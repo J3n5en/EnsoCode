@@ -55,6 +55,7 @@ import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { builtinToolsInSection, TOOL_SECTIONS, type ToolSectionId } from './builtinToolSections';
 import { ComputerAllowedApps } from './ComputerAllowedApps';
 import { NewSessionBadge } from './NewSessionBadge';
 import {
@@ -299,191 +300,42 @@ export function BuiltinToolsSettings() {
     };
   }, [guideOpen]);
 
-  return (
-    <div className="space-y-6">
-      <div data-settings-row="tools.root">
-        <h3 className="font-medium text-lg">
-          {t('Built-in tools')}
-          <OccupancyEnabledTotal tokens={enabledTokens} />
-        </h3>
-        <p className="text-muted-foreground text-sm">
-          {t('Toggle the built-in tools available to agents.')}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        {BUILTIN_TOOLS.map((tool) => (
-          <ToolRow
-            key={tool.id}
-            icon={TOOL_ICON[tool.id] ?? Wrench}
-            title={t(tool.name)}
-            description={t(tool.description)}
-            newSession={
-              tool.id === 'isolated_sandbox'
-                ? t(
-                    'Isolated sandbox switches between script and tool-search mode, so open sessions keep the mode they started with.'
-                  )
-                : undefined
-            }
-            control={
-              <>
-                <OccupancyMark
-                  row={occupancy.rows[tool.id]}
-                  pending={occupancy.pending && !occupancy.rows[tool.id]}
-                />
-                <Switch
-                  checked={!disabled.includes(tool.id)}
-                  onCheckedChange={(checked) => {
-                    toggle(tool.id, checked);
-                    if (tool.id === 'computer' && checked) setGuideOpen(true);
-                  }}
-                />
-              </>
-            }
+  const sectionExtras: Record<ToolSectionId, ReactNode> = {
+    collaboration: null,
+    web: null,
+    execution: (
+      <ToolRow
+        rowId="tools.editMode"
+        newSession
+        icon={FilePenLine}
+        title={t('File edit mode')}
+        description={t(
+          'Choose how files are modified. Apply patch is the default. New and cold-restored sessions use this mode; already warm sessions keep their current mode.'
+        )}
+        control={
+          <Select
+            items={Object.fromEntries(EDIT_MODES.map((mode) => [mode, t(EDIT_MODE_LABEL[mode])]))}
+            value={editMode}
+            onValueChange={(value) => {
+              if (isEditMode(value)) setEditMode(value);
+            }}
           >
-            {tool.id === 'web' ? (
-              <WebSearchChainEditor disabled={disabled.includes('web')} />
-            ) : null}
-            {tool.id === 'subagent' ? (
-              <div className="space-y-2" data-settings-row="tools.subagentModes">
-                {(
-                  [
-                    ['task', 'One-shot task agents'],
-                    ['coworker', 'Persistent coworkers'],
-                  ] as const
-                ).map(([mode, label]) => (
-                  <div key={mode} className="flex items-center justify-between gap-4">
-                    <span className="text-sm">{t(label)}</span>
-                    <Switch
-                      checked={subagentAllowedModes.includes(mode)}
-                      disabled={!subagentEnabled}
-                      onCheckedChange={(checked) => setMode(mode, checked)}
-                    />
-                  </div>
-                ))}
-                {!subagentEnabled && (
-                  <p className="text-muted-foreground text-xs">
-                    {t(
-                      'The unified subagent tool is off. Re-enabling it keeps this mode selection.'
-                    )}
-                  </p>
-                )}
-              </div>
-            ) : null}
-            {tool.id === 'computer' && computerEnabled ? (
-              <div className="space-y-2" data-settings-row="tools.computer">
-                {capabilities && computerPermissionGuideKind(capabilities) === 'unsupported' ? (
-                  <p className="text-muted-foreground text-xs">
-                    {t('This platform cannot operate the desktop yet.')}
-                  </p>
-                ) : (
-                  <>
-                    {capabilities?.platform === 'darwin' && (
-                      <p className="text-muted-foreground text-xs">
-                        {t(
-                          'Computer needs Screen Recording to capture windows and Accessibility to inspect or click them. Grant both to EnsoCode, then restart the app.'
-                        )}
-                      </p>
-                    )}
-                    {capabilities && (
-                      <p className="text-muted-foreground text-xs">
-                        {t(
-                          capabilities.capturePermission === 'granted'
-                            ? 'Capture: granted'
-                            : 'Capture: denied'
-                        )}
-                        {capabilities.axPermission !== 'unsupported' && (
-                          <>
-                            {' · '}
-                            {t(
-                              capabilities.axPermission === 'granted'
-                                ? 'Input/AX: granted'
-                                : 'Input/AX: denied'
-                            )}
-                          </>
-                        )}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
-                        {t('Show permission guide')}
-                      </Button>
-                      {capabilities?.platform === 'darwin' && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              void window.electronAPI.computer.openPermissions('screen')
-                            }
-                          >
-                            {t('Open Screen Recording settings')}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() =>
-                              void window.electronAPI.computer.openPermissions('accessibility')
-                            }
-                          >
-                            {t('Open Accessibility settings')}
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                    {capabilities?.platform === 'darwin' && (
-                      <>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="font-medium text-sm">
-                              {t('Show the app being operated')}
-                            </div>
-                            <p className="text-muted-foreground text-xs">
-                              {t(
-                                'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.'
-                              )}
-                            </p>
-                          </div>
-                          <Switch checked={computerPreview} onCheckedChange={setComputerPreview} />
-                        </div>
-                        <ComputerAllowedApps />
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            ) : null}
-            {tool.id === 'browser' ? (
-              <div className="space-y-2">
-                <p className="text-muted-foreground text-xs">
-                  {t(
-                    'Cookies and site storage of the built-in browser, separate from the app itself.'
-                  )}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(['cookies', 'cache', 'all'] as const).map((kind) => (
-                    <Button key={kind} variant="outline" size="sm" onClick={() => void clear(kind)}>
-                      {cleared === kind
-                        ? t('Cleared')
-                        : kind === 'cookies'
-                          ? t('Clear cookies')
-                          : kind === 'cache'
-                            ? t('Clear cache')
-                            : t('Clear all browsing data')}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </ToolRow>
-        ))}
-
-        <ComputerPermissionGuideDialog
-          open={guideOpen}
-          capabilities={capabilities}
-          onOpenChange={setGuideOpen}
-        />
-
+            <SelectTrigger className="w-44 shrink-0" aria-label={t('File edit mode')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectPopup>
+              {EDIT_MODES.map((mode) => (
+                <SelectItem key={mode} value={mode}>
+                  {t(EDIT_MODE_LABEL[mode])}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+      />
+    ),
+    context: (
+      <>
         <ToolRow
           icon={FoldVertical}
           newSession
@@ -493,7 +345,6 @@ export function BuiltinToolsSettings() {
           )}
           control={<Switch checked={exploreFoldEnabled} onCheckedChange={setExploreFoldEnabled} />}
         />
-
         <ToolRow
           rowId="tools.rtkEnabled"
           newSession
@@ -504,7 +355,10 @@ export function BuiltinToolsSettings() {
           )}
           control={<Switch checked={rtkEnabled} onCheckedChange={setRtkEnabled} />}
         />
-
+      </>
+    ),
+    safety: (
+      <>
         <ToolRow
           icon={ShieldAlert}
           newSession
@@ -516,39 +370,208 @@ export function BuiltinToolsSettings() {
             <Switch checked={protectedActionsInCode} onCheckedChange={setProtectedActionsInCode} />
           }
         />
-
         <DcgGuardRow />
+      </>
+    ),
+  };
 
-        <ToolRow
-          rowId="tools.editMode"
-          newSession
-          icon={FilePenLine}
-          title={t('File edit mode')}
-          description={t(
-            'Choose how files are modified. Apply patch is the default. New and cold-restored sessions use this mode; already warm sessions keep their current mode.'
-          )}
-          control={
-            <Select
-              items={Object.fromEntries(EDIT_MODES.map((mode) => [mode, t(EDIT_MODE_LABEL[mode])]))}
-              value={editMode}
-              onValueChange={(value) => {
-                if (isEditMode(value)) setEditMode(value);
-              }}
-            >
-              <SelectTrigger className="w-44 shrink-0" aria-label={t('File edit mode')}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectPopup>
-                {EDIT_MODES.map((mode) => (
-                  <SelectItem key={mode} value={mode}>
-                    {t(EDIT_MODE_LABEL[mode])}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
+  return (
+    <div className="space-y-8">
+      <div data-settings-row="tools.root">
+        <h3 className="font-medium text-lg">
+          {t('Built-in tools')}
+          <OccupancyEnabledTotal tokens={enabledTokens} />
+        </h3>
+        <p className="text-muted-foreground text-sm">
+          {t('Toggle the built-in tools available to agents.')}
+        </p>
       </div>
+
+      {TOOL_SECTIONS.map((section) => (
+        <section key={section.id} className="space-y-3">
+          <h4 className="text-sm font-semibold text-foreground/70">{t(section.label)}</h4>
+          {builtinToolsInSection(BUILTIN_TOOLS, section.id).map((tool) => (
+            <ToolRow
+              key={tool.id}
+              icon={TOOL_ICON[tool.id] ?? Wrench}
+              title={t(tool.name)}
+              description={t(tool.description)}
+              newSession={
+                tool.id === 'isolated_sandbox'
+                  ? t(
+                      'Isolated sandbox switches between script and tool-search mode, so open sessions keep the mode they started with.'
+                    )
+                  : undefined
+              }
+              control={
+                <>
+                  <OccupancyMark
+                    row={occupancy.rows[tool.id]}
+                    pending={occupancy.pending && !occupancy.rows[tool.id]}
+                  />
+                  <Switch
+                    checked={!disabled.includes(tool.id)}
+                    onCheckedChange={(checked) => {
+                      toggle(tool.id, checked);
+                      if (tool.id === 'computer' && checked) setGuideOpen(true);
+                    }}
+                  />
+                </>
+              }
+            >
+              {tool.id === 'web' ? (
+                <WebSearchChainEditor disabled={disabled.includes('web')} />
+              ) : null}
+              {tool.id === 'subagent' ? (
+                <div className="space-y-2" data-settings-row="tools.subagentModes">
+                  {(
+                    [
+                      ['task', 'One-shot task agents'],
+                      ['coworker', 'Persistent coworkers'],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <div key={mode} className="flex items-center justify-between gap-4">
+                      <span className="text-sm">{t(label)}</span>
+                      <Switch
+                        checked={subagentAllowedModes.includes(mode)}
+                        disabled={!subagentEnabled}
+                        onCheckedChange={(checked) => setMode(mode, checked)}
+                      />
+                    </div>
+                  ))}
+                  {!subagentEnabled && (
+                    <p className="text-muted-foreground text-xs">
+                      {t(
+                        'The unified subagent tool is off. Re-enabling it keeps this mode selection.'
+                      )}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+              {tool.id === 'computer' && computerEnabled ? (
+                <div className="space-y-2" data-settings-row="tools.computer">
+                  {capabilities && computerPermissionGuideKind(capabilities) === 'unsupported' ? (
+                    <p className="text-muted-foreground text-xs">
+                      {t('This platform cannot operate the desktop yet.')}
+                    </p>
+                  ) : (
+                    <>
+                      {capabilities?.platform === 'darwin' && (
+                        <p className="text-muted-foreground text-xs">
+                          {t(
+                            'Computer needs Screen Recording to capture windows and Accessibility to inspect or click them. Grant both to EnsoCode, then restart the app.'
+                          )}
+                        </p>
+                      )}
+                      {capabilities && (
+                        <p className="text-muted-foreground text-xs">
+                          {t(
+                            capabilities.capturePermission === 'granted'
+                              ? 'Capture: granted'
+                              : 'Capture: denied'
+                          )}
+                          {capabilities.axPermission !== 'unsupported' && (
+                            <>
+                              {' · '}
+                              {t(
+                                capabilities.axPermission === 'granted'
+                                  ? 'Input/AX: granted'
+                                  : 'Input/AX: denied'
+                              )}
+                            </>
+                          )}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
+                          {t('Show permission guide')}
+                        </Button>
+                        {capabilities?.platform === 'darwin' && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                void window.electronAPI.computer.openPermissions('screen')
+                              }
+                            >
+                              {t('Open Screen Recording settings')}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                void window.electronAPI.computer.openPermissions('accessibility')
+                              }
+                            >
+                              {t('Open Accessibility settings')}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                      {capabilities?.platform === 'darwin' && (
+                        <>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-medium text-sm">
+                                {t('Show the app being operated')}
+                              </div>
+                              <p className="text-muted-foreground text-xs">
+                                {t(
+                                  'While the AI works in an app in the background, a small floating window shows that app live. Close it any time.'
+                                )}
+                              </p>
+                            </div>
+                            <Switch
+                              checked={computerPreview}
+                              onCheckedChange={setComputerPreview}
+                            />
+                          </div>
+                          <ComputerAllowedApps />
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
+              {tool.id === 'browser' ? (
+                <div className="space-y-2">
+                  <p className="text-muted-foreground text-xs">
+                    {t(
+                      'Cookies and site storage of the built-in browser, separate from the app itself.'
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(['cookies', 'cache', 'all'] as const).map((kind) => (
+                      <Button
+                        key={kind}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void clear(kind)}
+                      >
+                        {cleared === kind
+                          ? t('Cleared')
+                          : kind === 'cookies'
+                            ? t('Clear cookies')
+                            : kind === 'cache'
+                              ? t('Clear cache')
+                              : t('Clear all browsing data')}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </ToolRow>
+          ))}
+          {sectionExtras[section.id]}
+        </section>
+      ))}
+
+      <ComputerPermissionGuideDialog
+        open={guideOpen}
+        capabilities={capabilities}
+        onOpenChange={setGuideOpen}
+      />
     </div>
   );
 }
