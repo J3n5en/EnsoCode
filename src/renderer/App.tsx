@@ -8,12 +8,21 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FoldHorizontal, Menu, PanelRight, UnfoldHorizontal } from 'lucide-react';
+import {
+  FoldHorizontal,
+  Menu,
+  PanelLeft,
+  PanelRight,
+  Search,
+  SquarePen,
+  UnfoldHorizontal,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import {
+  MAC_TRAFFIC_LIGHT_INSET,
   type ShellChrome,
   ShellChromeContext,
   useWindowChromeKind,
@@ -84,6 +93,16 @@ const dndCollision: CollisionDetection = (args) => {
 
 const WIDTH_KEY = 'enso-sidebar-width';
 const COLLAPSED_KEY = 'enso-sidebar-collapsed';
+
+function startNewConversation() {
+  const sessions = useSessionsStore.getState();
+  const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+  const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
+  if (projectId) void sessions.newConversation(projectId);
+}
+
+const TOOLBAR_BUTTON =
+  'no-drag flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 420;
 
@@ -247,12 +266,6 @@ export default function App() {
       const current = tabs.indexOf(parent.activeTabId);
       sessions.selectTab(parent.id, tabs[(current + direction + tabs.length) % tabs.length]);
     };
-    const startNewConversation = () => {
-      const sessions = useSessionsStore.getState();
-      const active = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
-      const projectId = active?.projectId ?? useSettingsStore.getState().projects[0]?.id;
-      if (projectId) void sessions.newConversation(projectId);
-    };
     const onKeyDown = (e: KeyboardEvent) => {
       const pressed = eventToBinding(e);
       if (!pressed) return;
@@ -363,6 +376,7 @@ export default function App() {
   const chromeKind = useWindowChromeKind();
   // Bot / 远程节点视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
   const desktopShell = chromeKind !== 'mobile' && !remoteNodeActive && !botModeActive;
+  const macToolbar = desktopShell && chromeKind === 'mac' && collapsed && !isMobile;
   const handleSideResize = useCallback(
     (deltaX: number) => {
       const workspace = workspaceRef.current;
@@ -472,6 +486,38 @@ export default function App() {
         />
       )}
       {!desktopShell && <UpdateBanner />}
+      {/* mac 折叠侧栏：红绿灯与侧栏入口并成窗口顶部一行，折叠栏与卡片都落在它下面 */}
+      {macToolbar && (
+        <div
+          className="drag-region flex h-[44px] shrink-0 items-center gap-0.5"
+          style={{ paddingLeft: MAC_TRAFFIC_LIGHT_INSET }}
+        >
+          <button
+            type="button"
+            className={TOOLBAR_BUTTON}
+            onClick={() => setCollapsed(false)}
+            title={t('Expand sidebar')}
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className={TOOLBAR_BUTTON}
+            onClick={() => setSearchOpen(true)}
+            title={t('Search anything')}
+          >
+            <Search className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className={TOOLBAR_BUTTON}
+            onClick={startNewConversation}
+            title={t('New conversation')}
+          >
+            <SquarePen className="h-4 w-4" />
+          </button>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1">
         {remoteNodeActive ? (
           // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
@@ -533,7 +579,7 @@ export default function App() {
               ref={workspaceRef}
               className={cn(
                 'relative flex min-h-0 min-w-0 flex-1 overflow-hidden',
-                desktopShell && 'py-[8px] pr-[8px]'
+                desktopShell && (macToolbar ? 'pr-[8px] pb-[8px]' : 'py-[8px] pr-[8px]')
               )}
             >
               <div

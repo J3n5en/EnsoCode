@@ -186,6 +186,7 @@ export function Sidebar({
   const { t, locale } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
   const chromeKind = useWindowChromeKind();
+  const macRail = collapsed && chromeKind === 'mac';
   const scratchSessionsEnabled = useSettingsStore((state) => state.scratchSessionsEnabled);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
   const createProjectGroup = useSettingsStore((state) => state.createProjectGroup);
@@ -799,27 +800,28 @@ export function Sidebar({
   return (
     <motion.aside
       initial={false}
-      animate={{ width: collapsed ? (chromeKind === 'mac' ? MAC_TRAFFIC_LIGHT_INSET : 48) : width }}
+      animate={{ width: collapsed ? 48 : width }}
       transition={springStandard}
       data-enso="sidebar"
       className="flex shrink-0 flex-col overflow-hidden"
     >
       {collapsed && (
         <div className="flex w-full flex-1 flex-col items-center gap-1 py-2">
-          {/* 红绿灯占着折叠栏顶部 */}
-          {chromeKind === 'mac' && (
-            <div aria-hidden className="drag-region -mt-2 h-[44px] w-full shrink-0" />
+          {/* mac 上展开与搜索在窗口顶部工具栏（App），折叠栏只留其余入口 */}
+          {!macRail && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className={ICON_BUTTON_CLASS}
+              title={
+                searchShortcut
+                  ? `${t('Search anything')} (${searchShortcut})`
+                  : t('Search anything')
+              }
+            >
+              <Search className="h-4 w-4" />
+            </button>
           )}
-          <button
-            type="button"
-            onClick={onOpenSearch}
-            className={ICON_BUTTON_CLASS}
-            title={
-              searchShortcut ? `${t('Search anything')} (${searchShortcut})` : t('Search anything')
-            }
-          >
-            <Search className="h-4 w-4" />
-          </button>
           <button
             type="button"
             onClick={() => setAddOpen(true)}
@@ -867,14 +869,16 @@ export function Sidebar({
           >
             <Settings className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            className={ICON_BUTTON_CLASS}
-            title={t('Expand sidebar')}
-          >
-            <PanelLeft className="h-4 w-4" />
-          </button>
+          {!macRail && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className={ICON_BUTTON_CLASS}
+              title={t('Expand sidebar')}
+            >
+              <PanelLeft className="h-4 w-4" />
+            </button>
+          )}
         </div>
       )}
       <div className={cn('flex h-full min-h-0 flex-col', collapsed && 'hidden')} style={{ width }}>
