@@ -498,18 +498,6 @@ function SidePanelHeaderActions({
   const windows = useWindowChromeKind() === 'windows';
   return (
     <div className="flex h-full items-center gap-0.5">
-      <button
-        type="button"
-        className={cn(
-          'flex h-6 w-6 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-          isMobile && 'hidden'
-        )}
-        onClick={toggleFullscreen}
-        aria-label={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
-        title={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
-      >
-        {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-      </button>
       <NewTabMenu
         compact
         onNewTerminal={() => {
@@ -551,6 +539,18 @@ function SidePanelHeaderActions({
           addPluginViewPanel(containerApi, conversationId, projectId, view, group)
         }
       />
+      <button
+        type="button"
+        className={cn(
+          'flex h-6 w-6 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+          isMobile && 'hidden'
+        )}
+        onClick={toggleFullscreen}
+        aria-label={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
+        title={fullscreen ? t('Exit side panel fullscreen') : t('Expand side panel')}
+      >
+        {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+      </button>
       {titleRow && topRight && (
         <button
           type="button"
