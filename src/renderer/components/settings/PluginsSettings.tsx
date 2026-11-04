@@ -232,6 +232,31 @@ function ExtensionPluginLogs({ pluginId, plain }: { pluginId: string; plain?: bo
   );
 }
 
+function PluginErrorText({ message }: { message: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="space-y-0.5">
+      <p
+        className={cn(
+          'select-text break-all font-mono text-destructive text-xs',
+          open ? 'max-h-48 overflow-auto whitespace-pre-wrap' : 'line-clamp-2'
+        )}
+      >
+        {message}
+      </p>
+      {message.length > 120 && (
+        <button
+          type="button"
+          className="text-muted-foreground text-xs hover:text-foreground"
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? '收起' : '展开全部'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PermissionLines({ permissions }: { permissions: readonly string[] }) {
   if (permissions.length === 0) return <p className="text-muted-foreground text-xs">无特殊权限</p>;
   return (
@@ -746,11 +771,7 @@ export function EnsoPluginsSettings({
                       {t('Update check failed: {{reason}}', { reason: plugin.updateCheckError })}
                     </p>
                   )}
-                  {plugin.lastError && (
-                    <p className="line-clamp-2 break-all font-mono text-destructive text-xs">
-                      {plugin.lastError.message}
-                    </p>
-                  )}
+                  {plugin.lastError && <PluginErrorText message={plugin.lastError.message} />}
                   {plugin.pendingVersion && (
                     <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-amber-700 text-xs dark:text-amber-400">
                       {t('{{version}} asks for more and is waiting for approval', {
