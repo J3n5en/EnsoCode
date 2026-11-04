@@ -852,7 +852,17 @@ export function SidePanel({
             // invisible 而非 hidden：关着时 dockview 也按目标宽度排好，打开首帧即满遮罩
             !open && 'invisible'
           )}
-          style={contentW !== undefined ? { width: contentW } : undefined}
+          style={
+            contentW === undefined
+              ? undefined
+              : {
+                  width: contentW,
+                  // 顶栏态：面板内容自带实底，挖出卡片右上圆角（y=44 处）
+                  clipPath: titleRow
+                    ? 'shape(from 0 0, hline to 100%, vline to 44px, hline to calc(100% - 10px), arc to 100% 54px of 10px cw, vline to 100%, hline to 0, close)'
+                    : undefined,
+                }
+          }
         >
           {visibleIds.length > 0 ? (
             <div className="relative min-h-0 flex-1">
