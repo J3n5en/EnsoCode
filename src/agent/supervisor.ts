@@ -1046,8 +1046,9 @@ export class SessionSupervisor {
     // 失败（含前台中止后按错误收口）同空闲：能接新回合就立即唤起，不攒到用户下一条消息
     if (managed.status !== 'running') {
       managed.roundPending = true;
+      // 合成提示不是用户输入：标 extension 让插件 input 拦截跳过
       void managed.session
-        .prompt(`<agent-notification>\n${text}\n</agent-notification>`)
+        .prompt(`<agent-notification>\n${text}\n</agent-notification>`, { source: 'extension' })
         .finally(() => {
           if (managed.status !== 'running') managed.roundPending = false;
         })

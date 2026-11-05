@@ -821,6 +821,26 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     });
   });
 
+  it('合成的 agent-notification 以 extension 来源投递，插件 input 拦截不会当成用户消息改写', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const live = mocks.sessions.at(-1) as unknown as { prompt: ReturnType<typeof vi.fn> };
+    (
+      supervisor as unknown as { deliverNotification(sessionId: string, text: string): void }
+    ).deliverNotification(parent.sessionId, 'task done');
+    expect(live.prompt).toHaveBeenLastCalledWith(
+      '<agent-notification>\ntask done\n</agent-notification>',
+      { source: 'extension' }
+    );
+    await supervisor.shutdown();
+  });
+
   it('targeted snapshot 带回请求的 sessionId，会话不在 worker 时 sessions 为空仍可路由', () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({
@@ -901,7 +921,9 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     expect(childNames).not.toEqual(expect.arrayContaining(['apply_patch', 'edit', 'write']));
     expect(messageMain).toBeDefined();
     await messageMain!.execute('call', { message: 'explicit handoff', urgent: true });
-    expect(parentSession.prompt).toHaveBeenCalledWith(expect.stringContaining('explicit handoff'));
+    expect(parentSession.prompt).toHaveBeenCalledWith(expect.stringContaining('explicit handoff'), {
+      source: 'extension',
+    });
   });
 
   it('spawn-child 的类型级 reasoning/thinkingLevel 作为类型预设进入子会话', async () => {
