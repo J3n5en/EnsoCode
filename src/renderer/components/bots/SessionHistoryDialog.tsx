@@ -1,4 +1,4 @@
-import type { ProjectedMessage } from '@shared/types/agent';
+import type { ParentHistoryTailResult, ProjectedMessage } from '@shared/types/agent';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatHostContext, type ChatSpeaker } from '@/components/chat/chatHost';
 import { MessageTimeline, type MessageTimelineHandle } from '@/components/chat/MessageTimeline';
@@ -17,6 +17,10 @@ interface SessionHistoryDialogProps {
   focus?: MessageFocus;
   /** 一轮最终回复下方的附加内容（私聊产物卡片） */
   turnFooter?: (messageIndex: number) => ReactNode;
+  /** 缺省走 bots.sessionHistory。子代理记录改走 agent.readChildRun */
+  read?: (beforeIndex?: number) => Promise<ParentHistoryTailResult>;
+  /** 缺省 true。子代理查看不是 bot 会话，调用方传 false */
+  botSession?: boolean;
   onClose: () => void;
 }
 
@@ -27,6 +31,8 @@ export function SessionHistoryDialog({
   speaker,
   focus,
   turnFooter,
+  read,
+  botSession = true,
   onClose,
 }: SessionHistoryDialogProps) {
   const { t } = useI18n();
@@ -38,12 +44,23 @@ export function SessionHistoryDialog({
   const loadingRef = useRef(false);
   const timelineRef = useRef<MessageTimelineHandle>(null);
 
+  const loadPage = useCallback(
+    (beforeIndex?: number) => {
+      if (read) return read(beforeIndex);
+      return window.electronAPI.bots.sessionHistory({
+        conversationId: conversationId ?? '',
+        ...(beforeIndex !== undefined ? { beforeIndex } : {}),
+      });
+    },
+    [conversationId, read]
+  );
+
   useEffect(() => {
     setPage(null);
     setError(undefined);
     if (!conversationId) return;
     let alive = true;
-    void window.electronAPI.bots.sessionHistory({ conversationId }).then((result) => {
+    void loadPage().then((result) => {
       if (!alive) return;
       if (result.ok) setPage({ messages: result.messages, baseIndex: result.baseIndex });
       else
@@ -54,17 +71,14 @@ export function SessionHistoryDialog({
     return () => {
       alive = false;
     };
-  }, [conversationId, t]);
+  }, [conversationId, loadPage, t]);
 
   const loadOlder = useCallback(async () => {
     if (!conversationId || !page || page.baseIndex <= 0 || loadingRef.current) return;
     loadingRef.current = true;
     setLoadingOlder(true);
     try {
-      const result = await window.electronAPI.bots.sessionHistory({
-        conversationId,
-        beforeIndex: page.baseIndex,
-      });
+      const result = await loadPage(page.baseIndex);
       if (result.ok && result.baseIndex + result.messages.length === page.baseIndex) {
         setPage({ messages: [...result.messages, ...page.messages], baseIndex: result.baseIndex });
       }
@@ -72,7 +86,7 @@ export function SessionHistoryDialog({
       loadingRef.current = false;
       setLoadingOlder(false);
     }
-  }, [conversationId, page]);
+  }, [conversationId, loadPage, page]);
 
   const runDividers = useRunDividers(conversationId);
   const items = useMemo(
@@ -103,14 +117,14 @@ export function SessionHistoryDialog({
       sessionId: conversationId,
       canRewind: false,
       canRetry: false,
-      botSession: true,
+      botSession,
       speaker:
         speakerName && speakerColor
           ? { name: speakerName, color: speakerColor, image: speakerImage }
           : undefined,
       turnFooter,
     }),
-    [conversationId, speakerName, speakerColor, speakerImage, turnFooter]
+    [botSession, conversationId, speakerName, speakerColor, speakerImage, turnFooter]
   );
 
   return (

@@ -28,6 +28,7 @@ import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
 import { ChatSessionTimeline } from './ChatSessionTimeline';
+import { ChildRunsButton } from './ChildRunsButton';
 import { Composer } from './Composer';
 import { ConversationStatusIndicator } from './ConversationStatusIndicator';
 import { CoworkerTabs } from './CoworkerTabs';
@@ -90,6 +91,9 @@ export function ChatView() {
     speechStatus?.state !== 'unsupported' &&
     speechStatus?.models.find((model) => model.id === voiceModel)?.state === 'ready';
   const chrome = useSessionsStore(useShallow(selectChatChrome));
+  const coworkerIds = useSessionsStore(
+    (state) => state.conversations[chrome?.parentId ?? '']?.coworkerIds
+  );
   const pluginPresetId =
     presetOverlay(chrome?.presetId, (id) => presets.find((preset) => preset.id === id))
       .pluginPresetId ?? null;
@@ -357,19 +361,22 @@ export function ChatView() {
         parentId={chrome.parentId}
         displayedId={chrome.id}
         trailing={
-          project ? (
-            <WorkspaceBadge
-              project={project}
-              conversationId={chrome.parentId}
-              path={chrome.parentWorktreePath ?? project.path}
-              branch={branch}
-              openDisabled={chrome.parentWorktreeMissing}
-            >
-              {statusDot}
-            </WorkspaceBadge>
-          ) : (
-            <div className="flex min-w-0 shrink-0 items-center">{statusDot}</div>
-          )
+          <div className="flex min-w-0 shrink-0 items-center gap-1">
+            <ChildRunsButton parentId={chrome.parentId} coworkerIds={coworkerIds ?? []} />
+            {project ? (
+              <WorkspaceBadge
+                project={project}
+                conversationId={chrome.parentId}
+                path={chrome.parentWorktreePath ?? project.path}
+                branch={branch}
+                openDisabled={chrome.parentWorktreeMissing}
+              >
+                {statusDot}
+              </WorkspaceBadge>
+            ) : (
+              <div className="flex min-w-0 shrink-0 items-center">{statusDot}</div>
+            )}
+          </div>
         }
       />
       <ChatSessionTimeline
