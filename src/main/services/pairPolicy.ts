@@ -1,4 +1,5 @@
 import {
+  APPROVAL_DECISIONS,
   APPROVAL_MODES,
   type ApprovalMode,
   DIRECT_SIGNAL_MAX_CHARS,
@@ -264,7 +265,7 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       return { ok: true, command: value as PhoneToHost };
     case 'approval-respond':
       if (!isStr(v.sessionId) || !isStr(v.requestId)) return { ok: false, error: 'missing ids' };
-      if (v.decision !== 'allow' && v.decision !== 'allowSession' && v.decision !== 'deny') {
+      if (!(APPROVAL_DECISIONS as readonly unknown[]).includes(v.decision)) {
         return { ok: false, error: 'invalid decision' };
       }
       return { ok: true, command: value as PhoneToHost };

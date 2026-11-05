@@ -716,6 +716,108 @@ describe('ApprovalGate 托管判定（#152）', () => {
     expect(await pending).toBe('deny');
   });
 
+  it('真人点代审：受保护命令也交给判定；拒绝不执行，重复点击不重复判定', async () => {
+    let finish!: (value: { decision: 'deny'; message: string }) => void;
+    const review = vi.fn(
+      () =>
+        new Promise<{ decision: 'deny'; message: string }>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const execute = vi.fn();
+    const infos: ApprovalRequestInfo[] = [];
+    const gate = new ApprovalGate(
+      'assistant',
+      (info) => infos.push(info),
+      () => {},
+      {
+        review,
+        protectedFloor: true,
+      }
+    );
+    const pending = withApproval(gate, 'command', {
+      name: 'bash',
+      label: 'Bash',
+      description: '',
+      parameters: {} as never,
+      execute,
+    }).execute('c1', { command: 'rm -rf /tmp/enso-floor-test' }, undefined, undefined, {} as never);
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    expect(review).not.toHaveBeenCalled();
+    gate.respond(infos[0].requestId, 'review');
+    gate.respond(infos[0].requestId, 'review');
+    await vi.waitFor(() => expect(infos.at(-1)?.phase).toBe('reviewing'));
+    expect(review).toHaveBeenCalledOnce();
+    finish({ decision: 'deny', message: 'Too destructive.' });
+    await expect(pending).rejects.toThrow('Too destructive.');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('真人点代审且判定放行时才执行受保护命令', async () => {
+    let finish!: (value: { decision: 'auto_allow' }) => void;
+    const review = vi.fn(
+      () =>
+        new Promise<{ decision: 'auto_allow' }>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const execute = vi.fn(async () => ({ content: [], details: {} }));
+    const infos: ApprovalRequestInfo[] = [];
+    const gate = new ApprovalGate(
+      'assistant',
+      (info) => infos.push(info),
+      () => {},
+      {
+        review,
+        protectedFloor: true,
+      }
+    );
+    const pending = withApproval(gate, 'command', {
+      name: 'bash',
+      label: 'Bash',
+      description: '',
+      parameters: {} as never,
+      execute,
+    }).execute('c1', { command: 'rm -rf /tmp/enso-floor-test' }, undefined, undefined, {} as never);
+    await vi.waitFor(() => expect(infos).toHaveLength(1));
+    gate.respond(infos[0].requestId, 'review');
+    await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+    finish({ decision: 'auto_allow' });
+    await pending;
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it('调整不执行命令，并要求换成更安全的命令', async () => {
+    const execute = vi.fn();
+    const gate = new ApprovalGate(
+      'supervised',
+      (info) => gate.respond(info.requestId, 'revise'),
+      () => undefined
+    );
+    const tool = withApproval(gate, 'command', {
+      name: 'bash',
+      label: 'Bash',
+      description: '',
+      parameters: {} as never,
+      execute,
+    });
+    await expect(
+      tool.execute('c1', { command: 'rm -rf x' }, undefined, undefined, {} as never)
+    ).rejects.toThrow(/safer command/);
+    expect(execute).not.toHaveBeenCalled();
+    expect(gate.needsApproval('command', 'bash')).toBe(true);
+  });
+
+  it('没有代审函数时，代审不放行', async () => {
+    const { gate, requests } = makeGate('supervised');
+    const pending = gate.ask('bash', 'command', 'rm x', undefined);
+    gate.respond(requests[0], 'review');
+    expect(gate.snapshot()).toHaveLength(1);
+    expect(gate.snapshot()[0]?.phase).toBeUndefined();
+    gate.respond(requests[0], 'deny');
+    await expect(pending).resolves.toBe('deny');
+  });
+
   it('判定失败（超时 / 报错 / 缺字段）退回人工，卡片带失败原因', async () => {
     for (const fallback of ['timeout', 'error', 'invalid'] as const) {
       const infos: ApprovalRequestInfo[] = [];

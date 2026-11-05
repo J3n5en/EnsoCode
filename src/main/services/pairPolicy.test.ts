@@ -1,5 +1,8 @@
-import { APPROVAL_MODES } from '@enso/pair';
-import { APPROVAL_MODES as LOCAL_APPROVAL_MODES } from '@shared/types/agent';
+import { APPROVAL_DECISIONS, APPROVAL_MODES } from '@enso/pair';
+import {
+  APPROVAL_DECISIONS as LOCAL_APPROVAL_DECISIONS,
+  APPROVAL_MODES as LOCAL_APPROVAL_MODES,
+} from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import {
   botCommandError,
@@ -251,6 +254,17 @@ describe('手机命令白名单', () => {
 
   it('pair 协议审批档与桌面 APPROVAL_MODES 同集合（漂移会让档位在边界上丢）', () => {
     expect([...APPROVAL_MODES]).toEqual([...LOCAL_APPROVAL_MODES]);
+  });
+
+  it('pair 协议审批决定与桌面同集合，调整和代审都能上行', () => {
+    expect([...APPROVAL_DECISIONS]).toEqual([...LOCAL_APPROVAL_DECISIONS]);
+    for (const decision of APPROVAL_DECISIONS) {
+      expect(
+        parsePhoneCommand({ type: 'approval-respond', sessionId: 's', requestId: 'r', decision })
+          .ok,
+        decision
+      ).toBe(true);
+    }
   });
 
   it('push-subscribe 结构校验：endpoint 必须 https，keys 必填', () => {

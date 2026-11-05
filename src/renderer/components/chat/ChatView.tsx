@@ -427,8 +427,9 @@ export function ChatView() {
             key={capabilityApprovals[0]?.requestId ?? 'no-capability-approval'}
             approvals={capabilityApprovals}
             allowSession={false}
+            handoff={false}
             onRespond={(requestId, decision) => {
-              if (decision === 'allowSession') return;
+              if (decision !== 'allow' && decision !== 'deny') return;
               void useSessionsStore.getState().respondCapabilityAsk(chrome.id, requestId, decision);
             }}
           />

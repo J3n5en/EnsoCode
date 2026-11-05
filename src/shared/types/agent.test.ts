@@ -2790,6 +2790,20 @@ describe('等人超时协议', () => {
     expect(parseAgentCommand({ ...base, kind: 'ask', extra: 1 })).toBeNull();
   });
 
+  it('approval-respond 接受调整与代审，拒绝未知决定', () => {
+    const base = { type: 'approval-respond', identity: parent, requestId: 'r1' };
+    expect(parseAgentCommand({ ...base, decision: 'revise' })).toEqual({
+      ...base,
+      decision: 'revise',
+    });
+    expect(parseAgentCommand({ ...base, decision: 'review' })).toEqual({
+      ...base,
+      decision: 'review',
+    });
+    expect(parseAgentCommand({ ...base, decision: 'allow' })).not.toBeNull();
+    expect(parseAgentCommand({ ...base, decision: 'yolo' })).toBeNull();
+  });
+
   it('approval-request / ask-request 的 expiresAt 必须是有限数字', () => {
     const approval = {
       type: 'approval-request',

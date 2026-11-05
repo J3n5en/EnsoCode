@@ -1,6 +1,11 @@
 import type { CatalogEntry, ProviderEntry } from '@enso/pair';
 import { type GuestSessionView, localCompactionNoticeIndex } from '@shared/pair/guestProjection';
-import { type AttachedImage, THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
+import {
+  type ApprovalDecision,
+  type AttachedImage,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+} from '@shared/types/agent';
 import type { ModelProvider } from '@shared/types/llm';
 import type { RemoteNodeStatus } from '@shared/types/nodes';
 import { Bot, MessageCircle, Monitor } from 'lucide-react';
@@ -37,7 +42,7 @@ interface RemoteNodeChatProps {
   onSelectTab: (id: string) => void;
   onSend: (text: string, images: AttachedImage[]) => void;
   onAbort: () => void;
-  onApproval: (requestId: string, decision: 'allow' | 'allowSession' | 'deny') => void;
+  onApproval: (requestId: string, decision: ApprovalDecision) => void;
   onAsk: (requestId: string, answer: string) => void;
   onSetModel: (providerId: string, modelId: string) => void;
   onSetReasoning: (enabled: boolean) => void;

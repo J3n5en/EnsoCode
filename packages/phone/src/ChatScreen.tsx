@@ -1,6 +1,11 @@
 import type { CatalogEntry } from '@enso/pair';
 import { localCompactionNoticeIndex } from '@shared/pair/guestProjection';
-import type { AttachedImage, ProjectedMessage, SlashCommand } from '@shared/types/agent';
+import type {
+  ApprovalDecision,
+  AttachedImage,
+  ProjectedMessage,
+  SlashCommand,
+} from '@shared/types/agent';
 import type { StartVoiceSession } from '@shared/types/speech';
 import {
   Bot,
@@ -91,7 +96,7 @@ interface Props {
   slashCommands?: SlashCommand[];
   onSend(text: string, images: AttachedImage[]): void;
   onAbort(): void;
-  onApproval(requestId: string, decision: 'allow' | 'allowSession' | 'deny'): void;
+  onApproval(requestId: string, decision: ApprovalDecision): void;
   onAsk(requestId: string, answer: string): void;
   /** Bot 成员会话：发送走 bot-send，无回退/重试/斜杠命令；readOnly = 群聊「查看过程」 */
   bot?: {

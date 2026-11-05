@@ -27,8 +27,11 @@ export class HumanRequestTimeouts {
   observe(event: AgentWorkerEvent | { type: 'worker-exited' }): void {
     switch (event.type) {
       case 'approval-request':
-        if (event.request.phase !== 'reviewing')
-          this.track(event.identity, 'approval', event.request.requestId, event.request.expiresAt);
+        if (event.request.phase === 'reviewing') {
+          this.entries.delete(keyOf(event.identity, 'approval', event.request.requestId));
+          return;
+        }
+        this.track(event.identity, 'approval', event.request.requestId, event.request.expiresAt);
         return;
       case 'ask-request':
         this.track(event.identity, 'ask', event.ask.requestId, event.ask.expiresAt);

@@ -18,7 +18,6 @@ import type {
   AgentRemoteConfig,
   AgentSpawnRequest,
   AgentWorkerEvent,
-  ApprovalDecision,
   ApprovalMode,
   ChildHistoryResult,
   ConversationReloadResult,
@@ -31,6 +30,7 @@ import type {
 } from '@shared/types/agent';
 import {
   APPROVAL_MODES,
+  isApprovalDecision,
   isDeliveryId,
   parseAgentCommand,
   parseConversationAuthorityRequest,
@@ -2082,14 +2082,10 @@ export function registerAgentHandlers(): void {
     IPC_CHANNELS.AGENT_APPROVAL_RESPOND,
     (_event, sessionId: unknown, requestId: unknown, decision: unknown): AgentActionResult => {
       const identity = exactIdentity(sessionId);
-      if (
-        !identity ||
-        !isNonEmptyString(requestId) ||
-        (decision !== 'allow' && decision !== 'allowSession' && decision !== 'deny')
-      ) {
+      if (!identity || !isNonEmptyString(requestId) || !isApprovalDecision(decision)) {
         return { ok: false, error: 'invalid approval response or stale generation' };
       }
-      return respondApproval(identity, requestId, decision as ApprovalDecision);
+      return respondApproval(identity, requestId, decision);
     }
   );
 

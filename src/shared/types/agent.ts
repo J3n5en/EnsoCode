@@ -303,8 +303,13 @@ export interface AskRequestInfo {
   expiresAt?: number;
 }
 
-/** 审批决策 */
-export type ApprovalDecision = 'allow' | 'allowSession' | 'deny';
+/** 审批决策：revise 打回换更安全的命令；review 把这一条交给助手代审 */
+export const APPROVAL_DECISIONS = ['allow', 'allowSession', 'deny', 'revise', 'review'] as const;
+export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
+
+export function isApprovalDecision(value: unknown): value is ApprovalDecision {
+  return (APPROVAL_DECISIONS as readonly unknown[]).includes(value);
+}
 
 /** 后台任务状态（渲染层胶囊/面板与 snapshot 共用） */
 export interface BackgroundTaskInfo {
@@ -3742,9 +3747,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return hasExactKeys(value, ['type', 'identity', 'requestId', 'decision']) &&
         parseAnySessionIdentity(value.identity) &&
         isNonEmptyString(value.requestId) &&
-        (value.decision === 'allow' ||
-          value.decision === 'allowSession' ||
-          value.decision === 'deny')
+        isApprovalDecision(value.decision)
         ? (value as unknown as AgentCommand)
         : null;
     case 'request-timeout':

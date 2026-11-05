@@ -9,6 +9,7 @@ import type {
 } from '@enso/pair';
 import { retryableGroupFailures } from '@shared/bots/groupRetry';
 import { splitTaskRef } from '@shared/bots/progress';
+import type { ApprovalDecision } from '@shared/types/agent';
 import type { StartVoiceSession } from '@shared/types/speech';
 import {
   ArrowUp,
@@ -87,11 +88,7 @@ interface Props {
   onOpenProcess(conversationId: string): void;
   /** 桌面语音识别可用时由 App 下发：输入框左侧显示麦克风 */
   voice?: StartVoiceSession;
-  onApproval(
-    sessionId: string,
-    requestId: string,
-    decision: 'allow' | 'allowSession' | 'deny'
-  ): void;
+  onApproval(sessionId: string, requestId: string, decision: ApprovalDecision): void;
   onAsk(sessionId: string, requestId: string, answer: string): void;
 }
 

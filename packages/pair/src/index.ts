@@ -66,6 +66,7 @@ export {
   toPairProjectEntry,
 } from './projectEntry';
 export {
+  APPROVAL_DECISIONS,
   APPROVAL_MODES,
   type ApprovalDecision,
   type ApprovalMode,

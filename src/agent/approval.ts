@@ -14,7 +14,10 @@ import { classifyProtectedTool } from './protectedActions';
 import { extractWriteTargetPaths } from './writeScope';
 
 /** no-approver：需要确认但本会话没人能确认（无人值守），不是用户拒绝 */
-type ApprovalResult = 'allow' | 'deny' | 'block' | 'cancel' | 'timeout' | 'no-approver';
+type ApprovalResult = 'allow' | 'deny' | 'revise' | 'block' | 'cancel' | 'timeout' | 'no-approver';
+
+const APPROVAL_REVISE_ERROR =
+  'User asked for a safer command; this one was not run. Do not retry the same command. Use a safer command that still accomplishes the task, and say what you changed.';
 
 /**
  * 无人值守下的拒绝文案（对齐 factory 的 delegatedToolDenied）：点名动作、说明没人能批准、
@@ -35,7 +38,9 @@ export function approvalNoUserMessage(label: string, mode: ApprovalMode): string
 
 interface PendingApproval {
   info: ApprovalRequestInfo;
-  settle(result: ApprovalResult): void;
+  settle(result: ApprovalResult, denial?: Error): void;
+  /** 真人把这一条交给助手代审 */
+  startReview(): void;
 }
 
 export type ApprovalReviewResult =
@@ -135,7 +140,7 @@ export class ApprovalGate {
     const wantsHuman = this.mode !== 'assistant' || Boolean(protectedCategory);
     if (this.autoReject && wantsHuman) return Promise.resolve('no-approver');
     const requestId = `apr-${++this.counter}-${Date.now()}`;
-    let info: ApprovalRequestInfo = {
+    const info: ApprovalRequestInfo = {
       requestId,
       tool,
       kind,
@@ -147,6 +152,7 @@ export class ApprovalGate {
     };
     return new Promise((resolve, reject) => {
       let settled = false;
+      let entry!: PendingApproval;
       const settle = (result: ApprovalResult, denial?: Error) => {
         if (settled) return;
         settled = true;
@@ -158,21 +164,52 @@ export class ApprovalGate {
       };
       const onAbort = () => settle('cancel');
       const askHuman = (fallback?: ApprovalReviewFallback) => {
-        info = { ...info, phase: undefined, ...(fallback ? { reviewFallback: fallback } : {}) };
+        const {
+          phase: _phase,
+          expiresAt: _expiresAt,
+          reviewFallback: _previous,
+          ...rest
+        } = entry.info;
         const timeoutMs = this.options?.humanTimeoutMs;
-        if (timeoutMs) info = { ...info, expiresAt: Date.now() + timeoutMs };
-        this.pending.set(requestId, { info, settle });
-        this.onRequest(info);
+        entry.info = {
+          ...rest,
+          ...(fallback ? { reviewFallback: fallback } : {}),
+          ...(timeoutMs ? { expiresAt: Date.now() + timeoutMs } : {}),
+        };
+        this.pending.set(requestId, entry);
+        this.onRequest(entry.info);
       };
-      this.pending.set(requestId, { info, settle });
+      const startReview = (source: 'auto' | 'explicit') => {
+        if (settled) return;
+        if (source === 'explicit' && entry.info.phase === 'reviewing') return;
+        const reviewFn = this.options?.review;
+        if (!reviewFn) return;
+        const { expiresAt: _expiresAt, reviewFallback: _fallback, ...rest } = entry.info;
+        entry.info = { ...rest, phase: 'reviewing' };
+        this.pending.set(requestId, entry);
+        this.onRequest(entry.info);
+        void Promise.resolve()
+          .then(() => reviewFn(entry.info, signal))
+          .then((result) => {
+            if (settled) return;
+            this.applyReviewResult(entry, result, source, askHuman);
+          })
+          .catch(() => {
+            if (settled) return;
+            if (this.autoReject) settle('no-approver');
+            else askHuman(source === 'explicit' ? 'error' : undefined);
+          });
+      };
+      entry = { info, settle, startReview: () => startReview('explicit') };
+      this.pending.set(requestId, entry);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (signal?.aborted) {
         settle('cancel');
         return;
       }
-      // 受保护动作不交给代审模型放行，直接等真人
+      // 受保护动作不自动交给代审；真人点「代审」才逐条移交
       const review =
-        this.mode === 'assistant' && !protectedCategory ? this.options?.review : undefined;
+        this.mode === 'assistant' && !info.protected ? this.options?.review : undefined;
       if (!review) {
         // assistant 档没配代审模型时本来会退回真人；无人值守下没人可退，直接拒绝
         if (this.autoReject) {
@@ -182,63 +219,73 @@ export class ApprovalGate {
         askHuman();
         return;
       }
-      info = { ...info, phase: 'reviewing' };
-      this.pending.set(requestId, { info, settle });
-      this.onRequest(info);
-      void Promise.resolve()
-        .then(() => review(info, signal))
-        .then((result) => {
-          if (settled) return;
-          // 代审期间档位被改过：旧档的结论不再算数，按当前档位重新路由
-          if (this.mode !== 'assistant') {
-            if (this.autoReject) {
-              settle('no-approver');
-              return;
-            }
-            if (!info.protected && !this.needsApproval(info.kind, info.tool)) {
-              settle('allow');
-              return;
-            }
-            askHuman();
-            return;
-          }
-          if (result.decision !== 'ask_user' && result.record && toolCallId) {
-            rememberApprovalReview(toolCallId, result.record);
-          }
-          if (result.decision === 'auto_allow') {
-            settle('allow');
-            return;
-          }
-          if (result.decision === 'block') {
-            settle('block');
-            return;
-          }
-          if (result.decision === 'deny') {
-            settle('block', new Error(result.message));
-            return;
-          }
-          if (this.autoReject) {
-            settle('no-approver');
-            return;
-          }
-          askHuman(result.decision === 'ask_user' ? result.fallback : undefined);
-        })
-        .catch(() => {
-          if (settled) return;
-          if (this.autoReject) settle('no-approver');
-          else askHuman();
-        });
+      startReview('auto');
     });
+  }
+
+  /** 代审结论：自动路径在档位被改走后作废；真人点的代审按结论收尾 */
+  private applyReviewResult(
+    entry: PendingApproval,
+    result: ApprovalReviewResult,
+    source: 'auto' | 'explicit',
+    askHuman: (fallback?: ApprovalReviewFallback) => void
+  ): void {
+    if (source === 'auto' && this.mode !== 'assistant') {
+      if (this.autoReject) {
+        entry.settle('no-approver');
+        return;
+      }
+      if (!entry.info.protected && !this.needsApproval(entry.info.kind, entry.info.tool)) {
+        entry.settle('allow');
+        return;
+      }
+      askHuman();
+      return;
+    }
+    if (result.decision !== 'ask_user' && result.record && entry.info.toolCallId) {
+      rememberApprovalReview(entry.info.toolCallId, result.record);
+    }
+    if (result.decision === 'auto_allow') {
+      entry.settle('allow');
+      return;
+    }
+    if (result.decision === 'block') {
+      entry.settle('block');
+      return;
+    }
+    if (result.decision === 'deny') {
+      entry.settle('block', new Error(result.message));
+      return;
+    }
+    if (this.autoReject) {
+      entry.settle('no-approver');
+      return;
+    }
+    askHuman(result.decision === 'ask_user' ? result.fallback : undefined);
   }
 
   /** 渲染层决策入口 */
   respond(requestId: string, decision: ApprovalDecision): void {
     const entry = this.pending.get(requestId);
     if (!entry) return;
-    if (decision === 'allowSession' && !entry.info.protected) {
-      this.sessionAllowed.add(entry.info.tool);
+    switch (decision) {
+      case 'review':
+        entry.startReview();
+        return;
+      case 'revise':
+        entry.settle('revise');
+        return;
+      case 'deny':
+        entry.settle('deny');
+        return;
+      case 'allowSession':
+        if (!entry.info.protected) this.sessionAllowed.add(entry.info.tool);
+        entry.settle('allow');
+        return;
+      case 'allow':
+        entry.settle('allow');
+        return;
     }
-    entry.settle(decision === 'deny' ? 'deny' : 'allow');
   }
 
   /** Main 判定等人超时：按超时拒绝（区别于用户主动拒绝） */
@@ -287,6 +334,7 @@ export function throwUnlessAllowed(result: ApprovalResult): void {
   if (result === 'no-approver') throw new Error('No user available to approve this action');
   if (result === 'block') throw new Error('Assistant approval blocked this operation');
   if (result === 'deny') throw new Error('User denied this operation');
+  if (result === 'revise') throw new Error(APPROVAL_REVISE_ERROR);
   if (result === 'cancel') throw new Error('Approval cancelled');
   if (result === 'timeout') throw new Error(APPROVAL_TIMEOUT_ERROR);
 }

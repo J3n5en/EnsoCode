@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { protectedActionLabel } from '@/lib/protectedAction';
 import { toolLabel } from '@/lib/toolLabels';
+import { CopyButton } from './CopyButton';
 import { RequestCountdown, useRemainingMs } from './RequestCountdown';
 import { codeToHtml } from './snippetHighlighter';
 
@@ -21,6 +22,8 @@ interface ApprovalBarProps {
   onRespond: (requestId: string, decision: ApprovalDecision) => void;
   /** Enso capability approvals are one-shot and must never expose allowSession. */
   allowSession?: boolean;
+  /** 打回换命令、交给助手代审。能力审批不提供。 */
+  handoff?: boolean;
   /** 本机时钟 − host 时钟（手机伴侣显示剩余时间用） */
   clockOffset?: number;
 }
@@ -40,19 +43,32 @@ function SummaryView({ kind, summary }: { kind: ApprovalKind; summary: string })
     };
   }, [kind, summary]);
 
+  const copy = (
+    <CopyButton
+      text={summary}
+      className="absolute top-1 right-1 z-10 rounded-md bg-background/80 p-1 text-muted-foreground backdrop-blur"
+    />
+  );
+
   if (kind === 'command' && html != null) {
     return (
-      <div
-        className="mt-1.5 max-h-24 overflow-auto rounded-md text-xs leading-relaxed [&_pre]:m-0 [&_pre]:px-2 [&_pre]:py-1.5 [&_pre]:font-mono [&_pre]:whitespace-pre-wrap"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki 输出的受控 HTML（本地生成，无用户注入）
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+      <div className="relative mt-1.5">
+        <div
+          className="max-h-24 overflow-auto rounded-md text-xs leading-relaxed [&_pre]:m-0 [&_pre]:py-1.5 [&_pre]:pr-7 [&_pre]:pl-2 [&_pre]:font-mono [&_pre]:whitespace-pre-wrap"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki 输出的受控 HTML（本地生成，无用户注入）
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+        {copy}
+      </div>
     );
   }
   return (
-    <pre className="mt-1.5 max-h-24 overflow-auto rounded-md bg-muted/50 px-2 py-1.5 font-mono text-xs whitespace-pre-wrap">
-      {summary}
-    </pre>
+    <div className="relative mt-1.5">
+      <pre className="max-h-24 overflow-auto rounded-md bg-muted/50 py-1.5 pr-7 pl-2 font-mono text-xs whitespace-pre-wrap">
+        {summary}
+      </pre>
+      {copy}
+    </div>
   );
 }
 const REVIEW_FALLBACK_LABELS: Record<ApprovalReviewFallback, string> = {
@@ -66,6 +82,7 @@ export function ApprovalBar({
   approvals,
   onRespond,
   allowSession = true,
+  handoff = true,
   clockOffset,
 }: ApprovalBarProps) {
   const { t } = useI18n();
@@ -81,7 +98,8 @@ export function ApprovalBar({
   const disabled =
     responding === active.requestId || (remainingMs !== undefined && remainingMs <= 0);
   const respond = (decision: ApprovalDecision) => {
-    setResponding(active.requestId);
+    // 代审可能原卡退回，不能把按钮锁死
+    if (decision !== 'review') setResponding(active.requestId);
     onRespond(active.requestId, decision);
   };
 
@@ -127,6 +145,28 @@ export function ApprovalBar({
       {active.summary && <SummaryView kind={active.kind} summary={active.summary} />}
       {!reviewing && (
         <div className="mt-2 flex items-center justify-end gap-1.5">
+          {handoff && active.kind === 'command' && (
+            <button
+              type="button"
+              disabled={disabled}
+              title={t('Send back for a safer command')}
+              onClick={() => respond('revise')}
+              className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {t('Adjust')}
+            </button>
+          )}
+          {handoff && (
+            <button
+              type="button"
+              disabled={disabled}
+              title={t('Let the assistant decide')}
+              onClick={() => respond('review')}
+              className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {t('Assistant review')}
+            </button>
+          )}
           <button
             type="button"
             disabled={disabled}

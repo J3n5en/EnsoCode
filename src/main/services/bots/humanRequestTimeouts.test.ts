@@ -100,6 +100,23 @@ describe('HumanRequestTimeouts', () => {
     expect(fired).toEqual(['s1:approval:r1']);
   });
 
+  it('等人卡片转代审后取消计时，退回人工再重新计时', () => {
+    const { timeouts, fired, advance } = make();
+    timeouts.observe(approval('r1', 1_000 + TEN_MIN));
+    advance(TEN_MIN - 10);
+    timeouts.observe(approval('r1', undefined, 'reviewing'));
+    advance(10);
+    timeouts.check();
+    expect(fired).toEqual([]);
+    timeouts.observe(approval('r1', 1_000 + 2 * TEN_MIN));
+    advance(TEN_MIN - 1);
+    timeouts.check();
+    expect(fired).toEqual([]);
+    advance(1);
+    timeouts.check();
+    expect(fired).toEqual(['s1:approval:r1']);
+  });
+
   it('expire 抛错（会话已不在）不影响其余卡片', () => {
     let now = 0;
     const fired: string[] = [];
