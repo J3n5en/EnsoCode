@@ -58,7 +58,7 @@ import { isMobileWidth, useIsMobile, useViewportWidth } from '@/hooks/useViewpor
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
-import { springStandard } from '@/lib/motion';
+import { easeOutLayout, springStandard } from '@/lib/motion';
 import {
   addSidePanelBtw,
   addSidePanelTerminal,
@@ -424,12 +424,7 @@ export default function App() {
   // Linux 自绘按钮在顶栏里会被面板盖住，保持独立卡片
   const titleRowPanel = desktopShell && (chromeKind === 'mac' || chromeKind === 'windows');
   const sideInTitleRow =
-    titleRowPanel &&
-    sideOpen &&
-    !sideFullscreen &&
-    !isMobile &&
-    !botModeActive &&
-    !remoteNodeActive;
+    titleRowPanel && sideOpen && !isMobile && !botModeActive && !remoteNodeActive;
   const sideToggle = remoteNodeActive ? null : (
     <button
       type="button"
@@ -526,7 +521,8 @@ export default function App() {
               )}
             </div>
           }
-          centered={modeSwitch ?? undefined}
+          // 顶栏态全屏：面板 tab 条铺满整行，居中开关会被压在 tab 下
+          centered={(sideInTitleRow && sideFullscreen ? null : modeSwitch) ?? undefined}
           centerOver={desktopShell ? mainBox : undefined}
           className={cn(
             chromeKind !== 'mac' && !remoteNodeActive && 'pl-0',
@@ -639,6 +635,15 @@ export default function App() {
                   // 与右侧面板合成一张卡：接缝处直角，分割靠 1px 手柄线
                   sideInTitleRow && 'rounded-r-none'
                 )}
+                // 全屏面板开壁纸时是半透明的，铺开后把被盖住的对话藏掉，否则会透上来
+                style={
+                  sideOpen && sideFullscreen
+                    ? {
+                        visibility: 'hidden',
+                        transition: `visibility 0s ${easeOutLayout.duration}s`,
+                      }
+                    : undefined
+                }
               >
                 <PluginUiHost />
                 <ShellChromeContext.Provider value={shellChrome}>
