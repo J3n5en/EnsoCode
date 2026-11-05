@@ -1,7 +1,6 @@
 import { agentLoop, type AgentContext, type AgentLoopConfig, type AgentTool } from "@earendil-works/pi-agent-core";
 import type { Message, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { Type } from "@earendil-works/pi-ai";
-import type { Static } from "typebox";
+import { Type, type Static } from "typebox";
 import { debugLog } from "../../debug-log.js";
 import { AGENT_LOOP_MAX_TOKENS, boundedMaxTokens } from "../../model-budget.js";
 import { logAgentStreamError } from "../stream-errors.js";
