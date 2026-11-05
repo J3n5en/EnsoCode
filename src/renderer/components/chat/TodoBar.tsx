@@ -79,7 +79,7 @@ export function TodoBar({ conversationId }: { conversationId: string }) {
   return (
     <div
       data-enso="todo"
-      className="mx-3 mb-1.5 rounded-[14px] border bg-card px-3 py-1.5 text-xs shadow-xs"
+      className="mb-1.5 rounded-xl border bg-card px-3 py-1.5 text-xs shadow-xs"
     >
       <div className="flex items-center gap-2">
         <button
