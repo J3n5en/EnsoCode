@@ -312,7 +312,7 @@ html.bg-image-enabled [data-slot='composer'] {
   background-color: oklch(from var(--background) l c h / var(--bg-composer-alpha, 0.6));
 }
 
-/* Code 侧栏直接坐在画布上（无卡片底色），开壁纸时补一层与面板同档的画布色遮罩 */
+/* 开壁纸时侧栏卡片与对话卡片同档半透明；圆角由组件的 overflow 裁切 */
 html.bg-image-enabled [data-enso='sidebar'] {
   background-color: oklch(from var(--canvas, var(--background)) l c h / var(--bg-panel-alpha, 0.15));
 }

@@ -175,6 +175,8 @@ interface SidebarProps {
   onOpenSearch?: () => void;
   /** 用户点了某个会话（窄屏抽屉据此收起，即使点的是当前会话） */
   onNavigate?: () => void;
+  /** 桌面外壳：与对话卡片一样圆角并留出画布缝，避免侧栏贴边直角 */
+  card?: boolean;
 }
 
 export function Sidebar({
@@ -183,6 +185,7 @@ export function Sidebar({
   onToggleCollapse,
   onOpenSearch,
   onNavigate,
+  card = false,
 }: SidebarProps) {
   const { t, locale } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
@@ -804,7 +807,10 @@ export function Sidebar({
       animate={{ width: collapsed ? 48 : width }}
       transition={springStandard}
       data-enso="sidebar"
-      className="flex shrink-0 flex-col overflow-hidden"
+      className={cn(
+        'flex shrink-0 flex-col overflow-hidden',
+        card && 'mb-[8px] ml-[8px] mr-[8px] rounded-[10px] bg-background shadow-surface'
+      )}
     >
       {collapsed && (
         <div className="flex w-full flex-1 flex-col items-center gap-1 py-2">
