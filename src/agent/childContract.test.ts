@@ -45,6 +45,14 @@ describe('child contract system prompt', () => {
     expect(SUBAGENT_CONTRACT_PROMPT).toMatch(/self-sufficient/);
     expect(SUBAGENT_CONTRACT_PROMPT).toMatch(/absolute paths/);
   });
+
+  it('合同约束共享工作区的文件归属、编辑冲突与最终回复要素', () => {
+    expect(SUBAGENT_CONTRACT_PROMPT).toMatch(/shared with your caller and other agents/);
+    expect(SUBAGENT_CONTRACT_PROMPT).toMatch(/before changing any other file/);
+    expect(SUBAGENT_CONTRACT_PROMPT).toMatch(/modified since you last read it/);
+    expect(SUBAGENT_CONTRACT_PROMPT).toMatch(/found, did, changed, and left undone/);
+    expect(SUBAGENT_CONTRACT_PROMPT).toMatch(/do not also send it with message_main_agent/);
+  });
 });
 
 describe('tailSystemPromptSection', () => {
