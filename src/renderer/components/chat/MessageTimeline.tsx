@@ -44,8 +44,9 @@ import {
 import { REPLY_ROW_KINDS, turnMetaTails } from './turnMeta';
 import { WelcomeSuggestions } from './WelcomeSuggestions';
 
-/** 消息列/输入区共用的列：正文 640px + 两侧 padding；宽模式由 globals.css 去掉 max-w */
-export const CHAT_COL = 'enso-chat-col mx-auto w-full max-w-[calc(640px+2rem)] px-4';
+/** 消息列/输入区共用的列：阶梯 max-w + 水平 padding。padding 必须在列上而不是 @container 上，否则两侧查询宽度差 2rem，会在断点附近上下错位。宽模式由 globals.css 去掉 max-w。 */
+export const CHAT_COL =
+  'enso-chat-col mx-auto w-full max-w-2xl px-4 @min-[56rem]:max-w-3xl @min-[72rem]:max-w-4xl @min-[84rem]:max-w-5xl @min-[96rem]:max-w-6xl @min-[112rem]:max-w-7xl';
 
 /** 探后折叠组动效窗口：超过后行重挂（虚拟化滚回）不再重播 */
 const FOLD_MOTION_MS = 1000;
