@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
+import { filterMarketPlugins, marketCategories } from './pluginMarketFilter';
 
 export function PluginMarket({
   disabled,
@@ -24,6 +25,7 @@ export function PluginMarket({
   const [list, setList] = React.useState<ExtensionPluginMarketList | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [query, setQuery] = React.useState('');
+  const [category, setCategory] = React.useState<string | null>(null);
 
   const load = React.useCallback(
     async (refresh: boolean) => {
@@ -53,14 +55,10 @@ export function PluginMarket({
     await load(true);
   };
 
-  const q = query.trim().toLowerCase();
-  const plugins =
-    list?.ok === true
-      ? list.plugins.filter(
-          (p) =>
-            !q || [p.id, p.name, p.description, ...p.tags].some((s) => s.toLowerCase().includes(q))
-        )
-      : [];
+  const all = list?.ok === true ? list.plugins : [];
+  const categories = marketCategories(all);
+  const activeCategory = category !== null && categories.includes(category) ? category : null;
+  const plugins = filterMarketPlugins(all, { query, category: activeCategory });
 
   return (
     <div className="space-y-2">
@@ -82,6 +80,29 @@ export function PluginMarket({
           {loading ? <Spinner /> : t('Refresh')}
         </Button>
       </div>
+      {categories.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          <Button
+            size="xs"
+            variant={activeCategory === null ? 'secondary' : 'outline'}
+            aria-pressed={activeCategory === null}
+            onClick={() => setCategory(null)}
+          >
+            {t('All')}
+          </Button>
+          {categories.map((tag) => (
+            <Button
+              key={tag}
+              size="xs"
+              variant={activeCategory === tag ? 'secondary' : 'outline'}
+              aria-pressed={activeCategory === tag}
+              onClick={() => setCategory(tag)}
+            >
+              {tag}
+            </Button>
+          ))}
+        </div>
+      )}
       {list?.ok === false && <p className="text-destructive text-sm">{list.error}</p>}
       {list?.ok === true && list.stale && (
         <p className="text-muted-foreground text-xs">
@@ -109,19 +130,34 @@ export function PluginMarket({
               </p>
             )}
           </div>
-          {p.installedVersion && !p.updateAvailable ? (
-            <span className="shrink-0 text-muted-foreground text-xs">{t('Installed')}</span>
-          ) : (
+          <div className="relative shrink-0">
             <Button
+              aria-hidden
+              tabIndex={-1}
               size="sm"
               variant="outline"
-              className="shrink-0"
-              disabled={disabled}
-              onClick={() => onInstall(p.id)}
+              className="pointer-events-none invisible"
             >
-              {p.updateAvailable ? t('Update') : t('Install')}
+              {t('Installed')}
             </Button>
-          )}
+            <div className="absolute inset-0 flex items-center justify-center">
+              {p.installedVersion && !p.updateAvailable ? (
+                <span className="whitespace-nowrap font-medium text-base text-muted-foreground sm:text-sm">
+                  {t('Installed')}
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="size-full"
+                  disabled={disabled}
+                  onClick={() => onInstall(p.id)}
+                >
+                  {p.updateAvailable ? t('Update') : t('Install')}
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       ))}
     </div>
