@@ -257,7 +257,7 @@ export function GroupChips({
 
 function tabClass(selected: boolean, dropping: boolean) {
   return cn(
-    'relative flex shrink-0 items-center whitespace-nowrap pt-1 pb-[7px] text-[0.78125rem] transition-colors',
+    'relative flex shrink-0 items-center whitespace-nowrap pt-1 pb-[7px] text-[0.8929rem] transition-colors',
     selected
       ? 'font-medium text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-[1.5px] after:rounded-full after:bg-foreground'
       : 'text-subtle-foreground hover:text-foreground',
@@ -287,7 +287,7 @@ function TabContent({
         />
       )}
       <span className="max-w-32 truncate">{label}</span>
-      <span className="ml-1 font-normal text-[0.65625rem] text-subtle-foreground/75 tabular-nums">
+      <span className="ml-1 font-normal text-[0.75rem] text-subtle-foreground/75 tabular-nums">
         {count}
       </span>
     </>

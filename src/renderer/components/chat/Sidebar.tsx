@@ -996,7 +996,7 @@ export function Sidebar({
           )}
           {scratchSessionsEnabled && scratchProject && (
             <div data-slot="scratch-section">
-              <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.71875rem] font-medium text-subtle-foreground">
+              <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.8214rem] font-medium text-subtle-foreground">
                 <button
                   type="button"
                   onClick={toggleScratchCollapsed}
@@ -1010,7 +1010,7 @@ export function Sidebar({
                       !scratchFolded && 'rotate-90 opacity-0 group-hover:opacity-100'
                     )}
                   />
-                  <span className="ml-auto shrink-0 font-normal text-[0.6875rem] tabular-nums">
+                  <span className="ml-auto shrink-0 font-normal text-[0.7857rem] tabular-nums">
                     {scratchVisibleIds.length}
                   </span>
                 </button>
@@ -1104,7 +1104,7 @@ export function Sidebar({
                 <Loader2 className="size-4 animate-spin" />
               </span>
               <span
-                className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium"
+                className="min-w-0 flex-1 truncate text-[0.9286rem] font-medium"
                 title={pendingProject.path}
               >
                 {pendingProject.name}
@@ -1262,7 +1262,7 @@ export function Sidebar({
                                   >
                                     <FoldChevron folded={folded} />
                                     <span
-                                      className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-foreground"
+                                      className="min-w-0 flex-1 truncate text-[0.9286rem] font-medium text-foreground"
                                       title={
                                         project.kind === 'ssh'
                                           ? `${project.sshHost}:${project.path}`
@@ -1276,7 +1276,7 @@ export function Sidebar({
                                         </span>
                                       )}
                                       {recentView && (
-                                        <span className="ml-1.5 font-normal text-[0.6875rem] text-subtle-foreground">
+                                        <span className="ml-1.5 font-normal text-[0.7857rem] text-subtle-foreground">
                                           {projectGroups.find(
                                             (group) => group.id === project.groupId
                                           )?.name ?? t('Ungrouped')}
@@ -1313,7 +1313,7 @@ export function Sidebar({
                                   */}
                                   {(projectPinned || folded) && (
                                     <span
-                                      className="flex shrink-0 items-center justify-center gap-1 py-1 text-[0.6875rem] text-subtle-foreground tabular-nums group-hover:opacity-0"
+                                      className="flex shrink-0 items-center justify-center gap-1 py-1 text-[0.7857rem] text-subtle-foreground tabular-nums group-hover:opacity-0"
                                       aria-hidden
                                     >
                                       {projectPinned && <Pin className="h-3.5 w-3.5" />}
@@ -1954,7 +1954,7 @@ function ProjectGroupHeader({
         opacity: sortableDrag.isDragging ? 0.4 : undefined,
       }}
       className={cn(
-        'group relative flex w-full select-none items-center rounded-md pt-3.5 pr-2.5 pb-1 pl-2 text-[0.71875rem] font-medium text-subtle-foreground transition-colors hover:text-foreground',
+        'group relative flex w-full select-none items-center rounded-md pt-3.5 pr-2.5 pb-1 pl-2 text-[0.8214rem] font-medium text-subtle-foreground transition-colors hover:text-foreground',
         droppable.isOver && 'bg-foreground/5 text-foreground',
         sortable && 'cursor-grab'
       )}
@@ -1981,7 +1981,7 @@ function ProjectGroupHeader({
         />
         <span
           className={cn(
-            'ml-auto shrink-0 font-normal text-[0.6875rem] tabular-nums',
+            'ml-auto shrink-0 font-normal text-[0.7857rem] tabular-nums',
             onEdit && 'transition-opacity group-hover:opacity-0'
           )}
         >
@@ -2039,7 +2039,7 @@ function ProjectDragPreview({
       className="pointer-events-none rounded-lg border bg-background/95 py-0.5 shadow-float"
       style={{ width: width ?? 224 }}
     >
-      <div className="flex h-8 items-center gap-2 px-2 text-[0.8125rem] font-medium">
+      <div className="flex h-8 items-center gap-2 px-2 text-[0.9286rem] font-medium">
         <FoldChevron folded={folded} />
         <span className="min-w-0 flex-1 truncate">{name}</span>
       </div>
@@ -2051,7 +2051,7 @@ function ProjectDragPreview({
             return (
               <div
                 key={id}
-                className="flex h-8 items-center gap-2 px-2 text-[0.8125rem] text-foreground/88"
+                className="flex h-8 items-center gap-2 px-2 text-[0.9286rem] text-foreground/88"
               >
                 <ConversationDot conversation={conversation} />
                 <span className="min-w-0 truncate">
@@ -2384,7 +2384,7 @@ function ConversationRow({
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
       className={cn(
-        'group flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-[0.8125rem] transition-colors',
+        'group flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-[0.9286rem] transition-colors',
         active
           ? 'bg-foreground/[0.075] text-foreground dark:bg-foreground/10'
           : 'text-foreground/88 hover:bg-foreground/5 hover:text-foreground'
@@ -2408,7 +2408,7 @@ function ConversationRow({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {sourceTitle && (
-            <span className="max-w-1/3 truncate text-[0.6875rem] text-subtle-foreground">
+            <span className="max-w-1/3 truncate text-[0.7857rem] text-subtle-foreground">
               {t('Branched from {{title}}', { title: sourceTitle })}
             </span>
           )}
@@ -2425,7 +2425,7 @@ function ConversationRow({
             <span className="min-w-0 flex-1 truncate">
               {displayTitle}
               {subtitle && (
-                <span className="ml-1.5 text-[0.6875rem] text-subtle-foreground">{subtitle}</span>
+                <span className="ml-1.5 text-[0.7857rem] text-subtle-foreground">{subtitle}</span>
               )}
             </span>
           )}
@@ -2441,7 +2441,7 @@ function ConversationRow({
         )}
         {!renaming &&
           (switchHint ? (
-            <span className="shrink-0 text-[0.6875rem] text-subtle-foreground tabular-nums">
+            <span className="shrink-0 text-[0.7857rem] text-subtle-foreground tabular-nums">
               {switchHint}
             </span>
           ) : (
@@ -2452,7 +2452,7 @@ function ConversationRow({
                   aria-hidden
                 />
               )}
-              <span className="shrink-0 text-[0.6875rem] text-subtle-foreground tabular-nums group-hover:hidden">
+              <span className="shrink-0 text-[0.7857rem] text-subtle-foreground tabular-nums group-hover:hidden">
                 {formatRelativeTime(
                   conversation.lastActiveAt ?? conversation.createdAt,
                   locale,
@@ -2790,7 +2790,7 @@ function SidebarSectionLabel({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.71875rem] font-medium text-subtle-foreground">
+    <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.8214rem] font-medium text-subtle-foreground">
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {actions}
     </div>

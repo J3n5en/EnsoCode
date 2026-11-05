@@ -58,12 +58,12 @@ export function NodeSwitcher() {
             <Icon className="size-3.5" />
           </span>
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="flex min-w-0 items-center gap-1.5 font-medium text-[0.8125rem] text-foreground leading-4">
+            <span className="flex min-w-0 items-center gap-1.5 font-medium text-[0.9286rem] text-foreground leading-4">
               <span className="truncate">{label}</span>
               {active && <NodeDot node={active} />}
             </span>
             {subtitle && (
-              <span className="truncate text-[0.6875rem] text-subtle-foreground leading-3.5">
+              <span className="truncate text-[0.7857rem] text-subtle-foreground leading-3.5">
                 {subtitle}
               </span>
             )}
