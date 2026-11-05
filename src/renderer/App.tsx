@@ -487,7 +487,7 @@ export default function App() {
                 <div
                   className={cn(
                     chromeKind !== 'mac' && 'flex justify-center',
-                    chromeKind !== 'mac' && (desktopShell ? 'ml-[8px] w-[48px]' : 'w-12')
+                    chromeKind !== 'mac' && (desktopShell ? 'w-[48px]' : 'w-12')
                   )}
                 >
                   <button
@@ -616,7 +616,6 @@ export default function App() {
                   collapsed={collapsed}
                   onToggleCollapse={() => setCollapsed((v) => !v)}
                   onOpenSearch={() => setSearchOpen(true)}
-                  card={desktopShell}
                 />
                 {!collapsed && <ResizeHandle edge={desktopShell} onResize={handleResize} />}
               </>

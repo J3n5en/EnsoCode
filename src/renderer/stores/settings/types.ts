@@ -268,6 +268,8 @@ export interface SettingsState {
   backgroundBrightness: number;
   /** 饱和度 0–2（1 为原图） */
   backgroundSaturation: number;
+  /** 壁纸遮罩 0–1：主题色盖在图上的比例，0 为原图 */
+  backgroundMask: number;
   /** 底部输入框（Composer）的不透明度 0–1，独立于面板 alpha 单独可调 */
   backgroundComposerOpacity: number;
   /** 代码块 / diff 视图的不透明度 0–1，独立可调（保可读性同时透出背景） */
@@ -435,6 +437,7 @@ export interface SettingsState {
   setBackgroundBlur: (blur: number) => void;
   setBackgroundBrightness: (brightness: number) => void;
   setBackgroundSaturation: (saturation: number) => void;
+  setBackgroundMask: (mask: number) => void;
   setBackgroundComposerOpacity: (opacity: number) => void;
   setBackgroundCodeOpacity: (opacity: number) => void;
   setBackgroundSizeMode: (mode: BackgroundSizeMode) => void;

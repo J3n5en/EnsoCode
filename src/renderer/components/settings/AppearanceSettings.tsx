@@ -125,6 +125,8 @@ function BackgroundImageSettings() {
   const setBrightness = useSettingsStore((s) => s.setBackgroundBrightness);
   const saturation = useSettingsStore((s) => s.backgroundSaturation);
   const setSaturation = useSettingsStore((s) => s.setBackgroundSaturation);
+  const mask = useSettingsStore((s) => s.backgroundMask);
+  const setMask = useSettingsStore((s) => s.setBackgroundMask);
   const composerOpacity = useSettingsStore((s) => s.backgroundComposerOpacity);
   const setComposerOpacity = useSettingsStore((s) => s.setBackgroundComposerOpacity);
   const codeOpacity = useSettingsStore((s) => s.backgroundCodeOpacity);
@@ -311,6 +313,11 @@ function BackgroundImageSettings() {
             value={Math.round(saturation * 100)}
             onCommit={(v) => setSaturation(v / 100)}
             max={200}
+          />
+          <PercentSliderRow
+            label={t('Overlay')}
+            value={Math.round(mask * 100)}
+            onCommit={(v) => setMask(v / 100)}
           />
           <PercentSliderRow
             label={t('Composer opacity')}

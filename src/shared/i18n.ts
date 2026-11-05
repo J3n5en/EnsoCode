@@ -556,6 +556,7 @@ export const zhTranslations: Record<string, string> = {
   Blur: '模糊',
   Brightness: '亮度',
   Saturation: '饱和度',
+  Overlay: '遮罩',
   'Size mode': '填充方式',
   Cover: '覆盖',
   Contain: '完整显示',

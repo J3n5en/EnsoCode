@@ -40,6 +40,7 @@ export function BackgroundLayer() {
   const blur = useSettingsStore((s) => s.backgroundBlur);
   const brightness = useSettingsStore((s) => s.backgroundBrightness);
   const saturation = useSettingsStore((s) => s.backgroundSaturation);
+  const mask = useSettingsStore((s) => s.backgroundMask);
   const sizeMode = useSettingsStore((s) => s.backgroundSizeMode);
   const refreshNonce = useSettingsStore((s) => s.backgroundRefreshNonce);
 
@@ -100,6 +101,7 @@ export function BackgroundLayer() {
             blur,
             brightness,
             saturation,
+            mask,
             sizeMode,
           }}
         />
@@ -136,6 +138,7 @@ interface MediaState {
   blur: number;
   brightness: number;
   saturation: number;
+  mask: number;
   sizeMode: BackgroundSizeMode;
 }
 
@@ -149,6 +152,7 @@ function BackgroundMedia({ state }: { state: MediaState }) {
     blur,
     brightness,
     saturation,
+    mask,
     sizeMode,
   } = state;
 
@@ -231,6 +235,16 @@ function BackgroundMedia({ state }: { state: MediaState }) {
             ...SIZE_MODE_STYLES[sizeMode],
             filter,
             transition: 'filter 0.3s ease',
+          }}
+        />
+      )}
+      {/* 侧栏没有自己的底，字直接叠在壁纸上。主题色遮罩压住高光，深浅模式都跟着画布走 */}
+      {mask > 0 && (
+        <div
+          aria-hidden
+          className="absolute inset-0"
+          style={{
+            backgroundColor: `color-mix(in oklab, var(--canvas, var(--background)) ${Math.round(Math.min(1, Math.max(0, mask)) * 100)}%, transparent)`,
           }}
         />
       )}

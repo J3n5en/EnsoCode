@@ -312,11 +312,6 @@ html.bg-image-enabled [data-slot='composer'] {
   background-color: oklch(from var(--background) l c h / var(--bg-composer-alpha, 0.6));
 }
 
-/* 开壁纸时侧栏卡片与对话卡片同档半透明；圆角由组件的 overflow 裁切 */
-html.bg-image-enabled [data-enso='sidebar'] {
-  background-color: oklch(from var(--canvas, var(--background)) l c h / var(--bg-panel-alpha, 0.15));
-}
-
 /*
  * 承载内容的卡片叠在已半透明的面板上会叠成近乎不透明，这些卡片不再额外叠一层面板色，
  * 只留边框、直接透出壁纸：欢迎页建议、工具详情、Bot 页的内容卡片与系统提示条。

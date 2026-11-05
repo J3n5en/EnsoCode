@@ -230,6 +230,7 @@ const initialState = {
   backgroundBlur: 0,
   backgroundBrightness: 1,
   backgroundSaturation: 1,
+  backgroundMask: 0.5,
   backgroundComposerOpacity: 0.6,
   backgroundCodeOpacity: 0.65,
   backgroundSizeMode: 'cover' as BackgroundSizeMode,
@@ -444,6 +445,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ backgroundBrightness: clampNumber(brightness, 0, 2, 1) }),
       setBackgroundSaturation: (saturation) =>
         set({ backgroundSaturation: clampNumber(saturation, 0, 2, 1) }),
+      setBackgroundMask: (mask) => set({ backgroundMask: clampNumber(mask, 0, 1, 0.5) }),
       setBackgroundComposerOpacity: (opacity) =>
         set({ backgroundComposerOpacity: clampNumber(opacity, 0, 1, 0.6) }),
       setBackgroundCodeOpacity: (opacity) =>

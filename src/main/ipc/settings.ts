@@ -118,6 +118,7 @@ export const SETTINGS_STATE_FIELDS = [
   'backgroundBlur',
   'backgroundBrightness',
   'backgroundSaturation',
+  'backgroundMask',
   'backgroundComposerOpacity',
   'backgroundCodeOpacity',
   'backgroundSizeMode',

@@ -119,6 +119,7 @@ const STATE_KEYS = [
   'backgroundBlur',
   'backgroundBrightness',
   'backgroundSaturation',
+  'backgroundMask',
   'backgroundComposerOpacity',
   'backgroundCodeOpacity',
   'backgroundSizeMode',
@@ -1031,6 +1032,7 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
     ['backgroundBlur', 0, 20],
     ['backgroundBrightness', 0, 2],
     ['backgroundSaturation', 0, 2],
+    ['backgroundMask', 0, 1],
     ['backgroundComposerOpacity', 0, 1],
     ['backgroundCodeOpacity', 0, 1],
   ] as const)
