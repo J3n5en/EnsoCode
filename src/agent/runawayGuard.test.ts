@@ -42,6 +42,19 @@ describe('RunawayGuard', () => {
     }
   });
 
+  it('参数不同但成功结果文本相同（同文件分步 edit、静默 bash）不算 runaway', () => {
+    const guard = new RunawayGuard();
+    const done = { text: 'Successfully replaced 1 block(s) in src/a.ts.' };
+    for (let i = 0; i < 8; i++) {
+      expect(
+        guard.observe('edit', { path: 'src/a.ts', oldText: `v${i}`, newText: `v${i + 1}` }, done)
+      ).toBeUndefined();
+    }
+    for (let i = 0; i < 8; i++) {
+      expect(guard.observe('bash', { command: `mkdir d${i}` }, { text: '' })).toBeUndefined();
+    }
+  });
+
   it('换工具或换参数会打断动作连击', () => {
     const guard = new RunawayGuard();
     const args = { command: 'ls' };
@@ -156,7 +169,7 @@ describe('RunawayGuard', () => {
     const text = third.content[0];
     expect(text?.type).toBe('text');
     if (text?.type === 'text') {
-      expect(text.text.startsWith(runawayReminderText('unchanged_progress_repeat'))).toBe(true);
+      expect(text.text.startsWith(runawayReminderText('exact_action_repeat'))).toBe(true);
       expect(text.text).toContain('body');
     }
     expect(third.terminate).toBeUndefined();

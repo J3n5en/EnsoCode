@@ -117,14 +117,12 @@ export class RunawayGuard {
         : bump(this.result, fingerprint(result.text));
       this.poll = { key: '', count: 0 };
     } else {
-      // 判重带结果：同参数但结果在变（轮询构建状态）不是卡死
+      // 判重带结果：同参数但结果在变（轮询构建状态）不是卡死；不单看结果文本，edit/write 等成功文本固定
       const outcome = result.isError
         ? `e\0${errorFamily(result.text)}`
         : `o\0${fingerprint(result.text)}`;
       this.action = bump(this.action, `${toolName}\0${fingerprint(args)}\0${outcome}`);
-      this.result = result.isError
-        ? { key: '', count: 0 }
-        : bump(this.result, `${toolName}\0${fingerprint(result.text)}`);
+      this.result = { key: '', count: 0 };
       this.poll = { key: '', count: 0 };
     }
     this.error = result.isError
