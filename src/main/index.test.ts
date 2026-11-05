@@ -55,6 +55,7 @@ vi.mock('./desktop/localImageScheme', () => ({
   registerLocalImageSchemePrivileges: vi.fn(),
 }));
 vi.mock('./services/remoteRenderer', () => ({ setupRemoteRenderer: vi.fn() }));
+vi.mock('./services/nodeRemote', () => ({ registerNodeSettingsProtocolHandler: vi.fn() }));
 vi.mock('./services/appMenu', () => ({ installAppMenu: vi.fn() }));
 vi.mock('./services/computerHost', () => ({ computerHost: { closeAll: vi.fn() } }));
 vi.mock('./services/pairHost', () => ({

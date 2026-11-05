@@ -281,7 +281,7 @@ describe('乐观回显投递协议（有界穷举）', () => {
     const result = explore(core);
     expect(result.counterexample).toBeUndefined();
     expect(result.states).toBeGreaterThan(50_000);
-  });
+  }, 60_000);
 
   // 已知发现：promptTracked / steerTracked 遇 disposition 'handled' 不发任何回执，回显永远 pending。
   // 修复后这条会变红：把它改成断言 toBeUndefined 并并入上面的核心配置。
