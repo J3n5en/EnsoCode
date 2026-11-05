@@ -14,7 +14,7 @@ import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { localMainContents, rendererById } from '../renderers';
 import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
-import type { GateDeps, PluginSessionInfo } from './gate';
+import type { GateDeps } from './gate';
 import { envMarketSources, marketPublicKeys, PluginMarket } from './market';
 import { pluginError } from './process';
 import { ExtensionPluginService, type PluginSessionBridge } from './service';
@@ -28,16 +28,16 @@ let service: ExtensionPluginService | null = null;
 let mcpBridge: PluginMcpBridge | null = null;
 let draftBroker: DraftBroker | null = null;
 let sessionBridge: PluginSessionBridge | null = null;
-let sessionDirectory: ((origin: string) => PluginSessionInfo[]) | null = null;
+let sessionDirectory: PluginSessionDirectory | null = null;
 
 export function setPluginSessionBridge(bridge: PluginSessionBridge | null): void {
   sessionBridge = bridge;
 }
 
-/** 会话列表由持有权威记录的 agent IPC 注入，避免这里反向依赖它 */
-export function setPluginSessionDirectory(
-  directory: ((origin: string) => PluginSessionInfo[]) | null
-): void {
+export type PluginSessionDirectory = Required<NonNullable<GateDeps['sessions']>>;
+
+/** 会话列表与状态由持有权威记录的 agent IPC 注入，避免这里反向依赖它 */
+export function setPluginSessionDirectory(directory: PluginSessionDirectory | null): void {
   sessionDirectory = directory;
 }
 
@@ -146,7 +146,17 @@ export function getExtensionPlugins(): ExtensionPluginService {
       },
       composer: (target, op, payload) =>
         getDraftBroker().request(target.origin, target.sessionId, op, payload),
-      sessions: { list: (origin) => sessionDirectory?.(origin) ?? [] },
+      sessions: {
+        list: (origin) => sessionDirectory?.list(origin) ?? [],
+        listAll: () => sessionDirectory?.listAll() ?? [],
+        status: (sessionId) =>
+          sessionDirectory?.status(sessionId) ?? {
+            sessionId,
+            state: 'idle',
+            pendingAsks: 0,
+            pendingApprovals: 0,
+          },
+      },
       sessionUi: (target, op, payload) =>
         getDraftBroker().request(
           target.origin,

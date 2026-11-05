@@ -19,7 +19,8 @@ const LABELS: Record<ExtensionPluginPermission, string> = {
   'plugin.call': '调用其他插件',
   'ui.clipboard': '写入剪贴板',
   'ui.openExternal': '用浏览器打开链接',
-  'session.read': '查看本项目的会话列表（标题与活动时间）',
+  'session.read': '查看本项目的会话列表与运行状态（标题、活动时间、是否在等你）',
+  'session.readAll': '查看所有项目的会话列表与运行状态',
   'session.focus': '在你点击时切换到本项目的会话',
   'session.create': '在你点击时于本项目新建会话',
 };

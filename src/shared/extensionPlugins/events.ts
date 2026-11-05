@@ -11,8 +11,30 @@ export const PLUGIN_EVENTS = [
   'tool_result',
   'input',
   'context_usage',
+  'session_status',
 ] as const;
 export type PluginEventName = (typeof PLUGIN_EVENTS)[number];
+
+/** 由 Main 汇总派发、不经 worker 的事件；worker 发来的同名事件一律拒收 */
+export const HOST_PLUGIN_EVENTS = ['session_status'] as const satisfies readonly PluginEventName[];
+export const isHostPluginEvent = (event: string): boolean =>
+  (HOST_PLUGIN_EVENTS as readonly string[]).includes(event);
+
+/** 主会话（含其子会话）的汇总状态，优先级与侧栏圆点一致：error > waiting > running > idle */
+export type PluginSessionState = 'idle' | 'running' | 'waiting' | 'error';
+
+export interface PluginSessionStatus {
+  sessionId: string;
+  state: PluginSessionState;
+  /** 等待用户回答的提问数（含子会话） */
+  pendingAsks: number;
+  /** 等待用户审批的工具调用数（含子会话） */
+  pendingApprovals: number;
+}
+
+export interface SessionStatusPayload extends PluginSessionStatus {
+  previous: PluginSessionState;
+}
 
 /** agent_end 携带的本轮最终回复正文上限（字符） */
 export const AGENT_END_TEXT_MAX = 64 * 1024;

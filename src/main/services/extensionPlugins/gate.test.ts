@@ -582,8 +582,8 @@ describe('PluginHostGate', () => {
 
   it('会话接口：列表需要 session.read，跳转与新建需要各自权限和用户手势', async () => {
     const list = vi.fn(() => [
-      { id: 's1', title: '当前', updatedAt: 2 },
-      { id: 's2', title: '另一个', updatedAt: 1, running: true },
+      { id: 's1', title: '当前', updatedAt: 2, state: 'idle' as const },
+      { id: 's2', title: '另一个', updatedAt: 1, state: 'running' as const, running: true },
     ]);
     const sessionUi = vi.fn(async (_target: unknown, op: string) =>
       op === 'createSession' ? { sessionId: 's3' } : null
@@ -650,6 +650,75 @@ describe('PluginHostGate', () => {
       await expect(gate.handle('a.b', api, { sessionId: 's2' }, orphan())).rejects.toMatchObject({
         code: 'NO_SESSION',
       });
+  });
+
+  it('会话状态：本项目凭 session.read，跨项目需 session.readAll', async () => {
+    const status = vi.fn((sessionId: string) => ({
+      sessionId,
+      state: 'waiting' as const,
+      pendingAsks: 1,
+      pendingApprovals: 0,
+    }));
+    const all = [
+      {
+        id: 's1',
+        title: '当前',
+        updatedAt: 2,
+        state: 'idle' as const,
+        projectId: 'p1',
+        projectName: 'a',
+      },
+      {
+        id: 'x9',
+        title: '别的项目',
+        updatedAt: 1,
+        state: 'running' as const,
+        projectId: 'p2',
+        projectName: 'b',
+      },
+    ];
+    deps.sessions = {
+      list: vi.fn(() => [{ id: 's1', title: '当前', updatedAt: 2, state: 'idle' as const }]),
+      listAll: vi.fn(() => all),
+      status,
+    };
+    deps.manifest = () => manifest({ permissions: [] });
+    gate = new PluginHostGate(deps);
+    await expect(gate.handle('a.b', 'session.status', {}, agentCall())).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+    });
+
+    deps.manifest = () => manifest({ permissions: ['session.read'] });
+    gate = new PluginHostGate(deps);
+    await expect(gate.handle('a.b', 'session.status', {}, agentCall())).resolves.toEqual(
+      status('s1')
+    );
+    await expect(
+      gate.handle('a.b', 'session.status', { sessionId: 'x9' }, agentCall())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all' }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'nope' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+
+    deps.manifest = () => manifest({ permissions: ['session.readAll'] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.list', { scope: 'all' }, agentCall())
+    ).resolves.toEqual({ current: 's1', sessions: all });
+    await expect(
+      gate.handle('a.b', 'session.status', { sessionId: 'x9' }, agentCall())
+    ).resolves.toMatchObject({ sessionId: 'x9' });
+    await expect(
+      gate.handle('a.b', 'session.status', { sessionId: 'ghost' }, agentCall())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    // 常驻进程不在调用里：全局列表照常可用，当前会话为 null
+    await expect(gate.handle('a.b', 'session.list', { scope: 'all' }, undefined)).resolves.toEqual({
+      current: null,
+      sessions: all,
+    });
   });
 
   it('远端窗口发起的调用不能动宿主桌面的剪贴板和外链', async () => {

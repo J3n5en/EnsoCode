@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import type { PluginSessionState, PluginSessionStatus } from '@shared/extensionPlugins/events';
 import {
   type ExtensionPluginManifest,
   type ExtensionPluginPermission,
@@ -46,8 +47,12 @@ export interface PluginSessionInfo {
   id: string;
   title: string;
   updatedAt: number;
+  state: PluginSessionState;
   running?: boolean;
   archived?: boolean;
+  /** 仅跨项目列表（scope: 'all'）带项目标识；名称为项目目录名 */
+  projectId?: string;
+  projectName?: string;
 }
 
 /** 草稿请求的目标：会话 + 发起手势的窗口（webContents id），草稿只回写到发起窗口 */
@@ -123,8 +128,13 @@ export interface GateDeps {
   registerContrib?(pluginId: string, input: Record<string, unknown>): void;
   unregisterContrib?(pluginId: string, input: Record<string, unknown>): void;
   capabilities?(): PluginHostCapabilities;
-  /** 与 sessionId 同项目的主会话；按最近活动排序 */
-  sessions?: { list(sessionId: string): PluginSessionInfo[] };
+  sessions?: {
+    /** 与 sessionId 同项目的主会话；按最近活动排序 */
+    list(sessionId: string): PluginSessionInfo[];
+    /** 所有项目的主会话 */
+    listAll?(): PluginSessionInfo[];
+    status?(sessionId: string): PluginSessionStatus;
+  };
   sessionUi?(
     target: ComposerTarget,
     op: SessionUiOp,
@@ -301,6 +311,10 @@ export class PluginHostGate {
     const permit = (permission: ExtensionPluginPermission) => {
       if (!manifest.permissions.includes(permission))
         throw pluginError('PERMISSION_DENIED', `插件未获授权：${permission}`);
+    };
+    /** session.readAll 涵盖本项目的读取 */
+    const permitRead = () => {
+      if (!manifest.permissions.includes('session.readAll')) permit('session.read');
     };
     const invocation = () => {
       const inv = this.invocations.get(invocationId);
@@ -539,10 +553,43 @@ export class PluginHostGate {
           }
         );
       case 'session.list': {
-        permit('session.read');
+        if (a.scope === 'all') {
+          permit('session.readAll');
+          if (!this.deps.sessions?.listAll)
+            throw pluginError('UNSUPPORTED', '当前环境不能列出会话');
+          return {
+            current: optionalInvocation()?.sessionId ?? null,
+            sessions: this.deps.sessions.listAll(),
+          };
+        }
+        if (a.scope !== undefined && a.scope !== 'project')
+          throw pluginError('INVALID_ARGS', 'scope 只能是 project 或 all');
+        permitRead();
         const current = sessionOf(invocation());
         if (!this.deps.sessions) throw pluginError('UNSUPPORTED', '当前环境不能列出会话');
         return { current, sessions: this.deps.sessions.list(current) };
+      }
+      case 'session.status': {
+        permitRead();
+        const sessions = this.deps.sessions;
+        if (!sessions?.status) throw pluginError('UNSUPPORTED', '当前环境不能读取会话状态');
+        if (
+          a.sessionId !== undefined &&
+          (typeof a.sessionId !== 'string' || a.sessionId.length === 0 || a.sessionId.length > 256)
+        )
+          throw pluginError('INVALID_ARGS', 'sessionId 不合法');
+        const current = optionalInvocation()?.sessionId ?? null;
+        const target = (a.sessionId as string | undefined) ?? current;
+        if (!target) throw pluginError('NO_SESSION', '调用不属于任何会话');
+        const visible =
+          target === current ||
+          (current !== null &&
+            manifest.permissions.includes('session.read') &&
+            sessions.list(current).some((s) => s.id === target)) ||
+          (manifest.permissions.includes('session.readAll') &&
+            (sessions.listAll?.() ?? []).some((s) => s.id === target));
+        if (!visible) throw pluginError('NOT_FOUND', '没有这个会话');
+        return sessions.status(target);
       }
       case 'session.focus': {
         permit('session.focus');

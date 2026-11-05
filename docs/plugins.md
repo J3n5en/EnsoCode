@@ -113,7 +113,8 @@
 | `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
 | `ui.clipboard` | 要写剪贴板 | `enso.ui.clipboard.writeText` |
 | `ui.openExternal` | 要打开外部链接 | `enso.ui.openExternal` |
-| `session.read` | 要列出会话 | `enso.session.list` |
+| `session.read` | 要列出会话或读会话状态 | `enso.session.list` / `enso.session.status`，限本项目 |
+| `session.readAll` | 要看所有项目的会话 | `enso.session.list({ scope: 'all' })`，`enso.session.status` 可查任意项目的会话；涵盖 `session.read` |
 | `session.focus` | 要切换到会话 | `enso.session.focus` |
 | `session.create` | 要新建会话 | `enso.session.create` |
 
@@ -229,7 +230,8 @@ export async function activate(enso) {
 | `artifacts.write(input)` | 见「产出文件」 |
 | `session.inject(input)` | 见「向会话发消息」 |
 | `session.abort(sessionId?)` | 见「向会话发消息」 |
-| `session.list()` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, running?, archived? }`。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除 |
+| `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null` |
+| `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在全局列表）里，否则 `NOT_FOUND` |
 | `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签）。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND` |
 | `session.create({ text? })` | 需要 `session.create`。在发起会话的项目里新建会话并切过去，返回 `{ sessionId }`。`text`（不超过 32KB）只填进新会话的输入框，由用户确认后发送。只能在用户操作触发的调用里用 |
 | `host.capabilities()` | 返回 `{ host: 'desktop' \| 'server', hostVersion, notify, mcp, clipboard, openExternal, composer }`，用来在桌面和服务端之间降级 |
@@ -271,6 +273,7 @@ export async function activate(enso) {
 | `tool_result` | 工具执行后 | `{ toolCallId, toolName, input, content, isError }`。通知里的 `content` 最多 64K 字符，超出截断；拦截看到的是完整文本 | 返回 `{ content?, isError? }` 改写结果 |
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
 | `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage?, parts?, turns? }` | 否 |
+| `session_status` | 主会话的汇总状态或挂起的提问 / 审批数变化时，所有项目的会话都会发 | `{ sessionId, state, previous, pendingAsks, pendingApprovals }`，见「会话状态」 | 否 |
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。插件进程没在运行、且不是常驻时，通知直接丢掉，不会为此拉起进程。主会话的 `before_compact` 也一样：只等已经在运行的插件，不会为了等待去拉起非常驻插件。
 
@@ -291,6 +294,19 @@ export async function activate(enso) {
 多个插件拦截同一事件时按插件 id 顺序依次询问，后一个看到的是前一个改写后的数据；一旦有插件拦下或吞掉，后面的不再询问。每个插件限时 5 秒，一次拦截合计不超过 25 秒。处理函数抛错或超时时默认放行；设了 `failClosed: true` 的则拦下。合计时长用尽时，还没轮到的插件也按各自的 `failClosed` 处理。只有 Enso 自身出错（与任何插件无关）时才无条件放行。
 
 同一插件的同一事件连续失败 3 次（报错或超时）后熔断：之后 30 秒内该事件不再询问它，直接放行，即使设了 `failClosed`。界面会提示「插件 X 的检查连续失败，已临时放行」，设置页的插件行显示放行到何时，日志里有记录。到期后下一次事件会试探询问：成功则恢复，失败则按 `failClosed` 处理并再熔断 30 秒。因前面的插件拖慢而没轮到的不计入失败次数。停用、卸载、更新插件会立即解除它的熔断并重新计数。
+
+### 会话状态
+
+`state` 是主会话连同它的子代理、coworker 汇总出的状态，优先级与侧栏圆点一致：
+
+| `state` | 含义 |
+| --- | --- |
+| `error` | 主会话上一轮失败或 worker 退出；下一轮开始运行时清除。子会话失败不算 |
+| `waiting` | 有等你回答的提问（`pendingAsks`）或等你审批的工具调用（`pendingApprovals`），含子会话的 |
+| `running` | 主会话、某个子会话或子代理在运行，或会话正在启动 |
+| `idle` | 以上都不是 |
+
+`session_status` 只在 `state` 或两个挂起数变化时发，`previous` 是上一次通知时的 `state`（首次为 `idle`），`ctx.sessionId` 与 `data.sessionId` 都是主会话 id。它由 Enso 汇总后派发，不经过会话本身，所以不进会话的事件计划，订阅它也不会让会话多等；按到达顺序排队，不合并。和其他事件一样，Bot 会话不发。
 
 ### 子代理与 coworker
 

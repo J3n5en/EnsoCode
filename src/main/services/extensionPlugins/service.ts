@@ -22,6 +22,7 @@ import {
   type InterceptResult,
   initialInterceptState,
   isChildInterceptEvent,
+  isHostPluginEvent,
   OBSERVE_TIMEOUT_MS,
   type PluginEventName,
   type PluginInterceptEvent,
@@ -846,6 +847,7 @@ export class ExtensionPluginService {
     for (const { manifest } of this.enabled()) {
       if (manifest.permissions.includes('agent.inject')) inject = true;
       for (const sub of manifest.contributes.events) {
+        if (isHostPluginEvent(sub.event)) continue;
         if (sub.mode === 'observe') {
           observe.add(sub.event);
           continue;

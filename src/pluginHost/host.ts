@@ -374,7 +374,9 @@ export function runPluginHost(transport: HostTransport): void {
         inject: (input: unknown) => hostCall('session.inject', input ?? {}),
         abort: (sessionId?: string) =>
           hostCall('session.abort', sessionId === undefined ? {} : { sessionId }),
-        list: () => hostCall('session.list', {}),
+        list: (options?: unknown) => hostCall('session.list', options ?? {}),
+        status: (sessionId?: string) =>
+          hostCall('session.status', sessionId === undefined ? {} : { sessionId }),
         focus: (sessionId: string) => hostCall('session.focus', { sessionId }),
         create: (input?: unknown) => hostCall('session.create', input ?? {}),
       },

@@ -167,6 +167,18 @@ describe('ExtensionPluginService', () => {
     expect(readRegistry(root).plugins[0]?.state).toBe('enabled');
   });
 
+  it('Main 派发的 session_status 不进 worker 事件计划', async () => {
+    await install({
+      'enso-plugin.json': manifest({
+        permissions: ['agent.observe'],
+        contributes: { events: [{ event: 'session_status' }] },
+      }),
+      'main.mjs': 'export function activate() {}',
+    });
+    await service.setEnabled('example.demo', true);
+    expect(service.eventPlanForSpawn()).toBeNull();
+  });
+
   it('调用插件工具：会话 id 由 Main 传入', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
     await service.setEnabled('example.demo', true);

@@ -109,7 +109,8 @@ import { chatModelsRoot } from '../services/chatModels';
 import { reloadConversation } from '../services/conversationReload';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
 import { getExtensionPlugins, setPluginSessionDirectory } from '../services/extensionPlugins';
-import { listProjectSessions } from '../services/extensionPlugins/sessions';
+import { SessionStateTracker } from '../services/extensionPlugins/sessionState';
+import { listAllSessions, listProjectSessions } from '../services/extensionPlugins/sessions';
 import { searchFiles } from '../services/fileSearch';
 import { createLocalComplete, memoryCompleteFromSettings } from '../services/llama/chat';
 import {
@@ -214,6 +215,7 @@ let sourceBindings: ActiveConversationRegistry | null = null;
 let sourceAuthority: SourceAuthorityRegistry | null = null;
 let botWorkerObserver: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null =
   null;
+const pluginSessionStates = new SessionStateTracker();
 const selectionClockOwners = new WeakSet<RendererContents>();
 
 function watchSelectionClock(sender: RendererContents): void {
@@ -276,6 +278,28 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
   forwardAgentEvent(event);
   handlePairHeadlessAgentEvent(event);
+  publishPluginSessionStatus(event);
+}
+
+/** 主会话汇总状态变化时通知订阅了 session_status 的插件 */
+function publishPluginSessionStatus(event: RendererAgentEvent): void {
+  for (const change of pluginSessionStates.observe(event)) {
+    // 与其他插件事件一致：Bot 会话不发
+    if (sourceAuthority?.conversation(change.sessionId)?.bot) continue;
+    void getExtensionPlugins()
+      .dispatchEvent({
+        sessionId: change.sessionId,
+        projectRoot: pluginProjectRoot(change.sessionId),
+        event: 'session_status',
+        data: change,
+      })
+      .catch((error: unknown) => {
+        console.warn(
+          '[plugins] session_status failed:',
+          error instanceof Error ? error.message : error
+        );
+      });
+  }
 }
 
 export function pushMcpStatus(push: McpStatusPush): void {
@@ -989,14 +1013,26 @@ export function registerAgentHandlers(): void {
     if (!identity || 'parent' in identity || !agentSessionIndex.isReady(identity)) return undefined;
     return identity;
   });
-  setPluginSessionDirectory((origin) =>
-    listProjectSessions({
-      origin,
-      conversations: sourceAuthority?.projection().conversations ?? [],
-      persisted: (id) => agentSessionIndex.persistedConversation(id),
-      running: (id) => agentSessionIndex.workspaceTreeRunning(id),
-    })
-  );
+  const sessionSource = () => ({
+    conversations: sourceAuthority?.projection().conversations ?? [],
+    persisted: (id: string) => agentSessionIndex.persistedConversation(id),
+    running: (id: string) => agentSessionIndex.workspaceTreeRunning(id),
+    state: (id: string) => pluginSessionStates.status(id).state,
+  });
+  setPluginSessionDirectory({
+    list: (origin) => listProjectSessions({ ...sessionSource(), origin }),
+    listAll: () =>
+      listAllSessions({
+        ...sessionSource(),
+        projects: sourceAuthority?.projection().projects ?? [],
+      }),
+    status: (sessionId) => {
+      const status = pluginSessionStates.status(sessionId);
+      return status.state === 'idle' && agentSessionIndex.workspaceTreeRunning(status.sessionId)
+        ? { ...status, state: 'running' }
+        : status;
+    },
+  });
   wirePairAgentBridge();
   wirePairSessionHost();
   configureMemoryDistill({ complete: distillCompletion });

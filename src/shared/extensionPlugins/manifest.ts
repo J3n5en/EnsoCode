@@ -28,6 +28,7 @@ export const EXTENSION_PLUGIN_PERMISSIONS = [
   'ui.clipboard',
   'ui.openExternal',
   'session.read',
+  'session.readAll',
   'session.focus',
   'session.create',
 ] as const;

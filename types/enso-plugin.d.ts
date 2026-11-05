@@ -6,6 +6,9 @@ import type {
   ContextUsagePayload,
   InputPayload,
   PluginEventName,
+  PluginSessionState,
+  PluginSessionStatus,
+  SessionStatusPayload,
   ToolCallPayload,
   ToolResultPayload,
 } from '../src/shared/extensionPlugins/events';
@@ -65,9 +68,16 @@ export interface EnsoSessionInfo {
   id: string;
   title: string;
   updatedAt: number;
+  /** 汇总状态：error > waiting（等你回答或审批）> running > idle */
+  state: PluginSessionState;
   running?: boolean;
   archived?: boolean;
+  /** 仅 `list({ scope: 'all' })` 带；projectName 为项目目录名 */
+  projectId?: string;
+  projectName?: string;
 }
+
+export type EnsoSessionStatus = PluginSessionStatus;
 
 export interface EnsoMcpTool {
   server: string;
@@ -155,7 +165,13 @@ export interface EnsoHostApi {
   'contrib.register': (input: EnsoContribRegister) => Promise<void>;
   'contrib.unregister': (input: { kind: 'tool' | 'command'; name: string }) => Promise<void>;
   'host.capabilities': () => Promise<PluginHostCapabilities>;
-  'session.list': () => Promise<{ current: string; sessions: EnsoSessionInfo[] }>;
+  'session.list': {
+    (options?: { scope?: 'project' }): Promise<{ current: string; sessions: EnsoSessionInfo[] }>;
+    /** 所有项目的会话，需 `session.readAll`；不在宿主发起的调用里时 current 为 null */
+    (options: { scope: 'all' }): Promise<{ current: string | null; sessions: EnsoSessionInfo[] }>;
+  };
+  /** 缺省发起会话；别的会话须在可见列表里 */
+  'session.status': (sessionId?: string) => Promise<EnsoSessionStatus>;
   'session.focus': (sessionId: string) => Promise<void>;
   'session.create': (input?: { text?: string }) => Promise<{ sessionId: string }>;
 }
@@ -182,6 +198,7 @@ export interface EnsoEventData {
   tool_result: ToolResultPayload;
   input: InputPayload;
   context_usage: ContextUsagePayload;
+  session_status: SessionStatusPayload;
 }
 
 export type EnsoToolResult = string | Pick<PluginToolResult, 'content' | 'details'>;
@@ -262,6 +279,7 @@ export interface EnsoMain {
     inject: EnsoHostApi['session.inject'];
     abort: EnsoHostApi['session.abort'];
     list: EnsoHostApi['session.list'];
+    status: EnsoHostApi['session.status'];
     focus: EnsoHostApi['session.focus'];
     create: EnsoHostApi['session.create'];
   };
