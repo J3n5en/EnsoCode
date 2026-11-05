@@ -54,6 +54,7 @@ function registerEnsoCompactionHook(
         firstKeptEntryId,
         {
           observationsPoolMaxTokens: runtime.config.observationsPoolMaxTokens,
+          reflectionsPoolMaxTokens: runtime.config.reflectionsPoolMaxTokens,
         }
       );
       const summary = renderSummary(projection.reflections, projection.observations);

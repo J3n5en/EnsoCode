@@ -1,18 +1,23 @@
 import {
 	isObservationsDroppedData,
 	isObservationsRecordedData,
+	isReflectionsConsolidatedData,
 	isReflectionsRecordedData,
 	OM_OBSERVATIONS_DROPPED,
 	OM_OBSERVATIONS_RECORDED,
+	OM_REFLECTIONS_CONSOLIDATED,
 	OM_REFLECTIONS_RECORDED,
 	type Entry,
 	type Observation,
 	type Reflection,
 } from "./types.js";
+import { reflectionsHardCapTokens, selectActiveReflections } from "./active-reflections.js";
 
 export type FoldLedgerOptions = {
 	/** Fold entries from branch root through this entry id, inclusive. Omit to fold through branch tip. */
 	upToEntryId?: string;
+	/** Consolidation budget; active reflections are capped at twice it. Omit for the default. */
+	reflectionsPoolMaxTokens?: number;
 };
 
 export type FoldedLedger = {
@@ -22,8 +27,12 @@ export type FoldedLedger = {
 	activeObservations: Observation[];
 	/** Tombstoned observation ids, including ids that may not have a corresponding folded observation. */
 	droppedObservationIds: Set<string>;
-	/** All first-valid reflection records encountered through the fold boundary. */
+	/** All first-valid reflection records encountered through the fold boundary, including superseded ones. */
 	reflections: Reflection[];
+	/** Unsuperseded reflection records within the hard cap; this is what memory agents see. */
+	activeReflections: Reflection[];
+	/** Reflection ids replaced by consolidation entries. */
+	supersededReflectionIds: Set<string>;
 	/** All first-valid observation records by id, including dropped observations. */
 	observationsById: Map<string, Observation>;
 	/** All first-valid reflection records by id. */
@@ -51,6 +60,7 @@ export function foldLedger(entries: Entry[], options: FoldLedgerOptions = {}): F
 	const observationsById = new Map<string, Observation>();
 	const reflectionsById = new Map<string, Reflection>();
 	const droppedObservationIds = new Set<string>();
+	const supersededReflectionIds = new Set<string>();
 	const endIdx = foldEndIndex(entries, options.upToEntryId);
 
 	for (let i = 0; i <= endIdx; i++) {
@@ -77,6 +87,15 @@ export function foldLedger(entries: Entry[], options: FoldLedgerOptions = {}): F
 			continue;
 		}
 
+		if (isCustomEntry(entry, OM_REFLECTIONS_CONSOLIDATED)) {
+			if (!isReflectionsConsolidatedData(entry.data)) continue;
+			for (const reflectionId of entry.data.supersededReflectionIds) supersededReflectionIds.add(reflectionId);
+			for (const reflection of entry.data.reflections) {
+				if (!reflectionsById.has(reflection.id)) reflectionsById.set(reflection.id, reflection);
+			}
+			continue;
+		}
+
 		if (isCustomEntry(entry, OM_OBSERVATIONS_DROPPED)) {
 			if (!isObservationsDroppedData(entry.data)) continue;
 			for (const observationId of entry.data.observationIds) {
@@ -88,12 +107,18 @@ export function foldLedger(entries: Entry[], options: FoldLedgerOptions = {}): F
 	const observations = Array.from(observationsById.values());
 	const activeObservations = observations.filter((observation) => !droppedObservationIds.has(observation.id));
 	const reflections = Array.from(reflectionsById.values());
+	const activeReflections = selectActiveReflections(
+		reflections.filter((reflection) => !supersededReflectionIds.has(reflection.id)),
+		reflectionsHardCapTokens(options.reflectionsPoolMaxTokens),
+	);
 
 	return {
 		observations,
 		activeObservations,
 		droppedObservationIds,
 		reflections,
+		activeReflections,
+		supersededReflectionIds,
 		observationsById,
 		reflectionsById,
 	};

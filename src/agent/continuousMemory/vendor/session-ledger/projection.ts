@@ -3,12 +3,14 @@ import {
 	isMemoryDetails,
 	isObservationsDroppedEntry,
 	isObservationsRecordedEntry,
+	isReflectionsConsolidatedEntry,
 	isReflectionsRecordedEntry,
 	type Entry,
 	type MemoryDetails,
 	type Observation,
 	type Reflection,
 } from "./types.js";
+import { reflectionsHardCapTokens, selectActiveReflections } from "./active-reflections.js";
 
 export type Projection = {
 	observations: Observation[];
@@ -23,6 +25,7 @@ export type ProjectionDiff = {
 
 export type CompactionProjectionConfig = {
 	observationsPoolMaxTokens: number;
+	reflectionsPoolMaxTokens?: number;
 };
 
 export type CompactionProjection = Projection & {
@@ -39,6 +42,7 @@ type ProjectionFoldOptions = {
 	observationsBoundary: ProjectionBoundary;
 	reflectionsBoundary: ProjectionBoundary;
 	dropsBoundary: ProjectionBoundary;
+	reflectionsPoolMaxTokens?: number;
 };
 
 function entryIndexById(entries: Entry[]): Map<string, number> {
@@ -91,6 +95,7 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
 	const observationsById = new Set<string>();
 	const reflectionsById = new Set<string>();
 	const droppedObservationIds = new Set<string>();
+	const supersededReflectionIds = new Set<string>();
 
 	for (const entry of entries) {
 		if (isObservationsRecordedEntry(entry) && isCoveredAtOrBefore(entry, indexes, observationsBoundary)) {
@@ -111,6 +116,16 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
 			continue;
 		}
 
+		if (isReflectionsConsolidatedEntry(entry) && isCoveredAtOrBefore(entry, indexes, reflectionsBoundary)) {
+			for (const reflectionId of entry.data.supersededReflectionIds) supersededReflectionIds.add(reflectionId);
+			for (const reflection of entry.data.reflections) {
+				if (reflectionsById.has(reflection.id)) continue;
+				reflectionsById.add(reflection.id);
+				reflections.push(reflection);
+			}
+			continue;
+		}
+
 		if (isObservationsDroppedEntry(entry) && isCoveredAtOrBefore(entry, indexes, dropsBoundary)) {
 			for (const observationId of entry.data.observationIds) droppedObservationIds.add(observationId);
 		}
@@ -118,7 +133,10 @@ function foldProjection(entries: Entry[], options: ProjectionFoldOptions): Proje
 
 	return {
 		observations: observations.filter((observation) => !droppedObservationIds.has(observation.id)),
-		reflections,
+		reflections: selectActiveReflections(
+			reflections.filter((reflection) => !supersededReflectionIds.has(reflection.id)),
+			reflectionsHardCapTokens(options.reflectionsPoolMaxTokens),
+		),
 	};
 }
 
@@ -138,12 +156,13 @@ function latestV3CompactionDetails(entries: Entry[]): MemoryDetails | undefined 
 	return undefined;
 }
 
-export function fullProjection(entries: Entry[], upToEntryId?: string): Projection {
+export function fullProjection(entries: Entry[], upToEntryId?: string, reflectionsPoolMaxTokens?: number): Projection {
 	const boundary = upToEntryId ? entryBoundary(upToEntryId) : tipBoundary();
 	return foldProjection(entries, {
 		observationsBoundary: boundary,
 		reflectionsBoundary: boundary,
 		dropsBoundary: boundary,
+		reflectionsPoolMaxTokens,
 	});
 }
 
@@ -181,6 +200,7 @@ export function buildCompactionProjection(
 		observationsBoundary: entryBoundary(firstKeptEntryId),
 		reflectionsBoundary: maintenanceBoundary,
 		dropsBoundary: maintenanceBoundary,
+		reflectionsPoolMaxTokens: config.reflectionsPoolMaxTokens,
 	});
 	const observationTokens = normalProjection.observations.reduce(
 		(total, observation) => total + observation.tokenCount,
@@ -188,7 +208,7 @@ export function buildCompactionProjection(
 	);
 	const fullFold = observationTokens >= config.observationsPoolMaxTokens;
 	const projection = fullFold
-		? fullProjection(entries, firstKeptEntryId)
+		? fullProjection(entries, firstKeptEntryId, config.reflectionsPoolMaxTokens)
 		: normalProjection;
 
 	const details: MemoryDetails = {

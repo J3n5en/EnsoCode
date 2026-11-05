@@ -1,6 +1,7 @@
 export const OM_OBSERVATIONS_RECORDED = "om.observations.recorded";
 export const OM_REFLECTIONS_RECORDED = "om.reflections.recorded";
 export const OM_OBSERVATIONS_DROPPED = "om.observations.dropped";
+export const OM_REFLECTIONS_CONSOLIDATED = "om.reflections.consolidated";
 export const OM_FOLDED = "om.folded";
 
 export const RELEVANCE_VALUES = ["low", "medium", "high", "critical"] as const;
@@ -50,6 +51,13 @@ export type ReflectionsRecordedEntryData = {
 
 export type ObservationsDroppedEntryData = {
 	observationIds: string[];
+	coversUpToId: string;
+};
+
+/** Rewrites part of the active reflection set: superseded ids leave it, `reflections` join it. */
+export type ReflectionsConsolidatedEntryData = {
+	reflections: Reflection[];
+	supersededReflectionIds: string[];
 	coversUpToId: string;
 };
 
@@ -138,6 +146,18 @@ export function isObservationsDroppedData(value: unknown): value is Observations
 	return isNonEmptyStringArray(value.observationIds) && isNonEmptyString(value.coversUpToId);
 }
 
+export function isReflectionsConsolidatedData(value: unknown): value is ReflectionsConsolidatedEntryData {
+	if (!isPlainRecord(value)) return false;
+	return (
+		Array.isArray(value.reflections) &&
+		value.reflections.every(isReflection) &&
+		Array.isArray(value.supersededReflectionIds) &&
+		value.supersededReflectionIds.length > 0 &&
+		value.supersededReflectionIds.every(isMemoryId) &&
+		isNonEmptyString(value.coversUpToId)
+	);
+}
+
 export function isMemoryDetails(value: unknown): value is MemoryDetails {
 	if (!isPlainRecord(value)) return false;
 	return (
@@ -175,6 +195,14 @@ export function isObservationsDroppedEntry(entry: Entry): entry is Entry & {
 	return entry.type === "custom" && entry.customType === OM_OBSERVATIONS_DROPPED && isObservationsDroppedData(entry.data);
 }
 
+export function isReflectionsConsolidatedEntry(entry: Entry): entry is Entry & {
+	type: "custom";
+	customType: typeof OM_REFLECTIONS_CONSOLIDATED;
+	data: ReflectionsConsolidatedEntryData;
+} {
+	return entry.type === "custom" && entry.customType === OM_REFLECTIONS_CONSOLIDATED && isReflectionsConsolidatedData(entry.data);
+}
+
 export function buildObservationsRecordedData(
 	observations: Observation[],
 	coversUpToId: string,
@@ -197,4 +225,13 @@ export function buildObservationsDroppedData(
 ): ObservationsDroppedEntryData | undefined {
 	if (observationIds.length === 0 || !isNonEmptyString(coversUpToId)) return undefined;
 	return { observationIds, coversUpToId };
+}
+
+export function buildReflectionsConsolidatedData(
+	reflections: Reflection[],
+	supersededReflectionIds: string[],
+	coversUpToId: string,
+): ReflectionsConsolidatedEntryData | undefined {
+	const data = { reflections, supersededReflectionIds, coversUpToId };
+	return isReflectionsConsolidatedData(data) ? data : undefined;
 }

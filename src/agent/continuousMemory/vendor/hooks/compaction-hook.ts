@@ -36,7 +36,7 @@ export function registerCompactionHook(pi: ExtensionAPI, runtime: Runtime): void
 			const projection = buildCompactionProjection(
 				branchEntries as Entry[],
 				firstKeptEntryId,
-				{ observationsPoolMaxTokens: observationsPoolMaxTokens(runtime) },
+				{ observationsPoolMaxTokens: observationsPoolMaxTokens(runtime), reflectionsPoolMaxTokens: runtime.config.reflectionsPoolMaxTokens },
 			);
 			const summary = renderSummary(projection.reflections, projection.observations);
 			if (summary.length === 0) {

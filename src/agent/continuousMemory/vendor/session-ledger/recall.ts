@@ -1,6 +1,7 @@
 import {
 	isObservationsDroppedEntry,
 	isObservationsRecordedEntry,
+	isReflectionsConsolidatedEntry,
 	isReflectionsRecordedEntry,
 	type Entry,
 	type Observation,
@@ -108,7 +109,7 @@ function indexLedger(entries: Entry[]): {
 			});
 			continue;
 		}
-		if (isReflectionsRecordedEntry(entry)) {
+		if (isReflectionsRecordedEntry(entry) || isReflectionsConsolidatedEntry(entry)) {
 			entry.data.reflections.forEach((reflection, recordIndex) => {
 				reflections.push({ reflection, entryId: entry.id, entryIndex, recordIndex });
 			});

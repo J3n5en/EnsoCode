@@ -110,6 +110,11 @@ export function rawTokensSinceDropCoverage(entries: Entry[]): number {
 	return rawTokensSinceCoverage(entries, OM_OBSERVATIONS_DROPPED);
 }
 
+/** True when observation coverage has moved past the latest reflection, i.e. the reflector has new input. */
+export function observationsAdvancedPastReflection(entries: Entry[]): boolean {
+	return latestCoverageIndex(entries, OM_OBSERVATIONS_RECORDED) > latestCoverageIndex(entries, OM_REFLECTIONS_RECORDED);
+}
+
 export function findLastCompactionIndex(entries: Entry[]): number {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		if (entries[i].type === "compaction") return i;

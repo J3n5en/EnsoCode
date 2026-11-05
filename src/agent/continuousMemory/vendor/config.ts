@@ -44,6 +44,16 @@ export interface Config {
 	compactAfterTokensRatio: number;
 	observationsPoolMaxTokens: number;
 	observationsPoolTargetTokens: number;
+	/**
+	 * Active reflection budget. Above it, the reflector stage first rewrites the
+	 * oldest reflections into a condensed set of about half this size, so the
+	 * reflections every memory agent and compaction summary carry stay bounded.
+	 * 10K sits above the 95th percentile of real sessions (~4.9K) and matches
+	 * the observation pool target, keeping a full-fold summary near 30K tokens.
+	 * If consolidation fails, a deterministic oldest-quarter + newest cap at
+	 * twice this value still bounds what agents and summaries carry.
+	 */
+	reflectionsPoolMaxTokens: number;
 	agentMaxTurns: number;
 	/**
 	 * Maximum output tokens requested for background memory-agent loops
@@ -67,6 +77,7 @@ export const DEFAULTS: Config = {
 	compactAfterTokensRatio: 0.68,
 	observationsPoolMaxTokens: 20_000,
 	observationsPoolTargetTokens: 10_000,
+	reflectionsPoolMaxTokens: 10_000,
 	agentMaxTurns: 16,
 	agentMaxTokens: 32_000,
 	showWorkerNotifications: true,
@@ -197,6 +208,7 @@ function normalizeSettingsConfig(value: Record<string, unknown>): Partial<Config
 		"compactAfterTokens",
 		"observationsPoolMaxTokens",
 		"observationsPoolTargetTokens",
+		"reflectionsPoolMaxTokens",
 		"agentMaxTurns",
 		"agentMaxTokens",
 	] as const;

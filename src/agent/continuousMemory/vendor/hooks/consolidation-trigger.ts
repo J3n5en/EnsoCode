@@ -3,6 +3,7 @@ import { runDropper } from "../agents/dropper/agent.js";
 import { observationPoolMetrics } from "../agents/dropper/pool.js";
 import { ObserverStreamError, runObserver } from "../agents/observer/agent.js";
 import { runReflector } from "../agents/reflector/agent.js";
+import { runReflectionConsolidator } from "../agents/reflector/consolidate.js";
 import { debugLog, withDebugLogContext } from "../debug-log.js";
 import { resolveObserverChunkMaxTokens } from "../config.js";
 import type { ResolveResult, Runtime } from "../runtime.js";
@@ -10,9 +11,11 @@ import { serializeSourceAddressedBranchEntries } from "../serialize.js";
 import {
 	OM_OBSERVATIONS_DROPPED,
 	OM_OBSERVATIONS_RECORDED,
+	OM_REFLECTIONS_CONSOLIDATED,
 	OM_REFLECTIONS_RECORDED,
 	buildObservationsDroppedData,
 	buildObservationsRecordedData,
+	buildReflectionsConsolidatedData,
 	buildReflectionsRecordedData,
 	earlierCoverageMarkerId,
 	foldLedger,
@@ -20,6 +23,7 @@ import {
 	isSourceEntry,
 	latestCoverageIndex,
 	latestCoverageMarkerId,
+	observationsAdvancedPastReflection,
 	observationToSummaryLine,
 	realTokensSinceAnchor,
 	rawTokensSinceObservationCoverage,
@@ -106,7 +110,23 @@ function stageDue(
 
 function anyStageDue(entries: Entry[], runtime: Runtime, currentTokens: number | undefined): boolean {
 	return stageDue(entries, runtime, currentTokens, OM_OBSERVATIONS_RECORDED, rawTokensSinceObservationCoverage, runtime.config.observeAfterTokens)
-		|| stageDue(entries, runtime, currentTokens, OM_REFLECTIONS_RECORDED, rawTokensSinceReflectionCoverage, runtime.config.reflectAfterTokens);
+		|| (observationsAdvancedPastReflection(entries)
+			&& stageDue(entries, runtime, currentTokens, OM_REFLECTIONS_RECORDED, rawTokensSinceReflectionCoverage, runtime.config.reflectAfterTokens));
+}
+
+function tokenSum(reflections: readonly Reflection[]): number {
+	return reflections.reduce((sum, reflection) => sum + reflection.tokenCount, 0);
+}
+
+/** Oldest reflections fitting `maxTokens` (at least two, so a merge is possible). */
+function oldestReflectionBatch(reflections: Reflection[], maxTokens: number): Reflection[] {
+	let tokens = 0;
+	let end = 0;
+	while (end < reflections.length && (end < 2 || tokens + reflections[end].tokenCount <= maxTokens)) {
+		tokens += reflections[end].tokenCount;
+		end++;
+	}
+	return reflections.slice(0, end);
 }
 
 function shouldNotifyWorker(runtime: Runtime, ctx: ConsolidationCtx): boolean {
@@ -303,7 +323,7 @@ async function runObserverStage(
 		});
 	}
 
-	const memory = fullProjection(entries);
+	const memory = fullProjection(entries, undefined, runtime.config.reflectionsPoolMaxTokens);
 	const priorReflections = memory.reflections.map(reflectionToSummaryLine);
 	const priorObservations = memory.observations.map(observationToSummaryLine);
 
@@ -389,6 +409,10 @@ async function runReflectorStage(
 
 	const observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
 	if (!observationCoverageId) return { outcome: "continue", sameRunReflections: [] };
+	if (!observationsAdvancedPastReflection(entries)) {
+		debugLog("reflector.no_new_observations", { observationCoverageId });
+		return { outcome: "continue", sameRunReflections: [] };
+	}
 
 	if (shouldNotifyWorker(runtime, ctx)) ctx.ui?.notify(
 		`Observational memory: reflector running (~${reflectionTokens.toLocaleString()} tokens)`,
@@ -397,13 +421,19 @@ async function runReflectorStage(
 	const resolved = await resolveModel("reflector");
 	if (!resolved) return { outcome: "abort", sameRunReflections: [] };
 
-	const folded = foldLedger(entries);
+	try {
+		await runReflectionConsolidationRounds(pi, runtime, ctx, resolved, observationCoverageId);
+	} catch (error) {
+		debugLog("reflection_consolidator.error", { errorMessage: error instanceof Error ? error.message : String(error) });
+	}
+
+	const folded = foldLedger(ctx.sessionManager.getBranch() as Entry[], { reflectionsPoolMaxTokens: runtime.config.reflectionsPoolMaxTokens });
 	const reflections = await runReflector({
 		model: resolved.model as any,
 		apiKey: resolved.apiKey,
 		headers: resolved.headers,
 		env: resolved.env,
-		reflections: folded.reflections,
+		reflections: folded.activeReflections,
 		observations: folded.activeObservations,
 		maxTurns: runtime.config.agentMaxTurns,
 		maxOutputTokens: runtime.config.agentMaxTokens,
@@ -420,6 +450,55 @@ async function runReflectorStage(
 		sameRunReflections: reflections,
 		effectiveReflectionCoverageId: data.coversUpToId,
 	};
+}
+
+/**
+ * Keep unsuperseded reflections within `reflectionsPoolMaxTokens`: rewrite the
+ * oldest batch into ~half the budget until under it. Works on the uncapped set so
+ * reflections trimmed by the hard cap still get merged. Each accepted round
+ * strictly shrinks the set; the round cap only bounds a long legacy backlog.
+ */
+async function runReflectionConsolidationRounds(
+	pi: ExtensionAPI,
+	runtime: Runtime,
+	ctx: ConsolidationCtx,
+	resolved: ResolvedModel,
+	observationCoverageId: string,
+): Promise<void> {
+	const maxTokens = runtime.config.reflectionsPoolMaxTokens;
+	const targetTokens = Math.floor(maxTokens / 2);
+	let maxRounds: number | undefined;
+	for (let round = 0; maxRounds === undefined || round < maxRounds; round++) {
+		const folded = foldLedger(ctx.sessionManager.getBranch() as Entry[]);
+		const active = folded.reflections.filter((reflection) => !folded.supersededReflectionIds.has(reflection.id));
+		const activeTokens = tokenSum(active);
+		if (activeTokens <= maxTokens) return;
+		maxRounds ??= Math.ceil((activeTokens - maxTokens) / Math.max(1, maxTokens - targetTokens)) + 1;
+
+		const batch = oldestReflectionBatch(active, maxTokens);
+		debugLog("reflection_consolidator.start", { round, activeTokens, maxTokens, targetTokens, batchCount: batch.length, batchTokens: tokenSum(batch) });
+		if (shouldNotifyWorker(runtime, ctx)) ctx.ui?.notify(
+			`Observational memory: consolidating ${batch.length} reflections (~${activeTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens)`,
+			"info",
+		);
+		const result = await runReflectionConsolidator({
+			model: resolved.model as any,
+			apiKey: resolved.apiKey,
+			headers: resolved.headers,
+			env: resolved.env,
+			reflections: batch,
+			targetTokens,
+			maxTurns: runtime.config.agentMaxTurns,
+			maxOutputTokens: runtime.config.agentMaxTokens,
+			thinkingLevel: runtime.config.model?.thinking ?? "low",
+			modelRegistry: ctx.modelRegistry,
+		});
+		const data = result
+			? buildReflectionsConsolidatedData(result.reflections, result.supersededReflectionIds, observationCoverageId)
+			: undefined;
+		if (!data) return;
+		appendEntry(pi, OM_REFLECTIONS_CONSOLIDATED, data);
+	}
 }
 
 async function runDropperStage(
@@ -439,7 +518,7 @@ async function runDropperStage(
 	const observationCoverageId = latestCoverageMarkerId(entries, OM_OBSERVATIONS_RECORDED);
 	if (!observationCoverageId) return "continue";
 
-	const folded = foldLedger(entries);
+	const folded = foldLedger(entries, { reflectionsPoolMaxTokens: runtime.config.reflectionsPoolMaxTokens });
 	const metrics = observationPoolMetrics(folded.activeObservations, runtime.config.observationsPoolTargetTokens);
 	if (!metrics.ready) {
 		debugLog("dropper.not_ready", {
@@ -472,7 +551,7 @@ async function runDropperStage(
 	const resolved = await resolveModel("dropper");
 	if (!resolved) return "abort";
 
-	const reflectionsForDropper = mergeReflections(folded.reflections, sameRunReflections);
+	const reflectionsForDropper = mergeReflections(folded.activeReflections, sameRunReflections);
 	const droppedIds = await runDropper({
 		model: resolved.model as any,
 		apiKey: resolved.apiKey,
