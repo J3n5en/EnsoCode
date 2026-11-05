@@ -1,5 +1,4 @@
 import { type PlanState, splitPlanPrefix } from '@shared/planMode';
-import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { truncatedProjectionHead } from '@shared/projectedText';
 import {
   type AgentSessionCustomEntry,
@@ -15,6 +14,7 @@ import {
   type SubagentInfo,
   shouldApplyDispatchMainEvent,
 } from '@shared/types/agent';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { extractEdits, extractWriteContent } from './timeline';
 
 /**

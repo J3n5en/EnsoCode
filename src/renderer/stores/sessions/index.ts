@@ -16,7 +16,6 @@ import {
   planPhase,
   splitPlanPrefix,
 } from '@shared/planMode';
-import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
   ApprovalMode,
@@ -41,6 +40,7 @@ import type {
   WorkspaceBranchSwitchResult,
   WorktreeStatus,
 } from '@shared/types/worktree';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 // 纯逻辑模块(仅类型级依赖),store 引用不破坏 node 环境测试
 import {
   cleanTitleSummarySource,
@@ -537,11 +537,11 @@ function userMessageRawText(message: ProjectedMessage): string {
   if (message.role !== 'user') return '';
   return splitPlanPrefix(
     splitUnattendedPrefix(
-    message.content
-      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-      .map((part) => part.text)
-      .join(' ')
-      .trim()
+      message.content
+        .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+        .map((part) => part.text)
+        .join(' ')
+        .trim()
     ).rest
   ).rest;
 }

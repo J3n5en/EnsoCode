@@ -15,7 +15,6 @@ import {
 } from '@shared/pair/headlessQueue';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { splitPlanPrefix } from '@shared/planMode';
-import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import {
   hasLiveGenerationWork,
   nextStallWatchAction,
@@ -30,6 +29,7 @@ import type {
   TitleSummaryInput,
 } from '@shared/types/agent';
 import type { PairCreatedSession, PairQueueAction, PairSessionConfig } from '@shared/types/pair';
+import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { patchConversationsState, readPersistedConversation } from '../ipc/settings';
 import { getPairCatalog, getPairProjects, mutatePairCatalog } from './pairHost';
 
@@ -510,14 +510,14 @@ function titleFromFirstMessage(sessionId: string, content: ReadonlyArray<unknown
   }
   const raw = splitPlanPrefix(
     splitUnattendedPrefix(
-    content
-      .flatMap((part) =>
-        part && typeof part === 'object' && (part as { type?: unknown }).type === 'text'
-          ? [String((part as { text?: unknown }).text ?? '')]
-          : []
-      )
-      .join(' ')
-      .trim()
+      content
+        .flatMap((part) =>
+          part && typeof part === 'object' && (part as { type?: unknown }).type === 'text'
+            ? [String((part as { text?: unknown }).text ?? '')]
+            : []
+        )
+        .join(' ')
+        .trim()
     ).rest
   ).rest;
   if (!raw) return;
