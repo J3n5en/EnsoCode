@@ -166,6 +166,7 @@ vi.mock('./capabilities', () => ({
     persistedConversation: mocks.persistedConversation,
     coworkerOf: mocks.coworkerOf,
     sessionFile: mocks.sessionFile,
+    isAlive: vi.fn(() => false),
   },
   capabilityGateway: {
     registerInvocation: vi.fn(() => true),
@@ -788,6 +789,36 @@ describe('agent IPC Main identity boundary', () => {
         code: 'not-found',
       });
       expect(mocks.restoreJournal).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('子运行目录', () => {
+    const parentId = '11111111-1111-4111-8111-111111111111';
+    const list = (request: unknown) =>
+      mocks.handlers.get(IPC_CHANNELS.AGENT_CHILD_RUNS_LIST)?.(event, request);
+    const readRun = (request: unknown) =>
+      mocks.handlers.get(IPC_CHANNELS.AGENT_CHILD_RUN_READ)?.(event, request);
+
+    it('未登记的 childId 返回 not-found，且不读 journal', async () => {
+      await expect(
+        readRun({ parentConversationId: parentId, childId: `${parentId}::cw-missing` })
+      ).resolves.toMatchObject({ ok: false, code: 'not-found' });
+      expect(mocks.restoreJournal).not.toHaveBeenCalled();
+    });
+
+    it('非法入参拒绝', async () => {
+      await expect(list(null)).resolves.toMatchObject({ ok: false });
+      await expect(list({ parentConversationId: '../etc' })).resolves.toMatchObject({ ok: false });
+      await expect(list({ parentConversationId: 'origin' })).resolves.toMatchObject({ ok: false });
+      await expect(
+        readRun({ parentConversationId: 'origin', childId: 'origin::cw-a' })
+      ).resolves.toMatchObject({ ok: false });
+      await expect(readRun({ parentConversationId: parentId })).resolves.toMatchObject({
+        ok: false,
+      });
+      await expect(readRun({ parentConversationId: parentId, childId: 1 })).resolves.toMatchObject({
+        ok: false,
+      });
     });
   });
 

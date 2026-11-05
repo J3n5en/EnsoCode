@@ -512,6 +512,12 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_CHILD_HISTORY_READ: excluded(
     'Read-only replay of an ended child safe journal; no product capability, no execution rights.'
   ),
+  AGENT_CHILD_RUNS_LIST: excluded(
+    'Read-only list of a parent conversation child runs; summaries only, no paths, no execution rights.'
+  ),
+  AGENT_CHILD_RUN_READ: excluded(
+    'Read-only replay of one registered child run; path stays in Main, no execution rights.'
+  ),
   AGENT_CONVERSATION_RELOAD: excluded(
     'Manual read-only reload of a conversation (live snapshot or safe journal); no spawn, no execution rights.'
   ),

@@ -176,6 +176,10 @@ export const IPC_CHANNELS = {
   AGENT_SNAPSHOT: 'agent:snapshot',
   /** 已结束 child 的 safe journal 只读回放（路径由 Main 推导，请求只带 conversationId） */
   AGENT_CHILD_HISTORY_READ: 'agent:child-history-read',
+  /** 父会话的子运行目录（只回摘要，不回路径） */
+  AGENT_CHILD_RUNS_LIST: 'agent:child-runs-list',
+  /** 子运行只读回放。pi jsonl 分页，safe journal 整页投影。路径由 Main 从目录推导 */
+  AGENT_CHILD_RUN_READ: 'agent:child-run-read',
   /** 手动「重新读取会话」：Main 选来源（worker 活快照 / safe journal），只读不 spawn */
   AGENT_CONVERSATION_RELOAD: 'agent:conversation-reload',
   /** 父会话 jsonl 尾窗/分页只读（不 spawn）；路径由 Main 从已登记 sessionFile 推导 */
