@@ -8,6 +8,36 @@ import { type SettingsState, useSettingsStore } from '@/stores/settings';
 /** 按此顺序追加到 <head> 末尾，后者覆盖前者 */
 const STYLE_IDS = ['enso-theme-tokens', 'enso-theme-css', 'enso-user-css'] as const;
 
+/** 上次实际生效的主题：完整模式经隧道读设置与插件主题要好几秒，读完前先用它，免得先闪回 enso */
+const SNAPSHOT_KEY = 'enso-theme-snapshot';
+
+interface ThemeSnapshot {
+  id: string;
+  tokens: string;
+  css: string;
+}
+
+function readSnapshot(): ThemeSnapshot | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(SNAPSHOT_KEY) ?? 'null');
+    return typeof value?.id === 'string' &&
+      typeof value.tokens === 'string' &&
+      typeof value.css === 'string'
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSnapshot(snapshot: ThemeSnapshot): void {
+  try {
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {}
+}
+
+let showingSnapshot = false;
+
 function writeStyle(id: (typeof STYLE_IDS)[number], css: string): void {
   if (!document.getElementById(STYLE_IDS[0])) {
     for (const styleId of STYLE_IDS) {
@@ -27,19 +57,38 @@ export function availableThemes(
   return pluginThemes ? [...BUILTIN_THEMES, ...pluginThemes] : BUILTIN_THEMES;
 }
 
+function writeTheme({ id, tokens, css }: ThemeSnapshot): void {
+  writeStyle('enso-theme-tokens', tokens);
+  writeStyle('enso-theme-css', css);
+  document.documentElement.dataset.theme = id;
+}
+
 function applyTheme({ themeId, accentColor }: SettingsState): void {
+  const hydrated = useSettingsStore.persist.hasHydrated();
+  // 水合前是默认值，快照在显示就先不动
+  if (showingSnapshot && !hydrated) return;
   const pluginThemes = usePluginThemesStore.getState().themes;
   // 插件主题还在读：保持上一个主题，免得先闪回 enso
   if (pluginThemes === null && !BUILTIN_THEMES.some((theme) => theme.id === themeId)) return;
   const theme = resolveTheme(themeId, availableThemes(pluginThemes));
-  writeStyle('enso-theme-tokens', themeTokensCss(theme, accentColor));
-  writeStyle('enso-theme-css', theme.css ?? '');
-  document.documentElement.dataset.theme = theme.id;
+  const snapshot = {
+    id: theme.id,
+    tokens: themeTokensCss(theme, accentColor),
+    css: theme.css ?? '',
+  };
+  writeTheme(snapshot);
+  if (hydrated) writeSnapshot(snapshot);
 }
 
 /** 窗口入口在首次渲染前调用，水合完成或设置变更后跟随重写 */
 export function installThemeStyles(): void {
+  const snapshot = useSettingsStore.persist.hasHydrated() ? null : readSnapshot();
+  if (snapshot) {
+    writeTheme(snapshot);
+    showingSnapshot = true;
+  }
   applyTheme(useSettingsStore.getState());
+  useSettingsStore.persist.onFinishHydration((state) => applyTheme(state));
   useSettingsStore.subscribe((state, prev) => {
     if (state.themeId !== prev.themeId || state.accentColor !== prev.accentColor) {
       applyTheme(state);
