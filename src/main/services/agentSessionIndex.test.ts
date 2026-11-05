@@ -1,6 +1,10 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
 import { describe, expect, it } from 'vitest';
 import { AgentSessionIndex, MAX_ORIGIN_COWORKERS } from './agentSessionIndex';
+import { listChildRuns } from './childRunCatalog';
 
 const parent: SessionIdentity = {
   sessionId: 'origin',
@@ -448,5 +452,126 @@ describe('AgentSessionIndex generation and reservation authority', () => {
       })
     ).toBe(true);
     expect(sessions.isReady(replacement)).toBe(true);
+  });
+
+  it('child-ready 写入子运行目录，同一 child 再次 ready 不重复', () => {
+    const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-child-ready-'));
+    const parentId = '11111111-1111-4111-8111-111111111111';
+    const root: SessionIdentity = {
+      sessionId: parentId,
+      generation: '22222222-2222-4222-8222-222222222222',
+    };
+    const file = path.join(sessionDir, '2026-08-29T00-00-00-000Z_abc.jsonl');
+    const open = () =>
+      new AgentSessionIndex({
+        readSettings: () => null,
+        randomUuid: uuids(),
+        sessionDir,
+      });
+    try {
+      const first = open();
+      first.prepareParent(root);
+      first.observe({
+        type: 'parent-ready',
+        identity: root,
+        seq: 1,
+        sessionFile: path.join(sessionDir, 'parent.jsonl'),
+        model: { providerId: 'p', modelId: 'm' },
+      });
+      const reserved = first.reserveChild(root, 'builtin:scout', 'Scout', 'request-1');
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) return;
+      expect(
+        first.observe({ ...readyChild(reserved.reservation.child), sessionFile: file, seq: 1 })
+      ).toBe(true);
+      expect(listChildRuns(sessionDir, parentId)).toEqual([
+        expect.objectContaining({
+          childId: reserved.reservation.child.sessionId,
+          name: reserved.reservation.child.instanceName,
+          agentType: 'builtin:scout',
+          file: path.basename(file),
+        }),
+      ]);
+
+      const second = open();
+      second.prepareParent(root);
+      const resumed = second.reserveChildResume(root, reserved.reservation.metadata, 'resume-1');
+      expect(resumed.ok).toBe(true);
+      if (!resumed.ok) return;
+      expect(
+        second.observe({ ...readyChild(resumed.reservation.child), sessionFile: file, seq: 1 })
+      ).toBe(true);
+      const lines = readFileSync(path.join(sessionDir, 'child-runs', `${parentId}.jsonl`), 'utf8')
+        .trim()
+        .split('\n');
+      expect(lines).toHaveLength(1);
+      expect(listChildRuns(sessionDir, parentId)).toHaveLength(1);
+    } finally {
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
+  });
+
+  it('带 sessionFile 的 coworker-update 写入同一份目录，重复更新不追加', () => {
+    const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-coworker-run-'));
+    const parentId = '11111111-1111-4111-8111-111111111111';
+    const root: SessionIdentity = {
+      sessionId: parentId,
+      generation: '22222222-2222-4222-8222-222222222222',
+    };
+    const childId = `${parentId}::cw-bob`;
+    const file = path.join(sessionDir, '2026-08-29T00-00-00-000Z_bob.jsonl');
+    const sessions = new AgentSessionIndex({
+      readSettings: () => null,
+      randomUuid: uuids(),
+      sessionDir,
+    });
+    try {
+      sessions.prepareParent(root);
+      const coworker = {
+        id: childId,
+        name: 'bob',
+        agentType: 'worker',
+        status: 'idle' as const,
+        sessionFile: file,
+        createdAt: 0,
+      };
+      expect(
+        sessions.observe({
+          type: 'coworker-update',
+          identity: root,
+          seq: 1,
+          coworker,
+          coworkerIdentity: {
+            sessionId: childId,
+            generation: '44444444-4444-4444-8444-444444444444',
+          },
+        })
+      ).toBe(true);
+      expect(listChildRuns(sessionDir, parentId)).toEqual([
+        expect.objectContaining({
+          childId,
+          name: 'bob',
+          agentType: 'worker',
+          file: '2026-08-29T00-00-00-000Z_bob.jsonl',
+        }),
+      ]);
+      sessions.observe({
+        type: 'coworker-update',
+        identity: root,
+        seq: 2,
+        coworker,
+        coworkerIdentity: {
+          sessionId: childId,
+          generation: '44444444-4444-4444-8444-444444444444',
+        },
+      });
+      expect(
+        readFileSync(path.join(sessionDir, 'child-runs', `${parentId}.jsonl`), 'utf8')
+          .trim()
+          .split('\n')
+      ).toHaveLength(1);
+    } finally {
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
   });
 });
