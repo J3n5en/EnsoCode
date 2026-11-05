@@ -30,10 +30,9 @@ import { NavRail } from './NavRail';
 import {
   isCompactRow,
   isToolStepRow,
+  ReplyHeader,
   RetryTurnButton,
-  SpeakerHeader,
   TimelineRow,
-  TurnMeta,
 } from './TimelineRow';
 import { nextTimelineReveal } from './timelineReveal';
 import {
@@ -41,7 +40,7 @@ import {
   type TimelineRowAnchor,
   virtuosoScrollIndex,
 } from './timelineRowOrigin';
-import { REPLY_ROW_KINDS, turnMetaTails } from './turnMeta';
+import { REPLY_ROW_KINDS } from './turnMeta';
 import { WelcomeSuggestions } from './WelcomeSuggestions';
 
 /** 消息列/输入区共用的列：阶梯 max-w + 水平 padding。padding 必须在列上而不是 @container 上，否则两侧查询宽度差 2rem，会在断点附近上下错位。宽模式由 globals.css 去掉 max-w。 */
@@ -228,7 +227,6 @@ export function MessageTimeline({
       turnOverrides,
     ]
   );
-  const metaTails = useMemo(() => turnMetaTails(folded, running), [folded, running]);
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
   const foldMotionRef = useRef({
     state: EMPTY_FOLD_MOTION,
@@ -503,8 +501,8 @@ export function MessageTimeline({
   };
   const renderRow = (item: TimelineItem, index: number) => {
     const prev = folded[index - 1];
-    const replyStart = prev?.kind === 'user' && !prev.collapsed && REPLY_ROW_KINDS.has(item.kind);
-    const tailOwner = metaTails.get(item.key);
+    const replyHead =
+      prev?.kind === 'user' && !prev.collapsed && REPLY_ROW_KINDS.has(item.kind) ? prev : undefined;
     const now = Date.now();
     const collapse = foldMotionRef.current.collapse.get(item.key);
     const folding = collapse && now - collapse.at < FOLD_MOTION_MS ? collapse : undefined;
@@ -530,17 +528,16 @@ export function MessageTimeline({
           '[overflow-wrap:anywhere]'
         )}
       >
-        {replyStart && <SpeakerHeader />}
+        {replyHead && (
+          <ReplyHeader
+            model={replyHead.replyModel}
+            at={replyHead.replyAt}
+            privacyMask={replyHead.replyPrivacyMask}
+          />
+        )}
         <RowErrorBoundary itemKey={item.key}>
           <TimelineRow item={item} onToggleGroup={toggleGroup} onToggleTurn={setTurnCollapsed} />
         </RowErrorBoundary>
-        {tailOwner && (
-          <TurnMeta
-            model={tailOwner.replyModel}
-            at={tailOwner.replyAt}
-            privacyMask={tailOwner.replyPrivacyMask}
-          />
-        )}
       </div>
     );
   };

@@ -731,37 +731,8 @@ export function isCompactRow(item: TimelineItem): boolean {
 /** 手机 PWA 没有 subtle-foreground token，回落到 muted-foreground */
 const SUBTLE_TEXT = 'text-[color:var(--subtle-foreground,var(--muted-foreground))]';
 
-/** Bot 发言人身份头：挂在本轮首个 assistant 行之上；普通会话不显示 */
-export function SpeakerHeader() {
-  const speaker = useChatHost()?.speaker;
-  if (!speaker) return null;
-  return (
-    <div className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none">
-      {speaker.image ? (
-        <img
-          src={speaker.image}
-          alt=""
-          draggable={false}
-          className="size-[22px] shrink-0 rounded-full object-cover"
-          style={{ backgroundColor: speaker.color }}
-        />
-      ) : (
-        <span
-          className="flex size-[22px] shrink-0 items-center justify-center rounded-full font-semibold text-[11px] text-white"
-          style={{ backgroundColor: speaker.color }}
-        >
-          {[...speaker.name.trim()][0]?.toUpperCase() ?? '?'}
-        </span>
-      )}
-      <span className="shrink-0 truncate text-[13px] font-semibold text-foreground">
-        {speaker.name}
-      </span>
-    </div>
-  );
-}
-
-/** 回合末尾的淡色元信息：本轮模型 + 回复时间 */
-export function TurnMeta({
+/** 每轮回复的头部：Bot 发言人身份 + 本轮模型 + 回复时间，挂在本轮首个回复行之上，运行中即可见 */
+export function ReplyHeader({
   model,
   at,
   privacyMask,
@@ -770,16 +741,34 @@ export function TurnMeta({
   at?: number;
   privacyMask?: MaskReport;
 }) {
+  const speaker = useChatHost()?.speaker;
+  const meta = [model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ');
+  if (!speaker && !meta && !privacyMask) return null;
   return (
-    <div
-      className={cn(
-        'mt-1.5 flex h-5 min-w-0 items-center gap-1.5 text-[11.5px] select-none',
-        SUBTLE_TEXT
+    <div className="mb-2 flex h-6 min-w-0 items-center gap-2 text-xs select-none">
+      {speaker &&
+        (speaker.image ? (
+          <img
+            src={speaker.image}
+            alt=""
+            draggable={false}
+            className="size-[22px] shrink-0 rounded-full object-cover"
+            style={{ backgroundColor: speaker.color }}
+          />
+        ) : (
+          <span
+            className="flex size-[22px] shrink-0 items-center justify-center rounded-full font-semibold text-[11px] text-white"
+            style={{ backgroundColor: speaker.color }}
+          >
+            {[...speaker.name.trim()][0]?.toUpperCase() ?? '?'}
+          </span>
+        ))}
+      {speaker && (
+        <span className="shrink-0 truncate text-[13px] font-semibold text-foreground">
+          {speaker.name}
+        </span>
       )}
-    >
-      <span className="min-w-0 truncate">
-        {[model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ')}
-      </span>
+      {meta && <span className={cn('min-w-0 truncate text-[11.5px]', SUBTLE_TEXT)}>{meta}</span>}
       {privacyMask && <PrivacyMaskBadge report={privacyMask} />}
     </div>
   );
