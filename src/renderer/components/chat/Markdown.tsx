@@ -546,10 +546,14 @@ export const markdownComponents: Components = {
   p: ({ children }) => <Paragraph className={P_CLASS}>{children}</Paragraph>,
   a: MarkdownAnchor,
   ul: ({ children }) => (
-    <ul className="my-2 list-disc pl-5 space-y-1 marker:text-muted-foreground">{children}</ul>
+    <ul className="my-2 list-disc space-y-0.5 pl-5 text-[12px] leading-[1.5] marker:text-muted-foreground [&_p]:leading-[1.5]">
+      {children}
+    </ul>
   ),
   ol: ({ children }) => (
-    <ol className="my-2 list-decimal pl-5 space-y-1 marker:text-muted-foreground">{children}</ol>
+    <ol className="my-2 list-decimal space-y-0.5 pl-5 text-[12px] leading-[1.5] marker:text-muted-foreground [&_p]:leading-[1.5]">
+      {children}
+    </ol>
   ),
   h1: ({ children }) => <h1 className={H12_CLASS}>{children}</h1>,
   h2: ({ children }) => <h2 className={H12_CLASS}>{children}</h2>,
@@ -647,7 +651,7 @@ export const markdownComponents: Components = {
     const raw = start !== undefined && end !== undefined ? text.slice(start, end) : null;
     return (
       <div className="group/table relative my-2 min-w-0 max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
-        <table className="w-max min-w-full border-collapse text-xs [overflow-wrap:normal]">
+        <table className="w-max min-w-full border-collapse text-[12px] leading-[1.5] [overflow-wrap:normal]">
           {children}
         </table>
         {raw && !streaming && (
