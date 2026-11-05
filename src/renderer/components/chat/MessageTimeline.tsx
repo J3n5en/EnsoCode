@@ -322,6 +322,10 @@ export function MessageTimeline({
     };
 
     const settle = () => {
+      if (userScrollingRef.current) {
+        abort();
+        return;
+      }
       if (!bound && scrollerRef.current) {
         bound = scrollerRef.current;
         bound.addEventListener('touchstart', abort, { passive: true, once: true });
@@ -350,6 +354,30 @@ export function MessageTimeline({
     },
     []
   );
+
+  /** 用户滚动意图（滚轮/触摸/键盘/拖滚动条）：只有这期间的离底才算用户上滚，两条渲染路径共用 */
+  const holdUserScroll = () => {
+    userScrollingRef.current = true;
+    window.clearTimeout(userScrollTimerRef.current);
+  };
+  const releaseUserScroll = () => {
+    window.clearTimeout(userScrollTimerRef.current);
+    userScrollTimerRef.current = window.setTimeout(() => {
+      userScrollingRef.current = false;
+    }, 400);
+  };
+  const markUserScroll = () => {
+    holdUserScroll();
+    releaseUserScroll();
+  };
+  /** 程序跳转（导航/搜索）主动离底：先解除跟随，否则离底会被当成内容收缩拉回底部 */
+  const releaseFollow = () => {
+    cancelAnimationFrame(settleRef.current);
+    cancelAnimationFrame(followSettleRef.current);
+    pinningRef.current = false;
+    atBottomRef.current = false;
+    setAtBottom(false);
+  };
 
   /*
    * 全量渲染下的跟随：内容常在提交之后才继续长高（markdown 渲染、代码高亮、图片），
@@ -419,6 +447,7 @@ export function MessageTimeline({
   /** 目标藏在折叠轮次里：先展开，等 folded 重算后再滚动（同步滚动拿到的是旧 folded / 旧 DOM） */
   const pendingJumpRef = useRef<string | null>(null);
   const jumpTo = (key: string) => {
+    releaseFollow();
     if (foldedIndexOf(key) >= 0) {
       pendingJumpRef.current = null;
       scrollToFoldedKey(key);
@@ -602,7 +631,20 @@ export function MessageTimeline({
 
   return (
     <ChatSearchHighlightContext.Provider value={searchHighlight}>
-      <div data-enso="timeline" className="@container relative min-h-0 flex-1">
+      <div
+        data-enso="timeline"
+        className="@container relative min-h-0 flex-1"
+        onWheel={markUserScroll}
+        onKeyDown={markUserScroll}
+        onTouchStart={holdUserScroll}
+        onTouchEnd={releaseUserScroll}
+        onPointerDown={(e) => {
+          // 只认滚动条拖拽（落点即滚动容器本身）；点行内按钮不算滚动意图
+          if (e.target !== scrollerRef.current) return;
+          holdUserScroll();
+          window.addEventListener('pointerup', releaseUserScroll, { once: true });
+        }}
+      >
         <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
         {items.length === 0 && !busy ? (
           <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 overflow-y-auto px-4 text-center">
@@ -665,23 +707,6 @@ export function MessageTimeline({
             ref={(el) => {
               scrollerRef.current = el;
             }}
-            onTouchStart={() => {
-              userScrollingRef.current = true;
-              window.clearTimeout(userScrollTimerRef.current);
-            }}
-            onTouchEnd={() => {
-              window.clearTimeout(userScrollTimerRef.current);
-              userScrollTimerRef.current = window.setTimeout(() => {
-                userScrollingRef.current = false;
-              }, 400);
-            }}
-            onWheel={() => {
-              userScrollingRef.current = true;
-              window.clearTimeout(userScrollTimerRef.current);
-              userScrollTimerRef.current = window.setTimeout(() => {
-                userScrollingRef.current = false;
-              }, 400);
-            }}
             onScroll={(e) => {
               const el = e.currentTarget;
               if (pinningRef.current) {
@@ -735,6 +760,15 @@ export function MessageTimeline({
             followOutput={followChatOutput}
             atBottomThreshold={AT_BOTTOM_THRESHOLD}
             atBottomStateChange={(value) => {
+              /*
+               * 非用户滚动导致的离底 = 内容高度变化：流式思考单次增高超过阈值，或思考收起后
+               * 浏览器钳位 scrollTop、Virtuoso 再按「上滚」补偿一整段，视口落到本轮开头。
+               * 此前贴底就重新贴回去，不解除跟随。
+               */
+              if (!value && atBottomRef.current && !userScrollingRef.current) {
+                scrollToBottom();
+                return;
+              }
               setAtBottom(value);
               atBottomRef.current = value;
             }}
