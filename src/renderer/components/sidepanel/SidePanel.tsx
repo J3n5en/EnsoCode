@@ -869,8 +869,11 @@ export function SidePanel({
         }}
         className={cn(
           'flex min-h-0 flex-col',
-          // 顶栏态的描边/阴影画在盒外，放宽 4px 裁剪才能和对话卡片底边、右边一致
-          titleRow && !cover ? 'overflow-clip [overflow-clip-margin:4px]' : 'overflow-hidden',
+          // 顶栏态的描边/阴影画在盒外，放宽 4px 裁剪才能和对话卡片底边、右边一致；
+          // 关着时不放宽：dockview 的 .dv-view.visible 会顶掉外层 invisible，内容会从余量里漏出一条
+          titleRow && !cover && open
+            ? 'overflow-clip [overflow-clip-margin:4px]'
+            : 'overflow-hidden',
           // 平时透明让底层挖孔透出 guest；全屏盖在 ChatView 上、收起动画中必须实底
           open && !cover ? 'bg-transparent' : titleRow && !cover ? '' : 'bg-background',
           !cover
