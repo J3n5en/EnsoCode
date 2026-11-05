@@ -9,6 +9,7 @@ import {
 import { Check, ChevronDown, Pencil, Plus, TextSearch, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { type DragPayload, selectorGroupDropId } from '@/components/chat/dragDrop';
+import { indicatorOffset } from '@/components/chat/groupChipIndicator';
 import { Popover, PopoverPopup, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -61,7 +62,12 @@ export function GroupChips({
   const showSearch = searchOpen || query.length > 0;
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLSpanElement>(null);
+  const indicatorRef = useRef<HTMLSpanElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false, overflow: false });
+  // 拖动分组时父组件要跟着重排下划线
+  const { active } = useDndContext();
 
   const selectedGroup = ordered.find((group) => group.id === selectedId);
   const selectedLabel =
@@ -70,8 +76,31 @@ export function GroupChips({
     ? t('Search in {{group}}...', { group: selectedLabel })
     : t('Search conversations...');
 
+  // 下划线不能用按钮的 ::after：滚动容器 overflow 会裁掉伸出底边的部分，
+  // 而它必须盖住底部分割线，底边才和分割线重合。
+  const placeIndicator = useCallback(() => {
+    const row = rowRef.current;
+    const scroll = scrollRef.current;
+    const track = trackRef.current;
+    const indicator = indicatorRef.current;
+    const chip = scroll?.querySelector<HTMLElement>('[data-selected]');
+    if (!row || !scroll || !track || !indicator || !chip || row.offsetParent === null) {
+      if (indicator) indicator.style.width = '0px';
+      return;
+    }
+    const scrollRect = scroll.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const chipRect = chip.getBoundingClientRect();
+    const frame = indicatorOffset(chipRect, scrollRect.left);
+    track.style.left = `${scrollRect.left - rowRect.left}px`;
+    track.style.width = `${scrollRect.width}px`;
+    indicator.style.transform = `translateX(${frame.x}px)`;
+    indicator.style.width = `${frame.width}px`;
+  }, []);
+
   const measure = useCallback(() => {
     const el = scrollRef.current;
+    placeIndicator();
     // 搜索展开时标签条隐藏，宽度为 0，保留上次结果
     if (!el || el.clientWidth === 0) return;
     setEdges((prev) => {
@@ -85,7 +114,7 @@ export function GroupChips({
         ? prev
         : next;
     });
-  }, []);
+  }, [placeIndicator]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -96,6 +125,12 @@ export function GroupChips({
     if (el.firstElementChild) observer.observe(el.firstElementChild);
     return () => observer.disconnect();
   }, [measure]);
+
+  // 选中、展开搜索、拖动分组都会挪动标签，但测量只读 DOM
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 这些值是重测触发信号
+  useLayoutEffect(() => {
+    placeIndicator();
+  }, [placeIndicator, active, selectedId, showSearch, ordered.length]);
 
   // 竖向滚轮转横滑：React 的 onWheel 是 passive，拦不住默认滚动
   useEffect(() => {
@@ -144,7 +179,8 @@ export function GroupChips({
 
   return (
     <div className="group/bar shrink-0">
-      <div className="flex h-9 items-end gap-1.5 px-3.5">
+      {/* 35px + 1px 分割线 = 会话 tab 条 ChromeRow 的 36px；用 px，不随 rem 缩放，两条底线才能接上 */}
+      <div className="relative z-[1] flex h-[35px] items-end gap-1.5 px-3.5">
         {showSearch && (
           <label className="mb-1 flex h-7 min-w-0 flex-1 cursor-text items-center gap-2 rounded-lg border border-transparent bg-foreground/5 pr-0.5 pl-2.5 text-xs text-muted-foreground transition-colors focus-within:border-brand/45">
             <TextSearch className="size-3.5 shrink-0" />
@@ -175,12 +211,18 @@ export function GroupChips({
             </button>
           </label>
         )}
-        <div className={cn('flex min-w-0 flex-1 items-center gap-1.5', showSearch && 'hidden')}>
+        <div
+          ref={rowRef}
+          className={cn(
+            'relative flex min-w-0 flex-1 items-center gap-1.5',
+            showSearch && 'hidden'
+          )}
+        >
           <div
             ref={scrollRef}
             onScroll={measure}
             style={{ maskImage }}
-            className="relative min-w-0 overflow-x-auto [scrollbar-width:none]"
+            className="min-w-0 overflow-x-auto [scrollbar-width:none]"
           >
             <div className="flex w-max gap-3.5">
               <button
@@ -223,6 +265,16 @@ export function GroupChips({
               )}
             </div>
           </div>
+          <span
+            ref={trackRef}
+            aria-hidden
+            className="pointer-events-none absolute -bottom-px z-10 h-[1.5px] overflow-hidden"
+          >
+            <span
+              ref={indicatorRef}
+              className="absolute top-0 left-0 h-full rounded-full bg-foreground"
+            />
+          </span>
           <button
             type="button"
             onClick={onAddGroup}
@@ -257,10 +309,8 @@ export function GroupChips({
 
 function tabClass(selected: boolean, dropping: boolean) {
   return cn(
-    'relative flex shrink-0 items-center whitespace-nowrap pt-1 pb-[7px] text-[0.8929rem] transition-colors',
-    selected
-      ? 'font-medium text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-[1.5px] after:rounded-full after:bg-foreground'
-      : 'text-subtle-foreground hover:text-foreground',
+    'flex shrink-0 items-center whitespace-nowrap pt-1 pb-[7px] text-[0.8929rem] transition-colors',
+    selected ? 'font-medium text-foreground' : 'text-subtle-foreground hover:text-foreground',
     dropping && 'rounded-t-md bg-foreground/[0.075] text-foreground'
   );
 }
