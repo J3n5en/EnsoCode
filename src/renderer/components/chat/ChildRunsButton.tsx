@@ -73,11 +73,12 @@ export function ChildRunsButton({
           }}
         >
           <PopoverTrigger
-            className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex h-6 shrink-0 items-center justify-center gap-1 rounded-full px-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label={t('Subagent history')}
             title={t('Subagent history')}
           >
             <History className="size-3.5" />
+            <span className="text-[11px] tabular-nums leading-none">{items.length}</span>
           </PopoverTrigger>
           <PopoverPopup align="end" className="w-72 [&_[data-slot=popover-viewport]]:p-1">
             <ul className="flex flex-col">
