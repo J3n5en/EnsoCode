@@ -76,6 +76,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   rtkEnabled: { mode: 'portable' },
   computerPreview: { mode: 'excluded', reason: 'macOS-only desktop display preference' },
   computerAllowAllApps: { mode: 'excluded', reason: 'device-local computer control trust' },
+  openLinksInBuiltinBrowser: { mode: 'excluded', reason: 'desktop link-opening preference' },
   editMode: { mode: 'portable' },
   hashlineEditEnabled: { mode: 'excluded', reason: 'legacy read-only edit mode migration' },
   compactStrategy: { mode: 'portable' },

@@ -45,6 +45,9 @@ export const SETTINGS_DATA_COVERAGE = {
   rtkEnabled: excluded('RTK command compression is a desktop session preference.'),
   computerPreview: excluded('Computer picture-in-picture is a desktop display preference.'),
   computerAllowAllApps: excluded('Computer app trust is a device-local security preference.'),
+  openLinksInBuiltinBrowser: excluded(
+    'Chat link opening target is a desktop UI preference, not an Enso capability.'
+  ),
   memoryEmbeddingModel: excluded('Memory embedding model choice is a desktop preference.'),
   memoryEmbeddingAutoDownload: excluded('Memory model download policy is a device preference.'),
   memoryModelIdleMinutes: excluded('Memory model idle unloading policy is a device preference.'),
@@ -200,6 +203,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   setRtkEnabled: excluded('RTK command compression is a desktop session preference.'),
   setComputerPreview: excluded('Computer picture-in-picture is a desktop display preference.'),
   setComputerAllowAllApps: excluded('Computer app trust is a device-local security preference.'),
+  setOpenLinksInBuiltinBrowser: excluded(
+    'Chat link opening target is a desktop UI preference, not an Enso capability.'
+  ),
   setProtectedActionsInCode: excluded(
     'Protected-action confirmation floor for Code sessions; desktop safety preference.'
   ),

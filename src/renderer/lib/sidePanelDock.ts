@@ -229,6 +229,17 @@ export function addSidePanelBrowser(opts?: {
   });
 }
 
+/** 聊天网页链接：在会话所属 dock 新开内置浏览器 tab；会话不存在返回 null，由调用方回落系统浏览器 */
+export function openSidePanelBrowserUrl(
+  conversationId: string,
+  url: string
+): Promise<{ ok: boolean; error?: string }> | null {
+  if (!useSessionsStore.getState().conversations[conversationId]) return null;
+  const tabId = `browser:${crypto.randomUUID()}`;
+  addSidePanelBrowser({ conversationId, tabId, title: new URL(url).host });
+  return window.electronAPI.browser.navigate(tabId, conversationId, url);
+}
+
 export function addSidePanelBtw(opts?: { title?: string }): void {
   const active = activeDock();
   if (!active) return;

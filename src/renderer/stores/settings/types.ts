@@ -142,6 +142,8 @@ export interface SettingsState {
   computerPreview: boolean;
   /** computer 操作任何 app 都不再询问（macOS），缺省关 */
   computerAllowAllApps: boolean;
+  /** 聊天网页链接默认在内置浏览器打开（需启用 browser 工具），Cmd/Ctrl+点击走系统浏览器 */
+  openLinksInBuiltinBrowser: boolean;
 
   /** Code 会话也启用受保护动作底线（Bot 会话恒开）；缺省关，新建或冷恢复会话生效。 */
   protectedActionsInCode: boolean;
@@ -383,6 +385,7 @@ export interface SettingsState {
   setRtkEnabled: (value: boolean) => void;
   setComputerPreview: (value: boolean) => void;
   setComputerAllowAllApps: (value: boolean) => void;
+  setOpenLinksInBuiltinBrowser: (value: boolean) => void;
   setProtectedActionsInCode: (value: boolean) => void;
   setDcgEnabled: (value: boolean) => void;
   setMemoryEmbeddingModel: (value: string) => void;

@@ -12,12 +12,18 @@ const harness = vi.hoisted(() => ({
   revealExternal: vi.fn(),
   readImage: vi.fn(),
   openSidePanelFile: vi.fn(),
+  openSidePanelBrowserUrl: vi.fn(),
   toast: vi.fn(),
   contextMenuOpen: [] as ContextMenuOpen,
-  projects: [] as { id: string; kind: string }[],
+  projects: [] as { id: string; kind: string; disabledBuiltinTools?: string[] }[],
+  disabledBuiltinTools: [] as string[],
+  openLinksInBuiltinBrowser: true,
 }));
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
-vi.mock('@/lib/sidePanelDock', () => ({ openSidePanelFile: harness.openSidePanelFile }));
+vi.mock('@/lib/sidePanelDock', () => ({
+  openSidePanelFile: harness.openSidePanelFile,
+  openSidePanelBrowserUrl: harness.openSidePanelBrowserUrl,
+}));
 vi.mock('@/components/ui/toast', () => ({ addToast: harness.toast }));
 vi.mock('./CodeBlock', () => ({ CodeBlock: () => null }));
 vi.mock('./MermaidRenderer', () => ({ MermaidRenderer: () => null }));
@@ -25,9 +31,17 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: (
     selector: (state: {
       contextMenuOpen: ContextMenuOpen;
-      projects: { id: string; kind: string }[];
+      projects: { id: string; kind: string; disabledBuiltinTools?: string[] }[];
+      disabledBuiltinTools: string[];
+      openLinksInBuiltinBrowser: boolean;
     }) => unknown
-  ) => selector({ contextMenuOpen: harness.contextMenuOpen, projects: harness.projects }),
+  ) =>
+    selector({
+      contextMenuOpen: harness.contextMenuOpen,
+      projects: harness.projects,
+      disabledBuiltinTools: harness.disabledBuiltinTools,
+      openLinksInBuiltinBrowser: harness.openLinksInBuiltinBrowser,
+    }),
 }));
 vi.mock('@/components/ui/context-menu', async () => {
   const { cloneElement, createContext, useContext, useState } = await import('react');
@@ -85,12 +99,13 @@ async function render(text: string, authorized = true) {
   );
 }
 
-async function click(selector: string, type = 'click') {
+async function click(selector: string, type = 'click', init: Record<string, boolean> = {}) {
   const element = container.querySelector(selector);
   expect(element).not.toBeNull();
   let prevented = false;
   await act(async () => {
     const event = new window.Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, init);
     element?.dispatchEvent(event);
     prevented = event.defaultPrevented;
   });
@@ -126,6 +141,9 @@ beforeEach(() => {
     { id: 'vscode', target: 'vscode', enabled: true },
   ];
   harness.projects = [];
+  harness.disabledBuiltinTools = [];
+  harness.openLinksInBuiltinBrowser = true;
+  harness.openSidePanelBrowserUrl.mockResolvedValue({ ok: true });
   harness.readImage.mockResolvedValue({ ok: true, dataUrl: 'data:image/png;base64,AAAA' });
 });
 
@@ -293,16 +311,46 @@ describe('聊天文件链接的打开方式', () => {
     expect(harness.open).not.toHaveBeenCalled();
   });
 
-  it('http 链接维持外链，无上下文本地链接不导航且不展示 reveal 按钮', async () => {
+  it('关闭内置浏览器打开链接时 http 链接维持外链，无上下文本地链接不导航且不展示 reveal 按钮', async () => {
+    harness.openLinksInBuiltinBrowser = false;
     await render('[web](https://example.com)');
     expect(container.querySelector('a')?.getAttribute('target')).toBe('_blank');
     expect(await click('a')).toBe(false);
+    expect(harness.openSidePanelBrowserUrl).not.toHaveBeenCalled();
     expect(container.querySelector('button')).toBeNull();
     await render('[local](src/a.ts)', false);
     expect(await click('a')).toBe(true);
     expect(container.querySelector('a')?.getAttribute('href')).toBeNull();
     expect(container.querySelector('button')).toBeNull();
     expect(harness.open).not.toHaveBeenCalled();
+  });
+
+  it('启用内置浏览器时网页链接默认在会话侧栏浏览器打开，并提示修饰键点击走外部浏览器', async () => {
+    await render('[web](https://example.com/a)');
+    expect(container.querySelector('a')?.getAttribute('title')).toBe(
+      '{{key}}+Click to open in external browser'
+    );
+    expect(await click('a')).toBe(true);
+    expect(harness.openSidePanelBrowserUrl).toHaveBeenCalledWith('child', 'https://example.com/a');
+  });
+
+  it('Cmd/Ctrl+点击网页链接交给外部浏览器', async () => {
+    await render('[web](https://example.com)');
+    expect(await click('a', 'click', { metaKey: true, ctrlKey: true })).toBe(false);
+    expect(harness.openSidePanelBrowserUrl).not.toHaveBeenCalled();
+  });
+
+  it('项目禁用 browser 工具、无会话上下文或非 http 链接时维持外部浏览器', async () => {
+    harness.projects = [{ id: 'project', kind: 'local', disabledBuiltinTools: ['browser'] }];
+    await render('[web](https://example.com)');
+    expect(container.querySelector('a')?.getAttribute('title')).toBeNull();
+    expect(await click('a')).toBe(false);
+    harness.projects = [];
+    await render('[web](https://example.com)', false);
+    expect(await click('a')).toBe(false);
+    await render('[mail](mailto:a@example.com)');
+    expect(await click('a')).toBe(false);
+    expect(harness.openSidePanelBrowserUrl).not.toHaveBeenCalled();
   });
 
   it('越界与危险协议被拒绝，后端不可预览错误仍 toast', async () => {

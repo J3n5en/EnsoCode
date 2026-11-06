@@ -1,4 +1,5 @@
 import { previewImageMime } from '@shared/markdownPreviewImage';
+import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import type { Element, ElementContent } from 'hast';
 import { FolderOpen } from 'lucide-react';
 import type { Root } from 'mdast';
@@ -25,7 +26,8 @@ import {
 } from '@/components/ui/context-menu';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
-import { openSidePanelFile } from '@/lib/sidePanelDock';
+import { IS_MAC } from '@/lib/keybindings';
+import { openSidePanelBrowserUrl, openSidePanelFile } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { type PluginSlotEntry, parsePluginFence, pluginMessageLeaf } from '../../plugins/registry';
@@ -37,6 +39,7 @@ import { highlightNode } from './highlightQuery';
 import { MermaidRenderer } from './MermaidRenderer';
 import {
   classifyMarkdownLink,
+  parseWebUrl,
   splitFileLineRef,
   toExternalAbsolutePath,
   toWorkspaceRelativePath,
@@ -441,9 +444,33 @@ function MarkdownAnchor({
   );
   const local = classification.kind === 'local' && linkContext !== null;
   const codeText = local ? soleInlineCodeText(node) : null;
+  const builtinBrowser = useSettingsStore(
+    (state) =>
+      state.openLinksInBuiltinBrowser &&
+      isBuiltinToolEnabledForProject(
+        state.disabledBuiltinTools,
+        state.projects,
+        linkContext?.projectId,
+        'browser'
+      )
+  );
+  const webUrl =
+    builtinBrowser && linkContext && classification.kind === 'external' ? parseWebUrl(href) : null;
 
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (classification.kind === 'external') return;
+    if (classification.kind === 'external') {
+      // Cmd/Ctrl+点击或打不开内置浏览器时走默认 target=_blank → 系统浏览器
+      if (!webUrl || !linkContext || (IS_MAC ? event.metaKey : event.ctrlKey)) return;
+      const opening = openSidePanelBrowserUrl(linkContext.conversationId, webUrl.href);
+      if (!opening) return;
+      event.preventDefault();
+      void opening.then((result) => {
+        if (!result.ok) {
+          addToast({ type: 'error', title: t('Navigation failed'), description: result.error });
+        }
+      });
+      return;
+    }
     event.preventDefault();
     if (local) void openLocal(false);
   };
@@ -457,6 +484,11 @@ function MarkdownAnchor({
       )}
       role={local ? 'link' : undefined}
       tabIndex={local ? 0 : undefined}
+      title={
+        webUrl
+          ? t('{{key}}+Click to open in external browser', { key: IS_MAC ? 'Cmd' : 'Ctrl' })
+          : undefined
+      }
       {...(classification.kind === 'external' ? { target: '_blank', rel: 'noreferrer' } : {})}
       onClick={onClick}
       onKeyDown={(event) => {

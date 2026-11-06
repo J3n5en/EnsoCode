@@ -192,6 +192,7 @@ const initialState = {
   rtkEnabled: true,
   computerPreview: true,
   computerAllowAllApps: false,
+  openLinksInBuiltinBrowser: true,
   protectedActionsInCode: false,
   dcgEnabled: false,
   editMode: 'apply_patch' as import('@shared/types').EditMode,
@@ -381,6 +382,8 @@ export const useSettingsStore = create<SettingsState>()(
       setRtkEnabled: (rtkEnabled) => set({ rtkEnabled }),
       setComputerPreview: (computerPreview) => set({ computerPreview }),
       setComputerAllowAllApps: (computerAllowAllApps) => set({ computerAllowAllApps }),
+      setOpenLinksInBuiltinBrowser: (openLinksInBuiltinBrowser) =>
+        set({ openLinksInBuiltinBrowser }),
       setProtectedActionsInCode: (protectedActionsInCode) => set({ protectedActionsInCode }),
       setDcgEnabled: (dcgEnabled) => set({ dcgEnabled }),
       setMemoryEmbeddingModel: (memoryEmbeddingModel) => set({ memoryEmbeddingModel }),

@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { IS_MAC } from '@/lib/keybindings';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { builtinToolsInSection, TOOL_SECTIONS, type ToolSectionId } from './builtinToolSections';
@@ -241,6 +242,10 @@ export function BuiltinToolsSettings() {
   const rtkEnabled = useSettingsStore((state) => state.rtkEnabled);
   const computerPreview = useSettingsStore((state) => state.computerPreview);
   const setComputerPreview = useSettingsStore((state) => state.setComputerPreview);
+  const openLinksInBuiltinBrowser = useSettingsStore((state) => state.openLinksInBuiltinBrowser);
+  const setOpenLinksInBuiltinBrowser = useSettingsStore(
+    (state) => state.setOpenLinksInBuiltinBrowser
+  );
   const setRtkEnabled = useSettingsStore((state) => state.setRtkEnabled);
   const protectedActionsInCode = useSettingsStore((state) => state.protectedActionsInCode);
   const setProtectedActionsInCode = useSettingsStore((state) => state.setProtectedActionsInCode);
@@ -536,6 +541,23 @@ export function BuiltinToolsSettings() {
               ) : null}
               {tool.id === 'browser' ? (
                 <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm">
+                        {t('Open chat links in the built-in browser')}
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        {t(
+                          'Clicking a web link in chat opens it in the side panel browser. {{key}}+Click opens it in the external browser.',
+                          { key: IS_MAC ? 'Cmd' : 'Ctrl' }
+                        )}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={openLinksInBuiltinBrowser}
+                      onCheckedChange={setOpenLinksInBuiltinBrowser}
+                    />
+                  </div>
                   <p className="text-muted-foreground text-xs">
                     {t(
                       'Cookies and site storage of the built-in browser, separate from the app itself.'

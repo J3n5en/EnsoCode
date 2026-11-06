@@ -403,6 +403,10 @@ export const zhTranslations: Record<string, string> = {
   Reason: '原因',
   'Cookies and site storage of the built-in browser, separate from the app itself.':
     '内嵌浏览器的 Cookie 与站点存储，与应用本身隔离。',
+  'Open chat links in the built-in browser': '对话链接在内嵌浏览器打开',
+  'Clicking a web link in chat opens it in the side panel browser. {{key}}+Click opens it in the external browser.':
+    '点击对话里的网页链接会在侧栏内嵌浏览器打开；{{key}}+点击在外部浏览器打开。',
+  '{{key}}+Click to open in external browser': '{{key}}+点击在外部浏览器打开',
   Cleared: '已清除',
   'Clear cookies': '清除 Cookie',
   'Clear cache': '清除缓存',

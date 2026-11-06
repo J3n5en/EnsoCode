@@ -9,6 +9,17 @@ const PROTOCOL_RE = /^[a-z][a-z\d+.-]*:/i;
 const SAFE_EXTERNAL_PROTOCOL_RE = /^(?:https?|ircs?|mailto|xmpp):/i;
 const WINDOWS_ABSOLUTE_RE = /^(?:[a-z]:[\\/]|\\\\)/i;
 
+/** http(s) 网页链接（可交给内置浏览器）；其它协议返回 null */
+export function parseWebUrl(raw: string | undefined): URL | null {
+  const value = raw?.trim();
+  if (!value || !/^https?:\/\//i.test(value)) return null;
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
 /** 拆开 `path:line` / `path:start-end` 形式的文件引用，行号取起始行 */
 export function splitFileLineRef(value: string): { path: string; line?: number } {
   const match = /^(.*?):(\d+)(?:-\d+)?$/.exec(value);
