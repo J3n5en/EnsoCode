@@ -19,6 +19,12 @@ const render = (props: Parameters<typeof TitleBar>[0]) =>
 const centered = createElement('div', { 'data-testid': 'mode-switch' });
 
 describe('TitleBar centered content', () => {
+  it('centers over the entire window while reserving native controls only for actions', () => {
+    setPlatform('win32');
+    const html = render({ centered });
+    expect(html).toContain('padding-right:');
+    expect(html).not.toContain('style="right:');
+  });
   it('renders centered content as an overlay sibling of title and actions', () => {
     setPlatform('win32');
     const html = render({

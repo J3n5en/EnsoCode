@@ -24,8 +24,8 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
+  --color-border: color-mix(in oklab, var(--border) calc(var(--ui-border-opacity, 1) * 100%), transparent);
+  --color-input: color-mix(in oklab, var(--input) calc(var(--ui-border-opacity, 1) * 100%), transparent);
   --color-ring: var(--ring);
 
   --radius-lg: var(--radius);
@@ -245,11 +245,10 @@
 html.bg-image-enabled {
   --color-background: oklch(from var(--background) l c h / var(--bg-panel-alpha, 0.15));
   --color-card: oklch(from var(--card) l c h / var(--bg-panel-alpha, 0.15));
-  --color-secondary: oklch(from var(--secondary) l c h / var(--bg-panel-alpha, 0.15));
-  --color-muted: oklch(from var(--muted) l c h / var(--bg-panel-alpha, 0.15));
-  --color-accent: oklch(from var(--accent) l c h / var(--bg-panel-alpha, 0.15));
-  --color-border: oklch(from var(--border) l c h / var(--bg-border-alpha, 0.4));
-  --color-input: oklch(from var(--input) l c h / var(--bg-border-alpha, 0.4));
+  /* 控件/hover 保持主题对比度，不随全局壁纸可见度消失。 */
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
   /* 弹出层保底不透明度，叠在内容上方时保住可读性 */
   --color-popover: oklch(from var(--popover) l c h / var(--bg-popover-alpha, 0.92));
 }

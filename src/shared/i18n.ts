@@ -552,6 +552,7 @@ export const zhTranslations: Record<string, string> = {
   'Refresh now': '立即刷新',
   'Background visibility': '背景可见度',
   'Composer opacity': '输入框不透明度',
+  'Border opacity': '边框不透明度',
   'Code block opacity': '代码块不透明度',
   Blur: '模糊',
   Brightness: '亮度',

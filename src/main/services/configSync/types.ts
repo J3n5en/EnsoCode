@@ -159,6 +159,7 @@ export interface ConfigSyncState {
   backgroundBrightness?: number;
   backgroundSaturation?: number;
   backgroundMask?: number;
+  borderOpacity?: number;
   backgroundComposerOpacity?: number;
   backgroundCodeOpacity?: number;
   backgroundSizeMode?: 'cover' | 'contain' | 'repeat' | 'center';

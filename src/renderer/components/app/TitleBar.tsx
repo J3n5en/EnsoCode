@@ -15,15 +15,13 @@ interface TitleBarProps {
   /** Optional no-drag content shown in place of the title. */
   leading?: React.ReactNode;
   /**
-   * 可选的居中内容使用独立覆盖层，在 Windows 上避开原生按钮区域。
+   * 可选的居中内容使用独立覆盖层，固定在整个窗口正中。
    * 它保留左侧标题；macOS 隐藏标题以免挤占系统红绿灯。
    *
-   * Center optional content in an overlay that excludes native Windows controls.
+   * Center optional content over the entire window, independent of panel widths.
    * Keep the left title except on macOS, where traffic lights take precedence.
    */
   centered?: React.ReactNode;
-  /** 居中内容对齐的横向区间（窗口坐标，如对话卡片）；缺省按整行居中 */
-  centerOver?: { left: number; right: number } | null;
 }
 
 export function SummonEnsoButton({ label = true }: { label?: boolean }) {
@@ -52,14 +50,7 @@ export function SummonEnsoButton({ label = true }: { label?: boolean }) {
  * Preserve native caption controls and Snap Layouts on Windows, traffic lights
  * on macOS, and renderer caption controls on Linux.
  */
-export function TitleBar({
-  title,
-  className,
-  actions,
-  leading,
-  centered,
-  centerOver,
-}: TitleBarProps) {
+export function TitleBar({ title, className, actions, leading, centered }: TitleBarProps) {
   const kind = useWindowChromeKind();
   const isMac = kind === 'mac';
   const isWindows = kind === 'windows';
@@ -87,16 +78,7 @@ export function TitleBar({
       ) : null}
 
       {centered && (
-        <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          style={
-            centerOver
-              ? { left: centerOver.left, right: `calc(100% - ${centerOver.right}px)` }
-              : isWindows
-                ? { right: nativeControlsInset }
-                : undefined
-          }
-        >
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <div className="no-drag pointer-events-auto">{centered}</div>
         </div>
       )}

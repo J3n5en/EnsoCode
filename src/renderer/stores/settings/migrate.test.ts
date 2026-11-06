@@ -21,6 +21,26 @@ describe('文件链接右键打开设置水合', () => {
   });
 });
 
+describe('边框不透明度', () => {
+  const current = {
+    editMode: 'apply_patch' as const,
+    accentColor: 'theme' as const,
+    borderOpacity: 1,
+  };
+  it('旧配置保留默认，已保存值正确恢复', () => {
+    expect(mergeSettingsState({}, current).borderOpacity).toBe(1);
+    expect(mergeSettingsState({ borderOpacity: 0 }, current).borderOpacity).toBe(0);
+    expect(mergeSettingsState({ borderOpacity: 0.25 }, current).borderOpacity).toBe(0.25);
+  });
+  it.each([null, '0.5', Number.NaN, Infinity])('拒绝脏值 %s', (borderOpacity) => {
+    expect(mergeSettingsState({ borderOpacity }, current).borderOpacity).toBe(1);
+  });
+  it('限制为 0–1', () => {
+    expect(mergeSettingsState({ borderOpacity: -1 }, current).borderOpacity).toBe(0);
+    expect(mergeSettingsState({ borderOpacity: 2 }, current).borderOpacity).toBe(1);
+  });
+});
+
 describe('主题与强调色设置', () => {
   const current = { editMode: 'apply_patch' as const, accentColor: 'theme' as const };
 

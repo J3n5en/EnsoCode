@@ -68,17 +68,22 @@ className={cn('text-sm font-medium', !enabled && 'text-muted-foreground line-thr
 
 用户可开「背景图」（设置 → 外观）。实现不是透明窗口，而是
 `hooks/useBackgroundImage.ts` 给 `<html>` 挂 `bg-image-enabled` 类并写入几个 alpha 变量，
-`globals.css` 里用相对颜色把 **`--color-*` 令牌**（Tailwind 引用层）重映射成半透明：
+`BackgroundLayer` 将整张壁纸（包含主题色遮罩）按背景可见度合成到画布上。
+侧栏、顶栏、聊天区共享这一层，不能再各自叠加「1 − 可见度」底色。
+`globals.css` 只在 **`--color-*` 令牌**（Tailwind 引用层）调整前景：
 
 | 变量 | 作用范围 | 来源 |
 |------|---------|------|
-| `--bg-panel-alpha` | 普通面板（`bg-background` / `bg-card` / `bg-muted` / `bg-sidebar`…） | 1 − 背景可见度 |
+| `--bg-panel-alpha` | 普通面板（`bg-background` / `bg-card` / 侧栏终端） | 背景图模式固定 0，避免重复合成 |
 | `--bg-popover-alpha` | 弹出层（`bg-popover`），保底 0.92 | 派生 |
-| `--bg-border-alpha` | 边框 | 面板 + 0.25 |
+| `--ui-border-opacity` | 全局语义边框、输入控件边缘、内置主题卡片描边 | 「边框不透明度」滑块，0–1；有无壁纸均生效 |
 | `--bg-code-alpha` | 代码块 / diff / 终端 | 「代码块不透明度」滑块 |
 | `--bg-composer-alpha` | 输入框 `[data-slot="composer"]` | 「输入框不透明度」滑块 |
 
 **新页面只要用语义令牌类（`bg-background` 等）就自动跟随，什么都不用做。**
+`bg-muted` / `bg-secondary` / `bg-accent` 保留控件与 hover 的主题色，不用于大面积内容底板。
+遮罩与可见度都覆盖整张壁纸：最终壁纸贡献为 `可见度 × (1 − 遮罩)`；遮罩为 0
+不取消可见度设置，可见度为 100% 也不取消遮罩。输入框、代码块继续独立调节。
 真正会绕过机制的是内联色值、固定色值或第三方组件自带的主题底色：
 
 ```tsx

@@ -774,6 +774,8 @@ function UserCssRow() {
 }
 
 export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => void } = {}) {
+  const borderOpacity = useSettingsStore((s) => s.borderOpacity);
+  const setBorderOpacity = useSettingsStore((s) => s.setBorderOpacity);
   const {
     theme,
     setTheme,
@@ -1087,6 +1089,11 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
       </div>
 
       {/* Background Image */}
+      <PercentSliderRow
+        label={t('Border opacity')}
+        value={Math.round(borderOpacity * 100)}
+        onCommit={(v) => setBorderOpacity(v / 100)}
+      />
       <BackgroundImageSettings />
     </div>
   );

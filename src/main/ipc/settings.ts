@@ -119,6 +119,7 @@ export const SETTINGS_STATE_FIELDS = [
   'backgroundBrightness',
   'backgroundSaturation',
   'backgroundMask',
+  'borderOpacity',
   'backgroundComposerOpacity',
   'backgroundCodeOpacity',
   'backgroundSizeMode',

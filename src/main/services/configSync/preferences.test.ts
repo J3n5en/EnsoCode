@@ -155,6 +155,7 @@ describe('config sync portable preference contract', () => {
       backgroundSaturation: 0.8,
       backgroundMask: 0.4,
       backgroundComposerOpacity: 0.7,
+      borderOpacity: 0.25,
       backgroundCodeOpacity: 0.6,
       backgroundSizeMode: 'contain',
       disabledBuiltinTools: ['subagent', 'browser'],

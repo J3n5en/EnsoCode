@@ -67,6 +67,14 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
     ...fileOpening,
     ...contextMenuOpening,
     ...theme,
+    ...('borderOpacity' in source
+      ? {
+          borderOpacity:
+            typeof source.borderOpacity === 'number' && Number.isFinite(source.borderOpacity)
+              ? Math.min(1, Math.max(0, source.borderOpacity))
+              : 1,
+        }
+      : {}),
     editMode,
     accentColor,
   } as T;

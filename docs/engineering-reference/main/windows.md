@@ -39,8 +39,11 @@ macOS 保留系统红绿灯；Windows 通过 Window Controls Overlay 保留原�
 让系统识别最大化按钮并提供 Windows 11 贴靠布局；Linux 由 `TitleBar.tsx` 自绘。
 Windows 的标题栏内容为原生按钮预留区域，优先使用 `titlebar-area-width`，独立
 `WebContentsView` 没有该几何信息时按 138 DIP 预留。`useNativeWindowControls` 把实际
-标题栏配色转换成 RGB，经 `window:set-title-bar-appearance` 同步；Main 只接受经过校验的
-两种颜色，并且只允许该窗口的工作区 renderer 更新。
+标题栏配色转换成十六进制色，经 `window:set-title-bar-appearance` 同步；Main 只接受经过校验的
+颜色，并且只允许该窗口的工作区 renderer 更新。按钮底色保留 alpha（`#rrggbbaa`）：
+标题栏透明或半透明（壁纸模式、桌面外壳顶栏落在画布上）时原生按钮区一起透出，
+不要再给顶栏垫不透明底色来迁就按钮。按钮图标色和可选的宿主底色 `surface`（取画布色）
+必须不透明；半透明按钮底色不能拿来 `setBackgroundColor`，丢掉 alpha 会把宿主刷成近黑。
 
 Windows 顶层 `BrowserWindow` 必须保持不透明：Electron 43 的透明窗口会强制关闭
 粗边框，并使用特殊的最大化路径。主窗口的 workbench `WebContentsView` 与其 HTML

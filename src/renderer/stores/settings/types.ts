@@ -90,6 +90,8 @@ export interface SettingsState {
   accentColor: import('@shared/accentColor').AccentColor;
   /** 是否注入 userData/user.css */
   userCssEnabled: boolean;
+  /** 全局界面边框相对主题原色的不透明度，0–1；不影响文字与图标 */
+  borderOpacity: number;
   language: Locale;
 
   /**
@@ -262,7 +264,7 @@ export interface SettingsState {
   backgroundRandomEnabled: boolean;
   /** 自动换图间隔（秒），setter 内 clamp 5–86400 */
   backgroundRandomInterval: number;
-  /** 背景可见度 0–1；前景面板 alpha = 1 - opacity（背景图本身不变透明） */
+  /** 背景可见度 0–1；整张壁纸（含遮罩）在画布上统一合成，普通面板不重复叠色 */
   backgroundOpacity: number;
   /** 模糊半径 0–20 px */
   backgroundBlur: number;
@@ -441,6 +443,7 @@ export interface SettingsState {
   setBackgroundBrightness: (brightness: number) => void;
   setBackgroundSaturation: (saturation: number) => void;
   setBackgroundMask: (mask: number) => void;
+  setBorderOpacity: (opacity: number) => void;
   setBackgroundComposerOpacity: (opacity: number) => void;
   setBackgroundCodeOpacity: (opacity: number) => void;
   setBackgroundSizeMode: (mode: BackgroundSizeMode) => void;

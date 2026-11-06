@@ -1,5 +1,6 @@
 import { isVideoPath, toLocalImageUrl, toRemoteImageProxyUrl } from '@shared/localImage';
 import * as React from 'react';
+import { backgroundAppearance } from '@/lib/backgroundAppearance';
 import { holesClipPath } from '@/lib/backgroundClip';
 import type { BackgroundSizeMode } from '@/stores/settings';
 import { useSettingsStore } from '@/stores/settings';
@@ -41,6 +42,7 @@ export function BackgroundLayer() {
   const brightness = useSettingsStore((s) => s.backgroundBrightness);
   const saturation = useSettingsStore((s) => s.backgroundSaturation);
   const mask = useSettingsStore((s) => s.backgroundMask);
+  const visibility = useSettingsStore((s) => s.backgroundOpacity);
   const sizeMode = useSettingsStore((s) => s.backgroundSizeMode);
   const refreshNonce = useSettingsStore((s) => s.backgroundRefreshNonce);
 
@@ -102,6 +104,7 @@ export function BackgroundLayer() {
             brightness,
             saturation,
             mask,
+            visibility,
             sizeMode,
           }}
         />
@@ -139,6 +142,7 @@ interface MediaState {
   brightness: number;
   saturation: number;
   mask: number;
+  visibility: number;
   sizeMode: BackgroundSizeMode;
 }
 
@@ -153,6 +157,7 @@ function BackgroundMedia({ state }: { state: MediaState }) {
     brightness,
     saturation,
     mask,
+    visibility,
     sizeMode,
   } = state;
 
@@ -204,7 +209,11 @@ function BackgroundMedia({ state }: { state: MediaState }) {
   const bleed = blur > 0 ? `-${blur * 2}px` : '0';
 
   return (
-    <>
+    <div
+      data-slot="background-media"
+      className="absolute inset-0"
+      style={{ opacity: backgroundAppearance(visibility).wallpaperOpacity }}
+    >
       {video ? (
         <video
           key={src}
@@ -248,6 +257,6 @@ function BackgroundMedia({ state }: { state: MediaState }) {
           }}
         />
       )}
-    </>
+    </div>
   );
 }

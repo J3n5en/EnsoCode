@@ -1,7 +1,7 @@
 import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtocol';
 import { IPC_CHANNELS } from '@shared/types';
 import { parseAgentSummonRequest } from '@shared/types/mentions';
-import { parseTitleBarAppearance } from '@shared/windowControls';
+import { parseTitleBarAppearance, windowSurfaceColor } from '@shared/windowControls';
 import { BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { agentTypeRegistrySnapshot } from '../services/agentHost';
 import {
@@ -94,8 +94,10 @@ export function registerWindowHandlers(): void {
       return { ok: false, error: 'Only the window renderer may update its title bar' };
     }
     try {
-      win.setTitleBarOverlay(appearance);
-      win.setBackgroundColor(appearance.color);
+      win.setTitleBarOverlay({ color: appearance.color, symbolColor: appearance.symbolColor });
+      // 宿主窗口保持不透明；半透明标题栏没有可用底色时保留原值
+      const surface = windowSurfaceColor(appearance);
+      if (surface) win.setBackgroundColor(surface);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };

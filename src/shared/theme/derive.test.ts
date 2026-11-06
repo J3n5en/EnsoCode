@@ -19,6 +19,14 @@ function referencedTokens(): string[] {
 }
 
 describe('deriveThemeTokens', () => {
+  it('卡片描边跟随全局边框不透明度，投影与文字不随之变淡', () => {
+    for (const mode of THEME_MODES) {
+      const tokens = deriveThemeTokens(enso[mode], mode);
+      expect(tokens['--elevation-surface']).toContain('var(--ui-border-opacity, 1)');
+      expect(tokens['--foreground']).toBe(enso[mode].text);
+      expect(tokens['--elevation-float']).not.toContain('--ui-border-opacity');
+    }
+  });
   it('产出样式表引用的全部颜色与阴影变量', () => {
     const referenced = referencedTokens();
     expect(referenced).toEqual(expect.arrayContaining(['--background', '--brand', '--ring']));

@@ -166,6 +166,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   backgroundBrightness: { mode: 'portable' },
   backgroundSaturation: { mode: 'portable' },
   backgroundMask: { mode: 'portable' },
+  borderOpacity: { mode: 'portable' },
   backgroundComposerOpacity: { mode: 'portable' },
   backgroundCodeOpacity: { mode: 'portable' },
   backgroundSizeMode: { mode: 'portable' },

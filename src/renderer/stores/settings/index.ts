@@ -124,6 +124,7 @@ function applySettings(state: {
   terminalFontSize: number;
   language: Locale;
   chatWide?: boolean;
+  borderOpacity?: number;
 }): void {
   if (state.theme === 'sync-terminal') {
     applyTerminalThemeToApp(state.terminalTheme, true);
@@ -132,6 +133,10 @@ function applySettings(state: {
     applyAppTheme(state.theme, state.terminalTheme);
   }
   applyTerminalFont(state.terminalFontFamily, state.terminalFontSize);
+  document.documentElement.style.setProperty(
+    '--ui-border-opacity',
+    String(state.borderOpacity ?? 1)
+  );
   document.documentElement.lang = normalizeLocale(state.language) === 'zh' ? 'zh-CN' : 'en';
   document.documentElement.classList.toggle('enso-chat-wide', Boolean(state.chatWide));
 }
@@ -232,6 +237,7 @@ const initialState = {
   backgroundBrightness: 1,
   backgroundSaturation: 1,
   backgroundMask: 0.5,
+  borderOpacity: 1,
   backgroundComposerOpacity: 0.6,
   backgroundCodeOpacity: 0.65,
   backgroundSizeMode: 'cover' as BackgroundSizeMode,
@@ -449,6 +455,11 @@ export const useSettingsStore = create<SettingsState>()(
       setBackgroundSaturation: (saturation) =>
         set({ backgroundSaturation: clampNumber(saturation, 0, 2, 1) }),
       setBackgroundMask: (mask) => set({ backgroundMask: clampNumber(mask, 0, 1, 0.5) }),
+      setBorderOpacity: (value) => {
+        const borderOpacity = clampNumber(value, 0, 1, 1);
+        document.documentElement.style.setProperty('--ui-border-opacity', String(borderOpacity));
+        set({ borderOpacity });
+      },
       setBackgroundComposerOpacity: (opacity) =>
         set({ backgroundComposerOpacity: clampNumber(opacity, 0, 1, 0.6) }),
       setBackgroundCodeOpacity: (opacity) =>
