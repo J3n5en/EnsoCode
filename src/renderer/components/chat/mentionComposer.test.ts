@@ -804,6 +804,25 @@ describe('mentionPopupLayout', () => {
       expect(cleanTitleSummarySource(`${pasted}\u00a0帮我总结这份日志`)).toBe('帮我总结这份日志');
       expect(cleanTitleSummarySource(`${pasted}\u00a0`)).toBe('');
     });
+
+    it('剥掉已展开的 skill 正文和句首 /skill:，只留用户自己的话', () => {
+      const expanded = [
+        '<skill name="poteto-mode" location="/skills/poteto-mode/SKILL.md">',
+        'References are relative to /skills/poteto-mode.',
+        '',
+        '# Poteto mode playbook. Follow every step before answering.',
+        '</skill>',
+        '',
+        '感觉标题生成有点缺陷',
+      ].join('\n');
+      expect(cleanTitleSummarySource(expanded)).toBe('感觉标题生成有点缺陷');
+      expect(cleanTitleSummarySource('/skill:poteto-mode 感觉标题生成有点缺陷')).toBe(
+        '感觉标题生成有点缺陷'
+      );
+      expect(cleanTitleSummarySource(expanded.replace('\n\n感觉标题生成有点缺陷', ''))).toBe(
+        'poteto-mode'
+      );
+    });
   });
 
   describe('extractRepresentativeTitle：提取首条消息的代表行作为暂存标题', () => {
@@ -852,6 +871,22 @@ describe('mentionPopupLayout', () => {
         '帮我总结这份日志'
       );
       expect(extractRepresentativeTitle(`${pasted}\u00a0`)).toBe('pasted-text.txt');
+    });
+
+    it('skill 展开块不当代表行；没有正文时用 skill 名', () => {
+      const expanded = [
+        '<skill name="poteto-mode" location="/skills/poteto-mode/SKILL.md">',
+        'References are relative to /skills/poteto-mode.',
+        '',
+        '# Poteto',
+        '</skill>',
+        '',
+        '感觉标题生成有点缺陷',
+      ].join('\n');
+      expect(extractRepresentativeTitle(expanded)).toBe('感觉标题生成有点缺陷');
+      expect(
+        extractRepresentativeTitle(expanded.replace('\n\n感觉标题生成有点缺陷', ''))
+      ).toBe('poteto-mode');
     });
   });
 });

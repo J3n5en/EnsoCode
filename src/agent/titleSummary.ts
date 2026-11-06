@@ -1,6 +1,7 @@
 /** 会话标题总结：一次性补全的输入与输出处理（纯函数，供 supervisor 调用）。 */
 
 import { isContinuationTurn } from '@shared/titleContinuation';
+import { userTextWithoutSkills } from '@shared/skillCommands';
 import type {
   ProjectedMessage,
   SpawnModelConfig,
@@ -111,13 +112,14 @@ const INLINE_UI_REF = /\[Selected UI element "([^"]*)" — path: (.*?); text: (.
 export function buildTitleUserText(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return '';
+  const skills = userTextWithoutSkills(trimmed);
 
   const chatLabels: string[] = [];
-  for (const match of trimmed.matchAll(INLINE_CHAT_REF)) {
+  for (const match of skills.text.matchAll(INLINE_CHAT_REF)) {
     if (match[1]?.trim()) chatLabels.push(match[1].trim());
   }
 
-  const stripped = trimmed.replace(INLINE_CHAT_REF, '').replace(INLINE_UI_REF, '');
+  const stripped = skills.text.replace(INLINE_CHAT_REF, '').replace(INLINE_UI_REF, '');
 
   const lines = stripped
     .split('\n')
@@ -137,6 +139,7 @@ export function buildTitleUserText(text: string): string {
     return chatLabels[0].slice(0, MAX_INPUT_CHARS);
   }
 
+  if (!cleanBody && skills.names[0]) return skills.names[0].slice(0, MAX_INPUT_CHARS);
   return cleanBody.slice(0, MAX_INPUT_CHARS);
 }
 

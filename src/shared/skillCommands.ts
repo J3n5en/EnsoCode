@@ -14,6 +14,19 @@ export interface SkillBlock {
 
 const COMMAND = /^\/skill:(\S+)(?:\s+|$)/;
 const BLOCK = /^<skill name="([^"]+)" location="([^"]*)">\n([\s\S]*?)\n<\/skill>(?:\n\n|$)/;
+const EXPANDED = /<skill name="([^"]*)" location="[^"]*">[\s\S]*?<\/skill>/g;
+
+/** 标题等展示用：去掉已展开的 skill 块和句首 /skill:，只留用户自己写的话。names 供只点了 skill、没有正文时兜底。 */
+export function userTextWithoutSkills(text: string): { text: string; names: string[] } {
+  const names: string[] = [];
+  const withoutBlocks = text.replace(EXPANDED, (_match, name: string) => {
+    const trimmed = name.trim();
+    if (trimmed) names.push(trimmed);
+    return '\n';
+  });
+  const parsed = parseSkillCommands(withoutBlocks.trim());
+  return { text: parsed.rest.trim(), names: [...parsed.names, ...names] };
+}
 
 export function parseSkillCommands(text: string): { names: string[]; rest: string } {
   const names: string[] = [];

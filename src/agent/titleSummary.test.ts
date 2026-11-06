@@ -85,6 +85,19 @@ describe('buildTitleUserText：送给模型的用户消息（清洗后的用户�
     expect(buildTitleUserText('x'.repeat(5000))).toHaveLength(2000);
   });
 
+  it('已展开的 skill 正文不进入标题输入，只留用户自己的话', () => {
+    const raw = [
+      '<skill name="poteto-mode" location="/skills/poteto-mode/SKILL.md">',
+      '# playbook',
+      'x'.repeat(3000),
+      '</skill>',
+      '',
+      '感觉标题生成有点缺陷',
+    ].join('\n');
+    expect(buildTitleUserText(raw)).toBe('感觉标题生成有点缺陷');
+    expect(buildTitleUserText(raw.replace('\n\n感觉标题生成有点缺陷', ''))).toBe('poteto-mode');
+  });
+
   it('首尾空白剔除', () => {
     expect(buildTitleUserText('  帮我修 bug\n')).toBe('帮我修 bug');
   });
