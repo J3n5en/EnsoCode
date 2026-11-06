@@ -7,12 +7,12 @@ import { useWindowMaximized } from '@/hooks/useWindowMaximized';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
-/** mobile = 窄屏或远程浏览器：没有系统窗口控件，沿用整行 TitleBar */
-export type WindowChromeKind = 'mobile' | 'mac' | 'windows' | 'linux';
+/** mobile = 窄屏：沿用整行 TitleBar；web = 宽屏远程浏览器：同桌面外壳布局，但没有系统窗口控件 */
+export type WindowChromeKind = 'mobile' | 'web' | 'mac' | 'windows' | 'linux';
 
 export function useWindowChromeKind(): WindowChromeKind {
-  const mobile = useIsMobile() || Boolean(window.electronAPI.remote);
-  if (mobile) return 'mobile';
+  if (useIsMobile()) return 'mobile';
+  if (window.electronAPI.remote) return 'web';
   const { platform } = window.electronAPI.env;
   return platform === 'darwin' ? 'mac' : platform === 'win32' ? 'windows' : 'linux';
 }

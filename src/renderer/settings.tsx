@@ -22,7 +22,8 @@ function SettingsApp() {
   const { t } = useI18n();
   const chromeKind = useWindowChromeKind();
 
-  if (chromeKind !== 'mobile') {
+  // 远程浏览器里设置是叠加层，需要整行 TitleBar 上的关闭按钮
+  if (chromeKind !== 'mobile' && chromeKind !== 'web') {
     return (
       <div data-enso="canvas" className="flex h-screen overflow-hidden bg-canvas">
         <OauthCredentialBootstrap />
