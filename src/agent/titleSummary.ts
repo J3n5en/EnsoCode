@@ -1,7 +1,7 @@
 /** 会话标题总结：一次性补全的输入与输出处理（纯函数，供 supervisor 调用）。 */
 
-import { isContinuationTurn } from '@shared/titleContinuation';
 import { userTextWithoutSkills } from '@shared/skillCommands';
+import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
   ProjectedMessage,
   SpawnModelConfig,

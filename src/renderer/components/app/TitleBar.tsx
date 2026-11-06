@@ -50,13 +50,7 @@ export function SummonEnsoButton({ label = true }: { label?: boolean }) {
  * Preserve native caption controls and Snap Layouts on Windows, traffic lights
  * on macOS, and renderer caption controls on Linux.
  */
-export function TitleBar({
-  title,
-  className,
-  actions,
-  leading,
-  centered,
-}: TitleBarProps) {
+export function TitleBar({ title, className, actions, leading, centered }: TitleBarProps) {
   const kind = useWindowChromeKind();
   const isMac = kind === 'mac';
   const isWindows = kind === 'windows';
