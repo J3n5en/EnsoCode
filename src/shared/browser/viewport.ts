@@ -33,3 +33,21 @@ export function parseBrowserViewport(raw: unknown): BrowserViewport | null {
   }
   return out;
 }
+
+/** renderer 页面缩放（⌘+/⌘-）下 CSS px ≠ 窗口 DIP；按四边换算，避免取整累积出缝。 */
+export function viewportToDip(
+  viewport: BrowserViewport | null,
+  zoom: number
+): BrowserViewport | null {
+  if (!viewport || !Number.isFinite(zoom) || zoom <= 0 || zoom === 1) return viewport;
+  const x = Math.round(viewport.x * zoom);
+  const y = Math.round(viewport.y * zoom);
+  const out: BrowserViewport = {
+    x,
+    y,
+    width: Math.max(1, Math.round((viewport.x + viewport.width) * zoom) - x),
+    height: Math.max(1, Math.round((viewport.y + viewport.height) * zoom) - y),
+  };
+  if (viewport.radius !== undefined) out.radius = Math.round(viewport.radius * zoom);
+  return out;
+}
