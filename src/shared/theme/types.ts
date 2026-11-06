@@ -27,6 +27,30 @@ export interface ThemePalette {
 
 export type ThemeTokens = Record<string, string>;
 
+export type ThemeAssetSlot =
+  | 'canvas-pattern'
+  | 'sidebar-footer'
+  | 'empty-main'
+  | 'welcome'
+  | 'composer-peek'
+  | 'thinking'
+  | 'code-corner'
+  | 'status-icon'
+  | 'panel-corner';
+
+export type ThemeAssetState = 'running' | 'waiting' | 'error';
+
+/** 主题 JSON 里是相对路径，加载后换成可直接放进 url() 的地址 */
+export interface ThemeAsset {
+  src: string;
+  /** 减少动态效果时，以及思考块不在进行时 */
+  still?: string;
+  dark?: string;
+  states?: Partial<Record<ThemeAssetState, string>>;
+}
+
+export type ThemeAssets = Partial<Record<ThemeAssetSlot, ThemeAsset>>;
+
 export interface ThemeDefinition {
   id: ThemeKey;
   name: string;
@@ -35,5 +59,6 @@ export interface ThemeDefinition {
   dark: ThemePalette;
   /** 任意 `--x` 覆盖，派生之后叠加 */
   tokens?: Partial<Record<ThemeMode, ThemeTokens>>;
+  assets?: ThemeAssets;
   css?: string;
 }
