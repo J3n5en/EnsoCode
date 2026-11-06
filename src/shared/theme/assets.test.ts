@@ -226,6 +226,11 @@ describe('themeAssetsCss', () => {
       [':root[data-enso-session="waiting"]{--enso-asset-composer-peek:url("u/q")}'],
     ],
     [
+      '探头只挂在装着输入框的列，不挂到时间线行',
+      { 'composer-peek': { src: 'u/p' } },
+      ['.enso-chat-col:has([data-enso="composer"])>:first-child::before{'],
+    ],
+    [
       '全局槽位跟 data-enso-activity',
       { 'sidebar-footer': { src: 'u/p', states: { error: 'u/e' } } },
       [':root[data-enso-activity="error"]{--enso-asset-sidebar-footer:url("u/e")}'],

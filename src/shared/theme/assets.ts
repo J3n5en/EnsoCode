@@ -14,6 +14,9 @@ const v = (slot: ThemeAssetSlot) => `var(--enso-asset-${slot})`;
 const overlay = (slot: ThemeAssetSlot, box: string, fit = 'center / contain no-repeat') =>
   `content:"";position:absolute;pointer-events:none;${box};background:${v(slot)} ${fit}`;
 
+/** 时间线每一行也带 enso-chat-col，只认装着输入框的那一列 */
+const COMPOSER_COL = `.enso-chat-col:has([data-enso="composer"])`;
+
 /**
  * 槽位挂在哪、怎么摆，跟哪个状态属性变。定位取自奶龙主题。
  * `session` 跟当前会话，`activity` 跟所有主会话，见 themeState
@@ -38,10 +41,10 @@ const SLOTS: Record<ThemeAssetSlot, { state: 'session' | 'activity'; css: string
   'composer-peek': {
     state: 'session',
     css:
-      `.enso-chat-col>:first-child{position:relative;isolation:isolate}` +
-      `.enso-chat-col>:first-child::before{${overlay('composer-peek', 'right:72px;bottom:calc(100% - 4px);width:84px;height:66px;z-index:-1;transform-origin:center bottom;transition:transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1)', 'center bottom / contain no-repeat')}}` +
-      `.enso-chat-col:focus-within>:first-child::before{transform:translateY(-5px) scale(1.04)}` +
-      `@media (prefers-reduced-motion: reduce){.enso-chat-col>:first-child::before{transition:none}.enso-chat-col:focus-within>:first-child::before{transform:none}}`,
+      `${COMPOSER_COL}>:first-child{position:relative;isolation:isolate}` +
+      `${COMPOSER_COL}>:first-child::before{${overlay('composer-peek', 'right:72px;bottom:calc(100% - 4px);width:84px;height:66px;z-index:-1;transform-origin:center bottom;transition:transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1)', 'center bottom / contain no-repeat')}}` +
+      `${COMPOSER_COL}:focus-within>:first-child::before{transform:translateY(-5px) scale(1.04)}` +
+      `@media (prefers-reduced-motion: reduce){${COMPOSER_COL}>:first-child::before{transition:none}${COMPOSER_COL}:focus-within>:first-child::before{transform:none}}`,
   },
   thinking: {
     state: 'session',
