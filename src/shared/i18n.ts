@@ -1929,6 +1929,7 @@ export const zhTranslations: Record<string, string> = {
   'Stop subagent': '停止子代理',
   'Dismiss coworker': '解雇 coworker',
   'Hire coworker': '雇佣 coworker',
+  'Subagent history': '子代理记录',
   'Set a session goal (/goal <objective> · pause · resume · clear)':
     '设定会话目标(/goal <目标> · pause · resume · clear)',
   'Pause the current session goal': '暂停当前会话目标',

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { app, ipcMain, type RendererContents } from '@platform';
 import { parseCapabilityAskResponse } from '@shared/capabilities/types';
 import { IPC_CHANNELS } from '@shared/types';
@@ -43,7 +44,10 @@ function senderById(webContentsId?: number): RendererContents | undefined {
 
 const watchedRemotes = new Set<number>();
 
-export const agentSessionIndex = new AgentSessionIndex({ readSettings });
+export const agentSessionIndex = new AgentSessionIndex({
+  readSettings,
+  sessionDir: () => path.join(app.getPath('userData'), 'agent', 'sessions'),
+});
 
 const transport: CapabilityGatewayTransport = {
   hasWindow: (webContentsId) => Boolean(senderById(webContentsId)),

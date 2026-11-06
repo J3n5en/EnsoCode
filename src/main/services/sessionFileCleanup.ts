@@ -1,6 +1,7 @@
 import { readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { conversationCwd } from '@shared/conversationCwd';
+import { removeChildRuns } from './childRunCatalog';
 import { removePastedTextFiles } from './pastedTextFiles';
 
 export interface RemoveConversationSessionFilesOptions {
@@ -60,6 +61,7 @@ export function removeConversationSessionFiles(
     } catch {}
   }
   removePastedTextFiles(root, id);
+  removeChildRuns(root, id);
   // 未投递的完成通知：pending-notifications/<encodeURIComponent(sessionId)>.json
   const pendingRoot = path.join(root, 'pending-notifications');
   let pendingEntries: string[] = [];

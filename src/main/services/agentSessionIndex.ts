@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import {
   type AgentTypeKey,
   buildAgentTypeRegistrySnapshot,
@@ -22,6 +23,7 @@ import type {
   WorkspaceLockEvent,
 } from '@shared/types/agent';
 import { type AgentTypeEntry, BUILTIN_AGENT_TYPES } from '@shared/types/assets';
+import { recordChildRun } from './childRunCatalog';
 import { withPluginAgentTypes } from './pluginRuntime';
 
 export const MAX_ORIGIN_COWORKERS = DEFAULT_MAX_ACTIVE_COWORKERS;
@@ -76,6 +78,8 @@ export type TeamOperationResult = TeamOperationSuccess | TeamTargetUnavailable;
 export interface AgentSessionIndexOptions {
   readSettings: () => Record<string, unknown> | null;
   randomUuid?: () => string;
+  /** 设置后，child-ready / 带 sessionFile 的 coworker-update 追加子运行目录。函数形式避免在 app ready 前取 userData。 */
+  sessionDir?: string | (() => string);
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -149,6 +153,30 @@ export class AgentSessionIndex {
 
   constructor(private readonly options: AgentSessionIndexOptions) {
     this.randomUuid = options.randomUuid ?? randomUUID;
+  }
+
+  private rememberChildRun(
+    parentId: string,
+    childId: string,
+    name: string,
+    agentType: string | undefined,
+    sessionFile: string | undefined
+  ): void {
+    const sessionDir =
+      typeof this.options.sessionDir === 'function'
+        ? this.options.sessionDir()
+        : this.options.sessionDir;
+    if (!sessionDir || !sessionFile || !name) return;
+    const file = path.basename(sessionFile);
+    if (path.resolve(sessionFile) !== path.resolve(sessionDir, file)) return;
+    recordChildRun(sessionDir, parentId, {
+      v: 1,
+      childId,
+      name,
+      ...(agentType ? { agentType } : {}),
+      file,
+      startedAt: Date.now(),
+    });
   }
 
   private originCoworkerLimit(): number {
@@ -498,6 +526,13 @@ export class AgentSessionIndex {
         sessionFile: event.sessionFile,
         coworkers: new Map(),
       });
+      this.rememberChildRun(
+        event.identity.parent.sessionId,
+        event.identity.sessionId,
+        event.identity.instanceName,
+        event.identity.typeKey,
+        event.sessionFile
+      );
       return true;
     }
     if (event.type === 'child-rejected' || event.type === 'child-ended') {
@@ -545,6 +580,15 @@ export class AgentSessionIndex {
             ...(event.coworker.sessionFile ? { sessionFile: event.coworker.sessionFile } : {}),
             coworkers: new Map(),
           });
+        }
+        if (event.coworker.sessionFile) {
+          this.rememberChildRun(
+            identity.sessionId,
+            event.coworker.id,
+            event.coworker.name,
+            event.coworker.agentType,
+            event.coworker.sessionFile
+          );
         }
       }
       return true;

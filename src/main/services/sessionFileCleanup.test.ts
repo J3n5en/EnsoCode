@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { recordChildRun } from './childRunCatalog';
 import { removeConversationSessionFiles } from './sessionFileCleanup';
 
 const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111';
@@ -148,5 +149,34 @@ describe('removeConversationSessionFiles', () => {
       scratchRoot,
     });
     expect(existsSync(scratchRoot)).toBe(true);
+  });
+
+  it('删除父会话时连带删除 catalog 登记的普通子 pi jsonl', () => {
+    const childFile = path.join(sessionDir, '2026-08-29T00-00-00-000Z_child.jsonl');
+    const otherChild = path.join(sessionDir, '2026-08-29T00-00-00-000Z_other-child.jsonl');
+    const otherParent = '22222222-2222-4222-8222-222222222222';
+    writeFileSync(childFile, '{}\n');
+    writeFileSync(otherChild, '{}\n');
+    recordChildRun(sessionDir, CONVERSATION_ID, {
+      v: 1,
+      childId: `${CONVERSATION_ID}::cw-child`,
+      name: 'scout',
+      file: path.basename(childFile),
+      startedAt: 1,
+    });
+    recordChildRun(sessionDir, otherParent, {
+      v: 1,
+      childId: `${otherParent}::cw-child`,
+      name: 'other',
+      file: path.basename(otherChild),
+      startedAt: 1,
+    });
+
+    removeConversationSessionFiles({ sessionDir, conversationId: CONVERSATION_ID });
+
+    expect(existsSync(childFile)).toBe(false);
+    expect(existsSync(path.join(sessionDir, 'child-runs', `${CONVERSATION_ID}.jsonl`))).toBe(false);
+    expect(existsSync(otherChild)).toBe(true);
+    expect(existsSync(path.join(sessionDir, 'child-runs', `${otherParent}.jsonl`))).toBe(true);
   });
 });

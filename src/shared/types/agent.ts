@@ -1149,6 +1149,19 @@ export type ParentHistoryTailResult =
   | { ok: true; messages: ProjectedMessage[]; baseIndex: number }
   | { ok: false; code: 'not-found' | 'unavailable'; error: string };
 
+export interface ChildRunSummary {
+  childId: string;
+  name: string;
+  agentType?: string;
+  startedAt: number;
+  live: boolean;
+  available: boolean;
+}
+
+export type ChildRunListResult =
+  | { ok: true; items: ChildRunSummary[] }
+  | { ok: false; code: 'invalid'; error: string };
+
 export type DispatchProgressPhase =
   | 'received'
   | 'source-bound'
