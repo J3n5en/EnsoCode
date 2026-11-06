@@ -664,6 +664,8 @@ export const zhTranslations: Record<string, string> = {
   'Deselect all': '全不选',
   '{{enabled}}/{{total}} enabled': '已启用 {{enabled}}/{{total}}',
   'Fetch models': '拉取模型',
+  'Fetch all models': '拉取全部模型',
+  'Fetched {{count}} providers': '已拉取 {{count}} 个模型服务',
   'Test connection': '测试连接',
   Authorize: '授权',
   Authorizing: '授权中...',

@@ -8,6 +8,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   Server,
   Trash2,
 } from 'lucide-react';
@@ -32,6 +33,7 @@ import { NewSessionBadge } from './NewSessionBadge';
 import { AccountUsageBlock } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
+import { fetchProviderModels, type ProviderFetchOutcome } from './providerFetch';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
 import { TitleSummaryPicker } from './TitleSummaryPicker';
 import { VirtualModelsSettings } from './VirtualModelsSettings';
@@ -59,6 +61,11 @@ export function ProvidersSettings() {
     providerId: string;
     message: string;
   } | null>(null);
+  const [fetching, setFetching] = React.useState(false);
+  const [fetchOutcomes, setFetchOutcomes] = React.useState<Record<
+    string,
+    ProviderFetchOutcome
+  > | null>(null);
 
   /** 账号展示跟随非持久凭证快照 revision；跨窗口 invalidation 后会自动重拉。 */
   const oauthRevision = useOauthCredentialStore((state) => state.snapshot.revision);
@@ -124,6 +131,36 @@ export function ProvidersSettings() {
     void performRemove(provider);
   };
 
+  const fetchAllModels = async () => {
+    setFetching(true);
+    setFetchOutcomes(null);
+    try {
+      const pairs = await Promise.all(
+        providers.map(async (provider) => {
+          const outcome = await fetchProviderModels(provider);
+          return [provider.id, outcome] as const;
+        })
+      );
+      const next: Record<string, ProviderFetchOutcome> = {};
+      for (const [id, outcome] of pairs) {
+        next[id] = outcome;
+        if (outcome.status === 'ok' && outcome.models) {
+          updateProvider(id, { models: outcome.models });
+        }
+      }
+      setFetchOutcomes(next);
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const fetchOkCount = fetchOutcomes
+    ? Object.values(fetchOutcomes).filter((outcome) => outcome.status === 'ok').length
+    : 0;
+  const fetchFailedCount = fetchOutcomes
+    ? Object.values(fetchOutcomes).filter((outcome) => outcome.status === 'failed').length
+    : 0;
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4" data-settings-row="providers.root">
@@ -141,6 +178,30 @@ export function ProvidersSettings() {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {fetchOutcomes && (
+            <span className="text-xs text-muted-foreground">
+              {t('Fetched {{count}} providers', { count: fetchOkCount })}
+              {fetchFailedCount > 0 && (
+                <span className="text-destructive">
+                  {' '}
+                  {t('{{count}} failed', { count: fetchFailedCount })}
+                </span>
+              )}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={fetching || providers.length === 0}
+            onClick={() => void fetchAllModels()}
+          >
+            {fetching ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-1.5 h-4 w-4" />
+            )}
+            {t('Fetch all models')}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <HardDriveDownload className="h-4 w-4 mr-1.5" />
             {t('Import from local apps')}
@@ -214,6 +275,7 @@ export function ProvidersSettings() {
                       : isSubscription
                         ? (account?.email ?? provider.oauthAccountKey ?? provider.name)
                         : provider.name;
+                    const fetchOutcome = fetchOutcomes?.[provider.id];
                     return (
                       <React.Fragment key={provider.id}>
                         <div
@@ -335,6 +397,13 @@ export function ProvidersSettings() {
                                 {t('Delete anyway')}
                               </Button>
                             </div>
+                          </div>
+                        )}
+                        {fetchOutcome?.status === 'failed' && (
+                          <div className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
+                            <span className="min-w-0 truncate">
+                              {t('Fetch failed')}: {fetchOutcome.message}
+                            </span>
                           </div>
                         )}
                       </React.Fragment>
