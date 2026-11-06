@@ -336,3 +336,9 @@ export const contextBridge = {
 export const webUtils = {
   getPathForFile: (_file: File): string => '',
 };
+
+/** Web 远程没有 Chromium 页面缩放，横幅按 100% 永不出现 */
+export const webFrame = {
+  getZoomFactor: (): number => 1,
+  setZoomFactor: (_factor: number): void => {},
+};

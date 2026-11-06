@@ -3181,6 +3181,8 @@ export const zhTranslations: Record<string, string> = {
   Unnamed: '未命名',
   'Group settings and member personas only. Memory, sessions, timeline, tasks, routines, models, skills and MCP are not included.':
     '只含群配置和成员人设，不含记忆、会话、时间线、看板、例行任务、模型、技能和 MCP。',
+  'Interface is zoomed to {{percent}}% · {{shortcut}}': '界面已缩放至 {{percent}}% · {{shortcut}}',
+  'Restore 100%': '恢复 100%',
 };
 
 export function normalizeLocale(input?: string): Locale {

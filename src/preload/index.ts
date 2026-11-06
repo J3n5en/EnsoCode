@@ -259,7 +259,8 @@ import type {
   WorkspaceSearchQueryRequest,
   WorkspaceSearchQueryResult,
 } from '@shared/workspaceSearchQuery';
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { zoomPercent } from '@shared/zoomBanner';
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
 
 const electronAPI = {
   env: {
@@ -1321,6 +1322,10 @@ const electronAPI = {
       const listener = (_: unknown, fullscreen: boolean) => callback(fullscreen);
       ipcRenderer.on(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_FULLSCREEN_CHANGED, listener);
+    },
+    getZoomPercent: (): number => zoomPercent(webFrame.getZoomFactor()),
+    resetZoom: (): void => {
+      webFrame.setZoomFactor(1);
     },
   },
   btw: {
