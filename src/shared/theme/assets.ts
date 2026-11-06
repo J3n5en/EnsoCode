@@ -1,4 +1,12 @@
-import type { ThemeAsset, ThemeAssetSlot, ThemeAssetState, ThemeAssets } from './types';
+import type {
+  ThemeAsset,
+  ThemeAssetSlot,
+  ThemeAssetState,
+  ThemeAssets,
+  ThemeBackground,
+  ThemeBackgroundParam,
+  ThemeBackgroundSize,
+} from './types';
 
 const ASSET_STATES = ['running', 'waiting', 'error'] as const satisfies readonly ThemeAssetState[];
 
@@ -118,6 +126,43 @@ export function parseThemeAssets(raw: unknown): ThemeAssets | undefined {
   return Object.keys(assets).length > 0 ? assets : undefined;
 }
 
+export const THEME_BACKGROUND_SIZES = [
+  'cover',
+  'contain',
+  'repeat',
+  'center',
+] as const satisfies readonly ThemeBackgroundSize[];
+
+/** 与设置页背景图的范围和默认值一致 */
+export const THEME_BACKGROUND_PARAMS: Record<
+  ThemeBackgroundParam,
+  { min: number; max: number; default: number }
+> = {
+  opacity: { min: 0, max: 1, default: 0.85 },
+  blur: { min: 0, max: 20, default: 0 },
+  brightness: { min: 0, max: 2, default: 1 },
+  saturation: { min: 0, max: 2, default: 1 },
+  mask: { min: 0, max: 1, default: 0.5 },
+  composerOpacity: { min: 0, max: 1, default: 0.6 },
+  codeOpacity: { min: 0, max: 1, default: 0.65 },
+};
+
+/** 主题 JSON 的 background：图片不合法整个丢掉；参数越界钳制，类型不对只丢该字段 */
+export function parseThemeBackground(raw: unknown): ThemeBackground | undefined {
+  if (!isRecord(raw)) return undefined;
+  const image = parseAsset(raw.image);
+  if (!image) return undefined;
+  const background: ThemeBackground = { image };
+  const size = THEME_BACKGROUND_SIZES.find((s) => s === raw.size);
+  if (size) background.size = size;
+  for (const [key, range] of Object.entries(THEME_BACKGROUND_PARAMS)) {
+    const value = raw[key];
+    if (typeof value === 'number' && Number.isFinite(value))
+      background[key as ThemeBackgroundParam] = Math.min(range.max, Math.max(range.min, value));
+  }
+  return background;
+}
+
 function mapAsset(asset: ThemeAsset, map: (path: string) => string): ThemeAsset {
   return {
     src: map(asset.src),
@@ -129,35 +174,55 @@ function mapAsset(asset: ThemeAsset, map: (path: string) => string): ThemeAsset 
   };
 }
 
+function themeDirMap(themePath: string, toUrl: (rel: string) => string) {
+  const dir = themePath.split('/').slice(0, -1).join('/');
+  return (path: string) => toUrl(dir ? `${dir}/${path}` : path);
+}
+
 /** 路径按主题 JSON 所在目录解析成插件内相对路径后交给 toUrl */
 export function resolveThemeAssets(
   assets: ThemeAssets,
   themePath: string,
   toUrl: (rel: string) => string
 ): ThemeAssets {
-  const dir = themePath.split('/').slice(0, -1).join('/');
-  const map = (path: string) => toUrl(dir ? `${dir}/${path}` : path);
+  const map = themeDirMap(themePath, toUrl);
   return Object.fromEntries(
     Object.entries(assets).map(([slot, asset]) => [slot, mapAsset(asset, map)])
   );
+}
+
+export function resolveThemeBackground(
+  background: ThemeBackground,
+  themePath: string,
+  toUrl: (rel: string) => string
+): ThemeBackground {
+  return { ...background, image: mapAsset(background.image, themeDirMap(themePath, toUrl)) };
 }
 
 const cssUrl = (url: string) => `url("${url.replace(/["\\\n\r\f]/g, encodeURIComponent)}")`;
 
 /**
  * 地址已解析好的素材 → CSS。每个槽位一个变量 `--enso-asset-<slot>`，主题 CSS 也能引用。
+ * 背景图只出变量 `--enso-asset-background`，由背景层引用，状态跟 data-enso-activity。
  * 层叠顺序：默认 < 深色 < 减少动态效果 < 状态
  */
-export function themeAssetsCss(assets: ThemeAssets | undefined): string {
-  if (!assets) return '';
+export function themeAssetsCss(
+  assets: ThemeAssets | undefined,
+  background?: ThemeBackground
+): string {
+  const entries: { name: string; asset: ThemeAsset; state: 'session' | 'activity'; css: string }[] =
+    (Object.keys(SLOTS) as ThemeAssetSlot[]).flatMap((slot) => {
+      const asset = assets?.[slot];
+      return asset ? [{ name: slot, asset, ...SLOTS[slot] }] : [];
+    });
+  if (background)
+    entries.push({ name: 'background', asset: background.image, state: 'activity', css: '' });
   const base: string[] = [];
   const dark: string[] = [];
   const still: string[] = [];
   const states: string[] = [];
   const rules: string[] = [];
-  for (const slot of Object.keys(SLOTS) as ThemeAssetSlot[]) {
-    const asset = assets[slot];
-    if (!asset) continue;
+  for (const { name: slot, asset, state: stateAttr, css } of entries) {
     const name = `--enso-asset-${slot}`;
     base.push(`${name}:${cssUrl(asset.src)}`);
     if (asset.still) {
@@ -167,10 +232,9 @@ export function themeAssetsCss(assets: ThemeAssets | undefined): string {
     if (asset.dark) dark.push(`${name}:${cssUrl(asset.dark)}`);
     for (const state of ASSET_STATES) {
       const url = asset.states?.[state];
-      if (url)
-        states.push(`:root[data-enso-${SLOTS[slot].state}="${state}"]{${name}:${cssUrl(url)}}`);
+      if (url) states.push(`:root[data-enso-${stateAttr}="${state}"]{${name}:${cssUrl(url)}}`);
     }
-    rules.push(SLOTS[slot].css);
+    if (css) rules.push(css);
   }
   if (base.length === 0) return '';
   return [

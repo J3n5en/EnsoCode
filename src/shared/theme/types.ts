@@ -51,6 +51,26 @@ export interface ThemeAsset {
 
 export type ThemeAssets = Partial<Record<ThemeAssetSlot, ThemeAsset>>;
 
+export type ThemeBackgroundSize = 'cover' | 'contain' | 'repeat' | 'center';
+
+/** 主题自带的背景图，参数与设置页背景图同义同范围；用户自己开了背景图时不生效 */
+export interface ThemeBackground {
+  /** states 跟 data-enso-activity */
+  image: ThemeAsset;
+  size?: ThemeBackgroundSize;
+  blur?: number;
+  brightness?: number;
+  saturation?: number;
+  /** 主题色遮罩 */
+  mask?: number;
+  /** 背景可见度，面板 alpha 取补 */
+  opacity?: number;
+  composerOpacity?: number;
+  codeOpacity?: number;
+}
+
+export type ThemeBackgroundParam = Exclude<keyof ThemeBackground, 'image' | 'size'>;
+
 export interface ThemeDefinition {
   id: ThemeKey;
   name: string;
@@ -60,5 +80,6 @@ export interface ThemeDefinition {
   /** 任意 `--x` 覆盖，派生之后叠加 */
   tokens?: Partial<Record<ThemeMode, ThemeTokens>>;
   assets?: ThemeAssets;
+  background?: ThemeBackground;
   css?: string;
 }

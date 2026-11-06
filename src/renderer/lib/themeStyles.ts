@@ -76,7 +76,9 @@ function applyTheme({ themeId, accentColor }: SettingsState): void {
     id: theme.id,
     tokens: themeTokensCss(theme, accentColor),
     // 素材在前，主题 CSS 可以覆盖或引用 --enso-asset-*
-    css: [themeAssetsCss(theme.assets), theme.css ?? ''].filter(Boolean).join('\n'),
+    css: [themeAssetsCss(theme.assets, theme.background), theme.css ?? '']
+      .filter(Boolean)
+      .join('\n'),
   };
   writeTheme(snapshot);
   if (hydrated) writeSnapshot(snapshot);

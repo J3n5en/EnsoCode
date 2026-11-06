@@ -174,6 +174,41 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 
 生成的 CSS 放在主题 `css` 前面，每个槽位还有一个变量 `--enso-asset-<槽位>`，值是当前生效的 `url()`。主题 CSS 可以覆盖槽位的摆法，也可以引用变量叠加别的图层。只有 `assets`、没有 `css` 的主题不需要「修改界面样式」同意。槽位表和生成逻辑在 `src/shared/theme/assets.ts`，它只依赖同目录模块，主题生成器会原样拷用。
 
+## 主题背景
+
+主题 JSON 可以加 `background`，带一张铺满窗口的壁纸，参数和外观页「背景图」那组设置同义：
+
+```json
+"background": {
+  "image": { "src": "assets/background.webp", "dark": "assets/background-dark.webp" },
+  "size": "cover",
+  "opacity": 0.85,
+  "blur": 0,
+  "brightness": 1,
+  "saturation": 1,
+  "mask": 0.5,
+  "composerOpacity": 0.6,
+  "codeOpacity": 0.65
+}
+```
+
+`image` 和素材槽位的写法一样，`still`、`dark`、`states` 都能用，状态跟 `data-enso-activity`。路径规则同上。`image` 不合法时整个 `background` 作废，主题照常加载。
+
+| 字段 | 对应设置 | 范围 | 默认 |
+| --- | --- | --- | --- |
+| `size` | 填充方式 | `cover`、`contain`、`repeat`、`center` | `cover` |
+| `opacity` | 背景可见度，即整张壁纸的不透明度；普通面板全透，弹出层保底 0.92 | 0–1 | 0.85 |
+| `blur` | 模糊，单位 px | 0–20 | 0 |
+| `brightness` | 亮度 | 0–2 | 1 |
+| `saturation` | 饱和度 | 0–2 | 1 |
+| `mask` | 遮罩，按画布色压暗或提亮 | 0–1 | 0.5 |
+| `composerOpacity` | 输入框不透明度 | 0–1 | 0.6 |
+| `codeOpacity` | 代码块不透明度 | 0–1 | 0.65 |
+
+越界的数值钳到范围内，不是数字或不认识的 `size` 只丢这一个字段，缺的字段取默认值。
+
+用户在外观页自己开了背景图时，用户的设置优先，主题背景不生效。用户没开时，主题背景按上表参数生效，界面和用户背景图一样变成半透明面板。外观页会提示「当前主题自带背景」。主题背景只支持图片，不支持视频、文件夹随机和网络地址。图片地址在变量 `--enso-asset-background` 里，由背景层引用。谁生效由 `src/renderer/lib/effectiveBackground.ts` 判定。
+
 ## 用户 CSS
 
 外观页有「自定义 CSS」开关，对应 `appearance.userCssEnabled`，默认关。旁边是「打开 user.css」。文件是 Main 拥有的 `userData/user.css`，不写进 `settings.json`。文件还不存在时，打开动作会先写入一份模板，再用系统默认程序打开。保存后界面跟着变，不用重启。关掉开关就不再注入这份文件。
@@ -192,7 +227,7 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 
 1. 建一个目录，放 `enso-plugin.json`。`schemaVersion` 为 `1`，`permissions` 为 `[]`。不需要 `main`。
 2. 在 `contributes.themes` 里加一项。`id` 不含 `/`，并匹配 `^[a-z][a-z0-9-]{0,31}$`。`path` 是插件目录内的相对路径，以 `.json` 结尾，不能是绝对路径，不能含 `..` 或反斜杠。
-3. JSON 里写全 `light` 和 `dark` 的九个字段。要改某一个派生变量，再加 `tokens`。要放角色图，加 `assets`，见「素材槽位」。
+3. JSON 里写全 `light` 和 `dark` 的九个字段。要改某一个派生变量，再加 `tokens`。要放角色图，加 `assets`，见「素材槽位」。要带壁纸，加 `background`，见「主题背景」。
 4. 需要改圆角、间距或锚点上的布局时，再加 `css`，路径以 `.css` 结尾。只使用 `data-enso` 和上面的变量。可以用相对 `url()` 引用插件目录内的图片和字体。不要加载远程资源。这一步会触发「修改界面样式」的同意。
 5. 设置里安装这个目录并启用。外观页的画廊里选它。插件停用后界面回到 `enso`，设置里的键还在。
 

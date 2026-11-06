@@ -42,6 +42,7 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { addToast } from '@/components/ui/toast';
+import { useEffectiveBackground } from '@/hooks/useBackgroundImage';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useI18n } from '@/i18n';
 import {
@@ -169,6 +170,7 @@ function BackgroundImageSettings() {
   const sizeMode = useSettingsStore((s) => s.backgroundSizeMode);
   const setSizeMode = useSettingsStore((s) => s.setBackgroundSizeMode);
   const bumpRefresh = useSettingsStore((s) => s.bumpBackgroundRefresh);
+  const themeBackground = useEffectiveBackground()?.source === 'theme';
 
   // 路径类输入框：本地编辑，blur/Enter 时提交（与字体设置同一惯例）
   const storedPath =
@@ -234,6 +236,14 @@ function BackgroundImageSettings() {
         </div>
         <Switch checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} />
       </div>
+
+      {themeBackground && (
+        <p className="text-sm text-muted-foreground">
+          {t(
+            'The current theme has its own background. Turn this on to replace it with your image.'
+          )}
+        </p>
+      )}
 
       {enabled && (
         <>

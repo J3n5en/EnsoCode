@@ -1,7 +1,9 @@
 import { isVideoPath, toLocalImageUrl, toRemoteImageProxyUrl } from '@shared/localImage';
 import * as React from 'react';
+import { useEffectiveBackground } from '@/hooks/useBackgroundImage';
 import { backgroundAppearance } from '@/lib/backgroundAppearance';
 import { holesClipPath } from '@/lib/backgroundClip';
+import type { EffectiveBackground } from '@/lib/effectiveBackground';
 import type { BackgroundSizeMode } from '@/stores/settings';
 import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
@@ -17,6 +19,7 @@ import { useSidePanelStore } from '@/stores/sidePanel';
  * - file 模式：本地路径经 local-image:// 协议加载
  * - folder 模式：files.listMedia 枚举目录后随机选一张；定时/手动刷新时重新随机
  * - url 模式：经 local-image://remote-fetch 主进程代理加载；刷新时以 nonce 绕开缓存
+ * - 用户没开背景图时，当前主题自带的背景经 --enso-asset-background 铺上（变体由主题 CSS 切换）
  */
 
 const SIZE_MODE_STYLES: Record<BackgroundSizeMode, React.CSSProperties> = {
@@ -31,6 +34,7 @@ const SIZE_MODE_STYLES: Record<BackgroundSizeMode, React.CSSProperties> = {
 };
 
 export function BackgroundLayer() {
+  const background = useEffectiveBackground();
   const enabled = useSettingsStore((s) => s.backgroundImageEnabled);
   const sourceType = useSettingsStore((s) => s.backgroundSourceType);
   const imagePath = useSettingsStore((s) => s.backgroundImagePath);
@@ -38,12 +42,6 @@ export function BackgroundLayer() {
   const urlPath = useSettingsStore((s) => s.backgroundUrlPath);
   const randomEnabled = useSettingsStore((s) => s.backgroundRandomEnabled);
   const randomInterval = useSettingsStore((s) => s.backgroundRandomInterval);
-  const blur = useSettingsStore((s) => s.backgroundBlur);
-  const brightness = useSettingsStore((s) => s.backgroundBrightness);
-  const saturation = useSettingsStore((s) => s.backgroundSaturation);
-  const mask = useSettingsStore((s) => s.backgroundMask);
-  const visibility = useSettingsStore((s) => s.backgroundOpacity);
-  const sizeMode = useSettingsStore((s) => s.backgroundSizeMode);
   const refreshNonce = useSettingsStore((s) => s.backgroundRefreshNonce);
 
   // 换图信号 = 手动刷新（nonce 经多窗口同步传来）+ 定时器；tick 单调递增兼作缓存 buster
@@ -92,7 +90,7 @@ export function BackgroundLayer() {
 
   return (
     <BackgroundShell>
-      {enabled && (
+      {background?.source === 'user' && (
         <BackgroundMedia
           state={{
             sourceType,
@@ -100,14 +98,15 @@ export function BackgroundLayer() {
             folderPick,
             urlPath,
             tick,
-            blur,
-            brightness,
-            saturation,
-            mask,
-            visibility,
-            sizeMode,
           }}
+          look={background}
         />
+      )}
+      {background?.source === 'theme' && (
+        <WallpaperLayer look={background}>
+          <ImageLayer image="var(--enso-asset-background)" look={background} />
+          <MaskLayer mask={background.mask} />
+        </WallpaperLayer>
       )}
     </BackgroundShell>
   );
@@ -138,28 +137,16 @@ interface MediaState {
   folderPick: string;
   urlPath: string;
   tick: number;
-  blur: number;
-  brightness: number;
-  saturation: number;
-  mask: number;
-  visibility: number;
-  sizeMode: BackgroundSizeMode;
 }
 
-function BackgroundMedia({ state }: { state: MediaState }) {
-  const {
-    sourceType,
-    imagePath,
-    folderPick,
-    urlPath,
-    tick,
-    blur,
-    brightness,
-    saturation,
-    mask,
-    visibility,
-    sizeMode,
-  } = state;
+const lookFilter = ({ blur, brightness, saturation }: EffectiveBackground) =>
+  `blur(${blur}px) brightness(${brightness}) saturate(${saturation})`;
+
+// 模糊会在边缘产生透明晕边，内层向外扩 2×blur 再被外层裁掉
+const lookBleed = ({ blur }: EffectiveBackground) => (blur > 0 ? `-${blur * 2}px` : '0');
+
+function BackgroundMedia({ state, look }: { state: MediaState; look: EffectiveBackground }) {
+  const { sourceType, imagePath, folderPick, urlPath, tick } = state;
 
   // 目标源解析
   const target = React.useMemo(() => {
@@ -204,16 +191,8 @@ function BackgroundMedia({ state }: { state: MediaState }) {
   if (!display) return null;
   const { src, video } = display;
 
-  const filter = `blur(${blur}px) brightness(${brightness}) saturate(${saturation})`;
-  // 模糊会在边缘产生透明晕边，内层向外扩 2×blur 再被外层裁掉
-  const bleed = blur > 0 ? `-${blur * 2}px` : '0';
-
   return (
-    <div
-      data-slot="background-media"
-      className="absolute inset-0"
-      style={{ opacity: backgroundAppearance(visibility).wallpaperOpacity }}
-    >
+    <WallpaperLayer look={look}>
       {video ? (
         <video
           key={src}
@@ -224,39 +203,68 @@ function BackgroundMedia({ state }: { state: MediaState }) {
           playsInline
           className="absolute"
           style={{
-            inset: bleed,
+            inset: lookBleed(look),
             width: 'auto',
             height: 'auto',
             minWidth: '100%',
             minHeight: '100%',
-            objectFit: sizeMode === 'contain' ? 'contain' : 'cover',
-            filter,
+            objectFit: look.size === 'contain' ? 'contain' : 'cover',
+            filter: lookFilter(look),
             transition: 'filter 0.3s ease',
           }}
         />
       ) : (
-        <div
-          key={src}
-          className="absolute"
-          style={{
-            inset: bleed,
-            backgroundImage: `url("${src}")`,
-            ...SIZE_MODE_STYLES[sizeMode],
-            filter,
-            transition: 'filter 0.3s ease',
-          }}
-        />
+        <ImageLayer key={src} image={`url("${src}")`} look={look} />
       )}
-      {/* 侧栏没有自己的底，字直接叠在壁纸上。主题色遮罩压住高光，深浅模式都跟着画布走 */}
-      {mask > 0 && (
-        <div
-          aria-hidden
-          className="absolute inset-0"
-          style={{
-            backgroundColor: `color-mix(in oklab, var(--canvas, var(--background)) ${Math.round(Math.min(1, Math.max(0, mask)) * 100)}%, transparent)`,
-          }}
-        />
-      )}
+      <MaskLayer mask={look.mask} />
+    </WallpaperLayer>
+  );
+}
+
+/** 可见度在整张壁纸上合成一次，前景面板置透（见 backgroundAppearance） */
+function WallpaperLayer({
+  look,
+  children,
+}: {
+  look: EffectiveBackground;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      data-slot="background-media"
+      className="absolute inset-0"
+      style={{ opacity: backgroundAppearance(look.opacity).wallpaperOpacity }}
+    >
+      {children}
     </div>
+  );
+}
+
+function ImageLayer({ image, look }: { image: string; look: EffectiveBackground }) {
+  return (
+    <div
+      className="absolute"
+      style={{
+        inset: lookBleed(look),
+        backgroundImage: image,
+        ...SIZE_MODE_STYLES[look.size],
+        filter: lookFilter(look),
+        transition: 'filter 0.3s ease',
+      }}
+    />
+  );
+}
+
+/** 侧栏没有自己的底，字直接叠在壁纸上。主题色遮罩压住高光，深浅模式都跟着画布走 */
+function MaskLayer({ mask }: { mask: number }) {
+  if (mask <= 0) return null;
+  return (
+    <div
+      aria-hidden
+      className="absolute inset-0"
+      style={{
+        backgroundColor: `color-mix(in oklab, var(--canvas, var(--background)) ${Math.round(Math.min(1, Math.max(0, mask)) * 100)}%, transparent)`,
+      }}
+    />
   );
 }

@@ -6,6 +6,7 @@ import {
   ContextMenuPopup,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import { useEffectiveBackground } from '@/hooks/useBackgroundImage';
 import { useI18n } from '@/i18n';
 import { getXtermTheme, withTransparentBackground } from '@/lib/ghosttyTheme';
 import {
@@ -47,7 +48,9 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const fontFamily = useSettingsStore((s) => s.terminalFontFamily);
   const fontSize = useSettingsStore((s) => s.terminalFontSize);
-  const bgImageEnabled = useSettingsStore((s) => s.backgroundImageEnabled);
+  const bgImageEnabled = useEffectiveBackground() !== null;
+  const bgImageEnabledRef = useRef(bgImageEnabled);
+  bgImageEnabledRef.current = bgImageEnabled;
   const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
@@ -65,7 +68,7 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
       }
       const settings = useSettingsStore.getState();
       const instance = attachTerminal(termId, wrapper, {
-        theme: resolveTerminalTheme(settings.terminalTheme, settings.backgroundImageEnabled),
+        theme: resolveTerminalTheme(settings.terminalTheme, bgImageEnabledRef.current),
         fontFamily: settings.terminalFontFamily,
         fontSize: settings.terminalFontSize,
       });

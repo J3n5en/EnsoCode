@@ -1,6 +1,35 @@
-import { useEffect } from 'react';
+import { resolveTheme } from '@shared/theme/themeKey';
+import { useEffect, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { backgroundAppearance } from '@/lib/backgroundAppearance';
+import { type EffectiveBackground, effectiveBackground } from '@/lib/effectiveBackground';
+import { availableThemes } from '@/lib/themeStyles';
+import { usePluginThemesStore } from '@/stores/pluginThemes';
 import { useSettingsStore } from '@/stores/settings';
+
+/** 当前生效的背景：用户背景图优先，否则当前主题自带的背景 */
+export function useEffectiveBackground(): EffectiveBackground | null {
+  const user = useSettingsStore(
+    useShallow((s) => ({
+      backgroundImageEnabled: s.backgroundImageEnabled,
+      backgroundSizeMode: s.backgroundSizeMode,
+      backgroundOpacity: s.backgroundOpacity,
+      backgroundBlur: s.backgroundBlur,
+      backgroundBrightness: s.backgroundBrightness,
+      backgroundSaturation: s.backgroundSaturation,
+      backgroundMask: s.backgroundMask,
+      backgroundComposerOpacity: s.backgroundComposerOpacity,
+      backgroundCodeOpacity: s.backgroundCodeOpacity,
+    }))
+  );
+  const themeId = useSettingsStore((s) => s.themeId);
+  const pluginThemes = usePluginThemesStore((s) => s.themes);
+  return useMemo(
+    () =>
+      effectiveBackground(user, resolveTheme(themeId, availableThemes(pluginThemes)).background),
+    [user, themeId, pluginThemes]
+  );
+}
 
 /**
  * 背景图的前景透明化。
@@ -15,10 +44,7 @@ import { useSettingsStore } from '@/stores/settings';
  * 仅在主窗口 App 挂载（设置窗口保持不透明）。
  */
 export function useBackgroundImage(): void {
-  const enabled = useSettingsStore((s) => s.backgroundImageEnabled);
-  const opacity = useSettingsStore((s) => s.backgroundOpacity);
-  const composerOpacity = useSettingsStore((s) => s.backgroundComposerOpacity);
-  const codeOpacity = useSettingsStore((s) => s.backgroundCodeOpacity);
+  const background = useEffectiveBackground();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -30,10 +56,11 @@ export function useBackgroundImage(): void {
       root.style.removeProperty('--bg-composer-alpha');
     };
 
-    if (!enabled) {
+    if (!background) {
       clear();
       return;
     }
+    const { opacity, composerOpacity, codeOpacity } = background;
 
     // 可见度在 BackgroundLayer 全局合成，前景面板不再重复铺底。
     const { panelAlpha, popoverAlpha } = backgroundAppearance(opacity);
@@ -46,5 +73,5 @@ export function useBackgroundImage(): void {
     // 输入框不透明度独立可调（设置项直接控制，不随可见度联动）
     root.style.setProperty('--bg-composer-alpha', String(composerOpacity));
     return clear;
-  }, [enabled, opacity, composerOpacity, codeOpacity]);
+  }, [background]);
 }

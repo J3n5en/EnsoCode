@@ -551,6 +551,8 @@ export const zhTranslations: Record<string, string> = {
   // Background image
   'Background image': '背景图',
   'Show a custom image behind the interface': '在界面背后显示自定义背景图',
+  'The current theme has its own background. Turn this on to replace it with your image.':
+    '当前主题自带背景，开启后用你的图片替换',
   'Source type': '来源类型',
   'Single image': '单张图片',
   'Folder (random)': '文件夹（随机）',

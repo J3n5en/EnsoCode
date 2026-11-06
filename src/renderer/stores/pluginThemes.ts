@@ -1,6 +1,6 @@
 import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
 import { pluginAssetUrl } from '@shared/localImage';
-import { resolveThemeAssets } from '@shared/theme/assets';
+import { resolveThemeAssets, resolveThemeBackground } from '@shared/theme/assets';
 import { rewriteThemeCssUrls, themeCssReferencesLocalImage } from '@shared/theme/themeCss';
 import { parseThemeFile } from '@shared/theme/themeFile';
 import { pluginThemeKey } from '@shared/theme/themeKey';
@@ -34,7 +34,7 @@ async function loadPlugin(plugin: ExtensionPluginSummary): Promise<Loaded> {
     try {
       const file = parseThemeFile(JSON.parse(await readText(plugin.id, contrib.path)));
       if (!file.ok) throw new Error(file.error);
-      const { ok: _ok, assets, ...palettes } = file;
+      const { ok: _ok, assets, background, ...palettes } = file;
       const toUrl = (rel: string) => pluginAssetUrl(plugin.id, rel, plugin.build);
       let css: string | undefined;
       if (contrib.css) {
@@ -48,6 +48,9 @@ async function loadPlugin(plugin: ExtensionPluginSummary): Promise<Loaded> {
         source: { kind: 'plugin', pluginId: plugin.id, pluginName: plugin.name },
         ...palettes,
         ...(assets ? { assets: resolveThemeAssets(assets, contrib.path, toUrl) } : {}),
+        ...(background
+          ? { background: resolveThemeBackground(background, contrib.path, toUrl) }
+          : {}),
         ...(css !== undefined ? { css } : {}),
       });
     } catch (error) {

@@ -19,6 +19,14 @@ describe('parseThemeFile', () => {
     expect(result).toEqual({ ok: true, light: palette(), dark: palette('#5e81ac') });
   });
 
+  it('带出背景，坏背景不让主题失败', () => {
+    const background = { image: { src: 'assets/bg.webp' }, size: 'repeat', mask: 0.2 };
+    const good = parseThemeFile({ light: palette(), dark: palette(), background });
+    expect(good.ok && good.background).toEqual(background);
+    const bad = parseThemeFile({ light: palette(), dark: palette(), background: { blur: 1 } });
+    expect(bad).toEqual({ ok: true, light: palette(), dark: palette() });
+  });
+
   it('tokens 只留合法键值，空的模式不出现', () => {
     const result = parseThemeFile({
       light: palette(),

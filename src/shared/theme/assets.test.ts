@@ -4,7 +4,9 @@ import { IMAGE_EXTENSIONS } from '../localImage';
 import {
   isThemeAssetPath,
   parseThemeAssets,
+  parseThemeBackground,
   resolveThemeAssets,
+  resolveThemeBackground,
   THEME_ASSET_EXTENSIONS,
   themeAssetsCss,
 } from './assets';
@@ -121,6 +123,75 @@ describe('resolveThemeAssets', () => {
   });
 });
 
+describe('parseThemeBackground', () => {
+  it('保留图片全部变体和全部参数', () => {
+    const background = {
+      image: { src: 'bg.webp', still: 'bg-s.png', dark: 'bg-d.webp', states: { running: 'r.gif' } },
+      size: 'contain',
+      blur: 4,
+      brightness: 0.8,
+      saturation: 1.2,
+      mask: 0.3,
+      opacity: 0.7,
+      composerOpacity: 0.5,
+      codeOpacity: 0.6,
+    };
+    expect(parseThemeBackground(background)).toEqual(background);
+    expect(parseThemeBackground({ image: ok })).toEqual({ image: ok });
+  });
+
+  it('越界的参数钳到设置页同样的范围', () => {
+    expect(
+      parseThemeBackground({
+        image: ok,
+        blur: 99,
+        brightness: 5,
+        saturation: -1,
+        mask: 2,
+        opacity: -0.5,
+        composerOpacity: 1.5,
+        codeOpacity: -3,
+      })
+    ).toEqual({
+      image: ok,
+      blur: 20,
+      brightness: 2,
+      saturation: 0,
+      mask: 1,
+      opacity: 0,
+      composerOpacity: 1,
+      codeOpacity: 0,
+    });
+  });
+
+  it('非数字参数和未知填充方式只丢该字段', () => {
+    expect(
+      parseThemeBackground({ image: ok, blur: '4', mask: Number.NaN, opacity: null, size: 'fill' })
+    ).toEqual({ image: ok });
+  });
+
+  it.each<[string, unknown]>([
+    ['不是对象', 'bg.webp'],
+    ['缺 image', { blur: 2 }],
+    ['image 越界', { image: { src: '../bg.webp' } }],
+    ['image 变体不合法', { image: { ...ok, dark: 'a.css' } }],
+  ])('%s 时整个背景丢掉', (_label, raw) => {
+    expect(parseThemeBackground(raw)).toBeUndefined();
+  });
+});
+
+describe('resolveThemeBackground', () => {
+  it('只改写图片路径，参数原样', () => {
+    expect(
+      resolveThemeBackground(
+        { image: { src: 'bg.webp', dark: 'd.webp' }, blur: 3 },
+        'themes/x.json',
+        (rel) => `u:${rel}`
+      )
+    ).toEqual({ image: { src: 'u:themes/bg.webp', dark: 'u:themes/d.webp' }, blur: 3 });
+  });
+});
+
 describe('themeAssetsCss', () => {
   it('没有素材时不生成 CSS', () => {
     expect(themeAssetsCss(undefined)).toBe('');
@@ -186,5 +257,28 @@ describe('themeAssetsCss', () => {
     const css = themeAssetsCss({ 'code-corner': { src: 'u/c' } });
     expect(css).toContain('[data-enso="code-block"]::after');
     expect(css).not.toContain('thinking');
+  });
+
+  it('背景图只生成变量，变体齐全，状态跟 data-enso-activity', () => {
+    const css = themeAssetsCss(undefined, {
+      image: { src: 'u/b', still: 'u/s', dark: 'u/d', states: { waiting: 'u/w' } },
+      blur: 4,
+    });
+    expect(css).toContain(':root{--enso-asset-background:url("u/b")}');
+    expect(css).toContain(':root.dark{--enso-asset-background:url("u/d")}');
+    expect(css).toContain(
+      '@media (prefers-reduced-motion: reduce){:root,:root.dark{--enso-asset-background:url("u/s")}}'
+    );
+    expect(css).toContain(
+      ':root[data-enso-activity="waiting"]{--enso-asset-background:url("u/w")}'
+    );
+    expect(css).not.toContain('var(--enso-asset-background)');
+  });
+
+  it('背景图与槽位共用一个 :root 块', () => {
+    const css = themeAssetsCss({ welcome: { src: 'u/w' } }, { image: { src: 'u/b' } });
+    expect(css).toContain(
+      ':root{--enso-asset-welcome:url("u/w");--enso-asset-background:url("u/b")}'
+    );
   });
 });
