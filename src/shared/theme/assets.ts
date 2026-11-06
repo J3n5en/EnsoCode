@@ -54,6 +54,10 @@ const SLOTS: Record<ThemeAssetSlot, { state: 'session' | 'activity'; css: string
     state: 'session',
     css: `[data-enso="code-block"]::after{${overlay('code-corner', 'right:20px;top:-13px;width:24px;height:24px;z-index:1')}}`,
   },
+  'todo-corner': {
+    state: 'session',
+    css: `[data-enso="todo"]{position:relative}[data-enso="todo"]:not(:has(+ * [data-enso="composer"]))::after{${overlay('todo-corner', 'right:6px;top:-30px;width:44px;height:44px')}}`,
+  },
   'status-icon': {
     state: 'session',
     css: `[data-enso="status-line"]::before{${overlay('status-icon', 'left:2px;top:50%;width:20px;height:20px;translate:0 -50%')}}`,

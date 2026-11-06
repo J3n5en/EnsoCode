@@ -259,6 +259,17 @@ describe('themeAssetsCss', () => {
     expect(css).not.toContain('thinking');
   });
 
+  it('待办角标挂在时间线里的待办上，跟当前会话状态', () => {
+    const assets = parseThemeAssets({
+      'todo-corner': { src: 'a/t.png', states: { running: 'a/r.png' } },
+    });
+    const css = themeAssetsCss(assets);
+    expect(css).toContain('[data-enso="todo"]:not(:has(+ * [data-enso="composer"]))::after');
+    expect(css).toMatch(
+      /\[data-enso-session="running"\][^{]*\{--enso-asset-todo-corner:url\("a\/r\.png"\)/
+    );
+  });
+
   it('背景图只生成变量，变体齐全，状态跟 data-enso-activity', () => {
     const css = themeAssetsCss(undefined, {
       image: { src: 'u/b', still: 'u/s', dark: 'u/d', states: { waiting: 'u/w' } },

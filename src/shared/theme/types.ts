@@ -35,6 +35,7 @@ export type ThemeAssetSlot =
   | 'composer-peek'
   | 'thinking'
   | 'code-corner'
+  | 'todo-corner'
   | 'status-icon'
   | 'panel-corner';
 

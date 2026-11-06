@@ -167,6 +167,7 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 | `composer-peek` | 从输入区上沿探头，聚焦时弹起 | 右 72px，84×66，底边对齐 | `data-enso-session` |
 | `thinking` | 思考块左侧 | 34×34，思考块左缩进 36px | `data-enso-session` |
 | `code-corner` | 代码块右上沿 | 右 20px、上 -13px，24×24 | `data-enso-session` |
+| `todo-corner` | 时间线里待办卡片右上沿，紧贴输入框的那张不挂 | 右 6px、上 -30px，44×44 | `data-enso-session` |
 | `status-icon` | 状态行左侧 | 左 2px、垂直居中，20×20 | `data-enso-session` |
 | `panel-corner` | 右侧面板右下角 | 右下各 10px，72×72，不透明度 0.9 | `data-enso-session` |
 
