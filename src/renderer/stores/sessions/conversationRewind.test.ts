@@ -312,5 +312,9 @@ describe('extractRewindDraft', () => {
     expect(draft(`${block}\n\n修 bug`)).toEqual({ text: '/skill:poteto-mode 修 bug' });
     expect(draft(block)).toEqual({ text: '/skill:poteto-mode' });
     expect(draft(`前缀 ${block}`)).toEqual({ text: `前缀 ${block}` });
+    const other = '<skill name="diffs" location="/d/SKILL.md">\n# D\n</skill>';
+    expect(draft(`${block}\n\n${other}\n\n修 bug`)).toEqual({
+      text: '/skill:poteto-mode /skill:diffs 修 bug',
+    });
   });
 });

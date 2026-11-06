@@ -579,7 +579,7 @@ describe('typed multi-entity mentions', () => {
     ];
     const payload = createEditorPayload({
       segments,
-      slash: null,
+      slashes: [],
       images: [],
       recipient: agents[1],
     });
@@ -595,11 +595,20 @@ describe('typed multi-entity mentions', () => {
     ]);
     expect(payload.recipient).toBe(agents[1]);
     // slash 前缀拼接；空正文只发 slash
-    expect(createEditorPayload({ segments: [], slash: '/plan', images: [] }).text).toBe('/plan');
+    expect(createEditorPayload({ segments: [], slashes: ['/plan'], images: [] }).text).toBe(
+      '/plan'
+    );
+    expect(
+      createEditorPayload({
+        segments: [{ type: 'text', text: '做事' }],
+        slashes: ['/skill:a', '/skill:b'],
+        images: [],
+      }).text
+    ).toBe('/skill:a /skill:b 做事');
     expect(
       createEditorPayload({
         segments: [{ type: 'text', text: ' go ' }],
-        slash: '/plan',
+        slashes: ['/plan'],
         images: [],
       }).text
     ).toBe('/plan go');
@@ -611,7 +620,7 @@ describe('typed multi-entity mentions', () => {
         { type: 'text', text: 'see ' },
         { type: 'file', path: 'src/components/' },
       ],
-      slash: null,
+      slashes: [],
       images: [],
     });
     expect(payload.text).toBe('see @src/components/');
@@ -669,7 +678,7 @@ describe('typed multi-entity mentions', () => {
     };
     const payload = createEditorPayload({
       segments: [{ type: 'text', text: 'restyle ' }, ui],
-      slash: null,
+      slashes: [],
       images: [],
     });
     expect(payload.text).toBe(

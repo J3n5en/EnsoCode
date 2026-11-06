@@ -1,5 +1,6 @@
 import { type PlanState, splitPlanPrefix } from '@shared/planMode';
 import { truncatedProjectionHead } from '@shared/projectedText';
+import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
 import {
   type AgentSessionCustomEntry,
   type ApprovalRequestInfo,
@@ -51,10 +52,6 @@ function textOf(message: ProjectedMessage): string {
     .trim();
 }
 
-const SKILL_SLASH = /^\/skill:(\S+)(?:\s+([\s\S]*))?$/;
-const SKILL_BLOCK =
-  /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/;
-
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 
 function stripRolePrefix(text: string): string {
@@ -72,10 +69,13 @@ function sameUserText(optimistic: string, delivered: string): boolean {
   if (optimistic === plain.replace(IMAGE_HINTS, '')) return true;
   const head = truncatedProjectionHead(delivered);
   if (head !== null && optimistic.startsWith(stripRolePrefix(head))) return true;
-  const slash = SKILL_SLASH.exec(optimistic);
-  const block = SKILL_BLOCK.exec(delivered);
-  if (!slash || !block) return false;
-  return slash[1] === block[1] && (slash[2] ?? '').trim() === (block[4] ?? '').trim();
+  const slash = parseSkillCommands(optimistic);
+  const blocks = splitSkillBlocks(delivered);
+  if (slash.names.length === 0 || !blocks) return false;
+  return (
+    slash.names.join(' ') === blocks.skills.map((skill) => skill.name).join(' ') &&
+    slash.rest === blocks.rest
+  );
 }
 
 function leftoverSnapshotUserTexts(

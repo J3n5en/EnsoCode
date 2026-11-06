@@ -312,7 +312,7 @@ export function splitMentionRefs(text: string): SentMentionRefs {
 /** 编辑器段 → 发送 payload：wire text 内联序列化，mentions 从段派生 */
 export function createEditorPayload(input: {
   segments: readonly MentionSegment[];
-  slash: string | null;
+  slashes: readonly string[];
   images: AttachedImage[];
   recipient?: AgentTypeMentionCandidate;
 }): ComposerPayload {
@@ -346,8 +346,9 @@ export function createEditorPayload(input: {
       };
     });
   if (input.recipient) mentions.push(input.recipient);
+  const head = input.slashes.join(' ');
   return {
-    text: input.slash ? (content ? `${input.slash} ${content}` : input.slash) : content,
+    text: head ? (content ? `${head} ${content}` : head) : content,
     images: input.images.map(({ data, mimeType }) => ({ data, mimeType })),
     mentions,
     ...(input.recipient ? { recipient: input.recipient } : {}),

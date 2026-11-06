@@ -4,6 +4,8 @@
  * worker 此时已 register，命令进同一 gate。热/冷发送前共用 shouldSendRewindCommand。
  */
 
+import { joinSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
+
 export interface ConversationRewindView {
   started: boolean;
   spawning?: boolean;
@@ -213,13 +215,13 @@ export function extractRewindDraft(
   };
 }
 
-const SKILL_BLOCK =
-  /^<skill name="([^"]+)" location="[^"]*">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]*))?$/;
-
 // pi 已把 /skill:name 展开成 XML；原样回填会让输入拦截器（如 poteto 模式）再包一层
 function collapseSkillBlock(text: string): string {
-  const match = SKILL_BLOCK.exec(text);
-  if (!match) return text;
-  const rest = match[2]?.trim();
-  return rest ? `/skill:${match[1]} ${rest}` : `/skill:${match[1]}`;
+  const blocks = splitSkillBlocks(text);
+  return blocks
+    ? joinSkillCommands(
+        blocks.skills.map((skill) => skill.name),
+        blocks.rest
+      )
+    : text;
 }

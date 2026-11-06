@@ -5,6 +5,7 @@ import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
 import type {
   AgentRunProgress,
   AgentSessionCustomEntry,
@@ -357,10 +358,6 @@ function isFromMainAgent(text: string): boolean {
   return MAIN_AGENT_BLOCK.test(role ? text.slice(role[0].length) : text);
 }
 
-/** pi 把 /skill:name 展开成整段 XML；气泡里显示高亮 tag，点击看正文 */
-const SKILL_BLOCK =
-  /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/;
-
 function SkillTag({ name, content }: { name: string; content: string }) {
   const { t } = useI18n();
   return (
@@ -392,16 +389,38 @@ function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
   );
 }
 
-function SkillInvocation({ text }: { text: string }) {
-  const match = SKILL_BLOCK.exec(text);
-  if (!match) return null;
-  const [, name, , content, userMessage] = match;
+/** /skill:name 展开后的 XML 块：气泡里每个块一个高亮 tag，点击看正文 */
+function SkillInvocation({ blocks }: { blocks: NonNullable<ReturnType<typeof splitSkillBlocks>> }) {
   return (
-    <ChipBubble chip={<SkillTag name={name} content={content} />} extra={userMessage?.trim()} />
+    <ChipBubble
+      chip={
+        <span className="inline-flex flex-wrap gap-1 align-middle">
+          {blocks.skills.map((skill) => (
+            <SkillTag key={skill.location} name={skill.name} content={skill.body} />
+          ))}
+        </span>
+      }
+      extra={blocks.rest}
+    />
   );
 }
 
 function SlashInvocation({ text }: { text: string }) {
+  const skills = parseSkillCommands(text);
+  if (skills.names.length > 1) {
+    return (
+      <ChipBubble
+        chip={
+          <span className="inline-flex flex-wrap gap-1 align-middle">
+            {skills.names.map((name) => (
+              <SlashChip key={name} name={`/skill:${name}`} />
+            ))}
+          </span>
+        }
+        extra={skills.rest}
+      />
+    );
+  }
   const parsed = splitSlashCommand(text);
   if (!parsed.slash) return null;
   return <ChipBubble chip={<SlashChip name={parsed.slash} />} extra={parsed.rest.trim()} />;
@@ -668,7 +687,8 @@ function UserText({
       </div>
     );
   }
-  if (SKILL_BLOCK.test(text)) return <SkillInvocation text={text} />;
+  const skillBlocks = splitSkillBlocks(text);
+  if (skillBlocks) return <SkillInvocation blocks={skillBlocks} />;
   if (splitSlashCommand(text).slash) return <SlashInvocation text={text} />;
   const migrated = WORKSPACE_MIGRATED_PREFIX.exec(text);
   if (migrated) {

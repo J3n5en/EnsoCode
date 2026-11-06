@@ -242,6 +242,7 @@ import {
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
 import { type SilentTurnKind, silentTurnKind } from './silentTurn';
+import { skillChainExtension } from './skillChainExtension';
 import { assignCompactRoute, providerKeyFor, smartCompactInlineExtension } from './smartCompact';
 import {
   createSshExecutor,
@@ -577,7 +578,7 @@ function createSessionResourceLoader(options: {
   const persona = options.persona;
   const pluginCommands = options.pluginCommands ?? [];
   const pluginHooks = options.pluginHooks;
-  return new DefaultResourceLoader({
+  const loader: DefaultResourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,
     settingsManager: createProjectSettingsManager(
@@ -663,6 +664,7 @@ function createSessionResourceLoader(options: {
           ]
         : []),
       ...(options.pluginEvents ? [createPluginEventsExtension(options.pluginEvents.invoker)] : []),
+      skillChainExtension(() => loader.getSkills().skills),
       options.silentTurnRecovery,
       appendSystemPromptExtension('workspace-policy', WORKSPACE_POLICY_PROMPT),
       ...(options.childContract
@@ -702,6 +704,7 @@ function createSessionResourceLoader(options: {
           ...(harness ? readHarnessRuleFiles(options.cwd) : []),
         ]),
   });
+  return loader;
 }
 
 /** Enso 不走 pi 的会话切换流程，session_shutdown 要自己发（Claude 插件的 SessionEnd hook 靠它） */
