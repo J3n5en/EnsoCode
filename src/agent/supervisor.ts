@@ -44,7 +44,6 @@ import {
   PLAN_ENTRY_TYPE,
   parsePlanMessage,
   splitPlanPrefix,
-  withPlanNote,
 } from '@shared/planMode';
 import {
   type MaskReport,
@@ -63,6 +62,7 @@ import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import { DEFAULT_SSH_TIMEOUT_SECONDS } from '@shared/sshTimeout';
 import { replacePersonaParagraph } from '@shared/systemPrompt';
+import { prependTurnNote } from '@shared/turnNotes';
 import type {
   AgentCommand,
   AgentRemoteConfig,
@@ -1688,8 +1688,13 @@ export class SessionSupervisor {
         this.must(command.parent);
         // 清理幂等：子会话从未建成（spawn 被拒）或已换代时无事可做，不能抛错连累父会话
         const child = this.sessions.get(command.child.sessionId);
+        // 实体已不在（task 跑完/失败/重启）：仍回流 dismissed，否则渲染层 tab 永远卡住
+        if (!child) {
+          await this.dismissCoworker(command.parent.sessionId, command.child.sessionId);
+          return;
+        }
         if (
-          !child?.childIdentity ||
+          !child.childIdentity ||
           !isSameChildSessionIdentity(command.child, child.childIdentity)
         ) {
           return;
@@ -5700,7 +5705,7 @@ function withPendingPlanNote(
 ): string {
   text = consumeUnattendedNote(managed, text);
   const note = managed.plan?.takeNote();
-  return note ? withPlanNote(note, text) : text;
+  return note ? prependTurnNote(note, text) : text;
 }
 
 /** coworker 首条消息前缀注入角色提示,消费一次 */

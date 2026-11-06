@@ -2104,6 +2104,15 @@ describe('SessionSupervisor custom parent system prompt', () => {
           event.status === 'failed'
       )
     ).toEqual([]);
+    // worker 侧已无实体（task 跑完/失败）时仍要回流 dismissed，渲染层才能收掉 tab
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'coworker-update' &&
+          event.coworker.id === child.sessionId &&
+          event.coworker.status === 'dismissed'
+      )
+    ).toBe(true);
     await supervisor.shutdown();
   });
 
