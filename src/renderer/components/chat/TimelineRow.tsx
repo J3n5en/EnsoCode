@@ -1484,7 +1484,7 @@ function ThinkingRow({
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const expanded = thinkingRowExpanded(userToggled, streaming, expandLiveReasoning);
   return (
-    <div data-enso="thinking">
+    <div data-enso="thinking" data-live={streaming || undefined}>
       <button
         type="button"
         onClick={() => setUserToggled(!expanded)}

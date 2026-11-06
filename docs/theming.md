@@ -121,6 +121,24 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 | `settings-nav` | 设置导航。 |
 | `settings-content` | 设置内容。 |
 
+## 状态
+
+主窗口在 `<html>` 上写两个状态属性，值都是 `idle`、`running`、`waiting`、`error` 之一，含义和优先级与插件 `session_status` 事件相同，见 [插件](plugins.md) 的「会话状态」：
+
+- `data-enso-activity`：所有主会话里优先级最高的状态。
+- `data-enso-session`：当前打开的会话的状态。没有打开会话时是 `idle`。
+
+`waiting` 包括等待回答的提问、等待审批的工具调用和能力确认。未读不算状态。设置窗口不写这两个属性。
+
+思考块 `[data-enso="thinking"]` 在思考进行中带 `data-live`，结束后去掉。
+
+```css
+:root[data-enso-session="error"] [data-enso="composer"] { border-color: var(--destructive); }
+[data-enso="thinking"][data-live]::before { background-image: var(--my-busy); }
+```
+
+这些属性和锚点一样是稳定接口，不要再用内部类名（例如 `.animate-pulse`）推断状态。
+
 ## 用户 CSS
 
 外观页有「自定义 CSS」开关，对应 `appearance.userCssEnabled`，默认关。旁边是「打开 user.css」。文件是 Main 拥有的 `userData/user.css`，不写进 `settings.json`。文件还不存在时，打开动作会先写入一份模板，再用系统默认程序打开。保存后界面跟着变，不用重启。关掉开关就不再注入这份文件。
