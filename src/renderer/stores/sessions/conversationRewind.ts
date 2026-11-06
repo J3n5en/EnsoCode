@@ -207,5 +207,19 @@ export function extractRewindDraft(
       : []
   );
   if (!text && images.length === 0) return {};
-  return { ...(text ? { text } : {}), ...(images.length > 0 ? { images } : {}) };
+  return {
+    ...(text ? { text: collapseSkillBlock(text) } : {}),
+    ...(images.length > 0 ? { images } : {}),
+  };
+}
+
+const SKILL_BLOCK =
+  /^<skill name="([^"]+)" location="[^"]*">\n[\s\S]*?\n<\/skill>(?:\n\n([\s\S]*))?$/;
+
+// pi 已把 /skill:name 展开成 XML；原样回填会让输入拦截器（如 poteto 模式）再包一层
+function collapseSkillBlock(text: string): string {
+  const match = SKILL_BLOCK.exec(text);
+  if (!match) return text;
+  const rest = match[2]?.trim();
+  return rest ? `/skill:${match[1]} ${rest}` : `/skill:${match[1]}`;
 }
