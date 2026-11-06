@@ -22,8 +22,6 @@ interface TitleBarProps {
    * Keep the left title except on macOS, where traffic lights take precedence.
    */
   centered?: React.ReactNode;
-  /** 居中内容对齐的横向区间（窗口坐标，如对话卡片）；缺省按整行居中 */
-  centerOver?: { left: number; right: number } | null;
 }
 
 export function SummonEnsoButton({ label = true }: { label?: boolean }) {
@@ -58,7 +56,6 @@ export function TitleBar({
   actions,
   leading,
   centered,
-  centerOver,
 }: TitleBarProps) {
   const kind = useWindowChromeKind();
   const isMac = kind === 'mac';
@@ -89,13 +86,7 @@ export function TitleBar({
       {centered && (
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          style={
-            centerOver
-              ? { left: centerOver.left, right: `calc(100% - ${centerOver.right}px)` }
-              : isWindows
-                ? { right: nativeControlsInset }
-                : undefined
-          }
+          style={isWindows ? { right: nativeControlsInset } : undefined}
         >
           <div className="no-drag pointer-events-auto">{centered}</div>
         </div>

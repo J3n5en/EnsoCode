@@ -393,32 +393,6 @@ export default function App() {
     },
     [desktopShell]
   );
-  // Code/Bot 切换按对话卡片居中：侧栏、右侧面板开合与拖宽都会改变卡片宽度
-  const [mainEl, setMainEl] = useState<HTMLDivElement | null>(null);
-  const [mainBox, setMainBox] = useState<{ left: number; right: number } | null>(null);
-  useEffect(() => {
-    const el = mainEl;
-    if (!el) {
-      setMainBox(null);
-      return;
-    }
-    const update = () => {
-      const r = el.getBoundingClientRect();
-      setMainBox((prev) =>
-        prev && prev.left === r.left && prev.right === r.right
-          ? prev
-          : { left: r.left, right: r.right }
-      );
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    window.addEventListener('resize', update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', update);
-    };
-  }, [mainEl]);
   const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
   // 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行；Windows 原生按钮由面板 tab 条右端让位，
   // Linux 自绘按钮在顶栏里会被面板盖住，保持独立卡片
@@ -523,7 +497,6 @@ export default function App() {
           }
           // 顶栏态全屏：面板 tab 条铺满整行，居中开关会被压在 tab 下
           centered={(sideInTitleRow && sideFullscreen ? null : modeSwitch) ?? undefined}
-          centerOver={desktopShell ? mainBox : undefined}
           className={cn(
             chromeKind !== 'mac' && !remoteNodeActive && 'pl-0',
             desktopShell && 'border-b-0',
@@ -627,7 +600,6 @@ export default function App() {
               )}
             >
               <div
-                ref={setMainEl}
                 data-enso="main"
                 className={cn(
                   'flex min-h-0 min-w-0 flex-1 flex-col bg-background',
