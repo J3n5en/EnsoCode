@@ -173,6 +173,12 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Pin unfinished todos',
   },
   {
+    id: 'appearance.chatTypography',
+    category: 'appearance',
+    title: 'Conversation typography',
+    description: 'Headings, tables and inline code scale with the body text',
+  },
+  {
     id: 'general.notifyMainAgentOnly',
     category: 'general',
     title: 'Notify only for the main agent',

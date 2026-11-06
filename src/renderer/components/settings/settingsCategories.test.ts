@@ -1,3 +1,4 @@
+import { buildSettingsCatalog } from '@shared/searchAnything';
 import { describe, expect, it } from 'vitest';
 import type { SettingsCategory } from './constants';
 import {
@@ -138,6 +139,17 @@ describe('groupCategories', () => {
       'app',
       'system',
     ]);
+  });
+});
+
+describe('appearance search rows', () => {
+  it('会话排版登记在外观页', () => {
+    expect(
+      buildSettingsCatalog().find((entry) => entry.id === 'appearance.chatTypography')
+    ).toMatchObject({
+      category: 'appearance',
+      title: 'Conversation typography',
+    });
   });
 });
 

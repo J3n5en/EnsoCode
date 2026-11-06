@@ -96,6 +96,7 @@ export const SETTINGS_STATE_FIELDS = [
   'collapseCompletedActivity',
   'pinUnfinishedTodos',
   'chatWide',
+  'chatTypography',
   'notifyMainAgentOnly',
   'maxActiveCoworkers',
   'autoRetryLimit',

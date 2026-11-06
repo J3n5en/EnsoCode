@@ -491,7 +491,7 @@ function MarkdownAnchor({
 
   if (codeText !== null) {
     return (
-      <span className="inline-flex max-w-full items-center gap-0.5 rounded-[5px] border border-border/70 bg-muted/70 py-px pr-0.5 pl-1 align-baseline font-mono text-[0.85em]">
+      <span className="inline-flex max-w-full items-center gap-0.5 rounded-[5px] border border-border/70 bg-muted/70 py-px pr-0.5 pl-1 align-baseline font-mono text-(length:--chat-inline-code-size) [font-weight:var(--chat-inline-code-weight)]">
         {anchor}
         <button
           type="button"
@@ -536,10 +536,13 @@ export function markdownUrlTransform(value: string, key?: string, allowLocal = t
 }
 
 const P_CLASS = 'my-2 leading-[1.7] first:mt-0 last:mb-0';
-const H1_CLASS = 'mt-4 mb-2 text-[1.5em] leading-tight font-semibold';
-const H2_CLASS = 'mt-4 mb-2 text-[1.3em] leading-tight font-semibold';
-const H3_CLASS = 'mt-3 mb-1.5 text-[1.15em] leading-tight font-semibold';
-const H4_CLASS = 'mt-3 mb-1 font-semibold';
+const H1_CLASS =
+  'mt-4 mb-2 text-(length:--chat-h1-size) leading-tight [font-weight:var(--chat-h1-weight)]';
+const H2_CLASS =
+  'mt-4 mb-2 text-(length:--chat-h2-size) leading-tight [font-weight:var(--chat-h2-weight)]';
+const H3_CLASS =
+  'mt-3 mb-1.5 text-(length:--chat-h3-size) leading-tight [font-weight:var(--chat-h3-weight)]';
+const H4_CLASS = 'mt-3 mb-1 text-(length:--chat-h4-size) [font-weight:var(--chat-h4-weight)]';
 const TH_CLASS = 'whitespace-nowrap border-b border-border px-2 py-1 text-left font-medium';
 const TD_CLASS = 'whitespace-nowrap border-b border-border/50 px-2 py-1';
 
@@ -609,7 +612,7 @@ export const markdownComponents: Components = {
           type="button"
           onClick={onClick}
           title={value}
-          className="inline-flex max-w-full items-center rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px align-baseline font-mono text-[0.85em] text-brand transition-colors hover:bg-muted"
+          className="inline-flex max-w-full items-center rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px align-baseline font-mono text-(length:--chat-inline-code-size) [font-weight:var(--chat-inline-code-weight)] text-brand transition-colors hover:bg-muted"
         >
           <span className="truncate">{value}</span>
         </button>
@@ -623,7 +626,7 @@ export const markdownComponents: Components = {
       );
     }
     return (
-      <code className="rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px font-mono text-[0.85em]">
+      <code className="rounded-[5px] border border-border/70 bg-muted/70 px-1 py-px font-mono text-(length:--chat-inline-code-size) [font-weight:var(--chat-inline-code-weight)]">
         {children}
       </code>
     );
@@ -656,7 +659,7 @@ export const markdownComponents: Components = {
     const raw = start !== undefined && end !== undefined ? text.slice(start, end) : null;
     return (
       <div className="group/table relative my-2 min-w-0 max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
-        <table className="w-max min-w-full border-collapse text-[0.9em] leading-[1.5] [overflow-wrap:normal]">
+        <table className="w-max min-w-full border-collapse text-(length:--chat-table-size) [font-weight:var(--chat-table-weight)] leading-[1.5] [overflow-wrap:normal]">
           {children}
         </table>
         {raw && !streaming && (
@@ -898,7 +901,7 @@ function MarkdownView({
   );
   return (
     <MarkdownCtx.Provider value={ctx}>
-      <div className={streaming ? 't-stream-live' : undefined}>
+      <div className={cn('[font-weight:var(--chat-body-weight)]', streaming && 't-stream-live')}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
           components={leafSlot ? leafMarkdownComponents : markdownComponents}

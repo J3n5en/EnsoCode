@@ -568,7 +568,7 @@ function MentionRefChips({
 }
 
 export const USER_BUBBLE =
-  'max-w-[82%] rounded-[10px] bg-muted px-3.5 py-[9px] text-[14.5px] leading-[1.6]';
+  'max-w-[82%] rounded-[10px] bg-muted px-3.5 py-[9px] text-(length:--chat-body-size) leading-[1.6]';
 
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
 function UserText({
@@ -1388,7 +1388,7 @@ function TextRow({
     sessionId: host ? host.sessionId : localSessionId,
   };
   return (
-    <div data-enso="message-assistant" className="group text-[14.5px]">
+    <div data-enso="message-assistant" className="group text-(length:--chat-body-size)">
       <Markdown
         text={item.text}
         streaming={item.streaming}

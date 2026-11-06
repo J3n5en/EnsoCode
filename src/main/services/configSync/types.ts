@@ -1,4 +1,5 @@
 import type { AccentColor } from '@shared/accentColor';
+import type { ChatTypography } from '@shared/chatTypography';
 import type { CompactStrategy } from '@shared/compactStrategy';
 import type { DefaultModelRef } from '@shared/defaultModel';
 import type { Locale } from '@shared/i18n';
@@ -145,6 +146,7 @@ export interface ConfigSyncState {
   collapseCompletedActivity?: boolean;
   pinUnfinishedTodos?: boolean;
   chatWide?: boolean;
+  chatTypography?: ChatTypography;
   notifyMainAgentOnly?: boolean;
   maxActiveCoworkers?: number;
   autoRetryLimit?: number;
