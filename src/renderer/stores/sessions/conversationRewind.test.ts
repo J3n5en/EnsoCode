@@ -304,4 +304,20 @@ describe('extractRewindDraft', () => {
   it('对不上返回 null', () => {
     expect(extractRewindDraft([{ role: 'assistant', content: [] }], 0)).toBe(null);
   });
+
+  it('已展开的技能块还原成 /skill: 命令，重发不再套层', () => {
+    const block = '<skill name="poteto-mode" location="/p/SKILL.md">\nReferences.\n\n# P\n</skill>';
+    const draft = (text: string) =>
+      extractRewindDraft([{ role: 'user', content: [{ type: 'text', text }] }], 0);
+    expect(draft(`${block}\n\n修 bug`)).toEqual({ text: '/skill:poteto-mode 修 bug' });
+    expect(draft(block)).toEqual({ text: '/skill:poteto-mode' });
+    expect(draft(`前缀 ${block}`)).toEqual({ text: `前缀 ${block}` });
+    const other = '<skill name="diffs" location="/d/SKILL.md">\n# D\n</skill>';
+    expect(draft(`${block}\n\n${other}\n\n修 bug`)).toEqual({
+      text: '/skill:poteto-mode /skill:diffs 修 bug',
+    });
+    expect(
+      draft(`${block}\n\n<unattended>\nUnattended mode is ON: x\n</unattended>\n\n修 bug`)
+    ).toEqual({ text: '/skill:poteto-mode 修 bug' });
+  });
 });

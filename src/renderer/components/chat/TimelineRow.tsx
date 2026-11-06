@@ -5,6 +5,8 @@ import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
+import { splitTurnNotes } from '@shared/turnNotes';
 import type {
   AgentRunProgress,
   AgentSessionCustomEntry,
@@ -97,6 +99,7 @@ import { PluginIcon } from '../../plugins/PluginIcon';
 import { PluginMessageActions, PluginThinkingBody, PluginToolCardSlot } from '../../plugins/slots';
 import { ApprovalReviewBar } from './ApprovalReviewBar';
 import { AskUserResult } from './AskUserResult';
+import { parseAgentNotification, type SubagentNotice } from './agentNotification';
 import { CodeBlock } from './CodeBlock';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useChatHost } from './chatHost';
@@ -315,6 +318,56 @@ function UnattendedNoteBanner({ note }: { note: UnattendedNoteKind }) {
 
 /** 合成注入块（后台任务 / 子代理完成通知等）：多行时默认只露首行，点击展开全文 */
 function SyntheticNotice({ tag, body }: { tag: string; body: string }) {
+  const notices = tag === 'agent-notification' ? parseAgentNotification(body) : null;
+  if (notices) return <SubagentNotices notices={notices} />;
+  return <RawSyntheticNotice tag={tag} body={body} />;
+}
+
+/** 子代理完成通知：首行作标题，展开后正文按 Markdown 渲染，用量收进底栏 */
+function SubagentNotices({ notices }: { notices: SubagentNotice[] }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="w-full overflow-hidden rounded-lg border border-dashed border-border/60 text-xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-start gap-2 px-3 py-2 text-left hover:text-foreground"
+      >
+        <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{notices.map((n) => n.header).join(' · ')}</span>
+        <ChevronRight
+          className={cn('mt-0.5 h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90')}
+        />
+      </button>
+      {expanded &&
+        notices.map((n, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: 通知内容不可变，顺序即身份
+          <div key={i} className="border-border/60 border-t">
+            {notices.length > 1 && <p className="truncate px-3 pt-2">{n.header}</p>}
+            {n.report && (
+              <div className="max-h-80 overflow-auto px-3 py-2 text-sm text-foreground">
+                <Markdown text={n.report} />
+              </div>
+            )}
+            {n.usage && (
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-border/60 border-t px-3 py-1 text-[10px]">
+                <span className="font-semibold tracking-wide text-foreground/75">Subagent</span>
+                <span aria-hidden="true">·</span>
+                <span>{t('{{count}} tokens', { count: formatTokens(n.usage.tokens) })}</span>
+                <span aria-hidden="true">·</span>
+                <span>{t('{{count}} tool calls', { count: n.usage.toolUses })}</span>
+                <span aria-hidden="true">·</span>
+                <span>{formatDuration(n.usage.durationMs)}</span>
+              </div>
+            )}
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function RawSyntheticNotice({ tag, body }: { tag: string; body: string }) {
   const [expanded, setExpanded] = useState(false);
   const trimmed = body.trim();
   const nl = trimmed.indexOf('\n');
@@ -357,10 +410,6 @@ function isFromMainAgent(text: string): boolean {
   return MAIN_AGENT_BLOCK.test(role ? text.slice(role[0].length) : text);
 }
 
-/** pi 把 /skill:name 展开成整段 XML；气泡里显示高亮 tag，点击看正文 */
-const SKILL_BLOCK =
-  /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/;
-
 function SkillTag({ name, content }: { name: string; content: string }) {
   const { t } = useI18n();
   return (
@@ -392,16 +441,47 @@ function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
   );
 }
 
-function SkillInvocation({ text }: { text: string }) {
-  const match = SKILL_BLOCK.exec(text);
-  if (!match) return null;
-  const [, name, , content, userMessage] = match;
+/** /skill:name 展开后的 XML 块：气泡里每个块一个高亮 tag，点击看正文 */
+function SkillInvocation({ blocks }: { blocks: NonNullable<ReturnType<typeof splitSkillBlocks>> }) {
+  const notes = splitTurnNotes(blocks.rest);
+  const bubble = (
+    <ChipBubble
+      chip={
+        <span className="inline-flex flex-wrap gap-1 align-middle">
+          {blocks.skills.map((skill) => (
+            <SkillTag key={skill.location} name={skill.name} content={skill.body} />
+          ))}
+        </span>
+      }
+      extra={notes.rest.trim()}
+    />
+  );
+  if (!notes.plan && !notes.unattended) return bubble;
   return (
-    <ChipBubble chip={<SkillTag name={name} content={content} />} extra={userMessage?.trim()} />
+    <div className="flex w-full flex-col items-end gap-1.5">
+      {notes.plan && <PlanNoteBanner note={notes.plan} />}
+      {notes.unattended && <UnattendedNoteBanner note={notes.unattended} />}
+      {bubble}
+    </div>
   );
 }
 
 function SlashInvocation({ text }: { text: string }) {
+  const skills = parseSkillCommands(text);
+  if (skills.names.length > 1) {
+    return (
+      <ChipBubble
+        chip={
+          <span className="inline-flex flex-wrap gap-1 align-middle">
+            {skills.names.map((name) => (
+              <SlashChip key={name} name={`/skill:${name}`} />
+            ))}
+          </span>
+        }
+        extra={skills.rest}
+      />
+    );
+  }
   const parsed = splitSlashCommand(text);
   if (!parsed.slash) return null;
   return <ChipBubble chip={<SlashChip name={parsed.slash} />} extra={parsed.rest.trim()} />;
@@ -549,7 +629,7 @@ function MentionRefChips({
 }
 
 export const USER_BUBBLE =
-  'max-w-[82%] rounded-[10px] bg-muted px-3.5 py-[9px] text-[14.5px] leading-[1.6]';
+  'max-w-[82%] rounded-[10px] bg-muted px-3.5 py-[9px] text-(length:--chat-body-size) leading-[1.6]';
 
 /** 用户气泡：识别合成标记,渲染成系统事件行 / 角色块 / 来源徽章而非原始 XML */
 function UserText({
@@ -668,7 +748,8 @@ function UserText({
       </div>
     );
   }
-  if (SKILL_BLOCK.test(text)) return <SkillInvocation text={text} />;
+  const skillBlocks = splitSkillBlocks(text);
+  if (skillBlocks) return <SkillInvocation blocks={skillBlocks} />;
   if (splitSlashCommand(text).slash) return <SlashInvocation text={text} />;
   const migrated = WORKSPACE_MIGRATED_PREFIX.exec(text);
   if (migrated) {
@@ -1368,7 +1449,7 @@ function TextRow({
     sessionId: host ? host.sessionId : localSessionId,
   };
   return (
-    <div data-enso="message-assistant" className="group text-[14.5px]">
+    <div data-enso="message-assistant" className="group text-(length:--chat-body-size)">
       <Markdown
         text={item.text}
         streaming={item.streaming}
@@ -1464,7 +1545,7 @@ function ThinkingRow({
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const expanded = thinkingRowExpanded(userToggled, streaming, expandLiveReasoning);
   return (
-    <div data-enso="thinking">
+    <div data-enso="thinking" data-live={streaming || undefined}>
       <button
         type="button"
         onClick={() => setUserToggled(!expanded)}

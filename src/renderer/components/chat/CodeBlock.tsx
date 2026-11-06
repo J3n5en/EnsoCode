@@ -7,7 +7,7 @@ import { codeToHtml } from './snippetHighlighter';
  * 手机 PWA 没有 sunken token，回落到 muted。
  */
 const CODE_SURFACE =
-  'my-2 overflow-x-auto rounded-lg border bg-[var(--sunken,var(--muted))] text-xs leading-relaxed';
+  'my-2 overflow-x-auto rounded-lg border bg-[var(--sunken,var(--muted))] text-(length:--chat-code-block-size) [font-weight:var(--chat-code-block-weight)] leading-relaxed';
 
 /** 无语言标记时的轻量猜测（缩进代码块常见）；猜错也只是配色不同 */
 function guessLanguage(code: string): string {

@@ -1,4 +1,11 @@
 import { ACCENT_PRESETS } from '@shared/accentColor';
+import {
+  CHAT_TYPOGRAPHY_ROLES,
+  CHAT_TYPOGRAPHY_SPEC,
+  CHAT_TYPOGRAPHY_WEIGHTS,
+  type ChatTypographyRole,
+  type ChatTypographyWeight,
+} from '@shared/chatTypography';
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/localImage';
 import { resolveTheme } from '@shared/theme/themeKey';
 import {
@@ -67,36 +74,64 @@ function PercentSliderRow({
   onCommit,
   min = 0,
   max = 100,
+  step,
   unit = '%',
+  formatSuffix,
+  onPreview,
+  trailing,
+  valueClassName = 'w-12',
 }: {
   label: string;
   value: number;
   onCommit: (value: number) => void;
   min?: number;
   max?: number;
+  step?: number;
   unit?: string;
+  formatSuffix?: (value: number) => string;
+  onPreview?: (value: number) => void;
+  trailing?: React.ReactNode;
+  valueClassName?: string;
 }) {
   const [local, setLocal] = React.useState(value);
   React.useEffect(() => {
     setLocal(value);
   }, [value]);
+  const suffix = formatSuffix?.(local);
 
   return (
-    <div className="grid grid-cols-[100px_1fr] items-center gap-4">
+    <div
+      className={cn(
+        'grid items-center gap-4',
+        trailing ? 'grid-cols-[9.5rem_minmax(0,1fr)_auto]' : 'grid-cols-[100px_1fr]'
+      )}
+    >
       <span className="text-sm font-medium">{label}</span>
       <div className="flex items-center gap-3">
         <Slider
           min={min}
           max={max}
+          step={step}
           value={local}
-          onValueChange={(v) => setLocal(Array.isArray(v) ? v[0] : v)}
+          onValueChange={(v) => {
+            const next = Array.isArray(v) ? v[0] : v;
+            setLocal(next);
+            onPreview?.(next);
+          }}
           onValueCommitted={(v) => onCommit(Array.isArray(v) ? v[0] : v)}
         />
-        <span className="w-12 shrink-0 text-right text-sm text-muted-foreground">
+        <span
+          className={cn(
+            'shrink-0 text-right text-sm text-muted-foreground tabular-nums',
+            suffix ? 'w-28' : valueClassName
+          )}
+        >
           {local}
           {unit}
+          {suffix ? ` · ${suffix}` : ''}
         </span>
       </div>
+      {trailing}
     </div>
   );
 }
@@ -631,6 +666,104 @@ const ACCENT_LABELS = {
   graphite: 'Graphite',
 } as const satisfies Record<AccentColor, string>;
 
+const CHAT_ROLE_LABELS = {
+  body: 'Body',
+  h1: 'Heading 1',
+  h2: 'Heading 2',
+  h3: 'Heading 3',
+  h4: 'Heading 4–6',
+  table: 'Table',
+  inlineCode: 'Inline code',
+  codeBlock: 'Code block',
+} as const satisfies Record<ChatTypographyRole, string>;
+
+const CHAT_WEIGHT_ITEMS = CHAT_TYPOGRAPHY_WEIGHTS.map((weight) => ({
+  value: String(weight),
+  label: String(weight),
+}));
+
+function ChatTypographyCard() {
+  const { t } = useI18n();
+  const typography = useSettingsStore((s) => s.chatTypography);
+  const setChatTypography = useSettingsStore((s) => s.setChatTypography);
+  const resetChatTypography = useSettingsStore((s) => s.resetChatTypography);
+  const [bodyPreview, setBodyPreview] = React.useState(typography.body.size);
+  React.useEffect(() => {
+    setBodyPreview(typography.body.size);
+  }, [typography.body.size]);
+
+  const commit = (role: ChatTypographyRole, size: number) => {
+    const current = useSettingsStore.getState().chatTypography;
+    setChatTypography({ ...current, [role]: { ...current[role], size } });
+  };
+  const commitWeight = (role: ChatTypographyRole, weight: ChatTypographyWeight) => {
+    const current = useSettingsStore.getState().chatTypography;
+    setChatTypography({ ...current, [role]: { ...current[role], weight } });
+  };
+
+  return (
+    <section data-settings-row="appearance.chatTypography" className="space-y-3">
+      <div>
+        <h3 className="text-lg font-medium">{t('Conversation typography')}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t('Headings, tables and inline code scale with the body text')}
+        </p>
+      </div>
+      <div className="space-y-3 rounded-lg border bg-card p-3.5">
+        {CHAT_TYPOGRAPHY_ROLES.map((role) => {
+          const spec = CHAT_TYPOGRAPHY_SPEC[role];
+          return (
+            <PercentSliderRow
+              key={role}
+              label={t(CHAT_ROLE_LABELS[role])}
+              value={typography[role].size}
+              min={spec.min}
+              max={spec.max}
+              step={spec.step}
+              unit={spec.unit === '%' ? '%' : 'px'}
+              valueClassName="w-28"
+              formatSuffix={
+                spec.unit === '%'
+                  ? (size) => `${((bodyPreview * size) / 100).toFixed(1)}px`
+                  : undefined
+              }
+              onPreview={role === 'body' ? setBodyPreview : undefined}
+              onCommit={(size) => commit(role, size)}
+              trailing={
+                <Select
+                  items={CHAT_WEIGHT_ITEMS}
+                  value={String(typography[role].weight)}
+                  onValueChange={(value) => {
+                    const weight = Number(value);
+                    if (!(CHAT_TYPOGRAPHY_WEIGHTS as readonly number[]).includes(weight)) return;
+                    commitWeight(role, weight as ChatTypographyWeight);
+                  }}
+                >
+                  <SelectTrigger className="w-24 min-w-24" aria-label={t(CHAT_ROLE_LABELS[role])}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectPopup>
+                    {CHAT_WEIGHT_ITEMS.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+          );
+        })}
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={() => resetChatTypography()}>
+            {t('Reset to defaults')}
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ConversationDisplaySection() {
   const { t } = useI18n();
   const openChangesOnFileEdit = useSettingsStore((s) => s.openChangesOnFileEdit);
@@ -715,6 +848,7 @@ function ConversationDisplaySection() {
           onChange={setPinUnfinishedTodos}
         />
       </div>
+      <ChatTypographyCard />
       <FileOpeningSettings />
     </div>
   );

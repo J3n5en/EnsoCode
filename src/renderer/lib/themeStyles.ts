@@ -1,3 +1,4 @@
+import { themeAssetsCss } from '@shared/theme/assets';
 import { BUILTIN_THEMES } from '@shared/theme/builtinThemes';
 import { resolveTheme } from '@shared/theme/themeKey';
 import { themeTokensCss } from '@shared/theme/tokensCss';
@@ -74,7 +75,8 @@ function applyTheme({ themeId, accentColor }: SettingsState): void {
   const snapshot = {
     id: theme.id,
     tokens: themeTokensCss(theme, accentColor),
-    css: theme.css ?? '',
+    // 素材在前，主题 CSS 可以覆盖或引用 --enso-asset-*
+    css: [themeAssetsCss(theme.assets), theme.css ?? ''].filter(Boolean).join('\n'),
   };
   writeTheme(snapshot);
   if (hydrated) writeSnapshot(snapshot);

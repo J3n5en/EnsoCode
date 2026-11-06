@@ -62,6 +62,7 @@ import type { ComposerPayload, MentionSegment } from './mentionComposer';
 import { createEditorPayload, mentionPopupLayout, resolvePopupKeyAction } from './mentionComposer';
 import { SlashChip } from './SlashChip';
 import { filterComposerCommands } from './skillCompletion';
+import { pushSlash } from './slashChain';
 import { VoiceInputButton } from './VoiceInputButton';
 
 interface ComposerProps {
@@ -120,7 +121,7 @@ interface ComposerProps {
 interface ComposerDraft {
   segments: MentionSegment[];
   images: AttachedImage[];
-  slash: string | null;
+  slashes: string[];
   recipient?: AgentTypeMentionCandidate;
 }
 
@@ -171,7 +172,7 @@ export function Composer({
   const voiceHoldBinding = effectiveKeybindings(keybindings)['voice-hold'];
   const mentionPickerId = useId();
   const [images, setImages] = useState<AttachedImage[]>([]);
-  const [slash, setSlash] = useState<string | null>(null);
+  const [slashes, setSlashes] = useState<string[]>([]);
   const [recipient, setRecipient] = useState<AgentTypeMentionCandidate | undefined>(
     initialRecipient
   );
@@ -291,7 +292,7 @@ export function Composer({
         drafts.set(previous, {
           segments: editorRef.current?.getSegments() ?? [],
           images,
-          slash,
+          slashes,
           recipient,
         });
       }
@@ -306,7 +307,7 @@ export function Composer({
           .map((segment) => (segment.type === 'ui-element' ? segment.imageId : ''))
       );
       setImages(draft?.images ?? []);
-      setSlash(draft?.slash ?? null);
+      setSlashes(draft?.slashes ?? []);
       setRecipient(draft?.recipient);
       prevFocusKeyRef.current = focusKey;
       setMentionQuery(null);
@@ -329,22 +330,23 @@ export function Composer({
   useEffect(() => {
     if (!injectedDraft && !injectedImages?.length) return;
     const draft = applyInjectedDraft(
-      { segments: editorRef.current?.getSegments() ?? [], images, slash },
+      { segments: editorRef.current?.getSegments() ?? [], images, slashes },
       { text: injectedDraft, images: injectedImages },
       injectedDraftAppend
     );
-    setSlash(draft.slash);
+    setSlashes(draft.slashes);
     setImages(draft.images);
     editorRef.current?.setSegments(draft.segments);
     onDraftConsumed?.();
     window.setTimeout(() => editorRef.current?.focus(), 0);
   }, [injectedDraft, injectedImages, injectedDraftAppend]);
 
-  const subQuery = slashSubcommandQuery(slash, editorPlain.replaceAll('\uFFFC', ''));
+  const soleSlash = slashes.length === 1 ? slashes[0]! : null;
+  const subQuery = slashSubcommandQuery(soleSlash, editorPlain.replaceAll('\uFFFC', ''));
   const slashResults = filterComposerCommands(commands, slashQuery, skillQuery);
   const subResults =
     slashQuery === null && skillQuery === null && subQuery !== null
-      ? filterSlashSubcommands(slash, subQuery)
+      ? filterSlashSubcommands(soleSlash, subQuery)
       : [];
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset highlight when the filter token changes
@@ -435,20 +437,20 @@ export function Composer({
       if (!sendNow) return;
       const payload = createEditorPayload({
         segments,
-        slash,
+        slashes,
         images,
         recipient,
       });
       if (onSend(payload) === false) return;
       editorRef.current?.clear();
       setImages([]);
-      setSlash(null);
+      setSlashes([]);
       setRecipient(undefined);
       setMentionQuery(null);
       setSlashQuery(null);
       setSkillQuery(null);
     },
-    [images, onSend, recipient, slash]
+    [images, onSend, recipient, slashes]
   );
 
   /** 插件命令选中即执行，不进草稿；其它斜杠命令变成芯片随消息发送 */
@@ -459,7 +461,7 @@ export function Composer({
       setSkillQuery(null);
       const command = pluginCommandFor(name);
       if (!command) {
-        setSlash(name);
+        setSlashes((current) => pushSlash(current, name));
         return;
       }
       void runPluginCommand(command, isolated ? null : (focusKey ?? null)).then((error) => {
@@ -510,7 +512,9 @@ export function Composer({
   );
 
   const content = editorPlain.replaceAll('\uFFFC', '').trim();
-  const hasContent = Boolean(content || slash || images.length > 0 || editorHasMentions);
+  const hasContent = Boolean(
+    content || slashes.length > 0 || images.length > 0 || editorHasMentions
+  );
   const agentRecipient = recipient !== undefined;
   const effectiveBusy = busy && !agentRecipient;
   const pluginSlotProps = {
@@ -532,7 +536,7 @@ export function Composer({
     if (!hasContent) return;
     const payload = createEditorPayload({
       segments: editorRef.current?.getSegments() ?? [],
-      slash,
+      slashes,
       images,
       recipient,
     });
@@ -554,7 +558,7 @@ export function Composer({
     if (onSend(payload) === false) return;
     editorRef.current?.clear();
     setImages([]);
-    setSlash(null);
+    setSlashes([]);
     setRecipient(undefined);
     setMentionQuery(null);
     setSlashQuery(null);
@@ -653,14 +657,24 @@ export function Composer({
       requestOpenChatModelPicker();
       return;
     }
-    if (event.key === 'Backspace' && slash && content.length === 0 && !editorHasMentions) {
+    if (
+      event.key === 'Backspace' &&
+      slashes.length > 0 &&
+      content.length === 0 &&
+      !editorHasMentions
+    ) {
       event.preventDefault();
-      setSlash(null);
+      setSlashes((current) => current.slice(0, -1));
       return;
     }
     // 文件/会话卡片是 cE=false 原子块，Backspace 浏览器原生整块删除；
     // 只剩 recipient（编辑器外的顶部 chip）需要在编辑器全空时兼顾
-    if (event.key === 'Backspace' && recipient && editorRef.current?.isEmpty() && !slash) {
+    if (
+      event.key === 'Backspace' &&
+      recipient &&
+      editorRef.current?.isEmpty() &&
+      slashes.length === 0
+    ) {
       event.preventDefault();
       setRecipient(undefined);
       return;
@@ -829,14 +843,15 @@ export function Composer({
           {recipient && (
             <MentionChip recipient={recipient} onRemove={() => setRecipient(undefined)} />
           )}
-          {slash && (
+          {slashes.map((name) => (
             <SlashChip
-              name={slash}
+              key={name}
+              name={name}
               className="mt-0.5 shrink-0"
               trailing={
                 <button
                   type="button"
-                  onClick={() => setSlash(null)}
+                  onClick={() => setSlashes((current) => current.filter((item) => item !== name))}
                   className="rounded-sm opacity-70 hover:opacity-100"
                   aria-label={t('Remove')}
                 >
@@ -844,11 +859,11 @@ export function Composer({
                 </button>
               }
             />
-          )}
+          ))}
           <MentionEditor
             ref={editorRef}
             placeholder={
-              slash
+              slashes.length > 0
                 ? ''
                 : locked
                   ? t('Resolve the pending approval to continue')

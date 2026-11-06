@@ -18,6 +18,7 @@ vi.mock('electron', () => ({
     removeListener: mocks.removeListener,
   },
   webUtils: { getPathForFile: vi.fn() },
+  webFrame: { getZoomFactor: () => 1, setZoomFactor: vi.fn() },
 }));
 
 type DispatchApi = {

@@ -1,4 +1,5 @@
 import { type AccentColor, resolveAccentColor } from '@shared/accentColor';
+import { normalizeChatTypography } from '@shared/chatTypography';
 import { resolveCompactStrategy } from '@shared/compactStrategy';
 import { normalizeContextMenuOpen, normalizeFileOpenRules } from '@shared/fileOpening';
 import { extractModelOverrides, referencedModelIds } from '@shared/modelDirectory';
@@ -59,6 +60,10 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
     'contextMenuOpen' in source || 'contextMenuOpen' in current
       ? { contextMenuOpen: normalizeContextMenuOpen(source.contextMenuOpen) }
       : {};
+  const chatTypography =
+    'chatTypography' in source || 'chatTypography' in current
+      ? { chatTypography: normalizeChatTypography(source.chatTypography) }
+      : {};
   return {
     ...current,
     ...rest,
@@ -66,6 +71,7 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
     ...search,
     ...fileOpening,
     ...contextMenuOpening,
+    ...chatTypography,
     ...theme,
     ...('borderOpacity' in source
       ? {

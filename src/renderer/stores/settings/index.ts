@@ -6,6 +6,12 @@ import {
   normalizeBotMaxRunningTurns,
 } from '@shared/bots/concurrency';
 import {
+  type ChatTypography,
+  chatTypographyCssVars,
+  DEFAULT_CHAT_TYPOGRAPHY,
+  normalizeChatTypography,
+} from '@shared/chatTypography';
+import {
   type DefaultModelRef,
   oauthCredentialBlock,
   sanitizeDefaultModel,
@@ -106,6 +112,15 @@ function applyTerminalFont(fontFamily: string, fontSize: number): void {
   root.style.setProperty('--font-size-base', `${fontSize}px`);
 }
 
+function applyChatTypography(typography: ChatTypography): void {
+  if (typeof document === 'undefined') return;
+  const style = document.documentElement?.style;
+  if (!style) return;
+  for (const [name, value] of Object.entries(chatTypographyCssVars(typography))) {
+    style.setProperty(name, value);
+  }
+}
+
 // Apply app theme (dark/light mode)
 function applyAppTheme(theme: Theme, terminalTheme: string): void {
   const isDark =
@@ -125,6 +140,7 @@ function applySettings(state: {
   language: Locale;
   chatWide?: boolean;
   borderOpacity?: number;
+  chatTypography?: ChatTypography;
 }): void {
   if (state.theme === 'sync-terminal') {
     applyTerminalThemeToApp(state.terminalTheme, true);
@@ -139,6 +155,7 @@ function applySettings(state: {
   );
   document.documentElement.lang = normalizeLocale(state.language) === 'zh' ? 'zh-CN' : 'en';
   document.documentElement.classList.toggle('enso-chat-wide', Boolean(state.chatWide));
+  applyChatTypography(state.chatTypography ?? DEFAULT_CHAT_TYPOGRAPHY);
 }
 
 function getDefaultLocale(): Locale {
@@ -214,6 +231,7 @@ const initialState = {
   collapseCompletedActivity: true,
   pinUnfinishedTodos: true,
   chatWide: false,
+  chatTypography: normalizeChatTypography(DEFAULT_CHAT_TYPOGRAPHY),
   notifyMainAgentOnly: true,
   maxActiveCoworkers: DEFAULT_MAX_ACTIVE_COWORKERS,
   autoRetryLimit: DEFAULT_AUTO_RETRY_LIMIT,
@@ -416,6 +434,16 @@ export const useSettingsStore = create<SettingsState>()(
       setChatWide: (chatWide) => {
         document.documentElement.classList.toggle('enso-chat-wide', chatWide);
         set({ chatWide });
+      },
+      setChatTypography: (next) => {
+        const chatTypography = normalizeChatTypography(next);
+        applyChatTypography(chatTypography);
+        set({ chatTypography });
+      },
+      resetChatTypography: () => {
+        const chatTypography = normalizeChatTypography(DEFAULT_CHAT_TYPOGRAPHY);
+        applyChatTypography(chatTypography);
+        set({ chatTypography });
       },
       setNotifyMainAgentOnly: (notifyMainAgentOnly) => set({ notifyMainAgentOnly }),
       setMaxActiveCoworkers: (value) =>
@@ -1130,6 +1158,7 @@ export const useSettingsStore = create<SettingsState>()(
         ...state,
         fileOpenRules: normalizeFileOpenRules(state.fileOpenRules),
         contextMenuOpen: normalizeContextMenuOpen(state.contextMenuOpen),
+        chatTypography: normalizeChatTypography(state.chatTypography),
       }),
       onRehydrateStorage: () => (state, error) => {
         // merge 已完成：此后（含下面的补写）才允许落盘；读失败保持关闸
@@ -1233,6 +1262,9 @@ export const useSettingsStore = create<SettingsState>()(
     }
   )
 );
+
+// 水合前先写默认变量，避免首帧字号落空
+applyChatTypography(DEFAULT_CHAT_TYPOGRAPHY);
 
 type ProjectEntry = SettingsState['projects'][number];
 

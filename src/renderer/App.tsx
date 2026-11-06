@@ -27,6 +27,7 @@ import {
   ShellChromeContext,
   useWindowChromeKind,
 } from '@/components/app/WindowChrome';
+import { ZoomBanner } from '@/components/app/ZoomBanner';
 import { BotView } from '@/components/bots/BotView';
 import { ModeSwitch } from '@/components/bots/ModeSwitch';
 import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
@@ -533,6 +534,7 @@ export default function App() {
         />
       )}
       {!desktopShell && <UpdateBanner />}
+      {!desktopShell && <ZoomBanner />}
       <div className="flex min-h-0 flex-1">
         {remoteNodeActive ? (
           // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
@@ -623,6 +625,7 @@ export default function App() {
                   <ChatView />
                 </ShellChromeContext.Provider>
                 {desktopShell && <UpdateBanner />}
+                {desktopShell && <ZoomBanner />}
               </div>
               {sideOpen && !sideFullscreen && !isMobile && (
                 <ResizeHandle

@@ -38,6 +38,10 @@ describe('一次性提示的消费', () => {
 
     state.unattendedNote = UNATTENDED_ON_NOTE;
     expect(consumeUnattendedNote(state, '继续')).toBe(`${UNATTENDED_ON_NOTE}\n\n继续`);
+    state.unattendedNote = UNATTENDED_ON_NOTE;
+    expect(consumeUnattendedNote(state, '/skill:a 继续')).toBe(
+      `/skill:a ${UNATTENDED_ON_NOTE}\n\n继续`
+    );
     expect(state.unattendedNote).toBeUndefined();
     expect(consumeUnattendedNote(state, '下一句')).toBe('下一句');
   });

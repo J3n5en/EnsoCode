@@ -1,4 +1,4 @@
-import { parseBrowserViewport } from '@shared/browser/viewport';
+import { parseBrowserViewport, viewportToDip } from '@shared/browser/viewport';
 import { IPC_CHANNELS } from '@shared/types';
 import { ipcMain, type WebContents } from 'electron';
 import { browserHost } from '../services/browserHost';
@@ -33,6 +33,9 @@ const fromMainRenderer = (event: { sender: WebContents }): boolean => {
   return true;
 };
 
+const readViewport = (sender: WebContents, raw: unknown) =>
+  raw === null ? null : viewportToDip(parseBrowserViewport(raw), sender.getZoomFactor());
+
 /** 右侧面板内嵌浏览器：矩形上报、地址栏动作、清数据。业务在 browserHost。 */
 export function registerBrowserHandlers(): void {
   ipcMain.handle(
@@ -44,7 +47,7 @@ export function registerBrowserHandlers(): void {
       return browserHost.setViewport(
         tabId,
         conversationId,
-        raw === null ? null : parseBrowserViewport(raw),
+        readViewport(event.sender, raw),
         covered === true
       );
     }
@@ -108,7 +111,7 @@ export function registerBrowserHandlers(): void {
       return browserHost.setDevToolsViewport(
         tabId,
         conversationId,
-        raw === null ? null : parseBrowserViewport(raw),
+        readViewport(event.sender, raw),
         covered === true
       );
     }

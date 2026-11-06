@@ -1,4 +1,5 @@
 import { PASTED_TEXT_FILE_NAME, stripPastedTextRefs } from './pastedText';
+import { userTextWithoutSkills } from './skillCommands';
 import { splitUnattendedPrefix } from './unattendedNote';
 import { parseWorkflowPresetMessage } from './workflowPresetMessage';
 
@@ -17,8 +18,10 @@ const CONTINUATION_LINE = /^(?:从这里继续|继续|continue(?:\s+here)?)\s*[:
 
 /** 清洗送给标题总结模型的输入文本：剥离内部引用块与跳转引导词，返回纯净的用户自然语言或被引标题 */
 export function cleanTitleSummarySource(text: string): string {
-  const trimmed = stripPastedTextRefs(splitUnattendedPrefix(text).rest).trim();
-  if (!trimmed) return '';
+  const prepared = stripPastedTextRefs(splitUnattendedPrefix(text).rest).trim();
+  const skills = userTextWithoutSkills(prepared);
+  const trimmed = skills.text;
+  if (!trimmed) return skills.names[0] ?? '';
 
   const chatLabels: string[] = [];
   for (const match of trimmed.matchAll(INLINE_CHAT_REF)) {
@@ -44,6 +47,7 @@ export function cleanTitleSummarySource(text: string): string {
     return chatLabels[0];
   }
 
+  if (skills.names[0]) return skills.names[0];
   return cleanBody;
 }
 
@@ -57,7 +61,12 @@ export function extractRepresentativeTitle(text: string): string {
   const workflow = parseWorkflowPresetMessage(visible);
   if (workflow) return workflow.name.slice(0, 40);
   const withoutPasted = stripPastedTextRefs(visible);
-  const displayed = mentionDisplayText(withoutPasted);
+  const skills = userTextWithoutSkills(withoutPasted);
+  if (!skills.text) {
+    if (skills.names[0]) return skills.names[0].slice(0, 40);
+    return withoutPasted === text ? '[image]' : PASTED_TEXT_FILE_NAME;
+  }
+  const displayed = mentionDisplayText(skills.text);
   const lines = displayed
     .split('\n')
     .map((l) => l.trim())

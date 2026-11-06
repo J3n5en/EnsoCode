@@ -11,7 +11,7 @@ interface ResizeHandleProps {
   edge?: boolean;
 }
 
-/** 侧边栏缘的拖拽手柄:视觉 1px,命中区左右各扩 4px；gap 模式命中区即 8px 缝 */
+/** 侧边栏缘的拖拽手柄:视觉 1px。edge 命中区只向右扩进卡片，避免盖住侧栏滚动条。 */
 export function ResizeHandle({
   onResize,
   onResizingChange,
@@ -44,14 +44,20 @@ export function ResizeHandle({
   );
 
   return (
-    <div className={cn('relative shrink-0', edge ? 'w-0' : gap ? 'w-[8px]' : 'w-px bg-border')}>
+    <div
+      className={cn(
+        // z-20：命中区伸进相邻卡片，否则后绘制的卡片会把指针吃掉
+        'relative z-20 shrink-0',
+        edge ? 'w-0' : gap ? 'w-[8px]' : 'w-px bg-border'
+      )}
+    >
       <div
         onMouseDown={handleMouseDown}
         className={cn(
           'absolute inset-y-0 z-10 cursor-col-resize',
           'after:absolute after:inset-y-0 after:w-px after:transition-colors hover:after:bg-ring',
           edge
-            ? 'left-0 -right-1.5 after:left-0'
+            ? 'left-0 w-3 after:left-0'
             : gap
               ? 'inset-x-0 after:left-1/2'
               : '-left-1 -right-1 after:left-1',

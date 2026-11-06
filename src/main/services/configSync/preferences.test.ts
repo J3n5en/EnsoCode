@@ -64,6 +64,7 @@ describe('config sync portable preference contract', () => {
       'collapseCompletedActivity',
       'pinUnfinishedTodos',
       'chatWide',
+      'chatTypography',
       'notifyMainAgentOnly',
       'maxActiveCoworkers',
       'generationStallTimeoutMin',

@@ -129,6 +129,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   collapseCompletedActivity: { mode: 'portable' },
   pinUnfinishedTodos: { mode: 'portable' },
   chatWide: { mode: 'portable' },
+  chatTypography: { mode: 'portable' },
   notifyMainAgentOnly: { mode: 'portable' },
   maxActiveCoworkers: { mode: 'portable' },
   autoRetryLimit: { mode: 'portable' },

@@ -661,6 +661,56 @@ describe('applyAgentEvent', () => {
     expect(delivered.messages[0].content).toEqual([{ type: 'text', text: expanded }]);
   });
 
+  it('多个 /skill: 的乐观回显被展开后的多个技能块消费', () => {
+    const expanded =
+      '<skill name="a" location="/s/a/SKILL.md">\n# a\n</skill>\n\n' +
+      '<skill name="b" location="/s/b/SKILL.md">\n# b\n</skill>\n\n做事';
+    const withEcho = {
+      ...base,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [{ type: 'text' as const, text: '/skill:a /skill:b 做事' }],
+          optimistic: true as const,
+        },
+      ],
+    };
+    const delivered = applyAgentEvent(withEcho, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 0,
+      message: { role: 'user', content: [{ type: 'text', text: expanded }] },
+    });
+    expect(delivered.messages).toHaveLength(1);
+    expect(delivered.messages[0]).not.toHaveProperty('optimistic', true);
+  });
+
+  it('技能块后跟无人值守提示时仍消费 /skill: 乐观回显', () => {
+    const expanded =
+      '<skill name="a" location="/s/a/SKILL.md">\n# a\n</skill>\n\n' +
+      '<unattended>\nUnattended mode is ON: x\n</unattended>\n\n做事';
+    const withEcho = {
+      ...base,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [{ type: 'text' as const, text: '/skill:a 做事' }],
+          optimistic: true as const,
+        },
+      ],
+    };
+    const delivered = applyAgentEvent(withEcho, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 0,
+      message: { role: 'user', content: [{ type: 'text', text: expanded }] },
+    });
+    expect(delivered.messages).toHaveLength(1);
+    expect(delivered.messages[0]).not.toHaveProperty('optimistic', true);
+  });
+
   it.each([
     ['带文字', '加个按钮', '加个按钮\n\n'],
     ['纯图片', '', '\n\n'],

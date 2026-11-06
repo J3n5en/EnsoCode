@@ -6,7 +6,7 @@ describe('applyInjectedDraft', () => {
   const current = {
     segments: [{ type: 'text' as const, text: 'editing' }],
     images: [image],
-    slash: null,
+    slashes: [],
   };
 
   it('撤回追加文字和附件，不覆盖当前编辑内容', () => {
@@ -22,10 +22,10 @@ describe('applyInjectedDraft', () => {
   it('保留 mention 和已有 slash，撤回文本不转换成新指令', () => {
     const segments = [{ type: 'file' as const, path: '/file' }];
     expect(
-      applyInjectedDraft({ ...current, segments, slash: 'plan' }, { text: '/help' }, true)
+      applyInjectedDraft({ ...current, segments, slashes: ['plan'] }, { text: '/help' }, true)
     ).toEqual({
       segments: [...segments, { type: 'text', text: '\n\n/help' }],
-      slash: 'plan',
+      slashes: ['plan'],
       images: [image],
     });
   });
@@ -35,15 +35,23 @@ describe('applyInjectedDraft', () => {
       current.segments
     );
     expect(
-      applyInjectedDraft({ segments: [], images: [], slash: null }, { text: '/help' }, true)
-    ).toMatchObject({ slash: '/help', segments: [] });
+      applyInjectedDraft({ segments: [], images: [], slashes: [] }, { text: '/help' }, true)
+    ).toMatchObject({ slashes: ['/help'], segments: [] });
   });
 
   it('历史回退仍然替换内容并清除旧附件', () => {
     expect(applyInjectedDraft(current, { text: 'rewound' })).toEqual({
       segments: [{ type: 'text', text: 'rewound' }],
       images: [],
-      slash: null,
+      slashes: [],
+    });
+  });
+
+  it('回退的多个 /skill: 恢复成多个芯片', () => {
+    expect(applyInjectedDraft(current, { text: '/skill:a /skill:b 修 bug' })).toEqual({
+      segments: [{ type: 'text', text: '修 bug' }],
+      images: [],
+      slashes: ['/skill:a', '/skill:b'],
     });
   });
 });
