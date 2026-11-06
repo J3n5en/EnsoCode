@@ -1,3 +1,5 @@
+import { splitTurnNotes } from './turnNotes';
+
 // 开头连续的 /skill:a /skill:b 全部展开；pi 自身只展开第一个（earendil-works/pi#4986）
 
 export interface SkillRef {
@@ -25,7 +27,10 @@ export function userTextWithoutSkills(text: string): { text: string; names: stri
     return '\n';
   });
   const parsed = parseSkillCommands(withoutBlocks.trim());
-  return { text: parsed.rest.trim(), names: [...parsed.names, ...names] };
+  return {
+    text: splitTurnNotes(parsed.rest.trim()).rest.trim(),
+    names: [...parsed.names, ...names],
+  };
 }
 
 export function parseSkillCommands(text: string): { names: string[]; rest: string } {

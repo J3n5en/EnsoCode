@@ -4,6 +4,7 @@ import {
   joinSkillCommands,
   parseSkillCommands,
   splitSkillBlocks,
+  userTextWithoutSkills,
 } from './skillCommands';
 
 const skills = {
@@ -81,5 +82,11 @@ describe('joinSkillCommands', () => {
   it('拼回 /skill: 命令', () => {
     expect(joinSkillCommands(['a', 'b'], '做事')).toBe('/skill:a /skill:b 做事');
     expect(joinSkillCommands(['a'], '')).toBe('/skill:a');
+  });
+
+  it('展示文本去掉技能块后的一次性提示', () => {
+    const text =
+      '<skill name="a" location="/a">\n# a\n</skill>\n\n<unattended>\nUnattended mode is ON: x\n</unattended>\n\n做事';
+    expect(userTextWithoutSkills(text)).toEqual({ text: '做事', names: ['a'] });
   });
 });

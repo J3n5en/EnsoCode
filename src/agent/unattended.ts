@@ -1,3 +1,4 @@
+import { prependTurnNote } from '@shared/turnNotes';
 /**
  * 无人值守的模型侧说明。
  *
@@ -29,5 +30,5 @@ export function consumeUnattendedNote(state: { unattendedNote?: string }, text: 
   const note = state.unattendedNote;
   if (!note) return text;
   state.unattendedNote = undefined;
-  return `${note}\n\n${text}`;
+  return prependTurnNote(note, text);
 }

@@ -316,5 +316,8 @@ describe('extractRewindDraft', () => {
     expect(draft(`${block}\n\n${other}\n\n修 bug`)).toEqual({
       text: '/skill:poteto-mode /skill:diffs 修 bug',
     });
+    expect(
+      draft(`${block}\n\n<unattended>\nUnattended mode is ON: x\n</unattended>\n\n修 bug`)
+    ).toEqual({ text: '/skill:poteto-mode 修 bug' });
   });
 });

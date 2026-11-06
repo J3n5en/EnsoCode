@@ -6,6 +6,7 @@ import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
+import { splitTurnNotes } from '@shared/turnNotes';
 import type {
   AgentRunProgress,
   AgentSessionCustomEntry,
@@ -391,7 +392,8 @@ function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
 
 /** /skill:name 展开后的 XML 块：气泡里每个块一个高亮 tag，点击看正文 */
 function SkillInvocation({ blocks }: { blocks: NonNullable<ReturnType<typeof splitSkillBlocks>> }) {
-  return (
+  const notes = splitTurnNotes(blocks.rest);
+  const bubble = (
     <ChipBubble
       chip={
         <span className="inline-flex flex-wrap gap-1 align-middle">
@@ -400,8 +402,16 @@ function SkillInvocation({ blocks }: { blocks: NonNullable<ReturnType<typeof spl
           ))}
         </span>
       }
-      extra={blocks.rest}
+      extra={notes.rest.trim()}
     />
+  );
+  if (!notes.plan && !notes.unattended) return bubble;
+  return (
+    <div className="flex w-full flex-col items-end gap-1.5">
+      {notes.plan && <PlanNoteBanner note={notes.plan} />}
+      {notes.unattended && <UnattendedNoteBanner note={notes.unattended} />}
+      {bubble}
+    </div>
   );
 }
 

@@ -12,8 +12,10 @@ import {
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
+import { prependTurnNote } from '@shared/turnNotes';
 import { afterEach, expect, it, vi } from 'vitest';
 import { skillChainExtension } from './skillChainExtension';
+import { UNATTENDED_ON_NOTE } from './unattended';
 
 const model = getModel('openai', 'gpt-4o-mini');
 if (!model) throw new Error('Test model is not available in the bundled Pi catalog.');
@@ -104,7 +106,7 @@ it('插件追加的 /skill: 与用户选的 /skill: 在真实 pi 会话里都被
     rmSync(root, { recursive: true, force: true });
   });
 
-  await session.prompt('/skill:beta 做事');
+  await session.prompt(prependTurnNote(UNATTENDED_ON_NOTE, '/skill:beta 做事'));
 
   const user = session.messages.find((message) => message.role === 'user');
   const text =
@@ -112,6 +114,6 @@ it('插件追加的 /skill: 与用户选的 /skill: 在真实 pi 会话里都被
       ? user.content
       : (user?.content ?? []).map((part) => (part.type === 'text' ? part.text : '')).join('');
   expect(text).toMatch(
-    /^<skill name="alpha" [^>]*>\n[\s\S]*BODY-alpha\n<\/skill>\n\n<skill name="beta" [^>]*>\n[\s\S]*BODY-beta\n<\/skill>\n\n做事$/
+    /^<skill name="alpha" [^>]*>\n[\s\S]*BODY-alpha\n<\/skill>\n\n<skill name="beta" [^>]*>\n[\s\S]*BODY-beta\n<\/skill>\n\n<unattended>\n[\s\S]*<\/unattended>\n\n做事$/
   );
 });

@@ -5,6 +5,7 @@
  */
 
 import { joinSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
+import { splitTurnNotes } from '@shared/turnNotes';
 
 export interface ConversationRewindView {
   started: boolean;
@@ -221,7 +222,7 @@ function collapseSkillBlock(text: string): string {
   return blocks
     ? joinSkillCommands(
         blocks.skills.map((skill) => skill.name),
-        blocks.rest
+        splitTurnNotes(blocks.rest).rest
       )
     : text;
 }

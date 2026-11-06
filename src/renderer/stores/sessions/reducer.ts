@@ -1,6 +1,7 @@
 import { type PlanState, splitPlanPrefix } from '@shared/planMode';
 import { truncatedProjectionHead } from '@shared/projectedText';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
+import { splitTurnNotes } from '@shared/turnNotes';
 import {
   type AgentSessionCustomEntry,
   type ApprovalRequestInfo,
@@ -74,7 +75,7 @@ function sameUserText(optimistic: string, delivered: string): boolean {
   if (slash.names.length === 0 || !blocks) return false;
   return (
     slash.names.join(' ') === blocks.skills.map((skill) => skill.name).join(' ') &&
-    slash.rest === blocks.rest
+    slash.rest === splitTurnNotes(blocks.rest).rest
   );
 }
 
