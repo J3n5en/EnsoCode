@@ -861,8 +861,14 @@ export function SidePanel({
         data-slot="side-panel"
         initial={false}
         animate={{ width: targetW }}
+        // 定位走内联：主题 CSS 常给 [data-enso="side-panel"] 写 position:relative 挂角标，会压过 absolute 类，全屏就铺不开
         style={
-          cover ? undefined : { maxWidth: `max(0px, calc(100% - ${CHAT_MIN_WIDTH + handleW}px))` }
+          cover
+            ? { position: 'absolute' }
+            : {
+                position: 'relative',
+                maxWidth: `max(0px, calc(100% - ${CHAT_MIN_WIDTH + handleW}px))`,
+              }
         }
         transition={sidePanelWidthTransition({ skip: skipWidthAnim, cover, targetW })}
         onAnimationComplete={() => {
@@ -876,12 +882,12 @@ export function SidePanel({
           // 平时透明让底层挖孔透出 guest；全屏盖在 ChatView 上、收起动画中必须实底
           open && (inTitleRow || !cover) ? 'bg-transparent' : inTitleRow ? '' : 'bg-background',
           !cover
-            ? 'relative shrink-0'
+            ? 'shrink-0'
             : inTitleRow
-              ? 'absolute top-px right-[8px] bottom-[8px]'
+              ? 'top-px right-[8px] bottom-[8px]'
               : !card
-                ? 'absolute inset-y-0 right-0'
-                : 'absolute top-0 right-[8px] bottom-[8px]',
+                ? 'inset-y-0 right-0'
+                : 'top-0 right-[8px] bottom-[8px]',
           inTitleRow
             ? cn('no-drag -mt-[44px]', cover ? 'rounded-b-[10px]' : 'rounded-br-[10px]')
             : card
