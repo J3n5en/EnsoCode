@@ -129,6 +129,12 @@ describe('ChildRunsButton', () => {
     expect(listChildRuns).toHaveBeenCalledWith(PARENT);
   });
 
+  it('按钮上显示记录数量', async () => {
+    await render([ended, { ...ended, childId: `${PARENT}::cw-second`, name: 'Worker' }]);
+    const trigger = container.querySelector('[aria-label="Subagent history"]');
+    expect(trigger?.textContent).toBe('2');
+  });
+
   it('点已结束的记录用父会话和 childId 读取', async () => {
     await render([ended]);
     const trigger = container.querySelector('[aria-label="Subagent history"]');
