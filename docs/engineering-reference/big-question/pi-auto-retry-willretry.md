@@ -40,10 +40,11 @@ pi SDK（AgentSession）**内置瞬态错误自动重试**（指数退避），�
   重试耗尽时 `auto_retry_end(success:false)` 看到 `settlePending` 就让给 settled 收口。
 - **回放与实时统一在渲染层解决**：`buildTimeline` 两条规则——错误项后面
   紧跟另一条 assistant（已重试过）或末条且 running（重试倒计时中）都不渲染。
-- **手动重试（裸 `agent.continue()`）里 `willRetry` 不可信**：pi 只在 `_runAgentPrompt`
-  循环里做自动重试，但 `agent_end.willRetry` 仍按错误类型和计数（耗尽后已清零）计算。
-  手动重试再遇 429/5xx 时 `willRetry=true` 却无人重试，若照常跳过 settle 就永远卡 running。
-  supervisor 用 `manualRetryRun` 标记此类运行，忽略 `willRetry` 按终态收口。
+- **手动重试不能用裸 `agent.continue()`**：pi 只在 `_runAgentPrompt` 循环里做自动重试并发
+  `agent_settled`，但 `agent_end.willRetry` 仍按错误类型和计数计算。裸 continue 再遇 429/5xx
+  时 `willRetry=true` 却无人重试，跳过 settle 就永远卡 running。现在手动重试走
+  `continueSessionActivity`（`sessionAdapter.ts`，经 pi `_startRun`），由 SDK 重试并结算，
+  `willRetry` 与 `agent_settled` 都可信，supervisor 不再需要额外标记。
 - 同理，pi 被 abort 取消的压缩发 `compaction_end{aborted:true}` 且不带 `errorMessage`，
   不能按「无错误即压完」判定，须按 `abandoned` 收口。
 
