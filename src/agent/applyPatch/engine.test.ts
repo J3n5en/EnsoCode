@@ -627,6 +627,47 @@ describe('apply_patch 引擎', () => {
     expect(await text('anchor-eof.txt')).toBe('a\nanchor\n');
   });
 
+  it('上下文对不上时报错附上文件里最接近的原文', async () => {
+    await writeFile(path.join(cwd, 'near.txt'), 'one\ntwo\nthree\n');
+    await expectFailed(
+      executeApplyPatch(
+        cwd,
+        patch('*** Update File: near.txt', '@@', ' one', '-tow', '+2', ' three')
+      ),
+      /Closest match[\s\S]*\|\s*two/
+    );
+  });
+
+  it('块顺序颠倒时提示这些行在前一个块上方', async () => {
+    await writeFile(path.join(cwd, 'order.txt'), 'a\nb\nc\nd\n');
+    await expectFailed(
+      executeApplyPatch(
+        cwd,
+        patch('*** Update File: order.txt', '@@', '-c', '+C', '@@', '-a', '+A')
+      ),
+      /line 1[\s\S]*top to bottom/
+    );
+  });
+
+  it('同一文件拆成多个 Update 段时合并应用，后一段从文件开头查找', async () => {
+    await writeFile(path.join(cwd, 'twice.txt'), 'a\nb\nc\n');
+    const result = await executeApplyPatch(
+      cwd,
+      patch(
+        '*** Update File: twice.txt',
+        '@@',
+        '-c',
+        '+C',
+        '*** Update File: twice.txt',
+        '@@',
+        '-a',
+        '+A'
+      )
+    );
+    expect(result.details.status).toBe('success');
+    expect(await text('twice.txt')).toBe('A\nb\nC\n');
+  });
+
   it('EOF chunk 匹配文件结尾，并按 Codex 为最后一行补上惯用换行', async () => {
     await writeFile(path.join(cwd, 'eof.txt'), 'head\nold');
     await executeApplyPatch(

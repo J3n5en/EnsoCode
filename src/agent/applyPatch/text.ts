@@ -1,4 +1,5 @@
 import { isUtf8 } from 'node:buffer';
+import { closestMatchHint } from '../closestMatch';
 import type { ApplyPatchChunk } from './types';
 
 interface SourceLine {
@@ -142,6 +143,7 @@ function computeReplacements(
   let lineIndex = 0;
   let order = 0;
   for (const chunk of chunks) {
+    if (chunk.restartSearch) lineIndex = 0;
     if (chunk.changeContext !== undefined) {
       const found = seekSequence(lines, [chunk.changeContext], lineIndex, false, budget);
       if (found === undefined) {
@@ -162,7 +164,17 @@ function computeReplacements(
       found = seekSequence(lines, pattern, lineIndex, chunk.endOfFile, budget);
     }
     if (found === undefined) {
-      throw new Error(`Failed to find expected lines in ${path}:\n${chunk.oldLines.join('\n')}`);
+      const earlier =
+        lineIndex > 0
+          ? seekSequence(lines, pattern, 0, false, { remaining: Number.MAX_SAFE_INTEGER })
+          : undefined;
+      const hint =
+        earlier !== undefined
+          ? `These lines exist at line ${earlier + 1}, above the previous hunk. Order hunks top to bottom.`
+          : closestMatchHint(lines, chunk.oldLines);
+      throw new Error(
+        `Failed to find expected lines in ${path}:\n${chunk.oldLines.join('\n')}${hint ? `\n\n${hint}` : ''}`
+      );
     }
     let oldStart = 0;
     let newStart = 0;

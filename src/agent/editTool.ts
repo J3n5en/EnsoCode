@@ -1,8 +1,12 @@
+import { readFile } from 'node:fs/promises';
+import os from 'node:os';
+import nodePath from 'node:path';
 import {
   createEditToolDefinition,
   type EditToolOptions,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import { closestMatchHint } from './closestMatch';
 
 export const EDIT_REPLACE_GUIDELINE =
   'For a single replacement, send path + oldText + newText and omit edits. ' +
@@ -166,10 +170,47 @@ export function normalizeEditArguments(input: unknown): unknown {
   return next === args.edits ? args : { ...args, edits: next };
 }
 
+const NOT_FOUND = /Could not find (?:edits\[(\d+)\]|the exact text) in /;
+const NOT_UNIQUE = /Found \d+ occurrences of (?:edits\[(\d+)\]|the text) in /;
+
+function lineNumbersOf(text: string, needle: string): number[] {
+  const lines: number[] = [];
+  for (let index = text.indexOf(needle); index !== -1; index = text.indexOf(needle, index + 1)) {
+    lines.push(text.slice(0, index).split('\n').length);
+    if (lines.length >= 10) break;
+  }
+  return lines;
+}
+
+/** 匹配失败的报错补上现场：找不到时给最接近的原文，不唯一时给各处行号 */
+async function editFailureHint(
+  error: Error,
+  params: unknown,
+  cwd: string,
+  read: (absolutePath: string) => Promise<Buffer>
+): Promise<string> {
+  const match = NOT_FOUND.exec(error.message) ?? NOT_UNIQUE.exec(error.message);
+  const args = params as { path?: unknown; edits?: Array<{ oldText?: unknown }> } | undefined;
+  const oldText = args?.edits?.[Number(match?.[1] ?? 0)]?.oldText;
+  if (!match || typeof args?.path !== 'string' || typeof oldText !== 'string') return '';
+  const requested = args.path.replace(/^@/, '').replace(/^~(?=$|\/)/, os.homedir());
+  const text = (await read(nodePath.resolve(cwd, requested)))
+    .toString('utf8')
+    .replace(/\r\n/g, '\n');
+  if (NOT_FOUND.test(error.message)) {
+    return closestMatchHint(text.split('\n'), oldText.replace(/\r\n/g, '\n').split('\n'));
+  }
+  const lines = lineNumbersOf(text, oldText.replace(/\r\n/g, '\n'));
+  return lines.length > 1
+    ? `It occurs at lines ${lines.join(', ')}; include neighbouring lines to pick one.`
+    : '';
+}
+
 /** 保留 stock 执行语义，公开它已支持的单次替换参数。 */
 export function createNormalizedEditTool(cwd: string, options?: EditToolOptions): ToolDefinition {
   const base = createEditToolDefinition(cwd, options) as unknown as ToolDefinition;
   const prepareBase = base.prepareArguments;
+  const read = options?.operations?.readFile ?? ((absolutePath: string) => readFile(absolutePath));
   return {
     ...base,
     description: `${base.description} ${EDIT_REPLACE_GUIDELINE}${EDIT_REPLACE_EXAMPLES}`,
@@ -187,7 +228,14 @@ export function createNormalizedEditTool(cwd: string, options?: EditToolOptions)
       const prepared = prepareBase
         ? prepareBase(normalizeEditArguments(params))
         : normalizeEditArguments(params);
-      return base.execute(toolCallId, prepared as typeof params, signal, onUpdate, ctx);
+      try {
+        return await base.execute(toolCallId, prepared as typeof params, signal, onUpdate, ctx);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        const hint = await editFailureHint(error, prepared, ctx?.cwd || cwd, read).catch(() => '');
+        if (!hint) throw error;
+        throw new Error(`${error.message}\n\n${hint}`);
+      }
     },
   };
 }

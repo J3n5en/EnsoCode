@@ -32,6 +32,8 @@ export interface ApplyPatchChunk {
   newLines: string[];
   contextLineIndices: Array<[number, number]>;
   endOfFile: boolean;
+  /** 合并进来的同文件后续 Update 段：从文件开头重新查找 */
+  restartSearch?: boolean;
 }
 
 export type ApplyPatchOperation =

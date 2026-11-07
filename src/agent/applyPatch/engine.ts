@@ -54,15 +54,41 @@ function normalizeOperations(
   operations: ApplyPatchOperation[],
   normalizePath: (value: string) => string
 ): ApplyPatchOperation[] {
-  return operations.map((operation) => {
-    const normalizedPath = normalizePath(operation.path);
-    if (operation.type !== 'update') return { ...operation, path: normalizedPath };
-    return {
-      ...operation,
-      path: normalizedPath,
-      ...(operation.movePath ? { movePath: normalizePath(operation.movePath) } : {}),
-    };
-  });
+  return mergeRepeatedUpdates(
+    operations.map((operation) => {
+      const normalizedPath = normalizePath(operation.path);
+      if (operation.type !== 'update') return { ...operation, path: normalizedPath };
+      return {
+        ...operation,
+        path: normalizedPath,
+        ...(operation.movePath ? { movePath: normalizePath(operation.movePath) } : {}),
+      };
+    })
+  );
+}
+
+/** 同一路径拆成多个 Update 段（都不改名）时合并成一段，免得整份补丁因重复路径被拒 */
+function mergeRepeatedUpdates(operations: ApplyPatchOperation[]): ApplyPatchOperation[] {
+  const merged: ApplyPatchOperation[] = [];
+  const updates = new Map<string, Extract<ApplyPatchOperation, { type: 'update' }>>();
+  for (const operation of operations) {
+    if (operation.type !== 'update' || operation.movePath) {
+      merged.push(operation);
+      continue;
+    }
+    const key = pathIdentity(operation.path);
+    const previous = updates.get(key);
+    if (!previous) {
+      const copy = { ...operation, chunks: [...operation.chunks] };
+      updates.set(key, copy);
+      merged.push(copy);
+      continue;
+    }
+    operation.chunks.forEach((chunk, index) => {
+      previous.chunks.push(index === 0 ? { ...chunk, restartSearch: true } : chunk);
+    });
+  }
+  return merged;
 }
 
 function operationPaths(operations: readonly ApplyPatchOperation[]): string[] {

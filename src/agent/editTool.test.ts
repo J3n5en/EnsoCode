@@ -176,6 +176,23 @@ describe('edit 工具完整契约', () => {
     }
   });
 
+  it('oldText 找不到时附上最接近的原文，重复时列出各处行号', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'enso-edit-'));
+    try {
+      const path = join(cwd, 'f.ts');
+      await writeFile(path, 'const a = 1;\nconst b = 2;\nconst a2 = 1;\nconst b = 2;\n');
+      const execute = toolFor(cwd).execute as (id: string, args: unknown) => Promise<unknown>;
+      await expect(
+        execute('test', { path, edits: [{ oldText: 'const a = 1;\nconst b = 3;', newText: 'x' }] })
+      ).rejects.toThrow(/Closest match[\s\S]*1\| const a = 1;/);
+      await expect(
+        execute('test', { path, edits: [{ oldText: 'const b = 2;', newText: 'x' }] })
+      ).rejects.toThrow(/lines 2, 4/);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('截断edits和顶层newText混发时执行拒绝，文件保持原样', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'enso-edit-'));
     try {
