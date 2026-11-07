@@ -944,6 +944,7 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   EXTENSION_PLUGINS_DISMISS_REGISTRY_NOTICE: excluded('Enso 插件管理页：确认登记表提示。'),
   EXTENSION_PLUGINS_CHANGED: excluded('Enso 插件登记变更的跨窗口通知。'),
+  EXTENSION_PLUGINS_NOTICE: excluded('Enso 插件拦截、待授权与自动更新的跨窗口通知。'),
   EXTENSION_PLUGINS_COMMIT: excluded('Enso 插件安装确认：用户同意权限后落盘。'),
   EXTENSION_PLUGINS_DISCARD: excluded('Enso 插件安装取消：丢弃暂存。'),
   EXTENSION_PLUGINS_SET_ENABLED: excluded('Enso 插件启用 / 停用开关。'),

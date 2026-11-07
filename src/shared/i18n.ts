@@ -1748,6 +1748,13 @@ export const zhTranslations: Record<string, string> = {
   Marketplace: '插件市场',
   'Search plugins': '搜索插件',
   'China mirror': '国内镜像',
+  '{{name}} tried to message another session and was blocked':
+    '插件 {{name}} 想向其他会话发消息，已拦截',
+  'Turn on': '去开启',
+  '{{name}} {{version}} needs new permissions': '插件 {{name}} 新版本 {{version}} 需要新权限',
+  'Review permissions': '去授权',
+  '{{name}} updated to {{version}}': '插件 {{name}} 已更新到 {{version}}',
+  View: '查看',
   'Could not reach the marketplace; showing the last saved list.':
     '无法连接插件市场，显示的是上次保存的列表。',
   'No matching plugins': '没有匹配的插件',

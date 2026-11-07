@@ -1,4 +1,5 @@
 import { parsePluginInstallUrl } from './extensionPlugins/installUrl';
+import { isPluginId } from './extensionPlugins/manifest';
 
 export const SETTINGS_CATEGORIES = [
   'general',
@@ -33,6 +34,8 @@ export interface SettingsDeepLink {
   rowId: string;
   /** 仅插件安装深链：已校验的 http(s) 插件地址 */
   pluginInstallUrl?: string;
+  /** 打开插件设置并展开该插件详情 */
+  pluginId?: string;
 }
 
 const CATEGORY_SET = new Set<string>(SETTINGS_CATEGORIES);
@@ -44,13 +47,22 @@ export function parseSettingsDeepLink(raw: unknown): SettingsDeepLink | null {
   if (typeof category !== 'string' || !CATEGORY_SET.has(category)) return null;
   if (typeof rowId !== 'string' || !rowId) return null;
   const pluginInstallUrl = (raw as { pluginInstallUrl?: unknown }).pluginInstallUrl;
-  if (pluginInstallUrl === undefined) return { category: category as SettingsCategory, rowId };
+  if (pluginInstallUrl === undefined)
+    return attachPluginId({ category: category as SettingsCategory, rowId }, raw);
   if (typeof pluginInstallUrl !== 'string') return null;
   const parsed = parsePluginInstallUrl(pluginInstallUrl);
   if (!parsed.ok) return null;
-  return {
+  const link: SettingsDeepLink = {
     category: category as SettingsCategory,
     rowId,
     pluginInstallUrl: parsed.url.href,
   };
+  return attachPluginId(link, raw);
+}
+
+function attachPluginId(link: SettingsDeepLink, raw: object): SettingsDeepLink | null {
+  const pluginId = (raw as { pluginId?: unknown }).pluginId;
+  if (pluginId === undefined) return link;
+  if (link.category !== 'plugins' || !isPluginId(pluginId)) return null;
+  return { ...link, pluginId };
 }

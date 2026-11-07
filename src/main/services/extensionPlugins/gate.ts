@@ -103,6 +103,7 @@ export interface GateDeps {
   ): PluginArtifactInfo | Promise<PluginArtifactInfo>;
   /** 用户是否允许该插件向非发起会话注入 */
   crossSessionInject?(pluginId: string): boolean;
+  onInjectDenied?(pluginId: string): void;
   inject?(
     pluginId: string,
     input: {
@@ -295,8 +296,10 @@ export class PluginHostGate {
   ): string {
     const sessionId = typeof a.sessionId === 'string' ? a.sessionId : (inv?.sessionId ?? null);
     if (!sessionId) throw pluginError('NO_SESSION', '调用不属于任何会话');
-    if (sessionId !== inv?.sessionId && !this.deps.crossSessionInject?.(pluginId))
+    if (sessionId !== inv?.sessionId && !this.deps.crossSessionInject?.(pluginId)) {
+      this.deps.onInjectDenied?.(pluginId);
       throw pluginError('PERMISSION_DENIED', '未允许向其他会话发送消息');
+    }
     return sessionId;
   }
 

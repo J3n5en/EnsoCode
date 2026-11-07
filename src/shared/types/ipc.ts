@@ -529,6 +529,8 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_REGISTRY_NOTICE: 'extension-plugins:registry-notice',
   EXTENSION_PLUGINS_DISMISS_REGISTRY_NOTICE: 'extension-plugins:dismiss-registry-notice',
   EXTENSION_PLUGINS_CHANGED: 'extension-plugins:changed',
+  /** main → renderer：插件被拦截、待授权或已自动更新 */
+  EXTENSION_PLUGINS_NOTICE: 'extension-plugins:notice',
   EXTENSION_PLUGINS_COMMIT: 'extension-plugins:commit',
   EXTENSION_PLUGINS_DISCARD: 'extension-plugins:discard',
   EXTENSION_PLUGINS_SET_ENABLED: 'extension-plugins:set-enabled',

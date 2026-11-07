@@ -77,4 +77,24 @@ describe('parseSettingsDeepLink', () => {
       })
     ).toBeNull();
   });
+
+  it('插件 id 只在插件页接受，非法 id 整条作废', () => {
+    expect(
+      parseSettingsDeepLink({
+        category: 'plugins',
+        rowId: 'plugins.enso',
+        pluginId: 'example.demo',
+      })
+    ).toEqual({ category: 'plugins', rowId: 'plugins.enso', pluginId: 'example.demo' });
+    expect(
+      parseSettingsDeepLink({
+        category: 'general',
+        rowId: 'general.language',
+        pluginId: 'example.demo',
+      })
+    ).toBeNull();
+    expect(
+      parseSettingsDeepLink({ category: 'plugins', rowId: 'plugins.enso', pluginId: '../x' })
+    ).toBeNull();
+  });
 });

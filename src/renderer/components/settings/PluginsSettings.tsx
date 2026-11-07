@@ -405,9 +405,13 @@ const stagingInstallUrls = new Set<string>();
 export function EnsoPluginsSettings({
   requestedInstallUrl = null,
   onRequestedInstallUrlConsumed,
+  focusPluginId = null,
+  onFocusPluginConsumed,
 }: {
   requestedInstallUrl?: string | null;
   onRequestedInstallUrlConsumed?: () => void;
+  focusPluginId?: string | null;
+  onFocusPluginConsumed?: () => void;
 } = {}) {
   const { t } = useI18n();
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
@@ -444,6 +448,19 @@ export function EnsoPluginsSettings({
       .catch(() => setNotice(null));
     return window.electronAPI.extensionPlugins.onChanged(() => void refresh());
   }, [refresh]);
+
+  React.useEffect(() => {
+    if (!focusPluginId) return;
+    setExpanded((prev) => (prev.includes(focusPluginId) ? prev : [...prev, focusPluginId]));
+    if (!plugins.some((plugin) => plugin.id === focusPluginId)) return;
+    const id = focusPluginId;
+    window.requestAnimationFrame(() => {
+      document.querySelector(`[data-plugin-id="${CSS.escape(id)}"]`)?.scrollIntoView({
+        block: 'center',
+      });
+    });
+    onFocusPluginConsumed?.();
+  }, [focusPluginId, plugins, onFocusPluginConsumed]);
 
   const stage = async (kind: 'dir' | 'zip') => {
     setError(null);
@@ -723,6 +740,7 @@ export function EnsoPluginsSettings({
         {plugins.map((plugin) => (
           <div
             key={plugin.id}
+            data-plugin-id={plugin.id}
             className={cn(
               'overflow-hidden rounded-lg border bg-card transition-colors',
               plugin.state === 'crashed' && 'border-destructive/50'

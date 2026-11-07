@@ -52,6 +52,7 @@ import type {
   ExtensionPluginConfigField,
   ExtensionPluginInstallPreview,
   ExtensionPluginMarketList,
+  ExtensionPluginNotice,
   ExtensionPluginSummary,
   PluginEventPlan,
   PluginToolDescriptor,
@@ -239,6 +240,8 @@ export class ExtensionPluginService {
     { stamps: number[]; failures: number; openUntil: number }
   >();
   private readonly listeners = new Set<() => void>();
+  private readonly noticeListeners = new Set<(notice: ExtensionPluginNotice) => void>();
+  private readonly injectDeniedNotified = new Set<string>();
   private changeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly logger: PluginLogger;
   /** 检查更新的结果，只在内存；装上不低于该版本的包后清掉 */
@@ -288,6 +291,7 @@ export class ExtensionPluginService {
       },
       crossSessionInject: (pluginId) =>
         this.records.find((r) => r.id === pluginId)?.crossSessionInject === true,
+      onInjectDenied: (pluginId) => this.noteInjectDenied(pluginId),
       callPlugin: (callerId, targetId, name, args, depth, caller) =>
         this.callExport(callerId, targetId, name, args, depth, caller),
       registerContrib: (pluginId, input) => this.registerContrib(pluginId, input),
@@ -309,6 +313,11 @@ export class ExtensionPluginService {
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onNotice(listener: (notice: ExtensionPluginNotice) => void): () => void {
+    this.noticeListeners.add(listener);
+    return () => this.noticeListeners.delete(listener);
   }
 
   list(): ExtensionPluginSummary[] {
@@ -569,6 +578,13 @@ export class ExtensionPluginService {
         if (!expands) {
           this.stopProcess(existing.id);
           removePackage(this.options.root, existing.id, oldDir);
+        } else {
+          this.emitNotice({
+            kind: 'update-needs-approval',
+            pluginId: existing.id,
+            name: manifest.name,
+            version: manifest.version,
+          });
         }
       }
       this.persist();
@@ -597,6 +613,7 @@ export class ExtensionPluginService {
       return { ok: false, error: '插件没有申请 agent.inject' };
     record.crossSessionInject = allowed;
     this.persist();
+    this.injectDeniedNotified.delete(id);
     return { ok: true };
   }
 
@@ -1760,6 +1777,18 @@ export class ExtensionPluginService {
       for (const listener of this.listeners) listener();
     }, CHANGE_DEBOUNCE_MS);
     this.changeTimer.unref?.();
+  }
+
+  private emitNotice(notice: ExtensionPluginNotice): void {
+    for (const listener of this.noticeListeners) listener(notice);
+  }
+
+  private noteInjectDenied(pluginId: string): void {
+    if (this.injectDeniedNotified.has(pluginId)) return;
+    this.injectDeniedNotified.add(pluginId);
+    const record = this.records.find((item) => item.id === pluginId);
+    const name = record ? (this.load(record.id, record.dir)?.name ?? pluginId) : pluginId;
+    this.emitNotice({ kind: 'inject-denied', pluginId, name });
   }
 
   private inject(

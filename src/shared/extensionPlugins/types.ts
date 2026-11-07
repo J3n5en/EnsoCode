@@ -148,3 +148,8 @@ export interface RegistryNotice {
   /** 登记表曾经读不出；插件列表可能不全，原文在 registry.json.unreadable */
   unreadable?: true;
 }
+
+export type ExtensionPluginNotice =
+  | { kind: 'inject-denied'; pluginId: string; name: string }
+  | { kind: 'update-needs-approval'; pluginId: string; name: string; version: string }
+  | { kind: 'auto-updated'; pluginId: string; name: string; version: string };

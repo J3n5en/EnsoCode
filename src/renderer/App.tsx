@@ -67,6 +67,7 @@ import {
 } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
+import { PluginNotices } from '@/plugins/PluginNotices';
 import { PluginUiHost } from '@/plugins/PluginUiHost';
 import { useBotsStore } from '@/stores/bots';
 import {
@@ -447,6 +448,7 @@ export default function App() {
     >
       {/* 全局 toast 出口（addToast 依赖；不挂则静默失效） */}
       <ToastProvider />
+      <PluginNotices />
       <BackgroundLayer />
       <OauthCredentialBootstrap />
       {chromeKind !== 'mobile' ? (

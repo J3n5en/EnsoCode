@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { ExtensionPluginNotice } from '@shared/extensionPlugins/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPluginHost } from '../../../pluginHost/host';
 import { setNativeAgentTypeSource, withPluginAgentTypes } from '../pluginRuntime';
@@ -243,6 +244,66 @@ describe('ExtensionPluginService', () => {
     await service.approvePending('example.demo');
     expect(service.list()[0]).toMatchObject({ version: '2.0.0', state: 'enabled' });
     expect(service.list()[0]?.pendingVersion).toBeUndefined();
+  });
+
+  it('跨会话注入被拒只通知一次，切换开关后可以再通知', async () => {
+    await install({
+      'enso-plugin.json': manifest({
+        permissions: ['agent.tool', 'agent.inject'],
+      }),
+      'main.mjs': mainJs,
+    });
+    await service.setEnabled('example.demo', true);
+    const notices: ExtensionPluginNotice[] = [];
+    service.onNotice((notice) => notices.push(notice));
+    const deny = () =>
+      service.gate.handle(
+        'example.demo',
+        'session.inject',
+        { text: 'hi', sessionId: 'other' },
+        undefined
+      );
+    await expect(deny()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(deny()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(notices).toEqual([{ kind: 'inject-denied', pluginId: 'example.demo', name: 'Demo' }]);
+    expect(service.setCrossSessionInject('example.demo', false).ok).toBe(true);
+    await expect(deny()).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(notices).toHaveLength(2);
+    expect(notices[1]).toEqual({ kind: 'inject-denied', pluginId: 'example.demo', name: 'Demo' });
+  });
+
+  it('权限没变的更新不通知，扩大授权时通知待授权', async () => {
+    const src = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    const first = await service.stage({ kind: 'dir', path: src });
+    if (!first.ok) throw new Error(first.error);
+    await service.commit(first.preview.token);
+    const notices: ExtensionPluginNotice[] = [];
+    service.onNotice((notice) => notices.push(notice));
+    writeFileSync(join(src, 'enso-plugin.json'), manifest({ version: '1.1.0' }));
+    const same = await service.restage('example.demo');
+    if (!same.ok) throw new Error(same.error);
+    expect((await service.commit(same.preview.token)).ok).toBe(true);
+    expect(notices).toEqual([]);
+    writeFileSync(
+      join(src, 'enso-plugin.json'),
+      manifest({
+        version: '2.0.0',
+        permissions: ['agent.tool', 'net.fetch'],
+        net: { domains: ['api.example.com'] },
+      })
+    );
+    const wider = await service.restage('example.demo');
+    if (!wider.ok) throw new Error(wider.error);
+    expect((await service.commit(wider.preview.token)).ok).toBe(true);
+    expect(service.list()[0]?.pendingVersion).toBe('2.0.0');
+    expect(notices).toEqual([
+      {
+        kind: 'update-needs-approval',
+        pluginId: 'example.demo',
+        name: 'Demo',
+        version: '2.0.0',
+      },
+    ]);
   });
 
   it('卸载删除安装目录与数据目录', async () => {

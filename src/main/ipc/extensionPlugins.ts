@@ -240,6 +240,9 @@ export function registerExtensionPluginHandlers(): void {
   if (!wired) {
     wired = true;
     plugins().onChange(() => broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_CHANGED));
+    plugins().onNotice((notice) =>
+      broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_NOTICE, notice)
+    );
   }
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_LIST, () => plugins().list());
