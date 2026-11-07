@@ -5,10 +5,12 @@ import { AUTO_RESTART_IDLE_MS } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
+import { agentSessionIndex } from '../../ipc/capabilities';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
 import { IdleRestartGate } from './idleRestartGate';
 import { currentIdleRestartObservation } from './idleRestartSnapshot';
+import { recordInterruptedSessions } from './interruptedSessions';
 
 const { autoUpdater } = electronUpdater;
 
@@ -133,6 +135,11 @@ class AutoUpdaterService {
   quitAndInstall(): void {
     if (!this.updateDownloaded) return;
     this.quittingForUpdate = true;
+    try {
+      recordInterruptedSessions(app.getPath('userData'), agentSessionIndex.runningRootSessionIds());
+    } catch (error) {
+      console.error('Failed to record sessions interrupted by update:', error);
+    }
     autoUpdater.quitAndInstall();
   }
 

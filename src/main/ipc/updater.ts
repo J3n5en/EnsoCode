@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types';
 import type { UpdaterState } from '@shared/types/updater';
-import { ipcMain } from 'electron';
+import { app, ipcMain } from 'electron';
+import { takeInterruptedSessions } from '../services/updater/interruptedSessions';
 
 /** Linux deb/rpm 上不加载 electron-updater(某些系统会触发 GTK 崩溃);AppImage 正常 */
 function isUpdaterEnabled(): boolean {
@@ -11,6 +12,10 @@ export function registerUpdaterHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.UPDATER_GET_STATE,
     (): UpdaterState => ({ host: 'desktop', status: null })
+  );
+
+  ipcMain.handle(IPC_CHANNELS.UPDATER_TAKE_INTERRUPTED_SESSIONS, (): string[] =>
+    takeInterruptedSessions(app.getPath('userData'))
   );
 
   ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, async () => {

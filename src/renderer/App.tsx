@@ -55,6 +55,7 @@ import { useAutoArchiveScan } from '@/hooks/useAutoArchiveScan';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useDockBadge } from '@/hooks/useDockBadge';
 import { useGenerationStallTimeout } from '@/hooks/useGenerationStallTimeout';
+import { useResumeInterruptedByUpdate } from '@/hooks/useResumeInterruptedByUpdate';
 import { isMobileWidth, useIsMobile, useViewportWidth } from '@/hooks/useViewport';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
@@ -117,6 +118,7 @@ export default function App() {
   useBackgroundImage();
   useGenerationStallTimeout();
   useAutoArchiveScan();
+  useResumeInterruptedByUpdate();
   useDockBadge();
   const [searchOpen, setSearchOpen] = useState(false);
   const [closeRequestId, setCloseRequestId] = useState<string | null>(null);

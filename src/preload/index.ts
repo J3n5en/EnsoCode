@@ -1196,6 +1196,9 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_WHEN_IDLE, enabled),
     getState: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_GET_STATE),
     restart: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_RESTART),
+    /** 取走上次更新重启时被打断的会话 id（取一次即清空） */
+    takeInterruptedSessions: (): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_TAKE_INTERRUPTED_SESSIONS),
     onStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
       const listener = (_: unknown, status: UpdateStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.UPDATER_STATUS, listener);

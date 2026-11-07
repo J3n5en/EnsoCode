@@ -68,6 +68,35 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     sessions.observe({ type: 'worker-exited' });
     expect(sessions.workspaceTreeRunning(parent.sessionId)).toBe(false);
   });
+  it('runningRootSessionIds 只列自身在跑的父会话，不含子会话与空闲会话', () => {
+    const sessions = index();
+    const other: SessionIdentity = { sessionId: 'other', generation: parent.generation };
+    for (const identity of [parent, other]) {
+      sessions.prepareParent(identity);
+      sessions.observe({
+        type: 'parent-ready',
+        identity,
+        seq: 1,
+        sessionFile: `/tmp/${identity.sessionId}.jsonl`,
+        model: { providerId: 'p', modelId: 'm' },
+      });
+    }
+    const reserved = sessions.reserveChild(other, 'builtin:scout', 'Scout', 'request-1');
+    if (!reserved.ok) throw new Error('reservation failed');
+    sessions.observe(readyChild(reserved.reservation.child));
+    sessions.observe({
+      type: 'status',
+      identity: reserved.reservation.child,
+      seq: 2,
+      status: 'running',
+    });
+    expect(sessions.runningRootSessionIds()).toEqual([]);
+    sessions.observe({ type: 'status', identity: parent, seq: 2, status: 'running' });
+    expect(sessions.runningRootSessionIds()).toEqual([parent.sessionId]);
+    sessions.observe({ type: 'worker-exited' });
+    expect(sessions.runningRootSessionIds()).toEqual([]);
+  });
+
   it('distinguishes preparing workers from ended identities for worktree rebuilds', () => {
     const sessions = index();
     expect(sessions.isAlive(parent.sessionId)).toBe(false);

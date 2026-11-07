@@ -683,6 +683,9 @@ export const IPC_PRODUCT_COVERAGE = {
   UPDATER_SET_AUTO_RESTART_WHEN_IDLE: excluded(
     'Device idle-restart update policy; not an Enso capability.'
   ),
+  UPDATER_TAKE_INTERRUPTED_SESSIONS: excluded(
+    'Startup handoff that resumes turns interrupted by an update restart.'
+  ),
   PROXY_APPLY: surfaces('general.proxy-mode', 'general.custom-proxy-url'),
   APPEARANCE_USER_CSS_GET: excluded('User CSS injects a device-local user.css file.'),
   APPEARANCE_USER_CSS_OPEN: excluded('Opens user.css in the host default editor.'),

@@ -223,6 +223,16 @@ export class AgentSessionIndex {
     );
   }
 
+  /** 自身正在跑回合的父会话（更新重启前记下，重启后续跑） */
+  runningRootSessionIds(): string[] {
+    return [...this.sessions.values()]
+      .filter(
+        (session) =>
+          !('parent' in session.identity) && session.alive && session.status === 'running'
+      )
+      .map((session) => session.identity.sessionId);
+  }
+
   workspaceRoot(sessionId: string): string {
     const identity = this.currentIdentity(sessionId);
     if (identity && 'parent' in identity) return this.workspaceRoot(identity.parent.sessionId);
