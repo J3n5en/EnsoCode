@@ -710,9 +710,12 @@ export function parseExtensionPluginManifest(
   const configRaw = list('configuration');
   if (configRaw.length > MAX_CONFIG_ITEMS) errors.push(`配置项最多 ${MAX_CONFIG_ITEMS} 个`);
   for (const c of configRaw) {
-    const field = parseConfigField(c);
-    if (!field) errors.push(`配置项不合法：${isRecord(c) ? String(c.key) : ''}`);
-    else configuration.push(field);
+    const reasons: string[] = [];
+    const field = parseConfigField(c, reasons);
+    if (!field) {
+      const name = isRecord(c) ? String(c.key) : '';
+      errors.push(`配置项不合法：${name}${reasons.length > 0 ? `（${reasons.join('；')}）` : ''}`);
+    } else configuration.push(field);
   }
   uniqueIds(
     configuration.map((c) => ({ id: c.key })),
@@ -903,45 +906,87 @@ function parseEventSubscription(raw: unknown): PluginEventSubscription | null {
   return { event, mode, failClosed: raw.failClosed === true, ...(tools ? { tools } : {}) };
 }
 
-function parseConfigField(c: unknown): PluginConfigContrib | null {
-  if (
-    !isRecord(c) ||
-    typeof c.key !== 'string' ||
-    !CONFIG_KEY.test(c.key) ||
-    !isNonEmptyString(c.title, 60) ||
-    (c.description !== undefined && !isNonEmptyString(c.description, 500)) ||
-    (c.secret !== undefined && typeof c.secret !== 'boolean')
-  )
+function parseConfigField(c: unknown, reasons: string[] = []): PluginConfigContrib | null {
+  if (!isRecord(c)) {
+    reasons.push('必须是对象');
     return null;
+  }
+  if (typeof c.key !== 'string') {
+    reasons.push('key 必须是字符串');
+    return null;
+  }
+  if (!CONFIG_KEY.test(c.key)) {
+    reasons.push('key 必须以字母开头，只含字母数字下划线，最长 32');
+    return null;
+  }
+  if (!isNonEmptyString(c.title, 60)) {
+    reasons.push('title 必须是非空字符串，最长 60');
+    return null;
+  }
+  if (c.description !== undefined && !isNonEmptyString(c.description, 500)) {
+    reasons.push('description 必须是非空字符串，最长 500');
+    return null;
+  }
+  if (c.secret !== undefined && typeof c.secret !== 'boolean') {
+    reasons.push('secret 必须是布尔值');
+    return null;
+  }
   const type = c.type ?? 'string';
-  if (!(PLUGIN_CONFIG_TYPES as readonly unknown[]).includes(type)) return null;
+  if (!(PLUGIN_CONFIG_TYPES as readonly unknown[]).includes(type)) {
+    reasons.push(`type 只能是 ${PLUGIN_CONFIG_TYPES.join('、')}`);
+    return null;
+  }
   const secret = c.secret === true;
-  if (secret && type !== 'string') return null;
+  if (secret && type !== 'string') {
+    reasons.push('secret 只能用在 string 类型上');
+    return null;
+  }
   const field: PluginConfigContrib = {
     key: c.key,
-    title: c.title as string,
+    title: c.title,
     description: typeof c.description === 'string' ? c.description : '',
     secret,
     type: type as PluginConfigType,
   };
   const has = (k: string) => c[k] !== undefined;
-  const only = (...allowed: string[]) =>
-    ['default', 'options', 'min', 'max', 'pathKind'].every((k) => allowed.includes(k) || !has(k));
+  const only = (...allowed: string[]) => {
+    const extra = ['default', 'options', 'min', 'max', 'pathKind'].filter(
+      (k) => !allowed.includes(k) && has(k)
+    );
+    if (extra.length === 0) return true;
+    reasons.push(`${String(type)} 类型不支持 ${extra.join('、')}`);
+    return false;
+  };
   switch (type) {
     case 'string':
-      if (!only('default') || (has('default') && !isNonEmptyString(c.default, 4096))) return null;
+      if (!only('default')) return null;
+      if (has('default') && !isNonEmptyString(c.default, 4096)) {
+        reasons.push('default 必须是非空字符串，最长 4096');
+        return null;
+      }
       if (has('default')) field.default = c.default as string;
       return field;
     case 'number': {
       if (!only('default', 'min', 'max')) return null;
       const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
-      if ((has('min') && !finite(c.min)) || (has('max') && !finite(c.max))) return null;
-      if (has('min') && has('max') && (c.min as number) > (c.max as number)) return null;
+      if ((has('min') && !finite(c.min)) || (has('max') && !finite(c.max))) {
+        reasons.push('min 和 max 必须是有限数字');
+        return null;
+      }
+      if (has('min') && has('max') && (c.min as number) > (c.max as number)) {
+        reasons.push('min 不能大于 max');
+        return null;
+      }
       if (has('default')) {
-        if (!finite(c.default)) return null;
-        const d = c.default as number;
-        if ((has('min') && d < (c.min as number)) || (has('max') && d > (c.max as number)))
+        if (!finite(c.default)) {
+          reasons.push('default 必须是有限数字');
           return null;
+        }
+        const d = c.default as number;
+        if ((has('min') && d < (c.min as number)) || (has('max') && d > (c.max as number))) {
+          reasons.push('default 必须落在 min 和 max 之间');
+          return null;
+        }
         field.default = d;
       }
       if (has('min')) field.min = c.min as number;
@@ -949,28 +994,42 @@ function parseConfigField(c: unknown): PluginConfigContrib | null {
       return field;
     }
     case 'boolean':
-      if (!only('default') || (has('default') && typeof c.default !== 'boolean')) return null;
+      if (!only('default')) return null;
+      if (has('default') && typeof c.default !== 'boolean') {
+        reasons.push('default 必须是布尔值');
+        return null;
+      }
       if (has('default')) field.default = c.default as boolean;
       return field;
     case 'enum': {
       if (!only('default', 'options')) return null;
       const options = c.options;
-      if (
-        !Array.isArray(options) ||
-        options.length === 0 ||
-        options.length > 50 ||
-        !options.every((o) => isNonEmptyString(o, 200)) ||
-        new Set(options).size !== options.length
-      )
+      if (!Array.isArray(options) || options.length === 0 || options.length > 50) {
+        reasons.push('options 必须是 1 到 50 项的数组');
         return null;
-      if (has('default') && !(options as unknown[]).includes(c.default)) return null;
+      }
+      if (!options.every((o) => isNonEmptyString(o, 200))) {
+        reasons.push('options 每一项都必须是非空字符串，最长 200');
+        return null;
+      }
+      if (new Set(options).size !== options.length) {
+        reasons.push('options 不能有重复项');
+        return null;
+      }
+      if (has('default') && !(options as unknown[]).includes(c.default)) {
+        reasons.push('default 必须是 options 里的一项');
+        return null;
+      }
       field.options = options as string[];
       if (has('default')) field.default = c.default as string;
       return field;
     }
     default:
       if (!only('pathKind')) return null;
-      if (has('pathKind') && c.pathKind !== 'file' && c.pathKind !== 'directory') return null;
+      if (has('pathKind') && c.pathKind !== 'file' && c.pathKind !== 'directory') {
+        reasons.push('pathKind 只能是 file 或 directory');
+        return null;
+      }
       field.pathKind = c.pathKind === 'directory' ? 'directory' : 'file';
       return field;
   }

@@ -281,6 +281,37 @@ describe('parseExtensionPluginManifest', () => {
     ).not.toEqual([]);
   });
 
+  it('配置项：错误信息说清违反了哪条规则', () => {
+    const reason = (c: unknown) =>
+      errorsOf({
+        ...base(),
+        contributes: { ...base().contributes, configuration: [c] },
+      }).join(' ');
+
+    expect(reason({ key: 'a', title: 'x', default: '' })).toContain('default 必须是非空字符串');
+    expect(reason({ key: 'a', title: 'x', type: 'nope' })).toContain(
+      'type 只能是 string、number、boolean、enum、path'
+    );
+    expect(reason({ key: 'a', title: 'x', type: 'boolean', default: 'yes' })).toContain(
+      'default 必须是布尔值'
+    );
+    expect(reason({ key: 'a', title: 'x', type: 'enum', options: ['a', 'a'] })).toContain(
+      'options 不能有重复项'
+    );
+    expect(reason({ key: 'a', title: 'x', type: 'enum', options: ['a'], default: 'b' })).toContain(
+      'default 必须是 options 里的一项'
+    );
+    expect(reason({ key: 'a', title: 'x', type: 'number', min: 5, max: 1 })).toContain(
+      'min 不能大于 max'
+    );
+    expect(reason({ key: 'a', title: 'x', type: 'string', min: 1 })).toContain(
+      'string 类型不支持 min'
+    );
+    expect(reason({ key: 'a', title: 'x', type: 'number', secret: true })).toContain(
+      'secret 只能用在 string 类型上'
+    );
+  });
+
   it('接受预设，并拒绝未声明的 skill、MCP、越界正文和缺少推脱正文', () => {
     const preset = {
       id: 'review',
