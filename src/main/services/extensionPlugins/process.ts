@@ -66,6 +66,10 @@ export class PluginProcess {
     return this.child !== null;
   }
 
+  get inflight(): number {
+    return this.pending.size;
+  }
+
   ready(): Promise<PluginRegistrations> {
     if (this.closed) return Promise.reject(pluginError('PLUGIN_EXITED', '插件进程已退出'));
     this.readyPromise ??= this.spawn();

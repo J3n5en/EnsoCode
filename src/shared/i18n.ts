@@ -1750,6 +1750,9 @@ export const zhTranslations: Record<string, string> = {
   'China mirror': '国内镜像',
   'Usage guide': '使用说明',
   Homepage: '主页',
+  'Update plugins automatically': '自动更新插件',
+  'Marketplace updates that do not ask for new permissions install on their own.':
+    '权限不变的市场更新会自动装上。需要新权限的仍等你同意。',
   '{{name}} tried to message another session and was blocked':
     '插件 {{name}} 想向其他会话发消息，已拦截',
   'Turn on': '去开启',

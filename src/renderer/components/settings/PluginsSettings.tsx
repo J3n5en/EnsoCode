@@ -416,6 +416,8 @@ export function EnsoPluginsSettings({
   onFocusPluginConsumed?: () => void;
 } = {}) {
   const { t } = useI18n();
+  const pluginAutoUpdate = useSettingsStore((state) => state.pluginAutoUpdate !== false);
+  const setPluginAutoUpdate = useSettingsStore((state) => state.setPluginAutoUpdate);
   const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
   const themeErrors = usePluginThemesStore((state) => state.errors);
   const [preview, setPreview] = React.useState<ExtensionPluginInstallPreview | null>(null);
@@ -584,6 +586,18 @@ export function EnsoPluginsSettings({
               'Installing a plugin lets it run code on this machine. Review what it asks for before confirming.'
             )}
           </p>
+          <label className="mt-3 flex items-center gap-2 text-sm">
+            <Switch
+              checked={pluginAutoUpdate}
+              onCheckedChange={(on) => setPluginAutoUpdate?.(on)}
+            />
+            <span>
+              <span className="block">{t('Update plugins automatically')}</span>
+              <span className="block text-muted-foreground text-xs">
+                {t('Marketplace updates that do not ask for new permissions install on their own.')}
+              </span>
+            </span>
+          </label>
         </div>
         <div className="flex shrink-0 gap-2">
           {plugins.some(

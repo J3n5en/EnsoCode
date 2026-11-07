@@ -10,6 +10,7 @@ import {
 } from '@platform';
 import type { PluginHostCapabilities } from '@shared/extensionPlugins/protocol';
 import { IPC_CHANNELS } from '@shared/types';
+import { readSettings } from '../../ipc/settings';
 import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { remoteLeaderId } from '../remoteRenderer/senders';
 import { localMainContents, rendererById } from '../renderers';
@@ -128,6 +129,12 @@ export function getExtensionPlugins(): ExtensionPluginService {
     capabilities,
     sessionBridge: () => sessionBridge,
     fork: (modulePath, args, options) => utilityProcess.fork(modulePath, args, options),
+    autoUpdatePlugins: () => {
+      const persisted = readSettings()?.['enso-settings'] as
+        | { state?: { pluginAutoUpdate?: unknown } }
+        | undefined;
+      return persisted?.state?.pluginAutoUpdate !== false;
+    },
     market: new PluginMarket({
       root: join(app.getPath('userData'), 'extension-plugins'),
       fetch: (url, init) => fetch(url, init),

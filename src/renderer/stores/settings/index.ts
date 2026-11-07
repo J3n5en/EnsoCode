@@ -222,6 +222,7 @@ const initialState = {
   voiceGeminiApiKey: '',
   autoUpdate: true,
   autoRestartWhenIdle: false,
+  pluginAutoUpdate: true,
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
   openChangesOnFileEdit: false,
@@ -425,6 +426,8 @@ export const useSettingsStore = create<SettingsState>()(
         }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
       setAutoRestartWhenIdle: (autoRestartWhenIdle) => set({ autoRestartWhenIdle }),
+      setPluginAutoUpdate: (pluginAutoUpdate) =>
+        set({ pluginAutoUpdate: pluginAutoUpdate !== false }),
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
       setCustomProxyUrl: (customProxyUrl) => set({ customProxyUrl }),
       setOpenChangesOnFileEdit: (openChangesOnFileEdit) => set({ openChangesOnFileEdit }),
@@ -1228,6 +1231,9 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (typeof s.botDiscussModeEnabled !== 'boolean') {
           useSettingsStore.setState({ botDiscussModeEnabled: false });
+        }
+        if (typeof s.pluginAutoUpdate !== 'boolean') {
+          useSettingsStore.setState({ pluginAutoUpdate: true });
         }
         const sshTimeoutSeconds = normalizeSshTimeoutSeconds(s.sshTimeoutSeconds);
         if (sshTimeoutSeconds !== s.sshTimeoutSeconds) {

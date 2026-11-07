@@ -172,6 +172,8 @@ export interface ExtensionPluginServiceOptions {
   market?: PluginMarket;
   /** 拉起动态工具时单个插件的等待上限，测试可缩短 */
   prepareTimeoutMs?: number;
+  /** 缺省开启。返回 false 时市场更新只提示，不安装 */
+  autoUpdatePlugins?: () => boolean;
 }
 
 export type UiCallMethod = Exclude<PluginCallMethod, 'tool.execute'>;
@@ -1533,7 +1535,7 @@ export class ExtensionPluginService {
     run(UPDATE_CHECK_FIRST_DELAY_MS);
   }
 
-  /** GitHub 来源只拉清单比较版本；市场来源对比签名索引。不下载整包、不自动安装 */
+  /** GitHub 来源只比较版本。市场来源在自动更新开启时走和手动更新相同的安装流程 */
   async checkUpdates(options: { enabledOnly?: boolean } = {}) {
     const marketRecords = this.records.filter(
       (r) => r.source?.kind === 'market' && (!options.enabledOnly || r.state === 'enabled')
@@ -1572,17 +1574,61 @@ export class ExtensionPluginService {
   private async checkMarketUpdates(records: PluginRecord[]) {
     if (records.length === 0 || !this.options.market) return [];
     const r = await this.options.market.index({ refresh: true });
-    return records.map((record) => {
+    const results: Array<'available' | 'current' | 'failed'> = [];
+    for (const record of records) {
       if (!r.ok) {
         this.updates.set(record.id, { error: r.error });
-        return 'failed' as const;
+        results.push('failed');
+        continue;
       }
       const latest = r.index.plugins.find((p) => p.id === record.id)?.latest;
-      const update =
-        latest && isNewerPluginVersion(latest, record.version) ? { version: latest } : {};
-      this.updates.set(record.id, update);
-      return update.version ? ('available' as const) : ('current' as const);
+      const version = latest && isNewerPluginVersion(latest, record.version) ? latest : undefined;
+      this.updates.set(record.id, version ? { version } : {});
+      if (!version || record.source?.kind !== 'market' || !this.wantsPluginAutoUpdate()) {
+        results.push(version ? 'available' : 'current');
+        continue;
+      }
+      results.push(await this.installMarketUpdate(record.id, version));
+    }
+    return results;
+  }
+
+  private wantsPluginAutoUpdate(): boolean {
+    return this.options.autoUpdatePlugins?.() !== false;
+  }
+
+  private async installMarketUpdate(
+    id: string,
+    version: string
+  ): Promise<'available' | 'current' | 'failed'> {
+    const current = this.records.find((item) => item.id === id);
+    if (current?.pending?.version === version) return 'available';
+    const staged = await this.restage(id);
+    if (!staged.ok) {
+      this.updates.set(id, { version, error: staged.error });
+      return 'failed';
+    }
+    if (!staged.preview.expands && (this.processes.get(id)?.inflight ?? 0) > 0) {
+      this.discard(staged.preview.token);
+      this.updates.set(id, { version });
+      return 'available';
+    }
+    const committed = await this.commit(staged.preview.token);
+    if (!committed.ok) {
+      this.updates.set(id, { version, error: committed.error });
+      return 'failed';
+    }
+    if (staged.preview.expands) {
+      this.updates.set(id, { version });
+      return 'available';
+    }
+    this.emitNotice({
+      kind: 'auto-updated',
+      pluginId: id,
+      name: staged.preview.name,
+      version: staged.preview.version,
     });
+    return 'current';
   }
 
   private async probeVersion(id: string, probe: URL): Promise<string> {

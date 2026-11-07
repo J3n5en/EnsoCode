@@ -119,6 +119,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   voiceGeminiApiKey: { mode: 'excluded', reason: 'voice input is configured per device' },
   autoUpdate: { mode: 'excluded', reason: 'device update policy' },
   autoRestartWhenIdle: { mode: 'excluded', reason: 'device update policy' },
+  pluginAutoUpdate: { mode: 'excluded', reason: 'device update policy' },
   proxyMode: { mode: 'excluded', reason: 'device network configuration' },
   customProxyUrl: { mode: 'excluded', reason: 'device network configuration may contain secrets' },
   sshTimeoutSeconds: { mode: 'excluded', reason: 'device network configuration' },

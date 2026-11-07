@@ -421,10 +421,14 @@ describe('ExtensionPluginService', () => {
       const svc = reopenWithRepo(fetch);
       const changed = vi.fn();
       svc.onChange(changed);
+      const notices: ExtensionPluginNotice[] = [];
+      svc.onNotice((notice) => notices.push(notice));
       expect(await svc.checkUpdates()).toEqual({ checked: 1, available: 1, failed: 0 });
       expect(fetch).toHaveBeenCalledWith(probe, expect.anything());
       expect(svc.list()[0]).toMatchObject({ availableVersion: '1.2.0' });
       expect(svc.list()[0]?.updateCheckError).toBeUndefined();
+      expect(svc.list()[0]?.version).toBe('1.0.0');
+      expect(notices).toEqual([]);
       await vi.waitFor(() => expect(changed).toHaveBeenCalled());
     });
 
@@ -1872,9 +1876,16 @@ describe('插件市场', () => {
   }
 
   /** 市场替身：latest 为当前可下载版本，download 写出对应 zip */
-  function fakeMarket(state: { latest: string; zipId?: string }) {
+  function fakeMarket(state: {
+    latest: string;
+    zipId?: string;
+    patch?: Record<string, unknown>;
+    main?: string;
+  }) {
     let mirror = false;
+    let downloads = 0;
     return {
+      downloads: () => downloads,
       chinaMirror: () => mirror,
       setChinaMirror: (on: boolean) => {
         mirror = on;
@@ -1908,14 +1919,16 @@ describe('插件市场', () => {
         },
       }),
       download: async (_id: string, _v: string | undefined, dest: string) => {
+        downloads += 1;
         writeFileSync(
           dest,
           storedZip({
             'enso-plugin.json': manifest({
               id: state.zipId ?? 'example.demo',
               version: state.latest,
+              ...state.patch,
             }),
-            'main.mjs': mainJs,
+            'main.mjs': state.main ?? mainJs,
           })
         );
         return { ok: true as const, version: state.latest };
@@ -1923,7 +1936,10 @@ describe('插件市场', () => {
     };
   }
 
-  const open = (market: unknown) =>
+  const open = (
+    market: unknown,
+    options: { auto?: boolean; composer?: () => Promise<unknown> } = {}
+  ) =>
     new ExtensionPluginService({
       root,
       hostVersion: '0.2.12',
@@ -1931,22 +1947,28 @@ describe('插件市场', () => {
       env: {},
       fork: () => new InProcessChild() as never,
       market: market as never,
+      ...(options.auto === false ? { autoUpdatePlugins: () => false } : {}),
       gate: {
         fetch: vi.fn(),
         notify: () => true,
-        composer: async () => null,
+        composer: options.composer ?? (async () => null),
         mcpTools: async () => [],
         mcpCall: async () => ({ content: '', isError: false }),
         now: () => Date.now(),
       },
     });
 
-  it('从市场安装记录 market 来源；列表带安装状态；新版本出现时检查更新提示', async () => {
-    const state = { latest: '1.0.0' };
-    const svc = open(fakeMarket(state));
+  async function installMarket(svc: ExtensionPluginService) {
     const staged = await svc.stage({ kind: 'market', id: 'example.demo' });
     if (!staged.ok) throw new Error(staged.error);
-    await svc.commit(staged.preview.token);
+    const committed = await svc.commit(staged.preview.token);
+    if (!committed.ok) throw new Error(committed.error);
+  }
+
+  it('从市场安装记录 market 来源；列表带安装状态；新版本出现时检查更新提示', async () => {
+    const state = { latest: '1.0.0' };
+    const svc = open(fakeMarket(state), { auto: false });
+    await installMarket(svc);
     expect(svc.list()[0]?.source).toEqual({ kind: 'market' });
     expect(readRegistry(root).plugins[0]?.source).toEqual({ kind: 'market', id: 'example.demo' });
     const list = await svc.marketList(false);
@@ -1963,6 +1985,89 @@ describe('插件市场', () => {
     if (!again.ok) throw new Error(again.error);
     await svc.commit(again.preview.token);
     expect(svc.list()[0]?.version).toBe('1.1.0');
+  });
+
+  it('自动更新关闭时只提示，不安装', async () => {
+    const state = { latest: '1.0.0' };
+    const svc = open(fakeMarket(state), { auto: false });
+    await installMarket(svc);
+    const notices: ExtensionPluginNotice[] = [];
+    svc.onNotice((notice) => notices.push(notice));
+    state.latest = '1.2.0';
+    await svc.checkUpdates();
+    expect(svc.list()[0]).toMatchObject({ version: '1.0.0', availableVersion: '1.2.0' });
+    expect(notices).toEqual([]);
+  });
+
+  it('权限不变时自动安装并通知', async () => {
+    const state = { latest: '1.0.0' };
+    const svc = open(fakeMarket(state));
+    await installMarket(svc);
+    const notices: ExtensionPluginNotice[] = [];
+    svc.onNotice((notice) => notices.push(notice));
+    state.latest = '1.1.0';
+    expect(await svc.checkUpdates()).toMatchObject({ checked: 1, failed: 0, available: 0 });
+    expect(svc.list()[0]?.version).toBe('1.1.0');
+    expect(svc.list()[0]?.availableVersion).toBeUndefined();
+    expect(notices).toEqual([
+      { kind: 'auto-updated', pluginId: 'example.demo', name: 'Demo', version: '1.1.0' },
+    ]);
+  });
+
+  it('扩大权限时进入待授权，同一版本不重复下载也不重复通知', async () => {
+    const state: { latest: string; patch?: Record<string, unknown> } = { latest: '1.0.0' };
+    const market = fakeMarket(state);
+    const svc = open(market);
+    await installMarket(svc);
+    const notices: ExtensionPluginNotice[] = [];
+    svc.onNotice((notice) => notices.push(notice));
+    state.latest = '2.0.0';
+    state.patch = {
+      permissions: ['agent.tool', 'net.fetch'],
+      net: { domains: ['api.example.com'] },
+    };
+    const before = market.downloads();
+    await svc.checkUpdates();
+    expect(svc.list()[0]).toMatchObject({ version: '1.0.0', pendingVersion: '2.0.0' });
+    expect(notices).toEqual([
+      {
+        kind: 'update-needs-approval',
+        pluginId: 'example.demo',
+        name: 'Demo',
+        version: '2.0.0',
+      },
+    ]);
+    expect(market.downloads()).toBe(before + 1);
+    await svc.checkUpdates();
+    expect(market.downloads()).toBe(before + 1);
+    expect(notices).toHaveLength(1);
+  });
+
+  it('有进行中的调用时跳过不扩权的替换', async () => {
+    const state = {
+      latest: '1.0.0',
+      main: `export function activate(enso) { enso.tools.register('lookup', async (_args, ctx) => { await ctx.progress('busy'); await new Promise(() => {}); }); }`,
+    };
+    const svc = open(fakeMarket(state));
+    await installMarket(svc);
+    await svc.setEnabled('example.demo', true);
+    const seen = vi.fn();
+    const pending = svc.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's1',
+      projectRoot: null,
+      onProgress: seen,
+    });
+    await vi.waitFor(() => expect(seen).toHaveBeenCalled());
+    const notices: ExtensionPluginNotice[] = [];
+    svc.onNotice((notice) => notices.push(notice));
+    state.latest = '1.1.0';
+    await svc.checkUpdates();
+    expect(svc.list()[0]).toMatchObject({ version: '1.0.0', availableVersion: '1.1.0' });
+    expect(notices).toEqual([]);
+    void svc.dispose();
+    await pending.catch(() => undefined);
   });
 
   it('市场包里的插件 id 与条目不符时拒绝', async () => {

@@ -91,6 +91,9 @@ export const SETTINGS_DATA_COVERAGE = {
   ),
   autoUpdate: surfaces('general.automatic-updates'),
   autoRestartWhenIdle: excluded('Device idle-restart update policy; not an Enso capability.'),
+  pluginAutoUpdate: excluded(
+    'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
+  ),
   proxyMode: surfaces('general.proxy-mode'),
   customProxyUrl: surfaces('general.custom-proxy-url'),
   openChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
@@ -258,6 +261,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   ),
   setAutoUpdate: surfaces('general.automatic-updates'),
   setAutoRestartWhenIdle: excluded('Device idle-restart update policy; not an Enso capability.'),
+  setPluginAutoUpdate: excluded(
+    'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
+  ),
   setProxyMode: surfaces('general.proxy-mode'),
   setCustomProxyUrl: surfaces('general.custom-proxy-url'),
   setOpenChangesOnFileEdit: excluded('Renderer side-panel preference; not an Enso capability.'),
