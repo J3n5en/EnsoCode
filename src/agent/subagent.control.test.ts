@@ -324,7 +324,7 @@ describe('unified subagent tool', () => {
     ).rejects.toThrow(/unknown model/i);
   });
 
-  it('保留 agent_type 的必选模型与锁定模型边界', async () => {
+  it('agent_pick 类型漏传 model 时用第一个子代理模型并在回执注明；无可选模型仍报错', async () => {
     const required = setup({
       agentTypes: [
         {
@@ -336,16 +336,41 @@ describe('unified subagent tool', () => {
         },
       ],
     });
+    const result = await required.tool.execute(
+      'call-required',
+      { operation: 'spawn', description: 'x', prompt: 'x', agent_type: 'scout' },
+      undefined,
+      undefined,
+      {} as never
+    );
+    expect(required.deps.invoke).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'OpenAI/gpt-cheap' }),
+      undefined
+    );
+    expect(JSON.stringify(result.content)).toContain('OpenAI/gpt-cheap');
+
+    const none = setup({
+      models: [],
+      agentTypes: [
+        {
+          name: 'scout',
+          description: 'scout',
+          systemPrompt: '',
+          tools: 'readonly',
+          allowModelOverride: true,
+        },
+      ],
+    });
     await expect(
-      required.tool.execute(
-        'call-required',
+      none.tool.execute(
+        'call-none',
         { operation: 'spawn', description: 'x', prompt: 'x', agent_type: 'scout' },
         undefined,
         undefined,
         {} as never
       )
     ).rejects.toThrow(/requires a model/i);
-    expect(required.deps.invoke).not.toHaveBeenCalled();
+    expect(none.deps.invoke).not.toHaveBeenCalled();
 
     const locked = setup({
       agentTypes: [

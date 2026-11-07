@@ -131,10 +131,13 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
         );
       }
       const modelInput = typeof params.model === 'string' ? params.model : undefined;
-      const { modelName, thinking } = resolveChildThinkingInput(
+      const { modelName: requestedModel, thinking } = resolveChildThinkingInput(
         modelInput,
         typeof params.thinking === 'string' ? params.thinking : undefined
       );
+      // agent_pick 漏传时按设置顺序取第一个可选模型，回执注明，省一轮重试
+      const modelName =
+        requestedModel ?? (agentType?.allowModelOverride ? modelNames[0] : undefined);
       if (modelName && !deps.models.some((model) => model.name === modelName)) {
         throw new Error(`unknown model "${modelName}". Available: [${modelNames.join(', ')}]`);
       }
@@ -342,6 +345,10 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       if (!request) {
         throw new Error(`invalid subagent parameters: ${describeInvalidSubagentParams(input)}`);
       }
+      const defaultedModel =
+        request.operation === 'spawn' && request.model && typeof input.model !== 'string'
+          ? request.model
+          : undefined;
       const waits =
         request.operation === 'wait' ||
         ((request.operation === 'spawn' || request.operation === 'send') && request.wait);
@@ -370,9 +377,16 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
             : background
               ? BACKGROUND_RECEIPT_NOTE
               : undefined;
+      const modelNote = defaultedModel
+        ? `No model was given; used ${defaultedModel}, the first configured subagent model. Pass model to choose another.`
+        : undefined;
       const value =
-        note && response.value && typeof response.value === 'object'
-          ? { ...(response.value as Record<string, unknown>), note }
+        (note || modelNote) && response.value && typeof response.value === 'object'
+          ? {
+              ...(response.value as Record<string, unknown>),
+              ...(note ? { note } : {}),
+              ...(modelNote ? { modelNote } : {}),
+            }
           : response.value;
       const serialized = JSON.stringify(value, null, 2);
       return {

@@ -326,7 +326,10 @@ export class AgentService implements AgentServiceContract {
         return failure('invalid-state', 'requestId and message are required.');
       }
       if (agent.value.status === 'closed') {
-        return failure('invalid-state', 'Agent is dismissed.');
+        return failure(
+          'invalid-state',
+          'Agent is dismissed and cannot receive messages. Spawn a new agent with the context it needs.'
+        );
       }
       const active = agent.value.activeRunId ? this.runs.get(agent.value.activeRunId) : undefined;
       if (request.expectedRunId && request.expectedRunId !== active?.runId) {
