@@ -10,8 +10,8 @@ export interface SessionBridgeDeps {
   conversation(id: string): { projectId: string; parentId?: string } | null;
   /** 选中主会话；target 是子会话时再切到它的标签 */
   focus(rootId: string, target: string): void;
-  /** 新建并选中，返回会话 id */
-  create(projectId: string): Promise<string | null>;
+  /** 新建并选中，返回会话 id；presetId 让插件建的会话带上自己的预设 */
+  create(projectId: string, presetId?: string): Promise<string | null>;
   prefill(sessionId: string, text: string): void;
   /** 启动没在运行的会话，返回失败原因 */
   ensure(sessionId: string): Promise<string | null>;
@@ -41,7 +41,8 @@ export async function handleSessionRequest(
   }
   const origin = deps.conversation(req.sessionId);
   if (!origin) return fail('NO_SESSION', '发起调用的会话不在本窗口');
-  const id = await deps.create(origin.projectId);
+  const presetId = typeof req.payload.presetId === 'string' ? req.payload.presetId : undefined;
+  const id = await deps.create(origin.projectId, presetId);
   if (!id) return fail('CREATE_FAILED', '新建会话失败');
   const text = req.payload.text;
   if (typeof text === 'string' && text) deps.prefill(id, text);

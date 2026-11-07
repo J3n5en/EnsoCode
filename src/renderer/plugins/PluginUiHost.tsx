@@ -19,7 +19,8 @@ const sessionDeps = {
     sessions.selectConversation(rootId);
     if (target !== rootId) sessions.selectTab(rootId, target);
   },
-  create: (projectId: string) => useSessionsStore.getState().newConversation(projectId),
+  create: (projectId: string, presetId?: string) =>
+    useSessionsStore.getState().newConversation(projectId, presetId ? { presetId } : undefined),
   prefill: prefillDraft,
   ensure: async (id: string) => {
     const sessions = useSessionsStore.getState();

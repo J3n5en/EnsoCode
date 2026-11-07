@@ -36,8 +36,15 @@ describe('handleSessionRequest', () => {
         d
       )
     ).resolves.toEqual({ ok: true, value: { sessionId: 'n1' } });
-    expect(d.create).toHaveBeenCalledWith('p1');
+    expect(d.create).toHaveBeenCalledWith('p1', undefined);
     expect(d.prefill).toHaveBeenCalledWith('n1', '整理');
+
+    const withPreset = deps();
+    await handleSessionRequest(
+      { sessionId: 'a', op: 'createSession', payload: { presetId: 'enso.hornet:redteam' } },
+      withPreset
+    );
+    expect(withPreset.create).toHaveBeenCalledWith('p1', 'enso.hornet:redteam');
 
     const failed = deps({ create: vi.fn(async () => null) });
     await expect(

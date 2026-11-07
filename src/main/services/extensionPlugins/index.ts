@@ -11,6 +11,7 @@ import {
 import type { PluginHostCapabilities } from '@shared/extensionPlugins/protocol';
 import { IPC_CHANNELS } from '@shared/types';
 import { setNativeAgentTypeSource } from '../pluginRuntime';
+import { remoteLeaderId } from '../remoteRenderer/senders';
 import { localMainContents, rendererById } from '../renderers';
 import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
@@ -165,10 +166,12 @@ export function getExtensionPlugins(): ExtensionPluginService {
           payload,
           SESSION_UI_TIMEOUT_MS
         ),
-      // 后台投递没有发起窗口：交给本机主窗口启动，没有主窗口时如实失败
-      wakeSession: async (sessionId) => {
+      // 发起窗口一定活着（它刚调用了插件），优先交给它。后台投递没有发起窗口时退到主窗口，
+      // 服务器模式下本机主窗口恒为 null，再退到远端主界面
+      wakeSession: async (sessionId, origin) => {
+        const target = origin ?? localMainContents()?.id ?? remoteLeaderId(false) ?? null;
         await getDraftBroker().request(
-          localMainContents()?.id ?? null,
+          target,
           sessionId,
           'ensureSession',
           {},

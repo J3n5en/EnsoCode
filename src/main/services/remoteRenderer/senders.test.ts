@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   addRemoteSender,
   RemoteSender,
+  remoteLeaderId,
+  remoteSenders,
   SETTINGS_COALESCE_MS,
   STREAM_COALESCE_MS,
   staleRemoteSenders,
@@ -305,6 +307,30 @@ describe('RemoteSender settings change coalesce', () => {
       expect(channels()).toEqual(['agent:event', 'settings:changed']);
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('remoteLeaderId', () => {
+  it('桌面主窗口活着时不选远端，否则选最早接入的远端主界面', () => {
+    for (const stale of remoteSenders()) stale.destroy();
+    const settings = new RemoteSender('p1', 'c-settings', 'settings', () => {});
+    const earlier = new RemoteSender('p1', 'c-earlier', 'main', () => {});
+    const later = new RemoteSender('p1', 'c-later', 'main', () => {});
+    addRemoteSender(settings);
+    addRemoteSender(later);
+    addRemoteSender(earlier);
+    try {
+      expect(remoteLeaderId(true)).toBeNull();
+      expect(remoteLeaderId(false)).toBe(earlier.id);
+      earlier.destroy();
+      expect(remoteLeaderId(false)).toBe(later.id);
+      later.destroy();
+      expect(remoteLeaderId(false)).toBeNull();
+    } finally {
+      settings.destroy();
+      later.destroy();
+      earlier.destroy();
     }
   });
 });

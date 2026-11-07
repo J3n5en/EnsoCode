@@ -372,6 +372,8 @@ interface SessionsState {
     options?: {
       forkedFrom?: { conversationId: string; entryId: string };
       worktreeFromConversationId?: string;
+      /** 插件建会话时指定预设；缺省跟设置里的默认预设 */
+      presetId?: string;
     }
   ): Promise<string | null>;
   /** 会话切到隔离 worktree（composer 选择器/右键菜单入口）。
@@ -534,7 +536,7 @@ function toQueuedMessage(message: ProjectedMessage): QueuedMessage {
 }
 
 function userMessageRawText(message: ProjectedMessage): string {
-  if (message.role !== 'user') return '';
+  if (message.role !== 'user' && !message.pluginSource) return '';
   return splitPlanPrefix(
     splitUnattendedPrefix(
       message.content
@@ -552,14 +554,18 @@ function truncateTitle(text: string): string {
 }
 
 /** 首条用户消息的文本，用作手机端建会话的标题（桌面建的在 spawn 时已有标题） */
+/** 插件注入的消息也算会话的第一句话，否则插件建的会话永远停在「新对话」 */
+const isTitleSource = (message: ProjectedMessage): boolean =>
+  message.role === 'user' || Boolean(message.pluginSource);
+
 function firstUserText(projection: SessionProjection): string {
-  const message = projection.messages.find((m) => m.role === 'user');
+  const message = projection.messages.find(isTitleSource);
   if (!message) return '';
   return truncateTitle(userMessageRawText(message));
 }
 
 function firstUserRawText(projection: SessionProjection): string {
-  const message = projection.messages.find((m) => m.role === 'user');
+  const message = projection.messages.find(isTitleSource);
   return message ? userMessageRawText(message) : '';
 }
 
@@ -1585,11 +1591,11 @@ export const useSessionsStore = create<SessionsState>()(
         const current = get();
         const currentConversation = current.conversations[id];
         if (!currentConversation) return;
-        // 手机创建的冷会话仍需从首条用户消息提取标题。
+        // 冷会话不落正文，标题仍要从首条用户消息或插件注入里提出来。
         const rawUserText =
           !currentConversation.title &&
           event.type === 'message-upsert' &&
-          event.message.role === 'user'
+          isTitleSource(event.message)
             ? userMessageRawText(event.message)
             : undefined;
         const extractedTitle = rawUserText ? truncateTitle(rawUserText) : undefined;
@@ -2505,11 +2511,12 @@ export const useSessionsStore = create<SessionsState>()(
             defaultReasoningEnabled,
             defaultThinkingLevel,
           });
+          const wantedPresetId = options?.presetId ?? defaultPresetId;
           const defaultPreset =
-            defaultPresetId !== 'default' &&
-            (presets.some((preset) => preset.id === defaultPresetId) ||
-              isPluginPresetId(defaultPresetId))
-              ? { presetId: defaultPresetId }
+            wantedPresetId !== 'default' &&
+            (presets.some((preset) => preset.id === wantedPresetId) ||
+              isPluginPresetId(wantedPresetId))
+              ? { presetId: wantedPresetId }
               : {};
           const conversation: Conversation = {
             ...emptyProjection,

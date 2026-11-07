@@ -7,6 +7,7 @@ import {
   type ExtensionPluginPermission,
   isPluginRelativePath,
 } from '@shared/extensionPlugins/manifest';
+import { parsePluginPresetId } from '@shared/extensionPlugins/preset';
 import {
   PLUGIN_INJECT_MAX_CHARS,
   type PluginArtifactInfo,
@@ -112,8 +113,8 @@ export interface GateDeps {
       triggerTurn: boolean;
     }
   ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
-  /** 让主窗口启动没在运行的会话（有历史就恢复）；就绪与否由注入重试判断 */
-  wakeSession?(sessionId: string): Promise<void>;
+  /** 让发起窗口启动没在运行的会话（有历史就恢复）；就绪与否由注入重试判断 */
+  wakeSession?(sessionId: string, origin: number | null): Promise<void>;
   abort?(pluginId: string, sessionId: string): { ok: true } | { ok: false; error: string };
   callPlugin?(
     callerId: string,
@@ -435,7 +436,8 @@ export class PluginHostGate {
       }
       case 'session.inject': {
         permit('agent.inject');
-        const sessionId = this.targetSession(pluginId, a, optionalInvocation());
+        const injectInv = optionalInvocation();
+        const sessionId = this.targetSession(pluginId, a, injectInv);
         if (
           typeof a.text !== 'string' ||
           a.text.length === 0 ||
@@ -445,7 +447,8 @@ export class PluginHostGate {
         const images = parsePluginInjectImages(a.images);
         if (!images)
           throw pluginError('INVALID_ARGS', 'images 不合法：最多 4 张 png/jpeg/webp/gif 的 base64');
-        const deliverAs = a.deliverAs === undefined ? 'nextTurn' : a.deliverAs;
+        // nextTurn 只排队不触发，和 triggerTurn 互相矛盾；要触发一轮就得走 followUp
+        const deliverAs = a.deliverAs ?? (a.triggerTurn === true ? 'followUp' : 'nextTurn');
         if (deliverAs !== 'steer' && deliverAs !== 'followUp' && deliverAs !== 'nextTurn')
           throw pluginError('INVALID_ARGS', 'deliverAs 不合法');
         if (a.triggerTurn !== undefined && typeof a.triggerTurn !== 'boolean')
@@ -463,7 +466,7 @@ export class PluginHostGate {
         let result = bridge(pluginId, input);
         if (!result.ok && result.notRunning && this.deps.wakeSession) {
           try {
-            await this.deps.wakeSession(sessionId);
+            await this.deps.wakeSession(sessionId, injectInv?.origin ?? null);
           } catch (error) {
             const reason = error instanceof Error ? error.message : String(error);
             throw pluginError('INJECT_FAILED', `${result.error}，启动失败：${reason}`);
@@ -614,10 +617,17 @@ export class PluginHostGate {
           (typeof a.text !== 'string' || utf8Bytes(a.text) > MAX_DRAFT_BYTES)
         )
           throw pluginError('INVALID_ARGS', 'text 不合法或超过 32KB');
+        // 插件只能给自己的预设建会话，否则等于替别的插件选预设
+        const presetId = a.presetId === undefined ? undefined : String(a.presetId);
+        if (presetId !== undefined && parsePluginPresetId(presetId)?.pluginId !== pluginId)
+          throw pluginError(
+            'INVALID_ARGS',
+            `presetId 必须是本插件的预设，格式 plugin:${pluginId}:<预设 id>`
+          );
         const created = await sessionUi()(
           { sessionId: current, origin: inv.origin ?? null },
           'createSession',
-          a.text ? { text: a.text } : {}
+          { ...(a.text ? { text: a.text } : {}), ...(presetId ? { presetId } : {}) }
         );
         const id = isRecord(created) ? created.sessionId : undefined;
         if (typeof id !== 'string' || id.length === 0)

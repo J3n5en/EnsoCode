@@ -1680,6 +1680,41 @@ describe('typed Agent child projection', () => {
       ).toBe('贪吃蛇游戏开发');
     });
 
+    it('插件注入的消息也算首句，插件建的会话不会停在「新对话」', async () => {
+      const pluginSessionId = '77777777-7777-4777-8777-777777777777';
+      summarizeTitle.mockClear();
+      settingsModule.useSettingsStore.setState({ titleSummaryEnabled: true });
+      sessionsModule.useSessionsStore.getState().adoptPairSession({
+        ...pairSession,
+        sessionId: pluginSessionId,
+      });
+      sessionsModule.useSessionsStore.setState({ activeId: 'parent' });
+      expect(sessionsModule.useSessionsStore.getState().conversations[pluginSessionId]?.title).toBe(
+        ''
+      );
+
+      onAgentEvent?.({
+        type: 'message-upsert',
+        identity: { sessionId: pluginSessionId, generation: 'g1' },
+        seq: 1,
+        index: 0,
+        message: {
+          role: 'custom',
+          content: [{ type: 'text', text: '你是这场战役的指挥官，先跑 engage_status' }],
+          pluginSource: { pluginId: 'enso.hornet', pluginName: 'Hornet' },
+        },
+      });
+
+      expect(sessionsModule.useSessionsStore.getState().conversations[pluginSessionId]?.title).toBe(
+        '你是这场战役的指挥官，先跑 engage_status'
+      );
+      expect(summarizeTitle).toHaveBeenCalledWith(
+        pluginSessionId,
+        { kind: 'initial', text: '你是这场战役的指挥官，先跑 engage_status' },
+        expect.objectContaining({ providerId: 'p', modelId: 'm' })
+      );
+    });
+
     it('标题总结关闭时冷会话保留截断标题，不调用 summarizeTitle', async () => {
       const disabledSessionId = '99999999-9999-4999-8999-999999999999';
       summarizeTitle.mockClear();

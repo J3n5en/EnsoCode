@@ -140,7 +140,7 @@ export const PLUGIN_HOST_APIS = [
   'session.status',
   /** 切换到会话；args { sessionId }，需用户手势 */
   'session.focus',
-  /** 在发起会话的项目里新建会话并切过去；args { text? } 预填输入框，需用户手势 */
+  /** 在发起会话的项目里新建会话并切过去；args { text?, presetId? }，presetId 只能填本插件的预设 */
   'session.create',
 ] as const;
 export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];

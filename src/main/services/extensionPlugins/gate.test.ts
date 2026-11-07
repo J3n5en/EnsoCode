@@ -631,6 +631,18 @@ describe('PluginHostGate', () => {
     expect(sessionUi).toHaveBeenLastCalledWith({ sessionId: 's1', origin: null }, 'createSession', {
       text: '整理看板',
     });
+
+    await expect(
+      gate.handle('a.b', 'session.create', { presetId: 'plugin:a.b:review' }, uiCall())
+    ).resolves.toEqual({ sessionId: 's3' });
+    expect(sessionUi).toHaveBeenLastCalledWith({ sessionId: 's1', origin: null }, 'createSession', {
+      presetId: 'plugin:a.b:review',
+    });
+    for (const bad of ['a.b:review', 'plugin:other.plugin:review', 'plugin:a.b:']) {
+      await expect(
+        gate.handle('a.b', 'session.create', { presetId: bad }, uiCall())
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    }
   });
 
   it('会话接口在调用不属于任何会话时拒绝', async () => {
@@ -780,7 +792,7 @@ describe('PluginHostGate', () => {
       gate.handle('a.b', 'session.inject', { text: 'hi' }, agentCall())
     ).resolves.toBeNull();
     expect(wakeSession).toHaveBeenCalledTimes(1);
-    expect(wakeSession).toHaveBeenCalledWith('s1');
+    expect(wakeSession).toHaveBeenCalledWith('s1', null);
     expect(inject).toHaveBeenCalledTimes(3);
 
     deps.inject = vi.fn(() => notRunning);
