@@ -25,6 +25,7 @@ export interface MarketPlugin {
   tags: string[];
   homepage?: string;
   icon?: string;
+  readme?: { path: string; sha256: string; size: number };
   /** 宿主可用版本中 semver 最大者 */
   latest: string;
   versions: MarketVersion[];
@@ -43,6 +44,16 @@ const str = (v: unknown, max: number): v is string =>
 const strings = (v: unknown, max: number): string[] =>
   Array.isArray(v) ? v.filter((s): s is string => str(s, max)) : [];
 const optStr = (v: unknown, max: number) => (str(v, max) ? v : undefined);
+const README_MAX_BYTES = 256 * 1024;
+
+function parseReadme(raw: unknown): MarketPlugin['readme'] {
+  if (!isRecord(raw)) return undefined;
+  if (!isPluginRelativePath(raw.path) || !/^[A-Za-z0-9._/-]+$/.test(raw.path)) return undefined;
+  if (typeof raw.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(raw.sha256)) return undefined;
+  if (!Number.isSafeInteger(raw.size) || (raw.size as number) <= 0) return undefined;
+  if ((raw.size as number) > README_MAX_BYTES) return undefined;
+  return { path: raw.path, sha256: raw.sha256, size: raw.size as number };
+}
 
 function parseVersion(raw: unknown, hostVersion: string): MarketVersion | null {
   if (!isRecord(raw) || !str(raw.version, 40)) return null;
@@ -71,6 +82,7 @@ function parsePlugin(raw: unknown, hostVersion: string): MarketPlugin | null {
     .filter((v): v is MarketVersion => v !== null);
   if (versions.length === 0) return null;
   const latest = versions.reduce((a, b) => (isNewerPluginVersion(b.version, a.version) ? b : a));
+  const readme = parseReadme(raw.readme);
   return {
     id: raw.id,
     name: raw.name,
@@ -79,6 +91,7 @@ function parsePlugin(raw: unknown, hostVersion: string): MarketPlugin | null {
     tags: strings(raw.tags, 32),
     homepage: optStr(raw.homepage, 500),
     icon: optStr(raw.icon, 500),
+    ...(readme ? { readme } : {}),
     latest: latest.version,
     versions,
   };

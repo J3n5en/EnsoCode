@@ -958,6 +958,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_MARKET_LIST: excluded('Enso 插件市场列表：签名索引与本机安装状态。'),
   EXTENSION_PLUGINS_MARKET_STAGE: excluded('Enso 插件从市场暂存，渲染层只传 id 与版本。'),
   EXTENSION_PLUGINS_MARKET_SET_MIRROR: excluded('Enso 插件市场国内镜像开关。'),
+  EXTENSION_PLUGINS_README: excluded('Enso 插件使用说明。渲染层只传插件 id 和来源。'),
   EXTENSION_PLUGINS_RESTAGE: excluded('Enso 插件从记录的安装来源重新暂存，渲染层只传 id。'),
   EXTENSION_PLUGINS_CALL: excluded('Enso 插件运行期调用：命令、挂件、侧栏页面与补全。'),
   EXTENSION_PLUGINS_ASSET: excluded('Enso 插件渲染资源读取：只收插件 id 与相对路径。'),

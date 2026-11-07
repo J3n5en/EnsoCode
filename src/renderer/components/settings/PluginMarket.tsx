@@ -15,11 +15,13 @@ export function PluginMarket({
   disabled,
   installedKey,
   onInstall,
+  onGuide,
 }: {
   disabled: boolean;
   /** 已装插件版本变化时刷新安装状态 */
   installedKey: string;
   onInstall: (id: string) => void;
+  onGuide: (id: string, name: string, homepage?: string) => void;
 }) {
   const { t } = useI18n();
   const api = window.electronAPI.extensionPlugins;
@@ -133,6 +135,9 @@ export function PluginMarket({
               </p>
             )}
           </div>
+          <Button size="sm" variant="ghost" onClick={() => onGuide(p.id, p.name, p.homepage)}>
+            {t('Usage guide')}
+          </Button>
           <div className="relative shrink-0">
             <Button
               aria-hidden

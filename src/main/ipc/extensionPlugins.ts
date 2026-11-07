@@ -6,6 +6,7 @@ import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import type { ExtensionPluginInstallPreview } from '@shared/extensionPlugins/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { getDraftBroker, getExtensionPlugins } from '../services/extensionPlugins';
+import { parseReadmeRequest } from '../services/extensionPlugins/readme';
 import { setPluginAssetResolver } from '../services/localImageProtocol';
 import { remoteSenderById } from '../services/remoteRenderer/senders';
 import { broadcastToRenderers } from '../services/renderers';
@@ -277,6 +278,12 @@ export function registerExtensionPluginHandlers(): void {
     if (typeof on !== 'boolean') return { ok: false, error: '参数不合法' };
     plugins().setMarketChinaMirror(on);
     return { ok: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_README, (_e, raw: unknown) => {
+    const request = parseReadmeRequest(raw);
+    if (!request) return { ok: false, error: '参数不合法' };
+    return plugins().readme(request.id, request.from);
   });
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_RESTAGE, (_e, id: unknown) => {

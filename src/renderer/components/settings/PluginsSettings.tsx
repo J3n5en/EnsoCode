@@ -7,6 +7,7 @@ import type {
 } from '@shared/extensionPlugins/types';
 import type { InstalledPluginInfo, PluginComponentSummary, PluginEntry } from '@shared/types';
 import {
+  BookOpen,
   ChevronDown,
   ChevronRight,
   Files,
@@ -54,6 +55,7 @@ import { usePluginThemesStore } from '@/stores/pluginThemes';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
 import { PluginMarket } from './PluginMarket';
+import { PluginReadmeDialog } from './PluginReadmeDialog';
 import { RegistryNoticeBanner } from './RegistryNoticeBanner';
 
 /** 插件配置表单：密钥不回显，留空保持不变 */
@@ -431,6 +433,12 @@ export function EnsoPluginsSettings({
   const [checkResult, setCheckResult] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<RegistryNotice | null>(null);
   const [marketOpen, setMarketOpen] = React.useState(false);
+  const [guide, setGuide] = React.useState<{
+    id: string;
+    name: string;
+    from: 'installed' | 'market';
+    homepage?: string;
+  } | null>(null);
 
   const refresh = React.useCallback(async () => {
     try {
@@ -657,6 +665,10 @@ export function EnsoPluginsSettings({
                 setMarketOpen(false);
                 void restage(id, true);
               }}
+              onGuide={(id, name, homepage) => {
+                setMarketOpen(false);
+                setGuide({ id, name, from: 'market', homepage });
+              }}
             />
           </DialogPanel>
         </DialogContent>
@@ -863,6 +875,15 @@ export function EnsoPluginsSettings({
                 <Button
                   size="icon"
                   variant="ghost"
+                  aria-label={t('Usage guide')}
+                  title={t('Usage guide')}
+                  onClick={() => setGuide({ id: plugin.id, name: plugin.name, from: 'installed' })}
+                >
+                  <BookOpen className="size-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
                   aria-label={t('Plugin logs')}
                   title={t('Plugin logs')}
                   onClick={() =>
@@ -998,6 +1019,13 @@ export function EnsoPluginsSettings({
           </DialogPanel>
         </DialogContent>
       </Dialog>
+      <PluginReadmeDialog
+        pluginId={guide?.id ?? null}
+        name={guide?.name ?? ''}
+        from={guide?.from ?? 'installed'}
+        homepage={guide?.homepage}
+        onClose={() => setGuide(null)}
+      />
     </div>
   );
 }

@@ -175,4 +175,25 @@ describe('parseMarketIndex', () => {
     expect(parse(index({ sequence: 1.5 }))).toBeNull();
     expect(parse(index({ plugins: {} }))).toBeNull();
   });
+
+  it('合法 readme 保留，路径、哈希或大小不合法时只丢掉该字段', () => {
+    const readme = {
+      path: 'packages/enso.example.notes/1.0.0.readme.md',
+      sha256: 'b'.repeat(64),
+      size: 20,
+    };
+    const ok = parse(index({ plugins: [plugin({ readme })] }));
+    expect(ok?.plugins[0].readme).toEqual(readme);
+    for (const bad of [
+      { path: '../secret.md', sha256: 'b'.repeat(64), size: 20 },
+      { path: '/abs.md', sha256: 'b'.repeat(64), size: 20 },
+      { path: 'packages/a.md', sha256: 'zz', size: 20 },
+      { path: 'packages/a.md', sha256: 'b'.repeat(64), size: 0 },
+      { path: 'packages/a.md', sha256: 'b'.repeat(64), size: 256 * 1024 + 1 },
+    ]) {
+      const r = parse(index({ plugins: [plugin({ readme: bad })] }));
+      expect(r?.plugins.map((p) => p.id)).toEqual(['enso.example.notes']);
+      expect(r?.plugins[0].readme).toBeUndefined();
+    }
+  });
 });

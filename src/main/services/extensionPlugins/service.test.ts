@@ -315,6 +315,20 @@ describe('ExtensionPluginService', () => {
     expect(existsSync(join(root, 'data', 'example.demo'))).toBe(false);
   });
 
+  it('使用说明只读安装目录里的 README.md', async () => {
+    await install({
+      'enso-plugin.json': manifest(),
+      'main.mjs': mainJs,
+      'README.md': '# Demo\n',
+    });
+    expect(await service.readme('example.demo', 'installed')).toEqual({
+      ok: true,
+      markdown: '# Demo\n',
+    });
+    expect(await service.readme('example.other', 'installed')).toMatchObject({ ok: false });
+    expect(await service.readme('example.demo', 'market')).toMatchObject({ ok: false });
+  });
+
   it('10 分钟内非预期退出 3 次即标记崩溃停用', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
     await service.setEnabled('example.demo', true);

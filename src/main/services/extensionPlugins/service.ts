@@ -83,6 +83,7 @@ import { applyPluginAction, type PluginAction, type PluginRecord } from './lifec
 import { DEFAULT_LOG_TAIL_BYTES, PluginLogger } from './log';
 import { marketIconUrl, type PluginMarket } from './market';
 import { type PluginLogLevel, PluginProcess, pluginError } from './process';
+import { type ReadmeResult, readPackageReadme } from './readme';
 import {
   preserveUnreadableRegistry,
   REGISTRY_VERSION,
@@ -502,6 +503,17 @@ export class ExtensionPluginService {
 
   setMarketChinaMirror(on: boolean): void {
     this.options.market?.setChinaMirror(on);
+  }
+
+  readme(id: string, from: 'installed' | 'market'): ReadmeResult | Promise<ReadmeResult> {
+    if (from === 'market') {
+      const market = this.options.market;
+      if (!market) return { ok: false, error: '当前环境不支持插件市场' };
+      return market.readme(id);
+    }
+    const record = this.records.find((item) => item.id === id);
+    if (!record) return { ok: false, error: '插件未安装' };
+    return readPackageReadme(pluginPackagePath(this.options.root, record.id, record.dir));
   }
 
   /** 从记录的安装来源重新暂存；之后和普通更新一样确认、按授权是否扩大分流 */

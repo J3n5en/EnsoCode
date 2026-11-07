@@ -229,6 +229,33 @@ export class PluginMarket {
     }
     return { ok: false, error: lastError };
   }
+
+  async readme(id: string): Promise<{ ok: true; markdown: string } | { ok: false; error: string }> {
+    const r = await this.index();
+    if (!r.ok) return r;
+    const entry = r.index.plugins.find((plugin) => plugin.id === id)?.readme;
+    if (!entry) return { ok: false, error: '没有使用说明' };
+    let mismatch = false;
+    let lastError = '无法下载使用说明';
+    for (const base of this.sources()) {
+      try {
+        const bytes = await this.fetchBytes(new URL(entry.path, base).href, entry.size);
+        if (bytes.byteLength > entry.size) {
+          lastError = '使用说明过大';
+          continue;
+        }
+        if (createHash('sha256').update(bytes).digest('hex') !== entry.sha256) {
+          mismatch = true;
+          lastError = '使用说明校验失败';
+          continue;
+        }
+        return { ok: true, markdown: bytes.toString('utf8') };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : lastError;
+      }
+    }
+    return { ok: false, error: mismatch ? '使用说明校验失败' : lastError };
+  }
 }
 
 function sha256File(path: string): Promise<string> {

@@ -200,3 +200,50 @@ describe('PluginMarket.mirror', () => {
     expect(market(root, fakeFetch({})).chinaMirror()).toBe(true);
   });
 });
+
+describe('PluginMarket.readme', () => {
+  const guide = Buffer.from('# Guide\n');
+  const withReadme = (readme: Record<string, unknown>) => {
+    const value = indexOf(1);
+    const plugin = value.plugins[0] as Record<string, unknown>;
+    plugin.readme = readme;
+    const s = signed(value);
+    return market(
+      temp(),
+      fakeFetch({
+        'https://a/v1/': {
+          'index.json': s.index,
+          'index.json.sig': s.sig,
+          'packages/enso.notes/1.readme.md': guide,
+        },
+      })
+    );
+  };
+
+  it('校验通过后返回文本', async () => {
+    const m = withReadme({
+      path: 'packages/enso.notes/1.readme.md',
+      sha256: createHash('sha256').update(guide).digest('hex'),
+      size: guide.length,
+    });
+    expect(await m.readme('enso.notes')).toEqual({ ok: true, markdown: '# Guide\n' });
+  });
+
+  it('sha256 不符时失败，不返回正文', async () => {
+    const m = withReadme({
+      path: 'packages/enso.notes/1.readme.md',
+      sha256: 'a'.repeat(64),
+      size: guide.length,
+    });
+    expect(await m.readme('enso.notes')).toEqual({ ok: false, error: '使用说明校验失败' });
+  });
+
+  it('路径不合法的字段被丢弃，当作没有使用说明', async () => {
+    const m = withReadme({
+      path: '../secret.md',
+      sha256: createHash('sha256').update(guide).digest('hex'),
+      size: guide.length,
+    });
+    expect(await m.readme('enso.notes')).toEqual({ ok: false, error: '没有使用说明' });
+  });
+});
