@@ -1565,7 +1565,13 @@ export type AgentCommand =
   | { type: 'abort-classify-choice'; requestId: string }
   | { type: 'abort-retry'; identity: SessionIdentity }
   /** instanceId 同 prompt：会话不在而被拒时 parent-rejected 回显 */
-  | { type: 'retry'; identity: SessionIdentity; instanceId?: string }
+  | {
+      type: 'retry';
+      identity: SessionIdentity;
+      instanceId?: string;
+      /** 只移出未完成（出错/中断/停在工具调用）的最后一条 assistant；已正常完成则回执 nothing-to-retry */
+      unfinishedOnly?: true;
+    }
   /** 释放父会话：中断并销毁 worker 侧会话（含全部 coworker/child），jsonl 留盘可 resume。
    *  用于 Move to worktree 等需要换 cwd 重新 spawn 的场景。 */
   | { type: 'release-parent'; identity: SessionIdentity }
@@ -4086,8 +4092,9 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'retry':
-      return hasOnlyKeys(value, ['type', 'identity', 'instanceId']) &&
+      return hasOnlyKeys(value, ['type', 'identity', 'instanceId', 'unfinishedOnly']) &&
         parseAnySessionIdentity(value.identity) &&
+        (value.unfinishedOnly === undefined || value.unfinishedOnly === true) &&
         (value.instanceId === undefined ||
           (isUuid(value.instanceId) && parseSessionIdentity(value.identity) !== null))
         ? (value as unknown as AgentCommand)

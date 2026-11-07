@@ -2056,14 +2056,21 @@ export function registerAgentHandlers(): void {
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_RETRY, (_event, sessionId: unknown): AgentActionResult => {
-    const rejected = botControlError(sessionId);
-    if (rejected) return rejected;
-    const identity = exactIdentity(sessionId);
-    return identity
-      ? retrySession(identity)
-      : { ok: false, error: 'invalid retry or stale session generation' };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_RETRY,
+    (_event, sessionId: unknown, options: unknown): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
+      const identity = exactIdentity(sessionId);
+      const unfinishedOnly =
+        typeof options === 'object' &&
+        options !== null &&
+        (options as { unfinishedOnly?: unknown }).unfinishedOnly === true;
+      return identity
+        ? retrySession(identity, unfinishedOnly)
+        : { ok: false, error: 'invalid retry or stale session generation' };
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.AGENT_RELEASE,

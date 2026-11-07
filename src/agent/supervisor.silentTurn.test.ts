@@ -370,6 +370,45 @@ describe('SessionSupervisor terminal turn handling', () => {
     await supervisor.shutdown();
   });
 
+  it.each([
+    ['aborted', ['edit:m1', 'continue']],
+    ['stop', []],
+  ] as const)(
+    'unfinishedOnly retry：最后的 assistant 为 %s 时只移除未完成的再续跑',
+    async (stopReason, expected) => {
+      const { events, supervisor, parentSession } = await spawn();
+      const order: string[] = [];
+      parentSession.messages.push(
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'x' }], stopReason }
+      );
+      Object.assign(mocks.managers[0]!, {
+        buildSessionProjection: vi.fn(() => ({
+          entries: parentSession.messages.map((message, index) => ({
+            sourceEntry: { type: 'message', id: `m${index}`, message },
+            messages: [message],
+          })),
+        })),
+        appendContextEdit: vi.fn((targetId: string) => {
+          order.push(`edit:${targetId}`);
+          parentSession.messages.pop();
+        }),
+      });
+      Object.assign(parentSession, {
+        refreshContext: vi.fn(),
+        _startRun: vi.fn(async () => {
+          order.push('continue');
+        }),
+        _prepareRun: vi.fn(),
+      });
+      supervisor.handleCommand({ type: 'retry', identity: parent, unfinishedOnly: true });
+      if (expected.length === 0) await waitFor(events, 'retry-skipped');
+      else for (let i = 0; i < 10 && !order.includes('continue'); i++) await settle();
+      expect(order).toEqual(expected);
+      await supervisor.shutdown();
+    }
+  );
+
   it('会话已不在 worker 时 retry 按 parent-rejected 回流，不静默丢弃', async () => {
     const { events, supervisor } = await spawn();
     const ghost = { sessionId: 'ghost', generation: '22222222-2222-4222-8222-222222222222' };

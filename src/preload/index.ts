@@ -846,8 +846,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT, sessionId),
     abortRetry: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_ABORT_RETRY, sessionId),
-    retry: (sessionId: string): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_RETRY, sessionId),
+    retry: (
+      sessionId: string,
+      options?: { unfinishedOnly?: boolean }
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_RETRY, sessionId, options),
     /** 释放父会话（worker 侧销毁，jsonl 留盘），之后可携新 cwd resume（Move to worktree） */
     release: (sessionId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_RELEASE, sessionId),

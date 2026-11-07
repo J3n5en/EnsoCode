@@ -2142,6 +2142,12 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand(command)).toEqual(command);
     expect(parseAgentCommand({ ...command, extra: true })).toBeNull();
     expect(parseAgentCommand({ type: 'retry' })).toBeNull();
+    expect(parseAgentCommand({ ...command, unfinishedOnly: true })).toEqual({
+      ...command,
+      unfinishedOnly: true,
+    });
+    for (const bad of [false, 1, 'true', null])
+      expect(parseAgentCommand({ ...command, unfinishedOnly: bad })).toBeNull();
   });
 
   it('snapshot 可带可选 sessionId', () => {

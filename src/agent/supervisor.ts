@@ -1853,7 +1853,8 @@ export class SessionSupervisor {
           return;
         }
         const agent = managed.session.agent;
-        editLatestAssistantForRetry(managed.session);
+        if (command.unfinishedOnly) editUnfinishedAssistantForResume(managed.session);
+        else editLatestAssistantForRetry(managed.session);
         if (agent.state.messages.at(-1)?.role === 'assistant') {
           this.emitRetrySkipped(managed, 'nothing-to-retry');
           return;

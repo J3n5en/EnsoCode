@@ -1848,8 +1848,16 @@ export function abortRetrySession(identity: SessionIdentity): { ok: boolean; err
 }
 
 /** 终态失败后手动续跑：不新增 user 消息，从当前上下文 continue */
-export function retrySession(identity: SessionIdentity): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'retry', identity, ...instanceField(identity) });
+export function retrySession(
+  identity: SessionIdentity,
+  unfinishedOnly = false
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'retry',
+    identity,
+    ...instanceField(identity),
+    ...(unfinishedOnly ? { unfinishedOnly: true as const } : {}),
+  });
 }
 
 export function respondApproval(
