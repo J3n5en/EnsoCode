@@ -260,13 +260,14 @@ const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 /** 工作区迁移/回退提醒：前置在用户消息之前，渲染成系统事件行而非原始 XML */
 const WORKSPACE_MIGRATED_PREFIX = /^<workspace-migrated>\n?([\s\S]*?)\n?<\/workspace-migrated>\s*/;
 
-/** 迁移提醒横幅：图标 + 一句话 + 目标路径，完整原文放 hover title */
+/** 迁移提醒横幅：图标 + 一句话 + 目标路径，完整原文放 hover title。
+ * 系统提示条用 aside 并与气泡平铺在 message-user 下：主题以 `> div:not(:last-child)` 选中气泡 */
 function WorkspaceMigratedBanner({ note }: { note: string }) {
   const { t } = useI18n();
   const path = /(?:moved to|main working tree): (.+)$/m.exec(note)?.[1]?.trim();
   const fallback = note.includes('main working tree');
   return (
-    <div
+    <aside
       title={note}
       className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground"
     >
@@ -277,14 +278,14 @@ function WorkspaceMigratedBanner({ note }: { note: string }) {
           : t('Workspace moved to an isolated worktree')}
         {path && <span className="ml-1.5 break-all font-mono text-[11px] opacity-80">{path}</span>}
       </span>
-    </div>
+    </aside>
   );
 }
 /** Plan 状态提示：worker 前置在用户消息之前，渲染成系统事件行 */
 function PlanNoteBanner({ note }: { note: PlanNoteKind }) {
   const { t } = useI18n();
   return (
-    <div className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+    <aside className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
       <ClipboardList className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0">
         {note === 'on'
@@ -293,7 +294,7 @@ function PlanNoteBanner({ note }: { note: PlanNoteKind }) {
             ? t('Plan mode off')
             : t('Context compacted: the approved plan was attached again')}
       </span>
-    </div>
+    </aside>
   );
 }
 
@@ -302,7 +303,7 @@ function UnattendedNoteBanner({ note }: { note: UnattendedNoteKind }) {
   const { t } = useI18n();
   const on = note === 'on';
   return (
-    <div className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+    <aside className="flex w-full items-start gap-2 rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
       {on ? (
         <EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       ) : (
@@ -313,7 +314,7 @@ function UnattendedNoteBanner({ note }: { note: UnattendedNoteKind }) {
           ? t('Unattended mode on: no one is watching, so it decides and keeps going')
           : t('Unattended mode off: a person is available again')}
       </span>
-    </div>
+    </aside>
   );
 }
 
@@ -459,11 +460,11 @@ function SkillInvocation({ blocks }: { blocks: NonNullable<ReturnType<typeof spl
   );
   if (!notes.plan && !notes.unattended) return bubble;
   return (
-    <div className="flex w-full flex-col items-end gap-1.5">
+    <>
       {notes.plan && <PlanNoteBanner note={notes.plan} />}
       {notes.unattended && <UnattendedNoteBanner note={notes.unattended} />}
       {bubble}
-    </div>
+    </>
   );
 }
 
@@ -678,20 +679,20 @@ function UserText({
   if (planPrefix.note) {
     const remainder = planPrefix.rest.trim();
     return (
-      <div className="flex w-full flex-col items-end gap-1.5">
+      <>
         <PlanNoteBanner note={planPrefix.note} />
         {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
-      </div>
+      </>
     );
   }
   const unattended = splitUnattendedPrefix(text);
   if (unattended.note) {
     const remainder = unattended.rest.trim();
     return (
-      <div className="flex w-full flex-col items-end gap-1.5">
+      <>
         <UnattendedNoteBanner note={unattended.note} />
         {remainder && <UserText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />}
-      </div>
+      </>
     );
   }
   const planMessage = parsePlanMessage(text);
@@ -756,14 +757,14 @@ function UserText({
   if (migrated) {
     const remainder = text.slice(migrated[0].length).trim();
     return (
-      <div className="flex w-full flex-col items-end gap-1.5">
+      <>
         <WorkspaceMigratedBanner note={migrated[1]} />
         {remainder && (
           <div className={cn(USER_BUBBLE, 'whitespace-pre-wrap')}>
             <InlineMentionText text={remainder} searchQuery={searchQuery} activeNth={activeNth} />
           </div>
         )}
-      </div>
+      </>
     );
   }
   const block = SYNTHETIC_BLOCK.exec(text);
