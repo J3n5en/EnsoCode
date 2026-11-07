@@ -179,6 +179,9 @@ export const zhTranslations: Record<string, string> = {
     '新版本 {{version}} 已就绪 —— 重启以更新。',
   'Update check failed': '检查更新失败',
   'Restart to update': '重启更新',
+  'Restart now': '立即重启',
+  'Will restart to update {{version}} when the running turns finish.':
+    '当前回合结束后将自动重启并更新到 {{version}}。',
   'Continued {{count}} conversation(s) interrupted by the update':
     '已从断点继续 {{count}} 个因更新中断的会话',
   'Update failed: {{error}}': '更新失败：{{error}}',

@@ -30,10 +30,20 @@ export function registerUpdaterHandlers(): void {
     await autoUpdaterService.downloadUpdate();
   });
 
-  ipcMain.handle(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL, async () => {
+  ipcMain.handle(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL, async (_event, options: unknown) => {
+    if (!isUpdaterEnabled()) return;
+    const now =
+      typeof options === 'object' &&
+      options !== null &&
+      (options as { now?: unknown }).now === true;
+    const { autoUpdaterService } = await import('../services/updater/AutoUpdater');
+    autoUpdaterService.requestRestart(now);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.UPDATER_CANCEL_RESTART, async () => {
     if (!isUpdaterEnabled()) return;
     const { autoUpdaterService } = await import('../services/updater/AutoUpdater');
-    autoUpdaterService.quitAndInstall();
+    autoUpdaterService.cancelRestart();
   });
 
   ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, async (_event, enabled: unknown) => {

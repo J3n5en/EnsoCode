@@ -380,6 +380,7 @@ export const IPC_CHANNELS = {
   UPDATER_STATUS: 'updater:status',
   UPDATER_GET_STATE: 'updater:getState',
   UPDATER_RESTART: 'updater:restart',
+  UPDATER_CANCEL_RESTART: 'updater:cancelRestart',
   UPDATER_TAKE_INTERRUPTED_SESSIONS: 'updater:takeInterruptedSessions',
 
   // Network proxy

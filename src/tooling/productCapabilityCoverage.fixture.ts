@@ -683,6 +683,7 @@ export const IPC_PRODUCT_COVERAGE = {
   UPDATER_SET_AUTO_RESTART_WHEN_IDLE: excluded(
     'Device idle-restart update policy; not an Enso capability.'
   ),
+  UPDATER_CANCEL_RESTART: surfaces('updates.install'),
   UPDATER_TAKE_INTERRUPTED_SESSIONS: excluded(
     'Startup handoff that resumes turns interrupted by an update restart.'
   ),

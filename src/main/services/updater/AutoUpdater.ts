@@ -1,7 +1,7 @@
 import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types';
 import type { UpdateStatus } from '@shared/types/updater';
-import { AUTO_RESTART_IDLE_MS } from '@shared/updater/idleRestart';
+import { AUTO_RESTART_IDLE_MS, isTurnRestartBlocked } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
@@ -37,6 +37,8 @@ class AutoUpdaterService {
   private idleGate = new IdleRestartGate();
   private idleTimer: NodeJS.Timeout | null = null;
   private installingIdleRestart = false;
+  private restartPending = false;
+  private downloadedInfo: UpdateStatus['info'];
 
   init(window: BrowserWindow, autoUpdateEnabled = true, autoRestartWhenIdle = false): void {
     this.mainWindow = window;
@@ -72,7 +74,8 @@ class AutoUpdaterService {
         clearInterval(this.checkIntervalId);
         this.checkIntervalId = null;
       }
-      this.sendStatus({ status: 'downloaded', info: projectInfo(info) });
+      this.downloadedInfo = projectInfo(info);
+      this.sendStatus({ status: 'downloaded', info: this.downloadedInfo });
       this.notifyIdleStateChanged();
     });
     autoUpdater.on('error', (error) => this.sendStatus({ status: 'error', error: error.message }));
@@ -132,7 +135,39 @@ class AutoUpdaterService {
     return this.quittingForUpdate;
   }
 
-  quitAndInstall(): void {
+  /** 用户点重启：有回合在跑时等它们结束再装，now 跳过等待 */
+  requestRestart(now = false): void {
+    if (!this.updateDownloaded || this.quittingForUpdate) return;
+    if (now || !this.turnsBlockRestart()) {
+      this.setRestartPending(false);
+      void this.install(() => true);
+      return;
+    }
+    this.setRestartPending(true);
+    this.notifyIdleStateChanged();
+  }
+
+  cancelRestart(): void {
+    if (!this.restartPending) return;
+    this.setRestartPending(false);
+    this.notifyIdleStateChanged();
+  }
+
+  private turnsBlockRestart(): boolean {
+    return isTurnRestartBlocked(currentIdleRestartObservation(true, true));
+  }
+
+  private setRestartPending(pending: boolean): void {
+    if (this.restartPending === pending) return;
+    this.restartPending = pending;
+    this.sendStatus({
+      status: 'downloaded',
+      info: this.downloadedInfo,
+      ...(pending ? { restartPending: true } : {}),
+    });
+  }
+
+  private quitAndInstall(): void {
     if (!this.updateDownloaded) return;
     this.quittingForUpdate = true;
     try {
@@ -175,14 +210,20 @@ class AutoUpdaterService {
   }
 
   notifyIdleStateChanged(): void {
-    if (
-      this.installingIdleRestart ||
-      this.quittingForUpdate ||
-      this.idleGate.isFailed() ||
-      !this.updateDownloaded ||
-      !this.autoRestartWhenIdle ||
-      !autoUpdater.autoDownload
-    ) {
+    if (this.installingIdleRestart || this.quittingForUpdate || !this.updateDownloaded) {
+      this.clearIdleTimer();
+      return;
+    }
+    if (this.restartPending) {
+      if (this.turnsBlockRestart()) {
+        this.scheduleIdleCheck(BUSY_POLL_MS);
+        return;
+      }
+      this.clearIdleTimer();
+      void this.install(() => !this.turnsBlockRestart());
+      return;
+    }
+    if (this.idleGate.isFailed() || !this.autoRestartWhenIdle || !autoUpdater.autoDownload) {
       this.clearIdleTimer();
       return;
     }
@@ -190,7 +231,9 @@ class AutoUpdaterService {
     const observation = currentIdleRestartObservation(true, true);
     if (this.idleGate.evaluate(observation, now)) {
       this.clearIdleTimer();
-      void this.installWhenIdle();
+      void this.install(() =>
+        this.idleGate.evaluate(currentIdleRestartObservation(true, true), Date.now())
+      );
       return;
     }
     const remaining = this.idleGate.delayUntilReadyMs(now);
@@ -214,22 +257,21 @@ class AutoUpdaterService {
     this.idleTimer = null;
   }
 
-  private async installWhenIdle(): Promise<void> {
+  /** 落盘渲染层状态与设置后安装；recheck 在落盘后复核仍可重启 */
+  private async install(recheck: () => boolean): Promise<void> {
     if (this.installingIdleRestart || this.quittingForUpdate) return;
     this.installingIdleRestart = true;
     try {
       const { flushRendererPersist, isServerMode } = await import('../appServerMode');
       await flushRendererPersist();
       flushSettings();
-      const observation = currentIdleRestartObservation(true, true);
-      if (!this.idleGate.evaluate(observation, Date.now())) {
-        return;
-      }
+      if (!recheck()) return;
       if (isServerMode()) writeTrayReenterAfterUpdate(true);
       this.quitAndInstall();
     } catch (error) {
-      console.error('Idle auto-restart failed:', error);
+      console.error('Restart to update failed:', error);
       this.idleGate.markFailed();
+      this.setRestartPending(false);
       writeTrayReenterAfterUpdate(false);
       this.clearIdleTimer();
     } finally {

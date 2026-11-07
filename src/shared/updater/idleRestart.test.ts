@@ -7,6 +7,7 @@ import {
   countQueuedMessages,
   idleDurationMs,
   isAutoRestartBlocked,
+  isTurnRestartBlocked,
   mergeIdleRestartBlocks,
   nextIdleSince,
   persistedConversations,
@@ -26,6 +27,19 @@ const ready = {
 };
 
 describe('shouldAutoRestartForUpdate', () => {
+  it('用户要求的「回合结束后重启」不看窗口焦点，只看回合、排队、提问与审批', () => {
+    const focused = { ...ready, windowFocused: true };
+    expect(isTurnRestartBlocked(focused)).toBe(false);
+    for (const blocked of [
+      { agentBusy: true },
+      { queuedCount: 1 },
+      { pendingAskCount: 1 },
+      { pendingApprovalCount: 1 },
+    ]) {
+      expect(isTurnRestartBlocked({ ...ready, ...blocked })).toBe(true);
+    }
+  });
+
   it('空闲连续满 5 分钟才装', () => {
     expect(shouldAutoRestartForUpdate(ready)).toBe(true);
     expect(shouldAutoRestartForUpdate({ ...ready, idleForMs: AUTO_RESTART_IDLE_MS - 1 })).toBe(

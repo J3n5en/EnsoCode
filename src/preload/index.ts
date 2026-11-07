@@ -1189,7 +1189,10 @@ const electronAPI = {
   updater: {
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
     downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),
-    quitAndInstall: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL),
+    /** 有回合在跑时等它们结束再重启；now 立即重启 */
+    quitAndInstall: (options?: { now?: boolean }): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL, options),
+    cancelRestart: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CANCEL_RESTART),
     setAutoUpdateEnabled: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, enabled),
     setAutoRestartWhenIdle: (enabled: boolean): Promise<void> =>

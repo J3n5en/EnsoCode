@@ -37,6 +37,7 @@ export function UpdateBanner() {
 
   const version = status.info?.version;
   const isDownloaded = status.status === 'downloaded';
+  const isPending = isDownloaded && status.restartPending === true;
 
   return (
     <div className="border-b border-blue-500/20 bg-background">
@@ -47,15 +48,19 @@ export function UpdateBanner() {
           <Download className="h-3.5 w-3.5 shrink-0 animate-pulse text-blue-500" />
         )}
         <span className="min-w-0 flex-1">
-          {isDownloaded
-            ? t('New version {{version}} is ready — restart to update.', {
+          {isPending
+            ? t('Will restart to update {{version}} when the running turns finish.', {
                 version: version ?? '',
               })
-            : isAvailable
-              ? t('New version {{version}} found', { version: version ?? '' })
-              : t('Downloading update… {{percent}}%', {
-                  percent: Math.round(status.progress?.percent ?? 0),
-                })}
+            : isDownloaded
+              ? t('New version {{version}} is ready — restart to update.', {
+                  version: version ?? '',
+                })
+              : isAvailable
+                ? t('New version {{version}} found', { version: version ?? '' })
+                : t('Downloading update… {{percent}}%', {
+                    percent: Math.round(status.progress?.percent ?? 0),
+                  })}
         </span>
         {(isDownloaded || isAvailable) && (
           <button
@@ -75,13 +80,22 @@ export function UpdateBanner() {
             {t('Download update')}
           </button>
         )}
+        {isPending && (
+          <button
+            type="button"
+            onClick={() => void window.electronAPI.updater.cancelRestart()}
+            className="shrink-0 rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          >
+            {t('Cancel')}
+          </button>
+        )}
         {isDownloaded && (
           <button
             type="button"
-            onClick={() => void window.electronAPI.updater.quitAndInstall()}
+            onClick={() => void window.electronAPI.updater.quitAndInstall({ now: isPending })}
             className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            {t('Restart to update')}
+            {isPending ? t('Restart now') : t('Restart to update')}
           </button>
         )}
         <button

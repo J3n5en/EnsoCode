@@ -11,19 +11,25 @@ export interface AutoRestartIdleSnapshot {
   idleForMs: number;
 }
 
-export function isAutoRestartBlocked(
-  snapshot: Pick<
-    AutoRestartIdleSnapshot,
-    'agentBusy' | 'queuedCount' | 'pendingAskCount' | 'pendingApprovalCount' | 'windowFocused'
-  >
-): boolean {
+type TurnBlocks = Pick<
+  AutoRestartIdleSnapshot,
+  'agentBusy' | 'queuedCount' | 'pendingAskCount' | 'pendingApprovalCount'
+>;
+
+/** 还有回合在跑、排队消息、待答提问或审批：重启会打断 */
+export function isTurnRestartBlocked(snapshot: TurnBlocks): boolean {
   return (
     snapshot.agentBusy ||
     snapshot.queuedCount > 0 ||
     snapshot.pendingAskCount > 0 ||
-    snapshot.pendingApprovalCount > 0 ||
-    snapshot.windowFocused
+    snapshot.pendingApprovalCount > 0
   );
+}
+
+export function isAutoRestartBlocked(
+  snapshot: TurnBlocks & Pick<AutoRestartIdleSnapshot, 'windowFocused'>
+): boolean {
+  return isTurnRestartBlocked(snapshot) || snapshot.windowFocused;
 }
 
 /** 开关开、包已下好、无忙态，且该状态连续保持满 5 分钟才重启安装。 */
