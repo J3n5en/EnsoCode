@@ -10,6 +10,7 @@ import {
   codemodeToolSnapshot,
   looksLikeShellCommand,
   nestedToolCallParent,
+  preflightCodemodeScript,
   renderMcpServersSection,
   withCodemodeInputs,
   withCodemodeTimeout,
@@ -299,6 +300,50 @@ describe('CodemodeHost', () => {
       await emit('tool_call', { toolName: 'codemode', toolCallId: 'c', input })
     ).toBeUndefined();
     expect(input.code.startsWith('// @options:')).toBe(true);
+  });
+
+  it('预检：禁用工具、计时器、重定义 tools 在运行前拦下，什么都不执行', () => {
+    const blocked = (code: string) => preflightCodemodeScript(code);
+    expect(blocked('await tools.read({path:"a"}); await tools.todo({todos:[]});')).toMatchObject({
+      error: expect.stringContaining('"todo"'),
+    });
+    expect(blocked('await tools["task_output"]({taskId:"x"})')).toMatchObject({
+      error: expect.stringContaining('"task_output"'),
+    });
+    expect(blocked('const sleep = (ms) => new Promise((r) => setTimeout(r, ms));')).toMatchObject({
+      error: expect.stringContaining('setTimeout'),
+    });
+    expect(blocked('const tools = ALL_TOOLS;')).toMatchObject({
+      error: expect.stringContaining('`tools`'),
+    });
+    // 字符串和注释里的文字不算调用
+    expect(blocked('// tools.todo later\nreturn "tools.subagent setTimeout(";')).toEqual({
+      code: '// tools.todo later\nreturn "tools.subagent setTimeout(";',
+    });
+  });
+
+  it('预检：tools.searchTools / describeTool / describeNamespace 改写为全局函数', () => {
+    expect(
+      preflightCodemodeScript(
+        'const a = await tools.searchTools("x"); await tools . describeNamespace("m");'
+      )
+    ).toEqual({ code: 'const a = await searchTools("x"); await describeNamespace("m");' });
+  });
+
+  it('tool_call 预检失败直接拦下，成功时写回改写后的脚本', async () => {
+    const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
+    expect(
+      await emit('tool_call', {
+        toolName: 'codemode',
+        toolCallId: 'c',
+        input: { code: 'await tools.subagent({})' },
+      })
+    ).toMatchObject({ block: true, reason: expect.stringContaining('"subagent"') });
+    const input = { code: 'return await tools.describeTool("read");' };
+    expect(
+      await emit('tool_call', { toolName: 'codemode', toolCallId: 'c', input })
+    ).toBeUndefined();
+    expect(input.code).toContain('return await describeTool("read");');
   });
 
   it('tool_call 展开 @input 块，坏块直接拦下；工具描述写明用法', async () => {

@@ -105,6 +105,50 @@ export const CODEMODE_FORBIDDEN_DOC =
 
 const FORBIDDEN_SECTION_NAME = 'codemode_forbidden_tools';
 
+/** 脚本被 pi 包成 `(tools, console) => …`，同名声明是 SyntaxError 且报错不带名字 */
+const SCRIPT_PARAMS = ['tools', 'console'];
+const HELPER_ALIAS = /(?<![.\w$])tools\s*\.\s*(searchTools|describeTool|describeNamespace)\b/g;
+const STRINGS_AND_COMMENTS =
+  /`(?:[^`\\]|\\[\s\S])*`|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
+
+/**
+ * 运行前静态检查：会在中途才失败的写法（禁用工具、计时器、重定义参数）直接拦下，
+ * 免得前面的工具调用已经生效；全局辅助函数误写成 tools.* 时就地改写。
+ */
+export function preflightCodemodeScript(code: string): { code: string } | { error: string } {
+  const rewritten = code.replace(HELPER_ALIAS, '$1');
+  const bare = rewritten.replace(STRINGS_AND_COMMENTS, (match) =>
+    match.startsWith('/') ? ' ' : '""'
+  );
+  const forbidden = new Set<string>();
+  for (const match of rewritten.matchAll(/(?<![.\w$])tools\s*\[\s*(['"`])([\w-]+)\1\s*\]/g)) {
+    if (CODEMODE_FORBIDDEN_TOOLS.has(match[2])) forbidden.add(match[2]);
+  }
+  for (const match of bare.matchAll(/(?<![.\w$])tools\s*\.\s*([A-Za-z_$][\w$]*)/g)) {
+    if (CODEMODE_FORBIDDEN_TOOLS.has(match[1])) forbidden.add(match[1]);
+  }
+  if (forbidden.size > 0) {
+    const names = [...forbidden].map((name) => `"${name}"`).join(', ');
+    return {
+      error: `Tool ${names} cannot be called from codemode scripts. Nothing was run. Call it directly as a top-level tool, and keep the rest of the script.`,
+    };
+  }
+  const timer = /\b(setTimeout|setInterval|setImmediate)\s*\(/.exec(bare);
+  if (timer) {
+    return {
+      error: `codemode has no timers (${timer[1]}). Nothing was run. To wait for something, run it with bash (background: true notifies you when it ends) instead of sleeping in a script.`,
+    };
+  }
+  for (const name of SCRIPT_PARAMS) {
+    if (new RegExp(`\\b(?:const|let|var|function|class)\\s+${name}\\b`).test(bare)) {
+      return {
+        error: `\`${name}\` is a codemode script parameter and cannot be redeclared. Nothing was run. Rename the variable.`,
+      };
+    }
+  }
+  return { code: rewritten };
+}
+
 /** 只列本会话真正声明给模型的禁用工具，避免点出不存在的工具名 */
 export function renderCodemodeForbiddenSection(activeTools: readonly string[]): string {
   const names = activeTools.filter((name) => CODEMODE_FORBIDDEN_TOOLS.has(name)).sort();
@@ -299,7 +343,9 @@ export class CodemodeHost {
         if (code) {
           const expanded = withCodemodeInputs(code);
           if ('error' in expanded) return { block: true, reason: expanded.error };
-          input.code = withCodemodeTimeout(expanded.code);
+          const checked = preflightCodemodeScript(expanded.code);
+          if ('error' in checked) return { block: true, reason: checked.error };
+          input.code = withCodemodeTimeout(checked.code);
         }
       }
       if (event.toolName === CODEMODE_TOOL_NAME || event.toolName === TOOL_SEARCH_TOOL_NAME) {
