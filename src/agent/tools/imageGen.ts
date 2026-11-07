@@ -1,6 +1,26 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { ImageGenerationState } from '@shared/imageGeneration';
+import { type ApprovalGate, throwUnlessAllowed } from '../approval';
 import { type EngineDeps, generate, type ImageArgs } from '../imageGeneration/engine';
+import type { ConfirmOutsideImage } from './sendImage';
+
+/** SSH 会话的参考图在 EnsoCode 本机，full 档只授权远端操作：上传本机文件按对外发送强制真人确认。 */
+export function confirmImageReference(gate: ApprovalGate, remote: boolean): ConfirmOutsideImage {
+  return async (file, signal, toolCallId) => {
+    if (!remote && !gate.needsApproval('command', 'ImageGen')) return;
+    throwUnlessAllowed(
+      await gate.ask(
+        'ImageGen',
+        'command',
+        `Upload a reference image from outside the workspace: ${file}`,
+        signal,
+        toolCallId,
+        undefined,
+        remote ? 'external-send' : undefined
+      )
+    );
+  };
+}
 
 function normalize(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;

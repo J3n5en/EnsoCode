@@ -12,8 +12,65 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ApprovalRequestInfo } from '@shared/types/agent';
 import { expect, it, vi } from 'vitest';
-import { createImageGenTool } from './imageGen';
+import { ApprovalGate } from '../approval';
+import { confirmImageReference, createImageGenTool } from './imageGen';
+
+it('SSH 会话在 full 档上传本机参考图仍要真人确认，本地 full 档照常放行', async () => {
+  const requests: ApprovalRequestInfo[] = [];
+  const gate = new ApprovalGate(
+    'full',
+    (info) => {
+      requests.push(info);
+      gate.respond(info.requestId, 'deny');
+    },
+    () => undefined
+  );
+  await expect(confirmImageReference(gate, false)('/x.png', undefined, 'c1')).resolves.toBe(
+    undefined
+  );
+  expect(requests).toHaveLength(0);
+  await expect(confirmImageReference(gate, true)('/x.png', undefined, 'c2')).rejects.toThrow();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].protected).toBe('external-send');
+});
+
+it('fake-ip 代理解析出的 198.18/15 地址可以下载结果图', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-gen-'));
+  try {
+    const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+    const fetch = vi.fn(async (url: string, _init: RequestInit) =>
+      url.includes('/images/generations')
+        ? new Response(JSON.stringify({ data: [{ url: 'https://public.example/image' }] }))
+        : new Response(new Uint8Array(png), { headers: { 'content-type': 'image/png' } })
+    );
+    const tool = createImageGenTool({
+      cwd: root,
+      homeDir: root,
+      confirmOutside: async () => {},
+      fetch,
+      lookup: async () => ['198.18.0.12'],
+      getConfig: () => ({
+        config: {
+          providerId: 'p',
+          modelId: 'm',
+          protocol: 'openai-compatible',
+          baseUrl: 'http://localhost/v1',
+          apiKey: 'secret',
+        },
+      }),
+    });
+    const result = await tool.execute('id', { prompt: 'x' } as never, undefined, undefined, {
+      sessionManager: { getSessionId: () => 's' },
+    } as never);
+    expect(JSON.parse((result.content[0] as { text: string }).text).items[0].status).toBe(
+      'success'
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 it('Gemini 第一张落盘后取消：保留已完成文件，剩余项 cancelled 且不再发请求', async () => {
   const root = mkdtempSync(join(tmpdir(), 'image-gen-partial-cancel-'));

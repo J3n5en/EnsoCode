@@ -107,7 +107,6 @@ import { applyPatchResultExtension } from './applyPatchResultExtension';
 import {
   ApprovalGate,
   type ApprovalReviewResult,
-  throwUnlessAllowed,
   withApproval,
   withProtectedFloor,
 } from './approval';
@@ -285,7 +284,7 @@ import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
 import { createGroupHistoryTool } from './tools/groupHistory';
 import { createGroupTasksTool } from './tools/groupTasks';
-import { createImageGenTool } from './tools/imageGen';
+import { confirmImageReference, createImageGenTool } from './tools/imageGen';
 import { createMemoryTools, MemoryInvoker } from './tools/memory';
 import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
@@ -3102,17 +3101,7 @@ export class SessionSupervisor {
           getConfig: () => this.imageGeneration,
           cwd,
           remote: !!remote,
-          confirmOutside: async (file, signal, toolCallId) => {
-            if (!gate.needsApproval('command', 'ImageGen')) return;
-            const result = await gate.ask(
-              'ImageGen',
-              'command',
-              `Upload a reference image from outside the workspace: ${file}`,
-              signal,
-              toolCallId
-            );
-            throwUnlessAllowed(result);
-          },
+          confirmOutside: confirmImageReference(gate, !!remote),
         }),
       ]),
       ...builtin('todo', [createTodoTool((todos) => todoReminder.update(todos))]),
