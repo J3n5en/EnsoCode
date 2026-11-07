@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
+import type { InlineExtension, ToolDefinition } from '@earendil-works/pi-coding-agent';
 
 export type ToolExecuteResult = Awaited<ReturnType<ToolDefinition['execute']>>;
 
@@ -60,6 +60,21 @@ export function prependToolText<T extends ToolExecuteResult>(result: T, prefix: 
   return { ...result, content };
 }
 
+function withPendingReminders<T extends ToolExecuteResult>(
+  result: T,
+  registry: SystemReminderRegistry
+): T | undefined {
+  const pending = registry.takePending();
+  if (pending.length === 0) return undefined;
+  const tagged = pending.map((block) =>
+    block.includes('<system-reminder>') || block.includes('<background-task-update>')
+      ? block
+      : systemReminderBlock(block)
+  );
+  return prependToolText(result, tagged.join('\n\n'));
+}
+
+/** Cursor bridge 绕过 pi 的工具循环、收不到 tool_result 事件，只能包在工具上。 */
 export function withSystemReminders(
   definition: ToolDefinition,
   registry: SystemReminderRegistry
@@ -68,14 +83,25 @@ export function withSystemReminders(
     ...definition,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const result = await definition.execute(toolCallId, params, signal, onUpdate, ctx);
-      const pending = registry.takePending();
-      if (pending.length === 0) return result;
-      const tagged = pending.map((block) =>
-        block.includes('<system-reminder>') || block.includes('<background-task-update>')
-          ? block
-          : systemReminderBlock(block)
-      );
-      return prependToolText(result, tagged.join('\n\n'));
+      return withPendingReminders(result, registry) ?? result;
+    },
+  };
+}
+
+/**
+ * 挂在 tool_result 上而不是包工具：codemode、tool_search 等由扩展注册的工具不经过 Enso 的工具装饰。
+ * 嵌套调用的结果只进脚本，提醒留给外层结果。
+ */
+export function systemReminderExtension(registry: SystemReminderRegistry): InlineExtension {
+  return {
+    name: 'system-reminders',
+    hidden: true,
+    factory: (pi) => {
+      pi.on('tool_result', (event) => {
+        if (event.parentToolCallId) return;
+        const next = withPendingReminders({ content: event.content, details: undefined }, registry);
+        return next ? { content: next.content } : undefined;
+      });
     },
   };
 }
