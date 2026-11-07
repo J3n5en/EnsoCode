@@ -27,6 +27,7 @@ import { ApprovalReviewerPicker } from './ApprovalReviewerPicker';
 import { chatgptPoolSources, createChatgptPoolProvider, providerDisplayName } from './chatgptPool';
 import { API_KIND_LABELS } from './constants';
 import { DefaultModelPicker } from './DefaultModelPicker';
+import { ImageGenerationPicker } from './ImageGenerationPicker';
 import { LocalImportDialog } from './LocalImportDialog';
 import { NewSessionBadge } from './NewSessionBadge';
 import { AccountUsageBlock } from './OauthProvidersDialog';
@@ -152,6 +153,7 @@ export function ProvidersSettings() {
         </div>
       </div>
       <DefaultModelPicker />
+      <ImageGenerationPicker />
       <VirtualModelsSettings />
       <TitleSummaryPicker />
       <ApprovalReviewerPicker />

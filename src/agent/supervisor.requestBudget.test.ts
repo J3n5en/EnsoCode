@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { ModelRuntime, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -255,6 +255,59 @@ describe('SessionSupervisor 子代理请求预算', () => {
       task: { text: 'inspect files', images: [], fileMentions: [] },
     });
   }
+
+  it('主会话 ImageGen 读取实时配置并遵循工具开关，readonly 子会话不挂生图工具', async () => {
+    const { supervisor } = await spawnChild();
+    try {
+      const options = mocks.createAgentSession.mock.calls[0][0] as {
+        customTools: ToolDefinition[];
+      };
+      const tool = options.customTools.find((entry) => entry.name === 'ImageGen');
+      expect(tool).toBeDefined();
+      const run = (params: unknown) =>
+        tool!.execute('image-call', params as never, undefined, undefined, undefined as never);
+      const text = (result: Awaited<ReturnType<typeof run>>) => JSON.stringify(result.content);
+      expect(text(await run({ prompt: 'draw' }))).toContain(
+        'Select a default image generation model'
+      );
+      supervisor.handleCommand({
+        type: 'set-image-generation-config',
+        config: {
+          providerId: 'image-provider',
+          modelId: 'image',
+          protocol: 'openai',
+          baseUrl: 'https://images.example/v1',
+          apiKey: 'fixture-only',
+        },
+      });
+      expect(text(await run({ prompt: '' }))).toContain('Invalid ImageGen arguments');
+      supervisor.handleCommand({
+        type: 'set-image-generation-config',
+        config: null,
+        error: 'Model disabled',
+      });
+      expect(text(await run({ prompt: 'draw' }))).toContain(
+        'selected image generation model is unavailable'
+      );
+      supervisor.handleCommand({
+        type: 'set-builtin-tools',
+        identity: parent,
+        disabledTools: ['image_generation'],
+      });
+      await settle();
+      const parentSession = mocks.sessions[0] as FakeSession;
+      expect(parentSession.getActiveToolNames()).not.toContain('ImageGen');
+      supervisor.handleCommand({ type: 'set-builtin-tools', identity: parent, disabledTools: [] });
+      await settle();
+      expect(parentSession.getActiveToolNames()).toContain('ImageGen');
+      const childOptions = mocks.createAgentSession.mock.calls[1][0] as {
+        customTools: ToolDefinition[];
+      };
+      expect(childOptions.customTools.some((entry) => entry.name === 'ImageGen')).toBe(false);
+    } finally {
+      await supervisor.shutdown();
+    }
+  });
 
   it('到 1.5 倍中止时不发 turn-completed，补报告那轮用原 turnId 带预算停止标记收口', async () => {
     const { events, supervisor, worker } = await spawnChild();

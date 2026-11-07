@@ -175,6 +175,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   defaultModelFollowLast: { mode: 'portable' },
   titleSummaryEnabled: { mode: 'portable' },
   titleSummaryModel: { mode: 'portable' },
+  imageGenerationModel: { mode: 'portable' },
   memoryDistillModel: { mode: 'portable' },
   memoryChatModel: { mode: 'portable' },
   memoryLanguage: { mode: 'portable' },

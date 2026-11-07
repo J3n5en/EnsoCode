@@ -38,6 +38,7 @@ export interface ModelCapabilityOverrides {
 
 export interface ModelEntry extends ModelCapabilityOverrides {
   id: string;
+  imageGeneration?: boolean;
   label?: string;
   /** 是否启用（缺省视为启用） */
   enabled?: boolean;

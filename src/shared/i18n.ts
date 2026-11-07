@@ -761,6 +761,13 @@ export const zhTranslations: Record<string, string> = {
     '所选模型已不可用——将回退到默认模型。',
   'No default model': '未设置默认模型',
   'No usable models': '没有可用模型',
+  'Image generation': '生图模型',
+  'Default image generation model': '默认生图模型',
+  'Selected image generation model is unavailable':
+    '所选生图模型不可用，请检查模型标记、启用状态和 API Key。',
+  'Generate images with the configured image model and save them to the session scratch directory':
+    '使用默认生图模型生成图片，并保存到会话专属目录。',
+  'No image generation models available': '没有可用的图像生成模型',
   'Enable a model and configure valid provider credentials first.':
     '请先启用模型并配置有效的提供商凭证。',
   'Default model changed: {{previous}} → {{next}}': '默认模型已更改：{{previous}} → {{next}}',

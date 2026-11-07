@@ -81,6 +81,7 @@ const SCALAR_SETTING_KEYS = [
   'defaultModel',
   'defaultModelFollowLast',
   'titleSummaryModel',
+  'imageGenerationModel',
   'memoryDistillModel',
   'memoryChatModel',
   'memoryLanguage',
@@ -580,6 +581,7 @@ function previewDisclosureWarnings(
   for (const key of [
     'defaultModel',
     'titleSummaryModel',
+    'imageGenerationModel',
     'memoryDistillModel',
     'smartCompactModel',
     'approvalReviewer',
@@ -743,6 +745,7 @@ export function planImport(
   for (const key of [
     'defaultModel',
     'titleSummaryModel',
+    'imageGenerationModel',
     'memoryDistillModel',
     'smartCompactModel',
     'approvalReviewer',
@@ -837,6 +840,7 @@ export function planImport(
   for (const key of [
     'defaultModel',
     'titleSummaryModel',
+    'imageGenerationModel',
     'memoryDistillModel',
     'smartCompactModel',
     'approvalReviewer',

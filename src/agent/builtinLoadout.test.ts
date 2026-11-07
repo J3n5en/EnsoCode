@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { enabledHotBuiltins, nextActiveToolNames } from './builtinLoadout';
 
 describe('enabledHotBuiltins', () => {
+  it('ImageGen 可热切，禁用后不进入激活工具列表', () => {
+    expect(enabledHotBuiltins([]).has('image_generation')).toBe(true);
+    const groups = new Map([['image_generation', ['ImageGen']]]);
+    expect(
+      nextActiveToolNames(['read', 'ImageGen'], groups, enabledHotBuiltins(['image_generation']))
+    ).toEqual(['read']);
+    expect(nextActiveToolNames(['read'], groups, enabledHotBuiltins([]))).toEqual([
+      'read',
+      'ImageGen',
+    ]);
+  });
+
   it('workflow 依赖 subagent；spawn 时定型的工具不在热切范围', () => {
     const enabled = enabledHotBuiltins(['subagent', 'isolated_sandbox']);
     expect(enabled.has('workflow')).toBe(false);

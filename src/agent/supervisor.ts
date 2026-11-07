@@ -33,6 +33,7 @@ import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStr
 import type { PluginAgentSource } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan, PluginToolDescriptor } from '@shared/extensionPlugins/types';
 import { HUMAN_REQUEST_TIMEOUT_MS } from '@shared/humanRequestTimeout';
+import type { ImageGenerationState } from '@shared/imageGeneration';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import { positiveContextWindow } from '@shared/modelCatalog';
 import type { ModelDirectorySnapshot } from '@shared/modelDirectory';
@@ -106,6 +107,7 @@ import { applyPatchResultExtension } from './applyPatchResultExtension';
 import {
   ApprovalGate,
   type ApprovalReviewResult,
+  throwUnlessAllowed,
   withApproval,
   withProtectedFloor,
 } from './approval';
@@ -283,6 +285,7 @@ import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
 import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
 import { createGroupHistoryTool } from './tools/groupHistory';
 import { createGroupTasksTool } from './tools/groupTasks';
+import { createImageGenTool } from './tools/imageGen';
 import { createMemoryTools, MemoryInvoker } from './tools/memory';
 import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
@@ -991,6 +994,7 @@ export class SessionSupervisor {
   private disabledWorkflowPresets: string[] = [];
   /** undefined 跟随会话；空数组表示已配置但全部不可用，直接走 Exa。 */
   private webSearchChain: readonly WebSearchChainEntry[] | undefined;
+  private imageGeneration: ImageGenerationState = { config: null };
   /**
    * Main 推送的统一模型目录。revision 与自定义 provider 语义都没变时不再注册。
    * 当前消费者是自定义 provider 预注册；快照本体由后续的全局 web_search
@@ -1460,6 +1464,13 @@ export class SessionSupervisor {
           disabled: command.disabledTools,
         });
       }
+      return;
+    }
+    if (command.type === 'set-image-generation-config') {
+      this.imageGeneration = {
+        config: command.config ? { ...command.config } : null,
+        ...(command.error ? { error: command.error } : {}),
+      };
       return;
     }
     if (command.type === 'set-web-search-config') {
@@ -3086,6 +3097,24 @@ export class SessionSupervisor {
           ]
         : []),
       ...builtin('web', createWebTools({ chain: () => this.webSearchChain })),
+      ...builtin('image_generation', [
+        createImageGenTool({
+          getConfig: () => this.imageGeneration,
+          cwd,
+          remote: !!remote,
+          confirmOutside: async (file, signal, toolCallId) => {
+            if (!gate.needsApproval('command', 'ImageGen')) return;
+            const result = await gate.ask(
+              'ImageGen',
+              'command',
+              `Upload a reference image from outside the workspace: ${file}`,
+              signal,
+              toolCallId
+            );
+            throwUnlessAllowed(result);
+          },
+        }),
+      ]),
       ...builtin('todo', [createTodoTool((todos) => todoReminder.update(todos))]),
       ...(computer
         ? builtin('computer', [withComputerApproval(gate, createComputerTool(computer))])

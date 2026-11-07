@@ -124,6 +124,9 @@ export const SETTINGS_DATA_COVERAGE = {
   defaultThinkingLevel: surfaces('providers.default-model'),
   titleSummaryEnabled: excluded('Conversation title summary preference; not an Enso capability.'),
   titleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
+  imageGenerationModel: excluded(
+    'Independent image generation model preference; not an Enso capability.'
+  ),
   memoryDistillModel: excluded('Memory distillation model preference; not an Enso capability.'),
   memoryLanguage: excluded('Memory output language preference; not an Enso capability.'),
   memoryChatModel: excluded('Memory local/remote chat model preference; not an Enso capability.'),
@@ -299,6 +302,7 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Conversation title summary preference; not an Enso capability.'
   ),
   setTitleSummaryModel: excluded('Conversation title summary preference; not an Enso capability.'),
+  setImageGenerationModel: excluded('Default image generation model; desktop settings only.'),
   setMemoryDistillModel: excluded('Memory distillation model preference; not an Enso capability.'),
   setMemoryLanguage: excluded('Memory output language preference; not an Enso capability.'),
   setMemoryChatModel: excluded(
@@ -393,6 +397,9 @@ export const SETTINGS_ACTION_COVERAGE = {
 } satisfies Record<SettingsActionKey, CoverageDisposition>;
 
 export const BUILTIN_TOOL_COVERAGE: Readonly<Record<string, CoverageDisposition>> = {
+  image_generation: excluded(
+    'ImageGen uses its dedicated default model; not an Enso app capability.'
+  ),
   subagent: surfaces('coding-tools.subagent'),
   workflow: surfaces('coding-tools.workflow'),
   todo: surfaces('coding-tools.todo'),

@@ -139,6 +139,13 @@ export function ProviderModelRow({
             {model.id}
           </span>
         )}
+        <label className="flex shrink-0 items-center gap-1.5 text-xs">
+          <Checkbox
+            checked={model.imageGeneration === true}
+            onCheckedChange={(checked) => onChange({ ...model, imageGeneration: checked })}
+          />
+          {t('Image generation')}
+        </label>
         {canRemove && (
           <Button
             type="button"

@@ -42,6 +42,22 @@ const current = (state: Record<string, unknown> = {}): Record<string, unknown> =
 });
 
 describe('config sync merge identity and reference mapping', () => {
+  it('导入生图选型时映射本机服务 ID 并保留模型标记', () => {
+    const result = planImport(
+      current({ providers: [provider('local', 'Provider', 'key')] }),
+      bundle({
+        providers: [
+          { ...provider('remote', 'provider'), models: [{ id: 'model-1', imageGeneration: true }] },
+        ],
+        imageGenerationModel: { providerId: 'remote', modelId: 'model-1' },
+      }),
+      'merge'
+    );
+    expect(result.state.imageGenerationModel).toEqual({ providerId: 'local', modelId: 'model-1' });
+    expect(result.state.providers).toContainEqual(
+      expect.objectContaining({ id: 'local', models: [{ id: 'model-1', imageGeneration: true }] })
+    );
+  });
   it.each(['merge', 'replace'] as const)(
     '%s 导入未带 systemPromptId 的匹配预设时显式恢复默认提示词',
     (mode) => {

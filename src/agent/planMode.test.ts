@@ -56,7 +56,7 @@ describe('withPlanGate', () => {
     expect(edit.execute).toHaveBeenCalled();
   });
 
-  it.each(['edit', 'write', 'apply_patch', 'todo', 'workflow'])(
+  it.each(['edit', 'write', 'apply_patch', 'todo', 'workflow', 'ImageGen'])(
     '规划与待审期间拒绝 %s',
     async (name) => {
       for (const state of [planning, reviewing]) {
@@ -67,6 +67,19 @@ describe('withPlanGate', () => {
       }
     }
   );
+
+  it('codemode 嵌套调用 ImageGen 仍经过规划门，批准执行后才放行', async () => {
+    const definition = tool('ImageGen');
+    const nestedCall = () => setup(planning).run(definition, { prompt: '一只猫' });
+    await expect(nestedCall()).rejects.toThrow(/Plan mode is active/);
+    expect(definition.execute).not.toHaveBeenCalled();
+    await setup({
+      active: false,
+      executing: { planId: 'p', title: 'T', text: 'x' },
+      resolutions: {},
+    }).run(definition, { prompt: '一只猫' });
+    expect(definition.execute).toHaveBeenCalledTimes(1);
+  });
 
   it('full 档：非只读 bash 与 MCP 直接执行，不额外询问', async () => {
     const { run, requests, gate } = setup(planning, 'full');

@@ -258,6 +258,7 @@ const initialState = {
   defaultModelFollowLast: false,
   titleSummaryEnabled: false,
   titleSummaryModel: null as import('@shared/defaultModel').DefaultModelRef | null,
+  imageGenerationModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   memoryDistillModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   memoryChatModel: 'remote',
   memoryLanguage: 'en',
@@ -536,6 +537,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       setTitleSummaryEnabled: (titleSummaryEnabled) => set({ titleSummaryEnabled }),
       setTitleSummaryModel: (titleSummaryModel) => set({ titleSummaryModel }),
+      setImageGenerationModel: (imageGenerationModel) => set({ imageGenerationModel }),
       setMemoryDistillModel: (memoryDistillModel) => set({ memoryDistillModel }),
       setMemoryChatModel: (memoryChatModel) => set({ memoryChatModel }),
       setMemoryLanguage: (memoryLanguage) => set({ memoryLanguage }),
