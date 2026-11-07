@@ -205,6 +205,7 @@ import {
   resetOauthPoolActivity,
   resolveOauthPoolModel,
 } from './oauthAccountPool';
+import { withPathHints } from './pathHints';
 import { PendingNotificationStore } from './pendingNotifications';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
 import {
@@ -2531,8 +2532,8 @@ export class SessionSupervisor {
               grep: createRemoteGrepToolDefinition(cwd, sshExecutor) as unknown as Def,
             }
           : {
-              read: wrapRead(createReadToolDefinition(cwd) as unknown as Def),
-              grep: createGrepToolDefinition(cwd) as unknown as Def,
+              read: withPathHints(wrapRead(createReadToolDefinition(cwd) as unknown as Def), cwd),
+              grep: withPathHints(createGrepToolDefinition(cwd) as unknown as Def, cwd),
             };
       const { grep } = stock;
       const read = withProtectedFloor(toolGate, 'read', stock.read);
@@ -2546,8 +2547,8 @@ export class SessionSupervisor {
         : [
             read,
             grep,
-            createFindToolDefinition(cwd) as unknown as Def,
-            createLsToolDefinition(cwd) as unknown as Def,
+            withPathHints(createFindToolDefinition(cwd) as unknown as Def, cwd),
+            withPathHints(createLsToolDefinition(cwd) as unknown as Def, cwd),
           ];
     };
     // Bot 写成员（本地工作区）参与同工作区写协调
