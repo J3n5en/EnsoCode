@@ -17,6 +17,7 @@ import {
   markBuildReady,
   saveDeskMeta,
 } from './launch';
+import { installLeaveGuard } from './leaveGuard';
 import {
   loadReads,
   loadSnapshot,
@@ -35,9 +36,12 @@ const $ = (id: string) => document.getElementById(id) as HTMLElement;
 
 /** 已判定无法使用（旧桌面/只读）：后续连接状态、超时提示不再覆盖结论 */
 let stopped = false;
+/** 界面在用时关闭/后退要二次确认；出错页只剩跳转链接，不再拦 */
+let leaveGuard: { release(): void } | null = null;
 
 function splash(html: string): void {
   if (stopped) return;
+  leaveGuard?.release();
   loading = false;
   $('frames').style.visibility = 'hidden';
   $('splash').style.display = 'flex';
@@ -255,10 +259,17 @@ async function main(): Promise<void> {
       return link;
     },
     exitDesk() {
+      leaveGuard?.release();
       location.href = PHONE_URL;
     },
   };
   (window as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote = bridge;
+  // 后退先关设置层，其余情况确认后才离开
+  leaveGuard = installLeaveGuard(window, '确定离开 EnsoCode 完整版？', () => {
+    if (!iframes.settings) return false;
+    closeSettings();
+    return true;
+  });
 
   /**
    * 会话目录要等连上桌面才有，iframe 还没 attach 或目录未到时发一次会丢。
