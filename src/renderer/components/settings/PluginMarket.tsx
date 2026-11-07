@@ -8,6 +8,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { pluginPermissionLabel } from '@/plugins/pluginMeta';
+import { nextMarketLoadRequest, openMarketLoadRequest } from './marketLoad';
 import { filterMarketPlugins, marketCategories } from './pluginMarketFilter';
 
 export function PluginMarket({
@@ -26,6 +27,9 @@ export function PluginMarket({
   const [loading, setLoading] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [category, setCategory] = React.useState<string | null>(null);
+  const [loadRequest, setLoadRequest] = React.useState(() => openMarketLoadRequest(installedKey));
+  const nextRequest = nextMarketLoadRequest(loadRequest, installedKey);
+  if (nextRequest !== loadRequest) setLoadRequest(nextRequest);
 
   const load = React.useCallback(
     async (refresh: boolean) => {
@@ -46,9 +50,8 @@ export function PluginMarket({
   );
 
   React.useEffect(() => {
-    void installedKey;
-    void load(false);
-  }, [load, installedKey]);
+    void load(loadRequest.refresh);
+  }, [load, loadRequest]);
 
   const setMirror = async (on: boolean) => {
     await api.setMarketChinaMirror(on);
