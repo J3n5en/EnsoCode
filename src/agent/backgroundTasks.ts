@@ -646,9 +646,31 @@ export function shellReadHint(command: string): string {
   );
 }
 
+const SLEEP_UNIT_SEC: Record<string, number> = { '': 1, s: 1, m: 60, h: 3600 };
+const SLEEP_HINT_MIN_SEC = 20;
+
+/**
+ * 前台 sleep 等待的提示：固定延时后检查、或 sleep 轮询循环，每查一次都要多一轮模型。
+ * 改成后台条件等待，结束时通知，一次就够。
+ */
+export function shellSleepHint(command: string): string {
+  const bare = command.replace(HEREDOC_BODY, ' ').replace(QUOTED_SEGMENT, ' ');
+  const sleeps = [...bare.matchAll(/(?:^|[;&|(\s])sleep\s+(\d+(?:\.\d+)?)([smh]?)\b/g)].map(
+    (match) => Number(match[1]) * (SLEEP_UNIT_SEC[match[2]] ?? 1)
+  );
+  if (sleeps.length === 0) return '';
+  const loop = /(?:^|[;&|\s])(?:while|until|for)\s/.test(bare);
+  if (!loop && sleeps.reduce((sum, value) => sum + value, 0) < SLEEP_HINT_MIN_SEC) return '';
+  return (
+    'Sleep-waiting in a foreground command costs a model round per check. Put the whole wait in one ' +
+    'command that exits when the condition holds (e.g. `until <check>; do sleep 10; done; <report>`) ' +
+    'and run it with background: true — you are notified when it finishes, then end your turn.'
+  );
+}
+
 /** 把提示附在工具结果前面：规则写进结果里才不会在长会话中被冲淡 */
-function withReadHint<T>(result: T, command: string): T {
-  const hint = shellReadHint(command);
+function withCommandHints<T>(result: T, command: string): T {
+  const hint = [shellReadHint(command), shellSleepHint(command)].filter(Boolean).join('\n');
   if (!hint) return result;
   const content = (result as { content?: Array<{ type?: string; text?: string }> }).content;
   if (!Array.isArray(content)) return result;
@@ -932,7 +954,7 @@ export function withBackground(
       try {
         // timeout 原样下传：只作截止（到点杀），让位由 ForegroundCommand 按分类计时
         const result = await definition.execute(toolCallId, params, callSignal, onUpdate, ctx);
-        return withReadHint(withFailureNote(result), command);
+        return withCommandHints(withFailureNote(result), command);
       } catch (error) {
         if (error instanceof ForegroundDetachedError) {
           return detachedResult(error, {

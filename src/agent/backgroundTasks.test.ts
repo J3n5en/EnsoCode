@@ -13,6 +13,7 @@ import {
   resolveBackgroundLaunch,
   shellBackgroundEscape,
   shellReadHint,
+  shellSleepHint,
   type TaskEvents,
   withBackground,
 } from './backgroundTasks';
@@ -887,6 +888,22 @@ describe('shellReadHint', () => {
     expect(shellReadHint('pnpm test')).toBe('');
     expect(shellReadHint('sed -i "" s/a/b/ src/a.ts')).toBe('');
     expect(shellReadHint('git status')).toBe('');
+  });
+});
+
+describe('shellSleepHint', () => {
+  it('前台固定等待或 sleep 轮询循环提示改用后台条件等待', () => {
+    expect(shellSleepHint('sleep 40 && ssh host "select 1"')).toMatch(/background: true/);
+    expect(shellSleepHint('make deploy; sleep 1m; curl -f localhost')).toMatch(/until/);
+    expect(shellSleepHint('for i in 1 2 3; do curl -f x && break; sleep 5; done')).toMatch(
+      /background: true/
+    );
+  });
+
+  it('短暂等待、引号里的 sleep 不提示', () => {
+    expect(shellSleepHint('sleep 2 && curl localhost')).toBe('');
+    expect(shellSleepHint('echo "sleep 60 for i in"')).toBe('');
+    expect(shellSleepHint('pnpm test')).toBe('');
   });
 });
 
