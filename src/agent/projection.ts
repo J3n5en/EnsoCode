@@ -2,6 +2,10 @@ import { parseApprovalReviewRecord } from '@shared/approvalReviewRecord';
 import { pluginArtifactsFromToolDetails } from '@shared/extensionPlugins/artifacts';
 import { PLUGIN_MESSAGE_TYPE, parsePluginMessageSource } from '@shared/extensionPlugins/protocol';
 import { parsePluginToolName } from '@shared/extensionPlugins/toolName';
+import {
+  imageGenerationPreviewPaths,
+  parseGeneratedImagePaths,
+} from '@shared/imageGenerationResults';
 import { parseMaskReport } from '@shared/privacyMask/report';
 import { parseRtkToolStats } from '@shared/rtk';
 import {
@@ -166,6 +170,19 @@ export function projectMessage(value: unknown): ProjectedMessage | null {
   if (typeof value.toolName === 'string') projected.toolName = value.toolName;
   if (typeof value.toolCallId === 'string') projected.toolCallId = value.toolCallId;
   if (typeof value.isError === 'boolean') projected.isError = value.isError;
+  if (value.role === 'toolResult') {
+    const images =
+      value.toolName === 'ImageGen'
+        ? imageGenerationPreviewPaths(
+            projected.content
+              .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+              .join('\n')
+          )
+        : value.toolName === 'codemode' && isRecord(value.details)
+          ? parseGeneratedImagePaths(value.details.generatedImages)
+          : null;
+    if (images?.length) projected.generatedImages = images;
+  }
   if (typeof value.stopReason === 'string') projected.stopReason = value.stopReason;
   if (typeof value.errorMessage === 'string') projected.errorMessage = value.errorMessage;
   if (typeof value.timestamp === 'number') projected.timestamp = value.timestamp;

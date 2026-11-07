@@ -64,6 +64,9 @@ it('Gemini 第一张落盘后取消：保留已完成文件，剩余项 cancelle
       'cancelled',
     ]);
     expect(readFileSync(items[0].path).equals(png)).toBe(true);
+    expect(result.content.filter((part) => part.type === 'image')).toEqual([
+      { type: 'image', data: png.toString('base64'), mimeType: 'image/png' },
+    ]);
     expect(items.slice(1).every((item: { path: unknown }) => item.path === null)).toBe(true);
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(readdirSync(join(root, '.pi', 'scratch', 's'))).toHaveLength(1);
@@ -267,7 +270,7 @@ it('第二张图片写到一半失败时删除半成品，保留首张成功图�
   }
 });
 
-it('生成的图片落盘并以四字段返回，数量不足保留失败项', async () => {
+it('生成的图片落盘并返回会话图片附件，JSON 回执保留四字段和失败项', async () => {
   const home = mkdtempSync(join(tmpdir(), 'image-gen-'));
   try {
     const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
@@ -302,6 +305,10 @@ it('生成的图片落盘并以四字段返回，数量不足保留失败项', a
     expect(Object.keys(body.items[0]).sort()).toEqual(['index', 'mimeType', 'path', 'status']);
     expect(readFileSync(body.items[0].path)).toEqual(png);
     expect(body.items[1]).toEqual({ index: 2, status: 'error', path: null, mimeType: null });
+    expect(result.content.slice(1)).toEqual([
+      { type: 'image', data: png.toString('base64'), mimeType: 'image/png' },
+    ]);
+    expect(body).not.toHaveProperty('images');
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

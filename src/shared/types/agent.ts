@@ -58,6 +58,7 @@ import {
 import { parsePluginToolName } from '../extensionPlugins/toolName';
 import type { PluginEventPlan, PluginToolDescriptor } from '../extensionPlugins/types';
 import { type ImageGenerationConfig, parseImageGenerationConfig } from '../imageGeneration';
+import { parseGeneratedImagePaths } from '../imageGenerationResults';
 import { parseMaxActiveCoworkers } from '../maxActiveCoworkers';
 import {
   isCodexAccountKey,
@@ -1641,6 +1642,8 @@ export interface ProjectedMessage {
   shellFailure?: ShellFailure;
   /** 插件工具写出的产出文件 */
   pluginArtifacts?: PluginArtifactInfo[];
+  /** ImageGen 已落盘的本地图片，含 codemode 嵌套生成的产物。 */
+  generatedImages?: string[];
   /** 插件注入的消息（role=custom）的来源 */
   pluginSource?: PluginMessageSource;
   role: string;
@@ -2520,6 +2523,8 @@ function isProjectedCodemodeCalls(value: unknown): value is ProjectedCodemodeCal
 }
 
 function hasValidProjectedMetadata(value: Record<string, unknown>): boolean {
+  if (value.generatedImages !== undefined && !parseGeneratedImagePaths(value.generatedImages))
+    return false;
   if (value.rtk !== undefined && !parseRtkToolStats(value.rtk)) return false;
   if (value.approvalReview !== undefined && !parseApprovalReviewRecord(value.approvalReview))
     return false;

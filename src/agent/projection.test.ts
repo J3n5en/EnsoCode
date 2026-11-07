@@ -2,6 +2,35 @@ import { describe, expect, it } from 'vitest';
 import { PROJECTED_FILE_CHANGE_LIMIT, PROJECTED_TEXT_LIMIT, projectMessage } from './projection';
 
 describe('projectMessage', () => {
+  it('ImageGen 从已有文本结果恢复图片路径，codemode 从持久化详情恢复，普通工具不采信', () => {
+    const path = '/tmp/generated.png';
+    const content = [
+      {
+        type: 'text',
+        text: JSON.stringify({ items: [{ status: 'success', path, mimeType: 'image/png' }] }),
+      },
+    ];
+    expect(projectMessage({ role: 'toolResult', toolName: 'ImageGen', content })).toMatchObject({
+      generatedImages: [path],
+    });
+    expect(
+      projectMessage({
+        role: 'toolResult',
+        toolName: 'codemode',
+        content: [],
+        details: { generatedImages: [path], secret: 'hidden' },
+      })
+    ).toEqual({ role: 'toolResult', toolName: 'codemode', content: [], generatedImages: [path] });
+    expect(
+      projectMessage({
+        role: 'toolResult',
+        toolName: 'read',
+        content,
+        details: { generatedImages: [path] },
+      })
+    ).not.toHaveProperty('generatedImages');
+  });
+
   it('托管判定记录从任意工具结果 details 白名单投影', () => {
     const approvalReview = { verdict: 'deny', model: 'jev', allow: 0.67, ask: 0.1, block: 0.23 };
     expect(

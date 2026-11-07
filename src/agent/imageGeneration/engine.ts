@@ -221,12 +221,17 @@ export async function generate(
   session: string,
   toolCallId: string,
   externalSignal?: AbortSignal
-): Promise<{ items: ImageGenItem[]; diagnostics: string[] }> {
+): Promise<{
+  items: ImageGenItem[];
+  diagnostics: string[];
+  images: { type: 'image'; data: string; mimeType: string }[];
+}> {
   const signal = externalSignal
     ? AbortSignal.any([externalSignal, AbortSignal.timeout(120_000)])
     : AbortSignal.timeout(120_000);
   const items: ImageGenItem[] = [];
   const diagnostics: string[] = [];
+  const images: { type: 'image'; data: string; mimeType: string }[] = [];
   try {
     signal.throwIfAborted();
     const home = deps.homeDir ?? homedir();
@@ -398,6 +403,11 @@ export async function generate(
           ctimeMs: info.ctimeMs,
         });
         items.push({ index, status: 'success', path: file, mimeType: picture.mimeType });
+        images.push({
+          type: 'image',
+          data: picture.bytes.toString('base64'),
+          mimeType: picture.mimeType,
+        });
       } catch (error) {
         const status = signal.aborted ? 'cancelled' : 'error';
         items.push({ index, status, path: null, mimeType: null });
@@ -424,5 +434,5 @@ export async function generate(
             : 'Image generation failed'
     );
   }
-  return { items, diagnostics };
+  return { items, diagnostics, images };
 }

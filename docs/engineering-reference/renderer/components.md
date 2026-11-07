@@ -130,6 +130,12 @@
 - 验证方法：CDP `/json/list` 应出现 `type: worker`；prod 是 `file://`，模块 worker 照常可加载
   （已用 bogus 消息回 `Unknown request type` 验过）。
 
+## 生成图片是产物，不随工具过程折叠
+
+ImageGen 同时返回 JSON 回执和标准 image content 附件：附件进入模型上下文和 JSONL，JSON 回执经 worker 投影为 `generatedImages` 本地路径列表。codemode 嵌套生成时，由 `CodemodeHost` 的 `tool_result` 钩子将图片附件合入父结果 content，路径合入 details，随 JSONL 持久化。不能依赖脚本主动 `text()` 或 `image()` 输出嵌套结果。后续追问的图片保留策略见 [Main services](../main/services.md)。
+
+时间线把路径交给 `local-image` 协议和 `ZoomableImage` 展示，默认可见，不进入普通工具分组或已完成过程折叠。只展示 `status: success` 的产物；后续脚本失败仍保留已生成图片。原始工具回执继续在详情中展示。回归见 `imageGenerationResults.test.ts`、`codemode.test.ts`、`projection.test.ts` 和 `TimelineRow.image.test.tsx`。
+
 ## 时间线初始高度不能取首条消息
 
 `MessageTimeline` 切会话会重挂 Virtuoso 并定位 `LAST`。必须提供 `defaultItemHeight` 初始估算，不能让首条长文本的探测高度外推到全部消息；实际行高仍动态测量，不能改成 `fixedItemHeight`。

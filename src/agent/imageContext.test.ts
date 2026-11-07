@@ -32,6 +32,58 @@ const texts = (m: ContextMessage) =>
     : [];
 
 describe('pruneHistoricalImages', () => {
+  it.each(['ImageGen', 'codemode'])(
+    '后续追问保留最近一批 %s 生成图，普通工具图仍裁剪',
+    (toolName) => {
+      const generated = (id: string, data: string): ContextMessage => ({
+        ...toolResult(
+          id,
+          toolName,
+          text(
+            JSON.stringify({
+              items: [{ status: 'success', path: `/tmp/${data}.png`, mimeType: 'image/png' }],
+            })
+          ),
+          img(data),
+          img(`${data}-2`)
+        ),
+        ...(toolName === 'codemode' ? { details: { generatedImages: [`/tmp/${data}.png`] } } : {}),
+      });
+      const messages = [
+        user(text('生成第一批')),
+        assistant([{ id: 'g1', name: toolName }]),
+        generated('g1', 'OLD'),
+        user(text('生成第二批')),
+        assistant([{ id: 'g2', name: toolName }]),
+        generated('g2', 'NEW'),
+        assistant([{ id: 'r', name: 'read' }]),
+        toolResult('r', 'read', img('READ')),
+        user(text('把第二张改成蓝色')),
+      ];
+      const out = sanitizeContextMessages(messages);
+      expect(images(out[2])).toEqual([]);
+      expect(images(out[5])).toEqual([img('NEW'), img('NEW-2')]);
+      expect(images(out[7])).toEqual([]);
+      expect(images(messages[2])).toHaveLength(2);
+    }
+  );
+
+  it('新一轮生成替代上一批，失败且没有图片的生成不会清掉上一批', () => {
+    const messages = [
+      user(text('生成')),
+      assistant([{ id: 'g1', name: 'ImageGen' }]),
+      toolResult('g1', 'ImageGen', img('OLD')),
+      user(text('再生成')),
+      assistant([{ id: 'g2', name: 'ImageGen' }]),
+      toolResult('g2', 'ImageGen', text('failed')),
+    ];
+    expect(images(sanitizeContextMessages(messages)[2])).toEqual([img('OLD')]);
+    messages[5] = toolResult('g2', 'ImageGen', img('NEW'));
+    const out = sanitizeContextMessages(messages);
+    expect(images(out[2])).toEqual([]);
+    expect(images(out[5])).toEqual([img('NEW')]);
+  });
+
   // 真实场景：cursor2api 代理把 image block 按 base64 字符计 token，一张 1.7MB 的 read 结果
   // 直接 Input token limit exceeded；pi 的 findCutPoint 又只按 1200 tokens 估图片，
   // 每次 compaction 都把它留在保留段里，压多少次都爆。

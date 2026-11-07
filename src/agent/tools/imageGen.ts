@@ -44,7 +44,7 @@ export function createImageGenTool(
     name: 'ImageGen',
     label: 'ImageGen',
     description:
-      'Generate and save images using the independent default image-generation model configured in settings. Only call when the user requests image generation or editing. Parameters: prompt, optional referenceImages (local workspace-relative, absolute or ~/ image paths), count (1–10, default 1). References outside the workspace may require approval. Even in SSH sessions, references and saved files are on the EnsoCode host. Saves under ~/.pi/scratch/<Pi Session ID>/ and returns each image index/status/path/mimeType; files are available only for success items. Do not repeat a partially successful request automatically: it may charge again.',
+      'Generate and save images using the independent default image-generation model configured in settings. Only call when the user requests image generation or editing. Parameters: prompt, optional referenceImages (local workspace-relative, absolute or ~/ image paths), count (1–10, default 1). References outside the workspace may require approval. Even in SSH sessions, references and saved files are on the EnsoCode host. Saves under ~/.pi/scratch/<Pi Session ID>/ and returns each image index/status/path/mimeType; files are available only for success items. Successful images are automatically displayed to the user and attached to the conversation for you to see, including calls inside codemode; no read or image link is needed to display or inspect them. The latest generated batch stays in subsequent model context until replaced by a newer batch or removed by context compaction. Do not repeat a partially successful request automatically: it may charge again.',
     parameters: {
       type: 'object',
       properties: {
@@ -85,9 +85,9 @@ export function createImageGenTool(
       }
       const session = ctx?.sessionManager?.getSessionId?.();
       if (typeof session !== 'string') return fail('Missing session ID');
-      const result = await generate(config, args, deps, session, toolCallId, signal);
+      const { images, ...result } = await generate(config, args, deps, session, toolCallId, signal);
       return {
-        content: [{ type: 'text', text: JSON.stringify(result) }],
+        content: [{ type: 'text', text: JSON.stringify(result) }, ...images],
         details: undefined,
         ...(result.items.some((item) => item.status === 'success') ? {} : { isError: true }),
       };

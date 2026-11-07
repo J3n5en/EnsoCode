@@ -1,3 +1,4 @@
+import type { ImageContent } from '@earendil-works/pi-ai';
 import {
   createCodemodeExtension,
   createToolSearchExtension,
@@ -5,6 +6,7 @@ import {
   type InlineExtension,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import { imageGenerationPreviewPaths } from '@shared/imageGenerationResults';
 import type { McpServerSpawnConfig } from '@shared/types/agent';
 import { looksLikeApplyPatchDocument } from './applyPatch/parser';
 import { mcpNamespaceName, oneLine } from './mcpNames';
@@ -203,6 +205,8 @@ export class CodemodeHost {
   private pi?: ExtensionAPI;
   private deferredPending?: Promise<void>;
   private readonly nestedCounts = new Map<string, number>();
+  private readonly generatedImages = new Map<string, string[]>();
+  private readonly generatedImageAttachments = new Map<string, ImageContent[]>();
 
   constructor(private readonly options: CodemodeHostOptions) {}
 
@@ -322,6 +326,56 @@ export class CodemodeHost {
 
     pi.on('tool_result', (event) => {
       if (!event.parentToolCallId) this.nestedCounts.delete(event.toolCallId);
+      if (event.parentToolCallId && event.toolName === 'ImageGen') {
+        const images = event.content.filter((part): part is ImageContent => part.type === 'image');
+        if (images.length)
+          this.generatedImageAttachments.set(event.parentToolCallId, [
+            ...(this.generatedImageAttachments.get(event.parentToolCallId) ?? []),
+            ...images,
+          ]);
+        const paths = imageGenerationPreviewPaths(
+          event.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n')
+        );
+        if (paths.length)
+          this.generatedImages.set(event.parentToolCallId, [
+            ...(this.generatedImages.get(event.parentToolCallId) ?? []),
+            ...paths,
+          ]);
+      }
+      if (event.toolName === CODEMODE_TOOL_NAME) {
+        const paths = this.generatedImages.get(event.toolCallId);
+        const images = this.generatedImageAttachments.get(event.toolCallId);
+        this.generatedImages.delete(event.toolCallId);
+        this.generatedImageAttachments.delete(event.toolCallId);
+        if (paths?.length || images?.length)
+          return {
+            ...(images?.length
+              ? {
+                  content: [
+                    ...event.content,
+                    ...images.filter(
+                      (image, index) =>
+                        !event.content.some(
+                          (part) =>
+                            part.type === 'image' &&
+                            part.mimeType === image.mimeType &&
+                            part.data === image.data
+                        ) &&
+                        !images
+                          .slice(0, index)
+                          .some(
+                            (part) => part.mimeType === image.mimeType && part.data === image.data
+                          )
+                    ),
+                  ],
+                }
+              : {}),
+            details: {
+              ...(isRecord(event.details) ? event.details : {}),
+              ...(paths?.length ? { generatedImages: [...new Set(paths)] } : {}),
+            },
+          };
+      }
       return undefined;
     });
   }

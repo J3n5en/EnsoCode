@@ -72,6 +72,8 @@ export type TimelineItem =
       state: 'running' | 'reviewing' | 'ok' | 'error';
       /** read 到图片时的绝对路径，展开后按原文件渲染（含 svg / 动图）；其它缺省 */
       imagePath?: string;
+      /** 生成图片是回复产物，独立于折叠的工具详情展示。 */
+      generatedImages?: string[];
       /** edit 工具的替换块，用于渲染 diff；非 edit 为 null */
       edits: EditBlock[] | null;
       /** write 工具写入的文件内容,展开即可查看;非 write 为 null */
@@ -859,6 +861,7 @@ function buildMessageTimeline(
       fileChanges: ProjectedFileChange[] | null;
       applyPatchOutcome: ProjectedApplyPatchOutcome | null;
       codemodeCalls: ProjectedCodemodeCall[] | null;
+      generatedImages?: string[];
       rtk?: RtkToolStats;
       approvalReview?: ApprovalReviewRecord;
       backgroundTaskId?: string;
@@ -883,6 +886,7 @@ function buildMessageTimeline(
         backgroundTaskId: message.backgroundTaskId,
         shellFailure: message.shellFailure,
         pluginArtifacts: message.pluginArtifacts,
+        generatedImages: message.generatedImages,
       });
     }
   }
@@ -1202,6 +1206,7 @@ function buildMessageTimeline(
             output: sent ? stripDeliveryReceipt(output) : asked ? asked.output : output,
             nestedPending: nestedPendingCount(part.id, pendingApprovals) || undefined,
             ...(imagePath ? { imagePath } : {}),
+            ...(result?.generatedImages?.length ? { generatedImages: result.generatedImages } : {}),
             ...(sandboxTool ? { sandbox: sandboxView } : {}),
             state: result
               ? result.isError || sandboxView?.status === 'failed'
@@ -1787,12 +1792,13 @@ export function foldTimeline(
   const activityAt = (index: number): boolean =>
     options.collapseCompletedActivity === true && !(running && index > liveFrom);
   const inSegment = (s: TimelineItem, index: number): boolean =>
-    s.kind === 'thinking' ||
-    (s.kind === 'tool-group' && activityAt(index)) ||
-    (s.kind === 'tool' &&
-      (activityAt(index)
-        ? s.state === 'ok' && !s.name.startsWith('goal_') && s.name !== 'submit_plan'
-        : !compact || isReadOnlyTool(s)));
+    !(s.kind === 'tool' && s.generatedImages?.length) &&
+    (s.kind === 'thinking' ||
+      (s.kind === 'tool-group' && activityAt(index)) ||
+      (s.kind === 'tool' &&
+        (activityAt(index)
+          ? s.state === 'ok' && !s.name.startsWith('goal_') && s.name !== 'submit_plan'
+          : !compact || isReadOnlyTool(s))));
   const result: TimelineItem[] = [];
   let i = 0;
   while (i < sourceItems.length) {

@@ -188,6 +188,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.writeContent === b.writeContent &&
         a.fileChanges === b.fileChanges &&
         a.imagePath === b.imagePath &&
+        a.generatedImages === b.generatedImages &&
         a.todos === b.todos &&
         a.durationMs === b.durationMs &&
         a.startedAt === b.startedAt &&
@@ -2158,6 +2159,17 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           </button>
         )}
       </div>
+      {item.generatedImages?.length ? (
+        <div data-slot="generated-images" className="mt-2 mb-3 ml-5 grid gap-3">
+          {item.generatedImages.map((path) => (
+            <ReadImagePreview
+              key={path}
+              path={path}
+              fallback={<p className="break-all px-3 py-2 text-xs text-muted-foreground">{path}</p>}
+            />
+          ))}
+        </div>
+      ) : null}
       {expanded && expandable && (
         // 展开内容收进与工具名对齐的卡片
         <div
