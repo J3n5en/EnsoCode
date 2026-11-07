@@ -15,6 +15,12 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/stores/sessions', () => ({
   useSessionsStore: Object.assign(() => ({}), { getState: () => ({ selectTab }) }),
 }));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: (select: (state: { agentTypes: { id: string; name: string }[] }) => unknown) =>
+    select({
+      agentTypes: [{ id: 'ecc3cc9e-f9f5-54b3-bbd2-0b8dd0d0c654', name: 'Poteto' }],
+    }),
+}));
 vi.mock('@/components/ui/popover', () => {
   const PopoverState = createContext<{ open: boolean; setOpen: (open: boolean) => void } | null>(
     null
@@ -156,5 +162,34 @@ describe('ChildRunsButton', () => {
     expect(container.querySelector('[data-history]')?.getAttribute('data-history')).toBe(CHILD);
     expect(container.querySelector('[data-history]')?.getAttribute('data-bot')).toBe('false');
     expect(selectTab).not.toHaveBeenCalled();
+  });
+
+  it('行上显示任务标题；没有标题时去掉哈希，自定义类型显示配置名', async () => {
+    await render([
+      {
+        ...ended,
+        name: 'exp-invite-0cd21319',
+        title: '探测邀请接口',
+        agentType: 'custom:ecc3cc9e-f9f5-54b3-bbd2-0b8dd0d0c654',
+      },
+      {
+        ...ended,
+        childId: `${PARENT}::cw-sqli`,
+        name: 'exp-sqli3-371654bd',
+        agentType: 'builtin:scout',
+      },
+    ]);
+    const trigger = container.querySelector('[aria-label="Subagent history"]');
+    await act(async () => {
+      (trigger as HTMLButtonElement).click();
+    });
+    const text = container.textContent ?? '';
+    expect(text).toContain('探测邀请接口');
+    expect(text).not.toContain('exp-invite-0cd21319');
+    expect(text).toContain('exp-sqli3');
+    expect(text).not.toContain('exp-sqli3-371654bd');
+    expect(text).toContain('Poteto');
+    expect(text).not.toContain('custom');
+    expect(text).toContain('scout');
   });
 });

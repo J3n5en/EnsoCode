@@ -1,4 +1,5 @@
 import { agentTypeDisplayName } from '@shared/builtinAgents';
+import { childRunLabel } from '@shared/childRunLabel';
 import type { ChildRunSummary } from '@shared/types/agent';
 import { History } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -8,6 +9,7 @@ import { useI18n } from '@/i18n';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
+import { useSettingsStore } from '@/stores/settings';
 import { ConversationStatusIndicator } from './ConversationStatusIndicator';
 
 export function ChildRunsButton({
@@ -18,6 +20,7 @@ export function ChildRunsButton({
   coworkerIds: readonly string[];
 }) {
   const { t, locale } = useI18n();
+  const customAgentTypes = useSettingsStore((state) => state.agentTypes);
   const [items, setItems] = useState<ChildRunSummary[]>([]);
   const [open, setOpen] = useState(false);
   const [viewing, setViewing] = useState<ChildRunSummary | null>(null);
@@ -80,43 +83,51 @@ export function ChildRunsButton({
             <History className="size-3.5" />
             <span className="text-[11px] tabular-nums leading-none">{items.length}</span>
           </PopoverTrigger>
-          <PopoverPopup align="end" className="w-72 [&_[data-slot=popover-viewport]]:p-1">
+          <PopoverPopup align="end" className="w-96 [&_[data-slot=popover-viewport]]:p-1">
             <ul className="flex flex-col">
-              {items.map((item) => (
-                <li key={item.childId}>
-                  <button
-                    type="button"
-                    disabled={!item.available}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-                      item.available
-                        ? 'hover:bg-muted'
-                        : 'cursor-default text-muted-foreground opacity-40'
-                    )}
-                    onClick={() => activate(item)}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{item.name}</span>
-                    {item.agentType && (
+              {items.map((item) => {
+                const label = childRunLabel(item);
+                return (
+                  <li key={item.childId}>
+                    <button
+                      type="button"
+                      disabled={!item.available}
+                      title={label}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                        item.available
+                          ? 'hover:bg-muted'
+                          : 'cursor-default text-muted-foreground opacity-40'
+                      )}
+                      onClick={() => activate(item)}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{label}</span>
+                      {item.agentType && (
+                        <span className="shrink-0 text-muted-foreground text-xs">
+                          {agentTypeDisplayName(item.agentType, customAgentTypes)}
+                        </span>
+                      )}
                       <span className="shrink-0 text-muted-foreground text-xs">
-                        {agentTypeDisplayName(item.agentType, [])}
+                        {formatRelativeTime(item.startedAt, locale)}
                       </span>
-                    )}
-                    <span className="shrink-0 text-muted-foreground text-xs">
-                      {formatRelativeTime(item.startedAt, locale)}
-                    </span>
-                    {item.live && (
-                      <ConversationStatusIndicator tone="running" size="sm" title={t('Running')} />
-                    )}
-                  </button>
-                </li>
-              ))}
+                      {item.live && (
+                        <ConversationStatusIndicator
+                          tone="running"
+                          size="sm"
+                          title={t('Running')}
+                        />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </PopoverPopup>
         </Popover>
       )}
       <SessionHistoryDialog
         conversationId={viewing?.childId ?? null}
-        title={viewing?.name ?? ''}
+        title={viewing ? childRunLabel(viewing) : ''}
         read={read}
         botSession={false}
         onClose={() => setViewing(null)}

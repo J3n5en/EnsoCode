@@ -118,6 +118,40 @@ describe('childRunCatalog', () => {
     expect(listChildRuns(sessionDir, PARENT).map((item) => item.name)).toEqual(['Alpha', 'Beta']);
   });
 
+  it('title 是任务标题：写入后读回，脏值忽略，换文件时没有新标题就留住旧的', () => {
+    expect(
+      recordChildRun(sessionDir, PARENT, {
+        ...run(PARENT, 'a', 'a.jsonl', 10, 'exp-invite-0cd21319'),
+        title: '  探测邀请接口  ',
+      })
+    ).toBe(true);
+    expect(listChildRuns(sessionDir, PARENT)[0]).toMatchObject({
+      name: 'exp-invite-0cd21319',
+      title: '探测邀请接口',
+    });
+
+    const catalog = path.join(sessionDir, 'child-runs', `${PARENT}.jsonl`);
+    writeFileSync(
+      catalog,
+      `${JSON.stringify({ ...run(PARENT, 'b', 'b.jsonl', 2, 'Beta'), title: 1 })}\n`,
+      'utf8'
+    );
+    expect(listChildRuns(sessionDir, PARENT)[0]).not.toHaveProperty('title');
+
+    recordChildRun(sessionDir, PARENT, {
+      ...run(PARENT, 'a', 'a.jsonl', 10, 'exp-invite-0cd21319'),
+      title: '探测邀请接口',
+    });
+    recordChildRun(sessionDir, PARENT, run(PARENT, 'a', 'b.jsonl', 99, 'exp-invite-0cd21319'));
+    expect(
+      listChildRuns(sessionDir, PARENT).find((item) => item.childId.endsWith('::cw-a'))
+    ).toMatchObject({
+      file: 'b.jsonl',
+      title: '探测邀请接口',
+      startedAt: 10,
+    });
+  });
+
   it('childId 不属于该 parent、或 parentId 非法时拒绝写入', () => {
     expect(recordChildRun(sessionDir, PARENT, run(OTHER, 'a', 'a.jsonl', 1))).toBe(false);
     expect(recordChildRun(sessionDir, `../${PARENT}`, run(PARENT, 'a', 'a.jsonl', 1))).toBe(false);

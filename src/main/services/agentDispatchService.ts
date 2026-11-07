@@ -223,6 +223,8 @@ export class AgentDispatchService {
     overrides?: {
       model?: string;
       thinking?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+      /** 子代理历史里给用户看的任务标题，不参与实例名 */
+      title?: string;
     },
     controlledAgentId?: string
   ): Promise<TeamOperationResult> {
@@ -334,7 +336,8 @@ export class AgentDispatchService {
       controlledAgentId ?? `team-${this.randomUuid()}`,
       candidate.typeKey === 'agent:enso' ? ENSO_LOCKED_PROFILE_ID : undefined,
       dispatchOrigin,
-      mode
+      mode,
+      overrides?.title
     );
     if (!reserved.ok) {
       return {
@@ -400,6 +403,7 @@ export class AgentDispatchService {
     agentId: string;
     parentConversationId: string;
     name: string;
+    description?: string;
     agentType?: string;
     mode: 'task' | 'coworker';
     model?: string;
@@ -415,6 +419,7 @@ export class AgentDispatchService {
       {
         ...(input.model ? { model: input.model } : {}),
         ...(input.thinking ? { thinking: input.thinking } : {}),
+        ...(input.description ? { title: input.description } : {}),
       },
       input.agentId
     );

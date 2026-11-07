@@ -1152,6 +1152,8 @@ export type ParentHistoryTailResult =
 export interface ChildRunSummary {
   childId: string;
   name: string;
+  /** 任务标题。旧记录没有，界面退回去掉哈希的实例名 */
+  title?: string;
   agentType?: string;
   startedAt: number;
   live: boolean;

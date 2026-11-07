@@ -511,6 +511,62 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     }
   });
 
+  it('预约时的任务标题写入子运行目录，coworker-update 先到也不会丢掉', () => {
+    const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-child-title-'));
+    const parentId = '11111111-1111-4111-8111-111111111111';
+    const root: SessionIdentity = {
+      sessionId: parentId,
+      generation: '22222222-2222-4222-8222-222222222222',
+    };
+    const file = path.join(sessionDir, '2026-08-29T00-00-00-000Z_abc.jsonl');
+    const sessions = new AgentSessionIndex({
+      readSettings: () => null,
+      randomUuid: uuids(),
+      sessionDir,
+    });
+    try {
+      sessions.prepareParent(root);
+      const reserved = sessions.reserveChild(
+        root,
+        'builtin:scout',
+        'exp-invite',
+        'request-1',
+        undefined,
+        'agent-tool',
+        'task',
+        '探测邀请接口'
+      );
+      expect(reserved.ok).toBe(true);
+      if (!reserved.ok) return;
+      const child = reserved.reservation.child;
+      expect(
+        sessions.observe({
+          type: 'coworker-update',
+          identity: root,
+          seq: 1,
+          coworker: {
+            id: child.sessionId,
+            name: child.instanceName,
+            agentType: child.typeKey,
+            status: 'idle',
+            sessionFile: file,
+            createdAt: 0,
+          },
+        })
+      ).toBe(true);
+      expect(listChildRuns(sessionDir, parentId)[0]).toMatchObject({
+        name: child.instanceName,
+        title: '探测邀请接口',
+      });
+      expect(sessions.observe({ ...readyChild(child), sessionFile: file, seq: 2 })).toBe(true);
+      expect(listChildRuns(sessionDir, parentId)).toEqual([
+        expect.objectContaining({ title: '探测邀请接口', file: path.basename(file) }),
+      ]);
+    } finally {
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
+  });
+
   it('带 sessionFile 的 coworker-update 写入同一份目录，重复更新不追加', () => {
     const sessionDir = mkdtempSync(path.join(tmpdir(), 'enso-coworker-run-'));
     const parentId = '11111111-1111-4111-8111-111111111111';

@@ -23,7 +23,7 @@ import type {
   WorkspaceLockEvent,
 } from '@shared/types/agent';
 import { type AgentTypeEntry, BUILTIN_AGENT_TYPES } from '@shared/types/assets';
-import { recordChildRun } from './childRunCatalog';
+import { normalizeChildRunTitle, recordChildRun } from './childRunCatalog';
 import { withPluginAgentTypes } from './pluginRuntime';
 
 export const MAX_ORIGIN_COWORKERS = DEFAULT_MAX_ACTIVE_COWORKERS;
@@ -45,6 +45,8 @@ export interface ChildReservation {
   requestId: string;
   child: ChildSessionIdentity;
   metadata: ChildConversationMetadata;
+  /** 只活在预约里，给历史列表当标题；不进持久化身份 */
+  title?: string;
 }
 
 export type ChildReservationResult =
@@ -160,7 +162,8 @@ export class AgentSessionIndex {
     childId: string,
     name: string,
     agentType: string | undefined,
-    sessionFile: string | undefined
+    sessionFile: string | undefined,
+    title?: string
   ): void {
     const sessionDir =
       typeof this.options.sessionDir === 'function'
@@ -169,10 +172,12 @@ export class AgentSessionIndex {
     if (!sessionDir || !sessionFile || !name) return;
     const file = path.basename(sessionFile);
     if (path.resolve(sessionFile) !== path.resolve(sessionDir, file)) return;
+    const label = normalizeChildRunTitle(title ?? this.reservations.get(childId)?.title);
     recordChildRun(sessionDir, parentId, {
       v: 1,
       childId,
       name,
+      ...(label ? { title: label } : {}),
       ...(agentType ? { agentType } : {}),
       file,
       startedAt: Date.now(),
@@ -286,7 +291,8 @@ export class AgentSessionIndex {
     requestId: string,
     profileId?: ChildSessionIdentity['profileId'],
     dispatchOrigin: ChildConversationMetadata['dispatchOrigin'] = 'typed-mention',
-    mode: ChildConversationMetadata['mode'] = 'coworker'
+    mode: ChildConversationMetadata['mode'] = 'coworker',
+    title?: string
   ): ChildReservationResult {
     const session = this.sessions.get(parent.sessionId);
     if (!session || !isSameGeneration(session.identity, parent)) {
@@ -318,6 +324,7 @@ export class AgentSessionIndex {
       typeKey,
       ...(profileId ? { profileId } : {}),
     };
+    const label = normalizeChildRunTitle(title);
     const reservation: ChildReservation = {
       requestId,
       child,
@@ -331,6 +338,7 @@ export class AgentSessionIndex {
         mode,
         ...(profileId ? { lockedProfileId: profileId } : {}),
       },
+      ...(label ? { title: label } : {}),
     };
     this.reservations.set(child.sessionId, reservation);
     return { ok: true, reservation };
@@ -526,12 +534,14 @@ export class AgentSessionIndex {
         sessionFile: event.sessionFile,
         coworkers: new Map(),
       });
+      const title = reservation.title;
       this.rememberChildRun(
         event.identity.parent.sessionId,
         event.identity.sessionId,
         event.identity.instanceName,
         event.identity.typeKey,
-        event.sessionFile
+        event.sessionFile,
+        title
       );
       return true;
     }

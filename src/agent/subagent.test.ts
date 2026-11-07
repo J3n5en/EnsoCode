@@ -95,6 +95,18 @@ describe('subagent unified control', () => {
     expect(guidelines).toMatch(/Treat the delivered report as your source of record/);
   });
 
+  it('spawn 的 description 是用户在子代理历史里看见的标题，不是 id', () => {
+    const tool = createUnifiedSubagentTool({ agentTypes: [], models: [], invoke: vi.fn() });
+    const description = (
+      tool.parameters as { properties: { description: { description?: string } } }
+    ).properties.description;
+    expect(description.description).toMatch(/title/i);
+    expect(description.description).toMatch(/not an id/i);
+    const guidelines = (tool.promptGuidelines ?? []).join('\n');
+    expect(guidelines).toMatch(/description is the title/);
+    expect(guidelines).toMatch(/not an id or slug/);
+  });
+
   it('参数不合法时点名缺失字段或非法 operation，不调用 Main', async () => {
     const invoke = vi.fn();
     const tool = createUnifiedSubagentTool({ agentTypes: [], models: [], invoke });

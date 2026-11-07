@@ -6,6 +6,8 @@ export type ChildRunRecord = {
   v: 1;
   childId: string;
   name: string;
+  /** 用户看见的任务标题；缺省时界面退回实例名 */
+  title?: string;
   agentType?: string;
   /** basename，相对 sessions 目录 */
   file: string;
@@ -24,6 +26,16 @@ function isSafeBasename(file: string): boolean {
     file !== '.' &&
     file !== '..'
   );
+}
+
+export function normalizeChildRunTitle(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const title = value.trim().replace(/\s+/g, ' ').slice(0, 80);
+  return title || undefined;
+}
+
+function readTitle(value: unknown): string | undefined {
+  return typeof value === 'string' ? normalizeChildRunTitle(value) : undefined;
 }
 
 function catalogPath(sessionDir: string, parentId: string): string {
@@ -46,10 +58,12 @@ function parseLine(line: string): ChildRunRecord | null {
   if (row.agentType !== undefined && (typeof row.agentType !== 'string' || !row.agentType)) {
     return null;
   }
+  const title = readTitle(row.title);
   return {
     v: 1,
     childId: row.childId,
     name: row.name,
+    ...(title ? { title } : {}),
     ...(typeof row.agentType === 'string' ? { agentType: row.agentType } : {}),
     file: row.file,
     startedAt: row.startedAt,
@@ -70,7 +84,16 @@ function readFolded(sessionDir: string, parentId: string): ChildRunRecord[] {
     if (!row) continue;
     if (!row.childId.startsWith(`${parentId}::cw-`)) continue;
     const prev = folded.get(row.childId);
-    folded.set(row.childId, prev ? { ...row, startedAt: prev.startedAt } : row);
+    folded.set(
+      row.childId,
+      prev
+        ? {
+            ...row,
+            startedAt: prev.startedAt,
+            ...(row.title ? {} : prev.title ? { title: prev.title } : {}),
+          }
+        : row
+    );
   }
   return [...folded.values()];
 }
@@ -85,6 +108,7 @@ export function recordChildRun(
   if (record.v !== 1 || !record.name || !isSafeBasename(record.file)) return false;
   if (!Number.isFinite(record.startedAt)) return false;
   if (record.agentType !== undefined && !record.agentType) return false;
+  const title = normalizeChildRunTitle(record.title);
   const prev = readFolded(sessionDir, parentId).find((item) => item.childId === record.childId);
   if (prev && prev.file === record.file) return true;
   const dir = path.join(sessionDir, 'child-runs');
@@ -93,6 +117,7 @@ export function recordChildRun(
     v: 1 as const,
     childId: record.childId,
     name: record.name,
+    ...(title ? { title } : {}),
     ...(record.agentType ? { agentType: record.agentType } : {}),
     file: record.file,
     startedAt: record.startedAt,

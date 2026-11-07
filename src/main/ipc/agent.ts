@@ -564,6 +564,7 @@ function listChildRunSummaries(parentId: string): ChildRunListResult {
       return {
         childId: run.childId,
         name: run.name,
+        ...(run.title ? { title: run.title } : {}),
         ...(run.agentType ? { agentType: run.agentType } : {}),
         startedAt: run.startedAt,
         live: agentSessionIndex.isAlive(run.childId),
@@ -1194,6 +1195,7 @@ export function registerAgentHandlers(): void {
           agentId: input.agentId,
           parentConversationId: input.context.owner.ownerId,
           name: input.name ?? input.description,
+          description: input.description,
           mode: input.mode,
           ...(input.agentType ? { agentType: input.agentType } : {}),
           ...(input.model ? { model: input.model } : {}),

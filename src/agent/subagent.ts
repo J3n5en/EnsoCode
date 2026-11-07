@@ -234,6 +234,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       'Spawn task/coworker agents, list owned agents, send Runs or bound messages, wait/report/stop a Run, or dismiss an Agent. Default spawn mode=task and wait=false; finished Runs notify you automatically.',
     promptGuidelines: [
       'spawn requires non-empty description and prompt. Omit both for every other operation.',
+      'On spawn, description is the title the user sees in subagent history. Write a short human-readable label of the work, not an id or slug. name is an optional internal handle and is not the title.',
       'Agent and Run are different identities: use runId for wait/report/stop and agentId for send/dismiss.',
       "Delegate when the work matches an available agent type, when two independent investigations can run in parallel, when answering needs broad exploration across several files, or when a long-running job can proceed in the background. For a known file, symbol, or single fact, use the direct tool (read for a known path, grep for a specific symbol) instead, and do not repeat work you delegated. Once you've delegated a search, don't also run it yourself.",
       'Treat the delivered report as your source of record: do not re-read files it covered unless you are about to edit them or the report is incomplete.',
@@ -263,10 +264,14 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
           enum: [...SUBAGENT_OPERATIONS],
         },
         mode: { type: 'string', enum: ['task', 'coworker'] },
-        name: { type: 'string' },
+        name: {
+          type: 'string',
+          description: 'Optional internal handle. Not the title shown to the user.',
+        },
         description: {
           type: 'string',
-          description: 'Required for spawn: non-empty short label of the delegated work.',
+          description:
+            'Required for spawn: the short title shown in subagent history. A human-readable label of the work, not an id.',
         },
         prompt: {
           type: 'string',
