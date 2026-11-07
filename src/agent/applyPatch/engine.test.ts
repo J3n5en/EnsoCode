@@ -442,6 +442,32 @@ describe('apply_patch 引擎', () => {
     await expect(readFile(absolute, 'utf8')).rejects.toThrow();
   });
 
+  it('根目录下的系统链接（macOS /tmp → private/tmp）不算父目录符号链接', async () => {
+    if (process.platform === 'win32') return;
+    const outside = await mkdtemp('/tmp/enso-patch-system-link-');
+    try {
+      const updated = path.join(outside, 'update.txt');
+      const added = path.join(outside, 'nested/add.txt');
+      await writeFile(updated, 'before\n');
+      const result = await executeApplyPatch(
+        cwd,
+        patch(
+          `*** Update File: ${updated}`,
+          '@@',
+          '-before',
+          '+after',
+          `*** Add File: ${added}`,
+          '+x'
+        )
+      );
+      expect(result.details.status).not.toBe('failed');
+      expect(await readFile(updated, 'utf8')).toBe('after\n');
+      expect(await readFile(added, 'utf8')).toBe('x\n');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('外部绝对路径的 leaf 和父目录符号链接仍拒绝', async () => {
     const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), 'enso-patch-link-')));
     const actual = path.join(outside, 'actual');

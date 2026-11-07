@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { constants, realpathSync, type Stats } from 'node:fs';
+import { constants, lstatSync, realpathSync, type Stats } from 'node:fs';
 import { access, chmod, lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { PatchEntry, PatchIo } from './types';
@@ -58,8 +58,21 @@ export function createLocalApplyPatchIo(cwd: string): PatchIo {
     } else {
       target = normalized;
     }
-    const anchor = isWithin(root, target) ? root : path.parse(target).root;
-    const relative = path.relative(anchor, target);
+    let anchor = isWithin(root, target) ? root : path.parse(target).root;
+    let relative = path.relative(anchor, target);
+    // 根目录直属链接只有 root 能建（macOS /tmp、/var → private/*），按系统路径展开
+    const head = relative.split(path.sep)[0];
+    if (anchor !== root && head && head !== relative) {
+      const top = path.join(anchor, head);
+      try {
+        if (lstatSync(top).isSymbolicLink()) {
+          anchor = realpathSync(top);
+          relative = path.relative(top, target);
+        }
+      } catch {
+        // 不存在时照常逐级检查
+      }
+    }
     return {
       target,
       anchor,
