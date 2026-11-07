@@ -121,7 +121,7 @@ const RESIDENT_LIMIT = 5;
 const RESIDENT_RESTART_MS = 5_000;
 const PROGRESS_INTERVAL_MS = 200;
 const MAX_TOOL_RESULT_BYTES = 1024 * 1024;
-const MAX_UI_PAYLOAD_BYTES = 64 * 1024;
+const MAX_UI_PAYLOAD_BYTES = 1024 * 1024;
 const UI_RATE_PER_SECOND = 10;
 const BREAKER_FAILURES = 5;
 const BREAKER_COOLDOWN_MS = 30_000;
@@ -1414,7 +1414,7 @@ export class ExtensionPluginService {
           : manifest.contributes.triggers.some((t) => t.name === input.payload.name);
     if (!declared) throw pluginError('NOT_DECLARED', '清单没有声明这项能力');
     if (Buffer.byteLength(JSON.stringify(input.payload), 'utf8') > MAX_UI_PAYLOAD_BYTES)
-      throw pluginError('TOO_LARGE', '参数超过 64KB');
+      throw pluginError('TOO_LARGE', '参数超过 1MB');
     this.admitUiCall(input.pluginId);
     try {
       const value = await this.invoke(input.pluginId, input.method, input.payload, {
@@ -1427,7 +1427,7 @@ export class ExtensionPluginService {
         kind: 'ui',
       });
       if (Buffer.byteLength(JSON.stringify(value ?? null), 'utf8') > MAX_UI_PAYLOAD_BYTES)
-        throw pluginError('TOO_LARGE', '返回值超过 64KB');
+        throw pluginError('TOO_LARGE', '返回值超过 1MB');
       this.settleUiCall(input.pluginId, true);
       return value;
     } catch (error) {

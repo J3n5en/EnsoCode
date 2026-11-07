@@ -416,7 +416,7 @@ export function onLoad(enso) {
 
 `enso.React` 是完整的 React，可以用 hooks。`enso.slots.register` 返回取消函数，`onLoad` 的返回值如果是函数，卸载时也会被调用。
 
-`enso.dispatch('plugin.call', { method, args })` 调用本插件 `main.mjs` 里 `enso.renderer.handle` 注册的方法。参数和返回值各不超过 64KB，默认 2 秒超时，清单 `contributes.methods` 里声明过的方法按声明的超时（最长 120 秒）。
+`enso.dispatch('plugin.call', { method, args })` 调用本插件 `main.mjs` 里 `enso.renderer.handle` 注册的方法。参数和返回值各不超过 1MB，默认 2 秒超时，清单 `contributes.methods` 里声明过的方法按声明的超时（最长 120 秒）。
 
 申请了 `composer.draft` 的插件还有 `enso.composer`：`readDraft()`、`insertText({ text })`、`replaceDraft({ text, expect? })`，返回值和失败的错误码与 `main.mjs` 里的同名接口一致。它直接作用于当前窗口当前会话的输入框，不受 30 秒手势限制（渲染模块本来就和界面同权），但仍然受内容指纹、引用和输入法组字检查的约束。没有会话时报 `NO_SESSION`。
 
@@ -507,7 +507,7 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 | 常驻插件 | 同时 5 个，意外退出 5 秒后重启 |
 | 插件间调用 | 嵌套 3 层 |
 | 透传环境变量 | 20 个 |
-| 界面调用 | 参数与返回值各 64KB；命令 60 秒，声明过的渲染方法按声明（最长 120 秒），其余 2 秒 |
+| 界面调用 | 参数与返回值各 1MB；命令 60 秒，声明过的渲染方法按声明（最长 120 秒），其余 2 秒 |
 | 宿主 MCP | 参数 64KB；单次最长 120 秒 |
 | 配置项 | 最多 20 项，每个值 4096 字符 |
 | 子代理类型 | 每插件 20 个，类型名 64 字符，提示词文件 256KB |
