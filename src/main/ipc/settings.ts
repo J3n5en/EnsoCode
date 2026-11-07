@@ -131,6 +131,7 @@ export const SETTINGS_STATE_FIELDS = [
   'defaultModelFollowLast',
   'titleSummaryEnabled',
   'titleSummaryModel',
+  'imageGenerationModel',
   'memoryDistillModel',
   'memoryChatModel',
   'memoryLanguage',
@@ -508,6 +509,7 @@ function scheduleWrite(
           pushBuiltinTools,
           pushModelDirectory,
           pushWebSearchConfig,
+          pushImageGenerationConfig,
         }) => {
           pushApprovalReviewer(await readStoredOauthCredentialKeys());
           pushCompactRoute(await readStoredOauthCredentialKeys());
@@ -519,6 +521,7 @@ function scheduleWrite(
           pushBuiltinTools();
           pushModelDirectory();
           pushWebSearchConfig();
+          pushImageGenerationConfig();
         }
       )
       .catch(() => {});
@@ -638,6 +641,7 @@ export function commitSettingsTransaction(
         pushBuiltinTools,
         pushModelDirectory,
         pushWebSearchConfig,
+        pushImageGenerationConfig,
       }) => {
         pushApprovalReviewer(await readStoredOauthCredentialKeys());
         pushCompactRoute(await readStoredOauthCredentialKeys());
@@ -649,6 +653,7 @@ export function commitSettingsTransaction(
         pushBuiltinTools();
         pushModelDirectory();
         pushWebSearchConfig();
+        pushImageGenerationConfig();
       }
     )
     .catch(() => {});

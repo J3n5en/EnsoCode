@@ -63,6 +63,93 @@ function install(host: CodemodeHost, activeTools?: string[]) {
 }
 
 describe('withCodemodeTimeout', () => {
+  it('嵌套 ImageGen 的成功图片随父结果持久化，即使脚本没有输出结果或随后失败', async () => {
+    const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
+    const path = '/tmp/generated.png';
+    await emit('tool_result', {
+      toolName: 'ImageGen',
+      toolCallId: 'nested',
+      parentToolCallId: 'p',
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ items: [{ status: 'success', path, mimeType: 'image/png' }] }),
+        },
+      ],
+    });
+    expect(
+      await emit('tool_result', { toolName: 'codemode', toolCallId: 'other', details: {} })
+    ).toBeUndefined();
+    expect(
+      await emit('tool_result', {
+        toolName: 'codemode',
+        toolCallId: 'p',
+        isError: true,
+        details: { calls: [] },
+      })
+    ).toMatchObject({ details: { calls: [], generatedImages: [path] } });
+    expect(
+      await emit('tool_result', { toolName: 'codemode', toolCallId: 'p', details: {} })
+    ).toBeUndefined();
+  });
+
+  it('嵌套生成的图片自动进入父结果 content，保留已有内容且各脚本隔离', async () => {
+    const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
+    const image = { type: 'image', data: 'AAAA', mimeType: 'image/png' };
+    const receipt = {
+      type: 'text',
+      text: JSON.stringify({
+        items: [{ status: 'success', path: '/tmp/generated.png', mimeType: 'image/png' }],
+      }),
+    };
+    await emit('tool_result', {
+      toolName: 'ImageGen',
+      toolCallId: 'p/1',
+      parentToolCallId: 'p',
+      content: [receipt, image],
+    });
+    expect(
+      await emit('tool_result', { toolName: 'codemode', toolCallId: 'q', content: [], details: {} })
+    ).toBeUndefined();
+    const output = { type: 'text', text: 'Script failed after generating' };
+    const parent = await emit('tool_result', {
+      toolName: 'codemode',
+      toolCallId: 'p',
+      content: [output],
+      details: { calls: [] },
+      isError: true,
+    });
+    expect(parent).toMatchObject({
+      content: [output, image],
+      details: {
+        calls: [],
+        generatedImages: ['/tmp/generated.png'],
+      },
+    });
+    expect(
+      await emit('tool_result', { toolName: 'codemode', toolCallId: 'p', content: [], details: {} })
+    ).toBeUndefined();
+  });
+
+  it('脚本已主动输出同一图片时不重复追加附件', async () => {
+    const { emit } = install(new CodemodeHost({ codemode: true, deferredServers: [] }));
+    const image = { type: 'image', data: 'AAAA', mimeType: 'image/png' };
+    await emit('tool_result', {
+      toolName: 'ImageGen',
+      toolCallId: 'p/1',
+      parentToolCallId: 'p',
+      content: [image],
+    });
+    expect(
+      await emit('tool_result', {
+        toolName: 'codemode',
+        toolCallId: 'p',
+        content: [image],
+        details: {},
+      })
+    ).toMatchObject({ content: [image] });
+  });
+
   const header = (code: string) => JSON.parse(code.split('\n')[0].slice('// @options:'.length));
 
   it('无 options 行时补默认超时，正文不变', () => {

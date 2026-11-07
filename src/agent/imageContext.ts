@@ -10,7 +10,7 @@
  * 策略沿用业界通行做法（Anthropic clear_tool_uses、opencode 媒体占位、image-context-cascade）：
  * - 只改 `context` 钩子里的消息副本，jsonl / 时间线一字不动；
  * - 当前轮（最后一条 user 消息及之后）的图片原样保留，模型看得到刚读的图；
- * - 历史轮工具结果里的图片全部换占位，占位写明工具名 / 路径 / mime，需要时可以再 read；
+ * - 历史轮工具结果里的图片换占位；最近一批生成图片保留，供后续追问继续看图；
  * - 用户自己贴的图保留最近 `KEEP_USER_IMAGE_TURNS` 条 user 消息里的，更早的换占位；
  * - 无法判定当前轮（没有 user 消息）时 fail-open，不动。
  */
@@ -177,6 +177,17 @@ export function pruneHistoricalImages(messages: ContextMessage[]): ContextMessag
     if ((m.toolName ?? call?.name) === 'computer') computerHits.push(i);
   }
   const keepComputer = new Set(computerHits.slice(-1));
+  // 扫描包含当前轮：新批次一旦产生图片，就替换此前保留的生成图；纯失败回执不替换。
+  const latestGenerated = messages.findLastIndex(
+    (message) =>
+      message.role === 'toolResult' &&
+      hasImage(message) &&
+      (message.toolName === 'ImageGen' ||
+        (message.toolName === 'codemode' &&
+          isRecord(message.details) &&
+          Array.isArray(message.details.generatedImages) &&
+          message.details.generatedImages.length > 0))
+  );
 
   let out: ContextMessage[] | undefined;
   for (let i = 0; i < lastUserIndex; i++) {
@@ -184,7 +195,7 @@ export function pruneHistoricalImages(messages: ContextMessage[]): ContextMessag
     if (!m || !hasImage(m)) continue;
     let replaced: ContextMessage | undefined;
     if (m.role === 'toolResult') {
-      if (keepComputer.has(i)) continue;
+      if (keepComputer.has(i) || i === latestGenerated) continue;
       const call = typeof m.toolCallId === 'string' ? calls.get(m.toolCallId) : undefined;
       const tool = m.toolName ?? call?.name ?? 'tool';
       const path = pathOfCall(call);

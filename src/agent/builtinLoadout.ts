@@ -1,5 +1,6 @@
 /** 会话中途可开关的内置工具。isolated_sandbox / workspace_write / goal 仍在 spawn 时定型。 */
 export const HOT_BUILTIN_TOOL_IDS = [
+  'image_generation',
   'subagent',
   'workflow',
   'todo',

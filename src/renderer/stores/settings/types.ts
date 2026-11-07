@@ -300,6 +300,7 @@ export interface SettingsState {
   titleSummaryEnabled: boolean;
   /** 标题总结独立模型；null = 跟随全局默认模型 */
   titleSummaryModel: DefaultModelRef | null;
+  imageGenerationModel: DefaultModelRef | null;
   /** 记忆提炼模型；null = 跟随标题模型 → 全局默认的既有回退链 */
   memoryDistillModel: DefaultModelRef | null;
   /** 记忆补全走远程还是本地 GGUF；`remote` 或 `local:*` 注册表 id */
@@ -480,6 +481,7 @@ export interface SettingsState {
   setTitleSummaryEnabled: (value: boolean) => void;
   /** 设置标题总结独立模型；null = 回到跟随全局默认 */
   setTitleSummaryModel: (model: DefaultModelRef | null) => void;
+  setImageGenerationModel: (model: DefaultModelRef | null) => void;
   /** 记忆提炼独立模型；null = 回落到标题模型 → 全局默认 */
   setMemoryDistillModel: (model: DefaultModelRef | null) => void;
   setMemoryChatModel: (modelId: string) => void;

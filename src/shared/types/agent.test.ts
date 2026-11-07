@@ -2704,6 +2704,33 @@ describe('MCP 旁路事件收窄', () => {
 });
 
 describe('apply_patch fileChanges 事件收窄', () => {
+  it('生成图片路径在增量消息和历史快照中收窄，拒绝 URL、共享路径和脏输入', () => {
+    const message = {
+      role: 'toolResult',
+      toolName: 'ImageGen',
+      content: [],
+      generatedImages: ['/tmp/a.png', 'C:\\scratch\\a.webp'],
+    };
+    const event = { type: 'message-upsert', identity: parent, seq: 1, index: 0, message };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseSessionSnapshot({ identity: parent, status: 'idle', messages: [message], commands: [] })
+    ).not.toBeNull();
+    for (const generatedImages of [null, 'bad', [null], ['https://a/a.png'], ['//server/a.png']]) {
+      expect(
+        parseAgentWorkerEvent({ ...event, message: { ...message, generatedImages } })
+      ).toBeNull();
+      expect(
+        parseSessionSnapshot({
+          identity: parent,
+          status: 'idle',
+          messages: [{ ...message, generatedImages }],
+          commands: [],
+        })
+      ).toBeNull();
+    }
+  });
+
   const event = {
     type: 'message-upsert',
     identity: parent,

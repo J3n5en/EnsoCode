@@ -180,7 +180,7 @@ function executionDone(entries: readonly unknown[], planId: string): boolean {
   return sawItems && done && !interrupted;
 }
 
-const DENIED_TOOLS = new Set(['edit', 'write', 'apply_patch', 'todo', 'workflow']);
+const DENIED_TOOLS = new Set(['edit', 'write', 'apply_patch', 'todo', 'workflow', 'ImageGen']);
 const SUBAGENT_PASSIVE_OPS = new Set(['wait', 'report', 'list', 'stop', 'dismiss']);
 
 const denied = (reason: string) =>

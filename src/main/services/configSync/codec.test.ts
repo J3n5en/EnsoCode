@@ -34,6 +34,30 @@ const skill = {
 };
 
 describe('config sync codec', () => {
+  it('生图标记和独立模型引用可导入，非布尔标记被拒绝', () => {
+    const source = {
+      ...bundle(),
+      state: {
+        ...bundle().state,
+        providers: [
+          {
+            id: 'p',
+            name: 'P',
+            api: 'openai-completions',
+            baseUrl: 'https://example.test',
+            enabled: true,
+            models: [{ id: 'm', imageGeneration: true }],
+          },
+        ],
+        imageGenerationModel: { providerId: 'p', modelId: 'm' },
+      },
+    };
+    expect(validateBundle(source).state.imageGenerationModel).toEqual(
+      source.state.imageGenerationModel
+    );
+    source.state.providers[0].models[0].imageGeneration = 'true' as never;
+    expect(() => validateBundle(source)).toThrow();
+  });
   const subagentBundle = (): ConfigSyncBundle => ({
     ...bundle(),
     state: {

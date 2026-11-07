@@ -19,6 +19,7 @@ export const TOOL_SECTION = {
   background_tasks: 'execution',
   isolated_sandbox: 'execution',
   computer: 'execution',
+  image_generation: 'execution',
   memory: 'context',
 } as const satisfies Record<string, ToolSectionId>;
 

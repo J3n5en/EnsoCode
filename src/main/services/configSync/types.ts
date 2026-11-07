@@ -76,6 +76,7 @@ export interface ConfigSyncState {
   defaultModel?: DefaultModelRef | null;
   defaultModelFollowLast?: boolean;
   titleSummaryModel?: DefaultModelRef | null;
+  imageGenerationModel?: DefaultModelRef | null;
   memoryDistillModel?: DefaultModelRef | null;
   memoryChatModel?: string;
   memoryLanguage?: string;

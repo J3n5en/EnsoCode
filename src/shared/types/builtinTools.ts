@@ -11,6 +11,12 @@ export interface BuiltinToolInfo {
 
 export const BUILTIN_TOOLS: BuiltinToolInfo[] = [
   {
+    id: 'image_generation',
+    name: 'ImageGen',
+    description:
+      'Generate images with the configured image model and save them to the session scratch directory',
+  },
+  {
     id: 'subagent',
     name: 'Subagent',
     description:

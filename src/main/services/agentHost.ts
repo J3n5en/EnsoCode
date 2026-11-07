@@ -34,6 +34,7 @@ import {
 } from '@shared/defaultModel';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
+import { resolveImageGenerationConfig } from '@shared/imageGeneration';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
 import { mcpHeaders } from '@shared/mcpConfig';
 import { mcpTimeoutsForSpawn } from '@shared/mcpTimeout';
@@ -337,6 +338,7 @@ export function startAgentWorker(): void {
     } satisfies AgentCommand);
     // 先于积压的 spawn 命令送达：新会话的工具描述按设置生成
     pushShellLimits();
+    pushImageGenerationConfig();
     pushMcpWarmup();
     pushPinnedSessions(true);
     if (snapshotPending !== false) {
@@ -2418,6 +2420,18 @@ export function pushWebSearchConfig(): void {
   } satisfies AgentCommand);
 }
 
+/** 设置失效同样下发 null，防止已打开会话沿用被撤销的生图模型和凭据。 */
+export function pushImageGenerationConfig(): void {
+  if (!worker || !workerReady) return;
+  worker.postMessage({
+    type: 'set-image-generation-config',
+    ...resolveImageGenerationConfig(
+      readSettingsState()?.imageGenerationModel,
+      providersFromSettings()
+    ),
+  } satisfies AgentCommand);
+}
+
 let modelDirectoryListenerBound = false;
 
 function bindModelDirectoryListener(): void {
@@ -2426,6 +2440,7 @@ function bindModelDirectoryListener(): void {
   onModelDirectoryChanged(() => {
     pushModelDirectory();
     pushWebSearchConfig();
+    pushImageGenerationConfig();
   });
 }
 

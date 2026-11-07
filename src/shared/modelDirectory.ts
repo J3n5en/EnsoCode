@@ -70,6 +70,7 @@ export function extractModelOverrides(
       // 被选型引用的 {id} 是用户选择，不是冻结目录；编辑再次保存也不能丢。
       referencedIds?.has(entry.id) ||
       entry.enabled === false ||
+      entry.imageGeneration === true ||
       labelIsIntent ||
       Object.keys(pickModelCapabilityOverrides(entry)).length > 0;
     if (hasIntent) {
@@ -106,6 +107,7 @@ export function referencedModelIds(settings: unknown, providerId: unknown): Set<
   const state = record(settings);
   for (const key of [
     'defaultModel',
+    'imageGenerationModel',
     'titleSummaryModel',
     'approvalReviewer',
     'smartCompactModel',
@@ -151,6 +153,7 @@ export function materializeOAuthModels(
     if (override) {
       if (override.label !== undefined) entry.label = override.label;
       if (override.enabled !== undefined) entry.enabled = override.enabled;
+      if (override.imageGeneration !== undefined) entry.imageGeneration = override.imageGeneration;
       Object.assign(entry, pickModelCapabilityOverrides(override));
     }
     out.push(entry);

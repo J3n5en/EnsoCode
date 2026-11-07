@@ -6,6 +6,7 @@
 export const app = {
   getPath: (name: string) => `/tmp/enso-code-test/${name}`,
   getName: () => 'enso-code',
+  getAppPath: () => '/tmp/enso-code-test/app',
   on: () => {},
 };
 

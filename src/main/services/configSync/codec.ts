@@ -63,6 +63,7 @@ const STATE_KEYS = [
   'defaultModel',
   'defaultModelFollowLast',
   'titleSummaryModel',
+  'imageGenerationModel',
   'memoryDistillModel',
   'memoryChatModel',
   'memoryLanguage',
@@ -207,6 +208,7 @@ const MODEL_KEYS = [
   'thinkingLevel',
   'contextWindow',
   'maxTokens',
+  'imageGeneration',
 ];
 const RESOURCE_KEYS = ['skills', 'instructions', 'systemPrompts'];
 const SKILL_RESOURCE_KEYS = ['id', 'files'];
@@ -477,6 +479,7 @@ function validateModels(value: unknown, provider: string): RecordValue[] {
     ids.add(id);
     if (entry.label !== undefined) stringField(entry, 'label', 'model', false);
     booleanField(entry, 'enabled', 'model', false);
+    booleanField(entry, 'imageGeneration', 'model', false);
     if (entry.reasoning !== undefined && entry.reasoning !== 'on' && entry.reasoning !== 'off') {
       throw new Error('Invalid model reasoning override');
     }
@@ -817,6 +820,7 @@ function validateReferences(
   for (const key of [
     'defaultModel',
     'titleSummaryModel',
+    'imageGenerationModel',
     'memoryDistillModel',
     'smartCompactModel',
     'approvalReviewer',

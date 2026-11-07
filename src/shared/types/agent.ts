@@ -57,6 +57,8 @@ import {
 } from '../extensionPlugins/protocol';
 import { parsePluginToolName } from '../extensionPlugins/toolName';
 import type { PluginEventPlan, PluginToolDescriptor } from '../extensionPlugins/types';
+import { type ImageGenerationConfig, parseImageGenerationConfig } from '../imageGeneration';
+import { parseGeneratedImagePaths } from '../imageGenerationResults';
 import { parseMaxActiveCoworkers } from '../maxActiveCoworkers';
 import {
   isCodexAccountKey,
@@ -1427,6 +1429,8 @@ export type AgentCommand =
   /** 设置变更后 Main 按会话推送当前禁用的内置工具；worker 只增删已注册的可热切工具 */
   | { type: 'set-builtin-tools'; identity: SessionIdentity; disabledTools: string[] }
   | { type: 'set-web-search-config'; chain: WebSearchChainEntry[]; configured?: boolean }
+  /** 专用生图模型；null 显式撤销旧配置。密钥只在 Main → worker 方向传递。 */
+  | { type: 'set-image-generation-config'; config: ImageGenerationConfig | null; error?: string }
   /** 隐私脱敏配置：worker 全局生效，不重启会话 */
   | { type: 'set-privacy-masking'; settings: PrivacyMaskSettings }
   /** 全局 settings.shell 经 resolveShellLimits 规范化后的命令时限；worker 级后台任务管理器共用 */
@@ -1663,6 +1667,8 @@ export interface ProjectedMessage {
   shellFailure?: ShellFailure;
   /** 插件工具写出的产出文件 */
   pluginArtifacts?: PluginArtifactInfo[];
+  /** ImageGen 已落盘的本地图片，含 codemode 嵌套生成的产物。 */
+  generatedImages?: string[];
   /** 插件注入的消息（role=custom）的来源 */
   pluginSource?: PluginMessageSource;
   role: string;
@@ -2569,6 +2575,8 @@ function isProjectedCodemodeCalls(value: unknown): value is ProjectedCodemodeCal
 }
 
 function hasValidProjectedMetadata(value: Record<string, unknown>): boolean {
+  if (value.generatedImages !== undefined && !parseGeneratedImagePaths(value.generatedImages))
+    return false;
   if (value.rtk !== undefined && !parseRtkToolStats(value.rtk)) return false;
   if (value.approvalReview !== undefined && !parseApprovalReviewRecord(value.approvalReview))
     return false;
@@ -3895,6 +3903,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
     case 'set-privacy-masking':
       return hasExactKeys(value, ['type', 'settings']) &&
         JSON.stringify(parsePrivacyMaskSettings(value.settings)) === JSON.stringify(value.settings)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-image-generation-config':
+      return hasOnlyKeys(value, ['type', 'config', 'error']) &&
+        (value.config === null || parseImageGenerationConfig(value.config) !== null) &&
+        (value.error === undefined ||
+          (typeof value.error === 'string' && value.error.length <= 1024))
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-web-search-config':

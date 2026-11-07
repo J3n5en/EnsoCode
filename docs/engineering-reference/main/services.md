@@ -23,7 +23,21 @@
 - worker `exit` 时向 Renderer 广播 `worker-exited`（全部会话视为 failed），
   **不自动重启**——重启牵出 jsonl 恢复，是独立一刀。
 - pi 的全局目录与会话目录经 `ENSO_AGENT_DATA_DIR` 指到 `userData/agent/`，
-  不碰用户的 `~/.pi`。
+  不碰用户的 `~/.pi` 配置。ImageGen 按产品约定将生成图片单独写入
+  `~/.pi/scratch/<Pi Session ID>/`，该输出目录不随 `ENSO_AGENT_DATA_DIR` 重定向。
+- ImageGen 使用独立的 `imageGenerationModel` 设置；Main 校验模型启用状态、
+  `imageGeneration` 标记、API Key 和协议后下发 worker。配置变更及 worker ready
+  都要推送，失效配置显式清空，不回退到聊天模型。只有图片写入完成后才能返回
+  `index/status/path/mimeType`；成功图片同时作为标准 image content 返回，进入模型上下文和
+  JSONL 会话历史。JSON 回执只含状态和路径，密钥不进入结果。codemode 自动将嵌套 ImageGen
+  的图片附件合入父工具结果，不依赖脚本显式输出。
+  `imageContext` 保留最近一个含图片的生成结果供后续追问，较早的生成图转成占位，
+  不改 JSONL；完整上下文压缩仍按会话的现有策略处理。回归见
+  `imageGeneration/sessionImages.test.ts`、`tools/imageGen.test.ts` 和 `imageContext.test.ts`。
+- 生图网络层配套使用同版本的 `undici.fetch`、dispatcher 和 `FormData`，避免 Node
+  内置旧版 fetch handler / multipart 实现与 undici 8 不兼容；协议测试应包含真实本地 HTTP 请求。
+- SSH 会话的生图参考图始终从宿主机读取，不能用远端 cwd 免除本机文件审批；
+  输出目录在写入前后复核路径和身份，供应商请求期间发生目录替换时拒绝保存。
 - **代理要在 worker 里单独装 dispatcher**：Node `fetch` 不读 `HTTP_PROXY` env，光把 env
   传进 fork 没用。两条腿缺一不可：worker 入口先 `bootstrapWorkerProxyFromEnv()` 按继承 env
   自举；main 在 `spawn` 后按 `process.env` 补发一次 `set-proxy-env`（fork 前 `ProxyConfig`
