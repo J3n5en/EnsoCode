@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createViewBridge,
   decodeUtf8Base64,
+  viewEventPush,
   viewStoragePatch,
   viewThemeNotice,
   viewThemePush,
@@ -59,5 +60,13 @@ describe('侧栏页面桥', () => {
     expect(viewThemeNotice(viewThemePush('light'))).toBe('light');
     expect(viewThemeNotice({ type: 'enso-theme', theme: 'blue' })).toBeNull();
     expect(viewThemeNotice({ id: 1, ok: true, value: null })).toBeNull();
+  });
+
+  it('侧栏事件原样带上名字和数据', () => {
+    expect(viewEventPush('snapshot', { n: 1 })).toEqual({
+      type: 'enso-view-event',
+      name: 'snapshot',
+      data: { n: 1 },
+    });
   });
 });

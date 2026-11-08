@@ -99,7 +99,7 @@
 | --- | --- | --- |
 | `agent.tool` | 有 `agentTools` | 注册 Agent 工具 |
 | `ui.slot` | 有 `renderer` 或 `triggers` | 渲染模块、补全来源 |
-| `ui.view` | 有 `views` | 侧栏页面 |
+| `ui.view` | 有 `views` | 侧栏页面，以及 `enso.ui.view.emit` |
 | `ui.notify` | 要发系统通知 | `enso.ui.notify` |
 | `composer.draft` | 要读写输入框 | `enso.composer.*` |
 | `fs.read` / `fs.write` | 声明了对应范围 | 读写当前会话的项目文件 |
@@ -240,6 +240,7 @@ export async function activate(enso) {
 | `fs.readText(path)` / `fs.writeText(path, text)` | 路径相对当前会话的项目根 |
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
+| `ui.view.emit(name, data?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，所以 Agent 工具里也能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
 | `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |
@@ -445,6 +446,7 @@ export function onLoad(enso) {
 
 - `enso.theme`：`'light'` 或 `'dark'`，当前主题。`<html>` 上的 `data-theme` 会随宿主主题一起变。
 - `enso.onTheme(listener)`：主题变化时调用 `listener(theme)`，返回取消订阅的函数。打开页面时不会立刻回调，当前值读 `enso.theme`。
+- `enso.on(name, listener)`：主进程 `enso.ui.view.emit` 的同名事件到达时调用 `listener(data)`，返回取消订阅的函数。只发给本插件自己的侧栏页面。
 - `enso.call(method, args)`：调用本插件 `renderer.handle` 注册的方法，返回 Promise。
 - `enso.storage.get(key)` / `set(key, value)` / `remove(key)`：页面状态，关闭重开后仍在。值按字符串保存。页面里的 `localStorage` 是另一份包装，方法名是标准的 `getItem` / `setItem` / `removeItem` / `clear`，读写同一份数据。读取是同步的（打开页面时的快照加本页写入），写入异步保存。每个插件合计不超过 1MB，卸载时删除。
 

@@ -5,6 +5,7 @@ import {
   createViewBridge,
   decodeUtf8Base64,
   usePluginViews,
+  viewEventPush,
   viewStoragePatch,
   viewThemePush,
 } from './viewBridge';
@@ -55,6 +56,14 @@ export function PluginView({
     themeObserver.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['class'],
+    });
+    const unsubscribeViewEvent = window.electronAPI.extensionPlugins.onViewEvent((event) => {
+      if (event.pluginId !== pluginId || typeof event.name !== 'string') return;
+      try {
+        channel?.port1.postMessage(viewEventPush(event.name, event.data));
+      } catch {
+        /* 端口已关闭 */
+      }
     });
     const handle = createViewBridge(async (method, args) => {
       const res = await window.electronAPI.extensionPlugins.call({
@@ -113,6 +122,7 @@ export function PluginView({
     return () => {
       disposed = true;
       themeObserver.disconnect();
+      unsubscribeViewEvent();
       window.removeEventListener('message', onReady);
       channel?.port1.close();
       frame.removeAttribute('src');

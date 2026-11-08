@@ -35,6 +35,9 @@ const MAX_CLIPBOARD_BYTES = 1024 * 1024;
 const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 const INJECT_PER_WINDOW = 5;
 const INJECT_WINDOW_MS = 10_000;
+const VIEW_EVENT_PER_SECOND = 20;
+const VIEW_EVENT_NAME = /^[a-z][a-z0-9._-]{0,63}$/;
+const MAX_VIEW_EVENT_BYTES = 256 * 1024;
 /** 会话被唤起后等它就绪：worker 冷启动要加载 runtime/skill/MCP，可能十几秒 */
 const WAKE_READY_MS = 60_000;
 const WAKE_POLL_MS = 250;
@@ -132,6 +135,8 @@ export interface GateDeps {
   ): Promise<unknown>;
   clipboard?(text: string): void;
   openExternal?(url: string): Promise<void> | void;
+  /** 把事件广播到该插件已打开的侧栏页面 */
+  viewEvent?(pluginId: string, name: string, data: unknown): void;
   registerContrib?(pluginId: string, input: Record<string, unknown>): void;
   unregisterContrib?(pluginId: string, input: Record<string, unknown>): void;
   capabilities?(): PluginHostCapabilities;
@@ -276,6 +281,7 @@ async function readLimitedBody(response: Response): Promise<Buffer> {
 export class PluginHostGate {
   readonly invocations: InvocationTable;
   private readonly injects = new Map<string, number[]>();
+  private readonly viewEvents = new Map<string, number[]>();
 
   constructor(private readonly deps: GateDeps) {
     this.invocations = new InvocationTable(deps.now);
@@ -288,6 +294,16 @@ export class PluginHostGate {
     if (recent.length >= INJECT_PER_WINDOW) throw pluginError('RATE_LIMITED', '注入消息过于频繁');
     recent.push(now);
     this.injects.set(pluginId, recent);
+  }
+
+  /** 每个插件每秒最多 20 条，避免 agent 把侧栏刷爆 */
+  private admitViewEvent(pluginId: string): void {
+    const now = this.deps.now();
+    const recent = (this.viewEvents.get(pluginId) ?? []).filter((t) => now - t < 1000);
+    if (recent.length >= VIEW_EVENT_PER_SECOND)
+      throw pluginError('RATE_LIMITED', '侧栏事件过于频繁');
+    recent.push(now);
+    this.viewEvents.set(pluginId, recent);
   }
 
   /**
@@ -378,6 +394,24 @@ export class PluginHostGate {
         const body = typeof a.body === 'string' ? a.body.slice(0, 1000) : '';
         if (!this.deps.notify(a.title, body))
           throw pluginError('UNSUPPORTED', '当前环境不支持系统通知');
+        return null;
+      }
+      case 'ui.viewEvent': {
+        permit('ui.view');
+        invocation();
+        if (typeof a.name !== 'string' || !VIEW_EVENT_NAME.test(a.name))
+          throw pluginError('INVALID_ARGS', 'name 不合法');
+        let encoded: string;
+        try {
+          encoded = JSON.stringify(a.data === undefined ? null : a.data);
+        } catch {
+          throw pluginError('INVALID_ARGS', 'data 不能序列化');
+        }
+        if (encoded === undefined || utf8Bytes(encoded) > MAX_VIEW_EVENT_BYTES)
+          throw pluginError('TOO_LARGE', '侧栏事件超过 256KB');
+        if (!this.deps.viewEvent) throw pluginError('UNSUPPORTED', '当前环境不能更新侧栏');
+        this.admitViewEvent(pluginId);
+        this.deps.viewEvent(pluginId, a.name, JSON.parse(encoded) as unknown);
         return null;
       }
       case 'composer.readDraft':

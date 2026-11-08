@@ -61,12 +61,16 @@ function bootShell() {
     push(theme: 'light' | 'dark') {
       portHandler?.({ data: viewThemePush(theme) });
     },
+    pushEvent(name: string, data: unknown) {
+      portHandler?.({ data: { type: 'enso-view-event', name, data } });
+    },
   };
 }
 
 interface ShellEnso {
   theme: string;
   onTheme(listener: (theme: string) => void): () => void;
+  on(name: string, listener: (data: unknown) => void): () => void;
 }
 
 describe('侧栏页面主题', () => {
@@ -93,5 +97,20 @@ describe('侧栏页面主题', () => {
     shell.push('dark');
     shell.push('light');
     expect(seen).toEqual(['dark']);
+  });
+
+  it('把主进程事件交给同名订阅', () => {
+    const shell = bootShell();
+    const seen: unknown[] = [];
+    const unsubscribe = shell.enso.on('snapshot', (data) => seen.push(data));
+    shell.enso.on('snapshot', () => {
+      throw new Error('bad listener');
+    });
+    shell.pushEvent('other', { n: 0 });
+    shell.pushEvent('snapshot', { n: 1 });
+    expect(seen).toEqual([{ n: 1 }]);
+    unsubscribe();
+    shell.pushEvent('snapshot', { n: 2 });
+    expect(seen).toEqual([{ n: 1 }]);
   });
 });

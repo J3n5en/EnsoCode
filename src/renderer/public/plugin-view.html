@@ -30,6 +30,18 @@
         let theme = 'light';
         const pending = new Map();
         const themeListeners = new Set();
+        const eventListeners = new Map();
+        const emitView = (name, data) => {
+          const set = eventListeners.get(name);
+          if (!set) return;
+          for (const listener of [...set]) {
+            try {
+              listener(data);
+            } catch {
+              /* 单个订阅失败不影响其余 */
+            }
+          }
+        };
         const applyTheme = (next) => {
           const value = next === 'dark' ? 'dark' : 'light';
           const changed = value !== theme;
@@ -99,6 +111,17 @@
               themeListeners.add(listener);
               return () => themeListeners.delete(listener);
             },
+            on(name, listener) {
+              if (typeof name !== 'string' || name.length === 0 || typeof listener !== 'function')
+                return () => {};
+              let set = eventListeners.get(name);
+              if (!set) {
+                set = new Set();
+                eventListeners.set(name, set);
+              }
+              set.add(listener);
+              return () => set.delete(listener);
+            },
             call(method, args) {
               if (!port) return Promise.reject(new Error('bridge not ready'));
               const id = ++seq;
@@ -140,6 +163,10 @@
             const reply = message.data;
             if (reply && reply.type === 'enso-theme') {
               if (reply.theme === 'dark' || reply.theme === 'light') applyTheme(reply.theme);
+              return;
+            }
+            if (reply && reply.type === 'enso-view-event') {
+              if (typeof reply.name === 'string') emitView(reply.name, reply.data);
               return;
             }
             const entry = reply && pending.get(reply.id);

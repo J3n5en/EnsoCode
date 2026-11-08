@@ -1006,6 +1006,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_CALL: excluded('Enso 插件运行期调用：命令、挂件、侧栏页面与补全。'),
   EXTENSION_PLUGINS_ASSET: excluded('Enso 插件渲染资源读取：只收插件 id 与相对路径。'),
   EXTENSION_PLUGINS_DRAFT_REQUEST: excluded('Enso 插件草稿请求：Main 推给发起手势的窗口。'),
+  EXTENSION_PLUGINS_VIEW_EVENT: excluded('Enso 插件侧栏事件：Main 推给已打开的侧栏页面。'),
   EXTENSION_PLUGINS_DRAFT_RESPONSE: excluded('Enso 插件草稿请求的回包。'),
   EXTENSION_PLUGINS_CONFIG_GET: excluded('Enso 插件配置项读取：密钥只报告是否已设置。'),
   EXTENSION_PLUGINS_CONFIG_SET: excluded('Enso 插件配置项写入，Main 私有文件保存。'),

@@ -13,7 +13,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import { readSettings } from '../../ipc/settings';
 import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { remoteLeaderId } from '../remoteRenderer/senders';
-import { localMainContents, rendererById } from '../renderers';
+import { broadcastToRenderers, localMainContents, rendererById } from '../renderers';
 import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
 import type { GateDeps } from './gate';
@@ -151,6 +151,9 @@ export function getExtensionPlugins(): ExtensionPluginService {
         if (!notification.isSupported()) return false;
         notification.show({ title, body });
         return true;
+      },
+      viewEvent: (pluginId, name, data) => {
+        broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_EVENT, { pluginId, name, data });
       },
       composer: (target, op, payload) =>
         getDraftBroker().request(target.origin, target.sessionId, op, payload),

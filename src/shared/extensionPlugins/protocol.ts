@@ -111,6 +111,8 @@ export const PLUGIN_HOST_APIS = [
   'fs.writeText',
   'net.fetch',
   'ui.notify',
+  /** 推一条事件到本插件已打开的侧栏页面；args { name, data } */
+  'ui.viewEvent',
   'composer.readDraft',
   'composer.insertText',
   'composer.replaceDraft',

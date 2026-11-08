@@ -53,6 +53,14 @@ export function viewThemePush(theme: 'light' | 'dark'): {
   return { type: 'enso-theme', theme };
 }
 
+/** 插件主进程推给自己侧栏页面的事件 */
+export function viewEventPush(
+  name: string,
+  data: unknown
+): { type: 'enso-view-event'; name: string; data: unknown } {
+  return { type: 'enso-view-event', name, data };
+}
+
 /** 宿主经端口推来的主题；不是主题消息时返回 null */
 export function viewThemeNotice(data: unknown): 'light' | 'dark' | null {
   if (typeof data !== 'object' || data === null) return null;

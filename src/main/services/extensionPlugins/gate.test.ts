@@ -418,6 +418,40 @@ describe('PluginHostGate', () => {
     });
   });
 
+  it('有 ui.view 时不需要手势就能把事件交给宿主', async () => {
+    const viewEvent = vi.fn();
+    deps.viewEvent = viewEvent;
+    deps.manifest = (id) =>
+      id === 'a.b' ? manifest({ permissions: ['ui.view', 'ui.notify'] }) : null;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.viewEvent', { name: 'snapshot', data: { n: 1 } }, agentCall())
+    ).resolves.toBeNull();
+    expect(viewEvent).toHaveBeenCalledWith('a.b', 'snapshot', { n: 1 });
+  });
+
+  it('没有 ui.view、名字不合法或数据过大时拒绝侧栏事件', async () => {
+    deps.viewEvent = vi.fn();
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.viewEvent', { name: 'snapshot', data: null }, agentCall())
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+
+    deps.manifest = (id) => (id === 'a.b' ? manifest({ permissions: ['ui.view'] }) : null);
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.viewEvent', { name: 'Snapshot', data: null }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(
+      gate.handle(
+        'a.b',
+        'ui.viewEvent',
+        { name: 'snapshot', data: 'x'.repeat(300_000) },
+        agentCall()
+      )
+    ).rejects.toMatchObject({ code: 'TOO_LARGE' });
+  });
+
   it('草稿读写需要用户手势，令牌 30 秒后过期', async () => {
     await expect(gate.handle('a.b', 'composer.readDraft', {}, agentCall())).rejects.toMatchObject({
       code: 'GESTURE_REQUIRED',

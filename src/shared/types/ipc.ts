@@ -576,6 +576,8 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_ASSET: 'extension-plugins:asset',
   /** Main → 发起窗口：插件读写草稿的请求；只发给发起手势的那个窗口 */
   EXTENSION_PLUGINS_DRAFT_REQUEST: 'extension-plugins:draft-request',
+  /** Main → 所有界面：插件推给自己侧栏页面的事件 */
+  EXTENSION_PLUGINS_VIEW_EVENT: 'extension-plugins:view-event',
   /** 渲染进程对草稿请求的回包，Main 校验回包窗口与发起窗口一致 */
   EXTENSION_PLUGINS_DRAFT_RESPONSE: 'extension-plugins:draft-response',
   /** 插件配置项：读（密钥不回显）与写；只在本机界面或服务端 CLI 上做 */
