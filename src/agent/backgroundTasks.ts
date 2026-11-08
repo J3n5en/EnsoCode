@@ -668,9 +668,26 @@ export function shellSleepHint(command: string): string {
   );
 }
 
+const TIMEOUT_HINT_MIN_SEC = SHELL_LIMITS.yieldDefaultMs / 1000;
+
+/**
+ * 前台显式 timeout 的提示：模型常把 timeout 当成「等这么久」，其实它只杀进程、不延长让位。
+ * 达到默认让位时长才提示，短 timeout 是在提前杀，不误伤。
+ */
+export function shellTimeoutHint(timeoutSec: number | undefined): string {
+  if (timeoutSec === undefined || timeoutSec < TIMEOUT_HINT_MIN_SEC) return '';
+  return (
+    'timeout only kills the process; it does not keep this call in the foreground. ' +
+    'If the command may outlast the yield, set background: true and end your turn — completion wakes you. ' +
+    'Do not poll with sleep, ps, pgrep, or task_output loops.'
+  );
+}
+
 /** 把提示附在工具结果前面：规则写进结果里才不会在长会话中被冲淡 */
-function withCommandHints<T>(result: T, command: string): T {
-  const hint = [shellReadHint(command), shellSleepHint(command)].filter(Boolean).join('\n');
+function withCommandHints<T>(result: T, command: string, timeoutSec?: number): T {
+  const hint = [shellReadHint(command), shellSleepHint(command), shellTimeoutHint(timeoutSec)]
+    .filter(Boolean)
+    .join('\n');
   if (!hint) return result;
   const content = (result as { content?: Array<{ type?: string; text?: string }> }).content;
   if (!Array.isArray(content)) return result;
@@ -833,14 +850,16 @@ export function withBackground(
         description:
           'Seconds after which the command is killed. It does not make this call wait longer: a ' +
           'foreground command still running at its yield point continues as a background job and is ' +
-          'still killed at this limit. Omit for no limit. Not applied when background=true.',
+          'still killed at this limit. Do not set timeout to wait — use background: true. ' +
+          'Omit for no kill limit. Not applied when background=true.',
       },
       background: {
         type: 'boolean',
         description:
-          'Run in the background and return immediately with a job id. Required for anything that ' +
-          'does not exit on its own (dev servers, watch modes, tail -f) — run in the foreground they ' +
-          `are moved to the background after ~${yieldSec(limits.yieldServerMs)}s anyway. ` +
+          'Run in the background and return immediately with a job id. Use this whenever the command ' +
+          `may outlast the foreground yield (~${yieldSec(limits.yieldDefaultMs)}s; ` +
+          `~${yieldSec(limits.yieldBuildMs)}s for builds/tests; servers/watchers ~${yieldSec(limits.yieldServerMs)}s). ` +
+          'Required for anything that does not exit on its own (dev servers, watch modes, tail -f). ' +
           'You will be notified automatically when it finishes — do not poll or sleep-wait; end your turn instead.',
       },
     },
@@ -859,15 +878,19 @@ export function withBackground(
       'kills the command when reached. There is no interactive input: password prompts, ' +
       'confirmations and editors fail immediately, so use non-interactive flags. ' +
       'Read files with read (offset/limit) instead of cat/head/tail/sed/nl; ' +
-      'search with grep and locate with find instead of running rg/grep/find in a shell command.',
+      'search with grep and locate with find instead of running rg/grep/find in a shell command. ' +
+      'Do not poll a running job with sleep, ps, pgrep, top, or task_output loops. ' +
+      'If you already know the command will outlast the yield, set background: true instead of a large timeout.',
     promptSnippet:
       `${name}: run shell commands as tracked jobs. Anything that can outlive the call must use ` +
-      `background=true. Foreground calls yield back with a receipt at ~${yieldSec(limits.yieldServerMs)}–` +
-      `${yieldSec(limits.yieldBuildMs)}s depending on the command, instead of blocking the turn.`,
+      `background=true. timeout only kills; it does not extend the wait. Foreground calls yield back ` +
+      `with a receipt at ~${yieldSec(limits.yieldServerMs)}–${yieldSec(limits.yieldBuildMs)}s ` +
+      `depending on the command, instead of blocking the turn.`,
     promptGuidelines: [
       ...(definition.promptGuidelines ?? []),
       `Never background a command with &, nohup, setsid or disown — set background: true on ${name}, which tracks the job and wakes you when it ends.`,
       `A ${name} yield receipt means the command is still running as a background job, not that it failed: do not rerun it and do not poll it (task_output loops, sleep) — continue other work or end your turn; its completion wakes you automatically.`,
+      `timeout only kills — it does not extend the foreground wait. If a command may outlast the yield (~${yieldSec(limits.yieldDefaultMs)}s; ~${yieldSec(limits.yieldBuildMs)}s for builds), set background: true from the start and end your turn. Never poll with sleep, ps, pgrep, or task_output loops.`,
     ],
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
@@ -954,7 +977,7 @@ export function withBackground(
       try {
         // timeout 原样下传：只作截止（到点杀），让位由 ForegroundCommand 按分类计时
         const result = await definition.execute(toolCallId, params, callSignal, onUpdate, ctx);
-        return withCommandHints(withFailureNote(result), command);
+        return withCommandHints(withFailureNote(result), command, deadlineSec);
       } catch (error) {
         if (error instanceof ForegroundDetachedError) {
           return detachedResult(error, {
