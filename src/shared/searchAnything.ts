@@ -173,6 +173,11 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Collapse finished activity while replying',
   },
   {
+    id: 'appearance.liveActivityFoldDelaySec',
+    category: 'appearance',
+    title: 'Wait before folding',
+  },
+  {
     id: 'appearance.pinUnfinishedTodos',
     category: 'appearance',
     title: 'Pin unfinished todos',

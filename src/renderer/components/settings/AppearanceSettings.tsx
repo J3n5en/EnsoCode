@@ -6,6 +6,7 @@ import {
   type ChatTypographyRole,
   type ChatTypographyWeight,
 } from '@shared/chatTypography';
+import { liveActivityFoldDelaySec as normalizeLiveActivityFoldDelaySec } from '@shared/liveActivityFoldDelay';
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from '@shared/localImage';
 import { resolveTheme } from '@shared/theme/themeKey';
 import {
@@ -775,6 +776,59 @@ function ChatTypographyCard() {
   );
 }
 
+function LiveFoldDelayRow({
+  seconds,
+  onCommit,
+}: {
+  seconds: number;
+  onCommit: (value: number) => void;
+}) {
+  const { t } = useI18n();
+  const [draft, setDraft] = React.useState(String(seconds));
+  React.useEffect(() => setDraft(String(seconds)), [seconds]);
+  const commit = () => {
+    const value = Number(draft);
+    if (!Number.isInteger(value)) {
+      setDraft(String(seconds));
+      return;
+    }
+    const next = normalizeLiveActivityFoldDelaySec(value);
+    onCommit(next);
+    setDraft(String(next));
+  };
+  return (
+    <div
+      className="ml-6 flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      data-settings-row="appearance.liveActivityFoldDelaySec"
+    >
+      <div className="min-w-0">
+        <p className="text-sm">{t('Wait before folding')}</p>
+        <p className="text-xs text-muted-foreground">
+          {t('Seconds to wait after tools and thinking finish')}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min={1}
+          max={60}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              commit();
+              event.currentTarget.blur();
+            }
+          }}
+          className="w-20"
+        />
+        <span className="text-sm text-muted-foreground">{t('sec')}</span>
+      </div>
+    </div>
+  );
+}
+
 function ConversationDisplaySection() {
   const { t } = useI18n();
   const openChangesOnFileEdit = useSettingsStore((s) => s.openChangesOnFileEdit);
@@ -791,6 +845,8 @@ function ConversationDisplaySection() {
   const setCollapseCompletedActivity = useSettingsStore((s) => s.setCollapseCompletedActivity);
   const collapseLiveActivity = useSettingsStore((s) => s.collapseLiveActivity);
   const setCollapseLiveActivity = useSettingsStore((s) => s.setCollapseLiveActivity);
+  const liveActivityFoldDelaySec = useSettingsStore((s) => s.liveActivityFoldDelaySec);
+  const setLiveActivityFoldDelaySec = useSettingsStore((s) => s.setLiveActivityFoldDelaySec);
   const pinUnfinishedTodos = useSettingsStore((s) => s.pinUnfinishedTodos);
   const setPinUnfinishedTodos = useSettingsStore((s) => s.setPinUnfinishedTodos);
   const navRailSide = useSettingsStore((s) => s.navRailSide);
@@ -862,6 +918,12 @@ function ConversationDisplaySection() {
           checked={collapseLiveActivity}
           onChange={setCollapseLiveActivity}
         />
+        {collapseLiveActivity ? (
+          <LiveFoldDelayRow
+            seconds={liveActivityFoldDelaySec}
+            onCommit={setLiveActivityFoldDelaySec}
+          />
+        ) : null}
         <SwitchRow
           rowId="appearance.pinUnfinishedTodos"
           title={t('Pin unfinished todos')}

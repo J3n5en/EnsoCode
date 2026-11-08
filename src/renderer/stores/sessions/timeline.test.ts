@@ -3185,7 +3185,7 @@ describe('foldTimeline 回答完成后折叠过程（collapseCompletedActivity�
 
 describe('过程中折叠已完成的调用', () => {
   type Group = Extract<TimelineItem, { kind: 'tool-group' }>;
-  const prep = { collapseLiveActivity: true as const };
+  const prep = { collapseLiveActivity: true as const, liveActivityFoldDelaySec: 2 };
   const kinds = (items: TimelineItem[]) =>
     items.map((item) => (item.kind === 'tool' ? item.name : item.kind));
   const timed = (item: TimelineItem, durationMs: number): TimelineItem =>
@@ -3214,6 +3214,18 @@ describe('过程中折叠已完成的调用', () => {
     expect(first.wakeAt).toBe(3_000);
     expect([...first.released]).toEqual([]);
     expect(kinds(folded(items, first.released))).toEqual(['user', 'bash', 'read']);
+  });
+
+  it('没写等待秒数时默认等 5 秒', () => {
+    const items = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(
+      items,
+      true,
+      { collapseLiveActivity: true },
+      EMPTY_ACTIVITY_WITNESS,
+      1_000
+    );
+    expect(first.wakeAt).toBe(6_000);
   });
 
   it('新开关：到点后这一轮仍在跑，也折成过程组', () => {

@@ -475,6 +475,9 @@ export const zhTranslations: Record<string, string> = {
   'Auto-collapse previous turns': '自动折叠历史轮次',
   'Collapse activity after reply': '回答完成后折叠过程',
   'Collapse finished activity while replying': '过程中折叠已完成的调用',
+  'Wait before folding': '折叠前等待',
+  'Seconds to wait after tools and thinking finish': '工具和思考都结束后再等这么多秒',
+  sec: '秒',
   'Pin unfinished todos': '固定显示未完成待办',
   'Turn marks': '轮次刻度',
   'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.':

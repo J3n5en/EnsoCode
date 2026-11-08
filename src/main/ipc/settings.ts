@@ -97,6 +97,7 @@ export const SETTINGS_STATE_FIELDS = [
   'autoCollapseTurns',
   'collapseCompletedActivity',
   'collapseLiveActivity',
+  'liveActivityFoldDelaySec',
   'pinUnfinishedTodos',
   'chatWide',
   'navRailSide',

@@ -1,5 +1,6 @@
 import type { ApprovalReviewRecord } from '@shared/approvalReviewRecord';
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
+import { liveActivityFoldDelayMs } from '@shared/liveActivityFoldDelay';
 import { IMAGE_EXTENSIONS, mediaExtension } from '@shared/localImage';
 import { type MaskReport, mergeMaskReports } from '@shared/privacyMask/report';
 import { firstProgram, isReadOnlyCommand } from '@shared/readOnlyCommand';
@@ -1729,9 +1730,6 @@ function activitySegment(
   return expanded ? [group, ...segment.flatMap(withExploreChildren)] : [group];
 }
 
-/** 过程中的尾段安静下来之后再等多久才收。不是设置项，只有 nextActivityRelease 读它。 */
-export const ACTIVITY_FOLD_DELAY_MS = 2000;
-
 export interface ActivityWitness {
   /** 还没折进去的后缀。后缀一变就重新计时，已经折起的前缀不重开。 */
   readonly signature: string;
@@ -1760,6 +1758,8 @@ export interface TimelinePrep {
   collapseCompletedActivity?: boolean;
   /** 这一轮还在跑时，也把已经结束的尾段收成过程组 */
   collapseLiveActivity?: boolean;
+  /** 尾段安静后等多久再折，单位秒。缺省 5，超出 1–60 会被收窄 */
+  liveActivityFoldDelaySec?: number;
 }
 
 export type TimelineFoldOptions = TimelinePrep & {
@@ -1915,7 +1915,7 @@ export function nextActivityRelease(
   const signature = pending.join('\0');
   const same = prev.signature === signature && prev.closedAt !== null;
   const at = same ? prev.closedAt : now;
-  const due = at + ACTIVITY_FOLD_DELAY_MS;
+  const due = at + liveActivityFoldDelayMs(prep.liveActivityFoldDelaySec);
   if (now < due) {
     return { witness: { signature, closedAt: at, held }, released: releasedNow, wakeAt: due };
   }

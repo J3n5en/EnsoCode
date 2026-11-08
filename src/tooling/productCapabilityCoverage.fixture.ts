@@ -109,6 +109,9 @@ export const SETTINGS_DATA_COVERAGE = {
     'Renderer timeline collapse preference; not an Enso capability.'
   ),
   collapseLiveActivity: excluded('Renderer timeline collapse preference; not an Enso capability.'),
+  liveActivityFoldDelaySec: excluded(
+    'Renderer timeline collapse delay preference; not an Enso capability.'
+  ),
   pinUnfinishedTodos: excluded('Renderer pinned todo bar preference; not an Enso capability.'),
   chatWide: excluded('Renderer chat column width preference; not an Enso capability.'),
   navRailSide: excluded('Renderer turn-mark position preference; not an Enso capability.'),
@@ -284,6 +287,9 @@ export const SETTINGS_ACTION_COVERAGE = {
   ),
   setCollapseLiveActivity: excluded(
     'Renderer timeline collapse preference; not an Enso capability.'
+  ),
+  setLiveActivityFoldDelaySec: excluded(
+    'Renderer timeline collapse delay preference; not an Enso capability.'
   ),
   setPinUnfinishedTodos: excluded('Renderer pinned todo bar preference; not an Enso capability.'),
   setChatWide: excluded('Renderer chat column width preference; not an Enso capability.'),

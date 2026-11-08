@@ -107,6 +107,7 @@ const STATE_KEYS = [
   'autoCollapseTurns',
   'collapseCompletedActivity',
   'collapseLiveActivity',
+  'liveActivityFoldDelaySec',
   'pinUnfinishedTodos',
   'chatWide',
   'navRailSide',
@@ -1044,6 +1045,7 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
   numberField(state, 'maxActiveCoworkers', 'state', 1, 20, true);
   numberField(state, 'autoRetryLimit', 'state', -1, 100, true);
   numberField(state, 'generationStallTimeoutMin', 'state', 0, 120, true);
+  numberField(state, 'liveActivityFoldDelaySec', 'state', 1, 60, true);
   numberField(state, 'autoArchiveIdleDays', 'state', 0, 90, true);
   numberField(state, 'autoDeleteArchivedDays', 'state', 0, 90, true);
   numberField(state, 'activeRetentionMinutes', 'state', 0, 120, true);

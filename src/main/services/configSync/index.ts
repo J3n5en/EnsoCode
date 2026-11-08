@@ -130,6 +130,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   autoCollapseTurns: { mode: 'portable' },
   collapseCompletedActivity: { mode: 'portable' },
   collapseLiveActivity: { mode: 'portable' },
+  liveActivityFoldDelaySec: { mode: 'portable' },
   pinUnfinishedTodos: { mode: 'portable' },
   chatWide: { mode: 'portable' },
   navRailSide: { mode: 'portable' },

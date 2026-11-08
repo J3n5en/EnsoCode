@@ -230,6 +230,8 @@ export interface SettingsState {
   collapseCompletedActivity: boolean;
   /** 这一轮还在跑时，工具和思考都结束后再把尾段折成一行；缺省关 */
   collapseLiveActivity: boolean;
+  /** 过程中折叠的等待秒数，1–60，缺省 5。开关关闭时界面不显示 */
+  liveActivityFoldDelaySec: number;
   /** 输入框上方固定显示最新 todo 清单（仍有未完成项时）；缺省 true */
   pinUnfinishedTodos: boolean;
   /** 聊天列铺满：去掉两侧阶梯 max-w；缺省 false（居中阅读宽度） */
@@ -432,6 +434,7 @@ export interface SettingsState {
   setAutoCollapseTurns: (value: boolean) => void;
   setCollapseCompletedActivity: (value: boolean) => void;
   setCollapseLiveActivity: (value: boolean) => void;
+  setLiveActivityFoldDelaySec: (value: number) => void;
   setPinUnfinishedTodos: (value: boolean) => void;
   setChatWide: (value: boolean) => void;
   setNavRailSide: (value: 'left' | 'right' | 'off') => void;

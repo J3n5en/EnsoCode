@@ -203,6 +203,7 @@ describe('buildSettingsCatalog', () => {
     'appearance.autoCollapseTurns',
     'appearance.collapseCompletedActivity',
     'appearance.collapseLiveActivity',
+    'appearance.liveActivityFoldDelaySec',
     'appearance.pinUnfinishedTodos',
     'appearance.navRailSide',
     'general.notifyMainAgentOnly',
@@ -249,6 +250,7 @@ describe('buildSettingsCatalog', () => {
       'autoCollapseTurns',
       'collapseCompletedActivity',
       'collapseLiveActivity',
+      'liveActivityFoldDelaySec',
       'pinUnfinishedTodos',
       'navRailSide',
     ];

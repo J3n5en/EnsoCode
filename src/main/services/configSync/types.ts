@@ -146,6 +146,7 @@ export interface ConfigSyncState {
   autoCollapseTurns?: boolean;
   collapseCompletedActivity?: boolean;
   collapseLiveActivity?: boolean;
+  liveActivityFoldDelaySec?: number;
   pinUnfinishedTodos?: boolean;
   chatWide?: boolean;
   navRailSide?: 'left' | 'right' | 'off';

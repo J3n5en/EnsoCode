@@ -23,6 +23,7 @@ import {
 } from '@shared/fileOpening';
 import type { Locale } from '@shared/i18n';
 import { normalizeLocale } from '@shared/i18n';
+import { liveActivityFoldDelaySec as normalizeLiveActivityFoldDelaySec } from '@shared/liveActivityFoldDelay';
 import {
   DEFAULT_MAX_ACTIVE_COWORKERS,
   normalizeMaxActiveCoworkers,
@@ -232,6 +233,7 @@ const initialState = {
   autoCollapseTurns: false,
   collapseCompletedActivity: true,
   collapseLiveActivity: false,
+  liveActivityFoldDelaySec: 5,
   pinUnfinishedTodos: true,
   chatWide: false,
   navRailSide: 'left' as const,
@@ -440,6 +442,8 @@ export const useSettingsStore = create<SettingsState>()(
       setCollapseCompletedActivity: (collapseCompletedActivity) =>
         set({ collapseCompletedActivity }),
       setCollapseLiveActivity: (collapseLiveActivity) => set({ collapseLiveActivity }),
+      setLiveActivityFoldDelaySec: (seconds) =>
+        set({ liveActivityFoldDelaySec: normalizeLiveActivityFoldDelaySec(seconds) }),
       setPinUnfinishedTodos: (pinUnfinishedTodos) => set({ pinUnfinishedTodos }),
       setChatWide: (chatWide) => {
         document.documentElement.classList.toggle('enso-chat-wide', chatWide);
