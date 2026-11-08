@@ -5,7 +5,7 @@ export interface SidebarDirectoryEntry {
   title: string;
   status: string;
   spawning: boolean;
-  /** 子会话 / subagent 仍在跑：侧栏蓝点，即使本会话 idle */
+  /** 子会话、subagent 或后台任务仍在跑时侧栏仍显示蓝点，即使本会话 idle */
   hasRunningChild?: boolean;
   pinned?: boolean;
   archived?: boolean;
@@ -24,6 +24,7 @@ export interface SidebarDirectoryEntry {
   coworkerName?: string;
   child?: { agentInstanceName?: string };
   subagents?: readonly { status: string }[];
+  backgroundTasks?: readonly { status: string }[];
   parentId?: string;
   sessionFile?: string;
   worktree?: { path?: string };
@@ -51,6 +52,7 @@ type Source = {
   coworkerName?: string;
   child?: { agentInstanceName?: string; mode?: 'task' | 'coworker' };
   subagents?: readonly { status: string }[];
+  backgroundTasks?: readonly { status: string }[];
   parentId?: string;
   sessionFile?: string;
   worktree?: { path?: string };
@@ -86,6 +88,7 @@ function project(conversation: Source, hasRunningChild: boolean): SidebarDirecto
     coworkerName: conversation.coworkerName,
     child: conversation.child,
     subagents: conversation.subagents,
+    backgroundTasks: conversation.backgroundTasks?.map(({ status }) => ({ status })),
     parentId: conversation.parentId,
     sessionFile: conversation.sessionFile,
     worktree: conversation.worktree,
@@ -119,6 +122,7 @@ export function selectSidebarConversations(
           spawning: conversation.spawning,
           subagents: conversation.subagents,
           coworkerIds: conversation.coworkerIds,
+          backgroundTasks: conversation.backgroundTasks,
         },
         conversations
       )

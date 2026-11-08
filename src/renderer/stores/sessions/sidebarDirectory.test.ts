@@ -59,6 +59,38 @@ describe('selectSidebarConversations', () => {
     expect(first.parent.hasRunningChild).toBe(false);
     expect(second.parent.hasRunningChild).toBe(true);
   });
+
+  it('父会话 idle 但有 running 后台任务时投影 hasRunningChild', () => {
+    const directory = selectSidebarConversations({
+      parent: conv('parent', {
+        status: 'idle',
+        backgroundTasks: [{ status: 'running', tail: 'log' }],
+      }),
+    });
+    expect(directory.parent.status).toBe('idle');
+    expect(directory.parent.hasRunningChild).toBe(true);
+  });
+
+  it('仅后台任务 tail 变化时复用目录，status 变为 done 时重建并翻转为 false', () => {
+    const running = (tail: string) =>
+      conv('parent', {
+        status: 'idle',
+        backgroundTasks: [{ status: 'running', tail }],
+      });
+    const first = selectSidebarConversations({ parent: running('one') });
+    const second = selectSidebarConversations({ parent: running('two') });
+    expect(second).toBe(first);
+    expect(second.parent.hasRunningChild).toBe(true);
+
+    const done = selectSidebarConversations({
+      parent: conv('parent', {
+        status: 'idle',
+        backgroundTasks: [{ status: 'done', tail: 'two' }],
+      }),
+    });
+    expect(done).not.toBe(second);
+    expect(done.parent.hasRunningChild).toBe(false);
+  });
 });
 
 describe('selectChatCandidateConversations', () => {

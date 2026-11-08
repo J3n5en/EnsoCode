@@ -5,6 +5,7 @@ type ChildActivityConversation = {
   spawning?: boolean;
   subagents?: readonly { status: string }[];
   coworkerIds?: readonly string[];
+  backgroundTasks?: readonly { status: string }[];
 };
 
 export function conversationHasRunningChild(
@@ -14,6 +15,7 @@ export function conversationHasRunningChild(
 ): boolean {
   if (!conversation) return false;
   if (conversation.subagents?.some((agent) => agent.status === 'running') === true) return true;
+  if (conversation.backgroundTasks?.some((task) => task.status === 'running') === true) return true;
   const visited = seen ?? new Set<string>();
   for (const childId of conversation.coworkerIds ?? []) {
     if (visited.has(childId)) continue;

@@ -34,6 +34,7 @@ interface SidebarConversation {
   pendingCapabilityAsks?: readonly unknown[];
   coworkerIds?: readonly string[];
   subagents?: readonly { status: string }[];
+  backgroundTasks?: readonly { status: string }[];
   worktree?: { path?: string };
 }
 

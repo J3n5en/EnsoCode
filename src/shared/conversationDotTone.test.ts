@@ -58,6 +58,29 @@ describe('conversationHasRunningChild', () => {
       })
     ).toBe(true);
   });
+
+  it('自身有 running 后台任务时有活跃子任务', () => {
+    expect(
+      conversationHasRunningChild({ status: 'idle', backgroundTasks: [{ status: 'running' }] }, {})
+    ).toBe(true);
+  });
+
+  it('后台任务均已结束时没有活跃子任务', () => {
+    expect(
+      conversationHasRunningChild(
+        { status: 'idle', backgroundTasks: [{ status: 'done' }, { status: 'failed' }] },
+        {}
+      )
+    ).toBe(false);
+  });
+
+  it('子会话 idle 但其后台任务 running 时父会话仍有活跃子任务', () => {
+    expect(
+      conversationHasRunningChild(parent, {
+        child: { status: 'idle', backgroundTasks: [{ status: 'running' }] },
+      })
+    ).toBe(true);
+  });
 });
 
 describe('conversationDotTone', () => {
