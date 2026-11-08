@@ -586,18 +586,6 @@ export function EnsoPluginsSettings({
               'Installing a plugin lets it run code on this machine. Review what it asks for before confirming.'
             )}
           </p>
-          <label className="mt-3 flex items-center gap-2 text-sm">
-            <Switch
-              checked={pluginAutoUpdate}
-              onCheckedChange={(on) => setPluginAutoUpdate?.(on)}
-            />
-            <span>
-              <span className="block">{t('Update plugins automatically')}</span>
-              <span className="block text-muted-foreground text-xs">
-                {t('Marketplace updates that do not ask for new permissions install on their own.')}
-              </span>
-            </span>
-          </label>
         </div>
         <div className="flex shrink-0 gap-2">
           {plugins.some(
@@ -619,6 +607,19 @@ export function EnsoPluginsSettings({
           </Button>
         </div>
       </div>
+      <label className="flex items-center justify-between gap-3 text-sm">
+        <span className="min-w-0">
+          <span className="block">{t('Update plugins automatically')}</span>
+          <span className="block text-muted-foreground text-xs">
+            {t('Marketplace updates that do not ask for new permissions install on their own.')}
+          </span>
+        </span>
+        <Switch
+          className="shrink-0"
+          checked={pluginAutoUpdate}
+          onCheckedChange={(on) => setPluginAutoUpdate(on)}
+        />
+      </label>
       <div className="space-y-2.5 rounded-lg border bg-muted/30 p-3">
         <div className="flex gap-2">
           <InputGroup className="flex-1">
