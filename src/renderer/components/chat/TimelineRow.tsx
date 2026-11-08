@@ -1986,6 +1986,11 @@ function SandboxOutput({
           </pre>
         )
       ) : null}
+      {view?.console ? (
+        <pre className="border-l-2 pl-2 font-mono text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          {stripAnsi(view.console)}
+        </pre>
+      ) : null}
     </div>
   );
 }

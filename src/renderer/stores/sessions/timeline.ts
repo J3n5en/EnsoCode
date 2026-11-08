@@ -389,6 +389,8 @@ export interface SandboxView {
   status: 'completed' | 'failed';
   value?: unknown;
   error?: string;
+  /** codemode 的 console.* 输出，已去掉 <console_output> 标签 */
+  console?: string;
   calls: SandboxCallView[];
 }
 
@@ -408,15 +410,26 @@ export function stripCodemodeHeader(output: string | null): string | null {
   return output.replace(CODEMODE_HEADER, '') || null;
 }
 
+const CONSOLE_BLOCK = /(?:^|\n)<console_output>\n([\s\S]*?)\n<\/console_output>(?:\n|$)/;
+
+function splitConsoleOutput(text: string): { body: string; console?: string } {
+  const match = CONSOLE_BLOCK.exec(text);
+  if (!match) return { body: text };
+  const before = text.slice(0, match.index);
+  const after = text.slice(match.index + match[0].length);
+  return { body: [before, after].filter(Boolean).join('\n'), console: match[1] };
+}
+
 export function codemodeView(
   body: string | null,
   isError: boolean,
   calls: readonly SandboxCallView[] | null
 ): SandboxView {
-  const text = body ?? '';
+  const { body: text, console: logs } = splitConsoleOutput(body ?? '');
+  const extra = logs === undefined ? {} : { console: logs };
   return isError
-    ? { status: 'failed', error: text, calls: [...(calls ?? [])] }
-    : { status: 'completed', value: text, calls: [...(calls ?? [])] };
+    ? { status: 'failed', error: text, ...extra, calls: [...(calls ?? [])] }
+    : { status: 'completed', value: text, ...extra, calls: [...(calls ?? [])] };
 }
 
 export function parseSandboxOutput(output: string | null): SandboxView | null {

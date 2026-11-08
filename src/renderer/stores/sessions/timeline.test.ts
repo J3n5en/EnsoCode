@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { applyAgentEvent, emptyProjection, type TimelineMessage } from './reducer';
 import {
   buildTimeline,
+  codemodeView,
   completedEditWriteFingerprint,
   exploreStepsKey,
   foldTimeline,
@@ -1113,6 +1114,27 @@ describe('buildTimeline', () => {
       state: 'error',
       sandbox: { status: 'failed', error: 'Script error: 1', calls: [] },
     });
+  });
+
+  it('codemode 卡片：console 块拆成独立字段并去掉标签', () => {
+    expect(codemodeView('<console_output>\nkeys [1]\n 0\n</console_output>', false, null)).toEqual({
+      status: 'completed',
+      value: '',
+      console: 'keys [1]\n 0',
+      calls: [],
+    });
+    expect(codemodeView('42\n<console_output>\na\n\nb\n</console_output>', false, null)).toEqual({
+      status: 'completed',
+      value: '42',
+      console: 'a\n\nb',
+      calls: [],
+    });
+    expect(
+      codemodeView('<console_output>\nlog\n</console_output>\nScript error:\nboom', true, null)
+    ).toEqual({ status: 'failed', error: 'Script error:\nboom', console: 'log', calls: [] });
+    // 截断后缺闭合标签：原样保留
+    const cut = '<console_output>\nlog…truncated';
+    expect(codemodeView(cut, false, null)).toEqual({ status: 'completed', value: cut, calls: [] });
   });
 
   it('codemode 运行中按 <parent>/<n> 统计嵌套待审批', () => {
