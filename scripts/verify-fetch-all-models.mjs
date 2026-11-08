@@ -115,7 +115,10 @@ async function main() {
       return true;
     })()`
   );
-  await waitFor(settings.send, `document.querySelectorAll('[data-settings-row^="providers."]').length > 1`);
+  await waitFor(
+    settings.send,
+    `document.querySelectorAll('[data-settings-row^="providers."]').length > 1`
+  );
 
   const before = await evalExpr(settings.send, readRows);
   assert.ok(before.length >= 2, `期望至少 2 个条目，实际 ${before.length}`);
