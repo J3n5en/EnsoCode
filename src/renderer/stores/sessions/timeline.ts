@@ -1729,41 +1729,66 @@ function activitySegment(
   return expanded ? [group, ...segment.flatMap(withExploreChildren)] : [group];
 }
 
-/**
- * 工具行分组折叠（折中方案）：
- * - 段 = 连续的 tool/thinking 行（text/user/error 打断）；thinking 收进段内，门槛只数 tool。
- * - 带 diff 的 edit 行不进组，紧跟组头之后平铺（改动是核心产物，不折）。
- * - 默认：running 时最后一个 user 之后的段不折（进行中的轮实时展示）。
- * - compact（对齐 Cursor 的 Explored）：段只收只读工具（read/grep/find/ls/glob），
- *   bash 等其它工具打断段并平铺；live 也折，running 只读行进组，组头标 exploring。
- * - collapseCompletedActivity（对齐 deepchat）：已完成轮次里连续的思考 + 成功工具（不分类型，
- *   含 edit/write/todo）≥2 条折成一个过程组；失败/未完成工具与目标信号打断段。进行中的轮不受影响。
- * - 成功配对的 explore_mark → explore_fold 先收成探索组：平时独立成行，完成后并入过程组。
- * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
- * 纯函数。
- */
-export function foldTimeline(
+/** 亲眼看到闭合之后再等多久才收成过程组。不是设置项，只有 nextActivityRelease 读它。 */
+export const ACTIVITY_FOLD_DELAY_MS = 2000;
+
+export interface ActivityWitness {
+  readonly seenLive: ReadonlySet<string>;
+  readonly closedAt: ReadonlyMap<string, number>;
+}
+
+export const EMPTY_ACTIVITY_WITNESS: ActivityWitness = {
+  seenLive: new Set(),
+  closedAt: new Map(),
+};
+
+export interface ActivityRelease {
+  readonly witness: ActivityWitness;
+  readonly released: ReadonlySet<string>;
+  readonly wakeAt: number | null;
+}
+
+export interface TimelinePrep {
+  compact?: boolean;
+  /** 用户显式操作过的轮次：key → 是否折叠；优先于自动折叠默认值 */
+  turnOverrides?: ReadonlyMap<string, boolean>;
+  autoCollapseCompletedTurns?: boolean;
+  collapseCompletedActivity?: boolean;
+}
+
+export type TimelineFoldOptions =
+  | (Omit<TimelinePrep, 'collapseCompletedActivity'> & {
+      collapseCompletedActivity?: false;
+    })
+  | (Omit<TimelinePrep, 'collapseCompletedActivity'> & {
+      collapseCompletedActivity: true;
+      releasedActivity: ReadonlySet<string>;
+    });
+
+/** 探索组取配对前的第一行，mark 收进 explore- 组后身份不变。 */
+function activityAnchor(row: TimelineItem): string {
+  return row.kind === 'tool-group' && row.children[0] ? row.children[0].key : row.key;
+}
+
+function isActivityMember(item: TimelineItem): boolean {
+  if (item.kind === 'tool' && item.generatedImages?.length) return false;
+  if (item.kind === 'thinking' || item.kind === 'tool-group') return true;
+  if (item.kind !== 'tool') return false;
+  return item.state === 'ok' && !item.name.startsWith('goal_') && item.name !== 'submit_plan';
+}
+
+function prepareTimeline(
   items: TimelineItem[],
   running: boolean,
   expandedKeys: ReadonlySet<string>,
-  options: {
-    compact?: boolean;
-    /** 用户显式操作过的轮次：key → 是否折叠；优先于自动折叠默认值 */
-    turnOverrides?: ReadonlyMap<string, boolean>;
-    autoCollapseCompletedTurns?: boolean;
-    collapseCompletedActivity?: boolean;
-  } = {}
-): TimelineItem[] {
-  const compact = options.compact === true;
-  const autoCollapse = options.autoCollapseCompletedTurns === true;
-  const turnOverrides = options.turnOverrides;
+  prep: TimelinePrep
+): { sourceItems: TimelineItem[]; lastUserIndex: number; liveFrom: number } {
+  const autoCollapse = prep.autoCollapseCompletedTurns === true;
+  const turnOverrides = prep.turnOverrides;
   const origLastUserIndex = items.findLastIndex(
     (item) => item.kind === 'user' && !item.deliveryState
   );
-
-  // 第一步：轮次折叠。正在生成的最新一轮不折叠，确保实时输出可见；
-  // 自动折叠只作用于历史轮次（最后一轮默认展开），显式操作优先于默认值。
-  // 压缩标记和错误行是会话状态，不随轮次隐藏。
+  // 正在生成的最新一轮不折叠。自动折叠只作用于历史轮次。压缩标记和错误行不随轮次隐藏。
   let sourceItems: TimelineItem[] = items;
   if (autoCollapse || (turnOverrides && turnOverrides.size > 0)) {
     const nextItems: TimelineItem[] = [];
@@ -1793,17 +1818,96 @@ export function foldTimeline(
     }
     sourceItems = nextItems;
   }
-  sourceItems = pairExploreFolds(sourceItems, expandedKeys, compact);
+  sourceItems = pairExploreFolds(sourceItems, expandedKeys, prep.compact === true);
   const lastUserIndex = sourceItems.findLastIndex(
     (item) => item.kind === 'user' && !item.deliveryState
   );
-  // 生成中只有最后一段正文之后的尾段仍在进行；被正文隔开的前段已完成，可立即折叠
+  // 步骤之间还没有新正文时，尾段仍算进行中。
   const liveFrom = Math.max(
     lastUserIndex,
     sourceItems.findLastIndex((item) => item.kind === 'text')
   );
+  return { sourceItems, lastUserIndex, liveFrom };
+}
+
+function segmentActivity(
+  items: TimelineItem[],
+  running: boolean,
+  prep: TimelinePrep
+): { closed: string[]; live: string[] } {
+  if (prep.collapseCompletedActivity !== true) return { closed: [], live: [] };
+  const { sourceItems, liveFrom } = prepareTimeline(items, running, new Set(), prep);
+  const closed: string[] = [];
+  const live: string[] = [];
+  const closedSet = new Set<string>();
+  const liveSet = new Set<string>();
+  let i = 0;
+  while (i < sourceItems.length) {
+    if (!isActivityMember(sourceItems[i])) {
+      i += 1;
+      continue;
+    }
+    let end = i;
+    while (end < sourceItems.length && isActivityMember(sourceItems[end])) end += 1;
+    const segment = mergeAdjacentThinking(sourceItems.slice(i, end));
+    const anchor = activityAnchor(segment[0]);
+    if (running && i > liveFrom) {
+      if (!liveSet.has(anchor)) {
+        live.push(anchor);
+        liveSet.add(anchor);
+      }
+    } else if (segment.length >= 2 && !closedSet.has(anchor)) {
+      closed.push(anchor);
+      closedSet.add(anchor);
+    }
+    i = end;
+  }
+  if (liveSet.size === 0) return { closed, live };
+  return { closed: closed.filter((anchor) => !liveSet.has(anchor)), live };
+}
+
+export function nextActivityRelease(
+  items: TimelineItem[],
+  running: boolean,
+  prep: TimelinePrep,
+  prev: ActivityWitness,
+  now: number
+): ActivityRelease {
+  const { closed, live } = segmentActivity(items, running, prep);
+  const liveSet = new Set(live);
+  const seenLive = new Set<string>();
+  const closedAt = new Map<string, number>();
+  const released = new Set<string>();
+  let wakeAt: number | null = null;
+  for (const anchor of live) seenLive.add(anchor);
+  for (const anchor of closed) {
+    if (liveSet.has(anchor)) continue;
+    if (!prev.seenLive.has(anchor)) {
+      released.add(anchor);
+      continue;
+    }
+    seenLive.add(anchor);
+    const started = prev.closedAt.get(anchor);
+    const at = started ?? now;
+    closedAt.set(anchor, at);
+    const due = at + ACTIVITY_FOLD_DELAY_MS;
+    if (now >= due) released.add(anchor);
+    else if (wakeAt === null || due < wakeAt) wakeAt = due;
+  }
+  return { witness: { seenLive, closedAt }, released, wakeAt };
+}
+
+function foldPrepared(
+  sourceItems: TimelineItem[],
+  running: boolean,
+  expandedKeys: ReadonlySet<string>,
+  compact: boolean,
+  releasedActivity: ReadonlySet<string> | null,
+  lastUserIndex: number,
+  liveFrom: number
+): TimelineItem[] {
   const activityAt = (index: number): boolean =>
-    options.collapseCompletedActivity === true && !(running && index > liveFrom);
+    releasedActivity !== null && !(running && index > liveFrom);
   const inSegment = (s: TimelineItem, index: number): boolean =>
     !(s.kind === 'tool' && s.generatedImages?.length) &&
     (s.kind === 'thinking' ||
@@ -1821,19 +1925,22 @@ export function foldTimeline(
       i += 1;
       continue;
     }
-    // 收集连续段
     let end = i;
     while (end < sourceItems.length && inSegment(sourceItems[end], end)) end += 1;
     const segment = mergeAdjacentThinking(sourceItems.slice(i, end));
-    if (activityAt(i)) {
-      result.push(...activitySegment(segment, expandedKeys));
+    if (activityAt(i) && releasedActivity) {
+      if (segment.length >= 2 && releasedActivity.has(activityAnchor(segment[0]))) {
+        result.push(...activitySegment(segment, expandedKeys));
+      } else if (compact) {
+        result.push(...foldPrepared(segment, false, expandedKeys, true, null, -1, -1));
+      } else {
+        result.push(...segment.flatMap(withExploreChildren));
+      }
       i = end;
       continue;
     }
     const liveSegment = !compact && running && lastUserIndex >= 0 && i > lastUserIndex;
-    // 钉住的行不进组：edit 的 diff、write 的内容、图片预览、todo 清单是核心产物。
-    // compact 下 running 只读行进组（避免完成后从平铺跳进组头抽动）；
-    // 非 compact 仍把 running 钉在组外，方便看此刻在跑什么。
+    // edit / write / 图片 / todo 是产物，钉在组外。compact 下 running 的只读行仍进组，避免完成后抽动。
     const pinned = (s: TimelineItem): boolean => {
       if (s.kind !== 'tool') return false;
       if (
@@ -1875,11 +1982,50 @@ export function foldTimeline(
             )),
         children: groupRows,
       });
-      // 展开：原始顺序全量平铺；收拢：仅 edit 行（diff）跟在组头后
+      // 展开：原始顺序全量平铺；收拢：仅钉住的行跟在组头后
       if (expanded) result.push(...segment);
       else result.push(...editRows);
     }
     i = end;
   }
   return result;
+}
+
+/**
+ * 工具行分组折叠（折中方案）：
+ * - 段 = 连续的 tool/thinking 行（text/user/error 打断）；thinking 收进段内，门槛只数 tool。
+ * - 带 diff 的 edit 行不进组，紧跟组头之后平铺（改动是核心产物，不折）。
+ * - 默认：running 时最后一个 user 之后的段不折（进行中的轮实时展示）。
+ * - compact（对齐 Cursor 的 Explored）：段只收只读工具（read/grep/find/ls/glob），
+ *   bash 等其它工具打断段并平铺；live 也折，running 只读行进组，组头标 exploring。
+ * - collapseCompletedActivity：位置已闭合的思考 + 成功工具（含 edit/write/todo）≥2，且 anchor 已释放，
+ *   才折成过程组。未释放时 compact 只在段内收只读组，否则平铺。失败工具与目标信号打断段。
+ *   活尾段（running 且在 liveFrom 之后）不进过程组。
+ * - 成功配对的 explore_mark → explore_fold 先收成探索组：平时独立成行，完成后并入过程组。
+ * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
+ * 纯函数。
+ */
+export function foldTimeline(
+  items: TimelineItem[],
+  running: boolean,
+  expandedKeys: ReadonlySet<string>,
+  options: TimelineFoldOptions = {}
+): TimelineItem[] {
+  const { sourceItems, lastUserIndex, liveFrom } = prepareTimeline(
+    items,
+    running,
+    expandedKeys,
+    options
+  );
+  const releasedActivity =
+    options.collapseCompletedActivity === true ? options.releasedActivity : null;
+  return foldPrepared(
+    sourceItems,
+    running,
+    expandedKeys,
+    options.compact === true,
+    releasedActivity,
+    lastUserIndex,
+    liveFrom
+  );
 }

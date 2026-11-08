@@ -843,7 +843,7 @@ function ConversationDisplaySection() {
           rowId="appearance.collapseCompletedActivity"
           title={t('Collapse activity after reply')}
           description={t(
-            'When a reply finishes, fold consecutive thinking and tool calls (including edits and commands) into one summary row; failed calls stay visible'
+            'After tools and thinking finish, wait a moment, then fold them into one row; failed calls stay visible'
           )}
           checked={collapseCompletedActivity}
           onChange={setCollapseCompletedActivity}

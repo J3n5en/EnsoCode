@@ -16,7 +16,6 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import {
-  foldTimeline,
   type HistoryPageChrome,
   historyPageChrome,
   shouldPrefetchOlderHistory,
@@ -41,6 +40,7 @@ import {
   virtuosoScrollIndex,
 } from './timelineRowOrigin';
 import { REPLY_ROW_KINDS } from './turnMeta';
+import { useFoldedTimeline } from './useFoldedTimeline';
 import { WelcomeSuggestions } from './WelcomeSuggestions';
 
 /** 消息列/输入区共用的列：阶梯 max-w + 水平 padding。padding 必须在列上而不是 @container 上，否则两侧查询宽度差 2rem，会在断点附近上下错位。宽模式由 globals.css 去掉 max-w。 */
@@ -209,24 +209,12 @@ export function MessageTimeline({
   const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
   const collapseCompletedActivity = useSettingsStore((s) => s.collapseCompletedActivity);
   const compact = useSettingsStore((s) => s.compactReadOnlyTools);
-  const folded = useMemo(
-    () =>
-      foldTimeline(items, running, expandedGroups, {
-        compact,
-        autoCollapseCompletedTurns: autoCollapseTurns,
-        collapseCompletedActivity,
-        turnOverrides,
-      }),
-    [
-      items,
-      running,
-      expandedGroups,
-      compact,
-      autoCollapseTurns,
-      collapseCompletedActivity,
-      turnOverrides,
-    ]
-  );
+  const folded = useFoldedTimeline(items, running, expandedGroups, {
+    compact,
+    autoCollapseCompletedTurns: autoCollapseTurns,
+    collapseCompletedActivity,
+    turnOverrides,
+  });
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
   const foldMotionRef = useRef({
     state: EMPTY_FOLD_MOTION,

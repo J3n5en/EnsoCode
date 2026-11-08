@@ -1,7 +1,13 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { buildTimeline, foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
+import {
+  buildTimeline,
+  EMPTY_ACTIVITY_WITNESS,
+  foldTimeline,
+  nextActivityRelease,
+  type TimelineItem,
+} from '@/stores/sessions/timeline';
 import { ReadImagePreview, TimelineRow } from './TimelineRow';
 
 const settings = vi.hoisted(() => ({ compactReadOnlyTools: false, expandLiveEdits: false }));
@@ -33,15 +39,44 @@ describe('ReadImagePreview', () => {
     );
     const item = timeline[0];
     expect(item).toMatchObject({ kind: 'tool', generatedImages: images });
-    const folded = foldTimeline(
-      [
-        { kind: 'thinking', key: 'think', text: 'thinking', streaming: false, durationMs: null },
-        item,
-      ],
+    const bash = (key: string): TimelineItem =>
+      ({
+        kind: 'tool',
+        key,
+        name: 'bash',
+        summary: key,
+        output: null,
+        state: 'ok',
+        edits: null,
+        writeContent: null,
+        todos: null,
+        durationMs: null,
+        agentMeta: null,
+      }) as TimelineItem;
+    const rows = [
+      {
+        kind: 'thinking' as const,
+        key: 'think',
+        text: 'thinking',
+        streaming: false,
+        durationMs: null,
+      },
+      bash('a'),
+      bash('b'),
+      item,
+    ];
+    const released = nextActivityRelease(
+      rows,
       false,
-      new Set(),
-      { collapseCompletedActivity: true }
-    );
+      { collapseCompletedActivity: true },
+      EMPTY_ACTIVITY_WITNESS,
+      0
+    ).released;
+    const folded = foldTimeline(rows, false, new Set(), {
+      collapseCompletedActivity: true,
+      releasedActivity: released,
+    });
+    expect(folded.some((row) => row.kind === 'tool-group')).toBe(true);
     expect(folded).toContain(item);
     const html = renderToStaticMarkup(createElement(TimelineRow, { item }));
     expect(html).toContain('src="local-image://posix/tmp/generated.png"');
