@@ -788,6 +788,8 @@ function ConversationDisplaySection() {
   const setAutoCollapseTurns = useSettingsStore((s) => s.setAutoCollapseTurns);
   const collapseCompletedActivity = useSettingsStore((s) => s.collapseCompletedActivity);
   const setCollapseCompletedActivity = useSettingsStore((s) => s.setCollapseCompletedActivity);
+  const collapseLiveActivity = useSettingsStore((s) => s.collapseLiveActivity);
+  const setCollapseLiveActivity = useSettingsStore((s) => s.setCollapseLiveActivity);
   const pinUnfinishedTodos = useSettingsStore((s) => s.pinUnfinishedTodos);
   const setPinUnfinishedTodos = useSettingsStore((s) => s.setPinUnfinishedTodos);
   return (
@@ -843,10 +845,19 @@ function ConversationDisplaySection() {
           rowId="appearance.collapseCompletedActivity"
           title={t('Collapse activity after reply')}
           description={t(
-            'After tools and thinking finish, wait a moment, then fold them into one row; failed calls stay visible'
+            'When a reply finishes, fold consecutive thinking and tool calls (including edits and commands) into one summary row; failed calls stay visible'
           )}
           checked={collapseCompletedActivity}
           onChange={setCollapseCompletedActivity}
+        />
+        <SwitchRow
+          rowId="appearance.collapseLiveActivity"
+          title={t('Collapse finished activity while replying')}
+          description={t(
+            'While a reply is still running, wait a moment after tools and thinking finish, then fold that stretch into one row. Calls still running stay visible, and failed calls stay visible'
+          )}
+          checked={collapseLiveActivity}
+          onChange={setCollapseLiveActivity}
         />
         <SwitchRow
           rowId="appearance.pinUnfinishedTodos"

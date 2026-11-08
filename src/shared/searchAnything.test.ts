@@ -202,6 +202,7 @@ describe('buildSettingsCatalog', () => {
     'appearance.expandLiveReasoning',
     'appearance.autoCollapseTurns',
     'appearance.collapseCompletedActivity',
+    'appearance.collapseLiveActivity',
     'appearance.pinUnfinishedTodos',
     'general.notifyMainAgentOnly',
     'general.smartCompactEnabled',
@@ -246,6 +247,7 @@ describe('buildSettingsCatalog', () => {
       'expandLiveReasoning',
       'autoCollapseTurns',
       'collapseCompletedActivity',
+      'collapseLiveActivity',
       'pinUnfinishedTodos',
     ];
     for (const suffix of moved) {

@@ -96,6 +96,7 @@ export const SETTINGS_STATE_FIELDS = [
   'expandLiveReasoning',
   'autoCollapseTurns',
   'collapseCompletedActivity',
+  'collapseLiveActivity',
   'pinUnfinishedTodos',
   'chatWide',
   'chatTypography',

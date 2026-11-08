@@ -1651,6 +1651,7 @@ export function updatePairCatalog(payload: {
   expandLiveReasoning?: boolean;
   autoCollapseTurns?: boolean;
   collapseCompletedActivity?: boolean;
+  collapseLiveActivity?: boolean;
   pinUnfinishedTodos?: boolean;
   /** false：OAuth 暂态空列表，不能覆盖上一份真列表，也不能下发 */
   providersSettled?: boolean;

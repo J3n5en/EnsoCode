@@ -561,6 +561,7 @@ export type HostToPhone =
       expandLiveReasoning?: boolean;
       autoCollapseTurns?: boolean;
       collapseCompletedActivity?: boolean;
+      collapseLiveActivity?: boolean;
       pinUnfinishedTodos?: boolean;
     }
   | { type: 'agent-event'; event: unknown; cursor?: PairSyncCursor }

@@ -3,6 +3,7 @@ export interface PairTimelinePrefs {
   expandLiveReasoning: boolean;
   autoCollapseTurns: boolean;
   collapseCompletedActivity: boolean;
+  collapseLiveActivity: boolean;
   pinUnfinishedTodos: boolean;
 }
 
@@ -14,6 +15,7 @@ export function normalizeTimelinePrefs(
     expandLiveReasoning: raw.expandLiveReasoning !== false,
     autoCollapseTurns: raw.autoCollapseTurns === true,
     collapseCompletedActivity: raw.collapseCompletedActivity !== false,
+    collapseLiveActivity: raw.collapseLiveActivity === true,
     pinUnfinishedTodos: raw.pinUnfinishedTodos !== false,
   };
 }

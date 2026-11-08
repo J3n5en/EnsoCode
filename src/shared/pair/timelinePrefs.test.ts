@@ -7,6 +7,7 @@ describe('normalizeTimelinePrefs', () => {
       expandLiveReasoning: true,
       autoCollapseTurns: false,
       collapseCompletedActivity: true,
+      collapseLiveActivity: false,
       pinUnfinishedTodos: true,
     });
   });
@@ -17,12 +18,14 @@ describe('normalizeTimelinePrefs', () => {
         expandLiveReasoning: false,
         autoCollapseTurns: true,
         collapseCompletedActivity: false,
+        collapseLiveActivity: true,
         pinUnfinishedTodos: false,
       })
     ).toEqual({
       expandLiveReasoning: false,
       autoCollapseTurns: true,
       collapseCompletedActivity: false,
+      collapseLiveActivity: true,
       pinUnfinishedTodos: false,
     });
   });
@@ -33,12 +36,14 @@ describe('normalizeTimelinePrefs', () => {
         expandLiveReasoning: 'no',
         autoCollapseTurns: 'yes',
         collapseCompletedActivity: 0,
+        collapseLiveActivity: 'yes',
         pinUnfinishedTodos: null,
       })
     ).toEqual({
       expandLiveReasoning: true,
       autoCollapseTurns: false,
       collapseCompletedActivity: true,
+      collapseLiveActivity: false,
       pinUnfinishedTodos: true,
     });
   });

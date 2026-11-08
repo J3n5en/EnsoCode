@@ -231,6 +231,7 @@ const initialState = {
   expandLiveReasoning: true,
   autoCollapseTurns: false,
   collapseCompletedActivity: true,
+  collapseLiveActivity: false,
   pinUnfinishedTodos: true,
   chatWide: false,
   chatTypography: normalizeChatTypography(DEFAULT_CHAT_TYPOGRAPHY),
@@ -437,6 +438,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoCollapseTurns: (autoCollapseTurns) => set({ autoCollapseTurns }),
       setCollapseCompletedActivity: (collapseCompletedActivity) =>
         set({ collapseCompletedActivity }),
+      setCollapseLiveActivity: (collapseLiveActivity) => set({ collapseLiveActivity }),
       setPinUnfinishedTodos: (pinUnfinishedTodos) => set({ pinUnfinishedTodos }),
       setChatWide: (chatWide) => {
         document.documentElement.classList.toggle('enso-chat-wide', chatWide);

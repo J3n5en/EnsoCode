@@ -228,6 +228,8 @@ export interface SettingsState {
   autoCollapseTurns: boolean;
   /** 回答完成后把连续的思考与工具调用折成一行过程摘要 */
   collapseCompletedActivity: boolean;
+  /** 这一轮还在跑时，工具和思考都结束后再把尾段折成一行；缺省关 */
+  collapseLiveActivity: boolean;
   /** 输入框上方固定显示最新 todo 清单（仍有未完成项时）；缺省 true */
   pinUnfinishedTodos: boolean;
   /** 聊天列铺满：去掉两侧阶梯 max-w；缺省 false（居中阅读宽度） */
@@ -427,6 +429,7 @@ export interface SettingsState {
   setExpandLiveReasoning: (value: boolean) => void;
   setAutoCollapseTurns: (value: boolean) => void;
   setCollapseCompletedActivity: (value: boolean) => void;
+  setCollapseLiveActivity: (value: boolean) => void;
   setPinUnfinishedTodos: (value: boolean) => void;
   setChatWide: (value: boolean) => void;
   setChatTypography: (next: ChatTypography) => void;

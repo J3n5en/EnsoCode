@@ -208,11 +208,13 @@ export function MessageTimeline({
   const [turnOverrides, setTurnOverrides] = useState<ReadonlyMap<string, boolean>>(new Map());
   const autoCollapseTurns = useSettingsStore((s) => s.autoCollapseTurns);
   const collapseCompletedActivity = useSettingsStore((s) => s.collapseCompletedActivity);
+  const collapseLiveActivity = useSettingsStore((s) => s.collapseLiveActivity);
   const compact = useSettingsStore((s) => s.compactReadOnlyTools);
   const folded = useFoldedTimeline(items, running, expandedGroups, {
     compact,
     autoCollapseCompletedTurns: autoCollapseTurns,
     collapseCompletedActivity,
+    collapseLiveActivity,
     turnOverrides,
   });
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）

@@ -32,6 +32,7 @@ export function parsePairCatalogPayload(payload: unknown): PairCatalogSnapshot |
     expandLiveReasoning?: boolean;
     autoCollapseTurns?: boolean;
     collapseCompletedActivity?: boolean;
+    collapseLiveActivity?: boolean;
     pinUnfinishedTodos?: boolean;
   };
   if (!p || typeof p !== 'object') return null;

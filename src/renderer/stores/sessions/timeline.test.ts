@@ -1874,16 +1874,9 @@ const thinkingItem = (key: string): TimelineItem => ({
   durationMs: null,
 });
 
-/** 已经闭合、这份 witness 没见过的段：当场释放。历史折叠测试用它保住原来的行形状。 */
-const activityOn = (rows: TimelineItem[], running = false) => ({
+/** 回答完成后立刻折。进行中的尾段不走这条。 */
+const activityOn = (_rows?: TimelineItem[], _running = false) => ({
   collapseCompletedActivity: true as const,
-  releasedActivity: nextActivityRelease(
-    rows,
-    running,
-    { collapseCompletedActivity: true },
-    EMPTY_ACTIVITY_WITNESS,
-    0
-  ).released,
 });
 
 describe('重试过的瞬态错误不渲染', () => {
@@ -3190,90 +3183,81 @@ describe('foldTimeline 回答完成后折叠过程（collapseCompletedActivity�
   });
 });
 
-describe('活动折叠延迟释放', () => {
+describe('过程中折叠已完成的调用', () => {
   type Group = Extract<TimelineItem, { kind: 'tool-group' }>;
-  const prep = { collapseCompletedActivity: true as const };
+  const prep = { collapseLiveActivity: true as const };
   const kinds = (items: TimelineItem[]) =>
     items.map((item) => (item.kind === 'tool' ? item.name : item.kind));
   const timed = (item: TimelineItem, durationMs: number): TimelineItem =>
     ({ ...item, durationMs }) as TimelineItem;
+  const streaming = (key: string): TimelineItem => ({ ...thinkingItem(key), streaming: true });
+  const runningTool = (key: string): TimelineItem =>
+    ({ ...toolItem(key, 'bash'), state: 'running' }) as TimelineItem;
   const failed = (key: string): TimelineItem =>
     ({ ...toolItem(key, 'bash'), state: 'error' }) as TimelineItem;
+  const folded = (items: TimelineItem[], released: ReadonlySet<string>, running = true) =>
+    foldTimeline(items, running, new Set(), { ...prep, releasedLiveActivity: released });
 
-  it('空 witness、会话已 idle：第一帧释放，行收成活动组', () => {
-    const items = [
-      userItem('u'),
-      timed(thinkingItem('t1'), 2000),
-      timed(toolItem('a', 'bash'), 1000),
-      toolItem('b', 'edit', [textItem('x')]),
-      textItem('answer'),
-    ];
-    const opened = nextActivityRelease(items, false, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
-    expect(opened.wakeAt).toBeNull();
-    const folded = foldTimeline(items, false, new Set(), {
-      collapseCompletedActivity: true,
-      releasedActivity: opened.released,
-    });
-    expect(kinds(folded)).toEqual(['user', 'tool-group', 'text']);
-    const group = folded[1] as Group;
-    expect(group.activity).toEqual({ thinking: 1, workedMs: 3000 });
-    expect(group.count).toBe(2);
-    expect(kinds(group.children)).toEqual(['thinking', 'bash', 'edit']);
-  });
-
-  it('running、工具已 ok、还没有 text：不释放，wakeAt 为 null', () => {
+  it('只有回答完成后的开关：这一轮还在跑、后面没有正文时不折', () => {
     const items = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
-    const watched = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
-    expect(watched.wakeAt).toBeNull();
-    expect([...watched.released]).toEqual([]);
-    expect(
-      kinds(
-        foldTimeline(items, true, new Set(), {
-          collapseCompletedActivity: true,
-          releasedActivity: watched.released,
-        })
-      )
-    ).toEqual(['user', 'bash', 'read']);
+    expect(kinds(foldTimeline(items, true, new Set(), activityOn()))).toEqual([
+      'user',
+      'bash',
+      'read',
+    ]);
   });
 
-  it('先看见活尾段，正文让这段闭合后要到 wakeAt 才折成活动组', () => {
-    const liveItems = [
+  it('新开关：工具都结束后开始等，没到点不折', () => {
+    const items = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    expect(first.wakeAt).toBe(3_000);
+    expect([...first.released]).toEqual([]);
+    expect(kinds(folded(items, first.released))).toEqual(['user', 'bash', 'read']);
+  });
+
+  it('新开关：到点后这一轮仍在跑，也折成过程组', () => {
+    const items = [
       userItem('u'),
       timed(thinkingItem('t1'), 2000),
       timed(toolItem('a', 'bash'), 1000),
       toolItem('b', 'read'),
     ];
-    const closedItems = [...liveItems, textItem('answer')];
-    const watched = nextActivityRelease(liveItems, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
-    expect(watched.wakeAt).toBeNull();
-    expect([...watched.released]).toEqual([]);
-
-    const holding = nextActivityRelease(closedItems, true, prep, watched.witness, 1_500);
-    expect(holding.wakeAt).toBe(1_500 + 2000);
-    expect([...holding.released]).toEqual([]);
-    expect(
-      kinds(
-        foldTimeline(closedItems, true, new Set(), {
-          collapseCompletedActivity: true,
-          releasedActivity: holding.released,
-        })
-      )
-    ).toEqual(['user', 'thinking', 'bash', 'read', 'text']);
-
-    const later = nextActivityRelease(closedItems, true, prep, holding.witness, 1_600);
-    expect(later.wakeAt).toBe(1_500 + 2000);
-
-    if (holding.wakeAt === null) throw new Error('witnessed close must arm');
-    const due = nextActivityRelease(closedItems, true, prep, holding.witness, holding.wakeAt);
-    const folded = foldTimeline(closedItems, true, new Set(), {
-      collapseCompletedActivity: true,
-      releasedActivity: due.released,
-    });
-    expect(kinds(folded)).toEqual(['user', 'tool-group', 'text']);
-    const group = folded[1] as Group;
+    const first = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    if (first.wakeAt === null) throw new Error('quiet live tail must arm');
+    const due = nextActivityRelease(items, true, prep, first.witness, first.wakeAt);
+    const rows = folded(items, due.released);
+    expect(kinds(rows)).toEqual(['user', 'tool-group']);
+    const group = rows[1] as Group;
     expect(group.activity).toEqual({ thinking: 1, workedMs: 3000 });
     expect(group.count).toBe(2);
     expect(kinds(group.children)).toEqual(['thinking', 'bash', 'read']);
+  });
+
+  it('2 秒内又完成一个工具就重新计时', () => {
+    const items = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    const more = [...items, toolItem('c', 'bash')];
+    const again = nextActivityRelease(more, true, prep, first.witness, 1_500);
+    expect(again.wakeAt).toBe(3_500);
+    expect([...again.released]).toEqual([]);
+    expect(kinds(folded(more, again.released))).toEqual(['user', 'bash', 'read', 'bash']);
+  });
+
+  it('思考还在流时不计时', () => {
+    const items = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read'), streaming('t')];
+    const first = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    expect(first.wakeAt).toBeNull();
+    expect(kinds(folded(items, first.released))).toEqual(['user', 'bash', 'read', 'thinking']);
+  });
+
+  it('前面的段到点后可以折，正在跑的工具留在组外', () => {
+    const done = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(done, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    if (first.wakeAt === null) throw new Error('quiet live tail must arm');
+    const due = nextActivityRelease(done, true, prep, first.witness, first.wakeAt);
+    const items = [...done, runningTool('live')];
+    const still = nextActivityRelease(items, true, prep, due.witness, first.wakeAt);
+    expect(kinds(folded(items, still.released))).toEqual(['user', 'tool-group', 'bash']);
   });
 
   it('失败工具仍留在组外', () => {
@@ -3285,16 +3269,64 @@ describe('活动折叠延迟释放', () => {
       toolItem('c', 'read'),
       toolItem('d', 'read'),
     ];
-    const opened = nextActivityRelease(items, false, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
-    const folded = foldTimeline(items, false, new Set(), {
-      collapseCompletedActivity: true,
-      releasedActivity: opened.released,
-    });
-    expect(kinds(folded)).toEqual(['user', 'tool-group', 'bash', 'tool-group']);
+    const first = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    if (first.wakeAt === null) throw new Error('quiet live tail must arm');
+    const due = nextActivityRelease(items, true, prep, first.witness, first.wakeAt);
+    expect(kinds(folded(items, due.released))).toEqual([
+      'user',
+      'tool-group',
+      'bash',
+      'tool-group',
+    ]);
   });
 
-  it('未释放时 compact 只收只读组，bash 不标成探索；compact 关则整段平铺', () => {
-    const liveItems = [
+  it('新开关不负责已经结束的会话', () => {
+    const items = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read'), textItem('answer')];
+    const opened = nextActivityRelease(items, false, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    expect(opened.wakeAt).toBeNull();
+    expect(kinds(folded(items, opened.released, false))).toEqual(['user', 'bash', 'read', 'text']);
+  });
+
+  it('两个开关一起开：正文隔开的段立刻折，尾段仍要等到点', () => {
+    const items = [
+      userItem('u'),
+      toolItem('a', 'bash'),
+      toolItem('b', 'read'),
+      textItem('mid'),
+      toolItem('c', 'bash'),
+      toolItem('d', 'read'),
+    ];
+    const first = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    expect(
+      kinds(
+        foldTimeline(items, true, new Set(), {
+          collapseCompletedActivity: true,
+          collapseLiveActivity: true,
+          releasedLiveActivity: first.released,
+        })
+      )
+    ).toEqual(['user', 'tool-group', 'text', 'bash', 'read']);
+  });
+
+  it('正文一出现，回答完成后的开关立刻折，不等过程中的 2 秒', () => {
+    const live = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(live, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    const closed = [...live, textItem('answer')];
+    const holding = nextActivityRelease(closed, true, prep, first.witness, 1_500);
+    expect(holding.wakeAt).toBeNull();
+    expect(
+      kinds(
+        foldTimeline(closed, true, new Set(), {
+          collapseCompletedActivity: true,
+          collapseLiveActivity: true,
+          releasedLiveActivity: holding.released,
+        })
+      )
+    ).toEqual(['user', 'tool-group', 'text']);
+  });
+
+  it('没到点时 compact 仍只收只读组，bash 不标成探索', () => {
+    const items = [
       userItem('u'),
       toolItem('r1', 'read'),
       toolItem('r2', 'grep'),
@@ -3302,40 +3334,20 @@ describe('活动折叠延迟释放', () => {
       toolItem('b', 'bash'),
       toolItem('e', 'edit', [textItem('x')]),
     ];
-    const closedItems = [...liveItems, textItem('answer')];
-    const watched = nextActivityRelease(liveItems, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
-    const holding = nextActivityRelease(closedItems, true, prep, watched.witness, 1_500);
-    expect(
-      kinds(
-        foldTimeline(closedItems, true, new Set(), {
-          collapseCompletedActivity: true,
-          releasedActivity: holding.released,
-        })
-      )
-    ).toEqual(['user', 'read', 'grep', 'find', 'bash', 'edit', 'text']);
-
-    const compactPrep = { ...prep, compact: true };
-    const watchedCompact = nextActivityRelease(
-      liveItems,
+    const first = nextActivityRelease(
+      items,
       true,
-      compactPrep,
+      { ...prep, compact: true },
       EMPTY_ACTIVITY_WITNESS,
       1_000
     );
-    const holdingCompact = nextActivityRelease(
-      closedItems,
-      true,
-      compactPrep,
-      watchedCompact.witness,
-      1_500
-    );
-    const folded = foldTimeline(closedItems, true, new Set(), {
+    const rows = foldTimeline(items, true, new Set(), {
       compact: true,
-      collapseCompletedActivity: true,
-      releasedActivity: holdingCompact.released,
+      collapseLiveActivity: true,
+      releasedLiveActivity: first.released,
     });
-    expect(kinds(folded)).toEqual(['user', 'tool-group', 'bash', 'edit', 'text']);
-    const group = folded[1] as Group;
+    expect(kinds(rows)).toEqual(['user', 'tool-group', 'bash', 'edit']);
+    const group = rows[1] as Group;
     expect(group.activity).toBeUndefined();
     expect(group.exploring).toBe(false);
     expect(kinds(group.children)).toEqual(['read', 'grep', 'find']);

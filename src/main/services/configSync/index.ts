@@ -129,6 +129,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   expandLiveReasoning: { mode: 'portable' },
   autoCollapseTurns: { mode: 'portable' },
   collapseCompletedActivity: { mode: 'portable' },
+  collapseLiveActivity: { mode: 'portable' },
   pinUnfinishedTodos: { mode: 'portable' },
   chatWide: { mode: 'portable' },
   chatTypography: { mode: 'portable' },

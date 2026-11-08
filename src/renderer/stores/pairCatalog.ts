@@ -175,6 +175,7 @@ function buildPayload(): PairCatalogPayload {
     expandLiveReasoning: settings.expandLiveReasoning,
     autoCollapseTurns: settings.autoCollapseTurns,
     collapseCompletedActivity: settings.collapseCompletedActivity,
+    collapseLiveActivity: settings.collapseLiveActivity,
     pinUnfinishedTodos: settings.pinUnfinishedTodos,
   };
 }
@@ -195,6 +196,7 @@ function catalogPushFingerprint(payload: PairCatalogPayload): string {
     expandLiveReasoning: payload.expandLiveReasoning,
     autoCollapseTurns: payload.autoCollapseTurns,
     collapseCompletedActivity: payload.collapseCompletedActivity,
+    collapseLiveActivity: payload.collapseLiveActivity,
     pinUnfinishedTodos: payload.pinUnfinishedTodos,
   });
 }
@@ -250,6 +252,7 @@ export function bindPairCatalogSync(): void {
       state.expandLiveReasoning !== prev.expandLiveReasoning ||
       state.autoCollapseTurns !== prev.autoCollapseTurns ||
       state.collapseCompletedActivity !== prev.collapseCompletedActivity ||
+      state.collapseLiveActivity !== prev.collapseLiveActivity ||
       state.pinUnfinishedTodos !== prev.pinUnfinishedTodos ||
       state.skills !== prev.skills
     ) {

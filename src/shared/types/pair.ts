@@ -185,5 +185,6 @@ export interface PairCatalogPayload {
   expandLiveReasoning?: boolean;
   autoCollapseTurns?: boolean;
   collapseCompletedActivity?: boolean;
+  collapseLiveActivity?: boolean;
   pinUnfinishedTodos?: boolean;
 }

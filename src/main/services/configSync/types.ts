@@ -145,6 +145,7 @@ export interface ConfigSyncState {
   expandLiveReasoning?: boolean;
   autoCollapseTurns?: boolean;
   collapseCompletedActivity?: boolean;
+  collapseLiveActivity?: boolean;
   pinUnfinishedTodos?: boolean;
   chatWide?: boolean;
   chatTypography?: ChatTypography;

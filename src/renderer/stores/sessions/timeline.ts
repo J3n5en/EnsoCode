@@ -1729,17 +1729,18 @@ function activitySegment(
   return expanded ? [group, ...segment.flatMap(withExploreChildren)] : [group];
 }
 
-/** 亲眼看到闭合之后再等多久才收成过程组。不是设置项，只有 nextActivityRelease 读它。 */
+/** 过程中的尾段安静下来之后再等多久才收。不是设置项，只有 nextActivityRelease 读它。 */
 export const ACTIVITY_FOLD_DELAY_MS = 2000;
 
 export interface ActivityWitness {
-  readonly seenLive: ReadonlySet<string>;
-  readonly closedAt: ReadonlyMap<string, number>;
+  /** 正在计时的那几段成员。成员一变就重新计时。 */
+  readonly signature: string;
+  readonly closedAt: number | null;
 }
 
 export const EMPTY_ACTIVITY_WITNESS: ActivityWitness = {
-  seenLive: new Set(),
-  closedAt: new Map(),
+  signature: '',
+  closedAt: null,
 };
 
 export interface ActivityRelease {
@@ -1754,16 +1755,14 @@ export interface TimelinePrep {
   turnOverrides?: ReadonlyMap<string, boolean>;
   autoCollapseCompletedTurns?: boolean;
   collapseCompletedActivity?: boolean;
+  /** 这一轮还在跑时，也把已经结束的尾段收成过程组 */
+  collapseLiveActivity?: boolean;
 }
 
-export type TimelineFoldOptions =
-  | (Omit<TimelinePrep, 'collapseCompletedActivity'> & {
-      collapseCompletedActivity?: false;
-    })
-  | (Omit<TimelinePrep, 'collapseCompletedActivity'> & {
-      collapseCompletedActivity: true;
-      releasedActivity: ReadonlySet<string>;
-    });
+export type TimelineFoldOptions = TimelinePrep & {
+  /** collapseLiveActivity 打开时，这些 anchor 才可以折进行中的尾段 */
+  releasedLiveActivity?: ReadonlySet<string>;
+};
 
 /** 探索组取配对前的第一行，mark 收进 explore- 组后身份不变。 */
 function activityAnchor(row: TimelineItem): string {
@@ -1830,40 +1829,34 @@ function prepareTimeline(
   return { sourceItems, lastUserIndex, liveFrom };
 }
 
-function segmentActivity(
+/** 进行中、且思考已经停的尾段。正在流的思考整段都不算安静。 */
+function quietLiveActivity(
   items: TimelineItem[],
   running: boolean,
   prep: TimelinePrep
-): { closed: string[]; live: string[] } {
-  if (prep.collapseCompletedActivity !== true) return { closed: [], live: [] };
+): { anchors: string[]; signature: string } | null {
+  if (prep.collapseLiveActivity !== true || !running) return null;
   const { sourceItems, liveFrom } = prepareTimeline(items, running, new Set(), prep);
-  const closed: string[] = [];
-  const live: string[] = [];
-  const closedSet = new Set<string>();
-  const liveSet = new Set<string>();
+  const anchors: string[] = [];
+  const keys: string[] = [];
   let i = 0;
   while (i < sourceItems.length) {
-    if (!isActivityMember(sourceItems[i])) {
+    if (!(i > liveFrom) || !isActivityMember(sourceItems[i])) {
       i += 1;
       continue;
     }
     let end = i;
     while (end < sourceItems.length && isActivityMember(sourceItems[end])) end += 1;
     const segment = mergeAdjacentThinking(sourceItems.slice(i, end));
-    const anchor = activityAnchor(segment[0]);
-    if (running && i > liveFrom) {
-      if (!liveSet.has(anchor)) {
-        live.push(anchor);
-        liveSet.add(anchor);
-      }
-    } else if (segment.length >= 2 && !closedSet.has(anchor)) {
-      closed.push(anchor);
-      closedSet.add(anchor);
+    const streaming = segment.some((row) => row.kind === 'thinking' && row.streaming);
+    if (!streaming && segment.length >= 2) {
+      anchors.push(activityAnchor(segment[0]));
+      for (const row of segment) keys.push(activityAnchor(row));
     }
     i = end;
   }
-  if (liveSet.size === 0) return { closed, live };
-  return { closed: closed.filter((anchor) => !liveSet.has(anchor)), live };
+  if (anchors.length === 0) return null;
+  return { anchors, signature: keys.join('\0') };
 }
 
 export function nextActivityRelease(
@@ -1873,28 +1866,17 @@ export function nextActivityRelease(
   prev: ActivityWitness,
   now: number
 ): ActivityRelease {
-  const { closed, live } = segmentActivity(items, running, prep);
-  const liveSet = new Set(live);
-  const seenLive = new Set<string>();
-  const closedAt = new Map<string, number>();
-  const released = new Set<string>();
-  let wakeAt: number | null = null;
-  for (const anchor of live) seenLive.add(anchor);
-  for (const anchor of closed) {
-    if (liveSet.has(anchor)) continue;
-    if (!prev.seenLive.has(anchor)) {
-      released.add(anchor);
-      continue;
-    }
-    seenLive.add(anchor);
-    const started = prev.closedAt.get(anchor);
-    const at = started ?? now;
-    closedAt.set(anchor, at);
-    const due = at + ACTIVITY_FOLD_DELAY_MS;
-    if (now >= due) released.add(anchor);
-    else if (wakeAt === null || due < wakeAt) wakeAt = due;
-  }
-  return { witness: { seenLive, closedAt }, released, wakeAt };
+  const plan = quietLiveActivity(items, running, prep);
+  if (!plan) return { witness: EMPTY_ACTIVITY_WITNESS, released: new Set(), wakeAt: null };
+  const same = prev.signature === plan.signature && prev.closedAt !== null;
+  const at = same && prev.closedAt !== null ? prev.closedAt : now;
+  const due = at + ACTIVITY_FOLD_DELAY_MS;
+  const released = now >= due ? new Set(plan.anchors) : new Set<string>();
+  return {
+    witness: { signature: plan.signature, closedAt: at },
+    released,
+    wakeAt: now >= due ? null : due,
+  };
 }
 
 function foldPrepared(
@@ -1902,12 +1884,22 @@ function foldPrepared(
   running: boolean,
   expandedKeys: ReadonlySet<string>,
   compact: boolean,
-  releasedActivity: ReadonlySet<string> | null,
+  collapseCompleted: boolean,
+  releasedLive: ReadonlySet<string> | null,
   lastUserIndex: number,
   liveFrom: number
 ): TimelineItem[] {
   const activityAt = (index: number): boolean =>
-    releasedActivity !== null && !(running && index > liveFrom);
+    collapseCompleted && !(running && index > liveFrom);
+  const releasedLiveStart = (index: number): boolean => {
+    if (!releasedLive || !running || !(index > liveFrom) || !isActivityMember(sourceItems[index])) {
+      return false;
+    }
+    let end = index;
+    while (end < sourceItems.length && isActivityMember(sourceItems[end])) end += 1;
+    const segment = mergeAdjacentThinking(sourceItems.slice(index, end));
+    return segment.length >= 2 && releasedLive.has(activityAnchor(segment[0]));
+  };
   const inSegment = (s: TimelineItem, index: number): boolean =>
     !(s.kind === 'tool' && s.generatedImages?.length) &&
     (s.kind === 'thinking' ||
@@ -1920,22 +1912,31 @@ function foldPrepared(
   let i = 0;
   while (i < sourceItems.length) {
     const item = sourceItems[i];
+    if (releasedLiveStart(i)) {
+      let liveEnd = i;
+      while (liveEnd < sourceItems.length && isActivityMember(sourceItems[liveEnd])) liveEnd += 1;
+      result.push(
+        ...activitySegment(mergeAdjacentThinking(sourceItems.slice(i, liveEnd)), expandedKeys)
+      );
+      i = liveEnd;
+      continue;
+    }
     if (!inSegment(item, i)) {
       result.push(...withExploreChildren(item));
       i += 1;
       continue;
     }
     let end = i;
-    while (end < sourceItems.length && inSegment(sourceItems[end], end)) end += 1;
+    while (
+      end < sourceItems.length &&
+      inSegment(sourceItems[end], end) &&
+      !releasedLiveStart(end)
+    ) {
+      end += 1;
+    }
     const segment = mergeAdjacentThinking(sourceItems.slice(i, end));
-    if (activityAt(i) && releasedActivity) {
-      if (segment.length >= 2 && releasedActivity.has(activityAnchor(segment[0]))) {
-        result.push(...activitySegment(segment, expandedKeys));
-      } else if (compact) {
-        result.push(...foldPrepared(segment, false, expandedKeys, true, null, -1, -1));
-      } else {
-        result.push(...segment.flatMap(withExploreChildren));
-      }
+    if (activityAt(i)) {
+      result.push(...activitySegment(segment, expandedKeys));
       i = end;
       continue;
     }
@@ -1998,9 +1999,10 @@ function foldPrepared(
  * - 默认：running 时最后一个 user 之后的段不折（进行中的轮实时展示）。
  * - compact（对齐 Cursor 的 Explored）：段只收只读工具（read/grep/find/ls/glob），
  *   bash 等其它工具打断段并平铺；live 也折，running 只读行进组，组头标 exploring。
- * - collapseCompletedActivity：位置已闭合的思考 + 成功工具（含 edit/write/todo）≥2，且 anchor 已释放，
- *   才折成过程组。未释放时 compact 只在段内收只读组，否则平铺。失败工具与目标信号打断段。
- *   活尾段（running 且在 liveFrom 之后）不进过程组。
+ * - collapseCompletedActivity：已离开活尾段的思考 + 成功工具（含 edit/write/todo）≥2 立刻折成过程组。
+ *   失败工具与目标信号打断段。running 且在 liveFrom 之后的尾段不进这个开关。
+ * - collapseLiveActivity：上面那条尾段在工具和思考都结束后再等一段时间，anchor 进入
+ *   releasedLiveActivity 才折。正在流的思考不算结束。
  * - 成功配对的 explore_mark → explore_fold 先收成探索组：平时独立成行，完成后并入过程组。
  * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
  * 纯函数。
@@ -2017,14 +2019,15 @@ export function foldTimeline(
     expandedKeys,
     options
   );
-  const releasedActivity =
-    options.collapseCompletedActivity === true ? options.releasedActivity : null;
+  const releasedLive =
+    options.collapseLiveActivity === true ? (options.releasedLiveActivity ?? null) : null;
   return foldPrepared(
     sourceItems,
     running,
     expandedKeys,
     options.compact === true,
-    releasedActivity,
+    options.collapseCompletedActivity === true,
+    releasedLive,
     lastUserIndex,
     liveFrom
   );

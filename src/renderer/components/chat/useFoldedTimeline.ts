@@ -22,33 +22,19 @@ export function useFoldedTimeline(
   const compact = prep.compact;
   const autoCollapseCompletedTurns = prep.autoCollapseCompletedTurns;
   const collapse = prep.collapseCompletedActivity === true;
+  const live = prep.collapseLiveActivity === true;
   const turnOverrides = prep.turnOverrides;
 
   const base = { compact, autoCollapseCompletedTurns, turnOverrides };
-  let wakeAt: number | null = null;
-  let rows: TimelineItem[];
-  if (!collapse) {
-    witnessRef.current = EMPTY_ACTIVITY_WITNESS;
-    rows = foldTimeline(items, running, expandedKeys, {
-      ...base,
-      collapseCompletedActivity: false,
-    });
-  } else {
-    const release = nextActivityRelease(
-      items,
-      running,
-      { ...base, collapseCompletedActivity: true },
-      witnessRef.current,
-      now
-    );
-    witnessRef.current = release.witness;
-    wakeAt = release.wakeAt;
-    rows = foldTimeline(items, running, expandedKeys, {
-      ...base,
-      collapseCompletedActivity: true,
-      releasedActivity: release.released,
-    });
-  }
+  const release = live ? nextActivityRelease(items, running, prep, witnessRef.current, now) : null;
+  witnessRef.current = release?.witness ?? EMPTY_ACTIVITY_WITNESS;
+  const wakeAt = release?.wakeAt ?? null;
+  const rows = foldTimeline(items, running, expandedKeys, {
+    ...base,
+    collapseCompletedActivity: collapse,
+    collapseLiveActivity: live,
+    releasedLiveActivity: release?.released,
+  });
 
   useEffect(() => {
     if (wakeAt === null || wakeAt <= now) return;

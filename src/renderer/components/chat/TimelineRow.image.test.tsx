@@ -1,13 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  buildTimeline,
-  EMPTY_ACTIVITY_WITNESS,
-  foldTimeline,
-  nextActivityRelease,
-  type TimelineItem,
-} from '@/stores/sessions/timeline';
+import { buildTimeline, foldTimeline, type TimelineItem } from '@/stores/sessions/timeline';
 import { ReadImagePreview, TimelineRow } from './TimelineRow';
 
 const settings = vi.hoisted(() => ({ compactReadOnlyTools: false, expandLiveEdits: false }));
@@ -65,16 +59,8 @@ describe('ReadImagePreview', () => {
       bash('b'),
       item,
     ];
-    const released = nextActivityRelease(
-      rows,
-      false,
-      { collapseCompletedActivity: true },
-      EMPTY_ACTIVITY_WITNESS,
-      0
-    ).released;
     const folded = foldTimeline(rows, false, new Set(), {
       collapseCompletedActivity: true,
-      releasedActivity: released,
     });
     expect(folded.some((row) => row.kind === 'tool-group')).toBe(true);
     expect(folded).toContain(item);
