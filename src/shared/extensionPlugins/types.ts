@@ -88,6 +88,8 @@ export interface ExtensionPluginConfigField {
   options?: string[];
   min?: number;
   max?: number;
+  /** string 类型专用：值是多行文本，界面给多行输入框 */
+  multiline?: boolean;
   pathKind?: 'file' | 'directory';
   set: boolean;
   value?: string;

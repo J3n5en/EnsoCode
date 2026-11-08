@@ -88,6 +88,7 @@ export interface PluginConfigContrib {
   options?: string[];
   min?: number;
   max?: number;
+  multiline?: boolean;
   pathKind?: 'file' | 'directory';
 }
 export interface PluginScheduleContrib {
@@ -941,6 +942,10 @@ function parseConfigField(c: unknown, reasons: string[] = []): PluginConfigContr
     reasons.push('secret 只能用在 string 类型上');
     return null;
   }
+  if (c.multiline !== undefined && typeof c.multiline !== 'boolean') {
+    reasons.push('multiline 必须是布尔值');
+    return null;
+  }
   const field: PluginConfigContrib = {
     key: c.key,
     title: c.title,
@@ -950,7 +955,7 @@ function parseConfigField(c: unknown, reasons: string[] = []): PluginConfigContr
   };
   const has = (k: string) => c[k] !== undefined;
   const only = (...allowed: string[]) => {
-    const extra = ['default', 'options', 'min', 'max', 'pathKind'].filter(
+    const extra = ['default', 'options', 'min', 'max', 'pathKind', 'multiline'].filter(
       (k) => !allowed.includes(k) && has(k)
     );
     if (extra.length === 0) return true;
@@ -959,12 +964,13 @@ function parseConfigField(c: unknown, reasons: string[] = []): PluginConfigContr
   };
   switch (type) {
     case 'string':
-      if (!only('default')) return null;
+      if (!only('default', 'multiline')) return null;
       if (has('default') && !isNonEmptyString(c.default, 4096)) {
         reasons.push('default 必须是非空字符串，最长 4096');
         return null;
       }
       if (has('default')) field.default = c.default as string;
+      if (c.multiline === true) field.multiline = true;
       return field;
     case 'number': {
       if (!only('default', 'min', 'max')) return null;
