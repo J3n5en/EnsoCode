@@ -596,38 +596,15 @@ export function MessageTimeline({
         )
     );
   }, [virtualize, hasOlder, historyLoading, firstItemIndex, folded.length, items.length]);
-  const renderHeader = () => (
-    <HistoryPageHeader
-      chrome={pageChrome}
-      onLoadMore={pageChrome === 'more' ? requestOlder : undefined}
-    />
-  );
-  const renderFooter = () => (
-    <div className={cn(CHAT_COL, 'pb-6 [overflow-wrap:anywhere]')}>
-      {busy && (
-        <div className="flex min-h-[26px] items-center gap-2 text-[13px]">
-          <LoadingDots />
-          <span className="t-shimmer" data-text={loading ? t('Loading…') : t('Working…')}>
-            {loading ? t('Loading…') : t('Working…')}
-          </span>
-          {!loading && (lastOutputAt ?? runStartedAt) !== undefined && (
-            <ElapsedTimer since={(lastOutputAt ?? runStartedAt) as number} />
-          )}
-        </div>
-      )}
-      {error && (
-        <div className="flex items-start gap-2">
-          <p className="min-w-0 flex-1 text-sm text-destructive whitespace-pre-wrap">{t(error)}</p>
-          <RetryTurnButton />
-          {onRetryResume && (
-            <Button size="sm" variant="outline" onClick={onRetryResume}>
-              {t('Retry resume')}
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-  );
+  const chrome: TimelineChrome = {
+    pageChrome,
+    onLoadMore: pageChrome === 'more' ? requestOlder : undefined,
+    busy,
+    loading: !!loading,
+    since: loading ? undefined : (lastOutputAt ?? runStartedAt),
+    error,
+    onRetryResume,
+  };
 
   return (
     <ChatSearchHighlightContext.Provider value={searchHighlight}>
@@ -741,9 +718,9 @@ export function MessageTimeline({
             className="h-full select-text overflow-y-auto [overflow-anchor:none]"
           >
             <div ref={attachContent}>
-              {renderHeader()}
+              <TimelineHeader context={chrome} />
               {folded.map((item, index) => renderRow(item, index))}
-              {renderFooter()}
+              <TimelineFooter context={chrome} />
             </div>
           </div>
         ) : (
@@ -791,11 +768,8 @@ export function MessageTimeline({
               scrollerRef.current = el instanceof HTMLElement ? el : null;
             }}
             className="h-full select-text"
-            components={{
-              List: TimelineList,
-              Header: renderHeader,
-              Footer: renderFooter,
-            }}
+            context={chrome}
+            components={TIMELINE_COMPONENTS}
             // Virtuoso 传入的是含 firstItemIndex 的绝对下标，换算回 folded 下标
             itemContent={(index, item) => renderRow(item, index - firstItemIndex)}
           />
@@ -854,6 +828,52 @@ function HistoryPageHeader({
     </div>
   );
 }
+
+type TimelineChrome = {
+  pageChrome: HistoryPageChrome;
+  onLoadMore?: () => void;
+  busy: boolean;
+  loading: boolean;
+  since?: number;
+  error?: string;
+  onRetryResume?: () => void;
+};
+
+function TimelineHeader({ context }: { context: TimelineChrome }) {
+  return <HistoryPageHeader chrome={context.pageChrome} onLoadMore={context.onLoadMore} />;
+}
+
+function TimelineFooter({ context }: { context: TimelineChrome }) {
+  const { t } = useI18n();
+  const { busy, loading, since, error, onRetryResume } = context;
+  return (
+    <div className={cn(CHAT_COL, 'pb-6 [overflow-wrap:anywhere]')}>
+      {busy && (
+        <div className="flex min-h-[26px] items-center gap-2 text-[13px]">
+          <LoadingDots />
+          <span className="t-shimmer" data-text={loading ? t('Loading…') : t('Working…')}>
+            {loading ? t('Loading…') : t('Working…')}
+          </span>
+          {since !== undefined && <ElapsedTimer since={since} />}
+        </div>
+      )}
+      {error && (
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-sm text-destructive whitespace-pre-wrap">{t(error)}</p>
+          <RetryTurnButton />
+          {onRetryResume && (
+            <Button size="sm" variant="outline" onClick={onRetryResume}>
+              {t('Retry resume')}
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Virtuoso 把 components 当组件类型，每次渲染换新函数会整段重挂，运行中的动画随之重头开始
+const TIMELINE_COMPONENTS = { List: TimelineList, Header: TimelineHeader, Footer: TimelineFooter };
 
 function LoadingDots() {
   return (
