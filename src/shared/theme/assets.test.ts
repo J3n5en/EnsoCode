@@ -264,6 +264,12 @@ describe('themeAssetsCss', () => {
     expect(css).not.toContain('thinking');
   });
 
+  it('canvas-pattern 伪元素跟随 --enso-browser-holes-clip 挖空浏览器区域，避免沉底网页漏出主题花纹', () => {
+    const css = themeAssetsCss({ 'canvas-pattern': { src: 'u/dots.png' } });
+    expect(css).toContain('[data-enso="canvas"]:has([data-enso="sidebar"])::before{');
+    expect(css).toContain('clip-path:var(--enso-browser-holes-clip,none)');
+  });
+
   it('待办角标挂在时间线里的待办上，跟当前会话状态', () => {
     const assets = parseThemeAssets({
       'todo-corner': { src: 'a/t.png', states: { running: 'a/r.png' } },

@@ -1,5 +1,5 @@
 import type { BrowserTabState } from '@shared/types/browser';
-import { ArrowLeft, ArrowRight, BoxSelect, Bug, Globe, Hand, RotateCw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bug, Globe, Hand, RotateCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   insertComposerImage,
@@ -13,6 +13,13 @@ import { resolveSidePanelDockConversationId } from '@/lib/sidePanelDockId';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import {
+  AnnotateToolbarControl,
+  BrowserAnnotateStageOverlay,
+  DesignFrameRing,
+  DesignHintBar,
+  useBrowserAnnotateSession,
+} from './BrowserAnnotateOverlay';
 import { isCoveredBy, overlayBoxes } from './overlayCover';
 
 const EMPTY: BrowserTabState = {
@@ -122,6 +129,7 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [devtoolsRatio, setDevtoolsRatio] = useState(DEFAULT_DEVTOOLS_RATIO);
+  const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
   const hostRef = useRef<HTMLDivElement>(null);
   const dtRef = useRef<HTMLDivElement>(null);
   const splitRef = useRef<HTMLDivElement>(null);
@@ -141,6 +149,29 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   const lastHole = useRef<Rect | null>(null);
   const tabId = panelApi.id;
 
+  const annotate = useBrowserAnnotateSession({
+    tabId,
+    conversationId,
+    url: state.url,
+    designMode: state.designMode,
+    onDesignModeState: setState,
+  });
+
+  useEffect(() => {
+    const node = hostRef.current;
+    if (!node) return;
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setStageSize({ width: Math.round(rect.width), height: Math.round(rect.height) });
+      }
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     return window.electronAPI.browser.onState((event) => {
       if (event.tabId === tabId) setState(event.state);
@@ -150,7 +181,15 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   useEffect(() => {
     return window.electronAPI.browser.onDesignMode((event) => {
       if (event.tabId !== tabId) return;
-      if (event.type === 'cancelled') return;
+      if (
+        event.type === 'cancelled' ||
+        event.type === 'select' ||
+        event.type === 'drawing' ||
+        event.type === 'pin-click' ||
+        event.type === 'pins'
+      ) {
+        return;
+      }
       let inserted = false;
       if (event.type === 'annotated') {
         inserted = event.image ? insertComposerImage(event.image) : false;
@@ -175,17 +214,6 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
       else requestFocusComposer();
     });
   }, [tabId, t]);
-
-  useEffect(() => {
-    if (!state.designMode) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      void window.electronAPI.browser.setDesignMode(tabId, false).then(setState);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [state.designMode, tabId]);
 
   useEffect(() => {
     if (!editing) setAddress(state.url);
@@ -351,18 +379,17 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
             className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />
         </form>
-        <button
-          type="button"
-          className={cn(iconButton, state.designMode && 'bg-muted text-foreground')}
+        <AnnotateToolbarControl
+          tabId={tabId}
+          conversationId={conversationId}
+          active={state.designMode}
           disabled={!state.tabId || state.locked || state.devtoolsOpen}
-          onClick={() =>
-            void window.electronAPI.browser.setDesignMode(tabId, !state.designMode).then(setState)
-          }
-          aria-label={t('Toggle Design Mode')}
-          aria-pressed={state.designMode}
-        >
-          <BoxSelect className="h-3.5 w-3.5" />
-        </button>
+          queueOpen={annotate.queueOpen}
+          onQueueOpenChange={annotate.setQueueOpen}
+          onToggleDesignMode={(next) => void annotate.setDesignMode(next)}
+          onOpenPinFromQueue={(item) => void annotate.openPinFromQueue(item)}
+          onSendQueue={annotate.sendQueue}
+        />
         <button
           type="button"
           className={cn(iconButton, state.devtoolsOpen && 'bg-muted text-foreground')}
@@ -382,6 +409,16 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
           </span>
         )}
       </div>
+      {state.designMode && (
+        <DesignHintBar
+          drawing={annotate.drawing}
+          pick={annotate.draftPick}
+          markupTool={annotate.markupTool}
+          editorOpen={annotate.openPin !== null}
+          onMarkupToolChange={annotate.handleMarkupToolChange}
+          onExit={() => void annotate.setDesignMode(false)}
+        />
+      )}
       {error && (
         <div className="border-b bg-destructive/10 px-3 py-1 text-xs text-destructive">{error}</div>
       )}
@@ -395,7 +432,26 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
           )}
           style={state.devtoolsOpen ? { flex: `${1 - devtoolsRatio} 1 0` } : undefined}
         >
-          {!state.url.startsWith('http') && (
+          <DesignFrameRing active={state.designMode} />
+          {state.designMode && (
+            <BrowserAnnotateStageOverlay
+              tabId={tabId}
+              conversationId={conversationId}
+              stageSize={stageSize}
+              draftPick={annotate.draftPick}
+              openPin={annotate.openPin}
+              markupTool={annotate.markupTool}
+              warningShown={annotate.warningShown}
+              onWarningShownChange={annotate.setWarningShown}
+              onDraftPickChange={annotate.setDraftPick}
+              onMoveSelection={(dir) => void annotate.moveSelection(dir)}
+              onCancelDraft={annotate.cancelDraft}
+              onCloseOpenPin={annotate.closeOpenPin}
+              onSendQueue={annotate.sendQueue}
+              onStrokeStateChange={annotate.setMarkupStrokeActive}
+            />
+          )}
+          {!state.url.startsWith('http') && !state.url.startsWith('file:') && (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
               <Globe className="h-6 w-6 opacity-40" />
               <p>{t('Enter a URL above, or let the agent open a page with browser_navigate.')}</p>

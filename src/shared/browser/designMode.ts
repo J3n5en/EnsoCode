@@ -1,3 +1,4 @@
+import type { BrowserPickedElementRef } from './designAnnotation';
 export const UI_ELEMENT_LABEL_MAX = 80;
 export const UI_ELEMENT_PATH_MAX = 300;
 export const UI_ELEMENT_TEXT_MAX = 200;
@@ -285,16 +286,76 @@ export type DesignBindingMessage =
   | { type: 'cancelled' }
   | { type: 'freeze-request' }
   | { type: 'picked'; payload: unknown }
-  | { type: 'annotated'; points: ScribblePoint[] };
+  | { type: 'annotated'; points: ScribblePoint[] }
+  | {
+      type: 'select';
+      elements: BrowserPickedElementRef[];
+      region: UiElementRect | null;
+      addToChat: boolean;
+      viewportWidth: number;
+    }
+  | { type: 'drawing'; drawing: boolean }
+  | { type: 'pin-click'; id: string }
+  | { type: 'pins'; ids: string[] };
+
+function parsePickedElementRef(value: unknown): BrowserPickedElementRef | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const rect = parseRect(raw.rect);
+  if (
+    typeof raw.tag !== 'string' ||
+    typeof raw.component !== 'string' ||
+    typeof raw.uid !== 'string' ||
+    typeof raw.hueIndex !== 'number' ||
+    !Number.isFinite(raw.hueIndex) ||
+    !rect
+  ) {
+    return null;
+  }
+  return {
+    tag: raw.tag.slice(0, 128),
+    component: raw.component.slice(0, 1000),
+    rect,
+    uid: raw.uid.slice(0, 1000),
+    hueIndex: raw.hueIndex,
+  };
+}
 
 export function parseDesignBinding(value: unknown): DesignBindingMessage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const type = (value as { type?: unknown }).type;
+  const record = value as Record<string, unknown>;
+  const type = record.type;
   if (type === 'cancelled' || type === 'freeze-request') return { type };
   if (type === 'picked') return { type, payload: (value as { payload?: unknown }).payload };
   if (type === 'annotated') {
     const points = sanitizeScribblePoints((value as { points?: unknown }).points);
     return points.length >= 2 ? { type, points } : null;
+  }
+  if (type === 'drawing' && typeof record.drawing === 'boolean') {
+    return { type: 'drawing', drawing: record.drawing };
+  }
+  if (type === 'pin-click' && typeof record.id === 'string' && record.id.length > 0) {
+    return { type: 'pin-click', id: record.id };
+  }
+  if (type === 'pins' && Array.isArray(record.ids)) {
+    const ids = record.ids.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    return { type: 'pins', ids };
+  }
+  if (type === 'select') {
+    if (!Array.isArray(record.elements)) return null;
+    const elements = record.elements
+      .map(parsePickedElementRef)
+      .filter((item): item is BrowserPickedElementRef => item !== null);
+    const region = record.region === null ? null : (parseRect(record.region) ?? null);
+    if (record.region !== null && region === null) return null;
+    const addToChat = record.addToChat === true;
+    const viewportWidth =
+      typeof record.viewportWidth === 'number' &&
+      Number.isFinite(record.viewportWidth) &&
+      record.viewportWidth > 0
+        ? record.viewportWidth
+        : 1280;
+    return { type: 'select', elements, region, addToChat, viewportWidth };
   }
   return null;
 }

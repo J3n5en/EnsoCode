@@ -1,14 +1,26 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertAllowedCdpMethod } from '@shared/browser/cdpPolicy';
+import {
+  type BrowserAnnotationPinSpec,
+  type BrowserElementSnapshot,
+  type BrowserPickedElementRef,
+  DESIGN_CSS_TARGET_ATTRIBUTE,
+  type DesignCssSnapshot,
+  type DesignTopLeftRect,
+  type DesignXyRect,
+  designAnnotationPinsFor,
+  elementCropBounds,
+  parseBrowserElementSnapshot,
+} from '@shared/browser/designAnnotation';
 import { parseDesignBinding, sanitizeUiElementPayload } from '@shared/browser/designMode';
 import { assertDevtoolsIdle } from '@shared/browser/devtools';
 import { pickFaviconUrl } from '@shared/browser/favicon';
 import {
   DESIGN_MODE_BINDING,
+  PAGE_COMPONENT_PROBE_SCRIPT,
   PAGE_DESIGN_MODE_COMPOSE_SCRIPT,
   PAGE_DESIGN_MODE_DISABLE_SCRIPT,
-  PAGE_DESIGN_MODE_ENABLE_SCRIPT,
   PAGE_DESIGN_MODE_HIDE_SCRIPT,
   PAGE_LOCK_OVERLAY_SCRIPT,
   PAGE_SETTLE_FRAMES_SCRIPT,
@@ -18,6 +30,7 @@ import {
   pageClickScript,
   pageClickXyScript,
   pageDesignModeShowFrozenScript,
+  pageDesignRuntimeCallScript,
   pageDragPointsScript,
   pageHighlightScript,
   pageLockOverlayDisplayScript,
@@ -45,6 +58,9 @@ import type { BrowserOp } from '@shared/types/agent';
 import type {
   BrowserClearKind,
   BrowserDesignModeEvent,
+  BrowserDesignMoveDirection,
+  BrowserOpenPinResult,
+  BrowserSelectionDescription,
   BrowserTabState,
 } from '@shared/types/browser';
 import type { BrowserWindow, Session, WebContents } from 'electron';
@@ -188,6 +204,7 @@ interface Tab {
   designMode: boolean;
   favicon: string | null;
   designBinding?: boolean;
+  annotationPins?: { pageKey: string; pins: BrowserAnnotationPinSpec[] };
   pickSeq: number;
   /** 正在发合成输入（drag / CDP Input.*），input-event 不算用户接管 */
   synthetic: number;
@@ -666,15 +683,37 @@ export class BrowserHost {
     if (!enabled) {
       tab.designMode = false;
       tab.pickSeq += 1;
+      tab.annotationPins = undefined;
+      await this.callDesignRuntime(tab, 'designStop');
       await this.runGuest(tab, PAGE_DESIGN_MODE_DISABLE_SCRIPT);
       this.emitState(tab.ownerSessionId, tab.id);
       return this.stateOf(tab);
     }
     await this.ensureDesignBinding(tab);
-    await this.runGuest(tab, PAGE_DESIGN_MODE_ENABLE_SCRIPT);
     tab.designMode = true;
+    await this.syncDesignRuntimeOnPage(tab);
     this.emitState(tab.ownerSessionId, tab.id);
     return this.stateOf(tab);
+  }
+
+  private async syncDesignRuntimeOnPage(tab: Tab): Promise<void> {
+    if (!tab.designMode) return;
+    await this.ensureDesignBinding(tab);
+    await this.runGuest(tab, PAGE_COMPONENT_PROBE_SCRIPT);
+    await this.callDesignRuntime(tab, 'designStart');
+    if (tab.annotationPins) {
+      const url = tab.view.webContents.getURL();
+      const matching = designAnnotationPinsFor(url, tab.annotationPins);
+      await this.callDesignRuntime(tab, 'designPins', [matching]);
+    }
+  }
+
+  private async callDesignRuntime(
+    tab: Tab,
+    method: string,
+    args: readonly unknown[] = []
+  ): Promise<unknown> {
+    return this.runGuest(tab, pageDesignRuntimeCallScript(method, args));
   }
 
   private emitDesign(event: BrowserDesignModeEvent): void {
@@ -688,7 +727,6 @@ export class BrowserHost {
   }
 
   private async ensureDesignBinding(tab: Tab): Promise<void> {
-    if (tab.designBinding && tab.view.webContents.debugger.isAttached()) return;
     const contents = tab.view.webContents;
     if (contents.isDestroyed() || !tab.ready) return;
     const dbg = contents.debugger;
@@ -699,15 +737,21 @@ export class BrowserHost {
         return;
       }
     }
-    dbg.on('message', (_event, method, params) => {
-      if (method !== 'Runtime.bindingCalled') return;
-      const name = isRecord(params) ? params.name : undefined;
-      const payload = isRecord(params) ? params.payload : undefined;
-      if (name !== DESIGN_MODE_BINDING || typeof payload !== 'string') return;
-      void this.onDesignBinding(tab, payload);
-    });
+    if (!tab.designBinding) {
+      dbg.on('message', (_event, method, params) => {
+        if (method !== 'Runtime.bindingCalled') return;
+        const name = isRecord(params) ? params.name : undefined;
+        const payload = isRecord(params) ? params.payload : undefined;
+        if (name !== DESIGN_MODE_BINDING || typeof payload !== 'string') return;
+        void this.onDesignBinding(tab, payload);
+      });
+      dbg.on('detach', () => {
+        tab.designBinding = false;
+      });
+      tab.designBinding = true;
+    }
+    await this.cdp(tab, 'Runtime.enable', {});
     await this.cdp(tab, 'Runtime.addBinding', { name: DESIGN_MODE_BINDING });
-    tab.designBinding = true;
   }
 
   private async onDesignBinding(tab: Tab, raw: string): Promise<void> {
@@ -723,6 +767,51 @@ export class BrowserHost {
     if (msg.type === 'cancelled') {
       await this.setDesignMode(tab.id, false);
       this.emitDesign({ type: 'cancelled', conversationId: tab.ownerSessionId, tabId: tab.id });
+      return;
+    }
+    if (msg.type === 'drawing') {
+      this.emitDesign({
+        type: 'drawing',
+        conversationId: tab.ownerSessionId,
+        tabId: tab.id,
+        drawing: msg.drawing,
+      });
+      return;
+    }
+    if (msg.type === 'pins') {
+      this.emitDesign({
+        type: 'pins',
+        conversationId: tab.ownerSessionId,
+        tabId: tab.id,
+        ids: msg.ids,
+      });
+      return;
+    }
+    if (msg.type === 'pin-click') {
+      const pin = await this.openAnnotationPin(tab.id, msg.id, false);
+      this.emitDesign({
+        type: 'pin-click',
+        conversationId: tab.ownerSessionId,
+        tabId: tab.id,
+        id: msg.id,
+        pin,
+      });
+      return;
+    }
+    if (msg.type === 'select') {
+      const seq = ++tab.pickSeq;
+      const description = await this.describeSelection(tab.id, msg.region ?? undefined);
+      if (seq !== tab.pickSeq) return;
+      this.emitDesign({
+        type: 'select',
+        conversationId: tab.ownerSessionId,
+        tabId: tab.id,
+        elements: msg.elements,
+        region: msg.region,
+        addToChat: msg.addToChat,
+        viewportWidth: msg.viewportWidth,
+        description,
+      });
       return;
     }
     if (msg.type === 'freeze-request') {
@@ -769,6 +858,354 @@ export class BrowserHost {
       payload,
       ...(image ? { image } : {}),
     });
+  }
+
+  async describeSelection(
+    tabId: string,
+    crop?: DesignXyRect
+  ): Promise<BrowserSelectionDescription> {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return { elements: [], image: null };
+    await this.runGuest(tab, PAGE_COMPONENT_PROBE_SCRIPT);
+    let elements: BrowserElementSnapshot[] = [];
+    let regionAnchor: BrowserElementSnapshot | undefined;
+    const rawViewport = await this.callDesignRuntime(tab, 'viewport');
+    const viewport =
+      isRecord(rawViewport) &&
+      typeof rawViewport.width === 'number' &&
+      typeof rawViewport.height === 'number' &&
+      rawViewport.width > 0 &&
+      rawViewport.height > 0
+        ? { width: rawViewport.width, height: rawViewport.height }
+        : { width: HEADLESS_BOUNDS.width, height: HEADLESS_BOUNDS.height };
+
+    if (crop === undefined) {
+      const rawElements = await this.callDesignRuntime(tab, 'designDescribe');
+      if (Array.isArray(rawElements)) {
+        elements = rawElements
+          .map(parseBrowserElementSnapshot)
+          .filter((item): item is BrowserElementSnapshot => item !== null);
+      }
+    } else {
+      const rawAnchor = await this.callDesignRuntime(tab, 'designRegionAnchor', [
+        {
+          x: crop.x + crop.width / 2,
+          y: crop.y + crop.height / 2,
+        },
+      ]);
+      regionAnchor = parseBrowserElementSnapshot(rawAnchor) ?? undefined;
+    }
+
+    await this.callDesignRuntime(tab, 'captureChrome', [false]);
+    let frame: { data: string; mimeType: string } | undefined;
+    let croppedImage: BrowserSelectionDescription['image'] = null;
+    try {
+      frame = await this.screenshotClip(tab, undefined, { captureBeyondViewport: false });
+      const targetCrop =
+        crop !== undefined
+          ? crop
+          : elements.length > 0
+            ? elementCropBounds(elements, 1, viewport)
+            : null;
+      if (targetCrop && targetCrop.width >= 1 && targetCrop.height >= 1) {
+        const shot = await this.screenshotClip(
+          tab,
+          {
+            x: Math.max(0, Math.round(targetCrop.x)),
+            y: Math.max(0, Math.round(targetCrop.y)),
+            width: Math.max(1, Math.round(targetCrop.width)),
+            height: Math.max(1, Math.round(targetCrop.height)),
+            scale: 1,
+          },
+          { captureBeyondViewport: false }
+        );
+        croppedImage = {
+          data: shot.data,
+          mimeType: shot.mimeType,
+          name: elements.length > 0 ? 'design-element.png' : 'design-annotation.png',
+          width: Math.max(1, Math.round(targetCrop.width)),
+          height: Math.max(1, Math.round(targetCrop.height)),
+        };
+      }
+    } catch {
+      // ignore screenshot race
+    } finally {
+      await this.callDesignRuntime(tab, 'captureChrome', [true]);
+    }
+
+    return {
+      elements,
+      ...(regionAnchor ? { regionAnchor } : {}),
+      image: croppedImage,
+      ...(frame ? { frame } : {}),
+    };
+  }
+
+  async moveSelection(
+    tabId: string,
+    direction: BrowserDesignMoveDirection
+  ): Promise<{
+    elements: BrowserPickedElementRef[];
+    description: BrowserSelectionDescription;
+  }> {
+    const tab = this.tabs.get(tabId);
+    if (!tab?.designMode) {
+      return { elements: [], description: { elements: [], image: null } };
+    }
+    const raw = await this.callDesignRuntime(tab, 'designMove', [direction]);
+    const elements: BrowserPickedElementRef[] = Array.isArray(raw)
+      ? raw.filter(
+          (item): item is BrowserPickedElementRef =>
+            isRecord(item) &&
+            typeof item.tag === 'string' &&
+            typeof item.component === 'string' &&
+            typeof item.uid === 'string' &&
+            typeof item.hueIndex === 'number' &&
+            isRecord(item.rect)
+        )
+      : [];
+    const description = await this.describeSelection(tabId);
+    return { elements, description };
+  }
+
+  async clearSelection(tabId: string): Promise<boolean> {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return false;
+    tab.pickSeq += 1;
+    await this.callDesignRuntime(tab, 'designPinOpen', [null, false]);
+    const cleared = await this.callDesignRuntime(tab, 'designClear');
+    return cleared === true;
+  }
+
+  async setAnnotationPins(
+    tabId: string,
+    pageKey: string,
+    pins: BrowserAnnotationPinSpec[]
+  ): Promise<boolean> {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return false;
+    tab.annotationPins = { pageKey, pins };
+    if (!tab.designMode) return false;
+    const matching = designAnnotationPinsFor(tab.view.webContents.getURL(), tab.annotationPins);
+    const res = await this.callDesignRuntime(tab, 'designPins', [matching]);
+    return res === true;
+  }
+
+  async openAnnotationPin(
+    tabId: string,
+    pinId: string | null,
+    reveal = false
+  ): Promise<BrowserOpenPinResult | null> {
+    const tab = this.tabs.get(tabId);
+    if (!tab?.designMode) return null;
+    const raw = await this.callDesignRuntime(tab, 'designPinOpen', [pinId, reveal]);
+    if (
+      !isRecord(raw) ||
+      typeof raw.top !== 'number' ||
+      typeof raw.left !== 'number' ||
+      typeof raw.detached !== 'boolean' ||
+      typeof raw.rulerInset !== 'number' ||
+      typeof raw.viewportWidth !== 'number'
+    ) {
+      return null;
+    }
+    return {
+      top: raw.top,
+      left: raw.left,
+      detached: raw.detached,
+      rulerInset: raw.rulerInset,
+      viewportWidth: raw.viewportWidth,
+    };
+  }
+
+  async readDesignCss(tabId: string, uid: string): Promise<DesignCssSnapshot | null> {
+    const tab = this.tabs.get(tabId);
+    if (!tab?.designMode) return null;
+    const token = `css-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const marked = await this.callDesignRuntime(tab, 'markCss', [uid, token]);
+      if (marked !== true) return null;
+      const matched = await this.readMatchedCssStylesForSelector(
+        tab,
+        `[${DESIGN_CSS_TARGET_ATTRIBUTE}="${token}"]`
+      ).catch(() => null);
+      const raw = await this.callDesignRuntime(tab, 'readCss', [
+        uid,
+        matched ?? { blocks: [], variableNames: [] },
+      ]);
+      if (
+        !isRecord(raw) ||
+        typeof raw.rendersText !== 'boolean' ||
+        !isRecord(raw.values) ||
+        !Array.isArray(raw.authored) ||
+        !isRecord(raw.variables) ||
+        !isRecord(raw.rect)
+      ) {
+        return null;
+      }
+      return raw as unknown as DesignCssSnapshot;
+    } finally {
+      await this.callDesignRuntime(tab, 'unmarkCss', [token]).catch(() => undefined);
+    }
+  }
+
+  private async readMatchedCssStylesForSelector(
+    tab: Tab,
+    selector: string
+  ): Promise<{
+    blocks: {
+      userAgent: boolean;
+      declarations: { name: string; value: string; important: boolean }[];
+    }[];
+    variableNames: string[];
+  } | null> {
+    await this.cdp(tab, 'DOM.enable', {});
+    await this.cdp(tab, 'CSS.enable', {});
+    try {
+      const doc = (await this.cdp(tab, 'DOM.getDocument', { depth: 0 })) as {
+        root?: { nodeId?: number };
+      };
+      const rootNodeId = doc?.root?.nodeId;
+      if (typeof rootNodeId !== 'number') return null;
+      const q = (await this.cdp(tab, 'DOM.querySelector', {
+        nodeId: rootNodeId,
+        selector,
+      })) as { nodeId?: number };
+      if (typeof q?.nodeId !== 'number' || !q.nodeId) return null;
+      const styles = (await this.cdp(tab, 'CSS.getMatchedStylesForNode', {
+        nodeId: q.nodeId,
+      })) as {
+        matchedCSSRules?: {
+          rule: {
+            origin?: string;
+            startingStyles?: unknown[];
+            style?: {
+              cssProperties?: {
+                name: string;
+                value: string;
+                disabled?: boolean;
+                parsedOk?: boolean;
+                important?: boolean;
+              }[];
+            };
+          };
+        }[];
+        attributesStyle?: {
+          cssProperties?: {
+            name: string;
+            value: string;
+            disabled?: boolean;
+            parsedOk?: boolean;
+            important?: boolean;
+          }[];
+        };
+        inlineStyle?: {
+          cssProperties?: {
+            name: string;
+            value: string;
+            disabled?: boolean;
+            parsedOk?: boolean;
+            important?: boolean;
+          }[];
+        };
+        inherited?: {
+          matchedCSSRules?: {
+            rule: {
+              startingStyles?: unknown[];
+              style?: {
+                cssProperties?: {
+                  name: string;
+                  value: string;
+                  disabled?: boolean;
+                  parsedOk?: boolean;
+                }[];
+              };
+            };
+          }[];
+          inlineStyle?: {
+            cssProperties?: {
+              name: string;
+              value: string;
+              disabled?: boolean;
+              parsedOk?: boolean;
+            }[];
+          };
+        }[];
+      };
+      type CssStyleEntry = {
+        cssProperties?: {
+          name: string;
+          value: string;
+          disabled?: boolean;
+          parsedOk?: boolean;
+          important?: boolean;
+        }[];
+      };
+      const applying = (style?: CssStyleEntry) =>
+        style?.cssProperties?.filter(
+          (prop) => !prop.disabled && prop.parsedOk !== false && prop.value !== ''
+        ) ?? [];
+      const rulesInEffect = (
+        matches?: { rule: { origin?: string; startingStyles?: unknown[]; style?: CssStyleEntry } }[]
+      ) =>
+        (matches ?? []).filter(({ rule }) => !rule.startingStyles?.length).map(({ rule }) => rule);
+
+      const rules = rulesInEffect(styles.matchedCSSRules);
+      const isUserAgent = (rule: { origin?: string }) => rule.origin === 'user-agent';
+      const blocks = [
+        ...rules.filter(isUserAgent).map((r) => ({ userAgent: true, style: r.style })),
+        { userAgent: false, style: styles.attributesStyle },
+        ...rules.filter((r) => !isUserAgent(r)).map((r) => ({ userAgent: false, style: r.style })),
+        { userAgent: false, style: styles.inlineStyle },
+      ]
+        .map(({ userAgent, style }) => ({
+          userAgent,
+          declarations: applying(style)
+            .filter((prop) => !prop.name.startsWith('--'))
+            .map((prop) => ({
+              name: prop.name,
+              value: prop.value,
+              important: prop.important === true,
+            })),
+        }))
+        .filter((b) => b.declarations.length > 0);
+
+      const variableNames = new Set<string>();
+      const rootFirst = [...(styles.inherited ?? [])].reverse();
+      for (const entry of [...rootFirst, styles]) {
+        for (const style of [
+          ...rulesInEffect(entry.matchedCSSRules).map((r) => r.style),
+          entry.inlineStyle,
+        ]) {
+          for (const prop of applying(style)) {
+            if (prop.name.startsWith('--')) variableNames.add(prop.name);
+          }
+        }
+      }
+      return { blocks, variableNames: [...variableNames] };
+    } finally {
+      await this.cdp(tab, 'CSS.disable', {}).catch(() => undefined);
+    }
+  }
+
+  async previewDesignCss(
+    tabId: string,
+    slot: 'queue' | 'draft',
+    spec: Record<string, Record<string, string | null>>
+  ): Promise<DesignTopLeftRect | null> {
+    const tab = this.tabs.get(tabId);
+    if (!tab?.designMode) return null;
+    const raw = await this.callDesignRuntime(tab, 'previewCss', [slot, spec]);
+    if (
+      !isRecord(raw) ||
+      typeof raw.top !== 'number' ||
+      typeof raw.left !== 'number' ||
+      typeof raw.width !== 'number' ||
+      typeof raw.height !== 'number'
+    ) {
+      return null;
+    }
+    return { top: raw.top, left: raw.left, width: raw.width, height: raw.height };
   }
 
   private async screenshotRect(
@@ -860,7 +1297,10 @@ export class BrowserHost {
         sessionId,
         isRecord(params) && typeof params.action === 'string' ? params.action : 'list',
         isRecord(params) && typeof params.index === 'number' ? params.index : undefined,
-        actor
+        actor,
+        isRecord(params) && typeof params.tabId === 'string' && params.tabId.trim()
+          ? params.tabId.trim()
+          : undefined
       );
     const pointed = this.tabClaims.pointer(actor.sessionId);
     const newTab = op === 'navigate' && isRecord(params) && params.newTab === true;
@@ -990,7 +1430,11 @@ export class BrowserHost {
         return this.handleTabs(
           sessionId,
           isRecord(params) && typeof params.action === 'string' ? params.action : 'list',
-          isRecord(params) && typeof params.index === 'number' ? params.index : undefined
+          isRecord(params) && typeof params.index === 'number' ? params.index : undefined,
+          undefined,
+          isRecord(params) && typeof params.tabId === 'string' && params.tabId.trim()
+            ? params.tabId.trim()
+            : undefined
         );
       case 'lock': {
         const locked = !(isRecord(params) && params.release === true);
@@ -1011,7 +1455,8 @@ export class BrowserHost {
     sessionId: string,
     action: string,
     index?: number,
-    actor?: BrowserActor
+    actor?: BrowserActor,
+    tabId?: string
   ): Promise<unknown> {
     const list = () => {
       const current =
@@ -1030,11 +1475,18 @@ export class BrowserHost {
       return { opened: tab.id, tabs: list() };
     }
     if (action === 'select') {
-      if (index === undefined || !Number.isInteger(index)) {
-        throw new Error('index is required for select');
+      const tabs = this.tabsForSession(sessionId);
+      let tab: Tab | undefined;
+      if (tabId !== undefined) {
+        tab = tabs.find((t) => t.id === tabId);
+        if (!tab) throw new Error(`No browser tab with tabId ${tabId}`);
+      } else {
+        if (index === undefined || !Number.isInteger(index)) {
+          throw new Error('index is required for select');
+        }
+        tab = tabs[index];
+        if (!tab) throw new Error(`No browser tab at index ${index}`);
       }
-      const tab = this.tabsForSession(sessionId)[index];
-      if (!tab) throw new Error(`No browser tab at index ${index}`);
       this.currentBySession.set(sessionId, tab.id);
       if (actor) this.tabClaims.point(actor.sessionId, tab.id);
       this.requestReveal(sessionId, tab.id);
@@ -1044,9 +1496,11 @@ export class BrowserHost {
       const tabs = this.tabsForSession(sessionId);
       const pointed = actor ? this.tabClaims.pointer(actor.sessionId) : undefined;
       const tab =
-        index === undefined
-          ? ((pointed ? this.tabs.get(pointed) : undefined) ?? this.tabFor(sessionId))
-          : tabs[index];
+        tabId !== undefined
+          ? tabs.find((t) => t.id === tabId)
+          : index === undefined
+            ? ((pointed ? this.tabs.get(pointed) : undefined) ?? this.tabFor(sessionId))
+            : tabs[index];
       if (!tab) throw new Error('No browser tab to close');
       if (actor) {
         const claim = this.tabClaims.claim(tab.id, actor);
@@ -1323,18 +1777,31 @@ export class BrowserHost {
       wasFilePage = isFilePage;
       tab.lastSnapshot = undefined;
       tab.favicon = null;
+      tab.pickSeq += 1;
+      if (tab.designMode) {
+        this.emitDesign({
+          type: 'drawing',
+          conversationId: tab.ownerSessionId,
+          tabId: tab.id,
+          drawing: false,
+        });
+      }
       push();
     });
     contents.on('did-finish-load', () => {
       // 始终对齐：history / BFCache 带回来的残留遮罩也要清掉
       void this.syncLockOverlay(tab);
-      if (tab.designMode) void this.runGuest(tab, PAGE_DESIGN_MODE_ENABLE_SCRIPT);
+      if (tab.designMode) void this.syncDesignRuntimeOnPage(tab);
     });
-    contents.once('dom-ready', () => {
+    contents.on('did-navigate-in-page', () => {
+      if (tab.designMode) void this.syncDesignRuntimeOnPage(tab);
+    });
+    contents.on('dom-ready', () => {
+      const firstReady = !tab.ready;
       tab.ready = true;
-      this.layout();
+      if (firstReady) this.layout();
       if (tab.locked) void this.syncLockOverlay(tab);
-      if (tab.designMode) void this.runGuest(tab, PAGE_DESIGN_MODE_ENABLE_SCRIPT);
+      if (tab.designMode) void this.syncDesignRuntimeOnPage(tab);
     });
     // window.open / target=_blank：本 tab 内导航，不弹系统浏览器
     contents.setWindowOpenHandler(({ url }) => {

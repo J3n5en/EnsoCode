@@ -1,6 +1,7 @@
 import { splitChatReferences } from '@shared/bots/composerRefs';
 import { parseBotInjectedMessage } from '@shared/bots/injectedMessage';
 import { stripBotNotesUpdate } from '@shared/bots/notes';
+import { stripBrowserElementBlocks } from '@shared/browser/designAnnotation';
 import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
@@ -561,7 +562,7 @@ function InlineMentionText({
   searchQuery?: string;
   activeNth?: number;
 }) {
-  const segments = splitInlineMentions(text);
+  const segments = splitInlineMentions(stripBrowserElementBlocks(text));
   const counter = { n: 0 };
   return (
     <span className="whitespace-pre-wrap">

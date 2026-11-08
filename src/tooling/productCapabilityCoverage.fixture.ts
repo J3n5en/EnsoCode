@@ -798,6 +798,27 @@ export const IPC_PRODUCT_COVERAGE = {
   BROWSER_DESIGN_MODE_EVENT: excluded(
     'Side panel browser Design Mode pick event; renderer UI only.'
   ),
+  BROWSER_DESCRIBE_SELECTION: excluded(
+    'Side panel browser Design Mode selection inspection; renderer UI only.'
+  ),
+  BROWSER_MOVE_SELECTION: excluded(
+    'Side panel browser Design Mode DOM traversal; renderer UI only.'
+  ),
+  BROWSER_CLEAR_SELECTION: excluded(
+    'Side panel browser Design Mode selection reset; renderer UI only.'
+  ),
+  BROWSER_SET_ANNOTATION_PINS: excluded(
+    'Side panel browser Design Mode annotation pin sync; renderer UI only.'
+  ),
+  BROWSER_OPEN_ANNOTATION_PIN: excluded(
+    'Side panel browser Design Mode annotation pin open/scroll; renderer UI only.'
+  ),
+  BROWSER_READ_DESIGN_CSS: excluded(
+    'Side panel browser Design Mode CSS inspector read; renderer UI only.'
+  ),
+  BROWSER_PREVIEW_DESIGN_CSS: excluded(
+    'Side panel browser Design Mode CSS live preview; renderer UI only.'
+  ),
   SSH_CONNECTIONS_LIST: surfaces('projects.ssh-connections'),
   SSH_CONNECTIONS_UPSERT: surfaces(
     'projects.ssh-connections.add',

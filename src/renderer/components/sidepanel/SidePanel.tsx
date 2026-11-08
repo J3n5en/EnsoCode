@@ -960,7 +960,19 @@ function SurfaceUnderHoles({ titleRow, full }: { titleRow: boolean; full: boolea
     if (!el) return;
     const { left, top } = el.getBoundingClientRect();
     const local = Object.values(holes).map((h) => ({ ...h, x: h.x - left, y: h.y - top }));
-    el.style.clipPath = holesClipPath(local) ?? '';
+    const clip = holesClipPath(local) ?? '';
+    el.style.clipPath = clip;
+    const panel = el.closest<HTMLElement>('[data-enso="side-panel"]');
+    if (panel) {
+      if (clip) {
+        panel.style.setProperty('--enso-side-panel-holes-clip', clip);
+      } else {
+        panel.style.removeProperty('--enso-side-panel-holes-clip');
+      }
+    }
+    return () => {
+      panel?.style.removeProperty('--enso-side-panel-holes-clip');
+    };
   }, [holes]);
   return (
     <>

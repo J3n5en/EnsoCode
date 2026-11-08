@@ -128,6 +128,15 @@
     padding-bottom: 8px;
   }
 
+  [data-enso='canvas']::before {
+    clip-path: var(--enso-browser-holes-clip, none) !important;
+  }
+
+  [data-enso='side-panel']::before,
+  [data-enso='side-panel']::after {
+    clip-path: var(--enso-side-panel-holes-clip, none) !important;
+  }
+
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;

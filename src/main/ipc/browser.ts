@@ -1,5 +1,7 @@
+import type { BrowserAnnotationPinSpec, DesignXyRect } from '@shared/browser/designAnnotation';
 import { parseBrowserViewport, viewportToDip } from '@shared/browser/viewport';
 import { IPC_CHANNELS } from '@shared/types';
+import type { BrowserDesignMoveDirection } from '@shared/types/browser';
 import { ipcMain, type WebContents } from 'electron';
 import { browserHost } from '../services/browserHost';
 import { sendToAllWindows } from '../windows/createAppWindow';
@@ -7,9 +9,94 @@ import { isMainWebContents } from '../windows/MainWindow';
 
 const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const CLEAR_KINDS = new Set(['cookies', 'cache', 'all']);
+const MOVE_DIRECTIONS = new Set<BrowserDesignMoveDirection>([
+  'parent',
+  'child',
+  'next',
+  'previous',
+]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object';
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+function parseCropRect(value: unknown): DesignXyRect | undefined {
+  if (!isRecord(value)) return undefined;
+  const { x, y, width, height } = value;
+  if (
+    typeof x !== 'number' ||
+    typeof y !== 'number' ||
+    typeof width !== 'number' ||
+    typeof height !== 'number' ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return undefined;
+  }
+  return { x, y, width, height };
+}
+
+function parsePinSpec(value: unknown): BrowserAnnotationPinSpec | null {
+  if (!isRecord(value)) return null;
+  const { id, number, comment, label, elements, region } = value;
+  if (
+    typeof id !== 'string' ||
+    !id ||
+    typeof number !== 'number' ||
+    !Number.isFinite(number) ||
+    typeof comment !== 'string' ||
+    typeof label !== 'string' ||
+    !Array.isArray(elements)
+  ) {
+    return null;
+  }
+  const parsedElements = elements
+    .filter(
+      (el): el is BrowserAnnotationPinSpec['elements'][number] =>
+        isRecord(el) &&
+        typeof el.uid === 'string' &&
+        typeof el.tagName === 'string' &&
+        typeof el.id === 'string' &&
+        typeof el.className === 'string' &&
+        typeof el.innerText === 'string'
+    )
+    .map((el) => ({
+      uid: el.uid,
+      tagName: el.tagName,
+      id: el.id,
+      className: el.className,
+      innerText: el.innerText,
+    }));
+  let parsedRegion: BrowserAnnotationPinSpec['region'] = null;
+  if (region !== null && region !== undefined) {
+    if (
+      !isRecord(region) ||
+      typeof region.left !== 'number' ||
+      typeof region.top !== 'number' ||
+      typeof region.width !== 'number' ||
+      typeof region.height !== 'number'
+    ) {
+      return null;
+    }
+    parsedRegion = {
+      left: region.left,
+      top: region.top,
+      width: region.width,
+      height: region.height,
+    };
+  }
+  return {
+    id,
+    number,
+    comment,
+    label,
+    elements: parsedElements,
+    region: parsedRegion,
+  };
+}
 
 const watchedReporters = new WeakSet<WebContents>();
 
@@ -130,6 +217,70 @@ export function registerBrowserHandlers(): void {
     async (_event, tabId: unknown, enabled: unknown) => {
       if (!isId(tabId) || typeof enabled !== 'boolean') return browserHost.state('');
       return browserHost.setDesignMode(tabId, enabled);
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_DESCRIBE_SELECTION,
+    async (_event, tabId: unknown, crop: unknown) => {
+      if (!isId(tabId)) return { elements: [], image: null };
+      return browserHost.describeSelection(tabId, parseCropRect(crop));
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_MOVE_SELECTION,
+    async (_event, tabId: unknown, direction: unknown) => {
+      if (
+        !isId(tabId) ||
+        typeof direction !== 'string' ||
+        !MOVE_DIRECTIONS.has(direction as BrowserDesignMoveDirection)
+      ) {
+        return { elements: [], description: { elements: [], image: null } };
+      }
+      return browserHost.moveSelection(tabId, direction as BrowserDesignMoveDirection);
+    }
+  );
+  ipcMain.handle(IPC_CHANNELS.BROWSER_CLEAR_SELECTION, async (_event, tabId: unknown) => {
+    if (!isId(tabId)) return false;
+    return browserHost.clearSelection(tabId);
+  });
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_SET_ANNOTATION_PINS,
+    async (_event, tabId: unknown, pageKey: unknown, pins: unknown) => {
+      if (!isId(tabId) || typeof pageKey !== 'string' || !Array.isArray(pins)) return false;
+      const parsed = pins
+        .map(parsePinSpec)
+        .filter((pin): pin is BrowserAnnotationPinSpec => pin !== null);
+      return browserHost.setAnnotationPins(tabId, pageKey, parsed);
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_OPEN_ANNOTATION_PIN,
+    async (_event, tabId: unknown, pinId: unknown, reveal: unknown) => {
+      if (!isId(tabId) || (pinId !== null && !isId(pinId))) return null;
+      return browserHost.openAnnotationPin(tabId, pinId, reveal === true);
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_READ_DESIGN_CSS,
+    async (_event, tabId: unknown, uid: unknown) => {
+      if (!isId(tabId) || !isId(uid)) return null;
+      return browserHost.readDesignCss(tabId, uid);
+    }
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.BROWSER_PREVIEW_DESIGN_CSS,
+    async (_event, tabId: unknown, slot: unknown, spec: unknown) => {
+      if (!isId(tabId) || (slot !== 'queue' && slot !== 'draft') || !isRecord(spec)) return null;
+      const clean: Record<string, Record<string, string | null>> = {};
+      for (const [uid, edits] of Object.entries(spec)) {
+        if (!isRecord(edits)) continue;
+        const entry: Record<string, string | null> = {};
+        for (const [prop, val] of Object.entries(edits)) {
+          if (typeof val === 'string' || val === null) entry[prop] = val;
+        }
+        clean[uid] = entry;
+      }
+      return browserHost.previewDesignCss(tabId, slot, clean);
     }
   );
   browserHost.onDesignMode((event) => {

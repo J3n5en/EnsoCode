@@ -13,6 +13,16 @@ const mocks = vi.hoisted(() => ({
     onReveal: vi.fn(),
     onTabClosed: vi.fn(),
     onDesignMode: vi.fn(),
+    describeSelection: vi.fn(async () => ({ elements: [], image: null })),
+    moveSelection: vi.fn(async () => ({
+      elements: [],
+      description: { elements: [], image: null },
+    })),
+    clearSelection: vi.fn(async () => true),
+    setAnnotationPins: vi.fn(async () => true),
+    openAnnotationPin: vi.fn(async () => null),
+    readDesignCss: vi.fn(async () => null),
+    previewDesignCss: vi.fn(async () => null),
   },
 }));
 
@@ -88,4 +98,46 @@ it('上报方崩溃 / 销毁 / 整页重载后清掉浮层闩锁', () => {
   expect(mocks.host.resetOverlayReports).toHaveBeenCalledTimes(2);
   reloaded.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
   expect(mocks.host.resetOverlayReports).toHaveBeenCalledTimes(3);
+});
+
+it('Design Mode Annotate IPC 校验入参并转发给 browserHost', async () => {
+  const describeSelection = mocks.handlers.get(IPC_CHANNELS.BROWSER_DESCRIBE_SELECTION)!;
+  const moveSelection = mocks.handlers.get(IPC_CHANNELS.BROWSER_MOVE_SELECTION)!;
+  const clearSelection = mocks.handlers.get(IPC_CHANNELS.BROWSER_CLEAR_SELECTION)!;
+  const setPins = mocks.handlers.get(IPC_CHANNELS.BROWSER_SET_ANNOTATION_PINS)!;
+  const openPin = mocks.handlers.get(IPC_CHANNELS.BROWSER_OPEN_ANNOTATION_PIN)!;
+  const readCss = mocks.handlers.get(IPC_CHANNELS.BROWSER_READ_DESIGN_CSS)!;
+  const previewCss = mocks.handlers.get(IPC_CHANNELS.BROWSER_PREVIEW_DESIGN_CSS)!;
+
+  await describeSelection({}, '', undefined);
+  expect(mocks.host.describeSelection).not.toHaveBeenCalled();
+  await describeSelection({}, 'tab-1', { x: 10, y: 20, width: 100, height: 50 });
+  expect(mocks.host.describeSelection).toHaveBeenCalledWith('tab-1', {
+    x: 10,
+    y: 20,
+    width: 100,
+    height: 50,
+  });
+
+  await moveSelection({}, 'tab-1', 'invalid');
+  expect(mocks.host.moveSelection).not.toHaveBeenCalled();
+  await moveSelection({}, 'tab-1', 'parent');
+  expect(mocks.host.moveSelection).toHaveBeenCalledWith('tab-1', 'parent');
+
+  await clearSelection({}, 'tab-1');
+  expect(mocks.host.clearSelection).toHaveBeenCalledWith('tab-1');
+
+  await setPins({}, 'tab-1', 'http://localhost:3000', []);
+  expect(mocks.host.setAnnotationPins).toHaveBeenCalledWith('tab-1', 'http://localhost:3000', []);
+
+  await openPin({}, 'tab-1', 'pin-1', true);
+  expect(mocks.host.openAnnotationPin).toHaveBeenCalledWith('tab-1', 'pin-1', true);
+
+  await readCss({}, 'tab-1', 'uid-1');
+  expect(mocks.host.readDesignCss).toHaveBeenCalledWith('tab-1', 'uid-1');
+
+  await previewCss({}, 'tab-1', 'draft', { 'uid-1': { color: 'red' } });
+  expect(mocks.host.previewDesignCss).toHaveBeenCalledWith('tab-1', 'draft', {
+    'uid-1': { color: 'red' },
+  });
 });

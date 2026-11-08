@@ -203,9 +203,17 @@ import type {
   BotWriteIpcResult,
 } from '@shared/types/botIpc';
 import type {
+  BrowserAnnotationPinSpec,
   BrowserClearKind,
   BrowserDesignModeEvent,
+  BrowserDesignMoveDirection,
+  BrowserOpenPinResult,
+  BrowserPickedElementRef,
+  BrowserSelectionDescription,
   BrowserTabState,
+  DesignCssSnapshot,
+  DesignTopLeftRect,
+  DesignXyRect,
 } from '@shared/types/browser';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
@@ -1597,6 +1605,37 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_DEVTOOLS, tabId, open),
     setDesignMode: (tabId: string, enabled: boolean): Promise<BrowserTabState> =>
       ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_DESIGN_MODE, tabId, enabled),
+    describeSelection: (tabId: string, crop?: DesignXyRect): Promise<BrowserSelectionDescription> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_DESCRIBE_SELECTION, tabId, crop),
+    moveSelection: (
+      tabId: string,
+      direction: BrowserDesignMoveDirection
+    ): Promise<{
+      elements: BrowserPickedElementRef[];
+      description: BrowserSelectionDescription;
+    }> => ipcRenderer.invoke(IPC_CHANNELS.BROWSER_MOVE_SELECTION, tabId, direction),
+    clearSelection: (tabId: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_CLEAR_SELECTION, tabId),
+    setAnnotationPins: (
+      tabId: string,
+      pageKey: string,
+      pins: BrowserAnnotationPinSpec[]
+    ): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_SET_ANNOTATION_PINS, tabId, pageKey, pins),
+    openAnnotationPin: (
+      tabId: string,
+      pinId: string | null,
+      reveal = false
+    ): Promise<BrowserOpenPinResult | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_OPEN_ANNOTATION_PIN, tabId, pinId, reveal),
+    readDesignCss: (tabId: string, uid: string): Promise<DesignCssSnapshot | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_READ_DESIGN_CSS, tabId, uid),
+    previewDesignCss: (
+      tabId: string,
+      slot: 'queue' | 'draft',
+      spec: Record<string, Record<string, string | null>>
+    ): Promise<DesignTopLeftRect | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.BROWSER_PREVIEW_DESIGN_CSS, tabId, slot, spec),
     setDevToolsViewport: (
       tabId: string,
       conversationId: string,

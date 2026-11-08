@@ -94,6 +94,19 @@ describe('typed multi-entity mentions', () => {
     ]);
   });
 
+  it('strips trailing browser_element metadata blocks from display and title summary text', () => {
+    const wire = [
+      '[Selected UI element "Region 169 × 91" — path: div > svg > path 1; text: Screenshot region 169 × 91] 鸡',
+      '',
+      '```browser_element',
+      'The user selected this node in the browser preview.',
+      'tag: path',
+      '```',
+    ].join('\n');
+    expect(mentionDisplayText(wire)).toBe('@Region 169 × 91 鸡');
+    expect(cleanTitleSummarySource(wire)).toBe('鸡');
+  });
+
   it('nests Agents as a folder on empty query and flattens agents when searching', () => {
     const groups = groupMentionCandidates('', agents, duplicateNames);
     expect(flattenMentionRoot(groups, '')).toEqual([
@@ -884,9 +897,9 @@ describe('mentionPopupLayout', () => {
         '感觉标题生成有点缺陷',
       ].join('\n');
       expect(extractRepresentativeTitle(expanded)).toBe('感觉标题生成有点缺陷');
-      expect(
-        extractRepresentativeTitle(expanded.replace('\n\n感觉标题生成有点缺陷', ''))
-      ).toBe('poteto-mode');
+      expect(extractRepresentativeTitle(expanded.replace('\n\n感觉标题生成有点缺陷', ''))).toBe(
+        'poteto-mode'
+      );
     });
   });
 });

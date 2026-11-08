@@ -50,6 +50,7 @@ import {
   registerComposerInsertImage,
   registerComposerInsertText,
   registerComposerInsertUiElement,
+  registerComposerSubmitPayload,
 } from './composerMentionBridge';
 import { COMPOSER_DROP_ID } from './dragDrop';
 import { HoldToTalk, HoldToTalkToggle } from './HoldToTalk';
@@ -188,6 +189,10 @@ export function Composer({
   const [preview, setPreview] = useState<UiElementMentionCandidate | null>(null);
   const [imagePreview, setImagePreview] = useState<AttachedImage | null>(null);
   const boundIds = useRef(new Set<string>());
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  const privacyMaskingRef = useRef(privacyMasking);
+  privacyMaskingRef.current = privacyMasking;
   useEffect(() => {
     if (isolated) return;
     const unsubInsert = registerComposerInsert((candidate) =>
@@ -206,14 +211,32 @@ export function Composer({
       setImages((current) => [...current, { data: image.data, mimeType: image.mimeType }]);
       editorRef.current?.focus();
     });
+    const unsubSubmit = registerComposerSubmitPayload((payload) => {
+      if (lockedRef.current) return false;
+      const mask = privacyMaskingRef.current;
+      const blocked = mask.enabled ? scanUserInput(payload.text, mask).blocked : [];
+      if (blocked.length > 0) {
+        addToast({
+          type: 'error',
+          title: t('Message not sent'),
+          description: t(
+            'Privacy masking blocks {{kinds}}. Remove it, or change the action or allow list in Settings → Privacy.',
+            { kinds: blocked.join(', ') }
+          ),
+        });
+        return false;
+      }
+      return onSendRef.current(payload) !== false;
+    });
     return () => {
       unsubInsert();
       unsubText();
       unsubFocus();
       unsubUi();
       unsubImage();
+      unsubSubmit();
     };
-  }, [isolated]);
+  }, [isolated, t]);
   const editorRef = useRef<MentionEditorHandle>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);

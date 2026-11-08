@@ -24,7 +24,7 @@ const COMPOSER_COL = `.enso-chat-col:has([data-enso="composer"])`;
 const SLOTS: Record<ThemeAssetSlot, { state: 'session' | 'activity'; css: string }> = {
   'canvas-pattern': {
     state: 'activity',
-    css: `[data-enso="canvas"]:has([data-enso="sidebar"]){position:relative;isolation:isolate}[data-enso="canvas"]:has([data-enso="sidebar"])::before{${overlay('canvas-pattern', 'inset:0;z-index:-1', 'repeat 0 0')}}`,
+    css: `[data-enso="canvas"]:has([data-enso="sidebar"]){position:relative;isolation:isolate}[data-enso="canvas"]:has([data-enso="sidebar"])::before{${overlay('canvas-pattern', 'inset:0;z-index:-1', 'repeat 0 0')};clip-path:var(--enso-browser-holes-clip,none)}`,
   },
   'sidebar-footer': {
     state: 'activity',

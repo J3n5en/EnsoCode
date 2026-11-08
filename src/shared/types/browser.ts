@@ -1,3 +1,12 @@
+import type {
+  BrowserAnnotationPinSpec,
+  BrowserElementSnapshot,
+  BrowserPickedElementRef,
+  DesignCssSnapshot,
+  DesignTopLeftRect,
+  DesignXyRect,
+} from '../browser/designAnnotation';
+
 /** 内嵌浏览器当前 tab 状态(main → renderer 推送) */
 export interface BrowserTabHolder {
   conversationId: string;
@@ -25,6 +34,29 @@ export interface BrowserTabState {
 }
 
 export type BrowserClearKind = 'cookies' | 'cache' | 'all';
+
+export type BrowserDesignMoveDirection = 'parent' | 'child' | 'next' | 'previous';
+
+export interface BrowserSelectionDescription {
+  elements: BrowserElementSnapshot[];
+  regionAnchor?: BrowserElementSnapshot;
+  image: {
+    data: string;
+    mimeType: string;
+    name: 'design-element.png' | 'design-annotation.png';
+    width: number;
+    height: number;
+  } | null;
+  frame?: { data: string; mimeType: string };
+}
+
+export interface BrowserOpenPinResult {
+  top: number;
+  left: number;
+  detached: boolean;
+  rulerInset: number;
+  viewportWidth: number;
+}
 
 export type BrowserDesignModeEvent =
   | {
@@ -59,4 +91,42 @@ export type BrowserDesignModeEvent =
       };
       image?: { data: string; mimeType: string };
     }
-  | { type: 'cancelled'; conversationId: string; tabId: string };
+  | { type: 'cancelled'; conversationId: string; tabId: string }
+  | {
+      type: 'select';
+      conversationId: string;
+      tabId: string;
+      elements: BrowserPickedElementRef[];
+      region: DesignXyRect | null;
+      addToChat: boolean;
+      viewportWidth: number;
+      description: BrowserSelectionDescription;
+    }
+  | {
+      type: 'drawing';
+      conversationId: string;
+      tabId: string;
+      drawing: boolean;
+    }
+  | {
+      type: 'pin-click';
+      conversationId: string;
+      tabId: string;
+      id: string;
+      pin: BrowserOpenPinResult | null;
+    }
+  | {
+      type: 'pins';
+      conversationId: string;
+      tabId: string;
+      ids: string[];
+    };
+
+export type {
+  BrowserAnnotationPinSpec,
+  BrowserElementSnapshot,
+  BrowserPickedElementRef,
+  DesignCssSnapshot,
+  DesignTopLeftRect,
+  DesignXyRect,
+};

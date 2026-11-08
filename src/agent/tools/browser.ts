@@ -212,7 +212,7 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
     define(
       'browser_tabs',
       'Browser tabs',
-      'List, create, close, or select a browser tab in this conversation. Use action=list to see index/url/title; new to open a blank tab; select/close with index (0-based). Navigate after new/select.',
+      'List, create, close, or select a browser tab in this conversation. Use action=list to see index/tabId/url/title; new to open a blank tab; select/close with index (0-based) or tabId. Navigate after new/select.',
       schema({
         action: {
           type: 'string',
@@ -221,7 +221,13 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
         },
         index: {
           type: 'number',
-          description: 'Tab index. Required for select. Optional for close (defaults to current).',
+          description:
+            'Tab index (0-based). Provide index or tabId for select; optional for close (defaults to current).',
+        },
+        tabId: {
+          type: 'string',
+          description:
+            'Browser tabId (e.g. from browser_element annotation metadata). Can be used instead of index for select/close.',
         },
       }),
       (params, signal) => {
@@ -230,9 +236,14 @@ export function createBrowserTools(invoker: BrowserInvoker): ToolDefinition[] {
             ? params.action
             : 'list';
         const index = typeof params.index === 'number' ? params.index : undefined;
+        const tabId = str(params, 'tabId');
         return invoker.invoke(
           'tabs',
-          { action, ...(index !== undefined ? { index } : {}) },
+          {
+            action,
+            ...(index !== undefined ? { index } : {}),
+            ...(tabId !== undefined ? { tabId } : {}),
+          },
           signal
         );
       }

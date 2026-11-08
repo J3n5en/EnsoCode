@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   DESIGN_MODE_BINDING,
+  PAGE_COMPONENT_PROBE_SCRIPT,
   PAGE_DESIGN_MODE_DISABLE_SCRIPT,
   PAGE_DESIGN_MODE_ENABLE_SCRIPT,
   PAGE_DESIGN_MODE_HIDE_SCRIPT,
+  PAGE_DESIGN_RUNTIME_SCRIPT,
   PAGE_LOCK_OVERLAY_SCRIPT,
   PAGE_SETTLE_COMBOBOX_MS,
   PAGE_SETTLE_FRAME_MS,
@@ -11,6 +13,7 @@ import {
   PAGE_UNLOCK_OVERLAY_SCRIPT,
   pageClickScript,
   pageClickXyScript,
+  pageDesignRuntimeCallScript,
   pageDragPointsScript,
   pageLockOverlayDisplayScript,
   pagePressKeyScript,
@@ -105,6 +108,30 @@ describe('design mode scripts', () => {
     expect(PAGE_DESIGN_MODE_ENABLE_SCRIPT).toContain("freezeLayer.style.visibility = 'hidden'");
     expect(PAGE_DESIGN_MODE_ENABLE_SCRIPT).toContain("freezeLayer.style.visibility = ''");
     expect(PAGE_DESIGN_MODE_HIDE_SCRIPT).toContain('hide');
+  });
+
+  it('exports valid Cursor component probe and full design runtime scripts', () => {
+    expect(() => new Function(PAGE_COMPONENT_PROBE_SCRIPT)).not.toThrow();
+    expect(PAGE_COMPONENT_PROBE_SCRIPT).toContain('molten-picker-component-query');
+    expect(PAGE_COMPONENT_PROBE_SCRIPT).toContain('__reactFiber$');
+    expect(PAGE_COMPONENT_PROBE_SCRIPT).toContain('__vueParentComponent');
+    expect(PAGE_COMPONENT_PROBE_SCRIPT).toContain('__svelte_meta');
+
+    expect(() => new Function(PAGE_DESIGN_RUNTIME_SCRIPT)).not.toThrow();
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('MOLTEN-GLASS-OVERLAY');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('designStart');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('designStop');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('designDescribe');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('designRegionAnchor');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('designPins');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('designPinOpen');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('previewCss');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('readCss');
+    expect(PAGE_DESIGN_RUNTIME_SCRIPT).toContain('scroll to nearest');
+
+    const callSrc = pageDesignRuntimeCallScript('designMove', ['parent']);
+    expect(() => new Function(callSrc)).not.toThrow();
+    expect(callSrc).toContain('designMove');
   });
 });
 

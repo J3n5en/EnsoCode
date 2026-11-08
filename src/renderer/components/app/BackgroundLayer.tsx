@@ -115,6 +115,17 @@ export function BackgroundLayer() {
 function BackgroundShell({ children }: { children: React.ReactNode }) {
   const holes = useSidePanelStore((s) => s.browserHoles);
   const clipPath = holesClipPath(Object.values(holes));
+  React.useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (clipPath) {
+      root.style.setProperty('--enso-browser-holes-clip', clipPath);
+    } else {
+      root.style.removeProperty('--enso-browser-holes-clip');
+    }
+    return () => {
+      root.style.removeProperty('--enso-browser-holes-clip');
+    };
+  }, [clipPath]);
   return (
     <div
       aria-hidden

@@ -286,4 +286,50 @@ describe('parseDesignBinding', () => {
     expect(parseDesignBinding({ type: 'hover' })).toBeNull();
     expect(parseDesignBinding('x')).toBeNull();
   });
+
+  it('accepts Cursor annotate runtime events: select, drawing, pin-click, and pins', () => {
+    expect(parseDesignBinding({ type: 'drawing', drawing: true })).toEqual({
+      type: 'drawing',
+      drawing: true,
+    });
+    expect(parseDesignBinding({ type: 'pin-click', id: 'ann-1' })).toEqual({
+      type: 'pin-click',
+      id: 'ann-1',
+    });
+    expect(parseDesignBinding({ type: 'pins', ids: ['ann-1', 'ann-2'] })).toEqual({
+      type: 'pins',
+      ids: ['ann-1', 'ann-2'],
+    });
+    expect(
+      parseDesignBinding({
+        type: 'select',
+        elements: [
+          {
+            tag: 'button',
+            component: 'SubmitBtn',
+            rect: { x: 10, y: 20, width: 100, height: 32 },
+            uid: 'cursor-el-1',
+            hueIndex: 2,
+          },
+        ],
+        region: null,
+        addToChat: true,
+        viewportWidth: 1280,
+      })
+    ).toEqual({
+      type: 'select',
+      elements: [
+        {
+          tag: 'button',
+          component: 'SubmitBtn',
+          rect: { x: 10, y: 20, width: 100, height: 32 },
+          uid: 'cursor-el-1',
+          hueIndex: 2,
+        },
+      ],
+      region: null,
+      addToChat: true,
+      viewportWidth: 1280,
+    });
+  });
 });

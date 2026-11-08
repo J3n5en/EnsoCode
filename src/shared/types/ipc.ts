@@ -365,6 +365,20 @@ export const IPC_CHANNELS = {
   BROWSER_SET_DESIGN_MODE: 'browser:set-design-mode',
   /** main → renderer:圈选结果 / 取消 */
   BROWSER_DESIGN_MODE_EVENT: 'browser:design-mode-event',
+  /** renderer → main:读取当前选中元素/选区的完整快照与裁剪图 */
+  BROWSER_DESCRIBE_SELECTION: 'browser:describe-selection',
+  /** renderer → main:在 DOM 树中移动当前选中元素（parent/child/next/previous） */
+  BROWSER_MOVE_SELECTION: 'browser:move-selection',
+  /** renderer → main:清空当前页内选中框并恢复悬停拾取 */
+  BROWSER_CLEAR_SELECTION: 'browser:clear-selection',
+  /** renderer → main:同步当前页面的编号标注 Pin */
+  BROWSER_SET_ANNOTATION_PINS: 'browser:set-annotation-pins',
+  /** renderer → main:在页内打开或关闭指定编号 Pin（可选滚动定位） */
+  BROWSER_OPEN_ANNOTATION_PIN: 'browser:open-annotation-pin',
+  /** renderer → main:通过 CDP + 页内脚本读取选中元素的 27 项 CSS 与页面变量 */
+  BROWSER_READ_DESIGN_CSS: 'browser:read-design-css',
+  /** renderer → main:实时预览 queue / draft 槽位的 CSS 修改 */
+  BROWSER_PREVIEW_DESIGN_CSS: 'browser:preview-design-css',
 
   // Auto updater
   COMPUTER_CAPABILITIES: 'computer:capabilities',
