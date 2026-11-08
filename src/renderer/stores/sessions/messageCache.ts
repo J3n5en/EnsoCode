@@ -112,8 +112,10 @@ export function chatTimelineActivity(conversation: {
   spawning: boolean;
   status?: string;
   historyLoadAttempted?: boolean;
+  historyLoading?: boolean;
 }): 'working' | 'loading' | null {
   if (conversation.status === 'running') return 'working';
+  if (conversation.historyLoading) return 'loading';
   if (
     conversation.spawning ||
     needsHistoryHydration({

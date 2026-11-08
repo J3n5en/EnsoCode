@@ -139,6 +139,7 @@ export function ChatSessionTimeline({
     spawning,
     status,
     historyLoadAttempted,
+    historyLoading,
   });
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');

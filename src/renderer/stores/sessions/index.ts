@@ -301,7 +301,7 @@ export interface Conversation extends SessionProjection {
   historyOnly?: boolean;
   /** 已尝试过只读回放（含失败），避免反复打 IPC。不持久化。 */
   historyLoadAttempted?: boolean;
-  /** 上滑翻页在途；不持久化 */
+  /** 上滑翻页或子会话历史回放在途；不持久化 */
   historyLoading?: boolean;
   /** 手动重读在途（菜单项禁用 / 反馈）；不持久化 */
   reloading?: boolean;
@@ -871,33 +871,82 @@ export const useSessionsStore = create<SessionsState>()(
       }
 
       /**
-       * 已结束 child TAB 的惰性只读回放。四个条件全满足才发请求，失败也标记已尝试，
-       * 避免每次切 TAB 都打一次 IPC。活会话（started）走正常事件流，不走这里。
+       * child TAB 没正文时从 jsonl 回放。重启会把 coworker 标成 started，
+       * 但 worker 快照可能是空的，文件里的历史还在，所以不能用 started 当门槛。
+       * 没有 sessionFile 的是刚开的活会话，等事件流，不读文件。
        */
       async function loadChildHistory(conversationId: string): Promise<void> {
         const conversation = get().conversations[conversationId];
         if (
           !conversation?.parentId ||
-          conversation.started ||
           conversation.messages.length > 0 ||
           conversation.historyLoadAttempted
         ) {
           return;
         }
-        set((state) => patch(state, conversationId, { historyLoadAttempted: true }));
-        const result = await window.electronAPI.agent.readChildHistory(conversationId);
-        if (!result.ok) return;
-        const timeline = projectSafeJournal(result.projection.records);
-        if (timeline.messages.length === 0 && timeline.customEntries.length === 0) return;
+        // 刚开的活会话还没有文件，等事件流。重启恢复出来的有文件，即使 started 也要读。
+        if (conversation.started && !conversation.sessionFile) return;
         set((state) =>
           state.conversations[conversationId]
-            ? patch(state, conversationId, {
-                messages: timeline.messages,
-                customEntries: timeline.customEntries,
-                historyOnly: true,
-              })
+            ? patch(state, conversationId, { historyLoadAttempted: true, historyLoading: true })
             : state
         );
+        const finish = (extra: Record<string, unknown>) =>
+          set((state) =>
+            state.conversations[conversationId]
+              ? patch(state, conversationId, { historyLoading: undefined, ...extra })
+              : state
+          );
+        const result = await window.electronAPI.agent.readChildHistory(conversationId);
+        // 读取期间 worker 已经写入正文或正在跑，就不能再用文件回放盖掉，更不能标成只读。
+        const superseded = () => {
+          const current = get().conversations[conversationId];
+          return !current || current.messages.length > 0 || current.status === 'running';
+        };
+        if (superseded()) {
+          finish({});
+          return;
+        }
+        if (!result.ok) {
+          // pi 格式的子会话历史不是 safe journal，readChildHistory 会拒；改走 child run 通道
+          const tail = await window.electronAPI.agent.readChildRun(
+            conversation.parentId,
+            conversationId
+          );
+          if (superseded()) {
+            finish({});
+            return;
+          }
+          if (!tail.ok) {
+            const current = get().conversations[conversationId];
+            finish(current?.error ? {} : { error: `历史读取失败：${tail.error}` });
+            return;
+          }
+          if (tail.messages.length === 0) {
+            finish({});
+            return;
+          }
+          finish({
+            messages: tail.messages,
+            customEntries: [],
+            historyOnly: true,
+          });
+          return;
+        }
+        const timeline = projectSafeJournal(result.projection.records);
+        if (superseded()) {
+          finish({});
+          return;
+        }
+        if (timeline.messages.length === 0 && timeline.customEntries.length === 0) {
+          finish({});
+          return;
+        }
+        finish({
+          messages: timeline.messages,
+          customEntries: timeline.customEntries,
+          historyOnly: true,
+        });
       }
 
       async function adoptMissingRootAuthority(
@@ -1135,6 +1184,22 @@ export const useSessionsStore = create<SessionsState>()(
                         customEntries: conversation.customEntries,
                       }
                     : {}),
+                  // 重启后的空快照会把刚从 jsonl 补上的正文抹掉，已结束的回放要留住
+                  // 冷会话仍按缓存丢掉。worker 自己有正文时收回只读标记，避免活会话被文件回放锁死。
+                  ...(keepBody &&
+                  snapshot.messages.length === 0 &&
+                  conversation.historyOnly &&
+                  hasAuthoritativeMessages(conversation.messages)
+                    ? {
+                        messages: conversation.messages,
+                        customEntries: conversation.customEntries,
+                        historyBaseIndex: conversation.historyBaseIndex,
+                        historyOnly: true,
+                        historyLoadAttempted: true,
+                      }
+                    : snapshot.messages.length > 0
+                      ? { historyOnly: undefined }
+                      : {}),
                   ...(snapshot.child
                     ? {
                         parentId: snapshot.child.parentId,

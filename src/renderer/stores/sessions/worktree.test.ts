@@ -117,6 +117,8 @@ vi.stubGlobal('window', {
         return vi.fn();
       }),
       requestSnapshot: vi.fn(async () => ({ ok: true })),
+      readChildHistory: vi.fn(async () => ({ ok: false, code: 'not-found', error: 'no' })),
+      readChildRun: vi.fn(async () => ({ ok: false, code: 'not-found', error: 'no' })),
       spawn: agentSpawn,
       prompt: agentPrompt,
       release: agentRelease,

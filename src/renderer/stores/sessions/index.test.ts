@@ -1,6 +1,7 @@
 import type { ChildSessionIdentity } from '@shared/builtinAgents';
 import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import type {
+  ChildHistoryResult,
   ConversationReloadResult,
   DispatchMainEvent,
   ParentHistoryTailResult,
@@ -107,10 +108,17 @@ const updateConversationSelection = vi.fn(
   }
 );
 
-const readChildHistory = vi.fn(async (_conversationId: string) => ({
+const readChildHistory = vi.fn(
+  async (_conversationId: string): Promise<ChildHistoryResult> => ({
+    ok: false as const,
+    code: 'not-found' as const,
+    error: 'none',
+  })
+);
+const readChildRun = vi.fn(async () => ({
   ok: false as const,
   code: 'not-found' as const,
-  error: 'none',
+  error: 'no',
 }));
 const dismissCoworker = vi.fn(
   async (): Promise<{ ok: boolean; error?: string }> => ({
@@ -174,6 +182,7 @@ vi.stubGlobal('window', {
       requestSnapshot,
       readParentHistoryTail,
       readChildHistory,
+      readChildRun,
       reloadConversation,
       prompt: agentPrompt,
       summarizeTitle,
@@ -285,6 +294,7 @@ describe('typed Agent child projection', () => {
     createConversation.mockClear();
     updateConversationSelection.mockClear();
     readChildHistory.mockClear();
+    readChildRun.mockClear();
     readParentHistoryTail.mockReset();
     readParentHistoryTail.mockResolvedValue({
       ok: false,
@@ -1210,6 +1220,102 @@ describe('typed Agent child projection', () => {
       sessionsModule.useSessionsStore.getState().selectTab('parent', 'live');
       await Promise.resolve();
       expect(readChildHistory).not.toHaveBeenCalled();
+    });
+
+    it('回放完成前 worker 已写入正文，就不再盖成只读', async () => {
+      let resolveHistory: (value: ChildHistoryResult) => void = () => {};
+      readChildHistory.mockImplementationOnce(
+        () =>
+          new Promise<ChildHistoryResult>((resolve) => {
+            resolveHistory = resolve;
+          })
+      );
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          child: {
+            ...state.conversations.parent,
+            id: 'child',
+            parentId: 'parent',
+            started: true,
+            spawning: false,
+            status: 'idle' as const,
+            sessionFile: '/tmp/child.jsonl',
+            messages: [],
+            historyOnly: undefined,
+            historyLoadAttempted: undefined,
+          },
+        },
+      }));
+      sessionsModule.useSessionsStore.getState().selectTab('parent', 'child');
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          child: {
+            ...state.conversations.child,
+            messages: [{ role: 'assistant', content: [{ type: 'text', text: 'live' }] }],
+          },
+        },
+      }));
+      resolveHistory({
+        ok: true,
+        projection: {
+          records: [{ type: 'safe-assistant-text', text: 'file', at: 1 }],
+          partial: false,
+        },
+      } as ChildHistoryResult);
+      await vi.waitFor(() =>
+        expect(
+          sessionsModule.useSessionsStore.getState().conversations.child.historyLoading
+        ).toBeUndefined()
+      );
+      const child = sessionsModule.useSessionsStore.getState().conversations.child;
+      expect(child.historyOnly).toBeUndefined();
+      expect(child.messages).toEqual([
+        { role: 'assistant', content: [{ type: 'text', text: 'live' }] },
+      ]);
+    });
+
+    it('worker 快照带回正文后收回只读标记', () => {
+      const child = childIdentity(1);
+      onAgentEvent?.(reserve(1));
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          [child.sessionId]: {
+            ...state.conversations[child.sessionId],
+            historyOnly: true,
+            historyLoadAttempted: true,
+            sessionFile: '/tmp/child.jsonl',
+            messages: [{ role: 'assistant', content: [{ type: 'text', text: 'file' }] }],
+          },
+        },
+      }));
+      sessionsModule.useSessionsStore.getState().selectTab('parent', child.sessionId);
+      onAgentEvent?.({
+        type: 'snapshot',
+        partial: true,
+        sessions: [
+          {
+            identity: child,
+            status: 'idle',
+            messages: [{ role: 'assistant', content: [{ type: 'text', text: 'worker' }] }],
+            commands: [],
+            child: {
+              parentId: 'parent',
+              childGeneration: child.generation,
+              agentTypeKey: child.typeKey,
+              agentInstanceId: child.instanceId,
+              agentInstanceName: child.instanceName,
+              dispatchOrigin: 'typed-mention',
+            },
+          },
+        ],
+      });
+      const conversation =
+        sessionsModule.useSessionsStore.getState().conversations[child.sessionId];
+      expect(conversation.historyOnly).toBeUndefined();
+      expect(conversation.messages[0]?.content).toEqual([{ type: 'text', text: 'worker' }]);
     });
 
     it('冷缓存清掉正文后清掉已尝试标记，再打开会重读', async () => {
@@ -3335,7 +3441,7 @@ describe('parent history tail hydrate', () => {
     sessionsModule.useSessionsStore.getState().selectTab('parent', 'child');
     expect(requestSnapshot).toHaveBeenCalledWith('child');
     expect(readParentHistoryTail).not.toHaveBeenCalled();
-    expect(readChildHistory).not.toHaveBeenCalled();
+    expect(readChildHistory).toHaveBeenCalledWith('child');
   });
 
   function seedReleasable(id: string) {

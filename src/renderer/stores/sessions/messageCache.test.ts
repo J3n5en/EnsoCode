@@ -351,5 +351,8 @@ describe('chatSurfaceBusy', () => {
   it('时间线脚点：空闲与空草稿无脚点', () => {
     expect(chatTimelineActivity({ messages: [{}], spawning: false, status: 'idle' })).toBeNull();
     expect(chatTimelineActivity({ started: false, messages: [], spawning: false })).toBeNull();
+    expect(
+      chatTimelineActivity({ messages: [], spawning: false, status: 'idle', historyLoading: true })
+    ).toBe('loading');
   });
 });
