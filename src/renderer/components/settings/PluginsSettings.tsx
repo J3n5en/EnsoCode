@@ -44,6 +44,7 @@ import {
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -124,10 +125,34 @@ function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plai
           {field.description && (
             <p className="text-muted-foreground text-xs">{field.description}</p>
           )}
-          {field.secret ||
-          field.type === 'string' ||
-          field.type === 'number' ||
-          field.type === 'path' ? (
+          {field.multiline && field.type === 'string' ? (
+            <div className="flex items-start gap-2">
+              <Textarea
+                autoComplete="off"
+                rows={4}
+                value={textOf(field)}
+                placeholder={
+                  field.secret && field.set ? t('Set (leave blank to keep)') : t('Not set')
+                }
+                className="min-w-0 flex-1"
+                onChange={(event) =>
+                  setDraft((prev) => ({ ...prev, [field.key]: event.target.value }))
+                }
+              />
+              {field.set && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDraft((prev) => ({ ...prev, [field.key]: null }))}
+                >
+                  {t('Clear value')}
+                </Button>
+              )}
+            </div>
+          ) : field.secret ||
+            field.type === 'string' ||
+            field.type === 'number' ||
+            field.type === 'path' ? (
             <div className="flex items-center gap-2">
               <Input
                 type={field.secret ? 'password' : field.type === 'number' ? 'number' : 'text'}

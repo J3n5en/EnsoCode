@@ -8,6 +8,7 @@ const harness = vi.hoisted(() => ({
   logs: vi.fn(),
   artifacts: vi.fn(),
   list: vi.fn(),
+  configGet: vi.fn(async () => ({ ok: true as const, fields: [] as unknown[] })),
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -34,6 +35,12 @@ vi.mock('@/components/ui/badge', () => ({
 }));
 vi.mock('@/components/ui/input', () => ({
   Input: (props: ComponentProps<'input'>) => <input {...props} />,
+}));
+vi.mock('@/components/ui/textarea', () => ({
+  // linkedom 读不回 textarea 的 value，挂到 data-value 上断言
+  Textarea: ({ value, ...props }: ComponentProps<'textarea'>) => (
+    <textarea {...props} data-value={value} />
+  ),
 }));
 vi.mock('@/components/ui/spinner', () => ({ Spinner: () => <span>loading</span> }));
 vi.mock('@/components/ui/switch', () => ({
@@ -131,7 +138,7 @@ beforeEach(async () => {
         onChanged: () => () => {},
         logs: harness.logs,
         artifactsList: harness.artifacts,
-        configGet: async () => ({ ok: true, fields: [] }),
+        configGet: harness.configGet,
       },
       assets: { listInstalledPlugins: async () => [] },
     },
@@ -139,6 +146,8 @@ beforeEach(async () => {
   harness.list.mockResolvedValue([plugin]);
   harness.logs.mockResolvedValue({ ok: true, text: 'plugin log line' });
   harness.artifacts.mockResolvedValue({ ok: true, artifacts: [] });
+  harness.configGet.mockReset();
+  harness.configGet.mockResolvedValue({ ok: true, fields: [] });
   container = dom.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
   vi.clearAllMocks();
@@ -192,5 +201,36 @@ describe('ExtensionPluginsSection', () => {
 
     await act(async () => byLabel('产出文件').click());
     expect(harness.artifacts).toHaveBeenCalledWith('local.missionops');
+  });
+
+  it('multiline 的字符串配置用多行框，普通字符串仍是单行', async () => {
+    harness.configGet.mockResolvedValue({
+      ok: true,
+      fields: [
+        {
+          key: 'name',
+          title: 'Name',
+          description: '',
+          secret: false,
+          type: 'string',
+          set: false,
+        },
+        {
+          key: 'prompt',
+          title: 'Prompt',
+          description: '',
+          secret: false,
+          type: 'string',
+          multiline: true,
+          set: true,
+          value: 'line1\nline2',
+        },
+      ],
+    });
+
+    await act(async () => byLabel('Configure').click());
+    const dialog = container.querySelector('[data-dialog="open"]');
+    expect(dialog?.querySelector('input')?.getAttribute('type')).toBe('text');
+    expect(dialog?.querySelector('textarea')?.getAttribute('data-value')).toBe('line1\nline2');
   });
 });
