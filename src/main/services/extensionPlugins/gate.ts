@@ -40,8 +40,13 @@ const WAKE_READY_MS = 60_000;
 const WAKE_POLL_MS = 250;
 
 export type ComposerOp = 'readDraft' | 'insertText' | 'replaceDraft';
-/** 需要窗口配合的会话操作：切换到会话、在发起会话的项目里新建会话、启动没在运行的会话 */
-export type SessionUiOp = 'focusSession' | 'createSession' | 'ensureSession';
+/** 需要窗口配合的会话操作：切换到会话、展开某个子代理、在发起会话的项目里新建会话、启动没在运行的会话 */
+export type SessionUiOp =
+  | 'focusSession'
+  | 'focusSubagent'
+  | 'openChildRun'
+  | 'createSession'
+  | 'ensureSession';
 
 /** 插件看到的会话：只有标识与展示字段，不含路径 */
 export interface PluginSessionInfo {
@@ -604,10 +609,50 @@ export class PluginHostGate {
         if (typeof a.sessionId !== 'string' || a.sessionId.length === 0 || a.sessionId.length > 256)
           throw pluginError('INVALID_ARGS', 'sessionId 不合法');
         const target = a.sessionId;
-        if (!this.deps.sessions?.list(current).some((s) => s.id === target))
-          throw pluginError('NOT_FOUND', '会话不存在或不在本项目');
+        // 会话列表只收根会话；coworker 和子代理的 id 是 `<根>::<子>`，
+        // 根在列表里就算本项目内的目标，具体怎么切由窗口按会话表决定。
+        const visible = this.deps.sessions?.list(current) ?? [];
+        const rootId = target.split('::')[0];
+        const inProject =
+          visible.some((session) => session.id === target) ||
+          (rootId !== target && visible.some((session) => session.id === rootId));
+        if (!inProject) throw pluginError('NOT_FOUND', '会话不存在或不在本项目');
         await sessionUi()({ sessionId: current, origin: inv.origin ?? null }, 'focusSession', {
           sessionId: target,
+        });
+        return null;
+      }
+      case 'session.focusSubagent': {
+        permit('session.focus');
+        const inv = gestured('查看干员');
+        const current = sessionOf(inv);
+        const target = a.sessionId;
+        if (typeof target !== 'string' || target.length === 0 || target.length > 256)
+          throw pluginError('INVALID_ARGS', 'sessionId 不合法');
+        if (typeof a.agentId !== 'string' || a.agentId.length === 0 || a.agentId.length > 256)
+          throw pluginError('INVALID_ARGS', 'agentId 不合法');
+        if (!(this.deps.sessions?.list(current) ?? []).some((s) => s.id === target))
+          throw pluginError('NOT_FOUND', '会话不存在或不在本项目');
+        await sessionUi()({ sessionId: current, origin: inv.origin ?? null }, 'focusSubagent', {
+          sessionId: target,
+          agentId: a.agentId,
+        });
+        return null;
+      }
+      case 'session.openChildRun': {
+        permit('session.focus');
+        const inv = gestured('查看干员历史');
+        const current = sessionOf(inv);
+        const parentId = a.parentId;
+        if (typeof parentId !== 'string' || parentId.length === 0 || parentId.length > 256)
+          throw pluginError('INVALID_ARGS', 'parentId 不合法');
+        if (typeof a.childId !== 'string' || a.childId.length === 0 || a.childId.length > 256)
+          throw pluginError('INVALID_ARGS', 'childId 不合法');
+        if (!(this.deps.sessions?.list(current) ?? []).some((s) => s.id === parentId))
+          throw pluginError('NOT_FOUND', '会话不存在或不在本项目');
+        await sessionUi()({ sessionId: current, origin: inv.origin ?? null }, 'openChildRun', {
+          parentId,
+          childId: a.childId,
         });
         return null;
       }

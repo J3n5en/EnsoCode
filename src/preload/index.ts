@@ -1794,6 +1794,8 @@ const electronAPI = {
           | 'insertText'
           | 'replaceDraft'
           | 'focusSession'
+          | 'focusSubagent'
+          | 'openChildRun'
           | 'createSession'
           | 'ensureSession';
         payload: Record<string, unknown>;

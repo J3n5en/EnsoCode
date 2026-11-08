@@ -22,6 +22,7 @@ import { useI18n } from '@/i18n';
 import { parseMcpToolName, unwrapMcpProxyCall } from '@/lib/mcpToolName';
 import { stripAnsi } from '@/lib/terminalText';
 import { cn } from '@/lib/utils';
+import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
 import { Markdown } from './Markdown';
@@ -69,6 +70,13 @@ export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps)
   const { t } = useI18n();
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => readDismissed(sessionId));
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const pendingOpen = useSessionsStore((s) => s.pendingAgentOpen);
+
+  useEffect(() => {
+    if (!pendingOpen || pendingOpen.sessionId !== sessionId) return;
+    setOpenTaskId(pendingOpen.agentId);
+    useSessionsStore.setState({ pendingAgentOpen: null });
+  }, [pendingOpen, sessionId]);
   const seenRunning = trackRunning(sessionId, [
     ...tasks.filter((task) => task.status === 'running').map((task) => task.taskId),
     ...subagents.filter((agent) => agent.status === 'running').map((agent) => agent.id),

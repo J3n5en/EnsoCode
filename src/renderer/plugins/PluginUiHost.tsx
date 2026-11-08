@@ -19,6 +19,10 @@ const sessionDeps = {
     sessions.selectConversation(rootId);
     if (target !== rootId) sessions.selectTab(rootId, target);
   },
+  focusSubagent: (sessionId: string, agentId: string) =>
+    useSessionsStore.getState().focusSubagent(sessionId, agentId),
+  openChildRun: (parentId: string, childId: string) =>
+    useSessionsStore.getState().openChildRun(parentId, childId),
   create: (projectId: string, presetId?: string) =>
     useSessionsStore.getState().newConversation(projectId, presetId ? { presetId } : undefined),
   prefill: prefillDraft,
@@ -95,6 +99,8 @@ export function PluginUiHost() {
     const unsubscribeDraft = window.electronAPI.extensionPlugins.onDraftRequest((request) => {
       if (
         request.op === 'focusSession' ||
+        request.op === 'focusSubagent' ||
+        request.op === 'openChildRun' ||
         request.op === 'createSession' ||
         request.op === 'ensureSession'
       ) {

@@ -26,6 +26,7 @@ export function ChildRunsButton({
   const [viewing, setViewing] = useState<ChildRunSummary | null>(null);
   const ticket = useRef(0);
   const coworkerKey = coworkerIds.join('\0');
+  const pendingChildRun = useSessionsStore((s) => s.pendingChildRun);
 
   const refresh = useCallback(() => {
     const current = ++ticket.current;
@@ -64,6 +65,21 @@ export function ChildRunsButton({
     }
     setViewing(item);
   };
+
+  // 插件侧栏点「跳转」时，这里代替用户点开对应的历史弹窗
+  useEffect(() => {
+    if (!pendingChildRun || pendingChildRun.parentId !== parentId) return;
+    const item = items.find((candidate) => candidate.childId === pendingChildRun.childId);
+    if (!item) return;
+    useSessionsStore.setState({ pendingChildRun: null });
+    if (!item.available) return;
+    setOpen(false);
+    if (item.live && coworkerIds.includes(item.childId)) {
+      useSessionsStore.getState().selectTab(parentId, item.childId);
+      return;
+    }
+    setViewing(item);
+  }, [pendingChildRun, items, parentId, coworkerIds]);
 
   return (
     <>

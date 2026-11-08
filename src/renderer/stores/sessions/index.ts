@@ -366,6 +366,12 @@ interface SessionsState {
   ): Promise<WorkspaceBranchSwitchResult>;
   /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
   pendingAgentPrefill?: AgentTypeKey;
+  /** 外部（插件侧栏）要求展开某个子代理的详情；TaskBar 消费后清空 */
+  pendingAgentOpen?: { sessionId: string; agentId: string } | null;
+  focusSubagent(sessionId: string, agentId: string): void;
+  /** 外部要求打开某个子会话的历史弹窗；ChildRunsButton 消费后清空 */
+  pendingChildRun?: { parentId: string; childId: string } | null;
+  openChildRun(parentId: string, childId: string): void;
 
   newConversation(
     projectId: string,
@@ -3850,6 +3856,21 @@ export const useSessionsStore = create<SessionsState>()(
           if (!get().conversations[parentId]) return;
           set((state) => patch(state, parentId, { activeTabId: tabId }));
           if (tabId && tabId !== parentId) void loadChildHistory(tabId);
+        },
+
+        focusSubagent(sessionId, agentId) {
+          if (!get().conversations[sessionId]) return;
+          // 插件手里只有 `<主会话>::<子会话>` 这种完整 id，TaskBar 认的是短 id
+          const cut = agentId.indexOf('::');
+          const short = cut >= 0 ? agentId.slice(cut + 2) : agentId;
+          get().selectConversation(sessionId);
+          set({ pendingAgentOpen: { sessionId, agentId: short } });
+        },
+
+        openChildRun(parentId, childId) {
+          if (!get().conversations[parentId]) return;
+          get().selectConversation(parentId);
+          set({ pendingChildRun: { parentId, childId } });
         },
 
         async dismissCoworkerFromUI(parentId, coworkerId) {

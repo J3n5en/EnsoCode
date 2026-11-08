@@ -12,6 +12,12 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: { virtualModels: never[] }) => unknown) =>
     select({ virtualModels: [] }),
 }));
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: Object.assign(
+    (select: (state: { pendingAgentOpen: null }) => unknown) => select({ pendingAgentOpen: null }),
+    { setState: () => {}, getState: () => ({ pendingAgentOpen: null }) }
+  ),
+}));
 
 const renderActivity = (activity: SubagentActivity): string =>
   renderToStaticMarkup(createElement(AgentActivityView, { activity }));

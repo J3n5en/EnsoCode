@@ -140,6 +140,10 @@ export const PLUGIN_HOST_APIS = [
   'session.status',
   /** 切换到会话；args { sessionId }，需用户手势 */
   'session.focus',
+  /** 切到会话并展开某个子代理的详情；args { sessionId, agentId }，需用户手势 */
+  'session.focusSubagent',
+  /** 打开某个子会话的历史弹窗；args { parentId, childId }，需用户手势 */
+  'session.openChildRun',
   /** 在发起会话的项目里新建会话并切过去；args { text?, presetId? }，presetId 只能填本插件的预设 */
   'session.create',
 ] as const;

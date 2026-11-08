@@ -619,6 +619,17 @@ describe('PluginHostGate', () => {
       sessionId: 's2',
     });
 
+    // coworker 和子代理的 id 是 `<根>::<子>`，根在列表里就放行
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 's2::cw-1' }, uiCall())
+    ).resolves.toBeNull();
+    expect(sessionUi).toHaveBeenLastCalledWith({ sessionId: 's1', origin: null }, 'focusSession', {
+      sessionId: 's2::cw-1',
+    });
+    await expect(
+      gate.handle('a.b', 'session.focus', { sessionId: 'elsewhere::cw-1' }, uiCall())
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
     await expect(gate.handle('a.b', 'session.create', {}, agentCall())).rejects.toMatchObject({
       code: 'GESTURE_REQUIRED',
     });

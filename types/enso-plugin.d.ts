@@ -173,6 +173,10 @@ export interface EnsoHostApi {
   /** 缺省发起会话；别的会话须在可见列表里 */
   'session.status': (sessionId?: string) => Promise<EnsoSessionStatus>;
   'session.focus': (sessionId: string) => Promise<void>;
+  /** 切到会话并展开某个子代理的详情；子代理不是标签页，靠 TaskBar 展开 */
+  'session.focusSubagent': (sessionId: string, agentId: string) => Promise<void>;
+  /** 打开某个子会话的历史弹窗；已结束的 coworker 只能这样看 */
+  'session.openChildRun': (parentId: string, childId: string) => Promise<void>;
   'session.create': (input?: { text?: string }) => Promise<{ sessionId: string }>;
 }
 

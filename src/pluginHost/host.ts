@@ -378,6 +378,10 @@ export function runPluginHost(transport: HostTransport): void {
         status: (sessionId?: string) =>
           hostCall('session.status', sessionId === undefined ? {} : { sessionId }),
         focus: (sessionId: string) => hostCall('session.focus', { sessionId }),
+        focusSubagent: (sessionId: string, agentId: string) =>
+          hostCall('session.focusSubagent', { sessionId, agentId }),
+        openChildRun: (parentId: string, childId: string) =>
+          hostCall('session.openChildRun', { parentId, childId }),
         create: (input?: unknown) => hostCall('session.create', input ?? {}),
       },
       host: { capabilities: () => hostCall('host.capabilities', {}) },
