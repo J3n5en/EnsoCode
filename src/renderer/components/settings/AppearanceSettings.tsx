@@ -798,7 +798,7 @@ function LiveFoldDelayRow({
   };
   return (
     <div
-      className="ml-6 flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+      className="flex items-center justify-between gap-3"
       data-settings-row="appearance.liveActivityFoldDelaySec"
     >
       <div className="min-w-0">
@@ -917,13 +917,14 @@ function ConversationDisplaySection() {
           )}
           checked={collapseLiveActivity}
           onChange={setCollapseLiveActivity}
-        />
-        {collapseLiveActivity ? (
-          <LiveFoldDelayRow
-            seconds={liveActivityFoldDelaySec}
-            onCommit={setLiveActivityFoldDelaySec}
-          />
-        ) : null}
+        >
+          {collapseLiveActivity ? (
+            <LiveFoldDelayRow
+              seconds={liveActivityFoldDelaySec}
+              onCommit={setLiveActivityFoldDelaySec}
+            />
+          ) : null}
+        </SwitchRow>
         <SwitchRow
           rowId="appearance.pinUnfinishedTodos"
           title={t('Pin unfinished todos')}

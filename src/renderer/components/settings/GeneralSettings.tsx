@@ -499,23 +499,25 @@ export function SwitchRow({
   checked,
   onChange,
   rowId,
+  children,
 }: {
   title: string;
   description: string;
   checked: boolean;
   onChange: (value: boolean) => void;
   rowId?: string;
+  children?: React.ReactNode;
 }) {
   return (
-    <div
-      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
-      data-settings-row={rowId}
-    >
-      <div className="min-w-0">
-        <p className="text-sm">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
+    <div className="rounded-md border px-3 py-2.5" data-settings-row={rowId}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm">{title}</p>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <Switch checked={checked} onCheckedChange={(value) => onChange(value === true)} />
       </div>
-      <Switch checked={checked} onCheckedChange={(value) => onChange(value === true)} />
+      {children ? <div className="mt-2">{children}</div> : null}
     </div>
   );
 }
