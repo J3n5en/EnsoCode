@@ -39,6 +39,7 @@ import {
   type TimelineRowAnchor,
   virtuosoScrollIndex,
 } from './timelineRowOrigin';
+import { type ToolHoldApi, ToolHoldProvider } from './toolHold';
 import { REPLY_ROW_KINDS } from './turnMeta';
 import { useFoldedTimeline } from './useFoldedTimeline';
 import { WelcomeSuggestions } from './WelcomeSuggestions';
@@ -196,6 +197,17 @@ export function MessageTimeline({
 
   // 工具组展开态：会话内记忆（组件随会话 key 重挂自动清零）
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
+  const heldToolsRef = useRef(new Set<string>());
+  const [heldOpenTools, setHeldOpenTools] = useState<ReadonlySet<string>>(() => new Set());
+  const reportToolHold = useCallback((key: string, held: boolean) => {
+    const current = heldToolsRef.current;
+    if (held === current.has(key)) return;
+    if (held) current.add(key);
+    else current.delete(key);
+    setHeldOpenTools(new Set(current));
+  }, []);
+  const toolHold = useRef<ToolHoldApi>({ report: reportToolHold, scroller: scrollerRef });
+  toolHold.current.report = reportToolHold;
   const toggleGroup = useCallback((key: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -217,6 +229,7 @@ export function MessageTimeline({
     collapseCompletedActivity,
     collapseLiveActivity,
     liveActivityFoldDelaySec,
+    heldOpenTools,
     turnOverrides,
   });
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
@@ -600,183 +613,186 @@ export function MessageTimeline({
 
   return (
     <ChatSearchHighlightContext.Provider value={searchHighlight}>
-      <div
-        data-enso="timeline"
-        className="@container relative min-h-0 flex-1"
-        onWheel={markUserScroll}
-        onKeyDown={markUserScroll}
-        onTouchStart={holdUserScroll}
-        onTouchEnd={releaseUserScroll}
-        onPointerDown={(e) => {
-          // 只认滚动条拖拽（落点即滚动容器本身）；点行内按钮不算滚动意图
-          if (e.target !== scrollerRef.current) return;
-          holdUserScroll();
-          window.addEventListener('pointerup', releaseUserScroll, { once: true });
-        }}
-      >
-        <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
-        {items.length === 0 && !busy ? (
-          <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 overflow-y-auto px-4 text-center">
-            <span className="t-stagger-line t-stagger-line--1 mb-3">
-              <span className="flex size-11 items-center justify-center rounded-[13px] border border-brand/20 bg-brand/8 text-brand dark:bg-brand/14">
-                <EnsoMark className="size-6" />
+      <ToolHoldProvider value={toolHold.current}>
+        <div
+          data-enso="timeline"
+          className="@container relative min-h-0 flex-1"
+          onWheel={markUserScroll}
+          onKeyDown={markUserScroll}
+          onTouchStart={holdUserScroll}
+          onTouchEnd={releaseUserScroll}
+          onPointerDown={(e) => {
+            // 只认滚动条拖拽（落点即滚动容器本身）；点行内按钮不算滚动意图
+            if (e.target !== scrollerRef.current) return;
+            holdUserScroll();
+            window.addEventListener('pointerup', releaseUserScroll, { once: true });
+          }}
+        >
+          <NavRail items={navItems} activeKey={activeNavKey} onJump={jumpTo} />
+          {items.length === 0 && !busy ? (
+            <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 overflow-y-auto px-4 text-center">
+              <span className="t-stagger-line t-stagger-line--1 mb-3">
+                <span className="flex size-11 items-center justify-center rounded-[13px] border border-brand/20 bg-brand/8 text-brand dark:bg-brand/14">
+                  <EnsoMark className="size-6" />
+                </span>
               </span>
-            </span>
-            <p className="t-stagger-line t-stagger-line--1 text-[22px] font-semibold tracking-tight">
-              {emptyTitle}
-            </p>
-            {error ? (
-              <>
-                <p className="t-stagger-line t-stagger-line--2 max-w-md text-sm text-destructive whitespace-pre-wrap">
-                  {t(error)}
-                </p>
-                {onRetryResume && (
-                  <Button size="sm" variant="outline" onClick={onRetryResume}>
-                    {t('Retry resume')}
-                  </Button>
-                )}
-              </>
-            ) : (
-              <>
-                {emptyDescription !== '' && (
-                  <p className="t-stagger-line t-stagger-line--2 text-sm text-muted-foreground">
-                    {emptyDescription ?? t('Ask the agent…')}
+              <p className="t-stagger-line t-stagger-line--1 text-[22px] font-semibold tracking-tight">
+                {emptyTitle}
+              </p>
+              {error ? (
+                <>
+                  <p className="t-stagger-line t-stagger-line--2 max-w-md text-sm text-destructive whitespace-pre-wrap">
+                    {t(error)}
                   </p>
-                )}
-                {onSuggestion && (
-                  <div className="t-stagger-line t-stagger-line--3 mt-5 w-full">
-                    <WelcomeSuggestions onPick={onSuggestion} />
-                  </div>
-                )}
-              </>
-            )}
-          </EmptyReveal>
-        ) : items.length === 0 && error ? (
-          <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <p className="t-stagger-line t-stagger-line--1 max-w-md text-sm text-destructive whitespace-pre-wrap">
-              {t(error)}
-            </p>
-            {onRetryResume && (
-              <Button size="sm" variant="outline" onClick={onRetryResume}>
-                {t('Retry resume')}
-              </Button>
-            )}
-          </EmptyReveal>
-        ) : items.length === 0 ? (
-          // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
-          <div
-            data-timeline-loading=""
-            className="flex h-full flex-col items-center justify-center gap-2.5 text-center"
-          >
-            <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
-          </div>
-        ) : !virtualize ? (
-          <div
-            ref={(el) => {
-              scrollerRef.current = el;
-            }}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              if (pinningRef.current) {
-                pinningRef.current = false;
-                atBottomRef.current = true;
-                setAtBottom(true);
-                return;
-              }
-              /*
-               * 进行中的 write/edit 会先以标题贴底、再突然插入 max-h-96 正文。
-               * 浏览器会为这次长高发一次非用户 scroll（钉住工具头），若据此解除跟随，
-               * 画面就停在工具开头。完成态不再默认展开，所以只有 loading 才复现。
-               */
-              if (!userScrollingRef.current) {
-                if (atBottomRef.current) pinToBottom();
-                return;
-              }
-              const value = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
-              if (value !== atBottomRef.current) {
-                atBottomRef.current = value;
-                setAtBottom(value);
-              }
-              if (onStartReached) {
-                if (el.scrollTop < 80 && !startReachedLatch.current) {
-                  startReachedLatch.current = true;
-                  onStartReached();
-                } else if (el.scrollTop > 240) {
-                  startReachedLatch.current = false;
-                }
-              }
-            }}
-            className="h-full select-text overflow-y-auto [overflow-anchor:none]"
-          >
-            <div ref={attachContent}>
-              <TimelineHeader context={chrome} />
-              {folded.map((item, index) => renderRow(item, index))}
-              <TimelineFooter context={chrome} />
+                  {onRetryResume && (
+                    <Button size="sm" variant="outline" onClick={onRetryResume}>
+                      {t('Retry resume')}
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {emptyDescription !== '' && (
+                    <p className="t-stagger-line t-stagger-line--2 text-sm text-muted-foreground">
+                      {emptyDescription ?? t('Ask the agent…')}
+                    </p>
+                  )}
+                  {onSuggestion && (
+                    <div className="t-stagger-line t-stagger-line--3 mt-5 w-full">
+                      <WelcomeSuggestions onPick={onSuggestion} />
+                    </div>
+                  )}
+                </>
+              )}
+            </EmptyReveal>
+          ) : items.length === 0 && error ? (
+            <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 text-center">
+              <p className="t-stagger-line t-stagger-line--1 max-w-md text-sm text-destructive whitespace-pre-wrap">
+                {t(error)}
+              </p>
+              {onRetryResume && (
+                <Button size="sm" variant="outline" onClick={onRetryResume}>
+                  {t('Retry resume')}
+                </Button>
+              )}
+            </EmptyReveal>
+          ) : items.length === 0 ? (
+            // spawn/resume 期间（历史消息尚未回放）：明确的加载态，不留空白页
+            <div
+              data-timeline-loading=""
+              className="flex h-full flex-col items-center justify-center gap-2.5 text-center"
+            >
+              <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">{t('Preparing session…')}</p>
             </div>
-          </div>
-        ) : (
-          <Virtuoso
-            key={rowEpoch.current}
-            ref={virtuosoRef}
-            data={folded}
-            // 不用首条长消息探测整段高度，否则初始定位反复校正，正文隐藏只剩脚点。
-            defaultItemHeight={80}
-            computeItemKey={(_, item) => item.key}
-            firstItemIndex={firstItemIndex}
-            startReached={requestOlder}
-            // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
-            followOutput={followChatOutput}
-            atBottomThreshold={AT_BOTTOM_THRESHOLD}
-            atBottomStateChange={(value) => {
-              /*
-               * 非用户滚动导致的离底 = 内容高度变化：流式思考单次增高超过阈值，或思考收起后
-               * 浏览器钳位 scrollTop、Virtuoso 再按「上滚」补偿一整段，视口落到本轮开头。
-               * 此前贴底就重新贴回去，不解除跟随。
-               */
-              if (!value && atBottomRef.current && !userScrollingRef.current) {
-                scrollToBottom();
-                return;
-              }
-              setAtBottom(value);
-              atBottomRef.current = value;
-            }}
-            increaseViewportBy={VIEWPORT_OVERSCAN}
-            initialTopMostItemIndex={INITIAL_TOP_MOST_ITEM_INDEX}
-            // 可视范围起点附近的 user 轮次作为导航条高亮
-            rangeChanged={({ startIndex }) => {
-              renderedStartRef.current = startIndex;
-              if (startIndex > firstItemIndex + 4) startReachedLatch.current = false;
-              scheduleActiveNavKey(() => {
-                const dataIndex = Math.max(0, startIndex - firstItemIndex);
-                let current: string | null = null;
-                for (let i = 0; i <= Math.min(dataIndex + 1, folded.length - 1); i++) {
-                  if (folded[i]?.kind === 'user') current = folded[i].key;
+          ) : !virtualize ? (
+            <div
+              ref={(el) => {
+                scrollerRef.current = el;
+              }}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (pinningRef.current) {
+                  pinningRef.current = false;
+                  atBottomRef.current = true;
+                  setAtBottom(true);
+                  return;
                 }
-                return current;
-              });
-            }}
-            scrollerRef={(el) => {
-              scrollerRef.current = el instanceof HTMLElement ? el : null;
-            }}
-            className="h-full select-text"
-            context={chrome}
-            components={TIMELINE_COMPONENTS}
-            // Virtuoso 传入的是含 firstItemIndex 的绝对下标，换算回 folded 下标
-            itemContent={(index, item) => renderRow(item, index - firstItemIndex)}
-          />
-        )}
-        {!atBottom && items.length > 0 && (
-          <button
-            type="button"
-            onClick={scrollToBottom}
-            className="absolute bottom-4 left-1/2 z-10 inline-flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3 text-xs text-muted-foreground shadow-float transition-colors hover:text-foreground"
-          >
-            <ArrowDown className="h-3 w-3" />
-            {t('Scroll to bottom')}
-          </button>
-        )}
-      </div>
+                /*
+                 * 进行中的 write/edit 会先以标题贴底、再突然插入 max-h-96 正文。
+                 * 浏览器会为这次长高发一次非用户 scroll（钉住工具头），若据此解除跟随，
+                 * 画面就停在工具开头。完成态不再默认展开，所以只有 loading 才复现。
+                 */
+                if (!userScrollingRef.current) {
+                  if (atBottomRef.current) pinToBottom();
+                  return;
+                }
+                const value =
+                  el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
+                if (value !== atBottomRef.current) {
+                  atBottomRef.current = value;
+                  setAtBottom(value);
+                }
+                if (onStartReached) {
+                  if (el.scrollTop < 80 && !startReachedLatch.current) {
+                    startReachedLatch.current = true;
+                    onStartReached();
+                  } else if (el.scrollTop > 240) {
+                    startReachedLatch.current = false;
+                  }
+                }
+              }}
+              className="h-full select-text overflow-y-auto [overflow-anchor:none]"
+            >
+              <div ref={attachContent}>
+                <TimelineHeader context={chrome} />
+                {folded.map((item, index) => renderRow(item, index))}
+                <TimelineFooter context={chrome} />
+              </div>
+            </div>
+          ) : (
+            <Virtuoso
+              key={rowEpoch.current}
+              ref={virtuosoRef}
+              data={folded}
+              // 不用首条长消息探测整段高度，否则初始定位反复校正，正文隐藏只剩脚点。
+              defaultItemHeight={80}
+              computeItemKey={(_, item) => item.key}
+              firstItemIndex={firstItemIndex}
+              startReached={requestOlder}
+              // 贴底时新内容自动跟随（含流式增高）；非贴底不抢滚
+              followOutput={followChatOutput}
+              atBottomThreshold={AT_BOTTOM_THRESHOLD}
+              atBottomStateChange={(value) => {
+                /*
+                 * 非用户滚动导致的离底 = 内容高度变化：流式思考单次增高超过阈值，或思考收起后
+                 * 浏览器钳位 scrollTop、Virtuoso 再按「上滚」补偿一整段，视口落到本轮开头。
+                 * 此前贴底就重新贴回去，不解除跟随。
+                 */
+                if (!value && atBottomRef.current && !userScrollingRef.current) {
+                  scrollToBottom();
+                  return;
+                }
+                setAtBottom(value);
+                atBottomRef.current = value;
+              }}
+              increaseViewportBy={VIEWPORT_OVERSCAN}
+              initialTopMostItemIndex={INITIAL_TOP_MOST_ITEM_INDEX}
+              // 可视范围起点附近的 user 轮次作为导航条高亮
+              rangeChanged={({ startIndex }) => {
+                renderedStartRef.current = startIndex;
+                if (startIndex > firstItemIndex + 4) startReachedLatch.current = false;
+                scheduleActiveNavKey(() => {
+                  const dataIndex = Math.max(0, startIndex - firstItemIndex);
+                  let current: string | null = null;
+                  for (let i = 0; i <= Math.min(dataIndex + 1, folded.length - 1); i++) {
+                    if (folded[i]?.kind === 'user') current = folded[i].key;
+                  }
+                  return current;
+                });
+              }}
+              scrollerRef={(el) => {
+                scrollerRef.current = el instanceof HTMLElement ? el : null;
+              }}
+              className="h-full select-text"
+              context={chrome}
+              components={TIMELINE_COMPONENTS}
+              // Virtuoso 传入的是含 firstItemIndex 的绝对下标，换算回 folded 下标
+              itemContent={(index, item) => renderRow(item, index - firstItemIndex)}
+            />
+          )}
+          {!atBottom && items.length > 0 && (
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              className="absolute bottom-4 left-1/2 z-10 inline-flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full border bg-card px-3 text-xs text-muted-foreground shadow-float transition-colors hover:text-foreground"
+            >
+              <ArrowDown className="h-3 w-3" />
+              {t('Scroll to bottom')}
+            </button>
+          )}
+        </div>
+      </ToolHoldProvider>
     </ChatSearchHighlightContext.Provider>
   );
 }

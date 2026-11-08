@@ -3228,6 +3228,39 @@ describe('过程中折叠已完成的调用', () => {
     expect(first.wakeAt).toBe(6_000);
   });
 
+  it('用户展开后点名留下的工具不进过程组，左右仍各自折', () => {
+    const items = [
+      userItem('u'),
+      toolItem('a', 'bash'),
+      toolItem('b', 'read'),
+      toolItem('c', 'bash'),
+      toolItem('d', 'read'),
+      toolItem('e', 'bash'),
+    ];
+    const heldOpenTools = new Set(['c']);
+    const live = foldTimeline(items, true, new Set(), {
+      ...prep,
+      releasedLiveActivity: new Set(['a', 'b', 'c', 'd', 'e']),
+      heldOpenTools,
+    });
+    expect(live.map((item) => (item.kind === 'tool' ? item.key : item.kind))).toEqual([
+      'user',
+      'tool-group',
+      'c',
+      'tool-group',
+    ]);
+    const done = foldTimeline(items, false, new Set(), {
+      collapseCompletedActivity: true,
+      heldOpenTools,
+    });
+    expect(done.map((item) => (item.kind === 'tool' ? item.key : item.kind))).toEqual([
+      'user',
+      'tool-group',
+      'c',
+      'tool-group',
+    ]);
+  });
+
   it('新开关：到点后这一轮仍在跑，也折成过程组', () => {
     const items = [
       userItem('u'),

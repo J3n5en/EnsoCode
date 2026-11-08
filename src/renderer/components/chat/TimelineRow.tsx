@@ -120,6 +120,7 @@ import { SubagentResult } from './SubagentResult';
 import { parseSubagentReceipt } from './subagentReceipt';
 import { TerminalOutput } from './TerminalOutput';
 import { TodoList, TodoProgress } from './TodoBar';
+import { useToolHold } from './toolHold';
 import { ZoomableImage } from './ZoomableImage';
 
 const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
@@ -2047,6 +2048,25 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const autoExpand =
     expandLiveEdits && (hasDiff || hasWrite || hasImage) && item.state === 'running';
   const [expanded, setExpanded] = useState(autoExpand);
+  const [userOpened, setUserOpened] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const hold = useToolHold();
+  useEffect(() => {
+    if (!userOpened) return;
+    const node = rowRef.current;
+    if (!node) return;
+    const key = item.key;
+    const report = hold.report;
+    const observer = new IntersectionObserver(
+      ([entry]) => report(key, entry?.isIntersecting === true),
+      { root: hold.scroller.current }
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      report(key, false);
+    };
+  }, [userOpened, item.key, hold]);
   const memoryHits =
     expanded && item.name === 'memory_search' ? parseMemorySearchHits(item.output) : null;
   const memoryCapture =
@@ -2073,12 +2093,22 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   if (item.plan && item.state !== 'error') return <PlanRow plan={item.plan} />;
 
   return (
-    <div data-enso="tool-row" data-tool-style={compact ? 'compact' : 'full'}>
+    <div
+      ref={rowRef}
+      data-enso="tool-row"
+      data-tool-style={compact ? 'compact' : 'full'}
+      data-user-open={userOpened ? 'true' : undefined}
+    >
       <div className="flex items-center gap-1">
         <button
           type="button"
           disabled={!expandable}
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            setUserOpened(next);
+            hold.report(item.key, next);
+          }}
           className={cn(
             'group/step flex min-h-6 min-w-0 flex-1 items-center gap-2 text-left text-[13px]',
             SUBTLE_TEXT,

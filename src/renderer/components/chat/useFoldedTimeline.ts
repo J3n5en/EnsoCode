@@ -34,6 +34,7 @@ export function useFoldedTimeline(
     collapseCompletedActivity: collapse,
     collapseLiveActivity: live,
     releasedLiveActivity: release?.released,
+    heldOpenTools: prep.heldOpenTools,
   });
 
   useEffect(() => {

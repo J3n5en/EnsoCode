@@ -1760,6 +1760,8 @@ export interface TimelinePrep {
   collapseLiveActivity?: boolean;
   /** 尾段安静后等多久再折，单位秒。缺省 5，超出 1–60 会被收窄 */
   liveActivityFoldDelaySec?: number;
+  /** 用户展开了、并且这行还在视窗里。这些工具留在过程组外面。 */
+  heldOpenTools?: ReadonlySet<string>;
 }
 
 export type TimelineFoldOptions = TimelinePrep & {
@@ -1935,19 +1937,24 @@ function foldPrepared(
   collapseCompleted: boolean,
   releasedLive: ReadonlySet<string> | null,
   lastUserIndex: number,
-  liveFrom: number
+  liveFrom: number,
+  heldOpenTools: ReadonlySet<string> | null
 ): TimelineItem[] {
+  const heldOpen = (row: TimelineItem): boolean =>
+    row.kind === 'tool' && heldOpenTools?.has(row.key) === true;
   const activityAt = (index: number): boolean =>
     collapseCompleted && !(running && index > liveFrom);
   const releasedPrefixEnd = (index: number): number => {
     if (!releasedLive || !running || !(index > liveFrom) || !isActivityMember(sourceItems[index])) {
       return index;
     }
+    if (heldOpen(sourceItems[index])) return index;
     if (!releasedLive.has(activityAnchor(sourceItems[index]))) return index;
     let end = index;
     while (
       end < sourceItems.length &&
       isActivityMember(sourceItems[end]) &&
+      !heldOpen(sourceItems[end]) &&
       releasedLive.has(activityAnchor(sourceItems[end]))
     ) {
       end += 1;
@@ -1955,6 +1962,7 @@ function foldPrepared(
     return end - index >= 2 ? end : index;
   };
   const inSegment = (s: TimelineItem, index: number): boolean =>
+    !heldOpen(s) &&
     !(s.kind === 'tool' && s.generatedImages?.length) &&
     (s.kind === 'thinking' ||
       (s.kind === 'tool-group' && activityAt(index)) ||
@@ -2056,6 +2064,7 @@ function foldPrepared(
  *   失败工具与目标信号打断段。running 且在 liveFrom 之后的尾段不进这个开关。
  * - collapseLiveActivity：上面那条尾段在工具和思考都结束后再等一段时间，anchor 进入
  *   releasedLiveActivity 才折。已经折起的前缀留在组里，新完成的调用单独再等一段时间。
+ *   heldOpenTools 里的工具不进过程组或只读组，左右邻行仍按原规则折。
  *   正在流的思考从安静前缀后面截断，不把前面已经折起的部分重新打开。
  * - 成功配对的 explore_mark → explore_fold 先收成探索组：平时独立成行，完成后并入过程组。
  * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
@@ -2083,6 +2092,7 @@ export function foldTimeline(
     options.collapseCompletedActivity === true,
     releasedLive,
     lastUserIndex,
-    liveFrom
+    liveFrom,
+    options.heldOpenTools ?? null
   );
 }
