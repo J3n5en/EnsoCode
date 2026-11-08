@@ -7,7 +7,7 @@ import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { isVirtualRef, modelDisplayName } from '@shared/virtualModels';
 import { Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
 import { ChromeRow, useShellChrome } from '@/components/app/WindowChrome';
@@ -20,7 +20,7 @@ import { startDesktopVoiceSession } from '@/lib/voiceSession';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSessionsStore } from '@/stores/sessions';
-import { selectChatChrome } from '@/stores/sessions/chatChrome';
+import { selectChatChrome, selectEmptyChatState } from '@/stores/sessions/chatChrome';
 import { selectChatCandidateConversations } from '@/stores/sessions/sidebarDirectory';
 import { useSettingsStore } from '@/stores/settings';
 import { usePluginSlashCommands } from '../../plugins/commands';
@@ -90,6 +90,10 @@ export function ChatView() {
     voiceInputEnabled &&
     speechStatus?.state !== 'unsupported' &&
     speechStatus?.models.find((model) => model.id === voiceModel)?.state === 'ready';
+  const sessionsHydrated = useSyncExternalStore(
+    (onChange) => useSessionsStore.persist?.onFinishHydration?.(onChange) ?? (() => {}),
+    () => useSessionsStore.persist?.hasHydrated?.() ?? true
+  );
   const chrome = useSessionsStore(useShallow(selectChatChrome));
   const coworkerIds = useSessionsStore(
     (state) => state.conversations[chrome?.parentId ?? '']?.coworkerIds
@@ -332,16 +336,22 @@ export function ChatView() {
     useSessionsStore.getState().clearCompactionError(chrome.id);
   }, [chrome, t]);
 
+  const emptyState = selectEmptyChatState(chrome, sessionsHydrated);
   if (!chrome) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
+        {...(emptyState === 'hydrating' ? { 'data-timeline-loading': '' } : {})}
+      >
         {shellChrome && <ChromeRow data-enso="title-bar" />}
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 text-center">
-          <p className="text-lg font-medium">EnsoCode</p>
-          <p className="text-sm text-muted-foreground">
-            {t('Create or select a project to start a conversation')}
-          </p>
-        </div>
+        {emptyState === 'empty' && (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 text-center">
+            <p className="text-lg font-medium">EnsoCode</p>
+            <p className="text-sm text-muted-foreground">
+              {t('Create or select a project to start a conversation')}
+            </p>
+          </div>
+        )}
       </div>
     );
   }

@@ -51,6 +51,20 @@ export interface ChatChrome {
   busy: boolean;
 }
 
+/**
+ * 无选中会话时的展示分支：
+ * - 'hydrating'：useSessionsStore 尚未完成持久化水合，不闪现空会话提示且挂 data-timeline-loading；
+ * - 'empty'：水合已完成且确实无选中会话，显示引导占位；
+ * - null：已有选中会话。
+ */
+export function selectEmptyChatState(
+  chrome: ChatChrome | null,
+  sessionsHydrated: boolean
+): 'hydrating' | 'empty' | null {
+  if (chrome) return null;
+  return sessionsHydrated ? 'empty' : 'hydrating';
+}
+
 type SessionsSlice = {
   activeId: string | null;
   conversations: Record<string, Conversation | undefined>;

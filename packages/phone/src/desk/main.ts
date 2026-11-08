@@ -19,13 +19,13 @@ import {
 } from './launch';
 import { installLeaveGuard } from './leaveGuard';
 import {
+  createSnapshotTracker,
   loadReads,
   loadSnapshot,
   mountSnapshot,
   pruneSnapshots,
   saveReads,
   saveSnapshot,
-  snapshotReady,
 } from './snapshot';
 import { type DeskAsset, type DeskFrame, DeskTunnel } from './tunnel';
 
@@ -183,6 +183,7 @@ async function main(): Promise<void> {
   let settingsLink: unknown = null;
   let settingsLoaded = false;
   let snapshot: HTMLIFrameElement | null = null;
+  let snapshotTimer: ReturnType<typeof setInterval> | null = null;
 
   const tunnel = new DeskTunnel(device, showState, (error) => {
     if (error === 'host-outdated') fallback('桌面端版本过旧，不支持完整版，请升级后再试。');
@@ -219,6 +220,15 @@ async function main(): Promise<void> {
     attach(kind) {
       const frame = tunnel.attach(kind, () => {
         const iframe = iframes[kind];
+        if (kind === 'main') {
+          void (async () => {
+            await keepSnapshot();
+            settingsLoaded = false;
+            await coverWithSnapshot();
+            if (iframes.main === iframe) iframe?.contentWindow?.location.reload();
+          })();
+          return;
+        }
         iframe?.contentWindow?.location.reload();
       });
       attached[kind] = frame;
@@ -350,6 +360,10 @@ async function main(): Promise<void> {
   const liveChars = () => iframes.main?.contentDocument?.body?.textContent?.length ?? 0;
 
   const dropSnapshot = (): void => {
+    if (snapshotTimer) {
+      clearInterval(snapshotTimer);
+      snapshotTimer = null;
+    }
     const el = snapshot;
     snapshot = null;
     syncing = false;
@@ -363,36 +377,40 @@ async function main(): Promise<void> {
   const coverWithSnapshot = async (): Promise<void> => {
     const saved = await loadSnapshot(`${DESK_CACHE_PREFIX}${version}`, base);
     if (!saved || !iframes.main) return;
-    const snapChars = saved.chars;
-    snapshot = mountSnapshot(frames, saved.html);
+    if (snapshotTimer) {
+      clearInterval(snapshotTimer);
+      snapshotTimer = null;
+    }
+    if (!snapshot) {
+      const mounted = mountSnapshot(frames, saved.html);
+      snapshot = mounted;
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(fallbackTimer);
+          resolve();
+        };
+        const fallbackTimer = setTimeout(done, 150);
+        mounted.addEventListener('load', done, { once: true });
+      });
+    }
     syncing = true;
     renderStatus();
-    const started = Date.now();
-    let last = -1;
-    let changedAt = started;
-    const timer = setInterval(() => {
+    const step = createSnapshotTracker(Date.now(), saved.chars);
+    snapshotTimer = setInterval(() => {
       if (!snapshot) {
-        clearInterval(timer);
+        if (snapshotTimer) clearInterval(snapshotTimer);
+        snapshotTimer = null;
         return;
       }
-      const now = Date.now();
-      const chars = liveChars();
-      if (chars !== last) {
-        last = chars;
-        changedAt = now;
-      }
-      const ready = snapshotReady({
-        elapsed: now - started,
-        liveChars: chars,
-        snapChars,
+      const ready = step({
+        now: Date.now(),
+        liveChars: liveChars(),
         settingsLoaded,
-        stableFor: now - changedAt,
         liveLoading: Boolean(
           iframes.main?.contentDocument?.querySelector('[data-timeline-loading]')
         ),
       });
       if (!ready) return;
-      clearInterval(timer);
       dropSnapshot();
     }, 200);
   };
@@ -402,19 +420,19 @@ async function main(): Promise<void> {
   (window as Window & { __ensoRemoteReads?: unknown }).__ensoRemoteReads = reads;
 
   /** 切后台/离开时存一份当前界面和只读缓存，下次启动先显示它 */
-  const keepSnapshot = (): void => {
+  const keepSnapshot = async (): Promise<void> => {
     if (!version) return;
     void saveReads(`${DESK_CACHE_PREFIX}${version}`, base, reads).catch(() => {});
     const doc = iframes.main?.contentDocument;
     if (snapshot || !settingsLoaded || !doc) return;
-    void saveSnapshot(`${DESK_CACHE_PREFIX}${version}`, base, doc).catch(() => {});
+    await saveSnapshot(`${DESK_CACHE_PREFIX}${version}`, base, doc).catch(() => {});
   };
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') keepSnapshot();
+    if (document.visibilityState === 'hidden') void keepSnapshot();
   });
-  window.addEventListener('pagehide', keepSnapshot);
+  window.addEventListener('pagehide', () => void keepSnapshot());
   setInterval(() => {
-    if (document.visibilityState === 'visible') keepSnapshot();
+    if (document.visibilityState === 'visible') void keepSnapshot();
   }, 60_000);
 
   /** 首次（或桌面升级后）要经隧道下载整套界面：盖着启动画面并报进度，iframe 加载完再露出 */
@@ -452,8 +470,8 @@ async function main(): Promise<void> {
   if (launched) {
     use(cached);
     mount('main');
+    await coverWithSnapshot();
     revealFrames();
-    void coverWithSnapshot();
   }
   // 设置是弹窗时不铺满，状态栏 / 安全区底色仍跟主界面
   const settingsModal = matchMedia('(min-width: 800px) and (min-height: 560px)');

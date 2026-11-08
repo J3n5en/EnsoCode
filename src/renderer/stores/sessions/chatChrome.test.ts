@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { selectChatChrome } from './chatChrome';
+import { selectChatChrome, selectEmptyChatState } from './chatChrome';
 import type { Conversation } from './index';
 
 const conv = (id: string, extra: Partial<Conversation> = {}): Conversation =>
@@ -52,5 +52,14 @@ describe('selectChatChrome', () => {
     for (const key of keys) {
       expect(second![key]).toBe(first![key]);
     }
+  });
+
+  it('水合完成前不把空 chrome 当成未选择会话，水合完成后才显示空会话提示', () => {
+    const parent = conv('parent');
+    const chrome = selectChatChrome({ activeId: 'parent', conversations: { parent } });
+    expect(selectEmptyChatState(null, false)).toBe('hydrating');
+    expect(selectEmptyChatState(null, true)).toBe('empty');
+    expect(selectEmptyChatState(chrome, false)).toBeNull();
+    expect(selectEmptyChatState(chrome, true)).toBeNull();
   });
 });

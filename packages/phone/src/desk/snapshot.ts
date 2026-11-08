@@ -26,10 +26,47 @@ export interface SnapshotProgress {
   liveLoading: boolean;
 }
 
+export interface SnapshotSample {
+  now: number;
+  liveChars: number;
+  settingsLoaded: boolean;
+  liveLoading: boolean;
+}
+
 export function snapshotReady(p: SnapshotProgress): boolean {
   if (p.elapsed >= MAX_SNAPSHOT_MS) return true;
   if (!p.settingsLoaded || p.liveLoading) return false;
   return p.liveChars >= p.snapChars * 0.8 || p.stableFor >= SETTLED_MS;
+}
+
+/**
+ * 跟踪快照何时可揭开：等待设置或读取历史期间不累计「已稳定」时长，
+ * 否则网络握手耗时 >= SETTLED_MS 时会在设置刚到达、会话尚未渲染出的瞬间提前撤下快照。
+ */
+export function createSnapshotTracker(
+  startedAt: number,
+  snapChars: number
+): (sample: SnapshotSample) => boolean {
+  let lastChars = -1;
+  let changedAt = startedAt;
+  return (sample) => {
+    if (!sample.settingsLoaded || sample.liveLoading || sample.liveChars !== lastChars) {
+      lastChars = sample.liveChars;
+      changedAt = sample.now;
+    }
+    return snapshotReady({
+      elapsed: sample.now - startedAt,
+      liveChars: sample.liveChars,
+      snapChars,
+      settingsLoaded: sample.settingsLoaded,
+      stableFor: sample.now - changedAt,
+      liveLoading: sample.liveLoading,
+    });
+  };
+}
+
+export function canSaveSnapshot(chars: number, liveLoading: boolean): boolean {
+  return !liveLoading && chars >= MIN_SNAPSHOT_CHARS;
 }
 
 const snapshotUrl = (base: string) => `${location.origin}${base}/${SNAPSHOT_FILE}`;
@@ -71,6 +108,8 @@ export async function saveSnapshot(cacheName: string, base: string, doc: Documen
   const body = doc.body;
   if (!body) return;
   const chars = body.textContent?.length ?? 0;
+  const liveLoading = Boolean(doc.querySelector('[data-timeline-loading]'));
+  if (!canSaveSnapshot(chars, liveLoading)) return;
   const marked: Element[] = [];
   for (const el of doc.querySelectorAll('*')) {
     if (el.scrollTop > 0 || el.scrollLeft > 0) {
