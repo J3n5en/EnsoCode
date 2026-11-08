@@ -78,6 +78,7 @@ describe('BrowserAnnotateOverlay components', () => {
       />
     );
     expect(neverHtml).toContain('Annotate');
+    expect(neverHtml).toContain('M14.434 6.765');
     expect(neverHtml).toContain('data-gradient-sweep=""');
     expect(ANNOTATE_SHORTCUT_LABEL).toMatch(/D$/);
 
