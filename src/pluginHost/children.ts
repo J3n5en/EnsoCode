@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
+import { promisify } from 'node:util';
 
 /** 当前插件宿主要负责收掉的子进程；只在 runPluginHost 期间收集 */
 let bucket: Set<ChildProcess> | null = null;
@@ -11,6 +12,33 @@ function track(child: ChildProcess): ChildProcess {
   current.add(child);
   child.once('exit', () => current.delete(child));
   return child;
+}
+
+function attachStdioPromisify<T extends (...args: unknown[]) => ChildProcess>(fn: T): T {
+  Object.defineProperty(fn, promisify.custom, {
+    enumerable: false,
+    value: (...args: unknown[]) => {
+      let child: ChildProcess | undefined;
+      const promise = new Promise<{ stdout: string | Buffer; stderr: string | Buffer }>(
+        (resolve, reject) => {
+          child = fn(
+            ...args,
+            (err: Error | null, stdout: string | Buffer, stderr: string | Buffer) => {
+              if (err) {
+                Object.assign(err, { stdout, stderr });
+                reject(err);
+              } else {
+                resolve({ stdout, stderr });
+              }
+            }
+          );
+        }
+      );
+      if (child) Object.assign(promise, { child });
+      return promise;
+    },
+  });
+  return fn;
 }
 
 /** 替换 node:child_process，让插件拉起的子进程在 shutdown 时能被关掉 */
@@ -37,7 +65,7 @@ export function installChildProcessHooks(): void {
     }
     return track(spawn(file, args as import('node:child_process').SpawnOptions));
   }) as typeof cp.spawn;
-  cp.exec = ((command: string, options?: unknown, callback?: unknown) => {
+  cp.exec = attachStdioPromisify(((command: string, options?: unknown, callback?: unknown) => {
     const child =
       typeof options === 'function'
         ? exec(command, options as never)
@@ -47,8 +75,13 @@ export function installChildProcessHooks(): void {
             ? exec(command, options as never)
             : exec(command);
     return track(child);
-  }) as typeof cp.exec;
-  cp.execFile = ((file: string, args?: unknown, options?: unknown, callback?: unknown) => {
+  }) as unknown as (...args: unknown[]) => ChildProcess) as unknown as typeof cp.exec;
+  cp.execFile = attachStdioPromisify(((
+    file: string,
+    args?: unknown,
+    options?: unknown,
+    callback?: unknown
+  ) => {
     const child =
       typeof args === 'function'
         ? execFile(file, args as never)
@@ -62,7 +95,7 @@ export function installChildProcessHooks(): void {
                 ? execFile(file, args as never)
                 : execFile(file);
     return track(child);
-  }) as typeof cp.execFile;
+  }) as unknown as (...args: unknown[]) => ChildProcess) as unknown as typeof cp.execFile;
   cp.fork = ((
     modulePath: string,
     args?: readonly string[],

@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   beginChildTracking,
@@ -72,5 +73,22 @@ describe('插件宿主异常退出', () => {
     ).not.toThrow();
     expect(code).toBe(1);
     expect(child.killed).toBe(true);
+  });
+
+  it('installChildProcessHooks 保留 execFile 与 exec 的 util.promisify.custom ({ stdout, stderr })', async () => {
+    installChildProcessHooks();
+    beginChildTracking();
+    const { exec, execFile } = require('node:child_process') as typeof import('node:child_process');
+    const execFileAsync = promisify(execFile);
+    const execAsync = promisify(exec);
+
+    const fileRes = await execFileAsync(process.execPath, [
+      '-e',
+      'process.stdout.write("ok-file")',
+    ]);
+    expect(fileRes).toEqual({ stdout: 'ok-file', stderr: '' });
+
+    const cmdRes = await execAsync(`"${process.execPath}" -e "process.stdout.write('ok-cmd')"`);
+    expect(cmdRes).toEqual({ stdout: 'ok-cmd', stderr: '' });
   });
 });
