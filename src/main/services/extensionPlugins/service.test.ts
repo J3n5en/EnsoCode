@@ -2070,6 +2070,28 @@ describe('插件市场', () => {
     await pending.catch(() => undefined);
   });
 
+  it('本地安装的插件已在市场里有更高版本时，浏览市场和检查更新都能提示更新，但不静默覆盖本地来源', async () => {
+    const state = { latest: '1.2.0' };
+    const svc = open(fakeMarket(state));
+    const staged = await svc.stage({
+      kind: 'dir',
+      path: writePlugin({ 'enso-plugin.json': manifest({ version: '1.0.0' }), 'main.mjs': mainJs }),
+    });
+    if (!staged.ok) throw new Error(staged.error);
+    await svc.commit(staged.preview.token);
+
+    expect(await svc.checkUpdates()).toEqual({ checked: 1, available: 1, failed: 0 });
+    expect(svc.list()[0]).toMatchObject({
+      version: '1.0.0',
+      availableVersion: '1.2.0',
+      source: { kind: 'dir' },
+    });
+
+    state.latest = '1.3.0';
+    await svc.marketList(true);
+    expect(svc.list()[0]?.availableVersion).toBe('1.3.0');
+  });
+
   it('市场包里的插件 id 与条目不符时拒绝', async () => {
     const svc = open(fakeMarket({ latest: '1.0.0', zipId: 'other.plugin' }));
     expect(await svc.stage({ kind: 'market', id: 'example.demo' })).toMatchObject({ ok: false });

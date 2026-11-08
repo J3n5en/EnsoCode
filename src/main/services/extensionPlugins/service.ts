@@ -479,28 +479,36 @@ export class ExtensionPluginService {
     const chinaMirror = market.chinaMirror();
     const r = await market.index({ refresh });
     if (!r.ok) return { ok: false, error: r.error, chinaMirror };
-    return {
-      ok: true,
-      stale: r.stale,
-      chinaMirror,
-      plugins: r.index.plugins.map((p) => {
-        const installed = this.records.find((rec) => rec.id === p.id)?.version;
-        const icon = marketIconUrl(p.icon);
-        return {
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          tier: p.tier,
-          tags: p.tags,
-          ...(p.homepage ? { homepage: p.homepage } : {}),
-          ...(icon ? { icon } : {}),
-          latest: p.latest,
-          permissions: p.versions.find((v) => v.version === p.latest)?.permissions ?? [],
-          ...(installed ? { installedVersion: installed } : {}),
-          updateAvailable: installed !== undefined && isNewerPluginVersion(p.latest, installed),
-        };
-      }),
-    };
+    let changed = false;
+    const plugins = r.index.plugins.map((p) => {
+      const rec = this.records.find((item) => item.id === p.id);
+      const installed = rec?.version;
+      const updateAvailable = installed !== undefined && isNewerPluginVersion(p.latest, installed);
+      if (rec && rec.source?.kind !== 'url') {
+        const next = updateAvailable ? p.latest : undefined;
+        const prev = this.updates.get(rec.id);
+        if (prev?.version !== next || prev?.error) {
+          this.updates.set(rec.id, next ? { version: next } : {});
+          changed = true;
+        }
+      }
+      const icon = marketIconUrl(p.icon);
+      return {
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        tier: p.tier,
+        tags: p.tags,
+        ...(p.homepage ? { homepage: p.homepage } : {}),
+        ...(icon ? { icon } : {}),
+        latest: p.latest,
+        permissions: p.versions.find((v) => v.version === p.latest)?.permissions ?? [],
+        ...(installed ? { installedVersion: installed } : {}),
+        updateAvailable,
+      };
+    });
+    if (changed) this.touch();
+    return { ok: true, stale: r.stale, chinaMirror, plugins };
   }
 
   setMarketChinaMirror(on: boolean): void {
@@ -1538,7 +1546,7 @@ export class ExtensionPluginService {
   /** GitHub 来源只比较版本。市场来源在自动更新开启时走和手动更新相同的安装流程 */
   async checkUpdates(options: { enabledOnly?: boolean } = {}) {
     const marketRecords = this.records.filter(
-      (r) => r.source?.kind === 'market' && (!options.enabledOnly || r.state === 'enabled')
+      (r) => r.source?.kind !== 'url' && (!options.enabledOnly || r.state === 'enabled')
     );
     const marketResults = await this.checkMarketUpdates(marketRecords);
     const targets = this.records.flatMap((record) => {
@@ -1577,11 +1585,14 @@ export class ExtensionPluginService {
     const results: Array<'available' | 'current' | 'failed'> = [];
     for (const record of records) {
       if (!r.ok) {
+        if (record.source?.kind !== 'market') continue;
         this.updates.set(record.id, { error: r.error });
         results.push('failed');
         continue;
       }
-      const latest = r.index.plugins.find((p) => p.id === record.id)?.latest;
+      const entry = r.index.plugins.find((p) => p.id === record.id);
+      if (!entry && record.source?.kind !== 'market') continue;
+      const latest = entry?.latest;
       const version = latest && isNewerPluginVersion(latest, record.version) ? latest : undefined;
       this.updates.set(record.id, version ? { version } : {});
       if (!version || record.source?.kind !== 'market' || !this.wantsPluginAutoUpdate()) {

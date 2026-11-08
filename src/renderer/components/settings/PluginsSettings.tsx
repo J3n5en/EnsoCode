@@ -613,9 +613,7 @@ export function EnsoPluginsSettings({
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
-          {plugins.some(
-            (plugin) => plugin.source?.kind === 'url' || plugin.source?.kind === 'market'
-          ) && (
+          {plugins.length > 0 && (
             <Button
               size="sm"
               variant="outline"
@@ -843,7 +841,7 @@ export function EnsoPluginsSettings({
                       <Button
                         size="xs"
                         disabled={busy || downloading}
-                        onClick={() => void restage(plugin.id)}
+                        onClick={() => void restage(plugin.id, plugin.source?.kind !== 'url')}
                       >
                         {downloading ? <Spinner /> : t('Update')}
                       </Button>
