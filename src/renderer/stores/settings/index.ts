@@ -234,7 +234,7 @@ const initialState = {
   collapseLiveActivity: false,
   pinUnfinishedTodos: true,
   chatWide: false,
-  navRailSide: 'left',
+  navRailSide: 'left' as const,
   chatTypography: normalizeChatTypography(DEFAULT_CHAT_TYPOGRAPHY),
   notifyMainAgentOnly: true,
   maxActiveCoworkers: DEFAULT_MAX_ACTIVE_COWORKERS,

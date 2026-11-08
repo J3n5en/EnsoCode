@@ -3190,7 +3190,8 @@ describe('过程中折叠已完成的调用', () => {
     items.map((item) => (item.kind === 'tool' ? item.name : item.kind));
   const timed = (item: TimelineItem, durationMs: number): TimelineItem =>
     ({ ...item, durationMs }) as TimelineItem;
-  const streaming = (key: string): TimelineItem => ({ ...thinkingItem(key), streaming: true });
+  const streaming = (key: string): TimelineItem =>
+    ({ ...thinkingItem(key), streaming: true }) as TimelineItem;
   const runningTool = (key: string): TimelineItem =>
     ({ ...toolItem(key, 'bash'), state: 'running' }) as TimelineItem;
   const failed = (key: string): TimelineItem =>
