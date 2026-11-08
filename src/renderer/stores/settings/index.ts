@@ -234,6 +234,7 @@ const initialState = {
   collapseLiveActivity: false,
   pinUnfinishedTodos: true,
   chatWide: false,
+  navRailSide: 'left',
   chatTypography: normalizeChatTypography(DEFAULT_CHAT_TYPOGRAPHY),
   notifyMainAgentOnly: true,
   maxActiveCoworkers: DEFAULT_MAX_ACTIVE_COWORKERS,
@@ -444,6 +445,10 @@ export const useSettingsStore = create<SettingsState>()(
         document.documentElement.classList.toggle('enso-chat-wide', chatWide);
         set({ chatWide });
       },
+      setNavRailSide: (navRailSide) =>
+        set({
+          navRailSide: navRailSide === 'right' || navRailSide === 'off' ? navRailSide : 'left',
+        }),
       setChatTypography: (next) => {
         const chatTypography = normalizeChatTypography(next);
         applyChatTypography(chatTypography);

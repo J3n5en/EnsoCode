@@ -99,6 +99,7 @@ export const SETTINGS_STATE_FIELDS = [
   'collapseLiveActivity',
   'pinUnfinishedTodos',
   'chatWide',
+  'navRailSide',
   'chatTypography',
   'notifyMainAgentOnly',
   'maxActiveCoworkers',

@@ -476,6 +476,11 @@ export const zhTranslations: Record<string, string> = {
   'Collapse activity after reply': '回答完成后折叠过程',
   'Collapse finished activity while replying': '过程中折叠已完成的调用',
   'Pin unfinished todos': '固定显示未完成待办',
+  'Turn marks': '轮次刻度',
+  'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.':
+    '对话旁边的轮次刻度。悬停预览，点击跳转。聊天铺满宽度时不显示。',
+  Left: '左',
+  Right: '右',
   'Keep the latest todo list above the input while it has unfinished items, so it does not scroll away with the timeline':
     '最新任务清单还有未完成项时，固定显示在输入框上方，不随时间线滚走',
   'Hide until the todo list updates': '隐藏，清单更新后再显示',

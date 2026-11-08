@@ -178,6 +178,11 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Pin unfinished todos',
   },
   {
+    id: 'appearance.navRailSide',
+    category: 'appearance',
+    title: 'Turn marks',
+  },
+  {
     id: 'appearance.chatTypography',
     category: 'appearance',
     title: 'Conversation typography',

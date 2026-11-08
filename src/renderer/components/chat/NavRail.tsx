@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
-import { navRailEnabled } from './navRailVisibility';
+import { navRailEnabled, navRailSideOf } from './navRailVisibility';
 
 export interface NavRailItem {
   key: string;
@@ -21,8 +21,10 @@ const MAX_BARS = 40;
 /** Codex 风格的轮次快速导航条：每条 user 轮次一条小横线，hover 预览问答，点击跳转 */
 export function NavRail({ items, activeKey, onJump }: NavRailProps) {
   const chatWide = useSettingsStore((s) => s.chatWide);
+  const side = navRailSideOf(useSettingsStore((s) => s.navRailSide));
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  if (!navRailEnabled(chatWide, items.length)) return null;
+  if (!navRailEnabled(side, chatWide, items.length)) return null;
+  const right = side === 'right';
 
   // 轮次超过容量时，以 active 为中心截取窗口；首尾渐隐提示还有更多
   const activeIndex = Math.max(
@@ -47,11 +49,19 @@ export function NavRail({ items, activeKey, onJump }: NavRailProps) {
   };
 
   return (
-    // 默认隐藏：鼠标进入左缘感应带才淡入；容器宽不足（对话区顶满）时整体不显示，
+    // 默认隐藏：鼠标进入所选一侧的感应带才淡入；容器宽不足（对话区顶满）时整体不显示，
     // 阈值 = 列宽 42rem + 两侧留白，由父级 @container 提供查询上下文
-    <div className="group/rail absolute top-0 left-0 z-10 hidden h-full w-14 @min-[52rem]:block">
+    <div
+      className={cn(
+        'group/rail absolute top-0 z-10 hidden h-full w-14 @min-[52rem]:block',
+        right ? 'right-0' : 'left-0'
+      )}
+    >
       <div
-        className="absolute top-1/2 left-2 -translate-y-1/2 opacity-0 transition-opacity duration-200 group-hover/rail:opacity-100"
+        className={cn(
+          'absolute top-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-200 group-hover/rail:opacity-100',
+          right ? 'right-2' : 'left-2'
+        )}
         onMouseLeave={() => setHoverIndex(null)}
       >
         <div
@@ -72,7 +82,7 @@ export function NavRail({ items, activeKey, onJump }: NavRailProps) {
                 type="button"
                 onClick={() => onJump(item.key)}
                 onMouseEnter={() => setHoverIndex(index)}
-                className="flex h-[7px] items-center"
+                className={cn('flex h-[7px] w-10 items-center', right && 'justify-end')}
               >
                 <span
                   className={cn(
@@ -87,7 +97,10 @@ export function NavRail({ items, activeKey, onJump }: NavRailProps) {
 
           {hoverIndex !== null && visible[hoverIndex] && (
             <div
-              className="pointer-events-none absolute left-10 w-72 -translate-y-1/2 rounded-xl border bg-popover p-3 shadow-lg"
+              className={cn(
+                'pointer-events-none absolute w-72 -translate-y-1/2 rounded-xl border bg-popover p-3 shadow-lg',
+                right ? 'right-10' : 'left-10'
+              )}
               style={{ top: `${((hoverIndex + 0.5) / visible.length) * 100}%` }}
             >
               <p className="line-clamp-2 text-xs font-semibold">{visible[hoverIndex].question}</p>

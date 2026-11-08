@@ -234,6 +234,8 @@ export interface SettingsState {
   pinUnfinishedTodos: boolean;
   /** 聊天列铺满：去掉两侧阶梯 max-w；缺省 false（居中阅读宽度） */
   chatWide: boolean;
+  /** 轮次刻度在对话左侧、右侧，或关闭；缺省 left */
+  navRailSide: 'left' | 'right' | 'off';
   /** 会话正文排版；标题、表格与行内代码按正文比例 */
   chatTypography: ChatTypography;
   /** 仅主 agent 发送完成/失败通知；coworker 提问/审批仍提醒；缺省 true */
@@ -432,6 +434,7 @@ export interface SettingsState {
   setCollapseLiveActivity: (value: boolean) => void;
   setPinUnfinishedTodos: (value: boolean) => void;
   setChatWide: (value: boolean) => void;
+  setNavRailSide: (value: 'left' | 'right' | 'off') => void;
   setChatTypography: (next: ChatTypography) => void;
   resetChatTypography: () => void;
   setNotifyMainAgentOnly: (value: boolean) => void;

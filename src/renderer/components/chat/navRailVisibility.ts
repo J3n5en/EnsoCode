@@ -1,4 +1,10 @@
-/** 铺满时正文贴到容器左缘，定位条感应带会盖住正文，所以不显示。不足两轮也没有可跳目标。 */
-export function navRailEnabled(chatWide: boolean, turnCount: number): boolean {
-  return !chatWide && turnCount >= 2;
+export type NavRailSide = 'left' | 'right' | 'off';
+
+export function navRailSideOf(value: unknown): NavRailSide {
+  return value === 'right' || value === 'off' ? value : 'left';
+}
+
+/** 关闭、铺满或不足两轮时不显示。铺满时感应带会盖住贴边的正文。 */
+export function navRailEnabled(side: NavRailSide, chatWide: boolean, turnCount: number): boolean {
+  return side !== 'off' && !chatWide && turnCount >= 2;
 }

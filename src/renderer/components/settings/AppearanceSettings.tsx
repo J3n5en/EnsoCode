@@ -22,6 +22,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import * as React from 'react';
+import { Segmented } from '@/components/bots/BotFields';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -792,6 +793,8 @@ function ConversationDisplaySection() {
   const setCollapseLiveActivity = useSettingsStore((s) => s.setCollapseLiveActivity);
   const pinUnfinishedTodos = useSettingsStore((s) => s.pinUnfinishedTodos);
   const setPinUnfinishedTodos = useSettingsStore((s) => s.setPinUnfinishedTodos);
+  const navRailSide = useSettingsStore((s) => s.navRailSide);
+  const setNavRailSide = useSettingsStore((s) => s.setNavRailSide);
   return (
     <div className="space-y-6">
       <h3 className="text-lg font-medium">{t('Conversation display')}</h3>
@@ -868,6 +871,30 @@ function ConversationDisplaySection() {
           checked={pinUnfinishedTodos}
           onChange={setPinUnfinishedTodos}
         />
+        <div
+          className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
+          data-settings-row="appearance.navRailSide"
+        >
+          <div className="min-w-0">
+            <p className="text-sm">{t('Turn marks')}</p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.'
+              )}
+            </p>
+          </div>
+          <div className="w-36 shrink-0">
+            <Segmented
+              value={navRailSide}
+              options={[
+                { value: 'left', label: t('Left') },
+                { value: 'right', label: t('Right') },
+                { value: 'off', label: t('Off') },
+              ]}
+              onChange={setNavRailSide}
+            />
+          </div>
+        </div>
       </div>
       <ChatTypographyCard />
       <FileOpeningSettings />
