@@ -3260,6 +3260,34 @@ describe('过程中折叠已完成的调用', () => {
     expect(kinds(folded(items, still.released))).toEqual(['user', 'tool-group', 'bash']);
   });
 
+  it('已经折起的前缀不因新工具完成而展开，新工具等满 2 秒再并进去', () => {
+    const done = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(done, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    if (first.wakeAt === null) throw new Error('quiet live tail must arm');
+    const due = nextActivityRelease(done, true, prep, first.witness, first.wakeAt);
+    const more = [...done, toolItem('c', 'read')];
+    const pending = nextActivityRelease(more, true, prep, due.witness, first.wakeAt);
+    expect(pending.wakeAt).toBe(first.wakeAt + 2_000);
+    const waiting = folded(more, pending.released);
+    expect(kinds(waiting)).toEqual(['user', 'tool-group', 'read']);
+    expect(kinds((waiting[1] as Group).children)).toEqual(['bash', 'read']);
+    const absorbed = nextActivityRelease(more, true, prep, pending.witness, pending.wakeAt ?? 0);
+    const rows = folded(more, absorbed.released);
+    expect(kinds(rows)).toEqual(['user', 'tool-group']);
+    expect(kinds((rows[1] as Group).children)).toEqual(['bash', 'read', 'read']);
+  });
+
+  it('新的思考还在流时，已经折起的前缀保持折叠', () => {
+    const done = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(done, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    if (first.wakeAt === null) throw new Error('quiet live tail must arm');
+    const due = nextActivityRelease(done, true, prep, first.witness, first.wakeAt);
+    const items = [...done, streaming('t2')];
+    const still = nextActivityRelease(items, true, prep, due.witness, first.wakeAt);
+    expect(still.wakeAt).toBeNull();
+    expect(kinds(folded(items, still.released))).toEqual(['user', 'tool-group', 'thinking']);
+  });
+
   it('失败工具仍留在组外', () => {
     const items = [
       userItem('u'),
