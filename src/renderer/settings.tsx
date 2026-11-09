@@ -13,6 +13,7 @@ import { ToastProvider } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { installScrollbarActivity } from '@/lib/scrollbars';
 import { installThemeStyles } from '@/lib/themeStyles';
+import { PluginNotices } from '@/plugins/PluginNotices';
 import './styles/globals.css';
 
 installThemeStyles();
@@ -40,6 +41,7 @@ function SettingsApp() {
           <SettingsContent />
         </ShellChromeContext.Provider>
         <ToastProvider />
+        <PluginNotices />
       </div>
     );
   }
@@ -71,6 +73,7 @@ function SettingsApp() {
         <SettingsContent />
       </main>
       <ToastProvider />
+      <PluginNotices />
     </div>
   );
 }
