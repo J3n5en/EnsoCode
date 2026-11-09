@@ -16,6 +16,7 @@ import {
   UNGROUPED_GROUP_ID,
 } from '@shared/projectGroups';
 import { projectDisplayName, projectNameFromPath } from '@shared/projectName';
+import { conversationThemeState } from '@shared/theme/themeState';
 import type { Project } from '@shared/types';
 import type { SessionWorktree, WorktreeStatus } from '@shared/types/worktree';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -840,6 +841,7 @@ export function Sidebar({
           )}
           <button
             type="button"
+            data-enso="settings-button"
             onClick={() => window.electronAPI.window.openSettings()}
             className={ICON_BUTTON_CLASS}
             title={t('Settings')}
@@ -909,7 +911,7 @@ export function Sidebar({
           )}
           {visibleActiveIds.length > 0 && (
             <div data-slot="active-section">
-              <SidebarSectionLabel>{t('Active')}</SidebarSectionLabel>
+              <SidebarSectionLabel section="active">{t('Active')}</SidebarSectionLabel>
               <div className="flex flex-col">
                 {visibleActiveIds.map((id) => (
                   <DraggableChat
@@ -955,7 +957,7 @@ export function Sidebar({
           )}
           {visiblePinnedIds.length > 0 && (
             <PinnedDropZone data-slot="pinned-section">
-              <SidebarSectionLabel>{t('Pinned')}</SidebarSectionLabel>
+              <SidebarSectionLabel section="pinned">{t('Pinned')}</SidebarSectionLabel>
               <div className="flex flex-col">
                 <SortableContext
                   items={visiblePinnedIds.map((id) => pinnedChatDragId(id))}
@@ -996,7 +998,11 @@ export function Sidebar({
           )}
           {scratchSessionsEnabled && scratchProject && (
             <div data-slot="scratch-section">
-              <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.8214rem] font-medium text-subtle-foreground">
+              <div
+                data-enso="section-header"
+                data-section="scratch"
+                className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.8214rem] font-medium text-subtle-foreground"
+              >
                 <button
                   type="button"
                   onClick={toggleScratchCollapsed}
@@ -1005,6 +1011,8 @@ export function Sidebar({
                 >
                   <span className="min-w-0 truncate">{t('Temporary chats')}</span>
                   <ChevronRight
+                    data-enso="tree-chevron"
+                    data-expanded={!scratchFolded || undefined}
                     className={cn(
                       'size-3 shrink-0 transition-[opacity,transform] duration-150',
                       !scratchFolded && 'rotate-90 opacity-0 group-hover:opacity-100'
@@ -1069,6 +1077,7 @@ export function Sidebar({
           )}
           {orderedProjects.length > 0 && (
             <SidebarSectionLabel
+              section="projects"
               actions={
                 <>
                   <button
@@ -1251,6 +1260,8 @@ export function Sidebar({
                               <div ref={drag.setNodeRef} style={drag.style}>
                                 {/* 项目行：折叠箭头 + 名称 + 悬停操作；整行可拖拽排序 */}
                                 <div
+                                  data-enso="project-row"
+                                  data-expanded={!folded || undefined}
                                   className="group flex h-8 w-full items-center gap-1 rounded-lg px-2 transition-colors hover:bg-foreground/5"
                                   {...drag.handleProps}
                                 >
@@ -1475,7 +1486,9 @@ export function Sidebar({
                   <div>
                     {pinnedProjects.length > 0 && (
                       <div>
-                        <SidebarSectionLabel>{t('Pinned projects')}</SidebarSectionLabel>
+                        <SidebarSectionLabel section="pinned-projects">
+                          {t('Pinned projects')}
+                        </SidebarSectionLabel>
                         <div>{pinnedProjects.map(projectNode)}</div>
                       </div>
                     )}
@@ -1524,7 +1537,9 @@ export function Sidebar({
                 return (
                   <div className="space-y-2">
                     <div>
-                      <SidebarSectionLabel>{t('Pinned projects')}</SidebarSectionLabel>
+                      <SidebarSectionLabel section="pinned-projects">
+                        {t('Pinned projects')}
+                      </SidebarSectionLabel>
                       <div>{pinnedProjects.map(projectNode)}</div>
                     </div>
                     <div>{unpinnedProjects.map(projectNode)}</div>
@@ -1561,6 +1576,7 @@ export function Sidebar({
           )}
           <button
             type="button"
+            data-enso="settings-button"
             onClick={() => window.electronAPI.window.openSettings()}
             className={ICON_BUTTON_CLASS}
             title={t('Settings')}
@@ -1573,6 +1589,7 @@ export function Sidebar({
             <>
               <button
                 type="button"
+                data-enso="search-button"
                 onClick={onOpenSearch}
                 className={ICON_BUTTON_CLASS}
                 title={
@@ -1585,6 +1602,7 @@ export function Sidebar({
               </button>
               <button
                 type="button"
+                data-enso="sidebar-toggle"
                 onClick={onToggleCollapse}
                 className={ICON_BUTTON_CLASS}
                 title={t('Collapse sidebar')}
@@ -1948,6 +1966,8 @@ function ProjectGroupHeader({
   return (
     <div
       ref={setRefs}
+      data-enso="section-header"
+      data-section="group"
       style={{
         transform: CSS.Transform.toString(sortableDrag.transform),
         transition: sortableDrag.transition,
@@ -1974,6 +1994,8 @@ function ProjectGroupHeader({
           <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
         )}
         <ChevronRight
+          data-enso="tree-chevron"
+          data-expanded={!folded || undefined}
           className={cn(
             'size-3 shrink-0 transition-[opacity,transform] duration-150',
             !folded && 'rotate-90 opacity-0 group-hover:opacity-100'
@@ -2273,6 +2295,10 @@ interface ConversationRowProps {
     projectId: string;
     messages: { timestamp?: number }[];
     forkedFromConversationId?: string;
+    unread?: boolean;
+    pendingAsks?: readonly { requestId: string }[];
+    pendingApprovals?: readonly unknown[];
+    pendingCapabilityAsks?: readonly unknown[];
     /** 标题总结在飞（标题后转圈） */
     titleSummaryPending?: boolean;
     /** 标题总结全部候选失败（标题后红叹号，点击重试） */
@@ -2383,6 +2409,10 @@ function ConversationRow({
     <div
       data-slot="conversation-row"
       data-pinned={pinned ? 'true' : 'false'}
+      data-enso="session-row"
+      data-active={active || undefined}
+      data-status={conversationThemeState(conversation)}
+      data-unread={conversation.unread || undefined}
       className={cn(
         'group flex h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-[0.9286rem] transition-colors',
         active
@@ -2767,6 +2797,7 @@ function ProjectOverflowMenu({ actions }: { actions: ProjectAction[] }) {
   return (
     <Menu>
       <MenuTrigger
+        data-enso="row-menu"
         aria-label={t('More actions')}
         className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 data-popup-open:bg-muted data-popup-open:text-foreground data-popup-open:opacity-100"
         title={t('More actions')}
@@ -2783,14 +2814,21 @@ function ProjectOverflowMenu({ actions }: { actions: ProjectAction[] }) {
 
 /** 区块标签:纯文字,不占图标列(对应不可折叠的 Active / Pinned 等分区);actions 悬停才显示 */
 function SidebarSectionLabel({
+  section,
   children,
   actions,
 }: {
+  /** 主题用的稳定分区 id，写到 data-section */
+  section: 'active' | 'pinned' | 'projects' | 'pinned-projects';
   children: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.8214rem] font-medium text-subtle-foreground">
+    <div
+      data-enso="section-header"
+      data-section={section}
+      className="group flex items-center gap-1 pt-3.5 pr-1 pb-1 pl-2 text-[0.8214rem] font-medium text-subtle-foreground"
+    >
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {actions}
     </div>
@@ -2800,7 +2838,11 @@ function SidebarSectionLabel({
 /** 项目行首的折叠箭头:与会话行状态点同占 16px 列 */
 function FoldChevron({ folded }: { folded: boolean }) {
   return (
-    <span className="flex size-4 shrink-0 items-center justify-center text-subtle-foreground">
+    <span
+      data-enso="tree-chevron"
+      data-expanded={!folded || undefined}
+      className="flex size-4 shrink-0 items-center justify-center text-subtle-foreground"
+    >
       <ChevronRight
         className={cn('size-3.5 transition-transform duration-150', !folded && 'rotate-90')}
       />
@@ -2837,7 +2879,14 @@ function ConversationDot({
   // 空闲不画点:满列空心圈没有信息量,只有运行/待回答/失败/未读才需要被看见
   return (
     <span className="flex size-4 shrink-0 items-center justify-center">
-      {tone !== 'idle' && <ConversationStatusIndicator tone={tone} size="sm" />}
+      {tone !== 'idle' && (
+        <ConversationStatusIndicator
+          tone={tone}
+          size="sm"
+          data-enso="session-status"
+          data-status={conversationThemeState(conversation)}
+        />
+      )}
     </span>
   );
 }

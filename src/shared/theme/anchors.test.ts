@@ -19,4 +19,11 @@ describe('THEME_ANCHORS', () => {
   it.each(THEME_ANCHORS)('锚点 %s 至少挂在一个组件上', (anchor) => {
     expect(renderer).toMatch(new RegExp(`data-enso=(?:"${anchor}"|\\{'${anchor}'\\})`));
   });
+
+  it('docs/theming.md 的锚点表与清单一致、顺序相同', () => {
+    const doc = readFileSync(join(__dirname, '../../../docs/theming.md'), 'utf8');
+    const section = doc.split(/^## 锚点\r?$/m)[1]?.split(/^## /m)[0] ?? '';
+    const documented = [...section.matchAll(/^\| `([a-z-]+)` \|/gm)].map((match) => match[1]);
+    expect(documented).toEqual([...THEME_ANCHORS]);
+  });
 });

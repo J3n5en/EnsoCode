@@ -227,7 +227,9 @@ export function GroupChips({
             <div className="flex w-max gap-3.5">
               <button
                 type="button"
+                data-enso="group-chip"
                 data-selected={selectedId === ALL_GROUP_ID || undefined}
+                data-active={selectedId === ALL_GROUP_ID || undefined}
                 onClick={() => onSelect(ALL_GROUP_ID)}
                 className={tabClass(selectedId === ALL_GROUP_ID, false)}
               >
@@ -235,7 +237,9 @@ export function GroupChips({
               </button>
               <button
                 type="button"
+                data-enso="group-chip"
                 data-selected={selectedId === RECENT_GROUP_ID || undefined}
+                data-active={selectedId === RECENT_GROUP_ID || undefined}
                 onClick={() => onSelect(RECENT_GROUP_ID)}
                 className={tabClass(selectedId === RECENT_GROUP_ID, false)}
               >
@@ -367,7 +371,9 @@ function SortableGroupChip({
     <button
       ref={setNodeRef}
       type="button"
+      data-enso="group-chip"
       data-selected={selected || undefined}
+      data-active={selected || undefined}
       onClick={onSelect}
       // 只沿横轴跟手：纵向位移会被横滑容器裁掉
       style={{
@@ -407,7 +413,9 @@ function UngroupedChip({
     <button
       ref={setNodeRef}
       type="button"
+      data-enso="group-chip"
       data-selected={selected || undefined}
+      data-active={selected || undefined}
       onClick={onSelect}
       className={tabClass(selected, isOver && isProjectDrag(active?.data.current))}
     >

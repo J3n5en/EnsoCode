@@ -51,6 +51,7 @@ export function NodeSwitcher() {
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
+          data-enso="node-switcher"
           className="flex h-8.5 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-foreground/5 data-popup-open:bg-foreground/5"
           title={t('Switch node')}
         >

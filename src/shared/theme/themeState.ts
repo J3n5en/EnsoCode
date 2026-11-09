@@ -24,6 +24,19 @@ export function sessionThemeState(
   conversations: Conversations
 ): ThemeState {
   if (!conversation) return 'idle';
+  return conversationThemeState({
+    ...conversation,
+    hasRunningChild: conversationHasRunningChild(
+      { ...conversation, status: conversation.status ?? 'idle' },
+      conversations
+    ),
+  });
+}
+
+/** 子会话是否在跑已由调用方算好（如侧栏目录投影的 `hasRunningChild`），其余与 sessionThemeState 相同 */
+export function conversationThemeState(
+  conversation: StateConversation & { hasRunningChild?: boolean }
+): ThemeState {
   const tone = conversationDotTone({
     status: conversation.status ?? 'idle',
     spawning: conversation.spawning,
@@ -31,10 +44,7 @@ export function sessionThemeState(
       (conversation.pendingAsks?.length ?? 0) +
       (conversation.pendingApprovals?.length ?? 0) +
       (conversation.pendingCapabilityAsks?.length ?? 0),
-    hasRunningChild: conversationHasRunningChild(
-      { ...conversation, status: conversation.status ?? 'idle' },
-      conversations
-    ),
+    hasRunningChild: conversation.hasRunningChild,
   });
   return tone === 'failed' ? 'error' : tone === 'unread' ? 'idle' : tone;
 }

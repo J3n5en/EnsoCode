@@ -1,4 +1,5 @@
 import type { CoworkerTabTone } from '@shared/conversationDotTone';
+import type { ThemeState } from '@shared/theme/themeState';
 import { CircleHelp } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -15,12 +16,17 @@ export function ConversationStatusIndicator({
   size = 'sm',
   title,
   className,
+  'data-enso': anchor,
+  'data-status': status,
 }: {
   tone: ConversationIndicatorTone;
   size?: keyof typeof DOT_SIZE;
   /** 非 waiting 态的悬停提示（waiting 态固定为「等待你回答」） */
   title?: string;
   className?: string;
+  /** 主题锚点，只有侧栏会话行的圆点挂 */
+  'data-enso'?: 'session-status';
+  'data-status'?: ThemeState;
 }) {
   const { t } = useI18n();
   if (tone === 'waiting') {
@@ -32,6 +38,8 @@ export function ConversationStatusIndicator({
         title={label}
         data-slot="conversation-status"
         data-tone={tone}
+        data-enso={anchor}
+        data-status={status}
         className={cn('flex shrink-0 items-center text-amber-500', className)}
       >
         <CircleHelp className={cn(ICON_SIZE[size], 'stroke-[2.5]')} aria-hidden />
@@ -42,6 +50,8 @@ export function ConversationStatusIndicator({
     <span
       data-slot="conversation-status"
       data-tone={tone}
+      data-enso={anchor}
+      data-status={status}
       title={title}
       className={cn(
         'shrink-0 rounded-full',
