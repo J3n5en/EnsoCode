@@ -40,12 +40,113 @@ export interface ResolvedCustomModelCapabilities {
 
 const OPTIMISTIC_THINKING_LEVEL_MAP = { xhigh: 'xhigh', max: 'max' } as const;
 
-/** 精确 model id 查找。OAuth meta 与自定义 spawn 共用；禁止前缀 / 品牌猜测。 */
-export function findCatalogModelById<T extends { id: string }>(
+/**
+ * 第三方常在原模型 id 后挂的部署标记，剥掉仍是同一个模型。
+ * 不收 mini / pro / turbo / 1m 这类：剥掉会变成别的模型或更小的窗口。
+ */
+const DEPLOYMENT_MARKERS = new Set([
+  'fast',
+  'eco',
+  'flex',
+  'priority',
+  'highspeed',
+  'thinking',
+  'think',
+  'nothink',
+  'free',
+  'preview',
+  'latest',
+  'exp',
+  'beta',
+  'online',
+  'nitro',
+  'floor',
+  'exacto',
+  'batch',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
+
+function canonicalModelId(id: string): string {
+  return id
+    .trim()
+    .toLowerCase()
+    .replace(/^models\//, '')
+    .replace(/[_\s]+/g, '-')
+    .replace(/(\d)\.(?=\d)/g, '$1-');
+}
+
+/** 去命名空间（openrouter 的 vendor/）与厂商点前缀（bedrock 的 us.anthropic.） */
+function leafModelKey(id: string): string {
+  const canonical = canonicalModelId(id);
+  return canonical.slice(canonical.lastIndexOf('/') + 1).replace(/^(?:[a-z]+\.)+(?=[a-z])/, '');
+}
+
+function stripDeploymentMarker(key: string): string | undefined {
+  const match = /^(.*[^-:])[-:]([a-z]+)$/.exec(key);
+  return match?.[1] && match[2] && DEPLOYMENT_MARKERS.has(match[2]) ? match[1] : undefined;
+}
+
+/** 模型家族 → 权重所有者的 provider；转售商记录的窗口常与原厂不一致 */
+const MODEL_OWNERS: readonly [RegExp, string][] = [
+  [/^claude-/, 'anthropic'],
+  [/^(?:gpt-|chatgpt-|codex-|o\d)/, 'openai'],
+  [/^(?:gemini-|gemma-)/, 'google'],
+  [/^grok-/, 'xai'],
+  [/^deepseek-/, 'deepseek'],
+  [/^kimi-/, 'moonshotai'],
+  [/^glm-/, 'zai'],
+  [/^minimax-/, 'minimax'],
+  [/^(?:mistral-|codestral-|devstral-|magistral-)/, 'mistral'],
+  [/^mimo-/, 'xiaomi'],
+];
+
+type CatalogKeyed = { id: string; provider?: string };
+
+/** 同档多条时：原厂 provider > 无命名空间 id > 目录顺序第一条 */
+function pickPreferred<T extends CatalogKeyed>(
+  catalog: readonly T[],
+  matches: (entry: T) => boolean,
+  owner: string | undefined
+): T | undefined {
+  let bare: T | undefined;
+  let first: T | undefined;
+  for (const entry of catalog) {
+    if (!matches(entry)) continue;
+    if (owner && entry.provider === owner) return entry;
+    if (!bare && canonicalModelId(entry.id) === leafModelKey(entry.id)) bare = entry;
+    first ??= entry;
+  }
+  return bare ?? first;
+}
+
+/**
+ * model id → catalog 条目。OAuth meta 与自定义 spawn 共用。
+ * 依次：精确 id → 归一后同命名空间 → 同叶子 id → 剥一个部署标记后同叶子 id；每档内原厂优先。
+ * 不做前缀猜测；只用于取能力数值，发请求的 id 不改写。
+ */
+export function findCatalogModelById<T extends CatalogKeyed>(
   catalog: readonly T[],
   modelId: string
 ): T | undefined {
-  return catalog.find((entry) => entry.id === modelId);
+  const canonical = canonicalModelId(modelId);
+  const leaf = leafModelKey(modelId);
+  const stripped = stripDeploymentMarker(leaf);
+  const owner = MODEL_OWNERS.find(([pattern]) => pattern.test(leaf))?.[1];
+  const tiers: ((entry: T) => boolean)[] = [
+    (entry) => entry.id === modelId,
+    (entry) => canonicalModelId(entry.id) === canonical,
+    (entry) => leafModelKey(entry.id) === leaf,
+  ];
+  if (stripped) tiers.push((entry) => leafModelKey(entry.id) === stripped);
+  for (const matches of tiers) {
+    const hit = pickPreferred(catalog, matches, owner);
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 /** 非正 / 非有限视为缺失。未知不得用 128K 凑数。 */

@@ -31,6 +31,56 @@ describe('findCatalogModelById', () => {
     expect(findCatalogModelById(catalog, 'claude-sonnet')).toBeUndefined();
     expect(findCatalogModelById(catalog, 'claude-sonnet-4-5')?.id).toBe('claude-sonnet-4-5');
   });
+
+  const opus = { id: 'claude-opus-4-8', contextWindow: 1_000_000 };
+
+  it('第三方加的部署后缀剥掉一个再查', () => {
+    const catalog = [opus, { id: 'gpt-5', contextWindow: 400_000 }];
+    expect(findCatalogModelById(catalog, 'claude-opus-4-8-fast')).toBe(opus);
+    expect(findCatalogModelById(catalog, 'claude-opus-4-8-eco')).toBe(opus);
+    expect(findCatalogModelById(catalog, 'claude-opus-4-8-thinking')).toBe(opus);
+    expect(findCatalogModelById(catalog, 'gpt-5-high')?.id).toBe('gpt-5');
+    expect(findCatalogModelById(catalog, 'gpt-5:free')?.id).toBe('gpt-5');
+  });
+
+  it('目录里本身有带后缀的模型时精确命中优先', () => {
+    const fast = { id: 'grok-4-fast', contextWindow: 2_000_000 };
+    const catalog = [{ id: 'grok-4', contextWindow: 256_000 }, fast];
+    expect(findCatalogModelById(catalog, 'grok-4-fast')).toBe(fast);
+    expect(findCatalogModelById(catalog, 'xai/grok-4-fast')).toBe(fast);
+  });
+
+  it('只剥白名单里的一个后缀，-mini / -pro 这类变体不剥', () => {
+    const catalog = [opus, { id: 'gpt-5' }];
+    expect(findCatalogModelById(catalog, 'gpt-5-mini')).toBeUndefined();
+    expect(findCatalogModelById(catalog, 'gpt-5-pro')).toBeUndefined();
+    expect(findCatalogModelById(catalog, 'claude-opus-4-8-fast-thinking')).toBeUndefined();
+  });
+
+  it('大小写、命名空间、点号版本与厂商点前缀归一后命中', () => {
+    const catalog = [opus];
+    expect(findCatalogModelById(catalog, 'Claude-Opus-4-8')).toBe(opus);
+    expect(findCatalogModelById(catalog, 'anthropic/claude-opus-4.8')).toBe(opus);
+    expect(findCatalogModelById(catalog, 'us.anthropic.claude-opus-4-8')).toBe(opus);
+    expect(findCatalogModelById(catalog, 'models/claude_opus_4.8-fast')).toBe(opus);
+  });
+
+  it('同名多条时命名空间完全一致优先，否则取原厂条目', () => {
+    const routed = { id: 'anthropic/claude-sonnet-4.5', contextWindow: 1_000_000 };
+    const direct = { id: 'claude-sonnet-4-5', contextWindow: 200_000 };
+    const catalog = [routed, direct];
+    expect(findCatalogModelById(catalog, 'Anthropic/Claude-Sonnet-4.5')).toBe(routed);
+    expect(findCatalogModelById(catalog, 'relay/claude-sonnet-4.5-fast')).toBe(direct);
+  });
+
+  it('多家服务商同 id 时按模型家族取原厂条目', () => {
+    const azure = { id: 'gpt-5.4', provider: 'azure', contextWindow: 1_050_000 };
+    const openai = { id: 'gpt-5.4', provider: 'openai', contextWindow: 272_000 };
+    const catalog = [azure, openai];
+    expect(findCatalogModelById(catalog, 'gpt-5.4')).toBe(openai);
+    expect(findCatalogModelById(catalog, 'gpt-5.4-high')).toBe(openai);
+    expect(findCatalogModelById([azure], 'gpt-5.4-fast')).toBe(azure);
+  });
 });
 
 describe('pickModelCapabilityOverrides', () => {
