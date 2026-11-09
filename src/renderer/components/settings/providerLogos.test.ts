@@ -34,4 +34,10 @@ describe('向导厂商 logo', () => {
     expect(resolveProviderLogo('acme-labs', 'Acme Labs')).toEqual({ kind: 'letter', letter: 'A' });
     expect(resolveProviderLogo('9lives')).toEqual({ kind: 'letter', letter: '9' });
   });
+
+  it('Qoder-CN 和 Qoder 共用品牌标', () => {
+    const logo = resolveProviderLogo('qoder', 'Qoder');
+    expect(logo?.kind).toBe('mark');
+    expect(resolveProviderLogo('qoder-cn', 'Qoder-CN')).toEqual(logo);
+  });
 });

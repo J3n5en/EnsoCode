@@ -71,7 +71,8 @@
       "!packages/relay-go/frontend/assets",
       "!packages/relay-go/frontend/desk-bundle",
       "!src/agent/continuousMemory/vendor",
-      "!src/shared/providers/devin/vendor"
+      "!src/shared/providers/devin/vendor",
+      "!src/shared/providers/qoder/vendor"
     ]
   },
   "overrides": [

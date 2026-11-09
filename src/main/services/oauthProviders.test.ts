@@ -90,6 +90,22 @@ afterAll(() => {
 });
 
 describe('listOauthProviders 的账号枚举', () => {
+  it('Qoder 与 Qoder-CN 分别列为支持多账号的订阅供应商', async () => {
+    const { listOauthProviders } = await import('./oauthProviders');
+    const providers = await listOauthProviders();
+    for (const [id, name] of [
+      ['qoder', 'Qoder'],
+      ['qoder-cn', 'Qoder-CN'],
+    ]) {
+      expect(providers.find((provider) => provider.id === id)).toMatchObject({
+        id,
+        name,
+        supportsMultipleAccounts: true,
+        accounts: [],
+      });
+    }
+  });
+
   it('同一厂商的两个账号各占一行，裸 key 排在 #2 前面', { timeout: 20_000 }, async () => {
     const { listOauthProviders } = await import('./oauthProviders');
     const providers = await listOauthProviders();
