@@ -1,3 +1,4 @@
+import type { ProviderGroup } from '@shared/providerGroups';
 import type {
   ModelEntry,
   ModelMeta,
@@ -12,8 +13,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   duplicateModelLabels,
   ModelPicker,
+  parsePinnedModelKeys,
   persistClampedThinkingLevel,
+  pinnedModelKey,
+  resolveActiveWorkbenchView,
   resolvePickerCapabilities,
+  togglePinnedModelKey,
 } from './ModelPicker';
 
 interface WrapperProps {
@@ -807,5 +812,243 @@ describe('duplicateModelLabels', () => {
     expect(html).toContain('data-model-row-id="cursor-grok-4.6"');
     expect(html).toContain('data-model-row-id="grok-4.6"');
     expect(html).not.toContain('data-model-row-id="gpt-5"');
+  });
+});
+
+function pickerProvider(id: string, name: string): ModelProvider {
+  return {
+    ...providers[0],
+    id,
+    name,
+    models: [{ id: 'm', label: name }],
+  };
+}
+
+describe('pinned model keys', () => {
+  it('非法或空的收藏存储解析为空集，并丢掉非字符串', () => {
+    expect(parsePinnedModelKeys(null).size).toBe(0);
+    expect(parsePinnedModelKeys(undefined).size).toBe(0);
+    expect(parsePinnedModelKeys('').size).toBe(0);
+    expect(parsePinnedModelKeys('{').size).toBe(0);
+    expect(parsePinnedModelKeys('{}').size).toBe(0);
+    expect(parsePinnedModelKeys('["keep", "", 1, null, "keep", "next"]')).toEqual(
+      new Set(['keep', 'next'])
+    );
+  });
+
+  it('切换收藏不改原集合，并按 provider/model 组 key', () => {
+    const current = new Set(['api/model']);
+    const added = togglePinnedModelKey(current, pinnedModelKey('api', 'other'));
+    expect([...current]).toEqual(['api/model']);
+    expect([...added]).toEqual(['api/model', 'api/other']);
+    expect([...togglePinnedModelKey(added, 'api/model')]).toEqual(['api/other']);
+  });
+});
+
+describe('resolveActiveWorkbenchView', () => {
+  const work = pickerProvider('work', 'Work');
+  const personal = pickerProvider('personal', 'Personal');
+  const gateway = pickerProvider('gateway', 'Gateway');
+  const openai: ProviderGroup = {
+    vendorId: 'openai',
+    label: 'OpenAI',
+    providers: [work, personal],
+  };
+  const custom: ProviderGroup = {
+    vendorId: 'custom',
+    label: 'Custom',
+    providers: [gateway],
+  };
+  const groups = [openai, custom];
+  const virtual: VirtualModelEntry = {
+    id: 'auto',
+    name: 'Auto route',
+    enabled: true,
+    primary: { providerId: 'work', modelId: 'm' },
+    fallbacks: [],
+  };
+
+  it('未指定导航时落到当前供应商所在厂商，并选中该账号', () => {
+    const view = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [],
+      pinnedCount: 0,
+      selectedProviderId: 'personal',
+      activeNav: null,
+    });
+    expect(view.showFavoritesNav).toBe(false);
+    expect(view.activeNav).toEqual({ kind: 'vendor', vendorId: 'openai' });
+    expect(view.activeGroup).toBe(openai);
+    expect(view.activeProvider).toBe(personal);
+  });
+
+  it('当前选中虚拟模型时默认打开常用栏', () => {
+    const view = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [virtual],
+      pinnedCount: 0,
+      selectedProviderId: VIRTUAL_PROVIDER_ID,
+      activeNav: null,
+    });
+    expect(view.showFavoritesNav).toBe(true);
+    expect(view.activeNav).toEqual({ kind: 'favorites' });
+    expect(view.activeGroup).toBeUndefined();
+    expect(view.activeProvider).toBeUndefined();
+  });
+
+  it('同厂商多账号优先用右栏记住的账号，否则用当前选中，再否则用第一个', () => {
+    const remembered = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [],
+      pinnedCount: 0,
+      selectedProviderId: 'work',
+      activeNav: { kind: 'vendor', vendorId: 'openai' },
+      activeProviderByVendor: { openai: 'personal' },
+    });
+    expect(remembered.activeProvider).toBe(personal);
+
+    const selected = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [],
+      pinnedCount: 0,
+      selectedProviderId: 'work',
+      activeNav: { kind: 'vendor', vendorId: 'openai' },
+      activeProviderByVendor: { openai: 'missing' },
+    });
+    expect(selected.activeProvider).toBe(work);
+
+    const first = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [],
+      pinnedCount: 1,
+      selectedProviderId: 'gateway',
+      activeNav: { kind: 'vendor', vendorId: 'openai' },
+    });
+    expect(first.activeProvider).toBe(work);
+    expect(first.showFavoritesNav).toBe(true);
+  });
+
+  it('单账号厂商直接定位到该账号；失效导航退回当前选中或第一项', () => {
+    const single = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [],
+      pinnedCount: 0,
+      selectedProviderId: 'gateway',
+      activeNav: null,
+    });
+    expect(single.activeNav).toEqual({ kind: 'vendor', vendorId: 'custom' });
+    expect(single.activeProvider).toBe(gateway);
+    expect(single.activeGroup?.providers).toHaveLength(1);
+
+    const staleFavorites = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [],
+      pinnedCount: 0,
+      selectedProviderId: 'gateway',
+      activeNav: { kind: 'favorites' },
+    });
+    expect(staleFavorites.activeNav).toEqual({ kind: 'vendor', vendorId: 'custom' });
+
+    const staleVendor = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [virtual],
+      pinnedCount: 0,
+      selectedProviderId: 'missing',
+      activeNav: { kind: 'vendor', vendorId: 'gone' },
+    });
+    expect(staleVendor.activeNav).toEqual({ kind: 'favorites' });
+
+    const firstGroup = resolveActiveWorkbenchView({
+      groups,
+      selectableVirtualModels: [],
+      pinnedCount: 0,
+      selectedProviderId: VIRTUAL_PROVIDER_ID,
+      activeNav: null,
+    });
+    expect(firstGroup.activeNav).toEqual({ kind: 'vendor', vendorId: 'openai' });
+    expect(firstGroup.activeProvider).toBe(work);
+  });
+});
+
+describe('model picker workbench', () => {
+  const workbenchProviders: ModelProvider[] = [
+    {
+      ...providers[0],
+      id: 'work',
+      name: 'Work',
+      oauthAccountKey: 'openai',
+      models: [{ id: 'gpt', label: 'GPT Work' }],
+    },
+    {
+      ...providers[0],
+      id: 'personal',
+      name: 'Personal',
+      oauthAccountKey: 'openai#2',
+      models: [{ id: 'gpt', label: 'GPT Personal' }],
+    },
+    {
+      ...providers[0],
+      id: 'gateway',
+      name: 'Gateway',
+      models: [{ id: 'gw', label: 'Gateway model' }],
+    },
+  ];
+
+  it('左栏列出全部厂商，多账号只在右栏切换且只查当前账号额度', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: workbenchProviders,
+        providerId: 'work',
+        modelId: 'gpt',
+        virtualModels: [
+          {
+            id: 'auto',
+            name: 'Auto route',
+            enabled: true,
+            primary: { providerId: 'work', modelId: 'gpt' },
+            fallbacks: [],
+          },
+        ],
+      })
+    );
+    expect(html).toContain('data-model-picker="workbench"');
+    expect(html).toContain('data-model-picker-nav="favorites"');
+    expect(html).toContain('Starred &amp; virtual');
+    expect(html).toContain('data-model-picker-vendor="openai"');
+    expect(html).toContain('data-model-picker-vendor="__custom"');
+    expect(html).toContain('Gateway');
+    expect(html).toContain('2 accounts');
+    expect(html).toContain('data-model-picker="account-tabs"');
+    expect(html).toContain('data-model-picker-account="work"');
+    expect(html).toContain('data-model-picker-account="personal"');
+    expect(html).not.toContain('data-model-picker-account="gateway"');
+    expect(html).toContain('GPT Work');
+    expect(html).not.toContain('GPT Personal');
+    expect(html).not.toContain('Auto route');
+    expect(html).toContain(`data-model-pin="${pinnedModelKey('work', 'gpt')}"`);
+    const workbenchHtml = html.slice(html.indexOf('data-model-picker="workbench"'));
+    expect(workbenchHtml.indexOf(`data-model-pin="${pinnedModelKey('work', 'gpt')}"`)).toBeLessThan(
+      workbenchHtml.indexOf('GPT Work')
+    );
+    expect(harness.usageAccountKeys).toEqual(['openai']);
+  });
+
+  it('单账号厂商把账号名放在左栏，右栏用账号头而不是切换胶囊', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: workbenchProviders,
+        providerId: 'gateway',
+        modelId: 'gw',
+      })
+    );
+    expect(html).toContain('data-model-picker-vendor="__custom"');
+    expect(html).toContain('Gateway');
+    expect(html).toContain('data-model-picker="account-header"');
+    expect(html).toContain('example.test');
+    expect(html).not.toContain('data-model-picker="account-tabs"');
+    expect(html).toContain('Gateway model');
+    expect(harness.usageAccountKeys).toEqual([]);
   });
 });

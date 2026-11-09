@@ -2101,6 +2101,7 @@ export const zhTranslations: Record<string, string> = {
   '{{speed}} tok/s': '{{speed}} tok/s',
   'Search models': '搜索模型',
   'Virtual models': '虚拟模型',
+  'Starred & virtual': '星标与虚拟',
   'Enable virtual model': '启用虚拟模型',
   'Primary model': '主模型',
   'Default for each new turn': '每轮默认使用',
