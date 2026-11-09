@@ -1836,7 +1836,8 @@ const electronAPI = {
           | 'focusSubagent'
           | 'openChildRun'
           | 'createSession'
-          | 'ensureSession';
+          | 'ensureSession'
+          | 'openPluginView';
         payload: Record<string, unknown>;
       }) => void
     ): (() => void) => {

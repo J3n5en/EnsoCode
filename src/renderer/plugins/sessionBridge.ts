@@ -2,7 +2,13 @@ import type { DraftResult } from './draftBridge';
 
 export interface SessionRequest {
   sessionId: string;
-  op: 'focusSession' | 'focusSubagent' | 'openChildRun' | 'createSession' | 'ensureSession';
+  op:
+    | 'focusSession'
+    | 'focusSubagent'
+    | 'openChildRun'
+    | 'createSession'
+    | 'ensureSession'
+    | 'openPluginView';
   payload: Record<string, unknown>;
 }
 
@@ -19,6 +25,11 @@ export interface SessionBridgeDeps {
   prefill(sessionId: string, text: string): void;
   /** 启动没在运行的会话，返回失败原因 */
   ensure(sessionId: string): Promise<string | null>;
+  /** 打开右侧栏并创建或定位到插件侧栏页面 */
+  openPluginView?(
+    sessionId: string,
+    view: { pluginId: string; viewId: string; title: string }
+  ): void;
 }
 
 const fail = (code: string, error: string): DraftResult => ({ ok: false, code, error });
@@ -71,6 +82,21 @@ export async function handleSessionRequest(
     if (conversation.parentId) return fail('UNSUPPORTED', '子会话随主会话恢复');
     const error = await deps.ensure(req.sessionId);
     return error ? fail('SESSION_FAILED', error) : { ok: true, value: null };
+  }
+  if (req.op === 'openPluginView') {
+    if (!deps.conversation(req.sessionId)) return fail('NOT_FOUND', '会话不在本窗口');
+    const { pluginId, viewId, title } = req.payload;
+    if (
+      typeof pluginId !== 'string' ||
+      !pluginId ||
+      typeof viewId !== 'string' ||
+      !viewId ||
+      typeof title !== 'string' ||
+      !title
+    )
+      return fail('BAD_REQUEST', '缺少视图标识');
+    deps.openPluginView?.(req.sessionId, { pluginId, viewId, title });
+    return { ok: true, value: null };
   }
   const origin = deps.conversation(req.sessionId);
   if (!origin) return fail('NO_SESSION', '发起调用的会话不在本窗口');

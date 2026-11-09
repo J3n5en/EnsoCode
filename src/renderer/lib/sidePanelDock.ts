@@ -26,6 +26,13 @@ const pendingWorkflowReveal: {
   title: string;
   runId: string;
 }[] = [];
+const pendingPluginViewReveal: {
+  conversationId: string;
+  ownerId: string;
+  pluginId: string;
+  viewId: string;
+  title: string;
+}[] = [];
 const revealedWorkflowRuns = new Set<string>();
 
 /** 工作流 tab 跟随该项目生效的内置工具开关（项目覆盖优先于全局） */
@@ -102,6 +109,22 @@ export function bindSidePanelDock(conversationId: string, api: DockviewApi): voi
     addSidePanelWorkflow({
       conversationId: item.ownerId,
       runId: item.runId,
+      title: item.title,
+    });
+  }
+  const pluginViewDue = pendingPluginViewReveal.filter(
+    (item) => item.conversationId === conversationId
+  );
+  pendingPluginViewReveal.splice(
+    0,
+    pendingPluginViewReveal.length,
+    ...pendingPluginViewReveal.filter((item) => item.conversationId !== conversationId)
+  );
+  for (const item of pluginViewDue) {
+    openSidePanelPluginView({
+      conversationId: item.ownerId,
+      pluginId: item.pluginId,
+      viewId: item.viewId,
       title: item.title,
     });
   }
@@ -286,6 +309,48 @@ export function addSidePanelWorkflow(opts: {
   });
 }
 
+export function openSidePanelPluginView(opts: {
+  conversationId: string;
+  pluginId: string;
+  viewId: string;
+  title: string;
+}): void {
+  const sessions = useSessionsStore.getState();
+  const conversation = sessions.conversations[opts.conversationId];
+  if (!conversation) return;
+  const dockId = resolveSidePanelDockConversationId(sessions.conversations, opts.conversationId);
+  const api = docks.get(dockId);
+  useSidePanelStore.getState().ensureOpen(dockId);
+  if (!api) {
+    pendingPluginViewReveal.push({
+      conversationId: dockId,
+      ownerId: opts.conversationId,
+      pluginId: opts.pluginId,
+      viewId: opts.viewId,
+      title: opts.title,
+    });
+    return;
+  }
+  const id = `plugin:${opts.pluginId}:${opts.viewId}`;
+  const existing = api.getPanel(id);
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  api.addPanel({
+    id,
+    component: 'plugin',
+    title: opts.title,
+    params: {
+      conversationId: dockId,
+      projectId: conversation.projectId,
+      pluginId: opts.pluginId,
+      viewId: opts.viewId,
+    },
+    renderer: 'always',
+  });
+}
+
 export function closeSidePanelBrowser(conversationId: string, tabId: string): void {
   const dockId = resolveSidePanelDockConversationId(
     useSessionsStore.getState().conversations,
@@ -310,6 +375,11 @@ export function disposeConversationResources(conversationId: string): void {
     0,
     pendingWorkflowReveal.length,
     ...pendingWorkflowReveal.filter((item) => item.conversationId !== conversationId)
+  );
+  pendingPluginViewReveal.splice(
+    0,
+    pendingPluginViewReveal.length,
+    ...pendingPluginViewReveal.filter((item) => item.conversationId !== conversationId)
   );
   for (const runId of [...revealedWorkflowRuns]) {
     if (runId.startsWith(`${conversationId}:`)) revealedWorkflowRuns.delete(runId);

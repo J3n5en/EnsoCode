@@ -241,6 +241,7 @@ export async function activate(enso) {
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
 | `ui.view.emit(name, data?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，所以 Agent 工具里也能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
+| `ui.view.open(viewId?)` | 打开当前会话的右侧栏并创建或聚焦本插件的侧栏页面（`viewId` 缺省取清单 `views` 的第一项）。需要 `ui.view`，不需要用户手势 |
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
 | `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |

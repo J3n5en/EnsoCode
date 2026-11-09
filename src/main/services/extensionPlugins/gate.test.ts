@@ -452,6 +452,67 @@ describe('PluginHostGate', () => {
     ).rejects.toMatchObject({ code: 'TOO_LARGE' });
   });
 
+  it('ui.viewOpen 在会话调用里打开或定位已声明的侧栏视图（缺省首个视图，子会话落到根会话）', async () => {
+    const sessionUi = vi.fn(async () => null);
+    deps.sessionUi = sessionUi;
+    deps.manifest = (id) =>
+      id === 'a.b'
+        ? manifest({
+            permissions: ['ui.view'],
+            contributes: {
+              ...manifest().contributes,
+              views: [
+                { id: 'bridge', title: '跨会话桥', entry: 'bridge.html' },
+                { id: 'logs', title: '日志', entry: 'logs.html' },
+              ],
+            },
+          })
+        : null;
+    gate = new PluginHostGate(deps);
+    const childInv = gate.invocations.create({
+      pluginId: 'a.b',
+      sessionId: 's1::sub1',
+      projectRoot: root,
+      gesture: false,
+      origin: 9,
+    });
+    await expect(gate.handle('a.b', 'ui.viewOpen', {}, childInv)).resolves.toBeNull();
+    expect(sessionUi).toHaveBeenCalledWith({ sessionId: 's1', origin: 9 }, 'openPluginView', {
+      pluginId: 'a.b',
+      viewId: 'bridge',
+      title: '跨会话桥',
+    });
+    await expect(
+      gate.handle('a.b', 'ui.viewOpen', { viewId: 'logs' }, agentCall())
+    ).resolves.toBeNull();
+    expect(sessionUi).toHaveBeenLastCalledWith(
+      { sessionId: 's1', origin: null },
+      'openPluginView',
+      { pluginId: 'a.b', viewId: 'logs', title: '日志' }
+    );
+    deps.sessions = {
+      list: () => [
+        { id: 's1', title: '一', updatedAt: 1, state: 'idle' },
+        { id: 's2', title: '二', updatedAt: 2, state: 'running' },
+      ],
+    };
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.viewOpen', { viewId: 'bridge', sessionId: 's2' }, agentCall())
+    ).resolves.toBeNull();
+    expect(sessionUi).toHaveBeenLastCalledWith(
+      { sessionId: 's2', origin: null },
+      'openPluginView',
+      { pluginId: 'a.b', viewId: 'bridge', title: '跨会话桥' }
+    );
+    await expect(
+      gate.handle('a.b', 'ui.viewOpen', { viewId: 'missing' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(gate.handle('a.b', 'ui.viewOpen', {}, undefined)).rejects.toMatchObject({
+      code: 'NO_INVOCATION',
+    });
+  });
+
   it('草稿读写需要用户手势，令牌 30 秒后过期', async () => {
     await expect(gate.handle('a.b', 'composer.readDraft', {}, agentCall())).rejects.toMatchObject({
       code: 'GESTURE_REQUIRED',

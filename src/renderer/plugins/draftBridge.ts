@@ -20,7 +20,8 @@ export interface DraftRequest {
     | 'focusSubagent'
     | 'openChildRun'
     | 'createSession'
-    | 'ensureSession';
+    | 'ensureSession'
+    | 'openPluginView';
   payload: Record<string, unknown>;
 }
 

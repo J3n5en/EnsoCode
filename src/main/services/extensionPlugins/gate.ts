@@ -49,7 +49,8 @@ export type SessionUiOp =
   | 'focusSubagent'
   | 'openChildRun'
   | 'createSession'
-  | 'ensureSession';
+  | 'ensureSession'
+  | 'openPluginView';
 
 /** 插件看到的会话：只有标识与展示字段，不含路径 */
 export interface PluginSessionInfo {
@@ -412,6 +413,41 @@ export class PluginHostGate {
         if (!this.deps.viewEvent) throw pluginError('UNSUPPORTED', '当前环境不能更新侧栏');
         this.admitViewEvent(pluginId);
         this.deps.viewEvent(pluginId, a.name, JSON.parse(encoded) as unknown);
+        return null;
+      }
+      case 'ui.viewOpen': {
+        permit('ui.view');
+        const inv = invocation();
+        const current = sessionOf(inv);
+        const views = manifest.contributes.views;
+        const view =
+          a.viewId === undefined
+            ? views[0]
+            : typeof a.viewId === 'string'
+              ? views.find((v) => v.id === a.viewId)
+              : undefined;
+        if (!view) throw pluginError('INVALID_ARGS', 'viewId 不合法或未在清单 views 中声明');
+        let targetSessionId = current.split('::')[0];
+        if (a.sessionId !== undefined) {
+          if (
+            typeof a.sessionId !== 'string' ||
+            a.sessionId.length === 0 ||
+            a.sessionId.length > 256
+          )
+            throw pluginError('INVALID_ARGS', 'sessionId 不合法');
+          const candidate = a.sessionId.split('::')[0];
+          if (candidate !== targetSessionId) {
+            const visible = this.deps.sessions?.list(current) ?? [];
+            if (!visible.some((s) => s.id === candidate))
+              throw pluginError('NOT_FOUND', '会话不存在或不在本项目');
+            targetSessionId = candidate;
+          }
+        }
+        await sessionUi()(
+          { sessionId: targetSessionId, origin: inv.origin ?? null },
+          'openPluginView',
+          { pluginId, viewId: view.id, title: view.title }
+        );
         return null;
       }
       case 'composer.readDraft':

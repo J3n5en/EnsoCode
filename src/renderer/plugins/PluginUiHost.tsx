@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { addToast } from '@/components/ui/toast';
+import { openSidePanelPluginView } from '@/lib/sidePanelDock';
 import { useSessionsStore } from '@/stores/sessions';
 import { displayedConversationId } from '@/stores/sessions/chatChrome';
 import { newInterceptBreakers } from './breakers';
@@ -35,6 +36,8 @@ const sessionDeps = {
     if (after?.started || after?.spawning) return null;
     return after?.error ?? '无法启动会话：请检查默认模型与登录状态';
   },
+  openPluginView: (sessionId: string, view: { pluginId: string; viewId: string; title: string }) =>
+    openSidePanelPluginView({ conversationId: sessionId, ...view }),
 };
 
 /** 挂一次：启用插件的渲染模块在宿主页面加载，登记挂点；停用或变更时收回 */
@@ -102,7 +105,8 @@ export function PluginUiHost() {
         request.op === 'focusSubagent' ||
         request.op === 'openChildRun' ||
         request.op === 'createSession' ||
-        request.op === 'ensureSession'
+        request.op === 'ensureSession' ||
+        request.op === 'openPluginView'
       ) {
         void handleSessionRequest(request as SessionRequest, sessionDeps)
           .catch((error: unknown) => ({

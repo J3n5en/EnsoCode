@@ -138,4 +138,40 @@ describe('handleSessionRequest', () => {
       handleSessionRequest({ sessionId: 'a', op: 'ensureSession', payload: {} }, failed)
     ).resolves.toEqual({ ok: false, code: 'SESSION_FAILED', error: '没有可用的模型' });
   });
+
+  it('打开或聚焦插件侧栏视图：校验会话与视图标识', async () => {
+    const openPluginView = vi.fn();
+    const d = deps({ openPluginView });
+    await expect(
+      handleSessionRequest(
+        {
+          sessionId: 'a',
+          op: 'openPluginView',
+          payload: { pluginId: 'enso.bridge', viewId: 'bridge', title: '会话桥' },
+        },
+        d
+      )
+    ).resolves.toEqual({ ok: true, value: null });
+    expect(openPluginView).toHaveBeenCalledWith('a', {
+      pluginId: 'enso.bridge',
+      viewId: 'bridge',
+      title: '会话桥',
+    });
+    await expect(
+      handleSessionRequest(
+        {
+          sessionId: 'zz',
+          op: 'openPluginView',
+          payload: { pluginId: 'enso.bridge', viewId: 'bridge', title: '会话桥' },
+        },
+        d
+      )
+    ).resolves.toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    await expect(
+      handleSessionRequest(
+        { sessionId: 'a', op: 'openPluginView', payload: { pluginId: 'enso.bridge' } },
+        d
+      )
+    ).resolves.toMatchObject({ ok: false, code: 'BAD_REQUEST' });
+  });
 });

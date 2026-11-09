@@ -168,14 +168,20 @@ export function getExtensionPlugins(): ExtensionPluginService {
             pendingApprovals: 0,
           },
       },
-      sessionUi: (target, op, payload) =>
-        getDraftBroker().request(
-          target.origin,
+      sessionUi: (target, op, payload) => {
+        const origin =
+          target.origin ??
+          (op === 'openPluginView'
+            ? (localMainContents()?.id ?? remoteLeaderId(false) ?? null)
+            : null);
+        return getDraftBroker().request(
+          origin,
           target.sessionId,
           op,
           payload,
           SESSION_UI_TIMEOUT_MS
-        ),
+        );
+      },
       // 发起窗口一定活着（它刚调用了插件），优先交给它。后台投递没有发起窗口时退到主窗口，
       // 服务器模式下本机主窗口恒为 null，再退到远端主界面
       wakeSession: async (sessionId, origin) => {
