@@ -1,11 +1,13 @@
 import { previewImageMime } from '@shared/markdownPreviewImage';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import type { Element, ElementContent } from 'hast';
-import { FolderOpen } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderOpen, Search } from 'lucide-react';
 import type { Root } from 'mdast';
 import {
   Children,
+  cloneElement,
   createContext,
+  isValidElement,
   type MouseEvent,
   type ReactElement,
   type ReactNode,
@@ -36,6 +38,7 @@ import { usePluginSlotsVersion } from '../../plugins/usePluginSlots';
 import { CodeBlock } from './CodeBlock';
 import { CopyButton } from './CopyButton';
 import { highlightNode } from './highlightQuery';
+import { JsonTree } from './JsonTree';
 import { MermaidRenderer } from './MermaidRenderer';
 import {
   classifyMarkdownLink,
@@ -44,6 +47,9 @@ import {
   toExternalAbsolutePath,
   toWorkspaceRelativePath,
 } from './markdownLinks';
+import { inferNumericColumns, nextSort, sortedOrder, type TableSort } from './markdownTable';
+import { classifyFence, parseJsonLoose } from './richFence';
+import { TerminalBlock } from './TerminalBlock';
 
 /**
  * 解析代码围栏的 info 串。除了纯语言名（```ts），agent 常输出
@@ -578,6 +584,176 @@ const H4_CLASS = 'mt-3 mb-1 text-(length:--chat-h4-size) [font-weight:var(--chat
 const TH_CLASS = 'whitespace-nowrap border-b border-border px-2 py-1 text-left font-medium';
 const TD_CLASS = 'whitespace-nowrap border-b border-border/50 px-2 py-1';
 
+/** JSON 写完才画成树（半截先当代码）；终端输出边写边画 */
+function RichFence({
+  source,
+  language,
+  streaming,
+}: {
+  source: string;
+  language?: string;
+  streaming: boolean;
+}) {
+  const rich = useMemo(() => {
+    const kind = classifyFence(language, source);
+    if (kind === 'json') {
+      const parsed = parseJsonLoose(source);
+      return !streaming && parsed.ok ? { kind, value: parsed.value } : null;
+    }
+    return kind ? { kind } : null;
+  }, [language, source, streaming]);
+  if (rich?.kind === 'json') return <JsonTree source={source} value={rich.value} />;
+  if (rich?.kind === 'terminal') return <TerminalBlock source={source} />;
+  return <CodeBlock code={source} language={language} streaming={streaming} />;
+}
+
+/** 表格行数达到此值才提供搜索 */
+const SEARCH_ROWS = 6;
+
+function hastText(node: ElementContent): string {
+  if (node.type === 'text') return node.value;
+  return 'children' in node ? node.children.map(hastText).join('') : '';
+}
+
+const elementsOf = (node: Element | undefined, tag: string): Element[] =>
+  (node?.children ?? []).filter(
+    (child): child is Element => child.type === 'element' && child.tagName === tag
+  );
+
+const reactElementsOf = (children: ReactNode, tag?: string) =>
+  Children.toArray(children).filter(
+    (child): child is ReactElement<{ children?: ReactNode }> =>
+      isValidElement(child) && (tag === undefined || child.type === tag)
+  );
+
+function TableHeader({
+  children,
+  sort,
+  onSort,
+}: {
+  children?: ReactNode;
+  sort?: 'asc' | 'desc' | 'none';
+  onSort?: () => void;
+}) {
+  if (!onSort) return <th className={TH_CLASS}>{children}</th>;
+  const Arrow = sort === 'desc' ? ArrowDown : ArrowUp;
+  return (
+    <th
+      className={TH_CLASS}
+      aria-sort={sort === 'asc' ? 'ascending' : sort === 'desc' ? 'descending' : undefined}
+    >
+      <button
+        type="button"
+        onClick={onSort}
+        className="group/sort inline-flex items-center gap-1 hover:text-foreground"
+      >
+        {children}
+        <Arrow
+          className={cn(
+            'h-3 w-3 shrink-0',
+            sort === 'none' ? 'opacity-0 group-hover/sort:opacity-40' : 'opacity-70'
+          )}
+        />
+      </button>
+    </th>
+  );
+}
+
+/** 表格：点表头排序（升 → 降 → 原序，数值列按数值），行多时可搜索；流式中保持原样 */
+function MarkdownTable({ children, node }: { children?: ReactNode; node?: Element }) {
+  const { t } = useI18n();
+  const { text, streaming } = useContext(MarkdownCtx);
+  const [sort, setSort] = useState<TableSort>(null);
+  const [query, setQuery] = useState<string | null>(null);
+  const start = node?.position?.start?.offset;
+  const end = node?.position?.end?.offset;
+  const raw = start !== undefined && end !== undefined ? text.slice(start, end) : null;
+
+  const parts = reactElementsOf(children);
+  const head = parts.find((part) => part.type === 'thead');
+  const body = parts.find((part) => part.type === 'tbody');
+  const rowElements = reactElementsOf(body?.props.children, 'tr');
+  const rows = useMemo(
+    () =>
+      elementsOf(node, 'tbody')
+        .flatMap((tbody) => elementsOf(tbody, 'tr'))
+        .map((tr) => tr.children.filter((cell) => cell.type === 'element').map(hastText)),
+    [node]
+  );
+  const numeric = useMemo(() => inferNumericColumns(rows), [rows]);
+  const interactive =
+    !streaming && head !== undefined && rows.length >= 2 && rowElements.length === rows.length;
+
+  let content = children;
+  if (interactive) {
+    const needle = query?.trim().toLowerCase();
+    const order = sortedOrder(rows, sort, numeric).filter(
+      (index) => !needle || rows[index]!.join(' ').toLowerCase().includes(needle)
+    );
+    const headRows = reactElementsOf(head.props.children, 'tr');
+    content = (
+      <>
+        <thead>
+          {headRows.map((row, rowIndex) =>
+            cloneElement(
+              row,
+              { key: row.key ?? rowIndex },
+              reactElementsOf(row.props.children).map((cell, column) =>
+                cloneElement(cell as ReactElement<Parameters<typeof TableHeader>[0]>, {
+                  key: cell.key ?? column,
+                  sort: sort?.column === column ? sort.dir : 'none',
+                  onSort: () => setSort((current) => nextSort(current, column)),
+                })
+              )
+            )
+          )}
+        </thead>
+        <tbody>{order.map((index) => rowElements[index])}</tbody>
+      </>
+    );
+  }
+
+  const toolClass =
+    'rounded-md border bg-background/80 p-1.5 text-muted-foreground opacity-0 backdrop-blur transition-opacity group-hover/table:opacity-100';
+  return (
+    <div className="group/table relative my-2 min-w-0 max-w-full">
+      {interactive && query !== null && (
+        <input
+          // biome-ignore lint/a11y/noAutofocus: 用户刚点了搜索按钮
+          autoFocus
+          type="text"
+          onInput={(event) => setQuery(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setQuery(null);
+          }}
+          placeholder={t('Search table')}
+          className="mb-1 h-7 w-56 rounded-md border bg-background px-2 text-xs outline-none focus:border-ring"
+        />
+      )}
+      <div className="overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
+        <table className="w-max min-w-full border-collapse text-(length:--chat-table-size) [font-weight:var(--chat-table-weight)] leading-[1.5] [overflow-wrap:normal]">
+          {content}
+        </table>
+      </div>
+      {raw && !streaming && (
+        <div className="absolute top-0.5 right-0.5 flex gap-1">
+          {interactive && rows.length >= SEARCH_ROWS && (
+            <button
+              type="button"
+              title={t('Search table')}
+              onClick={() => setQuery((current) => (current === null ? '' : null))}
+              className={cn(toolClass, 'hover:text-foreground')}
+            >
+              <Search className="h-3 w-3" />
+            </button>
+          )}
+          <CopyButton text={raw} className={toolClass} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 模块级稳定引用：react-markdown 按组件类型协调子树，内联对象每帧都会拆掉 CodeBlock */
 export const markdownComponents: Components = {
   p: ({ children }) => <Paragraph className={P_CLASS}>{children}</Paragraph>,
@@ -682,28 +858,10 @@ export const markdownComponents: Components = {
     if (language?.toLowerCase() === 'mermaid') {
       return <MermaidRenderer code={source} streaming={streaming} />;
     }
-    return <CodeBlock code={source} language={language} streaming={streaming} />;
+    return <RichFence source={source} language={language} streaming={streaming} />;
   },
-  table: ({ children, node }) => {
-    const { text, streaming } = useContext(MarkdownCtx);
-    const start = node?.position?.start?.offset;
-    const end = node?.position?.end?.offset;
-    const raw = start !== undefined && end !== undefined ? text.slice(start, end) : null;
-    return (
-      <div className="group/table relative my-2 min-w-0 max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
-        <table className="w-max min-w-full border-collapse text-(length:--chat-table-size) [font-weight:var(--chat-table-weight)] leading-[1.5] [overflow-wrap:normal]">
-          {children}
-        </table>
-        {raw && !streaming && (
-          <CopyButton
-            text={raw}
-            className="absolute top-0.5 right-0.5 rounded-md border bg-background/80 p-1.5 text-muted-foreground opacity-0 backdrop-blur transition-opacity group-hover/table:opacity-100"
-          />
-        )}
-      </div>
-    );
-  },
-  th: ({ children }) => <th className={TH_CLASS}>{children}</th>,
+  table: MarkdownTable,
+  th: TableHeader as Components['th'],
   td: ({ children }) => <td className={TD_CLASS}>{children}</td>,
   hr: () => <hr className="my-3 border-border" />,
 };
