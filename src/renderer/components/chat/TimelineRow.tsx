@@ -80,7 +80,7 @@ import {
   resolveRewindConfirm,
   userIndexFromEndForTurnKey,
 } from '@/stores/sessions/conversationRewind';
-import { canWithdrawMessage } from '@/stores/sessions/reducer';
+import { canRequestWithdraw, canWithdrawMessage } from '@/stores/sessions/reducer';
 import { formatDuration, formatTokens } from '@/stores/sessions/stats';
 import {
   exploreStepsKey,
@@ -1209,7 +1209,10 @@ function WithdrawButton({ messageIndex }: { messageIndex: number }) {
     )
       return undefined;
     const message = conversation.messages[messageIndex - (conversation.historyBaseIndex ?? 0)];
-    return canWithdrawMessage(message) ? message.deliveryId : undefined;
+    return canWithdrawMessage(message) ||
+      (conversation.status === 'running' && canRequestWithdraw(message))
+      ? message?.deliveryId
+      : undefined;
   });
   if (!conversationId || !deliveryId) return null;
   return (

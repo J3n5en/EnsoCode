@@ -169,6 +169,7 @@ export const IPC_CHANNELS = {
   AGENT_SPAWN: 'agent:spawn',
   AGENT_PROMPT: 'agent:prompt',
   AGENT_STEER: 'agent:steer',
+  AGENT_WITHDRAW_STEER: 'agent:withdraw-steer',
   AGENT_ABORT: 'agent:abort',
   AGENT_ABORT_RETRY: 'agent:abort-retry',
   AGENT_RETRY: 'agent:retry',

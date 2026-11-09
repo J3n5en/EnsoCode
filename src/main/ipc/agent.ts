@@ -101,6 +101,7 @@ import {
   stopSubagent,
   stopWorkflow,
   summarizeConversationTitle,
+  withdrawSteerSession,
 } from '../services/agentHost';
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
@@ -2036,6 +2037,18 @@ export function registerAgentHandlers(): void {
         images as { data: string; mimeType: string }[] | undefined,
         deliveryId
       );
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_WITHDRAW_STEER,
+    (_event, sessionId: unknown, deliveryId: unknown): AgentActionResult => {
+      const rejected = botControlError(sessionId);
+      if (rejected) return rejected;
+      const identity = exactIdentity(sessionId);
+      return identity && isDeliveryId(deliveryId)
+        ? withdrawSteerSession(identity, deliveryId)
+        : { ok: false, error: 'invalid withdraw-steer or stale session generation' };
     }
   );
 

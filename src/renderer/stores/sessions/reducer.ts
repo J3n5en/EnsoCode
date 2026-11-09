@@ -29,6 +29,8 @@ export type TimelineMessage = ProjectedMessage & {
   deliveryId?: string;
   /** worker 明确拒收；只有这种乐观回显可以本地撤回。 */
   deliveryRejected?: boolean;
+  /** 用户已请求撤回未读插话：worker 撤回成功回执 delivery-rejected 时直接移除 */
+  withdrawRequested?: true;
 };
 
 export function canWithdrawMessage(message: TimelineMessage | undefined): boolean {
@@ -36,6 +38,18 @@ export function canWithdrawMessage(message: TimelineMessage | undefined): boolea
     message?.role === 'user' &&
       message.optimistic &&
       message.deliveryRejected &&
+      message.deliveryId &&
+      !message.entryId
+  );
+}
+
+/** 运行中模型尚未取用的插话：可请求 worker 撤回。 */
+export function canRequestWithdraw(message: TimelineMessage | undefined): boolean {
+  return Boolean(
+    message?.role === 'user' &&
+      message.optimistic &&
+      !message.deliveryRejected &&
+      !message.withdrawRequested &&
       message.deliveryId &&
       !message.entryId
   );
@@ -480,13 +494,15 @@ export function applyAgentEvent(
     case 'delivery-rejected':
       return {
         ...current,
-        messages: current.messages.map((message) =>
+        messages: current.messages.flatMap((message) =>
           message.role === 'user' &&
           message.optimistic &&
           !message.entryId &&
           message.deliveryId === event.deliveryId
-            ? { ...message, deliveryRejected: true }
-            : message
+            ? message.withdrawRequested
+              ? []
+              : [{ ...message, deliveryRejected: true }]
+            : [message]
         ),
         lastSeq: event.seq,
       };

@@ -552,6 +552,7 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_SPAWN: excluded('Lazy worker lifecycle command behind conversation send.'),
   AGENT_PROMPT: surfaces('conversations.send'),
   AGENT_STEER: surfaces('conversations.queue.send-now'),
+  AGENT_WITHDRAW_STEER: surfaces('conversations.queue.remove'),
   AGENT_ABORT: surfaces('conversations.abort'),
   AGENT_ABORT_RETRY: surfaces('conversations.abort'),
   AGENT_RETRY: surfaces('conversations.retry-turn'),

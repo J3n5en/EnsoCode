@@ -1847,6 +1847,13 @@ export function abortRetrySession(identity: SessionIdentity): { ok: boolean; err
   return sendAgentCommand({ type: 'abort-retry', identity });
 }
 
+export function withdrawSteerSession(
+  identity: SessionIdentity,
+  deliveryId: string
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'withdraw-steer', identity, deliveryId });
+}
+
 /** 终态失败后手动续跑：不新增 user 消息，从当前上下文 continue */
 export function retrySession(
   identity: SessionIdentity,

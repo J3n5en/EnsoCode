@@ -19,6 +19,11 @@ let onDispatchEvent: ((event: DispatchMainEvent) => void) | undefined;
 let sourceProjection: SourceAuthorityProjection = { projects: [], conversations: [] };
 let nextConversationId = 'parent';
 const agentPrompt = vi.fn(async () => ({ ok: true }));
+const agentWithdrawSteer = vi.fn(
+  async (_id: string, _deliveryId: string): Promise<{ ok: boolean; error?: string }> => ({
+    ok: true,
+  })
+);
 const agentSpawn = vi.fn(async () => ({ ok: true }));
 const reloadConversation = vi.fn(
   async (_conversationId: string): Promise<ConversationReloadResult> => ({
@@ -194,6 +199,7 @@ vi.stubGlobal('window', {
       rewind: agentRewind,
       fork: agentFork,
       steer: vi.fn(async () => ({ ok: true })),
+      withdrawSteer: agentWithdrawSteer,
       setPlanMode: agentSetPlanMode,
       setApprovalMode: agentSetApprovalMode,
     },
@@ -4299,6 +4305,68 @@ describe('withdraw undelivered messages', () => {
       expect(agentRewind).not.toHaveBeenCalled();
     }
   );
+
+  describe('运行中撤回模型未读的插话', () => {
+    const pendingEcho = {
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'later' }],
+      optimistic: true,
+      deliveryId: 'd1',
+    };
+    const seedRunning = () =>
+      sessionsModule.useSessionsStore.setState((state) => ({
+        conversations: {
+          ...state.conversations,
+          parent: {
+            ...state.conversations.parent,
+            started: true,
+            status: 'running',
+            generation: 'g1',
+            lastSeq: 0,
+            draftText: 'existing',
+            messages: [pendingEcho],
+          },
+        },
+      }));
+
+    beforeEach(() => {
+      agentWithdrawSteer.mockClear();
+      agentWithdrawSteer.mockResolvedValue({ ok: true });
+    });
+
+    it('请求 worker 撤回；回执后收回回显并把原文退回输入框', () => {
+      const store = sessionsModule.useSessionsStore;
+      seedRunning();
+      store.getState().withdrawMessage('parent', { kind: 'delivery', id: 'd1' });
+      store.getState().withdrawMessage('parent', { kind: 'delivery', id: 'd1' });
+      expect(agentWithdrawSteer).toHaveBeenCalledTimes(1);
+      expect(agentWithdrawSteer).toHaveBeenCalledWith('parent', 'd1');
+      expect(store.getState().conversations.parent.messages).toEqual([
+        { ...pendingEcho, withdrawRequested: true },
+      ]);
+      expect(store.getState().conversations.parent.draftText).toBe('existing');
+      onAgentEvent?.({
+        type: 'delivery-rejected',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq: 1,
+        deliveryId: 'd1',
+      });
+      const after = store.getState().conversations.parent;
+      expect(after.messages).toEqual([]);
+      expect(after.draftText).toBe('existing\n\nlater');
+      expect(after.draftAppend).toBe(true);
+    });
+
+    it('撤回请求未送达 worker 时恢复为可再次撤回', async () => {
+      const store = sessionsModule.useSessionsStore;
+      seedRunning();
+      agentWithdrawSteer.mockResolvedValueOnce({ ok: false, error: 'gone' });
+      store.getState().withdrawMessage('parent', { kind: 'delivery', id: 'd1' });
+      await vi.waitFor(() =>
+        expect(store.getState().conversations.parent.messages).toEqual([pendingEcho])
+      );
+    });
+  });
 });
 
 const rewindMessages = () =>

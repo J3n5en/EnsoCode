@@ -118,6 +118,7 @@ import {
   applyAgentEvent,
   applyDispatchEvent,
   applyHistoryPage,
+  canRequestWithdraw,
   canWithdrawMessage,
   emptyProjection,
   isVisibleGenerationOutput,
@@ -539,6 +540,35 @@ function toQueuedMessage(message: ProjectedMessage): QueuedMessage {
     text: userMessageRawText(message),
     ...(images.length > 0 ? { images } : {}),
   };
+}
+
+function withdrawBlocked(conversation: Conversation): boolean {
+  return Boolean(
+    conversation.historyOnly ||
+      conversation.rewinding ||
+      conversation.restoringFiles ||
+      conversation.workspaceMigrating
+  );
+}
+
+/** 撤回的内容追加到输入框已有草稿之后 */
+function appendDraft(
+  conversation: Conversation,
+  draft: { text?: string; images?: AttachedImage[] }
+): Pick<Conversation, 'draftText' | 'draftImages' | 'draftAppend'> {
+  return {
+    draftText: [conversation.draftText, draft.text].filter(Boolean).join('\n\n'),
+    draftImages: [...(conversation.draftImages ?? []), ...(draft.images ?? [])],
+    draftAppend: true,
+  };
+}
+
+function withdrawnDraftPatch(
+  conversation: Conversation,
+  withdrawn: TimelineMessage | undefined
+): Partial<Conversation> {
+  const draft = withdrawn && extractRewindDraft([withdrawn], 0);
+  return draft ? appendDraft(conversation, draft) : {};
 }
 
 function userMessageRawText(message: ProjectedMessage): string {
@@ -1768,6 +1798,18 @@ export const useSessionsStore = create<SessionsState>()(
             }),
             title,
             spawning: false,
+            // 撤回成功的插话：reducer 已移除回显，原文与附件退回输入框
+            ...(event.type === 'delivery-rejected'
+              ? withdrawnDraftPatch(
+                  conversation,
+                  conversation.messages.find(
+                    (message) =>
+                      message.withdrawRequested &&
+                      message.deliveryId === event.deliveryId &&
+                      !next.messages.includes(message)
+                  )
+                )
+              : {}),
             // 未提交的消息被 reducer 收回乐观回显（最早一条）：连同图片回到队首，
             // 多条连续失败也不互相覆盖；队列区可编辑/删除/立即发送
             ...(event.type === 'turn-failed' &&
@@ -4032,16 +4074,37 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         withdrawMessage(conversationId, target) {
+          const live = get().conversations[conversationId];
+          const unread =
+            target.kind === 'delivery' && live?.status === 'running' && !withdrawBlocked(live)
+              ? live.messages.find((item) => item.deliveryId === target.id)
+              : undefined;
+          if (canRequestWithdraw(unread)) {
+            const mark = (withdrawRequested: boolean) =>
+              set((state) => {
+                const current = state.conversations[conversationId];
+                if (!current) return state;
+                return patch(state, conversationId, {
+                  messages: current.messages.map((item) =>
+                    item.optimistic && item.deliveryId === target.id
+                      ? withdrawRequested
+                        ? { ...item, withdrawRequested: true as const }
+                        : (({ withdrawRequested: _, ...rest }) => rest)(item)
+                      : item
+                  ),
+                });
+              });
+            mark(true);
+            void window.electronAPI.agent
+              .withdrawSteer(conversationId, target.id)
+              .then((result) => {
+                if (!result.ok) mark(false);
+              });
+            return;
+          }
           set((state) => {
             const conversation = state.conversations[conversationId];
-            if (
-              !conversation ||
-              conversation.historyOnly ||
-              conversation.rewinding ||
-              conversation.restoringFiles ||
-              conversation.workspaceMigrating
-            )
-              return state;
+            if (!conversation || withdrawBlocked(conversation)) return state;
             const queued =
               target.kind === 'queue'
                 ? conversation.queuedMessages?.find((item) => item.id === target.id)
@@ -4061,9 +4124,7 @@ export const useSessionsStore = create<SessionsState>()(
                     ),
                   }
                 : { messages: conversation.messages.filter((item) => item !== message) }),
-              draftText: [conversation.draftText, draft.text].filter(Boolean).join('\n\n'),
-              draftImages: [...(conversation.draftImages ?? []), ...(draft.images ?? [])],
-              draftAppend: true,
+              ...appendDraft(conversation, draft),
             });
           });
         },

@@ -2137,6 +2137,15 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand({ type: 'abort-retry' })).toBeNull();
   });
 
+  it('withdraw-steer 命令携 identity 与合法 deliveryId，多余字段拒绝', () => {
+    const command = { type: 'withdraw-steer', identity: parent, deliveryId: 'd-1' };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(parseAgentCommand({ ...command, extra: true })).toBeNull();
+    expect(parseAgentCommand({ ...command, deliveryId: '' })).toBeNull();
+    expect(parseAgentCommand({ ...command, deliveryId: 'x'.repeat(129) })).toBeNull();
+    expect(parseAgentCommand({ type: 'withdraw-steer', identity: parent })).toBeNull();
+  });
+
   it('retry 命令只携 identity，多余字段拒绝', () => {
     const command = { type: 'retry', identity: parent };
     expect(parseAgentCommand(command)).toEqual(command);

@@ -16,12 +16,14 @@ import {
 import { Type } from 'typebox';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  batchSteering,
   buildSessionDisplayMessages,
   continueSessionActivity,
   editLatestAssistantForRetry,
   editUnfinishedAssistantForResume,
   silentTurnRecoveryExtension,
   steerActiveSession,
+  steerDetachable,
 } from './sessionAdapter';
 import { POST_TOOL_EMPTY_NUDGE, SILENT_TURN_NUDGE } from './silentTurn';
 
@@ -350,6 +352,60 @@ describe('Pi session adapter integration', () => {
         .filter((entry) => entry.type === 'message' && entry.message.role === 'user')
         .map((entry) => entry.type === 'message' && textOf(entry.message))
     ).toEqual(['original', 'supplement']);
+  });
+
+  it('普通插话在模型取用前可撤回：不进上下文、不留标签，取用后不可再撤', async () => {
+    const current = await harness(['wait-for-abort', { content: [{ type: 'text', text: 'ok' }] }]);
+    const original = current.session.prompt('original');
+    await current.streamStarted;
+    await current.session.steer('ordinary');
+    let detach: (() => boolean) | undefined;
+    expect(
+      await steerDetachable(current.session, 'withdrawn', undefined, (remove) => {
+        detach = remove;
+      })
+    ).toBe('queued');
+    expect(current.session.getSteeringMessages()).toEqual(['ordinary', 'withdrawn']);
+    expect(detach?.()).toBe(true);
+    expect(detach?.()).toBe(false);
+    expect(current.session.getSteeringMessages()).toEqual(['ordinary']);
+    await current.session.abort();
+    await original;
+    await current.session.prompt('next');
+    expect(current.requests.some((context) => contextText(context).includes('withdrawn'))).toBe(
+      false
+    );
+  });
+
+  it('批量插话：同一边界内排队的多条插话一次送达同一请求', async () => {
+    const toolGate = Promise.withResolvers<void>();
+    const toolEntered = Promise.withResolvers<void>();
+    const gatedTool: ToolDefinition = {
+      ...testTool,
+      execute: async () => {
+        toolEntered.resolve();
+        await toolGate.promise;
+        return { content: [{ type: 'text', text: 'tool finished' }], details: undefined };
+      },
+    };
+    const current = await harness(
+      [
+        { content: [{ type: 'toolCall', id: 'call-1', name: 'adapter_test_tool', arguments: {} }] },
+        { content: [{ type: 'text', text: 'combined reply' }] },
+      ],
+      { tools: [gatedTool] }
+    );
+    batchSteering(current.session);
+    const original = current.session.prompt('original');
+    await toolEntered.promise;
+    await current.session.steer('first supplement');
+    await current.session.steer('second supplement');
+    toolGate.resolve();
+    await original;
+    expect(current.requests).toHaveLength(2);
+    const second = contextText(current.requests[1]!);
+    expect(second).toContain('first supplement');
+    expect(second).toContain('second supplement');
   });
 
   it('空回复走 canonical context edit + 临时 context nudge，且不改原用户历史、system 或 tools', async () => {

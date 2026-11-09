@@ -44,6 +44,7 @@ pnpm vitest run src/renderer/stores/sessions/deliveryEcho.formal.test.ts
 | store 越界补快照 | `src/renderer/stores/sessions/index.ts` 中 `upsertOutOfRange` 触发 `resyncSnapshot` |
 | idle 收到 prompt：accepted / rejected / timeout / handled | `src/agent/supervisor.ts` `case 'prompt'`、`promptTracked`、`failTurn` |
 | running 收到 prompt：queued / handled | `steerTracked` |
+| running 中撤回未读插话：仍在 pi 队列则移除并回执 `delivery-rejected`，否则无事；回显带 `withdrawRequested` 时收到拒收即移除 | `supervisor.ts` `case 'withdraw-steer'` 与 `steerTracked` 的 `withdraw` 句柄；store `withdrawMessage`；reducer `delivery-rejected` |
 | user 消息落地后发 `delivery-settled` | user `message-upsert` 处的 `takeDelivery` |
 | snapshot 不排在在途 prompt 之后，但与事件同一 FIFO 发出 | `handleCommand` 开头的 `command.type === 'snapshot'` 分支走 `this.options.emit` |
 
@@ -57,7 +58,7 @@ git diff --stat f32fa5e95bc4..HEAD -- src/renderer/stores/sessions/reducer.ts sr
 
 ## 范围
 
-验证范围：一个会话、一个 generation；最多 3 次发送，文本取自 `a`、`b`（含重复文本）；1 次主动 snapshot 加 store 越界触发的 snapshot；每段轮次一次 assistant 回复；投递按发送顺序结算。
+验证范围：一个会话、一个 generation；最多 3 次发送，文本取自 `a`、`b`（含重复文本）；1 次主动 snapshot 加 store 越界触发的 snapshot；每段轮次一次 assistant 回复；投递按发送顺序结算。撤回单独一组配置：至多 1 次撤回、无主动 snapshot。
 
 不覆盖：worker 退出与重建（seq 归零）；图片、`<role>` 前缀、skill 块、截断头等 `sameUserText` 变体；尾窗 `baseIndex` 与分页；冷缓存清正文；rewind 与压缩；IPC 失败本地回滚；`steerActive` 与 `delivery-deferred`；steer 抛错路径。模型里文本匹配总先于 `delivery-settled` 消费回显，所以只靠 `delivery-settled` 按 id 收回的路径未被独立验证。
 

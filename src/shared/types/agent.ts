@@ -1564,6 +1564,8 @@ export type AgentCommand =
     }
   | { type: 'abort-classify-choice'; requestId: string }
   | { type: 'abort-retry'; identity: SessionIdentity }
+  /** 撤回模型尚未取用的插话；撤回成功以 delivery-rejected 回执，已取用则无事发生 */
+  | { type: 'withdraw-steer'; identity: SessionIdentity; deliveryId: string }
   /** instanceId 同 prompt：会话不在而被拒时 parent-rejected 回显 */
   | {
       type: 'retry';
@@ -4089,6 +4091,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
     case 'abort-retry':
     case 'release-parent':
       return hasExactKeys(value, ['type', 'identity']) && parseAnySessionIdentity(value.identity)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'withdraw-steer':
+      return hasExactKeys(value, ['type', 'identity', 'deliveryId']) &&
+        parseAnySessionIdentity(value.identity) &&
+        isDeliveryId(value.deliveryId)
         ? (value as unknown as AgentCommand)
         : null;
     case 'retry':

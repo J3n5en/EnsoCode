@@ -803,6 +803,25 @@ describe('applyAgentEvent', () => {
     ).toBe(after);
   });
 
+  it('用户请求撤回的回显收到拒收回执即移除，同文其他回显不受影响', () => {
+    const echo = (deliveryId: string, withdrawRequested?: true) => ({
+      role: 'user' as const,
+      content: [{ type: 'text' as const, text: 'same' }],
+      optimistic: true,
+      deliveryId,
+      ...(withdrawRequested ? { withdrawRequested } : {}),
+    });
+    const before = { ...base, messages: [echo('d1'), echo('d2', true)] };
+    const after = applyAgentEvent(before, 's1', {
+      type: 'delivery-rejected',
+      identity: identity(),
+      seq: 1,
+      deliveryId: 'd2',
+    });
+    expect(after.messages).toEqual([before.messages[0]]);
+    expect(after.lastSeq).toBe(1);
+  });
+
   it('拒收气泡不被另一条同文消息上屏或快照匹配吞掉', () => {
     const rejected = {
       role: 'user' as const,

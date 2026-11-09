@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   dismissCoworkerSession: vi.fn(() => ({ ok: true })),
   promptSession: vi.fn(),
   steerSession: vi.fn(),
+  withdrawSteerSession: vi.fn(),
   abortSession: vi.fn(),
   setPairAgentBridge: vi.fn(),
   configurePairSessionHost: vi.fn(),
@@ -109,6 +110,7 @@ vi.mock('../services/agentHost', () => ({
   spawnChildSession: vi.fn(),
   spawnSession: mocks.spawnSession,
   steerSession: mocks.steerSession,
+  withdrawSteerSession: mocks.withdrawSteerSession,
   stopBackgroundTask: vi.fn(),
   backgroundForegroundTool: vi.fn(),
   summarizeConversationTitle: mocks.summarizeConversationTitle,
@@ -224,6 +226,7 @@ describe('agent IPC Main identity boundary', () => {
     mocks.currentIdentity.mockReset();
     mocks.promptSession.mockClear();
     mocks.steerSession.mockClear();
+    mocks.withdrawSteerSession.mockClear();
     mocks.abortSession.mockClear();
     mocks.setPairAgentBridge.mockClear();
     mocks.configurePairSessionHost.mockClear();
@@ -373,6 +376,7 @@ describe('agent IPC Main identity boundary', () => {
     for (const [channel, args] of [
       [IPC_CHANNELS.AGENT_PROMPT, ['hello']],
       [IPC_CHANNELS.AGENT_STEER, ['hello']],
+      [IPC_CHANNELS.AGENT_WITHDRAW_STEER, ['d-1']],
       [IPC_CHANNELS.AGENT_SET_MODEL, ['provider', 'model']],
       [IPC_CHANNELS.AGENT_SET_THINKING, ['high']],
       [IPC_CHANNELS.AGENT_SET_REASONING, [true]],
@@ -720,6 +724,25 @@ describe('agent IPC Main identity boundary', () => {
       mocks.currentIdentity.mockReturnValue(parent);
       expect(await invoke('conv-1', 'hi', undefined, deliveryId)).toMatchObject({ ok: false });
       expect(send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('撤回未读插话', () => {
+    const parent = { sessionId: 'conv-1', generation: 'gen-1' };
+    const invoke = (...args: unknown[]) =>
+      mocks.handlers.get(IPC_CHANNELS.AGENT_WITHDRAW_STEER)?.(event, ...args);
+
+    it('合法 deliveryId 按当前代次下发', async () => {
+      mocks.currentIdentity.mockReturnValue(parent);
+      mocks.withdrawSteerSession.mockReturnValue({ ok: true });
+      expect(await invoke('conv-1', 'd-1')).toEqual({ ok: true });
+      expect(mocks.withdrawSteerSession).toHaveBeenCalledWith(parent, 'd-1');
+    });
+
+    it.each([undefined, '', 7, 'x'.repeat(129)])('非法 deliveryId %# 拒绝且不下发', async (id) => {
+      mocks.currentIdentity.mockReturnValue(parent);
+      expect(await invoke('conv-1', id)).toMatchObject({ ok: false });
+      expect(mocks.withdrawSteerSession).not.toHaveBeenCalled();
     });
   });
 

@@ -9,13 +9,15 @@ import {
 } from './reducer';
 
 type Outcome = 'accepted' | 'rejected' | 'timeout' | 'handled' | 'queued';
-type Fate = 'pending' | 'delivered' | 'rejected' | 'undelivered' | 'handled';
+type Fate = 'pending' | 'delivered' | 'rejected' | 'undelivered' | 'handled' | 'withdrawn';
 type Line = { role: string; text: string };
 
 interface Config {
   sends: number;
   texts: readonly string[];
   snapshots: number;
+  /** 运行中撤回未读插话的次数上限 */
+  withdraws: number;
   idle: readonly Outcome[];
   running: readonly Outcome[];
 }
@@ -26,8 +28,9 @@ interface World {
   prompts: string[];
   snapshotRequests: number;
   events: RendererAgentEvent[];
-  sent: { d: string; text: string; fate: Fate }[];
+  sent: { d: string; text: string; fate: Fate; withdrawRequested?: boolean }[];
   snapshotsLeft: number;
+  withdrawsLeft: number;
 }
 
 const SID = 's1';
@@ -47,6 +50,7 @@ function key(s: World): string {
       m.optimistic,
       m.deliveryId,
       m.deliveryRejected,
+      m.withdrawRequested,
     ]),
     s.r.lastSeq,
     s.r.status,
@@ -57,6 +61,7 @@ function key(s: World): string {
     s.events,
     s.sent,
     s.snapshotsLeft,
+    s.withdrawsLeft,
   ]);
 }
 
@@ -121,6 +126,24 @@ function successors(s: World, cfg: Config): [string, World][] {
       n.snapshotRequests++;
     });
   }
+  // 与 store.withdrawMessage 同条件：运行中、未拒收、未请求过撤回的回显
+  if (s.withdrawsLeft > 0 && s.r.status === 'running') {
+    for (const m of s.r.messages) {
+      if (!m.optimistic || m.deliveryRejected || m.withdrawRequested || !m.deliveryId) continue;
+      const d = m.deliveryId;
+      step(`renderer 请求撤回 ${d}`, (n) => {
+        n.withdrawsLeft--;
+        n.r = {
+          ...n.r,
+          messages: n.r.messages.map((x) =>
+            x.optimistic && x.deliveryId === d ? { ...x, withdrawRequested: true } : x
+          ),
+        };
+        n.sent.find((x) => x.d === d)!.withdrawRequested = true;
+        n.prompts.push(`~${d}`);
+      });
+    }
+  }
 
   if (s.snapshotRequests > 0) {
     step('worker 发出 snapshot', (n) => {
@@ -139,7 +162,18 @@ function successors(s: World, cfg: Config): [string, World][] {
     });
   }
   const d = s.prompts[0];
-  if (d) {
+  if (d?.startsWith('~')) {
+    // supervisor 'withdraw-steer'：仍在 pi 队列（未读）才撤回并回执拒收，否则无事发生
+    const target = d.slice(1);
+    step(`worker 处理撤回 ${target}`, (n) => {
+      n.prompts.shift();
+      const at = n.w.steers.indexOf(target);
+      if (at === -1) return;
+      n.w.steers.splice(at, 1);
+      n.sent.find((x) => x.d === target)!.fate = 'withdrawn';
+      emit(n, { type: 'delivery-rejected', deliveryId: target });
+    });
+  } else if (d) {
     for (const outcome of s.w.running ? cfg.running : cfg.idle) {
       step(`worker 处理 ${d}: ${outcome}`, (n) => {
         n.prompts.shift();
@@ -223,7 +257,9 @@ function violation(s: World): string | null {
   const echoes = msgs
     .filter((m) => m.optimistic)
     .map((m) => `${m.deliveryId}:${m.deliveryRejected ? 'rejected' : 'pending'}`);
-  const expected = s.sent.filter((x) => x.fate === 'rejected').map((x) => `${x.d}:rejected`);
+  const expected = s.sent
+    .filter((x) => x.fate === 'rejected' && !x.withdrawRequested)
+    .map((x) => `${x.d}:rejected`);
   if (JSON.stringify(echoes) !== JSON.stringify(expected)) {
     const fates = s.sent.map((x) => `${x.d}=${x.fate}`).join(', ');
     return `静止后回显尾巴 ${JSON.stringify(echoes)}，应为 ${JSON.stringify(expected)}（${fates}）`;
@@ -240,6 +276,7 @@ function explore(cfg: Config): { states: number; counterexample?: string } {
     events: [],
     sent: [],
     snapshotsLeft: cfg.snapshots,
+    withdrawsLeft: cfg.withdraws,
   };
   const parent = new Map<string, [string, string] | null>([[key(init), null]]);
   let frontier: World[] = [init];
@@ -272,6 +309,7 @@ const core: Config = {
   sends: 3,
   texts: ['a', 'b'],
   snapshots: 1,
+  withdraws: 0,
   idle: ['accepted', 'rejected', 'timeout'],
   running: ['queued'],
 };
@@ -281,6 +319,12 @@ describe('乐观回显投递协议（有界穷举）', () => {
     const result = explore(core);
     expect(result.counterexample).toBeUndefined();
     expect(result.states).toBeGreaterThan(50_000);
+  }, 60_000);
+
+  it('运行中撤回未读插话：撤回成功的不再显示，未撤成的照常送达', () => {
+    const result = explore({ ...core, snapshots: 0, withdraws: 1 });
+    expect(result.counterexample).toBeUndefined();
+    expect(result.states).toBeGreaterThan(10_000);
   }, 60_000);
 
   // 已知发现：promptTracked / steerTracked 遇 disposition 'handled' 不发任何回执，回显永远 pending。

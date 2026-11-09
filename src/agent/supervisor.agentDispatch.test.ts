@@ -1675,6 +1675,35 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       await supervisor.shutdown();
     });
 
+    it('同一边界排队的插话按批送达', async () => {
+      const { supervisor, piSession } = await spawned();
+      expect((piSession.agent as { steeringMode?: string }).steeringMode).toBe('all');
+      await supervisor.shutdown();
+    });
+
+    it('用户插话未读时可撤回：只移出本条并回执 delivery-rejected，已读后撤回无效', async () => {
+      const { events, supervisor, piSession, userMessage, settled } = await spawned();
+      piSession.isStreaming = true;
+      supervisor.handleCommand({ type: 'steer', identity: parent, text: 'a', deliveryId: 'a' });
+      supervisor.handleCommand({ type: 'steer', identity: parent, text: 'b', deliveryId: 'b' });
+      await settle();
+      expect(piSession.getSteeringMessages()).toEqual(['a', 'b']);
+      supervisor.handleCommand({ type: 'withdraw-steer', identity: parent, deliveryId: 'a' });
+      await settle();
+      expect(piSession.getSteeringMessages()).toEqual(['b']);
+      expect(events.filter((event) => event.type === 'delivery-rejected')).toEqual([
+        expect.objectContaining({ deliveryId: 'a' }),
+      ]);
+      // 撤回的投递不再占回执队列：下一条上屏的 user 消息结算给 b
+      userMessage('b');
+      expect(settled()).toEqual(['b']);
+      supervisor.handleCommand({ type: 'withdraw-steer', identity: parent, deliveryId: 'b' });
+      supervisor.handleCommand({ type: 'withdraw-steer', identity: parent, deliveryId: 'zz' });
+      await settle();
+      expect(events.filter((event) => event.type === 'delivery-rejected')).toHaveLength(1);
+      await supervisor.shutdown();
+    });
+
     it('Bot 已入队但结算前未消费时只移除本条，并交回 Main', async () => {
       const { events, supervisor, piSession } = await spawned();
       piSession.isStreaming = true;

@@ -10,36 +10,35 @@ import { transcriptMessages } from './transcript';
 
 export const OAUTH_POOL_TERMINAL_ERROR_ENTRY = 'enso.oauth-pool-terminal-error';
 
-/** Pi 1.4：仅在本次 steer 的同步入队点检查活轮，不触碰 prompt 的压缩/nextTurn 副作用。
- * 每次调用独立代理，不替换共享 session 方法；私有队列形状由真实 SDK 契约测试锁定。
- *
- * Pi 1.4: Check the active run only at this steer call’s synchronous enqueue point,
- * avoiding prompt compaction/nextTurn effects. A per-call proxy leaves shared session
- * methods intact; real SDK contract tests cover the private queue shape.
+/** 同一边界排队的插话一次送达（pi 默认逐条，后一条要多等一次模型请求）。不写 settings。 */
+export function batchSteering(session: AgentSession): void {
+  if (session.agent) session.agent.steeringMode = 'all';
+}
+
+/**
+ * 每次调用独立代理截获本条入队，交出只移除本条的撤回句柄；不替换共享 session 方法，
+ * 私有队列形状由真实 SDK 契约测试锁定。`guard` 在同步入队点抛错可拒绝入队。
  */
-export async function steerActiveSession(
+function detachableSteer(
   session: AgentSession,
-  text: string,
-  images: Parameters<AgentSession['steer']>[1],
   onQueued: (detach: () => boolean) => void,
-  prepareText: (text: string) => string = (text) => text
-): Promise<'queued' | 'handled' | 'deferred'> {
-  if (!session.isStreaming || session.isRetrying) return 'deferred';
+  prepareText: (text: string) => string,
+  guard?: () => void
+): AgentSession | null {
   const adapter = session as unknown as {
     _queueSteer: (text: string, images: Parameters<AgentSession['steer']>[1]) => Promise<void>;
     _emitQueueUpdate: () => void;
   };
-  const queue = (session.agent as unknown as { steeringQueue?: { messages?: unknown[] } })
-    .steeringQueue;
-  if (!Array.isArray(queue?.messages) || typeof adapter._queueSteer !== 'function')
-    throw new Error('Unsupported Pi steering adapter');
+  const queue = (
+    session.agent as unknown as { steeringQueue?: { messages?: unknown[] } } | undefined
+  )?.steeringQueue;
+  if (!Array.isArray(queue?.messages) || typeof adapter._queueSteer !== 'function') return null;
   const pendingQueue = queue as { messages: unknown[] };
-  const deferred = new Error('active turn ended before steering');
-  const guarded = new Proxy(session, {
+  return new Proxy(session, {
     get(target, key, receiver) {
       if (key !== '_queueSteer') return Reflect.get(target, key, receiver);
       return (input: string, attached: Parameters<AgentSession['steer']>[1]) => {
-        if (!target.isStreaming || target.isRetrying) throw deferred;
+        guard?.();
         const queuedText = prepareText(input);
         const result = adapter._queueSteer(queuedText, attached);
         const message = pendingQueue.messages.at(-1);
@@ -58,6 +57,36 @@ export async function steerActiveSession(
       };
     },
   });
+}
+
+/** 用户插话：入队后交出撤回句柄，模型取用（出队）前可撤回；会话不支持截获时照常插话、不可撤回。 */
+export function steerDetachable(
+  session: AgentSession,
+  text: string,
+  images: Parameters<AgentSession['steer']>[1],
+  onQueued: (detach: () => boolean) => void
+): Promise<'queued' | 'handled'> {
+  return (detachableSteer(session, onQueued, (input) => input) ?? session).steer(text, images);
+}
+
+/** Pi 1.4：仅在本次 steer 的同步入队点检查活轮，不触碰 prompt 的压缩/nextTurn 副作用。
+ *
+ * Pi 1.4: Check the active run only at this steer call’s synchronous enqueue point,
+ * avoiding prompt compaction/nextTurn effects.
+ */
+export async function steerActiveSession(
+  session: AgentSession,
+  text: string,
+  images: Parameters<AgentSession['steer']>[1],
+  onQueued: (detach: () => boolean) => void,
+  prepareText: (text: string) => string = (text) => text
+): Promise<'queued' | 'handled' | 'deferred'> {
+  if (!session.isStreaming || session.isRetrying) return 'deferred';
+  const deferred = new Error('active turn ended before steering');
+  const guarded = detachableSteer(session, onQueued, prepareText, () => {
+    if (!session.isStreaming || session.isRetrying) throw deferred;
+  });
+  if (!guarded) throw new Error('Unsupported Pi steering adapter');
   try {
     return await guarded.steer(text, images);
   } catch (error) {

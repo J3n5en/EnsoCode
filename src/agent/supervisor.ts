@@ -232,12 +232,14 @@ import { projectMessages, projectResumeTail } from './resumeSnapshots';
 import { withRtkOptimization } from './rtk';
 import { RunawayGuard } from './runawayGuard';
 import {
+  batchSteering,
   buildSessionDisplayMessages,
   continueSessionActivity,
   editLatestAssistantForRetry,
   editUnfinishedAssistantForResume,
   silentTurnRecoveryExtension,
   steerActiveSession,
+  steerDetachable,
 } from './sessionAdapter';
 import {
   EVICTION_SWEEP_INTERVAL_MS,
@@ -446,7 +448,8 @@ interface ManagedSession {
   /** 下一条 prompt 产生的 user 消息的投递回执；id 为 null 表示该投递无乐观回显 */
   promptDelivery?: { id: string | null };
   /** 已入 pi steer 队列、尚未上屏的投递回执，与 pi 队列同序 */
-  steerDeliveries?: { id: string | null; detach?: () => boolean }[];
+  /** detach：Bot 插话结算时交回 Main；withdraw：用户在模型取用前撤回 */
+  steerDeliveries?: { id: string | null; detach?: () => boolean; withdraw?: () => boolean }[];
   pendingBranch?: string;
   pendingBranchRequestId?: string;
   pendingVerifications?: number;
@@ -1850,6 +1853,19 @@ export class SessionSupervisor {
       case 'abort-retry':
         this.must(command.identity).session.abortRetry();
         return;
+      case 'withdraw-steer': {
+        const managed = this.must(command.identity);
+        const slot = managed.steerDeliveries?.find((item) => item.id === command.deliveryId);
+        if (!slot?.withdraw?.()) return;
+        managed.steerDeliveries = managed.steerDeliveries?.filter((item) => item !== slot);
+        this.options.emit({
+          type: 'delivery-rejected',
+          identity: managed.identity,
+          seq: ++managed.seq,
+          deliveryId: command.deliveryId,
+        });
+        return;
+      }
       case 'retry': {
         const managed = this.must(command.identity);
         // 没开出新轮的两条路都要回执：Main 的 bot 宿主据此结算等着这次续跑的轮次，
@@ -3401,6 +3417,7 @@ export class SessionSupervisor {
       requestBudget?: RequestBudget;
     } = {}
   ): ManagedSession {
+    batchSteering(session);
     const customEntries = session.sessionManager.getBranch().flatMap((entry) => {
       if (entry.type !== 'custom' || entry.customType !== 'enso-agent-session') return [];
       const parsed = parseAgentSessionCustomEntry(entry.data);
@@ -4905,11 +4922,17 @@ export class SessionSupervisor {
     images?: { type: 'image'; data: string; mimeType: string }[],
     deliveryId?: string
   ): Promise<void> {
-    const slot = { id: deliveryId ?? null };
+    const slot: NonNullable<ManagedSession['steerDeliveries']>[number] = { id: deliveryId ?? null };
     managed.steerDeliveries ??= [];
     managed.steerDeliveries.push(slot);
-    return managed.session
-      .steer(withPendingPlanNote(managed, text), images)
+    return steerDetachable(
+      managed.session,
+      withPendingPlanNote(managed, text),
+      images,
+      (detach) => {
+        slot.withdraw = detach;
+      }
+    )
       .then((disposition) => {
         // Pi 可在 input hook 中消费输入，而不向队列添加 user 消息，因此不能保留对应投递标记。
         //
