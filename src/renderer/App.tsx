@@ -467,6 +467,7 @@ export default function App() {
                 >
                   <button
                     type="button"
+                    data-enso="sidebar-toggle"
                     className={TOOLBAR_BUTTON}
                     onClick={() => setCollapsed((v) => !v)}
                     title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
@@ -483,6 +484,7 @@ export default function App() {
                 <>
                   <button
                     type="button"
+                    data-enso="search-button"
                     className={TOOLBAR_BUTTON}
                     onClick={() => setSearchOpen(true)}
                     title={t('Search anything')}
@@ -491,6 +493,7 @@ export default function App() {
                   </button>
                   <button
                     type="button"
+                    data-enso="new-session"
                     className={TOOLBAR_BUTTON}
                     onClick={startNewConversation}
                     title={t('New conversation')}
@@ -522,6 +525,7 @@ export default function App() {
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
+                  data-enso="sidebar-toggle"
                   className="-ml-1.5 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
                   onClick={() => setDrawerOpen(true)}
                   aria-label={t('Conversations')}

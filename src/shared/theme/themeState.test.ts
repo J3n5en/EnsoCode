@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appActivityState, sessionThemeState } from './themeState';
+import { appActivityState, conversationThemeState, sessionThemeState } from './themeState';
 
 const idle = { status: 'idle' };
 
@@ -48,5 +48,17 @@ describe('appActivityState', () => {
         side: { status: 'failed', btwParentId: 'a' },
       })
     ).toBe('idle');
+  });
+});
+
+describe('conversationThemeState', () => {
+  it('子会话在跑由调用方预先算好，取值与 sessionThemeState 同序', () => {
+    expect(conversationThemeState(idle)).toBe('idle');
+    expect(conversationThemeState({ status: 'idle', hasRunningChild: true })).toBe('running');
+    expect(conversationThemeState({ status: 'idle', spawning: true })).toBe('running');
+    expect(conversationThemeState({ status: 'running', pendingApprovals: [{}] })).toBe('waiting');
+    expect(conversationThemeState({ status: 'idle', pendingCapabilityAsks: [{}] })).toBe('waiting');
+    expect(conversationThemeState({ status: 'failed', hasRunningChild: true })).toBe('error');
+    expect(conversationThemeState({ status: 'idle', unread: true })).toBe('idle');
   });
 });

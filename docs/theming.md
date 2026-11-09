@@ -104,7 +104,19 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 | 锚点 | 位置 |
 | --- | --- |
 | `canvas` | 主窗口和设置窗口的画布。侧栏坐在上面。 |
+| `sidebar-toggle` | 展开 / 折叠侧栏的按钮。窗口顶栏左侧那个，移动端顶栏打开抽屉的按钮和抽屉底部的收起按钮也挂。 |
+| `search-button` | 「Search anything」搜索按钮。窗口顶栏那个和移动端抽屉底部那个。 |
+| `new-session` | 窗口顶栏的新建会话按钮。 |
 | `sidebar` | 会话侧栏。 |
+| `group-chip` | 侧栏顶部分类条里的每个分组标签：全部、最近、自定义分组、未分组。 |
+| `section-header` | 侧栏列表里的分区标题，带 `data-section`。 |
+| `project-row` | 侧栏里的项目行，只是那一行，不含下面的会话。 |
+| `tree-chevron` | 侧栏里可折叠行的展开箭头：项目行、临时会话分区标题、分组标题。 |
+| `session-row` | 侧栏里的会话行。 |
+| `session-status` | 会话行里的状态圆点。空闲且没有未读时不画圆点，也就没有这个元素。 |
+| `row-menu` | 侧栏项目行悬停时出现的「…」更多操作按钮。 |
+| `node-switcher` | 侧栏底部的设备切换按钮。 |
+| `settings-button` | 侧栏底部和折叠栏里的设置按钮。 |
 | `main` | 主内容卡片。 |
 | `title-bar` | 卡片顶栏。聊天、设置和整行标题栏都挂它。 |
 | `session-tabs` | 会话标签行。 |
@@ -116,6 +128,7 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 | `thinking` | 思考块。 |
 | `todo` | 待办。时间线里的待办面板和输入框上的待办条都挂它。 |
 | `code-block` | 代码块。 |
+| `approval` | 输入框上方的工具审批卡。 |
 | `composer` | 输入框。 |
 | `status-line` | 状态行。 |
 | `settings-nav` | 设置导航。 |
@@ -132,9 +145,18 @@ token 那一块写成两段，选择器是 `:where(:root)` 和 `:where(:root.dar
 
 思考块 `[data-enso="thinking"]` 在思考进行中带 `data-live`，结束后去掉。
 
+侧栏和审批卡上的控件级属性。布尔属性存在即为真，为假时不渲染这个属性：
+
+- `data-active`：`group-chip` 是当前选中的分组；`session-row` 是当前打开的会话。
+- `data-expanded`：`project-row` 和 `tree-chevron` 处于展开状态。搜索时项目一律展开。
+- `data-section`：`section-header` 的分区，取值 `active`（活跃中）、`pinned`（置顶会话）、`scratch`（临时会话）、`projects`（项目）、`pinned-projects`（置顶项目）、`group`（「全部」视图下的分组标题，含未分组）。
+- `data-status`：`session-row` 和 `session-status` 上，值是 `idle`、`running`、`waiting`、`error` 之一，算法与 `data-enso-session` 相同，只是对象换成这一行的会话。
+- `data-unread`：`session-row` 有未读回复。未读不改变 `data-status`。
+
 ```css
 :root[data-enso-session="error"] [data-enso="composer"] { border-color: var(--destructive); }
 [data-enso="thinking"][data-live]::before { background-image: var(--my-busy); }
+[data-enso="session-row"][data-status="waiting"] [data-enso="session-status"] { background-image: var(--my-ask); }
 ```
 
 这些属性和锚点一样是稳定接口，不要再用内部类名（例如 `.animate-pulse`）推断状态。

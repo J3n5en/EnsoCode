@@ -104,7 +104,10 @@ export function ApprovalBar({
   };
 
   return (
-    <div className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2">
+    <div
+      data-enso="approval"
+      className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2"
+    >
       <div className="flex items-center gap-2 text-xs">
         <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-amber-500" />
         <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
