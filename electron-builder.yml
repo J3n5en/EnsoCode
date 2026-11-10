@@ -100,6 +100,9 @@ asarUnpack:
   - node_modules/@vscode/ripgrep/bin/**
 mac:
   category: public.app-category.developer-tools
+  extraResources:
+    - from: build/bin/enso
+      to: bin/enso
   hardenedRuntime: true
   gatekeeperAssess: false
   # 公证与 staple 由 scripts/after-sign.mjs 负责，staple 断网可重试

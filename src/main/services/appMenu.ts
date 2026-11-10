@@ -1,4 +1,5 @@
-import { Menu, type MenuItemConstructorOptions } from 'electron';
+import { app, Menu, type MenuItemConstructorOptions } from 'electron';
+import { installEnsoCommand } from '../desktop/shellCommand';
 
 export const APP_DISPLAY_NAME = 'EnsoCode';
 
@@ -12,6 +13,14 @@ export function macAppMenuTemplate(): MenuItemConstructorOptions[] {
       label: APP_DISPLAY_NAME,
       submenu: [
         { role: 'about', label: `About ${APP_DISPLAY_NAME}` },
+        ...(app.isPackaged
+          ? [
+              {
+                label: "Install 'enso' Command in PATH",
+                click: () => void installEnsoCommand(),
+              },
+            ]
+          : []),
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },

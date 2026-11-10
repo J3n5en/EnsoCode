@@ -1,0 +1,5 @@
+#!/bin/sh
+self=$(readlink "$0" || printf '%s' "$0")
+app=$(cd "$(dirname "$self")/../../.." && pwd) || exit 1
+dir=$(cd "${1:-.}" && pwd) || exit 1
+exec open -a "$app" "$dir"
