@@ -47,7 +47,7 @@ import type {
 } from '@shared/types/oauthProviders';
 import type { RecentProject } from '@shared/types/project';
 import type { ListModelsResult, TestProviderResult } from '@shared/types/providerApi';
-import { parseVirtualModels } from '@shared/virtualModels';
+import { findVirtualModel, isVirtualRef, parseVirtualModels } from '@shared/virtualModels';
 import { isAbsolutePathLike } from '@shared/worktreeRoot';
 import type { AgentSessionIndex } from './agentSessionIndex';
 import { getModelDirectorySnapshot } from './modelDirectory';
@@ -445,7 +445,8 @@ function referencedIds(
 }
 
 /**
- * subagent-models 条目字段解析：providerId/modelId 必须指向已配置且启用的模型行；
+ * subagent-models 条目字段解析：真实引用必须指向已配置且启用的模型行；
+ * 虚拟引用必须命中 settings.virtualModels 里启用的条目。
  * reasoning/thinkingLevel 的 'follow' 表示清除覆盖（存储层不落 'follow'）；
  * 推理非 'on' 时档位无意义，一律丢弃，与设置页交互保持一致。
  */
@@ -461,14 +462,22 @@ function parseSubagentModelFields(
     requiredString(params, 'modelId') ??
     (typeof existing?.modelId === 'string' ? existing.modelId : null);
   if (!providerId || !modelId) return invalid('providerId and modelId are required');
-  const provider = providersOf(services).find((entry) => entry.id === providerId);
-  if (!provider || provider.enabled === false) {
-    return unavailable(`provider not available: ${providerId}`);
+  if (isVirtualRef({ providerId })) {
+    const virtual = findVirtualModel(
+      parseVirtualModels(settingsState(services.readSettings()).virtualModels),
+      { providerId, modelId }
+    );
+    if (!virtual?.enabled) return unavailable(`model not available: ${modelId}`);
+  } else {
+    const provider = providersOf(services).find((entry) => entry.id === providerId);
+    if (!provider || provider.enabled === false) {
+      return unavailable(`provider not available: ${providerId}`);
+    }
+    const model = Array.isArray(provider.models)
+      ? provider.models.find((entry) => asRecord(entry)?.id === modelId)
+      : undefined;
+    if (!model || model.enabled === false) return unavailable(`model not available: ${modelId}`);
   }
-  const model = Array.isArray(provider.models)
-    ? provider.models.find((entry) => asRecord(entry)?.id === modelId)
-    : undefined;
-  if (!model || model.enabled === false) return unavailable(`model not available: ${modelId}`);
   const description =
     typeof params.description === 'string'
       ? params.description

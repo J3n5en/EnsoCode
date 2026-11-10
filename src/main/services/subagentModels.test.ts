@@ -1,4 +1,5 @@
 import type { ModelProvider, SubagentModelEntry } from '@shared/types';
+import { VIRTUAL_PROVIDER_ID, type VirtualModelEntry } from '@shared/virtualModels';
 import { describe, expect, it } from 'vitest';
 import { pickSubagentModelRefs } from './subagentModels';
 
@@ -29,7 +30,7 @@ describe('pickSubagentModelRefs', () => {
       entry({ id: 'legacy', modelId: 'legacy' }),
       entry({ id: 'on', modelId: 'on', enabled: true }),
     ];
-    expect(pickSubagentModelRefs(entries, providers).map((ref) => ref.modelId)).toEqual([
+    expect(pickSubagentModelRefs(entries, providers, []).map((ref) => ref.modelId)).toEqual([
       'legacy',
       'on',
     ]);
@@ -42,7 +43,7 @@ describe('pickSubagentModelRefs', () => {
       entry({ enabled: false, description: '禁用配置', reasoning: 'off' }),
       entry({ id: 'e2', enabled: true, description: '启用配置', reasoning: 'on' }),
     ];
-    expect(pickSubagentModelRefs(entries, [provider({})])).toEqual([
+    expect(pickSubagentModelRefs(entries, [provider({})], [])).toEqual([
       {
         name: 'OpenAI/gpt-cheap',
         providerId: 'p1',
@@ -56,9 +57,11 @@ describe('pickSubagentModelRefs', () => {
   it('关闭不修改持久化配置，重新启用后恢复描述和推理覆盖', () => {
     const configured = entry({ enabled: false, reasoning: 'off', thinkingLevel: 'high' });
     const original = structuredClone(configured);
-    expect(pickSubagentModelRefs([configured], [provider({})])).toEqual([]);
+    expect(pickSubagentModelRefs([configured], [provider({})], [])).toEqual([]);
     expect(configured).toEqual(original);
-    expect(pickSubagentModelRefs([{ ...configured, enabled: true }], [provider({})])[0]).toEqual({
+    expect(
+      pickSubagentModelRefs([{ ...configured, enabled: true }], [provider({})], [])[0]
+    ).toEqual({
       name: 'OpenAI/gpt-cheap',
       providerId: 'p1',
       modelId: 'gpt-cheap',
@@ -82,7 +85,7 @@ describe('pickSubagentModelRefs', () => {
       entry({ id: 'e5', modelId: 'ghost' }),
       entry({ id: 'e6', providerId: 'ghost' }),
     ];
-    expect(pickSubagentModelRefs(entries, providers)).toEqual([
+    expect(pickSubagentModelRefs(entries, providers, [])).toEqual([
       {
         name: 'OpenAI/gpt-cheap',
         providerId: 'p1',
@@ -103,7 +106,7 @@ describe('pickSubagentModelRefs', () => {
       }),
     ];
     expect(
-      pickSubagentModelRefs([entry({ modelId: 'sonnet', description: '' })], providers)
+      pickSubagentModelRefs([entry({ modelId: 'sonnet', description: '' })], providers, [])
     ).toEqual([{ name: 'Claude/sonnet', providerId: 'p1', modelId: 'sonnet' }]);
   });
 
@@ -117,7 +120,7 @@ describe('pickSubagentModelRefs', () => {
       entry({ id: 'e2', providerId: 'p2', modelId: 'm' }),
       entry({ id: 'e3', providerId: 'p1', modelId: 'm' }),
     ];
-    expect(pickSubagentModelRefs(entries, providers).map((ref) => ref.name)).toEqual([
+    expect(pickSubagentModelRefs(entries, providers, []).map((ref) => ref.name)).toEqual([
       'X/m',
       'X/m#2',
     ]);
@@ -126,12 +129,12 @@ describe('pickSubagentModelRefs', () => {
   it('条目级推理覆盖透传;非法值丢弃;缺省不透传', () => {
     const providers = [provider({})];
     expect(
-      pickSubagentModelRefs([entry({ reasoning: 'on', thinkingLevel: 'high' })], providers)[0]
+      pickSubagentModelRefs([entry({ reasoning: 'on', thinkingLevel: 'high' })], providers, [])[0]
     ).toMatchObject({ reasoning: 'on', thinkingLevel: 'high' });
-    expect(pickSubagentModelRefs([entry({ reasoning: 'off' })], providers)[0]).toMatchObject({
+    expect(pickSubagentModelRefs([entry({ reasoning: 'off' })], providers, [])[0]).toMatchObject({
       reasoning: 'off',
     });
-    const plain = pickSubagentModelRefs([entry({})], providers)[0];
+    const plain = pickSubagentModelRefs([entry({})], providers, [])[0];
     expect(plain).not.toHaveProperty('reasoning');
     expect(plain).not.toHaveProperty('thinkingLevel');
     const bad = pickSubagentModelRefs(
@@ -141,7 +144,8 @@ describe('pickSubagentModelRefs', () => {
           thinkingLevel: 'ultra' as unknown as SubagentModelEntry['thinkingLevel'],
         }),
       ],
-      providers
+      providers,
+      []
     )[0];
     expect(bad).not.toHaveProperty('reasoning');
     expect(bad).not.toHaveProperty('thinkingLevel');
@@ -150,6 +154,79 @@ describe('pickSubagentModelRefs', () => {
   it('脏输入不崩:models 非数组/条目缺字段直接跳过', () => {
     const dirty = provider({ models: undefined as unknown as ModelProvider['models'] });
     const badEntry = { id: 'x' } as unknown as SubagentModelEntry;
-    expect(pickSubagentModelRefs([entry({}), badEntry], [dirty])).toEqual([]);
+    expect(pickSubagentModelRefs([entry({}), badEntry], [dirty], [])).toEqual([]);
+  });
+
+  const auto = (overrides: Partial<VirtualModelEntry> = {}): VirtualModelEntry => ({
+    id: 'auto',
+    name: 'Auto',
+    enabled: true,
+    primary: { providerId: 'p1', modelId: 'gpt-cheap' },
+    fallbacks: [],
+    ...overrides,
+  });
+
+  const virtualEntry = (overrides: Partial<SubagentModelEntry> = {}): SubagentModelEntry =>
+    entry({
+      providerId: VIRTUAL_PROVIDER_ID,
+      modelId: 'auto',
+      description: '按难度路由',
+      reasoning: 'on',
+      thinkingLevel: 'high',
+      ...overrides,
+    });
+
+  it('启用的虚拟条目按条目名列出，不查凭证，描述和推理覆盖透传', () => {
+    expect(pickSubagentModelRefs([virtualEntry()], [], [auto()])).toEqual([
+      {
+        name: 'Auto',
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: 'auto',
+        description: '按难度路由',
+        reasoning: 'on',
+        thinkingLevel: 'high',
+      },
+    ]);
+  });
+
+  it('禁用或缺失的虚拟条目被跳过，且不占去重键', () => {
+    const entries = [
+      virtualEntry({
+        id: 'disabled-model',
+        modelId: 'off',
+        description: '目录停用',
+        reasoning: 'off',
+      }),
+      virtualEntry({ id: 'missing', modelId: 'ghost', description: '缺失' }),
+      virtualEntry({ id: 'entry-off', enabled: false, description: '条目禁用', reasoning: 'off' }),
+      virtualEntry({ id: 'e2', description: '启用配置', reasoning: 'on' }),
+    ];
+    expect(
+      pickSubagentModelRefs(
+        entries,
+        [],
+        [auto(), auto({ id: 'off', name: 'Auto', enabled: false })]
+      )
+    ).toEqual([
+      {
+        name: 'Auto',
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: 'auto',
+        description: '启用配置',
+        reasoning: 'on',
+        thinkingLevel: 'high',
+      },
+    ]);
+  });
+
+  it('虚拟条目名与真实模型名冲突时追加 #2', () => {
+    const providers = [provider({ name: 'OpenAI', models: [{ id: 'gpt-cheap' }] })];
+    expect(
+      pickSubagentModelRefs(
+        [entry({}), virtualEntry({ id: 'v1', description: '虚拟' })],
+        providers,
+        [auto({ name: 'OpenAI/gpt-cheap' })]
+      ).map((ref) => ref.name)
+    ).toEqual(['OpenAI/gpt-cheap', 'OpenAI/gpt-cheap#2']);
   });
 });

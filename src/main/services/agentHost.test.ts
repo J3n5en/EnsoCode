@@ -348,7 +348,8 @@ describe('resolveModelSelection 虚拟模型', () => {
           { ...tsRef, id: 'ts-entry', description: '' },
           { ...chatRef, id: 'chat-entry', description: '' },
         ],
-        [ts, chat]
+        [ts, chat],
+        []
       ).map((entry) => entry.modelId)
     ).toEqual(['chat-model']);
     const resolved = resolveModelSelection('enso-virtual', 'auto', new Set(), {
@@ -528,6 +529,68 @@ describe('resolveModelSelection 虚拟模型', () => {
     expect(resolveModelSelection('enso-virtual', 'auto', keys, { allowVirtual: true })).toEqual({
       ok: false,
       error: '虚拟模型没有可用成员',
+    });
+  });
+});
+
+describe('resolveSubagentModelSelection 虚拟模型', () => {
+  it('按虚拟名整包下发，身份保持虚拟引用，条目推理覆盖在顶层', () => {
+    settingsMock.value = {
+      'enso-settings': {
+        version: 99,
+        state: {
+          subagentModelsEnabled: true,
+          providers: [
+            {
+              id: 'p1',
+              name: 'Claude',
+              api: 'anthropic-messages',
+              apiKey: '',
+              baseUrl: '',
+              enabled: true,
+              oauthAccountKey: 'anthropic',
+              models: [{ id: 'strong' }, { id: 'weak' }],
+            },
+          ],
+          virtualModels: [
+            {
+              id: 'auto',
+              name: 'Auto',
+              enabled: true,
+              primary: { providerId: 'p1', modelId: 'strong' },
+              fast: { providerId: 'p1', modelId: 'weak' },
+              fallbacks: [],
+            },
+          ],
+          subagentModels: [
+            {
+              id: 'e1',
+              providerId: 'enso-virtual',
+              modelId: 'auto',
+              description: '按难度路由',
+              reasoning: 'off',
+              thinkingLevel: 'low',
+            },
+          ],
+        },
+      },
+    };
+    const selected = resolveSubagentModelSelection('Auto', new Set(['anthropic']));
+    expect(selected.ok).toBe(true);
+    if (!selected.ok) return;
+    expect(selected.selection.config.virtual).toMatchObject({
+      primary: { modelId: 'strong' },
+      fast: { modelId: 'weak' },
+    });
+    expect(selected.selection.config.settingsProviderId).toBe('enso-virtual');
+    expect(selected.selection.config.modelId).toBe('auto');
+    expect(selected.selection.config.reasoning).toBe('off');
+    expect(selected.selection.config.thinkingLevel).toBe('low');
+    expect(selected.selection.config.virtual?.primary).not.toHaveProperty('reasoning');
+    expect(selected.selection.ref).toEqual({ providerId: 'enso-virtual', modelId: 'auto' });
+    expect(selected.selection.runtimeRef).toEqual({
+      providerId: 'enso-virtual',
+      modelId: 'auto',
     });
   });
 });

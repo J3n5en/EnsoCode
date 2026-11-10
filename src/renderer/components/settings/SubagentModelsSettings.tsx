@@ -3,6 +3,7 @@ import { SUBAGENT_MODELS_CONFIGURE_PROMPT } from '@shared/i18n';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import type { ModelProvider, ModelThinkingLevelOverride } from '@shared/types';
 import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
+import { isVirtualRef, selectableVirtualModels, VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import { Plus, Sparkles, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';
 import { ModelPicker } from '@/components/chat/ModelPicker';
@@ -46,10 +47,17 @@ export function SubagentModelsSettings() {
   const updateEntry = useSettingsStore((state) => state.updateSubagentModel);
   const removeEntry = useSettingsStore((state) => state.removeSubagentModel);
   const defaultModel = useSettingsStore((state) => state.defaultModel);
+  const virtualModels = useSettingsStore((state) => state.virtualModels);
   const candidates = useUsableProviders();
 
-  // 新条目的初始选择：全局默认模型可用则用它,否则第一个可用模型
+  // 新条目的初始选择：可选虚拟默认模型优先，否则全局默认或第一个可用真实模型
   const seedSelection = useMemo((): { providerId: string; modelId: string } | null => {
+    if (defaultModel && isVirtualRef(defaultModel)) {
+      const seed = selectableVirtualModels(virtualModels, candidates).find(
+        (entry) => entry.id === defaultModel.modelId
+      );
+      if (seed) return { providerId: VIRTUAL_PROVIDER_ID, modelId: seed.id };
+    }
     if (defaultModel) {
       const provider = candidates.find((entry) => entry.id === defaultModel.providerId);
       if (provider && isModelEnabled(provider, defaultModel.modelId)) return defaultModel;
@@ -59,7 +67,7 @@ export function SubagentModelsSettings() {
       if (model) return { providerId: provider.id, modelId: model.id };
     }
     return null;
-  }, [candidates, defaultModel]);
+  }, [candidates, defaultModel, virtualModels]);
 
   const handleAiConfigure = () => {
     void window.electronAPI.window.summonAgent({
@@ -123,6 +131,7 @@ export function SubagentModelsSettings() {
               <div className="shrink-0 rounded-md border bg-background">
                 <ModelPicker
                   providers={candidates}
+                  virtualModels={virtualModels}
                   providerId={entry.providerId}
                   modelId={entry.modelId}
                   modelCapabilityOverrides={pickModelCapabilityOverrides(entry)}

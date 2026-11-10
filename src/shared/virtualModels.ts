@@ -131,6 +131,24 @@ export function findVirtualModel(
   return virtualModels?.find((entry) => entry.id === ref.modelId);
 }
 
+/** 选择器可展示的虚拟模型：条目启用，且主模型行存在并启用。不判断凭证。 */
+export function selectableVirtualModels(
+  virtualModels: readonly VirtualModelEntry[] | undefined,
+  providers: readonly Pick<ModelProvider, 'id' | 'models'>[]
+): VirtualModelEntry[] {
+  return (virtualModels ?? []).filter(
+    (entry) =>
+      entry.enabled &&
+      providers.some(
+        (provider) =>
+          provider.id === entry.primary.providerId &&
+          provider.models.some(
+            (model) => model.id === entry.primary.modelId && model.enabled !== false
+          )
+      )
+  );
+}
+
 /** 不走路由的辅助场景（标题、代审、btw…）落到虚拟引用时用的真实成员。 */
 export function directMemberRef(entry: VirtualModelEntry): DefaultModelRef {
   return entry.fast ?? entry.primary;

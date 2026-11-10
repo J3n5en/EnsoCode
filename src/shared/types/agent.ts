@@ -399,7 +399,7 @@ export interface AgentTypeSpawnConfig {
 
 /**
  * 下发 worker 的子代理可选模型（设置页集中配置，main 已解析凭证）。
- * name 是给 LLM 看的唯一键（`{provider.name}/{modelId}`，冲突时追加 #n）；
+ * name 是给 LLM 看的唯一键：物理为 `{provider.name}/{modelId}`，虚拟为条目 name，不是 `enso-virtual/{id}`；冲突时追加 #n。
  * description 是用户写的选型依据，注入工具参数说明。
  */
 export interface SubagentModelOption {

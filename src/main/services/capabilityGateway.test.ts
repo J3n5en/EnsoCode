@@ -527,10 +527,66 @@ describe('CapabilityGateway OAuth/default/secret/receipt', () => {
       expect(updated.modelResult).toMatchObject({ ok: true });
       expect(state.subagentModels).toStrictEqual([{ ...entry, description: '新说明' }, neighbor]);
       expect(
-        pickSubagentModelRefs(state.subagentModels as SubagentModelEntry[], [provider()])
+        pickSubagentModelRefs(state.subagentModels as SubagentModelEntry[], [provider()], [])
       ).toHaveLength(enabled === false ? 0 : 1);
     }
   );
+
+  it('subagent-models.add 接受启用的虚拟模型，拒绝缺失或禁用的', async () => {
+    const { gateway, state } = fixture();
+    state.virtualModels = [
+      {
+        id: 'auto',
+        name: 'Auto',
+        enabled: true,
+        primary: { providerId: 'provider-1', modelId: 'model-1' },
+        fallbacks: [],
+      },
+      {
+        id: 'off',
+        name: 'Off',
+        enabled: false,
+        primary: { providerId: 'provider-1', modelId: 'model-1' },
+        fallbacks: [],
+      },
+    ];
+    const added = await gateway.invoke(
+      request('sm-virtual', 'providers.subagent-models.add', {
+        providerId: 'enso-virtual',
+        modelId: 'auto',
+        description: 'routed',
+        reasoning: 'on',
+        thinkingLevel: 'low',
+      })
+    );
+    expect(added.modelResult).toMatchObject({ ok: true });
+    const entries = () => state.subagentModels as Array<Record<string, unknown>>;
+    expect(entries()).toHaveLength(1);
+    expect(entries()[0]).toMatchObject({
+      providerId: 'enso-virtual',
+      modelId: 'auto',
+      description: 'routed',
+      reasoning: 'on',
+      thinkingLevel: 'low',
+    });
+
+    const missing = await gateway.invoke(
+      request('sm-virtual-missing', 'providers.subagent-models.add', {
+        providerId: 'enso-virtual',
+        modelId: 'ghost',
+      })
+    );
+    expect(missing.modelResult).toMatchObject({ ok: false, code: 'unavailable' });
+
+    const disabled = await gateway.invoke(
+      request('sm-virtual-off', 'providers.subagent-models.add', {
+        providerId: 'enso-virtual',
+        modelId: 'off',
+      })
+    );
+    expect(disabled.modelResult).toMatchObject({ ok: false, code: 'unavailable' });
+    expect(entries()).toHaveLength(1);
+  });
 
   it('Enso 不能打开 computer；改其它工具时旧落盘列表保持 computer 关闭', async () => {
     const { gateway, state, patchSettings } = fixture();

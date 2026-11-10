@@ -9,6 +9,7 @@ import {
   findVirtualModel,
   parseVirtualClassifier,
   parseVirtualModels,
+  selectableVirtualModels,
   VIRTUAL_PROVIDER_ID,
   type VirtualModelEntry,
 } from './virtualModels';
@@ -115,6 +116,23 @@ describe('parseVirtualModels', () => {
     expect(canBeVirtualMember({ oauthAccountKey: 'cursor' })).toBe(false);
     expect(canBeVirtualMember({ oauthAccountKey: 'anthropic#2' })).toBe(true);
     expect(canBeVirtualMember({})).toBe(true);
+  });
+
+  it('可选虚拟模型要求条目启用且主模型行存在并启用', () => {
+    const disabledRow = provider('p2', ['other'], {
+      models: [{ id: 'other', enabled: false }],
+    });
+    const listed = selectableVirtualModels(
+      [
+        auto,
+        { ...auto, id: 'off', enabled: false },
+        { ...auto, id: 'missing', primary: { providerId: 'p1', modelId: 'gone' } },
+        { ...auto, id: 'row-off', primary: { providerId: 'p2', modelId: 'other' } },
+      ],
+      [providers[0]!, disabledRow]
+    );
+    expect(listed.map((entry) => entry.id)).toEqual(['auto']);
+    expect(selectableVirtualModels(undefined, providers)).toEqual([]);
   });
 });
 

@@ -11,6 +11,7 @@ import type {
 import { THINKING_LEVELS, type ThinkingLevel } from '@shared/types/agent';
 import {
   findVirtualModel,
+  selectableVirtualModels,
   VIRTUAL_PROVIDER_ID,
   type VirtualModelEntry,
 } from '@shared/virtualModels';
@@ -314,7 +315,7 @@ function stopTypeaheadOnly(e: KeyboardEvent<HTMLInputElement>): void {
 
 interface ModelPickerProps {
   providers: ModelProvider[];
-  /** 传入时在顶部列出虚拟模型（仅会话主模型与默认模型的选择场景） */
+  /** 传入时在顶部列出可选虚拟模型 */
   virtualModels?: readonly VirtualModelEntry[];
   /** 选中虚拟模型时附在触发器上的实际路由模型 */
   routedModelLabel?: string;
@@ -723,17 +724,8 @@ export function ModelPicker({
     {}
   );
 
-  const selectableVirtualModels = useMemo(
-    () =>
-      (virtualModels ?? []).filter(
-        (entry) =>
-          entry.enabled &&
-          providers.some(
-            (p) =>
-              p.id === entry.primary.providerId &&
-              p.models.some((m) => m.id === entry.primary.modelId && m.enabled !== false)
-          )
-      ),
+  const visibleVirtualModels = useMemo(
+    () => selectableVirtualModels(virtualModels, providers),
     [virtualModels, providers]
   );
   const currentVirtual = findVirtualModel(virtualModels, { providerId, modelId });
@@ -769,13 +761,13 @@ export function ModelPicker({
     () =>
       resolveActiveWorkbenchView({
         groups,
-        selectableVirtualModels,
+        selectableVirtualModels: visibleVirtualModels,
         pinnedCount: pinnedKeys.size,
         selectedProviderId: providerId,
         activeNav,
         activeProviderByVendor,
       }),
-    [groups, selectableVirtualModels, pinnedKeys, providerId, activeNav, activeProviderByVendor]
+    [groups, visibleVirtualModels, pinnedKeys, providerId, activeNav, activeProviderByVendor]
   );
 
   // 弹层打开时才刷新订阅账号展示名（登录/登出可能已发生），关闭时不必轮询。
@@ -944,11 +936,11 @@ export function ModelPicker({
   const virtualHits = useMemo(
     () =>
       searching
-        ? selectableVirtualModels.filter(
+        ? visibleVirtualModels.filter(
             (entry) => fuzzyMatchScore(keyword.trim(), entry.name) !== null
           )
-        : selectableVirtualModels,
-    [searching, keyword, selectableVirtualModels]
+        : visibleVirtualModels,
+    [searching, keyword, visibleVirtualModels]
   );
   const virtualItems = virtualHits.map((entry) => (
     <MenuItem
@@ -1251,7 +1243,7 @@ export function ModelPicker({
                       <Star className="h-3.5 w-3.5 shrink-0 text-primary" />
                       <span className="min-w-0 flex-1 truncate">{t('Starred & virtual')}</span>
                       <Badge variant="outline" size="sm" className="shrink-0 text-[9px]">
-                        {selectableVirtualModels.length + pinnedHits.length}
+                        {visibleVirtualModels.length + pinnedHits.length}
                       </Badge>
                     </button>
                   )}
