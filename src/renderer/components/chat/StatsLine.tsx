@@ -41,7 +41,8 @@ import { useSessionsStore } from '@/stores/sessions';
 import { computeStats, formatDuration } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
 import { ContextInspector } from './ContextInspector';
-import { ContextMeter } from './ContextMeter';
+import { CONTEXT_BAR_WARN_PERCENT, ContextBar, ContextMeter } from './ContextMeter';
+import { contextBarSegments } from './contextBreakdown';
 import { buildRequestBodySegment } from './requestBodySegment';
 import { StatusLineSettings } from './StatusLineSettings';
 import { resolveSessionUsageAccount } from './sessionUsageAccount';
@@ -57,6 +58,8 @@ export type { SegmentValue };
 
 interface StatsLineProps {
   conversationId: string;
+  /** 会话工作目录：上下文明细里的文件按它打开 */
+  cwd?: string;
 }
 
 /**
@@ -401,7 +404,7 @@ function buildSegmentValues(
  *  段位顺序 = `statusLineSegments` 数组自身顺序（用户可在设置弹层拖拽），预设不进存储，
  *  见 `statusLinePresetOf`。外层恒占一行高度（h-7）：避免统计从无到有时输入框跳动；
  *  全部段位关掉时仍渲染空容器 + hover 齿轮，否则用户关完就再也打不开设置。 */
-export function StatsLine({ conversationId }: StatsLineProps) {
+export function StatsLine({ conversationId, cwd }: StatsLineProps) {
   const { t } = useI18n();
   const conversation = useSessionsStore((state) => state.conversations[conversationId]);
   const messages = conversation?.messages ?? [];
@@ -468,6 +471,7 @@ export function StatsLine({ conversationId }: StatsLineProps) {
 
   // 渲染顺序恒按 statusLineSegments 数组自身顺序（用户拖拽排序的落点），⛔ 不要改回按
   // STATUS_LINE_SEGMENT_IDS 声明序 filter —— 那是旧契约，已被拖拽排序需求反转。
+  const contextSegments = conversation.occupancy ? contextBarSegments(conversation.occupancy) : [];
   const visibleSegments = enabledSegments.filter((id) => values[id]);
 
   return (
@@ -489,11 +493,21 @@ export function StatsLine({ conversationId }: StatsLineProps) {
                 onMouseLeave={() => setHoveredId((current) => (current === id ? null : current))}
                 className={cn(
                   'relative flex items-center gap-1 text-[11px] tabular-nums',
-                  value.critical ? 'text-destructive' : 'text-subtle-foreground'
+                  value.critical
+                    ? 'text-destructive'
+                    : id === 'context' &&
+                        value.percent !== undefined &&
+                        value.percent >= CONTEXT_BAR_WARN_PERCENT
+                      ? 'text-warning'
+                      : 'text-subtle-foreground'
                 )}
               >
                 {id === 'context' && value.percent !== undefined ? (
-                  <ContextMeter percent={value.percent} critical={Boolean(value.critical)} />
+                  contextSegments.length > 0 ? (
+                    <ContextBar segments={contextSegments} />
+                  ) : (
+                    <ContextMeter percent={value.percent} critical={Boolean(value.critical)} />
+                  )
                 ) : (
                   <Icon className="h-3 w-3 shrink-0 opacity-75" />
                 )}
@@ -527,6 +541,8 @@ export function StatsLine({ conversationId }: StatsLineProps) {
                       <ContextInspector
                         occupancy={conversation.occupancy}
                         conversationId={conversation.id}
+                        cwd={cwd}
+                        onNavigate={() => setContextOpen(false)}
                       />
                     </PopoverPopup>
                   </Popover>

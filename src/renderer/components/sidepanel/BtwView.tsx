@@ -305,7 +305,7 @@ export function BtwView({
             }}
             onAbort={() => void useSessionsStore.getState().abort(sessionId)}
           />
-          <StatsLine conversationId={sessionId} />
+          <StatsLine conversationId={sessionId} cwd={project?.path} />
         </div>
       </div>
     </div>
