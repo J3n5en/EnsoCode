@@ -1,7 +1,11 @@
 import { type Locale, translate } from '@shared/i18n';
-import { SHELL_INTEGRATION_MENU_LABELS, SHELL_INTEGRATIONS } from '@shared/shellIntegration';
+import {
+  SHELL_INTEGRATIONS,
+  type ShellIntegration,
+  shellIntegrationMenuLabel,
+} from '@shared/shellIntegration';
 import { app, Menu, type MenuItemConstructorOptions } from 'electron';
-import { installShellIntegration } from '../desktop/shellCommand';
+import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
 
 export const APP_DISPLAY_NAME = 'EnsoCode';
 
@@ -11,7 +15,8 @@ export const APP_DISPLAY_NAME = 'EnsoCode';
  */
 export function macAppMenuTemplate(
   locale: Locale = 'en',
-  packaged = app.isPackaged
+  packaged = app.isPackaged,
+  installed: Record<ShellIntegration, boolean> = readShellIntegrationStatusSync()
 ): MenuItemConstructorOptions[] {
   return [
     {
@@ -36,8 +41,9 @@ export function macAppMenuTemplate(
           {
             label: translate(locale, 'Integrations'),
             submenu: SHELL_INTEGRATIONS.map((kind) => ({
-              label: translate(locale, SHELL_INTEGRATION_MENU_LABELS[kind]),
-              click: () => void installShellIntegration(kind, locale),
+              label: translate(locale, shellIntegrationMenuLabel(kind, installed[kind])),
+              click: () =>
+                void shellIntegrationAction(kind, locale).then(() => installAppMenu(locale)),
             })),
           },
         ]

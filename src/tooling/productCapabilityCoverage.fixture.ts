@@ -490,6 +490,9 @@ export const IPC_PRODUCT_COVERAGE = {
   WINDOW_INSTALL_SHELL_INTEGRATION: excluded(
     'Host-only installer that writes outside userData and may ask for an admin password.'
   ),
+  WINDOW_SHELL_INTEGRATION_STATUS: excluded(
+    'Host-only read of whether the macOS shell integrations exist on disk.'
+  ),
   APP_CLOSE_REQUEST: excluded('Main-to-renderer quit confirm handshake.'),
   APP_CLOSE_RESPONSE: excluded('Renderer-to-main quit confirm handshake.'),
   APP_FLUSH_PERSIST_REQUEST: excluded(

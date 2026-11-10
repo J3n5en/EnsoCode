@@ -1337,6 +1337,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS),
     installShellIntegration: (kind: ShellIntegration): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_INSTALL_SHELL_INTEGRATION, kind),
+    shellIntegrationStatus: (): Promise<Record<ShellIntegration, boolean>> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SHELL_INTEGRATION_STATUS),
     onOpenFolderRequested: (callback: () => void): (() => void) => {
       const listener = () => callback();
       ipcRenderer.on(IPC_CHANNELS.WINDOW_OPEN_FOLDER_REQUESTED, listener);

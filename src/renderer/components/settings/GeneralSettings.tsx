@@ -130,13 +130,35 @@ function ShellIntegrationRow({
   description: string;
 }) {
   const { t } = useI18n();
-  const [installing, setInstalling] = React.useState(false);
-  const install = async () => {
-    setInstalling(true);
+  const [installed, setInstalled] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void window.electronAPI.window.shellIntegrationStatus().then((status) => {
+        if (active) setInstalled(status[kind]);
+      });
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [kind]);
+
+  const toggle = async () => {
+    setBusy(true);
     try {
       await window.electronAPI.window.installShellIntegration(kind);
     } finally {
-      setInstalling(false);
+      try {
+        const status = await window.electronAPI.window.shellIntegrationStatus();
+        setInstalled(status[kind]);
+      } finally {
+        setBusy(false);
+      }
     }
   };
   return (
@@ -152,10 +174,10 @@ function ShellIntegrationRow({
         variant="outline"
         size="sm"
         className="shrink-0"
-        disabled={installing}
-        onClick={() => void install()}
+        disabled={busy}
+        onClick={() => void toggle()}
       >
-        {installing ? t('Installing…') : t('Install')}
+        {busy ? t('In progress…') : t(installed ? 'Uninstall' : 'Install')}
       </Button>
     </div>
   );

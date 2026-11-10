@@ -3273,6 +3273,13 @@ export const zhTranslations: Record<string, string> = {
     '只含群配置和成员人设，不含记忆、会话、时间线、看板、例行任务、模型、技能和 MCP。',
   'Interface is zoomed to {{percent}}% · {{shortcut}}': '界面已缩放至 {{percent}}% · {{shortcut}}',
   'Restore 100%': '恢复 100%',
+  "Uninstall 'enso' Command from PATH": '卸载 enso 命令',
+  'Uninstall Finder Quick Action': '卸载访达快速操作',
+  "Couldn't uninstall the 'enso' command": '无法卸载 enso 命令',
+  "Shell command 'enso' uninstalled.": '已卸载 enso 命令。',
+  "Couldn't uninstall the Finder Quick Action": '无法卸载访达快速操作',
+  'Finder Quick Action uninstalled.': '访达快速操作已卸载。',
+  'In progress…': '处理中…',
 };
 
 export function normalizeLocale(input?: string): Locale {
