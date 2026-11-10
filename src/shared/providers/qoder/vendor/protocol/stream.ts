@@ -817,6 +817,8 @@ export function streamQoder(
             ...headers,
           },
           body: encodedBytes as unknown as BodyInit,
+          // Credentials and the conversation are in the body; never replay them to a redirect target.
+          redirect: "manual",
           signal: options?.signal,
         });
         await options?.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers.entries()) }, model);
@@ -866,7 +868,6 @@ export function streamQoder(
         try {
           while (!sawDone) {
             const { done, value } = await reader.read();
-            if (done) break;
 
             // Drop consumed prefix before appending so we do not keep growing a
             // dead head of the string across chunks.
@@ -874,7 +875,11 @@ export function streamQoder(
               buffer = buffer.substring(bufferStart);
               bufferStart = 0;
             }
-            buffer += decoder.decode(value, { stream: true });
+            buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+            // The connection closed without a final newline: parse the remaining
+            // line too, and count it as lost output if it was cut in half.
+            const unterminatedTail = done && buffer.trim() !== "";
+            if (done) buffer += "\n";
 
             while (true) {
               const lineEnd = buffer.indexOf("\n", bufferStart);
@@ -941,7 +946,7 @@ export function streamQoder(
                 if (inner.id) output.responseId = inner.id as string;
                 if (inner.model) output.responseModel = inner.model as string;
                 if (inner.usage) {
-                  applyQoderCredits(output.usage, inner.usage, model.provider === "qoder-cn" ? "qoder-cn" : "qoder");
+                  applyQoderCredits(output.usage, inner.usage, providerMode === "cn" ? "qoder-cn" : "qoder");
                   const u = inner.usage as {
                     prompt_tokens?: number;
                     completion_tokens?: number;
@@ -1191,12 +1196,13 @@ export function streamQoder(
                   // payload is model output we will never see; it has to be
                   // accounted for, or the turn ends as an unexplained
                   // "invalid arguments" failure that no retry policy covers.
-                  if (parsePhase === "payload") droppedPayloads += 1;
+                  if (parsePhase === "payload" || unterminatedTail) droppedPayloads += 1;
                   continue;
                 }
                 throw e;
               }
             }
+            if (done) break;
           }
         } finally {
           // Release on DONE, abort, and identity/argument failures alike.

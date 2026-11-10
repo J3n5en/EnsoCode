@@ -44,16 +44,16 @@ export async function resolveQoderIdentity(key: string, providerID: string, mode
 
 export async function refreshQoderToken(credentials: OAuthCredentials, mode: QoderMode, signal?: AbortSignal): Promise<OAuthCredentials> {
   if (isPatRefresh(credentials.refresh)) {
-    const { pat } = decodePatRefresh(credentials.refresh);
+    const { pat, userID } = decodePatRefresh(credentials.refresh);
     if (!pat) throw new Error('Qoder PAT is missing');
-    return credentialsFromPat(pat, mode, signal);
+    return credentialsFromPat(pat, mode, signal, userID);
   }
   const [refreshToken, userID, machineID] = credentials.refresh.split('|');
   if (!refreshToken || !userID || !machineID) throw new Error('Qoder refresh credentials are invalid');
   let response: Response;
   try { response = await fetch(getQoderRefreshURL(mode), {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${credentials.access}`, Accept: 'application/json' },
-    body: JSON.stringify({ refreshToken }), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
+    body: JSON.stringify({ refreshToken }), redirect: 'manual', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
   }); } catch {
     if (signal?.aborted) throw new Error('Qoder refresh cancelled');
     throw new Error('Qoder refresh network error');

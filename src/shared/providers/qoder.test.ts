@@ -6,7 +6,7 @@ import { normalizeContext } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { afterEach, expect, it, vi } from 'vitest';
 import { qoderProviderConfig } from './qoder';
-import { exchangeJobToken } from './qoder/vendor/auth/pat';
+import { encodePatRefresh, exchangeJobToken } from './qoder/vendor/auth/pat';
 import { getCachedModelConfig, staticCnModels, staticModels } from './qoder/vendor/catalog';
 import { qoderDecodeBody } from './qoder/vendor/protocol/encoding';
 
@@ -426,4 +426,113 @@ it('工具结果与请求 hook 进入编码载荷，两个账号不会串号', a
   expect(onPayload).toHaveBeenCalledTimes(2);
   expect(onResponse).toHaveBeenCalledTimes(2);
   expect(onProviderStreamEvent).toHaveBeenCalledTimes(2);
+});
+
+const chatKey = (config: ReturnType<typeof qoderProviderConfig>) =>
+  config.oauth!.getApiKey({ access: 'job', refresh: '', expires: 1, userID: 'u', machineID: 'm' });
+const sse = (payload: unknown) =>
+  `data: ${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify(payload) })}`;
+
+it('设备登录单次轮询超时后继续轮询', async () => {
+  setupDir();
+  vi.useFakeTimers();
+  let polls = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (!url.includes('deviceToken/poll')) return new Response('{}');
+      if (++polls === 1) throw new DOMException('timed out', 'TimeoutError');
+      return new Response(
+        JSON.stringify({ token: 'job', user_id: 'user', refresh_token: 'rt', expires_in: 3600 })
+      );
+    })
+  );
+  const login = qoderProviderConfig().oauth!.login({
+    onPrompt: async () => '',
+    onAuth: () => {},
+    onDeviceCode: () => {},
+    onSelect: async () => undefined,
+  });
+  const settled = login.then(
+    (value) => value,
+    (error: unknown) => error
+  );
+  await vi.advanceTimersByTimeAsync(4200);
+  expect(await settled).toMatchObject({ access: 'job', userID: 'user' });
+});
+
+it('PAT 刷新时身份查询失败沿用已有 userID', async () => {
+  setupDir();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) =>
+      url.includes('jobToken/exchange')
+        ? new Response(JSON.stringify({ token: 'job-new', expires_in: 3600000 }))
+        : new Response('', { status: 500 })
+    )
+  );
+  const refreshed = await qoderProviderConfig('cn').oauth!.refreshToken(
+    { access: 'job-old', refresh: encodePatRefresh('pt-x', '', 'user-1', 'm-1'), expires: 1 },
+    new AbortController().signal
+  );
+  expect(refreshed).toMatchObject({ access: 'job-new', userID: 'user-1' });
+});
+
+it('携带凭证或正文的请求不跟随重定向', async () => {
+  setupDir();
+  const send = vi.fn(async (url: string) =>
+    url.includes('jobToken/exchange')
+      ? new Response(JSON.stringify({ token: 'job', expires_in: 3600000 }))
+      : new Response(JSON.stringify({ id: 'u', token: 'job', expires_in: 3600 }))
+  );
+  vi.stubGlobal('fetch', send);
+  const oauth = qoderProviderConfig().oauth!;
+  await oauth.refreshToken(
+    { access: 'a', refresh: encodePatRefresh('pt-x', '', 'u', 'm'), expires: 1 },
+    new AbortController().signal
+  );
+  await oauth.refreshToken(
+    { access: 'a', refresh: 'rt|u|m', expires: 1 },
+    new AbortController().signal
+  );
+  const config = qoderProviderConfig();
+  const chat = vi.fn(async () => new Response('data: [DONE]\n\n'));
+  await config.streamSimple!(staticModels[0], normalizeContext({ messages: [] }), {
+    apiKey: chatKey(config),
+    fetch: chat as typeof fetch,
+  }).result();
+  const calls = [...send.mock.calls, ...chat.mock.calls] as unknown as [string, RequestInit?][];
+  const withBody = calls.filter(([, init]) => init?.method === 'POST');
+  expect(withBody.length).toBe(3);
+  for (const [, init] of withBody) expect(init?.redirect).toBe('manual');
+});
+
+it('连接结束时解析未换行的尾块，截断的工具参数按可重试错误结束', async () => {
+  setupDir();
+  const config = qoderProviderConfig();
+  const run = (body: string) =>
+    config.streamSimple!(staticModels[0], normalizeContext({ messages: [] }), {
+      apiKey: chatKey(config),
+      fetch: (async () => new Response(body)) as typeof fetch,
+    }).result();
+  const tail = await run(sse({ choices: [{ delta: { content: 'tail' } }] }));
+  expect(tail.content).toEqual([expect.objectContaining({ type: 'text', text: 'tail' })]);
+  const cut = await run(
+    `${sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'read', arguments: '{"path":' } }] } }] })}\n\n` +
+      'data: {"statusCodeValue":200,"body":"{\\"choices'
+  );
+  expect(cut.stopReason).toBe('error');
+  expect(cut.errorMessage).toMatch(/cut off/);
+});
+
+it('CN 副账号用量标记为 qoder-cn', async () => {
+  setupDir();
+  const config = qoderProviderConfig('cn');
+  const body = `${sse({ choices: [{ delta: { content: 'x' } }], usage: { prompt_tokens: 1 } })}\n\ndata: [DONE]\n\n`;
+  const result = await config.streamSimple!(
+    { ...staticCnModels[0], provider: 'qoder-cn#2' },
+    normalizeContext({ messages: [] }),
+    { apiKey: chatKey(config), fetch: (async () => new Response(body)) as typeof fetch }
+  ).result();
+  expect((result.usage as { qoder_provider?: string }).qoder_provider).toBe('qoder-cn');
 });

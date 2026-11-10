@@ -62,6 +62,7 @@ export async function exchangeJobToken(pat: string, mode: QoderMode, signal?: Ab
       "Cosy-ClientType": QODER_CLIENT_TYPE,
     },
     body: JSON.stringify({ personal_token: pat }),
+    redirect: "manual",
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
   }); } catch {
     if (signal?.aborted) throw new Error("Login cancelled");
@@ -138,10 +139,12 @@ export async function fetchUserInfo(
  * Exchanges the PAT for a job token, resolves identity, and encodes the PAT
  * into the refresh field so the token can be re-exchanged on expiry.
  */
-export async function credentialsFromPat(pat: string, mode: QoderMode, signal?: AbortSignal): Promise<OAuthCredentials> {
+export async function credentialsFromPat(pat: string, mode: QoderMode, signal?: AbortSignal, knownUserID = ""): Promise<OAuthCredentials> {
   const region = getQoderRegionConfig(mode);
   const { jobToken, jobRefreshToken, expiresAt } = await exchangeJobToken(pat, mode, signal);
-  const { userID, email, name } = await fetchUserInfo(jobToken, mode, signal);
+  const info = await fetchUserInfo(jobToken, mode, signal);
+  const { email, name } = info;
+  const userID = info.userID || knownUserID;
   if (signal?.aborted) throw new Error("Login cancelled");
   if (!userID) throw new Error("Qoder user identity is missing");
   const machineID = getMachineId();

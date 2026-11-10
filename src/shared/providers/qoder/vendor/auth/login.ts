@@ -134,9 +134,11 @@ async function runDeviceFlow(callbacks: OAuthLoginCallbacks): Promise<OAuthCrede
   const pollInterval = 2000;
   const maxAttempts = 90; // 3 minutes
 
+  let networkFailed = false;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (getSignal(callbacks)?.aborted) throw new Error("Login cancelled");
     await abortableDelay(pollInterval, getSignal(callbacks));
+    networkFailed = false;
 
     try {
       const response = await fetch(pollURL, {
@@ -215,9 +217,12 @@ async function runDeviceFlow(callbacks: OAuthLoginCallbacks): Promise<OAuthCrede
         throw new Error("Login cancelled");
       }
       if (e instanceof Error && e.message.startsWith("Device token poll")) throw e;
-      throw new Error("Qoder device login network error");
+      // A single poll timing out or a transient network failure must not end the whole login window.
+      networkFailed = true;
+      continue;
     }
   }
 
+  if (networkFailed) throw new Error("Qoder device login network error");
   throw new Error("Authorization timed out");
 }
