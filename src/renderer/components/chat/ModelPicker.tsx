@@ -111,6 +111,24 @@ function activeProviderForGroup(
   );
 }
 
+export function expandWorkbenchGroups(groups: readonly ProviderGroup[]): ProviderGroup[] {
+  const out: ProviderGroup[] = [];
+  for (const group of groups) {
+    if (group.vendorId !== CUSTOM_VENDOR_ID) {
+      out.push(group);
+      continue;
+    }
+    for (const provider of group.providers) {
+      out.push({
+        vendorId: `${CUSTOM_VENDOR_ID}:${provider.id}`,
+        label: provider.name,
+        providers: [provider],
+      });
+    }
+  }
+  return out;
+}
+
 export function resolveActiveWorkbenchView(options: {
   groups: readonly ProviderGroup[];
   selectableVirtualModels: readonly VirtualModelEntry[];
@@ -451,11 +469,11 @@ function ModelRowContent({
     <>
       {pin && <ModelPinButton pin={pin} />}
       {showId ? (
-        <span className="flex min-w-0 flex-1 flex-col items-start">
-          <span className="max-w-full truncate">{model.label ?? model.id}</span>
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
+          <span className="shrink-0 truncate">{model.label ?? model.id}</span>
           <span
             data-model-row-id={model.id}
-            className="max-w-full truncate font-mono text-[10px] leading-3 text-muted-foreground"
+            className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/70"
           >
             {model.id}
           </span>
@@ -567,14 +585,17 @@ function ProviderSubmenuList({
   return (
     <>
       {showFilter && (
-        <div className="mb-1 shrink-0 border-b pb-1.5">
+        <div className="mb-1 flex shrink-0 items-center gap-1.5 border-b pb-1">
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             onKeyDown={stopTypeaheadOnly}
             placeholder={t('Filter models in this entry')}
-            className="h-7 w-full rounded-md border bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+            className="h-6 min-w-0 flex-1 rounded border bg-transparent px-2 text-[11px] outline-none placeholder:text-muted-foreground focus:border-ring"
           />
+          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
+            {visibleModels.length}/{enabledModels.length}
+          </span>
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -583,7 +604,7 @@ function ProviderSubmenuList({
           return (
             <MenuItem
               key={model.id}
-              className="gap-1.5 px-1.5 py-1 text-xs"
+              className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
               onClick={() => onSelectModel(model.id)}
             >
               <ModelRowContent
@@ -602,14 +623,6 @@ function ProviderSubmenuList({
           </p>
         )}
       </div>
-      {showFilter && (
-        <p className="mt-1 shrink-0 border-t px-2 pt-1 text-[10px] text-muted-foreground/60">
-          {t('Showing {{shown}} of {{total}} models', {
-            shown: visibleModels.length,
-            total: enabledModels.length,
-          })}
-        </p>
-      )}
     </>
   );
 }
@@ -620,7 +633,7 @@ function SubmenuUsage({ accountKey }: { accountKey: string }) {
   const info = useCachedAccountUsage(accountKey);
   if (!info || info.error || info.windows.length === 0) return null;
   return (
-    <div className="-mx-1 -mt-1 mb-1 space-y-1 border-b px-3 py-2">
+    <div className="mb-1 shrink-0 space-y-0.5 border-b px-1.5 pb-1">
       {info.windows.map((windowInfo) => (
         <div key={windowInfo.label} className="flex min-w-0 items-center gap-2 text-[10px]">
           <span className="w-8 shrink-0 truncate text-muted-foreground" title={windowInfo.label}>
@@ -748,7 +761,10 @@ export function ModelPicker({
         : modelName
       : emptyLabel || t('Select model'));
 
-  const groups = useMemo(() => groupProviders(providers, oauthInfos), [providers, oauthInfos]);
+  const groups = useMemo(
+    () => expandWorkbenchGroups(groupProviders(providers, oauthInfos)),
+    [providers, oauthInfos]
+  );
   const view = useMemo(
     () =>
       resolveActiveWorkbenchView({
@@ -841,7 +857,9 @@ export function ModelPicker({
       }
     > = {};
     for (const group of groups) {
-      const vendorLabel = group.vendorId === CUSTOM_VENDOR_ID ? t('Custom') : group.label;
+      const isCustomGroup =
+        group.vendorId === CUSTOM_VENDOR_ID || group.vendorId.startsWith(`${CUSTOM_VENDOR_ID}:`);
+      const vendorLabel = isCustomGroup ? t('Custom') : group.label;
       for (const provider of group.providers) {
         const { primary, secondary, plan, isSubscription } = entryLabelOf(
           provider,
@@ -935,7 +953,7 @@ export function ModelPicker({
   const virtualItems = virtualHits.map((entry) => (
     <MenuItem
       key={`virtual/${entry.id}`}
-      className="gap-1.5 px-1.5 py-1 text-xs"
+      className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
       data-model-picker-virtual={entry.id}
       onClick={() => handleSelectModel(VIRTUAL_PROVIDER_ID, entry.id)}
     >
@@ -1067,6 +1085,55 @@ export function ModelPicker({
       prev[vendorId] === accountId ? prev : { ...prev, [vendorId]: accountId }
     );
   };
+  const thinkingSlider =
+    displayedReasoningEnabled && visibleLevels.length > 0 ? (
+      <div className={cn(reasoningMode ? 'mt-2' : 'min-w-0 flex-1 px-1.5 pt-0.5')}>
+        <Slider
+          tabIndex={-1}
+          aria-label={t('Thinking level')}
+          thumbAlignment="center"
+          className="[&_[data-slot=slider-indicator]]:ms-0 [&_[data-slot=slider-track]]:before:inset-x-0"
+          min={0}
+          max={Math.max(1, visibleLevels.length - 1)}
+          step={1}
+          value={levelIndex}
+          disabled={visibleLevels.length === 1}
+          onValueChange={(value) => {
+            const index = Array.isArray(value) ? value[0] : value;
+            const target = visibleLevels[index] ?? visibleLevels[0];
+            onThinkingChange(target);
+          }}
+        />
+        <div className="relative mt-0.5 h-4">
+          {visibleLevels.map((entry, index) => (
+            <button
+              key={entry}
+              type="button"
+              tabIndex={-1}
+              data-thinking-tick={entry}
+              style={{
+                left: `${(index / Math.max(1, visibleLevels.length - 1)) * 100}%`,
+              }}
+              onClick={() => onThinkingChange(entry)}
+              className="absolute top-0 flex w-0 flex-col items-center"
+            >
+              <span className="h-1 w-px shrink-0 bg-muted-foreground/40" />
+              <span
+                className={cn(
+                  'whitespace-nowrap text-[10px] leading-3 transition-colors',
+                  index === 0 ? 'self-start' : index === visibleLevels.length - 1 && 'self-end',
+                  entry === displayedThinkingLevel
+                    ? 'font-medium text-primary'
+                    : 'text-muted-foreground/70 hover:text-foreground'
+                )}
+              >
+                {t(LEVEL_LABEL_KEYS[entry])}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    ) : null;
 
   return (
     <div className={cn(triggerClassName && 'w-full min-w-0')}>
@@ -1108,7 +1175,7 @@ export function ModelPicker({
           data-model-picker="root"
           side={side}
           align="start"
-          className="w-[520px] max-w-[calc(100vw-2rem)]"
+          className="w-[560px] max-w-[calc(100vw-2rem)]"
           zIndex={zIndex}
         >
           {providers.map((provider) => (
@@ -1134,7 +1201,7 @@ export function ModelPicker({
             />
           </div>
 
-          <div className="max-h-52 overflow-y-auto">
+          <div className="max-h-[268px] overflow-y-auto">
             {searching ? (
               <>
                 {virtualItems}
@@ -1143,7 +1210,7 @@ export function ModelPicker({
                   return (
                     <MenuItem
                       key={`${provider.id}/${model.id}`}
-                      className="gap-1.5 px-1.5 py-1 text-xs"
+                      className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
                       onClick={() => handleSelectModel(provider.id, model.id)}
                     >
                       <ModelRowContent
@@ -1168,8 +1235,8 @@ export function ModelPicker({
                 {t('No models found')}
               </p>
             ) : (
-              <div data-model-picker="workbench" className="flex h-52 overflow-hidden">
-                <div className="w-48 shrink-0 overflow-y-auto border-r pr-1">
+              <div data-model-picker="workbench" className="flex h-[268px] overflow-hidden">
+                <div className="w-44 shrink-0 overflow-y-auto border-r pr-1">
                   {view.showFavoritesNav && (
                     <button
                       type="button"
@@ -1193,6 +1260,12 @@ export function ModelPicker({
                       group.vendorId === CUSTOM_VENDOR_ID ? t('Custom') : group.label;
                     const sole = group.providers.length === 1 ? group.providers[0] : undefined;
                     const soleInfo = sole ? entryInfoByProviderId[sole.id] : undefined;
+                    const solePrimary = sole ? (soleInfo?.primary ?? sole.name) : undefined;
+                    const soleSubtitle = sole
+                      ? solePrimary === vendorLabel
+                        ? (soleInfo?.secondary ?? t('Custom'))
+                        : solePrimary
+                      : undefined;
                     const selectedHere = group.providers.some(
                       (provider) => provider.id === providerId
                     );
@@ -1218,7 +1291,7 @@ export function ModelPicker({
                           <span className="block truncate">{vendorLabel}</span>
                           <span className="block truncate text-[10px] text-muted-foreground/70">
                             {sole
-                              ? (soleInfo?.primary ?? sole.name)
+                              ? soleSubtitle
                               : t('{{count}} accounts', { count: group.providers.length })}
                           </span>
                         </span>
@@ -1250,7 +1323,7 @@ export function ModelPicker({
                         return (
                           <MenuItem
                             key={`pin/${key}`}
-                            className="gap-1.5 px-1.5 py-1 text-xs"
+                            className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
                             onClick={() => handleSelectModel(provider.id, model.id)}
                           >
                             <ModelRowContent
@@ -1307,7 +1380,13 @@ export function ModelPicker({
                       ) : (
                         <div
                           data-model-picker="account-header"
-                          className="mb-1 flex items-center justify-between gap-2 border-b px-1 pb-1 text-[11px]"
+                          className={cn(
+                            'mb-1 flex items-center justify-between gap-2 border-b px-1 pb-1 text-[11px]',
+                            (!entryInfoByProviderId[detailProvider.id]?.secondary ||
+                              (entryInfoByProviderId[detailProvider.id]?.primary ??
+                                detailProvider.name) === detailGroup.label) &&
+                              'sr-only'
+                          )}
                         >
                           <span className="flex min-w-0 items-center gap-1.5 truncate">
                             <span className="truncate">
@@ -1352,21 +1431,24 @@ export function ModelPicker({
           </div>
 
           {showReasoningControls && (
-            <div className="-mx-1 -mb-1 mt-1 border-t px-2.5 py-2">
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1 text-xs">
-                  <Brain className="h-3.5 w-3.5 text-muted-foreground" />
-                  {t('Reasoning')}
-                </span>
-                {!reasoningMode && (
-                  <Switch
-                    tabIndex={-1}
-                    aria-label={t('Reasoning')}
-                    checked={displayedReasoningEnabled}
-                    onCheckedChange={onReasoningChange}
-                    disabled={reasoningUnsupported}
-                  />
-                )}
+            <div className="-mx-1 -mb-1 mt-1 border-t px-2.5 py-1.5">
+              <div className={cn(!reasoningMode && 'flex items-center gap-4')}>
+                <div className="flex shrink-0 items-center justify-between gap-2">
+                  <span className="flex items-center gap-1 text-xs">
+                    <Brain className="h-3.5 w-3.5 text-muted-foreground" />
+                    {t('Reasoning')}
+                  </span>
+                  {!reasoningMode && (
+                    <Switch
+                      tabIndex={-1}
+                      aria-label={t('Reasoning')}
+                      checked={displayedReasoningEnabled}
+                      onCheckedChange={onReasoningChange}
+                      disabled={reasoningUnsupported}
+                    />
+                  )}
+                </div>
+                {!reasoningMode && thinkingSlider}
               </div>
               {reasoningMode && (
                 <div className="mt-2 flex gap-1" role="group" aria-label={t('Reasoning')}>
@@ -1400,56 +1482,7 @@ export function ModelPicker({
                   {t('Depth: {{level}}', { level: t(LEVEL_LABEL_KEYS[displayedThinkingLevel]) })}
                 </p>
               )}
-              {displayedReasoningEnabled && visibleLevels.length > 0 && (
-                <div className="mt-2">
-                  <Slider
-                    tabIndex={-1}
-                    aria-label={t('Thinking level')}
-                    thumbAlignment="center"
-                    className="[&_[data-slot=slider-indicator]]:ms-0 [&_[data-slot=slider-track]]:before:inset-x-0"
-                    min={0}
-                    max={Math.max(1, visibleLevels.length - 1)}
-                    step={1}
-                    value={levelIndex}
-                    disabled={visibleLevels.length === 1}
-                    onValueChange={(value) => {
-                      const index = Array.isArray(value) ? value[0] : value;
-                      const target = visibleLevels[index] ?? visibleLevels[0];
-                      onThinkingChange(target);
-                    }}
-                  />
-                  <div className="relative mt-1 h-5">
-                    {visibleLevels.map((entry, index) => (
-                      <button
-                        key={entry}
-                        type="button"
-                        tabIndex={-1}
-                        data-thinking-tick={entry}
-                        style={{
-                          left: `${(index / Math.max(1, visibleLevels.length - 1)) * 100}%`,
-                        }}
-                        onClick={() => onThinkingChange(entry)}
-                        className="absolute top-0 flex w-0 flex-col items-center"
-                      >
-                        <span className="h-1.5 w-px shrink-0 bg-muted-foreground/40" />
-                        <span
-                          className={cn(
-                            'whitespace-nowrap text-[10px] transition-colors',
-                            index === 0
-                              ? 'self-start'
-                              : index === visibleLevels.length - 1 && 'self-end',
-                            entry === displayedThinkingLevel
-                              ? 'font-medium text-primary'
-                              : 'text-muted-foreground/70 hover:text-foreground'
-                          )}
-                        >
-                          {t(LEVEL_LABEL_KEYS[entry])}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {reasoningMode && thinkingSlider}
             </div>
           )}
         </MenuPopup>

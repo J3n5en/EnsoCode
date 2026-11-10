@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   duplicateModelLabels,
+  expandWorkbenchGroups,
   ModelPicker,
   parsePinnedModelKeys,
   persistClampedThinkingLevel,
@@ -992,7 +993,34 @@ describe('model picker workbench', () => {
       name: 'Gateway',
       models: [{ id: 'gw', label: 'Gateway model' }],
     },
+    {
+      ...providers[0],
+      id: 'relay',
+      name: 'Relay',
+      baseUrl: 'https://relay.example.test/v1',
+      models: [{ id: 'rl', label: 'Relay model' }],
+    },
   ];
+
+  it('自定义供应商在左栏逐个平铺，不折叠进单个自定义组', () => {
+    const expanded = expandWorkbenchGroups([
+      {
+        vendorId: 'openai',
+        label: 'OpenAI',
+        providers: [workbenchProviders[0], workbenchProviders[1]],
+      },
+      {
+        vendorId: '__custom',
+        label: '',
+        providers: [workbenchProviders[2], workbenchProviders[3]],
+      },
+    ]);
+    expect(expanded.map((group) => ({ vendorId: group.vendorId, label: group.label }))).toEqual([
+      { vendorId: 'openai', label: 'OpenAI' },
+      { vendorId: '__custom:gateway', label: 'Gateway' },
+      { vendorId: '__custom:relay', label: 'Relay' },
+    ]);
+  });
 
   it('左栏列出全部厂商，多账号只在右栏切换且只查当前账号额度', () => {
     const html = renderToStaticMarkup(
@@ -1016,8 +1044,11 @@ describe('model picker workbench', () => {
     expect(html).toContain('data-model-picker-nav="favorites"');
     expect(html).toContain('Starred &amp; virtual');
     expect(html).toContain('data-model-picker-vendor="openai"');
-    expect(html).toContain('data-model-picker-vendor="__custom"');
+    expect(html).toContain('data-model-picker-vendor="__custom:gateway"');
+    expect(html).toContain('data-model-picker-vendor="__custom:relay"');
+    expect(html).not.toContain('data-model-picker-vendor="__custom"');
     expect(html).toContain('Gateway');
+    expect(html).toContain('Relay');
     expect(html).toContain('2 accounts');
     expect(html).toContain('data-model-picker="account-tabs"');
     expect(html).toContain('data-model-picker-account="work"');
@@ -1043,7 +1074,8 @@ describe('model picker workbench', () => {
         modelId: 'gw',
       })
     );
-    expect(html).toContain('data-model-picker-vendor="__custom"');
+    expect(html).toContain('data-model-picker-vendor="__custom:gateway"');
+    expect(html).toContain('data-model-picker-vendor="__custom:relay"');
     expect(html).toContain('Gateway');
     expect(html).toContain('data-model-picker="account-header"');
     expect(html).toContain('example.test');
