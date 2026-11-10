@@ -61,6 +61,13 @@ EnsoCode 是基于 Electron 和 [pi](https://github.com/earendil-works/pi) 的�
 
 不需要 EnsoCode 账号。模型请求直达你配置的供应商。
 
+### 接入 Qoder
+
+在设置的供应商向导中选择 **Qoder-CN**（中国区）或 **Qoder**（国际区），然后登录订阅账号。
+中国区使用 [Qoder-CN 集成页面](https://qoder.com.cn/account/integrations) 创建的 Personal Access Token（PAT）；
+国际区可使用 [Qoder 集成页面](https://qoder.com/account/integrations) 的 PAT，也可在令牌输入框留空后通过浏览器登录。
+两个地区的账号独立管理，登录后可拉取对应地区的模型列表。
+
 ---
 
 ## 核心能力

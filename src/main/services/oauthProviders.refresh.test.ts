@@ -127,4 +127,18 @@ describe('extension model catalog refresh', () => {
       clock.mockRestore();
     }
   });
+  it('Qoder 两个地区均注册自定义协议，并可按地区强制刷新目录', async () => {
+    mocks.refresh.mockResolvedValue({ aborted: false, errors: new Map() });
+    const { ensureProviderModelsRefreshed, getRuntime } = await import('./oauthProviders');
+    const runtime = await getRuntime();
+    for (const id of ['qoder', 'qoder-cn']) {
+      expect(runtime.registerProvider).toHaveBeenCalledWith(
+        id,
+        expect.objectContaining({ api: 'qoder-api', streamSimple: expect.any(Function) })
+      );
+      const before = callsFor(id);
+      await ensureProviderModelsRefreshed(runtime, `${id}#2`, { force: true });
+      expect(callsFor(id)).toBe(before + 1);
+    }
+  });
 });

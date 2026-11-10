@@ -41,6 +41,11 @@ import {
   kimiCodingBearerToken,
   parseKimiCodingUsageWindows,
 } from '@shared/providers/kimiCoding';
+import {
+  QODER_CN_PROVIDER_ID,
+  QODER_PROVIDER_ID,
+  qoderProviderConfig,
+} from '@shared/providers/qoder';
 import type {
   OauthAccount,
   OauthAccountUsage,
@@ -120,7 +125,12 @@ export function getOauthQuotaCoordinator(): OauthQuotaCoordinator {
 function invalidateOauthQuota(accountKey: string): void {
   if (isCodexAccountKey(accountKey)) getOauthQuotaCoordinator().invalidate(accountKey);
 }
-const onlineCatalogProviderIds = new Set<string>([ANTIGRAVITY_PROVIDER_ID, DEVIN_PROVIDER_ID]);
+const onlineCatalogProviderIds = new Set<string>([
+  ANTIGRAVITY_PROVIDER_ID,
+  DEVIN_PROVIDER_ID,
+  QODER_PROVIDER_ID,
+  QODER_CN_PROVIDER_ID,
+]);
 /** 与 pi-cursor 自身的 catalog freshness 对齐：成功结果在本进程内只留用这么久 */
 const ONLINE_CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
 const onlineCatalogRefreshes = new Map<
@@ -142,6 +152,8 @@ export function getRuntime(): Promise<ModelRuntimeType> {
     // Cursor 的合成账号会由 syncAccountProviders 按单账号能力显式排除
     runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
     runtime.registerProvider(DEVIN_PROVIDER_ID, devinProviderConfig());
+    runtime.registerProvider(QODER_PROVIDER_ID, qoderProviderConfig('global'));
+    runtime.registerProvider(QODER_CN_PROVIDER_ID, qoderProviderConfig('cn'));
     const { CURSOR_PROVIDER_ID, loadCursorProvider } = await import(
       '../../agent/cursor/loadProvider'
     );
@@ -155,6 +167,8 @@ export function getRuntime(): Promise<ModelRuntimeType> {
     // 元数据查询会 await 同一份 promise，避免首次查询抢在预热前把 unknown 永久写进缓存。
     void ensureProviderModelsRefreshed(runtime, ANTIGRAVITY_PROVIDER_ID);
     void ensureProviderModelsRefreshed(runtime, DEVIN_PROVIDER_ID);
+    void ensureProviderModelsRefreshed(runtime, QODER_PROVIDER_ID);
+    void ensureProviderModelsRefreshed(runtime, QODER_CN_PROVIDER_ID);
     void ensureProviderModelsRefreshed(runtime, CURSOR_PROVIDER_ID);
     return runtime;
   })();

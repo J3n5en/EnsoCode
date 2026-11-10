@@ -15,7 +15,7 @@ describe('initializeWorkerRuntime', () => {
     vi.clearAllMocks();
   });
 
-  it.each([ANTIGRAVITY_PROVIDER_ID, DEVIN_PROVIDER_ID, CURSOR_PROVIDER_ID])(
+  it.each([ANTIGRAVITY_PROVIDER_ID, DEVIN_PROVIDER_ID, CURSOR_PROVIDER_ID, 'qoder', 'qoder-cn'])(
     '%s 联网刷新失败时仍刷新其余 provider 并返回 runtime',
     async (rejectedProviderId) => {
       const runtime = {
@@ -31,13 +31,25 @@ describe('initializeWorkerRuntime', () => {
       await expect(initializeWorkerRuntime(runtime)).resolves.toBe(runtime);
 
       expect(loadCursorProvider).toHaveBeenCalledWith(runtime);
-      expect(runtime.refresh).toHaveBeenCalledTimes(3);
+      expect(runtime.refresh).toHaveBeenCalledTimes(5);
       expect(runtime.registerProvider).toHaveBeenCalledWith(
         ANTIGRAVITY_PROVIDER_ID,
         expect.anything()
       );
       expect(runtime.registerProvider).toHaveBeenCalledWith(DEVIN_PROVIDER_ID, expect.anything());
-      for (const providerId of [ANTIGRAVITY_PROVIDER_ID, DEVIN_PROVIDER_ID, CURSOR_PROVIDER_ID]) {
+      for (const id of ['qoder', 'qoder-cn']) {
+        expect(runtime.registerProvider).toHaveBeenCalledWith(
+          id,
+          expect.objectContaining({ api: 'qoder-api', streamSimple: expect.any(Function) })
+        );
+      }
+      for (const providerId of [
+        ANTIGRAVITY_PROVIDER_ID,
+        DEVIN_PROVIDER_ID,
+        CURSOR_PROVIDER_ID,
+        'qoder',
+        'qoder-cn',
+      ]) {
         expect(runtime.refresh).toHaveBeenCalledWith({
           providers: [providerId],
           allowNetwork: true,

@@ -57,6 +57,11 @@ import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig } from '@shared/providers/antigravity';
 import { installCodexLinkedRefresh } from '@shared/providers/codexAuth';
 import { DEVIN_PROVIDER_ID, devinProviderConfig } from '@shared/providers/devin';
+import {
+  QODER_CN_PROVIDER_ID,
+  QODER_PROVIDER_ID,
+  qoderProviderConfig,
+} from '@shared/providers/qoder';
 import { looksLikeRefusal } from '@shared/refusalRetry';
 import type { RequestBodyUsage } from '@shared/requestBodyUsage';
 import { computeStats, toUsageTotals } from '@shared/sessionStats';
@@ -878,6 +883,8 @@ export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<Mo
   // 推理发生在本进程：Main 侧注册过不算，worker 不注册就会以「未知 provider」流不起来
   runtime.registerProvider(ANTIGRAVITY_PROVIDER_ID, antigravityProviderConfig());
   runtime.registerProvider(DEVIN_PROVIDER_ID, devinProviderConfig());
+  runtime.registerProvider(QODER_PROVIDER_ID, qoderProviderConfig('global'));
+  runtime.registerProvider(QODER_CN_PROVIDER_ID, qoderProviderConfig('cn'));
   await loadCursorProvider(runtime);
   // 已关联 Codex 的账号也可能在 worker 里触发刷新，必须同样接管；须在按需注册克隆之前
   installCodexLinkedRefresh(runtime);
@@ -887,6 +894,8 @@ export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<Mo
   // await 而非 fire-and-forget：resolveBaseModel 紧接着就要用这份清单。
   await refreshWorkerProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
   await refreshWorkerProviderModels(runtime, DEVIN_PROVIDER_ID);
+  await refreshWorkerProviderModels(runtime, QODER_PROVIDER_ID);
+  await refreshWorkerProviderModels(runtime, QODER_CN_PROVIDER_ID);
   await refreshWorkerProviderModels(runtime, CURSOR_PROVIDER_ID);
   installModelContextCompat(runtime);
   return runtime;

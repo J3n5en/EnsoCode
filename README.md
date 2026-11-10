@@ -61,6 +61,13 @@ EnsoCode is a local-first desktop agent workbench on Electron, powered by the [p
 
 No EnsoCode account. Model traffic goes to the provider you configured.
 
+### Connect Qoder
+
+Choose **Qoder-CN** (China) or **Qoder** (global) in the provider wizard in Settings, then sign in to your subscription account.
+For China, create a Personal Access Token (PAT) on the [Qoder-CN integrations page](https://qoder.com.cn/account/integrations).
+For global accounts, use a PAT from the [Qoder integrations page](https://qoder.com/account/integrations), or leave the token prompt empty to sign in through your browser.
+The two regions manage accounts separately and can fetch their respective model catalogs after login.
+
 ---
 
 ## Core capabilities
