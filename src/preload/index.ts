@@ -1332,6 +1332,13 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
     },
+    takeOpenFolders: (): Promise<string[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS),
+    onOpenFolderRequested: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.WINDOW_OPEN_FOLDER_REQUESTED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_OPEN_FOLDER_REQUESTED, listener);
+    },
     onMaximizedChange: (callback: (maximized: boolean) => void): (() => void) => {
       const listener = (_: unknown, maximized: boolean) => callback(maximized);
       ipcRenderer.on(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, listener);

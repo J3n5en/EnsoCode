@@ -48,7 +48,12 @@ vi.mock('./ipc/settings', () => ({
   consumeTrayReenterAfterUpdate: () => mocks.consumeTrayReenter(),
 }));
 vi.mock('./ipc/desktop', () => ({ registerDesktopIpcHandlers: vi.fn() }));
-vi.mock('./ipc/window', () => ({ openPluginInstallFromProtocol: vi.fn() }));
+vi.mock('./ipc/window', () => ({
+  openPluginInstallFromProtocol: vi.fn(),
+  noteOpenFolder: vi.fn(),
+  noteOpenFolderArgv: vi.fn(),
+  notifyOpenFolderRequested: vi.fn(),
+}));
 vi.mock('./desktop/localUi', () => ({ installDesktopLocalUi: vi.fn() }));
 vi.mock('./desktop/localImageScheme', () => ({
   registerLocalImageProtocolHandler: vi.fn(),

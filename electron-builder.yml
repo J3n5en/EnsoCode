@@ -110,6 +110,12 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: EnsoCode uses the microphone for voice input. Speech is transcribed locally on this Mac.
     NSAppleEventsUsageDescription: EnsoCode uses Apple Events to activate app windows for the computer tool.
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: Folder
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Alternate
+        LSItemContentTypes:
+          - public.folder
   target:
     - dmg
     - zip
@@ -118,6 +124,7 @@ win:
     - nsis
 nsis:
   artifactName: ${productName}-Setup-${version}.exe
+  include: build/installer.nsh
 linux:
   target:
     - AppImage

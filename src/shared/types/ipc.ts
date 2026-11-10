@@ -32,6 +32,8 @@ export const IPC_CHANNELS = {
   SETTINGS_DEEP_LINK: 'settings:deep-link',
   SETTINGS_DEEP_LINK_CONSUME: 'settings:deep-link-consume',
   WINDOW_POPUP_MENU: 'window:popup-menu',
+  WINDOW_TAKE_OPEN_FOLDERS: 'window:takeOpenFolders',
+  WINDOW_OPEN_FOLDER_REQUESTED: 'window:openFolderRequested',
   APP_CLOSE_REQUEST: 'app:close-request',
   APP_CLOSE_RESPONSE: 'app:close-response',
   APP_FLUSH_PERSIST_REQUEST: 'app:flush-persist-request',

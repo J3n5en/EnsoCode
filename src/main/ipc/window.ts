@@ -1,4 +1,5 @@
 import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtocol';
+import { openFolderPathsFromArgv } from '@shared/openFolder';
 import { IPC_CHANNELS } from '@shared/types';
 import { parseAgentSummonRequest } from '@shared/types/mentions';
 import { parseTitleBarAppearance, windowSurfaceColor } from '@shared/windowControls';
@@ -14,6 +15,19 @@ import { openSettingsWindow } from '../windows/SettingsWindow';
 import { parseOpenSettingsRequest } from './searchAnything';
 
 let pendingDeepLink: ReturnType<typeof parseOpenSettingsRequest> = null;
+const pendingOpenFolders: string[] = [];
+
+export function noteOpenFolder(folder: string): void {
+  if (!pendingOpenFolders.includes(folder)) pendingOpenFolders.push(folder);
+}
+
+export function noteOpenFolderArgv(argv: readonly string[]): void {
+  for (const folder of openFolderPathsFromArgv(argv)) noteOpenFolder(folder);
+}
+
+export function notifyOpenFolderRequested(): void {
+  sendToWindow(focusMainWindow(), IPC_CHANNELS.WINDOW_OPEN_FOLDER_REQUESTED);
+}
 
 function openSettingsDeepLink(link: ReturnType<typeof parseOpenSettingsRequest>): void {
   const win = openSettingsWindow();
@@ -124,6 +138,10 @@ export function registerWindowHandlers(): void {
     pendingDeepLink = null;
     return link;
   });
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS, (): string[] =>
+    pendingOpenFolders.splice(0)
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.WINDOW_POPUP_MENU,

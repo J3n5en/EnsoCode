@@ -11,7 +11,12 @@ import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
 import { consumeTrayReenterAfterUpdate, readSettings } from './ipc/settings';
-import { openPluginInstallFromProtocol } from './ipc/window';
+import {
+  noteOpenFolder,
+  noteOpenFolderArgv,
+  notifyOpenFolderRequested,
+  openPluginInstallFromProtocol,
+} from './ipc/window';
 import { createPluginInstallInbox } from './protocol/pluginInstall';
 import { agentWorkerAlive, startAgentWorker, stopAgentWorkerForQuit } from './services/agentHost';
 import { installAppMenu } from './services/appMenu';
@@ -107,13 +112,22 @@ if (!gotTheLock) {
 } else {
   registerEnsoProtocol();
   pluginInstallInbox.noteArgv(process.argv);
+  noteOpenFolderArgv(process.argv);
   app.on('open-url', (event, url) => {
     event.preventDefault();
     pluginInstallInbox.noteLink(url);
   });
+  // macOS：拖到 Dock 图标或 `open -a EnsoCode <dir>`；冷启动早于 ready，由渲染端挂载时取走
+  app.on('open-file', (event, folder) => {
+    event.preventDefault();
+    noteOpenFolder(folder);
+    if (app.isReady()) notifyOpenFolderRequested();
+  });
   app.on('second-instance', (_event, argv) => {
     restoreFromSecondInstance();
     pluginInstallInbox.noteArgv(argv);
+    noteOpenFolderArgv(argv);
+    notifyOpenFolderRequested();
   });
   app.on('child-process-gone', (_event, details) => {
     console.error(
