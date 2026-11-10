@@ -127,6 +127,9 @@ mac:
 win:
   target:
     - nsis
+  extraResources:
+    - from: build/bin/enso.cmd
+      to: bin/enso.cmd
 nsis:
   artifactName: ${productName}-Setup-${version}.exe
   include: build/installer.nsh
