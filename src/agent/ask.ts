@@ -42,6 +42,9 @@ export class AskManager {
       requestId,
       question,
       ...(options && options.length > 0 ? { options } : {}),
+      ...(opts.defaultAnswer && options?.includes(opts.defaultAnswer)
+        ? { recommended: opts.defaultAnswer }
+        : {}),
       ...(this.humanTimeoutMs ? { expiresAt: Date.now() + this.humanTimeoutMs } : {}),
     };
     return new Promise<string>((resolve, reject) => {
@@ -139,7 +142,9 @@ export function createAskTool(manager: AskManager): ToolDefinition {
         },
         default_option: {
           type: 'string',
-          description: 'Optional: answer to auto-select when the timeout elapses',
+          description:
+            'Optional: your recommended answer. If it equals one of the options it is marked ' +
+            'Recommended; it is also auto-selected when the timeout elapses',
         },
       },
       required: ['question'],

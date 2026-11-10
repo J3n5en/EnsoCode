@@ -40,6 +40,15 @@ describe('AskManager 等人超时', () => {
     expect(infos[0].expiresAt).toBeUndefined();
     manager.cancelAll();
   });
+
+  it('默认答案是选项之一时作为推荐项上报，否则不带', () => {
+    const { manager, infos } = make();
+    void manager.ask('q', ['a', 'b'], { defaultAnswer: 'b' }).catch(() => undefined);
+    void manager.ask('q', ['a', 'b'], { defaultAnswer: 'c' }).catch(() => undefined);
+    void manager.ask('q', undefined, { defaultAnswer: 'a' }).catch(() => undefined);
+    expect(infos.map((info) => info.recommended)).toEqual(['b', undefined, undefined]);
+    manager.cancelAll();
+  });
 });
 
 describe('无人值守：没人能回答提问', () => {
