@@ -1,8 +1,10 @@
 import { execFile } from 'node:child_process';
-import { cp, lstat, rm, symlink, unlink } from 'node:fs/promises';
+import { access, cp, lstat, rm, symlink, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { type Locale, translate } from '@shared/i18n';
+import type { ShellIntegration } from '@shared/shellIntegration';
 import { dialog } from 'electron';
 
 const ENSO_COMMAND_TARGET = '/usr/local/bin/enso';
@@ -34,9 +36,21 @@ async function linkAsAdmin(source: string, target: string): Promise<void> {
   ]);
 }
 
-export async function installEnsoCommand(): Promise<void> {
+async function showResult(
+  locale: Locale,
+  result: { type: 'info' | 'error'; message: string; detail: string }
+): Promise<void> {
+  await dialog.showMessageBox({ ...result, buttons: [translate(locale, 'OK')] });
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function installEnsoCommand(locale: Locale): Promise<void> {
   const source = path.join(process.resourcesPath, 'bin', 'enso');
   try {
+    await access(source);
     try {
       await linkEnsoCommand(source, ENSO_COMMAND_TARGET);
     } catch (error) {
@@ -47,20 +61,23 @@ export async function installEnsoCommand(): Promise<void> {
   } catch (error) {
     // osascript 在用户取消授权时以 -128 退出
     if (String((error as { stderr?: unknown }).stderr ?? '').includes('-128')) return;
-    dialog.showErrorBox(
-      "Couldn't install the 'enso' command",
-      error instanceof Error ? error.message : String(error)
-    );
+    await showResult(locale, {
+      type: 'error',
+      message: translate(locale, "Couldn't install the 'enso' command"),
+      detail: errorText(error),
+    });
     return;
   }
-  await dialog.showMessageBox({
+  await showResult(locale, {
     type: 'info',
-    message: `Shell command 'enso' installed in ${path.dirname(ENSO_COMMAND_TARGET)}.`,
-    detail: 'Run `enso .` in a terminal to open the current folder in EnsoCode.',
+    message: translate(locale, "Shell command 'enso' installed in {{dir}}.", {
+      dir: path.dirname(ENSO_COMMAND_TARGET),
+    }),
+    detail: translate(locale, 'Run `enso .` in a terminal to open the current folder in EnsoCode.'),
   });
 }
 
-export async function installFinderQuickAction(): Promise<void> {
+async function installFinderQuickAction(locale: Locale): Promise<void> {
   const target = path.join(homedir(), 'Library', 'Services', QUICK_ACTION);
   try {
     await rm(target, { recursive: true, force: true });
@@ -69,15 +86,28 @@ export async function installFinderQuickAction(): Promise<void> {
     });
     await execFileAsync('/System/Library/CoreServices/pbs', ['-update']);
   } catch (error) {
-    dialog.showErrorBox(
-      "Couldn't install the Finder Quick Action",
-      error instanceof Error ? error.message : String(error)
-    );
+    await showResult(locale, {
+      type: 'error',
+      message: translate(locale, "Couldn't install the Finder Quick Action"),
+      detail: errorText(error),
+    });
     return;
   }
-  await dialog.showMessageBox({
+  await showResult(locale, {
     type: 'info',
-    message: 'Finder Quick Action installed.',
-    detail: 'Right-click a folder in Finder and choose Services > Open with EnsoCode.',
+    message: translate(locale, 'Finder Quick Action installed.'),
+    detail: translate(
+      locale,
+      'Right-click a folder in Finder and choose Services > Open with EnsoCode.'
+    ),
   });
+}
+
+const INSTALLERS: Record<ShellIntegration, (locale: Locale) => Promise<void>> = {
+  ensoCommand: installEnsoCommand,
+  finderQuickAction: installFinderQuickAction,
+};
+
+export function installShellIntegration(kind: ShellIntegration, locale: Locale): Promise<void> {
+  return INSTALLERS[kind](locale);
 }

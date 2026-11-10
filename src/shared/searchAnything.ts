@@ -233,6 +233,18 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
   },
   { id: 'general.updates', category: 'general', title: 'Updates' },
   {
+    id: 'general.ensoCommand',
+    category: 'general',
+    title: "'enso' terminal command",
+    description: 'Run `enso .` in a terminal to open the current folder in EnsoCode.',
+  },
+  {
+    id: 'general.finderQuickAction',
+    category: 'general',
+    title: 'Finder Quick Action',
+    description: 'Right-click a folder in Finder and choose Services > Open with EnsoCode.',
+  },
+  {
     id: 'experimental.botMode',
     category: 'experimental',
     title: 'Bot mode',

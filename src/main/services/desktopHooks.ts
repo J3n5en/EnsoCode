@@ -44,6 +44,7 @@ export interface AppDesktop {
   checkForUpdates(): Promise<void>;
   downloadUpdate(): Promise<void>;
   syncTrayToggleShortcut(keybindings: unknown): void;
+  syncAppLanguage(): void;
 }
 
 const appDesktopNoop: AppDesktop = {
@@ -55,6 +56,7 @@ const appDesktopNoop: AppDesktop = {
     throw new Error('Updater is not available on this host');
   },
   syncTrayToggleShortcut() {},
+  syncAppLanguage() {},
 };
 
 const sessionDesktopNoop: SessionDesktop = {

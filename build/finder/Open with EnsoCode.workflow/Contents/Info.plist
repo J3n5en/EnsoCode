@@ -2,6 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en_US</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.j3n5en.enso-code.open-folder-service</string>
+	<key>CFBundleName</key>
+	<string>Open with EnsoCode</string>
 	<key>NSServices</key>
 	<array>
 		<dict>

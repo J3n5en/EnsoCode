@@ -10,7 +10,7 @@ import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
 import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
-import { consumeTrayReenterAfterUpdate, readSettings } from './ipc/settings';
+import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
 import {
   noteOpenFolder,
   noteOpenFolderArgv,
@@ -147,7 +147,7 @@ if (!gotTheLock) {
     if (!app.isPackaged && process.platform === 'darwin') {
       app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     }
-    installAppMenu();
+    installAppMenu(readLocale());
 
     // Default open/close DevTools by F12 in development
     app.on('browser-window-created', (_, window) => {
@@ -188,6 +188,7 @@ if (!gotTheLock) {
           await autoUpdaterService.downloadUpdate();
         },
         syncTrayToggleShortcut,
+        syncAppLanguage: () => installAppMenu(readLocale()),
       },
     });
     registerIpcHandlers();

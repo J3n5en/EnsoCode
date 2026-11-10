@@ -1,9 +1,11 @@
 import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtocol';
 import { openFolderPathsFromArgv } from '@shared/openFolder';
+import { parseShellIntegration } from '@shared/shellIntegration';
 import { IPC_CHANNELS } from '@shared/types';
 import { parseAgentSummonRequest } from '@shared/types/mentions';
 import { parseTitleBarAppearance, windowSurfaceColor } from '@shared/windowControls';
 import { BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { installShellIntegration } from '../desktop/shellCommand';
 import { agentTypeRegistrySnapshot } from '../services/agentHost';
 import {
   getWindowWebContents,
@@ -13,6 +15,7 @@ import {
 import { focusMainWindow } from '../windows/MainWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
 import { parseOpenSettingsRequest } from './searchAnything';
+import { readLocale } from './settings';
 
 let pendingDeepLink: ReturnType<typeof parseOpenSettingsRequest> = null;
 const pendingOpenFolders: string[] = [];
@@ -142,6 +145,12 @@ export function registerWindowHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS, (): string[] =>
     pendingOpenFolders.splice(0)
   );
+
+  ipcMain.handle(IPC_CHANNELS.WINDOW_INSTALL_SHELL_INTEGRATION, async (_event, raw: unknown) => {
+    const kind = parseShellIntegration(raw);
+    if (process.platform !== 'darwin' || !kind) return;
+    await installShellIntegration(kind, readLocale());
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.WINDOW_POPUP_MENU,

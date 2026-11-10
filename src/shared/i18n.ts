@@ -381,6 +381,22 @@ export const zhTranslations: Record<string, string> = {
   'Not installed': '未安装',
   Install: '安装',
   Uninstall: '卸载',
+  OK: '好',
+  Integrations: '集成',
+  "Install 'enso' Command in PATH": '在 PATH 中安装 enso 命令',
+  'Install Finder Quick Action': '安装访达快速操作',
+  "'enso' terminal command": 'enso 终端命令',
+  'Finder Quick Action': '访达快速操作',
+  "Couldn't install the 'enso' command": '无法安装 enso 命令',
+  "Shell command 'enso' installed in {{dir}}.": '已在 {{dir}} 安装 enso 命令。',
+  'Run `enso .` in a terminal to open the current folder in EnsoCode.':
+    '在终端运行 `enso .` 即可用 EnsoCode 打开当前目录。',
+  'Run `enso .` in a terminal to open the current folder in EnsoCode. Links the command into /usr/local/bin and may ask for your password.':
+    '在终端运行 `enso .` 即可用 EnsoCode 打开当前目录。会把命令链接到 /usr/local/bin，可能需要输入密码。',
+  "Couldn't install the Finder Quick Action": '无法安装访达快速操作',
+  'Finder Quick Action installed.': '访达快速操作已安装。',
+  'Right-click a folder in Finder and choose Services > Open with EnsoCode.':
+    '在访达中右键文件夹，选择「服务」>「用 EnsoCode 打开」。',
   'Installing…': '安装中…',
   'Operation failed': '操作失败',
   'Install dcg': '安装 dcg',

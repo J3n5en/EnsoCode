@@ -60,6 +60,7 @@ import type {
 } from '@shared/resources';
 import type { BrowserSearchTab } from '@shared/searchAnything';
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
+import type { ShellIntegration } from '@shared/shellIntegration';
 import type {
   AssetOccupancyRow,
   CollectedAsset,
@@ -1334,6 +1335,8 @@ const electronAPI = {
     },
     takeOpenFolders: (): Promise<string[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS),
+    installShellIntegration: (kind: ShellIntegration): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_INSTALL_SHELL_INTEGRATION, kind),
     onOpenFolderRequested: (callback: () => void): (() => void) => {
       const listener = () => callback();
       ipcRenderer.on(IPC_CHANNELS.WINDOW_OPEN_FOLDER_REQUESTED, listener);

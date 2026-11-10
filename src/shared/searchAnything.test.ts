@@ -213,6 +213,8 @@ describe('buildSettingsCatalog', () => {
     'general.autoRetryLimit',
     'general.proxy',
     'general.updates',
+    'general.ensoCommand',
+    'general.finderQuickAction',
     'experimental.botMode',
     'bots.routeClassifier',
     'shortcuts.root',

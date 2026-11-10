@@ -34,6 +34,7 @@ export const IPC_CHANNELS = {
   WINDOW_POPUP_MENU: 'window:popup-menu',
   WINDOW_TAKE_OPEN_FOLDERS: 'window:takeOpenFolders',
   WINDOW_OPEN_FOLDER_REQUESTED: 'window:openFolderRequested',
+  WINDOW_INSTALL_SHELL_INTEGRATION: 'window:installShellIntegration',
   APP_CLOSE_REQUEST: 'app:close-request',
   APP_CLOSE_RESPONSE: 'app:close-response',
   APP_FLUSH_PERSIST_REQUEST: 'app:flush-persist-request',

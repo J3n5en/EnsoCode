@@ -278,6 +278,15 @@ function notifyTrayToggleShortcut(settings: Record<string, unknown>): void {
   appDesktop().syncTrayToggleShortcut(keybindings);
 }
 
+function notifyAppLanguage(
+  previous: Record<string, unknown> | null,
+  next: Record<string, unknown>
+): void {
+  if (settingsStateOf(previous).language !== settingsStateOf(next).language) {
+    appDesktop().syncAppLanguage();
+  }
+}
+
 function notifySpeechSettings(settings: Record<string, unknown>): void {
   const state = settingsStateOf(settings);
   void import('../services/speech/service')
@@ -445,6 +454,7 @@ function scheduleWrite(
     notifyMemoryEmbeddingSettings(data);
     notifyTrayToggleShortcut(data);
     notifySpeechSettings(data);
+    notifyAppLanguage(previous, data);
     if (
       settingsStateOf(previous).botModeEnabled !== settingsStateOf(data).botModeEnabled ||
       settingsStateOf(previous).botMaxRunningTurns !== settingsStateOf(data).botMaxRunningTurns
@@ -628,6 +638,7 @@ export function commitSettingsTransaction(
   notifyMemoryEmbeddingSettings(next);
   notifyTrayToggleShortcut(next);
   notifySpeechSettings(next);
+  notifyAppLanguage(latest, next);
   try {
     broadcastToRenderers(IPC_CHANNELS.SETTINGS_CHANGED);
   } catch {

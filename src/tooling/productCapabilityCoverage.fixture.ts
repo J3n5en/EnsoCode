@@ -487,6 +487,9 @@ export const IPC_PRODUCT_COVERAGE = {
   WINDOW_OPEN_FOLDER_REQUESTED: excluded(
     'Renderer wake-up for a Windows shell open-folder request.'
   ),
+  WINDOW_INSTALL_SHELL_INTEGRATION: excluded(
+    'Host-only installer that writes outside userData and may ask for an admin password.'
+  ),
   APP_CLOSE_REQUEST: excluded('Main-to-renderer quit confirm handshake.'),
   APP_CLOSE_RESPONSE: excluded('Renderer-to-main quit confirm handshake.'),
   APP_FLUSH_PERSIST_REQUEST: excluded(

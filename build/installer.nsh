@@ -8,12 +8,21 @@
 !macroend
 
 !macro customInstall
-  WriteRegStr SHCTX "Software\Classes\Directory\shell\EnsoCode" "" "Open with EnsoCode"
+  Push $0
+  Push $1
+  System::Call 'kernel32::GetUserDefaultUILanguage() i .r0'
+  IntOp $0 $0 & 0x3FF
+  StrCpy $1 "Open with EnsoCode"
+  IntCmp $0 4 0 +2 +2
+  StrCpy $1 "用 EnsoCode 打开"
+  WriteRegStr SHCTX "Software\Classes\Directory\shell\EnsoCode" "" "$1"
   WriteRegStr SHCTX "Software\Classes\Directory\shell\EnsoCode" "Icon" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
   WriteRegStr SHCTX "Software\Classes\Directory\shell\EnsoCode\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "--open-folder=%V"'
-  WriteRegStr SHCTX "Software\Classes\Directory\Background\shell\EnsoCode" "" "Open with EnsoCode"
+  WriteRegStr SHCTX "Software\Classes\Directory\Background\shell\EnsoCode" "" "$1"
   WriteRegStr SHCTX "Software\Classes\Directory\Background\shell\EnsoCode" "Icon" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}",0'
   WriteRegStr SHCTX "Software\Classes\Directory\Background\shell\EnsoCode\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "--open-folder=%V"'
+  Pop $1
+  Pop $0
   !insertmacro ensoUserPath add
 !macroend
 
