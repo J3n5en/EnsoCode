@@ -74,6 +74,7 @@ import type {
   ApprovalMode,
   AttachedImage,
   ChildConversationMetadata,
+  ContextPart,
   CoworkerInfo,
   McpOAuthRefreshResult,
   McpServerSpawnConfig,
@@ -5229,36 +5230,38 @@ export class SessionSupervisor {
     } catch {
       occupancy = undefined;
     }
+    let parts: ContextPart[] | undefined;
+    if (occupancy) {
+      try {
+        const inputs = this.occupancyInputs(managed);
+        parts = buildContextParts({
+          buckets: contextUsagePayload(occupancy, managed.messages).buckets,
+          agentsFiles: inputs.agentsFiles,
+          skills: inputs.skills,
+          tools: inputs.tools,
+          reminders: inputs.pendingTaskReminders ?? [],
+          messages: inputs.contextMessages,
+          estimate: (message) => this.estimateSessionMessage(message),
+        }).parts;
+      } catch {
+        // 拆分失败只少了条目，分类合计照发
+      }
+    }
     this.options.emit({
       type: 'session-meta',
       identity: managed.identity,
       seq: ++managed.seq,
       sessionFile: managed.session.sessionFile,
-      ...(occupancy ? { occupancy } : {}),
+      ...(occupancy ? { occupancy: { ...occupancy, ...(parts ? { parts } : {}) } } : {}),
       ...(contextWindow !== undefined ? { contextWindow } : {}),
       // 渲染层冷会话不留正文、手机只持尾窗：按 worker 的完整记录算好随占用下发
       usageTotals: toUsageTotals(computeStats(managed.messages)),
     });
     if (occupancy && managed.pluginEvents?.plan.observe.includes('context_usage')) {
-      const payload = contextUsagePayload(occupancy, managed.messages);
-      try {
-        const inputs = this.occupancyInputs(managed);
-        Object.assign(
-          payload,
-          buildContextParts({
-            buckets: payload.buckets,
-            agentsFiles: inputs.agentsFiles,
-            skills: inputs.skills,
-            tools: inputs.tools,
-            reminders: inputs.pendingTaskReminders ?? [],
-            messages: inputs.contextMessages,
-            estimate: (message) => this.estimateSessionMessage(message),
-          })
-        );
-      } catch {
-        // 拆分失败只少了条目，分类合计照发
-      }
-      managed.pluginEvents.notify('context_usage', payload);
+      managed.pluginEvents.notify(
+        'context_usage',
+        contextUsagePayload({ ...occupancy, ...(parts ? { parts } : {}) }, managed.messages)
+      );
     }
   }
 

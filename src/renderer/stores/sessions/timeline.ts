@@ -145,6 +145,8 @@ export type TimelineItem =
       key: string;
       summary: string;
       tokensBefore: number | null;
+      /** 只有最近一次压缩才有：压缩刚结束时的估算用量 */
+      tokensAfter?: number;
       verified?: boolean;
       memory?: boolean;
     }
@@ -156,6 +158,7 @@ export type TimelineItem =
       key: string;
       summary: string;
       tokensBefore: number | null;
+      tokensAfter?: number;
       verified?: boolean;
       memory?: boolean;
     }
@@ -1342,17 +1345,31 @@ function insertCompactionNotice(items: TimelineItem[], noticeAt: number): Timeli
     key: `compaction-notice:${lastSummary.key}`,
     summary: lastSummary.summary,
     tokensBefore: lastSummary.tokensBefore,
+    ...(lastSummary.tokensAfter !== undefined ? { tokensAfter: lastSummary.tokensAfter } : {}),
     ...(lastSummary.verified ? { verified: true } : {}),
     ...(lastSummary.memory ? { memory: true } : {}),
   };
   return [...items.slice(0, at), notice, ...items.slice(at)];
 }
 
+/** 压缩后用量只属于最近一次压缩：挂到最后一条摘要行上（提示从它复制） */
+function withTokensAfter(items: TimelineItem[], tokensAfter?: number): TimelineItem[] {
+  if (tokensAfter === undefined) return items;
+  const at = items.findLastIndex((item) => item.kind === 'compaction');
+  const last = items[at];
+  if (last?.kind !== 'compaction') return items;
+  const next = [...items];
+  next[at] = { ...last, tokensAfter };
+  return next;
+}
+
 function appendCompactionChrome(
-  items: TimelineItem[],
+  source: TimelineItem[],
   compaction?: 'queued' | 'running',
-  noticeAt?: number
+  noticeAt?: number,
+  tokensAfter?: number
 ): TimelineItem[] {
+  const items = withTokensAfter(source, tokensAfter);
   const withNotice = noticeAt === undefined ? items : insertCompactionNotice(items, noticeAt);
   if (!compaction) return withNotice;
   return [
@@ -1460,6 +1477,8 @@ export function buildTimeline(
   options?: {
     compaction?: 'queued' | 'running';
     compactionNoticeAt?: number;
+    /** 最近一次压缩后的估算用量（来自占用上报） */
+    compactionTokensAfter?: number;
     /** 当前权威消息对应的 worker 绝对起点；尾窗分页时行 key 用绝对下标 */
     historyBaseIndex?: number;
     /** 运行中工具的输出快照（toolCallId → 文本）；真实 toolResult 到位后优先用后者 */
@@ -1537,7 +1556,12 @@ export function buildTimeline(
         historyBaseIndex === 0
       )
     : ordered;
-  return appendCompactionChrome(withDividers, options?.compaction, options?.compactionNoticeAt);
+  return appendCompactionChrome(
+    withDividers,
+    options?.compaction,
+    options?.compactionNoticeAt,
+    options?.compactionTokensAfter
+  );
 }
 
 const DIVIDER_LEAD_MS = 10_000;

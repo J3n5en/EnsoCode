@@ -525,6 +525,7 @@ describe('contextUsagePayload', () => {
     compactionModelMismatch: false,
     contextWindow: 100,
     percent: 36,
+    parts: [{ kind: 'chat' as const, tokens: 5, items: [{ name: '1', tag: 'turn', tokens: 5 }] }],
   };
 
   it('带分桶与最近一次请求的用量，去掉已废弃的 projectMemory', () => {
@@ -549,6 +550,7 @@ describe('contextUsagePayload', () => {
         reminders: 8,
       },
       usage: { input: 10, output: 2, cacheRead: 90, cacheWrite: 3 },
+      parts: [{ kind: 'chat', tokens: 5, items: [{ name: '1', tag: 'turn', tokens: 5 }] }],
     });
   });
 

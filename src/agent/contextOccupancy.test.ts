@@ -245,6 +245,48 @@ describe('summarizeContextOccupancy 的 usedOverride / anchored', () => {
 });
 
 describe('collectContextOccupancy', () => {
+  it('压缩后用量 = 固定开销 + 摘要 + firstKept 起保留下来的消息，不含压缩之后的新消息', () => {
+    const message = (n: number) => ({ role: 'user', content: 'x', n });
+    const occupancy = collectContextOccupancy({
+      systemPrompt: 'abcdefgh',
+      agentsFiles: [],
+      skills: [],
+      tools: [],
+      contextMessages: [message(7), message(30)],
+      branch: [
+        { type: 'message', id: 'm1', parentId: null, message: message(500) },
+        { type: 'message', id: 'm2', parentId: 'm1', message: message(7) },
+        {
+          type: 'compaction',
+          id: 'c1',
+          parentId: 'm2',
+          summary: 'xxxxxxxxxxxx',
+          firstKeptEntryId: 'm2',
+          tokensBefore: 600,
+        },
+        { type: 'message', id: 'm3', parentId: 'c1', message: message(30) },
+      ],
+      currentModelFamily: 'claude',
+      estimateMessageTokens: (value) => (value as { n?: number }).n ?? 0,
+    });
+    // system 2 + 摘要 3 + 保留的 m2 7
+    expect(occupancy.compactionTokensAfter).toBe(12);
+    expect(occupancy.used).toBe(2 + 3 + 37);
+  });
+
+  it('没有压缩时不带压缩后用量', () => {
+    const occupancy = collectContextOccupancy({
+      systemPrompt: '',
+      agentsFiles: [],
+      skills: [],
+      tools: [],
+      contextMessages: [],
+      branch: [],
+      currentModelFamily: 'claude',
+    });
+    expect(occupancy).not.toHaveProperty('compactionTokensAfter');
+  });
+
   it('对话走 estimateTokens；压缩摘要单独成桶；折叠条数按 firstKept 之前计', () => {
     const occupancy = collectContextOccupancy({
       systemPrompt: 'abcd',

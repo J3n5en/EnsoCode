@@ -59,6 +59,9 @@ export function ChatSessionTimeline({
   const compactionNoticeAt = useSessionsStore(
     (state) => state.conversations[conversationId]?.compactionNoticeAt
   );
+  const compactionTokensAfter = useSessionsStore(
+    (state) => state.conversations[conversationId]?.occupancy?.compactionTokensAfter
+  );
   const historyBaseIndex = useSessionsStore(
     (state) => state.conversations[conversationId]?.historyBaseIndex ?? 0
   );
@@ -110,6 +113,7 @@ export function ChatSessionTimeline({
       buildTimeline(messages, running, customEntries, cwd, {
         compaction,
         compactionNoticeAt,
+        compactionTokensAfter,
         historyBaseIndex,
         toolOutputs,
         toolStartedAt,
@@ -120,6 +124,7 @@ export function ChatSessionTimeline({
   }, [
     compaction,
     compactionNoticeAt,
+    compactionTokensAfter,
     conversationId,
     cwd,
     customEntries,

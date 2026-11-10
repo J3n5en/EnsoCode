@@ -30,6 +30,8 @@ export interface ContextOccupancyInput {
   compactionModelFamily?: string;
   contextWindow?: number;
   compactionEntryId?: string;
+  /** 最近一次压缩保留下来（firstKept 起、压缩条目之前）的消息 token */
+  compactionKeptTokens?: number;
   usedOverride?: number;
   anchored?: boolean;
 }
@@ -106,6 +108,24 @@ function compactedCount(
   return cut >= 0 ? cut : 0;
 }
 
+/** firstKept 起、压缩条目之前的消息：压缩后仍留在上下文里 */
+function keptTokens(
+  branch: readonly OccupancyBranchEntry[],
+  compaction: OccupancyCompactionEntry,
+  estimate: (message: unknown) => number
+): number {
+  const compactionIndex = branch.findIndex((entry) => entry.id === compaction.id);
+  const kept = compaction.firstKeptEntryId
+    ? branch.findIndex((entry) => entry.id === compaction.firstKeptEntryId)
+    : -1;
+  if (kept < 0 || compactionIndex < 0 || kept > compactionIndex) return 0;
+  let tokens = 0;
+  for (const entry of branch.slice(kept, compactionIndex)) {
+    if (entry.type === 'message' && entry.message) tokens += Math.max(0, estimate(entry.message));
+  }
+  return tokens;
+}
+
 function defaultEstimate(message: unknown): number {
   const record = (message ?? {}) as Record<string, unknown>;
   const role = typeof record.role === 'string' ? record.role : '';
@@ -142,6 +162,7 @@ export function collectContextOccupancy(input: CollectContextOccupancyInput): Co
     conversationTokens,
     compactionTokens: compaction ? charsToTokens(compaction.summary.length) : 0,
     compactedMessageCount: compactedCount(input.branch, compaction),
+    ...(compaction ? { compactionKeptTokens: keptTokens(input.branch, compaction, estimate) } : {}),
     projectMemoryText: input.projectMemoryText ?? '',
     projectMemoryEnabled: input.projectMemoryEnabled ?? true,
     reminderText: (input.pendingTaskReminders ?? []).join('\n'),
@@ -177,6 +198,7 @@ export function summarizeContextOccupancy(input: ContextOccupancyInput): Context
     reminders: charsToTokens(input.reminderText.length),
   };
   const bucketSum = CONTEXT_OCCUPANCY_BUCKETS.reduce((sum, id) => sum + buckets[id], 0);
+  const overhead = bucketSum - buckets.conversation;
   const used =
     input.usedOverride !== undefined ? Math.max(0, Math.round(input.usedOverride)) : bucketSum;
   if (input.usedOverride !== undefined) {
@@ -196,5 +218,10 @@ export function summarizeContextOccupancy(input: ContextOccupancyInput): Context
     ...(window !== undefined ? { contextWindow: window } : {}),
     ...(window !== undefined ? { percent: Math.min(100, Math.round((used / window) * 100)) } : {}),
     ...(input.compactionEntryId ? { compactionEntryId: input.compactionEntryId } : {}),
+    ...(input.compactionKeptTokens !== undefined
+      ? {
+          compactionTokensAfter: overhead + Math.max(0, Math.round(input.compactionKeptTokens)),
+        }
+      : {}),
   };
 }

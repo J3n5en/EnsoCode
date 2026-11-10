@@ -61,6 +61,7 @@ export function contextUsagePayload(
     ...(occupancy.contextWindow !== undefined ? { contextWindow: occupancy.contextWindow } : {}),
     ...(occupancy.percent !== undefined ? { percent: occupancy.percent } : {}),
     buckets,
+    ...(occupancy.parts ? { parts: occupancy.parts } : {}),
     ...(usage
       ? {
           usage: {

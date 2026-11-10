@@ -2531,6 +2531,31 @@ describe('compaction 摘要行', () => {
     expect(timeline[1]).not.toHaveProperty('verified');
   });
 
+  it('压缩后用量只挂在最后一次压缩的分隔行和提示上', () => {
+    const summary = (text: string) => ({
+      role: 'compactionSummary',
+      content: [{ type: 'text' as const, text }],
+      tokensBefore: 9000,
+    });
+    const timeline = buildTimeline(
+      [summary('A'), user('a'), summary('B'), user('kept'), user('after')],
+      false,
+      [],
+      undefined,
+      { compactionNoticeAt: 4, compactionTokensAfter: 1200 }
+    );
+    const rows = timeline.filter(
+      (item) => item.kind === 'compaction' || item.kind === 'compaction-notice'
+    );
+    expect(
+      rows.map((item) => [item.kind, 'tokensAfter' in item ? item.tokensAfter : null])
+    ).toEqual([
+      ['compaction', null],
+      ['compaction', 1200],
+      ['compaction-notice', 1200],
+    ]);
+  });
+
   it('verified 摘要行带 verified', () => {
     const timeline = buildTimeline(
       [
