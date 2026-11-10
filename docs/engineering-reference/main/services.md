@@ -150,7 +150,7 @@ Pi 0.87.1 的 `_rewriteFile()` 不设置 `flushed`；不显式同步时，首条
 会以 `wx` 创建已有文件并抛出 `EEXIST`。回归还须覆盖物化后追加首条 assistant、
 重开 JSONL 后消息仍存在。只有重写成功后才能设置该标记。
 
-第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.5.0
+第二处：`src/agent/sessionAdapter.ts` 的 `continueSessionActivity()` 调用 pi 1.5.1
 私有 `_startRun`，通过每次调用独立的代理令 `_prepareRun` 返回空数组。Pi 1.2 起
 移除了旧 `_runAgentPrompt([])`。公开 API 没有不新增消息的 session 级 continue；裸
 `agent.continue()` 绕过自动重试、`agent_before_settle` 与 `agent_settled`，手工补发
@@ -171,7 +171,7 @@ post-run / before-settle / settled 生命周期。
 选号等待时取消与唯一结算）、`sessionAdapter.test.ts` 和 `supervisor.silentTurn.test.ts`。
 
 第三处：`sessionAdapter.steerActiveSession()` 针对 Bot 插话，以每次调用独立的代理拦截
-pi 1.5.0 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
+pi 1.5.1 `_queueSteer`，在异步 input hook 后、同步入队前再次检查活轮，仍沿用原生
 steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., streamingBehavior:'steer')`
 在 `started` 回调抛错：那时已经可能做过压缩并清空 nextTurn 消息。
 已入队但到 `agent_settled` 仍未消费的消息（如 abort）按对象引用从
