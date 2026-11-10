@@ -103,6 +103,8 @@ mac:
   extraResources:
     - from: build/bin/enso
       to: bin/enso
+    - from: build/finder
+      to: finder
   hardenedRuntime: true
   gatekeeperAssess: false
   # 公证与 staple 由 scripts/after-sign.mjs 负责，staple 断网可重试

@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
-import { lstat, symlink, unlink } from 'node:fs/promises';
+import { cp, lstat, rm, symlink, unlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { dialog } from 'electron';
 
 const ENSO_COMMAND_TARGET = '/usr/local/bin/enso';
+const QUICK_ACTION = 'Open with EnsoCode.workflow';
+const execFileAsync = promisify(execFile);
 
 export async function linkEnsoCommand(source: string, target: string): Promise<void> {
   const existing = await lstat(target).catch(() => null);
@@ -25,7 +28,7 @@ function appleScriptString(value: string): string {
 
 async function linkAsAdmin(source: string, target: string): Promise<void> {
   const command = `mkdir -p ${shellQuote(path.dirname(target))} && ln -sf ${shellQuote(source)} ${shellQuote(target)}`;
-  await promisify(execFile)('osascript', [
+  await execFileAsync('osascript', [
     '-e',
     `do shell script ${appleScriptString(command)} with administrator privileges`,
   ]);
@@ -54,5 +57,27 @@ export async function installEnsoCommand(): Promise<void> {
     type: 'info',
     message: `Shell command 'enso' installed in ${path.dirname(ENSO_COMMAND_TARGET)}.`,
     detail: 'Run `enso .` in a terminal to open the current folder in EnsoCode.',
+  });
+}
+
+export async function installFinderQuickAction(): Promise<void> {
+  const target = path.join(homedir(), 'Library', 'Services', QUICK_ACTION);
+  try {
+    await rm(target, { recursive: true, force: true });
+    await cp(path.join(process.resourcesPath, 'finder', QUICK_ACTION), target, {
+      recursive: true,
+    });
+    await execFileAsync('/System/Library/CoreServices/pbs', ['-update']);
+  } catch (error) {
+    dialog.showErrorBox(
+      "Couldn't install the Finder Quick Action",
+      error instanceof Error ? error.message : String(error)
+    );
+    return;
+  }
+  await dialog.showMessageBox({
+    type: 'info',
+    message: 'Finder Quick Action installed.',
+    detail: 'Right-click a folder in Finder and choose Services > Open with EnsoCode.',
   });
 }

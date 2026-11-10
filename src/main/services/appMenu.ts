@@ -1,5 +1,5 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron';
-import { installEnsoCommand } from '../desktop/shellCommand';
+import { installEnsoCommand, installFinderQuickAction } from '../desktop/shellCommand';
 
 export const APP_DISPLAY_NAME = 'EnsoCode';
 
@@ -18,6 +18,10 @@ export function macAppMenuTemplate(): MenuItemConstructorOptions[] {
               {
                 label: "Install 'enso' Command in PATH",
                 click: () => void installEnsoCommand(),
+              },
+              {
+                label: 'Install Finder Quick Action',
+                click: () => void installFinderQuickAction(),
               },
             ]
           : []),
