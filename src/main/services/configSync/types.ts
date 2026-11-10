@@ -25,6 +25,7 @@ export const CONFIG_SYNC_PROVIDER_OMISSIONS = [
   'baseUrlCredentials',
   'baseUrlQuery',
   'baseUrlFragment',
+  'headers',
 ] as const;
 export type ConfigSyncProviderOmission = (typeof CONFIG_SYNC_PROVIDER_OMISSIONS)[number];
 

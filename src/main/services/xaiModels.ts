@@ -16,7 +16,12 @@ export async function fetchXaiSubscriptionModels(token: string): Promise<Fetched
   if (!key) return [];
   const [official, cli] = await Promise.all([
     listModels({ api: 'openai-completions', apiKey: key, baseUrl: XAI_API_BASE }),
-    listModels({ api: 'openai-completions', apiKey: key, baseUrl: XAI_CLI_BASE }, CLI_HEADERS),
+    listModels({
+      api: 'openai-completions',
+      apiKey: key,
+      baseUrl: XAI_CLI_BASE,
+      headers: CLI_HEADERS,
+    }),
   ]);
   const merged = new Map<string, FetchedModel>();
   for (const model of [...(official.ok ? official.models : []), ...(cli.ok ? cli.models : [])]) {

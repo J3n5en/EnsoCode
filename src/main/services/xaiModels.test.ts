@@ -32,10 +32,12 @@ describe('fetchXaiSubscriptionModels', () => {
       apiKey: 'tok',
       baseUrl: XAI_API_BASE,
     });
-    expect(listModels).toHaveBeenCalledWith(
-      { api: 'openai-completions', apiKey: 'tok', baseUrl: XAI_CLI_BASE },
-      { Accept: 'application/json', 'X-XAI-Token-Auth': 'xai-grok-cli' }
-    );
+    expect(listModels).toHaveBeenCalledWith({
+      api: 'openai-completions',
+      apiKey: 'tok',
+      baseUrl: XAI_CLI_BASE,
+      headers: { Accept: 'application/json', 'X-XAI-Token-Auth': 'xai-grok-cli' },
+    });
   });
 
   it('一侧失败仍用另一侧，空 token 不发请求', async () => {

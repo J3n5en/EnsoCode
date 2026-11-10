@@ -1335,6 +1335,28 @@ describe('parent/child commands', () => {
     ).toBeNull();
   });
 
+  it('spawn model 收下合法请求头，并丢掉非法条目', () => {
+    const command = {
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/repo',
+      model: {
+        ...model,
+        headers: { 'X-Ok': 'one', 'bad name': 'no', 'X-Break': 'a\nb' },
+      },
+    };
+    expect(parseAgentCommand(command)).toEqual({
+      ...command,
+      model: { ...model, headers: { 'X-Ok': 'one' } },
+    });
+    expect(
+      parseAgentCommand({
+        ...command,
+        model: { ...model, headers: { nope: 1 } },
+      })
+    ).toEqual({ ...command, model });
+  });
+
   it('set-web-search-config 链收窄：合法透传，非法/超限拒收', () => {
     const exhausted = { type: 'set-web-search-config', chain: [], configured: true };
     expect(parseAgentCommand(exhausted)).toEqual(exhausted);

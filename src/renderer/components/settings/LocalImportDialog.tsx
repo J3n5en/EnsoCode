@@ -279,6 +279,7 @@ function ProviderModelSection({ providerId }: { providerId: string }) {
       api: provider.api,
       apiKey: provider.apiKey,
       baseUrl: provider.baseUrl,
+      ...(provider.headers ? { headers: provider.headers } : {}),
     });
     setBusy(false);
     if (result.ok) {

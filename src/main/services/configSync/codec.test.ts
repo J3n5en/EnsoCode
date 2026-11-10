@@ -171,6 +171,7 @@ describe('config sync codec', () => {
             name: 'P',
             api: 'openai-completions' as const,
             apiKey: 'secret',
+            headers: { 'X-Trace': 'secret' },
             baseUrl: 'https://example.test',
             enabled: true,
             models: [],
@@ -194,8 +195,65 @@ describe('config sync codec', () => {
     const redacted = redactBundle(source);
     expect(JSON.stringify(redacted)).not.toContain('secret');
     expect(source.state.providers[0]).toHaveProperty('apiKey', 'secret');
+    expect(source.state.providers[0]).toHaveProperty('headers', { 'X-Trace': 'secret' });
+    expect(redacted.state.providers[0]).not.toHaveProperty('headers');
+    expect(redacted.state.providers[0]?.omittedFields).toContain('headers');
     expect(source.state.mcpServers[0]).toHaveProperty('env.TOKEN', 'secret');
     expect(redacted.state.mcpServers[0]?.omittedFields).toContain('headers');
+  });
+
+  it('含请求头的密钥包加密往返后仍是原文', async () => {
+    const source = {
+      ...bundle(),
+      secretsIncluded: true,
+      state: {
+        ...bundle().state,
+        providers: [
+          {
+            id: 'p1',
+            name: 'P',
+            api: 'openai-completions' as const,
+            apiKey: 'secret',
+            headers: { originator: 'enso', 'X-Home': '$HOME' },
+            baseUrl: 'https://example.test',
+            enabled: true,
+            models: [],
+          },
+        ],
+      },
+    } satisfies ConfigSyncBundle;
+    const encoded = await encodeBundle(source, 'correct horse');
+    await expect(decodeBundle(encoded, 'correct horse')).resolves.toMatchObject({
+      state: { providers: [{ headers: { originator: 'enso', 'X-Home': '$HOME' } }] },
+    });
+  });
+
+  it('非法请求头名或含换行的值拒绝导入', async () => {
+    const cases: Record<string, string>[] = [{ 'Bad Name': 'x' }, { 'X-Ok': 'a\r\nInjected: 1' }];
+    for (const headers of cases) {
+      const source = {
+        ...bundle(),
+        secretsIncluded: true,
+        state: {
+          ...bundle().state,
+          providers: [
+            {
+              id: 'p1',
+              name: 'P',
+              api: 'openai-completions' as const,
+              apiKey: 'secret',
+              headers,
+              baseUrl: 'https://example.test',
+              enabled: true,
+              models: [],
+            },
+          ],
+        },
+      } satisfies ConfigSyncBundle;
+      await expect(
+        (async () => decodeBundle(await encodeBundle(source, 'correct horse'), 'correct horse'))()
+      ).rejects.toThrow();
+    }
   });
 
   it('包含敏感信息时加密整个包并支持正确密码解密', async () => {

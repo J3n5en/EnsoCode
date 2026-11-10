@@ -959,3 +959,58 @@ describe('拉模型走 Chromium 网络栈', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
+
+describe('provider headers', () => {
+  afterEach(() => {
+    net.fetch = originalNetFetch;
+  });
+
+  const headers = { originator: 'enso', 'User-Agent': 'custom' };
+
+  it('listModels 在鉴权头之后合并用户请求头，Anthropic 401 重试也保留', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => mockResponse(200, {}));
+    fetchMock
+      .mockResolvedValueOnce(mockResponse(401, undefined, 'Unauthorized'))
+      .mockResolvedValueOnce(mockResponse(200, { data: [{ id: 'claude' }] }));
+    net.fetch = fetchMock;
+    await expect(
+      listModels({
+        api: 'anthropic-messages',
+        apiKey: 'k',
+        baseUrl: 'https://relay.example',
+        headers,
+      })
+    ).resolves.toMatchObject({ ok: true });
+    const sent = (call: readonly unknown[]) =>
+      (call[1] as { headers: Record<string, string> }).headers;
+    for (const call of fetchMock.mock.calls) {
+      expect(sent(call)).toMatchObject(headers);
+      expect(sent(call)['anthropic-version']).toBe('2023-06-01');
+    }
+    expect(sent(fetchMock.mock.calls[0] ?? [])['x-api-key']).toBe('k');
+    expect(sent(fetchMock.mock.calls[1] ?? []).Authorization).toBe('Bearer k');
+  });
+
+  it('testProvider 在鉴权头之后发送用户请求头', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      void init;
+      return mockResponse(200, {});
+    });
+    net.fetch = fetchMock;
+    await testProvider(
+      {
+        api: 'openai-completions',
+        apiKey: 'k',
+        baseUrl: 'https://api.example/v1',
+        headers,
+      },
+      'm'
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined;
+    expect(init?.headers).toMatchObject({
+      Authorization: 'Bearer k',
+      'Content-Type': 'application/json',
+      ...headers,
+    });
+  });
+});

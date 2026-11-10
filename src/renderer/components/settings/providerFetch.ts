@@ -24,6 +24,7 @@ export async function fetchProviderModels(provider: ModelProvider): Promise<Prov
       api: provider.api,
       apiKey: provider.apiKey,
       baseUrl: provider.baseUrl,
+      ...(provider.headers ? { headers: provider.headers } : {}),
     });
     if (!result.ok) return { status: 'failed', message: result.error ?? 'Failed' };
     return {

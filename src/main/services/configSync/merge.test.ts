@@ -73,6 +73,23 @@ describe('config sync merge planning', () => {
     });
   });
 
+  it('导入省略请求头时保留本机请求头', () => {
+    const local = { ...provider('same', 'Old', 'keep-secret'), headers: { 'X-Local': 'keep' } };
+    const imported = {
+      ...provider('same', 'New', 'incoming'),
+      omittedFields: ['headers' as const],
+    };
+    const result = planImport(current([local]), bundle([imported]), 'merge');
+    expect(result.state.providers).toContainEqual(
+      expect.objectContaining({
+        id: 'same',
+        name: 'New',
+        apiKey: 'incoming',
+        headers: { 'X-Local': 'keep' },
+      })
+    );
+  });
+
   it('允许导入与内置同名的自定义 Agent type，仍拒绝保留名', () => {
     const agentType = (name: string) => ({
       id: '14478e0b-5089-4801-967e-0adeadfb4813',

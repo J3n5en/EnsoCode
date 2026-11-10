@@ -2,6 +2,7 @@ import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { findCatalogModelById, resolveCustomModelCapabilities } from '@shared/modelCatalog';
 import { type ModelDirectorySnapshot, parseModelDirectorySnapshot } from '@shared/modelDirectory';
 import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
+import { escapePiConfigValue, parseProviderHeaders } from '@shared/providers/providerHeaders';
 import type { WorkerCustomProvider } from '@shared/types/agent';
 import {
   MODEL_API_KINDS,
@@ -38,6 +39,7 @@ export interface CustomProviderEndpoint {
   api: ModelApiKind;
   baseUrl: string;
   apiKey: string;
+  headers?: Record<string, string>;
 }
 
 export interface ModelDirectoryPushState {
@@ -102,6 +104,7 @@ function parseWorkerCustomProvider(value: unknown): WorkerCustomProvider | undef
     const model = parseWorkerModelEntry(item);
     if (model) models.push(model);
   }
+  const headers = parseProviderHeaders(raw.headers);
   return {
     settingsId: raw.settingsId,
     name: raw.name,
@@ -109,6 +112,7 @@ function parseWorkerCustomProvider(value: unknown): WorkerCustomProvider | undef
     baseUrl: raw.baseUrl,
     apiKey: raw.apiKey,
     models,
+    ...(headers ? { headers } : {}),
   };
 }
 
@@ -143,6 +147,7 @@ function providerFingerprint(provider: WorkerCustomProvider) {
     api: provider.api,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
+    ...(provider.headers ? { headers: provider.headers } : {}),
     models: provider.models.map((model) => ({
       id: model.id,
       ...(model.label !== undefined ? { label: model.label } : {}),
@@ -268,7 +273,7 @@ export function registerCustomProviderModels(
     baseUrl: piBaseUrl,
     api: provider.api,
     apiKey: provider.apiKey,
-    headers: { 'User-Agent': ENSO_USER_AGENT },
+    headers: providerRequestHeaders(provider.headers),
     models: [...known.values()],
   });
   const registered = runtime.getProvider(providerId);
@@ -286,11 +291,29 @@ export function installPushedCustomProviders(
 ): void {
   for (const provider of providers) {
     if (!isModelApiKind(provider.api)) continue;
+    const headers = parseProviderHeaders(provider.headers);
     registerCustomProviderModels(
       runtime,
-      { api: provider.api, baseUrl: provider.baseUrl, apiKey: provider.apiKey },
+      {
+        api: provider.api,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        ...(headers ? { headers } : {}),
+      },
       provider.models,
       { accumulateOnly: true }
     );
   }
+}
+
+/** 内置 User-Agent 垫底；用户任意大小写的 user-agent 替换它。值按 pi 配置模板转义成字面量。 */
+function providerRequestHeaders(
+  headers: Record<string, string> | undefined
+): Record<string, string> {
+  const user = headers ?? {};
+  const overridesUserAgent = Object.keys(user).some((name) => name.toLowerCase() === 'user-agent');
+  const merged: Record<string, string> = {};
+  if (!overridesUserAgent) merged['User-Agent'] = ENSO_USER_AGENT;
+  for (const [name, value] of Object.entries(user)) merged[name] = escapePiConfigValue(value);
+  return merged;
 }

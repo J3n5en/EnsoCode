@@ -5987,7 +5987,12 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
   // 成员会互相挤出目录（pi 路由时按目录重新取模型）。同 id 仍覆盖，保持 spawn 重解析。
   registerCustomProviderModels(
     runtime,
-    { api: model.api, baseUrl: model.baseUrl, apiKey: model.apiKey },
+    {
+      api: model.api,
+      baseUrl: model.baseUrl,
+      apiKey: model.apiKey,
+      ...(model.headers ? { headers: model.headers } : {}),
+    },
     [entry]
   );
   const registered = runtime.getModel(providerId, model.modelId);

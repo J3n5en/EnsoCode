@@ -86,9 +86,15 @@ export interface CapabilityDomainServices {
     api: ModelProvider['api'];
     apiKey: string;
     baseUrl: string;
+    headers?: Record<string, string>;
   }): Promise<ListModelsResult>;
   testProvider(
-    config: { api: ModelProvider['api']; apiKey: string; baseUrl: string },
+    config: {
+      api: ModelProvider['api'];
+      apiKey: string;
+      baseUrl: string;
+      headers?: Record<string, string>;
+    },
     modelId?: string
   ): Promise<TestProviderResult>;
   queryModelMeta(query: { oauthAccountKey?: string; modelIds: string[] }): Promise<ModelMetaResult>;
@@ -222,7 +228,12 @@ function materializeSettingsProviders(value: unknown): ModelProvider[] {
 }
 
 function providerConfig(provider: ModelProvider) {
-  return { api: provider.api, apiKey: provider.apiKey, baseUrl: provider.baseUrl };
+  return {
+    api: provider.api,
+    apiKey: provider.apiKey,
+    baseUrl: provider.baseUrl,
+    ...(provider.headers ? { headers: provider.headers } : {}),
+  };
 }
 
 function success(data: unknown): CapabilityResult {

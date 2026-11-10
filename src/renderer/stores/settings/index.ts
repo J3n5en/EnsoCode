@@ -533,7 +533,12 @@ export const useSettingsStore = create<SettingsState>()(
 
       updateProvider: (id, updates) => {
         set((state) => ({
-          providers: state.providers.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+          providers: state.providers.map((p) => {
+            if (p.id !== id) return p;
+            const next = { ...p, ...updates };
+            if ('headers' in updates && updates.headers === undefined) delete next.headers;
+            return next;
+          }),
         }));
         get().revalidateDefaultModel(useOauthCredentialStore.getState().snapshot);
       },

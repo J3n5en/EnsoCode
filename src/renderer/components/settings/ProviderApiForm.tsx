@@ -1,10 +1,23 @@
 import { commitPendingModel, mergeFetchedModels } from '@shared/modelEntry';
 import { baseUrlAfterApiChange, isClassifierOnlyProvider } from '@shared/providerCatalog';
+import { HEADER_NAME_RE, normalizeProviderHeaders } from '@shared/providers/providerHeaders';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
-import { CircleCheck, CircleX, Eye, EyeOff, ListPlus, Loader2, Plus, Zap } from 'lucide-react';
+import {
+  ChevronDown,
+  CircleCheck,
+  CircleX,
+  Eye,
+  EyeOff,
+  ListPlus,
+  Loader2,
+  Plus,
+  X,
+  Zap,
+} from 'lucide-react';
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
   DialogFooter,
@@ -24,6 +37,7 @@ import {
 } from '@/components/ui/select';
 import { useScrollChain } from '@/hooks/useScrollChain';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { API_KIND_LABELS } from './constants';
 import { ListFilterBar, useVisibleSelection } from './ListFilterBar';
@@ -35,6 +49,7 @@ export interface ProviderApiFormValue {
   apiKey: string;
   baseUrl: string;
   models: ModelEntry[];
+  headers?: Record<string, string>;
 }
 
 interface ProviderApiFormProps {
@@ -51,6 +66,16 @@ interface ProviderApiFormProps {
 }
 
 const isEnabled = (model: ModelEntry) => model.enabled !== false;
+
+type HeaderDraft = { key: string; name: string; value: string };
+
+function headerDrafts(headers: Record<string, string> | undefined): HeaderDraft[] {
+  return Object.entries(headers ?? {}).map(([name, value]) => ({
+    key: crypto.randomUUID(),
+    name,
+    value,
+  }));
+}
 
 /** 编辑与统一向导共用的 API/模型表单，Fetch/Test 只有这一份实现。 */
 export function ProviderApiForm({
@@ -70,6 +95,10 @@ export function ProviderApiForm({
   const [apiKey, setApiKey] = React.useState(initialValue.apiKey);
   const [baseUrl, setBaseUrl] = React.useState(initialValue.baseUrl);
   const [models, setModels] = React.useState<ModelEntry[]>(initialValue.models);
+  const [headerRows, setHeaderRows] = React.useState(() => headerDrafts(initialValue.headers));
+  const [advancedOpen, setAdvancedOpen] = React.useState(
+    () => Object.keys(initialValue.headers ?? {}).length > 0
+  );
   const [newModel, setNewModel] = React.useState('');
   const [filter, setFilter] = React.useState('');
   const [testModel, setTestModel] = React.useState(
@@ -126,6 +155,10 @@ export function ProviderApiForm({
   const availableTestModel = models.some((model) => model.id === testModel)
     ? testModel
     : (models.find(isEnabled)?.id ?? models[0]?.id ?? '');
+  const headers = normalizeProviderHeaders(headerRows);
+  const headersInvalid = headerRows.some(
+    (row) => row.name.trim() !== '' && !HEADER_NAME_RE.test(row.name.trim())
+  );
 
   const setSelectedEnabled = (enabled: boolean) => {
     const ids = new Set(selection.selectedIds);
@@ -134,7 +167,12 @@ export function ProviderApiForm({
     );
   };
 
-  const apiConfig = { api, apiKey: apiKey.trim(), baseUrl: baseUrl.trim() };
+  const apiConfig = {
+    api,
+    apiKey: apiKey.trim(),
+    baseUrl: baseUrl.trim(),
+    ...(headers ? { headers } : {}),
+  };
 
   const handleFetchModels = async () => {
     setBusy('fetch');
@@ -277,6 +315,90 @@ export function ProviderApiForm({
                 </button>
               </div>
             </Field>
+
+            <Collapsible
+              open={advancedOpen}
+              onOpenChange={setAdvancedOpen}
+              className="rounded-md border"
+            >
+              <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left">
+                <span className="text-sm font-medium">{t('Advanced')}</span>
+                <ChevronDown
+                  className={cn(
+                    'h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                    advancedOpen && 'rotate-180'
+                  )}
+                />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <Field className="items-stretch border-t px-3 py-3">
+                  <FieldLabel>{t('Request headers')}</FieldLabel>
+                  {headerRows.map((row) => {
+                    const invalid = row.name.trim() !== '' && !HEADER_NAME_RE.test(row.name.trim());
+                    return (
+                      <div key={row.key} className="flex items-center gap-2">
+                        <Input
+                          value={row.name}
+                          placeholder="Header-Name"
+                          aria-invalid={invalid || undefined}
+                          spellCheck={false}
+                          onChange={(event) =>
+                            setHeaderRows((current) =>
+                              current.map((entry) =>
+                                entry.key === row.key
+                                  ? { ...entry, name: event.target.value }
+                                  : entry
+                              )
+                            )
+                          }
+                        />
+                        <Input
+                          value={row.value}
+                          spellCheck={false}
+                          onChange={(event) =>
+                            setHeaderRows((current) =>
+                              current.map((entry) =>
+                                entry.key === row.key
+                                  ? { ...entry, value: event.target.value }
+                                  : entry
+                              )
+                            )
+                          }
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="shrink-0"
+                          aria-label={t('Remove header')}
+                          onClick={() =>
+                            setHeaderRows((current) =>
+                              current.filter((entry) => entry.key !== row.key)
+                            )
+                          }
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 self-start px-2 text-xs"
+                    onClick={() =>
+                      setHeaderRows((current) => [
+                        ...current,
+                        { key: crypto.randomUUID(), name: '', value: '' },
+                      ])
+                    }
+                  >
+                    + {t('Add header')}
+                  </Button>
+                </Field>
+              </CollapsibleContent>
+            </Collapsible>
           </>
         )}
 
@@ -465,7 +587,7 @@ export function ProviderApiForm({
           </Button>
           <Button
             size="sm"
-            disabled={saveDisabled || !name.trim()}
+            disabled={saveDisabled || !name.trim() || headersInvalid}
             onClick={() =>
               onSave({
                 name: name.trim(),
@@ -473,6 +595,7 @@ export function ProviderApiForm({
                 apiKey: apiKey.trim(),
                 baseUrl: baseUrl.trim(),
                 models: commitPendingModel(models, newModel),
+                headers,
               })
             }
           >

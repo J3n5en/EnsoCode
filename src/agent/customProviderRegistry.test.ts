@@ -1,5 +1,6 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { ModelDirectorySnapshot } from '@shared/modelDirectory';
+import { providerKeyFor } from '@shared/providers/providerKey';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   accumulateModelIds,
@@ -26,10 +27,16 @@ function provider(models: { id: string; contextWindow?: number }[], apiKey = 'sk
 }
 
 function mockRuntime() {
+  const providers = new Map<string, { id: string; headers?: Record<string, string> }>();
   const registerProvider = vi.fn();
+  registerProvider.mockImplementation(
+    (id: string, config: { headers?: Record<string, string> }) => {
+      providers.set(id, { id, ...config });
+    }
+  );
   const runtime = {
     getModels: () => [],
-    getProvider: () => ({ id: 'registered' }),
+    getProvider: (id: string) => providers.get(id),
     registerProvider,
     registerNativeProvider: vi.fn(),
   } as unknown as ModelRuntime;
@@ -66,6 +73,18 @@ describe('parseModelDirectoryPush', () => {
     expect(parsed?.map((item) => item.settingsId)).toEqual(['settings-1', 'other']);
     expect(parsed?.[0]?.models.map((model) => model.id)).toEqual(['keep']);
     expect(parsed?.[1]?.models.map((model) => model.id)).toEqual(['row']);
+  });
+
+  it('收窄请求头：非法名称和换行丢掉，空结果不带键', () => {
+    const parsed = parseWorkerCustomProviders([
+      {
+        ...provider([{ id: 'keep' }]),
+        headers: { 'X-Ok': 'one', 'bad name': 'no', 'X-Break': 'a\nb' },
+      },
+      { ...provider([]), settingsId: 'empty', headers: { nope: 1 } },
+    ]);
+    expect(parsed?.[0]?.headers).toEqual({ 'X-Ok': 'one' });
+    expect(parsed?.[1]).not.toHaveProperty('headers');
   });
 });
 
@@ -138,5 +157,44 @@ describe('installPushedCustomProviders', () => {
     };
     const out = previewModelDirectoryPush(first.parsed, stale, providers);
     expect(out).toEqual({ status: 'ignored', reason: 'stale-revision' });
+  });
+});
+
+describe('registerCustomProviderModels headers', () => {
+  beforeEach(() => {
+    resetCustomProviderRegistryForTests();
+  });
+
+  it('注册后的 provider 带上 Enso User-Agent，用户头覆盖它，并把 $ 和 ! 转成字面量', () => {
+    const { runtime } = mockRuntime();
+    const endpoint = {
+      api: 'openai-completions' as const,
+      baseUrl: 'https://gw.example/v1',
+      apiKey: 'sk-push',
+    };
+    registerCustomProviderModels(runtime, endpoint, [{ id: 'm' }]);
+    const plain = runtime.getProvider(providerKeyFor(endpoint));
+    expect(plain?.headers?.['User-Agent']).toMatch(/^enso-code\//);
+
+    const custom = {
+      ...endpoint,
+      headers: { 'user-agent': 'custom', originator: '!rm', 'X-Home': '$HOME' },
+    };
+    registerCustomProviderModels(runtime, custom, [{ id: 'm' }]);
+    expect(runtime.getProvider(providerKeyFor(custom))?.headers).toEqual({
+      'user-agent': 'custom',
+      originator: '$!rm',
+      'X-Home': '$$HOME',
+    });
+  });
+
+  it('请求头变化不会被当成相同推送', () => {
+    const first = previewModelDirectoryPush(undefined, snapshot, [provider([{ id: 'a' }])]);
+    expect(first.status).toBe('apply');
+    if (first.status !== 'apply') return;
+    const next = previewModelDirectoryPush(first.parsed, snapshot, [
+      { ...provider([{ id: 'a' }]), headers: { 'X-Trace': '1' } },
+    ]);
+    expect(next.status).toBe('apply');
   });
 });

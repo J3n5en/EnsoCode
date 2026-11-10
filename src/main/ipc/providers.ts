@@ -4,6 +4,7 @@ import {
   parseOauthFlowPromptResponse,
   parseStartOauthWizardRequest,
 } from '@shared/capabilities/types';
+import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import type { ModelMetaQuery, ProviderApiConfig } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { listClassifierModels } from '../services/classifierModels';
@@ -28,7 +29,13 @@ function toApiConfig(input: unknown): ProviderApiConfig | null {
   if (typeof api !== 'string' || typeof apiKey !== 'string' || typeof baseUrl !== 'string') {
     return null;
   }
-  return { api: api as ProviderApiConfig['api'], apiKey, baseUrl };
+  const headers = parseProviderHeaders((input as Record<string, unknown>).headers);
+  return {
+    api: api as ProviderApiConfig['api'],
+    apiKey,
+    baseUrl,
+    ...(headers ? { headers } : {}),
+  };
 }
 
 // 当前最大订阅 catalog 为 155 项；256 项留出增长余量，同时把单次 IPC 的字符串载荷

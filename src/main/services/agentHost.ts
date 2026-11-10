@@ -44,6 +44,7 @@ import { eligibleOauthPoolAccountKeys, isOauthAccountPool } from '@shared/oauthA
 import { ensureAccountProvider } from '@shared/piAccounts';
 import { parsePrivacyMaskSettings } from '@shared/privacyMask/settings';
 import { isClassifierOnlyProvider } from '@shared/providerCatalog';
+import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
 import { resolveShellLimits, type ShellLimits } from '@shared/shellLimits';
@@ -2500,6 +2501,7 @@ function customProvidersForWorker(): WorkerCustomProvider[] {
       continue;
     }
     if (!Array.isArray(provider.models)) continue;
+    const headers = parseProviderHeaders(provider.headers);
     out.push({
       settingsId: provider.id,
       name: provider.name,
@@ -2507,6 +2509,7 @@ function customProvidersForWorker(): WorkerCustomProvider[] {
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
       models: provider.models,
+      ...(headers ? { headers } : {}),
     });
   }
   return out;
@@ -2564,12 +2567,14 @@ function spawnModelConfig(
   if (provider.oauthAccountPool !== undefined && !isOauthAccountPool(provider))
     throw new Error('Invalid ChatGPT OAuth pool configuration.');
   const entry = provider.models.find((model: ModelEntry) => model.id === modelId);
+  const headers = parseProviderHeaders(provider.headers);
   return {
     api: provider.api,
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     modelId,
     settingsProviderId: provider.id,
+    ...(headers ? { headers } : {}),
     ...(provider.oauthAccountKey ? { oauthAccountKey: provider.oauthAccountKey } : {}),
     ...(isOauthAccountPool(provider) ? { oauthAccountPool: provider.oauthAccountPool } : {}),
     // 统一目录后 OAuth 条目 models 只承载稀疏用户覆盖（enabled/别名/能力/档位），

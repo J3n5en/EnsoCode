@@ -167,6 +167,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                 apiKey: provider.apiKey,
                 baseUrl: provider.baseUrl,
                 models: materializedModels ?? provider.models,
+                headers: provider.headers,
               }}
               oauth={Boolean(provider.oauthAccountKey)}
               oauthAccountKey={provider.oauthAccountKey}

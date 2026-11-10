@@ -2222,6 +2222,9 @@ export const zhTranslations: Record<string, string> = {
   'Refusal retry': '拒答补发',
   'Refusal retry prompt': '拒答补发正文',
   Advanced: '高级',
+  'Request headers': '请求头',
+  'Add header': '添加请求头',
+  'Remove header': '移除请求头',
   'Rewrites the role paragraph or appends text to the system prompt.':
     '改写角色段落，或往系统提示词末尾追加内容。',
   'Import URL': '从 URL 导入',

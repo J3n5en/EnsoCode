@@ -54,6 +54,14 @@ describe('fetchProviderModels', () => {
     });
   });
 
+  it('拉模型带上供应商请求头', async () => {
+    listModels.mockResolvedValue({ ok: true, models: [] });
+    await fetchProviderModels(apiProvider({ headers: { originator: 'enso' } }));
+    expect(listModels).toHaveBeenCalledWith(
+      expect.objectContaining({ headers: { originator: 'enso' } })
+    );
+  });
+
   it('listModels 失败时透传 message，且没有 models', async () => {
     listModels.mockResolvedValue({ ok: false, models: [{ id: 'new' }], error: 'unauthorized' });
 

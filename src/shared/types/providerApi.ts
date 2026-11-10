@@ -5,6 +5,7 @@ export interface ProviderApiConfig {
   api: ModelApiKind;
   apiKey: string;
   baseUrl: string;
+  headers?: Record<string, string>;
 }
 
 /** 拉取模型列表时从响应里识别出的单个模型（元数据字段可能缺失） */

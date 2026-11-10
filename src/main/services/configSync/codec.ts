@@ -10,6 +10,7 @@ import { isStoredChatTypography } from '@shared/chatTypography';
 import { parseCompactStrategy } from '@shared/compactStrategy';
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
 import { parseOauthAccountPool } from '@shared/oauthAccountPool';
+import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import { STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
 import {
@@ -145,6 +146,7 @@ const PROVIDER_KEYS = [
   'models',
   'importedFrom',
   'catalogId',
+  'headers',
   'omittedFields',
 ];
 const SKILL_KEYS = ['id', 'name', 'description', 'path', 'source', 'enabled'];
@@ -532,6 +534,15 @@ function validateProvider(raw: unknown): RecordValue {
   validateModels(entry.models, String(entry.id));
   for (const key of ['importedFrom', 'catalogId'])
     if (entry[key] !== undefined) stringField(entry, key, 'provider', false);
+  if (entry.headers !== undefined) {
+    if (
+      !isRecord(entry.headers) ||
+      Object.keys(parseProviderHeaders(entry.headers) ?? {}).length !==
+        Object.keys(entry.headers).length
+    ) {
+      throw new Error('Invalid provider headers');
+    }
+  }
   const omittedFields = optionalStringArray(entry.omittedFields, 'provider.omittedFields');
   if (omittedFields?.some((field) => !CONFIG_SYNC_PROVIDER_OMISSIONS.includes(field as never))) {
     throw new Error('Invalid provider omission marker');
@@ -760,6 +771,7 @@ function assertPlainBundle(bundle: ConfigSyncBundle): void {
         entry.apiKey !== undefined ||
         entry.oauthAccountKey !== undefined ||
         entry.oauthAccountPool !== undefined ||
+        entry.headers !== undefined ||
         redactEndpoint(entry.baseUrl).omissions.length > 0
     ) ||
     bundle.state.mcpServers.some(
@@ -1178,6 +1190,10 @@ export function redactBundle(bundle: ConfigSyncBundle): ConfigSyncBundle {
     if (next.oauthAccountPool !== undefined) {
       delete next.oauthAccountPool;
       omitted.add('oauthAccountPool');
+    }
+    if (next.headers !== undefined) {
+      delete next.headers;
+      omitted.add('headers');
     }
     const originalBaseUrl = next.baseUrl;
     const redactedBaseUrl = redactEndpoint(originalBaseUrl);

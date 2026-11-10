@@ -71,6 +71,8 @@ export interface ModelProvider {
    * Sequential ChatGPT OAuth pool; absent means a fixed account. Never reorder the anchor.
    */
   oauthAccountPool?: { accountKeys: string[] };
+  /** 发给该供应商的额外 HTTP 请求头。空表不持久化。 */
+  headers?: Record<string, string>;
 }
 
 /** provider 是否具备可用凭证（API key 或订阅账号） */

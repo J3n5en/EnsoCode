@@ -66,10 +66,15 @@ export function toMessage(error: unknown): string {
   return String(error);
 }
 
-export async function listModels(
-  config: ProviderApiConfig,
-  extraHeaders?: Record<string, string>
-): Promise<ListModelsResult> {
+/** 鉴权头先放，用户请求头后盖。没有用户头时保持原对象。 */
+function withProviderHeaders(
+  headers: Record<string, string>,
+  extra: Record<string, string> | undefined
+): Record<string, string> {
+  return extra ? { ...headers, ...extra } : headers;
+}
+
+export async function listModels(config: ProviderApiConfig): Promise<ListModelsResult> {
   const base = resolveBase(config);
   const key = config.apiKey.trim();
   try {
@@ -97,7 +102,7 @@ export async function listModels(
         url = `${base}/models`;
         headers = { Authorization: `Bearer ${key}` };
     }
-    if (extraHeaders) headers = { ...headers, ...extraHeaders };
+    headers = withProviderHeaders(headers, config.headers);
 
     let response = await request(url, { headers, redirect: 'manual' });
     if (
@@ -110,7 +115,10 @@ export async function listModels(
         Authorization: `Bearer ${key}`,
         'anthropic-version': ANTHROPIC_VERSION,
       };
-      response = await request(url, { headers: retryHeaders, redirect: 'manual' });
+      response = await request(url, {
+        headers: withProviderHeaders(retryHeaders, config.headers),
+        redirect: 'manual',
+      });
     }
 
     if (!response.ok) return { ok: false, models: [], error: httpError(response) };
@@ -331,6 +339,7 @@ export async function testProvider(
         };
     }
 
+    headers = withProviderHeaders(headers, config.headers);
     const response = await request(url, { method: 'POST', headers, body: JSON.stringify(body) });
     const latencyMs = Date.now() - started;
     if (!response.ok) return { ok: false, latencyMs, message: httpError(response) };

@@ -295,6 +295,7 @@ function providerEntry(plan: PlannedEntry, mode: MergeMode): JsonRecord {
     id: plan.destinationId,
   };
   mergeSensitiveField(next, plan.source, plan.existing, 'apiKey', omitted);
+  mergeSensitiveField(next, plan.source, plan.existing, 'headers', omitted);
   if (mode === 'merge' && plan.existing) {
     const importedModels = records(plan.source.models);
     const importedIds = new Set(importedModels.map((model) => String(model.id)));

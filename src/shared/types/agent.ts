@@ -83,6 +83,7 @@ import {
 } from '../privacyMask/report';
 import { type PrivacyMaskSettings, parsePrivacyMaskSettings } from '../privacyMask/settings';
 import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurfaces';
+import { parseProviderHeaders } from '../providers/providerHeaders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
 import { resolveShellLimits, type ShellLimits } from '../shellLimits';
@@ -136,6 +137,7 @@ export interface WorkerCustomProvider {
   baseUrl: string;
   apiKey: string;
   models: ModelEntry[];
+  headers?: Record<string, string>;
 }
 
 /** 会话状态。waiting/done 属权限门与 subagent 刀，M1 不引入 */
@@ -194,6 +196,8 @@ export interface SpawnModelConfig extends ModelCapabilityOverrides {
    * Validated sequential pool configuration; identifies the route, while Main remains authoritative for live membership and cursors.
    */
   oauthAccountPool?: { accountKeys: string[] };
+  /** 该供应商的额外 HTTP 请求头。空表不下发。 */
+  headers?: Record<string, string>;
 }
 
 /** pi catalog 里的分类器 provider/model 与凭证 */
@@ -2849,6 +2853,7 @@ function parsePhysicalSpawnModelConfig(value: unknown): SpawnModelConfig | null 
       'thinkingLevel',
       'contextWindow',
       'maxTokens',
+      'headers',
     ]) ||
     !MODEL_API_KINDS.includes(value.api as ModelApiKind) ||
     typeof value.baseUrl !== 'string' ||
@@ -2862,6 +2867,11 @@ function parsePhysicalSpawnModelConfig(value: unknown): SpawnModelConfig | null 
         value.apiKey !== ''))
   ) {
     return null;
+  }
+  if (value.headers !== undefined) {
+    const headers = parseProviderHeaders(value.headers);
+    if (headers) value.headers = headers;
+    else delete value.headers;
   }
   return value as unknown as SpawnModelConfig;
 }
