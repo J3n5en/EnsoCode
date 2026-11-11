@@ -855,6 +855,10 @@ export const zhTranslations: Record<string, string> = {
   'A file or folder with that name already exists.': '已存在同名文件或文件夹。',
   'Invalid name.': '名称无效。',
   'Could not complete the file action.': '无法完成该文件操作。',
+  'Search needs ripgrep (rg). Install it and make sure it is on PATH.':
+    '搜索依赖 ripgrep（rg）：请安装并确保它在 PATH 里。',
+  'Search timed out. Try a more specific query or a smaller folder.':
+    '搜索超时，请换更具体的关键词或缩小目录范围。',
   'Could not open local file link': '无法打开本地文件链接',
   'The link is outside the current workspace.': '链接位于当前工作区之外。',
   'This link is not available on the local computer.': '此链接不在本机工作区中，无法打开。',

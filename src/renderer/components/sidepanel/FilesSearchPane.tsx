@@ -105,11 +105,7 @@ export function FilesSearchPane({
           <p className="px-1 py-2 text-muted-foreground text-xs">{t('Searching…')}</p>
         ) : result && !result.ok ? (
           <p className="px-1 py-2 text-muted-foreground text-xs">
-            {t(
-              result.error === 'unsupported'
-                ? 'Search is not available for SSH workspaces.'
-                : 'Could not complete the file action.'
-            )}
+            {t(searchErrorMessage(result.error))}
           </p>
         ) : result?.ok && result.hits.length === 0 ? (
           <p className="px-1 py-2 text-muted-foreground text-xs">{t('No results')}</p>
@@ -225,6 +221,20 @@ function SearchFileMenu({
       {children}
     </FileTreeMenu>
   );
+}
+
+/** Main 返回的错误码 → 用户能据以行动的提示；未知码兜底成通用文案 */
+function searchErrorMessage(error: string): string {
+  switch (error) {
+    case 'unsupported':
+      return 'Search is not available for SSH workspaces.';
+    case 'rg-missing':
+      return 'Search needs ripgrep (rg). Install it and make sure it is on PATH.';
+    case 'timeout':
+      return 'Search timed out. Try a more specific query or a smaller folder.';
+    default:
+      return 'Could not complete the file action.';
+  }
 }
 
 function ModeButton({

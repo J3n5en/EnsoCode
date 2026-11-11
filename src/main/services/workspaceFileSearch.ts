@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { FilesSearchContentHit, FilesSearchNameHit, FilesSearchResult } from '@shared/types';
 import type { ParsedWorkspaceFileSearchRequest } from '@shared/workspaceFileSearch';
@@ -14,7 +15,14 @@ const EXCLUDE_GLOBS = [
   '!package-lock.json',
 ];
 
-export type RgRunner = (args: string[], cwd: string) => Promise<{ code: number; stdout: string }>;
+/** rg 跑完的结果；`failure` 只在进程根本没跑起来（missing）或被我们掐掉（timeout）时出现 */
+export interface RgRunResult {
+  code: number;
+  stdout: string;
+  failure?: 'missing' | 'timeout';
+}
+
+export type RgRunner = (args: string[], cwd: string) => Promise<RgRunResult>;
 
 export function toRelativePosix(root: string, candidate: string): string | null {
   const resolvedRoot = path.resolve(root);
@@ -118,31 +126,64 @@ export function buildContentSearchArgs(opts: {
   return args;
 }
 
-export async function spawnRipgrep(
-  args: string[],
-  cwd: string
-): Promise<{ code: number; stdout: string }> {
+/**
+ * rg 可执行文件的候选顺序：随包二进制优先（asar 内不能执行，改指向 asar.unpacked），
+ * 其次是 PATH 上用户自装的 rg。随包下载在 postinstall 阶段走 GitHub，离线 / 被墙 / 用
+ * --ignore-scripts 安装的无界面服务端都可能缺这一个文件，没有回退整个搜索面板就只剩一句报错。
+ */
+export async function ripgrepCandidates(): Promise<string[]> {
   const { rgPath: originalRgPath } = await import('@vscode/ripgrep');
-  const rgPath = originalRgPath.replace(/\.asar([\\/])/, '.asar.unpacked$1');
+  const bundled = originalRgPath.replace(/\.asar([\\/])/, '.asar.unpacked$1');
+  const fromPath = process.platform === 'win32' ? 'rg.exe' : 'rg';
+  // 随包文件已经确认不存在就不必再 spawn 一次拿 ENOENT；PATH 候选交给 spawn 自己去找
+  return existsSync(bundled) ? [bundled, fromPath] : [fromPath];
+}
+
+function spawnOnce(
+  file: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number
+): Promise<RgRunResult> {
   return new Promise((resolve) => {
-    const child = spawn(rgPath, args, { cwd, windowsHide: true });
+    const child = spawn(file, args, { cwd, windowsHide: true });
     let stdout = '';
+    let settled = false;
+    const finish = (result: RgRunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
     const timer = setTimeout(() => {
       child.kill();
-      resolve({ code: 2, stdout });
-    }, SEARCH_TIMEOUT_MS);
+      finish({ code: 2, stdout, failure: 'timeout' });
+    }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer | string) => {
       stdout += chunk.toString();
     });
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve({ code: 2, stdout: '' });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? 2, stdout });
-    });
+    // 'error' 在进程起不来（ENOENT / EACCES）时触发；起来之后的失败走 close 的退出码
+    child.on('error', () => finish({ code: 2, stdout: '', failure: 'missing' }));
+    child.on('close', (code) => finish({ code: code ?? 2, stdout }));
   });
+}
+
+/** 依次尝试候选可执行文件；只有「起不来」才换下一个，rg 自身的退出码照原样返回 */
+export async function runRipgrep(
+  candidates: readonly string[],
+  args: string[],
+  cwd: string,
+  timeoutMs = SEARCH_TIMEOUT_MS
+): Promise<RgRunResult> {
+  for (const file of candidates) {
+    const result = await spawnOnce(file, args, cwd, timeoutMs);
+    if (result.failure !== 'missing') return result;
+  }
+  return { code: 2, stdout: '', failure: 'missing' };
+}
+
+export async function spawnRipgrep(args: string[], cwd: string): Promise<RgRunResult> {
+  return runRipgrep(await ripgrepCandidates(), args, cwd);
 }
 
 function listedRelativeFiles(stdout: string, cwd: string): string[] {
@@ -157,6 +198,16 @@ function listedRelativeFiles(stdout: string, cwd: string): string[] {
   return files;
 }
 
+/**
+ * rg 退出码 2 = 出错，但「找不到 rg」「跑超时」和「正则写错」对用户是三件事：
+ * 前两个要提示装 rg / 缩小范围，最后一个只是这次查询不合法。
+ */
+function failureCode(result: RgRunResult): string {
+  if (result.failure === 'missing') return 'rg-missing';
+  if (result.failure === 'timeout') return 'timeout';
+  return 'unavailable';
+}
+
 export async function searchWorkspaceFiles(
   cwd: string,
   request: ParsedWorkspaceFileSearchRequest,
@@ -164,8 +215,9 @@ export async function searchWorkspaceFiles(
 ): Promise<FilesSearchResult> {
   if (request.mode === 'names') {
     if (!request.query.trim()) return { ok: true, mode: 'names', hits: [] };
-    const { stdout, code } = await run(buildNameSearchArgs(), cwd);
-    if (code === 2) return { ok: false, error: 'unavailable' };
+    const names = await run(buildNameSearchArgs(), cwd);
+    if (names.code === 2) return { ok: false, error: failureCode(names) };
+    const { stdout } = names;
     return {
       ok: true,
       mode: 'names',
@@ -173,7 +225,7 @@ export async function searchWorkspaceFiles(
     };
   }
   if (!request.query.trim()) return { ok: true, mode: 'content', hits: [], truncated: false };
-  const { stdout, code } = await run(
+  const content = await run(
     buildContentSearchArgs({
       query: request.query,
       caseSensitive: request.caseSensitive,
@@ -182,7 +234,8 @@ export async function searchWorkspaceFiles(
     }),
     cwd
   );
-  if (code === 2) return { ok: false, error: 'unavailable' };
+  if (content.code === 2) return { ok: false, error: failureCode(content) };
+  const { stdout } = content;
   const hits: FilesSearchContentHit[] = [];
   let truncated = false;
   for (const line of stdout.split('\n')) {

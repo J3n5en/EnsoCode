@@ -7,6 +7,7 @@ import {
   buildNameSearchArgs,
   parseRipgrepJsonMatch,
   rankNameHits,
+  runRipgrep,
   searchWorkspaceFiles,
   toRelativePosix,
 } from './workspaceFileSearch';
@@ -188,5 +189,73 @@ describe('searchWorkspaceFiles 真机 rg', () => {
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runRipgrep 候选回退', () => {
+  const node = process.execPath;
+
+  it('随包二进制起不来时退到下一个候选', async () => {
+    const result = await runRipgrep(
+      [path.join(os.tmpdir(), 'enso-missing-rg'), node],
+      ['-e', 'process.stdout.write("hit")'],
+      process.cwd()
+    );
+    expect(result).toEqual({ code: 0, stdout: 'hit' });
+  });
+
+  it('所有候选都起不来时标记 missing', async () => {
+    const result = await runRipgrep(
+      [path.join(os.tmpdir(), 'enso-missing-rg-a'), path.join(os.tmpdir(), 'enso-missing-rg-b')],
+      ['--files'],
+      process.cwd()
+    );
+    expect(result).toEqual({ code: 2, stdout: '', failure: 'missing' });
+  });
+
+  it('超时杀进程并标记 timeout，保留已收到的输出', async () => {
+    const result = await runRipgrep(
+      [node],
+      ['-e', 'process.stdout.write("partial"); setTimeout(() => {}, 5000)'],
+      process.cwd(),
+      200
+    );
+    expect(result).toEqual({ code: 2, stdout: 'partial', failure: 'timeout' });
+  });
+});
+
+describe('searchWorkspaceFiles 错误码', () => {
+  const request = {
+    conversationId: 'c',
+    projectId: 'p',
+    query: 'x',
+    maxResults: 10,
+    caseSensitive: false,
+    wholeWord: false,
+    regex: false,
+  } as const;
+
+  it('rg 缺失报 rg-missing，而不是笼统的 unavailable', async () => {
+    const run = vi.fn(async () => ({ code: 2, stdout: '', failure: 'missing' as const }));
+    await expect(
+      searchWorkspaceFiles('/tmp/ws', { ...request, mode: 'names' }, run)
+    ).resolves.toEqual({ ok: false, error: 'rg-missing' });
+    await expect(
+      searchWorkspaceFiles('/tmp/ws', { ...request, mode: 'content' }, run)
+    ).resolves.toEqual({ ok: false, error: 'rg-missing' });
+  });
+
+  it('超时报 timeout', async () => {
+    const run = vi.fn(async () => ({ code: 2, stdout: '', failure: 'timeout' as const }));
+    await expect(
+      searchWorkspaceFiles('/tmp/ws', { ...request, mode: 'content' }, run)
+    ).resolves.toEqual({ ok: false, error: 'timeout' });
+  });
+
+  it('rg 自身报错（如非法正则）仍是 unavailable', async () => {
+    const run = vi.fn(async () => ({ code: 2, stdout: '' }));
+    await expect(
+      searchWorkspaceFiles('/tmp/ws', { ...request, mode: 'content', regex: true }, run)
+    ).resolves.toEqual({ ok: false, error: 'unavailable' });
   });
 });
