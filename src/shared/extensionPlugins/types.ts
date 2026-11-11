@@ -47,6 +47,8 @@ export interface ExtensionPluginSummary {
   crossSessionInject?: boolean;
   pendingVersion?: string;
   pendingPermissions?: ExtensionPluginPermission[];
+  /** 待授权版本新带了界面模块（当前授权里没有） */
+  pendingRenderer?: boolean;
   /** 最近一次错误：崩溃停用的原因，或本次运行里最近的错误日志 */
   lastError?: { at: number; message: string };
   /** 安装来源；有就能「从来源重新安装」。本地路径不下发 */

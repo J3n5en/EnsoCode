@@ -188,6 +188,32 @@ describe('ExtensionPluginsSection', () => {
     expect(container.textContent).not.toContain('无特殊权限');
   });
 
+  it('带界面模块的插件标为受信任界面代码', async () => {
+    harness.list.mockResolvedValue([{ ...plugin, permissions: [], hasRenderer: true }]);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+
+    expect(container.textContent).toContain('受信任界面');
+    expect(container.textContent).toContain('界面代码');
+    await act(async () => byText('详情').click());
+    expect(container.textContent).toContain('界面代码：运行在主界面里');
+    expect(container.textContent).not.toContain('无特殊权限');
+  });
+
+  it('待授权更新新增界面模块时单独列出', async () => {
+    harness.list.mockResolvedValue([
+      { ...plugin, pendingVersion: '2.0.0', pendingPermissions: [], pendingRenderer: true },
+    ]);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+
+    await act(async () => byText('详情').click());
+    expect(container.textContent).toContain('待同意');
+    expect(container.textContent).toContain('新增界面代码');
+  });
+
   it('日志、配置、产出都开在弹窗层，不插进页面', async () => {
     expect(container.querySelector('[data-dialog="open"]')).toBeNull();
 

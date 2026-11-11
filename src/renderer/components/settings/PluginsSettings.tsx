@@ -326,6 +326,7 @@ function capabilitySummary(plugin: ExtensionPluginSummary): string {
     plugin.permissions.length > 0 ? `${plugin.permissions.length} 项权限` : '',
     (plugin.events?.length ?? 0) > 0 ? `${plugin.events?.length} 个事件` : '',
     (plugin.schedules?.length ?? 0) > 0 ? `${plugin.schedules?.length} 个定时任务` : '',
+    plugin.hasRenderer ? '界面代码' : '',
     plugin.crossSessionInject !== undefined ? '跨会话投递开关' : '',
   ]
     .filter(Boolean)
@@ -339,6 +340,7 @@ function PluginCapabilityBlock({
   resident,
   running,
   styles,
+  trustedUi,
   events,
   schedules,
 }: {
@@ -348,6 +350,8 @@ function PluginCapabilityBlock({
   resident?: boolean;
   running?: boolean;
   styles?: boolean;
+  /** 带 ui.js：与主界面同权运行，不受权限清单约束 */
+  trustedUi?: boolean;
   events?: readonly { event: string; mode: string; failClosed?: boolean }[];
   schedules?: readonly {
     id: string;
@@ -358,7 +362,8 @@ function PluginCapabilityBlock({
 }) {
   return (
     <div className="space-y-1">
-      <PermissionLines permissions={permissions} styles={styles} />
+      <PermissionLines permissions={permissions} styles={styles || trustedUi} />
+      {trustedUi && <TrustedUiLine />}
       {resident && (
         <p className="text-xs">
           常驻进程
@@ -388,6 +393,14 @@ function PluginCapabilityBlock({
         </p>
       ))}
     </div>
+  );
+}
+
+function TrustedUiLine() {
+  return (
+    <p className="text-amber-700 text-xs dark:text-amber-400">
+      界面代码：运行在主界面里，可读写页面内容、调用界面能力，不受上面权限清单约束；只安装信任的插件
+    </p>
   );
 }
 
@@ -745,6 +758,7 @@ export function EnsoPluginsSettings({
                   interop={preview.interop}
                   resident={preview.resident}
                   styles={preview.styles}
+                  trustedUi={preview.hasRenderer}
                   events={preview.events}
                   schedules={preview.schedules}
                 />
@@ -823,6 +837,11 @@ export function EnsoPluginsSettings({
                     {plugin.pendingVersion && (
                       <Badge variant="warning" className="text-[11px]">
                         待授权
+                      </Badge>
+                    )}
+                    {plugin.hasRenderer && (
+                      <Badge variant="outline" className="text-[11px]">
+                        受信任界面
                       </Badge>
                     )}
                     {plugin.resident && (
@@ -1000,6 +1019,7 @@ export function EnsoPluginsSettings({
                   resident={plugin.resident}
                   running={plugin.running}
                   styles={plugin.themes.some((theme) => theme.css !== undefined)}
+                  trustedUi={plugin.hasRenderer}
                   events={plugin.events}
                   schedules={plugin.schedules}
                 />
@@ -1023,10 +1043,18 @@ export function EnsoPluginsSettings({
                     />
                   </div>
                 )}
-                {plugin.pendingPermissions && plugin.pendingPermissions.length > 0 && (
+                {((plugin.pendingPermissions?.length ?? 0) > 0 || plugin.pendingRenderer) && (
                   <div className="space-y-1">
-                    <p className="text-muted-foreground text-xs">待同意的权限</p>
-                    <PermissionLines permissions={plugin.pendingPermissions} />
+                    <p className="text-muted-foreground text-xs">待同意</p>
+                    <PermissionLines
+                      permissions={plugin.pendingPermissions ?? []}
+                      styles={plugin.pendingRenderer}
+                    />
+                    {plugin.pendingRenderer && (
+                      <p className="text-amber-700 text-xs dark:text-amber-400">
+                        新增界面代码：运行在主界面里，不受权限清单约束
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

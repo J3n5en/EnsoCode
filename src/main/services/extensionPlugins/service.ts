@@ -386,7 +386,13 @@ export class ExtensionPluginService {
             ? { crossSessionInject: record.crossSessionInject }
             : {}),
           ...(record.pending && pending
-            ? { pendingVersion: record.pending.version, pendingPermissions: pending.permissions }
+            ? {
+                pendingVersion: record.pending.version,
+                pendingPermissions: pending.permissions,
+                ...(pending.renderer !== undefined && !record.grant.renderer
+                  ? { pendingRenderer: true }
+                  : {}),
+              }
             : {}),
           ...lastErrorField(record.lastError ?? this.recentErrors.get(record.id)),
           ...(record.source ? { source: sourceView(record.source) } : {}),

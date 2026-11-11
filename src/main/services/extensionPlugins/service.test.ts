@@ -1881,6 +1881,7 @@ describe('插件市场', () => {
     zipId?: string;
     patch?: Record<string, unknown>;
     main?: string;
+    files?: Record<string, string>;
   }) {
     let mirror = false;
     let downloads = 0;
@@ -1929,6 +1930,7 @@ describe('插件市场', () => {
               ...state.patch,
             }),
             'main.mjs': state.main ?? mainJs,
+            ...state.files,
           })
         );
         return { ok: true as const, version: state.latest };
@@ -2041,6 +2043,27 @@ describe('插件市场', () => {
     await svc.checkUpdates();
     expect(market.downloads()).toBe(before + 1);
     expect(notices).toHaveLength(1);
+  });
+
+  it('更新新增界面模块时进入待授权，并标出新增的界面代码', async () => {
+    const state: {
+      latest: string;
+      patch?: Record<string, unknown>;
+      files?: Record<string, string>;
+    } = { latest: '1.0.0' };
+    const svc = open(fakeMarket(state));
+    await installMarket(svc);
+    expect(svc.list()[0]?.pendingRenderer).toBeUndefined();
+    state.latest = '2.0.0';
+    state.patch = { renderer: 'ui.js', permissions: ['agent.tool', 'ui.slot'] };
+    state.files = { 'ui.js': 'export default () => {};' };
+    await svc.checkUpdates();
+    expect(svc.list()[0]).toMatchObject({
+      version: '1.0.0',
+      hasRenderer: false,
+      pendingVersion: '2.0.0',
+      pendingRenderer: true,
+    });
   });
 
   it('有进行中的调用时跳过不扩权的替换', async () => {
