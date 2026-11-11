@@ -57,10 +57,10 @@ describe('会话排版设置', () => {
   it('旧配置缺少字段时得到默认，并写上默认 CSS 变量', async () => {
     const store = await loadStore();
     expect(store.getState().chatTypography).toEqual(DEFAULT_CHAT_TYPOGRAPHY);
-    expect(cssVars.get('--chat-body-size')).toBe('14.5px');
-    expect(cssVars.get('--chat-h1-size')).toBe('1.5em');
+    expect(cssVars.get('--chat-body-size')).toBe('14px');
+    expect(cssVars.get('--chat-h1-size')).toBe('1.3em');
     expect(cssVars.get('--chat-inline-code-size')).toBe('0.85em');
-    expect(cssVars.get('--chat-code-block-size')).toBe('10.5px');
+    expect(cssVars.get('--chat-code-block-size')).toBe('12px');
   });
 
   it('setter 写入后经持久化重载能恢复，恢复默认回到规格', async () => {
@@ -87,8 +87,8 @@ describe('会话排版设置', () => {
 
     store.getState().resetChatTypography();
     expect(store.getState().chatTypography).toEqual(DEFAULT_CHAT_TYPOGRAPHY);
-    expect(cssVars.get('--chat-body-size')).toBe('14.5px');
-    expect(cssVars.get('--chat-h1-size')).toBe('1.5em');
+    expect(cssVars.get('--chat-body-size')).toBe('14px');
+    expect(cssVars.get('--chat-h1-size')).toBe('1.3em');
   });
 
   it('持久化的脏值被规范化后再进入内存和 CSS 变量', async () => {
@@ -100,7 +100,7 @@ describe('会话排版设置', () => {
       },
     });
     expect(store.getState().chatTypography.body).toEqual({ size: 20, weight: 400 });
-    expect(store.getState().chatTypography.h1).toEqual({ size: 150, weight: 700 });
+    expect(store.getState().chatTypography.h1).toEqual({ size: 130, weight: 700 });
     expect(store.getState().chatTypography.h2).toEqual({ size: 110, weight: 500 });
     expect(store.getState().chatTypography.table).toEqual(DEFAULT_CHAT_TYPOGRAPHY.table);
     expect(cssVars.get('--chat-body-size')).toBe('20px');

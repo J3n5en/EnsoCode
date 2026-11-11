@@ -573,7 +573,7 @@ export function markdownUrlTransform(value: string, key?: string, allowLocal = t
   return allowLocal && classifyFileReference(value).classification.kind === 'local' ? value : '';
 }
 
-const P_CLASS = 'my-2 leading-[1.7] first:mt-0 last:mb-0';
+const P_CLASS = 'my-2 leading-[1.625] first:mt-0 last:mb-0';
 const H1_CLASS =
   'mt-4 mb-2 text-(length:--chat-h1-size) leading-tight [font-weight:var(--chat-h1-weight)]';
 const H2_CLASS =
@@ -759,12 +759,12 @@ export const markdownComponents: Components = {
   p: ({ children }) => <Paragraph className={P_CLASS}>{children}</Paragraph>,
   a: MarkdownAnchor,
   ul: ({ children }) => (
-    <ul className="my-2 list-disc space-y-0.5 pl-5 leading-[1.5] marker:text-muted-foreground [&_p]:leading-[1.5]">
+    <ul className="my-2 list-disc space-y-1 pl-5 leading-[1.625] marker:text-muted-foreground [&_p]:leading-[1.625]">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="my-2 list-decimal space-y-0.5 pl-5 leading-[1.5] marker:text-muted-foreground [&_p]:leading-[1.5]">
+    <ol className="my-2 list-decimal space-y-1 pl-5 leading-[1.625] marker:text-muted-foreground [&_p]:leading-[1.625]">
       {children}
     </ol>
   ),
@@ -887,7 +887,7 @@ const BLOCK_TAGS = new Set([
 ]);
 
 /** 叶子后面跟着插槽 div，`last:mb-0` 不再命中，改为只留上边距 */
-const P_LEAF_CLASS = 'mt-2 mb-0 leading-[1.7] first:mt-0';
+const P_LEAF_CLASS = 'mt-2 mb-0 leading-[1.625] first:mt-0';
 const SLOT_CLASS = 'empty:hidden whitespace-normal';
 
 function isBlock(node: ElementContent): boolean {
