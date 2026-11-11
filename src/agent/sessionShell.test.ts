@@ -1,5 +1,5 @@
 import type { BashOperations } from '@earendil-works/pi-coding-agent';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createSessionCommandTool, resolveSessionShellKind } from './sessionShell';
 
 describe('resolveSessionShellKind', () => {
@@ -85,6 +85,8 @@ describe('createSessionCommandTool', () => {
   });
 
   it('远程（外部传入的 operations）不注入本地硬化 env', async () => {
+    // 在 agent shell 里跑测试时 process.env 本身已带硬化键，先清掉才能区分「注入」与「继承」
+    vi.stubEnv('GIT_TERMINAL_PROMPT', undefined);
     const seen: Array<NodeJS.ProcessEnv | undefined> = [];
     const operations: BashOperations = {
       exec: async (_command, _cwd, options) => {
@@ -93,7 +95,11 @@ describe('createSessionCommandTool', () => {
       },
     };
     const tool = createSessionCommandTool({ cwd: '/srv/app', remote: true, operations });
-    await tool.execute('t1', { command: 'true' }, undefined, undefined, undefined as never);
-    expect(seen[0]?.GIT_TERMINAL_PROMPT).toBeUndefined();
+    try {
+      await tool.execute('t1', { command: 'true' }, undefined, undefined, undefined as never);
+      expect(seen[0]?.GIT_TERMINAL_PROMPT).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
