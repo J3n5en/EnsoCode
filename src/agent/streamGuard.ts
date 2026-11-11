@@ -14,6 +14,11 @@ export const STREAM_IDLE_TIMEOUT_MS = 300_000;
 export const LOCAL_STREAM_IDLE_TIMEOUT_MS = 900_000;
 /** 静默到此只记一条日志 */
 export const STREAM_STALL_LOG_MS = 90_000;
+/**
+ * 远端单次流的总寿命上限：涓流事件会不断重置空闲计时，网关滴灌或卡死的生成需要这道不重置的硬顶。
+ * 留足超长输出（128k token 级）的余量；本机模型速度不可预期，不设。
+ */
+export const STREAM_MAX_LIFETIME_MS = 3_600_000;
 
 const REPETITION_WINDOW = 16_384;
 const REPETITION_MIN_SPAN = 4_000;
@@ -62,15 +67,14 @@ export interface StreamGuardOptions {
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
 
-function idleTimeoutFor(model: Model<Api>): number {
+function isLocalModel(model: Model<Api>): boolean {
   try {
     const host = new URL(model.baseUrl).hostname;
-    if (LOOPBACK_HOSTS.has(host) || host.endsWith('.localhost'))
-      return LOCAL_STREAM_IDLE_TIMEOUT_MS;
+    return LOOPBACK_HOSTS.has(host) || host.endsWith('.localhost');
   } catch {
     // 无 baseUrl 的 provider 按远端处理
+    return false;
   }
-  return STREAM_IDLE_TIMEOUT_MS;
 }
 
 function emptyMessage(model: Model<Api>): AssistantMessage {
@@ -111,7 +115,8 @@ function withBlockText(message: AssistantMessage, index: number, text: string): 
 }
 
 /**
- * 流守卫：事件间静默超时（先记卡顿日志，再中断并抛可重试错误）、正文 / 思考逐字复读检测（中断并抛不可重试错误）。
+ * 流守卫：事件间静默超时（先记卡顿日志，再中断并抛可重试错误）、远端总寿命上限（同为可重试错误）、
+ * 正文 / 思考逐字复读检测（中断并抛不可重试错误）。
  * 守卫自己的中断通过派生 signal 传给上游；调用方的中断原样透传。
  */
 export function guardStream(inner: StreamMethod, guard: StreamGuardOptions = {}): StreamMethod {
@@ -124,17 +129,20 @@ export function guardStream(inner: StreamMethod, guard: StreamGuardOptions = {})
         once: true,
       });
     const out = createAssistantMessageEventStream();
-    const idleMs = idleTimeoutFor(model);
+    const local = isLocalModel(model);
+    const idleMs = local ? LOCAL_STREAM_IDLE_TIMEOUT_MS : STREAM_IDLE_TIMEOUT_MS;
     let finished = false;
     let partial: AssistantMessage | undefined;
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    let lifetimeTimer: ReturnType<typeof setTimeout> | undefined;
     const texts = new Map<number, string>();
     const checkedAt = new Map<number, number>();
 
     const clear = () => {
       clearTimeout(idleTimer);
       clearTimeout(stallTimer);
+      clearTimeout(lifetimeTimer);
     };
     const fail = (text: string, base: AssistantMessage | undefined) => {
       if (finished) return;
@@ -150,7 +158,8 @@ export function guardStream(inner: StreamMethod, guard: StreamGuardOptions = {})
       out.end(error);
     };
     const arm = () => {
-      clear();
+      clearTimeout(idleTimer);
+      clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
         if (guard.onStall) guard.onStall(STREAM_STALL_LOG_MS, model);
         else
@@ -173,6 +182,15 @@ export function guardStream(inner: StreamMethod, guard: StreamGuardOptions = {})
       signal: controller.signal,
     });
     arm();
+    if (!local)
+      lifetimeTimer = setTimeout(
+        () =>
+          fail(
+            `LLM stream timed out: still incomplete after ${Math.round(STREAM_MAX_LIFETIME_MS / 60_000)} minutes, so the request was aborted.`,
+            partial
+          ),
+        STREAM_MAX_LIFETIME_MS
+      );
     void (async () => {
       try {
         for await (const event of input) {

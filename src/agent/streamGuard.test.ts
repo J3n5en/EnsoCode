@@ -8,7 +8,12 @@ import {
   type Model,
 } from '@earendil-works/pi-ai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { findRepetitionCycle, guardStream, STREAM_IDLE_TIMEOUT_MS } from './streamGuard';
+import {
+  findRepetitionCycle,
+  guardStream,
+  STREAM_IDLE_TIMEOUT_MS,
+  STREAM_MAX_LIFETIME_MS,
+} from './streamGuard';
 
 const model = (baseUrl = 'https://api.example.com/v1') =>
   ({ api: 'openai-completions', provider: 'test', id: 'm', baseUrl }) as unknown as Model<Api>;
@@ -134,6 +139,32 @@ describe('guardStream', () => {
     const { inner, state } = fakeInner();
     guardStream(inner)(model('http://127.0.0.1:8080/v1'), { messages: [] }, {});
     await vi.advanceTimersByTimeAsync(STREAM_IDLE_TIMEOUT_MS + 1000);
+    expect(state.signal?.aborted).toBe(false);
+  });
+
+  it('事件持续涓流但总时长超过寿命上限：中断上游并以可重试错误结束', async () => {
+    const { inner, state } = fakeInner();
+    const out = guardStream(inner)(model(), { messages: [] }, {});
+    const done = collect(out);
+    const steps = Math.ceil(STREAM_MAX_LIFETIME_MS / 60_000) + 1;
+    for (let i = 0; i < steps && !state.signal?.aborted; i++) {
+      state.stream!.push({ type: 'text_delta', contentIndex: 0, delta: 'x', partial: message() });
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    expect(state.signal?.aborted).toBe(true);
+    expect((await done).at(-1)?.type).toBe('error');
+    const error = (await out.result()) as AssistantMessage;
+    expect(error.errorMessage).toMatch(/timed out/);
+    expect(isRetryableAssistantError(error)).toBe(true);
+  });
+
+  it('本机模型不设寿命上限', async () => {
+    const { inner, state } = fakeInner();
+    guardStream(inner)(model('http://localhost:11434/v1'), { messages: [] }, {});
+    for (let i = 0; i < Math.ceil(STREAM_MAX_LIFETIME_MS / 60_000) + 5; i++) {
+      state.stream!.push({ type: 'text_delta', contentIndex: 0, delta: 'x', partial: message() });
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
     expect(state.signal?.aborted).toBe(false);
   });
 
