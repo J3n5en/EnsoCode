@@ -466,24 +466,32 @@ function ModelRowContent({
     windowTokens !== undefined &&
     view.source.contextWindow === 'catalog' &&
     meta?.source === 'catalog-fallback';
+  const name = model.label ?? model.id;
   return (
     <>
       {pin && <ModelPinButton pin={pin} />}
       {showId ? (
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
-          <span className="shrink-0 truncate">{model.label ?? model.id}</span>
+          <span className="shrink-0 truncate" title={name}>
+            {name}
+          </span>
           <span
             data-model-row-id={model.id}
+            title={model.id}
             className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/70"
           >
             {model.id}
           </span>
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate">{model.label ?? model.id}</span>
+        <span className="min-w-0 flex-1 truncate" title={name}>
+          {name}
+        </span>
       )}
       {entryTag && (
-        <span className="shrink-0 truncate text-[10px] text-muted-foreground/60">{entryTag}</span>
+        <span className="shrink-0 truncate text-[10px] text-muted-foreground/60" title={entryTag}>
+          {entryTag}
+        </span>
       )}
       {windowTokens !== undefined && (
         <span
@@ -950,7 +958,9 @@ export function ModelPicker({
       onClick={() => handleSelectModel(VIRTUAL_PROVIDER_ID, entry.id)}
     >
       <Shuffle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+      <span className="min-w-0 flex-1 truncate" title={entry.name}>
+        {entry.name}
+      </span>
       {currentVirtual?.id === entry.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
     </MenuItem>
   ));

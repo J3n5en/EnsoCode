@@ -813,6 +813,10 @@ describe('duplicateModelLabels', () => {
     expect(html).toContain('data-model-row-id="cursor-grok-4.6"');
     expect(html).toContain('data-model-row-id="grok-4.6"');
     expect(html).not.toContain('data-model-row-id="gpt-5"');
+    expect(html).toContain('title="Grok 4.6 Medium"');
+    expect(html).toContain('title="cursor-grok-4.6"');
+    expect(html).toContain('title="grok-4.6"');
+    expect(html).toContain('title="GPT-5"');
   });
 });
 
