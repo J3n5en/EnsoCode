@@ -543,14 +543,22 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
           line &&
           attached?.rel === rel &&
           activeRelRef.current === rel &&
-          doc?.viewMode !== 'preview'
+          doc?.viewMode !== 'preview' &&
+          !doc?.viewer
         ) {
           pendingLineRef.current = null;
           attached.editor.focus({ lineNumber: line });
           return;
         }
         if (viewer === 'markdown' && !line) void openPreview(rel, true);
-        else void openFile(rel, 'source');
+        else
+          void openFile(
+            rel,
+            // 不跳行时让插件的默认查看器生效
+            !line && pluginFileViewersFor(rel, fileViewersRef.current).some((v) => v.default)
+              ? undefined
+              : 'source'
+          );
       }),
     [conversationId, openFile, openPreview]
   );
