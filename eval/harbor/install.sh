@@ -7,7 +7,7 @@ need_node() {
   if ! command -v node >/dev/null 2>&1; then
     return 0
   fi
-  node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)'
+  node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 1 : 0)'
 }
 
 if need_node; then
