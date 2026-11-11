@@ -95,9 +95,9 @@ export const RUN_USAGE = `enso-server run — 无界面跑一轮真实 agent 会
 环境变量（命令行优先）:
   ENSO_DATA_DIR ENSO_PROVIDER_ID ENSO_MODEL ENSO_API_KEY ENSO_BASE_URL ENSO_API
   ENSO_REASONING_EFFORT ENSO_TIMEOUT_MS
-  未设置 ENSO_API_KEY 时回退 OPENAI_API_KEY / ANTHROPIC_API_KEY
-  未设置 ENSO_BASE_URL 时回退 OPENAI_BASE_URL / ANTHROPIC_BASE_URL
-  未设置 ENSO_MODEL 时回退 OPENAI_MODEL
+  ENSO_API_KEY 和 ENSO_BASE_URL 都没设置、也没指定供应商但给了模型时，整组回退
+  OPENAI_API_KEY + OPENAI_BASE_URL，其次 ANTHROPIC_API_KEY + ANTHROPIC_BASE_URL
+  未设置 ENSO_MODEL 时回退 OPENAI_MODEL；没给地址时用协议默认端点
 
 已有 $ENSO_DATA_DIR/settings.json 里的 providers 会用；标志或环境变量可以覆盖或新建一条。
 run 默认无人值守：会挡住的审批按档位当场拒绝，不会等待。web / browser / image_generation
@@ -157,6 +157,23 @@ function envValue(env: NodeJS.ProcessEnv, ...keys: string[]): string | undefined
   for (const key of keys) {
     const value = env[key]?.trim();
     if (value) return value;
+  }
+  return undefined;
+}
+
+/** OPENAI_* / ANTHROPIC_* 只能整组取用，不和别家的 key、地址混搭。 */
+function vendorEndpoint(
+  env: NodeJS.ProcessEnv
+): { apiKey: string; baseUrl?: string; api?: ModelApiKind } | undefined {
+  const openai = envValue(env, 'OPENAI_API_KEY');
+  if (openai) {
+    const baseUrl = envValue(env, 'OPENAI_BASE_URL');
+    return { apiKey: openai, ...(baseUrl ? { baseUrl } : {}) };
+  }
+  const anthropic = envValue(env, 'ANTHROPIC_API_KEY');
+  if (anthropic) {
+    const baseUrl = envValue(env, 'ANTHROPIC_BASE_URL');
+    return { apiKey: anthropic, api: 'anthropic-messages', ...(baseUrl ? { baseUrl } : {}) };
   }
   return undefined;
 }
@@ -265,6 +282,19 @@ export function parseRunArgs(
     timeoutMs = parsed;
   }
 
+  const providerId = values.get('--provider')?.trim() || envValue(env, 'ENSO_PROVIDER_ID');
+  const modelId = values.get('--model')?.trim() || envValue(env, 'ENSO_MODEL', 'OPENAI_MODEL');
+  let apiKey = values.get('--api-key') || envValue(env, 'ENSO_API_KEY');
+  let baseUrl = values.get('--base-url')?.trim() || envValue(env, 'ENSO_BASE_URL');
+  let api = apiText as ModelApiKind | undefined;
+  // 厂商变量常年挂在环境里：只有没指定供应商、又给了模型时才拿来新建，否则继续用 settings 里的供应商
+  const vendor = !apiKey && !baseUrl && !providerId && modelId ? vendorEndpoint(env) : undefined;
+  if (vendor) {
+    apiKey = vendor.apiKey;
+    baseUrl = vendor.baseUrl;
+    api ??= vendor.api;
+  }
+
   return {
     ok: true,
     args: {
@@ -273,15 +303,11 @@ export function parseRunArgs(
       mode: modeText as ApprovalMode,
       ...(goal ? { goal: goal.trim() } : {}),
       autoTurns,
-      providerId: values.get('--provider')?.trim() || envValue(env, 'ENSO_PROVIDER_ID'),
-      modelId: values.get('--model')?.trim() || envValue(env, 'ENSO_MODEL', 'OPENAI_MODEL'),
-      apiKey:
-        values.get('--api-key') ||
-        envValue(env, 'ENSO_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'),
-      baseUrl:
-        values.get('--base-url')?.trim() ||
-        envValue(env, 'ENSO_BASE_URL', 'OPENAI_BASE_URL', 'ANTHROPIC_BASE_URL'),
-      ...(apiText ? { api: apiText as ModelApiKind } : {}),
+      providerId,
+      modelId,
+      apiKey,
+      baseUrl,
+      ...(api ? { api } : {}),
       ...(reasoning ? { reasoningEffort: reasoning } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       outputFormat: formatText as OutputFormat,

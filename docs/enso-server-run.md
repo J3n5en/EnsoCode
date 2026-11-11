@@ -68,11 +68,13 @@ node out/server/index.js run \
 | `ENSO_DATA_DIR` | 数据目录，默认 `~/.enso-server` |
 | `ENSO_PROVIDER_ID` | 供应商 id |
 | `ENSO_MODEL` | 模型 id。未设置时回退 `OPENAI_MODEL` |
-| `ENSO_API_KEY` | API key。未设置时回退 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` |
-| `ENSO_BASE_URL` | 端点。未设置时回退 `OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL` |
+| `ENSO_API_KEY` | API key |
+| `ENSO_BASE_URL` | 端点。没给时用协议默认端点（OpenAI / Anthropic 官方地址） |
 | `ENSO_API` | 协议种类 |
 | `ENSO_REASONING_EFFORT` | 推理档位 |
 | `ENSO_TIMEOUT_MS` | 超时毫秒 |
+
+`ENSO_API_KEY`、`ENSO_BASE_URL` 都没设置、没指定供应商、但给了模型时，才整组回退厂商变量：先 `OPENAI_API_KEY` + `OPENAI_BASE_URL`，再 `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL`（后者默认 `anthropic-messages`）。不同厂商的 key 和地址不会混搭；环境里常驻的厂商 key 也不会盖掉 `settings.json` 里已配好的供应商。
 
 已有 `$ENSO_DATA_DIR/settings.json` 的 `enso-settings.state.providers` 会直接用。标志或环境变量给出 key 和 base URL 时，会合并或新建一条供应商，文件权限收成 `0600`。
 

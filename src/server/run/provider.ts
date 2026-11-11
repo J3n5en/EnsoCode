@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { modelUsability } from '@shared/defaultModel';
+import { DEFAULT_BASE_URLS } from '@shared/providerCatalog';
 import { MODEL_API_KINDS, type ModelApiKind, type ModelProvider } from '@shared/types/llm';
 
 export interface RunProviderRequest {
@@ -88,11 +89,10 @@ export function resolveRunProvider(
   const endpoint = Boolean(request.apiKey || request.baseUrl || request.api);
   if (endpoint) {
     if (!request.modelId) return { ok: false, error: '新建供应商时需要 --model 或 ENSO_MODEL' };
-    if (!request.baseUrl)
-      return { ok: false, error: '新建供应商时需要 --base-url 或 ENSO_BASE_URL' };
     if (!request.apiKey) return { ok: false, error: '新建供应商时需要 --api-key 或 ENSO_API_KEY' };
     const id = request.providerId || 'enso-run';
     const api = inferApi(request.baseUrl, request.api);
+    const baseUrl = request.baseUrl || DEFAULT_BASE_URLS[api];
     const index = known.findIndex((provider) => provider?.id === id);
     const previous = index >= 0 ? known[index] : null;
     const base: ModelProvider = previous ?? {
@@ -100,7 +100,7 @@ export function resolveRunProvider(
       name: id,
       api,
       apiKey: request.apiKey,
-      baseUrl: request.baseUrl,
+      baseUrl,
       enabled: true,
       models: [],
     };
@@ -110,7 +110,7 @@ export function resolveRunProvider(
         name: base.name || id,
         api,
         apiKey: request.apiKey,
-        baseUrl: request.baseUrl,
+        baseUrl,
         enabled: true,
       },
       request.modelId

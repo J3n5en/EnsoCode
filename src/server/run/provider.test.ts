@@ -60,6 +60,17 @@ describe('resolveRunProvider', () => {
     expect(resolveRunProvider({ providerId: 'missing' }, [saved]).ok).toBe(false);
   });
 
+  it('uses the protocol default base URL when only a key is given', () => {
+    const resolved = resolveRunProvider(
+      { modelId: 'claude', apiKey: 'key', api: 'anthropic-messages' },
+      []
+    );
+    expect(resolved.ok && resolved.value.providers[0]).toMatchObject({
+      api: 'anthropic-messages',
+      baseUrl: 'https://api.anthropic.com',
+    });
+  });
+
   it('writes settings as owner-only and keeps unrelated state', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'enso-run-settings-'));
     dirs.push(dir);
