@@ -90,7 +90,8 @@ afterAll(() => {
 });
 
 describe('listOauthProviders 的账号枚举', () => {
-  it('Qoder 与 Qoder-CN 分别列为支持多账号的订阅供应商', async () => {
+  // 首条用例替整个文件付模块图的 import 成本，5s 默认值在并行跑满时会超时
+  it('Qoder 与 Qoder-CN 分别列为支持多账号的订阅供应商', { timeout: 20_000 }, async () => {
     const { listOauthProviders } = await import('./oauthProviders');
     const providers = await listOauthProviders();
     for (const [id, name] of [
