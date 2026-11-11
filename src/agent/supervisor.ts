@@ -269,6 +269,7 @@ import { applyRemoteWorkingDirectory } from './ssh/posixPath';
 import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
 import { installStreamGuard } from './streamGuard';
+import { installStableToolOrder } from './toolOrder';
 import {
   appendYieldJson,
   parseJsonFromAssistant,
@@ -5380,6 +5381,7 @@ export class SessionSupervisor {
       );
       installOauthPoolSelector(runtime, this.selectOauthPool);
       installStreamGuard(runtime);
+      installStableToolOrder(runtime);
       return runtime;
     })();
     return this.runtimePromise;
