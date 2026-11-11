@@ -122,11 +122,23 @@ afterEach(async () => {
 describe('AgentTypeEditDialog 固定模型走统一选择器', () => {
   it('虚拟绑定原样交给 ModelPicker，并带虚拟模型清单', () => {
     renderToStaticMarkup(<AgentTypeEditDialog entry={FIXED_VIRTUAL_TYPE} onClose={() => {}} />);
-    // 静态渲染不跑 mock 调用的 push（React 仍会调用函数组件），取最后一次
     const picker = harness.pickerProps.find((props) => props.providerId === 'enso-virtual');
     expect(picker).toBeDefined();
     expect(picker?.modelId).toBe('auto');
     expect(picker?.virtualModels).toEqual([VIRTUAL_ENTRY]);
+    // 跟随态不写推理覆盖，交给模型自身能力
+    expect(picker?.modelCapabilityOverrides).toEqual({});
+  });
+
+  it('已有档位的条目把档位作为可编辑覆盖传给 ModelPicker', () => {
+    renderToStaticMarkup(
+      <AgentTypeEditDialog
+        entry={{ ...FIXED_VIRTUAL_TYPE, reasoning: 'on', thinkingLevel: 'high' }}
+        onClose={() => {}}
+      />
+    );
+    const picker = harness.pickerProps.find((props) => props.providerId === 'enso-virtual');
+    expect(picker?.modelCapabilityOverrides).toEqual({ reasoning: 'on', thinkingLevel: 'high' });
   });
 
   it('选中虚拟条目后保存，条目保持虚拟引用', async () => {

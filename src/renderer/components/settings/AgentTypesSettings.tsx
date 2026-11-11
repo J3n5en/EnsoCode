@@ -1,6 +1,7 @@
 import { ENSO_AGENT_TYPE_KEY, isReservedAgentTypeName } from '@shared/builtinAgents';
 import { SUBAGENT_MODELS_CONFIGURE_PROMPT } from '@shared/i18n';
 import { MAX_MAX_ACTIVE_COWORKERS, MIN_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
+import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import type {
   AgentTypeEntry,
   AgentTypeModelMode,
@@ -339,6 +340,11 @@ export function AgentTypeEditDialog({
 
   // 固定模型也允许绑虚拟条目：推理能力按主成员展示与钳位
   const pickerThinkingLevel = thinking !== '' && thinking !== 'off' ? thinking : 'medium';
+  // 与子模型一致：类型级推理预设是用户覆盖，不因模型声明能力丢掉档位入口
+  const pickerCapabilityOverrides = pickModelCapabilityOverrides({
+    reasoning: thinking === 'off' ? 'off' : thinking === '' ? undefined : 'on',
+    thinkingLevel: thinking === '' || thinking === 'off' ? undefined : thinking,
+  });
 
   const save = () => {
     const slug = slugify(name);
@@ -432,6 +438,7 @@ export function AgentTypeEditDialog({
                 virtualModels={virtualModels}
                 providerId={providerId}
                 modelId={modelId}
+                modelCapabilityOverrides={pickerCapabilityOverrides}
                 reasoningMode={thinking === '' ? 'follow' : thinking === 'off' ? 'off' : 'on'}
                 reasoningEnabled={thinking !== '' && thinking !== 'off'}
                 thinkingLevel={pickerThinkingLevel}
