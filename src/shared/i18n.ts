@@ -1778,6 +1778,7 @@ export const zhTranslations: Record<string, string> = {
     '此项目带有 pi 扩展代码，会以你的权限运行，已阻止加载。只有信任这个仓库时才加载。',
   'Trust and load': '信任并加载',
   Plugins: '插件',
+  Plugin: '插件',
   'Enso plugins': 'Enso 插件',
   'Claude Code plugins': 'Claude Code 插件',
   'No Enso plugins installed': '还没有安装 Enso 插件',

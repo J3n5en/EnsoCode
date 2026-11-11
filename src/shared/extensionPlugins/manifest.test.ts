@@ -504,6 +504,54 @@ describe('parseExtensionPluginManifest', () => {
     ).not.toEqual([]);
   });
 
+  it('接受 workflow 预设文件，预设可圈定；坏路径、坏文件名、重名和未声明引用都拒绝', () => {
+    const raw = {
+      ...base(),
+      contributes: {
+        ...base().contributes,
+        workflows: ['workflows/triage.js', 'workflows/release-check.js'],
+        presets: [
+          {
+            id: 'review',
+            name: 'Review',
+            skills: [],
+            mcpServers: [],
+            workflows: ['workflows/triage.js'],
+          },
+        ],
+      },
+    };
+    const ok = parseExtensionPluginManifest(raw, '0.2.12');
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    expect(ok.manifest.contributes.workflows).toEqual(raw.contributes.workflows);
+    expect(ok.manifest.contributes.presets[0]?.workflows).toEqual(['workflows/triage.js']);
+    const withWorkflows = (workflows: unknown) => ({
+      ...base(),
+      contributes: { ...base().contributes, workflows },
+    });
+    expect(parseExtensionPluginManifest(base(), '0.2.12')).toMatchObject({
+      ok: true,
+      manifest: { contributes: { workflows: [] } },
+    });
+    for (const bad of [
+      ['../triage.js'],
+      ['workflows/triage.md'],
+      ['workflows/Bad Name.js'],
+      ['a/triage.js', 'b/triage.js'],
+    ])
+      expect(errorsOf(withWorkflows(bad))).not.toEqual([]);
+    expect(
+      errorsOf({
+        ...raw,
+        contributes: {
+          ...raw.contributes,
+          presets: [{ ...raw.contributes.presets[0], workflows: ['workflows/missing.js'] }],
+        },
+      })
+    ).not.toEqual([]);
+  });
+
   describe('子代理类型 agentTypes', () => {
     const agentType = {
       name: 'demo:reviewer',

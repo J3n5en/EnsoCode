@@ -36,6 +36,7 @@ const manifest = (patch: Partial<ExtensionPluginManifest> = {}): ExtensionPlugin
     triggers: [],
     skills: [],
     mcpServers: [],
+    workflows: [],
     methods: [],
     configuration: [],
     presets: [],

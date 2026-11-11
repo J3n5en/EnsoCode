@@ -1,6 +1,7 @@
 import { isReservedAgentTypeName } from '../builtinAgents';
 import { type ApprovalMode, THINKING_LEVELS, type ThinkingLevel } from '../types/agent';
 import { BUILTIN_AGENT_TYPES } from '../types/assets';
+import { isWorkflowPresetId } from '../types/workflow';
 import {
   APPEND_ONLY_INTERCEPT_EVENTS,
   isInterceptEvent,
@@ -146,6 +147,8 @@ export interface PluginPresetContrib {
   mcpServers: string[];
   /** 圈定的子代理类型：被任一预设列出的类型只在该预设生效时下发 */
   agentTypes?: string[];
+  /** 圈定的 workflow 预设文件：被任一预设列出的只在该预设生效时可用 */
+  workflows?: string[];
   instruction?: string;
   systemPrompt?: string;
   systemPromptTail?: string;
@@ -201,6 +204,8 @@ export interface ExtensionPluginManifest {
     triggers: PluginTriggerContrib[];
     skills: string[];
     mcpServers: PluginMcpContrib[];
+    /** workflow 预设文件（`<id>.js`），文件名即预设 id */
+    workflows: string[];
     methods: PluginMethodContrib[];
     configuration: PluginConfigContrib[];
     presets: PluginPresetContrib[];
@@ -615,6 +620,16 @@ export function parseExtensionPluginManifest(
     (p) => isPluginRelativePath(p) && p !== '.'
   );
 
+  const workflows = stringList(
+    contrib.workflows,
+    'contributes.workflows',
+    (p) => isPluginRelativePath(p) && isWorkflowPresetId(workflowFileId(p))
+  );
+  uniqueIds(
+    workflows.map((p) => ({ id: workflowFileId(p) })),
+    'workflow 预设'
+  );
+
   const mcpServers: PluginMcpContrib[] = [];
   for (const s of list('mcpServers')) {
     const env = isRecord(s) && s.env !== undefined ? s.env : {};
@@ -734,6 +749,11 @@ export function parseExtensionPluginManifest(
       item.agentTypes.some((name) => !agentTypes.some((type) => type.name === name))
     )
       errors.push(`预设 ${item.id} 引用了未声明的子代理类型`);
+    const presetWorkflows = stringList(
+      item.workflows,
+      `预设 ${item.id} 的 workflows`,
+      (p) => typeof p === 'string' && workflows.includes(p)
+    );
     const instruction = promptPath(item.instruction, `预设 ${item.id} 的指令`);
     const systemPrompt = promptPath(item.systemPrompt, `预设 ${item.id} 的角色描述`);
     const systemPromptTail = promptPath(item.systemPromptTail, `预设 ${item.id} 的真尾`);
@@ -772,6 +792,7 @@ export function parseExtensionPluginManifest(
       skills: presetSkills,
       mcpServers: presetMcp,
       ...(presetAgentTypes.length > 0 ? { agentTypes: presetAgentTypes } : {}),
+      ...(presetWorkflows.length > 0 ? { workflows: presetWorkflows } : {}),
       ...(instruction ? { instruction } : {}),
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(systemPromptTail ? { systemPromptTail } : {}),
@@ -973,6 +994,7 @@ export function parseExtensionPluginManifest(
         triggers,
         skills,
         mcpServers,
+        workflows,
         methods,
         configuration,
         presets,
@@ -985,6 +1007,12 @@ export function parseExtensionPluginManifest(
       },
     },
   };
+}
+
+/** `workflows/triage.js` → `triage`；非 `.js` 返回空串 */
+export function workflowFileId(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  return name.endsWith('.js') ? name.slice(0, -3) : '';
 }
 
 function parseEventSubscription(raw: unknown): PluginEventSubscription | null {

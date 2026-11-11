@@ -1265,6 +1265,8 @@ export type AgentCommand =
       pluginHooks?: PluginHookSpawn[];
       /** 已启用 Enso 插件的 agent 工具；执行经 plugin-tool-invoke 回到 Main */
       pluginTools?: PluginToolDescriptor[];
+      /** 已启用 Enso 插件的 workflow 预设文件（绝对路径，已按插件预设圈定） */
+      workflowPresetFiles?: string[];
       /** 已启用插件的事件订阅；Bot 会话不下发 */
       pluginEvents?: PluginEventPlan;
       instruction?: { path: string; content: string };
@@ -3644,6 +3646,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'mcpServers',
           'pluginCommands',
           'pluginTools',
+          'workflowPresetFiles',
           'pluginEvents',
           'pluginHooks',
           'instruction',
@@ -3691,6 +3694,14 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.pluginCommands !== undefined &&
           parsePluginCommands(value.pluginCommands) === null) ||
         (value.pluginTools !== undefined && !isPluginToolList(value.pluginTools)) ||
+        (value.workflowPresetFiles !== undefined &&
+          !(
+            Array.isArray(value.workflowPresetFiles) &&
+            value.workflowPresetFiles.length <= 500 &&
+            value.workflowPresetFiles.every(
+              (entry) => typeof entry === 'string' && entry.length > 0 && entry.length <= 1024
+            )
+          )) ||
         (value.pluginEvents !== undefined && !isPluginEventPlan(value.pluginEvents)) ||
         (value.pluginHooks !== undefined && parsePluginHooks(value.pluginHooks) === null) ||
         (value.rtkEnabled !== undefined && typeof value.rtkEnabled !== 'boolean') ||

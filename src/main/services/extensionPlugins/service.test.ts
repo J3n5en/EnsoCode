@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ExtensionPluginNotice } from '@shared/extensionPlugins/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPluginHost } from '../../../pluginHost/host';
@@ -648,13 +648,14 @@ describe('ExtensionPluginService', () => {
     expect(server?.args?.[0]).toMatch(/packages\/example\.demo\/[^/]+\/server\.js$/);
   });
 
-  it('预设点名的 skill 和 MCP 只在选中该预设时下发，并读出角色与指令', async () => {
+  it('预设点名的 skill、MCP 和 workflow 只在选中该预设时下发，并读出角色与指令', async () => {
     await install({
       'enso-plugin.json': manifest({
         permissions: ['agent.tool', 'mcp.server'],
         contributes: {
           agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
           skills: ['skills/always', 'skills/review'],
+          workflows: ['workflows/always.js', 'workflows/review.js'],
           mcpServers: [
             { name: 'always', command: 'node', args: ['a.js'] },
             { name: 'review', command: 'node', args: ['b.js'] },
@@ -665,6 +666,7 @@ describe('ExtensionPluginService', () => {
               name: 'Review',
               skills: ['skills/review'],
               mcpServers: ['review'],
+              workflows: ['workflows/review.js'],
               instruction: 'prompts/instruction.md',
               systemPrompt: 'prompts/role.md',
               systemPromptTail: 'prompts/tail.md',
@@ -678,6 +680,8 @@ describe('ExtensionPluginService', () => {
       'main.mjs': mainJs,
       'skills/always/SKILL.md': '# always',
       'skills/review/SKILL.md': '# review',
+      'workflows/always.js': '',
+      'workflows/review.js': '',
       'a.js': '',
       'b.js': '',
       'prompts/instruction.md': 'do this',
@@ -690,12 +694,17 @@ describe('ExtensionPluginService', () => {
     const ends = (paths: string[], name: string) => paths.some((path) => path.endsWith(name));
     expect(ends(service.skillPathsForSpawn(), 'skills/always')).toBe(true);
     expect(ends(service.skillPathsForSpawn(), 'skills/review')).toBe(false);
+    expect(service.workflowPathsForSpawn().map((path) => basename(path))).toEqual(['always.js']);
     expect(service.mcpServersForSpawn().map((server) => server.name)).toEqual([
       'plugin-example-demo-always',
     ]);
     const id = 'plugin:example.demo:review';
     expect(ends(service.skillPathsForSpawn(id), 'skills/always')).toBe(true);
     expect(ends(service.skillPathsForSpawn(id), 'skills/review')).toBe(true);
+    expect(service.workflowPathsForSpawn(id).map((path) => basename(path))).toEqual([
+      'always.js',
+      'review.js',
+    ]);
     expect(service.mcpServersForSpawn(id).map((server) => server.name)).toEqual([
       'plugin-example-demo-always',
       'plugin-example-demo-review',

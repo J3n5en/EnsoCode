@@ -29,7 +29,7 @@ export interface WorkflowMemberGroup {
   members: WorkflowMemberSnapshot[];
 }
 
-export type WorkflowPresetSource = 'project' | 'custom' | 'global' | 'builtin';
+export type WorkflowPresetSource = 'project' | 'custom' | 'global' | 'plugin' | 'builtin';
 
 const WORKFLOW_PRESET_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_DISABLED_WORKFLOW_PRESETS = 64;

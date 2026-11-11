@@ -776,6 +776,14 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...base, trustedProjectCode: ['x'.repeat(2000)] })).toBeNull();
   });
 
+  it('spawn-parent 携插件 workflow 预设文件:字符串数组通过,脏值拒绝', () => {
+    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
+    const files = { ...base, workflowPresetFiles: ['/plugins/demo/workflows/triage.js'] };
+    expect(parseAgentCommand(files)).toEqual(files);
+    expect(parseAgentCommand({ ...base, workflowPresetFiles: 'x' })).toBeNull();
+    expect(parseAgentCommand({ ...base, workflowPresetFiles: [''] })).toBeNull();
+  });
+
   it('spawn-parent 携插件命令与 hooks:合法通过,脏值拒绝', () => {
     const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
     const hook = {

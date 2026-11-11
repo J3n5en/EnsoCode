@@ -997,6 +997,7 @@ export function spawnSession(
     ...(bot ? [] : plugins.skillPaths),
     ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset) ?? []),
   ];
+  const workflowPresetFiles = extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? [];
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of [
@@ -1104,6 +1105,7 @@ export function spawnSession(
     ...(plugins.commands.length > 0 ? { pluginCommands: plugins.commands } : {}),
     ...(pluginHooks.length > 0 ? { pluginHooks } : {}),
     ...(pluginTools.length > 0 ? { pluginTools } : {}),
+    ...(workflowPresetFiles.length > 0 ? { workflowPresetFiles } : {}),
     ...(pluginEvents ? { pluginEvents } : {}),
     ...(presetApplied.approvalMode ? { approvalMode: presetApplied.approvalMode } : {}),
     ...(request.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
@@ -1188,9 +1190,17 @@ export function pluginSkillPathsForMenu(
     } | null;
   }
 ): string[] {
-  const { pluginPresetId } = presetOverlay(presetId, deps.resolve);
-  const active = deps.extension?.presetForSpawn(pluginPresetId)?.ok ? pluginPresetId : undefined;
+  const active = activePluginPresetForMenu(presetId, deps.resolve, deps.extension);
   return [...deps.claude, ...(deps.extension?.skillPathsForSpawn(active) ?? [])];
+}
+
+function activePluginPresetForMenu(
+  presetId: string | undefined,
+  resolve: (id?: string) => Preset | undefined,
+  extension: { presetForSpawn(id?: string): { ok: boolean } | undefined } | null
+): string | undefined {
+  const { pluginPresetId } = presetOverlay(presetId, resolve);
+  return extension?.presetForSpawn(pluginPresetId)?.ok ? pluginPresetId : undefined;
 }
 
 export function menuPluginSkillPaths(presetId: string | undefined): string[] {
@@ -1199,6 +1209,14 @@ export function menuPluginSkillPaths(presetId: string | undefined): string[] {
     claude: enabledPlugins(readSettingsState()).skillPaths,
     extension: getExtensionPlugins(),
   });
+}
+
+/** 侧栏列 workflow 预设时的插件文件，与 spawn 同口径按生效的插件预设圈定 */
+export function menuPluginWorkflowPaths(presetId: string | undefined): string[] {
+  const extension = getExtensionPlugins();
+  return extension.workflowPathsForSpawn(
+    activePluginPresetForMenu(presetId, resolvePreset, extension)
+  );
 }
 
 interface PresetPromptKit {

@@ -1751,7 +1751,8 @@ export class SessionSupervisor {
           command.dcgPath,
           command.autoRejectApprovals ?? false,
           command.botDiscussMode,
-          command.instanceId
+          command.instanceId,
+          command.workflowPresetFiles
         );
         return;
       case 'spawn-child':
@@ -2392,7 +2393,8 @@ export class SessionSupervisor {
     dcgPath?: string,
     autoRejectApprovals = false,
     botDiscussMode = false,
-    instanceId?: string
+    instanceId?: string,
+    workflowPresetFiles: readonly string[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -3155,6 +3157,7 @@ export class SessionSupervisor {
       : undefined;
     const workflowRoots = workflowPresetRoots(remote ? undefined : cwd, {
       customDir: this.options.workflowDir,
+      pluginFiles: workflowPresetFiles,
     });
     const workflowRuns = new Map<string, AbortController>();
     const computer = !remote

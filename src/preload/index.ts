@@ -567,9 +567,12 @@ const electronAPI = {
       presetId?: string
     ): Promise<{ name: string; description: string }[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS, cwd, presetId),
-    /** 按会话列出工作流预设；项目根由 Main 从会话记录推导 */
-    listWorkflowPresets: (conversationId: string): Promise<WorkflowPresetSummary[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_LIST_WORKFLOW_PRESETS, conversationId),
+    /** 按会话列出工作流预设；项目根由 Main 从会话记录推导，presetId 决定哪些插件预设圈定的 workflow 计入 */
+    listWorkflowPresets: (
+      conversationId: string,
+      presetId?: string
+    ): Promise<WorkflowPresetSummary[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_LIST_WORKFLOW_PRESETS, conversationId, presetId),
     skillOccupancy: (ids: string[]): Promise<AssetOccupancyRow[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_SKILL_OCCUPANCY, ids),
     instructionOccupancy: (ids: string[]): Promise<AssetOccupancyRow[]> =>

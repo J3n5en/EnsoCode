@@ -1076,6 +1076,22 @@ export class ExtensionPluginService {
     });
   }
 
+  /** workflow 预设文件的绝对路径，与 skill 同口径按插件预设圈定 */
+  workflowPathsForSpawn(activePresetId?: string): string[] {
+    return this.enabled().flatMap(({ id, dir, manifest }) => {
+      const root = pluginPackagePath(this.options.root, id, dir);
+      const { scoped, selected } = presetSelection(
+        manifest,
+        id,
+        activePresetId,
+        (preset) => preset.workflows ?? []
+      );
+      return manifest.contributes.workflows
+        .filter((rel) => !scoped.has(rel) || selected.has(rel))
+        .map((rel) => resolve(root, rel));
+    });
+  }
+
   /**
    * 已启用插件声明的子代理类型；正文读不出的跳过并记日志。技能目录不受预设范围影响。
    * 传 scope 时按会话生效的插件预设过滤：被预设圈定的类型只在该预设下发；不传则列出全部（设置页、派发）

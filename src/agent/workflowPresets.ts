@@ -19,6 +19,8 @@ export interface WorkflowPreset extends WorkflowPresetSummary {
 export interface WorkflowPresetRoot {
   dir: string;
   source: Exclude<WorkflowPresetSource, 'builtin'>;
+  /** 只认这些 id（插件清单逐个列出文件）；缺省为目录下全部 */
+  ids?: readonly string[];
 }
 
 const ARG_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/;
@@ -80,18 +82,30 @@ export function parseWorkflowPreset(
 
 export function workflowPresetRoots(
   localCwd: string | undefined,
-  { customDir, home = os.homedir() }: { customDir?: string; home?: string } = {}
+  {
+    customDir,
+    home = os.homedir(),
+    pluginFiles = [],
+  }: { customDir?: string; home?: string; pluginFiles?: readonly string[] } = {}
 ): WorkflowPresetRoot[] {
+  const pluginIds = new Map<string, string[]>();
+  for (const file of pluginFiles) {
+    if (path.extname(file) !== '.js') continue;
+    const dir = path.dirname(file);
+    pluginIds.set(dir, [...(pluginIds.get(dir) ?? []), path.basename(file, '.js')]);
+  }
   return [
     ...(localCwd
       ? [{ dir: path.join(localCwd, '.agents', 'workflows'), source: 'project' as const }]
       : []),
     ...(customDir ? [{ dir: customDir, source: 'custom' as const }] : []),
-    { dir: path.join(home, '.agents', 'workflows'), source: 'global' },
+    { dir: path.join(home, '.agents', 'workflows'), source: 'global' as const },
+    ...[...pluginIds].map(([dir, ids]) => ({ dir, source: 'plugin' as const, ids })),
   ];
 }
 
 function readPresetFile(root: WorkflowPresetRoot, id: string): WorkflowPreset | null {
+  if (root.ids && !root.ids.includes(id)) return null;
   try {
     const file = path.join(root.dir, `${id}.js`);
     const stat = fs.statSync(file);
@@ -103,6 +117,7 @@ function readPresetFile(root: WorkflowPresetRoot, id: string): WorkflowPreset | 
 }
 
 function rootIds(root: WorkflowPresetRoot): string[] {
+  if (root.ids) return root.ids.filter(isWorkflowPresetId);
   try {
     return fs
       .readdirSync(root.dir)
