@@ -2843,6 +2843,37 @@ describe('typed Agent child projection', () => {
     );
   });
 
+  it('别的窗口中断的轮次（turn-completed.aborted）：本窗口无中断标记也不泵队列、不续跑目标', async () => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          queuedMessages: [{ id: 'q1', text: 'sent by other window' }],
+          goal: { text: 'ship', status: 'active' as const, autoTurns: 0, noProgressRuns: 0 },
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+
+    onAgentEvent?.({
+      type: 'turn-completed',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 2,
+      turnId: 't1',
+      aborted: true,
+    });
+    await Promise.resolve();
+
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q1', text: 'sent by other window' },
+    ]);
+  });
+
   it('轮次结束时压缩仍在排队则不投递，等压缩结束再发', async () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {

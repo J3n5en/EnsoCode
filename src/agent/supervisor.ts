@@ -404,6 +404,8 @@ interface ManagedSession {
   unattendedNote?: string;
   /** 本轮 pi 已做过回合内自动重试；轮次收口时清掉 */
   turnRetried?: boolean;
+  /** 本轮被 abort 命令中断：收口时随 turn-completed 下发，各窗口据此不泵队列；新轮起点清掉 */
+  turnAborted?: boolean;
   /** 已见终态 agent_end、待 agent_settled 收口；failTurn 等提前收口时清掉，settled 不再重复收 */
   settlePending?: boolean;
   /** 当前用户轮已做过一次空回复自动续跑 */
@@ -1798,6 +1800,7 @@ export class SessionSupervisor {
         }
         managed.promptedRequestIds.add(command.requestId);
         managed.currentTurnId = command.requestId;
+        managed.turnAborted = false;
         // 只有子代理 Run（Main 带 requestBudget 标记）计数；Bot 成员等不 arm，不计数
         if (command.requestBudget) managed.requestBudget?.arm();
         else managed.requestBudget?.disarm();
@@ -2272,6 +2275,7 @@ export class SessionSupervisor {
         if (retrying) {
           this.failTurn(managed, managed.lastRetryError ?? 'Auto-retry cancelled.');
         } else {
+          if (managed.status === 'running') managed.turnAborted = true;
           managed.turnRetried = false;
           managed.status = 'idle';
           this.emitStatus(managed);
@@ -4544,7 +4548,9 @@ export class SessionSupervisor {
   /** 本轮成功收口。budget：子代理因请求预算被强制停止，带上标记（及补报告的错误）交回已有输出。 */
   private completeTurn(managed: ManagedSession, budget?: { error?: string }): void {
     const turnId = managed.currentTurnId ?? randomUUID();
+    const aborted = managed.turnAborted === true;
     managed.currentTurnId = undefined;
+    managed.turnAborted = false;
     managed.turnRetried = false;
     // 预算只管一次 Run：收口即清零，之后用户自己发起的回合不计数
     managed.requestBudget?.disarm();
@@ -4564,6 +4570,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       ...(digest ? { digest } : {}),
+      ...(aborted ? { aborted: true as const } : {}),
       ...(budget ? { requestBudgetStop: true } : {}),
       ...(budget?.error ? { requestBudgetError: budget.error } : {}),
     });
@@ -4833,6 +4840,7 @@ export class SessionSupervisor {
     }
     if (resume) editUnfinishedAssistantForResume(managed.session);
     managed.currentTurnId = randomUUID();
+    managed.turnAborted = false;
     ensureAssistantUsage(managed.session.messages as unknown[]);
     void this.promptTracked(
       managed,
@@ -4994,6 +5002,7 @@ export class SessionSupervisor {
     const turnId = managed.currentTurnId ?? randomUUID();
     managed.currentTurnId = undefined;
     managed.turnRetried = false;
+    managed.turnAborted = false;
     managed.settlePending = false;
     managed.requestBudget?.disarm();
     managed.contextUsage.setPendingSnapshot(undefined);

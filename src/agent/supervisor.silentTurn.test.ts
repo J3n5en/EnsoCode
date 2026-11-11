@@ -571,6 +571,31 @@ describe('SessionSupervisor terminal turn handling', () => {
     await supervisor.shutdown();
   });
 
+  it('用户中断的轮次收口带 aborted：只读本地中断标记的其他窗口据此不泵队列；下一轮不沿用', async () => {
+    const { events, supervisor, parentSession } = await spawn();
+    parentSession.emit({ type: 'agent_start' });
+    await settle();
+    supervisor.handleCommand({ type: 'abort', identity: parent });
+    await settle();
+    parentSession.messages.push({ role: 'assistant', content: [], stopReason: 'aborted' });
+    parentSession.emit({ type: 'agent_end', willRetry: false });
+    parentSession.emit({ type: 'agent_settled' });
+    await settle();
+
+    parentSession.emit({ type: 'agent_start' });
+    parentSession.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'ok' }] });
+    parentSession.emit({ type: 'agent_end', willRetry: false });
+    parentSession.emit({ type: 'agent_settled' });
+    await settle();
+
+    const completed = events.filter((event) => event.type === 'turn-completed');
+    expect(completed).toHaveLength(2);
+    expect(completed[0]).toMatchObject({ aborted: true });
+    expect(completed[1]).not.toHaveProperty('aborted');
+
+    await supervisor.shutdown();
+  });
+
   it('重试倒计时中中断：已按失败收口，随后的 agent_settled 不再补发完成', async () => {
     const { events, supervisor, parentSession } = await spawn();
     parentSession.emit({ type: 'agent_start' });

@@ -1965,6 +1965,8 @@ export type AgentWorkerEvent =
       turnId: string;
       /** worker 切出的本轮压缩摘要，供 renderer 决定是否滚动刷新标题；纯工具轮可缺省 */
       digest?: TurnDigest;
+      /** 本轮被 abort 命令中断：不自动泵队列、不续跑目标（发起中断的未必是本窗口） */
+      aborted?: true;
       /** 子代理因请求预算被强制停止：已有部分输出随本次收口交回，不当作失败 */
       requestBudgetStop?: true;
       /** 预算停止后补报告那一轮出错：错误随结果交回，不丢已有输出 */
@@ -4576,6 +4578,7 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     case 'turn-completed':
       return isNonEmptyString(value.turnId) &&
         (value.digest === undefined || parseTurnDigest(value.digest)) &&
+        (value.aborted === undefined || value.aborted === true) &&
         (value.requestBudgetStop === undefined || value.requestBudgetStop === true) &&
         (value.requestBudgetError === undefined ||
           (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError)))

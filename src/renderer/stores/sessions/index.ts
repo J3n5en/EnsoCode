@@ -1882,9 +1882,13 @@ export const useSessionsStore = create<SessionsState>()(
           void recoverStaleSession(id, event.reason);
         }
         if (event.type === 'turn-completed' || event.type === 'turn-failed') {
-          // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口
-          if (get().conversations[id]?.abortRequested) {
-            set((state) => patch(state, id, { abortRequested: false }));
+          // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口。
+          // 中断标记只在发起窗口本地，别的窗口（如 PWA 完整模式）发起的中断靠 worker 的 aborted 认出
+          const aborted = event.type === 'turn-completed' && event.aborted === true;
+          if (get().conversations[id]?.abortRequested || aborted) {
+            if (get().conversations[id]?.abortRequested) {
+              set((state) => patch(state, id, { abortRequested: false }));
+            }
             return;
           }
           if (event.type !== 'turn-completed') return;
