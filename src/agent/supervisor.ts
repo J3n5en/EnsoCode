@@ -110,6 +110,7 @@ import { AgentControlInvoker } from './agentControl';
 import {
   createApplyPatchTool,
   createRemoteApplyPatchIo,
+  getApplyPatchPaths,
   validateApplyPatchTargets,
 } from './applyPatch';
 import { applyPatchResultExtension } from './applyPatchResultExtension';
@@ -224,6 +225,7 @@ import {
   createPluginEventsExtension,
   PluginEventInvoker,
 } from './pluginEvents';
+import { ReadLedger, withPathRecord, withPriorRead } from './priorRead';
 import {
   configurePrivacyMasking,
   installPrivacyMasking,
@@ -324,7 +326,7 @@ import { listWorkflowPresets, loadWorkflowPreset, workflowPresetRoots } from './
 import { WorkspaceClaims, withExclusiveCommand, withFileClaims } from './workspaceClaims';
 import { WORKSPACE_POLICY_PROMPT } from './workspacePolicy';
 import { WorkspaceSwitchGate, workspaceBranchContextExtension } from './workspaceSwitch';
-import { withWritePreflight, withWriteScope } from './writeScope';
+import { extractEditTargetPath, withWritePreflight, withWriteScope } from './writeScope';
 
 /** 子会话产物：实际 session、模型与精确工具集合。 */
 interface ChildSessionResult {
@@ -2566,8 +2568,19 @@ export class SessionSupervisor {
     // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座。
     // 远程会话经 operations 注入落到 ssh(grep 无注入点,换整个定义)
     const structuredById = new Map<string, unknown>();
+    // 改前须读只对本地工作区生效：远程会话的路径不在本机文件系统上
+    const readLedger = remoteOps ? undefined : new ReadLedger(cwd);
+    const targetPath = (params: unknown) => {
+      const target = extractEditTargetPath(params);
+      return target ? [target] : [];
+    };
+    const recordPaths = (definition: Def, paths: (params: unknown) => string[]): Def =>
+      readLedger ? withPathRecord(definition, readLedger, paths) : definition;
     const wrapRead = (definition: Def): Def =>
-      withReadTruncationMeta(withAgentRead(definition, () => structuredById));
+      recordPaths(
+        withReadTruncationMeta(withAgentRead(definition, () => structuredById)),
+        targetPath
+      );
     const readOnlyTools = (toolGate: ApprovalGate): Def[] => {
       const stock =
         remoteOps && sshExecutor
@@ -2668,15 +2681,23 @@ export class SessionSupervisor {
           ? [
               scoped(
                 'file-edit',
-                createApplyPatchTool({
-                  cwd,
-                  ...(patchIo ? { io: patchIo } : {}),
-                }) as unknown as Def,
+                recordPaths(
+                  createApplyPatchTool({
+                    cwd,
+                    ...(patchIo ? { io: patchIo } : {}),
+                  }) as unknown as Def,
+                  getApplyPatchPaths
+                ),
                 (params: unknown, signal: AbortSignal | undefined) =>
                   validateApplyPatchTargets(cwd, params, patchIo, signal)
               ),
             ]
-          : [scoped('file-edit', stockEdit), scoped('file-write', stockWrite)];
+          : [
+              scoped('file-edit', recordPaths(stockEdit, targetPath)),
+              ((write: Def) => (readLedger ? withPriorRead(write, readLedger, targetPath) : write))(
+                scoped('file-write', recordPaths(stockWrite, targetPath))
+              ),
+            ];
       return [
         ...readOnlyTools(toolGate),
         withApproval(
