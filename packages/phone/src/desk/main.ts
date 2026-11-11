@@ -83,6 +83,7 @@ const STATE_TEXT: Record<ConnState, string> = {
   'host-offline': '桌面不在线',
   offline: '已断开，正在重连…',
   unauthorized: '配对已失效',
+  replaced: '已在其他页面打开',
 };
 
 const LOADING_TEXT: Partial<Record<ConnState, string>> = {
@@ -111,6 +112,8 @@ function showState(state: ConnState): void {
   if (text) progress(text);
   if (state === 'unauthorized')
     splash(`配对已失效，请回到<a href="${PHONE_URL}">精简版</a>重新配对。`);
+  if (state === 'replaced')
+    splash(`已在其他页面打开，关掉那个页面或回到<a href="${PHONE_URL}">精简版</a>重连。`);
 }
 
 /** SW 需要能代理 /desk/* ：旧版 SW 没有 fetch 处理，先确保新版接管本页 */

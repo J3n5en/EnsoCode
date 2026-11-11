@@ -77,7 +77,14 @@ import { setHostTheme } from './theme';
  * 重连后按游标增量续传（游标失配则回落全量 snapshot）。
  */
 
-export type ConnState = 'connecting' | 'online' | 'host-offline' | 'unauthorized' | 'offline';
+export type ConnState =
+  | 'connecting'
+  | 'online'
+  | 'host-offline'
+  | 'unauthorized'
+  /** 同一配对已被另一个页面连上：停链、保留缓存，刷新页面可再连 */
+  | 'replaced'
+  | 'offline';
 
 /** 与桌面远程节点视图共用一份投影结构 */
 export type SessionView = GuestSessionView;
@@ -160,6 +167,8 @@ export class PairClient {
   private closed = false;
   /** 中继已告知配对被解除：与 closed（本端主动关闭）区分，前者要提示用户重新配对 */
   private revoked = false;
+  /** 被同角色新连接顶替：与 revoked 区分，配对没坏，只是这个页面不该再占着 */
+  private replaced = false;
   private subscribedId: string | null = null;
   private sessions = new Map<string, SessionView>();
   /** 分页请求在途标记（每会话一次一发，响应或换订阅时清） */
@@ -242,7 +251,13 @@ export class PairClient {
   }
 
   connect(): void {
-    if (this.closed || this.revoked || this.cacheLoading || (this.ws && this.ws.readyState < 2))
+    if (
+      this.closed ||
+      this.revoked ||
+      this.replaced ||
+      this.cacheLoading ||
+      (this.ws && this.ws.readyState < 2)
+    )
       return;
     this.replay.peerReset();
     if (!this.cacheReady) {
@@ -301,8 +316,13 @@ export class PairClient {
       this.heartbeat = null;
       this.ws = null;
       this.roomPrimed = false;
-      // 1008 = 凭据已失效；4001 = 同角色被顶替（已在其他页面打开）。都不重连。
-      if (code === 1008 || code === 4001 || reason === 'replaced' || this.revoked) {
+      // 4001 = 同角色被新连接顶替：另一个页面打开了同一配对。停链但不清缓存、不置 revoked
+      if (code === 4001 || reason === 'replaced') {
+        this.suspendReplaced();
+        return;
+      }
+      // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）
+      if (code === 1008 || this.revoked) {
         this.revoke();
         return;
       }
@@ -1061,6 +1081,25 @@ export class PairClient {
         cursor: this.cursors.get(id),
       }));
     void this.cache.save(this.device.pairId, { ...this.metadata, sessions }).catch(() => {});
+  }
+
+  /**
+   * 被同角色新连接顶替：停链、留缓存。
+   * 不能走 revoke——配对没坏，清缓存和「配对已失效」都会骗人；也不自动重连，
+   * 否则两个页面会互相顶替成环。用户刷新页面（新 client）自然就换到这个页面。
+   */
+  private suspendReplaced(): void {
+    this.replaced = true;
+    this.pendingDirectRestart = false;
+    this.stopSyncRetry();
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.direct.close();
+    this.heartbeat?.stop();
+    this.heartbeat = null;
+    this.dropVoice();
+    this.flushCache();
+    this.events.onState('replaced');
   }
 
   private revoke(): void {

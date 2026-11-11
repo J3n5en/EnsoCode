@@ -5,6 +5,7 @@ const OFFLINE_KEY: Record<Exclude<RemoteLinkState, 'online'>, string> = {
   connecting: 'Connecting…',
   'host-offline': 'Desktop is offline',
   unauthorized: 'Pairing expired',
+  replaced: 'Open in another page',
   offline: 'Reconnecting…',
 };
 

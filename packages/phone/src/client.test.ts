@@ -329,12 +329,14 @@ describe('PairClient 缓存与续传', () => {
     expect(events.onState).toHaveBeenLastCalledWith('unauthorized');
   });
 
-  it('收到 4001 不重连、进入终止态', async () => {
+  it('收到 4001 只停链：保留缓存、不重连、状态是 replaced 而不是配对失效', async () => {
     const socket = await start();
     const sockets = Socket.all.length;
+    const clears = vi.mocked(cache.clear).mock.calls.length;
     socket.close(4001, 'replaced');
     await settle();
-    expect(events.onState).toHaveBeenLastCalledWith('unauthorized');
+    expect(events.onState).toHaveBeenLastCalledWith('replaced');
+    expect(cache.clear).toHaveBeenCalledTimes(clears);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(Socket.all).toHaveLength(sockets);
     client.connect();
