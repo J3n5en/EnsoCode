@@ -305,8 +305,10 @@ function explore(cfg: Config): { states: number; counterexample?: string } {
   return { states: parent.size };
 }
 
+// 日常 pnpm test：sends=2，仍覆盖重复文本 a/b、1 次 snapshot、idle 三结局与 running queued。
+// ENSO_FORMAL_FULL=1（pnpm test:formal）恢复 sends=3 的完整界限。
 const core: Config = {
-  sends: 3,
+  sends: process.env.ENSO_FORMAL_FULL === '1' ? 3 : 2,
   texts: ['a', 'b'],
   snapshots: 1,
   withdraws: 0,
@@ -318,13 +320,13 @@ describe('乐观回显投递协议（有界穷举）', () => {
   it('每条消息恰好显示一次，静止后正文等于 worker、只剩被拒回显', () => {
     const result = explore(core);
     expect(result.counterexample).toBeUndefined();
-    expect(result.states).toBeGreaterThan(50_000);
+    expect(result.states).toBeGreaterThan(process.env.ENSO_FORMAL_FULL === '1' ? 50_000 : 4_000);
   }, 60_000);
 
   it('运行中撤回未读插话：撤回成功的不再显示，未撤成的照常送达', () => {
     const result = explore({ ...core, snapshots: 0, withdraws: 1 });
     expect(result.counterexample).toBeUndefined();
-    expect(result.states).toBeGreaterThan(10_000);
+    expect(result.states).toBeGreaterThan(process.env.ENSO_FORMAL_FULL === '1' ? 10_000 : 2_000);
   }, 60_000);
 
   // 已知发现：promptTracked / steerTracked 遇 disposition 'handled' 不发任何回执，回显永远 pending。

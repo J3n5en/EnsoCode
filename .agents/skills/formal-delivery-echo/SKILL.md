@@ -16,10 +16,10 @@ description: >
 ## 运行
 
 ```bash
-pnpm vitest run src/renderer/stores/sessions/deliveryEcho.formal.test.ts
+pnpm test:formal
 ```
 
-约 4 秒，`pnpm test` 也会跑它。工具是 vitest 内的广度优先状态探索，直接调用真实的 `applyAgentEvent`，无需额外安装。
+`pnpm test:formal`（`ENSO_FORMAL_FULL=1`）跑完整界限 `sends=3`；`pnpm test` 日常只跑 `sends=2` 的小界限。改动上述协议代码后必须跑完整界限。工具是 vitest 内的广度优先状态探索，直接调用真实的 `applyAgentEvent`，无需额外安装。
 
 ## 怎么读结果
 

@@ -102,7 +102,7 @@ afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
 - 不真实等待超时、轮询或退避：用 `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()`，或通过参数注入缩短时限。
 - 需要真实 git 仓库、子进程的用例，在 `beforeAll` 建一次模板，各用例复制副本，不要每条都从零 `git init`。
-- 穷举类验证（如 `deliveryEcho.formal.test.ts`）日常跑小界限，完整界限放单独脚本。
+- 穷举类验证（如 `deliveryEcho.formal.test.ts`）日常跑小界限，完整界限放单独脚本（`pnpm test:formal`）。
 - 单条用例超过约 500ms 视为需要优化。
 
 ## 参与模型的功能，真机验证至少跨两个厂商
