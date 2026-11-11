@@ -209,6 +209,13 @@ pnpm lint
 pnpm test
 ```
 
+无界面单次运行（评测容器、不打开窗口）见 [docs/enso-server-run.md](docs/enso-server-run.md)：
+
+```bash
+pnpm build:server:bundle
+node out/server/index.js run --prompt "..." --cwd . --output-format json
+```
+
 </details>
 
 <details>

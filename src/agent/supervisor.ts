@@ -33,6 +33,7 @@ import { WORKSPACE_WRITE_TOOL_ID } from '@shared/childProfileTools';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
 import type { PluginAgentSource } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan, PluginToolDescriptor } from '@shared/extensionPlugins/types';
+import { isHeadlessRun } from '@shared/headlessRun';
 import { HUMAN_REQUEST_TIMEOUT_MS } from '@shared/humanRequestTimeout';
 import type { ImageGenerationState } from '@shared/imageGeneration';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
@@ -184,6 +185,7 @@ import {
   registerCustomProviderModels,
 } from './customProviderRegistry';
 import { createDcgGuard } from './dcg';
+import { omitNamedTools } from './disallowedTools';
 import { createNormalizedEditTool } from './editTool';
 import type { EnsoCompactOptions } from './ensoCompact/types';
 import { ENSO_SYSTEM_PROMPT } from './ensoPrompt';
@@ -894,11 +896,14 @@ export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<Mo
   // 展示的却是联网发现结果。必须拆成两次并各自吞错，避免一个 provider 的发现服务异常
   // 连带另一个拿不到清单；失败方只回退自己的兜底，worker 仍能启动。
   // await 而非 fire-and-forget：resolveBaseModel 紧接着就要用这份清单。
-  await refreshWorkerProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
-  await refreshWorkerProviderModels(runtime, DEVIN_PROVIDER_ID);
-  await refreshWorkerProviderModels(runtime, QODER_PROVIDER_ID);
-  await refreshWorkerProviderModels(runtime, QODER_CN_PROVIDER_ID);
-  await refreshWorkerProviderModels(runtime, CURSOR_PROVIDER_ID);
+  // enso-server run 只允许打到用户配置的模型端点，不在启动时刷新订阅目录。
+  if (!isHeadlessRun()) {
+    await refreshWorkerProviderModels(runtime, ANTIGRAVITY_PROVIDER_ID);
+    await refreshWorkerProviderModels(runtime, DEVIN_PROVIDER_ID);
+    await refreshWorkerProviderModels(runtime, QODER_PROVIDER_ID);
+    await refreshWorkerProviderModels(runtime, QODER_CN_PROVIDER_ID);
+    await refreshWorkerProviderModels(runtime, CURSOR_PROVIDER_ID);
+  }
   installModelContextCompat(runtime);
   return runtime;
 }
@@ -2921,7 +2926,10 @@ export class SessionSupervisor {
             runaway: childRunaway,
             budget: childBudget,
           });
-        const subTools = isLockedEnso ? rawSubTools : decorateChild(rawSubTools);
+        const subTools = omitNamedTools(
+          isLockedEnso ? rawSubTools : decorateChild(rawSubTools),
+          disabledTools
+        );
         childCodemode.bindDeferredTools(deferredMcpLoader(childGate, decorateChild));
         const safeJournal =
           isLockedEnso && childIdentity
@@ -3243,12 +3251,15 @@ export class SessionSupervisor {
     );
     const planGated = (tools: Def[]): Def[] =>
       tools.map((tool) => withPlanGate(tool, { host: planHost, readonlyAgentTypes }));
-    const customTools = decorateSessionTools(
-      [
-        ...planGated(sessionTools),
-        ...builtin('plan', [createSubmitPlanTool(planHost, randomUUID)]),
-      ],
-      { runaway, budget }
+    const customTools = omitNamedTools(
+      decorateSessionTools(
+        [
+          ...planGated(sessionTools),
+          ...builtin('plan', [createSubmitPlanTool(planHost, randomUUID)]),
+        ],
+        { runaway, budget }
+      ),
+      disabledTools
     );
     codemodeHost.bindDeferredTools(
       deferredMcpLoader(gate, (tools) =>

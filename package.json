@@ -20,6 +20,7 @@
     "build:win": "pnpm build && electron-builder --win",
     "build:linux": "pnpm build && electron-builder --linux",
     "build:server": "pnpm build && vite build -c vite.server.config.ts",
+    "build:server:bundle": "vite build -c vite.server.config.ts",
     "pack:server": "node scripts/pack-server.mjs",
     "generate:themes": "npx tsx scripts/generate-themes.ts",
     "rtk:prepare": "node scripts/prepare-rtk.mjs",
@@ -30,6 +31,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "node --test scripts/rtk.test.mjs && vitest run",
+    "test:e2e:server": "ENSO_RUN_E2E=1 vitest run src/server/run/cli.e2e.test.ts",
     "test:watch": "vitest",
     "format": "biome format --write .",
     "postinstall": "node node_modules/electron/install.js && node scripts/fix-node-pty-helper.mjs"

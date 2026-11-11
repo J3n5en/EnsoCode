@@ -48,6 +48,7 @@ import {
 import { isRunning, runCommand, USAGE } from './cli';
 import { applyConfigEnv, readServerConfig } from './config';
 import { type PluginControlCommand, parseControlCommand } from './control';
+import { runCli } from './run/cli';
 import { registerServerUpdater } from './update/ipc';
 import type { ServerUpdater } from './update/serverUpdater';
 import { startWeb } from './web';
@@ -219,6 +220,10 @@ async function serve(web: WebConfig | null): Promise<void> {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  if (argv[0] === 'run') {
+    const code = await runCli(argv.slice(1));
+    process.exit(code);
+  }
   if (argv[0] === 'start') {
     const config = readServerConfig(app.getPath('userData'));
     if (!config.ok) {

@@ -27,11 +27,13 @@ const appRoot = path.resolve(
 );
 export const resourcesPath = path.join(appRoot, 'resources');
 
-const userData = path.resolve(
-  process.env.ENSO_DATA_DIR?.trim() || path.join(homedir(), '.enso-server')
-);
+/** 每次读取，这样 `enso-server run --data-dir` 能在入口解析后再生效。 */
+function dataDir(): string {
+  return path.resolve(process.env.ENSO_DATA_DIR?.trim() || path.join(homedir(), '.enso-server'));
+}
 
 function ensureUserData(): string {
+  const userData = dataDir();
   mkdirSync(userData, { recursive: true });
   return userData;
 }
@@ -53,7 +55,7 @@ export const app = {
       case 'home':
         return homedir();
       case 'appData':
-        return path.dirname(userData);
+        return path.dirname(dataDir());
       case 'logs':
         return path.join(ensureUserData(), 'logs');
       case 'downloads':
@@ -189,11 +191,19 @@ export const session = { defaultSession: inertSession, fromPartition: () => iner
 export const net = { fetch: globalThis.fetch.bind(globalThis) };
 
 class ForkedWorker extends EventEmitter {
+  private exited = false;
+
   constructor(private readonly child: ChildProcess) {
     super();
     child.on('spawn', () => this.emit('spawn'));
     child.on('message', (message) => this.emit('message', message));
-    child.on('exit', (code) => this.emit('exit', code ?? 0));
+    child.on('error', (error) => {
+      process.stderr.write(
+        `[enso-server] worker: ${error instanceof Error ? error.message : String(error)}\n`
+      );
+      this.finish(1);
+    });
+    child.on('exit', (code) => this.finish(code ?? 0));
   }
 
   get pid(): number | undefined {
@@ -205,19 +215,47 @@ class ForkedWorker extends EventEmitter {
   }
 
   kill(): boolean {
-    return this.child.kill();
+    const ok = this.child.kill();
+    const pid = this.child.pid;
+    const timer = setTimeout(() => {
+      if (this.exited || pid === undefined) return;
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // 进程已经退出
+      }
+    }, 2_000);
+    timer.unref?.();
+    return ok;
+  }
+
+  private finish(code: number): void {
+    if (this.exited) return;
+    this.exited = true;
+    this.emit('exit', code);
   }
 }
 
 export const utilityProcess = {
   fork(modulePath: string, args: string[], options: WorkerForkOptions) {
-    return new ForkedWorker(
-      fork(modulePath, args, {
-        env: options.env,
-        serialization: 'advanced',
-        stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-      })
-    );
+    // run 把 worker 的 stdout 接到本进程 stderr，避免诊断混进机器可读输出。
+    const headless = process.env.ENSO_HEADLESS_RUN === '1';
+    const child = fork(modulePath, args, {
+      env: options.env,
+      serialization: 'advanced',
+      stdio: headless
+        ? ['ignore', 'pipe', 'pipe', 'ipc']
+        : ['inherit', 'inherit', 'inherit', 'ipc'],
+    });
+    if (headless) {
+      child.stdout?.on('data', (chunk: Buffer) => {
+        process.stderr.write(chunk);
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        process.stderr.write(chunk);
+      });
+    }
+    return new ForkedWorker(child);
   },
 };
 

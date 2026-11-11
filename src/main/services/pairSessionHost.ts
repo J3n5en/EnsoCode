@@ -7,6 +7,7 @@ import {
   upsertCatalogEntry,
 } from '@shared/pair/headlessCatalog';
 import {
+  applyHeadlessGoalSignal,
   applyHeadlessQueueAction,
   emptyHeadlessRuntime,
   type HeadlessDelivery,
@@ -392,29 +393,68 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
     setRuntime(sessionId, { ...runtime, pendingAsks: runtime.pendingAsks + 1 });
     return;
   }
+  if (event.type === 'goal-signal') {
+    const next = applyHeadlessGoalSignal(runtime, event.kind, event.note);
+    setRuntime(sessionId, next);
+    persistRuntime(sessionId, next);
+    pushCatalog(sessionId, next);
+    return;
+  }
   if (event.type === 'status') {
     const status = event.status;
-    if (status === 'running') {
+    if (status === 'running' || status === 'idle' || status === 'failed') {
       const next = { ...runtime, started: true, status };
       setRuntime(sessionId, next);
       pushCatalog(sessionId, next);
-      return;
     }
-    if (status === 'idle' || status === 'failed') {
-      finishTurn(sessionId, { ...runtime, started: true, status });
-    }
+    // 轮次收口只跟 turn-* 走一次。status idle 总是先于 turn-completed，两边都泵会把 goal 续跑发两遍。
     return;
   }
-  if (event.type === 'turn-completed' || event.type === 'turn-failed') {
-    finishTurn(sessionId, { ...runtime, started: true, pendingApprovals: 0, pendingAsks: 0 });
+  if (event.type === 'turn-failed') {
+    const failed: HeadlessSessionRuntime = {
+      ...runtime,
+      started: true,
+      status: 'failed',
+      pendingApprovals: 0,
+      pendingAsks: 0,
+      ...(runtime.goal?.status === 'active'
+        ? { goal: { ...runtime.goal, status: 'paused' as const, note: event.error } }
+        : {}),
+    };
+    // goal 已暂停，这里只会投用户排队的消息；没有可投的就保留 failed
+    const idle = onHeadlessIdle(failed);
+    finishTurn(sessionId, idle.deliver ? idle : { runtime: { ...idle.runtime, status: 'failed' } });
+    return;
+  }
+  if (event.type === 'turn-completed') {
+    if (event.aborted || runtime.abortRequested) {
+      // 中止的轮不续跑 goal、不泵队列；只投「中断并发送」指定的那条
+      finishTurn(sessionId, {
+        runtime: {
+          ...runtime,
+          started: true,
+          status: 'idle',
+          abortRequested: false,
+          pendingApprovals: 0,
+          pendingAsks: 0,
+        },
+      });
+      return;
+    }
+    finishTurn(
+      sessionId,
+      onHeadlessIdle({ ...runtime, started: true, pendingApprovals: 0, pendingAsks: 0 })
+    );
   }
 }
 
-function finishTurn(sessionId: string, runtime: HeadlessSessionRuntime): void {
+function finishTurn(
+  sessionId: string,
+  settled: { runtime: HeadlessSessionRuntime; deliver?: HeadlessDelivery }
+): void {
   const interruptId = pendingInterrupt.get(sessionId);
-  const idle = onHeadlessIdle(runtime);
-  let next = idle.runtime;
-  let delivery = idle.deliver;
+  let next = settled.runtime;
+  let delivery = settled.deliver;
   if (interruptId) {
     pendingInterrupt.delete(sessionId);
     const sent = applyHeadlessQueueAction(

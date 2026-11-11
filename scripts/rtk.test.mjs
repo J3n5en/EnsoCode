@@ -90,7 +90,16 @@ test('bounds a stalled download with an abort timeout', async () => {
         downloadTimeoutMs: 5,
         fetchImpl: async (_url, { signal }) =>
           new Promise((_resolve, reject) => {
-            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            // AbortSignal.timeout 的计时器是 unref 的，Node 测试运行器会把事件循环当成已经空了。
+            const keepAlive = setInterval(() => {}, 1_000);
+            signal.addEventListener(
+              'abort',
+              () => {
+                clearInterval(keepAlive);
+                reject(signal.reason);
+              },
+              { once: true }
+            );
           }),
       }),
       /Timed out downloading RTK.*after 5ms/

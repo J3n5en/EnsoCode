@@ -57,4 +57,20 @@ describe('initializeWorkerRuntime', () => {
       }
     }
   );
+
+  it('enso-server run 不联网刷新订阅目录', async () => {
+    process.env.ENSO_HEADLESS_RUN = '1';
+    try {
+      const runtime = {
+        getProvider: vi.fn(),
+        registerProvider: vi.fn(),
+        refresh: vi.fn(),
+      } as unknown as ModelRuntime;
+      await expect(initializeWorkerRuntime(runtime)).resolves.toBe(runtime);
+      expect(runtime.refresh).not.toHaveBeenCalled();
+      expect(loadCursorProvider).toHaveBeenCalledWith(runtime);
+    } finally {
+      delete process.env.ENSO_HEADLESS_RUN;
+    }
+  });
 });

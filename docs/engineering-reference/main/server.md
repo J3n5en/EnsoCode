@@ -43,7 +43,7 @@ app 路径来自 `ENSO_DATA_DIR`（默认 `~/.enso-server`）与 `ENSO_APP_ROOT`
   - 打过补丁的 `@earendil-works/pi-coding-agent` 和 `@rahularya01/pi-cursor` 随包放在 `out/node_modules`。产物解析模块时会先命中这里，再往上找包级 `node_modules`。这里不能用 `bundleDependencies`：npm 会把它们的传递依赖也当成随包内容，结果不解压，留下空目录（例如 esbuild 的 install.js 缺失）。
   - `node-pty` 换成 `npm:@lydell/node-pty`：上游包在 Linux 上没有预编译产物，用户机器上不一定有编译工具链。
   - `node-llama-cpp` 不随包，本地 llama 能力缺失时会降级。rtk 也不随包。
-- 子命令：`start` 前台运行，`pair | devices | revoke | status | update` 经 `$ENSO_DATA_DIR/server.sock`（0600）操作运行中的宿主。`pair` 在终端打印二维码，并等待配对完成。`service install|uninstall` 写 systemd 单元（root 写系统级，其他用户写用户级），单元里只写 `ENSO_DATA_DIR`、`PATH`。`logs` 调用 journalctl。
+- 子命令：`start` 前台运行，`pair | devices | revoke | status | update` 经 `$ENSO_DATA_DIR/server.sock`（0600）操作运行中的宿主。`run` 不启动宿主，直接跑一轮会话，见 [enso-server run](../../enso-server-run.md)。`pair` 在终端打印二维码，并等待配对完成。`service install|uninstall` 写 systemd 单元（root 写系统级，其他用户写用户级），单元里只写 `ENSO_DATA_DIR`、`PATH`。`logs` 调用 journalctl。
 - 配置：`$ENSO_DATA_DIR/config.toml`（`src/server/config.ts`），`start` 时只补环境里没设的 `ENSO_*`，所以优先级是参数 > 环境变量 > 文件；未知键或类型不对直接拒绝启动。`service install` 把当时的 `ENSO_RELAY_URL`、`ENSO_NPM_REGISTRY` 和 web 参数写进这个文件而不写死在单元里，并总是 `restart`（已运行时 `enable --now` 不会重启）。旧版本写死在单元里的这些变量会盖过配置文件，`config` 向导检测到会提示重新注册。
 - `config` 向导（`src/server/setup/`）：公共中继 / 自己反代（打印 Caddy、nginx 示例）/ 自有域名 + Caddy（先查 A 记录是否指向本机公网 IP）/ `公网IP.nip.io` + Caddy。root 下用系统包管理器装 Caddy，Caddyfile 里只维护带标记的一段（发行版自带的 `:80` 示例整份替换），写前备份为 `.enso-bak`，`caddy validate` 不过就还原；Caddyfile 里已有用户手写的同域名站点时不再追加（否则 Caddy 报 ambiguous site definition）：已转发到本端口就沿用，否则提示手动改。最后探测本机端口和公开地址的 `/healthz`。系统操作经 `SetupSystem` 注入，流程有单测。
 - 同一数据目录只允许运行一个宿主：`start` 前先探测控制 socket；`service install` 发现前台实例正在运行时会拒绝安装。

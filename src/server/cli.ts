@@ -37,6 +37,7 @@ export const USAGE = `EnsoCode Server — 无界面宿主，手机 / 浏览器�
   service install [web 参数]  注册 systemd 服务（开机自启、崩溃拉起）；web 参数写入配置文件
   service uninstall          移除 systemd 服务
   logs                       跟随 systemd 服务日志
+  run [选项]                 无界面跑一轮真实会话（enso-server run --help）
 
 内置 web（默认关闭；开启后手机直接访问本机，不经公共中继）:
   --web                      开启

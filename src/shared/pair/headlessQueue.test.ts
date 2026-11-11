@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyHeadlessGoalSignal,
   applyHeadlessQueueAction,
   emptyHeadlessRuntime,
   GOAL_AUTO_TURN_LIMIT,
@@ -65,5 +66,36 @@ describe('headless queue', () => {
     const idle = onHeadlessIdle(runtime);
     expect(idle.deliver).toBeUndefined();
     expect(idle.runtime.goal?.status).toBe('paused');
+    expect(idle.runtime.goal?.note).toBe('automatic-turn limit (25) reached');
+  });
+
+  it('stops continuation after a goal signal', () => {
+    const runtime = {
+      ...emptyHeadlessRuntime(),
+      started: true,
+      status: 'idle' as const,
+      goal: { text: 'ship it', status: 'active' as const, autoTurns: 1 },
+    };
+    const completed = applyHeadlessGoalSignal(runtime, 'complete', 'shipped');
+    expect(completed.goal).toMatchObject({ status: 'completed', note: 'shipped' });
+    expect(onHeadlessIdle(completed).deliver).toBeUndefined();
+
+    const blocked = applyHeadlessGoalSignal(runtime, 'blocked', 'need a token');
+    expect(blocked.goal?.status).toBe('blocked');
+    const waiting = applyHeadlessGoalSignal(runtime, 'wait', 'ci');
+    expect(waiting.goal?.status).toBe('waiting');
+    expect(applyHeadlessGoalSignal(emptyHeadlessRuntime(), 'complete', 'x').goal).toBeUndefined();
+  });
+
+  it('honors a caller-supplied automatic turn limit', () => {
+    const runtime = {
+      ...emptyHeadlessRuntime(),
+      started: true,
+      status: 'idle' as const,
+      goal: { text: 'ship it', status: 'active' as const, autoTurns: 1 },
+    };
+    const idle = onHeadlessIdle(runtime, { autoTurnLimit: 1 });
+    expect(idle.deliver).toBeUndefined();
+    expect(idle.runtime.goal?.note).toBe('automatic-turn limit (1) reached');
   });
 });
