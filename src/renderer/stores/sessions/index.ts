@@ -199,6 +199,28 @@ function forgetUnknownSessionClocks(conversations: Record<string, unknown>): voi
   pruneSessionClocks(snapshotResyncAt, known);
 }
 
+/** task 子代理结束后 tab 先只读停留这么久再收进历史，避免一完成就消失 */
+const TASK_TAB_LINGER_MS = 8_000;
+/** 用户点 X 解雇的 coworker：回流 dismissed 时立即移除，不走停留 */
+const userDismissedCoworkers = new Set<string>();
+
+function dropCoworkerTab(
+  conversations: Record<string, Conversation>,
+  parentId: string,
+  coworkerId: string
+): void {
+  delete conversations[coworkerId];
+  const parent = conversations[parentId];
+  if (parent) {
+    conversations[parentId] = {
+      ...parent,
+      coworkerIds: (parent.coworkerIds ?? []).filter((id) => id !== coworkerId),
+      activeTabId: parent.activeTabId === coworkerId ? undefined : parent.activeTabId,
+    };
+  }
+  forgetUnknownSessionClocks(conversations);
+}
+
 /**
  * worker 回流的 child metadata 来源恒为 typed-mention、不带 mode；这两项沿用 Main 预约时的权威值。
  * 落盘的就是这份，Main 重启后靠它认领 agent-tool coworker。
@@ -1452,15 +1474,29 @@ export const useSessionsStore = create<SessionsState>()(
             const coworker = event.coworker;
             const conversations = { ...state.conversations, [id]: nextParent as Conversation };
             if (coworker.status === 'dismissed') {
-              delete conversations[coworker.id];
-              conversations[id] = {
-                ...(nextParent as Conversation),
-                coworkerIds: (parent.coworkerIds ?? []).filter(
-                  (coworkerId) => coworkerId !== coworker.id
-                ),
-                activeTabId: parent.activeTabId === coworker.id ? undefined : parent.activeTabId,
-              };
-              forgetUnknownSessionClocks(conversations);
+              const byUser = userDismissedCoworkers.delete(coworker.id);
+              const child = conversations[coworker.id];
+              if (!byUser && child?.child?.mode === 'task') {
+                conversations[coworker.id] = {
+                  ...child,
+                  started: false,
+                  spawning: false,
+                  ended: true,
+                  historyOnly: true,
+                };
+                setTimeout(
+                  () =>
+                    set((current) => {
+                      if (!current.conversations[coworker.id]?.ended) return current;
+                      const next = { ...current.conversations };
+                      dropCoworkerTab(next, id, coworker.id);
+                      return { conversations: next };
+                    }),
+                  TASK_TAB_LINGER_MS
+                );
+                return { conversations };
+              }
+              dropCoworkerTab(conversations, id, coworker.id);
               return { conversations };
             }
             const existing = conversations[coworker.id];
@@ -3920,8 +3956,10 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         async dismissCoworkerFromUI(parentId, coworkerId) {
+          userDismissedCoworkers.add(coworkerId);
           const result = await window.electronAPI.agent.dismissCoworker(parentId, coworkerId, true);
           if (result.ok) return;
+          userDismissedCoworkers.delete(coworkerId);
           const coworker = get().conversations[coworkerId];
           // 只兑底「worker/Main 侧本就没有实体」的死 tab（重启后未恢复）；
           // 活会话的 dismiss 失败不能静默吞 tab，否则 worker 侧会泄漏孤儿会话。
