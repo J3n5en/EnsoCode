@@ -3,8 +3,10 @@
 import type * as React from 'react';
 import type { PluginSlotName } from '../src/renderer/plugins/registry';
 import type {
+  BeforeAgentStartPayload,
   ContextUsagePayload,
   InputPayload,
+  ModelSelectPayload,
   PluginEventName,
   PluginSessionState,
   PluginSessionStatus,
@@ -207,6 +209,9 @@ export interface EnsoEventData {
   input: InputPayload;
   context_usage: ContextUsagePayload;
   session_status: SessionStatusPayload;
+  model_select: ModelSelectPayload;
+  /** 拦截时返回 `{ append }` 追加到本轮 system prompt；只在主会话触发 */
+  before_agent_start: BeforeAgentStartPayload;
 }
 
 export type EnsoToolResult = string | Pick<PluginToolResult, 'content' | 'details'>;

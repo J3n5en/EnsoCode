@@ -25,6 +25,33 @@ const errorsOf = (raw: unknown): string[] => {
 };
 
 describe('parseExtensionPluginManifest', () => {
+  it('before_agent_start 可拦截但不能 failClosed；model_select 只能观察', () => {
+    const withEvents = (events: unknown, permissions: string[]) => ({
+      ...base(),
+      permissions: ['agent.tool', ...permissions],
+      contributes: { ...base().contributes, events },
+    });
+    expect(
+      errorsOf(
+        withEvents(
+          [{ event: 'before_agent_start', mode: 'intercept' }, { event: 'model_select' }],
+          ['agent.intercept', 'agent.observe']
+        )
+      )
+    ).toEqual([]);
+    expect(
+      errorsOf(
+        withEvents(
+          [{ event: 'before_agent_start', mode: 'intercept', failClosed: true }],
+          ['agent.intercept']
+        )
+      )
+    ).not.toEqual([]);
+    expect(
+      errorsOf(withEvents([{ event: 'model_select', mode: 'intercept' }], ['agent.intercept']))
+    ).not.toEqual([]);
+  });
+
   it('statusItems 声明输入框底栏状态项，command 必须是本插件命令', () => {
     const withItems = (statusItems: unknown) => ({
       ...base(),

@@ -2,6 +2,7 @@ import { isReservedAgentTypeName } from '../builtinAgents';
 import { type ApprovalMode, THINKING_LEVELS, type ThinkingLevel } from '../types/agent';
 import { BUILTIN_AGENT_TYPES } from '../types/assets';
 import {
+  APPEND_ONLY_INTERCEPT_EVENTS,
   isInterceptEvent,
   PLUGIN_EVENTS,
   type PluginEventName,
@@ -993,6 +994,11 @@ function parseEventSubscription(raw: unknown): PluginEventSubscription | null {
   if (mode !== 'observe' && mode !== 'intercept') return null;
   if (mode === 'intercept' && !isInterceptEvent(event)) return null;
   if (raw.failClosed !== undefined && (typeof raw.failClosed !== 'boolean' || mode !== 'intercept'))
+    return null;
+  if (
+    raw.failClosed === true &&
+    (APPEND_ONLY_INTERCEPT_EVENTS as readonly string[]).includes(event)
+  )
     return null;
   let tools: string[] | undefined;
   if (raw.tools !== undefined) {

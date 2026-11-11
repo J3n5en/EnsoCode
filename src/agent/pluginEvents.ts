@@ -8,9 +8,12 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import {
   AGENT_END_TEXT_MAX,
+  BEFORE_AGENT_START_APPEND_MAX,
+  BEFORE_AGENT_START_PROMPT_MAX,
   CONTEXT_USAGE_BUCKETS,
   type ContextUsagePayload,
   isChildInterceptEvent,
+  type ModelSelectPayload,
   type PluginEventName,
   type PluginInterceptEvent,
 } from '@shared/extensionPlugins/events';
@@ -417,6 +420,53 @@ export function createPluginEventsExtension(invoker: PluginEventInvoker): Inline
             });
           }
           return result;
+        });
+      }
+      if (observe.has('model_select')) {
+        pi.on('model_select', (event) => {
+          const data: ModelSelectPayload = {
+            provider: event.model.provider,
+            modelId: event.model.id,
+            ...(event.previousModel
+              ? {
+                  previous: {
+                    provider: event.previousModel.provider,
+                    modelId: event.previousModel.id,
+                  },
+                }
+              : {}),
+            source: event.source,
+          };
+          invoker.notify('model_select', data);
+        });
+      }
+      // 子会话不追加：子代理的提示词由类型定义，插件上下文只给主会话
+      if (
+        !invoker.childSession &&
+        (intercepts('before_agent_start') || observe.has('before_agent_start'))
+      ) {
+        pi.on('before_agent_start', async (event) => {
+          const payload = {
+            prompt:
+              event.messageType === 'user'
+                ? event.prompt.slice(0, BEFORE_AGENT_START_PROMPT_MAX)
+                : '',
+            kind: event.messageType,
+          };
+          let append: string | undefined;
+          if (intercepts('before_agent_start')) {
+            try {
+              const raw = (await invoker.intercept('before_agent_start', payload)) as
+                | { append?: unknown }
+                | undefined;
+              if (typeof raw?.append === 'string' && raw.append.length > 0)
+                append = raw.append.slice(0, BEFORE_AGENT_START_APPEND_MAX);
+            } catch {
+              append = undefined;
+            }
+          }
+          if (observe.has('before_agent_start')) invoker.notify('before_agent_start', payload);
+          return append ? { systemPrompt: `${event.systemPrompt}\n\n${append}` } : undefined;
         });
       }
     },

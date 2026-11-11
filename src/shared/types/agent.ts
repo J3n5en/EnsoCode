@@ -38,6 +38,7 @@ import type {
 
 import {
   AGENT_END_TEXT_MAX,
+  BEFORE_AGENT_START_PROMPT_MAX,
   CONTEXT_PART_ITEMS,
   CONTEXT_PART_KINDS,
   CONTEXT_USAGE_BUCKETS,
@@ -45,6 +46,7 @@ import {
   isChildInterceptEvent,
   isInterceptEvent,
   PLUGIN_EVENTS,
+  PLUGIN_INTERCEPT_EVENTS,
 } from '../extensionPlugins/events';
 import {
   PLUGIN_INJECT_MAX_CHARS,
@@ -2356,7 +2358,8 @@ function isPluginEventPlan(value: unknown): value is PluginEventPlan {
   )
     return false;
   if (new Set(value.observe).size !== value.observe.length) return false;
-  if (!Array.isArray(value.intercept) || value.intercept.length > 3) return false;
+  if (!Array.isArray(value.intercept) || value.intercept.length > PLUGIN_INTERCEPT_EVENTS.length)
+    return false;
   const events = new Set<string>();
   for (const item of value.intercept) {
     if (!isRecord(item) || !hasOnlyKeys(item, ['event', 'tools']) || typeof item.event !== 'string')
@@ -2399,6 +2402,7 @@ const isPluginObserveData = (event: string, data: unknown): boolean => {
         (typeof data.text === 'string' && data.text.length <= AGENT_END_TEXT_MAX))
     );
   if (event === 'context_usage') return isContextUsagePayload(data);
+  if (event === 'model_select') return isModelSelectPayload(data);
   return (
     (event === 'session_start' || event === 'session_end' || event === 'after_compact') &&
     hasExactKeys(data, ['reason']) &&
@@ -2409,6 +2413,22 @@ const isPluginObserveData = (event: string, data: unknown): boolean => {
 
 const isTokenCount = (value: unknown): boolean =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+const isModelRefPart = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 256;
+
+const isModelSelectPayload = (data: Record<string, unknown>): boolean => {
+  if (!hasOnlyKeys(data, ['provider', 'modelId', 'previous', 'source'])) return false;
+  if (!isModelRefPart(data.provider) || !isModelRefPart(data.modelId)) return false;
+  if (data.source !== 'set' && data.source !== 'cycle' && data.source !== 'restore') return false;
+  if (data.previous === undefined) return true;
+  return (
+    isRecord(data.previous) &&
+    hasExactKeys(data.previous, ['provider', 'modelId']) &&
+    isModelRefPart(data.previous.provider) &&
+    isModelRefPart(data.previous.modelId)
+  );
+};
 
 const isTokenRecord = (value: unknown, keys: readonly string[]): boolean =>
   isRecord(value) && hasExactKeys(value, keys) && keys.every((key) => isTokenCount(value[key]));
@@ -2458,6 +2478,13 @@ const isContextPart = (value: unknown): boolean =>
 
 const isPluginInterceptPayload = (event: string, payload: unknown): boolean => {
   if (!isRecord(payload)) return false;
+  if (event === 'before_agent_start') {
+    return (
+      hasExactKeys(payload, ['prompt', 'kind']) &&
+      isBoundedText(payload.prompt, BEFORE_AGENT_START_PROMPT_MAX) &&
+      (payload.kind === 'user' || payload.kind === 'custom')
+    );
+  }
   if (event === 'before_compact') {
     return (
       hasExactKeys(payload, ['reason']) &&

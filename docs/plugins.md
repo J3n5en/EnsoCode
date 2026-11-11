@@ -285,6 +285,10 @@ export async function activate(enso) {
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
 | `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage?, parts?, turns? }` | 否 |
 | `session_status` | 主会话的汇总状态或挂起的提问 / 审批数变化时，所有项目的会话都会发 | `{ sessionId, state, previous, pendingAsks, pendingApprovals }`，见「会话状态」 | 否 |
+| `model_select` | 会话切换模型时（手动切换、循环切换、恢复会话） | `{ provider, modelId, previous?: { provider, modelId }, source }`，`source` 是 `set` / `cycle` / `restore` | 否 |
+| `before_agent_start` | 每轮回复开始前（用户消息，或插件消息触发的一轮），只在主会话 | `{ prompt, kind }`：`kind` 为 `user` 时 `prompt` 是用户消息正文（最多 64K 字符），为 `custom` 时是空串 | 返回 `{ append }` 把文本追加到本轮 system prompt 末尾；多个插件按 id 顺序用空行拼接，合计最多 16K 字符。只能追加，不能拦下，所以不接受 `failClosed` |
+
+要在派子代理之前检查或改写，拦截 `tool_call` 并写 `tools: ['subagent']`；要在消息发出前改写或吞掉，用 `input`。
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。插件进程没在运行、且不是常驻时，通知直接丢掉，不会为此拉起进程。主会话的 `before_compact` 也一样：只等已经在运行的插件，不会为了等待去拉起非常驻插件。
 
