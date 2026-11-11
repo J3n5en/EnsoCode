@@ -28,11 +28,15 @@ export interface RemoteBridge {
   consumeSettingsLink(): unknown;
   /** 离开桌面模式回手机版 */
   exitDesk(): void;
-  linkStatus(): RemoteLinkStatus;
-  onLinkStatus(callback: (status: RemoteLinkStatus) => void): () => void;
-  vapidPublicKey(): string | null;
-  setPushSubscription(subscription: RemotePushSubscription | null): void;
-  setPushPending(pending: RemotePushPending): void;
+  /**
+   * 手机壳专属：手机到桌面的链路与浏览器推送。节点设置窗口同样实现本接口，
+   * 但那侧没有这条链路，因此这组方法与 RemoteApi 一致按可选处理。
+   */
+  linkStatus?(): RemoteLinkStatus;
+  onLinkStatus?(callback: (status: RemoteLinkStatus) => void): () => void;
+  vapidPublicKey?(): string | null;
+  setPushSubscription?(subscription: RemotePushSubscription | null): void;
+  setPushPending?(pending: RemotePushPending): void;
 }
 
 /** web-preload 额外挂到 window.electronAPI.remote；桌面 preload 不提供 */

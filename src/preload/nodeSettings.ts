@@ -91,6 +91,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     closeSettings: () => ipcRenderer.send(IPC_CHANNELS.NODE_REMOTE_CLOSE),
     consumeSettingsLink: () => null,
     exitDesk: () => {},
+    // 不提供 linkStatus / onLinkStatus / vapidPublicKey / setPushSubscription / setPushPending：
+    // 节点设置窗口没有「手机→桌面」链路与浏览器推送，宿主设置页按缺省隐藏这组入口。
   };
   contextBridge.exposeInMainWorld('__ensoRemote', bridge);
   showStatus(TEXT.loading);
