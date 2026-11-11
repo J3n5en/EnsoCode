@@ -214,7 +214,7 @@ describe('TypeSafe settings', () => {
           onClose={vi.fn()}
         />
       );
-      expect(markup).toContain('data-option="chat"');
+      expect(markup).toContain('data-chat-models="chat"');
       expect(markup).not.toContain('typesafe');
     }
   );

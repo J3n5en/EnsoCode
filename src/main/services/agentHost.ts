@@ -589,8 +589,8 @@ export function agentTypeRegistrySnapshot(): AgentTypeRegistrySnapshot {
 
 /**
  * 解析模型引用并组装下发配置。只有显式 `allowVirtual` 的调用方得到 `config.virtual`；
- * 今天是会话主模型（含跟随父会话、set-model、插件预设换模）和子代理目录。
- * 其他场景（标题、代审、类型化 agent 的 fixed 模型、压缩摘要、btw…）落到虚拟引用时取其快模型（无则主模型）。
+ * 今天是会话主模型（含跟随父会话、set-model、插件预设换模）、子代理目录和类型化 agent 的 fixed 绑定。
+ * 其他场景（标题、代审、压缩摘要、btw…）落到虚拟引用时取其快模型（无则主模型）。
  */
 export function resolveModelSelection(
   providerId: string,
@@ -848,7 +848,8 @@ export function resolveAgentTypeSpawnConfig(
     const resolved = resolveModelSelection(
       definition.providerId,
       definition.modelId,
-      authenticatedAccountKeys
+      authenticatedAccountKeys,
+      { allowVirtual: true }
     );
     if (!resolved.ok) return { ok: false, error: resolved.error };
     selectedModel = resolved.selection;
@@ -2054,7 +2055,9 @@ export function configuredAgentTypes(
     const effectiveMode = mode === 'agent_pick' && !hasSubagentModels ? 'follow' : mode;
     const bound =
       effectiveMode === 'fixed' && entry.providerId && entry.modelId
-        ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
+        ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys, {
+            allowVirtual: true,
+          })
         : null;
     return {
       name: entry.name,
@@ -2084,7 +2087,9 @@ export function configuredAgentTypes(
       const resources = resolveAgentTypeResources(entry);
       const bound =
         entry.providerId && entry.modelId
-          ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
+          ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys, {
+              allowVirtual: true,
+            })
           : null;
       return {
         name: entry.typeKey,

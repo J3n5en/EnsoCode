@@ -1,12 +1,16 @@
 import { ENSO_AGENT_TYPE_KEY, isReservedAgentTypeName } from '@shared/builtinAgents';
 import { SUBAGENT_MODELS_CONFIGURE_PROMPT } from '@shared/i18n';
 import { MAX_MAX_ACTIVE_COWORKERS, MIN_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
-import { isClassifierOnlyProvider } from '@shared/providerCatalog';
-import type { AgentTypeEntry, AgentTypeModelMode } from '@shared/types';
-import { hasProviderCredentials, MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
+import type {
+  AgentTypeEntry,
+  AgentTypeModelMode,
+  MODEL_THINKING_LEVEL_OVERRIDES,
+} from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
+import { findVirtualModel } from '@shared/virtualModels';
 import { AlertCircle, Bot, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import * as React from 'react';
+import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,7 +34,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
-import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
+import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
 import { DetailRows, PickList, setFilteredIds } from './PresetsSettings';
@@ -137,6 +141,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
   const disabledBuiltins = useSettingsStore((state) => state.disabledBuiltinAgentTypes);
   const toggleBuiltin = useSettingsStore((state) => state.toggleBuiltinAgentType);
   const providers = useMaterializedProviders();
+  const virtualModels = useSettingsStore((state) => state.virtualModels);
   const [editing, setEditing] = React.useState<
     AgentTypeEntry | 'new' | { defaults: Omit<AgentTypeEntry, 'id'> } | null
   >(null);
@@ -204,6 +209,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
 
       {agentTypes.map((entry) => {
         const provider = providers.find((p) => p.id === entry.providerId);
+        const virtual = findVirtualModel(virtualModels, entry);
         const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
         const modeLabel =
           mode === 'agent_pick'
@@ -211,7 +217,9 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
               ? t('Picked by main agent')
               : `${t('Picked by main agent')} (${t('Follows the conversation model')})`
             : mode === 'fixed'
-              ? `${provider?.name ?? '?'} / ${entry.modelId}`
+              ? virtual
+                ? virtual.name
+                : `${provider?.name ?? '?'} / ${entry.modelId}`
               : t('Follows the conversation model');
         const thinkingChoice = mode === 'fixed' ? thinkingChoiceOf(entry) : '';
 
@@ -306,7 +314,8 @@ export function AgentTypeEditDialog({
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const providers = useMaterializedProviders();
+  const candidates = useUsableProviders();
+  const virtualModels = useSettingsStore((state) => state.virtualModels);
   const addAgentType = useSettingsStore((state) => state.addAgentType);
   const updateAgentType = useSettingsStore((state) => state.updateAgentType);
 
@@ -328,8 +337,8 @@ export function AgentTypeEditDialog({
   const toggleId = (list: string[], id: string): string[] =>
     list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 
-  const provider = providers.find((p) => p.id === providerId && !isClassifierOnlyProvider(p));
-  const models = (provider?.models ?? []).filter((m) => m.enabled !== false);
+  // 固定模型也允许绑虚拟条目：推理能力按主成员展示与钳位
+  const pickerThinkingLevel = thinking !== '' && thinking !== 'off' ? thinking : 'medium';
 
   const save = () => {
     const slug = slugify(name);
@@ -416,96 +425,30 @@ export function AgentTypeEditDialog({
             </Select>
           </Field>
           {modelMode === 'fixed' && (
-            <div className="grid grid-cols-3 gap-3">
-              <Field>
-                <FieldLabel>{t('Provider (optional)')}</FieldLabel>
-                <Select
-                  items={[
-                    { value: '', label: t('Select provider') || '选择服务商' },
-                    ...providers
-                      .filter(
-                        (p) =>
-                          p.enabled && hasProviderCredentials(p) && !isClassifierOnlyProvider(p)
-                      )
-                      .map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                  value={providerId}
-                  onValueChange={(value) => {
-                    setProviderId(value ?? '');
-                    setModelId('');
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                    <SelectItem value="">{t('Select provider') || '选择服务商'}</SelectItem>
-                    {providers
-                      .filter(
-                        (p) =>
-                          p.enabled && hasProviderCredentials(p) && !isClassifierOnlyProvider(p)
-                      )
-                      .map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                  </SelectPopup>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel>{t('Model')}</FieldLabel>
-                <Select
-                  disabled={!providerId}
-                  items={[
-                    { value: '', label: providerId ? t('Select model') : '—' },
-                    ...models.map((m) => ({ value: m.id, label: m.id })),
-                  ]}
-                  value={modelId}
-                  onValueChange={(value) => setModelId(value ?? '')}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                    <SelectItem value="">{providerId ? t('Select model') : '—'}</SelectItem>
-                    {models.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.id}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel>{t('Thinking level')}</FieldLabel>
-                <Select
-                  items={[
-                    { value: '', label: t('Follow conversation') },
-                    { value: 'off', label: t('Off') },
-                    ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({
-                      value: level,
-                      label: level,
-                    })),
-                  ]}
-                  value={thinking}
-                  onValueChange={(value) => setThinking((value ?? '') as ThinkingChoice)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                    <SelectItem value="">{t('Follow conversation')}</SelectItem>
-                    <SelectItem value="off">{t('Off')}</SelectItem>
-                    {MODEL_THINKING_LEVEL_OVERRIDES.map((level) => (
-                      <SelectItem key={level} value={level}>
-                        {level}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              </Field>
-            </div>
+            <Field>
+              <FieldLabel>{t('Model')}</FieldLabel>
+              <ModelPicker
+                providers={candidates}
+                virtualModels={virtualModels}
+                providerId={providerId}
+                modelId={modelId}
+                reasoningMode={thinking === '' ? 'follow' : thinking === 'off' ? 'off' : 'on'}
+                reasoningEnabled={thinking !== '' && thinking !== 'off'}
+                thinkingLevel={pickerThinkingLevel}
+                onReasoningModeChange={(mode, level) =>
+                  setThinking(mode === 'follow' ? '' : mode === 'off' ? 'off' : level)
+                }
+                onSelect={(nextProviderId, nextModelId) => {
+                  setProviderId(nextProviderId);
+                  setModelId(nextModelId);
+                }}
+                onReasoningChange={(enabled) => setThinking(enabled ? pickerThinkingLevel : 'off')}
+                onThinkingChange={(level) => setThinking(level)}
+                side="bottom"
+                triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+                zIndex={Z_INDEX.DROPDOWN_IN_MODAL}
+              />
+            </Field>
           )}
           <Field>
             <FieldLabel>{t('Toolset')}</FieldLabel>
