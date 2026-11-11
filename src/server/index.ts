@@ -103,6 +103,9 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
     case 'inject-anywhere':
     case 'inject-current':
       return plugins.setCrossSessionInject(command.id, command.action === 'inject-anywhere');
+    case 'dev-on':
+    case 'dev-off':
+      return plugins.setDevWatch(command.id, command.action === 'dev-on');
     case 'config-get':
       return plugins.configView(command.id);
     case 'restage':

@@ -9,6 +9,8 @@ const PLUGIN_ID_ACTIONS = [
   'uninstall',
   'inject-anywhere',
   'inject-current',
+  'dev-on',
+  'dev-off',
 ] as const;
 const PLUGIN_TOKEN_ACTIONS = ['commit', 'discard'] as const;
 

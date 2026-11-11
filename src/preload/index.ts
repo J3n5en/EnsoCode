@@ -1779,6 +1779,8 @@ const electronAPI = {
       allowed: boolean
     ): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT, id, allowed),
+    setDevWatch: (id: string, on: boolean): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_SET_DEV_WATCH, id, on),
     approvePending: (id: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_APPROVE_PENDING, id),
     rejectPending: (id: string): Promise<{ ok: boolean; error?: string }> =>

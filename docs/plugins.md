@@ -20,6 +20,12 @@
 - 远程使用：手机 PWA 的完整模式跑的是同一套界面，插件的挂点、补全、命令和侧栏页面都能用；安装、启停、授权、配置、看日志和重新安装只能在本机界面或服务端 CLI 上做。手机精简模式不加载插件界面，插件工具仍由桌面端的 Agent 正常调用。
 - 有配置项的插件：设置页插件行的齿轮按钮，或 `enso-server plugin config <id>`（查看）/ `enso-server plugin config <id> key=value`（设置；`key=` 留空会在终端里提示输入，不进 shell 历史；`--unset key` 清除）。
 
+### 开发工具
+
+- 开发模式：从目录安装的插件，在设置页插件详情里打开「开发模式」，或 `enso-server plugin dev <id>`（`dev-off` 关闭）。目录里的文件改动停下约 400ms 后自动从来源重装；隐藏文件、`node_modules` 和 zip 的改动不算。授权没变大时直接替换，变大时停下并在插件行显示错误，需要「从来源重新安装」走确认。开关只在内存里，重启后关闭。
+- 打包：`enso-server plugin pack <目录> [--out <zip>]` 先按安装时的规则校验清单，再把目录打成 zip，排除隐藏文件、`node_modules`、`test/`、zip 和 `enso-testing.mjs`。条目按路径排序、时间戳固定，同样的内容得到同样的 sha256，输出里给出大小和哈希。
+- 测试：`enso-server plugin testing <目录>` 写入零依赖的 `enso-testing.mjs` 和示例 `test/main.test.mjs`。`mountMain(activate, { config?, host? })` 用一个假的 `enso` 调起 `activate`，返回 `tool(name, args, ctx?)`、`command(id, ctx?)`、`fire(event, data, ctx?)`、`schedule(id)`、`method(name, args, ctx?)` 去调注册的处理函数；宿主调用记在 `calls` 里（如 `{ api: 'ui.status.update', args }`），返回值由 `host['ui.status.update']` 这样的函数提供。在插件目录运行 `node --test`。
+
 ## 清单 `enso-plugin.json`
 
 不超过 256KB，必须是 JSON 对象，`schemaVersion` 固定为 `1`。未知字段会被忽略并给出警告。

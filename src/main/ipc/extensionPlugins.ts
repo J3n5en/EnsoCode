@@ -318,6 +318,11 @@ export function registerExtensionPluginHandlers(): void {
     }
   );
 
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_SET_DEV_WATCH, (_e, id: unknown, on: unknown) => {
+    if (!isId(id) || typeof on !== 'boolean') return { ok: false, error: '参数不合法' };
+    return plugins().setDevWatch(id, on);
+  });
+
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_APPROVE_PENDING, (_e, id: unknown) => {
     if (!isId(id)) return { ok: false, error: '参数不合法' };
     return plugins().approvePending(id);

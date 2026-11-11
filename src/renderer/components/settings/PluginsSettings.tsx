@@ -844,6 +844,11 @@ export function EnsoPluginsSettings({
                         受信任界面
                       </Badge>
                     )}
+                    {plugin.devWatch && (
+                      <Badge variant="secondary" className="text-[11px]">
+                        开发模式
+                      </Badge>
+                    )}
                     {plugin.resident && (
                       <Badge
                         variant={plugin.running ? 'secondary' : 'outline'}
@@ -1039,6 +1044,27 @@ export function EnsoPluginsSettings({
                           plugin.id,
                           allowed
                         )
+                      }
+                    />
+                  </div>
+                )}
+                {plugin.devWatch !== undefined && (
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span>
+                      <span className="block">开发模式：目录改动后自动重装</span>
+                      <span className="block text-muted-foreground">
+                        授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭
+                      </span>
+                    </span>
+                    <Switch
+                      aria-label="开发模式：目录改动后自动重装"
+                      checked={plugin.devWatch}
+                      onCheckedChange={(on) =>
+                        void window.electronAPI.extensionPlugins
+                          .setDevWatch(plugin.id, on)
+                          .then((res) => {
+                            if (!res.ok && res.error) addToast({ title: res.error });
+                          })
                       }
                     />
                   </div>

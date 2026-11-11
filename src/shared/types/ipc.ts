@@ -556,6 +556,7 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_DISCARD: 'extension-plugins:discard',
   EXTENSION_PLUGINS_SET_ENABLED: 'extension-plugins:set-enabled',
   EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT: 'extension-plugins:set-cross-session-inject',
+  EXTENSION_PLUGINS_SET_DEV_WATCH: 'extension-plugins:set-dev-watch',
   EXTENSION_PLUGINS_APPROVE_PENDING: 'extension-plugins:approve-pending',
   EXTENSION_PLUGINS_REJECT_PENDING: 'extension-plugins:reject-pending',
   EXTENSION_PLUGINS_UNINSTALL: 'extension-plugins:uninstall',

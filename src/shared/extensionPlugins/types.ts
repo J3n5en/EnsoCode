@@ -64,6 +64,8 @@ export interface ExtensionPluginSummary {
   lastError?: { at: number; message: string };
   /** 安装来源；有就能「从来源重新安装」。本地路径不下发 */
   source?: { kind: 'dir' | 'zip' | 'market' } | { kind: 'url'; url: string };
+  /** 目录来源才有：开发模式是否开着（改动后自动重装） */
+  devWatch?: boolean;
   /** 检查更新发现的新版本（GitHub 或插件市场来源） */
   availableVersion?: string;
   /** 最近一次检查更新失败的原因 */

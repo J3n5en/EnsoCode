@@ -108,6 +108,60 @@ async function install(files: Record<string, string>) {
 }
 
 describe('ExtensionPluginService', () => {
+  it('开发模式：目录来源的插件改动后自动重装，授权扩大时停下并报错', async () => {
+    const watchers = new Map<string, () => void>();
+    const closed: string[] = [];
+    const dev = new ExtensionPluginService({
+      root: temp('plugins-dev-'),
+      hostVersion: '0.2.12',
+      hostPath: '/unused',
+      env: {},
+      fork: () => new InProcessChild() as never,
+      devWatch: (dir, onChange) => {
+        watchers.set(dir, onChange);
+        return { close: () => closed.push(dir) };
+      },
+      devReloadDelayMs: 0,
+      gate: {
+        fetch: vi.fn(),
+        notify: () => true,
+        composer: async () => null,
+        mcpTools: async () => [],
+        mcpCall: async () => ({ content: '', isError: false }),
+        now: () => Date.now(),
+      },
+    });
+    const dir = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    const staged = await dev.stage({ kind: 'dir', path: dir });
+    if (!staged.ok) throw new Error(staged.error);
+    await dev.commit(staged.preview.token);
+    expect(dev.list()[0]?.devWatch).toBe(false);
+    expect(dev.setDevWatch('example.demo', true)).toEqual({ ok: true });
+    expect(dev.list()[0]?.devWatch).toBe(true);
+    expect(watchers.has(dir)).toBe(true);
+
+    writeFileSync(join(dir, 'enso-plugin.json'), manifest({ version: '1.0.1' }));
+    await dev.devReloadNow('example.demo');
+    expect(dev.list()[0]?.version).toBe('1.0.1');
+
+    writeFileSync(
+      join(dir, 'enso-plugin.json'),
+      manifest({ version: '1.0.2', permissions: ['agent.tool', 'ui.notify'] })
+    );
+    await dev.devReloadNow('example.demo');
+    expect(dev.list()[0]?.version).toBe('1.0.1');
+    expect(dev.list()[0]?.lastError?.message).toContain('授权扩大');
+
+    expect(dev.setDevWatch('example.demo', false)).toEqual({ ok: true });
+    expect(closed).toEqual([dir]);
+    await dev.dispose();
+  });
+
+  it('开发模式只对目录来源开放', async () => {
+    await service.stage({ kind: 'dir', path: writePlugin({ 'enso-plugin.json': manifest() }) });
+    expect(service.setDevWatch('missing.plugin', true)).toMatchObject({ ok: false });
+  });
+
   it('只含主题的插件：预览带样式能力，启用后摘要列出主题、资源可读', async () => {
     const themeManifest = JSON.stringify({
       schemaVersion: 1,
