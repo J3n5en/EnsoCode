@@ -70,6 +70,7 @@ import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import { DEFAULT_SSH_TIMEOUT_SECONDS } from '@shared/sshTimeout';
 import { replacePersonaParagraph } from '@shared/systemPrompt';
+import { toolBatchDigest } from '@shared/toolBatchLabel';
 import { prependTurnNote } from '@shared/turnNotes';
 import type {
   AgentCommand,
@@ -4310,6 +4311,14 @@ export class SessionSupervisor {
       case 'turn_start':
         managed.requestStartMs = Date.now();
         return;
+      case 'turn_end': {
+        // 父会话的工具批次交给 Main 生成一句话标签（子代理不生成）
+        if (managed.childIdentity || managed.coworkerName) return;
+        const digest = toolBatchDigest(event.message, event.toolResults);
+        if (digest)
+          this.options.emit({ type: 'tool-batch-completed', identity: managed.identity, digest });
+        return;
+      }
       case 'message_start': {
         const index = managed.messages.length;
         const message = projectMessage(event.message);

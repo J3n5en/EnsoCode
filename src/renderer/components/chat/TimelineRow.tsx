@@ -1057,6 +1057,7 @@ function SessionCustomRow({ entry }: { entry: AgentSessionCustomEntry }) {
     );
   }
 
+  if (entry.kind === 'tool-batch-label') return null;
   const receipt = entry.receipt;
   const succeeded = receipt.outcome === 'succeeded';
   return (
@@ -1806,11 +1807,13 @@ function ToolGroupRow({
         : t('{{count}} tool calls', { count: item.count });
   const detail = explore
     ? [explore.goal, t('{{count}} tool calls', { count: item.count })].filter(Boolean)
-    : activity
-      ? activityParts
-      : compact
-        ? explored
-        : parts;
+    : item.summary && !item.exploring
+      ? [item.summary]
+      : activity
+        ? activityParts
+        : compact
+          ? explored
+          : parts;
   const head = (
     <button
       type="button"

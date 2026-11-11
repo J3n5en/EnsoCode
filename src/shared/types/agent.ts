@@ -89,6 +89,7 @@ import { parseRtkToolStats, type RtkToolStats } from '../rtk';
 import { resolveShellLimits, type ShellLimits } from '../shellLimits';
 import { parseSmartCompactMode, type SmartCompactMode } from '../smartCompactMode';
 import { parseSshTimeoutSeconds } from '../sshTimeout';
+import { parseToolBatchDigest, type ToolBatchDigest } from '../toolBatchLabel';
 import {
   isWebSearchChainEntry,
   WEB_SEARCH_CHAIN_MAX,
@@ -1120,7 +1121,9 @@ export type AgentSessionCustomEntry =
       message: string;
       at: number;
     }
-  | { kind: 'capability-receipt'; receipt: CapabilityReceipt };
+  | { kind: 'capability-receipt'; receipt: CapabilityReceipt }
+  /** 工具批次一句话标签：callId 为批次首个工具调用 id，时间线工具组头据此显示 */
+  | { kind: 'tool-batch-label'; callId: string; label: string; at: number };
 
 export type SafeJournalRecord =
   | { type: 'safe-user-text'; text: string; at: number }
@@ -1884,6 +1887,7 @@ export type RendererAgentEvent =
       | PluginMcpResultEvent
       | { type: 'oauth-pool-select' }
       | { type: 'privacy-mask-ledger' }
+      | { type: 'tool-batch-completed' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2197,6 +2201,12 @@ export type AgentWorkerEvent =
       type: 'title-generated';
       conversationId: string;
       title: string;
+    }
+  | {
+      /** 父会话一个工具批次结束：Main 旁路消费生成标签，不进渲染层事件流、不占 seq */
+      type: 'tool-batch-completed';
+      identity: SessionIdentity;
+      digest: ToolBatchDigest;
     }
   | {
       /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
@@ -3238,6 +3248,16 @@ export function parseAgentSessionCustomEntry(value: unknown): AgentSessionCustom
     if (!hasExactKeys(value, ['kind', 'receipt'])) return null;
     const receipt = parseCapabilityReceipt(value.receipt);
     return receipt ? { kind: 'capability-receipt', receipt } : null;
+  }
+  if (value.kind === 'tool-batch-label') {
+    return hasExactKeys(value, ['kind', 'callId', 'label', 'at']) &&
+      isNonEmptyString(value.callId) &&
+      isNonEmptyString(value.label) &&
+      value.label.length <= 200 &&
+      typeof value.at === 'number' &&
+      Number.isFinite(value.at)
+      ? (value as unknown as AgentSessionCustomEntry)
+      : null;
   }
   const child = parseSafeChildRef(value.child);
   if (!child || typeof value.at !== 'number' || !Number.isFinite(value.at)) return null;
@@ -4407,6 +4427,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     return hasExactKeys(value, ['type', 'conversationId', 'error']) &&
       isNonEmptyString(value.conversationId) &&
       isNonEmptyString(value.error)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'tool-batch-completed') {
+    return hasExactKeys(value, ['type', 'identity', 'digest']) &&
+      parseSessionIdentity(value.identity) &&
+      parseToolBatchDigest(value.digest)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

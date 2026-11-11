@@ -1805,6 +1805,28 @@ describe('buildTimeline', () => {
     });
   });
 
+  it('工具批次标签不单独成行，挂到批次首个工具行上', () => {
+    const messages: ProjectedMessage[] = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'c1', name: 'grep', arguments: { pattern: 'x' } },
+          { type: 'toolCall', id: 'c2', name: 'read', arguments: { path: 'a' } },
+        ],
+        timestamp: 10,
+      } as ProjectedMessage,
+    ];
+    const timeline = buildTimeline(messages, false, [
+      { kind: 'tool-batch-label', callId: 'c1', label: 'Searched auth', at: 20 },
+    ]);
+    expect(timeline.some((item) => item.kind === 'session-custom')).toBe(false);
+    const tools = timeline.filter((item) => item.kind === 'tool');
+    expect(tools.map((item) => (item.kind === 'tool' ? item.batchLabel : null))).toEqual([
+      'Searched auth',
+      undefined,
+    ]);
+  });
+
   it('keeps the complete child capability receipt in a custom timeline row', () => {
     const receiptEntry = {
       kind: 'capability-receipt' as const,
@@ -2137,6 +2159,20 @@ describe('foldTimeline', () => {
     const group = folded[1] as Extract<TimelineItem, { kind: 'tool-group' }>;
     expect(group.count).toBe(3);
     expect(group.stats).toEqual({ commands: 1, reads: 1, searches: 1, others: 0 });
+    expect(group.summary).toBeUndefined();
+  });
+
+  it('组头带上组内批次标签，按出现顺序去重拼接', () => {
+    const items = [
+      { ...toolItem('t1', 'bash'), batchLabel: 'Ran tests' },
+      toolItem('t2', 'read'),
+      { ...toolItem('t3', 'grep'), batchLabel: 'Searched auth/' },
+      { ...toolItem('t4', 'grep'), batchLabel: 'Ran tests' },
+      textItem('x'),
+    ] as TimelineItem[];
+    const folded = foldTimeline(items, false, new Set());
+    const group = folded[0] as Extract<TimelineItem, { kind: 'tool-group' }>;
+    expect(group.summary).toBe('Ran tests · Searched auth/');
   });
 
   it('不足 3 条工具不折叠', () => {

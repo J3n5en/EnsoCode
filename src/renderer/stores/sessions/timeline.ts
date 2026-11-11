@@ -121,6 +121,8 @@ export type TimelineItem =
       subagentTitles?: Record<string, string>;
       /** 插件工具写出的产出文件；其它缺省 */
       pluginArtifacts?: PluginArtifactInfo[];
+      /** 本行是工具批次首个调用且已生成一句话标签时的标签；其它缺省 */
+      batchLabel?: string;
     }
   | {
       kind: 'tool-group';
@@ -135,6 +137,8 @@ export type TimelineItem =
       activity?: { thinking: number; workedMs: number };
       /** 成对的 explore_mark → explore_fold 探索组：组头展开只给目标与结果，steps 时才平铺过程；其它组缺省 */
       explore?: { goal: string; report: string; steps: boolean };
+      /** 组内工具批次的一句话标签（按出现顺序去重拼接）；没有标签时缺省 */
+      summary?: string;
       /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
       children: TimelineItem[];
     }
@@ -863,7 +867,8 @@ function buildMessageTimeline(
   toolOutputs?: Record<string, string>,
   pendingApprovals?: readonly ApprovalRequestInfo[],
   toolStartedAt?: Record<string, number>,
-  historyBaseIndex = 0
+  historyBaseIndex = 0,
+  batchLabels?: ReadonlyMap<string, string>
 ): TimelineItem[] {
   const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
@@ -1261,6 +1266,7 @@ function buildMessageTimeline(
             ...(subagent?.op ? { subagentOp: subagent.op } : {}),
             ...(subagent?.titles ? { subagentTitles: subagent.titles } : {}),
             ...(result?.pluginArtifacts ? { pluginArtifacts: result.pluginArtifacts } : {}),
+            ...(batchLabels?.has(part.id) ? { batchLabel: batchLabels.get(part.id) } : {}),
             ...(result || !toolStartedAt ? {} : { startedAt: toolStartedAt[part.id] ?? null }),
           });
           return;
@@ -1490,6 +1496,13 @@ export function buildTimeline(
   }
 ): TimelineItem[] {
   const historyBaseIndex = options?.historyBaseIndex ?? 0;
+  // 工具批次标签不单独成行，挂到批次首个工具行上供组头取用
+  const batchLabels = new Map<string, string>();
+  const rowEntries: Exclude<AgentSessionCustomEntry, { kind: 'tool-batch-label' }>[] = [];
+  for (const entry of customEntries) {
+    if (entry.kind === 'tool-batch-label') batchLabels.set(entry.callId, entry.label);
+    else rowEntries.push(entry);
+  }
   const messageItems = buildMessageTimeline(
     messages,
     running,
@@ -1497,10 +1510,11 @@ export function buildTimeline(
     options?.toolOutputs,
     options?.pendingApprovals,
     options?.toolStartedAt,
-    historyBaseIndex
+    historyBaseIndex,
+    batchLabels
   );
   const merged =
-    customEntries.length === 0
+    rowEntries.length === 0
       ? messageItems
       : [
           ...messageItems.map((item, order) => ({
@@ -1508,7 +1522,7 @@ export function buildTimeline(
             at: messageItemTime(item, messages, historyBaseIndex),
             order,
           })),
-          ...customEntries.map((entry, index) => ({
+          ...rowEntries.map((entry, index) => ({
             item: {
               kind: 'session-custom' as const,
               key:
@@ -1629,6 +1643,18 @@ function classifyTool(
 
 const READ_ONLY_TOOLS = new Set(['read', ...SEARCH_TOOLS]);
 
+/** 组内工具批次标签：含嵌套组的子行，按出现顺序去重拼接；一条都没有时 undefined */
+export function toolGroupSummary(rows: readonly TimelineItem[]): string | undefined {
+  const labels: string[] = [];
+  const visit = (row: TimelineItem) => {
+    if (row.kind === 'tool-group') row.children.forEach(visit);
+    else if (row.kind === 'tool' && row.batchLabel && !labels.includes(row.batchLabel))
+      labels.push(row.batchLabel);
+  };
+  rows.forEach(visit);
+  return labels.length > 0 ? labels.join(' · ') : undefined;
+}
+
 const READ_FILE_PROGRAMS = new Set(['cat', 'bat', 'head', 'tail', 'less', 'more', 'nl', 'tac']);
 
 /** 精简模式下按「探索」处理的工具行：只读工具，或只读的 bash 命令 */
@@ -1741,6 +1767,7 @@ function activitySegment(
   }
   const key = `group-${segment[0].key}`;
   const expanded = expandedKeys.has(key);
+  const summary = toolGroupSummary(segment);
   const group: TimelineItem = {
     kind: 'tool-group',
     key,
@@ -1749,6 +1776,7 @@ function activitySegment(
     stats,
     exploring: false,
     activity: { thinking, workedMs },
+    ...(summary ? { summary } : {}),
     children: segment,
   };
   return expanded ? [group, ...segment.flatMap(withExploreChildren)] : [group];
@@ -2053,6 +2081,7 @@ function foldPrepared(
       }
       const key = `group-${segment[0].key}`;
       const expanded = expandedKeys.has(key);
+      const summary = toolGroupSummary(groupRows);
       result.push({
         kind: 'tool-group',
         key,
@@ -2066,6 +2095,7 @@ function foldPrepared(
             groupRows.some(
               (s) => s.kind === 'tool' && (s.state === 'running' || s.state === 'reviewing')
             )),
+        ...(summary ? { summary } : {}),
         children: groupRows,
       });
       // 展开：原始顺序全量平铺；收拢：仅钉住的行跟在组头后
