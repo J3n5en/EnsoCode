@@ -364,8 +364,15 @@ describe('enso-server plugin validate / init', () => {
     await runPluginCommand(['validate', dir], d);
     expect(out.join('\n')).toContain('通过');
     execFileSync(
-      'pnpm',
-      ['exec', 'tsc', '-p', join(dir, 'jsconfig.json'), '--pretty', 'false', '--noEmit'],
+      process.execPath,
+      [
+        join(process.cwd(), 'node_modules/typescript/bin/tsc'),
+        '-p',
+        join(dir, 'jsconfig.json'),
+        '--pretty',
+        'false',
+        '--noEmit',
+      ],
       { encoding: 'utf8' }
     );
     await expect(runPluginCommand(['init', dir], d)).rejects.toThrow('已经有');

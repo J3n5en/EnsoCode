@@ -4,13 +4,36 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { SHELL_LIMITS } from '@shared/shellLimits';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type BackgroundTaskManager, withBackground } from '../backgroundTasks';
 import { ForegroundDetachedError } from '../foregroundCommand';
 import { toBashRuntimePath, withRtkOptimization } from './index';
 import { bindPowerShellRtk } from './powershell';
 
 const tempDirs: string[] = [];
+let rtkHome = '';
+let rtkBinary = '';
+
+beforeAll(() => {
+  rtkHome = mkdtempSync(path.join(tmpdir(), 'enso-rtk-bin-'));
+  rtkBinary = path.join(rtkHome, 'rtk');
+  writeFileSync(
+    rtkBinary,
+    `#!/usr/bin/env node
+if (process.env.ENSO_FAKE_RTK_WARMUP) process.exit(0);
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
+new Function('require', readFileSync(join(__dirname, 'body.js'), 'utf8'))(require);
+`
+  );
+  chmodSync(rtkBinary, 0o755);
+  // macOS 首次执行新建的可执行文件要过安全评估，负载高时可达秒级，会挤爆被测的真实超时；在此预付一次
+  spawnSync(rtkBinary, [], { env: { ...process.env, ENSO_FAKE_RTK_WARMUP: '1' } });
+});
+
+afterAll(() => {
+  rmSync(rtkHome, { recursive: true, force: true });
+});
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -23,16 +46,8 @@ function tempDir(name: string): string {
 }
 
 function fakeRtk(body: string): string {
-  const dir = tempDir('enso-rtk-bin-');
-  const file = path.join(dir, 'rtk');
-  writeFileSync(
-    file,
-    `#!/usr/bin/env node\nif (process.env.ENSO_FAKE_RTK_WARMUP) process.exit(0);\n${body}\n`
-  );
-  chmodSync(file, 0o755);
-  // macOS 首次执行新建的可执行文件要过安全评估，负载高时可达秒级，会挤爆被测的真实超时；在此预付
-  spawnSync(file, [], { env: { ...process.env, ENSO_FAKE_RTK_WARMUP: '1' } });
-  return file;
+  writeFileSync(path.join(rtkHome, 'body.js'), body);
+  return rtkBinary;
 }
 
 function baseTool(name: 'bash' | 'powershell' = 'bash') {

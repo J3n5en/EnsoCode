@@ -1,8 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type CheckpointHost,
   createCheckpoint,
@@ -20,19 +28,29 @@ const runGit = (cwd: string, ...args: string[]): string =>
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
 
 let root: string;
+let templateRoot: string;
+
+beforeAll(() => {
+  templateRoot = mkdtempSync(join(tmpdir(), 'enso-cp-tpl-'));
+  runGit(templateRoot, 'init', '-q', '-b', 'main');
+  runGit(templateRoot, 'config', 'user.name', 'test');
+  runGit(templateRoot, 'config', 'user.email', 'test@test');
+  writeFileSync(join(templateRoot, 'a.txt'), 'v1\n');
+  runGit(templateRoot, 'add', '.');
+  runGit(templateRoot, 'commit', '-q', '-m', 'init');
+});
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'enso-cp-test-'));
-  runGit(root, 'init', '-q', '-b', 'main');
-  runGit(root, 'config', 'user.name', 'test');
-  runGit(root, 'config', 'user.email', 'test@test');
-  writeFileSync(join(root, 'a.txt'), 'v1\n');
-  runGit(root, 'add', '.');
-  runGit(root, 'commit', '-q', '-m', 'init');
+  rmSync(root, { recursive: true, force: true });
+  cpSync(templateRoot, root, { recursive: true });
 });
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
+});
+afterAll(() => {
+  rmSync(templateRoot, { recursive: true, force: true });
 });
 
 describe('createCheckpoint / restoreCheckpoint', () => {

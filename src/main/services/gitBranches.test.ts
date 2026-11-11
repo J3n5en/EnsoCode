@@ -1,27 +1,43 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readWorkspaceBranches, switchWorkspaceBranch, workspaceIdentityPath } from './gitBranches';
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
+let templateRoot: string;
 let root: string;
 let repo: string;
+beforeAll(() => {
+  templateRoot = mkdtempSync(join(tmpdir(), 'enso-branches-tpl-'));
+  const templateRepo = join(templateRoot, 'repo');
+  git(templateRoot, 'init', '-q', '-b', 'main', templateRepo);
+  git(templateRepo, 'config', 'user.name', 'test');
+  git(templateRepo, 'config', 'user.email', 'test@example.com');
+  writeFileSync(join(templateRepo, 'file.txt'), 'main\n');
+  git(templateRepo, 'add', '.');
+  git(templateRepo, 'commit', '-qm', 'initial');
+  git(templateRepo, 'branch', 'feature');
+});
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'enso-branches-'));
+  rmSync(root, { recursive: true, force: true });
+  cpSync(templateRoot, root, { recursive: true });
   repo = join(root, 'repo');
-  git(root, 'init', '-q', '-b', 'main', repo);
-  git(repo, 'config', 'user.name', 'test');
-  git(repo, 'config', 'user.email', 'test@example.com');
-  writeFileSync(join(repo, 'file.txt'), 'main\n');
-  git(repo, 'add', '.');
-  git(repo, 'commit', '-qm', 'initial');
-  git(repo, 'branch', 'feature');
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterAll(() => rmSync(templateRoot, { recursive: true, force: true }));
 
 describe('workspace branches', () => {
   it('resolves the default branch from cached origin HEAD without changing the checkout', async () => {
