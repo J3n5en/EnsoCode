@@ -4,7 +4,7 @@ import { openSidePanelPluginView } from '@/lib/sidePanelDock';
 import { useSessionsStore } from '@/stores/sessions';
 import { displayedConversationId } from '@/stores/sessions/chatChrome';
 import { newInterceptBreakers } from './breakers';
-import { mergePluginCommands, setPluginCommands } from './commands';
+import { pluginCommandRefs, setPluginCommands } from './commands';
 import { handleDraftRequest, prefillDraft } from './draftBridge';
 import { createRendererDeps, loadPluginRenderer } from './loader';
 import { setPluginIcons } from './PluginIcon';
@@ -61,15 +61,7 @@ export function PluginUiHost() {
         }
         const enabled = list.filter((plugin) => plugin.state === 'enabled');
         setPluginIcons(Object.fromEntries(list.flatMap((p) => (p.icon ? [[p.id, p.icon]] : []))));
-        setPluginCommands(
-          enabled.flatMap((plugin) =>
-            mergePluginCommands(plugin.commands, plugin.dynamicCommands).map((command) => ({
-              pluginId: plugin.id,
-              pluginName: plugin.name,
-              ...command,
-            }))
-          )
-        );
+        setPluginCommands(pluginCommandRefs(list));
         setPluginViews(
           enabled.flatMap((plugin) =>
             plugin.views.map((view) => ({

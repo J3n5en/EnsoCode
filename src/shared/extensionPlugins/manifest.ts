@@ -48,6 +48,26 @@ export interface PluginAgentToolContrib {
 export interface PluginCommandContrib {
   id: string;
   title: string;
+  /** 默认快捷键，形如 mod+shift+k；用户可在设置里改 */
+  key?: string;
+}
+
+const KEY_NAME =
+  /^(?:[a-z0-9]|f(?:[1-9]|1[0-2])|[,./;'[\]\\=`-]|arrow(?:up|down|left|right)|enter|space|tab|backspace|delete|home|end|pageup|pagedown)$/;
+
+/** 快捷键串：修饰键按 mod、ctrl、alt、shift 顺序，至少一个非 shift 修饰键 */
+export function isPluginKeyBinding(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const parts = value.split('+');
+  const key = parts.pop() ?? '';
+  const order = ['mod', 'ctrl', 'alt', 'shift'];
+  let last = -1;
+  for (const part of parts) {
+    const at = order.indexOf(part);
+    if (at <= last) return false;
+    last = at;
+  }
+  return parts.some((part) => part !== 'shift') && KEY_NAME.test(key);
 }
 export interface PluginViewContrib {
   id: string;
@@ -452,10 +472,16 @@ export function parseExtensionPluginManifest(
       !isRecord(cmd) ||
       typeof cmd.id !== 'string' ||
       !LOCAL_ID.test(cmd.id) ||
-      !isNonEmptyString(cmd.title, 60)
+      !isNonEmptyString(cmd.title, 60) ||
+      (cmd.key !== undefined && !isPluginKeyBinding(cmd.key))
     )
       errors.push('命令不合法');
-    else commands.push({ id: cmd.id, title: cmd.title as string });
+    else
+      commands.push({
+        id: cmd.id,
+        title: cmd.title as string,
+        ...(cmd.key !== undefined ? { key: cmd.key as string } : {}),
+      });
   }
   uniqueIds(commands, '命令');
 

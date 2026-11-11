@@ -137,7 +137,8 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
 ### 贡献
 
 - `agentTools`：`{ name, description, parameters, timeoutMs? }`。`timeoutMs` 是 1000 到 600000 的整数，缺省 60 秒。`name` 匹配 `^[a-z][a-z0-9_]*$`，不能含 `__`。`description` 最长 1024 字符。`parameters` 必须是 `type` 为 `object` 的 JSON Schema。模型看到的工具名是 `plugin_<id>__<name>`，其中 id 的 `.` 换成 `-`，总长不超过 64 字符。
-- `commands`：`{ id, title }`。`id` 匹配 `^[a-z][a-z0-9-]{0,31}$`。启用后出现在输入框的 `/` 菜单里，名字是 `/<插件 id>:<命令 id>`，选中立即执行，不进草稿也不发消息。执行算用户操作，可以改草稿；侧栏等独立输入框里 `ctx.sessionId` 为 `null`。失败时界面提示错误信息。
+- `commands`：`{ id, title, key? }`。`id` 匹配 `^[a-z][a-z0-9-]{0,31}$`。启用后出现在输入框的 `/` 菜单里，名字是 `/<插件 id>:<命令 id>`，选中立即执行，不进草稿也不发消息。执行算用户操作，可以改草稿；侧栏等独立输入框里 `ctx.sessionId` 为 `null`。失败时界面提示错误信息。
+  - `key` 是默认快捷键，如 `mod+shift+k`：修饰键按 `mod`、`ctrl`、`alt`、`shift` 顺序写，至少一个不是 `shift`；`mod` 在 macOS 是 ⌘，其他平台是 Ctrl。按下时对当前会话执行，`ctx.sessionId` 为当前标签的会话。内置快捷键优先，多个插件抢同一个键时先装的生效；用户可以在设置的快捷键页改键或删除。
 - `views`：`{ id, title, entry }`。`title` 最长 40 字符，`entry` 必须是 `.html`。
 - `triggers`：`{ symbol, name }`。`symbol` 只能是 `#`，`@` 和 `/` 归 Enso 自己用。
 - `skills`：skill 目录的相对路径，随插件下发给新会话。

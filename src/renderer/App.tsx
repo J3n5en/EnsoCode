@@ -50,7 +50,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { ToastProvider } from '@/components/ui/toast';
+import { addToast, ToastProvider } from '@/components/ui/toast';
 import { useAutoArchiveScan } from '@/hooks/useAutoArchiveScan';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useDockBadge } from '@/hooks/useDockBadge';
@@ -69,6 +69,8 @@ import {
 } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
+import { pluginCommands, runPluginCommand } from '@/plugins/commands';
+import { resolvePluginKeybindings } from '@/plugins/keybindings';
 import { PluginNotices } from '@/plugins/PluginNotices';
 import { PluginUiHost } from '@/plugins/PluginUiHost';
 import { useBotsStore } from '@/stores/bots';
@@ -353,6 +355,21 @@ export default function App() {
       } else if (pressed === bindings['search-workspace']) {
         e.preventDefault();
         setSearchOpen(true);
+      } else if (!remote) {
+        const command = resolvePluginKeybindings(
+          pluginCommands(),
+          keybindings,
+          bindings
+        ).byBinding.get(pressed);
+        if (!command) return;
+        e.preventDefault();
+        const sessions = useSessionsStore.getState();
+        const parent = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+        void runPluginCommand(command, parent ? (parent.activeTabId ?? parent.id) : null).then(
+          (error) => {
+            if (error) addToast({ type: 'error', title: command.title, description: error });
+          }
+        );
       }
     };
     window.addEventListener('keydown', onKeyDown);

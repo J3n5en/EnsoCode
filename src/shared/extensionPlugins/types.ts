@@ -13,7 +13,7 @@ export interface ExtensionPluginSummary {
   state: 'disabled' | 'enabled' | 'crashed';
   permissions: ExtensionPluginPermission[];
   tools: { name: string; description: string }[];
-  commands: { id: string; title: string }[];
+  commands: { id: string; title: string; key?: string }[];
   /** entry 是安装目录内的相对路径，渲染层经 asset 通道取内容 */
   views: { id: string; title: string; entry: string }[];
   /** path / css 是安装目录内的相对路径，渲染层经 asset 通道取；没同意样式能力时不带 css */

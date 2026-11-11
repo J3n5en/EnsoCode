@@ -25,6 +25,23 @@ const errorsOf = (raw: unknown): string[] => {
 };
 
 describe('parseExtensionPluginManifest', () => {
+  it('命令可带默认快捷键，必须含 mod/ctrl/alt 且键名合法', () => {
+    const withKey = (key: unknown) => ({
+      ...base(),
+      contributes: { ...base().contributes, commands: [{ id: 'run', title: 'Run', key }] },
+    });
+    const ok = parseExtensionPluginManifest(withKey('mod+shift+k'), '0.2.12');
+    expect(ok.ok && ok.manifest.contributes.commands).toEqual([
+      { id: 'run', title: 'Run', key: 'mod+shift+k' },
+    ]);
+    for (const key of ['alt+f5', 'ctrl+alt+arrowup', 'mod+,']) {
+      expect(errorsOf(withKey(key))).toEqual([]);
+    }
+    for (const key of ['k', 'shift+k', 'mod+', 'mod+foo', 'shift+mod+k', 'MOD+K', 1]) {
+      expect(errorsOf(withKey(key))).toContain('命令不合法');
+    }
+  });
+
   it('接受合法清单并补齐缺省字段', () => {
     const result = parseExtensionPluginManifest(base(), '0.2.12');
     expect(result.ok).toBe(true);
