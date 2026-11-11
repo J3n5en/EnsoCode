@@ -209,6 +209,13 @@ pnpm lint
 pnpm test
 ```
 
+Headless one-shot runs (eval containers, no window) are documented in [docs/enso-server-run.md](docs/enso-server-run.md):
+
+```bash
+pnpm build:server:bundle
+node out/server/index.js run --prompt "..." --cwd . --output-format json
+```
+
 </details>
 
 <details>

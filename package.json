@@ -20,6 +20,7 @@
     "build:win": "pnpm build && electron-builder --win",
     "build:linux": "pnpm build && electron-builder --linux",
     "build:server": "pnpm build && vite build -c vite.server.config.ts",
+    "build:server:bundle": "vite build -c vite.server.config.ts",
     "pack:server": "node scripts/pack-server.mjs",
     "generate:themes": "npx tsx scripts/generate-themes.ts",
     "rtk:prepare": "node scripts/prepare-rtk.mjs",

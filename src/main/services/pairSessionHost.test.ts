@@ -1,6 +1,6 @@
 import type { CatalogEntry } from '@enso/pair';
 import type { RendererAgentEvent } from '@shared/types/agent';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   rows: {} as Record<string, Record<string, unknown>>,
@@ -148,6 +148,35 @@ describe('headless stall watchdog', () => {
     }
     expect(agent.abort).toHaveBeenCalledTimes(4);
     expect(agent.retry).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('headless goal continuation', () => {
+  it('pumps an active goal once across status idle and turn-completed', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    applyPairQueueActionHeadless({ type: 'goal-set', sessionId: SID, text: 'ship it' });
+    const prompt = agent.prompt as Mock;
+    expect(prompt).toHaveBeenCalledTimes(1);
+    prompt.mockClear();
+    handlePairHeadlessAgentEvent(status('running'));
+    handlePairHeadlessAgentEvent(status('idle'));
+    expect(prompt).not.toHaveBeenCalled();
+    handlePairHeadlessAgentEvent(event({ type: 'turn-completed', turnId: 't1' }));
+    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(String(prompt.mock.calls[0]?.[1])).toContain('ship it');
+  });
+
+  it('does not continue after goal_complete', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    applyPairQueueActionHeadless({ type: 'goal-set', sessionId: SID, text: 'ship it' });
+    (agent.prompt as Mock).mockClear();
+    handlePairHeadlessAgentEvent(event({ type: 'goal-signal', kind: 'complete', note: 'shipped' }));
+    handlePairHeadlessAgentEvent(status('idle'));
+    handlePairHeadlessAgentEvent(event({ type: 'turn-completed', turnId: 't2' }));
+    expect(agent.prompt).not.toHaveBeenCalled();
+    expect(mocks.rows[SID].goal).toMatchObject({ status: 'completed', note: 'shipped' });
   });
 });
 

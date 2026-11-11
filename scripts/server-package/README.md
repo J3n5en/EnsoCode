@@ -27,6 +27,7 @@ enso-server logs
 | `update` | 检查并安装新版本后重启 |
 | `service install\|uninstall` | 注册 / 移除 systemd 服务 |
 | `logs` | 跟随服务日志 |
+| `run` | 不启动宿主，对一个目录跑一轮真实会话。`enso-server run --help` |
 
 设置保存在 `$ENSO_DATA_DIR/config.toml`（`enso-server config` 生成，可手改，改完重启服务生效）：
 
@@ -41,6 +42,15 @@ public_url = "https://enso.example.com"
 ```
 
 环境变量：`ENSO_DATA_DIR`（默认 `~/.enso-server`）、`ENSO_RELAY_URL`、`ENSO_WEB` / `ENSO_WEB_HOST` / `ENSO_WEB_PORT` / `ENSO_PUBLIC_URL`。优先级：命令行参数 > 环境变量 > 配置文件。`service install` 只把 `ENSO_DATA_DIR`、`PATH` 写进服务；当时的 `ENSO_RELAY_URL`、`ENSO_NPM_REGISTRY` 和 web 参数写进配置文件。
+
+单次评测运行不需要 `start`：
+
+```bash
+enso-server run --prompt "..." --cwd /workspace --mode full \
+  --api openai-completions --output-format json --usage-log /tmp/usage.jsonl
+```
+
+供应商可以用 `--api-key`、`--base-url`、`--model`，或 `ENSO_API_KEY`、`ENSO_BASE_URL`、`ENSO_MODEL`（也接受 `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` 和对应的 `*_BASE_URL`）。退出码、JSON 和用量日志见仓库 `docs/enso-server-run.md`。
 
 ## 内置 web（可选）
 

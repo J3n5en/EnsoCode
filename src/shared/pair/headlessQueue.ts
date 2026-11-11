@@ -102,7 +102,10 @@ function flushQueue(runtime: HeadlessSessionRuntime): {
   };
 }
 
-function continueGoal(runtime: HeadlessSessionRuntime): {
+function continueGoal(
+  runtime: HeadlessSessionRuntime,
+  autoTurnLimit = GOAL_AUTO_TURN_LIMIT
+): {
   runtime: HeadlessSessionRuntime;
   deliver?: HeadlessDelivery;
 } {
@@ -110,11 +113,15 @@ function continueGoal(runtime: HeadlessSessionRuntime): {
   if (!canFlush(runtime) || goal?.status !== 'active' || runtime.queued.length > 0) {
     return { runtime };
   }
-  if (goal.autoTurns >= GOAL_AUTO_TURN_LIMIT) {
+  if (goal.autoTurns >= autoTurnLimit) {
     return {
       runtime: {
         ...runtime,
-        goal: { ...goal, status: 'paused', note: 'automatic-turn limit (25) reached' },
+        goal: {
+          ...goal,
+          status: 'paused',
+          note: `automatic-turn limit (${autoTurnLimit}) reached`,
+        },
       },
     };
   }
@@ -128,8 +135,21 @@ function continueGoal(runtime: HeadlessSessionRuntime): {
   };
 }
 
+export function applyHeadlessGoalSignal(
+  runtime: HeadlessSessionRuntime,
+  kind: 'complete' | 'blocked' | 'wait',
+  note: string
+): HeadlessSessionRuntime {
+  if (!runtime.goal) return runtime;
+  const status = kind === 'complete' ? 'completed' : kind === 'blocked' ? 'blocked' : 'waiting';
+  return { ...runtime, goal: { ...runtime.goal, status, note } };
+}
+
 /** 轮次收束：先清中断标记，再投队列，最后续跑 goal。 */
-export function onHeadlessIdle(runtime: HeadlessSessionRuntime): {
+export function onHeadlessIdle(
+  runtime: HeadlessSessionRuntime,
+  options?: { autoTurnLimit?: number }
+): {
   runtime: HeadlessSessionRuntime;
   deliver?: HeadlessDelivery;
 } {
@@ -142,7 +162,7 @@ export function onHeadlessIdle(runtime: HeadlessSessionRuntime): {
   if (runtime.abortRequested) return { runtime: next };
   const queued = flushQueue(next);
   if (queued.deliver) return queued;
-  return continueGoal(queued.runtime);
+  return continueGoal(queued.runtime, options?.autoTurnLimit);
 }
 
 export function applyHeadlessQueueAction(
