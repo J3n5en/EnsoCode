@@ -819,6 +819,8 @@ export function isCompactRow(item: TimelineItem): boolean {
 
 /** 手机 PWA 没有 subtle-foreground token，回落到 muted-foreground */
 const SUBTLE_TEXT = 'text-[color:var(--subtle-foreground,var(--muted-foreground))]';
+/** 进行中的文字统一呼吸 */
+const BREATHE = 'animate-pulse motion-reduce:animate-none';
 
 /** 每轮回复的头部：Bot 发言人身份 + 本轮模型 + 回复时间，挂在本轮首个回复行之上，运行中即可见 */
 export function ReplyHeader({
@@ -1598,9 +1600,7 @@ function ThinkingRow({
           <Brain className={cn('size-3', streaming && 'animate-pulse text-brand')} />
         </span>
         {streaming ? (
-          <span className="t-shimmer" data-text={t('Thinking…')}>
-            {t('Thinking…')}
-          </span>
+          <span className={cn('text-foreground', BREATHE)}>{t('Thinking…')}</span>
         ) : durationMs !== null ? (
           <span>{t('Thought for {{duration}}', { duration: formatDuration(durationMs) })}</span>
         ) : (
@@ -1795,7 +1795,7 @@ function ToolGroupRow({
     if (item.count > 0) activityParts.push(t('{{count}} tool calls', { count: item.count }));
   }
   const explore = item.explore;
-  const breathing = Boolean(activity && item.live);
+  const breathing = item.exploring || Boolean(activity && item.live);
   const label = explore
     ? toolLabel('explore_fold', t)
     : activity
@@ -1832,26 +1832,16 @@ function ToolGroupRow({
       )}
     >
       <StepDot state={item.exploring ? 'running' : 'ok'} />
-      {item.exploring ? (
-        <span className="t-shimmer shrink-0 font-medium" data-text={label}>
-          {label}
-        </span>
-      ) : (
-        <span
-          className={cn(
-            'shrink-0 text-muted-foreground group-hover/step:text-foreground',
-            breathing && 'animate-pulse text-foreground motion-reduce:animate-none'
-          )}
-        >
-          {label}
-        </span>
-      )}
       <span
         className={cn(
-          'min-w-0 flex-1 truncate',
-          breathing && 'animate-pulse motion-reduce:animate-none'
+          'shrink-0 text-muted-foreground group-hover/step:text-foreground',
+          breathing && cn(BREATHE, 'text-foreground'),
+          item.exploring && 'font-medium'
         )}
       >
+        {label}
+      </span>
+      <span className={cn('min-w-0 flex-1 truncate', breathing && BREATHE)}>
         {detail.join(' · ')}
       </span>
       <ChevronRight
@@ -2183,13 +2173,19 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           )}
         >
           <StepDot state={item.state} />
-          <span className="shrink-0 text-muted-foreground transition-colors group-hover/step:text-foreground">
+          <span
+            className={cn(
+              'shrink-0 text-muted-foreground transition-colors group-hover/step:text-foreground',
+              item.state === 'running' && cn(BREATHE, 'text-foreground')
+            )}
+          >
             {labelKey ? t(labelKey) : (mcp?.tool ?? item.name)}
           </span>
           <span
             className={cn(
               'min-w-0 flex-1 truncate font-mono text-[12px]',
-              item.state === 'error' ? 'text-destructive' : 'text-muted-foreground'
+              item.state === 'error' ? 'text-destructive' : 'text-muted-foreground',
+              item.state === 'running' && BREATHE
             )}
           >
             {item.state === 'error' && item.output
@@ -2212,7 +2208,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
             <ShellFailureBadge failure={item.shellFailure} />
           )}
           {item.state === 'reviewing' ? (
-            <span className="t-shimmer shrink-0 text-[11px]" data-text={t('Assistant reviewing…')}>
+            <span className={cn('shrink-0 text-[11px] text-foreground', BREATHE)}>
               {t('Assistant reviewing…')}
             </span>
           ) : item.state === 'running' && item.startedAt !== null ? (

@@ -859,7 +859,7 @@ function TimelineFooter({ context }: { context: TimelineChrome }) {
       {busy && (
         <div className="flex min-h-[26px] items-center gap-2 text-[13px]">
           <LoadingDots />
-          <span className="t-shimmer" data-text={loading ? t('Loading…') : t('Working…')}>
+          <span className="animate-pulse text-foreground motion-reduce:animate-none">
             {loading ? t('Loading…') : t('Working…')}
           </span>
           {since !== undefined && <ElapsedTimer since={since} />}

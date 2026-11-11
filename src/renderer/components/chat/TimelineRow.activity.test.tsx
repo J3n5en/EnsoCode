@@ -43,3 +43,48 @@ describe('进行中的已工作行', () => {
     expect(html(group())).not.toContain('animate-pulse');
   });
 });
+
+const tool = (state: 'running' | 'ok'): TimelineItem =>
+  ({
+    kind: 'tool',
+    key: 'bash-1',
+    name: 'bash',
+    summary: 'pnpm test',
+    output: null,
+    state,
+    edits: null,
+    writeContent: null,
+    todos: null,
+    durationMs: state === 'ok' ? 1200 : null,
+    agentMeta: null,
+  }) as TimelineItem;
+
+describe('进行中的状态统一用呼吸', () => {
+  it('探索中的组头呼吸，不再流光', () => {
+    const exploring = html({
+      ...(group() as Extract<TimelineItem, { kind: 'tool-group' }>),
+      activity: undefined,
+      summary: undefined,
+      exploring: true,
+    });
+    expect(exploring).toContain('animate-pulse');
+    expect(exploring).not.toContain('t-shimmer');
+  });
+
+  it('运行中的工具调用呼吸，结束后静止', () => {
+    expect(html(tool('running'))).toContain('animate-pulse');
+    expect(html(tool('ok'))).not.toContain('animate-pulse');
+  });
+
+  it('思考中呼吸，不再流光', () => {
+    const thinking = html({
+      kind: 'thinking',
+      key: 't1',
+      text: '',
+      streaming: true,
+      durationMs: null,
+    } as TimelineItem);
+    expect(thinking).toContain('Thinking…');
+    expect(thinking).not.toContain('t-shimmer');
+  });
+});
