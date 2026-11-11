@@ -762,3 +762,36 @@ describe('审批/提问收束事件跨会话转发', () => {
     }
   });
 });
+
+describe('远程添加项目命令校验', () => {
+  it('按字段重建，未知字段不透传', () => {
+    expect(parsePhoneCommand({ type: 'host-dirs', requestId: 'r' })).toEqual({
+      ok: true,
+      command: { type: 'host-dirs', requestId: 'r' },
+    });
+    expect(
+      parsePhoneCommand({ type: 'host-dirs', requestId: 'r', path: '/a', create: 'b', x: 1 })
+    ).toEqual({
+      ok: true,
+      command: { type: 'host-dirs', requestId: 'r', path: '/a', create: 'b' },
+    });
+    expect(parsePhoneCommand({ type: 'project-add', requestId: 'r', path: '/a', x: 1 })).toEqual({
+      ok: true,
+      command: { type: 'project-add', requestId: 'r', path: '/a' },
+    });
+  });
+
+  it('拒绝缺字段、非绝对路径与建目录时缺 path', () => {
+    const bad = [
+      { type: 'host-dirs' },
+      { type: 'host-dirs', requestId: 'r'.repeat(200) },
+      { type: 'host-dirs', requestId: 'r', path: 1 },
+      { type: 'host-dirs', requestId: 'r', create: 'b' },
+      { type: 'host-dirs', requestId: 'r', path: '/a', create: '' },
+      { type: 'project-add', requestId: 'r' },
+      { type: 'project-add', requestId: 'r', path: 'relative/dir' },
+      { type: 'project-add', requestId: 'r', path: '/a'.repeat(3000) },
+    ];
+    for (const cmd of bad) expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd)).toBe(false);
+  });
+});

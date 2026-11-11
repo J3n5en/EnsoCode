@@ -34,15 +34,15 @@ import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
 
-type DirPage = { path: string; parent: string | null; dirs: string[] };
+export type DirPage = { path: string; parent: string | null; dirs: string[] };
 
 /** 拿不到列表时：error 显示在浏览器里，null 表示已另行处理（如弹出主机指纹确认） */
-type ListDirs = (
+export type ListDirs = (
   target: string | undefined,
   retry: boolean
 ) => Promise<DirPage | { error: string } | null>;
 
-type CreateDir = (parent: string, name: string) => Promise<DirPage | { error: string }>;
+export type CreateDir = (parent: string, name: string) => Promise<DirPage | { error: string }>;
 
 const posixParent = (dir: string) => (dir === '/' ? null : dir.replace(/\/[^/]+$/, '') || '/');
 
@@ -52,7 +52,7 @@ function childPath(dir: string, name: string): string {
 }
 
 /** 内嵌目录浏览：逐级钻取，选中回填路径输入框（避免嵌套 Dialog）；reloadKey 变化时以 retry 重载当前目录 */
-function DirBrowser({
+export function DirBrowser({
   list,
   create,
   initialPath,

@@ -7,6 +7,7 @@ import {
   renameDevice,
   revokeDevice,
   setDeviceScope,
+  setPairProjectDeps,
   setPairQueueActionListener,
   setPairResumeListener,
   setPairSessionConfigListener,
@@ -25,8 +26,19 @@ import {
 } from '../services/pairSessionHost';
 import { hasMainRenderer } from '../services/remoteRenderer';
 import { broadcastToRenderers } from '../services/renderers';
+import { getSourceAuthorityRegistry } from './agent';
 
 export function registerPairHandlers(): void {
+  // 另一台桌面添加项目：只登记权威注册表，renderer 收投影广播后更新项目列表并重推目录
+  setPairProjectDeps({
+    createProject: (request) => {
+      const registry = getSourceAuthorityRegistry();
+      return registry
+        ? registry.createProject(request)
+        : { accepted: false, error: 'Project registry is not ready.' };
+    },
+  });
+
   // 状态变化广播回设置页（配对成功、手机上下线、重连）
   setPairStatusListener(() => {
     const status = getPairStatus();

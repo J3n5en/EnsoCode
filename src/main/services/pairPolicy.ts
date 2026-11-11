@@ -28,6 +28,10 @@ const isSignal = (v: unknown): v is string =>
 const isSafeIndex = (v: unknown): v is number =>
   typeof v === 'number' && Number.isSafeInteger(v) && v >= -1;
 const isChatId = (v: unknown): v is string => isStr(v) && v.length <= 128;
+const isRequestId = (v: unknown): v is string => isStr(v) && v.length <= 100;
+const isHostPath = (v: unknown): v is string => isStr(v) && v.length <= 4096;
+const isAbsoluteHostPath = (v: unknown): v is string =>
+  isHostPath(v) && (v.startsWith('/') || /^[A-Za-z]:[\\/]/.test(v) || v.startsWith('\\\\'));
 const BOT_TEXT_MAX_CHARS = 100_000;
 
 export function botCommandError(type: string, bot: boolean): string | undefined {
@@ -406,6 +410,26 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
         return { ok: false, error: 'invalid requestId' };
       }
       return { ok: true, command: value as PhoneToHost };
+    case 'host-dirs': {
+      if (!isRequestId(v.requestId)) return { ok: false, error: 'invalid requestId' };
+      if (v.path !== undefined && !isHostPath(v.path)) return { ok: false, error: 'invalid path' };
+      if (v.create !== undefined && (!isStr(v.create) || v.create.length > 255 || !v.path)) {
+        return { ok: false, error: 'invalid create' };
+      }
+      return {
+        ok: true,
+        command: {
+          type: 'host-dirs',
+          requestId: v.requestId,
+          ...(v.path !== undefined ? { path: v.path as string } : {}),
+          ...(v.create !== undefined ? { create: v.create as string } : {}),
+        },
+      };
+    }
+    case 'project-add':
+      if (!isRequestId(v.requestId)) return { ok: false, error: 'invalid requestId' };
+      if (!isAbsoluteHostPath(v.path)) return { ok: false, error: 'invalid path' };
+      return { ok: true, command: { type: 'project-add', requestId: v.requestId, path: v.path } };
     default:
       return { ok: false, error: `command not allowed: ${String(v.type)}` };
   }

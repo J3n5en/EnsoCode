@@ -2,6 +2,7 @@ import type { PhoneToHost } from '@enso/pair';
 import { useMemo, useState } from 'react';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { emptyNodeView } from '@/stores/remoteNodes/reducer';
+import { AddRemoteProjectDialog } from './AddRemoteProjectDialog';
 import { NewRemoteSessionDialog } from './NewRemoteSessionDialog';
 import { RemoteNodeChat } from './RemoteNodeChat';
 import { RemoteNodeSidebar } from './RemoteNodeSidebar';
@@ -20,6 +21,7 @@ export function RemoteNodeView({ nodeId, sidebarWidth }: RemoteNodeViewProps) {
   const requestHistory = useRemoteNodesStore((s) => s.requestHistory);
   const spawn = useRemoteNodesStore((s) => s.spawn);
   const [composing, setComposing] = useState(false);
+  const [addingProject, setAddingProject] = useState(false);
 
   const activeId = view.activeSessionId;
   const entry = useMemo(
@@ -56,6 +58,7 @@ export function RemoteNodeView({ nodeId, sidebarWidth }: RemoteNodeViewProps) {
         canCreate={node.hostOnline && view.projects.length > 0}
         onSelect={(id) => selectSession(nodeId, id)}
         onNewConversation={() => setComposing(true)}
+        onAddProject={() => setAddingProject(true)}
       />
       <RemoteNodeChat
         node={node}
@@ -101,6 +104,11 @@ export function RemoteNodeView({ nodeId, sidebarWidth }: RemoteNodeViewProps) {
         projects={view.projects}
         providers={view.providers}
         onCreate={(req) => spawn(nodeId, req)}
+      />
+      <AddRemoteProjectDialog
+        nodeId={nodeId}
+        open={addingProject}
+        onOpenChange={setAddingProject}
       />
     </>
   );

@@ -2420,6 +2420,11 @@ export const zhTranslations: Record<string, string> = {
   'The remote desktop has no projects yet': '对方桌面还没有项目',
   'Select a conversation on the left, or create one': '从左侧选择会话，或新建一个',
   'New remote conversation': '新建远程会话',
+  'Add a directory on the remote computer as a project.': '把对方电脑上的目录添加为项目。',
+  'The remote desktop did not respond. It may need to be updated.':
+    '对方桌面没有响应，可能需要升级。',
+  'Directory not found.': '目录不存在。',
+  'Project path is not a directory.': '项目路径不是目录。',
   'Node settings': '节点设置',
   'The conversation runs on the remote computer with its projects, models and keys.':
     '会话在对方电脑上运行，用的是对方的项目、模型与密钥。',
