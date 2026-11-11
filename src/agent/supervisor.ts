@@ -214,6 +214,7 @@ import {
   resetOauthPoolActivity,
   resolveOauthPoolModel,
 } from './oauthAccountPool';
+import { outputLimitRecoveryExtension } from './outputLimitRecovery';
 import { withPathHints } from './pathHints';
 import { PendingNotificationStore } from './pendingNotifications';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
@@ -642,6 +643,7 @@ function createSessionResourceLoader(options: {
         },
       } satisfies InlineExtension,
       microcompactExtension(),
+      outputLimitRecoveryExtension,
       ...(options.exploreFold ? [exploreFoldExtension(options.exploreFold)] : []),
       ...(options.reminders ? [systemReminderExtension(options.reminders)] : []),
       ...(options.remoteSsh
