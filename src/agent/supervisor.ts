@@ -199,6 +199,12 @@ import {
 } from './exploreFold';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
+import {
+  buildGoalVerifierRequest,
+  GOAL_VERIFIER_SYSTEM_PROMPT,
+  GOAL_VERIFIER_TIMEOUT_MS,
+  parseGoalVerdict,
+} from './goalVerifier';
 import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
 import { type ContextMessage, sanitizeContextMessages } from './imageContext';
 import { McpManager } from './mcp';
@@ -3254,17 +3260,23 @@ export class SessionSupervisor {
       ...(exploreFold ? createExploreFoldTools(exploreFold) : []),
       ...builtin('background_tasks', createTaskTools(this.bgTasks, sessionId)),
       ...(toolEnabled('goal')
-        ? createGoalTools((kind, note) => {
-            const managed = managedRef ?? this.sessions.get(sessionId);
-            if (!managed) return;
-            this.options.emit({
-              type: 'goal-signal',
-              identity: managed.identity,
-              seq: ++managed.seq,
-              kind,
-              note,
-            });
-          })
+        ? createGoalTools(
+            (kind, note) => {
+              const managed = managedRef ?? this.sessions.get(sessionId);
+              if (!managed) return;
+              this.options.emit({
+                type: 'goal-signal',
+                identity: managed.identity,
+                seq: ++managed.seq,
+                kind,
+                note,
+              });
+            },
+            async (summary, signal) => {
+              const managed = managedRef ?? this.sessions.get(sessionId);
+              return managed ? this.verifyGoalCompletion(managed, summary, signal) : undefined;
+            }
+          )
         : []),
     ];
     // Plan 工具门包在父会话工具最外层（codemode 嵌套调用同样受限）；目录跨模式不变
@@ -5419,6 +5431,53 @@ export class SessionSupervisor {
       return runtime;
     })();
     return this.runtimePromise;
+  }
+
+  /**
+   * goal_complete 的独立核验：用会话当前模型、无工具，只凭本 goal 的对话尾部判断。
+   * 返回驳回理由；找不到 goal、核验失败或超时时放行（不比没有核验更糟），用户中断则中断工具。
+   */
+  private async verifyGoalCompletion(
+    managed: ManagedSession,
+    summary: string,
+    signal: AbortSignal | undefined
+  ): Promise<string | undefined> {
+    const model = managed.session.model;
+    const request = buildGoalVerifierRequest({
+      messages: managed.session.messages as unknown as Parameters<
+        typeof buildGoalVerifierRequest
+      >[0]['messages'],
+      summary,
+    });
+    if (!model || !request) return undefined;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GOAL_VERIFIER_TIMEOUT_MS);
+    const onAbort = () => controller.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const runtime = await this.getRuntime();
+      const message = await runtime.completeSimple(
+        model,
+        {
+          systemPrompt: GOAL_VERIFIER_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: request, timestamp: Date.now() }],
+        },
+        { signal: controller.signal }
+      );
+      const raw = Array.isArray(message.content)
+        ? message.content.map((part) => (part.type === 'text' ? part.text : '')).join('')
+        : '';
+      const verdict = parseGoalVerdict(raw);
+      return verdict?.decision === 'reject'
+        ? verdict.reason || 'The transcript does not prove the goal is complete.'
+        : undefined;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return undefined;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+    }
   }
 
   private async reviewApproval(
