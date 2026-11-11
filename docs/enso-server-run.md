@@ -123,13 +123,13 @@ node out/server/index.js run \
 
 ## 用量日志
 
-`--usage-log` 会清空并重写该文件。每个已完成的模型调用一行：
+`--usage-log` 会清空并重写该文件。每个模型调用一结束就追加一行：
 
 ```json
 {"type":"call","timestamp":"2026-01-01T00:00:00.000Z","provider":"enso-run","model":"gpt-4o-mini","inputTokens":10,"outputTokens":4,"cacheReadTokens":0,"cacheWriteTokens":0,"costUsd":null}
 ```
 
-结束时再加一行 `type: "summary"`，字段是合计、`costUsd` 和 `calls`。进程被杀掉时，已经写完的 `call` 行还在；没有 `summary` 时把 `call` 加总即可。
+结束时再加一行 `type: "summary"`，字段是合计、`costUsd` 和 `calls`；任何一次调用缺价时 `costUsd` 为 `null`。进程被杀掉时，已经写完的 `call` 行还在；没有 `summary` 时把 `call` 加总即可。
 
 ## 出站网络
 

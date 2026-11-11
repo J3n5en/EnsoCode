@@ -48,6 +48,7 @@ export interface TranscriptMessage {
   stopReason?: string;
   usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   model?: string;
+  timestamp?: number;
 }
 
 export type StreamRecord = Record<string, unknown>;
@@ -65,14 +66,23 @@ function toolResultText(message: TranscriptMessage): string {
     .join('');
 }
 
-/** 把 worker 的整条 message-upsert 收成增量事件，并在每步结束时记一次用量。 */
+/**
+ * 把 worker 的整条 message-upsert 收成增量事件。流式中途的消息也带 stopReason 和零用量，
+ * 所以一次调用的用量要等同一会话出现下一条消息（或轮次结束）才算定稿并落一行。
+ */
 export class RunTranscript {
   private readonly texts = new Map<string, string>();
   private readonly seenTools = new Map<string, string>();
   private readonly logged = new Set<string>();
   private readonly pending = new Map<
     string,
-    { model: string; usage: NonNullable<TranscriptMessage['usage']> }
+    {
+      id: string;
+      scope: string;
+      index: number;
+      model: string;
+      usage: NonNullable<TranscriptMessage['usage']>;
+    }
   >();
   finalText = '';
   readonly calls: UsageCall[] = [];
@@ -85,6 +95,21 @@ export class RunTranscript {
 
   ingest(key: string, message: TranscriptMessage, parent: boolean): StreamRecord[] {
     const records: StreamRecord[] = [];
+    // 压缩、重试会让下标复用；用消息时间戳区分不同调用，同一条消息的重复投影只记一次
+    const id = `${key}@${message.timestamp ?? ''}`;
+    const cut = key.lastIndexOf(':');
+    const scope = cut >= 0 ? key.slice(0, cut) : '';
+    const index = Number(key.slice(cut + 1));
+    for (const [pendingKey, pending] of this.pending) {
+      if (pending.scope !== scope) continue;
+      // 同一下标换了新消息，或后面出现了新消息；旧下标的重复投影不算
+      const ended = pendingKey === key ? pending.id !== id : pending.index < index;
+      if (!ended) continue;
+      this.pending.delete(pendingKey);
+      if (!this.logged.has(pending.id)) {
+        records.push(this.log(pending.id, pending.model, pending.usage));
+      }
+    }
     if (message.role === 'assistant') {
       const next = textOf(message);
       const prev = this.texts.get(key) ?? '';
@@ -106,8 +131,14 @@ export class RunTranscript {
           arguments: part.arguments ?? {},
         });
       }
-      if (message.usage) {
-        this.pending.set(key, { model: message.model || 'unknown', usage: message.usage });
+      if (message.usage && !this.logged.has(id)) {
+        this.pending.set(key, {
+          id,
+          scope,
+          index,
+          model: message.model || 'unknown',
+          usage: message.usage,
+        });
       }
     } else if (message.role === 'toolResult') {
       records.push({
@@ -121,34 +152,37 @@ export class RunTranscript {
     return records;
   }
 
-  /** 轮次结束时补记还没有 stopReason 的用量。 */
+  /** 轮次结束时补记最后一次调用的用量。 */
   flushTurn(): StreamRecord[] {
     const records: StreamRecord[] = [];
-    for (const [key, pending] of this.pending) {
-      if (this.logged.has(key)) continue;
-      records.push(this.log(key, pending.model, pending.usage));
+    for (const pending of this.pending.values()) {
+      if (!this.logged.has(pending.id)) {
+        records.push(this.log(pending.id, pending.model, pending.usage));
+      }
     }
+    this.pending.clear();
     return records;
   }
 
   usage(): RunUsage {
-    const totals: RunUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: null };
+    const totals: RunUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 };
     for (const call of this.calls) {
       totals.input += call.inputTokens;
       totals.output += call.outputTokens;
       totals.cacheRead += call.cacheReadTokens;
       totals.cacheWrite += call.cacheWriteTokens;
-      if (call.costUsd !== null) totals.costUsd = (totals.costUsd ?? 0) + call.costUsd;
+      totals.costUsd =
+        totals.costUsd === null || call.costUsd === null ? null : totals.costUsd + call.costUsd;
     }
-    return totals;
+    return this.calls.length > 0 ? totals : { ...totals, costUsd: null };
   }
 
   private log(
-    key: string,
+    id: string,
     model: string,
     usage: NonNullable<TranscriptMessage['usage']>
   ): StreamRecord {
-    this.logged.add(key);
+    this.logged.add(id);
     const costUsd = priceUsage(model, usage, this.pricing);
     const call: UsageCall = {
       timestamp: new Date(this.now()).toISOString(),

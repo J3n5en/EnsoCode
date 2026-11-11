@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { app } from '@platform';
-import { isHeadlessRun } from '@shared/headlessRun';
 import {
   applyHeadlessGoalSignal,
   emptyHeadlessRuntime,
@@ -98,6 +97,7 @@ function toTranscript(message: ProjectedMessage): TranscriptMessage {
     ...(message.stopReason ? { stopReason: message.stopReason } : {}),
     ...(message.usage ? { usage: message.usage } : {}),
     ...(message.model ? { model: message.model } : {}),
+    ...(message.timestamp !== undefined ? { timestamp: message.timestamp } : {}),
   };
 }
 
@@ -328,6 +328,12 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
               ...(event.error ? { error: event.error } : {}),
             },
           ]);
+          // 通用异常只发 status failed，之后不保证还有 turn-failed；不收口会一直挂到超时
+          if (event.status === 'failed') {
+            turns += 1;
+            emit(transcript.flushTurn());
+            stop({ code: 1, status: 'error', reason: 'turn-failed', error: event.error });
+          }
           return;
         }
         if (event.type === 'parent-rejected') {
@@ -402,7 +408,6 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
     });
 
     try {
-      if (!isHeadlessRun()) process.env.ENSO_HEADLESS_RUN = '1';
       startAgentWorker();
       const spawnedCommand = spawnSession(
         identity,

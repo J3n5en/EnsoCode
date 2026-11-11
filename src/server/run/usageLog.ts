@@ -39,14 +39,15 @@ export function usageSummaryRecord(
   calls: readonly UsageCall[],
   timestamp: string
 ): Record<string, unknown> {
-  let cost: number | null = null;
+  let cost: number | null = calls.length > 0 ? 0 : null;
   const totals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   for (const call of calls) {
     totals.inputTokens += call.inputTokens;
     totals.outputTokens += call.outputTokens;
     totals.cacheReadTokens += call.cacheReadTokens;
     totals.cacheWriteTokens += call.cacheWriteTokens;
-    if (call.costUsd !== null) cost = (cost ?? 0) + call.costUsd;
+    // 有一次调用缺价就整体未知，避免部分求和被当成总费用
+    cost = cost === null || call.costUsd === null ? null : cost + call.costUsd;
   }
   return { type: 'summary', timestamp, ...totals, costUsd: cost, calls: calls.length };
 }
