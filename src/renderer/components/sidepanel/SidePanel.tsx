@@ -71,6 +71,7 @@ import { BrowserView } from './BrowserView';
 import { BtwView } from './BtwView';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
+import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
 import { TerminalView } from './TerminalView';
 import { idsToClose, type TabCloseKind } from './tabCloseActions';
@@ -304,17 +305,22 @@ function WorkflowPanel(
 function closeGroupTabs(
   api: IDockviewPanelHeaderProps['api'],
   kind: Exclude<TabCloseKind, 'saved'>
-): void {
+): string[] {
   const ordered = api.group.panels.map((panel) => panel.id);
   const closing = new Set(idsToClose(ordered, api.id, kind));
+  const closed: string[] = [];
   for (const panel of [...api.group.panels]) {
-    if (closing.has(panel.id)) panel.api.close();
+    if (!closing.has(panel.id)) continue;
+    panel.api.close();
+    closed.push(panel.id);
   }
+  return closed;
 }
 
 /** 与 CoworkerTabs 同款 chip:圆角、bg-muted 激活、hover 出关闭 */
 function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null }>) {
   const { t } = useI18n();
+  const tabNode = useRef<HTMLDivElement | null>(null);
   const [active, setActive] = useState(props.api.isActive);
   const [title, setTitle] = useState(props.api.title ?? '');
   const [favicon, setFavicon] = useState<string | null>(props.params.favicon ?? null);
@@ -337,9 +343,26 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
     };
   }, [props.api]);
   const isBrowser = props.api.id === 'browser' || props.api.id.startsWith('browser:');
+  const closeTabs = (kind: Exclude<TabCloseKind, 'saved'>) => {
+    const list = tabNode.current ? overflowTabList(tabNode.current) : null;
+    const rows = list ? snapshotOverflowRows(list) : null;
+    const closed = closeGroupTabs(props.api, kind);
+    if (!list || !rows) return;
+    removeOverflowRows(
+      list,
+      closed.flatMap((id) => {
+        const row = rows.get(id);
+        return row ? [row] : [];
+      })
+    );
+  };
   const tab = (
     <div
+      ref={(node) => {
+        tabNode.current = node;
+      }}
       data-side-tab
+      data-panel-id={props.api.id}
       data-active={active || undefined}
       className={cn(
         'group/tab relative flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
@@ -374,8 +397,12 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/tab:opacity-100"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
+          e.preventDefault();
           e.stopPropagation();
+          const list = overflowTabList(e.currentTarget);
+          const row = list ? snapshotOverflowRows(list).get(props.api.id) : undefined;
           props.api.close();
+          if (list && row) removeOverflowRows(list, [row]);
         }}
       >
         <X className="h-3 w-3" />
@@ -386,18 +413,12 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
     <ContextMenu>
       <ContextMenuTrigger render={tab as ReactElement<Record<string, unknown>>} />
       <ContextMenuPopup className="min-w-40">
-        <ContextMenuItem onClick={() => closeGroupTabs(props.api, 'self')}>
-          {t('Close')}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => closeGroupTabs(props.api, 'others')}>
-          {t('Close others')}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => closeGroupTabs(props.api, 'right')}>
+        <ContextMenuItem onClick={() => closeTabs('self')}>{t('Close')}</ContextMenuItem>
+        <ContextMenuItem onClick={() => closeTabs('others')}>{t('Close others')}</ContextMenuItem>
+        <ContextMenuItem onClick={() => closeTabs('right')}>
           {t('Close tabs to the right')}
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => closeGroupTabs(props.api, 'all')}>
-          {t('Close all')}
-        </ContextMenuItem>
+        <ContextMenuItem onClick={() => closeTabs('all')}>{t('Close all')}</ContextMenuItem>
       </ContextMenuPopup>
     </ContextMenu>
   );
