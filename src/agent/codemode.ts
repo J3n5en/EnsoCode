@@ -38,6 +38,8 @@ export const CODEMODE_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
   'message_main_agent',
   'explore_mark',
   'explore_fold',
+  'turn_discard',
+  'turn_recall',
   'goal_complete',
   'goal_blocked',
   'goal_wait',

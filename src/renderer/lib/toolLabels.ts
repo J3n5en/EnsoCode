@@ -9,6 +9,8 @@ export const TOOL_LABEL_KEYS: Partial<Record<string, string>> = {
   apply_patch: 'Apply patch',
   explore_mark: 'Explore mark',
   explore_fold: 'Explore fold',
+  turn_discard: 'Turn discard',
+  turn_recall: 'Turn recall',
   subagent: 'Subagent',
   workflow: 'Workflow',
   ask_user: 'Ask user',

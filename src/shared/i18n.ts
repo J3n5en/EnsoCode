@@ -2252,6 +2252,8 @@ export const zhTranslations: Record<string, string> = {
     '让 agent 自动发现 .agents/skills、.pi/skills 下的 skill',
   'Explore fold': '探后折叠',
   'Explore mark': '开始探索',
+  'Turn discard': '丢弃本轮',
+  'Turn recall': '取回已丢弃',
   Goal: '目标',
   'Show process': '展开过程',
   'Hide process': '收起过程',

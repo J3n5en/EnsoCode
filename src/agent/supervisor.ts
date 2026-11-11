@@ -323,6 +323,7 @@ import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
 import { createWebTools } from './tools/web';
+import { createTurnDiscardTools, turnDiscardExtension } from './turnDiscard';
 import {
   consumeUnattendedNote,
   UNATTENDED_OFF_NOTE,
@@ -597,6 +598,8 @@ function createSessionResourceLoader(options: {
   };
   pluginEvents?: { invoker: PluginEventInvoker };
   exploreFold?: ReturnType<typeof createExploreFoldState>;
+  /** 主会话：允许丢弃插件自动投递触发的无关轮次 */
+  turnDiscard?: boolean;
   reminders?: SystemReminderRegistry;
   /** codemode / tool_search 与按需 MCP；排在最前，mcp_servers 段先于 persona 强制提示词写入 */
   codemode?: InlineExtension;
@@ -660,6 +663,7 @@ function createSessionResourceLoader(options: {
       microcompactExtension(),
       outputLimitRecoveryExtension,
       ...(options.exploreFold ? [exploreFoldExtension(options.exploreFold)] : []),
+      ...(options.turnDiscard ? [turnDiscardExtension()] : []),
       ...(options.reminders ? [systemReminderExtension(options.reminders)] : []),
       ...(options.remoteSsh
         ? [
@@ -2505,6 +2509,7 @@ export class SessionSupervisor {
       pluginHooks: { hooks: pluginHooks, role: { kind: 'parent' }, resumed: Boolean(resumeFile) },
       ...(pluginEventInvoker ? { pluginEvents: { invoker: pluginEventInvoker } } : {}),
       exploreFold,
+      turnDiscard: true,
       reminders,
       codemode: codemodeHost.extension,
       persona: systemPrompt,
@@ -3298,6 +3303,7 @@ export class SessionSupervisor {
         }),
       ]),
       ...(exploreFold ? createExploreFoldTools(exploreFold) : []),
+      ...createTurnDiscardTools(),
       ...builtin('background_tasks', createTaskTools(this.bgTasks, sessionId)),
       ...(toolEnabled('goal')
         ? createGoalTools(

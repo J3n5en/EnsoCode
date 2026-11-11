@@ -26,7 +26,13 @@ const INTENT_CHARS = 200;
 const MAX_TOOLS = 8;
 const LABEL_CHARS = 60;
 /** 记账类工具不值得起标签 */
-const BOOKKEEPING_TOOLS = new Set(['todo', 'explore_mark', 'explore_fold', 'ask_user']);
+const BOOKKEEPING_TOOLS = new Set([
+  'todo',
+  'explore_mark',
+  'explore_fold',
+  'turn_discard',
+  'ask_user',
+]);
 
 const clip = (text: string, max: number): string =>
   text.length > max ? `${text.slice(0, max - 1)}…` : text;
