@@ -2085,17 +2085,21 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const hasImage = Boolean(item.imagePath) && item.state !== 'error';
   const labelKey = TOOL_LABEL_KEYS[item.name];
   const mcp = parseMcpToolName(item.name);
+  // 空清单是「清空」而不是产物：不画 0/0 卡片，收成一行
+  const todoCleared = item.state !== 'error' && item.todos?.length === 0;
   // 子代理按 id 指代的操作：动作词在前，长标题截断时动作仍可见
-  const summary = item.subagentOp
-    ? [t(SUBAGENT_OP_LABEL_KEYS[item.subagentOp]), item.summary].filter(Boolean).join(' · ')
-    : item.summary;
+  const summary = todoCleared
+    ? t('Todo list cleared')
+    : item.subagentOp
+      ? [t(SUBAGENT_OP_LABEL_KEYS[item.subagentOp]), item.summary].filter(Boolean).join(' · ')
+      : item.summary;
   const headerSummary =
     item.nestedPending && item.state === 'running'
       ? `${summary} · ${item.nestedPending} pending`
       : sandbox?.calls.length && item.state !== 'error'
         ? summarizeSandboxCalls(sandbox.calls)
         : summary;
-  const hasBody = Boolean(item.output || item.source || sentMessage || item.ask);
+  const hasBody = !todoCleared && Boolean(item.output || item.source || sentMessage || item.ask);
   // 子代理等待行：运行中可展开看在等的子代理各自在干什么
   const waitProgress = item.state === 'running' && item.waiting === 'subagent' && !host;
   const expandable = hasDiff || hasWrite || hasFileChanges || hasBody || waitProgress || hasImage;
@@ -2145,7 +2149,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
     if (autoExpand || (expandLiveEdits && appliedChangesArrived)) setExpanded(true);
   }, [autoExpand, expandLiveEdits, hasFileChanges, item]);
 
-  if (item.todos) return <TodoRow todos={item.todos} />;
+  if (item.todos && item.todos.length > 0) return <TodoRow todos={item.todos} />;
   if (item.name.startsWith('goal_')) return <GoalSignalRow item={item} />;
   if (item.plan && item.state !== 'error') return <PlanRow plan={item.plan} />;
 
@@ -2634,7 +2638,7 @@ function ShellRunStatusLive({
 /** 日志式工具行：普通工具行与工具组头，相邻时贴紧排 */
 export function isToolStepRow(item: TimelineItem): boolean {
   if (item.kind === 'tool-group') return true;
-  return item.kind === 'tool' && !item.todos && !item.name.startsWith('goal_');
+  return item.kind === 'tool' && !item.todos?.length && !item.name.startsWith('goal_');
 }
 
 const firstLine = (text: string): string => stripAnsi(text.split('\n', 1)[0] ?? '');

@@ -2115,6 +2115,7 @@ export const zhTranslations: Record<string, string> = {
   'Beginning of conversation': '已到对话开头',
   'Retry resume': '重新恢复',
   Todos: '任务清单',
+  'Todo list cleared': '已清空',
   '{{count}} tool calls': '{{count}} 个工具调用',
   'ran {{count}} commands': '跑了 {{count}} 条命令',
   'total {{duration}}': '总计 {{duration}}',

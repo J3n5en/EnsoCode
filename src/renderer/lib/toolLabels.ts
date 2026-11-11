@@ -41,6 +41,7 @@ export const TOOL_LABEL_KEYS: Partial<Record<string, string>> = {
   browser_cdp: 'Browser CDP',
   web_search: 'Web search',
   web_fetch: 'Web fetch',
+  todo: 'Todos',
 };
 
 export function toolLabel(name: string, t: TFunction): string {
