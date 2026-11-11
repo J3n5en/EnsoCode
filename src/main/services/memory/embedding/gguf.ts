@@ -63,6 +63,7 @@ export async function createGgufEmbeddingProvider(
           ? tokens.eos
           : null;
 
+  let warnedTruncation = false;
   return {
     spec,
     async embed(texts: string[], kind: EmbedKind): Promise<(Float32Array | null)[]> {
@@ -79,6 +80,12 @@ export async function createGgufEmbeddingProvider(
           // 截断会丢掉原有结尾，所以必须重新预留结束 token；不要 detokenize 后再次分词。
           const budget = contextSize - prepend - (ending != null ? 1 : 0);
           if (budget <= 0) continue;
+          if (!warnedTruncation) {
+            warnedTruncation = true;
+            console.warn(
+              `embedding: ${spec.id} truncated ${inputTokens.length} tokens to budget ${budget}`
+            );
+          }
           bounded = inputTokens.slice(0, budget);
         }
         const embedding = await context.getEmbeddingFor(bounded);
