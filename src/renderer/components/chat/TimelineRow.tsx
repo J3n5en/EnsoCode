@@ -255,6 +255,14 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
       return b.kind === 'divider' && a.text === b.text;
     case 'plugin-message':
       return b.kind === 'plugin-message' && a.text === b.text && a.pluginId === b.pluginId;
+    case 'discarded-turn':
+      return (
+        b.kind === 'discarded-turn' &&
+        a.expanded === b.expanded &&
+        a.reason === b.reason &&
+        a.messages.length === b.messages.length &&
+        a.messages.every((text, i) => text === b.messages[i])
+      );
   }
 }
 
@@ -954,6 +962,8 @@ export const TimelineRow = memo(function TimelineRow({
       return <SessionCustomRow entry={item.entry} />;
     case 'plugin-message':
       return <PluginMessageRow item={item} />;
+    case 'discarded-turn':
+      return <DiscardedTurnRow item={item} onToggle={onToggleGroup} />;
     case 'divider':
       return (
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
@@ -1013,6 +1023,55 @@ function PluginMessageRow({ item }: { item: Extract<TimelineItem, { kind: 'plugi
         <span className="font-mono opacity-70">{item.pluginId}</span>
       </p>
       <p className="whitespace-pre-wrap break-words text-foreground">{item.text}</p>
+    </div>
+  );
+}
+
+/** 被 turn_discard 丢弃的插件投递：一行原因，展开看原文；模型上下文里只剩痕迹 */
+function DiscardedTurnRow({
+  item,
+  onToggle,
+}: {
+  item: Extract<TimelineItem, { kind: 'discarded-turn' }>;
+  onToggle?: (key: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div data-discarded-turn={item.pluginId}>
+      <button
+        type="button"
+        onClick={() => onToggle?.(item.key)}
+        data-enso="tool-row"
+        className={cn(
+          'group/step flex min-h-6 w-full items-center gap-2 text-left text-[13px] transition-colors hover:text-foreground',
+          SUBTLE_TEXT
+        )}
+      >
+        <SkipForward className="h-3.5 w-3.5 shrink-0" />
+        <span className="shrink-0 text-muted-foreground group-hover/step:text-foreground">
+          {toolLabel('turn_discard', t)}
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          {[item.pluginName, item.reason].filter(Boolean).join(' · ')}
+        </span>
+        <ChevronRight
+          className={cn('h-3 w-3 shrink-0 transition-transform', item.expanded && 'rotate-90')}
+        />
+      </button>
+      {item.expanded && (
+        <div className="t-acc-reveal mt-1 mb-1.5 ml-5 space-y-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs">
+          <p className="flex items-center gap-1.5 text-muted-foreground">
+            <PluginIcon pluginId={item.pluginId} className="h-3.5 w-3.5 shrink-0" />
+            <span>{t('From plugin {{name}}', { name: item.pluginName })}</span>
+          </p>
+          {item.messages.map((text, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 投递原文只读、顺序固定
+            <p key={i} className="whitespace-pre-wrap break-words text-foreground">
+              {text}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

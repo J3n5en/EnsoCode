@@ -175,7 +175,17 @@ export type TimelineItem =
   /** 带字分隔线（委派子会话的「第 N 次执行」） */
   | { kind: 'divider'; key: string; text: string }
   /** 插件经 session.inject 写入的消息；必须标明来源 */
-  | { kind: 'plugin-message'; key: string; text: string; pluginId: string; pluginName: string };
+  | { kind: 'plugin-message'; key: string; text: string; pluginId: string; pluginName: string }
+  /** 插件投递被 turn_discard 丢弃的一轮：收成一行，展开看投递原文 */
+  | {
+      kind: 'discarded-turn';
+      key: string;
+      reason: string;
+      pluginId: string;
+      pluginName: string;
+      messages: string[];
+      expanded: boolean;
+    };
 
 export function formatApplyPatchOutcome(outcome: ProjectedApplyPatchOutcome): string {
   const list = (label: string, paths: string[]): string =>
@@ -1620,6 +1630,7 @@ function isTurnSwallowable(item: TimelineItem): boolean {
     case 'error':
     case 'divider':
     case 'plugin-message':
+    case 'discarded-turn':
       return false;
     default:
       return true;
@@ -1745,6 +1756,49 @@ function pairExploreFolds(
   return result;
 }
 
+const TURN_DISCARD_HEAD = /^Turn discarded:\s*/;
+
+/** 连续插件投递到成功的 turn_discard（其间只有思考/正文）收成一行 */
+function pairTurnDiscards(
+  items: TimelineItem[],
+  expandedKeys: ReadonlySet<string>
+): TimelineItem[] {
+  const result: TimelineItem[] = [];
+  for (const item of items) {
+    if (item.kind === 'tool' && item.name === 'turn_discard' && item.state === 'ok') {
+      let start = result.length;
+      while (
+        start > 0 &&
+        (result[start - 1].kind === 'thinking' || result[start - 1].kind === 'text')
+      )
+        start--;
+      const first = start;
+      while (start > 0 && result[start - 1].kind === 'plugin-message') start--;
+      if (start < first) {
+        const plugins = result
+          .splice(start)
+          .filter(
+            (row): row is Extract<TimelineItem, { kind: 'plugin-message' }> =>
+              row.kind === 'plugin-message'
+          );
+        const key = `discard-${plugins[0].key}`;
+        result.push({
+          kind: 'discarded-turn',
+          key,
+          reason: (item.output ?? '').replace(TURN_DISCARD_HEAD, '').trim() || item.summary,
+          pluginId: plugins[0].pluginId,
+          pluginName: plugins[0].pluginName,
+          messages: plugins.map((row) => row.text),
+          expanded: expandedKeys.has(key),
+        });
+        continue;
+      }
+    }
+    result.push(item);
+  }
+  return result;
+}
+
 /** 探索组展开过程时其原始行紧随组头 */
 function withExploreChildren(item: TimelineItem): TimelineItem[] {
   return item.kind === 'tool-group' && item.explore?.steps ? [item, ...item.children] : [item];
@@ -1838,11 +1892,13 @@ function isActivityMember(item: TimelineItem): boolean {
 }
 
 function prepareTimeline(
-  items: TimelineItem[],
+  rawItems: TimelineItem[],
   running: boolean,
   expandedKeys: ReadonlySet<string>,
   prep: TimelinePrep
 ): { sourceItems: TimelineItem[]; lastUserIndex: number; liveFrom: number } {
+  // 先于轮次折叠配对：折叠会吞掉 turn_discard 而留下投递行
+  const items = pairTurnDiscards(rawItems, expandedKeys);
   const autoCollapse = prep.autoCollapseCompletedTurns === true;
   const turnOverrides = prep.turnOverrides;
   const origLastUserIndex = items.findLastIndex(

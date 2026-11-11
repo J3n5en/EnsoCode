@@ -4104,3 +4104,75 @@ describe('buildTimeline runDividers', () => {
     ).toEqual(['run 1', 'user', 'text', 'run 2']);
   });
 });
+
+describe('foldTimeline 丢弃本轮折叠（插件投递 → turn_discard）', () => {
+  type Discarded = Extract<TimelineItem, { kind: 'discarded-turn' }>;
+  const keys = (items: TimelineItem[]) => items.map((item) => item.key);
+  const plugin = (key: string, text: string): TimelineItem => ({
+    kind: 'plugin-message',
+    key,
+    text,
+    pluginId: 'enso.tgclient',
+    pluginName: 'Telegram',
+  });
+  const discard = (key: string, state = 'ok'): TimelineItem =>
+    ({
+      ...toolItem(key, 'turn_discard'),
+      state,
+      output: 'Turn discarded: chip news',
+    }) as TimelineItem;
+
+  it('插件投递到成功的 turn_discard（含其间思考）收成一行，原文留在行内', () => {
+    const items = [
+      userItem('u'),
+      textItem('a'),
+      plugin('p1', 'NVIDIA news'),
+      plugin('p2', 'more news'),
+      thinkingItem('th'),
+      discard('d'),
+      plugin('p3', 'EnsoCode bug'),
+    ];
+    const folded = foldTimeline(items, false, new Set());
+    expect(keys(folded)).toEqual(['u', 'a', 'discard-p1', 'p3']);
+    const row = folded[2] as Discarded;
+    expect(row).toMatchObject({
+      kind: 'discarded-turn',
+      reason: 'chip news',
+      pluginName: 'Telegram',
+      messages: ['NVIDIA news', 'more news'],
+      expanded: false,
+    });
+    expect((foldTimeline(items, false, new Set(['discard-p1']))[2] as Discarded).expanded).toBe(
+      true
+    );
+  });
+
+  it('turn_discard 未完成、失败或前面不是插件投递时不折叠', () => {
+    const running = [plugin('p', 'x'), discard('d', 'running')];
+    expect(keys(foldTimeline(running, true, new Set()))).toEqual(['p', 'd']);
+    const failed = [plugin('p', 'x'), discard('d', 'error')];
+    expect(keys(foldTimeline(failed, false, new Set()))).toEqual(['p', 'd']);
+    const byUser = [userItem('u'), discard('d')];
+    expect(foldTimeline(byUser, false, new Set()).some((i) => i.kind === 'discarded-turn')).toBe(
+      false
+    );
+  });
+});
+
+it('丢弃的一轮在其所属用户轮次自动折叠时仍保留为一行', () => {
+  const items: TimelineItem[] = [
+    { ...userItem('u1'), canCollapse: true } as TimelineItem,
+    textItem('a'),
+    {
+      kind: 'plugin-message',
+      key: 'p',
+      text: 'x',
+      pluginId: 'enso.tgclient',
+      pluginName: 'Telegram',
+    },
+    { ...toolItem('d', 'turn_discard'), output: 'Turn discarded: r' } as TimelineItem,
+    userItem('u2'),
+  ];
+  const folded = foldTimeline(items, false, new Set(), { autoCollapseCompletedTurns: true });
+  expect(folded.map((item) => item.key)).toEqual(['u1', 'discard-p', 'u2']);
+});
