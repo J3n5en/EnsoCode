@@ -57,7 +57,14 @@ export interface RemoteApi {
   setPushPending?(pending: RemotePushPending): void;
 }
 
-export type RemoteLinkState = 'connecting' | 'online' | 'host-offline' | 'unauthorized' | 'offline';
+export type RemoteLinkState =
+  | 'connecting'
+  | 'online'
+  | 'host-offline'
+  | 'unauthorized'
+  /** 同一配对已被另一个页面连上，本端停链不重连 */
+  | 'replaced'
+  | 'offline';
 
 export type RemotePushError =
   | 'unsupported'

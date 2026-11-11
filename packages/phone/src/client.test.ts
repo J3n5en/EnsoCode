@@ -31,7 +31,7 @@ class Socket {
   readyState = 0;
   binaryType = '';
   onopen?: () => void;
-  onclose?: (event: { code: number }) => void;
+  onclose?: (event: { code: number; reason: string }) => void;
   onmessage?: (event: { data: ArrayBuffer | string }) => void;
   sent: PhoneToHost[] = [];
   constructor() {
@@ -51,9 +51,9 @@ class Socket {
   receive(payload: unknown) {
     this.onmessage?.({ data: new TextEncoder().encode(JSON.stringify(payload)).buffer });
   }
-  close(code = 1000) {
+  close(code = 1000, reason = '') {
     this.readyState = 3;
-    this.onclose?.({ code });
+    this.onclose?.({ code, reason });
   }
 }
 
@@ -327,6 +327,21 @@ describe('PairClient 缓存与续传', () => {
     expect(cache.clear).toHaveBeenCalledWith(device.pairId);
     expect(cache.save).toHaveBeenCalledTimes(saves);
     expect(events.onState).toHaveBeenLastCalledWith('unauthorized');
+  });
+
+  it('收到 4001 只停链：保留缓存、不重连、状态是 replaced 而不是配对失效', async () => {
+    const socket = await start();
+    const sockets = Socket.all.length;
+    const clears = vi.mocked(cache.clear).mock.calls.length;
+    socket.close(4001, 'replaced');
+    await settle();
+    expect(events.onState).toHaveBeenLastCalledWith('replaced');
+    expect(cache.clear).toHaveBeenCalledTimes(clears);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(Socket.all).toHaveLength(sockets);
+    client.connect();
+    await settle();
+    expect(Socket.all).toHaveLength(sockets);
   });
 
   it('新epoch快照替换旧缓存，不能混入上一代的历史前缀', async () => {

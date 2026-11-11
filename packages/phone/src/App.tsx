@@ -91,6 +91,7 @@ const STATE_LABEL: Record<ConnState, string> = {
   online: '已连接',
   'host-offline': '桌面端离线',
   unauthorized: '配对已失效',
+  replaced: '已在其他页面打开',
   offline: '重连中…',
 };
 
@@ -831,6 +832,19 @@ export function App() {
         <Button onClick={() => unpairDevice(device.pairId)}>
           {others ? '移除此配对' : '重新配对'}
         </Button>
+      </div>
+    );
+  }
+
+  if (state === 'replaced') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <Smartphone className="h-8 w-8 text-muted-foreground" />
+        <h1 className="font-medium text-lg">已在其他页面打开</h1>
+        <p className="text-muted-foreground text-sm">
+          「{device.label}」正被另一个页面连着，同一时间只能有一个页面。
+        </p>
+        <Button onClick={() => window.location.reload()}>在这个页面重连</Button>
       </div>
     );
   }
