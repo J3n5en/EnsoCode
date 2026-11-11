@@ -148,7 +148,8 @@ function runCli(
   });
 }
 
-describe.sequential('enso-server run', () => {
+// 需要先整包构建 out/server，不进默认 pnpm test；用 pnpm test:e2e:server 跑
+describe.runIf(process.env.ENSO_RUN_E2E === '1').sequential('enso-server run', () => {
   let stub: Stub;
   const keep: string[] = [];
 
