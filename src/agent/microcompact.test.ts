@@ -117,7 +117,8 @@ describe('microcompactContextEdits', () => {
 describe('microcompactExtension', () => {
   it('请求前替换并在回合结束落盘，落盘后的请求保持同一替换', () => {
     const handlers = new Map<string, (event: unknown) => unknown>();
-    microcompactExtension(() => NOW).factory({
+    const extension = microcompactExtension(() => NOW) as { factory: (pi: never) => void };
+    extension.factory({
       on: (name: string, handler: (event: unknown) => unknown) => handlers.set(name, handler),
     } as never);
     const messages = [
