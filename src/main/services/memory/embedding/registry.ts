@@ -56,7 +56,9 @@ const REGISTRY: Record<string, EmbeddingModelSpec> = {
     // HF API 核对（2026-11）：bge-m3-q8_0.gguf 634,553,760B
     approxBytes: 634_553_760,
     files: [{ name: 'bge-m3-q8_0.gguf' }],
-    gguf: { file: 'bge-m3-q8_0.gguf', maxTokens: 512, truncateDim: null },
+    // BGE-M3 原生上下文 8192；maxTokens 只是上限，短输入计算量不变。
+    // 不要写成 512：超长记忆会被静默截成前缀，开头相同的长文本向量会趋同。
+    gguf: { file: 'bge-m3-q8_0.gguf', maxTokens: 8192, truncateDim: null },
     // ModelScope 同名镜像实测可直接 resolve 到 gguf（2026-11 核对 HTTP 200），HF 不可达时回退
     sources: {
       huggingface: 'ggml-org/bge-m3-Q8_0-GGUF',

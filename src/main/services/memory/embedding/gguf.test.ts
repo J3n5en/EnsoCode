@@ -1,5 +1,5 @@
 import type { Token } from 'node-llama-cpp';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LlamaEmbeddingContextLike, LlamaModelLike } from '../../llama/runtime';
 import { createGgufEmbeddingProvider } from './gguf';
 import type { EmbeddingModelSpec } from './types';
@@ -173,6 +173,49 @@ describe('createGgufEmbeddingProvider token budget', () => {
     const p = await provider(fixture.model);
     await expect(p.embed(['x'], 'passage')).resolves.toEqual([null]);
     expect(fixture.seen).toEqual([]);
+  });
+});
+
+describe('createGgufEmbeddingProvider truncation warn', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('超长输入按预算截断，同一 provider 只 warn 一次，向量仍走 finalize', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fixture = budgetModel(10, 'wpm');
+    const p = await provider(fixture.model);
+    const long = 'x'.repeat(20);
+    const [vec] = await p.embed([long, long], 'passage');
+
+    const reservedEnd = 1;
+    const sent = fixture.seen.filter((input): input is Token[] => Array.isArray(input));
+    expect(sent).toHaveLength(2);
+    for (const tokens of sent) {
+      expect(tokens.length).toBeLessThanOrEqual(10 - reservedEnd);
+    }
+    expect(sent[0]).toEqual(Array.from(Buffer.from(long)).slice(0, 10 - 1 - reservedEnd));
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = String(warn.mock.calls[0]?.[0]);
+    expect(message).toContain(spec.id);
+    expect(message).toContain(String(Buffer.from(long).length));
+    expect(message).toContain(String(10 - 1 - reservedEnd));
+
+    expect(vec).not.toBeNull();
+    expect(vec?.length).toBe(512);
+    let norm = 0;
+    for (const x of vec as Float32Array) norm += x * x;
+    expect(Math.sqrt(norm)).toBeCloseTo(1, 5);
+  });
+
+  it('正常长度不触发 warn，原文直接送给 getEmbeddingFor', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fixture = budgetModel(10, 'wpm');
+    const p = await provider(fixture.model);
+    await p.embed(['short'], 'passage');
+    expect(fixture.seen).toEqual(['short']);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
