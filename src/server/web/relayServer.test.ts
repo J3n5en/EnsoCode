@@ -157,7 +157,7 @@ describe('rooms', () => {
     const host1 = await connect(pairId, 'host', fetched.body.hostToken);
     expect(JSON.parse((await guest.next()).data)).toEqual({ type: 'host-online' });
     const host2 = await connect(pairId, 'host', fetched.body.hostToken);
-    expect(await host1.closed).toEqual({ code: 1000, reason: 'replaced' });
+    expect(await host1.closed).toEqual({ code: 4001, reason: 'replaced' });
     expect(JSON.parse((await guest.next()).data)).toEqual({ type: 'host-online' });
     // 被顶掉的旧连接断开不应让对端以为宿主离线
     host2.ws.send('still here');

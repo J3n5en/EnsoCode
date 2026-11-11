@@ -292,7 +292,7 @@ export class PairClient {
     // 半开死链的 close 事件可能永不到达：心跳判死后直接走关闭路径，幂等防双跑
     let settled = false;
     let connectTimer: ReturnType<typeof setTimeout> | undefined;
-    const closed = (code: number | null): void => {
+    const closed = (code: number | null, reason = ''): void => {
       if (settled) return;
       settled = true;
       if (connectTimer) clearTimeout(connectTimer);
@@ -301,8 +301,8 @@ export class PairClient {
       this.heartbeat = null;
       this.ws = null;
       this.roomPrimed = false;
-      // 1008 = 中继明确告知凭据已失效（解绑时下发，或带失效凭据重连时下发）
-      if (code === 1008 || this.revoked) {
+      // 1008 = 凭据已失效；4001 = 同角色被顶替（已在其他页面打开）。都不重连。
+      if (code === 1008 || code === 4001 || reason === 'replaced' || this.revoked) {
         this.revoke();
         return;
       }
@@ -368,7 +368,7 @@ export class PairClient {
       this.enqueueFrame(new Uint8Array(event.data as ArrayBuffer), ws);
     };
 
-    ws.onclose = (event) => closed(event.code);
+    ws.onclose = (event) => closed(event.code, event.reason);
 
     ws.onerror = () => {
       try {

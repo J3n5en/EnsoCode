@@ -107,7 +107,7 @@ export class PairRoom extends DurableObject<Env> {
     // 会在新连接建立后向对端广播离线，把真实在线状态覆盖成假离线
     for (const stale of this.ctx.getWebSockets(role)) {
       try {
-        stale.close(1000, 'replaced');
+        stale.close(4001, 'replaced');
       } catch {}
     }
     this.ctx.acceptWebSocket(server, [role]);

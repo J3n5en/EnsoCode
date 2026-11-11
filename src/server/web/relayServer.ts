@@ -88,7 +88,7 @@ class Hub {
     this.rooms.set(pairId, room);
     const stale = room[role];
     room[role] = ws;
-    stale?.close(1000, 'replaced');
+    stale?.close(4001, 'replaced');
     const other = room[role === 'host' ? 'guest' : 'host'];
     if (role === 'host') {
       if (other) {
