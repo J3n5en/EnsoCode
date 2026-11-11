@@ -79,7 +79,7 @@ import type {
   VirtualSpawnClassifier,
   WorkerCustomProvider,
 } from '@shared/types/agent';
-import { parseAgentWorkerEvent, THINKING_LEVELS } from '@shared/types/agent';
+import { parseAgentCommand, parseAgentWorkerEvent, THINKING_LEVELS } from '@shared/types/agent';
 import type { SubagentModelEntry } from '@shared/types/assets';
 import {
   type AgentTypeEntry,
@@ -547,6 +547,9 @@ export function setWorkspaceBusyResolver(resolver: (id: string) => boolean): voi
 }
 
 export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: string } {
+  // 与 worker 入口同一份校验：不合法的命令发过去只会被丢弃，这里当场报出命令类型
+  if (!parseAgentCommand(command))
+    return { ok: false, error: `invalid ${command.type} command: rejected by worker contract` };
   if (workspaceCommandBlocked(command, workspaceBusy))
     return { ok: false, error: 'Workspace operation in progress.' };
   const action = agentCommandDispatch({

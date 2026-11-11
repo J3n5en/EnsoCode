@@ -2866,7 +2866,7 @@ function parseVirtualSpawnConfig(value: unknown): boolean {
   );
 }
 
-/** 只有会话主模型（spawn-parent / set-model / 子会话继承）接受虚拟配置；其余用途一律真实模型。 */
+/** 只有会话主模型（spawn-parent / set-model / 子会话继承 / 子代理模型目录）接受虚拟配置；其余用途一律真实模型。 */
 function parseSessionModelConfig(value: unknown): SpawnModelConfig | null {
   if (!isRecord(value)) return null;
   if (value.virtual === undefined) return parsePhysicalSpawnModelConfig(value);
@@ -2922,7 +2922,7 @@ function parseSubagentModelOption(value: unknown): SubagentModelOption | null {
     !isRecord(value) ||
     !hasOnlyKeys(value, ['name', 'config', 'description']) ||
     !isNonEmptyString(value.name) ||
-    !parseSpawnModelConfig(value.config) ||
+    !parseSessionModelConfig(value.config) ||
     (value.description !== undefined && typeof value.description !== 'string')
   ) {
     return null;

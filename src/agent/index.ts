@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { parseAgentCommand } from '@shared/types/agent';
+import { rejectUnparsableCommand } from './commandRejection';
 import { installPiCursorExecHook } from './cursor/installHook';
 import { bootstrapWorkerProxyFromEnv } from './proxyEnv';
 import { SessionSupervisor } from './supervisor';
@@ -33,6 +34,8 @@ port.onMessage((data) => {
     console.warn(
       `[agent] dropped unparsable command: ${typeof type === 'string' ? type : '<unknown>'}`
     );
+    const rejection = rejectUnparsableCommand(data);
+    if (rejection) port.postMessage(rejection);
     return;
   }
   supervisor.handleCommand(command);

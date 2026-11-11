@@ -44,6 +44,9 @@ const child = {
   sessionId: 'parent::cw',
   generation: '33333333-3333-4333-8333-333333333333',
   parent,
+  instanceId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  instanceName: 'cw',
+  typeKey: 'builtin:worker',
 };
 const first = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const second = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';

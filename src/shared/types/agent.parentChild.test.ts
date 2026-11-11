@@ -554,6 +554,29 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...command, subagentModels: 'nope' })).toBeNull();
   });
 
+  it('spawn-parent 的 subagentModels 接受虚拟模型配置（否则整条被拒，会话未建）', () => {
+    const virtualConfig = {
+      ...model,
+      settingsProviderId: 'enso-virtual',
+      modelId: 'auto-1',
+      virtual: { name: 'Auto', primary: model, fallbacks: [] },
+    };
+    const command = {
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/repo',
+      model,
+      subagentModels: [{ name: 'Auto', config: virtualConfig }],
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(
+      parseAgentCommand({
+        ...command,
+        subagentModels: [{ name: 'Auto', config: { ...virtualConfig, virtual: { name: 'Auto' } } }],
+      })
+    ).toBeNull();
+  });
+
   it('spawn model 缺 settingsProviderId 必须拒绝：worker 回报 ready 模型身份要用它', () => {
     // 生产端 spawnModelConfig() 恒发该字段，worker 的 settingsModelRef() 缺了就抛错。
     // 解析器若放行，命令会在 worker 入口被静默丢弃 → Main 只能等 ready 握手超时。
