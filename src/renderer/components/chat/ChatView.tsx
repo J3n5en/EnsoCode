@@ -24,6 +24,7 @@ import { selectChatChrome, selectEmptyChatState } from '@/stores/sessions/chatCh
 import { selectChatCandidateConversations } from '@/stores/sessions/sidebarDirectory';
 import { useSettingsStore } from '@/stores/settings';
 import { usePluginSlashCommands } from '../../plugins/commands';
+import { ElevationBar } from '../elevation/ElevationPrompt';
 import { ApprovalBar } from './ApprovalBar';
 import { ApprovalModePicker } from './ApprovalModePicker';
 import { AskBar } from './AskBar';
@@ -457,6 +458,7 @@ export function ChatView() {
               void window.electronAPI.agent.respondApproval(chrome.id, requestId, decision)
             }
           />
+          <ElevationBar />
           <AskBar
             asks={chrome.pendingAsks ?? []}
             onAnswer={(requestId, answer) =>

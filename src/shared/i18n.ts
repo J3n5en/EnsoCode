@@ -2083,6 +2083,12 @@ export const zhTranslations: Record<string, string> = {
   '(no output yet)': '(暂无输出)',
   Deny: '拒绝',
   Allow: '允许',
+  'Run as administrator': '以管理员权限运行',
+  'Login password': '本机登录密码',
+  'A command is waiting for the administrator password': '有命令在等待管理员密码',
+  'Incorrect password. Try again.': '密码不正确，请重试。',
+  'Applies to this command only. The password is never shown to the AI.':
+    '仅对这一条命令生效，密码不会交给 AI。',
   Adjust: '调整',
   'Send back for a safer command': '打回去，让模型换一个更安全的命令',
   'Assistant review': '代审',

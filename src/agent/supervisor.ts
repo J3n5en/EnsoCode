@@ -269,6 +269,7 @@ import {
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
+import { prepareElevation, withElevation } from './shell/elevation';
 import { type SilentTurnKind, silentTurnKind } from './silentTurn';
 import { skillChainExtension } from './skillChainExtension';
 import { assignCompactRoute, providerKeyFor, smartCompactInlineExtension } from './smartCompact';
@@ -2733,6 +2734,30 @@ export class SessionSupervisor {
                 scoped('file-write', recordPaths(stockWrite, targetPath))
               ),
             ];
+      const commandTool = withBackground(
+        withRtkOptimization(
+          createSessionCommandTool({
+            cwd,
+            remote: Boolean(remoteOps),
+            preference: windowsLocalShell,
+            operations: remoteOps?.bash,
+          }) as unknown as Def,
+          {
+            binaryPath: process.env.ENSO_RTK_PATH,
+            dataDir: path.join(this.options.agentDir, 'rtk'),
+            cwd,
+            remote: Boolean(remoteOps),
+            enabled: rtkEnabled,
+          }
+        ),
+        this.bgTasks,
+        sessionId,
+        cwd,
+        backgroundTransform,
+        foregroundSessionId
+      );
+      // 提权只在本机 bash：远程会话的 sudo 在远端，连不上本机 askpass 服务
+      const elevation = remoteOps ? null : prepareElevation();
       return [
         ...readOnlyTools(toolGate),
         withApproval(
@@ -2740,28 +2765,12 @@ export class SessionSupervisor {
           'command',
           exclusive(
             guarded(
-              withBackground(
-                withRtkOptimization(
-                  createSessionCommandTool({
-                    cwd,
-                    remote: Boolean(remoteOps),
-                    preference: windowsLocalShell,
-                    operations: remoteOps?.bash,
-                  }) as unknown as Def,
-                  {
-                    binaryPath: process.env.ENSO_RTK_PATH,
-                    dataDir: path.join(this.options.agentDir, 'rtk'),
-                    cwd,
-                    remote: Boolean(remoteOps),
-                    enabled: rtkEnabled,
-                  }
-                ),
-                this.bgTasks,
-                sessionId,
-                cwd,
-                backgroundTransform,
-                foregroundSessionId
-              )
+              elevation
+                ? withElevation(commandTool, {
+                    ...elevation,
+                    unattended: () => toolGate.autoReject,
+                  })
+                : commandTool
             )
           )
         ),

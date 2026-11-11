@@ -60,6 +60,11 @@ export const IPC_CHANNELS = {
   // 隐私脱敏记录（只读，不含原值）
   PRIVACY_MASK_RECORDS: 'privacy-mask:records',
 
+  // bash 提权口令：只对桌面主窗口与完整模式主界面开放
+  ELEVATION_PENDING: 'elevation:pending',
+  ELEVATION_ANSWER: 'elevation:answer',
+  ELEVATION_CHANGED: 'elevation:changed',
+
   // Resource monitor
   RESOURCES_SAMPLE: 'resources:sample',
   RESOURCES_STORAGE_SCAN: 'resources:storage-scan',

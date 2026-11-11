@@ -32,6 +32,7 @@ import {
   type ModelCredentialContext,
   modelUsability,
 } from '@shared/defaultModel';
+import { ELEVATE_ASKPASS_ENV } from '@shared/elevation';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
 import { resolveImageGenerationConfig } from '@shared/imageGeneration';
@@ -121,6 +122,7 @@ import { BuiltinToolScopes, sessionDisabledTools } from './builtinToolScopes';
 import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { dcgRoot, installedDcgPath } from './dcgBinary';
+import { ensureElevationServer } from './elevation';
 import {
   getExtensionPlugins,
   setPluginMcpBridge,
@@ -312,10 +314,12 @@ export function customWorkflowPresetDir(): string {
 
 export function startAgentWorker(): void {
   if (worker) return;
+  const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
     serviceName: 'enso-agent-worker',
     env: {
       ...process.env,
+      ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
       ENSO_AGENT_DATA_DIR: agentDataDir(),
       PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
       ENSO_MODELS_DEV_CACHE: path.join(app.getPath('userData'), 'models-dev-cache.json'),

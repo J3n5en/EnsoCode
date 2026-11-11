@@ -866,6 +866,13 @@ export const IPC_PRODUCT_COVERAGE = {
   PRIVACY_MASK_RECORDS: excluded(
     'Read-only local privacy masking records for the Settings → Privacy panel.'
   ),
+  ELEVATION_PENDING: excluded(
+    'Human-only sudo password prompt; restricted to the desktop main window and full-mode remote UI.'
+  ),
+  ELEVATION_ANSWER: excluded(
+    'Human-only sudo password answer; must never be reachable by agents or plugins.'
+  ),
+  ELEVATION_CHANGED: excluded('Main → renderer push for the sudo password prompt.'),
   RESOURCES_SAMPLE: excluded('Read-only local process sampling for Settings → Resources.'),
   RESOURCES_STORAGE_SCAN: excluded('Read-only userData disk scan for Settings → Resources.'),
   RESOURCES_STORAGE_CLEAN: excluded('Local cache/log cleanup for Settings → Resources.'),

@@ -17,6 +17,7 @@ import type {
   StartOauthResult,
   StartOauthWizardRequest,
 } from '@shared/capabilities/types';
+import type { ElevationRequestView } from '@shared/elevation';
 import type {
   ChatModelDto,
   DistillableSessionDto,
@@ -354,6 +355,19 @@ const electronAPI = {
   privacyMask: {
     records: (days: 1 | 7 | 30): Promise<PrivacyMaskRecord[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.PRIVACY_MASK_RECORDS, days),
+  },
+
+  /** bash 提权口令：只有桌面主窗口与完整模式主界面能读写，其它窗口拿到空列表 */
+  elevation: {
+    pending: (): Promise<ElevationRequestView[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ELEVATION_PENDING),
+    answer: (id: string, password: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ELEVATION_ANSWER, id, password),
+    onChanged: (callback: (views: ElevationRequestView[]) => void): (() => void) => {
+      const listener = (_: unknown, views: ElevationRequestView[]) => callback(views);
+      ipcRenderer.on(IPC_CHANNELS.ELEVATION_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.ELEVATION_CHANGED, listener);
+    },
   },
 
   resources: {
