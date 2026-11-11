@@ -328,7 +328,8 @@ import {
 } from './unattended';
 import { createVirtualChooser, resolveClassifierModel } from './virtualClassifier';
 import { registerVirtualModel } from './virtualModels';
-import { createWorkflowTool, WORKFLOW_STOPPED_BY_USER } from './workflow';
+import { ACTIVE_WORKFLOW_RUN_IDS, createWorkflowTool, WORKFLOW_STOPPED_BY_USER } from './workflow';
+import { claimInterruptedWorkflowRuns } from './workflowJournal';
 import { listWorkflowPresets, loadWorkflowPreset, workflowPresetRoots } from './workflowPresets';
 import { WorkspaceClaims, withExclusiveCommand, withFileClaims } from './workspaceClaims';
 import { WORKSPACE_POLICY_PROMPT } from './workspacePolicy';
@@ -1127,6 +1128,10 @@ export class SessionSupervisor {
 
   private persistPendingReminders(managed: ManagedSession): void {
     this.pendingNotifications.save(managed.identity.sessionId, managed.pendingTaskReminders);
+  }
+
+  private workflowJournalDir(): string {
+    return path.join(this.options.sessionDir, 'workflows');
   }
 
   /** 回合收口后补投攒下的通知（中止后 pi 收尾期间被拒的 prompt 也在这里） */
@@ -3244,6 +3249,8 @@ export class SessionSupervisor {
           models: subagentModels,
           agentTypes,
           activeRuns: workflowRuns,
+          journalDir: this.workflowJournalDir(),
+          sessionId,
           notify: (text, urgent) => this.notifier.notify(sessionId, text, { urgent }),
           emit: (run) => {
             const managed = managedRef ?? this.sessions.get(sessionId);
@@ -3537,6 +3544,18 @@ export class SessionSupervisor {
       if (parent) managed.gate.mode = parent.gate.mode;
     }
     this.flushPendingMcpTools(managed);
+    // 上次进程退出时没跑完的 workflow：告诉模型可以 resume，随下一次工具结果或回合收口送达
+    for (const run of claimInterruptedWorkflowRuns(
+      this.workflowJournalDir(),
+      identity.sessionId,
+      ACTIVE_WORKFLOW_RUN_IDS
+    )) {
+      this.queueReminder(
+        managed,
+        `Workflow "${run.name}" (runId ${run.runId}) was interrupted before it finished (the app or worker restarted). ` +
+          `Its recorded agent() results are kept: call workflow with resume:"${run.runId}" to continue it, or ignore it if it is no longer needed.`
+      );
+    }
     this.bindAutoRetryLimit(session);
     const stream = session.agent?.streamFunction;
     if (stream) {

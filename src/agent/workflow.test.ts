@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { AgentControlToolRequest, AgentControlToolResponse } from '@shared/types/agent';
 import { generateWorkflowScript } from '@shared/workflowDesign';
 import { describe, expect, it, vi } from 'vitest';
@@ -709,5 +712,96 @@ describe('workflow tool', () => {
       invoke.mock.calls.find((c) => (c[0] as { description?: string }).description === 'tests')?.[0]
     ).not.toHaveProperty('agentType');
     expect(result.details).toMatchObject({ result: '## report\n\nout3' });
+  });
+});
+
+describe('运行日志与续跑', () => {
+  const script = `
+    const a = await agent('step A at ' + Date.now());
+    const b = await agent('step B after ' + a);
+    return [a, b];
+  `;
+  const meta = { name: 'two-step', description: 'Two dependent steps' };
+
+  it('失败后 resume：已成功的 agent() 从日志复用，只重跑失败的那步；Date.now 固定为启动时间', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-wf-resume-'));
+    try {
+      let failB = true;
+      const prompts: string[] = [];
+      const { invoke } = fakeChildren((spawn) => {
+        prompts.push(spawn.prompt);
+        const failing = spawn.prompt.startsWith('step B') && failB;
+        return {
+          runId: `r${prompts.length}`,
+          status: failing ? 'failed' : 'succeeded',
+          text: spawn.prompt.startsWith('step A') ? 'A-out' : 'B-out',
+        };
+      });
+      const tool = createWorkflowTool({
+        invoke,
+        emit: () => {},
+        journalDir: dir,
+        sessionId: 's1',
+        randomUuid: () => 'run-1',
+      });
+      const first = await tool.execute(
+        'c1',
+        { script, meta },
+        undefined,
+        undefined,
+        undefined as never
+      );
+      expect(first.details).toMatchObject({ result: ['A-out', null] });
+      expect(prompts).toHaveLength(2);
+      const stampedA = prompts[0];
+
+      failB = false;
+      await new Promise((r) => setTimeout(r, 5));
+      const resumed = await tool.execute(
+        'c2',
+        { resume: 'run-1' },
+        undefined,
+        undefined,
+        undefined as never
+      );
+      expect(resumed.details).toMatchObject({ runId: 'run-1', result: ['A-out', 'B-out'] });
+      // A 未重跑（提示里的 Date.now 不变才能命中），只多派了 B
+      expect(prompts).toEqual([stampedA, 'step B after A-out', 'step B after A-out']);
+      expect(JSON.stringify(resumed.content)).toContain('1 results reused');
+      // 再续一次：两步都已记录，全部复用，不再派发
+      const again = await tool.execute(
+        'c3',
+        { resume: 'run-1' },
+        undefined,
+        undefined,
+        undefined as never
+      );
+      expect(again.details).toMatchObject({ result: ['A-out', 'B-out'] });
+      expect(prompts).toHaveLength(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('不属于本会话或不存在的 runId 拒绝续跑', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-wf-resume-'));
+    try {
+      const { invoke } = fakeChildren(() => ({ runId: 'x', status: 'failed' }));
+      const other = createWorkflowTool({
+        invoke,
+        emit: () => {},
+        journalDir: dir,
+        sessionId: 's2',
+        randomUuid: () => 'run-2',
+      });
+      await other.execute('c1', { script, meta }, undefined, undefined, undefined as never);
+      const mine = createWorkflowTool({ invoke, emit: () => {}, journalDir: dir, sessionId: 's1' });
+      for (const resume of ['run-2', 'missing', '../x'])
+        await expect(
+          mine.execute('c', { resume }, undefined, undefined, undefined as never)
+        ).rejects.toThrow(/no resumable workflow run/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

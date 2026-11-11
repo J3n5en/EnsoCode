@@ -14,6 +14,7 @@ import type {
 } from '@shared/types/workflow';
 import { JSException, type JSValueHandle, QuickJS } from 'quickjs-wasi';
 import { describeSubagentModels } from './subagent';
+import { agentCallKey, WorkflowJournal, type WorkflowLaunch } from './workflowJournal';
 import { resolveWorkflowPresetArgs, type WorkflowPreset } from './workflowPresets';
 
 const require = createRequire(import.meta.url);
@@ -46,6 +47,18 @@ export interface WorkflowToolDeps {
   models?: readonly SubagentModelOption[];
   agentTypes?: readonly Pick<AgentTypeSpawnConfig, 'name' | 'allowModelOverride'>[];
   randomUuid?: () => string;
+  /** 运行日志目录；提供时 agent() 成功结果落盘，可 resume 续跑 */
+  journalDir?: string;
+  sessionId?: string;
+}
+
+/** 本进程正在跑的运行：认领“被中断的运行”时排除它们 */
+export const ACTIVE_WORKFLOW_RUN_IDS = new Set<string>();
+
+interface Replay {
+  journal?: WorkflowJournal;
+  cache: Map<string, unknown>;
+  startedAt: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,11 +134,15 @@ interface HostJob {
   id: string;
   op: 'agent' | 'phase' | 'log';
   payload: Record<string, unknown>;
+  /** agent() 的派发键：滚动前缀 + 派发参数，按入队顺序确定 */
+  key?: string;
 }
 
 class WorkflowRunState {
   readonly snapshot: WorkflowRunSnapshot;
   agentsStarted = 0;
+  /** 从运行日志复用的 agent() 结果数 */
+  reused = 0;
   /** 顶层 model：由未自带 model、且类型要求选模型的 agent() 继承 */
   model: string | undefined;
   private memberSeq = 0;
@@ -316,12 +333,14 @@ async function runScript(
   state: WorkflowRunState,
   script: string,
   args: unknown,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  replay: Replay
 ): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
   const publish = () => deps.emit(state.copy());
   publish();
   const queue: HostJob[] = [];
   let nextId = 0;
+  let lastKey = '';
   const started = performance.now();
   let pausedMs = 0;
   let pauseStarted = 0;
@@ -361,10 +380,16 @@ async function runScript(
         payload = {};
       }
       const id = String(++nextId);
-      queue.push({ id, op, payload });
+      let key: string | undefined;
+      if (op === 'agent') {
+        key = agentCallKey(lastKey, payload);
+        lastKey = key;
+      }
+      queue.push({ id, op, payload, ...(key ? { key } : {}) });
       return vm.newString(id);
     }).consume((handle) => vm.global.setProp('__enqueue', handle));
     const prelude = `
+      Date.now = () => ${replay.startedAt};
       const __waiters = new Map();
       globalThis.__settle = (id, ok, json) => {
         const waiter = __waiters.get(id);
@@ -468,9 +493,35 @@ async function runScript(
           publish();
           settleJob(job.id, true, {});
         } else {
-          const result = await runAgent(deps, state, job.payload, signal, publish);
-          if (result.fatal) settleJob(job.id, false, result.fatal);
-          else settleJob(job.id, true, { value: result.value });
+          const cached = job.key !== undefined && replay.cache.has(job.key);
+          if (cached) {
+            const value = replay.cache.get(job.key as string);
+            const prompt = String(job.payload.prompt ?? '');
+            const label =
+              (typeof job.payload.label === 'string' && job.payload.label.trim()) ||
+              prompt.trim().split('\n')[0]?.slice(0, 80) ||
+              'agent';
+            const member = state.startMember(
+              label,
+              typeof job.payload.phase === 'string' ? job.payload.phase : state.snapshot.phase,
+              typeof job.payload.batch === 'number' ? job.payload.batch : state.nextBatch(),
+              prompt
+            );
+            state.reused += 1;
+            state.finishMember(member.seq, 'completed', {
+              result: `(reused) ${typeof value === 'string' ? value : JSON.stringify(value)}`,
+            });
+            publish();
+            settleJob(job.id, true, { value });
+          } else {
+            const result = await runAgent(deps, state, job.payload, signal, publish);
+            if (result.fatal) settleJob(job.id, false, result.fatal);
+            else {
+              if (job.key !== undefined && result.value !== null)
+                replay.journal?.recordResult(job.key, result.value);
+              settleJob(job.id, true, { value: result.value });
+            }
+          }
         }
         vm.executePendingJobs();
       } catch {
@@ -531,6 +582,8 @@ async function runScript(
 
 /** 用户从侧边栏停止时的 abort reason，据此告诉模型不要重跑 */
 export const WORKFLOW_STOPPED_BY_USER = 'workflow-stopped-by-user';
+/** 模型用 stop 取消时的 abort reason；与用户停止一样不留续跑日志 */
+const WORKFLOW_STOPPED_BY_MODEL = 'workflow-stopped-by-model';
 const USER_STOP_TEXT = 'was stopped by the user — do not restart it';
 
 export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
@@ -543,14 +596,30 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
     state: WorkflowRunState,
     script: string,
     args: Record<string, unknown>,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    replay: Replay
   ): Promise<{ ok: true; value: unknown } | { ok: false; error: string; thrown?: unknown }> => {
+    const runId = state.snapshot.runId;
+    ACTIVE_WORKFLOW_RUN_IDS.add(runId);
+    // 完成或被用户 / 模型显式停止：删日志；失败保留可续跑；其余取消（Esc、会话释放、退出）不收尾，下次打开会话认领为中断
+    const close = (status: WorkflowRunSnapshot['status']) => {
+      ACTIVE_WORKFLOW_RUN_IDS.delete(runId);
+      if (!replay.journal) return;
+      if (status === 'completed') replay.journal.settle('completed');
+      else if (status === 'failed') replay.journal.settle('failed');
+      else if (
+        signal?.reason === WORKFLOW_STOPPED_BY_USER ||
+        signal?.reason === WORKFLOW_STOPPED_BY_MODEL
+      )
+        replay.journal.settle('cancelled');
+    };
     let result: Awaited<ReturnType<typeof runScript>>;
     try {
-      result = await runScript(deps, state, script, args, signal);
+      result = await runScript(deps, state, script, args, signal, replay);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       state.finish(signal?.aborted ? 'cancelled' : 'failed', message);
+      close(state.snapshot.status);
       deps.emit(state.copy());
       return { ok: false, error: message, thrown: error };
     }
@@ -562,11 +631,14 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
     } else {
       state.finish('completed');
     }
+    close(state.snapshot.status);
     deps.emit(state.copy());
     return result;
   };
   const completedText = (name: string, state: WorkflowRunState, value: unknown) =>
-    `workflow "${name}" completed (${state.agentsStarted} agents).\nReturn value:\n${JSON.stringify(value, null, 2)}`;
+    `workflow "${name}" completed (${state.agentsStarted} agents${
+      state.reused > 0 ? `, ${state.reused} results reused from the run journal` : ''
+    }).\nReturn value:\n${JSON.stringify(value, null, 2)}`;
 
   return {
     name: 'workflow',
@@ -575,8 +647,9 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
       'Run a JavaScript workflow that fans work out across subagents. Use only when the user asks for a workflow or a large multi-agent fan-out. ' +
       'Pass either preset (id of a saved workflow) or script + meta. ' +
       'Set background:true to return a runId immediately; the result arrives later as a notification. Pass stop:<runId> alone to cancel a background run. ' +
+      'Pass resume:<runId> to continue a failed or interrupted run: its script and args are reused, and agent() calls whose results were recorded are served from the run journal instead of running again. ' +
       'The script is plain JavaScript with top-level await and must return a JSON value. Hooks: agent(prompt, opts?), parallel(thunks), pipeline(items, ...stages), phase(title), log(message), args. ' +
-      'A failed child resolves to null. Bad hook arguments fail the whole run. The script cannot use filesystem, network, timers, or Node APIs. Status is shown in the side panel.' +
+      'A failed child resolves to null. Bad hook arguments fail the whole run. The script cannot use filesystem, network, timers, or Node APIs; Date.now() returns the run start time. Status is shown in the side panel.' +
       presetCatalog(deps.presets),
     promptSnippet:
       'workflow: run a saved preset or write a JavaScript orchestration script that fans subagents out. Use for an explicit workflow request, a large fan-out, or a task a listed preset clearly fits. One or two delegations should use subagent.',
@@ -646,6 +719,15 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
           type: 'string',
           description: 'runId of a background workflow to cancel. Pass it without other fields.',
         },
+        ...(deps.journalDir
+          ? {
+              resume: {
+                type: 'string',
+                description:
+                  'runId of a failed or interrupted run to continue. Pass it alone (optionally with background); recorded agent() results are reused.',
+              },
+            }
+          : {}),
       },
     } as unknown as ToolDefinition['parameters'],
     async execute(_toolCallId, params, signal) {
@@ -656,7 +738,7 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
         if (!controller) throw new Error(`no running background workflow: ${stopId}`);
         // 先摘除再 abort：收尾时发现已不在表里，就不再通知（模型已由本次返回知情）
         deps.activeRuns?.delete(stopId);
-        controller.abort();
+        controller.abort(WORKFLOW_STOPPED_BY_MODEL);
         return {
           content: [{ type: 'text', text: `workflow ${stopId} stopped` }],
           details: { runId: stopId, stopped: true },
@@ -673,6 +755,8 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
       if (model && !modelNames.includes(model)) {
         throw new Error(`unknown model "${model}". Available: [${modelNames.join(', ')}]`);
       }
+      const resumeId = typeof record.resume === 'string' ? record.resume.trim() : '';
+      if (resumeId) return start(resumeLaunch(resumeId), background, signal);
       const presetId = typeof record.preset === 'string' ? record.preset.trim() : '';
       let script = typeof record.script === 'string' ? record.script : '';
       let meta = parseMeta(record.meta);
@@ -689,8 +773,62 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
       }
       if (!script.trim() || !meta)
         throw new Error('workflow requires preset, or script with meta.name and meta.description');
-      const state = new WorkflowRunState(deps.randomUuid?.() ?? crypto.randomUUID(), meta);
-      state.model = model || undefined;
+      const runId = deps.randomUuid?.() ?? crypto.randomUUID();
+      const launch: WorkflowLaunch = {
+        runId,
+        sessionId: deps.sessionId ?? '',
+        name: meta.name,
+        description: meta.description,
+        script,
+        args,
+        ...(model ? { model } : {}),
+        startedAt: Date.now(),
+      };
+      const journal = deps.journalDir ? new WorkflowJournal(deps.journalDir, runId) : undefined;
+      journal?.launch(launch);
+      return start({ launch, journal, cache: new Map() }, background, signal);
+    },
+  };
+
+  function resumeLaunch(runId: string): {
+    launch: WorkflowLaunch;
+    journal: WorkflowJournal;
+    cache: Map<string, unknown>;
+  } {
+    if (!deps.journalDir) throw new Error('workflow resume is unavailable in this session');
+    let journal: WorkflowJournal;
+    try {
+      journal = new WorkflowJournal(deps.journalDir, runId);
+    } catch {
+      throw new Error(`no resumable workflow run: ${runId}`);
+    }
+    const launch = journal.readLaunch();
+    if (!launch || launch.sessionId !== (deps.sessionId ?? ''))
+      throw new Error(
+        `no resumable workflow run: ${runId} (stopped or expired runs keep no journal)`
+      );
+    if (ACTIVE_WORKFLOW_RUN_IDS.has(runId)) throw new Error(`workflow ${runId} is still running`);
+    journal.resumed();
+    return { launch, journal, cache: journal.results() };
+  }
+
+  async function start(
+    run: { launch: WorkflowLaunch; journal?: WorkflowJournal; cache: Map<string, unknown> },
+    background: boolean,
+    signal: AbortSignal | undefined
+  ): ReturnType<ToolDefinition['execute']> {
+    const { launch } = run;
+    const meta = { name: launch.name, description: launch.description };
+    const script = launch.script;
+    const args = launch.args;
+    const replay: Replay = {
+      ...(run.journal ? { journal: run.journal } : {}),
+      cache: run.cache,
+      startedAt: launch.startedAt,
+    };
+    {
+      const state = new WorkflowRunState(launch.runId, meta);
+      state.model = launch.model;
       const runId = state.snapshot.runId;
       const name = meta.name;
       const controller = new AbortController();
@@ -705,7 +843,7 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
       const byUser = () => controller.signal.reason === WORKFLOW_STOPPED_BY_USER;
       if (background && deps.notify) {
         const { notify } = deps;
-        void settle(state, script, args, controller.signal).then((result) => {
+        void settle(state, script, args, controller.signal, replay).then((result) => {
           if (!release()) return;
           notify(
             result.ok
@@ -732,7 +870,8 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
         state,
         script,
         args,
-        signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
+        signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+        replay
       ).finally(release);
       if (!result.ok) {
         if (result.thrown !== undefined && !byUser()) throw result.thrown;
@@ -755,6 +894,6 @@ export function createWorkflowTool(deps: WorkflowToolDeps): ToolDefinition {
           result: result.value,
         },
       };
-    },
-  };
+    }
+  }
 }
