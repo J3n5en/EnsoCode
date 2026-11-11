@@ -40,7 +40,10 @@ const temp = (prefix: string) => {
 };
 afterEach(() => {
   vi.useRealTimers();
-  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // 停用插件后服务仍可能异步落盘，删目录时撞上新文件会报 ENOTEMPTY
+  for (const dir of temps.splice(0)) {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
 });
 
 function writePlugin(files: Record<string, string>) {

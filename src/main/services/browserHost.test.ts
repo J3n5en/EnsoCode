@@ -25,6 +25,7 @@ const fakeTabs: Array<{
   };
 }> = [];
 
+vi.mock('./proxyConfig', () => ({ getProxyConfig: () => ({ attachSession: () => {} }) }));
 vi.mock('electron', () => {
   class FakeWebContentsView {
     webContents: (typeof fakeTabs)[number]['contents'];
