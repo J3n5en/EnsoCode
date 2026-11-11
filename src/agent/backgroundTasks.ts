@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
 import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
@@ -19,7 +20,9 @@ import { type CommandClass, classifyCommand } from './shell/policy';
 import {
   completionReceiptText,
   deadlineKillText,
+  excerpt,
   failureLine,
+  headChars,
   yieldFailedText,
   yieldReceiptText,
 } from './shell/receipts';
@@ -35,6 +38,8 @@ const COMPLETION_OUTPUT_LIMIT = 4_000;
 const HEAD_KEEP = Math.floor(COMPLETION_OUTPUT_LIMIT * 0.2);
 /** 失败分类只看输出尾部 */
 const FAILURE_TAIL = 4_000;
+/** task_output 单次返回的新输出上限（头 20% 尾 80%） */
+const TASK_OUTPUT_LIMIT = 30_000;
 /** 输出事件节流 */
 const EMIT_INTERVAL_MS = 500;
 
@@ -45,6 +50,11 @@ interface Task {
   output: string;
   /** 内存缓冲截头丢掉的字符数（磁盘 log 仍全量） */
   droppedChars: number;
+  /** 内存缓冲截头丢掉的 UTF-8 字节数 */
+  droppedMemBytes: number;
+  /** 模型读游标（输出流绝对位置，字符 / 字节）：让位回执、task_output、完成通知共用，读过的不重放 */
+  readChars: number;
+  readBytes: number;
   /** 输出开头（内存缓冲截头后仍保留） */
   head: string;
   dirty: boolean;
@@ -53,7 +63,9 @@ interface Task {
   /** 已写入磁盘日志的字节数 */
   logBytes: number;
   /** 日志超限后未写入的字节数 */
-  droppedBytes: number;
+  logDroppedBytes: number;
+  /** 跨 chunk 的多字节字符留到下个 chunk 再解码，避免产生替换字符 */
+  decoder: StringDecoder;
   /** 模型已经由工具返回值知情（阻塞等到结束 / kill 已回执），不再通知 */
   consumed: boolean;
   killedByUser: boolean;
@@ -130,6 +142,20 @@ export interface TaskEvents {
 
 /** 毫秒转秒（保留一位小数），用于工具描述与回执里的时长 */
 const yieldSec = (ms: number): number => Math.round(ms / 100) / 10;
+
+/** 自上次读取以来的新输出 */
+export interface UnreadOutput {
+  /** 内存缓冲里的未读部分 */
+  text: string;
+  /** 未读部分被内存缓冲截掉时单独保留的开头；不可得为空 */
+  head: string;
+  /** 未读部分里已被内存缓冲截掉的字节数（磁盘日志仍有） */
+  droppedBytes: number;
+  /** 未读总字节数 */
+  bytes: number;
+  /** 此前已读过部分输出 */
+  resumed: boolean;
+}
 
 /** 可被插话 / 用户「转后台」解除的在跑工具调用：前台命令移交后台，阻塞等待提前返回 */
 interface DetachableCall {
@@ -222,6 +248,9 @@ export class BackgroundTaskManager {
     });
     task.yieldedAt = Date.now();
     this.append(task, Buffer.from(proc.output()));
+    // 让位回执会带上这部分输出：视为已读。pipe() 之后 proc.output() 冻结（不再捕获），
+    // ForegroundCommand.detach 在同一同步段里取到的 error.output 与这里是同一快照，不存在时差
+    this.takeUnread(task);
     proc.pipe((chunk) => this.append(task, chunk));
     proc.done.then(
       (code) => this.exited(task, code, null),
@@ -342,12 +371,16 @@ export class BackgroundTaskManager {
       kill: opts.kill,
       output: '',
       droppedChars: 0,
+      droppedMemBytes: 0,
+      readChars: 0,
+      readBytes: 0,
       head: '',
       dirty: false,
       logPath,
       logStream,
       logBytes: 0,
-      droppedBytes: 0,
+      logDroppedBytes: 0,
+      decoder: new StringDecoder('utf8'),
       consumed: false,
       killedByUser: false,
       stoppedByModel: false,
@@ -369,13 +402,28 @@ export class BackgroundTaskManager {
 
   private append(task: Task, chunk: Buffer): void {
     if (chunk.length === 0) return;
-    const text = chunk.toString();
-    if (task.head.length < HEAD_KEEP) task.head = (task.head + text).slice(0, HEAD_KEEP);
-    const next = task.output + text;
-    task.droppedChars += Math.max(0, next.length - MAX_BUFFER);
-    task.output = next.slice(-MAX_BUFFER);
-    task.dirty = true;
     this.writeLog(task, chunk);
+    const text = task.decoder.write(chunk);
+    if (!text) return;
+    if (task.head.length < HEAD_KEEP) task.head = headChars(task.head + text, HEAD_KEEP);
+    const next = task.output + text;
+    let overflow = next.length - MAX_BUFFER;
+    if (overflow > 0) {
+      // 截头不劈开代理对：否则缓冲以孤立代理项开头，字节也会多算
+      if (
+        overflow < next.length &&
+        next.charCodeAt(overflow) >= 0xdc00 &&
+        next.charCodeAt(overflow) <= 0xdfff
+      ) {
+        overflow += 1;
+      }
+      task.droppedChars += overflow;
+      task.droppedMemBytes += Buffer.byteLength(next.slice(0, overflow));
+      task.output = next.slice(overflow);
+    } else {
+      task.output = next;
+    }
+    task.dirty = true;
   }
 
   /** 日志超过上限停写并标记截断；进程照常跑，内存缓冲照常滚动 */
@@ -388,14 +436,32 @@ export class BackgroundTaskManager {
       return;
     }
     const fits = Math.max(0, room);
-    if (task.droppedBytes === 0) {
+    if (task.logDroppedBytes === 0) {
       if (fits > 0) task.logStream.write(chunk.subarray(0, fits));
       task.logBytes += fits;
       task.logStream.write(
         `\n[log truncated: reached ${this.limits.logMaxBytes} bytes; further output is not recorded]\n`
       );
     }
-    task.droppedBytes += chunk.length - (task.droppedBytes === 0 ? fits : 0);
+    task.logDroppedBytes += chunk.length - (task.logDroppedBytes === 0 ? fits : 0);
+  }
+
+  /** 取出自上次读取以来的新输出并推进游标 */
+  private takeUnread(task: Task): UnreadOutput {
+    const text = task.output.slice(Math.max(0, task.readChars - task.droppedChars));
+    const totalBytes = task.droppedMemBytes + Buffer.byteLength(task.output);
+    const bytes = totalBytes - task.readBytes;
+    const droppedBytes = Math.max(0, bytes - Buffer.byteLength(text));
+    const unread: UnreadOutput = {
+      text,
+      head: droppedBytes > 0 && task.readChars === 0 ? task.head : '',
+      droppedBytes,
+      bytes,
+      resumed: task.readChars > 0,
+    };
+    task.readChars = task.droppedChars + task.output.length;
+    task.readBytes = totalBytes;
+    return unread;
   }
 
   private exited(task: Task, code: number | null, signal: NodeJS.Signals | null): void {
@@ -445,7 +511,7 @@ export class BackgroundTaskManager {
           killedByDeadline: task.killedByDeadline,
           deadlineSec: task.deadlineSec,
           stoppedByUser: task.killedByUser,
-          droppedBytes: task.droppedBytes,
+          droppedBytes: task.logDroppedBytes,
         });
     // 有阻塞等待者 = 结束态将经工具返回值送达模型（blockWaited 语义），无需再通知
     const hadWaiters = task.waiters.length > 0;
@@ -472,6 +538,7 @@ export class BackgroundTaskManager {
 
   private completionText(task: Task): string {
     const { taskId, command, exitCode, status, startedAt } = task.info;
+    const unread = this.takeUnread(task);
     return completionReceiptText({
       taskId,
       command,
@@ -483,9 +550,10 @@ export class BackgroundTaskManager {
       killedByDeadline: task.killedByDeadline === true,
       deadlineSec: task.deadlineSec,
       failure: task.failure ?? { kind: 'none', retryable: true, hint: '' },
-      output: stripVTControlCharacters(task.output),
-      head: stripVTControlCharacters(task.head),
-      droppedChars: task.droppedChars,
+      output: stripVTControlCharacters(unread.text),
+      head: stripVTControlCharacters(unread.head),
+      droppedBytes: unread.droppedBytes,
+      resumed: unread.resumed,
       logPath: task.logPath,
       limit: COMPLETION_OUTPUT_LIMIT,
     });
@@ -508,7 +576,10 @@ export class BackgroundTaskManager {
     }, EMIT_INTERVAL_MS);
   }
 
-  /** task_output：快照或阻塞等待（等到结束视为模型已知情） */
+  /**
+   * 仅供模型面（task_output）：快照或阻塞等待（等到结束视为模型已知情）。
+   * 调用即消费读游标——unread 是自上次交付以来的新输出；UI 等其它调用方用 snapshot()，否则会吞掉模型的新输出。
+   */
   async read(
     taskId: string,
     timeoutMs = 0,
@@ -516,6 +587,7 @@ export class BackgroundTaskManager {
   ): Promise<{
     status: string;
     output: string;
+    unread: UnreadOutput;
     exitCode?: number;
     logPath: string;
     details?: unknown;
@@ -545,6 +617,7 @@ export class BackgroundTaskManager {
     return {
       status: task.info.status,
       output: task.output,
+      unread: this.takeUnread(task),
       exitCode: task.info.exitCode,
       logPath: task.logPath,
       details: task.details,
@@ -760,7 +833,7 @@ function detachedResult(
     reason: error.reason,
     commandClass: context.commandClass,
     afterMs: Date.now() - context.startedAt,
-    output: error.output.slice(-TAIL_LIMIT),
+    output: error.output,
     logPath: context.logPath,
     waitCapSec: context.waitCapSec,
   });
@@ -1081,13 +1154,26 @@ export function createTaskTools(
           result.status !== 'running' && result.failure && result.failure.kind !== 'none'
             ? `\n${failureLine(result.failure)}`
             : '';
+        const { unread } = result;
+        const shown = excerpt(unread.text, TASK_OUTPUT_LIMIT, {
+          head: unread.droppedBytes > 0 ? unread.head : undefined,
+          droppedBytes: unread.droppedBytes,
+        });
+        const since = unread.resumed ? ' since the last read' : '';
+        const omitted = shown.omittedBytes > 0 ? `, ${shown.omittedBytes} omitted in between` : '';
+        const header =
+          unread.bytes > 0
+            ? `${unread.bytes} new bytes${since}${omitted}`
+            : unread.resumed
+              ? 'no new output since the last read'
+              : 'no output yet';
         return {
           content: [
             {
               type: 'text',
               text:
-                `[${result.status}${suffix}] Full log: ${result.logPath}\n` +
-                `${result.output.slice(-30_000) || '(no output yet)'}${hint}${failure}`,
+                `[${result.status}${suffix}] ${header}. Full log: ${result.logPath}` +
+                `${shown.text ? `\n${shown.text}` : ''}${hint}${failure}`,
             },
           ],
           details: result.details,

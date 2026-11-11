@@ -63,23 +63,37 @@ describe('yieldReceiptText', () => {
 
 describe('excerpt', () => {
   it('不超限原样返回', () => {
-    expect(excerpt('abc', 10)).toEqual({ text: 'abc', omitted: 0 });
+    expect(excerpt('abc', 10)).toEqual({ text: 'abc', omittedBytes: 0 });
   });
 
-  it('超限保留头 20% + 尾 80%，标注省略数', () => {
+  it('超限保留头 20% + 尾 80%，标注省略的真实字节数', () => {
     const full = `HEAD${'x'.repeat(1000)}TAIL`;
     const result = excerpt(full, 100);
     expect(result.text.startsWith('HEAD')).toBe(true);
     expect(result.text.endsWith('TAIL')).toBe(true);
-    expect(result.omitted).toBe(full.length - 100);
-    expect(result.text).toContain(`${result.omitted} characters omitted`);
+    expect(result.omittedBytes).toBe(full.length - 100);
+    expect(result.text).toContain(`${result.omittedBytes} bytes omitted`);
+  });
+
+  it('多字节字符按 UTF-8 字节计省略量，不按字符数', () => {
+    expect(excerpt('中'.repeat(1000), 100).omittedBytes).toBe(900 * 3);
+  });
+
+  it('切点不劈开代理对：头尾都不出现孤立代理项', () => {
+    // 头 20 字符、尾 80 字符都落在 emoji 中间
+    const result = excerpt(`x${'😀'.repeat(500)}`, 100);
+    expect(result.text).not.toMatch(
+      /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+    );
+    const shown = result.text.replace(/\n… \[\d+ bytes omitted\] …\n/, '');
+    expect(Buffer.byteLength(shown) + result.omittedBytes).toBe(1 + 500 * 4);
   });
 
   it('内存缓冲已截头时用单独保留的开头', () => {
-    const result = excerpt('y'.repeat(200), 100, { head: 'START', dropped: 5000 });
+    const result = excerpt('y'.repeat(200), 100, { head: 'START', droppedBytes: 5000 });
     expect(result.text.startsWith('START')).toBe(true);
     // 开头不足 20% 时剩余预算全给尾部
-    expect(result.omitted).toBe(5000 + 200 - 95 - 5);
+    expect(result.omittedBytes).toBe(5000 + 200 - 95 - 5);
   });
 });
 
@@ -107,7 +121,7 @@ describe('completionReceiptText', () => {
     killedByUser: false,
     killedByDeadline: false,
     head: '',
-    droppedChars: 0,
+    droppedBytes: 0,
     logPath: '/data/tasks/task-1-x.log',
     limit: 4000,
   };
@@ -143,5 +157,14 @@ describe('completionReceiptText', () => {
       failure: classifyFailure({ exitCode: 1, tail: 'ok' }),
     });
     expect(text).toContain('ran 1m5s, moved to background after 45s');
+  });
+
+  it('模型读过部分输出后：只给读后的新输出；没有新输出时明说', () => {
+    const failure = classifyFailure({ exitCode: 0, tail: '' });
+    const fresh = completionReceiptText({ ...done, resumed: true, output: 'later', failure });
+    expect(fresh).toContain('Output since the last read:');
+    expect(fresh).toContain('later');
+    const none = completionReceiptText({ ...done, resumed: true, output: '', failure });
+    expect(none).toContain('No new output since the last read.');
   });
 });
