@@ -79,6 +79,26 @@ describe('classifyFailure', () => {
     expect(result.retryable).toBe(false);
   });
 
+  // stdin 关闭 + 硬化 env 下真机实测的原文（macOS）：措辞不含通用子串，不补就退化成 exit_nonzero
+  it.each([
+    ['tty_required', "error: there was a problem with the editor 'false'"],
+    ['tty_required', "    input('q? ')\nEOFError: EOF when reading a line"],
+    ['auth_required', 'sudo: a password is required'],
+    ['auth_required', 'Enter passphrase for ./k:'],
+  ])('stdin 关闭后的真实报错 → %s：%s', (kind, tail) => {
+    expect(classifyFailure({ exitCode: 1, tail }).kind).toBe(kind);
+  });
+
+  it('编辑器失败不绑定具体编辑器；非 sudo 的 password is required 不判需认证', () => {
+    const vim =
+      "hint: Waiting for your editor...\nerror: there was a problem with the editor 'vim'";
+    expect(classifyFailure({ exitCode: 1, tail: vim }).kind).toBe('tty_required');
+    expect(
+      classifyFailure({ exitCode: 1, tail: 'Error: a password is required for database "app"' })
+        .kind
+    ).toBe('exit_nonzero');
+  });
+
   it('需要认证的真实报错与下一步', () => {
     const result = classifyFailure({
       exitCode: 128,
@@ -89,9 +109,9 @@ describe('classifyFailure', () => {
   });
 
   it('不在列表里的相似文本不判 tty/auth', () => {
-    expect(classifyFailure({ exitCode: 1, tail: 'sudo: a password is required' }).kind).toBe(
-      'exit_nonzero'
-    );
+    // npm legacy 登录读到 EOF 只留裸提示：没有锚点，按行尾冒号猜会误伤大量普通报错
+    const tail = 'npm notice Log in on http://127.0.0.1:9/\nUsername:';
+    expect(classifyFailure({ exitCode: 1, tail }).kind).toBe('exit_nonzero');
   });
 
   const ttyExtras = [

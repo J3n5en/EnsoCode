@@ -703,14 +703,17 @@ function spawnBackground(
   spawnOpts?: { file?: string; argsPrefix?: string[]; env?: NodeJS.ProcessEnv }
 ) {
   const env = spawnOpts?.env ?? process.env;
+  // stdin 关闭与前台（pi bash）一致：读 stdin 立即 EOF，交互提示 fail-fast 而不是挂到让位点；远程包装即 ssh -n
+  const stdio: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
   if (spawnOpts?.file) {
     return spawn(spawnOpts.file, [...(spawnOpts.argsPrefix ?? []), command], {
       cwd,
       env,
       detached: true,
+      stdio,
     });
   }
-  return spawn(command, { shell: true, cwd, env, detached: true });
+  return spawn(command, { shell: true, cwd, env, detached: true, stdio });
 }
 
 export type BackgroundLaunch = {

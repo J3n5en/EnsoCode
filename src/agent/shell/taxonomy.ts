@@ -42,6 +42,9 @@ const TTY_PATTERNS: readonly string[] = [
   'a terminal is required',
   'pseudo-terminal will not be allocated',
   'input is not from a terminal',
+  // stdin 关闭 + 硬化 env 下的真机原文；editor 不绑定具体值（硬化 env 设的是 false，远端可能是 vim）
+  'there was a problem with the editor',
+  'eof when reading a line',
 ];
 
 /** 需要认证：凭证 / 登录无法在这里输入（Factory 逆向列表，大小写不敏感子串） */
@@ -54,6 +57,9 @@ const AUTH_PATTERNS: readonly string[] = [
   'invalid username or password',
   'terminal prompts disabled',
   'no more authentication methods to try',
+  // 带 sudo 前缀：别的 CLI 自己报的同句文案多是可修的失败，判成需认证会让模型停止排查
+  'sudo: a password is required',
+  'enter passphrase for',
 ];
 
 const NOT_FOUND_PATTERNS: RegExp[] = [

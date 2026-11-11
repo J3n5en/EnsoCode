@@ -337,6 +337,26 @@ describe('BackgroundTaskManager', () => {
     expect(result?.status).toBe('done');
   });
 
+  // stdin 关闭：读 stdin 立即 EOF，不会挂到让位点；read 拿到 EOF 返回 1、脚本带空值继续（静默错值，不是挂起）
+  // 两个 spawn 分支都要钉住：shell:true（本地 bash）与 file+argsPrefix（powershell / 远程 ssh 包装）
+  it.skipIf(process.platform === 'win32').each([
+    ['shell', undefined],
+    ['file', { file: '/bin/sh', argsPrefix: ['-c'] }],
+  ])('后台命令 stdin 关闭（%s 分支）：读 stdin 立即 EOF', async (_branch, spawnOpts) => {
+    const { manager, ended } = makeManager();
+    const command = 'cat; read -r x; echo "read-rc=$?"';
+    const taskId = manager.start('s1', command, '/tmp', spawnOpts);
+    try {
+      await until(() => ended.includes(taskId), 2000);
+    } finally {
+      manager.stop(taskId);
+    }
+    const result = await manager.read(taskId);
+    expect(result?.status).toBe('done');
+    expect(result?.exitCode).toBe(0);
+    expect(result?.output).toContain('read-rc=1');
+  });
+
   it('完成通知超长时保留头 20% 尾 80%，标注省略并指向 task_output', async () => {
     const { manager, notified, ended } = makeManager();
     const taskId = manager.start(
