@@ -147,7 +147,7 @@ export function PluginMarket({
           ) : list?.ok === true && plugins.length === 0 ? (
             <p className="text-muted-foreground text-sm">{t('No matching plugins')}</p>
           ) : (
-            <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {plugins.map((p) => (
                 <MarketCard
                   key={p.id}
