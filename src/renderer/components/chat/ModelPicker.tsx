@@ -15,9 +15,10 @@ import {
   VIRTUAL_PROVIDER_ID,
   type VirtualModelEntry,
 } from '@shared/virtualModels';
-import { Brain, Check, ChevronDown, Shuffle, Star } from 'lucide-react';
+import { Brain, Check, ChevronDown, Loader2, RefreshCw, Shuffle, Star } from 'lucide-react';
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { providerDisplayName } from '@/components/settings/chatgptPool';
+import { applyFetchedModels, fetchAllProviderModels } from '@/components/settings/providerFetch';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
@@ -25,7 +26,7 @@ import { Switch } from '@/components/ui/switch';
 import { prefetchAccountUsage, useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { useModelMeta } from '@/stores/modelMeta';
+import { invalidateModelMeta, useModelMeta } from '@/stores/modelMeta';
 import { formatTokens } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
 import { interceptRootCascadeEscape } from './modelPickerCascadeEsc';
@@ -293,6 +294,8 @@ interface ModelPickerProps {
   showReasoningControls?: boolean;
   /** 仅会话工具行：响应全局「切换模型」快捷键并聚焦搜索框 */
   listenHotkey?: boolean;
+  /** 仅会话工具行：弹层顶部显示刷新 icon，一次拉取全部模型与模型信息 */
+  refreshAllModels?: boolean;
   onSelect: (providerId: string, modelId: string) => void;
   onReasoningChange: (enabled: boolean) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
@@ -655,6 +658,7 @@ export function ModelPicker({
   onReasoningModeChange,
   showReasoningControls = true,
   listenHotkey = false,
+  refreshAllModels = false,
   onSelect,
   onReasoningChange,
   onThinkingChange,
@@ -675,6 +679,22 @@ export function ModelPicker({
   const [keyword, setKeyword] = useState('');
   const pinnedModels = useSettingsStore((s) => s.pinnedModels);
   const handleTogglePin = useSettingsStore((s) => s.togglePinnedModel);
+  const allProviders = useSettingsStore((s) => s.providers);
+  const updateProvider = useSettingsStore((s) => s.updateProvider);
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  /** 先刷模型信息（统一目录），再按条目拉取全部模型清单：订阅条目的重拉依赖新目录。 */
+  const refreshAll = useCallback(async () => {
+    setRefreshingAll(true);
+    try {
+      await window.electronAPI.providers.refreshModelCatalog();
+      invalidateModelMeta();
+      applyFetchedModels(await fetchAllProviderModels(allProviders), updateProvider);
+    } catch {
+      // 失败时保留旧清单，不做额外提示
+    } finally {
+      setRefreshingAll(false);
+    }
+  }, [allProviders, updateProvider]);
   const pinnedKeys = useMemo(() => new Set(pinnedModels), [pinnedModels]);
   const [activeNav, setActiveNav] = useState<ModelPickerNavTarget | null>(null);
   const [activeProviderByVendor, setActiveProviderByVendor] = useState<
@@ -1120,7 +1140,7 @@ export function ModelPicker({
             <ModelMetaBridge key={provider.id} provider={provider} onData={handleMetaData} />
           ))}
 
-          <div className="-mx-1.5 -mt-1.5 border-b px-2.5 py-1.5">
+          <div className="-mx-1.5 -mt-1.5 flex items-center gap-1 border-b px-2.5 py-1.5">
             <input
               ref={searchInputRef}
               data-model-picker="search"
@@ -1135,8 +1155,25 @@ export function ModelPicker({
               }}
               onKeyDown={stopTypeaheadOnly}
               placeholder={t('Search models')}
-              className="h-7 w-full rounded-md border bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+              className="h-7 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
             />
+            {refreshAllModels && (
+              <button
+                type="button"
+                data-model-picker="refresh-all"
+                disabled={refreshingAll}
+                title={t('Refresh all models and info')}
+                aria-label={t('Refresh all models and info')}
+                onClick={() => void refreshAll()}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+              >
+                {refreshingAll ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
           </div>
 
           <div className="max-h-[268px] overflow-y-auto">

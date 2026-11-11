@@ -567,6 +567,7 @@ export function ChatView() {
                     />
                     <ModelPicker
                       listenHotkey
+                      refreshAllModels
                       providers={enabledProviders}
                       virtualModels={virtualModels}
                       routedModelLabel={routedModelLabel}

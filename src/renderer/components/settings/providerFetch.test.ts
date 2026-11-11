@@ -1,6 +1,6 @@
 import type { ModelProvider } from '@shared/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchProviderModels } from './providerFetch';
+import { applyFetchedModels, fetchAllProviderModels, fetchProviderModels } from './providerFetch';
 
 const listModels = vi.fn();
 const modelMeta = vi.fn();
@@ -112,5 +112,41 @@ describe('fetchProviderModels', () => {
       status: 'failed',
       message: 'meta down',
     });
+  });
+});
+
+describe('fetchAllProviderModels', () => {
+  it('并发拉取全部条目，单个条目失败不影响其他结果', async () => {
+    listModels.mockImplementation(({ baseUrl }: { baseUrl: string }) =>
+      baseUrl === 'https://down'
+        ? Promise.resolve({ ok: false, models: [], error: 'unauthorized' })
+        : Promise.resolve({ ok: true, models: [{ id: 'gpt' }] })
+    );
+
+    const outcomes = await fetchAllProviderModels([
+      apiProvider({ id: 'ok', baseUrl: 'https://ok' }),
+      apiProvider({ id: 'down', baseUrl: 'https://down' }),
+    ]);
+
+    expect(outcomes.ok).toEqual({ status: 'ok', count: 1, models: [{ id: 'gpt', enabled: true }] });
+    expect(outcomes.down).toEqual({ status: 'failed', message: 'unauthorized' });
+  });
+});
+
+describe('applyFetchedModels', () => {
+  it('只回写带清单的成功结果；订阅条目与失败条目不写 settings', () => {
+    const updateProvider = vi.fn();
+
+    applyFetchedModels(
+      {
+        api: { status: 'ok', count: 1, models: [{ id: 'gpt' }] },
+        subscription: { status: 'ok', count: 3 },
+        failed: { status: 'failed', message: 'down' },
+      },
+      updateProvider
+    );
+
+    expect(updateProvider).toHaveBeenCalledTimes(1);
+    expect(updateProvider).toHaveBeenCalledWith('api', { models: [{ id: 'gpt' }] });
   });
 });

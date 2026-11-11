@@ -18,6 +18,7 @@ import { refreshOauthCredentialState } from '@/components/oauth/OauthCredentialB
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { addToast } from '@/components/ui/toast';
 import { useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -35,7 +36,11 @@ import { NewSessionBadge } from './NewSessionBadge';
 import { AccountUsageBlock } from './OauthProvidersDialog';
 import { ProviderEditDialog } from './ProviderEditDialog';
 import { ProviderSetupWizard } from './ProviderSetupWizard';
-import { fetchProviderModels, type ProviderFetchOutcome } from './providerFetch';
+import {
+  applyFetchedModels,
+  fetchAllProviderModels,
+  type ProviderFetchOutcome,
+} from './providerFetch';
 import { SubagentModelsSettings } from './SubagentModelsSettings';
 import { TitleSummaryPicker } from './TitleSummaryPicker';
 import { VirtualModelsSettings } from './VirtualModelsSettings';
@@ -65,7 +70,6 @@ export function ProvidersSettings() {
   } | null>(null);
   const [fetching, setFetching] = React.useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = React.useState(false);
-  const [catalogStatus, setCatalogStatus] = React.useState<string | null>(null);
   const [fetchOutcomes, setFetchOutcomes] = React.useState<Record<
     string,
     ProviderFetchOutcome
@@ -139,20 +143,18 @@ export function ProvidersSettings() {
     setFetching(true);
     setFetchOutcomes(null);
     try {
-      const pairs = await Promise.all(
-        providers.map(async (provider) => {
-          const outcome = await fetchProviderModels(provider);
-          return [provider.id, outcome] as const;
-        })
-      );
-      const next: Record<string, ProviderFetchOutcome> = {};
-      for (const [id, outcome] of pairs) {
-        next[id] = outcome;
-        if (outcome.status === 'ok' && outcome.models) {
-          updateProvider(id, { models: outcome.models });
-        }
-      }
-      setFetchOutcomes(next);
+      const outcomes = await fetchAllProviderModels(providers);
+      applyFetchedModels(outcomes, updateProvider);
+      setFetchOutcomes(outcomes);
+      const failed = Object.values(outcomes).filter((outcome) => outcome.status === 'failed');
+      const ok = Object.keys(outcomes).length - failed.length;
+      addToast({
+        type: failed.length > 0 ? 'warning' : 'success',
+        title: t('Fetched {{count}} providers', { count: ok }),
+        ...(failed.length > 0
+          ? { description: t('{{count}} failed', { count: failed.length }) }
+          : {}),
+      });
     } finally {
       setFetching(false);
     }
@@ -160,35 +162,31 @@ export function ProvidersSettings() {
 
   const refreshCatalog = async () => {
     setCatalogRefreshing(true);
-    setCatalogStatus(null);
     try {
       const result = await window.electronAPI.providers.refreshModelCatalog();
       invalidateModelMeta();
-      setCatalogStatus(
-        result.ok
-          ? t('Model catalog updated')
+      addToast({
+        type: result.ok ? 'success' : 'warning',
+        title: result.ok
+          ? t('Model info updated')
           : result.fromCache
-            ? t('Model catalog refresh failed, using cache')
-            : t('Model catalog refresh failed')
-      );
+            ? t('Model info refresh failed, using cache')
+            : t('Model info refresh failed'),
+      });
     } catch {
-      setCatalogStatus(t('Model catalog refresh failed'));
+      addToast({ type: 'error', title: t('Model info refresh failed') });
     } finally {
       setCatalogRefreshing(false);
     }
   };
 
-  const fetchOkCount = fetchOutcomes
-    ? Object.values(fetchOutcomes).filter((outcome) => outcome.status === 'ok').length
-    : 0;
-  const fetchFailedCount = fetchOutcomes
-    ? Object.values(fetchOutcomes).filter((outcome) => outcome.status === 'failed').length
-    : 0;
-
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4" data-settings-row="providers.root">
-        <div>
+      <div
+        className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3"
+        data-settings-row="providers.root"
+      >
+        <div className="min-w-0 flex-1 basis-56">
           <h3 className="text-lg font-medium">
             {t('Model Providers')}
             <NewSessionBadge
@@ -201,18 +199,7 @@ export function ProvidersSettings() {
             {t('Manage model API providers for this app')}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {fetchOutcomes && (
-            <span className="text-xs text-muted-foreground">
-              {t('Fetched {{count}} providers', { count: fetchOkCount })}
-              {fetchFailedCount > 0 && (
-                <span className="text-destructive">
-                  {' '}
-                  {t('{{count}} failed', { count: fetchFailedCount })}
-                </span>
-              )}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -224,9 +211,8 @@ export function ProvidersSettings() {
             ) : (
               <RefreshCw className="mr-1.5 h-4 w-4" />
             )}
-            {t('Refresh model catalog')}
+            {t('Refresh model info')}
           </Button>
-          {catalogStatus && <span className="text-xs text-muted-foreground">{catalogStatus}</span>}
           <Button
             variant="outline"
             size="sm"
