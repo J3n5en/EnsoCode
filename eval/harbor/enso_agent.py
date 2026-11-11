@@ -70,9 +70,12 @@ class EnsoCodeAgent(BaseInstalledAgent):
         if package is not None:
             await environment.upload_file(package, "/tmp/ensocode-server.tgz")
             remote_package = "/tmp/ensocode-server.tgz"
+        # @vscode/ripgrep 的 postinstall 走 GitHub API 下载，未鉴权时每个出口 IP 每小时 60 次，批量跑很快 403
+        token = os.environ.get("GITHUB_TOKEN")
         await self.exec_as_root(
             environment,
             command=f"bash /tmp/enso-install.sh {shlex.quote(remote_package)}".rstrip(),
+            env={"GITHUB_TOKEN": token} if token else None,
             timeout_sec=600,
         )
 
@@ -119,19 +122,21 @@ class EnsoCodeAgent(BaseInstalledAgent):
         )
         try:
             result = await self.exec_as_agent(environment, command=command, env=self._connection_env())
-        except Exception:
+            self._stdout = getattr(result, "stdout", None)
+        finally:
+            # 日志目录未挂载时此刻还没下载回来；context 一旦非空 Harbor 就不再调 populate_context_post_run
             self._apply_usage(context)
-            raise
-        else:
-            self._apply_usage(context)
-            if getattr(result, "stdout", None):
-                context.metadata = {**(context.metadata or {}), "enso_stdout": result.stdout}
 
     def populate_context_post_run(self, context: AgentContext) -> None:
-        self._apply_usage(context)
+        self._apply_usage(context, final=True)
 
-    def _apply_usage(self, context: AgentContext) -> None:
+    def _apply_usage(self, context: AgentContext, final: bool = False) -> None:
         parsed = parse_usage_log(self.logs_dir / "enso-usage.jsonl")
+        if parsed is None and not final:
+            return
+        stdout = getattr(self, "_stdout", None)
+        if stdout:
+            context.metadata = {**(context.metadata or {}), "enso_stdout": stdout}
         if parsed is None:
             return
         context.n_input_tokens = parsed.input_including_cache
