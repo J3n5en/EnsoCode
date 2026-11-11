@@ -13,6 +13,7 @@ import {
 
 function keyEvent(partial: {
   key: string;
+  code?: string;
   metaKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
@@ -20,6 +21,7 @@ function keyEvent(partial: {
 }): KeyboardEvent {
   return {
     key: partial.key,
+    code: partial.code ?? '',
     metaKey: partial.metaKey ?? false,
     ctrlKey: partial.ctrlKey ?? false,
     altKey: partial.altKey ?? false,
@@ -28,6 +30,17 @@ function keyEvent(partial: {
 }
 
 describe('send-message binding', () => {
+  it('mac 上 ⌥ 改写的字符按物理键记，如 ⌥P 的 π 记作 p', () => {
+    const mod = IS_MAC ? { metaKey: true } : { ctrlKey: true };
+    expect(eventToBinding(keyEvent({ key: 'π', code: 'KeyP', altKey: true, ...mod }))).toBe(
+      'mod+alt+p'
+    );
+    expect(eventToBinding(keyEvent({ key: '¡', code: 'Digit1', altKey: true, ...mod }))).toBe(
+      'mod+alt+1'
+    );
+    expect(eventToBinding(keyEvent({ key: 'k', code: 'KeyK', ...mod }))).toBe('mod+k');
+  });
+
   it('defaults to Enter', () => {
     expect(KEYBINDING_ACTIONS).toContain('send-message');
     expect(DEFAULT_KEYBINDINGS['send-message']).toBe('enter');
