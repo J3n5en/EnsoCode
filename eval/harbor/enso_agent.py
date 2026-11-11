@@ -122,19 +122,21 @@ class EnsoCodeAgent(BaseInstalledAgent):
         )
         try:
             result = await self.exec_as_agent(environment, command=command, env=self._connection_env())
-        except Exception:
+            self._stdout = getattr(result, "stdout", None)
+        finally:
+            # 日志目录未挂载时此刻还没下载回来；context 一旦非空 Harbor 就不再调 populate_context_post_run
             self._apply_usage(context)
-            raise
-        else:
-            self._apply_usage(context)
-            if getattr(result, "stdout", None):
-                context.metadata = {**(context.metadata or {}), "enso_stdout": result.stdout}
 
     def populate_context_post_run(self, context: AgentContext) -> None:
-        self._apply_usage(context)
+        self._apply_usage(context, final=True)
 
-    def _apply_usage(self, context: AgentContext) -> None:
+    def _apply_usage(self, context: AgentContext, final: bool = False) -> None:
         parsed = parse_usage_log(self.logs_dir / "enso-usage.jsonl")
+        if parsed is None and not final:
+            return
+        stdout = getattr(self, "_stdout", None)
+        if stdout:
+            context.metadata = {**(context.metadata or {}), "enso_stdout": stdout}
         if parsed is None:
             return
         context.n_input_tokens = parsed.input_including_cache
