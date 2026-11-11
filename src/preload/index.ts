@@ -105,6 +105,7 @@ import type {
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
+  ModelCatalogRefreshResult,
   ModelMetaQuery,
   ModelMetaResult,
   OauthAccountUsage,
@@ -523,6 +524,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_CLASSIFIER_MODELS, providerId),
     modelMeta: (query: ModelMetaQuery): Promise<ModelMetaResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_MODEL_META, query),
+    refreshModelCatalog: (): Promise<ModelCatalogRefreshResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_REFRESH_MODEL_CATALOG),
     listOauth: (): Promise<OauthProviderInfo[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_PROVIDERS_LIST),
     listOauthCredentialKeys: (): Promise<string[]> =>

@@ -39,6 +39,7 @@ import type { ImageGenerationState } from '@shared/imageGeneration';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import { positiveContextWindow } from '@shared/modelCatalog';
 import type { ModelDirectorySnapshot } from '@shared/modelDirectory';
+import { cloneModelsDevOauthModel, findModelsDevModel } from '@shared/modelsDevCatalog';
 import { isOauthAccountPool } from '@shared/oauthAccountPool';
 import { resolveOauthCatalogModel } from '@shared/oauthCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
@@ -213,6 +214,7 @@ import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
 import { microcompactExtension } from './microcompact';
 import { installModelContextCompat } from './modelContextCompat';
+import { modelsDevModelsFromEnv } from './modelsDevCache';
 import { ParentNotifier } from './notify';
 import {
   installOauthPoolSelector,
@@ -6121,19 +6123,36 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
     // worker 与 Main 是两个 ModelRuntime 实例，只共用 auth.json。合成 id（第 2+ 个账号）
     // 的克隆 provider 必须在本进程也注册一遍，否则 getModel 取不到
     ensureAccountProvider(runtime, model.oauthAccountKey);
+    const providerId = providerIdOfAccountKey(model.oauthAccountKey);
+    const devModels = modelsDevModelsFromEnv();
     const exact = runtime.getModel(model.oauthAccountKey, model.modelId);
     const oauthModel =
       exact ??
       resolveOauthCatalogModel(
-        providerIdOfAccountKey(model.oauthAccountKey),
+        providerId,
         model.modelId,
         runtime.getModels(model.oauthAccountKey),
         undefined
+      ) ??
+      cloneModelsDevOauthModel(
+        providerId,
+        model.modelId,
+        runtime.getModels(model.oauthAccountKey),
+        devModels
       );
     if (!oauthModel) {
       throw new Error(`oauth model not found: ${model.oauthAccountKey}/${model.modelId}`);
     }
     const registered = exact ?? listCatalogClone(runtime, oauthModel);
+    const dev = findModelsDevModel(devModels, model.modelId, providerId);
+    if (dev) {
+      try {
+        if (dev.contextWindow) registered.contextWindow = dev.contextWindow;
+        if (dev.maxTokens) registered.maxTokens = dev.maxTokens;
+      } catch {
+        // 冻结的 catalog 对象保持原窗口
+      }
+    }
     const provider = runtime.getProvider(registered.provider);
     if (!provider) throw new Error(`oauth provider not found: ${registered.provider}`);
     runtime.registerNativeProvider(withRequestBodyBudget(provider));

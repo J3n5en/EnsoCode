@@ -38,6 +38,11 @@ const useModelMetaStore = create<ModelMetaState>((set) => ({
   invalidate: () => set((state) => ({ cache: {}, generation: state.generation + 1 })),
 }));
 
+/** 模型目录手动刷新后丢掉无 TTL 的元数据缓存，让下一轮查询读到新窗口。 */
+export function invalidateModelMeta(): void {
+  useModelMetaStore.getState().invalidate();
+}
+
 let cacheInvalidationBound = false;
 
 function ensureCacheInvalidation(): void {

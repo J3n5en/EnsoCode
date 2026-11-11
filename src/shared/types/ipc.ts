@@ -48,6 +48,7 @@ export const IPC_CHANNELS = {
   PROVIDERS_LIST_MODELS: 'providers:list-models',
   PROVIDERS_TEST: 'providers:test',
   PROVIDERS_MODEL_META: 'providers:model-meta',
+  PROVIDERS_REFRESH_MODEL_CATALOG: 'providers:refresh-model-catalog',
   PROVIDERS_CLASSIFIER_MODELS: 'providers:classifier-models',
   /** Main 合成的统一模型目录快照（Renderer 订阅，不落 settings.json） */
   MODEL_DIRECTORY_GET: 'modelDirectory:get',

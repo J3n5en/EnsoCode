@@ -193,6 +193,9 @@ if (!gotTheLock) {
     });
     registerIpcHandlers();
     registerDesktopIpcHandlers();
+    void import('./services/modelsDevCatalog').then(({ startModelsDevRefreshSchedule }) => {
+      startModelsDevRefreshSchedule();
+    });
     pluginInstallInbox.start((url) => openPluginInstallFromProtocol(url));
     setTrayToggleHandler(() => {
       if (isServerMode()) leaveServerMode();

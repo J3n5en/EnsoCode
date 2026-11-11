@@ -5,6 +5,7 @@ import { aggregateUsage } from '@shared/usage/aggregate';
 import { mergeUsageSources } from '@shared/usage/ledger';
 import { type ModelPricing, mergePricingTable, type PricingTable } from '@shared/usage/pricing';
 import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
+import { getModelsDevModels } from '../modelsDevCatalog';
 import { getRuntime } from '../oauthProviders';
 import { loadUsageModelPricing, loadUsageProjectAliases } from './aliases';
 import { loadLedger } from './ledgerStore';
@@ -105,7 +106,9 @@ function getPricingTable(now: number): Promise<PricingTable> {
   pricingInflight ??= (async () => {
     try {
       const runtime = await getRuntime();
-      const table = buildPricingTable(runtime.getModels() as readonly CatalogCostModel[]);
+      const piTable = buildPricingTable(runtime.getModels() as readonly CatalogCostModel[]);
+      const devTable = buildPricingTable(getModelsDevModels());
+      const table = { ...devTable, ...piTable };
       pricingCache = { table, loadedAt: now };
       return table;
     } catch {

@@ -11,9 +11,11 @@ import type {
   ModelDirectorySnapshot,
 } from '@shared/modelDirectory';
 import { parseModelDirectorySnapshot } from '@shared/modelDirectory';
+import { withModelsDevOauthModels } from '@shared/modelsDevCatalog';
 import { expandOauthCatalog } from '@shared/oauthCatalog';
 import { IPC_CHANNELS, type ModelProvider, persistedSettingsState } from '@shared/types';
 import { readSettings } from '../ipc/settings';
+import { getModelsDevModels } from './modelsDevCatalog';
 import { localUi } from './uiHost';
 
 export interface DirectoryOAuthSource {
@@ -261,7 +263,11 @@ async function loadLiveOAuthProviders(): Promise<DirectoryOAuthSource[] | undefi
       if (!provider.auth?.oauth || provider.id.includes('#')) continue;
       const oauthName =
         typeof provider.auth.oauth === 'object' ? provider.auth.oauth.name : undefined;
-      const models = expandOauthCatalog(provider.id, provider.getModels()).map((model) => ({
+      const models = withModelsDevOauthModels(
+        provider.id,
+        expandOauthCatalog(provider.id, provider.getModels()),
+        getModelsDevModels()
+      ).map((model) => ({
         id: model.id,
         name: 'name' in model && typeof model.name === 'string' ? model.name : undefined,
       }));

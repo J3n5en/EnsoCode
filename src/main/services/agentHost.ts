@@ -318,6 +318,7 @@ export function startAgentWorker(): void {
       ...process.env,
       ENSO_AGENT_DATA_DIR: agentDataDir(),
       PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
+      ENSO_MODELS_DEV_CACHE: path.join(app.getPath('userData'), 'models-dev-cache.json'),
       ENSO_RTK_PATH: bundledRtkPath({
         packaged: app.isPackaged,
         resourcesPath,

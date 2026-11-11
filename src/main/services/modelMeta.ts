@@ -3,6 +3,11 @@ import {
   findCatalogModelById,
   positiveFiniteNumber,
 } from '@shared/modelCatalog';
+import {
+  findModelsDevModel,
+  mergeCatalogEntry,
+  withModelsDevOauthModels,
+} from '@shared/modelsDevCatalog';
 import { supportedProjectThinkingLevels } from '@shared/modelThinking';
 import { expandOauthCatalog, mergeFetchedOauthModels } from '@shared/oauthCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
@@ -12,6 +17,7 @@ import {
   type ModelMetaResult,
   providerIdOfAccountKey,
 } from '@shared/types';
+import { getModelsDevModels } from './modelsDevCatalog';
 import { ensureProviderModelsRefreshed, getRuntime, hasStoredAccount } from './oauthProviders';
 import { fetchXaiSubscriptionModels } from './xaiModels';
 
@@ -113,6 +119,7 @@ export async function queryModelMeta(query: ModelMetaQuery): Promise<ModelMetaRe
           }
         }
       }
+      catalog = withModelsDevOauthModels(providerId, catalog, getModelsDevModels());
       const wanted = query.modelIds.length === 0 ? null : new Set(query.modelIds);
       const models: ModelMeta[] = [];
       const seen = new Set<string>();
@@ -135,10 +142,17 @@ export async function queryModelMeta(query: ModelMetaQuery): Promise<ModelMetaRe
     }
 
     const catalog = runtime.getModels() as readonly CatalogModelEntry[];
+    const devModels = getModelsDevModels();
     return {
       ok: true,
       models: query.modelIds.map((modelId) =>
-        mapCatalogFallback(modelId, findCatalogModelById(catalog, modelId))
+        mapCatalogFallback(
+          modelId,
+          mergeCatalogEntry(
+            findCatalogModelById(catalog, modelId),
+            findModelsDevModel(devModels, modelId)
+          )
+        )
       ),
     };
   } catch (error) {

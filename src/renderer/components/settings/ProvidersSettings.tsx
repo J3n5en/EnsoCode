@@ -22,6 +22,7 @@ import { useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
+import { invalidateModelMeta } from '@/stores/modelMeta';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSettingsStore } from '@/stores/settings';
 import { ApprovalReviewerPicker } from './ApprovalReviewerPicker';
@@ -63,6 +64,8 @@ export function ProvidersSettings() {
     message: string;
   } | null>(null);
   const [fetching, setFetching] = React.useState(false);
+  const [catalogRefreshing, setCatalogRefreshing] = React.useState(false);
+  const [catalogStatus, setCatalogStatus] = React.useState<string | null>(null);
   const [fetchOutcomes, setFetchOutcomes] = React.useState<Record<
     string,
     ProviderFetchOutcome
@@ -155,6 +158,26 @@ export function ProvidersSettings() {
     }
   };
 
+  const refreshCatalog = async () => {
+    setCatalogRefreshing(true);
+    setCatalogStatus(null);
+    try {
+      const result = await window.electronAPI.providers.refreshModelCatalog();
+      invalidateModelMeta();
+      setCatalogStatus(
+        result.ok
+          ? t('Model catalog updated')
+          : result.fromCache
+            ? t('Model catalog refresh failed, using cache')
+            : t('Model catalog refresh failed')
+      );
+    } catch {
+      setCatalogStatus(t('Model catalog refresh failed'));
+    } finally {
+      setCatalogRefreshing(false);
+    }
+  };
+
   const fetchOkCount = fetchOutcomes
     ? Object.values(fetchOutcomes).filter((outcome) => outcome.status === 'ok').length
     : 0;
@@ -190,6 +213,20 @@ export function ProvidersSettings() {
               )}
             </span>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={catalogRefreshing}
+            onClick={() => void refreshCatalog()}
+          >
+            {catalogRefreshing ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-1.5 h-4 w-4" />
+            )}
+            {t('Refresh model catalog')}
+          </Button>
+          {catalogStatus && <span className="text-xs text-muted-foreground">{catalogStatus}</span>}
           <Button
             variant="outline"
             size="sm"
@@ -344,12 +381,6 @@ export function ProvidersSettings() {
                             )}
                           </div>
                           <div className="flex shrink-0 items-center gap-1 pt-0.5">
-                            <Switch
-                              checked={provider.enabled}
-                              onCheckedChange={(enabled) =>
-                                updateProvider(provider.id, { enabled })
-                              }
-                            />
                             <Button
                               variant="ghost"
                               size="icon"
@@ -374,6 +405,12 @@ export function ProvidersSettings() {
                                 <Trash2 className="h-3.5 w-3.5" />
                               )}
                             </Button>
+                            <Switch
+                              checked={provider.enabled}
+                              onCheckedChange={(enabled) =>
+                                updateProvider(provider.id, { enabled })
+                              }
+                            />
                           </div>
                         </div>
                         {removeError?.providerId === provider.id && (

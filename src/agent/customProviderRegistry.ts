@@ -1,6 +1,7 @@
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { findCatalogModelById, resolveCustomModelCapabilities } from '@shared/modelCatalog';
 import { type ModelDirectorySnapshot, parseModelDirectorySnapshot } from '@shared/modelDirectory';
+import { findModelsDevModel, mergeCatalogEntry } from '@shared/modelsDevCatalog';
 import { resolvePiProviderBaseUrl } from '@shared/providerCatalog';
 import { escapePiConfigValue, parseProviderHeaders } from '@shared/providers/providerHeaders';
 import type { WorkerCustomProvider } from '@shared/types/agent';
@@ -15,6 +16,7 @@ import {
 } from '@shared/types/llm';
 import { version } from '../../package.json';
 import { resolveCustomModelCompat, selectCatalogEntryForCompat } from './customModelCompat';
+import { modelsDevModelsFromEnv } from './modelsDevCache';
 import { withOpenAIResponsesRouting } from './openaiResponsesRouting';
 import { withRequestBodyBudget } from './requestBodyBudget';
 import { providerKeyFor } from './smartCompact';
@@ -217,7 +219,9 @@ function definitionFor(
   piBaseUrl: string,
   entry: ModelEntry
 ): CustomModelDefinition {
-  const catalog = findCatalogModelById(catalogModels, entry.id);
+  const pi = findCatalogModelById(catalogModels, entry.id);
+  const dev = findModelsDevModel(modelsDevModelsFromEnv(), entry.id);
+  const catalog = mergeCatalogEntry(pi, dev);
   const resolved = resolveCustomModelCapabilities(catalog, entry);
   const contextWindow = resolved.contextWindow ?? 128_000;
   const maxTokens = resolved.maxTokens ?? 32_000;
@@ -232,8 +236,8 @@ function definitionFor(
     reasoning: resolved.reasoning,
     ...(resolved.thinkingLevelMap ? { thinkingLevelMap: resolved.thinkingLevelMap } : {}),
     input: ['text', 'image'],
-    ...(catalog?.api === api && catalog.inputLimits ? { inputLimits: catalog.inputLimits } : {}),
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ...(pi?.api === api && pi.inputLimits ? { inputLimits: pi.inputLimits } : {}),
+    cost: dev?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow,
     maxTokens,
     ...(compat ? { compat } : {}),

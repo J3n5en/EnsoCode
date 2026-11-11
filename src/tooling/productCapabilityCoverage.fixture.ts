@@ -507,6 +507,9 @@ export const IPC_PRODUCT_COVERAGE = {
   PROVIDERS_LIST_MODELS: surfaces('providers.fetch-models'),
   PROVIDERS_TEST: surfaces('providers.test-connection'),
   PROVIDERS_MODEL_META: surfaces('providers.model-meta'),
+  PROVIDERS_REFRESH_MODEL_CATALOG: excluded(
+    'Settings button refreshes the models.dev snapshot; not an agent capability.'
+  ),
   PROVIDERS_CLASSIFIER_MODELS: excluded(
     'classifier models are listed only by the virtual model settings UI'
   ),
