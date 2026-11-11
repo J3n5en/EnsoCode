@@ -133,6 +133,8 @@ export type TimelineItem =
       stats: ToolGroupStats;
       /** compact 模式下组外仍有 running 的只读行：组头显示 Exploring */
       exploring: boolean;
+      /** 这一轮还在跑、尾段已折进过程组：组头继续呼吸；结束后或缺省 */
+      live?: boolean;
       /** 回答完成后的过程折叠组（任意成功工具 + 思考）；普通工具组缺省 */
       activity?: { thinking: number; workedMs: number };
       /** 成对的 explore_mark → explore_fold 探索组：组头展开只给目标与结果，steps 时才平铺过程；其它组缺省 */
@@ -1750,7 +1752,8 @@ function withExploreChildren(item: TimelineItem): TimelineItem[] {
 
 function activitySegment(
   segment: TimelineItem[],
-  expandedKeys: ReadonlySet<string>
+  expandedKeys: ReadonlySet<string>,
+  live = false
 ): TimelineItem[] {
   if (segment.length < 2) return segment.flatMap(withExploreChildren);
   const stats: ToolGroupStats = { commands: 0, reads: 0, searches: 0, others: 0 };
@@ -1776,6 +1779,7 @@ function activitySegment(
     stats,
     exploring: false,
     activity: { thinking, workedMs },
+    ...(live ? { live: true } : {}),
     ...(summary ? { summary } : {}),
     children: segment,
   };
@@ -2029,7 +2033,11 @@ function foldPrepared(
     const prefixEnd = releasedPrefixEnd(i);
     if (prefixEnd > i) {
       result.push(
-        ...activitySegment(mergeAdjacentThinking(sourceItems.slice(i, prefixEnd)), expandedKeys)
+        ...activitySegment(
+          mergeAdjacentThinking(sourceItems.slice(i, prefixEnd)),
+          expandedKeys,
+          true
+        )
       );
       i = prefixEnd;
       continue;

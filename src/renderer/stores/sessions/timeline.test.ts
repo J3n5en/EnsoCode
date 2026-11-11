@@ -3338,6 +3338,27 @@ describe('过程中折叠已完成的调用', () => {
     expect(group.activity).toEqual({ thinking: 1, workedMs: 3000 });
     expect(group.count).toBe(2);
     expect(kinds(group.children)).toEqual(['thinking', 'bash', 'read']);
+    expect(group.live).toBe(true);
+  });
+
+  it('过程组只在这一轮还在跑时标记为进行中，结束后不再呼吸', () => {
+    const items = [userItem('u'), toolItem('a', 'bash'), toolItem('b', 'read')];
+    const first = nextActivityRelease(items, true, prep, EMPTY_ACTIVITY_WITNESS, 1_000);
+    if (first.wakeAt === null) throw new Error('quiet live tail must arm');
+    const due = nextActivityRelease(items, true, prep, first.witness, first.wakeAt);
+    expect((folded(items, due.released)[1] as Group).live).toBe(true);
+    const settled = foldTimeline(items, false, new Set(), {
+      collapseCompletedActivity: true,
+      collapseLiveActivity: true,
+      releasedLiveActivity: due.released,
+    });
+    expect((settled[1] as Group).live).toBeUndefined();
+    const answered = foldTimeline([...items, textItem('answer')], true, new Set(), {
+      collapseCompletedActivity: true,
+      collapseLiveActivity: true,
+      releasedLiveActivity: due.released,
+    });
+    expect((answered[1] as Group).live).toBeUndefined();
   });
 
   it('2 秒内又完成一个工具就重新计时', () => {

@@ -226,6 +226,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.stats.searches === b.stats.searches &&
         a.stats.others === b.stats.others &&
         a.exploring === b.exploring &&
+        a.live === b.live &&
         a.activity?.thinking === b.activity?.thinking &&
         a.activity?.workedMs === b.activity?.workedMs &&
         a.explore?.goal === b.explore?.goal &&
@@ -1794,6 +1795,7 @@ function ToolGroupRow({
     if (item.count > 0) activityParts.push(t('{{count}} tool calls', { count: item.count }));
   }
   const explore = item.explore;
+  const breathing = Boolean(activity && item.live);
   const label = explore
     ? toolLabel('explore_fold', t)
     : activity
@@ -1835,11 +1837,23 @@ function ToolGroupRow({
           {label}
         </span>
       ) : (
-        <span className="shrink-0 text-muted-foreground group-hover/step:text-foreground">
+        <span
+          className={cn(
+            'shrink-0 text-muted-foreground group-hover/step:text-foreground',
+            breathing && 'animate-pulse text-foreground motion-reduce:animate-none'
+          )}
+        >
           {label}
         </span>
       )}
-      <span className="min-w-0 flex-1 truncate">{detail.join(' · ')}</span>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate',
+          breathing && 'animate-pulse motion-reduce:animate-none'
+        )}
+      >
+        {detail.join(' · ')}
+      </span>
       <ChevronRight
         className={cn('h-3 w-3 shrink-0 transition-transform', item.expanded && 'rotate-90')}
       />
