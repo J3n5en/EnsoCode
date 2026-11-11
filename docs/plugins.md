@@ -140,6 +140,7 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
 - `commands`：`{ id, title, key? }`。`id` 匹配 `^[a-z][a-z0-9-]{0,31}$`。启用后出现在输入框的 `/` 菜单里，名字是 `/<插件 id>:<命令 id>`，选中立即执行，不进草稿也不发消息。执行算用户操作，可以改草稿；侧栏等独立输入框里 `ctx.sessionId` 为 `null`。失败时界面提示错误信息。
   - `key` 是默认快捷键，如 `mod+shift+k`：修饰键按 `mod`、`ctrl`、`alt`、`shift` 顺序写，至少一个不是 `shift`；`mod` 在 macOS 是 ⌘，其他平台是 Ctrl。按下时对当前会话执行，`ctx.sessionId` 为当前标签的会话。内置快捷键优先，多个插件抢同一个键时先装的生效；用户可以在设置的快捷键页改键或删除。
 - `views`：`{ id, title, entry }`。`title` 最长 40 字符，`entry` 必须是 `.html`。
+- `fileViewers`：`{ id, title, entry, extensions, default? }`，需要 `ui.view`。`extensions` 是 1 到 32 个小写、带点的后缀，如 `.csv`、`.excalidraw.json`；`default: true` 时匹配的文件默认用它打开，否则只在文件标签右上角给出切换按钮。见下文「文件查看器」。
 - `triggers`：`{ symbol, name }`。`symbol` 只能是 `#`，`@` 和 `/` 归 Enso 自己用。
 - `skills`：skill 目录的相对路径，随插件下发给新会话。
 - `mcpServers`：`{ name, command, args, env }`。服务名会加 `plugin-<id>-` 前缀。`command`、`args`、`env` 里的 `${ENSO_PLUGIN_ROOT}` 会展开成插件安装目录，`env` 只能写字面量。
@@ -466,6 +467,16 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 ```
 
 从侧栏页面发起的调用算用户操作，所以在这里可以改草稿。页面不能直接发系统通知，需要的话在 `main.mjs` 的处理函数里调 `enso.ui.notify`。
+
+## 文件查看器
+
+`fileViewers` 的页面和侧栏页面跑在同一种沙箱 iframe 里，`window.enso` 的能力都一样，另外多一个 `enso.file`（侧栏页面里是 `null`）：
+
+- `enso.file.rel` / `enso.file.text`：当前文件的相对路径和编辑区里的内容（含未保存的修改）。只支持文本文件，超出编辑器上限的文件不会交给查看器。
+- `enso.file.onChange(listener)`：内容在别处变了（切回编辑器改过、磁盘重新加载）时调用 `listener({ rel, text })`，返回取消订阅的函数。查看器自己 `update` 的内容不会回调。
+- `enso.file.update(text)`：把新内容交回编辑区，标签变成未保存，由用户保存。查看器拿不到磁盘路径，也不能直接写文件。
+
+一个文件被多个查看器匹配时，后缀更长的排前面；文件名正好等于后缀（如 `.csv`）不算匹配。插件停用后，打开中的文件回到编辑器。
 
 ## skill 与 MCP
 

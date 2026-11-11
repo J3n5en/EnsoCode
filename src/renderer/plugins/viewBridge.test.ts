@@ -3,6 +3,8 @@ import {
   createViewBridge,
   decodeUtf8Base64,
   viewEventPush,
+  viewFileEdit,
+  viewFilePush,
   viewStoragePatch,
   viewThemeNotice,
   viewThemePush,
@@ -68,5 +70,13 @@ describe('侧栏页面桥', () => {
       name: 'snapshot',
       data: { n: 1 },
     });
+  });
+
+  it('文件查看器：推送当前文件，只收字符串编辑', () => {
+    expect(viewFilePush('a.csv', 'x,y')).toEqual({ type: 'enso-file', rel: 'a.csv', text: 'x,y' });
+    expect(viewFileEdit({ type: 'enso-file-edit', text: 'a,b' })).toBe('a,b');
+    expect(viewFileEdit({ type: 'enso-file-edit', text: 1 })).toBeNull();
+    expect(viewFileEdit({ type: 'enso-storage', patch: {} })).toBeNull();
+    expect(viewFileEdit(null)).toBeNull();
   });
 });

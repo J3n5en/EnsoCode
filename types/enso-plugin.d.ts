@@ -374,10 +374,18 @@ export interface EnsoUi {
 export interface EnsoView {
   readonly theme: 'light' | 'dark';
   onTheme(listener: (theme: 'light' | 'dark') => void): () => void;
+  on(name: string, listener: (data: unknown) => void): () => void;
   call(method: string, args?: unknown): Promise<unknown>;
   readonly storage: {
     get(key: string): string | null;
     set(key: string, value: string): void;
     remove(key: string): void;
+  };
+  /** 文件查看器里是当前文件，侧栏页面里是 null */
+  readonly file: null | {
+    readonly rel: string;
+    readonly text: string;
+    onChange(listener: (file: { rel: string; text: string }) => void): () => void;
+    update(text: string): void;
   };
 }

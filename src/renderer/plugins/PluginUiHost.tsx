@@ -6,6 +6,7 @@ import { displayedConversationId } from '@/stores/sessions/chatChrome';
 import { newInterceptBreakers } from './breakers';
 import { pluginCommandRefs, setPluginCommands } from './commands';
 import { handleDraftRequest, prefillDraft } from './draftBridge';
+import { setPluginFileViewers } from './fileViewers';
 import { createRendererDeps, loadPluginRenderer } from './loader';
 import { setPluginIcons } from './PluginIcon';
 import { syncPluginRenderers } from './rendererReload';
@@ -71,6 +72,15 @@ export function PluginUiHost() {
             }))
           )
         );
+        setPluginFileViewers(
+          enabled.flatMap((plugin) =>
+            (plugin.fileViewers ?? []).map((viewer) => ({
+              pluginId: plugin.id,
+              pluginName: plugin.name,
+              ...viewer,
+            }))
+          )
+        );
         setPluginTriggers(
           enabled.flatMap((plugin) =>
             plugin.triggers
@@ -126,6 +136,7 @@ export function PluginUiHost() {
       setPluginCommands([]);
       setPluginTriggers([]);
       setPluginViews([]);
+      setPluginFileViewers([]);
       for (const handle of loaded.values()) handle.dispose();
       loaded.clear();
     };

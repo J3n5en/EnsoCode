@@ -25,6 +25,58 @@ const errorsOf = (raw: unknown): string[] => {
 };
 
 describe('parseExtensionPluginManifest', () => {
+  it('fileViewers 按扩展名声明查看器，需要 ui.view，扩展名须小写且带点', () => {
+    const withViewers = (fileViewers: unknown, permissions = ['agent.tool', 'ui.view']) => ({
+      ...base(),
+      permissions,
+      contributes: { ...base().contributes, fileViewers },
+    });
+    const ok = parseExtensionPluginManifest(
+      withViewers([
+        { id: 'draw', title: 'Drawing', entry: 'viewer.html', extensions: ['.excalidraw'] },
+        {
+          id: 'csv',
+          title: 'Table',
+          entry: 'csv.html',
+          extensions: ['.csv', '.tsv'],
+          default: true,
+        },
+      ]),
+      '0.2.12'
+    );
+    expect(ok.ok && ok.manifest.contributes.fileViewers).toEqual([
+      {
+        id: 'draw',
+        title: 'Drawing',
+        entry: 'viewer.html',
+        extensions: ['.excalidraw'],
+        default: false,
+      },
+      { id: 'csv', title: 'Table', entry: 'csv.html', extensions: ['.csv', '.tsv'], default: true },
+    ]);
+    expect(parseExtensionPluginManifest(base(), '0.2.12')).toMatchObject({
+      ok: true,
+      manifest: { contributes: { fileViewers: [] } },
+    });
+    const viewer = { id: 'v', title: 'V', entry: 'v.html', extensions: ['.x'] };
+    expect(errorsOf(withViewers([viewer], ['agent.tool']))).toContain(
+      'fileViewers 需要权限 ui.view'
+    );
+    for (const bad of [
+      { ...viewer, extensions: [] },
+      { ...viewer, extensions: ['x'] },
+      { ...viewer, extensions: ['.CSV'] },
+      { ...viewer, extensions: ['./x'] },
+      { ...viewer, entry: 'v.js' },
+      { ...viewer, entry: '../v.html' },
+      { ...viewer, default: 'yes' },
+      { ...viewer, id: 'Bad Id' },
+    ]) {
+      expect(errorsOf(withViewers([bad]))).toContain('文件查看器不合法');
+    }
+    expect(errorsOf(withViewers([viewer, viewer]))).toContain('文件查看器 重复：v');
+  });
+
   it('命令可带默认快捷键，必须含 mod/ctrl/alt 且键名合法', () => {
     const withKey = (key: unknown) => ({
       ...base(),

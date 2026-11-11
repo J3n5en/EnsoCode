@@ -28,8 +28,10 @@
         let port = null;
         let seq = 0;
         let theme = 'light';
+        let file = null;
         const pending = new Map();
         const themeListeners = new Set();
+        const fileListeners = new Set();
         const eventListeners = new Map();
         const emitView = (name, data) => {
           const set = eventListeners.get(name);
@@ -98,6 +100,25 @@
         } catch {
           /* 原生 localStorage 不可替换时仍提供 enso.storage */
         }
+        // 文件查看器才有：宿主推送当前内容，update 把新内容交回宿主（进编辑区草稿，由用户保存）
+        const fileApi = Object.freeze({
+          get rel() {
+            return file ? file.rel : '';
+          },
+          get text() {
+            return file ? file.text : '';
+          },
+          onChange(listener) {
+            if (typeof listener !== 'function') return () => {};
+            fileListeners.add(listener);
+            return () => fileListeners.delete(listener);
+          },
+          update(text) {
+            if (!file || !port) return;
+            file = { rel: file.rel, text: String(text) };
+            port.postMessage({ type: 'enso-file-edit', text: file.text });
+          },
+        });
         Object.defineProperty(window, 'enso', {
           configurable: false,
           enumerable: false,
@@ -105,6 +126,9 @@
           value: Object.freeze({
             get theme() {
               return theme;
+            },
+            get file() {
+              return file ? fileApi : null;
             },
             onTheme(listener) {
               if (typeof listener !== 'function') return () => {};
@@ -154,6 +178,8 @@
           window.removeEventListener('message', onInit);
           port = event.ports[0];
           theme = data.theme === 'dark' ? 'dark' : 'light';
+          if (data.file && typeof data.file.rel === 'string' && typeof data.file.text === 'string')
+            file = { rel: data.file.rel, text: data.file.text };
           const incoming = data.storage && typeof data.storage === 'object' ? data.storage : {};
           for (const name of Object.keys(store)) delete store[name];
           for (const name of Object.keys(incoming)) {
@@ -167,6 +193,19 @@
             }
             if (reply && reply.type === 'enso-view-event') {
               if (typeof reply.name === 'string') emitView(reply.name, reply.data);
+              return;
+            }
+            if (reply && reply.type === 'enso-file') {
+              if (!file || typeof reply.rel !== 'string' || typeof reply.text !== 'string') return;
+              if (reply.rel === file.rel && reply.text === file.text) return;
+              file = { rel: reply.rel, text: reply.text };
+              for (const listener of [...fileListeners]) {
+                try {
+                  listener({ rel: file.rel, text: file.text });
+                } catch {
+                  /* 单个订阅失败不影响其余 */
+                }
+              }
               return;
             }
             const entry = reply && pending.get(reply.id);

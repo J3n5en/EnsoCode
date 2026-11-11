@@ -344,6 +344,7 @@ export class ExtensionPluginService {
           })),
           commands: manifest.contributes.commands,
           views: manifest.contributes.views.map(({ id, title, entry }) => ({ id, title, entry })),
+          fileViewers: manifest.contributes.fileViewers,
           // css 只在用户同意过样式能力时下发，渲染层据此决定读不读
           themes: manifest.contributes.themes.map(({ css, ...theme }) =>
             css !== undefined && record.grant.styles ? { ...theme, css } : theme

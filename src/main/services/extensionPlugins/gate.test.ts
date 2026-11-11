@@ -31,6 +31,7 @@ const manifest = (patch: Partial<ExtensionPluginManifest> = {}): ExtensionPlugin
     agentTools: [],
     commands: [],
     views: [],
+    fileViewers: [],
     triggers: [],
     skills: [],
     mcpServers: [],

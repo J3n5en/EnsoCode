@@ -6,6 +6,8 @@ import {
   decodeUtf8Base64,
   usePluginViews,
   viewEventPush,
+  viewFileEdit,
+  viewFilePush,
   viewStoragePatch,
   viewThemePush,
 } from './viewBridge';
@@ -33,15 +35,50 @@ export function PluginView({
 }) {
   const { t } = useI18n();
   const view = usePluginViews().find((v) => v.pluginId === pluginId && v.id === viewId);
+  if (!view)
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+        {t('Plugin is not enabled')}
+      </div>
+    );
+  return (
+    <PluginFrame pluginId={pluginId} entry={view.entry} title={view.title} sessionId={sessionId} />
+  );
+}
+
+export interface PluginFrameFile {
+  rel: string;
+  text: string;
+  onEdit(text: string): void;
+}
+
+/** 跑插件页面的沙箱 iframe；带 file 时是文件查看器，页面经 enso.file 读写当前文件 */
+export function PluginFrame({
+  pluginId,
+  entry,
+  title,
+  sessionId,
+  file,
+}: {
+  pluginId: string;
+  entry: string;
+  title: string;
+  sessionId: string | null;
+  file?: PluginFrameFile;
+}) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const entry = view?.entry;
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
+  const fileRef = useRef(file);
+  fileRef.current = file;
+  const channelRef = useRef<MessageChannel | null>(null);
+  /** 查看器自己提交的内容，回推时跳过，避免把它刚写的又推回去 */
+  const echoRef = useRef<string | null>(null);
 
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame || !entry) return;
+    if (!frame) return;
     setError(null);
     let disposed = false;
     let channel: MessageChannel | null = null;
@@ -82,10 +119,17 @@ export function PluginView({
       channel?.port1.close();
       const current = new MessageChannel();
       channel = current;
+      channelRef.current = current;
       current.port1.onmessage = (event) => {
         const patch = viewStoragePatch(event.data);
         if (patch) {
           void window.electronAPI.extensionPlugins.viewStateSet(pluginId, patch);
+          return;
+        }
+        const edit = viewFileEdit(event.data);
+        if (edit !== null) {
+          echoRef.current = edit;
+          fileRef.current?.onEdit(edit);
           return;
         }
         void handle(event.data).then((reply) => {
@@ -106,12 +150,14 @@ export function PluginView({
         return asset.ok ? { mime: asset.mime, base64: asset.base64 } : null;
       });
       if (disposed || channel !== current) return;
+      const doc = fileRef.current;
       frame.contentWindow?.postMessage(
         {
           type: 'enso-view-init',
           html,
           theme: documentTheme(),
           storage: state.ok ? state.state : {},
+          ...(doc ? { file: { rel: doc.rel, text: doc.text } } : {}),
         },
         '*',
         [current.port2]
@@ -125,22 +171,32 @@ export function PluginView({
       unsubscribeViewEvent();
       window.removeEventListener('message', onReady);
       channel?.port1.close();
+      channelRef.current = null;
       frame.removeAttribute('src');
     };
   }, [pluginId, entry]);
 
-  if (!view)
-    return (
-      <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-        {t('Plugin is not enabled')}
-      </div>
-    );
+  const fileRel = file?.rel;
+  const fileText = file?.text;
+  useEffect(() => {
+    if (fileRel === undefined || fileText === undefined) return;
+    if (echoRef.current === fileText) {
+      echoRef.current = null;
+      return;
+    }
+    try {
+      channelRef.current?.port1.postMessage(viewFilePush(fileRel, fileText));
+    } catch {
+      /* 端口已关闭 */
+    }
+  }, [fileRel, fileText]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {error && <div className="shrink-0 px-3 py-2 text-xs text-destructive">{error}</div>}
       <iframe
         ref={frameRef}
-        title={view.title}
+        title={title}
         className="min-h-0 w-full flex-1 border-0 bg-background"
       />
     </div>

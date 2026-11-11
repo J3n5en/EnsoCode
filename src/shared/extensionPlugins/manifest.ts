@@ -74,6 +74,16 @@ export interface PluginViewContrib {
   title: string;
   entry: string;
 }
+/** 按扩展名打开文件的查看器；页面和侧栏页面一样跑在沙箱 iframe 里 */
+export interface PluginFileViewerContrib {
+  id: string;
+  title: string;
+  entry: string;
+  /** 小写、带点的后缀，如 .csv、.excalidraw.json */
+  extensions: string[];
+  /** 匹配的文件默认用它打开，否则只出现在切换按钮里 */
+  default: boolean;
+}
 /** 主题：path 是调色板 JSON，css 可选且可改任意界面（grant.styles） */
 export interface PluginThemeContrib {
   id: string;
@@ -178,6 +188,7 @@ export interface ExtensionPluginManifest {
     agentTools: PluginAgentToolContrib[];
     commands: PluginCommandContrib[];
     views: PluginViewContrib[];
+    fileViewers: PluginFileViewerContrib[];
     triggers: PluginTriggerContrib[];
     skills: string[];
     mcpServers: PluginMcpContrib[];
@@ -201,6 +212,7 @@ export type ManifestParseResult =
 const ID = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
 const TOOL = /^[a-z][a-z0-9_]*$/;
 const LOCAL_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const FILE_SUFFIX = /^\.[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)*$/;
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const ENGINE = /^>=(\d+)\.(\d+)\.(\d+)$/;
 const METHOD = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
@@ -499,6 +511,35 @@ export function parseExtensionPluginManifest(
     else views.push({ id: v.id, title: v.title as string, entry: v.entry });
   }
   uniqueIds(views, '侧栏页面');
+
+  const fileViewers: PluginFileViewerContrib[] = [];
+  for (const v of list('fileViewers')) {
+    if (
+      !isRecord(v) ||
+      typeof v.id !== 'string' ||
+      !LOCAL_ID.test(v.id) ||
+      !isNonEmptyString(v.title, 40) ||
+      !isPluginRelativePath(v.entry) ||
+      !v.entry.endsWith('.html') ||
+      !Array.isArray(v.extensions) ||
+      v.extensions.length === 0 ||
+      v.extensions.length > 32 ||
+      !v.extensions.every(
+        (ext) => typeof ext === 'string' && ext.length <= 32 && FILE_SUFFIX.test(ext)
+      ) ||
+      (v.default !== undefined && typeof v.default !== 'boolean')
+    )
+      errors.push('文件查看器不合法');
+    else
+      fileViewers.push({
+        id: v.id,
+        title: v.title as string,
+        entry: v.entry,
+        extensions: [...new Set(v.extensions as string[])],
+        default: v.default === true,
+      });
+  }
+  uniqueIds(fileViewers, '文件查看器');
 
   const themes: PluginThemeContrib[] = [];
   for (const theme of list('themes')) {
@@ -845,6 +886,7 @@ export function parseExtensionPluginManifest(
   need(renderer !== undefined, 'ui.slot', 'renderer');
   need(triggers.length > 0, 'ui.slot', 'triggers');
   need(views.length > 0, 'ui.view', 'views');
+  need(fileViewers.length > 0, 'ui.view', 'fileViewers');
   need(mcpServers.length > 0, 'mcp.server', 'mcpServers');
   need(fs.read.length > 0, 'fs.read', 'fs.read');
   need(fs.write.length > 0, 'fs.write', 'fs.write');
@@ -893,6 +935,7 @@ export function parseExtensionPluginManifest(
         agentTools,
         commands,
         views,
+        fileViewers,
         triggers,
         skills,
         mcpServers,
