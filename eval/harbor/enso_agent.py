@@ -70,9 +70,12 @@ class EnsoCodeAgent(BaseInstalledAgent):
         if package is not None:
             await environment.upload_file(package, "/tmp/ensocode-server.tgz")
             remote_package = "/tmp/ensocode-server.tgz"
+        # @vscode/ripgrep 的 postinstall 走 GitHub API 下载，未鉴权时每个出口 IP 每小时 60 次，批量跑很快 403
+        token = os.environ.get("GITHUB_TOKEN")
         await self.exec_as_root(
             environment,
             command=f"bash /tmp/enso-install.sh {shlex.quote(remote_package)}".rstrip(),
+            env={"GITHUB_TOKEN": token} if token else None,
             timeout_sec=600,
         )
 
