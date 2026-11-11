@@ -23,6 +23,7 @@ import type {
   PluginInjectImage,
   PluginToolResult,
 } from '../src/shared/extensionPlugins/protocol';
+import type { StatusPatch } from '../src/shared/extensionPlugins/statusItems';
 
 export type {
   ExtensionPluginManifest,
@@ -144,6 +145,7 @@ export interface EnsoHostApi {
   'ui.notify': (title: string, body?: string) => Promise<void>;
   'ui.viewEvent': (name: string, data?: unknown) => Promise<void>;
   'ui.viewOpen': (input?: string | { viewId?: string; sessionId?: string }) => Promise<void>;
+  'ui.statusUpdate': (id: string, patch: StatusPatch) => Promise<void>;
   'composer.readDraft': () => Promise<EnsoDraft>;
   'composer.insertText': (input: { text: string }) => Promise<EnsoDraftRev>;
   'composer.replaceDraft': (input: {
@@ -302,6 +304,8 @@ export interface EnsoMain {
     };
     clipboard: { writeText: EnsoHostApi['ui.clipboard'] };
     openExternal: EnsoHostApi['ui.openExternal'];
+    /** 改清单 `statusItems` 声明过的输入框底栏状态项；不需要权限和调用上下文，每秒最多 20 次 */
+    status: { update: EnsoHostApi['ui.statusUpdate'] };
   };
   composer: {
     readDraft: EnsoHostApi['composer.readDraft'];

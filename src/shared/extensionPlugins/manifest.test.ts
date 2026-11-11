@@ -25,6 +25,43 @@ const errorsOf = (raw: unknown): string[] => {
 };
 
 describe('parseExtensionPluginManifest', () => {
+  it('statusItems 声明输入框底栏状态项，command 必须是本插件命令', () => {
+    const withItems = (statusItems: unknown) => ({
+      ...base(),
+      contributes: {
+        ...base().contributes,
+        commands: [{ id: 'show', title: 'Show' }],
+        statusItems,
+      },
+    });
+    const ok = parseExtensionPluginManifest(
+      withItems([
+        { id: 'queue', text: '0 待办', tooltip: '队列', command: 'show' },
+        { id: 'plain', text: 'idle' },
+      ]),
+      '0.2.12'
+    );
+    expect(ok.ok && ok.manifest.contributes.statusItems).toEqual([
+      { id: 'queue', text: '0 待办', tooltip: '队列', command: 'show' },
+      { id: 'plain', text: 'idle' },
+    ]);
+    expect(parseExtensionPluginManifest(base(), '0.2.12')).toMatchObject({
+      ok: true,
+      manifest: { contributes: { statusItems: [] } },
+    });
+    for (const bad of [
+      { id: 'x', text: 'a'.repeat(25) },
+      { id: 'x', text: '' },
+      { id: 'Bad', text: 'a' },
+      { id: 'x', text: 'a', command: 'missing' },
+      { id: 'x', text: 'a', tooltip: 1 },
+    ]) {
+      expect(errorsOf(withItems([bad]))).toContain('状态项不合法');
+    }
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `s${i}`, text: 'a' }));
+    expect(errorsOf(withItems(many))).toContain('statusItems 最多 8 个');
+  });
+
   it('fileViewers 按扩展名声明查看器，需要 ui.view，扩展名须小写且带点', () => {
     const withViewers = (fileViewers: unknown, permissions = ['agent.tool', 'ui.view']) => ({
       ...base(),

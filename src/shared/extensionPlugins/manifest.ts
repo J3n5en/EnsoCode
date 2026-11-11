@@ -7,6 +7,12 @@ import {
   type PluginEventName,
   type PluginEventSubscription,
 } from './events';
+import {
+  MAX_STATUS_ITEMS,
+  MAX_STATUS_TEXT,
+  MAX_STATUS_TOOLTIP,
+  type PluginStatusItemContrib,
+} from './statusItems';
 import { pluginToolName } from './toolName';
 
 export const EXTENSION_PLUGIN_PERMISSIONS = [
@@ -189,6 +195,8 @@ export interface ExtensionPluginManifest {
     commands: PluginCommandContrib[];
     views: PluginViewContrib[];
     fileViewers: PluginFileViewerContrib[];
+    /** 输入框底栏状态项；纯数据，由宿主渲染 */
+    statusItems: PluginStatusItemContrib[];
     triggers: PluginTriggerContrib[];
     skills: string[];
     mcpServers: PluginMcpContrib[];
@@ -540,6 +548,30 @@ export function parseExtensionPluginManifest(
       });
   }
   uniqueIds(fileViewers, '文件查看器');
+
+  const statusItems: PluginStatusItemContrib[] = [];
+  const statusRaw = list('statusItems');
+  if (statusRaw.length > MAX_STATUS_ITEMS) errors.push(`statusItems 最多 ${MAX_STATUS_ITEMS} 个`);
+  for (const s of statusRaw.slice(0, MAX_STATUS_ITEMS)) {
+    if (
+      !isRecord(s) ||
+      typeof s.id !== 'string' ||
+      !LOCAL_ID.test(s.id) ||
+      !isNonEmptyString(s.text, MAX_STATUS_TEXT) ||
+      (s.tooltip !== undefined && !isNonEmptyString(s.tooltip, MAX_STATUS_TOOLTIP)) ||
+      (s.command !== undefined &&
+        (typeof s.command !== 'string' || !commands.some((c) => c.id === s.command)))
+    )
+      errors.push('状态项不合法');
+    else
+      statusItems.push({
+        id: s.id,
+        text: s.text as string,
+        ...(s.tooltip !== undefined ? { tooltip: s.tooltip as string } : {}),
+        ...(s.command !== undefined ? { command: s.command as string } : {}),
+      });
+  }
+  uniqueIds(statusItems, '状态项');
 
   const themes: PluginThemeContrib[] = [];
   for (const theme of list('themes')) {
@@ -936,6 +968,7 @@ export function parseExtensionPluginManifest(
         commands,
         views,
         fileViewers,
+        statusItems,
         triggers,
         skills,
         mcpServers,

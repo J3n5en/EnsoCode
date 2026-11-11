@@ -402,6 +402,10 @@ export function runPluginHost(transport: HostTransport): void {
             hostCall('ui.viewOpen', typeof input === 'string' ? { viewId: input } : (input ?? {})),
         },
         clipboard: { writeText: (text: string) => hostCall('ui.clipboard', { text }) },
+        status: {
+          update: (id: string, patch?: Record<string, unknown>) =>
+            hostCall('ui.statusUpdate', { ...(patch ?? {}), id }),
+        },
         openExternal: (url: string) => hostCall('ui.openExternal', { url }),
       },
       composer: {

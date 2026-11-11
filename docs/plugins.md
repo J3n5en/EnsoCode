@@ -141,6 +141,7 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
   - `key` 是默认快捷键，如 `mod+shift+k`：修饰键按 `mod`、`ctrl`、`alt`、`shift` 顺序写，至少一个不是 `shift`；`mod` 在 macOS 是 ⌘，其他平台是 Ctrl。按下时对当前会话执行，`ctx.sessionId` 为当前标签的会话。内置快捷键优先，多个插件抢同一个键时先装的生效；用户可以在设置的快捷键页改键或删除。
 - `views`：`{ id, title, entry }`。`title` 最长 40 字符，`entry` 必须是 `.html`。
 - `fileViewers`：`{ id, title, entry, extensions, default? }`，需要 `ui.view`。`extensions` 是 1 到 32 个小写、带点的后缀，如 `.csv`、`.excalidraw.json`；`default: true` 时匹配的文件默认用它打开，否则只在文件标签右上角给出切换按钮。见下文「文件查看器」。
+- `statusItems`：`{ id, text, tooltip?, command? }`，最多 8 个，不需要权限。显示在主输入框底栏右侧，`text` 最长 24 字符，`tooltip` 最长 200。`command` 是本插件 `commands` 里的 id，点击时对当前会话执行。见下文「状态项」。
 - `triggers`：`{ symbol, name }`。`symbol` 只能是 `#`，`@` 和 `/` 归 Enso 自己用。
 - `skills`：skill 目录的相对路径，随插件下发给新会话。
 - `mcpServers`：`{ name, command, args, env }`。服务名会加 `plugin-<id>-` 前缀。`command`、`args`、`env` 里的 `${ENSO_PLUGIN_ROOT}` 会展开成插件安装目录，`env` 只能写字面量。
@@ -339,6 +340,10 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 - `images` 是 `[{ data, mimeType }]`，`data` 为 base64，`mimeType` 只能是 `image/png`、`image/jpeg`、`image/webp`、`image/gif`；最多 4 张，每张 base64 不超过 7M 字符。图片随文字一起交给模型，不合法返回 `INVALID_ARGS`。
 
 `session.abort(sessionId?)` 中止会话正在进行的一轮，权限与目标会话规则同 `session.inject`（不计入频率限制）。会话没在运行返回 `ABORT_FAILED`。
+
+### 状态项
+
+`enso.ui.status.update(id, { text?, tooltip?, tone?, visible? })` 改清单 `statusItems` 里声明过的项，没声明的 id 会被拒绝。`tone` 是 `neutral`（缺省）、`accent`、`success`、`warning`、`danger`；`visible: false` 隐藏。不需要权限，也不需要在宿主发起的调用里，常驻进程和定时任务都能直接更新；和侧栏事件共用每秒 20 次的上限。更新只保存在内存里，应用重启后回到清单里的值。
 
 ### 产出文件
 

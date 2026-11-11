@@ -32,6 +32,7 @@ const manifest = (patch: Partial<ExtensionPluginManifest> = {}): ExtensionPlugin
     commands: [],
     views: [],
     fileViewers: [],
+    statusItems: [],
     triggers: [],
     skills: [],
     mcpServers: [],
@@ -417,6 +418,28 @@ describe('PluginHostGate', () => {
     await expect(gate.handle('a.b', 'ui.notify', { title: 't' }, undefined)).rejects.toMatchObject({
       code: 'UNSUPPORTED',
     });
+  });
+
+  it('ui.statusUpdate 只能改清单声明过的状态项，不需要调用上下文', async () => {
+    const statusUpdate = vi.fn();
+    deps.statusUpdate = statusUpdate;
+    deps.manifest = (id) =>
+      id === 'a.b'
+        ? manifest({
+            contributes: { ...manifest().contributes, statusItems: [{ id: 'queue', text: '0' }] },
+          })
+        : null;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.statusUpdate', { id: 'queue', text: '3', tone: 'warning' }, undefined)
+    ).resolves.toBeNull();
+    expect(statusUpdate).toHaveBeenCalledWith('a.b', 'queue', { text: '3', tone: 'warning' });
+    await expect(
+      gate.handle('a.b', 'ui.statusUpdate', { id: 'other', text: '3' }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(
+      gate.handle('a.b', 'ui.statusUpdate', { id: 'queue', tone: 'pink' }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
   });
 
   it('有 ui.view 时不需要手势就能把事件交给宿主', async () => {

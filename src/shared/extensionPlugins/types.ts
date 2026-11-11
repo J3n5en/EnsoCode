@@ -1,4 +1,5 @@
 import type { ExtensionPluginPermission, PluginConfigType, PluginTriggerSymbol } from './manifest';
+import type { PluginStatusItem } from './statusItems';
 
 /** 设置页、安装确认页看到的插件摘要；不含任何磁盘路径 */
 export interface ExtensionPluginSummary {
@@ -24,6 +25,8 @@ export interface ExtensionPluginSummary {
     extensions: string[];
     default: boolean;
   }[];
+  /** 输入框底栏状态项（清单 + 运行期更新后的当前值） */
+  statusItems: PluginStatusItem[];
   /** path / css 是安装目录内的相对路径，渲染层经 asset 通道取；没同意样式能力时不带 css */
   themes: { id: string; name: string; path: string; css?: string }[];
   triggers: { symbol: PluginTriggerSymbol; name: string }[];

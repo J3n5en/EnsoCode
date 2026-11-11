@@ -47,6 +47,7 @@ import {
   type PluginInjectImage,
   type PluginToolResult,
 } from '@shared/extensionPlugins/protocol';
+import { mergeStatusItems, type StatusPatch } from '@shared/extensionPlugins/statusItems';
 import { parsePluginToolName, pluginToolName } from '@shared/extensionPlugins/toolName';
 import type {
   ExtensionPluginConfigField,
@@ -253,6 +254,8 @@ export class ExtensionPluginService {
   private readonly artifacts: ArtifactStore;
   private readonly viewState: ViewStateStore;
   private readonly dynamic = new DynamicContribs();
+  /** 运行期状态项补丁，重启应用后回到清单值 */
+  private readonly statusState = new Map<string, Record<string, StatusPatch>>();
   private readonly progressTaps = new Map<string, (text: string) => void>();
   private readonly gateManifests = new Map<string, ExtensionPluginManifest>();
   private readonly trialing = new Set<string>();
@@ -286,6 +289,13 @@ export class ExtensionPluginService {
       manifest: (id) => this.gateManifests.get(id) ?? this.enabledManifest(id),
       config: (id) => this.pluginConfig(id),
       progress: (invocationId, text) => this.progressTaps.get(invocationId)?.(text),
+      statusUpdate: (pluginId, id, patch) => {
+        const current = this.statusState.get(pluginId) ?? {};
+        const next = { ...current[id], ...patch };
+        if (JSON.stringify(next) === JSON.stringify(current[id] ?? {})) return;
+        this.statusState.set(pluginId, { ...current, [id]: next });
+        this.touch();
+      },
       writeArtifact: (pluginId, input) => this.artifacts.write(pluginId, input),
       inject: (pluginId, input) => this.inject(pluginId, input),
       abort: (pluginId, sessionId) => {
@@ -345,6 +355,10 @@ export class ExtensionPluginService {
           commands: manifest.contributes.commands,
           views: manifest.contributes.views.map(({ id, title, entry }) => ({ id, title, entry })),
           fileViewers: manifest.contributes.fileViewers,
+          statusItems: mergeStatusItems(
+            manifest.contributes.statusItems,
+            this.statusState.get(record.id) ?? {}
+          ),
           // css 只在用户同意过样式能力时下发，渲染层据此决定读不读
           themes: manifest.contributes.themes.map(({ css, ...theme }) =>
             css !== undefined && record.grant.styles ? { ...theme, css } : theme
@@ -688,6 +702,7 @@ export class ExtensionPluginService {
       rmSync(`${this.logPath(id)}.1`, { force: true });
       this.recentErrors.delete(id);
       this.prepareFailed.delete(id);
+      this.statusState.delete(id);
       this.invalidatePackageCache(id);
       this.syncBackground();
       return { ok: true };

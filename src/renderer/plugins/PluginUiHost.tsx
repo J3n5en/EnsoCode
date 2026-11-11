@@ -11,6 +11,7 @@ import { createRendererDeps, loadPluginRenderer } from './loader';
 import { setPluginIcons } from './PluginIcon';
 import { syncPluginRenderers } from './rendererReload';
 import { handleSessionRequest, type SessionRequest } from './sessionBridge';
+import { pluginStatusRefs, setPluginStatusItems } from './statusItems';
 import { setPluginTriggers } from './triggers';
 import { setPluginViews } from './viewBridge';
 
@@ -63,6 +64,7 @@ export function PluginUiHost() {
         const enabled = list.filter((plugin) => plugin.state === 'enabled');
         setPluginIcons(Object.fromEntries(list.flatMap((p) => (p.icon ? [[p.id, p.icon]] : []))));
         setPluginCommands(pluginCommandRefs(list));
+        setPluginStatusItems(pluginStatusRefs(list));
         setPluginViews(
           enabled.flatMap((plugin) =>
             plugin.views.map((view) => ({
@@ -137,6 +139,7 @@ export function PluginUiHost() {
       setPluginTriggers([]);
       setPluginViews([]);
       setPluginFileViewers([]);
+      setPluginStatusItems([]);
       for (const handle of loaded.values()) handle.dispose();
       loaded.clear();
     };

@@ -39,6 +39,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { pluginCommandFor, runPluginCommand } from '../../plugins/commands';
 import { registerDraftTarget, takePendingDraft } from '../../plugins/draftBridge';
 import { PluginComposerSlots } from '../../plugins/slots';
+import { PluginStatusItems } from '../../plugins/statusItems';
 import {
   type PluginCandidate,
   pickPluginCandidate,
@@ -1013,6 +1014,7 @@ export function Composer({
               />
             ) : null}
             {toolbar}
+            {!isolated && <PluginStatusItems sessionId={pluginSlotProps.sessionId} />}
             <PluginComposerSlots side="right" {...pluginSlotProps} />
             {privacyScan && (privacyScan.blocked.length > 0 || privacyScan.masked > 0) && (
               <span
