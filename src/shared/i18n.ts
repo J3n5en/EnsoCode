@@ -2443,6 +2443,23 @@ export const zhTranslations: Record<string, string> = {
   'Waiting for device': '等待设备',
   'Direct link': '直连',
   'Via relay': '中继',
+  Connected: '已连接',
+  'Desktop is offline': '桌面端离线',
+  'Pairing expired': '配对已失效',
+  'Reconnecting…': '重连中…',
+  'Turn on notifications': '开启推送通知',
+  'Turn off notifications': '关闭推送通知',
+  'Push notifications': '推送通知',
+  'Turning on notifications…': '正在开启推送…',
+  'Notifications need a newer desktop app.': '需先升级桌面端才能开启推送。',
+  'Add this app to the Home Screen before notifications can be turned on.':
+    'iOS 需先用分享菜单「添加到主屏幕」，从主屏幕打开后才能开启。',
+  'This browser cannot show notifications.': '当前浏览器不支持推送。',
+  'Notification permission was denied. Allow notifications for this site and try again.':
+    '通知权限被拒绝，请在浏览器站点设置中允许后重试。',
+  'Cannot reach the push service. Check the network or proxy and try again.':
+    '无法连接推送服务，请检查网络或代理后重试。',
+  'Could not turn on notifications.': '无法开启推送。',
   'View only': '只读',
   'Can operate': '可操作',
   'Click to switch: view-only devices cannot send, approve or stop.':

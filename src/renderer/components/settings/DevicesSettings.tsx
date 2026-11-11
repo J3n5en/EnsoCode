@@ -31,7 +31,7 @@ export function DevicesSettings() {
   return (
     <div className="space-y-10">
       <AllowConnectionsSection />
-      <ConnectToNodesSection />
+      {!window.electronAPI.remote && <ConnectToNodesSection />}
       <RelaySection />
     </div>
   );

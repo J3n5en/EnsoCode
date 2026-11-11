@@ -17,6 +17,12 @@ import { type ConnState, PairClient } from '../client';
 import type { PhoneCacheStore } from '../sessionCache';
 import { stallDelay } from './stall';
 
+export interface DeskLinkHooks {
+  onTransport?(transport: 'relay' | 'direct'): void;
+  onRtt?(rttMs: number): void;
+  onPushConfig?(key: string): void;
+}
+
 export interface DeskAsset {
   status: number;
   mime: string;
@@ -109,7 +115,8 @@ export class DeskTunnel {
   constructor(
     device: PairedDevice,
     private onState: (state: ConnState) => void,
-    private onFatal: (error: string) => void
+    private onFatal: (error: string) => void,
+    private link: DeskLinkHooks = {}
   ) {
     this.client = new PairClient(
       device,
@@ -120,6 +127,9 @@ export class DeskTunnel {
         onProviders() {},
         onSession() {},
         onRemoteFrame: (frame) => this.receive(frame),
+        onTransport: (transport) => this.link.onTransport?.(transport),
+        onRtt: (rttMs) => this.link.onRtt?.(rttMs),
+        onPushConfig: (key) => this.link.onPushConfig?.(key),
         // host-info 先报 readOnly 再报 remoteDesktop：不支持时区分只读与旧桌面
         onReadOnly: (readOnly) => {
           this.readOnly = readOnly;
@@ -131,6 +141,11 @@ export class DeskTunnel {
       undefined,
       NO_CACHE
     );
+  }
+
+  /** 推送订阅帧走手机协议，不进 renderer 隧道 */
+  sendGuest(message: PhoneToHost): void {
+    this.client.send(message);
   }
 
   start(): void {

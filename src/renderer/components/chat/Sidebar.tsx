@@ -80,6 +80,7 @@ import {
   restartConversationFromMenu,
 } from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
+import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -819,6 +820,7 @@ export function Sidebar({
             <FolderPlus className="h-4 w-4" />
           </button>
           <div className="flex-1" />
+          {window.electronAPI.remote?.linkStatus && <PhoneLinkStatus />}
           {archivedCount > 0 && (
             <button
               type="button"
@@ -1552,7 +1554,14 @@ export function Sidebar({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 p-1.5">
-          <NodeSwitcher />
+          {window.electronAPI.remote?.linkStatus ? (
+            <>
+              <div className="min-w-0 flex-1" />
+              <PhoneLinkStatus />
+            </>
+          ) : (
+            <NodeSwitcher />
+          )}
           {archivedCount > 0 && (
             <button
               type="button"

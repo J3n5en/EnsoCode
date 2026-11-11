@@ -1,7 +1,7 @@
 /** 远程桌面 web-preload：复用桌面 preload 构造 window.electronAPI，再补远端专属能力 */
 import '../preload/index';
 import { REMOTE_LOCAL_IMAGE_PREFIX_KEY } from '@shared/localImage';
-import type { RemoteApi } from '@shared/remoteBridge';
+import type { RemoteApi, RemoteBridge } from '@shared/remoteBridge';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { remoteBridge, remoteFrame, uploadToHost } from './electronShim';
 
@@ -22,6 +22,18 @@ const remote: RemoteApi = {
   upload: uploadToHost,
   localImagePrefix,
   exitDesk: () => remoteBridge.exitDesk(),
+  ...(typeof remoteBridge.linkStatus === 'function'
+    ? {
+        linkStatus: () => remoteBridge.linkStatus(),
+        onLinkStatus: (callback: (status: ReturnType<RemoteBridge['linkStatus']>) => void) =>
+          remoteBridge.onLinkStatus(callback),
+        vapidPublicKey: () => remoteBridge.vapidPublicKey(),
+        setPushSubscription: (subscription: Parameters<RemoteBridge['setPushSubscription']>[0]) =>
+          remoteBridge.setPushSubscription(subscription),
+        setPushPending: (pending: Parameters<RemoteBridge['setPushPending']>[0]) =>
+          remoteBridge.setPushPending(pending),
+      }
+    : {}),
 };
 
 (window as unknown as { electronAPI: { remote?: RemoteApi } }).electronAPI.remote = remote;

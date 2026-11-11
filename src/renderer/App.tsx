@@ -217,8 +217,15 @@ export default function App() {
     bindPairCatalogSync();
   }, []);
 
-  // 连接到节点：订阅 main 推的节点状态与对方下行帧
-  useEffect(() => useRemoteNodesStore.getState().bind(), []);
+  // 连接到节点只在本机桌面可用。远程界面的 nodes: 被拒绝，不要订阅，也不要停在空的节点视图上
+  useEffect(() => {
+    const store = useRemoteNodesStore.getState();
+    if (window.electronAPI.remote) {
+      if (store.activeNodeId !== 'local') store.switchNode('local');
+      return;
+    }
+    return store.bind();
+  }, []);
   const activeNodeId = useRemoteNodesStore((s) => s.activeNodeId);
   const remoteNodeActive = activeNodeId !== 'local';
   const botModeActive = useBotModeActive();

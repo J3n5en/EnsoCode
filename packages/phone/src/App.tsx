@@ -44,6 +44,7 @@ import { PairScreen } from './PairScreen';
 import {
   isPushSupported,
   isStandalone,
+  PHONE_PUSH_ENABLED_KEY,
   type PushFailureReason,
   registerServiceWorker,
   subscribePush,
@@ -93,7 +94,6 @@ const STATE_LABEL: Record<ConnState, string> = {
   offline: '重连中…',
 };
 
-const PUSH_ENABLED_KEY = 'enso-phone-push';
 const SIDEBAR_PINNED_KEY = 'enso-phone-sidebar-pinned';
 
 /** 私聊尚无会话（从未发过消息）时的空视图 */
@@ -164,7 +164,7 @@ export function App() {
   const [composeProjectId, setComposeProjectId] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(
-    () => localStorage.getItem(PUSH_ENABLED_KEY) === 'on'
+    () => localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on'
   );
   /** 已收到桌面下发的 push-config；旧版桌面不会发，开关据此提示升级 */
   const [pushConfigReady, setPushConfigReady] = useState(false);
@@ -491,7 +491,7 @@ export function App() {
         vapidKeyRef.current = key;
         setPushConfigReady(true);
         // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
-        if (localStorage.getItem(PUSH_ENABLED_KEY) === 'on') {
+        if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on') {
           void subscribePush(key).then((result) => {
             if (result.ok)
               client.send({ type: 'push-subscribe', subscription: result.subscription });
@@ -1106,7 +1106,7 @@ export function App() {
   const togglePush = async (next: boolean) => {
     setPushError(null);
     if (!next) {
-      localStorage.setItem(PUSH_ENABLED_KEY, 'off');
+      localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'off');
       setPushEnabled(false);
       send({ type: 'push-unsubscribe' });
       void unsubscribePush();
@@ -1125,7 +1125,7 @@ export function App() {
       return;
     }
     send({ type: 'push-subscribe', subscription: result.subscription });
-    localStorage.setItem(PUSH_ENABLED_KEY, 'on');
+    localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'on');
   };
 
   return (

@@ -17,7 +17,11 @@ vi.mock('./NewSessionSheet', () => ({ NewSessionSheet: () => null }));
 vi.mock('./SessionConfigSheet', () => ({ SessionConfigSheet: () => null }));
 vi.mock('./stubs/electron-api', () => ({ setPhoneAgentActions: () => {} }));
 vi.mock('./stubs/sessions-store', () => ({ setQueueActions: () => {} }));
-vi.mock('./push', () => ({ isPushSupported: () => false, isStandalone: () => false }));
+vi.mock('./push', () => ({
+  isPushSupported: () => false,
+  isStandalone: () => false,
+  PHONE_PUSH_ENABLED_KEY: 'enso-phone-push',
+}));
 
 beforeEach(() => {
   const data = new Map<string, string>();
