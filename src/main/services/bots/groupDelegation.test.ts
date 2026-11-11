@@ -20,10 +20,17 @@ let root: string;
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'group-delegation-')));
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.useRealTimers();
+  rmSync(root, { recursive: true, force: true });
+});
 
 const settle = async () => {
-  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  if (vi.isFakeTimers()) {
+    await vi.advanceTimersByTimeAsync(0);
+    return;
+  }
+  for (let i = 0; i < 8; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
 function fixture(
@@ -1118,6 +1125,7 @@ it('已失败的追加不挂住执行：steer 被拒记 ok=false 并写进结果
 });
 
 it('忙不结算有上限：到期强制结算，没跑完的追加记 ok=false 并在结果里写明', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   const f = fixture(['林经理', '阿后'], undefined, true, undefined, 40);
   const { boss, child } = await handOver(f);
   await nextBossTurn(f);
@@ -1137,7 +1145,7 @@ it('忙不结算有上限：到期强制结算，没跑完的追加记 ok=false 
   expect(latest(f).state).toBe('running');
   // 追加回合开了头却迟迟不结束
   f.start(child);
-  await new Promise((resolve) => setTimeout(resolve, 40 * 240 + 50));
+  await vi.advanceTimersByTimeAsync(40 * 240 + 50);
   await settle();
   expect(latest(f)).toMatchObject({
     state: 'completed',
@@ -1477,6 +1485,7 @@ it('人在任务卡回复解除卡住：群里开过新对话 → 结果回群�
 });
 
 it('软停止：登记卡住后 5 分钟没收尾只中止当前回合；排队的追加转成下一次执行不丢；不取消子委派；停止原因区别于人工停止', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   const f = fixture(['林经理', '阿后', '小三'], undefined, true, undefined, 20);
   const finished: Array<{ conversationId: string; error?: string; stopped?: true }> = [];
   f.host.onTurnFinished((event) => finished.push(event));
@@ -1495,7 +1504,7 @@ it('软停止：登记卡住后 5 分钟没收尾只中止当前回合；排队�
   });
   await settle();
   const append = f.to(child).at(-1)!.deliveryId!;
-  await new Promise((resolve) => setTimeout(resolve, 5 * 20 + 60));
+  await vi.advanceTimersByTimeAsync(5 * 20 + 60);
   await settle();
   expect(f.delegations.list().find((record) => record.id === sent.delegationId)).toMatchObject({
     state: 'blocked',
@@ -1548,6 +1557,7 @@ it('软停止：登记卡住后 5 分钟没收尾只中止当前回合；排队�
 }, 20_000);
 
 it('软停止：执行中人在任务卡插的话还没被收下 → 转成下一次执行重新投递，不丢', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   const f = fixture(['林经理', '阿后'], undefined, true, undefined, 20);
   const { sent, child } = await handOver(f);
   expect(f.delegations.reportBlocked(child, { need: '数据库密码' })).toMatchObject({ ok: true });
@@ -1555,7 +1565,7 @@ it('软停止：执行中人在任务卡插的话还没被收下 → 转成下�
   await settle();
   const steer = f.to(child).at(-1)!;
   expect(steer.text).toContain('密码在 1Password 里');
-  await new Promise((resolve) => setTimeout(resolve, 5 * 20 + 60));
+  await vi.advanceTimersByTimeAsync(5 * 20 + 60);
   await settle();
   expect(f.delegations.list().find((record) => record.id === sent.delegationId)?.state).toBe(
     'blocked'

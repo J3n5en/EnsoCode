@@ -26,8 +26,26 @@ vi.mock('electron', () => ({
 
 let service: typeof import('./index');
 let settings: typeof import('../../ipc/settings');
+const emptySecretsBundle = (): ConfigSyncBundle => ({
+  format: 'enso-config',
+  version: 1,
+  createdAt: '2025-09-05T00:00:00.000Z',
+  state: {
+    providers: [],
+    skills: [],
+    mcpServers: [],
+    instructions: [],
+    presets: [],
+    agentTypes: [],
+    subagentModels: [],
+  },
+  resources: { skills: [], instructions: [] },
+  secretsIncluded: true,
+});
+let emptyEncrypted: Buffer;
 
 beforeAll(async () => {
+  emptyEncrypted = await encodeBundle(emptySecretsBundle(), 'correct horse');
   writeFileSync(
     join(userData, 'settings.json'),
     JSON.stringify({
@@ -177,28 +195,7 @@ describe('config sync sender-bound import flow', () => {
 
   it('加密预览切换模式时复用 token 内已验证 bundle，不要求再次提交密码', async () => {
     const encrypted = join(userData, 'encrypted.enso-config');
-    writeFileSync(
-      encrypted,
-      await encodeBundle(
-        {
-          format: 'enso-config',
-          version: 1,
-          createdAt: '2025-09-05T00:00:00.000Z',
-          state: {
-            providers: [],
-            skills: [],
-            mcpServers: [],
-            instructions: [],
-            presets: [],
-            agentTypes: [],
-            subagentModels: [],
-          },
-          resources: { skills: [], instructions: [] },
-          secretsIncluded: true,
-        },
-        'correct horse'
-      )
-    );
+    writeFileSync(encrypted, emptyEncrypted);
     const opened = await service.openImportForSender(20, encrypted);
     expect(opened.ok).toBe(true);
     if (!opened.ok) return;
@@ -213,28 +210,7 @@ describe('config sync sender-bound import flow', () => {
 
   it('错误密码返回固定安全错误键，不泄露解密异常', async () => {
     const encrypted = join(userData, 'wrong-password.enso-config');
-    writeFileSync(
-      encrypted,
-      await encodeBundle(
-        {
-          format: 'enso-config',
-          version: 1,
-          createdAt: '2025-09-05T00:00:00.000Z',
-          state: {
-            providers: [],
-            skills: [],
-            mcpServers: [],
-            instructions: [],
-            presets: [],
-            agentTypes: [],
-            subagentModels: [],
-          },
-          resources: { skills: [], instructions: [] },
-          secretsIncluded: true,
-        },
-        'correct horse'
-      )
-    );
+    writeFileSync(encrypted, emptyEncrypted);
     const opened = await service.openImportForSender(21, encrypted);
     expect(opened.ok).toBe(true);
     if (!opened.ok) return;

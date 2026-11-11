@@ -40,6 +40,7 @@ const makeManager = (limits?: Partial<ShellLimits>) => {
 
 const until = (pred: () => boolean, ms = 5000) =>
   new Promise<void>((resolve, reject) => {
+    if (pred()) return resolve();
     const t0 = Date.now();
     const timer = setInterval(() => {
       if (pred()) {
@@ -49,7 +50,7 @@ const until = (pred: () => boolean, ms = 5000) =>
         clearInterval(timer);
         reject(new Error('timeout'));
       }
-    }, 50);
+    }, 5);
   });
 
 describe('foregroundCommandTimeoutMs', () => {
@@ -280,7 +281,7 @@ describe('BackgroundTaskManager', () => {
     const finalized = new Promise<unknown>((resolve) => {
       finishFinalize = resolve;
     });
-    const taskId = manager.start('s1', 'printf finalized; sleep 0.2', '/tmp', {
+    const taskId = manager.start('s1', 'printf finalized; sleep 0.05', '/tmp', {
       details: { rtk: { status: 'pending', originalCommand: 'echo finalized' } },
       finalize: () => finalized,
     });
@@ -389,14 +390,14 @@ describe('BackgroundTaskManager', () => {
     const { manager, notified, ended } = makeManager({ logMaxBytes: 64 });
     const taskId = manager.start(
       's1',
-      `node -e "process.stdout.write('a'.repeat(50)); setTimeout(() => process.stdout.write('b'.repeat(200)), 50)"`,
+      `node -e "process.stdout.write('a'.repeat(50)); setTimeout(() => process.stdout.write('b'.repeat(200)), 10)"`,
       '/tmp'
     );
     await until(() => ended.includes(taskId));
     const result = await manager.read(taskId);
     expect(result?.status).toBe('done');
     expect(result?.output).toContain('b'.repeat(200));
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 15));
     const log = readFileSync(result?.logPath as string, 'utf8');
     expect(log).toContain('a'.repeat(50));
     expect(log).not.toContain('b'.repeat(200));
@@ -500,13 +501,13 @@ describe('BackgroundTaskManager', () => {
 
   it('阻塞等待拿到结束态 → consumed,不再自动通知', async () => {
     const { manager, notified } = makeManager();
-    const taskId = manager.start('s1', 'sleep 0.2 && echo done-x', '/tmp');
+    const taskId = manager.start('s1', 'sleep 0.05 && echo done-x', '/tmp');
     const result = await manager.read(taskId, 5000);
     expect(result?.status).toBe('done');
     // 输出由这次工具返回值交付，而不是通知
     expect(result?.unread.text).toContain('done-x');
     // 等潜在的通知路径跑完
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 20));
     expect(notified).toHaveLength(0);
   });
 
@@ -582,7 +583,7 @@ describe('BackgroundTaskManager', () => {
 
   it('task_output 阻塞时插话提前返回，任务继续跑，结束后照常通知', async () => {
     const { manager, notified, ended } = makeManager();
-    const taskId = manager.start('s1', 'sleep 0.6 && echo late', '/tmp');
+    const taskId = manager.start('s1', 'sleep 0.15 && echo late', '/tmp');
     const tool = createTaskTools(manager, 's1').find((item) => item.name === 'task_output');
     const t0 = Date.now();
     const reading = tool?.execute(
@@ -592,7 +593,7 @@ describe('BackgroundTaskManager', () => {
       undefined,
       undefined as never
     );
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 15));
     expect(manager.backgroundAllForeground('s1', 'steer')).toEqual([]);
     const result = await reading;
     expect(Date.now() - t0).toBeLessThan(500);
@@ -615,7 +616,7 @@ describe('BackgroundTaskManager', () => {
         undefined,
         undefined as never
       );
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 15));
       expect(manager.backgroundForeground('s1', 'other-call', 'user')).toBeNull();
       manager.backgroundForeground('s1', 'read-user', 'user');
       const text = ((await reading)?.content[0] as { text: string } | undefined)?.text;
@@ -629,7 +630,7 @@ describe('BackgroundTaskManager', () => {
 
   it('有界等待超时后任务结束仍会通知', async () => {
     const { manager, notified, ended } = makeManager();
-    const taskId = manager.start('s1', 'sleep 0.4', '/tmp');
+    const taskId = manager.start('s1', 'sleep 0.08', '/tmp');
     expect((await manager.read(taskId, 50))?.status).toBe('running');
     await until(() => ended.includes(taskId));
     expect(notified).toHaveLength(1);
@@ -648,8 +649,8 @@ describe('BackgroundTaskManager', () => {
       );
       return result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
     };
-    const taskId = manager.start('s1', 'echo first-中; sleep 0.6; echo second', '/tmp');
-    await new Promise((r) => setTimeout(r, 300));
+    const taskId = manager.start('s1', 'echo first-中; sleep 0.12; echo second', '/tmp');
+    await new Promise((r) => setTimeout(r, 40));
     const first = await call();
     expect(first).toContain('first-中');
     expect(first).toContain('10 new bytes');
@@ -793,7 +794,7 @@ describe('前台命令转后台', () => {
     const { pending, updates } = run(
       withBackground(deferring, manager, 's1', process.cwd()),
       't1',
-      'echo go; sleep 0.3'
+      'echo go; sleep 0.08'
     );
     await until(() => updates.join('').includes('go'));
     const taskId = manager.backgroundForeground('s1', 't1', 'user') as string;
@@ -818,10 +819,10 @@ describe('前台让位 / 截止 / 失败回执（真实进程）', () => {
     result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
 
   it('到让位时刻：工具回执（任务 id / 日志 / Next:，无 timeout 字样），进程继续跑完并通知', async () => {
-    const { manager, notified, ended } = makeManager({ yieldDefaultMs: 300 });
+    const { manager, notified, ended } = makeManager({ yieldDefaultMs: 80 });
     const result = await shell(manager).execute(
       't1',
-      { command: 'echo before-yield; sleep 0.8; echo after-yield' },
+      { command: 'echo before-yield; sleep 0.2; echo after-yield' },
       undefined,
       undefined,
       undefined as never
@@ -856,10 +857,10 @@ describe('前台让位 / 截止 / 失败回执（真实进程）', () => {
   });
 
   it('显式 timeout 晚于让位：先让位，后台到截止时间杀掉并在通知里说明', async () => {
-    const { manager, notified, ended } = makeManager({ yieldDefaultMs: 200 });
+    const { manager, notified, ended } = makeManager({ yieldDefaultMs: 50 });
     const result = await shell(manager).execute(
       't1',
-      { command: 'sleep 5', timeout: 0.6 },
+      { command: 'sleep 5', timeout: 0.15 },
       undefined,
       undefined,
       undefined as never
@@ -916,7 +917,7 @@ describe('前台让位 / 截止 / 失败回执（真实进程）', () => {
   });
 
   it('让位时配额已满：停止命令并说明原因，不挂住调用', async () => {
-    const { manager } = makeManager({ yieldDefaultMs: 200, maxTasks: 1 });
+    const { manager } = makeManager({ yieldDefaultMs: 50, maxTasks: 1 });
     manager.start('s1', 'sleep 5', '/tmp');
     const result = await shell(manager).execute(
       't1',
