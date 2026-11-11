@@ -7,6 +7,14 @@ export const ARTIFACT_URI_SCHEME = 'enso-artifact://';
 export const DEFAULT_MAX_INLINE_BYTES = 32 * 1024;
 const ARTIFACT_GREP_LIMIT = 100;
 const ARTIFACT_GREP_LINE_CHARS = 500;
+/**
+ * 按工具的内联预算（字节）。自带分页的工具外置会把续页提示藏进 artifact、让分页失效：
+ * read 完全自管；web_fetch 每页 5 万字符，放宽到容下整页英文，多字节重的页仍外置兜底。
+ */
+const TOOL_INLINE_BYTES: Record<string, number> = {
+  read: Number.POSITIVE_INFINITY,
+  web_fetch: 64 * 1024,
+};
 
 export function parseArtifactUri(value: string): string | undefined {
   const trimmed = value.trim();
@@ -203,10 +211,11 @@ export function withToolOutputBudget(
         }
       }
       const result = await definition.execute(toolCallId, params, signal, onUpdate, ctx);
-      if (definition.name === 'read') return result;
+      const inlineBytes = TOOL_INLINE_BYTES[definition.name] ?? budget.maxInlineBytes;
+      if (inlineBytes === Number.POSITIVE_INFINITY) return result;
       const text = toolResultText(result);
       const originalBytes = Buffer.byteLength(text);
-      if (!text || originalBytes <= budget.maxInlineBytes) return result;
+      if (!text || originalBytes <= Math.max(inlineBytes, budget.maxInlineBytes)) return result;
       const media = result.content.filter((part) => part.type !== 'text');
       try {
         const reference = budget.write(toolCallId, text);
