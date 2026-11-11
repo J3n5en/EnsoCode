@@ -185,6 +185,7 @@ const initialState = {
   terminalShell: 'auto' as const,
   worktreeRoot: '',
   favoriteTerminalThemes: [] as string[],
+  pinnedModels: [] as string[],
   statusLineSegments: [...DEFAULT_STATUS_LINE_SEGMENTS] as StatusLineSegmentId[],
   loadLocalSkills: true,
   loadHarnessAssets: false,
@@ -378,6 +379,13 @@ export const useSettingsStore = create<SettingsState>()(
           favoriteTerminalThemes: state.favoriteTerminalThemes.includes(theme)
             ? state.favoriteTerminalThemes.filter((t) => t !== theme)
             : [...state.favoriteTerminalThemes, theme],
+        })),
+
+      togglePinnedModel: (key) =>
+        set((state) => ({
+          pinnedModels: state.pinnedModels.includes(key)
+            ? state.pinnedModels.filter((k) => k !== key)
+            : [...state.pinnedModels, key],
         })),
 
       setLoadLocalSkills: (loadLocalSkills) => set({ loadLocalSkills }),

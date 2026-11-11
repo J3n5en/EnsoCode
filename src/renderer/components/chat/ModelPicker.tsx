@@ -21,13 +21,13 @@ import { providerDisplayName } from '@/components/settings/chatgptPool';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
-import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { prefetchAccountUsage, useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useModelMeta } from '@/stores/modelMeta';
 import { formatTokens } from '@/stores/sessions/stats';
+import { useSettingsStore } from '@/stores/settings';
 import { interceptRootCascadeEscape } from './modelPickerCascadeEsc';
 import { type SessionUsageAccount, usageAccountKeyForProvider } from './sessionUsageAccount';
 
@@ -45,51 +45,8 @@ export type ModelPickerNavTarget =
   | { readonly kind: 'favorites' }
   | { readonly kind: 'vendor'; readonly vendorId: string };
 
-export const PINNED_MODELS_STORAGE_KEY = 'enso:model-picker:pinned-models';
-
 export function pinnedModelKey(providerId: string, modelId: string): string {
   return `${providerId}/${modelId}`;
-}
-
-export function parsePinnedModelKeys(raw: string | null | undefined): Set<string> {
-  if (!raw) return new Set();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return new Set();
-  }
-  if (!Array.isArray(parsed)) return new Set();
-  const keys = new Set<string>();
-  for (const item of parsed) {
-    if (typeof item === 'string' && item.length > 0) keys.add(item);
-  }
-  return keys;
-}
-
-export function togglePinnedModelKey(current: ReadonlySet<string>, key: string): Set<string> {
-  const next = new Set(current);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-  return next;
-}
-
-function readStoredPinnedModelKeys(): Set<string> {
-  try {
-    const storage = globalThis.localStorage;
-    if (!storage) return new Set();
-    return parsePinnedModelKeys(storage.getItem(PINNED_MODELS_STORAGE_KEY));
-  } catch {
-    return new Set();
-  }
-}
-
-function writeStoredPinnedModelKeys(keys: ReadonlySet<string>): void {
-  try {
-    globalThis.localStorage?.setItem(PINNED_MODELS_STORAGE_KEY, JSON.stringify([...keys]));
-  } catch {
-    // 隐私模式或 node 测试环境没有可写的 localStorage，本次内存里的收藏仍然有效。
-  }
 }
 
 function providerInGroup(
@@ -716,7 +673,9 @@ export function ModelPicker({
   const thinkingInherited = reasoningMode !== undefined && !modelCapabilityOverrides?.thinkingLevel;
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(readStoredPinnedModelKeys);
+  const pinnedModels = useSettingsStore((s) => s.pinnedModels);
+  const handleTogglePin = useSettingsStore((s) => s.togglePinnedModel);
+  const pinnedKeys = useMemo(() => new Set(pinnedModels), [pinnedModels]);
   const [activeNav, setActiveNav] = useState<ModelPickerNavTarget | null>(null);
   const [activeProviderByVendor, setActiveProviderByVendor] = useState<
     Readonly<Record<string, string>>
@@ -901,14 +860,6 @@ export function ModelPicker({
     setMetaByProvider((prev) => (prev[pid] === meta ? prev : { ...prev, [pid]: meta }));
   }, []);
 
-  const handleTogglePin = useCallback((key: string) => {
-    setPinnedKeys((current) => {
-      const next = togglePinnedModelKey(current, key);
-      writeStoredPinnedModelKeys(next);
-      return next;
-    });
-  }, []);
-
   const searching = keyword.trim().length > 0;
   const searchingRef = useRef(searching);
   searchingRef.current = searching;
@@ -1023,7 +974,6 @@ export function ModelPicker({
     visibleLevels.length > 0
       ? clampProjectThinkingLevel(thinkingLevel, visibleLevels)
       : thinkingLevel;
-  const levelIndex = Math.max(0, visibleLevels.indexOf(displayedThinkingLevel));
 
   /**
    * 归一化 effect：钳位不能只挂在 handleSelectModel 的 onClick 上，两条路径会漏掉——
@@ -1087,53 +1037,39 @@ export function ModelPicker({
       prev[vendorId] === accountId ? prev : { ...prev, [vendorId]: accountId }
     );
   };
-  const thinkingSlider =
+  const thinkingLevelsControl =
     displayedReasoningEnabled && visibleLevels.length > 0 ? (
-      <div className={cn(reasoningMode ? 'mt-2' : 'min-w-0 flex-1 px-1.5 pt-0.5')}>
-        <Slider
-          tabIndex={-1}
-          aria-label={t('Thinking level')}
-          thumbAlignment="center"
-          className="[&_[data-slot=slider-indicator]]:ms-0 [&_[data-slot=slider-track]]:before:inset-x-0"
-          min={0}
-          max={Math.max(1, visibleLevels.length - 1)}
-          step={1}
-          value={levelIndex}
-          disabled={visibleLevels.length === 1}
-          onValueChange={(value) => {
-            const index = Array.isArray(value) ? value[0] : value;
-            const target = visibleLevels[index] ?? visibleLevels[0];
-            onThinkingChange(target);
-          }}
-        />
-        <div className="relative mt-0.5 h-4">
-          {visibleLevels.map((entry, index) => (
+      <div
+        role="group"
+        aria-label={t('Thinking level')}
+        data-thinking-levels="true"
+        className={cn(
+          'inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-muted/60 p-0.5',
+          reasoningMode && 'mt-2'
+        )}
+      >
+        {visibleLevels.map((entry) => {
+          const active = entry === displayedThinkingLevel;
+          return (
             <button
               key={entry}
               type="button"
               tabIndex={-1}
               data-thinking-tick={entry}
-              style={{
-                left: `${(index / Math.max(1, visibleLevels.length - 1)) * 100}%`,
-              }}
+              aria-pressed={active}
+              disabled={visibleLevels.length === 1}
               onClick={() => onThinkingChange(entry)}
-              className="absolute top-0 flex w-0 flex-col items-center"
+              className={cn(
+                'rounded-[5px] px-2.5 py-0.5 text-[11px] leading-4 transition-all disabled:pointer-events-none',
+                active
+                  ? 'bg-background font-medium text-primary shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
             >
-              <span className="h-1 w-px shrink-0 bg-muted-foreground/40" />
-              <span
-                className={cn(
-                  'whitespace-nowrap text-[10px] leading-3 transition-colors',
-                  index === 0 ? 'self-start' : index === visibleLevels.length - 1 && 'self-end',
-                  entry === displayedThinkingLevel
-                    ? 'font-medium text-primary'
-                    : 'text-muted-foreground/70 hover:text-foreground'
-                )}
-              >
-                {t(LEVEL_LABEL_KEYS[entry])}
-              </span>
+              {t(LEVEL_LABEL_KEYS[entry])}
             </button>
-          ))}
-        </div>
+          );
+        })}
       </div>
     ) : null;
 
@@ -1184,7 +1120,7 @@ export function ModelPicker({
             <ModelMetaBridge key={provider.id} provider={provider} onData={handleMetaData} />
           ))}
 
-          <div className="-mx-1 -mt-1 mb-1 border-b px-2 py-1.5">
+          <div className="-mx-1.5 -mt-1.5 border-b px-2.5 py-1.5">
             <input
               ref={searchInputRef}
               data-model-picker="search"
@@ -1205,7 +1141,7 @@ export function ModelPicker({
 
           <div className="max-h-[268px] overflow-y-auto">
             {searching ? (
-              <>
+              <div className="py-1">
                 {virtualItems}
                 {searchHits.map(({ provider, model, entryTag, showId }) => {
                   const key = pinnedModelKey(provider.id, model.id);
@@ -1231,14 +1167,14 @@ export function ModelPicker({
                     {t('No models found')}
                   </p>
                 )}
-              </>
+              </div>
             ) : groups.length === 0 && virtualItems.length === 0 ? (
               <p className="px-1 py-4 text-center text-xs text-muted-foreground">
                 {t('No models found')}
               </p>
             ) : (
-              <div data-model-picker="workbench" className="flex h-[268px] overflow-hidden">
-                <div className="w-44 shrink-0 overflow-y-auto border-r pr-1">
+              <div data-model-picker="workbench" className="-mx-1.5 flex h-[268px] overflow-hidden">
+                <div className="w-48 shrink-0 space-y-0.5 overflow-y-auto border-r bg-muted/15 p-1.5">
                   {view.showFavoritesNav && (
                     <button
                       type="button"
@@ -1316,7 +1252,7 @@ export function ModelPicker({
                     );
                   })}
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col overflow-hidden pl-1.5">
+                <div className="flex min-w-0 flex-1 flex-col overflow-hidden p-1.5">
                   {view.activeNav.kind === 'favorites' ? (
                     <div className="min-h-0 flex-1 overflow-y-auto">
                       {virtualItems}
@@ -1433,11 +1369,18 @@ export function ModelPicker({
           </div>
 
           {showReasoningControls && (
-            <div className="-mx-1 -mb-1 mt-1 border-t px-2.5 py-1.5">
-              <div className={cn(!reasoningMode && 'flex items-center gap-4')}>
+            <div className="-mx-1.5 -mb-1.5 border-t bg-muted/15 px-3 py-1.5">
+              <div
+                className={cn(!reasoningMode && 'flex min-h-6 items-center justify-between gap-3')}
+              >
                 <div className="flex shrink-0 items-center justify-between gap-2">
-                  <span className="flex items-center gap-1 text-xs">
-                    <Brain className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-foreground/85">
+                    <Brain
+                      className={cn(
+                        'h-3.5 w-3.5',
+                        displayedReasoningEnabled ? 'text-primary' : 'text-muted-foreground'
+                      )}
+                    />
                     {t('Reasoning')}
                   </span>
                   {!reasoningMode && (
@@ -1450,7 +1393,7 @@ export function ModelPicker({
                     />
                   )}
                 </div>
-                {!reasoningMode && thinkingSlider}
+                {!reasoningMode && thinkingLevelsControl}
               </div>
               {reasoningMode && (
                 <div className="mt-2 flex gap-1" role="group" aria-label={t('Reasoning')}>
@@ -1484,7 +1427,7 @@ export function ModelPicker({
                   {t('Depth: {{level}}', { level: t(LEVEL_LABEL_KEYS[displayedThinkingLevel]) })}
                 </p>
               )}
-              {reasoningMode && thinkingSlider}
+              {reasoningMode && thinkingLevelsControl}
             </div>
           )}
         </MenuPopup>

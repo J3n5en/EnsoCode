@@ -132,6 +132,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   collapseLiveActivity: { mode: 'portable' },
   liveActivityFoldDelaySec: { mode: 'portable' },
   pinUnfinishedTodos: { mode: 'portable' },
+  pinnedModels: { mode: 'excluded', reason: 'starred keys reference device-local provider ids' },
   chatWide: { mode: 'portable' },
   navRailSide: { mode: 'portable' },
   chatTypography: { mode: 'portable' },
