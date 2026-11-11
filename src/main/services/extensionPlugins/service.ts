@@ -537,6 +537,10 @@ export class ExtensionPluginService {
         }
       }
       const icon = marketIconUrl(p.icon);
+      const screenshots = p.screenshots?.flatMap((shot) => {
+        const url = marketIconUrl(shot.url);
+        return url ? [{ url, alt: shot.alt }] : [];
+      });
       return {
         id: p.id,
         name: p.name,
@@ -545,6 +549,8 @@ export class ExtensionPluginService {
         tags: p.tags,
         ...(p.homepage ? { homepage: p.homepage } : {}),
         ...(icon ? { icon } : {}),
+        ...(p.category ? { category: p.category } : {}),
+        ...(screenshots?.length ? { screenshots } : {}),
         latest: p.latest,
         permissions: p.versions.find((v) => v.version === p.latest)?.permissions ?? [],
         ...(installed ? { installedVersion: installed } : {}),

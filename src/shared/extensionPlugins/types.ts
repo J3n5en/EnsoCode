@@ -1,4 +1,5 @@
 import type { ExtensionPluginPermission, PluginConfigType, PluginTriggerSymbol } from './manifest';
+import type { MarketCategory, MarketScreenshot } from './marketCategories';
 import type { PluginStatusItem } from './statusItems';
 
 /** 设置页、安装确认页看到的插件摘要；不含任何磁盘路径 */
@@ -82,6 +83,9 @@ export interface ExtensionPluginMarketEntry {
   homepage?: string;
   /** 已转成 Worker 代理地址 */
   icon?: string;
+  category?: MarketCategory;
+  /** 已转成 Worker 代理地址 */
+  screenshots?: MarketScreenshot[];
   latest: string;
   permissions: string[];
   installedVersion?: string;

@@ -704,7 +704,7 @@ export function EnsoPluginsSettings({
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
       <Dialog open={marketOpen} onOpenChange={setMarketOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>{t('Marketplace')}</DialogTitle>
           </DialogHeader>
@@ -715,10 +715,6 @@ export function EnsoPluginsSettings({
               onInstall={(id) => {
                 setMarketOpen(false);
                 void restage(id, true);
-              }}
-              onGuide={(id, name, homepage) => {
-                setMarketOpen(false);
-                setGuide({ id, name, from: 'market', homepage });
               }}
             />
           </DialogPanel>

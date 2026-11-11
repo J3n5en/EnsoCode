@@ -5,6 +5,12 @@ import {
   isPluginId,
   isPluginRelativePath,
 } from '@shared/extensionPlugins/manifest';
+import {
+  isMarketCategory,
+  MAX_MARKET_SCREENSHOTS,
+  type MarketCategory,
+  type MarketScreenshot,
+} from '@shared/extensionPlugins/marketCategories';
 
 export type MarketTier = 'official' | 'community';
 
@@ -25,6 +31,9 @@ export interface MarketPlugin {
   tags: string[];
   homepage?: string;
   icon?: string;
+  category?: MarketCategory;
+  /** 只收 https；客户端再转成 Worker 代理地址 */
+  screenshots?: MarketScreenshot[];
   readme?: { path: string; sha256: string; size: number };
   /** 宿主可用版本中 semver 最大者 */
   latest: string;
@@ -45,6 +54,17 @@ const strings = (v: unknown, max: number): string[] =>
   Array.isArray(v) ? v.filter((s): s is string => str(s, max)) : [];
 const optStr = (v: unknown, max: number) => (str(v, max) ? v : undefined);
 const README_MAX_BYTES = 256 * 1024;
+
+function parseScreenshots(raw: unknown): MarketScreenshot[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const shots: MarketScreenshot[] = [];
+  for (const item of raw) {
+    if (shots.length >= MAX_MARKET_SCREENSHOTS) break;
+    if (!isRecord(item) || !str(item.url, 1000) || !item.url.startsWith('https://')) continue;
+    shots.push({ url: item.url, alt: typeof item.alt === 'string' ? item.alt.slice(0, 200) : '' });
+  }
+  return shots.length > 0 ? shots : undefined;
+}
 
 function parseReadme(raw: unknown): MarketPlugin['readme'] {
   if (!isRecord(raw)) return undefined;
@@ -83,6 +103,7 @@ function parsePlugin(raw: unknown, hostVersion: string): MarketPlugin | null {
   if (versions.length === 0) return null;
   const latest = versions.reduce((a, b) => (isNewerPluginVersion(b.version, a.version) ? b : a));
   const readme = parseReadme(raw.readme);
+  const screenshots = parseScreenshots(raw.screenshots);
   return {
     id: raw.id,
     name: raw.name,
@@ -91,6 +112,8 @@ function parsePlugin(raw: unknown, hostVersion: string): MarketPlugin | null {
     tags: strings(raw.tags, 32),
     homepage: optStr(raw.homepage, 500),
     icon: optStr(raw.icon, 500),
+    ...(isMarketCategory(raw.category) ? { category: raw.category } : {}),
+    ...(screenshots ? { screenshots } : {}),
     ...(readme ? { readme } : {}),
     latest: latest.version,
     versions,
