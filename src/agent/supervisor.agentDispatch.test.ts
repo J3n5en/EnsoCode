@@ -1499,6 +1499,67 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     }
   });
 
+  it('活轮仍在产出时超过僵尸时限不失败，空闲后再按新轮发出排队消息', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.isStreaming = true;
+      let release = () => {};
+      piSession.waitForIdle = vi.fn(
+        () =>
+          new Promise<undefined>((resolve) => {
+            release = () => {
+              piSession.isStreaming = false;
+              resolve(undefined);
+            };
+          })
+      );
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+      await vi.advanceTimersByTimeAsync(4_000);
+      piSession.emit({ type: 'turn_start' });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(events.some((event) => event.type === 'turn-failed')).toBe(false);
+      expect(piSession.prompt).not.toHaveBeenCalled();
+
+      release();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(piSession.prompt).toHaveBeenCalledWith('queued', undefined);
+      expect(events.some((event) => event.type === 'turn-failed')).toBe(false);
+      await supervisor.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('误判僵尸失败后，已见 agent_end 的原轮收束会清掉失败横幅', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.isStreaming = true;
+      piSession.waitForIdle = vi.fn(() => new Promise<undefined>(() => {}));
+      piSession.emit({ type: 'agent_end', willRetry: false });
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await settle();
+      expect(events.some((event) => event.type === 'turn-failed')).toBe(true);
+
+      piSession.isStreaming = false;
+      piSession.emit({ type: 'agent_settled' });
+      await settle();
+      const failedAt = events.findIndex((event) => event.type === 'turn-failed');
+      const completedAt = events.findIndex(
+        (event, index) => index > failedAt && event.type === 'turn-completed'
+      );
+      expect(completedAt).toBeGreaterThan(failedAt);
+      const status = events.filter((event) => event.type === 'status').at(-1);
+      expect(status).toMatchObject({ status: 'idle' });
+      if (status?.type === 'status') expect(status.error).toBeUndefined();
+      await supervisor.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   async function spawnParent() {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({

@@ -489,6 +489,8 @@ interface ManagedSession {
   pendingYieldSchema?: unknown;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
   lastActivityAt: number;
+  /** 会话事件计数：排队 prompt 据此判断等待期间轮次是否还在产出（同时刻的事件也算） */
+  activityNonce: number;
   contextUsage: ContextUsageTracker;
   requestBody?: RequestBodyUsage;
   /** 已发出、待挂到下一条 assistant 消息上的脱敏报告 */
@@ -1856,13 +1858,30 @@ export class SessionSupervisor {
         }
         // 投影已 idle 但 pi 仍忙：压缩中（pi 拒收 prompt）不限时等压完；仍 streaming 要么
         // agent_end 尚未回流，要么是 abort 后工具不响应信号的僵尸轮——steer 进僵尸轮永远
-        // 无人投递，故限时等空闲后走新轮；超时按失败收口，绝不静默。
-        if (!(await waitPromptable(managed.session, ZOMBIE_TURN_WAIT_MS))) {
+        // 无人投递，故限时等空闲后走新轮。仍在产出或投影已回到 running 的不是僵尸，继续等。
+        // 超时按失败收口，绝不静默。
+        let activityAt = managed.activityNonce;
+        if (
+          !(await waitPromptable(managed.session, ZOMBIE_TURN_WAIT_MS, () => {
+            if (managed.status === 'running') return true;
+            if (managed.activityNonce > activityAt) {
+              activityAt = managed.activityNonce;
+              return true;
+            }
+            return false;
+          }))
+        ) {
+          const settlePending = managed.settlePending === true;
           this.failTurn(
             managed,
             'The previous turn is still running and could not be interrupted. Please retry, or reopen the conversation to reset the session.',
             true
           );
+          // 终态 agent_end 已经记下、轮次却还在流：不能让这次误判吃掉随后的 agent_settled，
+          // 否则失败横幅会一直盖住仍在正常收束的轮次。
+          if (settlePending && (managed.session.isStreaming || managed.session.isCompacting)) {
+            managed.settlePending = true;
+          }
           return;
         }
         this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
@@ -3525,6 +3544,7 @@ export class SessionSupervisor {
       roundWaiters: new Set(),
       coworkers: new Map(),
       lastActivityAt: Date.now(),
+      activityNonce: 0,
       contextUsage: new UsageTracker(),
       ...(opts.factory ? { factory: opts.factory } : {}),
       ...(opts.parentId ? { parentId: opts.parentId } : {}),
@@ -4326,6 +4346,7 @@ export class SessionSupervisor {
     event: Parameters<Parameters<AgentSession['subscribe']>[0]>[0]
   ): void {
     managed.lastActivityAt = Date.now();
+    managed.activityNonce += 1;
     if (event.type !== 'message_update') this.flushStreamingUpsert(managed);
     switch (event.type) {
       case 'agent_start':
@@ -5909,17 +5930,21 @@ export function waitIdleBounded(
 /**
  * 等 pi 可以起新轮；false = 僵尸轮超时。压缩不计入僵尸时限。记忆扩展在 agent_settled 后
  * 下一个宏任务才启动压缩，等过之后须让一拍再复查，否则新轮先起、随即被压缩的 abort 打断。
+ * stillLive：本窗超时后轮次仍在产出（或投影已是 running）。静默挂死才算僵尸。
  */
 export async function waitPromptable(
   session: Pick<AgentSession, 'waitForIdle' | 'isStreaming' | 'isCompacting'>,
-  zombieMs: number
+  zombieMs: number,
+  stillLive?: () => boolean
 ): Promise<boolean> {
   let waited = false;
   for (;;) {
     if (session.isCompacting) {
       await session.waitForIdle();
     } else if (session.isStreaming) {
-      if (!(await waitIdleBounded(session, zombieMs)) && !session.isCompacting) return false;
+      const idle = await waitIdleBounded(session, zombieMs);
+      // 计时器可能先于空闲回调；已经不在流式就继续复查，不能当成僵尸失败。
+      if (!idle && session.isStreaming && !session.isCompacting && !stillLive?.()) return false;
     } else if (waited) {
       waited = false;
       await new Promise((resolve) => setTimeout(resolve, 0));
