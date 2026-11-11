@@ -203,6 +203,7 @@ import { McpManager } from './mcp';
 import { partitionMcpNamespaces } from './mcpNames';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
+import { microcompactExtension } from './microcompact';
 import { installModelContextCompat } from './modelContextCompat';
 import { ParentNotifier } from './notify';
 import {
@@ -269,7 +270,6 @@ import { applyRemoteWorkingDirectory } from './ssh/posixPath';
 import { createRemoteGrepToolDefinition } from './ssh/remoteGrep';
 import { createRemoteOperations } from './ssh/remoteOperations';
 import { installStreamGuard } from './streamGuard';
-import { installStableToolOrder } from './toolOrder';
 import {
   appendYieldJson,
   parseJsonFromAssistant,
@@ -295,6 +295,7 @@ import {
 } from './titleSummary';
 import { createTodoTool, TodoStaleReminder } from './todo';
 import { decorateSessionTools } from './toolDecorators';
+import { installStableToolOrder } from './toolOrder';
 import { ToolOutputBudget } from './toolOutputBudget';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { ComputerInvoker, createComputerTool, withComputerApproval } from './tools/computer';
@@ -640,6 +641,7 @@ function createSessionResourceLoader(options: {
           }));
         },
       } satisfies InlineExtension,
+      microcompactExtension(),
       ...(options.exploreFold ? [exploreFoldExtension(options.exploreFold)] : []),
       ...(options.reminders ? [systemReminderExtension(options.reminders)] : []),
       ...(options.remoteSsh
