@@ -806,8 +806,8 @@ export function EnsoPluginsSettings({
               plugin.state === 'crashed' && 'border-destructive/50'
             )}
           >
-            <div className="flex items-center justify-between gap-3 p-3">
-              <div className="flex min-w-0 items-start gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-3">
+              <div className="flex min-w-0 flex-1 basis-56 items-start gap-3">
                 <div
                   className={cn(
                     'flex size-9 shrink-0 items-center justify-center rounded-md bg-muted',
@@ -816,7 +816,7 @@ export function EnsoPluginsSettings({
                 >
                   <PluginIcon pluginId={plugin.id} icon={plugin.icon} className="size-4" />
                 </div>
-                <div className="min-w-0 space-y-0.5">
+                <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm">
                     <span className="truncate font-medium">{plugin.name}</span>
                     <Badge variant="outline" className="text-[11px]">
@@ -902,7 +902,7 @@ export function EnsoPluginsSettings({
                   )}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-0.5">
+              <div className="ml-auto flex shrink-0 items-center gap-0.5">
                 {plugin.source && (
                   <Button
                     size="icon"

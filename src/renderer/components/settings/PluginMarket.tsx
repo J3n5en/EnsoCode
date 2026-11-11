@@ -87,8 +87,11 @@ export function PluginMarket({
   const detail = selected ? all.find((p) => p.id === selected) : undefined;
 
   return (
-    <div className="flex h-[min(72vh,720px)] min-h-0 gap-4">
-      <nav aria-label="插件分类" className="w-36 shrink-0 space-y-0.5 overflow-y-auto">
+    <div className="flex h-[min(72vh,720px)] min-h-0 flex-col gap-3 sm:flex-row sm:gap-4">
+      <nav
+        aria-label="插件分类"
+        className="flex shrink-0 gap-1 overflow-x-auto pb-1 sm:block sm:w-36 sm:space-y-0.5 sm:overflow-y-auto sm:pb-0"
+      >
         {sections.map((item) => (
           <button
             key={item.id}
@@ -99,18 +102,19 @@ export function PluginMarket({
               setSelected(null);
             }}
             className={cn(
-              'flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent',
+              'flex shrink-0 items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent sm:w-full',
               active === item.id && 'bg-accent font-medium'
             )}
           >
-            <span className="truncate">{marketSectionLabel(item.id)}</span>
+            <span className="truncate whitespace-nowrap">{marketSectionLabel(item.id)}</span>
             <span className="text-muted-foreground text-xs tabular-nums">{item.count}</span>
           </button>
         ))}
       </nav>
       <div className="flex min-w-0 flex-1 flex-col gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Input
+            className="min-w-40 flex-1"
             value={query}
             placeholder={t('Search plugins')}
             onChange={(event) => {
