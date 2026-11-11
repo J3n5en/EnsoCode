@@ -411,7 +411,7 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
     return;
   }
   if (event.type === 'turn-failed') {
-    const failed = {
+    const failed: HeadlessSessionRuntime = {
       ...runtime,
       started: true,
       status: 'failed',
@@ -421,35 +421,40 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
         ? { goal: { ...runtime.goal, status: 'paused' as const, note: event.error } }
         : {}),
     };
-    setRuntime(sessionId, failed);
-    persistRuntime(sessionId, failed);
-    pushCatalog(sessionId, failed);
+    // goal 已暂停，这里只会投用户排队的消息；没有可投的就保留 failed
+    const idle = onHeadlessIdle(failed);
+    finishTurn(sessionId, idle.deliver ? idle : { runtime: { ...idle.runtime, status: 'failed' } });
     return;
   }
   if (event.type === 'turn-completed') {
     if (event.aborted || runtime.abortRequested) {
-      const stopped = {
-        ...runtime,
-        started: true,
-        status: 'idle',
-        abortRequested: false,
-        pendingApprovals: 0,
-        pendingAsks: 0,
-      };
-      setRuntime(sessionId, stopped);
-      persistRuntime(sessionId, stopped);
-      pushCatalog(sessionId, stopped);
+      // 中止的轮不续跑 goal、不泵队列；只投「中断并发送」指定的那条
+      finishTurn(sessionId, {
+        runtime: {
+          ...runtime,
+          started: true,
+          status: 'idle',
+          abortRequested: false,
+          pendingApprovals: 0,
+          pendingAsks: 0,
+        },
+      });
       return;
     }
-    finishTurn(sessionId, { ...runtime, started: true, pendingApprovals: 0, pendingAsks: 0 });
+    finishTurn(
+      sessionId,
+      onHeadlessIdle({ ...runtime, started: true, pendingApprovals: 0, pendingAsks: 0 })
+    );
   }
 }
 
-function finishTurn(sessionId: string, runtime: HeadlessSessionRuntime): void {
+function finishTurn(
+  sessionId: string,
+  settled: { runtime: HeadlessSessionRuntime; deliver?: HeadlessDelivery }
+): void {
   const interruptId = pendingInterrupt.get(sessionId);
-  const idle = onHeadlessIdle(runtime);
-  let next = idle.runtime;
-  let delivery = idle.deliver;
+  let next = settled.runtime;
+  let delivery = settled.deliver;
   if (interruptId) {
     pendingInterrupt.delete(sessionId);
     const sent = applyHeadlessQueueAction(

@@ -180,6 +180,39 @@ describe('headless goal continuation', () => {
   });
 });
 
+describe('headless turn settle', () => {
+  const queuedId = () => (mocks.rows[SID].queuedMessages as { id: string }[])[0]?.id ?? '';
+
+  it('sends the interrupting message once the aborted turn settles', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    handlePairHeadlessAgentEvent(status('running'));
+    applyPairQueueActionHeadless({ type: 'enqueue', sessionId: SID, text: 'later' });
+    applyPairQueueActionHeadless({
+      type: 'queue-interrupt-send',
+      sessionId: SID,
+      messageId: queuedId(),
+    });
+    expect(agent.abort).toHaveBeenCalledTimes(1);
+    handlePairHeadlessAgentEvent(status('idle'));
+    handlePairHeadlessAgentEvent(event({ type: 'turn-completed', turnId: 't', aborted: true }));
+    expect((agent.prompt as Mock).mock.calls.map((call) => call[1])).toEqual(['later']);
+    expect(mocks.rows[SID].queuedMessages).toEqual([]);
+  });
+
+  it('still delivers queued messages after a failed turn without resuming the goal', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    applyPairQueueActionHeadless({ type: 'goal-set', sessionId: SID, text: 'ship it' });
+    handlePairHeadlessAgentEvent(status('running'));
+    applyPairQueueActionHeadless({ type: 'enqueue', sessionId: SID, text: 'next' });
+    (agent.prompt as Mock).mockClear();
+    handlePairHeadlessAgentEvent(event({ type: 'turn-failed', turnId: 't', error: 'boom' }));
+    expect((agent.prompt as Mock).mock.calls.map((call) => call[1])).toEqual(['next']);
+    expect(mocks.rows[SID].goal).toMatchObject({ status: 'paused', note: 'boom' });
+  });
+});
+
 describe('headless first-message title', () => {
   it('titles sessions started through the headless queue too', () => {
     fakeAgent();
