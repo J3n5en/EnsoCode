@@ -349,196 +349,188 @@ export function GitChangesView({
                 : (readError ?? 'Loading...')
           )}
         </div>
+      ) : view === 'history' ? (
+        <GitHistoryView
+          key={`${status.head}:${historyVersion}`}
+          request={request}
+          head={status.head}
+          tree={tree}
+          onToggleTree={() => setTree((value) => !value)}
+        />
       ) : (
-        <>
-          {view === 'history' ? (
-            <GitHistoryView
-              key={`${status.head}:${historyVersion}`}
-              request={request}
-              head={status.head}
-              tree={tree}
-              onToggleTree={() => setTree((value) => !value)}
-            />
-          ) : (
-            <GitPanelLayout
-              title={t('Changed files')}
-              hasSelection={selected !== null}
-              actions={
-                <GitFileViewToggle tree={tree} onToggle={() => setTree((value) => !value)} />
-              }
-              navigation={
-                <>
-                  <div className="shrink-0 px-2 pb-1.5">
-                    <InputGroup className="text-xs">
-                      <InputGroupInput
-                        ref={filterInput}
-                        size="sm"
-                        type="search"
-                        value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder={t('Filter changed files…')}
-                        aria-label={t('Filter changed files…')}
-                      />
-                      {query.length > 0 && (
-                        <InputGroupAddon align="inline-end">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            title={t('Clear')}
-                            aria-label={t('Clear')}
-                            onClick={() => {
-                              setQuery('');
-                              filterInput.current?.focus();
-                            }}
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </InputGroupAddon>
-                      )}
-                    </InputGroup>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
-                    {visibleGroups.map((group) =>
-                      group.files.length === 0 ? null : (
-                        <section key={group.id} className="mb-2 last:mb-0">
-                          <div className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-muted-foreground">
-                            <span className="min-w-0 flex-1 truncate">
-                              {group.title}{' '}
-                              <span className="ml-1 font-normal">{group.files.length}</span>
-                            </span>
-                            <GitAction
-                              title={t(group.staged ? 'Unstage all' : 'Stage all')}
-                              disabled={blocked}
-                              onClick={() =>
-                                void perform(group.staged ? 'Unstage' : 'Stage', () =>
-                                  window.electronAPI.git[group.staged ? 'unstage' : 'stage']({
-                                    ...request,
-                                    paths: group.files.map((file) => file.path),
-                                  })
-                                )
-                              }
-                            >
-                              {group.staged ? (
-                                <Minus className="size-3.5" />
-                              ) : (
-                                <Plus className="size-3.5" />
-                              )}
-                            </GitAction>
-                          </div>
-                          <GitFileList key={filter} files={group.files} tree={tree}>
-                            {(file) => (
-                              <GitFileRow
-                                file={file}
-                                showDirectory={!tree}
-                                selected={
-                                  selected?.path === file.path && selected.staged === group.staged
-                                }
-                                onSelect={() => select(file, group.staged)}
-                                actions={
-                                  <>
-                                    {!group.staged && (
-                                      <GitAction
-                                        title={t(
-                                          file.status === 'untracked'
-                                            ? 'Delete untracked file'
-                                            : 'Discard changes'
-                                        )}
-                                        disabled={blocked || file.status === 'conflicted'}
-                                        onClick={() => setDiscard(file)}
-                                      >
-                                        <Undo2 className="size-3.5" />
-                                      </GitAction>
+        <GitPanelLayout
+          title={t('Changed files')}
+          hasSelection={selected !== null}
+          actions={<GitFileViewToggle tree={tree} onToggle={() => setTree((value) => !value)} />}
+          navigation={
+            <>
+              <div className="shrink-0 px-2 pb-1.5">
+                <InputGroup className="text-xs">
+                  <InputGroupInput
+                    ref={filterInput}
+                    size="sm"
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={t('Filter changed files…')}
+                    aria-label={t('Filter changed files…')}
+                  />
+                  {query.length > 0 && (
+                    <InputGroupAddon align="inline-end">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        title={t('Clear')}
+                        aria-label={t('Clear')}
+                        onClick={() => {
+                          setQuery('');
+                          filterInput.current?.focus();
+                        }}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </InputGroupAddon>
+                  )}
+                </InputGroup>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
+                {visibleGroups.map((group) =>
+                  group.files.length === 0 ? null : (
+                    <section key={group.id} className="mb-2 last:mb-0">
+                      <div className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                        <span className="min-w-0 flex-1 truncate">
+                          {group.title}{' '}
+                          <span className="ml-1 font-normal">{group.files.length}</span>
+                        </span>
+                        <GitAction
+                          title={t(group.staged ? 'Unstage all' : 'Stage all')}
+                          disabled={blocked}
+                          onClick={() =>
+                            void perform(group.staged ? 'Unstage' : 'Stage', () =>
+                              window.electronAPI.git[group.staged ? 'unstage' : 'stage']({
+                                ...request,
+                                paths: group.files.map((file) => file.path),
+                              })
+                            )
+                          }
+                        >
+                          {group.staged ? (
+                            <Minus className="size-3.5" />
+                          ) : (
+                            <Plus className="size-3.5" />
+                          )}
+                        </GitAction>
+                      </div>
+                      <GitFileList key={filter} files={group.files} tree={tree}>
+                        {(file) => (
+                          <GitFileRow
+                            file={file}
+                            showDirectory={!tree}
+                            selected={
+                              selected?.path === file.path && selected.staged === group.staged
+                            }
+                            onSelect={() => select(file, group.staged)}
+                            actions={
+                              <>
+                                {!group.staged && (
+                                  <GitAction
+                                    title={t(
+                                      file.status === 'untracked'
+                                        ? 'Delete untracked file'
+                                        : 'Discard changes'
                                     )}
-                                    <GitAction
-                                      title={t(group.staged ? 'Unstage' : 'Stage')}
-                                      disabled={blocked}
-                                      onClick={() =>
-                                        void perform(group.staged ? 'Unstage' : 'Stage', () =>
-                                          window.electronAPI.git[
-                                            group.staged ? 'unstage' : 'stage'
-                                          ]({
-                                            ...request,
-                                            paths: [file.path],
-                                          })
-                                        )
-                                      }
-                                    >
-                                      {group.staged ? (
-                                        <Minus className="size-3.5" />
-                                      ) : (
-                                        <Plus className="size-3.5" />
-                                      )}
-                                    </GitAction>
-                                  </>
-                                }
-                              />
-                            )}
-                          </GitFileList>
-                        </section>
-                      )
-                    )}
-                    {visibleCount === 0 && (
-                      <p className="m-1 rounded-md border border-dashed px-2 py-5 text-center text-xs text-muted-foreground">
-                        {t(
-                          status.staged.length + status.unstaged.length === 0
-                            ? 'Working tree clean.'
-                            : 'No matching files.'
+                                    disabled={blocked || file.status === 'conflicted'}
+                                    onClick={() => setDiscard(file)}
+                                  >
+                                    <Undo2 className="size-3.5" />
+                                  </GitAction>
+                                )}
+                                <GitAction
+                                  title={t(group.staged ? 'Unstage' : 'Stage')}
+                                  disabled={blocked}
+                                  onClick={() =>
+                                    void perform(group.staged ? 'Unstage' : 'Stage', () =>
+                                      window.electronAPI.git[group.staged ? 'unstage' : 'stage']({
+                                        ...request,
+                                        paths: [file.path],
+                                      })
+                                    )
+                                  }
+                                >
+                                  {group.staged ? (
+                                    <Minus className="size-3.5" />
+                                  ) : (
+                                    <Plus className="size-3.5" />
+                                  )}
+                                </GitAction>
+                              </>
+                            }
+                          />
                         )}
-                      </p>
+                      </GitFileList>
+                    </section>
+                  )
+                )}
+                {visibleCount === 0 && (
+                  <p className="m-1 rounded-md border border-dashed px-2 py-5 text-center text-xs text-muted-foreground">
+                    {t(
+                      status.staged.length + status.unstaged.length === 0
+                        ? 'Working tree clean.'
+                        : 'No matching files.'
                     )}
-                  </div>
-                  <div className="flex shrink-0 items-end gap-1.5 border-t p-2">
-                    <Textarea
-                      size="sm"
-                      rows={3}
-                      value={message}
-                      aria-label={t('Commit message')}
-                      placeholder={t('Enter commit message…')}
-                      className="min-w-0 flex-1 text-xs [&_textarea]:max-h-[calc(6lh+0.5rem)] [&_textarea]:min-h-[calc(3lh+0.5rem)] [&_textarea]:resize-none [&_textarea]:overflow-auto"
-                      disabled={busy !== null}
-                      onChange={(event) => setMessage(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (
-                          (event.ctrlKey || event.metaKey) &&
-                          event.key === 'Enter' &&
-                          !event.nativeEvent.isComposing
-                        ) {
-                          event.preventDefault();
-                          commit();
-                        }
-                      }}
-                    />
-                    <Button
-                      size="xs"
-                      className="mb-0.5 shrink-0"
-                      title={t('{{count}} staged files', { count: status.staged.length })}
-                      aria-label={t('Commit')}
-                      disabled={!canCommit}
-                      onClick={commit}
-                    >
-                      <GitCommitHorizontal className="size-3.5" />
-                      {t('Commit')}
-                      {status.staged.length > 0 && (
-                        <span className="font-mono text-[11px]">{status.staged.length}</span>
-                      )}
-                    </Button>
-                  </div>
-                </>
-              }
-            >
-              {selected && (
-                <div
-                  className="shrink-0 truncate border-b px-3 py-1 text-[11px] text-muted-foreground"
-                  title={selected.path}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-end gap-1.5 border-t p-2">
+                <Textarea
+                  size="sm"
+                  rows={3}
+                  value={message}
+                  aria-label={t('Commit message')}
+                  placeholder={t('Enter commit message…')}
+                  className="min-w-0 flex-1 text-xs [&_textarea]:max-h-[calc(6lh+0.5rem)] [&_textarea]:min-h-[calc(3lh+0.5rem)] [&_textarea]:resize-none [&_textarea]:overflow-auto"
+                  disabled={busy !== null}
+                  onChange={(event) => setMessage(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      (event.ctrlKey || event.metaKey) &&
+                      event.key === 'Enter' &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
+                      commit();
+                    }
+                  }}
+                />
+                <Button
+                  size="xs"
+                  className="mb-0.5 shrink-0"
+                  title={t('{{count}} staged files', { count: status.staged.length })}
+                  aria-label={t('Commit')}
+                  disabled={!canCommit}
+                  onClick={commit}
                 >
-                  {t(selected.staged ? 'Staged changes' : 'Unstaged changes')} · {selected.path}
-                </div>
-              )}
-              <GitDiffPreview result={diff} loading={selected !== null && diffLoading} />
-            </GitPanelLayout>
+                  <GitCommitHorizontal className="size-3.5" />
+                  {t('Commit')}
+                  {status.staged.length > 0 && (
+                    <span className="font-mono text-[11px]">{status.staged.length}</span>
+                  )}
+                </Button>
+              </div>
+            </>
+          }
+        >
+          {selected && (
+            <div
+              className="shrink-0 truncate border-b px-3 py-1 text-[11px] text-muted-foreground"
+              title={selected.path}
+            >
+              {t(selected.staged ? 'Staged changes' : 'Unstaged changes')} · {selected.path}
+            </div>
           )}
-        </>
+          <GitDiffPreview result={diff} loading={selected !== null && diffLoading} />
+        </GitPanelLayout>
       )}
       <ConfirmDialog
         open={discard !== null && !blocked}
