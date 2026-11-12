@@ -7,6 +7,12 @@ import type {
   MemoryStats,
 } from '@shared/memory/dto';
 import { MEMORY_MODEL_IDLE_MINUTES } from '@shared/memory/modelIdle';
+import {
+  NO_REMOTE_EMBEDDING_CANDIDATES,
+  remoteEmbeddingCandidates,
+  remoteEmbeddingIssue,
+  remoteEmbeddingIssueMessage,
+} from '@shared/memory/remoteEmbedding';
 import * as React from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Badge } from '@/components/ui/badge';
@@ -197,6 +203,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const setModelIdleMinutes = useSettingsStore((state) => state.setMemoryModelIdleMinutes);
   const remoteProviderId = useSettingsStore((state) => state.memoryEmbeddingRemoteProviderId);
   const setRemoteProviderId = useSettingsStore((state) => state.setMemoryEmbeddingRemoteProviderId);
+  const settingsProviders = useSettingsStore((state) => state.providers);
   const distillEnabled = useSettingsStore((state) => state.memoryDistillEnabled);
   const setDistillEnabled = useSettingsStore((state) => state.setMemoryDistillEnabled);
   const kgEnabled = useSettingsStore((state) => state.memoryKgEnabled);
@@ -215,12 +222,36 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     (entry) => entry.id === distillModel?.modelId
   );
   const remoteEmbeddingModel = remoteEmbeddingModelId(embeddingModel);
+  const embeddingCandidates = React.useMemo(
+    () => remoteEmbeddingCandidates(modelCandidates),
+    [modelCandidates]
+  );
   const embeddingProvider = remoteProviderId
-    ? modelCandidates.find((entry) => entry.id === remoteProviderId)
+    ? embeddingCandidates.find((entry) => entry.id === remoteProviderId)
     : undefined;
   const embeddingRemoteEntry = embeddingProvider?.models.find(
     (entry) => entry.id === remoteEmbeddingModel
   );
+  // 与 Main 校验同口径：已保存的选择若注定失败，就地说明原因；未选时由 picker 的空态引导
+  const savedRemoteProvider = remoteProviderId
+    ? settingsProviders.find((entry) => entry.id === remoteProviderId)
+    : undefined;
+  const savedRemoteIssue = remoteEmbeddingIssue({
+    providerId: remoteProviderId,
+    provider: savedRemoteProvider,
+    modelId: remoteEmbeddingModel,
+  });
+  const remoteIssueText =
+    savedRemoteIssue && savedRemoteIssue !== 'no-provider' && savedRemoteIssue !== 'no-model'
+      ? remoteEmbeddingIssueMessage(
+          savedRemoteIssue,
+          {
+            provider: savedRemoteProvider?.name || remoteProviderId || '',
+            model: remoteEmbeddingModel ?? '',
+          },
+          t
+        )
+      : null;
 
   const memoryEnabled = !disabledBuiltinTools.includes('memory');
   const [stats, setStats] = React.useState<MemoryStats | null>(null);
@@ -549,10 +580,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 {t('Credentials stay in the main process and are never sent to the renderer.')}
               </p>
             </div>
-            {modelCandidates.length > 0 && (
+            {embeddingCandidates.length > 0 ? (
               <div className="w-56 shrink-0">
                 <ModelPicker
-                  providers={modelCandidates}
+                  providers={embeddingCandidates}
                   providerId={embeddingProvider?.id ?? remoteProviderId ?? ''}
                   modelId={embeddingRemoteEntry?.id ?? remoteEmbeddingModel ?? ''}
                   reasoningEnabled={false}
@@ -569,8 +600,17 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                   onThinkingChange={() => {}}
                 />
               </div>
+            ) : (
+              <p className="w-56 shrink-0 text-xs text-destructive">
+                {t(NO_REMOTE_EMBEDDING_CANDIDATES)}
+              </p>
             )}
           </div>
+        )}
+        {showRemotePicker && remoteIssueText && (
+          <p className="text-xs text-destructive" data-settings-row="memory.remoteModelIssue">
+            {remoteIssueText}
+          </p>
         )}
 
         <SwitchRow

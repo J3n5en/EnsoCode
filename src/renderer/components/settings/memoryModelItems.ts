@@ -1,7 +1,8 @@
 import type { EmbeddingModelDto } from '@shared/memory/dto';
+import { REMOTE_EMBEDDING_SENTINEL_MODEL } from '@shared/memory/remoteEmbedding';
 
 /** 第一列「远程」选项；具体模型写在 `remote:<model>` 里，这个 id 表示还没选。 */
-export const REMOTE_EMBEDDING_BACKEND_ID = 'remote:openai-compatible';
+export const REMOTE_EMBEDDING_BACKEND_ID = `remote:${REMOTE_EMBEDDING_SENTINEL_MODEL}`;
 const REMOTE_PREFIX = 'remote:';
 
 /** 下拉标签：注册表 id 去掉 local:/remote: 前缀；none 要说清是「只用全文检索」 */
