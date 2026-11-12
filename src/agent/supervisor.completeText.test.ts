@@ -380,4 +380,33 @@ describe('SessionSupervisor.completeText：连通性探测允许没有正文', (
       },
     ]);
   });
+
+  it('候选模型配了推理开启时，辅助补全也带推理档位，不以 off 发送', async () => {
+    mocks.completeSimple.mockResolvedValueOnce(text('ok'));
+    supervisor.handleCommand({
+      type: 'complete-text',
+      requestId: 'label-1',
+      systemPrompt: 'sys',
+      userText: 'hi',
+      candidates: [{ ...candidate('reasoner'), reasoning: 'on' as const }],
+      timeoutMs: 1_000,
+      reasoning: 'off',
+    });
+    await flush();
+    expect(mocks.completeSimple.mock.calls[0]?.[2]).toMatchObject({ reasoning: 'medium' });
+  });
+
+  it('候选模型没配推理时不注入推理档位', async () => {
+    mocks.completeSimple.mockResolvedValueOnce(text('ok'));
+    supervisor.handleCommand({
+      type: 'complete-text',
+      requestId: 'label-2',
+      systemPrompt: 'sys',
+      userText: 'hi',
+      candidates: [candidate('plain')],
+      timeoutMs: 1_000,
+    });
+    await flush();
+    expect(mocks.completeSimple.mock.calls[0]?.[2]).not.toHaveProperty('reasoning');
+  });
 });
