@@ -74,5 +74,9 @@ jobs:
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # gha 有 10GB 配额，mode=max 会把 pnpm/go 中间层写满。读取仍认 gha（过渡期命中旧缓存），写入改到 GHCR。
+          # image 已在上一步把 owner 转成小写。registry 缓存首次不存在时忽略错误。
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,ignore-error=true
+          cache-to: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,mode=max
