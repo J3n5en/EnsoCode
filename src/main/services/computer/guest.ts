@@ -120,23 +120,26 @@ function pointInside(window: ComputerWindowInfo, point: { x: number; y: number }
   );
 }
 
-/**
- * ComputerWindowInfo 没有 ownerPid。进程身份是 pid（macOS 的 owner pid 就写在这里）；
- * 两边都有 pid 时按进程比较，否则退回 app 名。
- */
+/** 进程身份是 pid（macOS 的 owner pid）；任一边缺 pid 就不算同进程，同名 App 可能是别的进程。 */
 function sameProcessWindow(target: ComputerWindowInfo, top: ComputerWindowInfo): boolean {
-  if (typeof target.pid === 'number' && typeof top.pid === 'number') return target.pid === top.pid;
-  return target.app !== '' && target.app === top.app;
+  return typeof target.pid === 'number' && target.pid === top.pid;
 }
 
-/** 目标不在列表或宽高为 0 时无法判断，不拦。只有落在窗外，或被别的进程的窗口盖住，才拒绝。 */
+/**
+ * 原生窗口列表不可用时（回退列表全是 0×0）没有几何信息，跳过检查。
+ * 否则落点须在目标上，或被同一进程的弹层 / sheet 覆盖；目标缺失、0×0、落窗外、被别的进程盖住都拒绝。
+ */
 function foregroundPointBlocked(
   windows: ComputerWindowInfo[],
   targetId: string,
   point: { x: number; y: number }
 ): boolean {
+  if (windows.length > 0 && windows.every((item) => item.width <= 0 || item.height <= 0)) {
+    return false;
+  }
   const placement = pointerPlacement(windows, targetId, point);
-  if (!placement || placement.exposed) return false;
+  if (!placement) return true;
+  if (placement.exposed) return false;
   const target = windows.find((item) => item.id === targetId);
   const top = windows.find((item) => pointInside(item, point));
   if (target && top && sameProcessWindow(target, top)) return false;

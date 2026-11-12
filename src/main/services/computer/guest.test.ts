@@ -843,18 +843,20 @@ describe('投递方式与桌面接管', () => {
     expect(backend.clicks).toEqual([{ target: 'w1', x: 20, y: 20, delivery: 'foreground' }]);
   });
 
-  it('没有 pid 时按 app 名把同 App 弹层当成自己人', async () => {
+  it('缺 pid 时不按 app 名放行：同名不同进程无法区分', async () => {
     const backend = new FakeDesktopBackend();
     const target = { ...backend.windowsList[0], pid: undefined };
     backend.windowsList = [
       { id: 'sheet', app: 'Safari', title: '', x: 0, y: 0, width: 80, height: 80 },
       target,
     ];
-    await runWith(
-      `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
-      backend
-    );
-    expect(backend.clicks).toHaveLength(1);
+    await expect(
+      runWith(
+        `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+        backend
+      )
+    ).rejects.toThrow(/not on window 'w1'/);
+    expect(backend.clicks).toEqual([]);
   });
 
   it('同名 App 但是另一个进程盖住落点时不发送', async () => {
@@ -872,10 +874,10 @@ describe('投递方式与桌面接管', () => {
     expect(backend.clicks).toEqual([]);
   });
 
-  it('目标窗口是 0×0 时跳过落点检查，前台点击照样发送', async () => {
+  it('原生窗口列表不可用（所有窗口都没有几何信息）时跳过落点检查', async () => {
     const backend = new FakeDesktopBackend();
     backend.windowsList = [
-      { id: 'float', app: 'WeChat', title: '', pid: 2, x: 0, y: 0, width: 80, height: 80 },
+      { id: 'float', app: 'WeChat', title: '', x: 0, y: 0, width: 0, height: 0 },
       { ...backend.windowsList[0], width: 0, height: 0, focused: true },
     ];
     await runWith(
@@ -885,7 +887,22 @@ describe('投递方式与桌面接管', () => {
     expect(backend.clicks).toHaveLength(1);
   });
 
-  it('落点检查时目标已不在窗口列表里则跳过，不把前台点击整批拒绝', async () => {
+  it('只有目标是 0×0、别的窗口有几何信息时无法确认落点，不发送', async () => {
+    const backend = new FakeDesktopBackend();
+    backend.windowsList = [
+      { id: 'float', app: 'WeChat', title: '', pid: 2, x: 0, y: 0, width: 80, height: 80 },
+      { ...backend.windowsList[0], width: 0, height: 0, focused: true },
+    ];
+    await expect(
+      runWith(
+        `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+        backend
+      )
+    ).rejects.toThrow(/not on window 'w1'/);
+    expect(backend.clicks).toEqual([]);
+  });
+
+  it('落点检查时目标已不在窗口列表里则不发送，免得点到窗口关闭后露出的 App', async () => {
     const backend = new FakeDesktopBackend();
     let listings = 0;
     const read = backend.windows.bind(backend);
@@ -895,12 +912,14 @@ describe('投递方式与桌面接管', () => {
       const list = await read();
       return listings >= 5 ? list.filter((item) => item.id !== 'w1') : list;
     };
-    await runWith(
-      `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
-      backend
-    );
+    await expect(
+      runWith(
+        `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+        backend
+      )
+    ).rejects.toThrow(/not on window 'w1'/);
     expect(listings).toBeGreaterThanOrEqual(5);
-    expect(backend.clicks).toHaveLength(1);
+    expect(backend.clicks).toEqual([]);
   });
 
   it('raise 会抢前台，算接管', async () => {
