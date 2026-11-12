@@ -402,7 +402,6 @@ export class PluginHostGate {
       }
       case 'ui.viewEvent': {
         permit('ui.view');
-        invocation();
         if (typeof a.name !== 'string' || !VIEW_EVENT_NAME.test(a.name))
           throw pluginError('INVALID_ARGS', 'name 不合法');
         let encoded: string;

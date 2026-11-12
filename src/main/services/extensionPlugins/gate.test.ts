@@ -455,6 +455,17 @@ describe('PluginHostGate', () => {
     expect(viewEvent).toHaveBeenCalledWith('a.b', 'snapshot', { n: 1 });
   });
 
+  it('常驻进程不在宿主调用里也能推侧栏事件', async () => {
+    const viewEvent = vi.fn();
+    deps.viewEvent = viewEvent;
+    deps.manifest = (id) => (id === 'a.b' ? manifest({ permissions: ['ui.view'] }) : null);
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.viewEvent', { name: 'inbox', data: { at: 1 } }, undefined)
+    ).resolves.toBeNull();
+    expect(viewEvent).toHaveBeenCalledWith('a.b', 'inbox', { at: 1 });
+  });
+
   it('没有 ui.view、名字不合法或数据过大时拒绝侧栏事件', async () => {
     deps.viewEvent = vi.fn();
     gate = new PluginHostGate(deps);
