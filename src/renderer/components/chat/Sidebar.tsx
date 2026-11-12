@@ -493,15 +493,16 @@ export function Sidebar({
     groupId?: string;
   }) => {
     if (!request.sshConnectionId) {
-      void importLocalProject(request.path, request.groupId ?? defaultGroupId).catch(
-        (error: unknown) => {
-          addToast({
-            type: 'error',
-            title: t('Failed to add project'),
-            description: error instanceof Error ? error.message : String(error),
-          });
-        }
-      );
+      void importLocalProject(request.path, {
+        groupId: request.groupId ?? defaultGroupId,
+        onSelect: selectConversation,
+      }).catch((error: unknown) => {
+        addToast({
+          type: 'error',
+          title: t('Failed to add project'),
+          description: error instanceof Error ? error.message : String(error),
+        });
+      });
       return;
     }
     const knownIds = new Set(projects.map((project) => project.id));

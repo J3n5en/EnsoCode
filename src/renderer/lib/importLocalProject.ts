@@ -1,5 +1,5 @@
 import type { Project } from '@shared/types';
-import { projectImportFollowUp } from '@/lib/projectDrop';
+import { type ProjectImportFocus, projectImportFollowUp } from '@/lib/projectDrop';
 import { useSessionsStore } from '@/stores/sessions';
 import { projectConversationIds } from '@/stores/sessions/pinned';
 import { useSettingsStore } from '@/stores/settings';
@@ -57,11 +57,21 @@ export function isNotDirectoryError(error: unknown): boolean {
   return /not a directory/i.test(message);
 }
 
-/** 复用 addProject 权威链路，收尾与 Sidebar handleAddProject 一致。 */
-export async function importLocalProject(
+let importChain: Promise<void> = Promise.resolve();
+
+/** Dock 打开与拖入添加共用一条串行链，避免并发导入各自新建会话。 */
+export function enqueueProjectImport(task: () => Promise<void>): Promise<void> {
+  importChain = importChain.then(task).catch(() => undefined);
+  return importChain;
+}
+
+export type LocalProjectImport = { project: Project; focus: ProjectImportFocus };
+
+/** 复用 addProject 权威链路并解归档/展开，不切会话；批量导入由调用方只聚焦最后一个。 */
+export async function addLocalProject(
   path: string,
   groupId?: string
-): Promise<Project | undefined> {
+): Promise<LocalProjectImport | undefined> {
   const settings = useSettingsStore.getState();
   const knownIds = new Set(settings.projects.map((project) => project.id));
   const project = await settings.addProject(path, undefined, groupId ?? currentDefaultGroupId());
@@ -84,10 +94,31 @@ export async function importLocalProject(
   if (JSON.stringify(readCollapsedProjects()) !== JSON.stringify(follow.collapsed)) {
     writeCollapsedProjects(follow.collapsed);
   }
-  if (follow.focus.kind === 'select') {
-    await sessions.selectConversation(follow.focus.conversationId);
-  } else {
-    await sessions.newConversation(project.id);
+  return { project, focus: follow.focus };
+}
+
+export type SelectConversation = (conversationId: string) => unknown;
+
+export async function focusImportedProject(
+  imported: LocalProjectImport,
+  onSelect?: SelectConversation
+): Promise<void> {
+  const sessions = useSessionsStore.getState();
+  if (imported.focus.kind === 'select') {
+    await (onSelect ?? sessions.selectConversation)(imported.focus.conversationId);
+    return;
   }
-  return project;
+  const id = await sessions.newConversation(imported.project.id);
+  if (!id) throw new Error('Failed to create a conversation for the project.');
+}
+
+/** 收尾与 Sidebar handleAddProject 一致；onSelect 传 Sidebar 封装以触发 onNavigate。 */
+export async function importLocalProject(
+  path: string,
+  options: { groupId?: string; onSelect?: SelectConversation } = {}
+): Promise<Project | undefined> {
+  const imported = await addLocalProject(path, options.groupId);
+  if (!imported) return undefined;
+  await focusImportedProject(imported, options.onSelect);
+  return imported.project;
 }

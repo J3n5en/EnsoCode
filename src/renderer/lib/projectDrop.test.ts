@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createDropHighlightTracker,
+  DROP_HIGHLIGHT_WATCHDOG_MS,
   pickDroppedDirectories,
   projectImportFollowUp,
-  shouldOfferProjectDrop,
+  shouldAcceptProjectDrop,
 } from './projectDrop';
 
 describe('pickDroppedDirectories', () => {
@@ -65,46 +67,83 @@ describe('pickDroppedDirectories', () => {
   });
 });
 
-describe('shouldOfferProjectDrop', () => {
-  it('ignores drags that are not OS files', () => {
-    expect(shouldOfferProjectDrop({ types: ['text/plain'] })).toBe(false);
-  });
-
-  it('offers overlay when Files are present and entries cannot be inspected', () => {
-    expect(shouldOfferProjectDrop({ types: ['Files'] })).toBe(true);
-  });
-
-  it('does not steal file-only drops meant for the composer', () => {
+describe('shouldAcceptProjectDrop', () => {
+  it('leaves file-only drops to the composer even while the highlight is on', () => {
+    const tracker = createDropHighlightTracker(() => undefined);
+    tracker.enter(true);
     expect(
-      shouldOfferProjectDrop({
+      shouldAcceptProjectDrop({
         types: ['Files'],
-        items: [
-          { kind: 'file', isDirectory: false },
-          { kind: 'file', isDirectory: false },
-        ],
+        entries: [{ isDirectory: false }, { isDirectory: false }],
       })
     ).toBe(false);
+    tracker.dispose();
   });
 
-  it('offers overlay when at least one dropped item is a directory', () => {
+  it('takes over when the drop contains a directory', () => {
     expect(
-      shouldOfferProjectDrop({
+      shouldAcceptProjectDrop({
         types: ['Files'],
-        items: [
-          { kind: 'file', isDirectory: false },
-          { kind: 'file', isDirectory: true },
-        ],
+        entries: [{ isDirectory: false }, { isDirectory: true }],
       })
     ).toBe(true);
   });
 
-  it('offers overlay when file items exist but directory flags are unknown', () => {
+  it('ignores drags that are not OS files', () => {
     expect(
-      shouldOfferProjectDrop({
-        types: ['Files'],
-        items: [{ kind: 'file' }, { kind: 'file' }],
-      })
-    ).toBe(true);
+      shouldAcceptProjectDrop({ types: ['text/plain'], entries: [{ isDirectory: true }] })
+    ).toBe(false);
+  });
+});
+
+describe('createDropHighlightTracker', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function track() {
+    const states: boolean[] = [];
+    const tracker = createDropHighlightTracker((active) => states.push(active));
+    return { tracker, states, active: () => states.at(-1) === true };
+  }
+
+  it('resets on Escape inside the window even though leave never reached depth 0', () => {
+    const { tracker, active } = track();
+    tracker.enter(true);
+    tracker.enter(true);
+    tracker.leave();
+    expect(active()).toBe(true);
+    tracker.cancel();
+    expect(active()).toBe(false);
+  });
+
+  it('resets when dragover stops arriving (drag pulled out along the edge)', () => {
+    const { tracker, active } = track();
+    tracker.enter(true);
+    tracker.enter(true);
+    tracker.leave();
+    vi.advanceTimersByTime(DROP_HIGHLIGHT_WATCHDOG_MS - 1);
+    tracker.over(true);
+    vi.advanceTimersByTime(DROP_HIGHLIGHT_WATCHDOG_MS - 1);
+    expect(active()).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(active()).toBe(false);
+  });
+
+  it('resets as soon as enter/leave depth returns to 0', () => {
+    const { tracker, active } = track();
+    tracker.enter(true);
+    tracker.enter(true);
+    tracker.leave();
+    tracker.leave();
+    expect(active()).toBe(false);
+  });
+
+  it('never highlights for non-file drags', () => {
+    const { tracker, states } = track();
+    tracker.enter(false);
+    tracker.over(false);
+    tracker.leave();
+    expect(states).toEqual([]);
   });
 });
 

@@ -1,18 +1,22 @@
 import { FolderPlus } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { addToast } from '@/components/ui/toast';
 import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { type TFunction, useI18n } from '@/i18n';
 import {
-  importLocalProject,
+  addLocalProject,
+  enqueueProjectImport,
+  focusImportedProject,
   isNotDirectoryError,
   isSkippableProjectPathError,
+  type LocalProjectImport,
 } from '@/lib/importLocalProject';
 import {
+  createDropHighlightTracker,
   type DroppedPath,
-  type ProjectDropItemHint,
+  MAX_DROPPED_PROJECTS,
   pickDroppedDirectories,
-  shouldOfferProjectDrop,
+  shouldAcceptProjectDrop,
 } from '@/lib/projectDrop';
 import { Z_INDEX } from '@/lib/z-index';
 import { showLocalCodeView } from '@/stores/bots/mode';
@@ -23,21 +27,6 @@ function pathForDroppedFile(file: File): string {
   } catch {
     return '';
   }
-}
-
-function dropItemHints(event: DragEvent): ProjectDropItemHint[] | undefined {
-  const items = event.dataTransfer?.items;
-  if (!items?.length) return undefined;
-  const hints: ProjectDropItemHint[] = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    const entry = item.webkitGetAsEntry?.();
-    hints.push({
-      kind: item.kind,
-      ...(entry ? { isDirectory: entry.isDirectory } : {}),
-    });
-  }
-  return hints;
 }
 
 function readDroppedPaths(event: DragEvent): DroppedPath[] {
@@ -64,14 +53,13 @@ function readDroppedPaths(event: DragEvent): DroppedPath[] {
   }));
 }
 
-async function importDroppedFolders(event: DragEvent, t: TFunction): Promise<void> {
-  const picked = pickDroppedDirectories(readDroppedPaths(event));
+async function importDroppedFolders(rows: readonly DroppedPath[], t: TFunction): Promise<void> {
+  const picked = pickDroppedDirectories(rows);
   let skippedFiles = picked.skippedFiles;
-  let imported = 0;
+  let last: LocalProjectImport | undefined;
   for (const path of picked.directories) {
     try {
-      const project = await importLocalProject(path);
-      if (project) imported += 1;
+      last = (await addLocalProject(path)) ?? last;
     } catch (error) {
       if (isNotDirectoryError(error)) {
         skippedFiles += 1;
@@ -85,12 +73,29 @@ async function importDroppedFolders(event: DragEvent, t: TFunction): Promise<voi
       });
     }
   }
-  if (imported > 0) showLocalCodeView();
+  if (last) {
+    try {
+      await focusImportedProject(last);
+      showLocalCodeView();
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: t('Failed to add project'),
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (picked.directories.length === 0 && skippedFiles === 0) {
+    addToast({ type: 'error', title: t('Could not read the path of the dropped folder') });
+  }
   if (skippedFiles > 0) {
     addToast({ type: 'info', title: t('Only folders can be added as projects') });
   }
   if (picked.truncated) {
-    addToast({ type: 'info', title: t('Only the first 10 folders were added') });
+    addToast({
+      type: 'info',
+      title: t('Only the first {{count}} folders were added', { count: MAX_DROPPED_PROJECTS }),
+    });
   }
 }
 
@@ -98,77 +103,67 @@ async function importDroppedFolders(event: DragEvent, t: TFunction): Promise<voi
 export function ProjectDropOverlay(): ReactNode {
   const { t } = useI18n();
   const [active, setActive] = useState(false);
-  const activeRef = useRef(false);
-  const depthRef = useRef(0);
   useOverlayGuard(active);
-
-  useEffect(() => {
-    activeRef.current = active;
-  }, [active]);
 
   useEffect(() => {
     if (window.electronAPI.remote) return;
 
+    const tracker = createDropHighlightTracker(setActive);
     const typesOf = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []);
-    const offered = (event: DragEvent) =>
-      shouldOfferProjectDrop({ types: typesOf(event), items: dropItemHints(event) });
+    const hasFiles = (event: DragEvent) => typesOf(event).includes('Files');
 
-    const reset = () => {
-      depthRef.current = 0;
-      setActive(false);
-    };
-
+    // dragenter/dragover 读不到 entry，只高亮、不拦截；preventDefault 仅为放行 drop。
     const onEnter = (event: DragEvent) => {
-      if (!offered(event) && !activeRef.current) return;
+      if (!hasFiles(event)) return;
       event.preventDefault();
-      depthRef.current += 1;
-      if (!activeRef.current) setActive(true);
+      tracker.enter(true);
     };
     const onOver = (event: DragEvent) => {
-      if (!offered(event) && !activeRef.current) return;
+      if (!hasFiles(event)) return;
       event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      tracker.over(true);
     };
-    const onLeave = (event: DragEvent) => {
-      if (!activeRef.current && !typesOf(event).includes('Files')) return;
-      depthRef.current = Math.max(0, depthRef.current - 1);
-      if (depthRef.current > 0) return;
-      const { clientX, clientY } = event;
-      if (
-        clientX > 0 &&
-        clientY > 0 &&
-        clientX < window.innerWidth &&
-        clientY < window.innerHeight
-      ) {
-        return;
-      }
-      reset();
+    const onLeave = () => tracker.leave();
+    const onCancel = () => tracker.cancel();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') tracker.cancel();
     };
     const onDrop = (event: DragEvent) => {
-      const accept = offered(event) || activeRef.current;
-      reset();
-      if (!accept) return;
+      tracker.cancel();
+      if (!hasFiles(event)) return;
+      // 不接管时也要 preventDefault：主窗口没有 will-navigate 拦截，否则会跳到 file://。
       event.preventDefault();
+      const rows = readDroppedPaths(event);
+      if (!shouldAcceptProjectDrop({ types: typesOf(event), entries: rows })) return;
       event.stopPropagation();
-      void importDroppedFolders(event, t);
+      // drop 不再下发，补一个 dragleave 让沿途拖放区（如 Composer）撤掉自身高亮。
+      event.target?.dispatchEvent(new DragEvent('dragleave', { bubbles: true }));
+      void enqueueProjectImport(() => importDroppedFolders(rows, t));
     };
 
     window.addEventListener('dragenter', onEnter, true);
     window.addEventListener('dragover', onOver, true);
     window.addEventListener('dragleave', onLeave, true);
     window.addEventListener('drop', onDrop, true);
+    window.addEventListener('dragend', onCancel, true);
+    window.addEventListener('blur', onCancel);
+    window.addEventListener('keydown', onKey, true);
     return () => {
       window.removeEventListener('dragenter', onEnter, true);
       window.removeEventListener('dragover', onOver, true);
       window.removeEventListener('dragleave', onLeave, true);
       window.removeEventListener('drop', onDrop, true);
+      window.removeEventListener('dragend', onCancel, true);
+      window.removeEventListener('blur', onCancel);
+      window.removeEventListener('keydown', onKey, true);
+      tracker.dispose();
     };
   }, [t]);
 
   if (!active) return null;
   return (
     <div
-      className="pointer-events-auto fixed inset-0 flex items-center justify-center bg-background/70 backdrop-blur-[2px]"
+      className="pointer-events-none fixed inset-0 flex items-center justify-center bg-background/70 backdrop-blur-[2px]"
       style={{ zIndex: Z_INDEX.MODAL_BACKDROP }}
     >
       <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card px-8 py-6 text-card-foreground shadow-lg">
