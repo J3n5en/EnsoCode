@@ -650,9 +650,9 @@ export class ExtensionPluginService {
         if (available && !isNewerPluginVersion(available, manifest.version))
           this.updates.delete(existing.id);
         if (!expands) {
-          this.stopProcess(existing.id);
+          await this.stopProcessAndWait(existing.id);
           removePackage(this.options.root, existing.id, oldDir);
-          // 换版停掉了旧进程：按新清单重新拉起常驻进程、重排定时任务（与 approvePending 一致）
+          // 旧进程退出后再拉起，避免优雅退出期间双实例，且旧目录已被删掉
           this.syncBackground();
         } else {
           this.emitNotice({
@@ -763,7 +763,7 @@ export class ExtensionPluginService {
       if (result.ok && oldDir) {
         this.prepareFailed.delete(id);
         this.invalidatePackageCache(id);
-        this.stopProcess(id);
+        await this.stopProcessAndWait(id);
         removePackage(this.options.root, id, oldDir);
         this.syncBackground();
       }
@@ -1973,6 +1973,13 @@ export class ExtensionPluginService {
     this.processes.get(id)?.stop();
     this.processes.delete(id);
     if (this.dynamic.clear(id)) this.touch();
+  }
+
+  /** 从表里拿掉后一直等到进程退出。stop 只是开始优雅退出，最长约 3 秒。 */
+  private async stopProcessAndWait(id: string): Promise<void> {
+    const stopping = this.processes.get(id);
+    this.stopProcess(id);
+    await stopping?.whenStopped();
   }
 
   private touch(): void {

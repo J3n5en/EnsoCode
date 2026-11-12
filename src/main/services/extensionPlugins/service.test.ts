@@ -1096,6 +1096,89 @@ describe('插件运行期收敛', () => {
     expect(residentForks).toBe(before + 1);
   });
 
+  it('更新常驻插件时等旧进程真正退出再拉起新进程', async () => {
+    const dir = temp('resident-swap-');
+    const events: string[] = [];
+    let seq = 0;
+    class SlowExitChild extends EventEmitter {
+      pid = ++seq;
+      private exited = false;
+      constructor() {
+        super();
+        events.push(`fork:${this.pid}`);
+        queueMicrotask(() => this.emit('spawn'));
+      }
+      postMessage(message: unknown) {
+        const kind =
+          typeof message === 'object' && message !== null && 't' in message
+            ? String((message as { t?: unknown }).t)
+            : '';
+        queueMicrotask(() => {
+          if (kind === 'init') {
+            this.emit('message', {
+              t: 'ready',
+              registered: { tools: [], commands: [], triggers: [], rendererMethods: [] },
+            });
+          }
+          if (kind === 'shutdown') {
+            events.push(`shutdown:${this.pid}`);
+            setTimeout(() => {
+              if (this.exited) return;
+              this.exited = true;
+              events.push(`exit:${this.pid}`);
+              this.emit('exit', 0);
+            }, 40);
+          }
+        });
+      }
+      kill() {
+        return true;
+      }
+    }
+    const svc = bootService(dir, () => new SlowExitChild() as never);
+    const resident = {
+      id: 'example.resident',
+      name: 'Resident',
+      resident: true,
+      permissions: ['process.background'],
+      contributes: {},
+    };
+    try {
+      await stageCommit(svc, {
+        'enso-plugin.json': manifest(resident),
+        'main.mjs': 'export function activate() {}',
+      });
+      await svc.setEnabled('example.resident', true);
+      svc.startBackground();
+      await vi.waitFor(() => expect(svc.hasRunningPlugins()).toBe(true));
+      const live = seq;
+      const mark = events.length;
+      const updating = stageCommit(svc, {
+        'enso-plugin.json': manifest({ ...resident, version: '1.1.0' }),
+        'main.mjs': 'export function activate() {}',
+      });
+      const since = () => events.slice(mark);
+      await vi.waitFor(() => expect(since()).toContain(`shutdown:${live}`));
+      await vi.waitFor(() =>
+        expect(
+          since().some(
+            (item, index) => index > since().indexOf(`shutdown:${live}`) && item.startsWith('fork:')
+          )
+        ).toBe(true)
+      );
+      const shutdownAt = since().indexOf(`shutdown:${live}`);
+      const exitAt = since().indexOf(`exit:${live}`);
+      const forkAfter = since().findIndex(
+        (item, index) => index > shutdownAt && item.startsWith('fork:')
+      );
+      expect(exitAt).toBeGreaterThan(shutdownAt);
+      expect(forkAfter).toBeGreaterThan(exitAt);
+      await updating;
+    } finally {
+      await svc.dispose();
+    }
+  });
+
   it('同一插件同一通知事件同时只投递一次，后来的只保留最新一条', async () => {
     const dir = temp('coalesce-');
     const svc = bootService(dir, () => new InProcessChild());
