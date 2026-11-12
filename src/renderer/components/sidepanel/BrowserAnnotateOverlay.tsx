@@ -831,7 +831,7 @@ export function BrowserAnnotateStageOverlay({
   onCloseOpenPin: () => void;
   onSendQueue: (subsetIds?: ReadonlySet<string>) => void;
   onStrokeStateChange: (active: boolean) => void;
-  /** 该浏览器正显示且激活：window 级快捷键只在此时接管 */
+  /** 是否接管 window 级快捷键。调用方按可见优先决定：唯一可见时分组未激活也算 */
   active: boolean;
 }) {
   const { t } = useI18n();
@@ -2214,7 +2214,7 @@ export function useBrowserAnnotateSession({
 
   // 全局快捷键 ⌘⇧D 与分层 Escape 键处理（Cursor `qo`）
   useEffect(() => {
-    // 不可见的浏览器（隐藏会话的 dock、未选中的 tab）不注册：捕获阶段的 stopPropagation 会截走别处的按键
+    // 不该接管时不注册：捕获阶段的 stopPropagation 会截走别处的按键。点击原生视图不会激活分组，仍由调用方放行唯一可见的浏览器
     if (!active) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const mod = IS_MAC ? event.metaKey : event.ctrlKey;

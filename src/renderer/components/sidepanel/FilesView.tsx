@@ -59,7 +59,7 @@ import {
 } from './filesViewRel';
 import { readWorkspaceDocument, refreshWorkspaceDocument } from './filesWorkspaceRefresh';
 import { FileTreeMenu, isMarkdownRel, revealLabel } from './fileTreeMenu';
-import { usePanelVisibility } from './panelVisibility';
+import { usePanelHotkeyTarget } from './panelVisibility';
 import { idsToClose } from './tabCloseActions';
 
 const FILE_OPTIONS = {
@@ -111,7 +111,7 @@ interface FilesViewProps {
 export function FilesView({ conversationId, projectId }: FilesViewProps) {
   const { t } = useI18n();
   const fileOptions = useCodeHighlightOptions(FILE_OPTIONS);
-  const { active: panelActive } = usePanelVisibility();
+  const saveHotkey = usePanelHotkeyTarget('files');
   const req = useMemo(() => ({ conversationId, projectId }), [conversationId, projectId]);
   const workspaceRevision = useSessionsStore(
     (s) => s.workspaceRevisionByConversation[conversationId] ?? 0
@@ -656,8 +656,8 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   }, []);
 
   useEffect(() => {
-    // dock 按会话常驻：只有可见 dock 里激活的 Files 面板接保存键，隐藏会话不能跟着写盘
-    if (!panelActive) return;
+    // 隐藏会话不接保存键。唯一可见的 Files 即使分组没激活也接；多个可见时只交给激活的那个
+    if (!saveHotkey) return;
     const onKey = (event: KeyboardEvent) => {
       // mac 只认 ⌘：终端里的 ⌃S、emacs 的 C-x C-s 不是保存
       const mod = IS_MAC ? event.metaKey : event.ctrlKey;
@@ -668,7 +668,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeRel, panelActive, save]);
+  }, [activeRel, save, saveHotkey]);
 
   const active = openDocs.find((doc) => doc.rel === activeRel) ?? null;
   const activeViewers =

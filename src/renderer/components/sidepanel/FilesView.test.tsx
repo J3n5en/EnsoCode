@@ -146,23 +146,31 @@ vi.mock('./fileTreeMenu', () => ({
 vi.mock('./filePreviewMarkdown', () => ({ FileMarkdownPreview: () => null }));
 
 /** 所在分组激活、tab 被选中的 dockview 面板 */
-const activePanel: PanelActivitySource = {
-  isActive: true,
-  isVisible: true,
-  onDidActiveChange: () => ({ dispose() {} }),
-  onDidVisibilityChange: () => ({ dispose() {} }),
-};
+function panelSource(isActive: boolean, isVisible = true): PanelActivitySource {
+  return {
+    isActive,
+    isVisible,
+    onDidActiveChange: () => ({ dispose() {} }),
+    onDidVisibilityChange: () => ({ dispose() {} }),
+  };
+}
 
 let root: Root;
 let container: HTMLElement;
 
 /** 每个会话一个常驻 dock，与 SidePanel 的挂法一致 */
-async function mountDocks(ids: string[]) {
+async function mountDocks(
+  ids: string[],
+  activity: Record<string, { isActive: boolean; isVisible?: boolean }> = {}
+) {
   await act(async () =>
     root.render(
       ids.map((id) => (
         <section key={id} data-dock={id}>
-          <PanelVisibilityProvider dockConversationId={id} api={activePanel}>
+          <PanelVisibilityProvider
+            dockConversationId={id}
+            api={panelSource(activity[id]?.isActive ?? true, activity[id]?.isVisible ?? true)}
+          >
             <FilesView conversationId={id} projectId="project" />
           </PanelVisibilityProvider>
         </section>
@@ -305,6 +313,18 @@ describe('FilesView 保存快捷键', () => {
     expect(harness.files.write).not.toHaveBeenCalled();
     await pressSave();
     expect(harness.files.write).toHaveBeenCalledTimes(1);
+  });
+
+  // 真实场景：分屏后焦点在终端/浏览器，或点了原生视图这类不会把分组标成激活的区域
+  it('分组未激活但 Files 仍是唯一可见面板时，⌘S 照样保存', async () => {
+    await mountDocks(['a'], { a: { isActive: false } });
+    await openReadme('a');
+    await click('[data-dock="a"] [data-edit]');
+    await pressSave();
+    expect(harness.files.write).toHaveBeenCalledTimes(1);
+    expect(harness.files.write).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'a', rel: 'README.md' })
+    );
   });
 });
 

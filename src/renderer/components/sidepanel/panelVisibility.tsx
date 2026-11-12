@@ -3,7 +3,9 @@ import {
   type ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
 } from 'react';
 import { useSessionsStore } from '@/stores/sessions';
@@ -25,7 +27,7 @@ export interface PanelActivitySource {
 export interface PanelVisibility {
   /** 正显示在屏幕上：所在 dock 属于当前会话且侧栏展开，tab 在其分组里被选中 */
   visible: boolean;
-  /** 显示且所在分组激活（即 Cmd+W 会关掉的那个面板）：键盘快捷键只交给它 */
+  /** 所在分组是激活分组（Cmd+W 会关掉的那个面板）。快捷键见 usePanelHotkeyTarget */
   active: boolean;
 }
 
@@ -67,4 +69,59 @@ export function PanelVisibilityProvider({
 
 export function usePanelVisibility(): PanelVisibility {
   return useContext(PanelVisibilityContext);
+}
+
+export type PanelHotkeyKind = 'files' | 'browser';
+
+interface HotkeyClaim {
+  kind: PanelHotkeyKind;
+  visible: boolean;
+  active: boolean;
+}
+
+const hotkeyClaims = new Map<symbol, HotkeyClaim>();
+const hotkeyListeners = new Set<() => void>();
+
+function emitHotkeys(): void {
+  for (const listener of hotkeyListeners) listener();
+}
+
+function subscribeHotkeys(listener: () => void): () => void {
+  hotkeyListeners.add(listener);
+  return () => {
+    hotkeyListeners.delete(listener);
+  };
+}
+
+function hotkeyOwned(id: symbol): boolean {
+  const self = hotkeyClaims.get(id);
+  if (!self?.visible) return false;
+  let visiblePeers = 0;
+  let activeId: symbol | undefined;
+  for (const [peerId, peer] of hotkeyClaims) {
+    if (peer.kind !== self.kind || !peer.visible) continue;
+    visiblePeers += 1;
+    if (peer.active) activeId = peerId;
+  }
+  return visiblePeers <= 1 || activeId === id;
+}
+
+/**
+ * 窗口级快捷键归谁。同一种面板只有一个可见时，它接管（分屏焦点在终端、或点了原生视图
+ * 没把分组标成激活，也要能按 ⌘S / 标注键）。同时有多个可见时，只交给激活的那个。
+ */
+export function usePanelHotkeyTarget(kind: PanelHotkeyKind): boolean {
+  const { visible, active } = usePanelVisibility();
+  const idRef = useRef<symbol | null>(null);
+  if (idRef.current === null) idRef.current = Symbol(kind);
+  const id = idRef.current;
+  useEffect(() => {
+    hotkeyClaims.set(id, { kind, visible, active });
+    emitHotkeys();
+    return () => {
+      hotkeyClaims.delete(id);
+      emitHotkeys();
+    };
+  }, [active, id, kind, visible]);
+  return useSyncExternalStore(subscribeHotkeys, () => hotkeyOwned(id));
 }

@@ -21,7 +21,7 @@ import {
   useBrowserAnnotateSession,
 } from './BrowserAnnotateOverlay';
 import { isCoveredBy, overlayBoxes } from './overlayCover';
-import { usePanelVisibility } from './panelVisibility';
+import { usePanelHotkeyTarget } from './panelVisibility';
 
 const EMPTY: BrowserTabState = {
   tabId: null,
@@ -125,9 +125,9 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   );
   const isActiveConversation = useSessionsStore((s) => s.activeId === dockConversationId);
   const hostVisible = active ?? (sidebarOpen && isActiveConversation);
-  // 标注快捷键只交给屏幕上那一个浏览器：Bot 面板由宿主传 active，Code 侧栏看所在 dock 与 tab 是否激活
-  const panelVisibility = usePanelVisibility();
-  const hotkeysActive = active ?? panelVisibility.active;
+  // 标注快捷键：Bot 面板由宿主传 active。Code 侧栏按可见优先，多个可见浏览器才用分组是否激活区分
+  const browserHotkeys = usePanelHotkeyTarget('browser');
+  const hotkeysActive = active ?? browserHotkeys;
   const [state, setState] = useState<BrowserTabState>(EMPTY);
   const [address, setAddress] = useState('');
   const [editing, setEditing] = useState(false);
