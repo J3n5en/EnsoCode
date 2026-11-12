@@ -53,11 +53,18 @@ export function openExternalWebUrl(url: string): void {
 
 /**
  * 挂在加载应用页面的 webContents 上，只拦页面自己发起的跳转（链接点击、location 赋值、iframe src）。
- * hash 变化与 Main 侧 loadURL / reload 不触发这两个事件；页面内 location.reload() 会触发，
+ * hash 变化与 Main 侧 loadURL / reload 不触发这些事件；页面内 location.reload() 会触发，
  * 目标仍是本页，照常放行。
  */
 export function attachAppNavigationGuard(contents: WebContents, appUrl: string): void {
   contents.on('will-navigate', (event) => {
+    if (isAppNavigationAllowed(event.url, appUrl)) return;
+    event.preventDefault();
+    openExternalWebUrl(event.url);
+  });
+  // dev server 下同源 302 只走 will-redirect，不走 will-navigate。主 frame 与 will-navigate 同一策略
+  contents.on('will-redirect', (event) => {
+    if (!event.isMainFrame) return;
     if (isAppNavigationAllowed(event.url, appUrl)) return;
     event.preventDefault();
     openExternalWebUrl(event.url);

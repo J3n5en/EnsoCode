@@ -170,4 +170,37 @@ describe('attachAppNavigationGuard', () => {
     ).not.toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
   });
+
+  // dev server 下同源 302 走 will-redirect，不走 will-navigate
+  it('主 frame 被重定向到外站时拦下，并交给系统浏览器', () => {
+    const open = vi.spyOn(shell, 'openExternal').mockResolvedValue();
+    const { contents, fire } = fakeContents();
+    attachAppNavigationGuard(contents, DEV);
+    const prevented = fire('will-redirect', {
+      url: 'https://evil.example/phish',
+      isMainFrame: true,
+    });
+    expect(prevented).toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith('https://evil.example/phish');
+  });
+
+  it('主 frame 重定向回应用自身不拦', () => {
+    const open = vi.spyOn(shell, 'openExternal').mockResolvedValue();
+    const { contents, fire } = fakeContents();
+    attachAppNavigationGuard(contents, DEV);
+    expect(
+      fire('will-redirect', { url: 'http://localhost:5173/index.html', isMainFrame: true })
+    ).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('主 frame 重定向到非 http(s) 只拦不打开', () => {
+    const open = vi.spyOn(shell, 'openExternal').mockResolvedValue();
+    const { contents, fire } = fakeContents();
+    attachAppNavigationGuard(contents, DEV);
+    expect(
+      fire('will-redirect', { url: 'file:///etc/passwd', isMainFrame: true })
+    ).toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
 });
