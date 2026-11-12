@@ -55,6 +55,7 @@ import {
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
+import { isSecretFilePath, isUnderSecretDirectory } from '../../agent/protectedActions';
 import { titleSummaryTimeoutMs } from '../../agent/titleSummary';
 import { ActiveConversationRegistry } from '../services/activeConversationRegistry';
 import { AgentDispatchService } from '../services/agentDispatchService';
@@ -126,7 +127,7 @@ import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
 import { getExtensionPlugins, setPluginSessionDirectory } from '../services/extensionPlugins';
 import { SessionStateTracker } from '../services/extensionPlugins/sessionState';
 import { listAllSessions, listProjectSessions } from '../services/extensionPlugins/sessions';
-import { resolveExternalRevealTarget, sessionWrittenFiles } from '../services/externalFileReveal';
+import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/externalFileReveal';
 import { searchFiles } from '../services/fileSearch';
 import { resolveLocalUnderCwd } from '../services/filesWorkspace';
 import { createLocalComplete, memoryCompleteFromSettings } from '../services/llama/chat';
@@ -649,7 +650,7 @@ function conversationFile(request: unknown): string | null {
 /**
  * files.read 的工作区根。bot-home 不走浏览器 file:// 的 pickBrowserFileRoot
  * （那里会拒绝），这里单独放行：会话未结束、项目 active、属于该项目，
- * 有 bot 标记时再校验绑定；根目录是 canonicalPath 的 realpath。
+ * 有 bot 标记时校验 botId / chatId 形状；根目录是 canonicalPath 的 realpath。
  */
 function filesReadCwd(conversationId: string): string | null {
   const conversation = sourceAuthority?.conversation(conversationId);
@@ -712,7 +713,8 @@ function readBounded(file: string | null): string | null {
 
 /**
  * 工作区外、本会话 write/edit/apply_patch 写过的文件。
- * 渲染层只传绝对路径；messages 走会话 jsonl（readBotSessionMessages 按 mtime+size 缓存）。
+ * 请求路径须与写入记录词法相同且末端不是符号链接（写后换成链接不能借道读别处），
+ * 解析后的真实文件也不能是密钥。messages 走会话 jsonl（readBotSessionMessages 按 mtime+size 缓存）。
  */
 async function externalWrittenFile(request: unknown): Promise<string | null> {
   const record = asRecord(request);
@@ -723,14 +725,17 @@ async function externalWrittenFile(request: unknown): Promise<string | null> {
   if (sourceAuthority?.conversation(conversationId)?.projectId !== projectId) return null;
   const target = resolveExternalRevealTarget(record.path);
   if (!target.ok) return null;
+  const requested = path.resolve(record.path as string);
+  if (isSecretFilePath(target.real) || isUnderSecretDirectory(target.real)) return null;
   const cwd = filesReadCwd(conversationId);
   if (!cwd) return null;
   try {
+    if (lstatSync(requested).isSymbolicLink()) return null;
     const messages = await readBotSessionMessages(
       path.join(app.getPath('userData'), 'agent', 'sessions'),
       sourceAuthority?.conversation(conversationId)?.sessionFile
     );
-    return sessionWrittenFiles(messages, cwd).has(target.real) ? target.real : null;
+    return sessionWrittenPaths(messages, cwd).has(requested) ? target.real : null;
   } catch {
     return null;
   }

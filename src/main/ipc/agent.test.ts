@@ -994,6 +994,7 @@ describe('agent IPC Main identity boundary', () => {
         mkdirSync(sessionDir, { recursive: true });
         written = path.join(outside, 'notes.txt');
         writeFileSync(written, 'session note\n');
+        writeFileSync(path.join(outside, '.env'), 'TOKEN=1\n');
         const manager = SessionManager.create(root, sessionDir);
         const sessionFile = manager.getSessionFile();
         if (!sessionFile) throw new Error('session file missing');
@@ -1007,7 +1008,15 @@ describe('agent IPC Main identity boundary', () => {
         };
         manager.appendMessage({
           role: 'assistant',
-          content: [{ type: 'toolCall', id: 'w1', name: 'write', arguments: { path: written } }],
+          content: [
+            { type: 'toolCall', id: 'w1', name: 'write', arguments: { path: written } },
+            {
+              type: 'toolCall',
+              id: 'w2',
+              name: 'write',
+              arguments: { path: path.join(outside, '.env') },
+            },
+          ],
           api: 'openai-completions',
           provider: 'openai',
           model: 'test',
@@ -1022,6 +1031,14 @@ describe('agent IPC Main identity boundary', () => {
           content: [{ type: 'text', text: 'ok' }],
           isError: false,
           timestamp: 2,
+        });
+        manager.appendMessage({
+          role: 'toolResult',
+          toolCallId: 'w2',
+          toolName: 'write',
+          content: [{ type: 'text', text: 'ok' }],
+          isError: false,
+          timestamp: 3,
         });
         vi.spyOn(getSourceAuthorityRegistry()!, 'conversation').mockImplementation((id) =>
           id === 'conv-files'
@@ -1057,6 +1074,24 @@ describe('agent IPC Main identity boundary', () => {
         symlinkSync(path.join(outside, 'settings.json'), link);
         await expect(external(link)).resolves.toBeNull();
         await expect(external(written)).resolves.toBe('session note\n');
+      });
+
+      it('写过的文件之后被换成符号链接时拒绝', async () => {
+        const target = path.join(outside, 'private.txt');
+        writeFileSync(target, 'private\n');
+        rmSync(written);
+        symlinkSync(target, written);
+        await expect(external(written)).resolves.toBeNull();
+      });
+
+      it('写过的符号链接路径不能借由写入记录读到链接目标', async () => {
+        const alias = path.join(outside, 'alias.txt');
+        symlinkSync(written, alias);
+        await expect(external(alias)).resolves.toBeNull();
+      });
+
+      it('本会话写过的密钥文件也不经 files.read 读出', async () => {
+        await expect(external(path.join(outside, '.env'))).resolves.toBeNull();
       });
     });
 

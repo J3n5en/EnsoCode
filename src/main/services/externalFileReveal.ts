@@ -28,15 +28,21 @@ export function resolveExternalRevealTarget(
   }
 }
 
-function realOf(cwd: string, raw: string): string | null {
+function lexicalOf(cwd: string, raw: string): string | null {
   const trimmed = raw.trim().replace(/^@/, '');
   if (!trimmed) return null;
   const expanded =
     trimmed === '~' || trimmed.startsWith('~/')
       ? path.join(os.homedir(), trimmed.slice(1))
       : trimmed;
+  return path.resolve(cwd, expanded);
+}
+
+function realOf(cwd: string, raw: string): string | null {
+  const lexical = lexicalOf(cwd, raw);
+  if (!lexical) return null;
   try {
-    return realpathSync(path.resolve(cwd, expanded));
+    return realpathSync(lexical);
   } catch {
     return null;
   }
@@ -49,6 +55,21 @@ export function sessionWrittenFiles(
   messages: readonly ProjectedMessage[],
   cwd: string
 ): Set<string> {
+  return collectWritten(messages, (raw) => realOf(cwd, raw));
+}
+
+/** 同上，但按工具参数的词法绝对路径收集（不解析符号链接），供 files.read 先做词法比对。 */
+export function sessionWrittenPaths(
+  messages: readonly ProjectedMessage[],
+  cwd: string
+): Set<string> {
+  return collectWritten(messages, (raw) => lexicalOf(cwd, raw));
+}
+
+function collectWritten(
+  messages: readonly ProjectedMessage[],
+  map: (raw: string) => string | null
+): Set<string> {
   const succeeded = new Set<string>();
   for (const message of messages) {
     if (message.role === 'toolResult' && message.toolCallId && !message.isError)
@@ -56,8 +77,8 @@ export function sessionWrittenFiles(
   }
   const written = new Set<string>();
   const add = (raw: unknown) => {
-    const real = typeof raw === 'string' ? realOf(cwd, raw) : null;
-    if (real) written.add(real);
+    const mapped = typeof raw === 'string' ? map(raw) : null;
+    if (mapped) written.add(mapped);
   };
   for (const message of messages) {
     if (message.role === 'toolResult' && message.toolName === 'apply_patch') {
