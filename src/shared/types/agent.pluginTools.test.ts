@@ -31,6 +31,8 @@ describe('插件工具协议', () => {
     expect(parseAgentCommand(spawn([tool]))).not.toBeNull();
     expect(parseAgentCommand(spawn([{ ...tool, timeoutMs: 1000 }]))).not.toBeNull();
     expect(parseAgentCommand(spawn([{ ...tool, timeoutMs: 600_000 }]))).not.toBeNull();
+    expect(parseAgentCommand(spawn([{ ...tool, readOnly: true }]))).not.toBeNull();
+    expect(parseAgentCommand(spawn([{ ...tool, readOnly: 'yes' }]))).toBeNull();
   });
 
   it.each([

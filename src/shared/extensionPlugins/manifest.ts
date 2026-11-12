@@ -52,6 +52,8 @@ export interface PluginAgentToolContrib {
   parameters: Record<string, unknown>;
   /** 单次调用上限；缺省 60 秒 */
   timeoutMs?: number;
+  /** 作者声明不改动环境（同 MCP readOnlyHint，不核实）；turn_discard 据此放行 */
+  readOnly?: boolean;
 }
 export interface PluginCommandContrib {
   id: string;
@@ -480,6 +482,8 @@ export function parseExtensionPluginManifest(
     if (!isNonEmptyString(t.description, 1024)) errors.push(`工具 ${name} 缺少 description`);
     if (t.timeoutMs !== undefined && !isTimeout(t.timeoutMs, MAX_TOOL_TIMEOUT_MS))
       errors.push(`工具 ${name} 的 timeoutMs 不合法（1000–${MAX_TOOL_TIMEOUT_MS} 毫秒的整数）`);
+    if (t.readOnly !== undefined && typeof t.readOnly !== 'boolean')
+      errors.push(`工具 ${name} 的 readOnly 只能是布尔值`);
     if (!isRecord(t.parameters) || t.parameters.type !== 'object')
       errors.push(`工具 ${name} 的 parameters 必须是 type=object 的 JSON Schema`);
     else
@@ -488,6 +492,7 @@ export function parseExtensionPluginManifest(
         description: String(t.description ?? ''),
         parameters: t.parameters,
         ...(isTimeout(t.timeoutMs, MAX_TOOL_TIMEOUT_MS) ? { timeoutMs: t.timeoutMs } : {}),
+        ...(t.readOnly === true ? { readOnly: true } : {}),
       });
   }
   uniqueIds(agentTools, '工具');

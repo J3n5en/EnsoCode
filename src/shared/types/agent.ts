@@ -2324,7 +2324,14 @@ function isPluginToolList(value: unknown): value is PluginToolDescriptor[] {
   for (const tool of value) {
     if (
       !isRecord(tool) ||
-      !hasOnlyKeys(tool, ['name', 'description', 'parameters', 'pluginId', 'timeoutMs']) ||
+      !hasOnlyKeys(tool, [
+        'name',
+        'description',
+        'parameters',
+        'pluginId',
+        'timeoutMs',
+        'readOnly',
+      ]) ||
       tool.name === undefined ||
       tool.description === undefined ||
       tool.parameters === undefined ||
@@ -2334,6 +2341,7 @@ function isPluginToolList(value: unknown): value is PluginToolDescriptor[] {
       tool.description.length > 1024 ||
       !isRecord(tool.parameters) ||
       (tool.timeoutMs !== undefined && !isPluginToolTimeout(tool.timeoutMs)) ||
+      (tool.readOnly !== undefined && typeof tool.readOnly !== 'boolean') ||
       parsePluginToolName(tool.name)?.pluginId !== tool.pluginId ||
       names.has(tool.name)
     )

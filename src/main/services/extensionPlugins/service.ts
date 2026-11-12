@@ -1550,6 +1550,7 @@ export class ExtensionPluginService {
       description: string;
       parameters: Record<string, unknown>;
       timeoutMs?: number;
+      readOnly?: boolean;
     }
   ): PluginToolDescriptor {
     return {
@@ -1558,6 +1559,7 @@ export class ExtensionPluginService {
       parameters: tool.parameters,
       pluginId,
       ...(tool.timeoutMs !== undefined ? { timeoutMs: tool.timeoutMs } : {}),
+      ...(tool.readOnly ? { readOnly: true } : {}),
     };
   }
 

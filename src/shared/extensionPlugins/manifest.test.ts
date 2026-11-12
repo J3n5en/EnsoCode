@@ -274,6 +274,17 @@ describe('parseExtensionPluginManifest', () => {
     }
   );
 
+  it('工具可声明 readOnly，非布尔值报错', () => {
+    const tool = { ...base().contributes.agentTools[0], readOnly: true };
+    const parsed = parseExtensionPluginManifest(
+      { ...base(), contributes: { agentTools: [tool] } },
+      '0.2.12'
+    );
+    expect(parsed.ok && parsed.manifest.contributes.agentTools[0]?.readOnly).toBe(true);
+    const bad = { ...tool, readOnly: 'yes' };
+    expect(errorsOf({ ...base(), contributes: { agentTools: [bad] } })).not.toEqual([]);
+  });
+
   it('拒绝重复工具名', () => {
     const tool = base().contributes.agentTools[0];
     expect(errorsOf({ ...base(), contributes: { agentTools: [tool, tool] } })).not.toEqual([]);

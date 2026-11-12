@@ -143,6 +143,7 @@ export function createPluginTools(
     label: descriptor.name,
     description: descriptor.description,
     parameters: descriptor.parameters as unknown as ToolDefinition['parameters'],
+    ...(descriptor.readOnly ? { annotations: { readOnlyHint: true } } : {}),
     async execute(_toolCallId, params, signal, onUpdate) {
       const result = (await invoker.invoke(descriptor.name, params ?? {}, signal, {
         timeoutMs: pluginToolLocalTimeoutMs(descriptor.timeoutMs),

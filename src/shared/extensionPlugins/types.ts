@@ -150,6 +150,8 @@ export interface PluginToolDescriptor {
   pluginId: string;
   /** 清单声明的单次上限；worker 据此放宽本地超时 */
   timeoutMs?: number;
+  /** 清单声明只读；worker 转成 readOnlyHint */
+  readOnly?: boolean;
 }
 
 /** 会话下发给 worker 的插件事件订阅；事件本身只流向 Main，插件身份由 Main 保留 */
