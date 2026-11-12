@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
+import { ProjectDropOverlay } from '@/components/app/ProjectDropOverlay';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import {
@@ -478,6 +479,7 @@ export default function App() {
       <ToastProvider />
       <PluginNotices />
       <BackgroundLayer />
+      <ProjectDropOverlay />
       <OauthCredentialBootstrap />
       {chromeKind !== 'mobile' ? (
         <TitleBar
