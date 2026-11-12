@@ -92,6 +92,7 @@ import {
 import {
   bodyLastActiveAt,
   btwHotSessionIds,
+  chatTimelineActivity,
   evictColdMessages,
   evictStampedColdMessages,
   hasAuthoritativeMessages,
@@ -101,6 +102,7 @@ import {
   needsHistoryHydration,
   needsWorkerSnapshot,
   nextColdEvictDelay,
+  PREPARING_STALL_MS,
   pruneSessionClocks,
   stampViewDeparture,
   viewedConversationId,
@@ -326,6 +328,8 @@ export interface Conversation extends SessionProjection {
   historyLoadAttempted?: boolean;
   /** 上滑翻页或子会话历史回放在途；不持久化 */
   historyLoading?: boolean;
+  /** 准备（spawn / 读历史 / 等快照）超时降级：显示空态 + 重试，不代表已同步；不持久化 */
+  syncStalled?: boolean;
   /** 手动重读在途（菜单项禁用 / 反馈）；不持久化 */
   reloading?: boolean;
   /** 当前 child TAB 的危险 capability ASK；不持久化。 */
@@ -482,6 +486,8 @@ interface SessionsState {
    * 不动草稿 / 排队 / started。同会话在途合并；失败保留旧正文并返回原因，成功返 null。
    */
   reloadConversation(id: string): Promise<string | null>;
+  /** 准备超时后的重试：清降级标记，重读尾窗并向 worker 要快照；卡住的 spawn 重新 resume */
+  retrySessionSync(id: string): void;
   /** 重启根会话：释放 worker 侧会话后按当前设置从 jsonl 重新 spawn。运行中拒绝；成功返 null */
   restartConversation(id: string): Promise<string | null>;
   /** 登记一条手机端新建的会话（worker 侧已 spawn，这里只补桌面投影） */
@@ -1834,6 +1840,8 @@ export const useSessionsStore = create<SessionsState>()(
             }),
             title,
             spawning: false,
+            // worker 已回话：超时降级作废，由真实状态接管
+            syncStalled: undefined,
             // 撤回成功的插话：reducer 已移除回显，原文与附件退回输入框
             ...(event.type === 'delivery-rejected'
               ? withdrawnDraftPatch(
@@ -3611,6 +3619,26 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
+        retrySessionSync(id) {
+          const conversation = get().conversations[id];
+          if (!conversation) return;
+          parentTailInFlight.delete(id);
+          const stuckSpawn = conversation.spawning && !conversation.started;
+          set((state) =>
+            patch(state, id, {
+              syncStalled: undefined,
+              historyLoadAttempted: undefined,
+              ...(stuckSpawn ? { spawning: false } : {}),
+            })
+          );
+          if (conversation.parentId) loadViewedChildHistory(id);
+          else void hydrateParentHistoryTail(id);
+          if (stuckSpawn && conversation.sessionFile && !conversation.parentId) {
+            void get().resumeConversation(id);
+          }
+          void window.electronAPI.agent.requestSnapshot(id);
+        },
+
         reloadConversation(id) {
           const inFlight = reloadInFlight.get(id);
           if (inFlight) return inFlight.promise;
@@ -4424,9 +4452,68 @@ function armColdEvictTimer(): void {
   evictTimer.unref?.();
 }
 
+/**
+ * 正在看的会话在「已在看」期间才转入待补水（spawn 完成的 parent-ready、全量快照标存活、
+ * 补丁带来 sessionFile）时，切换触发器不会再跑，Preparing 会永久转圈。这里补一次尾窗读：
+ * 读空/失败由 historyLoadAttempted 收口。乐观回显或生成中交给 worker 事件流，避免尾窗与回显重叠。
+ */
+function hydrateViewedOnTransition(conversationId: string, conversation: Conversation): void {
+  if (
+    conversation.parentId ||
+    conversation.syncStalled ||
+    conversation.status === 'running' ||
+    conversation.messages.length > 0 ||
+    parentTailInFlight.has(conversationId) ||
+    !needsHistoryHydration(conversation)
+  ) {
+    return;
+  }
+  void hydrateParentHistoryTail(conversationId);
+}
+
+let preparingStallTimer: ReturnType<typeof setTimeout> | null = null;
+let preparingStallId: string | null = null;
+
+/** 只看空正文的非生成态准备：这正是 Preparing 占满时间线的情形 */
+function isPreparingStallCandidate(conversation: Conversation): boolean {
+  return (
+    !conversation.syncStalled &&
+    conversation.messages.length === 0 &&
+    chatTimelineActivity(conversation) === 'loading'
+  );
+}
+
+/** 兜底：准备超时降级为空态 + 重试；生成态（running）不在此列 */
+function watchPreparingStall(state: SessionsState, viewed: string | null): void {
+  const conversation = viewed ? state.conversations[viewed] : undefined;
+  const candidate = conversation && isPreparingStallCandidate(conversation) ? viewed : null;
+  if (candidate === preparingStallId) return;
+  if (preparingStallTimer) clearTimeout(preparingStallTimer);
+  preparingStallTimer = null;
+  preparingStallId = candidate;
+  if (!candidate) return;
+  preparingStallTimer = setTimeout(() => {
+    preparingStallTimer = null;
+    preparingStallId = null;
+    const current = useSessionsStore.getState();
+    const latest = current.conversations[candidate];
+    if (viewedFromState(current) !== candidate || !latest || !isPreparingStallCandidate(latest)) {
+      return;
+    }
+    // 挂住的尾窗读（远程隧道断线）不能继续占着去重位，否则重试也被吞掉
+    parentTailInFlight.delete(candidate);
+    useSessionsStore.setState((s) => patch(s, candidate, { syncStalled: true }));
+  }, PREPARING_STALL_MS);
+}
+
 useSessionsStore.subscribe((state) => {
   const viewed = viewedFromState(state);
-  if (viewed === lastReportedViewedId) return;
+  watchPreparingStall(state, viewed);
+  if (viewed === lastReportedViewedId) {
+    const conversation = viewed ? state.conversations[viewed] : undefined;
+    if (viewed && conversation) hydrateViewedOnTransition(viewed, conversation);
+    return;
+  }
   const previousViewedId = lastReportedViewedId;
   lastReportedViewedId = viewed;
   window.electronAPI.agent.setViewedSession?.(viewed);

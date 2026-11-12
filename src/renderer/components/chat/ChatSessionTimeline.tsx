@@ -93,6 +93,9 @@ export function ChatSessionTimeline({
   const historyLoading = useSessionsStore((state) =>
     Boolean(state.conversations[conversationId]?.historyLoading)
   );
+  const syncStalled = useSessionsStore(
+    (state) => state.conversations[conversationId]?.syncStalled === true
+  );
 
   const cache = useRef<{ conversationId: string; items: TimelineItem[] }>({
     conversationId: '',
@@ -145,6 +148,7 @@ export function ChatSessionTimeline({
     status,
     historyLoadAttempted,
     historyLoading,
+    syncStalled,
   });
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -281,6 +285,11 @@ export function ChatSessionTimeline({
         onRetryResume={
           !started && sessionFile && status === 'failed'
             ? () => void useSessionsStore.getState().resumeConversation(conversationId)
+            : undefined
+        }
+        onRetrySync={
+          syncStalled && !running
+            ? () => useSessionsStore.getState().retrySessionSync(conversationId)
             : undefined
         }
         historyLoading={historyLoading}

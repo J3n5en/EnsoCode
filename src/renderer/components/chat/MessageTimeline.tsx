@@ -118,6 +118,8 @@ interface MessageTimelineProps {
   onSuggestion?: (prompt: string) => void;
   /** 空时间线且 resume 失败时：再走一遍 jsonl 回放 */
   onRetryResume?: () => void;
+  /** 准备超时降级：空态说明「暂无可显示的历史」并给重试入口，不冒充已同步 */
+  onRetrySync?: () => void;
   /**
    * 是否虚拟化。移动端置 false：真机实测 Virtuoso 在 WebKit 上跳转到底时，
    * 渲染范围切换的中间态列表变短会被浏览器钳位滚动位置，之后模型再也涨不回去，
@@ -157,6 +159,7 @@ export function MessageTimeline({
   emptyDescription,
   onSuggestion,
   onRetryResume,
+  onRetrySync,
   virtualize = true,
   onStartReached,
   historyLoading = false,
@@ -653,11 +656,20 @@ export function MessageTimeline({
                 </>
               ) : (
                 <>
-                  {emptyDescription !== '' && (
+                  {onRetrySync ? (
+                    <>
+                      <p className="t-stagger-line t-stagger-line--2 max-w-md text-sm text-muted-foreground">
+                        {t('Session is not ready yet — no history to show.')}
+                      </p>
+                      <Button size="sm" variant="outline" onClick={onRetrySync}>
+                        {t('Retry sync')}
+                      </Button>
+                    </>
+                  ) : emptyDescription !== '' ? (
                     <p className="t-stagger-line t-stagger-line--2 text-sm text-muted-foreground">
                       {emptyDescription ?? t('Ask the agent…')}
                     </p>
-                  )}
+                  ) : null}
                   {onSuggestion && (
                     <div className="t-stagger-line t-stagger-line--3 mt-5 w-full">
                       <WelcomeSuggestions onPick={onSuggestion} />
