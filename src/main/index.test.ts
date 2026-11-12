@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   isPackaged: false,
   appHandlers: new Map<string, (...args: unknown[]) => void>(),
   setPath: vi.fn(),
+  crashReporterStart: vi.fn(),
   autoUpdaterInit: vi.fn(),
   startAgentWorker: vi.fn(() => mocks.order.push('worker')),
   createMainWindow: vi.fn(() => {
@@ -35,6 +36,7 @@ vi.mock('electron', () => ({
     }),
   },
   BrowserWindow: { getAllWindows: () => [] },
+  crashReporter: { start: mocks.crashReporterStart },
 }));
 vi.mock('@electron-toolkit/utils', () => ({
   electronApp: { setAppUserModelId: vi.fn() },
@@ -168,6 +170,14 @@ describe('Main process diagnostics', () => {
   it('listens for child-process-gone', async () => {
     await import('./index');
     expect(mocks.appHandlers.has('child-process-gone')).toBe(true);
+  });
+
+  it('crash dumps 落在 userData 下且只存本地', async () => {
+    mocks.crashReporterStart.mockClear();
+    await import('./index');
+    // mock 的 getPath('userData') 固定返回 /tmp
+    expect(mocks.setPath).toHaveBeenCalledWith('crashDumps', path.join('/tmp', 'Crashpad'));
+    expect(mocks.crashReporterStart).toHaveBeenCalledWith({ uploadToServer: false });
   });
 });
 

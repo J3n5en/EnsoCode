@@ -119,7 +119,13 @@ import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
 import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
-import { appendAgentWorkerExitLog, takeAgentWorkerCrash } from './agentWorkerExit';
+import {
+  AGENT_WORKER_SERVICE_NAME,
+  appendAgentWorkerExitLog,
+  createOutputTail,
+  isAgentWorkerGone,
+  takeAgentWorkerCrash,
+} from './agentWorkerExit';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools } from './builtinToolScopes';
 import type { ResolvedPlugins } from './claudePlugins';
@@ -315,13 +321,12 @@ export function customWorkflowPresetDir(): string {
   return path.join(agentDataDir(), 'workflows');
 }
 
-const AGENT_WORKER_SERVICE_NAME = 'enso-agent-worker';
-
 export function startAgentWorker(): void {
   if (worker) return;
   const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
     serviceName: AGENT_WORKER_SERVICE_NAME,
+    stdio: 'pipe',
     env: {
       ...process.env,
       ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
@@ -340,6 +345,7 @@ export function startAgentWorker(): void {
   worker = child;
   workerExited = false;
   let childPid: number | undefined;
+  const output = captureWorkerOutput(child);
 
   child.once('spawn', () => {
     childPid = child.pid;
@@ -431,6 +437,9 @@ export function startAgentWorker(): void {
       dataDir,
       `exit pid=${childPid ?? '?'} ${detail}${crash?.stack ? `\n${crash.stack}` : ''}`
     );
+    void output.settled().then((tail) => {
+      if (tail) appendAgentWorkerExitLog(dataDir, `output tail pid=${childPid ?? '?'}\n${tail}`);
+    });
     pendingReloads.failAll('agent worker exited');
     workspaceLocks.failAll('agent worker exited');
     pluginMcp.failAll('agent worker exited');
@@ -446,13 +455,43 @@ export function startAgentWorker(): void {
   });
 }
 
+/** worker 输出必须持续读走（否则管道写满会卡住 worker）；保留尾部供退出时落日志，dev 照常转到终端 */
+function captureWorkerOutput(child: WorkerProcess): { settled(): Promise<string> } {
+  const tail = createOutputTail(16 * 1024);
+  const streams = [child.stdout, child.stderr].filter((stream): stream is NodeJS.ReadableStream =>
+    Boolean(stream)
+  );
+  const ended = streams.map(
+    (stream, index) =>
+      new Promise<void>((resolve) => {
+        stream.on('data', (chunk: Buffer | string) => {
+          const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+          tail.push(buffer);
+          if (!app.isPackaged) (index === 0 ? process.stdout : process.stderr).write(buffer);
+        });
+        stream.once('end', () => resolve());
+        stream.once('close', () => resolve());
+        stream.once('error', () => resolve());
+      })
+  );
+  return {
+    // exit 与管道收尾先后不定：最多再等 1s 让遗言读完
+    settled: () =>
+      Promise.race([
+        Promise.all(ended),
+        new Promise<void>((resolve) => setTimeout(resolve, 1000).unref()),
+      ]).then(() => tail.text().trim()),
+  };
+}
+
 /** child-process-gone 能区分 crashed / oom / killed，和 exit 先后不定，单独落同一份日志 */
 export function recordAgentWorkerGone(details: {
-  serviceName?: string;
+  type: string;
+  name?: string;
   reason: string;
   exitCode: number;
 }): void {
-  if (details.serviceName !== AGENT_WORKER_SERVICE_NAME) return;
+  if (!isAgentWorkerGone(details)) return;
   appendAgentWorkerExitLog(
     agentDataDir(),
     `gone reason=${details.reason} ${describeAgentWorkerExit(details.exitCode, null)}`

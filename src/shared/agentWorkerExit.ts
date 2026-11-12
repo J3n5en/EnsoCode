@@ -31,6 +31,8 @@ const WINDOWS_EXIT_CODES: Record<number, string> = {
   3221225477: 'access violation',
   3221225725: 'stack overflow',
   3221226505: 'fatal error (fail-fast)',
+  // 0xFFFF7003 crashpad：未启用崩溃上报时 native 崩溃以此码自杀，原始异常码丢失
+  4294930435: 'native crash, crash handler not connected',
 };
 
 function formatExitCode(code: unknown): string {

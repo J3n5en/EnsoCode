@@ -2,7 +2,9 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { withFileMutationQueue } from '@earendil-works/pi-coding-agent';
+import { PROJECTED_FILE_TEXT_LIMIT } from '@shared/types/fileChanges';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { projectMessage } from '../projection';
 import {
   createLocalApplyPatchIo,
   executeApplyPatch,
@@ -179,6 +181,34 @@ describe('apply_patch 引擎', () => {
     );
     expect(result.details.status).toBe('success');
     expect(await text('eof.txt')).toBe('changed\n');
+  });
+
+  it('details 里的文件全文按投影上限截断，避免会话文件无界增长', async () => {
+    const big = `${'x'.repeat(PROJECTED_FILE_TEXT_LIMIT * 3)}\n`;
+    await writeFile(path.join(cwd, 'big.txt'), `head\n${big}`);
+    const result = await executeApplyPatch(
+      cwd,
+      patch('*** Update File: big.txt', '@@', '-head', '+HEAD')
+    );
+    expect(result.details.status).toBe('success');
+    const [change] = result.details.fileChanges;
+    expect(change.oldText).toBe(`${`head\n${big}`.slice(0, PROJECTED_FILE_TEXT_LIMIT)}\n…`);
+    expect(change.newText).toBe(`${`HEAD\n${big}`.slice(0, PROJECTED_FILE_TEXT_LIMIT)}\n…`);
+    expect(await text('big.txt')).toBe(`HEAD\n${big}`);
+    const projected = projectMessage({
+      role: 'toolResult',
+      toolCallId: 't1',
+      toolName: 'apply_patch',
+      content: result.content,
+      details: result.details,
+      isError: false,
+      timestamp: 1,
+    });
+    expect(projected?.fileChanges?.[0]).toMatchObject({
+      oldText: change.oldText,
+      newText: change.newText,
+      truncated: true,
+    });
   });
 
   it('move 先独占写目标再删除源，并按两个物理路径报告', async () => {

@@ -7,6 +7,25 @@ import {
   parseAgentWorkerCrash,
 } from '@shared/agentWorkerExit';
 
+export const AGENT_WORKER_SERVICE_NAME = 'enso-agent-worker';
+
+/** utilityProcess 的 fork serviceName 出现在 child-process-gone 的 name；serviceName 是 Chromium 服务名 */
+export function isAgentWorkerGone(details: { type: string; name?: string }): boolean {
+  return details.type === 'Utility' && details.name === AGENT_WORKER_SERVICE_NAME;
+}
+
+/** 子进程输出的尾部缓冲：native 崩溃（如 V8 OOM）的遗言只出现在 stderr */
+export function createOutputTail(maxBytes: number): { push(chunk: Buffer): void; text(): string } {
+  let buffer = Buffer.alloc(0);
+  return {
+    push(chunk) {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length > maxBytes) buffer = buffer.subarray(buffer.length - maxBytes);
+    },
+    text: () => buffer.toString('utf8'),
+  };
+}
+
 /** 取走本 pid 留下的崩溃记录；他人的旧记录保留不动 */
 export function takeAgentWorkerCrash(
   dataDir: string,

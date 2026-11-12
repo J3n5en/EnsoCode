@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { withFileMutationQueue } from '@earendil-works/pi-coding-agent';
-import type { AppliedFileChange } from '@shared/types/fileChanges';
+import { type AppliedFileChange, PROJECTED_FILE_TEXT_LIMIT } from '@shared/types/fileChanges';
 import { APPLY_PATCH_NO_EDITS_HINT } from './guidance';
 import { createLocalApplyPatchIo, normalizePatchPath } from './localIo';
 import { parseApplyPatch, requireApplyPatchInput } from './parser';
@@ -321,7 +321,12 @@ function result(
   const details: ApplyPatchDetails = {
     kind: 'apply_patch',
     status,
-    fileChanges,
+    // details 随会话落盘且常驻 worker 内存，全文会让会话涨到数十 MB；只留投影用得到的部分
+    fileChanges: fileChanges.map((change) => ({
+      ...change,
+      oldText: capDetailText(change.oldText),
+      newText: capDetailText(change.newText),
+    })),
     applied,
     failed,
     ...(error ? { error } : {}),
@@ -344,6 +349,13 @@ function result(
           ...(input ? ['Input:', input] : []),
         ];
   return { content: [{ type: 'text', text: lines.join('\n') }], details };
+}
+
+/** 与 projection 的 capText 同规则：投影结果与截断前一致，且仍标 truncated */
+function capDetailText(text: string): string {
+  return text.length <= PROJECTED_FILE_TEXT_LIMIT
+    ? text
+    : `${text.slice(0, PROJECTED_FILE_TEXT_LIMIT)}\n…`;
 }
 
 async function runPlan(plan: ReadyPlan, signal?: AbortSignal) {

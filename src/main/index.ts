@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
-import { app, type BrowserWindow } from 'electron';
+import { app, type BrowserWindow, crashReporter } from 'electron';
 import {
   registerLocalImageProtocolHandler,
   registerLocalImageSchemePrivileges,
@@ -92,6 +92,11 @@ app.setPath(
     ? path.resolve(developmentUserData)
     : path.join(app.getPath('appData'), app.isPackaged ? 'enso-code' : 'enso-code-dev')
 );
+
+// 未启动 crashpad 时子进程 native 崩溃只剩 0xFFFF7003，真实异常码与现场全丢。
+// 只落本地 minidump（userData/Crashpad），不上传。
+app.setPath('crashDumps', path.join(app.getPath('userData'), 'Crashpad'));
+crashReporter.start({ uploadToServer: false });
 
 // 背景图媒体协议：特权 scheme 必须在 app ready 前登记
 registerLocalImageSchemePrivileges();

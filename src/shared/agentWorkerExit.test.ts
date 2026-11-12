@@ -28,6 +28,9 @@ describe('describeAgentWorkerExit', () => {
   it('Windows 已知异常码转十六进制并注明含义', () => {
     expect(describeAgentWorkerExit(0xe0000008, null)).toBe('code=0xE0000008 out of memory');
     expect(describeAgentWorkerExit(-1073741819, null)).toBe('code=0xC0000005 access violation');
+    expect(describeAgentWorkerExit(-36861, null)).toBe(
+      'code=0xFFFF7003 native crash, crash handler not connected'
+    );
   });
 
   it('普通退出码与缺失退出码', () => {

@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AGENT_WORKER_CRASH_FILE, AGENT_WORKER_EXIT_LOG } from '@shared/agentWorkerExit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendAgentWorkerExitLog, takeAgentWorkerCrash } from './agentWorkerExit';
+import {
+  AGENT_WORKER_SERVICE_NAME,
+  appendAgentWorkerExitLog,
+  createOutputTail,
+  isAgentWorkerGone,
+  takeAgentWorkerCrash,
+} from './agentWorkerExit';
 
 let dir: string;
 beforeEach(() => {
@@ -44,5 +50,26 @@ describe('appendAgentWorkerExitLog', () => {
 
   it('目录不存在时不抛错', () => {
     expect(() => appendAgentWorkerExitLog(path.join(dir, 'missing', 'deep'), 'x')).not.toThrow();
+  });
+});
+
+describe('isAgentWorkerGone', () => {
+  it('按 fork 的 serviceName 匹配 details.name；details.serviceName 是 Chromium 服务名', () => {
+    const gone = { type: 'Utility', serviceName: 'node.mojom.NodeService' };
+    expect(isAgentWorkerGone({ ...gone, name: AGENT_WORKER_SERVICE_NAME })).toBe(true);
+    expect(isAgentWorkerGone({ ...gone, name: 'enso-plugin-host' })).toBe(false);
+    expect(isAgentWorkerGone({ type: 'GPU', name: AGENT_WORKER_SERVICE_NAME })).toBe(false);
+  });
+});
+
+describe('createOutputTail', () => {
+  it('只保留最后 maxBytes 字节', () => {
+    const tail = createOutputTail(8);
+    expect(tail.text()).toBe('');
+    tail.push(Buffer.from('abcdef'));
+    tail.push(Buffer.from('ghij'));
+    expect(tail.text()).toBe('cdefghij');
+    tail.push(Buffer.from('0123456789'));
+    expect(tail.text()).toBe('23456789');
   });
 });
