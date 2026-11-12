@@ -128,6 +128,13 @@ function normalizeRelativePath(raw: string): string | null {
 }
 
 /**
+ * 本机绝对路径（Unix 或 Windows 盘符）。工作区外的 edit diff 用它改走会话写入记录。
+ */
+export function isAbsoluteLocalPath(raw: string): boolean {
+  return canonicalAbsolutePath(raw) !== null;
+}
+
+/**
  * 把链接路径转换成可交给 Main 的工作区相对标识；越界或根不匹配返回 null。
  */
 export function toWorkspaceRelativePath(raw: string, cwd?: string): string | null {

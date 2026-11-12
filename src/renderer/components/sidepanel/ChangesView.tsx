@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CODE_THEME, ensureHighlighter } from '@/components/chat/codeHighlighter';
-import { toWorkspaceRelativePath } from '@/components/chat/markdownLinks';
+import { isAbsoluteLocalPath, toWorkspaceRelativePath } from '@/components/chat/markdownLinks';
 import { useCodeHighlightOptions } from '@/hooks/useColorScheme';
 import { useI18n } from '@/i18n';
 import { buildChangeItems, type ChangeItemMemo } from '@/lib/changesItems';
@@ -169,11 +169,13 @@ export function ChangesView({
     let alive = true;
     void Promise.all(
       paths.map(async (path) => {
-        // Main 只收会话标识 + 工作区相对路径（按会话权威 cwd 校验后读）；工作区外的文件不读
+        // 工作区内走相对路径；工作区外的绝对路径交给 Main 按会话写入记录判断
         const rel = toWorkspaceRelativePath(path, root);
         const text = rel
           ? await window.electronAPI.files.read({ conversationId, projectId, rel })
-          : null;
+          : isAbsoluteLocalPath(path)
+            ? await window.electronAPI.files.read({ conversationId, projectId, path })
+            : null;
         return [path, text] as const;
       })
     ).then((entries) => {

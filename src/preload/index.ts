@@ -825,10 +825,14 @@ const electronAPI = {
     /**
      * 读文件内容，失败返回 null。Main 不收任意路径，只认两种请求：
      * - 会话工作区内文件（edit diff 还原上下文/行号）：会话标识 + 工作区相对路径，根目录由 Main 推导；
+     * - 工作区外、本会话写过的文件：会话标识 + 绝对路径，Main 对照会话 jsonl 里的写入记录；
      * - 后台任务完整日志：任务完成提示里给出的 task-logs 路径，Main 只认该目录下的 task-*.log
      */
     read: (
-      request: { conversationId: string; projectId: string; rel: string } | string
+      request:
+        | { conversationId: string; projectId: string; rel: string }
+        | { conversationId: string; projectId: string; path: string }
+        | string
     ): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ, request),
     /** 枚举目录下的媒体文件（背景图文件夹随机模式），返回绝对路径 */
     listMedia: (dir: string): Promise<string[]> =>

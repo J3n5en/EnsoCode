@@ -112,6 +112,7 @@ import {
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
 import { HumanRequestTimeouts } from '../services/bots/humanRequestTimeouts';
+import { readBotSessionMessages } from '../services/bots/sessionMessages';
 import {
   pickBrowserFileRoot,
   resolveLocalCwdForBrowser,
@@ -125,6 +126,7 @@ import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
 import { getExtensionPlugins, setPluginSessionDirectory } from '../services/extensionPlugins';
 import { SessionStateTracker } from '../services/extensionPlugins/sessionState';
 import { listAllSessions, listProjectSessions } from '../services/extensionPlugins/sessions';
+import { resolveExternalRevealTarget, sessionWrittenFiles } from '../services/externalFileReveal';
 import { searchFiles } from '../services/fileSearch';
 import { resolveLocalUnderCwd } from '../services/filesWorkspace';
 import { createLocalComplete, memoryCompleteFromSettings } from '../services/llama/chat';
@@ -641,9 +643,7 @@ function taskLogFile(raw: string): string | null {
     : null;
 }
 
-/** FILES_READ 只有两种请求：工作区文件 { conversationId, projectId, rel }，或后台任务日志路径 */
-function readFilesRequest(request: unknown): string | null {
-  const file = typeof request === 'string' ? taskLogFile(request) : conversationFile(request);
+function readBounded(file: string | null): string | null {
   if (!file) return null;
   try {
     const stat = statSync(file);
@@ -652,6 +652,43 @@ function readFilesRequest(request: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 工作区外、本会话 write/edit/apply_patch 写过的文件。
+ * 渲染层只传绝对路径；messages 走会话 jsonl（readBotSessionMessages 按 mtime+size 缓存）。
+ */
+async function externalWrittenFile(request: unknown): Promise<string | null> {
+  const record = asRecord(request);
+  if (!record) return null;
+  const conversationId = record.conversationId;
+  const projectId = record.projectId;
+  if (!isNonEmptyString(conversationId) || !isNonEmptyString(projectId)) return null;
+  if (sourceAuthority?.conversation(conversationId)?.projectId !== projectId) return null;
+  const target = resolveExternalRevealTarget(record.path);
+  if (!target.ok) return null;
+  const cwd = resolveLocalCwdForBrowser(conversationId);
+  if (!cwd) return null;
+  try {
+    const messages = await readBotSessionMessages(
+      path.join(app.getPath('userData'), 'agent', 'sessions'),
+      sourceAuthority?.conversation(conversationId)?.sessionFile
+    );
+    return sessionWrittenFiles(messages, cwd).has(target.real) ? target.real : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 工作区文件 { conversationId, projectId, rel }、会话写过的外部绝对路径，或后台任务日志路径 */
+async function readFilesRequest(request: unknown): Promise<string | null> {
+  if (typeof request === 'string') return readBounded(taskLogFile(request));
+  const record = asRecord(request);
+  if (!record) return null;
+  // 带 rel 时只认工作区相对路径，附带的 path 不能改读别的文件
+  if ('rel' in record) return readBounded(conversationFile(request));
+  if ('path' in record) return readBounded(await externalWrittenFile(request));
+  return null;
 }
 
 function listChildRunSummaries(parentId: string): ChildRunListResult {
@@ -2606,10 +2643,8 @@ export function registerAgentHandlers(): void {
     return searchFiles(root, query);
   });
 
-  // 不收任意路径（那等于开放任意文件读取，远端同样可调）：只认工作区文件标识与任务日志
-  ipcMain.handle(IPC_CHANNELS.FILES_READ, (_event, request: unknown): string | null =>
-    readFilesRequest(request)
-  );
+  // 不收任意路径（那等于开放任意文件读取，远端同样可调）：工作区相对路径、会话写过的外部文件，或任务日志
+  ipcMain.handle(IPC_CHANNELS.FILES_READ, (_event, request: unknown) => readFilesRequest(request));
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_SCAN_EXTERNAL, (_event, projectPath: unknown) => {
     if (!isNonEmptyString(projectPath)) return [];

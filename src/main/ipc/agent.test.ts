@@ -204,6 +204,7 @@ vi.mock('./worktree', () => ({
   removeRegisteredWorktree: mocks.removeRegisteredWorktree,
 }));
 
+import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { app } from 'electron';
 import { resolveSubagentModelSelection, rewindSession } from '../services/agentHost';
 import { getSourceAuthorityRegistry, registerAgentHandlers } from './agent';
@@ -850,7 +851,7 @@ describe('agent IPC Main identity boundary', () => {
   describe('FILES_READ 只按会话权威 cwd 读工作区内文件', () => {
     let outside: string;
     let root: string;
-    const read = (request: unknown) =>
+    const read = async (request: unknown) =>
       mocks.handlers.get(IPC_CHANNELS.FILES_READ)?.(event, request);
     const mockProject = (kind?: 'ssh') => {
       vi.spyOn(getSourceAuthorityRegistry()!, 'project').mockImplementation((id) =>
@@ -879,21 +880,21 @@ describe('agent IPC Main identity boundary', () => {
       rmSync(outside, { recursive: true, force: true });
     });
 
-    it('工作区内相对路径按会话权威 cwd 读出', () => {
-      expect(read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })).toBe(
-        'export const a = 1;\n'
-      );
+    it('工作区内相对路径按会话权威 cwd 读出', async () => {
+      await expect(
+        read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })
+      ).resolves.toBe('export const a = 1;\n');
     });
 
-    it('渲染层直接传磁盘路径一律不读', () => {
-      expect(read(path.join(outside, 'settings.json'))).toBeNull();
+    it('渲染层直接传磁盘路径一律不读', async () => {
+      await expect(read(path.join(outside, 'settings.json'))).resolves.toBeNull();
     });
 
-    it('请求额外带的路径字段不被采信，只认 rel', () => {
+    it('请求额外带的路径字段不被采信，只认 rel', async () => {
       const secret = path.join(outside, 'settings.json');
-      expect(
+      await expect(
         read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts', path: secret })
-      ).toBe('export const a = 1;\n');
+      ).resolves.toBe('export const a = 1;\n');
     });
 
     it.each([
@@ -907,18 +908,96 @@ describe('agent IPC Main identity boundary', () => {
         '工作区内符号链接指向外部',
         { conversationId: 'conv-files', projectId: 'p', rel: 'escape/settings.json' },
       ],
-    ])('%s 时不读盘', (_case, request) => {
-      expect(read(request)).toBeNull();
+    ])('%s 时不读盘', async (_case, request) => {
+      await expect(read(request)).resolves.toBeNull();
     });
 
-    it('rel 是绝对路径时不读盘', () => {
+    it('rel 是绝对路径时不读盘', async () => {
       const rel = path.join(outside, 'settings.json');
-      expect(read({ conversationId: 'conv-files', projectId: 'p', rel })).toBeNull();
+      await expect(read({ conversationId: 'conv-files', projectId: 'p', rel })).resolves.toBeNull();
     });
 
-    it('SSH 会话的路径不在本机，不读本机同名文件', () => {
+    it('SSH 会话的路径不在本机，不读本机同名文件', async () => {
       mockProject('ssh');
-      expect(read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })).toBeNull();
+      await expect(
+        read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })
+      ).resolves.toBeNull();
+    });
+
+    describe('会话写过的工作区外文件', () => {
+      let written: string;
+      let sessionDir: string;
+
+      beforeEach(() => {
+        vi.mocked(app.getPath).mockReturnValue(outside);
+        sessionDir = path.join(outside, 'agent', 'sessions');
+        mkdirSync(sessionDir, { recursive: true });
+        written = path.join(outside, 'notes.txt');
+        writeFileSync(written, 'session note\n');
+        const manager = SessionManager.create(root, sessionDir);
+        const sessionFile = manager.getSessionFile();
+        if (!sessionFile) throw new Error('session file missing');
+        const usage = {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        };
+        manager.appendMessage({
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'w1', name: 'write', arguments: { path: written } }],
+          api: 'openai-completions',
+          provider: 'openai',
+          model: 'test',
+          usage,
+          stopReason: 'stop',
+          timestamp: 1,
+        });
+        manager.appendMessage({
+          role: 'toolResult',
+          toolCallId: 'w1',
+          toolName: 'write',
+          content: [{ type: 'text', text: 'ok' }],
+          isError: false,
+          timestamp: 2,
+        });
+        vi.spyOn(getSourceAuthorityRegistry()!, 'conversation').mockImplementation((id) =>
+          id === 'conv-files'
+            ? {
+                conversationId: id,
+                projectId: 'p',
+                kind: 'root',
+                lifecycle: 'ready',
+                version: 1,
+                sessionFile,
+              }
+            : undefined
+        );
+      });
+
+      afterEach(() => {
+        vi.mocked(app.getPath).mockReturnValue('/tmp');
+      });
+
+      const external = (file: string) =>
+        read({ conversationId: 'conv-files', projectId: 'p', path: file });
+
+      it('本会话写过的外部文件可读', async () => {
+        await expect(external(written)).resolves.toBe('session note\n');
+      });
+
+      it('未写过的外部文件不可读', async () => {
+        await expect(external(path.join(outside, 'settings.json'))).resolves.toBeNull();
+      });
+
+      it('符号链接指向未写过的文件时拒绝', async () => {
+        const link = path.join(outside, 'link-to-secret');
+        symlinkSync(path.join(outside, 'settings.json'), link);
+        await expect(external(link)).resolves.toBeNull();
+        await expect(external(written)).resolves.toBe('session note\n');
+      });
     });
 
     // TaskNoteRow 从任务完成提示里取出完整日志的绝对路径再读（审计漏掉的第三个调用方）。
@@ -938,16 +1017,16 @@ describe('agent IPC Main identity boundary', () => {
         vi.mocked(app.getPath).mockReturnValue('/tmp');
       });
 
-      it('task-logs 目录下的任务日志可读', () => {
-        expect(read(path.join(logDir, 'task-3-lx9f2k.log'))).toBe('build ok\n');
+      it('task-logs 目录下的任务日志可读', async () => {
+        await expect(read(path.join(logDir, 'task-3-lx9f2k.log'))).resolves.toBe('build ok\n');
       });
 
       it.each([
         ['文件名不是任务日志', () => path.join(logDir, 'notes.log')],
         ['借 ../ 跳出 task-logs', () => `${logDir}/../../../settings.json`],
         ['task-logs 的子目录', () => `${logDir}/nested/task-3-lx9f2k.log`],
-      ])('%s 时不读盘', (_case, file) => {
-        expect(read(file())).toBeNull();
+      ])('%s 时不读盘', async (_case, file) => {
+        await expect(read(file())).resolves.toBeNull();
       });
     });
   });

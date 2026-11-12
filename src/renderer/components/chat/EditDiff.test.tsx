@@ -77,10 +77,16 @@ describe('EditDiff 读当前文件', () => {
     );
   });
 
-  it('工作区外的绝对路径不发给 Main，退成片段 diff', async () => {
+  it('工作区外的绝对路径改走会话写入记录', async () => {
     await render(<EditDiff path="/etc/hosts" blocks={blocks} />);
-    expect(harness.read).not.toHaveBeenCalled();
-    expect(document.querySelector('[data-diff]')?.textContent).toBe('a = 1=>a = 2');
+    expect(harness.read).toHaveBeenCalledExactlyOnceWith({
+      conversationId: 'c1',
+      projectId: 'p',
+      path: '/etc/hosts',
+    });
+    expect(document.querySelector('[data-diff]')?.textContent).toBe(
+      'const a = 1;\n=>const a = 2;\n'
+    );
   });
 
   it('没有会话上下文（Bot、远程节点视图）时不读文件', async () => {
