@@ -1205,6 +1205,17 @@ export function registerAgentHandlers(): void {
       spawnChild: spawnChildSession,
       promptChild: promptChildSession,
       appendCustomEntry: appendSessionCustomEntry,
+      // 复用 subagent 完成回报的 agent-notify；发起派发的窗口已关则不追发
+      notifyParent: (identity, { text, urgent, ownerWebContentsId }) => {
+        const owner = webContentsOrRemote(ownerWebContentsId);
+        if (!owner || owner.isDestroyed()) return { ok: false, error: 'Owner window closed.' };
+        return sendAgentCommand({
+          type: 'agent-notify',
+          identity: { sessionId: identity.sessionId, generation: identity.generation },
+          text,
+          urgent,
+        });
+      },
       dismissChild: dismissChildSession,
       resumeCoworker: resumeCoworkerSession,
     },

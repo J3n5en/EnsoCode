@@ -182,6 +182,12 @@ async function setup(
   const capabilityBindings: ChildSessionIdentity[] = [];
   const terminatedGenerations: ChildSessionIdentity[] = [];
   const promptedTasks: string[] = [];
+  const parentNotices: Array<{
+    parent: { sessionId: string; generation: string };
+    text: string;
+    urgent: boolean;
+    ownerWebContentsId: number;
+  }> = [];
   let service!: AgentDispatchService;
   service = new AgentDispatchService({
     registerCapabilityInvocation: (context) => {
@@ -280,6 +286,10 @@ async function setup(
         customEntries.push(entry);
         return { ok: true };
       },
+      notifyParent: (parent, notice) => {
+        parentNotices.push({ parent, ...notice });
+        return { ok: true };
+      },
       dismissChild: () => ({ ok: true }),
       resumeCoworker: (parent, coworkerId, name, agentType, resumeFile) => {
         resumeCoworkerCalls.push({
@@ -309,6 +319,7 @@ async function setup(
     projectPath: project.value.canonicalPath,
     root,
     promptedTasks,
+    parentNotices,
   };
 }
 
@@ -618,6 +629,155 @@ describe('AgentDispatchService delta coordination', () => {
       1
     );
     expect(result).toMatchObject({ accepted: false, code: 'dispatch-failed' });
+  });
+});
+
+describe('派发收口通知父会话模型', () => {
+  async function dispatched(requestId = 'turn-1') {
+    const fixture = await setup();
+    const result = await fixture.service.dispatch(
+      {
+        requestId,
+        selectionBindingId: fixture.selectionBindingId,
+        typeKey: 'agent:enso',
+        task: { text: 'do it', images: [], fileMentions: [] },
+      },
+      1
+    );
+    if (!result.accepted) throw new Error('dispatch rejected');
+    return { ...fixture, child: result.child };
+  }
+
+  function settleReceipt(
+    service: AgentDispatchService,
+    child: ChildSessionIdentity,
+    outcome: CapabilityReceipt['outcome'],
+    summary: string
+  ) {
+    service.observeReceipt({
+      type: 'receipt-settled',
+      child,
+      turnId: 'turn-1',
+      requestId: 'call',
+      receiptId: 'r1',
+      receiptSeq: 1,
+      executionState: 'settled',
+      receipt: {
+        receiptId: 'r1',
+        operationId: 'op',
+        child,
+        turnId: 'turn-1',
+        requestId: 'call',
+        capabilityId: 'appearance.theme',
+        risk: 'reversible',
+        subject: { kind: 'setting', id: 'theme', label: 'Application theme' },
+        outcome,
+        summary,
+        occurredAt: 1,
+        sequence: 1,
+      },
+    });
+  }
+
+  it('completed 通知一次：带类型、实例名、摘要与子会话 id，不加急', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    settleReceipt(service, child, 'succeeded', 'theme: system → dark');
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    expect(parentNotices).toHaveLength(1);
+    const [notice] = parentNotices;
+    expect(notice.parent).toEqual(child.parent);
+    expect(notice.ownerWebContentsId).toBe(1);
+    expect(notice.urgent).toBe(false);
+    expect(notice.text).toContain('已完成');
+    expect(notice.text).toContain(child.instanceName);
+    expect(notice.text).toContain(child.typeKey);
+    expect(notice.text).toContain('theme: system → dark');
+    expect(notice.text).toContain(child.sessionId);
+    expect(notice.text).not.toContain(child.generation);
+  });
+
+  it('failed 通知一次并带错误码', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    service.observe({
+      type: 'turn-failed',
+      identity: child,
+      seq: 2,
+      turnId: 'turn-1',
+      error: 'boom',
+    });
+    expect(parentNotices).toHaveLength(1);
+    expect(parentNotices[0].urgent).toBe(true);
+    expect(parentNotices[0].text).toContain('child-failed');
+    expect(parentNotices[0].text).toContain(child.sessionId);
+  });
+
+  it('用户中止子代理回合按 cancelled 收口：带错误码、不带 receiptSummary', async () => {
+    const { service, child, parentNotices, customEntries } = await dispatched();
+    settleReceipt(service, child, 'denied', 'theme change denied');
+    service.observe({
+      type: 'turn-completed',
+      identity: child,
+      seq: 2,
+      turnId: 'turn-1',
+      aborted: true,
+    });
+    expect(parentNotices).toHaveLength(1);
+    expect(parentNotices[0].urgent).toBe(true);
+    expect(parentNotices[0].text).toContain('已取消');
+    expect(parentNotices[0].text).toContain('child-cancelled');
+    expect(parentNotices[0].text).not.toContain('theme change denied');
+    expect(customEntries.at(-1)).toMatchObject({
+      kind: 'agent-failed',
+      errorCode: 'child-cancelled',
+    });
+  });
+
+  it('同一 dispatch 只通知一次：重复终态与后续 child-ended 不再追发', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    service.observe({ type: 'turn-completed', identity: child, seq: 3, turnId: 'turn-1' });
+    service.observe({ type: 'child-ended', identity: child, seq: 4, reason: 'dismissed' });
+    service.observe({ type: 'worker-exited' });
+    expect(parentNotices).toHaveLength(1);
+  });
+
+  it('用户解雇 child 或 worker 退出导致的级联收口不通知', async () => {
+    const dismissed = await dispatched();
+    dismissed.service.observe({
+      type: 'child-ended',
+      identity: dismissed.child,
+      seq: 2,
+      reason: 'dismissed',
+    });
+    expect(dismissed.customEntries.at(-1)).toMatchObject({ errorCode: 'child-cancelled' });
+    expect(dismissed.parentNotices).toHaveLength(0);
+
+    const exited = await dispatched();
+    exited.service.observe({ type: 'worker-exited' });
+    expect(exited.customEntries.at(-1)).toMatchObject({ kind: 'agent-failed' });
+    expect(exited.parentNotices).toHaveLength(0);
+  });
+
+  it('父会话已结束（换代）时不投递', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    service.observe({ type: 'parent-ended', identity: child.parent, seq: 9, reason: 'released' });
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    expect(parentNotices).toHaveLength(0);
+  });
+
+  it('任务未派出就失败的派发不通知（renderer 已直接拿到拒绝）', async () => {
+    const fixture = await setup(() => ({ systemPromptHash: 'drifted' }));
+    const result = await fixture.service.dispatch(
+      {
+        requestId: 'turn-1',
+        selectionBindingId: fixture.selectionBindingId,
+        typeKey: 'agent:enso',
+        task: { text: 'do it', images: [], fileMentions: [] },
+      },
+      1
+    );
+    expect(result.accepted).toBe(false);
+    expect(fixture.parentNotices).toHaveLength(0);
   });
 });
 
