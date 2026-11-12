@@ -1,6 +1,10 @@
 import { commitPendingModel, mergeFetchedModels } from '@shared/modelEntry';
 import { baseUrlAfterApiChange, isClassifierOnlyProvider } from '@shared/providerCatalog';
-import { HEADER_NAME_RE, normalizeProviderHeaders } from '@shared/providers/providerHeaders';
+import {
+  HEADER_NAME_RE,
+  isSendableHeaderValue,
+  normalizeProviderHeaders,
+} from '@shared/providers/providerHeaders';
 import type { ModelEntry, ModelMeta, ModelProvider } from '@shared/types';
 import { MODEL_API_KINDS } from '@shared/types';
 import {
@@ -156,9 +160,14 @@ export function ProviderApiForm({
     ? testModel
     : (models.find(isEnabled)?.id ?? models[0]?.id ?? '');
   const headers = normalizeProviderHeaders(headerRows);
-  const headersInvalid = headerRows.some(
+  const headerNameInvalid = headerRows.some(
     (row) => row.name.trim() !== '' && !HEADER_NAME_RE.test(row.name.trim())
   );
+  const headerValueInvalid = headerRows.some((row) => {
+    const value = row.value.trim();
+    return value !== '' && !isSendableHeaderValue(value);
+  });
+  const headersInvalid = headerNameInvalid || headerValueInvalid;
 
   const setSelectedEnabled = (enabled: boolean) => {
     const ids = new Set(selection.selectedIds);
@@ -334,13 +343,16 @@ export function ProviderApiForm({
                 <Field className="items-stretch border-t px-3 py-3">
                   <FieldLabel>{t('Request headers')}</FieldLabel>
                   {headerRows.map((row) => {
-                    const invalid = row.name.trim() !== '' && !HEADER_NAME_RE.test(row.name.trim());
+                    const nameInvalid =
+                      row.name.trim() !== '' && !HEADER_NAME_RE.test(row.name.trim());
+                    const valueInvalid =
+                      row.value.trim() !== '' && !isSendableHeaderValue(row.value.trim());
                     return (
                       <div key={row.key} className="flex items-center gap-2">
                         <Input
                           value={row.name}
                           placeholder="Header-Name"
-                          aria-invalid={invalid || undefined}
+                          aria-invalid={nameInvalid || undefined}
                           spellCheck={false}
                           onChange={(event) =>
                             setHeaderRows((current) =>
@@ -354,6 +366,7 @@ export function ProviderApiForm({
                         />
                         <Input
                           value={row.value}
+                          aria-invalid={valueInvalid || undefined}
                           spellCheck={false}
                           onChange={(event) =>
                             setHeaderRows((current) =>
@@ -396,6 +409,13 @@ export function ProviderApiForm({
                   >
                     + {t('Add header')}
                   </Button>
+                  {headerValueInvalid ? (
+                    <p role="alert" className="text-destructive text-xs">
+                      {t(
+                        'Header values can only contain tab and single-byte characters (no Chinese, newlines, or NUL).'
+                      )}
+                    </p>
+                  ) : null}
                 </Field>
               </CollapsibleContent>
             </Collapsible>

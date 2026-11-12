@@ -2197,6 +2197,8 @@ export const zhTranslations: Record<string, string> = {
   'Request headers': '请求头',
   'Add header': '添加请求头',
   'Remove header': '移除请求头',
+  'Header values can only contain tab and single-byte characters (no Chinese, newlines, or NUL).':
+    '请求头的值只能包含制表符和单字节字符（不能有中文、换行或空字符）。',
   'Rewrites the role paragraph or appends text to the system prompt.':
     '改写角色段落，或往系统提示词末尾追加内容。',
   'Import URL': '从 URL 导入',

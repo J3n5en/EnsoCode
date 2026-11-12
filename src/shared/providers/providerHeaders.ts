@@ -26,13 +26,30 @@ export function normalizeProviderHeaders(
  */
 const INVALID_HEADER_VALUE_RE = /[^\t\x20-\x7e\x80-\xff]/;
 
+/** 与 fetch/undici 能发出的请求头值一致。空串在这里算合法，由规范化丢掉。 */
+export function isSendableHeaderValue(value: string): boolean {
+  return !INVALID_HEADER_VALUE_RE.test(value);
+}
+
+const droppedHeaderWarnings = new Set<string>();
+
+function warnDroppedHeader(name: string): void {
+  if (droppedHeaderWarnings.has(name)) return;
+  droppedHeaderWarnings.add(name);
+  console.warn(`[provider-headers] dropped ${name}: value cannot be sent as a header`);
+}
+
 /** IPC、设置和 worker 推送的边界收窄。非法条目丢弃，结果空则没有请求头。 */
 export function parseProviderHeaders(value: unknown): Record<string, string> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const headers: Record<string, string> = {};
   for (const [name, headerValue] of Object.entries(value)) {
     if (!HEADER_NAME_RE.test(name)) continue;
-    if (typeof headerValue !== 'string' || INVALID_HEADER_VALUE_RE.test(headerValue)) continue;
+    if (typeof headerValue !== 'string') continue;
+    if (!isSendableHeaderValue(headerValue)) {
+      warnDroppedHeader(name);
+      continue;
+    }
     headers[name] = headerValue;
   }
   return Object.keys(headers).length > 0 ? headers : undefined;
