@@ -2127,6 +2127,8 @@ export const zhTranslations: Record<string, string> = {
   'Load earlier messages': '加载更早的消息',
   'Beginning of conversation': '已到对话开头',
   'Retry resume': '重新恢复',
+  'Session is not ready yet — no history to show.': '会话准备超时，暂无可显示的历史。',
+  'Retry sync': '重新同步',
   Todos: '任务清单',
   'Todo list cleared': '已清空',
   '{{count}} tool calls': '{{count}} 个工具调用',
