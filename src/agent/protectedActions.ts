@@ -21,13 +21,21 @@ export function isSecretFilePath(path: string): boolean {
   return SECRET_BASENAMES.test(base) || SECRET_PATH_SUFFIX.test(normalized);
 }
 
-/** 路径后缀规则里的目录，加上私钥文件名 `id_*` 所在的 `.ssh`。段名整段相等才算，`.ssh-backup` 不算。 */
-const SECRET_DIR_SEGMENTS = new Set(['.ssh', '.aws', '.docker', '.kube', 'pi-agent']);
+/** 家目录下的凭据目录。只认家目录下的：仓库里的 .docker/、.kube/ 是普通配置；pi-agent/auth.json 由文件规则覆盖。 */
+const SECRET_HOME_DIRS = ['.ssh', '.aws', '.docker', '.kube', '.gnupg'];
 
-function isUnderSecretDirectory(input: string): boolean {
-  const normalized = input.trim().replace(/\\/g, '/').replace(/\/+$/, '');
-  if (!normalized) return false;
-  return normalized.split('/').some((segment) => SECRET_DIR_SEGMENTS.has(segment.toLowerCase()));
+function isUnderSecretDirectory(expanded: string): boolean {
+  const fold = (value: string) => {
+    const normalized = value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    return process.platform === 'linux' ? normalized : normalized.toLowerCase();
+  };
+  const target = fold(expanded);
+  const home = fold(os.homedir());
+  if (!target || !home) return false;
+  return SECRET_HOME_DIRS.some((dir) => {
+    const root = `${home}/${dir}`;
+    return target === root || target.startsWith(`${root}/`);
+  });
 }
 
 /**
@@ -130,6 +138,11 @@ function splitTopLevelCommas(body: string): string[] {
   return parts;
 }
 
+/** 花括号候选上限；超出时按指向密钥处理，避免组合爆炸卡住 worker。 */
+const MAX_BRACE_ALTERNATIVES = 256;
+
+class BraceLimitError extends Error {}
+
 /** ripgrep `{a,b}`。没有顶层逗号的 `{.env}` 保持字面量。 */
 function expandBraceAlternatives(pattern: string): string[] {
   const start = topLevelBrace(pattern);
@@ -144,10 +157,13 @@ function expandBraceAlternatives(pattern: string): string[] {
     if (topLevelBrace(suffix) < 0) return [pattern];
     return expandBraceAlternatives(suffix).map((tail) => literal + tail);
   }
+  const tails = expandBraceAlternatives(suffix);
+  if (parts.length * tails.length > MAX_BRACE_ALTERNATIVES) throw new BraceLimitError();
   const out: string[] = [];
   for (const part of parts) {
-    for (const tail of expandBraceAlternatives(suffix)) {
+    for (const tail of tails) {
       out.push(...expandBraceAlternatives(prefix + part + tail));
+      if (out.length > MAX_BRACE_ALTERNATIVES) throw new BraceLimitError();
     }
   }
   return out;
@@ -173,7 +189,14 @@ function globTargetsSecrets(glob: string): boolean {
   const trimmed = glob.trim();
   if (!trimmed || trimmed.startsWith('!')) return false;
   if (!/[*?[\]{}]/.test(trimmed)) return isSecretFilePath(trimmed);
-  return expandBraceAlternatives(trimmed).some(
+  let alternatives: string[];
+  try {
+    alternatives = expandBraceAlternatives(trimmed);
+  } catch (error) {
+    if (error instanceof BraceLimitError) return true;
+    throw error;
+  }
+  return alternatives.some(
     (alt) => alt.length > 0 && !alt.startsWith('!') && alternativeTargetsSecrets(alt)
   );
 }

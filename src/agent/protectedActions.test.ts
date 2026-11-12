@@ -282,18 +282,35 @@ describe('classifyProtectedTool', () => {
     '~/.aws/config',
     '~/.docker',
     '~/.kube/cache',
-    'pi-agent',
-    'pi-agent/notes.md',
+    '~/.gnupg',
     '@~/.ssh/known_hosts',
-  ])('路径 %s 落在密钥目录（或其下）判为读取密钥', (path) => {
+  ])('路径 %s 落在家目录的凭据目录（或其下）判为读取密钥', (path) => {
     expect(classifyProtectedTool('grep', 'read', { pattern: 'x', path })).toBe('secret');
     expect(classifyProtectedTool('read', 'read', { path })).toBe('secret');
   });
 
-  it.each(['src', '.', '~', '~/.ssh-backup', 'notes/aws', 'my-pi-agent', 'src/app.ts'])(
-    '路径 %s 不是密钥目录',
-    (path) => expect(classifyProtectedTool('read', 'read', { path })).toBeNull()
+  it.each([
+    'src',
+    '.',
+    '~',
+    '~/.ssh-backup',
+    'notes/aws',
+    'my-pi-agent',
+    'src/app.ts',
+    // 仓库里的同名目录与 Enso 自己的任务日志不是凭据
+    '.docker/Dockerfile',
+    'deploy/.kube/values.yaml',
+    '~/Library/Application Support/enso-code/agent/pi-agent/task-logs/task-1-abc.log',
+  ])('路径 %s 不是密钥目录', (path) =>
+    expect(classifyProtectedTool('read', 'read', { path })).toBeNull()
   );
+
+  it('花括号组合爆炸时按需确认处理且不卡死', () => {
+    const glob = '{a,b,c,d}'.repeat(40);
+    const started = Date.now();
+    expect(classifyProtectedTool('grep', 'read', { pattern: 'x', glob })).toBe('secret');
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
 
   it.each([
     ['gmail_send_email', 'external-send'],
