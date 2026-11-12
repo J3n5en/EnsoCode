@@ -112,6 +112,11 @@ import {
 import { addToast } from '@/components/ui/toast';
 import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
+import {
+  importLocalProject,
+  readCollapsedProjects,
+  subscribeCollapsedProjects,
+} from '@/lib/importLocalProject';
 import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { formatRelativeTime } from '@/lib/time';
@@ -153,6 +158,7 @@ import {
   PINNED_PROJECTS_KEY,
   PROJECT_ORDER_KEY,
   readSidebarOrder,
+  subscribeSidebarOrder,
   writeSidebarOrder,
 } from '@/stores/settings/sidebarOrderStorage';
 import { SessionTabCounts } from './SessionTabCounts';
@@ -286,6 +292,17 @@ export function Sidebar({
   // 不会把之前单独归档的会话一并“还原”回项目组
   const [archivedProjectIds, setArchivedProjectIds] = useState<string[]>(() =>
     readSidebarOrder(ARCHIVED_PROJECTS_KEY)
+  );
+  useEffect(
+    () => subscribeCollapsedProjects(() => setCollapsedProjects(readCollapsedProjects())),
+    []
+  );
+  useEffect(
+    () =>
+      subscribeSidebarOrder(() => {
+        setArchivedProjectIds(readSidebarOrder(ARCHIVED_PROJECTS_KEY));
+      }),
+    []
   );
   const [pinnedProjectIds, setPinnedProjectIds] = useState<string[]>(() =>
     readSidebarOrder(PINNED_PROJECTS_KEY)
@@ -475,17 +492,27 @@ export function Sidebar({
     sshHost?: string;
     groupId?: string;
   }) => {
-    const knownIds = new Set(projects.map((project) => project.id));
-    if (request.sshConnectionId) {
-      setPendingProject({
-        name: projectNameFromPath(request.path),
-        path: request.path,
-        sshHost: request.sshHost,
-      });
+    if (!request.sshConnectionId) {
+      void importLocalProject(request.path, request.groupId ?? defaultGroupId).catch(
+        (error: unknown) => {
+          addToast({
+            type: 'error',
+            title: t('Failed to add project'),
+            description: error instanceof Error ? error.message : String(error),
+          });
+        }
+      );
+      return;
     }
+    const knownIds = new Set(projects.map((project) => project.id));
+    setPendingProject({
+      name: projectNameFromPath(request.path),
+      path: request.path,
+      sshHost: request.sshHost,
+    });
     void addProject(
       request.path,
-      request.sshConnectionId ? { sshConnectionId: request.sshConnectionId } : undefined,
+      { sshConnectionId: request.sshConnectionId },
       request.groupId ?? defaultGroupId
     )
       .then((project) => {

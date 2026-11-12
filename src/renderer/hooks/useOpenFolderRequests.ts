@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
+import { importLocalProject } from '@/lib/importLocalProject';
 import { isLeaderRenderer } from '@/lib/rendererRole';
 import { showLocalCodeView } from '@/stores/bots/mode';
 import { useSessionsStore } from '@/stores/sessions';
@@ -37,19 +38,15 @@ export function useOpenFolderRequests(): void {
         .then(async () => {
           if (!(await waitUntil(hydrated))) return;
           const folders = await window.electronAPI.window.takeOpenFolders().catch(() => []);
+          let imported = false;
           for (const folder of folders) {
             try {
-              const project = await useSettingsStore.getState().addProject(folder);
+              const project = await importLocalProject(folder);
               if (!project) {
                 addToast({ type: 'error', title: t('Failed to add project') });
                 continue;
               }
-              const id = await useSessionsStore.getState().newConversation(project.id);
-              if (!id) {
-                addToast({ type: 'error', title: t('Failed to add project') });
-                continue;
-              }
-              showLocalCodeView();
+              imported = true;
             } catch (error) {
               addToast({
                 type: 'error',
@@ -58,6 +55,7 @@ export function useOpenFolderRequests(): void {
               });
             }
           }
+          if (imported) showLocalCodeView();
         })
         .catch(() => undefined);
     };
