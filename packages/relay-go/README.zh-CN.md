@@ -56,6 +56,16 @@ GitHub Release 构建（带版本 ldflags）默认开启：启动时检查最新
 - `RELAY_UPDATE_REPO` 默认 `J3n5en/EnsoCode`
 - `RELAY_GITHUB_TOKEN` 可选，提高 GitHub API 限额
 
+## Docker
+
+镜像发布到 `ghcr.io/j3n5en/enso-relay`（`linux/amd64` 与 `linux/arm64`）。Release tag 会打上该版本号和 `latest`；手动触发工作流打 `edge`。
+
+```bash
+docker run -d -p 8787:8787 -v enso-relay:/data ghcr.io/j3n5en/enso-relay:latest
+```
+
+数据库在卷里的 `/data/relay.sqlite`。镜像设置了 `RELAY_AUTO_UPDATE=0`：容器内自更新只是替换容器文件系统里的二进制，没有意义，更新请重新构建或拉取新镜像。
+
 ## 从源码构建
 
 需要 Go 1.24+、仓库根目录的 pnpm（用于构建 PWA）。

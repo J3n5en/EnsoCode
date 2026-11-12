@@ -56,6 +56,16 @@ GitHub Release builds (version via ldflags) check for a newer release at startup
 - `RELAY_UPDATE_REPO` defaults to `J3n5en/EnsoCode`
 - `RELAY_GITHUB_TOKEN` optional, for GitHub API rate limits
 
+## Docker
+
+Images are published to `ghcr.io/j3n5en/enso-relay` (`linux/amd64` and `linux/arm64`). A release tag is pushed as that version and `latest`; a manual workflow run is tagged `edge`.
+
+```bash
+docker run -d -p 8787:8787 -v enso-relay:/data ghcr.io/j3n5en/enso-relay:latest
+```
+
+The database is `/data/relay.sqlite` on the volume. The image sets `RELAY_AUTO_UPDATE=0`: in-container self-update would replace the binary inside the container filesystem and is pointless. Rebuild or pull a new image instead.
+
 ## Build from source
 
 Needs Go 1.24+ and pnpm at the repo root (to build the PWA).
