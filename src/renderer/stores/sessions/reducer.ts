@@ -272,7 +272,7 @@ export interface SessionProjection {
   ended?: boolean;
   /** 本次 running 的起点（wall clock），idle/failed 时清空 */
   runStartedAt?: number;
-  /** 最近一次可见进展时间（消息/工具/子代理/任务/审批提问）：运行中计时显示「距上次返回」，随 running 结束清空 */
+  /** 最近一次可见进展时间（消息/工具/子代理/任务/审批提问）：stall 心跳，脚点计时不用它；随 running 结束清空 */
   lastOutputAt?: number;
   /** 自动重试中（非终态）：turn-retry 设置，下一个 status/turn-* 事件清除 */
   retry?: { attempt: number; maxAttempts: number; delayMs: number; error: string; at: number };

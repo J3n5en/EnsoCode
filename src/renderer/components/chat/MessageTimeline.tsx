@@ -24,6 +24,7 @@ import {
 import { useSettingsStore } from '@/stores/settings';
 import { EnsoMark } from './EnsoMark';
 import { diffFoldMotion, EMPTY_FOLD_MOTION } from './foldMotion';
+import { generationElapsedOrigin } from './generationElapsed';
 import { ChatSearchHighlightContext } from './highlightQuery';
 import { NavRail } from './NavRail';
 import {
@@ -104,9 +105,9 @@ interface MessageTimelineProps {
   loading?: boolean;
   /** 会话 running：进行中的最后一轮工具行不折叠 */
   running: boolean;
-  /** 本次 running 的起点，无任何返回时作计时兜底起点 */
+  /** 本次 running 的起点：脚点「生成中」从这里连续读秒，思考与正文不重置 */
   runStartedAt?: number;
-  /** 最近一次返回落地时间：运行中计时显示「距上次返回」 */
+  /** 最近一次可见进展。脚点计时不使用：思考 token 会不断刷新它 */
   lastOutputAt?: number;
   error?: string;
   /** 空态标题（项目名） */
@@ -606,7 +607,7 @@ export function MessageTimeline({
     onLoadMore: pageChrome === 'more' ? requestOlder : undefined,
     busy,
     loading: !!loading,
-    since: loading ? undefined : (lastOutputAt ?? runStartedAt),
+    since: generationElapsedOrigin({ loading: !!loading, runStartedAt, lastOutputAt }),
     error,
     onRetryResume,
   };
