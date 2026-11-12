@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { app, safeStorage } from '@platform';
+import { app } from '@platform';
 import type { McpOAuthAccess, McpOAuthTokens } from '@shared/types/agent';
+import { type SecureCodec, SecureJsonFile } from './secureFile';
 
 /** 单个 MCP server 的授权状态：DCR 注册信息与 token 都按 McpServerEntry.id 归属 */
 export interface McpOAuthRecord {
@@ -15,9 +15,7 @@ export interface McpOAuthRecord {
 
 export interface McpOAuthStoreOptions {
   file?: string;
-  encryptionAvailable?: () => boolean;
-  encrypt?: (text: string) => Buffer;
-  decrypt?: (buf: Buffer) => string;
+  codec?: SecureCodec;
   now?: () => number;
 }
 
@@ -26,29 +24,35 @@ interface Persisted {
 }
 
 export class McpOAuthStore {
-  private readonly file: string;
-  private readonly encryptionAvailable: () => boolean;
-  private readonly encrypt: (text: string) => Buffer;
-  private readonly decrypt: (buf: Buffer) => string;
+  private readonly data: SecureJsonFile<Persisted>;
   private readonly now: () => number;
-  private cache: Record<string, McpOAuthRecord> | null = null;
-  /** 钥匙串不可用时降级明文；留痕供设置页/日志提示 */
-  encryptionDegraded = false;
 
   constructor(options: McpOAuthStoreOptions = {}) {
-    this.file = options.file ?? path.join(app.getPath('userData'), 'mcp-oauth.bin');
-    this.encryptionAvailable =
-      options.encryptionAvailable ??
-      (() => {
-        try {
-          return safeStorage.isEncryptionAvailable();
-        } catch {
-          return false;
-        }
-      });
-    this.encrypt = options.encrypt ?? ((text) => safeStorage.encryptString(text));
-    this.decrypt = options.decrypt ?? ((buf) => safeStorage.decryptString(buf));
+    const file = options.file ?? path.join(app.getPath('userData'), 'mcp-oauth.bin');
+    this.data = new SecureJsonFile<Persisted>(
+      () => file,
+      () => ({ servers: {} }),
+      (raw) => {
+        const servers = (raw as Partial<Persisted> | null)?.servers;
+        return { servers: servers && typeof servers === 'object' ? servers : {} };
+      },
+      options.codec
+    );
     this.now = options.now ?? Date.now;
+  }
+
+  ready(): Promise<void> {
+    return this.data.ready();
+  }
+
+  /** 等待已排队的落盘完成 */
+  flush(): Promise<void> {
+    return this.data.flush();
+  }
+
+  /** 钥匙串不可用时降级明文；供设置页/日志提示 */
+  get encryptionDegraded(): boolean {
+    return !this.data.isSecure();
   }
 
   record(serverId: string): McpOAuthRecord | undefined {
@@ -113,34 +117,11 @@ export class McpOAuthStore {
   }
 
   private load(): Record<string, McpOAuthRecord> {
-    if (this.cache) return this.cache;
-    try {
-      if (!existsSync(this.file)) {
-        this.cache = {};
-        return this.cache;
-      }
-      const raw = readFileSync(this.file);
-      const json = this.encryptionAvailable() ? this.decrypt(raw) : raw.toString('utf-8');
-      const parsed = JSON.parse(json) as Persisted;
-      this.cache =
-        parsed.servers && typeof parsed.servers === 'object' ? parsed.servers : ({} as never);
-    } catch {
-      // 损坏或换过钥匙串：当空库，重新授权即可恢复
-      this.cache = {};
-    }
-    return this.cache;
+    return this.data.get().servers;
   }
 
   private save(rows: Record<string, McpOAuthRecord>): void {
-    this.cache = rows;
-    const available = this.encryptionAvailable();
-    this.encryptionDegraded = !available;
-    const json = JSON.stringify({ servers: rows } satisfies Persisted);
-    const data = available ? this.encrypt(json) : Buffer.from(json, 'utf-8');
-    mkdirSync(path.dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, data);
-    renameSync(tmp, this.file);
+    void this.data.set({ servers: rows });
   }
 }
 

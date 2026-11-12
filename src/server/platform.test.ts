@@ -13,15 +13,18 @@ afterAll(() => {
 });
 
 describe('server platform', () => {
-  it('round-trips secrets with a 0600 key file and rejects tampering', () => {
-    const encrypted = platform.safeStorage.encryptString('pair-token');
-    expect(platform.safeStorage.decryptString(encrypted)).toBe('pair-token');
+  it('round-trips secrets with a 0600 key file and rejects tampering', async () => {
+    const encrypted = await platform.safeStorage.encryptStringAsync('pair-token');
+    expect(await platform.safeStorage.decryptStringAsync(encrypted)).toEqual({
+      result: 'pair-token',
+      shouldReEncrypt: false,
+    });
     const keyFile = path.join(dataDir, 'secret.key');
     expect(readFileSync(keyFile)).toHaveLength(32);
     expect(readFileSync(keyFile).toString('hex')).not.toContain('pair-token');
     expect(statSync(keyFile).mode & 0o777).toBe(0o600);
     encrypted[encrypted.length - 1] ^= 0xff;
-    expect(() => platform.safeStorage.decryptString(encrypted)).toThrow();
+    await expect(platform.safeStorage.decryptStringAsync(encrypted)).rejects.toThrow();
   });
 
   it('keeps ipc handlers and listeners independently removable', () => {

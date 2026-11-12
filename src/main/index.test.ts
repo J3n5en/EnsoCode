@@ -84,6 +84,11 @@ vi.mock('./services/proxyConfig', () => ({
     whenReady: () => Promise.resolve(true),
   }),
 }));
+vi.mock('./services/secureStores', () => ({
+  readySecureStores: vi.fn(async () => {
+    mocks.order.push('secure');
+  }),
+}));
 vi.mock('./services/updater/AutoUpdater', () => ({
   autoUpdaterService: { init: mocks.autoUpdaterInit },
 }));
@@ -129,17 +134,22 @@ afterAll(() => {
 });
 
 describe('Main startup order', () => {
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
   it('creates the renderer window before asynchronously starting the worker, exactly once', async () => {
     await import('./index');
-    await Promise.resolve();
+    await settle();
 
-    expect(mocks.order).toEqual(['ipc', 'window', 'tray']);
+    // 凭据存储先解密进内存，IPC 才注册
+    expect(mocks.order).toEqual(['secure', 'ipc', 'window', 'tray']);
     expect(mocks.startAgentWorker).not.toHaveBeenCalled();
 
     await new Promise<void>((resolve) => setImmediate(resolve));
     // pair 不依赖代理；worker 等 whenReady 后再 fork，所以排在 pair 之后。
     await Promise.resolve();
-    expect(mocks.order).toEqual(['ipc', 'window', 'tray', 'pair', 'worker']);
+    expect(mocks.order).toEqual(['secure', 'ipc', 'window', 'tray', 'pair', 'worker']);
     expect(mocks.createMainWindow).toHaveBeenCalledOnce();
     expect(mocks.startAgentWorker).toHaveBeenCalledOnce();
     expect(mocks.scheduleReenter).not.toHaveBeenCalled();
@@ -148,7 +158,7 @@ describe('Main startup order', () => {
   it('schedules tray re-entry after an update restart', async () => {
     mocks.consumeTrayReenter.mockReturnValue(true);
     await import('./index');
-    await Promise.resolve();
+    await settle();
     expect(mocks.createMainWindow).toHaveBeenCalledOnce();
     expect(mocks.scheduleReenter).toHaveBeenCalledOnce();
   });

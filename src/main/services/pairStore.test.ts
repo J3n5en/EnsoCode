@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let dir: string;
 vi.mock('electron', () => ({
   app: { getPath: () => dir },
-  safeStorage: { isEncryptionAvailable: () => false },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false },
 }));
 
 beforeEach(() => {

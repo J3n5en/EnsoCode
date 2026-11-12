@@ -159,20 +159,21 @@ function masterKey(): Buffer {
 }
 
 export const safeStorage = {
-  isEncryptionAvailable: () => true,
-  encryptString(plainText: string): Buffer {
+  isAsyncEncryptionAvailable: async () => true,
+  async encryptStringAsync(plainText: string): Promise<Buffer> {
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', masterKey(), iv);
     const body = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
     return Buffer.concat([iv, cipher.getAuthTag(), body]);
   },
-  decryptString(encrypted: Buffer): string {
+  async decryptStringAsync(encrypted: Buffer) {
     const iv = encrypted.subarray(0, 12);
     const tag = encrypted.subarray(12, 28);
     const body = encrypted.subarray(28);
     const decipher = createDecipheriv('aes-256-gcm', masterKey(), iv);
     decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+    const result = Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8');
+    return { result, shouldReEncrypt: false };
   },
 };
 

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let dir: string;
 vi.mock('electron', () => ({
   app: { getPath: () => dir },
-  safeStorage: { isEncryptionAvailable: () => false },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false },
   shell: { openExternal: vi.fn(async () => {}) },
 }));
 vi.mock('../ipc/settings', () => ({ readSettings: () => undefined }));
@@ -53,7 +53,6 @@ function fakeAuthServer(token: (params: URLSearchParams) => Response | Promise<R
 const newStore = (name = 'store') =>
   new McpOAuthStore({
     file: path.join(dir, `${name}.bin`),
-    encryptionAvailable: () => false,
     now: () => NOW,
   });
 

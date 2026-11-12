@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { app, safeStorage } from '@platform';
+import { app } from '@platform';
 import type { SshAuth, SshConnection } from '@shared/types';
+import { type SecureCodec, SecureJsonFile } from './secureFile';
 
 export interface SshConnectionSecret {
   id: string;
@@ -28,9 +28,7 @@ export type StoreResult<T> = { ok: true; value: T } | { ok: false; error: string
 
 export interface SshConnectionStoreOptions {
   file?: string;
-  encryptionAvailable?: () => boolean;
-  encrypt?: (text: string) => Buffer;
-  decrypt?: (buf: Buffer) => string;
+  codec?: SecureCodec;
   randomUuid?: () => string;
 }
 
@@ -39,27 +37,25 @@ interface Persisted {
 }
 
 export class SshConnectionStore {
-  private readonly file: string;
-  private readonly encryptionAvailable: () => boolean;
-  private readonly encrypt: (text: string) => Buffer;
-  private readonly decrypt: (buf: Buffer) => string;
+  private readonly data: SecureJsonFile<Persisted>;
   private readonly randomUuid: () => string;
-  private cache: SshConnectionSecret[] | null = null;
 
   constructor(options: SshConnectionStoreOptions = {}) {
-    this.file = options.file ?? path.join(app.getPath('userData'), 'ssh-connections.bin');
-    this.encryptionAvailable =
-      options.encryptionAvailable ??
-      (() => {
-        try {
-          return safeStorage.isEncryptionAvailable();
-        } catch {
-          return false;
-        }
-      });
-    this.encrypt = options.encrypt ?? ((text) => safeStorage.encryptString(text));
-    this.decrypt = options.decrypt ?? ((buf) => safeStorage.decryptString(buf));
+    const file = options.file ?? path.join(app.getPath('userData'), 'ssh-connections.bin');
+    this.data = new SecureJsonFile<Persisted>(
+      () => file,
+      () => ({ connections: [] }),
+      (raw) => {
+        const rows = (raw as Partial<Persisted> | null)?.connections;
+        return { connections: Array.isArray(rows) ? rows : [] };
+      },
+      options.codec
+    );
     this.randomUuid = options.randomUuid ?? randomUUID;
+  }
+
+  ready(): Promise<void> {
+    return this.data.ready();
   }
 
   list(): SshConnection[] {
@@ -84,7 +80,7 @@ export class SshConnectionStore {
     if (input.auth === 'password') {
       if (!password && existing?.auth === 'password') password = existing.password;
       if (!password) return { ok: false, error: '密码不能为空。' };
-      if (!this.encryptionAvailable()) {
+      if (!this.data.isSecure()) {
         return { ok: false, error: '无法加密保存密码:系统钥匙串不可用。' };
       }
     } else {
@@ -114,29 +110,11 @@ export class SshConnectionStore {
   }
 
   private load(): SshConnectionSecret[] {
-    if (this.cache) return this.cache;
-    try {
-      if (!existsSync(this.file)) {
-        this.cache = [];
-        return this.cache;
-      }
-      const raw = readFileSync(this.file);
-      const json = this.encryptionAvailable() ? this.decrypt(raw) : raw.toString('utf-8');
-      const parsed = JSON.parse(json) as Persisted;
-      this.cache = Array.isArray(parsed.connections) ? parsed.connections : [];
-    } catch {
-      this.cache = [];
-    }
-    return this.cache;
+    return this.data.get().connections;
   }
 
   private save(rows: SshConnectionSecret[]): void {
-    this.cache = rows;
-    const json = JSON.stringify({ connections: rows });
-    const data = this.encryptionAvailable() ? this.encrypt(json) : Buffer.from(json, 'utf-8');
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, data);
-    renameSync(tmp, this.file);
+    void this.data.set({ connections: rows });
   }
 }
 

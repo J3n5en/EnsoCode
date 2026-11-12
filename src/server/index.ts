@@ -40,6 +40,7 @@ import {
 } from '../main/services/pairHost';
 import { getProxyConfig } from '../main/services/proxyConfig';
 import { refreshRemoteLeadership, setupRemoteRenderer } from '../main/services/remoteRenderer';
+import { readySecureStores } from '../main/services/secureStores';
 import {
   disposeAllTerminals,
   hasPendingPtys,
@@ -164,6 +165,7 @@ function listenControl(updater: ServerUpdater, web: WebConfig | null): void {
 async function serve(web: WebConfig | null): Promise<void> {
   // 先占端口：端口被占时直接失败，不留半启动的宿主
   const relay = web ? await startWeb(web) : null;
+  await readySecureStores();
   setupRemoteRenderer();
   registerIpcHandlers();
   const updater = registerServerUpdater();

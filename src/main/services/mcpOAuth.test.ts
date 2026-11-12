@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let dir: string;
 vi.mock('electron', () => ({
   app: { getPath: () => dir },
-  safeStorage: { isEncryptionAvailable: () => false },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false },
   shell: { openExternal: vi.fn(async () => {}) },
 }));
 vi.mock('../ipc/settings', () => ({ readSettings: () => undefined }));
@@ -14,8 +14,7 @@ vi.mock('../ipc/settings', () => ({ readSettings: () => undefined }));
 import { authorizeMcpServer, McpOAuthClientProvider } from './mcpOAuth';
 import { McpOAuthStore } from './mcpOAuthStore';
 
-const newStore = () =>
-  new McpOAuthStore({ file: path.join(dir, 'store.bin'), encryptionAvailable: () => false });
+const newStore = () => new McpOAuthStore({ file: path.join(dir, 'store.bin') });
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), 'enso-mcp-oauth-flow-'));

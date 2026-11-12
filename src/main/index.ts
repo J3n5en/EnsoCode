@@ -58,6 +58,7 @@ import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { getProxyConfig } from './services/proxyConfig';
 import { setupRemoteRenderer } from './services/remoteRenderer';
+import { readySecureStores } from './services/secureStores';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { syncSpeechFromSettings } from './services/speech/service';
 import { disposeAllTerminals, hasPendingPtys, waitPtyQuitIdle } from './services/terminalService';
@@ -141,7 +142,8 @@ if (!gotTheLock) {
     recordAgentWorkerGone(details);
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    const secureStores = readySecureStores();
     electronApp.setAppUserModelId(
       resolveWindowsAppUserModelId({
         execPath: process.execPath,
@@ -197,6 +199,7 @@ if (!gotTheLock) {
         syncAppLanguage: () => installAppMenu(readLocale()),
       },
     });
+    await secureStores;
     registerIpcHandlers();
     registerDesktopIpcHandlers();
     void import('./services/modelsDevCatalog').then(({ startModelsDevRefreshSchedule }) => {

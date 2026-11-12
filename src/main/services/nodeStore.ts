@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { PairedDevice } from '@enso/pair';
-import { app, safeStorage } from '@platform';
+import { app } from '@platform';
+import { SecureJsonFile } from './secureFile';
 
 /**
  * 「连接到节点」的凭据（本机作为 guest 连别的桌面）。
@@ -15,18 +15,6 @@ export interface RemoteNode extends PairedDevice {
   nodeId: string;
   /** 本机给对方起的名字：默认 host-info 的 hostname，可重命名 */
   label: string;
-}
-
-function storePath(): string {
-  return path.join(app.getPath('userData'), 'remote-nodes.bin');
-}
-
-function isSecureStorageAvailable(): boolean {
-  try {
-    return safeStorage.isEncryptionAvailable();
-  } catch {
-    return false;
-  }
 }
 
 // ── 纯函数 ────────────────────────────────────────────────────────────
@@ -90,41 +78,24 @@ export function renameNode(
 
 // ── 落盘 ──────────────────────────────────────────────────────────────
 
-let cache: RemoteNode[] | null = null;
+const nodes = new SecureJsonFile<RemoteNode[]>(
+  () => path.join(app.getPath('userData'), 'remote-nodes.bin'),
+  () => [],
+  (raw) => (Array.isArray(raw) ? (raw as RemoteNode[]) : [])
+);
 
-export function loadNodes(): RemoteNode[] {
-  if (cache) return cache;
-  try {
-    const file = storePath();
-    if (!existsSync(file)) {
-      cache = [];
-      return cache;
-    }
-    const raw = readFileSync(file);
-    const json = isSecureStorageAvailable()
-      ? safeStorage.decryptString(raw)
-      : raw.toString('utf-8');
-    const parsed = JSON.parse(json);
-    cache = Array.isArray(parsed) ? (parsed as RemoteNode[]) : [];
-  } catch {
-    cache = [];
-  }
-  return cache;
+export function nodesReady(): Promise<void> {
+  return nodes.ready();
 }
 
-/** 原子写：临时文件 + rename，避免崩溃损坏 */
-export function saveNodes(nodes: RemoteNode[]): void {
-  cache = nodes;
-  try {
-    const file = storePath();
-    const json = JSON.stringify(nodes);
-    const data = isSecureStorageAvailable()
-      ? safeStorage.encryptString(json)
-      : Buffer.from(json, 'utf-8');
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, data);
-    renameSync(tmp, file);
-  } catch (error) {
-    console.warn('[nodes] save failed', error);
-  }
+export function isNodeStoreSecure(): boolean {
+  return nodes.isSecure();
+}
+
+export function loadNodes(): RemoteNode[] {
+  return nodes.get();
+}
+
+export function saveNodes(list: RemoteNode[]): Promise<void> {
+  return nodes.set(list);
 }
