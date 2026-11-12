@@ -116,7 +116,7 @@ function MaxActiveCoworkersRow() {
   );
 }
 
-/** 类型清单：Enso 固定只读；内置可开关；自定义可增删改且保留名 fail-closed。 */
+/** 类型清单：内置可开关；自定义可增删改且保留名 fail-closed。 */
 export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?: boolean }) {
   const { t } = useI18n();
   const agentTypes = useSettingsStore((state) => state.agentTypes);
@@ -137,20 +137,6 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
-        <Bot className="h-4 w-4 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            Enso
-            <Badge variant="secondary">{t('System')}</Badge>
-            <Badge variant="outline">{t('Locked')}</Badge>
-          </p>
-          <p className="text-muted-foreground text-xs">
-            {t('Inherits the conversation model and provides product capabilities')}
-          </p>
-        </div>
-      </div>
-
       <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
         <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">

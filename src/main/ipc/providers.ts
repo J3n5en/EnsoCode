@@ -3,7 +3,7 @@ import {
   parseOauthFlowControlRequest,
   parseOauthFlowPromptResponse,
   parseStartOauthWizardRequest,
-} from '@shared/capabilities/types';
+} from '@shared/oauthFlow';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import type { ModelMetaQuery, ProviderApiConfig } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';

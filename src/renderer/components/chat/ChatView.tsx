@@ -8,7 +8,6 @@ import { isVirtualRef, modelDisplayName } from '@shared/virtualModels';
 import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
 import { ChromeRow, useShellChrome } from '@/components/app/WindowChrome';
 import { addToast } from '@/components/ui/toast';
 import { useMemberName } from '@/hooks/useMemberName';
@@ -306,16 +305,6 @@ export function ChatView() {
   const running = chrome?.status === 'running';
   const busy = chrome?.busy === true;
   const toolCwd = chrome?.parentWorktreePath ?? project?.path;
-  const capabilityApprovals = useMemo(
-    () =>
-      (chrome?.pendingCapabilityAsks ?? []).map((request) => ({
-        requestId: request.requestId,
-        tool: request.capabilityId,
-        kind: 'mcp' as const,
-        summary: request.summary,
-      })),
-    [chrome?.pendingCapabilityAsks]
-  );
 
   const activateParent = useCallback(() => {
     if (
@@ -441,16 +430,6 @@ export function ChatView() {
             />
           </MarkdownLinkContext.Provider>
           <ApprovalBar
-            key={capabilityApprovals[0]?.requestId ?? 'no-capability-approval'}
-            approvals={capabilityApprovals}
-            allowSession={false}
-            handoff={false}
-            onRespond={(requestId, decision) => {
-              if (decision !== 'allow' && decision !== 'deny') return;
-              void useSessionsStore.getState().respondCapabilityAsk(chrome.id, requestId, decision);
-            }}
-          />
-          <ApprovalBar
             approvals={chrome.pendingApprovals ?? []}
             allowSession={chrome.childLockedProfileId === undefined}
             onRespond={(requestId, decision) =>
@@ -464,13 +443,6 @@ export function ChatView() {
               void window.electronAPI.agent.respondAsk(chrome.id, requestId, answer)
             }
           />
-          {chrome.activeOauthAsk && (
-            <AgentChildOauthHost
-              key={chrome.activeOauthAsk.requestId}
-              request={chrome.activeOauthAsk}
-              conversationId={chrome.id}
-            />
-          )}
           {!chrome.displayedParentId && (
             <PlanBar
               conversationId={chrome.id}
@@ -497,7 +469,6 @@ export function ChatView() {
             busy={busy}
             locked={
               (chrome.pendingApprovals ?? []).length > 0 ||
-              capabilityApprovals.length > 0 ||
               Boolean(chrome.rewinding || chrome.restoringFiles)
             }
             focusKey={chrome.id}

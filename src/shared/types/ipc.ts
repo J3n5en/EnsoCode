@@ -256,10 +256,6 @@ export const IPC_CHANNELS = {
   SOURCE_CONVERSATION_REMOVE: 'source-authority:conversation-remove',
   SOURCE_CONVERSATION_UPDATE_SELECTION: 'source-authority:conversation-update-selection',
 
-  // Enso child capability approval (result returns Main → worker command)
-  CAPABILITIES_ASK: 'capabilities:ask',
-  CAPABILITIES_RESPOND: 'capabilities:respond',
-
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
   DIALOG_SELECT_FILE: 'dialog:select-file',

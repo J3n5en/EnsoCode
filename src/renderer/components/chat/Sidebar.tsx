@@ -2335,7 +2335,6 @@ interface ConversationRowProps {
     unread?: boolean;
     pendingAsks?: readonly { requestId: string }[];
     pendingApprovals?: readonly unknown[];
-    pendingCapabilityAsks?: readonly unknown[];
     /** 标题总结在飞（标题后转圈） */
     titleSummaryPending?: boolean;
     /** 标题总结全部候选失败（标题后红叹号，点击重试） */
@@ -2896,14 +2895,12 @@ function ConversationDot({
     unread?: boolean;
     pendingAsks?: readonly { requestId: string }[];
     pendingApprovals?: readonly unknown[];
-    pendingCapabilityAsks?: readonly unknown[];
     hasRunningChild?: boolean;
   };
 }) {
-  // 待审批 / 待能力确认与 coworker tab 同为 attention；它们也按「等你处理」排在分组最前
+  // 待审批与 coworker tab 同为 attention；它们也按「等你处理」排在分组最前
   const tone =
-    (conversation.pendingApprovals?.length ?? 0) > 0 ||
-    (conversation.pendingCapabilityAsks?.length ?? 0) > 0
+    (conversation.pendingApprovals?.length ?? 0) > 0
       ? 'attention'
       : conversationDotTone({
           status: conversation.status,

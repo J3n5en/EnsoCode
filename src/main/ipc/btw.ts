@@ -25,7 +25,7 @@ import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { isMainRenderer } from '../services/renderers';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import { getSourceAuthorityRegistry, resolveConversationWorkspace } from './agent';
-import { agentSessionIndex } from './capabilities';
+import { agentSessionIndex } from './sessionIndex';
 import { readSettings } from './settings';
 
 function settingsState(): Record<string, unknown> | undefined {

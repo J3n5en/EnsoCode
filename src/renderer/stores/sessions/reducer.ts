@@ -318,7 +318,6 @@ const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
     event.type === 'text-delta'
   )
     return null;
-  if (event.type === 'capability-invoke') return event.child;
   return event.identity;
 };
 

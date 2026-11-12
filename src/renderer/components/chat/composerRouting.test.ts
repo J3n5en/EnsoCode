@@ -11,9 +11,9 @@ const payloadFor = (typeKey: AgentTypeKey): ComposerPayload => {
     label: typeKey,
     displayName: typeKey,
     description: 'Agent description',
-    source: (typeKey === 'agent:enso' ? 'system' : 'builtin') as 'system' | 'builtin',
-    locked: typeKey === 'agent:enso',
-    canDisable: typeKey !== 'agent:enso',
+    source: 'builtin' as const,
+    locked: false,
+    canDisable: true,
     canEdit: false,
   };
   return {
@@ -34,7 +34,7 @@ const payloadFor = (typeKey: AgentTypeKey): ComposerPayload => {
 
 describe('Composer typed recipient routing', () => {
   it.each<AgentTypeKey>([
-    'agent:enso',
+    'builtin:worker',
     'builtin:scout',
     'custom:123e4567-e89b-42d3-a456-426614174000',
   ])('dispatches typed recipient %s and never calls coding send', (typeKey) => {

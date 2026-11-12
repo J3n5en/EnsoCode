@@ -40,7 +40,7 @@ vi.mock('./agent', () => ({
     projection: () => ({ conversations: [...mocks.conversations.values()] }),
   }),
 }));
-vi.mock('./capabilities', () => ({
+vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     workspaceRoot: (id: string) => id,
     workspaceTreeRunning: mocks.running,

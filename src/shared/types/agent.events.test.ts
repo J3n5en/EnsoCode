@@ -97,11 +97,10 @@ describe('custom entry and snapshot projection', () => {
     const metadata = {
       parentId: parent.sessionId,
       childGeneration: CHILD_GENERATION,
-      agentTypeKey: 'agent:enso',
+      agentTypeKey: 'builtin:scout',
       agentInstanceId: INSTANCE_ID,
-      agentInstanceName: 'Enso 3333',
+      agentInstanceName: 'scout 3333',
       dispatchOrigin: 'typed-mention',
-      lockedProfileId: 'enso-locked-v1',
     };
     const safeJournal = {
       records: [
@@ -166,7 +165,7 @@ describe('custom entry and snapshot projection', () => {
     ).toBeNull();
   });
 
-  it('ChildSessionIdentity 不允许 parent/child 同 generation 串台或错误 locked profile', () => {
+  it('ChildSessionIdentity 不允许 parent/child 同 generation 串台或伪造 profile', () => {
     expect(parseChildSessionIdentity(child)).toEqual(child);
     expect(
       parseChildSessionIdentity({
@@ -174,7 +173,7 @@ describe('custom entry and snapshot projection', () => {
         parent: { ...parent, generation: 'old' },
       })
     ).toBeNull();
-    expect(parseChildSessionIdentity({ ...child, profileId: undefined })).toBeNull();
+    expect(parseChildSessionIdentity({ ...child, profileId: 'enso-locked-v1' })).toBeNull();
   });
 });
 

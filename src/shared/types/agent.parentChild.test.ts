@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { resolveShellLimits } from '../shellLimits';
-import { parseAgentCommand, parseAgentWorkerEvent } from './agent';
+import { parseAgentCommand, parseAgentWorkerEvent, parseChildConversationMetadata } from './agent';
 import {
   child,
+  legacyEnsoChild,
   model,
   PARENT_GENERATION,
   parent,
@@ -647,44 +648,56 @@ describe('parent/child commands', () => {
     }
   });
 
-  it('spawn-child Enso 必须 locked profile、exact tools、无 skills/MCP', () => {
-    const command = {
-      type: 'spawn-child',
-      identity: child,
-      cwd: '/repo',
-      config: {
-        typeKey: 'agent:enso',
-        spawnSpecId: SPAWN_SPEC_ID,
-        displayName: 'Enso',
-        description: 'System agent',
-        systemPrompt: 'Locked prompt',
-        model,
-        tools: 'enso-locked',
-        skillBindingIds: [],
-        skillPaths: [],
-        mcpBindingIds: [],
-        systemPromptHash: proof.systemPromptHash,
-        mcpServers: [],
-        lockedProfileId: 'enso-locked-v1',
-      },
+  it('spawn-child 不再接受历史 Enso 类型、enso-locked 工具档或 lockedProfileId', () => {
+    const config = {
+      typeKey: 'builtin:scout',
+      spawnSpecId: SPAWN_SPEC_ID,
+      displayName: 'Scout',
+      description: 'Read-only scout',
+      systemPrompt: 'scout role',
+      model,
+      tools: 'readonly',
+      skillBindingIds: [],
+      skillPaths: [],
+      mcpBindingIds: [],
+      systemPromptHash: proof.systemPromptHash,
+      mcpServers: [],
     };
+    const command = { type: 'spawn-child', identity: child, cwd: '/repo', config };
     expect(parseAgentCommand(command)).toEqual(command);
     expect(
       parseAgentCommand({
         ...command,
-        config: { ...command.config, tools: 'all' },
+        identity: legacyEnsoChild,
+        config: { ...config, typeKey: 'agent:enso' },
       })
     ).toBeNull();
     expect(
-      parseAgentCommand({
-        ...command,
-        identity: { ...child, profileId: 'other' },
-      })
+      parseAgentCommand({ ...command, config: { ...config, tools: 'enso-locked' } })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ ...command, config: { ...config, lockedProfileId: 'enso-locked-v1' } })
+    ).toBeNull();
+  });
+
+  it('历史 Enso child metadata 仍可解析（restoreChildren 依赖它安全跳过）', () => {
+    const metadata = {
+      parentId: parent.sessionId,
+      childGeneration: legacyEnsoChild.generation,
+      agentTypeKey: 'agent:enso',
+      agentInstanceId: legacyEnsoChild.instanceId,
+      agentInstanceName: legacyEnsoChild.instanceName,
+      dispatchOrigin: 'typed-mention',
+      lockedProfileId: 'enso-locked-v1',
+    };
+    expect(parseChildConversationMetadata(metadata)).toEqual(metadata);
+    expect(parseChildConversationMetadata({ ...metadata, lockedProfileId: undefined })).toBeNull();
+    expect(
+      parseChildConversationMetadata({ ...metadata, agentTypeKey: 'builtin:scout' })
     ).toBeNull();
   });
 
   it('spawn-child 透传类型级 reasoning/thinkingLevel；非法值拒绝', () => {
-    const { profileId: _omit, ...nonEnsoChild } = { ...child, typeKey: 'builtin:scout' };
     const baseConfig = {
       typeKey: 'builtin:scout',
       spawnSpecId: SPAWN_SPEC_ID,
@@ -701,7 +714,7 @@ describe('parent/child commands', () => {
     };
     const command = {
       type: 'spawn-child',
-      identity: nonEnsoChild,
+      identity: child,
       cwd: '/repo',
       config: { ...baseConfig, reasoning: 'on', thinkingLevel: 'xhigh' },
     };
@@ -719,35 +732,6 @@ describe('parent/child commands', () => {
     ]) {
       expect(parseAgentCommand({ ...command, config: bad })).toBeNull();
     }
-  });
-
-  it('spawn-child Enso locked profile 拒收类型级推理预设', () => {
-    const command = {
-      type: 'spawn-child',
-      identity: child,
-      cwd: '/repo',
-      config: {
-        typeKey: 'agent:enso',
-        spawnSpecId: SPAWN_SPEC_ID,
-        displayName: 'Enso',
-        description: 'System agent',
-        systemPrompt: 'Locked prompt',
-        model,
-        tools: 'enso-locked',
-        skillBindingIds: [],
-        skillPaths: [],
-        mcpBindingIds: [],
-        systemPromptHash: proof.systemPromptHash,
-        mcpServers: [],
-        lockedProfileId: 'enso-locked-v1',
-      },
-    };
-    expect(
-      parseAgentCommand({ ...command, config: { ...command.config, reasoning: 'on' } })
-    ).toBeNull();
-    expect(
-      parseAgentCommand({ ...command, config: { ...command.config, thinkingLevel: 'high' } })
-    ).toBeNull();
   });
 
   it('prompt-child 首条 task 绑定 child generation/requestId，旧 generation 拒绝', () => {
@@ -817,16 +801,15 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ ...command, extra: 1 })).toBeNull();
   });
 
-  it('capability-result 绑定 child/turn/request 并只接受 envelope', () => {
-    const command = {
-      type: 'capability-result',
-      child,
-      turnId: 'turn-1',
-      requestId: 'cap-1',
-      envelope: { modelResult: { ok: true, data: { changed: true } }, receipt },
-    };
-    expect(parseAgentCommand(command)).toEqual(command);
-    expect(parseAgentCommand({ ...command, turnId: '' })).toBeNull();
-    expect(parseAgentCommand({ ...command, envelope: { result: { ok: true } } })).toBeNull();
+  it('已移除的 capability-result 命令拒收', () => {
+    expect(
+      parseAgentCommand({
+        type: 'capability-result',
+        child,
+        turnId: 'turn-1',
+        requestId: 'cap-1',
+        envelope: { modelResult: { ok: true, data: { changed: true } }, receipt },
+      })
+    ).toBeNull();
   });
 });

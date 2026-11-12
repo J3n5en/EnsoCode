@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY_CATALOG } from './capabilities/catalog';
 import { getTranslation, normalizeLocale, translate, zhTranslations } from './i18n';
 import { BUILTIN_TOOLS } from './types/builtinTools';
 
@@ -152,7 +151,6 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Remove Agent recipient',
   'Message the selected Agent…',
   'Send only to the selected Agent',
-  'Inherits the conversation model and provides product capabilities',
   'This Agent name is reserved',
   'Dispatched to',
   'Completed',
@@ -171,7 +169,6 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Parent ready model did not match the bound model.',
   'Child ready identity mismatch.',
   'Child ready profile or model mismatch.',
-  'Locked Enso tool profile mismatch.',
 ] as const;
 
 describe('normalizeLocale', () => {
@@ -244,22 +241,6 @@ describe('workspace branch i18n keys', () => {
     for (const key of keys) {
       expect(getTranslation('en', key)).toBe(key);
       expect(getTranslation('zh', key), key).not.toBe(key);
-    }
-  });
-});
-
-describe('dangerous capability i18n keys', () => {
-  it('从 catalog 自动收集的全部危险能力说明都有中文映射', () => {
-    const descriptions = Object.values(CAPABILITY_CATALOG)
-      .filter((spec) => spec.risk === 'dangerous')
-      .map((spec) => spec.description);
-    expect(descriptions.length).toBeGreaterThan(0);
-    for (const description of descriptions) {
-      expect(
-        zhTranslations[description],
-        `missing dangerous capability: ${description}`
-      ).toBeDefined();
-      expect(getTranslation('zh', description)).not.toBe(description);
     }
   });
 });

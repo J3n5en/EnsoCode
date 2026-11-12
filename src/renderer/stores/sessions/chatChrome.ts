@@ -36,7 +36,6 @@ export interface ChatChrome {
   retry: Conversation['retry'];
   pendingApprovals: Conversation['pendingApprovals'];
   pendingAsks: Conversation['pendingAsks'];
-  pendingCapabilityAsks: Conversation['pendingCapabilityAsks'];
   backgroundTasks: Conversation['backgroundTasks'];
   subagents: Conversation['subagents'];
   queuedMessages: Conversation['queuedMessages'];
@@ -45,7 +44,6 @@ export interface ChatChrome {
   rewinding?: boolean;
   restoringFiles?: boolean;
   childLockedProfileId?: string;
-  activeOauthAsk: Conversation['activeOauthAsk'];
   displayedParentId?: string;
   busy: boolean;
 }
@@ -117,7 +115,6 @@ export function selectChatChrome(state: SessionsSlice): ChatChrome | null {
     retry: displayed.retry,
     pendingApprovals: displayed.pendingApprovals,
     pendingAsks: displayed.pendingAsks,
-    pendingCapabilityAsks: displayed.pendingCapabilityAsks,
     backgroundTasks: displayed.backgroundTasks,
     subagents: displayed.subagents,
     queuedMessages: displayed.queuedMessages,
@@ -126,7 +123,6 @@ export function selectChatChrome(state: SessionsSlice): ChatChrome | null {
     rewinding: displayed.rewinding,
     restoringFiles: displayed.restoringFiles,
     childLockedProfileId: displayed.child?.lockedProfileId,
-    activeOauthAsk: displayed.activeOauthAsk,
     displayedParentId: displayed.parentId,
     busy: chatSurfaceBusy(displayed),
   };

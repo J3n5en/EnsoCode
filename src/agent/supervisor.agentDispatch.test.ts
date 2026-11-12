@@ -105,9 +105,8 @@ const child = {
   generation: '22222222-2222-4222-8222-222222222222',
   parent,
   instanceId: '33333333-3333-4333-8333-333333333333',
-  instanceName: 'Enso-33333333',
-  typeKey: 'agent:enso' as const,
-  profileId: 'enso-locked-v1' as const,
+  instanceName: 'scout-33333333',
+  typeKey: 'builtin:scout' as const,
 };
 const model = {
   api: 'openai-completions' as const,
@@ -910,7 +909,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     await supervisor.shutdown();
   });
 
-  it('emits real parent/child ready, enforces locked tools, and prompts the child exactly once', async () => {
+  it('emits real parent/child ready and prompts the child exactly once', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
@@ -939,19 +938,18 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       identity: child,
       cwd: '/workspace',
       config: {
-        typeKey: 'agent:enso',
-        displayName: 'Enso',
-        description: 'System Agent',
-        spawnSpecId: 'spawn-enso',
-        systemPrompt: 'locked',
+        typeKey: 'builtin:scout',
+        displayName: 'scout',
+        description: 'Scout Agent',
+        spawnSpecId: 'spawn-scout',
+        systemPrompt: 'scout role',
         model,
-        tools: 'enso-locked',
+        tools: 'all',
         skillPaths: [],
         skillBindingIds: [],
         mcpServers: [],
         mcpBindingIds: [],
-        systemPromptHash: 'enso-hash',
-        lockedProfileId: 'enso-locked-v1',
+        systemPromptHash: 'scout-hash',
       },
     });
     await waitFor(events, 'child-ready');
@@ -960,9 +958,8 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         type: 'child-ready',
         identity: child,
         proof: expect.objectContaining({
-          spawnSpecId: 'spawn-enso',
+          spawnSpecId: 'spawn-scout',
           model: { providerId: 'settings-provider', modelId: 'model' },
-          toolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
         }),
       })
     );
@@ -982,7 +979,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     }
     expect(childSession.prompt).toHaveBeenCalledOnce();
     expect(childSession.prompt).toHaveBeenCalledWith(
-      '<role>\nlocked\n</role>\n\nchild-only task',
+      '<role>\nscout role\n</role>\n\nchild-only task',
       undefined
     );
     expect(parentSession.prompt).not.toHaveBeenCalled();
@@ -2374,7 +2371,7 @@ describe('SessionSupervisor custom parent system prompt', () => {
     rmSync(sessionDir, { recursive: true, force: true });
   });
 
-  it('自定义角色扩展只挂普通 parent，不进入 locked Enso 或 typed child', async () => {
+  it('自定义角色扩展只挂普通 parent，不进入 typed child', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
@@ -2395,31 +2392,6 @@ describe('SessionSupervisor custom parent system prompt', () => {
     // 强制提示词会冻结后续扩展对 systemPromptOptions 的修改，必须最后执行
     const factories = parentLoader?.extensionFactories as Array<{ name?: string }>;
     expect(factories.at(-1)?.name).toBe('custom-persona');
-
-    supervisor.handleCommand({
-      type: 'spawn-child',
-      identity: child,
-      cwd: '/workspace',
-      config: {
-        typeKey: 'agent:enso',
-        displayName: 'Enso',
-        description: 'System Agent',
-        spawnSpecId: 'spawn-enso-system-prompt',
-        systemPrompt: 'locked role prompt',
-        model,
-        tools: 'enso-locked',
-        skillPaths: [],
-        skillBindingIds: [],
-        mcpServers: [],
-        mcpBindingIds: [],
-        systemPromptHash: 'enso-hash',
-        lockedProfileId: 'enso-locked-v1',
-      },
-    });
-    await waitFor(events, 'child-ready');
-    const lockedLoader = mocks.loaderOptions.at(-1);
-    expect(lockedLoader?.systemPrompt).toBeTruthy();
-    expect(applyCustomPersona(lockedLoader, DEFAULT_PERSONA_PROMPT)).toBe(DEFAULT_PERSONA_PROMPT);
 
     supervisor.handleCommand({
       type: 'spawn-child',

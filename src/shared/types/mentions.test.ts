@@ -10,7 +10,6 @@ import {
 } from './mentions';
 
 const known = new Set<AgentTypeKey>([
-  'agent:enso',
   'builtin:scout',
   'custom:11111111-1111-4111-8111-111111111111',
 ]);
@@ -18,7 +17,7 @@ const known = new Set<AgentTypeKey>([
 const dispatch = {
   requestId: 'dispatch-1',
   selectionBindingId: 'selection-binding-1',
-  typeKey: 'agent:enso',
+  typeKey: 'builtin:scout',
   task: {
     text: 'Review this file',
     images: [],

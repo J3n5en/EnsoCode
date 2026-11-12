@@ -84,7 +84,7 @@ vi.mock('./agent', () => ({
   readSessionHistoryFile: vi.fn(),
   setBotWorkerEventObserver: vi.fn(),
 }));
-vi.mock('./capabilities', () => ({
+vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     currentIdentity: (id: string) => mocks.identities.get(id),
     prepareParent: (identity: { sessionId: string; generation: string }) =>
@@ -216,7 +216,7 @@ describe('bots IPC', () => {
   it('审查：failed 状态但尚未 parent-ended 的旧实例，重建说明前仍须真正 release', async () => {
     const { getBotServices, syncBotDiscussMode } = await import('./bots');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const alice = await createBot('Alice');
     const bob = await createBot('Bob');
@@ -255,7 +255,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)?.[0];
     if (!observe) throw new Error('missing observer');
@@ -302,7 +302,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     const alice = await createBot('Alice');
@@ -350,7 +350,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     const alice = await createBot('Alice');
@@ -466,7 +466,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     // 照真实 agentHost：同会话任意一条 parent-ended / parent-rejected 都唤醒 release 等待者，
@@ -562,7 +562,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     const alice = await createBot('Alice');

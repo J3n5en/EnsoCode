@@ -36,7 +36,7 @@ vi.mock('../services/renderers', async (importOriginal) => ({
 vi.mock('./agent', () => ({
   getSourceAuthorityRegistry: () => ({ project: mocks.project, conversation: mocks.conversation }),
 }));
-vi.mock('./capabilities', () => ({
+vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     currentIdentity: mocks.currentIdentity,
     isAlive: mocks.isAlive,

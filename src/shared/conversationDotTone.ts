@@ -54,11 +54,8 @@ export function coworkerTabTone(input: {
   spawning?: boolean;
   pendingApprovalCount?: number;
   pendingAskCount?: number;
-  pendingCapabilityAskCount?: number;
 }): CoworkerTabTone {
-  if ((input.pendingApprovalCount ?? 0) > 0 || (input.pendingCapabilityAskCount ?? 0) > 0) {
-    return 'attention';
-  }
+  if ((input.pendingApprovalCount ?? 0) > 0) return 'attention';
   const tone = conversationDotTone({
     status: input.status,
     spawning: input.spawning,

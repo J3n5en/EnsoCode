@@ -7,16 +7,6 @@ import type {
   BtwSpawnRequest,
 } from '@shared/btw';
 import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
-import type {
-  CapabilityAskDecisionAck,
-  CapabilityAskRequest,
-  CapabilityAskResponse,
-  OauthFlowControlRequest,
-  OauthFlowEvent,
-  OauthFlowPromptResponse,
-  StartOauthResult,
-  StartOauthWizardRequest,
-} from '@shared/capabilities/types';
 import type { ElevationRequestView } from '@shared/elevation';
 import type {
   ChatModelDto,
@@ -45,6 +35,13 @@ import type {
   TreeNodeDto,
   TreeQuery,
 } from '@shared/memory/graphDto';
+import type {
+  OauthFlowControlRequest,
+  OauthFlowEvent,
+  OauthFlowPromptResponse,
+  StartOauthResult,
+  StartOauthWizardRequest,
+} from '@shared/oauthFlow';
 import type { PastedTextFileResult } from '@shared/pastedText';
 import type { PlanRespondAction } from '@shared/planMode';
 import type { PresetImportDraft } from '@shared/presetImport';
@@ -1173,16 +1170,6 @@ const electronAPI = {
       request: UpdateConversationSelectionRequest
     ): Promise<AuthorityMutationResult<ConversationAuthorityProjection>> =>
       ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_UPDATE_SELECTION, request),
-  },
-
-  capabilities: {
-    onAsk: (callback: (request: CapabilityAskRequest) => void): (() => void) => {
-      const listener = (_event: unknown, request: CapabilityAskRequest) => callback(request);
-      ipcRenderer.on(IPC_CHANNELS.CAPABILITIES_ASK, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.CAPABILITIES_ASK, listener);
-    },
-    respond: (response: CapabilityAskResponse): Promise<CapabilityAskDecisionAck> =>
-      ipcRenderer.invoke(IPC_CHANNELS.CAPABILITIES_RESPOND, response),
   },
 
   proxy: {
