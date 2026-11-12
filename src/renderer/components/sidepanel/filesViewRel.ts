@@ -53,6 +53,21 @@ export function toggleViewMode(mode: FileViewMode | undefined): FileViewMode {
   return mode === 'preview' ? 'source' : 'preview';
 }
 
+export type FileTabPathMenuItem =
+  | { id: 'copy-path'; rel: string; mode: 'absolute' }
+  | { id: 'reveal'; rel: string };
+
+/**
+ * 打开文件标签的路径菜单。复制路径与资源管理器「Copy Path」一致，只传工作区相对路径，
+ * 绝对路径由 Main 推导。预览 tab 先剥掉 marker。在访达中显示仅本地工作区。
+ */
+export function fileTabPathMenuItems(tabRel: string, local: boolean): FileTabPathMenuItem[] {
+  const rel = fromPreviewKey(tabRel);
+  const items: FileTabPathMenuItem[] = [{ id: 'copy-path', rel, mode: 'absolute' }];
+  if (local) items.push({ id: 'reveal', rel });
+  return items;
+}
+
 export interface RelMutation {
   /** 递增的操作序号，重命名/删除各占一格 */
   epoch: number;
