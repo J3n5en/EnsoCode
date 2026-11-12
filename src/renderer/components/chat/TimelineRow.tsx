@@ -452,8 +452,10 @@ function SkillTag({ name, content }: { name: string; content: string }) {
 function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
   return (
     <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
-      {chip}
-      {extra ? <span className="ml-1.5 align-middle whitespace-pre-wrap">{extra}</span> : null}
+      <div className="flex flex-wrap items-center gap-1">{chip}</div>
+      {extra ? (
+        <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">{extra}</div>
+      ) : null}
     </div>
   );
 }
