@@ -64,6 +64,44 @@ export function paintDeskChrome(iframe: HTMLIFrameElement | undefined): void {
   } catch {}
 }
 
+/** 帧文档在 Safari 首帧前可能还没有 html/body，DOM 类型没这么声明 */
+export interface FrameChromeDoc {
+  documentElement: Node | null;
+  body: HTMLElement | null;
+}
+
+export interface FrameChromeBinding {
+  observer: MutationObserver;
+  /** body 比 documentElement 晚出现，补绑一次就够 */
+  body: boolean;
+}
+
+/**
+ * 给帧文档绑 MutationObserver。没有 documentElement 时先不绑（等下次 tick），
+ * 否则 Safari 会因目标不是 Node 抛错，把整个启动流程打断。
+ */
+export function bindFrameChrome(
+  doc: FrameChromeDoc,
+  existing: FrameChromeBinding | undefined,
+  onMutation: MutationCallback
+): FrameChromeBinding | null {
+  const root = doc.documentElement;
+  if (!root) return existing ?? null;
+  const bound =
+    existing ??
+    (() => {
+      const observer = new MutationObserver(onMutation);
+      observer.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
+      return { observer, body: false };
+    })();
+  const body = doc.body;
+  if (body && !bound.body) {
+    bound.observer.observe(body, { childList: true });
+    bound.body = true;
+  }
+  return bound;
+}
+
 /** 主题切换改 html 的 class/style；窗口尺寸与抽屉开合改边缘元素：合并到下一帧重取 */
 export function watchDeskChrome(current: () => HTMLIFrameElement | undefined): () => void {
   let frame = 0;
@@ -74,17 +112,12 @@ export function watchDeskChrome(current: () => HTMLIFrameElement | undefined): (
       paintDeskChrome(current());
     });
   };
-  const observers = new Map<Document, MutationObserver>();
+  const binding = new Map<Document, FrameChromeBinding>();
   const observe = () => {
     const doc = current()?.contentDocument;
-    if (!doc || observers.has(doc)) return;
-    const observer = new MutationObserver(schedule);
-    observer.observe(doc.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'style'],
-    });
-    observer.observe(doc.body, { childList: true });
-    observers.set(doc, observer);
+    if (!doc) return;
+    const bound = bindFrameChrome(doc, binding.get(doc), schedule);
+    if (bound) binding.set(doc, bound);
   };
   const tick = () => {
     observe();
@@ -99,6 +132,6 @@ export function watchDeskChrome(current: () => HTMLIFrameElement | undefined): (
     window.removeEventListener('resize', tick);
     document.removeEventListener('visibilitychange', tick);
     clearInterval(timer);
-    for (const observer of observers.values()) observer.disconnect();
+    for (const bound of binding.values()) bound.observer.disconnect();
   };
 }
