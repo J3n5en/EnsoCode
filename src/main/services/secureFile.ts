@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { safeStorage } from '@platform';
 
@@ -113,5 +113,12 @@ export class SecureJsonFile<T> {
     // 钥匙串不可用时这里是明文（refresh_token、SSH 密码等），与其它密钥文件一样只给本人读写
     await writeFile(tmp, data, { mode: 0o600 });
     await rename(tmp, file);
+    if (process.platform !== 'win32') {
+      try {
+        await chmod(file, 0o600);
+      } catch {
+        // 残留 0644 临时文件 rename 后收紧失败，不让这次落盘失败
+      }
+    }
   }
 }

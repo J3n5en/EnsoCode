@@ -343,6 +343,7 @@ function atomicWriteSettings(data: Record<string, unknown>): boolean {
     // 含供应商 apiKey、MCP env 明文：只给本人读写，rename 后 settings.json 沿用这个权限
     writeFileSync(tempPath, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600 });
     renameSync(tempPath, settingsPath);
+    tightenOwnerOnly(settingsPath);
     // 正文只能在引用成功落盘后回收；失败/防抖窗口内必须保留旧磁盘配置的正文。
     if (pendingSystemPromptDeletes.size > 0) {
       const referenced = systemPromptIds(data);
@@ -353,6 +354,16 @@ function atomicWriteSettings(data: Record<string, unknown>): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** mode 只在新建时生效；残留的 0644 .tmp 被 rename 上来后这里再收紧。失败不挡住落盘。 */
+function tightenOwnerOnly(file: string): void {
+  if (process.platform === 'win32') return;
+  try {
+    chmodSync(file, 0o600);
+  } catch {
+    // 权限收紧失败不让设置写盘失败
   }
 }
 

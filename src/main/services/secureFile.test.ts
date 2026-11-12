@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -61,6 +61,19 @@ describe('SecureJsonFile', () => {
 
   // 钥匙串不可用时 refresh_token、SSH 密码等以明文落盘：与其它密钥文件一样只给本人读写
   it.skipIf(process.platform === 'win32')('落盘文件权限为 0600，其他用户读不到', async () => {
+    const store = open(codec(false));
+    await store.ready();
+    await store.set(['plain']);
+    expect(statSync(file()).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === 'win32')('残留的 0644 临时文件再次写入后收紧为 0600', async () => {
+    writeFileSync(file(), '["old"]', { mode: 0o644 });
+    chmodSync(file(), 0o644);
+    const tmp = `${file()}.tmp`;
+    writeFileSync(tmp, 'leftover', { mode: 0o644 });
+    chmodSync(tmp, 0o644);
+    expect(statSync(tmp).mode & 0o777).toBe(0o644);
     const store = open(codec(false));
     await store.ready();
     await store.set(['plain']);

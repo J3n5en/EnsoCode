@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
@@ -314,5 +314,19 @@ describe.skipIf(process.platform === 'win32')('settings 落盘权限', () => {
     expect(settings.patchSettingsState('theme', 'light')).toMatchObject({ ok: true });
     expect(settings.flushSettings()).toBe(true);
     expect(statSync(path.join(userData, 'settings.json')).mode & 0o777).toBe(0o600);
+  });
+
+  it('残留的 0644 临时文件再次落盘后收紧为 0600', async () => {
+    const settings = await import('./settings');
+    const file = path.join(userData, 'settings.json');
+    const tmp = `${file}.tmp`;
+    writeFileSync(file, '{"stale":true}\n', { mode: 0o644 });
+    chmodSync(file, 0o644);
+    writeFileSync(tmp, 'leftover', { mode: 0o644 });
+    chmodSync(tmp, 0o644);
+    expect(statSync(tmp).mode & 0o777).toBe(0o644);
+    expect(settings.patchSettingsState('theme', 'dark')).toMatchObject({ ok: true });
+    expect(settings.flushSettings()).toBe(true);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 });
