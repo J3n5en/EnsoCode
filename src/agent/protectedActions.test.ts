@@ -248,6 +248,53 @@ describe('classifyProtectedTool', () => {
     expect(classifyProtectedTool('grep', 'read', params)).toBeNull()
   );
 
+  // 通配 glob：花括号拆开后，候选要命中密钥代表名，且不能同时命中无关文件。
+  // 近失（.env.example、id_rsa.pub）不算无关，所以 .env* / id_* 仍算主要指向密钥。
+  // *.json、*、a.* 会命中 package.json / a.json 等普通文件，不拦。
+  it.each([
+    '*.pem',
+    '**/*.key',
+    '.env*',
+    '.en?',
+    'id_*',
+    '{.env,x}',
+    '*.PEM',
+    '**/*.p12',
+    '.en[v]',
+    '**/.ssh/**',
+    '**/.aws/**',
+    'credentials.*',
+    '{*.json,.env}',
+  ])('grep glob %s 主要指向密钥文件', (glob) => {
+    expect(classifyProtectedTool('grep', 'read', { pattern: 'KEY', glob })).toBe('secret');
+  });
+
+  it.each(['*.ts', '**/*.tsx', 'src/**', '*.md', '*.json', '*', '**/*', 'a.*', '!*.pem'])(
+    'grep glob %s 不因能套到个别密钥文件而被拦',
+    (glob) => expect(classifyProtectedTool('grep', 'read', { pattern: 'KEY', glob })).toBeNull()
+  );
+
+  // isSecretFilePath 的目录：路径后缀里的 .aws/.docker/.kube/pi-agent，以及私钥文件名所在的 .ssh
+  it.each([
+    '~/.ssh',
+    '~/.ssh/config',
+    '~/.aws',
+    '~/.aws/config',
+    '~/.docker',
+    '~/.kube/cache',
+    'pi-agent',
+    'pi-agent/notes.md',
+    '@~/.ssh/known_hosts',
+  ])('路径 %s 落在密钥目录（或其下）判为读取密钥', (path) => {
+    expect(classifyProtectedTool('grep', 'read', { pattern: 'x', path })).toBe('secret');
+    expect(classifyProtectedTool('read', 'read', { path })).toBe('secret');
+  });
+
+  it.each(['src', '.', '~', '~/.ssh-backup', 'notes/aws', 'my-pi-agent', 'src/app.ts'])(
+    '路径 %s 不是密钥目录',
+    (path) => expect(classifyProtectedTool('read', 'read', { path })).toBeNull()
+  );
+
   it.each([
     ['gmail_send_email', 'external-send'],
     ['slack_post_message', 'external-send'],

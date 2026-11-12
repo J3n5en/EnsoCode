@@ -2,6 +2,7 @@ import os from 'node:os';
 import nodePath from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ApprovalKind, ProtectedActionCategory } from '@shared/types/agent';
+import { globToRegExp } from './globMatch';
 
 /**
  * 受保护动作底线的规则分类器：对外发送 / 删除 / 付款 / 部署改生产 / 读取或外传密钥。
@@ -18,6 +19,163 @@ export function isSecretFilePath(path: string): boolean {
   if (!normalized) return false;
   const base = normalized.slice(normalized.lastIndexOf('/') + 1);
   return SECRET_BASENAMES.test(base) || SECRET_PATH_SUFFIX.test(normalized);
+}
+
+/** 路径后缀规则里的目录，加上私钥文件名 `id_*` 所在的 `.ssh`。段名整段相等才算，`.ssh-backup` 不算。 */
+const SECRET_DIR_SEGMENTS = new Set(['.ssh', '.aws', '.docker', '.kube', 'pi-agent']);
+
+function isUnderSecretDirectory(input: string): boolean {
+  const normalized = input.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return false;
+  return normalized.split('/').some((segment) => SECRET_DIR_SEGMENTS.has(segment.toLowerCase()));
+}
+
+/**
+ * isSecretFilePath 能认出的代表名。通配 glob 用它们判断「必然或主要指向密钥」，
+ * 而不是把任何能套到 credentials.json 的宽模式都拦下来。
+ */
+const SECRET_GLOB_PROBES = [
+  '.env',
+  '.env.local',
+  'id_rsa',
+  'id_ed25519',
+  'a.pem',
+  'a.key',
+  'cert.p12',
+  'credentials.json',
+  'oauth-accounts.json',
+  'secrets.json',
+  'secret.yaml',
+  '.npmrc',
+  '.netrc',
+  '.ssh/id_rsa',
+  '.aws/credentials',
+  '.docker/config.json',
+  '.kube/config',
+  'pi-agent/auth.json',
+];
+/** 普通文件。命中任一则说明该 glob 太宽（`*`、`*.json`、`a.*`）。 */
+const UNRELATED_GLOB_PROBES = [
+  'src/app.ts',
+  'src/App.tsx',
+  'README.md',
+  'package.json',
+  'tsconfig.json',
+  'src/config.json',
+  'notes.txt',
+  'a.ts',
+  'a.json',
+  'a.md',
+  'a.txt',
+  'x',
+];
+
+function topLevelBrace(pattern: string): number {
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] === '[') {
+      const close = pattern.indexOf(']', i + 1);
+      if (close !== -1) {
+        i = close;
+        continue;
+      }
+    }
+    if (pattern[i] === '{') return i;
+  }
+  return -1;
+}
+
+function matchBrace(pattern: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < pattern.length; i++) {
+    if (pattern[i] === '[') {
+      const close = pattern.indexOf(']', i + 1);
+      if (close !== -1) {
+        i = close;
+        continue;
+      }
+    }
+    if (pattern[i] === '{') depth++;
+    else if (pattern[i] === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function splitTopLevelCommas(body: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let brace = 0;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === '[') {
+      const close = body.indexOf(']', i + 1);
+      if (close !== -1) {
+        current += body.slice(i, close + 1);
+        i = close;
+        continue;
+      }
+    }
+    if (ch === '{') brace++;
+    if (ch === '}' && brace > 0) brace--;
+    if (ch === ',' && brace === 0) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/** ripgrep `{a,b}`。没有顶层逗号的 `{.env}` 保持字面量。 */
+function expandBraceAlternatives(pattern: string): string[] {
+  const start = topLevelBrace(pattern);
+  if (start < 0) return [pattern];
+  const end = matchBrace(pattern, start);
+  if (end < 0) return [pattern];
+  const parts = splitTopLevelCommas(pattern.slice(start + 1, end));
+  const prefix = pattern.slice(0, start);
+  const suffix = pattern.slice(end + 1);
+  if (parts.length < 2) {
+    const literal = pattern.slice(0, end + 1);
+    if (topLevelBrace(suffix) < 0) return [pattern];
+    return expandBraceAlternatives(suffix).map((tail) => literal + tail);
+  }
+  const out: string[] = [];
+  for (const part of parts) {
+    for (const tail of expandBraceAlternatives(suffix)) {
+      out.push(...expandBraceAlternatives(prefix + part + tail));
+    }
+  }
+  return out;
+}
+
+function alternativeTargetsSecrets(pattern: string): boolean {
+  let matched: (probe: string) => boolean;
+  try {
+    const re = new RegExp(globToRegExp(pattern, { classes: true }).source, 'i');
+    matched = (probe) => re.test(probe);
+  } catch {
+    return true;
+  }
+  if (!SECRET_GLOB_PROBES.some(matched)) return false;
+  return !UNRELATED_GLOB_PROBES.some(matched);
+}
+
+/**
+ * 无通配符仍按文件名规则。有 `*?[]{}` 时：任一花括号候选命中密钥探针、且不命中无关文件，才算主要指向密钥。
+ * `.env.example` 这类近失不在无关探针里，因此 `.env*` 仍拦；`*.json` / `*` 会套到普通文件，不拦。
+ */
+function globTargetsSecrets(glob: string): boolean {
+  const trimmed = glob.trim();
+  if (!trimmed || trimmed.startsWith('!')) return false;
+  if (!/[*?[\]{}]/.test(trimmed)) return isSecretFilePath(trimmed);
+  return expandBraceAlternatives(trimmed).some(
+    (alt) => alt.length > 0 && !alt.startsWith('!') && alternativeTargetsSecrets(alt)
+  );
 }
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
@@ -551,9 +709,12 @@ export function classifyProtectedTool(
   }
   if (kind === 'read') {
     const path = record.path ?? record.file_path;
-    if (typeof path === 'string' && isSecretFilePath(expandPiToolPath(path))) return 'secret';
+    if (typeof path === 'string') {
+      const expanded = expandPiToolPath(path);
+      if (isSecretFilePath(expanded) || isUnderSecretDirectory(expanded)) return 'secret';
+    }
     // grep 的 --glob 会越过 .gitignore，glob 直接点名密钥文件等同显式读取它
-    return typeof record.glob === 'string' && isSecretFilePath(record.glob) ? 'secret' : null;
+    return typeof record.glob === 'string' && globTargetsSecrets(record.glob) ? 'secret' : null;
   }
   if (kind === 'mcp') return classifyMcpTool(toolName);
   return null;

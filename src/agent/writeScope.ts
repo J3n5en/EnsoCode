@@ -1,32 +1,10 @@
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { getApplyPatchPaths } from './applyPatch';
+import { globToRegExp } from './globMatch';
 import { expandPiToolPath } from './protectedActions';
-/** 极简 glob → RegExp：`**` 任意层级（含空）、`*` 段内任意、`?` 单字符；匹配整段 posix 相对路径 */
-export function globToRegExp(glob: string): RegExp {
-  let out = '';
-  for (let i = 0; i < glob.length; i++) {
-    const ch = glob[i];
-    if (ch === '*') {
-      if (glob[i + 1] === '*') {
-        i++;
-        if (glob[i + 1] === '/') {
-          i++;
-          out += '(?:.*/)?';
-        } else {
-          out += '.*';
-        }
-      } else {
-        out += '[^/]*';
-      }
-    } else if (ch === '?') {
-      out += '[^/]';
-    } else {
-      out += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-    }
-  }
-  return new RegExp(`^${out}$`);
-}
+
+export { globToRegExp } from './globMatch';
 
 /** replace/write 走 path；带 input 的旧 Hashline 形状不再当写目标。 */
 export function extractEditTargetPath(params: unknown): string | undefined {
