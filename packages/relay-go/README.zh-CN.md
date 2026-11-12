@@ -58,13 +58,27 @@ GitHub Release 构建（带版本 ldflags）默认开启：启动时检查最新
 
 ## Docker
 
-镜像发布到 `ghcr.io/j3n5en/enso-relay`（`linux/amd64` 与 `linux/arm64`）。Release tag 会打上该版本号和 `latest`；手动触发工作流打 `edge`。
+公共镜像在 `ghcr.io/j3n5en/enso-relay`（`linux/amd64`、`linux/arm64`），无需登录即可拉取。Release tag 会打上该版本号和 `latest`；手动触发工作流打 `edge` —— 那是尝鲜未发布构建的，别用在生产。
 
 ```bash
-docker run -d -p 8787:8787 -v enso-relay:/data ghcr.io/j3n5en/enso-relay:latest
+docker run -d --name enso-relay --restart unless-stopped \
+  -p 8787:8787 \
+  -v enso-relay:/data \
+  ghcr.io/j3n5en/enso-relay:latest
 ```
 
-数据库在卷里的 `/data/relay.sqlite`。镜像设置了 `RELAY_AUTO_UPDATE=0`：容器内自更新只是替换容器文件系统里的二进制，没有意义，更新请重新构建或拉取新镜像。
+数据库是卷里的 `/data/relay.sqlite`，所有 `pairs` 行都在这里 —— 就是每台设备配对时谈下来的状态。镜像里没有状态，所以升级只是换容器：
+
+```bash
+docker exec enso-relay sh -c 'cat /data/relay.sqlite' > relay.sqlite.bak   # 备份可选；想拷得干净就先停容器
+docker pull ghcr.io/j3n5en/enso-relay:latest
+docker rm -f enso-relay
+docker run -d --name enso-relay --restart unless-stopped -p 8787:8787 -v enso-relay:/data ghcr.io/j3n5en/enso-relay:latest
+```
+
+挂的必须还是同一个 `-v enso-relay:/data`。不写 `-v` 时 Docker 会给每个容器新建匿名卷，重建后就是空的，看起来像配对丢了；那个成孤儿的旧卷会被 `docker system prune` 清掉。不想让 `latest` 漂移可以锁 digest（`ghcr.io/j3n5en/enso-relay@sha256:...`）。
+
+镜像设置了 `RELAY_AUTO_UPDATE=0`：容器内自更新只是替换容器文件系统里的二进制，重启就没了，更新请拉新镜像。
 
 ## 从源码构建
 
