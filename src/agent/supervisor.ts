@@ -136,6 +136,7 @@ import {
 import { approvalReviewResultExtension } from './approvalReviewRecords';
 import { AskManager, createAskTool } from './ask';
 import { ensureAssistantUsage } from './assistantUsage';
+import { auxiliaryReasoning } from './auxiliaryReasoning';
 import {
   BackgroundTaskManager,
   createTaskTools,
@@ -5699,12 +5700,14 @@ export class SessionSupervisor {
         const timer = setTimeout(() => controller.abort(), command.timeoutMs);
         try {
           const model = await resolveBaseModelOrRefresh(runtime, candidate);
+          // 没显式给档位（或给的是 off）时按模型推理配置补：off 会让强制推理的模型断流
+          const requested = command.reasoning;
+          const reasoning =
+            requested && requested !== 'off' ? requested : auxiliaryReasoning(candidate);
           const options = {
             signal: controller.signal,
             ...(command.maxTokens !== undefined ? { maxTokens: command.maxTokens } : {}),
-            ...(command.reasoning && command.reasoning !== 'off'
-              ? { reasoning: command.reasoning }
-              : {}),
+            ...(reasoning ? { reasoning } : {}),
           };
           const message = command.stream
             ? await this.readSimpleStream(
@@ -5896,8 +5899,10 @@ export class SessionSupervisor {
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const model = await resolveBaseModelOrRefresh(runtime, candidate);
+        const reasoning = auxiliaryReasoning(candidate);
         const message = await runtime.completeSimple(model, context, {
           signal: controller.signal,
+          ...(reasoning ? { reasoning } : {}),
         });
         if (message.stopReason === 'aborted') {
           lastError = `${label}: timed out after ${Math.round(timeoutMs / 1000)}s`;
