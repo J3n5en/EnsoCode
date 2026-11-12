@@ -109,19 +109,22 @@ function hotkeyOwned(id: symbol): boolean {
 /**
  * 窗口级快捷键归谁。同一种面板只有一个可见时，它接管（分屏焦点在终端、或点了原生视图
  * 没把分组标成激活，也要能按 ⌘S / 标注键）。同时有多个可见时，只交给激活的那个。
+ * `enabled=false`（宿主自己决定，如 Bot 面板）时不登记，免得把侧栏同类面板的计数凑多。
  */
-export function usePanelHotkeyTarget(kind: PanelHotkeyKind): boolean {
+export function usePanelHotkeyTarget(kind: PanelHotkeyKind, enabled = true): boolean {
   const { visible, active } = usePanelVisibility();
   const idRef = useRef<symbol | null>(null);
   if (idRef.current === null) idRef.current = Symbol(kind);
   const id = idRef.current;
   useEffect(() => {
+    if (!enabled) return;
     hotkeyClaims.set(id, { kind, visible, active });
     emitHotkeys();
     return () => {
       hotkeyClaims.delete(id);
       emitHotkeys();
     };
-  }, [active, id, kind, visible]);
-  return useSyncExternalStore(subscribeHotkeys, () => hotkeyOwned(id));
+  }, [active, enabled, id, kind, visible]);
+  const owned = useSyncExternalStore(subscribeHotkeys, () => hotkeyOwned(id));
+  return enabled && owned;
 }

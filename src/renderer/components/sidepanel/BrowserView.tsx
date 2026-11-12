@@ -126,7 +126,7 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   const isActiveConversation = useSessionsStore((s) => s.activeId === dockConversationId);
   const hostVisible = active ?? (sidebarOpen && isActiveConversation);
   // 标注快捷键：Bot 面板由宿主传 active。Code 侧栏按可见优先，多个可见浏览器才用分组是否激活区分
-  const browserHotkeys = usePanelHotkeyTarget('browser');
+  const browserHotkeys = usePanelHotkeyTarget('browser', active === undefined);
   const hotkeysActive = active ?? browserHotkeys;
   const [state, setState] = useState<BrowserTabState>(EMPTY);
   const [address, setAddress] = useState('');

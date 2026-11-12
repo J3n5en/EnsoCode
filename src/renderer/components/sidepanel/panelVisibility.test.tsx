@@ -39,9 +39,9 @@ function fakePanelApi(initial: { isActive: boolean; isVisible: boolean }) {
   return api satisfies PanelActivitySource;
 }
 
-function Probe() {
+function Probe({ enabled = true }: { enabled?: boolean }) {
   const { visible, active } = usePanelVisibility();
-  const hotkey = usePanelHotkeyTarget('files');
+  const hotkey = usePanelHotkeyTarget('files', enabled);
   return (
     <i data-visible={String(visible)} data-active={String(active)} data-hotkey={String(hotkey)} />
   );
@@ -159,6 +159,25 @@ describe('侧栏面板可见性', () => {
           >
             <Probe />
           </PanelVisibilityProvider>
+        </>
+      )
+    );
+    const flags = () =>
+      [...container.querySelectorAll('i')].map((el) => el.getAttribute('data-hotkey'));
+    expect(flags()).toEqual(['true', 'false']);
+  });
+
+  it('宿主自管快捷键的面板（如 Bot 浏览器）不登记，不挤掉侧栏里唯一可见的同种面板', async () => {
+    await act(async () =>
+      root.render(
+        <>
+          <PanelVisibilityProvider
+            dockConversationId="a"
+            api={fakePanelApi({ isActive: false, isVisible: true })}
+          >
+            <Probe />
+          </PanelVisibilityProvider>
+          <Probe enabled={false} />
         </>
       )
     );
