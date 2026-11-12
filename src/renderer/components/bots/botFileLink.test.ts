@@ -29,12 +29,21 @@ describe('projectIdForBotConversation', () => {
     expect(projectIdForBotConversation([home], [], 'missing')).toBeUndefined();
   });
 
-  it('委派子会话沿用父聊天的项目', () => {
+  it('委派子会话取被委派成员在该聊天里的项目，不拿别的成员的', () => {
     const home = chat({
       id: 'direct',
-      sessions: { bot: { conversationId: 'parent', cursor: 0, projectId: 'home-project' } },
+      sessions: {
+        other: { conversationId: 'parent', cursor: 0, projectId: 'other-home' },
+        bot: { conversationId: 'sibling', cursor: 0, projectId: 'home-project' },
+      },
     });
-    const delegation = { childConversationId: 'child', chatId: 'direct' } as Delegation;
+    const delegation = {
+      childConversationId: 'child',
+      chatId: 'direct',
+      targetBotId: 'bot',
+    } as Delegation;
     expect(projectIdForBotConversation([home], [delegation], 'child')).toBe('home-project');
+    const unknown = { ...delegation, targetBotId: 'nobody' } as Delegation;
+    expect(projectIdForBotConversation([home], [unknown], 'child')).toBeUndefined();
   });
 });

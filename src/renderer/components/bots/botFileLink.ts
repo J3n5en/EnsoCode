@@ -7,7 +7,7 @@ function sessionProject(chat: BotChat, session: BotChat['sessions'][string]): st
   return chat.workspace.kind === 'member-home' ? undefined : chat.workspace.projectId;
 }
 
-/** 当前会话、或委派子会话（跟父聊天同一项目）的 projectId */
+/** 当前会话、或委派子会话（取被委派成员在该聊天里的会话项目，拿不到就不猜）的 projectId */
 export function projectIdForBotConversation(
   chats: readonly BotChat[] | undefined,
   delegations: readonly Delegation[] | undefined,
@@ -21,11 +21,8 @@ export function projectIdForBotConversation(
   for (const delegation of delegations ?? []) {
     if (delegation.childConversationId !== conversationId || !delegation.chatId) continue;
     const chat = chats?.find((item) => item.id === delegation.chatId);
-    if (!chat) continue;
-    for (const session of Object.values(chat.sessions)) {
-      const projectId = sessionProject(chat, session);
-      if (projectId) return projectId;
-    }
+    const session = chat?.sessions[delegation.targetBotId];
+    if (chat && session) return sessionProject(chat, session);
   }
   return undefined;
 }
