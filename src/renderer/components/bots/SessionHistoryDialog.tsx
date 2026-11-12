@@ -1,10 +1,12 @@
 import type { ParentHistoryTailResult, ProjectedMessage } from '@shared/types/agent';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatHostContext, type ChatSpeaker } from '@/components/chat/chatHost';
+import { EditDiffSourceContext } from '@/components/chat/editDiffSource';
 import { MessageTimeline, type MessageTimelineHandle } from '@/components/chat/MessageTimeline';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useI18n } from '@/i18n';
 import { buildTimeline } from '@/stores/sessions/timeline';
+import { useBotFileLink } from './botFileLink';
 import { type MessageFocus, useMessageFocus, useRunDividers } from './LiveSessionTimeline';
 
 interface SessionHistoryDialogProps {
@@ -39,6 +41,7 @@ export function SessionHistoryDialog({
   const [page, setPage] = useState<{ messages: ProjectedMessage[]; baseIndex: number } | null>(
     null
   );
+  const [historyProjectId, setHistoryProjectId] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const loadingRef = useRef(false);
@@ -58,12 +61,15 @@ export function SessionHistoryDialog({
   useEffect(() => {
     setPage(null);
     setError(undefined);
+    setHistoryProjectId(undefined);
     if (!conversationId) return;
     let alive = true;
     void loadPage().then((result) => {
       if (!alive) return;
-      if (result.ok) setPage({ messages: result.messages, baseIndex: result.baseIndex });
-      else
+      if (result.ok) {
+        setPage({ messages: result.messages, baseIndex: result.baseIndex });
+        setHistoryProjectId(result.projectId);
+      } else
         setError(
           result.code === 'not-found' ? t('This conversation has no history yet.') : result.error
         );
@@ -126,36 +132,39 @@ export function SessionHistoryDialog({
     }),
     [botSession, conversationId, speakerName, speakerColor, speakerImage, turnFooter]
   );
+  const link = useBotFileLink(botSession ? conversationId : null, historyProjectId);
 
   return (
-    <Dialog open={conversationId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex h-[80vh] max-w-3xl flex-col">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-        <ChatHostContext.Provider value={host}>
-          <div className="@container flex min-h-0 flex-1 flex-col border-t">
-            {error ? (
-              <p className="p-6 text-muted-foreground text-sm">{error}</p>
-            ) : (
-              <MessageTimeline
-                ref={timelineRef}
-                items={items}
-                busy={page === null}
-                loading={page === null}
-                running={false}
-                emptyTitle={title}
-                hasOlder={Boolean(page && page.baseIndex > 0)}
-                historyLoading={loadingOlder}
-                olderCursor={page?.baseIndex}
-                onStartReached={page && page.baseIndex > 0 ? () => void loadOlder() : undefined}
-                searchQuery={highlight.searchQuery}
-                activeHit={highlight.activeHit}
-              />
-            )}
-          </div>
-        </ChatHostContext.Provider>
-      </DialogContent>
-    </Dialog>
+    <EditDiffSourceContext.Provider value={link}>
+      <Dialog open={conversationId !== null} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent className="flex h-[80vh] max-w-3xl flex-col">
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+          </DialogHeader>
+          <ChatHostContext.Provider value={host}>
+            <div className="@container flex min-h-0 flex-1 flex-col border-t">
+              {error ? (
+                <p className="p-6 text-muted-foreground text-sm">{error}</p>
+              ) : (
+                <MessageTimeline
+                  ref={timelineRef}
+                  items={items}
+                  busy={page === null}
+                  loading={page === null}
+                  running={false}
+                  emptyTitle={title}
+                  hasOlder={Boolean(page && page.baseIndex > 0)}
+                  historyLoading={loadingOlder}
+                  olderCursor={page?.baseIndex}
+                  onStartReached={page && page.baseIndex > 0 ? () => void loadOlder() : undefined}
+                  searchQuery={highlight.searchQuery}
+                  activeHit={highlight.activeHit}
+                />
+              )}
+            </div>
+          </ChatHostContext.Provider>
+        </DialogContent>
+      </Dialog>
+    </EditDiffSourceContext.Provider>
   );
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { app, ipcMain, powerMonitor, type RendererContents } from '@platform';
 import { browserSessionKey } from '@shared/bots/browser';
@@ -615,7 +615,7 @@ function authoritativeResumeFile(
 
 /**
  * edit diff 还原上下文用的工作区文件：渲染层只传会话标识与工作区相对路径。
- * 根目录由 Main 按会话权威记录推导（SSH / bot-home 等非本机工作区返回 null），
+ * 根目录由 Main 按会话权威记录推导（SSH 等非本机工作区返回 null；bot-home 单独放行），
  * 再过 resolveLocalUnderCwd 的词法 + realpath 双重边界，防 `../` 与符号链接逃逸。
  */
 function conversationFile(request: unknown): string | null {
@@ -627,8 +627,38 @@ function conversationFile(request: unknown): string | null {
     return null;
   }
   if (sourceAuthority?.conversation(conversationId)?.projectId !== projectId) return null;
-  const cwd = resolveLocalCwdForBrowser(conversationId);
+  const cwd = filesReadCwd(conversationId);
   return cwd ? resolveLocalUnderCwd(cwd, rel) : null;
+}
+
+/**
+ * files.read 的工作区根。bot-home 不走浏览器 file:// 的 pickBrowserFileRoot
+ * （那里会拒绝），这里单独放行：会话未结束、项目 active、属于该项目，
+ * 有 bot 标记时再校验绑定；根目录是 canonicalPath 的 realpath。
+ */
+function filesReadCwd(conversationId: string): string | null {
+  const conversation = sourceAuthority?.conversation(conversationId);
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  if (project?.kind === 'bot-home') {
+    const bot = conversation?.bot;
+    const botOk = !bot || (isUuid(bot.botId) && (bot.chatId === null || isUuid(bot.chatId)));
+    if (
+      conversation &&
+      conversation.lifecycle !== 'ended' &&
+      project.state === 'active' &&
+      conversation.projectId === project.projectId &&
+      botOk
+    ) {
+      try {
+        const root = realpathSync(project.canonicalPath);
+        return statSync(root).isDirectory() ? root : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  return resolveLocalCwdForBrowser(conversationId);
 }
 
 /**
@@ -667,7 +697,7 @@ async function externalWrittenFile(request: unknown): Promise<string | null> {
   if (sourceAuthority?.conversation(conversationId)?.projectId !== projectId) return null;
   const target = resolveExternalRevealTarget(record.path);
   if (!target.ok) return null;
-  const cwd = resolveLocalCwdForBrowser(conversationId);
+  const cwd = filesReadCwd(conversationId);
   if (!cwd) return null;
   try {
     const messages = await readBotSessionMessages(

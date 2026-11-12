@@ -3,6 +3,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditDiff } from './EditDiff';
+import { EditDiffSourceContext } from './editDiffSource';
 import { MarkdownLinkContext, type MarkdownLinkContextValue } from './Markdown';
 
 const harness = vi.hoisted(() => ({ read: vi.fn() }));
@@ -89,9 +90,23 @@ describe('EditDiff 读当前文件', () => {
     );
   });
 
-  it('没有会话上下文（Bot、远程节点视图）时不读文件', async () => {
+  it('没有会话上下文（远程节点视图）时不读文件', async () => {
     await render(<EditDiff path="src/a.ts" blocks={blocks} />, null);
     expect(harness.read).not.toHaveBeenCalled();
     expect(document.querySelector('[data-diff]')?.textContent).toBe('a = 1=>a = 2');
+  });
+
+  it('Bot 时间线只给 EditDiff 提供会话标识', async () => {
+    await render(
+      <EditDiffSourceContext.Provider value={{ conversationId: 'b1', projectId: 'home' }}>
+        <EditDiff path="notes/a.md" blocks={blocks} />
+      </EditDiffSourceContext.Provider>,
+      null
+    );
+    expect(harness.read).toHaveBeenCalledExactlyOnceWith({
+      conversationId: 'b1',
+      projectId: 'home',
+      rel: 'notes/a.md',
+    });
   });
 });

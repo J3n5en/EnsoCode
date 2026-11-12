@@ -1441,6 +1441,22 @@ export function sendImageTool(
   );
 }
 
+/** member-home 的项目 id 不在聊天记录里；列表时从会话权威记录补上，供编辑 diff 回传 */
+function withSessionProjects(chats: readonly BotChat[]): BotChat[] {
+  const authority = getSourceAuthorityRegistry();
+  if (!authority) return [...chats];
+  return chats.map((chat) => {
+    let sessions: BotChat['sessions'] | undefined;
+    for (const [botId, session] of Object.entries(chat.sessions)) {
+      const projectId = authority.conversation(session.conversationId)?.projectId;
+      if (!projectId || session.projectId === projectId) continue;
+      sessions ??= { ...chat.sessions };
+      sessions[botId] = { ...session, projectId };
+    }
+    return sessions ? { ...chat, sessions } : chat;
+  });
+}
+
 export function registerBotHandlers(): void {
   syncBotModeServices();
   setBotAvatarResolver((botId) =>
@@ -1869,7 +1885,7 @@ export function registerBotHandlers(): void {
     'read',
     (_sender, _request, { chats, host }): BotChatsListResult => ({
       ok: true,
-      chats: chats.list(),
+      chats: withSessionProjects(chats.list()),
       queue: host.queueState(),
       silences: host.silences(),
       enabled: true,
@@ -2161,7 +2177,8 @@ export function registerBotHandlers(): void {
     if (!input || !conversation?.bot) {
       return { ok: false, code: 'not-found', error: 'Not a bot conversation.' };
     }
-    return readSessionHistoryFile(conversation.sessionFile, input.beforeIndex);
+    const page = await readSessionHistoryFile(conversation.sessionFile, input.beforeIndex);
+    return page.ok ? { ...page, projectId: conversation.projectId } : page;
   });
 
   handle(IPC_CHANNELS.BOT_SEARCH, 'read', (_sender, request, services) =>

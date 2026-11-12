@@ -1,5 +1,6 @@
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { type ChatHost, ChatHostContext, type ChatSpeaker } from '@/components/chat/chatHost';
+import { EditDiffSourceContext } from '@/components/chat/editDiffSource';
 import {
   CHAT_COL,
   MessageTimeline,
@@ -13,6 +14,7 @@ import { useBotsStore } from '@/stores/bots';
 import { delegationRunMarks } from '@/stores/bots/delegations';
 import { focusStep, messageItemKey } from '@/stores/bots/focus';
 import { buildTimeline } from '@/stores/sessions/timeline';
+import { useBotFileLink } from './botFileLink';
 import { triggerText } from './TaskRuns';
 
 export type RunDividers = { key: string; at: number; text: string }[];
@@ -184,43 +186,46 @@ export function LiveSessionTimeline({
     [conversationId, name, color, image, turnFooter, controls]
   );
   const hasOlder = (projection?.historyBaseIndex ?? 0) > 0;
+  const link = useBotFileLink(conversationId);
 
   return (
-    <ChatHostContext.Provider value={host}>
-      <div
-        data-slot={dataSlot}
-        className={cn('@container flex min-h-0 flex-1 flex-col', className)}
-      >
-        <MessageTimeline
-          key={conversationId}
-          ref={timelineRef}
-          items={items}
-          busy={running}
-          loading={false}
-          running={running}
-          runStartedAt={projection?.runStartedAt}
-          lastOutputAt={projection?.lastOutputAt}
-          error={projection?.status === 'failed' ? projection.error : undefined}
-          emptyTitle={emptyTitle}
-          emptyDescription={emptyDescription}
-          historyLoading={historyLoading}
-          hasOlder={hasOlder}
-          olderCursor={projection?.historyBaseIndex}
-          onStartReached={
-            hasOlder
-              ? () => void useBotsStore.getState().loadOlderSession(conversationId)
-              : undefined
-          }
-          searchQuery={highlight.searchQuery}
-          activeHit={highlight.activeHit}
-        />
-        {projection?.retry && (
-          <div className={CHAT_COL}>
-            <RetryBar retry={projection.retry} />
-          </div>
-        )}
-      </div>
-    </ChatHostContext.Provider>
+    <EditDiffSourceContext.Provider value={link}>
+      <ChatHostContext.Provider value={host}>
+        <div
+          data-slot={dataSlot}
+          className={cn('@container flex min-h-0 flex-1 flex-col', className)}
+        >
+          <MessageTimeline
+            key={conversationId}
+            ref={timelineRef}
+            items={items}
+            busy={running}
+            loading={false}
+            running={running}
+            runStartedAt={projection?.runStartedAt}
+            lastOutputAt={projection?.lastOutputAt}
+            error={projection?.status === 'failed' ? projection.error : undefined}
+            emptyTitle={emptyTitle}
+            emptyDescription={emptyDescription}
+            historyLoading={historyLoading}
+            hasOlder={hasOlder}
+            olderCursor={projection?.historyBaseIndex}
+            onStartReached={
+              hasOlder
+                ? () => void useBotsStore.getState().loadOlderSession(conversationId)
+                : undefined
+            }
+            searchQuery={highlight.searchQuery}
+            activeHit={highlight.activeHit}
+          />
+          {projection?.retry && (
+            <div className={CHAT_COL}>
+              <RetryBar retry={projection.retry} />
+            </div>
+          )}
+        </div>
+      </ChatHostContext.Provider>
+    </EditDiffSourceContext.Provider>
   );
 }
 

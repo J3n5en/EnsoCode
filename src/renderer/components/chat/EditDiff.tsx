@@ -7,6 +7,7 @@ import { diffCacheKey } from '@/lib/diffCacheKey';
 import { reconstructOld } from '@/lib/sessionChanges';
 import type { EditBlock } from '@/stores/sessions/timeline';
 import { CODE_THEME, ensureHighlighter } from './codeHighlighter';
+import { EditDiffSourceContext } from './editDiffSource';
 import { MarkdownLinkContext } from './Markdown';
 import { isAbsoluteLocalPath, toWorkspaceRelativePath } from './markdownLinks';
 
@@ -41,7 +42,9 @@ export function EditDiff({
   const name = path.split('/').pop() || 'file';
   const [state, setState] = useState<Loaded>({ kind: 'loading' });
   // 工作区内传相对路径；工作区外的绝对路径交给 Main 按会话写入记录判断；没有会话上下文不读
-  const link = useContext(MarkdownLinkContext);
+  const diffSource = useContext(EditDiffSourceContext);
+  const markdownLink = useContext(MarkdownLinkContext);
+  const link = diffSource ?? markdownLink;
   const conversationId = link?.conversationId;
   const projectId = link?.projectId;
   const rel = link ? toWorkspaceRelativePath(path, link.cwd) : null;

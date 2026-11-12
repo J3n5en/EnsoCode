@@ -853,7 +853,7 @@ describe('agent IPC Main identity boundary', () => {
     let root: string;
     const read = async (request: unknown) =>
       mocks.handlers.get(IPC_CHANNELS.FILES_READ)?.(event, request);
-    const mockProject = (kind?: 'ssh') => {
+    const mockProject = (kind?: 'ssh' | 'bot-home') => {
       vi.spyOn(getSourceAuthorityRegistry()!, 'project').mockImplementation((id) =>
         id === 'p'
           ? { projectId: 'p', canonicalPath: root, state: 'active', version: 1, kind }
@@ -922,6 +922,66 @@ describe('agent IPC Main identity boundary', () => {
       await expect(
         read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })
       ).resolves.toBeNull();
+    });
+
+    describe('bot-home 工作区', () => {
+      const botId = '33333333-3333-4333-8333-333333333333';
+      const conversation = (bot?: { botId: string; chatId: string | null }) => {
+        vi.spyOn(getSourceAuthorityRegistry()!, 'conversation').mockImplementation((id) =>
+          id === 'conv-files'
+            ? {
+                conversationId: id,
+                projectId: 'p',
+                kind: 'root' as const,
+                lifecycle: 'ready' as const,
+                version: 1,
+                ...(bot ? { bot } : {}),
+              }
+            : undefined
+        );
+      };
+
+      beforeEach(() => {
+        mockProject('bot-home');
+        conversation({ botId, chatId: null });
+      });
+
+      it('bot-home 工作区文件可读', async () => {
+        await expect(
+          read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })
+        ).resolves.toBe('export const a = 1;\n');
+      });
+
+      it('工作区内符号链接指向外部时不读', async () => {
+        await expect(
+          read({ conversationId: 'conv-files', projectId: 'p', rel: 'escape/settings.json' })
+        ).resolves.toBeNull();
+      });
+
+      it('bot 标记不合法时不读', async () => {
+        conversation({ botId: 'not-a-bot', chatId: null });
+        await expect(
+          read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })
+        ).resolves.toBeNull();
+      });
+
+      it('会话已结束时不读', async () => {
+        vi.spyOn(getSourceAuthorityRegistry()!, 'conversation').mockImplementation((id) =>
+          id === 'conv-files'
+            ? {
+                conversationId: id,
+                projectId: 'p',
+                kind: 'root' as const,
+                lifecycle: 'ended' as const,
+                version: 1,
+                bot: { botId, chatId: null },
+              }
+            : undefined
+        );
+        await expect(
+          read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })
+        ).resolves.toBeNull();
+      });
     });
 
     describe('会话写过的工作区外文件', () => {

@@ -1162,7 +1162,7 @@ export type ConversationReloadResult =
   | { ok: false; error: string };
 
 export type ParentHistoryTailResult =
-  | { ok: true; messages: ProjectedMessage[]; baseIndex: number }
+  | { ok: true; messages: ProjectedMessage[]; baseIndex: number; projectId?: string }
   | { ok: false; code: 'not-found' | 'unavailable'; error: string };
 
 export interface ChildRunSummary {

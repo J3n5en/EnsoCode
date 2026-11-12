@@ -78,6 +78,8 @@ export interface BotChatSession {
   /** 已投递给该成员的最后一条时间线 seq */
   cursor: number;
   distilledTo?: string;
+  /** 会话权威项目；member-home 的 bot-home 项目不在 renderer 投影里，列表时由 Main 补上 */
+  projectId?: string;
 }
 
 export interface BotChat {
@@ -649,6 +651,7 @@ export function parseBotChat(value: unknown): BotChat | undefined {
         conversationId: session.conversationId,
         cursor: intIn(session.cursor, 0, Number.MAX_SAFE_INTEGER, 0),
         ...(isText(session.distilledTo) ? { distilledTo: session.distilledTo } : {}),
+        ...(isBotId(session.projectId) ? { projectId: session.projectId } : {}),
       };
     }
   }
