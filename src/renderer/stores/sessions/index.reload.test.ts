@@ -51,7 +51,6 @@ describe('manual conversation reload', () => {
         conversations: {},
         order: [],
         activeId: null,
-        pendingAgentPrefill: undefined,
       });
       settingsModule.useSettingsStore.setState({
         projects: [{ id: 'project', name: 'Project', path: '/workspace' }],

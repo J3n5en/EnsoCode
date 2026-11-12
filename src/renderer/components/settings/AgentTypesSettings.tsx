@@ -1,5 +1,4 @@
-import { ENSO_AGENT_TYPE_KEY, isReservedAgentTypeName } from '@shared/builtinAgents';
-import { SUBAGENT_MODELS_CONFIGURE_PROMPT } from '@shared/i18n';
+import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import { MAX_MAX_ACTIVE_COWORKERS, MIN_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import type {
@@ -9,10 +8,10 @@ import type {
 } from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
 import { findVirtualModel } from '@shared/virtualModels';
-import { AlertCircle, Bot, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { AlertCircle, Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
-import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -66,23 +65,6 @@ export function AgentTypesSettings() {
           <AlertDescription className="text-xs text-foreground/90">
             {t('Subagent models not configured warning')}
           </AlertDescription>
-          <AlertAction>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 shrink-0 gap-1 px-2.5 text-xs bg-background/80 hover:bg-background"
-              onClick={() => {
-                void window.electronAPI.window.summonAgent({
-                  typeKey: ENSO_AGENT_TYPE_KEY,
-                  prompt: t(SUBAGENT_MODELS_CONFIGURE_PROMPT),
-                });
-              }}
-            >
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              {t('Auto configure with AI')}
-            </Button>
-          </AlertAction>
         </Alert>
       )}
       <AgentTypeList hasSubagentModels={hasSubagentModels} />

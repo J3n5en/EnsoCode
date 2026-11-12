@@ -29,7 +29,6 @@ export interface ChatChrome {
   draftText?: Conversation['draftText'];
   draftImages?: Conversation['draftImages'];
   draftAppend?: Conversation['draftAppend'];
-  prefillAgentTypeKey?: Conversation['prefillAgentTypeKey'];
   commands: Conversation['commands'];
   compactionError?: string;
   agentType?: Conversation['agentType'];
@@ -111,7 +110,6 @@ export function selectChatChrome(state: SessionsSlice): ChatChrome | null {
     draftText: displayed.draftText,
     draftImages: displayed.draftImages,
     draftAppend: displayed.draftAppend,
-    prefillAgentTypeKey: displayed.prefillAgentTypeKey,
     commands: displayed.commands,
     compactionError: displayed.compactionError,
     agentType: displayed.agentType,

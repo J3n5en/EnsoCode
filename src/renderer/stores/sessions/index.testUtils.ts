@@ -279,7 +279,6 @@ export async function seedParent() {
     },
     order: [draftId],
     activeId: draftId,
-    pendingAgentPrefill: undefined,
   }));
 }
 
@@ -319,7 +318,6 @@ export async function resetSessionHarness() {
     conversations: {},
     order: [],
     activeId: null,
-    pendingAgentPrefill: undefined,
     workspaceRevisionByConversation: {},
   });
   settingsModule.useSettingsStore.setState({

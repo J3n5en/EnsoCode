@@ -223,16 +223,8 @@ export function parseAgentTypeCandidate(value: unknown): AgentTypeCandidate | nu
   ) {
     return null;
   }
-  if (
-    typeKey === ENSO_AGENT_TYPE_KEY &&
-    (candidate.source !== 'system' ||
-      candidate.displayName !== 'Enso' ||
-      !candidate.locked ||
-      candidate.canDisable ||
-      candidate.canEdit)
-  ) {
-    return null;
-  }
+  // Enso 不再作为 @ 候选下发；agent:enso 仅保留旧会话读兼容
+  if (typeKey === ENSO_AGENT_TYPE_KEY) return null;
   if ((candidate.source === 'bot') !== typeKey.startsWith('bot:')) return null;
   return candidate as unknown as AgentTypeCandidate;
 }
@@ -252,7 +244,7 @@ export function parseAgentTypeRegistrySnapshot(value: unknown): AgentTypeRegistr
   const typeKeys = snapshot.candidates.map(
     (candidate) => (candidate as AgentTypeCandidate).typeKey
   );
-  if (new Set(typeKeys).size !== typeKeys.length || typeKeys[0] !== ENSO_AGENT_TYPE_KEY) {
+  if (new Set(typeKeys).size !== typeKeys.length) {
     return null;
   }
   return snapshot as unknown as AgentTypeRegistrySnapshot;
@@ -291,17 +283,7 @@ export function buildAgentTypeRegistrySnapshot(input: {
       .filter((entry) => isUuid(entry.id) && !isReservedAgentTypeName(entry.name))
       .map((entry) => entry.name.trim().toLowerCase())
   );
-  const candidates: AgentTypeCandidate[] = [
-    {
-      typeKey: ENSO_AGENT_TYPE_KEY,
-      displayName: 'Enso',
-      description: 'EnsoCode system agent for product capabilities and team setup',
-      source: 'system',
-      locked: true,
-      canDisable: false,
-      canEdit: false,
-    },
-  ];
+  const candidates: AgentTypeCandidate[] = [];
   for (const builtin of BUILTIN_AGENT_TYPES) {
     if (
       builtin.name === 'general' ||

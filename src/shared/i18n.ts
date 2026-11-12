@@ -1,9 +1,5 @@
 export type Locale = 'en' | 'zh';
 
-/** 「AI 自动配置」按钮召唤 Enso 时下发的完整提示词（key 即英文原文，中文见字典） */
-export const SUBAGENT_MODELS_CONFIGURE_PROMPT =
-  'Configure "Let the agent pick subagent models" for me. How it is used: when the main agent dispatches a subagent or coworker (built-in types: scout for read-only recon, reviewer for code review, tester for writing tests, worker for implementation), it reads each entry\'s description from the tool\'s model parameter to choose a model per subtask — so descriptions are decision rules, not marketing copy. Steps: 1) read the current entries and toggle state; 2) list providers with valid credentials and their enabled models, never invent models; 3) pick 2–4 models that cover: a cheap, fast, long-context model for recon / reading / summarizing; a strong reasoning model for review, architecture and hard debugging; a reliable coding model for implementation; 4) add what is missing, fix duplicates or unusable entries, then enable the toggle; 5) each description is one short sentence in my interface language: when to use it, relative cost / speed, one caveat. Finish by listing the final entries with the reason for each.';
-
 export const zhTranslations: Record<string, string> = {
   Privacy: '隐私',
   'Privacy masking': '隐私脱敏',
@@ -894,11 +890,9 @@ export const zhTranslations: Record<string, string> = {
   'Send only to the selected Agent': '仅发送给所选 Agent',
   Send: '发送',
   'Create or select a project to start a conversation': '创建或选择一个项目以开始对话',
-  'Ask Enso': '询问 Enso',
   'Compact view': '精简版',
   'The built-in browser is not available in full view. Check it on the computer.':
     '完整版暂不支持内置浏览器，请在电脑上查看。',
-  'Need help choosing a setup? Ask Enso.': '不确定如何配置？询问 Enso。',
   Locked: '已锁定',
   'Inherits the conversation model and provides product capabilities':
     '继承当前对话模型，并提供产品能力',
@@ -1955,9 +1949,6 @@ export const zhTranslations: Record<string, string> = {
   Unpin: '取消置顶',
   Rename: '重命名',
   'Model selection': '模型选择',
-  'Auto configure with AI': 'AI 自动配置',
-  [SUBAGENT_MODELS_CONFIGURE_PROMPT]:
-    '请帮我配置【允许子代理指定模型】。使用场景：主 Agent 派发 subagent/coworker（内置类型：scout 只读调研、reviewer 代码评审、tester 写测试、worker 实现）时，会从工具的 model 参数里读取每个条目的描述来给子任务挑模型，所以描述要写成选型规则，而不是宣传语。步骤：1）先读取当前条目和开关状态；2）列出凭证有效的模型服务及其已启用模型，不要凭空编造模型；3）挑 2–4 个模型覆盖：便宜、快、长上下文的用于调研/阅读/总结；推理最强的用于评审、架构和疑难排查；稳定的编码模型用于实现；4）补缺、去重、清理不可用条目，然后打开开关；5）每条描述用我的界面语言写一句话：什么时候用、相对成本/速度、一个注意点。最后列出最终条目及各自的选型理由。',
   'Must be picked by main agent': '必须由主 Agent 选择',
   'Picked by main agent': '由主 Agent 选择',
   'Fixed model': '自选固定模型',

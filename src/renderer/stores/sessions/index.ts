@@ -336,8 +336,6 @@ export interface Conversation extends SessionProjection {
   pendingCapabilityAsks?: CapabilityAskRequest[];
   /** allow ACK 后留在 child TAB 的 OAuth 宿主请求；不持久化。 */
   activeOauthAsk?: CapabilityAskRequest;
-  /** Main summon 注入的一次性 typed recipient。 */
-  prefillAgentTypeKey?: AgentTypeKey;
   /** 父会话专有：在编 coworker id 列表（驱动 tab 条） */
   coworkerIds?: string[];
   /** 父会话专有：当前 tab（undefined = 主会话） */
@@ -391,8 +389,6 @@ interface SessionsState {
     branch: string,
     create?: boolean
   ): Promise<WorkspaceBranchSwitchResult>;
-  /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
-  pendingAgentPrefill?: AgentTypeKey;
   /** 外部（插件侧栏）要求展开某个子代理的详情；TaskBar 消费后清空 */
   pendingAgentOpen?: { sessionId: string; agentId: string } | null;
   focusSubagent(sessionId: string, agentId: string): void;
@@ -449,8 +445,6 @@ interface SessionsState {
     task: AgentDispatchTask,
     selectedModel: DefaultModelRef | null
   ): Promise<AgentDispatchResult>;
-  prefillAgent(typeKey: AgentTypeKey, prompt?: string): void;
-  clearAgentPrefill(conversationId: string): void;
   respondCapabilityAsk(
     conversationId: string,
     requestId: string,
@@ -2191,7 +2185,6 @@ export const useSessionsStore = create<SessionsState>()(
         conversations: {},
         order: [],
         activeId: null,
-        pendingAgentPrefill: undefined,
         worktreeStatuses: {},
         workspaceRevisionByConversation: {},
 
@@ -2613,16 +2606,9 @@ export const useSessionsStore = create<SessionsState>()(
           if (existing) {
             const epoch = ++conversationSelectionEpoch;
             if (!(await activateConversationAuthority(existing, epoch))) return null;
-            const pendingAgentPrefill = get().pendingAgentPrefill;
             set((state) => ({
               activeId: existing,
-              pendingAgentPrefill: undefined,
-              conversations: patch(state, existing, {
-                unread: false,
-                ...(pendingAgentPrefill
-                  ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
-                  : {}),
-              }).conversations,
+              conversations: patch(state, existing, { unread: false }).conversations,
             }));
             return existing;
           }
@@ -2651,7 +2637,6 @@ export const useSessionsStore = create<SessionsState>()(
               return null;
             }
           }
-          const pendingAgentPrefill = get().pendingAgentPrefill;
           // 新会话应用默认预设；'default'（内置全局）或预设已删除时不写，spawn 时自然回落全局
           const settings = useSettingsStore.getState();
           const {
@@ -2697,7 +2682,6 @@ export const useSessionsStore = create<SessionsState>()(
             ),
             ...defaultPreset,
             ...(worktree ? { worktree } : {}),
-            ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
             ...(options?.forkedFrom
               ? {
                   forkedFromConversationId: options.forkedFrom.conversationId,
@@ -2709,7 +2693,6 @@ export const useSessionsStore = create<SessionsState>()(
             conversations: { ...state.conversations, [id]: conversation },
             order: [id, ...state.order],
             activeId: id,
-            pendingAgentPrefill: undefined,
           }));
           await activateConversationAuthority(id);
           return id;
@@ -2754,7 +2737,6 @@ export const useSessionsStore = create<SessionsState>()(
 
         selectConversation(id) {
           if (!get().conversations[id]) return;
-          const pendingAgentPrefill = get().pendingAgentPrefill;
           const local = get().conversations[id];
           const epoch = ++conversationSelectionEpoch;
           const now = Date.now();
@@ -2768,13 +2750,9 @@ export const useSessionsStore = create<SessionsState>()(
             }).length > 0;
           set((state) => ({
             activeId: id,
-            pendingAgentPrefill: undefined,
             conversations: patch(state, id, {
               unread: false,
               ...(renewActive ? { activeRenewedAt: now } : {}),
-              ...(pendingAgentPrefill
-                ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
-                : {}),
             }).conversations,
           }));
           void (async () => {
@@ -3123,39 +3101,6 @@ export const useSessionsStore = create<SessionsState>()(
             set((state) => patch(state, parentId, { error: result.message }));
             return result;
           }
-        },
-
-        prefillAgent(typeKey, prompt) {
-          const parentId = get().activeId;
-          if (parentId && get().conversations[parentId]) {
-            set((state) => ({
-              pendingAgentPrefill: undefined,
-              conversations: patch(state, parentId, {
-                activeTabId: undefined,
-                prefillAgentTypeKey: typeKey,
-                ...(prompt ? { draftText: prompt } : {}),
-              }).conversations,
-            }));
-            return;
-          }
-          set({ pendingAgentPrefill: typeKey });
-          const project = useSettingsStore.getState().projects[0];
-          if (project) {
-            void get()
-              .newConversation(project.id)
-              .then(() => {
-                const newActiveId = get().activeId;
-                if (newActiveId && prompt) {
-                  set((state) => patch(state, newActiveId, { draftText: prompt }));
-                }
-              });
-          }
-        },
-
-        clearAgentPrefill(conversationId) {
-          const conversation = get().conversations[conversationId];
-          if (!conversation?.prefillAgentTypeKey) return;
-          set((state) => patch(state, conversationId, { prefillAgentTypeKey: undefined }));
         },
 
         async respondCapabilityAsk(conversationId, requestId, decision) {

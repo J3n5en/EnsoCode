@@ -5,7 +5,6 @@ import {
   agentPrompt,
   agentRelease,
   bindSessionProjection,
-  dispatch,
   installSessionGlobals,
   loadSessionModules,
   onAgentEvent,
@@ -769,21 +768,6 @@ describe('typed Agent child projection', () => {
         sessionsModule.useSessionsStore.getState().conversations.parent.compactionNoticeAt
       ).toBe(105);
     });
-  });
-
-  it('summon only pre-fills the parent composer and never dispatches', () => {
-    sessionsModule.useSessionsStore.setState((state) => ({
-      conversations: {
-        ...state.conversations,
-        parent: { ...state.conversations.parent, activeTabId: 'parent::cw-child-1' },
-      },
-    }));
-    sessionsModule.useSessionsStore.getState().prefillAgent('agent:enso');
-    expect(sessionsModule.useSessionsStore.getState().conversations.parent).toMatchObject({
-      activeTabId: undefined,
-      prefillAgentTypeKey: 'agent:enso',
-    });
-    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('发送首条带「从这里继续:」和 chat 引用块的消息时，暂存标题跳过引导词且总结源被清洗', async () => {

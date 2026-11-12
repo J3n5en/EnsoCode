@@ -656,8 +656,6 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_DISPATCH_BIND_SOURCE: excluded('One-time sender-bound dispatch authorization transport.'),
   AGENT_DISPATCH: surfaces('team.hire-coworker'),
   AGENT_DISPATCH_EVENT: excluded('Main-owned dispatch phase and terminal event transport.'),
-  AGENT_SUMMON: excluded('Cross-window summon only focuses MainWindow and prefills a type chip.'),
-  AGENT_COMPOSER_PREFILL: excluded('Main-to-renderer typed Agent composer prefill event.'),
   SOURCE_AUTHORITY_READ: excluded('Main-owned source authority projection read transport.'),
   SOURCE_AUTHORITY_CHANGED: excluded('Main-owned source authority projection broadcast.'),
   SOURCE_PROJECT_CREATE: surfaces('projects.add'),

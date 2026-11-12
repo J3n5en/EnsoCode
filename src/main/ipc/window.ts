@@ -2,11 +2,9 @@ import { pluginInstallSettingsLink } from '@shared/extensionPlugins/pluginProtoc
 import { openFolderPathsFromArgv } from '@shared/openFolder';
 import { parseShellIntegration } from '@shared/shellIntegration';
 import { IPC_CHANNELS } from '@shared/types';
-import { parseAgentSummonRequest } from '@shared/types/mentions';
 import { parseTitleBarAppearance, windowSurfaceColor } from '@shared/windowControls';
 import { BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
-import { agentTypeRegistrySnapshot } from '../services/agentHost';
 import { installAppMenu } from '../services/appMenu';
 import {
   getWindowWebContents,
@@ -195,21 +193,6 @@ export function registerWindowHandlers(): void {
       });
     }
   );
-
-  ipcMain.handle(IPC_CHANNELS.AGENT_SUMMON, (_event, request: unknown) => {
-    const snapshot = agentTypeRegistrySnapshot();
-    const parsed = parseAgentSummonRequest(
-      request,
-      new Set(snapshot.candidates.map((candidate) => candidate.typeKey))
-    );
-    if (!parsed) return { ok: false, error: 'invalid Agent summon request' };
-    const window = focusMainWindow();
-    sendToWindow(window, IPC_CHANNELS.AGENT_COMPOSER_PREFILL, {
-      typeKey: parsed.typeKey,
-      ...(parsed.prompt ? { prompt: parsed.prompt } : {}),
-    });
-    return { ok: true };
-  });
 }
 
 /** 向渲染层同步窗口最大化/全屏状态变化 */

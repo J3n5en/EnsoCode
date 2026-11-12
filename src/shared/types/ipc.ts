@@ -243,8 +243,6 @@ export const IPC_CHANNELS = {
   AGENT_DISPATCH_BIND_SOURCE: 'agent-dispatch:bind-source',
   AGENT_DISPATCH: 'agent-dispatch:dispatch',
   AGENT_DISPATCH_EVENT: 'agent-dispatch:event',
-  AGENT_SUMMON: 'agent-dispatch:summon',
-  AGENT_COMPOSER_PREFILL: 'agent-dispatch:composer-prefill',
 
   // Main-owned project/conversation authority (generic settings are projection only)
   SOURCE_AUTHORITY_READ: 'source-authority:read',

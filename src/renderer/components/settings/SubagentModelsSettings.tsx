@@ -1,10 +1,8 @@
-import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
-import { SUBAGENT_MODELS_CONFIGURE_PROMPT } from '@shared/i18n';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
 import type { ModelProvider, ModelThinkingLevelOverride } from '@shared/types';
 import { MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
 import { isVirtualRef, selectableVirtualModels, VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
-import { Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';
 import { ModelPicker } from '@/components/chat/ModelPicker';
 import { Badge } from '@/components/ui/badge';
@@ -69,13 +67,6 @@ export function SubagentModelsSettings() {
     return null;
   }, [candidates, defaultModel, virtualModels]);
 
-  const handleAiConfigure = () => {
-    void window.electronAPI.window.summonAgent({
-      typeKey: ENSO_AGENT_TYPE_KEY,
-      prompt: t(SUBAGENT_MODELS_CONFIGURE_PROMPT),
-    });
-  };
-
   return (
     <section data-slot="subagent-models" className="space-y-2 rounded-lg border bg-card p-3">
       <div className="flex items-start justify-between gap-4">
@@ -90,19 +81,7 @@ export function SubagentModelsSettings() {
             {t('Applies to newly started conversations.')}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1 px-2.5 text-xs"
-            onClick={handleAiConfigure}
-          >
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            {t('Auto configure with AI')}
-          </Button>
-          <Switch checked={enabled} onCheckedChange={setEnabled} />
-        </div>
+        <Switch className="shrink-0" checked={enabled} onCheckedChange={setEnabled} />
       </div>
 
       {enabled && (

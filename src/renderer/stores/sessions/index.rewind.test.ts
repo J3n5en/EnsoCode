@@ -97,7 +97,6 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
       conversations: {},
       order: [],
       activeId: null,
-      pendingAgentPrefill: undefined,
     });
     settingsModule.useSettingsStore.setState({
       projects: [{ id: 'project', name: 'Project', path: '/workspace' }],

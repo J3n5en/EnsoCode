@@ -34,7 +34,7 @@ describe('agentTypeDisplayName', () => {
 });
 
 describe('AgentType registry and locked Enso profile', () => {
-  it('Enso 固定 locked/non-disableable/no override 并精确三 tools', () => {
+  it('Enso locked profile 保留精确三 tools（旧会话读兼容）', () => {
     expect(ENSO_LOCKED_PROFILE).toEqual({
       profileId: 'enso-locked-v1',
       typeKey: 'agent:enso',
@@ -45,19 +45,37 @@ describe('AgentType registry and locked Enso profile', () => {
       skillPaths: [],
       mcpServers: [],
     });
+  });
+
+  it('registry 不再下发 Enso 候选，快照仍可解析且保留 builtin 类型', () => {
     const snapshot = buildAgentTypeRegistrySnapshot({
       revision: 2,
       disabledBuiltinAgentTypes: [],
       customAgentTypes: [],
     });
-    expect(snapshot.candidates[0]).toMatchObject({
+    const typeKeys = snapshot.candidates.map((candidate) => candidate.typeKey);
+    expect(typeKeys).not.toContain(ENSO_AGENT_TYPE_KEY);
+    expect(typeKeys).toEqual(
+      expect.arrayContaining(['builtin:scout', 'builtin:reviewer', 'builtin:worker'])
+    );
+    expect(parseAgentTypeRegistrySnapshot(snapshot)).toEqual(snapshot);
+
+    const ensoCandidate = {
       typeKey: ENSO_AGENT_TYPE_KEY,
       displayName: 'Enso',
+      description: 'x',
       source: 'system',
       locked: true,
       canDisable: false,
       canEdit: false,
-    });
+    };
+    expect(parseAgentTypeCandidate(ensoCandidate)).toBeNull();
+    expect(
+      parseAgentTypeRegistrySnapshot({
+        revision: 2,
+        candidates: [ensoCandidate, ...snapshot.candidates],
+      })
+    ).toBeNull();
   });
 
   it('保留名归一化/case-fold 供 settings 与 Main 共用', () => {
@@ -90,7 +108,6 @@ describe('AgentType registry and locked Enso profile', () => {
       ],
     });
     expect(snapshot.candidates.map((candidate) => candidate.typeKey)).toEqual([
-      'agent:enso',
       'builtin:reviewer',
       'builtin:tester',
       `custom:${CUSTOM_ID}`,

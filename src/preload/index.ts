@@ -221,10 +221,8 @@ import type {
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import type {
-  AgentComposerPrefillEvent,
   AgentDispatchRequest,
   AgentDispatchResult,
-  AgentSummonRequest,
   MainModelSelectionBindingResult,
   ParentModelSelectionRequest,
   ParentSourceBindingRequest,
@@ -1344,15 +1342,6 @@ const electronAPI = {
       x: number,
       y: number
     ): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_POPUP_MENU, items, x, y),
-    summonAgent: (request: AgentSummonRequest): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMON, request),
-    onAgentComposerPrefill: (
-      callback: (event: AgentComposerPrefillEvent) => void
-    ): (() => void) => {
-      const listener = (_event: unknown, prefill: AgentComposerPrefillEvent) => callback(prefill);
-      ipcRenderer.on(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
-    },
     takeOpenFolders: (): Promise<string[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS),
     installShellIntegration: (kind: ShellIntegration): Promise<void> =>

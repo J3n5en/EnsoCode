@@ -1,9 +1,6 @@
-import { ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
 import { WINDOWS_CAPTION_BUTTONS_WIDTH } from '@shared/windowControls';
-import { Sparkles } from 'lucide-react';
 import { useRef } from 'react';
 import { useNativeWindowControls } from '@/hooks/useNativeWindowControls';
-import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { LinuxWindowButtons, useWindowChromeKind } from './WindowChrome';
 
@@ -24,23 +21,6 @@ interface TitleBarProps {
   centered?: React.ReactNode;
 }
 
-export function SummonEnsoButton({ label = true }: { label?: boolean }) {
-  const { t } = useI18n();
-  return (
-    <button
-      type="button"
-      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={() => {
-        void window.electronAPI.window.summonAgent({ typeKey: ENSO_AGENT_TYPE_KEY });
-      }}
-      aria-label={t('Ask Enso')}
-      title={t('Ask Enso')}
-    >
-      <Sparkles className="h-3.5 w-3.5" />
-      {label && <span>{t('Ask Enso')}</span>}
-    </button>
-  );
-}
 /**
  * 无边框窗口标题栏：
  * - macOS: 仅作为拖拽区域（traffic lights 由系统渲染，左侧预留空间）

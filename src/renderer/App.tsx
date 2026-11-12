@@ -197,14 +197,6 @@ export default function App() {
 
   useEffect(
     () =>
-      window.electronAPI.window.onAgentComposerPrefill((prefill) => {
-        useSessionsStore.getState().prefillAgent(prefill.typeKey, prefill.prompt);
-      }),
-    []
-  );
-
-  useEffect(
-    () =>
       window.electronAPI.resources.onSessionsCleanRequest(({ requestId, request }) => {
         void runSessionClean(request)
           .catch(() => 0)

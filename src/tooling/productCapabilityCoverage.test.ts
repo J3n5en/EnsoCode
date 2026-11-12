@@ -275,8 +275,8 @@ describe('product capability coverage', () => {
     expect(IPC_CHANNELS.AGENT_DISPATCH_BIND_SOURCE).toBe('agent-dispatch:bind-source');
     expect(IPC_CHANNELS.AGENT_DISPATCH).toBe('agent-dispatch:dispatch');
     expect(IPC_CHANNELS.AGENT_DISPATCH_EVENT).toBe('agent-dispatch:event');
-    expect(IPC_CHANNELS.AGENT_SUMMON).toBe('agent-dispatch:summon');
-    expect(IPC_CHANNELS.AGENT_COMPOSER_PREFILL).toBe('agent-dispatch:composer-prefill');
+    expect(IPC_CHANNELS).not.toHaveProperty('AGENT_SUMMON');
+    expect(IPC_CHANNELS).not.toHaveProperty('AGENT_COMPOSER_PREFILL');
     expect(IPC_CHANNELS.SOURCE_AUTHORITY_READ).toBe('source-authority:read');
     expect(IPC_CHANNELS.SOURCE_AUTHORITY_CHANGED).toBe('source-authority:changed');
     expect(IPC_CHANNELS.SOURCE_PROJECT_CREATE).toBe('source-authority:project-create');

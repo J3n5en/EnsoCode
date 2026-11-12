@@ -1,10 +1,9 @@
-import { agentTypeDisplayName, ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
+import { agentTypeDisplayName } from '@shared/builtinAgents';
 import { conversationDotTone } from '@shared/conversationDotTone';
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { planPhase } from '@shared/planMode';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
-import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { isVirtualRef, modelDisplayName } from '@shared/virtualModels';
 import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -519,14 +518,6 @@ export function ChatView() {
             onDraftConsumed={() => useSessionsStore.getState().clearDraft(chrome.id)}
             queuedCount={chrome.queuedMessages?.length ?? 0}
             onSteerQueued={() => useSessionsStore.getState().steerQueued(chrome.id)}
-            initialRecipient={
-              chrome.prefillAgentTypeKey === ENSO_AGENT_TYPE_KEY
-                ? ENSO_PREFILL_CANDIDATE
-                : undefined
-            }
-            onInitialRecipientConsumed={() =>
-              useSessionsStore.getState().clearAgentPrefill(chrome.id)
-            }
             toolbar={
               <>
                 {!chrome.displayedParentId && (
@@ -642,18 +633,6 @@ export function ChatView() {
     </div>
   );
 }
-const ENSO_PREFILL_CANDIDATE: AgentTypeMentionCandidate = {
-  kind: 'agent-type',
-  id: ENSO_AGENT_TYPE_KEY,
-  typeKey: ENSO_AGENT_TYPE_KEY,
-  label: 'Enso',
-  displayName: 'Enso',
-  description: 'EnsoCode system agent for product capabilities and team setup',
-  source: 'system',
-  locked: true,
-  canDisable: false,
-  canEdit: false,
-};
 
 function StatusDot({
   status,
