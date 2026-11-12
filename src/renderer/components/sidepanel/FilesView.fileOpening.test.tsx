@@ -93,14 +93,20 @@ vi.mock('@/components/ui/context-menu', () => {
   const Wrap = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   return {
     ContextMenu: Wrap,
-    ContextMenuPopup: () => null,
+    ContextMenuPopup: Wrap,
+    ContextMenuSeparator: () => null,
     ContextMenuTrigger: Wrap,
-    ContextMenuItem: Wrap,
+    ContextMenuItem: ({ children, onClick }: { children?: ReactNode; onClick?: () => void }) => (
+      <button type="button" onClick={onClick}>
+        {children}
+      </button>
+    ),
   };
 });
 vi.mock('./FilesSearchPane', () => ({ FilesSearchPane: () => null }));
 vi.mock('./fileTreeMenu', () => ({
   isMarkdownRel: (rel: string) => /\.(md|markdown|mdx)$/i.test(rel),
+  revealLabel: () => 'Reveal in Finder',
   FileTreeMenu: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 vi.mock('./filePreviewMarkdown', () => ({
@@ -174,5 +180,28 @@ describe('FilesView 文件链接预览', () => {
     expect(container.querySelector('[data-viewer="source"]')).not.toBeNull();
     expect(previous?.focus).not.toHaveBeenCalled();
     expect(harness.editors.at(-1)?.focus).toHaveBeenCalledWith({ lineNumber: 12 });
+  });
+
+  it('文件标签右键复制路径并在访达中显示，只传工作区相对路径', async () => {
+    const copyPath = vi.fn(async () => ({ ok: true }));
+    const reveal = vi.fn(async () => ({ ok: true }));
+    Object.assign(window.electronAPI.workspaceFiles, { copyPath, reveal });
+    await mount();
+    await open();
+    const button = (label: string) =>
+      [...container.querySelectorAll('button')].find((node) => node.textContent === label);
+    await act(async () => (button('Copy Path') as HTMLButtonElement).click());
+    await act(async () => (button('Reveal in Finder') as HTMLButtonElement).click());
+    expect(copyPath).toHaveBeenCalledWith({
+      conversationId: 'owner',
+      projectId: 'project',
+      rel: 'README.md',
+      mode: 'absolute',
+    });
+    expect(reveal).toHaveBeenCalledWith({
+      conversationId: 'owner',
+      projectId: 'project',
+      rel: 'README.md',
+    });
   });
 });

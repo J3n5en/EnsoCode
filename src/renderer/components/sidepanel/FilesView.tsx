@@ -18,6 +18,7 @@ import {
   ContextMenu,
   ContextMenuItem,
   ContextMenuPopup,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { addToast } from '@/components/ui/toast';
@@ -45,6 +46,7 @@ import { fileTypeIcon, fileTypeIconClass } from './fileIcons';
 import { FileMarkdownPreview } from './filePreviewMarkdown';
 import { ancestorDirs, applyCompletedWrites } from './filesTreeRefresh';
 import {
+  fileTabPathMenuItems,
   fromPreviewKey,
   type RelMutation,
   remapRelForRename,
@@ -55,7 +57,7 @@ import {
   wasPathInvalidated,
 } from './filesViewRel';
 import { readWorkspaceDocument, refreshWorkspaceDocument } from './filesWorkspaceRefresh';
-import { FileTreeMenu, isMarkdownRel } from './fileTreeMenu';
+import { FileTreeMenu, isMarkdownRel, revealLabel } from './fileTreeMenu';
 import { idsToClose } from './tabCloseActions';
 
 const FILE_OPTIONS = {
@@ -997,6 +999,35 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
                   <ContextMenu key={doc.rel}>
                     <ContextMenuTrigger render={tab as ReactElement<Record<string, unknown>>} />
                     <ContextMenuPopup className="min-w-40">
+                      {fileTabPathMenuItems(doc.rel, local).map((item) =>
+                        item.id === 'copy-path' ? (
+                          <ContextMenuItem
+                            key={item.id}
+                            onClick={() =>
+                              void window.electronAPI.workspaceFiles.copyPath({
+                                ...req,
+                                rel: item.rel,
+                                mode: item.mode,
+                              })
+                            }
+                          >
+                            {t('Copy Path')}
+                          </ContextMenuItem>
+                        ) : (
+                          <ContextMenuItem
+                            key={item.id}
+                            onClick={() =>
+                              void window.electronAPI.workspaceFiles.reveal({
+                                ...req,
+                                rel: item.rel,
+                              })
+                            }
+                          >
+                            {t(revealLabel())}
+                          </ContextMenuItem>
+                        )
+                      )}
+                      <ContextMenuSeparator />
                       {!doc.preview && (
                         <ContextMenuItem
                           onClick={() =>
