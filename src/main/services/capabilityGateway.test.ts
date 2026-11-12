@@ -1,9 +1,10 @@
 import type { ChildSessionIdentity } from '@shared/builtinAgents';
-import type {
-  CapabilityInvocationContext,
-  CapabilityInvokeRequest,
-  OauthFlowLocator,
-  ReceiptLifecycleEvent,
+import {
+  type CapabilityInvocationContext,
+  type CapabilityInvokeRequest,
+  type OauthFlowLocator,
+  parseCapabilityExecutionEnvelope,
+  type ReceiptLifecycleEvent,
 } from '@shared/capabilities/types';
 import type { ModelProvider, OauthLoginEvent, SubagentModelEntry } from '@shared/types';
 import { describe, expect, it, vi } from 'vitest';
@@ -792,6 +793,21 @@ describe('CapabilityGateway OAuth/default/secret/receipt', () => {
     expect(gateway.cacheSizes.settled).toBeLessThanOrEqual(256);
     expect(gateway.cacheSizes.pending).toBe(0);
   });
+
+  // 模型常把拿不准的标识填成空串：inputSchema 判 invalid 后仍要构造回执；subject.id 为空时
+  // worker 的 capability-result 信封校验失败、整条结果被丢弃，enso_app 没有超时会一直挂起
+  it.each([
+    ['providers.oauth.usage', { accountKey: '' }],
+    ['team.dismiss-coworker', { coworkerId: '' }],
+  ] as const)(
+    '%s 收到空串标识时 invalid 回执仍能通过 shared 信封校验',
+    async (capabilityId, params) => {
+      const { gateway } = fixture();
+      const envelope = await gateway.invoke(request(`empty-${capabilityId}`, capabilityId, params));
+      expect(envelope.modelResult).toMatchObject({ ok: false, code: 'invalid' });
+      expect(parseCapabilityExecutionEnvelope(envelope)).not.toBeNull();
+    }
+  );
 });
 
 describe('CapabilityGateway preset system prompt lifecycle', () => {

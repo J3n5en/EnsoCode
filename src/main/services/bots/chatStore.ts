@@ -527,7 +527,7 @@ function indexHead(line: Buffer): { seq: number; id: string } | undefined {
       const seq = Number(match[1]);
       if (id && Number.isSafeInteger(seq)) return { seq, id };
     } catch {
-      /* fall through */
+      /* 继续向下执行 */
     }
   }
   const entry = parseLine(line);

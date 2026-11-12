@@ -34,6 +34,8 @@ export function ConversationTitleEdit({
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation();
+        // 输入法组字中的回车 / Esc 只是确认或取消候选词
+        if (e.nativeEvent.isComposing) return;
         if (e.key === 'Enter') {
           e.preventDefault();
           commit();

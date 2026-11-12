@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +37,13 @@ describe('McpOAuthStore', () => {
     store.saveTokens('s1', { access_token: 'plain' });
     expect(readFileSync(file(), 'utf-8')).toContain('plain');
     expect(store.encryptionDegraded).toBe(true);
+  });
+
+  // safeStorage 不可用时 refresh_token 以明文落盘；与插件配置、oauth-accounts.json 等密钥文件一样只给本人读写
+  it.skipIf(process.platform === 'win32')('落盘文件权限为 0600，其他用户读不到', () => {
+    const store = new McpOAuthStore({ file: file(), encryptionAvailable: () => false });
+    store.saveTokens('s1', { access_token: 'plain', refresh_token: 'r1' });
+    expect(statSync(file()).mode & 0o777).toBe(0o600);
   });
 
   it('可用时走 safeStorage 加解密', () => {

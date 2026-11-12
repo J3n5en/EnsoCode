@@ -43,9 +43,6 @@ function loadEmails(revision: number): Promise<EmailSnapshot> {
 /**
  * 只读取现有 listOauth 的脱敏展示元数据，不读凭据，也不写入设置或会话历史。
  * 同一凭证 revision 的时间线行共用一次查询；刷新时立即隐藏旧邮箱，忽略过期或卸载后的响应。
- *
- * Read only sanitized display metadata from listOauth, never credentials, settings or session history.
- * Timeline rows share one query per credential revision; hide stale emails immediately and ignore obsolete or unmounted replies.
  */
 export function useOauthAccountEmails(): ReadonlyMap<string, string> {
   const revision = useOauthCredentialStore((state) => state.snapshot.revision);

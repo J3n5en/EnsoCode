@@ -38,7 +38,7 @@ export function startCursorH2Bridge(): CursorH2Proc {
     try {
       client?.close();
     } catch {
-      // already closed
+      // 已关闭
     }
     if (!stdin.writableEnded) stdin.end();
     if (!stdout.writableEnded) stdout.end();

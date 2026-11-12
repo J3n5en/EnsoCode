@@ -1,4 +1,5 @@
-import { EventEmitter } from 'node:events';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -22,6 +23,10 @@ class FakeProc extends EventEmitter {
     },
     end() {
       this.ended = true;
+    },
+    // 真实 stdin 是 Writable;执行器会挂 error 监听
+    on() {
+      return this;
     },
   };
   killed = false;
@@ -181,6 +186,75 @@ describe('SshExecutor', () => {
     proc.stderr.emit('data', Buffer.from('Permission denied (publickey)'));
     proc.emit('close', 255);
     await expect(pending).resolves.toMatchObject({ code: 255, stderr: /Permission denied/ });
+  });
+});
+
+/** 收集测试窗口内的未捕获异常用于断言;EPIPE 由管道 IO 回调异步抛出,结束后多等一会儿让它冒出来 */
+async function collectUncaught<T>(
+  run: () => Promise<T>
+): Promise<{ value: T; uncaught: unknown[] }> {
+  const uncaught: unknown[] = [];
+  process.setUncaughtExceptionCaptureCallback((error) => uncaught.push(error));
+  try {
+    const value = await run();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return { value, uncaught };
+  } finally {
+    process.setUncaughtExceptionCaptureCallback(null);
+  }
+}
+
+describe('SshExecutor 真实子进程 stdin', () => {
+  // 超过管道缓冲区(约 64KB)才会有写不进去的尾巴,8KB 不复现
+  const bigPayload = Buffer.alloc(1024 * 1024, 0x61);
+
+  /** 用 node 子进程冒充 ssh:保留真实 stdin 管道,行为由脚本决定 */
+  function realExecutor(script: string) {
+    const children: ChildProcess[] = [];
+    const spawnImpl: SpawnLike = () => {
+      const child = spawn(process.execPath, ['-e', script]);
+      children.push(child);
+      return child;
+    };
+    const executor = createSshExecutor(
+      'user@dev-box',
+      '/tmp/ctl',
+      spawnImpl,
+      { auth: 'key' },
+      'darwin'
+    );
+    return { children, executor };
+  }
+
+  // 真实场景:write 大文件时 ssh 建连失败(exit 255)早于读完 stdin,写管道 EPIPE 无人监听会让 worker 直接崩溃
+  it('ssh 没读完大块 stdin 就退出时返回失败结果，不抛出未捕获的 EPIPE', async () => {
+    const { executor } = realExecutor('process.exit(255)');
+    const { value, uncaught } = await collectUncaught(() =>
+      executor.exec('cat > /srv/big.bin', { stdin: bigPayload })
+    );
+    expect(value.code).toBe(255);
+    expect(uncaught).toEqual([]);
+  });
+
+  // 真实场景:用户停止 / 30 秒超时都会走 kill,被杀的 ssh 同样来不及读完 stdin
+  it('写大块 stdin 途中被中止时只 reject 中止错误，不抛出未捕获的 EPIPE', async () => {
+    const { children, executor } = realExecutor('setTimeout(() => {}, 30_000)');
+    const controller = new AbortController();
+    const { value, uncaught } = await collectUncaught(async () => {
+      const pending = executor.exec('cat > /srv/big.bin', {
+        stdin: bigPayload,
+        signal: controller.signal,
+      });
+      controller.abort();
+      const outcome = await pending.catch((error: unknown) => error);
+      if (children[0].exitCode === null && children[0].signalCode === null) {
+        await once(children[0], 'close');
+      }
+      return outcome;
+    });
+    expect(value).toBeInstanceOf(Error);
+    expect((value as Error).message).toMatch(/abort/i);
+    expect(uncaught).toEqual([]);
   });
 });
 

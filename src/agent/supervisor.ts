@@ -1648,10 +1648,17 @@ export class SessionSupervisor {
         if (!managed || !isSameGeneration(managed.identity, identity)) {
           // 会话已不在 worker（驱逐 / 释放 / 换代）而 renderer 仍认为 started：静默丢弃会让
           // 后续每次发送都绕过 spawn 直发到空会话。按拒绝回流，让 renderer 清 started 并报错。
-          // retry 同理：静默丢弃会让等着这次续跑的宿主轮次只能干等
-          if (command.type === 'prompt' || command.type === 'steer' || command.type === 'retry') {
+          // retry 同理：静默丢弃会让等着这次续跑的宿主轮次只能干等；
+          // rewind 同理：renderer 的回退锁只等 rewind-done 或拒绝，静默丢弃会让会话一直卡在回退中
+          if (
+            command.type === 'prompt' ||
+            command.type === 'steer' ||
+            command.type === 'retry' ||
+            command.type === 'rewind'
+          ) {
             // 命令类型声明为 SessionIdentity，但 coworker tab 发来的是完整 ChildSessionIdentity
             const target = command.identity as SessionIdentity | ChildSessionIdentity;
+            const instanceId = 'instanceId' in command ? command.instanceId : undefined;
             this.options.emit(
               'parent' in target
                 ? { type: 'child-rejected', identity: target, seq: 0, reason: message }
@@ -1661,7 +1668,7 @@ export class SessionSupervisor {
                     seq: 0,
                     reason: message,
                     // 回显这条命令自己带的实例号：Main 只把发给当前实例的命令被拒算作当前实例结束
-                    ...(command.instanceId ? { instanceId: command.instanceId } : {}),
+                    ...(instanceId ? { instanceId } : {}),
                   }
             );
           }
@@ -2163,7 +2170,9 @@ export class SessionSupervisor {
       }
       case 'compact': {
         const managed = this.must(command.identity);
-        if (managed.status !== 'idle') {
+        // 只有轮次真在跑才排队：failed 是静止态，排队后没有 completeTurn 来消费会永远停在 queued；
+        // 其余状态直接压，pi 的 compact() 自己会先 abort 并等残留活动收尾
+        if (managed.status === 'running') {
           // 忙碌时排队：不打断当前轮次，turn 收束后由 runCompaction 接手
           managed.pendingCompact = command.instructions
             ? { instructions: command.instructions }
@@ -2578,8 +2587,9 @@ export class SessionSupervisor {
               read: withPathHints(wrapRead(createReadToolDefinition(cwd) as unknown as Def), cwd),
               grep: withPathHints(createGrepToolDefinition(cwd) as unknown as Def, cwd),
             };
-      const { grep } = stock;
+      // grep 显式指向密钥文件时同样会把内容带回来（pi 的 grep 带 --hidden），与 read 一起受底线约束
       const read = withProtectedFloor(toolGate, 'read', stock.read);
+      const grep = withProtectedFloor(toolGate, 'read', stock.grep);
       return remoteOps && sshExecutor
         ? [
             read,
@@ -2994,7 +3004,7 @@ export class SessionSupervisor {
           ...(safeJournal ? { safeJournal } : {}),
           modelRef: settingsModelRef(selectedModel),
           toolIds: [...subTools.map((tool) => tool.name), ...childExtraTools],
-          // Decorators clone tools; exclude MCP and plugin tools by identity before decoration.
+          // 装饰器会克隆工具，所以要在装饰前按对象引用排除 MCP 与插件工具。
           proofToolIds: [
             ...rawSubTools
               .filter((tool) => !typeMcpTools.includes(tool) && !childPluginTools.includes(tool))
@@ -4777,7 +4787,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       ...(restoreFiles ? { filesRestored: false } : {}),
     });
-    // Clear the optimistic rewind before restoring the authoritative projection.
+    // 先清除乐观回退，再恢复权威投影。
     this.options.emit({
       type: 'snapshot',
       partial: true,
@@ -4964,8 +4974,6 @@ export class SessionSupervisor {
     )
       .then((disposition) => {
         // Pi 可在 input hook 中消费输入，而不向队列添加 user 消息，因此不能保留对应投递标记。
-        //
-        // Pi can consume input in an input hook without adding a user message to the queue, so its delivery marker must be removed.
         if (disposition === 'handled') {
           managed.steerDeliveries = managed.steerDeliveries?.filter((item) => item !== slot);
         }

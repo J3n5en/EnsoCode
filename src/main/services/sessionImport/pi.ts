@@ -26,10 +26,10 @@ function textOfContent(content: unknown): string {
     .join('');
 }
 
-function listJsonlFiles(sessionsDir: string): { path: string; mtime: number }[] {
+function listJsonlFiles(sessionsDir: string, maxFiles: number): { path: string; mtime: number }[] {
   const results: { path: string; mtime: number }[] = [];
   const walk = (dir: string, depth: number): void => {
-    if (depth > MAX_DEPTH || results.length >= MAX_FILES) return;
+    if (depth > MAX_DEPTH) return;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -47,7 +47,8 @@ function listJsonlFiles(sessionsDir: string): { path: string; mtime: number }[] 
     }
   };
   walk(sessionsDir, 0);
-  return results.sort((a, b) => b.mtime - a.mtime);
+  // 遍历只做 stat；readdir 顺序与新旧无关，必须全部按 mtime 排序后再截上限，否则会截掉最新的会话
+  return results.sort((a, b) => b.mtime - a.mtime).slice(0, maxFiles);
 }
 
 function cwdOfSession(filePath: string): string | null {
@@ -99,9 +100,13 @@ export function readPiV3Session(filePath: string): { title: string; messages: Si
   return { title, messages };
 }
 
-function listPiV3Sessions(sessionsDir: string, projectPath: string): ExternalSession[] {
+function listPiV3Sessions(
+  sessionsDir: string,
+  projectPath: string,
+  maxFiles: number
+): ExternalSession[] {
   const sessions: ExternalSession[] = [];
-  for (const file of listJsonlFiles(sessionsDir)) {
+  for (const file of listJsonlFiles(sessionsDir, maxFiles)) {
     if (cwdOfSession(file.path) !== projectPath) continue;
     const { title, messages } = readPiV3Session(file.path);
     if (messages.length === 0) continue;
@@ -118,15 +123,17 @@ function listPiV3Sessions(sessionsDir: string, projectPath: string): ExternalSes
 /** 列出 ~/.pi/agent/sessions 下 cwd 匹配的会话 */
 export function listPiSessions(
   projectPath: string,
-  home = process.env.HOME ?? ''
+  home = process.env.HOME ?? '',
+  maxFiles = MAX_FILES
 ): ExternalSession[] {
-  return listPiV3Sessions(path.join(home, '.pi', 'agent', 'sessions'), projectPath);
+  return listPiV3Sessions(path.join(home, '.pi', 'agent', 'sessions'), projectPath, maxFiles);
 }
 
 /** 列出 ~/.omp/agent/sessions 下 cwd 匹配的会话 */
 export function listOhMyPiSessions(
   projectPath: string,
-  home = process.env.HOME ?? ''
+  home = process.env.HOME ?? '',
+  maxFiles = MAX_FILES
 ): ExternalSession[] {
-  return listPiV3Sessions(path.join(home, '.omp', 'agent', 'sessions'), projectPath);
+  return listPiV3Sessions(path.join(home, '.omp', 'agent', 'sessions'), projectPath, maxFiles);
 }

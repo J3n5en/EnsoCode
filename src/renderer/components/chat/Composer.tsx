@@ -66,6 +66,14 @@ import { filterComposerCommands } from './skillCompletion';
 import { pushSlash } from './slashChain';
 import { VoiceInputButton } from './VoiceInputButton';
 
+/** 缩略图只列无 id 的附件，下标对不上完整列表；按对象身份删，带 id 的元素截图不受影响 */
+export function removeComposerImage(
+  images: AttachedImage[],
+  image: AttachedImage
+): AttachedImage[] {
+  return images.filter((item) => item !== image);
+}
+
 interface ComposerProps {
   cwd?: string;
   commands: SlashCommand[];
@@ -849,9 +857,7 @@ export function Composer({
                   </button>
                   <button
                     type="button"
-                    onClick={() =>
-                      setImages((current) => current.filter((_, item) => item !== index))
-                    }
+                    onClick={() => setImages((current) => removeComposerImage(current, image))}
                     className="absolute -top-1.5 -right-1.5 rounded-full border bg-background p-0.5 text-muted-foreground shadow-sm transition-opacity hover:text-destructive"
                   >
                     <X className="h-3 w-3" />

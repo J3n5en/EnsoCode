@@ -474,7 +474,7 @@ async function runScript(
         }
         vm.executePendingJobs();
       } catch {
-        /* vm already tearing down */
+        /* vm 已在销毁 */
       } finally {
         resume();
       }

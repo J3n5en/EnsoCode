@@ -791,6 +791,34 @@ describe('投递方式与桌面接管', () => {
     expect(backend.inputs).toEqual([]);
   });
 
+  // 审计发现：窗口目标的前台点击只确认窗口在最前，不看落点；
+  // win.click(-200, 300, { delivery: 'foreground' }) 这样的坐标会让真实指针点进别的 App
+  it('前台指针落点在目标窗口外时不发送，免得点进别的 App', async () => {
+    const backend = new FakeDesktopBackend();
+    await expect(
+      runWith(
+        `const w = await desktop.window('w1'); await w.screenshot(); await w.click(-50, 25, { delivery: 'foreground' })`,
+        backend
+      )
+    ).rejects.toThrow(/not on window 'w1'/);
+    expect(backend.clicks).toEqual([]);
+  });
+
+  it('前台指针落点被别的 App 的浮窗盖住时不发送', async () => {
+    const backend = new FakeDesktopBackend();
+    backend.windowsList = [
+      { id: 'float', app: 'WeChat', title: '', pid: 2, x: 0, y: 0, width: 60, height: 60 },
+      { ...backend.windowsList[0] },
+    ];
+    await expect(
+      runWith(
+        `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+        backend
+      )
+    ).rejects.toThrow(/not on window 'w1'/);
+    expect(backend.clicks).toEqual([]);
+  });
+
   it('raise 会抢前台，算接管', async () => {
     const occupancy = tracker();
     await runWith(

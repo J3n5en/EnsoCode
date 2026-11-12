@@ -56,8 +56,6 @@ export function registerFilesTabCloser(conversationId: string, close: () => bool
 
 /**
  * 注册按会话归属的 Files 打开入口；冷挂载时保留行号与查看器意图并只消费一次。
- *
- * Register the conversation-owned Files opener; retain line and viewer intent across cold mounts and consume it once.
  */
 export function registerFilesOpener(
   conversationId: string,
@@ -198,8 +196,6 @@ function revealFilesPanel(
 
 /**
  * 在会话所属 dock 打开文件，btw 沿既有父路由；Markdown 查看器选择预览，行号入口使用源码。
- *
- * Open files in their conversation-owned dock, preserving the existing btw parent route; Markdown requests preview and line references use source.
  */
 export function openSidePanelFile(
   conversationId: string,

@@ -198,7 +198,7 @@ export function SettingsContent() {
 
   return (
     <div className="flex h-full w-full">
-      {/* Left: Category List */}
+      {/* 左侧：分类列表 */}
       {showList && (
         <nav
           data-enso="settings-nav"
@@ -282,7 +282,7 @@ export function SettingsContent() {
         </nav>
       )}
 
-      {/* Right: Settings Panel */}
+      {/* 右侧：设置面板 */}
       {showContent && (
         <div
           data-enso="settings-content"

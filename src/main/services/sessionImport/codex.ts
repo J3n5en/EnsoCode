@@ -15,10 +15,13 @@ const parseLine = (line: string): Record<string, unknown> | null => {
   }
 };
 
-function listRolloutFiles(sessionsDir: string): { path: string; mtime: number }[] {
+function listRolloutFiles(
+  sessionsDir: string,
+  maxFiles: number
+): { path: string; mtime: number }[] {
   const results: { path: string; mtime: number }[] = [];
   const walk = (dir: string, depth: number): void => {
-    if (depth > 4 || results.length >= MAX_FILES) return;
+    if (depth > 4) return;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -36,7 +39,8 @@ function listRolloutFiles(sessionsDir: string): { path: string; mtime: number }[
     }
   };
   walk(sessionsDir, 0);
-  return results.sort((a, b) => b.mtime - a.mtime);
+  // 遍历只做 stat；readdir 顺序与新旧无关，必须全部按 mtime 排序后再截上限，否则会截掉最新的会话
+  return results.sort((a, b) => b.mtime - a.mtime).slice(0, maxFiles);
 }
 
 /** Codex 新版 session_meta 会携带较长配置；分块读取完整首行并限制最大内存占用。 */
@@ -130,8 +134,12 @@ export function readCodexSession(filePath: string): { title: string; messages: S
 }
 
 /** 列出 Codex 在某项目目录下的会话 */
-export function listCodexSessions(projectPath: string, home = os.homedir()): ExternalSession[] {
-  const files = listRolloutFiles(path.join(home, '.codex', 'sessions'));
+export function listCodexSessions(
+  projectPath: string,
+  home = os.homedir(),
+  maxFiles = MAX_FILES
+): ExternalSession[] {
+  const files = listRolloutFiles(path.join(home, '.codex', 'sessions'), maxFiles);
   const sessions: ExternalSession[] = [];
   for (const file of files) {
     const sessionCwd = cwdOfSession(file.path);

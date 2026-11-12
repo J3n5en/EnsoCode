@@ -189,6 +189,22 @@ type Cached =
 // 仅保留最近一次扫描，供确认导入时取回完整数据（含 env 明文）
 let lastScan: { scanId: string; byId: Map<string, Cached> } | null = null;
 
+/** 按资产类型分别 try：某一类读坏了（如 mcp.json 尾逗号）不能连带跳过同来源的其它资产 */
+function readEach<T>(
+  sourceId: AssetSourceId,
+  label: string,
+  read: (() => T[]) | undefined,
+  add: (item: T) => void
+): boolean {
+  try {
+    for (const item of read?.() ?? []) add(item);
+    return true;
+  } catch (error) {
+    console.warn(`[AssetScan] Failed reading ${label} from ${sourceId}:`, error);
+    return false;
+  }
+}
+
 export function scanLocalAssets(): LocalAssetScanResult {
   const known = existingKeys();
   const scanId = randomUUID();
@@ -216,55 +232,58 @@ export function scanLocalAssets(): LocalAssetScanResult {
 
     if (!fs.existsSync(spec.probe)) continue;
 
-    try {
-      for (const skill of spec.readSkills?.() ?? []) {
-        const id = randomUUID();
-        const nameKey = skillNameKey(skill.name);
-        const registered =
-          known.skillNames.has(nameKey) || known.skillPaths.has(skillKey(skill.path));
-        // 本轮更前面的来源已出现过同名技能
-        const sameName = seenSkillNames.has(nameKey);
-        seenSkillNames.add(nameKey);
+    const skillsOk = readEach(sourceId, 'skills', spec.readSkills, (skill) => {
+      const id = randomUUID();
+      const nameKey = skillNameKey(skill.name);
+      const registered =
+        known.skillNames.has(nameKey) || known.skillPaths.has(skillKey(skill.path));
+      // 本轮更前面的来源已出现过同名技能
+      const sameName = seenSkillNames.has(nameKey);
+      seenSkillNames.add(nameKey);
 
-        byId.set(id, { kind: 'skill', sourceId, skill });
-        candidates.push({
-          id,
-          kind: 'skill',
-          sourceId,
-          groupName: skill.groupName,
-          name: skill.name,
-          description: skill.description,
-          path: displayPath(skill.path),
-          duplicated: registered || sameName,
-          duplicateReason: registered ? 'registered' : sameName ? 'same-name' : undefined,
-        });
-        report.skillCount += 1;
-      }
+      byId.set(id, { kind: 'skill', sourceId, skill });
+      candidates.push({
+        id,
+        kind: 'skill',
+        sourceId,
+        groupName: skill.groupName,
+        name: skill.name,
+        description: skill.description,
+        path: displayPath(skill.path),
+        duplicated: registered || sameName,
+        duplicateReason: registered ? 'registered' : sameName ? 'same-name' : undefined,
+      });
+      report.skillCount += 1;
+    });
 
-      for (const server of spec.readMcp?.() ?? []) {
-        const id = randomUUID();
-        const key = mcpKey(server);
-        const registered = known.mcp.has(key);
-        const sameContent = seenMcpKeys.has(key);
-        seenMcpKeys.add(key);
+    const mcpOk = readEach(sourceId, 'MCP servers', spec.readMcp, (server) => {
+      const id = randomUUID();
+      const key = mcpKey(server);
+      const registered = known.mcp.has(key);
+      const sameContent = seenMcpKeys.has(key);
+      seenMcpKeys.add(key);
 
-        byId.set(id, { kind: 'mcp', sourceId, server });
-        candidates.push({
-          id,
-          kind: 'mcp',
-          sourceId,
-          groupName: SOURCE_NAMES[sourceId],
-          name: server.name,
-          transport: server.transport,
-          summary: server.url ?? [server.command, ...(server.args ?? [])].join(' ').trim(),
-          envKeys: Object.keys(server.env ?? {}),
-          duplicated: registered || sameContent,
-          duplicateReason: registered ? 'registered' : sameContent ? 'same-content' : undefined,
-        });
-        report.mcpCount += 1;
-      }
+      byId.set(id, { kind: 'mcp', sourceId, server });
+      candidates.push({
+        id,
+        kind: 'mcp',
+        sourceId,
+        groupName: SOURCE_NAMES[sourceId],
+        name: server.name,
+        transport: server.transport,
+        summary: server.url ?? [server.command, ...(server.args ?? [])].join(' ').trim(),
+        envKeys: Object.keys(server.env ?? {}),
+        duplicated: registered || sameContent,
+        duplicateReason: registered ? 'registered' : sameContent ? 'same-content' : undefined,
+      });
+      report.mcpCount += 1;
+    });
 
-      for (const instruction of spec.readInstructions?.() ?? []) {
+    const instructionsOk = readEach(
+      sourceId,
+      'instructions',
+      spec.readInstructions,
+      (instruction) => {
         const id = randomUUID();
         const registered = instruction.path
           ? known.instructionPaths.has(path.resolve(instruction.path))
@@ -286,12 +305,10 @@ export function scanLocalAssets(): LocalAssetScanResult {
         });
         report.instructionCount += 1;
       }
+    );
 
-      report.status = 'found';
-    } catch (error) {
-      console.warn(`[AssetScan] Failed reading ${sourceId}:`, error);
-      report.status = 'read-error';
-    }
+    // 任一类读失败仍记 read-error，但已读到的其它资产照常列出
+    report.status = skillsOk && mcpOk && instructionsOk ? 'found' : 'read-error';
   }
 
   lastScan = { scanId, byId };

@@ -9,9 +9,9 @@ interface SmoothCollapseProps {
 }
 
 /**
- * GPU-accelerated collapse animation using CSS grid-template-rows.
- * Best for natural-height content (lists, tree nodes). Not suitable for
- * flex-allocated panels where height depends on sibling sizing.
+ * 基于 CSS grid-template-rows 的 GPU 加速折叠动画。
+ * 适合自然高度的内容（列表、树节点）；不适合高度依赖兄弟元素尺寸的
+ * flex 分配面板。
  */
 export function SmoothCollapse({ open, children, className }: SmoothCollapseProps) {
   return (

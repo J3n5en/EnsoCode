@@ -563,6 +563,100 @@ describe('send 使用 worktree cwd 并消费迁移提醒', () => {
       .send('again', { providerId: 'p', modelId: 'm', cwd: '/workspace' });
     expect(agentPrompt).toHaveBeenLastCalledWith(id, 'again', undefined, expect.any(String));
   });
+
+  const target = { providerId: 'p', modelId: 'm', cwd: '/workspace' };
+
+  async function seedMovedConversation(): Promise<{ id: string; note: string }> {
+    const id = await seedLocalConversation();
+    sessions.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        [id]: { ...state.conversations[id], sessionFile: '/tmp/s.jsonl' },
+      },
+    }));
+    const error = await sessions.useSessionsStore.getState().moveConversationToWorktree(id);
+    if (error) throw new Error(error);
+    return { id, note: workspaceMigratedNote(`/managed/${id}`) };
+  }
+
+  // 真实场景：会话移到 worktree 后发第一条消息，spawn 因凭证不可用返回 ok:false；
+  // 用户重发成功，但提醒已被提前清掉，agent 不知道工作区已迁移，继续往旧工作区写
+  it('spawn 失败后重发，prompt 仍前置迁移提醒', async () => {
+    const { id, note } = await seedMovedConversation();
+    agentSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: 'model credentials unavailable',
+    } as never);
+    const store = sessions.useSessionsStore;
+    expect(await store.getState().send('hello', target, undefined, id)).toBe(
+      'model credentials unavailable'
+    );
+    expect(store.getState().conversations[id].messages).toHaveLength(0);
+    expect(store.getState().conversations[id].draftText).toBe('hello');
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(await store.getState().send('hello', target, undefined, id)).toBeNull();
+    expect(agentPrompt).toHaveBeenCalledExactlyOnceWith(
+      id,
+      `${note}\n\nhello`,
+      undefined,
+      expect.any(String)
+    );
+    expect(store.getState().conversations[id].pendingWorkspaceNote).toBeUndefined();
+  });
+
+  it('投递被拒后重发，prompt 仍前置迁移提醒', async () => {
+    const { id, note } = await seedMovedConversation();
+    agentPrompt.mockResolvedValueOnce({ ok: false, error: 'session unavailable' } as never);
+    const store = sessions.useSessionsStore;
+    expect(await store.getState().send('hello', target, undefined, id)).toBe('session unavailable');
+    expect(store.getState().conversations[id].messages).toHaveLength(0);
+    expect(store.getState().conversations[id].draftText).toBe('hello');
+    expect(await store.getState().send('hello', target, undefined, id)).toBeNull();
+    expect(agentPrompt).toHaveBeenCalledTimes(2);
+    expect(agentPrompt).toHaveBeenLastCalledWith(
+      id,
+      `${note}\n\nhello`,
+      undefined,
+      expect.any(String)
+    );
+  });
+
+  // 真实场景：切分支给 coworker 也挂了提醒；coworker 未恢复时发送在回显前被拦，恢复后重发要带上提醒
+  it('未恢复的 coworker 被拦下后重发，prompt 仍前置分支提醒', async () => {
+    const parentId = await seedLocalConversation();
+    const note = '<workspace-branch>feature</workspace-branch>';
+    sessions.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        child: {
+          ...state.conversations[parentId],
+          id: 'child',
+          parentId,
+          started: false,
+          pendingWorkspaceNote: note,
+        },
+      },
+    }));
+    const store = sessions.useSessionsStore;
+    expect(await store.getState().send('hello', target, undefined, 'child')).toContain(
+      'coworker not restored'
+    );
+    expect(store.getState().conversations.child.messages).toHaveLength(0);
+    expect(agentPrompt).not.toHaveBeenCalled();
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        child: { ...state.conversations.child, started: true, status: 'idle' },
+      },
+    }));
+    expect(await store.getState().send('hello', target, undefined, 'child')).toBeNull();
+    expect(agentPrompt).toHaveBeenCalledExactlyOnceWith(
+      'child',
+      `${note}\n\nhello`,
+      undefined,
+      expect.any(String)
+    );
+  });
 });
 
 async function seedLocalConversation(): Promise<string> {

@@ -90,7 +90,7 @@ export class BotRoutineRunLog {
         const run = parseBotRoutineRun(JSON.parse(line));
         if (run) runs.set(run.runId, run);
       } catch {
-        /* torn or invalid line */
+        /* 写了一半或无效的行 */
       }
     }
     return { runs, lines };

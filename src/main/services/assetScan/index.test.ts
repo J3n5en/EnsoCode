@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { LocalAssetScanResult } from '@shared/types';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'enso-agents-scan-')));
 vi.stubEnv('HOME', home);
@@ -57,5 +57,27 @@ describe('scanLocalAssets · ~/.agents/skills', () => {
       instructionCount: 0,
     });
     expect(result.candidates.filter((candidate) => candidate.sourceId === 'agents')).toEqual([]);
+  });
+});
+
+describe('scanLocalAssets · 单个资产类型读取失败', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // 真实场景：Cursor 的 mcp.json 有尾逗号；旧实现一个来源只有一个 try，同来源的 AGENTS.md 被一起跳过
+  it('同来源 MCP 配置损坏时仍列出该来源的指令文件', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dir = path.join(home, '.cursor');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'mcp.json'), '{"mcpServers": {"a": {"command": "x"},}}');
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), '# cursor rules\n');
+
+    const result = scanLocalAssets();
+    expect(
+      result.candidates.filter(
+        (candidate) => candidate.kind === 'instruction' && candidate.sourceId === 'cursor'
+      )
+    ).toEqual([expect.objectContaining({ name: 'AGENTS.md' })]);
   });
 });

@@ -151,6 +151,70 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.isReady(parent)).toBe(true);
   });
 
+  // 真实场景：父会话有空闲 typed child 时「移到 worktree」，worker 的 releaseParent 静默销毁整棵子树、只发 parent-ended；
+  // 父会话同 generation 重新 ready 后幽灵子会话仍算活着、仍被列出并占着 coworker 名额
+  it.each(['parent-ended', 'parent-rejected'] as const)(
+    '父会话 %s 后其子会话随之失效：重新 ready 后不再存活、不列为 coworker、不占名额',
+    (type) => {
+      const sessions = new AgentSessionIndex({
+        readSettings: () => ({ 'enso-settings': { state: { maxActiveCoworkers: 1 } } }),
+        randomUuid: uuids(),
+      });
+      const ready = {
+        type: 'parent-ready' as const,
+        identity: parent,
+        seq: 1,
+        sessionFile: '/tmp/a.jsonl',
+        model: { providerId: 'p', modelId: 'm' },
+      };
+      sessions.prepareParent(parent);
+      sessions.observe(ready);
+      const reserved = sessions.reserveChild(parent, 'builtin:scout', 'Scout', 'request-1');
+      if (!reserved.ok) throw new Error('reservation failed');
+      const child = reserved.reservation.child;
+      sessions.observe(readyChild(child));
+
+      sessions.observe({
+        type,
+        identity: parent,
+        seq: type === 'parent-ended' ? 2 : 0,
+        reason: 'released',
+      });
+      // 同代重新 spawn：worker 注册会话时先发 status 再发 parent-ready，seq 从头计
+      sessions.prepareParent(parent);
+      sessions.observe({ type: 'status', identity: parent, seq: 1, status: 'idle' });
+      sessions.observe({ ...ready, seq: 2 });
+
+      expect(sessions.isReady(child)).toBe(false);
+      expect(sessions.listCoworkers(parent.sessionId)).toEqual({ ok: true, data: [] });
+      expect(sessions.reserveChild(parent, 'builtin:scout', 'Scout', 'request-2').ok).toBe(true);
+    }
+  );
+
+  // 真实场景：worker 侧子会话已不在（如随父会话被释放），之后对它的命令回 child-rejected，恒为 seq 0
+  it('跑过几轮的子会话收到 child-rejected（恒为 seq 0）仍随之失效，不被单调守卫丢掉', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'p', modelId: 'm' },
+    });
+    const reserved = sessions.reserveChild(parent, 'builtin:scout', 'Scout', 'request-1');
+    if (!reserved.ok) throw new Error('reservation failed');
+    const child = reserved.reservation.child;
+    sessions.observe(readyChild(child));
+    sessions.observe({ type: 'status', identity: child, seq: 2, status: 'running' });
+    sessions.observe({ type: 'status', identity: child, seq: 3, status: 'idle' });
+
+    sessions.observe({ type: 'child-rejected', identity: child, seq: 0, reason: 'gone' });
+
+    expect(sessions.isReady(child)).toBe(false);
+    expect(sessions.listCoworkers(parent.sessionId)).toEqual({ ok: true, data: [] });
+  });
+
   it('generates a fresh id, generation, and unique instance name for every mention', () => {
     const sessions = index();
     sessions.prepareParent(parent);

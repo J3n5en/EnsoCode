@@ -32,6 +32,7 @@ import { GitFileList, GitFileViewToggle } from './GitFileList';
 import { GitFileRow } from './GitFileRow';
 import { GitHistoryView } from './GitHistoryView';
 import { GitPanelLayout } from './GitPanelLayout';
+import { usePanelVisibility } from './panelVisibility';
 
 type Status = Extract<GitStatusResult, { ok: true }>;
 type Selection = { path: string; staged: boolean };
@@ -50,6 +51,8 @@ export function GitChangesView({
   editWriteKey: string;
 }) {
   const { t } = useI18n();
+  // 面板不在屏幕上（隐藏会话的 dock、tab 未选中、侧栏收起）就不读 Git，免得和 agent 的 git 操作抢 index.lock
+  const { visible: panelVisible } = usePanelVisibility();
   const request = useMemo(() => ({ conversationId, projectId }), [conversationId, projectId]);
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +76,13 @@ export function GitChangesView({
 
   const refresh = useCallback(
     async (visible = false) => {
-      if (disabled || unavailable || busyRef.current || (readInFlight.current !== 0 && !visible))
+      if (
+        !panelVisible ||
+        disabled ||
+        unavailable ||
+        busyRef.current ||
+        (readInFlight.current !== 0 && !visible)
+      )
         return;
       const sequence = ++readSequence.current;
       readInFlight.current = sequence;
@@ -98,7 +107,8 @@ export function GitChangesView({
         if (alive.current && sequence === readSequence.current) setLoading(false);
       }
     },
-    [disabled, unavailable, request]
+    // panelVisible 变化会换掉 refresh：重新挂轮询，并由下方 effect 在切回可见时立即读一次
+    [panelVisible, disabled, unavailable, request]
   );
 
   useEffect(() => {
@@ -135,7 +145,15 @@ export function GitChangesView({
 
   useEffect(() => {
     void historyVersion;
-    if (!selected || disabled || unavailable || busy !== null || view !== 'changes') return;
+    if (
+      !panelVisible ||
+      !selected ||
+      disabled ||
+      unavailable ||
+      busy !== null ||
+      view !== 'changes'
+    )
+      return;
     let active = true;
     let inFlight = false;
     const load = async () => {
@@ -164,7 +182,7 @@ export function GitChangesView({
       window.clearInterval(timer);
       window.removeEventListener('focus', onFocus);
     };
-  }, [request, selected, historyVersion, disabled, unavailable, view, busy]);
+  }, [panelVisible, request, selected, historyVersion, disabled, unavailable, view, busy]);
 
   const perform = async (
     label: string,

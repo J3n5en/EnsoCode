@@ -39,9 +39,6 @@ function applyWindowsChromeClasses(maximized: boolean, fullscreen: boolean): voi
 /**
  * Windows 窗口由系统绘制圆角和外框；这些状态类只控制浏览器视图的边缘预留。
  * 只给 html 挂 class，样式在 globals.css；macOS 和 Linux 不执行。
- *
- * Windows supplies the rounded corners and frame. These classes control browser
- * view edge insets through globals.css and do not run on macOS or Linux.
  */
 export function useWindowsWindowChrome(): void {
   useEffect(() => {

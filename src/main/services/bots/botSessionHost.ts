@@ -1301,7 +1301,12 @@ export class BotSessionHost {
         const capped = this.deps.bots.get(binding.botId)?.maxTokensPerTurn !== undefined;
         if (!this.turnActive(id)) return;
         this.noteTurnUsage(id, event.index, event.message, final);
-        if (this.deps.budget || capped) void this.enforceBudget(id, final);
+        // release 失败/超时会让停回合 reject（stopping 保留，等真实 parent-ended 解除）；
+        // 这里无人 await，不接住的话纯 Node 的 enso-server 会因未处理拒绝退出
+        if (this.deps.budget || capped)
+          void this.enforceBudget(id, final).catch((error) =>
+            console.warn('[bots] budget stop failed:', error)
+          );
         return;
       }
       case 'session-meta': {
@@ -2145,7 +2150,7 @@ export class BotSessionHost {
     const newer = this.queue.findIndex(
       (other) => other.botId === item.botId && (other.order ?? 0) > item.order!
     );
-    // Preserve source priority across members, but never overtake this member's older work.
+    // 跨成员保留来源优先级，但绝不越过本成员更早的任务。
     const last =
       newer >= 0 ? newer - 1 : this.queue.findLastIndex((other) => other.botId === item.botId);
     this.queue = [
@@ -2226,7 +2231,7 @@ export class BotSessionHost {
       controller: new AbortController(),
     };
     item.admission = admission;
-    // Unknown or oversized snapshots cannot establish independence safely.
+    // 快照未知或过大时，无法安全判定任务相互独立。
     if (
       !this.deps.classifyMemberTask ||
       !item.text ||
@@ -2253,7 +2258,7 @@ export class BotSessionHost {
         )
           return;
         admission.verdict = verdict === 'parallel' ? 'parallel' : 'serial';
-        // pump recomputes the snapshot and reserves synchronously before any spawn/prepare await.
+        // pump 会重新计算快照，并在任何 spawn/prepare 的 await 之前同步占位。
         this.pump();
       });
     return false;
@@ -2270,7 +2275,7 @@ export class BotSessionHost {
     for (const chatId of this.changedQueueReasons()) this.deps.emit({ kind: 'queue', chatId });
   }
 
-  /** A release timeout is not a release; only runtime acknowledgement or actual worker death can unblock. */
+  /** 释放超时不等于已释放；只有运行时确认或 worker 真正退出才能解除阻塞。 */
   private confirmRelease(id: string): void {
     const epoch = this.epochs.get(id);
     void this.withLock(id, async () => {

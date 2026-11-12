@@ -53,9 +53,12 @@ export function OauthLoginStep({ flow, providerLabel, onBack }: OauthLoginStepPr
 
   if (flow.state.phase !== 'running') return null;
 
+  // 厂商声明可留空的提示（如 Qoder「留空走浏览器登录」）允许提交空值，其余仍须填写；
+  // 这里只是界面闸门，空值最终放不放行由 Main 按自己登记的提示裁决
+  const allowEmpty = prompt?.allowEmpty === true;
   const submitPrompt = (value: string) => {
     const trimmed = value.trim();
-    if (!prompt || !trimmed) return;
+    if (!prompt || (!trimmed && !allowEmpty)) return;
     flow.respond(prompt.requestId, trimmed);
   };
 
@@ -130,7 +133,7 @@ export function OauthLoginStep({ flow, providerLabel, onBack }: OauthLoginStepPr
               />
               <Button
                 size="sm"
-                disabled={!promptValue.trim()}
+                disabled={!promptValue.trim() && !allowEmpty}
                 onClick={() => submitPrompt(promptValue)}
               >
                 {t('Submit')}

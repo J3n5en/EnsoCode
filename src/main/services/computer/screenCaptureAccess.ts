@@ -32,7 +32,7 @@ export async function preflightScreenCaptureAccess(): Promise<boolean> {
   }
 }
 
-/** Blocks on the macOS Screen Recording TCC dialog. Adds this process to System Settings. */
+/** 会阻塞等待 macOS 屏幕录制 TCC 授权弹窗，并把本进程加入系统设置。 */
 export async function requestScreenCaptureAccess(): Promise<boolean> {
   if (process.platform !== 'darwin') return false;
   try {

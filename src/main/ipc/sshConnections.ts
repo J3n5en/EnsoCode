@@ -1,10 +1,38 @@
 import { ipcMain } from '@platform';
 import { resolveSshTarget } from '@shared/ssh';
-import { IPC_CHANNELS } from '@shared/types';
+import { IPC_CHANNELS, type SshHostKeyChallenge } from '@shared/types';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { getSshConnectionStore, type SshConnectionUpsert } from '../services/sshConnectionStore';
-import { sshListRemoteDirs, sshProbeLogin } from '../services/sshProbe';
+import { trustSshHostKey } from '../services/sshHostKey';
+import { type SshProbeError, sshListRemoteDirs, sshProbeLogin } from '../services/sshProbe';
 import { getSourceAuthorityRegistry } from './agent';
+
+/** 展示过的主机密钥在这段时间内可凭它信任，过期须重新测试 */
+const SHOWN_HOST_KEY_TTL_MS = 10 * 60_000;
+
+/**
+ * 测试连接 / 列目录时展示给用户的主机密钥，按连接 id 记在 Main。
+ * 渲染层「信任」只传 id，Main 必须以用户核对过的指纹为准，而不是信任那一刻服务器出示的任意密钥。
+ */
+const shownHostKeys = new Map<string, { challenge: SshHostKeyChallenge; at: number }>();
+
+function rememberShownHostKey(id: string, challenge: SshHostKeyChallenge | undefined): void {
+  if (challenge) shownHostKeys.set(id, { challenge, at: Date.now() });
+}
+
+function shownHostKey(id: string): SshHostKeyChallenge | null {
+  const shown = shownHostKeys.get(id);
+  if (!shown || Date.now() - shown.at > SHOWN_HOST_KEY_TTL_MS) return null;
+  return shown.challenge;
+}
+
+/** 信任后的登录：仍卡在主机密钥才算失败；认证等其它错误留给随后的重新测试展示 */
+function trustOutcome(failure: SshProbeError | null): { ok: true } | { ok: false; error: string } {
+  if (!failure || (!failure.hostKey && !/主机密钥未信任/.test(failure.error))) {
+    return { ok: true };
+  }
+  return { ok: false, error: failure.error };
+}
 
 function isTrustedWindow(webContentsId: number): boolean {
   return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
@@ -67,12 +95,15 @@ export function registerSshConnectionHandlers(): void {
       }
       const secret = getSshConnectionStore().getSecret(id);
       if (!secret) return { ok: false, error: '连接不存在。' };
-      return sshListRemoteDirs(resolveSshTarget(secret), remotePath || undefined, {
+      const result = await sshListRemoteDirs(resolveSshTarget(secret), remotePath || undefined, {
         auth: secret.auth,
         port: secret.port,
         password: secret.password,
         keyscanHost: secret.host,
       });
+      // 添加项目「浏览目录」同样会弹信任框
+      if (!result.ok) rememberShownHostKey(id, result.hostKey);
+      return result;
     }
   );
 
@@ -88,6 +119,7 @@ export function registerSshConnectionHandlers(): void {
       password: secret.password,
       keyscanHost: secret.host,
     });
+    rememberShownHostKey(id, failure?.hostKey);
     return failure ? { ok: false, ...failure } : { ok: true };
   });
 
@@ -97,15 +129,20 @@ export function registerSshConnectionHandlers(): void {
     }
     const secret = getSshConnectionStore().getSecret(id);
     if (!secret) return { ok: false, error: '连接不存在。' };
-    const failure = await sshProbeLogin(resolveSshTarget(secret), {
-      auth: secret.auth,
-      port: secret.port,
-      password: secret.password,
-      strictHostKeyChecking: 'accept-new',
-    });
-    if (!failure || (!failure.hostKey && !/主机密钥未信任/.test(failure.error))) {
-      return { ok: true };
+    const shown = shownHostKey(id);
+    if (!shown) return { ok: false, error: '请先测试连接并核对主机密钥。' };
+    const target = resolveSshTarget(secret);
+    const login = { auth: secret.auth, port: secret.port, password: secret.password };
+    const trusted = await trustSshHostKey(shown);
+    // 写入后不带 accept-new 再登录一次，确认 ssh 认这条记录（别名与 HostName 对不上时会失败）
+    if (trusted.ok) return trustOutcome(await sshProbeLogin(target, login));
+    // 取舍：弹窗没有指纹（keyscan 扫不到，常见于 ssh config 别名）时，用户确认的本就是
+    // 「信任首次出示的密钥」，保留 accept-new；展示过指纹则绝不回退，否则等于放过中间人
+    if (trusted.reason === 'unavailable' && !shown.fingerprint) {
+      return trustOutcome(
+        await sshProbeLogin(target, { ...login, strictHostKeyChecking: 'accept-new' })
+      );
     }
-    return { ok: false, error: failure.error };
+    return { ok: false, error: trusted.error };
   });
 }

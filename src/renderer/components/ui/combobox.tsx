@@ -54,7 +54,7 @@ function ComboboxInput({
   const { multiple } = React.useContext(ComboboxContext);
   const sizeValue = (size ?? 'default') as 'sm' | 'default' | 'lg' | number;
 
-  // multiple mode
+  // 多选模式
   if (multiple) {
     return (
       <ComboboxPrimitive.Input
@@ -71,7 +71,7 @@ function ComboboxInput({
     );
   }
 
-  // single mode
+  // 单选模式
   return (
     <div className="relative w-full has-disabled:opacity-64">
       {startAddon && (
@@ -138,22 +138,22 @@ function ComboboxPopup({
 }) {
   const { chipsRef, rootRef } = React.useContext(ComboboxContext);
 
-  // Detect modal context by checking if the combobox root is inside a dialog
-  // NOTE: Not using useMemo because rootRef.current is null on first render
-  // and ref changes don't trigger re-renders. This logic is lightweight (a few
-  // DOM queries) and only runs when the popup renders (i.e. when open).
+  // 通过检查 combobox 根节点是否位于 dialog 内来判断模态上下文
+  // 注意：不用 useMemo，因为首次渲染时 rootRef.current 为 null，
+  // 且 ref 变化不会触发重渲染。这段逻辑很轻量（几次 DOM 查询），
+  // 并且只在弹层渲染时（即打开时）执行。
   let computedZIndex: number = Z_INDEX.DROPDOWN;
   if (zIndex !== undefined) {
     computedZIndex = zIndex;
   } else {
     const rootEl = rootRef?.current;
     if (rootEl) {
-      // Check if inside a nested modal first
+      // 先检查是否位于嵌套模态框内
       const nestedModal = rootEl.closest('[data-slot="dialog-popup"] [data-slot="dialog-popup"]');
       if (nestedModal) {
         computedZIndex = Z_INDEX.DROPDOWN_IN_NESTED_MODAL;
       } else {
-        // Check if inside a modal
+        // 检查是否位于模态框内
         const modal = rootEl.closest('[data-slot="dialog-popup"]');
         if (modal) {
           computedZIndex = Z_INDEX.DROPDOWN_IN_MODAL;

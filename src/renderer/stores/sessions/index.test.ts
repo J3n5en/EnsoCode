@@ -4891,6 +4891,70 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
     );
   });
 
+  // 真实场景：回退 IPC 已返回 ok 后 worker 退出 / 会话被释放或拒绝，或 worker 侧 navigateTree
+  // 抛错只发 status failed；rewind-done 永远不会到达，send 一直返回 rewind in progress、回退入口隐藏
+  it.each<[string, RendererAgentEvent]>([
+    ['worker-exited', { type: 'worker-exited' }],
+    [
+      'parent-ended',
+      {
+        type: 'parent-ended',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq: 1,
+        reason: 'released',
+      },
+    ],
+    [
+      'parent-rejected',
+      {
+        type: 'parent-rejected',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq: 0,
+        reason: 'worker unavailable',
+      },
+    ],
+    [
+      'status failed',
+      {
+        type: 'status',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq: 1,
+        status: 'failed',
+        error: 'navigate failed',
+      },
+    ],
+  ])('回退进行中收到 %s：解除回退锁，之后发送照常上屏', async (_name, event) => {
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: false,
+          status: 'idle' as const,
+          generation: 'g1',
+        },
+      },
+    }));
+    store.getState().rewind('parent', 0, true);
+    expect(agentRewind).toHaveBeenCalledWith('parent', 'entry-two', true);
+    expect(store.getState().conversations.parent).toMatchObject({
+      rewinding: true,
+      restoringFiles: true,
+    });
+    onAgentEvent?.(event);
+    const before = store.getState().conversations.parent.messages.length;
+    const error = await store
+      .getState()
+      .send('next', { providerId: 'p1', modelId: 'm1', cwd: '/workspace' }, undefined, 'parent');
+    expect(error).toBeNull();
+    const after = store.getState().conversations.parent;
+    expect(after.messages).toHaveLength(before + 1);
+    expect(after.rewinding).toBeFalsy();
+    expect(after.restoringFiles).toBeFalsy();
+  });
+
   it('status:running 时不调用 window.electronAPI.agent.rewind', () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {
@@ -5532,5 +5596,112 @@ describe('无人值守开关：已启动即时下发，未启动随 spawn', () =
       .getState()
       .send('继续', { providerId: 'provider-1', modelId: 'model-1', cwd: '/workspace' });
     expect(agentSpawn).toHaveBeenCalledWith(expect.objectContaining({ autoRejectApprovals: true }));
+  });
+});
+
+describe('IPC invoke 被拒时按失败分支收尾', () => {
+  const target = { providerId: 'p1', modelId: 'm1', cwd: '/workspace' };
+
+  beforeAll(async () => {
+    settingsModule ??= await import('../settings');
+    sessionsModule ??= await import('./index');
+  });
+
+  beforeEach(async () => {
+    agentPrompt.mockClear();
+    agentSpawn.mockClear();
+    nextConversationId = 'parent';
+    sourceProjection = {
+      projects: [
+        {
+          projectId: 'project',
+          canonicalPath: '/workspace',
+          state: 'active',
+          version: 1,
+        },
+      ],
+      conversations: [],
+    };
+    sessionsModule.useSessionsStore.setState({
+      conversations: {},
+      order: [],
+      activeId: null,
+      pendingAgentPrefill: undefined,
+    });
+    settingsModule.useSettingsStore.setState({
+      projects: [{ id: 'project', name: 'Project', path: '/workspace' }],
+    });
+    await seedParent();
+  });
+
+  // Main 目前都返回结构化结果；一旦 invoke 本身被拒，不收尾的话乐观气泡永久残留
+  it('prompt 被拒：收回乐观气泡、原文退回输入框并报错', async () => {
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, started: true, status: 'idle' as const },
+      },
+    }));
+    agentPrompt.mockRejectedValueOnce(new Error('ipc closed'));
+    const before = store.getState().conversations.parent.messages.length;
+    const error = await store
+      .getState()
+      .send('hello', target, undefined, 'parent')
+      .catch((thrown: unknown) => thrown);
+    const after = store.getState().conversations.parent;
+    expect(after.messages).toHaveLength(before);
+    expect(after.draftText).toBe('hello');
+    expect(after).toMatchObject({ started: false, status: 'failed', error: 'ipc closed' });
+    expect(error).toBe('ipc closed');
+  });
+
+  it('首条消息 spawn 被拒：收回乐观气泡、清 spawning、原文退回输入框', async () => {
+    const store = sessionsModule.useSessionsStore;
+    agentSpawn.mockRejectedValueOnce(new Error('ipc closed'));
+    const error = await store
+      .getState()
+      .send('hello', target, undefined, 'parent')
+      .catch((thrown: unknown) => thrown);
+    const after = store.getState().conversations.parent;
+    expect(after.messages).toHaveLength(0);
+    expect(after.spawning).toBe(false);
+    expect(after.draftText).toBe('hello');
+    expect(after).toMatchObject({ status: 'failed', error: 'ipc closed' });
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(error).toBe('ipc closed');
+  });
+
+  it('resume 的 spawn 被拒：清 spawning 并标失败，之后可再次恢复', async () => {
+    enableRewindResumeModel();
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: false,
+          spawning: false,
+          status: 'idle' as const,
+          sessionFile: '/tmp/cold.jsonl',
+          lastProviderId: 'p1',
+          lastModelId: 'm1',
+        },
+      },
+    }));
+    agentSpawn.mockRejectedValueOnce(new Error('ipc closed'));
+    await store
+      .getState()
+      .resumeConversation('parent')
+      .catch(() => undefined);
+    expect(store.getState().conversations.parent).toMatchObject({
+      spawning: false,
+      started: false,
+      status: 'failed',
+      error: 'ipc closed',
+    });
+    await store.getState().resumeConversation('parent');
+    expect(agentSpawn).toHaveBeenCalledTimes(2);
+    expect(store.getState().conversations.parent.started).toBe(true);
   });
 });

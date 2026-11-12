@@ -27,6 +27,13 @@ display:flex;align-items:center;justify-content:center;height:100vh;margin:0;
 background:#0f1115;color:#e6e6e6}div{text-align:center}</style></head>
 <body><div><h2>登录失败</h2><p>回调参数不合法，请回到应用重试。</p></div></body></html>`;
 
+/** 授权服务器带回 error 时的页面；不回显 error 原文，免得在本机回调源上反射任意内容 */
+const ERROR_HTML = `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>授权未完成</title><style>body{font-family:system-ui,-apple-system,sans-serif;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0;
+background:#0f1115;color:#e6e6e6}div{text-align:center}</style></head>
+<body><div><h2>授权未完成</h2><p>授权服务器返回了错误，请回到应用查看原因后重试。</p></div></body></html>`;
+
 export interface OauthCallbackServer {
   /** 实际生效的 redirect_uri（端口被占用时会退到随机端口） */
   redirectUri: string;
@@ -107,7 +114,15 @@ export async function startOauthCallbackServer(
   options.signal?.addEventListener('abort', onAbort, { once: true });
 
   server.on('request', (req, res) => {
-    const url = new URL(req.url ?? '/', redirectUri);
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', redirectUri);
+    } catch {
+      // 等待期间任何网页都能请求这个端口；`//` 之类解析失败若抛出，就是 Main 里的未捕获异常
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('bad request');
+      return;
+    }
     if (url.pathname !== options.callbackPath) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('not found');
@@ -119,9 +134,11 @@ export async function startOauthCallbackServer(
     const state = url.searchParams.get('state');
     const isValidState = state === options.expectedState;
     const isSuccess = !error && !!code && isValidState;
+    // state 不符的 error 可能是伪造的，不能借它中断真实登录
+    const isAuthError = !!error && isValidState;
 
     res.writeHead(isSuccess ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(isSuccess ? SUCCESS_HTML : FAILURE_HTML);
+    res.end(isSuccess ? SUCCESS_HTML : isAuthError ? ERROR_HTML : FAILURE_HTML);
 
     if (isSuccess) {
       const iss = url.searchParams.get('iss');
@@ -131,8 +148,10 @@ export async function startOauthCallbackServer(
       });
       return;
     }
-    if (error === 'access_denied' && isValidState) {
-      settle(() => reject(new Error(`授权被拒绝：${error}`)));
+    // invalid_scope 等错误同样意味着这次授权已无法继续，不能让用户干等到超时
+    if (isAuthError) {
+      const message = error === 'access_denied' ? `授权被拒绝：${error}` : `授权失败：${error}`;
+      settle(() => reject(new Error(message)));
     }
   });
 

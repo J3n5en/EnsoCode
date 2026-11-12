@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import type { AddressInfo } from 'node:net';
+import { type AddressInfo, createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -70,6 +70,39 @@ function connect(pairId: string, role: string, token: string): Promise<Client> {
     ws.once('open', () => resolve({ ws, next, closed }));
     ws.once('error', reject);
   });
+}
+
+const UPGRADE_HEADERS = 'Host: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n';
+
+/** 原始 TCP 发一段请求，收集回包直到对端关闭；超时说明连接被晾着没人处理 */
+function rawRequest(request: string, timeoutMs = 1_000): Promise<string> {
+  const { port } = relay.server.address() as AddressInfo;
+  return new Promise((resolve) => {
+    let data = '';
+    const socket = createConnection(port, '127.0.0.1', () => socket.write(request));
+    const timer = setTimeout(() => socket.destroy(), timeoutMs);
+    socket.on('data', (chunk) => {
+      data += chunk.toString();
+    });
+    socket.on('error', () => {});
+    socket.on('close', () => {
+      clearTimeout(timer);
+      resolve(data);
+    });
+  });
+}
+
+/** 收集窗口内的未捕获异常：宿主进程没有兜底，出现任何一个都意味着 enso-server 整个退出 */
+async function collectUncaught(run: () => Promise<void>): Promise<unknown[]> {
+  const uncaught: unknown[] = [];
+  process.setUncaughtExceptionCaptureCallback((error) => uncaught.push(error));
+  try {
+    await run();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    process.setUncaughtExceptionCaptureCallback(null);
+  }
+  return uncaught;
 }
 
 beforeEach(() => {
@@ -193,6 +226,43 @@ describe('rooms', () => {
     expect(await host.closed).toEqual({ code: 1008, reason: 'revoked' });
     const again = await connect(pairId, 'guest', claimed.body.deviceToken);
     expect(await again.closed).toEqual({ code: 1008, reason: 'revoked' });
+  });
+});
+
+describe('malformed upgrades', () => {
+  // 审计复现：未鉴权的 `GET //host:99999/` 升级请求让 upgrade 回调里的 new URL 同步抛错，宿主直接退出
+  it('畸形请求目标的升级请求回 400，宿主不崩溃且继续服务', async () => {
+    await start();
+    const statusLines: string[] = [];
+    const uncaught = await collectUncaught(async () => {
+      for (const target of ['//host:99999/', '//[::1/x', '//a^b/']) {
+        const reply = await rawRequest(`GET ${target} HTTP/1.1\r\n${UPGRADE_HEADERS}`);
+        statusLines.push(reply.split('\r\n')[0]);
+      }
+    });
+    expect(uncaught).toEqual([]);
+    expect(statusLines).toEqual(Array(3).fill('HTTP/1.1 400 Bad Request'));
+    expect((await fetch(`${base}/healthz`)).status).toBe(200);
+  });
+
+  // 复现 I1 时发现：被拒的升级请求写回包时对端已重置，报 EPIPE；upgrade 之后 socket 没有 error 监听，宿主同样退出
+  it('提前拒绝的升级请求遇到对端立即重置连接，宿主不崩溃', async () => {
+    await start();
+    const { port } = relay.server.address() as AddressInfo;
+    const uncaught = await collectUncaught(async () => {
+      for (let i = 0; i < 20; i++) {
+        await new Promise<void>((resolve) => {
+          const socket = createConnection(port, '127.0.0.1', () => {
+            socket.write(`GET /v1/pair/abc?role=admin HTTP/1.1\r\n${UPGRADE_HEADERS}`);
+            socket.resetAndDestroy();
+          });
+          socket.on('error', () => {});
+          socket.on('close', () => resolve());
+        });
+      }
+    });
+    expect(uncaught).toEqual([]);
+    expect((await fetch(`${base}/healthz`)).status).toBe(200);
   });
 });
 

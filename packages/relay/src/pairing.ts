@@ -38,6 +38,15 @@ export function randomToken(): string {
   return toBase64Url(b);
 }
 
+/**
+ * host 公钥格式：客户端（@enso/pair startHostPairing）上报 32 字节 NaCl box 公钥的
+ * base64url（无填充），恒为 43 字符。request 不鉴权且会以 sha256(publicKey) 落存储，
+ * 只收这一种格式，挡住任意内容写进存储。
+ */
+export function isValidPublicKey(publicKey: string): boolean {
+  return /^[A-Za-z0-9_-]{43}$/.test(publicKey);
+}
+
 /** pairId = sha256(host 公钥) 前 128 位。两端各自从 QR 里的公钥独立算出同一房间号，QR 无需带 pairId。 */
 export async function pairIdFromPublicKey(publicKeyB64Url: string): Promise<string> {
   const data = new TextEncoder().encode(publicKeyB64Url);
@@ -48,6 +57,11 @@ export async function pairIdFromPublicKey(publicKeyB64Url: string): Promise<stri
 export function isExpired(state: PairState, now: number): boolean {
   // 只有未认领的配对码会过期；authorized 后长期有效（用于重连）
   return state.phase === 'requested' && now - state.createdAt > PAIR_TTL_MS;
+}
+
+/** 未认领配对码的清理时刻：isExpired 首次为真的那一毫秒；authorized 长期有效（重连要用），不清理 */
+export function purgeAt(state: PairState): number | null {
+  return state.phase === 'requested' ? state.createdAt + PAIR_TTL_MS + 1 : null;
 }
 
 /** host 发起/轮询 request：无 state 或已过期则新建 requested，否则原样返回 */
@@ -97,11 +111,24 @@ export function canFetchCredentials(state: PairState, now: number): boolean {
   return now - (state.authorizedAt ?? state.createdAt) <= CREDENTIAL_WINDOW_MS;
 }
 
+/**
+ * 常量时间比较：=== 遇到第一个不同字符就返回，耗时会泄露猜中了几位（与 Go 版 subtle.ConstantTimeCompare 对齐）。
+ * 长度不同直接返回（token 定长，长度不是秘密）；同长时逐字符异或累积，不提前退出。
+ * 本文件要在 Node 单测与内置中继里复用，不能用 Workers 专有的 crypto.subtle.timingSafeEqual。
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 export function tokenValid(
   state: PairState | undefined,
   role: 'host' | 'guest',
   token: string
 ): boolean {
   if (state?.phase !== 'authorized' || !token) return false;
-  return role === 'host' ? token === state.hostToken : token === state.deviceToken;
+  const want = role === 'host' ? state.hostToken : state.deviceToken;
+  return !!want && timingSafeEqual(want, token);
 }

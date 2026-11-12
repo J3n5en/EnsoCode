@@ -1,12 +1,14 @@
 import { parseDiffFromFile } from '@pierre/diffs';
 import { FileDiff } from '@pierre/diffs/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import { useCodeHighlightOptions } from '@/hooks/useColorScheme';
 import { useI18n } from '@/i18n';
 import { diffCacheKey } from '@/lib/diffCacheKey';
 import { reconstructOld } from '@/lib/sessionChanges';
 import type { EditBlock } from '@/stores/sessions/timeline';
 import { CODE_THEME, ensureHighlighter } from './codeHighlighter';
+import { MarkdownLinkContext } from './Markdown';
+import { toWorkspaceRelativePath } from './markdownLinks';
 
 /** 主题跟随应用明暗，split 左右分栏 + 词级高亮，纯 JS 高亮器（免 WASM）；高亮走根部 DiffWorkerPool */
 const DIFF_OPTIONS = {
@@ -38,6 +40,11 @@ export function EditDiff({
   const { t } = useI18n();
   const name = path.split('/').pop() || 'file';
   const [state, setState] = useState<Loaded>({ kind: 'loading' });
+  // Main 只收会话标识 + 工作区相对路径；工作区外或没有会话上下文（Bot、远程节点视图）不读
+  const link = useContext(MarkdownLinkContext);
+  const conversationId = link?.conversationId;
+  const projectId = link?.projectId;
+  const rel = link ? toWorkspaceRelativePath(path, link.cwd) : null;
 
   useEffect(() => {
     let alive = true;
@@ -56,7 +63,11 @@ export function EditDiff({
         alive = false;
       };
     }
-    Promise.all([ensureHighlighter(), window.electronAPI.files.read(path)])
+    const reading =
+      conversationId && projectId && rel
+        ? window.electronAPI.files.read({ conversationId, projectId, rel })
+        : Promise.resolve(null);
+    Promise.all([ensureHighlighter(), reading])
       .then(([, current]) => {
         if (!alive) return;
         // 读不到（手机端无本机文件系统）或还原失败时退成片段 diff
@@ -74,7 +85,7 @@ export function EditDiff({
     return () => {
       alive = false;
     };
-  }, [path, blocks, snapshot]);
+  }, [blocks, conversationId, projectId, rel, snapshot]);
 
   if (state.kind === 'loading') {
     return (

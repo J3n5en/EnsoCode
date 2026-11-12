@@ -1,5 +1,6 @@
 import { realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { isExternalFileOpenBlocked } from '@shared/fileOpening';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { isBotId } from '@shared/types/bot';
 import type { BotArtifact, BotArtifactKind, BotArtifactTarget } from '@shared/types/botIpc';
@@ -50,15 +51,12 @@ export function artifactKind(name: string): BotArtifactKind {
   return KINDS[ext] ?? 'other';
 }
 
-const NOT_OPENABLE = new Set(
-  'app command tool sh bash zsh csh fish exe bat cmd com msi ps1 vbs scpt applescript workflow action jar pkg mpkg dmg terminal py rb pl php js mjs cjs jxa webloc inetloc url fileloc'.split(
-    ' '
-  )
-);
-
-/** 「用默认应用打开」只给非可执行、非脚本文件；其余只能在访达中显示 */
+/**
+ * 「用默认应用打开」只给非可执行、非脚本文件；其余只能在访达中显示。
+ * Windows 上 stat 从不报执行位，扩展名是唯一防线，所以复用工作区文件打开的同一份完整清单。
+ */
 export function isOpenableArtifact(name: string, mode: number): boolean {
-  return (mode & 0o111) === 0 && !NOT_OPENABLE.has(path.extname(name).slice(1).toLowerCase());
+  return (mode & 0o111) === 0 && !isExternalFileOpenBlocked(name);
 }
 
 const idText = (value: unknown): value is string =>

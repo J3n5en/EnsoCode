@@ -306,6 +306,24 @@ describe('kg 任务：幂等、续跑、失败不影响记忆', () => {
     expect(ensureKgJob(db, 'nope')).toBeNull();
   });
 
+  // 只改标题时指纹不变但抽取输入变了：已收尾、或 running（已读过旧标题）的要重排；pending 开跑才读记忆，直接复用
+  it('ensureKgJob rerun：同指纹已收尾或运行中时新建 pending，仍在 pending 时复用原任务', async () => {
+    const m = await create('Sarah uses Kubernetes with Docker.');
+    const pending = ensureKgJob(db, m.id);
+    expect(ensureKgJob(db, m.id, { rerun: true })?.id).toBe(pending?.id);
+    db.prepare("UPDATE memory_jobs SET status = 'running' WHERE id = ?").run(pending?.id);
+    const afterRunning = ensureKgJob(db, m.id, { rerun: true });
+    expect(afterRunning).toMatchObject({ status: 'pending', fingerprint: pending?.fingerprint });
+    expect(afterRunning?.id).not.toBe(pending?.id);
+    await runKgJob(db, afterRunning as NonNullable<typeof afterRunning>, {
+      complete: completeWith(json({ entities: [entity('Kubernetes')], relationships: [] })),
+    });
+    expect(ensureKgJob(db, m.id)).toBeNull();
+    const afterDone = ensureKgJob(db, m.id, { rerun: true });
+    expect(afterDone).toMatchObject({ status: 'pending', fingerprint: pending?.fingerprint });
+    expect(afterDone?.id).not.toBe(afterRunning?.id);
+  });
+
   it('旧指纹抽空成功不挡住补抽；ensurePendingKgJobs 给最新记忆建任务', async () => {
     const m = await create('Sarah uses Kubernetes with Docker.');
     const now = new Date().toISOString();

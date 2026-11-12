@@ -47,7 +47,11 @@ import {
   skyMouseButton,
   skyPointerClickRecipe,
 } from './skyClick';
-import { findCapturerWindowSource, thumbnailCropForWindow } from './windowSource';
+import {
+  findCapturerWindowSource,
+  findCaptureWindow,
+  thumbnailCropForWindow,
+} from './windowSource';
 
 const execFileAsync = promisify(execFile);
 
@@ -168,9 +172,7 @@ export class MacosDesktopBackend implements DesktopBackend {
   ): Promise<CaptureBytes> {
     const size = image.getSize();
     const png = image.toPNG();
-    const info =
-      windowInfo ??
-      (await this.windows()).find((window) => window.id === target || target.includes(window.id));
+    const info = windowInfo ?? findCaptureWindow(await this.windows(), target);
     const scaled = scaleCaptureSize(size.width, size.height, maxWidth, maxHeight);
     const display = screen.getPrimaryDisplay().bounds;
     const rect = captureSourceRect({

@@ -89,6 +89,24 @@ describe('skyDragPath', () => {
     ]);
   });
 
+  // 审计发现：每 12px 插一个点、每点停 12ms，(10,10)→(100000,10) 生成 8334 个点、约 100 秒
+  it('超长拖拽的插值点数有上限，首尾仍是原始端点', () => {
+    const path = skyDragPath([
+      { x: 10, y: 10 },
+      { x: 100_000, y: 10 },
+    ]);
+    expect(path.length).toBeLessThanOrEqual(500);
+    expect([path[0], path.at(-1)]).toEqual([
+      { x: 10, y: 10 },
+      { x: 100_000, y: 10 },
+    ]);
+  });
+
+  it('途经点本身超过上限时拒绝，而不是逐点慢慢拖', () => {
+    const points = Array.from({ length: 501 }, (_, i) => ({ x: i, y: 0 }));
+    expect(() => skyDragPath(points)).toThrow(/at most 500 points/);
+  });
+
   it('单点与重复点不插值', () => {
     expect(skyDragPath([{ x: 3, y: 4 }], 10)).toEqual([{ x: 3, y: 4 }]);
     expect(

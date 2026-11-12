@@ -27,8 +27,6 @@ import { OAUTH_POOL_TERMINAL_ERROR_ENTRY } from './sessionAdapter';
 
 /**
  * Main 权威选号接口；排除集合属于当前活动，不受额度冷却窗口到期影响。取消后调用方必须拒绝延迟结果。
- *
- * Main-authoritative selection; exclusions belong to the current activity and survive quota-window expiry. Callers must reject delayed results after cancellation.
  */
 export type OauthPoolSelector = (
   providerId: string,
@@ -66,9 +64,6 @@ export function installOauthPoolSelector(runtime: ModelRuntime, selector: OauthP
   boundRuntimes.add(runtime);
   // SDK 的公开 resolveModel 会用目录模型替换路由返回的模型，所以在公开出口按请求克隆。
   // 私有 Symbol 经 prepareRequest 的 baseUrl spread 保留，但不进入 JSON；普通模型原样返回。
-  //
-  // Public resolveModel replaces the router's model with its catalog model, so clone at its public exit per request.
-  // A private Symbol survives prepareRequest's baseUrl spread but never enters JSON; ordinary models pass through.
   const resolveModel = runtime.resolveModel.bind(runtime);
   runtime.resolveModel = (model, messages, options) => {
     if (!model.provider.startsWith(PREFIX)) return resolveModel(model, messages, options);
@@ -81,8 +76,6 @@ export function installOauthPoolSelector(runtime: ModelRuntime, selector: OauthP
     });
   };
   // 路由预检后 SDK 还会在真实请求准备时刷新鉴权；同一请求模型上的票据必须覆盖这次刷新失败。
-  //
-  // After routing preflight, the SDK resolves auth again while preparing the real request; its request-local model receipt must cover that refresh failure too.
   const getAuth = runtime.getAuth.bind(runtime);
   runtime.getAuth = (model, options) => {
     if (typeof model === 'string') return getAuth(model, options);
@@ -118,7 +111,7 @@ function withReceipt(failure: OauthPoolFailure, selectionReceipt?: string): Oaut
 }
 
 function recordFailure(failure: OauthPoolFailure): string {
-  // SDK retry heuristics scan error text for numeric HTTP codes, including opaque ids.
+  // SDK 的重试启发式会扫描错误文本中的数字 HTTP 状态码，不透明 id 里的数字也会被扫到。
   const id = randomUUID().replace(/[0-9a-f]/g, (hex) =>
     String.fromCharCode(97 + Number.parseInt(hex, 16))
   );
@@ -133,9 +126,6 @@ export function releaseOauthPoolSession(sessionId: string): void {
 
 /**
  * 显式用户重试开始新活动；自动接替不调用此入口，失败账号仍在同活动内排除。
- *
- * An explicit user retry starts a new activity. Automatic takeover must not call
- * this entry, so failed accounts remain excluded within the same activity.
  */
 export function resetOauthPoolActivity(session: AgentSession): void {
   if (!session.model?.provider.startsWith(PREFIX)) return;
@@ -155,8 +145,6 @@ export function failureForMessage(message: {
 
 /**
  * getAuth 的公开错误保留 cause，但 Codex 仅在来源专属错误信封中保留 HTTP JSON。严格解析该信封，不按刷新失败或限速文案猜测登录失效。
- *
- * Public getAuth errors retain cause, while Codex keeps HTTP JSON only in its source-specific envelope. Parse that envelope strictly; generic refresh/rate-limit prose is not invalid-login evidence.
  */
 export function classifyCodexRefreshFailure(
   error: unknown,
@@ -202,8 +190,6 @@ function ensurePoolProvider(runtime: ModelRuntime, key: string): void {
 
 /**
  * 只为池会话强制 SSE 并读取真实错误 JSON；固定账号请求原样透传。证据仅保留原因和重置时间，不保留响应或凭证。
- *
- * Only pool sessions use controlled SSE and real error JSON; fixed requests pass through. Keep only reason/reset evidence, never bodies or credentials.
  */
 export function withCodexPoolEvidence(provider: Provider): Provider {
   const wrap =
@@ -318,8 +304,6 @@ export function withCodexPoolEvidence(provider: Provider): Provider {
 
 /**
  * 用公开虚拟模型路由保留模型和推理选择。每次请求实时向 Main 选号并先验证 OAuth 刷新；只有确证失效才推进，瞬态刷新错误原样失败。
- *
- * Public virtual routing preserves model/thinking selection. Each request selects live through Main and validates OAuth refresh first; only confirmed invalid credentials advance, while transient refresh failures remain errors.
  */
 export function resolveOauthPoolModel(runtime: ModelRuntime, config: SpawnModelConfig) {
   const select = selectors.get(runtime);
@@ -339,8 +323,6 @@ export function resolveOauthPoolModel(runtime: ModelRuntime, config: SpawnModelC
     thinkingLevels: getSupportedThinkingLevels(base),
     route: async (request) => {
       // 每活动失败集合保存在公开 router state 中，冷却窗口到期也不能让同一任务循环重试旧账号。
-      //
-      // The public router state stores per-activity failures, so cooldown expiry cannot loop the same task through failed accounts.
       let failed = request.failed ? failureForMessage(request.failed.message) : undefined;
       const previous = attemptedAccounts(request.state);
       const attempted = [...previous];
@@ -409,8 +391,6 @@ export function resolveOauthPoolModel(runtime: ModelRuntime, config: SpawnModelC
 
 /**
  * 在最终结算前用公开 boundary 移除失败的上下文消息并继续；任务和工具结果保持原位，不再次 prompt。
- *
- * Before settlement, the public boundary removes only the failed context message and continues; task/tool results remain intact and prompt is never repeated.
  */
 export function oauthPoolRecoveryExtension(
   select: OauthPoolSelector,
@@ -435,8 +415,6 @@ export function oauthPoolRecoveryExtension(
           };
           const existing = selectedAccounts.get(id);
           // 换池或换模型后同一个账号也必须重新通知；只有真实 stream 开始才产生账号证据。
-          //
-          // A pool/model change must notify even for the same account; evidence is emitted only when the real stream starts.
           const selected =
             existing?.settingsProviderId === scope.settingsProviderId &&
             existing.modelId === scope.modelId

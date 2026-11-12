@@ -20,6 +20,7 @@ import type { DesktopBackend, PointerOptions } from './backend';
 import { cropPngAround } from './clickCrop';
 import { hiddenBehindOthers } from './coverage';
 import { resolveMacKey } from './macKey';
+import { pointerPlacement } from './pointerPlacement';
 import { isProtectedAuthText, PROTECTED_SETTING_MESSAGE } from './protectedSetting';
 import { normalizeScrollDelta } from './scrollDelta';
 import { matchWindow, resolveWindow } from './windowMatch';
@@ -77,7 +78,7 @@ export function disposeComputerGuestVm(session: ComputerGuestSession): void {
   try {
     session.vm?.dispose();
   } catch {
-    // ignore
+    // 忽略
   }
   session.vm = undefined;
   session.primed = false;
@@ -102,6 +103,9 @@ type Delivery = NonNullable<PointerOptions['delivery']>;
 
 const NOT_FRONT_MESSAGE = (target: string) =>
   `window '${target}' could not be brought to the front; input was not sent so it cannot land in another app. Ask the user to bring it forward.`;
+
+const NOT_ON_TARGET_MESSAGE = (target: string) =>
+  `the point is not on window '${target}' (outside it or covered by another window); foreground input was not sent so it cannot land in another app. Take a new screenshot and use a visible point inside the window.`;
 
 const HIDDEN_WINDOW_NOTE =
   'window is covered by other windows; Chrome/Electron-based apps stop repainting while covered, so this image may be stale — verify with ax()/el.value instead of raising it';
@@ -503,6 +507,10 @@ export async function runComputerGuest(input: {
           await input.backend.raise(target);
           await settle();
           if (!(await front())) throw new Error(NOT_FRONT_MESSAGE(target));
+        }
+        // 窗口在最前不代表落点在它上面：真实指针点在窗口外或被别的浮窗盖住时会落进别的 App
+        if (point && !pointerPlacement(await input.backend.windows(), target, point)?.exposed) {
+          throw new Error(NOT_ON_TARGET_MESSAGE(target));
         }
       }
       outcome = await fn(opts);
@@ -1161,7 +1169,7 @@ export async function runComputerGuest(input: {
       try {
         vm.dispose();
       } catch {
-        // ignore
+        // 忽略
       }
     } else if (!clean) {
       // 中止/超时时 guest 仍挂着半截 async 与宿主等待，VM 不再可信

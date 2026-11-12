@@ -78,6 +78,11 @@ export interface OauthLoginPrompt {
   message: string;
   placeholder?: string;
   options?: { id: string; label: string; description?: string }[];
+  /**
+   * 厂商声明此提示可以留空提交（如 Qoder「留空走浏览器登录」），缺省即必须填写。
+   * 只供界面决定是否允许提交空值；Main 以自己登记的提示为准裁决，不采信回传。
+   */
+  allowEmpty?: boolean;
 }
 
 /** 登录流程事件（Main → Renderer 单向推送） */

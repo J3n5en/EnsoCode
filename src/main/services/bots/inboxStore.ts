@@ -116,7 +116,7 @@ export class BotInboxStore {
         const item = parseInboxItem(JSON.parse(line));
         if (item) this.items.set(item.key, item);
       } catch {
-        /* torn line */
+        /* 写了一半的行 */
       }
     }
     const cutoff = this.now() - (options.retentionMs ?? 7 * 86_400_000);

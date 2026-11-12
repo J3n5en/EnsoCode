@@ -50,7 +50,7 @@ export class DelegationStore {
         const record = parseDelegation(migrateRecord('delegation', value));
         if (record) this.records.set(record.id, record);
       } catch {
-        /* torn or invalid line */
+        /* 写了一半或无效的行 */
       }
     }
     const cutoff = this.now() - this.retentionMs;
@@ -77,7 +77,7 @@ export class DelegationStore {
     const line = withSchemaVersion('delegation', parsed);
     const previous = this.records.get(parsed.id);
     mkdirSync(dirname(this.file), { recursive: true });
-    // Leading newline also isolates any torn last line from the next valid record.
+    // 前导换行还能把写了一半的末行与下一条有效记录隔开。
     appendFileSync(this.file, `\n${JSON.stringify(line)}\n`, 'utf8');
     this.records.set(parsed.id, parsed);
     this.lines++;

@@ -143,6 +143,10 @@ export interface TaskEvents {
 /** 毫秒转秒（保留一位小数），用于工具描述与回执里的时长 */
 const yieldSec = (ms: number): number => Math.round(ms / 100) / 10;
 
+/** 任务归属的会话属于以 rootId 为根的会话树（会话自身或键以 `${rootId}::` 开头的子会话） */
+const inSessionTree = (sessionId: string, rootId: string): boolean =>
+  sessionId === rootId || sessionId.startsWith(`${rootId}::`);
+
 /** 自上次读取以来的新输出 */
 export interface UnreadOutput {
   /** 内存缓冲里的未读部分 */
@@ -216,7 +220,7 @@ export class BackgroundTaskManager {
       env?: NodeJS.ProcessEnv;
     }
   ): string {
-    const taskId = this.reserveId();
+    const taskId = this.reserveId(sessionId);
     // detached：POSIX 下是独立进程组；kill 时整棵树一起清（Windows 走 taskkill /T）
     const child = spawnBackground(command, cwd, spawnOpts);
     const task = this.register(sessionId, taskId, spawnOpts?.displayCommand ?? command, {
@@ -241,7 +245,7 @@ export class BackgroundTaskManager {
     proc: DetachableProcess,
     opts: { command: string; startedAt: number; deadlineSec?: number }
   ): string {
-    const taskId = this.reserveId();
+    const taskId = this.reserveId(sessionId);
     const task = this.register(sessionId, taskId, opts.command, {
       startedAt: opts.startedAt,
       kill: () => proc.kill(),
@@ -334,14 +338,15 @@ export class BackgroundTaskManager {
     return commands.flatMap((command) => command.detach(reason) ?? []);
   }
 
-  private reserveId(): string {
+  private reserveId(sessionId: string): string {
     // 配额：先清理已完成，再满则拒绝并教模型下一步
     const max = this.limits.maxTasks;
     if (this.tasks.size >= max) this.pruneFinished();
     if (this.tasks.size >= max) {
+      // 只列本会话树的：别的会话的任务模型既停不了，也不该看到
       throw new Error(
         `Too many background tasks (limit ${max}). Stop one with task_stop first. ` +
-          `Known task ids: [${[...this.tasks.keys()].join(', ')}]`
+          `Known task ids: [${this.knownIds(sessionId).join(', ')}]`
       );
     }
     return `task-${++this.counter}-${Date.now().toString(36)}`;
@@ -656,8 +661,17 @@ export class BackgroundTaskManager {
     return true;
   }
 
-  knownIds(): string[] {
-    return [...this.tasks.keys()];
+  /** 给了 rootId 时只列该会话树的任务 */
+  knownIds(rootId?: string): string[] {
+    return [...this.tasks.values()]
+      .filter((task) => rootId === undefined || inSessionTree(task.sessionId, rootId))
+      .map((task) => task.info.taskId);
+  }
+
+  /** 任务是否属于以 rootId 为根的会话树：所有会话共用一个 manager，模型面只能碰自己的 */
+  owns(taskId: string, rootId: string): boolean {
+    const task = this.tasks.get(taskId);
+    return task !== undefined && inSessionTree(task.sessionId, rootId);
   }
 
   hasRunningInWorkspace(rootIds: readonly string[]): boolean {
@@ -1098,6 +1112,9 @@ export function createTaskTools(
   sessionId?: string
 ): ToolDefinition[] {
   const waitCapMs = manager.limits.taskWaitMaxMs;
+  // 所有会话共用一个 manager：只认本会话树的任务（子代理启动的也登记在父会话名下）。
+  // 别的会话的任务一律按未知处理，免得推进它的读游标、吞掉它的完成通知，或把它静默停掉
+  const owned = (taskId: string) => sessionId === undefined || manager.owns(taskId, sessionId);
   return [
     {
       name: 'task_output',
@@ -1124,22 +1141,25 @@ export function createTaskTools(
           timeout_ms?: number;
         };
         const requested = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : 0;
+        const mine = owned(taskId);
         const blocking =
-          requested > 0 && sessionId ? manager.trackBlockingWait(sessionId, toolCallId) : null;
+          mine && requested > 0 && sessionId
+            ? manager.trackBlockingWait(sessionId, toolCallId)
+            : null;
         const waitSignal = blocking
           ? signal
             ? AbortSignal.any([signal, blocking.signal])
             : blocking.signal
           : signal;
-        let result: Awaited<ReturnType<BackgroundTaskManager['read']>>;
+        let result: Awaited<ReturnType<BackgroundTaskManager['read']>> = null;
         try {
-          result = await manager.read(taskId, requested, waitSignal);
+          if (mine) result = await manager.read(taskId, requested, waitSignal);
         } finally {
           blocking?.untrack();
         }
         if (!result) {
           throw new Error(
-            `unknown task: ${taskId}. Known task ids: [${manager.knownIds().join(', ')}]`
+            `unknown task: ${taskId}. Known task ids: [${manager.knownIds(sessionId).join(', ')}]`
           );
         }
         const suffix = result.exitCode !== undefined ? ` (exit ${result.exitCode})` : '';
@@ -1192,14 +1212,14 @@ export function createTaskTools(
       } as unknown as ToolDefinition['parameters'],
       async execute(_id, params) {
         const taskId = (params as { taskId?: string }).taskId ?? '';
-        const stopped = manager.stop(taskId);
+        const stopped = owned(taskId) && manager.stop(taskId);
         return {
           content: [
             {
               type: 'text',
               text: stopped
                 ? `Stopped ${taskId}`
-                : `${taskId} is not running. Known task ids: [${manager.knownIds().join(', ')}]`,
+                : `${taskId} is not running. Known task ids: [${manager.knownIds(sessionId).join(', ')}]`,
             },
           ],
           details: undefined,

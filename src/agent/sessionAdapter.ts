@@ -70,9 +70,6 @@ export function steerDetachable(
 }
 
 /** Pi 1.4：仅在本次 steer 的同步入队点检查活轮，不触碰 prompt 的压缩/nextTurn 副作用。
- *
- * Pi 1.4: Check the active run only at this steer call’s synchronous enqueue point,
- * avoiding prompt compaction/nextTurn effects.
  */
 export async function steerActiveSession(
   session: AgentSession,
@@ -235,12 +232,6 @@ export function editUnfinishedAssistantForResume(session: AgentSession): boolean
  * 自动重试、agent_before_settle 和 agent_settled。通过每次调用独立的代理，让 _startRun
  * 的 _prepareRun 返回空数组，不重放任务或工具结果，也不重新触发用户提示 hook。
  * SDK 管理取消与唯一结算。升级时复检这两个私有入口，见 main/services.md。
- *
- * Continue an activity without new messages. Pi 1.4.0 exposes no session.continue;
- * bare agent.continue bypasses retry, agent_before_settle and agent_settled. A per-call
- * proxy makes _prepareRun return no new messages to _startRun, without replaying tasks,
- * tools or user-prompt hooks. The SDK owns cancellation and single settlement. Recheck
- * both private entries on upgrades; see main/services.md.
  */
 export async function continueSessionActivity(session: AgentSession): Promise<void> {
   if (!session.isIdle) throw new Error('Cannot continue a busy session.');

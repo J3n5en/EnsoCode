@@ -54,6 +54,10 @@ export function hardenedEnv(
   const userSsh = base.GIT_SSH_COMMAND?.trim();
   if (userSsh) {
     env.GIT_SSH_COMMAND = /BatchMode/.test(userSsh) ? userSsh : `${userSsh} -o BatchMode=yes`;
+  } else if (base.GIT_SSH?.trim()) {
+    // git 里 GIT_SSH_COMMAND 优先于 GIT_SSH:注入会把用户指定的 ssh 程序(如 Windows 的 plink)整个顶掉。
+    // GIT_SSH 不经 shell、无法追加 BatchMode,只能不注入,交给用户自己的程序
+    delete env.GIT_SSH_COMMAND;
   }
   return env;
 }

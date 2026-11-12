@@ -24,6 +24,7 @@ import { addToast } from '@/components/ui/toast';
 import { useCodeHighlightOptions } from '@/hooks/useColorScheme';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
+import { IS_MAC } from '@/lib/keybindings';
 import {
   addSidePanelBrowser,
   registerFilesOpener,
@@ -50,6 +51,7 @@ import {
 } from './filesViewRel';
 import { readWorkspaceDocument, refreshWorkspaceDocument } from './filesWorkspaceRefresh';
 import { FileTreeMenu, isMarkdownRel } from './fileTreeMenu';
+import { usePanelVisibility } from './panelVisibility';
 import { idsToClose } from './tabCloseActions';
 
 const FILE_OPTIONS = {
@@ -99,6 +101,7 @@ interface FilesViewProps {
 export function FilesView({ conversationId, projectId }: FilesViewProps) {
   const { t } = useI18n();
   const fileOptions = useCodeHighlightOptions(FILE_OPTIONS);
+  const { active: panelActive } = usePanelVisibility();
   const req = useMemo(() => ({ conversationId, projectId }), [conversationId, projectId]);
   const workspaceRevision = useSessionsStore(
     (s) => s.workspaceRevisionByConversation[conversationId] ?? 0
@@ -579,7 +582,8 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
         return;
       }
       const doc = openDocsRef.current.find((item) => item.rel === rel);
-      if (!doc || doc.preview) return;
+      // 没有未保存改动就不写：磁盘上的文件可能已被 agent 删除或改写，旧内容写回会把它复活或覆盖
+      if (!doc || doc.preview || !doc.dirty) return;
       const content = doc.draft;
       const epoch = opEpochRef.current;
       const result = await window.electronAPI.workspaceFiles.write({ ...req, rel, content });
@@ -609,15 +613,19 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   }, []);
 
   useEffect(() => {
+    // dock 按会话常驻：只有可见 dock 里激活的 Files 面板接保存键，隐藏会话不能跟着写盘
+    if (!panelActive) return;
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return;
+      // mac 只认 ⌘：终端里的 ⌃S、emacs 的 C-x C-s 不是保存
+      const mod = IS_MAC ? event.metaKey : event.ctrlKey;
+      if (!mod || event.key.toLowerCase() !== 's') return;
       if (!activeRel) return;
       event.preventDefault();
       void save(activeRel);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activeRel, save]);
+  }, [activeRel, panelActive, save]);
 
   const active = openDocs.find((doc) => doc.rel === activeRel) ?? null;
   const editOptions = useMemo<EditorOptions<undefined>>(
@@ -681,7 +689,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   );
 
   const commitRename = useCallback(
-    async (rel: string, name: string) => {
+    async (rel: string, name: string): Promise<boolean> => {
       const result = await window.electronAPI.workspaceFiles.rename({
         ...req,
         rel,
@@ -689,7 +697,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
       });
       if (!result.ok) {
         failToast(result.error);
-        return;
+        return false;
       }
       setRenaming(null);
       const toRel = result.rel;
@@ -721,6 +729,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
         });
       }
       bumpTree();
+      return true;
     },
     [bumpTree, failToast, recordMutation, req]
   );
@@ -864,13 +873,14 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
                       const result = await api({ ...req, rel: parent || undefined, name });
                       if (!result.ok) {
                         failToast(result.error);
-                        return;
+                        return false;
                       }
                       setDraft(null);
                       bumpTree();
                       if (kind === 'file' && result.rel) void openFile(result.rel);
+                      return true;
                     }}
-                    onRenameCommit={(rel, name) => void commitRename(rel, name)}
+                    onRenameCommit={commitRename}
                   />
                 </div>
               </FileTreeMenu>
@@ -924,7 +934,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
                         variant="tab"
                         initial={renaming.name}
                         onCancel={() => setRenaming(null)}
-                        onCommit={(name) => void commitRename(doc.rel, name)}
+                        onCommit={(name) => commitRename(doc.rel, name)}
                       />
                     ) : (
                       <span className="max-w-36 truncate">
@@ -1198,8 +1208,9 @@ type TreeHandlers = {
   onDelete: (rel: string, name: string) => void;
   onDraftCancel: () => void;
   onRenameCancel: () => void;
-  onDraftCommit: (parent: string, kind: 'file' | 'dir', name: string) => void;
-  onRenameCommit: (rel: string, name: string) => void;
+  /** resolve 为 false 表示被拒（如重名），草稿保留待用户修改 */
+  onDraftCommit: (parent: string, kind: 'file' | 'dir', name: string) => Promise<boolean>;
+  onRenameCommit: (rel: string, name: string) => Promise<boolean>;
 };
 
 function NameDraft({
@@ -1214,7 +1225,8 @@ function NameDraft({
   kind: 'file' | 'dir';
   initial: string;
   onCancel: () => void;
-  onCommit: (name: string) => void;
+  /** resolve 为 false 表示提交被拒，输入框留在原处 */
+  onCommit: (name: string) => Promise<boolean>;
   variant?: 'tree' | 'tab';
 }) {
   const [value, setValue] = useState(initial);
@@ -1240,7 +1252,12 @@ function NameDraft({
     if (finishedRef.current) return;
     if (action === 'commit' && renameDraftDecision(value, initial) === 'commit') {
       finishedRef.current = true;
-      onCommit(value.trim());
+      void onCommit(value.trim()).then((ok) => {
+        if (ok) return;
+        // 被拒后输入框还在：解锁并拉回焦点，否则之后的回车 / Esc / 失焦都会被吞掉
+        finishedRef.current = false;
+        inputRef.current?.focus();
+      });
       return;
     }
     finishedRef.current = true;

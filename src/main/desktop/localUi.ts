@@ -3,7 +3,7 @@ import { isServerMode } from '../services/appServerMode';
 import { partitionName } from '../services/browserPartition';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { type ChromiumRendererInfo, installLocalUi, type LocalUi } from '../services/uiHost';
-import { getWindowWebContents } from '../windows/createAppWindow';
+import { getWindowWebContents, getWorkbenchView } from '../windows/createAppWindow';
 import { focusMainWindow, getMainWindow } from '../windows/MainWindow';
 import { getSettingsWindow } from '../windows/SettingsWindow';
 
@@ -75,9 +75,16 @@ const desktopUi: LocalUi = {
 export function installDesktopLocalUi(): void {
   installLocalUi(desktopUi);
   app.on('browser-window-created', (_event, window) => {
+    // closed 时窗口已销毁，win.webContents 会抛错，外壳 id 只能在这里取
     const webContentsId = window.webContents.id;
     window.once('closed', () => {
-      for (const listener of windowClosed) listener(webContentsId);
+      const ids = new Set([webContentsId]);
+      // 主窗口 UI 在 pinned WebContentsView 里，询问等归属记的是它的 id。创建事件触发时 view
+      // 还没挂上，要到 closed 再取：此时 view 的 webContents 尚未销毁（随后才销毁）；若已先销毁，
+      // 运行时取到的是 undefined
+      const ui = getWorkbenchView(window)?.webContents;
+      if (ui && !ui.isDestroyed()) ids.add(ui.id);
+      for (const id of ids) for (const listener of windowClosed) listener(id);
     });
   });
 }

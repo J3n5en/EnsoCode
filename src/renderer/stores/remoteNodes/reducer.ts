@@ -103,6 +103,30 @@ export function selectSession(
   return { view: next, effects: [{ kind: 'send', command }] };
 }
 
+/**
+ * 进入节点视图时恢复记忆的会话（切换节点或窗口重载后仍停在该节点）。
+ * 记忆可能指向对端已删的会话：订阅它宿主不回快照，同步横幅会永远停在 Syncing…。
+ */
+export function resumeRememberedSession(
+  view: NodeView,
+  remembered: string | null,
+  cursors: Cursors
+): NodeReduceResult {
+  // 目录已到：只认目录里还在的会话，否则退回当前视图
+  if (view.catalog.length > 0) {
+    const listed = remembered !== null && view.catalog.some((entry) => entry.id === remembered);
+    return selectSession(view, listed ? remembered : view.activeSessionId, cursors);
+  }
+  // 目录未到（重载后 store 为空）：先按记忆订阅，并把它记为已知会话，
+  // 让第一份不含它的目录走幽灵分支跳离。当前视图正看着的会话（如刚 spawn 尚未进目录）不预置，免得误判。
+  const target = remembered ?? view.activeSessionId;
+  const seeded =
+    target !== null && target !== view.activeSessionId
+      ? { ...view, sync: { ...view.sync, knownIds: new Set([...view.sync.knownIds, target]) } }
+      : view;
+  return selectSession(seeded, target, cursors);
+}
+
 /** 对方上线：重发订阅（带游标只补增量）并要目录；下线不发 */
 export function onHostOnlineChanged(
   view: NodeView,
@@ -116,7 +140,13 @@ export function onHostOnlineChanged(
   }
   effects.push({ kind: 'send', command: { type: 'snapshot' } });
   return {
-    view: { ...view, sync: applySubscribe(view.sync, view.subscribedId) },
+    view: {
+      ...view,
+      sync: applySubscribe(view.sync, view.subscribedId),
+      // 断线前的分页请求已丢，宿主收到重发的 subscribe 也会作废在途分页；
+      // 不清标记则 history 回包永不到，顶部一直转圈且 requestHistory 被挡死
+      historyPending: new Set(),
+    },
     effects,
   };
 }

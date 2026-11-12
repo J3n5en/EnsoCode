@@ -1,6 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain, type RendererContents } from '@platform';
-import { parseCapabilityAskResponse } from '@shared/capabilities/types';
+import { CAPABILITY_CATALOG } from '@shared/capabilities/catalog';
+import {
+  type CapabilityExecutionEnvelope,
+  parseCapabilityAskResponse,
+} from '@shared/capabilities/types';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { appendSessionCustomEntry, sendCapabilityResultToSession } from '../services/agentHost';
@@ -150,6 +155,33 @@ export const capabilityGateway = new CapabilityGateway(
   transport
 );
 
+/**
+ * invoke 意外 reject 时的兜底结果，结构同网关的 unprojectedEnvelope（worker 按同一 schema 校验）。
+ * 原始错误可能带未脱敏的凭据，只记 Main 日志，给模型和回执的是固定文案。
+ */
+function unexpectedFailureEnvelope(
+  event: Extract<AgentWorkerEvent, { type: 'capability-invoke' }>
+): CapabilityExecutionEnvelope {
+  const error = 'Capability invocation failed unexpectedly.';
+  return {
+    modelResult: { ok: false, code: 'failed', error },
+    receipt: {
+      receiptId: randomUUID(),
+      operationId: event.requestId,
+      child: event.child,
+      turnId: event.turnId,
+      requestId: event.requestId,
+      capabilityId: event.capabilityId,
+      risk: CAPABILITY_CATALOG[event.capabilityId].risk,
+      subject: { kind: 'other', id: event.capabilityId, label: event.capabilityId },
+      outcome: 'failed',
+      summary: error,
+      occurredAt: Date.now(),
+      sequence: 0,
+    },
+  };
+}
+
 export function handleCapabilityInvoke(
   event: Extract<AgentWorkerEvent, { type: 'capability-invoke' }>
 ): void {
@@ -160,6 +192,11 @@ export function handleCapabilityInvoke(
       requestId: event.requestId,
       capabilityId: event.capabilityId,
       params: event.params,
+    })
+    // invoke 里有几处 await 不在 try 内；reject 时也必须回结果，否则 child 一直挂着
+    .catch((error: unknown) => {
+      console.warn('[capabilities] invoke failed unexpectedly', error);
+      return unexpectedFailureEnvelope(event);
     })
     .then((envelope) => {
       sendCapabilityResultToSession(event.child, event.turnId, event.requestId, envelope);

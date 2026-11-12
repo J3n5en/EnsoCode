@@ -32,8 +32,6 @@ function PoolProviderForm({ provider, onClose }: { provider: ModelProvider; onCl
   const [selected, setSelected] = useState(provider.oauthAccountPool?.accountKeys ?? []);
   /**
    * 与普通账号列表一样，凭证 revision 变化时重拉展示元数据；关闭或新请求取代旧请求后忽略晚到响应。
-   *
-   * Like the regular account list, reload display metadata on credential revision changes; ignore late replies after closing or replacing a request.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision 是凭证变化后的刷新信号 / revision signals credential changes.
   useEffect(() => {

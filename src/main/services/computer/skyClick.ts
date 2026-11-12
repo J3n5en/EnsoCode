@@ -89,18 +89,32 @@ export function skyPointerClickRecipe(input: {
   return steps;
 }
 
+/** 后台拖拽最多投递的点数：每点约停 12ms，上限约 6 秒；单块屏幕内的拖拽仍按 12px 插值 */
+export const SKY_DRAG_MAX_POINTS = 500;
+
 /** 线段按 maxStep 插值：应用只在 dragged 事件之间做命中/跟随，跳太远会丢掉拖拽目标。 */
 export function skyDragPath(
   points: Array<{ x: number; y: number }>,
-  maxStep = 12
+  maxStep = 12,
+  maxPoints = SKY_DRAG_MAX_POINTS
 ): Array<{ x: number; y: number }> {
   if (points.length === 0) return [];
+  // 途经点不能省（拐角是调用方要的路径），超量只能拒绝；原生投递循环中途不响应中止
+  if (points.length > maxPoints) throw new Error(`drag supports at most ${maxPoints} points`);
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+  // 点数随距离线性增长：超出上限时等比例放大步长。每段段数 ≤ 距离/步长 + 1，
+  // 按「首点与各段终点之外还能插的点数」分摊总距离，总点数就不会超过 maxPoints
+  const spare = maxPoints - points.length;
+  const step = Math.max(1, maxStep, spare > 0 ? total / spare : total);
   const out = [{ ...points[0] }];
   for (let i = 1; i < points.length; i++) {
     const from = points[i - 1];
     const to = points[i];
     const distance = Math.hypot(to.x - from.x, to.y - from.y);
-    const segments = Math.max(1, Math.ceil(distance / Math.max(1, maxStep)));
+    const segments = Math.max(1, Math.ceil(distance / step));
     for (let s = 1; s <= segments; s++) {
       out.push({
         x: from.x + ((to.x - from.x) * s) / segments,

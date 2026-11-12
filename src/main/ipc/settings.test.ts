@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
@@ -304,5 +304,15 @@ describe('settings广播策略', () => {
     expect(writeTrayPreventDisplaySleep(false)).toBe(true);
     expect(readTraySleepPolicy()).toBe('never');
     expect(readTrayPreventDisplaySleep()).toBe(false);
+  });
+});
+
+// settings.json 里有 providers 的 apiKey、MCP env 明文；默认 0644 时本机其他用户都能读到
+describe.skipIf(process.platform === 'win32')('settings 落盘权限', () => {
+  it('落盘后的 settings.json 只有本人可读写（0600）', async () => {
+    const settings = await import('./settings');
+    expect(settings.patchSettingsState('theme', 'light')).toMatchObject({ ok: true });
+    expect(settings.flushSettings()).toBe(true);
+    expect(statSync(path.join(userData, 'settings.json')).mode & 0o777).toBe(0o600);
   });
 });

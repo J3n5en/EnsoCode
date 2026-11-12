@@ -10,6 +10,16 @@ export interface CaptureFrame {
   originY: number;
 }
 
+/**
+ * 截图坐标允许越出截图边缘的幅度（按截图宽高的倍数）：拖拽终点、拖窗口边缘可能落在目标窗口外；
+ * 再远就是坐标系弄错或离谱的数，原样映射会让后台拖拽插值点数与耗时随之暴涨。
+ */
+const SCREENSHOT_OVERSHOOT = 1;
+
+function farOutside(value: number, size: number): boolean {
+  return value < -size * SCREENSHOT_OVERSHOOT || value > size * (1 + SCREENSHOT_OVERSHOOT);
+}
+
 /** 像素坐标属于「同一 target 的最近一张截图」。缩放过则按比例映回源尺寸。 */
 export function mapScreenshotPoint(
   frames: Map<string, CaptureFrame>,
@@ -23,6 +33,13 @@ export function mapScreenshotPoint(
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
     throw new FrameError('coordinates must be finite numbers in the latest screenshot');
+  }
+  if (frame.width > 0 && frame.height > 0) {
+    if (farOutside(x, frame.width) || farOutside(y, frame.height)) {
+      throw new FrameError(
+        `coordinates (${x}, ${y}) are far outside the latest ${frame.width}×${frame.height} screenshot of '${target}'; use pixels from that screenshot`
+      );
+    }
   }
   const scaleX = frame.width > 0 ? frame.sourceWidth / frame.width : 1;
   const scaleY = frame.height > 0 ? frame.sourceHeight / frame.height : 1;

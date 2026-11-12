@@ -16,29 +16,68 @@ type frame struct {
 	closeText   string
 }
 
+// 单个连接发送队列的上限，帧数或字节任一超出即视为慢端。字节按 16 个满载帧
+// （16MB）封顶，限住单连接的最坏内存；帧数给足余量，免得一阵小帧（流式输出、
+// 重连后的目录 / 快照）就把只是稍慢的手机拆掉、陷入反复重连。
+const (
+	peerQueueFrames = 256
+	peerQueueBytes  = 16 * maxFrameBytes
+)
+
 type peer struct {
 	id        uint64
 	role      string
+	conn      *websocket.Conn
 	send      chan frame
 	done      chan struct{}
 	closeOnce sync.Once
+	queued    atomic.Int64 // 已入队、尚未写出的字节
+	dead      atomic.Bool  // 已按慢端拆链：不再入队，也不再写
 }
 
-func newPeer(role string) *peer {
+func newPeer(role string, conn *websocket.Conn) *peer {
 	return &peer{
 		id:   peerSeq.Add(1),
 		role: role,
-		send: make(chan frame, 16),
+		conn: conn,
+		send: make(chan frame, peerQueueFrames),
 		done: make(chan struct{}),
 	}
 }
 
 var peerSeq atomic.Uint64
 
+// trySend 绝不阻塞调用方：调用方多是对端的读循环，它一卡住，同循环里的
+// ping→pong 也停了，对端心跳会误判死链（CF 版 send 同样不阻塞）。
+// 队列满时拆掉本连接，而不是静默丢这一帧：中继不知道帧里是什么，丢一帧可能
+// 让快照残缺而两端都察觉不到；拆链后客户端重连，靠 peer-joined / session-sync
+// 重新同步，送达的始终是不带缺口的前缀。
 func (p *peer) trySend(fr frame) {
+	if p.dead.Load() {
+		return
+	}
+	n := int64(len(fr.data))
+	if p.queued.Add(n) > peerQueueBytes {
+		p.queued.Add(-n)
+		p.abort()
+		return
+	}
 	select {
 	case p.send <- fr:
 	case <-p.done:
+		p.queued.Add(-n)
+	default:
+		p.queued.Add(-n)
+		p.abort()
+	}
+}
+
+// abort 按慢端拆链。关连接放进 goroutine：TLS 连接没有在途写时 Close 会同步发
+// close_notify，发送缓冲已满时可能卡住调用方。关掉后在途的阻塞写立即返回，
+// writePump 退出；readPump 随之读失败，照常走 leave 通知对端。
+func (p *peer) abort() {
+	if p.dead.CompareAndSwap(false, true) {
+		go func() { _ = p.conn.Close() }()
 	}
 }
 
@@ -67,6 +106,10 @@ func (p *peer) writePump(conn *websocket.Conn) {
 		select {
 		case fr, ok := <-p.send:
 			if !ok {
+				return
+			}
+			p.queued.Add(-int64(len(fr.data)))
+			if p.dead.Load() {
 				return
 			}
 			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -101,9 +144,8 @@ func newHub() *hub {
 	return &hub{rooms: make(map[string]*room)}
 }
 
-func (h *hub) room(pairID string) *room {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+// roomLocked 取或建房间，调用方须持有 h.mu。
+func (h *hub) roomLocked(pairID string) *room {
 	r := h.rooms[pairID]
 	if r == nil {
 		r = &room{}
@@ -113,7 +155,11 @@ func (h *hub) room(pairID string) *room {
 }
 
 func (h *hub) join(pairID, role string, p *peer) {
-	r := h.room(pairID)
+	// 取房间与入座在 h.mu 下一次完成（锁序 h.mu → r.mu，与 leave 一致）：分两步时，
+	// leave 可能在中间把这间当时为空的房间从 map 删掉，新 peer 就落进孤儿房间，
+	// 对端再进房分到另一间新房，两端转发一边通一边不通，直到重连。
+	h.mu.Lock()
+	r := h.roomLocked(pairID)
 	r.mu.Lock()
 	var stale *peer
 	var other *peer
@@ -127,6 +173,7 @@ func (h *hub) join(pairID, role string, p *peer) {
 		other = r.host
 	}
 	r.mu.Unlock()
+	h.mu.Unlock()
 
 	if stale != nil {
 		stale.close(websocket.CloseNormalClosure, "replaced")
@@ -147,10 +194,11 @@ func (h *hub) join(pairID, role string, p *peer) {
 }
 
 func (h *hub) leave(pairID, role string, id uint64) {
+	// 判空与删除全程持有 h.mu，与 join 的「取房间 + 入座」互斥，见 join。
 	h.mu.Lock()
 	r := h.rooms[pairID]
-	h.mu.Unlock()
 	if r == nil {
+		h.mu.Unlock()
 		return
 	}
 	r.mu.Lock()
@@ -167,20 +215,17 @@ func (h *hub) leave(pairID, role string, id uint64) {
 	}
 	if *cur == nil || (*cur).id != id {
 		r.mu.Unlock()
+		h.mu.Unlock()
 		return
 	}
 	*cur = nil
-	empty := r.host == nil && r.guest == nil
+	if r.host == nil && r.guest == nil {
+		delete(h.rooms, pairID)
+	}
 	r.mu.Unlock()
+	h.mu.Unlock()
 	if other != nil {
 		other.sendJSON(offline)
-	}
-	if empty {
-		h.mu.Lock()
-		if h.rooms[pairID] == r {
-			delete(h.rooms, pairID)
-		}
-		h.mu.Unlock()
 	}
 }
 

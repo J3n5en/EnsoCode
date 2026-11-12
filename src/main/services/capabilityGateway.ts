@@ -1720,7 +1720,7 @@ export class CapabilityGateway {
     try {
       await this.transport.appendChildReceipt(context.child, receipt);
     } catch {
-      // The coordinator still needs the real settled outcome; a terminated child may reject projection.
+      // 协调器仍需拿到真实的结算结果；已终止的 child 可能拒收投影。
     }
     this.transport.observeReceipt({
       type: 'receipt-settled',
@@ -1934,7 +1934,9 @@ export class CapabilityGateway {
         label: provider?.name ?? `Unknown provider (${providerId})`,
       };
     }
-    if (typeof params.accountKey === 'string') {
+    // 空串标识（inputSchema 已判 invalid）不产出 account / coworker subject，落到下方兜底：
+    // id 为空的回执过不了 parseCapabilitySubject，worker 会丢掉整条 capability-result
+    if (typeof params.accountKey === 'string' && params.accountKey) {
       const key = params.accountKey;
       const provider = providersOf(this.services).find((entry) => entry.oauthAccountKey === key);
       return {
@@ -1943,7 +1945,7 @@ export class CapabilityGateway {
         label: provider?.name ?? `Unknown account (${key})`,
       };
     }
-    if (typeof params.coworkerId === 'string') {
+    if (typeof params.coworkerId === 'string' && params.coworkerId) {
       const target = context
         ? this.services.sessionIndex.listCoworkers(context.parentBinding.parentConversationId)
         : unavailable('No bound parent conversation.');

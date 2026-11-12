@@ -134,37 +134,26 @@ export async function scanSshHostKey(
   }
 }
 
-function runAcceptNew(target: string, port: number): Promise<boolean> {
-  const args = [
-    '-o',
-    'StrictHostKeyChecking=accept-new',
-    '-o',
-    'BatchMode=yes',
-    '-o',
-    'ConnectTimeout=10',
-  ];
-  if (port && port !== 22) args.push('-p', String(port));
-  args.push('--', target, 'true');
-  return new Promise((resolve) => {
-    execFile('ssh', args, { timeout: 15_000 }, (error, _stdout, stderr) => {
-      if (!error) return resolve(true);
-      resolve(/permission denied|authentication/i.test(String(stderr ?? '')));
-    });
-  });
-}
+export type TrustSshHostKeyResult =
+  | { ok: true }
+  | { ok: false; reason: 'unavailable' | 'mismatch'; error: string };
 
+/**
+ * 只把用户核对过的那把密钥写入 known_hosts：重新扫描，指纹与确认时展示的一致才写。
+ * 两次扫描之间密钥被换（中间人）即拒绝；扫不到也不在这里兜底接受任意密钥。
+ */
 export async function trustSshHostKey(
-  host: string,
-  port = 22,
+  confirmed: Pick<SshHostKeyChallenge, 'host' | 'port' | 'fingerprint'>,
   file = defaultKnownHostsPath(),
-  run?: KeyscanRunner,
-  sshTarget?: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const scanned = await scanSshHostKey(host, port, run ?? runKeyscan);
-  if (scanned) {
-    appendKnownHostLine(file, scanned.line);
-    return { ok: true };
+  run: KeyscanRunner = runKeyscan
+): Promise<TrustSshHostKeyResult> {
+  const scanned = await scanSshHostKey(confirmed.host, confirmed.port, run);
+  if (!scanned) {
+    return { ok: false, reason: 'unavailable', error: '无法获取主机密钥，请重新测试连接。' };
   }
-  if (await runAcceptNew(sshTarget ?? host, port)) return { ok: true };
-  return { ok: false, error: '无法获取主机密钥。' };
+  if (sshKeyFingerprint(scanned.key) !== confirmed.fingerprint) {
+    return { ok: false, reason: 'mismatch', error: '主机密钥已变化，请重新测试连接。' };
+  }
+  appendKnownHostLine(file, scanned.line);
+  return { ok: true };
 }

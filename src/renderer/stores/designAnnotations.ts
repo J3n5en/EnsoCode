@@ -51,7 +51,7 @@ function writeStorage(key: string, value: string): void {
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(key, value);
   } catch {
-    // ignore storage quota errors
+    // 忽略存储配额错误
   }
 }
 

@@ -1,6 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { fileChangeKeys } from '@/lib/fileChangeKeys';
+import {
+  advanceFileChangeBaseline,
+  type FileChangeBaseline,
+  INITIAL_FILE_CHANGE_BASELINE,
+} from '@/lib/fileChangeKeys';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
+import { useSessionsStore } from '@/stores/sessions';
+import { hasAuthoritativeMessages } from '@/stores/sessions/messageCache';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 
@@ -10,21 +16,26 @@ export function useOpenChangesOnEdit(
   conversationId: string | undefined
 ): void {
   const enabled = useSettingsStore((s) => s.openChangesOnFileEdit);
-  const prevId = useRef<string | undefined>(undefined);
-  const prevKeys = useRef<Set<string>>(new Set());
+  // 冷会话正文被清空（或只剩乐观回显）时没有权威历史可占位，基线要等补水后再记
+  const authoritative = useSessionsStore((s) =>
+    hasAuthoritativeMessages(
+      (conversationId ? s.conversations[conversationId]?.messages : undefined) ?? []
+    )
+  );
+  // 时间线 key 用绝对下标：上滑分页或尾窗切全文后基线须重新占位
+  const historyBaseIndex = useSessionsStore(
+    (s) => (conversationId ? s.conversations[conversationId]?.historyBaseIndex : undefined) ?? 0
+  );
+  const baseline = useRef<FileChangeBaseline>(INITIAL_FILE_CHANGE_BASELINE);
 
   useEffect(() => {
-    const keys = fileChangeKeys(timeline);
-    if (conversationId !== prevId.current) {
-      prevId.current = conversationId;
-      prevKeys.current = keys;
-      return;
-    }
-    let added = false;
-    for (const key of keys) {
-      if (!prevKeys.current.has(key)) added = true;
-    }
-    prevKeys.current = keys;
-    if (added && enabled) addSidePanelChanges();
-  }, [conversationId, enabled, timeline]);
+    const result = advanceFileChangeBaseline(baseline.current, {
+      conversationId,
+      historyBaseIndex,
+      authoritative,
+      timeline,
+    });
+    baseline.current = result.baseline;
+    if (result.added && enabled) addSidePanelChanges();
+  }, [authoritative, conversationId, enabled, historyBaseIndex, timeline]);
 }

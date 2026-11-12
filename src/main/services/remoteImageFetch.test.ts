@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { isPrivateOrReservedIp } from '@shared/remoteImageGuard';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fetchRemoteImageDataUrl } from './remoteImageFetch';
 
@@ -126,6 +127,65 @@ describe('fetchRemoteImageDataUrl', () => {
       isAllowedUrl: (u) => u.includes(`:${port}/`), // 只放行首跳，重定向目标仍会被字面量 IP 判断拦下
       isAllowedAddress: () => true,
       resolveHost: async () => '127.0.0.1',
+    });
+    expect(result).toEqual({ ok: false, error: 'blocked-address' });
+  });
+
+  // 审计实测：重定向到 [::ffff:127.0.0.1]（URL 规范化为 [::ffff:7f00:1]）能绕过两道防线取回本机服务内容
+  it('重定向到 IPv4 映射写法的环回地址时中止，不取回本机内容', async () => {
+    const port = await listen((req, res) => {
+      if (req.url === '/internal.png') {
+        res.writeHead(200, { 'Content-Type': 'image/png' });
+        res.end(PNG_MAGIC);
+        return;
+      }
+      res.writeHead(302, { Location: `http://[::ffff:127.0.0.1]:${port}/internal.png` });
+      res.end();
+    });
+    const result = await fetchRemoteImageDataUrl(`http://images.example.com:${port}/a.png`, {
+      // 首跳域名解析到本机测试服务器并单独放行；重定向那一跳走真实的 URL / 地址校验
+      resolveHost: async () => '127.0.0.1',
+      isAllowedAddress: (ip) => ip === '127.0.0.1' || !isPrivateOrReservedIp(ip),
+    });
+    expect(result).toEqual({ ok: false, error: 'blocked-address' });
+  });
+
+  // 背景：timeoutMs 只是 socket 空闲超时，服务器隔一会儿滴一个字节就能让请求一直挂着
+  it('慢速滴灌的响应超过整体截止时间时按超时结束', async () => {
+    let drip: ReturnType<typeof setInterval> | undefined;
+    const port = await listen((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      res.write(PNG_MAGIC);
+      let sent = 0;
+      drip = setInterval(() => {
+        sent += 1;
+        if (sent < 15) res.write(Buffer.from([0]));
+        else {
+          clearInterval(drip);
+          res.end();
+        }
+      }, 100);
+      res.on('close', () => clearInterval(drip));
+    });
+    const startedAt = Date.now();
+    const result = await fetchRemoteImageDataUrl(`http://127.0.0.1:${port}/slow.png`, {
+      isAllowedUrl: () => true,
+      isAllowedAddress: () => true,
+      timeoutMs: 1_000,
+      deadlineMs: 300,
+    });
+    expect(result).toEqual({ ok: false, error: 'timeout' });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  // 背景：AAAA 记录可直接返回 ::ffff:7f00:1，连接前的 IP 复核必须同样识别映射地址
+  it('域名解析出 IPv4 映射写法的环回地址时拒绝连接', async () => {
+    const port = await listen((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      res.end(PNG_MAGIC);
+    });
+    const result = await fetchRemoteImageDataUrl(`http://images.example.com:${port}/a.png`, {
+      resolveHost: async () => '::ffff:7f00:1',
     });
     expect(result).toEqual({ ok: false, error: 'blocked-address' });
   });

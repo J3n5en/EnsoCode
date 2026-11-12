@@ -95,4 +95,28 @@ describe('privacy mask rules', () => {
     const spans = findSpans(`bob@corp.io ${OPENAI}`, compileRules(s));
     expect(spans.map((x) => x.action)).toEqual(['warn', 'mask']);
   });
+
+  // 审计复现：开启脱敏后每次请求都对 tool_result 全量执行；url 规则的 scheme 从长串里每个词首起
+  // 都要扫到串尾，二次复杂度，200KB 的 `a.a.…` 要 9.8 秒
+  it('超长的点分串不会让脱敏卡住', () => {
+    const text = 'a.'.repeat(40_000);
+    const started = performance.now();
+    expect(values(text)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  // 同上：kv 规则的 key 前缀 `(?:[A-Za-z0-9]+[_-])*` 也逐个词首重扫，200KB 的 `a-a-…` 要 34 秒
+  it('超长的连字符串不会让脱敏卡住', () => {
+    const text = 'a-'.repeat(20_000);
+    const started = performance.now();
+    expect(values(text)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it('限制匹配起点后，原本能遮的 key 前缀与 scheme 写法一个不漏', () => {
+    expect(values('--password=hunter2hunter2')).toEqual([['PASSWORD', 'hunter2hunter2']]);
+    expect(values('__db-password=hunter2hunter2')).toEqual([['PASSWORD', 'hunter2hunter2']]);
+    expect(values('-postgres://admin:s3cretPass@db')).toEqual([['PASSWORD', 's3cretPass']]);
+    expect(values('x_y.postgres://admin:s3cretPass@db')).toEqual([['PASSWORD', 's3cretPass']]);
+  });
 });

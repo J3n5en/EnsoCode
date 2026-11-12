@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { EnvHttpProxyAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import { describe, expect, it, vi } from 'vitest';
 import { formatFetchResult, isPublicAddress, validateFetchUrl, webFetch } from './webFetch';
 
@@ -71,6 +74,66 @@ describe('webFetch', () => {
       webFetch('https://a.example/', {}, { fetch: evil, lookup: publicLookup })
     ).rejects.toThrow(/non-public/);
     expect(evil).toHaveBeenCalledTimes(1);
+  });
+
+  // 真实场景:DNS rebinding——校验时解析到公网,真正连接时再解析一次就可能指向内网;
+  // 经代理时域名交给代理再解析,同样是第二次解析
+  it('经代理抓取时每一跳(含重定向)都连向校验过的地址，代理不再解析域名', async () => {
+    // 记录代理被要求连接的目标:域名意味着由代理再解析一次
+    const targets: string[] = [];
+    const hosts: string[] = [];
+    // 第一跳 302 到另一个域名,第二跳返回正文
+    const raw = (path: string) =>
+      path === '/start'
+        ? 'HTTP/1.1 302 Found\r\nLocation: http://next.example/done\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'
+        : 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok';
+    // 明文代理请求:目标写在请求行的绝对 URL 里
+    const proxy = createServer((request, response) => {
+      const target = new URL(request.url ?? '');
+      targets.push(`${target.hostname}:${target.port || '80'}`);
+      hosts.push(request.headers.host ?? '');
+      response.socket?.end(raw(target.pathname));
+    });
+    // CONNECT 隧道:目标是 CONNECT 的 authority
+    proxy.on('connect', (request, socket) => {
+      targets.push(request.url ?? '');
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      socket.once('data', (data) => {
+        const head = data.toString();
+        hosts.push(/^host:\s*(\S+)/im.exec(head)?.[1] ?? '');
+        socket.end(raw(/^GET (\S+)/.exec(head)?.[1] ?? ''));
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+    vi.stubEnv('HTTP_PROXY', proxyUrl);
+    vi.stubEnv('HTTPS_PROXY', '');
+    vi.stubEnv('NO_PROXY', '');
+    // 与 worker 启动时 applyWorkerProxyEnv 装的全局代理一致
+    const previous = getGlobalDispatcher();
+    const globalProxy = new EnvHttpProxyAgent({ httpProxy: proxyUrl, noProxy: '' });
+    setGlobalDispatcher(globalProxy);
+    const resolved: Record<string, string> = {
+      'start.example': '1.1.1.1',
+      'next.example': '8.8.8.8',
+    };
+    try {
+      const result = await webFetch(
+        'http://start.example/start',
+        { signal: AbortSignal.timeout(3000) },
+        { lookup: async (host) => [resolved[host]] }
+      );
+      expect(result.text).toBe('ok');
+      expect(targets).toEqual(['1.1.1.1:80', '8.8.8.8:80']);
+      expect(hosts).toEqual(['start.example', 'next.example']);
+    } finally {
+      setGlobalDispatcher(previous);
+      await globalProxy.destroy();
+      vi.unstubAllEnvs();
+      await new Promise<void>((resolve, reject) =>
+        proxy.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
   });
 
   it('重定向次数有上限', async () => {

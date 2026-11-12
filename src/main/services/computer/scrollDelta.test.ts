@@ -12,4 +12,10 @@ describe('normalizeScrollDelta', () => {
   it('缺省是 0', () => {
     expect(normalizeScrollDelta({})).toEqual({ dx: 0, dy: 0 });
   });
+
+  // 审计发现：只检查是否为有限数，win.scroll(x, y, 0, 1e10) 在 Windows 按 120 拆成上亿步，
+  // macOS 则超出 CGEvent 的 int32 滚动量
+  it('离谱的滚动量收到单次上限，保留方向', () => {
+    expect(normalizeScrollDelta({ dx: -1e10, dy: 1e10 })).toEqual({ dx: -10_000, dy: 10_000 });
+  });
 });

@@ -18,6 +18,7 @@ import {
 } from '@shared/planMode';
 import { isContinuationTurn } from '@shared/titleContinuation';
 import type {
+  AgentActionResult,
   ApprovalMode,
   AttachedImage,
   ChildConversationMetadata,
@@ -542,6 +543,22 @@ function toQueuedMessage(message: ProjectedMessage): QueuedMessage {
   };
 }
 
+/** invoke 被拒（Main handler 抛错 / 通道断开）转成结构化失败，交给调用点现有的失败收尾 */
+function rejectedAction(error: unknown): AgentActionResult {
+  return { ok: false, error: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * 发送同步失败时写回已注入的工作区提醒：不告知的话 agent 会继续往旧工作区写。
+ * 期间已写入更新的提醒（新的工作区操作）则以新的为准。
+ */
+function restoredWorkspaceNote(
+  current: Conversation | undefined,
+  injected: string | undefined
+): Pick<Partial<Conversation>, 'pendingWorkspaceNote'> {
+  return injected && !current?.pendingWorkspaceNote ? { pendingWorkspaceNote: injected } : {};
+}
+
 function withdrawBlocked(conversation: Conversation): boolean {
   return Boolean(
     conversation.historyOnly ||
@@ -677,6 +694,17 @@ export const useSessionsStore = create<SessionsState>()(
       const rewindDraftGuard = new Map<string, string>();
       /** 回退目标的绝对保留长度；回退中快照超过这个长度视为未截断的旧会话 */
       const rewindKeepAbsolute = new Map<string, number>();
+
+      /**
+       * rewind-done 不会再来时解除回退锁（worker 退出、会话结束/被拒、回退命令本身失败），
+       * 否则 send 永远返回 rewind in progress、回退入口隐藏，直到重载渲染进程。
+       */
+      function releaseRewindLock(conversation: Conversation): Partial<Conversation> {
+        if (!conversation.rewinding && !conversation.restoringFiles) return {};
+        rewindDraftGuard.delete(conversation.id);
+        rewindKeepAbsolute.delete(conversation.id);
+        return { rewinding: undefined, restoringFiles: undefined };
+      }
 
       function withWorkspaceRevision(
         state: SessionsState,
@@ -1127,7 +1155,10 @@ export const useSessionsStore = create<SessionsState>()(
             const conversations = { ...state.conversations };
             for (const id of Object.keys(conversations)) {
               if (conversations[id].started) {
-                conversations[id] = applyAgentEvent(conversations[id], id, event) as Conversation;
+                conversations[id] = {
+                  ...(applyAgentEvent(conversations[id], id, event) as Conversation),
+                  ...releaseRewindLock(conversations[id]),
+                };
               }
             }
             return { conversations };
@@ -1872,6 +1903,14 @@ export const useSessionsStore = create<SessionsState>()(
             ...(event.type === 'parent-rejected' || event.type === 'child-rejected'
               ? { started: false }
               : {}),
+            // 会话已结束/被拒，或回退命令本身抛错（worker 只发 status failed）：rewind-done 不会再来
+            ...(event.type === 'parent-ended' ||
+            event.type === 'child-ended' ||
+            event.type === 'parent-rejected' ||
+            event.type === 'child-rejected' ||
+            (event.type === 'status' && event.status === 'failed' && conversation.rewinding)
+              ? releaseRewindLock(conversation)
+              : {}),
           });
         });
         if (
@@ -1966,15 +2005,15 @@ export const useSessionsStore = create<SessionsState>()(
         rollback: {
           deliveryId: string;
           restore:
-            | { kind: 'draft'; text: string }
+            | { kind: 'draft'; text: string; workspaceNote?: string }
             | { kind: 'queue'; item: QueuedMessage }
             | { kind: 'goal' };
         }
       ): Promise<string | null> {
-        const result =
-          mode === 'steer'
-            ? await window.electronAPI.agent.steer(id, text, images, rollback.deliveryId)
-            : await window.electronAPI.agent.prompt(id, text, images, rollback.deliveryId);
+        const result = await (mode === 'steer'
+          ? window.electronAPI.agent.steer(id, text, images, rollback.deliveryId)
+          : window.electronAPI.agent.prompt(id, text, images, rollback.deliveryId)
+        ).catch(rejectedAction);
         if (result.ok) return null;
         const error = result.error ?? 'send failed';
         const { restore } = rollback;
@@ -1987,6 +2026,9 @@ export const useSessionsStore = create<SessionsState>()(
             ),
             // 纯文本退回输入框；带图片的连同附件回队首，不丢附件
             ...(restore.kind === 'draft' && !images?.length ? { draftText: restore.text } : {}),
+            ...(restore.kind === 'draft'
+              ? restoredWorkspaceNote(current, restore.workspaceNote)
+              : {}),
             ...(restore.kind === 'queue' || (restore.kind === 'draft' && images?.length)
               ? {
                   queuedMessages: [
@@ -3287,8 +3329,13 @@ export const useSessionsStore = create<SessionsState>()(
           // 标题总结的输入在注入前定格：goal 用目标原文，普通消息清洗掉内部引用块与引导行
           const titleSummarySource = goalMatch?.[1]?.trim() ?? cleanTitleSummarySource(text);
           const workspaceNote = conversation.pendingWorkspaceNote;
-          if (workspaceNote && !(conversation.started && conversation.status === 'running')) {
-            text = `${workspaceNote}\n\n${text}`;
+          // 注入即清（防连发重复注入）；同步失败把原文退回输入框时要把它写回，否则重发只剩原文
+          const injectedWorkspaceNote =
+            workspaceNote && !(conversation.started && conversation.status === 'running')
+              ? workspaceNote
+              : undefined;
+          if (injectedWorkspaceNote) {
+            text = `${injectedWorkspaceNote}\n\n${text}`;
             set((state) => patch(state, id, { pendingWorkspaceNote: undefined }));
           }
           // agent 干活或压缩中消息进队列(不打断);收束后自动投递。压缩时 status 仍是 idle，
@@ -3318,6 +3365,7 @@ export const useSessionsStore = create<SessionsState>()(
               patch(state, id, {
                 status: 'failed',
                 error,
+                ...restoredWorkspaceNote(state.conversations[id], injectedWorkspaceNote),
                 ...(images?.length
                   ? {
                       queuedMessages: [
@@ -3352,8 +3400,9 @@ export const useSessionsStore = create<SessionsState>()(
                   extractRepresentativeTitle(text),
               })
             );
-            const result = conversation.btwParentId
-              ? await window.electronAPI.btw.spawn({
+            // invoke 被拒同 ok:false 收尾，否则 spawning 与乐观气泡永久残留
+            const spawned: Promise<AgentActionResult> = conversation.btwParentId
+              ? window.electronAPI.btw.spawn({
                   sessionId: id,
                   parentConversationId: conversation.btwParentId,
                   providerId: target.providerId,
@@ -3370,7 +3419,7 @@ export const useSessionsStore = create<SessionsState>()(
                     conversation.presetId,
                   loadLocalSkills: useSettingsStore.getState().loadLocalSkills,
                 })
-              : await window.electronAPI.agent.spawn({
+              : window.electronAPI.agent.spawn({
                   sessionId: id,
                   providerId: target.providerId,
                   modelId: target.modelId,
@@ -3401,6 +3450,7 @@ export const useSessionsStore = create<SessionsState>()(
                     ? { planMode: get().conversations[id]?.planState?.active }
                     : {}),
                 });
+            const result = await spawned.catch(rejectedAction);
             if (!result.ok) {
               // 与 deliver 失败同口径：收回回显、原文退回输入框，不留“看起来发出去了”的假象
               set((state) =>
@@ -3411,6 +3461,7 @@ export const useSessionsStore = create<SessionsState>()(
                   messages: state.conversations[id].messages.filter(
                     (message) => message.deliveryId !== deliveryId
                   ),
+                  ...restoredWorkspaceNote(state.conversations[id], injectedWorkspaceNote),
                   ...(images?.length
                     ? {
                         queuedMessages: [
@@ -3447,13 +3498,16 @@ export const useSessionsStore = create<SessionsState>()(
               }
             }
           }
-          // 注入过 goal/工作区提醒的文本不退回输入框，退用户原文
+          // 注入过 goal/工作区提醒的文本不退回输入框，退用户原文；提醒随失败写回待注入
           return deliver(
             id,
             text,
             images,
             get().conversations[id]?.status === 'running' ? 'steer' : 'prompt',
-            { deliveryId, restore: { kind: 'draft', text: submittedText } }
+            {
+              deliveryId,
+              restore: { kind: 'draft', text: submittedText, workspaceNote: injectedWorkspaceNote },
+            }
           );
         },
 
@@ -3504,7 +3558,8 @@ export const useSessionsStore = create<SessionsState>()(
             }
           }
           set((state) => patch(state, id, { spawning: true }));
-          const result = await window.electronAPI.agent.spawn({
+          // invoke 被拒同 ok:false 收尾，否则 spawning 永久残留、会话再也无法恢复
+          const spawned = window.electronAPI.agent.spawn({
             sessionId: id,
             providerId,
             modelId,
@@ -3525,6 +3580,7 @@ export const useSessionsStore = create<SessionsState>()(
             ...(conversation.autoRejectApprovals ? { autoRejectApprovals: true } : {}),
             ...(conversation.planState ? { planMode: conversation.planState.active } : {}),
           });
+          const result = await spawned.catch(rejectedAction);
           set((state) =>
             result.ok
               ? // spawning 不在此清除——worker 侧 spawn 要跑几秒到几十秒（runtime/skill/MCP/回放），

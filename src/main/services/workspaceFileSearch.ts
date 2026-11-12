@@ -1,11 +1,17 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import type { FilesSearchContentHit, FilesSearchNameHit, FilesSearchResult } from '@shared/types';
 import type { ParsedWorkspaceFileSearchRequest } from '@shared/workspaceFileSearch';
 import { fuzzyScore } from './fileSearch';
 
 const SEARCH_TIMEOUT_MS = 10_000;
+/**
+ * rg 输出的字节上限。内容搜索拿够结果会提前结束 rg，这里兜底超长行（压缩产物）和超大仓库的
+ * 文件列举：输出全拼成一个字符串，超过 V8 字符串上限会在 data 监听里抛 RangeError，成为主进程未捕获异常。
+ */
+const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const EXCLUDE_GLOBS = [
   '!node_modules/**',
   '!dist/**',
@@ -15,14 +21,31 @@ const EXCLUDE_GLOBS = [
   '!package-lock.json',
 ];
 
-/** rg 跑完的结果；`failure` 只在进程根本没跑起来（missing）或被我们掐掉（timeout）时出现 */
+/**
+ * rg 跑完的结果；`failure` 只在进程根本没跑起来（missing）、被我们掐掉（timeout）
+ * 或被调用方取消（cancelled）时出现
+ */
 export interface RgRunResult {
   code: number;
   stdout: string;
-  failure?: 'missing' | 'timeout';
+  failure?: 'missing' | 'timeout' | 'cancelled';
+  /** 调用方已拿够或输出超出字节上限，被我们提前结束；stdout 只保留完整行 */
+  truncated?: boolean;
 }
 
-export type RgRunner = (args: string[], cwd: string) => Promise<RgRunResult>;
+export interface RgRunOptions {
+  /** 逐行交给调用方（此时不再累积 stdout）；返回 false 表示结果已够，立即结束 rg */
+  onLine?: (line: string) => boolean;
+  maxBytes?: number;
+  /** 同一会话的新搜索到来时由 handler 中止：结果已没人要，及早结束 rg 免得在大仓库里堆积 */
+  signal?: AbortSignal;
+}
+
+export type RgRunner = (
+  args: string[],
+  cwd: string,
+  options?: RgRunOptions
+) => Promise<RgRunResult>;
 
 export function toRelativePosix(root: string, candidate: string): string | null {
   const resolvedRoot = path.resolve(root);
@@ -143,28 +166,80 @@ function spawnOnce(
   file: string,
   args: string[],
   cwd: string,
-  timeoutMs: number
+  timeoutMs: number,
+  { onLine, maxBytes = MAX_OUTPUT_BYTES, signal }: RgRunOptions
 ): Promise<RgRunResult> {
   return new Promise((resolve) => {
+    // 取消可能落在查找候选或换下一个候选的间隙里，此时已无人要结果，不必再起进程
+    if (signal?.aborted) {
+      resolve({ code: 2, stdout: '', failure: 'cancelled' });
+      return;
+    }
     const child = spawn(file, args, { cwd, windowsHide: true });
+    // 按字节分块到达，多字节字符可能被切开，交给 StringDecoder 拼回
+    const decoder = new StringDecoder('utf8');
     let stdout = '';
+    let pending = '';
+    let bytes = 0;
     let settled = false;
     const finish = (result: RgRunResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
       resolve(result);
+    };
+    // 提前收尾按成功处理：已收到的完整行照常可用，被切断的半行丢弃
+    const stop = () => {
+      child.kill();
+      finish({ code: 0, stdout: stdout.slice(0, stdout.lastIndexOf('\n') + 1), truncated: true });
     };
     const timer = setTimeout(() => {
       child.kill();
       finish({ code: 2, stdout, failure: 'timeout' });
     }, timeoutMs);
-    child.stdout.on('data', (chunk: Buffer | string) => {
-      stdout += chunk.toString();
+    const cancel = () => {
+      child.kill();
+      finish({ code: 2, stdout, failure: 'cancelled' });
+    };
+    signal?.addEventListener('abort', cancel, { once: true });
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > maxBytes) {
+        stop();
+        return;
+      }
+      const text = decoder.write(chunk);
+      if (!onLine) {
+        stdout += text;
+        return;
+      }
+      // 只切新到的这块，半行接到首段：超长行跨很多块时不必每次重扫已累积的部分
+      const lines = text.split('\n');
+      lines[0] = `${pending}${lines[0]}`;
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!onLine(line)) {
+          stop();
+          return;
+        }
+      }
     });
     // 'error' 在进程起不来（ENOENT / EACCES）时触发；起来之后的失败走 close 的退出码
     child.on('error', () => finish({ code: 2, stdout: '', failure: 'missing' }));
-    child.on('close', (code) => finish({ code: code ?? 2, stdout }));
+    child.on('close', (code) => {
+      const rest = decoder.end();
+      if (settled) return;
+      if (onLine) {
+        // 最后一行可能没有换行符
+        const last = `${pending}${rest}`;
+        if (last) onLine(last);
+      } else {
+        stdout += rest;
+      }
+      finish({ code: code ?? 2, stdout });
+    });
   });
 }
 
@@ -173,17 +248,22 @@ export async function runRipgrep(
   candidates: readonly string[],
   args: string[],
   cwd: string,
-  timeoutMs = SEARCH_TIMEOUT_MS
+  timeoutMs = SEARCH_TIMEOUT_MS,
+  options: RgRunOptions = {}
 ): Promise<RgRunResult> {
   for (const file of candidates) {
-    const result = await spawnOnce(file, args, cwd, timeoutMs);
+    const result = await spawnOnce(file, args, cwd, timeoutMs, options);
     if (result.failure !== 'missing') return result;
   }
   return { code: 2, stdout: '', failure: 'missing' };
 }
 
-export async function spawnRipgrep(args: string[], cwd: string): Promise<RgRunResult> {
-  return runRipgrep(await ripgrepCandidates(), args, cwd);
+export async function spawnRipgrep(
+  args: string[],
+  cwd: string,
+  options?: RgRunOptions
+): Promise<RgRunResult> {
+  return runRipgrep(await ripgrepCandidates(), args, cwd, SEARCH_TIMEOUT_MS, options);
 }
 
 function listedRelativeFiles(stdout: string, cwd: string): string[] {
@@ -201,21 +281,24 @@ function listedRelativeFiles(stdout: string, cwd: string): string[] {
 /**
  * rg 退出码 2 = 出错，但「找不到 rg」「跑超时」和「正则写错」对用户是三件事：
  * 前两个要提示装 rg / 缩小范围，最后一个只是这次查询不合法。
+ * 被新搜索取消的单独标出，renderer 本就按序号丢弃过期结果。
  */
 function failureCode(result: RgRunResult): string {
   if (result.failure === 'missing') return 'rg-missing';
   if (result.failure === 'timeout') return 'timeout';
+  if (result.failure === 'cancelled') return 'cancelled';
   return 'unavailable';
 }
 
 export async function searchWorkspaceFiles(
   cwd: string,
   request: ParsedWorkspaceFileSearchRequest,
-  run: RgRunner = spawnRipgrep
+  run: RgRunner = spawnRipgrep,
+  signal?: AbortSignal
 ): Promise<FilesSearchResult> {
   if (request.mode === 'names') {
     if (!request.query.trim()) return { ok: true, mode: 'names', hits: [] };
-    const names = await run(buildNameSearchArgs(), cwd);
+    const names = await run(buildNameSearchArgs(), cwd, { signal });
     if (names.code === 2) return { ok: false, error: failureCode(names) };
     const { stdout } = names;
     return {
@@ -225,6 +308,9 @@ export async function searchWorkspaceFiles(
     };
   }
   if (!request.query.trim()) return { ok: true, mode: 'content', hits: [], truncated: false };
+  const hits: FilesSearchContentHit[] = [];
+  let truncated = false;
+  // 边读边解析：凑够 maxResults 后再见到一条命中就能判定 truncated 并结束 rg，不必等它扫完整个仓库
   const content = await run(
     buildContentSearchArgs({
       query: request.query,
@@ -232,21 +318,22 @@ export async function searchWorkspaceFiles(
       wholeWord: request.wholeWord,
       regex: request.regex,
     }),
-    cwd
+    cwd,
+    {
+      signal,
+      onLine: (line) => {
+        const hit = line.trim() ? parseRipgrepJsonMatch(line, cwd) : null;
+        if (!hit) return true;
+        if (hits.length >= request.maxResults) {
+          truncated = true;
+          return false;
+        }
+        hits.push(hit);
+        return true;
+      },
+    }
   );
   if (content.code === 2) return { ok: false, error: failureCode(content) };
-  const { stdout } = content;
-  const hits: FilesSearchContentHit[] = [];
-  let truncated = false;
-  for (const line of stdout.split('\n')) {
-    if (!line.trim()) continue;
-    const hit = parseRipgrepJsonMatch(line, cwd);
-    if (!hit) continue;
-    if (hits.length >= request.maxResults) {
-      truncated = true;
-      break;
-    }
-    hits.push(hit);
-  }
-  return { ok: true, mode: 'content', hits, truncated };
+  // 输出超出字节上限被截断时，已解析的命中照常返回，同样提示结果不完整
+  return { ok: true, mode: 'content', hits, truncated: truncated || content.truncated === true };
 }

@@ -469,11 +469,25 @@ export function resolvePluginsForSpawn(
   return resolved;
 }
 
+/**
+ * 展示摘要用的环境：已设置的变量只展开成 `${NAME}` 占位符，未设置的照旧走缺省值。
+ * 不直接保留所有占位符原样，是为了让「哪些服务会启动」（URL 协议、命令非空）的判定与真正启动时一致。
+ */
+function placeholderEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env)
+      .filter(([, value]) => value)
+      .map(([name]) => [name, `\${${name}}`])
+  );
+}
+
 export function listInstalledPluginInfo(
   pluginsDir = DEFAULT_CLAUDE_PLUGINS_DIR
 ): InstalledPluginInfo[] {
+  // 摘要经 IPC 发给界面（远端/手机也能拿到），环境变量值可能是密钥，只能留在 Main；真正启动走 resolvePluginsForSpawn
+  const env = placeholderEnv(process.env);
   return listInstalledPlugins(pluginsDir).map((plugin) => {
-    const components = readPluginComponents(plugin, { pluginsDir, env: process.env });
+    const components = readPluginComponents(plugin, { pluginsDir, env });
     return {
       key: plugin.key,
       name: plugin.name,

@@ -174,8 +174,6 @@ let worker: WorkerProcess | null = null;
 
 /**
  * worker 每次请求都向 Main 选号。账号成员、启用状态、模型目录和真实 OAuth 存储实时核验，失败原因只影响该账号的有限窗口。
- *
- * Every worker request selects through Main. Membership, enabled state, catalog and stored OAuth credentials are checked live; evidence blocks only that account for a bounded window.
  */
 export async function selectOauthPoolAccount(
   event: Extract<AgentWorkerEvent, { type: 'oauth-pool-select' }>
@@ -216,8 +214,6 @@ export async function selectOauthPoolAccount(
     if (selected.warning) console.warn(`[OAuthQuota] ${selected.warning}`);
     if (accountKey) {
       // 查额度期间配置或登录态可能变化；返回 worker 前再次按权威记录核验，禁止发给已停用成员。
-      //
-      // Configuration/credentials may change while querying usage; validate authoritative records again before allowing the worker to use the selected account.
       const latestKeys = new Set(
         (await runtime.listCredentials())
           .filter((entry) => entry.type === 'oauth')
@@ -422,6 +418,8 @@ export function startAgentWorker(): void {
       pendingChoices.delete(id);
       p.reject(new Error('agent worker exited'));
     }
+    // 会话树随 worker 进程一起销毁，release 已达成；不唤醒就只能等到 8 秒超时报失败
+    resolveAllReleaseWaiters();
     onEvent?.({ type: 'worker-exited' });
   });
 }
@@ -1800,7 +1798,7 @@ export function reloadSession(sessionId: string): Promise<SessionReloadResult> {
   return pending;
 }
 
-/** release 等待者：sessionId → resolve。parent-ended/worker-exited 到达时唤醒 */
+/** release 等待者：sessionId → resolve。parent-ended / parent-rejected 回流或 worker 退出时唤醒 */
 const releaseWaiters = new Map<string, (() => void)[]>();
 
 function resolveReleaseWaiters(event: AgentWorkerEvent): void {
@@ -1808,6 +1806,12 @@ function resolveReleaseWaiters(event: AgentWorkerEvent): void {
   const waiters = releaseWaiters.get(event.identity.sessionId);
   if (!waiters) return;
   releaseWaiters.delete(event.identity.sessionId);
+  for (const resolve of waiters) resolve();
+}
+
+function resolveAllReleaseWaiters(): void {
+  const waiters = [...releaseWaiters.values()].flat();
+  releaseWaiters.clear();
   for (const resolve of waiters) resolve();
 }
 
@@ -1819,11 +1823,26 @@ function resolveReleaseWaiters(event: AgentWorkerEvent): void {
 export function releaseParentSession(
   identity: SessionIdentity
 ): Promise<{ ok: boolean; error?: string }> {
+  // worker 未就绪（未启动 / 已崩溃 / 已 fork 未 spawn）时进程里还没有任何会话，根会话只能由积压的
+  // spawn-parent 建出。两者都没有就无树可释放：照常下发会让崩溃后的 worker 白白重启，
+  // 新 worker 对不存在的会话静默丢弃 release-parent，调用方只能空等到超时。
+  if (
+    !workerReady &&
+    !('parent' in identity) &&
+    !commandsPending.some(
+      (command) =>
+        command.type === 'spawn-parent' &&
+        command.identity.sessionId === identity.sessionId &&
+        command.identity.generation === identity.generation
+    )
+  ) {
+    return Promise.resolve({ ok: true });
+  }
   const posted = sendAgentCommand({ type: 'release-parent', identity });
   if (!posted.ok) return Promise.resolve(posted);
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      // 超时兕底：不永久挂起调用方；调用方拿到失败后不会继续建 worktree
+      // 超时兜底：不永久挂起调用方；调用方拿到失败后不会继续建 worktree
       const waiters = releaseWaiters.get(identity.sessionId);
       if (waiters) {
         releaseWaiters.set(

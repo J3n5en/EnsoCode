@@ -83,6 +83,11 @@ export class McpOAuthStore {
     this.merge(serverId, { clientInformation, ...(serverUrl ? { serverUrl } : {}) });
   }
 
+  /** 原样写回整条记录（授权未完成时回滚用）：不经 saveTokens，过期时间不按 expires_in 重算 */
+  restore(serverId: string, record: McpOAuthRecord): void {
+    this.save({ ...this.load(), [serverId]: record });
+  }
+
   /** 只弃用 token（重新授权前避开失效 refresh_token），DCR 注册信息保留 */
   clearTokens(serverId: string): void {
     const rows = this.load();
@@ -139,7 +144,8 @@ export class McpOAuthStore {
     const data = available ? this.encrypt(json) : Buffer.from(json, 'utf-8');
     mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, data);
+    // 钥匙串不可用时 refresh_token 是明文，与其它密钥文件一样只给本人读写
+    writeFileSync(tmp, data, { mode: 0o600 });
     renameSync(tmp, this.file);
   }
 }

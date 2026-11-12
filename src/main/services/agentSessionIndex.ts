@@ -484,7 +484,7 @@ export class AgentSessionIndex {
     const current = this.sessions.get(identity.sessionId);
     if (current && !isSameGeneration(current.identity, identity)) return false;
     // 拒绝恒以 seq:0 发出（也可能针对已跑过的同代会话），不过单调守卫
-    if (current && event.type !== 'parent-rejected') {
+    if (current && event.type !== 'parent-rejected' && event.type !== 'child-rejected') {
       if (event.seq <= current.lastSeq) return false;
       current.lastSeq = event.seq;
     }
@@ -514,6 +514,16 @@ export class AgentSessionIndex {
       // ended/rejected 是该 worker 会话的末事件；同 generation 重建（驱逐后 resume）seq 从 0 重计
       current.lastSeq = -1;
       this.releaseParentReservations(identity.sessionId);
+      // worker 释放父会话时连同 `${父 id}::` 下整棵子树一起静默销毁，不逐个发 child-ended；
+      // 不在这里收口，同代重新 ready 后这些子会话仍算活着、被列出并占着 coworker 名额
+      current.coworkers.clear();
+      for (const [id, session] of this.sessions) {
+        if (!id.startsWith(`${identity.sessionId}::`)) continue;
+        session.ready = false;
+        session.alive = false;
+        session.status = 'failed';
+        session.coworkers.clear();
+      }
       return true;
     }
     if (event.type === 'child-ready') {

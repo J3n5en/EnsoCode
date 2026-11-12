@@ -135,4 +135,14 @@ describe('OAuth flow IPC ownership', () => {
     await cancel({ sender }, { locator: { ...locator, ownerWebContentsId: 8 } });
     expect(mocks.cancelOauthLogin).toHaveBeenCalledTimes(1);
   });
+
+  // 真实场景：Qoder 的 PAT 提示留空即走浏览器登录；handler 不自行判空，交给 service 按登记的提示裁决
+  it('prompt空串回复照常转交service裁决', async () => {
+    const prompt = mocks.handlers.get(IPC_CHANNELS.OAUTH_LOGIN_RESPOND);
+    if (!prompt) throw new Error('OAuth prompt handler missing');
+    const locator = { flowId, host: 'provider-wizard', ownerWebContentsId: 7 } as const;
+
+    await prompt({ sender }, { locator, requestId: 'prompt-1', value: '' });
+    expect(mocks.respondOauthPrompt).toHaveBeenCalledWith(locator, 'prompt-1', '');
+  });
 });

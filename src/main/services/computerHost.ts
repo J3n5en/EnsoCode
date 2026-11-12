@@ -264,7 +264,11 @@ export class ComputerHost {
         });
       } finally {
         if (occupancyGen !== undefined) this.occupancy?.stop(occupancyGen);
-        this.leases.releaseOwner(owner);
+        // 中止时 guest 立即返回，但宿主调用（如 macOS 后台打字循环）可能还在投递：
+        // 等它落地再放租约，否则别的会话拿到同一 app 后两边输入交错。中止结果本身不等它
+        const inflight = guest.inflight;
+        if (inflight) void inflight.then(() => this.leases.releaseOwner(owner));
+        else this.leases.releaseOwner(owner);
         this.feedback?.runEnd?.(owner);
       }
     } finally {

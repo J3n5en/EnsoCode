@@ -49,8 +49,6 @@ function validWindows(value: unknown, now: number): OauthUsageWindow[] | undefin
     )
       return undefined;
     // 过期窗口不是恢复证据；必须向上游重新确认。
-    //
-    // An expired window is not recovery evidence; confirmation must come from upstream.
     if (typeof window.resetsAt === 'number' && window.resetsAt <= now) return undefined;
     result.push({
       label: typeof window.label === 'string' ? window.label.slice(0, 100) : '',
@@ -71,9 +69,6 @@ export interface OauthQuotaDependencies {
 /**
  * Main 的唯一额度权威：只在候选证据未知、过期或 reset 到期时查额度，绝不用模型请求探测已知耗尽账号。
  * 本地 sidecar 只存账号 key、身份摘要、有限额度窗口及硬失败截止时间；同步原子写避免并发快照倒序覆盖。
- *
- * Main's quota authority queries only unknown/stale candidates or expired resets, never probes known exhausted accounts with model requests.
- * The local sidecar contains only account keys, identity digests, bounded windows and hard-failure deadlines; synchronous atomic writes prevent out-of-order snapshots.
  */
 export class OauthQuotaCoordinator {
   private readonly now: () => number;
@@ -143,8 +138,6 @@ export class OauthQuotaCoordinator {
       }
     } catch {
       // 缓存缺失或损坏时重新查额度，不能把坏数据解释为耗尽。
-      //
-      // Missing/corrupt cache triggers a fresh query, never an exhaustion inference.
     }
   }
 
@@ -193,8 +186,6 @@ export class OauthQuotaCoordinator {
 
   /**
    * 按真实凭证集合清理外部删除的账号；不按池配置清理，因为多个池共享账号证据。
-   *
-   * Prune externally deleted credentials using the authoritative credential set, not pool membership, since pools share evidence.
    */
   reconcileKeys(keys: ReadonlySet<string>): void {
     for (const key of new Set([
@@ -217,8 +208,6 @@ export class OauthQuotaCoordinator {
 
   /**
    * 仅在 Main 内存绑定选号凭证代际；硬失败提升查询代际，不撤销同身份并发模型请求的票。
-   *
-   * Bind selection to a credential generation in Main memory only. Hard failures advance query generations without revoking concurrent same-identity model receipts.
    */
   async issueSelectionReceipt(poolId: string, key: string): Promise<string | undefined> {
     this.pruneReceipts();
@@ -283,8 +272,8 @@ export class OauthQuotaCoordinator {
       return undefined;
     }
     if (!validIdentity(identity)) {
-      // A transient credential read is not authoritative deletion. Logout/reconcileKeys
-      // invalidate explicitly; a confirmed identity change is handled below.
+      // 凭证暂时读取失败不等于权威删除。登出 / reconcileKeys 会显式失效；
+      // 已确认的身份变更在下方处理。
       return undefined;
     }
     const previous =
@@ -333,8 +322,6 @@ export class OauthQuotaCoordinator {
             error: result.error || 'Quota information is unavailable or stale',
           };
       // 请求完成时重新比对身份及代际；旧请求不能写入重登账号，也不能覆盖新失败证据。
-      //
-      // Recheck identity/generation on completion: stale requests cannot update reauthenticated accounts or overwrite newer failure evidence.
       const latestIdentity = await this.identity(key);
       if (latestIdentity !== identity || (this.generations.get(key) ?? 0) !== generation) {
         return {
@@ -354,8 +341,6 @@ export class OauthQuotaCoordinator {
         resetDeadlines.some((reset) => reset !== undefined && now < reset && reset <= checkedAt)
       ) {
         // 恢复证据必须来自 reset 后发起的查询，不能把跨 reset 的旧查询视为确认恢复。
-        //
-        // Recovery evidence must come from a query started after reset, not an older request completing across reset.
         return {
           key,
           windows: [],
@@ -377,8 +362,6 @@ export class OauthQuotaCoordinator {
           });
         } else if (partial.some((window) => window.usedPercent >= 100)) {
           // 部分坏窗口不能抵消已知耗尽；只有完整有效的非耗尽窗口集合才是恢复证据。
-          //
-          // Invalid sibling windows cannot cancel known exhaustion; recovery requires a complete valid non-exhausted window set.
           const blocked = [
             ...(previous?.windows ?? []).filter(
               (window) => window.usedPercent >= 100 && (window.resetsAt ?? 0) > checkedAt
@@ -431,9 +414,6 @@ export class OauthQuotaCoordinator {
   /**
    * 选号共享单调时钟预算，只限制等待，不取消 UI/其它池共用的查询，也不把超时写成额度证据。
    * race 会处理迟到的拒绝；后台结果仍经 query 的身份及代际校验后缓存。
-   *
-   * Selection shares a monotonic-clock budget that bounds waiting, without cancelling queries shared with UI/other pools or recording timeout as quota evidence.
-   * The race handles late rejection; background results still pass query's identity and generation checks before caching.
    */
   private async queryWithinBudget(key: string, identity: string, deadline: number): Promise<void> {
     const remaining = deadline - performance.now();
@@ -484,8 +464,6 @@ export class OauthQuotaCoordinator {
           hardUntil: Math.max(previous?.hardUntil ?? 0, until),
         });
         // 硬故障必须让尚未过期的健康缓存也在封锁截止后重新查证。
-        //
-        // A hard failure forces revalidation at its deadline even if a healthy cache was still fresh.
         this.cache.delete(failed.accountKey);
         this.generations.set(failed.accountKey, (this.generations.get(failed.accountKey) ?? 0) + 1);
         this.inFlight.delete(failed.accountKey);

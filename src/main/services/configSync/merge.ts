@@ -204,15 +204,21 @@ function planCategory(
   const entries: PlannedEntry[] = [];
   const idMap = Object.create(null) as Record<string, string>;
   const claimedDestinations = new Set<string>();
-  for (const source of incoming) {
-    const sourceId = requiredId(source, category);
-    const exact = byId.get(sourceId) ?? [];
+  // 先整体按 id 精确认领，与包内顺序无关；名称兜底命中已被 id 认领的本机条目也算歧义，回落为新增，
+  // 否则"改名后再新建同名项"的合法包会因同一目标被认领两次而整包报错。
+  const exactMatches = incoming.map((source) => {
+    const exact = byId.get(requiredId(source, category)) ?? [];
     if (exact.length > 1) throw new Error(`Ambiguous ${category} id`);
-    let existing: JsonRecord | undefined = exact[0];
+    return exact[0];
+  });
+  const claimedByExact = new Set(exactMatches);
+  for (const [index, source] of incoming.entries()) {
+    const sourceId = requiredId(source, category);
+    let existing: JsonRecord | undefined = exactMatches[index];
     if (!existing) {
       const name = normalizedName(source.name);
       const matches = name && incomingNameCount.get(name) === 1 ? (byName.get(name) ?? []) : [];
-      existing = matches.length === 1 ? matches[0] : undefined;
+      existing = matches.length === 1 && !claimedByExact.has(matches[0]) ? matches[0] : undefined;
     }
     const destinationId = existing ? requiredId(existing, category) : safeNewId(sourceId, used);
     if (claimedDestinations.has(destinationId)) {
@@ -304,7 +310,7 @@ function providerEntry(plan: PlannedEntry, mode: MergeMode): JsonRecord {
       ...records(plan.existing.models).filter((model) => !importedIds.has(String(model.id))),
     ];
   }
-  // OAuth login state is device-local; imported keys are dropped, matched local keys kept.
+  // OAuth 登录态仅限本机：丢弃导入的 key，保留匹配到的本地 key。
   delete next.oauthAccountKey;
   delete next.oauthAccountPool;
   if (plan.existing && plan.existing.oauthAccountKey !== undefined) {

@@ -119,6 +119,15 @@ describe('isWorkspaceWideCommand', () => {
     'ls -la',
     'echo "git commit"',
   ])('非全局：%s', (command) => expect(isWorkspaceWideCommand(command)).toBe(false));
+
+  // 与受保护底线共用 programTokens：then/do 保留字、sudo -u USER 的选项值曾被当成程序名，全局命令漏判
+  it.each([
+    'if git diff --quiet; then echo clean; else git commit -am wip; fi',
+    'for d in a b; do git -C "$d" pull; done',
+    'sudo -u dev pnpm install',
+  ])('条件、循环或带参包装器里的全局命令 %s 仍独占工作区', (command) =>
+    expect(isWorkspaceWideCommand(command)).toBe(true)
+  );
 });
 
 describe('工具包装', () => {

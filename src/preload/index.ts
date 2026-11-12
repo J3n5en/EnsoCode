@@ -581,13 +581,16 @@ const electronAPI = {
   },
 
   instructions: {
-    /** local 为 false 时读源文件，为 true 时读本地副本 */
+    /**
+     * 按条目 id 读内容；读本地副本还是登记的源文件由 Main 按登记条目推导。
+     * 后两个参数只为兼容旧调用方的实参保留，不再发送
+     */
     read: (
       id: string,
-      local: boolean,
-      sourcePath?: string
+      _local?: boolean,
+      _sourcePath?: string
     ): Promise<{ ok: boolean; content: string; error?: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_READ, id, local, sourcePath),
+      ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_READ, id),
     /** 写入本地副本，首次写入即完成 copy-on-write */
     write: (id: string, content: string): Promise<{ ok: boolean; bytes: number }> =>
       ipcRenderer.invoke(IPC_CHANNELS.INSTRUCTIONS_WRITE, id, content),
@@ -804,9 +807,14 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, root, query),
     /** 取粘贴/拖入的 File 对象的磁盘路径（渲染层拿不到，需经 webUtils） */
     pathForFile: (file: File): string => webUtils.getPathForFile(file),
-    /** 读取文件内容（edit diff 还原上下文/行号用）；失败返回 null */
-    read: (filePath: string): Promise<string | null> =>
-      ipcRenderer.invoke(IPC_CHANNELS.FILES_READ, filePath),
+    /**
+     * 读文件内容，失败返回 null。Main 不收任意路径，只认两种请求：
+     * - 会话工作区内文件（edit diff 还原上下文/行号）：会话标识 + 工作区相对路径，根目录由 Main 推导；
+     * - 后台任务完整日志：任务完成提示里给出的 task-logs 路径，Main 只认该目录下的 task-*.log
+     */
+    read: (
+      request: { conversationId: string; projectId: string; rel: string } | string
+    ): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.FILES_READ, request),
     /** 枚举目录下的媒体文件（背景图文件夹随机模式），返回绝对路径 */
     listMedia: (dir: string): Promise<string[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_LIST_MEDIA, dir),

@@ -130,16 +130,12 @@ export interface MarkdownLinkContextValue {
   projectId: string;
   /**
    * 当前会话实际 worktree；缺失时仍由 Main 校验相对路径。
-   *
-   * The current worktree for this conversation; Main still validates relative paths when absent.
    */
   cwd?: string;
 }
 
 /**
  * 本地聊天链接的权限上下文；Files 预览不提供它，保持原有外链行为。
- *
- * Authorization context for local chat links; Files preview omits it to preserve its existing external-link behavior.
  */
 export const MarkdownLinkContext = createContext<MarkdownLinkContextValue | null>(null);
 
@@ -239,8 +235,6 @@ function FileLinkContextMenu({
 
 /**
  * 行号只适用于带扩展名的本地文件，避免将 javascript:123 等协议误识别成路径。
- *
- * Line references apply only to local files with extensions, never protocols such as javascript:123.
  */
 function classifyFileReference(href: string) {
   const classification = classifyMarkdownLink(href);
@@ -564,8 +558,6 @@ function MarkdownAnchor({
 
 /**
  * 在保留 react-markdown 默认安全协议过滤的基础上，仅放行待点击的本地链接。
- *
- * Preserve react-markdown's default safe-protocol filter and only additionally allow local links that are handled on click.
  */
 export function markdownUrlTransform(value: string, key?: string, allowLocal = true): string {
   const transformed = defaultUrlTransform(value);

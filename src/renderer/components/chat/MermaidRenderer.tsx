@@ -5,7 +5,12 @@ import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
-import { decorateMermaidSvg, MERMAID_OFFSCREEN_HOST_STYLE } from './mermaidSvg';
+import {
+  decorateMermaidSvg,
+  MERMAID_OFFSCREEN_HOST_STYLE,
+  mermaidConfig,
+  neutralizeMermaidLinks,
+} from './mermaidSvg';
 
 interface MermaidAPI {
   initialize: (config: Record<string, unknown>) => void;
@@ -46,14 +51,7 @@ function withRenderLock<T>(fn: () => Promise<T>): Promise<T> {
 async function renderMermaidSvg(code: string, theme: string): Promise<string> {
   return withRenderLock(async () => {
     const mermaid = await getMermaid();
-    mermaid.initialize({
-      startOnLoad: false,
-      theme,
-      securityLevel: 'loose',
-      fontFamily: 'inherit',
-      suppressErrorRendering: true,
-      flowchart: { htmlLabels: false, useMaxWidth: true },
-    });
+    mermaid.initialize(mermaidConfig(theme));
 
     const id = `ensoMermaid${++renderSeq}`;
     const host = document.createElement('div');
@@ -62,7 +60,7 @@ async function renderMermaidSvg(code: string, theme: string): Promise<string> {
     document.body.appendChild(host);
     try {
       const { svg } = await mermaid.render(id, code, host);
-      return decorateMermaidSvg(svg);
+      return decorateMermaidSvg(neutralizeMermaidLinks(svg));
     } finally {
       host.remove();
       document.getElementById(id)?.remove();

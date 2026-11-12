@@ -106,7 +106,7 @@ function normalizeSubagentAllowedModes(modes: readonly AgentMode[]): AgentMode[]
 
 export * from './types';
 
-// Apply terminal font settings to app CSS variables
+// 把终端字体设置应用到应用的 CSS 变量
 function applyTerminalFont(fontFamily: string, fontSize: number): void {
   const root = document.documentElement;
   root.style.setProperty('--font-family-mono', fontFamily);
@@ -122,7 +122,7 @@ function applyChatTypography(typography: ChatTypography): void {
   }
 }
 
-// Apply app theme (dark/light mode)
+// 应用界面主题（深色/浅色模式）
 function applyAppTheme(theme: Theme, terminalTheme: string): void {
   const isDark =
     resolveColorScheme(theme, {
@@ -916,7 +916,7 @@ export const useSettingsStore = create<SettingsState>()(
           return { keybindings: rest };
         }),
 
-      // Project execution authority is created/removed only through the dedicated Main registry.
+      // 项目执行权限只能经专用的 Main 注册表创建/移除。
       addProject: async (path, remote, groupId) => {
         const projection = await window.electronAPI.sourceAuthority.read();
         const existing = projection.projects.find((project) => {
@@ -1298,6 +1298,7 @@ type ProjectEntry = SettingsState['projects'][number];
 /**
  * 投影里没有的字段：别名、分组、项目级默认模型/内置工具与 Agent 模式只存在于渲染侧设置。
  * 重建 projects 时不原样带回就会被 source-authority 广播抹掉（新建对话必定触发一次广播）。
+ * 代码信任列表同理：Main spawn 时从 settings 读它决定是否加载 .pi/extensions，丢了就静默失效。
  */
 const LOCAL_PROJECT_KEYS = [
   'alias',
@@ -1307,6 +1308,7 @@ const LOCAL_PROJECT_KEYS = [
   'defaultThinkingLevel',
   'disabledBuiltinTools',
   'subagentAllowedModes',
+  'trustedProjectCode',
 ] as const satisfies readonly (keyof ProjectEntry)[];
 
 function localProjectFields(previous: ProjectEntry | undefined): Partial<ProjectEntry> {
@@ -1402,7 +1404,7 @@ async function syncSettingsFromMain(): Promise<void> {
   await refreshProjectAuthorityProjection();
 }
 
-// Generic settings is display persistence only; executable project identity is always re-projected by Main.
+// 通用 settings 只负责展示层持久化；可执行的项目身份始终由 Main 重新投影。
 window.electronAPI.settings.onChanged(() => {
   void syncSettingsFromMain();
 });

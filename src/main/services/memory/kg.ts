@@ -408,8 +408,14 @@ export function kgFingerprint(memoryId: string, content: string): string {
 /**
  * 幂等建任务（记忆创建后的持久化落点）：记忆不存在 / 已删除返回 null；
  * 同指纹已收尾（done / cancelled）返回 null；未跑完的返回原任务；内容已变则把该记忆的旧活动任务标 cancelled 再建新的。
+ * rerun：抽取输入含标题而指纹只算正文（并入标题会让存量全部重抽），只改标题时用它对同指纹再排一次；
+ * 仍在 pending 的任务开跑时才读记忆，直接复用；running 的已读过旧标题，与已收尾的一样新建。
  */
-export function ensureKgJob(db: Database.Database, memoryId: string): KgJob | null {
+export function ensureKgJob(
+  db: Database.Database,
+  memoryId: string,
+  opts: { rerun?: boolean } = {}
+): KgJob | null {
   const memory = getMemory(db, memoryId);
   if (!memory || memory.lifecycleState === 'deleted') return null;
   const fingerprint = kgFingerprint(memory.id, memory.content);
@@ -423,9 +429,8 @@ export function ensureKgJob(db: Database.Database, memoryId: string): KgJob | nu
       const exists = db
         .prepare('SELECT * FROM memory_jobs WHERE kind = ? AND target = ? ORDER BY id DESC LIMIT 1')
         .get(KIND, fingerprint) as JobRow | undefined;
-      if (exists) {
-        return exists.status === 'pending' || exists.status === 'running' ? toJob(exists) : null;
-      }
+      if (exists?.status === 'pending') return toJob(exists);
+      if (exists && !opts.rerun) return exists.status === 'running' ? toJob(exists) : null;
       const info = db
         .prepare(
           `INSERT INTO memory_jobs (kind, target, status, cursor, total, done, failed, created_at, updated_at)

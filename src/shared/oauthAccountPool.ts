@@ -10,8 +10,6 @@ export interface OauthPoolFailure {
   resetAt?: number;
   /**
    * Main 签发的请求级不透明 UUID；身份和凭证代次只保存在 Main，不由 worker 推导。
-   *
-   * Main-issued request-scoped opaque UUID; identity and credential generation stay in Main and are never derived by the worker.
    */
   selectionReceipt?: string;
 }
@@ -33,8 +31,6 @@ export function parseOauthPoolFailure(value: unknown): OauthPoolFailure | null {
 
 /**
  * 仅结构化额度码或鉴权失败能换号。SDK 会把普通 429 翻译成 usage limit，故绝不解析其文案。
- *
- * Only structured quota codes or authentication failure allow rotation. SDK renders ordinary 429 as usage limit, so prose is never evidence.
  */
 export function classifyCodexPoolFailure(
   status: number,
@@ -96,8 +92,6 @@ export function isOauthAccountPool(
 
 /**
  * UI 和 Main 共用成员资格：真实登录、固定条目启用且目标模型启用；池不能为自己背书。
- *
- * Shared UI/Main membership: authenticated, enabled fixed entry and enabled model; a pool cannot validate itself.
  */
 export function eligibleOauthPoolAccountKeys(
   provider: ModelProvider,

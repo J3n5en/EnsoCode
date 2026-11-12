@@ -16,9 +16,6 @@ const ALPHA_HEX = /^#[\da-f]{6}([\da-f]{2})?$/i;
 /**
  * 原生按钮底色可带 alpha（Window Controls Overlay 叠在透明工作区上，壁纸能透出来），
  * 按钮图标色必须不透明；渲染层不能借外观同步修改高度或其他窗口属性。
- *
- * The overlay color may carry alpha so wallpapers show behind native buttons; the
- * symbol color stays opaque. Updates cannot change the height or other window options.
  */
 export function parseTitleBarAppearance(raw: unknown): TitleBarAppearance | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;

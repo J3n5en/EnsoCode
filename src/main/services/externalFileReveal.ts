@@ -8,8 +8,6 @@ const WRITE_TOOLS = new Set(['write', 'edit']);
 
 /**
  * 工作区外链接的定位目标：只收绝对路径，按真实目标判断，必须是普通文件（目录、不存在一律拒绝）。
- *
- * Reveal target for out-of-workspace links: absolute paths only, judged by the real target, regular files only.
  */
 export function resolveExternalRevealTarget(
   input: unknown
@@ -46,8 +44,6 @@ function realOf(cwd: string, raw: string): string | null {
 
 /**
  * 本会话写入类工具（write / edit / apply_patch）成功写过、现仍存在的文件真实路径。
- *
- * Real paths of files that this session's write tools successfully wrote and that still exist.
  */
 export function sessionWrittenFiles(
   messages: readonly ProjectedMessage[],

@@ -108,7 +108,7 @@ function defaultUtilityFork(filename: string): ReturnType<AxUtilityFork> {
       return electron.utilityProcess.fork(filename, [], { serviceName: 'enso-ax-worker' });
     }
   } catch {
-    // tests / no electron
+    // 测试环境 / 没有 electron
   }
   return undefined;
 }

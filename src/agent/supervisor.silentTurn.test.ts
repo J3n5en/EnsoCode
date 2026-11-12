@@ -420,6 +420,18 @@ describe('SessionSupervisor terminal turn handling', () => {
     await supervisor.shutdown();
   });
 
+  // 会话被驱逐后 renderer 仍认为 started：rewind 静默丢弃时 renderer 的回退锁永远等不到 rewind-done
+  it('会话已不在 worker 时 rewind 按 parent-rejected 回流，不静默丢弃', async () => {
+    const { events, supervisor } = await spawn();
+    const ghost = { sessionId: 'ghost', generation: '22222222-2222-4222-8222-222222222222' };
+    supervisor.handleCommand({ type: 'rewind', identity: ghost, entryId: 'e1' });
+    await waitFor(events, 'parent-rejected');
+    expect(events.find((event) => event.type === 'parent-rejected')).toMatchObject({
+      identity: ghost,
+    });
+    await supervisor.shutdown();
+  });
+
   it('手动重试再遇限流：由 SDK 重试并在最终失败时收口', async () => {
     const { events, supervisor, parentSession } = await spawn();
     Object.assign(mocks.managers[0]!, {

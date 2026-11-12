@@ -22,6 +22,30 @@ export interface HostTransport {
   exit?(code: number): void;
 }
 
+/** 宿主所在进程的最小接口：桌面 utilityProcess 有 parentPort，服务端 child_process 走 IPC */
+export interface HostProcess {
+  parentPort?: (NodeJS.EventEmitter & { postMessage(message: unknown): void }) | null;
+  send?(message: unknown): unknown;
+  on(event: 'message', listener: (message: unknown) => void): unknown;
+  exit(code: number): void;
+}
+
+export function createProcessTransport(proc: HostProcess): HostTransport {
+  const parentPort = proc.parentPort;
+  return {
+    send: (message) => {
+      if (parentPort) parentPort.postMessage(message);
+      else proc.send?.(message);
+    },
+    onMessage: (handler) => {
+      if (parentPort) parentPort.on('message', (event: { data: unknown }) => handler(event.data));
+      else proc.on('message', handler);
+    },
+    // 消息监听会一直挂住事件循环，shutdown 收尾后必须显式退出；否则 Main 要等满宽限期再 SIGTERM
+    exit: (code) => proc.exit(code),
+  };
+}
+
 interface Invocation {
   id: string;
   controller: AbortController;
@@ -57,7 +81,11 @@ interface Declared {
   dynamicCommands: number;
 }
 
-const SHUTDOWN_MS = 3_000;
+/**
+ * 给 deactivate 的上限。必须比 Main 的 SHUTDOWN_GRACE_MS（extensionPlugins/process.ts，3 秒）短并留出余量：
+ * Main 计时先开始，到点即 SIGTERM，宿主来不及 killTrackedChildren，插件拉起的子进程会成孤儿
+ */
+const SHUTDOWN_MS = 2_500;
 const TOOL = /^[a-z][a-z0-9_]*$/;
 const LOCAL_ID = /^[a-z][a-z0-9-]{0,31}$/;
 

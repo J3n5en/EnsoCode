@@ -12,8 +12,6 @@ import { useI18n } from '@/i18n';
 
 /**
  * 只通过 img 展示经 workspaceFiles.readImage 授权读取的图片（含 SVG），不内联 SVG，也不接收磁盘或远程 URL。
- *
- * Display images (including SVG) authorized by workspaceFiles.readImage only via img, never inline SVG, disk or remote URLs.
  */
 export function WorkspaceImagePreview({
   image,

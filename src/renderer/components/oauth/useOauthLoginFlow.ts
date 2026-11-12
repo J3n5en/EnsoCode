@@ -59,7 +59,7 @@ export interface OauthLoginStartDependencies {
   invoke: (providerId: string) => Promise<StartOauthResult>;
 }
 
-/** Wizard start binds the complete Main-issued locator; busy/failed never become running. */
+/** 向导发起时绑定 Main 下发的完整 locator；busy/failed 绝不会转为 running。 */
 export async function startOauthLoginFlow(
   dependencies: OauthLoginStartDependencies,
   providerId: string
@@ -98,7 +98,7 @@ function matchesOauthFlowBinding(binding: OauthFlowBinding, locator: OauthFlowLo
   );
 }
 
-/** Child attachment locks the first exact child/turn/request locator, then compares every field. */
+/** child 接入时锁定第一个精确匹配 child/turn/request 的 locator，之后逐字段比对。 */
 export function reduceOauthLoginFlowState(
   state: OauthLoginFlowState,
   payload: OauthFlowEvent

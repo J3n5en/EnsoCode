@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { BashOperations } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
 import { HARDENED_ENV, hardenedEnv, withHardenedEnv } from './hardenedEnv';
@@ -49,6 +53,38 @@ describe('hardenedEnv', () => {
     );
     expect(already.GIT_SSH_COMMAND).toBe('ssh -o BatchMode=yes -i k');
   });
+
+  // 真实场景:Windows 用户用 GIT_SSH 指向 plink;git 里 GIT_SSH_COMMAND 优先于 GIT_SSH,
+  // 注入的默认命令会把用户的 ssh 程序整个顶掉,push/fetch 报 publickey
+  it.skipIf(process.platform === 'win32')(
+    '用户已设 GIT_SSH 时，git 仍调用用户指定的 ssh 程序',
+    () => {
+      const tmp = mkdtempSync(path.join(os.tmpdir(), 'enso-git-ssh-'));
+      try {
+        // 命名为 ssh:git 按 OpenSSH 处理,不先跑 -G 探测;只记录调用,不发起真实连接
+        const fakeSsh = path.join(tmp, 'ssh');
+        const log = path.join(tmp, 'ssh.log');
+        writeFileSync(fakeSsh, `#!/bin/sh\necho "$@" >> '${log}'\nexit 1\n`);
+        chmodSync(fakeSsh, 0o755);
+        const env = hardenedEnv(
+          {
+            PATH: process.env.PATH,
+            HOME: tmp,
+            // 隔离本机 git 配置(全局 core.sshCommand 会盖过 GIT_SSH)
+            GIT_CONFIG_GLOBAL: '/dev/null',
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_SSH: fakeSsh,
+          },
+          { shell: 'bash' }
+        );
+        // 端口 1 无人监听:万一走了真 ssh 也是立即拒绝连接,不碰 known_hosts
+        spawnSync('git', ['ls-remote', 'ssh://git@127.0.0.1:1/repo.git'], { cwd: tmp, env });
+        expect(existsSync(log) ? readFileSync(log, 'utf8') : '').toContain('127.0.0.1');
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('powershell 不注入 bash 专属的 PS1 / PROMPT_COMMAND', () => {
     const env = hardenedEnv({}, { shell: 'powershell' });

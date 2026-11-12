@@ -929,6 +929,18 @@ function discardNewChatHome(bots: BotServices, chatId: string, workspace: BotCha
 }
 
 /**
+ * 聊天删掉后清理应用为它建的本地副本：各话题的粘贴文件，以及聊天共享浏览器（话题共用根群的，按根群关）。
+ * 删聊天与删成员连带删私聊共用，免得两条删除路径各清一半。
+ */
+async function removeChatCopies(
+  rootId: string,
+  chatIds: readonly string[] = [rootId]
+): Promise<void> {
+  for (const id of chatIds) removePastedTextFiles(sessionDir(), botChatPasteOwner(id));
+  await botDesktop().closeBrowser(botBrowserKey(rootId));
+}
+
+/**
  * 群开新对话：停掉所有成员与排队，未 keep 的委派取消，结束全部成员会话，写分隔线并记 epochSeq。
  * 旧段不提炼进记忆；当前段为空时不重复写分隔线。
  */
@@ -1176,6 +1188,9 @@ export async function sendBotMessage(
   const chat = input ? chats.get(input.chatId) : undefined;
   if (!input || !chat) return INVALID;
   if (chat.archivedAt !== undefined) return { ok: false, error: 'chat-archived' };
+  // 新对话 / 切换对话进行中：旧会话还没结束，投进去回 ok 随后被 retireSession 取消，等于吞掉消息；
+  // 须在唤醒聊天等任何副作用之前拒绝
+  if (resettingChats.has(chat.id)) return { ok: false, error: 'session-busy' };
   // 引用不合法时整条拒绝：此时什么都还没发给 worker
   const refused = composerRefs.check(chat, input);
   if (refused) return { ok: false, error: refused };
@@ -1276,7 +1291,9 @@ export async function rewindBotChat(
   const target = directSession(services, input.chatId);
   if ('ok' in target) return target;
   const { conversationId } = target;
-  if (services.host.isBusy(conversationId)) return { ok: false, error: 'session-busy' };
+  // 新对话 / 切换对话进行中：回退会落在即将结束的旧会话上（同 sendBotMessage）
+  if (resettingChats.has(target.chatId) || services.host.isBusy(conversationId))
+    return { ok: false, error: 'session-busy' };
   const branch = await readBranch(
     getSourceAuthorityRegistry()?.conversation(conversationId)?.sessionFile
   ).catch(() => []);
@@ -1310,6 +1327,8 @@ export async function retryBotChat(
     Object.keys(input).some((key) => key !== 'chatId' && key !== 'entryId')
   )
     return INVALID;
+  // 新对话 / 切换对话进行中：重试会落在即将结束的旧会话上（同 sendBotMessage）
+  if (resettingChats.has(input.chatId)) return { ok: false, error: 'session-busy' };
   if (services.chats.get(input.chatId)?.kind === 'group') {
     if (typeof input.entryId !== 'string' || !input.entryId || input.entryId.length > 200)
       return INVALID;
@@ -1826,8 +1845,14 @@ export function registerBotHandlers(): void {
           }
         }
       }
+      const before = chats.list().map((chat) => chat.id);
       const result = host.discardBot(botId);
-      if (result.ok) await removeBotMemorySpace(app.getPath('userData'), `bot:${botId}`);
+      if (result.ok) {
+        // discardBot 会连带删掉该成员的私聊：按删除前后的差集认出这些聊天，像删聊天那样清本地副本
+        const removed = before.filter((id) => !chats.get(id));
+        await removeBotMemorySpace(app.getPath('userData'), `bot:${botId}`);
+        for (const id of removed) await removeChatCopies(id);
+      }
       return result.ok
         ? result
         : {
@@ -1957,10 +1982,11 @@ export function registerBotHandlers(): void {
       }
       for (const thread of threads.slice(1)) host.discardChat(thread.id);
       if (!host.discardChat(chatId)) return INVALID;
-      for (const thread of threads)
-        removePastedTextFiles(sessionDir(), botChatPasteOwner(thread.id));
       tasks.forget(chatId);
-      await botDesktop().closeBrowser(botBrowserKey(chatId));
+      await removeChatCopies(
+        chatId,
+        threads.map((thread) => thread.id)
+      );
       await removeBotMemorySpace(app.getPath('userData'), `chat:${chatId}`);
       return { ok: true };
     }
@@ -2041,7 +2067,11 @@ export function registerBotHandlers(): void {
         kind: 'group',
         title: input.title,
         members,
-        bossBotId: source.bossBotId && members.includes(source.bossBotId) ? source.bossBotId : null,
+        // 群必须有在成员里的群主（留空建不出群）：原群主已归档时照新建群的规则由第一个可用成员接任
+        bossBotId:
+          source.bossBotId && members.includes(source.bossBotId)
+            ? source.bossBotId
+            : (members[0] ?? null),
         workspace,
         routing: source.routing,
       },
@@ -2088,7 +2118,7 @@ export function registerBotHandlers(): void {
         ? request.deliveryId
         : undefined;
     if (!chatId || !isDeliveryId(deliveryId)) return INVALID;
-    // Only the writable desktop Main renderer reaches this handler; no worker / phone route.
+    // 只有可写的桌面端 Main renderer 会走到这个 handler；没有 worker / 手机端路由。
     return host.interjectQueued(chatId, deliveryId, { kind: 'human', readOnly: false });
   });
   handle(IPC_CHANNELS.BOT_CHAT_STATE, 'read', (_sender, request, { groups }) => {

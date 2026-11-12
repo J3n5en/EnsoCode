@@ -24,7 +24,7 @@ export function isCurrentChildOauthHost(
   );
 }
 
-/** OAuth is started by Main after the dangerous ASK; this child TAB only attaches to that flow. */
+/** OAuth 在危险能力 ASK 之后由 Main 发起；这个 child TAB 只接入该流程。 */
 export function AgentChildOauthHost({
   request,
   conversationId,

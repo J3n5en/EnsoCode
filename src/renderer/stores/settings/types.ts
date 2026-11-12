@@ -97,13 +97,11 @@ export interface SettingsState {
 
   /**
    * 按扩展名保存本地文件打开方式；空数组使用系统默认策略。
-   *
-   * Store local file-opening targets by extension; an empty array uses the default policy.
    */
   fileOpenRules: FileOpenRule[];
   contextMenuOpen: ContextMenuOpen;
 
-  // Terminal appearance
+  // 终端外观
   terminalTheme: string;
   terminalFontSize: number;
   terminalFontFamily: string;
@@ -298,7 +296,7 @@ export interface SettingsState {
    */
   backgroundRefreshNonce: number;
 
-  // Model providers
+  // 模型供应商
   providers: ModelProvider[];
   /** 尚未自选模型的新会话与 Enso 共用的全局默认；只保存 provider entry id + model id */
   defaultModel: DefaultModelRef | null;
@@ -371,7 +369,7 @@ export interface SettingsState {
   /** 用量估算覆盖：精确 model id → 四项单价 $/M；缺省 {} */
   usageModelPricing: PricingTable;
 
-  // Setters
+  // Setters（此行是文本锚点：configSync 测试按它切分数据字段与 action，勿改写或翻译）
   setTheme: (theme: Theme) => void;
   setThemeId: (themeId: import('@shared/theme/types').ThemeKey) => void;
   setAccentColor: (accent: import('@shared/accentColor').AccentColor) => void;
@@ -473,7 +471,7 @@ export interface SettingsState {
   setStatusLineSegments: (segments: StatusLineSegmentId[]) => void;
   toggleStatusLineSegment: (id: StatusLineSegmentId, enabled: boolean) => void;
 
-  // Provider actions
+  // Provider 操作
   /** 按端点指纹去重（Custom 单独计）；撞车合并模型。返回新增或合并成功的条数 */
   addProviders: (providers: ModelProvider[]) => number;
   updateProvider: (id: string, updates: Partial<Omit<ModelProvider, 'id'>>) => void;
@@ -489,7 +487,7 @@ export interface SettingsState {
   revalidateDefaultModel: (snapshot: OauthCredentialSnapshot) => DefaultModelRevalidation;
   setDefaultReasoningEnabled: (value: boolean) => void;
   setDefaultThinkingLevel: (level: ThinkingLevel) => void;
-  // Title summary actions
+  // 标题总结操作
   setTitleSummaryEnabled: (value: boolean) => void;
   /** 设置标题总结独立模型；null = 回到跟随全局默认 */
   setTitleSummaryModel: (model: DefaultModelRef | null) => void;
@@ -502,7 +500,7 @@ export interface SettingsState {
   setApprovalAutoManage: (enabled: boolean) => void;
   setApprovalAllowThreshold: (threshold: number) => void;
   setLastApprovalMode: (mode: ApprovalMode) => void;
-  // Skill actions
+  // 技能操作
   /** 按技能目录路径去重，返回实际新增数量 */
   addSkills: (skills: SkillEntry[]) => number;
   updateSkill: (id: string, updates: Partial<Omit<SkillEntry, 'id'>>) => void;
@@ -513,7 +511,7 @@ export interface SettingsState {
   setPluginEnabled: (id: string, enabled: boolean) => void;
   removePlugin: (id: string) => void;
 
-  // MCP actions
+  // MCP 操作
   /** 按启动命令或 URL 去重，返回实际新增数量 */
   addMcpServers: (servers: McpServerEntry[]) => number;
   updateMcpServer: (id: string, updates: Partial<Omit<McpServerEntry, 'id'>>) => void;
@@ -521,19 +519,19 @@ export interface SettingsState {
   setMcpServersEnabled: (ids: string[], enabled: boolean) => void;
   removeMcpServer: (id: string) => void;
 
-  // Instruction file actions
+  // 指令文件操作
   /** 按文件路径去重，返回实际新增数量 */
   addInstructions: (instructions: InstructionEntry[]) => number;
   updateInstruction: (id: string, updates: Partial<Omit<InstructionEntry, 'id'>>) => void;
   removeInstruction: (id: string) => void;
 
-  // Preset actions
+  // 预设操作
   addPreset: (preset: Omit<Preset, 'id'>) => Preset;
   updatePreset: (id: string, updates: Partial<Omit<Preset, 'id'>>) => void;
   removePreset: (id: string) => void;
   setDefaultPresetId: (id: string) => void;
 
-  // Subagent model actions
+  // 子代理模型操作
   setSubagentModelsEnabled: (value: boolean) => void;
   addSubagentModel: (entry: Omit<SubagentModelEntry, 'id'>) => SubagentModelEntry;
   updateSubagentModel: (id: string, updates: Partial<Omit<SubagentModelEntry, 'id'>>) => void;
@@ -542,7 +540,7 @@ export interface SettingsState {
   updateVirtualModel: (id: string, updates: Partial<Omit<VirtualModelEntry, 'id'>>) => void;
   removeVirtualModel: (id: string) => void;
 
-  // Agent type actions
+  // Agent 类型操作
   addAgentType: (entry: Omit<AgentTypeEntry, 'id'>) => AgentTypeEntry;
   updateAgentType: (id: string, updates: Partial<Omit<AgentTypeEntry, 'id'>>) => void;
   removeAgentType: (id: string) => void;
@@ -552,14 +550,14 @@ export interface SettingsState {
   toggleWorkflowPreset: (id: string, enabled: boolean) => void;
   setSubagentAllowedModes: (modes: AgentMode[]) => void;
 
-  // Onboarding
+  // 首次运行引导
   setOnboarded: (value: boolean) => void;
 
-  // Keybinding actions
+  // 快捷键操作
   setKeybinding: (action: string, binding: string) => void;
   resetKeybinding: (action: string) => void;
 
-  // Project actions
+  // 项目操作
   /** Main authority创建project并返回canonical projection。 */
   /** remote 传入时创建 ssh 远程项目;创建被拒(含远端探测失败)时抛 Error(message 可直接展示) */
   addProject: (

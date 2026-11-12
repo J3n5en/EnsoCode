@@ -876,6 +876,43 @@ describe('SessionSupervisor failTurn compaction cleanup', () => {
     await supervisor.shutdown();
   });
 
+  // 审计 D3：failed 是静止态，pendingCompact 只在 completeTurn 消费；按「非 idle 即忙」排队会让压缩永远停在
+  // queued，renderer 又因 compaction 为真把后续消息全部排队、flushQueue 要求 idle，会话就此卡死
+  it('轮次失败后手动压缩：直接执行，不停在 queued', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-compact-')),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+    });
+    await waitFor(events, 'parent-ready');
+    const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
+
+    parentSession.emit({ type: 'agent_start' });
+    await settle();
+    failTurnViaAgentEnd(parentSession);
+    await settle();
+    await settle();
+    expect(events.some((event) => event.type === 'status' && event.status === 'failed')).toBe(true);
+
+    supervisor.handleCommand({ type: 'compact', identity: parent, instructions: 'keep todos' });
+    await settle();
+    await settle();
+
+    expect(parentSession.compact).toHaveBeenCalledWith('keep todos');
+    expect(events.some((event) => event.type === 'compaction' && event.state === 'queued')).toBe(
+      false
+    );
+
+    await supervisor.shutdown();
+  });
+
   it('status=failed 时 rewind 不被 idle 守卫空操作：应尝试 navigateTree', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({

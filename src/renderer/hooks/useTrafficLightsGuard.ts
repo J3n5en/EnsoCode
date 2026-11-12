@@ -1,24 +1,22 @@
 import { useEffect } from 'react';
 
 /**
- * Module-level singleton guard for macOS traffic lights (red/yellow/green buttons).
+ * macOS 红绿灯（红/黄/绿按钮）的模块级单例守卫。
  *
- * Hides traffic lights when any modal is open AND window is NOT fullscreen.
- * Uses ref-counting so multiple concurrent modals work correctly.
+ * 任一模态框打开且窗口不处于全屏时隐藏红绿灯。
+ * 使用引用计数，多个模态框同时打开时也能正确工作。
  *
- * The fullscreen listener is initialized lazily on first acquire and lives for
- * the entire application lifetime (single Electron window, destroyed with the
- * process). In HMR scenarios the old listener is properly removed before
- * re-initialisation to avoid duplicate subscriptions.
+ * 全屏监听在首次 acquire 时惰性初始化，并贯穿整个应用生命周期
+ * （单个 Electron 窗口，随进程一起销毁）。HMR 场景下会先正确移除旧监听，
+ * 再重新初始化，避免重复订阅。
  *
- * NOTE: This guard only works for controlled Dialog/AlertDialog (with explicit
- * `open` prop). Uncontrolled usage (without `open`) will not trigger the guard.
+ * 注意：该守卫只对受控的 Dialog/AlertDialog（显式传入
+ * `open` prop）生效。非受控用法（不传 `open`）不会触发守卫。
  *
- * KNOWN LIMITATION: If a component unmounts abnormally (e.g. error boundary
- * catches during unmount) without calling releaseTrafficLightsGuard, the
- * guardCount will leak and traffic lights may remain hidden until the next
- * HMR reset or page reload. A global recovery mechanism is not implemented
- * as this is an unlikely edge case in practice.
+ * 已知限制：如果组件异常卸载（例如卸载期间被 error boundary 捕获）
+ * 且没有调用 releaseTrafficLightsGuard，guardCount 会泄漏，
+ * 红绿灯可能一直隐藏，直到下次 HMR 重置或页面重新加载。
+ * 实际中极少出现这种边界情况，因此没有实现全局恢复机制。
  */
 let guardCount = 0;
 let currentlyHidden = false;
@@ -55,7 +53,7 @@ function initFullScreenListener() {
       syncVisibility();
     })
     .catch(() => {
-      // IPC call may fail if the window is being destroyed; safe to ignore.
+      // 窗口正在销毁时 IPC 调用可能失败，可以安全忽略。
     });
 
   cleanupFullScreenListener =
@@ -79,8 +77,8 @@ export function releaseTrafficLightsGuard() {
 }
 
 /**
- * Hook: hide macOS traffic lights while `open` is true.
- * Automatically called by Dialog/AlertDialog root wrappers.
+ * Hook：`open` 为 true 时隐藏 macOS 红绿灯。
+ * 由 Dialog/AlertDialog 的根组件包装自动调用。
  */
 export function useTrafficLightsGuard(open: boolean) {
   useEffect(() => {
@@ -90,7 +88,7 @@ export function useTrafficLightsGuard(open: boolean) {
   }, [open]);
 }
 
-// Reset module state during HMR to avoid stale guard counts and duplicate listeners
+// HMR 时重置模块状态，避免残留的守卫计数和重复监听
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     if (currentlyHidden) {

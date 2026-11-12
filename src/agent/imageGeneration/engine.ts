@@ -70,8 +70,8 @@ function mime(bytes: Buffer): string {
   throw new ImageFailure('Unsupported image format (expected PNG, JPEG or WebP)');
 }
 function decoded(value: unknown, declared?: unknown): Picture {
-  // A nested repetition over megabyte images can overflow V8's regexp stack.
-  // Canonical round-trip validation below also checks padding and unused bits.
+  // 嵌套重复的正则作用于 MB 级图片可能撑爆 V8 的 regexp 栈。
+  // 下方的规范往返校验还会检查填充和未使用的比特位。
   if (
     typeof value !== 'string' ||
     value.length > Math.ceil(MAX_IMAGE / 3) * 4 ||

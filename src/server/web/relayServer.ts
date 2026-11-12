@@ -272,7 +272,21 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   });
 
   server.on('upgrade', (req, socket, head) => {
-    const { pathname, searchParams } = new URL(req.url ?? '/', 'http://relay');
+    // 触发 upgrade 前 http 模块已摘掉 socket 上的 error 监听：下面提前拒绝的分支写回包时
+    // 对端若已重置会报 EPIPE，没人接住就是未捕获异常，未鉴权即可打崩宿主
+    socket.on('error', () => socket.destroy());
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', 'http://relay');
+    } catch {
+      // 畸形请求目标（如 //host:99999/）会让 URL 同步抛错；回 400 并在写完后断开，不留半开连接
+      socket.end(
+        'HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\nConnection: close\r\n\r\nbad request',
+        () => socket.destroy()
+      );
+      return;
+    }
+    const { pathname, searchParams } = url;
     const pairId = pairIdOf(pathname);
     const role = searchParams.get('role');
     if (!pairId) return void socket.destroy();

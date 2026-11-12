@@ -1,5 +1,5 @@
 export const IPC_CHANNELS = {
-  // Settings persistence
+  // 设置持久化
   SETTINGS_READ: 'settings:read',
   SETTINGS_WRITE: 'settings:write',
   SETTINGS_WRITE_KEY: 'settings:write-key',
@@ -10,14 +10,14 @@ export const IPC_CHANNELS = {
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',
 
-  // Portable configuration sync
+  // 可迁移配置同步
   CONFIG_SYNC_EXPORT: 'config-sync:export',
   CONFIG_SYNC_OPEN_IMPORT: 'config-sync:open-import',
   CONFIG_SYNC_PREVIEW_IMPORT: 'config-sync:preview-import',
   CONFIG_SYNC_COMMIT_IMPORT: 'config-sync:commit-import',
   CONFIG_SYNC_CANCEL_IMPORT: 'config-sync:cancel-import',
 
-  // Window controls
+  // 窗口控制
   WINDOW_MINIMIZE: 'window:minimize',
   WINDOW_MAXIMIZE: 'window:maximize',
   WINDOW_CLOSE: 'window:close',
@@ -42,7 +42,7 @@ export const IPC_CHANNELS = {
   APP_FLUSH_PERSIST_RESPONSE: 'app:flush-persist-response',
   APP_SET_BADGE_COUNT: 'app:set-badge-count',
 
-  // Local provider scan/import
+  // 本地供应商扫描/导入
   PROVIDERS_SCAN_LOCAL: 'providers:scan-local',
   PROVIDERS_COLLECT_IMPORT: 'providers:collect-import',
   PROVIDERS_LIST_MODELS: 'providers:list-models',
@@ -53,13 +53,13 @@ export const IPC_CHANNELS = {
   MODEL_DIRECTORY_GET: 'modelDirectory:get',
   MODEL_DIRECTORY_CHANGED: 'modelDirectory:changed',
 
-  // Local token usage statistics
+  // 本地 token 用量统计
   USAGE_SUMMARY: 'usage:summary',
 
   // 隐私脱敏记录（只读，不含原值）
   PRIVACY_MASK_RECORDS: 'privacy-mask:records',
 
-  // Resource monitor
+  // 资源监控
   RESOURCES_SAMPLE: 'resources:sample',
   RESOURCES_STORAGE_SCAN: 'resources:storage-scan',
   RESOURCES_STORAGE_CLEAN: 'resources:storage-clean',
@@ -71,7 +71,7 @@ export const IPC_CHANNELS = {
   RESOURCES_SESSIONS_CLEAN_REQUEST: 'resources:sessions-clean-request',
   RESOURCES_SESSIONS_CLEAN_DONE: 'resources:sessions-clean-done',
 
-  // Memory administration
+  // 记忆管理
   MEMORY_LIST: 'memory:list',
   MEMORY_DETAIL: 'memory:detail',
   MEMORY_ARCHIVE: 'memory:archive',
@@ -120,7 +120,7 @@ export const IPC_CHANNELS = {
   MEMORY_DISTILLABLE_SESSIONS: 'memory:distillable-sessions',
   MEMORY_DISTILL_SESSION: 'memory:distill-session',
 
-  // OAuth subscription providers (pi builtin)
+  // OAuth 订阅供应商（pi 内置）
   OAUTH_PROVIDERS_LIST: 'oauth-providers:list',
   OAUTH_LOGIN: 'oauth-providers:login',
   OAUTH_LOGIN_RESPOND: 'oauth-providers:login-respond',
@@ -133,7 +133,7 @@ export const IPC_CHANNELS = {
   OAUTH_CREDENTIAL_KEYS_LIST: 'oauth:credential-keys-list',
   OAUTH_CREDENTIALS_CHANGED: 'oauth:credentials-changed',
 
-  // Local skill / MCP scan/import
+  // 本地 skill / MCP 扫描/导入
   ASSETS_SCAN_LOCAL: 'assets:scan-local',
   ASSETS_COLLECT_IMPORT: 'assets:collect-import',
   ASSETS_LIST_PROJECT_SKILLS: 'assets:list-project-skills',
@@ -152,24 +152,24 @@ export const IPC_CHANNELS = {
   MCP_STATUS_EVENT: 'mcp:status-event',
   MCP_STATUS_SNAPSHOT: 'mcp:status-snapshot',
 
-  // Instruction content (copy-on-write)
+  // 指令内容（写时复制）
   INSTRUCTIONS_READ: 'instructions:read',
   INSTRUCTIONS_WRITE: 'instructions:write',
   INSTRUCTIONS_WRITE_SOURCE: 'instructions:write-source',
   INSTRUCTIONS_DELETE: 'instructions:delete',
-  // Settings-managed workflow presets (userData/agent/workflows)
+  // 由设置管理的工作流预设（userData/agent/workflows）
   WORKFLOW_PRESETS_LIST: 'workflow-presets:list',
   WORKFLOW_PRESETS_READ: 'workflow-presets:read',
   WORKFLOW_PRESETS_SAVE: 'workflow-presets:save',
   WORKFLOW_PRESETS_DELETE: 'workflow-presets:delete',
 
-  // Preset custom system prompt content (UUID-backed external files)
+  // 预设的自定义系统提示词内容（以 UUID 命名的外部文件）
   PRESETS_SYSTEM_PROMPT_READ: 'presets:system-prompt-read',
   PRESETS_SYSTEM_PROMPT_WRITE: 'presets:system-prompt-write',
 
   PRESETS_FETCH_IMPORT: 'presets:fetch-import',
 
-  // Agent sessions (Renderer → Main → utilityProcess)
+  // Agent 会话（Renderer → Main → utilityProcess）
   AGENT_SPAWN: 'agent:spawn',
   AGENT_PROMPT: 'agent:prompt',
   AGENT_STEER: 'agent:steer',
@@ -231,7 +231,7 @@ export const IPC_CHANNELS = {
   WORKTREE_REBUILD: 'worktree:rebuild',
   WORKTREE_REPO_CLEAN: 'worktree:repo-clean',
 
-  // Agent type registry + sender-bound deterministic child dispatch
+  // Agent 类型注册表 + 绑定 sender 的确定性 child 派发
   AGENT_TYPES_REGISTRY_LIST: 'agent-types:registry-list',
   AGENT_MODEL_SELECTION_REGISTER: 'agent-dispatch:model-selection-register',
   AGENT_DISPATCH_BIND_SOURCE: 'agent-dispatch:bind-source',
@@ -240,7 +240,7 @@ export const IPC_CHANNELS = {
   AGENT_SUMMON: 'agent-dispatch:summon',
   AGENT_COMPOSER_PREFILL: 'agent-dispatch:composer-prefill',
 
-  // Main-owned project/conversation authority (generic settings are projection only)
+  // Main 持有的项目/会话权威记录（通用 settings 只是投影）
   SOURCE_AUTHORITY_READ: 'source-authority:read',
   SOURCE_AUTHORITY_CHANGED: 'source-authority:changed',
   SOURCE_PROJECT_CREATE: 'source-authority:project-create',
@@ -252,15 +252,15 @@ export const IPC_CHANNELS = {
   SOURCE_CONVERSATION_REMOVE: 'source-authority:conversation-remove',
   SOURCE_CONVERSATION_UPDATE_SELECTION: 'source-authority:conversation-update-selection',
 
-  // Enso child capability approval (result returns Main → worker command)
+  // Enso child 能力审批（结果经 Main → worker 命令返回）
   CAPABILITIES_ASK: 'capabilities:ask',
   CAPABILITIES_RESPOND: 'capabilities:respond',
 
-  // Native dialogs
+  // 原生对话框
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
   DIALOG_SELECT_FILE: 'dialog:select-file',
 
-  // Recent projects from local apps
+  // 来自本地应用的最近项目
   PROJECTS_GET_RECENT: 'projects:get-recent',
   /** 列出宿主机某目录的子目录（远端客户端没有系统目录选择框，用它浏览添加项目） */
   PROJECTS_LIST_HOST_DIRS: 'projects:list-host-dirs',
@@ -272,7 +272,7 @@ export const IPC_CHANNELS = {
   /** 列出本机已安装、可打开项目目录的编辑器 / 终端 */
   PROJECTS_OPEN_IN_APPS: 'projects:open-in-apps',
 
-  // SSH connection profiles (settings + add-project picker)
+  // SSH 连接配置（设置页 + 添加项目选择器）
   SSH_CONNECTIONS_LIST: 'ssh-connections:list',
   SSH_CONNECTIONS_UPSERT: 'ssh-connections:upsert',
   SSH_CONNECTIONS_DELETE: 'ssh-connections:delete',
@@ -280,7 +280,7 @@ export const IPC_CHANNELS = {
   SSH_CONNECTIONS_LIST_DIRS: 'ssh-connections:list-dirs',
   SSH_CONNECTIONS_TRUST_HOST: 'ssh-connections:trust-host',
 
-  // File search (@ mention)
+  // 文件搜索（@ 提及）
   FILES_SEARCH: 'files:search',
   FILES_READ: 'files:read',
   // 目录媒体文件枚举（背景图文件夹随机模式）
@@ -327,7 +327,7 @@ export const IPC_CHANNELS = {
   CHANGES_SNAPSHOTS_READ: 'changes:snapshots-read',
   CHANGES_SNAPSHOTS_WRITE: 'changes:snapshots-write',
 
-  // External session import
+  // 外部会话导入
   SESSIONS_SCAN_EXTERNAL: 'sessions:scan-external',
   SESSIONS_READ_EXTERNAL: 'sessions:read-external',
   SESSIONS_IMPORT_EXTERNAL: 'sessions:import-external',
@@ -385,7 +385,7 @@ export const IPC_CHANNELS = {
   /** renderer → main:实时预览 queue / draft 槽位的 CSS 修改 */
   BROWSER_PREVIEW_DESIGN_CSS: 'browser:preview-design-css',
 
-  // Auto updater
+  // 自动更新
   COMPUTER_CAPABILITIES: 'computer:capabilities',
   COMPUTER_OPEN_PERMISSIONS: 'computer:open-permissions',
   // computer 按 app 授权名单（只读列出 / 撤销）
@@ -402,7 +402,7 @@ export const IPC_CHANNELS = {
   UPDATER_CANCEL_RESTART: 'updater:cancelRestart',
   UPDATER_TAKE_INTERRUPTED_SESSIONS: 'updater:takeInterruptedSessions',
 
-  // Network proxy
+  // 网络代理
   PROXY_APPLY: 'proxy:apply',
 
   // userData/user.css：读取、首次写模板并用系统程序打开、文件变化广播
@@ -414,7 +414,7 @@ export const IPC_CHANNELS = {
   COMPACTION_RESERVE_TOKENS_GET: 'compaction:reserve-tokens-get',
   COMPACTION_RESERVE_TOKENS_SET: 'compaction:reserve-tokens-set',
 
-  // Phone second screen (pairing + relay)
+  // 手机副屏（配对 + 中继）
   PAIR_START: 'pair:start',
   PAIR_CANCEL: 'pair:cancel',
   PAIR_REVOKE: 'pair:revoke',
@@ -433,7 +433,7 @@ export const IPC_CHANNELS = {
   /** main → renderer：手机的排队消息 / 会话目标操作（只存于 renderer store，不走 agent bridge） */
   PAIR_QUEUE_ACTION: 'pair:queue-action',
 
-  // Remote nodes: this desktop as guest connecting to another EnsoCode desktop
+  // 远程节点：本机作为 guest 连接另一台 EnsoCode 桌面端
   NODES_LIST: 'nodes:list',
   NODES_PAIR: 'nodes:pair',
   NODES_REMOVE: 'nodes:remove',

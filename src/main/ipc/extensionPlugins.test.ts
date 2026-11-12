@@ -1,4 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { PluginLogger } from '../services/extensionPlugins/log';
 import {
   deletePluginArtifact,
   listPluginArtifacts,
@@ -6,6 +10,7 @@ import {
   parsePickPathKind,
   readPluginArtifact,
   readPluginAsset,
+  readPluginLogs,
   savePluginArtifact,
   setPluginConfig,
   setPluginViewState,
@@ -155,6 +160,48 @@ describe('插件 IPC 入参', () => {
     expect(parsePickPathKind('directory')).toBe('directory');
     expect(parsePickPathKind('zip')).toBeNull();
     expect(parsePickPathKind('/tmp')).toBeNull();
+  });
+
+  describe('插件日志', () => {
+    // 审计 J5d：日志文件名直接由 id 拼出（<root>/logs/<id>.log），旧校验只限长度，
+    // '../../secret' 就能读到 logs 目录外任意 .log；远端与本机同样可调。
+    const withLogger = async (
+      run: (plugins: { logs: (id: string) => Promise<string> }, tmp: string) => Promise<void>
+    ) => {
+      const tmp = mkdtempSync(join(tmpdir(), 'enso-plugin-logs-'));
+      try {
+        const logger = new PluginLogger(join(tmp, 'root'));
+        logger.append('enso.example.notes', 'info', '插件已启动');
+        logger.append('extension-plugins', 'warn', '宿主日志');
+        await run({ logs: vi.fn((id: string) => logger.read(id)) }, tmp);
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    };
+
+    it('../ 拼不出 logs 目录外的 .log：不调用服务、不读盘', async () => {
+      await withLogger(async (plugins, tmp) => {
+        writeFileSync(join(tmp, 'secret.log'), 'TOKEN=sk-secret');
+        await expect(readPluginLogs(plugins, '../../secret')).resolves.toEqual({
+          ok: false,
+          error: '参数不合法',
+        });
+        expect(plugins.logs).not.toHaveBeenCalled();
+      });
+    });
+
+    it('合法插件 id 与宿主日志照常读取', async () => {
+      await withLogger(async (plugins) => {
+        await expect(readPluginLogs(plugins, 'enso.example.notes')).resolves.toMatchObject({
+          ok: true,
+          text: expect.stringContaining('插件已启动'),
+        });
+        await expect(readPluginLogs(plugins, 'extension-plugins')).resolves.toMatchObject({
+          ok: true,
+          text: expect.stringContaining('宿主日志'),
+        });
+      });
+    });
   });
 
   it('配置写入把收窄后的补丁交给服务', async () => {

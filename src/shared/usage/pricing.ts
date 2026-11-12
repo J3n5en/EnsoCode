@@ -17,9 +17,6 @@ const THINKING_SUFFIX = new RegExp(`-(${THINKING_LEVELS.join('|')})$`);
 /**
  * 完整 ID 及其去思考档位后缀的价格优先；缺价时逐段剥除中转命名空间，每段仍先精确匹配。
  * 仅在查价时回退，保留原始模型 ID，并优先使用更长路径的专用价格（含零价）。
- *
- * Prefer the full ID and its thinking-suffix fallback, then strip relay namespaces one segment at a time.
- * Only pricing lookup falls back; preserve the recorded model ID and prefer prices for longer paths, including zero rates.
  */
 export function resolvePricing(model: string, table: PricingTable): ModelPricing | null {
   let candidate = model;

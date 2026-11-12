@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findCapturerWindowSource,
+  findCaptureWindow,
   isListedCgWindowLayer,
   thumbnailCropForWindow,
 } from './windowSource';
@@ -19,6 +20,17 @@ describe('findCapturerWindowSource', () => {
     const sources = [{ id: 'window:88:0' }, { id: 'window:17519:0' }];
     expect(findCapturerWindowSource(sources, '17519')?.id).toBe('window:17519:0');
     expect(findCapturerWindowSource(sources, '9')).toBeUndefined();
+  });
+});
+
+describe('findCaptureWindow', () => {
+  // 审计发现：按子串匹配时，排在前面的 "141" 会被当成 "31415" 的几何，后续点击映射到错误坐标
+  it('窗口号只按完整值匹配，前面的窗口号是目标的子串时不误取', () => {
+    const windows = [
+      { id: '141', x: 0, y: 0 },
+      { id: '31415', x: 500, y: 300 },
+    ];
+    expect(findCaptureWindow(windows, '31415')).toEqual({ id: '31415', x: 500, y: 300 });
   });
 });
 

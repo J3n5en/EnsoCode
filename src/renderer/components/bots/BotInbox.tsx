@@ -467,7 +467,11 @@ function InboxCard({
               value={answer}
               placeholder={t('Custom answer…')}
               onChange={(event) => setAnswer(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && reply(answer)}
+              onKeyDown={(event) => {
+                // 输入法回车只是确认候选词；发送中再按回车会重复回复（按钮已按 busy 禁用）
+                if (event.nativeEvent.isComposing || busy) return;
+                if (event.key === 'Enter') reply(answer);
+              }}
             />
             <Button size="xs" disabled={busy || !answer.trim()} onClick={() => reply(answer)}>
               {t('Reply')}

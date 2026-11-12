@@ -41,6 +41,18 @@ function isSessionId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= SPEECH_SESSION_ID_MAX;
 }
 
+/**
+ * 远端浏览器经配对通道推流时，Float32Array 被编码成原始字节（pair remote.ts 的 u8），
+ * 宿主收到的是 Uint8Array：两端都是小端平台，按 float32 视图还原；字节数不是 4 的倍数即坏数据。
+ */
+function toSamples(audio: unknown): Float32Array | null {
+  if (audio instanceof Float32Array) return audio;
+  if (!(audio instanceof Uint8Array) || audio.byteLength % 4 !== 0) return null;
+  // Float32Array 视图要求起点 4 字节对齐，不对齐先复制（new Uint8Array 一定复制，Buffer.slice 不会）
+  const bytes = audio.byteOffset % 4 === 0 ? audio : new Uint8Array(audio);
+  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+}
+
 function sessionsOf(sender: RendererContents): Map<string, VoiceSession> {
   let owned = sessions.get(sender.id);
   if (!owned) {
@@ -87,7 +99,8 @@ export function registerSpeechHandlers(): void {
   ipcMain.on(IPC_CHANNELS.SPEECH_SESSION_PUSH, (event, sessionId: unknown, audio: unknown) => {
     const sender = event.sender;
     if (!isMainRenderer(sender.id) || !isSessionId(sessionId)) return;
-    if (!(audio instanceof Float32Array) || audio.length > MAX_PUSH_SAMPLES) return;
+    const samples = toSamples(audio);
+    if (!samples || samples.length > MAX_PUSH_SAMPLES) return;
     const owned = sessionsOf(sender);
     let session = owned.get(sessionId);
     if (!session) {
@@ -103,7 +116,7 @@ export function registerSpeechHandlers(): void {
       });
       owned.set(sessionId, session);
     }
-    session.push(audio);
+    session.push(samples);
   });
 
   ipcMain.handle(

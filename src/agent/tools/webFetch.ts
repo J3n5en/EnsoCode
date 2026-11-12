@@ -3,6 +3,8 @@ import { BlockList, isIP } from 'node:net';
 import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
+import { type Dispatcher, fetch as undiciFetch } from 'undici';
+import { imageDownloadDispatcher as pinnedDispatcher } from '../imageGeneration/downloadDispatcher';
 
 const MAX_URL_LENGTH = 2048;
 const MAX_REDIRECTS = 5;
@@ -69,12 +71,17 @@ export interface WebFetchDeps {
 const systemLookup = async (hostname: string) =>
   (await dnsLookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address);
 
-async function assertPublicHost(url: URL, lookup: (hostname: string) => Promise<string[]>) {
+/** 返回校验过的地址,供本跳连接固定使用 */
+async function assertPublicHost(
+  url: URL,
+  lookup: (hostname: string) => Promise<string[]>
+): Promise<string[]> {
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   const blocked = () => new Error(`Refusing to fetch non-public address: ${url.host}`);
   if (host === 'localhost' || host.endsWith('.localhost')) throw blocked();
   const addresses = isIP(host) ? [host] : await lookup(host);
   if (addresses.length === 0 || !addresses.every(isPublicAddress)) throw blocked();
+  return addresses;
 }
 
 type BodyKind = 'html' | 'text';
@@ -194,53 +201,71 @@ export async function webFetch(
   options: { offset?: number; signal?: AbortSignal },
   deps: WebFetchDeps = {}
 ): Promise<WebFetchResult> {
-  const fetchImpl = deps.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
   const lookup = deps.lookup ?? systemLookup;
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  // 每跳一个 dispatcher;最后一跳要等 body 读完才能断开,统一在 finally 收尾
+  const dispatchers: Dispatcher[] = [];
+  const fetchHop = (url: URL, addresses: string[], init: RequestInit): Promise<Response> => {
+    if (deps.fetch) return deps.fetch(url.href, init);
+    // 连接固定到本跳刚校验过的地址:否则 undici(或代理)连接时会再解析一次域名,
+    // DNS rebinding 可让第二次解析指向内网,前面的公网校验就形同虚设
+    const dispatcher = pinnedDispatcher(url, addresses);
+    dispatchers.push(dispatcher);
+    // 用 npm undici 的 fetch:它与这里的 dispatcher 配套,Node 内置 fetch 可能仍走旧版 handler 协议
+    return undiciFetch(url.href, {
+      ...init,
+      dispatcher,
+    } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+  };
   let url = validateFetchUrl(input);
   let response: Response | undefined;
-  for (let hop = 0; ; hop++) {
-    await assertPublicHost(url, lookup);
-    response = await fetchImpl(url.href, {
-      redirect: 'manual',
-      signal,
-      headers: {
-        'user-agent': USER_AGENT,
-        accept:
-          'text/html,application/xhtml+xml,text/markdown;q=0.9,text/plain;q=0.8,application/json;q=0.8,*/*;q=0.5',
-        'accept-language': 'en-US,en;q=0.9,zh-CN;q=0.8',
-      },
-    });
-    const location = response.headers.get('location');
-    if (response.status < 300 || response.status >= 400 || !location) break;
-    await response.body?.cancel().catch(() => {});
-    if (hop >= MAX_REDIRECTS) throw new Error(`Stopped after ${MAX_REDIRECTS} redirects`);
-    url = validateFetchUrl(new URL(location, url).href);
+  try {
+    for (let hop = 0; ; hop++) {
+      const addresses = await assertPublicHost(url, lookup);
+      response = await fetchHop(url, addresses, {
+        redirect: 'manual',
+        signal,
+        headers: {
+          'user-agent': USER_AGENT,
+          accept:
+            'text/html,application/xhtml+xml,text/markdown;q=0.9,text/plain;q=0.8,application/json;q=0.8,*/*;q=0.5',
+          'accept-language': 'en-US,en;q=0.9,zh-CN;q=0.8',
+        },
+      });
+      const location = response.headers.get('location');
+      if (response.status < 300 || response.status >= 400 || !location) break;
+      await response.body?.cancel().catch(() => {});
+      if (hop >= MAX_REDIRECTS) throw new Error(`Stopped after ${MAX_REDIRECTS} redirects`);
+      url = validateFetchUrl(new URL(location, url).href);
+    }
+    const contentType = response.headers.get('content-type') ?? '';
+    const kind = classify(contentType);
+    if (!kind) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`Unsupported content type: ${contentType.split(';')[0]?.trim()}`);
+    }
+    const { bytes, cut } = await readCapped(response);
+    const raw = decode(bytes, contentType, kind);
+    const page = kind === 'html' ? htmlToMarkdown(raw, url.href) : { markdown: raw };
+    const full = page.markdown;
+    const offset = Math.min(Math.max(0, Math.floor(options.offset ?? 0)), full.length);
+    const end = offset + PAGE_CHARS;
+    return {
+      url: url.href,
+      status: response.status,
+      contentType: contentType.split(';')[0]?.trim() ?? '',
+      ...(page.title ? { title: page.title } : {}),
+      text: full.slice(offset, end),
+      offset,
+      totalChars: full.length,
+      ...(end < full.length ? { nextOffset: end } : {}),
+      bodyCut: cut,
+    };
+  } finally {
+    // 到这里 body 已读完或已放弃;destroy 直接断开,不像 close 那样等未消费完的响应
+    await Promise.all(dispatchers.map((dispatcher) => dispatcher.destroy()));
   }
-  const contentType = response.headers.get('content-type') ?? '';
-  const kind = classify(contentType);
-  if (!kind) {
-    await response.body?.cancel().catch(() => {});
-    throw new Error(`Unsupported content type: ${contentType.split(';')[0]?.trim()}`);
-  }
-  const { bytes, cut } = await readCapped(response);
-  const raw = decode(bytes, contentType, kind);
-  const page = kind === 'html' ? htmlToMarkdown(raw, url.href) : { markdown: raw };
-  const full = page.markdown;
-  const offset = Math.min(Math.max(0, Math.floor(options.offset ?? 0)), full.length);
-  const end = offset + PAGE_CHARS;
-  return {
-    url: url.href,
-    status: response.status,
-    contentType: contentType.split(';')[0]?.trim() ?? '',
-    ...(page.title ? { title: page.title } : {}),
-    text: full.slice(offset, end),
-    offset,
-    totalChars: full.length,
-    ...(end < full.length ? { nextOffset: end } : {}),
-    bodyCut: cut,
-  };
 }
 
 export function formatFetchResult(result: WebFetchResult): string {

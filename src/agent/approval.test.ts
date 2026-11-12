@@ -442,6 +442,28 @@ describe('受保护动作底线', () => {
     await expect(run).rejects.toThrow(/denied/);
     expect(read.execute).toHaveBeenCalledTimes(2);
   });
+
+  // grep 的 --glob 越过 .gitignore：glob 点名密钥文件触发确认时，卡片摘要要带出 glob，否则看不出要读什么
+  it('grep 用 glob 指向密钥文件时要求确认，摘要带出 glob，拒绝后不执行', async () => {
+    const on = collect('full', true);
+    const grep = tool('grep');
+    const run = withProtectedFloor(on.gate, 'read', grep.def).execute(
+      'g1',
+      { pattern: 'API_KEY', glob: '.env' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    await vi.waitFor(() => expect(on.infos).toHaveLength(1));
+    expect(on.infos[0]).toMatchObject({
+      tool: 'grep',
+      protected: 'secret',
+      summary: 'grep --glob .env',
+    });
+    on.gate.respond(on.infos[0].requestId, 'deny');
+    await expect(run).rejects.toThrow(/denied/);
+    expect(grep.execute).not.toHaveBeenCalled();
+  });
 });
 
 describe('bot 模式完全放行跳过受保护底线', () => {

@@ -11,6 +11,7 @@
  * 不引入额外校验依赖；运行时校验用手写窄化函数完成。
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { transformMessages } from '@earendil-works/pi-ai/api/transform-messages';
 import { clampProjectThinkingLevel, supportedProjectThinkingLevels } from '@shared/modelThinking';
 import { type OauthUsageWindow, sanitizeOauthLabel } from '@shared/types';
 import { startOauthCallbackServer } from './callbackServer';
@@ -703,6 +704,15 @@ export function normalizeToolSchema(value: unknown): unknown {
   const out: Record<string, unknown> = {};
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (DROPPED_SCHEMA_KEYS[key]) continue;
+    if (key === 'properties' && raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      // properties 的键是参数名而不是关键字（同 pi-ai google-shared 的 JSON_SCHEMA_NAME_MAPS）：
+      // 只清洗各参数的子 schema，否则名为 contains / const / oneOf 的参数会被删掉或改写。
+      // fromEntries 让 __proto__ 之类的参数名仍是自有属性。
+      out.properties = Object.fromEntries(
+        Object.entries(raw).map(([name, schema]) => [name, normalizeToolSchema(schema)])
+      );
+      continue;
+    }
     if (key === 'const') {
       out.enum = [raw];
       continue;
@@ -721,6 +731,13 @@ export function normalizeToolSchema(value: unknown): unknown {
     out[key] = normalizeToolSchema(raw);
   }
   if (out.type === 'object' && out.properties === undefined) out.properties = {};
+  const declared = out.properties;
+  if (Array.isArray(out.required) && declared && typeof declared === 'object') {
+    // 点名了未声明参数的 required（如参数只在已丢弃的 patternProperties 里）会让 Gemini 判整份 schema 非法
+    out.required = out.required.filter(
+      (name) => typeof name === 'string' && Object.hasOwn(declared, name)
+    );
+  }
   return out;
 }
 
@@ -1109,13 +1126,25 @@ function isGemini3Plus(modelId: string): boolean {
   return match ? Number.parseInt(match[1], 10) >= 3 : true;
 }
 
+/**
+ * 跨模型 toolCall id 的清洗规则，与 pi-ai google-shared 的 normalizeToolCallId 相同
+ * （Claude 只认 ^[a-zA-Z0-9_-]+$、最长 64）。google-shared 只对需要 id 的模型清洗；
+ * 这里每个模型都回传 id，所以一律清洗。
+ */
+function normalizeToolCallId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+}
+
 export function convertMessages(model: PiModel, context: PiContext): GeminiContent[] {
   const contents: GeminiContent[] = [];
   const supportsImages = model.input.includes('image');
   const isClaude = model.id.startsWith('claude-');
   const emittedToolNames = new Map<string, string>();
 
-  for (const message of context.messages) {
+  // 与 google-shared 一样先过 pi-ai transformMessages：error/aborted 轮整轮跳过、孤儿 toolCall
+  // 补 "No result provided" 错误结果、跨模型 id 清洗。Enso 的 dropUnpairedToolResults 按同一规则
+  // 删掉被跳过轮次的结果，这里不跳过就会留下没有 functionResponse 的 functionCall，后端 400。
+  for (const message of transformMessages(context.messages, model, normalizeToolCallId)) {
     if (message.role === 'user') {
       const parts: GeminiPart[] = [];
       if (typeof message.content === 'string') {

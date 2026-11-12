@@ -1,4 +1,4 @@
-/** 只看前面一段，避免把整份大文件都拿来做正则匹配 */
+/** 只看前面一段，避免把整份大文件都拿来扫描 */
 const SVG_SNIFF_WINDOW = 512;
 
 /**
@@ -13,7 +13,28 @@ export function looksLikeSvg(bytes: Uint8Array): boolean {
   const text = Buffer.from(bytes.subarray(0, Math.min(bytes.length, SVG_SNIFF_WINDOW))).toString(
     'utf8'
   );
-  return /^\uFEFF?\s*(<\?xml[^>]*\?>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(text);
+  // 逐段线性扫描，不能写回一条 `(<!--[\s\S]*?-->\s*)*<svg` 正则：连续注释后接的不是 <svg 时
+  // 它会指数回溯，而这里在 Main 同步执行，512 字节的前缀就能卡死整个应用。
+  // `\s` 含 U+FEFF，BOM 随空白一起跳过。
+  let pos = skipSpaces(text, 0);
+  if (/^<\?xml/i.test(text.slice(pos, pos + 5))) {
+    const end = text.indexOf('>', pos);
+    if (end < 0 || text[end - 1] !== '?') return false;
+    pos = skipSpaces(text, end + 1);
+  }
+  // 注释按 XML 语义结束于第一个 `-->`
+  while (text.startsWith('<!--', pos)) {
+    const end = text.indexOf('-->', pos + 4);
+    if (end < 0) return false;
+    pos = skipSpaces(text, end + 3);
+  }
+  return /^<svg[\s>]/i.test(text.slice(pos, pos + 5));
+}
+
+function skipSpaces(text: string, from: number): number {
+  let pos = from;
+  while (pos < text.length && /\s/.test(text[pos])) pos++;
+  return pos;
 }
 
 /**

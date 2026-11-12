@@ -583,7 +583,7 @@ export const zhTranslations: Record<string, string> = {
   'Git diff is not available for this workspace.': '当前工作区不支持 Git diff。',
   'Terminal appearance': '终端外观',
   'Theme mode': '主题模式',
-  // Background image
+  // 背景图
   'Background image': '背景图',
   'Show a custom image behind the interface': '在界面背后显示自定义背景图',
   'The current theme has its own background. Turn this on to replace it with your image.':
@@ -611,13 +611,13 @@ export const zhTranslations: Record<string, string> = {
   Contain: '完整显示',
   Repeat: '平铺',
   Center: '居中原图',
-  // Model providers
+  // 模型供应商
   Search: '搜索',
   'No results': '无匹配结果',
   'Semantic similarity': '语义相似度',
   'Preset is locked after the conversation starts': '对话开始后预设已锁定，不能中途替换',
   Path: '路径',
-  // Onboarding
+  // 首次运行引导
   'Welcome to EnsoCode': '欢迎使用 EnsoCode',
   'Import your providers and assets from local AI apps to get started. You can skip any step.':
     '从本地 AI 应用导入模型服务与资源即可开始，每一步都可跳过。',
@@ -741,7 +741,7 @@ export const zhTranslations: Record<string, string> = {
     '退出会完全关闭应用，手机将无法连接。最小化到托盘后应用会在后台继续运行，手机仍可连接。',
   'Minimize to tray': '最小化到托盘',
   Exit: '退出',
-  // Unified provider setup, default model, and Enso
+  // 统一的供应商设置、默认模型与 Enso
   'Add a provider subscription or API Key, or import providers from local AI apps':
     '添加提供商订阅或 API Key，也可从本地 AI 应用导入模型服务',
   'Add model or provider': '添加模型 / 提供商',
@@ -937,7 +937,7 @@ export const zhTranslations: Record<string, string> = {
   'Failed to bind the Enso capability generation.': '无法绑定 Enso 能力代次。',
   'Failed to prompt child Agent.': '无法向子 Agent 发送任务。',
   'Failed to record dispatch.': '无法记录派发结果。',
-  // Dangerous capability confirmation summaries
+  // 危险能力确认摘要
   Target: '目标',
   Provider: '提供商',
   Account: '账号',
@@ -997,7 +997,7 @@ export const zhTranslations: Record<string, string> = {
     '运行会调用编码会话工具（含编辑）的 JavaScript。',
   'Search and capture durable memories across coding sessions.': '跨编码会话检索与记录持久记忆。',
   Save: '保存',
-  // Skills & MCP
+  // 技能与 MCP
   Skills: '技能',
   Skill: '技能',
   'Skills registered by reference; files stay in their original location':
@@ -1052,7 +1052,7 @@ export const zhTranslations: Record<string, string> = {
   'Imported {{count}} entries': '已导入 {{count}} 项',
   'Instruction Files': '指令文件',
 
-  // Phone second screen
+  // 手机副屏
   Phone: '手机',
   'Use your phone as a second screen. Keep this app running.':
     '把手机当作第二块屏幕。需保持本应用运行。',
@@ -2186,7 +2186,7 @@ export const zhTranslations: Record<string, string> = {
   'This conversation will be removed from the list.': '该对话将从列表移除。',
   Reasoning: '推理',
   'Load local skills': '加载本机 skill',
-  // Presets
+  // 预设
   Presets: '预设',
   'New preset': '新建预设',
   'Edit preset': '编辑预设',

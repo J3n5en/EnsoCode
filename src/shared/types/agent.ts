@@ -192,8 +192,6 @@ export interface SpawnModelConfig extends ModelCapabilityOverrides {
   virtual?: VirtualSpawnConfig;
   /**
    * Main 校验后下发的顺序池配置；仅用于路由身份，实时成员和游标仍以 Main 为权威。
-   *
-   * Validated sequential pool configuration; identifies the route, while Main remains authoritative for live membership and cursors.
    */
   oauthAccountPool?: { accountKeys: string[] };
   /** 该供应商的额外 HTTP 请求头。空表不下发。 */
@@ -926,7 +924,7 @@ export const CONTEXT_OCCUPANCY_BUCKETS = [
   'tools',
   'conversation',
   'compaction',
-  // Retained for persisted context-occupancy snapshots; project memory has been removed.
+  // 为已持久化的上下文占用快照保留；项目记忆功能已移除。
   'projectMemory',
   'reminders',
 ] as const;
@@ -1055,7 +1053,7 @@ export interface ResolvedAgentTypeSpawnConfig {
    */
   reasoning?: ModelReasoningOverride;
   thinkingLevel?: ModelThinkingLevelOverride;
-  /** Main-authorized exact node/profile intersection; absent keeps the profile tool set. */
+  /** Main 授权的 node/profile 精确交集；缺省时沿用 profile 的工具集。 */
   allowedToolIds?: readonly string[];
   skillPaths: readonly string[];
   skillBindingIds: readonly string[];
@@ -1099,9 +1097,7 @@ export type AgentSessionCustomEntry =
       kind: 'oauth-account-selected';
       accountKey: string;
       previousAccountKey?: string;
-      /** 真实请求的池路由身份；旧历史缺省时不能用于额度展示。
-       *
-       * Pool route identity of the actual request; legacy entries without it cannot display usage. */
+      /** 真实请求的池路由身份；旧历史缺省时不能用于额度展示。 */
       settingsProviderId?: string;
       modelId?: string;
       at: number;
@@ -1524,7 +1520,7 @@ export type AgentCommand =
       type: 'rewind';
       identity: SessionIdentity;
       entryId?: string;
-      /** Legacy phone clients only; desktop rewind uses a persisted entryId. */
+      /** 仅供旧版手机客户端使用；桌面端回退使用持久化的 entryId。 */
       userIndexFromEnd?: number;
       restoreFiles?: boolean;
     }
@@ -1680,7 +1676,7 @@ export interface ProjectedCodemodeCall {
 }
 
 export interface ProjectedMessage {
-  /** Persisted user entry identity, absent on unconfirmed messages. */
+  /** 已持久化的 user entry 标识；未确认的消息没有该字段。 */
   entryId?: string;
   rtk?: RtkToolStats;
   /** 前台命令被移交为后台任务时的任务 id */
@@ -2883,7 +2879,8 @@ function parseSubagentModelOption(value: unknown): SubagentModelOption | null {
     !isRecord(value) ||
     !hasOnlyKeys(value, ['name', 'config', 'description']) ||
     !isNonEmptyString(value.name) ||
-    !parseSpawnModelConfig(value.config) ||
+    // 选中的条目就是子会话主模型，Main 对虚拟引用整包下发 virtual；只收真实模型会拒掉整条 spawn-parent
+    !parseSessionModelConfig(value.config) ||
     (value.description !== undefined && typeof value.description !== 'string')
   ) {
     return null;

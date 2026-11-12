@@ -705,13 +705,19 @@ export function applyAgentEvent(
     case 'messages-truncated': {
       const base = current.historyBaseIndex ?? 0;
       const localKeep = event.length - base;
-      if (localKeep >= current.messages.length) {
+      // worker 的 length 只计权威消息：裁剪只作用于权威区，乐观尾巴（如 willRetry 期间的 steer
+      // 气泡）照旧浮在后面，否则之后的 delivery-settled / delivery-rejected 按 id 找不到它
+      const authoritativeLen = authoritativeLength(current.messages);
+      if (localKeep >= authoritativeLen) {
         return { ...current, lastSeq: event.seq };
       }
       if (localKeep > 0) {
         return {
           ...current,
-          messages: current.messages.slice(0, localKeep),
+          messages: [
+            ...current.messages.slice(0, localKeep),
+            ...current.messages.slice(authoritativeLen),
+          ],
           lastSeq: event.seq,
         };
       }

@@ -45,4 +45,26 @@ describe('looksLikeSvg', () => {
     expect(looksLikeSvg(Buffer.from('<html><body><svg></svg></body></html>'))).toBe(false);
     expect(looksLikeSvg(Buffer.from('not svg at all'))).toBe(false);
   });
+
+  // 审计复现：前 512 字节是 73 个 `<!---->` 再接非 <svg 字符的 x.png，Files 面板预览即在 Main 同步卡死；
+  // 旧正则每多 2 个注释耗时约 ×4，27 个注释修复前就要数百毫秒到数秒
+  it('连续注释后接的不是 <svg 时迅速判否，不会回溯卡死主进程', () => {
+    const bytes = Buffer.from(`${'<!---->'.repeat(27)}x`);
+    const started = performance.now();
+    expect(looksLikeSvg(bytes)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it('BOM、多个注释与空白交替后接 <svg 仍识别', () => {
+    expect(
+      looksLikeSvg(Buffer.from('\uFEFF<?xml version="1.0"?>\n<!-- a -->\n<!-- b -->\n<SVG>'))
+    ).toBe(true);
+    expect(looksLikeSvg(Buffer.from('<!----><!-- c --> \t<svg\nwidth="1"></svg>'))).toBe(true);
+  });
+
+  it('注释或 xml 声明未闭合、<svg 后不是空白或 > 时判否', () => {
+    expect(looksLikeSvg(Buffer.from('<!-- 未闭合 <svg></svg>'))).toBe(false);
+    expect(looksLikeSvg(Buffer.from('<?xml version="1.0"><svg></svg>'))).toBe(false);
+    expect(looksLikeSvg(Buffer.from('<svgx></svgx>'))).toBe(false);
+  });
 });

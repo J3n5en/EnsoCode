@@ -1,4 +1,4 @@
-import { pairIdFromPublicKey } from './pairing';
+import { isValidPublicKey, pairIdFromPublicKey } from './pairing';
 import { PairRoom } from './room';
 
 export { PairRoom };
@@ -30,6 +30,10 @@ async function routeByPublicKey(
   }
   if (typeof body.publicKey !== 'string' || !body.publicKey) {
     return json({ error: 'missing publicKey' }, 400);
+  }
+  // request 会新建 DO 存储，只收真实客户端的公钥格式；claim 不建新记录，保持原样（与 Go 版一致）
+  if (internalPath === '/request' && !isValidPublicKey(body.publicKey)) {
+    return json({ error: 'invalid publicKey' }, 400);
   }
   const pairId = await pairIdFromPublicKey(body.publicKey);
   const stub = env.PAIR_ROOM.get(env.PAIR_ROOM.idFromName(pairId));

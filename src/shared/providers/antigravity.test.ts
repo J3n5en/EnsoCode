@@ -365,6 +365,51 @@ describe('normalizeToolSchema', () => {
     expect(normalizeToolSchema(null)).toBe(null);
     expect(normalizeToolSchema('x')).toBe('x');
   });
+
+  // MCP 工具 schema 原样透传：参数名恰好与 JSON Schema 关键字同名时，不能被当成关键字删除或改写
+  it('properties 里与关键字同名的参数名原样保留，只清洗参数自身的 schema', () => {
+    expect(
+      normalizeToolSchema({
+        type: 'object',
+        properties: {
+          dependencies: { type: 'array', items: { type: 'string' } },
+          contains: { type: 'string', examples: ['foo'] },
+          examples: { type: 'string' },
+          not: { type: 'boolean' },
+          const: { type: 'string' },
+          oneOf: { type: 'string', const: 'x' },
+        },
+        required: ['contains', 'const', 'oneOf'],
+      })
+    ).toEqual({
+      type: 'object',
+      properties: {
+        dependencies: { type: 'array', items: { type: 'string' } },
+        contains: { type: 'string' },
+        examples: { type: 'string' },
+        not: { type: 'boolean' },
+        const: { type: 'string' },
+        oneOf: { type: 'string', enum: ['x'] },
+      },
+      required: ['contains', 'const', 'oneOf'],
+    });
+  });
+
+  // required 点名的参数只在被丢弃的 patternProperties 里声明时，Gemini 会以 property is not defined 拒绝整份 schema
+  it('required 只保留 properties 里实际声明的参数名', () => {
+    expect(
+      normalizeToolSchema({
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        patternProperties: { '^x-': { type: 'string' } },
+        required: ['path', 'x-trace'],
+      })
+    ).toEqual({
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+    });
+  });
 });
 
 describe('parseUsageWindows', () => {
@@ -1029,6 +1074,108 @@ describe('buildRequest 的 model 字段用解析后的 wire id', () => {
     );
     // 只锁 model 原 id；无 map 的 raw 不猜档位、不改写成 -low。
     expect(request.model).toBe('gemini-3.8-flash-high');
+  });
+});
+
+describe('历史回放的工具调用配对（对齐 pi transformMessages）', () => {
+  const claude = {
+    id: 'claude-opus-4-6',
+    name: 'Claude Opus 4.6',
+    api: 'google-antigravity-cca',
+    provider: ANTIGRAVITY_PROVIDER_ID,
+    baseUrl: 'https://daily-cloudcode-pa.googleapis.com',
+    reasoning: true,
+    input: ['text', 'image'] as ('text' | 'image')[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 250_000,
+    maxTokens: 64_000,
+  };
+  type GeminiContents = Array<{
+    role: string;
+    parts: Array<{ functionCall?: { id?: string }; functionResponse?: { id?: string } }>;
+  }>;
+
+  const readCall = (id: string) => ({
+    type: 'toolCall' as const,
+    id,
+    name: 'read',
+    arguments: { path: 'a.ts' },
+  });
+  const assistant = (overrides: Partial<PiAssistantMessage>): PiAssistantMessage => ({
+    role: 'assistant',
+    content: [],
+    api: claude.api,
+    provider: claude.provider,
+    model: claude.id,
+    usage: emptyUsage(),
+    stopReason: 'toolUse',
+    timestamp: 1,
+    ...overrides,
+  });
+  const contentsOf = (messages: unknown[]): GeminiContents =>
+    buildRequest(claude, normalizeContext({ messages: messages as never }), 'projects/p', undefined)
+      .request.contents as GeminiContents;
+
+  // 用户中途停止：aborted 轮带着已流出的 toolCall 落盘但从未执行；Enso 的 dropUnpairedToolResults
+  // 也按「整轮跳过」删掉它的结果，若这里照常回放 functionCall，下一次请求就是孤立的 tool_use
+  it('error / aborted 的 assistant 轮整轮不回放', () => {
+    expect(
+      contentsOf([
+        { role: 'user', content: '读一下 a.ts', timestamp: 0 },
+        assistant({ stopReason: 'aborted', content: [readCall('toolu_1')] }),
+        assistant({ stopReason: 'error', content: [readCall('toolu_2')] }),
+        { role: 'user', content: '继续', timestamp: 2 },
+      ])
+    ).toEqual([
+      { role: 'user', parts: [{ text: '读一下 a.ts' }] },
+      { role: 'user', parts: [{ text: '继续' }] },
+    ]);
+  });
+
+  it('没有结果的孤儿工具调用补一条占位 error functionResponse', () => {
+    const contents = contentsOf([
+      { role: 'user', content: '读一下 a.ts', timestamp: 0 },
+      assistant({ content: [readCall('toolu_1')] }),
+      { role: 'user', content: '继续', timestamp: 2 },
+    ]);
+    expect(contents[2]).toEqual({
+      role: 'user',
+      parts: [
+        {
+          functionResponse: {
+            name: 'read',
+            response: { error: 'No result provided' },
+            id: 'toolu_1',
+          },
+        },
+      ],
+    });
+  });
+
+  // 真实场景：会话前半段由 Codex 产出，toolCall id 形如 call_…|fc_…（可达数百字符），
+  // Antigravity 上的 Claude 只认 ^[a-zA-Z0-9_-]+$ 且不超过 64 字符
+  it('跨厂商的 toolCall id 清洗成后端允许的字符集，调用与结果两侧一致', () => {
+    const codexId = `call_${'a'.repeat(40)}|fc_${'b'.repeat(60)}`;
+    const contents = contentsOf([
+      { role: 'user', content: '读一下 a.ts', timestamp: 0 },
+      assistant({
+        api: 'openai-codex-responses',
+        provider: 'openai-codex',
+        model: 'gpt-5.1-codex',
+        content: [readCall(codexId)],
+      }),
+      {
+        role: 'toolResult',
+        toolCallId: codexId,
+        toolName: 'read',
+        content: [{ type: 'text', text: 'ok' }],
+        isError: false,
+        timestamp: 2,
+      },
+    ]);
+    const callId = contents[1]?.parts[0]?.functionCall?.id;
+    expect(callId).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+    expect(contents[2]?.parts[0]?.functionResponse?.id).toBe(callId);
   });
 });
 

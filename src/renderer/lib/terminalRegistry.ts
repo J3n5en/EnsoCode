@@ -7,7 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import type { ITheme } from '@xterm/xterm';
+import type { FontWeight, ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import { tabTitleFromTerminal } from '@/lib/terminalTitle';
 import '@xterm/xterm/css/xterm.css';
@@ -17,6 +17,9 @@ export interface TerminalOptions {
   theme?: ITheme;
   fontFamily: string;
   fontSize: number;
+  /** 设置页的终端常规 / 粗体字重；不传时沿用 xterm 默认 */
+  fontWeight?: FontWeight;
+  fontWeightBold?: FontWeight;
 }
 
 export interface TerminalSearchOptions {
@@ -57,6 +60,8 @@ export function acquireTerminal(termId: string, options: TerminalOptions): Termi
     cursorBlink: true,
     fontFamily: `"Enso Nerd Symbols", ${options.fontFamily}`,
     fontSize: options.fontSize,
+    ...(options.fontWeight ? { fontWeight: options.fontWeight } : {}),
+    ...(options.fontWeightBold ? { fontWeightBold: options.fontWeightBold } : {}),
     theme: options.theme,
     // 背景图模式下 wrapper 半透明，xterm 自身不得再刷不透明底色
     allowTransparency: true,
@@ -123,12 +128,16 @@ export function detachTerminal(termId: string): void {
 export function updateTerminalAppearance(
   theme: ITheme | undefined,
   fontFamily: string,
-  fontSize: number
+  fontSize: number,
+  fontWeight?: FontWeight,
+  fontWeightBold?: FontWeight
 ): void {
   for (const { term } of registry.values()) {
     term.options.theme = theme;
     term.options.fontFamily = `"Enso Nerd Symbols", ${fontFamily}`;
     term.options.fontSize = fontSize;
+    if (fontWeight) term.options.fontWeight = fontWeight;
+    if (fontWeightBold) term.options.fontWeightBold = fontWeightBold;
   }
 }
 

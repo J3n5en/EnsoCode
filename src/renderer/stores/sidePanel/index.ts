@@ -18,8 +18,6 @@ interface SidePanelState {
   fullscreen: boolean;
   /**
    * 最近一次手动调整的宽度，仅作为尚无面板设置的会话的初始值，随会话偏好一起保存。
-   *
-   * Persist the last manually resized width as the initial value for conversations without panel settings.
    */
   lastWidth: number;
   uiByConversation: Record<string, SidePanelUi>;

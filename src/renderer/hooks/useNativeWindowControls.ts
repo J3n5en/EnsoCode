@@ -5,9 +5,6 @@ import { type RefObject, useEffect } from 'react';
  * 用实际标题栏配色同步原生按钮。画布将 OKLCH 等 CSS 颜色转为 Electron 可接受的十六进制色。
  * 按钮底色保留 alpha：标题栏透明/半透明（壁纸模式）时原生按钮区一起透出壁纸，
  * 不再是一块实色。宿主窗口底色取画布色，必须不透明。
- *
- * Synchronize native controls with the rendered title bar. A canvas converts CSS
- * colors such as OKLCH into hex accepted by Electron, keeping the overlay alpha.
  */
 export function useNativeWindowControls(ref: RefObject<HTMLElement | null>): void {
   useEffect(() => {

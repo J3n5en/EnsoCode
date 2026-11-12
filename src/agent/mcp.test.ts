@@ -528,6 +528,30 @@ describe('McpManager per-server timeouts', () => {
     vi.useRealTimers();
   });
 
+  // 审计 D5：callTool 只带 timeout 不带 signal，用户点停止后 pi 仍要等 MCP 工具跑到超时（默认 120s，
+  // 可配到 3600s），期间再发消息报 previous turn is still running；服务端也收不到取消
+  it('用户中止时立即结束等待，并把中止交给 SDK 去取消请求', async () => {
+    clientState.listTools = vi.fn(async () => ({
+      tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+    }));
+    // 服务端迟迟不回：不响应中止的话只能等到调用超时
+    clientState.callTool = vi.fn(() => new Promise(() => {}));
+    const { manager } = makeManager();
+    const [tool] = await manager.toolsFor([httpServer]);
+    const controller = new AbortController();
+    const outcome = tool?.execute('tc-1', {}, controller.signal, undefined, {} as never).then(
+      () => 'resolved',
+      (error: Error) => error.message
+    );
+    controller.abort();
+    const stillWaiting = new Promise((resolve) => setTimeout(() => resolve('still waiting'), 50));
+    expect(await Promise.race([outcome, stillWaiting])).toMatch(/aborted/);
+    const options = (clientState.callTool.mock.calls[0] as unknown[] | undefined)?.[2] as
+      | { signal?: AbortSignal }
+      | undefined;
+    expect(options?.signal?.aborted).toBe(true);
+  });
+
   it('forwards timeouts to SDK RequestOptions so the SDK 60s default does not win', async () => {
     clientState.connect = vi.fn(async () => {});
     clientState.listTools = vi.fn(async () => ({

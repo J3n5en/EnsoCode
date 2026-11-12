@@ -233,7 +233,7 @@ function parseSlicedJson(text: string): unknown {
     try {
       return JSON.parse(t);
     } catch {
-      /* next */
+      /* 尝试下一种 */
     }
   }
   return undefined;

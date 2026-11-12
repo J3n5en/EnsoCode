@@ -189,10 +189,6 @@ function attachTokenLimits(id: string, item: Record<string, unknown>): FetchedMo
 /**
  * 全量同步必须使用完整有效的模型清单；未拉完的分页或解析时被过滤的损坏条目
  * 不能被误判为模型下架。合法空数组仍代表上游已经没有模型，可以用于清空本地清单。
- *
- * Full synchronization requires a complete, valid list: unfetched pages or discarded
- * malformed entries must not be mistaken for retired models. A valid empty array may
- * clear the local list.
  */
 export function isValidModelListPayload(api: ModelApiKind, data: unknown): boolean {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {

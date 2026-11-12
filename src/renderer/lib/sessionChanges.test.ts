@@ -14,6 +14,17 @@ describe('reconstructOld', () => {
   it('当前内容对不上则失败', () => {
     expect(reconstructOld('nope', [{ oldText: 'a', newText: 'b' }])).toBeNull();
   });
+
+  // 真实场景：newText 为空时 indexOf('') 恒为 0，被删的行会被插回文件开头，
+  // Changes「Session」模式再把这份错误的 old 永久落盘。
+  it('纯删除的 edit 无法定位删除位置时放弃还原，不把删掉的内容插到文件开头', () => {
+    expect(reconstructOld('l1\nl2\nl4\n', [{ oldText: 'DEL\n', newText: '' }])).toBeNull();
+  });
+
+  // 删空整个文件时空串只有一个位置，还原结果是确定的，不应一并放弃
+  it('删空整个文件的 edit 删除位置唯一，仍可还原', () => {
+    expect(reconstructOld('', [{ oldText: 'all\n', newText: '' }])).toBe('all\n');
+  });
 });
 
 describe('sameTools / sameRecord', () => {
@@ -72,6 +83,16 @@ describe('aggregateSessionChanges', () => {
     });
     expect(result.files).toEqual([{ path: 'n.ts', oldText: '', newText: 'export {}' }]);
     expect(result.snapshots).toEqual({ 'n.ts': '' });
+  });
+
+  // 真实场景：纯删除的 edit 被还原到文件开头后，错误快照经 saveSnapshots 永久落盘
+  it('纯删除 edit 无法还原时不写入错误的 Session 快照', () => {
+    const result = aggregateSessionChanges({
+      tools: [{ path: 'a.ts', edits: [{ oldText: 'DEL\n', newText: '' }], writeContent: null }],
+      snapshots: {},
+      currentByPath: { 'a.ts': 'l1\nl2\nl4\n' },
+    });
+    expect(result.snapshots).toEqual({});
   });
 
   it('读盘失败且无法还原时跳过该文件', () => {

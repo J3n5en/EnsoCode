@@ -12,6 +12,18 @@ export function findCapturerWindowSource<T extends { id: string }>(
   );
 }
 
+/**
+ * 截图 target 对应的窗口几何。target 总是同一后端 windows() 给出的 id
+ * （有原生桥时是 CG 窗口号，否则是 capturer source id），只能精确比较：
+ * 子串匹配会让排在前面的 "141" 冒充 "31415"，截图原点错了，后续点击就落到别处。
+ */
+export function findCaptureWindow<T extends { id: string }>(
+  windows: T[],
+  target: string
+): T | undefined {
+  return windows.find((window) => window.id === target);
+}
+
 export function thumbnailCropForWindow(input: {
   window: { x: number; y: number; width: number; height: number };
   display: { x: number; y: number; width: number; height: number };

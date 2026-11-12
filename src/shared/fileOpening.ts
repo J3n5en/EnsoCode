@@ -91,9 +91,6 @@ function extensionOf(rel: string): string {
 
 /**
  * 从相对路径提取规范扩展名；与目标解析共用，避免 Main 查找应用规则时采用不同的后缀定义。
- *
- * Extract the canonical extension from a relative path, sharing target resolution's suffix definition
- * so Main does not use a different definition when looking up application rules.
  */
 export function fileOpenExtension(rel: string): string {
   const extension = extensionOf(rel);
@@ -102,9 +99,6 @@ export function fileOpenExtension(rel: string): string {
 
 /**
  * 应用路径只能是单个绝对路径，不能含命令、参数或控制字符；Main 还会检查本机存在性及文件类型。
- *
- * An application path must be one absolute path without commands, arguments, or control characters;
- * Main additionally checks its local existence and file type.
  */
 export function isFileOpenApplicationPath(value: unknown): value is string {
   if (typeof value !== 'string' || !value || value.length > 4096 || value !== value.trim())
@@ -117,9 +111,6 @@ export function isFileOpenApplicationPath(value: unknown): value is string {
 
 /**
  * 严格校验整组规则：任一脏字段、重复扩展名或不合法应用路径都会拒绝整组，避免部分生效。
- *
- * Validate the entire rule set strictly: dirty fields, duplicate extensions, or invalid application
- * paths reject the whole set rather than applying only some rules.
  */
 export function parseFileOpenRules(value: unknown): FileOpenRule[] | null {
   if (!Array.isArray(value) || value.length > 256) return null;
@@ -160,8 +151,6 @@ export function parseFileOpenRules(value: unknown): FileOpenRule[] | null {
 
 /**
  * 读取不可信持久化规则时规范化为安全列表；无效配置回退到默认打开行为。
- *
- * Normalize untrusted persisted rules to a safe list; invalid configuration falls back to defaults.
  */
 export function normalizeFileOpenRules(value: unknown): FileOpenRule[] {
   return parseFileOpenRules(value) ?? [];
@@ -169,9 +158,6 @@ export function normalizeFileOpenRules(value: unknown): FileOpenRule[] {
 
 /**
  * 可执行文件、安装包和脚本不能外部打开；此扩展名守卫还必须由 Main 的执行位和真实路径检查补足。
- *
- * Executables, installers, and scripts cannot open externally; Main must supplement this extension
- * guard with executable-mode and real-path checks.
  */
 export function isExternalFileOpenBlocked(rel: string): boolean {
   const extension = extensionOf(rel);
@@ -180,9 +166,6 @@ export function isExternalFileOpenBlocked(rel: string): boolean {
 
 /**
  * 返回已知格式的内部查看器类型；PDF 由 Main 独立只读预览窗口处理，不支持的格式返回 null。
- *
- * Return the internal viewer type for known formats; Main handles PDFs in a separate read-only
- * preview window, and unsupported formats return null.
  */
 export function fileOpenViewer(rel: string): 'text' | 'markdown' | 'image' | 'pdf' | null {
   const name = (rel.split('/').at(-1) ?? '').toLowerCase();
@@ -196,9 +179,6 @@ export function fileOpenViewer(rel: string): 'text' | 'markdown' | 'image' | 'pd
 
 /**
  * 规则可以覆盖默认查看行为，但永远不能把可执行文件改为执行，也不能把脚本交给外部应用。
- *
- * Rules may override default viewing behavior, but can never execute executable files or pass
- * scripts to external applications.
  */
 export function resolveFileOpenTarget(rel: string, rules: unknown): FileOpenRule['target'] {
   const extension = extensionOf(rel);

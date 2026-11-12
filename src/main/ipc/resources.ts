@@ -1,13 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { ipcMain, shell } from '@platform';
+import { ipcMain, type RendererContents, shell } from '@platform';
 import {
   isCleanableStorageCategory,
   parseSessionCleanRequest,
   type StorageScanProgress,
 } from '@shared/resources';
 import { IPC_CHANNELS } from '@shared/types';
-import { isMainRenderer, isSettingsRenderer, localMainContents } from '../services/renderers';
+import { remoteLeaderId } from '../services/remoteRenderer/senders';
+import {
+  isMainRenderer,
+  isSettingsRenderer,
+  localMainContents,
+  rendererById,
+} from '../services/renderers';
 import {
   cancelStorageScan,
   cleanStorage,
@@ -23,6 +29,17 @@ function assertTrusted(webContentsId: number): void {
   if (!isMainRenderer(webContentsId) && !isSettingsRenderer(webContentsId)) {
     throw new Error('Untrusted sender');
   }
+}
+
+/**
+ * 执行会话清理的主界面：服务端没有本地主窗口，退到远端主界面 leader（与插件 wakeSession 同一退路）。
+ * 只交给一个页面，多个远端主界面并存时不会重复删除。
+ */
+function sessionCleanTarget(): RendererContents | null {
+  const local = localMainContents();
+  if (local) return local;
+  const leader = remoteLeaderId(false);
+  return leader === null ? null : rendererById(leader);
 }
 
 export function registerResourceHandlers(): void {
@@ -67,7 +84,7 @@ export function registerResourceHandlers(): void {
     assertTrusted(event.sender.id);
     const parsed = parseSessionCleanRequest(request);
     if (!parsed) throw new Error('Invalid session clean request');
-    const main = localMainContents();
+    const main = sessionCleanTarget();
     if (!main) throw new Error('Main window is not open');
     const requestId = randomUUID();
     const removed = await new Promise<number>((resolve, reject) => {

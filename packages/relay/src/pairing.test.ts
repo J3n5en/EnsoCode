@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { generatePairKeypair } from '../../pair/src/crypto';
+import { toBase64Url } from '../../pair/src/encoding';
 import {
   CREDENTIAL_WINDOW_MS,
   canFetchCredentials,
   claim,
+  isValidPublicKey,
   PAIR_TTL_MS,
   pairIdFromPublicKey,
   request,
@@ -78,6 +81,19 @@ describe('token 校验', () => {
     expect(tokenValid(st, 'host', '')).toBe(false);
   });
 
+  it('同长度只差一位、长度不同或只是前缀的 token 都拒绝', () => {
+    const res = claim(request(undefined, 1000, 'pk'), 1000, 'boxed', 'a');
+    if (!res.ok) throw new Error('claim failed');
+    const st = res.next;
+    const host = st.hostToken as string;
+    const flip = (s: string, i: number) =>
+      s.slice(0, i) + (s[i] === 'A' ? 'B' : 'A') + s.slice(i + 1);
+    expect(tokenValid(st, 'host', flip(host, 0))).toBe(false);
+    expect(tokenValid(st, 'host', flip(host, host.length - 1))).toBe(false);
+    expect(tokenValid(st, 'host', host.slice(0, -1))).toBe(false);
+    expect(tokenValid(st, 'host', `${host}A`)).toBe(false);
+  });
+
   it('requested 阶段任何 token 都拒绝', () => {
     expect(tokenValid(request(undefined, 1000, 'pk'), 'host', 'x')).toBe(false);
   });
@@ -112,5 +128,30 @@ describe('凭据取回窗口（publicKey 在 QR 里公开，不能长期换 toke
     expect(canFetchCredentials(st, 1000 + 86_400_000)).toBe(false);
     expect(tokenValid(st, 'host', st.hostToken as string)).toBe(true);
     expect(tokenValid(st, 'guest', st.deviceToken as string)).toBe(true);
+  });
+});
+
+describe('公钥格式（request 不鉴权且会落存储，只收真实客户端格式）', () => {
+  it('真实客户端生成的公钥都通过', () => {
+    // 与 @enso/pair startHostPairing 同一路径：toBase64Url(nacl.box.keyPair().publicKey)
+    for (let i = 0; i < 64; i++) {
+      expect(isValidPublicKey(toBase64Url(generatePairKeypair().publicKey))).toBe(true);
+    }
+  });
+
+  it('长度不对、含非 base64url 字符或带填充的一律拒绝', () => {
+    const key = toBase64Url(generatePairKeypair().publicKey);
+    const bad = [
+      '',
+      'abc123',
+      key.slice(1),
+      `${key}A`,
+      `+${key.slice(1)}`,
+      `/${key.slice(1)}`,
+      ` ${key.slice(1)}`,
+      `${key.slice(0, 42)}=`,
+      'A'.repeat(512 * 1024),
+    ];
+    for (const publicKey of bad) expect(isValidPublicKey(publicKey)).toBe(false);
   });
 });

@@ -24,7 +24,9 @@ const mocks = vi.hoisted(() => ({
   openPath: vi.fn(),
   busy: vi.fn(() => false),
   readSettings: vi.fn((): Record<string, unknown> | null => null),
-  search: vi.fn(async () => ({ ok: true as const, mode: 'names' as const, hits: [] })),
+  search: vi.fn(
+    async (..._args: unknown[]): Promise<unknown> => ({ ok: true, mode: 'names', hits: [] })
+  ),
   confirmReveal: vi.fn(async () => false),
   sessionMessages: vi.fn(async (): Promise<unknown[]> => []),
 }));
@@ -109,7 +111,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 const invoke = (channel: string, request = {}) =>
   mocks.handlers.get(channel)?.(
-    {},
+    { sender: { id: 1 } },
     {
       conversationId: 'conversation',
       projectId: 'project',
@@ -310,6 +312,27 @@ it('本地目录链接打开目录', async () => {
   expect(await invoke(IPC_CHANNELS.FILES_REVEAL, { rel: '中文 空格' })).toEqual({ ok: true });
   expect(mocks.openPath).toHaveBeenCalledWith(dir);
   expect(mocks.showItemInFolder).not.toHaveBeenCalled();
+});
+// 审计 J1：克隆来的仓库带 tools/Helper.app，文件树「在访达中显示」走目录分支 openPath，macOS 会直接启动应用包
+it('应用包目录只定位，不交给 openPath 启动', async () => {
+  const bundle = path.join(root, 'tools', 'Helper.app');
+  mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+  expect(await invoke(IPC_CHANNELS.FILES_REVEAL, { rel: 'tools/Helper.app' })).toEqual({
+    ok: true,
+  });
+  expect(mocks.showItemInFolder).toHaveBeenCalledWith(bundle);
+  expect(mocks.openPath).not.toHaveBeenCalled();
+});
+// 审计 J1：rel 看不出应用包（软链接、尾斜杠）时，要按真实路径判定
+it('指向应用包的软链接与带尾斜杠的路径按真实路径判定，同样只定位', async () => {
+  const bundle = path.join(root, 'tools', 'Helper.app');
+  mkdirSync(path.join(bundle, 'Contents'), { recursive: true });
+  symlinkSync(bundle, path.join(root, 'tools', 'Helper'));
+  for (const rel of ['tools/Helper', 'tools/Helper.app/']) {
+    expect(await invoke(IPC_CHANNELS.FILES_REVEAL, { rel })).toEqual({ ok: true });
+  }
+  expect(mocks.showItemInFolder.mock.calls).toEqual([[bundle], [bundle]]);
+  expect(mocks.openPath).not.toHaveBeenCalled();
 });
 it('本地文件链接目标不存在时明确失败', async () => {
   expect(await invoke(IPC_CHANNELS.FILES_REVEAL, { rel: 'missing.md' })).toEqual({
@@ -519,8 +542,40 @@ it('本地搜索 cwd 来自会话而不是请求路径', async () => {
       projectId: 'project',
       query: 'chat',
       mode: 'names',
-    })
+    }),
+    undefined,
+    expect.any(AbortSignal)
   );
+});
+// 审计 F6：同一会话每次按键（150ms 防抖）都发新搜索，Main 要取消上一个 rg；别的会话、别的窗口互不影响
+it('同一窗口同一会话的新搜索取消上一个，其他会话与窗口的搜索不受影响', async () => {
+  const finishAll: Array<() => void> = [];
+  mocks.search.mockImplementation(
+    (_cwd, _request, _run, signal) =>
+      new Promise((resolve) => {
+        finishAll.push(() => resolve({ ok: true, mode: 'content', hits: [], truncated: false }));
+        (signal as AbortSignal | undefined)?.addEventListener('abort', () =>
+          resolve({ ok: false, error: 'cancelled' })
+        );
+      })
+  );
+  const search = (sender: number, request: Record<string, unknown>) =>
+    mocks.handlers.get(IPC_CHANNELS.FILES_SEARCH_WORKSPACE)?.(
+      { sender: { id: sender } },
+      { conversationId: 'conversation', projectId: 'project', mode: 'content', ...request }
+    );
+  const settled = (promise: Promise<unknown> | undefined) =>
+    Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve('pending'), 50))]);
+  const first = search(1, { query: 'a' });
+  const otherConversation = search(1, { conversationId: 'other', query: 'a' });
+  const otherWindow = search(2, { query: 'a' });
+  const latest = search(1, { query: 'ab' });
+  expect(await settled(first)).toEqual({ ok: false, error: 'cancelled' });
+  expect(await settled(otherConversation)).toBe('pending');
+  expect(await settled(otherWindow)).toBe('pending');
+  expect(await settled(latest)).toBe('pending');
+  for (const finish of finishAll) finish();
+  await Promise.all([otherConversation, otherWindow, latest]);
 });
 
 describe('工作区外文件只定位（#157）', () => {
@@ -589,5 +644,140 @@ describe('工作区外文件只定位（#157）', () => {
     mocks.project = { ...mocks.project, kind: 'ssh' };
     expect(await revealExternal(file)).toEqual({ ok: false, error: 'unsupported' });
     expect(mocks.showItemInFolder).not.toHaveBeenCalled();
+  });
+});
+
+describe('SSH 文件监听', () => {
+  function watchSender(id: number) {
+    const sender = {
+      id,
+      destroyed: false,
+      once: vi.fn(),
+      send: vi.fn(),
+      isDestroyed: () => sender.destroyed,
+    };
+    return sender;
+  }
+  const watch = (channel: string, sender: ReturnType<typeof watchSender>) =>
+    mocks.handlers.get(channel)?.(
+      { sender },
+      { conversationId: 'conversation', projectId: 'project', rel: 'file' }
+    );
+  const cksumCalls = () => mocks.exec.mock.calls.filter(([args]) => args[0] === 'cksum');
+  /** 远端路径校验（bash realpath 脚本）挂起，由测试决定何时放行；cksum 照常返回 */
+  function holdPathCheck(): () => void {
+    let pass = () => {};
+    mocks.exec.mockImplementation((args: string[]) =>
+      args[0] === 'bash'
+        ? new Promise((resolve) => {
+            pass = () => resolve({ code: 0, stdout: '', stderr: '' });
+          })
+        : Promise.resolve({ code: 0, stdout: '1 2 file\n', stderr: '' })
+    );
+    return () => pass();
+  }
+
+  beforeEach(() => {
+    mocks.project.kind = 'ssh';
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // 审计 J4：exec 超时或 ssh 起不来会 reject；轮询没兜底就成了未处理 rejection，无界面服务端（Node ≥22）默认直接退出
+  it('轮询时 ssh 失败不产生未处理的 rejection', async () => {
+    const rejections: unknown[] = [];
+    const record = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', record);
+    const sender = watchSender(201);
+    mocks.exec.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'cksum') throw new Error('ssh command timed out after 10000ms');
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    try {
+      expect(await watch(IPC_CHANNELS.FILES_WATCH_START, sender)).toEqual({ ok: true });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(cksumCalls()).toHaveLength(1);
+      expect(rejections).toEqual([]);
+    } finally {
+      await watch(IPC_CHANNELS.FILES_WATCH_STOP, sender);
+      process.off('unhandledRejection', record);
+    }
+  });
+
+  // 审计 J4：远端卡住时一轮要等 10s 才超时，轮询每 2s 一轮，没有在途标记会叠出一串 ssh 进程
+  it('上一轮还没回来时不叠加新的 ssh 轮询', async () => {
+    vi.useFakeTimers();
+    const sender = watchSender(202);
+    mocks.exec.mockImplementation((args: string[]) =>
+      args[0] === 'cksum'
+        ? new Promise(() => {})
+        : Promise.resolve({ code: 0, stdout: '', stderr: '' })
+    );
+    try {
+      expect(await watch(IPC_CHANNELS.FILES_WATCH_START, sender)).toEqual({ ok: true });
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(cksumCalls()).toHaveLength(1);
+    } finally {
+      await watch(IPC_CHANNELS.FILES_WATCH_STOP, sender);
+    }
+  });
+
+  // 审计 J4：路径校验是一次 ssh 往返，期间关掉标签时 stop 先到、释放的是空，之后建立的轮询再也没人释放
+  it('路径校验期间到达的 stop 作废这次监听，不留下轮询', async () => {
+    vi.useFakeTimers();
+    const sender = watchSender(203);
+    const passCheck = holdPathCheck();
+    try {
+      const started = watch(IPC_CHANNELS.FILES_WATCH_START, sender);
+      expect(await watch(IPC_CHANNELS.FILES_WATCH_STOP, sender)).toEqual({ ok: true });
+      passCheck();
+      await started;
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(cksumCalls()).toEqual([]);
+    } finally {
+      await watch(IPC_CHANNELS.FILES_WATCH_STOP, sender);
+    }
+  });
+
+  // 同一隐患的另一条路：路径校验期间窗口销毁，destroyed 钩子只清得到已建立的监听
+  it('路径校验期间窗口销毁，不再建立轮询', async () => {
+    vi.useFakeTimers();
+    const sender = watchSender(204);
+    const passCheck = holdPathCheck();
+    try {
+      const started = watch(IPC_CHANNELS.FILES_WATCH_START, sender);
+      sender.destroyed = true;
+      passCheck();
+      await started;
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(cksumCalls()).toEqual([]);
+    } finally {
+      await watch(IPC_CHANNELS.FILES_WATCH_STOP, sender);
+    }
+  });
+
+  it('路径校验通过后照常轮询，内容变化时推送 change，stop 后停止', async () => {
+    vi.useFakeTimers();
+    const sender = watchSender(205);
+    let sum = '1 2 file\n';
+    mocks.exec.mockImplementation(async (args: string[]) =>
+      args[0] === 'cksum'
+        ? { code: 0, stdout: sum, stderr: '' }
+        : { code: 0, stdout: '', stderr: '' }
+    );
+    expect(await watch(IPC_CHANNELS.FILES_WATCH_START, sender)).toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+    sum = '3 4 file\n';
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(sender.send).toHaveBeenCalledWith(IPC_CHANNELS.FILES_WATCH_EVENT, {
+      conversationId: 'conversation',
+      rel: 'file',
+      type: 'change',
+    });
+    expect(await watch(IPC_CHANNELS.FILES_WATCH_STOP, sender)).toEqual({ ok: true });
+    const calls = cksumCalls().length;
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(cksumCalls()).toHaveLength(calls);
   });
 });

@@ -1,5 +1,8 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   dispatchHost: { resolveSubagentModel: undefined as unknown },
@@ -206,6 +209,7 @@ vi.mock('./worktree', () => ({
   removeRegisteredWorktree: mocks.removeRegisteredWorktree,
 }));
 
+import { app } from 'electron';
 import { resolveSubagentModelSelection, rewindSession } from '../services/agentHost';
 import { getSourceAuthorityRegistry, registerAgentHandlers } from './agent';
 
@@ -843,6 +847,232 @@ describe('agent IPC Main identity boundary', () => {
         ok: false,
       });
     });
+  });
+
+  // 审计 J5a：FILES_READ 曾收任意磁盘路径原样读出（≤2MB），files.read('<userData>/settings.json')
+  // 直接拿到明文 key；远端（手机/远程桌面）同样可调，绕过 SETTINGS_READ 的脱敏。
+  // 现在只收 { conversationId, projectId, rel }，根目录由 Main 按会话权威记录推导。
+  describe('FILES_READ 只按会话权威 cwd 读工作区内文件', () => {
+    let outside: string;
+    let root: string;
+    const read = (request: unknown) =>
+      mocks.handlers.get(IPC_CHANNELS.FILES_READ)?.(event, request);
+    const mockProject = (kind?: 'ssh') => {
+      vi.spyOn(getSourceAuthorityRegistry()!, 'project').mockImplementation((id) =>
+        id === 'p'
+          ? { projectId: 'p', canonicalPath: root, state: 'active', version: 1, kind }
+          : undefined
+      );
+    };
+
+    beforeEach(() => {
+      outside = mkdtempSync(path.join(os.tmpdir(), 'enso-files-read-'));
+      root = path.join(outside, 'repo');
+      mkdirSync(path.join(root, 'src'), { recursive: true });
+      writeFileSync(path.join(root, 'src', 'a.ts'), 'export const a = 1;\n');
+      writeFileSync(path.join(outside, 'settings.json'), '{"apiKey":"sk-secret"}');
+      symlinkSync(outside, path.join(root, 'escape'));
+      vi.spyOn(getSourceAuthorityRegistry()!, 'conversation').mockImplementation((id) =>
+        id === 'conv-files'
+          ? { conversationId: id, projectId: 'p', kind: 'root', lifecycle: 'ready', version: 1 }
+          : undefined
+      );
+      mockProject();
+    });
+
+    afterEach(() => {
+      rmSync(outside, { recursive: true, force: true });
+    });
+
+    it('工作区内相对路径按会话权威 cwd 读出', () => {
+      expect(read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })).toBe(
+        'export const a = 1;\n'
+      );
+    });
+
+    it('渲染层直接传磁盘路径一律不读', () => {
+      expect(read(path.join(outside, 'settings.json'))).toBeNull();
+    });
+
+    it('请求额外带的路径字段不被采信，只认 rel', () => {
+      const secret = path.join(outside, 'settings.json');
+      expect(
+        read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts', path: secret })
+      ).toBe('export const a = 1;\n');
+    });
+
+    it.each([
+      ['不存在的会话', { conversationId: 'gone', projectId: 'p', rel: 'src/a.ts' }],
+      [
+        'projectId 与权威记录不符',
+        { conversationId: 'conv-files', projectId: 'x', rel: 'src/a.ts' },
+      ],
+      ['../ 逃出工作区', { conversationId: 'conv-files', projectId: 'p', rel: '../settings.json' }],
+      [
+        '工作区内符号链接指向外部',
+        { conversationId: 'conv-files', projectId: 'p', rel: 'escape/settings.json' },
+      ],
+    ])('%s 时不读盘', (_case, request) => {
+      expect(read(request)).toBeNull();
+    });
+
+    it('rel 是绝对路径时不读盘', () => {
+      const rel = path.join(outside, 'settings.json');
+      expect(read({ conversationId: 'conv-files', projectId: 'p', rel })).toBeNull();
+    });
+
+    it('SSH 会话的路径不在本机，不读本机同名文件', () => {
+      mockProject('ssh');
+      expect(read({ conversationId: 'conv-files', projectId: 'p', rel: 'src/a.ts' })).toBeNull();
+    });
+
+    // TaskNoteRow 从任务完成提示里取出完整日志的绝对路径再读（审计漏掉的第三个调用方）。
+    // 这个路径等价于任务 id：只认 worker 写日志的 <userData>/agent/pi-agent/task-logs/task-*.log
+    describe('后台任务完整日志', () => {
+      let logDir: string;
+
+      beforeEach(() => {
+        vi.mocked(app.getPath).mockReturnValue(outside);
+        logDir = path.join(outside, 'agent', 'pi-agent', 'task-logs');
+        mkdirSync(logDir, { recursive: true });
+        writeFileSync(path.join(logDir, 'task-3-lx9f2k.log'), 'build ok\n');
+        writeFileSync(path.join(logDir, 'notes.log'), 'not a task log');
+      });
+
+      afterEach(() => {
+        vi.mocked(app.getPath).mockReturnValue('/tmp');
+      });
+
+      it('task-logs 目录下的任务日志可读', () => {
+        expect(read(path.join(logDir, 'task-3-lx9f2k.log'))).toBe('build ok\n');
+      });
+
+      it.each([
+        ['文件名不是任务日志', () => path.join(logDir, 'notes.log')],
+        ['借 ../ 跳出 task-logs', () => `${logDir}/../../../settings.json`],
+        ['task-logs 的子目录', () => `${logDir}/nested/task-3-lx9f2k.log`],
+      ])('%s 时不读盘', (_case, file) => {
+        expect(read(file())).toBeNull();
+      });
+    });
+  });
+
+  // 审计 J5c：cwd 已按权威记录覆写，resumeFile 却只做 existsSync 就交给 worker 的
+  // SessionManager.open（读入并追加写）；渲染层/远端可借此读写 sessions 目录外的任意文件，
+  // 或让新会话改写别人的历史。
+  describe('AGENT_SPAWN 的 resumeFile 只认权威记录', () => {
+    const sessionDir = '/tmp/agent/sessions';
+    const own = `${sessionDir}/2026-11-01T00-00-00-000Z_own.jsonl`;
+    const other = `${sessionDir}/2026-11-01T00-00-00-000Z_other.jsonl`;
+    const spawn = (resumeFile?: string) =>
+      mocks.handlers.get(IPC_CHANNELS.AGENT_SPAWN)!(event, {
+        sessionId: 'resume-target',
+        providerId: 'provider',
+        modelId: 'model',
+        cwd: '/repo',
+        ...(resumeFile === undefined ? {} : { resumeFile }),
+      });
+    const bind = (sessionFile?: string, claimedBy?: { conversationId: string; file: string }) => {
+      const authority = getSourceAuthorityRegistry()!;
+      const conversation = {
+        conversationId: 'resume-target',
+        projectId: 'p',
+        kind: 'root' as const,
+        lifecycle: sessionFile ? ('ready' as const) : ('draft' as const),
+        version: 1,
+        ...(sessionFile ? { sessionFile } : {}),
+      };
+      vi.spyOn(authority, 'conversation').mockImplementation((id) =>
+        id === conversation.conversationId ? conversation : undefined
+      );
+      vi.spyOn(authority, 'project').mockReturnValue({
+        projectId: 'p',
+        canonicalPath: '/repo',
+        state: 'active',
+        version: 1,
+      });
+      vi.spyOn(authority, 'projection').mockReturnValue({
+        projects: [],
+        conversations: [
+          conversation,
+          ...(claimedBy
+            ? [
+                {
+                  conversationId: claimedBy.conversationId,
+                  projectId: 'p',
+                  kind: 'root' as const,
+                  lifecycle: 'ready' as const,
+                  version: 1,
+                  sessionFile: claimedBy.file,
+                },
+              ]
+            : []),
+        ],
+      });
+    };
+    const resumedFile = () => mocks.spawnSession.mock.calls[0]?.[1].resumeFile;
+
+    it('已绑定会话文件时恢复权威文件，渲染层换成别的会话文件不被采信', async () => {
+      bind(own);
+      await spawn(other);
+      expect(mocks.spawnSession).toHaveBeenCalledTimes(1);
+      expect(resumedFile()).toBe(own);
+    });
+
+    it('与权威记录一致的正常恢复原样放行', async () => {
+      bind(own);
+      await spawn(own);
+      expect(resumedFile()).toBe(own);
+    });
+
+    it('导入外部会话后的首次 spawn：sessions 目录下未被占用的 pi 会话文件可恢复', async () => {
+      // 导入只在渲染层记下 sessionFile，权威记录要等 parent-ready 才绑定
+      bind(undefined);
+      await spawn(other);
+      expect(resumedFile()).toBe(other);
+    });
+
+    it('旧版迁移的 realpath 记录：渲染层同名文件落在 sessions 目录内时照常恢复', async () => {
+      // 登记表从旧设置迁移时存 realpath；userData 在符号链接下（如 /tmp → /private/tmp）目录部分对不上
+      bind(`/private${own}`);
+      await spawn(own);
+      expect(resumedFile()).toBe(own);
+    });
+
+    it('不带 resumeFile 时仍是新会话，不替渲染层注入权威文件', async () => {
+      bind(own);
+      await spawn();
+      expect(mocks.spawnSession).toHaveBeenCalledTimes(1);
+      expect(resumedFile()).toBeUndefined();
+    });
+
+    it.each([
+      ['sessions 目录外的任意文件', undefined, '/etc/passwd'],
+      ['../ 穿越出 sessions 目录', undefined, `${sessionDir}/../../../etc/passwd`],
+      ['child 的 enso- safe journal', undefined, `${sessionDir}/enso-parent__cw-1-gen.jsonl`],
+      ['sessions 子目录里的子运行目录文件', undefined, `${sessionDir}/child-runs/parent.jsonl`],
+      ['持久化记录里的路径逃出 sessions 目录', '/etc/passwd', '/etc/passwd'],
+      ['realpath 记录与渲染层的文件名不一致', `/private${own}`, other],
+    ])('%s：拒绝且不交给 worker', async (_case, bound, requested) => {
+      bind(bound);
+      await expect(spawn(requested)).resolves.toMatchObject({ ok: false });
+      expect(mocks.spawnSession).not.toHaveBeenCalled();
+    });
+
+    it('导入路径已被其他会话占用：拒绝，不能借新会话改写别人的历史', async () => {
+      bind(undefined, { conversationId: 'someone-else', file: other });
+      await expect(spawn(other)).resolves.toMatchObject({ ok: false });
+      expect(mocks.spawnSession).not.toHaveBeenCalled();
+    });
+  });
+
+  it('换审批档位时读凭据失败返回结构化错误，不把异常抛过 IPC', async () => {
+    // 与 AGENT_SET_MODEL 同口径。渲染层只 .then 不 .catch：抛出会让乐观切换的档位留在界面上
+    mocks.currentIdentity.mockReturnValue({ sessionId: 'conv-1', generation: 'gen-1' });
+    mocks.credentials.mockRejectedValueOnce(new Error('keychain locked'));
+    await expect(
+      mocks.handlers.get(IPC_CHANNELS.AGENT_SET_APPROVAL_MODE)!(event, 'conv-1', 'full')
+    ).resolves.toEqual({ ok: false, error: 'model credentials unavailable' });
   });
 
   it('rejects dispatch payloads that forge profile, target, or reserved identity fields', async () => {

@@ -32,6 +32,11 @@ describe('isReadOnlyCommand', () => {
     'node --version && git -C /repo log --oneline -3 2>/dev/null | head -5',
     'python3 --version',
     'pnpm -v',
+    // 写参数识别放宽到组合短参数后，不含写字母的组合仍是只读
+    'sort -rn a.txt',
+    'fd -H ts src',
+    "awk -F, '{print $1}' a.csv",
+    '/bin/ls -la',
   ])('只读：%s', (cmd) => {
     expect(isReadOnlyCommand(cmd)).toBe(true);
   });
@@ -96,6 +101,16 @@ describe('isReadOnlyCommand', () => {
     'node --version --eval x',
     'git -C',
     'python3 script.py',
+    // 组合短参数 / 粘连参数 / 被空白拆开的 system( / 与只读工具同名的项目脚本
+    'sort -uo out.txt in.txt',
+    'fd -Hx rm {}',
+    'fd -HX rm',
+    'awk -fevil.awk a.txt',
+    'awk \'BEGIN{system ("rm -rf x")}\'',
+    './scripts/cat a.txt',
+    '/tmp/evil/cat a.txt',
+    'yq -s .a f.yml',
+    'yq --split-exp .a f.yml',
   ])('非只读：%s', (cmd) => {
     expect(isReadOnlyCommand(cmd)).toBe(false);
   });
