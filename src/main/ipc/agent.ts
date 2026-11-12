@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { app, ipcMain, powerMonitor, type RendererContents } from '@platform';
 import { browserSessionKey } from '@shared/bots/browser';
@@ -663,14 +663,25 @@ function filesReadCwd(conversationId: string): string | null {
 
 /**
  * 后台任务完成提示里给出的完整日志路径（TaskNoteRow 解析后回传）。该路径等价于任务 id：
- * 只认 worker 写日志的 <userData>/agent/pi-agent/task-logs/ 目录下 task-<序号>-<时间戳>.log。
+ * 只取文件名（兼容 Windows 盘符），必须是 task-logs 目录里的普通文件，符号链接与逃逸一律拒绝。
  */
 function taskLogFile(raw: string): string | null {
+  if (raw.includes('\0')) return null;
+  const name = raw.split(/[/\\]/).at(-1) ?? '';
+  if (!/^task-\d+-[0-9a-z]+\.log$/.test(name)) return null;
   const dir = path.join(app.getPath('userData'), 'agent', 'pi-agent', 'task-logs');
-  const resolved = path.resolve(raw);
-  return path.dirname(resolved) === dir && /^task-\d+-[0-9a-z]+\.log$/.test(path.basename(resolved))
-    ? resolved
-    : null;
+  const file = path.join(dir, name);
+  try {
+    const listed = lstatSync(file);
+    if (!listed.isFile() || listed.isSymbolicLink()) return null;
+    const root = realpathSync(dir);
+    const real = realpathSync(file);
+    const rel = path.relative(root, real);
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null;
+    return real;
+  } catch {
+    return null;
+  }
 }
 
 function readBounded(file: string | null): string | null {

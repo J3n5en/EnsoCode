@@ -1691,7 +1691,7 @@ function TaskNoteRow({ item }: { item: Extract<TimelineItem, { kind: 'task-note'
   const match = /^Background task (\S+) finished \((.+?), ran (.+?)\)/.exec(item.summary);
   const text = match ? `${match[1]} · ${match[2]} · ${match[3]}` : item.summary;
   const logPath =
-    /(?:read (\/.+?\.log) for the complete log|Full log: (\/\S+?\.log))/
+    /(?:read ((?:\/|[A-Za-z]:[\\/]).+?\.log) for the complete log|Full log: ((?:\/|[A-Za-z]:[\\/])\S+?\.log))/
       .exec(item.detail)
       ?.slice(1)
       .find(Boolean) ?? null;

@@ -1081,10 +1081,29 @@ describe('agent IPC Main identity boundary', () => {
         await expect(read(path.join(logDir, 'task-3-lx9f2k.log'))).resolves.toBe('build ok\n');
       });
 
+      it('Windows 风格路径只取文件名，仍读 task-logs 里的同名日志', async () => {
+        await expect(read('C:\\Users\\x\\AppData\\task-logs\\task-3-lx9f2k.log')).resolves.toBe(
+          'build ok\n'
+        );
+      });
+
+      it('任务日志若是符号链接则拒绝', async () => {
+        symlinkSync(path.join(outside, 'settings.json'), path.join(logDir, 'task-9-abcd.log'));
+        await expect(read(path.join(logDir, 'task-9-abcd.log'))).resolves.toBeNull();
+        await expect(read('C:\\Users\\x\\task-9-abcd.log')).resolves.toBeNull();
+      });
+
       it.each([
         ['文件名不是任务日志', () => path.join(logDir, 'notes.log')],
         ['借 ../ 跳出 task-logs', () => `${logDir}/../../../settings.json`],
-        ['task-logs 的子目录', () => `${logDir}/nested/task-3-lx9f2k.log`],
+        [
+          '只放在子目录里的任务日志',
+          () => {
+            mkdirSync(path.join(logDir, 'nested'), { recursive: true });
+            writeFileSync(path.join(logDir, 'nested', 'task-8-nest.log'), 'nested\n');
+            return `${logDir}/nested/task-8-nest.log`;
+          },
+        ],
       ])('%s 时不读盘', async (_case, file) => {
         await expect(read(file())).resolves.toBeNull();
       });
