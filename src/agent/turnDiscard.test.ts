@@ -109,6 +109,13 @@ describe('turnDiscardEdits', () => {
     expect(trace).toContain('d1');
     expect(trace).toContain('chip news');
   });
+
+  it('不填原因时痕迹只留 id', () => {
+    const [edit] = turnDiscardEdits({ triggers: ['d1'], run: [] }, '');
+    const trace = (edit!.replacement as { content: string }).content;
+    expect(trace).toContain('[Discarded turn input d1]');
+    expect(trace).not.toContain('d1:');
+  });
 });
 
 describe('recallDiscarded', () => {

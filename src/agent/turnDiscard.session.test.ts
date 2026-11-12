@@ -149,6 +149,28 @@ it('丢弃本轮后立即结束，后续请求只见痕迹不见投递原文与�
   expect(raw).toContain('NVIDIA-CHIP-NEWS');
 });
 
+it('reason 可省略：照常丢弃；过长报错且不丢', async () => {
+  const { manager, requests, deliver } = await setup([
+    reply([{ type: 'toolCall', id: 'd1', name: 'turn_discard', arguments: {} }]),
+    reply([
+      { type: 'toolCall', id: 'd2', name: 'turn_discard', arguments: { reason: 'x'.repeat(301) } },
+    ]),
+    reply([{ type: 'text', text: 'ok' }]),
+    reply([{ type: 'text', text: 'handled' }]),
+  ]);
+  await deliver('NVIDIA-CHIP-NEWS');
+  await deliver('SECOND-NEWS');
+  await deliver('EnsoCode bug report');
+  const last = JSON.stringify(requests.at(-1)!.messages);
+  expect(last).not.toContain('NVIDIA-CHIP-NEWS');
+  expect(last).toContain('SECOND-NEWS');
+  const traces = manager
+    .getBranch()
+    .filter((entry) => entry.type === 'context_edit' && entry.replacement !== null);
+  expect(traces).toHaveLength(1);
+  expect(last).toContain('[Discarded turn input');
+});
+
 const use = (name: string) => reply([{ type: 'toolCall', id: `p-${name}`, name, arguments: {} }]);
 
 it('只读工具查过再丢：查询结果连同投递一起离开上下文', async () => {

@@ -32,6 +32,8 @@ const PASSIVE = new Set([
   'context_edit',
 ]);
 
+const REASON_MAX = 300;
+
 const NO_TRIGGER = `${DISCARD} found no user message or plugin delivery that started this turn.`;
 
 /** 不改动环境的内置工具；其余工具看 readOnlyHint，bash 看命令 */
@@ -118,7 +120,7 @@ export function turnDiscardEdits(plan: DiscardPlan, reason: string) {
       type: 'context_edit' as const,
       targetId,
       replacement: {
-        content: `[Discarded turn input ${targetId}: ${reason}] Original hidden from context; call ${RECALL} with this id if needed.`,
+        content: `[Discarded turn input ${targetId}${reason ? `: ${reason}` : ''}] Original hidden from context; call ${RECALL} with this id if needed.`,
       },
     })),
     ...plan.run.map((targetId) => ({
@@ -213,20 +215,25 @@ export function createTurnDiscardTools(state: TurnDiscardState): ToolDefinition[
       parameters: {
         type: 'object',
         properties: {
-          reason: { type: 'string', description: 'One short line: why it needs no action' },
+          reason: {
+            type: 'string',
+            description: `Optional, one line (max ${REASON_MAX} chars): what this was and why it needs nothing; add any conclusion from your read-only checks worth remembering. Stays in later context.`,
+          },
         },
-        required: ['reason'],
       } as unknown as ToolDefinition['parameters'],
       async execute(_id, params, _signal, _onUpdate, ctx) {
         const reason = String((params as { reason?: string }).reason ?? '').trim();
-        if (!reason) throw new Error('reason is required');
+        if (reason.length > REASON_MAX)
+          throw new Error(
+            `reason is longer than ${REASON_MAX} characters; shorten it to one line.`
+          );
         const plan = planTurnDiscard(
           ctx.sessionManager.getBranch() as unknown as BranchEntry[],
           state.readOnly
         );
         if (typeof plan === 'string') throw new Error(plan);
         return {
-          content: text(`Turn discarded: ${reason}`),
+          content: text(reason ? `Turn discarded: ${reason}` : 'Turn discarded.'),
           details: { reason, triggers: plan.triggers },
           terminate: true,
         };

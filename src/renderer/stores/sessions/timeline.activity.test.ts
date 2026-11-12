@@ -1057,6 +1057,14 @@ describe('foldTimeline 丢弃本轮折叠（插件投递 → turn_discard）', (
     expect(row.tools.map((tool) => tool.name)).toEqual(['plugin_enso-tgclient__tg_get_messages']);
   });
 
+  it('未填原因时行内原因为空', () => {
+    const items = [
+      plugin('p1', 'news'),
+      { ...toolItem('d', 'turn_discard'), output: 'Turn discarded.' } as TimelineItem,
+    ];
+    expect((foldTimeline(items, false, new Set())[0] as Discarded).reason).toBe('');
+  });
+
   it('turn_discard 未完成、失败或前面不是插件投递时不折叠', () => {
     const running = [plugin('p', 'x'), discard('d', 'running')];
     expect(keys(foldTimeline(running, true, new Set()))).toEqual(['p', 'd']);

@@ -1758,7 +1758,7 @@ function pairExploreFolds(
   return result;
 }
 
-const TURN_DISCARD_HEAD = /^Turn discarded:\s*/;
+const TURN_DISCARD_HEAD = /^Turn discarded[:.]?\s*/;
 
 /** 连续插件投递到成功的 turn_discard（其间只有思考/正文/只读工具）收成一行 */
 function pairTurnDiscards(
@@ -1788,7 +1788,8 @@ function pairTurnDiscards(
         result.push({
           kind: 'discarded-turn',
           key,
-          reason: (item.output ?? '').replace(TURN_DISCARD_HEAD, '').trim() || item.summary,
+          reason:
+            item.output != null ? item.output.replace(TURN_DISCARD_HEAD, '').trim() : item.summary,
           pluginId: plugins[0].pluginId,
           pluginName: plugins[0].pluginName,
           messages: plugins.map((row) => row.text),
