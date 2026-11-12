@@ -1909,7 +1909,10 @@ export type RendererAgentEvent =
       | { type: 'session-reloaded' }
     >
   | RendererChildLifecycleEvent
-  | { type: 'worker-exited' };
+  | WorkerExitedEvent;
+
+/** detail：Main 汇总的退出原因（退出码 / worker 致命异常首行） */
+export type WorkerExitedEvent = { type: 'worker-exited'; detail?: string };
 
 export function workspaceBranchChangedNote(branch: string): string {
   return `<workspace-branch-changed>\nThe current workspace is now on Git branch ${JSON.stringify(branch)}. The directory is unchanged, but file contents may differ. Re-read relevant files before relying on earlier observations or edits. This is background information only, not a task or goal.\n</workspace-branch-changed>`;

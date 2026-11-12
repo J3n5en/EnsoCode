@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { agentWorkerPath, app, resourcesPath, utilityProcess, type WorkerProcess } from '@platform';
+import { describeAgentWorkerExit } from '@shared/agentWorkerExit';
 import {
   type ApprovalAllowThreshold,
   DEFAULT_APPROVAL_ALLOW_THRESHOLD,
@@ -78,6 +79,7 @@ import type {
   VirtualClassifierCredentials,
   VirtualSpawnClassifier,
   WorkerCustomProvider,
+  WorkerExitedEvent,
 } from '@shared/types/agent';
 import { parseAgentCommand, parseAgentWorkerEvent, THINKING_LEVELS } from '@shared/types/agent';
 import type { SubagentModelEntry } from '@shared/types/assets';
@@ -117,6 +119,7 @@ import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
 import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
+import { appendAgentWorkerExitLog, takeAgentWorkerCrash } from './agentWorkerExit';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools } from './builtinToolScopes';
 import type { ResolvedPlugins } from './claudePlugins';
@@ -271,7 +274,7 @@ export async function selectOauthPoolAccount(
 }
 /** worker 已过 'spawn'：在此之前 postMessage 不保证送达（含已 fork 未 spawn 的窗口） */
 let workerReady = false;
-let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
+let onEvent: ((event: AgentWorkerEvent | WorkerExitedEvent) => void) | null = null;
 /** worker 就绪前到达的快照请求，spawn 后补发。true = 全量，string = 单会话。 */
 let snapshotPending: false | true | string = false;
 /** worker 已 fork 未 spawn 窗口内到达的命令：postMessage 不保证送达，spawn 后按序补发 */
@@ -298,7 +301,7 @@ export function setPinnedSessions(source: 'viewed' | 'pair', sessionIds: readonl
 }
 
 export function setAgentEventListener(
-  listener: (event: AgentWorkerEvent | { type: 'worker-exited' }) => void
+  listener: (event: AgentWorkerEvent | WorkerExitedEvent) => void
 ): void {
   onEvent = listener;
 }
@@ -312,11 +315,13 @@ export function customWorkflowPresetDir(): string {
   return path.join(agentDataDir(), 'workflows');
 }
 
+const AGENT_WORKER_SERVICE_NAME = 'enso-agent-worker';
+
 export function startAgentWorker(): void {
   if (worker) return;
   const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
-    serviceName: 'enso-agent-worker',
+    serviceName: AGENT_WORKER_SERVICE_NAME,
     env: {
       ...process.env,
       ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
@@ -334,8 +339,10 @@ export function startAgentWorker(): void {
   });
   worker = child;
   workerExited = false;
+  let childPid: number | undefined;
 
   child.once('spawn', () => {
+    childPid = child.pid;
     workerReady = true;
     // fork 前 ProxyConfig 的 set-proxy-env 因 worker 不存在被丢；spawn 后按 main 当前 env 补发一次
     child.postMessage({
@@ -409,13 +416,21 @@ export function startAgentWorker(): void {
       onEvent?.(event);
     }
   });
-  child.on('exit', () => {
+  child.on('exit', (code: unknown) => {
     if (worker === child) {
       worker = null;
       workerReady = false;
       workerExited = true;
       parentInstanceIds.clear();
     }
+    const dataDir = agentDataDir();
+    const crash = takeAgentWorkerCrash(dataDir, childPid);
+    const detail = describeAgentWorkerExit(code, crash);
+    console.error(`[agent] worker exited pid=${childPid ?? '?'} ${detail}`);
+    appendAgentWorkerExitLog(
+      dataDir,
+      `exit pid=${childPid ?? '?'} ${detail}${crash?.stack ? `\n${crash.stack}` : ''}`
+    );
     pendingReloads.failAll('agent worker exited');
     workspaceLocks.failAll('agent worker exited');
     pluginMcp.failAll('agent worker exited');
@@ -427,8 +442,21 @@ export function startAgentWorker(): void {
       pendingChoices.delete(id);
       p.reject(new Error('agent worker exited'));
     }
-    onEvent?.({ type: 'worker-exited' });
+    onEvent?.({ type: 'worker-exited', detail });
   });
+}
+
+/** child-process-gone 能区分 crashed / oom / killed，和 exit 先后不定，单独落同一份日志 */
+export function recordAgentWorkerGone(details: {
+  serviceName?: string;
+  reason: string;
+  exitCode: number;
+}): void {
+  if (details.serviceName !== AGENT_WORKER_SERVICE_NAME) return;
+  appendAgentWorkerExitLog(
+    agentDataDir(),
+    `gone reason=${details.reason} ${describeAgentWorkerExit(details.exitCode, null)}`
+  );
 }
 
 export function stopAgentWorker(): void {

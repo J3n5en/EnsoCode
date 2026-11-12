@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { parseAgentCommand } from '@shared/types/agent';
 import { rejectUnparsableCommand } from './commandRejection';
+import { installCrashRecord } from './crashRecord';
 import { installPiCursorExecHook } from './cursor/installHook';
 import { bootstrapWorkerProxyFromEnv } from './proxyEnv';
 import { SessionSupervisor } from './supervisor';
@@ -17,6 +18,7 @@ const dataDir = process.env.ENSO_AGENT_DATA_DIR;
 if (!dataDir) {
   throw new Error('ENSO_AGENT_DATA_DIR is required');
 }
+installCrashRecord(dataDir);
 
 const supervisor = new SessionSupervisor({
   emit: (event) => port.postMessage(event),

@@ -1018,6 +1018,12 @@ describe('applyAgentEvent', () => {
   it('worker-exited has no seq threshold and fails the live projection', () => {
     const next = applyAgentEvent(base, 's1', { type: 'worker-exited' });
     expect(next.status).toBe('failed');
+    expect(next.error).toBe('agent worker exited');
+  });
+
+  it('worker-exited 带退出详情时写进错误', () => {
+    const next = applyAgentEvent(base, 's1', { type: 'worker-exited', detail: 'code=1' });
+    expect(next.error).toBe('agent worker exited: code=1');
   });
 
   it('applies only increasing Main seq for one exact dispatch/child and never reopens terminal', () => {

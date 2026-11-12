@@ -18,7 +18,12 @@ import {
   openPluginInstallFromProtocol,
 } from './ipc/window';
 import { createPluginInstallInbox } from './protocol/pluginInstall';
-import { agentWorkerAlive, startAgentWorker, stopAgentWorkerForQuit } from './services/agentHost';
+import {
+  agentWorkerAlive,
+  recordAgentWorkerGone,
+  startAgentWorker,
+  stopAgentWorkerForQuit,
+} from './services/agentHost';
 import { installAppMenu } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
 import {
@@ -133,6 +138,7 @@ if (!gotTheLock) {
     console.error(
       `[process] child-process-gone type=${details.type} reason=${details.reason} exitCode=${details.exitCode} serviceName=${details.serviceName ?? ''} name=${details.name ?? ''}`
     );
+    recordAgentWorkerGone(details);
   });
 
   app.whenReady().then(() => {

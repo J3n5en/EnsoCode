@@ -360,7 +360,7 @@ export function applyAgentEvent(
       // worker 重建后会话 seq 从 0 重计，保留旧 lastSeq 会把新会话的所有事件当重复丢掉
       lastSeq: 0,
       status: 'failed',
-      error: 'agent worker exited',
+      error: event.detail ? `agent worker exited: ${event.detail}` : 'agent worker exited',
       pendingApprovals: [],
       pendingAsks: [],
       backgroundTasks: state.backgroundTasks.map((task) =>
