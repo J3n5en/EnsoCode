@@ -740,7 +740,7 @@ export class MacosDesktopBackend implements DesktopBackend {
   }
 
   async clipboardWrite(text: string) {
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
   }
 
   async launchApp(name: string, opts?: { pane?: string }): Promise<void> {

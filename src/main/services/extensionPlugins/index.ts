@@ -199,7 +199,14 @@ export function getExtensionPlugins(): ExtensionPluginService {
       mcpCall: (target, server, tool, args, signal) =>
         mcpBridge ? mcpBridge.mcpCall(target, server, tool, args, signal) : noMcp(),
       now: Date.now,
-      ...(capabilities.clipboard ? { clipboard: (text: string) => clipboard.writeText(text) } : {}),
+      ...(capabilities.clipboard
+        ? {
+            clipboard: (text: string) =>
+              void clipboard
+                .writeText(text)
+                .catch((error) => console.warn('[plugins] clipboard write failed', error)),
+          }
+        : {}),
       ...(capabilities.openExternal
         ? { openExternal: (url: string) => shell.openExternal(url) }
         : {}),

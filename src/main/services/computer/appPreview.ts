@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, nativeImage, screen, session } from 'electron';
+import { app, BrowserWindow, nativeImage, screen, session, type WebContents } from 'electron';
 import { PreviewController, type PreviewView } from './appPreviewController';
 import { placePreview, previewSize } from './appPreviewLayout';
 
@@ -99,13 +99,13 @@ function createView(onUserClose: (windowId: string) => void): PreviewView {
   const sizes = new Map<string, { width: number; height: number }>();
   let label: string | undefined;
   let iconPath: string | undefined;
-  // 只允许本预览页取窗口画面
+  // 只允许本预览页取窗口画面；Electron 45 起 chromeMediaSource 采集报 display-capture
+  const capture = (contents: WebContents | null, permission: string) =>
+    (permission === 'display-capture' || permission === 'media') && contents === win?.webContents;
   previewSession.setPermissionRequestHandler((contents, permission, callback) =>
-    callback(permission === 'media' && contents === win?.webContents)
+    callback(capture(contents, permission))
   );
-  previewSession.setPermissionCheckHandler(
-    (contents, permission) => permission === 'media' && contents === win?.webContents
-  );
+  previewSession.setPermissionCheckHandler(capture);
   const run = (script: string) => {
     if (!win || win.isDestroyed()) return;
     const contents = win.webContents;

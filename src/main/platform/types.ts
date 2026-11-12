@@ -126,8 +126,8 @@ export interface PlatformUtilityProcess {
 }
 
 export interface PlatformClipboard {
-  writeText(text: string): void;
-  writeBuffer(format: string, buffer: Buffer): void;
+  writeText(text: string): Promise<void>;
+  writeBuffer(format: string, buffer: Buffer): Promise<void>;
 }
 
 export interface DecodedImage {

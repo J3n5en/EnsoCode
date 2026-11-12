@@ -259,7 +259,7 @@ export const utilityProcess = {
   },
 };
 
-export const clipboard = { writeText: () => undefined, writeBuffer: () => undefined };
+export const clipboard = { writeText: async () => {}, writeBuffer: async () => {} };
 
 export const images = { fromBuffer: () => null };
 

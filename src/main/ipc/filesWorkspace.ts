@@ -595,7 +595,7 @@ export function registerFilesWorkspaceHandlers(): void {
         : resolveLocalUnderCwd(cwd, parsed.rel);
       if (!abs) return { ok: false, error: 'invalid-path' };
       try {
-        clipboard.writeText(mode === 'relative' ? parsed.rel : abs);
+        await clipboard.writeText(mode === 'relative' ? parsed.rel : abs);
         return { ok: true };
       } catch {
         return { ok: false, error: 'unavailable' };

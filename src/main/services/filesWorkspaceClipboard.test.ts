@@ -23,4 +23,13 @@ describe('writeFileToClipboard', () => {
     expect(writeBuffer).toHaveBeenCalledOnce();
     expect(writeBuffer.mock.calls[0]?.[0]).toBe('public.file-url');
   });
+
+  it('darwin 异步写入失败时报 clipboard-write-failed', async () => {
+    const result = await writeFileToClipboard('/repo/INSTALL.md', {
+      platform: 'darwin',
+      writeBuffer: vi.fn().mockRejectedValue(new Error('denied')),
+      runCommand: vi.fn(),
+    });
+    expect(result).toEqual({ ok: false, reason: 'clipboard-write-failed' });
+  });
 });
