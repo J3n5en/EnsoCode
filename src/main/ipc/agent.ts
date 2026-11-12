@@ -578,6 +578,19 @@ function rootSessionFile(sessionDir: string, file: string): string | null {
   return name.endsWith('.jsonl') && !name.startsWith('enso-') ? resolved : null;
 }
 
+/** 占用判断：文件名（含会话 uuid）相同，或两边 realpath 后是同一个文件 */
+function sameSessionFile(recorded: string, candidate: string): boolean {
+  if (path.basename(recorded) === path.basename(candidate)) return true;
+  const identity = (file: string) => {
+    try {
+      return realpathSync(file);
+    } catch {
+      return path.resolve(file);
+    }
+  };
+  return identity(recorded) === identity(candidate);
+}
+
 /**
  * spawn 的 resumeFile 只认 Main 权威记录：worker 会把它交给 SessionManager.open（读入并追加写），
  * 渲染层传来的路径不能直接采信。
@@ -602,14 +615,16 @@ function authoritativeResumeFile(
     return same && path.basename(same) === path.basename(bound) ? { file: same } : null;
   }
   const file = rootSessionFile(sessionDir, requested);
-  const claimed = sourceAuthority
-    ?.projection()
-    .conversations.some(
-      (other) =>
-        other.conversationId !== sessionId &&
-        other.sessionFile !== undefined &&
-        path.resolve(other.sessionFile) === file
-    );
+  const claimed =
+    file !== null &&
+    sourceAuthority
+      ?.projection()
+      .conversations.some(
+        (other) =>
+          other.conversationId !== sessionId &&
+          other.sessionFile !== undefined &&
+          sameSessionFile(other.sessionFile, file)
+      );
   return file && !claimed ? { file } : null;
 }
 

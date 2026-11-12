@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
@@ -1216,6 +1216,36 @@ describe('agent IPC Main identity boundary', () => {
       bind(undefined, { conversationId: 'someone-else', file: other });
       await expect(spawn(other)).resolves.toMatchObject({ ok: false });
       expect(mocks.spawnSession).not.toHaveBeenCalled();
+    });
+
+    it('userData 在符号链接下时，realpath 或同名文件都视为已被占用', async () => {
+      const base = mkdtempSync(path.join(os.tmpdir(), 'enso-resume-link-'));
+      const realRoot = path.join(base, 'real');
+      const linkRoot = path.join(base, 'link');
+      mkdirSync(path.join(realRoot, 'agent', 'sessions'), { recursive: true });
+      symlinkSync(realRoot, linkRoot);
+      const name = '2026-11-01T00-00-00-000Z_other.jsonl';
+      const viaLink = path.join(linkRoot, 'agent', 'sessions', name);
+      writeFileSync(viaLink, '{}\n');
+      const viaReal = realpathSync(viaLink);
+      const alias = path.join(
+        linkRoot,
+        'agent',
+        'sessions',
+        '2026-11-01T00-00-00-000Z_alias.jsonl'
+      );
+      symlinkSync(viaReal, alias);
+      vi.mocked(app.getPath).mockReturnValue(linkRoot);
+      try {
+        bind(undefined, { conversationId: 'someone-else', file: viaReal });
+        await expect(spawn(viaLink)).resolves.toMatchObject({ ok: false });
+        mocks.spawnSession.mockClear();
+        await expect(spawn(alias)).resolves.toMatchObject({ ok: false });
+        expect(mocks.spawnSession).not.toHaveBeenCalled();
+      } finally {
+        vi.mocked(app.getPath).mockReturnValue('/tmp');
+        rmSync(base, { recursive: true, force: true });
+      }
     });
   });
 
