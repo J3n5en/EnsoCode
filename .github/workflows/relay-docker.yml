@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      latest:
+        description: 同时打 latest（把这次手动构建当成当前最新）
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,21 +39,29 @@ jobs:
       - name: Image name and tags
         id: meta
         run: |
-          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          image="ghcr.io/${owner}/enso-relay"
-          echo "image=${image}" >> "$GITHUB_OUTPUT"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            echo "version=edge" >> "$GITHUB_OUTPUT"
-            echo "tags=${image}:edge" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/$owner/enso-relay"
+          short="$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          emit() {
+            echo "version=$1" >> "$GITHUB_OUTPUT"
+            shift
             {
               echo "tags<<EOF"
-              echo "${image}:${GITHUB_REF_NAME}"
-              echo "${image}:latest"
+              for t in "$@"; do echo "$t"; done
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
+          }
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            set -- "$image:edge" "$image:sha-$short"
+            if [ "$LATEST_INPUT" = "true" ]; then set -- "$@" "$image:latest"; fi
+            emit edge "$@"
+          else
+            ref="$GITHUB_REF_NAME"
+            emit "$ref" "$image:$ref" "$image:${ref#v}" "$image:latest" "$image:sha-$short"
           fi
+        env:
+          LATEST_INPUT: ${{ inputs.latest }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
