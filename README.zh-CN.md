@@ -226,6 +226,7 @@ node out/server/index.js run --prompt "..." --cwd . --output-format json
 默认公共中继是 `https://enso-relay.j3.do`。要自己跑，见 [packages/relay/README.zh-CN.md](packages/relay/README.zh-CN.md)：
 
 - **Cloudflare Worker**（推荐）：`pnpm --filter @enso/relay release`。
+- **Docker**：`docker run -d -p 8787:8787 -v enso-relay:/data ghcr.io/j3n5en/enso-relay:latest` —— 公共镜像免登录，含 `linux/amd64` 与 `linux/arm64`。
 - **Go 单二进制**：从 GitHub Release 下载 `enso-relay-linux-amd64` / `enso-relay-linux-arm64`，`chmod +x` 后运行。
 
 桌面端 **设置 → 设备 → 中继地址** 改成你的 URL。
