@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import {
   AGENT_WORKER_CRASH_FILE,
@@ -6,6 +6,7 @@ import {
   type AgentWorkerCrash,
   parseAgentWorkerCrash,
 } from '@shared/agentWorkerExit';
+import { appendCappedLog } from '@shared/cappedLog';
 
 export const AGENT_WORKER_SERVICE_NAME = 'enso-agent-worker';
 
@@ -51,14 +52,5 @@ export function appendAgentWorkerExitLog(
   text: string,
   maxBytes = 512 * 1024
 ): void {
-  const file = path.join(dataDir, AGENT_WORKER_EXIT_LOG);
-  const line = `[${new Date().toISOString()}] ${text}\n`;
-  try {
-    let size = 0;
-    try {
-      size = statSync(file).size;
-    } catch {}
-    if (size + line.length > maxBytes) writeFileSync(file, line, 'utf8');
-    else appendFileSync(file, line, 'utf8');
-  } catch {}
+  appendCappedLog(path.join(dataDir, AGENT_WORKER_EXIT_LOG), text, maxBytes);
 }

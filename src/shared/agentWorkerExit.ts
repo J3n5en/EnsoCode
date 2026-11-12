@@ -2,6 +2,8 @@
 export const AGENT_WORKER_CRASH_FILE = 'worker-crash.json';
 /** Main 追加写的 worker 退出日志（相对 ENSO_AGENT_DATA_DIR） */
 export const AGENT_WORKER_EXIT_LOG = 'worker-exits.log';
+/** worker 追加写的压缩取消日志（相对 ENSO_AGENT_DATA_DIR） */
+export const AGENT_COMPACTION_LOG = 'compaction.log';
 
 export interface AgentWorkerCrash {
   pid: number;

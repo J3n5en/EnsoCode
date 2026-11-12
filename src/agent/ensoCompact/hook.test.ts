@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { sendBudget } from './budget';
+import { takeCompactCancel } from './cancel';
 import { createEnsoCompactFactory } from './extension';
 
 type Hook = (event: unknown, ctx: unknown) => unknown;
@@ -365,6 +366,7 @@ describe('enso compact hook', () => {
       mode: 'fast',
       summaryModel: { provider: 'enso-test', id: 'cheap' },
     })();
+    const sessionManager = { getBranch: () => branch };
     const result = await handler?.(
       {
         reason: 'overflow',
@@ -377,7 +379,7 @@ describe('enso compact hook', () => {
         signal: new AbortController().signal,
       },
       {
-        sessionManager: { getBranch: () => branch },
+        sessionManager,
         model: { id: 'session', contextWindow: 16_384 },
         modelRegistry: {
           find: () => ({ id: 'cheap', provider: 'enso-test' }),
@@ -386,5 +388,51 @@ describe('enso compact hook', () => {
       }
     );
     expect(result).toEqual({ cancel: true });
+    expect(takeCompactCancel(sessionManager)).toEqual({
+      reason: 'uncompressible',
+      budget: 0,
+      estimatedAfter: 2073,
+      tokensBefore: 5_000,
+      contextWindow: 16_384,
+    });
+    expect(takeCompactCancel(sessionManager)).toBeUndefined();
+  });
+  it('同一会话连续两次阈值压缩都能完成，不因摘要变长判成无节省', async () => {
+    const branch = Array.from({ length: 10 }, (_, i) => ({
+      id: `e${i}`,
+      type: 'message',
+      message: { role: i % 2 ? 'assistant' : 'user', content: 'x'.repeat(400) },
+    }));
+    const handler = hookFor({
+      mode: 'fast',
+      summaryModel: { provider: 'enso-test', id: 'cheap' },
+    })();
+    const sessionManager = { getBranch: () => branch };
+    const ctx = {
+      sessionManager,
+      model: { id: 'session', contextWindow: 200_000 },
+      modelRegistry: {
+        find: () => ({ id: 'cheap', provider: 'enso-test' }),
+        complete: async () => answer('## Goal\nship\n## Progress'),
+      },
+    };
+    const compactOnce = (previousSummary?: string) =>
+      handler?.(
+        {
+          reason: 'threshold',
+          branchEntries: branch,
+          preparation: {
+            tokensBefore: 50_000,
+            firstKeptEntryId: 'e6',
+            messagesToSummarize: [{ role: 'user', content: 'old' }],
+            previousSummary,
+          },
+          signal: new AbortController().signal,
+        },
+        ctx
+      ) as Promise<Result>;
+    expect((await compactOnce())?.compaction).toBeDefined();
+    expect((await compactOnce('S'.repeat(4000)))?.compaction).toBeDefined();
+    expect(takeCompactCancel(sessionManager)).toBeUndefined();
   });
 });

@@ -5,6 +5,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { directModelFor } from '../virtualModels';
 import { type EvictedItem, selectKeptBoundary } from './budget';
+import { recordCompactCancel } from './cancel';
 import { BUDGETS, type CompactMode, chunkMessages, type MessageChunk } from './chunk';
 import { extractCompactFacts } from './extract';
 import {
@@ -119,7 +120,6 @@ async function summarizeHierarchical(
 }
 
 export function createEnsoCompactHandler(options: EnsoCompactOptions = {}) {
-  const lastEstimatedAfter = new WeakMap<object, number>();
   return async (event: SessionBeforeCompactEvent, ctx: ExtensionContext) => {
     const branch = asEntries(event.branchEntries ?? ctx.sessionManager.getBranch());
     if (branch.length < 3) return;
@@ -150,16 +150,26 @@ export function createEnsoCompactHandler(options: EnsoCompactOptions = {}) {
     const origin = branch.findIndex((entry) => entry.id === firstKeptEntryId);
     // 切点对不上 branch id 时不改（旧测试/无 id 会话），避免误 cancel
     if (origin >= 0) {
+      const contextWindow = positiveWindow(ctx.model?.contextWindow);
       const cut = selectKeptBoundary({
         branch,
         preparation: { firstKeptEntryId, previousSummary, tokensBefore },
-        contextWindow: ctx.model?.contextWindow,
-        previousEstimatedAfter: lastEstimatedAfter.get(ctx.sessionManager),
+        contextWindow,
+        // 手动压缩是用户明确要求，不做节省判定
+        savingBaseline: event.reason === 'manual' ? undefined : tokensBefore,
       });
-      if ('fail' in cut) return { cancel: true };
+      if ('fail' in cut) {
+        recordCompactCancel(ctx.sessionManager, {
+          reason: cut.fail,
+          budget: cut.budget,
+          estimatedAfter: cut.estimatedAfter,
+          tokensBefore,
+          ...(contextWindow ? { contextWindow } : {}),
+        });
+        return { cancel: true };
+      }
       keptId = cut.firstKeptEntryId;
       evicted = cut.evicted;
-      lastEstimatedAfter.set(ctx.sessionManager, cut.estimatedAfter);
     }
     const keptIndex = branch.findIndex((entry) => entry.id === keptId);
     const extra = origin >= 0 && keptIndex > origin ? branch.slice(origin, keptIndex) : [];

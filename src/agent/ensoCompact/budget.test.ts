@@ -43,7 +43,7 @@ describe('compact budget', () => {
     ).toMatchObject({ firstKeptEntryId: 'later' });
   });
 
-  it('尾巴内助手的有效 usage 超过发送预算时推进到该助手之后', () => {
+  it('尾巴内助手的 usage 是压前整段上下文的账单，不据此推进切点', () => {
     const contextWindow = 18_184;
     const branch = [
       {
@@ -64,7 +64,31 @@ describe('compact budget', () => {
         contextWindow,
         summaryTokenHint: 0,
       })
-    ).toMatchObject({ firstKeptEntryId: 'later' });
+    ).toMatchObject({ firstKeptEntryId: 'assistant' });
+  });
+
+  it('阈值压缩：末条助手账单已超预算，但尾巴正文远小于预算时仍能压缩', () => {
+    const contextWindow = 200_000;
+    const branch = Array.from({ length: 40 }, (_, i) => ({
+      id: `e${i}`,
+      type: 'message',
+      message:
+        i % 2 === 0
+          ? { role: 'user', content: 'x'.repeat(4000) }
+          : {
+              role: 'assistant',
+              content: 'ok',
+              usage: { totalTokens: i === 39 ? sendBudget(contextWindow) + 1 : 1000 },
+            },
+    }));
+    expect(
+      selectKeptBoundary({
+        branch,
+        preparation: { firstKeptEntryId: 'e30', tokensBefore: 190_000 },
+        contextWindow,
+        savingBaseline: 190_000,
+      })
+    ).toMatchObject({ firstKeptEntryId: 'e30' });
   });
 
   it('最小合法尾巴仍超过发送预算时报告不可压缩', () => {
@@ -79,18 +103,25 @@ describe('compact budget', () => {
         contextWindow,
         summaryTokenHint: 0,
       })
-    ).toEqual({ fail: 'uncompressible' });
+    ).toEqual({ fail: 'uncompressible', budget: 100, estimatedAfter: 101 });
   });
 
-  it('本次估算相比上次节省不足一成时报告无有效节省', () => {
+  it('压后估算相比压前节省不足一成时报告无有效节省', () => {
     const branch = [{ id: 'only', type: 'message', message: { role: 'user', content: 'xxxx' } }];
     expect(
       selectKeptBoundary({
         branch,
         preparation: preparation('only'),
         summaryTokenHint: 99,
-        previousEstimatedAfter: 105,
+        savingBaseline: 105,
       })
-    ).toEqual({ fail: 'no_saving' });
+    ).toEqual({ fail: 'no_saving', budget: sendBudget(), estimatedAfter: 100 });
+  });
+
+  it('不给节省基准时不做节省判定（手动压缩）', () => {
+    const branch = [{ id: 'only', type: 'message', message: { role: 'user', content: 'xxxx' } }];
+    expect(
+      selectKeptBoundary({ branch, preparation: preparation('only'), summaryTokenHint: 99 })
+    ).toMatchObject({ firstKeptEntryId: 'only', estimatedAfter: 100 });
   });
 });

@@ -21,6 +21,7 @@ import {
   SessionManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import { AGENT_COMPACTION_LOG } from '@shared/agentWorkerExit';
 import type { ApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { autoRetryOverrides, DEFAULT_AUTO_RETRY_LIMIT } from '@shared/autoRetry';
 import {
@@ -28,6 +29,7 @@ import {
   isSameChildSessionIdentity,
   type SessionIdentity,
 } from '@shared/builtinAgents';
+import { appendCappedLog } from '@shared/cappedLog';
 import { WORKSPACE_WRITE_TOOL_ID } from '@shared/childProfileTools';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
 import type { PluginAgentSource } from '@shared/extensionPlugins/protocol';
@@ -190,6 +192,7 @@ import {
 import { createDcgGuard } from './dcg';
 import { omitNamedTools } from './disallowedTools';
 import { createNormalizedEditTool } from './editTool';
+import { type CompactCancel, formatCompactCancel, takeCompactCancel } from './ensoCompact/cancel';
 import type { EnsoCompactOptions } from './ensoCompact/types';
 import {
   createExploreFoldState,
@@ -544,6 +547,8 @@ export interface SupervisorOptions {
   sessionDir: string;
   /** 设置页新增的工作流预设目录（Main 写入，worker 只读） */
   workflowDir?: string;
+  /** 应用 agent 数据目录（ENSO_AGENT_DATA_DIR）；给出时压缩取消原因追加到 compaction.log */
+  dataDir?: string;
 }
 
 /** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份；开关打开时追加项目内其它 harness 的规则文件。 */
@@ -4385,8 +4390,14 @@ export class SessionSupervisor {
         this.reconcileMessages(managed, this.transcript(managed));
         this.rebaseContextUsage(managed);
         managed.compaction = undefined;
+        // 钩子主动取消时 pi 只给 aborted：取出钩子留下的原因，按失败上报，不当作放弃
+        const cancel = takeCompactCancel(managed.session.sessionManager);
+        const cancelled = event.aborted && !event.errorMessage ? cancel : undefined;
+        if (cancelled) this.logCompactCancel(managed, cancelled);
+        const error =
+          event.errorMessage || (cancelled ? formatCompactCancel(cancelled) : undefined);
         // 被 abort 取消的压缩 pi 不带 errorMessage：按放弃收口，不能当作压完
-        const succeeded = !event.errorMessage && !event.aborted;
+        const succeeded = !error && !event.aborted;
         // 锚点必须在对齐之后取：否则摘要消息未入列，与 guest 事件口径 maxIndex+1 差 1
         if (succeeded) {
           managed.compactionNoticeAt = managed.messages.length;
@@ -4398,8 +4409,8 @@ export class SessionSupervisor {
           identity: managed.identity,
           seq: ++managed.seq,
           state: 'end',
-          ...(event.errorMessage ? { error: event.errorMessage } : {}),
-          ...(!event.errorMessage && event.aborted ? { abandoned: true as const } : {}),
+          ...(error ? { error } : {}),
+          ...(!error && event.aborted ? { abandoned: true as const } : {}),
         });
         return;
       }
@@ -5067,6 +5078,15 @@ export class SessionSupervisor {
 
   private estimateSessionMessage(message: unknown): number {
     return estimateConversationTokens(message);
+  }
+
+  /** 打包后 stdout 不可见：取消原因落到数据目录，事后可查 */
+  private logCompactCancel(managed: ManagedSession, cancel: CompactCancel): void {
+    if (!this.options.dataDir) return;
+    appendCappedLog(
+      path.join(this.options.dataDir, AGENT_COMPACTION_LOG),
+      `compact-cancel session=${managed.identity.sessionId} ${JSON.stringify(cancel)}`
+    );
   }
 
   private occupancyInputs(managed: ManagedSession) {
