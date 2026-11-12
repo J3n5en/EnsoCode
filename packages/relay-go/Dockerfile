@@ -27,6 +27,11 @@ RUN apk add --no-cache ca-certificates tzdata \
  && mkdir -p /data \
  && chown relay:relay /data
 COPY --from=build /enso-relay /enso-relay
+# source 标签是 GHCR 把包挂到仓库（首页 Packages 入口）的唯一依据，别删
+LABEL org.opencontainers.image.source="https://github.com/J3n5en/EnsoCode" \
+      org.opencontainers.image.title="enso-relay" \
+      org.opencontainers.image.description="EnsoCode phone relay: single static Go binary, forwards ciphertext only" \
+      org.opencontainers.image.licenses="MIT"
 USER relay
 VOLUME /data
 ENV RELAY_DB=/data/relay.sqlite \
