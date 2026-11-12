@@ -1,15 +1,13 @@
-import { agentTypeDisplayName, ENSO_AGENT_TYPE_KEY } from '@shared/builtinAgents';
+import { agentTypeDisplayName } from '@shared/builtinAgents';
 import { conversationDotTone } from '@shared/conversationDotTone';
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { planPhase } from '@shared/planMode';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
-import type { AgentTypeMentionCandidate } from '@shared/types/mentions';
 import { isVirtualRef, modelDisplayName } from '@shared/virtualModels';
 import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { AgentChildOauthHost } from '@/components/agent/AgentChildOauthHost';
 import { ChromeRow, useShellChrome } from '@/components/app/WindowChrome';
 import { addToast } from '@/components/ui/toast';
 import { useMemberName } from '@/hooks/useMemberName';
@@ -307,16 +305,6 @@ export function ChatView() {
   const running = chrome?.status === 'running';
   const busy = chrome?.busy === true;
   const toolCwd = chrome?.parentWorktreePath ?? project?.path;
-  const capabilityApprovals = useMemo(
-    () =>
-      (chrome?.pendingCapabilityAsks ?? []).map((request) => ({
-        requestId: request.requestId,
-        tool: request.capabilityId,
-        kind: 'mcp' as const,
-        summary: request.summary,
-      })),
-    [chrome?.pendingCapabilityAsks]
-  );
 
   const activateParent = useCallback(() => {
     if (
@@ -442,16 +430,6 @@ export function ChatView() {
             />
           </MarkdownLinkContext.Provider>
           <ApprovalBar
-            key={capabilityApprovals[0]?.requestId ?? 'no-capability-approval'}
-            approvals={capabilityApprovals}
-            allowSession={false}
-            handoff={false}
-            onRespond={(requestId, decision) => {
-              if (decision !== 'allow' && decision !== 'deny') return;
-              void useSessionsStore.getState().respondCapabilityAsk(chrome.id, requestId, decision);
-            }}
-          />
-          <ApprovalBar
             approvals={chrome.pendingApprovals ?? []}
             allowSession={chrome.childLockedProfileId === undefined}
             onRespond={(requestId, decision) =>
@@ -465,13 +443,6 @@ export function ChatView() {
               void window.electronAPI.agent.respondAsk(chrome.id, requestId, answer)
             }
           />
-          {chrome.activeOauthAsk && (
-            <AgentChildOauthHost
-              key={chrome.activeOauthAsk.requestId}
-              request={chrome.activeOauthAsk}
-              conversationId={chrome.id}
-            />
-          )}
           {!chrome.displayedParentId && (
             <PlanBar
               conversationId={chrome.id}
@@ -498,7 +469,6 @@ export function ChatView() {
             busy={busy}
             locked={
               (chrome.pendingApprovals ?? []).length > 0 ||
-              capabilityApprovals.length > 0 ||
               Boolean(chrome.rewinding || chrome.restoringFiles)
             }
             focusKey={chrome.id}
@@ -519,14 +489,6 @@ export function ChatView() {
             onDraftConsumed={() => useSessionsStore.getState().clearDraft(chrome.id)}
             queuedCount={chrome.queuedMessages?.length ?? 0}
             onSteerQueued={() => useSessionsStore.getState().steerQueued(chrome.id)}
-            initialRecipient={
-              chrome.prefillAgentTypeKey === ENSO_AGENT_TYPE_KEY
-                ? ENSO_PREFILL_CANDIDATE
-                : undefined
-            }
-            onInitialRecipientConsumed={() =>
-              useSessionsStore.getState().clearAgentPrefill(chrome.id)
-            }
             toolbar={
               <>
                 {!chrome.displayedParentId && (
@@ -642,18 +604,6 @@ export function ChatView() {
     </div>
   );
 }
-const ENSO_PREFILL_CANDIDATE: AgentTypeMentionCandidate = {
-  kind: 'agent-type',
-  id: ENSO_AGENT_TYPE_KEY,
-  typeKey: ENSO_AGENT_TYPE_KEY,
-  label: 'Enso',
-  displayName: 'Enso',
-  description: 'EnsoCode system agent for product capabilities and team setup',
-  source: 'system',
-  locked: true,
-  canDisable: false,
-  canEdit: false,
-};
 
 function StatusDot({
   status,

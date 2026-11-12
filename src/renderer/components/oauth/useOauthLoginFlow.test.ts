@@ -1,8 +1,4 @@
-import type {
-  OauthFlowEvent,
-  OauthFlowLocator,
-  StartOauthResult,
-} from '@shared/capabilities/types';
+import type { OauthFlowEvent, OauthFlowLocator, StartOauthResult } from '@shared/oauthFlow';
 import { describe, expect, it, vi } from 'vitest';
 import {
   attachedOauthLoginFlowState,

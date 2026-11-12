@@ -146,10 +146,6 @@ describe('coworkerTabTone', () => {
     expect(coworkerTabTone({ status: 'running', pendingApprovalCount: 1 })).toBe('attention');
   });
 
-  it('待能力确认仍按原语义显示 attention', () => {
-    expect(coworkerTabTone({ status: 'running', pendingCapabilityAskCount: 1 })).toBe('attention');
-  });
-
   it('审批与提问同时挂起时审批优先', () => {
     expect(
       coworkerTabTone({ status: 'running', pendingApprovalCount: 1, pendingAskCount: 1 })

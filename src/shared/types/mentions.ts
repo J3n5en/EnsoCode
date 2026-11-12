@@ -117,21 +117,8 @@ export type ParentSourceBindingResult =
   | { accepted: true; requestId: string; parentBindingId: string; expiresAt: number }
   | { accepted: false; requestId: string; error: string };
 
-export interface AgentSummonRequest {
-  typeKey: AgentTypeKey;
-  prompt?: string;
-}
-
-export interface AgentComposerPrefillEvent {
-  typeKey: AgentTypeKey;
-  prompt?: string;
-}
-
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
-
-const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
-  Object.keys(value).every((key) => allowed.includes(key));
 
 const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => {
   const actual = Object.keys(value);
@@ -328,33 +315,4 @@ export function parseParentSourceBindingRequest(value: unknown): ParentSourceBin
   return hasExactKeys(request, ['requestId']) && isNonEmptyString(request.requestId)
     ? { requestId: request.requestId }
     : null;
-}
-
-export function parseAgentSummonRequest(
-  value: unknown,
-  knownTypeKeys: ReadonlySet<AgentTypeKey>
-): AgentSummonRequest | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const request = value as Record<string, unknown>;
-  const typeKey = parseAgentTypeKey(request.typeKey);
-  if (!typeKey || !knownTypeKeys.has(typeKey)) return null;
-  if (!hasOnlyKeys(request, ['typeKey', 'prompt'])) return null;
-  if (request.prompt !== undefined && typeof request.prompt !== 'string') return null;
-  return {
-    typeKey,
-    ...(typeof request.prompt === 'string' ? { prompt: request.prompt } : {}),
-  };
-}
-
-export function parseAgentComposerPrefillEvent(value: unknown): AgentComposerPrefillEvent | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const event = value as Record<string, unknown>;
-  const typeKey = parseAgentTypeKey(event.typeKey);
-  if (!typeKey) return null;
-  if (!hasOnlyKeys(event, ['typeKey', 'prompt'])) return null;
-  if (event.prompt !== undefined && typeof event.prompt !== 'string') return null;
-  return {
-    typeKey,
-    ...(typeof event.prompt === 'string' ? { prompt: event.prompt } : {}),
-  };
 }

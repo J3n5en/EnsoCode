@@ -243,8 +243,6 @@ export const IPC_CHANNELS = {
   AGENT_DISPATCH_BIND_SOURCE: 'agent-dispatch:bind-source',
   AGENT_DISPATCH: 'agent-dispatch:dispatch',
   AGENT_DISPATCH_EVENT: 'agent-dispatch:event',
-  AGENT_SUMMON: 'agent-dispatch:summon',
-  AGENT_COMPOSER_PREFILL: 'agent-dispatch:composer-prefill',
 
   // Main-owned project/conversation authority (generic settings are projection only)
   SOURCE_AUTHORITY_READ: 'source-authority:read',
@@ -257,10 +255,6 @@ export const IPC_CHANNELS = {
   SOURCE_CONVERSATION_END: 'source-authority:conversation-end',
   SOURCE_CONVERSATION_REMOVE: 'source-authority:conversation-remove',
   SOURCE_CONVERSATION_UPDATE_SELECTION: 'source-authority:conversation-update-selection',
-
-  // Enso child capability approval (result returns Main → worker command)
-  CAPABILITIES_ASK: 'capabilities:ask',
-  CAPABILITIES_RESPOND: 'capabilities:respond',
 
   // Native dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',

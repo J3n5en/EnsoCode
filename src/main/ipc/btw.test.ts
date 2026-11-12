@@ -56,7 +56,7 @@ vi.mock('./agent', () => ({
   getSourceAuthorityRegistry: () => ({ conversation: mocks.authorityConversation }),
   resolveConversationWorkspace: mocks.workspace,
 }));
-vi.mock('./capabilities', () => ({
+vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     prepareParent: mocks.prepareParent,
     currentIdentity: mocks.currentIdentity,

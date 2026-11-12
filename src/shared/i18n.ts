@@ -1,9 +1,5 @@
 export type Locale = 'en' | 'zh';
 
-/** 「AI 自动配置」按钮召唤 Enso 时下发的完整提示词（key 即英文原文，中文见字典） */
-export const SUBAGENT_MODELS_CONFIGURE_PROMPT =
-  'Configure "Let the agent pick subagent models" for me. How it is used: when the main agent dispatches a subagent or coworker (built-in types: scout for read-only recon, reviewer for code review, tester for writing tests, worker for implementation), it reads each entry\'s description from the tool\'s model parameter to choose a model per subtask — so descriptions are decision rules, not marketing copy. Steps: 1) read the current entries and toggle state; 2) list providers with valid credentials and their enabled models, never invent models; 3) pick 2–4 models that cover: a cheap, fast, long-context model for recon / reading / summarizing; a strong reasoning model for review, architecture and hard debugging; a reliable coding model for implementation; 4) add what is missing, fix duplicates or unusable entries, then enable the toggle; 5) each description is one short sentence in my interface language: when to use it, relative cost / speed, one caveat. Finish by listing the final entries with the reason for each.';
-
 export const zhTranslations: Record<string, string> = {
   Privacy: '隐私',
   'Privacy masking': '隐私脱敏',
@@ -894,17 +890,11 @@ export const zhTranslations: Record<string, string> = {
   'Send only to the selected Agent': '仅发送给所选 Agent',
   Send: '发送',
   'Create or select a project to start a conversation': '创建或选择一个项目以开始对话',
-  'Ask Enso': '询问 Enso',
   'Compact view': '精简版',
   'The built-in browser is not available in full view. Check it on the computer.':
     '完整版暂不支持内置浏览器，请在电脑上查看。',
-  'Need help choosing a setup? Ask Enso.': '不确定如何配置？询问 Enso。',
   Locked: '已锁定',
-  'Inherits the conversation model and provides product capabilities':
-    '继承当前对话模型，并提供产品能力',
   'This Agent name is reserved': '此 Agent 名称为系统保留名称',
-  'EnsoCode system agent for product capabilities and team setup':
-    '用于产品能力与团队组建的 EnsoCode 系统 Agent',
   'Fast read-only recon; returns compressed findings': '快速只读调研，返回精简结论',
   'Implements a self-contained coding subtask end to end': '端到端实现自包含编码子任务',
   'Reviews code or diffs; read-only, returns prioritized issues':
@@ -934,69 +924,13 @@ export const zhTranslations: Record<string, string> = {
   'Parent ready model did not match the bound model.': '父会话就绪模型与绑定模型不匹配。',
   'Child ready identity mismatch.': '子 Agent 就绪身份不匹配。',
   'Child ready profile or model mismatch.': '子 Agent 就绪配置或模型不匹配。',
-  'Locked Enso tool profile mismatch.': 'Enso 锁定工具配置不匹配。',
-  'Failed to bind the Enso capability generation.': '无法绑定 Enso 能力代次。',
   'Failed to prompt child Agent.': '无法向子 Agent 发送任务。',
   'Failed to record dispatch.': '无法记录派发结果。',
-  // Dangerous capability confirmation summaries
   Target: '目标',
   Provider: '提供商',
   Account: '账号',
   Coworker: '队员',
   'Could not load subscription providers': '无法加载订阅提供商',
-  'Remove one provider entry; subscription entries are signed out first.':
-    '移除一个提供商条目；订阅条目会先退出登录。',
-  'Test an already configured provider; this may make a minimal billable request.':
-    '测试已配置的提供商；这可能会发起一次最小计费请求。',
-  'Start the protected subscription authorization flow.': '启动受保护的订阅授权流程。',
-  'Sign out one subscription account.': '退出一个订阅账号。',
-  'Reopen the authorization page for the active subscription login.':
-    '重新打开当前订阅登录的授权页面。',
-  'Remove a skill registration without deleting its source directory.':
-    '移除技能登记，但不删除其源目录。',
-  'Remove an MCP server registration.': '移除 MCP 服务器登记。',
-  'Remove an instruction registration and its application-managed local copy.':
-    '移除指令登记及其由应用管理的本地副本。',
-  'Delete an injection preset.': '删除注入预设。',
-  'Delete a custom agent type.': '删除自定义 Agent 类型。',
-  'Remove a project and its conversations from the application list.':
-    '从应用列表中移除项目及其对话。',
-  'Add an SSH connection profile.': '添加 SSH 连接档案。',
-  'Remove one SSH connection profile; connections used by projects are protected.':
-    '移除一个 SSH 连接档案；仍被项目使用的连接受保护。',
-  'Test an SSH connection; this performs a real login attempt.':
-    '测试 SSH 连接；会发起一次真实登录尝试。',
-  'Hire a coworker into the origin coding conversation.': '为来源编码对话加入一名队员。',
-  'Dismiss a coworker from the origin coding conversation.': '从来源编码对话中移除一名队员。',
-  'Scan local AI applications and import selected providers.': '扫描本地 AI 应用并导入所选提供商。',
-  'Add a subscription or API-key provider.': '添加订阅或 API Key 提供商。',
-  'Overwrite the original instruction source file.': '覆盖原始指令源文件。',
-  'Add a local directory as a project.': '将本地目录添加为项目。',
-  'Delete a coding conversation from the list.': '从列表中删除编码对话。',
-  'Import a conversation from another local AI application.': '从其他本地 AI 应用导入对话。',
-  'Abort the origin coding agent turn.': '中止来源编码 Agent 的当前轮次。',
-  'Change coding-agent approval mode.': '更改编码 Agent 的批准模式。',
-  'Allow or deny a pending coding-agent tool request.': '允许或拒绝待处理的编码 Agent 工具请求。',
-  'Answer a pending question from the coding agent.': '回答编码 Agent 的待处理问题。',
-  'Stop a coding-agent background task.': '停止编码 Agent 的后台任务。',
-  'Clean up the isolated worktree of a conversation.': '清理会话的隔离 worktree。',
-  'Release a live session for workspace migration.': '释放运行中的会话以迁移工作区。',
-  'Rewind origin conversation history without restoring files.': '回退来源对话历史，但不恢复文件。',
-  'Rewind origin conversation history and restore project files.':
-    '回退来源对话历史并恢复项目文件。',
-  'Quit the application and install a downloaded update.': '退出应用并安装已下载的更新。',
-  'Close the origin window.': '关闭来源窗口。',
-  'Run an arbitrary shell command.': '运行任意 shell 命令。',
-  'Edit a project file.': '编辑项目文件。',
-  'Create or overwrite a project file.': '创建或覆盖项目文件。',
-  'Call an arbitrary MCP tool.': '调用任意 MCP 工具。',
-  'Delegate an arbitrary coding subtask to a subagent.': '将任意编码子任务委派给 subagent。',
-  'Use the unrestricted coworker tool.': '使用不受限的 Coworker 工具。',
-  'Run a background shell task.': '运行后台 shell 任务。',
-  "Browse pages in Enso's built-in browser.": '在 Enso 内嵌浏览器里浏览页面。',
-  'Run JavaScript that calls coding-session tools, including edits.':
-    '运行会调用编码会话工具（含编辑）的 JavaScript。',
-  'Search and capture durable memories across coding sessions.': '跨编码会话检索与记录持久记忆。',
   Save: '保存',
   // Skills & MCP
   Skills: '技能',
@@ -1955,9 +1889,6 @@ export const zhTranslations: Record<string, string> = {
   Unpin: '取消置顶',
   Rename: '重命名',
   'Model selection': '模型选择',
-  'Auto configure with AI': 'AI 自动配置',
-  [SUBAGENT_MODELS_CONFIGURE_PROMPT]:
-    '请帮我配置【允许子代理指定模型】。使用场景：主 Agent 派发 subagent/coworker（内置类型：scout 只读调研、reviewer 代码评审、tester 写测试、worker 实现）时，会从工具的 model 参数里读取每个条目的描述来给子任务挑模型，所以描述要写成选型规则，而不是宣传语。步骤：1）先读取当前条目和开关状态；2）列出凭证有效的模型服务及其已启用模型，不要凭空编造模型；3）挑 2–4 个模型覆盖：便宜、快、长上下文的用于调研/阅读/总结；推理最强的用于评审、架构和疑难排查；稳定的编码模型用于实现；4）补缺、去重、清理不可用条目，然后打开开关；5）每条描述用我的界面语言写一句话：什么时候用、相对成本/速度、一个注意点。最后列出最终条目及各自的选型理由。',
   'Must be picked by main agent': '必须由主 Agent 选择',
   'Picked by main agent': '由主 Agent 选择',
   'Fixed model': '自选固定模型',
@@ -2288,7 +2219,6 @@ export const zhTranslations: Record<string, string> = {
   'Message coworker': '联系队员',
   'Message main agent': '联系主 agent',
   'Enso app': 'Enso 应用',
-  'Enso capabilities': 'Enso 能力',
   'Recall memory': '回溯记忆',
   'Memory search': '搜索记忆',
   'Memory capture': '记录记忆',

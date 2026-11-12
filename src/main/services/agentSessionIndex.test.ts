@@ -560,7 +560,6 @@ describe('AgentSessionIndex generation and reservation authority', () => {
         'builtin:scout',
         'exp-invite',
         'request-1',
-        undefined,
         'agent-tool',
         'task',
         '探测邀请接口'

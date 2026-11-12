@@ -31,7 +31,6 @@ interface SidebarConversation {
   activeRenewedAt?: number;
   pendingAsks?: readonly { requestId: string }[];
   pendingApprovals?: readonly unknown[];
-  pendingCapabilityAsks?: readonly unknown[];
   coworkerIds?: readonly string[];
   subagents?: readonly { status: string }[];
   backgroundTasks?: readonly { status: string }[];
@@ -339,14 +338,9 @@ export function isActiveTone(id: string, conversations: Conversations): boolean 
   return tone === 'running' || tone === 'waiting' || tone === 'failed' || tone === 'unread';
 }
 
-/** 等你处理:待审批 / 待能力确认（圆点 attention），或圆点 waiting（待回答） */
+/** 等你处理:待审批（圆点 attention），或圆点 waiting（待回答） */
 function isWaiting(id: string, conversations: Conversations): boolean {
-  const conversation = conversations[id];
-  if (
-    (conversation?.pendingApprovals?.length ?? 0) > 0 ||
-    (conversation?.pendingCapabilityAsks?.length ?? 0) > 0
-  )
-    return true;
+  if ((conversations[id]?.pendingApprovals?.length ?? 0) > 0) return true;
   return dotTone(id, conversations) === 'waiting';
 }
 

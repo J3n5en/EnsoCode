@@ -8,13 +8,9 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { app, type RendererContents, shell } from '@platform';
 import { isSameChildSessionIdentity } from '@shared/builtinAgents';
-import type {
-  OauthFlowEvent,
-  OauthFlowLocator,
-  StartOauthResult,
-} from '@shared/capabilities/types';
 import { isCodexAccountKey } from '@shared/oauthAccountPool';
 import { expandOauthCatalog } from '@shared/oauthCatalog';
+import type { OauthFlowEvent, OauthFlowLocator, StartOauthResult } from '@shared/oauthFlow';
 import {
   ensureAccountProvider,
   nextAccountKey,

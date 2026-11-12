@@ -174,7 +174,7 @@ import {
   routineProposeTool,
   sendImageTool,
 } from './bots';
-import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
+import { agentSessionIndex } from './sessionIndex';
 import { readSettings, readSshTimeoutSeconds } from './settings';
 import {
   removeRegisteredWorktree,
@@ -1219,8 +1219,6 @@ export function registerAgentHandlers(): void {
       dismissChild: dismissChildSession,
       resumeCoworker: resumeCoworkerSession,
     },
-    registerCapabilityInvocation: (context) => capabilityGateway.registerInvocation(context),
-    terminateGeneration: (child) => capabilityGateway.terminateGeneration(child),
   });
 
   agentService = new AgentService({
@@ -1403,10 +1401,6 @@ export function registerAgentHandlers(): void {
         });
         return;
       }
-    }
-    if (workerEvent.type === 'capability-invoke') {
-      handleCapabilityInvoke(workerEvent);
-      return;
     }
     // 回合结束：agent 开的无头 tab 关掉（用户正看的 / 锁住的不动）；parent-ended 强关
     // Bot 聊天的浏览器由成员共享，随聊天删除才关

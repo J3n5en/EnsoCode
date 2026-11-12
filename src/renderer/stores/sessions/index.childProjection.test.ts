@@ -1,5 +1,4 @@
 import type { ChildSessionIdentity } from '@shared/builtinAgents';
-import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import type { RendererAgentEvent, SourceAuthorityProjection } from '@shared/types/agent';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -12,7 +11,6 @@ import {
   installSessionGlobals,
   loadSessionModules,
   onAgentEvent,
-  onCapabilityAsk,
   onDispatchEvent,
   registerModelSelection,
   resetSessionHarness,
@@ -775,40 +773,6 @@ describe('typed Agent child projection', () => {
       },
     });
     expect(state.conversations[childB.sessionId].dispatchMainEvents).toEqual({});
-  });
-
-  it('binds dangerous ASK and OAuth host to the exact child generation', async () => {
-    onAgentEvent?.(reserve(1));
-    const child = childIdentity(1);
-    const request: CapabilityAskRequest = {
-      child,
-      turnId: 'turn-1',
-      requestId: '123e4567-e89b-42d3-a456-426614174030',
-      capabilityId: 'providers.oauth.login',
-      summary: 'Open browser authorization for Anthropic',
-      host: {
-        kind: 'oauth-login',
-        providerId: 'anthropic',
-        providerLabel: 'Anthropic',
-      },
-    };
-    onCapabilityAsk?.({ ...request, child: { ...child, generation: 'stale-generation' } });
-    expect(
-      sessionsModule.useSessionsStore.getState().conversations[child.sessionId]
-        .pendingCapabilityAsks
-    ).toBeUndefined();
-
-    onCapabilityAsk?.(request);
-    expect(
-      sessionsModule.useSessionsStore.getState().conversations[child.sessionId]
-        .pendingCapabilityAsks
-    ).toEqual([request]);
-    await sessionsModule.useSessionsStore
-      .getState()
-      .respondCapabilityAsk(child.sessionId, request.requestId, 'allow');
-    expect(
-      sessionsModule.useSessionsStore.getState().conversations[child.sessionId].activeOauthAsk
-    ).toEqual(request);
   });
 
   it('persists child metadata only, then restores child history and a new generation from snapshot', () => {

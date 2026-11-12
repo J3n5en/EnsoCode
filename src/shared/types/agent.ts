@@ -10,20 +10,19 @@ import { parseAutoRetryLimit } from '../autoRetry';
 import {
   type AgentTypeKey,
   type ChildSessionIdentity,
-  ENSO_LOCKED_PROFILE_ID,
-  ENSO_LOCKED_TOOL_IDS,
   isSameChildSessionIdentity,
   isUuid,
+  isValidLegacyProfile,
+  LEGACY_ENSO_TYPE_KEY,
+  type LegacyEnsoProfileId,
   parseAgentTypeKey,
   parseChildSessionIdentity,
   parseSessionIdentity,
   type SessionIdentity,
 } from '../builtinAgents';
 import {
-  type CapabilityExecutionEnvelope,
   type CapabilityReceipt,
   type CapabilityResult,
-  parseCapabilityExecutionEnvelope,
   parseCapabilityReceipt,
   parseCapabilityResult,
 } from '../capabilities/types';
@@ -1051,7 +1050,7 @@ export interface ResolvedAgentTypeSpawnConfig {
   spawnSpecId: string;
   systemPrompt: string;
   model: SpawnModelConfig;
-  tools: 'all' | 'readonly' | 'enso-locked';
+  tools: 'all' | 'readonly';
   /**
    * 类型级推理预设（子代理类型上配置的档位）：优先级 派发 thinking > 类型预设 >
    * 模型条目预设 > 父会话。缺省 = 跟随模型条目/父会话。与 AgentTypeSpawnConfig 同语义。
@@ -1065,7 +1064,6 @@ export interface ResolvedAgentTypeSpawnConfig {
   mcpServers: readonly McpServerSpawnConfig[];
   mcpBindingIds: readonly string[];
   systemPromptHash: string;
-  lockedProfileId?: typeof ENSO_LOCKED_PROFILE_ID;
 }
 
 export interface ResolvedChildProfileProof {
@@ -1086,7 +1084,8 @@ export interface ChildConversationMetadata {
   agentInstanceName: string;
   dispatchOrigin: 'typed-mention' | 'manual' | 'agent-tool';
   mode?: AgentMode;
-  lockedProfileId?: typeof ENSO_LOCKED_PROFILE_ID;
+  /** 仅历史 Enso child 的元数据带此值（读兼容） */
+  lockedProfileId?: LegacyEnsoProfileId;
 }
 
 export interface SafeChildRef {
@@ -1460,13 +1459,6 @@ export type AgentCommand =
   | { type: 'set-model-directory'; snapshot: unknown; customProviders: unknown }
   | { type: 'compact'; identity: SessionIdentity; instructions?: string }
   | { type: 'ask-respond'; identity: SessionIdentity; requestId: string; answer: string }
-  | {
-      type: 'capability-result';
-      child: ChildSessionIdentity;
-      turnId: string;
-      requestId: string;
-      envelope: CapabilityExecutionEnvelope;
-    }
   | {
       type: 'browser-result';
       identity: SessionIdentity | ChildSessionIdentity;
@@ -2089,15 +2081,6 @@ export type AgentWorkerEvent =
       coworker: CoworkerInfo;
       /** 工具直雇 coworker 自身的会话身份(无 ChildSessionIdentity),Main 据此入索引供用户 tab 直接 prompt */
       coworkerIdentity?: SessionIdentity;
-    }
-  | {
-      type: 'capability-invoke';
-      child: ChildSessionIdentity;
-      seq: number;
-      turnId: string;
-      requestId: string;
-      capabilityId: ProductSurfaceId;
-      params: unknown;
     }
   | {
       type: 'browser-invoke';
@@ -3239,8 +3222,7 @@ export function parseChildConversationMetadata(value: unknown): ChildConversatio
       value.dispatchOrigin !== 'manual' &&
       value.dispatchOrigin !== 'agent-tool') ||
     (value.mode !== undefined && value.mode !== 'task' && value.mode !== 'coworker') ||
-    (typeKey === 'agent:enso' && value.lockedProfileId !== ENSO_LOCKED_PROFILE_ID) ||
-    (typeKey !== 'agent:enso' && value.lockedProfileId !== undefined)
+    !isValidLegacyProfile(typeKey, value.lockedProfileId)
   ) {
     return null;
   }
@@ -3344,15 +3326,6 @@ export function parseResolvedChildProfileProof(value: unknown): ResolvedChildPro
     !Array.isArray(value.loadedMcpBindingIds) ||
     !value.loadedMcpBindingIds.every(isNonEmptyString) ||
     !isNonEmptyString(value.systemPromptHash)
-  ) {
-    return null;
-  }
-  if (
-    value.typeKey === 'agent:enso' &&
-    (value.toolIds.length !== ENSO_LOCKED_TOOL_IDS.length ||
-      value.toolIds.some((toolId, index) => toolId !== ENSO_LOCKED_TOOL_IDS[index]) ||
-      value.loadedSkillBindingIds.length !== 0 ||
-      value.loadedMcpBindingIds.length !== 0)
   ) {
     return null;
   }
@@ -3480,7 +3453,6 @@ function parseResolvedAgentTypeSpawnConfig(value: unknown): ResolvedAgentTypeSpa
       'mcpServers',
       'mcpBindingIds',
       'systemPromptHash',
-      'lockedProfileId',
     ]) ||
     Object.keys(value).length < 12
   ) {
@@ -3494,12 +3466,13 @@ function parseResolvedAgentTypeSpawnConfig(value: unknown): ResolvedAgentTypeSpa
   const mcpBindingIds = Array.isArray(value.mcpBindingIds) ? value.mcpBindingIds : null;
   if (
     !typeKey ||
+    typeKey === LEGACY_ENSO_TYPE_KEY ||
     !model ||
     !isUuid(value.spawnSpecId) ||
     !isNonEmptyString(value.displayName) ||
     typeof value.description !== 'string' ||
     typeof value.systemPrompt !== 'string' ||
-    (value.tools !== 'all' && value.tools !== 'readonly' && value.tools !== 'enso-locked') ||
+    (value.tools !== 'all' && value.tools !== 'readonly') ||
     (value.allowedToolIds !== undefined &&
       (!Array.isArray(value.allowedToolIds) || !value.allowedToolIds.every(isNonEmptyString))) ||
     !skillPaths ||
@@ -3522,22 +3495,6 @@ function parseResolvedAgentTypeSpawnConfig(value: unknown): ResolvedAgentTypeSpa
       !MODEL_REASONING_OVERRIDES.includes(value.reasoning as ModelReasoningOverride)) ||
     (value.thinkingLevel !== undefined &&
       !MODEL_THINKING_LEVEL_OVERRIDES.includes(value.thinkingLevel as ModelThinkingLevelOverride))
-  ) {
-    return null;
-  }
-  if (
-    (typeKey === 'agent:enso' &&
-      (value.lockedProfileId !== ENSO_LOCKED_PROFILE_ID ||
-        value.tools !== 'enso-locked' ||
-        value.reasoning !== undefined ||
-        value.thinkingLevel !== undefined ||
-        value.allowedToolIds !== undefined ||
-        skillPaths.length !== 0 ||
-        skillBindingIds.length !== 0 ||
-        mcpServers.length !== 0 ||
-        mcpBindingIds.length !== 0)) ||
-    (typeKey !== 'agent:enso' &&
-      (value.lockedProfileId !== undefined || value.tools === 'enso-locked'))
   ) {
     return null;
   }
@@ -4081,14 +4038,6 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         isNonEmptyString(value.answer)
         ? (value as unknown as AgentCommand)
         : null;
-    case 'capability-result':
-      return hasExactKeys(value, ['type', 'child', 'turnId', 'requestId', 'envelope']) &&
-        parseChildSessionIdentity(value.child) &&
-        isNonEmptyString(value.turnId) &&
-        isNonEmptyString(value.requestId) &&
-        parseCapabilityExecutionEnvelope(value.envelope)
-        ? (value as unknown as AgentCommand)
-        : null;
     case 'browser-result':
     case 'memory-result':
     case 'delegation-result':
@@ -4424,16 +4373,6 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
   if (value.type === 'snapshot') {
     return Array.isArray(value.sessions) &&
       value.sessions.every((session) => parseSessionSnapshot(session) !== null)
-      ? (value as unknown as AgentWorkerEvent)
-      : null;
-  }
-  if (value.type === 'capability-invoke') {
-    return parseChildSessionIdentity(value.child) &&
-      isSequence(value.seq) &&
-      isNonEmptyString(value.turnId) &&
-      isNonEmptyString(value.requestId) &&
-      isProductSurfaceId(value.capabilityId) &&
-      Object.hasOwn(value, 'params')
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

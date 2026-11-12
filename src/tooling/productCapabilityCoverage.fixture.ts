@@ -1,6 +1,6 @@
 import type { SettingsState } from '../renderer/stores/settings/types';
-import type { CapabilitySpec, JsonSchema } from '../shared/capabilities/types';
-import type { ProductSurfaceId, ProductSurfaceInventoryItem } from '../shared/productSurfaces';
+import type { JsonSchema } from '../shared/capabilities/types';
+import type { ProductSurfaceId } from '../shared/productSurfaces';
 import { BUILTIN_AGENT_TYPES, BUILTIN_TOOLS, type IPC_CHANNELS } from '../shared/types';
 
 export type CoverageDisposition =
@@ -656,8 +656,6 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_DISPATCH_BIND_SOURCE: excluded('One-time sender-bound dispatch authorization transport.'),
   AGENT_DISPATCH: surfaces('team.hire-coworker'),
   AGENT_DISPATCH_EVENT: excluded('Main-owned dispatch phase and terminal event transport.'),
-  AGENT_SUMMON: excluded('Cross-window summon only focuses MainWindow and prefills a type chip.'),
-  AGENT_COMPOSER_PREFILL: excluded('Main-to-renderer typed Agent composer prefill event.'),
   SOURCE_AUTHORITY_READ: excluded('Main-owned source authority projection read transport.'),
   SOURCE_AUTHORITY_CHANGED: excluded('Main-owned source authority projection broadcast.'),
   SOURCE_PROJECT_CREATE: surfaces('projects.add'),
@@ -668,10 +666,6 @@ export const IPC_PRODUCT_COVERAGE = {
   SOURCE_CONVERSATION_END: surfaces('conversations.delete'),
   SOURCE_CONVERSATION_REMOVE: surfaces('conversations.delete'),
   SOURCE_CONVERSATION_UPDATE_SELECTION: surfaces('conversations.set-model'),
-  CAPABILITIES_ASK: excluded('Enso child approval request transport owned by CapabilityGateway.'),
-  CAPABILITIES_RESPOND: excluded(
-    'Enso child approval response transport owned by CapabilityGateway.'
-  ),
   DIALOG_SELECT_DIRECTORY: surfaces('projects.add'),
   PROJECTS_GET_RECENT: surfaces('projects.recent'),
   PROJECTS_LIST_HOST_DIRS: surfaces('projects.add'),
@@ -1137,41 +1131,6 @@ export function auditAuthorityCoverage(
   }
   for (const id of Object.keys(coverage)) {
     if (!authorityIds.includes(id)) issues.push(`coverage outside authority: ${id}`);
-  }
-  return issues;
-}
-
-export interface CapabilityAuditInput {
-  inventory: Readonly<Record<string, ProductSurfaceInventoryItem>>;
-  catalog: Readonly<Record<string, CapabilitySpec>>;
-  handlerIds: ReadonlySet<string>;
-}
-
-export function auditCapabilityContract(input: CapabilityAuditInput): string[] {
-  const issues: string[] = [];
-  for (const id of Object.keys(input.inventory)) {
-    const spec = input.catalog[id];
-    if (!spec) {
-      issues.push(`missing catalog: ${id}`);
-      continue;
-    }
-    if (spec.id !== id) issues.push(`catalog id mismatch: ${id}`);
-    if (spec.execution.kind === 'executable') {
-      if (!input.handlerIds.has(spec.execution.handlerId)) {
-        issues.push(`missing handler: ${spec.execution.handlerId}`);
-      }
-    } else {
-      if (!spec.execution.reason.trim()) issues.push(`empty unavailable reason: ${id}`);
-      if (!spec.execution.suggestedAction.trim()) {
-        issues.push(`empty unavailable action: ${id}`);
-      }
-    }
-  }
-  for (const id of Object.keys(input.catalog)) {
-    if (!input.inventory[id]) issues.push(`catalog outside inventory: ${id}`);
-    if (id.includes(':') || id === 'worker-exited' || id === 'snapshot') {
-      issues.push(`internal transport in catalog: ${id}`);
-    }
   }
   return issues;
 }

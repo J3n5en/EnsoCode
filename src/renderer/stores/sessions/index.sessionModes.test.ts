@@ -60,7 +60,6 @@ describe('btw session send', () => {
       conversations: {},
       order: [],
       activeId: null,
-      pendingAgentPrefill: undefined,
     });
     settingsModule.useSettingsStore.setState({
       projects: [{ id: 'project', name: 'Project', path: '/workspace' }],
@@ -193,7 +192,6 @@ describe('Plan 模式', () => {
       conversations: {},
       order: [],
       activeId: null,
-      pendingAgentPrefill: undefined,
     });
     settingsModule.useSettingsStore.setState({
       projects: [{ id: 'project', name: 'Project', path: '/workspace' }],

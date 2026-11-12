@@ -19,7 +19,6 @@ export interface SidebarDirectoryEntry {
   activeRenewedAt?: number;
   pendingAsks?: readonly { requestId: string }[];
   pendingApprovals?: readonly unknown[];
-  pendingCapabilityAsks?: readonly unknown[];
   coworkerIds?: readonly string[];
   coworkerName?: string;
   child?: { agentInstanceName?: string };
@@ -47,7 +46,6 @@ type Source = {
   activeRenewedAt?: number;
   pendingAsks?: readonly { requestId: string }[];
   pendingApprovals?: readonly unknown[];
-  pendingCapabilityAsks?: readonly unknown[];
   coworkerIds?: readonly string[];
   coworkerName?: string;
   child?: { agentInstanceName?: string; mode?: 'task' | 'coworker' };
@@ -83,7 +81,6 @@ function project(conversation: Source, hasRunningChild: boolean): SidebarDirecto
     activeRenewedAt: conversation.activeRenewedAt,
     pendingAsks: conversation.pendingAsks,
     pendingApprovals: conversation.pendingApprovals,
-    pendingCapabilityAsks: conversation.pendingCapabilityAsks,
     coworkerIds: conversation.coworkerIds,
     coworkerName: conversation.coworkerName,
     child: conversation.child,
@@ -192,7 +189,6 @@ export interface CoworkerTabConversation {
   spawning: boolean;
   pendingApprovalCount: number;
   pendingAskCount: number;
-  pendingCapabilityAskCount: number;
   coworkerName?: string;
   child?: { agentInstanceName?: string };
   mode: 'task' | 'coworker';
@@ -228,7 +224,6 @@ export function selectCoworkerTabConversations(
             spawning: conversation.spawning === true,
             pendingApprovalCount: conversation.pendingApprovals?.length ?? 0,
             pendingAskCount: conversation.pendingAsks?.length ?? 0,
-            pendingCapabilityAskCount: conversation.pendingCapabilityAsks?.length ?? 0,
             coworkerName: conversation.coworkerName,
             child: conversation.child?.agentInstanceName
               ? { agentInstanceName: conversation.child.agentInstanceName }

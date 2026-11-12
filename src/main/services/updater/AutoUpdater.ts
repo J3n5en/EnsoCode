@@ -5,7 +5,7 @@ import { AUTO_RESTART_IDLE_MS, isTurnRestartBlocked } from '@shared/updater/idle
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
-import { agentSessionIndex } from '../../ipc/capabilities';
+import { agentSessionIndex } from '../../ipc/sessionIndex';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
 import { IdleRestartGate } from './idleRestartGate';

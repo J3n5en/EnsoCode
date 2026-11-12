@@ -12,7 +12,6 @@ interface StateConversation {
   btwParentId?: string;
   pendingAsks?: readonly unknown[];
   pendingApprovals?: readonly unknown[];
-  pendingCapabilityAsks?: readonly unknown[];
   subagents?: readonly { status: string }[];
   coworkerIds?: readonly string[];
 }
@@ -41,9 +40,7 @@ export function conversationThemeState(
     status: conversation.status ?? 'idle',
     spawning: conversation.spawning,
     pendingAskCount:
-      (conversation.pendingAsks?.length ?? 0) +
-      (conversation.pendingApprovals?.length ?? 0) +
-      (conversation.pendingCapabilityAsks?.length ?? 0),
+      (conversation.pendingAsks?.length ?? 0) + (conversation.pendingApprovals?.length ?? 0),
     hasRunningChild: conversation.hasRunningChild,
   });
   return tone === 'failed' ? 'error' : tone === 'unread' ? 'idle' : tone;

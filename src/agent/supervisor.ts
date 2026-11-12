@@ -25,7 +25,6 @@ import type { ApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { autoRetryOverrides, DEFAULT_AUTO_RETRY_LIMIT } from '@shared/autoRetry';
 import {
   type ChildSessionIdentity,
-  ENSO_LOCKED_PROFILE,
   isSameChildSessionIdentity,
   type SessionIdentity,
 } from '@shared/builtinAgents';
@@ -192,8 +191,6 @@ import { createDcgGuard } from './dcg';
 import { omitNamedTools } from './disallowedTools';
 import { createNormalizedEditTool } from './editTool';
 import type { EnsoCompactOptions } from './ensoCompact/types';
-import { ENSO_SYSTEM_PROMPT } from './ensoPrompt';
-import { EnsoSafeJournal } from './ensoSafeJournal';
 import {
   createExploreFoldState,
   createExploreFoldTools,
@@ -314,8 +311,6 @@ import { ToolOutputBudget } from './toolOutputBudget';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { ComputerInvoker, createComputerTool, withComputerApproval } from './tools/computer';
 import { createDelegationTools, type DelegationOp } from './tools/delegation';
-import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
-import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
 import { createGroupHistoryTool } from './tools/groupHistory';
 import { createGroupTasksTool } from './tools/groupTasks';
 import { confirmImageReference, createImageGenTool } from './tools/imageGen';
@@ -353,8 +348,6 @@ interface ChildSessionResult {
   modelRef: { providerId: string; modelId: string };
   toolIds: string[];
   proofToolIds: string[];
-  ensoApp?: EnsoAppInvoker;
-  safeJournal?: EnsoSafeJournal;
   runawayGuard?: RunawayGuard;
   requestBudget?: RequestBudget;
   pluginTools?: PluginToolInvoker;
@@ -385,7 +378,6 @@ interface SessionFactory {
     thinkingOverride?: ChildThinkingLevel;
     identity?: ChildSessionIdentity;
     gate: ApprovalGate;
-    askManager?: AskManager;
     resumeFile?: string;
     extraTools?: unknown[];
     pluginSource?: ChildPluginSource;
@@ -408,12 +400,10 @@ interface ManagedSession {
   modelId: string;
   toolIds: string[];
   proofToolIds: string[];
-  safeJournal?: EnsoSafeJournal;
   currentTurnId?: string;
   /** 上一轮结束时 messages.length：本轮消息从这里开始，供 agent_end 切本轮摘要 */
   turnStartIndex: number;
   promptedRequestIds: Set<string>;
-  ensoApp?: EnsoAppInvoker;
   browser?: BrowserInvoker;
   memory?: MemoryInvoker;
   delegation?: MemoryInvoker<DelegationOp>;
@@ -531,7 +521,6 @@ type PendingCounterKey = {
  * 不再靠驱逐 / 工作区锁两处手工清单各自记得补（曾漏 memory、delegation）。
  */
 const PENDING_COUNTERS: Record<PendingCounterKey, true> = {
-  ensoApp: true,
   browser: true,
   memory: true,
   delegation: true,
@@ -809,40 +798,6 @@ function withPluginPrompts(
   return { prompts: [...base.prompts, ...extra], diagnostics: base.diagnostics };
 }
 
-/** Enso 不发现任何宿主或项目资源；cwd 只供 pi 的会话文件元数据使用。 */
-function createEnsoResourceLoader(
-  cwd: string,
-  agentDir: string,
-  branchContext: InlineExtension,
-  silentTurnRecovery: InlineExtension,
-  oauthPoolRecovery?: InlineExtension
-): DefaultResourceLoader {
-  return new DefaultResourceLoader({
-    cwd,
-    agentDir,
-    // noExtensions 挡不住项目包解析（缺包会自动安装），同样用未信任的 settings
-    settingsManager: createProjectSettingsManager(cwd, agentDir, []).settingsManager,
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    noContextFiles: true,
-    extensionFactories: [
-      branchContext,
-      applyPatchResultExtension,
-      approvalReviewResultExtension,
-      silentTurnRecovery,
-      ...(oauthPoolRecovery ? [oauthPoolRecovery] : []),
-    ],
-    systemPrompt: ENSO_SYSTEM_PROMPT,
-    skillsOverride: () => ({ skills: [], diagnostics: [] }),
-    promptsOverride: () => ({ prompts: [], diagnostics: [] }),
-
-    themesOverride: () => ({ themes: [], diagnostics: [] }),
-    agentsFilesOverride: () => ({ agentsFiles: [] }),
-    appendSystemPromptOverride: () => [],
-  });
-}
 /**
  * pi 的 SessionManager._persist 在第一条 assistant 前不写文件；纯派发父容器永远没有 assistant，
  * 派发通知等 custom entry 只在内存里，resume 指向的文件也不存在。所以没有 assistant 时由我们强制落盘。
@@ -1280,7 +1235,6 @@ export class SessionSupervisor {
       child.gate.cancelAll();
       child.asks.cancelAll();
       cancelContinuousMemory(child.session.sessionManager);
-      child.ensoApp?.cancelAll('Parent released');
       try {
         await child.session.abort();
       } catch {}
@@ -1299,7 +1253,6 @@ export class SessionSupervisor {
     managed.gate.cancelAll();
     managed.asks.cancelAll();
     cancelContinuousMemory(managed.session.sessionManager);
-    managed.ensoApp?.cancelAll('Session released');
     managed.browser?.cancelAll('Session released');
     managed.memory?.cancelAll('Session released');
     managed.delegation?.cancelAll('Session released');
@@ -1601,22 +1554,20 @@ export class SessionSupervisor {
       return;
     }
     const identity =
-      command.type === 'capability-result'
-        ? command.child
-        : command.type === 'browser-result' ||
-            command.type === 'memory-result' ||
-            command.type === 'delegation-result' ||
-            command.type === 'computer-result' ||
-            command.type === 'plugin-tool-result' ||
-            command.type === 'plugin-tool-progress' ||
-            command.type === 'plugin-intercept-result' ||
-            command.type === 'plugin-inject'
-          ? command.identity
-          : command.type === 'dismiss-child' ||
-              command.type === 'dismiss-coworker' ||
-              command.type === 'resume-coworker'
-            ? command.parent
-            : command.identity;
+      command.type === 'browser-result' ||
+      command.type === 'memory-result' ||
+      command.type === 'delegation-result' ||
+      command.type === 'computer-result' ||
+      command.type === 'plugin-tool-result' ||
+      command.type === 'plugin-tool-progress' ||
+      command.type === 'plugin-intercept-result' ||
+      command.type === 'plugin-inject'
+        ? command.identity
+        : command.type === 'dismiss-child' ||
+            command.type === 'dismiss-coworker' ||
+            command.type === 'resume-coworker'
+          ? command.parent
+          : command.identity;
     const scopeId =
       command.type === 'spawn-child' ? command.identity.parent.sessionId : identity.sessionId;
     if (this.workspaceSwitch.defer(scopeId, () => this.handleCommand(command))) return;
@@ -1844,7 +1795,6 @@ export class SessionSupervisor {
         // 只有子代理 Run（Main 带 requestBudget 标记）计数；Bot 成员等不 arm，不计数
         if (command.requestBudget) managed.requestBudget?.arm();
         else managed.requestBudget?.disarm();
-        managed.safeJournal?.appendUserText(command.task.text);
         const images = command.task.images.map((image) => ({ type: 'image' as const, ...image }));
         void managed.session
           .prompt(
@@ -2069,19 +2019,6 @@ export class SessionSupervisor {
       case 'ask-respond':
         this.must(command.identity).asks.respond(command.requestId, command.answer);
         return;
-      case 'capability-result': {
-        const managed = this.must(command.child);
-        if (
-          !managed.childIdentity ||
-          !isSameChildSessionIdentity(command.child, managed.childIdentity) ||
-          managed.currentTurnId !== command.turnId
-        ) {
-          return;
-        }
-        managed.safeJournal?.appendCapabilityResult(command.requestId, command.envelope);
-        managed.ensoApp?.resolve(command.turnId, command.requestId, command.envelope);
-        return;
-      }
       case 'browser-result': {
         const managed = this.must(command.identity);
         if (!managed.browser?.resolve(command)) {
@@ -2316,7 +2253,6 @@ export class SessionSupervisor {
         managed.gate.cancelAll();
         managed.asks.cancelAll();
         cancelContinuousMemory(managed.session.sessionManager);
-        managed.ensoApp?.cancelAll('Enso capability invocation aborted');
         managed.browser?.cancelAll('Browser action aborted');
         managed.memory?.cancelAll('Memory action aborted');
         managed.delegation?.cancelAll('Delegation action aborted');
@@ -2821,29 +2757,26 @@ export class SessionSupervisor {
         thinkingOverride,
         identity: childIdentity,
         gate: childGate,
-        askManager,
         resumeFile: childResume,
         extraTools = [],
         pluginSource,
       }) => {
-        const isLockedEnso = resolved?.tools === 'enso-locked';
-        // 插件能力下沉：锁定档不挂任何插件能力；只读档不挂插件工具（可能有副作用，
+        // 插件能力下沉：只读档不挂插件工具（可能有副作用，
         // Plan 模式靠只读子代理保证不写）；事件只拦 tool_call（独立预算），其余只通知
-        const childPlugins =
-          pluginSource && !isLockedEnso
-            ? this.childPluginBridge(
-                pluginSource,
-                resolved?.displayName ?? agentType?.name,
-                resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
-                  ? []
-                  : pluginToolDescriptors,
-                childPluginEventPlan(pluginEventPlan)
-              )
-            : undefined;
+        const childPlugins = pluginSource
+          ? this.childPluginBridge(
+              pluginSource,
+              resolved?.displayName ?? agentType?.name,
+              resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
+                ? []
+                : pluginToolDescriptors,
+              childPluginEventPlan(pluginEventPlan)
+            )
+          : undefined;
         const selectedMcp = resolved?.mcpServers ?? agentType?.mcpServers ?? [];
         // 冷连接最长 3s：与模型解析、资源加载并行，不串在首字节前的关键路径最前面
         const mcpPending =
-          !isLockedEnso && selectedMcp.length > 0
+          selectedMcp.length > 0
             ? Promise.all(selectedMcp.map((server) => this.mcp.toolsFor([server], 3000)))
             : Promise.resolve([]);
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
@@ -2861,15 +2794,11 @@ export class SessionSupervisor {
           childReasoning.enabled,
           selectedModel.modelId
         );
-        if (isLockedEnso && (!childIdentity || !askManager)) {
-          throw new Error('Locked Enso child requires exact identity and ask manager.');
-        }
-        const childExploreFold =
-          !isLockedEnso && exploreFoldEnabled ? createExploreFoldState() : undefined;
+        const childExploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
         const typed = Boolean(resolved || agentType);
         const childCodemode = new CodemodeHost({
-          codemode: !isLockedEnso && toolEnabled('isolated_sandbox'),
-          deferredServers: isLockedEnso || typed ? [] : deferredMcp,
+          codemode: toolEnabled('isolated_sandbox'),
+          deferredServers: typed ? [] : deferredMcp,
         });
         const selectedSkillPaths = resolved?.skillPaths ?? agentType?.skillPaths ?? [];
         const branchContext = this.branchContextExtension(() =>
@@ -2883,46 +2812,38 @@ export class SessionSupervisor {
           managed.silentTurnKind = kind;
         });
         const childReminders = new SystemReminderRegistry();
-        const subLoader = isLockedEnso
-          ? createEnsoResourceLoader(
-              cwd,
-              this.options.agentDir,
-              branchContext,
-              silentTurnRecovery,
-              this.oauthPoolRecovery()
-            )
-          : createSessionResourceLoader({
-              branchContext,
-              silentTurnRecovery,
-              oauthPoolRecovery: this.oauthPoolRecovery(),
-              cwd,
-              agentDir: this.options.agentDir,
-              noSkills: resolved || agentType ? true : loadLocalSkills === false,
-              noExtensions: Boolean(resolved || agentType),
-              skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
-              instruction,
-              remoteAgentsFiles,
-              ...(remote ? { remoteSsh: { host: remote.host } } : {}),
-              // 类型化子代理与项目资源隔离（同 noSkills/noExtensions），不追加 harness 资源
-              loadHarnessAssets: resolved || agentType ? false : loadHarnessAssets,
-              trustedProjectCode,
-              pluginHooks: {
-                hooks: pluginHooks,
-                role: {
-                  kind: 'subagent',
-                  agentType: resolved?.displayName ?? agentType?.name ?? 'general',
-                },
-                resumed: Boolean(childResume),
-              },
-              ...(childPlugins?.events ? { pluginEvents: { invoker: childPlugins.events } } : {}),
-              ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
-              reminders: childReminders,
-              codemode: childCodemode.extension,
-              childContract: true,
-              autoRejectApprovals: childGate.autoReject,
-              systemPromptAppend,
-              systemPromptBoost,
-            });
+        const subLoader = createSessionResourceLoader({
+          branchContext,
+          silentTurnRecovery,
+          oauthPoolRecovery: this.oauthPoolRecovery(),
+          cwd,
+          agentDir: this.options.agentDir,
+          noSkills: resolved || agentType ? true : loadLocalSkills === false,
+          noExtensions: Boolean(resolved || agentType),
+          skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
+          instruction,
+          remoteAgentsFiles,
+          ...(remote ? { remoteSsh: { host: remote.host } } : {}),
+          // 类型化子代理与项目资源隔离（同 noSkills/noExtensions），不追加 harness 资源
+          loadHarnessAssets: resolved || agentType ? false : loadHarnessAssets,
+          trustedProjectCode,
+          pluginHooks: {
+            hooks: pluginHooks,
+            role: {
+              kind: 'subagent',
+              agentType: resolved?.displayName ?? agentType?.name ?? 'general',
+            },
+            resumed: Boolean(childResume),
+          },
+          ...(childPlugins?.events ? { pluginEvents: { invoker: childPlugins.events } } : {}),
+          ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
+          reminders: childReminders,
+          codemode: childCodemode.extension,
+          childContract: true,
+          autoRejectApprovals: childGate.autoReject,
+          systemPromptAppend,
+          systemPromptBoost,
+        });
         const [mcpToolGroups] = await Promise.all([mcpPending, subLoader.reload()]);
         if (mcpToolGroups.some((tools) => tools.length === 0)) {
           throw new Error('Agent profile MCP resource failed to establish.');
@@ -2930,71 +2851,35 @@ export class SessionSupervisor {
         const typeMcpTools = mcpToolGroups
           .flat()
           .map((tool) => withApproval(childGate, 'mcp', tool));
-        const ensoApp =
-          isLockedEnso && childIdentity && askManager
-            ? new EnsoAppInvoker(
-                childIdentity,
-                () => this.sessions.get(childIdentity.sessionId)?.currentTurnId,
-                (request) => {
-                  const managed = this.sessions.get(childIdentity.sessionId);
-                  if (
-                    !managed?.childIdentity ||
-                    !isSameChildSessionIdentity(childIdentity, managed.childIdentity)
-                  ) {
-                    throw new Error('Enso child generation is no longer current.');
-                  }
-                  managed.safeJournal?.append({
-                    type: 'enso-operation',
-                    operationId: request.requestId,
-                    capabilityId: request.capabilityId,
-                    toolCallId: request.requestId,
-                    at: Date.now(),
-                  });
-                  this.options.emit({
-                    type: 'capability-invoke',
-                    child: request.child,
-                    seq: ++managed.seq,
-                    turnId: request.turnId,
-                    requestId: request.requestId,
-                    capabilityId: request.capabilityId,
-                    params: request.params,
-                  });
-                }
-              )
-            : undefined;
         // 子会话自己的门：审批条落在子会话 tab，allowSession 不跨会话（同 MCP）
         const childPluginTools = childPlugins?.tools
           ? createPluginTools([...childPlugins.descriptors], childPlugins.tools).map((tool) =>
               withApproval(childGate, 'mcp', tool)
             )
           : [];
-        const childTools = isLockedEnso
-          ? [createEnsoCapabilitiesTool(), createEnsoAppTool(ensoApp!), createAskTool(askManager!)]
-          : [
-              ...(!toolEnabled(WORKSPACE_WRITE_TOOL_ID) ||
-              resolved?.tools === 'readonly' ||
-              agentType?.tools === 'readonly'
-                ? readOnlyTools(childGate)
-                : buildBaseTools(
-                    childGate,
-                    undefined,
-                    agentType?.writeScope,
-                    childIdentity?.sessionId
-                  )),
-              ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
-              ...childPluginTools,
-              ...(extraTools as Def[]),
-              ...(childExploreFold ? createExploreFoldTools(childExploreFold) : []),
-            ];
+        const childTools = [
+          ...(!toolEnabled(WORKSPACE_WRITE_TOOL_ID) ||
+          resolved?.tools === 'readonly' ||
+          agentType?.tools === 'readonly'
+            ? readOnlyTools(childGate)
+            : buildBaseTools(
+                childGate,
+                undefined,
+                agentType?.writeScope,
+                childIdentity?.sessionId
+              )),
+          ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
+          ...childPluginTools,
+          ...(extraTools as Def[]),
+          ...(childExploreFold ? createExploreFoldTools(childExploreFold) : []),
+        ];
         const childRunaway = new RunawayGuard();
         const requestBudget = new RequestBudget();
-        // 到软预算时把一次性收尾提示排进下一条工具结果；锁定会话工具不装饰，提示无处可注入
-        if (!isLockedEnso) {
-          childReminders.register('request-budget', () => {
-            const notice = requestBudget.takeNotice();
-            return notice ? [notice] : [];
-          });
-        }
+        // 到软预算时把一次性收尾提示排进下一条工具结果
+        childReminders.register('request-budget', () => {
+          const notice = requestBudget.takeNotice();
+          return notice ? [notice] : [];
+        });
         const childBudget = new ToolOutputBudget({
           rootDir: path.join(
             this.options.sessionDir,
@@ -3008,31 +2893,11 @@ export class SessionSupervisor {
             runaway: childRunaway,
             budget: childBudget,
           });
-        const subTools = omitNamedTools(
-          isLockedEnso ? rawSubTools : decorateChild(rawSubTools),
-          disabledTools
-        );
+        const subTools = omitNamedTools(decorateChild(rawSubTools), disabledTools);
         childCodemode.bindDeferredTools(deferredMcpLoader(childGate, decorateChild));
-        const safeJournal =
-          isLockedEnso && childIdentity
-            ? new EnsoSafeJournal(this.options.sessionDir, childIdentity, cwd, childResume)
-            : undefined;
-        const sessionManager = safeJournal
-          ? SessionManager.inMemory(cwd)
-          : childResume
-            ? SessionManager.open(childResume, this.options.sessionDir, cwd)
-            : SessionManager.create(cwd, this.options.sessionDir);
-        if (safeJournal && childResume) {
-          for (const record of (await EnsoSafeJournal.restore(childResume)).records) {
-            if (record.type === 'safe-user-text') {
-              sessionManager.appendMessage({
-                role: 'user',
-                content: [{ type: 'text', text: record.text }],
-                timestamp: record.at,
-              });
-            }
-          }
-        }
+        const sessionManager = childResume
+          ? SessionManager.open(childResume, this.options.sessionDir, cwd)
+          : SessionManager.create(cwd, this.options.sessionDir);
         const { session } = await createAgentSession({
           cwd,
           agentDir: this.options.agentDir,
@@ -3052,7 +2917,7 @@ export class SessionSupervisor {
               cwd
             )
           : undefined;
-        if (childIdentity && !isLockedEnso) {
+        if (childIdentity) {
           const childServers = typed
             ? selectedMcp
             : directMcp.filter((server) => !isDeferredMcp(server));
@@ -3073,7 +2938,6 @@ export class SessionSupervisor {
         return {
           session,
           modelId: selectedModel.modelId,
-          ...(safeJournal ? { safeJournal } : {}),
           modelRef: settingsModelRef(selectedModel),
           toolIds: [...subTools.map((tool) => tool.name), ...childExtraTools],
           // Decorators clone tools; exclude MCP and plugin tools by identity before decoration.
@@ -3083,8 +2947,7 @@ export class SessionSupervisor {
               .map((tool) => tool.name),
             ...childExtraTools,
           ],
-          ...(ensoApp ? { ensoApp } : {}),
-          ...(isLockedEnso ? {} : { runawayGuard: childRunaway }),
+          runawayGuard: childRunaway,
           requestBudget,
           ...(childPlugins?.tools ? { pluginTools: childPlugins.tools } : {}),
           ...(childPlugins?.events ? { pluginEvents: childPlugins.events } : {}),
@@ -3526,10 +3389,8 @@ export class SessionSupervisor {
       resumeFile?: string;
       asks?: AskManager;
       checkpoints?: CheckpointManager;
-      ensoApp?: EnsoAppInvoker;
       toolIds?: string[];
       proofToolIds?: string[];
-      safeJournal?: EnsoSafeJournal;
       runawayGuard?: RunawayGuard;
       requestBudget?: RequestBudget;
     } = {}
@@ -3555,8 +3416,6 @@ export class SessionSupervisor {
       toolIds: opts.toolIds ?? [],
       proofToolIds: opts.proofToolIds ?? opts.toolIds ?? [],
       promptedRequestIds: new Set(),
-      ...(opts.ensoApp ? { ensoApp: opts.ensoApp } : {}),
-      ...(opts.safeJournal ? { safeJournal: opts.safeJournal } : {}),
       adaptiveDowngraded: new Set<string>(),
       silentTurnNudgeUsed: false,
       ...(opts.runawayGuard ? { runawayGuard: opts.runawayGuard } : {}),
@@ -3813,17 +3672,6 @@ export class SessionSupervisor {
     if (cwd !== factory.cwd || identity.typeKey !== config.typeKey) {
       throw new Error('Child source or Agent type does not match the reserved identity.');
     }
-    const isLockedEnso = identity.typeKey === ENSO_LOCKED_PROFILE.typeKey;
-    if (
-      isLockedEnso !== (config.tools === 'enso-locked') ||
-      identity.profileId !== config.lockedProfileId ||
-      (isLockedEnso &&
-        (identity.profileId !== ENSO_LOCKED_PROFILE.profileId ||
-          config.skillPaths.length !== 0 ||
-          config.mcpServers.length !== 0))
-    ) {
-      throw new Error('Child locked profile does not match the reserved identity.');
-    }
     const existing = this.sessions.get(identity.sessionId);
     if (existing) {
       if (
@@ -3836,7 +3684,7 @@ export class SessionSupervisor {
         type: 'child-ready',
         identity,
         seq: ++existing.seq,
-        sessionFile: existing.safeJournal?.sessionFile ?? requiredSessionFile(existing.session),
+        sessionFile: requiredSessionFile(existing.session),
         proof: {
           spawnSpecId: config.spawnSpecId,
           typeKey: config.typeKey,
@@ -3883,20 +3731,15 @@ export class SessionSupervisor {
       resolved: config,
       identity,
       gate,
-      askManager,
       resumeFile,
-      ...(isLockedEnso
-        ? {}
-        : {
-            extraTools: [
-              createMessageMainTool(
-                (text, urgent) => this.notifier.notify(identity.parent.sessionId, text, { urgent }),
-                identity.instanceName
-              ),
-              this.createPeerMessageTool(identity.parent.sessionId, identity.instanceName),
-            ],
-            pluginSource: { identity, kind: 'subagent', name: identity.instanceName },
-          }),
+      extraTools: [
+        createMessageMainTool(
+          (text, urgent) => this.notifier.notify(identity.parent.sessionId, text, { urgent }),
+          identity.instanceName
+        ),
+        this.createPeerMessageTool(identity.parent.sessionId, identity.instanceName),
+      ],
+      pluginSource: { identity, kind: 'subagent', name: identity.instanceName },
     });
     const metadata: ChildConversationMetadata = {
       parentId: identity.parent.sessionId,
@@ -3905,7 +3748,6 @@ export class SessionSupervisor {
       agentInstanceId: identity.instanceId,
       agentInstanceName: identity.instanceName,
       dispatchOrigin: 'typed-mention',
-      ...(identity.profileId ? { lockedProfileId: identity.profileId } : {}),
     };
     const info: CoworkerInfo = {
       id: identity.sessionId,
@@ -3914,7 +3756,7 @@ export class SessionSupervisor {
       agentType: identity.typeKey,
       status: 'idle',
       modelId: result.modelId,
-      sessionFile: result.safeJournal?.sessionFile ?? result.session.sessionFile,
+      sessionFile: result.session.sessionFile,
       createdAt: Date.now(),
     };
     parent.coworkers.set(identity.instanceName, info);
@@ -3931,10 +3773,8 @@ export class SessionSupervisor {
       coworkerName: identity.instanceName,
       resumeFile,
       asks: askManager,
-      ensoApp: result.ensoApp,
       toolIds: result.toolIds,
       proofToolIds: result.proofToolIds,
-      safeJournal: result.safeJournal,
       ...(result.runawayGuard ? { runawayGuard: result.runawayGuard } : {}),
       ...(result.requestBudget ? { requestBudget: result.requestBudget } : {}),
     });
@@ -3944,7 +3784,7 @@ export class SessionSupervisor {
       type: 'child-ready',
       identity,
       seq: ++managedRef.seq,
-      sessionFile: result.safeJournal?.sessionFile ?? requiredSessionFile(result.session),
+      sessionFile: requiredSessionFile(result.session),
       proof: {
         spawnSpecId: config.spawnSpecId,
         typeKey: config.typeKey,
@@ -4074,7 +3914,6 @@ export class SessionSupervisor {
       managed.gate.cancelAll();
       managed.asks.cancelAll();
       cancelContinuousMemory(managed.session.sessionManager);
-      managed.ensoApp?.cancelAll('Child dismissed');
       try {
         await managed.session.abort();
       } catch {}
@@ -4450,17 +4289,7 @@ export class SessionSupervisor {
           managed.pendingPrivacyMask = undefined;
         }
         this.replaceLastMessage(managed, projected);
-        if (projected?.role === 'assistant') {
-          const text = projected.content
-            .filter(
-              (part): part is Extract<(typeof projected.content)[number], { type: 'text' }> =>
-                part.type === 'text'
-            )
-            .map((part) => part.text)
-            .join('\\n');
-          if (text) managed.safeJournal?.appendAssistantText(text);
-          this.noteBudgetRequest(managed, projected);
-        }
+        if (projected?.role === 'assistant') this.noteBudgetRequest(managed, projected);
         this.emitSessionMeta(managed);
         return;
       }
@@ -5455,7 +5284,6 @@ export class SessionSupervisor {
     this.bgTasks.stopAll();
     for (const managed of this.sessions.values()) {
       cancelContinuousMemory(managed.session.sessionManager);
-      managed.ensoApp?.cancelAll('Enso worker shutdown');
       managed.browser?.cancelAll('Enso worker shutdown');
       managed.memory?.cancelAll('Enso worker shutdown');
       managed.delegation?.cancelAll('Enso worker shutdown');

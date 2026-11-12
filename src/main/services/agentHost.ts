@@ -14,13 +14,10 @@ import {
   type AgentTypeRegistrySnapshot,
   buildAgentTypeRegistrySnapshot,
   type ChildSessionIdentity,
-  ENSO_AGENT_TYPE_KEY,
-  ENSO_LOCKED_PROFILE,
   isReservedAgentTypeName,
   type SessionIdentity,
   visibleMemberAgentTypes,
 } from '@shared/builtinAgents';
-import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
 import {
   type ChildProfileToolOptions,
   childProfileShell,
@@ -116,7 +113,6 @@ import {
 } from '@shared/virtualModels';
 import { parseWebSearchChain, type WebSearchChainEntry } from '@shared/webSearchChain';
 import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
-import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
 import {
@@ -868,30 +864,6 @@ export function resolveAgentTypeSpawnConfig(
   const candidate = snapshot.candidates.find((entry) => entry.typeKey === typeKey);
   if (!candidate) return { ok: false, error: 'Agent type is unavailable.' };
 
-  if (typeKey === ENSO_AGENT_TYPE_KEY) {
-    return {
-      ok: true,
-      config: {
-        typeKey,
-        displayName: 'Enso',
-        description: candidate.description,
-        spawnSpecId: randomUUID(),
-        systemPrompt: ENSO_SYSTEM_PROMPT,
-        model: parentModel.config,
-        tools: 'enso-locked',
-        skillPaths: [],
-        skillBindingIds: [],
-        mcpServers: [],
-        mcpBindingIds: [],
-        systemPromptHash: createHash('sha256').update(ENSO_SYSTEM_PROMPT).digest('hex'),
-        lockedProfileId: ENSO_LOCKED_PROFILE.profileId,
-      },
-      expectedModel: parentModel.ref,
-      expectedToolIds: ENSO_LOCKED_PROFILE.toolIds,
-      allowsModelOverride: false,
-    };
-  }
-
   const state = readSettingsState();
   let definition: Omit<AgentTypeEntry, 'id'> | RuntimeAgentType | undefined;
   if (typeKey.startsWith('builtin:')) {
@@ -1633,15 +1605,6 @@ export function registerPluginSessionBridge(
       return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法中止会话' };
     },
   });
-}
-
-export function sendCapabilityResultToSession(
-  child: ChildSessionIdentity,
-  turnId: string,
-  requestId: string,
-  envelope: CapabilityExecutionEnvelope
-): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'capability-result', child, turnId, requestId, envelope });
 }
 
 export function setSessionThinking(

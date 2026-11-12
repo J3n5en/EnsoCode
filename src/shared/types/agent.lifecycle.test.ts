@@ -436,18 +436,6 @@ describe('generation lifecycle/events', () => {
     expect(
       parseAgentWorkerEvent({ ...ready, identity: { ...child, generation: 'old' } })
     ).toBeNull();
-    expect(
-      parseAgentWorkerEvent({
-        ...ready,
-        proof: { ...proof, loadedMcpBindingIds: ['missing-main-binding'] },
-      })
-    ).toBeNull();
-    expect(
-      parseAgentWorkerEvent({
-        ...ready,
-        proof: { ...proof, toolIds: [...proof.toolIds, 'bash'] },
-      })
-    ).toBeNull();
     expect(parseAgentWorkerEvent({ ...ready, rendererVerified: true })).toBeNull();
     expect(
       parseAgentWorkerEvent({ type: 'status', sessionId: child.sessionId, seq: 3, status: 'idle' })
@@ -637,7 +625,7 @@ describe('generation lifecycle/events', () => {
     expect(parseAgentCommand({ type: 'pin-sessions' })).toBeNull();
   });
 
-  it('turn/capability 事件必须 exact identity generation + turnId', () => {
+  it('turn 事件必须 exact identity generation + turnId；已移除的 capability-invoke 拒收', () => {
     expect(
       parseAgentWorkerEvent({
         type: 'turn-completed',
@@ -655,17 +643,6 @@ describe('generation lifecycle/events', () => {
         requestId: 'cap-1',
         capabilityId: 'appearance.theme',
         params: { value: 'dark' },
-      })
-    ).not.toBeNull();
-    expect(
-      parseAgentWorkerEvent({
-        type: 'capability-invoke',
-        child: { ...child, generation: 'old' },
-        seq: 4,
-        turnId: 'turn-1',
-        requestId: 'cap-1',
-        capabilityId: 'appearance.theme',
-        params: {},
       })
     ).toBeNull();
   });

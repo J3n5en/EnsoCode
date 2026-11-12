@@ -18,8 +18,6 @@ export const TOOL_LABEL_KEYS: Partial<Record<string, string>> = {
   task_stop: 'Task stop',
   message_coworker: 'Message coworker',
   message_main_agent: 'Message main agent',
-  enso_app: 'Enso app',
-  enso_capabilities: 'Enso capabilities',
   recall: 'Recall memory',
   memory_search: 'Memory search',
   memory_capture: 'Memory capture',

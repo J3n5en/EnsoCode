@@ -11,6 +11,12 @@ export const child = {
   generation: CHILD_GENERATION,
   parent,
   instanceId: INSTANCE_ID,
+  instanceName: 'scout 3333',
+  typeKey: 'builtin:scout',
+} as const;
+/** 历史 Enso child：只用于读兼容（metadata / receipt / safe journal）断言 */
+export const legacyEnsoChild = {
+  ...child,
   instanceName: 'Enso 3333',
   typeKey: 'agent:enso',
   profileId: 'enso-locked-v1',
@@ -25,9 +31,9 @@ export const model = {
 export const task = { text: 'Configure theme', images: [], fileMentions: [] };
 export const proof = {
   spawnSpecId: SPAWN_SPEC_ID,
-  typeKey: 'agent:enso',
+  typeKey: 'builtin:scout',
   model: { providerId: 'p', modelId: 'm' },
-  toolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
+  toolIds: ['read', 'grep'],
   loadedSkillBindingIds: [],
   loadedMcpBindingIds: [],
   systemPromptHash: 'sha256:locked-prompt',
@@ -35,7 +41,7 @@ export const proof = {
 export const receipt = {
   receiptId: RECEIPT_ID,
   operationId: 'op-1',
-  child,
+  child: legacyEnsoChild,
   turnId: 'turn-1',
   requestId: 'cap-1',
   capabilityId: 'appearance.theme',

@@ -53,7 +53,6 @@ describe('新会话 Preparing 收敛', () => {
       conversations: {},
       order: [],
       activeId: null,
-      pendingAgentPrefill: undefined,
     });
     settingsModule.useSettingsStore.setState({
       projects: [{ id: 'project', name: 'Project', path: '/workspace' }],

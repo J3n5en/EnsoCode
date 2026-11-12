@@ -68,7 +68,6 @@ describe('parent history tail hydrate', () => {
       conversations: {},
       order: [],
       activeId: null,
-      pendingAgentPrefill: undefined,
     });
     settingsModule.useSettingsStore.setState({
       projects: [{ id: 'project', name: 'Project', path: '/workspace' }],

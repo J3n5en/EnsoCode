@@ -1,4 +1,3 @@
-import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import type {
   ChildHistoryResult,
   ConversationReloadResult,
@@ -12,7 +11,6 @@ import type * as SettingsModule from '../settings';
 import type * as SessionsModule from './index';
 
 export let onAgentEvent: ((event: RendererAgentEvent) => void) | undefined;
-export let onCapabilityAsk: ((request: CapabilityAskRequest) => void) | undefined;
 export let onDispatchEvent: ((event: DispatchMainEvent) => void) | undefined;
 
 export interface SessionProjectionState {
@@ -173,12 +171,6 @@ export const agentSetApprovalMode = vi.fn(
 );
 
 export function installSessionGlobals(options?: { captureAsks?: boolean }) {
-  const onAsk = options?.captureAsks
-    ? vi.fn((callback: (request: CapabilityAskRequest) => void) => {
-        onCapabilityAsk = callback;
-        return vi.fn();
-      })
-    : vi.fn(() => vi.fn());
   const onDispatch = options?.captureAsks
     ? vi.fn((callback: (event: DispatchMainEvent) => void) => {
         onDispatchEvent = callback;
@@ -203,10 +195,6 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
         onChanged: vi.fn(),
       },
       instructions: { delete: vi.fn(async () => ({ ok: true })) },
-      capabilities: {
-        onAsk,
-        respond: vi.fn(async () => ({ ok: true, accepted: true })),
-      },
       agent: {
         onFocusSession: vi.fn(),
         onEvent: vi.fn((callback: (event: RendererAgentEvent) => void) => {
@@ -279,7 +267,6 @@ export async function seedParent() {
     },
     order: [draftId],
     activeId: draftId,
-    pendingAgentPrefill: undefined,
   }));
 }
 
@@ -319,7 +306,6 @@ export async function resetSessionHarness() {
     conversations: {},
     order: [],
     activeId: null,
-    pendingAgentPrefill: undefined,
     workspaceRevisionByConversation: {},
   });
   settingsModule.useSettingsStore.setState({

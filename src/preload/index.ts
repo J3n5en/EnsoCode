@@ -7,16 +7,6 @@ import type {
   BtwSpawnRequest,
 } from '@shared/btw';
 import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
-import type {
-  CapabilityAskDecisionAck,
-  CapabilityAskRequest,
-  CapabilityAskResponse,
-  OauthFlowControlRequest,
-  OauthFlowEvent,
-  OauthFlowPromptResponse,
-  StartOauthResult,
-  StartOauthWizardRequest,
-} from '@shared/capabilities/types';
 import type { ElevationRequestView } from '@shared/elevation';
 import type {
   ChatModelDto,
@@ -45,6 +35,13 @@ import type {
   TreeNodeDto,
   TreeQuery,
 } from '@shared/memory/graphDto';
+import type {
+  OauthFlowControlRequest,
+  OauthFlowEvent,
+  OauthFlowPromptResponse,
+  StartOauthResult,
+  StartOauthWizardRequest,
+} from '@shared/oauthFlow';
 import type { PastedTextFileResult } from '@shared/pastedText';
 import type { PlanRespondAction } from '@shared/planMode';
 import type { PresetImportDraft } from '@shared/presetImport';
@@ -221,10 +218,8 @@ import type {
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import type {
-  AgentComposerPrefillEvent,
   AgentDispatchRequest,
   AgentDispatchResult,
-  AgentSummonRequest,
   MainModelSelectionBindingResult,
   ParentModelSelectionRequest,
   ParentSourceBindingRequest,
@@ -1177,16 +1172,6 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_UPDATE_SELECTION, request),
   },
 
-  capabilities: {
-    onAsk: (callback: (request: CapabilityAskRequest) => void): (() => void) => {
-      const listener = (_event: unknown, request: CapabilityAskRequest) => callback(request);
-      ipcRenderer.on(IPC_CHANNELS.CAPABILITIES_ASK, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.CAPABILITIES_ASK, listener);
-    },
-    respond: (response: CapabilityAskResponse): Promise<CapabilityAskDecisionAck> =>
-      ipcRenderer.invoke(IPC_CHANNELS.CAPABILITIES_RESPOND, response),
-  },
-
   proxy: {
     apply: (settings: {
       mode: string;
@@ -1344,15 +1329,6 @@ const electronAPI = {
       x: number,
       y: number
     ): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_POPUP_MENU, items, x, y),
-    summonAgent: (request: AgentSummonRequest): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMON, request),
-    onAgentComposerPrefill: (
-      callback: (event: AgentComposerPrefillEvent) => void
-    ): (() => void) => {
-      const listener = (_event: unknown, prefill: AgentComposerPrefillEvent) => callback(prefill);
-      ipcRenderer.on(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
-    },
     takeOpenFolders: (): Promise<string[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS),
     installShellIntegration: (kind: ShellIntegration): Promise<void> =>

@@ -9,7 +9,6 @@ describe('sessionThemeState', () => {
     expect(sessionThemeState({ status: 'running' }, {})).toBe('running');
     expect(sessionThemeState({ status: 'running', pendingAsks: [{}] }, {})).toBe('waiting');
     expect(sessionThemeState({ status: 'idle', pendingApprovals: [{}] }, {})).toBe('waiting');
-    expect(sessionThemeState({ status: 'idle', pendingCapabilityAsks: [{}] }, {})).toBe('waiting');
     expect(sessionThemeState({ status: 'failed', pendingAsks: [{}] }, {})).toBe('error');
   });
 
@@ -57,7 +56,6 @@ describe('conversationThemeState', () => {
     expect(conversationThemeState({ status: 'idle', hasRunningChild: true })).toBe('running');
     expect(conversationThemeState({ status: 'idle', spawning: true })).toBe('running');
     expect(conversationThemeState({ status: 'running', pendingApprovals: [{}] })).toBe('waiting');
-    expect(conversationThemeState({ status: 'idle', pendingCapabilityAsks: [{}] })).toBe('waiting');
     expect(conversationThemeState({ status: 'failed', hasRunningChild: true })).toBe('error');
     expect(conversationThemeState({ status: 'idle', unread: true })).toBe('idle');
   });

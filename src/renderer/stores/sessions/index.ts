@@ -1,5 +1,4 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
-import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { conversationCwd } from '@shared/conversationCwd';
 import {
@@ -332,12 +331,6 @@ export interface Conversation extends SessionProjection {
   syncStalled?: boolean;
   /** 手动重读在途（菜单项禁用 / 反馈）；不持久化 */
   reloading?: boolean;
-  /** 当前 child TAB 的危险 capability ASK；不持久化。 */
-  pendingCapabilityAsks?: CapabilityAskRequest[];
-  /** allow ACK 后留在 child TAB 的 OAuth 宿主请求；不持久化。 */
-  activeOauthAsk?: CapabilityAskRequest;
-  /** Main summon 注入的一次性 typed recipient。 */
-  prefillAgentTypeKey?: AgentTypeKey;
   /** 父会话专有：在编 coworker id 列表（驱动 tab 条） */
   coworkerIds?: string[];
   /** 父会话专有：当前 tab（undefined = 主会话） */
@@ -391,8 +384,6 @@ interface SessionsState {
     branch: string,
     create?: boolean
   ): Promise<WorkspaceBranchSwitchResult>;
-  /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
-  pendingAgentPrefill?: AgentTypeKey;
   /** 外部（插件侧栏）要求展开某个子代理的详情；TaskBar 消费后清空 */
   pendingAgentOpen?: { sessionId: string; agentId: string } | null;
   focusSubagent(sessionId: string, agentId: string): void;
@@ -449,13 +440,6 @@ interface SessionsState {
     task: AgentDispatchTask,
     selectedModel: DefaultModelRef | null
   ): Promise<AgentDispatchResult>;
-  prefillAgent(typeKey: AgentTypeKey, prompt?: string): void;
-  clearAgentPrefill(conversationId: string): void;
-  respondCapabilityAsk(
-    conversationId: string,
-    requestId: string,
-    decision: 'allow' | 'deny'
-  ): Promise<void>;
   send(
     text: string,
     target: SendTarget,
@@ -1115,23 +1099,6 @@ export const useSessionsStore = create<SessionsState>()(
         get().selectConversation(parentId ?? sessionId);
         if (parentId) get().selectTab(parentId, sessionId);
       });
-      window.electronAPI.capabilities.onAsk((request) => {
-        set((state) => {
-          const conversation = state.conversations[request.child.sessionId];
-          if (
-            !conversation ||
-            conversation.generation !== request.child.generation ||
-            (conversation.pendingCapabilityAsks ?? []).some(
-              (pending) => pending.requestId === request.requestId
-            )
-          ) {
-            return state;
-          }
-          return patch(state, conversation.id, {
-            pendingCapabilityAsks: [...(conversation.pendingCapabilityAsks ?? []), request],
-          });
-        });
-      });
       window.electronAPI.agentDispatch.onEvent((event) => {
         set((state) => {
           const conversation = state.conversations[event.child.sessionId];
@@ -1275,8 +1242,6 @@ export const useSessionsStore = create<SessionsState>()(
                   started: true,
                   spawning: false,
                   error: undefined,
-                  pendingCapabilityAsks: [],
-                  activeOauthAsk: undefined,
                 };
                 continue;
               }
@@ -1294,8 +1259,6 @@ export const useSessionsStore = create<SessionsState>()(
                     started: false,
                     status: 'idle',
                     error: undefined,
-                    pendingCapabilityAsks: [],
-                    activeOauthAsk: undefined,
                     // 只有渲染层原以为 worker 还持有（started）时本地正文才可能掉队；
                     // 浏览态（尾窗上屏、started=false）的正文是 jsonl 来的，不动
                     ...(absentTarget &&
@@ -1319,8 +1282,6 @@ export const useSessionsStore = create<SessionsState>()(
                     ...conversation,
                     status: 'failed',
                     error: 'Session ended — history not restored',
-                    pendingCapabilityAsks: [],
-                    activeOauthAsk: undefined,
                   };
             }
             return { conversations };
@@ -1443,7 +1404,7 @@ export const useSessionsStore = create<SessionsState>()(
         )
           return;
 
-        const identity = event.type === 'capability-invoke' ? event.child : event.identity;
+        const identity = event.identity;
         const id = identity.sessionId;
         reloadInFlight.get(id)?.buffered.push(event);
 
@@ -1882,13 +1843,8 @@ export const useSessionsStore = create<SessionsState>()(
                   sessionFile: event.sessionFile,
                 }
               : {}),
-            ...(event.type === 'session-custom-entry' &&
-            event.entry.kind === 'capability-receipt' &&
-            conversation.activeOauthAsk?.requestId === event.entry.receipt.requestId
-              ? { activeOauthAsk: undefined }
-              : {}),
             ...(event.type === 'parent-ended' || event.type === 'child-ended'
-              ? { started: false, pendingCapabilityAsks: [], activeOauthAsk: undefined }
+              ? { started: false }
               : {}),
             // worker 释放冷会话：冷缓存期间 upsert 已被丢，本地正文可能掉队，而回收定时器只在切会话时
             // 武装、夜里不再切就永远不清。这里直接清掉，切回时走 jsonl 尾窗；热正文可信，保留
@@ -2087,8 +2043,7 @@ export const useSessionsStore = create<SessionsState>()(
         if (phase === 'planning' || phase === 'awaiting_review') return;
         if (
           (conversation.pendingApprovals ?? []).length > 0 ||
-          (conversation.pendingAsks ?? []).length > 0 ||
-          (conversation.pendingCapabilityAsks ?? []).length > 0
+          (conversation.pendingAsks ?? []).length > 0
         ) {
           return;
         }
@@ -2166,8 +2121,7 @@ export const useSessionsStore = create<SessionsState>()(
         if (!next) return;
         if (
           (conversation.pendingApprovals ?? []).length > 0 ||
-          (conversation.pendingAsks ?? []).length > 0 ||
-          (conversation.pendingCapabilityAsks ?? []).length > 0
+          (conversation.pendingAsks ?? []).length > 0
         ) {
           return;
         }
@@ -2191,7 +2145,6 @@ export const useSessionsStore = create<SessionsState>()(
         conversations: {},
         order: [],
         activeId: null,
-        pendingAgentPrefill: undefined,
         worktreeStatuses: {},
         workspaceRevisionByConversation: {},
 
@@ -2613,16 +2566,9 @@ export const useSessionsStore = create<SessionsState>()(
           if (existing) {
             const epoch = ++conversationSelectionEpoch;
             if (!(await activateConversationAuthority(existing, epoch))) return null;
-            const pendingAgentPrefill = get().pendingAgentPrefill;
             set((state) => ({
               activeId: existing,
-              pendingAgentPrefill: undefined,
-              conversations: patch(state, existing, {
-                unread: false,
-                ...(pendingAgentPrefill
-                  ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
-                  : {}),
-              }).conversations,
+              conversations: patch(state, existing, { unread: false }).conversations,
             }));
             return existing;
           }
@@ -2651,7 +2597,6 @@ export const useSessionsStore = create<SessionsState>()(
               return null;
             }
           }
-          const pendingAgentPrefill = get().pendingAgentPrefill;
           // 新会话应用默认预设；'default'（内置全局）或预设已删除时不写，spawn 时自然回落全局
           const settings = useSettingsStore.getState();
           const {
@@ -2697,7 +2642,6 @@ export const useSessionsStore = create<SessionsState>()(
             ),
             ...defaultPreset,
             ...(worktree ? { worktree } : {}),
-            ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
             ...(options?.forkedFrom
               ? {
                   forkedFromConversationId: options.forkedFrom.conversationId,
@@ -2709,7 +2653,6 @@ export const useSessionsStore = create<SessionsState>()(
             conversations: { ...state.conversations, [id]: conversation },
             order: [id, ...state.order],
             activeId: id,
-            pendingAgentPrefill: undefined,
           }));
           await activateConversationAuthority(id);
           return id;
@@ -2754,7 +2697,6 @@ export const useSessionsStore = create<SessionsState>()(
 
         selectConversation(id) {
           if (!get().conversations[id]) return;
-          const pendingAgentPrefill = get().pendingAgentPrefill;
           const local = get().conversations[id];
           const epoch = ++conversationSelectionEpoch;
           const now = Date.now();
@@ -2768,13 +2710,9 @@ export const useSessionsStore = create<SessionsState>()(
             }).length > 0;
           set((state) => ({
             activeId: id,
-            pendingAgentPrefill: undefined,
             conversations: patch(state, id, {
               unread: false,
               ...(renewActive ? { activeRenewedAt: now } : {}),
-              ...(pendingAgentPrefill
-                ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
-                : {}),
             }).conversations,
           }));
           void (async () => {
@@ -3125,77 +3063,6 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        prefillAgent(typeKey, prompt) {
-          const parentId = get().activeId;
-          if (parentId && get().conversations[parentId]) {
-            set((state) => ({
-              pendingAgentPrefill: undefined,
-              conversations: patch(state, parentId, {
-                activeTabId: undefined,
-                prefillAgentTypeKey: typeKey,
-                ...(prompt ? { draftText: prompt } : {}),
-              }).conversations,
-            }));
-            return;
-          }
-          set({ pendingAgentPrefill: typeKey });
-          const project = useSettingsStore.getState().projects[0];
-          if (project) {
-            void get()
-              .newConversation(project.id)
-              .then(() => {
-                const newActiveId = get().activeId;
-                if (newActiveId && prompt) {
-                  set((state) => patch(state, newActiveId, { draftText: prompt }));
-                }
-              });
-          }
-        },
-
-        clearAgentPrefill(conversationId) {
-          const conversation = get().conversations[conversationId];
-          if (!conversation?.prefillAgentTypeKey) return;
-          set((state) => patch(state, conversationId, { prefillAgentTypeKey: undefined }));
-        },
-
-        async respondCapabilityAsk(conversationId, requestId, decision) {
-          const conversation = get().conversations[conversationId];
-          const request = conversation?.pendingCapabilityAsks?.find(
-            (candidate) => candidate.requestId === requestId
-          );
-          if (!conversation || !request) return;
-          const result = await window.electronAPI.capabilities.respond({
-            child: request.child,
-            turnId: request.turnId,
-            requestId: request.requestId,
-            decision,
-          });
-          if (!result.ok || !result.accepted) {
-            set((state) =>
-              patch(state, conversationId, {
-                error: !result.ok ? result.error : 'This approval is no longer active.',
-              })
-            );
-            return;
-          }
-          set((state) => {
-            const current = state.conversations[conversationId];
-            if (!current || current.generation !== request.child.generation) return state;
-            return patch(state, conversationId, {
-              pendingCapabilityAsks: (current.pendingCapabilityAsks ?? []).filter(
-                (candidate) => candidate.requestId !== requestId
-              ),
-              activeOauthAsk:
-                decision === 'allow' && request.host?.kind === 'oauth-login'
-                  ? request
-                  : current.activeOauthAsk?.requestId === requestId
-                    ? undefined
-                    : current.activeOauthAsk,
-              error: undefined,
-            });
-          });
-        },
-
         ensureBtwConversation(input) {
           if (get().conversations[input.id]) return;
           const conversation: Conversation = {
@@ -3236,7 +3103,6 @@ export const useSessionsStore = create<SessionsState>()(
               queuedMessages: [],
               pendingApprovals: [],
               pendingAsks: [],
-              pendingCapabilityAsks: [],
               backgroundTasks: [],
               subagents: [],
               commands: [],

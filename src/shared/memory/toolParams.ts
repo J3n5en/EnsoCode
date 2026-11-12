@@ -66,7 +66,7 @@ export interface MemoryCrystallizeRequest {
   force?: boolean;
 }
 
-// 部分模型把对象参数序列化成 JSON 字符串下发（同 ensoApp.ts normalizeCapabilityParams）；
+// 部分模型把对象参数序列化成 JSON 字符串下发；
 // 只在能解析出对象时替换，其它原样透传给 schema 校验报错。
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value === 'string') {

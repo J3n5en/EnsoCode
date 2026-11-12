@@ -57,7 +57,7 @@ export interface TeamAgentType {
   typeKey: AgentTypeKey;
   name: string;
   description: string;
-  tools: 'all' | 'readonly' | 'enso-locked';
+  tools: 'all' | 'readonly';
 }
 
 export interface TeamTargetUnavailable {
@@ -127,7 +127,7 @@ function identityOf(
     | PluginMcpResultEvent
   >
 ): SessionIdentity {
-  return 'child' in event ? event.child : event.identity;
+  return event.identity;
 }
 
 function isSameGeneration(left: SessionIdentity, right: SessionIdentity): boolean {
@@ -299,7 +299,6 @@ export class AgentSessionIndex {
     typeKey: AgentTypeKey,
     displayName: string,
     requestId: string,
-    profileId?: ChildSessionIdentity['profileId'],
     dispatchOrigin: ChildConversationMetadata['dispatchOrigin'] = 'typed-mention',
     mode: ChildConversationMetadata['mode'] = 'coworker',
     title?: string
@@ -332,7 +331,6 @@ export class AgentSessionIndex {
       instanceId,
       instanceName,
       typeKey,
-      ...(profileId ? { profileId } : {}),
     };
     const label = normalizeChildRunTitle(title);
     const reservation: ChildReservation = {
@@ -346,7 +344,6 @@ export class AgentSessionIndex {
         agentInstanceName: child.instanceName,
         dispatchOrigin,
         mode,
-        ...(profileId ? { lockedProfileId: profileId } : {}),
       },
       ...(label ? { title: label } : {}),
     };
@@ -636,14 +633,11 @@ export class AgentSessionIndex {
       customAgentTypes,
     });
     return snapshot.candidates.map((candidate) => {
-      const tools =
-        candidate.typeKey === 'agent:enso'
-          ? 'enso-locked'
-          : candidate.typeKey.startsWith('builtin:')
-            ? (BUILTIN_AGENT_TYPES.find((entry) => `builtin:${entry.name}` === candidate.typeKey)
-                ?.tools ?? 'all')
-            : (customAgentTypes.find((entry) => `custom:${entry.id}` === candidate.typeKey)
-                ?.tools ?? 'all');
+      const tools = candidate.typeKey.startsWith('builtin:')
+        ? (BUILTIN_AGENT_TYPES.find((entry) => `builtin:${entry.name}` === candidate.typeKey)
+            ?.tools ?? 'all')
+        : (customAgentTypes.find((entry) => `custom:${entry.id}` === candidate.typeKey)?.tools ??
+          'all');
       return {
         typeKey: candidate.typeKey,
         name: candidate.displayName,

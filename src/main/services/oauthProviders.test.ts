@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { OauthFlowEvent } from '@shared/capabilities/types';
+import type { OauthFlowEvent } from '@shared/oauthFlow';
 import type { OauthLoginEvent } from '@shared/types';
 import { IPC_CHANNELS, OAUTH_LABEL_MAX_LENGTH } from '@shared/types';
 import type { WebContents } from 'electron';
