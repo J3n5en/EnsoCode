@@ -30,6 +30,7 @@ type peer struct {
 	conn      *websocket.Conn
 	send      chan frame
 	done      chan struct{}
+	kill      chan struct{} // abort 关掉它，writePump 不必干等下一轮 ping
 	closeOnce sync.Once
 	queued    atomic.Int64 // 已入队、尚未写出的字节
 	dead      atomic.Bool  // 已按慢端拆链：不再入队，也不再写
@@ -42,6 +43,7 @@ func newPeer(role string, conn *websocket.Conn) *peer {
 		conn: conn,
 		send: make(chan frame, peerQueueFrames),
 		done: make(chan struct{}),
+		kill: make(chan struct{}),
 	}
 }
 
@@ -77,6 +79,7 @@ func (p *peer) trySend(fr frame) {
 // writePump 退出；readPump 随之读失败，照常走 leave 通知对端。
 func (p *peer) abort() {
 	if p.dead.CompareAndSwap(false, true) {
+		close(p.kill)
 		go func() { _ = p.conn.Close() }()
 	}
 }
@@ -125,6 +128,8 @@ func (p *peer) writePump(conn *websocket.Conn) {
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
+		case <-p.kill:
+			return
 		}
 	}
 }

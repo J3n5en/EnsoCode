@@ -1,8 +1,15 @@
 package main
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // 真实场景（窄窗口）：手机断开（leave 把房间判空并删除）的同时桌面重连（join 已取到这间房、还没入座）。
@@ -42,5 +49,44 @@ func TestHubJoinRacingLeaveNoOrphanRoom(t *testing.T) {
 		if !seated {
 			t.Fatalf("第 %d 轮：hub 里的房间没有刚入座的 host", i)
 		}
+	}
+}
+
+// abort 关掉连接后，writePump 不能干等下一轮 ping 才退出。
+func TestAbortStopsWritePump(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	result := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			result <- err
+			return
+		}
+		p := newPeer(roleGuest, conn)
+		go p.writePump(conn)
+		time.Sleep(20 * time.Millisecond)
+		p.abort()
+		select {
+		case <-p.done:
+			result <- nil
+		case <-time.After(time.Second):
+			result <- errors.New("abort 后 p.done 没有在 1s 内关闭")
+		}
+	}))
+	defer srv.Close()
+
+	client, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("超时")
 	}
 }
