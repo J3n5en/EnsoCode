@@ -8,6 +8,8 @@ import {
   parseRipgrepJsonMatch,
   type RgRunner,
   rankNameHits,
+  resolveRgFromPath,
+  ripgrepCandidates,
   runRipgrep,
   searchWorkspaceFiles,
   toRelativePosix,
@@ -222,6 +224,72 @@ describe('runRipgrep 候选回退', () => {
       200
     );
     expect(result).toEqual({ code: 2, stdout: 'partial', failure: 'timeout' });
+  });
+
+  it('回退只 spawn PATH 上解析出的绝对路径，不执行工作目录里的 rg', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'enso-rg-path-'));
+    const cwd = path.join(root, 'ws');
+    const bin = path.join(root, 'bin');
+    const rel = path.join(root, 'rel');
+    fs.mkdirSync(cwd);
+    fs.mkdirSync(bin);
+    fs.mkdirSync(rel);
+    const marker = path.join(root, 'marker');
+    const writeRg = (dir: string, label: string) => {
+      const file = path.join(dir, 'rg');
+      fs.writeFileSync(
+        file,
+        `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, ${JSON.stringify(label)});\n`
+      );
+      fs.chmodSync(file, 0o755);
+    };
+    writeRg(cwd, 'cwd');
+    writeRg(rel, 'rel');
+    writeRg(bin, 'path');
+    try {
+      const resolved = resolveRgFromPath(['', '.', 'rel', bin].join(path.delimiter));
+      expect(resolved).toBe(path.join(bin, 'rg'));
+      await runRipgrep([resolved ?? ''], ['--files'], cwd);
+      expect(fs.readFileSync(marker, 'utf8')).toBe('path');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('Windows 只接受 PATH 里的绝对目录，并且只找 rg.exe', () => {
+    const seen: string[] = [];
+    const found = resolveRgFromPath(';.\\rel;C:\\Tools;D:\\bin', {
+      platform: 'win32',
+      exists: (candidate) => {
+        seen.push(candidate);
+        return candidate === 'D:\\bin\\rg.exe';
+      },
+    });
+    expect(seen).toEqual(['C:\\Tools\\rg.exe', 'D:\\bin\\rg.exe']);
+    expect(found).toBe('D:\\bin\\rg.exe');
+    expect(resolveRgFromPath('relative;.', { platform: 'linux', exists: () => true })).toBeNull();
+  });
+
+  it('随包 rg 缺失时候选不含裸 rg 名', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'enso-rg-candidates-'));
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const rg = path.join(bin, 'rg');
+    fs.writeFileSync(rg, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(rg, 0o755);
+    const previous = process.env.PATH;
+    process.env.PATH = ['', '.', path.join(root, 'rel'), bin].join(path.delimiter);
+    try {
+      const candidates = await ripgrepCandidates();
+      expect(candidates.some((candidate) => candidate === 'rg' || candidate === 'rg.exe')).toBe(
+        false
+      );
+      expect(candidates).toContain(rg);
+      expect(candidates.every((candidate) => path.isAbsolute(candidate))).toBe(true);
+    } finally {
+      process.env.PATH = previous;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

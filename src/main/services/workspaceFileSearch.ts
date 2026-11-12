@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { FilesSearchContentHit, FilesSearchNameHit, FilesSearchResult } from '@shared/types';
@@ -154,12 +154,51 @@ export function buildContentSearchArgs(opts: {
  * 其次是 PATH 上用户自装的 rg。随包下载在 postinstall 阶段走 GitHub，离线 / 被墙 / 用
  * --ignore-scripts 安装的无界面服务端都可能缺这一个文件，没有回退整个搜索面板就只剩一句报错。
  */
+export interface ResolveRgOptions {
+  platform?: NodeJS.Platform;
+  exists?: (candidate: string) => boolean;
+}
+
+function rgFileExists(candidate: string, platform: NodeJS.Platform): boolean {
+  try {
+    if (platform === 'win32') return existsSync(candidate);
+    accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 在 PATH 上找 rg。只接受绝对目录，跳过空项、`.` 和相对路径；Windows 只认 rg.exe。
+ * 找不到返回 null，调用方按 rg 缺失处理，不能把裸文件名交给 spawn（Windows 会先搜 cwd）。
+ */
+export function resolveRgFromPath(
+  pathEnv: string | undefined,
+  options: ResolveRgOptions = {}
+): string | null {
+  if (!pathEnv) return null;
+  const platform = options.platform ?? process.platform;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const delimiter = platform === 'win32' ? ';' : ':';
+  const name = platform === 'win32' ? 'rg.exe' : 'rg';
+  const exists = options.exists ?? ((candidate: string) => rgFileExists(candidate, platform));
+  for (const entry of pathEnv.split(delimiter)) {
+    if (!entry || !pathApi.isAbsolute(entry)) continue;
+    const candidate = pathApi.join(entry, name);
+    if (exists(candidate)) return candidate;
+  }
+  return null;
+}
+
 export async function ripgrepCandidates(): Promise<string[]> {
   const { rgPath: originalRgPath } = await import('@vscode/ripgrep');
   const bundled = originalRgPath.replace(/\.asar([\\/])/, '.asar.unpacked$1');
-  const fromPath = process.platform === 'win32' ? 'rg.exe' : 'rg';
-  // 随包文件已经确认不存在就不必再 spawn 一次拿 ENOENT；PATH 候选交给 spawn 自己去找
-  return existsSync(bundled) ? [bundled, fromPath] : [fromPath];
+  const candidates: string[] = [];
+  if (existsSync(bundled)) candidates.push(bundled);
+  const fromPath = resolveRgFromPath(process.env.PATH);
+  if (fromPath) candidates.push(fromPath);
+  return candidates;
 }
 
 function spawnOnce(
