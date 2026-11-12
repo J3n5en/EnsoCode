@@ -819,6 +819,90 @@ describe('投递方式与桌面接管', () => {
     expect(backend.clicks).toEqual([]);
   });
 
+  it('同一进程的 sheet 盖住落点时仍发送，不把同 App 弹层当成别的窗口', async () => {
+    const backend = new FakeDesktopBackend();
+    const target = { ...backend.windowsList[0] };
+    backend.windowsList = [
+      {
+        id: 'sheet',
+        app: 'Safari',
+        title: 'Save',
+        pid: target.pid,
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 80,
+        focused: false,
+      },
+      target,
+    ];
+    await runWith(
+      `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+      backend
+    );
+    expect(backend.clicks).toEqual([{ target: 'w1', x: 20, y: 20, delivery: 'foreground' }]);
+  });
+
+  it('没有 pid 时按 app 名把同 App 弹层当成自己人', async () => {
+    const backend = new FakeDesktopBackend();
+    const target = { ...backend.windowsList[0], pid: undefined };
+    backend.windowsList = [
+      { id: 'sheet', app: 'Safari', title: '', x: 0, y: 0, width: 80, height: 80 },
+      target,
+    ];
+    await runWith(
+      `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+      backend
+    );
+    expect(backend.clicks).toHaveLength(1);
+  });
+
+  it('同名 App 但是另一个进程盖住落点时不发送', async () => {
+    const backend = new FakeDesktopBackend();
+    backend.windowsList = [
+      { id: 'other', app: 'Safari', title: '', pid: 2, x: 0, y: 0, width: 80, height: 80 },
+      { ...backend.windowsList[0] },
+    ];
+    await expect(
+      runWith(
+        `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+        backend
+      )
+    ).rejects.toThrow(/not on window 'w1'/);
+    expect(backend.clicks).toEqual([]);
+  });
+
+  it('目标窗口是 0×0 时跳过落点检查，前台点击照样发送', async () => {
+    const backend = new FakeDesktopBackend();
+    backend.windowsList = [
+      { id: 'float', app: 'WeChat', title: '', pid: 2, x: 0, y: 0, width: 80, height: 80 },
+      { ...backend.windowsList[0], width: 0, height: 0, focused: true },
+    ];
+    await runWith(
+      `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+      backend
+    );
+    expect(backend.clicks).toHaveLength(1);
+  });
+
+  it('落点检查时目标已不在窗口列表里则跳过，不把前台点击整批拒绝', async () => {
+    const backend = new FakeDesktopBackend();
+    let listings = 0;
+    const read = backend.windows.bind(backend);
+    // window 查找、截图遮挡、受保护文案、确认在最前，之后才是落点检查
+    backend.windows = async () => {
+      listings += 1;
+      const list = await read();
+      return listings >= 5 ? list.filter((item) => item.id !== 'w1') : list;
+    };
+    await runWith(
+      `const w = await desktop.window('w1'); await w.screenshot(); await w.click(10, 10, { delivery: 'foreground' })`,
+      backend
+    );
+    expect(listings).toBeGreaterThanOrEqual(5);
+    expect(backend.clicks).toHaveLength(1);
+  });
+
   it('raise 会抢前台，算接管', async () => {
     const occupancy = tracker();
     await runWith(

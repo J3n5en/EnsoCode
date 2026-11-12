@@ -12,7 +12,11 @@ import { ComputerError, ReadOnlyError, StaleRefError } from '@shared/computer/er
 import { type CaptureFrame, mapScreenshotPoint, pixelFingerprint } from '@shared/computer/frame';
 import { COORDINATE_SAFE_MAX_HEIGHT, COORDINATE_SAFE_MAX_WIDTH } from '@shared/computer/params';
 import { isReadOnlyAllowed } from '@shared/computer/readOnly';
-import type { ComputerRunResult, ComputerScreenshot } from '@shared/computer/types';
+import type {
+  ComputerRunResult,
+  ComputerScreenshot,
+  ComputerWindowInfo,
+} from '@shared/computer/types';
 import { JSException, type JSValueHandle, QuickJS } from 'quickjs-wasi';
 import { describeAxOutcome, describeAxWorkerExited } from './axStatus';
 import { AX_WORKER_EXITED } from './axWorkerClient';
@@ -106,6 +110,38 @@ const NOT_FRONT_MESSAGE = (target: string) =>
 
 const NOT_ON_TARGET_MESSAGE = (target: string) =>
   `the point is not on window '${target}' (outside it or covered by another window); foreground input was not sent so it cannot land in another app. Take a new screenshot and use a visible point inside the window.`;
+
+function pointInside(window: ComputerWindowInfo, point: { x: number; y: number }): boolean {
+  return (
+    point.x >= window.x &&
+    point.y >= window.y &&
+    point.x < window.x + window.width &&
+    point.y < window.y + window.height
+  );
+}
+
+/**
+ * ComputerWindowInfo 没有 ownerPid。进程身份是 pid（macOS 的 owner pid 就写在这里）；
+ * 两边都有 pid 时按进程比较，否则退回 app 名。
+ */
+function sameProcessWindow(target: ComputerWindowInfo, top: ComputerWindowInfo): boolean {
+  if (typeof target.pid === 'number' && typeof top.pid === 'number') return target.pid === top.pid;
+  return target.app !== '' && target.app === top.app;
+}
+
+/** 目标不在列表或宽高为 0 时无法判断，不拦。只有落在窗外，或被别的进程的窗口盖住，才拒绝。 */
+function foregroundPointBlocked(
+  windows: ComputerWindowInfo[],
+  targetId: string,
+  point: { x: number; y: number }
+): boolean {
+  const placement = pointerPlacement(windows, targetId, point);
+  if (!placement || placement.exposed) return false;
+  const target = windows.find((item) => item.id === targetId);
+  const top = windows.find((item) => pointInside(item, point));
+  if (target && top && sameProcessWindow(target, top)) return false;
+  return true;
+}
 
 const HIDDEN_WINDOW_NOTE =
   'window is covered by other windows; Chrome/Electron-based apps stop repainting while covered, so this image may be stale — verify with ax()/el.value instead of raising it';
@@ -509,7 +545,7 @@ export async function runComputerGuest(input: {
           if (!(await front())) throw new Error(NOT_FRONT_MESSAGE(target));
         }
         // 窗口在最前不代表落点在它上面：真实指针点在窗口外或被别的浮窗盖住时会落进别的 App
-        if (point && !pointerPlacement(await input.backend.windows(), target, point)?.exposed) {
+        if (point && foregroundPointBlocked(await input.backend.windows(), target, point)) {
           throw new Error(NOT_ON_TARGET_MESSAGE(target));
         }
       }
