@@ -24,7 +24,7 @@ export function isSecretFilePath(path: string): boolean {
 /** 家目录下的凭据目录。只认家目录下的：仓库里的 .docker/、.kube/ 是普通配置；pi-agent/auth.json 由文件规则覆盖。 */
 const SECRET_HOME_DIRS = ['.ssh', '.aws', '.docker', '.kube', '.gnupg'];
 
-function isUnderSecretDirectory(expanded: string): boolean {
+export function isUnderSecretDirectory(expanded: string): boolean {
   const fold = (value: string) => {
     const normalized = value.trim().replace(/\\/g, '/').replace(/\/+$/, '');
     return process.platform === 'linux' ? normalized : normalized.toLowerCase();
@@ -143,7 +143,7 @@ const MAX_BRACE_ALTERNATIVES = 256;
 
 class BraceLimitError extends Error {}
 
-/** ripgrep `{a,b}`。没有顶层逗号的 `{.env}` 保持字面量。 */
+/** ripgrep `{a,b}`；单项 `{.env}` 在 rg 里同样是选择，等同 `.env`。 */
 function expandBraceAlternatives(pattern: string): string[] {
   const start = topLevelBrace(pattern);
   if (start < 0) return [pattern];
@@ -152,11 +152,6 @@ function expandBraceAlternatives(pattern: string): string[] {
   const parts = splitTopLevelCommas(pattern.slice(start + 1, end));
   const prefix = pattern.slice(0, start);
   const suffix = pattern.slice(end + 1);
-  if (parts.length < 2) {
-    const literal = pattern.slice(0, end + 1);
-    if (topLevelBrace(suffix) < 0) return [pattern];
-    return expandBraceAlternatives(suffix).map((tail) => literal + tail);
-  }
   const tails = expandBraceAlternatives(suffix);
   if (parts.length * tails.length > MAX_BRACE_ALTERNATIVES) throw new BraceLimitError();
   const out: string[] = [];

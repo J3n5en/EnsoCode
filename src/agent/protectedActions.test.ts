@@ -265,6 +265,11 @@ describe('classifyProtectedTool', () => {
     '**/.aws/**',
     'credentials.*',
     '{*.json,.env}',
+    '{.env}',
+    '.{env}',
+    '*.{pem}',
+    '{{.env}}',
+    '**/{.ssh}/*',
   ])('grep glob %s 主要指向密钥文件', (glob) => {
     expect(classifyProtectedTool('grep', 'read', { pattern: 'KEY', glob })).toBe('secret');
   });
