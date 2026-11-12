@@ -1508,6 +1508,22 @@ export const zhTranslations: Record<string, string> = {
   Backfill: '补齐',
   'Backfilling…': '补齐中…',
   'Vectors unavailable: {{reason}}': '无法生成向量：{{reason}}',
+  'No remote embedding provider is selected. Choose a provider with an API key, or switch to a local embedding model.':
+    '还没有选择远程向量服务商：请选择一个填了 API Key 的服务商，或改用本地向量模型。',
+  'The selected embedding provider no longer exists. Choose another provider, or switch to a local embedding model.':
+    '所选的向量服务商已被删除：请重新选择服务商，或改用本地向量模型。',
+  'Provider "{{provider}}" has no Base URL. Fill it in, or choose another provider.':
+    '服务商「{{provider}}」没有填写 Base URL：请补全，或换一个服务商。',
+  'Provider "{{provider}}" has no API key. Subscription sign-in cannot be used for embeddings; choose a provider with an API key, or switch to a local embedding model.':
+    '服务商「{{provider}}」没有 API Key：订阅登录不能用于向量化，请换一个填了 API Key 的服务商，或改用本地向量模型。',
+  'No remote embedding model is selected. Choose a model that supports /embeddings.':
+    '还没有选择远程向量模型：请选择支持 /embeddings 的模型。',
+  '"{{model}}" is a chat model and cannot be used for embeddings. Choose a model that supports /embeddings, or switch to a local embedding model.':
+    '「{{model}}」是对话模型，不能用于向量化：请选择支持 /embeddings 的模型，或改用本地向量模型。',
+  'Provider "{{provider}}" has no embedding model ("{{model}}" is a chat model). Add one that supports /embeddings (e.g. text-embedding-3-small), or switch to a local embedding model.':
+    '服务商「{{provider}}」下没有向量模型（「{{model}}」是对话模型）：请在该服务商里添加支持 /embeddings 的模型（如 text-embedding-3-small），或改用本地向量模型。',
+  'No model can be used for embeddings: it needs a provider with an API key and an embedding model (e.g. text-embedding-3-small). Subscription sign-in cannot be used for embeddings.':
+    '没有可用于向量化的模型：需要填了 API Key 的服务商，且其中有向量模型（如 text-embedding-3-small）。订阅登录不能用于向量化。',
   'Database size': '库体积',
   Spaces: '空间数',
   'Distill past sessions': '提炼历史会话',

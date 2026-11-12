@@ -324,6 +324,96 @@ describe('MemorySettings', () => {
     expect(setMemoryEmbeddingModel).toHaveBeenCalledWith('remote:openai/text-embedding-3-large');
   });
 
+  const apiProvider = (id: string, models: string[], extra: Record<string, unknown> = {}) => ({
+    id,
+    name: id.toUpperCase(),
+    api: 'openai-completions',
+    apiKey: 'secret',
+    baseUrl: `https://${id}.invalid/v1`,
+    enabled: true,
+    models: models.map((model) => ({ id: model })),
+    ...extra,
+  });
+
+  it('remote embedding picker only offers embedding models from API-key providers', () => {
+    setState({
+      memoryChatModel: 'local:e2b',
+      memoryEmbeddingModel: 'remote:openai-compatible',
+      providers: [
+        apiProvider('mixed', ['Qwen4-Max-Preview', 'text-embedding-v3']),
+        apiProvider('chatonly', ['gpt-4o']),
+        apiProvider('oauthemb', ['text-embedding-3-small'], {
+          apiKey: '',
+          oauthAccountKey: 'openai',
+        }),
+      ],
+    });
+    renderToStaticMarkup(createElement(MemorySettings));
+    const offered = (harness.pickerProps?.providers ?? []) as {
+      id: string;
+      models: { id: string }[];
+    }[];
+    expect(offered.map((p) => [p.id, p.models.map((m) => m.id)])).toEqual([
+      ['mixed', ['text-embedding-v3']],
+    ]);
+  });
+
+  it('explains why nothing can be picked instead of offering chat models', () => {
+    setState({
+      language: 'zh',
+      memoryChatModel: 'local:e2b',
+      memoryEmbeddingModel: 'remote:openai-compatible',
+      providers: [apiProvider('chatonly', ['gpt-4o'])],
+    });
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).not.toContain('data-model-picker=');
+    expect(html).toContain('没有可用于向量化的模型');
+    expect(html).toContain('订阅登录不能用于向量化');
+  });
+
+  it('flags a saved chat-model selection right in the remote row', () => {
+    setState({
+      language: 'zh',
+      memoryEmbeddingModel: 'remote:Qwen4-Max-Preview',
+      memoryEmbeddingRemoteProviderId: 'mixed',
+      providers: [apiProvider('mixed', ['Qwen4-Max-Preview', 'text-embedding-v3'])],
+    });
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).toContain('「Qwen4-Max-Preview」是对话模型');
+    expect(html).not.toContain('needs remote credentials');
+  });
+
+  it('flags a saved subscription-only provider as missing an API key', () => {
+    setState({
+      language: 'zh',
+      memoryEmbeddingModel: 'remote:text-embedding-3-small',
+      memoryEmbeddingRemoteProviderId: 'claude',
+      providers: [
+        apiProvider('claude', ['text-embedding-3-small'], {
+          apiKey: '',
+          baseUrl: '',
+          oauthAccountKey: 'anthropic',
+        }),
+        apiProvider('emb', ['text-embedding-3-small']),
+      ],
+    });
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).toContain('没有 API Key');
+    expect(html).toContain('订阅登录不能用于向量化');
+  });
+
+  it('shows no warning for a valid remote embedding selection', () => {
+    setState({
+      language: 'zh',
+      memoryEmbeddingModel: 'remote:text-embedding-3-small',
+      memoryEmbeddingRemoteProviderId: 'emb',
+      providers: [apiProvider('emb', ['text-embedding-3-small'])],
+    });
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).toContain('data-model-picker="emb/text-embedding-3-small"');
+    expect(html).not.toContain('data-settings-row="memory.remoteModelIssue"');
+  });
+
   it('never silently downloads: the model list drives an explicit download row', () => {
     // 模型清单来自 Main 注册表，不是渲染层手写副本；未下载时必须给出下载入口而不是只靠自动下载开关
     expect(harness.download).not.toHaveBeenCalled();
