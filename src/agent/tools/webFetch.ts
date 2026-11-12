@@ -3,8 +3,8 @@ import { BlockList, isIP } from 'node:net';
 import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
-import { type Dispatcher, fetch as undiciFetch } from 'undici';
-import { imageDownloadDispatcher as pinnedDispatcher } from '../imageGeneration/downloadDispatcher';
+import type { Dispatcher } from 'undici';
+import { fetchWebResource } from './webFetchConnect';
 
 const MAX_URL_LENGTH = 2048;
 const MAX_REDIRECTS = 5;
@@ -208,15 +208,11 @@ export async function webFetch(
   const dispatchers: Dispatcher[] = [];
   const fetchHop = (url: URL, addresses: string[], init: RequestInit): Promise<Response> => {
     if (deps.fetch) return deps.fetch(url.href, init);
-    // 连接固定到本跳刚校验过的地址:否则 undici(或代理)连接时会再解析一次域名,
-    // DNS rebinding 可让第二次解析指向内网,前面的公网校验就形同虚设
-    const dispatcher = pinnedDispatcher(url, addresses);
-    dispatchers.push(dispatcher);
-    // 用 npm undici 的 fetch:它与这里的 dispatcher 配套,Node 内置 fetch 可能仍走旧版 handler 协议
-    return undiciFetch(url.href, {
-      ...init,
-      dispatcher,
-    } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+    // 直连固定到本跳已校验的地址，避免 DNS rebinding。走代理时改交代理按原主机名连接：
+    // 本机 fake-ip / DNS 污染下固定 IP 会连错，只放行 443 的代理也会拒绝到 80 的隧道。
+    return fetchWebResource(url, addresses, init, (dispatcher) => {
+      dispatchers.push(dispatcher);
+    });
   };
   let url = validateFetchUrl(input);
   let response: Response | undefined;

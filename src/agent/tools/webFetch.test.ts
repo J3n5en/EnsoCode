@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { EnvHttpProxyAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import { describe, expect, it, vi } from 'vitest';
 import { formatFetchResult, isPublicAddress, validateFetchUrl, webFetch } from './webFetch';
+import { fetchWebResource, selectWebFetchProxy } from './webFetchConnect';
 
 const publicLookup = async () => ['93.184.215.14'];
 
@@ -76,12 +77,11 @@ describe('webFetch', () => {
     expect(evil).toHaveBeenCalledTimes(1);
   });
 
-  // 真实场景:DNS rebinding——校验时解析到公网,真正连接时再解析一次就可能指向内网;
-  // 经代理时域名交给代理再解析,同样是第二次解析
-  it('经代理抓取时每一跳(含重定向)都连向校验过的地址，代理不再解析域名', async () => {
-    // 记录代理被要求连接的目标:域名意味着由代理再解析一次
+  // 走代理时按原主机名转发。http 不建 CONNECT 隧道；本机解析出的 IP 不能拿来当隧道目标。
+  it('http 经代理按主机名转发且不建隧道，重定向后仍如此', async () => {
     const targets: string[] = [];
     const hosts: string[] = [];
+    const tunnels: string[] = [];
     // 第一跳 302 到另一个域名,第二跳返回正文
     const raw = (path: string) =>
       path === '/start'
@@ -90,13 +90,13 @@ describe('webFetch', () => {
     // 明文代理请求:目标写在请求行的绝对 URL 里
     const proxy = createServer((request, response) => {
       const target = new URL(request.url ?? '');
-      targets.push(`${target.hostname}:${target.port || '80'}`);
+      targets.push(target.hostname);
       hosts.push(request.headers.host ?? '');
       response.socket?.end(raw(target.pathname));
     });
     // CONNECT 隧道:目标是 CONNECT 的 authority
     proxy.on('connect', (request, socket) => {
-      targets.push(request.url ?? '');
+      tunnels.push(request.url ?? '');
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       socket.once('data', (data) => {
         const head = data.toString();
@@ -106,8 +106,11 @@ describe('webFetch', () => {
     });
     await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
     const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+    vi.stubEnv('http_proxy', proxyUrl);
     vi.stubEnv('HTTP_PROXY', proxyUrl);
+    vi.stubEnv('https_proxy', '');
     vi.stubEnv('HTTPS_PROXY', '');
+    vi.stubEnv('no_proxy', '');
     vi.stubEnv('NO_PROXY', '');
     // 与 worker 启动时 applyWorkerProxyEnv 装的全局代理一致
     const previous = getGlobalDispatcher();
@@ -124,11 +127,45 @@ describe('webFetch', () => {
         { lookup: async (host) => [resolved[host]] }
       );
       expect(result.text).toBe('ok');
-      expect(targets).toEqual(['1.1.1.1:80', '8.8.8.8:80']);
+      expect(targets).toEqual(['start.example', 'next.example']);
       expect(hosts).toEqual(['start.example', 'next.example']);
+      expect(tunnels).toEqual([]);
     } finally {
       setGlobalDispatcher(previous);
       await globalProxy.destroy();
+      vi.unstubAllEnvs();
+      await new Promise<void>((resolve, reject) =>
+        proxy.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  });
+
+  it('https 经代理时 CONNECT 原主机名，而不是本机解析出的 IP', async () => {
+    const tunnels: string[] = [];
+    const proxy = createServer();
+    proxy.on('connect', (request, socket) => {
+      tunnels.push(request.url ?? '');
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+    vi.stubEnv('http_proxy', proxyUrl);
+    vi.stubEnv('HTTP_PROXY', proxyUrl);
+    vi.stubEnv('https_proxy', proxyUrl);
+    vi.stubEnv('HTTPS_PROXY', proxyUrl);
+    vi.stubEnv('no_proxy', '');
+    vi.stubEnv('NO_PROXY', '');
+    try {
+      await expect(
+        webFetch(
+          'https://secure.example/a',
+          { signal: AbortSignal.timeout(3000) },
+          { lookup: async () => ['2001:db8::1'] }
+        )
+      ).rejects.toThrow();
+      expect(tunnels).toEqual(['secure.example:443']);
+    } finally {
       vi.unstubAllEnvs();
       await new Promise<void>((resolve, reject) =>
         proxy.close((error) => (error ? reject(error) : resolve()))
@@ -221,5 +258,194 @@ describe('webFetch', () => {
     );
     expect(text).toContain('HTTP 404');
     expect(text).toMatch(/untrusted/i);
+  });
+});
+
+describe('selectWebFetchProxy', () => {
+  const env = (patch: NodeJS.ProcessEnv): NodeJS.ProcessEnv => patch;
+
+  it('与 undici 一样：https 用 HTTPS_PROXY，缺省回退 HTTP_PROXY；http 不用只配的 HTTPS_PROXY', () => {
+    const httpUrl = new URL('http://example.com/a');
+    const httpsUrl = new URL('https://example.com/a');
+    expect(selectWebFetchProxy(httpUrl, env({ http_proxy: 'http://proxy:8080' }))).toBe(
+      'http://proxy:8080'
+    );
+    expect(selectWebFetchProxy(httpsUrl, env({ HTTP_PROXY: 'http://proxy:8080' }))).toBe(
+      'http://proxy:8080'
+    );
+    expect(selectWebFetchProxy(httpsUrl, env({ https_proxy: 'http://tls-proxy:8443' }))).toBe(
+      'http://tls-proxy:8443'
+    );
+    expect(selectWebFetchProxy(httpUrl, env({ HTTPS_PROXY: 'http://tls-proxy:8443' }))).toBeNull();
+  });
+
+  it('NO_PROXY 的 *、后缀、仅子域和端口规则与 EnvHttpProxyAgent 一致', () => {
+    const proxy = { http_proxy: 'http://proxy:8080', https_proxy: 'http://proxy:8080' };
+    expect(
+      selectWebFetchProxy(new URL('https://example.com'), env({ ...proxy, NO_PROXY: '*' }))
+    ).toBeNull();
+    expect(
+      selectWebFetchProxy(new URL('https://example.com'), env({ ...proxy, no_proxy: ' * ' }))
+    ).toBeNull();
+    expect(
+      selectWebFetchProxy(
+        new URL('https://a.example.com'),
+        env({ ...proxy, NO_PROXY: 'example.com' })
+      )
+    ).toBeNull();
+    expect(
+      selectWebFetchProxy(
+        new URL('https://example.com.'),
+        env({ ...proxy, NO_PROXY: '.example.com' })
+      )
+    ).toBeNull();
+    expect(
+      selectWebFetchProxy(
+        new URL('https://example.com'),
+        env({ ...proxy, NO_PROXY: '*.example.com' })
+      )
+    ).toBe('http://proxy:8080');
+    expect(
+      selectWebFetchProxy(
+        new URL('https://a.example.com'),
+        env({ ...proxy, NO_PROXY: '*.example.com' })
+      )
+    ).toBeNull();
+    expect(
+      selectWebFetchProxy(
+        new URL('https://example.com'),
+        env({ ...proxy, NO_PROXY: 'example.com:443' })
+      )
+    ).toBeNull();
+    expect(
+      selectWebFetchProxy(
+        new URL('https://example.com:8443'),
+        env({ ...proxy, NO_PROXY: 'example.com:443' })
+      )
+    ).toBe('http://proxy:8080');
+  });
+});
+
+describe('fetchWebResource 直连', () => {
+  function clearProxy() {
+    for (const key of [
+      'http_proxy',
+      'HTTP_PROXY',
+      'https_proxy',
+      'HTTPS_PROXY',
+      'no_proxy',
+      'NO_PROXY',
+    ]) {
+      vi.stubEnv(key, '');
+    }
+  }
+
+  it('IPv4 优先，当前地址连接失败才换下一个，HTTP 错误不换', async () => {
+    clearProxy();
+    const v4Hits: string[] = [];
+    const v4 = createServer((request, response) => {
+      v4Hits.push(request.headers.host ?? '');
+      response.end('from-v4');
+    });
+    await new Promise<void>((resolve) => v4.listen(0, '127.0.0.1', resolve));
+    const port = (v4.address() as AddressInfo).port;
+    const v6 = createServer((_request, response) => {
+      response.end('from-v6');
+    });
+    await new Promise<void>((resolve) => v6.listen(port, '::1', resolve));
+    const url = new URL(`http://unresolvable.example:${port}/x`);
+    const init = () => ({ signal: AbortSignal.timeout(3000) });
+    try {
+      const preferred = await fetchWebResource(url, ['::1', '127.0.0.1'], init(), () => {});
+      expect(await preferred.text()).toBe('from-v4');
+      expect(v4Hits).toEqual([url.host]);
+
+      await new Promise<void>((resolve, reject) =>
+        v4.close((error) => (error ? reject(error) : resolve()))
+      );
+      const fallback = await fetchWebResource(url, ['::1', '127.0.0.1'], init(), () => {});
+      expect(await fallback.text()).toBe('from-v6');
+      await expect(
+        fetchWebResource(
+          new URL('http://unresolvable.example:1/x'),
+          ['127.0.0.1'],
+          init(),
+          () => {}
+        )
+      ).rejects.toThrow();
+
+      let errors = 0;
+      const failing = createServer((_request, response) => {
+        errors += 1;
+        response.writeHead(500);
+        response.end('nope');
+      });
+      await new Promise<void>((resolve) => failing.listen(0, '127.0.0.1', resolve));
+      const failPort = (failing.address() as AddressInfo).port;
+      try {
+        const response = await fetchWebResource(
+          new URL(`http://unresolvable.example:${failPort}/x`),
+          ['127.0.0.1', '::1'],
+          init(),
+          () => {}
+        );
+        expect(response.status).toBe(500);
+        expect(errors).toBe(1);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          failing.close((error) => (error ? reject(error) : resolve()))
+        );
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      if (v4.listening) {
+        await new Promise<void>((resolve, reject) =>
+          v4.close((error) => (error ? reject(error) : resolve()))
+        );
+      }
+      await new Promise<void>((resolve, reject) =>
+        v6.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  });
+
+  it('NO_PROXY 命中时直连已校验地址，不把请求交给代理', async () => {
+    const origin = createServer((request, response) => {
+      response.end(request.headers.host ?? '');
+    });
+    await new Promise<void>((resolve) => origin.listen(0, '127.0.0.1', resolve));
+    const port = (origin.address() as AddressInfo).port;
+    const seen: string[] = [];
+    const proxy = createServer((request, response) => {
+      seen.push(request.url ?? '');
+      response.end('proxied');
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
+    vi.stubEnv('http_proxy', proxyUrl);
+    vi.stubEnv('HTTP_PROXY', proxyUrl);
+    vi.stubEnv('https_proxy', '');
+    vi.stubEnv('HTTPS_PROXY', '');
+    vi.stubEnv('no_proxy', 'unresolvable.example');
+    vi.stubEnv('NO_PROXY', 'unresolvable.example');
+    try {
+      const url = new URL(`http://unresolvable.example:${port}/x`);
+      const response = await fetchWebResource(
+        url,
+        ['127.0.0.1'],
+        { signal: AbortSignal.timeout(3000) },
+        () => {}
+      );
+      expect(await response.text()).toBe(url.host);
+      expect(seen).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+      await new Promise<void>((resolve, reject) =>
+        origin.close((error) => (error ? reject(error) : resolve()))
+      );
+      await new Promise<void>((resolve, reject) =>
+        proxy.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
   });
 });
