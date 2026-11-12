@@ -114,6 +114,11 @@ interface DispatchHost {
     identity: SessionIdentity,
     entry: AgentSessionCustomEntry
   ): { ok: boolean; error?: string };
+  /** 派发收口告知父会话模型（与 subagent 完成回报同一通道：空闲唤起、忙时搭车） */
+  notifyParent(
+    identity: SessionIdentity,
+    notice: { text: string; urgent: boolean; ownerWebContentsId: number }
+  ): { ok: boolean; error?: string };
   dismissChild(
     parent: SessionIdentity,
     child: ChildSessionIdentity,
@@ -165,6 +170,10 @@ interface ActiveDispatch {
   receipts: CapabilityReceipt[];
   turnTerminal?: DispatchTerminal;
   terminal?: DispatchTerminal;
+  /** 任务已真正交给 child：此前失败由 dispatch 结果直接拒绝，不再通知父会话 */
+  taskDispatched?: boolean;
+  /** 用户解雇 child / worker 退出：父会话已知情或已不在，收口不通知 */
+  silent?: boolean;
 }
 
 const MAX_RECENT_DISPATCHES = 128;
@@ -508,6 +517,7 @@ export class AgentDispatchService {
     if (event.type === 'worker-exited') {
       for (const dispatch of this.active.values()) {
         dispatch.turnTerminal = 'cancelled';
+        dispatch.silent = true;
         this.trySettle(dispatch);
         this.options.terminateGeneration?.(dispatch.child);
       }
@@ -518,6 +528,7 @@ export class AgentDispatchService {
       const dispatch = this.active.get(event.identity.generation);
       if (dispatch) {
         dispatch.turnTerminal = event.type === 'child-ended' ? 'cancelled' : 'failed';
+        if (event.type === 'child-ended') dispatch.silent = true;
         this.trySettle(dispatch);
       }
       this.options.terminateGeneration?.(event.identity);
@@ -532,7 +543,8 @@ export class AgentDispatchService {
     ) {
       return;
     }
-    dispatch.turnTerminal = event.type === 'turn-completed' ? 'completed' : 'failed';
+    dispatch.turnTerminal =
+      event.type === 'turn-failed' ? 'failed' : event.aborted ? 'cancelled' : 'completed';
     this.trySettle(dispatch);
   }
 
@@ -603,6 +615,7 @@ export class AgentDispatchService {
             at: this.now(),
           };
     this.options.host.appendCustomEntry(dispatch.parent, entry);
+    this.notifyParent(dispatch, terminal, receiptSummary);
     this.emitDispatch(dispatch, {
       phase: 'terminal',
       terminal,
@@ -613,6 +626,33 @@ export class AgentDispatchService {
     // 撤销边界只有 child-ended / child-rejected / worker-exited / 窗口关闭。
     this.active.delete(dispatch.child.generation);
     this.prompted.delete(`${dispatch.child.generation}\u0000${dispatch.requestId}`);
+  }
+
+  /** 父会话须仍是派发时那一代且在线：换代/已结束不投，免得唤起错的会话 */
+  private notifyParent(
+    dispatch: ActiveDispatch,
+    terminal: DispatchTerminal,
+    receiptSummary: string
+  ): void {
+    if (!dispatch.taskDispatched || dispatch.silent) return;
+    if (!this.options.sessionIndex.isReady(dispatch.parent)) return;
+    const { instanceName, typeKey, sessionId } = dispatch.child;
+    const head = `@${instanceName}（${typeKey}）派发的任务`;
+    const lines =
+      terminal === 'completed'
+        ? [`${head}已完成。`, ...(receiptSummary ? [`结果摘要：${receiptSummary}`] : [])]
+        : terminal === 'cancelled'
+          ? [`${head}已取消（child-cancelled）。`]
+          : [
+              `${head}失败（child-failed）。`,
+              ...(receiptSummary ? [`结果摘要：${receiptSummary}`] : []),
+            ];
+    lines.push(`子会话 ${sessionId}，需要细节可读取该会话。`);
+    this.options.host.notifyParent(dispatch.parent, {
+      text: lines.join('\n'),
+      urgent: terminal !== 'completed',
+      ownerWebContentsId: dispatch.ownerWebContentsId,
+    });
   }
 
   private async executeDispatch(
@@ -779,6 +819,7 @@ export class AgentDispatchService {
         at: this.now(),
       });
       if (!appended.ok) throw new Error(appended.error ?? 'Failed to record dispatch.');
+      dispatch.taskDispatched = true;
       return {
         accepted: true,
         dispatchId: dispatch.dispatchId,
