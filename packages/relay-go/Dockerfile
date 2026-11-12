@@ -11,14 +11,18 @@ COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts \
  && bash ./packages/relay-go/sync-frontend.sh
 
-FROM golang:1.24.4 AS build
+# Go 原生交叉编译，不必在 QEMU 里跑一整套 arm64 编译；模块缓存两条腿共用，arm64 不再重复下载。
+FROM --platform=$BUILDPLATFORM golang:1.27.4 AS build
 WORKDIR /src
 ARG VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
 COPY packages/relay-go/ ./
 COPY --from=frontend /src/packages/relay-go/frontend ./frontend
-RUN CGO_ENABLED=0 go build -trimpath -buildmode=exe \
-    -ldflags "-s -w -X main.version=${VERSION}" \
-    -o /enso-relay .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -buildmode=exe \
+      -ldflags "-s -w -X main.version=${VERSION}" \
+      -o /enso-relay .
 
 FROM alpine:3
 RUN apk add --no-cache ca-certificates tzdata \
