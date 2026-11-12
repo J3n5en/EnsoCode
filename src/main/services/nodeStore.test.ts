@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let dir: string;
 vi.mock('electron', () => ({
   app: { getPath: () => dir },
-  safeStorage: { isEncryptionAvailable: () => false },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false },
 }));
 
 beforeEach(() => {
@@ -95,23 +95,27 @@ describe('节点列表纯函数', () => {
 
 describe('节点凭据落盘', () => {
   it('空盘读回空数组', async () => {
-    const { loadNodes } = await store();
+    const { loadNodes, nodesReady } = await store();
+    await nodesReady();
     expect(loadNodes()).toEqual([]);
   });
 
   it('写入后读回；与 phone-pairing.bin 分文件', async () => {
     const { saveNodes, upsertNode } = await store();
-    saveNodes(upsertNode([], cred('p1'), 'dev-box'));
+    await saveNodes(upsertNode([], cred('p1'), 'dev-box'));
     vi.resetModules();
     const fresh = await store();
+    await fresh.nodesReady();
     expect(fresh.loadNodes().map((n) => [n.nodeId, n.label])).toEqual([['p1', 'dev-box']]);
-    const { loadDevices } = await import('./pairStore');
+    const { loadDevices, devicesReady } = await import('./pairStore');
+    await devicesReady();
     expect(loadDevices()).toEqual([]);
   });
 
   it('坏 JSON 降级为空', async () => {
     writeFileSync(path.join(dir, 'remote-nodes.bin'), 'not json');
-    const { loadNodes } = await store();
+    const { loadNodes, nodesReady } = await store();
+    await nodesReady();
     expect(loadNodes()).toEqual([]);
   });
 });

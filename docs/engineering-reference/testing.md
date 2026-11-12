@@ -93,6 +93,17 @@ afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 - 来自真实排查的用例，用注释写明背景：
   `// 真实场景：同一个服务器在 Claude 里叫 cunzhi，在 Cursor 里叫寸止`
 - 一个 `it` 验一件事，避免一个用例里堆十个断言。
+- 同一函数的多组输入输出（尤其是修 bug 补的回归样例）加进已有的 `it.each` 表格，不要每次新开一条几乎相同的 `it`。
+- 单个测试文件超过约 1500 行就按场景拆成 `<源文件>.<场景>.test.ts`，共用 fixture 放 `<源文件>.testUtils.ts`。
+
+## 用例耗时
+
+全量测试的耗时主要来自少数慢用例，不在用例条数。新增用例时：
+
+- 不真实等待超时、轮询或退避：用 `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()`，或通过参数注入缩短时限。
+- 需要真实 git 仓库、子进程的用例，在 `beforeAll` 建一次模板，各用例复制副本，不要每条都从零 `git init`。
+- 穷举类验证（如 `deliveryEcho.formal.test.ts`）日常跑小界限，完整界限放单独脚本（`pnpm test:formal`）。
+- 单条用例超过约 500ms 视为需要优化。
 
 ## 参与模型的功能，真机验证至少跨两个厂商
 

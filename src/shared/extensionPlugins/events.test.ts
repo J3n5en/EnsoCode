@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { applyInterceptResult, initialInterceptState } from './events';
+import {
+  applyInterceptResult,
+  BEFORE_AGENT_START_APPEND_MAX,
+  initialInterceptState,
+} from './events';
 
 describe('applyInterceptResult', () => {
   it('tool_call：改写参数累积，拦截后停止', () => {
@@ -46,5 +50,17 @@ describe('applyInterceptResult', () => {
     });
     s = applyInterceptResult(s, { input: 'rm -rf /' });
     expect(s.result).toEqual({});
+  });
+
+  it('before_agent_start：append 依次拼接，非字符串忽略，总长截到上限', () => {
+    let s = initialInterceptState('before_agent_start', { prompt: 'hi', kind: 'user' });
+    expect(s.result).toEqual({});
+    s = applyInterceptResult(s, { append: 42 });
+    expect(s.result).toEqual({});
+    s = applyInterceptResult(s, { append: '项目约定 A' });
+    s = applyInterceptResult(s, { append: '项目约定 B' });
+    expect(s).toMatchObject({ done: false, result: { append: '项目约定 A\n\n项目约定 B' } });
+    s = applyInterceptResult(s, { append: 'x'.repeat(BEFORE_AGENT_START_APPEND_MAX) });
+    expect(s.result.append?.length).toBe(BEFORE_AGENT_START_APPEND_MAX);
   });
 });

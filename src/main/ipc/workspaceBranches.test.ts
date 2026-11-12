@@ -39,7 +39,7 @@ vi.mock('./agent', () => ({
     }),
   }),
 }));
-vi.mock('./capabilities', () => ({
+vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     workspaceRoot: (id: string) => (id === 'child' ? 'main-a' : id),
     workspaceTreeRunning: mocks.running,

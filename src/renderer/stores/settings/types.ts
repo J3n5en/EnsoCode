@@ -109,6 +109,8 @@ export interface SettingsState {
   terminalFontWeightBold: FontWeight;
   terminalShell: TerminalShell;
   favoriteTerminalThemes: string[];
+  /** 模型选择器星标，`providerId/modelId` */
+  pinnedModels: string[];
 
   /**
    * 状态栏开启的段位序列。⚠️ **数组顺序即渲染顺序**（段位支持用户拖拽排序）；
@@ -385,6 +387,7 @@ export interface SettingsState {
   setFileOpenRules: (rules: unknown) => void;
   setContextMenuOpen: (value: unknown) => void;
   toggleFavoriteTerminalTheme: (theme: string) => void;
+  togglePinnedModel: (key: string) => void;
   setLoadLocalSkills: (value: boolean) => void;
   setLoadHarnessAssets: (value: boolean) => void;
   setWindowsLocalShell: (value: WindowsLocalShell) => void;

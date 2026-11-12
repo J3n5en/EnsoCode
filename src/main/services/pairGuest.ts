@@ -23,7 +23,7 @@ import {
   toBase64Url,
   toWebSocketUrl,
 } from '@enso/pair';
-import { powerMonitor, safeStorage } from '@platform';
+import { powerMonitor } from '@platform';
 import type {
   NodeActionResult,
   NodeMessage,
@@ -33,6 +33,7 @@ import type {
 } from '@shared/types/nodes';
 import {
   adoptHostname,
+  isNodeStoreSecure,
   loadNodes,
   type RemoteNode,
   removeNode as removeFromList,
@@ -115,14 +116,6 @@ export function setNodesMessageListener(listener: (message: NodeMessage) => void
   onMessage = listener;
 }
 
-function isSecureStorageAvailable(): boolean {
-  try {
-    return safeStorage.isEncryptionAvailable();
-  } catch {
-    return false;
-  }
-}
-
 export function getNodesStatus(): NodesStatus {
   return {
     nodes: loadNodes().map((node): RemoteNodeStatus => {
@@ -140,7 +133,7 @@ export function getNodesStatus(): NodesStatus {
         ...(conn?.appVersion ? { appVersion: conn.appVersion } : {}),
       };
     }),
-    secureStorage: isSecureStorageAvailable(),
+    secureStorage: isNodeStoreSecure(),
   };
 }
 

@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
-import type { AgentCommand } from '@shared/types/agent';
+import { type AgentCommand, parseAgentCommand } from '@shared/types/agent';
+import { model } from '@shared/types/agent.testUtils';
 import { expect, it, vi } from 'vitest';
 
 vi.mock('../../agent/index?modulePath', () => ({ default: '/tmp/agent.js' }));
@@ -47,6 +48,9 @@ const child = {
   sessionId: 'parent::cw',
   generation: '33333333-3333-4333-8333-333333333333',
   parent,
+  instanceId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  instanceName: 'cw',
+  typeKey: 'builtin:worker',
 };
 const first = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const second = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -143,11 +147,15 @@ it('worker 未 spawn 时积压了该会话的 spawn-parent：release 照常排�
   vi.useFakeTimers();
   try {
     liveWorker().emit('exit');
-    sendAgentCommand({
+    // 必须是能通过 worker 协议校验的完整命令：sendAgentCommand 会先校验，不合法的不进积压队列
+    const spawnParent = parseAgentCommand({
       type: 'spawn-parent',
       identity: parent,
       cwd: '/old',
-    } as unknown as AgentCommand);
+      model,
+    });
+    if (!spawnParent) throw new Error('spawn-parent 夹具不满足 worker 协议');
+    expect(sendAgentCommand(spawnParent)).toEqual({ ok: true });
     let result: unknown = 'pending';
     void releaseParentSession(parent).then((value) => {
       result = value;

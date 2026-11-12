@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
+import { ProjectDropOverlay } from '@/components/app/ProjectDropOverlay';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import {
@@ -50,7 +51,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import { ToastProvider } from '@/components/ui/toast';
+import { addToast, ToastProvider } from '@/components/ui/toast';
 import { useAutoArchiveScan } from '@/hooks/useAutoArchiveScan';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useDockBadge } from '@/hooks/useDockBadge';
@@ -69,6 +70,8 @@ import {
 } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
+import { pluginCommands, runPluginCommand } from '@/plugins/commands';
+import { resolvePluginKeybindings } from '@/plugins/keybindings';
 import { PluginNotices } from '@/plugins/PluginNotices';
 import { PluginUiHost } from '@/plugins/PluginUiHost';
 import { useBotsStore } from '@/stores/bots';
@@ -194,14 +197,6 @@ export default function App() {
 
   useEffect(
     () =>
-      window.electronAPI.window.onAgentComposerPrefill((prefill) => {
-        useSessionsStore.getState().prefillAgent(prefill.typeKey, prefill.prompt);
-      }),
-    []
-  );
-
-  useEffect(
-    () =>
       window.electronAPI.resources.onSessionsCleanRequest(({ requestId, request }) => {
         void runSessionClean(request)
           .catch(() => 0)
@@ -215,8 +210,15 @@ export default function App() {
     bindPairCatalogSync();
   }, []);
 
-  // 连接到节点：订阅 main 推的节点状态与对方下行帧
-  useEffect(() => useRemoteNodesStore.getState().bind(), []);
+  // 连接到节点只在本机桌面可用。远程界面的 nodes: 被拒绝，不要订阅，也不要停在空的节点视图上
+  useEffect(() => {
+    const store = useRemoteNodesStore.getState();
+    if (window.electronAPI.remote) {
+      if (store.activeNodeId !== 'local') store.switchNode('local');
+      return;
+    }
+    return store.bind();
+  }, []);
   const activeNodeId = useRemoteNodesStore((s) => s.activeNodeId);
   const remoteNodeActive = activeNodeId !== 'local';
   const botModeActive = useBotModeActive();
@@ -353,6 +355,21 @@ export default function App() {
       } else if (pressed === bindings['search-workspace']) {
         e.preventDefault();
         setSearchOpen(true);
+      } else if (!remote) {
+        const command = resolvePluginKeybindings(
+          pluginCommands(),
+          keybindings,
+          bindings
+        ).byBinding.get(pressed);
+        if (!command) return;
+        e.preventDefault();
+        const sessions = useSessionsStore.getState();
+        const parent = sessions.activeId ? sessions.conversations[sessions.activeId] : null;
+        void runPluginCommand(command, parent ? (parent.activeTabId ?? parent.id) : null).then(
+          (error) => {
+            if (error) addToast({ type: 'error', title: command.title, description: error });
+          }
+        );
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -454,6 +471,7 @@ export default function App() {
       <ToastProvider />
       <PluginNotices />
       <BackgroundLayer />
+      <ProjectDropOverlay />
       <OauthCredentialBootstrap />
       {chromeKind !== 'mobile' ? (
         <TitleBar

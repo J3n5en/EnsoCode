@@ -3,12 +3,13 @@ import {
   parseOauthFlowControlRequest,
   parseOauthFlowPromptResponse,
   parseStartOauthWizardRequest,
-} from '@shared/capabilities/types';
+} from '@shared/oauthFlow';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import type { ModelMetaQuery, ProviderApiConfig } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
 import { listClassifierModels } from '../services/classifierModels';
 import { queryModelMeta } from '../services/modelMeta';
+import { refreshModelCatalogNow } from '../services/modelsDevCatalog';
 import {
   cancelOauthLogin,
   getOauthAccountUsage,
@@ -103,6 +104,8 @@ export function registerProviderHandlers(): void {
     if (!parsed) return { ok: false, models: [], error: 'Invalid query' };
     return queryModelMeta(parsed);
   });
+
+  ipcMain.handle(IPC_CHANNELS.PROVIDERS_REFRESH_MODEL_CATALOG, () => refreshModelCatalogNow());
 
   ipcMain.handle(IPC_CHANNELS.PROVIDERS_CLASSIFIER_MODELS, (_event, providerId: unknown) =>
     listClassifierModels(providerId)

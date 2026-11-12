@@ -10,6 +10,8 @@ import type {
 } from '@shared/extensionPlugins/types';
 import { version } from '../../package.json';
 import type { PluginControlCommand } from './control';
+import { packPlugin } from './pluginPack';
+import { PLUGIN_TESTING_SOURCE } from './pluginTesting';
 
 export const PLUGIN_USAGE = `用法: enso-server plugin <action>
 
@@ -19,6 +21,7 @@ export const PLUGIN_USAGE = `用法: enso-server plugin <action>
   enable <id> / disable <id>   启用 / 停用
   approve <id> / reject <id>   更新扩大了授权时：同意新版本 / 保留旧版本
   reload <id> [--yes]          从上次安装的来源（目录、zip 或链接）重新安装；开发时改完代码用它更新
+  dev <id> / dev-off <id>      开发模式：从目录安装的插件改动后自动重装（授权扩大时停下，需要 reload 同意）
   uninstall <id>               卸载并删除插件数据
   inject-anywhere <id>         允许插件向任意运行中的会话发消息（默认只能发到发起调用的会话）
   inject-current <id>          恢复为只能发到发起调用的会话
@@ -28,7 +31,9 @@ export const PLUGIN_USAGE = `用法: enso-server plugin <action>
   config <id> key=value ...    设置；key= 留空则在终端里输入（不进 shell 历史）
            [--unset key]       清除某项
   validate <目录>              校验 enso-plugin.json，并确认 main / renderer 入口存在
-  init <目录> [--id <id>]      生成最小插件（清单、main.mjs、ui.js、类型引用）`;
+  init <目录> [--id <id>]      生成最小插件（清单、main.mjs、ui.js、类型引用）
+  pack <目录> [--out <zip>]    校验后打成确定性 zip（排除隐藏文件、node_modules、test/），输出 sha256
+  testing <目录>               写入 enso-testing.mjs 与 test/main.test.mjs，用 node --test 测 main.mjs`;
 
 type Reply = Record<string, unknown> & { ok?: boolean; error?: string };
 
@@ -220,6 +225,17 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
     deps.log('完成');
     return;
   }
+  if ((action === 'dev' || action === 'dev-off') && target) {
+    ensureOk(
+      await deps.call({
+        cmd: 'plugin',
+        action: action === 'dev' ? 'dev-on' : 'dev-off',
+        id: target,
+      })
+    );
+    deps.log(action === 'dev' ? '开发模式已开，目录改动后自动重装' : '开发模式已关');
+    return;
+  }
   if (action === 'validate') {
     if (!target || flags.length > 0) throw new Error(PLUGIN_USAGE);
     runValidate(target, deps);
@@ -230,7 +246,47 @@ export async function runPluginCommand(args: string[], deps: PluginCliDeps): Pro
     runInit(target, flags, deps);
     return;
   }
+  if (action === 'pack') {
+    if (!target) throw new Error(PLUGIN_USAGE);
+    const out = flags[0] === '--out' && flags[1] && flags.length === 2 ? flags[1] : undefined;
+    if (flags.length > 0 && !out) throw new Error(PLUGIN_USAGE);
+    const packed = packPlugin(pluginDir(target, deps.cwd), {
+      hostVersion: version,
+      ...(out ? { out: resolve(deps.cwd, out) } : {}),
+    });
+    deps.log(`${packed.id} ${packed.version} → ${packed.file}`);
+    deps.log(`  大小 ${packed.size} 字节，sha256 ${packed.sha256}`);
+    return;
+  }
+  if (action === 'testing') {
+    if (!target || flags.length > 0) throw new Error(PLUGIN_USAGE);
+    runTesting(target, deps);
+    return;
+  }
   throw new Error(PLUGIN_USAGE);
+}
+
+const TEST_SAMPLE = `import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { mountMain } from '../enso-testing.mjs';
+import { activate } from '../main.mjs';
+
+test('main.mjs 能挂载', async () => {
+  const plugin = await mountMain(activate);
+  assert.ok(plugin.enso);
+});
+`;
+
+function runTesting(target: string, deps: PluginCliDeps): void {
+  const dir = pluginDir(target, deps.cwd);
+  if (!existsSync(join(dir, 'enso-plugin.json'))) throw new Error('找不到 enso-plugin.json');
+  writeFileSync(join(dir, 'enso-testing.mjs'), PLUGIN_TESTING_SOURCE);
+  const sample = join(dir, 'test', 'main.test.mjs');
+  if (!existsSync(sample)) {
+    mkdirSync(dirname(sample), { recursive: true });
+    writeFileSync(sample, TEST_SAMPLE);
+  }
+  deps.log(`已写入 enso-testing.mjs，运行：cd ${dir} && node --test`);
 }
 
 const SCAFFOLD_FILES = ['enso-plugin.json', 'main.mjs', 'ui.js', 'jsconfig.json'] as const;

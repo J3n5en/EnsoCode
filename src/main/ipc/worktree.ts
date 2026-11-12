@@ -43,7 +43,7 @@ import {
   worktreeStatus,
 } from '../services/worktree/service';
 import { getSourceAuthorityRegistry } from './agent';
-import { agentSessionIndex } from './capabilities';
+import { agentSessionIndex } from './sessionIndex';
 
 let registry: WorktreeRegistry | null = null;
 const busyWorktrees = new Map<string, Promise<void>>();

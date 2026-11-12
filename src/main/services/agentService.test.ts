@@ -769,17 +769,17 @@ describe('AgentService wait bounds and completion notify', () => {
     expect(!reported.ok && reported.error).toMatch(/notified automatically/);
   });
 
-  it('完成通知超长时注明原长度与截断长度', async () => {
+  const completionOf = async (report: string, mode?: 'coworker') => {
     const notify = vi.fn();
     const { service, children } = setup({ notify });
-    const spawned = await service.spawn(spawnRequest());
+    const spawned = await service.spawn(spawnRequest(mode ? { mode } : {}));
     if (!spawned.ok) throw new Error(spawned.error);
     service.observe({
       type: 'message-upsert',
       identity: children[0],
       seq: 1,
       index: 1,
-      message: { role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(4000) }] },
+      message: { role: 'assistant', content: [{ type: 'text', text: report }] },
     });
     service.observe({
       type: 'turn-completed',
@@ -787,9 +787,27 @@ describe('AgentService wait bounds and completion notify', () => {
       seq: 2,
       turnId: spawned.value.runId,
     });
-    const text = notify.mock.calls[0][1] as string;
-    expect(text).toContain('cut from 4000 to its first 1500 characters');
-    expect(text).not.toContain('x'.repeat(1501));
+    return notify.mock.calls[0][1] as string;
+  };
+
+  it('完成通知超长时注明原长度与截断长度，并指向 report 取全文', async () => {
+    const text = await completionOf('x'.repeat(5000));
+    expect(text).toContain('cut from 5000 to its first 4000 characters');
+    expect(text).not.toContain('x'.repeat(4001));
+    expect(text).toMatch(/Use subagent report with runId \S+ for the full result\./);
+  });
+
+  it('完成通知已含全文时不提示 report，避免模型重复拉取', async () => {
+    const text = await completionOf('x'.repeat(4000));
+    expect(text).toContain('x'.repeat(4000));
+    expect(text).not.toContain('cut from');
+    expect(text).not.toContain('subagent report');
+  });
+
+  it('coworker 报告未截断时仍提示可 send 继续', async () => {
+    const text = await completionOf('done', 'coworker');
+    expect(text).not.toContain('subagent report');
+    expect(text).toMatch(/To continue this coworker, use subagent send with agentId \S+\./);
   });
 
   it('完成通知附 usage：token 合计、工具调用数与耗时', async () => {

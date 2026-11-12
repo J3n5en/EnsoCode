@@ -36,7 +36,7 @@ import {
   sendBotMessage,
 } from './bots';
 import { phoneArtifactImage, phoneArtifacts } from './botsContent';
-import { agentSessionIndex } from './capabilities';
+import { agentSessionIndex } from './sessionIndex';
 
 /**
  * 手机端 Bot 模式：pair 命令 → 与桌面 IPC 同一套 Bot 服务；Bot 事件/目录 → 已连接手机。

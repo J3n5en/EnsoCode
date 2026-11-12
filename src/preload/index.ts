@@ -7,16 +7,7 @@ import type {
   BtwSpawnRequest,
 } from '@shared/btw';
 import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
-import type {
-  CapabilityAskDecisionAck,
-  CapabilityAskRequest,
-  CapabilityAskResponse,
-  OauthFlowControlRequest,
-  OauthFlowEvent,
-  OauthFlowPromptResponse,
-  StartOauthResult,
-  StartOauthWizardRequest,
-} from '@shared/capabilities/types';
+import type { ElevationRequestView } from '@shared/elevation';
 import type {
   ChatModelDto,
   DistillableSessionDto,
@@ -44,6 +35,13 @@ import type {
   TreeNodeDto,
   TreeQuery,
 } from '@shared/memory/graphDto';
+import type {
+  OauthFlowControlRequest,
+  OauthFlowEvent,
+  OauthFlowPromptResponse,
+  StartOauthResult,
+  StartOauthWizardRequest,
+} from '@shared/oauthFlow';
 import type { PastedTextFileResult } from '@shared/pastedText';
 import type { PlanRespondAction } from '@shared/planMode';
 import type { PresetImportDraft } from '@shared/presetImport';
@@ -105,6 +103,7 @@ import type {
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
+  ModelCatalogRefreshResult,
   ModelMetaQuery,
   ModelMetaResult,
   OauthAccountUsage,
@@ -219,10 +218,8 @@ import type {
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
 import type {
-  AgentComposerPrefillEvent,
   AgentDispatchRequest,
   AgentDispatchResult,
-  AgentSummonRequest,
   MainModelSelectionBindingResult,
   ParentModelSelectionRequest,
   ParentSourceBindingRequest,
@@ -353,6 +350,19 @@ const electronAPI = {
   privacyMask: {
     records: (days: 1 | 7 | 30): Promise<PrivacyMaskRecord[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.PRIVACY_MASK_RECORDS, days),
+  },
+
+  /** bash 提权口令：只有桌面主窗口与完整模式主界面能读写，其它窗口拿到空列表 */
+  elevation: {
+    pending: (): Promise<ElevationRequestView[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ELEVATION_PENDING),
+    answer: (id: string, password: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ELEVATION_ANSWER, id, password),
+    onChanged: (callback: (views: ElevationRequestView[]) => void): (() => void) => {
+      const listener = (_: unknown, views: ElevationRequestView[]) => callback(views);
+      ipcRenderer.on(IPC_CHANNELS.ELEVATION_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.ELEVATION_CHANGED, listener);
+    },
   },
 
   resources: {
@@ -523,6 +533,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_CLASSIFIER_MODELS, providerId),
     modelMeta: (query: ModelMetaQuery): Promise<ModelMetaResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_MODEL_META, query),
+    refreshModelCatalog: (): Promise<ModelCatalogRefreshResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_REFRESH_MODEL_CATALOG),
     listOauth: (): Promise<OauthProviderInfo[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.OAUTH_PROVIDERS_LIST),
     listOauthCredentialKeys: (): Promise<string[]> =>
@@ -567,9 +579,12 @@ const electronAPI = {
       presetId?: string
     ): Promise<{ name: string; description: string }[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS, cwd, presetId),
-    /** 按会话列出工作流预设；项目根由 Main 从会话记录推导 */
-    listWorkflowPresets: (conversationId: string): Promise<WorkflowPresetSummary[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_LIST_WORKFLOW_PRESETS, conversationId),
+    /** 按会话列出工作流预设；项目根由 Main 从会话记录推导，presetId 决定哪些插件预设圈定的 workflow 计入 */
+    listWorkflowPresets: (
+      conversationId: string,
+      presetId?: string
+    ): Promise<WorkflowPresetSummary[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.ASSETS_LIST_WORKFLOW_PRESETS, conversationId, presetId),
     skillOccupancy: (ids: string[]): Promise<AssetOccupancyRow[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_SKILL_OCCUPANCY, ids),
     instructionOccupancy: (ids: string[]): Promise<AssetOccupancyRow[]> =>
@@ -1165,16 +1180,6 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SOURCE_CONVERSATION_UPDATE_SELECTION, request),
   },
 
-  capabilities: {
-    onAsk: (callback: (request: CapabilityAskRequest) => void): (() => void) => {
-      const listener = (_event: unknown, request: CapabilityAskRequest) => callback(request);
-      ipcRenderer.on(IPC_CHANNELS.CAPABILITIES_ASK, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.CAPABILITIES_ASK, listener);
-    },
-    respond: (response: CapabilityAskResponse): Promise<CapabilityAskDecisionAck> =>
-      ipcRenderer.invoke(IPC_CHANNELS.CAPABILITIES_RESPOND, response),
-  },
-
   proxy: {
     apply: (settings: {
       mode: string;
@@ -1332,15 +1337,6 @@ const electronAPI = {
       x: number,
       y: number
     ): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.WINDOW_POPUP_MENU, items, x, y),
-    summonAgent: (request: AgentSummonRequest): Promise<AgentActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SUMMON, request),
-    onAgentComposerPrefill: (
-      callback: (event: AgentComposerPrefillEvent) => void
-    ): (() => void) => {
-      const listener = (_event: unknown, prefill: AgentComposerPrefillEvent) => callback(prefill);
-      ipcRenderer.on(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_COMPOSER_PREFILL, listener);
-    },
     takeOpenFolders: (): Promise<string[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_TAKE_OPEN_FOLDERS),
     installShellIntegration: (kind: ShellIntegration): Promise<void> =>
@@ -1787,6 +1783,8 @@ const electronAPI = {
       allowed: boolean
     ): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT, id, allowed),
+    setDevWatch: (id: string, on: boolean): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_SET_DEV_WATCH, id, on),
     approvePending: (id: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.EXTENSION_PLUGINS_APPROVE_PENDING, id),
     rejectPending: (id: string): Promise<{ ok: boolean; error?: string }> =>

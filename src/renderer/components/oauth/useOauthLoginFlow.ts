@@ -4,7 +4,7 @@ import {
   type OauthFlowLocator,
   parseOauthFlowEvent,
   type StartOauthResult,
-} from '@shared/capabilities/types';
+} from '@shared/oauthFlow';
 import type { OauthAccount, OauthLoginEvent, OauthLoginPrompt } from '@shared/types';
 import * as React from 'react';
 

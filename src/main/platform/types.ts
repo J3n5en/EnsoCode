@@ -74,9 +74,9 @@ export interface PlatformShell {
 }
 
 export interface PlatformSafeStorage {
-  isEncryptionAvailable(): boolean;
-  encryptString(plainText: string): Buffer;
-  decryptString(encrypted: Buffer): string;
+  isAsyncEncryptionAvailable(): Promise<boolean>;
+  encryptStringAsync(plainText: string): Promise<Buffer>;
+  decryptStringAsync(encrypted: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>;
 }
 
 export interface PlatformPowerMonitor {
@@ -112,11 +112,15 @@ export interface PlatformSessions {
 export interface WorkerForkOptions {
   serviceName: string;
   env: NodeJS.ProcessEnv;
+  /** 'pipe' 时桌面端暴露 stdout/stderr；服务器版忽略 */
+  stdio?: 'pipe';
 }
 
 /** utilityProcess 子集：'spawn' 后 postMessage 才保证送达 */
 export interface WorkerProcess extends EventEmitter {
   readonly pid: number | undefined;
+  readonly stdout?: NodeJS.ReadableStream | null;
+  readonly stderr?: NodeJS.ReadableStream | null;
   postMessage(message: unknown): void;
   kill(): boolean;
 }
@@ -126,8 +130,8 @@ export interface PlatformUtilityProcess {
 }
 
 export interface PlatformClipboard {
-  writeText(text: string): void;
-  writeBuffer(format: string, buffer: Buffer): void;
+  writeText(text: string): Promise<void>;
+  writeBuffer(format: string, buffer: Buffer): Promise<void>;
 }
 
 export interface DecodedImage {

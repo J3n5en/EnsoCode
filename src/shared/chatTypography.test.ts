@@ -8,14 +8,14 @@ import {
 } from './chatTypography';
 
 const EXPECTED_DEFAULT: ChatTypography = {
-  body: { size: 14.5, weight: 400 },
-  h1: { size: 150, weight: 600 },
-  h2: { size: 130, weight: 600 },
-  h3: { size: 115, weight: 600 },
+  body: { size: 14, weight: 400 },
+  h1: { size: 130, weight: 600 },
+  h2: { size: 115, weight: 600 },
+  h3: { size: 105, weight: 600 },
   h4: { size: 100, weight: 600 },
   table: { size: 90, weight: 400 },
   inlineCode: { size: 85, weight: 400 },
-  codeBlock: { size: 10.5, weight: 400 },
+  codeBlock: { size: 12, weight: 400 },
 };
 
 describe('chatTypography', () => {
@@ -35,8 +35,8 @@ describe('chatTypography', () => {
       h2: { size: 140, weight: 'semibold' },
       codeBlock: { size: 12, weight: 800 },
     });
-    expect(next.body).toEqual({ size: 14.5, weight: 500 });
-    expect(next.h1).toEqual({ size: 150, weight: 700 });
+    expect(next.body).toEqual({ size: 14, weight: 500 });
+    expect(next.h1).toEqual({ size: 130, weight: 700 });
     expect(next.h2).toEqual({ size: 140, weight: 600 });
     expect(next.codeBlock).toEqual({ size: 12, weight: 400 });
   });
@@ -76,7 +76,7 @@ describe('chatTypography', () => {
     expect(vars['--chat-body-weight']).toBe('300');
     expect(vars['--chat-h1-size']).toBe('2em');
     expect(vars['--chat-h1-weight']).toBe('700');
-    expect(vars['--chat-h2-size']).toBe('1.3em');
+    expect(vars['--chat-h2-size']).toBe('1.15em');
     expect(vars['--chat-h3-size']).toBe('1.15em');
     expect(vars['--chat-h4-size']).toBe('1em');
     expect(vars['--chat-table-size']).toBe('0.9em');

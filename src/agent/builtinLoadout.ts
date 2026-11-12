@@ -11,6 +11,7 @@ export const HOT_BUILTIN_TOOL_IDS = [
   'background_tasks',
   'memory',
   'computer',
+  'turn_discard',
 ] as const;
 
 export function enabledHotBuiltins(disabled: readonly string[]): Set<string> {

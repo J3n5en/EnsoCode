@@ -196,4 +196,36 @@ describe('parseMarketIndex', () => {
       expect(r?.plugins[0].readme).toBeUndefined();
     }
   });
+
+  it('category 只认已知分类；screenshots 只收 https、最多 6 张，坏项单独丢掉', () => {
+    const ok = parse(
+      index({
+        plugins: [
+          plugin({
+            category: 'productivity',
+            screenshots: [
+              { url: 'https://cdn.example/a.png', alt: '看板' },
+              { url: 'http://cdn.example/b.png', alt: 'x' },
+              { url: 'https://cdn.example/c.png' },
+              'https://cdn.example/d.png',
+            ],
+          }),
+        ],
+      })
+    );
+    expect(ok?.plugins[0]).toMatchObject({
+      category: 'productivity',
+      screenshots: [
+        { url: 'https://cdn.example/a.png', alt: '看板' },
+        { url: 'https://cdn.example/c.png', alt: '' },
+      ],
+    });
+    const many = Array.from({ length: 8 }, (_, i) => ({ url: `https://cdn.example/${i}.png` }));
+    expect(
+      parse(index({ plugins: [plugin({ screenshots: many })] }))?.plugins[0].screenshots
+    ).toHaveLength(6);
+    const bad = parse(index({ plugins: [plugin({ category: 'games', screenshots: 'x' })] }));
+    expect(bad?.plugins[0].category).toBeUndefined();
+    expect(bad?.plugins[0].screenshots).toBeUndefined();
+  });
 });

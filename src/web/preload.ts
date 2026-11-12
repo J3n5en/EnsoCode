@@ -15,6 +15,10 @@ remoteFrame.on(IPC_CHANNELS.REMOTE_LEADER_CHANGED, (value) => {
   leader = value === true;
 });
 
+// 只有手机壳提供链路/推送；节点设置窗口没有这组方法，此时保留原来的节点切换器
+const { linkStatus, onLinkStatus, vapidPublicKey, setPushSubscription, setPushPending } =
+  remoteBridge;
+
 const remote: RemoteApi = {
   isLeader: () => leader,
   onLeaderChanged: (callback) =>
@@ -22,6 +26,9 @@ const remote: RemoteApi = {
   upload: uploadToHost,
   localImagePrefix,
   exitDesk: () => remoteBridge.exitDesk(),
+  ...(linkStatus && onLinkStatus && vapidPublicKey && setPushSubscription && setPushPending
+    ? { linkStatus, onLinkStatus, vapidPublicKey, setPushSubscription, setPushPending }
+    : {}),
 };
 
 (window as unknown as { electronAPI: { remote?: RemoteApi } }).electronAPI.remote = remote;

@@ -21,14 +21,15 @@ import {
   SessionManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
+import { AGENT_COMPACTION_LOG } from '@shared/agentWorkerExit';
 import type { ApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { autoRetryOverrides, DEFAULT_AUTO_RETRY_LIMIT } from '@shared/autoRetry';
 import {
   type ChildSessionIdentity,
-  ENSO_LOCKED_PROFILE,
   isSameChildSessionIdentity,
   type SessionIdentity,
 } from '@shared/builtinAgents';
+import { appendCappedLog } from '@shared/cappedLog';
 import { WORKSPACE_WRITE_TOOL_ID } from '@shared/childProfileTools';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
 import type { PluginAgentSource } from '@shared/extensionPlugins/protocol';
@@ -39,6 +40,7 @@ import type { ImageGenerationState } from '@shared/imageGeneration';
 import { DEFAULT_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import { positiveContextWindow } from '@shared/modelCatalog';
 import type { ModelDirectorySnapshot } from '@shared/modelDirectory';
+import { cloneModelsDevOauthModel, findModelsDevModel } from '@shared/modelsDevCatalog';
 import { isOauthAccountPool } from '@shared/oauthAccountPool';
 import { resolveOauthCatalogModel } from '@shared/oauthCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
@@ -70,6 +72,7 @@ import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import { DEFAULT_SSH_TIMEOUT_SECONDS } from '@shared/sshTimeout';
 import { replacePersonaParagraph } from '@shared/systemPrompt';
+import { toolBatchDigest } from '@shared/toolBatchLabel';
 import { prependTurnNote } from '@shared/turnNotes';
 import type {
   AgentCommand,
@@ -110,6 +113,7 @@ import { AgentControlInvoker } from './agentControl';
 import {
   createApplyPatchTool,
   createRemoteApplyPatchIo,
+  getApplyPatchPaths,
   validateApplyPatchTargets,
 } from './applyPatch';
 import { applyPatchResultExtension } from './applyPatchResultExtension';
@@ -133,6 +137,7 @@ import {
 import { approvalReviewResultExtension } from './approvalReviewRecords';
 import { AskManager, createAskTool } from './ask';
 import { ensureAssistantUsage } from './assistantUsage';
+import { auxiliaryReasoning } from './auxiliaryReasoning';
 import {
   BackgroundTaskManager,
   createTaskTools,
@@ -187,9 +192,8 @@ import {
 import { createDcgGuard } from './dcg';
 import { omitNamedTools } from './disallowedTools';
 import { createNormalizedEditTool } from './editTool';
+import { type CompactCancel, formatCompactCancel, takeCompactCancel } from './ensoCompact/cancel';
 import type { EnsoCompactOptions } from './ensoCompact/types';
-import { ENSO_SYSTEM_PROMPT } from './ensoPrompt';
-import { EnsoSafeJournal } from './ensoSafeJournal';
 import {
   createExploreFoldState,
   createExploreFoldTools,
@@ -197,13 +201,21 @@ import {
 } from './exploreFold';
 import { OperationGate } from './gate';
 import { createGoalTools } from './goal';
+import {
+  buildGoalVerifierRequest,
+  GOAL_VERIFIER_SYSTEM_PROMPT,
+  GOAL_VERIFIER_TIMEOUT_MS,
+  parseGoalVerdict,
+} from './goalVerifier';
 import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
 import { type ContextMessage, sanitizeContextMessages } from './imageContext';
 import { McpManager } from './mcp';
 import { partitionMcpNamespaces } from './mcpNames';
 import { createMessageCoworkerTool } from './messageCoworker';
 import { createMessageMainTool } from './messageMain';
+import { microcompactExtension } from './microcompact';
 import { installModelContextCompat } from './modelContextCompat';
+import { modelsDevModelsFromEnv } from './modelsDevCache';
 import { ParentNotifier } from './notify';
 import {
   installOauthPoolSelector,
@@ -213,6 +225,7 @@ import {
   resetOauthPoolActivity,
   resolveOauthPoolModel,
 } from './oauthAccountPool';
+import { outputLimitRecoveryExtension } from './outputLimitRecovery';
 import { withPathHints } from './pathHints';
 import { PendingNotificationStore } from './pendingNotifications';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
@@ -222,6 +235,7 @@ import {
   createPluginEventsExtension,
   PluginEventInvoker,
 } from './pluginEvents';
+import { ReadLedger, withPathRecord, withPriorRead } from './priorRead';
 import {
   configurePrivacyMasking,
   installPrivacyMasking,
@@ -256,6 +270,7 @@ import {
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
+import { prepareElevation, withElevation } from './shell/elevation';
 import { type SilentTurnKind, silentTurnKind } from './silentTurn';
 import { skillChainExtension } from './skillChainExtension';
 import { assignCompactRoute, providerKeyFor, smartCompactInlineExtension } from './smartCompact';
@@ -294,12 +309,11 @@ import {
 } from './titleSummary';
 import { createTodoTool, TodoStaleReminder } from './todo';
 import { decorateSessionTools } from './toolDecorators';
+import { installStableToolOrder } from './toolOrder';
 import { ToolOutputBudget } from './toolOutputBudget';
 import { BrowserInvoker, createBrowserTools, withNavigateApproval } from './tools/browser';
 import { ComputerInvoker, createComputerTool, withComputerApproval } from './tools/computer';
 import { createDelegationTools, type DelegationOp } from './tools/delegation';
-import { createEnsoAppTool, EnsoAppInvoker } from './tools/ensoApp';
-import { createEnsoCapabilitiesTool } from './tools/ensoCapabilities';
 import { createGroupHistoryTool } from './tools/groupHistory';
 import { createGroupTasksTool } from './tools/groupTasks';
 import { confirmImageReference, createImageGenTool } from './tools/imageGen';
@@ -309,6 +323,12 @@ import { createRoutineProposeTool } from './tools/routinePropose';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
 import { createWebTools } from './tools/web';
 import {
+  createTurnDiscardState,
+  createTurnDiscardTools,
+  type TurnDiscardState,
+  turnDiscardExtension,
+} from './turnDiscard';
+import {
   consumeUnattendedNote,
   UNATTENDED_OFF_NOTE,
   UNATTENDED_ON_NOTE,
@@ -316,12 +336,13 @@ import {
 } from './unattended';
 import { createVirtualChooser, resolveClassifierModel } from './virtualClassifier';
 import { registerVirtualModel } from './virtualModels';
-import { createWorkflowTool, WORKFLOW_STOPPED_BY_USER } from './workflow';
+import { ACTIVE_WORKFLOW_RUN_IDS, createWorkflowTool, WORKFLOW_STOPPED_BY_USER } from './workflow';
+import { claimInterruptedWorkflowRuns } from './workflowJournal';
 import { listWorkflowPresets, loadWorkflowPreset, workflowPresetRoots } from './workflowPresets';
 import { WorkspaceClaims, withExclusiveCommand, withFileClaims } from './workspaceClaims';
 import { WORKSPACE_POLICY_PROMPT } from './workspacePolicy';
 import { WorkspaceSwitchGate, workspaceBranchContextExtension } from './workspaceSwitch';
-import { withWritePreflight, withWriteScope } from './writeScope';
+import { extractEditTargetPath, withWritePreflight, withWriteScope } from './writeScope';
 
 /** 子会话产物：实际 session、模型与精确工具集合。 */
 interface ChildSessionResult {
@@ -330,8 +351,6 @@ interface ChildSessionResult {
   modelRef: { providerId: string; modelId: string };
   toolIds: string[];
   proofToolIds: string[];
-  ensoApp?: EnsoAppInvoker;
-  safeJournal?: EnsoSafeJournal;
   runawayGuard?: RunawayGuard;
   requestBudget?: RequestBudget;
   pluginTools?: PluginToolInvoker;
@@ -362,7 +381,6 @@ interface SessionFactory {
     thinkingOverride?: ChildThinkingLevel;
     identity?: ChildSessionIdentity;
     gate: ApprovalGate;
-    askManager?: AskManager;
     resumeFile?: string;
     extraTools?: unknown[];
     pluginSource?: ChildPluginSource;
@@ -385,12 +403,10 @@ interface ManagedSession {
   modelId: string;
   toolIds: string[];
   proofToolIds: string[];
-  safeJournal?: EnsoSafeJournal;
   currentTurnId?: string;
   /** 上一轮结束时 messages.length：本轮消息从这里开始，供 agent_end 切本轮摘要 */
   turnStartIndex: number;
   promptedRequestIds: Set<string>;
-  ensoApp?: EnsoAppInvoker;
   browser?: BrowserInvoker;
   memory?: MemoryInvoker;
   delegation?: MemoryInvoker<DelegationOp>;
@@ -476,6 +492,8 @@ interface ManagedSession {
   pendingYieldSchema?: unknown;
   /** 最近一次收到命令或产生事件；闲置回收的计时起点 */
   lastActivityAt: number;
+  /** 会话事件计数：排队 prompt 据此判断等待期间轮次是否还在产出（同时刻的事件也算） */
+  activityNonce: number;
   contextUsage: ContextUsageTracker;
   requestBody?: RequestBodyUsage;
   /** 已发出、待挂到下一条 assistant 消息上的脱敏报告 */
@@ -506,7 +524,6 @@ type PendingCounterKey = {
  * 不再靠驱逐 / 工作区锁两处手工清单各自记得补（曾漏 memory、delegation）。
  */
 const PENDING_COUNTERS: Record<PendingCounterKey, true> = {
-  ensoApp: true,
   browser: true,
   memory: true,
   delegation: true,
@@ -530,6 +547,8 @@ export interface SupervisorOptions {
   sessionDir: string;
   /** 设置页新增的工作流预设目录（Main 写入，worker 只读） */
   workflowDir?: string;
+  /** 应用 agent 数据目录（ENSO_AGENT_DATA_DIR）；给出时压缩取消原因追加到 compaction.log */
+  dataDir?: string;
 }
 
 /** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份；开关打开时追加项目内其它 harness 的规则文件。 */
@@ -579,6 +598,8 @@ function createSessionResourceLoader(options: {
   };
   pluginEvents?: { invoker: PluginEventInvoker };
   exploreFold?: ReturnType<typeof createExploreFoldState>;
+  /** 主会话：允许丢弃插件自动投递触发的无关轮次 */
+  turnDiscard?: TurnDiscardState;
   reminders?: SystemReminderRegistry;
   /** codemode / tool_search 与按需 MCP；排在最前，mcp_servers 段先于 persona 强制提示词写入 */
   codemode?: InlineExtension;
@@ -639,7 +660,10 @@ function createSessionResourceLoader(options: {
           }));
         },
       } satisfies InlineExtension,
+      microcompactExtension(),
+      outputLimitRecoveryExtension,
       ...(options.exploreFold ? [exploreFoldExtension(options.exploreFold)] : []),
+      ...(options.turnDiscard ? [turnDiscardExtension(options.turnDiscard)] : []),
       ...(options.reminders ? [systemReminderExtension(options.reminders)] : []),
       ...(options.remoteSsh
         ? [
@@ -779,40 +803,6 @@ function withPluginPrompts(
   return { prompts: [...base.prompts, ...extra], diagnostics: base.diagnostics };
 }
 
-/** Enso 不发现任何宿主或项目资源；cwd 只供 pi 的会话文件元数据使用。 */
-function createEnsoResourceLoader(
-  cwd: string,
-  agentDir: string,
-  branchContext: InlineExtension,
-  silentTurnRecovery: InlineExtension,
-  oauthPoolRecovery?: InlineExtension
-): DefaultResourceLoader {
-  return new DefaultResourceLoader({
-    cwd,
-    agentDir,
-    // noExtensions 挡不住项目包解析（缺包会自动安装），同样用未信任的 settings
-    settingsManager: createProjectSettingsManager(cwd, agentDir, []).settingsManager,
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    noContextFiles: true,
-    extensionFactories: [
-      branchContext,
-      applyPatchResultExtension,
-      approvalReviewResultExtension,
-      silentTurnRecovery,
-      ...(oauthPoolRecovery ? [oauthPoolRecovery] : []),
-    ],
-    systemPrompt: ENSO_SYSTEM_PROMPT,
-    skillsOverride: () => ({ skills: [], diagnostics: [] }),
-    promptsOverride: () => ({ prompts: [], diagnostics: [] }),
-
-    themesOverride: () => ({ themes: [], diagnostics: [] }),
-    agentsFilesOverride: () => ({ agentsFiles: [] }),
-    appendSystemPromptOverride: () => [],
-  });
-}
 /**
  * pi 的 SessionManager._persist 在第一条 assistant 前不写文件；纯派发父容器永远没有 assistant，
  * 派发通知等 custom entry 只在内存里，resume 指向的文件也不存在。所以没有 assistant 时由我们强制落盘。
@@ -1115,6 +1105,10 @@ export class SessionSupervisor {
     this.pendingNotifications.save(managed.identity.sessionId, managed.pendingTaskReminders);
   }
 
+  private workflowJournalDir(): string {
+    return path.join(this.options.sessionDir, 'workflows');
+  }
+
   /** 回合收口后补投攒下的通知（中止后 pi 收尾期间被拒的 prompt 也在这里） */
   private flushPendingReminders(managed: ManagedSession): void {
     if (managed.pendingTaskReminders.length === 0) return;
@@ -1246,7 +1240,6 @@ export class SessionSupervisor {
       child.gate.cancelAll();
       child.asks.cancelAll();
       cancelContinuousMemory(child.session.sessionManager);
-      child.ensoApp?.cancelAll('Parent released');
       try {
         await child.session.abort();
       } catch {}
@@ -1265,7 +1258,6 @@ export class SessionSupervisor {
     managed.gate.cancelAll();
     managed.asks.cancelAll();
     cancelContinuousMemory(managed.session.sessionManager);
-    managed.ensoApp?.cancelAll('Session released');
     managed.browser?.cancelAll('Session released');
     managed.memory?.cancelAll('Session released');
     managed.delegation?.cancelAll('Session released');
@@ -1567,22 +1559,20 @@ export class SessionSupervisor {
       return;
     }
     const identity =
-      command.type === 'capability-result'
-        ? command.child
-        : command.type === 'browser-result' ||
-            command.type === 'memory-result' ||
-            command.type === 'delegation-result' ||
-            command.type === 'computer-result' ||
-            command.type === 'plugin-tool-result' ||
-            command.type === 'plugin-tool-progress' ||
-            command.type === 'plugin-intercept-result' ||
-            command.type === 'plugin-inject'
-          ? command.identity
-          : command.type === 'dismiss-child' ||
-              command.type === 'dismiss-coworker' ||
-              command.type === 'resume-coworker'
-            ? command.parent
-            : command.identity;
+      command.type === 'browser-result' ||
+      command.type === 'memory-result' ||
+      command.type === 'delegation-result' ||
+      command.type === 'computer-result' ||
+      command.type === 'plugin-tool-result' ||
+      command.type === 'plugin-tool-progress' ||
+      command.type === 'plugin-intercept-result' ||
+      command.type === 'plugin-inject'
+        ? command.identity
+        : command.type === 'dismiss-child' ||
+            command.type === 'dismiss-coworker' ||
+            command.type === 'resume-coworker'
+          ? command.parent
+          : command.identity;
     const scopeId =
       command.type === 'spawn-child' ? command.identity.parent.sessionId : identity.sessionId;
     if (this.workspaceSwitch.defer(scopeId, () => this.handleCommand(command))) return;
@@ -1737,7 +1727,8 @@ export class SessionSupervisor {
           command.dcgPath,
           command.autoRejectApprovals ?? false,
           command.botDiscussMode,
-          command.instanceId
+          command.instanceId,
+          command.workflowPresetFiles
         );
         return;
       case 'spawn-child':
@@ -1816,7 +1807,6 @@ export class SessionSupervisor {
         // 只有子代理 Run（Main 带 requestBudget 标记）计数；Bot 成员等不 arm，不计数
         if (command.requestBudget) managed.requestBudget?.arm();
         else managed.requestBudget?.disarm();
-        managed.safeJournal?.appendUserText(command.task.text);
         const images = command.task.images.map((image) => ({ type: 'image' as const, ...image }));
         void managed.session
           .prompt(
@@ -1844,13 +1834,30 @@ export class SessionSupervisor {
         }
         // 投影已 idle 但 pi 仍忙：压缩中（pi 拒收 prompt）不限时等压完；仍 streaming 要么
         // agent_end 尚未回流，要么是 abort 后工具不响应信号的僵尸轮——steer 进僵尸轮永远
-        // 无人投递，故限时等空闲后走新轮；超时按失败收口，绝不静默。
-        if (!(await waitPromptable(managed.session, ZOMBIE_TURN_WAIT_MS))) {
+        // 无人投递，故限时等空闲后走新轮。仍在产出或投影已回到 running 的不是僵尸，继续等。
+        // 超时按失败收口，绝不静默。
+        let activityAt = managed.activityNonce;
+        if (
+          !(await waitPromptable(managed.session, ZOMBIE_TURN_WAIT_MS, () => {
+            if (managed.status === 'running') return true;
+            if (managed.activityNonce > activityAt) {
+              activityAt = managed.activityNonce;
+              return true;
+            }
+            return false;
+          }))
+        ) {
+          const settlePending = managed.settlePending === true;
           this.failTurn(
             managed,
             'The previous turn is still running and could not be interrupted. Please retry, or reopen the conversation to reset the session.',
             true
           );
+          // 终态 agent_end 已经记下、轮次却还在流：不能让这次误判吃掉随后的 agent_settled，
+          // 否则失败横幅会一直盖住仍在正常收束的轮次。
+          if (settlePending && (managed.session.isStreaming || managed.session.isCompacting)) {
+            managed.settlePending = true;
+          }
           return;
         }
         this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
@@ -2024,19 +2031,6 @@ export class SessionSupervisor {
       case 'ask-respond':
         this.must(command.identity).asks.respond(command.requestId, command.answer);
         return;
-      case 'capability-result': {
-        const managed = this.must(command.child);
-        if (
-          !managed.childIdentity ||
-          !isSameChildSessionIdentity(command.child, managed.childIdentity) ||
-          managed.currentTurnId !== command.turnId
-        ) {
-          return;
-        }
-        managed.safeJournal?.appendCapabilityResult(command.requestId, command.envelope);
-        managed.ensoApp?.resolve(command.turnId, command.requestId, command.envelope);
-        return;
-      }
       case 'browser-result': {
         const managed = this.must(command.identity);
         if (!managed.browser?.resolve(command)) {
@@ -2273,7 +2267,6 @@ export class SessionSupervisor {
         managed.gate.cancelAll();
         managed.asks.cancelAll();
         cancelContinuousMemory(managed.session.sessionManager);
-        managed.ensoApp?.cancelAll('Enso capability invocation aborted');
         managed.browser?.cancelAll('Browser action aborted');
         managed.memory?.cancelAll('Memory action aborted');
         managed.delegation?.cancelAll('Delegation action aborted');
@@ -2363,7 +2356,8 @@ export class SessionSupervisor {
     dcgPath?: string,
     autoRejectApprovals = false,
     botDiscussMode = false,
-    instanceId?: string
+    instanceId?: string,
+    workflowPresetFiles: readonly string[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2415,6 +2409,7 @@ export class SessionSupervisor {
           .catch(() => [] as Array<{ path: string; content: string }>)
       : undefined;
     const exploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
+    const turnDiscard = createTurnDiscardState();
     if (smartCompactSummaryModel) {
       await resolveBaseModelOrRefresh(runtime, smartCompactSummaryModel);
     }
@@ -2471,6 +2466,7 @@ export class SessionSupervisor {
       pluginHooks: { hooks: pluginHooks, role: { kind: 'parent' }, resumed: Boolean(resumeFile) },
       ...(pluginEventInvoker ? { pluginEvents: { invoker: pluginEventInvoker } } : {}),
       exploreFold,
+      turnDiscard,
       reminders,
       codemode: codemodeHost.extension,
       persona: systemPrompt,
@@ -2570,8 +2566,19 @@ export class SessionSupervisor {
     // 只读探索四件套(read/grep/find/ls,免审):readonly 子代理的全部工具,也是 base 的底座。
     // 远程会话经 operations 注入落到 ssh(grep 无注入点,换整个定义)
     const structuredById = new Map<string, unknown>();
+    // 改前须读只对本地工作区生效：远程会话的路径不在本机文件系统上
+    const readLedger = remoteOps ? undefined : new ReadLedger(cwd);
+    const targetPath = (params: unknown) => {
+      const target = extractEditTargetPath(params);
+      return target ? [target] : [];
+    };
+    const recordPaths = (definition: Def, paths: (params: unknown) => string[]): Def =>
+      readLedger ? withPathRecord(definition, readLedger, paths) : definition;
     const wrapRead = (definition: Def): Def =>
-      withReadTruncationMeta(withAgentRead(definition, () => structuredById));
+      recordPaths(
+        withReadTruncationMeta(withAgentRead(definition, () => structuredById)),
+        targetPath
+      );
     const readOnlyTools = (toolGate: ApprovalGate): Def[] => {
       const stock =
         remoteOps && sshExecutor
@@ -2673,15 +2680,47 @@ export class SessionSupervisor {
           ? [
               scoped(
                 'file-edit',
-                createApplyPatchTool({
-                  cwd,
-                  ...(patchIo ? { io: patchIo } : {}),
-                }) as unknown as Def,
+                recordPaths(
+                  createApplyPatchTool({
+                    cwd,
+                    ...(patchIo ? { io: patchIo } : {}),
+                  }) as unknown as Def,
+                  getApplyPatchPaths
+                ),
                 (params: unknown, signal: AbortSignal | undefined) =>
                   validateApplyPatchTargets(cwd, params, patchIo, signal)
               ),
             ]
-          : [scoped('file-edit', stockEdit), scoped('file-write', stockWrite)];
+          : [
+              scoped('file-edit', recordPaths(stockEdit, targetPath)),
+              ((write: Def) => (readLedger ? withPriorRead(write, readLedger, targetPath) : write))(
+                scoped('file-write', recordPaths(stockWrite, targetPath))
+              ),
+            ];
+      const commandTool = withBackground(
+        withRtkOptimization(
+          createSessionCommandTool({
+            cwd,
+            remote: Boolean(remoteOps),
+            preference: windowsLocalShell,
+            operations: remoteOps?.bash,
+          }) as unknown as Def,
+          {
+            binaryPath: process.env.ENSO_RTK_PATH,
+            dataDir: path.join(this.options.agentDir, 'rtk'),
+            cwd,
+            remote: Boolean(remoteOps),
+            enabled: rtkEnabled,
+          }
+        ),
+        this.bgTasks,
+        sessionId,
+        cwd,
+        backgroundTransform,
+        foregroundSessionId
+      );
+      // 提权只在本机 bash：远程会话的 sudo 在远端，连不上本机 askpass 服务
+      const elevation = remoteOps ? null : prepareElevation();
       return [
         ...readOnlyTools(toolGate),
         withApproval(
@@ -2689,28 +2728,12 @@ export class SessionSupervisor {
           'command',
           exclusive(
             guarded(
-              withBackground(
-                withRtkOptimization(
-                  createSessionCommandTool({
-                    cwd,
-                    remote: Boolean(remoteOps),
-                    preference: windowsLocalShell,
-                    operations: remoteOps?.bash,
-                  }) as unknown as Def,
-                  {
-                    binaryPath: process.env.ENSO_RTK_PATH,
-                    dataDir: path.join(this.options.agentDir, 'rtk'),
-                    cwd,
-                    remote: Boolean(remoteOps),
-                    enabled: rtkEnabled,
-                  }
-                ),
-                this.bgTasks,
-                sessionId,
-                cwd,
-                backgroundTransform,
-                foregroundSessionId
-              )
+              elevation
+                ? withElevation(commandTool, {
+                    ...elevation,
+                    unattended: () => toolGate.autoReject,
+                  })
+                : commandTool
             )
           )
         ),
@@ -2749,29 +2772,26 @@ export class SessionSupervisor {
         thinkingOverride,
         identity: childIdentity,
         gate: childGate,
-        askManager,
         resumeFile: childResume,
         extraTools = [],
         pluginSource,
       }) => {
-        const isLockedEnso = resolved?.tools === 'enso-locked';
-        // 插件能力下沉：锁定档不挂任何插件能力；只读档不挂插件工具（可能有副作用，
+        // 插件能力下沉：只读档不挂插件工具（可能有副作用，
         // Plan 模式靠只读子代理保证不写）；事件只拦 tool_call（独立预算），其余只通知
-        const childPlugins =
-          pluginSource && !isLockedEnso
-            ? this.childPluginBridge(
-                pluginSource,
-                resolved?.displayName ?? agentType?.name,
-                resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
-                  ? []
-                  : pluginToolDescriptors,
-                childPluginEventPlan(pluginEventPlan)
-              )
-            : undefined;
+        const childPlugins = pluginSource
+          ? this.childPluginBridge(
+              pluginSource,
+              resolved?.displayName ?? agentType?.name,
+              resolved?.tools === 'readonly' || agentType?.tools === 'readonly'
+                ? []
+                : pluginToolDescriptors,
+              childPluginEventPlan(pluginEventPlan)
+            )
+          : undefined;
         const selectedMcp = resolved?.mcpServers ?? agentType?.mcpServers ?? [];
         // 冷连接最长 3s：与模型解析、资源加载并行，不串在首字节前的关键路径最前面
         const mcpPending =
-          !isLockedEnso && selectedMcp.length > 0
+          selectedMcp.length > 0
             ? Promise.all(selectedMcp.map((server) => this.mcp.toolsFor([server], 3000)))
             : Promise.resolve([]);
         const selectedModel = modelOverride ?? resolved?.model ?? agentType?.model ?? model;
@@ -2789,15 +2809,11 @@ export class SessionSupervisor {
           childReasoning.enabled,
           selectedModel.modelId
         );
-        if (isLockedEnso && (!childIdentity || !askManager)) {
-          throw new Error('Locked Enso child requires exact identity and ask manager.');
-        }
-        const childExploreFold =
-          !isLockedEnso && exploreFoldEnabled ? createExploreFoldState() : undefined;
+        const childExploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
         const typed = Boolean(resolved || agentType);
         const childCodemode = new CodemodeHost({
-          codemode: !isLockedEnso && toolEnabled('isolated_sandbox'),
-          deferredServers: isLockedEnso || typed ? [] : deferredMcp,
+          codemode: toolEnabled('isolated_sandbox'),
+          deferredServers: typed ? [] : deferredMcp,
         });
         const selectedSkillPaths = resolved?.skillPaths ?? agentType?.skillPaths ?? [];
         const branchContext = this.branchContextExtension(() =>
@@ -2811,46 +2827,38 @@ export class SessionSupervisor {
           managed.silentTurnKind = kind;
         });
         const childReminders = new SystemReminderRegistry();
-        const subLoader = isLockedEnso
-          ? createEnsoResourceLoader(
-              cwd,
-              this.options.agentDir,
-              branchContext,
-              silentTurnRecovery,
-              this.oauthPoolRecovery()
-            )
-          : createSessionResourceLoader({
-              branchContext,
-              silentTurnRecovery,
-              oauthPoolRecovery: this.oauthPoolRecovery(),
-              cwd,
-              agentDir: this.options.agentDir,
-              noSkills: resolved || agentType ? true : loadLocalSkills === false,
-              noExtensions: Boolean(resolved || agentType),
-              skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
-              instruction,
-              remoteAgentsFiles,
-              ...(remote ? { remoteSsh: { host: remote.host } } : {}),
-              // 类型化子代理与项目资源隔离（同 noSkills/noExtensions），不追加 harness 资源
-              loadHarnessAssets: resolved || agentType ? false : loadHarnessAssets,
-              trustedProjectCode,
-              pluginHooks: {
-                hooks: pluginHooks,
-                role: {
-                  kind: 'subagent',
-                  agentType: resolved?.displayName ?? agentType?.name ?? 'general',
-                },
-                resumed: Boolean(childResume),
-              },
-              ...(childPlugins?.events ? { pluginEvents: { invoker: childPlugins.events } } : {}),
-              ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
-              reminders: childReminders,
-              codemode: childCodemode.extension,
-              childContract: true,
-              autoRejectApprovals: childGate.autoReject,
-              systemPromptAppend,
-              systemPromptBoost,
-            });
+        const subLoader = createSessionResourceLoader({
+          branchContext,
+          silentTurnRecovery,
+          oauthPoolRecovery: this.oauthPoolRecovery(),
+          cwd,
+          agentDir: this.options.agentDir,
+          noSkills: resolved || agentType ? true : loadLocalSkills === false,
+          noExtensions: Boolean(resolved || agentType),
+          skillPaths: resolved || agentType ? [...selectedSkillPaths] : skillPaths,
+          instruction,
+          remoteAgentsFiles,
+          ...(remote ? { remoteSsh: { host: remote.host } } : {}),
+          // 类型化子代理与项目资源隔离（同 noSkills/noExtensions），不追加 harness 资源
+          loadHarnessAssets: resolved || agentType ? false : loadHarnessAssets,
+          trustedProjectCode,
+          pluginHooks: {
+            hooks: pluginHooks,
+            role: {
+              kind: 'subagent',
+              agentType: resolved?.displayName ?? agentType?.name ?? 'general',
+            },
+            resumed: Boolean(childResume),
+          },
+          ...(childPlugins?.events ? { pluginEvents: { invoker: childPlugins.events } } : {}),
+          ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
+          reminders: childReminders,
+          codemode: childCodemode.extension,
+          childContract: true,
+          autoRejectApprovals: childGate.autoReject,
+          systemPromptAppend,
+          systemPromptBoost,
+        });
         const [mcpToolGroups] = await Promise.all([mcpPending, subLoader.reload()]);
         if (mcpToolGroups.some((tools) => tools.length === 0)) {
           throw new Error('Agent profile MCP resource failed to establish.');
@@ -2858,71 +2866,35 @@ export class SessionSupervisor {
         const typeMcpTools = mcpToolGroups
           .flat()
           .map((tool) => withApproval(childGate, 'mcp', tool));
-        const ensoApp =
-          isLockedEnso && childIdentity && askManager
-            ? new EnsoAppInvoker(
-                childIdentity,
-                () => this.sessions.get(childIdentity.sessionId)?.currentTurnId,
-                (request) => {
-                  const managed = this.sessions.get(childIdentity.sessionId);
-                  if (
-                    !managed?.childIdentity ||
-                    !isSameChildSessionIdentity(childIdentity, managed.childIdentity)
-                  ) {
-                    throw new Error('Enso child generation is no longer current.');
-                  }
-                  managed.safeJournal?.append({
-                    type: 'enso-operation',
-                    operationId: request.requestId,
-                    capabilityId: request.capabilityId,
-                    toolCallId: request.requestId,
-                    at: Date.now(),
-                  });
-                  this.options.emit({
-                    type: 'capability-invoke',
-                    child: request.child,
-                    seq: ++managed.seq,
-                    turnId: request.turnId,
-                    requestId: request.requestId,
-                    capabilityId: request.capabilityId,
-                    params: request.params,
-                  });
-                }
-              )
-            : undefined;
         // 子会话自己的门：审批条落在子会话 tab，allowSession 不跨会话（同 MCP）
         const childPluginTools = childPlugins?.tools
           ? createPluginTools([...childPlugins.descriptors], childPlugins.tools).map((tool) =>
               withApproval(childGate, 'mcp', tool)
             )
           : [];
-        const childTools = isLockedEnso
-          ? [createEnsoCapabilitiesTool(), createEnsoAppTool(ensoApp!), createAskTool(askManager!)]
-          : [
-              ...(!toolEnabled(WORKSPACE_WRITE_TOOL_ID) ||
-              resolved?.tools === 'readonly' ||
-              agentType?.tools === 'readonly'
-                ? readOnlyTools(childGate)
-                : buildBaseTools(
-                    childGate,
-                    undefined,
-                    agentType?.writeScope,
-                    childIdentity?.sessionId
-                  )),
-              ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
-              ...childPluginTools,
-              ...(extraTools as Def[]),
-              ...(childExploreFold ? createExploreFoldTools(childExploreFold) : []),
-            ];
+        const childTools = [
+          ...(!toolEnabled(WORKSPACE_WRITE_TOOL_ID) ||
+          resolved?.tools === 'readonly' ||
+          agentType?.tools === 'readonly'
+            ? readOnlyTools(childGate)
+            : buildBaseTools(
+                childGate,
+                undefined,
+                agentType?.writeScope,
+                childIdentity?.sessionId
+              )),
+          ...(typed ? typeMcpTools : wrapMcpTools(childGate)),
+          ...childPluginTools,
+          ...(extraTools as Def[]),
+          ...(childExploreFold ? createExploreFoldTools(childExploreFold) : []),
+        ];
         const childRunaway = new RunawayGuard();
         const requestBudget = new RequestBudget();
-        // 到软预算时把一次性收尾提示排进下一条工具结果；锁定会话工具不装饰，提示无处可注入
-        if (!isLockedEnso) {
-          childReminders.register('request-budget', () => {
-            const notice = requestBudget.takeNotice();
-            return notice ? [notice] : [];
-          });
-        }
+        // 到软预算时把一次性收尾提示排进下一条工具结果
+        childReminders.register('request-budget', () => {
+          const notice = requestBudget.takeNotice();
+          return notice ? [notice] : [];
+        });
         const childBudget = new ToolOutputBudget({
           rootDir: path.join(
             this.options.sessionDir,
@@ -2936,31 +2908,11 @@ export class SessionSupervisor {
             runaway: childRunaway,
             budget: childBudget,
           });
-        const subTools = omitNamedTools(
-          isLockedEnso ? rawSubTools : decorateChild(rawSubTools),
-          disabledTools
-        );
+        const subTools = omitNamedTools(decorateChild(rawSubTools), disabledTools);
         childCodemode.bindDeferredTools(deferredMcpLoader(childGate, decorateChild));
-        const safeJournal =
-          isLockedEnso && childIdentity
-            ? new EnsoSafeJournal(this.options.sessionDir, childIdentity, cwd, childResume)
-            : undefined;
-        const sessionManager = safeJournal
-          ? SessionManager.inMemory(cwd)
-          : childResume
-            ? SessionManager.open(childResume, this.options.sessionDir, cwd)
-            : SessionManager.create(cwd, this.options.sessionDir);
-        if (safeJournal && childResume) {
-          for (const record of (await EnsoSafeJournal.restore(childResume)).records) {
-            if (record.type === 'safe-user-text') {
-              sessionManager.appendMessage({
-                role: 'user',
-                content: [{ type: 'text', text: record.text }],
-                timestamp: record.at,
-              });
-            }
-          }
-        }
+        const sessionManager = childResume
+          ? SessionManager.open(childResume, this.options.sessionDir, cwd)
+          : SessionManager.create(cwd, this.options.sessionDir);
         const { session } = await createAgentSession({
           cwd,
           agentDir: this.options.agentDir,
@@ -2980,7 +2932,7 @@ export class SessionSupervisor {
               cwd
             )
           : undefined;
-        if (childIdentity && !isLockedEnso) {
+        if (childIdentity) {
           const childServers = typed
             ? selectedMcp
             : directMcp.filter((server) => !isDeferredMcp(server));
@@ -3001,7 +2953,6 @@ export class SessionSupervisor {
         return {
           session,
           modelId: selectedModel.modelId,
-          ...(safeJournal ? { safeJournal } : {}),
           modelRef: settingsModelRef(selectedModel),
           toolIds: [...subTools.map((tool) => tool.name), ...childExtraTools],
           // 装饰器会克隆工具，所以要在装饰前按对象引用排除 MCP 与插件工具。
@@ -3011,8 +2962,7 @@ export class SessionSupervisor {
               .map((tool) => tool.name),
             ...childExtraTools,
           ],
-          ...(ensoApp ? { ensoApp } : {}),
-          ...(isLockedEnso ? {} : { runawayGuard: childRunaway }),
+          runawayGuard: childRunaway,
           requestBudget,
           ...(childPlugins?.tools ? { pluginTools: childPlugins.tools } : {}),
           ...(childPlugins?.events ? { pluginEvents: childPlugins.events } : {}),
@@ -3108,6 +3058,7 @@ export class SessionSupervisor {
       : undefined;
     const workflowRoots = workflowPresetRoots(remote ? undefined : cwd, {
       customDir: this.options.workflowDir,
+      pluginFiles: workflowPresetFiles,
     });
     const workflowRuns = new Map<string, AbortController>();
     const computer = !remote
@@ -3221,6 +3172,8 @@ export class SessionSupervisor {
           models: subagentModels,
           agentTypes,
           activeRuns: workflowRuns,
+          journalDir: this.workflowJournalDir(),
+          sessionId,
           notify: (text, urgent) => this.notifier.notify(sessionId, text, { urgent }),
           emit: (run) => {
             const managed = managedRef ?? this.sessions.get(sessionId);
@@ -3235,19 +3188,26 @@ export class SessionSupervisor {
         }),
       ]),
       ...(exploreFold ? createExploreFoldTools(exploreFold) : []),
+      ...builtin('turn_discard', createTurnDiscardTools(turnDiscard)),
       ...builtin('background_tasks', createTaskTools(this.bgTasks, sessionId)),
       ...(toolEnabled('goal')
-        ? createGoalTools((kind, note) => {
-            const managed = managedRef ?? this.sessions.get(sessionId);
-            if (!managed) return;
-            this.options.emit({
-              type: 'goal-signal',
-              identity: managed.identity,
-              seq: ++managed.seq,
-              kind,
-              note,
-            });
-          })
+        ? createGoalTools(
+            (kind, note) => {
+              const managed = managedRef ?? this.sessions.get(sessionId);
+              if (!managed) return;
+              this.options.emit({
+                type: 'goal-signal',
+                identity: managed.identity,
+                seq: ++managed.seq,
+                kind,
+                note,
+              });
+            },
+            async (summary, signal) => {
+              const managed = managedRef ?? this.sessions.get(sessionId);
+              return managed ? this.verifyGoalCompletion(managed, summary, signal) : undefined;
+            }
+          )
         : []),
     ];
     // Plan 工具门包在父会话工具最外层（codemode 嵌套调用同样受限）；目录跨模式不变
@@ -3444,10 +3404,8 @@ export class SessionSupervisor {
       resumeFile?: string;
       asks?: AskManager;
       checkpoints?: CheckpointManager;
-      ensoApp?: EnsoAppInvoker;
       toolIds?: string[];
       proofToolIds?: string[];
-      safeJournal?: EnsoSafeJournal;
       runawayGuard?: RunawayGuard;
       requestBudget?: RequestBudget;
     } = {}
@@ -3473,8 +3431,6 @@ export class SessionSupervisor {
       toolIds: opts.toolIds ?? [],
       proofToolIds: opts.proofToolIds ?? opts.toolIds ?? [],
       promptedRequestIds: new Set(),
-      ...(opts.ensoApp ? { ensoApp: opts.ensoApp } : {}),
-      ...(opts.safeJournal ? { safeJournal: opts.safeJournal } : {}),
       adaptiveDowngraded: new Set<string>(),
       silentTurnNudgeUsed: false,
       ...(opts.runawayGuard ? { runawayGuard: opts.runawayGuard } : {}),
@@ -3489,6 +3445,7 @@ export class SessionSupervisor {
       roundWaiters: new Set(),
       coworkers: new Map(),
       lastActivityAt: Date.now(),
+      activityNonce: 0,
       contextUsage: new UsageTracker(),
       ...(opts.factory ? { factory: opts.factory } : {}),
       ...(opts.parentId ? { parentId: opts.parentId } : {}),
@@ -3508,6 +3465,18 @@ export class SessionSupervisor {
       if (parent) managed.gate.mode = parent.gate.mode;
     }
     this.flushPendingMcpTools(managed);
+    // 上次进程退出时没跑完的 workflow：告诉模型可以 resume，随下一次工具结果或回合收口送达
+    for (const run of claimInterruptedWorkflowRuns(
+      this.workflowJournalDir(),
+      identity.sessionId,
+      ACTIVE_WORKFLOW_RUN_IDS
+    )) {
+      this.queueReminder(
+        managed,
+        `Workflow "${run.name}" (runId ${run.runId}) was interrupted before it finished (the app or worker restarted). ` +
+          `Its recorded agent() results are kept: call workflow with resume:"${run.runId}" to continue it, or ignore it if it is no longer needed.`
+      );
+    }
     this.bindAutoRetryLimit(session);
     const stream = session.agent?.streamFunction;
     if (stream) {
@@ -3718,17 +3687,6 @@ export class SessionSupervisor {
     if (cwd !== factory.cwd || identity.typeKey !== config.typeKey) {
       throw new Error('Child source or Agent type does not match the reserved identity.');
     }
-    const isLockedEnso = identity.typeKey === ENSO_LOCKED_PROFILE.typeKey;
-    if (
-      isLockedEnso !== (config.tools === 'enso-locked') ||
-      identity.profileId !== config.lockedProfileId ||
-      (isLockedEnso &&
-        (identity.profileId !== ENSO_LOCKED_PROFILE.profileId ||
-          config.skillPaths.length !== 0 ||
-          config.mcpServers.length !== 0))
-    ) {
-      throw new Error('Child locked profile does not match the reserved identity.');
-    }
     const existing = this.sessions.get(identity.sessionId);
     if (existing) {
       if (
@@ -3741,7 +3699,7 @@ export class SessionSupervisor {
         type: 'child-ready',
         identity,
         seq: ++existing.seq,
-        sessionFile: existing.safeJournal?.sessionFile ?? requiredSessionFile(existing.session),
+        sessionFile: requiredSessionFile(existing.session),
         proof: {
           spawnSpecId: config.spawnSpecId,
           typeKey: config.typeKey,
@@ -3788,20 +3746,15 @@ export class SessionSupervisor {
       resolved: config,
       identity,
       gate,
-      askManager,
       resumeFile,
-      ...(isLockedEnso
-        ? {}
-        : {
-            extraTools: [
-              createMessageMainTool(
-                (text, urgent) => this.notifier.notify(identity.parent.sessionId, text, { urgent }),
-                identity.instanceName
-              ),
-              this.createPeerMessageTool(identity.parent.sessionId, identity.instanceName),
-            ],
-            pluginSource: { identity, kind: 'subagent', name: identity.instanceName },
-          }),
+      extraTools: [
+        createMessageMainTool(
+          (text, urgent) => this.notifier.notify(identity.parent.sessionId, text, { urgent }),
+          identity.instanceName
+        ),
+        this.createPeerMessageTool(identity.parent.sessionId, identity.instanceName),
+      ],
+      pluginSource: { identity, kind: 'subagent', name: identity.instanceName },
     });
     const metadata: ChildConversationMetadata = {
       parentId: identity.parent.sessionId,
@@ -3810,7 +3763,6 @@ export class SessionSupervisor {
       agentInstanceId: identity.instanceId,
       agentInstanceName: identity.instanceName,
       dispatchOrigin: 'typed-mention',
-      ...(identity.profileId ? { lockedProfileId: identity.profileId } : {}),
     };
     const info: CoworkerInfo = {
       id: identity.sessionId,
@@ -3819,7 +3771,7 @@ export class SessionSupervisor {
       agentType: identity.typeKey,
       status: 'idle',
       modelId: result.modelId,
-      sessionFile: result.safeJournal?.sessionFile ?? result.session.sessionFile,
+      sessionFile: result.session.sessionFile,
       createdAt: Date.now(),
     };
     parent.coworkers.set(identity.instanceName, info);
@@ -3836,10 +3788,8 @@ export class SessionSupervisor {
       coworkerName: identity.instanceName,
       resumeFile,
       asks: askManager,
-      ensoApp: result.ensoApp,
       toolIds: result.toolIds,
       proofToolIds: result.proofToolIds,
-      safeJournal: result.safeJournal,
       ...(result.runawayGuard ? { runawayGuard: result.runawayGuard } : {}),
       ...(result.requestBudget ? { requestBudget: result.requestBudget } : {}),
     });
@@ -3849,7 +3799,7 @@ export class SessionSupervisor {
       type: 'child-ready',
       identity,
       seq: ++managedRef.seq,
-      sessionFile: result.safeJournal?.sessionFile ?? requiredSessionFile(result.session),
+      sessionFile: requiredSessionFile(result.session),
       proof: {
         spawnSpecId: config.spawnSpecId,
         typeKey: config.typeKey,
@@ -3979,7 +3929,6 @@ export class SessionSupervisor {
       managed.gate.cancelAll();
       managed.asks.cancelAll();
       cancelContinuousMemory(managed.session.sessionManager);
-      managed.ensoApp?.cancelAll('Child dismissed');
       try {
         await managed.session.abort();
       } catch {}
@@ -4278,6 +4227,7 @@ export class SessionSupervisor {
     event: Parameters<Parameters<AgentSession['subscribe']>[0]>[0]
   ): void {
     managed.lastActivityAt = Date.now();
+    managed.activityNonce += 1;
     if (event.type !== 'message_update') this.flushStreamingUpsert(managed);
     switch (event.type) {
       case 'agent_start':
@@ -4294,6 +4244,14 @@ export class SessionSupervisor {
       case 'turn_start':
         managed.requestStartMs = Date.now();
         return;
+      case 'turn_end': {
+        // 父会话的工具批次交给 Main 生成一句话标签（子代理不生成）
+        if (managed.childIdentity || managed.coworkerName) return;
+        const digest = toolBatchDigest(event.message, event.toolResults);
+        if (digest)
+          this.options.emit({ type: 'tool-batch-completed', identity: managed.identity, digest });
+        return;
+      }
       case 'message_start': {
         const index = managed.messages.length;
         const message = projectMessage(event.message);
@@ -4346,17 +4304,7 @@ export class SessionSupervisor {
           managed.pendingPrivacyMask = undefined;
         }
         this.replaceLastMessage(managed, projected);
-        if (projected?.role === 'assistant') {
-          const text = projected.content
-            .filter(
-              (part): part is Extract<(typeof projected.content)[number], { type: 'text' }> =>
-                part.type === 'text'
-            )
-            .map((part) => part.text)
-            .join('\\n');
-          if (text) managed.safeJournal?.appendAssistantText(text);
-          this.noteBudgetRequest(managed, projected);
-        }
+        if (projected?.role === 'assistant') this.noteBudgetRequest(managed, projected);
         this.emitSessionMeta(managed);
         return;
       }
@@ -4452,8 +4400,14 @@ export class SessionSupervisor {
         this.reconcileMessages(managed, this.transcript(managed));
         this.rebaseContextUsage(managed);
         managed.compaction = undefined;
+        // 钩子主动取消时 pi 只给 aborted：取出钩子留下的原因，按失败上报，不当作放弃
+        const cancel = takeCompactCancel(managed.session.sessionManager);
+        const cancelled = event.aborted && !event.errorMessage ? cancel : undefined;
+        if (cancelled) this.logCompactCancel(managed, cancelled);
+        const error =
+          event.errorMessage || (cancelled ? formatCompactCancel(cancelled) : undefined);
         // 被 abort 取消的压缩 pi 不带 errorMessage：按放弃收口，不能当作压完
-        const succeeded = !event.errorMessage && !event.aborted;
+        const succeeded = !error && !event.aborted;
         // 锚点必须在对齐之后取：否则摘要消息未入列，与 guest 事件口径 maxIndex+1 差 1
         if (succeeded) {
           managed.compactionNoticeAt = managed.messages.length;
@@ -4465,8 +4419,8 @@ export class SessionSupervisor {
           identity: managed.identity,
           seq: ++managed.seq,
           state: 'end',
-          ...(event.errorMessage ? { error: event.errorMessage } : {}),
-          ...(!event.errorMessage && event.aborted ? { abandoned: true as const } : {}),
+          ...(error ? { error } : {}),
+          ...(!error && event.aborted ? { abandoned: true as const } : {}),
         });
         return;
       }
@@ -5134,6 +5088,15 @@ export class SessionSupervisor {
     return estimateConversationTokens(message);
   }
 
+  /** 打包后 stdout 不可见：取消原因落到数据目录，事后可查 */
+  private logCompactCancel(managed: ManagedSession, cancel: CompactCancel): void {
+    if (!this.options.dataDir) return;
+    appendCappedLog(
+      path.join(this.options.dataDir, AGENT_COMPACTION_LOG),
+      `compact-cancel session=${managed.identity.sessionId} ${JSON.stringify(cancel)}`
+    );
+  }
+
   private occupancyInputs(managed: ManagedSession) {
     const loader = managed.session.resourceLoader as {
       getAgentsFiles?: () => { agentsFiles?: ReadonlyArray<{ path: string; content: string }> };
@@ -5349,7 +5312,6 @@ export class SessionSupervisor {
     this.bgTasks.stopAll();
     for (const managed of this.sessions.values()) {
       cancelContinuousMemory(managed.session.sessionManager);
-      managed.ensoApp?.cancelAll('Enso worker shutdown');
       managed.browser?.cancelAll('Enso worker shutdown');
       managed.memory?.cancelAll('Enso worker shutdown');
       managed.delegation?.cancelAll('Enso worker shutdown');
@@ -5388,9 +5350,57 @@ export class SessionSupervisor {
       );
       installOauthPoolSelector(runtime, this.selectOauthPool);
       installStreamGuard(runtime);
+      installStableToolOrder(runtime);
       return runtime;
     })();
     return this.runtimePromise;
+  }
+
+  /**
+   * goal_complete 的独立核验：用会话当前模型、无工具，只凭本 goal 的对话尾部判断。
+   * 返回驳回理由；找不到 goal、核验失败或超时时放行（不比没有核验更糟），用户中断则中断工具。
+   */
+  private async verifyGoalCompletion(
+    managed: ManagedSession,
+    summary: string,
+    signal: AbortSignal | undefined
+  ): Promise<string | undefined> {
+    const model = managed.session.model;
+    const request = buildGoalVerifierRequest({
+      messages: managed.session.messages as unknown as Parameters<
+        typeof buildGoalVerifierRequest
+      >[0]['messages'],
+      summary,
+    });
+    if (!model || !request) return undefined;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GOAL_VERIFIER_TIMEOUT_MS);
+    const onAbort = () => controller.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const runtime = await this.getRuntime();
+      const message = await runtime.completeSimple(
+        model,
+        {
+          systemPrompt: GOAL_VERIFIER_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: request, timestamp: Date.now() }],
+        },
+        { signal: controller.signal }
+      );
+      const raw = Array.isArray(message.content)
+        ? message.content.map((part) => (part.type === 'text' ? part.text : '')).join('')
+        : '';
+      const verdict = parseGoalVerdict(raw);
+      return verdict?.decision === 'reject'
+        ? verdict.reason || 'The transcript does not prove the goal is complete.'
+        : undefined;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return undefined;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
+    }
   }
 
   private async reviewApproval(
@@ -5546,12 +5556,14 @@ export class SessionSupervisor {
         const timer = setTimeout(() => controller.abort(), command.timeoutMs);
         try {
           const model = await resolveBaseModelOrRefresh(runtime, candidate);
+          // 没显式给档位（或给的是 off）时按模型推理配置补：off 会让强制推理的模型断流
+          const requested = command.reasoning;
+          const reasoning =
+            requested && requested !== 'off' ? requested : auxiliaryReasoning(candidate);
           const options = {
             signal: controller.signal,
             ...(command.maxTokens !== undefined ? { maxTokens: command.maxTokens } : {}),
-            ...(command.reasoning && command.reasoning !== 'off'
-              ? { reasoning: command.reasoning }
-              : {}),
+            ...(reasoning ? { reasoning } : {}),
           };
           const message = command.stream
             ? await this.readSimpleStream(
@@ -5743,8 +5755,10 @@ export class SessionSupervisor {
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const model = await resolveBaseModelOrRefresh(runtime, candidate);
+        const reasoning = auxiliaryReasoning(candidate);
         const message = await runtime.completeSimple(model, context, {
           signal: controller.signal,
+          ...(reasoning ? { reasoning } : {}),
         });
         if (message.stopReason === 'aborted') {
           lastError = `${label}: timed out after ${Math.round(timeoutMs / 1000)}s`;
@@ -5803,17 +5817,21 @@ export function waitIdleBounded(
 /**
  * 等 pi 可以起新轮；false = 僵尸轮超时。压缩不计入僵尸时限。记忆扩展在 agent_settled 后
  * 下一个宏任务才启动压缩，等过之后须让一拍再复查，否则新轮先起、随即被压缩的 abort 打断。
+ * stillLive：本窗超时后轮次仍在产出（或投影已是 running）。静默挂死才算僵尸。
  */
 export async function waitPromptable(
   session: Pick<AgentSession, 'waitForIdle' | 'isStreaming' | 'isCompacting'>,
-  zombieMs: number
+  zombieMs: number,
+  stillLive?: () => boolean
 ): Promise<boolean> {
   let waited = false;
   for (;;) {
     if (session.isCompacting) {
       await session.waitForIdle();
     } else if (session.isStreaming) {
-      if (!(await waitIdleBounded(session, zombieMs)) && !session.isCompacting) return false;
+      const idle = await waitIdleBounded(session, zombieMs);
+      // 计时器可能先于空闲回调；已经不在流式就继续复查，不能当成僵尸失败。
+      if (!idle && session.isStreaming && !session.isCompacting && !stillLive?.()) return false;
     } else if (waited) {
       waited = false;
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -5987,19 +6005,36 @@ export function resolveBaseModel(runtime: ModelRuntime, model: SpawnModelConfig)
     // worker 与 Main 是两个 ModelRuntime 实例，只共用 auth.json。合成 id（第 2+ 个账号）
     // 的克隆 provider 必须在本进程也注册一遍，否则 getModel 取不到
     ensureAccountProvider(runtime, model.oauthAccountKey);
+    const providerId = providerIdOfAccountKey(model.oauthAccountKey);
+    const devModels = modelsDevModelsFromEnv();
     const exact = runtime.getModel(model.oauthAccountKey, model.modelId);
     const oauthModel =
       exact ??
       resolveOauthCatalogModel(
-        providerIdOfAccountKey(model.oauthAccountKey),
+        providerId,
         model.modelId,
         runtime.getModels(model.oauthAccountKey),
         undefined
+      ) ??
+      cloneModelsDevOauthModel(
+        providerId,
+        model.modelId,
+        runtime.getModels(model.oauthAccountKey),
+        devModels
       );
     if (!oauthModel) {
       throw new Error(`oauth model not found: ${model.oauthAccountKey}/${model.modelId}`);
     }
     const registered = exact ?? listCatalogClone(runtime, oauthModel);
+    const dev = findModelsDevModel(devModels, model.modelId, providerId);
+    if (dev) {
+      try {
+        if (dev.contextWindow) registered.contextWindow = dev.contextWindow;
+        if (dev.maxTokens) registered.maxTokens = dev.maxTokens;
+      } catch {
+        // 冻结的 catalog 对象保持原窗口
+      }
+    }
     const provider = runtime.getProvider(registered.provider);
     if (!provider) throw new Error(`oauth provider not found: ${registered.provider}`);
     runtime.registerNativeProvider(withRequestBodyBudget(provider));

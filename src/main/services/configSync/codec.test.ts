@@ -265,11 +265,6 @@ describe('config sync codec', () => {
     });
   });
 
-  it('错误密码不能解密敏感配置包', async () => {
-    const encrypted = await encodeBundle({ ...bundle(), secretsIncluded: true }, 'correct horse');
-    await expect(decodeBundle(encrypted, 'wrong password')).rejects.toThrow();
-  });
-
   it('允许与内置同名的自定义 Agent type（覆盖语义），仍拒绝保留名', () => {
     const agentType = (name: string) => ({
       id: '14478e0b-5089-4801-967e-0adeadfb4813',

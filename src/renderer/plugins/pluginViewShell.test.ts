@@ -3,7 +3,7 @@ import { createContext, runInContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { viewThemePush } from './viewBridge';
 
-function bootShell() {
+function bootShell(file?: { rel: string; text: string }) {
   const html = readFileSync(new URL('../public/plugin-view.html', import.meta.url), 'utf8');
   const script = html.match(/id="enso-view-bridge">([\s\S]*?)<\/script>/)?.[1];
   if (!script) throw new Error('找不到侧栏桥脚本');
@@ -41,8 +41,11 @@ function bootShell() {
   });
   runInContext(script, context);
   let portHandler: ((message: { data: unknown }) => void) | null = null;
+  const posted: unknown[] = [];
   const port = {
-    postMessage() {},
+    postMessage(data: unknown) {
+      posted.push(data);
+    },
     set onmessage(handler: (message: { data: unknown }) => void) {
       portHandler = handler;
     },
@@ -50,7 +53,13 @@ function bootShell() {
   for (const listener of listeners.get('message') ?? []) {
     listener({
       source: parent,
-      data: { type: 'enso-view-init', theme: 'light', html: '<p>notes</p>', storage: {} },
+      data: {
+        type: 'enso-view-init',
+        theme: 'light',
+        html: '<p>notes</p>',
+        storage: {},
+        ...(file ? { file } : {}),
+      },
       ports: [port],
     });
   }
@@ -58,11 +67,15 @@ function bootShell() {
   return {
     enso,
     dataset: documentElement.dataset,
+    posted,
     push(theme: 'light' | 'dark') {
       portHandler?.({ data: viewThemePush(theme) });
     },
     pushEvent(name: string, data: unknown) {
       portHandler?.({ data: { type: 'enso-view-event', name, data } });
+    },
+    pushFile(rel: string, text: string) {
+      portHandler?.({ data: { type: 'enso-file', rel, text } });
     },
   };
 }
@@ -71,7 +84,38 @@ interface ShellEnso {
   theme: string;
   onTheme(listener: (theme: string) => void): () => void;
   on(name: string, listener: (data: unknown) => void): () => void;
+  file: null | {
+    rel: string;
+    text: string;
+    onChange(listener: (file: { rel: string; text: string }) => void): () => void;
+    update(text: string): void;
+  };
 }
+
+describe('文件查看器', () => {
+  it('侧栏页面没有 enso.file', () => {
+    expect(bootShell().enso.file).toBeNull();
+  });
+
+  it('拿到初始文件，收宿主推送，编辑回传且不回调自己', () => {
+    const shell = bootShell({ rel: 'a.csv', text: 'x' });
+    const file = shell.enso.file;
+    if (!file) throw new Error('缺少 enso.file');
+    expect([file.rel, file.text]).toEqual(['a.csv', 'x']);
+    const seen: unknown[] = [];
+    const off = file.onChange((next) => seen.push(next));
+    file.update('y');
+    expect(file.text).toBe('y');
+    expect(shell.posted).toContainEqual({ type: 'enso-file-edit', text: 'y' });
+    expect(seen).toEqual([]);
+    shell.pushFile('a.csv', 'z');
+    expect(file.text).toBe('z');
+    expect(seen).toEqual([{ rel: 'a.csv', text: 'z' }]);
+    off();
+    shell.pushFile('a.csv', 'w');
+    expect(seen).toHaveLength(1);
+  });
+});
 
 describe('侧栏页面主题', () => {
   it('打开后能订阅主题变化，并同步 data-theme', () => {

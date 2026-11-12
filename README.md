@@ -226,6 +226,7 @@ node out/server/index.js run --prompt "..." --cwd . --output-format json
 The public default is `https://enso-relay.j3.do`. To run your own, see [packages/relay/README.md](packages/relay/README.md):
 
 - **Cloudflare Worker** (recommended): `pnpm --filter @enso/relay release`.
+- **Docker**: `docker run -d -p 8787:8787 -v enso-relay:/data ghcr.io/j3n5en/enso-relay:latest` — public image, no login needed, `linux/amd64` and `linux/arm64`.
 - **Go binary**: download `enso-relay-linux-amd64` / `enso-relay-linux-arm64` from the GitHub Release, `chmod +x`, run it.
 
 Point **Settings → Devices → Relay URL** at your instance.

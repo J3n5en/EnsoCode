@@ -73,6 +73,16 @@ describe('PluginToolInvoker', () => {
 });
 
 describe('createPluginTools', () => {
+  it('readOnly 描述转成 readOnlyHint 注解，未声明时不带注解', () => {
+    const invoker = { invoke: vi.fn() };
+    const [ro, plain] = createPluginTools(
+      [{ ...descriptor, readOnly: true }, descriptor],
+      invoker as never
+    );
+    expect(ro?.annotations).toEqual({ readOnlyHint: true });
+    expect(plain?.annotations).toBeUndefined();
+  });
+
   it('按描述生成工具，执行结果转成文本内容并保留 details', async () => {
     const invoker = { invoke: vi.fn(async () => ({ content: 'hi', details: { n: 1 } })) };
     const [tool] = createPluginTools([descriptor], invoker as never);

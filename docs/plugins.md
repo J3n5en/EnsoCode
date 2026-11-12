@@ -20,6 +20,12 @@
 - 远程使用：手机 PWA 的完整模式跑的是同一套界面，插件的挂点、补全、命令和侧栏页面都能用；安装、启停、授权、配置、看日志和重新安装只能在本机界面或服务端 CLI 上做。手机精简模式不加载插件界面，插件工具仍由桌面端的 Agent 正常调用。
 - 有配置项的插件：设置页插件行的齿轮按钮，或 `enso-server plugin config <id>`（查看）/ `enso-server plugin config <id> key=value`（设置；`key=` 留空会在终端里提示输入，不进 shell 历史；`--unset key` 清除）。
 
+### 开发工具
+
+- 开发模式：从目录安装的插件，在设置页插件详情里打开「开发模式」，或 `enso-server plugin dev <id>`（`dev-off` 关闭）。目录里的文件改动停下约 400ms 后自动从来源重装；隐藏文件、`node_modules` 和 zip 的改动不算。授权没变大时直接替换，变大时停下并在插件行显示错误，需要「从来源重新安装」走确认。开关只在内存里，重启后关闭。
+- 打包：`enso-server plugin pack <目录> [--out <zip>]` 先按安装时的规则校验清单，再把目录打成 zip，排除隐藏文件、`node_modules`、`test/`、zip 和 `enso-testing.mjs`。条目按路径排序、时间戳固定，同样的内容得到同样的 sha256，输出里给出大小和哈希。
+- 测试：`enso-server plugin testing <目录>` 写入零依赖的 `enso-testing.mjs` 和示例 `test/main.test.mjs`。`mountMain(activate, { config?, host? })` 用一个假的 `enso` 调起 `activate`，返回 `tool(name, args, ctx?)`、`command(id, ctx?)`、`fire(event, data, ctx?)`、`schedule(id)`、`method(name, args, ctx?)` 去调注册的处理函数；宿主调用记在 `calls` 里（如 `{ api: 'ui.status.update', args }`），返回值由 `host['ui.status.update']` 这样的函数提供。在插件目录运行 `node --test`。
+
 ## 清单 `enso-plugin.json`
 
 不超过 256KB，必须是 JSON 对象，`schemaVersion` 固定为 `1`。未知字段会被忽略并给出警告。
@@ -120,7 +126,7 @@
 
 主题的 CSS 不进上表，也不要往 `permissions` 里写一个样式权限，未知名字会被拒绝。任一 `themes` 项带了 `css`，安装和更新对话框会多出「修改界面样式：主题 CSS 可改变应用任意界面」。这项从无到有时要重新同意。只提供调色板的主题没有这项。调色板、派生变量和锚点见 [主题](theming.md)。
 
-升级时如果权限、文件范围、域名、MCP 工具、透传变量、可调用的插件、拦截事件变多，或改成常驻，需要重新确认。
+升级时如果权限、文件范围、域名、MCP 工具、透传变量、可调用的插件、拦截事件变多，改成常驻，或新带了 `renderer`，需要重新确认。
 
 安装时展示的是这些权限，但插件的 `main` 本身是完整的 Node 进程，权限只约束它能向 Enso 申请的能力，不约束它自己的代码。只安装你信任的插件。
 
@@ -136,13 +142,18 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
 
 ### 贡献
 
-- `agentTools`：`{ name, description, parameters, timeoutMs? }`。`timeoutMs` 是 1000 到 600000 的整数，缺省 60 秒。`name` 匹配 `^[a-z][a-z0-9_]*$`，不能含 `__`。`description` 最长 1024 字符。`parameters` 必须是 `type` 为 `object` 的 JSON Schema。模型看到的工具名是 `plugin_<id>__<name>`，其中 id 的 `.` 换成 `-`，总长不超过 64 字符。
-- `commands`：`{ id, title }`。`id` 匹配 `^[a-z][a-z0-9-]{0,31}$`。启用后出现在输入框的 `/` 菜单里，名字是 `/<插件 id>:<命令 id>`，选中立即执行，不进草稿也不发消息。执行算用户操作，可以改草稿；侧栏等独立输入框里 `ctx.sessionId` 为 `null`。失败时界面提示错误信息。
+- `agentTools`：`{ name, description, parameters, timeoutMs?, readOnly? }`。`timeoutMs` 是 1000 到 600000 的整数，缺省 60 秒。`readOnly: true` 声明这个工具不改动任何东西（只查询），宿主不核实；模型只用过只读工具的一轮可以用 `turn_discard` 丢弃，写操作或发消息的工具不要标。`name` 匹配 `^[a-z][a-z0-9_]*$`，不能含 `__`。`description` 最长 1024 字符。`parameters` 必须是 `type` 为 `object` 的 JSON Schema。模型看到的工具名是 `plugin_<id>__<name>`，其中 id 的 `.` 换成 `-`，总长不超过 64 字符。
+- `commands`：`{ id, title, key? }`。`id` 匹配 `^[a-z][a-z0-9-]{0,31}$`。启用后出现在输入框的 `/` 菜单里，名字是 `/<插件 id>:<命令 id>`，选中立即执行，不进草稿也不发消息。执行算用户操作，可以改草稿；侧栏等独立输入框里 `ctx.sessionId` 为 `null`。失败时界面提示错误信息。
+  - `key` 是默认快捷键，如 `mod+shift+k`：修饰键按 `mod`、`ctrl`、`alt`、`shift` 顺序写，至少一个不是 `shift`；`mod` 在 macOS 是 ⌘，其他平台是 Ctrl。按下时对当前会话执行，`ctx.sessionId` 为当前标签的会话。内置快捷键优先，多个插件抢同一个键时先装的生效；用户可以在设置的快捷键页改键或删除。
 - `views`：`{ id, title, entry }`。`title` 最长 40 字符，`entry` 必须是 `.html`。
+- `fileViewers`：`{ id, title, entry, extensions, default? }`，需要 `ui.view`。`extensions` 是 1 到 32 个小写、带点的后缀，如 `.csv`、`.excalidraw.json`；`default: true` 时匹配的文件默认用它打开，否则只在文件标签右上角给出切换按钮。见下文「文件查看器」。
+- `statusItems`：`{ id, text, tooltip?, command? }`，最多 8 个，不需要权限。显示在主输入框底栏右侧，`text` 最长 24 字符，`tooltip` 最长 200。`command` 是本插件 `commands` 里的 id，点击时对当前会话执行。见下文「状态项」。
 - `triggers`：`{ symbol, name }`。`symbol` 只能是 `#`，`@` 和 `/` 归 Enso 自己用。
 - `skills`：skill 目录的相对路径，随插件下发给新会话。
 - `mcpServers`：`{ name, command, args, env }`。服务名会加 `plugin-<id>-` 前缀。`command`、`args`、`env` 里的 `${ENSO_PLUGIN_ROOT}` 会展开成插件安装目录，`env` 只能写字面量。
-- `presets`：`{ id, name, skills, mcpServers, agentTypes?, instruction?, systemPrompt?, systemPromptTail?, boostPrompt?, refusalRetry?, refusalRetryPrompt?, model?, thinkingLevel?, approvalMode?, disabledTools? }`，最多 20 个。`skills`、`mcpServers` 和 `agentTypes` 只能引用本插件已经声明的 skill 目录、MCP 服务名和子代理类型名。指令和角色、真尾、boost、推脱补发都是插件目录里的 Markdown 文件。启用后出现在预设列表里，只读，不能在设置里改；用户也可以在自建预设的「高级」里叠加它。会话 id 是 `plugin:<插件 id>:<预设 id>`。`model` 是 `{ providerId, modelId }`，选中预设时输入框切到这个模型，模型不可用时会话启动失败；`thinkingLevel` 覆盖当前档位；`approvalMode` 只能是 `supervised` 或 `auto-edits`，和用户当前档位取更严的一个；`disabledTools` 并入禁用工具列表。
+- `workflows`：workflow 预设文件的相对路径，必须是 `<id>.js`，文件名即预设 id（`^[a-z0-9][a-z0-9-]{0,63}$`），同一插件内不能重名。文件格式与 `~/.agents/workflows` 里的预设相同。会话的 `workflow` 工具和侧栏都能用到；同 id 时项目、设置、全局目录里的预设优先，插件预设优先于内置预设。
+- `presets`：`{ id, name, skills, mcpServers, workflows?, agentTypes?, instruction?, systemPrompt?, systemPromptTail?, boostPrompt?, refusalRetry?, refusalRetryPrompt?, model?, thinkingLevel?, approvalMode?, disabledTools? }`，最多 20 个。`skills`、`mcpServers`、`workflows` 和 `agentTypes` 只能引用本插件已经声明的 skill 目录、MCP 服务名、workflow 文件和子代理类型名。指令和角色、真尾、boost、推脱补发都是插件目录里的 Markdown 文件。启用后出现在预设列表里，只读，不能在设置里改；用户也可以在自建预设的「高级」里叠加它。会话 id 是 `plugin:<插件 id>:<预设 id>`。`model` 是 `{ providerId, modelId }`，选中预设时输入框切到这个模型，模型不可用时会话启动失败；`thinkingLevel` 覆盖当前档位；`approvalMode` 只能是 `supervised` 或 `auto-edits`，和用户当前档位取更严的一个；`disabledTools` 并入禁用工具列表。
+  - 全局还是预设专用：`skills`、`mcpServers`、`workflows`、`agentTypes` 里的条目没被任何预设列出时，对所有会话生效；被某个预设列出后，只在选中这个预设（或自建预设叠加了它）的会话里生效。
 - `agentTypes`：`{ name, description, systemPrompt, tools?, skills? }`，最多 20 个，见下文「子代理类型」。
 - `methods`：`{ name, timeoutMs }`，给 `renderer.handle` 注册的方法声明更长的超时，1000 到 120000 毫秒的整数。没声明的方法 2 秒超时。
 - `configuration`：`{ key, title, description?, secret?, type?, default?, options?, min?, max?, pathKind? }`，最多 20 项。`key` 匹配 `^[A-Za-z][A-Za-z0-9_]{0,31}$`，`title` 最长 60 字符。`type` 是 `string`（缺省）、`number`（可带 `min` / `max`）、`boolean`、`enum`（必须带 `options`）或 `path`（可带 `pathKind: 'file' | 'directory'`）；只有 `string` 能设 `secret`。用户在设置页或命令行里填写，插件用 `enso.config.get()` 读取。
@@ -240,7 +251,7 @@ export async function activate(enso) {
 | `fs.readText(path)` / `fs.writeText(path, text)` | 路径相对当前会话的项目根 |
 | `net.fetch(url, init?)` | 见下 |
 | `ui.notify(title, body?)` | 系统通知 |
-| `ui.view.emit(name, data?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，所以 Agent 工具里也能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
+| `ui.view.emit(name, data?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，也不需要在宿主发起的调用里，所以 Agent 工具、常驻进程和定时任务都能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
 | `ui.view.open(viewId?)` | 打开当前会话的右侧栏并创建或聚焦本插件的侧栏页面（`viewId` 缺省取清单 `views` 的第一项）。需要 `ui.view`，不需要用户手势 |
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
@@ -276,6 +287,10 @@ export async function activate(enso) {
 | `input` | 用户发送消息时 | `{ text, source }` | 返回 `{ action: 'transform', text }` 改写，或 `{ action: 'handled' }` 吞掉这条消息 |
 | `context_usage` | 上下文占用刷新时（回复开始、每条回复结束、压缩后、一轮收口） | `{ used, estimated, contextWindow?, percent?, buckets, usage?, parts?, turns? }` | 否 |
 | `session_status` | 主会话的汇总状态或挂起的提问 / 审批数变化时，所有项目的会话都会发 | `{ sessionId, state, previous, pendingAsks, pendingApprovals }`，见「会话状态」 | 否 |
+| `model_select` | 会话切换模型时（手动切换、循环切换、恢复会话） | `{ provider, modelId, previous?: { provider, modelId }, source }`，`source` 是 `set` / `cycle` / `restore` | 否 |
+| `before_agent_start` | 每轮回复开始前（用户消息，或插件消息触发的一轮），只在主会话 | `{ prompt, kind }`：`kind` 为 `user` 时 `prompt` 是用户消息正文（最多 64K 字符），为 `custom` 时是空串 | 返回 `{ append }` 把文本追加到本轮 system prompt 末尾；多个插件按 id 顺序用空行拼接，合计最多 16K 字符。只能追加，不能拦下，所以不接受 `failClosed` |
+
+要在派子代理之前检查或改写，拦截 `tool_call` 并写 `tools: ['subagent']`；要在消息发出前改写或吞掉，用 `input`。
 
 `tools` 只对 `tool_call` / `tool_result` 有效，限定只对这些工具名触发。通知型的返回值被忽略，不阻塞会话。插件进程没在运行、且不是常驻时，通知直接丢掉，不会为此拉起进程。主会话的 `before_compact` 也一样：只等已经在运行的插件，不会为了等待去拉起非常驻插件。
 
@@ -338,6 +353,10 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 
 `session.abort(sessionId?)` 中止会话正在进行的一轮，权限与目标会话规则同 `session.inject`（不计入频率限制）。会话没在运行返回 `ABORT_FAILED`。
 
+### 状态项
+
+`enso.ui.status.update(id, { text?, tooltip?, tone?, visible? })` 改清单 `statusItems` 里声明过的项，没声明的 id 会被拒绝。`tone` 是 `neutral`（缺省）、`accent`、`success`、`warning`、`danger`；`visible: false` 隐藏。不需要权限，也不需要在宿主发起的调用里，常驻进程和定时任务都能直接更新；和侧栏事件共用每秒 20 次的上限。更新只保存在内存里，应用重启后回到清单里的值。
+
 ### 产出文件
 
 `artifacts.write({ name, text })` 或 `artifacts.write({ name, base64, mime? })` 保存一份文件，返回 `{ id, pluginId, name, mime, size, createdAt }`。不需要权限，但只能在宿主发起的调用里用。`name` 是不带路径的文件名（最长 200 字符，不能含 `/`、`\`）。单个不超过 50MB，每个插件最多保留 200 个，超出时删掉最旧的；卸载插件时全部删除。
@@ -394,6 +413,8 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 ## `ui.js`
 
 渲染模块在主界面里运行，和 Enso 自己的界面同权，能操作页面上的一切。这和 `main.mjs` 不同，后者在独立进程里。所以渲染模块只适合你完全信任的插件。
+
+带 `renderer` 的插件在设置页显示「受信任界面」，安装、更新和详情里写明界面代码不受权限清单约束。侧栏页面（`views`）跑在沙箱 iframe 里，不算受信任界面；只需要独立面板时优先用它。
 
 `ui.js` 不是按文件 URL 加载的：宿主把源码放进 blob，再用 `import()` 执行。blob 没有插件目录作为基址，`import './util.js'` 这类相对模块解析不到，也不会去读插件包里的其他文件。入口必须是单文件。用 esbuild 打包：
 
@@ -463,6 +484,16 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 ```
 
 从侧栏页面发起的调用算用户操作，所以在这里可以改草稿。页面不能直接发系统通知，需要的话在 `main.mjs` 的处理函数里调 `enso.ui.notify`。
+
+## 文件查看器
+
+`fileViewers` 的页面和侧栏页面跑在同一种沙箱 iframe 里，`window.enso` 的能力都一样，另外多一个 `enso.file`（侧栏页面里是 `null`）：
+
+- `enso.file.rel` / `enso.file.text`：当前文件的相对路径和编辑区里的内容（含未保存的修改）。只支持文本文件，超出编辑器上限的文件不会交给查看器。
+- `enso.file.onChange(listener)`：内容在别处变了（切回编辑器改过、磁盘重新加载）时调用 `listener({ rel, text })`，返回取消订阅的函数。查看器自己 `update` 的内容不会回调。
+- `enso.file.update(text)`：把新内容交回编辑区，标签变成未保存，由用户保存。查看器拿不到磁盘路径，也不能直接写文件。
+
+一个文件被多个查看器匹配时，后缀更长的排前面；文件名正好等于后缀（如 `.csv`）不算匹配。插件停用后，打开中的文件回到编辑器。
 
 ## skill 与 MCP
 

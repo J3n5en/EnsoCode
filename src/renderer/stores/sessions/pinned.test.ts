@@ -47,7 +47,6 @@ type Minimal = {
   unread?: boolean;
   pendingAsks?: { requestId: string }[];
   pendingApprovals?: unknown[];
-  pendingCapabilityAsks?: unknown[];
   coworkerIds?: string[];
   worktree?: { path: string };
 };
@@ -738,10 +737,9 @@ describe('等你处理优先', () => {
     expect(waitingConversationCount(['missing'], live)).toBe(0);
   });
 
-  it('待审批 / 待能力确认同样算等你处理', () => {
+  it('待审批同样算等你处理', () => {
     const approval = { pendingApprovals: [{ requestId: 'x' }] };
-    const capability = { pendingCapabilityAsks: [{ requestId: 'y' }] };
-    const live = withWaiting({ d: approval, a: capability });
+    const live = withWaiting({ d: approval, a: approval });
     expect(projectConversationIds(order, live, 'p1')).toEqual(['a', 'd', 'e', 'b']);
     expect(waitingConversationCount(order, live)).toBe(2);
   });

@@ -90,7 +90,6 @@ export function CoworkerTabs({
             spawning: coworker.spawning,
             pendingApprovalCount: coworker.pendingApprovalCount,
             pendingAskCount: coworker.pendingAskCount,
-            pendingCapabilityAskCount: coworker.pendingCapabilityAskCount,
           });
           return (
             <div key={coworker.id} className="group/tab relative shrink-0">

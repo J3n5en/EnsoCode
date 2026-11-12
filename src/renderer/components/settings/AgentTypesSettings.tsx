@@ -1,13 +1,17 @@
-import { ENSO_AGENT_TYPE_KEY, isReservedAgentTypeName } from '@shared/builtinAgents';
-import { SUBAGENT_MODELS_CONFIGURE_PROMPT } from '@shared/i18n';
+import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import { MAX_MAX_ACTIVE_COWORKERS, MIN_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
-import { isClassifierOnlyProvider } from '@shared/providerCatalog';
-import type { AgentTypeEntry, AgentTypeModelMode } from '@shared/types';
-import { hasProviderCredentials, MODEL_THINKING_LEVEL_OVERRIDES } from '@shared/types';
+import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
+import type {
+  AgentTypeEntry,
+  AgentTypeModelMode,
+  MODEL_THINKING_LEVEL_OVERRIDES,
+} from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
-import { AlertCircle, Bot, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { findVirtualModel } from '@shared/virtualModels';
+import { AlertCircle, Bot, Pencil, Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
-import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
+import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,7 +34,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { Z_INDEX } from '@/lib/z-index';
-import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
+import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
 import { DetailRows, PickList, setFilteredIds } from './PresetsSettings';
@@ -61,23 +65,6 @@ export function AgentTypesSettings() {
           <AlertDescription className="text-xs text-foreground/90">
             {t('Subagent models not configured warning')}
           </AlertDescription>
-          <AlertAction>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 shrink-0 gap-1 px-2.5 text-xs bg-background/80 hover:bg-background"
-              onClick={() => {
-                void window.electronAPI.window.summonAgent({
-                  typeKey: ENSO_AGENT_TYPE_KEY,
-                  prompt: t(SUBAGENT_MODELS_CONFIGURE_PROMPT),
-                });
-              }}
-            >
-              <Sparkles className="h-3.5 w-3.5 text-primary" />
-              {t('Auto configure with AI')}
-            </Button>
-          </AlertAction>
         </Alert>
       )}
       <AgentTypeList hasSubagentModels={hasSubagentModels} />
@@ -129,7 +116,7 @@ function MaxActiveCoworkersRow() {
   );
 }
 
-/** 类型清单：Enso 固定只读；内置可开关；自定义可增删改且保留名 fail-closed。 */
+/** 类型清单：内置可开关；自定义可增删改且保留名 fail-closed。 */
 export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?: boolean }) {
   const { t } = useI18n();
   const agentTypes = useSettingsStore((state) => state.agentTypes);
@@ -137,6 +124,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
   const disabledBuiltins = useSettingsStore((state) => state.disabledBuiltinAgentTypes);
   const toggleBuiltin = useSettingsStore((state) => state.toggleBuiltinAgentType);
   const providers = useMaterializedProviders();
+  const virtualModels = useSettingsStore((state) => state.virtualModels);
   const [editing, setEditing] = React.useState<
     AgentTypeEntry | 'new' | { defaults: Omit<AgentTypeEntry, 'id'> } | null
   >(null);
@@ -149,20 +137,6 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
-        <Bot className="h-4 w-4 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            Enso
-            <Badge variant="secondary">{t('System')}</Badge>
-            <Badge variant="outline">{t('Locked')}</Badge>
-          </p>
-          <p className="text-muted-foreground text-xs">
-            {t('Inherits the conversation model and provides product capabilities')}
-          </p>
-        </div>
-      </div>
-
       <div className="flex items-center gap-3 rounded-md border px-3 py-2.5">
         <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
@@ -204,6 +178,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
 
       {agentTypes.map((entry) => {
         const provider = providers.find((p) => p.id === entry.providerId);
+        const virtual = findVirtualModel(virtualModels, entry);
         const mode = entry.modelMode ?? (entry.providerId && entry.modelId ? 'fixed' : 'follow');
         const modeLabel =
           mode === 'agent_pick'
@@ -211,7 +186,9 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
               ? t('Picked by main agent')
               : `${t('Picked by main agent')} (${t('Follows the conversation model')})`
             : mode === 'fixed'
-              ? `${provider?.name ?? '?'} / ${entry.modelId}`
+              ? virtual
+                ? virtual.name
+                : `${provider?.name ?? '?'} / ${entry.modelId}`
               : t('Follows the conversation model');
         const thinkingChoice = mode === 'fixed' ? thinkingChoiceOf(entry) : '';
 
@@ -306,7 +283,8 @@ export function AgentTypeEditDialog({
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const providers = useMaterializedProviders();
+  const candidates = useUsableProviders();
+  const virtualModels = useSettingsStore((state) => state.virtualModels);
   const addAgentType = useSettingsStore((state) => state.addAgentType);
   const updateAgentType = useSettingsStore((state) => state.updateAgentType);
 
@@ -328,8 +306,13 @@ export function AgentTypeEditDialog({
   const toggleId = (list: string[], id: string): string[] =>
     list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
 
-  const provider = providers.find((p) => p.id === providerId && !isClassifierOnlyProvider(p));
-  const models = (provider?.models ?? []).filter((m) => m.enabled !== false);
+  // 固定模型也允许绑虚拟条目：推理能力按主成员展示与钳位
+  const pickerThinkingLevel = thinking !== '' && thinking !== 'off' ? thinking : 'medium';
+  // 与子模型一致：类型级推理预设是用户覆盖，不因模型声明能力丢掉档位入口
+  const pickerCapabilityOverrides = pickModelCapabilityOverrides({
+    reasoning: thinking === 'off' ? 'off' : thinking === '' ? undefined : 'on',
+    thinkingLevel: thinking === '' || thinking === 'off' ? undefined : thinking,
+  });
 
   const save = () => {
     const slug = slugify(name);
@@ -416,96 +399,31 @@ export function AgentTypeEditDialog({
             </Select>
           </Field>
           {modelMode === 'fixed' && (
-            <div className="grid grid-cols-3 gap-3">
-              <Field>
-                <FieldLabel>{t('Provider (optional)')}</FieldLabel>
-                <Select
-                  items={[
-                    { value: '', label: t('Select provider') || '选择服务商' },
-                    ...providers
-                      .filter(
-                        (p) =>
-                          p.enabled && hasProviderCredentials(p) && !isClassifierOnlyProvider(p)
-                      )
-                      .map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                  value={providerId}
-                  onValueChange={(value) => {
-                    setProviderId(value ?? '');
-                    setModelId('');
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                    <SelectItem value="">{t('Select provider') || '选择服务商'}</SelectItem>
-                    {providers
-                      .filter(
-                        (p) =>
-                          p.enabled && hasProviderCredentials(p) && !isClassifierOnlyProvider(p)
-                      )
-                      .map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                  </SelectPopup>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel>{t('Model')}</FieldLabel>
-                <Select
-                  disabled={!providerId}
-                  items={[
-                    { value: '', label: providerId ? t('Select model') : '—' },
-                    ...models.map((m) => ({ value: m.id, label: m.id })),
-                  ]}
-                  value={modelId}
-                  onValueChange={(value) => setModelId(value ?? '')}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                    <SelectItem value="">{providerId ? t('Select model') : '—'}</SelectItem>
-                    {models.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.id}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel>{t('Thinking level')}</FieldLabel>
-                <Select
-                  items={[
-                    { value: '', label: t('Follow conversation') },
-                    { value: 'off', label: t('Off') },
-                    ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({
-                      value: level,
-                      label: level,
-                    })),
-                  ]}
-                  value={thinking}
-                  onValueChange={(value) => setThinking((value ?? '') as ThinkingChoice)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
-                    <SelectItem value="">{t('Follow conversation')}</SelectItem>
-                    <SelectItem value="off">{t('Off')}</SelectItem>
-                    {MODEL_THINKING_LEVEL_OVERRIDES.map((level) => (
-                      <SelectItem key={level} value={level}>
-                        {level}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              </Field>
-            </div>
+            <Field>
+              <FieldLabel>{t('Model')}</FieldLabel>
+              <ModelPicker
+                providers={candidates}
+                virtualModels={virtualModels}
+                providerId={providerId}
+                modelId={modelId}
+                modelCapabilityOverrides={pickerCapabilityOverrides}
+                reasoningMode={thinking === '' ? 'follow' : thinking === 'off' ? 'off' : 'on'}
+                reasoningEnabled={thinking !== '' && thinking !== 'off'}
+                thinkingLevel={pickerThinkingLevel}
+                onReasoningModeChange={(mode, level) =>
+                  setThinking(mode === 'follow' ? '' : mode === 'off' ? 'off' : level)
+                }
+                onSelect={(nextProviderId, nextModelId) => {
+                  setProviderId(nextProviderId);
+                  setModelId(nextModelId);
+                }}
+                onReasoningChange={(enabled) => setThinking(enabled ? pickerThinkingLevel : 'off')}
+                onThinkingChange={(level) => setThinking(level)}
+                side="bottom"
+                triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
+                zIndex={Z_INDEX.DROPDOWN_IN_MODAL}
+              />
+            </Field>
           )}
           <Field>
             <FieldLabel>{t('Toolset')}</FieldLabel>

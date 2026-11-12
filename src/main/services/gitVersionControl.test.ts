@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -11,24 +12,34 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitRepository, parseGitStatus, validateGitPath } from './gitVersionControl';
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+let templateRoot: string;
 let root: string;
 let repo: string;
+beforeAll(() => {
+  templateRoot = mkdtempSync(join(tmpdir(), 'enso-git-panel-tpl-'));
+  const templateRepo = join(templateRoot, 'repo');
+  git(templateRoot, 'init', '-q', '-b', 'main', templateRepo);
+  git(templateRepo, 'config', 'core.autocrlf', 'false');
+  git(templateRepo, 'config', 'user.name', 'test');
+  git(templateRepo, 'config', 'user.email', 'test@example.com');
+});
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'enso-git-panel-'));
+  rmSync(root, { recursive: true, force: true });
+  cpSync(templateRoot, root, { recursive: true });
   repo = join(root, 'repo');
-  git(root, 'init', '-q', '-b', 'main', repo);
-  git(repo, 'config', 'core.autocrlf', 'false');
-  git(repo, 'config', 'user.name', 'test');
-  git(repo, 'config', 'user.email', 'test@example.com');
 });
 afterEach(() => {
   vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
+});
+afterAll(() => {
+  rmSync(templateRoot, { recursive: true, force: true });
 });
 
 describe('Git 版本管理', () => {

@@ -31,9 +31,12 @@ const manifest = (patch: Partial<ExtensionPluginManifest> = {}): ExtensionPlugin
     agentTools: [],
     commands: [],
     views: [],
+    fileViewers: [],
+    statusItems: [],
     triggers: [],
     skills: [],
     mcpServers: [],
+    workflows: [],
     methods: [],
     configuration: [],
     presets: [],
@@ -418,6 +421,28 @@ describe('PluginHostGate', () => {
     });
   });
 
+  it('ui.statusUpdate 只能改清单声明过的状态项，不需要调用上下文', async () => {
+    const statusUpdate = vi.fn();
+    deps.statusUpdate = statusUpdate;
+    deps.manifest = (id) =>
+      id === 'a.b'
+        ? manifest({
+            contributes: { ...manifest().contributes, statusItems: [{ id: 'queue', text: '0' }] },
+          })
+        : null;
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.statusUpdate', { id: 'queue', text: '3', tone: 'warning' }, undefined)
+    ).resolves.toBeNull();
+    expect(statusUpdate).toHaveBeenCalledWith('a.b', 'queue', { text: '3', tone: 'warning' });
+    await expect(
+      gate.handle('a.b', 'ui.statusUpdate', { id: 'other', text: '3' }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(
+      gate.handle('a.b', 'ui.statusUpdate', { id: 'queue', tone: 'pink' }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+  });
+
   it('有 ui.view 时不需要手势就能把事件交给宿主', async () => {
     const viewEvent = vi.fn();
     deps.viewEvent = viewEvent;
@@ -428,6 +453,17 @@ describe('PluginHostGate', () => {
       gate.handle('a.b', 'ui.viewEvent', { name: 'snapshot', data: { n: 1 } }, agentCall())
     ).resolves.toBeNull();
     expect(viewEvent).toHaveBeenCalledWith('a.b', 'snapshot', { n: 1 });
+  });
+
+  it('常驻进程不在宿主调用里也能推侧栏事件', async () => {
+    const viewEvent = vi.fn();
+    deps.viewEvent = viewEvent;
+    deps.manifest = (id) => (id === 'a.b' ? manifest({ permissions: ['ui.view'] }) : null);
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'ui.viewEvent', { name: 'inbox', data: { at: 1 } }, undefined)
+    ).resolves.toBeNull();
+    expect(viewEvent).toHaveBeenCalledWith('a.b', 'inbox', { at: 1 });
   });
 
   it('没有 ui.view、名字不合法或数据过大时拒绝侧栏事件', async () => {

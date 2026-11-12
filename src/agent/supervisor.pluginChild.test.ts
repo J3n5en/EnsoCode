@@ -98,15 +98,6 @@ const parent = {
   sessionId: 'parent',
   generation: '11111111-1111-4111-8111-111111111111',
 };
-const lockedChild = {
-  sessionId: 'parent::cw-instance',
-  generation: '22222222-2222-4222-8222-222222222222',
-  parent,
-  instanceId: '33333333-3333-4333-8333-333333333333',
-  instanceName: 'Enso-33333333',
-  typeKey: 'agent:enso' as const,
-  profileId: 'enso-locked-v1' as const,
-};
 const model = {
   api: 'openai-completions' as const,
   baseUrl: 'https://example.test/v1',
@@ -248,27 +239,6 @@ const typed = (name: string, tools: 'all' | 'readonly', n: number) => {
   return { identity, command };
 };
 
-const lockedCommand: AgentCommand = {
-  type: 'spawn-child',
-  identity: lockedChild,
-  cwd: '/workspace',
-  config: {
-    typeKey: 'agent:enso',
-    displayName: 'Enso',
-    description: 'System Agent',
-    spawnSpecId: 'spawn-enso',
-    systemPrompt: 'locked',
-    model,
-    tools: 'enso-locked',
-    skillPaths: [],
-    skillBindingIds: [],
-    mcpServers: [],
-    mcpBindingIds: [],
-    systemPromptHash: 'enso-hash',
-    lockedProfileId: 'enso-locked-v1',
-  },
-};
-
 function setup(approvalMode: 'full' | 'supervised' = 'full') {
   const events: AgentWorkerEvent[] = [];
   const supervisor = new SessionSupervisor({
@@ -336,7 +306,7 @@ describe('子会话插件能力', () => {
     }));
   });
 
-  it('普通子代理与 coworker 拿到插件工具；只读档与 enso-locked 不拿；proof 不含插件工具', async () => {
+  it('普通子代理与 coworker 拿到插件工具；只读档不拿；proof 不含插件工具', async () => {
     const ctx = setup();
     await spawnParent(ctx);
     const parentTools = (
@@ -354,14 +324,6 @@ describe('子会话插件能力', () => {
 
     const scout = await spawnChild(ctx, typed('scout', 'readonly', 6).command);
     expect(scout.tools.map((tool) => tool.name)).not.toContain(pluginTool.name);
-
-    const locked = await spawnChild(ctx, lockedCommand);
-    expect(locked.tools.map((tool) => tool.name)).toEqual([
-      'enso_capabilities',
-      'enso_app',
-      'ask_user',
-    ]);
-    expect(pluginExtension(locked.loaders)).toBeUndefined();
 
     const calls = mocks.createAgentSession.mock.calls.length;
     ctx.supervisor.handleCommand({

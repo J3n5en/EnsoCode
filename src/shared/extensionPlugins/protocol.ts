@@ -115,6 +115,8 @@ export const PLUGIN_HOST_APIS = [
   'ui.viewEvent',
   /** 打开右侧栏并创建或定位到本插件的侧栏页面；args { viewId? } */
   'ui.viewOpen',
+  /** 改清单声明过的输入框底栏状态项；args { id, text?, tooltip?, tone?, visible? } */
+  'ui.statusUpdate',
   'composer.readDraft',
   'composer.insertText',
   'composer.replaceDraft',

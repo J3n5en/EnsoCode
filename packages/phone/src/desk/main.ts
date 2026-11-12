@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
+import { PHONE_PUSH_ENABLED_KEY, pushAvailability, subscribePush, unsubscribePush } from '../push';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
 import { PHONE_URL, saveUiMode } from '../uiMode';
 import { RelayBundle } from './bundle';
@@ -18,6 +19,13 @@ import {
   saveDeskMeta,
 } from './launch';
 import { installLeaveGuard } from './leaveGuard';
+import {
+  initialDeskLink,
+  parsePushPending,
+  parseRemotePushSubscription,
+  reduceDeskLink,
+  toRemoteLinkStatus,
+} from './linkModel';
 import {
   createSnapshotTracker,
   loadReads,
@@ -75,6 +83,7 @@ const STATE_TEXT: Record<ConnState, string> = {
   'host-offline': '桌面不在线',
   offline: '已断开，正在重连…',
   unauthorized: '配对已失效',
+  replaced: '已在其他页面打开',
 };
 
 const LOADING_TEXT: Partial<Record<ConnState, string>> = {
@@ -103,6 +112,8 @@ function showState(state: ConnState): void {
   if (text) progress(text);
   if (state === 'unauthorized')
     splash(`配对已失效，请回到<a href="${PHONE_URL}">精简版</a>重新配对。`);
+  if (state === 'replaced')
+    splash(`已在其他页面打开，关掉那个页面或回到<a href="${PHONE_URL}">精简版</a>重连。`);
 }
 
 /** SW 需要能代理 /desk/* ：旧版 SW 没有 fetch 处理，先确保新版接管本页 */
@@ -185,13 +196,44 @@ async function main(): Promise<void> {
   let snapshot: HTMLIFrameElement | null = null;
   let snapshotTimer: ReturnType<typeof setInterval> | null = null;
 
-  const tunnel = new DeskTunnel(device, showState, (error) => {
-    if (error === 'host-outdated') fallback('桌面端版本过旧，不支持完整版，请升级后再试。');
-    else if (error === 'read-only') fallback('该设备在桌面端被设为只读，无法使用完整版。');
-    else if (error === 'renderer-missing')
-      splash('桌面端缺少浏览器版资源，请更新或重新构建桌面版。');
-    else splash(`桌面拒绝连接：${error}`);
-  });
+  let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
+  const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
+  const publishLink = (next: typeof link) => {
+    if (next === link) return;
+    link = next;
+    const status = toRemoteLinkStatus(link, pushAvailability());
+    for (const listener of linkListeners) listener(status);
+  };
+
+  let tunnel!: DeskTunnel;
+  tunnel = new DeskTunnel(
+    device,
+    (state) => {
+      showState(state);
+      publishLink(reduceDeskLink(link, { type: 'state', state }));
+    },
+    (error) => {
+      if (error === 'host-outdated') fallback('桌面端版本过旧，不支持完整版，请升级后再试。');
+      else if (error === 'read-only') fallback('该设备在桌面端被设为只读，无法使用完整版。');
+      else if (error === 'renderer-missing')
+        splash('桌面端缺少浏览器版资源，请更新或重新构建桌面版。');
+      else splash(`桌面拒绝连接：${error}`);
+    },
+    {
+      onTransport: (transport) =>
+        publishLink(reduceDeskLink(link, { type: 'transport', transport })),
+      onRtt: (rttMs) => publishLink(reduceDeskLink(link, { type: 'rtt', rttMs })),
+      onPushConfig: (key) => {
+        publishLink(reduceDeskLink(link, { type: 'push-config', key }));
+        if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) !== 'on') return;
+        // 已经允许过：刷新订阅不需要再弹权限
+        void subscribePush(key).then((result) => {
+          if (result.ok)
+            tunnel.sendGuest({ type: 'push-subscribe', subscription: result.subscription });
+        });
+      },
+    }
+  );
 
   const mount = (kind: RemoteFrameKind): HTMLIFrameElement => {
     const iframe = document.createElement('iframe');
@@ -271,6 +313,33 @@ async function main(): Promise<void> {
     exitDesk() {
       leaveGuard?.release();
       location.href = PHONE_URL;
+    },
+    linkStatus: () => toRemoteLinkStatus(link, pushAvailability()),
+    onLinkStatus(callback) {
+      linkListeners.add(callback);
+      return () => linkListeners.delete(callback);
+    },
+    vapidPublicKey: () => link.vapidPublicKey,
+    setPushSubscription(subscription) {
+      if (subscription === null) {
+        tunnel.sendGuest({ type: 'push-unsubscribe' });
+        localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'off');
+        publishLink(
+          reduceDeskLink(link, { type: 'push', enabled: false, busy: false, error: null })
+        );
+        void unsubscribePush();
+        return;
+      }
+      const parsed = parseRemotePushSubscription(subscription);
+      if (!parsed) return;
+      tunnel.sendGuest({ type: 'push-subscribe', subscription: parsed });
+      localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'on');
+      publishLink(reduceDeskLink(link, { type: 'push', enabled: true, busy: false, error: null }));
+    },
+    setPushPending(pending) {
+      const parsed = parsePushPending(pending);
+      if (!parsed) return;
+      publishLink(reduceDeskLink(link, { type: 'push', ...parsed }));
     },
   };
   (window as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote = bridge;

@@ -2,8 +2,6 @@ import type { AxTreeNode } from '@shared/computer/axTree';
 import { describe, expect, it } from 'vitest';
 import {
   AX_SNAPSHOT_BUDGET_MS,
-  AX_SNAPSHOT_DEFAULT_DEPTH,
-  AX_SNAPSHOT_MAX_NODES,
   AX_WORKER_TIMEOUT_MS,
   axChildTraversalAttributes,
   axCollectVisibleText,
@@ -18,10 +16,7 @@ import {
 } from './axWalkBudget';
 
 describe('axWalkDecision', () => {
-  it('默认只走根 + 一层有意义节点，并限制节点和时间', () => {
-    expect(AX_SNAPSHOT_DEFAULT_DEPTH).toBe(1);
-    expect(AX_SNAPSHOT_MAX_NODES).toBe(80);
-    expect(AX_SNAPSHOT_BUDGET_MS).toBe(1800);
+  it('worker 超时长于遍历预算，预算到点能先返回部分树', () => {
     expect(AX_WORKER_TIMEOUT_MS).toBeGreaterThan(AX_SNAPSHOT_BUDGET_MS);
   });
 

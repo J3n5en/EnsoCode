@@ -4,7 +4,7 @@ import {
   mergeIdleRestartBlocks,
   persistedConversations,
 } from '@shared/updater/idleRestart';
-import { agentSessionIndex } from '../../ipc/capabilities';
+import { agentSessionIndex } from '../../ipc/sessionIndex';
 import { readSettings } from '../../ipc/settings';
 import { getPairCatalog } from '../pairHost';
 import { headlessIdleBlocks, isPairHeadless } from '../pairSessionHost';

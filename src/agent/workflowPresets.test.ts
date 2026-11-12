@@ -113,6 +113,24 @@ describe('listWorkflowPresets', () => {
     expect(sources.has('project')).toBe(false);
   });
 
+  it('插件预设只认清单列出的文件，排在全局之后、内置之前', () => {
+    const pluginDir = path.join(tmp, 'plugin', 'workflows');
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, 'triage.js'), preset('Plugin triage'));
+    fs.writeFileSync(path.join(pluginDir, 'unlisted.js'), preset('Unlisted'));
+    fs.writeFileSync(path.join(pluginDir, 'shared.js'), preset('Plugin shared'));
+    write(home, 'shared.js', preset('Global shared'));
+    const pluginFiles = [path.join(pluginDir, 'triage.js'), path.join(pluginDir, 'shared.js')];
+    const roots = workflowPresetRoots(undefined, { home, pluginFiles });
+    expect(roots.map((root) => root.source)).toEqual(['global', 'plugin']);
+    const byId = new Map(listWorkflowPresets(roots).map((item) => [item.id, item]));
+    expect(byId.get('triage')).toMatchObject({ name: 'Plugin triage', source: 'plugin' });
+    expect(byId.get('shared')).toMatchObject({ source: 'global' });
+    expect(byId.has('unlisted')).toBe(false);
+    expect(loadWorkflowPreset('unlisted', roots)).toBeNull();
+    expect(loadWorkflowPreset('triage', roots)?.name).toBe('Plugin triage');
+  });
+
   it('内置预设全部可解析', () => {
     const builtin = listWorkflowPresets([]).filter((item) => item.source === 'builtin');
     expect(builtin.length).toBeGreaterThan(0);

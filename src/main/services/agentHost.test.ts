@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { McpServerEntry, ModelProvider } from '@shared/types';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { botToAgentType } from './bots/botAgentType';
 import { createModelProbe } from './bots/modelProbe';
 import { McpToolCatalogStore } from './mcpToolCatalog';
@@ -926,6 +926,66 @@ describe('resolveAgentTypeSpawnConfig 类型级推理预设', () => {
     if (!resolved.ok) return;
     expect(resolved.config).not.toHaveProperty('reasoning');
     expect(resolved.config).not.toHaveProperty('thinkingLevel');
+  });
+});
+
+describe('resolveAgentTypeSpawnConfig 虚拟模型绑定', () => {
+  const TYPE_ID = '77777777-7777-4777-8777-777777777777';
+  beforeEach(() => {
+    settingsMock.value = {
+      'enso-settings': {
+        version: 99,
+        state: {
+          providers: [
+            {
+              id: 'p1',
+              name: 'p1',
+              api: 'anthropic-messages',
+              apiKey: 'key-p1',
+              baseUrl: 'https://p1.test',
+              enabled: true,
+              models: [{ id: 'strong' }, { id: 'weak' }],
+            },
+          ],
+          virtualModels: [
+            {
+              id: 'auto',
+              name: 'Auto',
+              enabled: true,
+              primary: { providerId: 'p1', modelId: 'strong' },
+              fast: { providerId: 'p1', modelId: 'weak' },
+              fallbacks: [],
+            },
+          ],
+          agentTypes: [
+            {
+              id: TYPE_ID,
+              name: 'deep-scout',
+              description: 'Deep scout',
+              systemPrompt: 'Be thorough.',
+              tools: 'readonly',
+              modelMode: 'fixed',
+              providerId: 'enso-virtual',
+              modelId: 'auto',
+            },
+          ],
+        },
+      },
+    };
+  });
+
+  it('fixed 绑定虚拟条目按虚拟配置下发，身份保持虚拟引用', () => {
+    const parent = resolveModelSelection('p1', 'strong', new Set());
+    if (!parent.ok) throw new Error(parent.error);
+    const resolved = resolveAgentTypeSpawnConfig(`custom:${TYPE_ID}`, parent.selection, new Set());
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.expectedModel).toEqual({ providerId: 'enso-virtual', modelId: 'auto' });
+    expect(resolved.config.model).toMatchObject({
+      settingsProviderId: 'enso-virtual',
+      modelId: 'auto',
+    });
+    expect(resolved.config.model.virtual?.primary).toMatchObject({ modelId: 'strong' });
   });
 });
 

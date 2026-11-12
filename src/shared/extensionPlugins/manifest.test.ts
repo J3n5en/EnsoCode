@@ -25,6 +25,139 @@ const errorsOf = (raw: unknown): string[] => {
 };
 
 describe('parseExtensionPluginManifest', () => {
+  it('before_agent_start 可拦截但不能 failClosed；model_select 只能观察', () => {
+    const withEvents = (events: unknown, permissions: string[]) => ({
+      ...base(),
+      permissions: ['agent.tool', ...permissions],
+      contributes: { ...base().contributes, events },
+    });
+    expect(
+      errorsOf(
+        withEvents(
+          [{ event: 'before_agent_start', mode: 'intercept' }, { event: 'model_select' }],
+          ['agent.intercept', 'agent.observe']
+        )
+      )
+    ).toEqual([]);
+    expect(
+      errorsOf(
+        withEvents(
+          [{ event: 'before_agent_start', mode: 'intercept', failClosed: true }],
+          ['agent.intercept']
+        )
+      )
+    ).not.toEqual([]);
+    expect(
+      errorsOf(withEvents([{ event: 'model_select', mode: 'intercept' }], ['agent.intercept']))
+    ).not.toEqual([]);
+  });
+
+  it('statusItems 声明输入框底栏状态项，command 必须是本插件命令', () => {
+    const withItems = (statusItems: unknown) => ({
+      ...base(),
+      contributes: {
+        ...base().contributes,
+        commands: [{ id: 'show', title: 'Show' }],
+        statusItems,
+      },
+    });
+    const ok = parseExtensionPluginManifest(
+      withItems([
+        { id: 'queue', text: '0 待办', tooltip: '队列', command: 'show' },
+        { id: 'plain', text: 'idle' },
+      ]),
+      '0.2.12'
+    );
+    expect(ok.ok && ok.manifest.contributes.statusItems).toEqual([
+      { id: 'queue', text: '0 待办', tooltip: '队列', command: 'show' },
+      { id: 'plain', text: 'idle' },
+    ]);
+    expect(parseExtensionPluginManifest(base(), '0.2.12')).toMatchObject({
+      ok: true,
+      manifest: { contributes: { statusItems: [] } },
+    });
+    for (const bad of [
+      { id: 'x', text: 'a'.repeat(25) },
+      { id: 'x', text: '' },
+      { id: 'Bad', text: 'a' },
+      { id: 'x', text: 'a', command: 'missing' },
+      { id: 'x', text: 'a', tooltip: 1 },
+    ]) {
+      expect(errorsOf(withItems([bad]))).toContain('状态项不合法');
+    }
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `s${i}`, text: 'a' }));
+    expect(errorsOf(withItems(many))).toContain('statusItems 最多 8 个');
+  });
+
+  it('fileViewers 按扩展名声明查看器，需要 ui.view，扩展名须小写且带点', () => {
+    const withViewers = (fileViewers: unknown, permissions = ['agent.tool', 'ui.view']) => ({
+      ...base(),
+      permissions,
+      contributes: { ...base().contributes, fileViewers },
+    });
+    const ok = parseExtensionPluginManifest(
+      withViewers([
+        { id: 'draw', title: 'Drawing', entry: 'viewer.html', extensions: ['.excalidraw'] },
+        {
+          id: 'csv',
+          title: 'Table',
+          entry: 'csv.html',
+          extensions: ['.csv', '.tsv'],
+          default: true,
+        },
+      ]),
+      '0.2.12'
+    );
+    expect(ok.ok && ok.manifest.contributes.fileViewers).toEqual([
+      {
+        id: 'draw',
+        title: 'Drawing',
+        entry: 'viewer.html',
+        extensions: ['.excalidraw'],
+        default: false,
+      },
+      { id: 'csv', title: 'Table', entry: 'csv.html', extensions: ['.csv', '.tsv'], default: true },
+    ]);
+    expect(parseExtensionPluginManifest(base(), '0.2.12')).toMatchObject({
+      ok: true,
+      manifest: { contributes: { fileViewers: [] } },
+    });
+    const viewer = { id: 'v', title: 'V', entry: 'v.html', extensions: ['.x'] };
+    expect(errorsOf(withViewers([viewer], ['agent.tool']))).toContain(
+      'fileViewers 需要权限 ui.view'
+    );
+    for (const bad of [
+      { ...viewer, extensions: [] },
+      { ...viewer, extensions: ['x'] },
+      { ...viewer, extensions: ['.CSV'] },
+      { ...viewer, extensions: ['./x'] },
+      { ...viewer, entry: 'v.js' },
+      { ...viewer, entry: '../v.html' },
+      { ...viewer, default: 'yes' },
+      { ...viewer, id: 'Bad Id' },
+    ]) {
+      expect(errorsOf(withViewers([bad]))).toContain('文件查看器不合法');
+    }
+    expect(errorsOf(withViewers([viewer, viewer]))).toContain('文件查看器 重复：v');
+  });
+
+  it('命令可带默认快捷键，必须含 mod/ctrl/alt 且键名合法', () => {
+    const withKey = (key: unknown) => ({
+      ...base(),
+      contributes: { ...base().contributes, commands: [{ id: 'run', title: 'Run', key }] },
+    });
+    const ok = parseExtensionPluginManifest(withKey('mod+shift+k'), '0.2.12');
+    expect(ok.ok && ok.manifest.contributes.commands).toEqual([
+      { id: 'run', title: 'Run', key: 'mod+shift+k' },
+    ]);
+    for (const key of ['alt+f5', 'ctrl+alt+arrowup', 'mod+,']) {
+      expect(errorsOf(withKey(key))).toEqual([]);
+    }
+    for (const key of ['k', 'shift+k', 'mod+', 'mod+foo', 'shift+mod+k', 'MOD+K', 1]) {
+      expect(errorsOf(withKey(key))).toContain('命令不合法');
+    }
+  });
+
   it('接受合法清单并补齐缺省字段', () => {
     const result = parseExtensionPluginManifest(base(), '0.2.12');
     expect(result.ok).toBe(true);
@@ -140,6 +273,17 @@ describe('parseExtensionPluginManifest', () => {
       expect(errorsOf({ ...base(), contributes: { agentTools: [tool] } })).not.toEqual([]);
     }
   );
+
+  it('工具可声明 readOnly，非布尔值报错', () => {
+    const tool = { ...base().contributes.agentTools[0], readOnly: true };
+    const parsed = parseExtensionPluginManifest(
+      { ...base(), contributes: { agentTools: [tool] } },
+      '0.2.12'
+    );
+    expect(parsed.ok && parsed.manifest.contributes.agentTools[0]?.readOnly).toBe(true);
+    const bad = { ...tool, readOnly: 'yes' };
+    expect(errorsOf({ ...base(), contributes: { agentTools: [bad] } })).not.toEqual([]);
+  });
 
   it('拒绝重复工具名', () => {
     const tool = base().contributes.agentTools[0];
@@ -366,6 +510,54 @@ describe('parseExtensionPluginManifest', () => {
         contributes: {
           ...raw.contributes,
           presets: [{ ...preset, refusalRetry: true, refusalRetryPrompt: undefined }],
+        },
+      })
+    ).not.toEqual([]);
+  });
+
+  it('接受 workflow 预设文件，预设可圈定；坏路径、坏文件名、重名和未声明引用都拒绝', () => {
+    const raw = {
+      ...base(),
+      contributes: {
+        ...base().contributes,
+        workflows: ['workflows/triage.js', 'workflows/release-check.js'],
+        presets: [
+          {
+            id: 'review',
+            name: 'Review',
+            skills: [],
+            mcpServers: [],
+            workflows: ['workflows/triage.js'],
+          },
+        ],
+      },
+    };
+    const ok = parseExtensionPluginManifest(raw, '0.2.12');
+    expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    expect(ok.manifest.contributes.workflows).toEqual(raw.contributes.workflows);
+    expect(ok.manifest.contributes.presets[0]?.workflows).toEqual(['workflows/triage.js']);
+    const withWorkflows = (workflows: unknown) => ({
+      ...base(),
+      contributes: { ...base().contributes, workflows },
+    });
+    expect(parseExtensionPluginManifest(base(), '0.2.12')).toMatchObject({
+      ok: true,
+      manifest: { contributes: { workflows: [] } },
+    });
+    for (const bad of [
+      ['../triage.js'],
+      ['workflows/triage.md'],
+      ['workflows/Bad Name.js'],
+      ['a/triage.js', 'b/triage.js'],
+    ])
+      expect(errorsOf(withWorkflows(bad))).not.toEqual([]);
+    expect(
+      errorsOf({
+        ...raw,
+        contributes: {
+          ...raw.contributes,
+          presets: [{ ...raw.contributes.presets[0], workflows: ['workflows/missing.js'] }],
         },
       })
     ).not.toEqual([]);

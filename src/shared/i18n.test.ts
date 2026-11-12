@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY_CATALOG } from './capabilities/catalog';
-import {
-  getTranslation,
-  normalizeLocale,
-  SUBAGENT_MODELS_CONFIGURE_PROMPT,
-  translate,
-  zhTranslations,
-} from './i18n';
+import { getTranslation, normalizeLocale, translate, zhTranslations } from './i18n';
 import { BUILTIN_TOOLS } from './types/builtinTools';
 
 /** 间接映射表里的 t() key。删孤儿时漏看这些会把正在用的词条删掉。 */
@@ -146,7 +139,6 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Default model changed: {{previous}} → {{next}}',
   'Subscription credentials could not be loaded: {{error}}',
   // Typed Agent recipient, child TAB, and parent notifications
-  'Ask Enso',
   'Type @ to choose a file or Agent',
   'Create or select a project to start a conversation',
   'Agents',
@@ -159,7 +151,6 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Remove Agent recipient',
   'Message the selected Agent…',
   'Send only to the selected Agent',
-  'Inherits the conversation model and provides product capabilities',
   'This Agent name is reserved',
   'Dispatched to',
   'Completed',
@@ -178,7 +169,6 @@ const MODEL_CENTER_ENSO_I18N_KEYS = [
   'Parent ready model did not match the bound model.',
   'Child ready identity mismatch.',
   'Child ready profile or model mismatch.',
-  'Locked Enso tool profile mismatch.',
 ] as const;
 
 describe('normalizeLocale', () => {
@@ -202,20 +192,6 @@ describe('mapped i18n keys', () => {
       expect(zhTranslations[key], `missing mapped key: ${key}`).toBeTypeOf('string');
       expect(getTranslation('zh', key)).not.toBe(key);
     }
-  });
-});
-
-describe('SUBAGENT_MODELS_CONFIGURE_PROMPT', () => {
-  it('中英文都是可直接下发给 Enso 的完整提示词，且都说明了描述的用途', () => {
-    for (const locale of ['en', 'zh'] as const) {
-      const prompt = getTranslation(locale, SUBAGENT_MODELS_CONFIGURE_PROMPT);
-      expect(prompt.length).toBeGreaterThan(200);
-      expect(prompt).toContain('scout');
-      expect(prompt).toContain('model');
-    }
-    expect(getTranslation('zh', SUBAGENT_MODELS_CONFIGURE_PROMPT)).not.toBe(
-      SUBAGENT_MODELS_CONFIGURE_PROMPT
-    );
   });
 });
 
@@ -265,22 +241,6 @@ describe('workspace branch i18n keys', () => {
     for (const key of keys) {
       expect(getTranslation('en', key)).toBe(key);
       expect(getTranslation('zh', key), key).not.toBe(key);
-    }
-  });
-});
-
-describe('dangerous capability i18n keys', () => {
-  it('从 catalog 自动收集的全部危险能力说明都有中文映射', () => {
-    const descriptions = Object.values(CAPABILITY_CATALOG)
-      .filter((spec) => spec.risk === 'dangerous')
-      .map((spec) => spec.description);
-    expect(descriptions.length).toBeGreaterThan(0);
-    for (const description of descriptions) {
-      expect(
-        zhTranslations[description],
-        `missing dangerous capability: ${description}`
-      ).toBeDefined();
-      expect(getTranslation('zh', description)).not.toBe(description);
     }
   });
 });

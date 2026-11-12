@@ -1,7 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ChildSessionIdentity } from '@shared/builtinAgents';
-import type { CapabilityReceipt } from '@shared/capabilities/types';
 import type {
   AgentSessionCustomEntry,
   DispatchMainEvent,
@@ -142,8 +141,8 @@ async function setup(
   );
   if (!selection.accepted) throw new Error(selection.error);
   const config: ResolvedAgentTypeSpawnConfig = {
-    typeKey: 'agent:enso',
-    displayName: 'Enso',
+    typeKey: 'builtin:scout',
+    displayName: 'scout',
     description: 'Built in',
     spawnSpecId: crypto.randomUUID(),
     systemPrompt: 'safe',
@@ -156,14 +155,14 @@ async function setup(
       },
       { settingsProviderId: 'provider' }
     ),
-    tools: 'enso-locked',
+    tools: 'all',
     skillPaths: [],
     skillBindingIds: [],
     mcpServers: [],
     mcpBindingIds: [],
     systemPromptHash: 'hash',
-    lockedProfileId: 'enso-locked-v1',
   };
+  const toolIds = ['read', 'grep'];
   const mainEvents: DispatchMainEvent[] = [];
   const customEntries: AgentSessionCustomEntry[] = [];
   const spawnParentCalls: Array<{ sessionId: string; cwd: string }> = [];
@@ -179,18 +178,15 @@ async function setup(
     agentType?: string;
     resumeFile: string;
   }> = [];
-  const capabilityBindings: ChildSessionIdentity[] = [];
-  const terminatedGenerations: ChildSessionIdentity[] = [];
   const promptedTasks: string[] = [];
+  const parentNotices: Array<{
+    parent: { sessionId: string; generation: string };
+    text: string;
+    urgent: boolean;
+    ownerWebContentsId: number;
+  }> = [];
   let service!: AgentDispatchService;
   service = new AgentDispatchService({
-    registerCapabilityInvocation: (context) => {
-      capabilityBindings.push(context.child);
-      return true;
-    },
-    terminateGeneration: (child) => {
-      terminatedGenerations.push(child);
-    },
     sourceRegistry: bindings,
     sessionIndex: index,
     readStoredOauthCredentialKeys: options.readCredentials ?? (async () => new Set()),
@@ -201,14 +197,12 @@ async function setup(
         revision: 1,
         candidates: [
           {
-            kind: 'agent-type',
-            id: 'agent:enso',
-            typeKey: 'agent:enso',
-            displayName: 'Enso',
+            typeKey: 'builtin:scout',
+            displayName: 'scout',
             description: 'Built in',
-            source: 'system',
-            locked: true,
-            canDisable: false,
+            source: 'builtin',
+            locked: false,
+            canDisable: true,
             canEdit: false,
           },
         ],
@@ -221,14 +215,15 @@ async function setup(
           config: config.model,
         },
       }),
-      resolveAgentType: () =>
-        options.resolveAgentTypeError
-          ? { ok: false, error: options.resolveAgentTypeError }
+      // 同生产 host：registry 里没有的类型（含历史 agent:enso）一律 unavailable
+      resolveAgentType: (typeKey) =>
+        options.resolveAgentTypeError || typeKey !== config.typeKey
+          ? { ok: false, error: options.resolveAgentTypeError ?? 'Agent type is unavailable.' }
           : {
               ok: true,
               config,
               expectedModel: { providerId: 'provider', modelId: 'model' },
-              expectedToolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
+              expectedToolIds: toolIds,
             },
       spawnParent: (identity, request) => {
         spawnParentCalls.push({ sessionId: identity.sessionId, cwd: request.cwd });
@@ -263,7 +258,7 @@ async function setup(
               spawnSpecId: altered.spawnSpecId ?? config.spawnSpecId,
               typeKey: config.typeKey,
               model: { providerId: 'provider', modelId: 'model' },
-              toolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
+              toolIds,
               loadedSkillBindingIds: config.skillBindingIds,
               loadedMcpBindingIds: config.mcpBindingIds,
               systemPromptHash: altered.systemPromptHash ?? config.systemPromptHash,
@@ -278,6 +273,10 @@ async function setup(
       },
       appendCustomEntry: (_identity, entry) => {
         customEntries.push(entry);
+        return { ok: true };
+      },
+      notifyParent: (parent, notice) => {
+        parentNotices.push({ parent, ...notice });
         return { ok: true };
       },
       dismissChild: () => ({ ok: true }),
@@ -304,11 +303,10 @@ async function setup(
     spawnParentCalls,
     spawnChildCalls,
     resumeCoworkerCalls,
-    capabilityBindings,
-    terminatedGenerations,
     projectPath: project.value.canonicalPath,
     root,
     promptedTasks,
+    parentNotices,
   };
 }
 
@@ -320,7 +318,7 @@ describe('AgentDispatchService delta coordination', () => {
       {
         requestId: 'busy',
         selectionBindingId: fixture.selectionBindingId,
-        typeKey: 'agent:enso',
+        typeKey: 'builtin:scout',
         task: { text: 'task', images: [], fileMentions: [] },
       },
       1
@@ -346,7 +344,7 @@ describe('AgentDispatchService delta coordination', () => {
       {
         requestId: 'late-binding',
         selectionBindingId: fixture.selectionBindingId,
-        typeKey: 'agent:enso',
+        typeKey: 'builtin:scout',
         task: {
           text: 'task',
           images: [],
@@ -372,7 +370,7 @@ describe('AgentDispatchService delta coordination', () => {
       {
         requestId: 'dir-mention',
         selectionBindingId: fixture.selectionBindingId,
-        typeKey: 'agent:enso',
+        typeKey: 'builtin:scout',
         task: {
           text: 'look at @src/ and @note.txt',
           images: [],
@@ -402,7 +400,7 @@ describe('AgentDispatchService delta coordination', () => {
         {
           requestId: 'worktree-dispatch',
           selectionBindingId: fixture.selectionBindingId,
-          typeKey: 'agent:enso',
+          typeKey: 'builtin:scout',
           task: { text: 'do it', images: [], fileMentions: [] },
         },
         1
@@ -427,7 +425,7 @@ describe('AgentDispatchService delta coordination', () => {
       {
         requestId: 'draft-dispatch',
         selectionBindingId: fixture.selectionBindingId,
-        typeKey: 'agent:enso',
+        typeKey: 'builtin:scout',
         task: { text: 'do it', images: [], fileMentions: [] },
       },
       1
@@ -438,67 +436,13 @@ describe('AgentDispatchService delta coordination', () => {
     ]);
   });
 
-  it('receipt 的每笔调用 requestId 与派发 requestId 不同时，完成通知仍带安全 summary', async () => {
-    const { service, selectionBindingId, customEntries } = await setup();
-    const result = await service.dispatch(
-      {
-        requestId: 'turn-1',
-        selectionBindingId,
-        typeKey: 'agent:enso',
-        task: { text: 'do it', images: [], fileMentions: [] },
-      },
-      1
-    );
-    expect(result.accepted).toBe(true);
-    if (!result.accepted) return;
-    const child = result.child;
-    // 生产形状：ensoApp 每笔 capability 调用自己 randomUUID()，与派发 requestId 无关。
-    const callRequestId = 'capability-call-uuid';
-    service.observeReceipt({
-      type: 'receipt-started',
-      child,
-      turnId: 'turn-1',
-      requestId: callRequestId,
-      receiptId: 'r1',
-      receiptSeq: 1,
-      executionState: 'executing',
-    });
-    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
-    service.observeReceipt({
-      type: 'receipt-settled',
-      child,
-      turnId: 'turn-1',
-      requestId: callRequestId,
-      receiptId: 'r1',
-      receiptSeq: 1,
-      executionState: 'settled',
-      receipt: {
-        receiptId: 'r1',
-        operationId: 'op',
-        child,
-        turnId: 'turn-1',
-        requestId: callRequestId,
-        capabilityId: 'appearance.theme',
-        risk: 'reversible',
-        subject: { kind: 'setting', id: 'theme', label: 'Application theme' },
-        outcome: 'succeeded',
-        summary: 'theme: system → dark',
-        occurredAt: 1,
-        sequence: 1,
-      },
-    });
-    const completed = customEntries.filter((entry) => entry.kind === 'agent-completed');
-    expect(completed).toHaveLength(1);
-    expect(completed[0]).toMatchObject({ receiptSummary: 'theme: system → dark' });
-  });
-
-  it('settles receipt + turn exactly once with strictly increasing Main seq', async () => {
+  it('settles the turn exactly once with strictly increasing Main seq', async () => {
     const { service, selectionBindingId, mainEvents, customEntries, bindings } = await setup();
     const result = await service.dispatch(
       {
         requestId: 'turn-1',
         selectionBindingId,
-        typeKey: 'agent:enso',
+        typeKey: 'builtin:scout',
         task: { text: 'do it', images: [], fileMentions: [] },
       },
       1
@@ -506,51 +450,8 @@ describe('AgentDispatchService delta coordination', () => {
     expect(result.accepted).toBe(true);
     if (!result.accepted) return;
     const child = result.child;
-    service.observeReceipt({
-      type: 'receipt-started',
-      child,
-      turnId: 'turn-1',
-      requestId: 'turn-1',
-      receiptId: 'r1',
-      receiptSeq: 1,
-      executionState: 'executing',
-    });
     service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
-    expect(mainEvents.at(-1)?.phase).not.toBe('terminal');
-    const receipt: CapabilityReceipt = {
-      receiptId: 'r1',
-      operationId: 'op',
-      child,
-      turnId: 'turn-1',
-      requestId: 'turn-1',
-      capabilityId: 'appearance.status-line-segments',
-      risk: 'reversible',
-      subject: { kind: 'setting', id: 'statusLineSegments', label: 'Status line segments' },
-      outcome: 'succeeded',
-      summary: 'saved',
-      occurredAt: 1,
-      sequence: 1,
-    };
-    service.observeReceipt({
-      type: 'receipt-settled',
-      child,
-      turnId: 'turn-1',
-      requestId: 'turn-1',
-      receiptId: 'r1',
-      receiptSeq: 1,
-      executionState: 'settled',
-      receipt,
-    });
-    service.observeReceipt({
-      type: 'receipt-settled',
-      child,
-      turnId: 'turn-1',
-      requestId: 'turn-1',
-      receiptId: 'r1',
-      receiptSeq: 1,
-      executionState: 'settled',
-      receipt,
-    });
+    service.observe({ type: 'turn-completed', identity: child, seq: 3, turnId: 'turn-1' });
     expect(mainEvents.filter((event) => event.phase === 'terminal')).toHaveLength(1);
     expect(mainEvents.map((event) => event.mainSeq)).toEqual(
       mainEvents.map((_event, index) => index + 1)
@@ -574,7 +475,7 @@ describe('AgentDispatchService delta coordination', () => {
         {
           requestId: 'turn-2',
           selectionBindingId: reboundSelection.binding.selectionBindingId,
-          typeKey: 'agent:enso',
+          typeKey: 'builtin:scout',
           task: { text: 'again', images: [], fileMentions: [] },
         },
         1
@@ -582,42 +483,132 @@ describe('AgentDispatchService delta coordination', () => {
     ).resolves.toMatchObject({ accepted: true });
   });
 
-  it('派发回合结束不撤销能力授权，child 生命周期结束才撤销', async () => {
-    const { service, selectionBindingId, capabilityBindings, terminatedGenerations } =
-      await setup();
-    const result = await service.dispatch(
-      {
-        requestId: 'turn-1',
-        selectionBindingId,
-        typeKey: 'agent:enso',
-        task: { text: 'do it', images: [], fileMentions: [] },
-      },
-      1
-    );
-    expect(result.accepted).toBe(true);
-    if (!result.accepted) return;
-    const child = result.child;
-    expect(capabilityBindings).toHaveLength(1);
-    // 派发轮结束只是本次任务收口；child 会话仍活着，后续轮次的 enso_app 调用必须继续可用
-    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
-    expect(terminatedGenerations).toHaveLength(0);
-    // 真正的撤销边界是 child 结束
-    service.observe({ type: 'child-ended', identity: child, seq: 3, reason: 'dismissed' });
-    expect(terminatedGenerations).toEqual([child]);
-  });
-
-  it('rejects ordinary/locked child when exact spawn proof drifts', async () => {
+  it('rejects the child when exact spawn proof drifts', async () => {
     const { service, selectionBindingId } = await setup(() => ({ systemPromptHash: 'drifted' }));
     const result = await service.dispatch(
       {
         requestId: 'turn-2',
         selectionBindingId,
-        typeKey: 'agent:enso',
+        typeKey: 'builtin:scout',
         task: { text: 'do it', images: [], fileMentions: [] },
       },
       1
     );
     expect(result).toMatchObject({ accepted: false, code: 'dispatch-failed' });
+  });
+});
+
+describe('派发收口通知父会话模型', () => {
+  async function dispatched(requestId = 'turn-1') {
+    const fixture = await setup();
+    const result = await fixture.service.dispatch(
+      {
+        requestId,
+        selectionBindingId: fixture.selectionBindingId,
+        typeKey: 'builtin:scout',
+        task: { text: 'do it', images: [], fileMentions: [] },
+      },
+      1
+    );
+    if (!result.accepted) throw new Error('dispatch rejected');
+    return { ...fixture, child: result.child };
+  }
+
+  it('completed 通知一次：带类型、实例名与子会话 id，不加急', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    expect(parentNotices).toHaveLength(1);
+    const [notice] = parentNotices;
+    expect(notice.parent).toEqual(child.parent);
+    expect(notice.ownerWebContentsId).toBe(1);
+    expect(notice.urgent).toBe(false);
+    expect(notice.text).toContain('已完成');
+    expect(notice.text).toContain(child.instanceName);
+    expect(notice.text).toContain(child.typeKey);
+    expect(notice.text).toContain(child.sessionId);
+    expect(notice.text).not.toContain(child.generation);
+  });
+
+  it('failed 通知一次并带错误码', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    service.observe({
+      type: 'turn-failed',
+      identity: child,
+      seq: 2,
+      turnId: 'turn-1',
+      error: 'boom',
+    });
+    expect(parentNotices).toHaveLength(1);
+    expect(parentNotices[0].urgent).toBe(true);
+    expect(parentNotices[0].text).toContain('child-failed');
+    expect(parentNotices[0].text).toContain(child.sessionId);
+  });
+
+  it('用户中止子代理回合按 cancelled 收口：带错误码', async () => {
+    const { service, child, parentNotices, customEntries } = await dispatched();
+    service.observe({
+      type: 'turn-completed',
+      identity: child,
+      seq: 2,
+      turnId: 'turn-1',
+      aborted: true,
+    });
+    expect(parentNotices).toHaveLength(1);
+    expect(parentNotices[0].urgent).toBe(true);
+    expect(parentNotices[0].text).toContain('已取消');
+    expect(parentNotices[0].text).toContain('child-cancelled');
+    expect(customEntries.at(-1)).toMatchObject({
+      kind: 'agent-failed',
+      errorCode: 'child-cancelled',
+    });
+  });
+
+  it('同一 dispatch 只通知一次：重复终态与后续 child-ended 不再追发', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    service.observe({ type: 'turn-completed', identity: child, seq: 3, turnId: 'turn-1' });
+    service.observe({ type: 'child-ended', identity: child, seq: 4, reason: 'dismissed' });
+    service.observe({ type: 'worker-exited' });
+    expect(parentNotices).toHaveLength(1);
+  });
+
+  it('用户解雇 child 或 worker 退出导致的级联收口不通知', async () => {
+    const dismissed = await dispatched();
+    dismissed.service.observe({
+      type: 'child-ended',
+      identity: dismissed.child,
+      seq: 2,
+      reason: 'dismissed',
+    });
+    expect(dismissed.customEntries.at(-1)).toMatchObject({ errorCode: 'child-cancelled' });
+    expect(dismissed.parentNotices).toHaveLength(0);
+
+    const exited = await dispatched();
+    exited.service.observe({ type: 'worker-exited' });
+    expect(exited.customEntries.at(-1)).toMatchObject({ kind: 'agent-failed' });
+    expect(exited.parentNotices).toHaveLength(0);
+  });
+
+  it('父会话已结束（换代）时不投递', async () => {
+    const { service, child, parentNotices } = await dispatched();
+    service.observe({ type: 'parent-ended', identity: child.parent, seq: 9, reason: 'released' });
+    service.observe({ type: 'turn-completed', identity: child, seq: 2, turnId: 'turn-1' });
+    expect(parentNotices).toHaveLength(0);
+  });
+
+  it('任务未派出就失败的派发不通知（renderer 已直接拿到拒绝）', async () => {
+    const fixture = await setup(() => ({ systemPromptHash: 'drifted' }));
+    const result = await fixture.service.dispatch(
+      {
+        requestId: 'turn-1',
+        selectionBindingId: fixture.selectionBindingId,
+        typeKey: 'builtin:scout',
+        task: { text: 'do it', images: [], fileMentions: [] },
+      },
+      1
+    );
+    expect(result.accepted).toBe(false);
+    expect(fixture.parentNotices).toHaveLength(0);
   });
 });
 
@@ -639,11 +630,10 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
           child: {
             parentId: conversationId,
             childGeneration: '77777777-7777-4777-8777-777777777777',
-            agentTypeKey: 'agent:enso',
+            agentTypeKey: 'builtin:scout',
             agentInstanceId: INSTANCE_ID,
-            agentInstanceName: 'Enso · 9999',
+            agentInstanceName: 'scout · 9999',
             dispatchOrigin: 'typed-mention',
-            lockedProfileId: 'enso-locked-v1',
           },
         },
         [legacyId]: {
@@ -685,7 +675,7 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     const result = await fixture.service.hireCoworker(
       fixture.conversationId,
       'helper',
-      'agent:enso'
+      'builtin:scout'
     );
 
     expect(result.ok).toBe(true);
@@ -700,7 +690,7 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     const result = await fixture.service.hireCoworker(
       fixture.conversationId,
       'helper',
-      'agent:enso'
+      'builtin:scout'
     );
     expect(result.ok).toBe(true);
     expect(fixture.spawnChildCalls[0]?.cwd).toBe(
@@ -714,7 +704,7 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     const result = await fixture.service.hireCoworker(
       fixture.conversationId,
       'helper',
-      'agent:enso'
+      'builtin:scout'
     );
     expect(result.ok).toBe(false);
     expect(result.ok ? '' : result.error).toContain('Child source does not match.');
@@ -746,7 +736,7 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     expect(fixture.spawnChildCalls).toHaveLength(1);
     const typed = fixture.spawnChildCalls[0];
     expect(typed.identity.instanceId).toBe(INSTANCE_ID);
-    expect(typed.identity.instanceName).toBe('Enso · 9999');
+    expect(typed.identity.instanceName).toBe('scout · 9999');
     expect(typed.identity.generation).not.toBe('77777777-7777-4777-8777-777777777777');
     expect(typed.identity.parent).toEqual(identity);
     expect(typed.resumeFile).toBe('/tmp/typed.jsonl');
@@ -784,6 +774,34 @@ describe('parent-ready 级联恢复 child（§7.3）', () => {
     await ready(fixture, '11111111-1111-4111-8111-111111111111');
     expect(fixture.spawnChildCalls).toHaveLength(0);
     expect(fixture.resumeCoworkerCalls).toHaveLength(1);
+  });
+
+  it('历史 Enso child（lockedProfileId）恢复时安全跳过，不降级为 legacy resumeCoworker', async () => {
+    const ensoId = (conversationId: string) => `${conversationId}::cw-${INSTANCE_ID}`;
+    const fixture = await setup(undefined, {
+      persistedState: (conversationId) => ({
+        conversations: {
+          [conversationId]: { coworkerIds: [ensoId(conversationId)] },
+          [ensoId(conversationId)]: {
+            sessionFile: '/tmp/enso-safe-journal.jsonl',
+            coworkerName: 'Enso · 9999',
+            agentType: 'agent:enso',
+            child: {
+              parentId: conversationId,
+              childGeneration: '77777777-7777-4777-8777-777777777777',
+              agentTypeKey: 'agent:enso',
+              agentInstanceId: INSTANCE_ID,
+              agentInstanceName: 'Enso · 9999',
+              dispatchOrigin: 'typed-mention',
+              lockedProfileId: 'enso-locked-v1',
+            },
+          },
+        },
+      }),
+    });
+    await ready(fixture, '11111111-1111-4111-8111-111111111111');
+    expect(fixture.spawnChildCalls).toHaveLength(0);
+    expect(fixture.resumeCoworkerCalls).toHaveLength(0);
   });
 
   it('无持久化 coworkerIds 时零动作', async () => {

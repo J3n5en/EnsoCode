@@ -85,7 +85,7 @@ vi.mock('./agent', () => ({
   readSessionHistoryFile: vi.fn(),
   setBotWorkerEventObserver: vi.fn(),
 }));
-vi.mock('./capabilities', () => ({
+vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     currentIdentity: (id: string) => mocks.identities.get(id),
     prepareParent: (identity: { sessionId: string; generation: string }) =>
@@ -111,6 +111,12 @@ const call = async (channel: string, request?: unknown) => {
   if (!handler) throw new Error(`missing ${channel}`);
   return (await handler(main, request)) as Record<string, unknown>;
 };
+const waitFor: typeof vi.waitFor = (fn, options) =>
+  vi.waitFor(fn, {
+    interval: 5,
+    timeout: 1_000,
+    ...(typeof options === 'number' ? { timeout: options } : options),
+  });
 
 beforeEach(async () => {
   mocks.root = realpathSync(mkdtempSync(join(tmpdir(), 'bots-ipc-')));
@@ -167,7 +173,7 @@ describe('bots IPC', () => {
     expect(services.host.queueState()).toMatchObject([{ reason: 'capacity' }]);
     mocks.settings.botMaxRunningTurns = 2;
     syncBotModeServices();
-    await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(2));
     expect(getBotServices()).toBe(services);
     expect(services.host.queueState()).toEqual([]);
   });
@@ -211,7 +217,7 @@ describe('bots IPC', () => {
   it('审查：failed 状态但尚未 parent-ended 的旧实例，重建说明前仍须真正 release', async () => {
     const { getBotServices, syncBotDiscussMode } = await import('./bots');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const alice = await createBot('Alice');
     const bob = await createBot('Bob');
@@ -250,7 +256,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)?.[0];
     if (!observe) throw new Error('missing observer');
@@ -297,7 +303,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     const alice = await createBot('Alice');
@@ -324,7 +330,7 @@ describe('bots IPC', () => {
         reason: 'spawn preparation failed',
         instanceId: instanceOf(0),
       });
-      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
       observe({
         type: 'parent-rejected',
         identity,
@@ -345,7 +351,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     const alice = await createBot('Alice');
@@ -375,7 +381,7 @@ describe('bots IPC', () => {
         reason: 'evicted',
         instanceId: instanceOf(0),
       });
-      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
       observe({
         type: 'parent-rejected',
         identity,
@@ -427,7 +433,7 @@ describe('bots IPC', () => {
       // worker 已开始闲置回收，prompt 排在尚未完成的 releaseParent 后面。
       await services.host.deliver(chatId, alice, 'second', { deliveryId: 'second' });
       const stopping = services.host.abortConversation(id);
-      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
       // 真 supervisor 的 abort 绕过 gate，在 evicted 之前发出 idle；不是 prompt 的确认。
       emit({ type: 'status', identity, seq: 3, status: 'idle' });
       emit({
@@ -441,7 +447,7 @@ describe('bots IPC', () => {
       expect(
         await services.host.deliver(chatId, alice, 'third', { deliveryId: 'third' })
       ).toMatchObject({ ok: true });
-      await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(3));
       // 旧 prompt 现在才执行，因旧会话已回收而拒绝；新 spawn 已发出但未回 ready。
       emit({
         type: 'parent-rejected',
@@ -461,7 +467,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     // 照真实 agentHost：同会话任意一条 parent-ended / parent-rejected 都唤醒 release 等待者，
@@ -503,9 +509,9 @@ describe('bots IPC', () => {
         reason: 'spawn preparation failed',
         instanceId: instanceOf(0),
       });
-      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(2));
       const aborting = services.host.abortConversation(id);
-      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
       emit({
         type: 'parent-rejected',
         identity,
@@ -529,16 +535,16 @@ describe('bots IPC', () => {
         reason: 'released',
         instanceId: instanceOf(1),
       });
-      await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(3));
-      await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(mocks.promptSession).toHaveBeenCalledTimes(3));
       const settled = finished.length;
       emit({ type: 'status', identity, seq: 1, status: 'running' });
       emit({ type: 'turn-completed', identity, seq: 2, turnId: 't3' });
-      await vi.waitFor(() => expect(finished.length).toBe(settled + 1));
+      await waitFor(() => expect(finished.length).toBe(settled + 1));
       expect(finished.at(-1)).toMatchObject({ ok: true });
       // 第三个实例仍登记在案：中止要真正 release，由它自己的 parent-ended 正常确认
       const stopping = services.host.abortConversation(id);
-      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(2));
       emit({
         type: 'parent-ended',
         identity,
@@ -557,7 +563,7 @@ describe('bots IPC', () => {
     const { getBotServices } = await import('./bots');
     const { setBotWorkerEventObserver } = await import('./agent');
     const agent = await import('../services/agentHost');
-    const { agentSessionIndex } = await import('./capabilities');
+    const { agentSessionIndex } = await import('./sessionIndex');
     const services = getBotServices()!;
     const observe = vi.mocked(setBotWorkerEventObserver).mock.calls.at(-1)![0]!;
     const alice = await createBot('Alice');
@@ -1088,7 +1094,7 @@ describe('bots IPC', () => {
       ok: true,
     });
     // 新群缺省智能选人；worker 不在线没有可用模型 → 兜底群主
-    await vi.waitFor(async () =>
+    await waitFor(async () =>
       expect(await call(IPC_CHANNELS.BOT_CHAT_STATE, { chatId })).toMatchObject({
         ok: true,
         current: alice,
@@ -2028,7 +2034,7 @@ describe('群聊新对话与克隆', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mocks.promptSession.mockClear();
     await call(IPC_CHANNELS.BOT_SEND, { chatId, text: '新任务：写周报', deliveryId: 'd-new' });
-    await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.promptSession).toHaveBeenCalled());
     warn.mockRestore();
     const prompt = mocks.promptSession.mock.calls[0][1] as string;
     expect(prompt).toContain('新任务：写周报');
@@ -2165,7 +2171,7 @@ describe('群话题', () => {
     });
 
     await services.host.deliver(thread.id, bob, 'hello');
-    await vi.waitFor(() => expect(mocks.spawnSession).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.spawnSession).toHaveBeenCalled());
     const [, request, , , , options] = mocks.spawnSession.mock.calls[0] as [
       unknown,
       { cwd: string },
@@ -2223,7 +2229,7 @@ describe('群话题', () => {
         deliveryId: 'state',
       })
     ).toMatchObject({ ok: true });
-    await vi.waitFor(() => expect(mocks.promptSession).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.promptSession).toHaveBeenCalled());
     const prompts = mocks.promptSession.mock.calls.map((args) => String(args[1])).join('\n');
     expect(prompts).toContain('<group-state>');
     expect(prompts).toContain('Shared pending task');
@@ -2423,9 +2429,7 @@ describe('群话题', () => {
           deliveryId: 'a1',
         })
       ).toMatchObject({ ok: true });
-      await vi.waitFor(() =>
-        expect(services.chats.get(thread.id)?.threadTitle).toBe('发布清单梳理')
-      );
+      await waitFor(() => expect(services.chats.get(thread.id)?.threadTitle).toBe('发布清单梳理'));
 
       expect(
         await call(IPC_CHANNELS.BOT_THREAD_UPDATE, { chatId: thread.id, title: '我的标题' })
@@ -2435,7 +2439,7 @@ describe('群话题', () => {
       expect(
         await call(IPC_CHANNELS.BOT_SEND, { chatId, text: '讨论季度路线图', deliveryId: 'a2' })
       ).toMatchObject({ ok: true });
-      await vi.waitFor(() =>
+      await waitFor(() =>
         expect(services.chats.get(chatId)).toMatchObject({
           title: 'team',
           threadTitle: '季度路线图',

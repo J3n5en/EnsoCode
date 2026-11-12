@@ -1,8 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type CheckpointHost,
   createCheckpoint,
@@ -22,6 +30,17 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
 
 let root: string;
 let home: string;
+let templateRoot: string;
+
+beforeAll(() => {
+  templateRoot = mkdtempSync(join(tmpdir(), 'enso-cp-tpl-'));
+  runGit(templateRoot, 'init', '-q', '-b', 'main');
+  runGit(templateRoot, 'config', 'user.name', 'test');
+  runGit(templateRoot, 'config', 'user.email', 'test@test');
+  writeFileSync(join(templateRoot, 'a.txt'), 'v1\n');
+  runGit(templateRoot, 'add', '.');
+  runGit(templateRoot, 'commit', '-q', '-m', 'init');
+});
 
 beforeEach(() => {
   // 隔离开发机的全局/系统 git 配置与默认全局 ignore（如 core.quotePath、~/.config/git/ignore），
@@ -32,18 +51,17 @@ beforeEach(() => {
   vi.stubEnv('GIT_CONFIG_GLOBAL', devNull);
   vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
   root = mkdtempSync(join(tmpdir(), 'enso-cp-test-'));
-  runGit(root, 'init', '-q', '-b', 'main');
-  runGit(root, 'config', 'user.name', 'test');
-  runGit(root, 'config', 'user.email', 'test@test');
-  writeFileSync(join(root, 'a.txt'), 'v1\n');
-  runGit(root, 'add', '.');
-  runGit(root, 'commit', '-q', '-m', 'init');
+  rmSync(root, { recursive: true, force: true });
+  cpSync(templateRoot, root, { recursive: true });
 });
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
   rmSync(home, { recursive: true, force: true });
   vi.unstubAllEnvs();
+});
+afterAll(() => {
+  rmSync(templateRoot, { recursive: true, force: true });
 });
 
 describe('createCheckpoint / restoreCheckpoint', () => {

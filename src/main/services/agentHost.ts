@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { agentWorkerPath, app, resourcesPath, utilityProcess, type WorkerProcess } from '@platform';
+import { describeAgentWorkerExit } from '@shared/agentWorkerExit';
 import {
   type ApprovalAllowThreshold,
   DEFAULT_APPROVAL_ALLOW_THRESHOLD,
@@ -13,13 +14,10 @@ import {
   type AgentTypeRegistrySnapshot,
   buildAgentTypeRegistrySnapshot,
   type ChildSessionIdentity,
-  ENSO_AGENT_TYPE_KEY,
-  ENSO_LOCKED_PROFILE,
   isReservedAgentTypeName,
   type SessionIdentity,
   visibleMemberAgentTypes,
 } from '@shared/builtinAgents';
-import type { CapabilityExecutionEnvelope } from '@shared/capabilities/types';
 import {
   type ChildProfileToolOptions,
   childProfileShell,
@@ -32,6 +30,7 @@ import {
   type ModelCredentialContext,
   modelUsability,
 } from '@shared/defaultModel';
+import { ELEVATE_ASKPASS_ENV } from '@shared/elevation';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
 import { resolveImageGenerationConfig } from '@shared/imageGeneration';
@@ -77,8 +76,9 @@ import type {
   VirtualClassifierCredentials,
   VirtualSpawnClassifier,
   WorkerCustomProvider,
+  WorkerExitedEvent,
 } from '@shared/types/agent';
-import { parseAgentWorkerEvent, THINKING_LEVELS } from '@shared/types/agent';
+import { parseAgentCommand, parseAgentWorkerEvent, THINKING_LEVELS } from '@shared/types/agent';
 import type { SubagentModelEntry } from '@shared/types/assets';
 import {
   type AgentTypeEntry,
@@ -113,14 +113,21 @@ import {
 } from '@shared/virtualModels';
 import { parseWebSearchChain, type WebSearchChainEntry } from '@shared/webSearchChain';
 import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
-import { ENSO_SYSTEM_PROMPT } from '../../agent/ensoPrompt';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
+import {
+  AGENT_WORKER_SERVICE_NAME,
+  appendAgentWorkerExitLog,
+  createOutputTail,
+  isAgentWorkerGone,
+  takeAgentWorkerCrash,
+} from './agentWorkerExit';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools } from './builtinToolScopes';
 import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { dcgRoot, installedDcgPath } from './dcgBinary';
+import { ensureElevationServer } from './elevation';
 import {
   getExtensionPlugins,
   setPluginMcpBridge,
@@ -265,7 +272,7 @@ export async function selectOauthPoolAccount(
 }
 /** worker 已过 'spawn'：在此之前 postMessage 不保证送达（含已 fork 未 spawn 的窗口） */
 let workerReady = false;
-let onEvent: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null = null;
+let onEvent: ((event: AgentWorkerEvent | WorkerExitedEvent) => void) | null = null;
 /** worker 就绪前到达的快照请求，spawn 后补发。true = 全量，string = 单会话。 */
 let snapshotPending: false | true | string = false;
 /** worker 已 fork 未 spawn 窗口内到达的命令：postMessage 不保证送达，spawn 后按序补发 */
@@ -292,7 +299,7 @@ export function setPinnedSessions(source: 'viewed' | 'pair', sessionIds: readonl
 }
 
 export function setAgentEventListener(
-  listener: (event: AgentWorkerEvent | { type: 'worker-exited' }) => void
+  listener: (event: AgentWorkerEvent | WorkerExitedEvent) => void
 ): void {
   onEvent = listener;
 }
@@ -308,12 +315,16 @@ export function customWorkflowPresetDir(): string {
 
 export function startAgentWorker(): void {
   if (worker) return;
+  const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
-    serviceName: 'enso-agent-worker',
+    serviceName: AGENT_WORKER_SERVICE_NAME,
+    stdio: 'pipe',
     env: {
       ...process.env,
+      ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
       ENSO_AGENT_DATA_DIR: agentDataDir(),
       PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
+      ENSO_MODELS_DEV_CACHE: path.join(app.getPath('userData'), 'models-dev-cache.json'),
       ENSO_RTK_PATH: bundledRtkPath({
         packaged: app.isPackaged,
         resourcesPath,
@@ -325,8 +336,11 @@ export function startAgentWorker(): void {
   });
   worker = child;
   workerExited = false;
+  let childPid: number | undefined;
+  const output = captureWorkerOutput(child);
 
   child.once('spawn', () => {
+    childPid = child.pid;
     workerReady = true;
     // fork 前 ProxyConfig 的 set-proxy-env 因 worker 不存在被丢；spawn 后按 main 当前 env 补发一次
     child.postMessage({
@@ -400,13 +414,24 @@ export function startAgentWorker(): void {
       onEvent?.(event);
     }
   });
-  child.on('exit', () => {
+  child.on('exit', (code: unknown) => {
     if (worker === child) {
       worker = null;
       workerReady = false;
       workerExited = true;
       parentInstanceIds.clear();
     }
+    const dataDir = agentDataDir();
+    const crash = takeAgentWorkerCrash(dataDir, childPid);
+    const detail = describeAgentWorkerExit(code, crash);
+    console.error(`[agent] worker exited pid=${childPid ?? '?'} ${detail}`);
+    appendAgentWorkerExitLog(
+      dataDir,
+      `exit pid=${childPid ?? '?'} ${detail}${crash?.stack ? `\n${crash.stack}` : ''}`
+    );
+    void output.settled().then((tail) => {
+      if (tail) appendAgentWorkerExitLog(dataDir, `output tail pid=${childPid ?? '?'}\n${tail}`);
+    });
     pendingReloads.failAll('agent worker exited');
     workspaceLocks.failAll('agent worker exited');
     pluginMcp.failAll('agent worker exited');
@@ -420,8 +445,51 @@ export function startAgentWorker(): void {
     }
     // 会话树随 worker 进程一起销毁，release 已达成；不唤醒就只能等到 8 秒超时报失败
     resolveAllReleaseWaiters();
-    onEvent?.({ type: 'worker-exited' });
+    onEvent?.({ type: 'worker-exited', detail });
   });
+}
+
+/** worker 输出必须持续读走（否则管道写满会卡住 worker）；保留尾部供退出时落日志，dev 照常转到终端 */
+function captureWorkerOutput(child: WorkerProcess): { settled(): Promise<string> } {
+  const tail = createOutputTail(16 * 1024);
+  const streams = [child.stdout, child.stderr].filter((stream): stream is NodeJS.ReadableStream =>
+    Boolean(stream)
+  );
+  const ended = streams.map(
+    (stream, index) =>
+      new Promise<void>((resolve) => {
+        stream.on('data', (chunk: Buffer | string) => {
+          const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+          tail.push(buffer);
+          if (!app.isPackaged) (index === 0 ? process.stdout : process.stderr).write(buffer);
+        });
+        stream.once('end', () => resolve());
+        stream.once('close', () => resolve());
+        stream.once('error', () => resolve());
+      })
+  );
+  return {
+    // exit 与管道收尾先后不定：最多再等 1s 让遗言读完
+    settled: () =>
+      Promise.race([
+        Promise.all(ended),
+        new Promise<void>((resolve) => setTimeout(resolve, 1000).unref()),
+      ]).then(() => tail.text().trim()),
+  };
+}
+
+/** child-process-gone 能区分 crashed / oom / killed，和 exit 先后不定，单独落同一份日志 */
+export function recordAgentWorkerGone(details: {
+  type: string;
+  name?: string;
+  reason: string;
+  exitCode: number;
+}): void {
+  if (!isAgentWorkerGone(details)) return;
+  appendAgentWorkerExitLog(
+    agentDataDir(),
+    `gone reason=${details.reason} ${describeAgentWorkerExit(details.exitCode, null)}`
+  );
 }
 
 export function stopAgentWorker(): void {
@@ -540,6 +608,9 @@ export function setWorkspaceBusyResolver(resolver: (id: string) => boolean): voi
 }
 
 export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: string } {
+  // 与 worker 入口同一份校验：不合法的命令发过去只会被丢弃，这里当场报出命令类型
+  if (!parseAgentCommand(command))
+    return { ok: false, error: `invalid ${command.type} command: rejected by worker contract` };
   if (workspaceCommandBlocked(command, workspaceBusy))
     return { ok: false, error: 'Workspace operation in progress.' };
   const action = agentCommandDispatch({
@@ -582,8 +653,8 @@ export function agentTypeRegistrySnapshot(): AgentTypeRegistrySnapshot {
 
 /**
  * 解析模型引用并组装下发配置。只有显式 `allowVirtual` 的调用方得到 `config.virtual`；
- * 今天是会话主模型（含跟随父会话、set-model、插件预设换模）和子代理目录。
- * 其他场景（标题、代审、类型化 agent 的 fixed 模型、压缩摘要、btw…）落到虚拟引用时取其快模型（无则主模型）。
+ * 今天是会话主模型（含跟随父会话、set-model、插件预设换模）、子代理目录和类型化 agent 的 fixed 绑定。
+ * 其他场景（标题、代审、压缩摘要、btw…）落到虚拟引用时取其快模型（无则主模型）。
  */
 export function resolveModelSelection(
   providerId: string,
@@ -791,30 +862,6 @@ export function resolveAgentTypeSpawnConfig(
   const candidate = snapshot.candidates.find((entry) => entry.typeKey === typeKey);
   if (!candidate) return { ok: false, error: 'Agent type is unavailable.' };
 
-  if (typeKey === ENSO_AGENT_TYPE_KEY) {
-    return {
-      ok: true,
-      config: {
-        typeKey,
-        displayName: 'Enso',
-        description: candidate.description,
-        spawnSpecId: randomUUID(),
-        systemPrompt: ENSO_SYSTEM_PROMPT,
-        model: parentModel.config,
-        tools: 'enso-locked',
-        skillPaths: [],
-        skillBindingIds: [],
-        mcpServers: [],
-        mcpBindingIds: [],
-        systemPromptHash: createHash('sha256').update(ENSO_SYSTEM_PROMPT).digest('hex'),
-        lockedProfileId: ENSO_LOCKED_PROFILE.profileId,
-      },
-      expectedModel: parentModel.ref,
-      expectedToolIds: ENSO_LOCKED_PROFILE.toolIds,
-      allowsModelOverride: false,
-    };
-  }
-
   const state = readSettingsState();
   let definition: Omit<AgentTypeEntry, 'id'> | RuntimeAgentType | undefined;
   if (typeKey.startsWith('builtin:')) {
@@ -841,7 +888,8 @@ export function resolveAgentTypeSpawnConfig(
     const resolved = resolveModelSelection(
       definition.providerId,
       definition.modelId,
-      authenticatedAccountKeys
+      authenticatedAccountKeys,
+      { allowVirtual: true }
     );
     if (!resolved.ok) return { ok: false, error: resolved.error };
     selectedModel = resolved.selection;
@@ -995,6 +1043,7 @@ export function spawnSession(
     ...(bot ? [] : plugins.skillPaths),
     ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset) ?? []),
   ];
+  const workflowPresetFiles = extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? [];
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of [
@@ -1102,6 +1151,7 @@ export function spawnSession(
     ...(plugins.commands.length > 0 ? { pluginCommands: plugins.commands } : {}),
     ...(pluginHooks.length > 0 ? { pluginHooks } : {}),
     ...(pluginTools.length > 0 ? { pluginTools } : {}),
+    ...(workflowPresetFiles.length > 0 ? { workflowPresetFiles } : {}),
     ...(pluginEvents ? { pluginEvents } : {}),
     ...(presetApplied.approvalMode ? { approvalMode: presetApplied.approvalMode } : {}),
     ...(request.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
@@ -1186,9 +1236,17 @@ export function pluginSkillPathsForMenu(
     } | null;
   }
 ): string[] {
-  const { pluginPresetId } = presetOverlay(presetId, deps.resolve);
-  const active = deps.extension?.presetForSpawn(pluginPresetId)?.ok ? pluginPresetId : undefined;
+  const active = activePluginPresetForMenu(presetId, deps.resolve, deps.extension);
   return [...deps.claude, ...(deps.extension?.skillPathsForSpawn(active) ?? [])];
+}
+
+function activePluginPresetForMenu(
+  presetId: string | undefined,
+  resolve: (id?: string) => Preset | undefined,
+  extension: { presetForSpawn(id?: string): { ok: boolean } | undefined } | null
+): string | undefined {
+  const { pluginPresetId } = presetOverlay(presetId, resolve);
+  return extension?.presetForSpawn(pluginPresetId)?.ok ? pluginPresetId : undefined;
 }
 
 export function menuPluginSkillPaths(presetId: string | undefined): string[] {
@@ -1197,6 +1255,14 @@ export function menuPluginSkillPaths(presetId: string | undefined): string[] {
     claude: enabledPlugins(readSettingsState()).skillPaths,
     extension: getExtensionPlugins(),
   });
+}
+
+/** 侧栏列 workflow 预设时的插件文件，与 spawn 同口径按生效的插件预设圈定 */
+export function menuPluginWorkflowPaths(presetId: string | undefined): string[] {
+  const extension = getExtensionPlugins();
+  return extension.workflowPathsForSpawn(
+    activePluginPresetForMenu(presetId, resolvePreset, extension)
+  );
 }
 
 interface PresetPromptKit {
@@ -1537,15 +1603,6 @@ export function registerPluginSessionBridge(
       return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法中止会话' };
     },
   });
-}
-
-export function sendCapabilityResultToSession(
-  child: ChildSessionIdentity,
-  turnId: string,
-  requestId: string,
-  envelope: CapabilityExecutionEnvelope
-): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'capability-result', child, turnId, requestId, envelope });
 }
 
 export function setSessionThinking(
@@ -2050,7 +2107,9 @@ export function configuredAgentTypes(
     const effectiveMode = mode === 'agent_pick' && !hasSubagentModels ? 'follow' : mode;
     const bound =
       effectiveMode === 'fixed' && entry.providerId && entry.modelId
-        ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
+        ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys, {
+            allowVirtual: true,
+          })
         : null;
     return {
       name: entry.name,
@@ -2080,7 +2139,9 @@ export function configuredAgentTypes(
       const resources = resolveAgentTypeResources(entry);
       const bound =
         entry.providerId && entry.modelId
-          ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys)
+          ? resolveModelSelection(entry.providerId, entry.modelId, authenticatedAccountKeys, {
+              allowVirtual: true,
+            })
           : null;
       return {
         name: entry.typeKey,

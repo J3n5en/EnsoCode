@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  fileTabPathMenuItems,
   fromPreviewKey,
   isPreviewKey,
   remapRelForRename,
@@ -124,5 +125,27 @@ describe('renameDraftDecision', () => {
   it('去空后的新名才提交', () => {
     expect(renameDraftDecision('b.ts', 'a.ts')).toBe('commit');
     expect(renameDraftDecision('  b.ts  ', 'a.ts')).toBe('commit');
+  });
+});
+
+describe('fileTabPathMenuItems', () => {
+  it('本地标签给出复制绝对路径和在访达中显示，只带工作区相对路径', () => {
+    expect(fileTabPathMenuItems('src/a.ts', true)).toEqual([
+      { id: 'copy-path', rel: 'src/a.ts', mode: 'absolute' },
+      { id: 'reveal', rel: 'src/a.ts' },
+    ]);
+  });
+
+  it('预览标签先还原真实 rel，不把 marker 交给路径操作', () => {
+    expect(fileTabPathMenuItems(toPreviewKey('docs/readme.md'), true)).toEqual([
+      { id: 'copy-path', rel: 'docs/readme.md', mode: 'absolute' },
+      { id: 'reveal', rel: 'docs/readme.md' },
+    ]);
+  });
+
+  it('远程工作区只复制路径，不提供在访达中显示', () => {
+    expect(fileTabPathMenuItems('src/a.ts', false)).toEqual([
+      { id: 'copy-path', rel: 'src/a.ts', mode: 'absolute' },
+    ]);
   });
 });

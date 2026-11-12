@@ -4,12 +4,14 @@ import { openSidePanelPluginView } from '@/lib/sidePanelDock';
 import { useSessionsStore } from '@/stores/sessions';
 import { displayedConversationId } from '@/stores/sessions/chatChrome';
 import { newInterceptBreakers } from './breakers';
-import { mergePluginCommands, setPluginCommands } from './commands';
+import { pluginCommandRefs, setPluginCommands } from './commands';
 import { handleDraftRequest, prefillDraft } from './draftBridge';
+import { setPluginFileViewers } from './fileViewers';
 import { createRendererDeps, loadPluginRenderer } from './loader';
 import { setPluginIcons } from './PluginIcon';
 import { disposePluginRenderer, syncPluginRenderers } from './rendererReload';
 import { handleSessionRequest, type SessionRequest } from './sessionBridge';
+import { pluginStatusRefs, setPluginStatusItems } from './statusItems';
 import { setPluginTriggers } from './triggers';
 import { setPluginViews } from './viewBridge';
 
@@ -61,21 +63,23 @@ export function PluginUiHost() {
         }
         const enabled = list.filter((plugin) => plugin.state === 'enabled');
         setPluginIcons(Object.fromEntries(list.flatMap((p) => (p.icon ? [[p.id, p.icon]] : []))));
-        setPluginCommands(
-          enabled.flatMap((plugin) =>
-            mergePluginCommands(plugin.commands, plugin.dynamicCommands).map((command) => ({
-              pluginId: plugin.id,
-              pluginName: plugin.name,
-              ...command,
-            }))
-          )
-        );
+        setPluginCommands(pluginCommandRefs(list));
+        setPluginStatusItems(pluginStatusRefs(list));
         setPluginViews(
           enabled.flatMap((plugin) =>
             plugin.views.map((view) => ({
               pluginId: plugin.id,
               pluginName: plugin.name,
               ...view,
+            }))
+          )
+        );
+        setPluginFileViewers(
+          enabled.flatMap((plugin) =>
+            (plugin.fileViewers ?? []).map((viewer) => ({
+              pluginId: plugin.id,
+              pluginName: plugin.name,
+              ...viewer,
             }))
           )
         );
@@ -134,6 +138,8 @@ export function PluginUiHost() {
       setPluginCommands([]);
       setPluginTriggers([]);
       setPluginViews([]);
+      setPluginFileViewers([]);
+      setPluginStatusItems([]);
       // 切到 Bot/远程节点时在这里卸载：单个插件清理抛错不能跳过其余插件，更不能冒进 React 清理
       for (const [id, handle] of loaded) disposePluginRenderer(id, handle);
       loaded.clear();

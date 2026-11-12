@@ -40,7 +40,10 @@ const temp = (prefix: string) => {
 };
 afterEach(() => {
   vi.useRealTimers();
-  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // 停用插件后服务仍可能异步落盘，删目录时撞上新文件会报 ENOTEMPTY
+  for (const dir of temps.splice(0)) {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
 });
 
 function writePlugin(files: Record<string, string>) {
@@ -103,7 +106,13 @@ async function install(service: ExtensionPluginService, files: Record<string, st
   return preview.preview;
 }
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+/** 先让插件 import 跑完再同步推进，避免 advanceTimersByTimeAsync 等在途 Promise 死锁 */
+const armThenAdvance = async (ms: number) => {
+  for (let i = 0; i < 80; i++) await flush();
+  vi.advanceTimersByTime(ms);
+  for (let i = 0; i < 5; i++) await flush();
+};
 
 describe('插件能力', () => {
   it('未声明的事件收不到，停用后也不再收到', async () => {
@@ -509,13 +518,18 @@ describe('插件能力', () => {
         })
       ).content
     ).toContain('路径');
-    const hanging = service.callTool({
-      toolName: 'plugin_example-demo__lookup',
-      args: { hang: true },
-      sessionId: 's',
-      projectRoot: null,
-    });
-    await expect(hanging).rejects.toMatchObject({ code: 'TIMEOUT' });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const hanging = expect(
+      service.callTool({
+        toolName: 'plugin_example-demo__lookup',
+        args: { hang: true },
+        sessionId: 's',
+        projectRoot: null,
+      })
+    ).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await armThenAdvance(1_000);
+    await hanging;
+    vi.useRealTimers();
     expect(service.deleteArtifact(result.artifacts[0]?.id ?? '')).toBe(true);
     await service.uninstall('example.demo');
     expect(existsSync(join(root, 'artifacts', 'example.demo'))).toBe(false);
@@ -1107,26 +1121,27 @@ describe('插件能力', () => {
         )
       );
       await service.setEnabled('s.s', true);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
       let started = Date.now();
-      await expect(
-        service.intercept({
-          sessionId: 's',
-          projectRoot: null,
-          event: 'tool_call',
-          payload: toolCall,
-          agent,
-        })
-      ).resolves.toMatchObject({ block: true });
+      const childWait = service.intercept({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        payload: toolCall,
+        agent,
+      });
+      await armThenAdvance(2_000);
+      await expect(childWait).resolves.toMatchObject({ block: true });
       expect(Date.now() - started).toBeLessThan(2_400);
       started = Date.now();
-      await expect(
-        service.intercept({
-          sessionId: 's',
-          projectRoot: null,
-          event: 'tool_call',
-          payload: toolCall,
-        })
-      ).resolves.toEqual({ input: { command: 'rm', slow: true } });
+      const mainWait = service.intercept({
+        sessionId: 's',
+        projectRoot: null,
+        event: 'tool_call',
+        payload: toolCall,
+      });
+      await armThenAdvance(2_500);
+      await expect(mainWait).resolves.toEqual({ input: { command: 'rm', slow: true } });
       expect(Date.now() - started).toBeGreaterThanOrEqual(2_400);
     }, 15_000);
 
@@ -1153,14 +1168,17 @@ describe('插件能力', () => {
         );
         await service.setEnabled(id, true);
       }
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
       const started = Date.now();
-      const result = await service.intercept({
+      const pending = service.intercept({
         sessionId: 's',
         projectRoot: null,
         event: 'tool_call',
         payload: toolCall,
         agent,
       });
+      await armThenAdvance(5_000);
+      const result = await pending;
       const elapsed = Date.now() - started;
       expect(elapsed).toBeLessThan(5_500);
       expect(elapsed).toBeGreaterThanOrEqual(4_900);

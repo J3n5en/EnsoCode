@@ -96,6 +96,7 @@ import {
   powerSaveBlockerKind,
   shouldHoldPairPowerKeepAlive,
 } from './pairPowerKeepAlive';
+import { type PairProjectDeps, pairProjectReply } from './pairProjects';
 import { seedRelayHostCache } from './pairRelayLookup';
 import { openPairRelayWebSocket } from './pairRelayOpen';
 import { PairReplayLog } from './pairReplay';
@@ -326,6 +327,12 @@ let botPort: PairBotPort | null = null;
 
 export function setPairBotPort(port: PairBotPort | null): void {
   botPort = port;
+}
+
+let projectDeps: PairProjectDeps = {};
+
+export function setPairProjectDeps(deps: PairProjectDeps): void {
+  projectDeps = deps;
 }
 
 /** 发给所有在线手机（Bot 事件/目录广播） */
@@ -1136,6 +1143,14 @@ async function handleFrame(
     }
     case 'voice-cancel':
       conn.voiceUploads.cancel(command.requestId);
+      break;
+    case 'host-dirs':
+    case 'project-add':
+      void pairProjectReply(command, projectDeps)
+        .then((reply) => {
+          if (connectionCurrent(conn, generation, ioEpoch)) void send(conn, reply);
+        })
+        .catch((error) => console.warn('[pair] project command failed', error));
       break;
     case 'rpc-hello':
     case 'rpc-bye':

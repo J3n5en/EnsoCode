@@ -24,6 +24,7 @@ import {
 import { useSettingsStore } from '@/stores/settings';
 import { EnsoMark } from './EnsoMark';
 import { diffFoldMotion, EMPTY_FOLD_MOTION } from './foldMotion';
+import { generationElapsedOrigin } from './generationElapsed';
 import { ChatSearchHighlightContext } from './highlightQuery';
 import { NavRail } from './NavRail';
 import {
@@ -104,9 +105,9 @@ interface MessageTimelineProps {
   loading?: boolean;
   /** 会话 running：进行中的最后一轮工具行不折叠 */
   running: boolean;
-  /** 本次 running 的起点，无任何返回时作计时兜底起点 */
+  /** 本次 running 的起点：脚点「生成中」从这里连续读秒，思考与正文不重置 */
   runStartedAt?: number;
-  /** 最近一次返回落地时间：运行中计时显示「距上次返回」 */
+  /** 最近一次可见进展。脚点计时不使用：思考 token 会不断刷新它 */
   lastOutputAt?: number;
   error?: string;
   /** 空态标题（项目名） */
@@ -117,6 +118,8 @@ interface MessageTimelineProps {
   onSuggestion?: (prompt: string) => void;
   /** 空时间线且 resume 失败时：再走一遍 jsonl 回放 */
   onRetryResume?: () => void;
+  /** 准备超时降级：空态说明「暂无可显示的历史」并给重试入口，不冒充已同步 */
+  onRetrySync?: () => void;
   /**
    * 是否虚拟化。移动端置 false：真机实测 Virtuoso 在 WebKit 上跳转到底时，
    * 渲染范围切换的中间态列表变短会被浏览器钳位滚动位置，之后模型再也涨不回去，
@@ -156,6 +159,7 @@ export function MessageTimeline({
   emptyDescription,
   onSuggestion,
   onRetryResume,
+  onRetrySync,
   virtualize = true,
   onStartReached,
   historyLoading = false,
@@ -606,7 +610,7 @@ export function MessageTimeline({
     onLoadMore: pageChrome === 'more' ? requestOlder : undefined,
     busy,
     loading: !!loading,
-    since: loading ? undefined : (lastOutputAt ?? runStartedAt),
+    since: generationElapsedOrigin({ loading: !!loading, runStartedAt, lastOutputAt }),
     error,
     onRetryResume,
   };
@@ -652,11 +656,20 @@ export function MessageTimeline({
                 </>
               ) : (
                 <>
-                  {emptyDescription !== '' && (
+                  {onRetrySync ? (
+                    <>
+                      <p className="t-stagger-line t-stagger-line--2 max-w-md text-sm text-muted-foreground">
+                        {t('Session is not ready yet — no history to show.')}
+                      </p>
+                      <Button size="sm" variant="outline" onClick={onRetrySync}>
+                        {t('Retry sync')}
+                      </Button>
+                    </>
+                  ) : emptyDescription !== '' ? (
                     <p className="t-stagger-line t-stagger-line--2 text-sm text-muted-foreground">
                       {emptyDescription ?? t('Ask the agent…')}
                     </p>
-                  )}
+                  ) : null}
                   {onSuggestion && (
                     <div className="t-stagger-line t-stagger-line--3 mt-5 w-full">
                       <WelcomeSuggestions onPick={onSuggestion} />
@@ -859,7 +872,7 @@ function TimelineFooter({ context }: { context: TimelineChrome }) {
       {busy && (
         <div className="flex min-h-[26px] items-center gap-2 text-[13px]">
           <LoadingDots />
-          <span className="t-shimmer" data-text={loading ? t('Loading…') : t('Working…')}>
+          <span className="animate-pulse text-foreground motion-reduce:animate-none">
             {loading ? t('Loading…') : t('Working…')}
           </span>
           {since !== undefined && <ElapsedTimer since={since} />}

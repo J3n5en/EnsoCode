@@ -326,6 +326,7 @@ function capabilitySummary(plugin: ExtensionPluginSummary): string {
     plugin.permissions.length > 0 ? `${plugin.permissions.length} 项权限` : '',
     (plugin.events?.length ?? 0) > 0 ? `${plugin.events?.length} 个事件` : '',
     (plugin.schedules?.length ?? 0) > 0 ? `${plugin.schedules?.length} 个定时任务` : '',
+    plugin.hasRenderer ? '界面代码' : '',
     plugin.crossSessionInject !== undefined ? '跨会话投递开关' : '',
   ]
     .filter(Boolean)
@@ -339,6 +340,7 @@ function PluginCapabilityBlock({
   resident,
   running,
   styles,
+  trustedUi,
   events,
   schedules,
 }: {
@@ -348,6 +350,8 @@ function PluginCapabilityBlock({
   resident?: boolean;
   running?: boolean;
   styles?: boolean;
+  /** 带 ui.js：与主界面同权运行，不受权限清单约束 */
+  trustedUi?: boolean;
   events?: readonly { event: string; mode: string; failClosed?: boolean }[];
   schedules?: readonly {
     id: string;
@@ -358,7 +362,8 @@ function PluginCapabilityBlock({
 }) {
   return (
     <div className="space-y-1">
-      <PermissionLines permissions={permissions} styles={styles} />
+      <PermissionLines permissions={permissions} styles={styles || trustedUi} />
+      {trustedUi && <TrustedUiLine />}
       {resident && (
         <p className="text-xs">
           常驻进程
@@ -388,6 +393,14 @@ function PluginCapabilityBlock({
         </p>
       ))}
     </div>
+  );
+}
+
+function TrustedUiLine() {
+  return (
+    <p className="text-amber-700 text-xs dark:text-amber-400">
+      界面代码：运行在主界面里，可读写页面内容、调用界面能力，不受上面权限清单约束；只安装信任的插件
+    </p>
   );
 }
 
@@ -691,7 +704,7 @@ export function EnsoPluginsSettings({
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
       <Dialog open={marketOpen} onOpenChange={setMarketOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>{t('Marketplace')}</DialogTitle>
           </DialogHeader>
@@ -702,10 +715,6 @@ export function EnsoPluginsSettings({
               onInstall={(id) => {
                 setMarketOpen(false);
                 void restage(id, true);
-              }}
-              onGuide={(id, name, homepage) => {
-                setMarketOpen(false);
-                setGuide({ id, name, from: 'market', homepage });
               }}
             />
           </DialogPanel>
@@ -745,6 +754,7 @@ export function EnsoPluginsSettings({
                   interop={preview.interop}
                   resident={preview.resident}
                   styles={preview.styles}
+                  trustedUi={preview.hasRenderer}
                   events={preview.events}
                   schedules={preview.schedules}
                 />
@@ -796,8 +806,8 @@ export function EnsoPluginsSettings({
               plugin.state === 'crashed' && 'border-destructive/50'
             )}
           >
-            <div className="flex items-center justify-between gap-3 p-3">
-              <div className="flex min-w-0 items-start gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 p-3">
+              <div className="flex min-w-0 flex-1 basis-56 items-start gap-3">
                 <div
                   className={cn(
                     'flex size-9 shrink-0 items-center justify-center rounded-md bg-muted',
@@ -806,7 +816,7 @@ export function EnsoPluginsSettings({
                 >
                   <PluginIcon pluginId={plugin.id} icon={plugin.icon} className="size-4" />
                 </div>
-                <div className="min-w-0 space-y-0.5">
+                <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="flex flex-wrap items-center gap-1.5 text-sm">
                     <span className="truncate font-medium">{plugin.name}</span>
                     <Badge variant="outline" className="text-[11px]">
@@ -823,6 +833,16 @@ export function EnsoPluginsSettings({
                     {plugin.pendingVersion && (
                       <Badge variant="warning" className="text-[11px]">
                         待授权
+                      </Badge>
+                    )}
+                    {plugin.hasRenderer && (
+                      <Badge variant="outline" className="text-[11px]">
+                        受信任界面
+                      </Badge>
+                    )}
+                    {plugin.devWatch && (
+                      <Badge variant="secondary" className="text-[11px]">
+                        开发模式
                       </Badge>
                     )}
                     {plugin.resident && (
@@ -882,7 +902,7 @@ export function EnsoPluginsSettings({
                   )}
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-0.5">
+              <div className="ml-auto flex shrink-0 items-center gap-0.5">
                 {plugin.source && (
                   <Button
                     size="icon"
@@ -1000,6 +1020,7 @@ export function EnsoPluginsSettings({
                   resident={plugin.resident}
                   running={plugin.running}
                   styles={plugin.themes.some((theme) => theme.css !== undefined)}
+                  trustedUi={plugin.hasRenderer}
                   events={plugin.events}
                   schedules={plugin.schedules}
                 />
@@ -1023,10 +1044,39 @@ export function EnsoPluginsSettings({
                     />
                   </div>
                 )}
-                {plugin.pendingPermissions && plugin.pendingPermissions.length > 0 && (
+                {plugin.devWatch !== undefined && (
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span>
+                      <span className="block">开发模式：目录改动后自动重装</span>
+                      <span className="block text-muted-foreground">
+                        授权没扩大时直接替换；扩大时停下，需要从来源重新安装并同意。重启应用后关闭
+                      </span>
+                    </span>
+                    <Switch
+                      aria-label="开发模式：目录改动后自动重装"
+                      checked={plugin.devWatch}
+                      onCheckedChange={(on) =>
+                        void window.electronAPI.extensionPlugins
+                          .setDevWatch(plugin.id, on)
+                          .then((res) => {
+                            if (!res.ok && res.error) addToast({ title: res.error });
+                          })
+                      }
+                    />
+                  </div>
+                )}
+                {((plugin.pendingPermissions?.length ?? 0) > 0 || plugin.pendingRenderer) && (
                   <div className="space-y-1">
-                    <p className="text-muted-foreground text-xs">待同意的权限</p>
-                    <PermissionLines permissions={plugin.pendingPermissions} />
+                    <p className="text-muted-foreground text-xs">待同意</p>
+                    <PermissionLines
+                      permissions={plugin.pendingPermissions ?? []}
+                      styles={plugin.pendingRenderer}
+                    />
+                    {plugin.pendingRenderer && (
+                      <p className="text-amber-700 text-xs dark:text-amber-400">
+                        新增界面代码：运行在主界面里，不受权限清单约束
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

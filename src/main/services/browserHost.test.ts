@@ -29,10 +29,7 @@ const fakeTabs: Array<{
 
 // getSession() 里 fire-and-forget 地动态导入 proxyConfig，真实模块会连带加载 agentHost 等一长串依赖；
 // 全量跑测试负载高时，加载拖到本文件环境拆除之后，报成未处理的 EnvironmentTeardownError
-vi.mock('./proxyConfig', () => ({
-  getProxyConfig: () => ({ attachSession: () => {} }),
-}));
-
+vi.mock('./proxyConfig', () => ({ getProxyConfig: () => ({ attachSession: () => {} }) }));
 vi.mock('electron', () => {
   class FakeWebContentsView {
     webContents: (typeof fakeTabs)[number]['contents'];

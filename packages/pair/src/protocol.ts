@@ -164,6 +164,10 @@ export type PhoneToHost =
       mediaId?: string;
       rel?: string;
     }
+  /** 浏览 host 目录（另一台桌面添加项目用）；create 给出时先在 path 下建该子目录再列它 */
+  | { type: 'host-dirs'; requestId: string; path?: string; create?: string }
+  /** 把 host 上的绝对目录登记为项目；结果经 projects 帧同步 */
+  | { type: 'project-add'; requestId: string; path: string }
   /** 远程桌面隧道（仅 operate 设备） */
   | RemoteToHost;
 
@@ -217,6 +221,8 @@ export const PHONE_COMMAND_TYPES = [
   'bot-inbox-dismiss',
   'bot-artifacts',
   'bot-artifact-image',
+  'host-dirs',
+  'project-add',
   'rpc-hello',
   'rpc-bye',
   'rpc-invoke',
@@ -655,4 +661,14 @@ export type HostToPhone =
       media: PairBotMedia[];
     }
   | { type: 'bot-artifact-image'; requestId: string; dataUrl?: string; error?: string }
+  /** host-dirs 的应答：成功带目录页，失败带 error */
+  | {
+      type: 'host-dirs-result';
+      requestId: string;
+      path?: string;
+      parent?: string | null;
+      dirs?: string[];
+      error?: string;
+    }
+  | { type: 'project-add-result'; requestId: string; projectId?: string; error?: string }
   | HostToRemote;

@@ -80,6 +80,7 @@ import {
   restartConversationFromMenu,
 } from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
+import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -111,6 +112,11 @@ import {
 import { addToast } from '@/components/ui/toast';
 import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/i18n';
+import {
+  importLocalProject,
+  readCollapsedProjects,
+  subscribeCollapsedProjects,
+} from '@/lib/importLocalProject';
 import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { formatRelativeTime } from '@/lib/time';
@@ -152,6 +158,7 @@ import {
   PINNED_PROJECTS_KEY,
   PROJECT_ORDER_KEY,
   readSidebarOrder,
+  subscribeSidebarOrder,
   writeSidebarOrder,
 } from '@/stores/settings/sidebarOrderStorage';
 import { SessionTabCounts } from './SessionTabCounts';
@@ -285,6 +292,17 @@ export function Sidebar({
   // 不会把之前单独归档的会话一并“还原”回项目组
   const [archivedProjectIds, setArchivedProjectIds] = useState<string[]>(() =>
     readSidebarOrder(ARCHIVED_PROJECTS_KEY)
+  );
+  useEffect(
+    () => subscribeCollapsedProjects(() => setCollapsedProjects(readCollapsedProjects())),
+    []
+  );
+  useEffect(
+    () =>
+      subscribeSidebarOrder(() => {
+        setArchivedProjectIds(readSidebarOrder(ARCHIVED_PROJECTS_KEY));
+      }),
+    []
   );
   const [pinnedProjectIds, setPinnedProjectIds] = useState<string[]>(() =>
     readSidebarOrder(PINNED_PROJECTS_KEY)
@@ -474,17 +492,28 @@ export function Sidebar({
     sshHost?: string;
     groupId?: string;
   }) => {
-    const knownIds = new Set(projects.map((project) => project.id));
-    if (request.sshConnectionId) {
-      setPendingProject({
-        name: projectNameFromPath(request.path),
-        path: request.path,
-        sshHost: request.sshHost,
+    if (!request.sshConnectionId) {
+      void importLocalProject(request.path, {
+        groupId: request.groupId ?? defaultGroupId,
+        onSelect: selectConversation,
+      }).catch((error: unknown) => {
+        addToast({
+          type: 'error',
+          title: t('Failed to add project'),
+          description: error instanceof Error ? error.message : String(error),
+        });
       });
+      return;
     }
+    const knownIds = new Set(projects.map((project) => project.id));
+    setPendingProject({
+      name: projectNameFromPath(request.path),
+      path: request.path,
+      sshHost: request.sshHost,
+    });
     void addProject(
       request.path,
-      request.sshConnectionId ? { sshConnectionId: request.sshConnectionId } : undefined,
+      { sshConnectionId: request.sshConnectionId },
       request.groupId ?? defaultGroupId
     )
       .then((project) => {
@@ -819,6 +848,7 @@ export function Sidebar({
             <FolderPlus className="h-4 w-4" />
           </button>
           <div className="flex-1" />
+          {window.electronAPI.remote?.linkStatus && <PhoneLinkStatus />}
           {archivedCount > 0 && (
             <button
               type="button"
@@ -1550,7 +1580,14 @@ export function Sidebar({
         </div>
 
         <div className="flex shrink-0 items-center gap-0.5 p-1.5">
-          <NodeSwitcher />
+          {window.electronAPI.remote?.linkStatus ? (
+            <>
+              <div className="min-w-0 flex-1" />
+              <PhoneLinkStatus />
+            </>
+          ) : (
+            <NodeSwitcher />
+          )}
           {archivedCount > 0 && (
             <button
               type="button"
@@ -2296,7 +2333,6 @@ interface ConversationRowProps {
     unread?: boolean;
     pendingAsks?: readonly { requestId: string }[];
     pendingApprovals?: readonly unknown[];
-    pendingCapabilityAsks?: readonly unknown[];
     /** 标题总结在飞（标题后转圈） */
     titleSummaryPending?: boolean;
     /** 标题总结全部候选失败（标题后红叹号，点击重试） */
@@ -2857,14 +2893,12 @@ function ConversationDot({
     unread?: boolean;
     pendingAsks?: readonly { requestId: string }[];
     pendingApprovals?: readonly unknown[];
-    pendingCapabilityAsks?: readonly unknown[];
     hasRunningChild?: boolean;
   };
 }) {
-  // 待审批 / 待能力确认与 coworker tab 同为 attention；它们也按「等你处理」排在分组最前
+  // 待审批与 coworker tab 同为 attention；它们也按「等你处理」排在分组最前
   const tone =
-    (conversation.pendingApprovals?.length ?? 0) > 0 ||
-    (conversation.pendingCapabilityAsks?.length ?? 0) > 0
+    (conversation.pendingApprovals?.length ?? 0) > 0
       ? 'attention'
       : conversationDotTone({
           status: conversation.status,

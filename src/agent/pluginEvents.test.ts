@@ -154,6 +154,61 @@ describe('插件事件扩展', () => {
     ]);
   });
 
+  it('model_select 通知新旧模型与来源', () => {
+    const { emit, handlers } = harness(plan({ observe: ['model_select'] }));
+    handlers.get('model_select')?.({
+      model: { provider: 'pv-A', id: 'm2' },
+      previousModel: { provider: 'pv-A', id: 'm1' },
+      source: 'set',
+    } as never);
+    handlers.get('model_select')?.({
+      model: { provider: 'pv-B', id: 'm3' },
+      previousModel: undefined,
+      source: 'restore',
+    } as never);
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      {
+        type: 'plugin-event',
+        event: 'model_select',
+        data: {
+          provider: 'pv-A',
+          modelId: 'm2',
+          previous: { provider: 'pv-A', modelId: 'm1' },
+          source: 'set',
+        },
+      },
+      {
+        type: 'plugin-event',
+        event: 'model_select',
+        data: { provider: 'pv-B', modelId: 'm3', source: 'restore' },
+      },
+    ]);
+  });
+
+  it('before_agent_start 拦截把插件返回的 append 追加到本轮 system prompt；子会话不挂', async () => {
+    const { emit, handlers, invoker } = harness(
+      plan({ intercept: [{ event: 'before_agent_start' }] })
+    );
+    const pending = handlers.get('before_agent_start')?.({
+      type: 'before_agent_start',
+      messageType: 'user',
+      prompt: '修 bug',
+      systemPrompt: 'BASE',
+    } as never);
+    expect(emit.mock.calls[0]?.[0]).toMatchObject({
+      type: 'plugin-intercept',
+      event: 'before_agent_start',
+      payload: { prompt: '修 bug', kind: 'user' },
+    });
+    reply(emit, invoker, { append: '额外上下文' });
+    await expect(pending).resolves.toEqual({ systemPrompt: 'BASE\n\n额外上下文' });
+
+    const child = harness(plan({ intercept: [{ event: 'before_agent_start' }] }), {
+      childSession: true,
+    });
+    expect(child.handlers.has('before_agent_start')).toBe(false);
+  });
+
   it('同一事件既有拦截又有观察时，观察者收到拦截后的参数', async () => {
     const { emit, handlers, invoker } = harness(
       plan({ observe: ['tool_call'], intercept: [{ event: 'tool_call' }] })

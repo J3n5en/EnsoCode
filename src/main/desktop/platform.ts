@@ -4,7 +4,8 @@
  */
 import {
   app,
-  clipboard,
+  ClipboardItem,
+  clipboard as electronClipboard,
   ipcMain,
   Notification,
   nativeImage,
@@ -26,7 +27,6 @@ export const resourcesPath = process.resourcesPath;
 export {
   agentWorkerPath,
   app,
-  clipboard,
   ipcMain,
   net,
   pluginHostPath,
@@ -36,6 +36,17 @@ export {
   session,
   shell,
   utilityProcess,
+};
+
+/** Electron 44 起剪贴板全异步；原始格式经 osclipboard 自定义 MIME 写入 */
+export const clipboard = {
+  writeText: (text: string) => electronClipboard.writeText(text),
+  writeBuffer: (format: string, buffer: Buffer) =>
+    electronClipboard.write([
+      new ClipboardItem({
+        [`electron application/osclipboard;format="${format}"`]: new Blob([new Uint8Array(buffer)]),
+      }),
+    ]),
 };
 
 export const notification = {

@@ -1,3 +1,4 @@
+import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
 import type { SlashCommand } from '@shared/types/agent';
 import { useSyncExternalStore } from 'react';
 
@@ -6,6 +7,7 @@ export interface PluginCommandRef {
   pluginName: string;
   id: string;
   title: string;
+  key?: string;
 }
 
 let commands: PluginCommandRef[] = [];
@@ -48,6 +50,23 @@ function subscribe(listener: () => void): () => void {
 
 export function usePluginSlashCommands(): SlashCommand[] {
   return useSyncExternalStore(subscribe, pluginSlashCommands, pluginSlashCommands);
+}
+
+export function pluginCommands(): PluginCommandRef[] {
+  return commands;
+}
+
+/** 已启用插件的全部命令（清单 + 动态） */
+export function pluginCommandRefs(list: readonly ExtensionPluginSummary[]): PluginCommandRef[] {
+  return list
+    .filter((plugin) => plugin.state === 'enabled')
+    .flatMap((plugin) =>
+      mergePluginCommands(plugin.commands, plugin.dynamicCommands).map((command) => ({
+        pluginId: plugin.id,
+        pluginName: plugin.name,
+        ...command,
+      }))
+    );
 }
 
 /** 选中即执行，算用户操作；失败返回错误文本 */

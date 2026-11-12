@@ -61,6 +61,21 @@ export function viewEventPush(
   return { type: 'enso-view-event', name, data };
 }
 
+/** 宿主推给文件查看器的当前文件内容 */
+export function viewFilePush(
+  rel: string,
+  text: string
+): { type: 'enso-file'; rel: string; text: string } {
+  return { type: 'enso-file', rel, text };
+}
+
+/** 文件查看器提交的新内容；不是编辑消息时返回 null */
+export function viewFileEdit(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const record = data as Record<string, unknown>;
+  return record.type === 'enso-file-edit' && typeof record.text === 'string' ? record.text : null;
+}
+
 /** 宿主经端口推来的主题；不是主题消息时返回 null */
 export function viewThemeNotice(data: unknown): 'light' | 'dark' | null {
   if (typeof data !== 'object' || data === null) return null;

@@ -56,6 +56,30 @@ GitHub Release builds (version via ldflags) check for a newer release at startup
 - `RELAY_UPDATE_REPO` defaults to `J3n5en/EnsoCode`
 - `RELAY_GITHUB_TOKEN` optional, for GitHub API rate limits
 
+## Docker
+
+Public image at `ghcr.io/j3n5en/enso-relay` (`linux/amd64`, `linux/arm64`), no login needed. A release tag is published as that version and `latest`; a manual workflow run is tagged `edge` — for trying unreleased builds, not for production.
+
+```bash
+docker run -d --name enso-relay --restart unless-stopped \
+  -p 8787:8787 \
+  -v enso-relay:/data \
+  ghcr.io/j3n5en/enso-relay:latest
+```
+
+The database is `/data/relay.sqlite` on that volume, and it holds every `pairs` row — the pairing state each device negotiated. Nothing stateful is baked into the image, so an upgrade only replaces the container:
+
+```bash
+docker exec enso-relay sh -c 'cat /data/relay.sqlite' > relay.sqlite.bak   # optional; stop the container first for a clean copy
+docker pull ghcr.io/j3n5en/enso-relay:latest
+docker rm -f enso-relay
+docker run -d --name enso-relay --restart unless-stopped -p 8787:8787 -v enso-relay:/data ghcr.io/j3n5en/enso-relay:latest
+```
+
+Keep the same `-v enso-relay:/data`. Without `-v` Docker creates a fresh anonymous volume per container, so a recreated container starts empty and the paired devices look lost; the orphaned volume is what `docker system prune` later removes. Pinning a digest (`ghcr.io/j3n5en/enso-relay@sha256:...`) keeps you off a moving `latest`.
+
+The image sets `RELAY_AUTO_UPDATE=0`: self-update inside a container only rewrites the binary in the container filesystem, so pull a new image instead.
+
 ## Build from source
 
 Needs Go 1.24+ and pnpm at the repo root (to build the PWA).

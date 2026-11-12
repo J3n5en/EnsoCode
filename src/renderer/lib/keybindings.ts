@@ -122,9 +122,17 @@ export function isSendMessageKey(e: KeyboardEvent | React.KeyboardEvent, binding
   return !!binding && eventToBinding(e, { allowBare: true }) === binding;
 }
 
-/** 空格记作 space：否则绑定串里是看不见的空格，mac 的 ⌥Space 还会给出不换行空格 */
+/**
+ * 空格记作 space：否则绑定串里是看不见的空格，mac 的 ⌥Space 还会给出不换行空格。
+ * 按 ⌥ 时字母、数字取物理键：mac 上 ⌥P 的 key 是 π，按字符记就永远匹配不上 alt+p。
+ */
 function bindingKey(e: KeyboardEvent | React.KeyboardEvent): string {
-  return e.key === ' ' || e.key === '\u00a0' ? 'space' : e.key.toLowerCase();
+  if (e.key === ' ' || e.key === '\u00a0') return 'space';
+  if (e.altKey) {
+    const physical = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(e.code ?? '');
+    if (physical) return (physical[1] ?? physical[2] ?? '').toLowerCase();
+  }
+  return e.key.toLowerCase();
 }
 
 /** 按住型快捷键：松开主键或任一所需修饰键都算松手（mac 按着 ⌘ 时主键的 keyup 不一定会来） */

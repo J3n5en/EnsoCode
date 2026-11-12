@@ -1,0 +1,82 @@
+name: Relay Docker
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      latest:
+        description: 同时打 latest（把这次手动构建当成当前最新）
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Image name and tags
+        id: meta
+        run: |
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/$owner/enso-relay"
+          short="$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          emit() {
+            echo "version=$1" >> "$GITHUB_OUTPUT"
+            shift
+            {
+              echo "tags<<EOF"
+              for t in "$@"; do echo "$t"; done
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          }
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            set -- "$image:edge" "$image:sha-$short"
+            if [ "$LATEST_INPUT" = "true" ]; then set -- "$@" "$image:latest"; fi
+            emit edge "$@"
+          else
+            ref="$GITHUB_REF_NAME"
+            emit "$ref" "$image:$ref" "$image:${ref#v}" "$image:latest" "$image:sha-$short"
+          fi
+        env:
+          LATEST_INPUT: ${{ inputs.latest }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/relay-go/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          # gha 有 10GB 配额，mode=max 会把 pnpm/go 中间层写满。读取仍认 gha（过渡期命中旧缓存），写入改到 GHCR。
+          # image 已在上一步把 owner 转成小写。registry 缓存首次不存在时忽略错误。
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,ignore-error=true
+          cache-to: type=registry,ref=${{ steps.meta.outputs.image }}:buildcache,mode=max

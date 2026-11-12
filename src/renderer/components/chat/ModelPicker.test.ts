@@ -14,12 +14,10 @@ import {
   duplicateModelLabels,
   expandWorkbenchGroups,
   ModelPicker,
-  parsePinnedModelKeys,
   persistClampedThinkingLevel,
   pinnedModelKey,
   resolveActiveWorkbenchView,
   resolvePickerCapabilities,
-  togglePinnedModelKey,
 } from './ModelPicker';
 
 interface WrapperProps {
@@ -32,12 +30,12 @@ interface ClickWrapperProps extends WrapperProps {
 
 const harness = vi.hoisted(() => ({
   menuItemClicks: [] as Array<() => void>,
-  sliderProps: null as Record<string, unknown> | null,
   switchProps: null as Record<string, unknown> | null,
   buttons: [] as Record<string, unknown>[],
   meta: {} as Record<string, unknown>,
   usageAccountKeys: [] as string[],
   usageData: {} as Record<string, OauthAccountUsage>,
+  pinnedModels: [] as string[],
 }));
 
 vi.mock('@/i18n', () => ({
@@ -52,6 +50,12 @@ vi.mock('@/i18n', () => ({
 
 vi.mock('@/stores/modelMeta', () => ({
   useModelMeta: () => harness.meta,
+}));
+
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: <T>(
+    selector: (state: { pinnedModels: string[]; togglePinnedModel: () => void }) => T
+  ) => selector({ pinnedModels: harness.pinnedModels, togglePinnedModel: () => {} }),
 }));
 
 vi.mock('@/hooks/useAccountUsage', () => ({
@@ -102,13 +106,6 @@ vi.mock('@/components/ui/button', () => ({
   },
 }));
 
-vi.mock('@/components/ui/slider', () => ({
-  Slider: (props: Record<string, unknown>) => {
-    harness.sliderProps = props;
-    return createElement('i', { 'data-slider': 'true' });
-  },
-}));
-
 vi.mock('@/components/ui/switch', () => ({
   Switch: (props: Record<string, unknown>) => {
     harness.switchProps = props;
@@ -141,7 +138,6 @@ const commonProps = {
 
 beforeEach(() => {
   harness.menuItemClicks = [];
-  harness.sliderProps = null;
   harness.switchProps = null;
   harness.buttons = [];
   harness.meta = {};
@@ -288,7 +284,7 @@ describe('ModelPicker reasoning controls mode', () => {
 
   it('条目覆盖用于展示，切换模型也不丢弃已保存的深度', () => {
     const onThinkingNormalize = vi.fn();
-    renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       createElement(ModelPicker, {
         ...commonProps,
         thinkingLevel: 'max',
@@ -306,7 +302,8 @@ describe('ModelPicker reasoning controls mode', () => {
       })
     );
     expect(harness.switchProps?.checked).toBe(true);
-    expect(harness.sliderProps?.max).toBe(5);
+    const ticks = [...html.matchAll(/data-thinking-tick="([^"]+)"/g)].map((m) => m[1]);
+    expect(ticks).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
     harness.menuItemClicks[0]?.();
     expect(onThinkingNormalize).not.toHaveBeenCalled();
     harness.menuItemClicks[1]?.();
@@ -324,7 +321,7 @@ describe('ModelPicker reasoning controls mode', () => {
         .filter((button) => button['aria-pressed'] === true)
         .map((button) => button['data-reasoning-mode'])
     ).toEqual([mode.reasoningMode]);
-    expect(html.includes('data-slider="true"')).toBe(slider);
+    expect(html.includes('data-thinking-levels="true"')).toBe(slider);
     expect(html).not.toContain('data-switch="true"');
     expect(html).not.toContain('Explicit');
     expect(html).not.toContain('global defaults');
@@ -361,12 +358,12 @@ describe('ModelPicker reasoning controls mode', () => {
         onReasoningModeChange,
       })
     );
-    expect(html).toContain('data-slider="true"');
+    expect(html).toContain('data-thinking-levels="true"');
     expect(html).not.toContain('Customize');
     expect(harness.buttons.filter((button) => button['data-slot'] === 'follow-depth')).toHaveLength(
       0
     );
-    expect(harness.sliderProps?.value).toBe(2);
+    expect(html).toContain('data-thinking-tick="medium" aria-pressed="true"');
     expect(onReasoningModeChange).not.toHaveBeenCalled();
     expect(commonProps.onThinkingChange).not.toHaveBeenCalled();
   });
@@ -400,26 +397,20 @@ describe('ModelPicker reasoning controls mode', () => {
     ['low', 'high'],
     ['minimal', 'low', 'medium', 'high'],
     ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
-  ])('刻度与滑块共用完整轨道百分比，单档不除零：%j', (...levels) => {
+  ])('分段胶囊按支持集渲染并高亮当前档位，单档禁用：%j', (...levels) => {
     harness.meta = {
       model: { modelId: 'model', source: 'catalog', reasoning: true, thinkingLevels: levels },
     };
-    for (const [index, thinkingLevel] of levels.entries()) {
+    for (const thinkingLevel of levels) {
       const html = renderToStaticMarkup(
         createElement(ModelPicker, { ...commonProps, thinkingLevel })
       );
-      expect(harness.sliderProps).toMatchObject({
-        thumbAlignment: 'center',
-        min: 0,
-        max: Math.max(1, levels.length - 1),
-        value: index,
-        disabled: levels.length === 1,
-      });
-      expect(harness.sliderProps?.className).toContain('[&_[data-slot=slider-indicator]]:ms-0');
-      const tickStyles = [...html.matchAll(/data-thinking-tick="[^"]+"[^>]*style="([^"]+)"/g)];
-      expect(tickStyles.map((match) => match[1])).toEqual(
-        levels.map((_, tickIndex) => `left:${(tickIndex / Math.max(1, levels.length - 1)) * 100}%`)
-      );
+      const ticks = [...html.matchAll(/data-thinking-tick="([^"]+)"/g)].map((m) => m[1]);
+      expect(ticks).toEqual(levels);
+      expect(html).toContain(`data-thinking-tick="${thinkingLevel}" aria-pressed="true"`);
+      expect(
+        html.includes(`data-thinking-tick="${thinkingLevel}" aria-pressed="true" disabled=""`)
+      ).toBe(levels.length === 1);
     }
   });
 
@@ -488,7 +479,7 @@ describe('ModelPicker reasoning controls mode', () => {
     },
   ])('自定义能力按行覆盖解析，OAuth 仅信 catalog：%j', ({ row, meta, enabled, max, oauth }) => {
     harness.meta = { model: meta };
-    renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       createElement(ModelPicker, {
         ...commonProps,
         providers: [
@@ -501,7 +492,8 @@ describe('ModelPicker reasoning controls mode', () => {
       })
     );
     expect(harness.switchProps?.checked).toBe(enabled);
-    expect(harness.sliderProps?.max).toBe(max);
+    const ticks = [...html.matchAll(/data-thinking-tick="([^"]+)"/g)].map((m) => m[1]);
+    expect(max === undefined ? undefined : ticks.length - 1).toBe(max);
   });
 
   it('选择尚无元数据的自定义模型仍按显式行上限归一化', () => {
@@ -520,7 +512,7 @@ describe('ModelPicker reasoning controls mode', () => {
     const html = renderToStaticMarkup(createElement(ModelPicker, commonProps));
     expect(html).toContain('Reasoning');
     expect(html).toContain('Med');
-    expect(html).toContain('data-slider="true"');
+    expect(html).toContain('data-thinking-levels="true"');
   });
 
   it('表单触发器选中后显示「厂商 / 模型」和推理档', () => {
@@ -616,7 +608,7 @@ describe('ModelPicker reasoning controls mode', () => {
       primary: { providerId: 'api', modelId: 'model' },
       fallbacks: [],
     };
-    renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       createElement(ModelPicker, {
         ...commonProps,
         providers: [
@@ -633,7 +625,9 @@ describe('ModelPicker reasoning controls mode', () => {
       })
     );
     expect(harness.switchProps?.checked).toBe(true);
-    expect(harness.sliderProps).toMatchObject({ min: 0, max: 1, value: 1 });
+    const ticks = [...html.matchAll(/data-thinking-tick="([^"]+)"/g)].map((m) => m[1]);
+    expect(ticks).toEqual(['low', 'high']);
+    expect(html).toContain('data-thinking-tick="high" aria-pressed="true"');
     harness.menuItemClicks[0]();
     expect(commonProps.onSelect).toHaveBeenCalledWith(VIRTUAL_PROVIDER_ID, virtual.id);
     expect(harness.usageAccountKeys).toEqual([]);
@@ -681,7 +675,7 @@ describe('ModelPicker reasoning controls mode', () => {
     );
     expect(html).toContain('Chosen model');
     expect(html).not.toContain('Reasoning');
-    expect(html).not.toContain('data-slider="true"');
+    expect(html).not.toContain('data-thinking-levels="true"');
     expect(html).not.toContain('data-switch="true"');
   });
 
@@ -698,7 +692,6 @@ describe('ModelPicker reasoning controls mode', () => {
     expect(onThinkingChange).not.toHaveBeenCalled();
 
     harness.menuItemClicks = [];
-    harness.sliderProps = null;
     harness.switchProps = null;
     const onReasoningChange = vi.fn();
     const onReasoningNormalize = vi.fn();
@@ -722,11 +715,6 @@ describe('ModelPicker reasoning controls mode', () => {
     if (typeof onCheckedChange === 'function') onCheckedChange(false);
     expect(onReasoningChange).toHaveBeenCalledWith(false);
     expect(onReasoningNormalize).not.toHaveBeenCalled();
-
-    const sliderProps = harness.sliderProps as Record<string, unknown> | null;
-    const onValueChange = sliderProps?.onValueChange;
-    if (typeof onValueChange === 'function') onValueChange(1);
-    expect(onThinkingChange).toHaveBeenCalledWith('low');
   });
 
   it('catalog 显式支持集才回写钳位档', () => {
@@ -776,7 +764,7 @@ describe('ModelPicker reasoning controls mode', () => {
     );
     const switchProps = harness.switchProps as Record<string, unknown> | null;
     expect(switchProps?.checked).toBe(false);
-    expect(html).not.toContain('data-slider="true"');
+    expect(html).not.toContain('data-thinking-levels="true"');
     expect(html).not.toContain('>Med<');
   });
 });
@@ -813,6 +801,10 @@ describe('duplicateModelLabels', () => {
     expect(html).toContain('data-model-row-id="cursor-grok-4.6"');
     expect(html).toContain('data-model-row-id="grok-4.6"');
     expect(html).not.toContain('data-model-row-id="gpt-5"');
+    expect(html).toContain('title="Grok 4.6 Medium"');
+    expect(html).toContain('title="cursor-grok-4.6"');
+    expect(html).toContain('title="grok-4.6"');
+    expect(html).toContain('title="GPT-5"');
   });
 });
 
@@ -824,27 +816,6 @@ function pickerProvider(id: string, name: string): ModelProvider {
     models: [{ id: 'm', label: name }],
   };
 }
-
-describe('pinned model keys', () => {
-  it('非法或空的收藏存储解析为空集，并丢掉非字符串', () => {
-    expect(parsePinnedModelKeys(null).size).toBe(0);
-    expect(parsePinnedModelKeys(undefined).size).toBe(0);
-    expect(parsePinnedModelKeys('').size).toBe(0);
-    expect(parsePinnedModelKeys('{').size).toBe(0);
-    expect(parsePinnedModelKeys('{}').size).toBe(0);
-    expect(parsePinnedModelKeys('["keep", "", 1, null, "keep", "next"]')).toEqual(
-      new Set(['keep', 'next'])
-    );
-  });
-
-  it('切换收藏不改原集合，并按 provider/model 组 key', () => {
-    const current = new Set(['api/model']);
-    const added = togglePinnedModelKey(current, pinnedModelKey('api', 'other'));
-    expect([...current]).toEqual(['api/model']);
-    expect([...added]).toEqual(['api/model', 'api/other']);
-    expect([...togglePinnedModelKey(added, 'api/model')]).toEqual(['api/other']);
-  });
-});
 
 describe('resolveActiveWorkbenchView', () => {
   const work = pickerProvider('work', 'Work');
@@ -1063,6 +1034,27 @@ describe('model picker workbench', () => {
       workbenchHtml.indexOf('GPT Work')
     );
     expect(harness.usageAccountKeys).toEqual(['openai']);
+  });
+
+  it('星标取自 settings，桌面与 PWA 完整模式共享', () => {
+    const render = () =>
+      renderToStaticMarkup(
+        createElement(ModelPicker, {
+          ...commonProps,
+          providers: workbenchProviders,
+          providerId: 'work',
+          modelId: 'gpt',
+          virtualModels: [],
+        })
+      );
+    harness.pinnedModels = [];
+    expect(render()).not.toContain('data-model-picker-nav="favorites"');
+    harness.pinnedModels = [pinnedModelKey('work', 'gpt')];
+    try {
+      expect(render()).toContain('data-model-picker-nav="favorites"');
+    } finally {
+      harness.pinnedModels = [];
+    }
   });
 
   it('单账号厂商把账号名放在左栏，右栏用账号头而不是切换胶囊', () => {

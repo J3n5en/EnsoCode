@@ -14,6 +14,11 @@ describe('enabledHotBuiltins', () => {
     ]);
   });
 
+  it('turn_discard 默认开启，可在会话中途关掉', () => {
+    expect(enabledHotBuiltins([]).has('turn_discard')).toBe(true);
+    expect(enabledHotBuiltins(['turn_discard']).has('turn_discard')).toBe(false);
+  });
+
   it('workflow 依赖 subagent；spawn 时定型的工具不在热切范围', () => {
     const enabled = enabledHotBuiltins(['subagent', 'isolated_sandbox']);
     expect(enabled.has('workflow')).toBe(false);

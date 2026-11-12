@@ -48,6 +48,7 @@ export const IPC_CHANNELS = {
   PROVIDERS_LIST_MODELS: 'providers:list-models',
   PROVIDERS_TEST: 'providers:test',
   PROVIDERS_MODEL_META: 'providers:model-meta',
+  PROVIDERS_REFRESH_MODEL_CATALOG: 'providers:refresh-model-catalog',
   PROVIDERS_CLASSIFIER_MODELS: 'providers:classifier-models',
   /** Main 合成的统一模型目录快照（Renderer 订阅，不落 settings.json） */
   MODEL_DIRECTORY_GET: 'modelDirectory:get',
@@ -58,6 +59,11 @@ export const IPC_CHANNELS = {
 
   // 隐私脱敏记录（只读，不含原值）
   PRIVACY_MASK_RECORDS: 'privacy-mask:records',
+
+  // bash 提权口令：只对桌面主窗口与完整模式主界面开放
+  ELEVATION_PENDING: 'elevation:pending',
+  ELEVATION_ANSWER: 'elevation:answer',
+  ELEVATION_CHANGED: 'elevation:changed',
 
   // 资源监控
   RESOURCES_SAMPLE: 'resources:sample',
@@ -237,8 +243,6 @@ export const IPC_CHANNELS = {
   AGENT_DISPATCH_BIND_SOURCE: 'agent-dispatch:bind-source',
   AGENT_DISPATCH: 'agent-dispatch:dispatch',
   AGENT_DISPATCH_EVENT: 'agent-dispatch:event',
-  AGENT_SUMMON: 'agent-dispatch:summon',
-  AGENT_COMPOSER_PREFILL: 'agent-dispatch:composer-prefill',
 
   // Main 持有的项目/会话权威记录（通用 settings 只是投影）
   SOURCE_AUTHORITY_READ: 'source-authority:read',
@@ -251,10 +255,6 @@ export const IPC_CHANNELS = {
   SOURCE_CONVERSATION_END: 'source-authority:conversation-end',
   SOURCE_CONVERSATION_REMOVE: 'source-authority:conversation-remove',
   SOURCE_CONVERSATION_UPDATE_SELECTION: 'source-authority:conversation-update-selection',
-
-  // Enso child 能力审批（结果经 Main → worker 命令返回）
-  CAPABILITIES_ASK: 'capabilities:ask',
-  CAPABILITIES_RESPOND: 'capabilities:respond',
 
   // 原生对话框
   DIALOG_SELECT_DIRECTORY: 'dialog:select-directory',
@@ -556,6 +556,7 @@ export const IPC_CHANNELS = {
   EXTENSION_PLUGINS_DISCARD: 'extension-plugins:discard',
   EXTENSION_PLUGINS_SET_ENABLED: 'extension-plugins:set-enabled',
   EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT: 'extension-plugins:set-cross-session-inject',
+  EXTENSION_PLUGINS_SET_DEV_WATCH: 'extension-plugins:set-dev-watch',
   EXTENSION_PLUGINS_APPROVE_PENDING: 'extension-plugins:approve-pending',
   EXTENSION_PLUGINS_REJECT_PENDING: 'extension-plugins:reject-pending',
   EXTENSION_PLUGINS_UNINSTALL: 'extension-plugins:uninstall',

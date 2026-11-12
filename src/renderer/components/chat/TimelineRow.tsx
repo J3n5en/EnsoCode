@@ -226,6 +226,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.stats.searches === b.stats.searches &&
         a.stats.others === b.stats.others &&
         a.exploring === b.exploring &&
+        a.live === b.live &&
         a.activity?.thinking === b.activity?.thinking &&
         a.activity?.workedMs === b.activity?.workedMs &&
         a.explore?.goal === b.explore?.goal &&
@@ -254,6 +255,15 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
       return b.kind === 'divider' && a.text === b.text;
     case 'plugin-message':
       return b.kind === 'plugin-message' && a.text === b.text && a.pluginId === b.pluginId;
+    case 'discarded-turn':
+      return (
+        b.kind === 'discarded-turn' &&
+        a.expanded === b.expanded &&
+        a.reason === b.reason &&
+        a.messages.length === b.messages.length &&
+        a.messages.every((text, i) => text === b.messages[i]) &&
+        a.tools.length === b.tools.length
+      );
   }
 }
 
@@ -442,8 +452,10 @@ function SkillTag({ name, content }: { name: string; content: string }) {
 function ChipBubble({ chip, extra }: { chip: ReactNode; extra?: string }) {
   return (
     <div className="max-w-[80%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-sm">
-      {chip}
-      {extra ? <span className="ml-1.5 align-middle whitespace-pre-wrap">{extra}</span> : null}
+      <div className="flex flex-wrap items-center gap-1">{chip}</div>
+      {extra ? (
+        <div className="mt-1.5 whitespace-pre-wrap break-words leading-relaxed">{extra}</div>
+      ) : null}
     </div>
   );
 }
@@ -818,6 +830,8 @@ export function isCompactRow(item: TimelineItem): boolean {
 
 /** 手机 PWA 没有 subtle-foreground token，回落到 muted-foreground */
 const SUBTLE_TEXT = 'text-[color:var(--subtle-foreground,var(--muted-foreground))]';
+/** 进行中的文字统一呼吸 */
+const BREATHE = 'animate-pulse motion-reduce:animate-none';
 
 /** 每轮回复的头部：Bot 发言人身份 + 本轮模型 + 回复时间，挂在本轮首个回复行之上，运行中即可见 */
 export function ReplyHeader({
@@ -951,6 +965,8 @@ export const TimelineRow = memo(function TimelineRow({
       return <SessionCustomRow entry={item.entry} />;
     case 'plugin-message':
       return <PluginMessageRow item={item} />;
+    case 'discarded-turn':
+      return <DiscardedTurnRow item={item} onToggle={onToggleGroup} />;
     case 'divider':
       return (
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
@@ -1014,6 +1030,61 @@ function PluginMessageRow({ item }: { item: Extract<TimelineItem, { kind: 'plugi
   );
 }
 
+/** 被 turn_discard 丢弃的插件投递：一行原因，展开看原文；模型上下文里只剩痕迹 */
+function DiscardedTurnRow({
+  item,
+  onToggle,
+}: {
+  item: Extract<TimelineItem, { kind: 'discarded-turn' }>;
+  onToggle?: (key: string) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div data-discarded-turn={item.pluginId}>
+      <button
+        type="button"
+        onClick={() => onToggle?.(item.key)}
+        data-enso="tool-row"
+        className={cn(
+          'group/step flex min-h-6 w-full items-center gap-2 text-left text-[13px] transition-colors hover:text-foreground',
+          SUBTLE_TEXT
+        )}
+      >
+        <SkipForward className="h-3.5 w-3.5 shrink-0" />
+        <span className="shrink-0 text-muted-foreground group-hover/step:text-foreground">
+          {toolLabel('turn_discard', t)}
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          {[item.pluginName, item.reason].filter(Boolean).join(' · ')}
+        </span>
+        <ChevronRight
+          className={cn('h-3 w-3 shrink-0 transition-transform', item.expanded && 'rotate-90')}
+        />
+      </button>
+      {item.expanded && (
+        <div className="t-acc-reveal mt-1 mb-1.5 ml-5 space-y-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-xs">
+          <p className="flex items-center gap-1.5 text-muted-foreground">
+            <PluginIcon pluginId={item.pluginId} className="h-3.5 w-3.5 shrink-0" />
+            <span>{t('From plugin {{name}}', { name: item.pluginName })}</span>
+          </p>
+          {item.messages.map((text, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 投递原文只读、顺序固定
+            <p key={i} className="whitespace-pre-wrap break-words text-foreground">
+              {text}
+            </p>
+          ))}
+          {item.tools.map((tool, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 只读工具记录只读、顺序固定
+            <p key={i} className={cn('truncate', SUBTLE_TEXT)}>
+              {toolLabel(tool.name, t)} {tool.summary}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SessionCustomRow({ entry }: { entry: AgentSessionCustomEntry }) {
   const { t } = useI18n();
   if (entry.kind === 'oauth-account-selected') return <OauthAccountRow entry={entry} />;
@@ -1057,6 +1128,7 @@ function SessionCustomRow({ entry }: { entry: AgentSessionCustomEntry }) {
     );
   }
 
+  if (entry.kind === 'tool-batch-label') return null;
   const receipt = entry.receipt;
   const succeeded = receipt.outcome === 'succeeded';
   return (
@@ -1596,9 +1668,7 @@ function ThinkingRow({
           <Brain className={cn('size-3', streaming && 'animate-pulse text-brand')} />
         </span>
         {streaming ? (
-          <span className="t-shimmer" data-text={t('Thinking…')}>
-            {t('Thinking…')}
-          </span>
+          <span className={cn('text-foreground', BREATHE)}>{t('Thinking…')}</span>
         ) : durationMs !== null ? (
           <span>{t('Thought for {{duration}}', { duration: formatDuration(durationMs) })}</span>
         ) : (
@@ -1793,6 +1863,7 @@ function ToolGroupRow({
     if (item.count > 0) activityParts.push(t('{{count}} tool calls', { count: item.count }));
   }
   const explore = item.explore;
+  const breathing = item.exploring || Boolean(activity && item.live);
   const label = explore
     ? toolLabel('explore_fold', t)
     : activity
@@ -1806,11 +1877,13 @@ function ToolGroupRow({
         : t('{{count}} tool calls', { count: item.count });
   const detail = explore
     ? [explore.goal, t('{{count}} tool calls', { count: item.count })].filter(Boolean)
-    : activity
-      ? activityParts
-      : compact
-        ? explored
-        : parts;
+    : item.summary && !item.exploring
+      ? [item.summary]
+      : activity
+        ? activityParts
+        : compact
+          ? explored
+          : parts;
   const head = (
     <button
       type="button"
@@ -1827,16 +1900,18 @@ function ToolGroupRow({
       )}
     >
       <StepDot state={item.exploring ? 'running' : 'ok'} />
-      {item.exploring ? (
-        <span className="t-shimmer shrink-0 font-medium" data-text={label}>
-          {label}
-        </span>
-      ) : (
-        <span className="shrink-0 text-muted-foreground group-hover/step:text-foreground">
-          {label}
-        </span>
-      )}
-      <span className="min-w-0 flex-1 truncate">{detail.join(' · ')}</span>
+      <span
+        className={cn(
+          'shrink-0 text-muted-foreground group-hover/step:text-foreground',
+          breathing && cn(BREATHE, 'text-foreground'),
+          item.exploring && 'font-medium'
+        )}
+      >
+        {label}
+      </span>
+      <span className={cn('min-w-0 flex-1 truncate', breathing && BREATHE)}>
+        {detail.join(' · ')}
+      </span>
       <ChevronRight
         className={cn('h-3 w-3 shrink-0 transition-transform', item.expanded && 'rotate-90')}
       />
@@ -2078,17 +2153,21 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
   const hasImage = Boolean(item.imagePath) && item.state !== 'error';
   const labelKey = TOOL_LABEL_KEYS[item.name];
   const mcp = parseMcpToolName(item.name);
+  // 空清单是「清空」而不是产物：不画 0/0 卡片，收成一行
+  const todoCleared = item.state !== 'error' && item.todos?.length === 0;
   // 子代理按 id 指代的操作：动作词在前，长标题截断时动作仍可见
-  const summary = item.subagentOp
-    ? [t(SUBAGENT_OP_LABEL_KEYS[item.subagentOp]), item.summary].filter(Boolean).join(' · ')
-    : item.summary;
+  const summary = todoCleared
+    ? t('Todo list cleared')
+    : item.subagentOp
+      ? [t(SUBAGENT_OP_LABEL_KEYS[item.subagentOp]), item.summary].filter(Boolean).join(' · ')
+      : item.summary;
   const headerSummary =
     item.nestedPending && item.state === 'running'
       ? `${summary} · ${item.nestedPending} pending`
       : sandbox?.calls.length && item.state !== 'error'
         ? summarizeSandboxCalls(sandbox.calls)
         : summary;
-  const hasBody = Boolean(item.output || item.source || sentMessage || item.ask);
+  const hasBody = !todoCleared && Boolean(item.output || item.source || sentMessage || item.ask);
   // 子代理等待行：运行中可展开看在等的子代理各自在干什么
   const waitProgress = item.state === 'running' && item.waiting === 'subagent' && !host;
   const expandable = hasDiff || hasWrite || hasFileChanges || hasBody || waitProgress || hasImage;
@@ -2138,7 +2217,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
     if (autoExpand || (expandLiveEdits && appliedChangesArrived)) setExpanded(true);
   }, [autoExpand, expandLiveEdits, hasFileChanges, item]);
 
-  if (item.todos) return <TodoRow todos={item.todos} />;
+  if (item.todos && item.todos.length > 0) return <TodoRow todos={item.todos} />;
   if (item.name.startsWith('goal_')) return <GoalSignalRow item={item} />;
   if (item.plan && item.state !== 'error') return <PlanRow plan={item.plan} />;
 
@@ -2166,13 +2245,19 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           )}
         >
           <StepDot state={item.state} />
-          <span className="shrink-0 text-muted-foreground transition-colors group-hover/step:text-foreground">
+          <span
+            className={cn(
+              'shrink-0 text-muted-foreground transition-colors group-hover/step:text-foreground',
+              item.state === 'running' && cn(BREATHE, 'text-foreground')
+            )}
+          >
             {labelKey ? t(labelKey) : (mcp?.tool ?? item.name)}
           </span>
           <span
             className={cn(
               'min-w-0 flex-1 truncate font-mono text-[12px]',
-              item.state === 'error' ? 'text-destructive' : 'text-muted-foreground'
+              item.state === 'error' ? 'text-destructive' : 'text-muted-foreground',
+              item.state === 'running' && BREATHE
             )}
           >
             {item.state === 'error' && item.output
@@ -2195,7 +2280,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
             <ShellFailureBadge failure={item.shellFailure} />
           )}
           {item.state === 'reviewing' ? (
-            <span className="t-shimmer shrink-0 text-[11px]" data-text={t('Assistant reviewing…')}>
+            <span className={cn('shrink-0 text-[11px] text-foreground', BREATHE)}>
               {t('Assistant reviewing…')}
             </span>
           ) : item.state === 'running' && item.startedAt !== null ? (
@@ -2621,7 +2706,7 @@ function ShellRunStatusLive({
 /** 日志式工具行：普通工具行与工具组头，相邻时贴紧排 */
 export function isToolStepRow(item: TimelineItem): boolean {
   if (item.kind === 'tool-group') return true;
-  return item.kind === 'tool' && !item.todos && !item.name.startsWith('goal_');
+  return item.kind === 'tool' && !item.todos?.length && !item.name.startsWith('goal_');
 }
 
 const firstLine = (text: string): string => stripAnsi(text.split('\n', 1)[0] ?? '');

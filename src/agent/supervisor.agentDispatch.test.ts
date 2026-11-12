@@ -105,9 +105,8 @@ const child = {
   generation: '22222222-2222-4222-8222-222222222222',
   parent,
   instanceId: '33333333-3333-4333-8333-333333333333',
-  instanceName: 'Enso-33333333',
-  typeKey: 'agent:enso' as const,
-  profileId: 'enso-locked-v1' as const,
+  instanceName: 'scout-33333333',
+  typeKey: 'builtin:scout' as const,
 };
 const model = {
   api: 'openai-completions' as const,
@@ -910,7 +909,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     await supervisor.shutdown();
   });
 
-  it('emits real parent/child ready, enforces locked tools, and prompts the child exactly once', async () => {
+  it('emits real parent/child ready and prompts the child exactly once', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
@@ -939,19 +938,18 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       identity: child,
       cwd: '/workspace',
       config: {
-        typeKey: 'agent:enso',
-        displayName: 'Enso',
-        description: 'System Agent',
-        spawnSpecId: 'spawn-enso',
-        systemPrompt: 'locked',
+        typeKey: 'builtin:scout',
+        displayName: 'scout',
+        description: 'Scout Agent',
+        spawnSpecId: 'spawn-scout',
+        systemPrompt: 'scout role',
         model,
-        tools: 'enso-locked',
+        tools: 'all',
         skillPaths: [],
         skillBindingIds: [],
         mcpServers: [],
         mcpBindingIds: [],
-        systemPromptHash: 'enso-hash',
-        lockedProfileId: 'enso-locked-v1',
+        systemPromptHash: 'scout-hash',
       },
     });
     await waitFor(events, 'child-ready');
@@ -960,9 +958,8 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
         type: 'child-ready',
         identity: child,
         proof: expect.objectContaining({
-          spawnSpecId: 'spawn-enso',
+          spawnSpecId: 'spawn-scout',
           model: { providerId: 'settings-provider', modelId: 'model' },
-          toolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
         }),
       })
     );
@@ -982,7 +979,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     }
     expect(childSession.prompt).toHaveBeenCalledOnce();
     expect(childSession.prompt).toHaveBeenCalledWith(
-      '<role>\nlocked\n</role>\n\nchild-only task',
+      '<role>\nscout role\n</role>\n\nchild-only task',
       undefined
     );
     expect(parentSession.prompt).not.toHaveBeenCalled();
@@ -1494,6 +1491,67 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       expect(
         events.find((event) => event.type === 'status' && event.status === 'failed' && event.error)
       ).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('活轮仍在产出时超过僵尸时限不失败，空闲后再按新轮发出排队消息', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.isStreaming = true;
+      let release = () => {};
+      piSession.waitForIdle = vi.fn(
+        () =>
+          new Promise<undefined>((resolve) => {
+            release = () => {
+              piSession.isStreaming = false;
+              resolve(undefined);
+            };
+          })
+      );
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+      await vi.advanceTimersByTimeAsync(4_000);
+      piSession.emit({ type: 'turn_start' });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(events.some((event) => event.type === 'turn-failed')).toBe(false);
+      expect(piSession.prompt).not.toHaveBeenCalled();
+
+      release();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(piSession.prompt).toHaveBeenCalledWith('queued', undefined);
+      expect(events.some((event) => event.type === 'turn-failed')).toBe(false);
+      await supervisor.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('误判僵尸失败后，已见 agent_end 的原轮收束会清掉失败横幅', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.isStreaming = true;
+      piSession.waitForIdle = vi.fn(() => new Promise<undefined>(() => {}));
+      piSession.emit({ type: 'agent_end', willRetry: false });
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await settle();
+      expect(events.some((event) => event.type === 'turn-failed')).toBe(true);
+
+      piSession.isStreaming = false;
+      piSession.emit({ type: 'agent_settled' });
+      await settle();
+      const failedAt = events.findIndex((event) => event.type === 'turn-failed');
+      const completedAt = events.findIndex(
+        (event, index) => index > failedAt && event.type === 'turn-completed'
+      );
+      expect(completedAt).toBeGreaterThan(failedAt);
+      const status = events.filter((event) => event.type === 'status').at(-1);
+      expect(status).toMatchObject({ status: 'idle' });
+      if (status?.type === 'status') expect(status.error).toBeUndefined();
+      await supervisor.shutdown();
     } finally {
       vi.useRealTimers();
     }
@@ -2313,7 +2371,7 @@ describe('SessionSupervisor custom parent system prompt', () => {
     rmSync(sessionDir, { recursive: true, force: true });
   });
 
-  it('自定义角色扩展只挂普通 parent，不进入 locked Enso 或 typed child', async () => {
+  it('自定义角色扩展只挂普通 parent，不进入 typed child', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({
       emit: (event) => events.push(event),
@@ -2334,31 +2392,6 @@ describe('SessionSupervisor custom parent system prompt', () => {
     // 强制提示词会冻结后续扩展对 systemPromptOptions 的修改，必须最后执行
     const factories = parentLoader?.extensionFactories as Array<{ name?: string }>;
     expect(factories.at(-1)?.name).toBe('custom-persona');
-
-    supervisor.handleCommand({
-      type: 'spawn-child',
-      identity: child,
-      cwd: '/workspace',
-      config: {
-        typeKey: 'agent:enso',
-        displayName: 'Enso',
-        description: 'System Agent',
-        spawnSpecId: 'spawn-enso-system-prompt',
-        systemPrompt: 'locked role prompt',
-        model,
-        tools: 'enso-locked',
-        skillPaths: [],
-        skillBindingIds: [],
-        mcpServers: [],
-        mcpBindingIds: [],
-        systemPromptHash: 'enso-hash',
-        lockedProfileId: 'enso-locked-v1',
-      },
-    });
-    await waitFor(events, 'child-ready');
-    const lockedLoader = mocks.loaderOptions.at(-1);
-    expect(lockedLoader?.systemPrompt).toBeTruthy();
-    expect(applyCustomPersona(lockedLoader, DEFAULT_PERSONA_PROMPT)).toBe(DEFAULT_PERSONA_PROMPT);
 
     supervisor.handleCommand({
       type: 'spawn-child',

@@ -196,7 +196,6 @@ describe('selectCoworkerTabConversations', () => {
       reloading: false,
       pendingApprovalCount: 0,
       pendingAskCount: 0,
-      pendingCapabilityAskCount: 0,
     });
   });
 

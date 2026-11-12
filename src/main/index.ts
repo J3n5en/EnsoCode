@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
-import { app, type BrowserWindow } from 'electron';
+import { app, type BrowserWindow, crashReporter } from 'electron';
 import {
   registerLocalImageProtocolHandler,
   registerLocalImageSchemePrivileges,
@@ -18,7 +18,12 @@ import {
   openPluginInstallFromProtocol,
 } from './ipc/window';
 import { createPluginInstallInbox } from './protocol/pluginInstall';
-import { agentWorkerAlive, startAgentWorker, stopAgentWorkerForQuit } from './services/agentHost';
+import {
+  agentWorkerAlive,
+  recordAgentWorkerGone,
+  startAgentWorker,
+  stopAgentWorkerForQuit,
+} from './services/agentHost';
 import { installAppMenu } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
 import {
@@ -53,6 +58,7 @@ import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { getProxyConfig } from './services/proxyConfig';
 import { setupRemoteRenderer } from './services/remoteRenderer';
+import { readySecureStores } from './services/secureStores';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { syncSpeechFromSettings } from './services/speech/service';
 import { disposeAllTerminals, hasPendingPtys, waitPtyQuitIdle } from './services/terminalService';
@@ -86,6 +92,11 @@ app.setPath(
     ? path.resolve(developmentUserData)
     : path.join(app.getPath('appData'), app.isPackaged ? 'enso-code' : 'enso-code-dev')
 );
+
+// 未启动 crashpad 时子进程 native 崩溃只剩 0xFFFF7003，真实异常码与现场全丢。
+// 只落本地 minidump（userData/Crashpad），不上传。
+app.setPath('crashDumps', path.join(app.getPath('userData'), 'Crashpad'));
+crashReporter.start({ uploadToServer: false });
 
 // 背景图媒体协议：特权 scheme 必须在 app ready 前登记
 registerLocalImageSchemePrivileges();
@@ -133,9 +144,11 @@ if (!gotTheLock) {
     console.error(
       `[process] child-process-gone type=${details.type} reason=${details.reason} exitCode=${details.exitCode} serviceName=${details.serviceName ?? ''} name=${details.name ?? ''}`
     );
+    recordAgentWorkerGone(details);
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    const secureStores = readySecureStores();
     electronApp.setAppUserModelId(
       resolveWindowsAppUserModelId({
         execPath: process.execPath,
@@ -191,8 +204,12 @@ if (!gotTheLock) {
         syncAppLanguage: () => installAppMenu(readLocale()),
       },
     });
+    await secureStores;
     registerIpcHandlers();
     registerDesktopIpcHandlers();
+    void import('./services/modelsDevCatalog').then(({ startModelsDevRefreshSchedule }) => {
+      startModelsDevRefreshSchedule();
+    });
     pluginInstallInbox.start((url) => openPluginInstallFromProtocol(url));
     setTrayToggleHandler(() => {
       if (isServerMode()) leaveServerMode();

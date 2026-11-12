@@ -8,6 +8,12 @@ import { conversationCwd } from '@shared/conversationCwd';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { resolveSshTarget } from '@shared/ssh';
 import {
+  cleanToolBatchLabel,
+  TOOL_BATCH_LABEL_SYSTEM_PROMPT,
+  type ToolBatchDigest,
+  toolBatchLabelPrompt,
+} from '@shared/toolBatchLabel';
+import {
   IPC_CHANNELS,
   projectDisabledBuiltinTools,
   resolveDisabledBuiltinTools,
@@ -173,7 +179,7 @@ import {
   routineProposeTool,
   sendImageTool,
 } from './bots';
-import { agentSessionIndex, capabilityGateway, handleCapabilityInvoke } from './capabilities';
+import { agentSessionIndex } from './sessionIndex';
 import { readSettings, readSshTimeoutSeconds } from './settings';
 import {
   removeRegisteredWorktree,
@@ -909,19 +915,61 @@ async function requestTitleSummary(
   if (state?.titleSummaryEnabled !== true) {
     return { ok: false, error: 'title summary disabled' };
   }
+  const candidates = await resolveTitleCandidates(state, sessionModel);
+  if (!candidates) return { ok: false, error: 'model credentials unavailable' };
+  if (candidates.length === 0) return { ok: false, error: 'no usable title model' };
+  return summarizeConversationTitle(conversationId, input, candidates);
+}
+
+async function resolveTitleCandidates(
+  state: Record<string, unknown>,
+  sessionModel?: { providerId: string; modelId: string }
+): Promise<SpawnModelConfig[] | null> {
   let credentialKeys: ReadonlySet<string>;
   try {
     credentialKeys = await readStoredOauthCredentialKeys();
   } catch {
-    return { ok: false, error: 'model credentials unavailable' };
+    return null;
   }
   const candidates: SpawnModelConfig[] = [];
   for (const candidate of titleModelCandidates(state, sessionModel)) {
     const resolved = resolveModelSelection(candidate.providerId, candidate.modelId, credentialKeys);
     if (resolved.ok && resolved.selection) candidates.push(resolved.selection.config);
   }
-  if (candidates.length === 0) return { ok: false, error: 'no usable title model' };
-  return summarizeConversationTitle(conversationId, input, candidates);
+  return candidates;
+}
+
+const TOOL_BATCH_LABEL_TIMEOUT_MS = 15_000;
+
+/** 工具批次标签与 AI 标题共用开关和模型回退链；任何失败静默跳过，组头照旧显示计数 */
+async function labelToolBatch(identity: SessionIdentity, digest: ToolBatchDigest): Promise<void> {
+  const state = (
+    readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
+  )?.state;
+  if (state?.titleSummaryEnabled !== true) return;
+  const candidates = await resolveTitleCandidates(state);
+  if (!candidates?.length) return;
+  try {
+    const label = cleanToolBatchLabel(
+      await completeText({
+        systemPrompt: TOOL_BATCH_LABEL_SYSTEM_PROMPT,
+        userText: toolBatchLabelPrompt(digest),
+        candidates,
+        timeoutMs: TOOL_BATCH_LABEL_TIMEOUT_MS,
+        maxTokens: 128,
+        reasoning: 'off',
+      })
+    );
+    if (label)
+      appendSessionCustomEntry(identity, {
+        kind: 'tool-batch-label',
+        callId: digest.callId,
+        label,
+        at: Date.now(),
+      });
+  } catch {
+    // 标签是锦上添花
+  }
 }
 
 function wirePairSessionHost(): void {
@@ -1248,11 +1296,20 @@ export function registerAgentHandlers(): void {
       spawnChild: spawnChildSession,
       promptChild: promptChildSession,
       appendCustomEntry: appendSessionCustomEntry,
+      // 复用 subagent 完成回报的 agent-notify；发起派发的窗口已关则不追发
+      notifyParent: (identity, { text, urgent, ownerWebContentsId }) => {
+        const owner = webContentsOrRemote(ownerWebContentsId);
+        if (!owner || owner.isDestroyed()) return { ok: false, error: 'Owner window closed.' };
+        return sendAgentCommand({
+          type: 'agent-notify',
+          identity: { sessionId: identity.sessionId, generation: identity.generation },
+          text,
+          urgent,
+        });
+      },
       dismissChild: dismissChildSession,
       resumeCoworker: resumeCoworkerSession,
     },
-    registerCapabilityInvocation: (context) => capabilityGateway.registerInvocation(context),
-    terminateGeneration: (child) => capabilityGateway.terminateGeneration(child),
   });
 
   agentService = new AgentService({
@@ -1353,6 +1410,10 @@ export function registerAgentHandlers(): void {
     }
     // 手动重读结果按 requestId 在 agentHost 结算给 invoke 等待者；无主的迟到结果直接丢弃，
     // 绝不进普通事件流（renderer 的 snapshot 分支有 started / 审批副作用）
+    if (workerEvent.type === 'tool-batch-completed') {
+      void labelToolBatch(workerEvent.identity, workerEvent.digest);
+      return;
+    }
     if (
       workerEvent.type === 'session-reloaded' ||
       workerEvent.type === 'workspace-lock-result' ||
@@ -1431,10 +1492,6 @@ export function registerAgentHandlers(): void {
         });
         return;
       }
-    }
-    if (workerEvent.type === 'capability-invoke') {
-      handleCapabilityInvoke(workerEvent);
-      return;
     }
     // 回合结束：agent 开的无头 tab 关掉（用户正看的 / 锁住的不动）；parent-ended 强关
     // Bot 聊天的浏览器由成员共享，随聊天删除才关

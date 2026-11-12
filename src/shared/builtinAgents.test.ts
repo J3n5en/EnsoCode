@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   agentTypeDisplayName,
   buildAgentTypeRegistrySnapshot,
-  ENSO_AGENT_TYPE_KEY,
-  ENSO_LOCKED_PROFILE,
   isReservedAgentTypeName,
   isSameChildSessionIdentity,
   isSameSessionIdentity,
+  LEGACY_ENSO_TYPE_KEY,
   normalizeAgentTypeName,
   parseAgentTypeCandidate,
   parseAgentTypeKey,
   parseAgentTypeRegistrySnapshot,
+  parseChildSessionIdentity,
 } from './builtinAgents';
 
 const CUSTOM_ID = '11111111-1111-4111-8111-111111111111';
@@ -22,7 +22,7 @@ describe('agentTypeDisplayName', () => {
   it('maps type keys to human-readable names', () => {
     expect(agentTypeDisplayName(`custom:${CUSTOM_ID}`, custom)).toBe('reviewer-x');
     expect(agentTypeDisplayName('builtin:scout', custom)).toBe('scout');
-    expect(agentTypeDisplayName(ENSO_AGENT_TYPE_KEY, custom)).toBe('Enso');
+    expect(agentTypeDisplayName(LEGACY_ENSO_TYPE_KEY, custom)).toBe('Enso');
   });
 
   it('keeps legacy plain names and falls back for unknown custom ids', () => {
@@ -33,31 +33,36 @@ describe('agentTypeDisplayName', () => {
   });
 });
 
-describe('AgentType registry and locked Enso profile', () => {
-  it('Enso 固定 locked/non-disableable/no override 并精确三 tools', () => {
-    expect(ENSO_LOCKED_PROFILE).toEqual({
-      profileId: 'enso-locked-v1',
-      typeKey: 'agent:enso',
-      agentId: 'enso',
-      inheritParentModel: true,
-      systemPromptId: 'enso-system-v1',
-      toolIds: ['enso_capabilities', 'enso_app', 'ask_user'],
-      skillPaths: [],
-      mcpServers: [],
-    });
+describe('AgentType registry and legacy Enso read compatibility', () => {
+  it('registry 不再下发 Enso 候选，快照仍可解析且保留 builtin 类型', () => {
     const snapshot = buildAgentTypeRegistrySnapshot({
       revision: 2,
       disabledBuiltinAgentTypes: [],
       customAgentTypes: [],
     });
-    expect(snapshot.candidates[0]).toMatchObject({
-      typeKey: ENSO_AGENT_TYPE_KEY,
+    const typeKeys = snapshot.candidates.map((candidate) => candidate.typeKey);
+    expect(typeKeys).not.toContain(LEGACY_ENSO_TYPE_KEY);
+    expect(typeKeys).toEqual(
+      expect.arrayContaining(['builtin:scout', 'builtin:reviewer', 'builtin:worker'])
+    );
+    expect(parseAgentTypeRegistrySnapshot(snapshot)).toEqual(snapshot);
+
+    const ensoCandidate = {
+      typeKey: LEGACY_ENSO_TYPE_KEY,
       displayName: 'Enso',
+      description: 'x',
       source: 'system',
       locked: true,
       canDisable: false,
       canEdit: false,
-    });
+    };
+    expect(parseAgentTypeCandidate(ensoCandidate)).toBeNull();
+    expect(
+      parseAgentTypeRegistrySnapshot({
+        revision: 2,
+        candidates: [ensoCandidate, ...snapshot.candidates],
+      })
+    ).toBeNull();
   });
 
   it('保留名归一化/case-fold 供 settings 与 Main 共用', () => {
@@ -90,7 +95,6 @@ describe('AgentType registry and locked Enso profile', () => {
       ],
     });
     expect(snapshot.candidates.map((candidate) => candidate.typeKey)).toEqual([
-      'agent:enso',
       'builtin:reviewer',
       'builtin:tester',
       `custom:${CUSTOM_ID}`,
@@ -194,9 +198,8 @@ describe('AgentType registry and locked Enso profile', () => {
       generation: '22222222-2222-4222-8222-222222222222',
       parent,
       instanceId: '33333333-3333-4333-8333-333333333333',
-      instanceName: 'Enso 3333',
-      typeKey: 'agent:enso' as const,
-      profileId: 'enso-locked-v1' as const,
+      instanceName: 'scout 3333',
+      typeKey: 'builtin:scout' as const,
     };
     expect(isSameSessionIdentity(parent, parent)).toBe(true);
     expect(
@@ -212,5 +215,20 @@ describe('AgentType registry and locked Enso profile', () => {
         generation: '55555555-5555-4555-8555-555555555555',
       })
     ).toBe(false);
+  });
+
+  it('历史 Enso child 身份仍可解析：agent:enso 必带旧 profileId，其余类型不得带', () => {
+    const legacy = {
+      sessionId: 'parent::cw-1',
+      generation: '22222222-2222-4222-8222-222222222222',
+      parent: { sessionId: 'parent', generation: '11111111-1111-4111-8111-111111111111' },
+      instanceId: '33333333-3333-4333-8333-333333333333',
+      instanceName: 'Enso 3333',
+      typeKey: LEGACY_ENSO_TYPE_KEY,
+      profileId: 'enso-locked-v1',
+    };
+    expect(parseChildSessionIdentity(legacy)).toEqual(legacy);
+    expect(parseChildSessionIdentity({ ...legacy, profileId: undefined })).toBeNull();
+    expect(parseChildSessionIdentity({ ...legacy, typeKey: 'builtin:scout' })).toBeNull();
   });
 });

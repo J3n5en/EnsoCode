@@ -39,6 +39,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { pluginCommandFor, runPluginCommand } from '../../plugins/commands';
 import { registerDraftTarget, takePendingDraft } from '../../plugins/draftBridge';
 import { PluginComposerSlots } from '../../plugins/slots';
+import { PluginStatusItems } from '../../plugins/statusItems';
 import {
   type PluginCandidate,
   pickPluginCandidate,
@@ -97,8 +98,6 @@ interface ComposerProps {
   injectedImages?: AttachedImage[];
   injectedDraftAppend?: boolean;
   onDraftConsumed?: () => void;
-  initialRecipient?: AgentTypeMentionCandidate;
-  onInitialRecipientConsumed?: () => void;
   /** @ 弹窗的过去会话候选（宿主从 sessions store 算好传入，保持本组件与 store 解耦） */
   chatCandidates?: ChatMentionCandidate[];
   /** 浏览不自动 spawn：用户开始打字/聚焦输入框时再拉 worker */
@@ -154,8 +153,6 @@ export function Composer({
   injectedImages,
   injectedDraftAppend,
   onDraftConsumed,
-  initialRecipient,
-  onInitialRecipientConsumed,
   chatCandidates,
   onActivate,
   onSend,
@@ -182,9 +179,7 @@ export function Composer({
   const mentionPickerId = useId();
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [slashes, setSlashes] = useState<string[]>([]);
-  const [recipient, setRecipient] = useState<AgentTypeMentionCandidate | undefined>(
-    initialRecipient
-  );
+  const [recipient, setRecipient] = useState<AgentTypeMentionCandidate | undefined>();
   const prevFocusKeyRef = useRef(focusKey);
   const [dragging, setDragging] = useState(false);
 
@@ -350,12 +345,6 @@ export function Composer({
     }
     if (autoFocus) editorRef.current?.focus();
   }, [focusKey]);
-
-  useEffect(() => {
-    if (!initialRecipient) return;
-    setRecipient(initialRecipient);
-    onInitialRecipientConsumed?.();
-  }, [initialRecipient, onInitialRecipientConsumed]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: injected content is an external one-shot signal.
   useEffect(() => {
@@ -1019,6 +1008,7 @@ export function Composer({
               />
             ) : null}
             {toolbar}
+            {!isolated && <PluginStatusItems sessionId={pluginSlotProps.sessionId} />}
             <PluginComposerSlots side="right" {...pluginSlotProps} />
             {privacyScan && (privacyScan.blocked.length > 0 || privacyScan.masked > 0) && (
               <span

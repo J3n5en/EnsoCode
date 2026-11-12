@@ -34,6 +34,7 @@ const SOURCE_LABEL: Record<WorkflowPresetSummary['source'], string> = {
   project: 'Project',
   custom: 'Custom',
   global: 'Global',
+  plugin: 'Plugin',
   builtin: 'Built-in',
 };
 
@@ -160,10 +161,11 @@ function PresetList({ conversationId }: { conversationId: string }) {
   const [presets, setPresets] = useState<WorkflowPresetSummary[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const disabled = useSettingsStore((state) => state.disabledWorkflowPresets);
+  const presetId = useSessionsStore((state) => state.conversations[conversationId]?.presetId);
   const load = useCallback(() => {
     let cancelled = false;
     window.electronAPI.assets
-      .listWorkflowPresets(conversationId)
+      .listWorkflowPresets(conversationId, presetId)
       .then((listed) => {
         if (!cancelled) setPresets(listed);
       })
@@ -173,7 +175,7 @@ function PresetList({ conversationId }: { conversationId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [conversationId, presetId]);
   useEffect(load, [load]);
   // 开关状态在渲染侧设置里，切换即时生效；worker 执行时同样拦截已禁用的内置预设
   const visible = presets.filter(

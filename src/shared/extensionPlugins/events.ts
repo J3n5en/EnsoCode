@@ -12,6 +12,8 @@ export const PLUGIN_EVENTS = [
   'input',
   'context_usage',
   'session_status',
+  'model_select',
+  'before_agent_start',
 ] as const;
 export type PluginEventName = (typeof PLUGIN_EVENTS)[number];
 
@@ -95,8 +97,19 @@ export interface ContextPart {
 }
 
 /** 可以拦截或改写的事件；其余只通知 */
-export const PLUGIN_INTERCEPT_EVENTS = ['tool_call', 'tool_result', 'input'] as const;
+export const PLUGIN_INTERCEPT_EVENTS = [
+  'tool_call',
+  'tool_result',
+  'input',
+  'before_agent_start',
+] as const;
 export type PluginInterceptEvent = (typeof PLUGIN_INTERCEPT_EVENTS)[number];
+/** 只能追加、不能拒绝的拦截事件：声明 failClosed 没有意义，清单里拒绝 */
+export const APPEND_ONLY_INTERCEPT_EVENTS = ['before_agent_start'] as const;
+/** before_agent_start 所有插件追加的 system prompt 合计上限（字符） */
+export const BEFORE_AGENT_START_APPEND_MAX = 16 * 1024;
+/** before_agent_start 载荷里用户消息正文的上限（字符） */
+export const BEFORE_AGENT_START_PROMPT_MAX = 64 * 1024;
 
 /** before_compact 等插件落盘；超时照常压缩 */
 export const BEFORE_COMPACT_TIMEOUT_MS = 10_000;
@@ -144,17 +157,31 @@ export interface InputPayload {
   text: string;
   source: string;
 }
+/** 一轮开始前；kind=custom 是插件或系统消息触发的轮次，prompt 为空串 */
+export interface BeforeAgentStartPayload {
+  prompt: string;
+  kind: 'user' | 'custom';
+}
+export interface ModelSelectPayload {
+  provider: string;
+  modelId: string;
+  previous?: { provider: string; modelId: string };
+  source: 'set' | 'cycle' | 'restore';
+}
 
 export type InterceptPayload = {
   tool_call: ToolCallPayload;
   tool_result: ToolResultPayload;
   input: InputPayload;
+  before_agent_start: BeforeAgentStartPayload;
 };
 
 export type InterceptResult = {
   tool_call: { block?: true; reason?: string; input?: Record<string, unknown> };
   tool_result: { content?: string; isError?: boolean };
   input: { action: 'continue' } | { action: 'transform'; text: string } | { action: 'handled' };
+  /** 追加到本轮 system prompt 末尾的文本，多个插件按 id 顺序用空行拼接 */
+  before_agent_start: { append?: string };
 };
 
 export interface InterceptState<E extends PluginInterceptEvent> {
@@ -224,6 +251,15 @@ export function applyInterceptResult<E extends PluginInterceptEvent>(
       result: result as InterceptResult[E],
     };
   }
+  if (state.event === 'before_agent_start') {
+    if (typeof raw.append !== 'string' || raw.append.length === 0) return state;
+    const previous = (state.result as InterceptResult['before_agent_start']).append;
+    const append = (previous ? `${previous}\n\n${raw.append}` : raw.append).slice(
+      0,
+      BEFORE_AGENT_START_APPEND_MAX
+    );
+    return { ...state, result: { append } as InterceptResult[E] };
+  }
   if (raw.action === 'handled')
     return { ...state, done: true, result: { action: 'handled' } as InterceptResult[E] };
   if (raw.action === 'transform' && typeof raw.text === 'string') {
@@ -244,5 +280,6 @@ export function failClosedResult<E extends PluginInterceptEvent>(
   const reason = `插件 ${pluginName} 未能完成检查，已按其策略拒绝`;
   if (event === 'tool_call') return { block: true, reason } as InterceptResult[E];
   if (event === 'tool_result') return { content: reason, isError: true } as InterceptResult[E];
+  if (event === 'before_agent_start') return {} as InterceptResult[E];
   return { action: 'handled' } as InterceptResult[E];
 }

@@ -6,7 +6,7 @@ export type ClipboardFileResult = { ok: boolean; reason?: string };
 export type ClipboardFileDeps = {
   platform: NodeJS.Platform;
   desktop?: string;
-  writeBuffer: (format: string, buffer: Buffer) => void;
+  writeBuffer: (format: string, buffer: Buffer) => Promise<void>;
   runCommand: (command: string, args: string[], stdin?: string) => Promise<void>;
 };
 
@@ -21,7 +21,7 @@ export async function writeFileToClipboard(
 
   if (deps.platform === 'darwin') {
     try {
-      deps.writeBuffer('public.file-url', Buffer.from(pathToFileURL(filePath).href, 'utf8'));
+      await deps.writeBuffer('public.file-url', Buffer.from(pathToFileURL(filePath).href, 'utf8'));
       return { ok: true };
     } catch {
       return { ok: false, reason: 'clipboard-write-failed' };

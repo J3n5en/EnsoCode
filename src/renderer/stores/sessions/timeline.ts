@@ -121,6 +121,8 @@ export type TimelineItem =
       subagentTitles?: Record<string, string>;
       /** 插件工具写出的产出文件；其它缺省 */
       pluginArtifacts?: PluginArtifactInfo[];
+      /** 本行是工具批次首个调用且已生成一句话标签时的标签；其它缺省 */
+      batchLabel?: string;
     }
   | {
       kind: 'tool-group';
@@ -131,10 +133,14 @@ export type TimelineItem =
       stats: ToolGroupStats;
       /** compact 模式下组外仍有 running 的只读行：组头显示 Exploring */
       exploring: boolean;
+      /** 这一轮还在跑、尾段已折进过程组：组头继续呼吸；结束后或缺省 */
+      live?: boolean;
       /** 回答完成后的过程折叠组（任意成功工具 + 思考）；普通工具组缺省 */
       activity?: { thinking: number; workedMs: number };
       /** 成对的 explore_mark → explore_fold 探索组：组头展开只给目标与结果，steps 时才平铺过程；其它组缺省 */
       explore?: { goal: string; report: string; steps: boolean };
+      /** 组内工具批次的一句话标签（按出现顺序去重拼接）；没有标签时缺省 */
+      summary?: string;
       /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
       children: TimelineItem[];
     }
@@ -169,7 +175,19 @@ export type TimelineItem =
   /** 带字分隔线（委派子会话的「第 N 次执行」） */
   | { kind: 'divider'; key: string; text: string }
   /** 插件经 session.inject 写入的消息；必须标明来源 */
-  | { kind: 'plugin-message'; key: string; text: string; pluginId: string; pluginName: string };
+  | { kind: 'plugin-message'; key: string; text: string; pluginId: string; pluginName: string }
+  /** 插件投递被 turn_discard 丢弃的一轮：收成一行，展开看投递原文 */
+  | {
+      kind: 'discarded-turn';
+      key: string;
+      reason: string;
+      pluginId: string;
+      pluginName: string;
+      messages: string[];
+      /** 丢弃前用过的只读工具 */
+      tools: { name: string; summary: string }[];
+      expanded: boolean;
+    };
 
 export function formatApplyPatchOutcome(outcome: ProjectedApplyPatchOutcome): string {
   const list = (label: string, paths: string[]): string =>
@@ -863,7 +881,8 @@ function buildMessageTimeline(
   toolOutputs?: Record<string, string>,
   pendingApprovals?: readonly ApprovalRequestInfo[],
   toolStartedAt?: Record<string, number>,
-  historyBaseIndex = 0
+  historyBaseIndex = 0,
+  batchLabels?: ReadonlyMap<string, string>
 ): TimelineItem[] {
   const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
@@ -1261,6 +1280,7 @@ function buildMessageTimeline(
             ...(subagent?.op ? { subagentOp: subagent.op } : {}),
             ...(subagent?.titles ? { subagentTitles: subagent.titles } : {}),
             ...(result?.pluginArtifacts ? { pluginArtifacts: result.pluginArtifacts } : {}),
+            ...(batchLabels?.has(part.id) ? { batchLabel: batchLabels.get(part.id) } : {}),
             ...(result || !toolStartedAt ? {} : { startedAt: toolStartedAt[part.id] ?? null }),
           });
           return;
@@ -1490,6 +1510,13 @@ export function buildTimeline(
   }
 ): TimelineItem[] {
   const historyBaseIndex = options?.historyBaseIndex ?? 0;
+  // 工具批次标签不单独成行，挂到批次首个工具行上供组头取用
+  const batchLabels = new Map<string, string>();
+  const rowEntries: Exclude<AgentSessionCustomEntry, { kind: 'tool-batch-label' }>[] = [];
+  for (const entry of customEntries) {
+    if (entry.kind === 'tool-batch-label') batchLabels.set(entry.callId, entry.label);
+    else rowEntries.push(entry);
+  }
   const messageItems = buildMessageTimeline(
     messages,
     running,
@@ -1497,10 +1524,11 @@ export function buildTimeline(
     options?.toolOutputs,
     options?.pendingApprovals,
     options?.toolStartedAt,
-    historyBaseIndex
+    historyBaseIndex,
+    batchLabels
   );
   const merged =
-    customEntries.length === 0
+    rowEntries.length === 0
       ? messageItems
       : [
           ...messageItems.map((item, order) => ({
@@ -1508,7 +1536,7 @@ export function buildTimeline(
             at: messageItemTime(item, messages, historyBaseIndex),
             order,
           })),
-          ...customEntries.map((entry, index) => ({
+          ...rowEntries.map((entry, index) => ({
             item: {
               kind: 'session-custom' as const,
               key:
@@ -1604,6 +1632,7 @@ function isTurnSwallowable(item: TimelineItem): boolean {
     case 'error':
     case 'divider':
     case 'plugin-message':
+    case 'discarded-turn':
       return false;
     default:
       return true;
@@ -1628,6 +1657,18 @@ function classifyTool(
 }
 
 const READ_ONLY_TOOLS = new Set(['read', ...SEARCH_TOOLS]);
+
+/** 组内工具批次标签：含嵌套组的子行，按出现顺序去重拼接；一条都没有时 undefined */
+export function toolGroupSummary(rows: readonly TimelineItem[]): string | undefined {
+  const labels: string[] = [];
+  const visit = (row: TimelineItem) => {
+    if (row.kind === 'tool-group') row.children.forEach(visit);
+    else if (row.kind === 'tool' && row.batchLabel && !labels.includes(row.batchLabel))
+      labels.push(row.batchLabel);
+  };
+  rows.forEach(visit);
+  return labels.length > 0 ? labels.join(' · ') : undefined;
+}
 
 const READ_FILE_PROGRAMS = new Set(['cat', 'bat', 'head', 'tail', 'less', 'more', 'nl', 'tac']);
 
@@ -1717,6 +1758,54 @@ function pairExploreFolds(
   return result;
 }
 
+const TURN_DISCARD_HEAD = /^Turn discarded[:.]?\s*/;
+
+/** 连续插件投递到成功的 turn_discard（其间只有思考/正文/只读工具）收成一行 */
+function pairTurnDiscards(
+  items: TimelineItem[],
+  expandedKeys: ReadonlySet<string>
+): TimelineItem[] {
+  const result: TimelineItem[] = [];
+  for (const item of items) {
+    if (item.kind === 'tool' && item.name === 'turn_discard' && item.state === 'ok') {
+      let start = result.length;
+      while (
+        start > 0 &&
+        (result[start - 1].kind === 'thinking' ||
+          result[start - 1].kind === 'text' ||
+          result[start - 1].kind === 'tool')
+      )
+        start--;
+      const first = start;
+      while (start > 0 && result[start - 1].kind === 'plugin-message') start--;
+      if (start < first) {
+        const rows = result.splice(start);
+        const plugins = rows.filter(
+          (row): row is Extract<TimelineItem, { kind: 'plugin-message' }> =>
+            row.kind === 'plugin-message'
+        );
+        const key = `discard-${plugins[0].key}`;
+        result.push({
+          kind: 'discarded-turn',
+          key,
+          reason:
+            item.output != null ? item.output.replace(TURN_DISCARD_HEAD, '').trim() : item.summary,
+          pluginId: plugins[0].pluginId,
+          pluginName: plugins[0].pluginName,
+          messages: plugins.map((row) => row.text),
+          tools: rows.flatMap((row) =>
+            row.kind === 'tool' ? [{ name: row.name, summary: row.summary }] : []
+          ),
+          expanded: expandedKeys.has(key),
+        });
+        continue;
+      }
+    }
+    result.push(item);
+  }
+  return result;
+}
+
 /** 探索组展开过程时其原始行紧随组头 */
 function withExploreChildren(item: TimelineItem): TimelineItem[] {
   return item.kind === 'tool-group' && item.explore?.steps ? [item, ...item.children] : [item];
@@ -1724,7 +1813,8 @@ function withExploreChildren(item: TimelineItem): TimelineItem[] {
 
 function activitySegment(
   segment: TimelineItem[],
-  expandedKeys: ReadonlySet<string>
+  expandedKeys: ReadonlySet<string>,
+  live = false
 ): TimelineItem[] {
   if (segment.length < 2) return segment.flatMap(withExploreChildren);
   const stats: ToolGroupStats = { commands: 0, reads: 0, searches: 0, others: 0 };
@@ -1741,6 +1831,7 @@ function activitySegment(
   }
   const key = `group-${segment[0].key}`;
   const expanded = expandedKeys.has(key);
+  const summary = toolGroupSummary(segment);
   const group: TimelineItem = {
     kind: 'tool-group',
     key,
@@ -1749,6 +1840,8 @@ function activitySegment(
     stats,
     exploring: false,
     activity: { thinking, workedMs },
+    ...(live ? { live: true } : {}),
+    ...(summary ? { summary } : {}),
     children: segment,
   };
   return expanded ? [group, ...segment.flatMap(withExploreChildren)] : [group];
@@ -1806,11 +1899,13 @@ function isActivityMember(item: TimelineItem): boolean {
 }
 
 function prepareTimeline(
-  items: TimelineItem[],
+  rawItems: TimelineItem[],
   running: boolean,
   expandedKeys: ReadonlySet<string>,
   prep: TimelinePrep
 ): { sourceItems: TimelineItem[]; lastUserIndex: number; liveFrom: number } {
+  // 先于轮次折叠配对：折叠会吞掉 turn_discard 而留下投递行
+  const items = pairTurnDiscards(rawItems, expandedKeys);
   const autoCollapse = prep.autoCollapseCompletedTurns === true;
   const turnOverrides = prep.turnOverrides;
   const origLastUserIndex = items.findLastIndex(
@@ -2001,7 +2096,11 @@ function foldPrepared(
     const prefixEnd = releasedPrefixEnd(i);
     if (prefixEnd > i) {
       result.push(
-        ...activitySegment(mergeAdjacentThinking(sourceItems.slice(i, prefixEnd)), expandedKeys)
+        ...activitySegment(
+          mergeAdjacentThinking(sourceItems.slice(i, prefixEnd)),
+          expandedKeys,
+          true
+        )
       );
       i = prefixEnd;
       continue;
@@ -2053,6 +2152,7 @@ function foldPrepared(
       }
       const key = `group-${segment[0].key}`;
       const expanded = expandedKeys.has(key);
+      const summary = toolGroupSummary(groupRows);
       result.push({
         kind: 'tool-group',
         key,
@@ -2066,6 +2166,7 @@ function foldPrepared(
             groupRows.some(
               (s) => s.kind === 'tool' && (s.state === 'running' || s.state === 'reviewing')
             )),
+        ...(summary ? { summary } : {}),
         children: groupRows,
       });
       // 展开：原始顺序全量平铺；收拢：仅钉住的行跟在组头后

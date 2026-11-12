@@ -6,10 +6,10 @@ import { registerMemberAgentTypes } from './botAgentTypes';
 import { registerBotHandlers } from './bots';
 import { registerBotTemplateHandlers } from './botTemplates';
 import { registerBtwHandlers } from './btw';
-import { registerCapabilityHandlers } from './capabilities';
 import { registerChangesHandlers } from './changes';
 import { registerCompactionHandlers } from './compaction';
 import { registerDcgHandlers } from './dcg';
+import { registerElevationHandlers } from './elevation';
 import { registerExtensionPluginHandlers } from './extensionPlugins';
 import { registerFileHandlers } from './files';
 import { registerFilesWorkspaceHandlers } from './filesWorkspace';
@@ -40,7 +40,6 @@ export function registerIpcHandlers(): void {
   registerProviderHandlers();
   registerAssetHandlers();
   registerExtensionPluginHandlers();
-  registerCapabilityHandlers();
   registerAgentHandlers();
   registerProxyHandlers();
   registerCompactionHandlers();
@@ -68,4 +67,5 @@ export function registerIpcHandlers(): void {
   registerAppBadgeHandlers();
   registerSpeechHandlers();
   registerDcgHandlers();
+  registerElevationHandlers();
 }

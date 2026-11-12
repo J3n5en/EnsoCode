@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DispatchMainEvent } from '../shared/types/agent';
 import { IPC_CHANNELS } from '../shared/types/ipc';
+import type { ElectronAPI } from './index';
 import './index';
 
 const mocks = vi.hoisted(() => ({
@@ -29,6 +30,14 @@ type DispatchApi = {
 
 const electronAPI = mocks.exposeInMainWorld.mock.calls[0]?.[1] as DispatchApi;
 
+// 类型层面锁定：window 出口不再有 Enso 召唤/预填
+const noSummonExports: Extract<
+  keyof ElectronAPI['window'],
+  'summonAgent' | 'onAgentComposerPrefill'
+> extends never
+  ? true
+  : false = true;
+
 const event = {
   dispatchId: '66666666-6666-4666-8666-666666666666',
   child: {
@@ -48,6 +57,16 @@ const event = {
 } as const;
 
 describe('preload agentDispatch.onEvent', () => {
+  it('window 出口不含 summonAgent / onAgentComposerPrefill', () => {
+    expect(noSummonExports).toBe(true);
+    const api = mocks.exposeInMainWorld.mock.calls[0]?.[1] as ElectronAPI | undefined;
+    expect(api).toBeDefined();
+    const windowApi = api?.window;
+    expect(windowApi).toBeDefined();
+    expect(windowApi).not.toHaveProperty('summonAgent');
+    expect(windowApi).not.toHaveProperty('onAgentComposerPrefill');
+  });
+
   beforeEach(() => {
     mocks.on.mockClear();
     mocks.removeListener.mockClear();

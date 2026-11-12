@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 let dir: string;
 vi.mock('electron', () => ({
   app: { getPath: () => dir },
-  safeStorage: { isEncryptionAvailable: () => false },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false },
   shell: { openExternal: vi.fn(async () => {}) },
 }));
 vi.mock('../ipc/settings', () => ({ readSettings: () => undefined }));
@@ -14,8 +14,7 @@ vi.mock('../ipc/settings', () => ({ readSettings: () => undefined }));
 import { authorizeMcpServer, McpOAuthClientProvider } from './mcpOAuth';
 import { McpOAuthStore } from './mcpOAuthStore';
 
-const newStore = () =>
-  new McpOAuthStore({ file: path.join(dir, 'store.bin'), encryptionAvailable: () => false });
+const newStore = () => new McpOAuthStore({ file: path.join(dir, 'store.bin') });
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), 'enso-mcp-oauth-flow-'));
@@ -191,11 +190,7 @@ describe('authorizeMcpServer', () => {
   // token 只剩 5 分钟时点授权又取消：回滚若按 expires_in 重算，看起来还能用一小时，临期主动续期被跳过
   it('授权未完成回滚时保留旧 token 原来的过期时间', async () => {
     let now = 1_000_000;
-    const store = new McpOAuthStore({
-      file: path.join(dir, 'store.bin'),
-      encryptionAvailable: () => false,
-      now: () => now,
-    });
+    const store = new McpOAuthStore({ file: path.join(dir, 'store.bin'), now: () => now });
     store.saveTokens('s1', { access_token: 'old', refresh_token: 'r-old', expires_in: 3600 });
     const expiresAt = now + 3_600_000;
     now += 55 * 60_000;

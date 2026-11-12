@@ -212,6 +212,10 @@ describe('enso-server plugin', () => {
     await expect(runPluginCommand(['enable'], d)).rejects.toThrow('用法');
     await runPluginCommand(['inject-anywhere', 'a.b'], d);
     expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'inject-anywhere', id: 'a.b' });
+    await runPluginCommand(['dev', 'a.b'], d);
+    expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'dev-on', id: 'a.b' });
+    await runPluginCommand(['dev-off', 'a.b'], d);
+    expect(call).toHaveBeenLastCalledWith({ cmd: 'plugin', action: 'dev-off', id: 'a.b' });
     await expect(runPluginCommand(['bogus'], d)).rejects.toThrow('用法');
   });
 
@@ -270,6 +274,22 @@ const validManifest = {
 };
 
 describe('enso-server plugin validate / init', () => {
+  it('pack：本地打包并输出哈希；testing：写入测试桩和示例，不连接服务', async () => {
+    const root = tempDir();
+    const plugin = join(root, 'hello');
+    mkdirSync(plugin);
+    writeFileSync(join(plugin, 'enso-plugin.json'), JSON.stringify(validManifest));
+    const { call, out, deps: d } = deps();
+    await runPluginCommand(['testing', plugin], d);
+    expect(readFileSync(join(plugin, 'enso-testing.mjs'), 'utf8')).toContain('mountMain');
+    expect(readFileSync(join(plugin, 'test', 'main.test.mjs'), 'utf8')).toContain('mountMain');
+    await runPluginCommand(['pack', plugin, '--out', join(root, 'out.zip')], d);
+    expect(out.join('\n')).toMatch(/enso\.example\.hello 0\.1\.0 → .*out\.zip/);
+    expect(out.join('\n')).toMatch(/sha256 [0-9a-f]{64}/);
+    await expect(runPluginCommand(['pack', plugin, '--bad'], d)).rejects.toThrow('用法');
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it('validate：清单不合法、入口缺失或不是文件时抛出错误，且不连接服务', async () => {
     const root = tempDir();
     const { call, deps: d } = deps();
@@ -344,8 +364,15 @@ describe('enso-server plugin validate / init', () => {
     await runPluginCommand(['validate', dir], d);
     expect(out.join('\n')).toContain('通过');
     execFileSync(
-      'pnpm',
-      ['exec', 'tsc', '-p', join(dir, 'jsconfig.json'), '--pretty', 'false', '--noEmit'],
+      process.execPath,
+      [
+        join(process.cwd(), 'node_modules/typescript/bin/tsc'),
+        '-p',
+        join(dir, 'jsconfig.json'),
+        '--pretty',
+        'false',
+        '--noEmit',
+      ],
       { encoding: 'utf8' }
     );
     await expect(runPluginCommand(['init', dir], d)).rejects.toThrow('已经有');

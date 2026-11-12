@@ -44,6 +44,7 @@ import { PairScreen } from './PairScreen';
 import {
   isPushSupported,
   isStandalone,
+  PHONE_PUSH_ENABLED_KEY,
   type PushFailureReason,
   registerServiceWorker,
   subscribePush,
@@ -90,10 +91,10 @@ const STATE_LABEL: Record<ConnState, string> = {
   online: '已连接',
   'host-offline': '桌面端离线',
   unauthorized: '配对已失效',
+  replaced: '已在其他页面打开',
   offline: '重连中…',
 };
 
-const PUSH_ENABLED_KEY = 'enso-phone-push';
 const SIDEBAR_PINNED_KEY = 'enso-phone-sidebar-pinned';
 
 /** 私聊尚无会话（从未发过消息）时的空视图 */
@@ -164,7 +165,7 @@ export function App() {
   const [composeProjectId, setComposeProjectId] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(
-    () => localStorage.getItem(PUSH_ENABLED_KEY) === 'on'
+    () => localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on'
   );
   /** 已收到桌面下发的 push-config；旧版桌面不会发，开关据此提示升级 */
   const [pushConfigReady, setPushConfigReady] = useState(false);
@@ -491,7 +492,7 @@ export function App() {
         vapidKeyRef.current = key;
         setPushConfigReady(true);
         // 已开启则每次连上都重新登记：订阅幂等，且能修复桌面侧订阅丢失
-        if (localStorage.getItem(PUSH_ENABLED_KEY) === 'on') {
+        if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on') {
           void subscribePush(key).then((result) => {
             if (result.ok)
               client.send({ type: 'push-subscribe', subscription: result.subscription });
@@ -835,6 +836,19 @@ export function App() {
     );
   }
 
+  if (state === 'replaced') {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <Smartphone className="h-8 w-8 text-muted-foreground" />
+        <h1 className="font-medium text-lg">已在其他页面打开</h1>
+        <p className="text-muted-foreground text-sm">
+          「{device.label}」正被另一个页面连着，同一时间只能有一个页面。
+        </p>
+        <Button onClick={() => window.location.reload()}>在这个页面重连</Button>
+      </div>
+    );
+  }
+
   const send = (command: Parameters<PairClient['send']>[0]) => clientRef.current?.send(command);
 
   // 宽屏常驻左栏下「关掉抽屉」是空操作；窄屏照旧收起。直接查 matchMedia，闭包里也拿得到旋转后的最新值
@@ -1106,7 +1120,7 @@ export function App() {
   const togglePush = async (next: boolean) => {
     setPushError(null);
     if (!next) {
-      localStorage.setItem(PUSH_ENABLED_KEY, 'off');
+      localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'off');
       setPushEnabled(false);
       send({ type: 'push-unsubscribe' });
       void unsubscribePush();
@@ -1125,7 +1139,7 @@ export function App() {
       return;
     }
     send({ type: 'push-subscribe', subscription: result.subscription });
-    localStorage.setItem(PUSH_ENABLED_KEY, 'on');
+    localStorage.setItem(PHONE_PUSH_ENABLED_KEY, 'on');
   };
 
   return (

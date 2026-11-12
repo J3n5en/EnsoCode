@@ -7,6 +7,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  watch,
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -47,6 +48,7 @@ import {
   type PluginInjectImage,
   type PluginToolResult,
 } from '@shared/extensionPlugins/protocol';
+import { mergeStatusItems, type StatusPatch } from '@shared/extensionPlugins/statusItems';
 import { parsePluginToolName, pluginToolName } from '@shared/extensionPlugins/toolName';
 import type {
   ExtensionPluginConfigField,
@@ -103,6 +105,18 @@ const COMMAND_TIMEOUT_MS = 60_000;
 const SCHEDULE_TIMEOUT_MS = 60_000;
 const PREPARE_TIMEOUT_MS = 5_000;
 const CHANGE_DEBOUNCE_MS = 150;
+const DEV_RELOAD_DELAY_MS = 400;
+/** 隐藏文件、依赖目录和打包产物的改动不触发重装 */
+const DEV_IGNORED = /(^|[\\/])(\.[^\\/]*|node_modules)([\\/]|$)|\.zip$/;
+
+function watchPluginDir(dir: string, onChange: () => void): { close(): void } {
+  const watcher = watch(dir, { recursive: true }, (_event, filename) => {
+    if (filename && DEV_IGNORED.test(String(filename))) return;
+    onChange();
+  });
+  watcher.on('error', () => {});
+  return { close: () => watcher.close() };
+}
 const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
 
 const INTERCEPT_BREAKER_FAILURES = 3;
@@ -174,6 +188,10 @@ export interface ExtensionPluginServiceOptions {
   prepareTimeoutMs?: number;
   /** 缺省开启。返回 false 时市场更新只提示，不安装 */
   autoUpdatePlugins?: () => boolean;
+  /** 开发模式的目录监听；缺省 fs.watch 递归监听，测试可替换 */
+  devWatch?: (dir: string, onChange: () => void) => { close(): void };
+  /** 开发模式里改动停下多久才重装，缺省 400ms */
+  devReloadDelayMs?: number;
 }
 
 export type UiCallMethod = Exclude<PluginCallMethod, 'tool.execute'>;
@@ -253,6 +271,13 @@ export class ExtensionPluginService {
   private readonly artifacts: ArtifactStore;
   private readonly viewState: ViewStateStore;
   private readonly dynamic = new DynamicContribs();
+  /** 开发模式：目录来源插件的监听与去抖计时；只在内存里，重启后关闭 */
+  private readonly devWatchers = new Map<
+    string,
+    { close(): void; timer: ReturnType<typeof setTimeout> | null }
+  >();
+  /** 运行期状态项补丁，重启应用后回到清单值 */
+  private readonly statusState = new Map<string, Record<string, StatusPatch>>();
   private readonly progressTaps = new Map<string, (text: string) => void>();
   private readonly gateManifests = new Map<string, ExtensionPluginManifest>();
   private readonly trialing = new Set<string>();
@@ -288,6 +313,13 @@ export class ExtensionPluginService {
       manifest: (id) => this.gateManifests.get(id) ?? this.enabledManifest(id),
       config: (id) => this.pluginConfig(id),
       progress: (invocationId, text) => this.progressTaps.get(invocationId)?.(text),
+      statusUpdate: (pluginId, id, patch) => {
+        const current = this.statusState.get(pluginId) ?? {};
+        const next = { ...current[id], ...patch };
+        if (JSON.stringify(next) === JSON.stringify(current[id] ?? {})) return;
+        this.statusState.set(pluginId, { ...current, [id]: next });
+        this.touch();
+      },
       writeArtifact: (pluginId, input) => this.artifacts.write(pluginId, input),
       inject: (pluginId, input) => this.inject(pluginId, input),
       abort: (pluginId, sessionId) => {
@@ -346,6 +378,11 @@ export class ExtensionPluginService {
           })),
           commands: manifest.contributes.commands,
           views: manifest.contributes.views.map(({ id, title, entry }) => ({ id, title, entry })),
+          fileViewers: manifest.contributes.fileViewers,
+          statusItems: mergeStatusItems(
+            manifest.contributes.statusItems,
+            this.statusState.get(record.id) ?? {}
+          ),
           // css 只在用户同意过样式能力时下发，渲染层据此决定读不读
           themes: manifest.contributes.themes.map(({ css, ...theme }) =>
             css !== undefined && record.grant.styles ? { ...theme, css } : theme
@@ -388,10 +425,17 @@ export class ExtensionPluginService {
             ? { crossSessionInject: record.crossSessionInject }
             : {}),
           ...(record.pending && pending
-            ? { pendingVersion: record.pending.version, pendingPermissions: pending.permissions }
+            ? {
+                pendingVersion: record.pending.version,
+                pendingPermissions: pending.permissions,
+                ...(pending.renderer !== undefined && !record.grant.renderer
+                  ? { pendingRenderer: true }
+                  : {}),
+              }
             : {}),
           ...lastErrorField(record.lastError ?? this.recentErrors.get(record.id)),
           ...(record.source ? { source: sourceView(record.source) } : {}),
+          ...(record.source?.kind === 'dir' ? { devWatch: this.devWatchers.has(record.id) } : {}),
           ...updateFields(this.updates.get(record.id)),
         },
       ];
@@ -495,6 +539,10 @@ export class ExtensionPluginService {
         }
       }
       const icon = marketIconUrl(p.icon);
+      const screenshots = p.screenshots?.flatMap((shot) => {
+        const url = marketIconUrl(shot.url);
+        return url ? [{ url, alt: shot.alt }] : [];
+      });
       return {
         id: p.id,
         name: p.name,
@@ -503,6 +551,8 @@ export class ExtensionPluginService {
         tags: p.tags,
         ...(p.homepage ? { homepage: p.homepage } : {}),
         ...(icon ? { icon } : {}),
+        ...(p.category ? { category: p.category } : {}),
+        ...(screenshots?.length ? { screenshots } : {}),
         latest: p.latest,
         permissions: p.versions.find((v) => v.version === p.latest)?.permissions ?? [],
         ...(installed ? { installedVersion: installed } : {}),
@@ -643,6 +693,69 @@ export class ExtensionPluginService {
     return { ok: true };
   }
 
+  /** 开发模式：目录来源的插件改动后自动重装；授权扩大时不自动同意，记一条错误 */
+  setDevWatch(id: string, on: boolean): { ok: boolean; error?: string } {
+    const record = this.records.find((r) => r.id === id);
+    if (!record) return { ok: false, error: '插件未安装' };
+    const source = record.source;
+    if (source?.kind !== 'dir') return { ok: false, error: '只有从目录安装的插件能开开发模式' };
+    if (!on) {
+      if (this.devWatchers.has(id)) {
+        this.closeDevWatch(id);
+        this.touch();
+      }
+      return { ok: true };
+    }
+    if (this.devWatchers.has(id)) return { ok: true };
+    const watch = this.options.devWatch ?? watchPluginDir;
+    const entry: { close(): void; timer: ReturnType<typeof setTimeout> | null } = {
+      close: () => {},
+      timer: null,
+    };
+    try {
+      entry.close = watch(source.path, () => {
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.timer = setTimeout(() => {
+          entry.timer = null;
+          void this.devReloadNow(id);
+        }, this.options.devReloadDelayMs ?? DEV_RELOAD_DELAY_MS);
+      }).close;
+    } catch (error) {
+      return {
+        ok: false,
+        error: `监听目录失败：${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    this.devWatchers.set(id, entry);
+    this.touch();
+    return { ok: true };
+  }
+
+  /** 立即按来源目录重装一次；授权没扩大才落盘 */
+  async devReloadNow(id: string): Promise<void> {
+    const fail = (message: string) => {
+      this.recordError(id, message);
+      this.touch();
+    };
+    const staged = await this.restage(id);
+    if (!staged.ok) return fail(`开发模式重装失败：${staged.error}`);
+    if (staged.preview.expands) {
+      this.discard(staged.preview.token);
+      return fail('开发模式：新清单授权扩大，需要手动从来源重新安装并同意');
+    }
+    const committed = await this.commit(staged.preview.token);
+    if (!committed.ok) return fail(`开发模式重装失败：${committed.error}`);
+    this.recentErrors.delete(id);
+  }
+
+  private closeDevWatch(id: string): void {
+    const entry = this.devWatchers.get(id);
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.close();
+    this.devWatchers.delete(id);
+  }
+
   approvePending(id: string): Promise<{ ok: boolean; error?: string }> {
     return this.withIdLock(id, async () => {
       const oldDir = this.records.find((r) => r.id === id)?.dir;
@@ -685,6 +798,8 @@ export class ExtensionPluginService {
       rmSync(`${this.logPath(id)}.1`, { force: true });
       this.recentErrors.delete(id);
       this.prepareFailed.delete(id);
+      this.statusState.delete(id);
+      this.closeDevWatch(id);
       this.invalidatePackageCache(id);
       this.syncBackground();
       return { ok: true };
@@ -962,6 +1077,22 @@ export class ExtensionPluginService {
     return this.enabled().flatMap(({ id, dir, manifest }) => {
       const root = pluginPackagePath(this.options.root, id, dir);
       return this.contributedSkills(id, manifest, activePresetId).map((rel) => resolve(root, rel));
+    });
+  }
+
+  /** workflow 预设文件的绝对路径，与 skill 同口径按插件预设圈定 */
+  workflowPathsForSpawn(activePresetId?: string): string[] {
+    return this.enabled().flatMap(({ id, dir, manifest }) => {
+      const root = pluginPackagePath(this.options.root, id, dir);
+      const { scoped, selected } = presetSelection(
+        manifest,
+        id,
+        activePresetId,
+        (preset) => preset.workflows ?? []
+      );
+      return manifest.contributes.workflows
+        .filter((rel) => !scoped.has(rel) || selected.has(rel))
+        .map((rel) => resolve(root, rel));
     });
   }
 
@@ -1423,6 +1554,7 @@ export class ExtensionPluginService {
       description: string;
       parameters: Record<string, unknown>;
       timeoutMs?: number;
+      readOnly?: boolean;
     }
   ): PluginToolDescriptor {
     return {
@@ -1431,6 +1563,7 @@ export class ExtensionPluginService {
       parameters: tool.parameters,
       pluginId,
       ...(tool.timeoutMs !== undefined ? { timeoutMs: tool.timeoutMs } : {}),
+      ...(tool.readOnly ? { readOnly: true } : {}),
     };
   }
 
@@ -1675,6 +1808,7 @@ export class ExtensionPluginService {
     if (this.disposed) return this.disposed;
     this.isDisposed = true;
     this.background = false;
+    for (const id of [...this.devWatchers.keys()]) this.closeDevWatch(id);
     if (this.changeTimer) clearTimeout(this.changeTimer);
     this.changeTimer = null;
     if (this.updateTimer) clearTimeout(this.updateTimer);

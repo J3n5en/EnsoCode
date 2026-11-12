@@ -98,11 +98,17 @@ export function chatSurfaceBusy(conversation: {
   spawning: boolean;
   status?: string;
   historyLoadAttempted?: boolean;
+  syncStalled?: boolean;
 }): boolean {
   if (conversation.status === 'running') return true;
   if (hasAuthoritativeMessages(conversation.messages)) return false;
+  // 准备超时降级：读历史不再锁输入；spawn 仍在途时发出去不会真正投递，继续锁到重试
+  if (conversation.syncStalled) return conversation.spawning;
   return needsHistoryHydration(conversation) || conversation.spawning;
 }
+
+/** 非生成态的准备（spawn / resume / 读尾窗 / 等快照）最长等待；超时降级为空态 + 重试 */
+export const PREPARING_STALL_MS = 20_000;
 
 /** 时间线脚点只反映运行态；未确认气泡不代表模型仍在生成。 */
 export function chatTimelineActivity(conversation: {
@@ -113,8 +119,10 @@ export function chatTimelineActivity(conversation: {
   status?: string;
   historyLoadAttempted?: boolean;
   historyLoading?: boolean;
+  syncStalled?: boolean;
 }): 'working' | 'loading' | null {
   if (conversation.status === 'running') return 'working';
+  if (conversation.syncStalled) return null;
   if (conversation.historyLoading) return 'loading';
   if (
     conversation.spawning ||

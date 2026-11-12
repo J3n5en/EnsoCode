@@ -32,13 +32,18 @@ export type CutOk = {
   evicted: EvictedItem[];
   estimatedAfter: number;
 };
-export type CutFail = { fail: 'uncompressible' | 'no_saving' };
+export type CutFail = {
+  fail: 'uncompressible' | 'no_saving';
+  budget: number;
+  estimatedAfter: number;
+};
 
 export function selectKeptBoundary(input: {
   branch: CompactBranchEntry[];
   preparation: { firstKeptEntryId: string; previousSummary?: string; tokensBefore: number };
   contextWindow?: number;
-  previousEstimatedAfter?: number;
+  /** 压前 tokens；给出时压后估算须至少省一成，否则判无节省 */
+  savingBaseline?: number;
   summaryTokenHint?: number;
 }): CutOk | CutFail {
   const { branch, preparation } = input;
@@ -50,19 +55,23 @@ export function selectKeptBoundary(input: {
     branch.findIndex((entry) => entry.id === preparation.firstKeptEntryId)
   );
   const cuts = legalCuts(branch).filter((index) => index >= origin);
+  // 尾巴里 assistant 的 usage 是压前整段上下文的账单，与切点无关，只按尾巴自身估算
+  const estimateFrom = (cut: number) =>
+    hint + branch.slice(cut).reduce((sum, entry) => sum + estimateMessageTokens(entry.message), 0);
+  let estimatedAfter = estimateFrom(origin);
   for (const cut of cuts) {
-    const tail = branch.slice(cut);
-    const estimatedAfter =
-      hint + tail.reduce((sum, entry) => sum + estimateMessageTokens(entry.message), 0);
-    if (estimatedAfter > budget || billedOverBudget(tail, budget)) continue;
-    if (noSaving(input.previousEstimatedAfter, estimatedAfter)) return { fail: 'no_saving' };
+    estimatedAfter = estimateFrom(cut);
+    if (estimatedAfter > budget) continue;
+    if (noSaving(input.savingBaseline, estimatedAfter)) {
+      return { fail: 'no_saving', budget, estimatedAfter };
+    }
     return {
       firstKeptEntryId: branch[cut].id ?? preparation.firstKeptEntryId,
       evicted: evictedItems(branch.slice(origin, cut)),
       estimatedAfter,
     };
   }
-  return { fail: 'uncompressible' };
+  return { fail: 'uncompressible', budget, estimatedAfter };
 }
 
 function contentChars(content: unknown): number {
@@ -99,29 +108,10 @@ function legalCuts(branch: CompactBranchEntry[]): number[] {
   });
 }
 
-function billedTokens(message: CompactBranchEntry['message']): number {
-  const usage = message?.usage;
-  if (!usage || message.stopReason === 'aborted' || message.stopReason === 'error') return 0;
-  const billed =
-    (usage.totalTokens ?? 0) > 0
-      ? (usage.totalTokens ?? 0)
-      : (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
-  return billed > 0 ? billed : 0;
-}
-
-function billedOverBudget(tail: CompactBranchEntry[], budget: number): boolean {
-  for (let i = tail.length - 1; i >= 0; i--) {
-    if (tail[i].message?.role !== 'assistant') continue;
-    const billed = billedTokens(tail[i].message);
-    if (billed > 0) return billed > budget;
-  }
-  return false;
-}
-
-function noSaving(previous: number | undefined, after: number): boolean {
-  if (previous === undefined) return false;
-  if (previous <= 0) return after >= previous;
-  return (previous - after) / previous < MIN_SAVING_RATIO;
+function noSaving(baseline: number | undefined, after: number): boolean {
+  if (baseline === undefined) return false;
+  if (baseline <= 0) return after >= baseline;
+  return (baseline - after) / baseline < MIN_SAVING_RATIO;
 }
 
 function evictedItems(entries: CompactBranchEntry[]): EvictedItem[] {

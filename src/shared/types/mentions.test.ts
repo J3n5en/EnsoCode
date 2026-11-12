@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentTypeKey } from '../builtinAgents';
+import * as mentions from './mentions';
 import {
-  parseAgentComposerPrefillEvent,
   parseAgentDispatchRequest,
-  parseAgentSummonRequest,
   parseMainModelSelectionBinding,
   parseMentionCandidate,
   parseParentModelSelectionRequest,
@@ -11,7 +10,6 @@ import {
 } from './mentions';
 
 const known = new Set<AgentTypeKey>([
-  'agent:enso',
   'builtin:scout',
   'custom:11111111-1111-4111-8111-111111111111',
 ]);
@@ -19,7 +17,7 @@ const known = new Set<AgentTypeKey>([
 const dispatch = {
   requestId: 'dispatch-1',
   selectionBindingId: 'selection-binding-1',
-  typeKey: 'agent:enso',
+  typeKey: 'builtin:scout',
   task: {
     text: 'Review this file',
     images: [],
@@ -146,17 +144,11 @@ describe('Agent dispatch strict transport', () => {
       parseAgentDispatchRequest({ ...dispatch, selectedModel: selectionRequest.selection }, known)
     ).toBeNull();
     expect(parseAgentDispatchRequest({ ...dispatch, mainRevision: 4 }, known)).toBeNull();
-    expect(parseAgentSummonRequest({ typeKey: 'agent:enso' }, known)).not.toBeNull();
-    expect(parseAgentSummonRequest({ typeKey: 'agent:enso', prompt: 'hello' }, known)).toEqual({
-      typeKey: 'agent:enso',
-      prompt: 'hello',
-    });
-    expect(parseAgentSummonRequest({ typeKey: 'builtin:unknown' }, known)).toBeNull();
-    expect(parseAgentComposerPrefillEvent({ typeKey: 'agent:enso' })).not.toBeNull();
-    expect(parseAgentComposerPrefillEvent({ typeKey: 'agent:enso', prompt: 'hi' })).toEqual({
-      typeKey: 'agent:enso',
-      prompt: 'hi',
-    });
+  });
+
+  it('召唤/预填链已移除：不再导出 summon 与 composer prefill 解析器', () => {
+    expect(mentions).not.toHaveProperty('parseAgentSummonRequest');
+    expect(mentions).not.toHaveProperty('parseAgentComposerPrefillEvent');
   });
 
   it('mention candidate 支持 system/builtin/custom AgentType，不接受实例名路由', () => {

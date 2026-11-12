@@ -383,6 +383,6 @@ export class WindowsDesktopBackend implements DesktopBackend {
   }
 
   async clipboardWrite(text: string) {
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
   }
 }

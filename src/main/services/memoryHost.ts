@@ -2,10 +2,12 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { app } from '@platform';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
+import { normalizeLocale, translate } from '@shared/i18n';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
+import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
 import { effectiveDisabledBuiltinTools } from '@shared/types';
 import type { MemoryOp } from '@shared/types/agent';
-import { hasProviderCredentials, type ModelProvider } from '@shared/types/llm';
+import type { ModelProvider } from '@shared/types/llm';
 import type Database from 'better-sqlite3';
 import { holdLocalChat, syncLocalChatFromSettings } from './llama/chat';
 import { executeMemoryOp } from './memory/bridge';
@@ -31,7 +33,7 @@ import {
   embeddingModelDirName,
   resolveEmbeddingModelSpec,
 } from './memory/embedding/registry';
-import type { RemoteEmbeddingOptions } from './memory/embedding/remote';
+import { type RemoteEmbeddingOptions, remoteModelName } from './memory/embedding/remote';
 import type { EmbeddingModelSpec, EmbeddingProvider } from './memory/embedding/types';
 import {
   countFailedKgJobs,
@@ -64,6 +66,8 @@ export interface MemoryEmbeddingConfig {
   onProgress?: (p: DownloadProgress) => void;
   /** `remote:*` 模型的凭证解析：由接线层从既有 ModelProvider（baseUrl/apiKey）取，这里不新增 key 存储 */
   remoteCredentials?: () => RemoteEmbeddingOptions | null;
+  /** 远程凭证 / 模型不可用的面向用户原因；有值时不构造 provider，直接作为 lastEmbeddingError */
+  remoteIssue?: string | null;
 }
 
 let config: MemoryEmbeddingConfig = { modelId: DEFAULT_EMBEDDING_MODEL_ID, autoDownload: false };
@@ -129,21 +133,36 @@ export function syncMemoryEmbeddingFromSettings(state: Record<string, unknown>):
       ? state.memoryEmbeddingRemoteProviderId
       : null;
   const providers = Array.isArray(state.providers) ? (state.providers as unknown[]) : [];
-  const remoteCredentials = (): RemoteEmbeddingOptions | null => {
-    const p = providers.find(
-      (x): x is ModelProvider =>
-        Boolean(x) && typeof x === 'object' && (x as ModelProvider).id === providerId
-    );
-    if (!p || typeof p.baseUrl !== 'string' || !hasProviderCredentials(p) || !p.apiKey) return null;
-    return { baseUrl: p.baseUrl, apiKey: p.apiKey };
-  };
-  const credentials = remoteCredentials();
+  const spec = resolveEmbeddingModelSpec(modelId);
+  const remote = spec?.runtime === 'openai-compatible';
+  const selected = providerId
+    ? providers.find(
+        (x): x is ModelProvider =>
+          Boolean(x) && typeof x === 'object' && (x as ModelProvider).id === providerId
+      )
+    : undefined;
+  const model = remote ? remoteModelName(spec) : null;
+  const issue = remote
+    ? remoteEmbeddingIssue({ providerId, provider: selected, modelId: model })
+    : null;
+  const locale = normalizeLocale(typeof state.language === 'string' ? state.language : undefined);
+  const remoteIssue = issue
+    ? remoteEmbeddingIssueMessage(
+        issue,
+        { provider: selected?.name || providerId || '', model: model ?? '' },
+        (key, params) => translate(locale, key, params)
+      )
+    : null;
+  const credentials =
+    remote && !issue && selected ? { baseUrl: selected.baseUrl, apiKey: selected.apiKey } : null;
   const previous = config.remoteCredentials?.();
   const sameCredentials =
-    resolveEmbeddingModelSpec(modelId)?.runtime !== 'openai-compatible' ||
-    (credentials?.baseUrl === previous?.baseUrl && credentials?.apiKey === previous?.apiKey);
+    !remote ||
+    (credentials?.baseUrl === previous?.baseUrl &&
+      credentials?.apiKey === previous?.apiKey &&
+      remoteIssue === (config.remoteIssue ?? null));
   // 保存值快照而非 providers 引用：原地编辑也能识别变更，且无关设置不释放本地大模型。
-  const next = { modelId, autoDownload, remoteCredentials: () => credentials };
+  const next = { modelId, autoDownload, remoteCredentials: () => credentials, remoteIssue };
   if (modelId === config.modelId && autoDownload === config.autoDownload && sameCredentials) {
     config = { ...config, ...next };
     return;
@@ -641,6 +660,11 @@ async function memoryEmbedder(): Promise<Embedder | null> {
   }
   if (spec.runtime === 'none') {
     lastEmbeddingError = null;
+    return null;
+  }
+  // 校验阶段拦下注定失败的远程配置（缺凭证 / 对话模型）：不外发，原因直接给设置页
+  if (spec.runtime === 'openai-compatible' && config.remoteIssue) {
+    lastEmbeddingError = config.remoteIssue;
     return null;
   }
   const generation = embeddingGeneration;

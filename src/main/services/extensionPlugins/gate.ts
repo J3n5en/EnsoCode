@@ -16,6 +16,7 @@ import {
   type PluginInjectImage,
   parsePluginInjectImages,
 } from '@shared/extensionPlugins/protocol';
+import { parseStatusPatch, type StatusPatch } from '@shared/extensionPlugins/statusItems';
 import { pluginError } from './process';
 
 export const GESTURE_TTL_MS = 30_000;
@@ -138,6 +139,8 @@ export interface GateDeps {
   openExternal?(url: string): Promise<void> | void;
   /** 把事件广播到该插件已打开的侧栏页面 */
   viewEvent?(pluginId: string, name: string, data: unknown): void;
+  /** 改输入框底栏的状态项；id 已校验在清单里 */
+  statusUpdate?(pluginId: string, id: string, patch: StatusPatch): void;
   registerContrib?(pluginId: string, input: Record<string, unknown>): void;
   unregisterContrib?(pluginId: string, input: Record<string, unknown>): void;
   capabilities?(): PluginHostCapabilities;
@@ -399,7 +402,6 @@ export class PluginHostGate {
       }
       case 'ui.viewEvent': {
         permit('ui.view');
-        invocation();
         if (typeof a.name !== 'string' || !VIEW_EVENT_NAME.test(a.name))
           throw pluginError('INVALID_ARGS', 'name 不合法');
         let encoded: string;
@@ -413,6 +415,20 @@ export class PluginHostGate {
         if (!this.deps.viewEvent) throw pluginError('UNSUPPORTED', '当前环境不能更新侧栏');
         this.admitViewEvent(pluginId);
         this.deps.viewEvent(pluginId, a.name, JSON.parse(encoded) as unknown);
+        return null;
+      }
+      case 'ui.statusUpdate': {
+        const { id, ...rest } = a;
+        if (
+          typeof id !== 'string' ||
+          !manifest.contributes.statusItems.some((item) => item.id === id)
+        )
+          throw pluginError('INVALID_ARGS', 'id 未在清单 statusItems 中声明');
+        const patch = parseStatusPatch(rest);
+        if (!patch) throw pluginError('INVALID_ARGS', '状态项字段不合法');
+        if (!this.deps.statusUpdate) throw pluginError('UNSUPPORTED', '当前环境不能更新状态项');
+        this.admitViewEvent(pluginId);
+        this.deps.statusUpdate(pluginId, id, patch);
         return null;
       }
       case 'ui.viewOpen': {

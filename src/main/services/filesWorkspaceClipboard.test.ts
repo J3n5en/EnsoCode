@@ -55,4 +55,13 @@ describe('writeFileToClipboard', () => {
     const encoded = /'([A-Za-z0-9+/=]*)'/.exec(script)?.[1] ?? '';
     expect(Buffer.from(encoded, 'base64').toString('utf8')).toBe(filePath);
   });
+
+  it('darwin 异步写入失败时报 clipboard-write-failed', async () => {
+    const result = await writeFileToClipboard('/repo/INSTALL.md', {
+      platform: 'darwin',
+      writeBuffer: vi.fn().mockRejectedValue(new Error('denied')),
+      runCommand: vi.fn(),
+    });
+    expect(result).toEqual({ ok: false, reason: 'clipboard-write-failed' });
+  });
 });

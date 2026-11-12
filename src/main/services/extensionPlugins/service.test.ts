@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ExtensionPluginNotice } from '@shared/extensionPlugins/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runPluginHost } from '../../../pluginHost/host';
@@ -108,6 +108,60 @@ async function install(files: Record<string, string>) {
 }
 
 describe('ExtensionPluginService', () => {
+  it('开发模式：目录来源的插件改动后自动重装，授权扩大时停下并报错', async () => {
+    const watchers = new Map<string, () => void>();
+    const closed: string[] = [];
+    const dev = new ExtensionPluginService({
+      root: temp('plugins-dev-'),
+      hostVersion: '0.2.12',
+      hostPath: '/unused',
+      env: {},
+      fork: () => new InProcessChild() as never,
+      devWatch: (dir, onChange) => {
+        watchers.set(dir, onChange);
+        return { close: () => closed.push(dir) };
+      },
+      devReloadDelayMs: 0,
+      gate: {
+        fetch: vi.fn(),
+        notify: () => true,
+        composer: async () => null,
+        mcpTools: async () => [],
+        mcpCall: async () => ({ content: '', isError: false }),
+        now: () => Date.now(),
+      },
+    });
+    const dir = writePlugin({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
+    const staged = await dev.stage({ kind: 'dir', path: dir });
+    if (!staged.ok) throw new Error(staged.error);
+    await dev.commit(staged.preview.token);
+    expect(dev.list()[0]?.devWatch).toBe(false);
+    expect(dev.setDevWatch('example.demo', true)).toEqual({ ok: true });
+    expect(dev.list()[0]?.devWatch).toBe(true);
+    expect(watchers.has(dir)).toBe(true);
+
+    writeFileSync(join(dir, 'enso-plugin.json'), manifest({ version: '1.0.1' }));
+    await dev.devReloadNow('example.demo');
+    expect(dev.list()[0]?.version).toBe('1.0.1');
+
+    writeFileSync(
+      join(dir, 'enso-plugin.json'),
+      manifest({ version: '1.0.2', permissions: ['agent.tool', 'ui.notify'] })
+    );
+    await dev.devReloadNow('example.demo');
+    expect(dev.list()[0]?.version).toBe('1.0.1');
+    expect(dev.list()[0]?.lastError?.message).toContain('授权扩大');
+
+    expect(dev.setDevWatch('example.demo', false)).toEqual({ ok: true });
+    expect(closed).toEqual([dir]);
+    await dev.dispose();
+  });
+
+  it('开发模式只对目录来源开放', async () => {
+    await service.stage({ kind: 'dir', path: writePlugin({ 'enso-plugin.json': manifest() }) });
+    expect(service.setDevWatch('missing.plugin', true)).toMatchObject({ ok: false });
+  });
+
   it('只含主题的插件：预览带样式能力，启用后摘要列出主题、资源可读', async () => {
     const themeManifest = JSON.stringify({
       schemaVersion: 1,
@@ -594,13 +648,14 @@ describe('ExtensionPluginService', () => {
     expect(server?.args?.[0]).toMatch(/packages\/example\.demo\/[^/]+\/server\.js$/);
   });
 
-  it('预设点名的 skill 和 MCP 只在选中该预设时下发，并读出角色与指令', async () => {
+  it('预设点名的 skill、MCP 和 workflow 只在选中该预设时下发，并读出角色与指令', async () => {
     await install({
       'enso-plugin.json': manifest({
         permissions: ['agent.tool', 'mcp.server'],
         contributes: {
           agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
           skills: ['skills/always', 'skills/review'],
+          workflows: ['workflows/always.js', 'workflows/review.js'],
           mcpServers: [
             { name: 'always', command: 'node', args: ['a.js'] },
             { name: 'review', command: 'node', args: ['b.js'] },
@@ -611,6 +666,7 @@ describe('ExtensionPluginService', () => {
               name: 'Review',
               skills: ['skills/review'],
               mcpServers: ['review'],
+              workflows: ['workflows/review.js'],
               instruction: 'prompts/instruction.md',
               systemPrompt: 'prompts/role.md',
               systemPromptTail: 'prompts/tail.md',
@@ -624,6 +680,8 @@ describe('ExtensionPluginService', () => {
       'main.mjs': mainJs,
       'skills/always/SKILL.md': '# always',
       'skills/review/SKILL.md': '# review',
+      'workflows/always.js': '',
+      'workflows/review.js': '',
       'a.js': '',
       'b.js': '',
       'prompts/instruction.md': 'do this',
@@ -636,12 +694,17 @@ describe('ExtensionPluginService', () => {
     const ends = (paths: string[], name: string) => paths.some((path) => path.endsWith(name));
     expect(ends(service.skillPathsForSpawn(), 'skills/always')).toBe(true);
     expect(ends(service.skillPathsForSpawn(), 'skills/review')).toBe(false);
+    expect(service.workflowPathsForSpawn().map((path) => basename(path))).toEqual(['always.js']);
     expect(service.mcpServersForSpawn().map((server) => server.name)).toEqual([
       'plugin-example-demo-always',
     ]);
     const id = 'plugin:example.demo:review';
     expect(ends(service.skillPathsForSpawn(id), 'skills/always')).toBe(true);
     expect(ends(service.skillPathsForSpawn(id), 'skills/review')).toBe(true);
+    expect(service.workflowPathsForSpawn(id).map((path) => basename(path))).toEqual([
+      'always.js',
+      'review.js',
+    ]);
     expect(service.mcpServersForSpawn(id).map((server) => server.name)).toEqual([
       'plugin-example-demo-always',
       'plugin-example-demo-review',
@@ -1881,6 +1944,7 @@ describe('插件市场', () => {
     zipId?: string;
     patch?: Record<string, unknown>;
     main?: string;
+    files?: Record<string, string>;
   }) {
     let mirror = false;
     let downloads = 0;
@@ -1929,6 +1993,7 @@ describe('插件市场', () => {
               ...state.patch,
             }),
             'main.mjs': state.main ?? mainJs,
+            ...state.files,
           })
         );
         return { ok: true as const, version: state.latest };
@@ -2041,6 +2106,27 @@ describe('插件市场', () => {
     await svc.checkUpdates();
     expect(market.downloads()).toBe(before + 1);
     expect(notices).toHaveLength(1);
+  });
+
+  it('更新新增界面模块时进入待授权，并标出新增的界面代码', async () => {
+    const state: {
+      latest: string;
+      patch?: Record<string, unknown>;
+      files?: Record<string, string>;
+    } = { latest: '1.0.0' };
+    const svc = open(fakeMarket(state));
+    await installMarket(svc);
+    expect(svc.list()[0]?.pendingRenderer).toBeUndefined();
+    state.latest = '2.0.0';
+    state.patch = { renderer: 'ui.js', permissions: ['agent.tool', 'ui.slot'] };
+    state.files = { 'ui.js': 'export default () => {};' };
+    await svc.checkUpdates();
+    expect(svc.list()[0]).toMatchObject({
+      version: '1.0.0',
+      hasRenderer: false,
+      pendingVersion: '2.0.0',
+      pendingRenderer: true,
+    });
   });
 
   it('有进行中的调用时跳过不扩权的替换', async () => {

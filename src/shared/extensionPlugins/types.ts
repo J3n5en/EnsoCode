@@ -1,4 +1,6 @@
 import type { ExtensionPluginPermission, PluginConfigType, PluginTriggerSymbol } from './manifest';
+import type { MarketCategory, MarketScreenshot } from './marketCategories';
+import type { PluginStatusItem } from './statusItems';
 
 /** 设置页、安装确认页看到的插件摘要；不含任何磁盘路径 */
 export interface ExtensionPluginSummary {
@@ -13,9 +15,19 @@ export interface ExtensionPluginSummary {
   state: 'disabled' | 'enabled' | 'crashed';
   permissions: ExtensionPluginPermission[];
   tools: { name: string; description: string }[];
-  commands: { id: string; title: string }[];
+  commands: { id: string; title: string; key?: string }[];
   /** entry 是安装目录内的相对路径，渲染层经 asset 通道取内容 */
   views: { id: string; title: string; entry: string }[];
+  /** 按扩展名打开文件的查看器；entry 同 views */
+  fileViewers: {
+    id: string;
+    title: string;
+    entry: string;
+    extensions: string[];
+    default: boolean;
+  }[];
+  /** 输入框底栏状态项（清单 + 运行期更新后的当前值） */
+  statusItems: PluginStatusItem[];
   /** path / css 是安装目录内的相对路径，渲染层经 asset 通道取；没同意样式能力时不带 css */
   themes: { id: string; name: string; path: string; css?: string }[];
   triggers: { symbol: PluginTriggerSymbol; name: string }[];
@@ -47,10 +59,14 @@ export interface ExtensionPluginSummary {
   crossSessionInject?: boolean;
   pendingVersion?: string;
   pendingPermissions?: ExtensionPluginPermission[];
+  /** 待授权版本新带了界面模块（当前授权里没有） */
+  pendingRenderer?: boolean;
   /** 最近一次错误：崩溃停用的原因，或本次运行里最近的错误日志 */
   lastError?: { at: number; message: string };
   /** 安装来源；有就能「从来源重新安装」。本地路径不下发 */
   source?: { kind: 'dir' | 'zip' | 'market' } | { kind: 'url'; url: string };
+  /** 目录来源才有：开发模式是否开着（改动后自动重装） */
+  devWatch?: boolean;
   /** 检查更新发现的新版本（GitHub 或插件市场来源） */
   availableVersion?: string;
   /** 最近一次检查更新失败的原因 */
@@ -67,6 +83,9 @@ export interface ExtensionPluginMarketEntry {
   homepage?: string;
   /** 已转成 Worker 代理地址 */
   icon?: string;
+  category?: MarketCategory;
+  /** 已转成 Worker 代理地址 */
+  screenshots?: MarketScreenshot[];
   latest: string;
   permissions: string[];
   installedVersion?: string;
@@ -131,6 +150,8 @@ export interface PluginToolDescriptor {
   pluginId: string;
   /** 清单声明的单次上限；worker 据此放宽本地超时 */
   timeoutMs?: number;
+  /** 清单声明只读；worker 转成 readOnlyHint */
+  readOnly?: boolean;
 }
 
 /** 会话下发给 worker 的插件事件订阅；事件本身只流向 Main，插件身份由 Main 保留 */

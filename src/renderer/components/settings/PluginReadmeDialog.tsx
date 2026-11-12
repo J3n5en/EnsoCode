@@ -32,13 +32,42 @@ export function PluginReadmeDialog({
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  return (
+    <Dialog open={pluginId !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {t('Usage guide')}
+            {name ? ` · ${name}` : ''}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogPanel className="max-h-[60vh] space-y-3 overflow-y-auto">
+          {pluginId && <PluginReadmeBody pluginId={pluginId} from={from} homepage={homepage} />}
+        </DialogPanel>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** 插件 README 正文与主页链接；已装插件读不到时回落到市场 */
+export function PluginReadmeBody({
+  pluginId,
+  from,
+  homepage,
+  showLink = true,
+}: {
+  pluginId: string;
+  from: 'installed' | 'market';
+  homepage?: string;
+  showLink?: boolean;
+}) {
+  const { t } = useI18n();
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(httpHomepage(homepage));
   const [MarkdownView, setMarkdownView] = useState<ComponentType<{ text: string }> | null>(null);
 
   useEffect(() => {
-    if (!pluginId) return;
     let alive = true;
     void import('@/components/chat/Markdown').then((mod) => {
       if (alive) setMarkdownView(() => mod.Markdown);
@@ -46,10 +75,9 @@ export function PluginReadmeDialog({
     return () => {
       alive = false;
     };
-  }, [pluginId]);
+  }, []);
 
   useEffect(() => {
-    if (!pluginId) return;
     let cancelled = false;
     setMarkdown(null);
     setError(null);
@@ -81,24 +109,15 @@ export function PluginReadmeDialog({
   }, [pluginId, from, homepage]);
 
   return (
-    <Dialog open={pluginId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {t('Usage guide')}
-            {name ? ` · ${name}` : ''}
-          </DialogTitle>
-        </DialogHeader>
-        <DialogPanel className="max-h-[60vh] space-y-3 overflow-y-auto">
-          {link && (
-            <a href={link} target="_blank" rel="noreferrer" className="text-sm underline">
-              {t('Homepage')}
-            </a>
-          )}
-          {error && <p className="text-muted-foreground text-sm">{error}</p>}
-          {markdown !== null && MarkdownView && <MarkdownView text={markdown} />}
-        </DialogPanel>
-      </DialogContent>
-    </Dialog>
+    <div className="space-y-3">
+      {showLink && link && (
+        <a href={link} target="_blank" rel="noreferrer" className="text-sm underline">
+          {t('Homepage')}
+        </a>
+      )}
+      {error && <p className="text-muted-foreground text-sm">{error}</p>}
+      {markdown === null && !error && <p className="text-muted-foreground text-sm">…</p>}
+      {markdown !== null && MarkdownView && <MarkdownView text={markdown} />}
+    </div>
   );
 }

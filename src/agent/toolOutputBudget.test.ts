@@ -101,6 +101,29 @@ describe('ToolOutputBudget', () => {
     expect(hit.content).toEqual([{ type: 'text', text: 'abcdefghijklmnop' }]);
   });
 
+  it('自带分页的 web_fetch 不外置：整页留在上下文，续页提示不被藏进 artifact', async () => {
+    const store = budget(16);
+    const page = `${'x'.repeat(64)}\n[Call web_fetch again with offset=64 to continue.]`;
+    const wrapped = withToolOutputBudget(textTool('web_fetch', page), store);
+    const result = await wrapped.execute(
+      'w1',
+      { url: 'https://example.com' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(result.content).toEqual([{ type: 'text', text: page }]);
+    const huge = withToolOutputBudget(textTool('web_fetch', '字'.repeat(30_000)), store);
+    const big = await huge.execute(
+      'w2',
+      { url: 'https://example.com' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect((big.details as { externalized?: boolean }).externalized).toBe(true);
+  });
+
   it('receipt 指引 read/grep 可直接使用 artifact uri，而不是 bash', async () => {
     const store = budget(16);
     const wrapped = withToolOutputBudget(textTool('bash', 'x'.repeat(64)), store);

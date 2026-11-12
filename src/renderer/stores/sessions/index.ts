@@ -1,5 +1,4 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
-import type { CapabilityAskRequest } from '@shared/capabilities/types';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { conversationCwd } from '@shared/conversationCwd';
 import {
@@ -93,6 +92,7 @@ import {
 import {
   bodyLastActiveAt,
   btwHotSessionIds,
+  chatTimelineActivity,
   evictColdMessages,
   evictStampedColdMessages,
   hasAuthoritativeMessages,
@@ -102,6 +102,7 @@ import {
   needsHistoryHydration,
   needsWorkerSnapshot,
   nextColdEvictDelay,
+  PREPARING_STALL_MS,
   pruneSessionClocks,
   stampViewDeparture,
   viewedConversationId,
@@ -198,6 +199,28 @@ function forgetUnknownSessionClocks(conversations: Record<string, unknown>): voi
   const known = new Set(Object.keys(conversations));
   pruneSessionClocks(lastViewedAt, known);
   pruneSessionClocks(snapshotResyncAt, known);
+}
+
+/** task 子代理结束后 tab 先只读停留这么久再收进历史，避免一完成就消失 */
+const TASK_TAB_LINGER_MS = 8_000;
+/** 用户点 X 解雇的 coworker：回流 dismissed 时立即移除，不走停留 */
+const userDismissedCoworkers = new Set<string>();
+
+function dropCoworkerTab(
+  conversations: Record<string, Conversation>,
+  parentId: string,
+  coworkerId: string
+): void {
+  delete conversations[coworkerId];
+  const parent = conversations[parentId];
+  if (parent) {
+    conversations[parentId] = {
+      ...parent,
+      coworkerIds: (parent.coworkerIds ?? []).filter((id) => id !== coworkerId),
+      activeTabId: parent.activeTabId === coworkerId ? undefined : parent.activeTabId,
+    };
+  }
+  forgetUnknownSessionClocks(conversations);
 }
 
 /**
@@ -305,14 +328,10 @@ export interface Conversation extends SessionProjection {
   historyLoadAttempted?: boolean;
   /** 上滑翻页或子会话历史回放在途；不持久化 */
   historyLoading?: boolean;
+  /** 准备（spawn / 读历史 / 等快照）超时降级：显示空态 + 重试，不代表已同步；不持久化 */
+  syncStalled?: boolean;
   /** 手动重读在途（菜单项禁用 / 反馈）；不持久化 */
   reloading?: boolean;
-  /** 当前 child TAB 的危险 capability ASK；不持久化。 */
-  pendingCapabilityAsks?: CapabilityAskRequest[];
-  /** allow ACK 后留在 child TAB 的 OAuth 宿主请求；不持久化。 */
-  activeOauthAsk?: CapabilityAskRequest;
-  /** Main summon 注入的一次性 typed recipient。 */
-  prefillAgentTypeKey?: AgentTypeKey;
   /** 父会话专有：在编 coworker id 列表（驱动 tab 条） */
   coworkerIds?: string[];
   /** 父会话专有：当前 tab（undefined = 主会话） */
@@ -366,8 +385,6 @@ interface SessionsState {
     branch: string,
     create?: boolean
   ): Promise<WorkspaceBranchSwitchResult>;
-  /** 无 project 时保留的一次性 summon；下一条普通 draft 消费。 */
-  pendingAgentPrefill?: AgentTypeKey;
   /** 外部（插件侧栏）要求展开某个子代理的详情；TaskBar 消费后清空 */
   pendingAgentOpen?: { sessionId: string; agentId: string } | null;
   focusSubagent(sessionId: string, agentId: string): void;
@@ -424,13 +441,6 @@ interface SessionsState {
     task: AgentDispatchTask,
     selectedModel: DefaultModelRef | null
   ): Promise<AgentDispatchResult>;
-  prefillAgent(typeKey: AgentTypeKey, prompt?: string): void;
-  clearAgentPrefill(conversationId: string): void;
-  respondCapabilityAsk(
-    conversationId: string,
-    requestId: string,
-    decision: 'allow' | 'deny'
-  ): Promise<void>;
   send(
     text: string,
     target: SendTarget,
@@ -461,6 +471,8 @@ interface SessionsState {
    * 不动草稿 / 排队 / started。同会话在途合并；失败保留旧正文并返回原因，成功返 null。
    */
   reloadConversation(id: string): Promise<string | null>;
+  /** 准备超时后的重试：清降级标记，重读尾窗并向 worker 要快照；卡住的 spawn 重新 resume */
+  retrySessionSync(id: string): void;
   /** 重启根会话：释放 worker 侧会话后按当前设置从 jsonl 重新 spawn。运行中拒绝；成功返 null */
   restartConversation(id: string): Promise<string | null>;
   /** 登记一条手机端新建的会话（worker 侧已 spawn，这里只补桌面投影） */
@@ -1115,23 +1127,6 @@ export const useSessionsStore = create<SessionsState>()(
         get().selectConversation(parentId ?? sessionId);
         if (parentId) get().selectTab(parentId, sessionId);
       });
-      window.electronAPI.capabilities.onAsk((request) => {
-        set((state) => {
-          const conversation = state.conversations[request.child.sessionId];
-          if (
-            !conversation ||
-            conversation.generation !== request.child.generation ||
-            (conversation.pendingCapabilityAsks ?? []).some(
-              (pending) => pending.requestId === request.requestId
-            )
-          ) {
-            return state;
-          }
-          return patch(state, conversation.id, {
-            pendingCapabilityAsks: [...(conversation.pendingCapabilityAsks ?? []), request],
-          });
-        });
-      });
       window.electronAPI.agentDispatch.onEvent((event) => {
         set((state) => {
           const conversation = state.conversations[event.child.sessionId];
@@ -1278,8 +1273,6 @@ export const useSessionsStore = create<SessionsState>()(
                   started: true,
                   spawning: false,
                   error: undefined,
-                  pendingCapabilityAsks: [],
-                  activeOauthAsk: undefined,
                 };
                 continue;
               }
@@ -1297,8 +1290,6 @@ export const useSessionsStore = create<SessionsState>()(
                     started: false,
                     status: 'idle',
                     error: undefined,
-                    pendingCapabilityAsks: [],
-                    activeOauthAsk: undefined,
                     // 只有渲染层原以为 worker 还持有（started）时本地正文才可能掉队；
                     // 浏览态（尾窗上屏、started=false）的正文是 jsonl 来的，不动
                     ...(absentTarget &&
@@ -1322,8 +1313,6 @@ export const useSessionsStore = create<SessionsState>()(
                     ...conversation,
                     status: 'failed',
                     error: 'Session ended — history not restored',
-                    pendingCapabilityAsks: [],
-                    activeOauthAsk: undefined,
                   };
             }
             return { conversations };
@@ -1446,7 +1435,7 @@ export const useSessionsStore = create<SessionsState>()(
         )
           return;
 
-        const identity = event.type === 'capability-invoke' ? event.child : event.identity;
+        const identity = event.identity;
         const id = identity.sessionId;
         reloadInFlight.get(id)?.buffered.push(event);
 
@@ -1483,15 +1472,29 @@ export const useSessionsStore = create<SessionsState>()(
             const coworker = event.coworker;
             const conversations = { ...state.conversations, [id]: nextParent as Conversation };
             if (coworker.status === 'dismissed') {
-              delete conversations[coworker.id];
-              conversations[id] = {
-                ...(nextParent as Conversation),
-                coworkerIds: (parent.coworkerIds ?? []).filter(
-                  (coworkerId) => coworkerId !== coworker.id
-                ),
-                activeTabId: parent.activeTabId === coworker.id ? undefined : parent.activeTabId,
-              };
-              forgetUnknownSessionClocks(conversations);
+              const byUser = userDismissedCoworkers.delete(coworker.id);
+              const child = conversations[coworker.id];
+              if (!byUser && child?.child?.mode === 'task') {
+                conversations[coworker.id] = {
+                  ...child,
+                  started: false,
+                  spawning: false,
+                  ended: true,
+                  historyOnly: true,
+                };
+                setTimeout(
+                  () =>
+                    set((current) => {
+                      if (!current.conversations[coworker.id]?.ended) return current;
+                      const next = { ...current.conversations };
+                      dropCoworkerTab(next, id, coworker.id);
+                      return { conversations: next };
+                    }),
+                  TASK_TAB_LINGER_MS
+                );
+                return { conversations };
+              }
+              dropCoworkerTab(conversations, id, coworker.id);
               return { conversations };
             }
             const existing = conversations[coworker.id];
@@ -1829,6 +1832,8 @@ export const useSessionsStore = create<SessionsState>()(
             }),
             title,
             spawning: false,
+            // worker 已回话：超时降级作废，由真实状态接管
+            syncStalled: undefined,
             // 撤回成功的插话：reducer 已移除回显，原文与附件退回输入框
             ...(event.type === 'delivery-rejected'
               ? withdrawnDraftPatch(
@@ -1869,13 +1874,8 @@ export const useSessionsStore = create<SessionsState>()(
                   sessionFile: event.sessionFile,
                 }
               : {}),
-            ...(event.type === 'session-custom-entry' &&
-            event.entry.kind === 'capability-receipt' &&
-            conversation.activeOauthAsk?.requestId === event.entry.receipt.requestId
-              ? { activeOauthAsk: undefined }
-              : {}),
             ...(event.type === 'parent-ended' || event.type === 'child-ended'
-              ? { started: false, pendingCapabilityAsks: [], activeOauthAsk: undefined }
+              ? { started: false }
               : {}),
             // worker 释放冷会话：冷缓存期间 upsert 已被丢，本地正文可能掉队，而回收定时器只在切会话时
             // 武装、夜里不再切就永远不清。这里直接清掉，切回时走 jsonl 尾窗；热正文可信，保留
@@ -2085,8 +2085,7 @@ export const useSessionsStore = create<SessionsState>()(
         if (phase === 'planning' || phase === 'awaiting_review') return;
         if (
           (conversation.pendingApprovals ?? []).length > 0 ||
-          (conversation.pendingAsks ?? []).length > 0 ||
-          (conversation.pendingCapabilityAsks ?? []).length > 0
+          (conversation.pendingAsks ?? []).length > 0
         ) {
           return;
         }
@@ -2164,8 +2163,7 @@ export const useSessionsStore = create<SessionsState>()(
         if (!next) return;
         if (
           (conversation.pendingApprovals ?? []).length > 0 ||
-          (conversation.pendingAsks ?? []).length > 0 ||
-          (conversation.pendingCapabilityAsks ?? []).length > 0
+          (conversation.pendingAsks ?? []).length > 0
         ) {
           return;
         }
@@ -2189,7 +2187,6 @@ export const useSessionsStore = create<SessionsState>()(
         conversations: {},
         order: [],
         activeId: null,
-        pendingAgentPrefill: undefined,
         worktreeStatuses: {},
         workspaceRevisionByConversation: {},
 
@@ -2611,16 +2608,9 @@ export const useSessionsStore = create<SessionsState>()(
           if (existing) {
             const epoch = ++conversationSelectionEpoch;
             if (!(await activateConversationAuthority(existing, epoch))) return null;
-            const pendingAgentPrefill = get().pendingAgentPrefill;
             set((state) => ({
               activeId: existing,
-              pendingAgentPrefill: undefined,
-              conversations: patch(state, existing, {
-                unread: false,
-                ...(pendingAgentPrefill
-                  ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
-                  : {}),
-              }).conversations,
+              conversations: patch(state, existing, { unread: false }).conversations,
             }));
             return existing;
           }
@@ -2649,7 +2639,6 @@ export const useSessionsStore = create<SessionsState>()(
               return null;
             }
           }
-          const pendingAgentPrefill = get().pendingAgentPrefill;
           // 新会话应用默认预设；'default'（内置全局）或预设已删除时不写，spawn 时自然回落全局
           const settings = useSettingsStore.getState();
           const {
@@ -2695,7 +2684,6 @@ export const useSessionsStore = create<SessionsState>()(
             ),
             ...defaultPreset,
             ...(worktree ? { worktree } : {}),
-            ...(pendingAgentPrefill ? { prefillAgentTypeKey: pendingAgentPrefill } : {}),
             ...(options?.forkedFrom
               ? {
                   forkedFromConversationId: options.forkedFrom.conversationId,
@@ -2707,7 +2695,6 @@ export const useSessionsStore = create<SessionsState>()(
             conversations: { ...state.conversations, [id]: conversation },
             order: [id, ...state.order],
             activeId: id,
-            pendingAgentPrefill: undefined,
           }));
           await activateConversationAuthority(id);
           return id;
@@ -2752,7 +2739,6 @@ export const useSessionsStore = create<SessionsState>()(
 
         selectConversation(id) {
           if (!get().conversations[id]) return;
-          const pendingAgentPrefill = get().pendingAgentPrefill;
           const local = get().conversations[id];
           const epoch = ++conversationSelectionEpoch;
           const now = Date.now();
@@ -2766,13 +2752,9 @@ export const useSessionsStore = create<SessionsState>()(
             }).length > 0;
           set((state) => ({
             activeId: id,
-            pendingAgentPrefill: undefined,
             conversations: patch(state, id, {
               unread: false,
               ...(renewActive ? { activeRenewedAt: now } : {}),
-              ...(pendingAgentPrefill
-                ? { activeTabId: undefined, prefillAgentTypeKey: pendingAgentPrefill }
-                : {}),
             }).conversations,
           }));
           void (async () => {
@@ -3123,77 +3105,6 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
-        prefillAgent(typeKey, prompt) {
-          const parentId = get().activeId;
-          if (parentId && get().conversations[parentId]) {
-            set((state) => ({
-              pendingAgentPrefill: undefined,
-              conversations: patch(state, parentId, {
-                activeTabId: undefined,
-                prefillAgentTypeKey: typeKey,
-                ...(prompt ? { draftText: prompt } : {}),
-              }).conversations,
-            }));
-            return;
-          }
-          set({ pendingAgentPrefill: typeKey });
-          const project = useSettingsStore.getState().projects[0];
-          if (project) {
-            void get()
-              .newConversation(project.id)
-              .then(() => {
-                const newActiveId = get().activeId;
-                if (newActiveId && prompt) {
-                  set((state) => patch(state, newActiveId, { draftText: prompt }));
-                }
-              });
-          }
-        },
-
-        clearAgentPrefill(conversationId) {
-          const conversation = get().conversations[conversationId];
-          if (!conversation?.prefillAgentTypeKey) return;
-          set((state) => patch(state, conversationId, { prefillAgentTypeKey: undefined }));
-        },
-
-        async respondCapabilityAsk(conversationId, requestId, decision) {
-          const conversation = get().conversations[conversationId];
-          const request = conversation?.pendingCapabilityAsks?.find(
-            (candidate) => candidate.requestId === requestId
-          );
-          if (!conversation || !request) return;
-          const result = await window.electronAPI.capabilities.respond({
-            child: request.child,
-            turnId: request.turnId,
-            requestId: request.requestId,
-            decision,
-          });
-          if (!result.ok || !result.accepted) {
-            set((state) =>
-              patch(state, conversationId, {
-                error: !result.ok ? result.error : 'This approval is no longer active.',
-              })
-            );
-            return;
-          }
-          set((state) => {
-            const current = state.conversations[conversationId];
-            if (!current || current.generation !== request.child.generation) return state;
-            return patch(state, conversationId, {
-              pendingCapabilityAsks: (current.pendingCapabilityAsks ?? []).filter(
-                (candidate) => candidate.requestId !== requestId
-              ),
-              activeOauthAsk:
-                decision === 'allow' && request.host?.kind === 'oauth-login'
-                  ? request
-                  : current.activeOauthAsk?.requestId === requestId
-                    ? undefined
-                    : current.activeOauthAsk,
-              error: undefined,
-            });
-          });
-        },
-
         ensureBtwConversation(input) {
           if (get().conversations[input.id]) return;
           const conversation: Conversation = {
@@ -3234,7 +3145,6 @@ export const useSessionsStore = create<SessionsState>()(
               queuedMessages: [],
               pendingApprovals: [],
               pendingAsks: [],
-              pendingCapabilityAsks: [],
               backgroundTasks: [],
               subagents: [],
               commands: [],
@@ -3631,6 +3541,26 @@ export const useSessionsStore = create<SessionsState>()(
           }
         },
 
+        retrySessionSync(id) {
+          const conversation = get().conversations[id];
+          if (!conversation) return;
+          parentTailInFlight.delete(id);
+          const stuckSpawn = conversation.spawning && !conversation.started;
+          set((state) =>
+            patch(state, id, {
+              syncStalled: undefined,
+              historyLoadAttempted: undefined,
+              ...(stuckSpawn ? { spawning: false } : {}),
+            })
+          );
+          if (conversation.parentId) loadViewedChildHistory(id);
+          else void hydrateParentHistoryTail(id);
+          if (stuckSpawn && conversation.sessionFile && !conversation.parentId) {
+            void get().resumeConversation(id);
+          }
+          void window.electronAPI.agent.requestSnapshot(id);
+        },
+
         reloadConversation(id) {
           const inFlight = reloadInFlight.get(id);
           if (inFlight) return inFlight.promise;
@@ -3976,8 +3906,10 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         async dismissCoworkerFromUI(parentId, coworkerId) {
+          userDismissedCoworkers.add(coworkerId);
           const result = await window.electronAPI.agent.dismissCoworker(parentId, coworkerId, true);
           if (result.ok) return;
+          userDismissedCoworkers.delete(coworkerId);
           const coworker = get().conversations[coworkerId];
           // 只兑底「worker/Main 侧本就没有实体」的死 tab（重启后未恢复）；
           // 活会话的 dismiss 失败不能静默吞 tab，否则 worker 侧会泄漏孤儿会话。
@@ -4442,9 +4374,68 @@ function armColdEvictTimer(): void {
   evictTimer.unref?.();
 }
 
+/**
+ * 正在看的会话在「已在看」期间才转入待补水（spawn 完成的 parent-ready、全量快照标存活、
+ * 补丁带来 sessionFile）时，切换触发器不会再跑，Preparing 会永久转圈。这里补一次尾窗读：
+ * 读空/失败由 historyLoadAttempted 收口。乐观回显或生成中交给 worker 事件流，避免尾窗与回显重叠。
+ */
+function hydrateViewedOnTransition(conversationId: string, conversation: Conversation): void {
+  if (
+    conversation.parentId ||
+    conversation.syncStalled ||
+    conversation.status === 'running' ||
+    conversation.messages.length > 0 ||
+    parentTailInFlight.has(conversationId) ||
+    !needsHistoryHydration(conversation)
+  ) {
+    return;
+  }
+  void hydrateParentHistoryTail(conversationId);
+}
+
+let preparingStallTimer: ReturnType<typeof setTimeout> | null = null;
+let preparingStallId: string | null = null;
+
+/** 只看空正文的非生成态准备：这正是 Preparing 占满时间线的情形 */
+function isPreparingStallCandidate(conversation: Conversation): boolean {
+  return (
+    !conversation.syncStalled &&
+    conversation.messages.length === 0 &&
+    chatTimelineActivity(conversation) === 'loading'
+  );
+}
+
+/** 兜底：准备超时降级为空态 + 重试；生成态（running）不在此列 */
+function watchPreparingStall(state: SessionsState, viewed: string | null): void {
+  const conversation = viewed ? state.conversations[viewed] : undefined;
+  const candidate = conversation && isPreparingStallCandidate(conversation) ? viewed : null;
+  if (candidate === preparingStallId) return;
+  if (preparingStallTimer) clearTimeout(preparingStallTimer);
+  preparingStallTimer = null;
+  preparingStallId = candidate;
+  if (!candidate) return;
+  preparingStallTimer = setTimeout(() => {
+    preparingStallTimer = null;
+    preparingStallId = null;
+    const current = useSessionsStore.getState();
+    const latest = current.conversations[candidate];
+    if (viewedFromState(current) !== candidate || !latest || !isPreparingStallCandidate(latest)) {
+      return;
+    }
+    // 挂住的尾窗读（远程隧道断线）不能继续占着去重位，否则重试也被吞掉
+    parentTailInFlight.delete(candidate);
+    useSessionsStore.setState((s) => patch(s, candidate, { syncStalled: true }));
+  }, PREPARING_STALL_MS);
+}
+
 useSessionsStore.subscribe((state) => {
   const viewed = viewedFromState(state);
-  if (viewed === lastReportedViewedId) return;
+  watchPreparingStall(state, viewed);
+  if (viewed === lastReportedViewedId) {
+    const conversation = viewed ? state.conversations[viewed] : undefined;
+    if (viewed && conversation) hydrateViewedOnTransition(viewed, conversation);
+    return;
+  }
   const previousViewedId = lastReportedViewedId;
   lastReportedViewedId = viewed;
   window.electronAPI.agent.setViewedSession?.(viewed);

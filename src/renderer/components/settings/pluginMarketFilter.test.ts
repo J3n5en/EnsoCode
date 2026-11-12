@@ -1,34 +1,75 @@
 import { describe, expect, it } from 'vitest';
-import { filterMarketPlugins, marketCategories } from './pluginMarketFilter';
+import { filterMarketPlugins, marketSections } from './pluginMarketFilter';
 
+const item = (over: Record<string, unknown>) => ({
+  id: 'x.y',
+  name: 'X',
+  description: '',
+  tier: 'community' as const,
+  tags: [] as string[],
+  updateAvailable: false,
+  ...over,
+});
 const plugins = [
-  { id: 'enso.notes', name: 'Notes', description: '便签', tags: ['ui', 'notes'] },
-  { id: 'enso.stats', name: 'Stats', description: '', tags: ['ui', 'tools', 'ui'] },
-  { id: 'enso.video', name: 'Video', description: '播放', tags: ['  ', 'video'] },
+  item({
+    id: 'enso.notes',
+    name: 'Notes',
+    description: '便签',
+    tags: ['notes'],
+    category: 'productivity',
+    tier: 'official',
+  }),
+  item({ id: 'z.theme', name: 'Aurora', category: 'themes', installedVersion: '1.0.0' }),
+  item({
+    id: 'a.theme',
+    name: 'Nord',
+    category: 'themes',
+    tier: 'official',
+    installedVersion: '1.0.0',
+    updateAvailable: true,
+  }),
+  item({ id: 'b.misc', name: 'Misc', description: '播放' }),
 ];
 
-describe('marketCategories', () => {
-  it('收集去重后的标签，丢掉空白并按字母排序', () => {
-    expect(marketCategories(plugins)).toEqual(['notes', 'tools', 'ui', 'video']);
+describe('marketSections', () => {
+  it('按固定顺序列出有插件的分类与数量，没分类的归「其他」，另有已安装和可更新', () => {
+    expect(marketSections(plugins)).toEqual([
+      { id: 'all', count: 4 },
+      { id: 'installed', count: 2 },
+      { id: 'updates', count: 1 },
+      { id: 'themes', count: 2 },
+      { id: 'productivity', count: 1 },
+      { id: 'other', count: 1 },
+    ]);
   });
 });
 
 describe('filterMarketPlugins', () => {
-  it('未选分类时保留搜索命中的插件', () => {
-    expect(
-      filterMarketPlugins(plugins, { query: 'NOTES', category: null }).map((p) => p.id)
-    ).toEqual(['enso.notes']);
-    expect(filterMarketPlugins(plugins, { query: '', category: null })).toEqual(plugins);
-  });
-
-  it('分类与搜索同时生效，标签按去空白后的原文匹配', () => {
-    expect(filterMarketPlugins(plugins, { query: '', category: 'ui' }).map((p) => p.id)).toEqual([
+  it('官方排前，再按名字排序；搜索匹配 id、名字、描述和标签', () => {
+    expect(filterMarketPlugins(plugins, { query: '', section: 'all' }).map((p) => p.id)).toEqual([
+      'a.theme',
       'enso.notes',
-      'enso.stats',
+      'z.theme',
+      'b.misc',
     ]);
     expect(
-      filterMarketPlugins(plugins, { query: '播放', category: 'video' }).map((p) => p.id)
-    ).toEqual(['enso.video']);
-    expect(filterMarketPlugins(plugins, { query: 'notes', category: 'tools' })).toEqual([]);
+      filterMarketPlugins(plugins, { query: 'NOTES', section: 'all' }).map((p) => p.id)
+    ).toEqual(['enso.notes']);
+    expect(
+      filterMarketPlugins(plugins, { query: '播放', section: 'other' }).map((p) => p.id)
+    ).toEqual(['b.misc']);
+  });
+
+  it('分区：分类、已安装、可更新', () => {
+    expect(filterMarketPlugins(plugins, { query: '', section: 'themes' }).map((p) => p.id)).toEqual(
+      ['a.theme', 'z.theme']
+    );
+    expect(
+      filterMarketPlugins(plugins, { query: '', section: 'installed' }).map((p) => p.id)
+    ).toEqual(['a.theme', 'z.theme']);
+    expect(
+      filterMarketPlugins(plugins, { query: '', section: 'updates' }).map((p) => p.id)
+    ).toEqual(['a.theme']);
+    expect(filterMarketPlugins(plugins, { query: 'notes', section: 'themes' })).toEqual([]);
   });
 });

@@ -1,12 +1,12 @@
 import { type AgentTypeEntry, BUILTIN_AGENT_TYPES } from './types/assets';
 
-export const ENSO_AGENT_TYPE_KEY = 'agent:enso' as const;
-export const ENSO_LOCKED_PROFILE_ID = 'enso-locked-v1' as const;
-export const ENSO_SYSTEM_PROMPT_ID = 'enso-system-v1' as const;
-export const ENSO_LOCKED_TOOL_IDS = ['enso_capabilities', 'enso_app', 'ask_user'] as const;
+/** 已移除的 Enso child 类型键：只用于读取历史数据，不再产生新值。 */
+export const LEGACY_ENSO_TYPE_KEY = 'agent:enso' as const;
+/** 历史 Enso child 落盘的锁定档案 id，只随 LEGACY_ENSO_TYPE_KEY 出现 */
+export type LegacyEnsoProfileId = 'enso-locked-v1';
 
 export type AgentTypeKey =
-  | typeof ENSO_AGENT_TYPE_KEY
+  | typeof LEGACY_ENSO_TYPE_KEY
   | `builtin:${string}`
   | `custom:${string}`
   | `bot:${string}`;
@@ -27,19 +27,6 @@ export interface AgentTypeRegistrySnapshot {
   candidates: readonly AgentTypeCandidate[];
 }
 
-export const ENSO_LOCKED_PROFILE = {
-  profileId: ENSO_LOCKED_PROFILE_ID,
-  typeKey: ENSO_AGENT_TYPE_KEY,
-  agentId: 'enso',
-  inheritParentModel: true,
-  systemPromptId: ENSO_SYSTEM_PROMPT_ID,
-  toolIds: ENSO_LOCKED_TOOL_IDS,
-  skillPaths: [] as const,
-  mcpServers: [] as const,
-} as const;
-
-export type LockedAgentProfile = typeof ENSO_LOCKED_PROFILE;
-
 export interface SessionIdentity {
   sessionId: string;
   generation: string;
@@ -50,16 +37,17 @@ export interface ChildSessionIdentity extends SessionIdentity {
   instanceId: string;
   instanceName: string;
   typeKey: AgentTypeKey;
-  profileId?: typeof ENSO_LOCKED_PROFILE_ID;
+  /** 仅历史 Enso child 带此值 */
+  profileId?: LegacyEnsoProfileId;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BUILTIN_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
 const RESERVED_AGENT_NAMES: Readonly<Record<string, true>> = {
   enso: true,
-  [ENSO_AGENT_TYPE_KEY]: true,
-  [ENSO_LOCKED_PROFILE_ID]: true,
-  [ENSO_SYSTEM_PROMPT_ID]: true,
+  [LEGACY_ENSO_TYPE_KEY]: true,
+  'enso-locked-v1': true,
+  'enso-system-v1': true,
 };
 const RESERVED_AGENT_PREFIXES = [
   'agent:',
@@ -92,7 +80,7 @@ export function agentTypeDisplayName(
   value: string,
   customAgentTypes: readonly Pick<AgentTypeEntry, 'id' | 'name'>[]
 ): string {
-  if (value === ENSO_AGENT_TYPE_KEY) return 'Enso';
+  if (value === LEGACY_ENSO_TYPE_KEY) return 'Enso';
   if (value.startsWith('builtin:')) return value.slice('builtin:'.length);
   if (value.startsWith('custom:')) {
     const id = value.slice('custom:'.length);
@@ -101,8 +89,15 @@ export function agentTypeDisplayName(
   return value;
 }
 
+/** 历史 Enso child 必须带旧锁定档案 id，其余类型不得带 profileId */
+export function isValidLegacyProfile(typeKey: AgentTypeKey, profileId: unknown): boolean {
+  return typeKey === LEGACY_ENSO_TYPE_KEY
+    ? profileId === ('enso-locked-v1' satisfies LegacyEnsoProfileId)
+    : profileId === undefined;
+}
+
 export function parseAgentTypeKey(value: unknown): AgentTypeKey | null {
-  if (value === ENSO_AGENT_TYPE_KEY) return ENSO_AGENT_TYPE_KEY;
+  if (value === LEGACY_ENSO_TYPE_KEY) return LEGACY_ENSO_TYPE_KEY;
   if (typeof value !== 'string') return null;
   if (value.startsWith('builtin:')) {
     const name = value.slice('builtin:'.length);
@@ -166,8 +161,7 @@ export function parseChildSessionIdentity(value: unknown): ChildSessionIdentity 
     !typeKey ||
     own.sessionId === parent.sessionId ||
     own.generation === parent.generation ||
-    (typeKey === ENSO_AGENT_TYPE_KEY && identity.profileId !== ENSO_LOCKED_PROFILE_ID) ||
-    (typeKey !== ENSO_AGENT_TYPE_KEY && identity.profileId !== undefined)
+    !isValidLegacyProfile(typeKey, identity.profileId)
   ) {
     return null;
   }
@@ -223,16 +217,8 @@ export function parseAgentTypeCandidate(value: unknown): AgentTypeCandidate | nu
   ) {
     return null;
   }
-  if (
-    typeKey === ENSO_AGENT_TYPE_KEY &&
-    (candidate.source !== 'system' ||
-      candidate.displayName !== 'Enso' ||
-      !candidate.locked ||
-      candidate.canDisable ||
-      candidate.canEdit)
-  ) {
-    return null;
-  }
+  // Enso 不再作为 @ 候选下发；agent:enso 仅保留旧会话读兼容
+  if (typeKey === LEGACY_ENSO_TYPE_KEY) return null;
   if ((candidate.source === 'bot') !== typeKey.startsWith('bot:')) return null;
   return candidate as unknown as AgentTypeCandidate;
 }
@@ -252,7 +238,7 @@ export function parseAgentTypeRegistrySnapshot(value: unknown): AgentTypeRegistr
   const typeKeys = snapshot.candidates.map(
     (candidate) => (candidate as AgentTypeCandidate).typeKey
   );
-  if (new Set(typeKeys).size !== typeKeys.length || typeKeys[0] !== ENSO_AGENT_TYPE_KEY) {
+  if (new Set(typeKeys).size !== typeKeys.length) {
     return null;
   }
   return snapshot as unknown as AgentTypeRegistrySnapshot;
@@ -291,17 +277,7 @@ export function buildAgentTypeRegistrySnapshot(input: {
       .filter((entry) => isUuid(entry.id) && !isReservedAgentTypeName(entry.name))
       .map((entry) => entry.name.trim().toLowerCase())
   );
-  const candidates: AgentTypeCandidate[] = [
-    {
-      typeKey: ENSO_AGENT_TYPE_KEY,
-      displayName: 'Enso',
-      description: 'EnsoCode system agent for product capabilities and team setup',
-      source: 'system',
-      locked: true,
-      canDisable: false,
-      canEdit: false,
-    },
-  ];
+  const candidates: AgentTypeCandidate[] = [];
   for (const builtin of BUILTIN_AGENT_TYPES) {
     if (
       builtin.name === 'general' ||

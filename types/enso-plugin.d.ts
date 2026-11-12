@@ -3,8 +3,10 @@
 import type * as React from 'react';
 import type { PluginSlotName } from '../src/renderer/plugins/registry';
 import type {
+  BeforeAgentStartPayload,
   ContextUsagePayload,
   InputPayload,
+  ModelSelectPayload,
   PluginEventName,
   PluginSessionState,
   PluginSessionStatus,
@@ -23,6 +25,7 @@ import type {
   PluginInjectImage,
   PluginToolResult,
 } from '../src/shared/extensionPlugins/protocol';
+import type { StatusPatch } from '../src/shared/extensionPlugins/statusItems';
 
 export type {
   ExtensionPluginManifest,
@@ -144,6 +147,7 @@ export interface EnsoHostApi {
   'ui.notify': (title: string, body?: string) => Promise<void>;
   'ui.viewEvent': (name: string, data?: unknown) => Promise<void>;
   'ui.viewOpen': (input?: string | { viewId?: string; sessionId?: string }) => Promise<void>;
+  'ui.statusUpdate': (id: string, patch: StatusPatch) => Promise<void>;
   'composer.readDraft': () => Promise<EnsoDraft>;
   'composer.insertText': (input: { text: string }) => Promise<EnsoDraftRev>;
   'composer.replaceDraft': (input: {
@@ -205,6 +209,9 @@ export interface EnsoEventData {
   input: InputPayload;
   context_usage: ContextUsagePayload;
   session_status: SessionStatusPayload;
+  model_select: ModelSelectPayload;
+  /** 拦截时返回 `{ append }` 追加到本轮 system prompt；只在主会话触发 */
+  before_agent_start: BeforeAgentStartPayload;
 }
 
 export type EnsoToolResult = string | Pick<PluginToolResult, 'content' | 'details'>;
@@ -302,6 +309,8 @@ export interface EnsoMain {
     };
     clipboard: { writeText: EnsoHostApi['ui.clipboard'] };
     openExternal: EnsoHostApi['ui.openExternal'];
+    /** 改清单 `statusItems` 声明过的输入框底栏状态项；不需要权限和调用上下文，每秒最多 20 次 */
+    status: { update: EnsoHostApi['ui.statusUpdate'] };
   };
   composer: {
     readDraft: EnsoHostApi['composer.readDraft'];
@@ -374,10 +383,18 @@ export interface EnsoUi {
 export interface EnsoView {
   readonly theme: 'light' | 'dark';
   onTheme(listener: (theme: 'light' | 'dark') => void): () => void;
+  on(name: string, listener: (data: unknown) => void): () => void;
   call(method: string, args?: unknown): Promise<unknown>;
   readonly storage: {
     get(key: string): string | null;
     set(key: string, value: string): void;
     remove(key: string): void;
+  };
+  /** 文件查看器里是当前文件，侧栏页面里是 null */
+  readonly file: null | {
+    readonly rel: string;
+    readonly text: string;
+    onChange(listener: (file: { rel: string; text: string }) => void): () => void;
+    update(text: string): void;
   };
 }

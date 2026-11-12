@@ -43,7 +43,6 @@ vi.mock('electron', () => ({
   app: { getVersion: () => 'test', getPath: () => '/tmp' },
   powerMonitor: { on: vi.fn() },
   powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
-  safeStorage: { isEncryptionAvailable: () => true },
 }));
 vi.mock('./agentHost', () => ({ requestSnapshot: vi.fn(), setPinnedSessions: vi.fn() }));
 vi.mock('./macosSystemSleepAssertion', () => ({
@@ -90,6 +89,7 @@ vi.mock('./pairStore', () => ({
 }));
 vi.mock('./nodeStore', () => ({
   adoptHostname: vi.fn(),
+  isNodeStoreSecure: () => true,
   loadNodes: () => [{ ...mocks.device, nodeId: mocks.device?.pairId, label: 'node' }],
   removeNode: (nodes: unknown) => nodes,
   renameNode: (nodes: unknown) => nodes,

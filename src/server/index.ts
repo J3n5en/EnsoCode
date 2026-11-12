@@ -39,6 +39,7 @@ import {
 } from '../main/services/pairHost';
 import { getProxyConfig } from '../main/services/proxyConfig';
 import { refreshRemoteLeadership, setupRemoteRenderer } from '../main/services/remoteRenderer';
+import { readySecureStores } from '../main/services/secureStores';
 import {
   disposeAllTerminals,
   hasPendingPtys,
@@ -102,6 +103,9 @@ async function handlePlugin(command: PluginControlCommand): Promise<unknown> {
     case 'inject-anywhere':
     case 'inject-current':
       return plugins.setCrossSessionInject(command.id, command.action === 'inject-anywhere');
+    case 'dev-on':
+    case 'dev-off':
+      return plugins.setDevWatch(command.id, command.action === 'dev-on');
     case 'config-get':
       return plugins.configView(command.id);
     case 'restage':
@@ -156,6 +160,7 @@ function listenControl(updater: ServerUpdater, web: WebConfig | null): void {
 async function serve(web: WebConfig | null): Promise<void> {
   // 先占端口：端口被占时直接失败，不留半启动的宿主
   const relay = web ? await startWeb(web) : null;
+  await readySecureStores();
   setupRemoteRenderer();
   registerIpcHandlers();
   const updater = registerServerUpdater();

@@ -10,7 +10,27 @@ need_node() {
   node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 1 : 0)'
 }
 
+# 任务镜像常常是精简版：下载和解压 Node 需要 curl、证书与 xz
+ensure_fetch_tools() {
+  if command -v curl >/dev/null 2>&1 && command -v xz >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq curl ca-certificates xz-utils >/dev/null
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y curl ca-certificates xz
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y curl ca-certificates xz
+  else
+    echo "need curl and xz to install Node.js; unsupported package manager" >&2
+    exit 1
+  fi
+}
+
 if need_node; then
+  ensure_fetch_tools
   arch="$(uname -m)"
   case "$arch" in
     x86_64) node_arch=x64 ;;

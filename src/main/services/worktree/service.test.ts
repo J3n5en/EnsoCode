@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSessionWorktree,
   rebuildSessionWorktree,
@@ -19,21 +19,31 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
 
 let repo: string;
 let root: string;
+let templateRepo: string;
+
+beforeAll(() => {
+  templateRepo = mkdtempSync(join(tmpdir(), 'enso-wt-tpl-'));
+  runGit(templateRepo, 'init', '-q', '-b', 'main');
+  runGit(templateRepo, 'config', 'user.name', 'test');
+  runGit(templateRepo, 'config', 'user.email', 'test@test');
+  writeFileSync(join(templateRepo, 'a.txt'), 'v1\n');
+  runGit(templateRepo, 'add', '.');
+  runGit(templateRepo, 'commit', '-q', '-m', 'init');
+});
 
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), 'enso-wt-repo-'));
+  rmSync(repo, { recursive: true, force: true });
+  cpSync(templateRepo, repo, { recursive: true });
   root = mkdtempSync(join(tmpdir(), 'enso-wt-root-'));
-  runGit(repo, 'init', '-q', '-b', 'main');
-  runGit(repo, 'config', 'user.name', 'test');
-  runGit(repo, 'config', 'user.email', 'test@test');
-  writeFileSync(join(repo, 'a.txt'), 'v1\n');
-  runGit(repo, 'add', '.');
-  runGit(repo, 'commit', '-q', '-m', 'init');
 });
 
 afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
   rmSync(root, { recursive: true, force: true });
+});
+afterAll(() => {
+  rmSync(templateRepo, { recursive: true, force: true });
 });
 
 describe('createSessionWorktree', () => {

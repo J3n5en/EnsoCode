@@ -199,7 +199,7 @@ function projectedActivity(message: unknown): AgentRunActivity | undefined {
   return { phase: last?.type === 'text' ? 'writing' : 'thinking' };
 }
 
-const NOTIFY_TEXT_LIMIT = 1_500;
+const NOTIFY_TEXT_LIMIT = 4_000;
 /** 等待行预览只要结论所在的末尾 */
 const PROGRESS_TEXT_TAIL = 160;
 
@@ -895,11 +895,11 @@ export class AgentService implements AgentServiceContract {
     const title = this.agents.get(run.agentId)?.title ?? run.agentId;
     const durationMs = (run.finishedAt ?? this.now()) - (run.startedAt ?? run.createdAt);
     const body = run.status === 'succeeded' ? run.text?.trim() : run.error;
+    const truncated = !!body && body.length > NOTIFY_TEXT_LIMIT;
     // 截断要可感知：模型得知道被裁了多少，才会去 report 拿全文
-    const excerpt =
-      body && body.length > NOTIFY_TEXT_LIMIT
-        ? `${body.slice(0, NOTIFY_TEXT_LIMIT)}\n[…the subagent's report was cut from ${body.length} to its first ${NOTIFY_TEXT_LIMIT} characters]`
-        : body;
+    const excerpt = truncated
+      ? `${body.slice(0, NOTIFY_TEXT_LIMIT)}\n[…the subagent's report was cut from ${body.length} to its first ${NOTIFY_TEXT_LIMIT} characters]`
+      : body;
     let tokens = 0;
     for (const usage of run.usageByMessage.values()) {
       tokens += usage.input + usage.output + usage.cache;
@@ -914,12 +914,18 @@ export class AgentService implements AgentServiceContract {
           ]
         : []),
       `<usage>subagent_tokens: ${tokens}\ntool_uses: ${run.toolCallIds.size}\nduration_ms: ${durationMs}</usage>`,
-      `Use subagent report with runId ${run.runId} for the full result.${
+      // 全文已在通知里时不引导 report，否则模型会把整份报告再拉一遍
+      [
+        truncated ? `Use subagent report with runId ${run.runId} for the full result.` : '',
         run.mode === 'coworker'
-          ? ` To continue this coworker, use subagent send with agentId ${run.agentId}.`
-          : ''
-      }`,
-    ].join('\n');
+          ? `To continue this coworker, use subagent send with agentId ${run.agentId}.`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   private snapshot(run: RunRecord): AgentRunSnapshot {

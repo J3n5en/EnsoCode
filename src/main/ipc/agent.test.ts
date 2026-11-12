@@ -160,7 +160,7 @@ vi.mock('../services/pairSessionHost', () => ({
   configurePairSessionHost: mocks.configurePairSessionHost,
   handlePairHeadlessAgentEvent: vi.fn(),
 }));
-vi.mock('./capabilities', () => ({
+vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     currentIdentity: mocks.currentIdentity,
     prepareParent: mocks.prepareParent,
@@ -173,11 +173,6 @@ vi.mock('./capabilities', () => ({
     sessionFile: mocks.sessionFile,
     isAlive: vi.fn(() => false),
   },
-  capabilityGateway: {
-    registerInvocation: vi.fn(() => true),
-    terminateGeneration: vi.fn(),
-  },
-  handleCapabilityInvoke: vi.fn(),
 }));
 vi.mock('./settings', () => ({ readSettings: mocks.readSettings }));
 vi.mock('../services/memoryHost', async (importOriginal) => ({

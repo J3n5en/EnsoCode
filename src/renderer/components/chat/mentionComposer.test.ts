@@ -26,12 +26,12 @@ import {
 
 const registry: AgentTypeCandidate[] = [
   {
-    typeKey: 'agent:enso',
-    displayName: 'Enso',
-    description: 'EnsoCode system agent for product capabilities and team setup',
-    source: 'system',
-    locked: true,
-    canDisable: false,
+    typeKey: 'builtin:worker',
+    displayName: 'Worker',
+    description: 'Implements a self-contained coding subtask',
+    source: 'builtin',
+    locked: false,
+    canDisable: true,
     canEdit: false,
   },
   {
@@ -72,7 +72,7 @@ describe('typed multi-entity mentions', () => {
   it('keeps Main registry order, all legal types, duplicate labels, and Files after Agents', () => {
     const groups = groupMentionCandidates('', agents, duplicateNames);
     expect(groups.agents.map((candidate) => candidate.typeKey)).toEqual([
-      'agent:enso',
+      'builtin:worker',
       'builtin:scout',
       'builtin:reviewer',
       'custom:123e4567-e89b-42d3-a456-426614174000',

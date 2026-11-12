@@ -1,6 +1,6 @@
 import type { SettingsState } from '../renderer/stores/settings/types';
-import type { CapabilitySpec, JsonSchema } from '../shared/capabilities/types';
-import type { ProductSurfaceId, ProductSurfaceInventoryItem } from '../shared/productSurfaces';
+import type { JsonSchema } from '../shared/capabilities/types';
+import type { ProductSurfaceId } from '../shared/productSurfaces';
 import { BUILTIN_AGENT_TYPES, BUILTIN_TOOLS, type IPC_CHANNELS } from '../shared/types';
 
 export type CoverageDisposition =
@@ -100,6 +100,7 @@ export const SETTINGS_DATA_COVERAGE = {
   fileOpenRules: excluded('Device-local user file opening preferences; not an Enso capability.'),
   contextMenuOpen: excluded('Device-local preference for right-clicking chat file links.'),
   compactReadOnlyTools: excluded('Renderer timeline density preference; not an Enso capability.'),
+  pinnedModels: excluded('Renderer model picker starred list; not an Enso capability.'),
   expandLiveEdits: excluded('Renderer timeline expansion preference; not an Enso capability.'),
   expandLiveReasoning: excluded(
     'Renderer timeline reasoning expansion preference; not an Enso capability.'
@@ -277,6 +278,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setCompactReadOnlyTools: excluded(
     'Renderer timeline density preference; not an Enso capability.'
   ),
+  togglePinnedModel: excluded('Renderer model picker starred list; not an Enso capability.'),
   setExpandLiveEdits: excluded('Renderer timeline expansion preference; not an Enso capability.'),
   setExpandLiveReasoning: excluded(
     'Renderer timeline reasoning expansion preference; not an Enso capability.'
@@ -443,6 +445,7 @@ export const BUILTIN_TOOL_COVERAGE: Readonly<Record<string, CoverageDisposition>
   memory: surfaces('coding-tools.memory'),
   computer: surfaces('coding-tools.computer'),
   plan: surfaces('coding-tools.plan'),
+  turn_discard: excluded('Context bookkeeping inside the coding agent; not an Enso capability.'),
 };
 
 export const BUILTIN_AGENT_TYPE_COVERAGE: Readonly<Record<string, CoverageDisposition>> = {
@@ -505,6 +508,9 @@ export const IPC_PRODUCT_COVERAGE = {
   PROVIDERS_LIST_MODELS: surfaces('providers.fetch-models'),
   PROVIDERS_TEST: surfaces('providers.test-connection'),
   PROVIDERS_MODEL_META: surfaces('providers.model-meta'),
+  PROVIDERS_REFRESH_MODEL_CATALOG: excluded(
+    'Settings button refreshes the models.dev snapshot; not an agent capability.'
+  ),
   PROVIDERS_CLASSIFIER_MODELS: excluded(
     'classifier models are listed only by the virtual model settings UI'
   ),
@@ -650,8 +656,6 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_DISPATCH_BIND_SOURCE: excluded('One-time sender-bound dispatch authorization transport.'),
   AGENT_DISPATCH: surfaces('team.hire-coworker'),
   AGENT_DISPATCH_EVENT: excluded('Main-owned dispatch phase and terminal event transport.'),
-  AGENT_SUMMON: excluded('Cross-window summon only focuses MainWindow and prefills a type chip.'),
-  AGENT_COMPOSER_PREFILL: excluded('Main-to-renderer typed Agent composer prefill event.'),
   SOURCE_AUTHORITY_READ: excluded('Main-owned source authority projection read transport.'),
   SOURCE_AUTHORITY_CHANGED: excluded('Main-owned source authority projection broadcast.'),
   SOURCE_PROJECT_CREATE: surfaces('projects.add'),
@@ -662,10 +666,6 @@ export const IPC_PRODUCT_COVERAGE = {
   SOURCE_CONVERSATION_END: surfaces('conversations.delete'),
   SOURCE_CONVERSATION_REMOVE: surfaces('conversations.delete'),
   SOURCE_CONVERSATION_UPDATE_SELECTION: surfaces('conversations.set-model'),
-  CAPABILITIES_ASK: excluded('Enso child approval request transport owned by CapabilityGateway.'),
-  CAPABILITIES_RESPOND: excluded(
-    'Enso child approval response transport owned by CapabilityGateway.'
-  ),
   DIALOG_SELECT_DIRECTORY: surfaces('projects.add'),
   PROJECTS_GET_RECENT: surfaces('projects.recent'),
   PROJECTS_LIST_HOST_DIRS: surfaces('projects.add'),
@@ -861,6 +861,13 @@ export const IPC_PRODUCT_COVERAGE = {
   PRIVACY_MASK_RECORDS: excluded(
     'Read-only local privacy masking records for the Settings → Privacy panel.'
   ),
+  ELEVATION_PENDING: excluded(
+    'Human-only sudo password prompt; restricted to the desktop main window and full-mode remote UI.'
+  ),
+  ELEVATION_ANSWER: excluded(
+    'Human-only sudo password answer; must never be reachable by agents or plugins.'
+  ),
+  ELEVATION_CHANGED: excluded('Main → renderer push for the sudo password prompt.'),
   RESOURCES_SAMPLE: excluded('Read-only local process sampling for Settings → Resources.'),
   RESOURCES_STORAGE_SCAN: excluded('Read-only userData disk scan for Settings → Resources.'),
   RESOURCES_STORAGE_CLEAN: excluded('Local cache/log cleanup for Settings → Resources.'),
@@ -1005,6 +1012,7 @@ export const IPC_PRODUCT_COVERAGE = {
   EXTENSION_PLUGINS_DISCARD: excluded('Enso 插件安装取消：丢弃暂存。'),
   EXTENSION_PLUGINS_SET_ENABLED: excluded('Enso 插件启用 / 停用开关。'),
   EXTENSION_PLUGINS_SET_CROSS_SESSION_INJECT: excluded('Enso 插件跨会话注入消息的授权开关。'),
+  EXTENSION_PLUGINS_SET_DEV_WATCH: excluded('Enso 插件开发模式：目录来源改动后自动重装。'),
   EXTENSION_PLUGINS_APPROVE_PENDING: excluded('Enso 插件更新扩大授权后的重新同意。'),
   EXTENSION_PLUGINS_REJECT_PENDING: excluded('Enso 插件更新扩大授权后的拒绝，保留旧版本。'),
   EXTENSION_PLUGINS_UNINSTALL: excluded('Enso 插件卸载。'),
@@ -1123,41 +1131,6 @@ export function auditAuthorityCoverage(
   }
   for (const id of Object.keys(coverage)) {
     if (!authorityIds.includes(id)) issues.push(`coverage outside authority: ${id}`);
-  }
-  return issues;
-}
-
-export interface CapabilityAuditInput {
-  inventory: Readonly<Record<string, ProductSurfaceInventoryItem>>;
-  catalog: Readonly<Record<string, CapabilitySpec>>;
-  handlerIds: ReadonlySet<string>;
-}
-
-export function auditCapabilityContract(input: CapabilityAuditInput): string[] {
-  const issues: string[] = [];
-  for (const id of Object.keys(input.inventory)) {
-    const spec = input.catalog[id];
-    if (!spec) {
-      issues.push(`missing catalog: ${id}`);
-      continue;
-    }
-    if (spec.id !== id) issues.push(`catalog id mismatch: ${id}`);
-    if (spec.execution.kind === 'executable') {
-      if (!input.handlerIds.has(spec.execution.handlerId)) {
-        issues.push(`missing handler: ${spec.execution.handlerId}`);
-      }
-    } else {
-      if (!spec.execution.reason.trim()) issues.push(`empty unavailable reason: ${id}`);
-      if (!spec.execution.suggestedAction.trim()) {
-        issues.push(`empty unavailable action: ${id}`);
-      }
-    }
-  }
-  for (const id of Object.keys(input.catalog)) {
-    if (!input.inventory[id]) issues.push(`catalog outside inventory: ${id}`);
-    if (id.includes(':') || id === 'worker-exited' || id === 'snapshot') {
-      issues.push(`internal transport in catalog: ${id}`);
-    }
   }
   return issues;
 }

@@ -44,3 +44,12 @@ export interface ModelMetaResult {
   models: ModelMeta[];
   error?: string;
 }
+
+/** models.dev 手动刷新的结果。失败且 fromCache 时界面继续用上次成功的快照。 */
+export interface ModelCatalogRefreshResult {
+  ok: boolean;
+  modelCount: number;
+  fetchedAt?: number;
+  fromCache: boolean;
+  error?: string;
+}

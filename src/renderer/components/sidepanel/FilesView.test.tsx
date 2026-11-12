@@ -106,6 +106,7 @@ vi.mock('@/components/ui/context-menu', () => {
   return {
     ContextMenu: Wrap,
     ContextMenuPopup: () => null,
+    ContextMenuSeparator: () => null,
     ContextMenuTrigger: Wrap,
     ContextMenuItem: Wrap,
   };
@@ -113,6 +114,7 @@ vi.mock('@/components/ui/context-menu', () => {
 vi.mock('./FilesSearchPane', () => ({ FilesSearchPane: () => null }));
 vi.mock('./fileTreeMenu', () => ({
   isMarkdownRel: () => false,
+  revealLabel: () => 'Reveal in Finder',
   // 右键菜单替身：只露出用例要点的「新建文件」「重命名」入口
   FileTreeMenu: ({
     children,

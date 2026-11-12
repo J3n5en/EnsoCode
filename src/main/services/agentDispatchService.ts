@@ -6,15 +6,9 @@ import {
   type AgentTypeKey,
   type AgentTypeRegistrySnapshot,
   type ChildSessionIdentity,
-  ENSO_LOCKED_PROFILE_ID,
   isSameChildSessionIdentity,
   type SessionIdentity,
 } from '@shared/builtinAgents';
-import type {
-  CapabilityInvocationContext,
-  CapabilityReceipt,
-  ReceiptLifecycleEvent,
-} from '@shared/capabilities/types';
 import {
   type AgentSessionCustomEntry,
   type AgentSpawnRequest,
@@ -114,6 +108,11 @@ interface DispatchHost {
     identity: SessionIdentity,
     entry: AgentSessionCustomEntry
   ): { ok: boolean; error?: string };
+  /** 派发收口告知父会话模型（与 subagent 完成回报同一通道：空闲唤起、忙时搭车） */
+  notifyParent(
+    identity: SessionIdentity,
+    notice: { text: string; urgent: boolean; ownerWebContentsId: number }
+  ): { ok: boolean; error?: string };
   dismissChild(
     parent: SessionIdentity,
     child: ChildSessionIdentity,
@@ -141,8 +140,6 @@ export interface AgentDispatchServiceOptions {
   readStoredOauthCredentialKeys: () => Promise<ReadonlySet<string>>;
   emitRendererEvent: (event: RendererAgentEvent) => void;
   emitDispatchEvent?: (ownerWebContentsId: number, event: DispatchMainEvent) => void;
-  registerCapabilityInvocation?: (context: CapabilityInvocationContext) => boolean;
-  terminateGeneration?: (child: ChildSessionIdentity) => void;
   randomUuid?: () => string;
   now?: () => number;
   readyTimeoutMs?: number;
@@ -161,10 +158,12 @@ interface ActiveDispatch {
   child: ChildSessionIdentity;
   parent: SessionIdentity;
   seq: number;
-  pendingReceiptIds: Set<string>;
-  receipts: CapabilityReceipt[];
   turnTerminal?: DispatchTerminal;
   terminal?: DispatchTerminal;
+  /** 任务已真正交给 child：此前失败由 dispatch 结果直接拒绝，不再通知父会话 */
+  taskDispatched?: boolean;
+  /** 用户解雇 child / worker 退出：父会话已知情或已不在，收口不通知 */
+  silent?: boolean;
 }
 
 const MAX_RECENT_DISPATCHES = 128;
@@ -334,7 +333,6 @@ export class AgentDispatchService {
       candidate.typeKey,
       name,
       controlledAgentId ?? `team-${this.randomUuid()}`,
-      candidate.typeKey === 'agent:enso' ? ENSO_LOCKED_PROFILE_ID : undefined,
       dispatchOrigin,
       mode,
       overrides?.title
@@ -508,8 +506,8 @@ export class AgentDispatchService {
     if (event.type === 'worker-exited') {
       for (const dispatch of this.active.values()) {
         dispatch.turnTerminal = 'cancelled';
+        dispatch.silent = true;
         this.trySettle(dispatch);
-        this.options.terminateGeneration?.(dispatch.child);
       }
       return;
     }
@@ -518,9 +516,9 @@ export class AgentDispatchService {
       const dispatch = this.active.get(event.identity.generation);
       if (dispatch) {
         dispatch.turnTerminal = event.type === 'child-ended' ? 'cancelled' : 'failed';
+        if (event.type === 'child-ended') dispatch.silent = true;
         this.trySettle(dispatch);
       }
-      this.options.terminateGeneration?.(event.identity);
       return;
     }
     if (event.type !== 'turn-completed' && event.type !== 'turn-failed') return;
@@ -532,53 +530,15 @@ export class AgentDispatchService {
     ) {
       return;
     }
-    dispatch.turnTerminal = event.type === 'turn-completed' ? 'completed' : 'failed';
-    this.trySettle(dispatch);
-  }
-
-  observeReceipt(event: ReceiptLifecycleEvent): void {
-    const dispatch = this.active.get(event.child.generation);
-    // 关联键只能是 child 身份 + turnId：event.requestId 是每笔能力调用自己的 uuid
-    // （见 agent/tools/ensoApp.ts），与派发请求 id 不同命名空间；拿它与 dispatch.requestId
-    // 相比永远不相等，会把全部 receipt 丢掉，导致父会话完成通知拿不到安全 summary。
-    if (
-      !dispatch ||
-      dispatch.turnId !== event.turnId ||
-      !isSameChildSessionIdentity(dispatch.child, event.child) ||
-      dispatch.terminal
-    ) {
-      return;
-    }
-    if (event.type === 'receipt-started') {
-      if (!dispatch.receipts.some((receipt) => receipt.receiptId === event.receiptId)) {
-        dispatch.pendingReceiptIds.add(event.receiptId);
-      }
-      return;
-    }
-    dispatch.pendingReceiptIds.delete(event.receiptId);
-    if (!dispatch.receipts.some((receipt) => receipt.receiptId === event.receiptId)) {
-      dispatch.receipts.push(event.receipt);
-    }
+    dispatch.turnTerminal =
+      event.type === 'turn-failed' ? 'failed' : event.aborted ? 'cancelled' : 'completed';
     this.trySettle(dispatch);
   }
 
   private trySettle(dispatch: ActiveDispatch): void {
-    if (dispatch.terminal || !dispatch.turnTerminal || dispatch.pendingReceiptIds.size > 0) return;
-    const failedReceipt = dispatch.receipts.some((receipt) =>
-      ['denied', 'failed', 'unavailable'].includes(receipt.outcome)
-    );
-    const successfulCommit = dispatch.receipts.some((receipt) => receipt.outcome === 'succeeded');
-    const terminal: DispatchTerminal =
-      dispatch.turnTerminal === 'completed' && !failedReceipt
-        ? 'completed'
-        : dispatch.turnTerminal === 'cancelled' && !successfulCommit
-          ? 'cancelled'
-          : 'failed';
+    if (dispatch.terminal || !dispatch.turnTerminal) return;
+    const terminal = dispatch.turnTerminal;
     dispatch.terminal = terminal;
-    const receiptSummary = dispatch.receipts
-      .map((receipt) => receipt.summary)
-      .join('; ')
-      .slice(0, 600);
     const childRef = {
       sessionId: dispatch.child.sessionId,
       generation: dispatch.child.generation,
@@ -588,31 +548,39 @@ export class AgentDispatchService {
     };
     const entry: AgentSessionCustomEntry =
       terminal === 'completed'
-        ? {
-            kind: 'agent-completed',
-            child: childRef,
-            ...(receiptSummary ? { receiptSummary } : {}),
-            at: this.now(),
-          }
+        ? { kind: 'agent-completed', child: childRef, at: this.now() }
         : {
             kind: 'agent-failed',
             child: childRef,
             errorCode: terminal === 'cancelled' ? 'child-cancelled' : 'child-failed',
-            message:
-              receiptSummary || (terminal === 'cancelled' ? 'Agent cancelled.' : 'Agent failed.'),
+            message: terminal === 'cancelled' ? 'Agent cancelled.' : 'Agent failed.',
             at: this.now(),
           };
     this.options.host.appendCustomEntry(dispatch.parent, entry);
-    this.emitDispatch(dispatch, {
-      phase: 'terminal',
-      terminal,
-      ...(receiptSummary ? { receiptSummary } : {}),
-    });
-    // 这里只收口「本次派发任务」，不撤销能力授权：child 会话仍活着，用户后续轮次
-    // 还会继续用 enso_app（授权以 child generation 为单位，见 spec/main/services.md）。
-    // 撤销边界只有 child-ended / child-rejected / worker-exited / 窗口关闭。
+    this.notifyParent(dispatch, terminal);
+    this.emitDispatch(dispatch, { phase: 'terminal', terminal });
     this.active.delete(dispatch.child.generation);
     this.prompted.delete(`${dispatch.child.generation}\u0000${dispatch.requestId}`);
+  }
+
+  /** 父会话须仍是派发时那一代且在线：换代/已结束不投，免得唤起错的会话 */
+  private notifyParent(dispatch: ActiveDispatch, terminal: DispatchTerminal): void {
+    if (!dispatch.taskDispatched || dispatch.silent) return;
+    if (!this.options.sessionIndex.isReady(dispatch.parent)) return;
+    const { instanceName, typeKey, sessionId } = dispatch.child;
+    const head = `@${instanceName}（${typeKey}）派发的任务`;
+    const lines =
+      terminal === 'completed'
+        ? [`${head}已完成。`]
+        : terminal === 'cancelled'
+          ? [`${head}已取消（child-cancelled）。`]
+          : [`${head}失败（child-failed）。`];
+    lines.push(`子会话 ${sessionId}，需要细节可读取该会话。`);
+    this.options.host.notifyParent(dispatch.parent, {
+      text: lines.join('\n'),
+      urgent: terminal !== 'completed',
+      ownerWebContentsId: dispatch.ownerWebContentsId,
+    });
   }
 
   private async executeDispatch(
@@ -683,13 +651,11 @@ export class AgentDispatchService {
     }
 
     const parent = this.currentOrNewParent(binding);
-    const profileId = request.typeKey === 'agent:enso' ? ENSO_LOCKED_PROFILE_ID : undefined;
     const reserved = this.options.sessionIndex.reserveChild(
       parent,
       request.typeKey,
       candidate.displayName,
       request.requestId,
-      profileId,
       'typed-mention',
       'task'
     );
@@ -711,8 +677,6 @@ export class AgentDispatchService {
       child: reservation.child,
       parent,
       seq: 0,
-      pendingReceiptIds: new Set(),
-      receipts: [],
     };
     this.active.set(reservation.child.generation, dispatch);
     this.emitDispatch(dispatch, { phase: 'capacity-reserved' });
@@ -742,22 +706,6 @@ export class AgentDispatchService {
         agentType.expectedToolIds ?? []
       );
       this.emitDispatch(dispatch, { phase: 'child-ready' });
-      if (
-        reservation.child.typeKey === 'agent:enso' &&
-        this.options.registerCapabilityInvocation &&
-        !this.options.registerCapabilityInvocation({
-          child: reservation.child,
-          parentBinding: {
-            parentConversationId: binding.parentConversationId,
-            parentProjectId: binding.parentProjectId,
-            parentProjectPath: binding.parentProjectPath,
-          },
-          turnId: request.requestId,
-          ownerWebContentsId,
-        })
-      ) {
-        throw new Error('Failed to bind the Enso capability generation.');
-      }
       const promptKey = `${reservation.child.generation}\u0000${request.requestId}`;
       if (!this.prompted.has(promptKey)) {
         const prompted = this.options.host.promptChild(reservation.child, request.requestId, task);
@@ -779,6 +727,7 @@ export class AgentDispatchService {
         at: this.now(),
       });
       if (!appended.ok) throw new Error(appended.error ?? 'Failed to record dispatch.');
+      dispatch.taskDispatched = true;
       return {
         accepted: true,
         dispatchId: dispatch.dispatchId,
@@ -787,7 +736,6 @@ export class AgentDispatchService {
       };
     } catch (error) {
       this.options.sessionIndex.releaseChild(reservation.child);
-      this.options.terminateGeneration?.(reservation.child);
       this.options.host.dismissChild(parent, reservation.child, false);
       dispatch.turnTerminal = 'failed';
       this.trySettle(dispatch);
@@ -1067,7 +1015,7 @@ export class AgentDispatchService {
     if (ready.identity.typeKey !== config.typeKey || proof.typeKey !== config.typeKey) {
       mismatches.push('type');
     }
-    if (ready.identity.profileId !== config.lockedProfileId) mismatches.push('profile');
+    if (ready.identity.profileId !== undefined) mismatches.push('profile');
     if (proof.spawnSpecId !== config.spawnSpecId) mismatches.push('spawnSpec');
     if (
       proof.model.providerId !== expectedModel.providerId ||
@@ -1084,12 +1032,6 @@ export class AgentDispatchService {
     if (mismatches.length > 0) {
       throw new Error(`Child exact profile proof mismatch: ${mismatches.join('; ')}.`);
     }
-    if (
-      config.tools !== 'enso-locked' &&
-      proof.toolIds.some((toolId) => toolId === 'enso_app' || toolId === 'enso_capabilities')
-    ) {
-      throw new Error('Ordinary Agent received locked Enso tools.');
-    }
   }
 
   private emitDispatch(
@@ -1099,7 +1041,6 @@ export class AgentDispatchService {
       | {
           phase: 'terminal';
           terminal: DispatchTerminal;
-          receiptSummary?: string;
         }
   ): void {
     this.options.emitDispatchEvent?.(dispatch.ownerWebContentsId, {

@@ -12,7 +12,16 @@ import {
   UNGROUPED_GROUP_ID,
 } from '@shared/projectGroups';
 import type { RemoteNodeStatus } from '@shared/types/nodes';
-import { Archive, ChevronDown, ChevronRight, Pin, Search, Settings, SquarePen } from 'lucide-react';
+import {
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  FolderPlus,
+  Pin,
+  Search,
+  Settings,
+  SquarePen,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Input } from '@/components/ui/input';
 import {
@@ -38,6 +47,7 @@ interface RemoteNodeSidebarProps {
   canCreate: boolean;
   onSelect: (id: string) => void;
   onNewConversation: () => void;
+  onAddProject: () => void;
 }
 
 const ICON_BUTTON_CLASS =
@@ -45,7 +55,7 @@ const ICON_BUTTON_CLASS =
 
 /**
  * 远程节点侧栏：对方目录按项目分组，置顶/归档分栏（与本机侧栏、手机抽屉同语义）。
- * 只做选择与新建：置顶/归档/重命名/删除协议不支持，不露入口。
+ * 只做选择、新建会话与添加项目：置顶/归档/重命名/删除协议不支持，不露入口。
  */
 export function RemoteNodeSidebar({
   width,
@@ -58,6 +68,7 @@ export function RemoteNodeSidebar({
   canCreate,
   onSelect,
   onNewConversation,
+  onAddProject,
 }: RemoteNodeSidebarProps) {
   const { t, locale } = useI18n();
   const [selectedGroupId, setSelectedGroupId] = useState(ALL_GROUP_ID);
@@ -333,6 +344,15 @@ export function RemoteNodeSidebar({
           title={t('Node settings')}
         >
           <Settings className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onAddProject}
+          disabled={!node.hostOnline}
+          className={cn(ICON_BUTTON_CLASS, !node.hostOnline && 'opacity-40')}
+          title={t('Add project')}
+        >
+          <FolderPlus className="h-4 w-4" />
         </button>
         <button
           type="button"

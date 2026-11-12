@@ -1,12 +1,20 @@
 import { isReservedAgentTypeName } from '../builtinAgents';
 import { type ApprovalMode, THINKING_LEVELS, type ThinkingLevel } from '../types/agent';
 import { BUILTIN_AGENT_TYPES } from '../types/assets';
+import { isWorkflowPresetId } from '../types/workflow';
 import {
+  APPEND_ONLY_INTERCEPT_EVENTS,
   isInterceptEvent,
   PLUGIN_EVENTS,
   type PluginEventName,
   type PluginEventSubscription,
 } from './events';
+import {
+  MAX_STATUS_ITEMS,
+  MAX_STATUS_TEXT,
+  MAX_STATUS_TOOLTIP,
+  type PluginStatusItemContrib,
+} from './statusItems';
 import { pluginToolName } from './toolName';
 
 export const EXTENSION_PLUGIN_PERMISSIONS = [
@@ -44,15 +52,47 @@ export interface PluginAgentToolContrib {
   parameters: Record<string, unknown>;
   /** 单次调用上限；缺省 60 秒 */
   timeoutMs?: number;
+  /** 作者声明不改动环境（同 MCP readOnlyHint，不核实）；turn_discard 据此放行 */
+  readOnly?: boolean;
 }
 export interface PluginCommandContrib {
   id: string;
   title: string;
+  /** 默认快捷键，形如 mod+shift+k；用户可在设置里改 */
+  key?: string;
+}
+
+const KEY_NAME =
+  /^(?:[a-z0-9]|f(?:[1-9]|1[0-2])|[,./;'[\]\\=`-]|arrow(?:up|down|left|right)|enter|space|tab|backspace|delete|home|end|pageup|pagedown)$/;
+
+/** 快捷键串：修饰键按 mod、ctrl、alt、shift 顺序，至少一个非 shift 修饰键 */
+export function isPluginKeyBinding(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const parts = value.split('+');
+  const key = parts.pop() ?? '';
+  const order = ['mod', 'ctrl', 'alt', 'shift'];
+  let last = -1;
+  for (const part of parts) {
+    const at = order.indexOf(part);
+    if (at <= last) return false;
+    last = at;
+  }
+  return parts.some((part) => part !== 'shift') && KEY_NAME.test(key);
 }
 export interface PluginViewContrib {
   id: string;
   title: string;
   entry: string;
+}
+/** 按扩展名打开文件的查看器；页面和侧栏页面一样跑在沙箱 iframe 里 */
+export interface PluginFileViewerContrib {
+  id: string;
+  title: string;
+  entry: string;
+  /** 小写、带点的后缀，如 .csv、.excalidraw.json */
+  extensions: string[];
+  /** 匹配的文件默认用它打开，否则只出现在切换按钮里 */
+  default: boolean;
 }
 /** 主题：path 是调色板 JSON，css 可选且可改任意界面（grant.styles） */
 export interface PluginThemeContrib {
@@ -109,6 +149,8 @@ export interface PluginPresetContrib {
   mcpServers: string[];
   /** 圈定的子代理类型：被任一预设列出的类型只在该预设生效时下发 */
   agentTypes?: string[];
+  /** 圈定的 workflow 预设文件：被任一预设列出的只在该预设生效时可用 */
+  workflows?: string[];
   instruction?: string;
   systemPrompt?: string;
   systemPromptTail?: string;
@@ -158,9 +200,14 @@ export interface ExtensionPluginManifest {
     agentTools: PluginAgentToolContrib[];
     commands: PluginCommandContrib[];
     views: PluginViewContrib[];
+    fileViewers: PluginFileViewerContrib[];
+    /** 输入框底栏状态项；纯数据，由宿主渲染 */
+    statusItems: PluginStatusItemContrib[];
     triggers: PluginTriggerContrib[];
     skills: string[];
     mcpServers: PluginMcpContrib[];
+    /** workflow 预设文件（`<id>.js`），文件名即预设 id */
+    workflows: string[];
     methods: PluginMethodContrib[];
     configuration: PluginConfigContrib[];
     presets: PluginPresetContrib[];
@@ -181,6 +228,7 @@ export type ManifestParseResult =
 const ID = /^[a-z][a-z0-9]*(\.[a-z0-9]+)+$/;
 const TOOL = /^[a-z][a-z0-9_]*$/;
 const LOCAL_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const FILE_SUFFIX = /^\.[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)*$/;
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const ENGINE = /^>=(\d+)\.(\d+)\.(\d+)$/;
 const METHOD = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
@@ -434,6 +482,8 @@ export function parseExtensionPluginManifest(
     if (!isNonEmptyString(t.description, 1024)) errors.push(`工具 ${name} 缺少 description`);
     if (t.timeoutMs !== undefined && !isTimeout(t.timeoutMs, MAX_TOOL_TIMEOUT_MS))
       errors.push(`工具 ${name} 的 timeoutMs 不合法（1000–${MAX_TOOL_TIMEOUT_MS} 毫秒的整数）`);
+    if (t.readOnly !== undefined && typeof t.readOnly !== 'boolean')
+      errors.push(`工具 ${name} 的 readOnly 只能是布尔值`);
     if (!isRecord(t.parameters) || t.parameters.type !== 'object')
       errors.push(`工具 ${name} 的 parameters 必须是 type=object 的 JSON Schema`);
     else
@@ -442,6 +492,7 @@ export function parseExtensionPluginManifest(
         description: String(t.description ?? ''),
         parameters: t.parameters,
         ...(isTimeout(t.timeoutMs, MAX_TOOL_TIMEOUT_MS) ? { timeoutMs: t.timeoutMs } : {}),
+        ...(t.readOnly === true ? { readOnly: true } : {}),
       });
   }
   uniqueIds(agentTools, '工具');
@@ -452,10 +503,16 @@ export function parseExtensionPluginManifest(
       !isRecord(cmd) ||
       typeof cmd.id !== 'string' ||
       !LOCAL_ID.test(cmd.id) ||
-      !isNonEmptyString(cmd.title, 60)
+      !isNonEmptyString(cmd.title, 60) ||
+      (cmd.key !== undefined && !isPluginKeyBinding(cmd.key))
     )
       errors.push('命令不合法');
-    else commands.push({ id: cmd.id, title: cmd.title as string });
+    else
+      commands.push({
+        id: cmd.id,
+        title: cmd.title as string,
+        ...(cmd.key !== undefined ? { key: cmd.key as string } : {}),
+      });
   }
   uniqueIds(commands, '命令');
 
@@ -473,6 +530,59 @@ export function parseExtensionPluginManifest(
     else views.push({ id: v.id, title: v.title as string, entry: v.entry });
   }
   uniqueIds(views, '侧栏页面');
+
+  const fileViewers: PluginFileViewerContrib[] = [];
+  for (const v of list('fileViewers')) {
+    if (
+      !isRecord(v) ||
+      typeof v.id !== 'string' ||
+      !LOCAL_ID.test(v.id) ||
+      !isNonEmptyString(v.title, 40) ||
+      !isPluginRelativePath(v.entry) ||
+      !v.entry.endsWith('.html') ||
+      !Array.isArray(v.extensions) ||
+      v.extensions.length === 0 ||
+      v.extensions.length > 32 ||
+      !v.extensions.every(
+        (ext) => typeof ext === 'string' && ext.length <= 32 && FILE_SUFFIX.test(ext)
+      ) ||
+      (v.default !== undefined && typeof v.default !== 'boolean')
+    )
+      errors.push('文件查看器不合法');
+    else
+      fileViewers.push({
+        id: v.id,
+        title: v.title as string,
+        entry: v.entry,
+        extensions: [...new Set(v.extensions as string[])],
+        default: v.default === true,
+      });
+  }
+  uniqueIds(fileViewers, '文件查看器');
+
+  const statusItems: PluginStatusItemContrib[] = [];
+  const statusRaw = list('statusItems');
+  if (statusRaw.length > MAX_STATUS_ITEMS) errors.push(`statusItems 最多 ${MAX_STATUS_ITEMS} 个`);
+  for (const s of statusRaw.slice(0, MAX_STATUS_ITEMS)) {
+    if (
+      !isRecord(s) ||
+      typeof s.id !== 'string' ||
+      !LOCAL_ID.test(s.id) ||
+      !isNonEmptyString(s.text, MAX_STATUS_TEXT) ||
+      (s.tooltip !== undefined && !isNonEmptyString(s.tooltip, MAX_STATUS_TOOLTIP)) ||
+      (s.command !== undefined &&
+        (typeof s.command !== 'string' || !commands.some((c) => c.id === s.command)))
+    )
+      errors.push('状态项不合法');
+    else
+      statusItems.push({
+        id: s.id,
+        text: s.text as string,
+        ...(s.tooltip !== undefined ? { tooltip: s.tooltip as string } : {}),
+        ...(s.command !== undefined ? { command: s.command as string } : {}),
+      });
+  }
+  uniqueIds(statusItems, '状态项');
 
   const themes: PluginThemeContrib[] = [];
   for (const theme of list('themes')) {
@@ -513,6 +623,16 @@ export function parseExtensionPluginManifest(
     contrib.skills,
     'contributes.skills',
     (p) => isPluginRelativePath(p) && p !== '.'
+  );
+
+  const workflows = stringList(
+    contrib.workflows,
+    'contributes.workflows',
+    (p) => isPluginRelativePath(p) && isWorkflowPresetId(workflowFileId(p))
+  );
+  uniqueIds(
+    workflows.map((p) => ({ id: workflowFileId(p) })),
+    'workflow 预设'
   );
 
   const mcpServers: PluginMcpContrib[] = [];
@@ -634,6 +754,11 @@ export function parseExtensionPluginManifest(
       item.agentTypes.some((name) => !agentTypes.some((type) => type.name === name))
     )
       errors.push(`预设 ${item.id} 引用了未声明的子代理类型`);
+    const presetWorkflows = stringList(
+      item.workflows,
+      `预设 ${item.id} 的 workflows`,
+      (p) => typeof p === 'string' && workflows.includes(p)
+    );
     const instruction = promptPath(item.instruction, `预设 ${item.id} 的指令`);
     const systemPrompt = promptPath(item.systemPrompt, `预设 ${item.id} 的角色描述`);
     const systemPromptTail = promptPath(item.systemPromptTail, `预设 ${item.id} 的真尾`);
@@ -672,6 +797,7 @@ export function parseExtensionPluginManifest(
       skills: presetSkills,
       mcpServers: presetMcp,
       ...(presetAgentTypes.length > 0 ? { agentTypes: presetAgentTypes } : {}),
+      ...(presetWorkflows.length > 0 ? { workflows: presetWorkflows } : {}),
       ...(instruction ? { instruction } : {}),
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(systemPromptTail ? { systemPromptTail } : {}),
@@ -819,6 +945,7 @@ export function parseExtensionPluginManifest(
   need(renderer !== undefined, 'ui.slot', 'renderer');
   need(triggers.length > 0, 'ui.slot', 'triggers');
   need(views.length > 0, 'ui.view', 'views');
+  need(fileViewers.length > 0, 'ui.view', 'fileViewers');
   need(mcpServers.length > 0, 'mcp.server', 'mcpServers');
   need(fs.read.length > 0, 'fs.read', 'fs.read');
   need(fs.write.length > 0, 'fs.write', 'fs.write');
@@ -867,9 +994,12 @@ export function parseExtensionPluginManifest(
         agentTools,
         commands,
         views,
+        fileViewers,
+        statusItems,
         triggers,
         skills,
         mcpServers,
+        workflows,
         methods,
         configuration,
         presets,
@@ -884,6 +1014,12 @@ export function parseExtensionPluginManifest(
   };
 }
 
+/** `workflows/triage.js` → `triage`；非 `.js` 返回空串 */
+export function workflowFileId(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  return name.endsWith('.js') ? name.slice(0, -3) : '';
+}
+
 function parseEventSubscription(raw: unknown): PluginEventSubscription | null {
   if (!isRecord(raw) || !(PLUGIN_EVENTS as readonly unknown[]).includes(raw.event)) return null;
   const event = raw.event as PluginEventName;
@@ -891,6 +1027,11 @@ function parseEventSubscription(raw: unknown): PluginEventSubscription | null {
   if (mode !== 'observe' && mode !== 'intercept') return null;
   if (mode === 'intercept' && !isInterceptEvent(event)) return null;
   if (raw.failClosed !== undefined && (typeof raw.failClosed !== 'boolean' || mode !== 'intercept'))
+    return null;
+  if (
+    raw.failClosed === true &&
+    (APPEND_ONLY_INTERCEPT_EVENTS as readonly string[]).includes(event)
+  )
     return null;
   let tools: string[] | undefined;
   if (raw.tools !== undefined) {

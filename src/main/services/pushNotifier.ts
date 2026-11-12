@@ -1,11 +1,10 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { PushSubscriptionJson } from '@enso/pair';
-import { app, safeStorage } from '@platform';
+import { app } from '@platform';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
 import type { ApprovalRequestInfo } from '@shared/types/agent';
 import webPush from 'web-push';
-import { isSecureStorageAvailable } from './pairStore';
+import { SecureJsonFile } from './secureFile';
 
 /**
  * Web Push 直发（不经中继）：VAPID 密钥对首次生成后落盘，
@@ -51,7 +50,7 @@ export function buildPushPayload(
   return { title, body: sessionTitle || '会话', sessionId };
 }
 
-// ── 持久化（与 pairStore 同一套 safeStorage 姿态）─────────────────────────
+// ── 持久化（与 pairStore 同一套加密姿态）─────────────────────────
 
 interface PushStore {
   vapid?: { publicKey: string; privateKey: string };
@@ -59,47 +58,26 @@ interface PushStore {
   subscriptions: Record<string, PushSubscriptionJson>;
 }
 
-function storePath(): string {
-  return path.join(app.getPath('userData'), 'phone-push.bin');
+const pushFile = new SecureJsonFile<PushStore>(
+  () => path.join(app.getPath('userData'), 'phone-push.bin'),
+  () => ({ subscriptions: {} }),
+  (raw) => {
+    const parsed = raw && typeof raw === 'object' ? (raw as PushStore) : { subscriptions: {} };
+    if (!parsed.subscriptions) parsed.subscriptions = {};
+    return parsed;
+  }
+);
+
+export function pushStoreReady(): Promise<void> {
+  return pushFile.ready();
 }
 
-let cache: PushStore | null = null;
-
 function loadStore(): PushStore {
-  if (cache) return cache;
-  try {
-    const file = storePath();
-    if (!existsSync(file)) {
-      cache = { subscriptions: {} };
-      return cache;
-    }
-    const raw = readFileSync(file);
-    const json = isSecureStorageAvailable()
-      ? safeStorage.decryptString(raw)
-      : raw.toString('utf-8');
-    const parsed = JSON.parse(json) as PushStore;
-    cache = parsed && typeof parsed === 'object' ? parsed : { subscriptions: {} };
-    if (!cache.subscriptions) cache.subscriptions = {};
-  } catch {
-    cache = { subscriptions: {} };
-  }
-  return cache;
+  return pushFile.get();
 }
 
 function saveStore(store: PushStore): void {
-  cache = store;
-  try {
-    const file = storePath();
-    const json = JSON.stringify(store);
-    const data = isSecureStorageAvailable()
-      ? safeStorage.encryptString(json)
-      : Buffer.from(json, 'utf-8');
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, data);
-    renameSync(tmp, file);
-  } catch (error) {
-    console.warn('[push] save store failed', error);
-  }
+  void pushFile.set(store);
 }
 
 /** VAPID 公钥（手机订阅用）；首次调用生成并持久化密钥对 */

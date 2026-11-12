@@ -168,7 +168,7 @@ import {
   parseTimelineInput,
 } from './botsInput';
 import { parseTeamCreateInput, parseTeamPreviewInput } from './botsTeamInput';
-import { agentSessionIndex } from './capabilities';
+import { agentSessionIndex } from './sessionIndex';
 
 interface BotServices {
   bots: BotStore;

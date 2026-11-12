@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   isPackaged: false,
   appHandlers: new Map<string, (...args: unknown[]) => void>(),
   setPath: vi.fn(),
+  crashReporterStart: vi.fn(),
   autoUpdaterInit: vi.fn(),
   startAgentWorker: vi.fn(() => mocks.order.push('worker')),
   createMainWindow: vi.fn(() => {
@@ -35,6 +36,7 @@ vi.mock('electron', () => ({
     }),
   },
   BrowserWindow: { getAllWindows: () => [] },
+  crashReporter: { start: mocks.crashReporterStart },
 }));
 vi.mock('@electron-toolkit/utils', () => ({
   electronApp: { setAppUserModelId: vi.fn() },
@@ -84,6 +86,11 @@ vi.mock('./services/proxyConfig', () => ({
     whenReady: () => Promise.resolve(true),
   }),
 }));
+vi.mock('./services/secureStores', () => ({
+  readySecureStores: vi.fn(async () => {
+    mocks.order.push('secure');
+  }),
+}));
 vi.mock('./services/updater/AutoUpdater', () => ({
   autoUpdaterService: { init: mocks.autoUpdaterInit },
 }));
@@ -129,17 +136,22 @@ afterAll(() => {
 });
 
 describe('Main startup order', () => {
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
   it('creates the renderer window before asynchronously starting the worker, exactly once', async () => {
     await import('./index');
-    await Promise.resolve();
+    await settle();
 
-    expect(mocks.order).toEqual(['ipc', 'window', 'tray']);
+    // 凭据存储先解密进内存，IPC 才注册
+    expect(mocks.order).toEqual(['secure', 'ipc', 'window', 'tray']);
     expect(mocks.startAgentWorker).not.toHaveBeenCalled();
 
     await new Promise<void>((resolve) => setImmediate(resolve));
     // pair 不依赖代理；worker 等 whenReady 后再 fork，所以排在 pair 之后。
     await Promise.resolve();
-    expect(mocks.order).toEqual(['ipc', 'window', 'tray', 'pair', 'worker']);
+    expect(mocks.order).toEqual(['secure', 'ipc', 'window', 'tray', 'pair', 'worker']);
     expect(mocks.createMainWindow).toHaveBeenCalledOnce();
     expect(mocks.startAgentWorker).toHaveBeenCalledOnce();
     expect(mocks.scheduleReenter).not.toHaveBeenCalled();
@@ -148,7 +160,7 @@ describe('Main startup order', () => {
   it('schedules tray re-entry after an update restart', async () => {
     mocks.consumeTrayReenter.mockReturnValue(true);
     await import('./index');
-    await Promise.resolve();
+    await settle();
     expect(mocks.createMainWindow).toHaveBeenCalledOnce();
     expect(mocks.scheduleReenter).toHaveBeenCalledOnce();
   });
@@ -158,6 +170,14 @@ describe('Main process diagnostics', () => {
   it('listens for child-process-gone', async () => {
     await import('./index');
     expect(mocks.appHandlers.has('child-process-gone')).toBe(true);
+  });
+
+  it('crash dumps 落在 userData 下且只存本地', async () => {
+    mocks.crashReporterStart.mockClear();
+    await import('./index');
+    // mock 的 getPath('userData') 固定返回 /tmp
+    expect(mocks.setPath).toHaveBeenCalledWith('crashDumps', path.join('/tmp', 'Crashpad'));
+    expect(mocks.crashReporterStart).toHaveBeenCalledWith({ uploadToServer: false });
   });
 });
 

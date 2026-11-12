@@ -26,14 +26,14 @@ export const CHAT_TYPOGRAPHY_SPEC: Record<
   ChatTypographyRole,
   { unit: 'px' | '%'; min: number; max: number; step: number; default: ChatTypographyEntry }
 > = {
-  body: { unit: 'px', min: 12, max: 20, step: 0.5, default: { size: 14.5, weight: 400 } },
-  h1: { unit: '%', min: 100, max: 250, step: 5, default: { size: 150, weight: 600 } },
-  h2: { unit: '%', min: 100, max: 250, step: 5, default: { size: 130, weight: 600 } },
-  h3: { unit: '%', min: 100, max: 250, step: 5, default: { size: 115, weight: 600 } },
+  body: { unit: 'px', min: 12, max: 20, step: 0.5, default: { size: 14, weight: 400 } },
+  h1: { unit: '%', min: 100, max: 250, step: 5, default: { size: 130, weight: 600 } },
+  h2: { unit: '%', min: 100, max: 250, step: 5, default: { size: 115, weight: 600 } },
+  h3: { unit: '%', min: 100, max: 250, step: 5, default: { size: 105, weight: 600 } },
   h4: { unit: '%', min: 80, max: 200, step: 5, default: { size: 100, weight: 600 } },
   table: { unit: '%', min: 70, max: 120, step: 5, default: { size: 90, weight: 400 } },
   inlineCode: { unit: '%', min: 70, max: 120, step: 5, default: { size: 85, weight: 400 } },
-  codeBlock: { unit: 'px', min: 9, max: 20, step: 0.5, default: { size: 10.5, weight: 400 } },
+  codeBlock: { unit: 'px', min: 9, max: 20, step: 0.5, default: { size: 12, weight: 400 } },
 };
 
 function cloneEntry(entry: ChatTypographyEntry): ChatTypographyEntry {

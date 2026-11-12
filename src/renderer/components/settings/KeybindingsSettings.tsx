@@ -13,6 +13,8 @@ import {
   type KeybindingAction,
 } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
+import { type PluginCommandRef, pluginCommandRefs } from '@/plugins/commands';
+import { resolvePluginKeybindings } from '@/plugins/keybindings';
 import { useSettingsStore } from '@/stores/settings';
 
 export function KeybindingsSettings() {
@@ -26,6 +28,140 @@ export function KeybindingsSettings() {
         </p>
       </div>
       <KeybindingsSection />
+      <PluginKeybindingsSection />
+    </div>
+  );
+}
+
+/** 设置窗口不挂 PluginUiHost，直接拉插件列表 */
+function usePluginCommandRefs(): PluginCommandRef[] {
+  const [commands, setCommands] = React.useState<PluginCommandRef[]>([]);
+  React.useEffect(() => {
+    const api = window.electronAPI.extensionPlugins;
+    let alive = true;
+    const load = () =>
+      void api.list().then((list) => alive && setCommands(pluginCommandRefs(list)));
+    load();
+    const off = api.onChanged(load);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+  return commands;
+}
+
+/** 插件命令快捷键：内置快捷键优先；默认键被占用时标出占用方，改键后生效 */
+function PluginKeybindingsSection() {
+  const { t } = useI18n();
+  const commands = usePluginCommandRefs();
+  const keybindings = useSettingsStore((s) => s.keybindings);
+  const setKeybinding = useSettingsStore((s) => s.setKeybinding);
+  const resetKeybinding = useSettingsStore((s) => s.resetKeybinding);
+  const [capturing, setCapturing] = React.useState<string | null>(null);
+  const [taken, setTaken] = React.useState<string | null>(null);
+  if (commands.length === 0) return null;
+  const builtin = effectiveKeybindings(keybindings);
+  const { rows } = resolvePluginKeybindings(commands, keybindings, builtin);
+  const labelOf = (action: string) =>
+    rows.find((row) => row.action === action)?.command.title ??
+    t(ACTION_LABEL_KEYS[action as KeybindingAction] ?? action);
+  const stop = () => {
+    setCapturing(null);
+    setTaken(null);
+  };
+
+  const capture = (e: React.KeyboardEvent, action: string, declared?: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') return stop();
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      setKeybinding(action, '');
+      return stop();
+    }
+    const binding = eventToBinding(e);
+    if (!binding) return;
+    const owner =
+      KEYBINDING_ACTIONS.find((a) => builtin[a] === binding) ??
+      rows.find((row) => row.action !== action && !row.conflict && row.binding === binding)?.action;
+    if (owner) return setTaken(owner);
+    if (binding === declared) resetKeybinding(action);
+    else setKeybinding(action, binding);
+    stop();
+  };
+
+  return (
+    <div className="space-y-2">
+      <h4 className="font-medium text-sm">插件命令</h4>
+      <div className="divide-y rounded-md border">
+        {rows.map(({ action, command, binding, custom, conflict }) => {
+          const isCapturing = capturing === action;
+          return (
+            <div key={action} className="flex items-center gap-3 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm">{command.title}</p>
+                <p className="text-muted-foreground text-xs">
+                  {command.pluginName}
+                  {conflict && !isCapturing && (
+                    <span className="ml-2 text-destructive">
+                      {t('Already used by "{{label}}"', { label: labelOf(conflict) })}
+                    </span>
+                  )}
+                </p>
+              </div>
+              {isCapturing && taken && (
+                <span className="text-destructive text-xs">
+                  {t('Already used by "{{label}}"', { label: labelOf(taken) })}
+                </span>
+              )}
+              {binding && !isCapturing && (
+                <button
+                  type="button"
+                  title={t('Remove shortcut')}
+                  onClick={() => setKeybinding(action, '')}
+                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {custom && !isCapturing && (
+                <button
+                  type="button"
+                  title={t('Reset to default')}
+                  onClick={() => resetKeybinding(action)}
+                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setCapturing(action);
+                  setTaken(null);
+                }}
+                onKeyDown={isCapturing ? (e) => capture(e, action, command.key) : undefined}
+                onBlur={() => isCapturing && stop()}
+                // biome-ignore lint/a11y/noAutofocus: 进入录制态即聚焦以捕获按键是预期交互
+                autoFocus={isCapturing}
+                className={cn(
+                  'rounded-md px-1 py-0.5 transition-colors',
+                  isCapturing ? 'ring-1 ring-ring' : 'hover:bg-muted',
+                  conflict && !isCapturing && 'opacity-50 line-through'
+                )}
+              >
+                {isCapturing ? (
+                  <span className="text-muted-foreground text-xs">{t('Press shortcut…')}</span>
+                ) : binding ? (
+                  <Kbd>{formatBinding(binding)}</Kbd>
+                ) : (
+                  <span className="text-muted-foreground text-xs">{t('No shortcut')}</span>
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

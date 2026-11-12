@@ -25,6 +25,7 @@ import {
   stopAgentWorker,
   stopAgentWorkerForQuit,
 } from '../../main/services/agentHost';
+import { readySecureStores } from '../../main/services/secureStores';
 import { loadUsageModelPricing } from '../../main/services/usage/aliases';
 import { disabledToolsForRun, type RunArgs } from './args';
 import { initialPrompt, nextGoalStep } from './goalDrive';
@@ -260,6 +261,8 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
     usageLog.write(usageSummaryRecord(transcript.calls, new Date().toISOString()));
   };
 
+  // MCP OAuth token 等凭据要先解密进内存，worker 起会话时才带得上
+  await readySecureStores();
   return await new Promise<number>((resolve) => {
     const cleanup = async () => {
       if (spawned) {

@@ -1,4 +1,4 @@
-import type { OauthFlowLocator } from '@shared/capabilities/types';
+import type { OauthFlowLocator } from '@shared/oauthFlow';
 import type { OauthLoginPrompt } from '@shared/types';
 import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, createElement } from 'react';

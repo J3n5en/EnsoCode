@@ -3,7 +3,7 @@
 import { Autocomplete as AutocompletePrimitive } from '@base-ui/react/autocomplete';
 import { ChevronsUpDownIcon, XIcon } from 'lucide-react';
 import * as React from 'react';
-
+import { nextClearLayerState } from '@/components/ui/autocompleteClearLayers';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,17 @@ import { cn } from '@/lib/utils';
 const Autocomplete = AutocompletePrimitive.Root;
 
 const clearTimers = new WeakMap<HTMLElement, number>();
+const clearAnimations = new WeakMap<HTMLElement, Animation[]>();
+
+/** 放弃进行中的清除动画，直接回到「按当前值显示」的状态 */
+function stopAutocompleteClear(wrap: HTMLElement) {
+  const timer = clearTimers.get(wrap);
+  if (timer !== undefined) window.clearTimeout(timer);
+  clearTimers.delete(wrap);
+  for (const animation of clearAnimations.get(wrap) ?? []) animation.cancel();
+  clearAnimations.delete(wrap);
+  wrap.classList.remove('is-clearing');
+}
 
 function motionNumber(name: string, fallback: number) {
   const value = Number.parseFloat(
@@ -20,13 +31,17 @@ function motionNumber(name: string, fallback: number) {
 }
 
 function syncAutocompleteClearLayers(wrap: HTMLElement) {
-  if (wrap.classList.contains('is-clearing')) return;
   const input = wrap.querySelector('input');
   const mirror = wrap.querySelector<HTMLElement>('.t-clear-mirror');
   if (!input || !mirror) return;
-  const hasValue = input.value.length > 0;
-  wrap.classList.toggle('has-value', hasValue);
-  mirror.textContent = hasValue ? input.value.replace(/ /g, '\u00a0') : '';
+  const state = nextClearLayerState({
+    value: input.value,
+    mirrorText: mirror.textContent ?? '',
+    clearing: wrap.classList.contains('is-clearing'),
+  });
+  if (state.superseded) stopAutocompleteClear(wrap);
+  wrap.classList.toggle('has-value', state.hasValue);
+  mirror.textContent = state.mirrorText;
 }
 
 function animateAutocompleteClear(button: HTMLElement) {
@@ -87,6 +102,7 @@ function animateAutocompleteClear(button: HTMLElement) {
     () => {
       outgoing.cancel();
       incoming.cancel();
+      clearAnimations.delete(wrap);
       wrap.classList.remove('is-clearing');
       mirror.textContent = '';
       clearTimers.delete(wrap);
@@ -95,6 +111,7 @@ function animateAutocompleteClear(button: HTMLElement) {
     Math.max(total, outDuration, inDuration)
   );
   clearTimers.set(wrap, timer);
+  clearAnimations.set(wrap, [outgoing, incoming]);
 }
 
 function AutocompleteInput({
@@ -114,10 +131,15 @@ function AutocompleteInput({
   const sizeValue = (size ?? 'default') as 'sm' | 'default' | 'lg' | number;
   const wrapRef = React.useRef<HTMLDivElement>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: effect 通过 ref 读写 DOM，依赖项是重定位 pill/镜像层的真实触发信号
+  // 每次都同步：值可能由外部程序化写入（浏览选目录、选中最近项目），不会触发 onInput
+  // 内容区组件也可能在本轮提交之后才把新值写进 input，所以再补一次下一帧同步
   React.useLayoutEffect(() => {
     if (wrapRef.current) syncAutocompleteClearLayers(wrapRef.current);
-  }, [props.value]);
+    const frame = window.requestAnimationFrame(() => {
+      if (wrapRef.current) syncAutocompleteClearLayers(wrapRef.current);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  });
 
   return (
     <div
