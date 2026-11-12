@@ -86,7 +86,8 @@ export function buildRemoteGrepScript(
   }
   parts.push('--', shellQuote(params.pattern), target);
   // 管道退出码默认取 head 的,正则写错/路径不存在会被吞成"无命中":保留 stderr,
-  // 用 PIPESTATUS 透传 rg/grep 自身的退出码(字符串脚本由 buildRemoteCommand 交给远端 bash -lc)
+  // 用 PIPESTATUS 透传 rg/grep 自身的退出码(字符串脚本由 buildRemoteCommand 交给远端 bash -lc)。
+  // 退出码 2 且 stdout 已有命中(部分文件不可读)由 remoteGrep 当部分结果返回;无输出的 2 仍是错误。
   return `${parts.join(' ')} | head -n ${limit}; exit "\${PIPESTATUS[0]}"`;
 }
 

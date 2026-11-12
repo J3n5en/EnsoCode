@@ -15,6 +15,12 @@ import {
 /** 报错只带 stderr 摘要:grep -r 遇到大量不可读文件时 stderr 可能很长,不能整段塞给模型 */
 const STDERR_SUMMARY_CHARS = 2000;
 
+function stderrSummary(stderr: string): string {
+  const trimmed = stderr.trim();
+  if (trimmed.length <= STDERR_SUMMARY_CHARS) return trimmed;
+  return `${trimmed.slice(0, STDERR_SUMMARY_CHARS)}\n…(stderr truncated)`;
+}
+
 export function createRemoteGrepToolDefinition(cwd: string, executor: SshExecutor): ToolDefinition {
   const base = createGrepToolDefinition(cwd) as unknown as ToolDefinition;
   let enginePromise: Promise<'rg' | 'grep'> | undefined;
@@ -36,16 +42,18 @@ export function createRemoteGrepToolDefinition(cwd: string, executor: SshExecuto
       // 之后 grep 再写会被 SIGPIPE 杀掉(141),远端忽略 SIGPIPE 时则以 EPIPE 退出 2,结果仍有效
       const lines = result.stdout.match(/\n/g)?.length ?? 0;
       const cutByHead = lines >= (grepParams.limit ?? REMOTE_GREP_DEFAULT_LIMIT);
-      if (result.code > 1 && !cutByHead) {
-        const stderr = result.stderr.trim();
-        const summary =
-          stderr.length > STDERR_SUMMARY_CHARS
-            ? `${stderr.slice(0, STDERR_SUMMARY_CHARS)}\n…(stderr truncated)`
-            : stderr;
+      const text = result.stdout.replace(/\n+$/, '');
+      // 退出码 2 且已有命中：有文件不可读，但已搜到的行仍然有效。无输出的 2（正则非法、路径不存在）仍报错。
+      const partial = result.code === 2 && text.length > 0 && !cutByHead;
+      if (result.code > 1 && !cutByHead && !partial) {
+        const summary = stderrSummary(result.stderr);
         throw new Error(summary || `remote grep failed (code ${result.code})`);
       }
-      const text = result.stdout.replace(/\n+$/, '');
-      return { content: [{ type: 'text', text: text || 'No matches found' }], details: undefined };
+      const warning = partial ? stderrSummary(result.stderr) : '';
+      const body = warning
+        ? `${text}\n\n[remote grep: some paths were unreadable]\n${warning}`
+        : text || 'No matches found';
+      return { content: [{ type: 'text', text: body }], details: undefined };
     },
   };
 }

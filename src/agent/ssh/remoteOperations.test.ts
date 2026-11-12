@@ -176,6 +176,7 @@ describe('buildRemoteGrepScript', () => {
     expect(script).toContain("'foo.*bar'");
     expect(script).toContain("'/srv/app/src'");
     expect(script).toContain('head -n');
+    expect(script).toContain('PIPESTATUS[0]');
   });
 
   it('grep 引擎降级:literal 用 -F,glob 映射 --include', () => {

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ExtensionToolContext } from '@earendil-works/pi-coding-agent';
@@ -9,14 +9,16 @@ import { createRemoteGrepToolDefinition } from './remoteGrep';
 
 const ctx = undefined as unknown as ExtensionToolContext;
 
-function fakeExecutor(handler: (command: string[] | string) => { stdout?: string; code?: number }) {
+function fakeExecutor(
+  handler: (command: string[] | string) => { stdout?: string; stderr?: string; code?: number }
+) {
   const calls: (string[] | string)[] = [];
   const executor = {
     host: 'h',
     async exec(command: string[] | string) {
       calls.push(command);
       const r = handler(command);
-      return { stdout: r.stdout ?? '', stderr: '', code: r.code ?? 0 };
+      return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.code ?? 0 };
     },
     async execRaw() {
       throw new Error('unused');
@@ -62,6 +64,33 @@ describe('createRemoteGrepToolDefinition', () => {
       type: 'text',
       text: expect.stringMatching(/no matches/i),
     });
+  });
+
+  it('退出码 2 但已有命中时返回命中，并附上 stderr 摘要', async () => {
+    const { executor } = fakeExecutor((cmd) => {
+      if (typeof cmd === 'string' && cmd.includes('command -v rg')) return { code: 1 };
+      return {
+        stdout: 'ok.txt:1:token-hit\n',
+        stderr: 'grep: locked: Permission denied\n',
+        code: 2,
+      };
+    });
+    const tool = createRemoteGrepToolDefinition('/srv/app', executor);
+    const result = await tool.execute('t1', { pattern: 'token-hit' }, undefined, undefined, ctx);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain('ok.txt:1:token-hit');
+    expect(text).toContain('Permission denied');
+  });
+
+  it('退出码 2 且没有输出仍然报错', async () => {
+    const { executor } = fakeExecutor((cmd) => {
+      if (typeof cmd === 'string' && cmd.includes('command -v rg')) return { code: 1 };
+      return { stdout: '', stderr: 'grep: missing-dir: No such file or directory', code: 2 };
+    });
+    const tool = createRemoteGrepToolDefinition('/srv/app', executor);
+    await expect(
+      tool.execute('t1', { pattern: 'token-hit' }, undefined, undefined, ctx)
+    ).rejects.toThrow(/missing-dir/);
   });
 });
 
@@ -165,5 +194,22 @@ describe('远端 grep 真实管道', () => {
     );
     const text = (result.content[0] as { text: string }).text;
     expect(text.split('\n')).toHaveLength(5);
+  });
+
+  it('有文件不可读但其余文件已命中时仍返回命中', async () => {
+    writeFileSync(path.join(tmp, 'ok.txt'), 'token-hit\n');
+    const locked = path.join(tmp, 'locked');
+    mkdirSync(locked);
+    writeFileSync(path.join(locked, 'hidden.txt'), 'token-hit\n');
+    chmodSync(locked, 0o000);
+    try {
+      const tool = createRemoteGrepToolDefinition(tmp, localBashExecutor());
+      const result = await tool.execute('t1', { pattern: 'token-hit' }, undefined, undefined, ctx);
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain('token-hit');
+      expect(text).toContain('ok.txt');
+    } finally {
+      chmodSync(locked, 0o755);
+    }
   });
 });
