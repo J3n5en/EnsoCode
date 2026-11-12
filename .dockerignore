@@ -4,5 +4,8 @@ dist
 .git
 packages/relay-go/frontend
 packages/phone/dist
+enso-relay-linux-*
 resources/rtk/*-*
 *.log
+.env
+.env.*
