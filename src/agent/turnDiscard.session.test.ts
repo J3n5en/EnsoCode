@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { AssistantMessage, TranscriptContext } from '@earendil-works/pi-ai';
 import { getModel } from '@earendil-works/pi-ai/compat';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -13,7 +14,24 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { PLUGIN_MESSAGE_TYPE } from '@shared/extensionPlugins/protocol';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createTurnDiscardTools, turnDiscardExtension } from './turnDiscard';
+import {
+  createTurnDiscardState,
+  createTurnDiscardTools,
+  turnDiscardExtension,
+} from './turnDiscard';
+
+const probe = (name: string, readOnlyHint: boolean): ToolDefinition =>
+  ({
+    name,
+    label: name,
+    description: name,
+    parameters: { type: 'object', properties: {} },
+    annotations: { readOnlyHint },
+    execute: async () => ({
+      content: [{ type: 'text', text: `${name}-OUTPUT` }],
+      details: undefined,
+    }),
+  }) as unknown as ToolDefinition;
 
 const model = getModel('openai', 'gpt-4o-mini');
 if (!model) throw new Error('Test model is not available in the bundled Pi catalog.');
@@ -63,6 +81,7 @@ async function setup(plans: AssistantMessage[]) {
     stream.push({ type: 'done', reason: message.stopReason as 'stop', message });
     return stream;
   });
+  const state = createTurnDiscardState();
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir,
@@ -72,7 +91,7 @@ async function setup(plans: AssistantMessage[]) {
     noThemes: true,
     noContextFiles: true,
     systemPrompt: 'Turn discard test.',
-    extensionFactories: [turnDiscardExtension()],
+    extensionFactories: [turnDiscardExtension(state)],
   });
   await resourceLoader.reload();
   const manager = SessionManager.create(cwd, path.join(root, 'sessions'));
@@ -89,7 +108,7 @@ async function setup(plans: AssistantMessage[]) {
       compaction: { enabled: false },
     }),
     noTools: 'builtin',
-    customTools: createTurnDiscardTools(),
+    customTools: [probe('lookup', true), probe('mutate', false), ...createTurnDiscardTools(state)],
   });
   cleanups.push(() => {
     session.dispose();
@@ -130,12 +149,41 @@ it('丢弃本轮后立即结束，后续请求只见痕迹不见投递原文与�
   expect(raw).toContain('NVIDIA-CHIP-NEWS');
 });
 
-it('用户消息触发的轮次调用 turn_discard 报错，不写任何 context_edit', async () => {
-  const { session, manager } = await setup([
+const use = (name: string) => reply([{ type: 'toolCall', id: `p-${name}`, name, arguments: {} }]);
+
+it('只读工具查过再丢：查询结果连同投递一起离开上下文', async () => {
+  const { manager, requests, deliver } = await setup([
+    use('lookup'),
+    discard('checked, unrelated'),
+    reply([{ type: 'text', text: 'handled' }]),
+  ]);
+  await deliver('NVIDIA-CHIP-NEWS');
+  await deliver('EnsoCode bug report');
+  const last = JSON.stringify(requests.at(-1)!.messages);
+  expect(last).not.toContain('NVIDIA-CHIP-NEWS');
+  expect(last).not.toContain('lookup-OUTPUT');
+  expect(last).toContain('checked, unrelated');
+  expect(manager.getBranch().some((entry) => entry.type === 'context_edit')).toBe(true);
+});
+
+it('本轮调用过有副作用的工具时 turn_discard 报错，不写 context_edit', async () => {
+  const { manager, deliver } = await setup([
+    use('mutate'),
     discard('nope'),
     reply([{ type: 'text', text: 'ok' }]),
   ]);
-  await session.prompt('hello');
+  await deliver('NVIDIA-CHIP-NEWS');
   expect(manager.getBranch().some((entry) => entry.type === 'context_edit')).toBe(false);
-  expect(JSON.stringify(manager.buildSessionProjection().messages)).toContain('hello');
+});
+
+it('用户消息触发的轮次可丢弃，之后只见痕迹', async () => {
+  const { session, requests } = await setup([
+    discard('throwaway question'),
+    reply([{ type: 'text', text: 'ok' }]),
+  ]);
+  await session.prompt('SIDE-QUESTION');
+  await session.prompt('next');
+  const last = JSON.stringify(requests.at(-1)!.messages);
+  expect(last).not.toContain('SIDE-QUESTION');
+  expect(last).toContain('throwaway question');
 });

@@ -21,6 +21,7 @@ export const TOOL_SECTION = {
   computer: 'execution',
   image_generation: 'execution',
   memory: 'context',
+  turn_discard: 'context',
 } as const satisfies Record<string, ToolSectionId>;
 
 export function builtinToolsInSection<T extends { id: string }>(

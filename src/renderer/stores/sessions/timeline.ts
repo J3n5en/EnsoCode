@@ -184,6 +184,8 @@ export type TimelineItem =
       pluginId: string;
       pluginName: string;
       messages: string[];
+      /** 丢弃前用过的只读工具 */
+      tools: { name: string; summary: string }[];
       expanded: boolean;
     };
 
@@ -1758,7 +1760,7 @@ function pairExploreFolds(
 
 const TURN_DISCARD_HEAD = /^Turn discarded:\s*/;
 
-/** 连续插件投递到成功的 turn_discard（其间只有思考/正文）收成一行 */
+/** 连续插件投递到成功的 turn_discard（其间只有思考/正文/只读工具）收成一行 */
 function pairTurnDiscards(
   items: TimelineItem[],
   expandedKeys: ReadonlySet<string>
@@ -1769,18 +1771,19 @@ function pairTurnDiscards(
       let start = result.length;
       while (
         start > 0 &&
-        (result[start - 1].kind === 'thinking' || result[start - 1].kind === 'text')
+        (result[start - 1].kind === 'thinking' ||
+          result[start - 1].kind === 'text' ||
+          result[start - 1].kind === 'tool')
       )
         start--;
       const first = start;
       while (start > 0 && result[start - 1].kind === 'plugin-message') start--;
       if (start < first) {
-        const plugins = result
-          .splice(start)
-          .filter(
-            (row): row is Extract<TimelineItem, { kind: 'plugin-message' }> =>
-              row.kind === 'plugin-message'
-          );
+        const rows = result.splice(start);
+        const plugins = rows.filter(
+          (row): row is Extract<TimelineItem, { kind: 'plugin-message' }> =>
+            row.kind === 'plugin-message'
+        );
         const key = `discard-${plugins[0].key}`;
         result.push({
           kind: 'discarded-turn',
@@ -1789,6 +1792,9 @@ function pairTurnDiscards(
           pluginId: plugins[0].pluginId,
           pluginName: plugins[0].pluginName,
           messages: plugins.map((row) => row.text),
+          tools: rows.flatMap((row) =>
+            row.kind === 'tool' ? [{ name: row.name, summary: row.summary }] : []
+          ),
           expanded: expandedKeys.has(key),
         });
         continue;

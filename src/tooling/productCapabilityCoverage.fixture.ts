@@ -445,6 +445,7 @@ export const BUILTIN_TOOL_COVERAGE: Readonly<Record<string, CoverageDisposition>
   memory: surfaces('coding-tools.memory'),
   computer: surfaces('coding-tools.computer'),
   plan: surfaces('coding-tools.plan'),
+  turn_discard: excluded('Context bookkeeping inside the coding agent; not an Enso capability.'),
 };
 
 export const BUILTIN_AGENT_TYPE_COVERAGE: Readonly<Record<string, CoverageDisposition>> = {

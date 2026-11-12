@@ -65,6 +65,12 @@ export const BUILTIN_TOOLS: BuiltinToolInfo[] = [
       'Long-term memory: the agent can search, capture and consolidate durable decisions, preferences and lessons across sessions',
   },
   {
+    id: 'turn_discard',
+    name: 'Turn discard',
+    description:
+      'Let the agent drop an irrelevant automatic delivery or throwaway exchange from its context; the timeline keeps it and turn_recall can read it back',
+  },
+  {
     id: 'isolated_sandbox',
     name: 'Isolated sandbox',
     description:

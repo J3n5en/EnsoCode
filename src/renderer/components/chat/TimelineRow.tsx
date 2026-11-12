@@ -261,7 +261,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.expanded === b.expanded &&
         a.reason === b.reason &&
         a.messages.length === b.messages.length &&
-        a.messages.every((text, i) => text === b.messages[i])
+        a.messages.every((text, i) => text === b.messages[i]) &&
+        a.tools.length === b.tools.length
       );
   }
 }
@@ -1068,6 +1069,12 @@ function DiscardedTurnRow({
             // biome-ignore lint/suspicious/noArrayIndexKey: 投递原文只读、顺序固定
             <p key={i} className="whitespace-pre-wrap break-words text-foreground">
               {text}
+            </p>
+          ))}
+          {item.tools.map((tool, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 只读工具记录只读、顺序固定
+            <p key={i} className={cn('truncate', SUBTLE_TEXT)}>
+              {toolLabel(tool.name, t)} {tool.summary}
             </p>
           ))}
         </div>

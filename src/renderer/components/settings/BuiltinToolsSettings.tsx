@@ -25,6 +25,7 @@ import {
   ShieldAlert,
   ShieldX,
   Shrink,
+  SkipForward,
   SquareTerminal,
   Trash2,
   TriangleAlert,
@@ -83,6 +84,7 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   memory: Brain,
   isolated_sandbox: Box,
   computer: Monitor,
+  turn_discard: SkipForward,
 };
 
 function ToolRow({

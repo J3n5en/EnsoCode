@@ -1045,6 +1045,18 @@ describe('foldTimeline 丢弃本轮折叠（插件投递 → turn_discard）', (
     );
   });
 
+  it('丢弃前用只读工具查过：查询行一并收进，展开可见', () => {
+    const items = [
+      plugin('p1', 'news'),
+      toolItem('t1', 'plugin_enso-tgclient__tg_get_messages'),
+      thinkingItem('th'),
+      discard('d'),
+    ];
+    const [row] = foldTimeline(items, false, new Set()) as Discarded[];
+    expect(row).toMatchObject({ kind: 'discarded-turn', key: 'discard-p1' });
+    expect(row.tools.map((tool) => tool.name)).toEqual(['plugin_enso-tgclient__tg_get_messages']);
+  });
+
   it('turn_discard 未完成、失败或前面不是插件投递时不折叠', () => {
     const running = [plugin('p', 'x'), discard('d', 'running')];
     expect(keys(foldTimeline(running, true, new Set()))).toEqual(['p', 'd']);

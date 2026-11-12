@@ -23,6 +23,7 @@ const row = (expanded: boolean): TimelineItem => ({
   pluginId: 'enso.tgclient',
   pluginName: 'Telegram',
   messages: ['NVIDIA-NEWS'],
+  tools: [{ name: 'read', summary: 'README.md' }],
   expanded,
 });
 const html = (item: TimelineItem) => renderToStaticMarkup(createElement(TimelineRow, { item }));
@@ -32,5 +33,8 @@ it('丢弃的一轮收起时只有一行原因，展开才显示投递原文', (
   expect(closed).toContain('Turn discard');
   expect(closed).toContain('Telegram · chip news');
   expect(closed).not.toContain('NVIDIA-NEWS');
-  expect(html(row(true))).toContain('NVIDIA-NEWS');
+  expect(closed).not.toContain('README.md');
+  const open = html(row(true));
+  expect(open).toContain('NVIDIA-NEWS');
+  expect(open).toContain('README.md');
 });
