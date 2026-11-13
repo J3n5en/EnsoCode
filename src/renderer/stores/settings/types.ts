@@ -181,6 +181,8 @@ export interface SettingsState {
   botModeEnabled: boolean;
   /** 实验功能：临时会话；缺省关，关闭只藏入口，不删已有会话 */
   scratchSessionsEnabled: boolean;
+  /** 实验功能（macOS）：Finder 拖文件时屏幕右上角弹出投放浮窗；缺省关 */
+  dropShelfEnabled: boolean;
   /** Bot 群聊智能选人的分类来源；null 走标题模型回退链 judge */
   botRouteClassifier: VirtualClassifierConfig | null;
   /** Bot 辅助任务（自动设置能力等）用的模型；null 跟随默认模型 */
@@ -413,6 +415,7 @@ export interface SettingsState {
   setVoiceInputEnabled: (value: boolean) => void;
   setBotModeEnabled: (value: boolean) => void;
   setScratchSessionsEnabled: (value: boolean) => void;
+  setDropShelfEnabled: (value: boolean) => void;
   setBotRouteClassifier: (value: VirtualClassifierConfig | null) => void;
   setBotAssistantModel: (value: DefaultModelRef | null) => void;
   setBotMaxRunningTurns: (value: number) => void;

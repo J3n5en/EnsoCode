@@ -1,4 +1,5 @@
 import { app, type BrowserWindow } from 'electron';
+import { registerDropShelfHandlers } from '../desktop/dropShelf';
 import { registerNodeRemoteHandlers } from '../services/nodeRemote';
 import { registerBrowserHandlers } from './browser';
 import { registerComputerHandlers } from './computer';
@@ -16,6 +17,7 @@ export function registerDesktopIpcHandlers(): void {
   registerExtensionPluginDesktopHandlers();
   registerComputerHandlers();
   registerNodeRemoteHandlers();
+  registerDropShelfHandlers();
   app.on('browser-window-created', (_event, win: BrowserWindow) => {
     attachWindowStateEvents(win);
   });

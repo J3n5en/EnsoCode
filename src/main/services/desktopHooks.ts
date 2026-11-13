@@ -45,6 +45,7 @@ export interface AppDesktop {
   downloadUpdate(): Promise<void>;
   syncTrayToggleShortcut(keybindings: unknown): void;
   syncAppLanguage(): void;
+  syncDropShelf(enabled: boolean): void;
 }
 
 const appDesktopNoop: AppDesktop = {
@@ -57,6 +58,7 @@ const appDesktopNoop: AppDesktop = {
   },
   syncTrayToggleShortcut() {},
   syncAppLanguage() {},
+  syncDropShelf() {},
 };
 
 const sessionDesktopNoop: SessionDesktop = {

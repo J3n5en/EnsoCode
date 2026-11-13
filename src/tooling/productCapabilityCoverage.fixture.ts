@@ -65,6 +65,7 @@ export const SETTINGS_DATA_COVERAGE = {
   scratchSessionsEnabled: excluded(
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
   ),
+  dropShelfEnabled: excluded('Experimental macOS drop shelf toggle; device-local window.'),
   botMaxRunningTurns: excluded('Device-local Bot concurrency limit; not an Enso capability.'),
   botDiscussModeEnabled: excluded(
     'Experimental Bot group discussion toggle; device-local, not an Enso capability.'
@@ -246,6 +247,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setScratchSessionsEnabled: excluded(
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
   ),
+  setDropShelfEnabled: excluded('Experimental macOS drop shelf toggle; device-local window.'),
   setBotRouteClassifier: excluded(
     'Bot group smart-routing model preference; not an Enso capability.'
   ),
@@ -517,6 +519,10 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   APP_FLUSH_PERSIST_RESPONSE: excluded('Renderer-to-main persist flush ack.'),
   APP_SET_BADGE_COUNT: excluded('Renderer-to-main Dock badge count for waiting conversations.'),
+  DROP_SHELF_STATE: excluded('Main-to-shelf window visual state for the macOS drop shelf.'),
+  DROP_SHELF_DROP: excluded('Drop shelf window hands dropped Finder paths to main.'),
+  DROP_SHELF_PENDING: excluded('Main-to-renderer ping that drop shelf paths are waiting.'),
+  DROP_SHELF_TAKE: excluded('Local main renderer takes paths dropped on the shelf.'),
   PROVIDERS_SCAN_LOCAL: surfaces('providers.import-local'),
   PROVIDERS_COLLECT_IMPORT: excluded('Second phase of the reviewed provider import flow.'),
   PROVIDERS_LIST_MODELS: surfaces('providers.fetch-models'),

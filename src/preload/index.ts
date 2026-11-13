@@ -8,6 +8,7 @@ import type {
 } from '@shared/btw';
 import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
 import type { CaCertStatus } from '@shared/caCert';
+import type { DropShelfDelivery } from '@shared/dropShelf';
 import type { ElevationRequestView } from '@shared/elevation';
 import type {
   ChatModelDto,
@@ -821,6 +822,14 @@ const electronAPI = {
     /** 在 root 下按文件名/路径模糊搜索（@ 提及用） */
     search: (root: string, query: string): Promise<{ relativePath: string; name: string }[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILES_SEARCH, root, query),
+    /** 拖放浮窗收到的路径：Main 推 pending 提醒，renderer 主动取走 */
+    takeShelfDrop: (): Promise<DropShelfDelivery[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.DROP_SHELF_TAKE),
+    onShelfDrop: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.DROP_SHELF_PENDING, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.DROP_SHELF_PENDING, listener);
+    },
     /** 取粘贴/拖入的 File 对象的磁盘路径（渲染层拿不到，需经 webUtils） */
     pathForFile: (file: File): string => webUtils.getPathForFile(file),
     /**
