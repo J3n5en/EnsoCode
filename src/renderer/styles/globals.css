@@ -290,6 +290,11 @@ html.enso-chat-wide .enso-chat-col {
   max-width: none;
 }
 
+/* OS 文件拖入期间 iframe（插件页等）不接指针，否则拖到其上父文档收不到 dragover/drop */
+html[data-file-dragging] iframe {
+  pointer-events: none;
+}
+
 /**
  * @pierre/diffs（edit diff / read 文件视图）：shadow 内 host/pre/gutter/content/行
  * 多层元素都各自刷 --diffs-bg，若给它设半透明色会叠成近乎不透明。

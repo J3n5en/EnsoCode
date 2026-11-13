@@ -38,23 +38,76 @@ export function pickDroppedDirectories(
   };
 }
 
-export type DropZones = { project: boolean; attach: boolean };
+export type DroppedEntry<F> = DroppedPath & { file: F };
+
+type DropFileLike = { size: number; type: string };
+
+export type DropDataLike<F> = {
+  items?: ArrayLike<{
+    kind: string;
+    getAsFile(): F | null;
+    webkitGetAsEntry?(): { isDirectory: boolean } | null;
+  }> | null;
+  files?: ArrayLike<F> | null;
+};
 
 /**
- * 拖动中只能读到 item 的 kind/type，读不到 entry。目录的 type 恒为空，
- * 所以全部带 MIME 的必是文件，只给「引用」；有空 type 或读不到列表时两个都给。
+ * drop 时刻同步读取（之后 DataTransfer 即失效）。只取 kind=file 且有磁盘路径的项：
+ * 链接、文本片段是 string 项，网页里拖出的图片拿不到路径，一律丢弃。
  */
-export function dropZonesFor(input: {
-  types: readonly string[];
-  items: readonly { kind: string; type: string }[];
-  composerReady: boolean;
-}): DropZones {
-  if (!input.types.includes('Files')) return { project: false, attach: false };
-  const files = input.items.filter((item) => item.kind === 'file');
-  return {
-    project: files.length === 0 || files.some((item) => item.type === ''),
-    attach: input.composerReady,
+export function readDroppedEntries<F extends DropFileLike>(
+  data: DropDataLike<F>,
+  pathFor: (file: F) => string
+): DroppedEntry<F>[] {
+  const safePath = (file: F) => {
+    try {
+      return pathFor(file).trim();
+    } catch {
+      return '';
+    }
   };
+  const guessDirectory = (file: F) => file.size === 0 && file.type === '';
+  const rows: DroppedEntry<F>[] = [];
+  const items = data.items;
+  if (items && items.length > 0) {
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      if (item.kind !== 'file') continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      const path = safePath(file);
+      if (!path) continue;
+      const entry = item.webkitGetAsEntry?.();
+      rows.push({ path, isDirectory: entry ? entry.isDirectory : guessDirectory(file), file });
+    }
+    return rows;
+  }
+  for (const file of Array.from(data.files ?? [])) {
+    const path = safePath(file);
+    if (path) rows.push({ path, isDirectory: guessDirectory(file), file });
+  }
+  return rows;
+}
+
+export type DropPlan<F> =
+  | ({ kind: 'projects' } & PickDroppedDirectoriesResult)
+  | { kind: 'files'; files: F[]; names: string[] };
+
+/** 有目录就按项目打开（混入的文件计入 skippedFiles），否则作为附件；都没有返回 null。 */
+export function planDrop<F>(entries: readonly DroppedEntry<F>[]): DropPlan<F> | null {
+  const picked = pickDroppedDirectories(entries);
+  if (picked.directories.length > 0) return { kind: 'projects', ...picked };
+  const seen = new Set<string>();
+  const files: F[] = [];
+  const names: string[] = [];
+  for (const entry of entries) {
+    const path = entry.path.trim();
+    if (!path || entry.isDirectory || seen.has(path)) continue;
+    seen.add(path);
+    files.push(entry.file);
+    names.push(path.split(/[\\/]/).filter(Boolean).at(-1) ?? path);
+  }
+  return files.length > 0 ? { kind: 'files', files, names } : null;
 }
 
 export const DROP_HIGHLIGHT_WATCHDOG_MS = 150;
