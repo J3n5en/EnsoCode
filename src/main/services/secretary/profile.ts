@@ -24,9 +24,9 @@ type ModelPatch = NonNullable<SecretaryProfile['model']>;
 /** Main 侧的档案写入数据源；测试注入假实现，生产走文件末尾的 secretaryProfilePorts */
 export interface SecretaryProfilePorts {
   /** null = 还没完成初次设置 */
-  profile(): MaybePromise<SecretaryProfile | null>;
+  profile(): SecretaryProfile | null;
   saveProfile(profile: SecretaryProfile): SecretaryProfile;
-  persona(): MaybePromise<string>;
+  persona(): string;
   writePersona(persona: string): void;
   /** 清掉 profile.json / persona.md / avatar.png */
   clearFiles(): void;
@@ -152,8 +152,8 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     async save(draft, secretaryConversationId) {
       const parsed = parseProfileDraft(draft);
       if (!parsed.ok) return parsed;
-      const before = await ports.profile();
-      const personaBefore = await ports.persona();
+      const before = ports.profile();
+      const personaBefore = ports.persona();
       const profile = ports.saveProfile(mergeProfile(before, parsed.draft, ports.now()));
       const persona = parsed.draft.persona;
       if (persona !== undefined) ports.writePersona(persona);

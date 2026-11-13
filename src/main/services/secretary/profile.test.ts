@@ -70,9 +70,10 @@ function harness(
   };
   const conversations = options.conversations ?? ['sec-1'];
   h.ports = {
-    profile: () => h.saved,
+    // 与磁盘一致：读出的是副本
+    profile: () => structuredClone(h.saved),
     saveProfile: (profile) => {
-      h.saved = profile;
+      h.saved = structuredClone(profile);
       return profile;
     },
     persona: () => h.persona,
@@ -332,5 +333,14 @@ describe('配置提案', () => {
       await h.service.propose({ autonomy: 'god' }, { secretaryConversationId: 'sec-1' })
     ).toEqual({ ok: false, error: 'invalid autonomy' });
     expect(h.file.proposals).toEqual({});
+  });
+
+  it('两处同时保存不同字段时都不丢', async () => {
+    const h = harness({ profile: baseProfile() });
+    await Promise.all([
+      h.service.save({ addressAs: '老板' }, null),
+      h.service.save({ dailyBriefAt: '09:30' }, null),
+    ]);
+    expect(h.saved).toMatchObject({ addressAs: '老板', dailyBriefAt: '09:30' });
   });
 });
