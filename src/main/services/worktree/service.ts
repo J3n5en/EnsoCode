@@ -120,6 +120,11 @@ export async function repoIsClean(repoPath: string): Promise<boolean> {
   return porcelain.length === 0;
 }
 
+/** 当前分支名；detached HEAD 返回 null，非 git 目录抛错 */
+export async function currentBranch(repoPath: string): Promise<string | null> {
+  return (await git(repoPath, 'branch', '--show-current')) || null;
+}
+
 /**
  * 删除 worktree（强制，未提交改动由上层拦截确认）。分支保留。
  * 目录已被手动删除时仅清理 git 元数据。

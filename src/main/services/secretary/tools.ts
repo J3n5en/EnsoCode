@@ -1,4 +1,5 @@
 import type { SecretaryOp } from '@shared/secretary/tools';
+import { secretaryReadHandlers } from './readers';
 
 export type SecretaryOpResult = { ok: true; result: unknown } | { ok: false; error: string };
 
@@ -16,10 +17,7 @@ export type SecretaryOpHandler = (
 const unavailable: SecretaryOpHandler = () => ({ ok: false, error: 'unavailable' });
 
 export const SECRETARY_OP_HANDLERS: Record<SecretaryOp, SecretaryOpHandler> = {
-  project_list: unavailable,
-  project_info: unavailable,
-  session_list: unavailable,
-  session_read: unavailable,
+  ...secretaryReadHandlers,
   session_create: unavailable,
   session_send: unavailable,
   session_stop: unavailable,

@@ -5,6 +5,7 @@ import { app, ipcMain, powerMonitor, type RendererContents } from '@platform';
 import { browserSessionKey } from '@shared/bots/browser';
 import { type ChildSessionIdentity, isUuid, type SessionIdentity } from '@shared/builtinAgents';
 import { conversationCwd } from '@shared/conversationCwd';
+import type { PluginSessionStatus } from '@shared/extensionPlugins/events';
 import { normalizeLocale } from '@shared/i18n';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { resolveSshTarget } from '@shared/ssh';
@@ -267,6 +268,17 @@ export function getAgentService(): AgentService | null {
 
 export function getSourceAuthorityRegistry(): SourceAuthorityRegistry | null {
   return sourceAuthority;
+}
+
+/**
+ * 只读会话状态：秘书的 session_list / session_read 与插件查询同源。
+ * worker 活着但状态跟踪器还没收到事件时按运行中算，避免把在跑的会话报成空闲。
+ */
+export function observedSessionStatus(sessionId: string): PluginSessionStatus {
+  const status = pluginSessionStates.status(sessionId);
+  return status.state === 'idle' && agentSessionIndex.workspaceTreeRunning(status.sessionId)
+    ? { ...status, state: 'running' }
+    : status;
 }
 
 /** Bot 会话宿主订阅 worker 事件（turn 结果、运行态） */
@@ -1369,12 +1381,7 @@ export function registerAgentHandlers(): void {
         ...sessionSource(),
         projects: sourceAuthority?.projection().projects ?? [],
       }),
-    status: (sessionId) => {
-      const status = pluginSessionStates.status(sessionId);
-      return status.state === 'idle' && agentSessionIndex.workspaceTreeRunning(status.sessionId)
-        ? { ...status, state: 'running' }
-        : status;
-    },
+    status: (sessionId) => observedSessionStatus(sessionId),
   });
   wirePairAgentBridge();
   wirePairSessionHost();
