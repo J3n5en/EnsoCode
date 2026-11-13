@@ -73,6 +73,15 @@ describe('send-message binding', () => {
     ]);
   });
 
+  it('打开秘书有默认绑定且不与其它动作冲突', () => {
+    expect(KEYBINDING_ACTIONS).toContain('open-secretary');
+    const binding = DEFAULT_KEYBINDINGS['open-secretary'];
+    expect(binding).toBe('mod+shift+s');
+    expect(KEYBINDING_ACTIONS.filter((action) => DEFAULT_KEYBINDINGS[action] === binding)).toEqual([
+      'open-secretary',
+    ]);
+  });
+
   it('空覆盖表示删除，不回落到默认', () => {
     expect(effectiveKeybindings({ 'toggle-minimize-to-tray': '' })['toggle-minimize-to-tray']).toBe(
       ''

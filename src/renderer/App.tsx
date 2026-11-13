@@ -64,6 +64,7 @@ import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, isEventInSidePanel } from '@/lib/keybindings';
 import { easeOutLayout, springStandard } from '@/lib/motion';
+import { openSecretary } from '@/lib/openSecretary';
 import {
   addSidePanelBtw,
   addSidePanelTerminal,
@@ -250,6 +251,7 @@ export default function App() {
 
   // 秘书开关打开即常驻订阅：聊天里的确认卡片与工作台读同一份 Main 状态
   const secretaryEnabled = useSettingsStore((s) => s.secretaryEnabled);
+  const secretaryWelcomeOpen = useSecretaryStore((s) => s.welcomeOpen);
   useEffect(
     () => (secretaryEnabled ? useSecretaryStore.getState().bind() : undefined),
     [secretaryEnabled]
@@ -320,6 +322,7 @@ export default function App() {
           'close-side-tab',
           'find-in-chat',
           'search-workspace',
+          'open-secretary',
         ].some((key) => pressed === bindings[key as keyof typeof bindings])
       ) {
         return;
@@ -331,6 +334,11 @@ export default function App() {
       } else if (pressed === bindings['open-settings']) {
         e.preventDefault();
         void window.electronAPI.window.openSettings();
+      } else if (pressed === bindings['open-secretary']) {
+        if (useSettingsStore.getState().secretaryEnabled) {
+          e.preventDefault();
+          openSecretary();
+        }
       } else if (pressed === bindings['new-conversation']) {
         e.preventDefault();
         startNewConversation();
@@ -688,6 +696,23 @@ export default function App() {
                 card={desktopShell}
                 titleRow={titleRowPanel}
               />
+              {/* 秘书欢迎页的挂载点：初次设置完成前盖住主区域，页面内容由设置流程提供 */}
+              {secretaryEnabled && secretaryWelcomeOpen && (
+                <div
+                  data-enso="secretary-welcome"
+                  className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background px-6 text-center"
+                >
+                  <p className="text-sm font-medium">{t('Set up your secretary')}</p>
+                  <p className="max-w-sm text-xs text-muted-foreground">
+                    {t(
+                      'Pick a name, a model and how much it may do on its own. The secretary then watches your projects and reports back here.'
+                    )}
+                  </p>
+                  <Button size="sm" onClick={() => useSecretaryStore.getState().closeWelcome()}>
+                    {t('Close')}
+                  </Button>
+                </div>
+              )}
             </div>
           </DndContext>
         )}

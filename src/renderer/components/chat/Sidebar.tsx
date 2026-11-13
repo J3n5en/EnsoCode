@@ -50,7 +50,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type * as React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWindowChromeKind } from '@/components/app/WindowChrome';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
@@ -81,6 +81,13 @@ import {
 } from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
 import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
+import { SecretaryOriginBadge } from '@/components/secretary/SecretaryOriginBadge';
+import {
+  SecretaryCollapsedButton,
+  SecretarySidebarSection,
+  secretarySectionView,
+  sidebarProjects,
+} from '@/components/secretary/SecretarySidebarSection';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -119,10 +126,12 @@ import {
 } from '@/lib/importLocalProject';
 import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
+import { openSecretary } from '@/lib/openSecretary';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
+import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import {
   activeConversationIds,
@@ -171,6 +180,9 @@ const ARCHIVE_PURGE_DAYS = [7, 15, 30] as const;
 const SHOW_MORE_CLASS =
   'h-6.5 rounded-lg px-2 text-xs text-subtle-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
 const SCRATCH_COLLAPSED_KEY = 'enso-collapsed-scratch';
+const SECRETARY_COLLAPSED_KEY = 'enso-collapsed-secretary';
+/** 秘书伪项目默认只列最近几条，其余折叠 */
+const SECRETARY_VISIBLE_LIMIT = 3;
 
 const ICON_BUTTON_CLASS =
   'flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
@@ -284,11 +296,49 @@ export function Sidebar({
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>(() =>
     readSidebarOrder(PROJECT_ORDER_KEY)
   );
-  const orderedProjects = applyProjectOrder(
-    projects.filter((project) => project.kind !== 'scratch' && project.kind !== 'secretary'),
-    projectOrderIds
-  );
+  const orderedProjects = applyProjectOrder(sidebarProjects(projects), projectOrderIds);
   const scratchProject = projects.find((project) => project.kind === 'scratch');
+
+  // 秘书是置顶伪项目：单独渲染，不参与分组筛选、拖拽排序与项目设置
+  const secretaryState = useSecretaryStore((state) => state.secretary);
+  const secretaryView = useMemo(() => secretarySectionView(secretaryState, t), [secretaryState, t]);
+  const [secretaryFolded, setSecretaryFolded] = useState(() => {
+    try {
+      return localStorage.getItem(SECRETARY_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSecretaryFolded = () => {
+    setSecretaryFolded((prev) => {
+      try {
+        localStorage.setItem(SECRETARY_COLLAPSED_KEY, prev ? '0' : '1');
+      } catch {
+        // 隐私模式或配额满时只保留本次内存状态
+      }
+      return !prev;
+    });
+  };
+  const [secretaryRevealed, setSecretaryRevealed] = useState(false);
+  const secretaryConversationIds = useMemo(() => {
+    const projectId = secretaryState.projectId;
+    if (!projectId) return [];
+    return order
+      .filter((id) => {
+        const conversation = conversations[id];
+        return (
+          conversation?.projectId === projectId &&
+          conversation.archived !== true &&
+          !conversation.parentId
+        );
+      })
+      .sort(
+        (a, b) => (conversations[b]?.lastActiveAt ?? 0) - (conversations[a]?.lastActiveAt ?? 0)
+      );
+  }, [order, conversations, secretaryState.projectId]);
+  const shownSecretaryIds = secretaryRevealed
+    ? secretaryConversationIds
+    : secretaryConversationIds.slice(0, SECRETARY_VISIBLE_LIMIT);
 
   // 项目归档(项目层标记,存 localStorage):整个项目移到底部 Archived 栏目,
   // 不碰其下会话的 archived/pinned——恢复后会话分布与归档前完全一致,
@@ -859,6 +909,9 @@ export function Sidebar({
       {collapsed && (
         <div className="flex w-full flex-1 flex-col items-center gap-1 py-2">
           {/* 展开/折叠与搜索常驻窗口顶栏（App），折叠栏只留其余入口 */}
+          {secretaryView && (
+            <SecretaryCollapsedButton view={secretaryView} onClick={openSecretary} />
+          )}
           <button
             type="button"
             onClick={() => setAddOpen(true)}
@@ -938,6 +991,55 @@ export function Sidebar({
 
         {/* 右侧不留 padding：8px 滚动条槽就是右边距，滚动条不再多占一列、挤到卡片边上 */}
         <div className="min-h-0 flex-1 overflow-y-auto pt-0.5 pb-2 pl-1.5 [scrollbar-gutter:stable]">
+          {secretaryView && (
+            <SecretarySidebarSection
+              view={secretaryView}
+              folded={secretaryFolded}
+              onToggleFold={toggleSecretaryFolded}
+              onOpen={openSecretary}
+              onNewConversation={() => {
+                if (!secretaryState.projectId) return;
+                void newConversation(secretaryState.projectId);
+              }}
+              onOpenSettings={() => void window.electronAPI.window.openSettings()}
+              // 重新设置由设置页的秘书分类接管，这里先把用户送到那里
+              onReset={() => void window.electronAPI.window.openSettings()}
+            >
+              {shownSecretaryIds.map((id) => (
+                <ConversationRow
+                  key={id}
+                  id={id}
+                  conversation={conversations[id]}
+                  active={activeId === id}
+                  switchHint={switchHintFor(id, 'project')}
+                  locale={locale}
+                  nowTick={nowTick}
+                  hoverTitle={secretaryView.name}
+                  onSelect={selectConversation}
+                  onTogglePin={togglePinConversation}
+                  onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                  onCleanupWorktree={(conversationId) => void handleCleanupWorktree(conversationId)}
+                  onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
+                  onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                />
+              ))}
+              {!secretaryFolded && secretaryConversationIds.length > SECRETARY_VISIBLE_LIMIT && (
+                <div className="flex items-center gap-1 pl-6">
+                  <button
+                    type="button"
+                    onClick={() => setSecretaryRevealed((prev) => !prev)}
+                    className={SHOW_MORE_CLASS}
+                  >
+                    {secretaryRevealed
+                      ? t('Collapse')
+                      : t('Show {{n}} more', {
+                          n: secretaryConversationIds.length - SECRETARY_VISIBLE_LIMIT,
+                        })}
+                  </button>
+                </div>
+              )}
+            </SecretarySidebarSection>
+          )}
           {orderedProjects.length === 0 && (
             <button
               type="button"
@@ -2359,6 +2461,8 @@ interface ConversationRowProps {
     titleSummaryError?: string;
     /** 手动重读在途（菜单项禁用 + 图标转圈） */
     reloading?: boolean;
+    /** 由秘书派出；只用于显示标记，权限判断不读它 */
+    secretaryOrigin?: { secretaryConversationId: string };
   };
   active: boolean;
   locale: Parameters<typeof formatRelativeTime>[1];
@@ -2517,6 +2621,7 @@ function ConversationRow({
             </span>
           )}
         </div>
+        {conversation.secretaryOrigin && <SecretaryOriginBadge />}
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
         {!renaming && (

@@ -56,6 +56,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { InjectedMessageCard } from '@/components/bots/InjectedMessageCard';
+import { conversationIdBySessionFile } from '@/components/chat/sessionRefJump';
 import {
   SecretaryProposalRow,
   secretaryProposalId,
@@ -571,6 +572,29 @@ function InlineMentionCard({
   );
 }
 
+/** chat 引用卡片：会话还在本机就点得开，找不到时保持不可点 */
+function ChatRefCard({ label, sessionFile }: { label: string; sessionFile: string }) {
+  const conversations = useSessionsStore((state) => state.conversations);
+  const selectConversation = useSessionsStore((state) => state.selectConversation);
+  const conversationId = conversationIdBySessionFile(conversations, sessionFile);
+  if (!conversationId) return <InlineMentionCard kind="chat" label={label} title={sessionFile} />;
+  return (
+    <button
+      type="button"
+      data-enso="chat-ref"
+      onClick={() => selectConversation(conversationId)}
+      title={sessionFile}
+      className={cn(
+        mentionChipClass('chat'),
+        'mx-0.5 inline-flex max-w-52 items-center gap-1 rounded-md px-1.5 align-middle leading-4 hover:bg-muted'
+      )}
+    >
+      <History className="h-3 w-3 shrink-0" />
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
 /** 正文里的 @path / chat 引用块原位渲染成卡片，其余文本原样 */
 function InlineMentionText({
   text,
@@ -596,12 +620,11 @@ function InlineMentionText({
             />
           </LocalFileTrigger>
         ) : segment.type === 'chat' ? (
-          <InlineMentionCard
+          <ChatRefCard
             // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
             key={index}
-            kind="chat"
             label={segment.label}
-            title={segment.sessionFile}
+            sessionFile={segment.sessionFile}
           />
         ) : segment.type === 'ui-element' ? (
           <InlineMentionCard

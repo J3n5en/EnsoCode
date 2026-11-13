@@ -45,6 +45,15 @@ describe('selectSidebarConversations', () => {
     expect(directory.kid.hasRunningChild).toBe(false);
   });
 
+  it('派出关系随投影带到侧栏，供「由秘书派出」标记', () => {
+    const directory = selectSidebarConversations({
+      a: conv('a', { secretaryOrigin: { secretaryConversationId: 'sec' } }),
+      b: conv('b'),
+    });
+    expect(directory.a.secretaryOrigin).toEqual({ secretaryConversationId: 'sec' });
+    expect(directory.b.secretaryOrigin).toBeUndefined();
+  });
+
   it('coworker 从 idle 变为 running 时重建目录，父条目 hasRunningChild 翻转', () => {
     const parent = conv('parent', { status: 'idle', coworkerIds: ['kid'] });
     const first = selectSidebarConversations({

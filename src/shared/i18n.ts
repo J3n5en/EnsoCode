@@ -3347,6 +3347,25 @@ export const zhTranslations: Record<string, string> = {
   'Session created': '已创建会话',
   Rejected: '已拒绝',
   Expired: '已过期',
+  // 秘书界面：侧栏伪项目、工作台、记忆面板
+  'Secretary settings': '秘书设置',
+  'Re-run setup': '重新设置秘书',
+  'Waiting for you': '等你回答',
+  'Waiting on you': '需要你处理',
+  'Not started': '未开始',
+  'Add a to-do': '添加待办',
+  'What needs doing?': '要做什么？',
+  Workbench: '工作台',
+  'Secretary memory': '秘书的记忆',
+  'The secretary has not saved anything yet.': '秘书还没有保存任何记忆。',
+  'From your projects (read-only)': '来自你的项目（只读）',
+  'Dispatched by secretary': '由秘书派出',
+  'Set up your secretary': '设置你的秘书',
+  'Pick a name, a model and how much it may do on its own. The secretary then watches your projects and reports back here.':
+    '选个名字、模型和它能自己做到什么程度。之后秘书会盯着你的项目，把结果回到这里。',
+  'Open secretary': '打开秘书',
+  'Only when the secretary agent is enabled in Experimental settings':
+    '仅在实验设置里开启秘书后生效',
 };
 
 export function normalizeLocale(input?: string): Locale {

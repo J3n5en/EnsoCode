@@ -9,6 +9,7 @@ export const KEYBINDING_ACTIONS = [
   'toggle-side-panel',
   'toggle-side-panel-fullscreen',
   'open-settings',
+  'open-secretary',
   'switch-model',
   'focus-composer',
   'send-message',
@@ -31,6 +32,7 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
   'toggle-side-panel': 'Toggle side panel',
   'toggle-side-panel-fullscreen': 'Toggle side panel fullscreen',
   'open-settings': 'Open settings',
+  'open-secretary': 'Open secretary',
   'switch-model': 'Switch model',
   'focus-composer': 'Focus chat input',
   'send-message': 'Send message',
@@ -49,6 +51,7 @@ export const ACTION_LABEL_KEYS: Record<KeybindingAction, string> = {
 /** 仅部分动作需要补充生效范围，没有就不渲染 */
 export const ACTION_HINT_KEYS: Partial<Record<KeybindingAction, string>> = {
   'toggle-app-mode': 'Only when Bot mode is enabled in Experimental settings',
+  'open-secretary': 'Only when the secretary agent is enabled in Experimental settings',
   'switch-model': 'Only when the chat input is focused',
   'send-message': 'Only when the chat input is focused',
   'new-side-tab': 'New terminal when the side panel is focused; otherwise new conversation',
@@ -72,6 +75,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeybindingAction, string> = {
   'toggle-side-panel': 'mod+j',
   'toggle-side-panel-fullscreen': 'mod+shift+j',
   'open-settings': 'mod+,',
+  'open-secretary': 'mod+shift+s',
   'switch-model': 'mod+.',
   'focus-composer': 'mod+l',
   'send-message': 'enter',

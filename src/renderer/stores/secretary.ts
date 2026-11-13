@@ -17,19 +17,28 @@ export const EMPTY_SECRETARY_STATE: SecretaryState = {
 interface SecretaryStoreState {
   secretary: SecretaryState;
   resolving: Record<string, true>;
+  /** 未完成初次设置时主区域显示欢迎页（页面本身由设置流程提供） */
+  welcomeOpen: boolean;
   bind: () => () => void;
+  openWelcome: () => void;
+  closeWelcome: () => void;
   resolveProposal: (proposalId: string, action: 'confirm' | 'reject') => Promise<void>;
 }
 
 export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
   secretary: EMPTY_SECRETARY_STATE,
   resolving: {},
+  welcomeOpen: false,
+
+  openWelcome: () => set({ welcomeOpen: true }),
+  closeWelcome: () => set({ welcomeOpen: false }),
 
   bind: () => {
     let pushed = false;
     const off = window.electronAPI.secretary.onStateChanged((secretary) => {
       pushed = true;
-      set({ secretary });
+      // 设置完成后欢迎页自动让位给会话
+      set((state) => ({ secretary, welcomeOpen: secretary.profile ? false : state.welcomeOpen }));
     });
     void window.electronAPI.secretary
       .getState()

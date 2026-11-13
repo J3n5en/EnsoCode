@@ -27,6 +27,8 @@ export interface SidebarDirectoryEntry {
   parentId?: string;
   sessionFile?: string;
   worktree?: { path?: string };
+  /** 由秘书派出；只用于显示标记 */
+  secretaryOrigin?: { secretaryConversationId: string };
 }
 
 type Source = {
@@ -56,6 +58,7 @@ type Source = {
   worktree?: { path?: string };
   reloading?: boolean;
   btwParentId?: string;
+  secretaryOrigin?: { secretaryConversationId: string };
 };
 
 function lastActiveAt(conversation: Source): number | undefined {
@@ -89,6 +92,7 @@ function project(conversation: Source, hasRunningChild: boolean): SidebarDirecto
     parentId: conversation.parentId,
     sessionFile: conversation.sessionFile,
     worktree: conversation.worktree,
+    secretaryOrigin: conversation.secretaryOrigin,
   };
 }
 

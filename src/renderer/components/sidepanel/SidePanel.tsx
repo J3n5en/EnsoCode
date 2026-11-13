@@ -11,9 +11,11 @@ import type {
 import { DockviewReact, themeDark, themeLight } from 'dockview-react';
 import { motion } from 'framer-motion';
 import {
+  Brain,
   FolderOpen,
   GitCompare,
   Globe,
+  LayoutGrid,
   Maximize2,
   MessageCircle,
   Minimize2,
@@ -50,6 +52,7 @@ import {
   bindSidePanelDock,
   closeSidePanelBrowser,
   disposeConversationResources,
+  selectIsSecretaryProject,
   selectWorkflowAvailable,
 } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
@@ -68,6 +71,8 @@ import { useWorkflowRunsStore } from '@/stores/workflowRuns';
 import { PluginIcon } from '../../plugins/PluginIcon';
 import { PluginView } from '../../plugins/PluginView';
 import { type PluginViewRef, usePluginViews } from '../../plugins/viewBridge';
+import { SecretaryBoardPanel } from '../secretary/SecretaryBoardPanel';
+import { SecretaryMemoryPanel } from '../secretary/SecretaryMemoryPanel';
 import { BrowserView } from './BrowserView';
 import { BtwView } from './BtwView';
 import { ChangesView } from './ChangesView';
@@ -280,8 +285,48 @@ function addWorkflowPanel(
   });
 }
 
+/** 秘书会话的原生面板：需要就地审批与跳转会话，不走插件 iframe */
+function addSecretaryPanel(
+  api: DockviewApi,
+  id: 'secretary-board' | 'secretary-memory',
+  component: 'secretaryBoard' | 'secretaryMemory',
+  conversationId: string | undefined,
+  projectId: string | undefined,
+  label: string
+): void {
+  const existing = api.getPanel(id);
+  if (existing) {
+    existing.focus();
+    return;
+  }
+  api.addPanel({ id, component, title: label, params: { conversationId, projectId } });
+}
+
+function SecretaryBoard(props: IDockviewPanelProps<{ conversationId?: string }>) {
+  return (
+    <VisiblePanel api={props.api}>
+      <SecretaryBoardPanel />
+    </VisiblePanel>
+  );
+}
+
+function SecretaryMemory(props: IDockviewPanelProps<{ conversationId?: string }>) {
+  return (
+    <VisiblePanel api={props.api}>
+      <SecretaryMemoryPanel />
+    </VisiblePanel>
+  );
+}
+
 function useWorkflowAvailable(projectId: string | undefined): boolean {
   return useSettingsStore((state) => selectWorkflowAvailable(state, projectId));
+}
+
+/** 秘书会话只留浏览器、工作台与记忆；开关关掉时与普通会话一样 */
+function useSecretaryConversation(projectId: string | undefined): boolean {
+  return useSettingsStore(
+    (state) => state.secretaryEnabled && selectIsSecretaryProject(state.projects, projectId)
+  );
 }
 
 function addPluginViewPanel(
@@ -402,6 +447,10 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         <MessageCircle className="h-3 w-3 shrink-0" />
       ) : props.api.id === 'workflow' ? (
         <Workflow className="h-3 w-3 shrink-0" />
+      ) : props.api.id === 'secretary-board' ? (
+        <LayoutGrid className="h-3 w-3 shrink-0" />
+      ) : props.api.id === 'secretary-memory' ? (
+        <Brain className="h-3 w-3 shrink-0" />
       ) : props.api.id.startsWith('plugin:') ? (
         <PluginIcon pluginId={props.api.id.split(':')[1] ?? ''} className="h-3 w-3 shrink-0" />
       ) : isBrowser && favicon && !faviconBroken ? (
@@ -456,16 +505,20 @@ function NewTabMenu({
   onNewBrowser,
   onNewBtw,
   onNewWorkflow,
+  onNewSecretaryBoard,
+  onNewSecretaryMemory,
   onNewPluginView,
   compact,
 }: {
-  onNewTerminal: () => void;
-  onNewChanges: () => void;
-  onNewFiles: () => void;
+  /** 缺省 = 该会话不提供这个入口（秘书会话没有终端、文件、改动） */
+  onNewTerminal?: () => void;
+  onNewChanges?: () => void;
+  onNewFiles?: () => void;
   onNewBrowser: () => void;
-  onNewBtw: () => void;
-  /** 缺省 = 该项目没开 workflow 工具，不给入口 */
+  onNewBtw?: () => void;
   onNewWorkflow?: () => void;
+  onNewSecretaryBoard?: () => void;
+  onNewSecretaryMemory?: () => void;
   onNewPluginView?: (view: PluginViewRef) => void;
   compact?: boolean;
 }) {
@@ -486,30 +539,50 @@ function NewTabMenu({
         {!compact && <span>{t('New tab')}</span>}
       </MenuTrigger>
       <MenuPopup align={compact ? 'end' : 'center'} className="min-w-36">
-        <MenuItem onClick={onNewTerminal}>
-          <SquareTerminal className="h-4 w-4" />
-          {t('Terminal')}
-        </MenuItem>
-        <MenuItem onClick={onNewChanges}>
-          <GitCompare className="h-4 w-4" />
-          {t('Changes')}
-        </MenuItem>
-        <MenuItem onClick={onNewFiles}>
-          <FolderOpen className="h-4 w-4" />
-          {t('Files')}
-        </MenuItem>
+        {onNewTerminal ? (
+          <MenuItem onClick={onNewTerminal}>
+            <SquareTerminal className="h-4 w-4" />
+            {t('Terminal')}
+          </MenuItem>
+        ) : null}
+        {onNewChanges ? (
+          <MenuItem onClick={onNewChanges}>
+            <GitCompare className="h-4 w-4" />
+            {t('Changes')}
+          </MenuItem>
+        ) : null}
+        {onNewFiles ? (
+          <MenuItem onClick={onNewFiles}>
+            <FolderOpen className="h-4 w-4" />
+            {t('Files')}
+          </MenuItem>
+        ) : null}
         <MenuItem onClick={onNewBrowser}>
           <Globe className="h-4 w-4" />
           {t('Browser')}
         </MenuItem>
-        <MenuItem onClick={onNewBtw}>
-          <MessageCircle className="h-4 w-4" />
-          {t('Btw')}
-        </MenuItem>
+        {onNewBtw ? (
+          <MenuItem onClick={onNewBtw}>
+            <MessageCircle className="h-4 w-4" />
+            {t('Btw')}
+          </MenuItem>
+        ) : null}
         {onNewWorkflow ? (
           <MenuItem onClick={onNewWorkflow}>
             <Workflow className="h-4 w-4" />
             {t('Workflow')}
+          </MenuItem>
+        ) : null}
+        {onNewSecretaryBoard ? (
+          <MenuItem onClick={onNewSecretaryBoard}>
+            <LayoutGrid className="h-4 w-4" />
+            {t('Workbench')}
+          </MenuItem>
+        ) : null}
+        {onNewSecretaryMemory ? (
+          <MenuItem onClick={onNewSecretaryMemory}>
+            <Brain className="h-4 w-4" />
+            {t('Memory')}
           </MenuItem>
         ) : null}
         {onNewPluginView
@@ -537,6 +610,7 @@ function SidePanelHeaderActions({
   const fullscreen = useSidePanelStore((s) => s.fullscreen);
   const toggleFullscreen = useSidePanelStore((s) => s.toggleFullscreen);
   const workflowAvailable = useWorkflowAvailable(projectId);
+  const secretary = useSecretaryConversation(projectId);
   const isMobile = useIsMobile();
   const titleRow = useContext(TitleRowContext);
   const topRight = useIsTopRightGroup(containerApi, group);
@@ -546,43 +620,89 @@ function SidePanelHeaderActions({
     <div className="flex h-full items-center gap-0.5">
       <NewTabMenu
         compact
-        onNewTerminal={() => {
-          if (group) {
-            containerApi.addPanel({
-              id: crypto.randomUUID(),
-              component: 'terminal',
-              title: nextTerminalTitle(containerApi, t('Terminal')),
-              params: { conversationId, projectId },
-              position: { referenceGroup: group },
-            });
-            return;
-          }
-          addTerminalPanel(containerApi, conversationId, projectId, t('Terminal'));
-        }}
-        onNewChanges={() => addChangesPanel(containerApi, conversationId, projectId, t('Changes'))}
-        onNewFiles={() => addFilesPanel(containerApi, conversationId, projectId, t('Files'))}
+        onNewTerminal={
+          secretary
+            ? undefined
+            : () => {
+                if (group) {
+                  containerApi.addPanel({
+                    id: crypto.randomUUID(),
+                    component: 'terminal',
+                    title: nextTerminalTitle(containerApi, t('Terminal')),
+                    params: { conversationId, projectId },
+                    position: { referenceGroup: group },
+                  });
+                  return;
+                }
+                addTerminalPanel(containerApi, conversationId, projectId, t('Terminal'));
+              }
+        }
+        onNewChanges={
+          secretary
+            ? undefined
+            : () => addChangesPanel(containerApi, conversationId, projectId, t('Changes'))
+        }
+        onNewFiles={
+          secretary
+            ? undefined
+            : () => addFilesPanel(containerApi, conversationId, projectId, t('Files'))
+        }
         onNewBrowser={() => addBrowserPanel(containerApi, conversationId, projectId, t('Browser'))}
-        onNewBtw={() => {
-          if (group) {
-            const count = containerApi.panels.filter((panel) => panel.id.startsWith('btw:')).length;
-            containerApi.addPanel({
-              id: `btw:${crypto.randomUUID()}`,
-              component: 'btw',
-              title: count === 0 ? t('Btw') : `${t('Btw')} ${count + 1}`,
-              params: { conversationId, projectId },
-              position: { referenceGroup: group },
-            });
-            return;
-          }
-          addBtwPanel(containerApi, conversationId, projectId, t('Btw'));
-        }}
+        onNewBtw={
+          secretary
+            ? undefined
+            : () => {
+                if (group) {
+                  const count = containerApi.panels.filter((panel) =>
+                    panel.id.startsWith('btw:')
+                  ).length;
+                  containerApi.addPanel({
+                    id: `btw:${crypto.randomUUID()}`,
+                    component: 'btw',
+                    title: count === 0 ? t('Btw') : `${t('Btw')} ${count + 1}`,
+                    params: { conversationId, projectId },
+                    position: { referenceGroup: group },
+                  });
+                  return;
+                }
+                addBtwPanel(containerApi, conversationId, projectId, t('Btw'));
+              }
+        }
         onNewWorkflow={
-          workflowAvailable
+          workflowAvailable && !secretary
             ? () => addWorkflowPanel(containerApi, conversationId, projectId, t('Workflow'))
             : undefined
         }
-        onNewPluginView={(view) =>
-          addPluginViewPanel(containerApi, conversationId, projectId, view, group)
+        onNewSecretaryBoard={
+          secretary
+            ? () =>
+                addSecretaryPanel(
+                  containerApi,
+                  'secretary-board',
+                  'secretaryBoard',
+                  conversationId,
+                  projectId,
+                  t('Workbench')
+                )
+            : undefined
+        }
+        onNewSecretaryMemory={
+          secretary
+            ? () =>
+                addSecretaryPanel(
+                  containerApi,
+                  'secretary-memory',
+                  'secretaryMemory',
+                  conversationId,
+                  projectId,
+                  t('Memory')
+                )
+            : undefined
+        }
+        onNewPluginView={
+          secretary
+            ? undefined
+            : (view) => addPluginViewPanel(containerApi, conversationId, projectId, view, group)
         }
       />
       <button
@@ -627,6 +747,7 @@ function Watermark(props: IWatermarkPanelProps) {
   const { t } = useI18n();
   const { conversationId, projectId } = useContext(PanelContext);
   const workflowAvailable = useWorkflowAvailable(projectId);
+  const secretary = useSecretaryConversation(projectId);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="enso-side-dock-header flex shrink-0 items-center justify-end border-b bg-background px-2 py-1">
@@ -637,26 +758,64 @@ function Watermark(props: IWatermarkPanelProps) {
           {t('No tabs yet. Create one to get started.')}
         </p>
         <NewTabMenu
-          onNewTerminal={() =>
-            addTerminalPanel(props.containerApi, conversationId, projectId, t('Terminal'))
+          onNewTerminal={
+            secretary
+              ? undefined
+              : () => addTerminalPanel(props.containerApi, conversationId, projectId, t('Terminal'))
           }
-          onNewChanges={() =>
-            addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
+          onNewChanges={
+            secretary
+              ? undefined
+              : () => addChangesPanel(props.containerApi, conversationId, projectId, t('Changes'))
           }
-          onNewFiles={() =>
-            addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))
+          onNewFiles={
+            secretary
+              ? undefined
+              : () => addFilesPanel(props.containerApi, conversationId, projectId, t('Files'))
           }
           onNewBrowser={() =>
             addBrowserPanel(props.containerApi, conversationId, projectId, t('Browser'))
           }
-          onNewBtw={() => addBtwPanel(props.containerApi, conversationId, projectId, t('Btw'))}
+          onNewBtw={
+            secretary
+              ? undefined
+              : () => addBtwPanel(props.containerApi, conversationId, projectId, t('Btw'))
+          }
           onNewWorkflow={
-            workflowAvailable
+            workflowAvailable && !secretary
               ? () => addWorkflowPanel(props.containerApi, conversationId, projectId, t('Workflow'))
               : undefined
           }
-          onNewPluginView={(view) =>
-            addPluginViewPanel(props.containerApi, conversationId, projectId, view)
+          onNewSecretaryBoard={
+            secretary
+              ? () =>
+                  addSecretaryPanel(
+                    props.containerApi,
+                    'secretary-board',
+                    'secretaryBoard',
+                    conversationId,
+                    projectId,
+                    t('Workbench')
+                  )
+              : undefined
+          }
+          onNewSecretaryMemory={
+            secretary
+              ? () =>
+                  addSecretaryPanel(
+                    props.containerApi,
+                    'secretary-memory',
+                    'secretaryMemory',
+                    conversationId,
+                    projectId,
+                    t('Memory')
+                  )
+              : undefined
+          }
+          onNewPluginView={
+            secretary
+              ? undefined
+              : (view) => addPluginViewPanel(props.containerApi, conversationId, projectId, view)
           }
         />
       </div>
@@ -676,6 +835,8 @@ const DOCK_COMPONENTS = {
   browser: BrowserPanel,
   btw: BtwPanel,
   workflow: WorkflowPanel,
+  secretaryBoard: SecretaryBoard,
+  secretaryMemory: SecretaryMemory,
   plugin: PluginViewPanel,
 };
 
@@ -747,7 +908,14 @@ function ConversationDock({
     });
     // 只有用户关 tab 才回收;dock 本身不随切会话卸载
     event.api.onDidRemovePanel((panel) => {
-      if (panel.id === 'changes' || panel.id === 'files' || panel.id.startsWith('plugin:')) return;
+      if (
+        panel.id === 'changes' ||
+        panel.id === 'files' ||
+        panel.id === 'secretary-board' ||
+        panel.id === 'secretary-memory' ||
+        panel.id.startsWith('plugin:')
+      )
+        return;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) {
         void window.electronAPI.browser.closeTab(panel.id);
         return;
