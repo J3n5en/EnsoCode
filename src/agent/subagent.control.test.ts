@@ -1,3 +1,4 @@
+import { type ToolCall, validateToolArguments } from '@earendil-works/pi-ai';
 import type { SpawnModelConfig } from '@shared/types';
 import type { AgentControlToolResponse, AgentWorkerEvent } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
@@ -156,6 +157,50 @@ describe('unified subagent tool', () => {
       undefined
     );
     expect(result.details).toMatchObject({ request: { operation: 'spawn', mode: 'task' } });
+  });
+
+  it('schema 校验前：漏传 operation 但有 description 与 prompt 视为 spawn，否则给可读错误', async () => {
+    const { deps, tool } = setup();
+    const validate = (args: Record<string, unknown>) =>
+      validateToolArguments(tool, {
+        type: 'toolCall',
+        id: 'call-op',
+        name: tool.name,
+        arguments: tool.prepareArguments!(args) as ToolCall['arguments'],
+      }) as Record<string, unknown>;
+
+    const args = validate({ description: 'review', prompt: 'review this' });
+    expect(args.operation).toBe('spawn');
+    await tool.execute('call-op', args, undefined, undefined, {} as never);
+    expect(deps.invoke).toHaveBeenCalledWith(
+      {
+        operation: 'spawn',
+        mode: 'task',
+        description: 'review',
+        prompt: 'review this',
+        wait: false,
+      },
+      undefined
+    );
+
+    for (const bad of [{}, { description: 'review' }, { description: 'review', prompt: '  ' }]) {
+      let message = '';
+      try {
+        validate(bad);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toMatch(/requires operation.*operation:"spawn".*description and prompt/);
+      expect(message).not.toMatch(/Validation failed/);
+    }
+    expect(() => validate({ operation: 'spwan', description: 'd', prompt: 'p' })).toThrow(
+      'unknown operation "spwan". Expected one of: spawn, send, wait, report, list, message, stop, dismiss'
+    );
+    expect(validate({ operation: 'report', runId: 'r1' })).toEqual({
+      operation: 'report',
+      runId: 'r1',
+    });
+    expect(deps.invoke).toHaveBeenCalledTimes(1);
   });
 
   it('spawn/send 带 wait:true 被 abort 时只打断等待，仍返回 Main 的回执', async () => {
