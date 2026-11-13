@@ -10,6 +10,10 @@ describe('isRemoteChannelAllowed', () => {
       IPC_CHANNELS.SETTINGS_WRITE_KEY,
       IPC_CHANNELS.FILES_READ,
       IPC_CHANNELS.TERMINAL_CREATE,
+      // 秘书：远端（PWA）与桌面共用同一套状态推送与提案确认
+      IPC_CHANNELS.SECRETARY_GET_STATE,
+      IPC_CHANNELS.SECRETARY_RESOLVE_PROPOSAL,
+      IPC_CHANNELS.SECRETARY_REFERENCE_CONVERSATIONS,
     ]) {
       expect(isRemoteChannelAllowed(ch, false)).toBe(true);
     }

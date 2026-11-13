@@ -94,6 +94,7 @@ function buildChip(segment: Exclude<MentionSegment, { type: 'text' }>): HTMLSpan
   } else if (segment.type === 'chat') {
     chip.dataset.label = segment.label;
     chip.dataset.sessionFile = segment.sessionFile;
+    if (segment.conversationId) chip.dataset.conversationId = segment.conversationId;
   } else {
     chip.dataset.id = segment.id;
     chip.dataset.label = segment.label;
@@ -129,7 +130,12 @@ function segmentFromChip(chip: HTMLElement): MentionSegment | null {
     };
   }
   if (chip.dataset.mentionKind === 'chat' && chip.dataset.label && chip.dataset.sessionFile) {
-    return { type: 'chat', label: chip.dataset.label, sessionFile: chip.dataset.sessionFile };
+    return {
+      type: 'chat',
+      label: chip.dataset.label,
+      sessionFile: chip.dataset.sessionFile,
+      ...(chip.dataset.conversationId ? { conversationId: chip.dataset.conversationId } : {}),
+    };
   }
   if (
     chip.dataset.mentionKind === 'ui-element' &&
@@ -479,6 +485,7 @@ export const MentionEditor = forwardRef<MentionEditorHandle, MentionEditorProps>
                     type: 'chat' as const,
                     label: candidate.label,
                     sessionFile: candidate.sessionFile,
+                    conversationId: candidate.id,
                   }
                 : {
                     type: 'ui-element' as const,

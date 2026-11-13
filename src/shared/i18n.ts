@@ -3338,6 +3338,15 @@ export const zhTranslations: Record<string, string> = {
   "Couldn't uninstall the Finder Quick Action": '无法卸载访达快速操作',
   'Finder Quick Action uninstalled.': '访达快速操作已卸载。',
   'In progress…': '处理中…',
+  // 秘书派活提案卡片
+  Dispatch: '派活',
+  'Confirm dispatch': '确认派活',
+  'Project checkout': '项目目录',
+  'Waiting for your confirmation': '等待你确认',
+  'Creating the session…': '正在创建会话…',
+  'Session created': '已创建会话',
+  Rejected: '已拒绝',
+  Expired: '已过期',
 };
 
 export function normalizeLocale(input?: string): Locale {

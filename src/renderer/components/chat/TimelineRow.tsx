@@ -57,6 +57,10 @@ import {
 } from 'react';
 import { InjectedMessageCard } from '@/components/bots/InjectedMessageCard';
 import {
+  SecretaryProposalRow,
+  secretaryProposalId,
+} from '@/components/secretary/SecretaryProposalRow';
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -936,14 +940,16 @@ export const TimelineRow = memo(function TimelineRow({
           startedAt={item.startedAt}
         />
       );
-    case 'tool':
+    case 'tool': {
+      const proposalId = secretaryProposalId(item);
       return (
         <>
           <PluginToolCardSlot name={item.name} output={item.output} state={item.state} />
-          <ToolRow item={item} />
+          {proposalId ? <SecretaryProposalRow proposalId={proposalId} /> : <ToolRow item={item} />}
           {item.pluginArtifacts ? <PluginArtifactsCard artifacts={item.pluginArtifacts} /> : null}
         </>
       );
+    }
     case 'tool-group':
       return <ToolGroupRow item={item} onToggle={onToggleGroup} />;
     case 'error':

@@ -575,6 +575,17 @@ export function ChatView() {
               ) {
                 return false;
               }
+              // 秘书会话里用户点名的会话先授权（独立 IPC，不改提示词）；失败不阻断发送
+              if (project?.kind === 'secretary' && !payload.recipient) {
+                const named = payload.mentions
+                  .filter((mention) => mention.kind === 'chat')
+                  .map((mention) => mention.id);
+                if (named.length > 0) {
+                  void window.electronAPI.secretary
+                    .referenceConversations(chrome.id, named)
+                    .catch(() => undefined);
+                }
+              }
               routeComposerPayload(payload, {
                 dispatchAgent: (typeKey, task) => {
                   void useSessionsStore

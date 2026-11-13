@@ -85,6 +85,7 @@ import {
 } from '@/stores/bots/mode';
 import { bindPairCatalogSync } from '@/stores/pairCatalog';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
+import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
@@ -246,6 +247,13 @@ export default function App() {
       offOpen();
     };
   }, [botModeEnabled]);
+
+  // 秘书开关打开即常驻订阅：聊天里的确认卡片与工作台读同一份 Main 状态
+  const secretaryEnabled = useSettingsStore((s) => s.secretaryEnabled);
+  useEffect(
+    () => (secretaryEnabled ? useSecretaryStore.getState().bind() : undefined),
+    [secretaryEnabled]
+  );
 
   // Code 会话通知点击：当前在远程节点或 Bot 模式时先切回本机 Code，会话由 sessions store 选中
   useEffect(

@@ -308,3 +308,24 @@ describe('模块级常量的 i18n key（#5）', () => {
     }
   });
 });
+
+describe('秘书派活卡片文案', () => {
+  it('卡片上的每个状态与按钮都有中文译文', () => {
+    for (const key of [
+      'Dispatch',
+      'Confirm dispatch',
+      'Reject',
+      'Isolated worktree',
+      'Project checkout',
+      'Waiting for your confirmation',
+      'Creating the session…',
+      'Session created',
+      'Failed',
+      'Rejected',
+      'Expired',
+    ]) {
+      expect(getTranslation('en', key)).toBe(key);
+      expect(getTranslation('zh', key), key).not.toBe(key);
+    }
+  });
+});
