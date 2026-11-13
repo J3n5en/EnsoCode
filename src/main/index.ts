@@ -36,6 +36,7 @@ import {
   shouldQuitOnWindowAllClosed,
 } from './services/appServerMode';
 import { browserHost } from './services/browserHost';
+import { getCaCertConfig } from './services/caCert';
 import { computerHost } from './services/computerHost';
 import { installDesktopHooks } from './services/desktopHooks';
 import { releaseLocalChatSlot } from './services/llama/chat';
@@ -219,9 +220,17 @@ if (!gotTheLock) {
     registerLocalImageProtocolHandler();
     registerNodeSettingsProtocolHandler();
     const persisted = readSettings()?.['enso-settings'] as
-      | { state?: { proxyMode?: unknown; customProxyUrl?: unknown; autoUpdate?: boolean } }
+      | {
+          state?: {
+            proxyMode?: unknown;
+            customProxyUrl?: unknown;
+            customCaCertPath?: unknown;
+            autoUpdate?: boolean;
+          };
+        }
       | undefined;
     getProxyConfig().initFromConfig(persisted?.state?.proxyMode, persisted?.state?.customProxyUrl);
+    getCaCertConfig().initFromConfig(persisted?.state?.customCaCertPath);
     const persistedState = (
       persisted?.state && typeof persisted.state === 'object' ? persisted.state : {}
     ) as Record<string, unknown>;
@@ -241,7 +250,11 @@ if (!gotTheLock) {
       // 打包版再等登录 shell 探测出真实 PATH。
       const ready = getProxyConfig().whenReady();
       if (app.isPackaged && process.platform !== 'win32') {
-        void ready.finally(() => hydrateShellPath().finally(() => startAgentWorker()));
+        void ready.finally(() =>
+          hydrateShellPath()
+            .then(({ extraCaCerts }) => getCaCertConfig().applyShellValue(extraCaCerts))
+            .finally(() => startAgentWorker())
+        );
       } else {
         void ready.finally(() => startAgentWorker());
       }

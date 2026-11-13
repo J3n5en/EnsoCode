@@ -405,6 +405,10 @@ export const IPC_CHANNELS = {
   // 网络代理
   PROXY_APPLY: 'proxy:apply',
 
+  // 自定义 CA 证书（NODE_EXTRA_CA_CERTS）
+  CA_CERT_STATUS: 'ca-cert:status',
+  CA_CERT_APPLY: 'ca-cert:apply',
+
   // userData/user.css：读取、首次写模板并用系统程序打开、文件变化广播
   APPEARANCE_USER_CSS_GET: 'appearance:user-css:get',
   APPEARANCE_USER_CSS_OPEN: 'appearance:user-css:open',

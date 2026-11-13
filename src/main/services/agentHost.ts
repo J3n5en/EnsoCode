@@ -508,6 +508,19 @@ export function agentWorkerAlive(): boolean {
 }
 
 /**
+ * 让 worker 按 Main 当前 env 重新 fork（env 是 fork 时的快照）。尚未启动或已退出时
+ * 不处理：首次启动 / 下一条命令触发的重建自然带上新 env。
+ */
+export async function restartAgentWorker(timeoutMs = 5_000): Promise<boolean> {
+  const child = worker;
+  if (!child) return false;
+  await killAndWaitExit(child, timeoutMs);
+  if (worker === child) stopAgentWorker();
+  if (!worker) startAgentWorker();
+  return true;
+}
+
+/**
  * 应用退出时 Electron 不给 utility 进程发 SIGTERM，worker 的收尾（中止会话→pi 杀 detached
  * bash 进程组、断开 MCP）跑不到，命令会成孤儿进程。退出前主动发信号并等它自行退出。
  */

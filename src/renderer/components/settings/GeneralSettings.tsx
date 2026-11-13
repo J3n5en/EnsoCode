@@ -1,4 +1,5 @@
 import { AUTO_RETRY_LIMIT_OPTIONS, UNLIMITED_AUTO_RETRY } from '@shared/autoRetry';
+import { CA_CERT_EXTENSIONS, type CaCertError, type CaCertStatus } from '@shared/caCert';
 import { isValidProxyUrl, type ProxyMode } from '@shared/proxy';
 import type { ShellIntegration } from '@shared/shellIntegration';
 import { GENERATION_STALL_TIMEOUT_MINUTES } from '@shared/stallTimeout';
@@ -72,6 +73,7 @@ export function GeneralSettings() {
         </div>
         <NotificationSection />
         <ProxySection />
+        <CaCertSection />
         <ConfigSyncSettings />
         <UpdateSection />
       </section>
@@ -685,6 +687,105 @@ function ProxySection() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CaCertSection() {
+  const { t } = useI18n();
+  const customCaCertPath = useSettingsStore((s) => s.customCaCertPath);
+  const setCustomCaCertPath = useSettingsStore((s) => s.setCustomCaCertPath);
+  const [status, setStatus] = React.useState<CaCertStatus | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    window.electronAPI.caCert
+      .status()
+      .then((next) => {
+        if (alive) setStatus(next);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const apply = async (path: string) => {
+    setCustomCaCertPath(path);
+    setBusy(true);
+    try {
+      setStatus(await window.electronAPI.caCert.apply(path));
+    } catch {
+      // 远端宿主不支持时保持原状态
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = async () => {
+    const path = await window.electronAPI.dialog.selectFile([...CA_CERT_EXTENSIONS]);
+    if (path) await apply(path);
+  };
+
+  const errorText: Record<CaCertError, string> = {
+    'not-absolute': t('Path must be absolute'),
+    'not-found': t('File not found'),
+    'not-file': t('Not a file'),
+    'not-readable': t('File is not readable'),
+  };
+
+  const statusText = (): string => {
+    if (!status) return '';
+    if (status.source === 'env') {
+      return t('Using NODE_EXTRA_CA_CERTS from the launch environment: {{path}}', {
+        path: status.path,
+      });
+    }
+    if (status.source === 'setting') return t('Set: {{path}}', { path: status.path });
+    if (status.source === 'shell') {
+      return t('Not set; using NODE_EXTRA_CA_CERTS from the login shell: {{path}}', {
+        path: status.path,
+      });
+    }
+    return t('Not set');
+  };
+
+  return (
+    <div className="space-y-3" data-settings-row="general.caCert">
+      <div>
+        <h4 className="text-sm font-medium">{t('Custom CA certificate')}</h4>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'Trust an extra CA (PEM file) for model endpoints signed by a private CA. TLS verification stays on.'
+          )}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => void pick()}>
+          {t('Choose certificate file')}
+        </Button>
+        {customCaCertPath && (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void apply('')}>
+            {t('Clear')}
+          </Button>
+        )}
+      </div>
+      {status?.error ? (
+        <p className="break-all text-xs text-destructive">
+          {t('Certificate file unavailable ({{reason}}): {{path}}', {
+            reason: errorText[status.error],
+            path: status.settingPath,
+          })}
+        </p>
+      ) : (
+        <p className="break-all text-xs text-muted-foreground">{statusText()}</p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {t(
+          'Changes restart the agent process right away (running turns are interrupted). Requests made by the app main process take effect after restarting the app.'
+        )}
+      </p>
     </div>
   );
 }

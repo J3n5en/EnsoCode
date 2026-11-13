@@ -6,6 +6,7 @@ import { registerMemberAgentTypes } from './botAgentTypes';
 import { registerBotHandlers } from './bots';
 import { registerBotTemplateHandlers } from './botTemplates';
 import { registerBtwHandlers } from './btw';
+import { registerCaCertHandlers } from './caCert';
 import { registerChangesHandlers } from './changes';
 import { registerCompactionHandlers } from './compaction';
 import { registerDcgHandlers } from './dcg';
@@ -42,6 +43,7 @@ export function registerIpcHandlers(): void {
   registerExtensionPluginHandlers();
   registerAgentHandlers();
   registerProxyHandlers();
+  registerCaCertHandlers();
   registerCompactionHandlers();
   registerProjectHandlers();
   registerSshConnectionHandlers();

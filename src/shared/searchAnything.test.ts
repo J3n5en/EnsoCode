@@ -212,6 +212,7 @@ describe('buildSettingsCatalog', () => {
     'general.generationStallTimeout',
     'general.autoRetryLimit',
     'general.proxy',
+    'general.caCert',
     'general.updates',
     'general.ensoCommand',
     'general.finderQuickAction',
