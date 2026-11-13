@@ -251,6 +251,21 @@ describe('config CLI socket', () => {
     expect((await state()).autoUpdate).toBe(true);
   });
 
+  it('秘书开关可写且不需要重启', async () => {
+    const schema = await config({ action: 'schema' });
+    const keys = new Map(
+      (schema.keys as { path: string; writable: boolean; requiresRestart: boolean }[]).map((k) => [
+        k.path,
+        k,
+      ])
+    );
+    expect(keys.get('secretaryEnabled')).toMatchObject({ writable: true, requiresRestart: false });
+    expect(await config({ action: 'set', key: 'secretaryEnabled', value: true })).toEqual({
+      ok: true,
+    });
+    expect((await state()).secretaryEnabled).toBe(true);
+  });
+
   it('reload 以磁盘为准重读', async () => {
     const settings = await import('../../ipc/settings');
     settings.flushSettings();

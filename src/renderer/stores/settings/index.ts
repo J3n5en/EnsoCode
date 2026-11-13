@@ -214,6 +214,7 @@ const initialState = {
   botModeEnabled: false,
   scratchSessionsEnabled: false,
   dropShelfEnabled: false,
+  secretaryEnabled: false,
   botRouteClassifier: null as VirtualClassifierConfig | null,
   botAssistantModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   botMaxRunningTurns: DEFAULT_BOT_MAX_RUNNING_TURNS,
@@ -419,6 +420,7 @@ export const useSettingsStore = create<SettingsState>()(
       setBotModeEnabled: (botModeEnabled) => set({ botModeEnabled }),
       setScratchSessionsEnabled: (scratchSessionsEnabled) => set({ scratchSessionsEnabled }),
       setDropShelfEnabled: (dropShelfEnabled) => set({ dropShelfEnabled }),
+      setSecretaryEnabled: (secretaryEnabled) => set({ secretaryEnabled }),
       setBotRouteClassifier: (botRouteClassifier) => set({ botRouteClassifier }),
       setBotAssistantModel: (botAssistantModel) => set({ botAssistantModel }),
       setBotMaxRunningTurns: (value) =>

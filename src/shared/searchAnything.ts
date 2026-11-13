@@ -264,6 +264,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
       'Adds a Code | Bot switch to the sidebar. Create members with their own persona, model and tools, and chat with them alone or in groups.',
   },
   {
+    id: 'experimental.secretary',
+    category: 'experimental',
+    title: 'Secretary',
+    description:
+      'A global agent that watches your projects and sessions, creates sessions to do the work, and reports results back to you.',
+  },
+  {
     id: 'bots.routeClassifier',
     category: 'bots',
     title: 'Group reply picker model',

@@ -12,6 +12,8 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
   const setScratchSessionsEnabled = useSettingsStore((s) => s.setScratchSessionsEnabled);
   const dropShelfEnabled = useSettingsStore((s) => s.dropShelfEnabled);
   const setDropShelfEnabled = useSettingsStore((s) => s.setDropShelfEnabled);
+  const secretaryEnabled = useSettingsStore((s) => s.secretaryEnabled);
+  const setSecretaryEnabled = useSettingsStore((s) => s.setSecretaryEnabled);
   const isMac = window.electronAPI.env.platform === 'darwin' && !window.electronAPI.remote;
   return (
     <div className="space-y-6">
@@ -56,6 +58,15 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
             onChange={setDropShelfEnabled}
           />
         )}
+        <SwitchRow
+          rowId="experimental.secretary"
+          title={t('Secretary')}
+          description={t(
+            'A global agent that watches your projects and sessions, creates sessions to do the work, and reports results back to you.'
+          )}
+          checked={secretaryEnabled}
+          onChange={setSecretaryEnabled}
+        />
       </div>
     </div>
   );

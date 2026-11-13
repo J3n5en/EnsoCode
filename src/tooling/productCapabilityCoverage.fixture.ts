@@ -66,6 +66,9 @@ export const SETTINGS_DATA_COVERAGE = {
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
   ),
   dropShelfEnabled: excluded('Experimental macOS drop shelf toggle; device-local window.'),
+  secretaryEnabled: excluded(
+    'Experimental secretary agent toggle; device-local, not an Enso capability.'
+  ),
   botMaxRunningTurns: excluded('Device-local Bot concurrency limit; not an Enso capability.'),
   botDiscussModeEnabled: excluded(
     'Experimental Bot group discussion toggle; device-local, not an Enso capability.'
@@ -248,6 +251,9 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
   ),
   setDropShelfEnabled: excluded('Experimental macOS drop shelf toggle; device-local window.'),
+  setSecretaryEnabled: excluded(
+    'Experimental secretary agent toggle; device-local, not an Enso capability.'
+  ),
   setBotRouteClassifier: excluded(
     'Bot group smart-routing model preference; not an Enso capability.'
   ),

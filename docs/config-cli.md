@@ -57,7 +57,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 | 类别 | 规则 | get / list | set |
 | --- | --- | --- | --- |
-| 密钥和凭据 | 任一段键名匹配 `apiKey`、`api_key`、`secret`、`password`、`credential`、`authorization`、`cookie`、`*token`，或键名就是 `env`（MCP 环境变量）。例如 `providers.<id>.apiKey`、`providers.<id>.headers.Authorization`、`voiceGeminiApiKey`、`mcpServers.<id>.env` | `get` 返回 `{ ok: false, hidden: true }`；`list` 和父对象中显示为 `***` | 拒绝 |
+| 密钥和凭据 | 任一段键名匹配 `apiKey`、`api_key`、`secret`、`password`、`credential`、`authorization`、`cookie`、`*token`，或键名就是 `env`（MCP 环境变量）。例如 `providers.<id>.apiKey`、`providers.<id>.headers.Authorization`、`voiceGeminiApiKey`、`mcpServers.<id>.env`。名字含 `secret` 字样但不是密钥的字段（`secretaryEnabled`）在 `policy.ts` 的 `NOT_SECRET_FIELDS` 里豁免 | `get` 返回 `{ ok: false, hidden: true }`；`list` 和父对象中显示为 `***` | 拒绝 |
 | 文件路径 | `worktreeRoot`、`backgroundImagePath`、`backgroundFolderPath`，以及任一段是 `path`、`dir`、`root`、`cwd` 或以 `Path`、`Dir`、`Root` 结尾的键 | 可读 | 拒绝 |
 | 执行命令 | `terminalShell`、`windowsLocalShell`、`fileOpenRules`、`contextMenuOpen`，以及任一段是 `command` 或 `args` 的键（例如 MCP 的启动命令） | 可读 | 拒绝 |
 | 插件 / 技能装卸 | 整体替换或增删 `plugins`、`skills`、`instructions` 的条目 | 可读 | 拒绝；条目内的字段（如 `plugins.<id>.enabled`）可以写 |

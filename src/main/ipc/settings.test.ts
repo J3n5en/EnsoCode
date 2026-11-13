@@ -209,6 +209,26 @@ describe('settings广播策略', () => {
     expect(CONFIG_SYNC_COMMIT_FIELDS).not.toContain('hashlineEditEnabled');
   });
 
+  it('秘书开关：本机字段、不参与同步，落盘后可重读', async () => {
+    vi.resetModules();
+    const settings = await import('./settings');
+    expect(settings.SETTINGS_STATE_FIELDS).toContain('secretaryEnabled');
+    expect(settings.CONFIG_SYNC_COMMIT_FIELDS).not.toContain('secretaryEnabled');
+    expect(settings.patchSettingsState('secretaryEnabled', true)).toMatchObject({ ok: true });
+    settings.flushSettings();
+    expect(
+      JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))['enso-settings'].state
+        .secretaryEnabled
+    ).toBe(true);
+    vi.resetModules();
+    const reloaded = await import('./settings');
+    expect(reloaded.readSettings()?.['enso-settings']).toMatchObject({
+      state: { secretaryEnabled: true },
+    });
+    reloaded.patchSettingsState('secretaryEnabled', false);
+    reloaded.flushSettings();
+  });
+
   it('旧字段写请求收敛到 canonical mode，不形成双状态', async () => {
     const { patchSettingsState, readSettings } = await import('./settings');
     expect(patchSettingsState('hashlineEditEnabled', true)).toMatchObject({

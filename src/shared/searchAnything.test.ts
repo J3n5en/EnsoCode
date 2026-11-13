@@ -218,6 +218,7 @@ describe('buildSettingsCatalog', () => {
     'general.ensoCommand',
     'general.finderQuickAction',
     'experimental.botMode',
+    'experimental.secretary',
     'bots.routeClassifier',
     'shortcuts.root',
     'appearance.theme',
@@ -274,6 +275,11 @@ describe('buildSettingsCatalog', () => {
     expect(ids).not.toContain('general.botRouteClassifier');
     expect(catalog.find((e) => e.id === 'experimental.botMode')?.category).toBe('experimental');
     expect(catalog.find((e) => e.id === 'bots.routeClassifier')?.category).toBe('bots');
+  });
+
+  it('秘书开关归实验页', () => {
+    const catalog = buildSettingsCatalog();
+    expect(catalog.find((e) => e.id === 'experimental.secretary')?.category).toBe('experimental');
   });
 
   it('general.language 标题包含 Language', () => {

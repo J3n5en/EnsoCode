@@ -1129,6 +1129,9 @@ export const zhTranslations: Record<string, string> = {
   'Add a project to start': '添加一个项目开始',
   'Temporary chats': '临时会话',
   'Drop shelf': '拖放浮窗',
+  Secretary: '秘书',
+  'A global agent that watches your projects and sessions, creates sessions to do the work, and reports results back to you.':
+    '一个全局 Agent：替你查看各项目与会话的进展，创建普通会话派活，并把结果回报给你。',
   'When you drag files in Finder, a small panel appears at the top right of the screen. Drop them on it to reference them in the current conversation, or drop folders to open them as projects, even when EnsoCode is minimized or in the tray.':
     '在访达中拖动文件时，屏幕右上角会出现一个小浮窗：把文件拖到上面即可引用到当前会话，拖文件夹还可选择作为项目打开；EnsoCode 最小化或在托盘时同样可用。',
   'Drop here to add to the conversation': '拖到这里，添加到会话',
