@@ -497,6 +497,25 @@ describe('resolveProposal', () => {
     expect(h.created).toHaveLength(1);
   });
 
+  it('并发确认只留一条执行记录，与落盘的接受记录分开', async () => {
+    const h = harness();
+    const { proposalId } = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+    })) as { proposalId: string };
+
+    await Promise.all([
+      resolveProposal(h.ports, proposalId, 'confirm'),
+      resolveProposal(h.ports, proposalId, 'confirm'),
+    ]);
+
+    const confirms = h.audits.filter((entry) => entry.op === 'proposal_confirm');
+    expect(confirms.map((entry) => [entry.detail, entry.ok])).toEqual([
+      ['accepted', true],
+      ['succeeded', true],
+    ]);
+  });
+
   it('重新校验失败时记失败并给原因', async () => {
     const h = harness();
     const { proposalId } = (await run(h.handlers.session_create, {

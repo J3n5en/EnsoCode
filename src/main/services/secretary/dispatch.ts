@@ -553,7 +553,7 @@ async function finishProposal(
     op: 'proposal_confirm',
     targetId: proposalId,
     ok: outcome.ok,
-    ...(outcome.ok ? {} : { detail: outcome.error }),
+    detail: outcome.ok ? 'succeeded' : (outcome.error ?? 'failed'),
   });
   notifySecretaryChanged();
   return { ok: true, proposal: transitioned.proposal };
@@ -608,6 +608,7 @@ export async function resolveProposal(
     op: action === 'confirm' ? 'proposal_confirm' : 'proposal_reject',
     targetId: proposalId,
     ok: true,
+    ...(action === 'confirm' ? { detail: 'accepted' } : {}),
   });
   if (action === 'reject') {
     notifySecretaryChanged();
