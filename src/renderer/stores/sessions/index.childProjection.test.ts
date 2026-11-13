@@ -344,6 +344,50 @@ describe('typed Agent child projection', () => {
     expect(after.started).toBe(false);
     expect(after.status).toBe('failed');
     expect(after.error).toBe('unknown or stale session generation: parent');
+    // 放弃自愈时重投的回显标为「未发送」，不停在「送达待确认」
+    expect(
+      after.messages.filter((message) => message.optimistic).map((m) => m.deliveryRejected)
+    ).toEqual([true]);
+  });
+
+  it.each([
+    ['无 sessionFile', { sessionFile: undefined }],
+    ['子会话', { parentId: 'root' }],
+  ])('%s 不自愈时被拒回显标为未发送', async (_label, extra) => {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: false,
+          status: 'idle' as const,
+          generation: 'pg1',
+          sessionFile: '/tmp/evicted.jsonl',
+          ...extra,
+          messages: [
+            {
+              role: 'user' as const,
+              content: [{ type: 'text' as const, text: 'lost' }],
+              optimistic: true,
+              deliveryId: 'd1',
+            },
+          ],
+        },
+      },
+    }));
+    onAgentEvent?.({
+      type: 'parent-rejected',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 0,
+      reason: 'unknown or stale session generation: parent',
+    });
+    await Promise.resolve();
+    const conversation = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(agentSpawn).not.toHaveBeenCalled();
+    expect(conversation.messages).toEqual([
+      expect.objectContaining({ deliveryId: 'd1', deliveryRejected: true }),
+    ]);
   });
 
   it('partialize never persists started and resets stale running status to idle', () => {

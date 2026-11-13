@@ -39,6 +39,8 @@ interface IndexedSession {
   proof?: ResolvedChildProfileProof;
   sessionFile?: string;
   coworkers: Map<string, CoworkerInfo>;
+  /** worker 侧已无此会话（ended / rejected / worker 退出），重新 prepareParent 或 parent-ready 前不可投递 */
+  detached?: boolean;
 }
 
 export interface ChildReservation {
@@ -192,7 +194,10 @@ export class AgentSessionIndex {
 
   prepareParent(identity: SessionIdentity): void {
     const current = this.sessions.get(identity.sessionId);
-    if (current && isSameGeneration(current.identity, identity)) return;
+    if (current && isSameGeneration(current.identity, identity)) {
+      current.detached = false;
+      return;
+    }
     this.releaseParentReservations(identity.sessionId);
     this.sessions.set(identity.sessionId, {
       identity,
@@ -269,6 +274,12 @@ export class AgentSessionIndex {
   isReady(identity: SessionIdentity): boolean {
     const current = this.sessions.get(identity.sessionId);
     return Boolean(current?.ready && current.alive && isSameGeneration(current.identity, identity));
+  }
+
+  /** 同代会话已从 worker 释放且尚未重新 spawn：prompt/steer 发过去只会被当作过期代次拒绝 */
+  isDetached(identity: SessionIdentity | ChildSessionIdentity): boolean {
+    const current = this.sessions.get(identity.sessionId);
+    return Boolean(current?.detached && isSameGeneration(current.identity, identity));
   }
 
   childProof(identity: ChildSessionIdentity): ResolvedChildProfileProof | undefined {
@@ -426,6 +437,7 @@ export class AgentSessionIndex {
       for (const session of this.sessions.values()) {
         session.alive = false;
         session.ready = false;
+        session.detached = true;
         // worker 重建后会话 seq 从 0 重计；不重置则 parent-ready 被当重复丢弃，索引永远不 ready
         session.lastSeq = -1;
       }
@@ -497,6 +509,7 @@ export class AgentSessionIndex {
       parent.started = true;
       parent.ready = true;
       parent.alive = true;
+      parent.detached = false;
       parent.sessionFile = event.sessionFile;
       parent.model = event.model;
       return true;
@@ -512,6 +525,7 @@ export class AgentSessionIndex {
       if (!current) return false;
       current.ready = false;
       current.alive = false;
+      current.detached = true;
       current.status = 'failed';
       // ended/rejected 是该 worker 会话的末事件；同 generation 重建（驱逐后 resume）seq 从 0 重计
       current.lastSeq = -1;

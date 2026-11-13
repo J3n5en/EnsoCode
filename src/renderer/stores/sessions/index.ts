@@ -186,6 +186,8 @@ const SNAPSHOT_RESYNC_DEBOUNCE_MS = 2_000;
 /** worker 丢会话后的自动恢复节流：窗口期内再次被同因拒绝即放弃自愈，避免 spawn/拒绝循环 */
 const staleRecoveredAt = new Map<string, number>();
 const STALE_RECOVERY_WINDOW_MS = 60_000;
+const isUndeliveredEcho = (message: TimelineMessage): boolean =>
+  Boolean(message.optimistic && !message.deliveryRejected && message.role === 'user');
 /** 冷会话不落正文，只按此节流续 lastOutputAt：每个流式增量都 set 会逐条触发 persist */
 const COLD_HEARTBEAT_INTERVAL_MS = 5_000;
 function resyncSnapshot(sessionId: string): void {
@@ -1913,11 +1915,7 @@ export const useSessionsStore = create<SessionsState>()(
               : {}),
           });
         });
-        if (
-          event.type === 'parent-rejected' &&
-          event.reason.startsWith(STALE_SESSION_ERROR) &&
-          isLeaderRenderer()
-        ) {
+        if (event.type === 'parent-rejected' && event.reason.startsWith(STALE_SESSION_ERROR)) {
           void recoverStaleSession(id, event.reason);
         }
         if (event.type === 'turn-completed' || event.type === 'turn-failed') {
@@ -1952,23 +1950,33 @@ export const useSessionsStore = create<SessionsState>()(
        */
       async function recoverStaleSession(id: string, reason: string): Promise<void> {
         const conversation = get().conversations[id];
+        if (!conversation) return;
+        const now = Date.now();
         if (
-          !conversation ||
+          !isLeaderRenderer() ||
           conversation.started ||
           conversation.parentId ||
           conversation.btwParentId ||
-          !conversation.sessionFile
-        )
+          !conversation.sessionFile ||
+          now - (staleRecoveredAt.get(id) ?? -Infinity) < STALE_RECOVERY_WINDOW_MS
+        ) {
+          // 不自愈时这些回显确已被拒：标为「未发送」（可撤回），不停在「送达待确认」
+          set((state) => {
+            const current = state.conversations[id];
+            if (!current?.messages.some(isUndeliveredEcho)) return state;
+            return patch(state, id, {
+              messages: current.messages.map((message) =>
+                isUndeliveredEcho(message) ? { ...message, deliveryRejected: true } : message
+              ),
+            });
+          });
           return;
-        const now = Date.now();
-        if (now - (staleRecoveredAt.get(id) ?? -Infinity) < STALE_RECOVERY_WINDOW_MS) return;
+        }
         staleRecoveredAt.set(id, now);
         set((state) => {
           const current = state.conversations[id];
           if (!current) return state;
-          const undelivered = current.messages.filter(
-            (message) => message.optimistic && !message.deliveryRejected && message.role === 'user'
-          );
+          const undelivered = current.messages.filter(isUndeliveredEcho);
           return patch(state, id, {
             status: 'idle',
             error: undefined,

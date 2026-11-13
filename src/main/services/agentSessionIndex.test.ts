@@ -107,6 +107,32 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.isAlive(parent.sessionId)).toBe(false);
   });
 
+  it('worker 释放后标记 detached，同代重新 prepareParent 或 parent-ready 后解除', () => {
+    const sessions = index();
+    sessions.prepareParent(parent);
+    expect(sessions.isDetached(parent)).toBe(false);
+    for (const end of [
+      { type: 'parent-ended' as const, identity: parent, seq: 1, reason: 'evicted' },
+      { type: 'parent-rejected' as const, identity: parent, seq: 0, reason: 'gone' },
+      { type: 'worker-exited' as const },
+    ]) {
+      sessions.observe(end);
+      expect(sessions.isDetached(parent)).toBe(true);
+      expect(sessions.isDetached({ ...parent, generation: 'other' })).toBe(false);
+      sessions.prepareParent(parent);
+      expect(sessions.isDetached(parent)).toBe(false);
+    }
+    sessions.observe({ type: 'parent-ended', identity: parent, seq: 1, reason: 'evicted' });
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'pv', modelId: 'm' },
+    });
+    expect(sessions.isDetached(parent)).toBe(false);
+  });
+
   it('手动只读响应不进入生命周期索引', () => {
     const sessions = index();
     const response = {

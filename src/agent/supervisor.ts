@@ -1195,6 +1195,8 @@ export class SessionSupervisor {
       lastActivityAt: managed.lastActivityAt,
       hasPendingWork:
         this.workspaceSwitch.isLocked(id) ||
+        // 串行门里还排着该会话的命令（prompt/steer 等）：此刻回收会让它们撞上已删除的会话
+        this.pendingCommands.has(id) ||
         managed.pendingBranch !== undefined ||
         !!managed.pendingVerifications ||
         managed.currentTurnId !== undefined ||

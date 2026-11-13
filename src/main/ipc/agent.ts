@@ -340,6 +340,8 @@ function exactIdentity(sessionId: unknown): SessionIdentity | ChildSessionIdenti
   return isNonEmptyString(sessionId) ? agentSessionIndex.currentIdentity(sessionId) : undefined;
 }
 
+const DETACHED_SESSION_ERROR = '会话已从后台释放（闲置回收或重启），请重新发送以恢复会话';
+
 function rootIdentity(sessionId: unknown): SessionIdentity | undefined {
   const identity = exactIdentity(sessionId);
   return identity && !('parent' in identity) ? identity : undefined;
@@ -2256,6 +2258,8 @@ export function registerAgentHandlers(): void {
       ) {
         return { ok: false, error: 'invalid prompt or stale session generation' };
       }
+      if (agentSessionIndex.isDetached(identity))
+        return { ok: false, error: DETACHED_SESSION_ERROR };
       return promptSession(
         identity,
         text as string,
@@ -2284,6 +2288,8 @@ export function registerAgentHandlers(): void {
       ) {
         return { ok: false, error: 'invalid steer or stale session generation' };
       }
+      if (agentSessionIndex.isDetached(identity))
+        return { ok: false, error: DETACHED_SESSION_ERROR };
       return steerSession(
         identity,
         text as string,
