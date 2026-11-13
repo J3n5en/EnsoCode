@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDropHighlightTracker,
   DROP_HIGHLIGHT_WATCHDOG_MS,
-  dropZonesFor,
   pickDroppedDirectories,
+  planDrop,
   projectImportFollowUp,
+  readDroppedEntries,
 } from './projectDrop';
 
 describe('pickDroppedDirectories', () => {
@@ -67,50 +68,112 @@ describe('pickDroppedDirectories', () => {
   });
 });
 
-describe('dropZonesFor', () => {
-  const file = (type: string) => ({ kind: 'file', type });
+type FakeFile = { name: string; size: number; type: string; path: string };
 
-  it('offers only the attach zone when every item has a MIME type (cannot be a folder)', () => {
+const fakeFile = (path: string, size = 1, type = 'text/plain'): FakeFile => ({
+  name: path.split('/').at(-1) ?? '',
+  size,
+  type,
+  path,
+});
+const pathOf = (file: FakeFile) => file.path;
+
+describe('readDroppedEntries', () => {
+  const fileItem = (file: FakeFile, isDirectory?: boolean) => ({
+    kind: 'file',
+    getAsFile: () => file,
+    webkitGetAsEntry: () => (isDirectory === undefined ? null : { isDirectory }),
+  });
+
+  it('marks folders by webkit entry and keeps the File for attaching', () => {
+    const dir = fakeFile('/repo', 96, '');
+    const doc = fakeFile('/notes.md');
     expect(
-      dropZonesFor({
-        types: ['Files'],
-        items: [file('text/plain'), file('image/png')],
-        composerReady: true,
+      readDroppedEntries({ items: [fileItem(dir, true), fileItem(doc, false)] }, pathOf)
+    ).toEqual([
+      { path: '/repo', isDirectory: true, file: dir },
+      { path: '/notes.md', isDirectory: false, file: doc },
+    ]);
+  });
+
+  it('ignores string items such as links and text snippets', () => {
+    const doc = fakeFile('/a.txt');
+    expect(
+      readDroppedEntries(
+        {
+          items: [
+            { kind: 'string', getAsFile: () => null },
+            { kind: 'string', getAsFile: () => null },
+            fileItem(doc, false),
+          ],
+        },
+        pathOf
+      )
+    ).toEqual([{ path: '/a.txt', isDirectory: false, file: doc }]);
+  });
+
+  it('drops files without a disk path (images dragged out of web pages)', () => {
+    const webImage = fakeFile('', 2048, 'image/png');
+    expect(readDroppedEntries({ items: [fileItem(webImage, false)] }, pathOf)).toEqual([]);
+  });
+
+  it('treats a path lookup failure as no path', () => {
+    expect(
+      readDroppedEntries({ items: [fileItem(fakeFile('/x'), false)] }, () => {
+        throw new Error('not a file');
       })
-    ).toEqual({ project: false, attach: true });
+    ).toEqual([]);
   });
 
-  it('offers both zones when an item may be a folder', () => {
-    expect(
-      dropZonesFor({ types: ['Files'], items: [file('text/plain'), file('')], composerReady: true })
-    ).toEqual({ project: true, attach: true });
+  it('falls back to the file list with a size/type folder guess when items are unavailable', () => {
+    const dir = fakeFile('/repo', 0, '');
+    const doc = fakeFile('/a.txt');
+    expect(readDroppedEntries({ files: [dir, doc] }, pathOf)).toEqual([
+      { path: '/repo', isDirectory: true, file: dir },
+      { path: '/a.txt', isDirectory: false, file: doc },
+    ]);
+  });
+});
+
+describe('planDrop', () => {
+  const entry = (path: string, isDirectory: boolean) => ({ path, isDirectory, file: path });
+
+  it('returns nothing when no usable path was dropped', () => {
+    expect(planDrop([])).toBeNull();
+    expect(planDrop([entry('  ', true)])).toBeNull();
   });
 
-  it('offers the project zone when the item list is unreadable', () => {
-    expect(dropZonesFor({ types: ['Files'], items: [], composerReady: true })).toEqual({
-      project: true,
-      attach: true,
+  it('opens folders as projects, deduped and capped at 10', () => {
+    const entries = Array.from({ length: 12 }, (_, index) => entry(`/p${index}`, true));
+    expect(planDrop([entry('/p0', true), ...entries])).toEqual({
+      kind: 'projects',
+      directories: Array.from({ length: 10 }, (_, index) => `/p${index}`),
+      skippedFiles: 0,
+      truncated: true,
     });
   });
 
-  it('drops the attach zone when no composer can take files', () => {
-    expect(dropZonesFor({ types: ['Files'], items: [file('')], composerReady: false })).toEqual({
-      project: true,
-      attach: false,
+  it('prefers folders when folders and files are mixed, counting the skipped files', () => {
+    expect(planDrop([entry('/a.txt', false), entry('/repo', true)])).toEqual({
+      kind: 'projects',
+      directories: ['/repo'],
+      skippedFiles: 1,
+      truncated: false,
     });
-    expect(
-      dropZonesFor({ types: ['Files'], items: [file('text/plain')], composerReady: false })
-    ).toEqual({ project: false, attach: false });
   });
 
-  it('offers nothing for drags that are not OS files', () => {
+  it('attaches plain files to the conversation, deduped by path with display names', () => {
     expect(
-      dropZonesFor({
-        types: ['text/plain'],
-        items: [{ kind: 'string', type: 'text/plain' }],
-        composerReady: true,
-      })
-    ).toEqual({ project: false, attach: false });
+      planDrop([
+        entry('/a/one.ts', false),
+        entry('C:\\b\\two.md', false),
+        entry('/a/one.ts', false),
+      ])
+    ).toEqual({
+      kind: 'files',
+      files: ['/a/one.ts', 'C:\\b\\two.md'],
+      names: ['one.ts', 'two.md'],
+    });
   });
 });
 
