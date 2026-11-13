@@ -207,8 +207,8 @@ export function parseAntigravityApiKey(apiKeyRaw: string): AntigravityCredential
 
 // ---- HTTP 小工具 ----
 
-/** 长度上限对齐 `src/main/services/providerApi.ts` 的 errorText */
-const UPSTREAM_BODY_LIMIT = 300;
+/** 400 的 schema 报错带完整字段路径，300 字放不下；全文另经 redactUpstreamBody 进日志 */
+const UPSTREAM_BODY_LIMIT = 2000;
 
 /** 看起来像凭证的片段：Authorization 头、token 字段、Google 的 ya29. 前缀、JWT */
 const SECRET_PATTERNS: readonly [RegExp, string][] = [
@@ -231,15 +231,20 @@ const SECRET_PATTERNS: readonly [RegExp, string][] = [
  * 这些错误会经 pi 的 `OauthLoginEvent.error` / worker 的 errorMessage 一路走到
  * 渲染层的登录框与聊天区，而 401 响应、企业代理的拦截页可能回显 Authorization
  * 头或几十 KB 的 HTML。所以先按整体脱敏（截断放最后，避免把 token 切成两半
- * 只脱敏掉前半截），再压掉换行、最后截到 300 字。
+ * 只脱敏掉前半截），再压掉换行、最后截到 UPSTREAM_BODY_LIMIT 字。
  */
 export function sanitizeUpstreamBody(text: string): string {
-  let safe = text;
-  for (const [pattern, replacement] of SECRET_PATTERNS) safe = safe.replace(pattern, replacement);
-  safe = safe.replace(/\s+/g, ' ').trim();
+  const safe = redactUpstreamBody(text);
   return safe.length > UPSTREAM_BODY_LIMIT
     ? `${safe.slice(0, UPSTREAM_BODY_LIMIT)}…（已截断）`
     : safe;
+}
+
+/** 脱敏 + 压掉换行但不截断，只用于写日志 */
+function redactUpstreamBody(text: string): string {
+  let safe = text;
+  for (const [pattern, replacement] of SECRET_PATTERNS) safe = safe.replace(pattern, replacement);
+  return safe.replace(/\s+/g, ' ').trim();
 }
 
 async function fetchWithTimeout(
@@ -696,6 +701,52 @@ const DROPPED_SCHEMA_KEYS: Record<string, true> = {
   contentMediaType: true,
   contentEncoding: true,
 };
+
+type SchemaRecord = Record<string, unknown>;
+
+const isSchemaRecord = (value: unknown): value is SchemaRecord =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/** 防菱形引用指数膨胀：超过这个嵌套深度的引用直接退化 */
+const MAX_REF_DEPTH = 16;
+
+/**
+ * Gemini 不认 `$defs`/`definitions`/`$ref`，只删定义会留下悬空 `$ref` 被后端 400，
+ * 所以先把根上的本地引用内联展开。环、过深或解析不到的引用退化成宽松 schema `{}`；
+ * `$ref` 的兄弟字段覆盖在展开结果之上。
+ */
+export function expandSchemaRefs(schema: unknown): unknown {
+  if (!isSchemaRecord(schema)) return schema;
+  const roots: Record<string, unknown> = { $defs: schema.$defs, definitions: schema.definitions };
+  const resolve = (ref: string): unknown => {
+    const match = /^#\/(\$defs|definitions)\/(.+)$/.exec(ref);
+    if (!match) return undefined;
+    let node = roots[match[1]];
+    for (const segment of match[2].split('/')) {
+      const key = segment.replace(/~1/g, '/').replace(/~0/g, '~');
+      if (!isSchemaRecord(node) || !Object.hasOwn(node, key)) return undefined;
+      node = node[key];
+    }
+    return node;
+  };
+  const walk = (value: unknown, stack: readonly string[]): unknown => {
+    if (Array.isArray(value)) return value.map((entry) => walk(entry, stack));
+    if (!isSchemaRecord(value)) return value;
+    const out: SchemaRecord = {};
+    const ref = value.$ref;
+    if (typeof ref === 'string' && !stack.includes(ref) && stack.length < MAX_REF_DEPTH) {
+      const target = resolve(ref);
+      if (isSchemaRecord(target)) Object.assign(out, walk(target, [...stack, ref]));
+    }
+    for (const [key, raw] of Object.entries(value)) {
+      if (key === '$ref' && typeof raw === 'string') continue;
+      if (value === schema && (key === '$defs' || key === 'definitions')) continue;
+      out[key] = walk(raw, stack);
+    }
+    return out;
+  };
+  return walk(schema, []);
+}
 
 export function normalizeToolSchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizeToolSchema);
@@ -1281,7 +1332,7 @@ export function convertTools(
       functionDeclarations: tools.map((tool) => ({
         name: tool.name,
         description: tool.description || '',
-        parameters: normalizeToolSchema(tool.parameters),
+        parameters: normalizeToolSchema(expandSchemaRefs(tool.parameters)),
       })),
     },
   ];
@@ -1609,7 +1660,11 @@ function streamAntigravity(
         );
 
         if (!response.ok) {
-          const detail = sanitizeUpstreamBody(await response.text().catch(() => ''));
+          const rawBody = await response.text().catch(() => '');
+          console.warn(
+            `[antigravity] ${model.id} session=${options.sessionId ?? '-'} HTTP ${response.status}: ${redactUpstreamBody(rawBody)}`
+          );
+          const detail = sanitizeUpstreamBody(rawBody);
           const error = new Error(
             `Cloud Code Assist 返回 ${response.status}${detail ? `: ${detail}` : ''}`
           );
