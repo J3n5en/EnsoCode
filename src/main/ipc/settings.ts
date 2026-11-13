@@ -749,6 +749,23 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/** 当前设置 state 快照（本机配置 CLI 读取用） */
+export function readSettingsState(): Record<string, unknown> {
+  return settingsStateOf(readSettings());
+}
+
+/** 丢弃内存副本并以磁盘为准重读，再走与普通写入相同的通知与广播（本机配置 CLI 的 reload） */
+export function reloadSettingsFromDisk(): boolean {
+  if (pendingWrite) clearTimeout(pendingWrite);
+  if (maxWaitTimer) clearTimeout(maxWaitTimer);
+  pendingWrite = null;
+  maxWaitTimer = null;
+  isDirty = false;
+  cachedSettings = null;
+  const data = readSettings();
+  return data !== null && scheduleWrite(data, undefined, 'all-renderers');
+}
+
 const TRAY_SETTINGS_KEY = 'enso-tray';
 
 export function readTraySleepPolicy(): TraySleepPolicy {

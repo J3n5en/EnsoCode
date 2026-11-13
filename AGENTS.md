@@ -40,6 +40,7 @@ pnpm typecheck && pnpm lint && pnpm test
 - 任何不会真正发给 worker 的操作，都必须在 optimistic echo 之前拒绝。
 - capability 授权按 child generation 建键，不按内部 turnId；child 恢复由 Main 级联完成。
 - 大段文本不要写进 `settings.json`；外部实体删除时同时清理由应用创建的本地副本。
+- 新增设置项必须同步 `src/main/services/configCli/policy.ts`（密钥/路径/执行类进黑名单，启动时读入的进 `RESTART_REQUIRED`）与 `docs/config-cli.md`。
 - 扫描器遵循“来源定位 / 格式读取 / 编排去重”三层结构；单个来源失败不能阻断整体扫描。
 
 ## 排查方式
