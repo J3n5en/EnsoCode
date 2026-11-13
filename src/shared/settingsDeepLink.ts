@@ -25,6 +25,7 @@ export const SETTINGS_CATEGORIES = [
   'experimental',
   'bots',
   'botTemplates',
+  'secretary',
 ] as const;
 
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];

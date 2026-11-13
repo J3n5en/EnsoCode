@@ -92,6 +92,7 @@ const EVERY_SETTINGS_CATEGORY = {
   experimental: true,
   bots: true,
   botTemplates: true,
+  secretary: true,
 } satisfies Record<SettingsCategory, true>;
 
 describe('SETTINGS_GROUPS', () => {
@@ -174,6 +175,29 @@ describe('Bot mode page', () => {
     expect(resolveActiveCategory('bots', [], true)).toBe('bots');
     expect(resolveActiveCategory('botTemplates', [], false)).toBe('experimental');
     expect(resolveActiveCategory('botTemplates', [], true)).toBe('botTemplates');
+  });
+});
+
+describe('Secretary page', () => {
+  const withSecretary = [
+    ...cats,
+    { id: 'experimental' as SettingsCategory },
+    { id: 'secretary' as SettingsCategory },
+  ];
+
+  it('is hidden until the secretary agent is enabled', () => {
+    expect(visibleCategories(withSecretary, []).map((c) => c.id)).not.toContain('secretary');
+    expect(visibleCategories(withSecretary, [], false, false).map((c) => c.id)).not.toContain(
+      'secretary'
+    );
+    expect(visibleCategories(withSecretary, [], false, true).map((c) => c.id)).toContain(
+      'secretary'
+    );
+  });
+
+  it('falls back to Experimental, where the switch lives', () => {
+    expect(resolveActiveCategory('secretary', [], false, false)).toBe('experimental');
+    expect(resolveActiveCategory('secretary', [], false, true)).toBe('secretary');
   });
 });
 

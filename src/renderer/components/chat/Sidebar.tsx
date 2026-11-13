@@ -82,6 +82,7 @@ import {
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
 import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
 import { SecretaryOriginBadge } from '@/components/secretary/SecretaryOriginBadge';
+import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import {
   SecretaryCollapsedButton,
   SecretarySidebarSection,
@@ -320,6 +321,7 @@ export function Sidebar({
     });
   };
   const [secretaryRevealed, setSecretaryRevealed] = useState(false);
+  const [secretaryResetOpen, setSecretaryResetOpen] = useState(false);
   const secretaryConversationIds = useMemo(() => {
     const projectId = secretaryState.projectId;
     if (!projectId) return [];
@@ -998,12 +1000,15 @@ export function Sidebar({
               onToggleFold={toggleSecretaryFolded}
               onOpen={openSecretary}
               onNewConversation={() => {
-                if (!secretaryState.projectId) return;
-                void newConversation(secretaryState.projectId);
+                void useSecretaryStore.getState().newSecretaryConversation();
               }}
-              onOpenSettings={() => void window.electronAPI.window.openSettings()}
-              // 重新设置由设置页的秘书分类接管，这里先把用户送到那里
-              onReset={() => void window.electronAPI.window.openSettings()}
+              onOpenSettings={() =>
+                void window.electronAPI.window.openSettings({
+                  category: 'secretary',
+                  rowId: 'secretary.root',
+                })
+              }
+              onReset={() => setSecretaryResetOpen(true)}
             >
               {shownSecretaryIds.map((id) => (
                 <ConversationRow
@@ -2082,6 +2087,7 @@ export function Sidebar({
         </DragOverlay>,
         document.body
       )}
+      <SecretaryResetDialog open={secretaryResetOpen} onOpenChange={setSecretaryResetOpen} />
     </motion.aside>
   );
 }

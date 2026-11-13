@@ -41,6 +41,7 @@ import { RemoteNodeView } from '@/components/nodes/RemoteNodeView';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
+import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
 import { SidePanel } from '@/components/sidepanel/SidePanel';
 import {
   AlertDialog,
@@ -696,23 +697,8 @@ export default function App() {
                 card={desktopShell}
                 titleRow={titleRowPanel}
               />
-              {/* 秘书欢迎页的挂载点：初次设置完成前盖住主区域，页面内容由设置流程提供 */}
-              {secretaryEnabled && secretaryWelcomeOpen && (
-                <div
-                  data-enso="secretary-welcome"
-                  className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background px-6 text-center"
-                >
-                  <p className="text-sm font-medium">{t('Set up your secretary')}</p>
-                  <p className="max-w-sm text-xs text-muted-foreground">
-                    {t(
-                      'Pick a name, a model and how much it may do on its own. The secretary then watches your projects and reports back here.'
-                    )}
-                  </p>
-                  <Button size="sm" onClick={() => useSecretaryStore.getState().closeWelcome()}>
-                    {t('Close')}
-                  </Button>
-                </div>
-              )}
+              {/* 初次设置盖住主区域；远端浏览器（PWA 完整模式）同样走这条路径 */}
+              {secretaryEnabled && secretaryWelcomeOpen && <SecretaryWelcome />}
             </div>
           </DndContext>
         )}

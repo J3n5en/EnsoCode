@@ -1,13 +1,16 @@
 import type { SecretaryProposal } from '@shared/types/secretary';
-import { createElement } from 'react';
+import { parseHTML } from 'linkedom';
+import { act, createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 服务端渲染拿的是 store 的初始快照，状态注入只能走 mock；store 本身的订阅由 secretary.test.ts 覆盖
 const h = vi.hoisted(() => ({
   proposal: null as unknown,
+  extra: {} as Record<string, unknown>,
   resolving: false,
-  resolveProposal: (() => {}) as (proposalId: string, action: string) => void,
+  resolveProposal: (() => {}) as (...args: unknown[]) => void,
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => `[${key}]` }) }));
@@ -19,10 +22,29 @@ vi.mock('@/stores/settings', () => ({
 vi.mock('@/stores/secretary', () => ({
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
     selector({
-      secretary: { proposals: h.proposal ? { pr1: h.proposal } : {} },
+      secretary: { proposals: { ...(h.proposal ? { pr1: h.proposal } : {}), ...h.extra } },
       resolving: h.resolving ? { pr1: true } : {},
       resolveProposal: h.resolveProposal,
     }),
+}));
+// 就地修改的表单由 profileFormState 与 SecretaryProfileForm 自己的测试覆盖，这里只验卡片把整份草案交出去
+vi.mock('./SecretaryProfileForm', () => ({
+  SecretaryProfileForm: ({
+    initialDraft,
+    onSubmit,
+  }: {
+    initialDraft: Record<string, unknown>;
+    onSubmit: (draft: Record<string, unknown>) => void;
+  }) =>
+    createElement(
+      'button',
+      {
+        type: 'button',
+        'data-enso': 'mock-profile-form',
+        onClick: () => onSubmit({ ...initialDraft, name: '改过的名字' }),
+      },
+      'Submit profile'
+    ),
 }));
 
 const { SecretaryProposalRow, secretaryProposalId } = await import('./SecretaryProposalRow');
@@ -57,6 +79,9 @@ describe('secretaryProposalId', () => {
     const output = '{"status":"awaiting_confirmation","proposalId":"pr1"}';
     expect(secretaryProposalId({ name: 'session_create', output, state: 'ok' })).toBe('pr1');
     expect(secretaryProposalId({ name: 'todo_item_dispatch', output, state: 'ok' })).toBe('pr1');
+    expect(secretaryProposalId({ name: 'secretary_profile_propose', output, state: 'ok' })).toBe(
+      'pr1'
+    );
     // 已建成的结果、别的工具、运行中与出错行都不是提案卡片
     expect(
       secretaryProposalId({ name: 'session_create', output: '{"status":"created"}', state: 'ok' })
@@ -127,5 +152,92 @@ describe('SecretaryProposalRow', () => {
     );
     expect(html).toContain('[Waiting for your confirmation]');
     expect(buttons(html)).toEqual([]);
+  });
+});
+
+const profileProposal: SecretaryProposal = {
+  id: 'pr2',
+  secretaryConversationId: 'sec1',
+  createdAt: 1,
+  updatedAt: 1,
+  status: 'pending',
+  kind: 'profile',
+  draft: {
+    name: '小安',
+    autonomy: 'full',
+    dispatchWorktree: 'always',
+    maxRunningDispatches: 5,
+    model: { providerId: 'p', modelId: 'm' },
+  },
+};
+
+const renderProfile = (over: Partial<SecretaryProposal> = {}): string => {
+  h.proposal = null;
+  h.extra = { pr2: { ...profileProposal, ...over } };
+  h.resolving = false;
+  return renderToStaticMarkup(createElement(SecretaryProposalRow, { proposalId: 'pr2' }));
+};
+
+describe('SecretaryProposalRow profile proposals', () => {
+  beforeEach(() => {
+    h.proposal = null;
+    h.extra = { pr2: profileProposal };
+    h.resolving = false;
+    h.resolveProposal = vi.fn();
+  });
+
+  it('待确认：逐项列出草案并给确认、拒绝、就地修改三个入口', () => {
+    const html = renderProfile();
+    expect(html).toContain('[Profile]');
+    expect(html).toContain('小安');
+    expect(html).toContain('m');
+    expect(html).toContain('[Fully autonomous]');
+    expect(html).toContain('[Always an isolated worktree]');
+    expect(html).toContain('[Up to {{n}} at a time]');
+    expect(html).toContain('[Waiting for your confirmation]');
+    expect(buttons(html)).toEqual(['[Confirm]', '[Reject]', '[Edit here]']);
+  });
+
+  it('没指定模型时标出跟随全局默认', () => {
+    expect(renderProfile({ draft: { name: '小安' } } as Partial<SecretaryProposal>)).toContain(
+      '[Follows the default model]'
+    );
+  });
+
+  it('终态只显示状态，不再给按钮', () => {
+    expect(renderProfile({ status: 'succeeded' })).toContain('[Profile saved]');
+    expect(buttons(renderProfile({ status: 'succeeded' }))).toEqual([]);
+    expect(renderProfile({ status: 'rejected' })).toContain('[Rejected]');
+    expect(renderProfile({ status: 'expired' })).toContain('[Expired]');
+    const failed = renderProfile({ status: 'failed', error: 'invalid autonomy' });
+    expect(failed).toContain('invalid autonomy');
+    expect(buttons(failed)).toEqual([]);
+  });
+
+  it('就地修改后确认，把改过的整份草案作为 profileDraft 交给 Main', async () => {
+    const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('document', window.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const container = window.document.getElementById('root') as unknown as HTMLElement;
+    const root: Root = createRoot(container);
+    await act(async () => root.render(createElement(SecretaryProposalRow, { proposalId: 'pr2' })));
+
+    const edit = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === '[Edit here]'
+    );
+    await act(async () => edit?.click());
+    const submit = container.querySelector('[data-enso="mock-profile-form"]');
+    expect(submit).not.toBeNull();
+    await act(async () => (submit as unknown as HTMLElement).click());
+
+    expect(h.resolveProposal).toHaveBeenCalledWith(
+      'pr2',
+      'confirm',
+      undefined,
+      expect.objectContaining({ name: '改过的名字', autonomy: 'full', maxRunningDispatches: 5 })
+    );
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
   });
 });

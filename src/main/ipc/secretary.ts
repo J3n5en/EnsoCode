@@ -9,7 +9,7 @@ import { notifyDesktop } from '../services/desktopHooks';
 import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
-import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
+import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
@@ -190,6 +190,11 @@ function secretaryStore(): SecretaryStore {
   return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
 }
 
+/** 档案与定时在设置窗口里编辑，聊天侧的操作仍只认主界面 */
+function isProfileEditor(webContentsId: number): boolean {
+  return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
+}
+
 function parseAvatarRequest(value: unknown): { image: Uint8Array | null } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const image = (value as { image?: unknown }).image;
@@ -289,26 +294,26 @@ export function registerSecretaryHandlers(): void {
 
   // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页
   ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_PROFILE, async (event) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     const store = secretaryStore();
     return { ok: true, profile: store.profile(), persona: store.readPersona() };
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SAVE_PROFILE, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     return secretaryProfile.save(request, null);
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_RESET_PROFILE, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     return secretaryProfile.reset(request, null);
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SET_AVATAR, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     const parsed = parseAvatarRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
@@ -359,13 +364,13 @@ export function registerSecretaryHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, async (event) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     return { ok: true, schedules: listSchedules(secretarySchedulePorts) };
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     const scheduleId = parseScheduleIdRequest(request);
     if (!scheduleId) return { ok: false, error: 'invalid request' };

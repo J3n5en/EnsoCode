@@ -283,6 +283,30 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Bot assistant model',
     description: 'Used for helper tasks such as auto-configuring member abilities.',
   },
+  { id: 'secretary.root', category: 'secretary', title: 'Secretary' },
+  {
+    id: 'secretary.profile',
+    category: 'secretary',
+    title: 'Secretary profile',
+    description: 'Name, avatar, model and how much the secretary may do on its own.',
+  },
+  {
+    id: 'secretary.style',
+    category: 'secretary',
+    title: 'Style and interruptions',
+    description: 'What it calls you, reply language, style and system notifications.',
+  },
+  {
+    id: 'secretary.schedules',
+    category: 'secretary',
+    title: 'Scheduled tasks',
+    description: 'Daily brief, to-do reminders and one-off or recurring prompts.',
+  },
+  {
+    id: 'secretary.reset',
+    category: 'secretary',
+    title: 'Reset the secretary and start over',
+  },
   { id: 'shortcuts.root', category: 'shortcuts', title: 'Shortcuts' },
   { id: 'appearance.theme', category: 'appearance', title: 'Theme mode' },
   {
