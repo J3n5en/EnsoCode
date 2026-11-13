@@ -53,6 +53,15 @@
   padding-block: 0;
   background: transparent;
   border-bottom: 0;
+  /* 面板 tab 条升进顶栏行、与窗口顶栏同高：那一段视觉上就是顶栏，
+     空白处必须能拖动窗口，否则用户按着「顶栏」拖不动。 */
+  -webkit-app-region: drag;
+}
+/* tab / 按钮 / 可交互元素豁免，否则点击会被当成拖窗口 */
+[data-title-row] .enso-side-dock [data-side-tab],
+[data-title-row] .enso-side-dock button,
+[data-title-row] .enso-side-dock [role="button"] {
+  -webkit-app-region: no-drag;
 }
 [data-title-row] .enso-side-dock [data-side-tab] {
   height: 1.75rem;
