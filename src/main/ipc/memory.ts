@@ -609,6 +609,10 @@ async function projectNames(): Promise<Map<string, string>> {
       names.set(project.projectId, '临时会话');
       continue;
     }
+    if (project.kind === 'secretary') {
+      names.set(project.projectId, '秘书');
+      continue;
+    }
     names.set(project.projectId, basename(project.canonicalPath));
   }
   return names;
@@ -626,6 +630,10 @@ async function spaceLabeler(): Promise<(spaceId: string) => string> {
     if (project.kind === 'bot-home') continue;
     if (project.kind === 'scratch') {
       names.set(project.projectId, '临时会话');
+      continue;
+    }
+    if (project.kind === 'secretary') {
+      names.set(project.projectId, '秘书');
       continue;
     }
     names.set(project.projectId, basename(project.canonicalPath));

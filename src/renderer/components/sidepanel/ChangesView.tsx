@@ -103,13 +103,15 @@ export function ChangesView({
   );
   const project = useSettingsStore((s) => s.projects.find((item) => item.id === projectId));
   const root = useSessionsStore((s) =>
-    project?.kind === 'scratch'
-      ? (conversationCwd({
-          kind: 'scratch',
-          canonicalPath: project.path,
-          conversationId,
-        }) ?? undefined)
-      : (s.conversations[conversationId]?.worktree?.path ?? project?.path)
+    project?.kind === 'secretary'
+      ? undefined
+      : project?.kind === 'scratch'
+        ? (conversationCwd({
+            kind: 'scratch',
+            canonicalPath: project.path,
+            conversationId,
+          }) ?? undefined)
+        : (s.conversations[conversationId]?.worktree?.path ?? project?.path)
   );
   const running = useSessionsStore((s) => s.conversations[conversationId]?.status === 'running');
 

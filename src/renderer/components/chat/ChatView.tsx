@@ -392,6 +392,7 @@ export function ChatView() {
           {project &&
             project.kind !== 'ssh' &&
             project.kind !== 'scratch' &&
+            project.kind !== 'secretary' &&
             !chrome.displayedParentId && (
               <ProjectCodeTrustBar projectId={project.id} conversationId={chrome.id} />
             )}

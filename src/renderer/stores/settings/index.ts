@@ -1367,7 +1367,9 @@ function applyProjectAuthorityProjection(projection: SourceAuthorityProjection):
             }
           : project.kind === 'scratch'
             ? { kind: 'scratch' as const, name: 'Temporary chats' }
-            : {}),
+            : project.kind === 'secretary'
+              ? { kind: 'secretary' as const, name: 'Secretary' }
+              : {}),
       };
     });
   // 投影未变时必须不写 state：persist 的每次 setState 都会落盘并广播 SETTINGS_CHANGED，

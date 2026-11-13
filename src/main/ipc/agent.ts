@@ -160,6 +160,7 @@ import {
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
+import { isSecretaryConversation } from '../services/secretary/identity';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
   projectParentHistoryPage,
@@ -309,16 +310,17 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
 function publishPluginTurnEnd(event: RendererAgentEvent): void {
   const sessionId = turnEndSessionId(event);
   if (!sessionId) return;
-  // 与其他插件事件一致：Bot 会话不发
-  if (sourceAuthority?.conversation(sessionId)?.bot) return;
+  // 与其他插件事件一致：Bot 与秘书会话不发
+  if (sourceAuthority?.conversation(sessionId)?.bot || isSecretaryConversation(sessionId)) return;
   peekExtensionPlugins()?.notifyTurnEnd(sessionId);
 }
 
 /** 主会话汇总状态变化时通知订阅了 session_status 的插件 */
 function publishPluginSessionStatus(event: RendererAgentEvent): void {
   for (const change of pluginSessionStates.observe(event)) {
-    // 与其他插件事件一致：Bot 会话不发
+    // 与其他插件事件一致：Bot 与秘书会话不发
     if (sourceAuthority?.conversation(change.sessionId)?.bot) continue;
+    if (isSecretaryConversation(change.sessionId)) continue;
     void getExtensionPlugins()
       .dispatchEvent({
         sessionId: change.sessionId,
@@ -368,7 +370,7 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   return cwd !== null && cwd === request.cwd;
 }
 
-/** cwd 只从权威记录推导。scratch 固定为 `<根>/<会话 id>`，不接受 worktree 或其他路径。 */
+/** cwd 只从权威记录推导。scratch 固定为 `<根>/<会话 id>`，secretary 固定为项目根，都不接受 worktree。 */
 function authoritativeSpawnCwd(sessionId: string): string | null {
   const conversation = sourceAuthority?.conversation(sessionId);
   const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
@@ -384,7 +386,7 @@ function authoritativeSpawnCwd(sessionId: string): string | null {
     canonicalPath: project.canonicalPath,
     conversationId: sessionId,
     worktreePath:
-      project.kind === 'ssh' || project.kind === 'scratch'
+      project.kind === 'ssh' || project.kind === 'scratch' || project.kind === 'secretary'
         ? undefined
         : sessionWorktree(sessionId)?.path,
   });
@@ -465,7 +467,10 @@ export function resolveConversationWorkspace(conversationId: string): {
     kind: project.kind,
     canonicalPath: project.canonicalPath,
     conversationId,
-    worktreePath: project.kind === 'ssh' || project.kind === 'scratch' ? undefined : cwd,
+    worktreePath:
+      project.kind === 'ssh' || project.kind === 'scratch' || project.kind === 'secretary'
+        ? undefined
+        : cwd,
   });
   if (!resolved) return null;
   const remote = remoteConfigFor(conversationId);
@@ -1359,6 +1364,9 @@ export function registerAgentHandlers(): void {
     },
   });
   sourceAuthority.ensureScratchProject(path.join(app.getPath('userData'), 'scratch'));
+  sourceAuthority.ensureSecretaryProject(
+    path.join(app.getPath('userData'), 'secretary', 'workspace')
+  );
   setBrowserFileRootResolver((conversationId) => {
     const conversation = sourceAuthority?.conversation(conversationId);
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;

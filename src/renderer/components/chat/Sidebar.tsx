@@ -285,7 +285,7 @@ export function Sidebar({
     readSidebarOrder(PROJECT_ORDER_KEY)
   );
   const orderedProjects = applyProjectOrder(
-    projects.filter((project) => project.kind !== 'scratch'),
+    projects.filter((project) => project.kind !== 'scratch' && project.kind !== 'secretary'),
     projectOrderIds
   );
   const scratchProject = projects.find((project) => project.kind === 'scratch');
@@ -2409,7 +2409,10 @@ function ConversationRow({
   const { t } = useI18n();
   const localProject = useSettingsStore((state) =>
     state.projects.some(
-      (project) => project.id === conversation.projectId && project.kind !== 'ssh'
+      (project) =>
+        project.id === conversation.projectId &&
+        project.kind !== 'ssh' &&
+        project.kind !== 'secretary'
     )
   );
   const scratchProject = useSettingsStore((state) =>

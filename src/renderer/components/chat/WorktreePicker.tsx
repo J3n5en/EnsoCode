@@ -81,7 +81,8 @@ export function WorktreePicker({
       !conversation.parentId &&
       !conversation.child &&
       project?.kind !== 'ssh' &&
-      project?.kind !== 'scratch'
+      project?.kind !== 'scratch' &&
+      project?.kind !== 'secretary'
   );
   const workspaceKey = `${conversationId}\0${conversation?.worktree?.path ?? project?.path ?? ''}`;
   const currentKeyRef = useRef(workspaceKey);

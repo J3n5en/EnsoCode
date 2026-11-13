@@ -793,7 +793,10 @@ export function getBotServices(): BotServices | null {
     isCodeProject: (id) => {
       const project = authority.project(id);
       return (
-        project?.state === 'active' && project.kind !== 'bot-home' && project.kind !== 'scratch'
+        project?.state === 'active' &&
+        project.kind !== 'bot-home' &&
+        project.kind !== 'scratch' &&
+        project.kind !== 'secretary'
       );
     },
     schedule: async (payload) =>
@@ -910,7 +913,9 @@ function resolveWorkspaceInput(
   if (project.kind === 'ssh' || project.kind === 'bot-home') {
     return { error: 'workspace-unsupported' };
   }
-  if (project.kind === 'scratch') return { error: 'workspace-unsupported' };
+  if (project.kind === 'scratch' || project.kind === 'secretary') {
+    return { error: 'workspace-unsupported' };
+  }
   return { kind: 'project', projectId: project.projectId };
 }
 

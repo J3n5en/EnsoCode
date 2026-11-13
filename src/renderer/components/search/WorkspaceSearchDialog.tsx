@@ -181,6 +181,7 @@ export function WorkspaceSearchDialog({
     return Object.values(conversations)
       .map((conversation) => {
         const project = projects.find((item) => item.id === conversation.projectId);
+        if (project?.kind === 'secretary') return null;
         if (!scratchSessionsEnabled && project?.kind === 'scratch') return null;
         return conversationToSearchDoc({
           conversationId: conversation.id,

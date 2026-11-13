@@ -67,6 +67,7 @@ function projectIdentity(
 ): string {
   if (project.kind === 'ssh') return `ssh:${project.sshConnectionId}:${project.canonicalPath}`;
   if (project.kind === 'scratch') return `scratch:${project.canonicalPath}`;
+  if (project.kind === 'secretary') return `secretary:${project.canonicalPath}`;
   return project.kind === 'bot-home'
     ? `bot-home:${project.canonicalPath}`
     : `local:${project.canonicalPath}`;
@@ -154,6 +155,9 @@ export class SourceAuthorityRegistry {
     if (request.kind === 'scratch') {
       return { accepted: false, error: 'Project kind is reserved.' };
     }
+    if (request.kind === 'secretary') {
+      return { accepted: false, error: 'Project kind is reserved.' };
+    }
     try {
       return request.kind === 'ssh'
         ? this.createSshProject(request)
@@ -209,6 +213,26 @@ export class SourceAuthorityRegistry {
         projectId: this.randomUuid(),
         canonicalPath,
         kind: 'scratch',
+        state: 'active',
+        version: 1,
+      });
+      return inserted.accepted ? inserted.value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 仅 Main：把秘书工作区登记为隐藏项目（按路径幂等，目录不存在则创建） */
+  ensureSecretaryProject(dir: string): ProjectAuthorityProjection | undefined {
+    try {
+      mkdirSync(dir, { recursive: true });
+      const canonicalPath = realpathSync(dir);
+      const existing = this.findActiveByIdentity(`secretary:${canonicalPath}`);
+      if (existing) return { ...existing };
+      const inserted = this.insertProject({
+        projectId: this.randomUuid(),
+        canonicalPath,
+        kind: 'secretary',
         state: 'active',
         version: 1,
       });
@@ -302,6 +326,7 @@ export class SourceAuthorityRegistry {
       project?.state !== 'active' ||
       project.kind === 'bot-home' ||
       project.kind === 'scratch' ||
+      project.kind === 'secretary' ||
       project.version !== request.version
     ) {
       return { accepted: false, error: 'Project authority is stale or unavailable.' };

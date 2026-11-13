@@ -62,13 +62,13 @@ export function listProjectSessions(
   );
 }
 
-/** 所有在用项目的主会话；不含 Bot 工作区 */
+/** 所有在用项目的主会话；不含 Bot 工作区与秘书项目 */
 export function listAllSessions(
   input: SessionSource & { projects: readonly ProjectAuthority[] }
 ): PluginSessionInfo[] {
   const projects = new Map(
     input.projects
-      .filter((p) => p.state === 'active' && p.kind !== 'bot-home')
+      .filter((p) => p.state === 'active' && p.kind !== 'bot-home' && p.kind !== 'secretary')
       .map((p) => [p.projectId, p])
   );
   return newestFirst(
