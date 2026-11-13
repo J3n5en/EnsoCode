@@ -208,6 +208,22 @@ export const zhTranslations: Record<string, string> = {
   'Custom proxy': '自定义代理',
   'Proxy URL': '代理地址',
   'Enter an http(s) proxy URL': '请输入 http(s) 代理地址',
+  'Custom CA certificate': '自定义 CA 证书',
+  'Trust an extra CA (PEM file) for model endpoints signed by a private CA. TLS verification stays on.':
+    '为私有 CA 签发的模型接口额外信任一个 CA（PEM 文件），TLS 校验保持开启。',
+  'Choose certificate file': '选择证书文件',
+  'Set: {{path}}': '已设置：{{path}}',
+  'Using NODE_EXTRA_CA_CERTS from the launch environment: {{path}}':
+    '已使用启动环境中的 NODE_EXTRA_CA_CERTS（优先于此设置）：{{path}}',
+  'Not set; using NODE_EXTRA_CA_CERTS from the login shell: {{path}}':
+    '未设置，使用登录 shell 中的 NODE_EXTRA_CA_CERTS：{{path}}',
+  'Certificate file unavailable ({{reason}}): {{path}}': '证书文件不可用（{{reason}}）：{{path}}',
+  'Path must be absolute': '须为绝对路径',
+  'File not found': '文件不存在',
+  'Not a file': '不是文件',
+  'File is not readable': '文件不可读',
+  'Changes restart the agent process right away (running turns are interrupted). Requests made by the app main process take effect after restarting the app.':
+    '修改后会立即重启 Agent 进程（进行中的回合会中断）；主进程侧需重启应用生效。',
   Shortcuts: '快捷键',
   'Click a shortcut to rebind it. Backspace removes it; Esc cancels.':
     '点击键位改绑。Backspace 删除；Esc 取消。',

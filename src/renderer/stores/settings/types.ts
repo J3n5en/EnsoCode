@@ -215,6 +215,8 @@ export interface SettingsState {
   proxyMode: ProxyMode;
   /** 自定义代理 URL，仅 custom 模式使用 */
   customProxyUrl: string;
+  /** 额外信任的 CA 证书文件路径（NODE_EXTRA_CA_CERTS），只存路径 */
+  customCaCertPath: string;
 
   /** agent 新完成文件改动时打开右侧 Changes；缺省 false */
   openChangesOnFileEdit: boolean;
@@ -428,6 +430,7 @@ export interface SettingsState {
   setPluginAutoUpdate: (value: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;
+  setCustomCaCertPath: (path: string) => void;
   setOpenChangesOnFileEdit: (value: boolean) => void;
   setCompactReadOnlyTools: (value: boolean) => void;
   setExpandLiveEdits: (value: boolean) => void;

@@ -8,6 +8,7 @@ describe('pluginHostEnv', () => {
       HTTP_PROXY: 'http://p:1',
       https_proxy: 'http://p:2',
       NO_PROXY: 'localhost',
+      NODE_EXTRA_CA_CERTS: '/etc/ssl/corp.pem',
       OPENAI_API_KEY: 'sk-secret',
     });
     expect(env).toEqual({
@@ -15,6 +16,7 @@ describe('pluginHostEnv', () => {
       HTTP_PROXY: 'http://p:1',
       https_proxy: 'http://p:2',
       NO_PROXY: 'localhost',
+      NODE_EXTRA_CA_CERTS: '/etc/ssl/corp.pem',
     });
   });
 

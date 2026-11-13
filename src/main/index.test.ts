@@ -86,6 +86,9 @@ vi.mock('./services/proxyConfig', () => ({
     whenReady: () => Promise.resolve(true),
   }),
 }));
+vi.mock('./services/caCert', () => ({
+  getCaCertConfig: () => ({ initFromConfig: vi.fn(), applyShellValue: vi.fn() }),
+}));
 vi.mock('./services/secureStores', () => ({
   readySecureStores: vi.fn(async () => {
     mocks.order.push('secure');

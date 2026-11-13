@@ -122,6 +122,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   pluginAutoUpdate: { mode: 'excluded', reason: 'device update policy' },
   proxyMode: { mode: 'excluded', reason: 'device network configuration' },
   customProxyUrl: { mode: 'excluded', reason: 'device network configuration may contain secrets' },
+  customCaCertPath: { mode: 'excluded', reason: 'device-local certificate file path' },
   sshTimeoutSeconds: { mode: 'excluded', reason: 'device network configuration' },
   openChangesOnFileEdit: { mode: 'portable' },
   compactReadOnlyTools: { mode: 'portable' },

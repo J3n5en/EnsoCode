@@ -7,6 +7,7 @@ import type {
   BtwSpawnRequest,
 } from '@shared/btw';
 import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
+import type { CaCertStatus } from '@shared/caCert';
 import type { ElevationRequestView } from '@shared/elevation';
 import type {
   ChatModelDto,
@@ -1190,6 +1191,13 @@ const electronAPI = {
       customUrl: string;
     }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROXY_APPLY, settings),
+  },
+
+  caCert: {
+    status: (): Promise<CaCertStatus> => ipcRenderer.invoke(IPC_CHANNELS.CA_CERT_STATUS),
+    /** 空串清除；生效值变化时 Main 会重启 agent worker */
+    apply: (path: string): Promise<CaCertStatus> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CA_CERT_APPLY, path),
   },
 
   appearance: {

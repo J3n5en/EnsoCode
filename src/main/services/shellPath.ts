@@ -8,22 +8,30 @@ import { delimiter } from 'node:path';
  *   1. seedProcessPath()：启动即前插常见安装目录，零延迟保底；
  *   2. hydrateShellPath()：异步跑登录 shell 拿真实 $PATH 合并提升。
  * 只动 PATH，不整包导入用户 env——密钥走应用设置，杂音不进 agent 子进程。
+ * 唯一例外：同一次探测额外取白名单变量 NODE_EXTRA_CA_CERTS（由 caCert 决定是否采用）。
  */
 
 const MARKER = `__ENSO_SHELL_PATH_${process.pid}__`;
+const CA_MARKER = `__ENSO_SHELL_CA_${process.pid}__`;
 /** 重型 rc（nvm+conda+gcloud）冷启动实测可到 6-7s，预算对齐成熟 GUI 编辑器 */
 const PROBE_TIMEOUT_MS = 10_000;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: 剥 ANSI 转义需要匹配 ESC
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
-/** 解析探测输出：成对标记之间的 $PATH，剥 ANSI、去重保序 */
-export function parseProbeOutput(stdout: string, marker: string): string[] {
+/** 成对标记之间的原始值（剥 ANSI、trim），缺标记或为空返回 undefined */
+export function parseProbeValue(stdout: string, marker: string): string | undefined {
   const cleaned = stdout.replace(ANSI_RE, '');
   const first = cleaned.indexOf(marker);
-  if (first === -1) return [];
+  if (first === -1) return undefined;
   const second = cleaned.indexOf(marker, first + marker.length);
-  if (second === -1) return [];
+  if (second === -1) return undefined;
   const value = cleaned.slice(first + marker.length, second).trim();
+  return value || undefined;
+}
+
+/** 解析探测输出：成对标记之间的 $PATH，剥 ANSI、去重保序 */
+export function parseProbeOutput(stdout: string, marker: string): string[] {
+  const value = parseProbeValue(stdout, marker);
   if (!value) return [];
   return [
     ...new Set(
@@ -64,14 +72,27 @@ export function seedProcessPath(): void {
   process.env.PATH = seeded;
 }
 
+/** 探测命令：PATH 段在前（与旧格式一致），CA 段只输出这一个变量 */
+export function buildProbeCommand(marker: string, caMarker: string): string {
+  return (
+    `printf '%s' '${marker}'; printf '%s' "$PATH"; printf '%s' '${marker}'; ` +
+    `printf '%s' '${caMarker}'; printf '%s' "$NODE_EXTRA_CA_CERTS"; printf '%s' '${caMarker}'`
+  );
+}
+
 /**
  * 跑登录 shell（-ilc，含 rc 文件）拿真实 $PATH，成功则提升到 process.env.PATH
  * 最前（shell 结果优先于 seed——seed 里的 node 可能不是用户 shell 实际解析的
  * 那个版本）。失败静默保留 seed。分辨率一次，进程内不重复探测。
+ * extraCaCerts 只回传、不写 env。
  */
-export async function hydrateShellPath(): Promise<{ ok: boolean; added: number }> {
+export async function hydrateShellPath(): Promise<{
+  ok: boolean;
+  added: number;
+  extraCaCerts?: string;
+}> {
   const shell = process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash');
-  const command = `printf '%s' '${MARKER}'; printf '%s' "$PATH"; printf '%s' '${MARKER}'`;
+  const command = buildProbeCommand(MARKER, CA_MARKER);
 
   const stdout = await new Promise<string>((resolve) => {
     let out = '';
@@ -109,9 +130,11 @@ export async function hydrateShellPath(): Promise<{ ok: boolean; added: number }
   });
 
   const segments = parseProbeOutput(stdout, MARKER);
-  if (segments.length === 0) return { ok: false, added: 0 };
+  const extraCaCerts = parseProbeValue(stdout, CA_MARKER);
+  const ca = extraCaCerts ? { extraCaCerts } : {};
+  if (segments.length === 0) return { ok: false, added: 0, ...ca };
   const before = process.env.PATH ?? '';
   const next = mergePathSegments(segments, before);
   process.env.PATH = next;
-  return { ok: true, added: next === before ? 0 : segments.length };
+  return { ok: true, added: next === before ? 0 : segments.length, ...ca };
 }

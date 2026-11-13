@@ -89,6 +89,7 @@ const ENV_ALLOWLIST = [
   'https_proxy',
   'all_proxy',
   'no_proxy',
+  'NODE_EXTRA_CA_CERTS',
 ];
 
 /** 插件进程不继承 Main 的环境变量，只给运行 Node 必需的几项和代理设置 */

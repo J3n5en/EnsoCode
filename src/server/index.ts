@@ -14,6 +14,7 @@ import {
   stopAgentWorkerForQuit,
 } from '../main/services/agentHost';
 import { attachAppQuitDrain } from '../main/services/appQuitDrain';
+import { getCaCertConfig } from '../main/services/caCert';
 import { getExtensionPlugins } from '../main/services/extensionPlugins';
 import {
   closeMemoryDb,
@@ -169,6 +170,7 @@ async function serve(web: WebConfig | null): Promise<void> {
     | undefined;
   const state = persisted?.state ?? {};
   getProxyConfig().initFromConfig(state.proxyMode, state.customProxyUrl);
+  getCaCertConfig().initFromConfig(state.customCaCertPath);
   syncMemoryEmbeddingFromSettings(state);
   syncMemoryDistillFromSettings(state);
   syncMemoryKgFromSettings(state);
