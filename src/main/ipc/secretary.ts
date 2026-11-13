@@ -71,20 +71,6 @@ import { createConversationWorktree, removeRegisteredWorktree } from './worktree
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0;
 
-function parseDevCreateRequest(value: unknown): MainSessionRequest | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const request = value as Record<string, unknown>;
-  if (!isNonEmptyString(request.projectId) || !isNonEmptyString(request.prompt)) return null;
-  if (request.title !== undefined && typeof request.title !== 'string') return null;
-  if (request.worktree !== undefined && typeof request.worktree !== 'boolean') return null;
-  return {
-    projectId: request.projectId,
-    prompt: request.prompt,
-    ...(typeof request.title === 'string' ? { title: request.title } : {}),
-    worktree: request.worktree === true,
-  };
-}
-
 function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactoryPorts {
   const authority = getSourceAuthorityRegistry();
   return {
@@ -384,15 +370,5 @@ export function registerSecretaryHandlers(): void {
     if (!parsed) return { ok: false, error: 'invalid request' };
     if (!driver) return { ok: false, error: 'driver unavailable' };
     return driver.goalAction(parsed.conversationId, parsed.action, parsed.text);
-  });
-
-  // dev-only 测试入口：真机验证 Main 原生建会话，U10 删除
-  if (app.isPackaged) return;
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_DEV_CREATE_SESSION, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseDevCreateRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    return createSessionViaMain(parsed);
   });
 }

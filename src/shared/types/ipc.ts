@@ -8,8 +8,6 @@ export const IPC_CHANNELS = {
   CONVERSATIONS_PATCH: 'conversations:patch',
   /** 主界面 renderer 读整份会话记录，同时重置自己的会话账本 */
   CONVERSATIONS_READ: 'conversations:read',
-  /** 秘书：dev-only 的 Main 原生建会话入口，U10 删除 */
-  SECRETARY_DEV_CREATE_SESSION: 'secretary:dev-create-session',
   /** 秘书：工作台与聊天卡片读的同一份 Main 状态 */
   SECRETARY_GET_STATE: 'secretary:get-state',
   /** main → 主界面 renderer：秘书状态变化 */
