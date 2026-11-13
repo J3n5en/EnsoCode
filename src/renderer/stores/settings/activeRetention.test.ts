@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTIVE_RETENTION_MINUTES,
   DEFAULT_ACTIVE_RETENTION_MINUTES,
+  DEFAULT_HEADER_RECENT_MINUTES,
   normalizeActiveRetentionMinutes,
+  normalizeHeaderRecentMinutes,
 } from './activeRetention';
 
 describe('active retention minutes', () => {
@@ -23,5 +25,12 @@ describe('active retention minutes', () => {
         normalizeActiveRetentionMinutes(value)
       )
     ).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it('顶栏最近会话窗口默认 30 分钟，允许关闭，非法值回落默认', () => {
+    expect(DEFAULT_HEADER_RECENT_MINUTES).toBe(30);
+    expect([0, 60, undefined, 45, '30'].map(normalizeHeaderRecentMinutes)).toEqual([
+      0, 60, 30, 30, 30,
+    ]);
   });
 });

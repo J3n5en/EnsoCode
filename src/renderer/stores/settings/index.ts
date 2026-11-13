@@ -81,7 +81,9 @@ import {
 } from '@/stores/oauthCredentials';
 import {
   DEFAULT_ACTIVE_RETENTION_MINUTES,
+  DEFAULT_HEADER_RECENT_MINUTES,
   normalizeActiveRetentionMinutes,
+  normalizeHeaderRecentMinutes,
 } from './activeRetention';
 import {
   DEFAULT_AUTO_ARCHIVE_IDLE_DAYS,
@@ -237,6 +239,8 @@ const initialState = {
   collapseLiveActivity: false,
   liveActivityFoldDelaySec: 5,
   pinUnfinishedTodos: true,
+  headerSessionTabs: false,
+  headerRecentMinutes: DEFAULT_HEADER_RECENT_MINUTES,
   chatWide: false,
   navRailSide: 'left' as const,
   chatTypography: normalizeChatTypography(DEFAULT_CHAT_TYPOGRAPHY),
@@ -455,6 +459,9 @@ export const useSettingsStore = create<SettingsState>()(
       setLiveActivityFoldDelaySec: (seconds) =>
         set({ liveActivityFoldDelaySec: normalizeLiveActivityFoldDelaySec(seconds) }),
       setPinUnfinishedTodos: (pinUnfinishedTodos) => set({ pinUnfinishedTodos }),
+      setHeaderSessionTabs: (headerSessionTabs) => set({ headerSessionTabs }),
+      setHeaderRecentMinutes: (minutes) =>
+        set({ headerRecentMinutes: normalizeHeaderRecentMinutes(minutes) }),
       setChatWide: (chatWide) => {
         document.documentElement.classList.toggle('enso-chat-wide', chatWide);
         set({ chatWide });
@@ -1276,6 +1283,10 @@ export const useSettingsStore = create<SettingsState>()(
         const activeRetentionMinutes = normalizeActiveRetentionMinutes(s.activeRetentionMinutes);
         if (activeRetentionMinutes !== s.activeRetentionMinutes) {
           useSettingsStore.setState({ activeRetentionMinutes });
+        }
+        const headerRecentMinutes = normalizeHeaderRecentMinutes(s.headerRecentMinutes);
+        if (headerRecentMinutes !== s.headerRecentMinutes) {
+          useSettingsStore.setState({ headerRecentMinutes });
         }
         if (s.autoArchiveMergedWorktrees !== true && s.autoArchiveMergedWorktrees !== false) {
           useSettingsStore.setState({ autoArchiveMergedWorktrees: false });

@@ -236,6 +236,10 @@ export interface SettingsState {
   liveActivityFoldDelaySec: number;
   /** 输入框上方固定显示最新 todo 清单（仍有未完成项时）；缺省 true */
   pinUnfinishedTodos: boolean;
+  /** 对话区上方顶栏以标签显示活跃中会话；Bot 模式开启时不显示；缺省 false */
+  headerSessionTabs: boolean;
+  /** 顶栏标签另含这么多分钟内有过消息的会话；0 只显示活跃中；缺省 30 */
+  headerRecentMinutes: number;
   /** 聊天列铺满：去掉两侧阶梯 max-w；缺省 false（居中阅读宽度） */
   chatWide: boolean;
   /** 轮次刻度在对话左侧、右侧，或关闭；缺省 left */
@@ -440,6 +444,8 @@ export interface SettingsState {
   setCollapseLiveActivity: (value: boolean) => void;
   setLiveActivityFoldDelaySec: (value: number) => void;
   setPinUnfinishedTodos: (value: boolean) => void;
+  setHeaderSessionTabs: (value: boolean) => void;
+  setHeaderRecentMinutes: (minutes: number) => void;
   setChatWide: (value: boolean) => void;
   setNavRailSide: (value: 'left' | 'right' | 'off') => void;
   setChatTypography: (next: ChatTypography) => void;

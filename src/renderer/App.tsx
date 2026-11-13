@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
+import { HeaderSessionTabs } from '@/components/app/HeaderSessionTabs';
 import { ProjectDropOverlay } from '@/components/app/ProjectDropOverlay';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
@@ -223,6 +224,7 @@ export default function App() {
   const remoteNodeActive = activeNodeId !== 'local';
   const botModeActive = useBotModeActive();
   const botModeEnabled = useSettingsStore((s) => s.botModeEnabled);
+  const headerSessionTabsEnabled = useSettingsStore((s) => s.headerSessionTabs);
   const appMode = useAppModeStore((s) => s.mode);
   // 关闭实验开关或切到远程节点：回到 Code（设置未水合前 botModeEnabled 恒为 false，不能据此回退）
   useEffect(() => {
@@ -423,6 +425,14 @@ export default function App() {
     desktopShell && (chromeKind === 'mac' || chromeKind === 'windows' || chromeKind === 'web');
   const sideInTitleRow =
     titleRowPanel && sideOpen && !isMobile && !botModeActive && !remoteNodeActive;
+  // Bot 模式开启时顶栏居中是 Bot 切换器，标签会与之重叠，整体让位
+  const headerSessionTabs =
+    headerSessionTabsEnabled &&
+    desktopShell &&
+    !botModeEnabled &&
+    !(sideInTitleRow && sideFullscreen) ? (
+      <HeaderSessionTabs onNew={startNewConversation} />
+    ) : null;
   const sideToggle = remoteNodeActive ? null : (
     <button
       type="button"
@@ -526,6 +536,7 @@ export default function App() {
           }
           // 顶栏态全屏：面板 tab 条铺满整行，居中开关会被压在 tab 下
           centered={(sideInTitleRow && sideFullscreen ? null : modeSwitch) ?? undefined}
+          middle={headerSessionTabs}
           className={cn(
             chromeKind !== 'mac' && !remoteNodeActive && 'pl-0',
             desktopShell && 'border-b-0',

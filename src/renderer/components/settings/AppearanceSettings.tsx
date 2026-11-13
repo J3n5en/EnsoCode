@@ -65,6 +65,7 @@ import {
   type Theme,
   useSettingsStore,
 } from '@/stores/settings';
+import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
 import { fontWeightOptions } from './constants';
 import { FileOpeningSettings } from './FileOpeningSettings';
 import { SwitchRow } from './GeneralSettings';
@@ -849,6 +850,12 @@ function ConversationDisplaySection() {
   const setLiveActivityFoldDelaySec = useSettingsStore((s) => s.setLiveActivityFoldDelaySec);
   const pinUnfinishedTodos = useSettingsStore((s) => s.pinUnfinishedTodos);
   const setPinUnfinishedTodos = useSettingsStore((s) => s.setPinUnfinishedTodos);
+  const headerSessionTabs = useSettingsStore((s) => s.headerSessionTabs);
+  const setHeaderSessionTabs = useSettingsStore((s) => s.setHeaderSessionTabs);
+  const headerRecentMinutes = useSettingsStore((s) => s.headerRecentMinutes);
+  const setHeaderRecentMinutes = useSettingsStore((s) => s.setHeaderRecentMinutes);
+  const recentLabel = (value: number) =>
+    value === 0 ? t('Off') : t('{{count}} min', { count: value });
   const navRailSide = useSettingsStore((s) => s.navRailSide);
   const setNavRailSide = useSettingsStore((s) => s.setNavRailSide);
   return (
@@ -934,6 +941,44 @@ function ConversationDisplaySection() {
           checked={pinUnfinishedTodos}
           onChange={setPinUnfinishedTodos}
         />
+        <SwitchRow
+          rowId="appearance.headerSessionTabs"
+          title={t('Show active sessions in the title bar')}
+          description={t(
+            'Show active conversations as tabs above the conversation. Hold ⌘/Ctrl to see number shortcuts. Hidden while Bot mode is enabled.'
+          )}
+          checked={headerSessionTabs}
+          onChange={setHeaderSessionTabs}
+        >
+          {headerSessionTabs && (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm">{t('Also show recent conversations')}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t('Conversations with messages within this window. Off shows only Active ones.')}
+                </p>
+              </div>
+              <Select
+                items={Object.fromEntries(
+                  ACTIVE_RETENTION_MINUTES.map((value) => [String(value), recentLabel(value)])
+                )}
+                value={String(headerRecentMinutes)}
+                onValueChange={(value) => setHeaderRecentMinutes(Number(value))}
+              >
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup>
+                  {ACTIVE_RETENTION_MINUTES.map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {recentLabel(value)}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            </div>
+          )}
+        </SwitchRow>
         <div
           className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
           data-settings-row="appearance.navRailSide"

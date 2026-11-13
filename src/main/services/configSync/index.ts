@@ -134,6 +134,8 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   liveActivityFoldDelaySec: { mode: 'portable' },
   pinUnfinishedTodos: { mode: 'portable' },
   pinnedModels: { mode: 'excluded', reason: 'starred keys reference device-local provider ids' },
+  headerSessionTabs: { mode: 'excluded', reason: 'desktop window chrome layout preference' },
+  headerRecentMinutes: { mode: 'excluded', reason: 'desktop window chrome layout preference' },
   chatWide: { mode: 'portable' },
   navRailSide: { mode: 'portable' },
   chatTypography: { mode: 'portable' },

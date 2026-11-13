@@ -203,6 +203,28 @@ export function activeConversationIds(
   );
 }
 
+/**
+ * 顶栏会话标签:活跃会话保持传入顺序(与 ⌘1–9 对齐)在前,
+ * 窗口内有过消息或续期的其余会话按活跃时间追加。include 用于套用侧栏的分组过滤。
+ */
+export function headerSessionTabIds(
+  activeIds: readonly string[],
+  order: readonly string[],
+  conversations: Conversations,
+  archivedProjectIds: readonly string[],
+  recent: { now: number; ms: number },
+  include: (id: string) => boolean = () => true
+): string[] {
+  const leading = new Set(activeIds);
+  const recentIds =
+    recent.ms > 0
+      ? activeConversationIds(order, conversations, archivedProjectIds, recent).filter(
+          (id) => !leading.has(id) && include(id)
+        )
+      : [];
+  return [...activeIds, ...recentIds];
+}
+
 /** 仅靠留存窗口留在「活跃中」的会话还剩多少毫秒;不会因超时移出或已超时的返回 undefined */
 export function activeRetentionRemainingMs(
   id: string,

@@ -16,6 +16,8 @@ interface TitleBarProps {
    * 它保留左侧标题；macOS 隐藏标题以免挤占系统红绿灯。
    */
   centered?: React.ReactNode;
+  /** 可选的中段内容，占满 leading 与 actions 之间的空白；自身保持拖拽区，子元素自行 no-drag */
+  middle?: React.ReactNode;
 }
 
 /**
@@ -24,7 +26,7 @@ interface TitleBarProps {
  * - Windows: 给原生窗口按钮预留空间，保留系统贴靠入口
  * - Linux: 自绘最小化/最大化/关闭按钮
  */
-export function TitleBar({ title, className, actions, leading, centered }: TitleBarProps) {
+export function TitleBar({ title, className, actions, leading, centered, middle }: TitleBarProps) {
   const kind = useWindowChromeKind();
   const isMac = kind === 'mac';
   const isWindows = kind === 'windows';
@@ -50,6 +52,8 @@ export function TitleBar({ title, className, actions, leading, centered }: Title
       ) : !centered || !isMac ? (
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
       ) : null}
+
+      {middle}
 
       {centered && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

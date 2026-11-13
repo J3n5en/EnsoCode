@@ -506,6 +506,12 @@ export const zhTranslations: Record<string, string> = {
   'Seconds to wait after tools and thinking finish': '工具和思考都结束后再等这么多秒',
   sec: '秒',
   'Pin unfinished todos': '固定显示未完成待办',
+  'Show active sessions in the title bar': '在顶栏显示活跃会话',
+  'Show active conversations as tabs above the conversation. Hold ⌘/Ctrl to see number shortcuts. Hidden while Bot mode is enabled.':
+    '在对话区上方以标签显示活跃中的会话，按住 ⌘/Ctrl 显示数字快捷键。开启 Bot 模式时不显示。',
+  'Also show recent conversations': '同时显示最近会话',
+  'Conversations with messages within this window. Off shows only Active ones.':
+    '这段时间内有过消息的会话；关闭则只显示活跃中的会话。',
   'Turn marks': '轮次刻度',
   'Marks along the conversation for each turn. Hover to preview, click to jump. Hidden when the chat uses the full width.':
     '对话旁边的轮次刻度。悬停预览，点击跳转。聊天铺满宽度时不显示。',

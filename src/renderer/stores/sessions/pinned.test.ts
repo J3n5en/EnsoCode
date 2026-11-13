@@ -5,6 +5,7 @@ import {
   activeRetentionRemainingMs,
   archivedConversationGroups,
   archivedConversationIds,
+  headerSessionTabIds,
   pinnedConversationIds,
   projectConversationIds,
   sortProjectsByActivity,
@@ -489,6 +490,48 @@ describe('pinnedConversationIds', () => {
   it('手动序里已取消置顶/已归档的不回流', () => {
     // withArchived 里 b 归档了:手动序含 b 也不应出现
     expect(pinnedConversationIds(order, withArchived, ['b', 'c'])).toEqual(['c', 'e']);
+  });
+});
+
+describe('headerSessionTabIds', () => {
+  const now = 100_000;
+  const min = 60_000;
+  const header = {
+    act: conv('p1', 1, 0, { status: 'idle', unread: true }),
+    recentOld: conv('p1', 2, now - 20 * min, { status: 'idle' }),
+    recentNew: conv('p2', 3, now - 5 * min, { status: 'idle' }),
+    stale: conv('p1', 4, now - 40 * min, { status: 'idle' }),
+    gone: conv('p1', 5, now - min, { status: 'idle', archived: true }),
+    kid: conv('p1', 6, now - min, { status: 'idle', parentId: 'act' }),
+  };
+  const headerOrder = ['kid', 'gone', 'stale', 'recentNew', 'recentOld', 'act'];
+
+  it('活跃会话在前保持原序，窗口内的最近会话按活跃时间追加', () => {
+    expect(headerSessionTabIds(['act'], headerOrder, header, [], { now, ms: 30 * min })).toEqual([
+      'act',
+      'recentNew',
+      'recentOld',
+    ]);
+  });
+
+  it('窗口为 0 只保留活跃会话', () => {
+    expect(headerSessionTabIds(['act'], headerOrder, header, [], { now, ms: 0 })).toEqual(['act']);
+  });
+
+  it('排除归档项目与外部过滤掉的会话', () => {
+    expect(
+      headerSessionTabIds(['act'], headerOrder, header, ['p2'], { now, ms: 30 * min })
+    ).toEqual(['act', 'recentOld']);
+    expect(
+      headerSessionTabIds(
+        ['act'],
+        headerOrder,
+        header,
+        [],
+        { now, ms: 30 * min },
+        (id) => id !== 'recentOld'
+      )
+    ).toEqual(['act', 'recentNew']);
   });
 });
 

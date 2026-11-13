@@ -128,6 +128,7 @@ import {
   activeConversationIds,
   activeRetentionRemainingMs,
   archivedConversationGroups,
+  headerSessionTabIds,
   pinnedConversationIds,
   projectConversationIds,
   RECENT_PROJECT_WINDOW_DAYS,
@@ -142,6 +143,7 @@ import {
   sessionSwitchSlotIds,
   shownConversationCount,
 } from '@/stores/sessions/sessionSwitchSlots';
+import { publishSessionSwitch, useSessionSwitchState } from '@/stores/sessions/sessionSwitchState';
 import { selectSidebarConversations } from '@/stores/sessions/sidebarDirectory';
 import { DIRTY_MAIN_TREE, worktreeHasPendingWork } from '@/stores/sessions/worktree';
 import { useSettingsStore } from '@/stores/settings';
@@ -205,6 +207,7 @@ export function Sidebar({
   const setProjectGroupId = useSettingsStore((state) => state.setProjectGroupId);
   const keybindings = useSettingsStore((state) => state.keybindings);
   const activeRetentionMinutes = useSettingsStore((state) => state.activeRetentionMinutes);
+  const headerRecentMinutes = useSettingsStore((state) => state.headerRecentMinutes);
   const searchBinding = effectiveKeybindings(keybindings)['search-workspace'];
   const searchShortcut = searchBinding ? formatBinding(searchBinding) : '';
   const addProject = useSettingsStore((state) => state.addProject);
@@ -570,7 +573,10 @@ export function Sidebar({
   // 项目已额外露出的条数(会话级状态,重启回到折叠上限)
   const [revealedExtras, setRevealedExtras] = useState<Record<string, number>>({});
   const [listQuery, setListQuery] = useState('');
-  const [modHeld, setModHeld] = useState(false);
+  const modHeld = useSessionSwitchState((state) => state.modHeld);
+  const setModHeld = useCallback((value: boolean) => {
+    useSessionSwitchState.setState({ modHeld: value });
+  }, []);
 
   // 相对时间每分钟自刷（“3 分钟前”不随时间僵住；活跃中留存窗口也随之过期）
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -618,7 +624,7 @@ export function Sidebar({
   const visibleActiveIds = (searching ? activeIds.filter(convMatches) : activeIds).filter(
     inActiveGroup
   );
-  const switchSlots = sessionSwitchSlotIds({
+  const sidebarSlots = sessionSwitchSlotIds({
     order,
     conversations,
     pinnedOrderIds,
@@ -636,8 +642,22 @@ export function Sidebar({
     },
     leadingIds: visibleActiveIds,
   });
+  const headerTabIds = headerSessionTabIds(
+    activeIds.filter(inActiveGroup),
+    order,
+    conversations,
+    archivedProjectIds,
+    { now: nowTick, ms: headerRecentMinutes * 60_000 },
+    inActiveGroup
+  );
+  if (activeId && conversations[activeId] && !conversations[activeId].parentId) {
+    if (!headerTabIds.includes(activeId)) headerTabIds.push(activeId);
+  }
+  const headerMounted = useSessionSwitchState((state) => state.headerMounted);
+  const switchSlots = headerMounted ? headerTabIds.slice(0, 9) : sidebarSlots;
   const switchSlotsRef = useRef(switchSlots);
   switchSlotsRef.current = switchSlots;
+  useEffect(() => publishSessionSwitch(headerTabIds, switchSlots));
   const visiblePinnedIds = (searching ? pinnedIds.filter(convMatches) : pinnedIds).filter(
     inActiveGroup
   );
@@ -736,7 +756,7 @@ export function Sidebar({
       window.removeEventListener('blur', clear);
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [selectConversation]);
+  }, [selectConversation, setModHeld]);
 
   // worktree 徽标状态：挂载 + 窗口聚焦 + 30s 轻量轮询（只查隔离会话，不每帧跑 git）
   useEffect(() => {

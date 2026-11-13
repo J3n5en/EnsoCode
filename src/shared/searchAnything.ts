@@ -183,6 +183,11 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Pin unfinished todos',
   },
   {
+    id: 'appearance.headerSessionTabs',
+    category: 'appearance',
+    title: 'Show active sessions in the title bar',
+  },
+  {
     id: 'appearance.navRailSide',
     category: 'appearance',
     title: 'Turn marks',
