@@ -112,6 +112,9 @@ function harness(
         state.spawns.push(request);
         return state.spawnResult;
       },
+      release: async () => {
+        log.push('release');
+      },
       prompt: (id, text, deliveryId) => {
         log.push('prompt');
         state.prompts.push({ id, text, deliveryId });
@@ -205,13 +208,27 @@ describe('createSessionFromMain', () => {
     expect(h.prompts).toEqual([]);
   });
 
-  it('首条 prompt 被拒时也回滚', async () => {
+  it('首条 prompt 被拒时先释放已 spawn 的会话再回滚', async () => {
     const h = harness();
     h.promptResult = { ok: false, error: 'unknown or stale session generation' };
     const result = await createSessionFromMain(h.ports, REQUEST);
     expect(result).toEqual({ ok: false, error: 'unknown or stale session generation' });
-    expect(h.removedRows).toEqual(['conv-1']);
-    expect(h.removedConversations).toEqual(['conv-1']);
+    expect(h.log).toEqual([
+      'createConversation',
+      'writeRow',
+      'spawn',
+      'prompt',
+      'release',
+      'removeRow',
+      'removeConversation',
+    ]);
+  });
+
+  it('spawn 失败时不释放', async () => {
+    const h = harness();
+    h.spawnResult = { ok: false, error: 'x' };
+    await createSessionFromMain(h.ports, REQUEST);
+    expect(h.log).not.toContain('release');
   });
 
   it('只接受 active 的本地项目', async () => {

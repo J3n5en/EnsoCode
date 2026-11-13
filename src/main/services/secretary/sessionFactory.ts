@@ -52,6 +52,8 @@ export interface SessionFactoryPorts {
   writeRow(row: Record<string, unknown>): void;
   removeRow(id: string): void;
   spawn(request: AgentSpawnRequest): Promise<{ ok: boolean; error?: string }>;
+  /** 释放已 spawn 的根会话 */
+  release(id: string): Promise<unknown>;
   prompt(id: string, text: string, deliveryId: string): { ok: boolean; error?: string };
   newId(): string;
   now(): number;
@@ -142,6 +144,7 @@ export async function createSessionFromMain(
 
   const prompted = ports.prompt(id, prompt, ports.newId());
   if (!prompted.ok) {
+    await ports.release(id).catch(() => undefined);
     await rollback();
     return { ok: false, error: prompted.error ?? 'prompt failed' };
   }

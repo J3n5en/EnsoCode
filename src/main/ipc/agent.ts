@@ -519,6 +519,13 @@ export function promptRootFromMain(
   return promptSession(identity, text, undefined, deliveryId);
 }
 
+export async function releaseRootFromMain(sessionId: string): Promise<AgentActionResult> {
+  const identity = exactIdentity(sessionId);
+  return identity
+    ? await releaseParentSession(identity)
+    : { ok: false, error: STALE_SESSION_ERROR };
+}
+
 /**
  * 渲染层 → Main 的 spawn 请求白名单。键集必须与 AgentSpawnRequest 完全一致：漏登记一个字段
  * 的后果是「类型里有、校验里没有」→ 整条请求被拒成 invalid spawn request（手机新会话踩过：

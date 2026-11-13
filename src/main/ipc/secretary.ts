@@ -10,7 +10,12 @@ import {
   type MainSessionRequest,
   type SessionFactoryPorts,
 } from '../services/secretary/sessionFactory';
-import { getSourceAuthorityRegistry, promptRootFromMain, spawnRootFromMain } from './agent';
+import {
+  getSourceAuthorityRegistry,
+  promptRootFromMain,
+  releaseRootFromMain,
+  spawnRootFromMain,
+} from './agent';
 import { patchConversationsState } from './settings';
 import { createConversationWorktree, removeRegisteredWorktree } from './worktree';
 
@@ -73,6 +78,7 @@ function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactor
       });
     },
     spawn: (request) => spawnRootFromMain(request),
+    release: (id) => releaseRootFromMain(id),
     prompt: (id, text, deliveryId) => promptRootFromMain(id, text, deliveryId),
     newId: () => randomUUID(),
     now: () => Date.now(),
