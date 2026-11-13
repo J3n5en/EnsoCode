@@ -213,7 +213,7 @@ describe('validateDispatch', () => {
     expect(validateDispatch(draft(), ctx)).toEqual({ ok: true, draft: draft() });
   });
 
-  it('rejects a missing, removed or ssh project', () => {
+  it('rejects a missing, removed or non-local project', () => {
     expect(validateDispatch(draft(), { ...ctx, project: undefined })).toEqual({
       ok: false,
       error: 'project-missing',
@@ -222,10 +222,15 @@ describe('validateDispatch', () => {
       ok: false,
       error: 'project-removed',
     });
-    expect(validateDispatch(draft(), { ...ctx, project: project({ kind: 'ssh' }) })).toEqual({
-      ok: false,
-      error: 'project-ssh',
-    });
+    for (const kind of ['ssh', 'bot-home', 'scratch'] as const) {
+      expect(validateDispatch(draft(), { ...ctx, project: project({ kind }) })).toEqual({
+        ok: false,
+        error: 'project-not-local',
+      });
+    }
+    expect(validateDispatch(draft(), { ...ctx, project: project({ kind: undefined }) }).ok).toBe(
+      true
+    );
   });
 
   it('rejects an invisible project and a full dispatch queue', () => {

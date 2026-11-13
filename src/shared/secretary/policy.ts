@@ -77,7 +77,7 @@ export function validateDispatch(
   const { project } = ctx;
   if (!project) return { ok: false, error: 'project-missing' };
   if (project.state !== 'active') return { ok: false, error: 'project-removed' };
-  if (project.kind === 'ssh') return { ok: false, error: 'project-ssh' };
+  if ((project.kind ?? 'local') !== 'local') return { ok: false, error: 'project-not-local' };
   if (!ctx.visible) return { ok: false, error: 'project-not-visible' };
   if (ctx.running >= ctx.max) return { ok: false, error: 'dispatch-limit' };
 
