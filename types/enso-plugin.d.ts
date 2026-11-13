@@ -184,6 +184,8 @@ export interface EnsoHostApi {
   /** 打开某个子会话的历史弹窗；已结束的 coworker 只能这样看 */
   'session.openChildRun': (parentId: string, childId: string) => Promise<void>;
   'session.create': (input?: { text?: string }) => Promise<{ sessionId: string }>;
+  /** 内部开关，作者用 `enso.session.onTurnEnd` */
+  'session.watchTurnEnd': (input: { on: boolean }) => Promise<void>;
 }
 
 export interface EnsoCallContext {
@@ -295,6 +297,11 @@ export interface EnsoMain {
     status: EnsoHostApi['session.status'];
     focus: EnsoHostApi['session.focus'];
     create: EnsoHostApi['session.create'];
+    /**
+     * 可见会话的一轮结束（完成、失败或中止）时回调；需 `session.read`（或 `session.readAll`）。
+     * 返回取消订阅函数；进程退出、插件停用或卸载后自动失效。
+     */
+    onTurnEnd(listener: (event: { sessionId: string }) => void): EnsoDisposable;
   };
   host: { capabilities: EnsoHostApi['host.capabilities'] };
   fs: { readText: EnsoHostApi['fs.readText']; writeText: EnsoHostApi['fs.writeText'] };

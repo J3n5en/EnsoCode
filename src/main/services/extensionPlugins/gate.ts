@@ -37,6 +37,7 @@ const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 const INJECT_PER_WINDOW = 5;
 const INJECT_WINDOW_MS = 10_000;
 const VIEW_EVENT_PER_SECOND = 20;
+const MAX_ANCHORS = 32;
 const VIEW_EVENT_NAME = /^[a-z][a-z0-9._-]{0,63}$/;
 const MAX_VIEW_EVENT_BYTES = 256 * 1024;
 /** 会话被唤起后等它就绪：worker 冷启动要加载 runtime/skill/MCP，可能十几秒 */
@@ -286,9 +287,46 @@ export class PluginHostGate {
   readonly invocations: InvocationTable;
   private readonly injects = new Map<string, number[]>();
   private readonly viewEvents = new Map<string, number[]>();
+  /** 插件被调用或注入过的主会话（新的在后）；常驻进程没有发起会话，回合结束按它们判定同项目 */
+  private readonly anchors = new Map<string, string[]>();
 
   constructor(private readonly deps: GateDeps) {
     this.invocations = new InvocationTable(deps.now);
+  }
+
+  noteSession(pluginId: string, sessionId: string): void {
+    const root = sessionId.split('::')[0];
+    const list = (this.anchors.get(pluginId) ?? []).filter((id) => id !== root);
+    list.push(root);
+    this.anchors.set(pluginId, list.slice(-MAX_ANCHORS));
+  }
+
+  forgetSession(sessionId: string): void {
+    for (const [pluginId, list] of this.anchors) {
+      const next = list.filter((id) => id !== sessionId);
+      if (next.length > 0) this.anchors.set(pluginId, next);
+      else this.anchors.delete(pluginId);
+    }
+  }
+
+  forgetPlugin(pluginId: string): void {
+    this.anchors.delete(pluginId);
+  }
+
+  /** 回合结束推送的可见性：readAll 看所有项目；session.read 只看与插件用过的会话同项目的 */
+  canSeeSession(pluginId: string, sessionId: string): boolean {
+    const manifest = this.deps.manifest(pluginId);
+    const sessions = this.deps.sessions;
+    if (!manifest || !sessions) return false;
+    if (
+      manifest.permissions.includes('session.readAll') &&
+      (sessions.listAll?.() ?? []).some((s) => s.id === sessionId)
+    )
+      return true;
+    if (!manifest.permissions.includes('session.read')) return false;
+    return (this.anchors.get(pluginId) ?? []).some(
+      (anchor) => anchor === sessionId || sessions.list(anchor).some((s) => s.id === sessionId)
+    );
   }
 
   /** 每个插件 10 秒内最多注入 5 条，防止失控的常驻插件撑爆会话上下文 */
@@ -572,6 +610,7 @@ export class PluginHostGate {
           }
         }
         if (!result.ok) throw pluginError('INJECT_FAILED', result.error);
+        this.noteSession(pluginId, sessionId);
         return null;
       }
       case 'session.abort': {
@@ -688,6 +727,10 @@ export class PluginHostGate {
         if (!visible) throw pluginError('NOT_FOUND', '没有这个会话');
         return sessions.status(target);
       }
+      case 'session.watchTurnEnd':
+        permitRead();
+        if (typeof a.on !== 'boolean') throw pluginError('INVALID_ARGS', 'on 必须是布尔值');
+        return a.on;
       case 'session.focus': {
         permit('session.focus');
         const inv = gestured('切换会话');

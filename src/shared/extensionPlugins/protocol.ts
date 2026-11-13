@@ -152,6 +152,8 @@ export const PLUGIN_HOST_APIS = [
   'session.openChildRun',
   /** 在发起会话的项目里新建会话并切过去；args { text?, presetId? }，presetId 只能填本插件的预设 */
   'session.create',
+  /** 开关本进程的回合结束订阅；args { on }，权限同 session.status */
+  'session.watchTurnEnd',
 ] as const;
 export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];
 
@@ -191,6 +193,8 @@ export type MainToPluginHost =
   | { t: 'cancel'; invocationId: string }
   /** 宿主正在收敛进程（停用、卸载、退出）；插件有短暂时间清理子进程 */
   | { t: 'shutdown' }
+  /** 订阅过的会话一轮结束（完成、失败或中止）；只发给调过 session.watchTurnEnd 的进程 */
+  | { t: 'session-turn-end'; sessionId: string }
   | PluginResponse;
 
 export type PluginHostToMain =

@@ -112,6 +112,11 @@ export function setPluginMcpBridge(bridge: PluginMcpBridge | null): void {
 
 const noMcp = () => Promise.reject(pluginError('UNSUPPORTED', '当前环境无法调用 MCP'));
 
+/** 只取已创建的实例：订阅与可见范围都在实例里，没创建就无需通知或清理 */
+export function peekExtensionPlugins(): ExtensionPluginService | null {
+  return service;
+}
+
 export function getExtensionPlugins(): ExtensionPluginService {
   if (service) return service;
   const capabilities = pluginHostCapabilities({

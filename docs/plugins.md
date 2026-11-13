@@ -24,7 +24,7 @@
 
 - 开发模式：从目录安装的插件，在设置页插件详情里打开「开发模式」，或 `enso-server plugin dev <id>`（`dev-off` 关闭）。目录里的文件改动停下约 400ms 后自动从来源重装；隐藏文件、`node_modules` 和 zip 的改动不算。授权没变大时直接替换，变大时停下并在插件行显示错误，需要「从来源重新安装」走确认。开关只在内存里，重启后关闭。
 - 打包：`enso-server plugin pack <目录> [--out <zip>]` 先按安装时的规则校验清单，再把目录打成 zip，排除隐藏文件、`node_modules`、`test/`、zip 和 `enso-testing.mjs`。条目按路径排序、时间戳固定，同样的内容得到同样的 sha256，输出里给出大小和哈希。
-- 测试：`enso-server plugin testing <目录>` 写入零依赖的 `enso-testing.mjs` 和示例 `test/main.test.mjs`。`mountMain(activate, { config?, host? })` 用一个假的 `enso` 调起 `activate`，返回 `tool(name, args, ctx?)`、`command(id, ctx?)`、`fire(event, data, ctx?)`、`schedule(id)`、`method(name, args, ctx?)` 去调注册的处理函数；宿主调用记在 `calls` 里（如 `{ api: 'ui.status.update', args }`），返回值由 `host['ui.status.update']` 这样的函数提供。在插件目录运行 `node --test`。
+- 测试：`enso-server plugin testing <目录>` 写入零依赖的 `enso-testing.mjs` 和示例 `test/main.test.mjs`。`mountMain(activate, { config?, host? })` 用一个假的 `enso` 调起 `activate`，返回 `tool(name, args, ctx?)`、`command(id, ctx?)`、`fire(event, data, ctx?)`、`schedule(id)`、`method(name, args, ctx?)`、`turnEnd(sessionId)` 去调注册的处理函数；宿主调用记在 `calls` 里（如 `{ api: 'ui.status.update', args }`），返回值由 `host['ui.status.update']` 这样的函数提供。在插件目录运行 `node --test`。
 
 ## 清单 `enso-plugin.json`
 
@@ -119,7 +119,7 @@
 | `plugin.call` | 有 `interop.call` | 调用其他插件导出的方法 |
 | `ui.clipboard` | 要写剪贴板 | `enso.ui.clipboard.writeText` |
 | `ui.openExternal` | 要打开外部链接 | `enso.ui.openExternal` |
-| `session.read` | 要列出会话或读会话状态 | `enso.session.list` / `enso.session.status`，限本项目 |
+| `session.read` | 要列出会话、读会话状态或得知回合结束 | `enso.session.list` / `enso.session.status` / `enso.session.onTurnEnd`，限本项目 |
 | `session.readAll` | 要看所有项目的会话 | `enso.session.list({ scope: 'all' })`，`enso.session.status` 可查任意项目的会话；涵盖 `session.read` |
 | `session.focus` | 要切换到会话 | `enso.session.focus` |
 | `session.create` | 要新建会话 | `enso.session.create` |
@@ -243,6 +243,7 @@ export async function activate(enso) {
 | `session.abort(sessionId?)` | 见「向会话发消息」 |
 | `session.list(options?)` | 需要 `session.read`。返回 `{ current, sessions }`：`current` 是发起调用的会话 id（子会话为其 id，可用 `split('::')[0]` 取主会话），`sessions` 是同项目的主会话，按最近活动从新到旧，最多 200 条，每项 `{ id, title, updatedAt, state, running?, archived? }`，`state` 见「会话状态」。不含 Bot 会话与已结束的会话；某个 id 不在列表里即可视为已删除。`{ scope: 'all' }` 需要 `session.readAll`，列出所有项目的主会话（同样最多 200 条），每项多带 `projectId` 和 `projectName`（项目目录名）；不在宿主发起的调用里（如常驻进程）也能用，此时 `current` 为 `null` |
 | `session.status(sessionId?)` | 需要 `session.read` 或 `session.readAll`。缺省查发起调用的会话，返回 `{ sessionId, state, pendingAsks, pendingApprovals }`，见「会话状态」。查别的会话时，它须在 `session.list()`（或有 `session.readAll` 时在全局列表）里，否则 `NOT_FOUND` |
+| `session.onTurnEnd(listener)` | 需要 `session.read` 或 `session.readAll`。主会话一轮结束时回调 `listener({ sessionId })`，返回取消订阅函数，见「回合结束」 |
 | `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签）。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND` |
 | `session.create({ text? })` | 需要 `session.create`。在发起会话的项目里新建会话并切过去，返回 `{ sessionId }`。`text`（不超过 32KB）只填进新会话的输入框，由用户确认后发送。只能在用户操作触发的调用里用 |
 | `host.capabilities()` | 返回 `{ host: 'desktop' \| 'server', hostVersion, notify, mcp, clipboard, openExternal, composer }`，用来在桌面和服务端之间降级 |
@@ -324,6 +325,22 @@ export async function activate(enso) {
 | `idle` | 以上都不是 |
 
 `session_status` 只在 `state` 或两个挂起数变化时发，`previous` 是上一次通知时的 `state`（首次为 `idle`），`ctx.sessionId` 与 `data.sessionId` 都是主会话 id。它由 Enso 汇总后派发，不经过会话本身，所以不进会话的事件计划，订阅它也不会让会话多等；按到达顺序排队，不合并。和其他事件一样，Bot 会话不发。
+
+### 回合结束
+
+`session.onTurnEnd(listener)` 在主会话的一轮执行结束时回调 `listener({ sessionId })`，正常完成、失败、被中止各发一次，过程中的流式输出不发。适合常驻进程在 Agent 答完后立刻收尾，例如停掉聊天软件里的「正在输入」。不需要在清单里声明事件，也不需要在宿主发起的调用里，`activate` 里就能订阅。
+
+```js
+export function activate(enso) {
+  // 返回值是取消订阅函数，不再需要时调用
+  const off = enso.session.onTurnEnd(({ sessionId }) => stopTyping(sessionId));
+}
+```
+
+- 权限：`session.read` 或 `session.readAll`。没有时订阅失败，原因写进插件日志，回调不会触发。
+- 范围：有 `session.readAll` 时收所有项目的主会话；只有 `session.read` 时，只收与本插件被调用过（工具、命令、事件等发起会话）或成功注入过消息的会话同项目的主会话。常驻进程刚启动、还没碰过任何会话时收不到。子会话和 Bot 会话不发。
+- 返回的函数取消这一次注册；全部取消后宿主不再推送。插件进程退出、插件被停用或卸载后订阅随之失效，进程重新拉起后需在 `activate` 里重新订阅。会话被删除后不再用它判定范围。
+- 回调抛错或返回的 Promise 失败只写插件日志，不影响其他回调。
 
 ### 子代理与 coworker
 

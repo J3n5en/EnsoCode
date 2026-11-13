@@ -19,6 +19,12 @@ const rootOf = (sessionId: string) => {
   return sep === -1 ? sessionId : sessionId.slice(0, sep);
 };
 
+/** 主会话一轮结束（完成、失败、abort 中止都由 supervisor 收口为这两种事件）返回其 id */
+export function turnEndSessionId(event: RendererAgentEvent): string | null {
+  if (event.type !== 'turn-completed' && event.type !== 'turn-failed') return null;
+  return 'parent' in event.identity ? null : event.identity.sessionId;
+}
+
 /** 从 Main 的会话事件流汇总每个主会话的状态，供插件查询与 session_status 推送 */
 export class SessionStateTracker {
   private readonly nodes = new Map<string, Node>();
