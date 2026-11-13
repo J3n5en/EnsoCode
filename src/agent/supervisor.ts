@@ -67,6 +67,7 @@ import {
 } from '@shared/providers/qoder';
 import { looksLikeRefusal } from '@shared/refusalRetry';
 import type { RequestBodyUsage } from '@shared/requestBodyUsage';
+import { isSecretaryToolAllowed, type SecretaryOp } from '@shared/secretary/tools';
 import { computeStats, toUsageTotals } from '@shared/sessionStats';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
@@ -320,6 +321,7 @@ import { confirmImageReference, createImageGenTool } from './tools/imageGen';
 import { createMemoryTools, MemoryInvoker } from './tools/memory';
 import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
+import { createSecretaryTools } from './tools/secretary';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
 import { createWebTools } from './tools/web';
 import {
@@ -410,6 +412,7 @@ interface ManagedSession {
   browser?: BrowserInvoker;
   memory?: MemoryInvoker;
   delegation?: MemoryInvoker<DelegationOp>;
+  secretary?: MemoryInvoker<SecretaryOp>;
   agentControl?: AgentControlInvoker;
   /** 已因不支持 adaptive 降级过的模型（虚拟模型下每个成员各降一次） */
   adaptiveDowngraded: Set<string>;
@@ -527,6 +530,7 @@ const PENDING_COUNTERS: Record<PendingCounterKey, true> = {
   browser: true,
   memory: true,
   delegation: true,
+  secretary: true,
   agentControl: true,
   computer: true,
   pluginTools: true,
@@ -1263,6 +1267,7 @@ export class SessionSupervisor {
     managed.browser?.cancelAll('Session released');
     managed.memory?.cancelAll('Session released');
     managed.delegation?.cancelAll('Session released');
+    managed.secretary?.cancelAll('Session released');
     managed.agentControl?.close('Session released');
     managed.computer?.cancelAll('Session released');
     managed.pluginTools?.cancelAll('Session released');
@@ -1564,6 +1569,7 @@ export class SessionSupervisor {
       command.type === 'browser-result' ||
       command.type === 'memory-result' ||
       command.type === 'delegation-result' ||
+      command.type === 'secretary-result' ||
       command.type === 'computer-result' ||
       command.type === 'plugin-tool-result' ||
       command.type === 'plugin-tool-progress' ||
@@ -1722,6 +1728,7 @@ export class SessionSupervisor {
           command.botGroupTasks,
           command.protectedActions,
           command.botRoutines,
+          command.secretaryMode ?? false,
           command.botWriteLock,
           command.botDelegationTask,
           command.pluginTools,
@@ -2051,6 +2058,10 @@ export class SessionSupervisor {
         this.must(command.identity).delegation?.resolve(command);
         return;
       }
+      case 'secretary-result': {
+        this.must(command.identity).secretary?.resolve(command);
+        return;
+      }
       case 'computer-result': {
         const managed = this.must(command.identity);
         if (!managed.computer?.resolve(command)) {
@@ -2351,6 +2362,7 @@ export class SessionSupervisor {
     botGroupTasks = false,
     protectedActions = false,
     botRoutines = false,
+    secretaryMode = false,
     botWriteLock?: { label: string; ancestors: string[] },
     botDelegationTask = false,
     pluginToolDescriptors: readonly PluginToolDescriptor[] = [],
@@ -2428,7 +2440,7 @@ export class SessionSupervisor {
     const deferredMcp = sessionMcp.filter(isDeferredMcp);
     const directMcp = sessionMcp.filter((server) => !isDeferredMcp(server));
     const codemodeHost = new CodemodeHost({
-      codemode: toolEnabled('isolated_sandbox'),
+      codemode: toolEnabled('isolated_sandbox') && !secretaryMode,
       deferredServers: deferredMcp,
     });
     // 非 Bot 会话即使启动时没有任何插件也挂上注入入口：插件可能在会话之后才启用
@@ -2458,6 +2470,8 @@ export class SessionSupervisor {
       cwd,
       agentDir: this.options.agentDir,
       noSkills: loadLocalSkills === false,
+      // 磁盘上的扩展会自行 registerTool，绕过按名字的允许列表；秘书只保留 inline 工厂
+      ...(secretaryMode ? { noExtensions: true } : {}),
       skillPaths,
       instruction,
       remoteAgentsFiles,
@@ -3058,6 +3072,20 @@ export class SessionSupervisor {
           });
         })
       : undefined;
+    const secretary = secretaryMode
+      ? new MemoryInvoker<SecretaryOp>(identity, (request) => {
+          const managed = managedRef ?? this.sessions.get(sessionId);
+          if (!managed) throw new Error('Session is not ready for secretary actions.');
+          this.options.emit({
+            type: 'secretary-invoke',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            requestId: request.requestId,
+            op: request.op,
+            params: request.params,
+          });
+        })
+      : undefined;
     const workflowRoots = workflowPresetRoots(remote ? undefined : cwd, {
       customDir: this.options.workflowDir,
       pluginFiles: workflowPresetFiles,
@@ -3124,6 +3152,7 @@ export class SessionSupervisor {
         : undefined;
     const sessionTools = [
       ...buildCoreTools(),
+      ...(secretary ? createSecretaryTools(secretary) : []),
       ...builtin(
         'browser',
         createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
@@ -3223,6 +3252,7 @@ export class SessionSupervisor {
     );
     const planGated = (tools: Def[]): Def[] =>
       tools.map((tool) => withPlanGate(tool, { host: planHost, readonlyAgentTypes }));
+    // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具与插件工具都不在其中
     const customTools = omitNamedTools(
       decorateSessionTools(
         [
@@ -3232,7 +3262,7 @@ export class SessionSupervisor {
         { runaway, budget }
       ),
       disabledTools
-    );
+    ).filter((tool) => !secretaryMode || isSecretaryToolAllowed(tool.name));
     codemodeHost.bindDeferredTools(
       deferredMcpLoader(gate, (tools) =>
         decorateSessionTools(planGated(tools), { runaway, budget })
@@ -3324,7 +3354,10 @@ export class SessionSupervisor {
     managed.applyBuiltinTools = (disabled) => {
       const enabled = enabledHotBuiltins(disabled);
       const active = session.getActiveToolNames();
-      const next = nextActiveToolNames(active, builtinGroups, enabled);
+      // 分组会把名字加回来，秘书再与允许列表求交，否则恢复一个分组就绕过了装配时的过滤
+      const next = nextActiveToolNames(active, builtinGroups, enabled).filter(
+        (name) => !secretaryMode || isSecretaryToolAllowed(name)
+      );
       if (next.length !== active.length || next.some((name, index) => name !== active[index])) {
         session.setActiveToolsByName(next);
       }
@@ -3342,6 +3375,7 @@ export class SessionSupervisor {
     managedRef.pluginTools = pluginTools;
     managedRef.pluginEvents = pluginEventInvoker;
     managedRef.delegation = delegation;
+    managedRef.secretary = secretary;
     if (pluginEventInvoker) {
       await emitPluginSessionStart(session, resumeFile ? 'resume' : 'startup');
     }
@@ -5317,6 +5351,7 @@ export class SessionSupervisor {
       managed.browser?.cancelAll('Enso worker shutdown');
       managed.memory?.cancelAll('Enso worker shutdown');
       managed.delegation?.cancelAll('Enso worker shutdown');
+      managed.secretary?.cancelAll('Enso worker shutdown');
       managed.agentControl?.close('Enso worker shutdown');
       managed.currentTurnId = undefined;
       managed.computer?.cancelAll('Enso worker shutdown');

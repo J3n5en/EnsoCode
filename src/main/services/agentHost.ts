@@ -46,6 +46,7 @@ import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
+import { SECRETARY_FORCED_DISABLED_TOOLS } from '@shared/secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '@shared/shellLimits';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import {
@@ -998,6 +999,11 @@ export function spawnSession(
       writeLock?: { label: string; ancestors: string[] };
     };
     /**
+     * 秘书会话：人设由 Main 组装，插件（工具/技能/MCP/hooks/命令）、子代理类型与全局指令全部不挂，
+     * 工具白名单在 worker 里按名字执行
+     */
+    secretary?: { systemPrompt: string };
+    /**
      * Main 给这次 spawn 的实例号（目前只有 Bot 宿主传）：随 spawn-parent 下发，之后同会话的 prompt / steer /
      * retry 自动带上，worker 在 parent-rejected / parent-ended 里回显，调用方据此确定结束事件属于哪个实例
      */
@@ -1023,44 +1029,55 @@ export function spawnSession(
   }
   const approvalReviewerSource = reviewer.ok ? reviewer.source : null;
   const bot = options?.bot;
-  const extensionPlugins = bot ? null : getExtensionPlugins();
-  const overlay = bot ? undefined : presetOverlay(request.presetId, resolvePreset);
+  const secretary = options?.secretary;
+  // 秘书与 Bot 同口径：Enso 插件整批关掉，插件工具会带进以用户身份发消息这类能力
+  const extensionPlugins = bot || secretary ? null : getExtensionPlugins();
+  const overlay = bot || secretary ? undefined : presetOverlay(request.presetId, resolvePreset);
   const overlayResult = extensionPlugins?.presetForSpawn(overlay?.pluginPresetId);
   if (overlayResult && !overlayResult.ok && overlay?.required) {
     return { ok: false, error: overlayResult.error };
   }
   // 自建预设叠加的插件预设失效（插件停用/卸载）时退回只用自建预设
   const pluginPreset = overlayResult?.ok ? overlayResult : undefined;
-  const preset: Preset | undefined = bot
-    ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
-    : overlay?.preset;
-  const ownKit = bot
-    ? { ok: true as const, systemPrompt: bot.systemPrompt }
-    : resolvePresetPromptKit(preset);
+  const preset: Preset | undefined = secretary
+    ? { id: 'secretary', name: 'secretary', skillIds: [], mcpServerIds: [] }
+    : bot
+      ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
+      : overlay?.preset;
+  const ownKit = secretary
+    ? { ok: true as const, systemPrompt: secretary.systemPrompt }
+    : bot
+      ? { ok: true as const, systemPrompt: bot.systemPrompt }
+      : resolvePresetPromptKit(preset);
   if (!ownKit.ok) {
     return { ok: false, error: '自定义系统提示词正文读取失败，请重新保存或恢复默认。' };
   }
   const promptKit = mergePresetPromptKit(ownKit, pluginPreset);
-  const instruction = bot
-    ? bot.instruction
-    : pluginPresetInstruction(pluginPreset?.instruction, () =>
-        resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined)
-      );
+  // 秘书不加载全局指令：那是给写代码的会话的
+  const instruction = secretary
+    ? undefined
+    : bot
+      ? bot.instruction
+      : pluginPresetInstruction(pluginPreset?.instruction, () =>
+          resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined)
+        );
   const state = readSettingsState();
   // Claude 插件：按各自开关现读安装目录，不受预设影响
-  const plugins = enabledPlugins(state);
+  const plugins = secretary
+    ? { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] }
+    : enabledPlugins(state);
   // Enso 插件：顺序在预设、Claude 插件之后；Bot 会话不合并
   const activePluginPreset = pluginPreset ? overlay?.pluginPresetId : undefined;
   const skillPaths = [
     ...enabledSkillPaths(preset),
-    ...(bot ? [] : plugins.skillPaths),
+    ...(bot || secretary ? [] : plugins.skillPaths),
     ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset) ?? []),
   ];
   const workflowPresetFiles = extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? [];
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of [
-    ...(bot ? [] : plugins.mcpServers),
+    ...(bot || secretary ? [] : plugins.mcpServers),
     ...(extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? []),
   ]) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
@@ -1068,21 +1085,26 @@ export function spawnSession(
   }
   const pluginTools = extensionPlugins?.toolsForSpawn() ?? [];
   // hooks 在本机起进程，远程会话的 cwd 不在本机
-  const pluginHooks = remote ? [] : plugins.hooks;
-  const subagentModels = options?.omitDispatchTools
-    ? []
-    : configuredSubagentModels(authenticatedAccountKeys);
-  const agentTypes = options?.omitDispatchTools
-    ? []
-    : configuredAgentTypes(
-        authenticatedAccountKeys,
-        subagentModels.length > 0,
-        plugins,
-        // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
-        bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
-      );
+  const pluginHooks = remote || secretary ? [] : plugins.hooks;
+  const subagentModels =
+    options?.omitDispatchTools || secretary
+      ? []
+      : configuredSubagentModels(authenticatedAccountKeys);
+  const agentTypes =
+    options?.omitDispatchTools || secretary
+      ? []
+      : configuredAgentTypes(
+          authenticatedAccountKeys,
+          subagentModels.length > 0,
+          plugins,
+          // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
+          bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
+        );
   // 当前平台不能操作桌面时禁用 computer，避免模型反复调用必失败的工具
-  const extraDisabledTools = options?.extraDisabledTools ?? [];
+  const extraDisabledTools = [
+    ...(options?.extraDisabledTools ?? []),
+    ...(secretary ? SECRETARY_FORCED_DISABLED_TOOLS : []),
+  ];
   const disabledTools = sessionDisabledTools(
     state,
     projectId,
@@ -1183,6 +1205,7 @@ export function spawnSession(
     ...(promptKit.systemPromptBoost ? { systemPromptBoost: promptKit.systemPromptBoost } : {}),
     ...(promptKit.refusalRetryPrompt ? { refusalRetryPrompt: promptKit.refusalRetryPrompt } : {}),
     ...(options?.bot ? { botMode: true } : {}),
+    ...(secretary ? { secretaryMode: true } : {}),
     ...(options?.bot?.groupTasks ? { botGroupTasks: true } : {}),
     ...(options?.bot?.groupTasks && options.bot.discussMode ? { botDiscussMode: true } : {}),
     ...(options?.bot?.routines ? { botRoutines: true } : {}),
@@ -1557,6 +1580,14 @@ export function sendDelegationResultToSession(
   outcome: { ok: true; result: unknown } | { ok: false; error: string }
 ): { ok: boolean; error?: string } {
   return sendAgentCommand({ type: 'delegation-result', identity, requestId, ...outcome });
+}
+
+export function sendSecretaryResultToSession(
+  identity: SessionIdentity,
+  requestId: string,
+  outcome: { ok: true; result: unknown } | { ok: false; error: string }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'secretary-result', identity, requestId, ...outcome });
 }
 
 export function sendComputerResultToSession(

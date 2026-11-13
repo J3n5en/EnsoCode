@@ -5,6 +5,7 @@ import { app, ipcMain, powerMonitor, type RendererContents } from '@platform';
 import { browserSessionKey } from '@shared/bots/browser';
 import { type ChildSessionIdentity, isUuid, type SessionIdentity } from '@shared/builtinAgents';
 import { conversationCwd } from '@shared/conversationCwd';
+import { normalizeLocale } from '@shared/i18n';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { resolveSshTarget } from '@shared/ssh';
 import {
@@ -96,6 +97,7 @@ import {
   sendPluginInterceptResultToSession,
   sendPluginToolProgressToSession,
   sendPluginToolResultToSession,
+  sendSecretaryResultToSession,
   setAgentEventListener,
   setPinnedSessions,
   setSessionApprovalMode,
@@ -160,7 +162,11 @@ import {
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
-import { isSecretaryConversation } from '../services/secretary/identity';
+import { secretaryEnabled } from '../services/secretary/enabled';
+import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
+import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
+import { SecretaryStore } from '../services/secretary/store';
+import { invokeSecretaryOp } from '../services/secretary/tools';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
   projectParentHistoryPage,
@@ -482,9 +488,22 @@ function spawnBoundSession(
   request: AgentSpawnRequest,
   credentialKeys: ReadonlySet<string>
 ) {
+  const conversation = sourceAuthority?.conversation(request.sessionId);
   // bot 会话的人设 / 工作区只能由 Main 的 BotSessionHost 组装，通用 spawn 路径一律拒绝
-  if (sourceAuthority?.conversation(request.sessionId)?.bot) {
+  if (conversation?.bot) {
     return { ok: false, error: 'bot conversation must be spawned by bot host' };
+  }
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  if (isSecretaryProject(project)) {
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return spawnSession(
+      identity,
+      request,
+      credentialKeys,
+      remoteConfigFor(request.sessionId),
+      projectIdFor(request.sessionId),
+      { secretary: { systemPrompt: secretarySystemPrompt() } }
+    );
   }
   return spawnSession(
     identity,
@@ -493,6 +512,17 @@ function spawnBoundSession(
     remoteConfigFor(request.sessionId),
     projectIdFor(request.sessionId)
   );
+}
+
+/** 秘书人设与档案只在 Main 读盘，模型每轮看到的都是最新配置 */
+function secretarySystemPrompt(): string {
+  const store = new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+  const language = readSettingsState()?.language;
+  return buildSecretarySystemPrompt({
+    profile: store.profile(),
+    persona: store.readPersona(),
+    uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
+  });
 }
 
 /** Main 侧根会话 spawn：pair 与秘书共用，renderer 走 AGENT_SPAWN 自己的校验 */
@@ -1833,6 +1863,32 @@ export function registerAgentHandlers(): void {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      return;
+    }
+    if (workerEvent.type === 'secretary-invoke') {
+      const { identity, requestId, op, params } = workerEvent;
+      // 调用方必须是当前代的秘书会话，且开关仍开着：worker 侧的白名单不代替这层校验
+      const conversation = sourceAuthority?.conversation(identity.sessionId);
+      const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+      const allowed =
+        secretaryEnabled() && isSecretaryProject(project) && agentSessionIndex.isCurrent(identity);
+      if (!allowed) {
+        sendSecretaryResultToSession(identity, requestId, { ok: false, error: 'disabled' });
+        return;
+      }
+      void invokeSecretaryOp(op, params).then(
+        (result) =>
+          sendSecretaryResultToSession(
+            identity,
+            requestId,
+            result.ok ? { ok: true, result: result.result } : { ok: false, error: result.error }
+          ),
+        (error: unknown) =>
+          sendSecretaryResultToSession(identity, requestId, {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+      );
       return;
     }
     if (workerEvent.type === 'computer-cancel') {

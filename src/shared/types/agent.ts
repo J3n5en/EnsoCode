@@ -87,6 +87,7 @@ import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurf
 import { parseProviderHeaders } from '../providers/providerHeaders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
+import { SECRETARY_OPS, type SecretaryOp } from '../secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '../shellLimits';
 import { parseSmartCompactMode, type SmartCompactMode } from '../smartCompactMode';
 import { parseSshTimeoutSeconds } from '../sshTimeout';
@@ -1313,6 +1314,11 @@ export type AgentCommand =
       instanceId?: string;
       /** Bot 私聊 / 群聊成员会话（非委派）：挂 routine_propose / send_image 工具 */
       botRoutines?: boolean;
+      /**
+       * 秘书会话：worker 按名字做工具允许列表，插件、MCP、codemode、子代理一律不挂。
+       * 由 Main 按项目 kind 决定，renderer 传不进来。
+       */
+      secretaryMode?: boolean;
       /** Bot 挂看板任务的委派会话：挂 report_blocked 工具 */
       botDelegationTask?: boolean;
       /** Bot 写成员：同工作区按文件占用、全局命令短独占；祖先会话（委派链）互不阻塞 */
@@ -1467,6 +1473,14 @@ export type AgentCommand =
   | {
       type: 'memory-result' | 'delegation-result';
       identity: SessionIdentity | ChildSessionIdentity;
+      requestId: string;
+      ok: boolean;
+      result?: unknown;
+      error?: string;
+    }
+  | {
+      type: 'secretary-result';
+      identity: SessionIdentity;
       requestId: string;
       ok: boolean;
       result?: unknown;
@@ -2109,6 +2123,14 @@ export type AgentWorkerEvent =
         | 'routine_propose'
         | 'send_image'
         | 'report_blocked';
+      params: unknown;
+    }
+  | {
+      type: 'secretary-invoke';
+      identity: SessionIdentity;
+      seq: number;
+      requestId: string;
+      op: SecretaryOp;
       params: unknown;
     }
   | {
@@ -3640,6 +3662,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'botGroupTasks',
           'botDiscussMode',
           'botRoutines',
+          'secretaryMode',
           'botDelegationTask',
           'botWriteLock',
           'protectedActions',
@@ -3718,6 +3741,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.botDiscussMode === true &&
           (value.botMode !== true || value.botGroupTasks !== true)) ||
         (value.botRoutines !== undefined && typeof value.botRoutines !== 'boolean') ||
+        (value.secretaryMode !== undefined && typeof value.secretaryMode !== 'boolean') ||
         (value.botDelegationTask !== undefined && typeof value.botDelegationTask !== 'boolean') ||
         (value.botWriteLock !== undefined &&
           (!isRecord(value.botWriteLock) ||
@@ -4046,6 +4070,20 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       if (
         !hasOnlyKeys(value, ['type', 'identity', 'requestId', 'ok', 'result', 'error']) ||
         !parseAnySessionIdentity(value.identity) ||
+        !isNonEmptyString(value.requestId) ||
+        typeof value.ok !== 'boolean'
+      ) {
+        return null;
+      }
+      const shapeOk = value.ok
+        ? value.error === undefined
+        : isNonEmptyString(value.error) && value.result === undefined;
+      return shapeOk ? (value as unknown as AgentCommand) : null;
+    }
+    case 'secretary-result': {
+      if (
+        !hasOnlyKeys(value, ['type', 'identity', 'requestId', 'ok', 'result', 'error']) ||
+        !parseSessionIdentity(value.identity) ||
         !isNonEmptyString(value.requestId) ||
         typeof value.ok !== 'boolean'
       ) {
@@ -4507,6 +4545,13 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
           value.op === 'routine_propose' ||
           value.op === 'send_image' ||
           value.op === 'report_blocked')
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
+    case 'secretary-invoke':
+      return hasExactKeys(value, ['type', 'identity', 'seq', 'requestId', 'op', 'params']) &&
+        parseSessionIdentity(value.identity) &&
+        isNonEmptyString(value.requestId) &&
+        SECRETARY_OPS.includes(value.op as SecretaryOp)
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'computer-invoke':
