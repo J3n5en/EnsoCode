@@ -25,6 +25,7 @@ export const RUNTIME_CONVERSATION_KEYS = [
   'lastSeq',
   'spawning',
   'error',
+  'spawnRejection',
   'started',
   'status',
   'runStartedAt',
