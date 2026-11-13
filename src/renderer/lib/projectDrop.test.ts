@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDropHighlightTracker,
   DROP_HIGHLIGHT_WATCHDOG_MS,
+  dropZonesFor,
   pickDroppedDirectories,
   projectImportFollowUp,
-  shouldAcceptProjectDrop,
 } from './projectDrop';
 
 describe('pickDroppedDirectories', () => {
@@ -67,32 +67,50 @@ describe('pickDroppedDirectories', () => {
   });
 });
 
-describe('shouldAcceptProjectDrop', () => {
-  it('leaves file-only drops to the composer even while the highlight is on', () => {
-    const tracker = createDropHighlightTracker(() => undefined);
-    tracker.enter(true);
+describe('dropZonesFor', () => {
+  const file = (type: string) => ({ kind: 'file', type });
+
+  it('offers only the attach zone when every item has a MIME type (cannot be a folder)', () => {
     expect(
-      shouldAcceptProjectDrop({
+      dropZonesFor({
         types: ['Files'],
-        entries: [{ isDirectory: false }, { isDirectory: false }],
+        items: [file('text/plain'), file('image/png')],
+        composerReady: true,
       })
-    ).toBe(false);
-    tracker.dispose();
+    ).toEqual({ project: false, attach: true });
   });
 
-  it('takes over when the drop contains a directory', () => {
+  it('offers both zones when an item may be a folder', () => {
     expect(
-      shouldAcceptProjectDrop({
-        types: ['Files'],
-        entries: [{ isDirectory: false }, { isDirectory: true }],
-      })
-    ).toBe(true);
+      dropZonesFor({ types: ['Files'], items: [file('text/plain'), file('')], composerReady: true })
+    ).toEqual({ project: true, attach: true });
   });
 
-  it('ignores drags that are not OS files', () => {
+  it('offers the project zone when the item list is unreadable', () => {
+    expect(dropZonesFor({ types: ['Files'], items: [], composerReady: true })).toEqual({
+      project: true,
+      attach: true,
+    });
+  });
+
+  it('drops the attach zone when no composer can take files', () => {
+    expect(dropZonesFor({ types: ['Files'], items: [file('')], composerReady: false })).toEqual({
+      project: true,
+      attach: false,
+    });
     expect(
-      shouldAcceptProjectDrop({ types: ['text/plain'], entries: [{ isDirectory: true }] })
-    ).toBe(false);
+      dropZonesFor({ types: ['Files'], items: [file('text/plain')], composerReady: false })
+    ).toEqual({ project: false, attach: false });
+  });
+
+  it('offers nothing for drags that are not OS files', () => {
+    expect(
+      dropZonesFor({
+        types: ['text/plain'],
+        items: [{ kind: 'string', type: 'text/plain' }],
+        composerReady: true,
+      })
+    ).toEqual({ project: false, attach: false });
   });
 });
 

@@ -38,12 +38,23 @@ export function pickDroppedDirectories(
   };
 }
 
-/** dragenter/dragover 时 dataTransfer 受保护读不到 entry，只有 drop 时刻能判定：含目录才接管，纯文件留给 Composer。 */
-export function shouldAcceptProjectDrop(input: {
+export type DropZones = { project: boolean; attach: boolean };
+
+/**
+ * 拖动中只能读到 item 的 kind/type，读不到 entry。目录的 type 恒为空，
+ * 所以全部带 MIME 的必是文件，只给「引用」；有空 type 或读不到列表时两个都给。
+ */
+export function dropZonesFor(input: {
   types: readonly string[];
-  entries: readonly { isDirectory: boolean }[];
-}): boolean {
-  return input.types.includes('Files') && input.entries.some((entry) => entry.isDirectory);
+  items: readonly { kind: string; type: string }[];
+  composerReady: boolean;
+}): DropZones {
+  if (!input.types.includes('Files')) return { project: false, attach: false };
+  const files = input.items.filter((item) => item.kind === 'file');
+  return {
+    project: files.length === 0 || files.some((item) => item.type === ''),
+    attach: input.composerReady,
+  };
 }
 
 export const DROP_HIGHLIGHT_WATCHDOG_MS = 150;

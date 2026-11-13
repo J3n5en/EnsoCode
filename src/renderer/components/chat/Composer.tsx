@@ -47,6 +47,7 @@ import {
 } from '../../plugins/triggers';
 import {
   registerComposerFocus,
+  registerComposerIngestFiles,
   registerComposerInsert,
   registerComposerInsertImage,
   registerComposerInsertText,
@@ -613,6 +614,14 @@ export function Composer({
       editorRef.current?.insertFileChip(filePath);
     }
   }, []);
+
+  useEffect(() => {
+    if (isolated) return;
+    return registerComposerIngestFiles((files) => {
+      ingestFiles(files);
+      editorRef.current?.focus();
+    });
+  }, [isolated, ingestFiles]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing = event.nativeEvent.isComposing || composingRef.current;

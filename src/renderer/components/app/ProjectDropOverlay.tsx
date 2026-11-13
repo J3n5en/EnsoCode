@@ -1,5 +1,6 @@
-import { FolderPlus } from 'lucide-react';
+import { FolderPlus, Paperclip } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
+import { composerAcceptsFiles, ingestComposerFiles } from '@/components/chat/composerMentionBridge';
 import { addToast } from '@/components/ui/toast';
 import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { type TFunction, useI18n } from '@/i18n';
@@ -14,12 +15,24 @@ import {
 import {
   createDropHighlightTracker,
   type DroppedPath,
+  type DropZones,
+  dropZonesFor,
   MAX_DROPPED_PROJECTS,
   pickDroppedDirectories,
-  shouldAcceptProjectDrop,
 } from '@/lib/projectDrop';
+import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { showLocalCodeView } from '@/stores/bots/mode';
+
+type Zone = keyof DropZones;
+
+const NO_ZONES: DropZones = { project: false, attach: false };
+
+function zoneAt(target: EventTarget | null): Zone | null {
+  const zone = target instanceof Element ? target.closest('[data-drop-zone]') : null;
+  const id = zone?.getAttribute('data-drop-zone');
+  return id === 'project' || id === 'attach' ? id : null;
+}
 
 function pathForDroppedFile(file: File): string {
   try {
@@ -99,29 +112,51 @@ async function importDroppedFolders(rows: readonly DroppedPath[], t: TFunction):
   }
 }
 
-/** 全窗拖入文件夹添加项目；高亮期间压住 WebContentsView guest，避免侧栏浏览器吞掉拖放。 */
+/** 全窗拖入遮罩：落在「新建项目」或「引用到对话」区才执行对应行为；高亮期间压住 WebContentsView guest。 */
 export function ProjectDropOverlay(): ReactNode {
   const { t } = useI18n();
   const [active, setActive] = useState(false);
+  const [zones, setZones] = useState<DropZones>(NO_ZONES);
+  const [hover, setHover] = useState<Zone | null>(null);
   useOverlayGuard(active);
 
   useEffect(() => {
     if (window.electronAPI.remote) return;
 
-    const tracker = createDropHighlightTracker(setActive);
+    const tracker = createDropHighlightTracker((next) => {
+      setActive(next);
+      if (!next) setHover(null);
+    });
     const typesOf = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []);
     const hasFiles = (event: DragEvent) => typesOf(event).includes('Files');
+    // 拖动中 dataTransfer 受保护，只能读 kind/type；返回是否有可用落区
+    const syncZones = (event: DragEvent) => {
+      const next = dropZonesFor({
+        types: typesOf(event),
+        items: Array.from(event.dataTransfer?.items ?? [], (item) => ({
+          kind: item.kind,
+          type: item.type,
+        })),
+        composerReady: composerAcceptsFiles(),
+      });
+      setZones((prev) =>
+        prev.project === next.project && prev.attach === next.attach ? prev : next
+      );
+      return next.project || next.attach;
+    };
 
-    // dragenter/dragover 读不到 entry，只高亮、不拦截；preventDefault 仅为放行 drop。
+    // preventDefault 放行 drop：主窗口没有 will-navigate 拦截，否则落空会跳到 file://。
     const onEnter = (event: DragEvent) => {
       if (!hasFiles(event)) return;
       event.preventDefault();
-      tracker.enter(true);
+      tracker.enter(syncZones(event));
     };
     const onOver = (event: DragEvent) => {
       if (!hasFiles(event)) return;
       event.preventDefault();
-      tracker.over(true);
+      tracker.over(syncZones(event));
+      const zone = zoneAt(event.target);
+      setHover((prev) => (prev === zone ? prev : zone));
     };
     const onLeave = () => tracker.leave();
     const onCancel = () => tracker.cancel();
@@ -131,13 +166,15 @@ export function ProjectDropOverlay(): ReactNode {
     const onDrop = (event: DragEvent) => {
       tracker.cancel();
       if (!hasFiles(event)) return;
-      // 不接管时也要 preventDefault：主窗口没有 will-navigate 拦截，否则会跳到 file://。
       event.preventDefault();
-      const rows = readDroppedPaths(event);
-      if (!shouldAcceptProjectDrop({ types: typesOf(event), entries: rows })) return;
+      const zone = zoneAt(event.target);
+      if (!zone) return;
       event.stopPropagation();
-      // drop 不再下发，补一个 dragleave 让沿途拖放区（如 Composer）撤掉自身高亮。
-      event.target?.dispatchEvent(new DragEvent('dragleave', { bubbles: true }));
+      if (zone === 'attach') {
+        ingestComposerFiles(Array.from(event.dataTransfer?.files ?? []));
+        return;
+      }
+      const rows = readDroppedPaths(event);
       void enqueueProjectImport(() => importDroppedFolders(rows, t));
     };
 
@@ -161,15 +198,28 @@ export function ProjectDropOverlay(): ReactNode {
   }, [t]);
 
   if (!active) return null;
+  const items = [
+    zones.project && { id: 'project' as const, Icon: FolderPlus, label: t('New project') },
+    zones.attach && { id: 'attach' as const, Icon: Paperclip, label: t('Reference in chat') },
+  ].filter((item) => item !== false);
   return (
     <div
-      className="pointer-events-none fixed inset-0 flex items-center justify-center bg-background/70 backdrop-blur-[2px]"
+      className="pointer-events-none fixed inset-0 flex items-center justify-center gap-4 bg-background/70 backdrop-blur-[2px]"
       style={{ zIndex: Z_INDEX.MODAL_BACKDROP }}
     >
-      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-card px-8 py-6 text-card-foreground shadow-lg">
-        <FolderPlus className="h-8 w-8 text-muted-foreground" />
-        <p className="text-sm font-medium">{t('Drop folders to add projects')}</p>
-      </div>
+      {items.map(({ id, Icon, label }) => (
+        <div
+          key={id}
+          data-drop-zone={id}
+          className={cn(
+            'pointer-events-auto flex h-40 w-56 flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-card text-card-foreground shadow-lg transition-colors duration-150',
+            hover === id ? 'border-brand bg-brand/5' : 'border-border'
+          )}
+        >
+          <Icon className={cn('h-8 w-8', hover === id ? 'text-brand' : 'text-muted-foreground')} />
+          <p className="text-sm font-medium">{label}</p>
+        </div>
+      ))}
     </div>
   );
 }

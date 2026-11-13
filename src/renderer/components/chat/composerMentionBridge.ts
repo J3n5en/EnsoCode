@@ -21,6 +21,7 @@ let insertUiElement:
   | ((candidate: UiElementMentionCandidate, image?: AttachedImage) => void)
   | null = null;
 let insertImage: ((image: AttachedImage) => void) | null = null;
+let ingestFiles: ((files: File[]) => void) | null = null;
 let submitPayload: ((payload: ComposerPayload) => boolean) | null = null;
 
 export function registerComposerInsert(fn: InsertFn): () => void {
@@ -106,5 +107,23 @@ export function registerComposerInsertImage(fn: (image: AttachedImage) => void):
 export function insertComposerImage(image: AttachedImage): boolean {
   if (!insertImage) return false;
   insertImage(image);
+  return true;
+}
+
+/** OS 拖入文件的全窗遮罩「引用」区投递到主 Composer，与 Composer 自身 onDrop 同一入口。 */
+export function registerComposerIngestFiles(fn: (files: File[]) => void): () => void {
+  ingestFiles = fn;
+  return () => {
+    if (ingestFiles === fn) ingestFiles = null;
+  };
+}
+
+export function composerAcceptsFiles(): boolean {
+  return ingestFiles !== null;
+}
+
+export function ingestComposerFiles(files: File[]): boolean {
+  if (!ingestFiles) return false;
+  ingestFiles(files);
   return true;
 }
