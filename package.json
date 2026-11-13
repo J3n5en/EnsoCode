@@ -3,6 +3,9 @@
   "version": "0.3.5",
   "description": "EnsoCode - Electron Multi-Window Scaffold",
   "main": "./out/main/index.js",
+  "bin": {
+    "enso": "./scripts/enso-cli.mjs"
+  },
   "author": {
     "name": "EnsoAI Team",
     "email": "i@j3.do"

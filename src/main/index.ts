@@ -37,6 +37,7 @@ import {
 } from './services/appServerMode';
 import { browserHost } from './services/browserHost';
 import { computerHost } from './services/computerHost';
+import { startDesktopConfigCli, stopDesktopConfigCli } from './services/configCli';
 import { installDesktopHooks } from './services/desktopHooks';
 import { releaseLocalChatSlot } from './services/llama/chat';
 import { disposeLlamaRuntime, llamaRuntimeActive } from './services/llama/runtime';
@@ -207,6 +208,7 @@ if (!gotTheLock) {
     await secureStores;
     registerIpcHandlers();
     registerDesktopIpcHandlers();
+    void startDesktopConfigCli();
     void import('./services/modelsDevCatalog').then(({ startModelsDevRefreshSchedule }) => {
       startModelsDevRefreshSchedule();
     });
@@ -264,6 +266,7 @@ if (!gotTheLock) {
 
   // Electron 退出即断开中继，手机侧收到 host-offline
   app.on('before-quit', () => {
+    stopDesktopConfigCli();
     stopTrayToggleShortcut();
     stopPairHost();
     stopPairGuest();
