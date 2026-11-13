@@ -16,6 +16,7 @@ import {
 } from '@shared/pair/headlessQueue';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { splitPlanPrefix } from '@shared/planMode';
+import { projectDisplayName } from '@shared/projectName';
 import {
   hasLiveGenerationWork,
   nextStallWatchAction,
@@ -284,8 +285,8 @@ export function adoptPairSessionHeadless(session: PairCreatedSession): void {
     state.order = [session.sessionId, ...state.order.filter((id) => id !== session.sessionId)];
   });
   agent?.createAuthority(session.sessionId, session.projectId);
-  const projectName =
-    getPairProjects().find((project) => project.id === session.projectId)?.name ?? '';
+  const pairProject = getPairProjects().find((project) => project.id === session.projectId);
+  const projectName = pairProject ? projectDisplayName(pairProject) : '';
   mutatePairCatalog(
     (catalog) =>
       upsertCatalogEntry(
