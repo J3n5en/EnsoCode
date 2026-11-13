@@ -10,7 +10,9 @@ import {
   antigravityProviderConfig,
   antigravityWireIds,
   buildRequest,
+  convertTools,
   defaultAntigravityProjectId,
+  expandSchemaRefs,
   extractAntigravityProjectId,
   isAccessTokenExpired,
   iterateSseJson,
@@ -408,6 +410,109 @@ describe('normalizeToolSchema', () => {
       type: 'object',
       properties: { path: { type: 'string' } },
       required: ['path'],
+    });
+  });
+});
+
+describe('expandSchemaRefs', () => {
+  const hasKey = (value: unknown, key: string): boolean =>
+    JSON.stringify(value).includes(`"${key}"`);
+
+  it('$defs + $ref 内联被引用定义且不留 $ref', () => {
+    const out = expandSchemaRefs({
+      type: 'object',
+      properties: {
+        layout: { type: 'array', items: { anyOf: [{ type: 'string' }, { $ref: '#/$defs/Mod' }] } },
+      },
+      $defs: { Mod: { type: 'object', properties: { kind: { const: 'x' } } } },
+    });
+    expect(hasKey(out, '$ref')).toBe(false);
+    expect(out).toMatchObject({
+      properties: {
+        layout: {
+          items: {
+            anyOf: [{ type: 'string' }, { type: 'object', properties: { kind: { const: 'x' } } }],
+          },
+        },
+      },
+    });
+  });
+
+  it('definitions 写法与 JSON Pointer 转义同样生效', () => {
+    const out = expandSchemaRefs({
+      type: 'object',
+      properties: { a: { $ref: '#/definitions/A~1B' }, b: { $ref: '#/definitions/C~0D' } },
+      definitions: { 'A/B': { type: 'string' }, 'C~D': { type: 'number' } },
+    });
+    expect(hasKey(out, '$ref')).toBe(false);
+    expect(out).toMatchObject({ properties: { a: { type: 'string' }, b: { type: 'number' } } });
+  });
+
+  it('循环引用退化成宽松 schema 而不挂死', () => {
+    const out = expandSchemaRefs({
+      type: 'object',
+      properties: { root: { $ref: '#/$defs/A' } },
+      $defs: {
+        A: { type: 'object', properties: { b: { $ref: '#/$defs/B' } } },
+        B: { type: 'object', properties: { a: { $ref: '#/$defs/A' } } },
+      },
+    });
+    expect(hasKey(out, '$ref')).toBe(false);
+    expect(out).toMatchObject({
+      properties: {
+        root: { type: 'object', properties: { b: { type: 'object', properties: { a: {} } } } },
+      },
+    });
+  });
+
+  it('悬空引用被删掉', () => {
+    const out = expandSchemaRefs({
+      type: 'object',
+      properties: {
+        x: { $ref: '#/$defs/Missing', description: 'gone' },
+        y: { $ref: 'http://x/y' },
+      },
+    });
+    expect(hasKey(out, '$ref')).toBe(false);
+    expect(out).toMatchObject({ properties: { x: { description: 'gone' }, y: {} } });
+  });
+
+  it('$ref 的兄弟字段覆盖到展开结果上', () => {
+    const out = expandSchemaRefs({
+      properties: { p: { $ref: '#/$defs/S', description: '覆盖' } },
+      $defs: { S: { type: 'string', description: '原始' } },
+    });
+    expect(out).toMatchObject({ properties: { p: { type: 'string', description: '覆盖' } } });
+  });
+
+  it('convertTools 输出的 parameters 不含 $ref/$defs/definitions', () => {
+    const declaration = convertTools([
+      {
+        name: 'notion',
+        description: 'd',
+        parameters: {
+          type: 'object',
+          properties: {
+            layout: { type: 'array', items: { anyOf: [{ type: 'null' }, { $ref: '#/$defs/M' }] } },
+            legacy: { $ref: '#/definitions/L' },
+          },
+          $defs: { M: { type: 'object', properties: { n: { type: 'string' } } } },
+          definitions: { L: { type: 'string' } },
+        },
+      } as never,
+    ])?.[0]?.functionDeclarations[0] as { parameters: unknown } | undefined;
+    const params = declaration?.parameters;
+    expect(params).toBeDefined();
+    for (const key of ['$ref', '$defs', 'definitions']) expect(hasKey(params, key)).toBe(false);
+    expect(params).toMatchObject({
+      properties: {
+        layout: {
+          items: {
+            anyOf: [{ type: 'null' }, { type: 'object', properties: { n: { type: 'string' } } }],
+          },
+        },
+        legacy: { type: 'string' },
+      },
     });
   });
 });
@@ -1307,9 +1412,9 @@ describe('mergeAntigravityModels', () => {
 });
 
 describe('sanitizeUpstreamBody（上游响应体进 Error.message 前脱敏 + 截断）', () => {
-  it('截到 300 字并标注已截断', () => {
+  it('截到 2000 字并标注已截断', () => {
     const safe = sanitizeUpstreamBody('x'.repeat(5_000));
-    expect(safe).toBe(`${'x'.repeat(300)}…（已截断）`);
+    expect(safe).toBe(`${'x'.repeat(2000)}…（已截断）`);
   });
 
   it('短响应体原样保留（只压空白）', () => {
