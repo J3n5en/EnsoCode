@@ -325,6 +325,17 @@ const electronAPI = {
     },
   },
 
+  secretary: {
+    /** dev-only：Main 原生建会话，U10 删除 */
+    devCreateSession: (request: {
+      projectId: string;
+      prompt: string;
+      title?: string;
+      worktree?: boolean;
+    }): Promise<{ ok: true; conversationId: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DEV_CREATE_SESSION, request),
+  },
+
   modelDirectory: {
     get: (): Promise<unknown> => ipcRenderer.invoke(IPC_CHANNELS.MODEL_DIRECTORY_GET),
     onChanged: (callback: (snapshot: unknown) => void): (() => void) => {

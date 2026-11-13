@@ -490,6 +490,35 @@ function spawnBoundSession(
   );
 }
 
+/** Main 侧根会话 spawn：pair 与秘书共用，renderer 走 AGENT_SPAWN 自己的校验 */
+export async function spawnRootFromMain(
+  request: AgentSpawnRequest
+): Promise<{ ok: boolean; error?: string }> {
+  const identity = rootIdentity(request.sessionId) ?? {
+    sessionId: request.sessionId,
+    generation: randomUUID(),
+  };
+  agentSessionIndex.prepareParent(identity);
+  let credentialKeys: ReadonlySet<string>;
+  try {
+    credentialKeys = await readStoredOauthCredentialKeys();
+  } catch {
+    return { ok: false, error: 'model credentials unavailable' };
+  }
+  return spawnBoundSession(identity, request, credentialKeys);
+}
+
+/** Main 侧给根会话发消息：deliveryId 由 Main 生成，供回执去重 */
+export function promptRootFromMain(
+  sessionId: string,
+  text: string,
+  deliveryId: string
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return promptSession(identity, text, undefined, deliveryId);
+}
+
 /**
  * 渲染层 → Main 的 spawn 请求白名单。键集必须与 AgentSpawnRequest 完全一致：漏登记一个字段
  * 的后果是「类型里有、校验里没有」→ 整条请求被拒成 invalid spawn request（手机新会话踩过：
@@ -1002,20 +1031,7 @@ function wirePairAgentBridge(): void {
       const identity = exactIdentity(sessionId);
       if (identity) respondAsk(identity, requestId, answer);
     },
-    spawn: async (request) => {
-      const identity = rootIdentity(request.sessionId) ?? {
-        sessionId: request.sessionId,
-        generation: randomUUID(),
-      };
-      agentSessionIndex.prepareParent(identity);
-      let credentialKeys: ReadonlySet<string>;
-      try {
-        credentialKeys = await readStoredOauthCredentialKeys();
-      } catch {
-        return { ok: false, error: 'model credentials unavailable' };
-      }
-      return spawnBoundSession(identity, request, credentialKeys);
-    },
+    spawn: (request) => spawnRootFromMain(request),
   });
 }
 
@@ -1094,20 +1110,7 @@ function wirePairSessionHost(): void {
     requestSnapshot: (sessionId) => {
       requestSnapshot(sessionId);
     },
-    spawn: async (request) => {
-      const identity = rootIdentity(request.sessionId) ?? {
-        sessionId: request.sessionId,
-        generation: randomUUID(),
-      };
-      agentSessionIndex.prepareParent(identity);
-      let credentialKeys: ReadonlySet<string>;
-      try {
-        credentialKeys = await readStoredOauthCredentialKeys();
-      } catch {
-        return { ok: false, error: 'model credentials unavailable' };
-      }
-      return spawnBoundSession(identity, request, credentialKeys);
-    },
+    spawn: (request) => spawnRootFromMain(request),
     prompt: (sessionId, text, images) => {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;

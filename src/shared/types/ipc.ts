@@ -8,6 +8,8 @@ export const IPC_CHANNELS = {
   CONVERSATIONS_PATCH: 'conversations:patch',
   /** 主界面 renderer 读整份会话记录，同时重置自己的会话账本 */
   CONVERSATIONS_READ: 'conversations:read',
+  /** 秘书：dev-only 的 Main 原生建会话入口，U10 删除 */
+  SECRETARY_DEV_CREATE_SESSION: 'secretary:dev-create-session',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

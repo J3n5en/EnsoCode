@@ -2362,7 +2362,7 @@ export function toSessionMcpConfig(
   return { ...config, loadMode: 'deferred', ...(toolNames ? { toolNames } : {}) };
 }
 
-function asModelRef(value: unknown): DefaultModelRef | null {
+export function asModelRef(value: unknown): DefaultModelRef | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as { providerId?: unknown; modelId?: unknown };
   return typeof candidate.providerId === 'string' &&
@@ -2623,11 +2623,11 @@ export function readSettingsState(): Record<string, unknown> | undefined {
   return persistedSettingsState(readSettings()?.['enso-settings']);
 }
 
-function virtualModelsFromSettings(): VirtualModelEntry[] {
+export function virtualModelsFromSettings(): VirtualModelEntry[] {
   return parseVirtualModels(readSettingsState()?.virtualModels);
 }
 
-function providersFromSettings(): ModelProvider[] {
+export function providersFromSettings(): ModelProvider[] {
   const providers = readSettingsState()?.providers;
   const raw = Array.isArray(providers)
     ? providers.filter(
