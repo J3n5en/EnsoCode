@@ -178,7 +178,7 @@ export class GroupTaskStore {
         state.tasks.set(task.id, task);
         state.maxSeq = Math.max(state.maxSeq, task.seq);
       } catch {
-        /* torn or invalid line */
+        /* 写了一半或无效的行 */
       }
     }
     this.cache.set(chatId, state);

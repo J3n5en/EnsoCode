@@ -8,6 +8,8 @@ const fakeTabs: Array<{
     getTitle: () => string;
     isLoading: () => boolean;
     isDestroyed: () => boolean;
+    isDevToolsOpened: () => boolean;
+    close: ReturnType<typeof vi.fn>;
     loadURL: ReturnType<typeof vi.fn>;
     executeJavaScript: ReturnType<typeof vi.fn>;
     setWindowOpenHandler: ReturnType<typeof vi.fn>;
@@ -19,12 +21,14 @@ const fakeTabs: Array<{
     debugger: EventEmitter & {
       isAttached: () => boolean;
       attach: ReturnType<typeof vi.fn>;
-      detach: ReturnType<typeof vi.fn>;
+      detach: ReturnType<typeof vi.fn<() => void>>;
       sendCommand: ReturnType<typeof vi.fn>;
     };
   };
 }> = [];
 
+// getSession() 里 fire-and-forget 地动态导入 proxyConfig，真实模块会连带加载 agentHost 等一长串依赖；
+// 全量跑测试负载高时，加载拖到本文件环境拆除之后，报成未处理的 EnvironmentTeardownError
 vi.mock('./proxyConfig', () => ({ getProxyConfig: () => ({ attachSession: () => {} }) }));
 vi.mock('electron', () => {
   class FakeWebContentsView {
@@ -48,13 +52,19 @@ vi.mock('electron', () => {
         sendCommand: vi.fn(async () => ({})),
       });
       let currentUrl = 'https://example.com/a';
+      let destroyed = false;
       const wcEmitter = new EventEmitter();
       const contents = Object.assign(wcEmitter, {
         id: fakeTabs.length + 1,
         getURL: () => currentUrl,
         getTitle: () => 'Test',
         isLoading: () => false,
-        isDestroyed: () => false,
+        isDestroyed: () => destroyed,
+        isDevToolsOpened: () => false,
+        close: vi.fn(() => {
+          destroyed = true;
+          wcEmitter.emit('destroyed');
+        }),
         loadURL: vi.fn(async (url: string) => {
           currentUrl = url;
         }),
@@ -181,6 +191,91 @@ describe('BrowserHost designMode across navigation', () => {
 
     expect(res.selected).toBe('tab-first');
     expect(res.tabs.find((t) => t.tabId === 'tab-first')?.active).toBe(true);
+  });
+});
+
+describe('BrowserHost 标注模式的 debugger 监听', () => {
+  // 审计发现：debugger 每断开一次，再进标注模式就在同一个 debugger 上多挂一份监听，
+  // N 轮后同一条 Runtime.bindingCalled 被处理 N 次，约 10 轮触发 MaxListenersExceededWarning
+  it('debugger 断开后多轮重进标注模式，同一条页面消息仍只处理一次', async () => {
+    fakeTabs.length = 0;
+    const host = new BrowserHost();
+    await host.userNavigate('tab-dbg', 'session-1', 'https://example.com/start');
+    const contents = fakeTabs[0]!.contents;
+    contents.emit('dom-ready');
+    await host.setDesignMode('tab-dbg', true);
+    for (let round = 0; round < 3; round += 1) {
+      // 真实 Electron 里 debugger 断开（DevTools 抢占、显式 detach）会发 detach 事件
+      contents.debugger.detach();
+      contents.debugger.emit('detach', {}, 'target closed');
+      await host.setDesignMode('tab-dbg', false);
+      await host.setDesignMode('tab-dbg', true);
+    }
+
+    const drawing: unknown[] = [];
+    const off = host.onDesignMode((event) => {
+      if (event.type === 'drawing') drawing.push(event);
+    });
+    contents.debugger.emit('message', {}, 'Runtime.bindingCalled', {
+      name: 'ensoDesignMode',
+      payload: JSON.stringify({ type: 'drawing', drawing: true }),
+    });
+    off();
+    expect(drawing).toHaveLength(1);
+  });
+});
+
+describe('BrowserHost tab 生命周期', () => {
+  // 审计发现：destroyTab 在 await flush() 期间同 id 的 tab 被重建，旧 webContents 的 destroyed 回调按 id 删表，把新 tab 删掉
+  it('关闭 tab 途中同一 tab 被重新打开，旧页面销毁时不会删掉新 tab', async () => {
+    fakeTabs.length = 0;
+    const host = new BrowserHost();
+    await host.userNavigate('tab-reopen', 'session-1', 'https://example.com/old');
+    const closing = host.closeTab('tab-reopen');
+    // closeTab 已同步摘掉旧 tab、正等 flush：此时用户又打开同一个 tab
+    await host.userNavigate('tab-reopen', 'session-1', 'https://example.com/new');
+    await closing;
+    expect(host.state('tab-reopen').url).toBe('https://example.com/new');
+  });
+});
+
+describe('BrowserHost CDP 连接失败', () => {
+  // 审计发现：cdp() 里 debugger.attach 没有保护，抛错时 layout() 里 void this.cdp(...) 变成未处理的 rejection
+  it('debugger 连不上时布局照常进行，不留下未处理的 rejection', async () => {
+    fakeTabs.length = 0;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const host = new BrowserHost();
+      const children: unknown[] = [];
+      host.setHostWindow(
+        () =>
+          ({
+            isDestroyed: () => false,
+            contentView: {
+              children,
+              addChildView: (view: unknown) => {
+                if (!children.includes(view)) children.push(view);
+              },
+              removeChildView: (view: unknown) => {
+                children.splice(children.indexOf(view), 1);
+              },
+            },
+          }) as never
+      );
+      await host.userNavigate('tab-cdp', 'session-1', 'https://example.com');
+      const contents = fakeTabs[0]!.contents;
+      contents.debugger.attach.mockImplementation(() => {
+        throw new Error('Another debugger is already attached');
+      });
+      // 首次 dom-ready 触发 layout，给隐藏的 tab 下发 CDP 命令
+      contents.emit('dom-ready');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });
 

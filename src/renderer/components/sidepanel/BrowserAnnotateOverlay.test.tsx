@@ -1,5 +1,9 @@
+import { parseHTML } from 'linkedom';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IS_MAC } from '@/lib/keybindings';
 import { useDesignAnnotationsStore } from '@/stores/designAnnotations';
 
 vi.mock('@/i18n', () => ({
@@ -15,6 +19,7 @@ import {
   BrowserAnnotateStageOverlay,
   DesignFrameRing,
   DesignHintBar,
+  useBrowserAnnotateSession,
 } from './BrowserAnnotateOverlay';
 
 describe('BrowserAnnotateOverlay components', () => {
@@ -161,6 +166,7 @@ describe('BrowserAnnotateOverlay components', () => {
         onCloseOpenPin={vi.fn()}
         onSendQueue={vi.fn()}
         onStrokeStateChange={vi.fn()}
+        active
       />
     );
     expect(overlayHtml).toContain('Region 240 × 140');
@@ -173,5 +179,141 @@ describe('BrowserAnnotateOverlay components', () => {
 
     const ringHtml = renderToStaticMarkup(<DesignFrameRing active={true} />);
     expect(ringHtml).toContain('data-component="design-frame-ring"');
+  });
+});
+
+describe('Annotate 全局快捷键只交给屏幕上的浏览器', () => {
+  const browser = {
+    setDesignMode: vi.fn(),
+    onDesignMode: vi.fn(() => () => {}),
+    setAnnotationPins: vi.fn(),
+    clearSelection: vi.fn(),
+    openAnnotationPin: vi.fn(),
+    previewDesignCss: vi.fn(),
+  };
+  const noop = () => {};
+  let root: Root;
+
+  /** mod = 本平台主修饰键（mac ⌘ / 其它 Ctrl） */
+  const keydown = (key: string, init: { mod?: boolean; shift?: boolean } = {}) =>
+    Object.assign(new window.Event('keydown', { bubbles: true, cancelable: true }), {
+      key,
+      metaKey: Boolean(init.mod) && IS_MAC,
+      ctrlKey: Boolean(init.mod) && !IS_MAC,
+      shiftKey: Boolean(init.shift),
+      altKey: false,
+    });
+
+  function Session(props: { tabId: string; active: boolean; designMode?: boolean }) {
+    useBrowserAnnotateSession({
+      tabId: props.tabId,
+      conversationId: 'conv-1',
+      url: 'http://localhost:3000/',
+      designMode: props.designMode ?? false,
+      onDesignModeState: noop,
+      active: props.active,
+    });
+    return null;
+  }
+
+  function Stage(props: {
+    tabId: string;
+    active: boolean;
+    onDraftPickChange: (next: unknown) => void;
+  }) {
+    return (
+      <BrowserAnnotateStageOverlay
+        tabId={props.tabId}
+        conversationId="conv-1"
+        stageSize={{ width: 800, height: 600 }}
+        draftPick={{
+          elements: [],
+          region: { left: 10, top: 10, width: 120, height: 80 },
+          viewportWidth: 800,
+          description: { elements: [], image: null },
+          markup: [{ kind: 'arrow', from: { x: 1, y: 1 }, to: { x: 20, y: 20 } }],
+          redoMarkup: [],
+        }}
+        openPin={null}
+        markupTool={null}
+        warningShown={false}
+        onWarningShownChange={noop}
+        onDraftPickChange={props.onDraftPickChange}
+        onMoveSelection={noop}
+        onCancelDraft={noop}
+        onCloseOpenPin={noop}
+        onSendQueue={noop}
+        onStrokeStateChange={noop}
+        active={props.active}
+      />
+    );
+  }
+
+  beforeEach(() => {
+    const dom = parseHTML(
+      '<html><body><div id="root"></div><div role="dialog"><button type="button">OK</button></div></body></html>'
+    );
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.document);
+    vi.stubGlobal('Element', dom.window.Element);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    useDesignAnnotationsStore.getState().resetForTests();
+    for (const fn of Object.values(browser)) fn.mockClear();
+    browser.setDesignMode.mockResolvedValue({});
+    Object.assign(dom.window, { electronAPI: { browser } });
+    root = createRoot(dom.document.getElementById('root') as unknown as HTMLElement);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  // 真实场景：开着两个浏览器 tab，按一次 ⌘⇧D 两个都切换了设计模式
+  it('⌘⇧D 只切换屏幕上那个浏览器的设计模式', async () => {
+    await act(async () =>
+      root.render(
+        <>
+          <Session tabId="tab-a" active={false} />
+          <Session tabId="tab-b" active />
+        </>
+      )
+    );
+    await act(async () => {
+      window.dispatchEvent(keydown('D', { mod: true, shift: true }));
+    });
+    expect(browser.setDesignMode).toHaveBeenCalledTimes(1);
+    expect(browser.setDesignMode).toHaveBeenCalledWith('tab-b', true);
+  });
+
+  // 真实场景：A 会话浏览器开着设计模式，切到 B 后，B 弹窗里的 Esc 在捕获阶段被 A 截走、弹窗关不掉
+  it('隐藏的浏览器开着设计模式时，不截走别处的 Esc', async () => {
+    await act(async () => root.render(<Session tabId="tab-a" active={false} designMode />));
+    const event = keydown('Escape');
+    await act(async () => {
+      document.querySelector('[role="dialog"] button')?.dispatchEvent(event);
+    });
+    // 截走 = preventDefault + stopPropagation，B 的弹窗就收不到这次 Esc
+    expect(event.defaultPrevented).toBe(false);
+    expect(event.cancelBubble).toBe(false);
+    expect(browser.setDesignMode).not.toHaveBeenCalled();
+  });
+
+  // 真实场景：隐藏的 tab 留着区域草稿，在别处按 ⌘Z 被拦去撤销那份看不见的草稿
+  it('⌘Z 只撤销屏幕上那个浏览器的区域草稿', async () => {
+    const hidden = vi.fn();
+    const shown = vi.fn();
+    await act(async () =>
+      root.render(
+        <>
+          <Stage tabId="tab-a" active={false} onDraftPickChange={hidden} />
+          <Stage tabId="tab-b" active onDraftPickChange={shown} />
+        </>
+      )
+    );
+    await act(async () => {
+      window.dispatchEvent(keydown('z', { mod: true }));
+    });
+    expect(hidden).not.toHaveBeenCalled();
+    expect(shown).toHaveBeenCalledTimes(1);
   });
 });

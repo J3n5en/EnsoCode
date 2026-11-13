@@ -10,8 +10,9 @@ import (
 )
 
 type Store struct {
-	mu sync.Mutex
-	db *sql.DB
+	mu       sync.Mutex
+	db       *sql.DB
+	prunedAt int64 // 上次清理过期配对码的时刻（毫秒）
 }
 
 func openStore(path string) (*Store, error) {
@@ -67,6 +68,47 @@ func (s *Store) requestPair(id, hostPublicKey string, now int64) (PairState, err
 		}
 	}
 	return next, nil
+}
+
+// pruneExpired 删掉过期未认领的配对码，口径同 isExpired（过期码已不能被认领）。
+// /v1/pair/request 不鉴权，不清理的话循环 POST 新公钥能让 relay.sqlite 无限增长。
+// 每个 TTL 至多扫一次全表，免得每次请求都扫；authorized 记录重连要用，不动。
+func (s *Store) pruneExpired(now int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if now-s.prunedAt < pairTTLMS {
+		return nil
+	}
+	rows, err := s.db.Query(`SELECT id, state FROM pairs`)
+	if err != nil {
+		return err
+	}
+	var expired []string
+	for rows.Next() {
+		var id, raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		var st PairState
+		// 解析不了的行跳过：一行坏数据不能卡住整个清理
+		if json.Unmarshal([]byte(raw), &st) == nil && isExpired(st, now) {
+			expired = append(expired, id)
+		}
+	}
+	// 只有一个连接（SetMaxOpenConns(1)）：先读完并关掉 rows 再删，否则删除拿不到连接会自锁
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range expired {
+		if err := s.deleteLocked(id); err != nil {
+			return err
+		}
+	}
+	s.prunedAt = now
+	return nil
 }
 
 func (s *Store) claimPair(id, boxedKey, deviceName string, now int64) (PairState, string, error) {

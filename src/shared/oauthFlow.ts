@@ -83,9 +83,11 @@ export function parseOauthFlowPromptResponse(value: unknown): OauthFlowPromptRes
   if (!isRecord(value) || !hasExactKeys(value, ['locator', 'requestId', 'value'])) {
     return null;
   }
+  // value 允许空串（如 Qoder 留空走浏览器登录）：传输层只收窄类型，
+  // 空值是否放行由 Main 按自己登记的提示声明（allowEmpty）裁决
   return parseOauthFlowLocator(value.locator) &&
     isNonEmptyString(value.requestId) &&
-    isNonEmptyString(value.value)
+    typeof value.value === 'string'
     ? (value as unknown as OauthFlowPromptResponse)
     : null;
 }

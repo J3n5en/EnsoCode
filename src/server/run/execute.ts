@@ -131,6 +131,7 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
     io.writeStderr(`${error}\n`);
     return 2;
   };
+  const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
   let cwd: string;
   try {
     cwd = path.resolve(args.cwd);
@@ -142,7 +143,14 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
   if (!prompt.ok) return fail(prompt.error);
   if (!prompt.text.trim() && !args.goal) return fail('需要 --prompt，或 --goal / --target');
 
-  const dataDir = app.getPath('userData');
+  // 下面几处写盘失败（--data-dir / --usage-log 不可写）都属于配置错误：按约定退出码 2，
+  // 不能任由异常冒成未处理 rejection（码 1 + 堆栈）
+  let dataDir: string;
+  try {
+    dataDir = app.getPath('userData');
+  } catch (error) {
+    return fail(`数据目录不可用: ${reason(error)}`);
+  }
   const settingsFile = path.join(dataDir, 'settings.json');
   const existing = readJson(settingsFile);
   const resolved = resolveRunProvider(
@@ -156,7 +164,13 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
     settingsProviders(existing)
   );
   if (!resolved.ok) return fail(resolved.error);
-  if (resolved.value.changed) writeProviderSettings(settingsFile, resolved.value.providers);
+  if (resolved.value.changed) {
+    try {
+      writeProviderSettings(settingsFile, resolved.value.providers);
+    } catch (error) {
+      return fail(`写不进 ${settingsFile}: ${reason(error)}`);
+    }
+  }
 
   const sessionDir = path.join(agentDataDir(), 'sessions');
   const lastFile = path.join(agentDataDir(), 'run-last.json');
@@ -188,7 +202,12 @@ export async function executeRun(args: RunArgs, io: RunIO): Promise<number> {
   const identity: SessionIdentity = { sessionId, generation: randomUUID() };
   const transcript = new RunTranscript(resolved.value.providerId, loadUsageModelPricing());
   const usageFile = args.usageLog ? path.resolve(cwd, args.usageLog) : undefined;
-  const usageLog = new UsageLogWriter(usageFile);
+  let usageLog: UsageLogWriter;
+  try {
+    usageLog = new UsageLogWriter(usageFile);
+  } catch (error) {
+    return fail(`写不了用量日志 ${usageFile}: ${reason(error)}`);
+  }
   const startedAt = Date.now();
   let runtime: HeadlessSessionRuntime = {
     ...emptyHeadlessRuntime(),

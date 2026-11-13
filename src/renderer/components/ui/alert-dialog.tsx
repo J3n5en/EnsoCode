@@ -7,8 +7,8 @@ import { useTrafficLightsGuard } from '@/hooks/useTrafficLightsGuard';
 import { cn } from '@/lib/utils';
 import { DropdownLayer, Z_INDEX } from '@/lib/z-index';
 
-// Traffic lights guard is driven by the controlled `open` prop.
-// Uncontrolled AlertDialogs (without `open`) will not trigger the guard.
+// 红绿灯守卫由受控的 `open` prop 驱动。
+// 非受控的 AlertDialog（不传 `open`）不会触发守卫。
 function AlertDialog(props: AlertDialogPrimitive.Root.Props) {
   useTrafficLightsGuard(props.open ?? false);
   return <AlertDialogPrimitive.Root {...props} />;

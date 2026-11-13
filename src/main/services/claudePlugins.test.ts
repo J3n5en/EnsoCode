@@ -2,10 +2,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PluginEntry } from '../../shared/types/plugins';
 import {
   expandPluginVars,
+  listInstalledPluginInfo,
   listInstalledPlugins,
   readPluginComponents,
   resolvePluginsForSpawn,
@@ -267,6 +268,46 @@ describe('summarizeComponents', () => {
       hooks: [{ event: 'Stop', command: 'echo done' }],
       unsupported: ['lspServers'],
     });
+  });
+});
+
+describe('listInstalledPluginInfo', () => {
+  const base = 'cache/mkt/demo/1.0.0';
+  const root = () => path.join(dir, base);
+  beforeEach(() => {
+    installed({ 'demo@mkt': [{ scope: 'user', installPath: root() }] });
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // 摘要经 PLUGINS_LIST_INSTALLED 发给界面（远端/手机也能拿到）；.mcp.json 引用的环境变量可能是密钥，值只能留在 Main
+  it('设置页摘要不带 Main 环境变量的值，插件目录照常展开', () => {
+    vi.stubEnv('ENSO_TEST_DB_URL', 'postgres://user:secret@db');
+    vi.stubEnv('ENSO_TEST_API_KEY', 'sk-secret');
+    write(`${base}/.mcp.json`, {
+      mcpServers: {
+        db: { command: '${CLAUDE_PLUGIN_ROOT}/bin/db', args: ['--url', '${ENSO_TEST_DB_URL}'] },
+        api: { type: 'http', url: 'https://api.example/mcp?key=${ENSO_TEST_API_KEY}' },
+      },
+    });
+    const [info] = listInstalledPluginInfo(dir);
+    expect(info.components.mcpServers).toEqual([
+      { name: 'db', target: `${root()}/bin/db --url \${ENSO_TEST_DB_URL}` },
+      { name: 'api', target: 'https://api.example/mcp?key=${ENSO_TEST_API_KEY}' },
+    ]);
+  });
+
+  // Claude Code 文档里的写法：地址整段来自带缺省值的变量。摘要不能因为不展开变量就把会启动的服务漏掉
+  it('未设置的变量与真正启动时一样取缺省值，服务不会从摘要里消失', () => {
+    vi.stubEnv('ENSO_TEST_BASE_URL', '');
+    write(`${base}/.mcp.json`, {
+      mcpServers: { api: { type: 'http', url: '${ENSO_TEST_BASE_URL:-https://api.example}/mcp' } },
+    });
+    const [info] = listInstalledPluginInfo(dir);
+    expect(info.components.mcpServers).toEqual([
+      { name: 'api', target: 'https://api.example/mcp' },
+    ]);
   });
 });
 

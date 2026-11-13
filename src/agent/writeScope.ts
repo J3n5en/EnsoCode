@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { getApplyPatchPaths } from './applyPatch';
+import { expandPiToolPath } from './protectedActions';
 /** 极简 glob → RegExp：`**` 任意层级（含空）、`*` 段内任意、`?` 单字符；匹配整段 posix 相对路径 */
 export function globToRegExp(glob: string): RegExp {
   let out = '';
@@ -42,7 +43,7 @@ export function extractWriteTargetPaths(toolName: string, params: unknown): stri
   return target ? [target] : [];
 }
 
-/** filePath 绝对或相对 cwd；越出 cwd 恒 false */
+/** filePath 绝对或相对 cwd，按字面解析（@/~ 由调用方按工具语义先展开）；越出 cwd 恒 false */
 export function isPathInWriteScope(
   filePath: string,
   cwd: string,
@@ -85,7 +86,10 @@ export function withWriteScope<T extends ToolDefinition>(
         throw new Error('write scope: cannot determine a valid target path');
       }
       for (const target of targets) {
-        if (!isPathInWriteScope(target, cwd, scope)) {
+        // edit/write 经 pi 的 resolveToCwd 落盘（去 @、展开 ~ 等），要按同一规则判定，
+        // 否则 ~/x、@../x 会被当成 cwd 内路径；apply_patch 自己按字面解析，不能套这层
+        const resolved = def.name === 'apply_patch' ? target : expandPiToolPath(target);
+        if (!isPathInWriteScope(resolved, cwd, scope)) {
           throw new Error(
             `write scope: "${target}" is outside [${scope.join(', ')}] — this agent type may only write files matching those globs`
           );

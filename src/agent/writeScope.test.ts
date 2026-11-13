@@ -441,6 +441,102 @@ describe('withWriteScope', () => {
     }
   });
 
+  // 审计实测：pi 的 write 经 resolveToCwd 展开 ~，按字面检查时 ~/notes.md 被当成 cwd 内路径、实际写进 HOME
+  it('真实 write 工具的 ~/ 路径按 pi 规则展开到 HOME，越出 cwd 时拒绝且不落盘', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'enso-write-scope-home-'));
+    const cwd = path.join(root, 'repo');
+    const home = path.join(root, 'home');
+    // os.homedir() 读 HOME / USERPROFILE：缺陷存在时也只会写进临时目录
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('USERPROFILE', home);
+    try {
+      await mkdir(cwd);
+      await mkdir(home);
+      const tool = withWriteScope(
+        createWriteToolDefinition(cwd) as unknown as ToolDefinition,
+        cwd,
+        ['**/*.md']
+      );
+      await expect(
+        tool.execute(
+          'home',
+          { path: '~/notes.md', content: 'x\n' },
+          undefined,
+          undefined,
+          {} as never
+        )
+      ).rejects.toThrow(/write scope/);
+      await expect(readFile(path.join(home, 'notes.md'), 'utf8')).rejects.toThrow();
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  // 审计实测：pi 的 write 会剥掉前导 @，按字面检查时 @../outside.md 被当成 cwd 内路径、实际写到上级目录
+  it('真实 write 工具的 @../ 路径剥掉 @ 后越出 cwd，拒绝且不落盘', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'enso-write-scope-at-'));
+    const cwd = path.join(root, 'repo');
+    try {
+      await mkdir(cwd);
+      const tool = withWriteScope(
+        createWriteToolDefinition(cwd) as unknown as ToolDefinition,
+        cwd,
+        ['**/*.md']
+      );
+      await expect(
+        tool.execute(
+          'at',
+          { path: '@../outside.md', content: 'x\n' },
+          undefined,
+          undefined,
+          {} as never
+        )
+      ).rejects.toThrow(/write scope/);
+      await expect(readFile(path.join(root, 'outside.md'), 'utf8')).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  // 反例：判定与真实落点同源，@ 前缀的范围内路径剥掉 @ 后照常放行
+  it('真实 write 工具的 @docs/ 路径按 pi 规则落在范围内时放行并写入', async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'enso-write-scope-at-in-'));
+    try {
+      const tool = withWriteScope(
+        createWriteToolDefinition(cwd) as unknown as ToolDefinition,
+        cwd,
+        ['docs/**']
+      );
+      await tool.execute(
+        'at-in',
+        { path: '@docs/a.md', content: 'ok\n' },
+        undefined,
+        undefined,
+        {} as never
+      );
+      expect(await readFile(path.join(cwd, 'docs/a.md'), 'utf8')).toBe('ok\n');
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  // 反例：apply_patch 自己按字面解析路径（@docs/a.md 落在 cwd/@docs/a.md），不能套用 pi 的 @/~ 归一
+  it('apply_patch 的 @docs/ 路径按字面判定，不当作 docs/ 放行', async () => {
+    const executed = vi.fn(async () => ({ content: [], details: {} }));
+    const definition = {
+      ...makeToolDef(),
+      name: 'apply_patch',
+      execute: executed,
+    } as unknown as ToolDefinition;
+    const wrapped = withWriteScope(definition, '/repo', ['docs/**']);
+    const input = ['*** Begin Patch', '*** Add File: @docs/a.md', '+a', '*** End Patch'].join('\n');
+    await expect(
+      wrapped.execute('patch', { input }, undefined, undefined, {} as never)
+    ).rejects.toThrow(/write scope/);
+    expect(executed).not.toHaveBeenCalled();
+  });
+
   it('scope 为 undefined 时原样返回同一对象', () => {
     const def = makeToolDef();
     expect(withWriteScope(def, '/repo', undefined)).toBe(def);

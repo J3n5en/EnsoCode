@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { normalizeContext } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
 import {
@@ -15,6 +16,9 @@ import {
 import {
   ChatMessageSource,
   create,
+  fromBinary,
+  type GetChatMessageRequest,
+  GetChatMessageRequestSchema,
   GetChatMessageResponseSchema,
   GetUserJwtResponseSchema,
   StopReason,
@@ -265,6 +269,66 @@ describe('Devin streamSimple（假 fetch）', () => {
       cacheWrite: 1,
     });
     expect(ChatMessageSource.USER).toBe(1);
+  });
+
+  // 用户中途停止的 aborted 轮带着从未执行的 toolCall 落盘；Enso 的 dropUnpairedToolResults 按
+  // pi transformMessages「error/aborted 整轮跳过」删掉其结果，这里照常回放就是一条没有结果的工具调用
+  it('error / aborted 的 assistant 轮不进 chatMessagePrompts', async () => {
+    const jwt = toBinary(
+      GetUserJwtResponseSchema,
+      create(GetUserJwtResponseSchema, { userJwt: 'user-jwt' })
+    );
+    let sent: GetChatMessageRequest | undefined;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('GetUserJwt')) return new Response(Buffer.from(jwt));
+      // Connect 帧：1 字节 flag + 4 字节长度，之后是 gzip 过的请求 protobuf
+      const frame = Buffer.from(init?.body as Uint8Array);
+      sent = fromBinary(GetChatMessageRequestSchema, gunzipSync(frame.subarray(5)));
+      return new Response('只取请求体', { status: 500 });
+    }) as unknown as typeof fetch;
+    const interrupted = (stopReason: 'aborted' | 'error', id: string) => ({
+      role: 'assistant',
+      content: [{ type: 'toolCall', id, name: 'read', arguments: { path: 'a.ts' } }],
+      api: DEVIN_API_ID,
+      provider: DEVIN_PROVIDER_ID,
+      model: model.id,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason,
+      timestamp: 1,
+    });
+
+    const stream = devinProviderConfig().streamSimple?.(
+      model,
+      normalizeContext({
+        messages: [
+          { role: 'user', content: '读一下 a.ts', timestamp: 0 },
+          interrupted('aborted', 'call_1'),
+          interrupted('error', 'call_2'),
+          { role: 'user', content: '继续', timestamp: 2 },
+        ] as never,
+      }),
+      { apiKey: 'session-token', fetch: fetchImpl }
+    );
+    if (!stream) throw new Error('streamSimple 未注册');
+    await stream.result();
+
+    expect(
+      sent?.chatMessagePrompts.map((prompt) => ({
+        source: prompt.source,
+        prompt: prompt.prompt,
+        toolCalls: prompt.toolCalls.length,
+      }))
+    ).toEqual([
+      { source: ChatMessageSource.USER, prompt: '读一下 a.ts', toolCalls: 0 },
+      { source: ChatMessageSource.USER, prompt: '继续', toolCalls: 0 },
+    ]);
   });
 });
 

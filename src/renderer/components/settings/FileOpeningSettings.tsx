@@ -74,8 +74,6 @@ function TargetPicker({
 
 /**
  * 按扩展名编辑打开规则；应用路径只来自系统选择器，候选整组校验失败时保留已保存配置。
- *
- * Edit opening rules by extension; application paths come only from the system picker, and invalid candidate sets preserve saved settings.
  */
 export function FileOpeningSettings() {
   const { t } = useI18n();

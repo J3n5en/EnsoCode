@@ -30,15 +30,24 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
   const [preview, setPreview] = useState<SimpleMessage[] | null>(null);
   const [importing, setImporting] = useState(false);
 
+  // 扫描与预览读取不可取消，先发后到的结果会盖掉当前项目 / 当前选中项：只认本次 effect 的结果
   useEffect(() => {
     if (!project) return;
+    let alive = true;
     setSources(null);
     setSelected(null);
     setPreview(null);
     window.electronAPI.sessionImport
       .scan(project.path)
-      .then(setSources)
-      .catch(() => setSources([]));
+      .then((next) => {
+        if (alive) setSources(next);
+      })
+      .catch(() => {
+        if (alive) setSources([]);
+      });
+    return () => {
+      alive = false;
+    };
   }, [project]);
 
   useEffect(() => {
@@ -46,11 +55,19 @@ export function ImportSessionDialog({ project, onClose }: ImportSessionDialogPro
       setPreview(null);
       return;
     }
+    let alive = true;
     setPreview(null);
     window.electronAPI.sessionImport
       .read(selected.sourceId, selected.path)
-      .then(setPreview)
-      .catch(() => setPreview([]));
+      .then((next) => {
+        if (alive) setPreview(next);
+      })
+      .catch(() => {
+        if (alive) setPreview([]);
+      });
+    return () => {
+      alive = false;
+    };
   }, [selected]);
 
   const handleImport = async () => {

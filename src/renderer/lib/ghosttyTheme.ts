@@ -1,10 +1,10 @@
-// Ghostty theme utilities - uses pre-generated themes JSON
+// Ghostty 主题工具：使用预生成的主题 JSON
 
 import terminalThemes from '@/data/terminal-themes.json';
 
 export interface GhosttyTheme {
   name: string;
-  palette: string[]; // 16 colors (0-15)
+  palette: string[]; // 16 色（0-15）
   background: string;
   foreground: string;
   cursorColor: string;
@@ -38,20 +38,20 @@ export interface XtermTheme {
   brightWhite: string;
 }
 
-// Type for the imported themes
+// 导入的主题数据的类型
 const themes = terminalThemes as Record<string, GhosttyTheme>;
 
-// Get all theme names sorted alphabetically
+// 获取按字母排序的全部主题名
 export function getThemeNames(): string[] {
   return Object.keys(themes).sort((a, b) => a.localeCompare(b));
 }
 
-// Get a specific theme by name
+// 按名称获取指定主题
 export function getTheme(name: string): GhosttyTheme | undefined {
   return themes[name];
 }
 
-// Convert GhosttyTheme to xterm.js ITheme format
+// 把 GhosttyTheme 转换为 xterm.js 的 ITheme 格式
 export function ghosttyToXterm(theme: GhosttyTheme): XtermTheme {
   return {
     background: theme.background,
@@ -79,7 +79,7 @@ export function ghosttyToXterm(theme: GhosttyTheme): XtermTheme {
   };
 }
 
-// Get xterm theme by name
+// 按名称获取 xterm 主题
 export function getXtermTheme(name: string): XtermTheme | undefined {
   const theme = getTheme(name);
   return theme ? ghosttyToXterm(theme) : undefined;
@@ -96,7 +96,7 @@ export function withTransparentBackground(theme: XtermTheme | undefined): XtermT
   return theme ? { ...theme, background: '#00000000' } : undefined;
 }
 
-// Default dark theme for fallback
+// 兜底用的默认深色主题
 export const defaultDarkTheme: XtermTheme = {
   background: '#1e1e1e',
   foreground: '#d4d4d4',
@@ -122,7 +122,7 @@ export const defaultDarkTheme: XtermTheme = {
   brightWhite: '#ffffff',
 };
 
-// Default light theme for fallback
+// 兜底用的默认浅色主题
 export const defaultLightTheme: XtermTheme = {
   background: '#ffffff',
   foreground: '#333333',
@@ -244,8 +244,8 @@ export function isTerminalThemeDark(themeName: string): boolean {
   return getLuminance(theme.background) < 0.5;
 }
 
-// Apply terminal theme colors to app CSS variables
-// syncDarkMode: if true, toggle dark class based on terminal theme; if false, don't change it
+// 把终端主题配色应用到应用的 CSS 变量
+// syncDarkMode：为 true 时按终端主题切换 dark class；为 false 时不改动
 export function applyTerminalThemeToApp(themeName: string, syncDarkMode = true): void {
   const theme = getXtermTheme(themeName);
   if (!theme) return;
@@ -253,16 +253,16 @@ export function applyTerminalThemeToApp(themeName: string, syncDarkMode = true):
   const root = document.documentElement;
   const isDark = getLuminance(theme.background) < 0.5;
 
-  // Only toggle dark class if syncDarkMode is true
+  // 仅在 syncDarkMode 为 true 时切换 dark class
   if (syncDarkMode) {
     root.classList.toggle('dark', isDark);
   }
 
-  // Base colors
+  // 基础色
   root.style.setProperty('--background', theme.background);
   root.style.setProperty('--foreground', theme.foreground);
 
-  // Card - same as background or slightly different
+  // Card：与背景相同或略有差异
   root.style.setProperty('--card', theme.background);
   root.style.setProperty('--card-foreground', theme.foreground);
 
@@ -270,11 +270,11 @@ export function applyTerminalThemeToApp(themeName: string, syncDarkMode = true):
   root.style.setProperty('--popover', theme.background);
   root.style.setProperty('--popover-foreground', theme.foreground);
 
-  // Primary - use foreground as primary
+  // Primary：用前景色作为主色
   root.style.setProperty('--primary', theme.foreground);
   root.style.setProperty('--primary-foreground', theme.background);
 
-  // Secondary - muted version of background
+  // Secondary：背景色的柔和版本
   const secondaryBg = isDark
     ? mixColors(theme.background, theme.brightBlack, 0.5)
     : mixColors(theme.background, theme.black, 0.1);
@@ -304,14 +304,14 @@ export function applyTerminalThemeToApp(themeName: string, syncDarkMode = true):
       : `0 0 0 1px ${hexToRgba(theme.foreground, 7)}, 0 1px 3px rgb(0 0 0 / 0.04)`
   );
 
-  // Accent - use blue mixed with background for softer appearance
+  // Accent：用蓝色与背景混合，观感更柔和
   const accentColor = isDark ? theme.brightBlue : theme.blue;
   const softAccent = mixColors(theme.background, accentColor, 0.3);
   const isSoftAccentDark = getLuminance(softAccent) < 0.5;
   root.style.setProperty('--accent', softAccent);
   root.style.setProperty('--accent-foreground', isSoftAccentDark ? '#ffffff' : '#000000');
 
-  // Semantic colors
+  // 语义色
   root.style.setProperty('--destructive', theme.red);
   root.style.setProperty('--destructive-foreground', '#ffffff');
 
@@ -324,18 +324,18 @@ export function applyTerminalThemeToApp(themeName: string, syncDarkMode = true):
   root.style.setProperty('--info', theme.blue);
   root.style.setProperty('--info-foreground', '#ffffff');
 
-  // Border & input
+  // Border 与 input
   const borderColor = isDark
     ? mixColors(theme.background, theme.foreground, 0.15)
     : mixColors(theme.background, theme.foreground, 0.12);
   root.style.setProperty('--border', borderColor);
   root.style.setProperty('--input', borderColor);
 
-  // Ring - accent based
+  // Ring：基于 accent
   root.style.setProperty('--ring', isDark ? theme.brightBlue : theme.blue);
 }
 
-// Clear terminal theme colors from app (restore CSS defaults)
+// 清除应用上的终端主题配色（恢复 CSS 默认值）
 export function clearTerminalThemeFromApp(): void {
   const root = document.documentElement;
   const cssVars = [

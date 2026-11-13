@@ -188,6 +188,28 @@ describe('loadPluginRenderer', () => {
     expect(pluginMessageActions('right')).toHaveLength(0);
   });
 
+  // 真实场景：宿主在 effect 清理里卸载插件（切到 Bot/远程节点），插件清理函数抛错会冒到 React，
+  // 没有错误边界兜底时整页白屏；且其后登记的挂点与 clearPluginSlots 都被跳过。
+  it('插件清理函数抛错时仍收回全部挂点，且不抛给调用方', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let register: Enso['slots']['register'] | undefined;
+    const handle = await loadPluginRenderer(
+      'a.b',
+      'ui.js',
+      deps((enso) => {
+        register = (enso as Enso).slots.register;
+        return () => {
+          throw new Error('cleanup boom');
+        };
+      })
+    );
+    // onLoad 返回后再登记的挂点排在清理函数之后
+    register?.({ slot: 'message.action', position: 'left', component: () => null });
+    expect(() => handle.dispose()).not.toThrow();
+    expect(pluginMessageActions('left')).toHaveLength(0);
+    warn.mockRestore();
+  });
+
   it('卸载之后再登记会被忽略', async () => {
     let register: Enso['slots']['register'] | undefined;
     const handle = await loadPluginRenderer(

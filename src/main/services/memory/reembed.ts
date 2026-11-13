@@ -22,8 +22,9 @@ export interface ReembedJob {
 
 const KIND = 'reembed';
 const DEFAULT_BATCH = 32;
-// 需要重嵌的行：最新版本、未删除、且向量不是目标模型的（含没向量的）
-const PENDING_ROWS_WHERE = `is_latest = 1 AND lifecycle_state != 'deleted'
+// 需要重嵌的行：最新版本、active、且向量不是目标模型的（含没向量的）。
+// 与 applyRow 写回条件一致：已归档行算完也会被丢弃，选进来只会每次白算（远程嵌入重复计费）并计入失败
+const PENDING_ROWS_WHERE = `is_latest = 1 AND lifecycle_state = 'active'
   AND (embedding_model IS NULL OR embedding_model != @target)`;
 
 interface JobRow {

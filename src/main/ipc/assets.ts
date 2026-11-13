@@ -37,6 +37,7 @@ import { listInstalledPluginInfo } from '../services/claudePlugins';
 import {
   deleteInstruction,
   readInstruction,
+  readRegisteredInstruction,
   writeInstruction,
   writeInstructionSource,
 } from '../services/instructionStore';
@@ -194,17 +195,11 @@ export function registerAssetHandlers(): void {
     occupancyForBuiltinTools(snapshotBuiltinOccupancyTools())
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.INSTRUCTIONS_READ,
-    (_event, id: unknown, local: unknown, sourcePath: unknown) => {
-      if (typeof id !== 'string') return { ok: false, content: '', error: 'Invalid id' };
-      return readInstruction(
-        id,
-        local === true,
-        typeof sourcePath === 'string' ? sourcePath : undefined
-      );
-    }
-  );
+  // 只收 id：读取位置由 Main 按登记条目推导，旧调用方多传的 local / sourcePath 不再采信
+  ipcMain.handle(IPC_CHANNELS.INSTRUCTIONS_READ, (_event, id: unknown) => {
+    if (typeof id !== 'string') return { ok: false, content: '', error: 'Invalid id' };
+    return readRegisteredInstruction(id);
+  });
 
   ipcMain.handle(IPC_CHANNELS.INSTRUCTIONS_WRITE, (_event, id: unknown, content: unknown) => {
     if (typeof id !== 'string' || typeof content !== 'string') return { ok: false, bytes: 0 };

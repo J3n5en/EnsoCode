@@ -90,7 +90,11 @@ export function CloneGroupDialog({
               value={title}
               autoFocus
               onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && void clone()}
+              onKeyDown={(event) => {
+                // 输入法回车只是确认候选词；克隆中再按回车会多克隆一份（按钮已按 busy 禁用）
+                if (event.nativeEvent.isComposing || busy) return;
+                if (event.key === 'Enter') void clone();
+              }}
             />
           </div>
           <div className="space-y-1">

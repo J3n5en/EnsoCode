@@ -26,6 +26,7 @@ import {
 import {
   createContext,
   type ReactElement,
+  type ReactNode,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -72,6 +73,7 @@ import { BtwView } from './BtwView';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
+import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
 import { TerminalView } from './TerminalView';
 import { idsToClose, type TabCloseKind } from './tabCloseActions';
@@ -83,6 +85,17 @@ import './sidepanel-dock.css';
 const PanelContext = createContext<{ conversationId?: string; projectId?: string }>({});
 /** 面板升进窗口顶栏行：右上角那组 tab 条接管窗口顶栏的面板开关 */
 const TitleRowContext = createContext(false);
+
+/** dock 按会话常驻，隐藏会话的面板仍挂载：把「此面板是否在屏幕上」交给子视图，供快捷键与轮询门控 */
+function VisiblePanel({ api, children }: { api: PanelActivitySource; children: ReactNode }) {
+  const { conversationId } = useContext(PanelContext);
+  if (!conversationId) return children;
+  return (
+    <PanelVisibilityProvider dockConversationId={conversationId} api={api}>
+      {children}
+    </PanelVisibilityProvider>
+  );
+}
 
 /** 该组的 tab 条是否在 dock 右上角（分屏后只有它挨着窗口顶栏右端） */
 function useIsTopRightGroup(
@@ -160,7 +173,11 @@ function TerminalPanel(
 function ChangesPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
   const { conversationId, projectId } = props.params;
   if (!conversationId || !projectId) return null;
-  return <ChangesView conversationId={conversationId} projectId={projectId} />;
+  return (
+    <VisiblePanel api={props.api}>
+      <ChangesView conversationId={conversationId} projectId={projectId} />
+    </VisiblePanel>
+  );
 }
 
 function addFilesPanel(
@@ -185,7 +202,11 @@ function addFilesPanel(
 function FilesPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
   const { conversationId, projectId } = props.params;
   if (!conversationId || !projectId) return null;
-  return <FilesView conversationId={conversationId} projectId={projectId} />;
+  return (
+    <VisiblePanel api={props.api}>
+      <FilesView conversationId={conversationId} projectId={projectId} />
+    </VisiblePanel>
+  );
 }
 
 function addBtwPanel(
@@ -233,7 +254,11 @@ function addBrowserPanel(
 function BrowserPanel(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
   const { conversationId } = props.params;
   if (!conversationId) return null;
-  return <BrowserView conversationId={conversationId} panelApi={props.api} />;
+  return (
+    <VisiblePanel api={props.api}>
+      <BrowserView conversationId={conversationId} panelApi={props.api} />
+    </VisiblePanel>
+  );
 }
 
 function addWorkflowPanel(

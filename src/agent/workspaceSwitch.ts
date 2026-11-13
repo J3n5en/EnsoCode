@@ -14,7 +14,7 @@ interface Lock<T> {
   deferred: Array<{ run: () => void; cancel: () => void }>;
 }
 
-/** Main owns the physical-path lock; this gate only freezes worker-local wakeups. */
+/** 物理路径锁归 Main 所有；这里的闸门只冻结 worker 本地的唤醒。 */
 export class WorkspaceSwitchGate<T extends Session> {
   private readonly locks = new Map<string, Lock<T>>();
   private readonly retired = new Map<string, { roots: Set<string>; branch?: string }>();
@@ -81,7 +81,7 @@ export class WorkspaceSwitchGate<T extends Session> {
 
   unlock(requestId: string, ids: string[], branch?: string): boolean {
     const lock = this.locks.get(requestId);
-    // Failed/timeout acquisition cleanup is idempotent, but never releases another nonce.
+    // 获取失败或超时后的清理是幂等的，但绝不会释放其他 nonce 的锁。
     if (!lock) {
       const retired = this.retired.get(requestId);
       if (!retired) this.retired.set(requestId, { roots: new Set(ids) });

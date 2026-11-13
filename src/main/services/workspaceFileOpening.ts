@@ -26,9 +26,6 @@ export interface WorkspaceFileOpeningDependencies {
 
 /**
  * 外部打开同时检查扩展名与 Unix 执行位，避免文件关联或伪装后缀执行脚本与程序。
- *
- * External opening checks both extensions and Unix executable bits to prevent executing programs
- * or scripts through file associations or disguised extensions.
  */
 export function canOpenWorkspaceFileExternally(
   rel: string,
@@ -55,10 +52,6 @@ function isPdfFile(file: string): boolean {
 /**
  * PDF 使用独立的无 preload 沙箱窗口，只允许内置 viewer 初始化已验证 PDF 的 stream 子帧；
  * 其他页面导航、新窗口和 WebView 一律禁止，加载失败不会返回成功。
- *
- * PDFs use a separate sandboxed window without preload, allowing only the built-in viewer's
- * initial stream child frame for the validated PDF. All other navigation, new windows, and
- * WebViews are denied; failed loading is never reported as success.
  */
 export async function openWorkspacePdfWindow(file: string): Promise<void> {
   if (!isPdfFile(file)) throw new Error('unsupported-viewer');
@@ -67,9 +60,6 @@ export async function openWorkspacePdfWindow(file: string): Promise<void> {
 
 /**
  * 直接传递应用与文件作为独立参数，永不启用 shell；Mac 只使用系统 open 的 -a 与 -- 分隔。
- *
- * Pass the application and file as separate arguments without a shell; macOS only uses the system
- * open command with -a and the -- separator.
  */
 export function launchWorkspaceFileApplication(
   application: string,
@@ -177,10 +167,6 @@ export async function openLocalWorkspaceFileContext(
 /**
  * 仅从 Main 权威工作区解析相对路径，校验真实路径边界后按持久化规则打开；外部操作使用真实路径，
  * 防止软链接伪装危险后缀。依赖参数仅用于隔离测试，不来自 IPC 请求。
- *
- * Resolve relative paths only against Main's authoritative workspace, verify real-path boundaries,
- * then apply persisted rules. External actions use real paths to prevent symlink-disguised dangerous
- * extensions. Dependencies are for isolated tests only and never come from IPC requests.
  */
 export async function openLocalWorkspaceFile(
   cwd: string,

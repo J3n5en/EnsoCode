@@ -24,8 +24,17 @@ export function allowAppQuit(): void {
   allowQuit = true;
 }
 
-export function bypassNextCloseConfirm(): void {
+/**
+ * 在 destroy 回调执行期间放行关窗确认，返回前复位。destroy() 不派发 close，提前置位或销毁后
+ * 不复位的放行标志会留给之后的新主窗口，第一次关窗 / Cmd+Q 就不再确认直接退出。
+ */
+export function destroyWithoutCloseConfirm(destroy: () => void): void {
   bypassDestroy = true;
+  try {
+    destroy();
+  } finally {
+    bypassDestroy = false;
+  }
 }
 
 export function attachAppCloseConfirm(
@@ -51,12 +60,12 @@ export function attachAppCloseConfirm(
         try {
           win.removeListener('closed', gone);
         } catch {
-          /* window already gone */
+          /* 窗口已销毁 */
         }
         try {
           contentsOf().removeListener('destroyed', gone);
         } catch {
-          /* contents already gone */
+          /* contents 已销毁 */
         }
         resolve(value);
       };

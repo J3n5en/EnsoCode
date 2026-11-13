@@ -14,6 +14,11 @@ describe('只读设备提示', () => {
     expect(readOnlyBanner(true)).toContain('未执行');
   });
 
+  // 成员正忙（含私聊「新对话」进行中）时桌面拒收，待发栏不能直接露出错误码
+  it('成员正忙被拒时提示等当前回复结束，而不是显示 session-busy', () => {
+    expect(rejectionText('session-busy')).toBe('请等当前回复结束');
+  });
+
   it('离线队列里被拒的消息显示只读原因，只读时不给重试', () => {
     const item: OutboxItem = {
       deliveryId: 'd',

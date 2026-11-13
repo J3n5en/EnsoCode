@@ -5,8 +5,6 @@ export const OAUTH_POOL_EXHAUSTED =
 
 /**
  * Main 的进程级游标和额度窗口。成员由调用方实时校验；并发旧账号故障只封锁该账号，不推进新账号。
- *
- * Main owns process-wide cursors and quota windows. Callers validate membership live; concurrent stale failures block only the failed account, never advance its successor.
  */
 export class OauthAccountPool {
   private readonly current = new Map<string, string>();
@@ -24,8 +22,6 @@ export class OauthAccountPool {
     for (const [key, resetAt] of this.blocked) if (resetAt <= now) this.blocked.delete(key);
     if (failed && orderedKeys.includes(failed.accountKey)) {
       // 无 reset 证据只作短暂冷却；不把暂时故障持久化为永久不可用。
-      //
-      // Without reset evidence use a bounded cooldown, never persist a permanent failure.
       const until =
         failed.resetAt && failed.resetAt > now
           ? Math.min(failed.resetAt, now + 30 * 86_400_000)

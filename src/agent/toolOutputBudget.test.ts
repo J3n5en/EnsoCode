@@ -206,6 +206,27 @@ describe('ToolOutputBudget', () => {
     ).rejects.toThrow(/unknown artifact/);
   });
 
+  // 安全边界：artifact uri 由模型传入，`..` / 路径分隔符不能把读取带出 rootDir
+  it('artifact uri 里带路径穿越时不读 rootDir 之外的文件', async () => {
+    const store = budget(1024);
+    const outside = mkdtempSync(path.join(tmpdir(), 'enso-budget-outside-'));
+    dirs.push(outside);
+    writeFileSync(path.join(outside, 'secret.txt'), 'TOP-SECRET', 'utf8');
+    const rel = path.relative(store.rootDir, path.join(outside, 'secret'));
+    expect(store.read(`${ARTIFACT_URI_SCHEME}${rel}`)).toBeUndefined();
+    expect(store.read(`${ARTIFACT_URI_SCHEME}${path.join(outside, 'secret')}`)).toBeUndefined();
+    const read = withToolOutputBudget(textTool('read', 'x'), store);
+    await expect(
+      read.execute(
+        'r9',
+        { path: `${ARTIFACT_URI_SCHEME}${rel}` },
+        undefined,
+        undefined,
+        undefined as never
+      )
+    ).rejects.toThrow(/unknown artifact/);
+  });
+
   it('落盘失败时退回 head/tail 预览', async () => {
     const blocker = path.join(tmpdir(), `enso-budget-file-${process.pid}`);
     writeFileSync(blocker, 'not-a-dir');

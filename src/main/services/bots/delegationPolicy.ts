@@ -28,7 +28,7 @@ export function delegationPolicy(
 export function delegatedBotPermissions(parent: BotProfile, target: BotProfile): BotProfile {
   const a = parent.approvalMode,
     b = target.approvalMode;
-  // assistant is policy-driven, not a total ordering relative to auto-edits.
+  // assistant 由策略驱动，与 auto-edits 之间没有全序关系。
   const approvalMode = a === b ? a : a === 'full' ? b : b === 'full' ? a : 'supervised';
   return { ...target, approvalMode };
 }

@@ -4,9 +4,6 @@ import type { BrowserWindowConstructorOptions } from 'electron';
 /**
  * Windows 顶层窗口保持不透明，保留系统缩放和贴靠；工作区视图自身仍可透明。
  * macOS 和 Linux 保留原有标题栏与透明窗口约定。
- *
- * Keep the Windows host opaque for native resizing and snapping while allowing
- * transparent workbench views. Preserve existing macOS and Linux window chrome.
  */
 export function windowChromeOptions(
   platform: string,

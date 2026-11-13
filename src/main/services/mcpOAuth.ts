@@ -63,9 +63,18 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
   }
 
   clientInformation(): OAuthClientInformationMixed | undefined {
-    return this.options.store.record(this.options.serverId)?.clientInformation as
-      | OAuthClientInformationMixed
-      | undefined;
+    const client = this.options.store.record(this.options.serverId)?.clientInformation;
+    // DCR 登记的是当次回调地址；首选端口被占用退到随机端口后，旧 client 会被严格比对 redirect_uri 的
+    // 授权服务器拒绝，返回 undefined 让流程按本次地址重新注册。登记列表为空（服务端没回）时无从判断，照旧复用
+    const registered = client?.redirect_uris;
+    if (
+      Array.isArray(registered) &&
+      registered.length > 0 &&
+      !registered.includes(this.options.redirectUrl)
+    ) {
+      return undefined;
+    }
+    return client as OAuthClientInformationMixed | undefined;
   }
 
   saveClientInformation(clientInformation: OAuthClientInformationMixed): void {
@@ -213,7 +222,8 @@ async function runAuthorize(
 
   // 重新授权前清掉失效 token（否则 SDK 先走 refresh，invalid_grant 直接抛错）；
   // 用户中途取消时再放回去，避免把原本可用的凭据弄没
-  const previousTokens = deps.store.tokens(serverId);
+  const previous = deps.store.record(serverId);
+  const previousTokens = previous?.tokens;
   const challenge = deps.scopeChallenge?.(serverId);
   let authorized = false;
   try {
@@ -260,8 +270,10 @@ async function runAuthorize(
   } catch (error) {
     return { ok: false, error: message(error) };
   } finally {
-    if (!authorized && previousTokens && !deps.store.tokens(serverId)) {
-      deps.store.saveTokens(serverId, previousTokens);
+    if (!authorized && previous?.tokens && !deps.store.tokens(serverId)) {
+      // 整条原样放回：saveTokens 会按 expires_in 重算，把快过期的 token 续成满额而跳过临期续期；
+      // 流程中途还可能为新回调地址重新注册了 client，旧 token 只配旧 client
+      deps.store.restore(serverId, previous);
     }
     callback.close();
   }

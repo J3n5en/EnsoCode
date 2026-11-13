@@ -78,6 +78,8 @@ interface Connection {
   probeSentAt: number | null;
   /** 直连和中继共用：一帧只封一次 */
   replay: FrameReplay;
+  /** 直连和中继共用的收帧链：解密是异步的，并发解密会让后到的小帧越过前面的大帧 */
+  receiveQueue: Promise<void>;
 }
 
 const connections = new Map<string, Connection>();
@@ -200,6 +202,15 @@ function closeConnection(conn: Connection): void {
 
 // ── 配对 / 解绑 / 重命名 ──────────────────────────────────────────────
 
+/**
+ * 认领失败是否属于中继的业务拒绝（链接过期 / 已被认领），而不是网络不可达。
+ * postJson 对 4xx 直接抛中继给的错误文案（不带状态码前缀），网络失败抛 fetch 错误。
+ * `no pending`：中继按 TTL 清掉未认领的配对码后，晚到的认领只会拿到这句。
+ */
+export function isPairClaimRejected(detail: string): boolean {
+  return /relay 4\d\d|not found|no pending|expired|claimed|authorized/i.test(detail);
+}
+
 /** 粘贴对方的配对链接：认领 → 存凭据 → 立即连接。deviceName 报本机主机名，对方设备列表据此区分手机与电脑 */
 export async function pairNode(inviteUri: string): Promise<NodePairResult> {
   let invite: ReturnType<typeof parsePairUri>;
@@ -213,11 +224,9 @@ export async function pairNode(inviteUri: string): Promise<NodePairResult> {
     claimed = await claimPairing(invite.relay, invite.publicKey, os.hostname());
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    // postJson 对 4xx 直接抛业务错误（如已被认领/过期），网络失败抛 fetch 错误
-    const businessReject = /relay 4\d\d|not found|expired|claimed|authorized/i.test(detail);
     return {
       ok: false,
-      error: businessReject ? 'expired-or-claimed' : 'relay-unreachable',
+      error: isPairClaimRejected(detail) ? 'expired-or-claimed' : 'relay-unreachable',
       detail,
     };
   }
@@ -302,13 +311,14 @@ function openConnection(node: RemoteNode): void {
     probeNonce: 0,
     probeSentAt: null,
     replay: createFrameReplay(),
+    receiveQueue: Promise.resolve(),
   };
   conn.direct = new DirectLink({
     role: 'guest',
     // openConnection 在 preloadDirectPeer 之后：原生模块缺失就别对 host-info 白跑协商
     factory: PAIR_DIRECT_ENABLED && isDirectPeerAvailable() ? mainDirectPeerFactory : null,
     sendSignal: (signal) => void sendViaRelay(conn, signal as PhoneToHost),
-    onFrame: (frame) => void handleFrame(conn, frame),
+    onFrame: (frame) => enqueueFrame(conn, frame),
     onTransportChange: () => {
       conn.rttMs = null;
       notifyStatus();
@@ -335,7 +345,6 @@ function openConnection(node: RemoteNode): void {
 
 function connect(conn: Connection): void {
   if (conn.closed) return;
-  conn.replay.peerReset();
   const generation = ++conn.generation;
   const base = toWebSocketUrl(conn.node.relayUrl);
   const url = `${base}/v1/pair/${encodeURIComponent(conn.node.pairId)}?role=guest&token=${encodeURIComponent(conn.node.token)}`;
@@ -408,6 +417,9 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
       try {
         const control = JSON.parse(event.data) as { type?: string };
         if (control.type === 'host-online') {
+          const wasOnline = conn.hostOnline;
+          // 防重放只在这里重置：host 进房时同样收到 peer-joined 一起重置。中继重连尝试不能重置，
+          // 否则直连上的帧退回随机 nonce，被仍锁定旧前缀的 host 静默丢弃
           conn.replay.peerReset();
           conn.hostOnline = true;
           conn.direct.peerOnline(true);
@@ -415,6 +427,9 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
           remoteHooks?.online(conn.node.nodeId, true);
           // 进房即要目录（host 收 peer-joined 也会推，双保险防时序丢帧）
           void sendFrame(conn, { type: 'snapshot' });
+          // host 换新连接顶替半开旧连接时不发 host-offline：在线态没经历 false→true，renderer
+          // 不会重订阅，而 host 进房已清空本设备订阅，由 main 代补（false→true 时交给 renderer）
+          if (wasOnline && conn.lastSubscribe) void sendFrame(conn, conn.lastSubscribe);
         } else if (control.type === 'host-offline') {
           conn.hostOnline = false;
           conn.direct.peerOnline(false);
@@ -426,7 +441,7 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
       } catch {}
       return;
     }
-    void handleFrame(conn, new Uint8Array(event.data as ArrayBuffer));
+    enqueueFrame(conn, new Uint8Array(event.data as ArrayBuffer));
   };
 
   ws.onclose = (event) => closed(event.code);
@@ -452,6 +467,16 @@ function scheduleReconnect(conn: Connection): void {
 }
 
 // ── 收：解密 → 过滤 → 推 renderer ────────────────────────────────────
+
+/** 按到达顺序逐帧处理（同 pairHost）：否则大快照后紧跟的 status 会先应用，再被快照盖回旧状态 */
+function enqueueFrame(conn: Connection, frame: Uint8Array): void {
+  const task = conn.receiveQueue.then(async () => {
+    if (!conn.closed) await handleFrame(conn, frame);
+  });
+  conn.receiveQueue = task.catch((error) => {
+    console.warn('[nodes] receive failed', error);
+  });
+}
 
 async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
   // 收到加密帧即证明对方在房间里（控制帧可能因时序丢失）

@@ -137,8 +137,16 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing publicKey"})
 		return
 	}
+	if !validPublicKey(body.PublicKey) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid publicKey"})
+		return
+	}
 	pairID := pairIDFromPublicKey(body.PublicKey)
 	now := s.now()
+	// 顺带清理过期配对码；清理失败只记日志，不耽误本次配对
+	if err := s.store.pruneExpired(now); err != nil {
+		s.log.Warn("prune expired pairs", "err", err)
+	}
 	next, err := s.store.requestPair(pairID, body.PublicKey, now)
 	if err != nil {
 		s.log.Error("store request", "err", err)
@@ -243,7 +251,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request, pairID st
 		return
 	}
 	conn.SetReadLimit(maxFrameBytes)
-	p := newPeer(role)
+	p := newPeer(role, conn)
 	go p.writePump(conn)
 	s.hub.join(pairID, role, p)
 	s.readPump(conn, pairID, role, p)

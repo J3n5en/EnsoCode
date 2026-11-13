@@ -16,12 +16,13 @@ const MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'bash', 'powersh
 /**
  * per 顶级会话的 checkpoint 管理:每轮首个写盘工具执行前打一次工作树快照,
  * 快照关联本轮 user 消息的 session entry(回退还原按 entry 匹配)。
- * 非 git 项目 / git 连续失败 3 次即禁用,静默降级,绝不影响工具执行。
+ * 非 git 项目静默禁用;git 连续失败 3 次即禁用(每次失败留日志),绝不影响工具执行。
  */
 export class CheckpointManager {
   /** undefined = 未探测;null = 非 git 项目 */
   private root: string | null | undefined;
-  private turnDone = false;
+  /** 本轮快照(进行中或已落定);同轮其余写盘工具共用,不各自打快照 */
+  private turnCheckpoint: Promise<void> | undefined;
   private failures = 0;
   private disabled = false;
 
@@ -36,7 +37,7 @@ export class CheckpointManager {
 
   /** agent_start 时调用,放行本轮的一次快照 */
   resetTurn(): void {
-    this.turnDone = false;
+    this.turnCheckpoint = undefined;
   }
 
   private async resolveRoot(): Promise<string | null> {
@@ -46,10 +47,17 @@ export class CheckpointManager {
     return this.root;
   }
 
-  /** 每轮至多一次;失败静默(先置 turnDone,同轮不重试) */
+  /**
+   * 每轮至多一次;失败不抛(同轮不重试)。同轮调用都等同一个快照落定:pi 默认并行执行
+   * 工具,只置标记就放行的话,后到的写盘会抢在快照的 git status/add 之前落盘
+   */
   async ensureTurnCheckpoint(toolName: string): Promise<void> {
-    if (this.disabled || this.turnDone) return;
-    this.turnDone = true;
+    if (this.disabled) return;
+    this.turnCheckpoint ??= this.createTurnCheckpoint(toolName);
+    await this.turnCheckpoint;
+  }
+
+  private async createTurnCheckpoint(toolName: string): Promise<void> {
     try {
       const root = await this.resolveRoot();
       if (!root) {
@@ -71,8 +79,14 @@ export class CheckpointManager {
       );
       void pruneCheckpoints(root, this.sessionId, undefined, this.host).catch(() => {});
       this.failures = 0;
-    } catch {
+    } catch (error) {
       if (++this.failures >= 3) this.disabled = true;
+      // 非 git 是预期内不可用(上面已返回);git 仓库里打不出快照是「该有而没有」,
+      // 只计数会让回退+文件静默失效,至少留下原因
+      console.warn(
+        `[checkpoint] ${this.sessionId.slice(0, 8)} snapshot failed (${this.failures}/3${this.disabled ? ', disabled for this session' : ''}):`,
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 

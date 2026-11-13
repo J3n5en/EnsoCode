@@ -45,11 +45,6 @@ export function commitPendingModel(models: readonly ModelEntry[], pending: strin
  * 用成功拉取的完整清单同步模型：移除上游缺席的条目（包括手动添加的模型），
  * 空清单会清空本地列表。同 ID 去重；仍存在的模型保留原顺序与用户设置，
  * 只回填缺失元数据；新模型追加到末尾并默认启用。调用方不能传入失败结果。
- *
- * Synchronize against a successfully fetched complete list, removing absent entries
- * (including manually added models) and clearing the local list when it is empty.
- * Deduplicate fetched IDs, preserve retained order and user settings, backfill only
- * missing metadata, and append enabled new models. Callers must exclude failed results.
  */
 export function mergeFetchedModels(
   current: readonly ModelEntry[],

@@ -6,7 +6,14 @@
 
 import { createGrepToolDefinition, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { SshExecutor } from './executor';
-import { buildRemoteGrepScript, type RemoteGrepParams } from './remoteOperations';
+import {
+  buildRemoteGrepScript,
+  REMOTE_GREP_DEFAULT_LIMIT,
+  type RemoteGrepParams,
+} from './remoteOperations';
+
+/** 报错只带 stderr 摘要:grep -r 遇到大量不可读文件时 stderr 可能很长,不能整段塞给模型 */
+const STDERR_SUMMARY_CHARS = 2000;
 
 export function createRemoteGrepToolDefinition(cwd: string, executor: SshExecutor): ToolDefinition {
   const base = createGrepToolDefinition(cwd) as unknown as ToolDefinition;
@@ -22,11 +29,20 @@ export function createRemoteGrepToolDefinition(cwd: string, executor: SshExecuto
     ...base,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const engine = await detectEngine();
-      const script = buildRemoteGrepScript(params as RemoteGrepParams, cwd, engine);
+      const grepParams = params as RemoteGrepParams;
+      const script = buildRemoteGrepScript(grepParams, cwd, engine);
       const result = await executor.exec(script, { signal });
-      // rg/grep 无命中退出码 1,不是错误;>1 才是真失败
-      if (result.code > 1) {
-        throw new Error(result.stderr.trim() || `remote grep failed (code ${result.code})`);
+      // rg/grep 无命中退出码 1,不是错误;>1 才是真失败。例外:输出已满 limit 行说明 head 先退出了,
+      // 之后 grep 再写会被 SIGPIPE 杀掉(141),远端忽略 SIGPIPE 时则以 EPIPE 退出 2,结果仍有效
+      const lines = result.stdout.match(/\n/g)?.length ?? 0;
+      const cutByHead = lines >= (grepParams.limit ?? REMOTE_GREP_DEFAULT_LIMIT);
+      if (result.code > 1 && !cutByHead) {
+        const stderr = result.stderr.trim();
+        const summary =
+          stderr.length > STDERR_SUMMARY_CHARS
+            ? `${stderr.slice(0, STDERR_SUMMARY_CHARS)}\n…(stderr truncated)`
+            : stderr;
+        throw new Error(summary || `remote grep failed (code ${result.code})`);
       }
       const text = result.stdout.replace(/\n+$/, '');
       return { content: [{ type: 'text', text: text || 'No matches found' }], details: undefined };

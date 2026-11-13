@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encodeClaudeProjectDir, listClaudeSessions, readClaudeSession } from './claudeCode';
 import { listCodexSessions, readCodexSession } from './codex';
 import { importExternalSession, listExternalSessions, readExternalSession } from './index';
+import { listPiSessions } from './pi';
 import { writePiSession } from './piJsonl';
 
 let tmp: string;
@@ -19,6 +20,23 @@ afterEach(() => {
 });
 
 const jsonl = (entries: unknown[]) => entries.map((e) => JSON.stringify(e)).join('\n');
+
+/** readdir 顺序由文件系统决定；固定为按名称升序（旧目录先遍历），让扫描上限的截断点可复现 */
+const readdirByName = () => {
+  const realReaddirSync = fs.readdirSync;
+  const nameOf = (entry: unknown) =>
+    typeof entry === 'string' ? entry : String((entry as fs.Dirent).name);
+  vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: Parameters<typeof fs.readdirSync>) =>
+    [...(realReaddirSync(...args) as unknown[])].sort((a, b) =>
+      nameOf(a) < nameOf(b) ? -1 : nameOf(a) > nameOf(b) ? 1 : 0
+    )) as unknown as typeof fs.readdirSync);
+};
+
+/** 把文件 mtime 设为指定日期，模拟新旧会话 */
+const setMtime = (file: string, iso: string) => {
+  const time = new Date(iso);
+  fs.utimesSync(file, time, time);
+};
 
 describe('encodeClaudeProjectDir', () => {
   it('非字母数字统一替换为连字符', () => {
@@ -128,11 +146,12 @@ describe('readCodexSession', () => {
 });
 
 describe('listCodexSessions', () => {
-  const writeRollout = (home: string, cwd: string, metaPadding = '') => {
-    const dir = path.join(home, '.codex', 'sessions', '2026', '09', '08');
+  const writeRollout = (home: string, cwd: string, metaPadding = '', day = '2026/09/08') => {
+    const dir = path.join(home, '.codex', 'sessions', ...day.split('/'));
     fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `rollout-${crypto.randomUUID()}.jsonl`);
     fs.writeFileSync(
-      path.join(dir, `rollout-${crypto.randomUUID()}.jsonl`),
+      file,
       jsonl([
         { type: 'session_meta', payload: { cwd, metaPadding } },
         {
@@ -145,7 +164,19 @@ describe('listCodexSessions', () => {
         },
       ])
     );
+    return file;
   };
+
+  // rollout 按 年/月/日 目录存放；旧年份目录先被遍历，旧会话数已达上限时最新会话不能被截掉
+  it('会话文件超过扫描上限时仍保留 mtime 最新的会话', () => {
+    readdirByName();
+    for (const name of ['a', 'b']) {
+      setMtime(writeRollout(tmp, '/tmp/demo', name, '2024/01/01'), '2024-01-01T00:00:00Z');
+    }
+    const newest = writeRollout(tmp, '/tmp/demo', '', '2026/11/12');
+    const sessions = listCodexSessions('/tmp/demo', tmp, 2);
+    expect(sessions[0]?.path).toBe(newest);
+  });
 
   it('Windows 未设置 HOME 时从系统用户目录扫描 Codex 会话', () => {
     writeRollout(tmp, 'D:\\Work\\Demo');
@@ -466,6 +497,19 @@ describe('pi / oh-my-pi 会话', () => {
     expect(readExternalSession('oh-my-pi', file).map((m) => m.text)).toEqual(['你好', '在']);
   });
 
+  // pi 按项目分目录；名称靠前的其他项目目录先被遍历，旧会话数已达上限时当前项目的新会话不能被截掉
+  it('会话文件超过扫描上限时仍保留 mtime 最新的会话', () => {
+    readdirByName();
+    for (const id of ['o1', 'o2']) {
+      const other = piSessionFile(tmp, '.pi', '-a-other', id);
+      fs.writeFileSync(other, jsonl([piHeader('/a/other'), piTurn('user', [piText('hi')])]));
+      setMtime(other, '2024-01-01T00:00:00Z');
+    }
+    const mine = piSessionFile(tmp, '.pi', '-tmp-demo', 's1');
+    fs.writeFileSync(mine, jsonl([piHeader(projectPath), piTurn('user', [piText('hi')])]));
+    expect(listPiSessions(projectPath, tmp, 2).map((s) => s.path)).toEqual([mine]);
+  });
+
   it('目录名像当前项目但 header cwd 不匹配时不出现', () => {
     const file = piSessionFile(tmp, '.pi', '-tmp-demo', 's1');
     fs.writeFileSync(file, jsonl([piHeader('/tmp/other'), piTurn('user', [piText('hi')])]));
@@ -744,6 +788,121 @@ describe('Gemini CLI 会话', () => {
     expect(readExternalSession('gemini-cli', file)).toEqual([
       expect.objectContaining({ role: 'user', text: '构建挂了' }),
       expect.objectContaining({ role: 'assistant', text: '已修复' }),
+    ]);
+  });
+
+  /** 按上游 chatRecordingService 的 jsonl 形状写一个会话文件 */
+  const writeRealSession = (records: unknown[]) => {
+    const file = geminiChatFile(tmp, geminiHash(projectPath), 'session-2026-11-01T10-00-a1.jsonl');
+    fs.writeFileSync(file, jsonl(records));
+    return file;
+  };
+
+  // 上游 chatRecordingTypes：模型消息 type 是 'gemini'，content 是 @google/genai 的 Part（{text}，无 type 字段），
+  // thought 为 true 的 Part 是思考摘要；首行是会话元数据，之后夹着 $set 元数据行
+  it('读取上游真实格式时保留 gemini 模型回复与无 type 字段的 text Part', () => {
+    const file = writeRealSession([
+      { sessionId: 's1', projectHash: geminiHash(projectPath), startTime: 't0', kind: 'main' },
+      { id: 'u1', timestamp: 't1', type: 'user', content: [{ text: '构建挂了' }] },
+      { $set: { lastUpdated: 't1' } },
+      { id: 'g1', timestamp: 't2', type: 'gemini', content: '先看日志', model: 'gemini-2.5-pro' },
+      { id: 'u2', timestamp: 't3', type: 'user', content: [{ functionResponse: { name: 'x' } }] },
+      {
+        id: 'g2',
+        timestamp: 't4',
+        type: 'gemini',
+        content: [{ text: '想想', thought: true }, { text: '已修复' }],
+      },
+    ]);
+    expect(readExternalSession('gemini-cli', file)).toEqual([
+      expect.objectContaining({ role: 'user', text: '构建挂了' }),
+      expect.objectContaining({ role: 'assistant', text: '先看日志' }),
+      expect.objectContaining({ role: 'assistant', text: '已修复' }),
+    ]);
+  });
+
+  // 上游补 tokens / toolCalls 时把整条消息按同一 id 再追加一次，读取以最后一版为准且位置不变
+  it('同一 id 的消息被整条重追加时只保留最后一版', () => {
+    const file = writeRealSession([
+      { sessionId: 's1', projectHash: geminiHash(projectPath), kind: 'main' },
+      { id: 'u1', type: 'user', content: [{ text: '构建挂了' }] },
+      { id: 'g1', type: 'gemini', content: '先看', tokens: null },
+      { id: 'u2', type: 'user', content: [{ text: '然后呢' }] },
+      { id: 'g1', type: 'gemini', content: '先看日志', tokens: { total: 3 } },
+    ]);
+    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+      '构建挂了',
+      '先看日志',
+      '然后呢',
+    ]);
+  });
+
+  // 上游 /rewind 与中断回滚写 {$rewindTo: id}：该条及之后的消息作废，Gemini CLI 恢复时也不再显示
+  it('$rewindTo 之后被撤回的轮次不导入', () => {
+    const file = writeRealSession([
+      { sessionId: 's1', projectHash: geminiHash(projectPath), kind: 'main' },
+      { id: 'u1', type: 'user', content: [{ text: '第一问' }] },
+      { id: 'g1', type: 'gemini', content: '第一答' },
+      { id: 'u2', type: 'user', content: [{ text: '被撤回的问题' }] },
+      { id: 'g2', type: 'gemini', content: '被撤回的回答' },
+      { $rewindTo: 'u2' },
+      { id: 'u3', type: 'user', content: [{ text: '第二问' }] },
+      { id: 'g3', type: 'gemini', content: '第二答' },
+    ]);
+    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+      '第一问',
+      '第一答',
+      '第二问',
+      '第二答',
+    ]);
+  });
+
+  // 上游压缩等改写历史时把新轮次追加到末尾，再写 $patch：updates 改正文、removeIds 删旧轮次、orderIds 给出新顺序
+  it('$patch 改写历史后按删除、重排与正文更新后的结果导入', () => {
+    const file = writeRealSession([
+      { sessionId: 's1', projectHash: geminiHash(projectPath), kind: 'main' },
+      { id: 'u1', type: 'user', content: [{ text: '很早的问题' }] },
+      { id: 'g1', type: 'gemini', content: '很早的回答' },
+      { id: 'u2', type: 'user', content: [{ text: '最近的问题' }] },
+      { id: 'g2', type: 'gemini', content: '最近的回答' },
+      { id: 's1', type: 'user', content: [{ text: '压缩摘要' }] },
+      { id: 'a1', type: 'gemini', content: [{ text: '好的，继续' }] },
+      {
+        $patch: {
+          updates: [{ id: 'g2', content: [{ text: '最近的回答（已更正）' }] }],
+          removeIds: ['u1', 'g1'],
+          orderIds: ['s1', 'a1', 'u2', 'g2'],
+        },
+      },
+    ]);
+    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+      '压缩摘要',
+      '好的，继续',
+      '最近的问题',
+      '最近的回答（已更正）',
+    ]);
+  });
+
+  // 上游旧版本写过 {$set: {messages}} 整段检查点（类型标注 deprecated，读取端仍兼容），它替换此前的全部消息
+  it('旧版 $set.messages 检查点替换此前消息，后续追加与 $patch 照常生效', () => {
+    const file = writeRealSession([
+      { sessionId: 's1', projectHash: geminiHash(projectPath) },
+      { id: 'u0', type: 'user', content: [{ text: '检查点之前的旧消息' }] },
+      {
+        $set: {
+          messages: [
+            { id: 'm1', type: 'user', content: '第一问' },
+            { id: 'm2', type: 'gemini', content: '第一答' },
+          ],
+        },
+      },
+      { id: 'm3', type: 'user', content: '第二问' },
+      { $patch: { updates: [{ id: 'm2', content: [{ text: '第一答（已更新）' }] }] } },
+    ]);
+    expect(readExternalSession('gemini-cli', file).map((m) => m.text)).toEqual([
+      '第一问',
+      '第一答（已更新）',
+      '第二问',
     ]);
   });
 

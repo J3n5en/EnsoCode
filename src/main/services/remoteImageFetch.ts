@@ -19,6 +19,7 @@ import { isAllowedRemoteImageUrl, isPrivateOrReservedIp } from '@shared/remoteIm
 
 export const REMOTE_IMAGE_MAX_BYTES = 5_000_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_DEADLINE_MS = 30_000;
 const DEFAULT_MAX_REDIRECTS = 3;
 
 // 含 svg：返回值总是 data URL，只会被渲染成 <img src>（见 filePreviewMarkdown.tsx），
@@ -37,7 +38,10 @@ export type RemoteImageFetchResult = { ok: true; dataUrl: string } | { ok: false
 
 export interface RemoteImageFetchOptions {
   maxBytes?: number;
+  /** socket 空闲超时：只要还在陆续收到字节就不会触发 */
   timeoutMs?: number;
+  /** 整体截止时间（含所有重定向跳），挡住隔一会儿滴一个字节、让请求一直挂着的服务器 */
+  deadlineMs?: number;
   maxRedirects?: number;
   isAllowedUrl?: (url: string) => boolean;
   isAllowedAddress?: (ip: string) => boolean;
@@ -61,12 +65,14 @@ export async function fetchRemoteImageDataUrl(
   const {
     maxBytes = REMOTE_IMAGE_MAX_BYTES,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    deadlineMs = DEFAULT_DEADLINE_MS,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     isAllowedUrl = isAllowedRemoteImageUrl,
     isAllowedAddress = (ip: string) => !isPrivateOrReservedIp(ip),
     resolveHost = defaultResolveHost,
   } = options;
 
+  const deadline = Date.now() + deadlineMs;
   let current = url;
   for (let redirects = 0; redirects <= maxRedirects; redirects++) {
     if (!isAllowedUrl(current)) return { ok: false, error: 'blocked-address' };
@@ -84,7 +90,7 @@ export async function fetchRemoteImageDataUrl(
       return { ok: false, error: 'unavailable' };
     }
     if (!isAllowedAddress(address)) return { ok: false, error: 'blocked-address' };
-    const result = await fetchOnce(parsed, address, { maxBytes, timeoutMs });
+    const result = await fetchOnce(parsed, address, { maxBytes, timeoutMs, deadline });
     if (result.kind === 'redirect') {
       current = new URL(result.location, parsed).toString();
       continue;
@@ -105,15 +111,17 @@ type FetchOnceResult =
 function fetchOnce(
   parsed: URL,
   address: string,
-  opts: { maxBytes: number; timeoutMs: number }
+  opts: { maxBytes: number; timeoutMs: number; deadline: number }
 ): Promise<FetchOnceResult> {
   return new Promise((resolve) => {
     const isHttps = parsed.protocol === 'https:';
     const client = isHttps ? https : http;
     let settled = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (result: FetchOnceResult) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadlineTimer);
       resolve(result);
     };
     const req = client.get(
@@ -179,5 +187,13 @@ function fetchOnce(
       finish({ kind: 'error', error: 'timeout' });
     });
     req.on('error', () => finish({ kind: 'error', error: 'unavailable' }));
+    // 空闲超时只看两次收包的间隔，慢速滴灌永远不会触发；按剩余的整体预算再兜一层
+    deadlineTimer = setTimeout(
+      () => {
+        req.destroy();
+        finish({ kind: 'error', error: 'timeout' });
+      },
+      Math.max(0, opts.deadline - Date.now())
+    );
   });
 }

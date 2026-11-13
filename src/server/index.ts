@@ -5,7 +5,6 @@
 import { chmodSync, existsSync, rmSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import path from 'node:path';
-import { createInterface } from 'node:readline';
 import { app } from '@platform';
 import { registerIpcHandlers } from '../main/ipc';
 import { readSettings } from '../main/ipc/settings';
@@ -48,7 +47,7 @@ import {
 } from '../main/services/terminalService';
 import { isRunning, runCommand, USAGE } from './cli';
 import { applyConfigEnv, readServerConfig } from './config';
-import { type PluginControlCommand, parseControlCommand } from './control';
+import { type PluginControlCommand, parseControlCommand, serveControlConnection } from './control';
 import { runCli } from './run/cli';
 import { registerServerUpdater } from './update/ipc';
 import type { ServerUpdater } from './update/serverUpdater';
@@ -148,13 +147,9 @@ function listenControl(updater: ServerUpdater, web: WebConfig | null): void {
   const file = socketPath();
   if (existsSync(file)) rmSync(file);
   // 客户端发完即半关闭；保持写端打开，等异步命令（如向中继登记配对）回包
-  const server = createServer({ allowHalfOpen: true }, (socket: Socket) => {
-    createInterface({ input: socket }).on('line', (line) => {
-      void handle(line, updater, web)
-        .catch((error: unknown) => ({ ok: false, error: String(error) }))
-        .then((reply) => socket.end(`${JSON.stringify(reply)}\n`));
-    });
-  });
+  const server = createServer({ allowHalfOpen: true }, (socket: Socket) =>
+    serveControlConnection(socket, (line) => handle(line, updater, web))
+  );
   server.listen(file, () => chmodSync(file, 0o600));
   app.on('before-quit', () => {
     server.close();

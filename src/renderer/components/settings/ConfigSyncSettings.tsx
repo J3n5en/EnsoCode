@@ -474,7 +474,7 @@ function ImportDialog({
         item.added + item.updated + item.skipped > 0
     )
   );
-  // Any package can change portable preferences, so every import requires an explicit trust confirmation.
+  // 任何包都可能改动可迁移偏好，因此每次导入都需要显式的信任确认。
   const requiresFinalConfirmation = summary !== null;
 
   const commit = async () => {

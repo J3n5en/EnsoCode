@@ -203,6 +203,7 @@ interface Tab {
   devtoolsOpen: boolean;
   designMode: boolean;
   favicon: string | null;
+  /** 已在本 tab 的 debugger 上挂过标注消息监听（每个 tab 只挂一次，断开重连不重置） */
   designBinding?: boolean;
   annotationPins?: { pageKey: string; pins: BrowserAnnotationPinSpec[] };
   pickSeq: number;
@@ -520,7 +521,6 @@ export class BrowserHost {
         dbg.detach();
       } catch {}
     }
-    tab.designBinding = false;
   }
 
   private ensureDevTools(tab: Tab): void {
@@ -559,7 +559,17 @@ export class BrowserHost {
     const contents = tab.view.webContents;
     if (!tab.ready || contents.isDestroyed()) return undefined;
     const dbg = contents.debugger;
-    if (!dbg.isAttached()) dbg.attach('1.3');
+    if (!dbg.isAttached()) {
+      // 与 sendCommand 失败同样按「无结果」处理：layout() 等处是 void 调用，抛出会成为未处理的 rejection
+      try {
+        dbg.attach('1.3');
+      } catch (error) {
+        console.warn(
+          `[browser] ${method} failed: debugger attach: ${error instanceof Error ? error.message : error}`
+        );
+        return undefined;
+      }
+    }
     return dbg.sendCommand(method, params).catch((error: unknown) => {
       console.warn(`[browser] ${method} failed: ${error instanceof Error ? error.message : error}`);
       return undefined;
@@ -737,6 +747,8 @@ export class BrowserHost {
         return;
       }
     }
+    // debugger 对象随 webContents 终身不变，断开重连后监听仍在；断开时重挂会让同一条消息被处理多次。
+    // 重连后丢失的是页面侧 binding，由下面每次都执行的 addBinding 补上。
     if (!tab.designBinding) {
       dbg.on('message', (_event, method, params) => {
         if (method !== 'Runtime.bindingCalled') return;
@@ -744,9 +756,6 @@ export class BrowserHost {
         const payload = isRecord(params) ? params.payload : undefined;
         if (name !== DESIGN_MODE_BINDING || typeof payload !== 'string') return;
         void this.onDesignBinding(tab, payload);
-      });
-      dbg.on('detach', () => {
-        tab.designBinding = false;
       });
       tab.designBinding = true;
     }
@@ -928,7 +937,7 @@ export class BrowserHost {
         };
       }
     } catch {
-      // ignore screenshot race
+      // 忽略截图竞态
     } finally {
       await this.callDesignRuntime(tab, 'captureChrome', [true]);
     }
@@ -1263,7 +1272,7 @@ export class BrowserHost {
       this.guestSession.setPermissionCheckHandler(
         (_wc, permission) => permission === 'clipboard-sanitized-write'
       );
-      // Also covers frames, subresources, reload and network-backed history loads.
+      // 同时覆盖子 frame、子资源、重新加载以及走网络的历史记录加载。
       this.guestSession.webRequest.onBeforeRequest(
         { urls: ['file://*/*'] },
         (details, callback) => {
@@ -1771,8 +1780,8 @@ export class BrowserHost {
     let wasFilePage = false;
     contents.on('did-navigate', () => {
       const isFilePage = contents.getURL().startsWith('file:');
-      // File entries must never be restored from Chromium's back/forward cache after
-      // a workspace or symlink changes. HTTP-only browsing keeps its history.
+      // 工作区或符号链接变化后，file 条目绝不能从 Chromium 的前进/后退缓存恢复。
+      // 纯 HTTP 浏览保留历史记录。
       if (wasFilePage || isFilePage) contents.navigationHistory.clear();
       wasFilePage = isFilePage;
       tab.lastSnapshot = undefined;
@@ -1811,6 +1820,8 @@ export class BrowserHost {
       return { action: 'deny' };
     });
     contents.on('destroyed', () => {
+      // destroyTab 已先摘表，等 flush 期间同 id 可能被重建：旧页面销毁只清理仍是自己的那条
+      if (this.tabs.get(id) !== tab) return;
       this.tabs.delete(id);
       this.tabClaims.closeTab(id);
       if (this.currentBySession.get(sessionId) === id) this.currentBySession.delete(sessionId);

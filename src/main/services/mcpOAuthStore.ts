@@ -87,6 +87,11 @@ export class McpOAuthStore {
     this.merge(serverId, { clientInformation, ...(serverUrl ? { serverUrl } : {}) });
   }
 
+  /** 原样写回整条记录（授权未完成时回滚用）：不经 saveTokens，过期时间不按 expires_in 重算 */
+  restore(serverId: string, record: McpOAuthRecord): void {
+    this.save({ ...this.load(), [serverId]: record });
+  }
+
   /** 只弃用 token（重新授权前避开失效 refresh_token），DCR 注册信息保留 */
   clearTokens(serverId: string): void {
     const rows = this.load();

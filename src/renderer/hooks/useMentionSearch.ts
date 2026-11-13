@@ -165,7 +165,7 @@ export interface MentionSearchOptions {
   agents?: boolean;
 }
 
-/** Agent candidates come from Main's registry snapshot; file search remains cwd-bound. */
+/** Agent 候选来自 Main 的注册表快照；文件搜索仍限定在 cwd 内。 */
 export function useMentionSearch(
   cwd: string | undefined,
   query: string | null,

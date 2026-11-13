@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { GitDiffFile, GitDiffResult } from '@shared/types/gitDiff';
 
@@ -56,8 +56,10 @@ export async function diffHead(cwd: string, host: GitDiffHost): Promise<GitDiffR
     return { ok: false, error: 'not-repo' };
   }
 
+  // 项目可能是仓库子目录：diff 默认输出相对仓库根、且含子目录外的改动，而 ls-files 输出相对 cwd；
+  // --relative 让两者都只取 cwd 之下、路径相对 cwd，与读文件时 path.join(cwd, rel) 一致
   const [named, others] = await Promise.all([
-    host.run(['diff', 'HEAD', '--name-status', '-z', '--no-renames'], cwd),
+    host.run(['diff', 'HEAD', '--name-status', '-z', '--no-renames', '--relative'], cwd),
     host.run(['ls-files', '--others', '--exclude-standard', '-z'], cwd),
   ]);
 
@@ -93,7 +95,8 @@ async function loadFile(
   let newText = '';
 
   if (status === 'modified' || status === 'deleted') {
-    const shown = await host.run(['show', `HEAD:${rel}`], cwd);
+    // `HEAD:path` 按仓库根解析，`HEAD:./path` 才按 cwd 解析，与上面相对 cwd 的路径对应
+    const shown = await host.run(['show', `HEAD:./${rel}`], cwd);
     if (shown.code !== 0) return null;
     oldText = shown.stdout;
   }
@@ -124,7 +127,8 @@ export function localGitDiffHost(): GitDiffHost {
 
 function readUtf8(filePath: string): string | null {
   try {
-    const stat = statSync(filePath);
+    // 不跟随符号链接：仓库里的链接可指向工作区外的任意文件（与 gitVersionControl 的 workingText 一致）
+    const stat = lstatSync(filePath);
     if (!stat.isFile() || stat.size > MAX_BYTES) return null;
     const buf = readFileSync(filePath);
     if (buf.includes(0)) return null;

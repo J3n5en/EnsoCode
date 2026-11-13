@@ -796,6 +796,69 @@ describe('插件能力', () => {
     expect(service.list()[0]?.schedules?.[0]?.lastRunAt).toBeUndefined();
   });
 
+  // 真实场景：市场自动更新（权限不变）换版时会停掉旧进程，之前没有人再把常驻插件拉起来
+  it('权限不变的更新换版后，常驻插件重新拉起', async () => {
+    const { service } = createService();
+    const plugin = (version: string) => ({
+      'enso-plugin.json': manifest({
+        version,
+        permissions: ['process.background'],
+        resident: true,
+        contributes: {},
+      }),
+      'main.mjs': 'export function activate() {}',
+    });
+    await install(service, plugin('1.0.0'));
+    await service.setEnabled('example.demo', true);
+    service.startBackground();
+    await flush();
+    expect(service.list()[0]?.running).toBe(true);
+
+    await install(service, plugin('1.1.0'));
+    await flush();
+    expect(service.list()[0]?.version).toBe('1.1.0');
+    expect(service.list()[0]?.running).toBe(true);
+  });
+
+  it('权限不变的更新改了定时任务间隔，旧计时器撤掉并按新间隔重排', async () => {
+    const { service, root } = createService();
+    const plugin = (version: string, intervalSeconds: number) => ({
+      'enso-plugin.json': manifest({
+        version,
+        permissions: ['agent.tool', 'process.background'],
+        contributes: {
+          agentTools: [{ name: 'lookup', description: '查询', parameters: { type: 'object' } }],
+          schedules: [{ id: 'tick', intervalSeconds }],
+        },
+      }),
+      'main.mjs': `import { appendFileSync } from 'node:fs';
+        export function activate(enso) {
+          enso.schedules.register('tick', () => { appendFileSync(enso.dataDir + '/ticks.txt', '${version};'); });
+          enso.tools.register('lookup', async () => 'ok');
+        }`,
+    });
+    const warmUp = () =>
+      service.callTool({
+        toolName: 'plugin_example-demo__lookup',
+        args: {},
+        sessionId: 's',
+        projectRoot: null,
+      });
+    await install(service, plugin('1.0.0', 60));
+    await service.setEnabled('example.demo', true);
+    await warmUp();
+    vi.useFakeTimers();
+    service.startBackground();
+
+    await install(service, plugin('1.1.0', 120));
+    await warmUp();
+    const ticks = join(pluginDataPath(root, 'example.demo'), 'ticks.txt');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(existsSync(ticks)).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readFileSync(ticks, 'utf8')).toBe('1.1.0;');
+  });
+
   it('常驻不超过 5 个，意外退出 5 秒后重拉', async () => {
     vi.useFakeTimers();
     const children: EventEmitter[] = [];

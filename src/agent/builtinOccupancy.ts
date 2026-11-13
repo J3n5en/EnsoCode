@@ -1,5 +1,6 @@
 import type { OccupancyTool } from '@shared/occupancy';
 import { EMPTY_PLAN_STATE } from '@shared/planMode';
+import { SHELL_LIMITS } from '@shared/shellLimits';
 import { BUILTIN_AGENT_TYPES } from '@shared/types';
 import type { AgentTypeSpawnConfig, SubagentModelOption } from '@shared/types/agent';
 import { AskManager, createAskTool } from './ask';
@@ -63,6 +64,8 @@ export function snapshotBuiltinOccupancyTools(input?: {
     web: createWebTools().map(fields),
     memory: createMemoryTools(new MemoryInvoker(noopIdentity, () => {})).map(fields),
     background_tasks: createTaskTools({
+      // createTaskTools 构造时就读限额生成工具描述，桩对象必须带上默认值，否则整份快照抛 TypeError
+      limits: SHELL_LIMITS,
       read: async () => undefined,
       stop: () => false,
       knownIds: () => [],

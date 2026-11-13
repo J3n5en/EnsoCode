@@ -70,6 +70,24 @@ describe('apply_patch 引擎', () => {
     expect(await text('a.txt')).toBe('two\nmid\n');
   });
 
+  // 背景：pi 文件锁以 realpath 为键；同一文件的两种写法若各取一次锁会同键嵌套自锁，
+  // 外层模块级队列随之卡死，此后本 worker 的 apply_patch 全部挂起（生产中暂由预检拒绝别名挡住）
+  it('两种写法经父目录符号链接指向同一文件时不自锁，照常给出失败结果', async () => {
+    await mkdir(path.join(cwd, 'real'));
+    await writeFile(path.join(cwd, 'real/a.txt'), 'one\n');
+    await symlink(path.join(cwd, 'real'), path.join(cwd, 'linked'));
+
+    const outcome = await Promise.race([
+      executeApplyPatch(
+        cwd,
+        patch('*** Update File: real/a.txt', '@@', '-one', '+two', '*** Delete File: linked/a.txt')
+      ).then((result) => result.details.status),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 2_000)),
+    ]);
+
+    expect(outcome).toBe('failed');
+  });
+
   it('move 目标同样等待写入队列', async () => {
     await writeFile(path.join(cwd, 'src.txt'), 'one\n');
     const lock = await holdFile('dst.txt');

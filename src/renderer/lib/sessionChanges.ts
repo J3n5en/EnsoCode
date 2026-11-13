@@ -42,6 +42,9 @@ export function reconstructOld(current: string, blocks: EditBlock[]): string | n
   let text = current;
   for (let i = blocks.length - 1; i >= 0; i--) {
     const { oldText, newText } = blocks[i];
+    // 纯删除没有可匹配的新文本，indexOf('') 恒为 0 会把删掉的内容插到开头；
+    // 只有文本已空时删除位置才唯一，其余情况放弃还原，避免错误 old 被当快照落盘。
+    if (newText === '' && text !== '') return null;
     const idx = text.indexOf(newText);
     if (idx === -1) return null;
     text = text.slice(0, idx) + oldText + text.slice(idx + newText.length);

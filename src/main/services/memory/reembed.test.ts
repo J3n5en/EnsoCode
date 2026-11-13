@@ -215,6 +215,17 @@ describe('runReembedJob', () => {
     expect(vecTableExists(db, 2)).toBe(false);
   });
 
+  // 写回只认 active 行；选择时若不排除已归档行，每次触发都会白算一遍（远程嵌入重复计费）并一直报 N rows failed
+  it('已归档的行不参与重嵌：不调用 embedder、不计失败，再次触发也不重复计算', async () => {
+    const [, archived] = await seed(2);
+    updateMemory(db, archived, { lifecycleState: 'archived' });
+    const { e, calls } = newModel();
+    const job = await runReembedJob(db, e, { batchSize: 10 });
+    expect(job).toMatchObject({ status: 'done', done: 1, failed: 0, error: null });
+    expect(await runReembedJob(db, e, { batchSize: 10 })).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
   it('运行中被切换到其他目标（任务 cancelled）会停止', async () => {
     await seed(4);
     const { e, calls } = newModel({

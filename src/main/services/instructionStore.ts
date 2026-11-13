@@ -116,6 +116,19 @@ function pickInstruction(explicit?: { instructionId?: string }): InstructionPick
 }
 
 /**
+ * 渲染层读取入口：只认 id，读本地副本还是登记的源文件、源文件在哪，都由 Main 按设置里登记的条目推导，
+ * 与 writeInstructionSource 的登记校验对称；未登记的 id 不读盘，请求里带的路径一概不用。
+ */
+export function readRegisteredInstruction(id: string): ReadResult {
+  const entry = isValidId(id) ? pickInstruction({ instructionId: id }) : undefined;
+  if (!entry) return { ok: false, content: '', error: 'Not a registered instruction' };
+  // 设置是外部可写的 JSON：字段逐个收窄，非字符串的 sourcePath 不能交给 readFileSync（数字会被当 fd）
+  const local = entry.local === true;
+  const sourcePath = typeof entry.sourcePath === 'string' ? entry.sourcePath : undefined;
+  return readInstruction(id, local, local ? undefined : sourcePath);
+}
+
+/**
  * 解析本会话要注入的指令（不落盘）。
  * 不传 explicit → 取启用条目；传 explicit → 自定义预设指定的 instructionId（无视 enabled）。
  */

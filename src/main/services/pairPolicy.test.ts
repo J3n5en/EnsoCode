@@ -568,6 +568,19 @@ describe('snapshot 裁剪（批事件，本身无 sessionId）', () => {
     expect(session.messages).toEqual([{ text: 'hi' }]);
   });
 
+  // 真实场景：supervisor 恢复冷会话先发 partial 尾窗（自带 baseIndex），裁剪若从 0 重算，
+  // 节点端消息落在 0..N，翻不出更早历史，后续截断也删不到
+  it('快照自带 baseIndex 时尾窗起点按绝对下标叠加，不从 0 重算', () => {
+    const messages = Array.from({ length: 100 }, (_, i) => ({ text: `m${100 + i}` }));
+    const out = narrowSnapshot(
+      { type: 'snapshot', sessions: [{ sessionId: 'a', messages, baseIndex: 100 }] },
+      'a'
+    );
+    const session = out?.sessions[0] as { messages: unknown[]; baseIndex?: number };
+    expect(session.messages.at(-1)).toEqual({ text: 'm199' });
+    expect(session.baseIndex).toBe(200 - session.messages.length);
+  });
+
   it('短对话不裁剪，baseIndex 为 0', () => {
     const messages = [{ text: 'a' }, { text: 'b' }];
     const out = narrowSnapshot({ type: 'snapshot', sessions: [{ sessionId: 'a', messages }] }, 'a');

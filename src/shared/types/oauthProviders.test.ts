@@ -1,5 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { OAUTH_LABEL_MAX_LENGTH, sanitizeOauthLabel } from './oauthProviders';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import {
+  OAUTH_LABEL_MAX_LENGTH,
+  type OauthLoginPrompt,
+  sanitizeOauthLabel,
+} from './oauthProviders';
+
+describe('OauthLoginPrompt 契约', () => {
+  // 真实场景：Qoder 的 PAT 提示声明 allowEmpty，留空才走浏览器登录；契约缺这个字段，Main 无法把声明带给界面
+  it('登录提示可以声明允许留空提交', () => {
+    expectTypeOf<OauthLoginPrompt>()
+      .toHaveProperty('allowEmpty')
+      .toEqualTypeOf<boolean | undefined>();
+  });
+});
 
 describe('sanitizeOauthLabel', () => {
   it('短文案原样返回', () => {

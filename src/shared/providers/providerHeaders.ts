@@ -20,13 +20,19 @@ export function normalizeProviderHeaders(
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
+/**
+ * 与 fetch/undici 的请求头值约束一致：只允许 \t、0x20-0x7E、0x80-0xFF。超出的（中文、零宽空格、
+ * NUL、CR/LF 等）一条就会让该供应商每个请求都抛 ByteString/invalid header，必须在边界丢掉。
+ */
+const INVALID_HEADER_VALUE_RE = /[^\t\x20-\x7e\x80-\xff]/;
+
 /** IPC、设置和 worker 推送的边界收窄。非法条目丢弃，结果空则没有请求头。 */
 export function parseProviderHeaders(value: unknown): Record<string, string> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const headers: Record<string, string> = {};
   for (const [name, headerValue] of Object.entries(value)) {
     if (!HEADER_NAME_RE.test(name)) continue;
-    if (typeof headerValue !== 'string' || /[\r\n]/.test(headerValue)) continue;
+    if (typeof headerValue !== 'string' || INVALID_HEADER_VALUE_RE.test(headerValue)) continue;
     headers[name] = headerValue;
   }
   return Object.keys(headers).length > 0 ? headers : undefined;

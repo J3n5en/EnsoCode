@@ -56,15 +56,8 @@ async function fetchCachedAsset(nodeId: string, path: string): Promise<NodeAsset
 }
 
 function fetchAsset(nodeId: string, path: string): Promise<NodeAsset> {
-  return Promise.race([
-    tunnelFor(nodeId).fetchAsset(path),
-    new Promise<NodeAsset>((resolve) =>
-      setTimeout(
-        () => resolve({ status: 504, mime: 'text/plain', body: new Uint8Array() }),
-        ASSET_TIMEOUT_MS
-      )
-    ),
-  ]);
+  // 超时交给 tunnel：它会同时撤掉在途条目，节点重新上线时不再补发已放弃的请求
+  return tunnelFor(nodeId).fetchAsset(path, ASSET_TIMEOUT_MS);
 }
 
 const SHELL_HTML = `<!doctype html><html><head><meta charset="utf-8">

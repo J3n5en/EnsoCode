@@ -59,6 +59,30 @@ describe('resolvePreviewImageRel', () => {
   it('去掉查询串/锚点再解析', () => {
     expect(resolvePreviewImageRel('', 'a.png?raw=true#frag')).toBe('a.png');
   });
+
+  // mdast-util-to-hast 会对 Markdown 图片地址做 normalizeUri：`![](docs/图片.png)`、`![](<my image.png>)`
+  // 到这里已是 %XX 形态，原样发给 Main 读盘只会 ENOENT
+  it('中文名、带空格的图片地址解码回真实文件名', () => {
+    expect(resolvePreviewImageRel('', 'docs/%E5%9B%BE%E7%89%87.png')).toBe('docs/图片.png');
+    expect(resolvePreviewImageRel('notes', 'my%20image.png?raw=1')).toBe('notes/my image.png');
+  });
+
+  it('编码的分隔符、..、反斜杠或 NUL 不能绕过分段与穿越校验', () => {
+    expect(resolvePreviewImageRel('docs', '..%2F..%2Fsecret.png')).toBeNull();
+    expect(resolvePreviewImageRel('', '%2E%2E/secret.png')).toBeNull();
+    expect(resolvePreviewImageRel('', 'a%5C..%5Csecret.png')).toBeNull();
+    expect(resolvePreviewImageRel('', 'a%00.png')).toBeNull();
+  });
+
+  it('%XX 解不出合法 UTF-8 时拒绝；不成 %XX 的字面 % 照旧当文件名字符', () => {
+    expect(resolvePreviewImageRel('', '%E5%9B.png')).toBeNull();
+    // 原始 HTML <img> 不经 normalizeUri，src 里的 % 就是文件名本身
+    expect(resolvePreviewImageRel('', '100%.png')).toBe('100%.png');
+  });
+
+  it('Markdown 所在目录是真实路径，不参与解码', () => {
+    expect(resolvePreviewImageRel('100%25', 'a.png')).toBe('100%25/a.png');
+  });
 });
 
 describe('classifyPreviewImageSrc', () => {

@@ -173,7 +173,8 @@ export class ToolOutputBudget {
 
   read(uri: string): string | undefined {
     const id = parseArtifactUri(uri);
-    if (!id) return undefined;
+    // uri 来自模型：只认 write() 产出的安全 id，带 `/`、`\`、`..` 的路径会把读取带出 rootDir
+    if (!id || safeArtifactId(id) !== id) return undefined;
     try {
       return readFileSync(path.join(this.rootDir, `${id}.txt`), 'utf8');
     } catch {

@@ -62,7 +62,7 @@ export function withPrivacyMask(messages: unknown[], branch: readonly SessionEnt
   });
 }
 
-/** Match source objects, never text: repeated prompts and unpersisted messages must not share an ID. */
+/** 按源对象匹配，绝不按文本：重复的 prompt 与未持久化的消息不能共用同一个 ID。 */
 export function withUserEntryIds(messages: unknown[], branch: readonly SessionEntry[]): unknown[] {
   const ids = new Map<unknown, string>();
   for (const entry of branch) {

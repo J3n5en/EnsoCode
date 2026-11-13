@@ -127,6 +127,21 @@ describe('NodeRemoteTunnel', () => {
     expect(new TextDecoder().decode((await asset).body)).toBe('hello');
   });
 
+  // 审计发现：资源请求 60 秒超时后调用方已放弃，tunnel 里的条目却还在，节点重新上线时 setOnline 把它再发一遍
+  it('超时放弃的资源请求返回 504，重新上线时不再补发', async () => {
+    vi.useFakeTimers();
+    try {
+      const { sent, tunnel } = setup();
+      const asset = tunnel.fetchAsset('r/a.js', 60_000);
+      vi.advanceTimersByTime(60_000);
+      tunnel.setOnline(true);
+      expect(sent.filter((frame) => frame.type === 'asset-get')).toEqual([]);
+      await expect(asset).resolves.toMatchObject({ status: 504 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('close 拒绝所有在途请求', async () => {
     const { tunnel } = setup();
     const cid = tunnel.attach('settings', { onEvent() {}, onReset() {} });

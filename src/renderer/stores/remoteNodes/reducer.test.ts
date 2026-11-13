@@ -5,6 +5,8 @@ import {
   emptyNodeView,
   type NodeView,
   onHostOnlineChanged,
+  requestHistory,
+  resumeRememberedSession,
   selectSession,
 } from './reducer';
 
@@ -114,6 +116,47 @@ describe('订阅', () => {
   });
 });
 
+describe('进入节点时恢复记忆的会话', () => {
+  // 真实场景：在节点 B 上看会话 S 后退出，B 删除 S；重启后 store 为空仍按记忆订阅 S，
+  // 宿主不回快照，knownIds 为空又判不出幽灵，横幅永远 Syncing…、prompt 发往已删 id。
+  it('重启后记忆的会话已被对端删除，第一份不含它的目录按幽灵跳离', () => {
+    const v = resumeRememberedSession(emptyNodeView(), 's1', {}).view;
+    const r = applyNodeMessage(v, { type: 'catalog', entries: [entry('s2')] });
+    expect(r.effects).toContainEqual({ kind: 'ghost', sessionId: 's1' });
+    expect(r.view.activeSessionId).toBeNull();
+    expect(r.view.sync.state).toBe('synced');
+  });
+
+  // 真实场景：重启时停在本机，B 的目录先到；之后切到 B，记忆的 S 已不在目录里，
+  // 订阅它同样等不到快照，且 knownIds 里没有它，之后的目录也永远判不出幽灵。
+  it('目录已到且记忆的会话不在其中时，不订阅该会话', () => {
+    const v = applyNodeMessage(emptyNodeView(), { type: 'catalog', entries: [entry('s2')] }).view;
+    const r = resumeRememberedSession(v, 's1', {});
+    expect(r.view.activeSessionId).toBeNull();
+    expect(r.effects).toContainEqual({
+      kind: 'send',
+      command: { type: 'subscribe', sessionId: null },
+    });
+  });
+
+  it('重启后记忆的会话仍在第一份目录里时照常恢复，不误判幽灵', () => {
+    const v = resumeRememberedSession(emptyNodeView(), 's1', {}).view;
+    const r = applyNodeMessage(v, { type: 'catalog', entries: [entry('s1')] });
+    expect(r.effects).toEqual([]);
+    expect(r.view.activeSessionId).toBe('s1');
+  });
+
+  // 本机刚 spawn、还没进目录的会话：切走再切回时首份目录可能仍不含它，不能当幽灵踢走
+  it('刚 spawn 未进目录的会话切走再切回，不被首份目录误判为幽灵', () => {
+    let v = applyNodeMessage(emptyNodeView(), { type: 'catalog', entries: [] }).view;
+    v = selectSession(v, 'fresh', {}, { fresh: true }).view;
+    v = resumeRememberedSession(v, 'fresh', {}).view;
+    const r = applyNodeMessage(v, { type: 'catalog', entries: [] });
+    expect(r.effects).toEqual([]);
+    expect(r.view.activeSessionId).toBe('fresh');
+  });
+});
+
 describe('agent-event', () => {
   const snapshotFor = (id: string, base: number, texts: string[]) => ({
     type: 'agent-event',
@@ -187,6 +230,27 @@ describe('history 分页', () => {
       8, 9, 10,
     ]);
     expect(r.view.historyPending.has('s1')).toBe(false);
+  });
+
+  // 真实场景：上滑翻页请求在途时断线（或离线时上滑），重连后宿主收到重发的 subscribe
+  // 会作废在途分页，history 回包永不到；标记不清则顶部一直转圈、再也发不出翻页请求。
+  it('对方重新上线后清掉翻页在途标记，恢复后仍能继续上滑加载', () => {
+    let v = selectSession(emptyNodeView(), 's1', {}).view;
+    v = applyNodeMessage(v, {
+      type: 'agent-event',
+      event: {
+        type: 'snapshot',
+        sessions: [{ sessionId: 's1', baseIndex: 10, messages: [msg('n10')], status: 'idle' }],
+      },
+    }).view;
+    v = requestHistory(v, 's1').view;
+    v = onHostOnlineChanged(v, true, {}).view;
+
+    expect(v.historyPending.has('s1')).toBe(false);
+    expect(requestHistory(v, 's1').effects).toContainEqual({
+      kind: 'send',
+      command: { type: 'history', sessionId: 's1', beforeIndex: 10 },
+    });
   });
 
   it('未知帧类型不改变视图', () => {

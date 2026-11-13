@@ -266,18 +266,30 @@ function mapToolResult(
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+  signal?: AbortSignal
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    const timer = setTimeout(
+      () => finish(() => reject(new Error(`${label} timed out after ${ms}ms`))),
+      ms
+    );
+    // 中止同超时：立即结束等待，不再等底层请求自己收尾
+    const onAbort = () =>
+      finish(() => reject(Object.assign(new Error(`${label} aborted`), { name: 'AbortError' })));
+    const finish = (settle: () => void) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      settle();
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
     promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      }
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error))
     );
   });
 }
@@ -366,7 +378,7 @@ export class McpManager {
     );
   }
 
-  /** 插件经 Main 调宿主 MCP 工具；中止只让本次等待失败，底层请求由 MCP 调用超时兜底 */
+  /** 插件经 Main 调宿主 MCP 工具；中止让本次等待立即失败，已发出的调用经 signal 取消 */
   async callPluginTool(
     servers: McpServerSpawnConfig[],
     serverName: string,
@@ -652,8 +664,14 @@ export class McpManager {
     callTimeoutMs: number
   ): ToolDefinition {
     let active = client;
-    const invoke = (target: Client, params: unknown) =>
-      withTimeout(
+    const invoke = (target: Client, params: unknown, signal: AbortSignal | undefined) => {
+      // 中止要交给 SDK 去给服务端发取消。SDK 不会摘掉挂在 signal 上的监听，直接传轮次 signal 的话，
+      // 轮次中止时会给本轮早已完成的请求补发取消；所以每次调用转接一个独立 signal，调用结束即断开
+      const call = new AbortController();
+      const forward = () => call.abort(signal?.reason);
+      if (signal?.aborted) forward();
+      else signal?.addEventListener('abort', forward, { once: true });
+      return withTimeout(
         // SDK 内部请求默认 60s 超时，必须显式传入，否则外层 withTimeout 永远轮不到
         target.callTool(
           {
@@ -661,11 +679,13 @@ export class McpManager {
             arguments: (params ?? {}) as Record<string, unknown>,
           },
           undefined,
-          { timeout: callTimeoutMs }
+          { timeout: callTimeoutMs, signal: call.signal }
         ),
         callTimeoutMs,
-        `callTool ${name}`
-      );
+        `callTool ${name}`,
+        call.signal
+      ).finally(() => signal?.removeEventListener('abort', forward));
+    };
     const annotations = toAnnotations(tool.annotations);
     return {
       name,
@@ -679,15 +699,15 @@ export class McpManager {
         description: server.description || server.name,
       },
       ...(annotations ? { annotations } : {}),
-      execute: async (_toolCallId, params) => {
+      execute: async (_toolCallId, params, signal) => {
         try {
-          return mapToolResult(await invoke(active, params), name);
+          return mapToolResult(await invoke(active, params, signal), name);
         } catch (error) {
           if (!isRetriableMcpConnectionError(error)) throw error;
           const next = await this.reconnect(server, active);
           if (!next) throw error;
           active = next.client;
-          return mapToolResult(await invoke(active, params), name);
+          return mapToolResult(await invoke(active, params, signal), name);
         }
       },
     };

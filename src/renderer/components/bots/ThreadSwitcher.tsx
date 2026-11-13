@@ -367,7 +367,11 @@ function RenameDialog({
             autoFocus
             maxLength={80}
             onChange={(event) => setTitle(event.target.value)}
-            onKeyDown={(event) => event.key === 'Enter' && save()}
+            onKeyDown={(event) => {
+              // 输入法回车只是确认候选词
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === 'Enter') save();
+            }}
           />
         </DialogPanel>
         <DialogFooter>

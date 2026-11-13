@@ -76,6 +76,11 @@ let headless = false;
 const runtimes = new Map<string, HeadlessSessionRuntime>();
 const pendingInterrupt = new Map<string, string>();
 const beats = new Map<string, StallBeat>();
+/**
+ * 挂起审批 / 提问的 requestId：代审转真人等会用同一 requestId 重发 request，
+ * 按次计数会多算且 resolved 后归不了零（渲染器同样按 requestId 去重）。
+ */
+const waitingIds = new Map<string, { approvals: Set<string>; asks: Set<string> }>();
 const titleBaselines = new Map<string, string>();
 let stallTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -88,6 +93,7 @@ export function setPairHeadless(active: boolean): void {
   if (stallTimer) clearInterval(stallTimer);
   stallTimer = null;
   beats.clear();
+  waitingIds.clear();
   titleBaselines.clear();
   if (!active) {
     runtimes.clear();
@@ -385,12 +391,28 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
   if (event.type === 'message-upsert' && event.message.role === 'user') {
     titleFromFirstMessage(sessionId, event.message.content);
   }
-  if (event.type === 'approval-request') {
-    setRuntime(sessionId, { ...runtime, pendingApprovals: runtime.pendingApprovals + 1 });
+  if (event.type === 'approval-request' || event.type === 'approval-resolved') {
+    const resolved = event.type === 'approval-resolved';
+    const requestId = resolved ? event.requestId : event.request?.requestId;
+    const pendingApprovals = nextPendingCount(
+      waitingOf(sessionId).approvals,
+      runtime.pendingApprovals,
+      requestId,
+      resolved
+    );
+    setRuntime(sessionId, { ...runtime, pendingApprovals });
     return;
   }
-  if (event.type === 'ask-request') {
-    setRuntime(sessionId, { ...runtime, pendingAsks: runtime.pendingAsks + 1 });
+  if (event.type === 'ask-request' || event.type === 'ask-resolved') {
+    const resolved = event.type === 'ask-resolved';
+    const requestId = resolved ? event.requestId : event.ask?.requestId;
+    const pendingAsks = nextPendingCount(
+      waitingOf(sessionId).asks,
+      runtime.pendingAsks,
+      requestId,
+      resolved
+    );
+    setRuntime(sessionId, { ...runtime, pendingAsks });
     return;
   }
   if (event.type === 'goal-signal') {
@@ -410,6 +432,8 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
     // 轮次收口只跟 turn-* 走一次。status idle 总是先于 turn-completed，两边都泵会把 goal 续跑发两遍。
     return;
   }
+  // 回合收口时计数归零，挂起的 requestId 也随之作废
+  if (event.type === 'turn-failed' || event.type === 'turn-completed') waitingIds.delete(sessionId);
   if (event.type === 'turn-failed') {
     const failed: HeadlessSessionRuntime = {
       ...runtime,
@@ -446,6 +470,35 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
       onHeadlessIdle({ ...runtime, started: true, pendingApprovals: 0, pendingAsks: 0 })
     );
   }
+}
+
+function waitingOf(sessionId: string): { approvals: Set<string>; asks: Set<string> } {
+  let entry = waitingIds.get(sessionId);
+  if (!entry) {
+    entry = { approvals: new Set(), asks: new Set() };
+    waitingIds.set(sessionId, entry);
+  }
+  return entry;
+}
+
+/**
+ * 按 requestId 增删挂起项并返回新计数。接管时目录只播下计数、没有 id，超出集合的部分
+ * 记作匿名挂起：不认识的 resolved 消耗一条，既不会一条就清零，也不会永不归零。
+ */
+function nextPendingCount(
+  ids: Set<string>,
+  count: number,
+  requestId: string | undefined,
+  resolved: boolean
+): number {
+  let anonymous = Math.max(0, count - ids.size);
+  if (!resolved) {
+    if (requestId) ids.add(requestId);
+    else anonymous++;
+  } else if (!requestId || !ids.delete(requestId)) {
+    anonymous = Math.max(0, anonymous - 1);
+  }
+  return ids.size + anonymous;
 }
 
 function finishTurn(

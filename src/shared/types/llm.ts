@@ -67,8 +67,6 @@ export interface ModelProvider {
   oauthAccountKey?: string;
   /**
    * ChatGPT OAuth 顺序账号池；缺省保持固定账号。顺序只来自显式成员，不重排锚点。
-   *
-   * Sequential ChatGPT OAuth pool; absent means a fixed account. Never reorder the anchor.
    */
   oauthAccountPool?: { accountKeys: string[] };
   /** 发给该供应商的额外 HTTP 请求头。空表不持久化。 */

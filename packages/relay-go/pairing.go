@@ -40,6 +40,17 @@ func randomToken() string {
 	return toBase64URL(b[:])
 }
 
+// validPublicKey：客户端（@enso/pair startHostPairing）上报的是 32 字节 NaCl box 公钥的
+// base64url（无填充），恒为 43 字符。request 不鉴权且会落库，只收这一种格式，
+// 挡住任意内容写进存储。
+func validPublicKey(publicKey string) bool {
+	if len(publicKey) != 43 {
+		return false
+	}
+	b, err := base64.RawURLEncoding.DecodeString(publicKey)
+	return err == nil && len(b) == 32
+}
+
 func pairIDFromPublicKey(publicKey string) string {
 	sum := sha256.Sum256([]byte(publicKey))
 	return toBase64URL(sum[:16])

@@ -55,6 +55,9 @@ export interface RemoteGrepParams {
   limit?: number;
 }
 
+/** 未传 limit 时远端 head 截取的行数;remoteGrep 也据此判断输出是否被 head 截断 */
+export const REMOTE_GREP_DEFAULT_LIMIT = 100;
+
 /** grep 工具参数 → 远端 rg/grep 脚本(engine 由能力探测决定) */
 export function buildRemoteGrepScript(
   params: RemoteGrepParams,
@@ -64,7 +67,7 @@ export function buildRemoteGrepScript(
   const target = shellQuote(
     params.path ? (params.path.startsWith('/') ? params.path : `${cwd}/${params.path}`) : cwd
   );
-  const limit = params.limit ?? 100;
+  const limit = params.limit ?? REMOTE_GREP_DEFAULT_LIMIT;
   const parts: string[] = [];
   if (engine === 'rg') {
     parts.push('rg -n --no-heading --color never');
@@ -82,7 +85,9 @@ export function buildRemoteGrepScript(
     parts.push('--exclude-dir=node_modules --exclude-dir=.git');
   }
   parts.push('--', shellQuote(params.pattern), target);
-  return `${parts.join(' ')} 2>/dev/null | head -n ${limit}`;
+  // 管道退出码默认取 head 的,正则写错/路径不存在会被吞成"无命中":保留 stderr,
+  // 用 PIPESTATUS 透传 rg/grep 自身的退出码(字符串脚本由 buildRemoteCommand 交给远端 bash -lc)
+  return `${parts.join(' ')} | head -n ${limit}; exit "\${PIPESTATUS[0]}"`;
 }
 
 export interface RemoteOperations {

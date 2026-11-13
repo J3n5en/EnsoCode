@@ -47,7 +47,7 @@ export function resolveLocalCwdForBrowser(conversationId: string): string | null
   return resolveRoot(conversationId);
 }
 
-/** Shared policy is lexical only; every privileged file request must pass realpath too. */
+/** 共享策略只做词法校验；每个特权文件请求还必须通过 realpath 校验。 */
 export function assertBrowserUrl(raw: string, fileRoot?: string): URL {
   const url = assertAllowedUrl(raw, { fileRoot });
   if (url.protocol !== 'file:') return url;

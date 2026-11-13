@@ -71,11 +71,6 @@ const authPath = (): string => path.join(agentDir(), 'auth.json');
  * 安装级稳定设备 ID。pi 0.99 起 OpenAI「ChatGPT 订阅」登录把它作为 agent host ID，
  * 缺失时登录直接失败。复用 pi 全局 `settings.json`（agentDir）里的 `deviceId`，
  * 首次使用时创建，之后每次返回同一值；只在需要它的登录流程里惰性创建 SettingsManager。
- *
- * Installation-level stable device ID. Since pi 0.99, OpenAI "ChatGPT subscription" login uses it as
- * the agent host ID and fails without it. Reuses `deviceId` in pi's global `settings.json` (agentDir),
- * created on first use and stable afterwards; the SettingsManager is created lazily only by login flows
- * that need it.
  */
 let deviceIdSettings: SettingsManagerType | undefined;
 function deviceIdFrom(SettingsManager: typeof SettingsManagerType): string {
@@ -90,8 +85,6 @@ let quotaCoordinator: OauthQuotaCoordinator | undefined;
 
 /**
  * 额度池与 UI 共用同一 Main 缓存。身份优先取稳定账号 ID；不透明凭证用摘要保守失效，凭证和邮箱不落额度文件。
- *
- * Pool selection and UI share one Main cache. Identity uses a stable account ID where possible, otherwise a conservative credential digest; credentials and emails never enter the quota file.
  */
 export function getOauthQuotaCoordinator(): OauthQuotaCoordinator {
   quotaCoordinator ??= new OauthQuotaCoordinator({
@@ -473,10 +466,17 @@ export async function listOauthProviders(): Promise<OauthProviderInfo[]> {
 
 // ---- 登录 / 登出 ----
 
+interface PendingPrompt {
+  resolve: (value: string) => void;
+  reject: (err: Error) => void;
+  /** 厂商是否在提示上声明可留空；回复空值时只认这里登记的值，不采信回传方 */
+  allowEmpty: boolean;
+}
+
 interface ActiveLogin {
   locator: OauthFlowLocator;
   abort: AbortController;
-  pendingPrompts: Map<string, { resolve: (value: string) => void; reject: (err: Error) => void }>;
+  pendingPrompts: Map<string, PendingPrompt>;
   resolveCompletion: (event: OauthLoginEvent) => void;
   settled: boolean;
   /** 完整 URL 只留在 Main 内存里，Renderer 需要重开时经专用 IPC 请求 */
@@ -652,7 +652,10 @@ async function runOauthLogin(
       prompt: (prompt: AuthPrompt) => {
         const requestId = crypto.randomUUID();
         const { promise, resolve, reject } = Promise.withResolvers<string>();
-        login.pendingPrompts.set(requestId, { resolve, reject });
+        // pi 的 AuthPrompt 类型没有 allowEmpty，但扩展的旧版提示（如 Qoder）会被整体展开进来；
+        // 用 in 收窄、只认严格的 true，登记在 Main 侧供 respond 裁决空值。
+        const allowEmpty = 'allowEmpty' in prompt && prompt.allowEmpty === true;
+        login.pendingPrompts.set(requestId, { resolve, reject, allowEmpty });
         prompt.signal?.addEventListener('abort', () => {
           if (login.pendingPrompts.delete(requestId)) {
             emit({ type: 'prompt-cancel', requestId });
@@ -670,6 +673,7 @@ async function runOauthLogin(
               prompt.type === 'select'
                 ? prompt.options.map((option) => ({ ...option }))
                 : undefined,
+            allowEmpty,
           },
         });
         return promise;
@@ -717,6 +721,9 @@ export function respondOauthPrompt(
   if (!activeLogin || !sameFlow(activeLogin.locator, locator)) return false;
   const pending = activeLogin.pendingPrompts.get(requestId);
   if (!pending) return false;
+  // 空值只对厂商声明了 allowEmpty 的提示放行，以 Main 登记的为准；
+  // 拒绝时保留提示，继续等真正的回答，而不是把空串交给厂商
+  if (!value.trim() && !pending.allowEmpty) return false;
   activeLogin.pendingPrompts.delete(requestId);
   pending.resolve(value);
   return true;
@@ -987,8 +994,6 @@ async function codexProbe(
   }
   if (rateLimit.allowed === false || rateLimit.limit_reached === true) {
     // 全局拒绝标志是额度证据；额外 credits 或某个模型的窗口不是全账号不可用证据。
-    //
-    // Global denial flags are quota evidence; extra credits or model-specific windows are not evidence that the entire account is unavailable.
     const resets = probe.windows.flatMap((window) =>
       window.usedPercent >= 100 && window.resetsAt ? [window.resetsAt] : []
     );

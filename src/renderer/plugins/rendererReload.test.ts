@@ -130,6 +130,37 @@ describe('syncPluginRenderers', () => {
     warn.mockRestore();
   });
 
+  // 真实场景：一个插件的清理函数抛错，循环中断，其余停用插件的卸载与新插件的加载都被跳过
+  it('一个插件卸载抛错不影响其余插件的卸载与加载', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bad = plugin('bad.id', '1.0.0');
+    const gone = plugin('gone.id', '1.0.0');
+    const goneDispose = vi.fn();
+    const loaded = new Map<string, { key: string; dispose(): void }>([
+      [
+        bad.id,
+        {
+          key: rendererPluginKey(bad),
+          dispose: () => {
+            throw new Error('boom');
+          },
+        },
+      ],
+      [gone.id, { key: rendererPluginKey(gone), dispose: goneDispose }],
+    ]);
+    await expect(
+      syncPluginRenderers(
+        loaded,
+        [plugin('new.id', '1.0.0')],
+        async () => ({ dispose: vi.fn() }),
+        () => true
+      )
+    ).resolves.toBeUndefined();
+    expect(goneDispose).toHaveBeenCalledOnce();
+    expect([...loaded.keys()]).toEqual(['new.id']);
+    warn.mockRestore();
+  });
+
   it('前面的插件卡住时，后面的插件仍然完成加载', async () => {
     let release: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {

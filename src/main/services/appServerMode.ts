@@ -25,7 +25,7 @@ import {
 } from '../windows/createAppWindow';
 import { createMainWindow, getMainWindow, isMainWindowAlive } from '../windows/MainWindow';
 import { getSettingsWindow } from '../windows/SettingsWindow';
-import { allowAppQuit, bypassNextCloseConfirm } from './appCloseConfirm';
+import { allowAppQuit, destroyWithoutCloseConfirm } from './appCloseConfirm';
 import { browserHost } from './browserHost';
 import { refreshPowerKeepAlive } from './pairHost';
 import { setPairHeadless } from './pairSessionHost';
@@ -186,7 +186,6 @@ export async function enterServerMode(): Promise<void> {
   flushSettings();
   active = true;
   setPairHeadless(true);
-  bypassNextCloseConfirm();
   refreshPowerKeepAlive();
   const settings = getSettingsWindow();
   if (settings && !settings.isDestroyed()) settings.close();
@@ -196,8 +195,11 @@ export async function enterServerMode(): Promise<void> {
   if (epoch !== transition) return;
   const win = getMainWindow();
   if (win && !win.isDestroyed()) {
-    closeWindowWebContents(win);
-    win.destroy();
+    // 放行只覆盖这次同步销毁：上面的提前 return 不留标志，也不会漏给唤回后的新窗口
+    destroyWithoutCloseConfirm(() => {
+      closeWindowWebContents(win);
+      win.destroy();
+    });
   }
   app.dock?.hide();
   // dock.hide() 会把 activation policy 改成 accessory，已有 NSStatusItem 经常被丢掉。

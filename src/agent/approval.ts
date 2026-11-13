@@ -397,10 +397,15 @@ export function withProtectedFloor(
         : null;
       if (protectedCategory) {
         const record = (params ?? {}) as Record<string, unknown>;
+        const target = record.path ?? record.file_path;
+        // grep 可能只靠 glob 点名密钥文件，卡片里要带出来，否则看不出要读什么
+        const glob = typeof record.glob === 'string' && record.glob ? `--glob ${record.glob}` : '';
         const result = await gate.ask(
           definition.name,
           'command',
-          `${definition.name} ${String(record.path ?? record.file_path ?? '')}`,
+          [definition.name, target === undefined ? '' : String(target), glob]
+            .filter(Boolean)
+            .join(' '),
           signal,
           toolCallId,
           undefined,

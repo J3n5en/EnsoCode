@@ -381,7 +381,7 @@ export async function createMemory(
     try {
       opts.onCreated(result.memory);
     } catch {
-      /* best-effort */
+      /* 尽力而为 */
     }
   }
   const { fresh: _fresh, ...rest } = result;
@@ -693,8 +693,10 @@ export function updateMemory(
       const r = db.prepare('SELECT rowid FROM memories WHERE id = ?').get(id) as { rowid: number };
       vecDelete(db, r.rowid, current.embeddingDim);
     }
-    // 正文变了旧实体提及失效（新指纹由 onUpdated 重新排抽）；删除的记忆不能再通过实体被召回
-    if (contentChanged || patch.lifecycleState === 'deleted') {
+    // 正文变了旧实体提及失效（新指纹由 onUpdated 重新排抽）；删除的记忆不能再通过实体被召回。
+    // 只改标题时 KG 指纹（只算正文）不变、不会自动重抽，先删会永久丢关联（开库清孤儿还会删实体）；
+    // 标题引起的重抽由调用方显式排队，抽完 applyExtraction 整体替换旧提及。
+    if (content !== current.content || patch.lifecycleState === 'deleted') {
       db.prepare('DELETE FROM mentions WHERE memory_id = ?').run(id);
     }
   }).immediate();

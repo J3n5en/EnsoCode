@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import { emptyUsage } from '@shared/providers/piProviderTypes';
 import {
@@ -20,10 +21,16 @@ export interface CursorSessionBridge {
   emitSessionEvents(events: CursorExecEvent[]): void;
 }
 
-let boundBridge: CursorSessionBridge | undefined;
+/**
+ * 所有会话共用一个 worker，不能用模块级变量记「当前会话」：轮次重叠时 exec 会派错会话。
+ * pi-cursor 在每次 streamSimple 内开 HTTP/2 流（连接可能复用），Node 把流回调绑在
+ * request() 调用方的异步上下文上，所以 prompt 内建立的作用域能沿流回调传到 exec 钩子。
+ * 不经 prompt/steer 起的轮次拿不到桥，钩子返回 false 交回 pi-cursor 拒绝，不会派到别的会话。
+ */
+const boundBridge = new AsyncLocalStorage<CursorSessionBridge>();
 
 export function getBoundCursorBridge(): CursorSessionBridge | undefined {
-  return boundBridge;
+  return boundBridge.getStore();
 }
 
 export function isCursorModel(model: { provider?: string; api?: string }): boolean {
@@ -131,24 +138,11 @@ export function attachCursorBridgeToSession(
   }) as AgentSession['subscribe'];
 
   session.prompt = (async (text, options) => {
-    const prev = boundBridge;
-    boundBridge = bridge;
-    try {
-      await origPrompt(text, options);
-    } finally {
-      boundBridge = prev;
-    }
+    await boundBridge.run(bridge, () => origPrompt(text, options));
   }) as AgentSession['prompt'];
 
-  session.steer = (async (text, images, options) => {
-    const prev = boundBridge;
-    boundBridge = bridge;
-    try {
-      return await origSteer(text, images, options);
-    } finally {
-      boundBridge = prev;
-    }
-  }) as AgentSession['steer'];
+  session.steer = (async (text, images, options) =>
+    boundBridge.run(bridge, () => origSteer(text, images, options))) as AgentSession['steer'];
 
   return bridge;
 }
@@ -162,7 +156,7 @@ export function handlePiCursorExec(
   },
   write: (bytes: Uint8Array) => void
 ): boolean | Promise<boolean> {
-  const bridge = boundBridge;
+  const bridge = boundBridge.getStore();
   const frame = execFrameFromCase(execCase, execMsg.message?.value);
   if (!bridge || !frame) return false;
   return bridge.dispatch(frame).then((dispatched) => {

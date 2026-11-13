@@ -295,6 +295,8 @@ export class ExtensionPluginService {
     {
       running: boolean;
       timer: ReturnType<typeof setInterval>;
+      /** 当前生效的定义；换版后由 armSchedules 就地替换，计时器触发时读这里而不是闭包里的旧定义 */
+      schedule: ExtensionPluginManifest['contributes']['schedules'][number];
       lastRunAt?: number;
       lastError?: string;
     }
@@ -650,6 +652,8 @@ export class ExtensionPluginService {
         if (!expands) {
           this.stopProcess(existing.id);
           removePackage(this.options.root, existing.id, oldDir);
+          // 换版停掉了旧进程：按新清单重新拉起常驻进程、重排定时任务（与 approvePending 一致）
+          this.syncBackground();
         } else {
           this.emitNotice({
             kind: 'update-needs-approval',
@@ -2168,16 +2172,21 @@ export class ExtensionPluginService {
         for (const schedule of manifest.contributes.schedules) {
           const key = scheduleKey(id, schedule.id);
           wanted.add(key);
-          if (this.scheduleRuns.has(key)) continue;
-          const state: {
-            running: boolean;
-            timer: ReturnType<typeof setInterval>;
-            lastRunAt?: number;
-            lastError?: string;
-          } = {
+          const existing = this.scheduleRuns.get(key);
+          if (existing) {
+            // 换版后同 id 的定时任务：间隔没变就沿用计时器、只换定义（如 timeoutMs）；间隔变了按新间隔重建
+            if (existing.schedule.intervalSeconds === schedule.intervalSeconds) {
+              existing.schedule = schedule;
+              continue;
+            }
+            clearInterval(existing.timer);
+            this.scheduleRuns.delete(key);
+          }
+          const state: NonNullable<ReturnType<typeof this.scheduleRuns.get>> = {
             running: false,
+            schedule,
             timer: setInterval(
-              () => void this.runSchedule(id, schedule),
+              () => void this.runSchedule(id, state.schedule),
               schedule.intervalSeconds * 1000
             ),
           };

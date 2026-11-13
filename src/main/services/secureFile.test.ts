@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -57,6 +57,14 @@ describe('SecureJsonFile', () => {
     expect(store.isSecure()).toBe(false);
     await store.set(['plain']);
     expect(readFileSync(file(), 'utf-8')).toBe('["plain"]');
+  });
+
+  // 钥匙串不可用时 refresh_token、SSH 密码等以明文落盘：与其它密钥文件一样只给本人读写
+  it.skipIf(process.platform === 'win32')('落盘文件权限为 0600，其他用户读不到', async () => {
+    const store = open(codec(false));
+    await store.ready();
+    await store.set(['plain']);
+    expect(statSync(file()).mode & 0o777).toBe(0o600);
   });
 
   it('文件缺失、解不开或坏 JSON 都当空库', async () => {

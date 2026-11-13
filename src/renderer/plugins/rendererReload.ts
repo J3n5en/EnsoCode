@@ -19,6 +19,18 @@ export function rendererPluginKey(plugin: RendererPluginSource): string {
 }
 
 /**
+ * 卸载单个渲染模块。清理抛错只记日志：不能打断其余插件的卸载与加载，
+ * 也不能冒进 React effect 清理（没有错误边界兜底会白屏）。
+ */
+export function disposePluginRenderer(id: string, handle: { dispose(): void } | undefined): void {
+  try {
+    handle?.dispose();
+  } catch (error) {
+    console.warn(`[plugin] ${id} 渲染模块卸载失败`, error);
+  }
+}
+
+/**
  * 按身份对齐已加载的渲染模块。过期调用（isCurrent 变为 false）卸掉自己刚加载的模块后停止，
  * 不改动别的一代已经登记的插件。
  */
@@ -41,7 +53,7 @@ export async function syncPluginRenderers(
     if (!next || rendererPluginKey(next) !== handle.key) drop.push(id);
   }
   for (const id of drop) {
-    loaded.get(id)?.dispose();
+    disposePluginRenderer(id, loaded.get(id));
     loaded.delete(id);
   }
   await Promise.allSettled(

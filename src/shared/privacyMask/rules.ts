@@ -88,7 +88,8 @@ const SECRET_RULES: Rule[] = [
   {
     kind: 'PASSWORD',
     rule: 'url',
-    re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:([^\s/@]+)@/dgi,
+    // 先认 `:` 再回看 scheme：若从 scheme 起匹配，长串 `a.a.…` 的每个词首都会扫到串尾，二次复杂度
+    re: /:(?<=\b[a-z][a-z0-9+.-]*:)\/\/[^\s/:@]+:([^\s/@]+)@/dgi,
     group: 1,
     keep: 0,
     validate: (v) => !SKIP_VALUE.test(v) && !PLACEHOLDER_VALUE.test(v),
@@ -96,7 +97,9 @@ const SECRET_RULES: Rule[] = [
   {
     kind: kvKind,
     rule: 'kv',
-    re: /\b(?:[A-Za-z0-9]+[_-])*(api[_-]?key|secret(?:[_-]?key)?|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|passwd|password|pwd|client[_-]?secret|private[_-]?key)["']?\s*[:=]\s*(?:"((?:\\.|[^"\\\n])*)"|'((?:\\.|[^'\\\n])*)'|([^\s"',;{}[\]]+))/dgi,
+    // 负回看跳过“更早的词首经 `xx_`/`xx-` 前缀能走到”的起点：这里能匹配的，那个词首必先匹配到；
+    // 否则长串 `a-a-…` 的每个词首都要把前缀重扫到串尾，二次复杂度
+    re: /\b(?<!(?:^|[^A-Za-z0-9_])(?:[A-Za-z0-9]+[_-])+?)(?:[A-Za-z0-9]+[_-])*(api[_-]?key|secret(?:[_-]?key)?|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|passwd|password|pwd|client[_-]?secret|private[_-]?key)["']?\s*[:=]\s*(?:"((?:\\.|[^"\\\n])*)"|'((?:\\.|[^'\\\n])*)'|([^\s"',;{}[\]]+))/dgi,
     group: -1,
     keep: 0,
     validate: kvValue,

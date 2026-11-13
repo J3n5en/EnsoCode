@@ -1620,4 +1620,54 @@ describe('editMemory（成员记忆手动编辑）', () => {
     expect(complete).toHaveBeenCalledTimes(1);
     configureMemoryKg({ enabled: false, complete: null });
   });
+
+  const kgEntities = (...names: string[]) =>
+    JSON.stringify({
+      entities: names.map((name) => ({ name, type: 'TOOL', confidence: 0.9 })),
+      relationships: [],
+    });
+  const linkedEntities = (memoryId: string) =>
+    (
+      memoryDatabase()
+        ?.prepare(
+          `SELECT e.name FROM mentions m JOIN entities e ON e.id = m.entity_id
+           WHERE m.memory_id = ? ORDER BY e.name`
+        )
+        .all(memoryId) as { name: string }[] | undefined
+    )?.map((row) => row.name);
+
+  // 真实场景：KG 指纹只算正文，只改标题时不会重抽；旧实现却先删了提及，开库清孤儿再把实体一并删掉
+  it('只改标题不丢实体关联：KG 关闭时改完重开库，实体仍挂在这条记忆上', async () => {
+    configureMemoryKg({ enabled: true, complete: () => async () => kgEntities('Terraform') });
+    const { memory } = await capture('infra is provisioned with terraform modules');
+    await awaitMemoryKg();
+    configureMemoryKg({ enabled: false, complete: null });
+    editMemory(memory.id, {
+      title: '基础设施',
+      content: 'infra is provisioned with terraform modules',
+    });
+    closeMemoryDb();
+    await invokeMemory('search', { query: 'terraform', limit: 5, spaceId: 'global' }, null);
+    expect(linkedEntities(memory.id)).toEqual(['Terraform']);
+  });
+
+  // 抽取输入是「标题\n正文」：只改标题也要按新标题重抽，抽完整体替换旧提及
+  it('KG 开启时只改标题也按新标题重新抽取实体', async () => {
+    const complete = vi
+      .fn(async (_system: string, _user: string) => kgEntities('Worker'))
+      .mockResolvedValueOnce(kgEntities('Worker'))
+      .mockResolvedValueOnce(kgEntities('Sidekiq'));
+    configureMemoryKg({ enabled: true, complete: () => complete });
+    const { memory } = await capture('the queue worker retries failed jobs');
+    await awaitMemoryKg();
+    editMemory(memory.id, {
+      title: 'Sidekiq 重试',
+      content: 'the queue worker retries failed jobs',
+    });
+    await awaitMemoryKg();
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(complete.mock.calls[1]?.[1]).toContain('Sidekiq 重试');
+    expect(linkedEntities(memory.id)).toEqual(['Sidekiq']);
+    configureMemoryKg({ enabled: false, complete: null });
+  });
 });

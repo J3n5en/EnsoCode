@@ -48,6 +48,8 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const fontFamily = useSettingsStore((s) => s.terminalFontFamily);
   const fontSize = useSettingsStore((s) => s.terminalFontSize);
+  const fontWeight = useSettingsStore((s) => s.terminalFontWeight);
+  const fontWeightBold = useSettingsStore((s) => s.terminalFontWeightBold);
   const bgImageEnabled = useEffectiveBackground() !== null;
   const bgImageEnabledRef = useRef(bgImageEnabled);
   bgImageEnabledRef.current = bgImageEnabled;
@@ -71,6 +73,8 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
         theme: resolveTerminalTheme(settings.terminalTheme, bgImageEnabledRef.current),
         fontFamily: settings.terminalFontFamily,
         fontSize: settings.terminalFontSize,
+        fontWeight: settings.terminalFontWeight,
+        fontWeightBold: settings.terminalFontWeightBold,
       });
       if (!instance.opened) {
         raf = requestAnimationFrame(tryAttach);
@@ -96,8 +100,6 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
       observer.observe(wrapper);
     };
     // 首次测量前加载图标，避免 xterm 缓存缺字时的错误宽度。
-    //
-    // Load icons before the first measurement so xterm does not cache missing-glyph widths.
     void document.fonts.load('14px "Enso Nerd Symbols"', '\uE0B0').then(tryAttach, (error) => {
       console.warn('Failed to load terminal icon font', error);
       tryAttach();
@@ -126,9 +128,11 @@ export function TerminalView({ termId, conversationId, projectId, onTitle }: Ter
     updateTerminalAppearance(
       resolveTerminalTheme(terminalTheme, bgImageEnabled),
       fontFamily,
-      fontSize
+      fontSize,
+      fontWeight,
+      fontWeightBold
     );
-  }, [terminalTheme, fontFamily, fontSize, bgImageEnabled]);
+  }, [terminalTheme, fontFamily, fontSize, fontWeight, fontWeightBold, bgImageEnabled]);
 
   const findNext = useCallback(
     (query: string, options?: Parameters<typeof findInTerminal>[3]) =>

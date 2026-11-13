@@ -29,6 +29,35 @@ describe('mapScreenshotPoint', () => {
     ]);
     expect(mapScreenshotPoint(frames, 'w1', 10, 5)).toEqual({ screenX: 60, screenY: 90 });
   });
+
+  const frame100x50 = () =>
+    new Map([
+      [
+        'w1',
+        {
+          target: 'w1',
+          width: 100,
+          height: 50,
+          sourceWidth: 200,
+          sourceHeight: 100,
+          originX: 40,
+          originY: 80,
+        },
+      ],
+    ]);
+
+  // 审计发现：只检查是否为有限数，100000、1e9 这样的坐标原样映射到屏幕，
+  // 后台拖拽按 12px 插值时点数和耗时随之暴涨（1e9 时主进程 OOM）
+  it('坐标远离最近截图时拒绝，不把离谱的数映射到屏幕', () => {
+    expect(() => mapScreenshotPoint(frame100x50(), 'w1', 100_000, 10)).toThrow(FrameError);
+  });
+
+  it('略出截图边缘的坐标照常映射：拖拽终点、拖窗口边缘可能落在目标窗口外', () => {
+    expect(mapScreenshotPoint(frame100x50(), 'w1', -50, 75)).toEqual({
+      screenX: -60,
+      screenY: 230,
+    });
+  });
 });
 
 describe('scaleCaptureSize', () => {

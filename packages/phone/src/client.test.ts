@@ -4,6 +4,7 @@ import {
   openFrame,
   type PairedDevice,
   type PhoneToHost,
+  sealFrame,
 } from '@enso/pair';
 import { emptyGuestView } from '@shared/pair/guestProjection';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,8 +19,9 @@ vi.mock('./stubs/settings-store', () => ({
 }));
 vi.mock('@enso/pair', async (original) => ({
   ...(await original<typeof import('@enso/pair')>()),
-  sealFrame: async (_key: unknown, payload: unknown) =>
-    new TextEncoder().encode(JSON.stringify(payload)),
+  sealFrame: vi.fn(async (_key: unknown, payload: unknown) =>
+    new TextEncoder().encode(JSON.stringify(payload))
+  ),
   openFrame: vi.fn(async (_key: unknown, frame: Uint8Array) =>
     JSON.parse(new TextDecoder().decode(frame))
   ),
@@ -55,6 +57,37 @@ class Socket {
     this.readyState = 3;
     this.onclose?.({ code, reason });
   }
+}
+
+/** 原样收发二进制帧：明文帧模型带 nonce 头，不能按 JSON 解析 */
+class RawSocket extends Socket {
+  raw: Uint8Array[] = [];
+  override send(frame: ArrayBuffer) {
+    this.raw.push(new Uint8Array(frame));
+  }
+  deliver(frame: Uint8Array) {
+    this.onmessage?.({ data: frame.slice().buffer });
+  }
+}
+
+/**
+ * 明文帧：1 字节版本 + 12 字节 nonce + JSON，与真实密文帧同布局。
+ * 防重放只看 nonce 与载荷里的 replay 戳，换成明文后不依赖 WebCrypto 的异步时序。
+ */
+async function plainSeal(
+  _key: Uint8Array,
+  payload: unknown,
+  nonce: Uint8Array = crypto.getRandomValues(new Uint8Array(12))
+): Promise<Uint8Array> {
+  const body = new TextEncoder().encode(JSON.stringify(payload));
+  const frame = new Uint8Array(13 + body.length);
+  frame[0] = 1;
+  frame.set(nonce, 1);
+  frame.set(body, 13);
+  return frame;
+}
+async function plainOpen(_key: Uint8Array, frame: Uint8Array): Promise<unknown> {
+  return JSON.parse(new TextDecoder().decode(frame.subarray(13)));
 }
 
 const device: PairedDevice = {
@@ -102,7 +135,7 @@ function stubDirectPeer(): DirectPeer {
   };
 }
 
-function liveDirectPeer() {
+function liveDirectPeer(onSend: (bytes: Uint8Array) => void = () => {}) {
   let onOpen = (): void => {};
   let onMessage = (_bytes: Uint8Array): void => {};
   const peer: DirectPeer = {
@@ -120,7 +153,10 @@ function liveDirectPeer() {
       return () => {};
     },
     onClose: () => () => {},
-    send: () => true,
+    send: (bytes) => {
+      onSend(bytes);
+      return true;
+    },
     close() {},
   };
   return {
@@ -599,6 +635,18 @@ describe('PairClient 缓存与续传', () => {
     expect(socket.sent.filter((item) => item.type === 'subscribe')).toHaveLength(2);
   });
 
+  // 真实场景：电脑重连中继时新连接顶替半开旧连接，中继只发 host-online、不发 host-offline；
+  // host 进房已清空本设备订阅，手机不重新进房则正在看的会话正文冻结
+  it('host 重新进房只来 host-online 时也重新 snapshot/subscribe', async () => {
+    const socket = await start();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+    await settle();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+    await settle();
+    expect(socket.sent.filter((item) => item.type === 'snapshot')).toHaveLength(2);
+    expect(socket.sent.filter((item) => item.type === 'subscribe')).toHaveLength(2);
+  });
+
   it('后台超过阈值回前台立即换 socket，不等 ping', async () => {
     const socket = await start();
     client.conceal();
@@ -681,6 +729,72 @@ describe('PairClient 缓存与续传', () => {
     expect(socket.sent.some((item) => item.type === 'direct-close')).toBe(true);
   });
 
+  describe('中继重连与防重放', () => {
+    afterEach(() => {
+      vi.mocked(sealFrame).mockReset();
+      vi.mocked(openFrame).mockReset();
+    });
+
+    // 真实场景：同局域网已直连，中继宕机/外网断时手机反复重连中继；每次重连尝试都重置防重放，
+    // 经直连发的 prompt/审批退回随机 nonce 且不带回声，仍锁定旧前缀的 host 静默丢弃，界面却显示在线
+    it('中继重连期间经直连发的命令仍被已锁定的 host 接收，重放旧帧仍被拒', async () => {
+      const pair = await vi.importActual<typeof import('@enso/pair')>('@enso/pair');
+      vi.mocked(sealFrame).mockImplementation(plainSeal);
+      vi.mocked(openFrame).mockImplementation(plainOpen);
+      const key = new Uint8Array(32);
+      const typeOf = async (frame: Uint8Array) =>
+        ((await plainOpen(key, frame)) as { type: string }).type;
+      const host = pair.createFrameReplay(plainSeal, plainOpen);
+      const directSent: Uint8Array[] = [];
+      const live = liveDirectPeer((bytes) => directSent.push(bytes));
+      client.close();
+      client = new PairClient(device, events, () => live.peer, cache);
+      vi.stubGlobal('WebSocket', RawSocket);
+      client.connect();
+      await settle();
+      const socket = Socket.all[0] as RawSocket;
+      socket.open();
+      socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+      await settle();
+
+      // 握手：host 从进房 snapshot 学到质询；手机收到带回声的 host-info 后回 replay-hello，双方锁定
+      let opened = 0;
+      const hostReadsRelay = async () => {
+        for (const frame of socket.raw.slice(opened)) await host.open(key, frame);
+        opened = socket.raw.length;
+      };
+      await hostReadsRelay();
+      socket.deliver(
+        await host.seal(key, { type: 'host-info', capabilities: ['direct-v1'], iceServers: [] })
+      );
+      await settle();
+      let hello: Uint8Array | undefined;
+      for (const frame of socket.raw) if ((await typeOf(frame)) === 'replay-hello') hello = frame;
+      if (!hello) throw new Error('missing replay-hello');
+      await hostReadsRelay();
+      expect(host.takeHello()).toBe(true);
+      socket.deliver(await host.seal(key, { type: 'replay-hello' }));
+      live.fireOpen();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await settle();
+      expect(client.transport()).toBe('direct');
+
+      socket.close(1006);
+      await vi.advanceTimersByTimeAsync(0);
+      await settle();
+      expect(Socket.all).toHaveLength(2);
+      client.send({ type: 'prompt', sessionId: 's', text: 'hi' });
+      await settle();
+      const chunk = directSent.filter((bytes) => bytes.byteLength > 1).at(-1);
+      if (!chunk) throw new Error('missing direct frame');
+      const prompt = chunk.subarray(1);
+      expect(await host.open(key, prompt)).toMatchObject({ type: 'prompt', text: 'hi' });
+      // 防重放不能被削弱：同一帧再到、握手阶段的旧帧再到都要丢
+      expect(await host.open(key, prompt)).toBeUndefined();
+      expect(await host.open(key, hello)).toBeUndefined();
+    });
+  });
+
   it('host-info 声明 voiceInput 才可用，主机离线即不可用', async () => {
     const onVoiceInput = vi.fn();
     events.onVoiceInput = onVoiceInput;
@@ -722,6 +836,19 @@ describe('PairClient 缓存与续传', () => {
     socket.receive({ type: 'host-info', hostname: 'h', appVersion: '1' });
     await settle();
     expect(onRemoteDesktop).toHaveBeenLastCalledWith(false);
+  });
+
+  // 中继单帧上限 1MB：CF 版超限静默丢弃、Go 版直接断连；手机发大图 prompt 时要本地拦下并回报
+  it('超过中继单帧上限的命令本地拦下，不发出并回报上层', async () => {
+    const onCommandRejected = vi.fn();
+    client.close();
+    client = new PairClient(device, { ...events, onCommandRejected }, null, cache);
+    const socket = await start();
+    const before = socket.sent.length;
+    client.send({ type: 'prompt', sessionId: 's', text: 'x'.repeat(1_100_000) });
+    await settle();
+    expect(socket.sent).toHaveLength(before);
+    expect(onCommandRejected).toHaveBeenCalledWith('prompt', expect.any(String));
   });
 
   it('写命令被 host 以只读拒绝时回报给上层', async () => {

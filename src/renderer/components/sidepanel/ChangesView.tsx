@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CODE_THEME, ensureHighlighter } from '@/components/chat/codeHighlighter';
+import { toWorkspaceRelativePath } from '@/components/chat/markdownLinks';
 import { useCodeHighlightOptions } from '@/hooks/useColorScheme';
 import { useI18n } from '@/i18n';
 import { buildChangeItems, type ChangeItemMemo } from '@/lib/changesItems';
@@ -54,13 +55,6 @@ const NO_FILES: {
   snapshots: {},
 };
 const EMPTY_MESSAGES: ProjectedMessage[] = [];
-
-function resolvePath(root: string | undefined, rel: string): string | null {
-  if (!rel) return null;
-  if (rel.startsWith('/') || /^[A-Za-z]:[\\/]/.test(rel)) return rel;
-  if (!root) return null;
-  return `${root.replace(/[/\\]+$/, '')}/${rel}`;
-}
 
 export function ChangesView({
   conversationId,
@@ -174,10 +168,13 @@ export function ChangesView({
     const paths = [...new Set(tools.map((tool) => tool.path))];
     let alive = true;
     void Promise.all(
-      paths.map(async (rel) => {
-        const abs = resolvePath(root, rel);
-        const text = abs ? await window.electronAPI.files.read(abs) : null;
-        return [rel, text] as const;
+      paths.map(async (path) => {
+        // Main 只收会话标识 + 工作区相对路径（按会话权威 cwd 校验后读）；工作区外的文件不读
+        const rel = toWorkspaceRelativePath(path, root);
+        const text = rel
+          ? await window.electronAPI.files.read({ conversationId, projectId, rel })
+          : null;
+        return [path, text] as const;
       })
     ).then((entries) => {
       if (!alive) return;
@@ -187,7 +184,7 @@ export function ChangesView({
     return () => {
       alive = false;
     };
-  }, [mode, root, tools, workspaceMigrating, workspaceRevision]);
+  }, [conversationId, mode, projectId, root, tools, workspaceMigrating, workspaceRevision]);
 
   const allResult = useMemo(
     () => (snapshots ? aggregateSessionChanges({ tools, snapshots, currentByPath }) : NO_FILES),

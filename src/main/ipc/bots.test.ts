@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { HostToPhone } from '@enso/pair';
+import { botBrowserKey } from '@shared/bots/browser';
 import { IPC_CHANNELS } from '@shared/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PairBotPort } from '../services/pairHost';
@@ -777,6 +778,43 @@ describe('bots IPC', () => {
     await call(IPC_CHANNELS.BOT_SET_AVATAR, { botId: alice, image: png });
     expect((await call(IPC_CHANNELS.BOT_DELETE, { botId: alice })).ok).toBe(true);
     expect(existsSync(file)).toBe(false);
+  });
+
+  // 审计 J8：discardBot 连带删私聊，但没做 BOT_CHAT_DELETE 里的粘贴文件与聊天浏览器清理
+  it('删除成员连带删掉私聊时清理该私聊的粘贴文件并关闭聊天浏览器，别的成员的私聊不受影响', async () => {
+    const hooks = await import('../services/desktopHooks');
+    const closeBrowser = vi.fn(async (_key: string) => {});
+    hooks.installDesktopHooks({ bot: { closeBrowser, notifyChat: async () => {} } });
+    const direct = async (botId: string) =>
+      (
+        (
+          await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+            kind: 'direct',
+            members: [botId],
+            workspace: { kind: 'member-home' },
+          })
+        ).chat as { id: string }
+      ).id;
+    // 粘贴文件落在 pasted-text/bot-<chatId>/<随机目录>/pasted-text.txt，按聊天归属的是外两层目录
+    const pasteDir = async (chatId: string) => {
+      const saved = await call(IPC_CHANNELS.BOT_CHAT_SAVE_PASTED_TEXT, {
+        chatId,
+        text: 'x'.repeat(50_000),
+      });
+      return dirname(dirname(saved.path as string));
+    };
+    const alice = await createBot('Alice');
+    const bob = await createBot('Bob');
+    const aliceChat = await direct(alice);
+    const bobChat = await direct(bob);
+    const aliceDir = await pasteDir(aliceChat);
+    const bobDir = await pasteDir(bobChat);
+
+    expect(await call(IPC_CHANNELS.BOT_DELETE, { botId: alice })).toEqual({ ok: true });
+    expect(existsSync(aliceDir)).toBe(false);
+    expect(closeBrowser).toHaveBeenCalledWith(botBrowserKey(aliceChat));
+    expect(existsSync(bobDir)).toBe(true);
+    expect(closeBrowser).not.toHaveBeenCalledWith(botBrowserKey(bobChat));
   });
 
   it('私聊发送：Main 组装人设并在成员 home 里 spawn，之后 prompt', async () => {
@@ -2087,6 +2125,21 @@ describe('群聊新对话与克隆', () => {
     expect(services.chats.get(copy.id)).toBeDefined();
     expect(existsSync(services.chats.workspaceDir(copy.id))).toBe(true);
   });
+
+  // 审计：群主归档后克隆回退成 bossBotId: null，而群必须有在成员里的群主，克隆必然失败
+  it('克隆：原群主已归档时由第一个可用成员接任群主，与新建群移出群主的规则一致', async () => {
+    const { alice, bob, carol, chatId } = await team();
+    expect(await call(IPC_CHANNELS.BOT_ARCHIVE, { botId: alice, archived: true })).toMatchObject({
+      ok: true,
+    });
+
+    expect(await call(IPC_CHANNELS.BOT_CHAT_CLONE, { chatId, title: 'team 的副本' })).toMatchObject(
+      {
+        ok: true,
+        chat: { members: [bob, carol], bossBotId: bob },
+      }
+    );
+  });
 });
 
 describe('群话题', () => {
@@ -2497,4 +2550,58 @@ describe('私聊切换对话', () => {
       })
     ).toMatchObject({ ok: false });
   });
+});
+
+describe('私聊新对话进行中', () => {
+  // 审计 J6：开着记忆提炼点「新对话」，提炼完成前发消息 / 重试 / 回退。stopTurn 不结束旧会话，
+  // 操作落进旧会话并回 ok，随后被 retireSession 取消，新会话里什么都没有
+  it.each(['发送', '重试', '回退'] as const)(
+    '提炼旧会话期间的%s返回 session-busy，不投进即将结束的旧会话',
+    async (action) => {
+      const alice = await createBot('Alice');
+      const created = await call(IPC_CHANNELS.BOT_CHAT_CREATE, {
+        kind: 'direct',
+        members: [alice],
+        workspace: { kind: 'member-home' },
+      });
+      const chatId = (created.chat as { id: string }).id;
+      const { getBotServices, retryBotChat, rewindBotChat } = await import('./bots');
+      const services = getBotServices()!;
+      const old = services.host.ensureSession(chatId, alice);
+      if (!old.ok) throw new Error(old.error);
+      const runtime = (services.host as unknown as { deps: { runtime: Record<string, unknown> } })
+        .deps.runtime;
+      const retry = vi.fn((..._args: unknown[]) => ({ ok: true }));
+      const rewind = vi.fn((..._args: unknown[]) => ({ ok: true }));
+      runtime.retry = retry;
+      runtime.rewind = rewind;
+      let finishDistill!: () => void;
+      const distill = vi.spyOn(services.memory, 'distill').mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            finishDistill = resolve;
+          })
+      );
+      const reset = call(IPC_CHANNELS.BOT_CHAT_NEW_SESSION, { chatId });
+      await vi.waitFor(() => expect(distill).toHaveBeenCalled());
+
+      const result =
+        action === '发送'
+          ? await call(IPC_CHANNELS.BOT_SEND, { chatId, text: '提炼期间的消息', deliveryId: 'd1' })
+          : action === '重试'
+            ? await retryBotChat(services, { chatId })
+            : await rewindBotChat(services, { chatId, entryId: 'u1' }, async () => [
+                { id: 'u1', userAt: 1 },
+              ]);
+      expect(result).toEqual({ ok: false, error: 'session-busy' });
+      expect(mocks.promptSession).not.toHaveBeenCalled();
+      expect(retry).not.toHaveBeenCalled();
+      expect(rewind).not.toHaveBeenCalled();
+
+      finishDistill();
+      const fresh = await reset;
+      expect(fresh).toMatchObject({ ok: true });
+      expect(fresh.conversationId).not.toBe(old.conversationId);
+    }
+  );
 });

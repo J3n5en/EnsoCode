@@ -815,6 +815,7 @@ export function BrowserAnnotateStageOverlay({
   onCloseOpenPin,
   onSendQueue,
   onStrokeStateChange,
+  active,
 }: {
   tabId: string;
   conversationId: string;
@@ -830,6 +831,8 @@ export function BrowserAnnotateStageOverlay({
   onCloseOpenPin: () => void;
   onSendQueue: (subsetIds?: ReadonlySet<string>) => void;
   onStrokeStateChange: (active: boolean) => void;
+  /** 该浏览器正显示且激活：window 级快捷键只在此时接管 */
+  active: boolean;
 }) {
   const { t } = useI18n();
   const sendImmediately = useDesignAnnotationsStore((s) => s.annotateSendImmediately);
@@ -871,7 +874,7 @@ export function BrowserAnnotateStageOverlay({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchSwitchId = useId();
 
-  // Reset card state when target draft or openPin changes
+  // 目标草稿或 openPin 变化时重置卡片状态
   const activeTargetKey = openPin ? `pin:${openPin.id}` : draftPick ? 'draft' : 'none';
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when active target identity changes
   useEffect(() => {
@@ -884,7 +887,7 @@ export function BrowserAnnotateStageOverlay({
     window.setTimeout(() => textareaRef.current?.focus(), 10);
   }, [activeTargetKey]);
 
-  // Sync queued CSS edits to guest page whenever queue changes
+  // 队列变化时把排队中的 CSS 修改同步到 guest 页面
   useEffect(() => {
     const queued = queuedCssEditsOf(allNotes.filter((n) => n.browserId === tabId));
     void window.electronAPI.browser.previewDesignCss(tabId, 'queue', queued);
@@ -917,9 +920,10 @@ export function BrowserAnnotateStageOverlay({
     setCssInspectorOpen(true);
   }, [singleElement, cssInspectorOpen, tabId, initialSplit.css, t]);
 
-  // Undo/Redo for region markup (⌘Z / ⌘⇧Z)
+  // Region 标注的撤销/重做（⌘Z / ⌘⇧Z）
   useEffect(() => {
-    if (!draftPick?.region) return;
+    // 隐藏的 tab / 会话里留着的草稿不能抢别处的撤销键
+    if (!active || !draftPick?.region) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const mod = IS_MAC ? event.metaKey : event.ctrlKey;
       if (!mod || event.altKey || event.key.toLowerCase() !== 'z') return;
@@ -955,9 +959,9 @@ export function BrowserAnnotateStageOverlay({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [draftPick, markupTool, commentText.length, onDraftPickChange]);
+  }, [active, draftPick, markupTool, commentText.length, onDraftPickChange]);
 
-  // Keyboard modifier listeners during active region resize drag
+  // Region 调整大小拖拽期间监听键盘修饰键
   useEffect(() => {
     if (!regionDrag || !draftPick) return;
     const bounds: DesignTopLeftRect = {
@@ -1225,7 +1229,7 @@ export function BrowserAnnotateStageOverlay({
 
   const currentRegion = regionDrag ? regionDrag.rect : (draftPick?.region ?? null);
 
-  // Compute card position
+  // 计算卡片位置
   const cardWidth = Math.min(320, Math.max(240, stageSize.width - 16));
   const estimatedCardHeight = cssInspectorOpen ? 360 : 148;
   const baseCardPos = useMemo(() => {
@@ -1291,7 +1295,7 @@ export function BrowserAnnotateStageOverlay({
         if (e.target === e.currentTarget) requestCancel();
       }}
     >
-      {/* Region static frame + dim mask + 8-way resize + SVG Freedraw canvas */}
+      {/* Region 静态边框 + 暗色遮罩 + 8 向调整 + SVG Freedraw 画布 */}
       {draftPick && currentRegion && (
         <>
           {frameSrc && (
@@ -1457,7 +1461,7 @@ export function BrowserAnnotateStageOverlay({
             }}
             className="absolute box-border border-2 border-[#3a96dd] border-dashed shadow-lg"
           >
-            {/* SVG Freedraw Layer */}
+            {/* SVG Freedraw 图层 */}
             <svg
               role="img"
               aria-label="Draw on screenshot region"
@@ -1496,7 +1500,7 @@ export function BrowserAnnotateStageOverlay({
                 ))}
             </svg>
 
-            {/* 8 Resize Corner/Edge Indicators */}
+            {/* 8 个调整大小的角/边指示点 */}
             {markupTool === null && (
               <>
                 <span className="pointer-events-none absolute -top-1.5 -left-1.5 h-2.5 w-2.5 rounded-xs border border-[#3a96dd] bg-white shadow-2xs" />
@@ -1509,13 +1513,13 @@ export function BrowserAnnotateStageOverlay({
         </>
       )}
 
-      {/* Floating Note Editor Card (Cursor `ai` / `Mi` / `zr`) */}
+      {/* 浮动标注编辑卡片（Cursor `ai` / `Mi` / `zr`） */}
       <div
         style={{ left: cardLeft, top: cardTop, width: cardWidth }}
         onMouseDown={(e) => e.stopPropagation()}
         className="glass-browser-design-input absolute z-40 flex flex-col overflow-hidden rounded-2xl border border-border/80 bg-popover/95 text-popover-foreground shadow-[0_14px_38px_-8px_rgba(0,0,0,0.32),0_4px_14px_-2px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-shadow duration-150 focus-within:border-[#3a96dd]/55 focus-within:ring-2 focus-within:ring-[#3a96dd]/15 dark:border-white/12"
       >
-        {/* Draggable Header with Element/Region Chips & Actions */}
+        {/* 可拖拽的头部：Element/Region 标签与操作按钮 */}
         <div
           onPointerDown={(e) => {
             if (
@@ -1686,7 +1690,7 @@ export function BrowserAnnotateStageOverlay({
           </div>
         </div>
 
-        {/* Attached Extra Images Row */}
+        {/* 附加图片行 */}
         {extraImages.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-1.5">
             {extraImages.map((img) => (
@@ -1712,7 +1716,7 @@ export function BrowserAnnotateStageOverlay({
           </div>
         )}
 
-        {/* Comment Textarea */}
+        {/* 评论输入框 */}
         <div className="px-3 py-1.5">
           <textarea
             ref={textareaRef}
@@ -1815,7 +1819,7 @@ export function BrowserAnnotateStageOverlay({
           )}
         </div>
 
-        {/* CSS Inspector Panel */}
+        {/* CSS 检查器面板 */}
         {cssInspectorOpen && cssStage && singleElement && (
           <CssInspectorPanel
             stage={cssStage}
@@ -1831,7 +1835,7 @@ export function BrowserAnnotateStageOverlay({
           />
         )}
 
-        {/* Unsaved Discard Confirmation Notice */}
+        {/* 放弃未保存内容的确认提示 */}
         {warningShown && (
           <div
             data-design-input-notice=""
@@ -1867,7 +1871,7 @@ export function BrowserAnnotateStageOverlay({
           </div>
         )}
 
-        {/* Footer Bar: Attach image, Batch edits toggle, Submit button */}
+        {/* 底栏：附加图片、批量编辑开关、提交按钮 */}
         <div className="flex items-center justify-between gap-2 border-t border-border/50 bg-muted/20 px-3 py-2">
           <div className="flex items-center gap-2.5">
             <input
@@ -1950,6 +1954,7 @@ export function useBrowserAnnotateSession({
   url,
   designMode,
   onDesignModeState,
+  active,
 }: {
   tabId: string;
   conversationId: string;
@@ -1958,6 +1963,8 @@ export function useBrowserAnnotateSession({
   onDesignModeState: (
     next: Awaited<ReturnType<typeof window.electronAPI.browser.setDesignMode>>
   ) => void;
+  /** 该浏览器正显示且激活：window 级快捷键只在此时接管 */
+  active: boolean;
 }) {
   const { t } = useI18n();
   const [drawing, setDrawing] = useState(false);
@@ -1974,7 +1981,7 @@ export function useBrowserAnnotateSession({
   );
   const lastUrlRef = useRef(url);
 
-  // Sync URL and register session in store
+  // 同步 URL 并在 store 中登记会话
   useEffect(() => {
     if (url) useDesignAnnotationsStore.getState().setBrowserUrl(tabId, url);
     if (lastUrlRef.current !== url) {
@@ -2003,7 +2010,7 @@ export function useBrowserAnnotateSession({
     [tabId, onDesignModeState]
   );
 
-  // Sync annotation pins to guest page whenever annotations or URL or designMode change
+  // 标注、URL 或 designMode 变化时，把标注图钉同步到 guest 页面
   useEffect(() => {
     if (!designMode || !url) return;
     const pageKey = designModePageKey(url);
@@ -2013,7 +2020,7 @@ export function useBrowserAnnotateSession({
     void window.electronAPI.browser.setAnnotationPins(tabId, pageKey, matching);
   }, [designMode, url, annotations, tabId]);
 
-  // Handle switching markup tool when an element is selected -> convert element bounding box into region
+  // 选中元素时切换标注工具 -> 把元素包围盒转换成 region
   const handleMarkupToolChange = useCallback(
     (nextTool: RegionMarkupTool | null) => {
       setMarkupTool(nextTool);
@@ -2040,7 +2047,7 @@ export function useBrowserAnnotateSession({
     [draftPick]
   );
 
-  // Subscribe to BrowserDesignModeEvent from Main
+  // 订阅来自 Main 的 BrowserDesignModeEvent
   useEffect(() => {
     return window.electronAPI.browser.onDesignMode((event: BrowserDesignModeEvent) => {
       if (event.tabId !== tabId) return;
@@ -2170,7 +2177,7 @@ export function useBrowserAnnotateSession({
     [tabId, designMode, setDesignMode, t]
   );
 
-  // Send annotations queue (optimistic remove + rollback on failure, matching Cursor `Tr()`)
+  // 发送标注队列（乐观移除 + 失败回滚，与 Cursor 的 `Tr()` 一致）
   const sendQueue = useCallback(
     (subsetIds?: ReadonlySet<string>) => {
       const store = useDesignAnnotationsStore.getState();
@@ -2205,8 +2212,10 @@ export function useBrowserAnnotateSession({
     [conversationId, designMode, setDesignMode, t]
   );
 
-  // Global shortcut ⌘⇧D & layered Escape key handling (Cursor `qo`)
+  // 全局快捷键 ⌘⇧D 与分层 Escape 键处理（Cursor `qo`）
   useEffect(() => {
+    // 不可见的浏览器（隐藏会话的 dock、未选中的 tab）不注册：捕获阶段的 stopPropagation 会截走别处的按键
+    if (!active) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const mod = IS_MAC ? event.metaKey : event.ctrlKey;
       if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
@@ -2282,6 +2291,7 @@ export function useBrowserAnnotateSession({
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [
+    active,
     designMode,
     queueOpen,
     markupStrokeActive,

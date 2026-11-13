@@ -137,6 +137,57 @@ describe('headless stall watchdog', () => {
     expect(agent.abort).not.toHaveBeenCalled();
   });
 
+  // 真实场景：托盘模式计数只在回合结束归零，审批点完后模型再卡住，看门狗仍以为在等人
+  it('审批处理完后生成再次卡住，看门狗照常中止', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    handlePairHeadlessAgentEvent(status('running'));
+    handlePairHeadlessAgentEvent(event({ type: 'approval-request', request: { requestId: 'a1' } }));
+    handlePairHeadlessAgentEvent(event({ type: 'approval-resolved', requestId: 'a1' }));
+    vi.advanceTimersByTime(61_000);
+    expect(agent.abort).toHaveBeenCalledTimes(1);
+  });
+
+  // 同上，提问回答完也要从挂起里移除
+  it('提问回答完后生成再次卡住，看门狗照常中止', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    handlePairHeadlessAgentEvent(status('running'));
+    handlePairHeadlessAgentEvent(event({ type: 'ask-request', ask: { requestId: 'q1' } }));
+    handlePairHeadlessAgentEvent(event({ type: 'ask-resolved', requestId: 'q1' }));
+    vi.advanceTimersByTime(61_000);
+    expect(agent.abort).toHaveBeenCalledTimes(1);
+  });
+
+  // 真实场景：代审转真人会用同一 requestId 再发 approval-request，按次计数会多算一条
+  it('同一审批从代审转真人重发，处理完一次就不再算挂起', () => {
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    handlePairHeadlessAgentEvent(status('running'));
+    handlePairHeadlessAgentEvent(
+      event({ type: 'approval-request', request: { requestId: 'a1', phase: 'reviewing' } })
+    );
+    handlePairHeadlessAgentEvent(event({ type: 'approval-request', request: { requestId: 'a1' } }));
+    handlePairHeadlessAgentEvent(event({ type: 'approval-resolved', requestId: 'a1' }));
+    vi.advanceTimersByTime(61_000);
+    expect(agent.abort).toHaveBeenCalledTimes(1);
+  });
+
+  // 托盘接管时目录只带挂起计数、没有 requestId：逐条处理完才恢复计时，不能处理一条就清零
+  it('接管前已挂起的审批逐条处理完才恢复计时', () => {
+    mocks.catalog = [
+      { id: SID, title: '', status: 'running', pendingApprovalCount: 2 } as unknown as CatalogEntry,
+    ];
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    handlePairHeadlessAgentEvent(event({ type: 'approval-resolved', requestId: 'old-1' }));
+    vi.advanceTimersByTime(600_000);
+    expect(agent.abort).not.toHaveBeenCalled();
+    handlePairHeadlessAgentEvent(event({ type: 'approval-resolved', requestId: 'old-2' }));
+    vi.advanceTimersByTime(61_000);
+    expect(agent.abort).toHaveBeenCalledTimes(1);
+  });
+
   it('gives up after repeated stalls', () => {
     const agent = fakeAgent();
     setPairHeadless(true);

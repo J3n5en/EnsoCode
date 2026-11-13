@@ -21,6 +21,7 @@ import {
   useBrowserAnnotateSession,
 } from './BrowserAnnotateOverlay';
 import { isCoveredBy, overlayBoxes } from './overlayCover';
+import { usePanelVisibility } from './panelVisibility';
 
 const EMPTY: BrowserTabState = {
   tabId: null,
@@ -124,6 +125,9 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
   );
   const isActiveConversation = useSessionsStore((s) => s.activeId === dockConversationId);
   const hostVisible = active ?? (sidebarOpen && isActiveConversation);
+  // 标注快捷键只交给屏幕上那一个浏览器：Bot 面板由宿主传 active，Code 侧栏看所在 dock 与 tab 是否激活
+  const panelVisibility = usePanelVisibility();
+  const hotkeysActive = active ?? panelVisibility.active;
   const [state, setState] = useState<BrowserTabState>(EMPTY);
   const [address, setAddress] = useState('');
   const [editing, setEditing] = useState(false);
@@ -155,6 +159,7 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
     url: state.url,
     designMode: state.designMode,
     onDesignModeState: setState,
+    active: hotkeysActive,
   });
 
   useEffect(() => {
@@ -449,6 +454,7 @@ function DesktopBrowserView({ conversationId, panelApi, active }: BrowserViewPro
               onCloseOpenPin={annotate.closeOpenPin}
               onSendQueue={annotate.sendQueue}
               onStrokeStateChange={annotate.setMarkupStrokeActive}
+              active={hotkeysActive}
             />
           )}
           {!state.url.startsWith('http') && !state.url.startsWith('file:') && (

@@ -162,7 +162,7 @@ if (!gotTheLock) {
     }
     installAppMenu(readLocale());
 
-    // Default open/close DevTools by F12 in development
+    // 开发环境下默认用 F12 打开/关闭 DevTools
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window);
     });

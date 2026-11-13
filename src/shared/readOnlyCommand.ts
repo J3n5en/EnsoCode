@@ -72,17 +72,21 @@ const GIT_READ_SUBCOMMANDS = new Set([
   'branch',
   'tag',
 ]);
-/** 各程序里会写文件 / 转执行的参数，命中即非只读 */
+/**
+ * 各程序里会写文件 / 转执行的参数，命中即非只读。
+ * 短参数按组合（-uo）与粘连值（-fx.awk）匹配：写字母出现在组合里任意位置都算，宁可误判为写。
+ */
 const WRITE_FLAGS: Record<string, RegExp> = {
   sed: /^(-[a-zA-Z]*i|--in-place)|\/[a-zA-Z]*e[a-zA-Z]*['"]?$|^['"]?e\b/,
-  awk: /system\s*\(|^-(f|i|E)$|^--(file|include|exec)/,
-  yq: /^(-i|--inplace)$/,
-  sort: /^(-o|--output|--compress-program)/,
+  awk: /^-[a-zA-Z]*[fiE]|^--(file|include|exec)/,
+  // -s/--split-exp 按表达式把结果写成多个文件
+  yq: /^-[a-zA-Z]*[is]|^--(inplace|split-exp)/,
+  sort: /^-[a-zA-Z]*o|^--(output|compress-program)/,
   find: /^-(exec|execdir|ok|okdir|delete|fprint|fprintf|fprint0|fls)$/,
   git: /^--(output|ext-diff|textconv|filters|exec-path)/,
   rg: /^--pre($|=)/,
-  fd: /^(-x|-X|--exec|--exec-batch)/,
-  fdfind: /^(-x|-X|--exec|--exec-batch)/,
+  fd: /^-[a-zA-Z0-9]*[xX]|^--exec/,
+  fdfind: /^-[a-zA-Z0-9]*[xX]|^--exec/,
   ag: /^--pager/,
   bat: /^--pager/,
   tree: /^-o$|^--output/,
@@ -98,6 +102,8 @@ const GIT_WRITE_ARGS: Record<string, RegExp> = {
   reflog: /^(expire|delete)$/,
   grep: /^(-O|--open-files-in-pager)/,
 };
+/** 带路径的程序只认系统 bin 目录：./scripts/cat 之类可能是工作区里与只读工具同名的脚本 */
+const SYSTEM_BIN_PATH = /^\/(usr\/(local\/)?)?s?bin\/[^/]+$|^\/opt\/homebrew\/bin\/[^/]+$/;
 /** 子命令前允许出现的 git 全局参数；-c / --config-env 可改 pager、diff 驱动转执行 */
 const GIT_SAFE_GLOBAL_FLAGS = new Set(['--no-pager', '-P', '--no-optional-locks']);
 /** 可改变程序行为的环境变量（LESSOPEN、RIPGREP_CONFIG_PATH、GIT_* …）一律不认，只放行语言/显示类 */
@@ -183,9 +189,9 @@ function isReadOnlyGit(tokens: string[]): boolean {
 
 /**
  * 判定一条 bash 命令是否纯只读（ls/rg/cat/git status …）。
- * 精简模式据此把命令折进探索组；Plan 模式据此决定是否免询问放行。
+ * 仅供展示：精简模式据此把命令折进探索组，不参与任何免询问放行（Plan 模式自 4a05088a 起不再用它）。
  * 策略保守（宁可误判为写）：重定向、命令/进程替换、后台 &、写参数、未知程序、
- * 非语言类环境前缀一律判非只读。
+ * 非系统目录的带路径程序、非语言类环境前缀一律判非只读。
  */
 export function isReadOnlyCommand(command: string): boolean {
   const trimmed = command.trim();
@@ -203,6 +209,8 @@ export function isReadOnlyCommand(command: string): boolean {
     const { env, tokens } = splitEnvPrefix(segment);
     if (env.some((e) => !SAFE_ENV.test(e))) return false;
     const program = firstProgram(segment);
+    const head = tokens[0] ?? '';
+    if (head.includes('/') && !SYSTEM_BIN_PATH.test(head)) return false;
     const args = tokens.slice(1);
     if (VERSION_ONLY_PROGRAMS.has(program)) {
       if (args.length !== 1 || !['--version', '-v', '-V'].includes(args[0])) return false;
@@ -211,6 +219,8 @@ export function isReadOnlyCommand(command: string): boolean {
     if (!READ_ONLY_PROGRAMS.has(program)) return false;
     const writeFlag = WRITE_FLAGS[program];
     if (writeFlag && args.some((t) => writeFlag.test(t))) return false;
+    // 按空白切出的 token 会把 `system ("…")` 拆成两段，只能对整段程序文本判断
+    if (program === 'awk' && /system\s*\(/.test(args.join(' '))) return false;
     if (program === 'sed' && !isReadOnlySed(args)) return false;
     if (program === 'git' && !isReadOnlyGit(tokens)) return false;
     // uniq IN OUT：第二个位置参数是输出文件

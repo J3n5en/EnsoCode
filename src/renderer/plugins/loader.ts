@@ -88,6 +88,21 @@ export async function loadPluginRenderer(
   const generation = allocateSlotGeneration();
   const disposers: (() => void)[] = [];
   let disposed = false;
+  // 逐个收回：插件自己的清理函数可能抛错，不能跳过其后的挂点与 clearPluginSlots，
+  // 也不能抛给宿主（宿主在 effect 清理里卸载，没有错误边界兜底会白屏）
+  const release = () => {
+    try {
+      for (const dispose of disposers.splice(0)) {
+        try {
+          dispose();
+        } catch (error) {
+          console.warn(`[plugin] ${pluginId} 渲染模块清理失败`, error);
+        }
+      }
+    } finally {
+      clearPluginSlots(pluginId, generation);
+    }
+  };
   const enso = {
     React: deps.react,
     slots: {
@@ -109,16 +124,14 @@ export async function loadPluginRenderer(
     if (typeof returned === 'function') disposers.push(returned as () => void);
   } catch (error) {
     disposed = true;
-    for (const dispose of disposers.splice(0)) dispose();
-    clearPluginSlots(pluginId, generation);
+    release();
     throw error;
   }
   return {
     dispose() {
       if (disposed) return;
       disposed = true;
-      for (const dispose of disposers.splice(0)) dispose();
-      clearPluginSlots(pluginId, generation);
+      release();
     },
   };
 }

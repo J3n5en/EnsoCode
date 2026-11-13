@@ -774,7 +774,7 @@ export function parsePersistedAnnotations(raw: string | null): {
   }
 }
 
-// --- Marquee State Machine (Cursor electron-main/browser/browser-page/marquee.ts) ---
+// --- 框选状态机（Cursor electron-main/browser/browser-page/marquee.ts）---
 
 export const MARQUEE_DRAG_THRESHOLD = 5;
 export const MARQUEE_AXIS_LOCK_THRESHOLD = 3;
@@ -1001,7 +1001,7 @@ export function finishMarquee(
     : { kind: 'region', rect: { x, y, width, height } };
 }
 
-// --- Region 8-Way Resize & Move Geometry (Cursor browser-element-QNt1jeWe.js) ---
+// --- Region 8 向调整大小与移动的几何计算（Cursor browser-element-QNt1jeWe.js）---
 
 export type RegionResizeHandle = 'move' | 'n' | 's' | 'e' | 'w' | 'ne' | 'sw' | 'nw' | 'se';
 
@@ -1313,7 +1313,7 @@ export function translateRegionMarkup(input: {
   );
 }
 
-// --- Freehand Stroke (perfect-freehand port) & Vector Shapes ---
+// --- 手绘笔迹（perfect-freehand 移植）与矢量图形 ---
 
 const { PI } = Math;
 const FIXED_PI = PI + 1e-4;
@@ -1870,7 +1870,7 @@ export function shapePaths(
   }
 }
 
-// --- Pin Geometry & Card Placement ---
+// --- 图钉几何与卡片定位 ---
 
 export type OffscreenEdge = 'top' | 'bottom' | 'left' | 'right';
 
@@ -2085,7 +2085,7 @@ export function placeFloatingNoteCard(
   return { x, y };
 }
 
-// --- 27 Design CSS Properties, Scrubbing, Staging & Comment Serialization ---
+// --- 27 项设计 CSS 属性、拖动调值、暂存与评论序列化 ---
 
 export interface DesignCssScrubRule {
   min: number;
@@ -2634,7 +2634,7 @@ export function queuedCssEditsOf(
   return out;
 }
 
-// --- Hint Phase, Escape Hierarchy, Familiarity, Frame Ring, Prompt Builder ---
+// --- 提示阶段、Escape 层级、熟悉度、流光边框、提示词构建 ---
 
 export type DesignHintPhase =
   | 'idle'

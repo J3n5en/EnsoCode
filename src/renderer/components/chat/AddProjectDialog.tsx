@@ -198,6 +198,8 @@ export function DirBrowser({
               onChange={(event) => setNewName(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
+                  // 输入法组字中的回车只是确认候选词
+                  if (event.nativeEvent.isComposing) return;
                   event.preventDefault();
                   submitNewFolder();
                 } else if (event.key === 'Escape') {
@@ -309,6 +311,9 @@ export function AddProjectDialog({
   const [afterTrust, setAfterTrust] = React.useState<'submit' | 'browse' | null>(null);
   const [hostKeyRetry, setHostKeyRetry] = React.useState(0);
   const [trusting, setTrusting] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
+  // 递增即作废进行中的连接测试：关闭或重开弹窗后，迟到的成功结果不能再添加项目
+  const submitSeq = React.useRef(0);
   const groupItems = React.useMemo(
     () => [
       { value: '', label: t('Ungrouped') },
@@ -318,6 +323,8 @@ export function AddProjectDialog({
   );
 
   React.useEffect(() => {
+    submitSeq.current += 1;
+    setSubmitting(false);
     if (!open) return;
     setMode('local');
     setPathValue('');
@@ -427,21 +434,31 @@ export function AddProjectDialog({
       onOpenChange(false);
       return;
     }
+    // 测试连接要等网络往返，期间连点或回车不能重复添加
+    if (submitting) return;
+    setSubmitting(true);
     setFormError('');
+    const seq = ++submitSeq.current;
     const connection = connections.find((item) => item.id === sshConnectionId);
-    void window.electronAPI.sshConnections.test(sshConnectionId).then((result) => {
-      if (!result.ok) {
-        const challenge = hostKeyFromSshFailure(result, connection);
-        if (challenge) {
-          setAfterTrust('submit');
-          setHostKey(challenge);
+    void window.electronAPI.sshConnections
+      .test(sshConnectionId)
+      .then((result) => {
+        if (seq !== submitSeq.current) return;
+        if (!result.ok) {
+          const challenge = hostKeyFromSshFailure(result, connection);
+          if (challenge) {
+            setAfterTrust('submit');
+            setHostKey(challenge);
+            return;
+          }
+          setFormError(result.error);
           return;
         }
-        setFormError(result.error);
-        return;
-      }
-      submitSsh();
-    });
+        submitSsh();
+      })
+      .finally(() => {
+        if (seq === submitSeq.current) setSubmitting(false);
+      });
   };
 
   const trustHost = async () => {
@@ -643,7 +660,7 @@ export function AddProjectDialog({
             <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
               {t('Cancel')}
             </Button>
-            <Button type="submit" size="sm" disabled={!canSubmit}>
+            <Button type="submit" size="sm" disabled={!canSubmit || submitting}>
               {t('Add')}
             </Button>
           </DialogFooter>

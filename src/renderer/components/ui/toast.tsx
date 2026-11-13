@@ -58,10 +58,10 @@ function Toasts({ position = 'bottom-right' }: { position: ToastPosition }) {
       <Toast.Viewport
         className={cn(
           'fixed z-[9999] mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-[480px] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]',
-          // Vertical positioning
+          // 垂直定位
           'data-[position*=top]:top-(--toast-inset)',
           'data-[position*=bottom]:bottom-(--toast-inset)',
-          // Horizontal positioning
+          // 水平定位
           'data-[position*=left]:left-(--toast-inset)',
           'data-[position*=right]:right-(--toast-inset)',
           'data-[position*=center]:-translate-x-1/2 data-[position*=center]:left-1/2'
@@ -77,40 +77,40 @@ function Toasts({ position = 'bottom-right' }: { position: ToastPosition }) {
             <Toast.Root
               className={cn(
                 'absolute z-[calc(9999-var(--toast-index))] h-(--toast-calc-height) w-full rounded-lg border bg-popover bg-clip-padding text-popover-foreground shadow-lg [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:bg-clip-border dark:before:shadow-[0_-1px_--theme(--color-white/8%)]',
-                // Base positioning using data-position
+                // 基于 data-position 的基础定位
                 'data-[position*=right]:right-0 data-[position*=right]:left-auto',
                 'data-[position*=left]:right-auto data-[position*=left]:left-0',
                 'data-[position*=center]:right-0 data-[position*=center]:left-0',
                 'data-[position*=top]:top-0 data-[position*=top]:bottom-auto data-[position*=top]:origin-top',
                 'data-[position*=bottom]:top-auto data-[position*=bottom]:bottom-0 data-[position*=bottom]:origin-bottom',
-                // Gap fill for hover
+                // 为悬停填补间隙
                 'after:absolute after:left-0 after:h-[calc(var(--toast-gap)+1px)] after:w-full',
                 'data-[position*=top]:after:top-full',
                 'data-[position*=bottom]:after:bottom-full',
-                // Define some variables
+                // 定义一些变量
                 '[--toast-calc-height:var(--toast-frontmost-height,var(--toast-height))] [--toast-gap:--spacing(3)] [--toast-peek:--spacing(3)] [--toast-scale:calc(max(0,1-(var(--toast-index)*.1)))] [--toast-shrink:calc(1-var(--toast-scale))]',
-                // Define offset-y variable
+                // 定义 offset-y 变量
                 'data-[position*=top]:[--toast-calc-offset-y:calc(var(--toast-offset-y)+var(--toast-index)*var(--toast-gap)+var(--toast-swipe-movement-y))]',
                 'data-[position*=bottom]:[--toast-calc-offset-y:calc(var(--toast-offset-y)*-1+var(--toast-index)*var(--toast-gap)*-1+var(--toast-swipe-movement-y))]',
-                // Default state transform
+                // 默认状态的 transform
                 'data-[position*=top]:transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)+(var(--toast-index)*var(--toast-peek))+(var(--toast-shrink)*var(--toast-calc-height))))_scale(var(--toast-scale))]',
                 'data-[position*=bottom]:transform-[translateX(var(--toast-swipe-movement-x))_translateY(calc(var(--toast-swipe-movement-y)-(var(--toast-index)*var(--toast-peek))-(var(--toast-shrink)*var(--toast-calc-height))))_scale(var(--toast-scale))]',
-                // Limited state
+                // limited 状态
                 'data-limited:opacity-0',
-                // Expanded state
+                // 展开状态
                 'data-expanded:h-(--toast-height)',
                 'data-position:data-expanded:transform-[translateX(var(--toast-swipe-movement-x))_translateY(var(--toast-calc-offset-y))]',
-                // Starting and ending animations
+                // 入场与退场动画
                 'data-[position*=top]:data-starting-style:transform-[translateY(calc(-100%-var(--toast-inset)))]',
                 'data-[position*=bottom]:data-starting-style:transform-[translateY(calc(100%+var(--toast-inset)))]',
                 'data-ending-style:opacity-0',
-                // Ending animations (direction-aware)
+                // 退场动画（区分方向）
                 'data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateY(calc(100%+var(--toast-inset)))]',
                 'data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-100%-var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]',
                 'data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]',
                 'data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-100%-var(--toast-inset)))]',
                 'data-ending-style:data-[swipe-direction=down]:transform-[translateY(calc(var(--toast-swipe-movement-y)+100%+var(--toast-inset)))]',
-                // Ending animations (expanded)
+                // 退场动画（展开状态）
                 'data-expanded:data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-100%-var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]',
                 'data-expanded:data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]',
                 'data-expanded:data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-100%-var(--toast-inset)))]',
@@ -128,7 +128,7 @@ function Toasts({ position = 'bottom-right' }: { position: ToastPosition }) {
               toast={toast}
             >
               <Toast.Content className="pointer-events-auto relative px-3.5 py-3 text-sm transition-opacity duration-250 data-behind:pointer-events-none data-behind:opacity-0 data-expanded:opacity-100">
-                {/* Close button - top right */}
+                {/* 关闭按钮 - 右上角 */}
                 <Toast.Close
                   aria-label="Close notification"
                   className="absolute right-2 top-2 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -137,7 +137,7 @@ function Toasts({ position = 'bottom-right' }: { position: ToastPosition }) {
                   <XIcon className="h-4 w-4" />
                 </Toast.Close>
 
-                {/* Main content */}
+                {/* 主体内容 */}
                 <div className="flex min-w-0 gap-2">
                   {Icon && (
                     <div
@@ -157,7 +157,7 @@ function Toasts({ position = 'bottom-right' }: { position: ToastPosition }) {
                   </div>
                 </div>
 
-                {/* Bottom actions */}
+                {/* 底部操作 */}
                 {(actions.length > 0 || toast.actionProps || toast.type === 'error') && (
                   <div
                     className="mt-2 flex items-center justify-end gap-1"
@@ -327,22 +327,22 @@ function getToastActions(toast: BaseToastObject): ToastAction[] {
 
 type ToastOptions = Omit<BaseToastAddOptions, 'data'> & {
   /**
-   * Ensure the toast type is the constrained union we use for timeouts/icons.
+   * 确保 toast 类型属于用于超时/图标的受限联合类型。
    */
   type?: ToastType;
   /**
-   * Multiple action buttons.
-   * Base UI Toast supports a single `actionProps`; for multiple actions we store them in `data.actions`.
+   * 多个操作按钮。
+   * Base UI Toast 只支持单个 `actionProps`；有多个操作时存放在 `data.actions` 中。
    */
   actions?: ToastAction[];
   data?: BaseToastAddOptions['data'] & ToastActionsData;
 };
 
 /**
- * Add a toast with smart timeout based on type.
- * - error/warning: 10s (longer for important messages)
- * - success/info: 5s (default)
- * - loading: no auto-dismiss
+ * 添加 toast，并按类型自动选择超时时间。
+ * - error/warning：10s（重要消息停留更久）
+ * - success/info：5s（默认）
+ * - loading：不自动关闭
  */
 function addToast(options: ToastOptions) {
   const defaultTimeouts: Record<ToastType, number> = {

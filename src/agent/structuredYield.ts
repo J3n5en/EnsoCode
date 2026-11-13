@@ -34,12 +34,29 @@ function tryParseJson(text: string): unknown | undefined {
   }
 }
 
+/**
+ * 取第一个 `{` / `[` 起的 JSON 值。对象 / 数组的结束位置由括号配对唯一确定（字符串内的括号与转义不算），
+ * 所以只需配对一次再 parse 一次；从末尾逐字符缩短反复 parse 结果相同，但截断的长 JSON 会退化成 O(n²)。
+ */
 function sliceFirstJson(text: string): unknown | undefined {
   const start = text.search(/[{[]/);
   if (start < 0) return undefined;
-  for (let end = text.length; end > start; end--) {
-    const parsed = tryParseJson(text.slice(start, end));
-    if (parsed !== undefined) return parsed;
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      if (char === '\\') i++;
+      else if (char === '"') inString = false;
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === '{' || char === '[') {
+      depth++;
+    } else if (char === '}' || char === ']') {
+      depth--;
+      // 括号种类是否匹配交给 JSON.parse 判定
+      if (depth === 0) return tryParseJson(text.slice(start, i + 1));
+    }
   }
   return undefined;
 }

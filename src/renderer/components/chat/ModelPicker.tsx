@@ -277,9 +277,7 @@ interface ModelPickerProps {
   virtualModels?: readonly VirtualModelEntry[];
   /** 选中虚拟模型时附在触发器上的实际路由模型 */
   routedModelLabel?: string;
-  /** 当前会话真实请求的订阅账号；设置场景不传，池额度保持隐藏。
-   *
-   * Subscription account of the current session's actual request; settings omit it and keep pool usage hidden. */
+  /** 当前会话真实请求的订阅账号；设置场景不传，池额度保持隐藏。 */
   activeAccount?: SessionUsageAccount;
   providerId: string;
   modelId: string;

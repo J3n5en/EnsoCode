@@ -29,13 +29,15 @@ export async function writeFileToClipboard(
   }
 
   if (deps.platform === 'win32') {
-    const escaped = filePath.replace(/'/g, "''");
+    // 路径不能以字符串字面量拼进命令：PowerShell 把 ‘ ’ ‚ ‛ 也当单引号，只转义 ASCII ' 挡不住注入。
+    // base64 字母表里没有任何引号或分隔符，PowerShell 侧按 UTF-8 解回原路径，中文路径也不受控制台代码页影响。
+    const encoded = Buffer.from(filePath, 'utf8').toString('base64');
     try {
       await deps.runCommand('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `Set-Clipboard -LiteralPath '${escaped}'`,
+        `Set-Clipboard -LiteralPath ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}')))`,
       ]);
       return { ok: true };
     } catch {

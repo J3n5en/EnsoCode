@@ -20,7 +20,7 @@ const KIND_ICONS = {
 interface ApprovalBarProps {
   approvals: ApprovalRequestInfo[];
   onRespond: (requestId: string, decision: ApprovalDecision) => void;
-  /** Enso capability approvals are one-shot and must never expose allowSession. */
+  /** Enso 能力审批是一次性的，绝不能提供 allowSession。 */
   allowSession?: boolean;
   /** 打回换命令、交给助手代审。能力审批不提供。 */
   handoff?: boolean;
@@ -31,17 +31,22 @@ interface ApprovalBarProps {
 /** 审批详情:command 走 shell 语法高亮,其余(文件路径/MCP 参数)素文本。
  *  刻意不截断:长命令可滚动查看全文（ref-chat-a 语义） */
 function SummaryView({ kind, summary }: { kind: ApprovalKind; summary: string }) {
-  const [html, setHtml] = useState<string | null>(null);
+  // 高亮结果连同原文一起存：换成下一条命令后，旧高亮不能在新高亮出来前顶替新命令显示
+  const [highlighted, setHighlighted] = useState<{
+    summary: string;
+    html: string | null;
+  } | null>(null);
   useEffect(() => {
     if (kind !== 'command') return;
     let alive = true;
     codeToHtml(summary, 'shellscript').then((out) => {
-      if (alive) setHtml(out);
+      if (alive) setHighlighted({ summary, html: out });
     });
     return () => {
       alive = false;
     };
   }, [kind, summary]);
+  const html = highlighted?.summary === summary ? highlighted.html : null;
 
   const copy = (
     <CopyButton
@@ -77,6 +82,9 @@ const REVIEW_FALLBACK_LABELS: Record<ApprovalReviewFallback, string> = {
   invalid: 'Auto-managed review returned no valid decision. Please decide.',
 };
 
+/** 队首换成新请求后的锁定时长：批完一条，下一条几十毫秒内出现在原位，双击的第二下会落在它上面 */
+const ARM_DELAY_MS = 400;
+
 /** composer 上方的审批条（ref-chat-a 形态）：只渲染队首，>1 显示 1/N；summary 全文可滚动 */
 export function ApprovalBar({
   approvals,
@@ -87,16 +95,25 @@ export function ApprovalBar({
 }: ApprovalBarProps) {
   const { t } = useI18n();
   const [responding, setResponding] = useState<string | null>(null);
+  const [armedId, setArmedId] = useState<string | null>(null);
   const active = approvals[0];
+  const activeId = active?.requestId;
   const remainingMs = useRemainingMs(
     active?.phase === 'reviewing' ? undefined : active?.expiresAt,
     clockOffset
   );
+  useEffect(() => {
+    if (!activeId) return;
+    const timer = setTimeout(() => setArmedId(activeId), ARM_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [activeId]);
   if (!active) return null;
   const Icon = KIND_ICONS[active.kind] ?? ShieldAlert;
   const reviewing = active.phase === 'reviewing';
   const disabled =
-    responding === active.requestId || (remainingMs !== undefined && remainingMs <= 0);
+    armedId !== active.requestId ||
+    responding === active.requestId ||
+    (remainingMs !== undefined && remainingMs <= 0);
   const respond = (decision: ApprovalDecision) => {
     // 代审可能原卡退回，不能把按钮锁死
     if (decision !== 'review') setResponding(active.requestId);

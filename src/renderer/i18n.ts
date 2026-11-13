@@ -29,7 +29,7 @@ function translateNodes(locale: Locale, key: string, params?: RichParams): React
     parts.push(template.slice(lastIndex));
   }
 
-  // Return a single React element with keyed fragments to avoid key warnings
+  // 返回单个 React 元素，内部用带 key 的 fragment 包裹，避免 key 警告
   return parts.length > 0
     ? React.createElement(
         React.Fragment,

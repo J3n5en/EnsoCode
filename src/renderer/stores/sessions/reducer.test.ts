@@ -1755,6 +1755,57 @@ describe('snapshot running clocks', () => {
     expect(Object.hasOwn(next, 'historyBaseIndex')).toBe(true);
   });
 
+  // 真实场景：运行中对排队消息「立即发送」走 steer，乐观气泡在尾部；请求遇瞬态错误 pi 进入
+  // willRetry，worker 截掉末条错误消息发 messages-truncated(N-1)，steer 气泡不能被一起删
+  it('willRetry 截掉末条错误消息时保留尾部乐观 steer，投递回执仍能按 id 找到它', () => {
+    const user: SessionProjection['messages'][number] = {
+      role: 'user',
+      entryId: 'u0',
+      content: [{ type: 'text', text: '开始' }],
+    };
+    const failed = { ...assistant(''), stopReason: 'error', errorMessage: '503' };
+    const steer = {
+      role: 'user',
+      content: [{ type: 'text' as const, text: '插话' }],
+      optimistic: true,
+      deliveryId: 'd1',
+    };
+    const state: SessionProjection = {
+      ...base,
+      generation: 'g1',
+      status: 'running',
+      messages: [user, failed, steer],
+    };
+    const next = applyAgentEvent(state, 's1', {
+      type: 'messages-truncated',
+      identity: identity(),
+      seq: 1,
+      length: 1,
+    });
+    expect(next.messages).toEqual([user, steer]);
+    const rejected = applyAgentEvent(next, 's1', {
+      type: 'delivery-rejected',
+      identity: identity(),
+      seq: 2,
+      deliveryId: 'd1',
+    });
+    expect(rejected.messages).toHaveLength(2);
+    expect(rejected.messages[1]).toMatchObject({ deliveryId: 'd1', deliveryRejected: true });
+  });
+
+  it('裁剪长度不小于权威区长度时只推进 seq，乐观尾巴原样保留', () => {
+    const optimistic = { ...assistant('pending'), optimistic: true as const };
+    const state = tail([assistant('m40'), assistant('m41'), optimistic]);
+    const next = applyAgentEvent(state, 's1', {
+      type: 'messages-truncated',
+      identity: identity(),
+      seq: 1,
+      length: 42,
+    });
+    expect(next.messages).toEqual([assistant('m40'), assistant('m41'), optimistic]);
+    expect(next.lastSeq).toBe(1);
+  });
+
   it('truncatedNeedsSnapshotResync：裁到尾窗起点之前才要补快照', () => {
     expect(truncatedNeedsSnapshotResync(40, 10)).toBe(true);
     expect(truncatedNeedsSnapshotResync(40, 40)).toBe(true);

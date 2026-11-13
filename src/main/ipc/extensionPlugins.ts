@@ -200,6 +200,22 @@ export async function setPluginConfig(
   return plugins.setConfig(id, parsed);
 }
 
+/** 宿主自身的日志（service 里登记表、拦截失败等写在这个 id 下），不是插件 id 形态 */
+const HOST_LOG_ID = 'extension-plugins';
+
+/**
+ * 日志文件名直接由 id 拼出（<root>/logs/<id>.log），不经登记表查找，
+ * 所以 id 必须是插件 id 形态（不含 `/`、`..`），只有宿主日志单独放行。
+ */
+export async function readPluginLogs(
+  plugins: { logs(id: string): Promise<string> },
+  id: unknown
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const logId = id === HOST_LOG_ID ? HOST_LOG_ID : parsePluginId(id);
+  if (!logId) return { ok: false, error: '参数不合法' };
+  return { ok: true, text: await plugins.logs(logId) };
+}
+
 export async function savePluginArtifact(
   plugins: {
     artifactInfo(id: string): PluginArtifactInfo | null;
@@ -347,12 +363,9 @@ export function registerExtensionPluginHandlers(): void {
     return setPluginConfig(plugins(), id, patch);
   });
 
-  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_LOGS, (_e, id: unknown) => {
-    if (!isId(id)) return { ok: false, error: '参数不合法' };
-    return plugins()
-      .logs(id)
-      .then((text) => ({ ok: true as const, text }));
-  });
+  ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_LOGS, (_e, id: unknown) =>
+    readPluginLogs(plugins(), id)
+  );
 
   ipcMain.handle(IPC_CHANNELS.EXTENSION_PLUGINS_CALL, async (e, raw: unknown) => {
     if (

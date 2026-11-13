@@ -28,15 +28,51 @@ export function isPrivateIPv4(ip: string): boolean {
   return false;
 }
 
-/** 环回 ::1、链路本地 fe80::/10、唯一本地 fc00::/7、IPv4 映射地址回退到 IPv4 规则 */
+/**
+ * 展开成 8 个 16 位分组再判断：同一地址有压缩、完整展开、末尾点分 IPv4 等多种写法，
+ * WHATWG URL 还会把 `::ffff:127.0.0.1` 规范成 `::ffff:7f00:1`，按字符串匹配必然漏掉某种写法。
+ */
+function toIpv6Groups(ip: string): number[] | null {
+  let text = ip.toLowerCase();
+  const lastColon = text.lastIndexOf(':');
+  const tail = text.slice(lastColon + 1);
+  if (tail.includes('.')) {
+    const v4 = toIpv4Parts(tail);
+    if (!v4) return null;
+    const high = ((v4[0] << 8) | v4[1]).toString(16);
+    const low = ((v4[2] << 8) | v4[3]).toString(16);
+    text = `${text.slice(0, lastColon + 1)}${high}:${low}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const zeros = 8 - head.length - rest.length;
+  if (halves.length === 2 ? zeros < 1 : zeros !== 0) return null;
+  const groups = [...head, ...Array<string>(halves.length === 2 ? zeros : 0).fill('0'), ...rest];
+  if (groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return null;
+  return groups.map((group) => Number.parseInt(group, 16));
+}
+
+/**
+ * 链路本地 fe80::/10、唯一本地 fc00::/7；内嵌 IPv4 的三类前缀还原成 IPv4 走同一套私网判断：
+ * IPv4 兼容 ::/96（`::`、`::1` 还原成 0.0.0.0/8 一并拦下）、IPv4 映射 ::ffff:0:0/96、
+ * NAT64 64:ff9b::/96（DNS64 网络靠它访问公网 IPv4，不能整段拒绝）。
+ */
 export function isPrivateIPv6(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  if (lower === '::1' || lower === '::') return true;
-  if (lower.startsWith('fe80:') || lower.startsWith('fe8') || lower.startsWith('fe9')) return true;
-  if (/^f[cd][0-9a-f]{0,2}:/.test(lower)) return true;
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped) return isPrivateIPv4(mapped[1]);
-  return false;
+  const groups = toIpv6Groups(ip);
+  // 真实调用方给的都是 URL / DNS 规范化过的地址，解析不了说明形态异常，不放行
+  if (!groups) return true;
+  const [first, second] = groups;
+  if ((first & 0xffc0) === 0xfe80) return true;
+  if ((first & 0xfe00) === 0xfc00) return true;
+  const zeros = (from: number, to: number) => groups.slice(from, to).every((group) => group === 0);
+  const embedsIpv4 =
+    (zeros(0, 5) && (groups[5] === 0 || groups[5] === 0xffff)) ||
+    (first === 0x64 && second === 0xff9b && zeros(2, 6));
+  if (!embedsIpv4) return false;
+  const [high, low] = [groups[6], groups[7]];
+  return isPrivateIPv4(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
 }
 
 export function isPrivateOrReservedIp(ip: string): boolean {

@@ -1349,8 +1349,6 @@ export function Sidebar({
                                   <ProjectOverflowMenu actions={projectActions} />
                                   {/*
                                     置顶标记在最右侧保留占位，避免菜单遮罩使项目行失去悬停时挤动触发器，导致松开鼠标即关闭菜单。
-
-                                    Keep the rightmost pin marker's space so losing row hover to the menu backdrop cannot shift the trigger and close the menu on mouseup.
                                   */}
                                   {(projectPinned || folded) && (
                                     <span

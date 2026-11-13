@@ -490,6 +490,44 @@ describe('speech status', () => {
     expect(seen).toEqual([true, false]);
   });
 
+  // 共用的运行时安装曾绑定第一个下载的取消信号：取消 A 会把同时在等运行时的 B 一起弄失败
+  it('两个模型共用运行时安装时，取消其中一个不会让另一个失败', async () => {
+    // 慢速网络：请求只在被 abort 时结束
+    const installSignals: AbortSignal[] = [];
+    vi.stubGlobal(
+      'fetch',
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          if (init?.signal) installSignals.push(init.signal);
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+            once: true,
+          });
+        })
+    );
+    const events: SpeechDownloadProgressDto[] = [];
+    setSpeechProgressSink((progress) => events.push(progress));
+    try {
+      const first = startSpeechDownload('x-asr-streaming');
+      const second = startSpeechDownload('x-asr');
+      cancelSpeechDownload('x-asr-streaming');
+      await expect(first).resolves.toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events.filter((event) => event.modelId === 'x-asr' && event.done)).toEqual([]);
+      expect(getSpeechStatus().models.find((model) => model.id === 'x-asr')?.state).toBe(
+        'downloading'
+      );
+      expect(installSignals.some((signal) => signal.aborted)).toBe(false);
+      // 等待者全部取消后才真正中止安装
+      cancelSpeechDownload('x-asr');
+      await expect(second).resolves.toBe(false);
+      expect(installSignals.length).toBeGreaterThan(0);
+      expect(installSignals.every((signal) => signal.aborted)).toBe(true);
+    } finally {
+      setSpeechProgressSink(null);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('announces a deletion so other windows re-read the status', async () => {
     installModel('x-asr');
     const events: SpeechDownloadProgressDto[] = [];

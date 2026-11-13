@@ -9,6 +9,7 @@ import {
   type NodeView,
   onHostOnlineChanged,
   requestHistory as reduceRequestHistory,
+  resumeRememberedSession as reduceResumeRememberedSession,
   selectSession as reduceSelectSession,
 } from './reducer';
 
@@ -94,10 +95,8 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
    * 目录可能还没到（刷新后 store 是空的）：此时先按记忆的会话 id 订阅，目录到达后由 UI 兑现。
    */
   const enterNode = (nodeId: string): void => {
-    const view = viewOf(nodeId);
     const last = localStorage.getItem(lastSessionKey(nodeId));
-    const target = last ?? view.activeSessionId;
-    const r = reduceSelectSession(view, target, loadCursors(nodeId));
+    const r = reduceResumeRememberedSession(viewOf(nodeId), last, loadCursors(nodeId));
     commit(nodeId, r.view, [...r.effects, { kind: 'send', command: { type: 'snapshot' } }]);
   };
 

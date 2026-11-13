@@ -1,7 +1,15 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 
 const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-server-platform-'));
 process.env.ENSO_DATA_DIR = dataDir;
@@ -53,5 +61,28 @@ describe('server platform', () => {
     worker.postMessage({ n: 1 });
     expect(await echoed).toEqual({ echo: { n: 1 } });
     worker.kill();
+  });
+});
+
+// settings.json 里有供应商 API key、MCP env；数据目录放开读权限，本机其他用户就能读到
+describe.skipIf(process.platform === 'win32')('server data dir permissions', () => {
+  afterEach(() => {
+    process.env.ENSO_DATA_DIR = dataDir;
+  });
+
+  it('新建的数据目录只给本人访问（0700）', () => {
+    const fresh = path.join(dataDir, 'fresh', 'data');
+    process.env.ENSO_DATA_DIR = fresh;
+    expect(platform.app.getPath('userData')).toBe(fresh);
+    expect(statSync(fresh).mode & 0o777).toBe(0o700);
+  });
+
+  it('旧版本建成 0755 的数据目录，启动时收紧为 0700', () => {
+    const legacy = path.join(dataDir, 'legacy');
+    mkdirSync(legacy);
+    chmodSync(legacy, 0o755);
+    process.env.ENSO_DATA_DIR = legacy;
+    platform.app.getPath('userData');
+    expect(statSync(legacy).mode & 0o777).toBe(0o700);
   });
 });

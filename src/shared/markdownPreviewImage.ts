@@ -43,6 +43,7 @@ export function isRemoteOrDataImageSrc(src: string): boolean {
  * - 以 `/` 开头视为工作区根相对路径
  * - `..` 允许在工作区内向上跳转，逃出根则拒绝（返回 null）
  * - 远程/data URL、含反斜杠或 NUL 的非法输入也返回 null
+ * - src 按段做 %XX 解码，解不出合法 UTF-8 或解出分隔符/NUL 的返回 null
  */
 export function resolvePreviewImageRel(baseDirRel: string, src: string): string | null {
   const trimmed = src.trim();
@@ -50,8 +51,11 @@ export function resolvePreviewImageRel(baseDirRel: string, src: string): string 
   if (trimmed.includes('\\') || trimmed.includes('\0')) return null;
   const withoutFragment = trimmed.split(/[?#]/)[0];
   if (!withoutFragment) return null;
-  const rooted = withoutFragment.startsWith('/');
-  const joined = rooted ? withoutFragment.slice(1) : posixJoin(baseDirRel, withoutFragment);
+  // baseDirRel 是真实路径，只解码 src 部分
+  const decoded = decodeSrcPath(withoutFragment);
+  if (decoded === null) return null;
+  const rooted = decoded.startsWith('/');
+  const joined = rooted ? decoded.slice(1) : posixJoin(baseDirRel, decoded);
   const stack: string[] = [];
   for (const part of joined.split('/')) {
     if (!part || part === '.') continue;
@@ -63,6 +67,26 @@ export function resolvePreviewImageRel(baseDirRel: string, src: string): string 
     stack.push(part);
   }
   return stack.join('/');
+}
+
+/**
+ * mdast-util-to-hast 会对 Markdown 图片地址做 normalizeUri（中文、空格等转成 %XX），不解码读盘
+ * 只会 ENOENT。只解合法的 %XX：原始 HTML 的 <img> 不经 normalizeUri，字面 `%` 就是文件名字符。
+ * 解出 `/`、`\`、NUL 的段直接拒绝，否则 `..%2F` 之类会绕过后面的分段与穿越校验。
+ */
+function decodeSrcPath(path: string): string | null {
+  const segments: string[] = [];
+  for (const segment of path.split('/')) {
+    let decoded: string;
+    try {
+      decoded = segment.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => decodeURIComponent(run));
+    } catch {
+      return null;
+    }
+    if (/[/\\\0]/.test(decoded)) return null;
+    segments.push(decoded);
+  }
+  return segments.join('/');
 }
 
 function posixJoin(dir: string, rel: string): string {

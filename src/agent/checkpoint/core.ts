@@ -160,6 +160,17 @@ export function parseArgs(cmd: string): string[] {
   return args;
 }
 
+/**
+ * 把路径包成 parseArgs 能原样还原的单个参数(本地/远程 host 都经 parseArgs 拆参,
+ * 接口只收字符串):单引号内一律按字面,单引号本身用 "'" 拼接,含空格、双引号、非 ASCII 都安全
+ */
+function quoteArg(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+/** 传给 git 的是真实文件名而非模式:不设的话 [id].tsx、*.log 会被当通配多匹配 */
+const LITERAL_PATHSPECS = { GIT_LITERAL_PATHSPECS: '1' };
+
 export const getRepoRoot = (
   cwd: string,
   host: CheckpointHost = localCheckpointHost
@@ -392,9 +403,11 @@ export async function createCheckpoint(
     for (let i = 0; i < filtered.length; i += BATCH) {
       const paths = filtered
         .slice(i, i + BATCH)
-        .map((f) => `"${f}"`)
+        .map(quoteArg)
         .join(' ');
-      await host.git(`add --all -- ${paths}`, root, { env: tmpEnv });
+      await host.git(`add --all -- ${paths}`, root, {
+        env: { ...tmpEnv, ...LITERAL_PATHSPECS },
+      });
     }
     const worktreeTreeSha = await host.git('write-tree', root, { env: tmpEnv });
 
@@ -494,8 +507,9 @@ async function safeClean(
   skippedDirs: string[],
   host: CheckpointHost
 ): Promise<void> {
-  const output = await host.git('ls-files --others --exclude-standard', root).catch(() => '');
-  const current = output.split('\n').filter(Boolean);
+  // -z 输出原始路径:默认会把非 ASCII、含引号的路径转义成 "\350…",对不上保护名单也匹配不到文件
+  const output = await host.git('ls-files -z --others --exclude-standard', root).catch(() => '');
+  const current = output.split('\0').filter(Boolean);
   if (current.length === 0) return;
   const preSet = new Set(preexisting);
   const sfSet = new Set(skippedFiles);
@@ -511,9 +525,9 @@ async function safeClean(
   for (let i = 0; i < toRemove.length; i += BATCH) {
     const paths = toRemove
       .slice(i, i + BATCH)
-      .map((f) => `"${f}"`)
+      .map(quoteArg)
       .join(' ');
-    await host.git(`clean -f -- ${paths}`, root).catch(() => {});
+    await host.git(`clean -f -- ${paths}`, root, { env: LITERAL_PATHSPECS }).catch(() => {});
   }
 }
 

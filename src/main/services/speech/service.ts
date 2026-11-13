@@ -59,6 +59,13 @@ interface DownloadTask {
   settled: Promise<void>;
 }
 
+interface RuntimeInstall {
+  promise: Promise<void>;
+  controller: AbortController;
+  /** 仍在等这次安装的下载数 */
+  waiters: number;
+}
+
 let hooks: SpeechTestHooks | null = null;
 let enabled = false;
 let selected: SpeechModelId = DEFAULT_SPEECH_MODEL_ID;
@@ -67,7 +74,7 @@ let geminiApiKey: string | null = null;
 let vocabulary: string[] = [];
 let corrector: SpeechCorrector | null = null;
 const downloads = new Map<SpeechModelId, DownloadTask>();
-let runtimeInstall: Promise<void> | null = null;
+let runtimeInstall: RuntimeInstall | null = null;
 let engine: { id: SpeechModelId; promise: Promise<SpeechEngine> } | null = null;
 let activeSessions = 0;
 let idleTimer: NodeJS.Timeout | null = null;
@@ -227,18 +234,44 @@ export function getSpeechStatus(): SpeechStatusDto {
   };
 }
 
-/** 多个模型同时下载时共用一次引擎安装 */
+/**
+ * 多个模型同时下载时共用一次引擎安装。安装用自己的取消信号：某个下载取消只放弃等待，
+ * 等待者全部取消后才中止安装，否则取消一个会把同时在等运行时的其它下载一起弄失败。
+ */
 async function ensureRuntime(pkg: string, signal: AbortSignal): Promise<void> {
   if (isSpeechRuntimeReady(runtimeDir(), pkg)) return;
-  runtimeInstall ??= installSpeechRuntime({
-    dir: runtimeDir(),
-    platformPackage: pkg,
-    version: SHERPA_ONNX_VERSION,
-    signal,
-  }).finally(() => {
-    runtimeInstall = null;
-  });
-  await runtimeInstall;
+  if (!runtimeInstall) {
+    const controller = new AbortController();
+    const install: RuntimeInstall = {
+      controller,
+      waiters: 0,
+      promise: installSpeechRuntime({
+        dir: runtimeDir(),
+        platformPackage: pkg,
+        version: SHERPA_ONNX_VERSION,
+        signal: controller.signal,
+      }).finally(() => {
+        if (runtimeInstall === install) runtimeInstall = null;
+      }),
+    };
+    runtimeInstall = install;
+  }
+  const install = runtimeInstall;
+  install.waiters += 1;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const giveUp = () => reject(signal.reason);
+      // 先挂上结果处理：即便本调用方已放弃，被中止的安装也不会成为未处理的 rejection
+      install.promise
+        .then(resolve, reject)
+        .finally(() => signal.removeEventListener('abort', giveUp));
+      if (signal.aborted) giveUp();
+      else signal.addEventListener('abort', giveUp, { once: true });
+    });
+  } finally {
+    install.waiters -= 1;
+    if (install.waiters === 0 && signal.aborted) install.controller.abort();
+  }
 }
 
 export async function startSpeechDownload(id: SpeechModelId): Promise<boolean> {

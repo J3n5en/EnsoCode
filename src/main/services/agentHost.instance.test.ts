@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
-import type { AgentCommand } from '@shared/types/agent';
+import { type AgentCommand, parseAgentCommand } from '@shared/types/agent';
+import { model } from '@shared/types/agent.testUtils';
 import { expect, it, vi } from 'vitest';
 
 vi.mock('../../agent/index?modulePath', () => ({ default: '/tmp/agent.js' }));
@@ -31,9 +32,12 @@ vi.mock('../ipc/settings', async (importOriginal) => ({
 }));
 
 import {
+  agentWorkerAlive,
   promptSession,
+  releaseParentSession,
   rememberParentInstance,
   retrySession,
+  sendAgentCommand,
   startAgentWorker,
   steerSession,
 } from './agentHost';
@@ -91,4 +95,85 @@ it('阶段13：prompt / steer / retry 自动带上该父会话最近一次 spawn
   expect(sessionCommands()).toEqual([
     { type: 'prompt', sessionId: 'parent', instanceId: undefined },
   ]);
+});
+
+/** 本文件的用例共享模块级 worker 状态：取一个已 spawn 的 worker，不依赖前序用例留下什么 */
+function liveWorker() {
+  if (!agentWorkerAlive()) startAgentWorker();
+  const live = fork.children[fork.children.length - 1];
+  live.emit('spawn');
+  return live;
+}
+
+// 真实场景：worker 崩溃后对之前跑过的会话「移到 / 清理 worktree」，卡 8 秒报 release timed out，还白白拉起新 worker
+it('worker 崩溃后释放旧会话：立即成功，不重启 worker、不空等超时', async () => {
+  vi.useFakeTimers();
+  try {
+    liveWorker().emit('exit');
+    const forks = fork.children.length;
+    let result: unknown = 'pending';
+    void releaseParentSession(parent).then((value) => {
+      result = value;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toEqual({ ok: true });
+    expect(fork.children).toHaveLength(forks);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// 真实场景：release-parent 已发给 worker，parent-ended 回来前 worker 崩溃；会话树随进程销毁，不该再等 8 秒超时
+it('release 等回执期间 worker 退出：立即唤醒等待者', async () => {
+  vi.useFakeTimers();
+  try {
+    const live = liveWorker();
+    let result: unknown = 'pending';
+    void releaseParentSession(parent).then((value) => {
+      result = value;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toBe('pending');
+    live.emit('exit');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toEqual({ ok: true });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// 短路的边界：积压里已有该会话的 spawn-parent 时 worker 起来后会建出它，提前报成功会让旧 cwd 的会话被同代复用
+it('worker 未 spawn 时积压了该会话的 spawn-parent：release 照常排在其后，等 parent-ended 才成功', async () => {
+  vi.useFakeTimers();
+  try {
+    liveWorker().emit('exit');
+    // 必须是能通过 worker 协议校验的完整命令：sendAgentCommand 会先校验，不合法的不进积压队列
+    const spawnParent = parseAgentCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/old',
+      model,
+    });
+    if (!spawnParent) throw new Error('spawn-parent 夹具不满足 worker 协议');
+    expect(sendAgentCommand(spawnParent)).toEqual({ ok: true });
+    let result: unknown = 'pending';
+    void releaseParentSession(parent).then((value) => {
+      result = value;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toBe('pending');
+    const next = fork.children[fork.children.length - 1];
+    fork.posted.length = 0;
+    next.emit('spawn');
+    expect(
+      (fork.posted as AgentCommand[])
+        .map((command) => command.type)
+        .filter((type) => type === 'spawn-parent' || type === 'release-parent')
+    ).toEqual(['spawn-parent', 'release-parent']);
+    next.emit('message', { type: 'parent-ended', identity: parent, seq: 1, reason: 'released' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toEqual({ ok: true });
+  } finally {
+    vi.useRealTimers();
+  }
 });

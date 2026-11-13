@@ -112,7 +112,11 @@ import {
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
 import { HumanRequestTimeouts } from '../services/bots/humanRequestTimeouts';
-import { pickBrowserFileRoot, setBrowserFileRootResolver } from '../services/browserFileRoot';
+import {
+  pickBrowserFileRoot,
+  resolveLocalCwdForBrowser,
+  setBrowserFileRootResolver,
+} from '../services/browserFileRoot';
 import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
@@ -122,6 +126,7 @@ import { getExtensionPlugins, setPluginSessionDirectory } from '../services/exte
 import { SessionStateTracker } from '../services/extensionPlugins/sessionState';
 import { listAllSessions, listProjectSessions } from '../services/extensionPlugins/sessions';
 import { searchFiles } from '../services/fileSearch';
+import { resolveLocalUnderCwd } from '../services/filesWorkspace';
 import { createLocalComplete, memoryCompleteFromSettings } from '../services/llama/chat';
 import {
   localChatModelPathIfReady,
@@ -561,6 +566,92 @@ async function readChildHistory(conversationId: string): Promise<ChildHistoryRes
 
 function agentSessionDir(): string {
   return path.join(app.getPath('userData'), 'agent', 'sessions');
+}
+
+/** 根会话 pi jsonl：直接位于 sessions 目录下的 .jsonl，且不是 child 的 enso- safe journal */
+function rootSessionFile(sessionDir: string, file: string): string | null {
+  const resolved = resolveParentHistoryFile(sessionDir, file);
+  if (!resolved || path.dirname(resolved) !== path.resolve(sessionDir)) return null;
+  const name = path.basename(resolved);
+  return name.endsWith('.jsonl') && !name.startsWith('enso-') ? resolved : null;
+}
+
+/**
+ * spawn 的 resumeFile 只认 Main 权威记录：worker 会把它交给 SessionManager.open（读入并追加写），
+ * 渲染层传来的路径不能直接采信。
+ * - 会话已绑定 sessionFile：恢复权威文件，渲染层的值只表示「要恢复」；
+ * - 尚未绑定（导入外部会话后的首次 spawn，导入只在渲染层记下文件）：只接受 sessions 目录下、
+ *   未被其他会话占用的根会话文件，避免借新会话读写别人的历史。
+ * 返回 null 表示不合法，调用方拒绝整条请求。
+ */
+function authoritativeResumeFile(
+  sessionId: string,
+  requested: string | undefined
+): { file?: string } | null {
+  if (requested === undefined) return {};
+  const sessionDir = agentSessionDir();
+  const bound = sourceAuthority?.conversation(sessionId)?.sessionFile;
+  if (bound) {
+    const file = rootSessionFile(sessionDir, bound);
+    if (file) return { file };
+    // 旧版迁移进登记表的路径是 realpath，userData 在符号链接下时目录部分对不上：
+    // 渲染层的路径落在 sessions 目录内、且文件名（含会话 uuid）与权威记录一致才采信
+    const same = rootSessionFile(sessionDir, requested);
+    return same && path.basename(same) === path.basename(bound) ? { file: same } : null;
+  }
+  const file = rootSessionFile(sessionDir, requested);
+  const claimed = sourceAuthority
+    ?.projection()
+    .conversations.some(
+      (other) =>
+        other.conversationId !== sessionId &&
+        other.sessionFile !== undefined &&
+        path.resolve(other.sessionFile) === file
+    );
+  return file && !claimed ? { file } : null;
+}
+
+/**
+ * edit diff 还原上下文用的工作区文件：渲染层只传会话标识与工作区相对路径。
+ * 根目录由 Main 按会话权威记录推导（SSH / bot-home 等非本机工作区返回 null），
+ * 再过 resolveLocalUnderCwd 的词法 + realpath 双重边界，防 `../` 与符号链接逃逸。
+ */
+function conversationFile(request: unknown): string | null {
+  const record = asRecord(request);
+  const conversationId = record?.conversationId;
+  const projectId = record?.projectId;
+  const rel = record?.rel;
+  if (!isNonEmptyString(conversationId) || !isNonEmptyString(projectId) || !isNonEmptyString(rel)) {
+    return null;
+  }
+  if (sourceAuthority?.conversation(conversationId)?.projectId !== projectId) return null;
+  const cwd = resolveLocalCwdForBrowser(conversationId);
+  return cwd ? resolveLocalUnderCwd(cwd, rel) : null;
+}
+
+/**
+ * 后台任务完成提示里给出的完整日志路径（TaskNoteRow 解析后回传）。该路径等价于任务 id：
+ * 只认 worker 写日志的 <userData>/agent/pi-agent/task-logs/ 目录下 task-<序号>-<时间戳>.log。
+ */
+function taskLogFile(raw: string): string | null {
+  const dir = path.join(app.getPath('userData'), 'agent', 'pi-agent', 'task-logs');
+  const resolved = path.resolve(raw);
+  return path.dirname(resolved) === dir && /^task-\d+-[0-9a-z]+\.log$/.test(path.basename(resolved))
+    ? resolved
+    : null;
+}
+
+/** FILES_READ 只有两种请求：工作区文件 { conversationId, projectId, rel }，或后台任务日志路径 */
+function readFilesRequest(request: unknown): string | null {
+  const file = typeof request === 'string' ? taskLogFile(request) : conversationFile(request);
+  if (!file) return null;
+  try {
+    const stat = statSync(file);
+    if (!stat.isFile() || stat.size > 2_000_000) return null;
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 function listChildRunSummaries(parentId: string): ChildRunListResult {
@@ -2007,6 +2098,13 @@ export function registerAgentHandlers(): void {
     if (!parsed || !persistedRootSpawn(parsed, event.sender.id)) {
       return { ok: false, error: 'invalid spawn request' };
     }
+    // resumeFile 同 cwd，只认权威记录；在 prepareParent 之前拒绝，非法请求不留下任何登记
+    const { resumeFile: requestedResume, ...spawnBase } = parsed;
+    const resume = authoritativeResumeFile(parsed.sessionId, requestedResume);
+    if (!resume) return { ok: false, error: 'invalid resume file' };
+    const resumable: AgentSpawnRequest = resume.file
+      ? { ...spawnBase, resumeFile: resume.file }
+      : spawnBase;
     const identity = exactIdentity(parsed.sessionId) ?? {
       sessionId: parsed.sessionId,
       generation: randomUUID(),
@@ -2024,7 +2122,7 @@ export function registerAgentHandlers(): void {
       return { ok: false, error: 'worktree operation in progress' };
     }
     const currentCwd = authoritativeSpawnCwd(parsed.sessionId);
-    const currentRequest = currentCwd ? { ...parsed, cwd: currentCwd } : parsed;
+    const currentRequest = currentCwd ? { ...resumable, cwd: currentCwd } : resumable;
     if (!persistedRootSpawn(currentRequest, event.sender.id)) {
       return { ok: false, error: 'conversation authority changed' };
     }
@@ -2296,10 +2394,17 @@ export function registerAgentHandlers(): void {
       ) {
         return { ok: false, error: 'invalid approval mode or stale generation' };
       }
+      let credentialKeys: ReadonlySet<string>;
+      try {
+        credentialKeys = await readStoredOauthCredentialKeys();
+      } catch {
+        // 与 AGENT_SET_MODEL 同口径：异常不跨 IPC 抛出，渲染层据 ok:false 回滚乐观切换的档位
+        return { ok: false, error: 'model credentials unavailable' };
+      }
       return setSessionApprovalMode(
         identity,
         mode as ApprovalMode,
-        await readStoredOauthCredentialKeys(),
+        credentialKeys,
         autoReject === undefined ? undefined : autoReject
       );
     }
@@ -2501,16 +2606,10 @@ export function registerAgentHandlers(): void {
     return searchFiles(root, query);
   });
 
-  ipcMain.handle(IPC_CHANNELS.FILES_READ, (_event, filePath: unknown): string | null => {
-    if (!isNonEmptyString(filePath)) return null;
-    try {
-      const stat = statSync(filePath);
-      if (!stat.isFile() || stat.size > 2_000_000) return null;
-      return readFileSync(filePath, 'utf8');
-    } catch {
-      return null;
-    }
-  });
+  // 不收任意路径（那等于开放任意文件读取，远端同样可调）：只认工作区文件标识与任务日志
+  ipcMain.handle(IPC_CHANNELS.FILES_READ, (_event, request: unknown): string | null =>
+    readFilesRequest(request)
+  );
 
   ipcMain.handle(IPC_CHANNELS.SESSIONS_SCAN_EXTERNAL, (_event, projectPath: unknown) => {
     if (!isNonEmptyString(projectPath)) return [];

@@ -9,7 +9,7 @@ import { handleDraftRequest, prefillDraft } from './draftBridge';
 import { setPluginFileViewers } from './fileViewers';
 import { createRendererDeps, loadPluginRenderer } from './loader';
 import { setPluginIcons } from './PluginIcon';
-import { syncPluginRenderers } from './rendererReload';
+import { disposePluginRenderer, syncPluginRenderers } from './rendererReload';
 import { handleSessionRequest, type SessionRequest } from './sessionBridge';
 import { pluginStatusRefs, setPluginStatusItems } from './statusItems';
 import { setPluginTriggers } from './triggers';
@@ -140,7 +140,8 @@ export function PluginUiHost() {
       setPluginViews([]);
       setPluginFileViewers([]);
       setPluginStatusItems([]);
-      for (const handle of loaded.values()) handle.dispose();
+      // 切到 Bot/远程节点时在这里卸载：单个插件清理抛错不能跳过其余插件，更不能冒进 React 清理
+      for (const [id, handle] of loaded) disposePluginRenderer(id, handle);
       loaded.clear();
     };
   }, []);

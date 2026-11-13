@@ -69,6 +69,21 @@ describe('OAuth exact locator/result', () => {
     ).toBeNull();
   });
 
+  // 真实场景：Qoder 的 PAT 提示留空即走浏览器登录；传输层先把空串拦掉，Main 根本收不到
+  it('prompt response 的 value 可以是空串，放行与否交给 Main 按登记的提示裁决', () => {
+    const prompt = { locator: wizardLocator, requestId: 'prompt-1', value: '' };
+    expect(parseOauthFlowPromptResponse(prompt)).toEqual(prompt);
+  });
+
+  // 安全边界：调用方不能替提示声明 allowEmpty，value 仍按 unknown 收窄为字符串
+  it('prompt response 不接受夹带的 allowEmpty，value 必须是字符串', () => {
+    const prompt = { locator: wizardLocator, requestId: 'prompt-1', value: '' };
+    expect(parseOauthFlowPromptResponse({ ...prompt, allowEmpty: true })).toBeNull();
+    for (const value of [undefined, null, 0, false, ['code'], { code: 'x' }]) {
+      expect(parseOauthFlowPromptResponse({ ...prompt, value })).toBeNull();
+    }
+  });
+
   it('start ACK 与每个 event 都携 locator；completed 只由 done event 收敛', () => {
     expect(parseStartOauthResult({ status: 'started', locator: wizardLocator })).not.toBeNull();
     expect(parseStartOauthResult({ status: 'completed', locator: wizardLocator })).toBeNull();

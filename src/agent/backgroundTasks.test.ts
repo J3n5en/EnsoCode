@@ -663,6 +663,106 @@ describe('BackgroundTaskManager', () => {
     expect(again).toContain('no new output since the last read');
     expect(again).not.toContain('second');
   });
+
+  // 审计 D6：所有会话共用一个 manager，task_output 只按 taskId 取任务；会话 B 读 A 的任务会推进 A 的读游标、
+  // 把任务标成已知情，A 就再也收不到完成通知
+  it('会话 B 的 task_output 读不到会话 A 的任务，A 的完成通知照常带上输出', async () => {
+    const { manager, notified, ended } = makeManager();
+    const taskId = manager.start('a', 'echo from-a; sleep 0.3', '/tmp');
+    const [taskOutputB] = createTaskTools(manager, 'b');
+    await expect(
+      taskOutputB.execute(
+        'read-b',
+        { taskId, timeout_ms: 2_000 },
+        undefined,
+        undefined,
+        undefined as never
+      )
+    ).rejects.toThrow(/unknown task/);
+    await until(() => ended.includes(taskId));
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain('from-a');
+  });
+
+  // 审计 D6：task_stop 同样只按 taskId，会话 B 能静默杀掉 A 的任务（模型停的还不通知 A）
+  it('会话 B 的 task_stop 停不掉会话 A 的任务', async () => {
+    const { manager, ended } = makeManager();
+    const taskId = manager.start('a', 'sleep 30', '/tmp');
+    try {
+      const taskStopB = createTaskTools(manager, 'b').find((item) => item.name === 'task_stop');
+      await taskStopB?.execute('stop-b', { taskId }, undefined, undefined, undefined as never);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(ended).not.toContain(taskId);
+      expect(manager.snapshot('a')[0]?.status).toBe('running');
+    } finally {
+      manager.stopAll();
+      await until(() => ended.includes(taskId));
+    }
+  });
+
+  // 审计 D6：报错里的 Known task ids 原本是全局列表，会把别的会话的任务 id 交给模型
+  it('报错里列出的任务 id 只含本会话树，不泄漏别的会话', async () => {
+    const { manager, ended } = makeManager({ maxTasks: 3 });
+    const mine = manager.start('b', 'sleep 30', '/tmp');
+    const others = manager.start('a', 'sleep 30', '/tmp');
+    try {
+      const [taskOutputB, taskStopB] = createTaskTools(manager, 'b');
+      const unknown = await taskOutputB
+        .execute('read-b', { taskId: 'task-missing' }, undefined, undefined, undefined as never)
+        .catch((error: Error) => error.message);
+      const notRunning = await taskStopB.execute(
+        'stop-b',
+        { taskId: 'task-missing' },
+        undefined,
+        undefined,
+        undefined as never
+      );
+      manager.start('b', 'sleep 30', '/tmp');
+      let quota = '';
+      try {
+        manager.start('b', 'sleep 30', '/tmp');
+      } catch (error) {
+        quota = (error as Error).message;
+      }
+      for (const text of [
+        String(unknown),
+        (notRunning.content[0] as { text: string }).text,
+        quota,
+      ]) {
+        expect(text).toContain(mine);
+        expect(text).not.toContain(others);
+      }
+    } finally {
+      manager.stopAll();
+      await until(() => ended.length === 3);
+    }
+  });
+
+  // 子代理启动的后台任务登记在父会话名下（或以 `父会话::` 为前缀），父会话的工具仍要能读、能停
+  // 真实起两个 shell 子进程并两次等待：全量测试负载高时会超过默认 5 秒，单独放宽超时
+  it('父会话能读取并停止自己会话树里的任务', async () => {
+    const { manager, ended } = makeManager();
+    const own = manager.start('parent', 'echo own-out; sleep 30', '/tmp');
+    const nested = manager.start('parent::cw-child', 'sleep 30', '/tmp');
+    try {
+      const [taskOutput, taskStop] = createTaskTools(manager, 'parent');
+      await until(() => manager.snapshot('parent')[0]?.tail.includes('own-out') ?? false);
+      const read = await taskOutput.execute(
+        'read-p',
+        { taskId: own },
+        undefined,
+        undefined,
+        undefined as never
+      );
+      expect((read.content[0] as { text: string }).text).toContain('own-out');
+      for (const taskId of [own, nested]) {
+        await taskStop.execute('stop-p', { taskId }, undefined, undefined, undefined as never);
+      }
+      await until(() => ended.includes(own) && ended.includes(nested));
+    } finally {
+      manager.stopAll();
+    }
+  }, 20_000);
 });
 
 describe('前台命令转后台', () => {

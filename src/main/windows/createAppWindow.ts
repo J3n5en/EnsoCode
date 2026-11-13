@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { is } from '@electron-toolkit/utils';
 import { firstExistingPath } from '@shared/appServerMode';
 import {
@@ -8,11 +9,11 @@ import {
   Menu,
   nativeTheme,
   screen,
-  shell,
   type WebContents,
   WebContentsView,
 } from 'electron';
 import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
+import { attachAppNavigationGuard, openExternalWebUrl } from './appNavigation';
 import { shouldReloadRenderer } from './rendererGone';
 import { attachPinnedWorkbenchBoundsSync, attachWindowsRestoreWake } from './win32Restore';
 import { windowChromeOptions } from './windowChrome';
@@ -119,11 +120,11 @@ function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, en
   });
 
   contents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:') || url.startsWith('http:')) {
-      shell.openExternal(url);
-    }
+    openExternalWebUrl(url);
     return { action: 'deny' };
   });
+  // 页面带完整 preload：同窗跳到外站等于把 window.electronAPI 交给对方
+  attachAppNavigationGuard(contents, rendererUrl(entry));
 
   let goneAt = 0;
   let goneCount = 0;
@@ -141,11 +142,23 @@ function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, en
   });
 }
 
+function rendererFile(entry: string): string {
+  return join(import.meta.dirname, `../renderer/${entry}.html`);
+}
+
+/** 窗口实际加载的地址；导航守卫据此划定「本应用」的范围 */
+function rendererUrl(entry: string): string {
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    return `${process.env.ELECTRON_RENDERER_URL}/${entry}.html`;
+  }
+  return pathToFileURL(rendererFile(entry)).href;
+}
+
 function loadRenderer(contents: WebContents, entry: string): void {
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    void contents.loadURL(`${process.env.ELECTRON_RENDERER_URL}/${entry}.html`);
+    void contents.loadURL(rendererUrl(entry));
   } else {
-    void contents.loadFile(join(import.meta.dirname, `../renderer/${entry}.html`));
+    void contents.loadFile(rendererFile(entry));
   }
 }
 
@@ -206,9 +219,6 @@ function resolveWindowIcon(): string | undefined {
  * - macOS: hiddenInset 保留 traffic lights
  * - Windows: 自定义标题栏内容与原生窗口按钮共存
  * - Linux: 隐藏标题栏，渲染层自绘窗口按钮
- *
- * Create app windows with native caption controls on Windows, traffic lights on
- * macOS, and renderer caption controls on Linux.
  */
 export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
   const isMac = process.platform === 'darwin';
@@ -239,8 +249,8 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
 
   if (icon) win.setIcon(icon);
 
-  // Taskbar icon is keyed by AUMID → Start Menu shortcut. win-unpacked must
-  // use a distinct AUMID or Windows keeps painting the installed square plate.
+  // 任务栏图标按 AUMID → 开始菜单快捷方式查找。win-unpacked 必须使用独立的 AUMID，
+  // 否则 Windows 会一直沿用已安装版的方形底板图标。
   if (isWindows) {
     try {
       const appId = resolveWindowsAppUserModelId({

@@ -170,6 +170,37 @@ describe('config sync merge identity and reference mapping', () => {
     );
   });
 
+  // 真实场景：A 机把预设 "Coding" 改名为 "Coding (old)" 再新建 "Coding"，B 机本机那条（同 id）仍叫 "Coding"；
+  // 名称兜底曾选中已被 id 精确认领的本机条目，merge / replace 预览整包报 Ambiguous
+  it.each(['merge', 'replace'] as const)(
+    '%s 导入改名后又新建的同名预设时，旧条目按 id 更新、同名新条目作为新增',
+    (mode) => {
+      const renamed = { id: 'p-old', name: 'Coding (old)', skillIds: [], mcpServerIds: [] };
+      const created = { id: 'p-new', name: 'Coding', skillIds: [], mcpServerIds: [] };
+      // 包内顺序不影响认领结果
+      for (const presets of [
+        [renamed, created],
+        [created, renamed],
+      ]) {
+        const plan = () =>
+          planImport(
+            current({ presets: [{ id: 'p-old', name: 'Coding', skillIds: [], mcpServerIds: [] }] }),
+            bundle({ presets }),
+            mode
+          );
+        expect(plan).not.toThrow();
+        const result = plan();
+        expect(result.presetIdMap).toEqual({ 'p-old': 'p-old', 'p-new': 'p-new' });
+        expect(result.state.presets).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: 'p-old', name: 'Coding (old)' }),
+            expect.objectContaining({ id: 'p-new', name: 'Coding' }),
+          ])
+        );
+      }
+    }
+  );
+
   it('replace 仅替换同步白名单并保留其它设置字段', () => {
     const result = planImport(
       current({

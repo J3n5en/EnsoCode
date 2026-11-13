@@ -114,4 +114,33 @@ describe('terminalRegistry font fallback', () => {
     expect(xtermHarness.instances[0]).toBe(instance.term);
     expect(instance.term.options.fontFamily).toBe(`"Enso Nerd Symbols", ${updatedFontFamily}`);
   });
+
+  // 设置页有终端字重的选项与预览，但之前从没传给 xterm，改了不生效
+  it('创建 xterm 时带上设置里的常规与粗体字重', async () => {
+    const { acquireTerminal } = await loadTerminalRegistry();
+    const termId = 'font-weight-create';
+    registeredIds.push(termId);
+
+    acquireTerminal(termId, {
+      fontFamily: '"Fira Code"',
+      fontSize: 14,
+      fontWeight: '300',
+      fontWeightBold: '700',
+    });
+
+    expect(xtermHarness.initialOptions[0]?.fontWeight).toBe('300');
+    expect(xtermHarness.initialOptions[0]?.fontWeightBold).toBe('700');
+  });
+
+  it('改终端字重后已打开的 xterm 立即跟着变', async () => {
+    const { acquireTerminal, updateTerminalAppearance } = await loadTerminalRegistry();
+    const termId = 'font-weight-update';
+    registeredIds.push(termId);
+    const instance = acquireTerminal(termId, { fontFamily: '"Fira Code"', fontSize: 14 });
+
+    updateTerminalAppearance({}, '"Fira Code"', 14, '200', 'bold');
+
+    expect(instance.term.options.fontWeight).toBe('200');
+    expect(instance.term.options.fontWeightBold).toBe('bold');
+  });
 });

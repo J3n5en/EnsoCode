@@ -8,13 +8,14 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type CheckpointHost,
   createCheckpoint,
   loadAllCheckpoints,
+  MAX_UNTRACKED_FILE_SIZE,
   pruneStaleCheckpoints,
   restoreCheckpoint,
 } from './core';
@@ -28,6 +29,7 @@ const runGit = (cwd: string, ...args: string[]): string =>
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 });
 
 let root: string;
+let home: string;
 let templateRoot: string;
 
 beforeAll(() => {
@@ -41,6 +43,13 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  // 隔离开发机的全局/系统 git 配置与默认全局 ignore（如 core.quotePath、~/.config/git/ignore），
+  // 用例结果只取决于临时仓库本身
+  home = mkdtempSync(join(tmpdir(), 'enso-cp-home-'));
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('XDG_CONFIG_HOME', home);
+  vi.stubEnv('GIT_CONFIG_GLOBAL', devNull);
+  vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
   root = mkdtempSync(join(tmpdir(), 'enso-cp-test-'));
   rmSync(root, { recursive: true, force: true });
   cpSync(templateRoot, root, { recursive: true });
@@ -48,6 +57,8 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
+  vi.unstubAllEnvs();
 });
 afterAll(() => {
   rmSync(templateRoot, { recursive: true, force: true });
@@ -74,6 +85,53 @@ describe('createCheckpoint / restoreCheckpoint', () => {
     expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('v1\n');
     expect(existsSync(join(root, 'new-file.txt'))).toBe(false);
     expect(readFileSync(join(root, 'pre-existing.txt'), 'utf8')).toBe('keep me\n');
+  });
+
+  // 真实场景:ls-files 不加 -z 时 git 把非 ASCII、含引号的路径转义成 "\350…",
+  // 拼进 clean 命令后匹配不到真实文件,还原后新文件残留(Windows 文件名不允许 ")
+  it.skipIf(process.platform === 'win32')(
+    '快照后新建的非 ASCII 与含引号文件名的未跟踪文件,还原时都被清掉',
+    async () => {
+      const cp = await createCheckpoint({
+        root,
+        id: 'tool-s1-q',
+        sessionId: 's1',
+        trigger: 'tool',
+      });
+      const names = ['说明.md', 'a"b.txt', "it's.txt"];
+      for (const name of names) writeFileSync(join(root, name), 'new\n');
+
+      await restoreCheckpoint(root, cp);
+
+      expect(names.filter((name) => existsSync(join(root, name)))).toEqual([]);
+    }
+  );
+
+  // 真实场景:Next.js 动态路由 [id].tsx 当 pathspec 会按通配匹配 d.tsx;
+  // 快照时因过大跳过的 d.tsx 不在还原后的 index 里,会被 clean 连带删掉
+  it('清理快照后新建的 [id].tsx 按字面匹配,不误删快照时跳过的大文件 d.tsx', async () => {
+    writeFileSync(join(root, 'd.tsx'), Buffer.alloc(MAX_UNTRACKED_FILE_SIZE + 1));
+    const cp = await createCheckpoint({ root, id: 'tool-s1-g', sessionId: 's1', trigger: 'tool' });
+    writeFileSync(join(root, '[id].tsx'), 'new\n');
+
+    await restoreCheckpoint(root, cp);
+
+    expect([existsSync(join(root, '[id].tsx')), existsSync(join(root, 'd.tsx'))]).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  it('快照按字面收录 [id].tsx,不连带收进本应跳过的大文件 d.tsx', async () => {
+    writeFileSync(join(root, '[id].tsx'), 'page\n');
+    writeFileSync(join(root, 'd.tsx'), Buffer.alloc(MAX_UNTRACKED_FILE_SIZE + 1));
+
+    const cp = await createCheckpoint({ root, id: 'tool-s1-h', sessionId: 's1', trigger: 'tool' });
+
+    expect(runGit(root, 'ls-tree', '--name-only', cp.worktreeTreeSha).split('\n')).toEqual([
+      '[id].tsx',
+      'a.txt',
+    ]);
   });
 
   it('node_modules 不入快照,还原也不删', async () => {
@@ -215,6 +273,88 @@ describe('CheckpointManager', () => {
       expect(await loadAllCheckpoints(root, 's1')).toHaveLength(1);
     }
   );
+
+  // 真实场景:pi 默认并行执行同一条消息里的工具,模型同时 edit a、edit b 时,
+  // b 抢在本轮快照之前落盘就会被当成「本轮开始前」的状态,回退+文件后 b 仍是改后内容
+  it('同一条消息里并行的写盘工具都等本轮快照落定后才执行', async () => {
+    writeFileSync(join(root, 'b.txt'), 'v1\n');
+    runGit(root, 'add', '.');
+    runGit(root, 'commit', '-q', '-m', 'add b');
+    const manager = new CheckpointManager(root, 's1', () => ({
+      entryId: 'e1',
+      entryTimestamp: 1000,
+    }));
+    const editOf = (file: string) =>
+      withCheckpoint(
+        {
+          name: 'edit',
+          label: 'edit',
+          description: '',
+          parameters: { type: 'object', properties: {} },
+          execute: async () => {
+            writeFileSync(join(root, file), 'turn-1 output\n');
+            return { content: [], details: undefined };
+          },
+        } as unknown as Parameters<typeof withCheckpoint>[0],
+        manager
+      );
+
+    await Promise.all(
+      ['a.txt', 'b.txt'].map((file) =>
+        editOf(file).execute(file, {}, undefined as never, undefined as never, undefined as never)
+      )
+    );
+    await manager.restoreForEntry('e1', 1000);
+
+    expect(['a.txt', 'b.txt'].map((file) => readFileSync(join(root, file), 'utf8'))).toEqual([
+      'v1\n',
+      'v1\n',
+    ]);
+  });
+
+  // 真实场景:文件名含 " 时快照拼出的 git add 参数被拆错而失败,该文件不删就每轮都失败,
+  // 连续 3 次后会话静默停用快照
+  it.skipIf(process.platform === 'win32')(
+    '工作树里有含引号文件名的未跟踪文件时,回退照常还原',
+    async () => {
+      writeFileSync(join(root, 'a"b.txt'), 'v1\n');
+      const manager = new CheckpointManager(root, 's1', () => ({
+        entryId: 'e1',
+        entryTimestamp: 1000,
+      }));
+      await manager.ensureTurnCheckpoint('write');
+      writeFileSync(join(root, 'a"b.txt'), 'turn-1 output\n');
+
+      await manager.restoreForEntry('e1', 1000);
+
+      expect(readFileSync(join(root, 'a"b.txt'), 'utf8')).toBe('v1\n');
+    }
+  );
+
+  // 背景:快照失败只计数、3 次后静默停用,正是 checkpoint-cross-session-wipe 记录的
+  // 「静默降级掩盖故障」;git 仓库里打不出快照属于「该有而没有」,至少要留下原因
+  it('git 仓库里快照失败时留一行带原因的日志', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const host: CheckpointHost = {
+        git: async (cmd) => {
+          if (cmd === 'rev-parse --show-toplevel') return '/repo';
+          throw new Error('fatal: index file corrupt');
+        },
+        statBatch: async () => new Map(),
+        mkdtemp: async () => '/tmp/enso-checkpoint-x',
+        rmrf: async () => {},
+        join: (...parts) => parts.join('/'),
+      };
+      const manager = new CheckpointManager('/repo', 's1', () => ({}), host);
+
+      await manager.ensureTurnCheckpoint('write');
+
+      expect(warn.mock.calls.flat().join(' ')).toContain('fatal: index file corrupt');
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   it('非 git 目录静默降级,不抛错', async () => {
     const plain = mkdtempSync(join(tmpdir(), 'enso-cp-plain-'));

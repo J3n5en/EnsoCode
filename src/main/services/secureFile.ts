@@ -110,7 +110,8 @@ export class SecureJsonFile<T> {
     const file = this.file();
     await mkdir(path.dirname(file), { recursive: true });
     const tmp = `${file}.tmp`;
-    await writeFile(tmp, data);
+    // 钥匙串不可用时这里是明文（refresh_token、SSH 密码等），与其它密钥文件一样只给本人读写
+    await writeFile(tmp, data, { mode: 0o600 });
     await rename(tmp, file);
   }
 }

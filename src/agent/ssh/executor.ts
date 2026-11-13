@@ -183,6 +183,9 @@ export function createSshExecutor(
         });
       });
 
+      // ssh 读完 stdin 前退出(建连失败/超时/中止被 kill)时,超出管道缓冲的写入会 EPIPE;
+      // 无人监听的 stream error 会变成未捕获异常拖垮 worker/主进程。写错误吞掉,结果以 close 退出码为准。
+      proc.stdin?.on('error', () => {});
       if (options.stdin !== undefined && proc.stdin) {
         proc.stdin.write(options.stdin);
         proc.stdin.end();

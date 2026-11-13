@@ -55,20 +55,30 @@ async function pruneLedger(file: string, now: number): Promise<void> {
   await rename(tmp, file);
 }
 
+// 同一账本的写操作排成进程内串行链：清理是「读出 → 写临时文件 → rename」，
+// 与并发追加交错时，读出之后落盘的那条会被 rename 整文件覆盖掉
+const ledgerChains = new Map<string, Promise<void>>();
+
 /** 追加一条；每个进程每天顺手按保留期清理一次 */
-export async function appendLedger(
+export function appendLedger(
   file: string,
   record: PrivacyMaskRecord,
   now = Date.now(),
   forcePrune = false
 ): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true });
-  const last = lastPrune.get(file);
-  if (forcePrune || last === undefined || now - last > DAY) {
-    lastPrune.set(file, now);
-    await pruneLedger(file, now).catch(() => {});
-  }
-  await appendFile(file, `${JSON.stringify(record)}\n`, 'utf8');
+  const run = (ledgerChains.get(file) ?? Promise.resolve())
+    .catch(() => {})
+    .then(async () => {
+      await mkdir(path.dirname(file), { recursive: true });
+      const last = lastPrune.get(file);
+      if (forcePrune || last === undefined || now - last > DAY) {
+        lastPrune.set(file, now);
+        await pruneLedger(file, now).catch(() => {});
+      }
+      await appendFile(file, `${JSON.stringify(record)}\n`, 'utf8');
+    });
+  ledgerChains.set(file, run);
+  return run;
 }
 
 const sessionCache = new Map<

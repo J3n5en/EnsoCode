@@ -60,8 +60,6 @@ function parseFileUrl(value: string): string | null {
 
 /**
  * 将 Markdown 链接分成网页、本地文件路径和危险/不支持协议。
- *
- * Classify a Markdown URL as an external page, a local path, or a dangerous/unsupported protocol.
  */
 export function classifyMarkdownLink(raw: string): MarkdownLink {
   const value = raw.trim();
@@ -131,8 +129,6 @@ function normalizeRelativePath(raw: string): string | null {
 
 /**
  * 把链接路径转换成可交给 Main 的工作区相对标识；越界或根不匹配返回 null。
- *
- * Convert a link path into the workspace-relative identifier accepted by Main; return null for escapes or root mismatches.
  */
 export function toWorkspaceRelativePath(raw: string, cwd?: string): string | null {
   if (!cwd) {
@@ -142,8 +138,6 @@ export function toWorkspaceRelativePath(raw: string, cwd?: string): string | nul
   if (!root) return null;
 
   // Windows 链接可能带 URL 风格的前导斜杠；仅按 Windows 工作区解释，保留 Unix 路径语义。
-  //
-  // Windows links may include a URL-style leading slash; interpret it only for Windows workspaces to preserve Unix path semantics.
   const targetPath = root.windows && /^\/[a-z]:[\\/]/i.test(raw) ? raw.slice(1) : raw;
   const target = canonicalAbsolutePath(targetPath);
   if (!target) return targetPath === raw ? normalizeRelativePath(raw) : null;
@@ -159,8 +153,6 @@ export function toWorkspaceRelativePath(raw: string, cwd?: string): string | nul
 
 /**
  * 工作区外的本地绝对路径，只用于请求 Main 定位；工作区内、相对路径或缺工作区返回 null。
- *
- * Absolute local path outside the workspace, used only to ask Main to reveal it.
  */
 export function toExternalAbsolutePath(raw: string, cwd?: string): string | null {
   const root = cwd ? canonicalAbsolutePath(cwd) : null;

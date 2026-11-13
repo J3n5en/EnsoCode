@@ -15,9 +15,12 @@ export const rejectionText = (error?: string): string | undefined =>
           ? '未收到回执，发送结果未确认；可重试确认'
           : error === READ_ONLY_ERROR
             ? '此设备为只读'
-            : error
-              ? translate('zh', imageSendErrorText(error) ?? error)
-              : error;
+            : // 成员正忙（含「新对话」进行中）桌面拒收，与重试失败同一句提示
+              error === 'session-busy'
+              ? '请等当前回复结束'
+              : error
+                ? translate('zh', imageSendErrorText(error) ?? error)
+                : error;
 
 /** 只读横幅；rejected = 刚有写操作被桌面拦下 */
 export const readOnlyBanner = (rejected = false): string =>

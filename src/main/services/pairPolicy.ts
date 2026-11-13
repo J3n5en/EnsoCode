@@ -500,6 +500,8 @@ interface SnapshotSession {
   sessionId?: string;
   identity?: { sessionId?: string; generation?: string };
   messages?: unknown[];
+  /** messages[0] 的绝对下标；resume 的 partial 尾窗会带，全量快照省略即 0 */
+  baseIndex?: number;
   /** worker 带 skills 描述；下发手机前剥掉 */
   commands?: unknown;
 }
@@ -544,7 +546,12 @@ export function narrowSnapshot(
       const base = { ...rest, sessionId: subscribedId };
       if (!Array.isArray(s.messages)) return { ...base, messages: [], baseIndex: 0 };
       const tail = takeSnapshotTail(s.messages, s.messages.length);
-      return fitSnapshotMessages({ ...base, messages: tail.messages, baseIndex: tail.baseIndex });
+      // tail.baseIndex 只是相对传入数组的起点；partial 尾窗本身不从 0 开始，要叠加成绝对下标
+      return fitSnapshotMessages({
+        ...base,
+        messages: tail.messages,
+        baseIndex: (s.baseIndex ?? 0) + tail.baseIndex,
+      });
     });
   return sessions.length > 0 ? { type: 'snapshot', sessions } : null;
 }

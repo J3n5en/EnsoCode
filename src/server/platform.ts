@@ -32,9 +32,24 @@ function dataDir(): string {
   return path.resolve(process.env.ENSO_DATA_DIR?.trim() || path.join(homedir(), '.enso-server'));
 }
 
+/** 本进程已收紧过权限的数据目录；`run --data-dir` 会在入口解析后换目录，所以按路径记 */
+const securedDirs = new Set<string>();
+
 function ensureUserData(): string {
   const userData = dataDir();
-  mkdirSync(userData, { recursive: true });
+  // settings.json 里有供应商 API key、MCP env：数据目录只给本人，其他本机用户无法进入
+  mkdirSync(userData, { recursive: true, mode: 0o700 });
+  if (!securedDirs.has(userData)) {
+    securedDirs.add(userData);
+    // mkdir 不会改已存在目录的权限（旧版本建的是 0755），每个进程首次取用时补收一次
+    try {
+      chmodSync(userData, 0o700);
+    } catch (error) {
+      console.warn(
+        `[enso-server] 无法把数据目录 ${userData} 收紧为 0700: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
   return userData;
 }
 

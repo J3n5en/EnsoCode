@@ -578,6 +578,36 @@ describe('parent/child commands', () => {
     ).toBeNull();
   });
 
+  // 5c481c4f 起 Main 对虚拟引用传 allowVirtual，子代理条目整包带 virtual 下发；worker 若拒收，
+  // 整条 spawn-parent 被丢弃，Main 收不到 parent-ready，所有根会话都起不来
+  it('子代理可选模型选了虚拟模型时，spawn-parent 整条命令仍能解析；坏的虚拟成员照样拒绝', () => {
+    const virtualModel = {
+      ...model,
+      settingsProviderId: 'enso-virtual',
+      modelId: 'auto-1',
+      virtual: { name: 'Auto', primary: model, fallbacks: [{ ...model, modelId: 'backup' }] },
+    };
+    const command = {
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/repo',
+      model,
+      subagentModels: [{ name: 'Auto', config: virtualModel }],
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    expect(
+      parseAgentCommand({
+        ...command,
+        subagentModels: [
+          {
+            name: 'Auto',
+            config: { ...virtualModel, virtual: { ...virtualModel.virtual, primary: {} } },
+          },
+        ],
+      })
+    ).toBeNull();
+  });
+
   it('spawn model 缺 settingsProviderId 必须拒绝：worker 回报 ready 模型身份要用它', () => {
     // 生产端 spawnModelConfig() 恒发该字段，worker 的 settingsModelRef() 缺了就抛错。
     // 解析器若放行，命令会在 worker 入口被静默丢弃 → Main 只能等 ready 握手超时。

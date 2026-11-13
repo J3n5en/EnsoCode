@@ -1,4 +1,4 @@
-import type { SourceAuthorityProjection } from '@shared/types/agent';
+import type { RendererAgentEvent, SourceAuthorityProjection } from '@shared/types/agent';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   agentFork,
@@ -519,6 +519,70 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
     expect(sessionsModule.useSessionsStore.getState().workspaceRevisionByConversation.parent).toBe(
       revisionAfterRewind + 1
     );
+  });
+
+  // 真实场景：回退 IPC 已返回 ok 后 worker 退出 / 会话被释放或拒绝，或 worker 侧 navigateTree
+  // 抛错只发 status failed；rewind-done 永远不会到达，send 一直返回 rewind in progress、回退入口隐藏
+  it.each<[string, RendererAgentEvent]>([
+    ['worker-exited', { type: 'worker-exited' }],
+    [
+      'parent-ended',
+      {
+        type: 'parent-ended',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq: 1,
+        reason: 'released',
+      },
+    ],
+    [
+      'parent-rejected',
+      {
+        type: 'parent-rejected',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq: 0,
+        reason: 'worker unavailable',
+      },
+    ],
+    [
+      'status failed',
+      {
+        type: 'status',
+        identity: { sessionId: 'parent', generation: 'g1' },
+        seq: 1,
+        status: 'failed',
+        error: 'navigate failed',
+      },
+    ],
+  ])('回退进行中收到 %s：解除回退锁，之后发送照常上屏', async (_name, event) => {
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: false,
+          status: 'idle' as const,
+          generation: 'g1',
+        },
+      },
+    }));
+    store.getState().rewind('parent', 0, true);
+    expect(agentRewind).toHaveBeenCalledWith('parent', 'entry-two', true);
+    expect(store.getState().conversations.parent).toMatchObject({
+      rewinding: true,
+      restoringFiles: true,
+    });
+    onAgentEvent?.(event);
+    const before = store.getState().conversations.parent.messages.length;
+    const error = await store
+      .getState()
+      .send('next', { providerId: 'p1', modelId: 'm1', cwd: '/workspace' }, undefined, 'parent');
+    expect(error).toBeNull();
+    const after = store.getState().conversations.parent;
+    expect(after.messages).toHaveLength(before + 1);
+    expect(after.rewinding).toBeFalsy();
+    expect(after.restoringFiles).toBeFalsy();
   });
 
   it('status:running 时不调用 window.electronAPI.agent.rewind', () => {

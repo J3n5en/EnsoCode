@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { OauthFlowEvent } from '@shared/oauthFlow';
-import type { OauthLoginEvent } from '@shared/types';
+import type { OauthLoginEvent, OauthLoginPrompt } from '@shared/types';
 import { IPC_CHANNELS, OAUTH_LABEL_MAX_LENGTH } from '@shared/types';
 import type { WebContents } from 'electron';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -1360,6 +1360,129 @@ describe('登录事件安全边界', () => {
       vi.doUnmock('@earendil-works/pi-coding-agent');
       vi.resetModules();
     }
+  });
+});
+
+describe('登录提示的留空提交', () => {
+  interface PromptingLogin {
+    prompt: OauthLoginPrompt;
+    respond: (value: string) => boolean;
+    /** 厂商 login 实际收到的回复 */
+    answered: Promise<string>;
+    completion: Promise<OauthLoginEvent> | undefined;
+  }
+
+  /** 厂商 login 只发一个提示，拿到回复后正常完成；request 原样交给 interaction.prompt */
+  async function withPromptingLogin(
+    request: Record<string, unknown>,
+    run: (login: PromptingLogin) => Promise<void>
+  ): Promise<void> {
+    vi.resetModules();
+    const answered = Promise.withResolvers<string>();
+    interface FakeProvider {
+      id: string;
+      name: string;
+      auth: { oauth?: { name?: string } };
+      getModels: () => string[];
+    }
+    const providers: FakeProvider[] = [
+      {
+        id: 'prompt-oauth',
+        name: 'Prompt OAuth',
+        auth: { oauth: { name: 'Prompt OAuth' } },
+        getModels: () => [],
+      },
+    ];
+    const runtime = {
+      registerProvider: (id: string, config: { oauth?: { name?: string } }) => {
+        providers.push({
+          id,
+          name: config.oauth?.name ?? id,
+          auth: { oauth: config.oauth },
+          getModels: () => [],
+        });
+      },
+      registerNativeProvider: (provider: FakeProvider) => providers.push(provider),
+      unregisterProvider: (id: string) => {
+        const index = providers.findIndex((provider) => provider.id === id);
+        if (index !== -1) providers.splice(index, 1);
+      },
+      getProvider: (id: string) => providers.find((provider) => provider.id === id),
+      getProviders: () => providers,
+      listCredentials: async () => [],
+      refresh: async () => ({ aborted: false, errors: new Map() }),
+      getAuth: async () => ({ auth: { apiKey: 'opaque-prompt-token' } }),
+      // pi 的 adaptOAuth 把扩展的旧版提示整体展开进 AuthPrompt，allowEmpty 随之原样到达
+      login: async (
+        _providerId: string,
+        _method: string,
+        interaction: { prompt: (prompt: Record<string, unknown>) => Promise<string> }
+      ) => {
+        answered.resolve(await interaction.prompt(request));
+      },
+    };
+    vi.doMock('@earendil-works/pi-coding-agent', () => ({
+      ModelRuntime: { create: async () => runtime },
+    }));
+    try {
+      const { beginOauthLogin, respondOauthPrompt } = await import('./oauthProviders');
+      const { sender, events } = fakeSender();
+      const locator = {
+        flowId: crypto.randomUUID(),
+        ownerWebContentsId: sender.id,
+        host: 'provider-wizard' as const,
+      };
+      const handle = beginOauthLogin('prompt-oauth', sender, locator);
+      const prompt = await vi.waitFor(() => {
+        const event = events.find((item) => item.type === 'prompt');
+        if (event?.type !== 'prompt') throw new Error('prompt not emitted yet');
+        return event.prompt;
+      });
+      await run({
+        prompt,
+        respond: (value) => respondOauthPrompt(locator, prompt.requestId, value),
+        answered: answered.promise,
+        completion: handle.completion,
+      });
+    } finally {
+      vi.doUnmock('@earendil-works/pi-coding-agent');
+      vi.resetModules();
+    }
+  }
+
+  // 真实场景：Qoder 提示「粘贴 PAT，或留空走浏览器登录」并声明 allowEmpty；Main 丢了声明，界面只能逼用户贴 PAT
+  it('声明 allowEmpty 的提示随事件透传，空值回复交给厂商登录流程', async () => {
+    await withPromptingLogin(
+      {
+        type: 'text',
+        message: 'Paste a Qoder Personal Access Token (pt-...), or leave empty for browser login',
+        placeholder: 'pt-...',
+        allowEmpty: true,
+      },
+      async ({ prompt, respond, answered, completion }) => {
+        expect(prompt.allowEmpty).toBe(true);
+        expect(respond('')).toBe(true);
+        await expect(answered).resolves.toBe('');
+        await completion;
+      }
+    );
+  });
+
+  // 安全边界：放行只看 Main 登记的声明，未声明或非严格 true 的提示收到空值要拒绝，且提示继续等真正的回答
+  it.each([
+    ['未声明', {}],
+    ['非布尔真值', { allowEmpty: 'true' }],
+  ])('allowEmpty %s的提示拒绝空值与纯空白回复，之后仍可正常作答', async (_label, declared) => {
+    await withPromptingLogin(
+      { type: 'text', message: 'Paste the authorization code', ...declared },
+      async ({ respond, answered, completion }) => {
+        expect(respond('')).toBe(false);
+        expect(respond('   ')).toBe(false);
+        expect(respond('auth-code')).toBe(true);
+        await expect(answered).resolves.toBe('auth-code');
+        await completion;
+      }
+    );
   });
 });
 

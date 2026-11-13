@@ -94,6 +94,8 @@ export type BotChatStateFrame = Extract<HostToPhone, { type: 'bot-chat-state' }>
 export type BotSendResultFrame = Extract<HostToPhone, { type: 'bot-send-result' }>;
 
 const VOICE_TIMEOUT_MS = 60_000;
+/** 与 pairHost / pairGuest 同口径的单帧预检，留出中继 1MB 上限的余量（直连拼帧同限） */
+const RELAY_FRAME_LIMIT = 1_000_000;
 /** 约 200ms 一块：桌面边收边识别 */
 const VOICE_CHUNK_SAMPLES = SPEECH_SAMPLE_RATE / 5;
 const SPEECH_ERRORS: readonly string[] = [
@@ -127,7 +129,7 @@ export interface ClientEvents {
   onReadOnly?(readOnly: boolean): void;
   /** 桌面支持桌面模式（host-info.remoteDesktop）；旧桌面缺省 */
   onRemoteDesktop?(available: boolean): void;
-  /** 写命令被 host 拦截（如作用域刚被改成只读） */
+  /** 写命令被 host 拦截（如作用域刚被改成只读），或超过中继单帧上限被本地拦下 */
   onCommandRejected?(command: string, error: string): void;
   /** Bot 模式（桌面开启时才下发；enabled=false = 已关闭） */
   onBotCatalog?(
@@ -192,6 +194,11 @@ export class PairClient {
   private cacheDirty = false;
   /** 当前这条 WS 已经发过进房 snapshot/subscribe；host-online 立刻再来时不再打第二遍 */
   private roomPrimed = false;
+  /**
+   * 当前这条 WS 已收到中继进房时回的首条在线状态帧。此后再来 host-online 说明 host 换了新连接
+   * 重新进房（顶替半开旧连接时中继不发 host-offline），host 已清空本设备订阅，必须重新进房。
+   */
+  private roomStatusSeen = false;
   /** 上次退到后台的时刻；回前台用来判断 TCP 是否多半已被冻死 */
   private hiddenAt: number | null = null;
   /** 换中继 socket 期间先别发 offer，等 host-online 再 ICE restart */
@@ -259,7 +266,6 @@ export class PairClient {
       (this.ws && this.ws.readyState < 2)
     )
       return;
-    this.replay.peerReset();
     if (!this.cacheReady) {
       this.cacheLoading = true;
       void this.cache
@@ -303,6 +309,7 @@ export class PairClient {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     this.roomPrimed = false;
+    this.roomStatusSeen = false;
 
     // 半开死链的 close 事件可能永不到达：心跳判死后直接走关闭路径，幂等防双跑
     let settled = false;
@@ -368,12 +375,17 @@ export class PairClient {
         try {
           const control = JSON.parse(event.data) as { type?: string };
           if (control.type === 'host-online') {
+            if (this.roomStatusSeen) this.roomPrimed = false;
+            this.roomStatusSeen = true;
+            // 防重放只在这里重置：host 进房时同样收到 peer-joined 一起重置。中继重连尝试不能重置，
+            // 否则直连上的帧退回随机 nonce，被仍锁定旧前缀的 host 静默丢弃
             this.replay.peerReset();
             this.events.onState('online');
             this.direct.peerOnline(true);
             this.flushDirectRestart();
             this.primeRoom();
           } else if (control.type === 'host-offline') {
+            this.roomStatusSeen = true;
             this.events.onState('host-offline');
             this.direct.peerOnline(false);
             this.roomPrimed = false;
@@ -952,12 +964,20 @@ export class PairClient {
       .then(async () => {
         if (this.closed || this.revoked) return;
         const frame = await this.replay.seal(this.contentKey, command);
-        if (this.closed || this.revoked) return;
+        if (this.closed || this.revoked || this.overRelayLimit(frame, command)) return;
         // 直连优先；背压/刚好断掉时无缝退回中继
         if (this.direct.send(frame)) return;
         this.sendFrameViaRelay(frame);
       })
       .catch(() => {});
+  }
+
+  /** 超限帧本地拦下并回报：中继 CF 版会静默丢弃、Go 版直接断连，发出去只会白发或打断连接 */
+  private overRelayLimit(frame: Uint8Array, command: PhoneToHost): boolean {
+    if (frame.byteLength <= RELAY_FRAME_LIMIT) return false;
+    console.warn(`[pair] ${command.type} frame ${frame.byteLength}B over relay limit, dropped`);
+    this.events.onCommandRejected?.(command.type, 'frame over relay limit');
+    return true;
   }
 
   private sendFrameViaRelay(frame: Uint8Array): void {
@@ -976,7 +996,8 @@ export class PairClient {
       .then(async () => {
         if (this.closed || this.revoked) return;
         const frame = await this.replay.seal(this.contentKey, command);
-        if (!this.closed && !this.revoked) this.sendFrameViaRelay(frame);
+        if (this.closed || this.revoked || this.overRelayLimit(frame, command)) return;
+        this.sendFrameViaRelay(frame);
       })
       .catch(() => {});
   }
@@ -987,7 +1008,7 @@ export class PairClient {
     if (changed) this.events.onSync?.(next.state);
   }
 
-  /** onopen 与紧随其后的 host-online 只进房一次；host 掉线后再上线才重拉。 */
+  /** onopen 与紧随其后的首条 host-online 只进房一次；host 掉线后再上线或换连接重新进房才重拉。 */
   private primeRoom(): void {
     if (this.closed || this.revoked || this.roomPrimed) return;
     if (this.ws?.readyState !== 1) return;

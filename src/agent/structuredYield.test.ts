@@ -16,6 +16,33 @@ describe('structuredYield', () => {
     expect(parseJsonFromAssistant('not json')).toBeUndefined();
   });
 
+  // 审计 D7：截断或带尾逗号的长 JSON 会让 sliceFirstJson 从末尾逐字符缩短、反复 JSON.parse（O(n²)），
+  // 60K 字符要数秒；worker（coworker 结构化收尾）与 Main（agentRunValidation）主线程都会被冻住
+  it('截断的长 JSON 很快判定为不可解析，不冻结线程', () => {
+    const items = Array.from({ length: 4000 }, (_, i) => `{"k":${i},"v":"x"}`).join(',');
+    const truncated = `结果如下：{"items":[${items}`.slice(0, 60_000);
+    const startedAt = performance.now();
+    expect(parseJsonFromAssistant(truncated)).toBeUndefined();
+    expect(performance.now() - startedAt).toBeLessThan(500);
+  });
+
+  it('带尾逗号的长 JSON 很快判定为不可解析，不冻结线程', () => {
+    const items = Array.from({ length: 4000 }, (_, i) => `{"k":${i},"v":"x"}`).join(',');
+    const startedAt = performance.now();
+    expect(parseJsonFromAssistant(`{"items":[${items}],}`)).toBeUndefined();
+    expect(performance.now() - startedAt).toBeLessThan(500);
+  });
+
+  it('取首个 JSON 值时不被字符串里的括号、转义引号或尾随文字干扰', () => {
+    expect(
+      parseJsonFromAssistant('result: {"s":"a}\\"]b","n":[1,{"x":"]"}]} 后面还有 } 与 ] 文字')
+    ).toEqual({ s: 'a}"]b', n: [1, { x: ']' }] });
+    expect(parseJsonFromAssistant('items: [1, 2, 3] done')).toEqual([1, 2, 3]);
+    // 只认第一个括号起的值：开头的方括号注释不是 JSON 时整体判为不可解析（沿用原有语义）
+    expect(parseJsonFromAssistant('[draft] {"a":1}')).toBeUndefined();
+    expect(parseJsonFromAssistant('{"a":[1}] tail')).toBeUndefined();
+  });
+
   it('validates a JSON Schema subset (type / required / properties)', () => {
     const schema = {
       type: 'object',

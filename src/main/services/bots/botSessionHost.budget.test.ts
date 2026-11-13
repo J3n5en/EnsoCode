@@ -315,6 +315,37 @@ describe('BotSessionHost budget reservation and per-turn cap', () => {
     expect(runtime.aborted).toHaveLength(1);
   });
 
+  // enso-server 是纯 Node，未处理的拒绝会让整个进程退出；worker 不回执时 release 超时 reject
+  it('超额停回合时 release 失败，不留下无人处理的 Promise 拒绝', async () => {
+    host = new BotSessionHost({
+      bots,
+      chats,
+      authority: registry,
+      runtime,
+      emit: (event) => events.push(event),
+    });
+    const alice = bot('Alice');
+    bots.update(alice.id, { maxTokensPerTurn: 1_000 }, []);
+    const chat = direct(alice.id);
+    const sent = await host.deliver(chat.id, alice.id, 'a');
+    if (!sent.ok) throw new Error(sent.error);
+    runtime.release = async (conversationId) => {
+      runtime.released.push(conversationId);
+      throw new Error('release timed out');
+    };
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      usage(sent.conversationId, 1, 1_001, 'toolUse');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(runtime.released).toEqual([sent.conversationId]);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('flags user stops but not budget stops as stopped', async () => {
     reserving(100);
     const { alice, one } = await twoChats();

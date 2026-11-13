@@ -3,8 +3,10 @@ import type { Env } from './index';
 import {
   canFetchCredentials,
   claim,
+  isExpired,
   MAX_FRAME_BYTES,
   type PairState,
+  purgeAt,
   request,
   tokenValid,
 } from './pairing';
@@ -44,7 +46,12 @@ export class PairRoom extends DurableObject<Env> {
     const now = Date.now();
     const prev = await this.ctx.storage.get<PairState>('state');
     const next = request(prev, now, publicKey);
-    if (next !== prev) await this.ctx.storage.put('state', next);
+    if (next !== prev) {
+      await this.ctx.storage.put('state', next);
+      // 新建 / 重建的配对码到期即清：request 不鉴权，换着公钥循环 POST，每个 DO 都会留下存储
+      const at = purgeAt(next);
+      if (at !== null) await this.ctx.storage.setAlarm(at);
+    }
     if (next.phase === 'authorized') {
       // 窗口外不再吐凭据：publicKey 在 QR 里公开，长期可换 token 等于把
       // host 身份长期暴露给任何看过二维码的人
@@ -151,6 +158,18 @@ export class PairRoom extends DurableObject<Env> {
     }
     await this.ctx.storage.deleteAll();
     return json({ ok: true });
+  }
+
+  /** 配对码过期后整间清空，释放存储；已认领的配对不动 */
+  async alarm(): Promise<void> {
+    const state = await this.ctx.storage.get<PairState>('state');
+    if (state && isExpired(state, Date.now())) {
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+    // alarm 提前触发时按过期时刻重排，免得过期码就此留下
+    const at = state ? purgeAt(state) : null;
+    if (at !== null) await this.ctx.storage.setAlarm(at);
   }
 
   // ── hibernation handlers ──────────────────────────────────────────────

@@ -57,7 +57,10 @@ export class NodeRemoteTunnel {
   private receivedBytes = 0;
   private ackedBytes = 0;
   private slots = new Map<string, Slot>();
-  private assets = new Map<number, { message: RemoteToHost; resolve: (a: NodeAsset) => void }>();
+  private assets = new Map<
+    number,
+    { message: RemoteToHost; resolve: (a: NodeAsset) => void; timer?: NodeJS.Timeout }
+  >();
   private parts = createRemotePartAssembler();
 
   constructor(private readonly post: (frame: RemoteToHost) => void) {}
@@ -146,17 +149,27 @@ export class NodeRemoteTunnel {
     if (this.online) this.post({ type: 'rpc-bye', cid });
   }
 
-  fetchAsset(path: string): Promise<NodeAsset> {
+  /** timeoutMs 到点回 504；超时由这里负责，放弃的请求要同时出表，否则重新上线时 setOnline 会再发一遍 */
+  fetchAsset(path: string, timeoutMs?: number): Promise<NodeAsset> {
     return new Promise((resolve) => {
       const message: RemoteToHost = { type: 'asset-get', id: ++this.seq, path };
-      this.assets.set(message.id, { message, resolve });
+      const id = message.id;
+      const timer =
+        timeoutMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              if (!this.assets.delete(id)) return;
+              resolve({ status: 504, mime: 'text/plain', body: new Uint8Array() });
+            }, timeoutMs);
+      this.assets.set(id, { message, resolve, timer });
       if (this.online) this.post(message);
     });
   }
 
   close(): void {
     for (const slot of [...this.slots.values()]) this.detach(slot.cid);
-    for (const { resolve } of this.assets.values()) {
+    for (const { resolve, timer } of this.assets.values()) {
+      clearTimeout(timer);
       resolve({ status: 503, mime: 'text/plain', body: new Uint8Array() });
     }
     this.assets.clear();
@@ -191,6 +204,7 @@ export class NodeRemoteTunnel {
         const pending = this.assets.get(frame.id);
         if (!pending) return;
         this.assets.delete(frame.id);
+        clearTimeout(pending.timer);
         pending.resolve({ status: frame.status, mime: frame.mime, body: decodeBase64(frame.data) });
         return;
       }

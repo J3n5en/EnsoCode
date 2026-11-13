@@ -532,6 +532,9 @@ function buildChatMessagePrompts(context: PiContext, cascadeId: string, model: P
       continue;
     }
     if (message.role === 'assistant') {
+      // 与 pi transformMessages 一致整轮跳过：中断轮里的 toolCall 从未执行，Enso 的
+      // dropUnpairedToolResults 也已按同一规则删掉其结果，回放只会留下没有结果的工具调用
+      if (message.stopReason === 'error' || message.stopReason === 'aborted') continue;
       const native =
         message.api === model.api &&
         message.provider === model.provider &&

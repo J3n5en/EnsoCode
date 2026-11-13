@@ -249,7 +249,7 @@ function BackgroundImageSettings() {
 
       {enabled && (
         <>
-          {/* Source type */}
+          {/* 来源类型 */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-4">
             <span className="text-sm font-medium">{t('Source type')}</span>
             <Select
@@ -270,7 +270,7 @@ function BackgroundImageSettings() {
             </Select>
           </div>
 
-          {/* Source path */}
+          {/* 来源路径 */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-4">
             <span className="text-sm font-medium">{pathLabel}</span>
             <div className="flex items-center gap-2">
@@ -310,7 +310,7 @@ function BackgroundImageSettings() {
             </div>
           </div>
 
-          {/* Auto switch interval（folder/url） */}
+          {/* 自动切换间隔（folder/url） */}
           {sourceType !== 'file' && (
             <div className="grid grid-cols-[100px_1fr] items-center gap-4">
               <span className="text-sm font-medium">{t('Auto switch')}</span>
@@ -377,7 +377,7 @@ function BackgroundImageSettings() {
             onCommit={(v) => setCodeOpacity(v / 100)}
           />
 
-          {/* Size mode */}
+          {/* 填充方式 */}
           <div className="grid grid-cols-[100px_1fr] items-center gap-4">
             <span className="text-sm font-medium">{t('Size mode')}</span>
             <Select
@@ -1333,7 +1333,7 @@ export function AppearanceSettings({ onOpenPlugins }: { onOpenPlugins?: () => vo
         </div>
       </div>
 
-      {/* Background Image */}
+      {/* 背景图 */}
       <PercentSliderRow
         label={t('Border opacity')}
         value={Math.round(borderOpacity * 100)}

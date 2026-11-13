@@ -273,6 +273,41 @@ describe('ComputerHost', () => {
     expect(order).toEqual(['a', 'b']);
   });
 
+  // 审计发现：macOS 后台打字循环不响应中止，run 被中止后 guest 立即返回、租约随即释放，
+  // 另一会话拿到同一 app 的租约后两边的输入交错
+  it('被中止的 run 还有动作在执行时，同一 app 的租约等它结束才交给别的会话', async () => {
+    const backend = new FakeDesktopBackend();
+    const longStarted = Promise.withResolvers<void>();
+    const longTyping = Promise.withResolvers<void>();
+    const typed: string[] = [];
+    backend.typeText = async (_target, text) => {
+      typed.push(`${text}:start`);
+      if (text === 'long') {
+        longStarted.resolve();
+        await longTyping.promise;
+      }
+      typed.push(`${text}:end`);
+    };
+    const host = new ComputerHost(() => backend, undefined, { leaseWaitMs: 2_000 });
+    const controller = new AbortController();
+    const a = host.invoke(
+      'a',
+      'run',
+      { code: 'const w = await desktop.window("w1"); await w.type("long")' },
+      controller.signal
+    );
+    await longStarted.promise;
+    controller.abort();
+    await expect(a).rejects.toThrow(/abort/);
+    const b = host.invoke('b', 'run', {
+      code: 'const w = await desktop.window("w1"); await w.type("short")',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    longTyping.resolve();
+    await b;
+    expect(typed).toEqual(['long:start', 'long:end', 'short:start', 'short:end']);
+  });
+
   it('等租约超时给出明确错误并带上 app 名', async () => {
     const host = new ComputerHost(twoApps, undefined, { leaseWaitMs: 30 });
     const a = host.invoke('a', 'run', { code: clickThenWait('w1', 'a', 300) });

@@ -139,6 +139,23 @@ describe('project authority projection write guard', () => {
     expect(alpha).toEqual(local);
   });
 
+  // 真实场景：对项目 A 点 "Trust and load" 后再新增/删除任意项目，数组长度变化触发重建，
+  // 信任列表不在白名单里就被清空，Main 之后 spawn 不再加载 .pi/extensions。
+  it('新增其它项目触发投影重建时保留已信任的项目代码来源', () => {
+    const local = {
+      id: 'p0',
+      name: 'alpha',
+      path: '/tmp/alpha',
+      trustedProjectCode: ['.pi/extensions/a.ts'],
+    };
+    settingsModule.useSettingsStore.setState({ projects: [local] });
+
+    projectionListener?.(projection(['/tmp/alpha', '/tmp/beta']));
+
+    const [alpha] = settingsModule.useSettingsStore.getState().projects;
+    expect(alpha).toEqual(local);
+  });
+
   // 投影按 registry 的插入顺序下发，本地数组顺序可能不同（项目删除后重建会错位）。
   // 顺序差异不是内容变化，按索引比对会让每次广播都重写整个数组。
   it('treats a reordered projection with the same projects as unchanged', async () => {

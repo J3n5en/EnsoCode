@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { withFileMutationQueue } from '@earendil-works/pi-coding-agent';
 import { type AppliedFileChange, PROJECTED_FILE_TEXT_LIMIT } from '@shared/types/fileChanges';
@@ -448,15 +449,31 @@ function peekApplyPatchInput(params: unknown): string | undefined {
 }
 
 /** 与 pi edit/write 共用同文件队列；解析失败不取锁，交给 buildPlan 报错 */
-function mutationTargets(cwd: string, params: unknown, io?: PatchIo): string[] {
+async function mutationTargets(cwd: string, params: unknown, io?: PatchIo): Promise<string[]> {
+  let operations: ApplyPatchOperation[];
   try {
-    const operations = normalizeOperations(
+    operations = normalizeOperations(
       parseApplyPatch(requireApplyPatchInput(params)),
       io?.normalizePath ?? normalizePatchPath
     );
-    return [...new Set(operationPaths(operations).map((value) => path.resolve(cwd, value)))].sort();
   } catch {
     return [];
+  }
+  const keys = await Promise.all(
+    operationPaths(operations).map((value) => mutationQueueKey(path.resolve(cwd, value)))
+  );
+  return [...new Set(keys)].sort();
+}
+
+/**
+ * 按 pi 文件锁的键去重(realpath,取不到时用 resolve 结果,与 pi 一致):只按 resolve 字符串去重时,
+ * 同一文件的两种写法(大小写、符号链接)会各取一次锁而同键嵌套自锁,外层全局队列随之让此后所有 apply_patch 挂起
+ */
+async function mutationQueueKey(target: string): Promise<string> {
+  try {
+    return await realpath(target);
+  } catch {
+    return target;
   }
 }
 
@@ -474,7 +491,7 @@ export function executeApplyPatch(
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; details: ApplyPatchDetails }> {
   return enqueue(async () => {
     try {
-      return await withMutationQueues(mutationTargets(cwd, params, options.io), async () =>
+      return await withMutationQueues(await mutationTargets(cwd, params, options.io), async () =>
         runPlan(await buildPlan(cwd, params, options.io, options.signal), options.signal)
       );
     } catch (error) {

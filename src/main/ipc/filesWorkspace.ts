@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { statSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, clipboard, type IpcInvokeEvent, ipcMain, shell } from '@platform';
+import { isExternalFileOpenBlocked } from '@shared/fileOpening';
 import { sniffImageMime } from '@shared/imageSniff';
 import { PREVIEW_IMAGE_MAX_BYTES, previewImageMime } from '@shared/markdownPreviewImage';
 import { resolveSshTarget } from '@shared/ssh';
@@ -62,6 +63,13 @@ import { sessionWorktreeBusy } from './worktree';
 const watches = new RefCountWatchers();
 const hookedSenders = new Set<number>();
 const sshPollHashes = new Map<string, string>();
+/**
+ * SSH 监听要先等一次远端路径校验（ssh 往返）才 acquire。这期间到达的 stop 没有引用可释放，
+ * 改为作废一个在途请求；否则校验通过后建立的轮询再也没人释放。
+ */
+const pendingSshWatches = new Map<string, Set<{ cancelled: boolean }>>();
+/** 每个窗口 × 会话正在跑的工作区搜索，新搜索到来时用它取消上一个 */
+const workspaceSearches = new Map<string, AbortController>();
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
@@ -396,24 +404,47 @@ export function registerFilesWorkspaceHandlers(): void {
       const key = watchKey(event.sender.id, parsed.conversationId, parsed.rel);
       const ssh = createProjectSsh(parsed.projectId);
       if (ssh) {
-        const abs = await resolveRemoteUnderCwd(ssh, parsed.rel);
+        const pending = { cancelled: false };
+        const inFlight = pendingSshWatches.get(key) ?? new Set();
+        pendingSshWatches.set(key, inFlight.add(pending));
+        let abs: string | null;
+        try {
+          abs = await resolveRemoteUnderCwd(ssh, parsed.rel);
+        } finally {
+          inFlight.delete(pending);
+          if (!inFlight.size) pendingSshWatches.delete(key);
+        }
         if (!abs) return { ok: false, error: 'invalid-path' };
+        // 校验期间标签已关（stop 作废了本次）或窗口已销毁（destroyed 钩子已跑过）：建了就没人释放
+        if (pending.cancelled || event.sender.isDestroyed())
+          return { ok: false, error: 'cancelled' };
         watches.acquire(key, () => {
           let timer: ReturnType<typeof setInterval> | undefined;
+          let polling = false;
           const tick = async () => {
-            const result = await ssh.executor.exec(['cksum', '--', abs], { timeoutMs: 10_000 });
-            if (result.code !== 0) return;
-            const prev = sshPollHashes.get(key);
-            if (prev === result.stdout) return;
-            sshPollHashes.set(key, result.stdout);
-            if (prev === undefined) return;
-            if (event.sender.isDestroyed()) return;
-            const payload: FilesWatchEvent = {
-              conversationId: parsed.conversationId,
-              rel: parsed.rel,
-              type: 'change',
-            };
-            event.sender.send(IPC_CHANNELS.FILES_WATCH_EVENT, payload);
+            // 远端卡住时一轮要等到 exec 超时，期间不再每 2 秒叠一个 ssh 进程
+            if (polling) return;
+            polling = true;
+            try {
+              const result = await ssh.executor.exec(['cksum', '--', abs], { timeoutMs: 10_000 });
+              if (result.code !== 0) return;
+              const prev = sshPollHashes.get(key);
+              if (prev === result.stdout) return;
+              sshPollHashes.set(key, result.stdout);
+              if (prev === undefined) return;
+              if (event.sender.isDestroyed()) return;
+              const payload: FilesWatchEvent = {
+                conversationId: parsed.conversationId,
+                rel: parsed.rel,
+                type: 'change',
+              };
+              event.sender.send(IPC_CHANNELS.FILES_WATCH_EVENT, payload);
+            } catch {
+              // exec 超时或 ssh 起不来会 reject，跳过这一轮即可；
+              // 不接住会成为未处理 rejection，无界面服务端（Node ≥22）默认直接退出
+            } finally {
+              polling = false;
+            }
           };
           void tick();
           timer = setInterval(() => void tick(), 2000);
@@ -448,7 +479,14 @@ export function registerFilesWorkspaceHandlers(): void {
     async (event, request: unknown): Promise<FilesWatchResult> => {
       const parsed = parseRequest(request);
       if (!parsed?.rel) return { ok: false, error: 'unavailable' };
-      watches.release(watchKey(event.sender.id, parsed.conversationId, parsed.rel));
+      const key = watchKey(event.sender.id, parsed.conversationId, parsed.rel);
+      // 与之配对的 start 还在做 SSH 路径校验、尚未 acquire：作废它，而不是去释放别的引用
+      const pending = [...(pendingSshWatches.get(key) ?? [])].find((item) => !item.cancelled);
+      if (pending) {
+        pending.cancelled = true;
+        return { ok: true };
+      }
+      watches.release(key);
       return { ok: true };
     }
   );
@@ -641,12 +679,18 @@ export function registerFilesWorkspaceHandlers(): void {
       try {
         const stat = statSync(abs);
         if (stat.isDirectory()) {
-          const failure = await shell.openPath(abs);
+          // macOS 的应用包（.app 等）也是目录，openPath 会直接启动它；软链接、尾斜杠能藏住后缀，
+          // 所以 rel 与真实路径都要判定，命中只定位。与 FILES_OPEN 对应用包目录的处理一致。
+          const real = realpathSync(abs);
+          if ([parsed.rel, real.split(path.sep).join('/')].some(isExternalFileOpenBlocked)) {
+            shell.showItemInFolder(real);
+            return { ok: true };
+          }
+          const failure = await shell.openPath(real);
           return failure ? { ok: false, error: failure } : { ok: true };
         }
         if (!stat.isFile()) return { ok: false, error: 'unavailable' };
         // 文件（包括 .exe）只在资源管理器中定位，不交给 shell.openPath，避免执行。
-        // Files, including .exe files, are selected in the file manager instead of being executed via shell.openPath.
         shell.showItemInFolder(abs);
         return { ok: true };
       } catch {
@@ -691,7 +735,7 @@ export function registerFilesWorkspaceHandlers(): void {
     }
   );
 
-  handle(IPC_CHANNELS.FILES_SEARCH_WORKSPACE, async (_event, request: unknown) => {
+  handle(IPC_CHANNELS.FILES_SEARCH_WORKSPACE, async (event, request: unknown) => {
     const parsedSearch = parseWorkspaceFileSearchRequest(request);
     if (!parsedSearch) return { ok: false, error: 'unavailable' };
     const parsed = parseRequest(request);
@@ -699,6 +743,16 @@ export function registerFilesWorkspaceHandlers(): void {
     if (createProjectSsh(parsed.projectId)) return { ok: false, error: 'unsupported' };
     const cwd = resolveLocalCwd(parsed.conversationId, parsed.projectId);
     if (!cwd) return { ok: false, error: 'unavailable' };
-    return searchWorkspaceFiles(cwd, parsedSearch);
+    // renderer 每次按键（防抖后）都发一次、只认最新结果：同窗口同会话的上一个 rg 已没人要，先取消。
+    // 键带上窗口：桌面与远程浏览器可能同时搜同一会话，不能互相取消
+    const key = `${event.sender.id}:${parsed.conversationId}`;
+    workspaceSearches.get(key)?.abort();
+    const controller = new AbortController();
+    workspaceSearches.set(key, controller);
+    try {
+      return await searchWorkspaceFiles(cwd, parsedSearch, undefined, controller.signal);
+    } finally {
+      if (workspaceSearches.get(key) === controller) workspaceSearches.delete(key);
+    }
   });
 }

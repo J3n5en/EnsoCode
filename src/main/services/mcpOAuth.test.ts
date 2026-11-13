@@ -187,6 +187,30 @@ describe('authorizeMcpServer', () => {
     expect(store.tokens('s1')).toEqual({ access_token: 'old', refresh_token: 'r-old' });
   });
 
+  // token 只剩 5 分钟时点授权又取消：回滚若按 expires_in 重算，看起来还能用一小时，临期主动续期被跳过
+  it('授权未完成回滚时保留旧 token 原来的过期时间', async () => {
+    let now = 1_000_000;
+    const store = new McpOAuthStore({ file: path.join(dir, 'store.bin'), now: () => now });
+    store.saveTokens('s1', { access_token: 'old', refresh_token: 'r-old', expires_in: 3600 });
+    const expiresAt = now + 3_600_000;
+    now += 55 * 60_000;
+    const server = fakeCallbackServer(() => Promise.reject(new Error('用户关了浏览器')));
+    const result = await authorizeMcpServer('s1', {
+      store,
+      resolveServer: () => ({
+        id: 's1',
+        name: 'notion',
+        transport: 'http',
+        url: 'https://mcp.test/mcp',
+      }),
+      startCallbackServer: server.start as never,
+      auth: (async () => 'REDIRECT') as never,
+      openExternal: vi.fn(),
+    });
+    expect(result.ok).toBe(false);
+    expect(store.access('s1')).toEqual({ access_token: 'old', expires_at: expiresAt });
+  });
+
   it('首轮即 AUTHORIZED 时不等待回调', async () => {
     const server = fakeCallbackServer(() => Promise.reject(new Error('不该等待')));
     const auth = vi.fn(async () => 'AUTHORIZED' as const);
@@ -416,17 +440,78 @@ describe('authorizeMcpServer · pi 1.0 OAuth 加固', () => {
       await as.close();
     }
   });
+
+  // 首选回调端口被占用退到随机端口时，DCR 登记的 redirect_uri 与本次不符；复用旧 client 会被严格比对的
+  // 授权服务器拒绝（真机上卡在浏览器错误页，Enso 干等到 300 秒超时）
+  it('回调端口变了：已存 client 没登记本次回调地址时重新注册，不复用旧 client', async () => {
+    const stale = 'http://127.0.0.1:43117/mcp/oauth/callback';
+    const as = await startFakeAuthorizationServer({ stale: [stale] });
+    try {
+      const store = newStore();
+      store.saveClientInformation(
+        's1',
+        { client_id: 'stale', redirect_uris: [stale] },
+        `${as.base}/mcp`
+      );
+      const result = await authorizeMcpServer('s1', {
+        store,
+        resolveServer: () => remote({ url: `${as.base}/mcp` }),
+        startCallbackServer: fakeCallbackServer('the-code', as.base).start as never,
+        openExternal: vi.fn(),
+      });
+      expect(result).toEqual({ ok: true });
+      expect(store.record('s1')?.clientInformation).toMatchObject({
+        redirect_uris: ['http://127.0.0.1:5000/cb'],
+      });
+    } finally {
+      await as.close();
+    }
+  });
+
+  // 端口回退时流程已按新回调地址重新注册了 client，用户随后取消：旧 token 只配旧 client，拆开恢复会让续期失败
+  it('授权未完成回滚时，旧 client 与旧 token 一起恢复', async () => {
+    const stale = {
+      client_id: 'stale',
+      redirect_uris: ['http://127.0.0.1:43117/mcp/oauth/callback'],
+    };
+    const as = await startFakeAuthorizationServer({ stale: stale.redirect_uris });
+    try {
+      const store = newStore();
+      store.saveClientInformation('s1', stale, `${as.base}/mcp`);
+      store.saveTokens('s1', { access_token: 'old', refresh_token: 'r-old' });
+      const result = await authorizeMcpServer('s1', {
+        store,
+        resolveServer: () => remote({ url: `${as.base}/mcp` }),
+        startCallbackServer: fakeCallbackServer(() => Promise.reject(new Error('用户关了浏览器')))
+          .start as never,
+        openExternal: vi.fn(),
+      });
+      expect(result.ok).toBe(false);
+      expect(store.record('s1')).toMatchObject({
+        clientInformation: stale,
+        tokens: { access_token: 'old', refresh_token: 'r-old' },
+      });
+    } finally {
+      await as.close();
+    }
+  });
 });
 
-/** loopback 上的最小授权服务器：PRM + AS 元数据（声明支持 iss）+ DCR + token */
-async function startFakeAuthorizationServer() {
+/**
+ * loopback 上的最小授权服务器：PRM + AS 元数据（声明支持 iss）+ DCR + token。
+ * 与真实服务一样按 client 登记的 redirect_uris 严格比对；preregistered 模拟之前注册过的 client
+ */
+async function startFakeAuthorizationServer(preregistered: Record<string, string[]> = {}) {
   const { createServer } = await import('node:http');
   let tokenRequests = 0;
-  const server = createServer((req, res) => {
+  const clients = new Map(Object.entries(preregistered));
+  const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', base);
-    const json = (body: unknown) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(body));
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const json = (payload: unknown, status = 200) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(payload));
     };
     if (url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
       return json({ resource: `${base}/mcp`, authorization_servers: [base] });
@@ -443,10 +528,17 @@ async function startFakeAuthorizationServer() {
       });
     }
     if (url.pathname === '/register') {
-      return json({ client_id: 'c1', redirect_uris: ['http://127.0.0.1:5000/cb'] });
+      const redirectUris = (JSON.parse(body) as { redirect_uris: string[] }).redirect_uris;
+      const clientId = `c${clients.size + 1}`;
+      clients.set(clientId, redirectUris);
+      return json({ client_id: clientId, redirect_uris: redirectUris });
     }
     if (url.pathname === '/token') {
       tokenRequests += 1;
+      const form = new URLSearchParams(body);
+      if (!clients.get(form.get('client_id') ?? '')?.includes(form.get('redirect_uri') ?? '')) {
+        return json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' }, 400);
+      }
       return json({ access_token: 'issued', token_type: 'Bearer' });
     }
     res.writeHead(404);

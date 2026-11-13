@@ -171,6 +171,13 @@ describe('isOpenableArtifact', () => {
     expect(isOpenableArtifact('tool.py', 0o644)).toBe(false);
     expect(isOpenableArtifact('a.txt', 0o755)).toBe(false);
   });
+  // 审计 J2：Windows 上 stat 的 mode 从不带执行位，只剩扩展名把关；旧黑名单漏了 hta/scr/pif 等，「用默认应用打开」会直接执行
+  it('Windows 下无执行位的程序与脚本也不交给默认应用', () => {
+    const windowsMode = 0o100666;
+    const names = 'hta scr pif lnk vbe jse wsf cpl msc reg'.split(' ').map((ext) => `a.${ext}`);
+    expect(names.filter((name) => isOpenableArtifact(name, windowsMode))).toEqual([]);
+    expect(isOpenableArtifact('report.pdf', windowsMode)).toBe(true);
+  });
 });
 
 describe('resolveArtifacts', () => {

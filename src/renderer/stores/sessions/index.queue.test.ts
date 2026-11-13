@@ -4,6 +4,7 @@ import {
   agentAbort,
   agentPrompt,
   agentRelease,
+  agentSpawn,
   bindSessionProjection,
   installSessionGlobals,
   loadSessionModules,
@@ -846,5 +847,106 @@ describe('typed Agent child projection', () => {
       { kind: 'initial', text: '帮我看看这个竞态问题' },
       { providerId: 'provider-1', modelId: 'model-1' }
     );
+  });
+});
+
+describe('IPC invoke 被拒时按失败分支收尾', () => {
+  const target = { providerId: 'p1', modelId: 'm1', cwd: '/workspace' };
+
+  function enableRewindResumeModel() {
+    settingsModule.useSettingsStore.setState({
+      projects: [{ id: 'project', name: 'Project', path: '/workspace' }],
+      providers: [
+        {
+          id: 'p1',
+          name: 'p1',
+          api: 'openai-completions',
+          apiKey: 'k',
+          baseUrl: 'https://example.test/v1',
+          enabled: true,
+          models: [{ id: 'm1' }],
+        },
+      ],
+      defaultModel: { providerId: 'p1', modelId: 'm1' },
+    });
+  }
+
+  beforeAll(async () => {
+    await loadSessionModules();
+  });
+
+  beforeEach(async () => {
+    await resetSessionHarness();
+  });
+
+  // Main 目前都返回结构化结果；一旦 invoke 本身被拒，不收尾的话乐观气泡永久残留
+  it('prompt 被拒：收回乐观气泡、原文退回输入框并报错', async () => {
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: { ...state.conversations.parent, started: true, status: 'idle' as const },
+      },
+    }));
+    agentPrompt.mockRejectedValueOnce(new Error('ipc closed'));
+    const before = store.getState().conversations.parent.messages.length;
+    const error = await store
+      .getState()
+      .send('hello', target, undefined, 'parent')
+      .catch((thrown: unknown) => thrown);
+    const after = store.getState().conversations.parent;
+    expect(after.messages).toHaveLength(before);
+    expect(after.draftText).toBe('hello');
+    expect(after).toMatchObject({ started: false, status: 'failed', error: 'ipc closed' });
+    expect(error).toBe('ipc closed');
+  });
+
+  it('首条消息 spawn 被拒：收回乐观气泡、清 spawning、原文退回输入框', async () => {
+    const store = sessionsModule.useSessionsStore;
+    agentSpawn.mockRejectedValueOnce(new Error('ipc closed'));
+    const error = await store
+      .getState()
+      .send('hello', target, undefined, 'parent')
+      .catch((thrown: unknown) => thrown);
+    const after = store.getState().conversations.parent;
+    expect(after.messages).toHaveLength(0);
+    expect(after.spawning).toBe(false);
+    expect(after.draftText).toBe('hello');
+    expect(after).toMatchObject({ status: 'failed', error: 'ipc closed' });
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(error).toBe('ipc closed');
+  });
+
+  it('resume 的 spawn 被拒：清 spawning 并标失败，之后可再次恢复', async () => {
+    enableRewindResumeModel();
+    const store = sessionsModule.useSessionsStore;
+    store.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: false,
+          spawning: false,
+          status: 'idle' as const,
+          sessionFile: '/tmp/cold.jsonl',
+          lastProviderId: 'p1',
+          lastModelId: 'm1',
+        },
+      },
+    }));
+    agentSpawn.mockRejectedValueOnce(new Error('ipc closed'));
+    await store
+      .getState()
+      .resumeConversation('parent')
+      .catch(() => undefined);
+    expect(store.getState().conversations.parent).toMatchObject({
+      spawning: false,
+      started: false,
+      status: 'failed',
+      error: 'ipc closed',
+    });
+    await store.getState().resumeConversation('parent');
+    expect(agentSpawn).toHaveBeenCalledTimes(2);
+    expect(store.getState().conversations.parent.started).toBe(true);
   });
 });
