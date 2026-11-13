@@ -1916,7 +1916,7 @@ export const useSessionsStore = create<SessionsState>()(
           });
         });
         if (event.type === 'parent-rejected' && event.reason.startsWith(STALE_SESSION_ERROR)) {
-          void recoverStaleSession(id, event.reason);
+          void recoverStaleSession(id, event.reason, event.identity.generation);
         }
         if (event.type === 'turn-completed' || event.type === 'turn-failed') {
           // 用户中断的轮次不自动续跑：清掉一次性标记后直接收口。
@@ -1948,7 +1948,11 @@ export const useSessionsStore = create<SessionsState>()(
        * 被拒。自动 resume 并按原序重投被拒消息，不让用户手动点「重新恢复」再重发。
        * 同一会话窗口期内只自愈一次，异常时退回原有的 failed + 手动恢复。
        */
-      async function recoverStaleSession(id: string, reason: string): Promise<void> {
+      async function recoverStaleSession(
+        id: string,
+        reason: string,
+        generation: string
+      ): Promise<void> {
         const conversation = get().conversations[id];
         if (!conversation) return;
         const now = Date.now();
@@ -1958,6 +1962,7 @@ export const useSessionsStore = create<SessionsState>()(
           conversation.parentId ||
           conversation.btwParentId ||
           !conversation.sessionFile ||
+          conversation.spawnRejection?.generation === generation ||
           now - (staleRecoveredAt.get(id) ?? -Infinity) < STALE_RECOVERY_WINDOW_MS
         ) {
           // 不自愈时这些回显确已被拒：标为「未发送」（可撤回），不停在「送达待确认」

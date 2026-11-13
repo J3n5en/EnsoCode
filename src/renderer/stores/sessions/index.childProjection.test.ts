@@ -390,6 +390,95 @@ describe('typed Agent child projection', () => {
     ]);
   });
 
+  const seedSpawnedParent = () =>
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          spawning: false,
+          status: 'idle' as const,
+          generation: undefined,
+          sessionFile: '/tmp/evicted.jsonl',
+          lastProviderId: 'p1',
+          lastModelId: 'm1',
+          messages: [
+            {
+              role: 'user' as const,
+              content: [{ type: 'text' as const, text: 'first' }],
+              optimistic: true,
+              deliveryId: 'd1',
+            },
+          ],
+        },
+      },
+    }));
+  const stale = (generation: string): RendererAgentEvent => ({
+    type: 'parent-rejected',
+    identity: { sessionId: 'parent', generation },
+    seq: 0,
+    reason: 'unknown or stale session generation: parent',
+  });
+
+  it('spawn 真实拒绝后紧跟的 STALE 不覆盖原因、不触发自愈', async () => {
+    enableRewindResumeModel();
+    agentSpawn.mockResolvedValue({ ok: true });
+    // 跳出上面自愈用例占用的 60s 窗口，确保「不自愈」由真实原因决定
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5 * 60_000);
+    try {
+      seedSpawnedParent();
+      onAgentEvent?.({
+        type: 'parent-rejected',
+        identity: { sessionId: 'parent', generation: 'pg1' },
+        seq: 0,
+        reason: 'oauth model not found',
+      });
+      onAgentEvent?.(stale('pg1'));
+      await Promise.resolve();
+    } finally {
+      now.mockRestore();
+    }
+    const conversation = sessionsModule.useSessionsStore.getState().conversations.parent;
+    expect(agentSpawn).not.toHaveBeenCalled();
+    expect(conversation.status).toBe('failed');
+    expect(conversation.error).toBe('oauth model not found');
+    expect(conversation.messages).toEqual([
+      expect.objectContaining({ deliveryId: 'd1', deliveryRejected: true }),
+    ]);
+  });
+
+  it('真实拒绝后新代 ready，之后只有 STALE 时仍自愈', async () => {
+    enableRewindResumeModel();
+    agentSpawn.mockResolvedValue({ ok: true });
+    // 上面的自愈用例已占用 60s 窗口
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 10 * 60_000);
+    try {
+      seedSpawnedParent();
+      onAgentEvent?.({
+        type: 'parent-rejected',
+        identity: { sessionId: 'parent', generation: 'pg1' },
+        seq: 0,
+        reason: 'oauth model not found',
+      });
+      onAgentEvent?.({
+        type: 'parent-ready',
+        identity: { sessionId: 'parent', generation: 'pg2' },
+        seq: 1,
+        sessionFile: '/tmp/evicted.jsonl',
+        model: { providerId: 'p1', modelId: 'm1' },
+      });
+      onAgentEvent?.(stale('pg2'));
+      await vi.waitFor(() =>
+        expect(agentSpawn).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'parent', resumeFile: '/tmp/evicted.jsonl' })
+        )
+      );
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('partialize never persists started and resets stale running status to idle', () => {
     sessionsModule.useSessionsStore.setState((state) => ({
       conversations: {
