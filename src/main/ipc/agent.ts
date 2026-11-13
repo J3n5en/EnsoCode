@@ -45,6 +45,7 @@ import {
   parseCreateConversationAuthorityRequest,
   parseTitleSummaryInput,
   parseUpdateConversationSelectionRequest,
+  STALE_SESSION_ERROR,
   THINKING_LEVELS,
 } from '@shared/types/agent';
 import { DELEGATION_NOTE_MAX, parseTaskCheck } from '@shared/types/bot';
@@ -1544,6 +1545,20 @@ export function registerAgentHandlers(): void {
         workerEvent.model
       );
       sourceBindings?.invalidateBindingsForConversation(workerEvent.identity.sessionId);
+    }
+    // 非 STALE 的 parent-rejected 只来自 spawn 失败：真实原因落主进程日志，renderer 侧会被后续 STALE 掩盖
+    if (
+      workerEvent.type === 'parent-rejected' &&
+      !workerEvent.reason.startsWith(STALE_SESSION_ERROR)
+    ) {
+      const selection = sourceAuthority?.conversation(workerEvent.identity.sessionId)?.selection;
+      console.warn('[agent] spawn rejected', {
+        sessionId: workerEvent.identity.sessionId,
+        generation: workerEvent.identity.generation,
+        providerId: selection?.providerId,
+        modelId: selection?.modelId,
+        reason: workerEvent.reason,
+      });
     }
     if (workerEvent.type === 'fork-done') {
       const pending = pendingWorktreeForks.get(workerEvent.targetConversationId);
