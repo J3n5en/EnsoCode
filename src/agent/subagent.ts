@@ -36,13 +36,31 @@ const BACKGROUND_RECEIPT_NOTE =
   'If the user asks for progress, say it is still running. Do not duplicate its work on the same files or topics. ' +
   'agentId and runId are internal ids — do not mention them to the user.';
 
-/** schema 校验前把超限的 timeoutMs 截到上限，不报错 */
-function clampWaitTimeout(params: unknown): unknown {
+/**
+ * schema 校验前归一化：漏传 operation 但带 description 与 prompt 视为 spawn，
+ * 其余缺失或非法 operation 抛可读错误；超限的 timeoutMs 截到上限，不报错
+ */
+export function normalizeSubagentArgs(params: unknown): unknown {
   if (!params || typeof params !== 'object' || Array.isArray(params)) return params;
-  const record = params as Record<string, unknown>;
-  if (typeof record.timeoutMs !== 'number' || !Number.isFinite(record.timeoutMs)) return params;
+  let record = params as Record<string, unknown>;
+  if (record.operation === undefined || record.operation === null) {
+    const filled = (value: unknown) => typeof value === 'string' && value.trim() !== '';
+    if (!filled(record.description) || !filled(record.prompt)) {
+      throw new Error(
+        `subagent requires operation. To spawn, pass operation:"spawn" with non-empty description and prompt; other operations: ${SUBAGENT_OPERATIONS.slice(1).join(', ')}`
+      );
+    }
+    record = { ...record, operation: 'spawn' };
+  } else if (
+    !SUBAGENT_OPERATIONS.includes(record.operation as (typeof SUBAGENT_OPERATIONS)[number])
+  ) {
+    throw new Error(
+      `unknown operation ${JSON.stringify(record.operation)}. Expected one of: ${SUBAGENT_OPERATIONS.join(', ')}`
+    );
+  }
+  if (typeof record.timeoutMs !== 'number' || !Number.isFinite(record.timeoutMs)) return record;
   const timeoutMs = Math.min(AGENT_WAIT_MAX_MS, Math.max(0, Math.round(record.timeoutMs)));
-  return timeoutMs === record.timeoutMs ? params : { ...record, timeoutMs };
+  return timeoutMs === record.timeoutMs ? record : { ...record, timeoutMs };
 }
 
 function waitReceiptOf(value: unknown): AgentWaitReceipt | undefined {
@@ -228,15 +246,15 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
     name: 'subagent',
     label: 'Subagent',
     description:
-      'Spawn requires non-empty description and prompt parameters; omit both for every other operation. ' +
+      'Every call must pass operation, including operation:"spawn". Spawn requires non-empty description and prompt parameters; omit both for every other operation. ' +
       'Create and control delegated agents. mode=task is one-shot; mode=coworker preserves context for multiple Runs. ' +
       'All operations are Main-authorized. Spawning and sending are asynchronous unless wait:true; ' +
       'you are notified automatically when a Run finishes.',
     promptSnippet:
-      'subagent: spawn requires non-empty description and prompt. Other operations omit both. ' +
+      'subagent: always pass operation (operation:"spawn" to spawn). spawn requires non-empty description and prompt. Other operations omit both. ' +
       'Spawn task/coworker agents, list owned agents, send Runs or bound messages, wait/report/stop a Run, or dismiss an Agent. Default spawn mode=task and wait=false; finished Runs notify you automatically.',
     promptGuidelines: [
-      'spawn requires non-empty description and prompt. Omit both for every other operation.',
+      'Every subagent call must pass operation; to spawn, pass operation:"spawn". spawn requires non-empty description and prompt. Omit both for every other operation.',
       'On spawn, description is the title the user sees in subagent history. Write a short human-readable label of the work, not an id or slug. name is an optional internal handle and is not the title.',
       'Agent and Run are different identities: use runId for wait/report/stop and agentId for send/dismiss.',
       "Delegate when the work matches an available agent type, when two independent investigations can run in parallel, when answering needs broad exploration across several files, or when a long-running job can proceed in the background. For a known file, symbol, or single fact, use the direct tool (read for a known path, grep for a specific symbol) instead, and do not repeat work you delegated. Once you've delegated a search, don't also run it yourself.",
@@ -338,9 +356,9 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       required: ['operation'],
       additionalProperties: false,
     } as unknown as ToolDefinition['parameters'],
-    prepareArguments: clampWaitTimeout as unknown as ToolDefinition['prepareArguments'],
+    prepareArguments: normalizeSubagentArgs as unknown as ToolDefinition['prepareArguments'],
     async execute(toolCallId, params, signal) {
-      const input = clampWaitTimeout(params) as Record<string, unknown>;
+      const input = normalizeSubagentArgs(params) as Record<string, unknown>;
       const request = normalize(input);
       if (!request) {
         throw new Error(`invalid subagent parameters: ${describeInvalidSubagentParams(input)}`);
