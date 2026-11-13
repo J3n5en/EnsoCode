@@ -89,7 +89,7 @@ function defaultProfile(): SecretaryProfile {
   return parsed;
 }
 
-function visibleProjects(
+export function visibleProjects(
   projects: readonly ProjectAuthority[],
   profile: SecretaryProfile
 ): ProjectAuthority[] {

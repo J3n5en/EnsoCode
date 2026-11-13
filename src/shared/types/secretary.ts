@@ -121,6 +121,13 @@ export interface SecretaryTodo {
   doneAt?: number;
 }
 
+/** 界面对待办的操作；dispatch 是用户亲手点出，不再走自主度确认 */
+export type SecretaryTodoMutate =
+  | { action: 'add'; text: string; dueAt?: number; projectId?: string }
+  | { action: 'update'; todoId: string; text?: string; dueAt?: number | null; done?: boolean }
+  | { action: 'remove'; todoId: string }
+  | { action: 'dispatch'; todoId: string; projectId?: string; prompt?: string };
+
 export type SecretarySchedule = {
   id: string;
   name: string;

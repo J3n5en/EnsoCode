@@ -486,6 +486,13 @@ export const IPC_PRODUCT_COVERAGE = {
   CONVERSATIONS_PATCH: excluded('Cross-renderer conversation persistence transport.'),
   CONVERSATIONS_READ: excluded('Conversation persistence read; Enso uses typed domain handlers.'),
   SECRETARY_DEV_CREATE_SESSION: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_GET_STATE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_STATE_CHANGED: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_RESOLVE_PROPOSAL: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_REFERENCE_CONVERSATIONS: excluded(
+    'Experimental secretary agent; not an Enso capability.'
+  ),
+  SECRETARY_TODO_MUTATE: excluded('Experimental secretary agent; not an Enso capability.'),
   REMOTE_LEADER_CHANGED: excluded('Remote desktop renderer coordination transport.'),
   REMOTE_UPLOAD: excluded('Remote desktop browser upload transport.'),
   CONFIG_SYNC_EXPORT: excluded('Settings-only portable configuration export flow.'),

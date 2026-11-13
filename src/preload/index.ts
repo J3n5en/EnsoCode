@@ -233,6 +233,12 @@ import type {
   NodePairResult,
   NodesStatus,
 } from '@shared/types/nodes';
+import type {
+  DispatchDraft,
+  SecretaryProposal,
+  SecretaryState,
+  SecretaryTodoMutate,
+} from '@shared/types/secretary';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import type {
   TerminalCreateRequest,
@@ -334,6 +340,37 @@ const electronAPI = {
       worktree?: boolean;
     }): Promise<{ ok: true; conversationId: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DEV_CREATE_SESSION, request),
+    /** 工作台与聊天卡片读同一份 Main 状态；开关关闭时 enabled 为 false */
+    getState: (): Promise<SecretaryState> => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_STATE),
+    onStateChanged: (callback: (state: SecretaryState) => void): (() => void) => {
+      const listener = (_event: unknown, state: SecretaryState) => callback(state);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);
+    },
+    /** 同一提案确认两次只执行一次 */
+    resolveProposal: (
+      proposalId: string,
+      action: 'confirm' | 'reject',
+      edits?: Partial<DispatchDraft>
+    ): Promise<{ ok: true; proposal: SecretaryProposal } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_RESOLVE_PROPOSAL, {
+        proposalId,
+        action,
+        ...(edits ? { edits } : {}),
+      }),
+    /** 用户把会话点名叫给秘书；Main 逐个校验，只返回通过的 id */
+    referenceConversations: (
+      secretaryConversationId: string,
+      conversationIds: string[]
+    ): Promise<{ ok: true; named: string[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_REFERENCE_CONVERSATIONS, {
+        secretaryConversationId,
+        conversationIds,
+      }),
+    mutateTodo: (
+      request: SecretaryTodoMutate
+    ): Promise<{ ok: true; todoId: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TODO_MUTATE, request),
   },
 
   modelDirectory: {

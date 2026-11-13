@@ -1,11 +1,12 @@
 import type { SecretaryOp } from '@shared/secretary/tools';
+import { secretaryDispatchHandlers } from './dispatch';
 import { secretaryReadHandlers } from './readers';
 
 export type SecretaryOpResult = { ok: true; result: unknown } | { ok: false; error: string };
 
-/** 调用方由 Main 按 worker 事件身份确定，不从模型参数里取 */
+/** 调用方由 Main 按 worker 事件身份确定，不从模型参数里取；界面直接发起的写操作为 null */
 export interface SecretaryOpContext {
-  secretaryConversationId: string;
+  secretaryConversationId: string | null;
 }
 
 export type SecretaryOpHandler = (
@@ -18,12 +19,7 @@ const unavailable: SecretaryOpHandler = () => ({ ok: false, error: 'unavailable'
 
 export const SECRETARY_OP_HANDLERS: Record<SecretaryOp, SecretaryOpHandler> = {
   ...secretaryReadHandlers,
-  session_create: unavailable,
-  session_send: unavailable,
-  session_stop: unavailable,
-  todo_item_add: unavailable,
-  todo_item_update: unavailable,
-  todo_item_dispatch: unavailable,
+  ...secretaryDispatchHandlers,
   schedule_add: unavailable,
   schedule_list: unavailable,
   schedule_remove: unavailable,

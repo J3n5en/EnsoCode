@@ -10,6 +10,16 @@ export const IPC_CHANNELS = {
   CONVERSATIONS_READ: 'conversations:read',
   /** 秘书：dev-only 的 Main 原生建会话入口，U10 删除 */
   SECRETARY_DEV_CREATE_SESSION: 'secretary:dev-create-session',
+  /** 秘书：工作台与聊天卡片读的同一份 Main 状态 */
+  SECRETARY_GET_STATE: 'secretary:get-state',
+  /** main → 主界面 renderer：秘书状态变化 */
+  SECRETARY_STATE_CHANGED: 'secretary:state-changed',
+  /** 秘书：确认或拒绝提案 */
+  SECRETARY_RESOLVE_PROPOSAL: 'secretary:resolve-proposal',
+  /** 秘书：用户把会话点名叫给秘书 */
+  SECRETARY_REFERENCE_CONVERSATIONS: 'secretary:reference-conversations',
+  /** 秘书：界面编辑、删除、派出待办 */
+  SECRETARY_TODO_MUTATE: 'secretary:todo-mutate',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

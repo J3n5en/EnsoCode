@@ -7,6 +7,7 @@ import { type ChildSessionIdentity, isUuid, type SessionIdentity } from '@shared
 import { conversationCwd } from '@shared/conversationCwd';
 import type { PluginSessionStatus } from '@shared/extensionPlugins/events';
 import { normalizeLocale } from '@shared/i18n';
+import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { resolveSshTarget } from '@shared/ssh';
 import {
@@ -196,7 +197,7 @@ import {
   sendImageTool,
 } from './bots';
 import { agentSessionIndex } from './sessionIndex';
-import { readSettings, readSshTimeoutSeconds } from './settings';
+import { readPersistedConversation, readSettings, readSshTimeoutSeconds } from './settings';
 import {
   removeRegisteredWorktree,
   sessionWorktree,
@@ -576,6 +577,55 @@ export async function releaseRootFromMain(sessionId: string): Promise<AgentActio
   return identity
     ? await releaseParentSession(identity)
     : { ok: false, error: STALE_SESSION_ERROR };
+}
+
+export function isRootSessionAlive(sessionId: string): boolean {
+  return agentSessionIndex.isAlive(sessionId);
+}
+
+export function abortRootFromMain(sessionId: string): void {
+  const identity = exactIdentity(sessionId);
+  if (identity) abortSession(identity);
+}
+
+/** 秘书给已释放的派出会话续发消息：按持久化元数据恢复 worker，之后走普通 prompt 路径 */
+export async function resumeRootFromMain(sessionId: string): Promise<AgentActionResult> {
+  const row = readPersistedConversation(sessionId);
+  const conversation = row ? persistedConversationForResume(sessionId, row) : null;
+  const worktree = sessionWorktree(sessionId);
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  const plan = planPairResume({
+    alive: agentSessionIndex.isAlive(sessionId),
+    conversation,
+    projectPath: project?.state === 'active' ? project.canonicalPath : undefined,
+    worktreePath: worktree?.path,
+    worktreeMissing: Boolean(worktree && !existsSync(worktree.path)),
+    loadLocalSkills: readSettingsState()?.loadLocalSkills === true,
+  });
+  if (plan.type === 'snapshot') return { ok: true };
+  if (plan.type === 'skip') return { ok: false, error: plan.reason };
+  return spawnRootFromMain(plan.request);
+}
+
+function persistedConversationForResume(
+  sessionId: string,
+  row: Record<string, unknown>
+): PersistedPairConversation | null {
+  const projectId = typeof row.projectId === 'string' ? row.projectId : '';
+  if (!projectId) return null;
+  return {
+    sessionId,
+    projectId,
+    ...(typeof row.sessionFile === 'string' ? { sessionFile: row.sessionFile } : {}),
+    ...(typeof row.lastProviderId === 'string' ? { lastProviderId: row.lastProviderId } : {}),
+    ...(typeof row.lastModelId === 'string' ? { lastModelId: row.lastModelId } : {}),
+    ...(typeof row.reasoningEnabled === 'boolean'
+      ? { reasoningEnabled: row.reasoningEnabled }
+      : {}),
+    ...(typeof row.thinkingLevel === 'string' ? { thinkingLevel: row.thinkingLevel } : {}),
+    ...(typeof row.presetId === 'string' ? { presetId: row.presetId } : {}),
+    ...(typeof row.approvalMode === 'string' ? { approvalMode: row.approvalMode } : {}),
+  };
 }
 
 /**
