@@ -569,10 +569,7 @@ function scheduleReembed(): void {
   reembedRun = prev
     .then(async () => {
       if (ac.signal.aborted) return;
-      if (!db) {
-        lastEmbeddingError = 'memory database is not open yet';
-        return;
-      }
+      if (!db) return; // 库是懒打开的：这里不报错也不开库，等 memoryDb() 首次打开时会再调度
       const e = await memoryEmbedder();
       if (!e || ac.signal.aborted || !db) return;
       const job = await runReembedJob(db, e, { signal: ac.signal });

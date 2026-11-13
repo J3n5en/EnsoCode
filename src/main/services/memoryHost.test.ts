@@ -1316,7 +1316,7 @@ describe('memoryHost embedding 配置与生命周期', () => {
     const joined = getMemoryEmbedder();
     next.resolve(next.model);
     const [first, second] = await Promise.all([nextPending, joined]);
-    expect(error).not.toContain('obsolete load failed');
+    expect(error ?? '').not.toContain('obsolete load failed');
     expect(second).toBe(first);
     expect(first?.model).toBe(next.modelId);
     expect(acquireModel).toHaveBeenCalledTimes(2);
