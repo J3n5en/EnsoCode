@@ -1,4 +1,5 @@
 import { type DefaultModelRef, resolveChatReasoning } from '@shared/defaultModel';
+import { projectDisplayName } from '@shared/projectName';
 import type { ProjectGroup, ThinkingLevel } from '@shared/types';
 import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -33,6 +34,8 @@ const PRESET_COLORS = [
 interface MovableProject {
   id: string;
   name: string;
+  path: string;
+  alias?: string;
 }
 
 interface GroupEditorDialogProps {
@@ -75,7 +78,9 @@ export function GroupEditorDialog({
   const movable = creating ? (projects ?? []) : [];
   const query = projectQuery.trim().toLowerCase();
   const visibleProjects = query
-    ? movable.filter((project) => project.name.toLowerCase().includes(query))
+    ? movable.filter((project) =>
+        [project.alias ?? '', project.name].some((text) => text.toLowerCase().includes(query))
+      )
     : movable;
 
   useEffect(() => {
@@ -196,7 +201,9 @@ export function GroupEditorDialog({
                         checked={selectedIds.has(project.id)}
                         onCheckedChange={() => toggleProject(project.id)}
                       />
-                      <span className="min-w-0 flex-1 truncate text-sm">{project.name}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm">
+                        {projectDisplayName(project)}
+                      </span>
                     </label>
                   ))}
                   {visibleProjects.length === 0 && (

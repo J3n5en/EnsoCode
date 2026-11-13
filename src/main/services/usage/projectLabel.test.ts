@@ -15,6 +15,21 @@ const worktrees = [
 ];
 
 describe('usageProjectLabel', () => {
+  it('项目设置了别名时统计标签用别名', () => {
+    const aliased = buildUsageProjectAliases({
+      projects: [{ ...projects[0], alias: '线上' }],
+      worktrees,
+    });
+    expect(usageProjectLabel('enso-code', '/Users/x/project/enso-code', aliased)).toBe('线上');
+    expect(
+      usageProjectLabel(
+        '3085e88f',
+        '/Users/x/Library/Application Support/enso-code/worktrees/proj-uuid/3085e88f',
+        aliased
+      )
+    ).toBe('线上');
+  });
+
   const aliases = buildUsageProjectAliases({
     projects,
     worktrees,

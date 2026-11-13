@@ -3,6 +3,7 @@ import { conversationDotTone } from '@shared/conversationDotTone';
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { planPhase } from '@shared/planMode';
+import { projectDisplayName } from '@shared/projectName';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import { isVirtualRef, modelDisplayName } from '@shared/virtualModels';
 import { Loader2 } from 'lucide-react';
@@ -381,7 +382,7 @@ export function ChatView() {
       <ChatSessionTimeline
         conversationId={chrome.id}
         cwd={toolCwd}
-        emptyTitle={project?.name ?? 'EnsoCode'}
+        emptyTitle={project ? projectDisplayName(project) : 'EnsoCode'}
         onSuggestion={project ? pickSuggestion : undefined}
         timelineRef={timelineRef}
       />

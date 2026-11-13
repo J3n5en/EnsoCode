@@ -29,6 +29,7 @@ function readSettingsProjects(): UsageProjectRef[] {
       id: project.id,
       name: typeof project.name === 'string' ? project.name : '',
       path: project.path,
+      ...(typeof project.alias === 'string' ? { alias: project.alias } : {}),
     });
   }
   return out;

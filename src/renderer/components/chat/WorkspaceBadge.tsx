@@ -1,3 +1,4 @@
+import { projectDisplayName } from '@shared/projectName';
 import type { OpenInApp } from '@shared/types';
 import { Code2, Copy, Folder, FolderOpen, GitBranch, SquareTerminal } from 'lucide-react';
 import { type ReactNode, useCallback, useState } from 'react';
@@ -25,7 +26,7 @@ export function WorkspaceBadge({
   openDisabled,
   children,
 }: {
-  project: { id: string; name: string; kind?: string };
+  project: { id: string; name: string; path: string; alias?: string; kind?: string };
   conversationId: string;
   path: string;
   branch?: string;
@@ -38,7 +39,7 @@ export function WorkspaceBadge({
   // 远端客户端：打开 / 用应用打开都发生在宿主机上，只留复制路径
   const local = project.kind !== 'ssh' && !window.electronAPI.remote;
   const scratch = project.kind === 'scratch';
-  const label = scratch ? t('Temporary chats') : project.name;
+  const label = scratch ? t('Temporary chats') : projectDisplayName(project);
   const refreshApps = useCallback(() => {
     if (!local) return;
     window.electronAPI.projects

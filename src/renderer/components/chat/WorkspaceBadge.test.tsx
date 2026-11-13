@@ -45,10 +45,16 @@ function setup(remote: boolean) {
   root = createRoot(container);
 }
 
-async function render() {
+async function render(
+  project: { id: string; name: string; path: string; alias?: string } = {
+    id: 'p1',
+    name: 'demo',
+    path: '/root/demo',
+  }
+) {
   await act(async () => {
     root.render(
-      <WorkspaceBadge project={{ id: 'p1', name: 'demo' }} conversationId="c1" path="/root/demo">
+      <WorkspaceBadge project={project} conversationId="c1" path="/root/demo">
         <span />
       </WorkspaceBadge>
     );
@@ -80,5 +86,13 @@ describe('WorkspaceBadge', () => {
     expect(container.textContent).not.toContain('Editors');
     expect(container.textContent).not.toContain('Open in');
     expect(container.textContent).toContain('Copy Path');
+  });
+
+  it('shows the project alias instead of the stored name', async () => {
+    setup(false);
+    openInApps.mockResolvedValue([]);
+    await render({ id: 'p1', name: 'demo', path: '/root/demo', alias: '线上' });
+    expect(container.textContent).toContain('线上');
+    expect(container.textContent).not.toContain('demo');
   });
 });

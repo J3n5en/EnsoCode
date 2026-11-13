@@ -1,5 +1,6 @@
 import { imageSendErrorText } from '@shared/bots/sendImage';
 import type { TeamFileError } from '@shared/bots/team';
+import { projectDisplayName } from '@shared/projectName';
 import type { BotChat, BotProfile } from '@shared/types/bot';
 import type { Project } from '@shared/types/project';
 import type { TFunction } from '@/i18n';
@@ -92,7 +93,7 @@ export function workspaceLabel(
     case 'project': {
       const projectId = chat.workspace.projectId;
       const project = projects.find((item) => item.id === projectId);
-      return project ? project.alias || project.name : t('Missing project');
+      return project ? projectDisplayName(project) : t('Missing project');
     }
   }
 }

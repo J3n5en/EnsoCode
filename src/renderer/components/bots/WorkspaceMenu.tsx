@@ -1,3 +1,4 @@
+import { projectDisplayName } from '@shared/projectName';
 import type { BotChat } from '@shared/types/bot';
 import type { BotChatWorkspaceInput } from '@shared/types/botIpc';
 import { Check, ChevronDown, Folder, FolderOpen } from 'lucide-react';
@@ -31,7 +32,7 @@ export function WorkspaceMenu({ chat, className }: { chat: BotChat; className?: 
       : { input: { kind: 'chat-home' }, label: t('Standalone workspace') },
     ...localProjects(projects).map((project) => ({
       input: { kind: 'project' as const, projectId: project.id },
-      label: project.alias || project.name,
+      label: projectDisplayName(project),
     })),
   ];
 

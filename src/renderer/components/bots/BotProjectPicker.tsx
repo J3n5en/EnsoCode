@@ -1,4 +1,4 @@
-import { projectNameFromPath } from '@shared/projectName';
+import { projectDisplayName, projectNameFromPath } from '@shared/projectName';
 import type { RecentProject } from '@shared/types';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -58,7 +58,7 @@ export function BotProjectPicker({
     return [
       ...projects.map((project) => ({
         path: project.path,
-        label: project.alias || project.name,
+        label: projectDisplayName(project),
         detail: project.path,
         projectId: project.id,
       })),

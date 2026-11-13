@@ -1897,7 +1897,7 @@ export function Sidebar({
         description={
           pendingRemove?.kind === 'project'
             ? t('"{{name}}" and its {{count}} conversations will be removed from the list.', {
-                name: pendingRemove.project.name,
+                name: projectDisplayName(pendingRemove.project),
                 count: pendingRemove.conversationIds.length,
               })
             : pendingRemove?.kind === 'archived'

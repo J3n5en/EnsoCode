@@ -1,7 +1,10 @@
+import { projectDisplayName } from '@shared/projectName';
+
 export interface UsageProjectRef {
   id: string;
   name: string;
   path: string;
+  alias?: string;
 }
 
 export interface UsageWorktreeRef {
@@ -26,7 +29,7 @@ function leaf(value: string): string {
 }
 
 function projectLabel(project: UsageProjectRef): string {
-  return project.name || leaf(project.path);
+  return projectDisplayName(project) || leaf(project.path);
 }
 
 export function buildUsageProjectAliases(

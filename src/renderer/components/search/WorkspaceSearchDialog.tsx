@@ -185,7 +185,7 @@ export function WorkspaceSearchDialog({
         return conversationToSearchDoc({
           conversationId: conversation.id,
           projectId: conversation.projectId,
-          projectName: project?.name ?? conversation.projectId,
+          projectName: project ? projectDisplayName(project) : conversation.projectId,
           title: conversation.title,
           lastActiveAt: conversationActivityAt(conversation),
           archived: conversation.archived,
