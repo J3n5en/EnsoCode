@@ -361,13 +361,12 @@ export function parseSchedules(value: unknown): SecretarySchedule[] {
     const createdAt = time(item.createdAt);
     if (!id || !name || !prompt || createdAt === undefined) continue;
     if (schedules.some((schedule) => schedule.id === id)) continue;
-    // at / cron 二选一由 schedule_add 校验；这里保留已写下的数据，不静默丢一个
     const at = isIsoTime(item.at) ? item.at : undefined;
     const cron = isCron(item.cron) ? item.cron.trim() : undefined;
-    if (!at && !cron) continue;
-    const schedule: SecretarySchedule = { id, name, prompt, createdAt };
-    if (at) schedule.at = at;
-    if (cron) schedule.cron = cron;
+    if (Boolean(at) === Boolean(cron)) continue;
+    const schedule: SecretarySchedule = at
+      ? { id, name, prompt, createdAt, at }
+      : { id, name, prompt, createdAt, cron: cron as string };
     const lastFiredAt = time(item.lastFiredAt);
     if (lastFiredAt !== undefined) schedule.lastFiredAt = lastFiredAt;
     if (item.system === 'daily-brief') schedule.system = 'daily-brief';

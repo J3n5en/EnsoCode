@@ -330,4 +330,19 @@ describe('parseSchedules', () => {
       { id: 's7', name: '坏系统', prompt: 'x', cron: '0 9 * * *', createdAt: 1 },
     ]);
   });
+
+  it('drops entries that set both at and cron', () => {
+    expect(
+      parseSchedules([
+        {
+          id: 'both',
+          name: 'a',
+          prompt: 'x',
+          at: '2026-11-13T09:00:00.000Z',
+          cron: '0 9 * * *',
+          createdAt: 1,
+        },
+      ])
+    ).toEqual([]);
+  });
 });

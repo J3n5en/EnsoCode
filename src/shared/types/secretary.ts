@@ -121,18 +121,17 @@ export interface SecretaryTodo {
   doneAt?: number;
 }
 
-export interface SecretarySchedule {
+export type SecretarySchedule = {
   id: string;
   name: string;
   prompt: string;
-  /** 一次性，ISO 时间 */
-  at?: string;
-  /** 五段式本地时间；与 at 二选一 */
-  cron?: string;
   createdAt: number;
   lastFiredAt?: number;
   system?: 'daily-brief' | { todoId: string };
-}
+} & (
+  | { /** 一次性，ISO 时间 */ at: string; cron?: never }
+  | { /** 五段式本地时间 */ cron: string; at?: never }
+);
 
 export interface SecretaryAuditEntry {
   at: number;
