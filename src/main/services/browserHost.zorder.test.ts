@@ -6,6 +6,7 @@ import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 const mock = vi.hoisted(() => ({
   dir: '',
   contents: [] as any[],
+  bounds: [] as { width: number; height: number }[],
   workbench: { name: 'workbench', setBounds() {} } as any,
 }));
 vi.mock('../windows/createAppWindow', () => ({ getWorkbenchView: () => mock.workbench }));
@@ -62,14 +63,20 @@ vi.mock('electron', () => ({
           attach() {},
           detach() {},
           on() {},
-          sendCommand: async () => ({}),
+          sendCommand: async (method: string) =>
+            method === 'Page.captureScreenshot' ? { data: 'png' } : {},
         },
       };
       mock.contents.push(contents);
       this.webContents = contents;
     }
     setBackgroundColor() {}
-    setBounds() {}
+    setBounds(bounds: { width: number; height: number }) {
+      mock.bounds.push({ width: bounds.width, height: bounds.height });
+    }
+    getBounds() {
+      return { x: 0, y: 0, ...(mock.bounds.at(-1) ?? { width: 0, height: 0 }) };
+    }
     setBorderRadius() {}
     setVisible() {}
   },
@@ -112,6 +119,7 @@ const viewport = { x: 0, y: 0, width: 600, height: 400 };
 
 beforeEach(() => {
   mock.contents.length = 0;
+  mock.bounds.length = 0;
 });
 
 const setup = async () => {
@@ -164,4 +172,30 @@ it('hibernateAll 关掉 guest webContents，进托盘才能丢掉 renderer', asy
   expect(host.listSearchableTabs().some((tab) => tab.url.startsWith('https://example.com'))).toBe(
     true
   );
+});
+
+// CDP 截图会直接改 guest 页面视图尺寸并还原到截图开始时的旧值；Windows 不随容器自愈，必须按容器重新对齐
+const bounced = () =>
+  mock.bounds
+    .slice(-2)
+    .map((b) => b.height)
+    .join() === `${viewport.height + 1},${viewport.height}`;
+
+it('截图后按当前容器尺寸重新对齐显示中的 guest', async () => {
+  const { host } = await setup();
+  mock.bounds.length = 0;
+  await host.invoke('conv', 'screenshot', {});
+  expect(bounced()).toBe(true);
+});
+
+it('隐藏时截过图，再以相同矩形显示也要重新对齐', async () => {
+  const { host } = await setup();
+  host.setViewport('tab-a', 'conv', null);
+  await host.invoke('conv', 'screenshot', {});
+  mock.bounds.length = 0;
+  host.setViewport('tab-a', 'conv', viewport);
+  expect(bounced()).toBe(true);
+  mock.bounds.length = 0;
+  host.setViewport('tab-a', 'conv', { ...viewport, x: 1 });
+  expect(bounced()).toBe(false);
 });
