@@ -51,6 +51,34 @@ beforeEach(async () => {
 });
 
 describe('会话账本', () => {
+  it('单主界面写回时 activeId 与 version 随写回落盘', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a'), b: row('b') }, ['a', 'b']);
+    sync.readConversationsFor(desktop, disk);
+    const value = { ...disk, state: { ...disk.state, activeId: 'b' } };
+    const merged = sync.mergeConversationsWrite(desktop, disk, value, 0) as Blob;
+    expect(merged.state.activeId).toBe('b');
+
+    const solo = peer();
+    peers.local = solo;
+    const first = sync.mergeConversationsWrite(solo, undefined, value, 0) as Blob;
+    expect(first.version).toBe(3);
+    expect(first.state.activeId).toBe('b');
+  });
+
+  it('多主界面时远端写回不改磁盘上的 activeId', () => {
+    const desktop = peer();
+    const phone = peer();
+    peers.local = desktop;
+    peers.remote = [phone];
+    const disk = blob({ a: row('a'), b: row('b') }, ['a', 'b']);
+    sync.readConversationsFor(phone, disk);
+    const value = { ...disk, state: { ...disk.state, activeId: 'b' } };
+    const merged = sync.mergeConversationsWrite(phone, disk, value, 0) as Blob;
+    expect(merged.state.activeId).toBe('a');
+  });
+
   it('Main 插入的行不会被 renderer 的旧值写回抹掉', () => {
     const desktop = peer();
     peers.local = desktop;
@@ -60,7 +88,7 @@ describe('会话账本', () => {
     const inserted = sync.applyMainConversationsPatch(disk, insert('m', ['m', 'a']));
     expect(desktop.sent).toEqual([{ ...insert('m', ['m', 'a']), seq: 1 }]);
 
-    expect(sync.mergeConversationsWrite(desktop, inserted, disk, 0)).toBe(inserted);
+    expect(sync.mergeConversationsWrite(desktop, inserted, disk, 0)).toEqual(inserted);
   });
 
   it('先回放已确认的补丁再求差量，renderer 的删除才会落到磁盘', () => {
@@ -127,7 +155,7 @@ describe('会话账本', () => {
     expect(reread).toEqual({ value: inserted, seq: 1 });
 
     const second = sync.applyMainConversationsPatch(inserted, insert('n', ['n', 'm', 'a']));
-    expect(sync.mergeConversationsWrite(desktop, second, inserted, reread.seq)).toBe(second);
+    expect(sync.mergeConversationsWrite(desktop, second, inserted, reread.seq)).toEqual(second);
   });
 
   it('settings:read 只在账本缺失时建账，不重置已有账本', () => {

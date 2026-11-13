@@ -110,12 +110,32 @@ export function mergeConversationsWrite(
   }
   ledgers.set(sender.id, { base: value, pending });
   const local = diffConversations(expected, value);
-  if (isEmptyConversationsPatch(local)) return current ?? value;
-  for (const peer of mainPeers()) {
-    if (peer.id !== sender.id) pushTo(peer, local);
+  const peers = mainPeers().filter((peer) => peer.id !== sender.id);
+  const empty = isEmptyConversationsPatch(local);
+  const merged = empty ? (current ?? value) : applyConversationsPatch(current, local);
+  if (!empty) {
+    for (const peer of peers) pushTo(peer, local);
+    notifyMerged(local);
   }
-  notifyMerged(local);
-  return applyConversationsPatch(current, local);
+  return peers.length === 0 ? withWriterFields(merged, value) : merged;
+}
+
+/**
+ * 补丁只管会话行与 order。独占时 activeId、version 等其余字段仍以写回方为准（原整份覆盖语义）；
+ * 多主界面时不让任何一端改磁盘上的 activeId。
+ */
+function withWriterFields(merged: unknown, value: unknown): unknown {
+  const record = (v: unknown): Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const mergedState = record(record(merged).state);
+  return {
+    ...record(value),
+    state: {
+      ...record(record(value).state),
+      conversations: mergedState.conversations,
+      order: mergedState.order,
+    },
+  };
 }
 
 /** Main 侧写入入口：把补丁并进磁盘值并推给所有主界面，返回应落盘的值 */
