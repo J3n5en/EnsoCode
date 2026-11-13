@@ -22,6 +22,7 @@ let insertUiElement:
   | null = null;
 let insertImage: ((image: AttachedImage) => void) | null = null;
 let ingestFiles: ((files: File[]) => void) | null = null;
+let insertPaths: ((paths: string[]) => void) | null = null;
 let submitPayload: ((payload: ComposerPayload) => boolean) | null = null;
 
 export function registerComposerInsert(fn: InsertFn): () => void {
@@ -125,5 +126,19 @@ export function composerAcceptsFiles(): boolean {
 export function ingestComposerFiles(files: File[]): boolean {
   if (!ingestFiles) return false;
   ingestFiles(files);
+  return true;
+}
+
+/** 拖放浮窗投来的磁盘路径，插为文件卡片 */
+export function registerComposerInsertPaths(fn: (paths: string[]) => void): () => void {
+  insertPaths = fn;
+  return () => {
+    if (insertPaths === fn) insertPaths = null;
+  };
+}
+
+export function insertComposerPaths(paths: string[]): boolean {
+  if (!insertPaths) return false;
+  insertPaths(paths);
   return true;
 }

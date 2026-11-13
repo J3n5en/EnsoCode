@@ -1,6 +1,10 @@
 import { FolderPlus } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
-import { composerAcceptsFiles, ingestComposerFiles } from '@/components/chat/composerMentionBridge';
+import {
+  composerAcceptsFiles,
+  ingestComposerFiles,
+  insertComposerPaths,
+} from '@/components/chat/composerMentionBridge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -32,6 +36,9 @@ import {
 } from '@/lib/projectDrop';
 import { Z_INDEX } from '@/lib/z-index';
 import { showLocalCodeView } from '@/stores/bots/mode';
+
+const SHELF_COMPOSER_RETRY_MS = 200;
+const SHELF_COMPOSER_RETRIES = 15;
 
 type PendingDrop = {
   plan: DropPlan<File>;
@@ -99,6 +106,41 @@ export function ProjectDropOverlay(): ReactNode {
   const [active, setActive] = useState(false);
   const [pending, setPending] = useState<PendingDrop | null>(null);
   useOverlayGuard(active);
+
+  // 拖放浮窗（macOS 实验功能）：托盘冷启动时 Composer 晚挂载，短暂重试后再提示
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (api.remote) return;
+    let disposed = false;
+    let retry: number | undefined;
+    const attempt = (paths: string[], tries: number) => {
+      if (disposed || insertComposerPaths(paths)) return;
+      if (tries >= SHELF_COMPOSER_RETRIES) {
+        addToast({ type: 'info', title: t('Open a conversation to add files') });
+        return;
+      }
+      retry = window.setTimeout(() => attempt(paths, tries + 1), SHELF_COMPOSER_RETRY_MS);
+    };
+    const take = () => {
+      void api.files.takeShelfDrop().then((deliveries) => {
+        for (const { action, paths, skipped = 0 } of deliveries) {
+          if (action === 'project') {
+            const directories = paths.slice(0, MAX_DROPPED_PROJECTS);
+            void enqueueProjectImport(() => importDroppedFolders(directories, skipped, t));
+          } else if (paths.length > 0) {
+            attempt(paths, 0);
+          }
+        }
+      });
+    };
+    take();
+    const off = api.files.onShelfDrop(take);
+    return () => {
+      disposed = true;
+      window.clearTimeout(retry);
+      off();
+    };
+  }, [t]);
 
   useEffect(() => {
     const root = document.documentElement;

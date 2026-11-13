@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
 import { app, type BrowserWindow, crashReporter } from 'electron';
+import { syncDropShelf } from './desktop/dropShelf';
 import {
   registerLocalImageProtocolHandler,
   registerLocalImageSchemePrivileges,
@@ -204,6 +205,7 @@ if (!gotTheLock) {
         },
         syncTrayToggleShortcut,
         syncAppLanguage: () => installAppMenu(readLocale()),
+        syncDropShelf,
       },
     });
     await secureStores;
@@ -237,6 +239,7 @@ if (!gotTheLock) {
       persisted?.state && typeof persisted.state === 'object' ? persisted.state : {}
     ) as Record<string, unknown>;
     syncTrayToggleShortcut(persistedState.keybindings);
+    syncDropShelf(persistedState.dropShelfEnabled === true);
     syncMemoryEmbeddingFromSettings(persistedState);
     syncMemoryDistillFromSettings(persistedState);
     syncMemoryKgFromSettings(persistedState);

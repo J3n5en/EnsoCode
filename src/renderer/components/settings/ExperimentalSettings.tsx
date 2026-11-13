@@ -10,6 +10,9 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
   const setBotModeEnabled = useSettingsStore((s) => s.setBotModeEnabled);
   const scratchSessionsEnabled = useSettingsStore((s) => s.scratchSessionsEnabled);
   const setScratchSessionsEnabled = useSettingsStore((s) => s.setScratchSessionsEnabled);
+  const dropShelfEnabled = useSettingsStore((s) => s.dropShelfEnabled);
+  const setDropShelfEnabled = useSettingsStore((s) => s.setDropShelfEnabled);
+  const isMac = window.electronAPI.env.platform === 'darwin' && !window.electronAPI.remote;
   return (
     <div className="space-y-6">
       <div>
@@ -42,6 +45,17 @@ export function ExperimentalSettings({ onOpenBots }: { onOpenBots: () => void })
           checked={scratchSessionsEnabled}
           onChange={setScratchSessionsEnabled}
         />
+        {isMac && (
+          <SwitchRow
+            rowId="experimental.dropShelf"
+            title={t('Drop shelf')}
+            description={t(
+              'When you drag files in Finder, a small panel appears at the top right of the screen. Drop them on it to reference them in the current conversation, or drop folders to open them as projects, even when EnsoCode is minimized or in the tray.'
+            )}
+            checked={dropShelfEnabled}
+            onChange={setDropShelfEnabled}
+          />
+        )}
       </div>
     </div>
   );

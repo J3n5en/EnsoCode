@@ -172,6 +172,7 @@ export const SETTINGS_STATE_FIELDS = [
   'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
+  'dropShelfEnabled',
   'botMaxRunningTurns',
   'botDiscussModeEnabled',
   'botRouteClassifier',
@@ -235,6 +236,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
+  'dropShelfEnabled',
   'botMaxRunningTurns',
   'botDiscussModeEnabled',
   'botRouteClassifier',
@@ -284,6 +286,10 @@ function notifyMemoryEmbeddingSettings(settings: Record<string, unknown>): void 
 function notifyTrayToggleShortcut(settings: Record<string, unknown>): void {
   const keybindings = settingsStateOf(settings).keybindings;
   appDesktop().syncTrayToggleShortcut(keybindings);
+}
+
+function notifyDropShelf(settings: Record<string, unknown>): void {
+  appDesktop().syncDropShelf(settingsStateOf(settings).dropShelfEnabled === true);
 }
 
 function notifyAppLanguage(
@@ -473,6 +479,7 @@ function scheduleWrite(
     isDirty = true;
     notifyMemoryEmbeddingSettings(data);
     notifyTrayToggleShortcut(data);
+    notifyDropShelf(data);
     notifySpeechSettings(data);
     notifyAppLanguage(previous, data);
     if (
@@ -656,6 +663,7 @@ export function commitSettingsTransaction(
   isDirty = false;
   notifyMemoryEmbeddingSettings(next);
   notifyTrayToggleShortcut(next);
+  notifyDropShelf(next);
   notifySpeechSettings(next);
   notifyAppLanguage(latest, next);
   try {

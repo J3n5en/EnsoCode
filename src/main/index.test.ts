@@ -51,6 +51,7 @@ vi.mock('./ipc/settings', () => ({
   consumeTrayReenterAfterUpdate: () => mocks.consumeTrayReenter(),
 }));
 vi.mock('./ipc/desktop', () => ({ registerDesktopIpcHandlers: vi.fn() }));
+vi.mock('./desktop/dropShelf', () => ({ syncDropShelf: vi.fn() }));
 vi.mock('./ipc/window', () => ({
   openPluginInstallFromProtocol: vi.fn(),
   noteOpenFolder: vi.fn(),

@@ -42,6 +42,12 @@ export const IPC_CHANNELS = {
   APP_FLUSH_PERSIST_RESPONSE: 'app:flush-persist-response',
   APP_SET_BADGE_COUNT: 'app:set-badge-count',
 
+  // 拖放浮窗（实验，macOS）：浮窗 ⇄ Main ⇄ 主窗口
+  DROP_SHELF_STATE: 'drop-shelf:state',
+  DROP_SHELF_DROP: 'drop-shelf:drop',
+  DROP_SHELF_PENDING: 'drop-shelf:pending',
+  DROP_SHELF_TAKE: 'drop-shelf:take',
+
   // 本地供应商扫描/导入
   PROVIDERS_SCAN_LOCAL: 'providers:scan-local',
   PROVIDERS_COLLECT_IMPORT: 'providers:collect-import',

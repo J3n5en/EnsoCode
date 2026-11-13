@@ -50,6 +50,7 @@ import {
   registerComposerIngestFiles,
   registerComposerInsert,
   registerComposerInsertImage,
+  registerComposerInsertPaths,
   registerComposerInsertText,
   registerComposerInsertUiElement,
   registerComposerSubmitPayload,
@@ -617,10 +618,18 @@ export function Composer({
 
   useEffect(() => {
     if (isolated) return;
-    return registerComposerIngestFiles((files) => {
+    const offFiles = registerComposerIngestFiles((files) => {
       ingestFiles(files);
       editorRef.current?.focus();
     });
+    const offPaths = registerComposerInsertPaths((paths) => {
+      for (const path of paths) editorRef.current?.insertFileChip(path);
+      editorRef.current?.focus();
+    });
+    return () => {
+      offFiles();
+      offPaths();
+    };
   }, [isolated, ingestFiles]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
