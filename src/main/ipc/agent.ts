@@ -1876,7 +1876,7 @@ export function registerAgentHandlers(): void {
         sendSecretaryResultToSession(identity, requestId, { ok: false, error: 'disabled' });
         return;
       }
-      void invokeSecretaryOp(op, params).then(
+      void invokeSecretaryOp(op, params, { secretaryConversationId: identity.sessionId }).then(
         (result) =>
           sendSecretaryResultToSession(
             identity,

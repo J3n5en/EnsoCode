@@ -3304,9 +3304,10 @@ export class SessionSupervisor {
       checkpoints,
       runawayGuard: runaway,
     });
+    // 秘书不订阅 MCP 热插拔：之后连上的 MCP 工具不走装配时的允许列表
     this.rememberMcpHotplug(
       sessionId,
-      new Set(directMcp.map((server) => this.mcpServerKey(server))),
+      new Set(secretaryMode ? [] : directMcp.map((server) => this.mcpServerKey(server))),
       (tools) => {
         for (const tool of tools) {
           if (!mcpTools.some((existing) => existing.name === tool.name)) mcpTools.push(tool);
