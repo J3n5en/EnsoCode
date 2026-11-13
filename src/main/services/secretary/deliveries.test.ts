@@ -157,6 +157,24 @@ describe('注入', () => {
     expect(h.state.prompts).toHaveLength(1);
   });
 
+  it('恢复期间再次触发投递也只注入一次', async () => {
+    const h = harness({ file: { outbox: [update()] }, alive: { sec1: false } });
+    await Promise.all([flushDeliveries(h.ports, 1000), flushDeliveries(h.ports, 1000)]);
+    expect(h.state.prompts).toHaveLength(1);
+  });
+
+  it('恢复一直失败时同样按 6 次上限放弃注入，只留工作台', async () => {
+    const h = harness({ file: { outbox: [update()] }, alive: { sec1: false } });
+    h.ports.resume = async () => ({ ok: false, error: 'boom' });
+    let now = 1000;
+    for (let i = 0; i < 10; i++) {
+      await flushDeliveries(h.ports, now);
+      now += 10 * 60 * 60 * 1000;
+    }
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.file.inflight).toBeUndefined();
+  });
+
   it('没有秘书会话时只更新工作台，不注入也不丢结果', async () => {
     const h = harness({ file: { outbox: [update()] }, rows: {}, conversations: [] });
     await flushDeliveries(h.ports, 1000);

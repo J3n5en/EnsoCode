@@ -145,7 +145,18 @@ function planGroups(ports: DeliveryPorts): Group[] {
  * 目标空闲时把一批结果注入秘书会话。一次只投一批：在途批次没结算前不叠加，
  * 否则秘书那边会同时收到两条互相矛盾的进展。
  */
-export async function flushDeliveries(ports: DeliveryPorts, now: number): Promise<void> {
+export function flushDeliveries(ports: DeliveryPorts, now: number): Promise<void> {
+  // 恢复 worker 要 await：期间再来的事件与定时器不能各自再注入同一批
+  const running = flushing.get(ports);
+  if (running) return running;
+  const flush = flushOnce(ports, now).finally(() => flushing.delete(ports));
+  flushing.set(ports, flush);
+  return flush;
+}
+
+const flushing = new WeakMap<DeliveryPorts, Promise<void>>();
+
+async function flushOnce(ports: DeliveryPorts, now: number): Promise<void> {
   let attempt = 1;
   const pending = ports.file().inflight;
   if (pending) {
@@ -171,19 +182,19 @@ export async function flushDeliveries(ports: DeliveryPorts, now: number): Promis
 
   for (const group of planGroups(ports)) {
     if (ports.status(group.target).state !== 'idle') continue;
-    if (!ports.alive(group.target)) {
-      const resumed = await ports.resume(group.target);
-      if (!resumed.ok) {
-        armRetry(ports, group.target, [], attempt, now);
-        continue;
-      }
-    }
     const batch = takeBatch(group.updates, {
       max: BATCH_MAX_ITEMS,
       maxChars: BATCH_MAX_CHARS,
     });
     if (batch.length === 0) continue;
     const keys = batch.map((update) => update.key);
+    if (!ports.alive(group.target)) {
+      const resumed = await ports.resume(group.target);
+      if (!resumed.ok) {
+        armRetry(ports, group.target, keys, attempt, now);
+        return;
+      }
+    }
     const deliveryId = ports.newId();
     const result = ports.prompt(group.target, formatSessionUpdates(batch), deliveryId);
     if (!result.ok) {
