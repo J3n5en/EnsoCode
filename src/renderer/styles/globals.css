@@ -151,9 +151,13 @@
     -webkit-app-region: no-drag;
   }
 
-  /* 卡片顶栏整行可拖，行内的可交互元素逐个豁免，免得每处手写 no-drag */
+  /**
+   * 卡片顶栏整行可拖，行内的可交互元素逐个豁免，免得每处手写 no-drag。
+   * 需要 !important：Windows 无边框窗口（titleBarOverlay + thickFrame，见 main/windows/windowChrome.ts）上
+   * 普通声明的 no-drag 会被窗口拖拽层覆盖，顶栏按钮点击被当成拖动窗口；与下方菜单规则是同一个坑，macOS 不受影响但无害。
+   */
   .drag-region :is(button, a, input, textarea, select, [role]) {
-    -webkit-app-region: no-drag;
+    -webkit-app-region: no-drag !important;
   }
 
   /**
