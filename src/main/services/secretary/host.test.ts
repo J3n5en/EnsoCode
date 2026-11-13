@@ -1,7 +1,11 @@
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { parseProfile } from '@shared/secretary/parse';
 import type { RendererAgentEvent } from '@shared/types/agent';
-import type { SecretaryDispatchFile, SecretaryProposal } from '@shared/types/secretary';
+import type {
+  SecretaryDispatchFile,
+  SecretaryProposal,
+  SecretarySchedule,
+} from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
 import { createSecretaryHost, type SecretaryHost, type SecretaryHostPorts } from './host';
 
@@ -48,6 +52,9 @@ interface Harness {
     >;
     enabled: boolean;
     notify: 'needs-user' | 'with-done' | 'off';
+    schedules: SecretarySchedule[];
+    briefAt?: string;
+    now: number;
     notifications: { title: string; body: string }[];
     published: number;
     prompts: string[];
@@ -67,6 +74,8 @@ function harness(
     statuses: { c1: running },
     enabled: options.enabled ?? true,
     notify: options.notify ?? 'needs-user',
+    schedules: [],
+    now: 0,
     notifications: [],
     published: 0,
     prompts: [],
@@ -91,16 +100,24 @@ function harness(
     profile: () => {
       const base = parseProfile({});
       if (!base) throw new Error('default profile');
-      return { ...base, notify: state.notify };
+      return {
+        ...base,
+        notify: state.notify,
+        ...(state.briefAt ? { dailyBriefAt: state.briefAt } : {}),
+      };
     },
     todos: () => [],
+    schedules: () => structuredClone(state.schedules),
+    saveSchedules: (schedules) => {
+      state.schedules = structuredClone(schedules);
+    },
     notify: (build) => {
       state.notifications.push(build('zh'));
     },
     publish: () => {
       state.published += 1;
     },
-    now: () => 0,
+    now: () => state.now,
     newId: () => `id-${++seq}`,
   };
   return { ports, host: createSecretaryHost(ports), state };
@@ -332,5 +349,80 @@ describe('投递结算', () => {
     );
     expect(h.state.file.inflight).toMatchObject({ attempt: 2, nextAttemptAt: 30_000 });
     expect(h.state.file.outbox).toHaveLength(1);
+  });
+});
+
+const localAt = (hour: number, minute = 0): number =>
+  new Date(2026, 10, 13, hour, minute, 0, 0).getTime();
+
+function onceSchedule(extra: Partial<SecretarySchedule> = {}): SecretarySchedule {
+  return {
+    id: 'sch1',
+    name: '提醒',
+    prompt: '看看进展',
+    createdAt: localAt(8),
+    at: new Date(localAt(9)).toISOString(),
+    ...extra,
+  } as SecretarySchedule;
+}
+
+function cronSchedule(extra: Partial<SecretarySchedule> = {}): SecretarySchedule {
+  return {
+    id: 'sch2',
+    name: '每日简报',
+    prompt: '写简报',
+    createdAt: localAt(8),
+    cron: '0 9 * * *',
+    ...extra,
+  } as SecretarySchedule;
+}
+
+describe('定时', () => {
+  const scheduleUpdates = (h: Harness) =>
+    h.state.file.outbox.filter((update) => update.kind === 'schedule');
+
+  it('到点的定时进回传队列，一次性任务随后删除', () => {
+    const h = harness({});
+    h.state.schedules = [onceSchedule()];
+    h.host.tick(localAt(9));
+    expect(scheduleUpdates(h)).toHaveLength(1);
+    expect(scheduleUpdates(h)[0]).toMatchObject({ scheduleId: 'sch1' });
+    expect(h.state.schedules).toEqual([]);
+    expect(h.state.published).toBe(1);
+  });
+
+  it('开关关闭时不触发定时', () => {
+    const h = harness({ enabled: false });
+    h.state.schedules = [onceSchedule()];
+    h.state.now = localAt(9);
+    h.host.tick(localAt(9));
+    h.host.recover();
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.schedules).toHaveLength(1);
+  });
+
+  it('启动补投错过的一次性任务，cron 只算下一次', () => {
+    const h = harness({});
+    h.state.schedules = [onceSchedule(), cronSchedule()];
+    h.state.now = localAt(10);
+    h.host.recover();
+    expect(scheduleUpdates(h)).toHaveLength(1);
+    expect(scheduleUpdates(h)[0]).toMatchObject({ scheduleId: 'sch1' });
+    expect(h.state.schedules).toEqual([
+      expect.objectContaining({ id: 'sch2', lastFiredAt: localAt(10) }),
+    ]);
+  });
+
+  it('每日简报按档案生成，到点后进队列', () => {
+    const h = harness({});
+    h.state.briefAt = '09:00';
+    h.state.now = localAt(8);
+    h.host.tick(localAt(8));
+    expect(h.state.schedules).toEqual([
+      expect.objectContaining({ id: 'system:daily-brief', cron: '0 9 * * *' }),
+    ]);
+    h.state.now = localAt(9);
+    h.host.tick(localAt(9));
+    expect(scheduleUpdates(h)).toHaveLength(1);
   });
 });

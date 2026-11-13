@@ -1,6 +1,7 @@
 import type { SecretaryOp } from '@shared/secretary/tools';
 import { secretaryDispatchHandlers } from './dispatch';
 import { secretaryReadHandlers } from './readers';
+import { secretaryScheduleHandlers } from './schedules';
 
 export type SecretaryOpResult = { ok: true; result: unknown } | { ok: false; error: string };
 
@@ -20,9 +21,7 @@ const unavailable: SecretaryOpHandler = () => ({ ok: false, error: 'unavailable'
 export const SECRETARY_OP_HANDLERS: Record<SecretaryOp, SecretaryOpHandler> = {
   ...secretaryReadHandlers,
   ...secretaryDispatchHandlers,
-  schedule_add: unavailable,
-  schedule_list: unavailable,
-  schedule_remove: unavailable,
+  ...secretaryScheduleHandlers,
   secretary_profile_propose: unavailable,
 };
 

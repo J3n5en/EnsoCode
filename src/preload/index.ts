@@ -236,6 +236,7 @@ import type {
 import type {
   DispatchDraft,
   SecretaryProposal,
+  SecretaryScheduleView,
   SecretaryState,
   SecretaryTodoMutate,
 } from '@shared/types/secretary';
@@ -378,6 +379,15 @@ const electronAPI = {
       text?: string;
     }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GOAL_ACTION, request),
+    /** 全部定时（含系统生成的每日简报与待办提醒），下一次触发时间由 Main 算 */
+    listSchedules: (): Promise<
+      { ok: true; schedules: SecretaryScheduleView[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST),
+    /** 系统生成的条目由档案与待办派生，删除会被拒绝 */
+    removeSchedule: (
+      scheduleId: string
+    ): Promise<{ ok: true; scheduleId: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, { scheduleId }),
   },
 
   modelDirectory: {

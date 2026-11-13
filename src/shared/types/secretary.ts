@@ -144,6 +144,18 @@ export type SecretarySchedule = {
   | { /** 五段式本地时间 */ cron: string; at?: never }
 );
 
+/** 设置页与工具共用的定时投影：下一次触发时间由 Main 算 */
+export interface SecretaryScheduleView {
+  id: string;
+  name: string;
+  prompt: string;
+  at?: string;
+  cron?: string;
+  nextRunAt?: number;
+  lastFiredAt?: number;
+  system?: 'daily-brief' | { todoId: string };
+}
+
 export interface SecretaryAuditEntry {
   at: number;
   secretaryConversationId: string | null;

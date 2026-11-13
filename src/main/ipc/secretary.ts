@@ -36,6 +36,11 @@ import {
   referenceConversations,
 } from '../services/secretary/requests';
 import {
+  listSchedules,
+  removeSchedule,
+  secretarySchedulePorts,
+} from '../services/secretary/schedules';
+import {
   createSessionFromMain,
   type MainSessionRequest,
   type MainSessionResult,
@@ -198,6 +203,10 @@ const hostPorts: SecretaryHostPorts = {
   resume: (conversationId) => resumeRootFromMain(conversationId),
   profile: () => secretaryStore().profile(),
   todos: () => secretaryStore().todos(),
+  schedules: () => secretaryStore().schedules(),
+  saveSchedules: (schedules) => {
+    secretaryStore().saveSchedules(schedules);
+  },
   notify: (build) => void notifyDesktop().notifySecretary(build),
   publish: () => broadcastState(),
   now: () => Date.now(),
@@ -220,6 +229,12 @@ function parseGoalAction(
     action,
     ...(typeof request.text === 'string' ? { text: request.text } : {}),
   };
+}
+
+function parseScheduleIdRequest(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const request = value as Record<string, unknown>;
+  return isNonEmptyString(request.scheduleId) ? request.scheduleId : null;
 }
 
 function secretaryState(): Promise<SecretaryState> {
@@ -279,6 +294,20 @@ export function registerSecretaryHandlers(): void {
     const parsed = parseTodoMutateRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
     return mutateTodo(secretaryDispatchPorts, parsed);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, async (event) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return { ok: true, schedules: listSchedules(secretarySchedulePorts) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const scheduleId = parseScheduleIdRequest(request);
+    if (!scheduleId) return { ok: false, error: 'invalid request' };
+    return removeSchedule(secretarySchedulePorts, scheduleId, { secretaryConversationId: null });
   });
 
   // 派出会话已经存在时开关关闭也不能让它失去驱动者，所以这里只查发起方与行的归属

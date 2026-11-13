@@ -125,14 +125,27 @@ function untrustedSource(update: SecretaryUpdate): string {
   return isResultUpdate(update) ? `session:${update.conversationId}` : 'secretary';
 }
 
-/** 回传给秘书的正文：最后一句先脱敏再包成不可信内容，防止会话正文里的指令被当成命令 */
+function formatLine(update: SecretaryUpdate): string {
+  const head = `- [${update.kind}] ${update.text}`;
+  if (!update.lastText) return head;
+  return `${head}\n${wrapUntrusted(untrustedSource(update), redactSecrets(update.lastText))}`;
+}
+
+/**
+ * 回传给秘书的正文：最后一句先脱敏再包成不可信内容，防止会话正文里的指令被当成命令。
+ * 定时到点是秘书自己写的待办，与派出会话的结果分开包裹，模型才知道哪条该照做。
+ */
 export function formatSessionUpdates(batch: readonly SecretaryUpdate[]): string {
-  const lines = batch.map((update) => {
-    const head = `- [${update.kind}] ${update.text}`;
-    if (!update.lastText) return head;
-    return `${head}\n${wrapUntrusted(untrustedSource(update), redactSecrets(update.lastText))}`;
-  });
-  return `<session-updates>\n${lines.join('\n')}\n</session-updates>`;
+  const blocks: string[] = [];
+  const results = batch.filter((update) => update.kind !== 'schedule');
+  const schedules = batch.filter((update) => update.kind === 'schedule');
+  if (results.length > 0)
+    blocks.push(`<session-updates>\n${results.map(formatLine).join('\n')}\n</session-updates>`);
+  if (schedules.length > 0)
+    blocks.push(
+      `<secretary-schedule>\n${schedules.map(formatLine).join('\n')}\n</secretary-schedule>`
+    );
+  return blocks.join('\n');
 }
 
 export function proposalUpdate(proposal: SecretaryProposal, at: number): SecretaryUpdate {

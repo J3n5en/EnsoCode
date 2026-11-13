@@ -14,6 +14,8 @@ describe('isRemoteChannelAllowed', () => {
       IPC_CHANNELS.SECRETARY_GET_STATE,
       IPC_CHANNELS.SECRETARY_RESOLVE_PROPOSAL,
       IPC_CHANNELS.SECRETARY_REFERENCE_CONVERSATIONS,
+      IPC_CHANNELS.SECRETARY_SCHEDULES_LIST,
+      IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE,
     ]) {
       expect(isRemoteChannelAllowed(ch, false)).toBe(true);
     }

@@ -7,6 +7,7 @@ import type {
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryResultKind,
+  SecretarySchedule,
   SecretaryTodo,
   SecretaryUpdate,
 } from '@shared/types/secretary';
@@ -27,6 +28,7 @@ import {
   stalled,
   updateKey,
 } from './results';
+import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 
 const TICK_MS = 60_000;
 
@@ -44,6 +46,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   enabled(): boolean;
   profile(): SecretaryProfile | null;
   todos(): SecretaryTodo[];
+  schedules(): SecretarySchedule[];
+  saveSchedules(schedules: SecretarySchedule[]): void;
   notify(build: (lang: 'zh' | 'en') => { title: string; body: string }): void;
   publish(): void;
   now(): number;
@@ -160,6 +164,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     });
   }
 
+  /** 到点的定时进回传队列，与结果共用一次投递；返回是否改了 dispatch 文件 */
+  function fireSchedules(file: SecretaryDispatchFile, now: number): boolean {
+    const fired = fireDue(ports.schedules(), now);
+    if (fired.changed) ports.saveSchedules(fired.schedules);
+    if (fired.updates.length === 0) return false;
+    file.outbox = fired.updates.reduce(enqueueUpdate, file.outbox);
+    return true;
+  }
+
   const host: SecretaryHost = {
     onAgentEvent(event, changes) {
       if (!ports.enabled()) return;
@@ -216,6 +229,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
     tick(now = ports.now()) {
       if (!ports.enabled()) return;
+      // 系统定时是档案与待办的派生状态，每分钟重算一次，没变化不写盘
+      syncSystemSchedules(ports, ports.profile(), ports.todos());
       const file = ports.file();
       const records = Object.values(file.dispatched);
       const statuses: Record<string, SecretarySessionStatus> = {};
@@ -236,6 +251,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         file.outbox = enqueueUpdate(file.outbox, proposalUpdate(transitioned.proposal, now));
         changed = true;
       }
+      if (fireSchedules(file, now)) changed = true;
       if (changed) {
         ports.save(file);
         ports.publish();
@@ -246,6 +262,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     recover() {
       if (!ports.enabled()) return;
       const now = ports.now();
+      // 应用没运行期间错过的 cron 只算下一次，不补投
+      const skipped = skipMissedCron(ports.schedules(), now);
+      if (skipped.changed) ports.saveSchedules(skipped.schedules);
       const file = ports.file();
       let changed = false;
       for (const record of Object.values(file.dispatched)) {
@@ -255,10 +274,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         recordResult(file, record, 'interrupted', now);
         changed = true;
       }
+      // 一次性任务错过就在启动时补投一次
+      if (fireSchedules(file, now)) changed = true;
       if (changed) {
         ports.save(file);
         ports.publish();
       }
+      syncSystemSchedules(ports, ports.profile(), ports.todos());
       recoverDeliveries(ports, now);
       flush(now);
     },

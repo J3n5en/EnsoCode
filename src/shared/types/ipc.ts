@@ -22,6 +22,10 @@ export const IPC_CHANNELS = {
   SECRETARY_TODO_MUTATE: 'secretary:todo-mutate',
   /** 秘书：派出会话的目标由 Main 续跑，界面只发指令 */
   SECRETARY_GOAL_ACTION: 'secretary:goal-action',
+  /** 秘书：全部定时（含系统生成的每日简报与待办提醒） */
+  SECRETARY_SCHEDULES_LIST: 'secretary:schedules-list',
+  /** 秘书：删除一条定时；系统生成的条目由档案与待办派生，不接受删除 */
+  SECRETARY_SCHEDULE_REMOVE: 'secretary:schedule-remove',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',
