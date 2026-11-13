@@ -5,6 +5,7 @@ import type {
   SecretaryDispatchFile,
   SecretaryProposal,
   SecretarySchedule,
+  SecretaryTodo,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
 import { createSecretaryHost, type SecretaryHost, type SecretaryHostPorts } from './host';
@@ -53,6 +54,7 @@ interface Harness {
     enabled: boolean;
     notify: 'needs-user' | 'with-done' | 'off';
     schedules: SecretarySchedule[];
+    todos: SecretaryTodo[];
     briefAt?: string;
     now: number;
     notifications: { title: string; body: string }[];
@@ -75,6 +77,7 @@ function harness(
     enabled: options.enabled ?? true,
     notify: options.notify ?? 'needs-user',
     schedules: [],
+    todos: [],
     now: 0,
     notifications: [],
     published: 0,
@@ -106,7 +109,7 @@ function harness(
         ...(state.briefAt ? { dailyBriefAt: state.briefAt } : {}),
       };
     },
-    todos: () => [],
+    todos: () => structuredClone(state.todos),
     schedules: () => structuredClone(state.schedules),
     saveSchedules: (schedules) => {
       state.schedules = structuredClone(schedules);
@@ -423,6 +426,23 @@ describe('定时', () => {
     ]);
     h.state.now = localAt(9);
     h.host.tick(localAt(9));
+    expect(scheduleUpdates(h)).toHaveLength(1);
+  });
+
+  it('待办到期时进回传队列，提醒不会在到点前被重算删掉', () => {
+    const h = harness({});
+    h.state.todos = [
+      { id: 'td1', text: '交周报', createdAt: 0, updatedAt: 0, dueAt: localAt(9) + 30_000 },
+    ];
+    h.state.now = localAt(9);
+    h.host.tick(localAt(9));
+    expect(h.state.schedules).toHaveLength(1);
+    h.state.now = localAt(9) + 60_000;
+    h.host.tick(localAt(9) + 60_000);
+    expect(scheduleUpdates(h)).toEqual([
+      expect.objectContaining({ scheduleId: 'system:todo:td1' }),
+    ]);
+    h.host.tick(localAt(9) + 120_000);
     expect(scheduleUpdates(h)).toHaveLength(1);
   });
 });

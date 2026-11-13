@@ -229,8 +229,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
     tick(now = ports.now()) {
       if (!ports.enabled()) return;
-      // 系统定时是档案与待办的派生状态，每分钟重算一次，没变化不写盘
-      syncSystemSchedules(ports, ports.profile(), ports.todos());
       const file = ports.file();
       const records = Object.values(file.dispatched);
       const statuses: Record<string, SecretarySessionStatus> = {};
@@ -256,6 +254,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         ports.save(file);
         ports.publish();
       }
+      // 系统定时是档案与待办的派生状态，每分钟重算一次；放在触发之后，否则刚到期的待办提醒先被重算删掉
+      syncSystemSchedules(ports, ports.profile(), ports.todos());
       flush(now);
     },
 
