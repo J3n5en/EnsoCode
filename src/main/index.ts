@@ -55,6 +55,7 @@ import {
   maybeNotify,
   maybeNotifyBot,
   notifyBotChat,
+  notifySecretary,
   setViewedSession,
 } from './services/notifications';
 import { startPairGuest, stopPairGuest } from './services/pairGuest';
@@ -187,7 +188,7 @@ if (!gotTheLock) {
         closeBrowser: (key) => browserHost.closeSession(key),
         notifyChat: (chatId, build) => notifyBotChat(chatId, build),
       },
-      notify: { maybeNotify, maybeNotifyBot, setViewedSession },
+      notify: { maybeNotify, maybeNotifyBot, notifySecretary, setViewedSession },
       file: {
         openPdf: openBotPdfWindow,
         openWorkspacePdf: openDesktopPdfWindow,

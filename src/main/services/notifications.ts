@@ -156,6 +156,16 @@ export async function notifyBotChat(
   });
 }
 
+/** 秘书的派出结果通知：主窗口聚焦时不弹，点击只把主窗口拉回前台 */
+export async function notifySecretary(
+  build: (lang: 'zh' | 'en') => { title: string; body: string }
+): Promise<void> {
+  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
+  if (getMainWindow()?.isFocused()) return;
+  const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
+  notify('secretary', title, body, () => void focusMainWindow());
+}
+
 /**
  * 后台通知：对待审批/轮完成/会话失败弹系统通知。
  * 仅当「主窗口聚焦且用户正看着事件所属会话」时抑制——看别的会话/设置页照弹。

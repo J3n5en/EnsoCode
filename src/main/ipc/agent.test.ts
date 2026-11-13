@@ -133,6 +133,7 @@ vi.mock('../services/desktopHooks', async (importOriginal) => {
     notify: {
       maybeNotify: vi.fn(),
       maybeNotifyBot: mocks.maybeNotifyBot,
+      notifySecretary: vi.fn(async () => {}),
       setViewedSession: vi.fn(),
     },
   });

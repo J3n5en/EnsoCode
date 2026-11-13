@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app } from '@platform';
-import { projectNameFromPath } from '@shared/projectName';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   canOperate,
@@ -13,17 +12,16 @@ import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agen
 import type {
   DispatchDraft,
   SecretaryAuditEntry,
-  SecretaryCard,
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryProposal,
   SecretaryState,
   SecretaryTodo,
   SecretaryTodoMutate,
-  SecretaryUpdate,
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
+import { buildBoard, proposalUpdate } from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
@@ -529,31 +527,6 @@ export type ResolveProposalResult =
   | { ok: true; proposal: SecretaryProposal }
   | { ok: false; error: string };
 
-function proposalUpdateText(proposal: SecretaryProposal): string {
-  switch (proposal.status) {
-    case 'succeeded':
-      return '提案已执行';
-    case 'failed':
-      return `提案执行失败：${proposal.error ?? 'unknown'}`;
-    case 'rejected':
-      return '用户拒绝了提案';
-    default:
-      return `提案状态：${proposal.status}`;
-  }
-}
-
-function proposalUpdate(proposal: SecretaryProposal, at: number): SecretaryUpdate {
-  return {
-    key: `proposal:${proposal.id}:${proposal.status}`,
-    at,
-    text: proposalUpdateText(proposal),
-    kind: 'proposal',
-    proposalId: proposal.id,
-    status: proposal.status,
-    secretaryConversationId: proposal.secretaryConversationId,
-  };
-}
-
 async function finishProposal(
   ports: SecretaryDispatchPorts,
   proposalId: string,
@@ -722,9 +695,6 @@ export interface SecretaryStatePorts {
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
 }
 
-/** 工作台最小投影：待确认提案进 needsYou，派出会话按 lastState 分 running / done */
-type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
-
 export async function buildSecretaryState(
   ports: SecretaryStatePorts,
   extra: { enabled: boolean; projectId: string | null }
@@ -732,56 +702,18 @@ export async function buildSecretaryState(
   const file = ports.dispatchFile();
   const rows = await ports.rows();
   const projects = await ports.projects();
-  const projectName = (projectId: string): string => {
-    const project = projects.find((candidate) => candidate.projectId === projectId);
-    return project ? projectNameFromPath(project.canonicalPath) : '';
-  };
-
-  const needsYou: SecretaryCard[] = Object.values(file.proposals)
-    .filter((proposal) => proposal.status === 'pending')
-    .sort((left, right) => left.createdAt - right.createdAt)
-    .map((proposal) => ({
-      kind: 'proposal',
-      proposal,
-      ...(proposal.kind === 'dispatch'
-        ? { projectName: projectName(proposal.draft.projectId) }
-        : {}),
-    }));
-
-  const running: SessionCard[] = [];
-  const done: SessionCard[] = [];
+  const statuses: Record<string, SecretarySessionStatus> = {};
   for (const record of Object.values(file.dispatched)) {
-    const row = rows[record.conversationId];
-    if (!row) continue;
-    const status = await ports.status(record.conversationId);
-    const card: SessionCard = {
-      kind: 'session',
-      conversationId: record.conversationId,
-      projectId: record.projectId,
-      projectName: projectName(record.projectId),
-      title: typeof row.title === 'string' ? row.title : '',
-      state: row.sessionFile ? status.state : 'not-started',
-      startedAt: record.createdAt,
-      secretaryConversationId: record.secretaryConversationId,
-      ...(record.lastResult ? { result: record.lastResult.kind } : {}),
-    };
-    if (record.lastState === 'running') running.push(card);
-    else done.push(card);
+    if (!rows[record.conversationId]) continue;
+    statuses[record.conversationId] = await ports.status(record.conversationId);
   }
-  running.sort((left, right) => right.startedAt - left.startedAt);
-  done.sort((left, right) => right.startedAt - left.startedAt);
 
   return {
     enabled: extra.enabled,
     projectId: extra.projectId,
     profile: await ports.profile(),
     persona: await ports.persona(),
-    board: {
-      needsYou,
-      running,
-      done,
-      todos: (await ports.todos()).filter((todo) => todo.doneAt === undefined),
-    },
+    board: buildBoard(file, { rows, statuses, projects, todos: await ports.todos() }),
     proposals: file.proposals,
   };
 }

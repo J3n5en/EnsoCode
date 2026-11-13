@@ -5,7 +5,7 @@ import { app, ipcMain, powerMonitor, type RendererContents } from '@platform';
 import { browserSessionKey } from '@shared/bots/browser';
 import { type ChildSessionIdentity, isUuid, type SessionIdentity } from '@shared/builtinAgents';
 import { conversationCwd } from '@shared/conversationCwd';
-import type { PluginSessionStatus } from '@shared/extensionPlugins/events';
+import type { PluginSessionStatus, SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
@@ -248,7 +248,9 @@ let sourceBindings: ActiveConversationRegistry | null = null;
 let sourceAuthority: SourceAuthorityRegistry | null = null;
 let botWorkerObserver: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null =
   null;
-let secretaryDriverObserver: ((event: RendererAgentEvent) => void) | null = null;
+let secretaryDriverObserver:
+  | ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void)
+  | null = null;
 const pluginSessionStates = new SessionStateTracker();
 const selectionClockOwners = new WeakSet<RendererContents>();
 
@@ -291,9 +293,12 @@ export function setBotWorkerEventObserver(
   botWorkerObserver = observer;
 }
 
-/** 秘书派出会话的驱动者订阅 worker 事件；由 ipc/secretary 注册，避免事件入口静态依赖秘书模块 */
+/**
+ * 秘书派出会话的驱动者与回传宿主订阅 worker 事件；由 ipc/secretary 组合后注册，
+ * 避免事件入口静态依赖秘书模块。状态变化由调用方算一次后一起传下去。
+ */
 export function setSecretaryDriverObserver(
-  observer: ((event: RendererAgentEvent) => void) | null
+  observer: ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void) | null
 ): void {
   secretaryDriverObserver = observer;
 }
@@ -330,12 +335,14 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
   forwardAgentEvent(event);
   handlePairHeadlessAgentEvent(event);
+  // 状态汇总只算一次：插件推送、秘书驱动与回传都读同一份结果
+  const changes = pluginSessionStates.observe(event);
   try {
-    secretaryDriverObserver?.(event);
+    secretaryDriverObserver?.(event, changes);
   } catch (error) {
     console.warn('[secretary] driver failed:', error instanceof Error ? error.message : error);
   }
-  publishPluginSessionStatus(event);
+  publishPluginSessionStatus(changes);
   publishPluginTurnEnd(event);
 }
 
@@ -349,8 +356,8 @@ function publishPluginTurnEnd(event: RendererAgentEvent): void {
 }
 
 /** 主会话汇总状态变化时通知订阅了 session_status 的插件 */
-function publishPluginSessionStatus(event: RendererAgentEvent): void {
-  for (const change of pluginSessionStates.observe(event)) {
+function publishPluginSessionStatus(changes: readonly SessionStatusPayload[]): void {
+  for (const change of changes) {
     // 与其他插件事件一致：Bot 与秘书会话不发
     if (sourceAuthority?.conversation(change.sessionId)?.bot) continue;
     if (isSecretaryConversation(change.sessionId)) continue;

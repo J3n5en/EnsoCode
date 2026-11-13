@@ -223,6 +223,8 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (todoId) record.todoId = todoId;
   const goal = text(value.goal);
   if (goal) record.goal = goal;
+  const lastText = text(value.lastText);
+  if (lastText) record.lastText = lastText;
   const stalledTurn = count(value.stalledTurn);
   if (stalledTurn) record.stalledTurn = stalledTurn;
   if (
@@ -243,8 +245,12 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
   const at = time(value.at);
   if (!key || at === undefined || typeof value.text !== 'string') return undefined;
   const base = { key, at, text: value.text };
+  const lastText = text(value.lastText);
   const secretaryConversationId = text(value.secretaryConversationId);
-  const scope = secretaryConversationId ? { secretaryConversationId } : {};
+  const scope = {
+    ...(lastText ? { lastText } : {}),
+    ...(secretaryConversationId ? { secretaryConversationId } : {}),
+  };
   if (RESULT_KINDS.includes(value.kind as SecretaryResultKind)) {
     const conversationId = text(value.conversationId);
     if (!conversationId) return undefined;

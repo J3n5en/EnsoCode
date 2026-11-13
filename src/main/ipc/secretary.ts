@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretaryState } from '@shared/types/secretary';
+import { notifyDesktop } from '../services/desktopHooks';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
@@ -21,6 +23,11 @@ import {
   type GoalAction,
 } from '../services/secretary/driver';
 import { secretaryEnabled } from '../services/secretary/enabled';
+import {
+  createSecretaryHost,
+  type SecretaryHost,
+  type SecretaryHostPorts,
+} from '../services/secretary/host';
 import { isSecretaryConversation, secretaryProjectId } from '../services/secretary/identity';
 import {
   parseReferenceRequest,
@@ -34,16 +41,22 @@ import {
   type MainSessionResult,
   type SessionFactoryPorts,
 } from '../services/secretary/sessionFactory';
+import { SecretaryStore } from '../services/secretary/store';
 import {
   getSourceAuthorityRegistry,
   isRootSessionAlive,
   observedSessionStatus,
   promptRootFromMain,
   releaseRootFromMain,
+  resumeRootFromMain,
   setSecretaryDriverObserver,
   spawnRootFromMain,
 } from './agent';
-import { patchConversationsState, readPersistedConversation } from './settings';
+import {
+  patchConversationsState,
+  readPersistedConversation,
+  readPersistedConversations,
+} from './settings';
 import { createConversationWorktree, removeRegisteredWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -162,6 +175,34 @@ const driverPorts: DispatchDriverPorts = {
 };
 
 let driver: DispatchDriver | null = null;
+let host: SecretaryHost | null = null;
+
+function secretaryStore(): SecretaryStore {
+  return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+}
+
+/** 回传宿主的 Main 侧能力：读写全部同步，读改写之间不留 await */
+const hostPorts: SecretaryHostPorts = {
+  enabled: () => secretaryEnabled(),
+  file: () => secretaryStore().dispatch(),
+  save: (file) => {
+    secretaryStore().saveDispatch(file);
+  },
+  rows: () => readPersistedConversations(),
+  conversations: () => getSourceAuthorityRegistry()?.projection().conversations ?? [],
+  projects: () => getSourceAuthorityRegistry()?.projection().projects ?? [],
+  status: (conversationId) => observedSessionStatus(conversationId),
+  alive: (conversationId) => isRootSessionAlive(conversationId),
+  prompt: (conversationId, text, deliveryId) =>
+    promptRootFromMain(conversationId, text, deliveryId),
+  resume: (conversationId) => resumeRootFromMain(conversationId),
+  profile: () => secretaryStore().profile(),
+  todos: () => secretaryStore().todos(),
+  notify: (build) => void notifyDesktop().notifySecretary(build),
+  publish: () => broadcastState(),
+  now: () => Date.now(),
+  newId: () => randomUUID(),
+};
 
 function parseGoalAction(
   value: unknown
@@ -199,8 +240,14 @@ function broadcastState(): void {
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
   driver = createDispatchDriver(driverPorts);
-  setSecretaryDriverObserver((event) => driver?.observe(event));
+  host = createSecretaryHost(hostPorts);
+  // 同一次 observe 的结果既给驱动也给回传宿主，事件入口只调一次
+  setSecretaryDriverObserver((event, changes) => {
+    driver?.observe(event);
+    host?.onAgentEvent(event, changes);
+  });
   onConversationsMerged((patch) => driver?.onConversationsMerged(patch));
+  host.start();
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_STATE, async (event) => {
     if (!isMainRenderer(event.sender.id)) return disabledState();

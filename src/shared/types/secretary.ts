@@ -77,6 +77,8 @@ export interface DispatchRecord {
   turn: number;
   lastState: 'running' | 'idle' | 'waiting' | 'error';
   lastEventAt: number;
+  /** 最后一轮的助手正文，工作台显示"最后说了什么" */
+  lastText?: string;
   /** 已报 stalled 的轮次，一轮只报一次 */
   stalledTurn?: number;
   lastResult?: { kind: SecretaryResultKind; turn: number; at: number };
@@ -86,6 +88,8 @@ export type SecretaryUpdate = {
   key: string;
   at: number;
   text: string;
+  /** 最后一轮正文：投递前脱敏并包成不可信内容 */
+  lastText?: string;
   secretaryConversationId?: string;
 } & (
   | { kind: SecretaryResultKind; conversationId: string }

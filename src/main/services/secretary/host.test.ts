@@ -1,0 +1,336 @@
+import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
+import { parseProfile } from '@shared/secretary/parse';
+import type { RendererAgentEvent } from '@shared/types/agent';
+import type { SecretaryDispatchFile, SecretaryProposal } from '@shared/types/secretary';
+import { describe, expect, it } from 'vitest';
+import { createSecretaryHost, type SecretaryHost, type SecretaryHostPorts } from './host';
+
+const MINUTE = 60_000;
+const idle = { state: 'idle' as const, pendingAsks: 0, pendingApprovals: 0 };
+const running = { state: 'running' as const, pendingAsks: 0, pendingApprovals: 0 };
+const waiting = { state: 'waiting' as const, pendingAsks: 1, pendingApprovals: 0 };
+const error = { state: 'error' as const, pendingAsks: 0, pendingApprovals: 0 };
+
+function emptyFile(extra: Partial<SecretaryDispatchFile> = {}): SecretaryDispatchFile {
+  return {
+    version: 1,
+    dispatched: {
+      c1: {
+        conversationId: 'c1',
+        projectId: 'p1',
+        secretaryConversationId: 'sec1',
+        createdAt: 0,
+        turn: 0,
+        lastState: 'running',
+        lastEventAt: 0,
+      },
+    },
+    named: [],
+    proposals: {},
+    outbox: [],
+    ...extra,
+  };
+}
+
+interface Harness {
+  ports: SecretaryHostPorts;
+  host: SecretaryHost;
+  state: {
+    file: SecretaryDispatchFile;
+    rows: Record<string, Record<string, unknown>>;
+    statuses: Record<
+      string,
+      {
+        state: 'running' | 'idle' | 'waiting' | 'error';
+        pendingAsks: number;
+        pendingApprovals: number;
+      }
+    >;
+    enabled: boolean;
+    notify: 'needs-user' | 'with-done' | 'off';
+    notifications: { title: string; body: string }[];
+    published: number;
+    prompts: string[];
+  };
+}
+
+function harness(
+  options: {
+    file?: Partial<SecretaryDispatchFile>;
+    enabled?: boolean;
+    notify?: Harness['state']['notify'];
+  } = {}
+): Harness {
+  const state: Harness['state'] = {
+    file: emptyFile(options.file),
+    rows: { c1: { id: 'c1', title: '派出会话', projectId: 'p1', sessionFile: '/tmp/c1.jsonl' } },
+    statuses: { c1: running },
+    enabled: options.enabled ?? true,
+    notify: options.notify ?? 'needs-user',
+    notifications: [],
+    published: 0,
+    prompts: [],
+  };
+  let seq = 0;
+  const ports: SecretaryHostPorts = {
+    enabled: () => state.enabled,
+    file: () => structuredClone(state.file),
+    save: (file) => {
+      state.file = structuredClone(file);
+    },
+    rows: () => structuredClone(state.rows),
+    conversations: () => [],
+    projects: () => [],
+    status: (id) => state.statuses[id] ?? idle,
+    alive: () => true,
+    prompt: (id, text) => {
+      state.prompts.push(`${id}:${text}`);
+      return { ok: true };
+    },
+    resume: async () => ({ ok: true }),
+    profile: () => {
+      const base = parseProfile({});
+      if (!base) throw new Error('default profile');
+      return { ...base, notify: state.notify };
+    },
+    todos: () => [],
+    notify: (build) => {
+      state.notifications.push(build('zh'));
+    },
+    publish: () => {
+      state.published += 1;
+    },
+    now: () => 0,
+    newId: () => `id-${++seq}`,
+  };
+  return { ports, host: createSecretaryHost(ports), state };
+}
+
+const identity = { sessionId: 'c1', generation: 'g1' };
+
+function event(type: string, extra: Record<string, unknown> = {}): RendererAgentEvent {
+  return { type, identity, seq: 1, turnId: 't1', ...extra } as unknown as RendererAgentEvent;
+}
+
+function change(
+  state: SessionStatusPayload['state'],
+  previous: SessionStatusPayload['previous'],
+  extra: Partial<SessionStatusPayload> = {}
+): SessionStatusPayload[] {
+  return [{ sessionId: 'c1', state, previous, pendingAsks: 0, pendingApprovals: 0, ...extra }];
+}
+
+describe('派出会话的结果记录', () => {
+  it('无目标的会话轮次结束记一条 turn-ended 并更新状态', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      event('turn-completed', {
+        digest: { firstUserText: '', userText: '', assistantText: '做完了' },
+      }),
+      change('idle', 'running')
+    );
+    expect(h.state.file.dispatched.c1).toMatchObject({
+      turn: 1,
+      lastState: 'idle',
+      lastResult: { kind: 'turn-ended', turn: 1 },
+    });
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({
+      kind: 'turn-ended',
+      conversationId: 'c1',
+      secretaryConversationId: 'sec1',
+      lastText: '做完了',
+    });
+    expect(h.state.published).toBe(1);
+  });
+
+  it('带目标的会话轮次结束不报 turn-ended', () => {
+    const h = harness({});
+    h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'active' } };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.file.dispatched.c1).toMatchObject({ turn: 1, lastState: 'idle' });
+  });
+
+  it('目标完成与安全限制暂停分别记完成与受阻', () => {
+    const done = harness({});
+    done.state.statuses.c1 = idle;
+    done.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(done.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete' });
+
+    const paused = harness({});
+    paused.state.rows.c1 = { ...paused.state.rows.c1, goal: { text: 'g', status: 'paused' } };
+    paused.state.statuses.c1 = idle;
+    paused.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(paused.state.file.outbox[0]).toMatchObject({ kind: 'goal-blocked' });
+  });
+
+  it('worker 退出记失败', () => {
+    const h = harness({});
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(
+      { type: 'worker-exited' } as RendererAgentEvent,
+      change('error', 'running')
+    );
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'failed' });
+    expect(h.state.file.dispatched.c1).toMatchObject({ lastState: 'error' });
+  });
+
+  it('等待审批记需要用户，同一状态不重复记', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request'), change('waiting', 'running'));
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
+    h.host.onAgentEvent(event('approval-request'), change('waiting', 'waiting'));
+    expect(h.state.file.outbox).toHaveLength(1);
+  });
+
+  it('开关关闭时不记录、不发通知、不注入', () => {
+    const h = harness({ enabled: false });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.notifications).toEqual([]);
+    expect(h.state.prompts).toEqual([]);
+    expect(h.state.published).toBe(0);
+  });
+});
+
+describe('每分钟检查', () => {
+  it('运行中十分钟无事件报一次停滞，同一轮不再报', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.lastEventAt = 0;
+    h.host.tick(10 * MINUTE);
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'stalled' });
+    expect(h.state.file.dispatched.c1.stalledTurn).toBe(0);
+    h.host.tick(30 * MINUTE);
+    expect(h.state.file.outbox).toHaveLength(1);
+  });
+
+  it('等待审批的会话不报停滞', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.tick(30 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('待确认提案超过 24 小时过期并进回传队列', () => {
+    const proposal: SecretaryProposal = {
+      id: 'prop1',
+      secretaryConversationId: 'sec1',
+      createdAt: 0,
+      updatedAt: 0,
+      status: 'pending',
+      kind: 'dispatch',
+      draft: { projectId: 'p1', prompt: 'do it', worktree: false },
+    };
+    const h = harness({ file: { proposals: { prop1: proposal } } });
+    h.state.statuses.c1 = idle;
+    h.host.tick(24 * 60 * MINUTE);
+    expect(h.state.file.proposals.prop1.status).toBe('expired');
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'proposal', status: 'expired' });
+  });
+});
+
+describe('启动恢复', () => {
+  it('重启时仍在运行的派出会话报中断', () => {
+    const h = harness({});
+    h.host.recover();
+    expect(h.state.file.dispatched.c1).toMatchObject({
+      lastState: 'idle',
+      lastResult: { kind: 'interrupted' },
+    });
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'interrupted' });
+  });
+
+  it('已经空闲的会话重启后不报中断', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.host.recover();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+});
+
+describe('系统通知', () => {
+  it('仅需要你处理时只通知受阻与停滞', () => {
+    const h = harness({ notify: 'needs-user' });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(h.state.notifications).toEqual([]);
+    h.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: 'no creds' }), []);
+    expect(h.state.notifications).toHaveLength(1);
+  });
+
+  it('含完成时完成也通知，关闭时一律不通知', () => {
+    const withDone = harness({ notify: 'with-done' });
+    withDone.state.statuses.c1 = idle;
+    withDone.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(withDone.state.notifications).toHaveLength(1);
+
+    const off = harness({ notify: 'off' });
+    off.state.statuses.c1 = idle;
+    off.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: 'no creds' }), []);
+    expect(off.state.notifications).toEqual([]);
+  });
+});
+
+describe('投递结算', () => {
+  const inflight = {
+    deliveryId: 'd1',
+    secretaryConversationId: 'sec1',
+    keys: ['sec1|turn-ended|0'],
+    attempt: 1,
+    nextAttemptAt: 0,
+  };
+
+  function pending(): Partial<SecretaryDispatchFile> {
+    return {
+      outbox: [
+        {
+          key: 'sec1|turn-ended|0',
+          at: 0,
+          text: 'line',
+          kind: 'turn-ended',
+          conversationId: 'c1',
+          secretaryConversationId: 'sec1',
+        },
+      ],
+      inflight,
+    };
+  }
+
+  it('秘书这一轮正常结束才清空在途批次', () => {
+    const h = harness({ file: pending() });
+    h.host.onAgentEvent(
+      {
+        type: 'turn-completed',
+        identity: { sessionId: 'sec1', generation: 'g' },
+        seq: 1,
+        turnId: 't',
+      } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(h.state.file.inflight).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('秘书这一轮失败时批次留着重投', () => {
+    const h = harness({ file: pending() });
+    h.host.onAgentEvent(
+      {
+        type: 'turn-failed',
+        identity: { sessionId: 'sec1', generation: 'g' },
+        seq: 1,
+        turnId: 't',
+        error: 'boom',
+      } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(h.state.file.inflight).toMatchObject({ attempt: 2, nextAttemptAt: 30_000 });
+    expect(h.state.file.outbox).toHaveLength(1);
+  });
+});
