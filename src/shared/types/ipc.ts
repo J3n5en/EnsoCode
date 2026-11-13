@@ -6,6 +6,8 @@ export const IPC_CHANNELS = {
   SETTINGS_CHANGED: 'settings:changed',
   /** main → 主界面 renderer：其他主界面（远程浏览器/桌面）改动的会话元数据补丁 */
   CONVERSATIONS_PATCH: 'conversations:patch',
+  /** 主界面 renderer 读整份会话记录，同时重置自己的会话账本 */
+  CONVERSATIONS_READ: 'conversations:read',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

@@ -306,8 +306,11 @@ const electronAPI = {
     write: (data: Record<string, unknown>): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE, data),
     /** 只更新单个顶层键（多 store 并发写不互相覆盖）；value undefined 表示删除该键 */
-    writeKey: (name: string, value: unknown): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE_KEY, name, value),
+    writeKey: (name: string, value: unknown, ackSeq?: number): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE_KEY, name, value, ackSeq),
+    /** 会话记录读回，带补丁序号；读的同时把本 renderer 的会话账本重置为磁盘值 */
+    readConversations: (): Promise<{ value: unknown; seq: number }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_READ),
     /** 其他窗口修改设置后触发，用于多窗口同步 */
     onChanged: (callback: () => void): (() => void) => {
       const listener = () => callback();

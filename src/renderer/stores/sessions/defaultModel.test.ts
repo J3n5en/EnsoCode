@@ -40,6 +40,7 @@ vi.stubGlobal('window', {
   electronAPI: {
     settings: {
       read: vi.fn(async () => null),
+      readConversations: vi.fn(async () => ({ value: null, seq: 0 })),
       writeKey: vi.fn(async () => undefined),
       onChanged: vi.fn(),
     },

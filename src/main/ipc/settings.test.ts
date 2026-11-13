@@ -310,6 +310,40 @@ describe('settings广播策略', () => {
     expect(consumeTrayReenterAfterUpdate()).toBe(false);
   });
 
+  it('会话读回带序号，旧确认号的写回不会抹掉 Main 插入的行', async () => {
+    const settings = await import('./settings');
+    settings.registerSettingsHandlers();
+    const write = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE_KEY);
+    const read = mocks.handlers.get(IPC_CHANNELS.CONVERSATIONS_READ);
+    if (!write || !read) throw new Error('conversations handlers missing');
+    const [owner] = mocks.windows;
+    const sender = { sender: owner.webContents };
+    type Conversations = { state: { conversations: Record<string, unknown>; order: string[] } };
+
+    await write(
+      sender,
+      'enso-conversations',
+      { state: { conversations: { a: { id: 'a', title: 'x' } }, order: ['a'] } },
+      0
+    );
+    const first = (await read(sender)) as { value: Conversations; seq: number };
+    expect(first.value.state.conversations).toHaveProperty('a');
+    expect(Number.isInteger(first.seq)).toBe(true);
+
+    expect(
+      settings.patchConversationsState((state) => {
+        state.conversations.m = { id: 'm', title: 'main' };
+        state.order.unshift('m');
+      })
+    ).toBe(true);
+    expect(settings.readPersistedConversations().m).toEqual({ id: 'm', title: 'main' });
+
+    await write(sender, 'enso-conversations', first.value, first.seq);
+    const second = (await read(sender)) as { value: Conversations; seq: number };
+    expect(second.value.state.conversations).toHaveProperty('m');
+    expect(second.value.state.conversations).toHaveProperty('a');
+  });
+
   it('阻止息屏开关与休眠策略互不覆盖', async () => {
     const {
       readTrayPreventDisplaySleep,

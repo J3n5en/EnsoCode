@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { applyConversationsPatchToState } from './remotePatch';
 
 type Row = Record<string, unknown>;
@@ -115,5 +115,53 @@ describe('applyConversationsPatchToState', () => {
       order: ['b', 'a', 'gone'],
     });
     expect(next.order).toEqual(['btw', 'b', 'a']);
+  });
+});
+
+describe('会话补丁确认号与水合缓存', () => {
+  const load = async () => {
+    vi.resetModules();
+    return import('./remotePatch');
+  };
+  const insert = (id: string, seq: number) => ({
+    upserts: { [id]: { set: row(id), unset: [] } },
+    removes: [],
+    seq,
+  });
+
+  it('水合前的补丁先缓存，水合后按序应用', async () => {
+    const mod = await load();
+    expect(mod.queueConversationsPatch(insert('b', 1))).toBeNull();
+    expect(mod.queueConversationsPatch(insert('c', 2))).toBeNull();
+
+    const buffered = mod.flushBufferedConversationsPatches();
+    expect(buffered.map((patch) => patch.seq)).toEqual([1, 2]);
+    let state: { conversations: Record<string, Row>; order: string[]; activeId: string | null } = {
+      conversations: { a: row('a') },
+      order: ['a'],
+      activeId: 'a',
+    };
+    for (const patch of buffered) state = mod.applySequencedConversationsPatch(state, patch);
+    expect(Object.keys(state.conversations).sort()).toEqual(['a', 'b', 'c']);
+    expect(mod.conversationsAppliedSeq()).toBe(2);
+    expect(mod.flushBufferedConversationsPatches()).toEqual([]);
+  });
+
+  it('水合后的补丁直接返回，确认号只增不减', async () => {
+    const mod = await load();
+    mod.flushBufferedConversationsPatches();
+    mod.resetConversationsAppliedSeq(7);
+    expect(mod.conversationsAppliedSeq()).toBe(7);
+
+    const patch = mod.queueConversationsPatch(insert('b', 9));
+    expect(patch?.seq).toBe(9);
+    mod.applySequencedConversationsPatch({ conversations: {}, order: [], activeId: null }, patch!);
+    expect(mod.conversationsAppliedSeq()).toBe(9);
+
+    mod.applySequencedConversationsPatch(
+      { conversations: {}, order: [], activeId: null },
+      { upserts: {}, removes: [], seq: 8 }
+    );
+    expect(mod.conversationsAppliedSeq()).toBe(9);
   });
 });

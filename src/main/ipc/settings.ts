@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { app, ipcMain, type RendererContents } from '@platform';
+import { diffConversations } from '@shared/conversationsPatch';
 import {
   type ContextMenuOpen,
   type FileOpenRule,
@@ -31,9 +32,11 @@ import {
   type TraySleepPolicy,
 } from '../services/pairPowerKeepAlive';
 import {
+  applyMainConversationsPatch,
   CONVERSATIONS_KEY,
   mergeConversationsWrite,
   noteConversationsRead,
+  readConversationsFor,
 } from '../services/remoteRenderer/conversationSync';
 import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
 import { broadcastToRenderers } from '../services/renderers';
@@ -865,13 +868,27 @@ export function patchConversationsState(
     : [];
   const nextState = { conversations, order, activeId: state.activeId };
   mutate(nextState);
+  const patch = diffConversations(current[CONVERSATIONS_KEY], {
+    ...store,
+    state: { ...state, ...nextState },
+  });
   return scheduleWrite({
     ...current,
-    'enso-conversations': {
-      ...store,
-      state: { ...state, ...nextState },
-    },
+    [CONVERSATIONS_KEY]: applyMainConversationsPatch(current[CONVERSATIONS_KEY], patch),
   });
+}
+
+/** 磁盘上的会话行；Main 侧派活、巡检都从这份权威值读 */
+export function readPersistedConversations(): Record<string, Record<string, unknown>> {
+  const conversations = objectRecord(
+    objectRecord(objectRecord(readSettings()?.[CONVERSATIONS_KEY])?.state)?.conversations
+  );
+  const rows: Record<string, Record<string, unknown>> = {};
+  for (const [id, value] of Object.entries(conversations ?? {})) {
+    const row = objectRecord(value);
+    if (row) rows[id] = row;
+  }
+  return rows;
 }
 
 export function readPersistedConversation(sessionId: string): Record<string, unknown> | null {
@@ -955,6 +972,11 @@ export function removeProjectAndConversations(
     : { ok: false, error: `Failed to remove project: ${projectId}` };
 }
 
+/** renderer 上报的确认号：非负整数以外一律按 0（等于没确认任何补丁） */
+function normalizeAckSeq(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
 export function registerSettingsHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SETTINGS_READ, async (event) => {
     const data = readSettings();
@@ -962,24 +984,32 @@ export function registerSettingsHandlers(): void {
     return data;
   });
 
-  // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE_KEY, async (event, name: unknown, value: unknown) => {
-    if (typeof name !== 'string') return false;
-    const current = readSettings() ?? {};
-    const next = { ...current };
-    const merged =
-      name === CONVERSATIONS_KEY
-        ? mergeConversationsWrite(event.sender, current[name], value)
-        : value;
-    if (merged === undefined) delete next[name];
-    else next[name] = merged;
-    return scheduleWrite(
-      next,
-      event.sender,
-      'exclude-sender',
-      name === CONVERSATIONS_KEY && value !== undefined
-    );
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_READ, async (event) => {
+    const data = readSettings() ?? {};
+    return readConversationsFor(event.sender, data[CONVERSATIONS_KEY]);
   });
+
+  // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖
+  ipcMain.handle(
+    IPC_CHANNELS.SETTINGS_WRITE_KEY,
+    async (event, name: unknown, value: unknown, ackSeq: unknown) => {
+      if (typeof name !== 'string') return false;
+      const current = readSettings() ?? {};
+      const next = { ...current };
+      const merged =
+        name === CONVERSATIONS_KEY
+          ? mergeConversationsWrite(event.sender, current[name], value, normalizeAckSeq(ackSeq))
+          : value;
+      if (merged === undefined) delete next[name];
+      else next[name] = merged;
+      return scheduleWrite(
+        next,
+        event.sender,
+        'exclude-sender',
+        name === CONVERSATIONS_KEY && value !== undefined
+      );
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE, async (event, data: unknown) => {
     const record = objectRecord(data);

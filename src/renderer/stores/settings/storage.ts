@@ -60,32 +60,45 @@ export const electronStorage = {
   },
 };
 
+export interface PersistStorageOptions<State> {
+  /** 整份读取；默认读 settings.read() 里的同名键 */
+  read?: (name: string) => Promise<StorageValue<State> | null>;
+  /** 写回时附带的确认号；缺省不传，其他 store 的 IPC 形状不变 */
+  ackSeq?: () => number;
+}
+
 /**
  * 流式会话使用对象级入口，在序列化和跨进程复制之前合并更新。
  * 同键只保留一个在途写入与一个最新待写值；整个批次共享完成 Promise。
  */
-export function createElectronPersistStorage<State>(): PersistStorage<State> {
-  type Write = { value: StorageValue<State> | undefined };
+export function createElectronPersistStorage<State>(
+  options: PersistStorageOptions<State> = {}
+): PersistStorage<State> {
+  type Write = { value: StorageValue<State> | undefined; ackSeq: number | undefined };
   type Queue = { pending?: Write; done: Promise<void> };
   const queues = new Map<string, Queue>();
-  const lastState = new Map<string, State | undefined>();
+  const lastWrite = new Map<string, { state: State | undefined; ackSeq: number | undefined }>();
 
   function enqueue(name: string, value: StorageValue<State> | undefined): Promise<void> | void {
     if (!hydratedNames.has(name)) return;
+    // 确认号与值同一时刻捕获：persist 在 setState 的同步回调里入队，
+    // 应用补丁时已先推进确认号，两者必须来自同一份状态
+    const ackSeq = options.ackSeq?.();
     const stateRef = value?.state;
-    if (lastState.has(name) && lastState.get(name) === stateRef) return;
-    lastState.set(name, stateRef);
+    const last = lastWrite.get(name);
+    if (last && last.state === stateRef && last.ackSeq === ackSeq) return;
+    lastWrite.set(name, { state: stateRef, ackSeq });
     writeGeneration++;
     const existing = queues.get(name);
     if (existing) {
-      existing.pending = { value };
+      existing.pending = { value, ackSeq };
       return existing.done;
     }
 
     let finish!: () => void;
     let fail!: (error: unknown) => void;
     const queue: Queue = {
-      pending: { value },
+      pending: { value, ackSeq },
       done: new Promise<void>((resolve, reject) => {
         finish = resolve;
         fail = reject;
@@ -101,9 +114,11 @@ export function createElectronPersistStorage<State>(): PersistStorage<State> {
         const next = queue.pending;
         queue.pending = undefined;
         try {
-          if (!(await window.electronAPI.settings.writeKey(name, next.value))) {
-            throw new Error(`写入 ${name} 失败`);
-          }
+          const written =
+            next.ackSeq === undefined
+              ? await window.electronAPI.settings.writeKey(name, next.value)
+              : await window.electronAPI.settings.writeKey(name, next.value, next.ackSeq);
+          if (!written) throw new Error(`写入 ${name} 失败`);
         } catch (error) {
           failure ??= { error };
         }
@@ -119,6 +134,7 @@ export function createElectronPersistStorage<State>(): PersistStorage<State> {
   return {
     async getItem(name) {
       await queues.get(name)?.done;
+      if (options.read) return options.read(name);
       const data = await window.electronAPI.settings.read();
       return data && typeof data === 'object' && name in data
         ? (data as Record<string, StorageValue<State>>)[name]

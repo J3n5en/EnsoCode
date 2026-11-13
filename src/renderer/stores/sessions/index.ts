@@ -69,11 +69,10 @@ export interface QueuedMessage {
   images?: AttachedImage[];
 }
 
-import { parseConversationsPatch } from '@shared/conversationsPatch';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
 import { isBuiltinToolEnabledForProject } from '@shared/types/builtinTools';
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, type StorageValue } from 'zustand/middleware';
 import { isLeaderRenderer } from '@/lib/rendererRole';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -108,7 +107,7 @@ import {
   viewedConversationId,
 } from './messageCache';
 import { migrateSessions, SESSIONS_VERSION } from './migrate';
-import { cachedPartializeSessions } from './persistSnapshot';
+import { cachedPartializeSessions, type SessionsPersistSlice } from './persistSnapshot';
 import {
   activeConversationIds,
   SIDEBAR_TICK_MS,
@@ -137,7 +136,13 @@ import {
   mergeWithRememberedActive,
   readCurrentRememberedActive,
 } from './remoteActive';
-import { applyConversationsPatchToState } from './remotePatch';
+import {
+  applySequencedConversationsPatch,
+  conversationsAppliedSeq,
+  flushBufferedConversationsPatches,
+  queueConversationsPatch,
+  resetConversationsAppliedSeq,
+} from './remotePatch';
 import { isPairViewed, nextUnread } from './unread';
 import {
   DIRTY_MAIN_TREE,
@@ -4246,7 +4251,15 @@ export const useSessionsStore = create<SessionsState>()(
       version: SESSIONS_VERSION,
       migrate: (persisted, version) => migrateSessions(persisted, version) as SessionsState,
       // 存 settings.json（localStorage 按 origin 隔离，dev 与打包版会分家）
-      storage: createElectronPersistStorage(),
+      // 读回带补丁序号，写回带确认号：Main 才能只合并本端的差量
+      storage: createElectronPersistStorage<SessionsPersistSlice>({
+        read: async () => {
+          const { value, seq } = await window.electronAPI.settings.readConversations();
+          resetConversationsAppliedSeq(seq);
+          return (value as StorageValue<SessionsPersistSlice> | undefined) ?? null;
+        },
+        ackSeq: conversationsAppliedSeq,
+      }),
       // 只存元数据：messages 由 worker snapshot 补回（刷新场景）；app 重启后拿不回则标结束
       partialize: (state) => cachedPartializeSessions(state),
       // 远程界面的当前会话不在共享补丁里，水合时用本机记住的值盖过磁盘
@@ -4256,6 +4269,10 @@ export const useSessionsStore = create<SessionsState>()(
         if (!error) {
           openPersistWriteGate('enso-conversations');
           armRemoteActiveMemory(useSessionsStore);
+        }
+        // 水合会用磁盘值盖掉内存，期间到达的补丁在这里补用，否则 Main 的插入永久丢失
+        for (const patch of flushBufferedConversationsPatches()) {
+          useSessionsStore.setState((state) => applySequencedConversationsPatch(state, patch));
         }
         // 刷新时 worker 仍活着：只补当前正在看的会话正文。其它会话点开再 snapshot。
         const state = useSessionsStore.getState();
@@ -4504,7 +4521,7 @@ async function forkConversation(
 }
 
 window.electronAPI.settings?.onConversationsPatch?.((value) => {
-  const remotePatch = parseConversationsPatch(value);
-  if (!remotePatch || !useSessionsStore.persist.hasHydrated()) return;
-  useSessionsStore.setState((state) => applyConversationsPatchToState(state, remotePatch));
+  const remotePatch = queueConversationsPatch(value);
+  if (!remotePatch) return;
+  useSessionsStore.setState((state) => applySequencedConversationsPatch(state, remotePatch));
 });

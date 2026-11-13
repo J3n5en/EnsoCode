@@ -484,6 +484,7 @@ export const IPC_PRODUCT_COVERAGE = {
   SETTINGS_WRITE_KEY: excluded('Raw store-key write is replaced by controlled field patches.'),
   SETTINGS_CHANGED: excluded('Cross-window persistence notification transport.'),
   CONVERSATIONS_PATCH: excluded('Cross-renderer conversation persistence transport.'),
+  CONVERSATIONS_READ: excluded('Conversation persistence read; Enso uses typed domain handlers.'),
   REMOTE_LEADER_CHANGED: excluded('Remote desktop renderer coordination transport.'),
   REMOTE_UPLOAD: excluded('Remote desktop browser upload transport.'),
   CONFIG_SYNC_EXPORT: excluded('Settings-only portable configuration export flow.'),

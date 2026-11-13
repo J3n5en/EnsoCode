@@ -191,6 +191,7 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
     electronAPI: {
       settings: {
         read: vi.fn(async () => null),
+        readConversations: vi.fn(async () => ({ value: null, seq: 0 })),
         writeKey: vi.fn(async () => true),
         onChanged: vi.fn(),
       },

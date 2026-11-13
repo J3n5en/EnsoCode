@@ -1,0 +1,161 @@
+import { applyConversationsPatch, diffConversations } from '@shared/conversationsPatch';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+interface FakePeer {
+  id: number;
+  kind: 'main';
+  sent: Array<Record<string, unknown>>;
+  send: (channel: string, payload: unknown) => void;
+}
+
+const peers = vi.hoisted(() => ({ local: null as unknown, remote: [] as unknown[] }));
+
+vi.mock('../renderers', () => ({ localMainContents: () => peers.local }));
+vi.mock('./senders', () => ({ remoteSenders: () => peers.remote }));
+
+let nextId = 1;
+function peer(): FakePeer {
+  const sent: Array<Record<string, unknown>> = [];
+  return {
+    id: nextId++,
+    kind: 'main',
+    sent,
+    send: (_channel, payload) => sent.push(payload as Record<string, unknown>),
+  };
+}
+
+type Row = Record<string, unknown>;
+interface Blob {
+  state: { conversations: Record<string, Row>; order: string[]; activeId: string | null };
+  version: number;
+}
+
+const row = (id: string, extra: Row = {}): Row => ({ id, projectId: 'p', title: id, ...extra });
+const blob = (conversations: Record<string, Row>, order: string[]): Blob => ({
+  state: { conversations, order, activeId: order[0] ?? null },
+  version: 3,
+});
+const insert = (id: string, order: string[]) => ({
+  upserts: { [id]: { set: row(id), unset: [] } },
+  removes: [],
+  order,
+});
+
+let sync: typeof import('./conversationSync');
+
+beforeEach(async () => {
+  peers.local = null;
+  peers.remote = [];
+  vi.resetModules();
+  sync = await import('./conversationSync');
+});
+
+describe('会话账本', () => {
+  it('Main 插入的行不会被 renderer 的旧值写回抹掉', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    expect(sync.readConversationsFor(desktop, disk)).toEqual({ value: disk, seq: 0 });
+
+    const inserted = sync.applyMainConversationsPatch(disk, insert('m', ['m', 'a']));
+    expect(desktop.sent).toEqual([{ ...insert('m', ['m', 'a']), seq: 1 }]);
+
+    expect(sync.mergeConversationsWrite(desktop, inserted, disk, 0)).toBe(inserted);
+  });
+
+  it('先回放已确认的补丁再求差量，renderer 的删除才会落到磁盘', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    const inserted = sync.applyMainConversationsPatch(disk, insert('m', ['m', 'a']));
+    const acked = (desktop.sent[0] as { seq: number }).seq;
+
+    const merged = sync.mergeConversationsWrite(desktop, inserted, disk, acked) as Blob;
+    expect(merged.state.conversations).toEqual({ a: row('a') });
+    expect(merged.state.order).toEqual(['a']);
+  });
+
+  it('两个主界面并发写入的结果与单端顺序写入一致', () => {
+    const desktop = peer();
+    const browser = peer();
+    peers.local = desktop;
+    peers.remote = [browser];
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    sync.readConversationsFor(browser, disk);
+    const desktopValue = blob({ a: row('a'), d: row('d') }, ['d', 'a']);
+    const browserValue = blob({ a: row('a'), r: row('r') }, ['r', 'a']);
+
+    const afterDesktop = sync.mergeConversationsWrite(desktop, disk, desktopValue, 0);
+    const afterBrowser = sync.mergeConversationsWrite(browser, afterDesktop, browserValue, 0);
+
+    const sequential = applyConversationsPatch(
+      applyConversationsPatch(disk, diffConversations(disk, desktopValue)),
+      diffConversations(disk, browserValue)
+    );
+    expect(afterBrowser).toEqual(sequential);
+    expect(Object.keys((afterBrowser as Blob).state.conversations).sort()).toEqual(['a', 'd', 'r']);
+  });
+
+  it('单主界面时只合并差量，Main 期间插入的行保留', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    const inserted = sync.applyMainConversationsPatch(disk, insert('m', ['m', 'a']));
+
+    const merged = sync.mergeConversationsWrite(
+      desktop,
+      inserted,
+      blob({ a: row('a', { pinned: true }) }, ['a']),
+      0
+    ) as Blob;
+    expect(merged.state.conversations.m).toEqual(row('m'));
+    expect(merged.state.conversations.a.pinned).toBe(true);
+    expect(merged.state.order).toEqual(['m', 'a']);
+  });
+
+  it('conversations:read 重置账本，未确认的补丁不再回放', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    const inserted = sync.applyMainConversationsPatch(disk, insert('m', ['m', 'a']));
+
+    const reread = sync.readConversationsFor(desktop, inserted);
+    expect(reread).toEqual({ value: inserted, seq: 1 });
+
+    const second = sync.applyMainConversationsPatch(inserted, insert('n', ['n', 'm', 'a']));
+    expect(sync.mergeConversationsWrite(desktop, second, inserted, reread.seq)).toBe(second);
+  });
+
+  it('settings:read 只在账本缺失时建账，不重置已有账本', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    const inserted = sync.applyMainConversationsPatch(disk, insert('m', ['m', 'a']));
+
+    sync.noteConversationsRead(desktop, inserted);
+    const merged = sync.mergeConversationsWrite(desktop, inserted, disk, 0) as Blob;
+    expect(merged.state.conversations.m).toEqual(row('m'));
+  });
+
+  it('写回合并后通知监听者，取消订阅后不再通知', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    const seen: unknown[] = [];
+    const off = sync.onConversationsMerged((patch) => seen.push(patch));
+
+    const pinned = blob({ a: row('a', { pinned: true }) }, ['a']);
+    sync.mergeConversationsWrite(desktop, disk, pinned, 0);
+    expect(seen).toEqual([diffConversations(disk, pinned)]);
+
+    off();
+    sync.mergeConversationsWrite(desktop, pinned, disk, 1);
+    expect(seen).toHaveLength(1);
+  });
+});

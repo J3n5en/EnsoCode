@@ -14,6 +14,11 @@ export interface ConversationsPatch {
   order?: string[];
 }
 
+/** Main 推送的补丁带单调序号；renderer 写回时把它作为确认号，Main 据此只回放未确认的部分 */
+export interface SequencedConversationsPatch extends ConversationsPatch {
+  seq: number;
+}
+
 type Row = Record<string, unknown>;
 interface Slice {
   conversations: Record<string, Row>;
@@ -112,7 +117,7 @@ export function applyConversationsPatch(target: unknown, patch: ConversationsPat
   };
 }
 
-export function parseConversationsPatch(value: unknown): ConversationsPatch | null {
+export function parseConversationsPatch(value: unknown): SequencedConversationsPatch | null {
   if (!isRecord(value) || !isRecord(value.upserts) || !Array.isArray(value.removes)) return null;
   const upserts: Record<string, ConversationRowPatch> = {};
   for (const [id, row] of Object.entries(value.upserts)) {
@@ -126,5 +131,7 @@ export function parseConversationsPatch(value: unknown): ConversationsPatch | nu
   const order = Array.isArray(value.order)
     ? value.order.filter((id): id is string => typeof id === 'string')
     : undefined;
-  return { upserts, removes, ...(order ? { order } : {}) };
+  const seq =
+    typeof value.seq === 'number' && Number.isInteger(value.seq) && value.seq >= 0 ? value.seq : 0;
+  return { upserts, removes, ...(order ? { order } : {}), seq };
 }
