@@ -35,7 +35,7 @@ export interface SecretaryDispatchPorts {
   /** null = 未完成初次设置，按 parseProfile({}) 的默认档案处理 */
   profile(): MaybePromise<SecretaryProfile | null>;
   persona(): MaybePromise<string>;
-  dispatchFile(): MaybePromise<SecretaryDispatchFile>;
+  dispatchFile(): SecretaryDispatchFile;
   saveDispatch(file: SecretaryDispatchFile): void;
   todos(): MaybePromise<SecretaryTodo[]>;
   saveTodos(todos: SecretaryTodo[]): void;
@@ -128,7 +128,7 @@ async function dispatchContext(
   projectId: string
 ): Promise<Parameters<typeof validateDispatch>[1]> {
   const projects = await ports.projects();
-  const file = await ports.dispatchFile();
+  const file = ports.dispatchFile();
   return {
     project: projects.find((candidate) => candidate.projectId === projectId),
     visible: visibleProjects(projects, profile).some(
@@ -177,7 +177,7 @@ async function saveProposal(
     kind: 'dispatch',
     draft,
   };
-  const file = await ports.dispatchFile();
+  const file = ports.dispatchFile();
   file.proposals[id] = proposal;
   ports.saveDispatch(file);
   notifyChanged();
@@ -199,7 +199,7 @@ async function executeDispatch(
   });
   if (!created.ok) return created;
   const now = ports.now();
-  const file = await ports.dispatchFile();
+  const file = ports.dispatchFile();
   file.dispatched[created.conversationId] = {
     conversationId: created.conversationId,
     projectId: draft.projectId,
@@ -338,7 +338,7 @@ export function createSecretaryDispatchHandlers(
       const conversationId = stringParam(params, 'conversationId');
       const text = stringParam(params, 'text');
       if (!conversationId || !text) return invalidArguments;
-      const file = await ports.dispatchFile();
+      const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
         return auditFailure(ports, ctx, 'session_send', 'not-operable', conversationId);
       }
@@ -409,7 +409,7 @@ export function createSecretaryDispatchHandlers(
     async session_stop(params, ctx) {
       const conversationId = stringParam(params, 'conversationId');
       if (!conversationId) return invalidArguments;
-      const file = await ports.dispatchFile();
+      const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
         return auditFailure(ports, ctx, 'session_stop', 'not-operable', conversationId);
       }
@@ -558,7 +558,7 @@ async function finishProposal(
   proposalId: string,
   outcome: { ok: true; conversationId?: string } | { ok: false; error: string }
 ): Promise<ResolveProposalResult> {
-  const file = await ports.dispatchFile();
+  const file = ports.dispatchFile();
   const current = file.proposals[proposalId];
   if (!current) return { ok: false, error: 'not-found' };
   const now = ports.now();
@@ -604,11 +604,11 @@ export async function resolveProposal(
   action: 'confirm' | 'reject',
   edits?: Partial<DispatchDraft>
 ): Promise<ResolveProposalResult> {
-  const proposal = (await ports.dispatchFile()).proposals[proposalId];
+  const proposal = ports.dispatchFile().proposals[proposalId];
   if (!proposal) return { ok: false, error: 'not-found' };
   if (action === 'confirm' && proposal.kind !== 'dispatch')
     return { ok: false, error: 'unsupported' };
-  const file = await ports.dispatchFile();
+  const file = ports.dispatchFile();
   const current = file.proposals[proposalId];
   if (!current) return { ok: false, error: 'not-found' };
   const now = ports.now();
@@ -714,7 +714,7 @@ export async function mutateTodo(
 export interface SecretaryStatePorts {
   profile(): MaybePromise<SecretaryProfile | null>;
   persona(): MaybePromise<string>;
-  dispatchFile(): MaybePromise<SecretaryDispatchFile>;
+  dispatchFile(): SecretaryDispatchFile;
   todos(): MaybePromise<SecretaryTodo[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
@@ -728,7 +728,7 @@ export async function buildSecretaryState(
   ports: SecretaryStatePorts,
   extra: { enabled: boolean; projectId: string | null }
 ): Promise<SecretaryState> {
-  const file = await ports.dispatchFile();
+  const file = ports.dispatchFile();
   const rows = await ports.rows();
   const projects = await ports.projects();
   const projectName = (projectId: string): string => {

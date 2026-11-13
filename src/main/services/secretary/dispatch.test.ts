@@ -140,9 +140,10 @@ function harness(
   h.ports = {
     profile: () => h.profileValue,
     persona: () => '',
-    dispatchFile: () => h.file,
+    // 与磁盘一致：每次读出的是新对象，改了不保存就不生效
+    dispatchFile: () => structuredClone(h.file),
     saveDispatch: (file) => {
-      h.file = file;
+      h.file = structuredClone(file);
     },
     todos: () => h.todos,
     saveTodos: (todos) => {

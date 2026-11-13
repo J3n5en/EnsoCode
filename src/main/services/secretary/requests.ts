@@ -128,7 +128,7 @@ export interface ReferencePorts {
   conversations(): MaybePromise<readonly ConversationAuthority[]>;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   profile(): MaybePromise<SecretaryProfile | null>;
-  dispatchFile(): MaybePromise<SecretaryDispatchFile>;
+  dispatchFile(): SecretaryDispatchFile;
   saveDispatch(file: SecretaryDispatchFile): void;
   audit(entry: SecretaryAuditEntry): void;
   now(): number;
@@ -158,7 +158,7 @@ export async function referenceConversations(
   const conversations = new Map(
     (await ports.conversations()).map((conversation) => [conversation.conversationId, conversation])
   );
-  const file = await ports.dispatchFile();
+  const file = ports.dispatchFile();
   const accepted: string[] = [];
   for (const conversationId of request.conversationIds) {
     const conversation = conversations.get(conversationId);
