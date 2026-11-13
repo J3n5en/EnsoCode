@@ -90,11 +90,14 @@ async function state(): Promise<Record<string, unknown>> {
   return (await import('../../ipc/settings')).readSettingsState();
 }
 
-function runCli(args: string[]): Promise<{ code: number; stdout: string }> {
+function runCli(
+  args: string[],
+  dataDir = userData
+): Promise<{ code: number; stdout: string; stderr: string }> {
   const script = path.resolve(__dirname, '../../../../scripts/enso-cli.mjs');
   return new Promise((resolve) => {
-    execFile(process.execPath, [script, '--data-dir', userData, ...args], (error, stdout) =>
-      resolve({ code: error ? Number(error.code ?? 1) : 0, stdout })
+    execFile(process.execPath, [script, '--data-dir', dataDir, ...args], (error, stdout, stderr) =>
+      resolve({ code: error ? Number(error.code ?? 1) : 0, stdout, stderr })
     );
   });
 }
@@ -257,6 +260,71 @@ describe('config CLI socket', () => {
     writeFileSync(file, JSON.stringify(disk));
     expect(await config({ action: 'reload' })).toEqual({ ok: true });
     expect((await state()).theme).toBe('light');
+  });
+
+  it('schema 从真实 state 生成键清单，标注密钥/需重启/可写且不含任何值', async () => {
+    const reply = await config({ action: 'schema' });
+    expect(reply.ok).toBe(true);
+    const text = JSON.stringify(reply);
+    for (const secret of [SECRET, 'gemini-secret', 'hdr-secret', 'ghp-secret'])
+      expect(text).not.toContain(secret);
+    const keys = new Map(
+      (reply.keys as { path: string }[]).map((k) => [k.path, k as Record<string, unknown>])
+    );
+    expect(keys.get('terminalFontSize')).toEqual({
+      path: 'terminalFontSize',
+      type: 'number',
+      writable: true,
+      requiresRestart: false,
+      secret: false,
+    });
+    expect(keys.get('theme')).toMatchObject({ type: 'string', writable: true });
+    expect(keys.get('mcpServers.<id>.callTimeoutSec')).toMatchObject({ writable: true });
+    for (const path of ['voiceGeminiApiKey', 'providers.<id>.apiKey', 'mcpServers.<id>.env']) {
+      expect(keys.get(path)).toMatchObject({ secret: true, writable: false });
+      const key = path.replace('<id>', path.startsWith('providers') ? 'p1' : 'mcp1');
+      expect(await config({ action: 'get', key })).toMatchObject({ ok: false, hidden: true });
+    }
+    expect(keys.get('autoUpdate')).toMatchObject({ requiresRestart: true, writable: false });
+    for (const path of ['worktreeRoot', 'mcpServers.<id>.command', 'plugins', 'providers.<id>'])
+      expect(keys.get(path)).toMatchObject({ writable: false });
+    expect(keys.get('plugins.<id>.enabled')).toMatchObject({ writable: true });
+    expect(keys.has('projects')).toBe(false);
+    // 未写入 state 的已登记字段同样出现
+    expect(keys.get('autoRestartWhenIdle')).toMatchObject({
+      type: 'unknown',
+      requiresRestart: true,
+    });
+    expect(reply).toMatchObject({
+      blacklist: { readDeniedFields: ['projects', 'projectGroups'] },
+      notes: { requiresRestart: { autoUpdate: expect.any(String) } },
+    });
+  });
+
+  it('enso CLI help：纯文本可离线打印，--json 需要应用在运行', async () => {
+    const offline = mkdtempSync(path.join(tmpdir(), 'enso-cli-offline-'));
+    for (const args of [['config', 'help'], ['--help'], ['config', '-h']]) {
+      const help = await runCli(args, offline);
+      expect(help.code).toBe(0);
+      expect(help.stdout).toContain('enso config set <key> <value>');
+    }
+    const missing = await runCli(['config', 'help', '--json'], offline);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('EnsoCode');
+    rmSync(offline, { recursive: true, force: true });
+
+    const json = await runCli(['config', 'help', '--json']);
+    expect(json.code).toBe(0);
+    const schema = JSON.parse(json.stdout);
+    expect(schema.commands.map((c: { name: string }) => c.name)).toEqual([
+      'get',
+      'set',
+      'list',
+      'reload',
+      'help',
+    ]);
+    expect(schema.keys.some((k: { path: string }) => k.path === 'terminalFontSize')).toBe(true);
+    expect(JSON.parse((await runCli(['config', 'schema'])).stdout)).toEqual(schema);
   });
 
   it('enso CLI 端到端：get/set/拒绝', async () => {

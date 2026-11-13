@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import path from 'node:path';
 import { serveControlConnection } from '@shared/controlSocket';
-import { getConfig, listConfig, planSet } from './policy';
+import { describeConfig, getConfig, listConfig, planSet } from './policy';
 
 /** 设置存储的最小读写面：生产接 ipc/settings，测试可替换 */
 export interface ConfigCliDeps {
@@ -59,6 +59,8 @@ export async function handleConfigRequest(
       return getConfig(state, request.key, deps.fields);
     case 'list':
       return { ok: true, entries: listConfig(state, deps.fields, request.prefix) };
+    case 'schema':
+      return { ok: true, ...describeConfig(state, deps.fields) };
     case 'set': {
       if (!('value' in request)) return { ok: false, error: 'set requires value' };
       const plan = planSet(state, request.key, request.value, deps.fields);

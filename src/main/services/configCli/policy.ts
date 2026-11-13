@@ -45,6 +45,16 @@ export type SetPlan =
 export const isSecretName = (name: string): boolean => SECRET_NAME.test(name);
 const isPathOrExecName = (name: string): boolean => PATH_OR_EXEC_NAME.test(name);
 
+export interface KeySchema {
+  path: string;
+  type: string;
+  writable: boolean;
+  requiresRestart: boolean;
+  secret: boolean;
+}
+
+const SCHEMA_MAX_DEPTH = 4;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -125,6 +135,80 @@ function deniedKeyIn(value: unknown): string | null {
 
 function jsonType(value: unknown): string {
   return value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+}
+
+/** 数组元素合并成一个样本对象，路径段用 <id>（元素都有 id）或 <index> 占位 */
+function arraySample(items: unknown[]): { seg: string; sample: Record<string, unknown> } | null {
+  const records = items.filter(isRecord);
+  if (!records.length) return null;
+  const seg = records.every((item) => typeof item.id === 'string') ? '<id>' : '<index>';
+  return { seg, sample: Object.assign({}, ...records) };
+}
+
+function keySchema(segs: string[], value: unknown, present: boolean): KeySchema {
+  const [field] = segs;
+  const secret = segs.some(isSecretName);
+  const requiresRestart = !!RESTART_REQUIRED[field];
+  const writable =
+    !secret &&
+    !requiresRestart &&
+    !segs.some(isPathOrExecName) &&
+    !WRITE_DENIED.has(field) &&
+    !(ENTRY_LEVEL_DENIED.has(field) && segs.length <= 2) &&
+    !deniedKeyIn(value);
+  const type = !present || value === null ? 'unknown' : jsonType(value);
+  return { path: segs.join('.'), type, writable, requiresRestart, secret };
+}
+
+function walkSchema(segs: string[], value: unknown, out: KeySchema[]): void {
+  out.push(keySchema(segs, value, true));
+  if (segs.some(isSecretName) || segs.length >= SCHEMA_MAX_DEPTH) return;
+  if (Array.isArray(value)) {
+    const items = arraySample(value);
+    if (items) walkSchema([...segs, items.seg], items.sample, out);
+  } else if (isRecord(value)) {
+    for (const [name, item] of Object.entries(value)) walkSchema([...segs, name], item, out);
+  }
+}
+
+/** 从当前 state 生成键清单（不含任何值）：新增设置字段自动出现，规则与 planSet 一致 */
+export function describeConfig(state: Record<string, unknown>, fields: readonly string[]) {
+  const keys: KeySchema[] = [];
+  for (const field of fields) {
+    if (READ_DENIED.has(field)) continue;
+    if (Object.hasOwn(state, field)) walkSchema([field], state[field], keys);
+    else keys.push(keySchema([field], undefined, false));
+  }
+  return {
+    keys,
+    blacklist: {
+      secretKeyPattern: SECRET_NAME.source,
+      secret:
+        'Any segment matching apiKey/api_key/secret/password/credential/authorization/cookie/*token, or named env: get returns hidden, list shows ***, set is refused.',
+      pathOrExecPattern: PATH_OR_EXEC_NAME.source,
+      pathOrExec:
+        'Any segment named path/dir/root/cwd/command/args or ending in Path/Dir/Root, plus writeDeniedFields: readable, set refused.',
+      writeDeniedFields: [...WRITE_DENIED],
+      entryLevelDeniedFields: [...ENTRY_LEVEL_DENIED],
+      readDeniedFields: [...READ_DENIED],
+      deniedOperations: [
+        'install/uninstall plugins, skills or instructions (replace or add/remove entries)',
+        'read or write project/session data (projects, projectGroups)',
+        'change file paths, shells or executable commands',
+        'read or write secrets (use the Settings page)',
+        'overwrite a parent object whose old or new value contains secret/path/command keys',
+      ],
+    },
+    notes: {
+      hotReload:
+        'set goes through the same Main write path as the Settings page: updates memory, broadcasts to renderers, pushes to agent workers, debounced save; proxy keys re-apply the proxy. Some keys only affect new sessions.',
+      requiresRestart: { ...RESTART_REQUIRED },
+      transport:
+        'Local-only Unix socket <userData>/cli/cli.sock (Windows named pipe) authenticated by the per-launch token in <userData>/cli-token.',
+      keyFormat:
+        '<field>[.<sub>...]; array segments select an element by id, else by index. <id>/<index> in paths are placeholders. type "unknown" means unset (any JSON accepted).',
+    },
+  };
 }
 
 function validateField(field: string, value: unknown): string | null {

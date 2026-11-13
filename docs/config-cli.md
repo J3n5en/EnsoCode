@@ -11,12 +11,25 @@ enso config get <key>              # 输出该键的 JSON 值
 enso config set <key> <value>      # value 按 JSON 解析（15、true、"dark"），解析失败按字符串处理
 enso config list [prefix]          # 列出全部设置键与当前值；prefix 带点号时只看该子树
 enso config reload                 # 运行中的应用丢弃内存副本、重新读盘并广播
+enso config help                   # 人类可读帮助（也可用 enso --help / enso config -h），应用未运行也能打印
+enso config help --json            # 机器可读 schema（别名 enso config schema），需应用在运行
 ```
 
 选项：`--data-dir <dir>` 指定 userData（也可用环境变量 `ENSO_USER_DATA_DIR`）；`--dev` 连接开发版（`enso-code-dev`）。
 在仓库里可以直接运行 `node scripts/enso-cli.mjs ...`，全局安装后命令名是 `enso`。
 
 返回值都是 JSON。成功为 `{ "ok": true, ... }`，失败为 `{ "ok": false, "error": "..." }`，退出码非 0。
+
+## 机器可读 help（给 LLM）
+
+`enso config help --json` 向运行中的 Main 发送只读请求 `{ action: "schema" }`，CLI 只负责拼上命令清单并格式化输出：
+
+- `commands`：每个命令的 `name`、`usage`、`args`、`description`、`examples`；`options` 为全局选项。
+- `keys`：由 Main 遍历 `SETTINGS_STATE_FIELDS` 与当前 settings state 生成（不含任何值），每项 `{ path, type, writable, requiresRestart, secret }`。数组元素以 `<id>`（或 `<index>`）占位，如 `providers.<id>.baseUrl`；最深 4 段；未写入 state 的字段 `type` 为 `unknown`。`writable` 与 `set` 的拒绝规则一致。
+- `blacklist`：密钥键名正则与说明、路径/命令规则、`writeDeniedFields`、`entryLevelDeniedFields`、`readDeniedFields` 和被拒的非设置操作清单。
+- `notes`：热生效说明、需重启键及原因、socket/token 机制、键格式。
+
+应用未运行时 `help --json` 退出码 1，并提示需要先启动 EnsoCode。
 
 ## 键格式
 
@@ -78,7 +91,18 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 - **只监听本机**：macOS 和 Linux 使用 Unix domain socket `<userData>/cli/cli.sock`，目录权限 0700，socket 权限 0600；Windows 使用按 userData 区分的命名管道 `\\.\pipe\enso-code-cli-<hash>`。不开任何 TCP 端口。
 - **token**：每次启动生成 32 字节随机 token，写入 `<userData>/cli-token`（0600）。每个请求都必须带 token，Main 用常量时间比较，校验失败一律返回 `unauthorized`。
-- **只做 config**：socket 只接受 `cmd: "config"` 的 get、set、list、reload，不提供插件安装、会话读写或执行命令。
+- **只做 config**：socket 只接受 `cmd: "config"` 的 get、set、list、reload、schema（只读，不含值），不提供插件安装、会话读写或执行命令。
 - **密钥不出 Main**：所有读路径都会递归脱敏，密钥类键名的值替换为 `***`。
 - **请求上限**：单个连接超过 1 MiB 会被断开。
 - **退出清理**：应用退出（`before-quit`）时关闭监听，并删除 socket 文件和 `cli-token`。
+
+## 新增设置项时必须同步
+
+新增或修改 `SETTINGS_STATE_FIELDS` 中的字段时逐条检查：
+
+1. **自动出现**：新字段无需手动登记，会自动出现在 `enso config list` 与 `enso config help --json` 的 `keys` 里（从 state 生成），`writable` / `secret` / `requiresRestart` 按 `policy.ts` 规则计算。
+2. **密钥 / 路径 / 执行类**：键名不被 `SECRET_NAME`、`PATH_OR_EXEC_NAME` 命中但实际存放凭据、文件路径或可执行入口时，必须加进 `src/main/services/configCli/policy.ts` 的 `WRITE_DENIED`（或调整正则）；项目/会话数据加进 `READ_DENIED`；条目增删等同安装卸载的加进 `ENTRY_LEVEL_DENIED`。
+3. **启动时读入**：只在启动时读取、或设置页另走专用 IPC 才生效的字段，必须加进 `RESTART_REQUIRED` 并写明原因。
+4. **取值校验**：有枚举或格式约束的字段，在 `validateField` 中补校验。
+5. **单测**：在 `src/main/services/configCli/server.test.ts` 补一条断言，新字段可被 `set` 并生效，或按上述规则被拒（`schema` 中对应 `writable` / `secret` / `requiresRestart` 正确）。
+6. **文档**：本文黑名单表或「热生效与需重启」列表随之更新。
