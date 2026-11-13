@@ -130,6 +130,43 @@ describe('runPluginHost', () => {
     });
   });
 
+  it('session.onTurnEnd：首个监听开订阅、回合结束回调、全部取消后关订阅', async () => {
+    const h = harness(`const seen = []; let offs = [];
+    export function activate(enso) {
+      offs.push(enso.session.onTurnEnd((e) => seen.push('a:' + e.sessionId)));
+      offs.push(enso.session.onTurnEnd(() => { throw new Error('listener boom'); }));
+      enso.tools.register('seen', async () => seen.join(','));
+      enso.tools.register('off', async () => { offs.forEach((off) => off()); offs = []; return 'ok'; });
+    }`);
+    await h.next((m) => m.t === 'ready');
+    const watches = () => h.sent.filter((m) => m.t === 'call' && m.api === 'session.watchTurnEnd');
+    expect(watches()).toEqual([
+      { t: 'call', id: expect.any(String), api: 'session.watchTurnEnd', args: { on: true } },
+    ]);
+    h.deliver({ t: 'session-turn-end', sessionId: 's1' });
+    h.deliver(call('7', 'tool.execute', { name: 'seen', args: {} }));
+    expect(await h.next((m) => m.t === 'res' && m.id === '7')).toMatchObject({
+      value: { content: 'a:s1' },
+    });
+    expect(h.sent.some((m) => m.t === 'log' && m.message.includes('listener boom'))).toBe(true);
+
+    h.deliver(call('8', 'tool.execute', { name: 'off', args: {} }));
+    await h.next((m) => m.t === 'res' && m.id === '8');
+    // 关订阅脱离调用上下文，不带 invocationId
+    expect(watches()).toHaveLength(2);
+    expect(watches()[1]).toEqual({
+      t: 'call',
+      id: expect.any(String),
+      api: 'session.watchTurnEnd',
+      args: { on: false },
+    });
+    h.deliver({ t: 'session-turn-end', sessionId: 's2' });
+    h.deliver(call('9', 'tool.execute', { name: 'seen', args: {} }));
+    expect(await h.next((m) => m.t === 'res' && m.id === '9')).toMatchObject({
+      value: { content: 'a:s1' },
+    });
+  });
+
   it('处理器内的宿主调用自动带上本次调用 id，并转发回 Main', async () => {
     const h = harness(`export function activate(enso) {
       enso.renderer.handle('read', async () => enso.fs.readText('a.txt'));

@@ -10,6 +10,7 @@ export async function mountMain(activate, options = {}) {
   const methods = new Map();
   const exportsMap = new Map();
   const triggers = new Map();
+  const turnEndListeners = new Set();
 
   const call = (api, args) => {
     calls.push({ api, args });
@@ -60,6 +61,11 @@ export async function mountMain(activate, options = {}) {
       status: (...args) => call('session.status', args),
       focus: (...args) => call('session.focus', args),
       create: (...args) => call('session.create', args),
+      onTurnEnd: (listener) => {
+        const entry = (event) => listener(event);
+        turnEndListeners.add(entry);
+        return () => turnEndListeners.delete(entry);
+      },
     },
     composer: {
       readDraft: (...args) => call('composer.readDraft', args),
@@ -91,6 +97,9 @@ export async function mountMain(activate, options = {}) {
     fire: (event, data, ctx) => invoke(events, 'event', event, [data, ctxOr(ctx)]),
     schedule: (id) => invoke(schedules, 'schedule', id, [ctxOr()]),
     method: (name, args, ctx) => invoke(methods, 'method', name, [args, ctxOr(ctx)]),
+    turnEnd: async (sessionId) => {
+      for (const listener of [...turnEndListeners]) await listener({ sessionId });
+    },
   };
 }
 `;

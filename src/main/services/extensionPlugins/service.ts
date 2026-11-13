@@ -248,6 +248,8 @@ export class ExtensionPluginService {
   private readonly idTails = new Map<string, Promise<void>>();
   private readonly observeLanes = new Map<string, ObserveLane>();
   private readonly processes = new Map<string, PluginProcess>();
+  /** 调过 session.watchTurnEnd 的进程；按进程实例记，换了进程就不再投递 */
+  private readonly turnEndWatchers = new Map<string, PluginProcess>();
   private readonly staged = new Map<
     string,
     { staged: StagedPlugin; at: number; source: PluginInstallSource }
@@ -670,8 +672,10 @@ export class ExtensionPluginService {
 
   async setEnabled(id: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
     return this.withIdLock(id, async () => {
-      if (!enabled) this.stopProcess(id);
-      else {
+      if (!enabled) {
+        this.stopProcess(id);
+        this.gate.forgetPlugin(id);
+      } else {
         this.recentErrors.delete(id);
         this.prepareFailed.delete(id);
       }
@@ -792,6 +796,7 @@ export class ExtensionPluginService {
       this.records = this.records.filter((r) => r.id !== id);
       this.persist();
       this.stopProcess(id);
+      this.gate.forgetPlugin(id);
       this.removeLocalFiles(id);
       await this.logger.discard(id);
       rmSync(this.logPath(id), { force: true });
@@ -1381,6 +1386,19 @@ export class ExtensionPluginService {
     );
   }
 
+  /** 主会话一轮结束；只推给订阅了且看得见这个会话的进程 */
+  notifyTurnEnd(sessionId: string): void {
+    for (const [id, proc] of this.turnEndWatchers) {
+      if (this.processes.get(id) !== proc || !this.gate.canSeeSession(id, sessionId)) continue;
+      proc.notifyTurnEnd(sessionId);
+    }
+  }
+
+  /** 会话删除：插件不再据它判定可见范围 */
+  forgetSession(sessionId: string): void {
+    this.gate.forgetSession(sessionId);
+  }
+
   async intercept<E extends PluginInterceptEvent>(input: {
     sessionId: string;
     projectRoot: string | null;
@@ -1842,6 +1860,7 @@ export class ExtensionPluginService {
     if (signal?.aborted) throw pluginError('ABORTED', '调用已取消');
     const proc = this.processFor(pluginId);
     const spawn = proc.ready();
+    if (ctx.sessionId) this.gate.noteSession(pluginId, ctx.sessionId);
     const invocationId = this.gate.invocations.create({
       pluginId,
       sessionId: ctx.sessionId,
@@ -1918,10 +1937,18 @@ export class ExtensionPluginService {
           main: manifest.main ?? '',
           dataDir,
         },
-        handleHostCall: (api, args, invocationId) =>
-          this.gate.handle(manifest.id, api, args, invocationId),
+        handleHostCall: async (api, args, invocationId) => {
+          const value = await this.gate.handle(manifest.id, api, args, invocationId);
+          if (api !== 'session.watchTurnEnd') return value;
+          if (value === true) this.turnEndWatchers.set(manifest.id, proc);
+          else if (this.turnEndWatchers.get(manifest.id) === proc)
+            this.turnEndWatchers.delete(manifest.id);
+          return null;
+        },
         onExit: ({ unexpected }) => {
           if (unexpected) this.appendLog(manifest.id, 'warn', '插件进程意外退出');
+          if (this.turnEndWatchers.get(manifest.id) === proc)
+            this.turnEndWatchers.delete(manifest.id);
           if (this.processes.get(manifest.id) === proc && this.dynamic.clear(manifest.id))
             this.touch();
           onExit(unexpected);
@@ -1972,6 +1999,7 @@ export class ExtensionPluginService {
     this.gate.invocations.cancelPlugin(id);
     this.processes.get(id)?.stop();
     this.processes.delete(id);
+    this.turnEndWatchers.delete(id);
     if (this.dynamic.clear(id)) this.touch();
   }
 

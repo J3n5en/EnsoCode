@@ -875,6 +875,48 @@ describe('PluginHostGate', () => {
     });
   });
 
+  it('session.watchTurnEnd 沿用 session.read；回合结束只对插件用过的会话同项目可见', async () => {
+    const info = (id: string) => ({ id, title: id, updatedAt: 1, state: 'idle' as const });
+    const projects: Record<string, string[]> = { s1: ['s1', 's2'], s2: ['s1', 's2'], x9: ['x9'] };
+    deps.sessions = {
+      list: vi.fn((origin: string) => (projects[origin.split('::')[0]] ?? []).map(info)),
+      listAll: vi.fn(() => ['s1', 's2', 'x9'].map(info)),
+    };
+    deps.manifest = () => manifest({ permissions: [] });
+    gate = new PluginHostGate(deps);
+    await expect(
+      gate.handle('a.b', 'session.watchTurnEnd', { on: true }, undefined)
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    gate.noteSession('a.b', 's1');
+    expect(gate.canSeeSession('a.b', 's1')).toBe(false);
+
+    deps.manifest = () => manifest({ permissions: ['session.read'] });
+    gate = new PluginHostGate(deps);
+    await expect(gate.handle('a.b', 'session.watchTurnEnd', { on: true }, undefined)).resolves.toBe(
+      true
+    );
+    await expect(
+      gate.handle('a.b', 'session.watchTurnEnd', { on: 'yes' }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    // 常驻进程还没碰过任何会话：什么都看不到
+    expect(gate.canSeeSession('a.b', 's2')).toBe(false);
+    gate.noteSession('a.b', 's1::child');
+    expect(gate.canSeeSession('a.b', 's1')).toBe(true);
+    expect(gate.canSeeSession('a.b', 's2')).toBe(true);
+    expect(gate.canSeeSession('a.b', 'x9')).toBe(false);
+    expect(gate.canSeeSession('other.plugin', 's2')).toBe(false);
+    gate.forgetSession('s1');
+    expect(gate.canSeeSession('a.b', 's2')).toBe(false);
+    gate.noteSession('a.b', 's2');
+    gate.forgetPlugin('a.b');
+    expect(gate.canSeeSession('a.b', 's2')).toBe(false);
+
+    deps.manifest = () => manifest({ permissions: ['session.readAll'] });
+    gate = new PluginHostGate(deps);
+    expect(gate.canSeeSession('a.b', 'x9')).toBe(true);
+    expect(gate.canSeeSession('a.b', 'ghost')).toBe(false);
+  });
+
   it('远端窗口发起的调用不能动宿主桌面的剪贴板和外链', async () => {
     deps.clipboard = vi.fn();
     deps.openExternal = vi.fn(async () => undefined);

@@ -1,6 +1,6 @@
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
-import { SessionStateTracker } from './sessionState';
+import { SessionStateTracker, turnEndSessionId } from './sessionState';
 
 const root = { sessionId: 'r', generation: 'g' };
 const child = { sessionId: 'r::cw-1', generation: 'c', parent: root };
@@ -9,6 +9,15 @@ const ev = (event: Record<string, unknown>) =>
   ({ seq: ++seq, identity: root, ...event }) as unknown as RendererAgentEvent;
 
 describe('SessionStateTracker', () => {
+  it('回合结束：主会话完成、失败、中止各算一次；子会话与其他事件不算', () => {
+    expect(turnEndSessionId(ev({ type: 'turn-completed', turnId: 't' }))).toBe('r');
+    expect(turnEndSessionId(ev({ type: 'turn-failed', turnId: 't', error: 'x' }))).toBe('r');
+    expect(turnEndSessionId(ev({ type: 'turn-completed', turnId: 't', aborted: true }))).toBe('r');
+    expect(turnEndSessionId(ev({ type: 'turn-completed', identity: child }))).toBeNull();
+    expect(turnEndSessionId(ev({ type: 'status', status: 'idle' }))).toBeNull();
+    expect(turnEndSessionId({ type: 'worker-exited' } as RendererAgentEvent)).toBeNull();
+  });
+
   it('按侧栏圆点优先级汇总：error > waiting > running > idle，状态或挂起数变化才报告', () => {
     const t = new SessionStateTracker();
     expect(t.status('r')).toEqual({

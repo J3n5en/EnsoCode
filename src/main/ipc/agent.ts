@@ -124,8 +124,12 @@ import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
 import { reloadConversation } from '../services/conversationReload';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
-import { getExtensionPlugins, setPluginSessionDirectory } from '../services/extensionPlugins';
-import { SessionStateTracker } from '../services/extensionPlugins/sessionState';
+import {
+  getExtensionPlugins,
+  peekExtensionPlugins,
+  setPluginSessionDirectory,
+} from '../services/extensionPlugins';
+import { SessionStateTracker, turnEndSessionId } from '../services/extensionPlugins/sessionState';
 import { listAllSessions, listProjectSessions } from '../services/extensionPlugins/sessions';
 import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/externalFileReveal';
 import { searchFiles } from '../services/fileSearch';
@@ -297,6 +301,16 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   forwardAgentEvent(event);
   handlePairHeadlessAgentEvent(event);
   publishPluginSessionStatus(event);
+  publishPluginTurnEnd(event);
+}
+
+/** 主会话一轮结束（完成、失败、中止各只发一次）时通知订阅了 onTurnEnd 的插件进程 */
+function publishPluginTurnEnd(event: RendererAgentEvent): void {
+  const sessionId = turnEndSessionId(event);
+  if (!sessionId) return;
+  // 与其他插件事件一致：Bot 会话不发
+  if (sourceAuthority?.conversation(sessionId)?.bot) return;
+  peekExtensionPlugins()?.notifyTurnEnd(sessionId);
 }
 
 /** 主会话汇总状态变化时通知订阅了 session_status 的插件 */
@@ -398,6 +412,7 @@ function removeConversationFiles(conversation: {
   sessionFile?: string;
 }): void {
   const project = sourceAuthority?.project(conversation.projectId);
+  peekExtensionPlugins()?.forgetSession(conversation.conversationId);
   removeConversationSessionFiles({
     sessionDir: path.join(app.getPath('userData'), 'agent', 'sessions'),
     conversationId: conversation.conversationId,

@@ -72,7 +72,13 @@ const manifest = (patch: Record<string, unknown> = {}) =>
 function createService(
   fork: (modulePath: string, args: string[], options: WorkerForkOptions) => EventEmitter = () =>
     new InProcessChild(),
-  extra: { env?: NodeJS.ProcessEnv; sourceEnv?: NodeJS.ProcessEnv } = {}
+  extra: {
+    env?: NodeJS.ProcessEnv;
+    sourceEnv?: NodeJS.ProcessEnv;
+    sessions?: {
+      list(origin: string): { id: string; title: string; updatedAt: number; state: 'idle' }[];
+    };
+  } = {}
 ) {
   const root = temp('plugins-root-');
   const bridge = vi.fn(() => ({ ok: true as const }));
@@ -93,6 +99,7 @@ function createService(
       now: () => Date.now(),
       clipboard: vi.fn(),
       openExternal: vi.fn(async () => undefined),
+      ...(extra.sessions ? { sessions: extra.sessions } : {}),
     },
   });
   return { root, service, bridge };
@@ -755,6 +762,89 @@ describe('插件能力', () => {
     });
     expect(service.setCrossSessionInject('example.demo', true).ok).toBe(false);
     expect(service.list()[0]?.crossSessionInject).toBeUndefined();
+  });
+
+  it('session.onTurnEnd：只收本项目会话，取消订阅、进程退出、停用后都不再投递', async () => {
+    const info = (id: string) => ({ id, title: id, updatedAt: 1, state: 'idle' as const });
+    const { service } = createService(undefined, {
+      sessions: { list: (origin) => (origin === 'x9' ? ['x9'] : ['s1', 's2']).map(info) },
+    });
+    await install(service, {
+      'enso-plugin.json': manifest({ permissions: ['agent.tool', 'session.read'] }),
+      'main.mjs': `const seen = []; let off = null;
+      export function activate(enso) {
+        enso.tools.register('lookup', async (args) => {
+          if (args.op === 'sub') off = enso.session.onTurnEnd((e) => seen.push(e.sessionId));
+          if (args.op === 'off') off();
+          return seen.join(',');
+        });
+      }`,
+    });
+    await service.setEnabled('example.demo', true);
+    const run = async (op?: string) => {
+      const content = (
+        await service.callTool({
+          toolName: 'plugin_example-demo__lookup',
+          args: op ? { op } : {},
+          sessionId: 's1',
+          projectRoot: null,
+        })
+      ).content;
+      for (let i = 0; i < 5; i++) await flush();
+      return content;
+    };
+    const watchers = () =>
+      (service as unknown as { turnEndWatchers: Map<string, unknown> }).turnEndWatchers;
+
+    await run('sub');
+    expect(watchers().size).toBe(1);
+    service.notifyTurnEnd('s2');
+    service.notifyTurnEnd('x9');
+    expect(await run()).toBe('s2');
+
+    await run('off');
+    expect(watchers().size).toBe(0);
+    service.notifyTurnEnd('s1');
+    expect(await run()).toBe('s2');
+
+    await run('sub');
+    expect(watchers().size).toBe(1);
+    await service.setEnabled('example.demo', false);
+    expect(watchers().size).toBe(0);
+    expect(() => service.notifyTurnEnd('s1')).not.toThrow();
+  });
+
+  it('session.onTurnEnd：插件进程意外退出后订阅随之清理', async () => {
+    const children: InProcessChild[] = [];
+    const info = (id: string) => ({ id, title: id, updatedAt: 1, state: 'idle' as const });
+    const { service } = createService(
+      () => {
+        const child = new InProcessChild();
+        children.push(child);
+        return child;
+      },
+      { sessions: { list: () => ['s1'].map(info) } }
+    );
+    await install(service, {
+      'enso-plugin.json': manifest({ permissions: ['agent.tool', 'session.read'] }),
+      'main.mjs': `export function activate(enso) {
+        enso.session.onTurnEnd(() => {});
+        enso.tools.register('lookup', () => 'ok');
+      }`,
+    });
+    await service.setEnabled('example.demo', true);
+    await service.callTool({
+      toolName: 'plugin_example-demo__lookup',
+      args: {},
+      sessionId: 's1',
+      projectRoot: null,
+    });
+    for (let i = 0; i < 5; i++) await flush();
+    const watchers = (service as unknown as { turnEndWatchers: Map<string, unknown> })
+      .turnEndWatchers;
+    expect(watchers.size).toBe(1);
+    children.at(-1)?.emit('exit', 1);
+    expect(watchers.size).toBe(0);
   });
 
   it('定时任务按间隔执行且不重叠，停用后不再跑', async () => {

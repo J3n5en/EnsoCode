@@ -142,6 +142,11 @@ export class PluginProcess {
     this.beginStop();
   }
 
+  /** 只推给活着的进程；不拉起、不影响空闲计时 */
+  notifyTurnEnd(sessionId: string): void {
+    if (this.child && !this.stopping) this.post({ t: 'session-turn-end', sessionId });
+  }
+
   /** 先发 shutdown，最多等 3 秒再 kill；再过 5 秒仍无 exit 则 SIGKILL 并结束等待 */
   private beginStop(): void {
     this.clearIdle();
