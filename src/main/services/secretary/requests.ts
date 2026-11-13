@@ -31,6 +31,8 @@ export interface ResolveProposalRequest {
   proposalId: string;
   action: 'confirm' | 'reject';
   edits?: Partial<DispatchDraft>;
+  /** 卡片上就地改过的档案草案；内容由档案服务收窄 */
+  profileDraft?: unknown;
 }
 
 function parseEdits(value: unknown): Partial<DispatchDraft> | undefined {
@@ -53,8 +55,14 @@ export function parseResolveProposalRequest(value: unknown): ResolveProposalRequ
   if (!proposalId) return null;
   if (value.action !== 'confirm' && value.action !== 'reject') return null;
   if (value.edits !== undefined && !isRecord(value.edits)) return null;
+  if (value.profileDraft !== undefined && !isRecord(value.profileDraft)) return null;
   const edits = parseEdits(value.edits);
-  return { proposalId, action: value.action, ...(edits ? { edits } : {}) };
+  return {
+    proposalId,
+    action: value.action,
+    ...(edits ? { edits } : {}),
+    ...(value.profileDraft !== undefined ? { profileDraft: value.profileDraft } : {}),
+  };
 }
 
 export interface ReferenceRequest {

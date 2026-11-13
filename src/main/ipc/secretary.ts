@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
+import { checkAvatarImage } from '@shared/bots/cardPng';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretaryState } from '@shared/types/secretary';
 import { notifyDesktop } from '../services/desktopHooks';
+import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
+import { appendAudit } from '../services/secretary/audit';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
   buildSecretaryState,
@@ -29,6 +32,7 @@ import {
   type SecretaryHostPorts,
 } from '../services/secretary/host';
 import { isSecretaryConversation, secretaryProjectId } from '../services/secretary/identity';
+import { secretaryProfile } from '../services/secretary/profile';
 import {
   parseReferenceRequest,
   parseResolveProposalRequest,
@@ -186,6 +190,14 @@ function secretaryStore(): SecretaryStore {
   return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
 }
 
+function parseAvatarRequest(value: unknown): { image: Uint8Array | null } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const image = (value as { image?: unknown }).image;
+  if (image === null) return { image: null };
+  if (image instanceof Uint8Array && checkAvatarImage(image)) return { image };
+  return null;
+}
+
 /** 回传宿主的 Main 侧能力：读写全部同步，读改写之间不留 await */
 const hostPorts: SecretaryHostPorts = {
   enabled: () => secretaryEnabled(),
@@ -254,12 +266,18 @@ function broadcastState(): void {
 
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
+  setSecretaryAvatarResolver(() => (secretaryEnabled() ? secretaryStore().avatarPath() : null));
   driver = createDispatchDriver(driverPorts);
   host = createSecretaryHost(hostPorts);
   // 同一次 observe 的结果既给驱动也给回传宿主，事件入口只调一次
   setSecretaryDriverObserver((event, changes) => {
     driver?.observe(event);
     host?.onAgentEvent(event, changes);
+    // 改了名字或人设的会话等本轮跑完再释放，免得打断正在跑的一轮
+    if (event.type === 'turn-completed' || event.type === 'turn-failed') {
+      const sessionId = 'identity' in event && event.identity ? event.identity.sessionId : null;
+      if (sessionId) void secretaryProfile.onTurnEnded(sessionId);
+    }
   });
   onConversationsMerged((patch) => driver?.onConversationsMerged(patch));
   host.start();
@@ -269,12 +287,56 @@ export function registerSecretaryHandlers(): void {
     return secretaryState();
   });
 
+  // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_PROFILE, async (event) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const store = secretaryStore();
+    return { ok: true, profile: store.profile(), persona: store.readPersona() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SAVE_PROFILE, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return secretaryProfile.save(request, null);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_RESET_PROFILE, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return secretaryProfile.reset(request, null);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SET_AVATAR, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseAvatarRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    const profile = secretaryStore().setAvatar(parsed.image);
+    if (!profile) return { ok: false, error: 'not-configured' };
+    appendAudit(path.join(app.getPath('userData'), 'secretary'), {
+      at: Date.now(),
+      secretaryConversationId: null,
+      op: 'profile_avatar',
+      ok: true,
+      detail: parsed.image ? 'set' : 'cleared',
+    });
+    broadcastState();
+    return { ok: true, profile };
+  });
+
   ipcMain.handle(IPC_CHANNELS.SECRETARY_RESOLVE_PROPOSAL, async (event, request: unknown) => {
     if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     const parsed = parseResolveProposalRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
-    return resolveProposal(secretaryDispatchPorts, parsed.proposalId, parsed.action, parsed.edits);
+    return resolveProposal(
+      secretaryDispatchPorts,
+      parsed.proposalId,
+      parsed.action,
+      parsed.edits,
+      parsed.profileDraft
+    );
   });
 
   ipcMain.handle(

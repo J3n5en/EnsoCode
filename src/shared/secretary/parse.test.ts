@@ -1,5 +1,76 @@
 import { describe, expect, it } from 'vitest';
-import { parseDispatchFile, parseProfile, parseSchedules, parseTodos } from './parse';
+import {
+  parseDispatchFile,
+  parseProfile,
+  parseProfileDraft,
+  parseSchedules,
+  parseTodos,
+} from './parse';
+
+describe('parseProfileDraft', () => {
+  it('rejects a non-object draft', () => {
+    expect(parseProfileDraft(undefined)).toEqual({ ok: false, error: 'invalid profile' });
+    expect(parseProfileDraft([])).toEqual({ ok: false, error: 'invalid profile' });
+  });
+
+  it('rejects out-of-range enum values instead of falling back to defaults', () => {
+    expect(parseProfileDraft({ autonomy: 'god' })).toEqual({
+      ok: false,
+      error: 'invalid autonomy',
+    });
+    expect(parseProfileDraft({ notify: 'always' })).toEqual({
+      ok: false,
+      error: 'invalid notify',
+    });
+    expect(parseProfileDraft({ replyLanguage: 'fr' })).toEqual({
+      ok: false,
+      error: 'invalid replyLanguage',
+    });
+  });
+
+  it('rejects malformed nested values', () => {
+    expect(parseProfileDraft({ model: { providerId: 'p' } })).toEqual({
+      ok: false,
+      error: 'invalid model',
+    });
+    expect(parseProfileDraft({ dispatchModel: { mode: 'fixed' } })).toEqual({
+      ok: false,
+      error: 'invalid dispatchModel',
+    });
+    expect(parseProfileDraft({ avatar: { color: 'red' } })).toEqual({
+      ok: false,
+      error: 'invalid avatar',
+    });
+    expect(parseProfileDraft({ dailyBriefAt: '9:00' })).toEqual({
+      ok: false,
+      error: 'invalid dailyBriefAt',
+    });
+    expect(parseProfileDraft({ maxRunningDispatches: 0 })).toEqual({
+      ok: false,
+      error: 'invalid maxRunningDispatches',
+    });
+    expect(parseProfileDraft({ visibleProjectIds: 'some' })).toEqual({
+      ok: false,
+      error: 'invalid visibleProjectIds',
+    });
+  });
+
+  it('keeps only known keys and allows null to clear optional ones', () => {
+    expect(
+      parseProfileDraft({
+        name: ' 小秘 ',
+        autonomy: 'full',
+        dailyBriefAt: null,
+        addressAs: null,
+        model: null,
+        junk: 1,
+      })
+    ).toEqual({
+      ok: true,
+      draft: { name: '小秘', autonomy: 'full', dailyBriefAt: null, addressAs: null, model: null },
+    });
+  });
+});
 
 describe('parseProfile', () => {
   it('treats a missing or non-object value as not configured', () => {

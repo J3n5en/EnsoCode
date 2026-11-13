@@ -44,6 +44,13 @@ export class SecretaryStore {
     writeAtomic(this.file('persona.md'), persona);
   }
 
+  /** 重来：档案、人设与头像一起清掉；会话、待办与私有记忆由调用方决定 */
+  clearProfile(): void {
+    for (const name of ['profile.json', 'persona.md', 'avatar.png']) {
+      rmSync(this.file(name), { force: true });
+    }
+  }
+
   /** 只在档案标记有图时返回 avatar.png 路径 */
   avatarPath(): string | null {
     if (!this.profile()?.avatar.imageVersion) return null;

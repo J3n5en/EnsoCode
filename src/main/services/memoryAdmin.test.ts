@@ -9,7 +9,7 @@ import { ensureDistillJob, listResumableDistillJobs } from './memory/distill';
 import { applyExtraction } from './memory/kg';
 import { createSearchAssist } from './memory/searchLlm';
 import { createMemory, getMemory } from './memory/store';
-import type { Embedder } from './memory/types';
+import { type Embedder, projectSpaceId } from './memory/types';
 import {
   archiveMemory,
   clearFinishedMemoryJobs,
@@ -78,6 +78,13 @@ it('deleting a chat space keeps pending member jobs but stops them routing into 
   const [job] = listResumableDistillJobs(db);
   expect(job.payload.botId).toBe('11111111-1111-4111-8111-111111111111');
   expect(job.payload).not.toHaveProperty('chatId');
+});
+
+it('deletes only the requested project space', async () => {
+  const keep = await add('keep', projectSpaceId('p1'));
+  await add('secretary note', projectSpaceId('secretary'));
+  expect(deleteMemorySpace(db, projectSpaceId('secretary'))).toBe(1);
+  expect(getMemory(db, keep.id)).not.toBeNull();
 });
 
 describe('memory admin — 语义搜索模式', () => {

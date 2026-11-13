@@ -6,6 +6,7 @@ import type {
   ProposalStatus,
   SecretaryDispatchFile,
   SecretaryProfile,
+  SecretaryProfileDraft,
   SecretaryProposal,
   SecretaryResultKind,
   SecretarySchedule,
@@ -143,6 +144,141 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
   if (typeof value.dailyBriefAt === 'string' && CLOCK_RE.test(value.dailyBriefAt))
     profile.dailyBriefAt = value.dailyBriefAt;
   return profile;
+}
+
+export type ProfileDraftResult =
+  | { ok: true; draft: SecretaryProfileDraft }
+  | { ok: false; error: string };
+
+const DRAFT_ENUMS: Record<string, readonly string[]> = {
+  autonomy: AUTONOMIES,
+  dispatchWorktree: WORKTREE_MODES,
+  replyLanguage: REPLY_LANGUAGES,
+  style: STYLES,
+  notify: NOTIFY_MODES,
+};
+
+const PERSONA_MAX_CHARS = 4000;
+
+function validModel(value: unknown): boolean {
+  if (!isObject(value) || !text(value.providerId) || !text(value.modelId)) return false;
+  return (
+    value.thinkingLevel === undefined ||
+    THINKING_LEVELS.includes(value.thinkingLevel as ThinkingLevel)
+  );
+}
+
+function validDispatchModel(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  if (value.mode === 'project') return true;
+  if (value.mode === 'fixed') return validModel(value.model);
+  if (value.mode === 'choose') {
+    return (
+      Array.isArray(value.candidates) &&
+      value.candidates.length > 0 &&
+      value.candidates.every(validModel)
+    );
+  }
+  return false;
+}
+
+function validIdList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => text(item) !== undefined);
+}
+
+/**
+ * 表单与配置提案的写入收窄：越界的枚举当场拒绝，而不是像读盘那样静默回默认值，
+ * 否则用户勾了"完全自主"却悄悄退回"先问我"。
+ */
+export function parseProfileDraft(value: unknown): ProfileDraftResult {
+  if (!isObject(value)) return { ok: false, error: 'invalid profile' };
+  for (const [key, allowed] of Object.entries(DRAFT_ENUMS)) {
+    const raw = value[key];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string' || !allowed.includes(raw)) {
+      return { ok: false, error: `invalid ${key}` };
+    }
+  }
+  const draft: SecretaryProfileDraft = {};
+  const name = value.name === undefined ? undefined : text(value.name);
+  if (value.name !== undefined && !name) return { ok: false, error: 'invalid name' };
+  if (name) draft.name = name;
+  if (value.avatar !== undefined) {
+    if (!isObject(value.avatar)) return { ok: false, error: 'invalid avatar' };
+    const color = value.avatar.color;
+    if (color !== undefined && !(typeof color === 'string' && COLOR_RE.test(color))) {
+      return { ok: false, error: 'invalid avatar' };
+    }
+    const imageVersion = value.avatar.imageVersion;
+    if (
+      imageVersion !== undefined &&
+      !(typeof imageVersion === 'number' && Number.isInteger(imageVersion) && imageVersion >= 0)
+    ) {
+      return { ok: false, error: 'invalid avatar' };
+    }
+    draft.avatar = {
+      ...(typeof color === 'string' ? { color } : {}),
+      ...(typeof imageVersion === 'number' ? { imageVersion } : {}),
+    };
+  }
+  if (value.model !== undefined) {
+    if (value.model === null) draft.model = null;
+    else if (validModel(value.model)) draft.model = parseProfileModel(value.model);
+    else return { ok: false, error: 'invalid model' };
+  }
+  if (value.dispatchModel !== undefined) {
+    if (!validDispatchModel(value.dispatchModel)) {
+      return { ok: false, error: 'invalid dispatchModel' };
+    }
+    draft.dispatchModel = parseDispatchModel(value.dispatchModel);
+  }
+  if (value.autoApproveProjectIds !== undefined) {
+    if (!validIdList(value.autoApproveProjectIds)) {
+      return { ok: false, error: 'invalid autoApproveProjectIds' };
+    }
+    draft.autoApproveProjectIds = texts(value.autoApproveProjectIds);
+  }
+  if (value.visibleProjectIds !== undefined) {
+    if (value.visibleProjectIds !== 'all' && !validIdList(value.visibleProjectIds)) {
+      return { ok: false, error: 'invalid visibleProjectIds' };
+    }
+    draft.visibleProjectIds =
+      value.visibleProjectIds === 'all' ? 'all' : texts(value.visibleProjectIds);
+  }
+  if (value.maxRunningDispatches !== undefined) {
+    const max = value.maxRunningDispatches;
+    if (typeof max !== 'number' || !Number.isInteger(max) || max < 1 || max > 10) {
+      return { ok: false, error: 'invalid maxRunningDispatches' };
+    }
+    draft.maxRunningDispatches = max;
+  }
+  if (value.addressAs !== undefined) {
+    if (value.addressAs === null) draft.addressAs = null;
+    else if (text(value.addressAs)) draft.addressAs = text(value.addressAs) as string;
+    else return { ok: false, error: 'invalid addressAs' };
+  }
+  if (value.dailyBriefAt !== undefined) {
+    if (value.dailyBriefAt === null) draft.dailyBriefAt = null;
+    else if (typeof value.dailyBriefAt === 'string' && CLOCK_RE.test(value.dailyBriefAt)) {
+      draft.dailyBriefAt = value.dailyBriefAt;
+    } else return { ok: false, error: 'invalid dailyBriefAt' };
+  }
+  if (value.autonomy !== undefined) draft.autonomy = value.autonomy as SecretaryProfile['autonomy'];
+  if (value.dispatchWorktree !== undefined) {
+    draft.dispatchWorktree = value.dispatchWorktree as SecretaryProfile['dispatchWorktree'];
+  }
+  if (value.replyLanguage !== undefined) {
+    draft.replyLanguage = value.replyLanguage as SecretaryProfile['replyLanguage'];
+  }
+  if (value.style !== undefined) draft.style = value.style as SecretaryProfile['style'];
+  if (value.notify !== undefined) draft.notify = value.notify as SecretaryProfile['notify'];
+  if (value.persona !== undefined) {
+    if (typeof value.persona !== 'string' || value.persona.length > PERSONA_MAX_CHARS) {
+      return { ok: false, error: 'invalid persona' };
+    }
+    draft.persona = value.persona.trim();
+  }
+  return { ok: true, draft };
 }
 
 function parseDraft(value: unknown): DispatchDraft | undefined {

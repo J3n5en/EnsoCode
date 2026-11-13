@@ -24,6 +24,23 @@ export interface SecretaryProfile {
   updatedAt: number;
 }
 
+/**
+ * 表单与配置提案共用的写入草案：只带要改的字段，`null` 表示清掉该可选字段。
+ * 人设文字不落 profile.json，随草案一起传，由 Main 写 persona.md。
+ */
+export type SecretaryProfileDraft = Partial<
+  Omit<
+    SecretaryProfile,
+    'version' | 'updatedAt' | 'model' | 'addressAs' | 'dailyBriefAt' | 'avatar'
+  >
+> & {
+  avatar?: Partial<SecretaryProfile['avatar']>;
+  model?: SecretaryProfile['model'] | null;
+  addressAs?: string | null;
+  dailyBriefAt?: string | null;
+  persona?: string;
+};
+
 export type ProposalStatus =
   | 'pending'
   | 'executing'
@@ -51,10 +68,7 @@ export type SecretaryProposal = {
   error?: string;
 } & (
   | { kind: 'dispatch'; draft: DispatchDraft; conversationId?: string }
-  | {
-      kind: 'profile';
-      draft: Partial<Omit<SecretaryProfile, 'version' | 'updatedAt'>> & { persona?: string };
-    }
+  | { kind: 'profile'; draft: SecretaryProfileDraft }
 );
 
 export type SecretaryResultKind =

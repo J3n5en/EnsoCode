@@ -1,5 +1,6 @@
 import type { SecretaryOp } from '@shared/secretary/tools';
 import { secretaryDispatchHandlers } from './dispatch';
+import { secretaryProfileHandlers } from './profile';
 import { secretaryReadHandlers } from './readers';
 import { secretaryScheduleHandlers } from './schedules';
 
@@ -15,14 +16,11 @@ export type SecretaryOpHandler = (
   ctx: SecretaryOpContext
 ) => SecretaryOpResult | Promise<SecretaryOpResult>;
 
-/** 业务逻辑按单元逐个落地；未实现的 op 一律回 unavailable，让模型转告用户而不是重试 */
-const unavailable: SecretaryOpHandler = () => ({ ok: false, error: 'unavailable' });
-
 export const SECRETARY_OP_HANDLERS: Record<SecretaryOp, SecretaryOpHandler> = {
   ...secretaryReadHandlers,
   ...secretaryDispatchHandlers,
   ...secretaryScheduleHandlers,
-  secretary_profile_propose: unavailable,
+  ...secretaryProfileHandlers,
 };
 
 export async function invokeSecretaryOp(

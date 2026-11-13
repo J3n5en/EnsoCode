@@ -34,6 +34,7 @@ import type {
   ChildRunListResult,
   ConversationReloadResult,
   McpStatusPush,
+  ModelRef,
   ParentHistoryTailResult,
   RendererAgentEvent,
   SpawnModelConfig,
@@ -603,6 +604,24 @@ export async function releaseRootFromMain(sessionId: string): Promise<AgentActio
 
 export function isRootSessionAlive(sessionId: string): boolean {
   return agentSessionIndex.isAlive(sessionId);
+}
+
+/** 档案改了模型：活着的根会话当场换，下次 spawn 读会话行 */
+export async function setRootSessionModelFromMain(
+  sessionId: string,
+  model: ModelRef & { thinkingLevel?: ThinkingLevel }
+): Promise<AgentActionResult> {
+  const identity = rootIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  let credentialKeys: ReadonlySet<string>;
+  try {
+    credentialKeys = await readStoredOauthCredentialKeys();
+  } catch {
+    return { ok: false, error: 'model credentials unavailable' };
+  }
+  const changed = setSessionModel(identity, model.providerId, model.modelId, credentialKeys);
+  if (!changed.ok || !model.thinkingLevel) return changed;
+  return setSessionThinking(identity, model.thinkingLevel);
 }
 
 export function abortRootFromMain(sessionId: string): void {

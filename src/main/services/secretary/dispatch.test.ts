@@ -4,6 +4,7 @@ import type {
   SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProfile,
+  SecretaryProfileDraft,
   SecretaryTodo,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
@@ -96,6 +97,7 @@ interface Harness {
   queued: { conversationId: string; message: { id: string; text: string } }[];
   pausedGoals: string[];
   profileValue: SecretaryProfile | null;
+  appliedProfiles: SecretaryProfileDraft[];
   projects: ProjectAuthority[];
   conversations: ConversationAuthority[];
   statuses: Map<string, SecretarySessionStatus>;
@@ -128,6 +130,7 @@ function harness(
     queued: [],
     pausedGoals: [],
     profileValue: options.profile === undefined ? profile() : options.profile,
+    appliedProfiles: [],
     projects: options.projects ?? [localProject()],
     conversations: options.conversations ?? [rootConversation('c1')],
     statuses: new Map(Object.entries(options.statuses ?? {})),
@@ -139,6 +142,10 @@ function harness(
   };
   h.ports = {
     profile: () => h.profileValue,
+    applyProfile: async (draft) => {
+      h.appliedProfiles.push(draft);
+      return { ok: true };
+    },
     persona: () => '',
     // 与磁盘一致：每次读出的是新对象，改了不保存就不生效
     dispatchFile: () => structuredClone(h.file),
@@ -539,6 +546,84 @@ describe('resolveProposal', () => {
       ok: false,
       error: 'not-found',
     });
+  });
+
+  it('确认 profile 提案时走同一套保存逻辑', async () => {
+    const h = harness();
+    const draft: SecretaryProfileDraft = { name: '小秘', autonomy: 'tell-after' };
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'profile',
+      draft,
+    };
+
+    const result = await resolveProposal(h.ports, 'p1', 'confirm');
+
+    expect(result.ok && result.proposal.status).toBe('succeeded');
+    expect(h.appliedProfiles).toEqual([draft]);
+    expect(h.file.outbox[0]).toMatchObject({ proposalId: 'p1', status: 'succeeded' });
+    expect(h.created).toEqual([]);
+  });
+
+  it('卡片上就地改过的档案草案整份替换', async () => {
+    const h = harness();
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'profile',
+      draft: { name: '小秘' },
+    };
+
+    await resolveProposal(h.ports, 'p1', 'confirm', undefined, {
+      name: '小秘',
+      autonomy: 'full',
+    });
+
+    expect(h.appliedProfiles).toEqual([{ name: '小秘', autonomy: 'full' }]);
+  });
+
+  it('拒绝 profile 提案不写档案', async () => {
+    const h = harness();
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'profile',
+      draft: { name: '小秘' },
+    };
+
+    const result = await resolveProposal(h.ports, 'p1', 'reject');
+
+    expect(result.ok && result.proposal.status).toBe('rejected');
+    expect(h.appliedProfiles).toEqual([]);
+  });
+
+  it('保存失败时提案记失败并带原因', async () => {
+    const h = harness();
+    h.ports.applyProfile = async () => ({ ok: false, error: 'invalid autonomy' });
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'profile',
+      draft: { name: '小秘' },
+    };
+
+    const result = await resolveProposal(h.ports, 'p1', 'confirm');
+
+    expect(result.ok && result.proposal.status).toBe('failed');
+    expect(result.ok && result.proposal.error).toBe('invalid autonomy');
   });
 });
 

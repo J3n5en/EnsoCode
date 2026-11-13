@@ -63,6 +63,19 @@ describe('SecretaryStore', () => {
     expect(store.profile()).toBeNull();
   });
 
+  it('clears profile.json, persona.md and avatar.png on reset', () => {
+    store.saveProfile(profile);
+    store.writePersona('说话简短。');
+    store.setAvatar(new Uint8Array([1, 2, 3]));
+    store.clearProfile();
+    expect(store.profile()).toBeNull();
+    expect(store.readPersona()).toBe('');
+    expect(store.avatarPath()).toBeNull();
+    expect(existsSync(join(dir, 'profile.json'))).toBe(false);
+    expect(existsSync(join(dir, 'persona.md'))).toBe(false);
+    expect(existsSync(join(dir, 'avatar.png'))).toBe(false);
+  });
+
   it('round-trips persona.md', () => {
     store.writePersona('说话简短。');
     expect(store.readPersona()).toBe('说话简短。');

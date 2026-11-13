@@ -200,6 +200,23 @@ describe('IPC 入参收窄', () => {
     ).toBeNull();
   });
 
+  it('确认档案提案时带上就地改过的草案', () => {
+    expect(
+      parseResolveProposalRequest({
+        proposalId: 'p1',
+        action: 'confirm',
+        profileDraft: { name: '小秘', autonomy: 'full' },
+      })
+    ).toEqual({
+      proposalId: 'p1',
+      action: 'confirm',
+      profileDraft: { name: '小秘', autonomy: 'full' },
+    });
+    expect(
+      parseResolveProposalRequest({ proposalId: 'p1', action: 'confirm', profileDraft: 'x' })
+    ).toBeNull();
+  });
+
   it('点名请求去重并拒绝空 id', () => {
     expect(
       parseReferenceRequest({

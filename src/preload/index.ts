@@ -235,6 +235,8 @@ import type {
 } from '@shared/types/nodes';
 import type {
   DispatchDraft,
+  SecretaryProfile,
+  SecretaryProfileDraft,
   SecretaryProposal,
   SecretaryScheduleView,
   SecretaryState,
@@ -352,12 +354,15 @@ const electronAPI = {
     resolveProposal: (
       proposalId: string,
       action: 'confirm' | 'reject',
-      edits?: Partial<DispatchDraft>
+      edits?: Partial<DispatchDraft>,
+      /** 档案提案卡片上就地改过的整份草案 */
+      profileDraft?: SecretaryProfileDraft
     ): Promise<{ ok: true; proposal: SecretaryProposal } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_RESOLVE_PROPOSAL, {
         proposalId,
         action,
         ...(edits ? { edits } : {}),
+        ...(profileDraft ? { profileDraft } : {}),
       }),
     /** 用户把会话点名叫给秘书；Main 逐个校验，只返回通过的 id */
     referenceConversations: (
@@ -388,6 +393,23 @@ const electronAPI = {
       scheduleId: string
     ): Promise<{ ok: true; scheduleId: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, { scheduleId }),
+    /** profile 为 null 表示还没完成初次设置 */
+    getProfile: (): Promise<
+      { ok: true; profile: SecretaryProfile | null; persona: string } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_PROFILE),
+    /** 只带要改的字段；null 清掉该可选字段。越界取值由 Main 拒绝 */
+    saveProfile: (
+      draft: SecretaryProfileDraft
+    ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SAVE_PROFILE, draft),
+    /** 重新设置：默认保留会话与私有记忆 */
+    resetProfile: (clearMemory: boolean): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_RESET_PROFILE, { clearMemory }),
+    /** image=null 移除图片头像，恢复颜色头像 */
+    setAvatar: (
+      image: Uint8Array | null
+    ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SET_AVATAR, { image }),
   },
 
   modelDirectory: {

@@ -14,6 +14,7 @@ import type {
   SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProfile,
+  SecretaryProfileDraft,
   SecretaryProposal,
   SecretaryState,
   SecretaryTodo,
@@ -59,6 +60,11 @@ export interface SecretaryDispatchPorts {
   ): MaybePromise<boolean>;
   /** 有目标的会话被停止时置为暂停 */
   pauseGoal(conversationId: string): MaybePromise<void>;
+  /** 确认 profile 提案：交给档案服务走同一套保存与副作用 */
+  applyProfile(
+    draft: SecretaryProfileDraft,
+    secretaryConversationId: string | null
+  ): Promise<{ ok: boolean; error?: string }>;
   newId(): string;
   now(): number;
 }
@@ -83,7 +89,7 @@ export function setSecretaryStateListener(listener: (() => void) | null): void {
   stateListener = listener;
 }
 
-function notifyChanged(): void {
+export function notifySecretaryChanged(): void {
   try {
     stateListener?.();
   } catch {
@@ -178,7 +184,7 @@ async function saveProposal(
   const file = ports.dispatchFile();
   file.proposals[id] = proposal;
   ports.saveDispatch(file);
-  notifyChanged();
+  notifySecretaryChanged();
   return id;
 }
 
@@ -211,7 +217,7 @@ async function executeDispatch(
     ...(draft.goal ? { goal: draft.goal } : {}),
   };
   ports.saveDispatch(file);
-  notifyChanged();
+  notifySecretaryChanged();
   return created;
 }
 
@@ -369,7 +375,7 @@ export function createSecretaryDispatchHandlers(
           ok: true,
           detail: 'queued',
         });
-        notifyChanged();
+        notifySecretaryChanged();
         return { ok: true, result: { status: 'queued' } };
       }
       if (!(await ports.alive(conversationId))) {
@@ -422,7 +428,7 @@ export function createSecretaryDispatchHandlers(
         ok: true,
         detail: 'stopped',
       });
-      notifyChanged();
+      notifySecretaryChanged();
       return { ok: true, result: { status: 'stopped' } };
     },
 
@@ -452,7 +458,7 @@ export function createSecretaryDispatchHandlers(
         targetId: todo.id,
         ok: true,
       });
-      notifyChanged();
+      notifySecretaryChanged();
       return { ok: true, result: { todoId: todo.id } };
     },
 
@@ -486,7 +492,7 @@ export function createSecretaryDispatchHandlers(
         targetId: todoId,
         ok: true,
       });
-      notifyChanged();
+      notifySecretaryChanged();
       return { ok: true, result: { todoId } };
     },
 
@@ -549,7 +555,7 @@ async function finishProposal(
     ok: outcome.ok,
     ...(outcome.ok ? {} : { detail: outcome.error }),
   });
-  notifyChanged();
+  notifySecretaryChanged();
   return { ok: true, proposal: transitioned.proposal };
 }
 
@@ -576,12 +582,12 @@ export async function resolveProposal(
   ports: SecretaryDispatchPorts,
   proposalId: string,
   action: 'confirm' | 'reject',
-  edits?: Partial<DispatchDraft>
+  edits?: Partial<DispatchDraft>,
+  /** 卡片上就地改过的档案草案：整份替换，确认时按同一套收窄写入 */
+  profileDraft?: unknown
 ): Promise<ResolveProposalResult> {
   const proposal = ports.dispatchFile().proposals[proposalId];
   if (!proposal) return { ok: false, error: 'not-found' };
-  if (action === 'confirm' && proposal.kind !== 'dispatch')
-    return { ok: false, error: 'unsupported' };
   const file = ports.dispatchFile();
   const current = file.proposals[proposalId];
   if (!current) return { ok: false, error: 'not-found' };
@@ -603,9 +609,21 @@ export async function resolveProposal(
     targetId: proposalId,
     ok: true,
   });
-  if (action === 'reject' || transitioned.proposal.kind !== 'dispatch') {
-    notifyChanged();
+  if (action === 'reject') {
+    notifySecretaryChanged();
     return { ok: true, proposal: transitioned.proposal };
+  }
+  // 档案提案走同一套状态机，确认后才写入；拒绝不写
+  if (transitioned.proposal.kind === 'profile') {
+    const applied = await ports.applyProfile(
+      (profileDraft ?? transitioned.proposal.draft) as SecretaryProfileDraft,
+      proposal.secretaryConversationId
+    );
+    return finishProposal(
+      ports,
+      proposalId,
+      applied.ok ? { ok: true } : { ok: false, error: applied.error ?? 'profile-save-failed' }
+    );
   }
 
   const profile = await profileOf(ports);
@@ -669,7 +687,7 @@ export async function mutateTodo(
       targetId: request.todoId,
       ok: true,
     });
-    notifyChanged();
+    notifySecretaryChanged();
     return { ok: true, todoId: request.todoId };
   }
   const secretaryConversationId = await latestSecretaryConversation(ports);
@@ -777,6 +795,11 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
         goal: { ...(goal as Record<string, unknown>), status: 'paused' },
       };
     });
+  },
+  applyProfile: async (draft, secretaryConversationId) => {
+    const { secretaryProfile } = await import('./profile');
+    const result = await secretaryProfile.save(draft, secretaryConversationId);
+    return result.ok ? { ok: true } : result;
   },
   newId: () => randomUUID(),
   now: () => Date.now(),

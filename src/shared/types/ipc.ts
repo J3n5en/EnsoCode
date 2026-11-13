@@ -26,6 +26,14 @@ export const IPC_CHANNELS = {
   SECRETARY_SCHEDULES_LIST: 'secretary:schedules-list',
   /** 秘书：删除一条定时；系统生成的条目由档案与待办派生，不接受删除 */
   SECRETARY_SCHEDULE_REMOVE: 'secretary:schedule-remove',
+  /** 秘书：读档案与人设；profile 为 null 表示还没完成初次设置 */
+  SECRETARY_GET_PROFILE: 'secretary:get-profile',
+  /** 秘书：表单写入档案（部分字段合并），越界取值当场拒绝 */
+  SECRETARY_SAVE_PROFILE: 'secretary:save-profile',
+  /** 秘书：重新设置，可选清空私有记忆 */
+  SECRETARY_RESET_PROFILE: 'secretary:reset-profile',
+  /** 秘书：头像图片由 Main 落盘，renderer 只传字节或 null */
+  SECRETARY_SET_AVATAR: 'secretary:set-avatar',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',
