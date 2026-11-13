@@ -6,6 +6,7 @@ import {
   parseMemoryDeleteRequest,
   parseMemorySearchRequest,
 } from '@shared/memory/toolParams';
+import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { MemoryOp } from '@shared/types/agent';
 import type Database from 'better-sqlite3';
 import { deleteMemoryPermanently } from '../memoryAdmin';
@@ -111,7 +112,7 @@ export async function executeMemoryOp(
       recordedDateFrom: request.recordedDateFrom ?? null,
       recordedDateTo: request.recordedDateTo ?? null,
     });
-    // 秘书读到的其它空间是别人的记忆：脱敏并标 untrusted，提示词据此禁止照做
+    // 秘书读到的其它空间是别人的记忆：脱敏并包进不可信标签，提示词据此禁止照做
     const own = secretaryPrivateSpace(ctx);
     const readOnly = (spaceId: string) => own !== null && spaceId !== own;
     return {
@@ -120,14 +121,13 @@ export async function executeMemoryOp(
         id: hit.memory.id,
         title: readOnly(hit.memory.spaceId) ? redactSecrets(hit.memory.title) : hit.memory.title,
         content: readOnly(hit.memory.spaceId)
-          ? redactSecrets(hit.memory.content)
+          ? wrapUntrusted(`memory:${hit.memory.spaceId}`, redactSecrets(hit.memory.content))
           : hit.memory.content,
         unitType: hit.memory.unitType,
         spaceId: hit.memory.spaceId,
         rank: index + 1,
         ...(hit.relevance === null ? {} : { relevance: Number(hit.relevance.toFixed(4)) }),
         isLatest: hit.memory.isLatest,
-        ...(readOnly(hit.memory.spaceId) ? { untrusted: true } : {}),
       })),
       ...searchAssistReport(request.mode, assist),
     };

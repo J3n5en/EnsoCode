@@ -180,7 +180,7 @@ describe('秘书记忆空间', () => {
     ).toBeNull();
   });
 
-  it('secretaryReadProjectIds：未完成设置不给项目；all 只给用户自己的项目；列表取交集', () => {
+  it('secretaryReadProjectIds：未完成设置按默认档案（全部可见）；all 只给用户自己的项目；列表取交集', () => {
     const projects = [
       { projectId: VISIBLE, state: 'active' as const },
       { projectId: VISIBLE_2, kind: 'local' as const, state: 'active' as const },
@@ -190,7 +190,7 @@ describe('秘书记忆空间', () => {
       { projectId: SECRETARY, kind: 'secretary' as const, state: 'active' as const },
       { projectId: 'bot-home-1', kind: 'bot-home' as const, state: 'active' as const },
     ];
-    expect(secretaryReadProjectIds(null, projects)).toEqual([]);
+    expect(secretaryReadProjectIds(null, projects)).toEqual([VISIBLE, VISIBLE_2, 'ssh-1']);
     expect(secretaryReadProjectIds({ visibleProjectIds: 'all' }, projects)).toEqual([
       VISIBLE,
       VISIBLE_2,

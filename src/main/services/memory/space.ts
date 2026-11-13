@@ -117,15 +117,15 @@ const HIDDEN_PROJECT_KINDS: ReadonlySet<ProjectKind> = new Set([
 ]);
 
 /**
- * profile 的可见项目 → 秘书可只读检索的项目 id。未完成初次设置时一个都不给：
- * 可见项目是设置里问过用户的那一项，缺省放开等于绕过它。
+ * profile 的可见项目 → 秘书可只读检索的项目 id。未完成初次设置时按默认档案（全部可见），
+ * 与项目、会话读取同口径。
  */
 export function secretaryReadProjectIds(
   profile: { visibleProjectIds: 'all' | readonly string[] } | null,
   projects: readonly Pick<ProjectAuthority, 'projectId' | 'kind' | 'state'>[]
 ): string[] {
-  if (!profile) return [];
-  const visible = profile.visibleProjectIds === 'all' ? null : new Set(profile.visibleProjectIds);
+  const allowed = profile?.visibleProjectIds ?? 'all';
+  const visible = allowed === 'all' ? null : new Set(allowed);
   return projects
     .filter((project) => project.state === 'active')
     .filter((project) => !HIDDEN_PROJECT_KINDS.has(project.kind ?? 'local'))

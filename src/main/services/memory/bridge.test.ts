@@ -557,7 +557,7 @@ describe('executeMemoryOp：秘书空间', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM memories').get()).toEqual({ n: 1 });
   });
 
-  it('search all 只含私有 + 可见项目 + global；非私有结果脱敏并标 untrusted', async () => {
+  it('search all 只含私有 + 可见项目 + global；非私有结果脱敏并包进不可信标签', async () => {
     await add('周报 私有：用户喜欢周五发', projectSpaceId(SECRETARY));
     await add('周报 可见项目：token=abcdef123456', projectSpaceId(VISIBLE));
     await add('周报 全局：api_key=sk-live-abcdefghijkl', 'global');
@@ -573,10 +573,10 @@ describe('executeMemoryOp：秘书空间', () => {
       [projectSpaceId(SECRETARY), projectSpaceId(VISIBLE), 'global'].sort()
     );
     const own = r.results.find((hit) => hit.spaceId === projectSpaceId(SECRETARY));
-    expect(own).not.toHaveProperty('untrusted');
     expect(own?.content).toBe('周报 私有：用户喜欢周五发');
     for (const hit of r.results.filter((x) => x.spaceId !== projectSpaceId(SECRETARY))) {
-      expect(hit.untrusted).toBe(true);
+      expect(String(hit.content)).toMatch(/^<untrusted-content source="memory:[^"]+">/);
+      expect(String(hit.content)).toMatch(/<\/untrusted-content>$/);
       expect(String(hit.content)).not.toMatch(/abcdef123456|sk-live/);
       expect(String(hit.content)).toContain('[REDACTED]');
     }
