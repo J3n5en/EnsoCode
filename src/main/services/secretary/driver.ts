@@ -252,13 +252,17 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
 
     onConversationsMerged(patch) {
       if (saving) return;
-      for (const [conversationId, row] of Object.entries(patch.upserts)) {
-        const queued = row.set.queuedMessages;
-        if (!Array.isArray(queued) || queued.length === 0) continue;
-        const runtime = runtimeOf(conversationId);
-        // 合并回调早于磁盘写入：排队消息以补丁里的值为准
-        if (runtime) settle(conversationId, { ...runtime, queued: queuedFrom(queued) });
-      }
+      const ids = Object.entries(patch.upserts)
+        .filter(([, row]) => Array.isArray(row.set.queuedMessages))
+        .map(([conversationId]) => conversationId);
+      if (ids.length === 0) return;
+      // 通知早于写回方落盘：此刻改行会被随后的整份写入覆盖，消息留在盘上下一轮再投一遍
+      queueMicrotask(() => {
+        for (const conversationId of ids) {
+          const runtime = runtimeOf(conversationId);
+          if (runtime && runtime.queued.length > 0) settle(conversationId, runtime);
+        }
+      });
     },
 
     goalAction(conversationId, action, text) {

@@ -189,18 +189,23 @@ describe('派出会话的排队消息', () => {
     expect(goalOf(h)).toMatchObject({ autoTurns: 0 });
   });
 
-  it('合并写回带来排队消息时立即投递', () => {
+  it('合并写回带来排队消息时，等写回落盘后投递一次并清掉队列', async () => {
     const h = harness();
-    h.driver.onConversationsMerged(mergedQueued('from the desktop'));
+    const patch = mergedQueued('from the desktop');
+    // 与 SETTINGS_WRITE_KEY 同序：先通知，写回方随后才把合并值落盘
+    h.driver.onConversationsMerged(patch);
+    h.rows[SID] = { ...h.rows[SID], ...patch.upserts[SID].set };
+    await Promise.resolve();
     expect(h.prompts).toHaveLength(1);
     expect(h.prompts[0].delivery.text).toBe('from the desktop');
     expect(h.rows[SID].queuedMessages).toEqual([]);
   });
 
-  it('运行中的会话不在合并写回时抢投', () => {
+  it('运行中的会话不在合并写回时抢投', async () => {
     const h = harness();
     h.statuses[SID].state = 'running';
     h.driver.onConversationsMerged(mergedQueued('later'));
+    await Promise.resolve();
     expect(h.prompts).toHaveLength(0);
   });
 
