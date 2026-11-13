@@ -879,6 +879,9 @@ export class AgentDispatchService {
           : {}),
         ...(persisted.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
       };
+      // 同代复活（回收后派发）：解除索引里的「已释放」标记，与其他 spawn 路径一致
+      if (this.options.sessionIndex.isCurrent(parent))
+        this.options.sessionIndex.prepareParent(parent);
       const spawned = this.options.host.spawnParent(parent, request, credentialKeys);
       if (!spawned.ok) throw new Error(spawned.error ?? 'Failed to spawn parent container.');
       const ready = await this.waitForParent(parent);

@@ -2227,6 +2227,38 @@ describe('SessionSupervisor idle eviction', () => {
     vi.useRealTimers();
   });
 
+  it('串行门里排着 prompt 时本轮跳过回收，prompt 照常送达', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
+    });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/w', model });
+    await waitFor(events, 'parent-ready');
+    const internals = supervisor as unknown as {
+      gate: { run(key: string, task: () => Promise<unknown>): Promise<unknown> };
+      sessions: Map<string, { lastActivityAt: number }>;
+      evictIdleSessions(): void;
+    };
+    const hold = Promise.withResolvers<void>();
+    void internals.gate.run(parent.sessionId, () => hold.promise);
+    const managed = internals.sessions.get(parent.sessionId)!;
+    managed.lastActivityAt = Date.now() - 31 * 60_000;
+    internals.evictIdleSessions();
+    supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'queued' });
+    // 排除 lastActivityAt 刷新的影响，只验证「队列里有待处理命令」这一条
+    managed.lastActivityAt = Date.now() - 31 * 60_000;
+    hold.resolve();
+    const current = mocks.sessions[0] as ReturnType<typeof session>;
+    await settleUntil(() => current.prompt.mock.calls.length > 0);
+    expect(current.prompt).toHaveBeenCalled();
+    expect(events.filter((event) => event.type === 'parent-ended')).toEqual([]);
+    expect(events.filter((event) => event.type === 'parent-rejected')).toEqual([]);
+    await supervisor.shutdown();
+    vi.useRealTimers();
+  });
+
   it('a running turn resets the idle clock', async () => {
     const events: AgentWorkerEvent[] = [];
     const supervisor = new SessionSupervisor({

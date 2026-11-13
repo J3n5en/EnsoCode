@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   respondApproval: vi.fn(),
   respondAsk: vi.fn(),
   prepareParent: vi.fn(),
+  isDetached: vi.fn(() => false),
   setSessionModel: vi.fn(() => ({ ok: true })),
   forkSession: vi.fn(() => ({ ok: true })),
   sessionWorktree: vi.fn(),
@@ -172,6 +173,7 @@ vi.mock('./sessionIndex', () => ({
     coworkerOf: mocks.coworkerOf,
     sessionFile: mocks.sessionFile,
     isAlive: vi.fn(() => false),
+    isDetached: mocks.isDetached,
   },
 }));
 vi.mock('./settings', () => ({ readSettings: mocks.readSettings }));
@@ -233,6 +235,7 @@ describe('agent IPC Main identity boundary', () => {
     mocks.respondApproval.mockClear();
     mocks.respondAsk.mockClear();
     mocks.prepareParent.mockClear();
+    mocks.isDetached.mockReset().mockReturnValue(false);
     mocks.setSessionModel.mockClear();
     mocks.coworkerOf.mockReset();
     mocks.dismissChildSession.mockClear();
@@ -723,6 +726,17 @@ describe('agent IPC Main identity boundary', () => {
     it.each(['', 7, 'x'.repeat(129)])('非法 deliveryId %# 拒绝且不下发', async (deliveryId) => {
       mocks.currentIdentity.mockReturnValue(parent);
       expect(await invoke('conv-1', 'hi', undefined, deliveryId)).toMatchObject({ ok: false });
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('会话已从 worker 释放时直接 ok:false，不下发给 worker', async () => {
+      mocks.currentIdentity.mockReturnValue(parent);
+      mocks.isDetached.mockReturnValue(true);
+      expect(await invoke('conv-1', 'hi', undefined, 'd-1')).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('释放'),
+      });
+      expect(mocks.isDetached).toHaveBeenCalledWith(parent);
       expect(send).not.toHaveBeenCalled();
     });
   });
