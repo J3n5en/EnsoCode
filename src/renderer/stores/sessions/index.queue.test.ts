@@ -10,6 +10,7 @@ import {
   loadSessionModules,
   onAgentEvent,
   resetSessionHarness,
+  secretaryGoalAction,
   sessionsModule,
   settingsModule,
   summarizeTitle,
@@ -948,5 +949,60 @@ describe('IPC invoke 被拒时按失败分支收尾', () => {
     await store.getState().resumeConversation('parent');
     expect(agentSpawn).toHaveBeenCalledTimes(2);
     expect(store.getState().conversations.parent.started).toBe(true);
+  });
+});
+
+describe('Main 驱动的派出会话', () => {
+  function seedMainDriven(over: Record<string, unknown> = {}) {
+    sessionsModule.useSessionsStore.setState((state) => ({
+      conversations: {
+        ...state.conversations,
+        parent: {
+          ...state.conversations.parent,
+          started: true,
+          status: 'idle' as const,
+          generation: 'pg1',
+          driver: 'main' as const,
+          queuedMessages: [{ id: 'q1', text: 'queued by user' }],
+          goal: { text: 'ship', status: 'active' as const, autoTurns: 0, noProgressRuns: 0 },
+          ...over,
+        },
+      },
+    }));
+    agentPrompt.mockClear();
+  }
+
+  it('轮次结束既不泵队列也不续跑目标', async () => {
+    seedMainDriven();
+    onAgentEvent?.({
+      type: 'turn-completed',
+      identity: { sessionId: 'parent', generation: 'pg1' },
+      seq: 2,
+      turnId: 't1',
+      digest: { firstUserText: '', userText: '', assistantText: 'done' },
+    });
+    await Promise.resolve();
+
+    expect(agentPrompt).not.toHaveBeenCalled();
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent.queuedMessages).toEqual([
+      { id: 'q1', text: 'queued by user' },
+    ]);
+  });
+
+  it('改目标交给 Main，本地不发 kickoff', () => {
+    seedMainDriven({ queuedMessages: [] });
+    const store = sessionsModule.useSessionsStore.getState();
+    store.setGoal('parent', 'fix the build');
+    store.pauseGoal('parent');
+    store.resumeGoal('parent');
+    store.clearGoal('parent');
+
+    expect(secretaryGoalAction.mock.calls.map((call) => call[0])).toEqual([
+      { conversationId: 'parent', action: 'set', text: 'fix the build' },
+      { conversationId: 'parent', action: 'pause' },
+      { conversationId: 'parent', action: 'resume' },
+      { conversationId: 'parent', action: 'clear' },
+    ]);
+    expect(agentPrompt).not.toHaveBeenCalled();
   });
 });

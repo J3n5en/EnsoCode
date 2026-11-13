@@ -351,6 +351,10 @@ export interface Conversation extends SessionProjection {
   queuedMessages?: QueuedMessage[];
   /** 会话目标(设定后空闲自动续跑) */
   goal?: SessionGoal;
+  /** Main 驱动的派出会话：续跑与队列泵由 Main 负责，本窗口只显示与转发指令 */
+  driver?: 'main';
+  /** 由秘书派出；只用于显示，任何权限判断都不读它 */
+  secretaryOrigin?: { secretaryConversationId: string };
   /** 回退后待预填输入框的内容(rewind-done 回流,Composer 消费一次) */
   draftText?: string;
   draftImages?: AttachedImage[];
@@ -2086,10 +2090,22 @@ export const useSessionsStore = create<SessionsState>()(
         };
       }
 
+      /** 派出会话的目标与队列归 Main:本窗口只发指令,不写状态也不投递 */
+      function mainGoalAction(
+        conversationId: string,
+        action: 'set' | 'pause' | 'resume' | 'clear',
+        text?: string
+      ): void {
+        void window.electronAPI.secretary
+          .goalAction({ conversationId, action, ...(text ? { text } : {}) })
+          .catch(() => undefined);
+      }
+
       /** goal 续跑:轮次收束且空闲、无排队消息/挂起项时,自动注入一条继续指令(带安全限制) */
       function continueGoal(id: string): void {
         const conversation = get().conversations[id];
         const goal = conversation?.goal;
+        if (conversation?.driver === 'main') return;
         if (
           !conversation?.started ||
           conversation.workspaceMigrating ||
@@ -2169,6 +2185,7 @@ export const useSessionsStore = create<SessionsState>()(
       /** 逐条投递排队消息:每次轮次收束只发队首一条(每条获得完整一轮),下轮结束再发下一条 */
       function flushQueue(id: string): void {
         const conversation = get().conversations[id];
+        if (conversation?.driver === 'main') return;
         if (
           !conversation?.started ||
           conversation.workspaceMigrating ||
@@ -3248,7 +3265,8 @@ export const useSessionsStore = create<SessionsState>()(
             }
             get().setGoal(id, arg);
             // 已 spawn:空闲由 setGoal kickoff,忙碌等本轮收束 continueGoal
-            if (conversation.started) return null;
+            // 派出会话的目标由 Main 落盘并投递 kickoff,本地不再 spawn
+            if (conversation.started || conversation.driver === 'main') return null;
             // 未 spawn:把 kickoff 当首条消息走下面的 spawn+prompt,否则 GoalBar 会一直停在「推进中」
             spawnTitle = arg.slice(0, 40);
             text = startGoalPrompt(arg);
@@ -3823,6 +3841,10 @@ export const useSessionsStore = create<SessionsState>()(
         setGoal(conversationId, text) {
           const conversation = get().conversations[conversationId];
           if (!conversation || conversation.workspaceMigrating || !text.trim()) return;
+          if (conversation.driver === 'main') {
+            mainGoalAction(conversationId, 'set', text.trim());
+            return;
+          }
           set((state) =>
             patch(state, conversationId, {
               goal: {
@@ -3853,8 +3875,13 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         pauseGoal(conversationId) {
-          const goal = get().conversations[conversationId]?.goal;
+          const conversation = get().conversations[conversationId];
+          const goal = conversation?.goal;
           if (!goal) return;
+          if (conversation.driver === 'main') {
+            mainGoalAction(conversationId, 'pause');
+            return;
+          }
           set((state) =>
             patch(state, conversationId, { goal: { ...goal, status: 'paused', note: undefined } })
           );
@@ -3862,8 +3889,13 @@ export const useSessionsStore = create<SessionsState>()(
 
         resumeGoal(conversationId) {
           if (get().conversations[conversationId]?.workspaceMigrating) return;
-          const goal = get().conversations[conversationId]?.goal;
+          const conversation = get().conversations[conversationId];
+          const goal = conversation?.goal;
           if (!goal) return;
+          if (conversation.driver === 'main') {
+            mainGoalAction(conversationId, 'resume');
+            return;
+          }
           // 恢复即重置安全计数(与 pi-goal 的 guided review 语义一致:人已过目)
           set((state) =>
             patch(state, conversationId, {
@@ -3876,7 +3908,6 @@ export const useSessionsStore = create<SessionsState>()(
               },
             })
           );
-          const conversation = get().conversations[conversationId];
           if (conversation?.started && conversation.status === 'idle') {
             const text =
               `<goal-continuation>\nSession goal resumed: ${goal.text}\n` +
@@ -3898,7 +3929,12 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         clearGoal(conversationId) {
-          if (!get().conversations[conversationId]) return;
+          const conversation = get().conversations[conversationId];
+          if (!conversation) return;
+          if (conversation.driver === 'main') {
+            mainGoalAction(conversationId, 'clear');
+            return;
+          }
           set((state) => patch(state, conversationId, { goal: undefined }));
         },
 

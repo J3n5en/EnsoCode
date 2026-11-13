@@ -20,6 +20,8 @@ export const IPC_CHANNELS = {
   SECRETARY_REFERENCE_CONVERSATIONS: 'secretary:reference-conversations',
   /** 秘书：界面编辑、删除、派出待办 */
   SECRETARY_TODO_MUTATE: 'secretary:todo-mutate',
+  /** 秘书：派出会话的目标由 Main 续跑，界面只发指令 */
+  SECRETARY_GOAL_ACTION: 'secretary:goal-action',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

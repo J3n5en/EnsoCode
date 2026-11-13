@@ -197,6 +197,20 @@ describe('createSessionFromMain', () => {
     expect(h.spawns[0].cwd).toBe(WORKTREE.path);
   });
 
+  it('带目标派出时首条消息追加 kickoff，行里落下可续跑的目标', async () => {
+    const h = harness();
+    await createSessionFromMain(h.ports, { ...REQUEST, goal: '把登录重定向修好' });
+    expect(h.prompts[0].text).toContain('看看这个 bug');
+    expect(h.prompts[0].text).toContain('<goal-continuation>');
+    expect(h.prompts[0].text).toContain('把登录重定向修好');
+    expect(h.rows.get('conv-1')?.goal).toMatchObject({
+      text: '把登录重定向修好',
+      status: 'active',
+      autoTurns: 0,
+      noProgressRuns: 0,
+    });
+  });
+
   it('spawn 失败时删行、删权威、删 worktree', async () => {
     const h = harness();
     h.spawnResult = { ok: false, error: 'model credentials unavailable' };

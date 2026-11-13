@@ -248,6 +248,7 @@ describe('session_create', () => {
         projectId: 'p1',
         prompt: '修构建',
         worktree: false,
+        goal: '构建通过',
         secretaryOrigin: { secretaryConversationId: 'sec-1' },
       },
     ]);

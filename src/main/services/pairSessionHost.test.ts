@@ -28,6 +28,7 @@ import {
   applyPairQueueActionHeadless,
   configurePairSessionHost,
   handlePairHeadlessAgentEvent,
+  headlessIdleBlocks,
   type PairSessionHostAgent,
   setPairHeadless,
 } from './pairSessionHost';
@@ -312,5 +313,35 @@ describe('headless first-message title', () => {
       title: 'Model title',
     } as unknown as RendererAgentEvent);
     expect(mocks.rows[SID].title).toBe('Renamed by user');
+  });
+});
+
+describe('Main 驱动的派出会话', () => {
+  it('不播种到 headless 运行时，也不响应它的轮次事件', () => {
+    mocks.rows[SID] = {
+      id: SID,
+      projectId: 'p',
+      driver: 'main',
+      queuedMessages: [{ id: 'q1', text: 'queued' }],
+      goal: { text: 'ship it', status: 'active', autoTurns: 0 },
+    };
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    expect(headlessIdleBlocks().queuedCount).toBe(0);
+
+    handlePairHeadlessAgentEvent(event({ type: 'turn-completed', turnId: 't1' }));
+    handlePairHeadlessAgentEvent(event({ type: 'goal-signal', kind: 'complete', note: 'done' }));
+
+    expect(agent.prompt).not.toHaveBeenCalled();
+    expect(mocks.rows[SID].goal).toMatchObject({ status: 'active' });
+    expect(mocks.rows[SID].queuedMessages).toHaveLength(1);
+  });
+
+  it('手机的排队操作也不替它投递', () => {
+    mocks.rows[SID] = { id: SID, projectId: 'p', driver: 'main' };
+    const agent = fakeAgent();
+    setPairHeadless(true);
+    applyPairQueueActionHeadless({ type: 'enqueue', sessionId: SID, text: 'from phone' });
+    expect(agent.prompt).not.toHaveBeenCalled();
   });
 });

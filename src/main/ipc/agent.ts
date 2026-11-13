@@ -29,6 +29,7 @@ import type {
   AgentSpawnRequest,
   AgentWorkerEvent,
   ApprovalMode,
+  AttachedImage,
   ChildHistoryResult,
   ChildRunListResult,
   ConversationReloadResult,
@@ -247,6 +248,7 @@ let sourceBindings: ActiveConversationRegistry | null = null;
 let sourceAuthority: SourceAuthorityRegistry | null = null;
 let botWorkerObserver: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null =
   null;
+let secretaryDriverObserver: ((event: RendererAgentEvent) => void) | null = null;
 const pluginSessionStates = new SessionStateTracker();
 const selectionClockOwners = new WeakSet<RendererContents>();
 
@@ -289,6 +291,13 @@ export function setBotWorkerEventObserver(
   botWorkerObserver = observer;
 }
 
+/** 秘书派出会话的驱动者订阅 worker 事件；由 ipc/secretary 注册，避免事件入口静态依赖秘书模块 */
+export function setSecretaryDriverObserver(
+  observer: ((event: RendererAgentEvent) => void) | null
+): void {
+  secretaryDriverObserver = observer;
+}
+
 function broadcastAgentEvent(event: RendererAgentEvent): void {
   try {
     broadcastToRenderers(IPC_CHANNELS.AGENT_EVENT, event);
@@ -321,6 +330,11 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
   forwardAgentEvent(event);
   handlePairHeadlessAgentEvent(event);
+  try {
+    secretaryDriverObserver?.(event);
+  } catch (error) {
+    console.warn('[secretary] driver failed:', error instanceof Error ? error.message : error);
+  }
   publishPluginSessionStatus(event);
   publishPluginTurnEnd(event);
 }
@@ -565,11 +579,12 @@ export async function spawnRootFromMain(
 export function promptRootFromMain(
   sessionId: string,
   text: string,
-  deliveryId: string
+  deliveryId: string,
+  images?: AttachedImage[]
 ): AgentActionResult {
   const identity = exactIdentity(sessionId);
   if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
-  return promptSession(identity, text, undefined, deliveryId);
+  return promptSession(identity, text, images, deliveryId);
 }
 
 export async function releaseRootFromMain(sessionId: string): Promise<AgentActionResult> {

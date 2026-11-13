@@ -371,6 +371,13 @@ const electronAPI = {
       request: SecretaryTodoMutate
     ): Promise<{ ok: true; todoId: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TODO_MUTATE, request),
+    /** 派出会话的目标与队列由 Main 驱动：设/暂停/恢复/清除都交给它 */
+    goalAction: (request: {
+      conversationId: string;
+      action: 'set' | 'pause' | 'resume' | 'clear';
+      text?: string;
+    }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GOAL_ACTION, request),
   },
 
   modelDirectory: {

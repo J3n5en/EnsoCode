@@ -7,6 +7,7 @@ import {
   scopedDefaultModels,
 } from '@shared/defaultModel';
 import { isPluginPresetId } from '@shared/extensionPlugins/preset';
+import { goalKickoffText } from '@shared/pair/headlessQueue';
 import { extractRepresentativeTitle } from '@shared/titleSource';
 import type {
   AgentSpawnRequest,
@@ -28,6 +29,8 @@ export interface MainSessionRequest {
   thinkingLevel?: ThinkingLevel;
   worktree: boolean;
   secretaryOrigin?: { secretaryConversationId: string };
+  /** 会话目标：首条消息追加 kickoff，行里的 goal 供 Main 续跑 */
+  goal?: string;
 }
 
 export type MainSessionResult = { ok: true; conversationId: string } | { ok: false; error: string };
@@ -77,6 +80,7 @@ export async function createSessionFromMain(
   if (!defaults) return { ok: false, error: 'no usable model' };
   const title = (request.title?.trim() || extractRepresentativeTitle(prompt)).slice(0, 80);
   if (!title) return { ok: false, error: 'empty title' };
+  const goal = request.goal?.trim();
 
   const conversation = ports.createConversation(request.projectId, project.version);
   if (!conversation) return { ok: false, error: 'conversation authority unavailable' };
@@ -118,6 +122,7 @@ export async function createSessionFromMain(
     approvalMode: defaults.approvalMode,
     ...(worktree ? { worktree } : {}),
     driver: 'main',
+    ...(goal ? { goal: { text: goal, status: 'active', autoTurns: 0, noProgressRuns: 0 } } : {}),
     ...(request.secretaryOrigin ? { secretaryOrigin: request.secretaryOrigin } : {}),
   });
 
@@ -142,7 +147,11 @@ export async function createSessionFromMain(
     return { ok: false, error: spawned.error ?? 'spawn failed' };
   }
 
-  const prompted = ports.prompt(id, prompt, ports.newId());
+  const prompted = ports.prompt(
+    id,
+    goal ? `${prompt}\n\n${goalKickoffText(goal)}` : prompt,
+    ports.newId()
+  );
   if (!prompted.ok) {
     await ports.release(id).catch(() => undefined);
     await rollback();

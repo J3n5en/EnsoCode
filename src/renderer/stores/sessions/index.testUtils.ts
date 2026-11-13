@@ -169,6 +169,7 @@ export const agentSetApprovalMode = vi.fn(
   async (_id: string, _mode: string, _autoReject?: boolean) =>
     ({ ok: true }) as { ok: boolean; error?: string }
 );
+export const secretaryGoalAction = vi.fn(async (_request: unknown) => ({ ok: true }));
 
 export function installSessionGlobals(options?: { captureAsks?: boolean }) {
   const onDispatch = options?.captureAsks
@@ -227,6 +228,9 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
         prompt: vi.fn(),
         abort: vi.fn(),
       },
+      secretary: {
+        goalAction: secretaryGoalAction,
+      },
       agentDispatch: {
         bindSource,
         registerModelSelection,
@@ -273,6 +277,7 @@ export async function seedParent() {
 
 export async function resetSessionHarness() {
   agentPrompt.mockClear();
+  secretaryGoalAction.mockClear();
   dispatch.mockReset();
   registerModelSelection.mockClear();
   bindSource.mockClear();

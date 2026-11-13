@@ -13,6 +13,10 @@ export interface HeadlessGoal {
   status: 'active' | 'paused' | 'completed' | 'blocked' | 'waiting';
   note?: string;
   autoTurns: number;
+  /** 连续无进展轮数；Main 与 renderer 都写进同一行的 goal，3 次暂停 */
+  noProgressRuns?: number;
+  /** 上一轮最终 assistant 文本的归一化指纹 */
+  lastOutput?: string;
 }
 
 export interface HeadlessSessionRuntime {

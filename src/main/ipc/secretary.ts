@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { app, ipcMain } from '@platform';
 import { IPC_CHANNELS } from '@shared/types';
+import type { AttachedImage } from '@shared/types/agent';
 import type { SecretaryState } from '@shared/types/secretary';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
+import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
@@ -12,6 +14,12 @@ import {
   secretaryDispatchPorts,
   setSecretaryStateListener,
 } from '../services/secretary/dispatch';
+import {
+  createDispatchDriver,
+  type DispatchDriver,
+  type DispatchDriverPorts,
+  type GoalAction,
+} from '../services/secretary/driver';
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { isSecretaryConversation, secretaryProjectId } from '../services/secretary/identity';
 import {
@@ -28,11 +36,14 @@ import {
 } from '../services/secretary/sessionFactory';
 import {
   getSourceAuthorityRegistry,
+  isRootSessionAlive,
+  observedSessionStatus,
   promptRootFromMain,
   releaseRootFromMain,
+  setSecretaryDriverObserver,
   spawnRootFromMain,
 } from './agent';
-import { patchConversationsState } from './settings';
+import { patchConversationsState, readPersistedConversation } from './settings';
 import { createConversationWorktree, removeRegisteredWorktree } from './worktree';
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -125,6 +136,51 @@ function disabledState(): SecretaryState {
   };
 }
 
+const driverPorts: DispatchDriverPorts = {
+  row: (conversationId) => readPersistedConversation(conversationId) ?? undefined,
+  saveRuntime: (conversationId, runtime) => {
+    patchConversationsState((state) => {
+      const row = state.conversations[conversationId];
+      if (!row) return;
+      state.conversations[conversationId] = {
+        ...row,
+        queuedMessages: runtime.queued,
+        ...(runtime.goal ? { goal: runtime.goal } : { goal: undefined }),
+      };
+    });
+  },
+  status: (conversationId) => observedSessionStatus(conversationId),
+  alive: (conversationId) => isRootSessionAlive(conversationId),
+  prompt: (conversationId, delivery, deliveryId) =>
+    promptRootFromMain(
+      conversationId,
+      delivery.text,
+      deliveryId,
+      delivery.images as AttachedImage[] | undefined
+    ),
+  newId: () => randomUUID(),
+};
+
+let driver: DispatchDriver | null = null;
+
+function parseGoalAction(
+  value: unknown
+): { conversationId: string; action: GoalAction; text?: string } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const request = value as Record<string, unknown>;
+  if (!isNonEmptyString(request.conversationId)) return null;
+  const action = request.action;
+  if (action !== 'set' && action !== 'pause' && action !== 'resume' && action !== 'clear') {
+    return null;
+  }
+  if (request.text !== undefined && typeof request.text !== 'string') return null;
+  return {
+    conversationId: request.conversationId,
+    action,
+    ...(typeof request.text === 'string' ? { text: request.text } : {}),
+  };
+}
+
 function secretaryState(): Promise<SecretaryState> {
   const enabled = secretaryEnabled();
   return buildSecretaryState(secretaryDispatchPorts, {
@@ -142,6 +198,9 @@ function broadcastState(): void {
 
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
+  driver = createDispatchDriver(driverPorts);
+  setSecretaryDriverObserver((event) => driver?.observe(event));
+  onConversationsMerged((patch) => driver?.onConversationsMerged(patch));
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_STATE, async (event) => {
     if (!isMainRenderer(event.sender.id)) return disabledState();
@@ -173,6 +232,15 @@ export function registerSecretaryHandlers(): void {
     const parsed = parseTodoMutateRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
     return mutateTodo(secretaryDispatchPorts, parsed);
+  });
+
+  // 派出会话已经存在时开关关闭也不能让它失去驱动者，所以这里只查发起方与行的归属
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_GOAL_ACTION, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    const parsed = parseGoalAction(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    if (!driver) return { ok: false, error: 'driver unavailable' };
+    return driver.goalAction(parsed.conversationId, parsed.action, parsed.text);
   });
 
   // dev-only 测试入口：真机验证 Main 原生建会话，U10 删除

@@ -195,6 +195,7 @@ async function executeDispatch(
     worktree: draft.worktree,
     ...(draft.title ? { title: draft.title } : {}),
     ...(draft.model ? { model: draft.model } : {}),
+    ...(draft.goal ? { goal: draft.goal } : {}),
     secretaryOrigin: { secretaryConversationId },
   });
   if (!created.ok) return created;
