@@ -48,3 +48,6 @@ export const SECRETARY_FORCED_DISABLED_TOOLS: readonly string[] = [
   WORKSPACE_WRITE_TOOL_ID,
   'goal',
 ];
+
+/** 记忆是秘书的核心能力：全局"禁用内置工具"对秘书会话不生效（默认关 memory，秘书始终开着） */
+export const SECRETARY_ALWAYS_ENABLED_TOOLS: readonly string[] = ['memory'];

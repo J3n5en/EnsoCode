@@ -46,7 +46,10 @@ import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
-import { SECRETARY_FORCED_DISABLED_TOOLS } from '@shared/secretary/tools';
+import {
+  SECRETARY_ALWAYS_ENABLED_TOOLS,
+  SECRETARY_FORCED_DISABLED_TOOLS,
+} from '@shared/secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '@shared/shellLimits';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import {
@@ -124,7 +127,7 @@ import {
   takeAgentWorkerCrash,
 } from './agentWorkerExit';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
-import { BuiltinToolScopes, sessionDisabledTools } from './builtinToolScopes';
+import { BuiltinToolScopes, sessionDisabledTools, withoutKeepEnabled } from './builtinToolScopes';
 import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { dcgRoot, installedDcgPath } from './dcgBinary';
@@ -1105,11 +1108,10 @@ export function spawnSession(
     ...(options?.extraDisabledTools ?? []),
     ...(secretary ? SECRETARY_FORCED_DISABLED_TOOLS : []),
   ];
-  const disabledTools = sessionDisabledTools(
-    state,
-    projectId,
-    extraDisabledTools,
-    isComputerPlatformSupported()
+  // 记忆是秘书的核心能力：全局"禁用内置工具"对秘书会话不生效
+  const disabledTools = withoutKeepEnabled(
+    sessionDisabledTools(state, projectId, extraDisabledTools, isComputerPlatformSupported()),
+    secretary ? SECRETARY_ALWAYS_ENABLED_TOOLS : []
   );
   const loadHarnessAssets = state?.loadHarnessAssets === true;
   const trustedProjectCode = projectTrustedCode(state?.projects, projectId);
@@ -1219,7 +1221,8 @@ export function spawnSession(
       identity,
       projectId,
       extraDisabledTools,
-      presetApplied.disabledTools
+      presetApplied.disabledTools,
+      secretary ? SECRETARY_ALWAYS_ENABLED_TOOLS : []
     );
     rememberParentInstance(identity.sessionId, options?.instanceId);
     rememberParentToolProfile(identity.sessionId, {

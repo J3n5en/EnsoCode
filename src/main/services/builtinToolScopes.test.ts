@@ -53,3 +53,21 @@ describe('BuiltinToolScopes', () => {
     ]);
   });
 });
+
+describe('BuiltinToolScopes：固定开启的开关', () => {
+  it('设置变化重算后仍然去掉，不推回给会话', () => {
+    const scopes = new BuiltinToolScopes();
+    const state = { disabledBuiltinTools: ['memory'] };
+    scopes.remember(
+      identity('s'),
+      undefined,
+      [],
+      sessionDisabledTools(state, undefined, [], true),
+      ['memory']
+    );
+    expect(scopes.changes(state, true)).toEqual([]);
+    expect(scopes.changes({ disabledBuiltinTools: ['memory', 'web'] }, true)).toEqual([
+      { identity: identity('s'), disabledTools: ['web'] },
+    ]);
+  });
+});

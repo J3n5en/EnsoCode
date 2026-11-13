@@ -8,7 +8,16 @@ const fork = vi.hoisted(() => ({
   children: [] as Array<{ emit(event: string, ...args: unknown[]): void }>,
 }));
 vi.mock('electron', () => ({
-  app: { getPath: () => tmpdir(), getAppPath: () => tmpdir(), isPackaged: false },
+  app: {
+    getPath: () => tmpdir(),
+    getAppPath: () => tmpdir(),
+    isPackaged: false,
+    getVersion: () => '0.0.0',
+    on: () => {},
+  },
+  notification: { isSupported: () => false },
+  clipboard: { writeText: () => {} },
+  shell: { openExternal: () => Promise.resolve() },
   utilityProcess: {
     fork: () => {
       const handlers = new Map<string, (...args: unknown[]) => void>();
@@ -95,4 +104,21 @@ it('秘书 spawn-parent 不带插件、技能、MCP、hooks、命令与子代理
   );
   expect(command.disabledTools).not.toContain('web');
   expect(command.disabledTools).not.toContain('ask_user');
+  // 记忆是秘书的核心能力：全局默认禁用 memory 分组时秘书仍然开着
+  expect(command.disabledTools).not.toContain('memory');
+});
+
+it('普通会话照旧受全局"禁用内置工具"约束：memory 仍在禁用列表里', () => {
+  fork.posted.length = 0;
+  const result = spawnSession(
+    { sessionId: 'plain', generation: '22222222-2222-4222-8222-222222222222' },
+    { sessionId: 'plain', providerId: 'p', modelId: 'm', cwd: '/workspace' },
+    new Set()
+  );
+  expect(result.ok).toBe(true);
+  const command = fork.posted.find(
+    (entry) => (entry as AgentCommand).type === 'spawn-parent'
+  ) as Extract<AgentCommand, { type: 'spawn-parent' }>;
+  expect(command.secretaryMode).toBeUndefined();
+  expect(command.disabledTools).toContain('memory');
 });

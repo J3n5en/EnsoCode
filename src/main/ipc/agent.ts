@@ -147,7 +147,7 @@ import {
 } from '../services/llama/chatModels';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import type { Complete } from '../services/memory/distill';
-import { memorySpaceContext } from '../services/memory/space';
+import { memorySpaceContext, secretaryReadProjectIds } from '../services/memory/space';
 import {
   configureMemoryDistill,
   invokeMemory,
@@ -526,9 +526,14 @@ function spawnBoundSession(
   );
 }
 
-/** 秘书人设与档案只在 Main 读盘，模型每轮看到的都是最新配置 */
+/** 秘书档案、人设与派发状态只在 Main 读盘 */
+function secretaryStore(): SecretaryStore {
+  return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+}
+
+/** 模型每轮看到的都是最新配置 */
 function secretarySystemPrompt(): string {
-  const store = new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+  const store = secretaryStore();
   const language = readSettingsState()?.language;
   return buildSecretarySystemPrompt({
     profile: store.profile(),
@@ -1746,9 +1751,24 @@ export function registerAgentHandlers(): void {
       const conversation = sourceAuthority?.conversation(rootSessionId(identity));
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
       const projectId = project?.state === 'active' ? project.projectId : null;
+      // 秘书：projectId 是私有空间，可见项目只读
+      const secretary = isSecretaryProject(project);
       const memory = conversation?.bot
         ? getBotServices()?.memory.context({ ...conversation, projectId })
-        : { enabled: true, context: memorySpaceContext({ projectId }) };
+        : {
+            enabled: true,
+            context: secretary
+              ? {
+                  ...memorySpaceContext({ projectId }),
+                  secretary: {
+                    readProjectIds: secretaryReadProjectIds(
+                      secretaryStore().profile(),
+                      sourceAuthority?.projection().projects ?? []
+                    ),
+                  },
+                }
+              : memorySpaceContext({ projectId }),
+          };
       if (!memory?.enabled) {
         sendMemoryResultToSession(identity, requestId, { ok: false, error: '该成员已关闭记忆' });
         return;
@@ -1757,7 +1777,8 @@ export function registerAgentHandlers(): void {
       const disabled = resolveDisabledBuiltinTools(state.disabledBuiltinTools, {
         disabledBuiltinTools: projectDisabledBuiltinTools(state.projects, projectId ?? undefined),
       });
-      if (disabled.includes('memory')) {
+      // 记忆是秘书的核心能力：全局"禁用内置工具"对它不生效（spawn 时同样去掉 memory 分组）
+      if (!secretary && disabled.includes('memory')) {
         sendMemoryResultToSession(identity, requestId, {
           ok: false,
           error: 'Memory tool is disabled',
