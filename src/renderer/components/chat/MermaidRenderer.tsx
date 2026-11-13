@@ -1,10 +1,20 @@
-import { Maximize2, Minimize2, Minus, Plus, RotateCcw, X } from 'lucide-react';
+import { Download, ImageDown, Maximize2, Minimize2, Minus, Plus, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { addToast } from '@/components/ui/toast';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { useOverlayGuard } from '@/hooks/useOverlayGuard';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
+import {
+  downloadFile,
+  exportMermaidPng,
+  mermaidExportFileName,
+  rasterizeSvg,
+  serializeSvgElement,
+  svgBlob,
+  svgMarkupToXml,
+} from './mermaidExport';
 import {
   decorateMermaidSvg,
   MERMAID_OFFSCREEN_HOST_STYLE,
@@ -48,10 +58,14 @@ function withRenderLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** 挂到 document.body 再画，避免 flowchart htmlLabels 读 firstChild 时空指针 */
-async function renderMermaidSvg(code: string, theme: string): Promise<string> {
+async function renderMermaidSvg(
+  code: string,
+  theme: string,
+  extraConfig: Record<string, unknown> = {}
+): Promise<string> {
   return withRenderLock(async () => {
     const mermaid = await getMermaid();
-    mermaid.initialize(mermaidConfig(theme));
+    mermaid.initialize({ ...mermaidConfig(theme), ...extraConfig });
 
     const id = `ensoMermaid${++renderSeq}`;
     const host = document.createElement('div');
@@ -70,6 +84,7 @@ async function renderMermaidSvg(code: string, theme: string): Promise<string> {
 }
 
 const ZOOM_STEP = 0.1;
+const PNG_BACKGROUND = { dark: '#1f2020', default: '#ffffff' } as const;
 const MIN_ZOOM = 0.1;
 
 export function MermaidRenderer({
@@ -152,14 +167,14 @@ export function MermaidRenderer({
   const handleEnterFullscreen = useCallback(() => {
     setIsFullscreen(true);
     requestAnimationFrame(() => {
-      const svgEl = svgContentRef.current?.querySelector('svg');
-      const contentArea = svgContentRef.current?.getBoundingClientRect();
-      if (!svgEl || !contentArea?.width || !contentArea.height) return;
-      const svgRect = svgEl.getBoundingClientRect();
+      const content = svgContentRef.current;
+      const target = content?.firstElementChild as HTMLElement | null | undefined;
+      if (!content || !target?.offsetWidth || !target.offsetHeight) return;
       const padding = 24;
+      // offset 尺寸不含 transform，避免沿用内联视图的缩放导致适配偏大、长图顶部被裁
       const fitScale = Math.min(
-        (contentArea.width - padding * 2) / svgRect.width,
-        (contentArea.height - padding * 2) / svgRect.height
+        (content.clientWidth - padding * 2) / target.offsetWidth,
+        (content.clientHeight - padding * 2) / target.offsetHeight
       );
       setZoom(Math.round(fitScale * 100) / 100);
       setPan({ x: 0, y: 0 });
@@ -205,6 +220,41 @@ export function MermaidRenderer({
   const handleFullscreenOverlayClick = useCallback(() => {
     if (!hasDraggedRef.current) handleExitFullscreen();
   }, [handleExitFullscreen]);
+
+  const handleExportSvg = useCallback(() => {
+    try {
+      const svgEl = containerRef.current?.querySelector('svg');
+      if (!svgEl) throw new Error('No svg');
+      downloadFile(svgBlob(serializeSvgElement(svgEl)), mermaidExportFileName('svg'));
+    } catch {
+      addToast({ type: 'error', title: t('Export failed') });
+    }
+  }, [t]);
+
+  const handleExportPng = useCallback(async () => {
+    const result = await exportMermaidPng({
+      currentSvg: () => {
+        const svgEl = containerRef.current?.querySelector('svg');
+        return svgEl ? serializeSvgElement(svgEl) : null;
+      },
+      rerender: async () =>
+        svgMarkupToXml(await renderMermaidSvg(code, mermaidTheme, { htmlLabels: false })),
+      rasterize: (markup, width, height, scale) =>
+        rasterizeSvg(markup, width, height, scale, PNG_BACKGROUND[mermaidTheme]),
+      download: downloadFile,
+    });
+    if (result.kind === 'failed') {
+      addToast({ type: 'error', title: t('Export failed') });
+    } else if (result.kind === 'svg') {
+      addToast({
+        type: 'warning',
+        title:
+          result.reason === 'too-large'
+            ? t('Diagram is too large for PNG, exported SVG instead')
+            : t('PNG export failed, exported SVG instead'),
+      });
+    }
+  }, [code, mermaidTheme, t]);
 
   const zoomControls = (size: 'sm' | 'md') => {
     const box = size === 'sm' ? 'h-6 w-6' : 'h-7 w-7';
@@ -261,6 +311,28 @@ export function MermaidRenderer({
           </button>
         )}
         <div className="mx-0.5 h-4 w-px bg-border" />
+        <button
+          type="button"
+          onClick={handleExportSvg}
+          className={cn(
+            'flex items-center justify-center rounded text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+            box
+          )}
+          title={t('Export SVG')}
+        >
+          <Download className={icon} />
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleExportPng()}
+          className={cn(
+            'flex items-center justify-center rounded text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+            box
+          )}
+          title={t('Export PNG')}
+        >
+          <ImageDown className={icon} />
+        </button>
         {isFullscreen ? (
           <button
             type="button"
@@ -362,7 +434,7 @@ export function MermaidRenderer({
           }}
         >
           <div
-            className="flex shrink-0 items-center justify-between border-b border-border bg-muted/30 px-4 py-2"
+            className="relative z-10 flex shrink-0 items-center justify-between border-b border-border bg-muted/30 px-4 py-2"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
@@ -379,11 +451,11 @@ export function MermaidRenderer({
             </button>
           </div>
 
-          <div className="relative min-h-0 flex-1">
+          <div className="relative flex min-h-0 flex-1 flex-col">
             <div
               ref={svgContentRef}
               className={cn(
-                'absolute inset-0 flex select-none items-center justify-center overflow-hidden',
+                'flex min-h-0 flex-1 select-none overflow-hidden',
                 isDragging ? 'cursor-grabbing' : 'cursor-grab'
               )}
               onWheel={handleWheel}
@@ -395,7 +467,7 @@ export function MermaidRenderer({
               onKeyDown={handleFullscreenContentClick}
             >
               <div
-                className="origin-center transition-transform duration-100 ease-out"
+                className="m-auto origin-center transition-transform duration-100 ease-out"
                 style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
               >
                 <div
