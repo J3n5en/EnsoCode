@@ -1,0 +1,154 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { SecretaryProfile } from '../../../shared/types/secretary';
+import { SecretaryStore } from './store';
+
+let dir: string;
+let store: SecretaryStore;
+let clock = 1000;
+const now = () => ++clock;
+
+const profile: SecretaryProfile = {
+  version: 1,
+  name: '小秘',
+  avatar: { color: '#0ea5e9' },
+  autonomy: 'tell-after',
+  autoApproveProjectIds: ['p1'],
+  visibleProjectIds: 'all',
+  dispatchModel: { mode: 'project' },
+  dispatchWorktree: 'auto',
+  maxRunningDispatches: 3,
+  replyLanguage: 'ui',
+  style: 'concise',
+  notify: 'needs-user',
+  updatedAt: 1,
+};
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'secretary-store-'));
+  store = new SecretaryStore(dir, now);
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+describe('SecretaryStore', () => {
+  it('reports no profile before the first setup', () => {
+    expect(store.profile()).toBeNull();
+    expect(store.readPersona()).toBe('');
+    expect(store.avatarPath()).toBeNull();
+  });
+
+  it('round-trips the profile through profile.json', () => {
+    expect(store.saveProfile(profile)).toEqual(profile);
+    expect(JSON.parse(readFileSync(join(dir, 'profile.json'), 'utf8'))).toEqual(profile);
+    expect(new SecretaryStore(dir, now).profile()).toEqual(profile);
+  });
+
+  it('normalizes the profile before writing it', () => {
+    const saved = store.saveProfile({
+      ...profile,
+      maxRunningDispatches: 42,
+      autonomy: 'nope',
+    } as never);
+    expect(saved.maxRunningDispatches).toBe(10);
+    expect(saved.autonomy).toBe('ask-first');
+    expect(new SecretaryStore(dir, now).profile()).toEqual(saved);
+  });
+
+  it('treats a corrupt profile.json as not configured', () => {
+    writeFileSync(join(dir, 'profile.json'), '{ not json');
+    expect(store.profile()).toBeNull();
+    writeFileSync(join(dir, 'profile.json'), '[1,2]');
+    expect(store.profile()).toBeNull();
+  });
+
+  it('round-trips persona.md', () => {
+    store.writePersona('说话简短。');
+    expect(store.readPersona()).toBe('说话简短。');
+    expect(new SecretaryStore(dir, now).readPersona()).toBe('说话简短。');
+  });
+
+  it('stores avatar.png and bumps its version, then removes both', () => {
+    store.saveProfile(profile);
+    expect(store.setAvatar(new Uint8Array([1, 2, 3]))?.avatar).toEqual({
+      color: '#0ea5e9',
+      imageVersion: 1,
+    });
+    expect(existsSync(join(dir, 'avatar.png'))).toBe(true);
+    expect(store.avatarPath()).toBe(join(dir, 'avatar.png'));
+
+    expect(store.setAvatar(new Uint8Array([4]))?.avatar).toEqual({
+      color: '#0ea5e9',
+      imageVersion: 2,
+    });
+    expect(store.avatarPath()).toBe(join(dir, 'avatar.png'));
+
+    expect(store.setAvatar(null)?.avatar).toEqual({ color: '#0ea5e9' });
+    expect(existsSync(join(dir, 'avatar.png'))).toBe(false);
+    expect(store.avatarPath()).toBeNull();
+  });
+
+  it('ignores an avatar write when no profile exists', () => {
+    expect(store.setAvatar(new Uint8Array([1]))).toBeNull();
+    expect(existsSync(join(dir, 'avatar.png'))).toBe(false);
+  });
+
+  it('round-trips dispatch.json and normalizes it on write', () => {
+    expect(store.dispatch()).toEqual({
+      version: 1,
+      dispatched: {},
+      named: [],
+      proposals: {},
+      outbox: [],
+    });
+
+    const saved = store.saveDispatch({
+      version: 1,
+      dispatched: {
+        c1: {
+          conversationId: 'c1',
+          projectId: 'p1',
+          secretaryConversationId: 's1',
+          createdAt: 10,
+          turn: -1,
+          lastState: 'running',
+          lastEventAt: 20,
+        },
+      },
+      named: ['c1'],
+      proposals: {},
+      outbox: [{ key: 'k', at: 1, text: '完成', kind: 'turn-ended', conversationId: 'c1' }],
+      inflight: {
+        deliveryId: 'd1',
+        secretaryConversationId: 's1',
+        keys: ['k'],
+        attempt: 0,
+        nextAttemptAt: 30,
+      },
+    });
+    expect(saved.dispatched.c1?.turn).toBe(0);
+    expect(saved.inflight?.attempt).toBe(1);
+    expect(new SecretaryStore(dir, now).dispatch()).toEqual(saved);
+  });
+
+  it('round-trips todos.json and schedules.json', () => {
+    expect(store.todos()).toEqual([]);
+    expect(store.schedules()).toEqual([]);
+
+    const todos = [{ id: 't1', text: '写周报', createdAt: 1, updatedAt: 2 }];
+    expect(store.saveTodos(todos)).toEqual(todos);
+    expect(new SecretaryStore(dir, now).todos()).toEqual(todos);
+
+    const schedules = [{ id: 's1', name: '日报', prompt: '总结', cron: '0 9 * * *', createdAt: 1 }];
+    expect(store.saveSchedules(schedules)).toEqual(schedules);
+    expect(new SecretaryStore(dir, now).schedules()).toEqual(schedules);
+  });
+
+  it('reads corrupt lists as empty', () => {
+    writeFileSync(join(dir, 'todos.json'), '{"todos":[]}');
+    writeFileSync(join(dir, 'schedules.json'), 'oops');
+    expect(store.todos()).toEqual([]);
+    expect(store.schedules()).toEqual([]);
+  });
+});
