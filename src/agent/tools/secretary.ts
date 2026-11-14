@@ -518,7 +518,7 @@ const SCHEMAS: Record<
   },
   todo_item_dispatch: {
     description:
-      'Turn a todo item into a dispatched session. Same confirmation rules as session_create.',
+      'Turn a todo item into a dispatched session. Same confirmation rules as session_create, and the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions.',
     parameters: object(
       {
         todoId: id('Todo id'),
@@ -531,6 +531,8 @@ const SCHEMAS: Record<
           description: 'Optional title; defaults to the todo text',
         },
         worktree: { type: 'boolean' },
+        ...BASE_PARAMS,
+        after: AFTER_PARAM,
       },
       ['todoId']
     ),
