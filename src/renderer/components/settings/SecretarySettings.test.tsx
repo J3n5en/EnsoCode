@@ -46,6 +46,8 @@ function profile(maxRunningDispatches: number, updatedAt = 1): SecretaryProfile 
     dispatchModel: { mode: 'project' },
     dispatchWorktree: 'auto',
     maxRunningDispatches,
+    patrolEnabled: true,
+    patrolIntervalMinutes: 15,
     dispatchMuted: true,
     dispatchUnattended: true,
     replyLanguage: 'ui',

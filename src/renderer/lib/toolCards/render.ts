@@ -318,15 +318,28 @@ register('session_send', (call, ctx) => {
 
 register('session_stop', (call, ctx) => {
   const id = str(rec(call.args)?.conversationId);
+  const output = rec(parseJson(call.output));
   const error = errorText(call, ctx);
+  const stillRunning = output?.status === 'running';
+  const cancelled = output?.status === 'cancelled';
+  const note = str(output?.note);
   return view(
     call,
-    ctx.t('Stop session {{title}}', { title: sessionLabel(id, ctx) }),
+    cancelled
+      ? ctx.t('Cancel waiting dispatch')
+      : ctx.t('Stop session {{title}}', { title: sessionLabel(id, ctx) }),
     [
       ...(id ? [{ kind: 'session' as const, id, label: sessionLabel(id, ctx) }] : []),
+      ...(note ? [{ kind: 'note' as const, text: note }] : []),
       ...(error ? [{ kind: 'error' as const, text: error }] : []),
     ],
-    error ? { tone: 'error', label: ctx.t('Refused') } : { tone: 'ok', label: ctx.t('Stopped') }
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : stillRunning
+        ? { tone: 'queued', label: ctx.t('Still running') }
+        : cancelled
+          ? { tone: 'ok', label: ctx.t('Cancelled') }
+          : { tone: 'ok', label: ctx.t('Stopped') }
   );
 });
 
@@ -356,6 +369,16 @@ function dispatchCard(
       value:
         args?.worktree === true ? ctx.t('Run in a worktree') : ctx.t('Run in the project checkout'),
     },
+    ...(str(args?.checkout)
+      ? [{ label: ctx.t('Checkout'), value: str(args?.checkout) as string }]
+      : []),
+    ...(str(args?.baseRef) ? [{ label: ctx.t('Base'), value: str(args?.baseRef) as string }] : []),
+    ...(str(args?.branch)
+      ? [{ label: ctx.t('New branch'), value: str(args?.branch) as string }]
+      : []),
+    ...(Array.isArray(args?.after) && args.after.length > 0
+      ? [{ label: ctx.t('After'), value: (args.after as unknown[]).map(String).join(', ') }]
+      : []),
     ...(str(args?.goal) ? [{ label: ctx.t('Goal'), value: str(args?.goal) as string }] : []),
   ];
   const prompt = str(args?.prompt);
@@ -375,7 +398,9 @@ function dispatchCard(
     blocks,
     error
       ? { tone: 'error', label: ctx.t('Refused') }
-      : (confirmation(output, ctx) ??
+      : output?.status === 'waiting'
+        ? { tone: 'queued', label: ctx.t('Waiting for dependencies') }
+        : (confirmation(output, ctx) ??
           (created ? { tone: 'ok', label: ctx.t('Created the session') } : undefined))
   );
 }

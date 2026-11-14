@@ -142,6 +142,8 @@ export interface DispatchContext {
   running: number;
   max: number;
   worktreeMode: SecretaryProfile['dispatchWorktree'];
+  /** 带 after 的派发先等依赖，不占运行名额；真正开始时再查一次上限 */
+  deferred?: boolean;
 }
 
 export function validateDispatch(
@@ -153,9 +155,50 @@ export function validateDispatch(
   if (project.state !== 'active') return { ok: false, error: 'project-removed' };
   if ((project.kind ?? 'local') !== 'local') return { ok: false, error: 'project-not-local' };
   if (!ctx.visible) return { ok: false, error: 'project-not-visible' };
-  if (ctx.running >= ctx.max) return { ok: false, error: 'dispatch-limit' };
+  if (!ctx.deferred && ctx.running >= ctx.max) return { ok: false, error: 'dispatch-limit' };
 
   const worktree =
     ctx.worktreeMode === 'never' ? false : ctx.worktreeMode === 'always' ? true : draft.worktree;
+  const { checkout, baseRef, branch } = draft;
+  // 基线只在真的建独立 worktree 时才有意义：否则秘书会以为隔离生效了
+  if (!worktree && (checkout || baseRef || branch)) {
+    return { ok: false, error: 'base-requires-worktree' };
+  }
   return { ok: true, draft: { ...draft, worktree } };
+}
+
+/** 派发基线校验用到的既成事实，由 Main 用 git 查出来 */
+export interface DispatchBaseFacts {
+  /** checkout 是这个项目的一个现有检出：项目目录或它的某个 worktree */
+  knownCheckout: boolean;
+  /** checkout 与项目是同一个 git 仓库 */
+  sameRepo: boolean;
+  /** baseRef 能解析成提交 */
+  baseRefExists: boolean;
+  /** 同名分支已经存在 */
+  branchExists: boolean;
+  /** 分支名合法 */
+  branchValid: boolean;
+}
+
+/**
+ * checkout / baseRef / branch 的校验：越界、ref 不存在、分支重名一律当场拒绝。
+ * 分支重名直接报错，绝不覆盖已有分支。
+ */
+export function validateDispatchBase(
+  draft: DispatchDraft,
+  facts: DispatchBaseFacts
+): { ok: true } | { ok: false; error: string } {
+  const { checkout, baseRef, branch } = draft;
+  if (!checkout && !baseRef && !branch) return { ok: true };
+  if (checkout) {
+    if (!facts.knownCheckout) return { ok: false, error: 'checkout-not-in-project' };
+    if (!facts.sameRepo) return { ok: false, error: 'checkout-other-repo' };
+  }
+  if (baseRef && !facts.baseRefExists) return { ok: false, error: 'base-ref-missing' };
+  if (branch) {
+    if (!facts.branchValid) return { ok: false, error: 'branch-invalid' };
+    if (facts.branchExists) return { ok: false, error: 'branch-exists' };
+  }
+  return { ok: true };
 }

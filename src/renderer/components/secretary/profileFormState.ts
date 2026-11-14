@@ -54,6 +54,8 @@ export function draftFromProfile(
     dispatchModel: cloneDispatchModel(base.dispatchModel),
     dispatchWorktree: base.dispatchWorktree,
     maxRunningDispatches: base.maxRunningDispatches,
+    patrolEnabled: base.patrolEnabled,
+    patrolIntervalMinutes: base.patrolIntervalMinutes,
     dispatchMuted: base.dispatchMuted,
     dispatchUnattended: base.dispatchUnattended,
     replyLanguage: base.replyLanguage,

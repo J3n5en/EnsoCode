@@ -15,6 +15,7 @@ import {
   takeoverRefusal,
   transitionProposal,
   validateDispatch,
+  validateDispatchBase,
 } from './policy';
 
 function profile(overrides: Partial<SecretaryProfile> = {}): SecretaryProfile {
@@ -29,6 +30,8 @@ function profile(overrides: Partial<SecretaryProfile> = {}): SecretaryProfile {
     dispatchModel: { mode: 'project' },
     dispatchWorktree: 'auto',
     maxRunningDispatches: 3,
+    patrolEnabled: true,
+    patrolIntervalMinutes: 15,
     dispatchMuted: true,
     dispatchUnattended: true,
     replyLanguage: 'ui',
@@ -359,5 +362,75 @@ describe('validateDispatch', () => {
 
     const auto = validateDispatch(draft({ worktree: true }), ctx);
     expect(auto.ok && auto.draft.worktree).toBe(true);
+  });
+
+  it('带 after 的派发不占运行名额，真正开始时才查上限', () => {
+    const deferred = validateDispatch(draft({ worktree: true, after: ['c1'] }), {
+      ...ctx,
+      running: 3,
+      deferred: true,
+    });
+    expect(deferred.ok).toBe(true);
+    expect(
+      validateDispatch(draft({ worktree: true, after: ['c1'] }), { ...ctx, running: 3 })
+    ).toEqual({ ok: false, error: 'dispatch-limit' });
+  });
+
+  it('基线只在真的建 worktree 时才有意义', () => {
+    expect(
+      validateDispatch(draft({ worktree: false, baseRef: 'main' }), {
+        ...ctx,
+        worktreeMode: 'never',
+      })
+    ).toEqual({ ok: false, error: 'base-requires-worktree' });
+  });
+});
+
+describe('validateDispatchBase', () => {
+  const facts = {
+    knownCheckout: true,
+    sameRepo: true,
+    baseRefExists: true,
+    branchExists: false,
+    branchValid: true,
+  };
+
+  it('没指定基线时直接通过', () => {
+    expect(validateDispatchBase(draft({ worktree: true }), facts)).toEqual({ ok: true });
+  });
+
+  it('checkout 越界或不是同一个仓库时拒绝', () => {
+    const base = draft({ worktree: true, checkout: '/repo/other' });
+    expect(validateDispatchBase(base, { ...facts, knownCheckout: false })).toEqual({
+      ok: false,
+      error: 'checkout-not-in-project',
+    });
+    expect(validateDispatchBase(base, { ...facts, sameRepo: false })).toEqual({
+      ok: false,
+      error: 'checkout-other-repo',
+    });
+    expect(validateDispatchBase(base, facts)).toEqual({ ok: true });
+  });
+
+  it('baseRef 不存在时拒绝', () => {
+    expect(
+      validateDispatchBase(draft({ worktree: true, baseRef: 'feat/nope' }), {
+        ...facts,
+        baseRefExists: false,
+      })
+    ).toEqual({ ok: false, error: 'base-ref-missing' });
+  });
+
+  it('分支重名或名字非法时拒绝，不覆盖已有分支', () => {
+    const base = draft({ worktree: true, branch: 'feat/x' });
+    expect(validateDispatchBase(base, { ...facts, branchExists: true })).toEqual({
+      ok: false,
+      error: 'branch-exists',
+    });
+    expect(validateDispatchBase(base, { ...facts, branchValid: false })).toEqual({
+      ok: false,
+      error: 'branch-invalid',
+    });
+    expect(validateDispatchBase(base, facts)).toEqual({ ok: true });
   });
 });

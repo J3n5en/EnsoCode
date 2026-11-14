@@ -1,4 +1,5 @@
-import { parseProfile } from '@shared/secretary/parse';
+import { parseDispatchFile, parseProfile } from '@shared/secretary/parse';
+import type { DispatchBaseFacts } from '@shared/secretary/policy';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type {
   DispatchRecord,
@@ -25,6 +26,7 @@ import {
   revokeTakeover,
   type SecretaryDispatchPorts,
   type SecretaryQueuedMessage,
+  startPendingDispatches,
   untrack,
 } from './dispatch';
 import type { SecretarySessionStatus } from './readers';
@@ -120,6 +122,10 @@ interface Harness {
   rows: Record<string, Record<string, unknown>>;
   createResult: MainSessionResult;
   changed: number;
+  /** 基线校验的既成事实；测试按需覆盖 */
+  baseFacts: DispatchBaseFacts;
+  baseFactsCalls: { projectPath: string; checkout?: string; baseRef?: string; branch?: string }[];
+  forgotten: string[];
 }
 
 function harness(
@@ -133,6 +139,8 @@ function harness(
     file?: SecretaryDispatchFile;
     createResult?: MainSessionResult;
     branch?: string | null;
+    baseFacts?: Partial<DispatchBaseFacts>;
+    waitStopped?: 'running' | 'idle' | 'waiting' | 'error';
   } = {}
 ): Harness {
   let ids = 0;
@@ -157,6 +165,16 @@ function harness(
     rows: options.rows ?? {},
     createResult: options.createResult ?? { ok: true, conversationId: 'new-1' },
     changed: 0,
+    baseFacts: {
+      knownCheckout: true,
+      sameRepo: true,
+      baseRefExists: true,
+      branchExists: false,
+      branchValid: true,
+      ...options.baseFacts,
+    },
+    baseFactsCalls: [],
+    forgotten: [],
     ports: undefined as unknown as SecretaryDispatchPorts,
     handlers: undefined as unknown as ReturnType<typeof createSecretaryDispatchHandlers>,
   };
@@ -234,6 +252,14 @@ function harness(
     },
     newId: () => `id-${++ids}`,
     now: () => NOW,
+    baseFacts: async (input) => {
+      h.baseFactsCalls.push(input);
+      return h.baseFacts;
+    },
+    waitStopped: async () => options.waitStopped ?? 'idle',
+    forget: (conversationId) => {
+      h.forgotten.push(conversationId);
+    },
   };
   h.handlers = createSecretaryDispatchHandlers(h.ports);
   return h;
@@ -2015,5 +2041,373 @@ describe('派出会话的默认静音与无人值守', () => {
       sessionFile: '/s/c1.jsonl',
       muted: false,
     });
+  });
+});
+
+describe('派发基线', () => {
+  const direct = () =>
+    harness({ profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }) });
+
+  it('checkout/baseRef/branch 原样带给建会话，并记在派出记录上', async () => {
+    const h = direct();
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      worktree: true,
+      checkout: '/repo/alpha-secretary',
+      baseRef: 'feat/secretary-agent',
+      branch: 'feat/secretary-dispatch-plus',
+    })) as { status: string; conversationId: string };
+    expect(payload.status).toBe('created');
+    expect(h.created[0]).toMatchObject({
+      worktree: true,
+      checkout: '/repo/alpha-secretary',
+      baseRef: 'feat/secretary-agent',
+      branch: 'feat/secretary-dispatch-plus',
+    });
+    expect(h.file.dispatched[payload.conversationId]).toMatchObject({
+      baseRef: 'feat/secretary-agent',
+      branch: 'feat/secretary-dispatch-plus',
+      checkout: '/repo/alpha-secretary',
+    });
+    expect(h.baseFactsCalls).toEqual([
+      {
+        projectPath: '/repo/alpha',
+        checkout: '/repo/alpha-secretary',
+        baseRef: 'feat/secretary-agent',
+        branch: 'feat/secretary-dispatch-plus',
+      },
+    ]);
+  });
+
+  it('checkout 越界、baseRef 不存在、分支重名都在建会话之前拒绝', async () => {
+    const cases: [Partial<DispatchBaseFacts>, string][] = [
+      [{ knownCheckout: false }, 'checkout-not-in-project'],
+      [{ sameRepo: false }, 'checkout-other-repo'],
+      [{ baseRefExists: false }, 'base-ref-missing'],
+      [{ branchExists: true }, 'branch-exists'],
+      [{ branchValid: false }, 'branch-invalid'],
+    ];
+    for (const [facts, error] of cases) {
+      const h = harness({
+        profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+        baseFacts: facts,
+      });
+      const result = await call(h.handlers.session_create, {
+        projectId: 'p1',
+        prompt: '接着改',
+        worktree: true,
+        checkout: '/repo/alpha-secretary',
+        baseRef: 'feat/secretary-agent',
+        branch: 'feat/x',
+      });
+      expect(result).toEqual({ ok: false, error });
+      expect(h.created).toEqual([]);
+      expect(h.file.dispatched).toEqual({});
+    }
+  });
+
+  it('不建 worktree 时带基线直接拒绝，不假装隔离生效', async () => {
+    const h = direct();
+    const result = await call(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      worktree: false,
+      baseRef: 'feat/secretary-agent',
+    });
+    expect(result).toEqual({ ok: false, error: 'base-requires-worktree' });
+    expect(h.created).toEqual([]);
+  });
+
+  it('待办派发的说明写明实际用到的基线与分支', async () => {
+    const h = harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    await run(h.handlers.todo_item_dispatch, {
+      todoId: 't1',
+      worktree: true,
+      baseRef: 'feat/secretary-agent',
+      branch: 'feat/secretary-dispatch-plus',
+    });
+    expect(h.created[0].prompt).toContain(
+      '基于 feat/secretary-agent 新建 feat/secretary-dispatch-plus 分支'
+    );
+    expect(h.created[0]).toMatchObject({
+      baseRef: 'feat/secretary-agent',
+      branch: 'feat/secretary-dispatch-plus',
+    });
+  });
+});
+
+describe('派发先后依赖', () => {
+  const direct = (options: Parameters<typeof harness>[0] = {}) =>
+    harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      ...options,
+    });
+
+  const depRow = (id: string) => ({ projectId: 'p1', title: id, sessionFile: `/s/${id}.jsonl` });
+
+  const finished = (id: string, kind: 'goal-complete' | 'turn-ended' = 'turn-ended') => ({
+    conversationId: id,
+    projectId: 'p1',
+    secretaryConversationId: 'sec-1',
+    createdAt: 1,
+    turn: 1,
+    lastState: 'idle' as const,
+    lastEventAt: 1,
+    lastResult: { kind, turn: 1, at: 1 },
+  });
+
+  it('带 after 的派发先等依赖：不建会话、不占运行名额', async () => {
+    const h = direct({
+      profile: profile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: ['p1'],
+        maxRunningDispatches: 1,
+      }),
+      file: dispatchedFile('busy', 'running'),
+      rows: { busy: depRow('busy'), c1: depRow('c1') },
+      statuses: { busy: running },
+    });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { status: string; pendingId: string };
+    expect(payload.status).toBe('waiting');
+    expect(h.created).toEqual([]);
+    expect(h.file.pending?.[payload.pendingId]).toMatchObject({
+      status: 'waiting',
+      after: ['c1'],
+      projectId: 'p1',
+      secretaryConversationId: 'sec-1',
+    });
+  });
+
+  it('依赖真正结束后才开始，并从等待表里移走', async () => {
+    const h = direct({
+      rows: { c1: depRow('c1') },
+      statuses: { c1: idle },
+      file: { ...emptyFile(), dispatched: { c1: finished('c1') } },
+    });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { pendingId: string };
+    await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+    expect(h.created).toHaveLength(1);
+    expect(h.file.pending).toBeUndefined();
+    expect(h.file.dispatched['new-1']).toMatchObject({ projectId: 'p1' });
+    expect(h.audits.at(-1)).toMatchObject({ op: 'dispatch_pending', ok: true });
+  });
+
+  it('依赖还在跑就继续等，不建会话', async () => {
+    const h = direct({
+      rows: { c1: depRow('c1') },
+      statuses: { c1: running },
+      file: { ...emptyFile(), dispatched: { c1: { ...finished('c1'), lastState: 'running' } } },
+    });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { pendingId: string };
+    await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+    expect(h.created).toEqual([]);
+    expect(h.file.pending?.[payload.pendingId]?.status).toBe('waiting');
+  });
+
+  it('依赖失败、被停止或被删除都不启动，标成出问题并推一条结果', async () => {
+    const cases: [string, Parameters<typeof harness>[0], string][] = [
+      [
+        'dependency-failed',
+        {
+          rows: { c1: depRow('c1') },
+          statuses: { c1: idle },
+          file: {
+            ...emptyFile(),
+            dispatched: {
+              c1: { ...finished('c1'), lastResult: { kind: 'failed', turn: 1, at: 1 } },
+            },
+          },
+        },
+        'dependency-failed',
+      ],
+      [
+        'dependency-stopped',
+        {
+          rows: { c1: depRow('c1') },
+          statuses: { c1: idle },
+          file: { ...emptyFile(), dispatched: { c1: { ...finished('c1'), stoppedAt: 5 } } },
+        },
+        'dependency-stopped',
+      ],
+      ['dependency-deleted', { rows: {}, statuses: {} }, 'dependency-deleted'],
+    ];
+    for (const [name, options, problem] of cases) {
+      const h = direct(options);
+      const payload = (await run(h.handlers.session_create, {
+        projectId: 'p1',
+        prompt: '接着改',
+        after: ['c1'],
+      })) as { pendingId: string };
+      await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+      expect(h.created).toEqual([]);
+      expect(h.file.pending?.[payload.pendingId]).toMatchObject({
+        status: 'failed',
+        problem,
+        failedDependency: 'c1',
+      });
+      expect(h.file.outbox).toHaveLength(1);
+      expect(h.file.outbox[0]).toMatchObject({
+        kind: 'pending',
+        pendingId: payload.pendingId,
+        status: 'failed',
+        problem,
+      });
+      expect(name).toBe(problem);
+    }
+  });
+
+  it('重启后等待中的派发还在，依赖结束后照样开始', async () => {
+    const h = direct({
+      rows: { c1: depRow('c1') },
+      statuses: { c1: idle },
+      file: { ...emptyFile(), dispatched: { c1: finished('c1') } },
+    });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { pendingId: string };
+    // 落盘再读回：等待状态是持久化的，不靠内存
+    const restored = parseDispatchFile(JSON.parse(JSON.stringify(h.file)));
+    h.file = restored;
+    expect(restored.pending?.[payload.pendingId]).toMatchObject({ after: ['c1'] });
+    await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+    expect(h.created).toHaveLength(1);
+  });
+
+  it('秘书用 session_stop 传 pendingId 取消等待中的派发', async () => {
+    const h = direct({ rows: { c1: depRow('c1') }, statuses: { c1: running } });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { pendingId: string };
+    const result = await call(h.handlers.session_stop, { conversationId: payload.pendingId });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'cancelled', pendingId: payload.pendingId },
+    });
+    expect(h.file.pending).toBeUndefined();
+    expect(h.file.outbox[0]).toMatchObject({ kind: 'pending', problem: 'cancelled' });
+    expect(h.aborts).toEqual([]);
+  });
+});
+
+describe('停止后不再被续跑或唤醒', () => {
+  it('停止时暂停目标、撤掉驱动者的续跑，并记下停止时间', async () => {
+    const h = harness({
+      file: dispatchedFile('c1', 'running'),
+      rows: { c1: { projectId: 'p1', title: '改构建', sessionFile: '/s/c1.jsonl' } },
+      statuses: { c1: running },
+    });
+    const result = await call(h.handlers.session_stop, { conversationId: 'c1' });
+    expect(result).toEqual({ ok: true, result: { status: 'stopped' } });
+    // 没有目标也照样暂停：停止就是停止
+    expect(h.pausedGoals).toEqual(['c1']);
+    expect(h.forgotten).toEqual(['c1']);
+    expect(h.file.dispatched.c1).toMatchObject({ lastState: 'idle', stoppedAt: NOW });
+  });
+
+  it('worker 十秒内没停下就如实返回 running 并附说明', async () => {
+    const h = harness({
+      file: dispatchedFile('c1', 'running'),
+      rows: { c1: { projectId: 'p1', sessionFile: '/s/c1.jsonl' } },
+      statuses: { c1: running },
+      waitStopped: 'running',
+    });
+    const result = await call(h.handlers.session_stop, { conversationId: 'c1' });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.result).toMatchObject({ status: 'running' });
+    expect((result.result as { note: string }).note).toContain('10 seconds');
+    expect(h.audits.at(-1)?.detail).toContain('still-running');
+  });
+});
+
+describe('等依赖的派发与确认卡', () => {
+  it('ask-first 时先出卡，确认后才进等待表', async () => {
+    const h = harness({ rows: { c1: { projectId: 'p1', sessionFile: '/s/c1.jsonl' } } });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { status: string; proposalId: string };
+    expect(payload.status).toBe('awaiting_confirmation');
+    expect(h.file.pending).toBeUndefined();
+    expect(await resolveProposal(h.ports, payload.proposalId, 'confirm')).toMatchObject({
+      ok: true,
+    });
+    expect(h.created).toEqual([]);
+    expect(Object.values(h.file.pending ?? {})).toHaveLength(1);
+    expect(h.file.pending && Object.values(h.file.pending)[0]).toMatchObject({
+      status: 'waiting',
+      after: ['c1'],
+    });
+  });
+
+  it('依赖全结束后名额已满：标成出问题并推一条，不建会话', async () => {
+    const h = harness({
+      profile: profile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: ['p1'],
+        maxRunningDispatches: 1,
+      }),
+      rows: {
+        busy: { projectId: 'p1', sessionFile: '/s/busy.jsonl' },
+        c1: { projectId: 'p1', sessionFile: '/s/c1.jsonl' },
+      },
+      statuses: { busy: running, c1: idle },
+      file: {
+        ...emptyFile(),
+        dispatched: {
+          busy: {
+            conversationId: 'busy',
+            projectId: 'p1',
+            secretaryConversationId: 'sec-1',
+            createdAt: 1,
+            turn: 0,
+            lastState: 'running',
+            lastEventAt: 1,
+          },
+          c1: {
+            conversationId: 'c1',
+            projectId: 'p1',
+            secretaryConversationId: 'sec-1',
+            createdAt: 1,
+            turn: 1,
+            lastState: 'idle',
+            lastEventAt: 1,
+            lastResult: { kind: 'turn-ended', turn: 1, at: 1 },
+          },
+        },
+      },
+    });
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '接着改',
+      after: ['c1'],
+    })) as { pendingId: string };
+    await startPendingDispatches(h.ports, [payload.pendingId], NOW);
+    expect(h.created).toEqual([]);
+    expect(h.file.pending?.[payload.pendingId]).toMatchObject({
+      status: 'failed',
+      problem: 'dispatch-failed',
+    });
+    expect(h.file.outbox[0]).toMatchObject({ kind: 'pending', status: 'failed' });
   });
 });

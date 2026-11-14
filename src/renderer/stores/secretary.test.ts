@@ -149,6 +149,8 @@ describe('newSecretaryConversation', () => {
     dispatchModel: { mode: 'project' },
     dispatchWorktree: 'auto',
     maxRunningDispatches: 3,
+    patrolEnabled: true,
+    patrolIntervalMinutes: 15,
     dispatchMuted: true,
     dispatchUnattended: true,
     replyLanguage: 'ui',

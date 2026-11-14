@@ -27,7 +27,9 @@ import {
   resolveProposal,
   revokeTakeover,
   secretaryDispatchPorts,
+  setSecretaryForgetListener,
   setSecretaryStateListener,
+  startPendingDispatches,
   untrack,
 } from '../services/secretary/dispatch';
 import {
@@ -106,8 +108,8 @@ function sessionFactoryPorts(credentialKeys: ReadonlySet<string>): SessionFactor
       });
     },
     defaults: (projectId) => mainSessionDefaultsFor(projectId, credentialKeys),
-    createWorktree: async (conversationId, projectId) => {
-      const created = await createConversationWorktree(conversationId, projectId);
+    createWorktree: async (conversationId, projectId, base) => {
+      const created = await createConversationWorktree(conversationId, projectId, base);
       if (!created.ok) throw new Error(created.error);
       return created.value;
     },
@@ -237,6 +239,14 @@ const hostPorts: SecretaryHostPorts = {
   publish: () => broadcastState(),
   now: () => Date.now(),
   backgroundStalls: (now) => driver?.watch(now) ?? [],
+  startPending: (pendingIds, now) => {
+    void startPendingDispatches(secretaryDispatchPorts, pendingIds, now).catch((error: unknown) => {
+      console.warn(
+        '[secretary] pending dispatch failed:',
+        error instanceof Error ? error.message : String(error)
+      );
+    });
+  },
   newId: () => randomUUID(),
   audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
   recordDaily: (entry) => appendDailyRecord(path.join(app.getPath('userData'), 'secretary'), entry),
@@ -283,6 +293,8 @@ function broadcastState(): void {
 
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
+  // 停止会话后撤掉续跑与看门狗：驱动者与派发模块互相不认识，只在这里接上
+  setSecretaryForgetListener((conversationId) => driver?.forget(conversationId));
   setSecretaryAvatarResolver(() => (secretaryEnabled() ? secretaryStore().avatarPath() : null));
   driver = createDispatchDriver(driverPorts);
   host = createSecretaryHost(hostPorts);

@@ -1,4 +1,4 @@
-import type { SecretaryCard } from '@shared/types/secretary';
+import type { PendingDispatch, SecretaryCard } from '@shared/types/secretary';
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
 import { HOVER_ROW_CLASS } from '@/components/ui/hover-actions';
@@ -69,6 +69,15 @@ function RunningRow({ card }: { card: SessionCard }) {
             {formatRelativeTime(card.stateSince, locale)}
           </span>
         </span>
+        {(card.branch || card.baseRef) && (
+          <span
+            data-enso="secretary-running-base"
+            className="mt-0.5 block truncate text-[11.5px] text-subtle-foreground"
+          >
+            {card.branch ?? ''}
+            {card.baseRef ? ` · ${t('from {{ref}}', { ref: card.baseRef })}` : ''}
+          </span>
+        )}
         {card.lastText && (
           <span
             className={cn(
@@ -102,6 +111,43 @@ function RunningRow({ card }: { card: SessionCard }) {
   );
 }
 
+/** 等依赖的派发：还没有会话，只报在等谁 */
+function PendingRow({ pending }: { pending: PendingDispatch }) {
+  const { t, locale } = useI18n();
+  const title = pending.draft.title?.trim() || pending.draft.prompt.split('\n')[0]?.trim() || '';
+  return (
+    <div
+      data-enso="secretary-running-pending"
+      data-pending={pending.id}
+      className="flex items-start gap-2 rounded-lg px-1.5 py-1.5"
+    >
+      <div className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span
+            data-enso="secretary-running-badge"
+            className={cn(BADGE_CLASS, 'bg-warning/15 text-warning')}
+          >
+            {t('Waiting for dependencies')}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[13px]">{title || t('Unnamed')}</span>
+        </span>
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <span className="shrink-0 rounded bg-muted px-1.5 text-[11px]">{pending.projectId}</span>
+          <span className="shrink-0 tabular-nums">
+            {formatRelativeTime(pending.updatedAt, locale)}
+          </span>
+        </span>
+        <span
+          data-enso="secretary-running-after"
+          className="mt-0.5 block truncate text-[11.5px] text-subtle-foreground"
+        >
+          {t('After {{ids}}', { ids: pending.after.join(', ') })}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** 「进行中 N」展开后的明细：和摘要里的数字共用 board.running，条数天然一致 */
 export function SecretaryRunningList() {
   const { t } = useI18n();
@@ -121,7 +167,11 @@ export function SecretaryRunningList() {
         </p>
       ) : (
         running.map((card) =>
-          card.kind === 'session' ? <RunningRow key={card.conversationId} card={card} /> : null
+          card.kind === 'session' ? (
+            <RunningRow key={card.conversationId} card={card} />
+          ) : card.kind === 'pending' ? (
+            <PendingRow key={card.pending.id} pending={card.pending} />
+          ) : null
         )
       )}
     </section>

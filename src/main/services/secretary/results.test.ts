@@ -2,6 +2,7 @@ import { parseSecretaryUpdates } from '@shared/secretary/updatesText';
 import type { ProjectAuthority } from '@shared/types/agent';
 import type {
   DispatchRecord,
+  PendingDispatch,
   SecretaryDispatchFile,
   SecretaryProposal,
   SecretaryUpdate,
@@ -14,6 +15,7 @@ import {
   countsAsRunning,
   enqueueUpdate,
   formatSessionUpdates,
+  pendingUpdate,
   proposalUpdate,
   stalled,
   takeBatch,
@@ -646,5 +648,72 @@ describe('在跑计数', () => {
         countsAsRunning(entry, rows[entry.conversationId], statuses[entry.conversationId])
       )
     ).toHaveLength(1);
+  });
+});
+
+describe('等依赖的派发卡片', () => {
+  const projects: ProjectAuthority[] = [
+    { projectId: 'p1', canonicalPath: '/tmp/enso-code', state: 'active' },
+  ] as ProjectAuthority[];
+
+  const pending = (overrides: Partial<PendingDispatch> = {}): PendingDispatch => ({
+    id: 'pend-1',
+    projectId: 'p1',
+    secretaryConversationId: 's1',
+    createdAt: 0,
+    updatedAt: 10,
+    status: 'waiting',
+    after: ['c1'],
+    draft: { projectId: 'p1', prompt: '接着改', worktree: true, branch: 'feat/x' },
+    ...overrides,
+  });
+
+  it('等待中在进行中，出问题在需要你处理', () => {
+    const waitingBoard = buildBoard(emptyFile({ pending: { 'pend-1': pending() } }), {
+      rows: {},
+      statuses: {},
+      projects,
+      todos: [],
+    });
+    expect(waitingBoard.running.map((card) => card.kind)).toEqual(['pending']);
+    expect(waitingBoard.running[0]).toMatchObject({
+      kind: 'pending',
+      projectName: 'enso-code',
+      pending: { after: ['c1'], status: 'waiting' },
+    });
+
+    const failedBoard = buildBoard(
+      emptyFile({
+        pending: {
+          'pend-1': pending({ status: 'failed', problem: 'dependency-failed' }),
+        },
+      }),
+      { rows: {}, statuses: {}, projects, todos: [] }
+    );
+    expect(failedBoard.needsYou.map((card) => card.kind)).toEqual(['pending']);
+    expect(failedBoard.running).toEqual([]);
+  });
+
+  it('派出的会话卡片带基线与分支', () => {
+    const board = buildBoard(
+      emptyFile({
+        dispatched: {
+          c1: record({ conversationId: 'c1', baseRef: 'feat/base', branch: 'feat/x' }),
+        },
+      }),
+      {
+        rows: { c1: { id: 'c1', title: '改构建', sessionFile: '/tmp/c1.jsonl' } },
+        statuses: { c1: running },
+        projects,
+        todos: [],
+      }
+    );
+    expect(board.running[0]).toMatchObject({ baseRef: 'feat/base', branch: 'feat/x' });
+  });
+
+  it('等依赖的回传带 pending:<id>，秘书能按 id 取消', () => {
+    const update = pendingUpdate(pending({ status: 'failed', problem: 'dependency-failed' }), 20);
+    expect(update).toMatchObject({ kind: 'pending', pendingId: 'pend-1', status: 'failed' });
+    expect(formatSessionUpdates([update])).toContain('- [pending pending:pend-1]');
   });
 });

@@ -31,6 +31,10 @@ export interface SecretaryProfile {
     | { mode: 'choose'; candidates: ModelRef[] };
   dispatchWorktree: 'never' | 'auto' | 'always';
   maxRunningDispatches: number;
+  /** 自动巡检：有进行中的会话时定期检查，只在发现异常时推一条 */
+  patrolEnabled: boolean;
+  /** 巡检间隔，分钟 */
+  patrolIntervalMinutes: number;
   /** 新派出的会话默认静音：不弹系统通知、不推送、不计角标 */
   dispatchMuted: boolean;
   /** 新派出的会话默认无人值守：需要人确认的动作直接按「没人可批准」拒绝 */
@@ -78,7 +82,51 @@ export interface DispatchDraft {
   model?: ModelRef;
   worktree: boolean;
   todoId?: string;
+  /** 基线：从项目的哪个现有检出、哪个 ref 起新分支。只在 worktree 为真时生效 */
+  checkout?: string;
+  baseRef?: string;
+  branch?: string;
+  /** 先后依赖：这些会话都真正结束后才开始；不建会话、不占派出上限 */
+  after?: string[];
 }
+
+/** 派发基线：三项都要在派发前校验，卡片与简报显示实际用到的值 */
+export interface DispatchBase {
+  checkout?: string;
+  baseRef?: string;
+  branch?: string;
+}
+
+/** 等待依赖的派发停在「出问题」的原因；cancelled 是秘书或用户主动取消 */
+export type PendingProblem =
+  | 'dependency-failed'
+  | 'dependency-stopped'
+  | 'dependency-deleted'
+  | 'dispatch-failed'
+  | 'cancelled';
+
+/**
+ * 带 after 的派发先停在这里：不建会话、不占派出上限，等依赖真正结束再开始。
+ * 落盘在 dispatch.json，应用重启后仍在。
+ */
+export interface PendingDispatch {
+  id: string;
+  projectId: string;
+  secretaryConversationId: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'waiting' | 'failed';
+  after: string[];
+  draft: DispatchDraft;
+  problem?: PendingProblem;
+  /** 触发失败的依赖会话；dispatch-failed 时缺省 */
+  failedDependency?: string;
+}
+
+/** 自动巡检的异常类型：同一会话同一原因只推一次，恢复后清除 */
+export const PATROL_REASONS = ['idle-stalled', 'running-stalled'] as const;
+
+export type PatrolReason = (typeof PATROL_REASONS)[number];
 
 /** 秘书申请接管一个不是它派出的会话；title 是提案时的快照，只给卡片显示 */
 export interface TakeoverDraft {
@@ -183,6 +231,14 @@ export interface DispatchRecord {
    * via=scope 表示项目在接管范围内、秘书实际用过它之后才建的跟踪记录。
    */
   takeover?: { grantedAt: number; via: TakeoverVia };
+  /** 派发时实际用到的基线：卡片显示分支与基准 */
+  checkout?: string;
+  baseRef?: string;
+  branch?: string;
+  /** 秘书停止的时间：after 依赖据此判定「被停止」 */
+  stoppedAt?: number;
+  /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
+  patrol?: { reason: PatrolReason; turn: number; at: number };
 }
 
 export type SecretaryUpdate = {
@@ -198,6 +254,12 @@ export type SecretaryUpdate = {
   | { kind: SecretaryResultKind; conversationId: string }
   | { kind: 'proposal'; proposalId: string; status: ProposalStatus }
   | { kind: 'schedule'; scheduleId: string }
+  | {
+      kind: 'pending';
+      pendingId: string;
+      status: PendingDispatch['status'];
+      problem?: PendingProblem;
+    }
 );
 
 /** 右侧动态的一条历史：压掉、合并和静默处理的更新都留在这里 */
@@ -211,6 +273,8 @@ export interface SecretaryActivity {
 export interface SecretaryDispatchFile {
   version: 1;
   dispatched: Record<string, DispatchRecord>;
+  /** 等依赖的派发；开始或出问题后从这里移走 */
+  pending?: Record<string, PendingDispatch>;
   named: string[];
   /**
    * 用户点过 × 收回的会话：范围权限不再自动覆盖它们，只能靠确认卡重新逐个授权。
@@ -325,7 +389,13 @@ export type SecretaryCard =
       secretaryConversationId: string;
       unread?: boolean;
       takeover?: true;
+      /** 派发时实际用到的基线 */
+      checkout?: string;
+      baseRef?: string;
+      branch?: string;
     }
+  /** 等依赖的派发：等待中在进行中，出问题在需要你处理 */
+  | { kind: 'pending'; pending: PendingDispatch; projectName: string }
   | { kind: 'proposal'; proposal: SecretaryProposal; projectName?: string };
 
 export interface SecretaryBoard {

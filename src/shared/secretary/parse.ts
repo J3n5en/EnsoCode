@@ -3,6 +3,9 @@ import { THINKING_LEVELS } from '../types/agent';
 import type {
   DispatchDraft,
   DispatchRecord,
+  PatrolReason,
+  PendingDispatch,
+  PendingProblem,
   ProposalStatus,
   SecretaryActivity,
   SecretaryDispatchFile,
@@ -31,6 +34,17 @@ const WORKTREE_MODES = ['never', 'auto', 'always'] as const;
 const REPLY_LANGUAGES = ['ui', 'zh', 'en'] as const;
 const STYLES = ['concise', 'detailed'] as const;
 const NOTIFY_MODES = ['needs-user', 'with-done', 'off'] as const;
+export const MIN_PATROL_INTERVAL_MINUTES = 5;
+export const MAX_PATROL_INTERVAL_MINUTES = 120;
+export const DEFAULT_PATROL_INTERVAL_MINUTES = 15;
+const PATROL_REASONS: readonly PatrolReason[] = ['idle-stalled', 'running-stalled'];
+const PENDING_PROBLEMS: readonly PendingProblem[] = [
+  'dependency-failed',
+  'dependency-stopped',
+  'dependency-deleted',
+  'dispatch-failed',
+  'cancelled',
+];
 const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
   'pending',
   'executing',
@@ -160,6 +174,13 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     dispatchWorktree: oneOf(value.dispatchWorktree, WORKTREE_MODES, 'auto'),
     maxRunningDispatches:
       clampInt(value.maxRunningDispatches, MIN_RUNNING_DISPATCHES, MAX_RUNNING_DISPATCHES) ?? 3,
+    patrolEnabled: flag(value.patrolEnabled, true),
+    patrolIntervalMinutes:
+      clampInt(
+        value.patrolIntervalMinutes,
+        MIN_PATROL_INTERVAL_MINUTES,
+        MAX_PATROL_INTERVAL_MINUTES
+      ) ?? DEFAULT_PATROL_INTERVAL_MINUTES,
     dispatchMuted: flag(value.dispatchMuted, true),
     dispatchUnattended: flag(value.dispatchUnattended, true),
     replyLanguage: oneOf(value.replyLanguage, REPLY_LANGUAGES, 'ui'),
@@ -303,7 +324,19 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     }
     draft.maxRunningDispatches = max;
   }
-  for (const key of ['dispatchMuted', 'dispatchUnattended'] as const) {
+  if (value.patrolIntervalMinutes !== undefined) {
+    const minutes = value.patrolIntervalMinutes;
+    if (
+      typeof minutes !== 'number' ||
+      !Number.isInteger(minutes) ||
+      minutes < MIN_PATROL_INTERVAL_MINUTES ||
+      minutes > MAX_PATROL_INTERVAL_MINUTES
+    ) {
+      return { ok: false, error: 'invalid patrolIntervalMinutes' };
+    }
+    draft.patrolIntervalMinutes = minutes;
+  }
+  for (const key of ['dispatchMuted', 'dispatchUnattended', 'patrolEnabled'] as const) {
     const raw = value[key];
     if (raw === undefined) continue;
     if (typeof raw !== 'boolean') return { ok: false, error: `invalid ${key}` };
@@ -352,7 +385,49 @@ function parseDraft(value: unknown): DispatchDraft | undefined {
   if (model) draft.model = model;
   const todoId = text(value.todoId);
   if (todoId) draft.todoId = todoId;
+  const checkout = text(value.checkout);
+  if (checkout) draft.checkout = checkout;
+  const baseRef = text(value.baseRef);
+  if (baseRef) draft.baseRef = baseRef;
+  const branch = text(value.branch);
+  if (branch) draft.branch = branch;
+  const after = texts(value.after);
+  if (after.length > 0) draft.after = after;
   return draft;
+}
+
+function parsePendingProblem(value: unknown): PendingProblem | undefined {
+  return PENDING_PROBLEMS.includes(value as PendingProblem) ? (value as PendingProblem) : undefined;
+}
+
+function parsePending(value: unknown): PendingDispatch | undefined {
+  if (!isObject(value)) return undefined;
+  const id = text(value.id);
+  const projectId = text(value.projectId);
+  const secretaryConversationId = text(value.secretaryConversationId);
+  const createdAt = time(value.createdAt);
+  const updatedAt = time(value.updatedAt);
+  const after = texts(value.after);
+  const draft = parseDraft(value.draft);
+  if (!id || !projectId || !secretaryConversationId || !draft) return undefined;
+  if (createdAt === undefined || updatedAt === undefined) return undefined;
+  // 没有依赖的「等待」永远不会自己开始，整条不认，免得挂死在看板上
+  if (after.length === 0) return undefined;
+  if (value.status !== 'waiting' && value.status !== 'failed') return undefined;
+  const problem = parsePendingProblem(value.problem);
+  const failedDependency = text(value.failedDependency);
+  return {
+    id,
+    projectId,
+    secretaryConversationId,
+    createdAt,
+    updatedAt,
+    status: value.status,
+    after,
+    draft,
+    ...(problem ? { problem } : {}),
+    ...(failedDependency ? { failedDependency } : {}),
+  };
 }
 
 function parseProposal(value: unknown): SecretaryProposal | undefined {
@@ -467,6 +542,26 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (goal) record.goal = goal;
   const lastText = text(value.lastText);
   if (lastText) record.lastText = lastText;
+  const checkout = text(value.checkout);
+  if (checkout) record.checkout = checkout;
+  const baseRef = text(value.baseRef);
+  if (baseRef) record.baseRef = baseRef;
+  const branch = text(value.branch);
+  if (branch) record.branch = branch;
+  const stoppedAt = time(value.stoppedAt);
+  if (stoppedAt !== undefined) record.stoppedAt = stoppedAt;
+  if (
+    isObject(value.patrol) &&
+    PATROL_REASONS.includes(value.patrol.reason as PatrolReason) &&
+    count(value.patrol.turn) !== undefined &&
+    time(value.patrol.at) !== undefined
+  ) {
+    record.patrol = {
+      reason: value.patrol.reason as PatrolReason,
+      turn: count(value.patrol.turn) as number,
+      at: time(value.patrol.at) as number,
+    };
+  }
   const stalledTurn = count(value.stalledTurn);
   if (stalledTurn) record.stalledTurn = stalledTurn;
   const stateSince = time(value.stateSince);
@@ -533,6 +628,20 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
     if (!scheduleId) return undefined;
     return { ...base, ...scope, kind: 'schedule', scheduleId };
   }
+  if (value.kind === 'pending') {
+    const pendingId = text(value.pendingId);
+    if (!pendingId) return undefined;
+    if (value.status !== 'waiting' && value.status !== 'failed') return undefined;
+    const problem = parsePendingProblem(value.problem);
+    return {
+      ...base,
+      ...scope,
+      kind: 'pending',
+      pendingId,
+      status: value.status,
+      ...(problem ? { problem } : {}),
+    };
+  }
   return undefined;
 }
 
@@ -588,6 +697,14 @@ export function parseDispatchFile(value: unknown): SecretaryDispatchFile {
       const proposal = parseProposal(item);
       if (proposal) file.proposals[proposal.id] = proposal;
     }
+  }
+  if (isObject(value.pending)) {
+    const pending: Record<string, PendingDispatch> = {};
+    for (const item of Object.values(value.pending)) {
+      const entry = parsePending(item);
+      if (entry) pending[entry.id] = entry;
+    }
+    if (Object.keys(pending).length > 0) file.pending = pending;
   }
   if (Array.isArray(value.outbox)) {
     for (const item of value.outbox) {

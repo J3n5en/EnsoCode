@@ -124,6 +124,22 @@ export function SecretaryProposalRow({
           {proposal.draft.worktree ? t('Isolated worktree') : t('Project checkout')}
         </span>
       </div>
+      {(proposal.draft.branch ||
+        proposal.draft.baseRef ||
+        (proposal.draft.after?.length ?? 0) > 0) && (
+        <div
+          data-enso="secretary-proposal-base"
+          className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"
+        >
+          {proposal.draft.branch && <span>{proposal.draft.branch}</span>}
+          {proposal.draft.baseRef && (
+            <span>{t('from {{ref}}', { ref: proposal.draft.baseRef })}</span>
+          )}
+          {proposal.draft.after && proposal.draft.after.length > 0 && (
+            <span>{t('After {{ids}}', { ids: proposal.draft.after.join(', ') })}</span>
+          )}
+        </div>
+      )}
       <div className="mt-1.5 flex items-center gap-1.5">
         <span className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}>
           {t(STATUS_LABELS[proposal.status])}
