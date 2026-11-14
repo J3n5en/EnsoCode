@@ -1737,6 +1737,23 @@ async function verifyTakeover(cdp, setup) {
     return JSON.stringify({ arrived: Boolean(hit) });
   `);
   assert(arrived.arrived, '接管: 目标会话收到秘书的消息', arrived);
+  const pushed = await page(`
+    const secretaryId = ${JSON.stringify(proposedTakeover.secretaryId)};
+    const target = ${JSON.stringify(ownId)};
+    const hit = await until(
+      () => texts(secretaryId).find(
+        (text) => text.startsWith('<session-updates>') && text.includes(target)
+      ),
+      60000
+    );
+    return JSON.stringify({ received: Boolean(hit), update: hit ?? null });
+  `);
+  assert(
+    pushed.received,
+    '接管: 接管的会话跑完一轮后像派出会话一样回传给提出接管的秘书会话',
+    pushed
+  );
+  log(`  ${pushed.update?.slice(0, 300)}`);
 
   const revoked = await page(`
     const id = ${JSON.stringify(ownId)};
