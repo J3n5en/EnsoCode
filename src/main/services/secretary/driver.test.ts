@@ -475,6 +475,26 @@ describe('派出会话的后台任务看门狗', () => {
     ]);
     expect(h.prompts).toHaveLength(before);
   });
+
+  it('会话被停止后 forget：看门狗不再报停滞，也不再唤醒', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({ deadlineAt: 5_000 }, 1_000));
+    h.driver.observe(turnCompleted(digest('等着')));
+    h.driver.forget(SID);
+    expect(h.driver.watch(5_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it('停止后被 forget 的会话，目标暂停后不再续跑', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(turnCompleted(digest('这一轮')));
+    expect(h.prompts).toHaveLength(1);
+    h.driver.forget(SID);
+    // 目标被暂停后，后续任何收束都不会再投续跑
+    h.rows[SID].goal = { text: 'ship it', status: 'paused', autoTurns: 1 };
+    h.driver.observe(turnCompleted(digest('停了')));
+    expect(h.prompts).toHaveLength(1);
+  });
 });
 
 describe('投递被拒的消息不丢', () => {

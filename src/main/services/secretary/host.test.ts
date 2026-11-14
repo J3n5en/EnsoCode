@@ -2,6 +2,7 @@ import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { parseProfile } from '@shared/secretary/parse';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type {
+  PendingDispatch,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProposal,
@@ -53,6 +54,7 @@ interface Harness {
       }
     >;
     enabled: boolean;
+    patrolEnabled: boolean;
     notify: 'needs-user' | 'with-done' | 'off';
     schedules: SecretarySchedule[];
     todos: SecretaryTodo[];
@@ -69,6 +71,7 @@ function harness(
   options: {
     file?: Partial<SecretaryDispatchFile>;
     enabled?: boolean;
+    patrolEnabled?: boolean;
     notify?: Harness['state']['notify'];
   } = {}
 ): Harness {
@@ -77,6 +80,7 @@ function harness(
     rows: { c1: { id: 'c1', title: '派出会话', projectId: 'p1', sessionFile: '/tmp/c1.jsonl' } },
     statuses: { c1: running },
     enabled: options.enabled ?? true,
+    patrolEnabled: options.patrolEnabled ?? true,
     notify: options.notify ?? 'needs-user',
     schedules: [],
     todos: [],
@@ -108,6 +112,7 @@ function harness(
       if (!base) throw new Error('default profile');
       return {
         ...base,
+        patrolEnabled: state.patrolEnabled,
         notify: state.notify,
         ...(state.briefAt ? { dailyBriefAt: state.briefAt } : {}),
       };
@@ -512,6 +517,95 @@ describe('每分钟检查', () => {
     h.host.tick(24 * 60 * MINUTE);
     expect(h.state.file.proposals.prop1.status).toBe('expired');
     expect(h.state.file.outbox[0]).toMatchObject({ kind: 'proposal', status: 'expired' });
+  });
+});
+
+describe('自动巡检', () => {
+  const idleWithGoal = (h: Harness) => {
+    h.state.statuses.c1 = idle;
+    h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'active' } };
+    h.state.file.dispatched.c1.lastState = 'idle';
+  };
+
+  it('空闲超过 20 分钟、目标没完成时推一条 stalled，同一原因不重复', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.host.tick(20 * MINUTE + 1);
+    const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].text).toContain('自动巡检');
+    expect(h.state.file.dispatched.c1.patrol).toMatchObject({ reason: 'idle-stalled' });
+    // 下一次巡检：同一个异常不再推
+    h.host.tick(45 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
+  it('正常时不推任何东西', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.host.tick(5 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.notifications).toEqual([]);
+  });
+
+  it('会话有了新事件就算恢复，之后再次卡住会重新推', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.host.tick(20 * MINUTE + 1);
+    expect(h.state.file.dispatched.c1.patrol).toBeDefined();
+    // 21 分钟时来了一次事件：下一次巡检把标记清掉，且因为刚动过不报
+    h.state.now = 21 * MINUTE;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    h.state.statuses.c1 = idle;
+    h.host.tick(36 * MINUTE);
+    expect(h.state.file.dispatched.c1.patrol).toBeUndefined();
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+    // 之后又静了 20 分钟以上：同一种异常按新的一轮重新推一次（同一会话只留最新一条）
+    h.host.tick(60 * MINUTE);
+    expect(h.state.file.dispatched.c1.patrol).toMatchObject({
+      reason: 'idle-stalled',
+      turn: 1,
+      at: 60 * MINUTE,
+    });
+    expect(h.state.file.outbox.map((update) => update.key)).toEqual(['c1|stalled|1']);
+  });
+
+  it('没有进行中的会话时巡检不跑', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 0, at: 0 };
+    h.host.tick(60 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.file.dispatched.c1.patrol).toBeUndefined();
+  });
+
+  it('设置里关掉巡检后什么都不推', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.state.patrolEnabled = false;
+    h.host.tick(60 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('等依赖的派发每轮交给 dispatch 判定，出问题的不再交过去', () => {
+    const pending: PendingDispatch = {
+      id: 'pend-1',
+      projectId: 'p1',
+      secretaryConversationId: 'sec1',
+      createdAt: 0,
+      updatedAt: 0,
+      status: 'waiting',
+      after: ['c1'],
+      draft: { projectId: 'p1', prompt: '接着改', worktree: false },
+    };
+    const h = harness({ file: { pending: { 'pend-1': pending } } });
+    const started: string[][] = [];
+    h.ports.startPending = (ids) => started.push([...ids]);
+    h.host.tick(1_000);
+    expect(started).toEqual([['pend-1']]);
+    h.state.file.pending = { 'pend-1': { ...pending, status: 'failed', problem: 'cancelled' } };
+    h.host.tick(2_000);
+    expect(started).toEqual([['pend-1']]);
   });
 });
 

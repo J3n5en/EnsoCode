@@ -106,6 +106,20 @@ function proposalEvent(card: Extract<SecretaryCard, { kind: 'proposal' }>): Feed
   };
 }
 
+/** 等依赖的派发：等待中算进行中，出问题算失败，卡片与动态同一口径 */
+function pendingEvent(card: Extract<SecretaryCard, { kind: 'pending' }>): FeedEvent {
+  const failed = card.pending.status === 'failed';
+  return {
+    id: `pending:${card.pending.id}`,
+    at: card.pending.updatedAt,
+    tone: failed ? 'bad' : 'run',
+    projectName: card.projectName,
+    title:
+      card.pending.draft.title?.trim() || card.pending.draft.prompt.split('\n')[0]?.trim() || '',
+    label: failed ? 'Dispatch problem' : 'Waiting for dependencies',
+  };
+}
+
 function activityEvent(entry: SecretaryActivity, card: SessionCard | undefined): FeedEvent {
   const feed =
     entry.kind === 'seen'
@@ -135,7 +149,13 @@ export function feedEvents(board: SecretaryBoard): FeedEvent[] {
   );
   const cards = new Map(sessions.map((card) => [card.conversationId, card]));
   return [...board.needsYou, ...board.running, ...board.done]
-    .map((card) => (card.kind === 'proposal' ? proposalEvent(card) : sessionEvent(card)))
+    .map((card) =>
+      card.kind === 'proposal'
+        ? proposalEvent(card)
+        : card.kind === 'pending'
+          ? pendingEvent(card)
+          : sessionEvent(card)
+    )
     .concat(
       (board.activity ?? []).map((entry) => activityEvent(entry, cards.get(entry.conversationId)))
     )

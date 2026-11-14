@@ -1,5 +1,6 @@
 import {
   NEEDS_YOU_RESULTS,
+  type PendingDispatch,
   type SecretaryBoardTodo,
   type SecretaryTodoMutate,
   type TodoProblemCode,
@@ -89,6 +90,38 @@ function Stat({ value, label, warn }: { value: number; label: string; warn?: boo
 }
 
 /** 需要你处理的会话：就地审批与提问，主按钮打开会话 */
+/** 等依赖的派发出问题：它没有会话可打开，只说明原因，秘书已经收到同一条结果 */
+function PendingProblemCard({ pending }: { pending: PendingDispatch }) {
+  const { t } = useI18n();
+  const title = pending.draft.title?.trim() || pending.draft.prompt.split('\n')[0]?.trim() || '';
+  return (
+    <div
+      data-enso="secretary-pending-problem"
+      data-problem={pending.problem ?? 'dispatch-failed'}
+      className="rounded-xl border border-warning/40 bg-warning/5 px-3 py-2.5"
+    >
+      <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-warning">
+        <ShieldAlert className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          {t(PENDING_PROBLEM_LABELS[pending.problem ?? 'dispatch-failed'])}
+        </span>
+      </div>
+      <p className="mt-1 text-[13px] font-medium">{title}</p>
+      <p className="mt-0.5 text-[12px] text-muted-foreground">
+        {t('Waited for {{ids}}', { ids: pending.after.join(', ') })}
+      </p>
+    </div>
+  );
+}
+
+const PENDING_PROBLEM_LABELS: Record<NonNullable<PendingDispatch['problem']>, string> = {
+  'dependency-failed': 'A dependency failed',
+  'dependency-stopped': 'A dependency was stopped',
+  'dependency-deleted': 'A dependency was deleted',
+  'dispatch-failed': 'The dispatch could not start',
+  cancelled: 'The dispatch was cancelled',
+};
+
 function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const { t, locale } = useI18n();
   const face = useSecretaryFace();
@@ -526,6 +559,8 @@ export function SecretaryWorkbench({ name }: { name: string }) {
                 proposalId={card.proposal.id}
                 prominent
               />
+            ) : card.kind === 'pending' ? (
+              <PendingProblemCard key={card.pending.id} pending={card.pending} />
             ) : (
               <AttentionCard key={card.conversationId} card={card} />
             )

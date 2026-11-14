@@ -28,6 +28,10 @@ export interface MainSessionRequest {
   model?: ModelRef;
   thinkingLevel?: ThinkingLevel;
   worktree: boolean;
+  /** 基线：从项目的哪个现有检出、哪个 ref 起新分支。只在 worktree 为真时生效 */
+  checkout?: string;
+  baseRef?: string;
+  branch?: string;
   secretaryOrigin?: { secretaryConversationId: string };
   /** 会话目标：首条消息追加 kickoff，行里的 goal 供 Main 续跑 */
   goal?: string;
@@ -54,7 +58,11 @@ export interface SessionFactoryPorts {
   removeConversation(id: string): void;
   /** null 表示当前没有可用模型 */
   defaults(projectId: string): MainSessionDefaults | null;
-  createWorktree(conversationId: string, projectId: string): Promise<SessionWorktree>;
+  createWorktree(
+    conversationId: string,
+    projectId: string,
+    base?: { checkout?: string; baseRef?: string; branch?: string }
+  ): Promise<SessionWorktree>;
   removeWorktree(record: SessionWorktree): Promise<void>;
   writeRow(row: Record<string, unknown>): void;
   removeRow(id: string): void;
@@ -93,7 +101,11 @@ export async function createSessionFromMain(
   let worktree: SessionWorktree | undefined;
   if (request.worktree) {
     try {
-      worktree = await ports.createWorktree(id, request.projectId);
+      worktree = await ports.createWorktree(id, request.projectId, {
+        ...(request.checkout ? { checkout: request.checkout } : {}),
+        ...(request.baseRef ? { baseRef: request.baseRef } : {}),
+        ...(request.branch ? { branch: request.branch } : {}),
+      });
     } catch (error) {
       ports.removeConversation(id);
       return { ok: false, error: error instanceof Error ? error.message : 'worktree failed' };

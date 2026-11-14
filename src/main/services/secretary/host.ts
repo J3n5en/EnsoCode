@@ -2,6 +2,7 @@ import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroun
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { projectNameFromPath } from '@shared/projectName';
 import { extractReportRefs } from '@shared/secretary/daily';
+import { type PatrolFacts, patrolAnomalies, patrolIntervalMs } from '@shared/secretary/patrol';
 import { transitionProposal } from '@shared/secretary/policy';
 import { sessionIdsInUpdates, shouldSilenceTurn } from '@shared/secretary/silence';
 import type { RendererAgentEvent } from '@shared/types/agent';
@@ -29,6 +30,7 @@ import {
   ACTIVITY_LIMIT,
   capLastText,
   classify,
+  countsAsRunning,
   enqueueUpdate,
   goalStatusOf,
   isUrgentUpdate,
@@ -36,6 +38,7 @@ import {
   proposalUpdate,
   type ResultEvent,
   SETTLED_RESULTS,
+  sessionStateOf,
   shouldNotify,
   stalled,
   UPDATE_WINDOW_MS,
@@ -78,6 +81,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   now(): number;
   /** 派出会话空闲等后台任务的看门狗；缺省表示没有 */
   backgroundStalls?(now: number): readonly BackgroundStall[];
+  /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
+  startPending?(pendingIds: readonly string[], now: number): void;
   audit?(entry: SecretaryAuditEntry): void;
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
@@ -151,6 +156,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let coalesceAt: number | undefined;
   /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
   const pendingComplete = new Set<string>();
+  /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
+  let patrolAt: number | undefined;
+
+  /** 巡检异常的中文说明：与现有停滞检测分开措辞，秘书一眼能看出是自动巡检发现的 */
+  const PATROL_DETAIL: Record<'idle-stalled' | 'running-stalled', string> = {
+    'idle-stalled': '自动巡检：空闲超过 20 分钟，目标还没完成，也没有待处理项',
+    'running-stalled': '自动巡检：运行超过 30 分钟没有任何事件',
+  };
 
   function remember(file: SecretaryDispatchFile, entry: SecretaryActivity): void {
     file.activity = [...(file.activity ?? []), entry].slice(-ACTIVITY_LIMIT);
@@ -292,6 +305,64 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         error instanceof Error ? error.message : String(error)
       );
     });
+  }
+
+  /**
+   * 自动巡检：只在有进行中的会话时跑，只在发现异常时推一条。
+   * 同一会话同一原因一轮只推一次；会话有了新事件就算恢复，标记清掉。
+   */
+  function runPatrol(
+    file: SecretaryDispatchFile,
+    records: readonly DispatchRecord[],
+    statuses: Readonly<Record<string, SecretarySessionStatus>>,
+    now: number
+  ): boolean {
+    const profile = ports.profile();
+    if (!profile?.patrolEnabled) return false;
+    const rows = ports.rows();
+    let changed = false;
+    for (const record of records) {
+      if (!record.patrol) continue;
+      if (record.lastEventAt <= record.patrol.at && record.turn === record.patrol.turn) continue;
+      delete record.patrol;
+      changed = true;
+    }
+    const live = records.filter((record) =>
+      countsAsRunning(record, rows[record.conversationId], statuses[record.conversationId])
+    );
+    // 没有进行中的会话：巡检自己停下，等下一次有活再重新计时
+    if (live.length === 0) {
+      patrolAt = undefined;
+      return changed;
+    }
+    if (patrolAt !== undefined && now < patrolAt) return changed;
+    patrolAt = now + patrolIntervalMs(profile.patrolIntervalMinutes);
+    const facts: PatrolFacts[] = live.map((record) => {
+      const status = statuses[record.conversationId];
+      const row = rows[record.conversationId];
+      const state = sessionStateOf(record, row, status);
+      const goalStatus = goalStatusOf(row);
+      return {
+        conversationId: record.conversationId,
+        state,
+        ...(goalStatus ? { goalStatus } : {}),
+        pending: (status?.pendingAsks ?? 0) + (status?.pendingApprovals ?? 0),
+        ...(record.backgroundRunning ? { backgroundRunning: true } : {}),
+        lastEventAt: record.lastEventAt,
+        turn: record.turn,
+        ...(record.patrol ? { patrol: record.patrol } : {}),
+        stallReported: record.stalledTurn === record.turn,
+        ...(record.lastResult ? { result: record.lastResult.kind } : {}),
+      };
+    });
+    for (const anomaly of patrolAnomalies(facts, now)) {
+      const record = file.dispatched[anomaly.conversationId];
+      if (!record) continue;
+      record.patrol = { reason: anomaly.reason, turn: record.turn, at: now };
+      recordResult(file, record, 'stalled', now, PATROL_DETAIL[anomaly.reason]);
+      changed = true;
+    }
+    return changed;
   }
 
   /** 到点的定时进回传队列，与结果共用一次投递；返回是否改了 dispatch 文件 */
@@ -463,6 +534,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       for (const stall of ports.backgroundStalls?.(now) ?? []) {
         if (applyBackgroundStall(file, stall, now)) changed = true;
       }
+      // 自动巡检：正常时什么都不推，异常时按会话与原因各推一次
+      if (runPatrol(file, records, statuses, now)) changed = true;
       for (const proposal of Object.values(file.proposals)) {
         const transitioned = transitionProposal(proposal, { type: 'expire' }, now);
         if (!transitioned.changed) continue;
@@ -477,6 +550,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       // 系统定时是档案与待办的派生状态，每分钟重算一次；放在触发之后，否则刚到期的待办提醒先被重算删掉
       syncSystemSchedules(ports, ports.profile(), ports.todos());
       flush(now);
+      // 等依赖的派发：判定与建会话都在 dispatch 模块里做，这里只把候选交过去
+      const waiting = Object.values(file.pending ?? {})
+        .filter((pending) => pending.status === 'waiting')
+        .map((pending) => pending.id);
+      if (waiting.length > 0) ports.startPending?.(waiting, now);
     },
 
     recordBackgroundStalls(stalls, now = ports.now()) {

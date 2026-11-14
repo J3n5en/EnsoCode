@@ -67,6 +67,8 @@ export interface DispatchDriver {
   ): { ok: boolean; error?: string };
   /** 看一眼后台等待：该醒的醒，并返回还没交给秘书的停滞 */
   watch(now: number): BackgroundStall[];
+  /** 会话被停止：撤掉续跑与看门狗，之后不许再唤醒它 */
+  forget(conversationId: string): void;
 }
 
 interface TrackedTask extends WatchedBackgroundTask {
@@ -620,6 +622,20 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         if (stall) stalls.push(stall);
       }
       return stalls;
+    },
+
+    forget(conversationId) {
+      awaiting.delete(conversationId);
+      pending.delete(conversationId);
+      consumedWaits.delete(conversationId);
+      continued.delete(conversationId);
+      tasksBySession.delete(conversationId);
+      const timer = watchTimers.get(conversationId);
+      if (timer) {
+        clearTimeout(timer);
+        watchTimers.delete(conversationId);
+      }
+      forgetDeliveries(conversationId);
     },
   };
 }

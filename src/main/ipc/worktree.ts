@@ -164,7 +164,8 @@ export type WorktreeResult<T> = { ok: true; value: T } | { ok: false; error: str
 /** Main 内部建 worktree（秘书派活）：与 WORKTREE_CREATE 同一套校验与串行化 */
 export async function createConversationWorktree(
   conversationId: string,
-  projectId: string
+  projectId: string,
+  base?: { checkout?: string; baseRef?: string; branch?: string }
 ): Promise<WorktreeResult<SessionWorktree>> {
   const repoPath = resolveRepoPath(projectId);
   if (!repoPath || activeRoot(conversationId)?.projectId !== projectId) {
@@ -186,6 +187,8 @@ export async function createConversationWorktree(
       conversationId,
       projectId,
       root: worktreesRoot(),
+      ...(base?.baseRef ? { baseRef: base.baseRef } : {}),
+      ...(base?.branch ? { branch: base.branch } : {}),
     });
     if (activeRoot(conversationId)?.projectId !== projectId) {
       await removeSessionWorktree(record);

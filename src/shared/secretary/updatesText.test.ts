@@ -34,6 +34,14 @@ describe('parseSecretaryUpdates', () => {
     ).toEqual([{ kind: 'goal-complete', text: 'app · 已完成' }]);
   });
 
+  it('等依赖的派发按 pending:<id> 单独成行，不冒充会话', () => {
+    expect(
+      parseSecretaryUpdates(
+        '<session-updates>\n- [pending pending:pend-1] 修构建 · 依赖的会话失败了\n</session-updates>'
+      )
+    ).toEqual([{ kind: 'pending', text: '修构建 · 依赖的会话失败了' }]);
+  });
+
   it.each([
     ['普通文本', '帮我看看进展'],
     ['未知种类', '<session-updates>\n- [bogus] x\n</session-updates>'],

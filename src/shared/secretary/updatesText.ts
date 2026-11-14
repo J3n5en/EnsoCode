@@ -3,10 +3,10 @@ import { RESULT_KINDS } from './parse';
 
 export type SecretaryUpdateLine =
   | { kind: SecretaryResultKind; text: string; conversationId?: string; detail?: string }
-  | { kind: 'proposal' | 'schedule'; text: string; detail?: string };
+  | { kind: 'proposal' | 'schedule' | 'pending'; text: string; detail?: string };
 
 const BLOCK = /^<(session-updates|secretary-schedule)>\n([\s\S]*?)\n<\/\1>(?:\n|$)/;
-const HEAD = /^- \[([a-z-]+)(?: session:([^\]\s]+))?\] ([^\n]*)(?:\n|$)/;
+const HEAD = /^- \[([a-z-]+)(?: (?:session|pending):([^\]\s]+))?\] ([^\n]*)(?:\n|$)/;
 const DETAIL = /^<untrusted-content source="[^"]*">/;
 const END_TAG = '</untrusted-content>';
 
@@ -23,6 +23,8 @@ function lineOf(
   if (tag === 'secretary-schedule')
     return kind === 'schedule' && !conversationId ? { kind, text } : null;
   if (kind === 'proposal') return conversationId ? null : { kind, text };
+  // 等依赖的派发没有会话可打开，pending:<id> 只用来区分行，不进结果
+  if (kind === 'pending') return { kind, text };
   if (!isResultKind(kind)) return null;
   return conversationId ? { kind, text, conversationId } : { kind, text };
 }

@@ -4,6 +4,7 @@ import type { ProjectAuthority } from '@shared/types/agent';
 import {
   type DispatchRecord,
   NEEDS_YOU_RESULTS,
+  type PendingDispatch,
   type SecretaryBoard,
   type SecretaryCard,
   type SecretaryDispatchFile,
@@ -147,8 +148,12 @@ function untrustedSource(update: SecretaryUpdate): string {
 }
 
 function formatLine(update: SecretaryUpdate): string {
-  const session = isResultUpdate(update) ? ` session:${update.conversationId}` : '';
-  const head = `- [${update.kind}${session}] ${update.text}`;
+  const marker = isResultUpdate(update)
+    ? ` session:${update.conversationId}`
+    : update.kind === 'pending'
+      ? ` pending:${update.pendingId}`
+      : '';
+  const head = `- [${update.kind}${marker}] ${update.text}`;
   if (!update.lastText) return head;
   return `${head}\n${wrapUntrusted(untrustedSource(update), redactSecrets(update.lastText))}`;
 }
@@ -179,6 +184,34 @@ export function proposalUpdate(proposal: SecretaryProposal, at: number): Secreta
     proposalId: proposal.id,
     status: proposal.status,
     secretaryConversationId: proposal.secretaryConversationId,
+  };
+}
+
+const PENDING_PROBLEM_TEXT: Record<NonNullable<PendingDispatch['problem']>, string> = {
+  'dependency-failed': '依赖的会话失败了，这条派发没有开始',
+  'dependency-stopped': '依赖的会话被停止了，这条派发没有开始',
+  'dependency-deleted': '依赖的会话被删除了，这条派发没有开始',
+  'dispatch-failed': '依赖都结束了，但这条派发没能建起来',
+  cancelled: '这条派发在等依赖时被取消了',
+};
+
+/** 等依赖的派发：开始或出问题时给秘书推一条，key 按派发 id 去重 */
+export function pendingUpdate(pending: PendingDispatch, at: number): SecretaryUpdate {
+  const failed = pending.status === 'failed';
+  const dependency = pending.failedDependency ? ` session:${pending.failedDependency}` : '';
+  const title = pending.draft.title?.trim() || pending.draft.prompt.split('\n')[0]?.trim() || '';
+  const head = failed
+    ? PENDING_PROBLEM_TEXT[pending.problem ?? 'dispatch-failed']
+    : '依赖都结束了，这条派发已经开始';
+  return {
+    key: `pending:${pending.id}:${pending.status}`,
+    at,
+    text: [title, head, dependency].filter(Boolean).join(' · '),
+    kind: 'pending',
+    pendingId: pending.id,
+    status: pending.status,
+    ...(pending.problem ? { problem: pending.problem } : {}),
+    secretaryConversationId: pending.secretaryConversationId,
   };
 }
 
@@ -339,7 +372,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
         : {}),
     }));
 
-  const running: SessionCard[] = [];
+  const running: SecretaryCard[] = [];
   const done: SessionCard[] = [];
   for (const record of Object.values(file.dispatched)) {
     const row = input.rows[record.conversationId];
@@ -364,17 +397,33 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(going && state !== 'running' ? { continuing: true as const } : {}),
       ...(going && record.backgroundRunning ? { backgroundRunning: true as const } : {}),
       ...(record.takeover ? { takeover: true as const } : {}),
+      ...(record.checkout ? { checkout: record.checkout } : {}),
+      ...(record.baseRef ? { baseRef: record.baseRef } : {}),
+      ...(record.branch ? { branch: record.branch } : {}),
     };
     const needsYouNow = sessionNeedsUser(record, state);
     if (needsYouNow) needsYou.push(card);
     else if (going) running.push(card);
     else done.push(card);
   }
-  const newestFirst =
-    (at: (card: SessionCard) => number) => (left: SessionCard, right: SessionCard) =>
-      at(right) - at(left) || left.conversationId.localeCompare(right.conversationId);
-  running.sort(newestFirst((card) => card.stateSince));
-  done.sort(newestFirst((card) => card.resultAt ?? card.stateSince));
+  // 等依赖的派发还没有会话：等待中算进行中，出问题进「需要你处理」
+  for (const pending of Object.values(file.pending ?? {})) {
+    const card: SecretaryCard = {
+      kind: 'pending',
+      pending,
+      projectName: projectName(pending.projectId),
+    };
+    if (pending.status === 'failed') needsYou.push(card);
+    else running.push(card);
+  }
+  running.sort(
+    (left, right) => cardAt(right) - cardAt(left) || cardKey(left).localeCompare(cardKey(right))
+  );
+  done.sort(
+    (left, right) =>
+      (right.resultAt ?? right.stateSince) - (left.resultAt ?? left.stateSince) ||
+      left.conversationId.localeCompare(right.conversationId)
+  );
 
   return {
     needsYou,
@@ -407,6 +456,20 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     }),
     ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
   };
+}
+
+/** 排序兜底键：会话用会话 id，等依赖的派发用派发 id */
+function cardKey(card: SecretaryCard): string {
+  if (card.kind === 'session') return card.conversationId;
+  if (card.kind === 'pending') return card.pending.id;
+  return card.proposal.id;
+}
+
+/** 进行中的排序时间：等依赖的派发按它自己的更新时间 */
+function cardAt(card: SecretaryCard): number {
+  if (card.kind === 'pending') return card.pending.updatedAt;
+  if (card.kind === 'session') return card.stateSince;
+  return card.proposal.updatedAt;
 }
 
 /** 接管清单：会话行已删的不列；按授权时间新的在前 */

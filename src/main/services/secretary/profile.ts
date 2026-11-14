@@ -315,6 +315,16 @@ function profileChanges(
   if (draft.maxRunningDispatches !== undefined) {
     put('maxRunningDispatches', before?.maxRunningDispatches ?? null, draft.maxRunningDispatches);
   }
+  if (draft.patrolEnabled !== undefined) {
+    put('patrolEnabled', before?.patrolEnabled ?? null, draft.patrolEnabled);
+  }
+  if (draft.patrolIntervalMinutes !== undefined) {
+    put(
+      'patrolIntervalMinutes',
+      before?.patrolIntervalMinutes ?? null,
+      draft.patrolIntervalMinutes
+    );
+  }
   if (draft.dispatchMuted !== undefined) {
     put('dispatchMuted', before?.dispatchMuted ?? null, draft.dispatchMuted);
   }

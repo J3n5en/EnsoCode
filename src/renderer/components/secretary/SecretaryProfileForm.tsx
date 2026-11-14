@@ -37,6 +37,7 @@ const STEP_LABELS: Record<FormStep, string> = {
 };
 
 const MAX_RUNNING_OPTIONS = [1, 2, 3, 4, 5] as const;
+const PATROL_INTERVAL_OPTIONS = [5, 10, 15, 30, 60] as const;
 
 function Chips<T extends string>({
   value,
@@ -442,6 +443,26 @@ export function SecretaryProfileForm({
             checked={draft.dispatchUnattended ?? true}
             onChange={(dispatchUnattended) => patch({ dispatchUnattended })}
           />
+          <SwitchField
+            enso="secretary-form-patrol"
+            label="Watch running sessions automatically"
+            hint="While anything is running the secretary checks it on a schedule and only reports an anomaly: idle for 20 minutes with an unfinished goal, or running for 30 minutes without any event. Nothing is sent when all is well."
+            checked={draft.patrolEnabled ?? true}
+            onChange={(patrolEnabled) => patch({ patrolEnabled })}
+          />
+          {(draft.patrolEnabled ?? true) && (
+            <Field label="Check every">
+              <Chips
+                enso="secretary-form-patrol-interval"
+                value={String(draft.patrolIntervalMinutes ?? 15)}
+                options={PATROL_INTERVAL_OPTIONS.map((value) => ({
+                  value: String(value),
+                  label: t('{{n}} min', { n: value }),
+                }))}
+                onChange={(value) => patch({ patrolIntervalMinutes: Number(value) })}
+              />
+            </Field>
+          )}
         </div>
       )}
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSessionWorktree,
+  probeDispatchBase,
   rebuildSessionWorktree,
   removeSessionWorktree,
   repoIsClean,
@@ -95,6 +96,98 @@ describe('createSessionWorktree', () => {
     });
     expect(b.branch).not.toBe(a.branch);
     expect(b.path).not.toBe(a.path);
+  });
+
+  it('指定基线与分支：从 baseRef 起新分支，分支名照用', async () => {
+    runGit(repo, 'branch', 'feat/base');
+    const record = await createSessionWorktree({
+      repoPath: repo,
+      conversationId: 'conv-base',
+      projectId: 'p1',
+      root,
+      baseRef: 'feat/base',
+      branch: 'feat/dispatch-plus',
+    });
+    expect(record.branch).toBe('feat/dispatch-plus');
+    expect(record.baseBranch).toBe('feat/base');
+    expect(record.baseCommit).toBe(runGit(repo, 'rev-parse', 'feat/base'));
+    expect(runGit(record.path, 'branch', '--show-current')).toBe('feat/dispatch-plus');
+  });
+
+  it('分支重名直接报错，不覆盖已有分支', async () => {
+    runGit(repo, 'branch', 'feat/taken');
+    const before = runGit(repo, 'rev-parse', 'feat/taken');
+    await expect(
+      createSessionWorktree({
+        repoPath: repo,
+        conversationId: 'conv-taken',
+        projectId: 'p1',
+        root,
+        branch: 'feat/taken',
+      })
+    ).rejects.toThrow(/already exists/);
+    expect(runGit(repo, 'rev-parse', 'feat/taken')).toBe(before);
+  });
+
+  it('baseRef 不存在时报错，不建任何东西', async () => {
+    await expect(
+      createSessionWorktree({
+        repoPath: repo,
+        conversationId: 'conv-noref',
+        projectId: 'p1',
+        root,
+        baseRef: 'feat/missing',
+      })
+    ).rejects.toThrow();
+    expect(runGit(repo, 'worktree', 'list')).not.toContain('conv-noref');
+  });
+});
+
+describe('probeDispatchBase', () => {
+  it('项目目录本身、它的 worktree 都算这个项目的检出', async () => {
+    const record = await createSessionWorktree({
+      repoPath: repo,
+      conversationId: 'conv-probe',
+      projectId: 'p1',
+      root,
+    });
+    expect(await probeDispatchBase({ projectPath: repo })).toEqual({
+      knownCheckout: true,
+      sameRepo: true,
+      baseRefExists: true,
+      branchExists: false,
+      branchValid: true,
+    });
+    const sameRepo = await probeDispatchBase({ projectPath: repo, checkout: record.path });
+    expect(sameRepo.knownCheckout).toBe(true);
+    expect(sameRepo.sameRepo).toBe(true);
+  });
+
+  it('别的仓库或别的目录一律不算这个项目的检出', async () => {
+    const other = mkdtempSync(join(tmpdir(), 'enso-wt-other-'));
+    runGit(other, 'init', '-q', '-b', 'main');
+    const outside = await probeDispatchBase({ projectPath: repo, checkout: other });
+    expect(outside.knownCheckout).toBe(false);
+    expect(outside.sameRepo).toBe(false);
+    const plain = mkdtempSync(join(tmpdir(), 'enso-wt-plain3-'));
+    expect((await probeDispatchBase({ projectPath: repo, checkout: plain })).knownCheckout).toBe(
+      false
+    );
+    rmSync(other, { recursive: true, force: true });
+    rmSync(plain, { recursive: true, force: true });
+  });
+
+  it('查 baseRef 是否存在、分支是否重名与名字是否合法', async () => {
+    runGit(repo, 'branch', 'feat/base');
+    expect(
+      await probeDispatchBase({ projectPath: repo, baseRef: 'feat/base', branch: 'feat/new' })
+    ).toMatchObject({ baseRefExists: true, branchExists: false, branchValid: true });
+    expect(
+      await probeDispatchBase({ projectPath: repo, baseRef: 'feat/missing', branch: 'feat/base' })
+    ).toMatchObject({ baseRefExists: false, branchExists: true });
+    expect(
+      (await probeDispatchBase({ projectPath: repo, branch: 'feat/../bad name' })).branchValid
+    ).toBe(false);
   });
 });
 

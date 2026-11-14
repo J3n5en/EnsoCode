@@ -4,8 +4,10 @@ import { app } from '@platform';
 import { projectNameFromPath } from '@shared/projectName';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
 import { parseProfile } from '@shared/secretary/parse';
+import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
 import {
   canOperate,
+  type DispatchBaseFacts,
   dispatchDecision,
   type OperateSource,
   operateSource,
@@ -13,6 +15,7 @@ import {
   takeoverRefusal,
   transitionProposal,
   validateDispatch,
+  validateDispatchBase,
 } from '@shared/secretary/policy';
 import {
   SECRETARY_ID_MAX,
@@ -25,6 +28,8 @@ import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agen
 import {
   type DispatchDraft,
   NEEDS_YOU_RESULTS,
+  type PendingDispatch,
+  type PendingProblem,
   type SecretaryAuditEntry,
   type SecretaryBoard,
   type SecretaryDispatchFile,
@@ -46,7 +51,9 @@ import { type SecretarySessionStatus, visibleProjects } from './readers';
 import {
   buildBoard,
   countsAsRunning,
+  enqueueUpdate,
   linkedTodoSession,
+  pendingUpdate,
   proposalUpdate,
   takeoverViews,
 } from './results';
@@ -64,6 +71,12 @@ import {
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
 type MaybePromise<T> = T | Promise<T>;
+
+/** 停止后等 worker 确认的上限：超过就如实返回 running */
+export const STOP_CONFIRM_TIMEOUT_MS = 10_000;
+
+/** 一次派发最多等几个依赖 */
+export const MAX_DISPATCH_DEPENDENCIES = 10;
 
 /** 秘书排进目标会话队列的消息：origin 标记来源，撤回与停止清队列只认自己排的 */
 export interface SecretaryQueuedMessage {
@@ -130,6 +143,20 @@ export interface SecretaryDispatchPorts {
   now(): number;
   /** 项目当前分支；不是 git 仓库或读失败时返回 null */
   branch(repoPath: string): MaybePromise<string | null>;
+  /** 派发基线的既成事实：checkout 归属、同仓库、ref 与分支是否存在 */
+  baseFacts(input: {
+    projectPath: string;
+    checkout?: string;
+    baseRef?: string;
+    branch?: string;
+  }): MaybePromise<DispatchBaseFacts>;
+  /** 停止后最多等 timeoutMs 看 worker 是否真的停下；缺省只读一次状态 */
+  waitStopped?(
+    conversationId: string,
+    timeoutMs: number
+  ): Promise<'running' | 'idle' | 'waiting' | 'error'>;
+  /** 撤掉驱动者的续跑与看门狗：停止后不许它再被唤醒 */
+  forget?(conversationId: string): void;
 }
 
 const DISPATCH_OPS = [
@@ -267,6 +294,15 @@ export function setSecretaryStateListener(listener: (() => void) | null): void {
   stateListener = listener;
 }
 
+/** 停止会话时撤掉驱动者的续跑与看门狗；同样由 IPC 层注册，避免静态依赖 driver */
+let forgetListener: ((conversationId: string) => void) | null = null;
+
+export function setSecretaryForgetListener(
+  listener: ((conversationId: string) => void) | null
+): void {
+  forgetListener = listener;
+}
+
 export function notifySecretaryChanged(): void {
   try {
     stateListener?.();
@@ -341,7 +377,8 @@ async function noteDispatchResumed(
 async function dispatchContext(
   ports: SecretaryDispatchPorts,
   profile: SecretaryProfile,
-  projectId: string
+  projectId: string,
+  deferred = false
 ): Promise<Parameters<typeof validateDispatch>[1]> {
   const projects = await ports.projects();
   const file = ports.dispatchFile();
@@ -353,6 +390,7 @@ async function dispatchContext(
     running: await runningCount(ports, file),
     max: profile.maxRunningDispatches,
     worktreeMode: profile.dispatchWorktree,
+    deferred,
   };
 }
 
@@ -377,13 +415,65 @@ function draftFromParams(params: Record<string, unknown>): DispatchDraft | null 
   if (model) draft.model = model;
   const todoId = stringParam(params, 'todoId');
   if (todoId) draft.todoId = todoId;
+  const base = baseFromParams(params);
+  if (base) Object.assign(draft, base);
+  const after = afterParam(params);
+  if (after) draft.after = after;
   return draft;
+}
+
+type DispatchBaseFields = Pick<DispatchDraft, 'checkout' | 'baseRef' | 'branch'>;
+
+/** checkout / baseRef / branch：三个都可选，只带其中一部分也照样校验 */
+function baseFromParams(params: Record<string, unknown>): DispatchBaseFields | null {
+  const checkout = stringParam(params, 'checkout');
+  const baseRef = stringParam(params, 'baseRef');
+  const branch = stringParam(params, 'branch');
+  if (!checkout && !baseRef && !branch) return null;
+  return {
+    ...(checkout ? { checkout } : {}),
+    ...(baseRef ? { baseRef } : {}),
+    ...(branch ? { branch } : {}),
+  };
+}
+
+/** after：会话 id 列表，去重后按给的顺序等 */
+function afterParam(params: Record<string, unknown>): string[] | undefined {
+  const value = params.after;
+  if (!Array.isArray(value)) return undefined;
+  const ids: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const id = item.trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids.length > 0 ? ids.slice(0, MAX_DISPATCH_DEPENDENCIES) : undefined;
 }
 
 type DispatchOutcome =
   | { kind: 'proposal'; proposalId: string }
   | { kind: 'created'; conversationId: string }
+  | { kind: 'pending'; pendingId: string }
   | { kind: 'failed'; error: string };
+
+/** 基线校验：越界、ref 不存在、分支重名都在建会话之前拒绝 */
+async function checkBase(
+  ports: SecretaryDispatchPorts,
+  draft: DispatchDraft
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!draft.checkout && !draft.baseRef && !draft.branch) return { ok: true };
+  const project = (await ports.projects()).find(
+    (candidate) => candidate.projectId === draft.projectId
+  );
+  if (!project) return { ok: false, error: 'project-missing' };
+  const facts = await ports.baseFacts({
+    projectPath: project.canonicalPath,
+    ...(draft.checkout ? { checkout: draft.checkout } : {}),
+    ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
+    ...(draft.branch ? { branch: draft.branch } : {}),
+  });
+  return validateDispatchBase(draft, facts);
+}
 
 async function saveProposal(
   ports: SecretaryDispatchPorts,
@@ -421,6 +511,9 @@ async function executeDispatch(
     ...(draft.title ? { title: draft.title } : {}),
     ...(draft.model ? { model: draft.model } : {}),
     ...(draft.goal ? { goal: draft.goal } : {}),
+    ...(draft.checkout ? { checkout: draft.checkout } : {}),
+    ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
+    ...(draft.branch ? { branch: draft.branch } : {}),
     secretaryOrigin: { secretaryConversationId },
     // 只有新派出的会话套用这两个默认值；接管的是用户已有会话，一概不碰
     ...(profile.dispatchMuted ? { muted: true } : {}),
@@ -440,6 +533,9 @@ async function executeDispatch(
     stateSince: now,
     ...(draft.todoId ? { todoId: draft.todoId } : {}),
     ...(draft.goal ? { goal: draft.goal } : {}),
+    ...(draft.checkout ? { checkout: draft.checkout } : {}),
+    ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
+    ...(draft.branch ? { branch: draft.branch } : {}),
   };
   ports.saveDispatch(file);
   if (draft.todoId) {
@@ -448,6 +544,58 @@ async function executeDispatch(
   }
   notifySecretaryChanged();
   return created;
+}
+
+/** 带 after 的派发先落一条等待记录：不建会话、不占运行名额，重启后还在 */
+async function queuePending(
+  ports: SecretaryDispatchPorts,
+  draft: DispatchDraft,
+  secretaryConversationId: string
+): Promise<string> {
+  const now = ports.now();
+  const id = ports.newId();
+  const pending: PendingDispatch = {
+    id,
+    projectId: draft.projectId,
+    secretaryConversationId,
+    createdAt: now,
+    updatedAt: now,
+    status: 'waiting',
+    after: [...(draft.after ?? [])],
+    draft,
+  };
+  const file = ports.dispatchFile();
+  file.pending = { ...(file.pending ?? {}), [id]: pending };
+  ports.saveDispatch(file);
+  ports.audit({
+    at: now,
+    secretaryConversationId,
+    op: 'dispatch_pending',
+    targetId: id,
+    ok: true,
+    detail: `waiting for ${pending.after.join(',')}`,
+  });
+  notifySecretaryChanged();
+  return id;
+}
+
+/** 依赖满足就建会话，依赖出问题就标成出问题并给秘书推一条 */
+async function startDispatch(
+  ports: SecretaryDispatchPorts,
+  draft: DispatchDraft,
+  secretaryConversationId: string,
+  profile: SecretaryProfile
+): Promise<DispatchOutcome> {
+  if ((draft.after?.length ?? 0) > 0) {
+    return {
+      kind: 'pending',
+      pendingId: await queuePending(ports, draft, secretaryConversationId),
+    };
+  }
+  const created = await executeDispatch(ports, draft, secretaryConversationId, profile);
+  return created.ok
+    ? { kind: 'created', conversationId: created.conversationId }
+    : { kind: 'failed', error: created.error };
 }
 
 async function dispatchDraft(
@@ -462,19 +610,18 @@ async function dispatchDraft(
       : draft;
   const validated = validateDispatch(
     wanted,
-    await dispatchContext(ports, profile, wanted.projectId)
+    await dispatchContext(ports, profile, wanted.projectId, (wanted.after?.length ?? 0) > 0)
   );
   if (!validated.ok) return { kind: 'failed', error: validated.error };
+  const base = await checkBase(ports, validated.draft);
+  if (!base.ok) return { kind: 'failed', error: base.error };
   if (dispatchDecision(profile, wanted.projectId) === 'confirm') {
     return {
       kind: 'proposal',
       proposalId: await saveProposal(ports, secretaryConversationId, validated.draft),
     };
   }
-  const created = await executeDispatch(ports, validated.draft, secretaryConversationId, profile);
-  return created.ok
-    ? { kind: 'created', conversationId: created.conversationId }
-    : { kind: 'failed', error: created.error };
+  return startDispatch(ports, validated.draft, secretaryConversationId, profile);
 }
 
 function auditFailure(
@@ -516,6 +663,7 @@ function outcomeResult(
 ): SecretaryOpResult {
   if (outcome.kind === 'failed') return auditFailure(ports, ctx, op, outcome.error, targetId);
   const at = ports.now();
+  if (outcome.kind === 'pending') return pendingResult(ports, ctx, op, outcome.pendingId);
   if (outcome.kind === 'proposal') {
     ports.audit({
       at,
@@ -539,6 +687,194 @@ function outcomeResult(
     detail: 'created',
   });
   return { ok: true, result: { status: 'created', conversationId: outcome.conversationId } };
+}
+
+/** 等依赖的派发：结果里点名 pendingId，取消时把它当 conversationId 传给 session_stop */
+function pendingResult(
+  ports: SecretaryDispatchPorts,
+  ctx: SecretaryOpContext,
+  op: string,
+  pendingId: string
+): SecretaryOpResult {
+  ports.audit({
+    at: ports.now(),
+    secretaryConversationId: ctx.secretaryConversationId,
+    op,
+    targetId: pendingId,
+    ok: true,
+    detail: 'waiting_dependencies',
+  });
+  return { ok: true, result: { status: 'waiting', pendingId } };
+}
+
+/** 依赖会话此刻的事实：判定它是否真正结束 */
+async function dependencyFacts(
+  ports: SecretaryDispatchPorts,
+  file: SecretaryDispatchFile,
+  conversationIds: readonly string[]
+): Promise<DependencyFacts[]> {
+  const rows = await ports.rows();
+  const facts: DependencyFacts[] = [];
+  for (const conversationId of conversationIds) {
+    const row = rows[conversationId];
+    if (!row) {
+      facts.push({
+        conversationId,
+        present: false,
+        state: 'not-started',
+        stopped: false,
+        tracked: false,
+      });
+      continue;
+    }
+    const record = file.dispatched[conversationId];
+    const status = await ports.status(conversationId);
+    const goal = row.goal;
+    const goalStatus =
+      goal && typeof goal === 'object' && !Array.isArray(goal)
+        ? (goal as Record<string, unknown>).status
+        : undefined;
+    facts.push({
+      conversationId,
+      present: true,
+      state: row.sessionFile ? status.state : 'not-started',
+      ...(typeof goalStatus === 'string' ? { goalStatus } : {}),
+      ...(record?.backgroundRunning ? { backgroundRunning: true } : {}),
+      ...(record?.lastResult ? { result: record.lastResult.kind } : {}),
+      stopped: record?.stoppedAt !== undefined,
+      tracked: record !== undefined,
+    });
+  }
+  return facts;
+}
+
+/** 出问题：留在看板上等用户或秘书处理，同时给秘书推一条结果 */
+async function failPending(
+  ports: SecretaryDispatchPorts,
+  pending: PendingDispatch,
+  problem: PendingProblem,
+  failedDependency: string | undefined,
+  detail?: string
+): Promise<void> {
+  const now = ports.now();
+  const failed: PendingDispatch = {
+    ...pending,
+    status: 'failed',
+    updatedAt: now,
+    problem,
+    ...(failedDependency ? { failedDependency } : {}),
+  };
+  const file = ports.dispatchFile();
+  file.pending = { ...(file.pending ?? {}), [pending.id]: failed };
+  file.outbox = enqueueUpdate(file.outbox, pendingUpdate(failed, now));
+  ports.saveDispatch(file);
+  ports.audit({
+    at: now,
+    secretaryConversationId: pending.secretaryConversationId,
+    op: 'dispatch_pending',
+    targetId: pending.id,
+    ok: false,
+    detail: [problem, failedDependency, detail].filter(Boolean).join(' '),
+  });
+  notifySecretaryChanged();
+}
+
+/**
+ * 依赖判定与真正开始。host 每分钟把「依赖已经全部结束」的派发 id 交过来，
+ * 这里先把它从等待表里摘掉再建会话：并发的第二次调用读不到它，不会建两个会话。
+ */
+export async function startPendingDispatches(
+  ports: SecretaryDispatchPorts,
+  pendingIds: readonly string[],
+  now: number
+): Promise<void> {
+  for (const pendingId of pendingIds) {
+    const file = ports.dispatchFile();
+    const pending = file.pending?.[pendingId];
+    if (pending?.status !== 'waiting') continue;
+    const outcome = pendingOutcome(await dependencyFacts(ports, file, pending.after));
+    if (outcome.kind === 'wait') continue;
+    if (outcome.kind === 'failed') {
+      await failPending(ports, pending, outcome.problem, outcome.conversationId);
+      continue;
+    }
+    const claimed = ports.dispatchFile();
+    if (!claimed.pending?.[pendingId]) continue;
+    delete claimed.pending[pendingId];
+    if (Object.keys(claimed.pending).length === 0) delete claimed.pending;
+    ports.saveDispatch(claimed);
+
+    const profile = await profileOf(ports);
+    const validated = validateDispatch(
+      pending.draft,
+      await dispatchContext(ports, profile, pending.projectId)
+    );
+    if (!validated.ok) {
+      await failPending(ports, pending, 'dispatch-failed', undefined, validated.error);
+      continue;
+    }
+    const base = await checkBase(ports, validated.draft);
+    if (!base.ok) {
+      await failPending(ports, pending, 'dispatch-failed', undefined, base.error);
+      continue;
+    }
+    const created = await executeDispatch(
+      ports,
+      validated.draft,
+      pending.secretaryConversationId,
+      profile
+    );
+    if (!created.ok) {
+      await failPending(ports, pending, 'dispatch-failed', undefined, created.error);
+      continue;
+    }
+    ports.audit({
+      at: now,
+      secretaryConversationId: pending.secretaryConversationId,
+      op: 'dispatch_pending',
+      targetId: pendingId,
+      ok: true,
+      detail: `started ${created.conversationId}`,
+    });
+  }
+}
+
+/** 取消一条等依赖的派发：从等待表里移除，并给秘书推一条 */
+async function cancelPending(
+  ports: SecretaryDispatchPorts,
+  ctx: SecretaryOpContext,
+  pendingId: string
+): Promise<SecretaryOpResult | null> {
+  const file = ports.dispatchFile();
+  const pending = file.pending?.[pendingId];
+  if (!pending) return null;
+  const profile = await profileOf(ports);
+  const visible = visibleProjects(await ports.projects(), profile).some(
+    (candidate) => candidate.projectId === pending.projectId
+  );
+  if (!visible) return deny(ports, ctx, 'session_stop', 'not-visible', pendingId);
+  const now = ports.now();
+  const cancelled: PendingDispatch = {
+    ...pending,
+    status: 'failed',
+    updatedAt: now,
+    problem: 'cancelled',
+  };
+  file.pending = { ...(file.pending ?? {}) };
+  delete file.pending[pendingId];
+  if (Object.keys(file.pending).length === 0) delete file.pending;
+  file.outbox = enqueueUpdate(file.outbox, pendingUpdate(cancelled, now));
+  ports.saveDispatch(file);
+  ports.audit({
+    at: now,
+    secretaryConversationId: ctx.secretaryConversationId,
+    op: 'session_stop',
+    targetId: pendingId,
+    ok: true,
+    detail: 'cancelled waiting dispatch',
+  });
+  notifySecretaryChanged();
+  return { ok: true, result: { status: 'cancelled', pendingId } };
 }
 
 async function targetConversation(
@@ -951,6 +1287,9 @@ export function createSecretaryDispatchHandlers(
       const fields = sessionFields(params, ['conversationId', 'clearQueue']);
       if (!fields.ok) return fields;
       const { conversationId, clearQueue } = fields.value;
+      // 等依赖的派发还没有会话：用同一个 id 取消它
+      const cancelled = await cancelPending(ports, ctx, conversationId);
+      if (cancelled) return cancelled;
       const check = await checkOperate(ports, conversationId, await profileOf(ports));
       if (!check.ok) return deny(ports, ctx, 'session_stop', check.code, conversationId);
       // 范围接管的会话：停下也算真正用上了它，从这里开始跟踪
@@ -970,31 +1309,48 @@ export function createSecretaryDispatchHandlers(
         }
       }
       await ports.abort(conversationId);
-      // 接管来的会话自带的目标也一并暂停，免得停下后又被续跑
+      // 停止就是停止：目标一并暂停，续跑与看门狗都撤掉，免得它自己又跑起来把代码合了
+      await ports.pauseGoal(conversationId);
+      ports.forget?.(conversationId);
       const record = file.dispatched[conversationId];
-      if (record?.goal || record?.takeover) await ports.pauseGoal(conversationId);
       // 停下就收口：残留的运行中与后台任务记录会让它一直被算在跑
       if (record) {
-        if (record.lastState !== 'idle') record.stateSince = ports.now();
+        const now = ports.now();
+        if (record.lastState !== 'idle') record.stateSince = now;
         record.lastState = 'idle';
+        record.stoppedAt = now;
         delete record.backgroundRunning;
         delete record.stalledTurn;
+        delete record.patrol;
         ports.saveDispatch(file);
       }
       const stopped = markTodoProblem(await ports.todos(), conversationId, 'stopped', ports.now());
       if (stopped.changed) ports.saveTodos(stopped.todos);
+      // 等 worker 确认：最多 10 秒。没停下就如实返回 running，不假装停住了
+      const state = ports.waitStopped
+        ? await ports.waitStopped(conversationId, STOP_CONFIRM_TIMEOUT_MS)
+        : (await ports.status(conversationId)).state;
       ports.audit({
         at: ports.now(),
         secretaryConversationId: ctx.secretaryConversationId,
         op: 'session_stop',
         targetId: conversationId,
         ok: true,
-        detail:
-          cleared > 0
-            ? `stopped (${check.source}), cleared ${cleared} queued`
-            : `stopped (${check.source})`,
+        detail: `${state === 'running' ? 'still-running' : 'stopped'} (${check.source})${
+          cleared > 0 ? `, cleared ${cleared} queued` : ''
+        }`,
       });
       notifySecretaryChanged();
+      if (state === 'running') {
+        return {
+          ok: true,
+          result: {
+            status: 'running',
+            note: 'the worker has not stopped yet after 10 seconds; the goal is paused and it will not be continued, but the current turn may still finish',
+            ...(cleared > 0 ? { clearedQueued: cleared } : {}),
+          },
+        };
+      }
       return {
         ok: true,
         result: { status: 'stopped', ...(cleared > 0 ? { clearedQueued: cleared } : {}) },
@@ -1207,18 +1563,25 @@ export function createSecretaryDispatchHandlers(
             ? true
             : requested;
       const branch = project ? await ports.branch(project.canonicalPath) : null;
+      const base = baseFromParams(params);
       const draft: DispatchDraft = {
         projectId,
         prompt: todoDispatchPrompt(todo.text, stringParam(params, 'prompt'), {
           projectPath: project?.canonicalPath ?? projectId,
           branch,
           worktree,
+          ...(base?.checkout ? { checkout: base.checkout } : {}),
+          ...(base?.baseRef ? { baseRef: base.baseRef } : {}),
+          ...(base?.branch ? { newBranch: base.branch } : {}),
         }),
         // 不给标题时会话按 prompt 开头起名，prompt 常以共同背景开头，几个会话会重名
         ...(title ? { title } : {}),
         worktree,
         todoId,
+        ...(base ?? {}),
       };
+      const after = afterParam(params);
+      if (after) draft.after = after;
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
       const result = outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
       return result;
@@ -1373,10 +1736,15 @@ export async function resolveProposal(
 
   const profile = await profileOf(ports);
   const draft = mergeDraft(transitioned.proposal.draft, edits);
-  const validated = validateDispatch(draft, await dispatchContext(ports, profile, draft.projectId));
+  const validated = validateDispatch(
+    draft,
+    await dispatchContext(ports, profile, draft.projectId, (draft.after?.length ?? 0) > 0)
+  );
   if (!validated.ok)
     return finishProposal(ports, proposalId, { ok: false, error: validated.error });
-  const created = await executeDispatch(
+  const base = await checkBase(ports, validated.draft);
+  if (!base.ok) return finishProposal(ports, proposalId, { ok: false, error: base.error });
+  const started = await startDispatch(
     ports,
     validated.draft,
     proposal.secretaryConversationId,
@@ -1385,9 +1753,11 @@ export async function resolveProposal(
   return finishProposal(
     ports,
     proposalId,
-    created.ok
-      ? { ok: true, conversationId: created.conversationId }
-      : { ok: false, error: created.error }
+    started.kind === 'failed'
+      ? { ok: false, error: started.error }
+      : started.kind === 'created'
+        ? { ok: true, conversationId: started.conversationId }
+        : { ok: true }
   );
 }
 
@@ -1656,6 +2026,22 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
     } catch {
       return null;
     }
+  },
+  baseFacts: async (input) => {
+    const { probeDispatchBase } = await import('../worktree/service');
+    return probeDispatchBase(input);
+  },
+  waitStopped: async (conversationId, timeoutMs) => {
+    const { observedSessionStatus } = await import('../../ipc/agent');
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const state = observedSessionStatus(conversationId).state;
+      if (state !== 'running' || Date.now() >= deadline) return state;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  },
+  forget: (conversationId) => {
+    forgetListener?.(conversationId);
   },
 };
 

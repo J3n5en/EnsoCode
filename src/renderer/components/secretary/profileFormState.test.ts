@@ -20,6 +20,8 @@ const profile: SecretaryProfile = {
   dispatchModel: { mode: 'fixed', model: { providerId: 'p', modelId: 'm2' } },
   dispatchWorktree: 'always',
   maxRunningDispatches: 5,
+  patrolEnabled: true,
+  patrolIntervalMinutes: 15,
   dispatchMuted: true,
   dispatchUnattended: true,
   addressAs: '老板',

@@ -40,7 +40,18 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
   },
   session_create: {
-    keys: ['projectId', 'prompt', 'title', 'goal', 'model', 'worktree'],
+    keys: [
+      'projectId',
+      'prompt',
+      'title',
+      'goal',
+      'model',
+      'worktree',
+      'checkout',
+      'baseRef',
+      'branch',
+      'after',
+    ],
     booleans: ['worktree'],
     aliases: {
       task: 'prompt',
@@ -94,7 +105,17 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     aliases: { id: 'todoId', title: 'text', content: 'text' },
   },
   todo_item_dispatch: {
-    keys: ['todoId', 'projectId', 'prompt', 'title', 'worktree'],
+    keys: [
+      'todoId',
+      'projectId',
+      'prompt',
+      'title',
+      'worktree',
+      'checkout',
+      'baseRef',
+      'branch',
+      'after',
+    ],
     booleans: ['worktree'],
     aliases: { id: 'todoId', task: 'prompt', instruction: 'prompt', name: 'title' },
   },
@@ -116,6 +137,8 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'dispatchModel',
       'dispatchWorktree',
       'maxRunningDispatches',
+      'patrolEnabled',
+      'patrolIntervalMinutes',
       'addressAs',
       'replyLanguage',
       'style',
@@ -123,7 +146,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'dailyBriefAt',
       'persona',
     ],
-    numbers: ['maxRunningDispatches'],
+    numbers: ['maxRunningDispatches', 'patrolIntervalMinutes'],
     aliases: { displayName: 'name', language: 'replyLanguage', about: 'persona' },
   },
   skill_propose: {
@@ -206,6 +229,39 @@ const id = (description: string): JsonSchema => ({
   description,
 });
 
+/** 派发基线：三项都可选，只在 worktree 为真时有意义 */
+const BASE_PARAMS: Record<string, JsonSchema> = {
+  checkout: {
+    type: 'string',
+    minLength: 1,
+    maxLength: 1024,
+    description:
+      'Optional: an existing checkout of this project to take the base from, e.g. /Users/me/project/enso-code-secretary. It must be the same git repository as the project (the project directory or one of its worktrees). Only with worktree true.',
+  },
+  baseRef: {
+    type: 'string',
+    minLength: 1,
+    maxLength: 200,
+    description:
+      'Optional: branch name or commit the new worktree starts from. It must exist. Only with worktree true.',
+  },
+  branch: {
+    type: 'string',
+    minLength: 1,
+    maxLength: 200,
+    description:
+      'Optional: name of the new branch to create. It must not exist yet; a taken name is refused, never overwritten. Only with worktree true.',
+  },
+};
+
+const AFTER_PARAM: JsonSchema = {
+  type: 'array',
+  items: { type: 'string', minLength: 1, maxLength: SECRETARY_ID_MAX },
+  maxItems: 10,
+  description:
+    'Optional: session ids this dispatch must wait for. It starts only after every one of them has really finished (goal complete and idle, or turn ended and idle for a session without a goal). It waits without creating a session and without using a dispatch slot; if any of them fails, is stopped or is deleted, this dispatch never starts and you get a result. Cancel a waiting dispatch with session_stop and its pendingId.',
+};
+
 const SCHEMAS: Record<
   SecretaryOp,
   { description: string; parameters: ToolDefinition['parameters'] }
@@ -251,7 +307,7 @@ const SCHEMAS: Record<
   },
   session_create: {
     description:
-      'Create a normal visible session in a local project and send the first prompt. It may need the user to confirm on a card; when it does, the call returns a proposalId instead of a conversationId.',
+      'Create a normal visible session in a local project and send the first prompt. It may need the user to confirm on a card; when it does, the call returns a proposalId instead of a conversationId. With worktree true you can pin the base: checkout picks an existing checkout of the project, baseRef the branch or commit to start from, branch the new branch name. With after the session is not created yet: it waits for the listed sessions and returns status "waiting" with a pendingId.',
     parameters: object(
       {
         projectId: id('Target project id'),
@@ -273,6 +329,8 @@ const SCHEMAS: Record<
           type: 'boolean',
           description: 'Run in an isolated worktree instead of the project checkout',
         },
+        ...BASE_PARAMS,
+        after: AFTER_PARAM,
       },
       ['projectId', 'prompt']
     ),
@@ -312,7 +370,7 @@ const SCHEMAS: Record<
   },
   session_stop: {
     description:
-      'Stop a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. Queued messages are kept by default; pass clearQueue true to also drop the messages you queued, so they do not all fire the next time the session runs. Messages the user queued are never cleared. A session reached through the scope starts reporting results to you only after this call.',
+      'Stop a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. The goal is paused and the session is not continued or woken again. The call waits up to 10 seconds for the worker to confirm and returns the real state: status "stopped" means it is down, status "running" means it was still running and the current turn may finish. Always trust the returned status, not the fact that you asked. Pass the pendingId of a dispatch that is waiting for dependencies as conversationId to cancel it. Queued messages are kept by default; pass clearQueue true to also drop the messages you queued, so they do not all fire the next time the session runs. Messages the user queued are never cleared. A session reached through the scope starts reporting results to you only after this call.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -490,6 +548,12 @@ const SCHEMAS: Record<
       },
       dispatchWorktree: { type: 'string', enum: ['never', 'auto', 'always'] },
       maxRunningDispatches: { type: 'integer', minimum: 1, maximum: 10 },
+      patrolEnabled: {
+        type: 'boolean',
+        description:
+          'Watch running sessions automatically and report only anomalies. On by default.',
+      },
+      patrolIntervalMinutes: { type: 'integer', minimum: 5, maximum: 120 },
       addressAs: { type: 'string', minLength: 1, maxLength: 64 },
       replyLanguage: { type: 'string', enum: ['ui', 'zh', 'en'] },
       style: { type: 'string', enum: ['concise', 'detailed'] },
