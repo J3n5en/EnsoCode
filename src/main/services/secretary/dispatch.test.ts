@@ -11,6 +11,7 @@ import type {
   SecretaryToolDraft,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
+import { createSecretaryTools, normalizeSecretaryParams } from '../../../agent/tools/secretary';
 import {
   buildSecretaryState,
   createSecretaryDispatchHandlers,
@@ -333,15 +334,83 @@ describe('session_create', () => {
 });
 
 describe('session_send', () => {
+  it('模型拿到的 schema 字段 Main 全部认得，必填项一致', async () => {
+    const tools = createSecretaryTools({ invoke: async () => ({}) } as never);
+    const sample: Record<string, string> = { conversationId: 'c1', message: '继续' };
+    for (const op of ['session_send', 'session_stop'] as const) {
+      const schema = tools.find((tool) => tool.name === op)?.parameters as unknown as {
+        properties: Record<string, unknown>;
+        required: string[];
+      };
+      const h = harness({ file: dispatchedFile() });
+      const params = Object.fromEntries(
+        Object.keys(schema.properties).map((key) => [key, sample[key]])
+      );
+      expect((await call(h.handlers[op], params)).ok, op).toBe(true);
+      for (const key of schema.required) {
+        const { [key]: _omitted, ...rest } = params;
+        const result = await call(harness({ file: dispatchedFile() }).handlers[op], rest);
+        expect(result.ok ? '' : result.error, `${op} 缺 ${key}`).toContain(`"${key}" is required`);
+      }
+    }
+  });
+
   it('未派出且未点名的会话拒绝发送', async () => {
     const h = harness();
-    const result = await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
     expect(result).toEqual({ ok: false, error: NOT_OPERABLE_ERROR });
     // 拒绝原因要说清，并指出可以申请接管
-    expect(NOT_OPERABLE_ERROR).toMatch(/^not-operable: /);
+    expect(NOT_OPERABLE_ERROR).toMatch(/^permission denied \(not-operable\): /u);
     expect(NOT_OPERABLE_ERROR).toContain('session_takeover_propose');
+    expect(NOT_OPERABLE_ERROR).not.toContain('invalid arguments');
     expect(h.prompts).toEqual([]);
     expect(h.audits.map((entry) => [entry.ok, entry.detail])).toEqual([[false, 'not-operable']]);
+  });
+
+  it('秘书派出的会话：模型侧参数经归一化后直接发到 Main 能发出', async () => {
+    for (const raw of [
+      { conversationId: 'c1', message: 'test' },
+      { conversationId: 'c1', text: '请继续把构建修好'.repeat(40) },
+      { sessionId: 'c1', content: '继续' },
+    ]) {
+      const h = harness({ file: dispatchedFile() });
+      const params = normalizeSecretaryParams('session_send', raw) as Record<string, unknown>;
+      const result = await call(h.handlers.session_send, params);
+      expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+      expect(h.prompts).toEqual([
+        { conversationId: 'c1', text: params.message as string, deliveryId: 'id-1' },
+      ]);
+    }
+  });
+
+  it('项目不可见时给出明确的拒绝原因', async () => {
+    const h = harness({ file: dispatchedFile(), profile: profile({ visibleProjectIds: ['p2'] }) });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^permission denied \(not-visible\): /u);
+    expect(h.prompts).toEqual([]);
+  });
+
+  it.each([
+    ['缺 conversationId', { message: '继续' }, 'conversationId'],
+    ['conversationId 为空', { conversationId: '', message: '继续' }, 'conversationId'],
+    ['conversationId 非字符串', { conversationId: 42, message: '继续' }, 'conversationId'],
+    ['conversationId 超长', { conversationId: 'x'.repeat(201), message: '继续' }, 'conversationId'],
+    ['缺 message', { conversationId: 'c1' }, 'message'],
+    ['message 全是空白', { conversationId: 'c1', message: '   ' }, 'message'],
+    ['message 非字符串', { conversationId: 'c1', message: ['继续'] }, 'message'],
+    ['message 超长', { conversationId: 'c1', message: 'x'.repeat(8001) }, 'message'],
+    ['未归一化的旧字段 text', { conversationId: 'c1', text: '继续' }, 'text'],
+  ])('参数不合法时指出字段：%s', async (_label, params, field) => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, params);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^invalid arguments: /u);
+    expect(result.error).toContain(field);
+    expect(h.prompts).toEqual([]);
+    expect(h.queued).toEqual([]);
   });
 
   it('目标有待审批时拒绝并提示需要用户', async () => {
@@ -349,8 +418,10 @@ describe('session_send', () => {
       file: dispatchedFile(),
       statuses: { c1: { state: 'waiting', pendingAsks: 0, pendingApprovals: 1 } },
     });
-    const result = await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' });
-    expect(result).toEqual({ ok: false, error: 'needs-user' });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^refused \(needs-user\): /u);
     expect(h.prompts).toEqual([]);
   });
 
@@ -359,7 +430,7 @@ describe('session_send', () => {
       file: dispatchedFile(),
       statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
     });
-    const result = await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
     expect(result).toEqual({ ok: true, result: { status: 'queued' } });
     expect(h.queued).toEqual([{ conversationId: 'c1', message: { id: 'id-1', text: '继续' } }]);
     expect(h.prompts).toEqual([]);
@@ -367,7 +438,7 @@ describe('session_send', () => {
 
   it('空闲且 worker 活着时直接发消息', async () => {
     const h = harness({ file: dispatchedFile() });
-    const result = await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
     expect(result).toEqual({ ok: true, result: { status: 'sent' } });
     expect(h.resumes).toEqual([]);
     expect(h.prompts).toEqual([{ conversationId: 'c1', text: '继续', deliveryId: 'id-1' }]);
@@ -376,7 +447,7 @@ describe('session_send', () => {
   it('worker 已释放时先恢复再发', async () => {
     const h = harness({ file: dispatchedFile() });
     h.ports.alive = () => false;
-    const result = await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
     expect(result).toEqual({ ok: true, result: { status: 'sent' } });
     expect(h.resumes).toEqual(['c1']);
     expect(h.prompts).toHaveLength(1);
@@ -386,7 +457,7 @@ describe('session_send', () => {
     const h = harness({ file: dispatchedFile() });
     h.ports.alive = () => false;
     h.ports.resume = async () => ({ ok: false, error: 'no session file' });
-    const result = await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
     expect(result).toEqual({ ok: false, error: 'no session file' });
     expect(h.prompts).toEqual([]);
   });
@@ -408,6 +479,31 @@ describe('session_stop', () => {
     const h = harness();
     const result = await call(h.handlers.session_stop, { conversationId: 'c1' });
     expect(result).toEqual({ ok: false, error: NOT_OPERABLE_ERROR });
+    expect(h.aborts).toEqual([]);
+  });
+
+  it('模型侧参数经归一化后能停止派出的会话', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const params = normalizeSecretaryParams('session_stop', { sessionId: 'c1' }) as Record<
+      string,
+      unknown
+    >;
+    const result = await call(h.handlers.session_stop, params);
+    expect(result).toEqual({ ok: true, result: { status: 'stopped' } });
+    expect(h.aborts).toEqual(['c1']);
+  });
+
+  it.each([
+    ['缺 conversationId', {}, 'conversationId'],
+    ['conversationId 全是空白', { conversationId: '  ' }, 'conversationId'],
+    ['多余字段', { conversationId: 'c1', force: true }, 'force'],
+  ])('参数不合法时指出字段：%s', async (_label, params, field) => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_stop, params);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^invalid arguments: /u);
+    expect(result.error).toContain(field);
     expect(h.aborts).toEqual([]);
   });
 });
@@ -500,7 +596,7 @@ describe('接管', () => {
       ])
     );
 
-    expect(await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' })).toEqual({
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: true,
       result: { status: 'sent' },
     });
@@ -534,10 +630,8 @@ describe('接管', () => {
       statuses: { c1: { state: 'waiting', pendingAsks: 1, pendingApprovals: 0 } },
     });
     expect(await grantTakeover(h.ports, 'c1', 'user', null)).toEqual({ ok: true });
-    expect(await call(h.handlers.session_send, { conversationId: 'c1', text: '选 A' })).toEqual({
-      ok: false,
-      error: 'needs-user',
-    });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '选 A' });
+    expect(result.ok ? '' : result.error).toMatch(/^refused \(needs-user\): /u);
     expect(h.prompts).toEqual([]);
   });
 
@@ -605,7 +699,7 @@ describe('接管', () => {
       ok: true,
       detail: 'session',
     });
-    expect(await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' })).toEqual({
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
       ok: false,
       error: NOT_OPERABLE_ERROR,
     });
