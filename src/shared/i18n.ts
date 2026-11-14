@@ -3430,7 +3430,7 @@ export const zhTranslations: Record<string, string> = {
   'One-off': '一次性',
   Workbench: '工作台',
   'The secretary has not saved anything yet.': '秘书还没有保存任何记忆。',
-  'Dispatched by secretary': '由秘书派出',
+  'Dispatched by {{name}}': '由{{name}}派出',
   'Set up your secretary': '设置你的秘书',
   'Open secretary': '打开秘书',
   'Only when the secretary agent is enabled in Experimental settings':
@@ -3536,11 +3536,11 @@ export const zhTranslations: Record<string, string> = {
   'Handing it over…': '正在交给秘书…',
   'Handed over to the secretary': '已交给秘书接管',
   'Allow takeover': '同意接管',
-  'Secretary managing': '秘书接管中',
+  'Managed by {{name}}': '{{name}}接管中',
   '{{name}} is managing this session: it may message and stop it.':
     '{{name}}正在接管这个会话，可以给它发消息、停止它。',
-  'Take back from the secretary': '取消秘书接管',
-  'Hand over to the secretary': '交给秘书接管',
+  'Take back from {{name}}': '取消{{name}}接管',
+  'Hand over to {{name}}': '交给{{name}}接管',
   'Let {{name}} message and stop this session for you. You can take it back any time.':
     '让{{name}}替你给这个会话发消息、停止它，随时可以收回。',
   'Takeover failed': '接管操作失败',

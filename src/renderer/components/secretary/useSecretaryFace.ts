@@ -1,4 +1,5 @@
 import { secretaryAvatarUrl } from '@shared/localImage';
+import { useI18n } from '@/i18n';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
@@ -7,6 +8,12 @@ export interface SecretaryFaceModel {
   name: string;
   color: string;
   image?: string;
+}
+
+/** 界面上指代秘书这个角色时用它：用户改的名字优先，没设名字就叫「秘书」 */
+export function useSecretaryName(): string {
+  const { t } = useI18n();
+  return useSecretaryStore((state) => state.secretary.profile?.name.trim()) || t('Secretary');
 }
 
 /** 秘书自己的脸，和当前打开的是不是秘书会话无关 */

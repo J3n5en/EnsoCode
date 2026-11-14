@@ -7,6 +7,7 @@ import { canOfferTakeover } from '@/lib/secretaryTakeover';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
+import { useSecretaryName } from './useSecretaryFace';
 
 export function useTakeover(conversationId: string): SecretaryTakeoverView | undefined {
   return useSecretaryStore((state) =>
@@ -17,12 +18,13 @@ export function useTakeover(conversationId: string): SecretaryTakeoverView | und
 /** 侧栏标识：与「由秘书派出」同款，用户一眼知道秘书在管它 */
 export function SecretaryTakeoverBadge() {
   const { t } = useI18n();
+  const name = useSecretaryName();
   return (
     <span
       data-enso="secretary-takeover"
       className="shrink-0 rounded bg-primary/10 px-1 text-[10px] text-primary group-hover:hidden"
     >
-      {t('Secretary managing')}
+      {t('Managed by {{name}}', { name })}
     </span>
   );
 }
@@ -37,7 +39,7 @@ export function SecretaryTakeoverControl({ conversationId }: { conversationId: s
     (state) => state.projects.find((project) => project.id === row?.projectId)?.kind
   );
   const [busy, setBusy] = useState(false);
-  const name = secretary.profile?.name ?? t('Secretary');
+  const name = useSecretaryName();
 
   const run = async (action: () => Promise<{ ok: true } | { ok: false; error: string }>) => {
     setBusy(true);
@@ -58,13 +60,13 @@ export function SecretaryTakeoverControl({ conversationId }: { conversationId: s
         title={t('{{name}} is managing this session: it may message and stop it.', { name })}
       >
         <UserRoundCheck className="size-3.5" />
-        {t('Secretary managing')}
+        {t('Managed by {{name}}', { name })}
         <button
           type="button"
           data-enso="secretary-takeover-revoke"
           disabled={busy}
-          aria-label={t('Take back from the secretary')}
-          title={t('Take back from the secretary')}
+          aria-label={t('Take back from {{name}}', { name })}
+          title={t('Take back from {{name}}', { name })}
           onClick={() =>
             void run(() => window.electronAPI.secretary.revokeTakeover(conversationId))
           }
@@ -83,7 +85,7 @@ export function SecretaryTakeoverControl({ conversationId }: { conversationId: s
       disabled={busy}
       onClick={() => void run(() => window.electronAPI.secretary.grantTakeover(conversationId))}
       className="flex h-6 shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-      aria-label={t('Hand over to the secretary')}
+      aria-label={t('Hand over to {{name}}', { name })}
       title={t(
         'Let {{name}} message and stop this session for you. You can take it back any time.',
         {
@@ -92,7 +94,7 @@ export function SecretaryTakeoverControl({ conversationId }: { conversationId: s
       )}
     >
       <UserRoundCheck className="size-3.5" />
-      {t('Hand over to the secretary')}
+      {t('Hand over to {{name}}', { name })}
     </button>
   );
 }

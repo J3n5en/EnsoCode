@@ -35,6 +35,7 @@ import {
   useState,
 } from 'react';
 import { useWindowChromeKind } from '@/components/app/WindowChrome';
+import { useSecretaryName } from '@/components/secretary/useSecretaryFace';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -56,7 +57,6 @@ import {
 } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
-import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
@@ -310,12 +310,6 @@ function Secretary(props: IDockviewPanelProps<{ conversationId?: string }>) {
       <SecretaryPanel />
     </VisiblePanel>
   );
-}
-
-/** 面板标题与新建入口都用秘书自己的名字，没设置过就叫「秘书」 */
-function useSecretaryName(): string {
-  const { t } = useI18n();
-  return useSecretaryStore((state) => state.secretary.profile?.name.trim() || t('Secretary'));
 }
 
 function useWorkflowAvailable(projectId: string | undefined): boolean {

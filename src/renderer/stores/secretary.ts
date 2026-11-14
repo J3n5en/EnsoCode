@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSessionsStore } from '@/stores/sessions';
+import { setTakenOverSessions } from '@/stores/sessions/secretaryOwned';
 import { useSettingsStore } from '@/stores/settings';
 
 /** 秘书会话的开场白：初次设置走「聊着设置」时由用户侧发一条固定引导语（D5） */
@@ -66,6 +67,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
     let pushed = false;
     const off = window.electronAPI.secretary.onStateChanged((secretary) => {
       pushed = true;
+      setTakenOverSessions(secretary.takeovers.map((entry) => entry.conversationId));
       set((state) => ({
         secretary,
         // 设置完成后欢迎页让位给会话；档案被重来清掉时再回到欢迎页（首次启动没有档案不弹）
@@ -80,7 +82,9 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       .getState()
       // 推送比首帧快时以推送为准，否则旧快照会盖掉刚确认的提案
       .then((secretary) => {
-        if (!pushed) set({ secretary });
+        if (pushed) return;
+        setTakenOverSessions(secretary.takeovers.map((entry) => entry.conversationId));
+        set({ secretary });
       })
       .catch(() => undefined);
     return off;
