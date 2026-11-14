@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
+import { shouldSilenceTurn } from '@shared/secretary/silence';
 import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { app, BrowserWindow, Notification } from 'electron';
@@ -194,6 +195,9 @@ export function maybeNotify(event: RendererAgentEvent): void {
       );
       return;
     case 'turn-completed':
+      if (event.digest && shouldSilenceTurn(event.digest.userText, event.digest.assistantText)) {
+        return;
+      }
       notify(
         event.identity.sessionId,
         eventTitle(event.identity.sessionId, t.turnDone),

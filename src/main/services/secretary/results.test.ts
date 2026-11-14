@@ -70,10 +70,23 @@ describe('结果分类', () => {
   it('目标信号决定完成与受阻', () => {
     expect(
       classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'complete' }, running)
-    ).toBe('goal-complete');
+    ).toBeNull();
     expect(classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'blocked' }, running)).toBe(
       'goal-blocked'
     );
+  });
+
+  it('goal_complete 等到轮次结束才报完成', () => {
+    expect(
+      classify(
+        record({ goal: 'g' }),
+        { type: 'turn-completed', goalCompleted: true, goalStatus: 'active' },
+        running
+      )
+    ).toBe('goal-complete');
+    expect(
+      classify(record({ goal: 'g' }), { type: 'turn-completed', goalStatus: 'active' }, idle)
+    ).toBeNull();
   });
 
   it('goal_wait 是在等外部事情（后台任务、CI），不报需要用户', () => {
@@ -95,7 +108,7 @@ describe('结果分类', () => {
     expect(classify(record(), { type: 'turn-completed' }, idle)).toBe('turn-ended');
   });
 
-  it('带目标的会话轮次结束不报 turn-ended，只在暂停时报受阻', () => {
+  it('带目标的会话轮次结束不报 turn-ended，暂停和等待也不当受阻', () => {
     expect(
       classify(record({ goal: 'g' }), { type: 'turn-completed', goalStatus: 'active' }, idle)
     ).toBeNull();
@@ -104,7 +117,10 @@ describe('结果分类', () => {
     ).toBeNull();
     expect(
       classify(record({ goal: 'g' }), { type: 'turn-completed', goalStatus: 'paused' }, idle)
-    ).toBe('goal-blocked');
+    ).toBeNull();
+    expect(
+      classify(record({ goal: 'g' }), { type: 'turn-completed', goalStatus: 'waiting' }, idle)
+    ).toBeNull();
   });
 
   it('目标撤下后轮次结束报 turn-ended，不拿派出时的初始目标兜底', () => {

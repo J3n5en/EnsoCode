@@ -2,6 +2,7 @@ import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agen
 import type { SecretaryDispatchFile, SecretaryUpdate } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
 import {
+  DELIVERY_IDLE_GRACE_MS,
   type DeliveryPorts,
   flushDeliveries,
   recoverDeliveries,
@@ -205,6 +206,8 @@ describe('成功判定与重投', () => {
       expect(h.state.file.outbox).toHaveLength(1);
       now += delay;
       await flushDeliveries(h.ports, now);
+      expect(h.state.prompts).toHaveLength(index + 1);
+      await flushDeliveries(h.ports, now + DELIVERY_IDLE_GRACE_MS);
       expect(h.state.prompts).toHaveLength(index + 2);
     }
     settleDelivery(h.ports, 'sec1', 'failed', now);
@@ -256,5 +259,49 @@ describe('成功判定与重投', () => {
     recoverDeliveries(h.ports, 5000);
     await flushDeliveries(h.ports, 5000);
     expect(h.state.prompts).toHaveLength(1);
+  });
+
+  it('到点时会话刚变空闲先等收口，正常结束不重投同一条', async () => {
+    const h = harness({ file: { outbox: [update()] } });
+    await flushDeliveries(h.ports, 1000);
+    await flushDeliveries(h.ports, 31_000);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.file.inflight?.idleGraceUntil).toBe(31_000 + DELIVERY_IDLE_GRACE_MS);
+    settleDelivery(h.ports, 'sec1', 'done', 31_100);
+    await flushDeliveries(h.ports, 31_000 + DELIVERY_IDLE_GRACE_MS);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('普通更新没到窗口不投，到点后多个会话合成一次', async () => {
+    const h = harness({
+      file: {
+        outbox: [
+          update({ key: 'a', conversationId: 'c1', deliverAt: 5_000 }),
+          update({ key: 'b', conversationId: 'c2', deliverAt: 5_000, text: '另一条' }),
+        ],
+      },
+    });
+    await flushDeliveries(h.ports, 1_000);
+    expect(h.state.prompts).toHaveLength(0);
+    await flushDeliveries(h.ports, 5_000);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0].text).toContain('line');
+    expect(h.state.prompts[0].text).toContain('另一条');
+  });
+
+  it('needs-user 立刻投，并把窗口里还没到点的更新一起带走', async () => {
+    const h = harness({
+      file: {
+        outbox: [
+          update({ key: 'held', deliverAt: 90_000 }),
+          update({ key: 'now', kind: 'needs-user', conversationId: 'c2', text: '要你看' }),
+        ],
+      },
+    });
+    await flushDeliveries(h.ports, 1_000);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0].text).toContain('要你看');
+    expect(h.state.prompts[0].text).toContain('line');
   });
 });

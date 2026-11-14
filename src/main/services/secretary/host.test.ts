@@ -2,6 +2,7 @@ import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { parseProfile } from '@shared/secretary/parse';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type {
+  SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProposal,
   SecretarySchedule,
@@ -60,6 +61,7 @@ interface Harness {
     notifications: { title: string; body: string }[];
     published: number;
     prompts: string[];
+    audit: SecretaryAuditEntry[];
   };
 }
 
@@ -82,6 +84,7 @@ function harness(
     notifications: [],
     published: 0,
     prompts: [],
+    audit: [],
   };
   let seq = 0;
   const ports: SecretaryHostPorts = {
@@ -122,6 +125,9 @@ function harness(
     },
     now: () => state.now,
     newId: () => `id-${++seq}`,
+    audit: (entry) => {
+      state.audit.push(entry);
+    },
   };
   return { ports, host: createSecretaryHost(ports), state };
 }
@@ -172,6 +178,72 @@ describe('派出会话的结果记录', () => {
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.outbox).toEqual([]);
     expect(h.state.file.dispatched.c1).toMatchObject({ turn: 1, lastState: 'idle' });
+    expect(h.state.file.activity).toEqual([
+      expect.objectContaining({ conversationId: 'c1', kind: 'turn-ended' }),
+    ]);
+  });
+
+  it('普通会话的 turn-ended 先攒着，needs-user 和 failed 不推迟', () => {
+    const held = harness({});
+    held.state.statuses.c1 = idle;
+    held.host.onAgentEvent(
+      event('turn-completed', { digest: { assistantText: '先这样' } }),
+      change('idle', 'running')
+    );
+    expect(held.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended', deliverAt: 45_000 });
+    expect(held.state.prompts).toEqual([]);
+
+    const urgent = harness({});
+    urgent.host.onAgentEvent(event('ask-request'), change('waiting', 'running'));
+    expect(urgent.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
+    expect(urgent.state.file.outbox[0]?.deliverAt).toBeUndefined();
+  });
+
+  it('同一会话短时间内的更新合并成最新一条，并记下被合并的那条', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'idle'));
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'failed' });
+    expect(h.state.file.activity?.map((entry) => entry.kind)).toEqual(['turn-ended', 'failed']);
+    expect(h.state.audit).toEqual([
+      expect.objectContaining({
+        op: 'update_coalesced',
+        targetId: 'c1',
+        detail: 'turn-ended -> failed',
+      }),
+    ]);
+  });
+
+  it('静默标记只收系统回传：动态记已查看，用户自己的消息不当静默', () => {
+    const h = harness({});
+    const digest = {
+      firstUserText: '',
+      userText: '<session-updates>\n- [turn-ended session:c1] 结束了\n</session-updates>',
+      assistantText: '<secretary-silent/>',
+    };
+    const silent = {
+      type: 'turn-completed',
+      identity: { sessionId: 'sec1', generation: 'g' },
+      seq: 1,
+      turnId: 't',
+      digest,
+    };
+    h.host.onAgentEvent(silent as unknown as RendererAgentEvent, []);
+    expect(h.state.file.activity).toEqual([
+      expect.objectContaining({ conversationId: 'c1', kind: 'seen', text: '秘书已查看' }),
+    ]);
+    expect(h.state.audit[0]).toMatchObject({ op: 'update_silent' });
+
+    const spoken = harness({});
+    spoken.host.onAgentEvent(
+      { ...silent, digest: { ...digest, userText: '帮我看看' } } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(spoken.state.file.activity ?? []).toEqual([]);
+    expect(spoken.state.audit).toEqual([]);
   });
 
   it('接管来的会话与派出会话一样回传结束、需要用户与失败', () => {
@@ -210,17 +282,23 @@ describe('派出会话的结果记录', () => {
     expect(failed.state.file.dispatched.c1.takeover).toEqual({ grantedAt: 0, via: 'user' });
   });
 
-  it('目标完成与安全限制暂停分别记完成与受阻', () => {
+  it('只有 goal_blocked 记受阻；goal_complete 等轮次结束后才记完成', () => {
     const done = harness({});
     done.state.statuses.c1 = idle;
     done.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(done.state.file.outbox).toEqual([]);
+    done.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(done.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete' });
+
+    const blocked = harness({});
+    blocked.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: '缺凭据' }), []);
+    expect(blocked.state.file.outbox[0]).toMatchObject({ kind: 'goal-blocked' });
 
     const paused = harness({});
     paused.state.rows.c1 = { ...paused.state.rows.c1, goal: { text: 'g', status: 'paused' } };
     paused.state.statuses.c1 = idle;
     paused.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
-    expect(paused.state.file.outbox[0]).toMatchObject({ kind: 'goal-blocked' });
+    expect(paused.state.file.outbox).toEqual([]);
   });
 
   it('目标完成后同一轮结束只留完成，不再补一条 turn-ended', () => {
@@ -266,7 +344,7 @@ describe('派出会话的结果记录', () => {
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.dispatched.c1.lastResult).toMatchObject({
       kind: 'goal-complete',
-      turn: 0,
+      turn: 1,
     });
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.dispatched.c1).toMatchObject({
@@ -311,6 +389,19 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
     h.host.onAgentEvent(event('approval-request'), change('waiting', 'waiting'));
     expect(h.state.file.outbox).toHaveLength(1);
+  });
+
+  it('同一次失败只记一条：status=failed 不抢在 turn-failed 前面再推一次', () => {
+    const h = harness({});
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(event('status', { status: 'failed' }), change('error', 'running'));
+    expect(h.state.file.outbox).toEqual([]);
+    h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'running'));
+    expect(h.state.file.outbox).toHaveLength(1);
+    h.state.file.outbox = [];
+    h.host.onAgentEvent(event('status', { status: 'failed' }), change('error', 'error'));
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 1 });
   });
 
   it('goal_wait 等后台任务、goal 续跑都不记需要用户；真有提问时才记', () => {
@@ -441,6 +532,8 @@ describe('系统通知', () => {
     const withDone = harness({ notify: 'with-done' });
     withDone.state.statuses.c1 = idle;
     withDone.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(withDone.state.notifications).toEqual([]);
+    withDone.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(withDone.state.notifications).toHaveLength(1);
 
     const off = harness({ notify: 'off' });

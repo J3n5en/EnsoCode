@@ -4,6 +4,7 @@ import type {
   DispatchDraft,
   DispatchRecord,
   ProposalStatus,
+  SecretaryActivity,
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryProfileDraft,
@@ -145,6 +146,8 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     notify: oneOf(value.notify, NOTIFY_MODES, 'needs-user'),
     updatedAt: time(value.updatedAt) ?? 0,
   };
+  const updateWindowMs = clampInt(value.updateWindowMs, 1_000, 60_000);
+  if (updateWindowMs !== undefined) profile.updateWindowMs = updateWindowMs;
   const model = parseProfileModel(value.model);
   if (model) profile.model = model;
   const addressAs = text(value.addressAs);
@@ -465,7 +468,8 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
   const key = text(value.key);
   const at = time(value.at);
   if (!key || at === undefined || typeof value.text !== 'string') return undefined;
-  const base = { key, at, text: value.text };
+  const deliverAt = time(value.deliverAt);
+  const base = { key, at, text: value.text, ...(deliverAt !== undefined ? { deliverAt } : {}) };
   const lastText = text(value.lastText);
   const secretaryConversationId = text(value.secretaryConversationId);
   const scope = {
@@ -509,7 +513,21 @@ function parseInflight(value: unknown): SecretaryDispatchFile['inflight'] {
     attempt: clampInt(value.attempt, 1, 6) ?? 1,
     nextAttemptAt: time(value.nextAttemptAt) ?? 0,
     ...(typeof value.settled === 'boolean' ? { settled: value.settled } : {}),
+    ...(time(value.idleGraceUntil) !== undefined
+      ? { idleGraceUntil: time(value.idleGraceUntil) }
+      : {}),
   };
+}
+
+function parseActivity(value: unknown): SecretaryActivity | undefined {
+  if (!isObject(value)) return undefined;
+  const at = time(value.at);
+  const conversationId = text(value.conversationId);
+  const entryText = typeof value.text === 'string' ? value.text : '';
+  if (at === undefined || !conversationId) return undefined;
+  if (value.kind === 'seen') return { at, conversationId, kind: 'seen', text: entryText };
+  if (!RESULT_KINDS.includes(value.kind as SecretaryResultKind)) return undefined;
+  return { at, conversationId, kind: value.kind as SecretaryResultKind, text: entryText };
 }
 
 export function parseDispatchFile(value: unknown): SecretaryDispatchFile {
@@ -542,6 +560,14 @@ export function parseDispatchFile(value: unknown): SecretaryDispatchFile {
   }
   const inflight = parseInflight(value.inflight);
   if (inflight) file.inflight = inflight;
+  if (Array.isArray(value.activity)) {
+    const activity: SecretaryActivity[] = [];
+    for (const item of value.activity) {
+      const entry = parseActivity(item);
+      if (entry) activity.push(entry);
+    }
+    if (activity.length > 0) file.activity = activity.slice(-40);
+  }
   return file;
 }
 

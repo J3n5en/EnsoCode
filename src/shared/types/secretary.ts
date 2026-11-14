@@ -25,6 +25,8 @@ export interface SecretaryProfile {
   style: 'concise' | 'detailed';
   notify: 'needs-user' | 'with-done' | 'off';
   dailyBriefAt?: string;
+  /** 同一会话的普通回传合并窗口，毫秒。缺省 45 秒；可配 1–60 秒 */
+  updateWindowMs?: number;
   updatedAt: number;
 }
 
@@ -170,11 +172,21 @@ export type SecretaryUpdate = {
   /** 最后一轮正文：投递前脱敏并包成不可信内容 */
   lastText?: string;
   secretaryConversationId?: string;
+  /** 非紧急更新到这个时间再投；缺省表示可以立刻投 */
+  deliverAt?: number;
 } & (
   | { kind: SecretaryResultKind; conversationId: string }
   | { kind: 'proposal'; proposalId: string; status: ProposalStatus }
   | { kind: 'schedule'; scheduleId: string }
 );
+
+/** 右侧动态的一条历史：压掉、合并和静默处理的更新都留在这里 */
+export interface SecretaryActivity {
+  at: number;
+  conversationId: string;
+  kind: SecretaryResultKind | 'seen';
+  text: string;
+}
 
 export interface SecretaryDispatchFile {
   version: 1;
@@ -182,6 +194,8 @@ export interface SecretaryDispatchFile {
   named: string[];
   proposals: Record<string, SecretaryProposal>;
   outbox: SecretaryUpdate[];
+  /** 按时间的动态，最多留最近 40 条 */
+  activity?: SecretaryActivity[];
   inflight?: {
     deliveryId: string;
     secretaryConversationId: string;
@@ -189,6 +203,8 @@ export interface SecretaryDispatchFile {
     /** 1..6 */
     attempt: number;
     nextAttemptAt: number;
+    /** 到点且会话刚变空闲时，留给紧随其后的 turn-completed 的窗口；过了才当结束事件丢失重投 */
+    idleGraceUntil?: number;
     settled?: boolean;
   };
 }
@@ -271,6 +287,7 @@ export interface SecretaryBoard {
   running: SecretaryCard[];
   todos: SecretaryTodo[];
   done: SecretaryCard[];
+  activity?: SecretaryActivity[];
 }
 
 /** 会话界面、侧栏与设置页共用的接管清单 */

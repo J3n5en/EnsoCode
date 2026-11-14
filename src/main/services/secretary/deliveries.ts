@@ -1,10 +1,18 @@
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type { SecretaryDispatchFile, SecretaryUpdate } from '@shared/types/secretary';
 import type { SecretarySessionStatus } from './readers';
-import { BATCH_MAX_CHARS, BATCH_MAX_ITEMS, formatSessionUpdates, takeBatch } from './results';
+import {
+  BATCH_MAX_CHARS,
+  BATCH_MAX_ITEMS,
+  dueUpdates,
+  formatSessionUpdates,
+  takeBatch,
+} from './results';
 
 export const RETRY_BASE_MS = 30_000;
 export const MAX_ATTEMPTS = 6;
+/** status=idle 先于 turn-completed。到点时先等收口，避免把正常结束当成丢事件重投同一条 */
+export const DELIVERY_IDLE_GRACE_MS = 2_000;
 
 /** 回传投递用到的 Main 侧能力；全部同步读写，读改写之间不留 await */
 export interface DeliveryPorts {
@@ -126,12 +134,19 @@ interface Group {
   updates: SecretaryUpdate[];
 }
 
-function planGroups(ports: DeliveryPorts): Group[] {
+function planGroups(ports: DeliveryPorts, now: number): Group[] {
   const file = ports.file();
   const inflightKeys = new Set(file.inflight?.keys ?? []);
+  const due = new Set(
+    dueUpdates(
+      file.outbox.filter((update) => !inflightKeys.has(update.key)),
+      now
+    ).map((update) => update.key)
+  );
   const groups = new Map<string, SecretaryUpdate[]>();
   for (const update of file.outbox) {
     if (inflightKeys.has(update.key)) continue;
+    if (!due.has(update.key)) continue;
     const target = resolveTarget(ports, update.secretaryConversationId);
     if (!target) continue;
     const list = groups.get(target);
@@ -173,6 +188,16 @@ async function flushOnce(ports: DeliveryPorts, now: number): Promise<void> {
       }
       return;
     }
+    // 会话还活着才可能有紧跟着的 turn-completed。worker 已经不在就不必等
+    if (pending.idleGraceUntil === undefined && ports.alive(pending.secretaryConversationId)) {
+      const file = ports.file();
+      if (file.inflight) {
+        file.inflight = { ...file.inflight, idleGraceUntil: now + DELIVERY_IDLE_GRACE_MS };
+        ports.save(file);
+      }
+      return;
+    }
+    if (pending.idleGraceUntil !== undefined && now < pending.idleGraceUntil) return;
     // 轮次结束事件丢了（重启等）：批次还在 outbox 里，按原次数重投
     attempt = pending.attempt;
     const file = ports.file();
@@ -180,7 +205,7 @@ async function flushOnce(ports: DeliveryPorts, now: number): Promise<void> {
     ports.save(file);
   }
 
-  for (const group of planGroups(ports)) {
+  for (const group of planGroups(ports, now)) {
     if (ports.status(group.target).state !== 'idle') continue;
     const batch = takeBatch(group.updates, {
       max: BATCH_MAX_ITEMS,

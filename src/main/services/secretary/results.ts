@@ -22,10 +22,13 @@ export const BATCH_MAX_ITEMS = 20;
 export const BATCH_MAX_CHARS = 12_000;
 /** 单条"最后说了什么"的上限：工作台与回传都只需要一句 */
 export const LAST_TEXT_MAX_CHARS = 500;
+/** 同一会话的普通回传先攒着，到点只投最新一条。档案里的 updateWindowMs 可改成 1–60 秒 */
+export const UPDATE_WINDOW_MS = 45_000;
+export const ACTIVITY_LIMIT = 40;
 
 /** worker 事件里与结果分类有关的部分；其余事件只刷新活动时间 */
 export type ResultEvent =
-  | { type: 'turn-completed'; aborted?: boolean; goalStatus?: string }
+  | { type: 'turn-completed'; aborted?: boolean; goalStatus?: string; goalCompleted?: boolean }
   | { type: 'turn-failed'; error?: string }
   | { type: 'worker-exited' }
   | { type: 'goal-signal'; kind: 'complete' | 'blocked' | 'wait' }
@@ -35,9 +38,11 @@ export type ResultEvent =
  * 结果类型判定。会话空闲不等于事情做成了：只有目标信号能说完成，
  * 无目标的轮次结束只能说"它停下了"。
  * 需要用户只看真实挂起的提问与审批：goal_wait 是在等后台任务、CI 等外部事情，不是等用户。
+ * goal-blocked 只认模型调用的 goal_blocked。等后台任务、安全限制暂停、回合结束都不是受阻。
+ * goal_complete 先记下，等这一轮真正结束再报，避免会话还在跑就通知完成。
  */
 export function classify(
-  record: DispatchRecord,
+  _record: DispatchRecord,
   event: ResultEvent,
   status: SecretarySessionStatus
 ): SecretaryResultKind | null {
@@ -46,7 +51,7 @@ export function classify(
     case 'turn-failed':
       return 'failed';
     case 'goal-signal':
-      if (event.kind === 'complete') return 'goal-complete';
+      if (event.kind === 'complete') return null;
       if (event.kind === 'blocked') return 'goal-blocked';
       return status.pendingAsks + status.pendingApprovals > 0 ? 'needs-user' : null;
     case 'needs-user':
@@ -55,14 +60,10 @@ export function classify(
       // 用户亲手中断的轮次不是结果
       if (event.aborted) return null;
       if (status.pendingAsks + status.pendingApprovals > 0) return 'needs-user';
+      if (event.goalCompleted) return 'goal-complete';
       // 目标是否还在只看会话行：派出记录里的 goal 是派出时的初始目标文本，目标完成后仍留着
-      const goal = event.goalStatus;
-      // 目标完成后目标已撤下；host 先把 turn 加一再分类，所以本轮的完成记在 turn - 1
-      const completedThisTurn =
-        record.lastResult?.kind === 'goal-complete' && record.lastResult.turn === record.turn - 1;
-      if (goal === undefined) return completedThisTurn ? null : 'turn-ended';
-      // 完成与受阻由目标信号报过；轮次结束时只有安全限制暂停是新信息
-      return goal === 'paused' ? 'goal-blocked' : null;
+      if (event.goalStatus === undefined) return 'turn-ended';
+      return null;
     }
   }
 }
@@ -108,6 +109,16 @@ export function enqueueUpdate(
       )
     : [...outbox];
   return [...kept, update];
+}
+
+export function isUrgentUpdate(update: { kind: string }): boolean {
+  return update.kind === 'needs-user' || update.kind === 'failed';
+}
+
+/** 有需要你处理或失败时整批立刻走；否则只投已经到点的 */
+export function dueUpdates(updates: readonly SecretaryUpdate[], now: number): SecretaryUpdate[] {
+  if (updates.some((update) => isUrgentUpdate(update))) return [...updates];
+  return updates.filter((update) => update.deliverAt === undefined || update.deliverAt <= now);
 }
 
 export function takeBatch(
@@ -267,6 +278,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     running,
     done,
     todos: input.todos.filter((todo) => todo.doneAt === undefined),
+    ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
   };
 }
 
