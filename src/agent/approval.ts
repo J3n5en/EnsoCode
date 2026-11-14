@@ -143,7 +143,8 @@ export class ApprovalGate {
   ): Promise<ApprovalResult> {
     // 无人值守：不建卡片、不占人。代审能给出结论时仍先问代审（见下方 review 分支），
     // 只有「本来要问人」的路径才落到这里直接拒绝。
-    const wantsHuman = this.mode !== 'assistant' || Boolean(protectedCategory) || mandatory === true;
+    const wantsHuman =
+      this.mode !== 'assistant' || Boolean(protectedCategory) || mandatory === true;
     if (this.autoReject && wantsHuman) return Promise.resolve('no-approver');
     const requestId = `apr-${++this.counter}-${Date.now()}`;
     const info: ApprovalRequestInfo = {

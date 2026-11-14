@@ -71,7 +71,7 @@ vi.mock('./extensionPlugins', async (importOriginal) => ({
         env: {},
       },
     ],
-    toolsForSpawn: (ids?: readonly string[]) => (ids ? [] : []),
+    toolsForSpawn: () => [],
     eventPlanForSpawn: () => null,
     agentTypesForSpawn: () => [],
   }),

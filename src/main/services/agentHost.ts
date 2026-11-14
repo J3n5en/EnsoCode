@@ -1090,8 +1090,9 @@ export function spawnSession(
     ...secretarySkillPaths(secretary),
   ];
   // 秘书不挂插件的 MCP 与 workflow：插件进程与凭据不该为它拉起，workflow 也不在它的能力里
-  const workflowPresetFiles =
-    secretary ? [] : (extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? []);
+  const workflowPresetFiles = secretary
+    ? []
+    : (extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? []);
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of [
