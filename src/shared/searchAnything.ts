@@ -291,6 +291,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     description: 'Name, avatar, model and how much the secretary may do on its own.',
   },
   {
+    id: 'secretary.dispatchLimit',
+    category: 'secretary',
+    title: 'Concurrent dispatch limit',
+    description:
+      'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.',
+  },
+  {
     id: 'secretary.style',
     category: 'secretary',
     title: 'Style and interruptions',

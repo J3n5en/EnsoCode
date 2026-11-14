@@ -365,6 +365,8 @@ describe('秘书初次设置与设置页文案', () => {
       'Always an isolated worktree',
       'Running dispatches at most',
       'Up to {{n}} at a time',
+      'Concurrent dispatch limit',
+      'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.',
       'Confirm',
       'Edit here',
       'Profile saved',

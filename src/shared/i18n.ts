@@ -3430,6 +3430,9 @@ export const zhTranslations: Record<string, string> = {
   'Always an isolated worktree': '总是开 worktree',
   'Running dispatches at most': '进行中派出会话上限',
   'Up to {{n}} at a time': '最多同时 {{n}} 个',
+  'Concurrent dispatch limit': '同时运行的派发会话上限',
+  'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.':
+    '秘书最多同时运行几个派发会话，超过上限时新派发会被拒绝。',
   Confirm: '确认',
   'Edit here': '就地修改',
   'Profile saved': '配置已保存',
