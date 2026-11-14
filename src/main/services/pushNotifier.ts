@@ -37,7 +37,8 @@ export function buildPushPayload(
     request?: Partial<ApprovalRequestInfo>;
   },
   sessionTitle: string | undefined,
-  notifyMainAgentOnly = true
+  notifyMainAgentOnly = true,
+  muted = false
 ): PushPayload | null {
   if (shouldMuteCoworkerCompletionNotification(event, notifyMainAgentOnly)) return null;
   // 代审中（reviewing）的审批可能由代审模型直接放行，不打扰真人；
@@ -47,6 +48,7 @@ export function buildPushPayload(
   if (!title) return null;
   const sessionId = event.identity?.sessionId ?? event.sessionId;
   if (!sessionId) return null;
+  if (muted) return null;
   return { title, body: sessionTitle || '会话', sessionId };
 }
 

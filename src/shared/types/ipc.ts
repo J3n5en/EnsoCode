@@ -213,6 +213,8 @@ export const IPC_CHANNELS = {
   NOTIFICATION_FOCUS_SESSION: 'notification:focus-session',
   /** renderer → main：上报当前正在查看的会话，供系统通知抑制判断 */
   NOTIFICATION_ACTIVE_SESSION: 'notification:active-session',
+  /** renderer → main：会话静音立即生效（落盘前也不推送）。走 agent: 前缀，远端界面可以同步 */
+  AGENT_SESSION_MUTED: 'agent:session-muted',
   AGENT_TASK_STOP: 'agent:task-stop',
   /** 把运行中的前台命令移交为后台任务 */
   AGENT_TOOL_BACKGROUND: 'agent:tool-background',

@@ -15,6 +15,7 @@ import { readSettings } from '../../ipc/settings';
 import { setNativeAgentTypeSource } from '../pluginRuntime';
 import { remoteLeaderId } from '../remoteRenderer/senders';
 import { broadcastToRenderers, localMainContents, rendererById } from '../renderers';
+import { isSessionMuted } from '../sessionMuteGate';
 import { BUILTIN_MARKET } from './builtinMarket';
 import { DraftBroker } from './draftBroker';
 import type { GateDeps } from './gate';
@@ -159,6 +160,7 @@ export function getExtensionPlugins(): ExtensionPluginService {
         notification.show({ title, body });
         return true;
       },
+      sessionMuted: (sessionId) => isSessionMuted(sessionId),
       viewEvent: (pluginId, name, data) => {
         broadcastToRenderers(IPC_CHANNELS.EXTENSION_PLUGINS_VIEW_EVENT, { pluginId, name, data });
       },

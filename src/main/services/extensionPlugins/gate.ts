@@ -98,6 +98,8 @@ export interface GateDeps {
   fetch(url: string, init: RequestInit): Promise<Response>;
   /** 不支持系统通知时返回 false */
   notify(title: string, body: string): boolean;
+  /** 发起会话已静音时，ui.notify 直接成功但不弹系统通知 */
+  sessionMuted?(sessionId: string): boolean;
   composer(
     target: ComposerTarget,
     op: ComposerOp,
@@ -461,6 +463,8 @@ export class PluginHostGate {
         if (typeof a.title !== 'string' || a.title.length === 0 || a.title.length > 200)
           throw pluginError('INVALID_ARGS', 'title 不合法');
         const body = typeof a.body === 'string' ? a.body.slice(0, 1000) : '';
+        const sessionId = this.invocations.get(invocationId)?.sessionId;
+        if (sessionId && this.deps.sessionMuted?.(sessionId)) return null;
         if (!this.deps.notify(a.title, body))
           throw pluginError('UNSUPPORTED', '当前环境不支持系统通知');
         return null;
