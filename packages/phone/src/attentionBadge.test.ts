@@ -19,6 +19,15 @@ describe('attentionBadgeCount', () => {
     expect(attentionBadgeCount([{ pendingAskCount: 0, pendingApprovalCount: 0 }])).toBe(0);
     expect(attentionBadgeCount([{ pendingAskCount: -2, pendingApprovalCount: 1.8 }])).toBe(1);
   });
+
+  it('静音会话不计入主屏幕角标，未静音的仍计入', () => {
+    expect(
+      attentionBadgeCount([
+        { pendingAskCount: 2, pendingApprovalCount: 1, muted: true },
+        { pendingApprovalCount: 1 },
+      ])
+    ).toBe(1);
+  });
 });
 
 describe('applyAppBadge', () => {

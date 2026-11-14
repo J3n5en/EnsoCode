@@ -73,4 +73,15 @@ describe('buildPushPayload', () => {
       sessionId: 's1::cw-bob',
     });
   });
+
+  it('静音会话不推送，取消静音后提问和完成都恢复', () => {
+    expect(buildPushPayload({ type: 'ask-request', identity }, '修复登录', true, true)).toBeNull();
+    expect(
+      buildPushPayload({ type: 'turn-completed', identity }, '修复登录', true, true)
+    ).toBeNull();
+    expect(buildPushPayload({ type: 'turn-failed', identity }, '修复登录', true, true)).toBeNull();
+    expect(
+      buildPushPayload({ type: 'ask-request', identity }, '修复登录', true, false)?.title
+    ).toBe('等待你的回答');
+  });
 });

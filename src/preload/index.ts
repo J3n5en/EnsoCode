@@ -1031,6 +1031,9 @@ const electronAPI = {
     /** 上报当前正在查看的会话（null = 没在看任何会话），供 main 抑制重复的系统通知 */
     setViewedSession: (sessionId: string | null): void =>
       ipcRenderer.send(IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION, sessionId),
+    /** 会话静音立即告诉 main。持久化仍走会话 store */
+    setSessionMuted: (sessionId: string, muted: boolean): void =>
+      ipcRenderer.send(IPC_CHANNELS.AGENT_SESSION_MUTED, sessionId, muted),
     /** 系统通知点击后由 main 下发：切到对应会话 */
     onFocusSession: (callback: (sessionId: string) => void): (() => void) => {
       const listener = (_: unknown, sessionId: string) => callback(sessionId);

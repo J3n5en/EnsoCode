@@ -279,6 +279,8 @@ export interface Conversation extends SessionProjection {
   archived?: boolean;
   /** 归档时刻；清理「N 天前已归档」用。取消归档时清掉 */
   archivedAt?: number;
+  /** 静音：不再发系统通知、提示音和配对推送。随 partialize 持久化；归档或删除时清掉 */
+  muted?: boolean;
   /**
    * 最后活跃时刻（最后一条消息的 timestamp）。partialize 剥离 messages 前写入，
    * 重启后侧栏排序靠它——否则回落 createdAt，「昨晚建、今早用」的会话会掉序消失
@@ -426,6 +428,8 @@ interface SessionsState {
   removeConversation(id: string): void;
   /** 切换会话置顶 */
   togglePinConversation(id: string): void;
+  /** 切换会话静音：只停推送和系统通知 */
+  toggleMuteConversation(id: string): void;
   /** 手动改会话标题（侧栏 / tab 双击或右键） */
   renameConversation(id: string, title: string): void;
   /** 标题总结失败后手动重试（侧栏红叹号）：有最近回合 digest 走 rolling，否则退 initial */
@@ -646,6 +650,19 @@ const patch = (
   if (!current) return { conversations: state.conversations };
   return { conversations: { ...state.conversations, [id]: { ...current, ...updates } } };
 };
+
+function publishSessionMuted(id: string, muted: boolean): void {
+  window.electronAPI.agent.setSessionMuted?.(id, muted);
+}
+
+function archivedFlags(now: number) {
+  return {
+    archived: true as const,
+    archivedAt: now,
+    pinned: undefined,
+    muted: undefined,
+  };
+}
 
 export const useSessionsStore = create<SessionsState>()(
   persist(
@@ -2793,6 +2810,14 @@ export const useSessionsStore = create<SessionsState>()(
           });
         },
 
+        toggleMuteConversation(id) {
+          const conversation = get().conversations[id];
+          if (!conversation || conversation.parentId) return;
+          const muted = conversation.muted !== true;
+          set((state) => patch(state, id, { muted: muted ? true : undefined }));
+          publishSessionMuted(id, muted);
+        },
+
         renameConversation(id, title) {
           const next = title.trim().slice(0, 80);
           if (!next) return;
@@ -2870,13 +2895,15 @@ export const useSessionsStore = create<SessionsState>()(
         },
 
         toggleArchiveConversation(id) {
-          set((state) => {
-            const conversation = state.conversations[id];
-            if (!conversation) return state;
-            return conversation.archived === true
-              ? patch(state, id, { archived: undefined, archivedAt: undefined })
-              : patch(state, id, { archived: true, pinned: undefined, archivedAt: Date.now() });
-          });
+          const conversation = get().conversations[id];
+          if (!conversation) return;
+          const archiving = conversation.archived !== true;
+          set((state) =>
+            archiving
+              ? patch(state, id, archivedFlags(Date.now()))
+              : patch(state, id, { archived: undefined, archivedAt: undefined })
+          );
+          if (archiving) publishSessionMuted(id, false);
         },
 
         async autoArchiveStaleConversations(now = Date.now()) {
@@ -2895,15 +2922,10 @@ export const useSessionsStore = create<SessionsState>()(
           });
           if (ids.length === 0) return;
           const archive = (id: string) => {
-            set((state) => {
-              const conversation = state.conversations[id];
-              if (!conversation || conversation.archived === true) return state;
-              return patch(state, id, {
-                archived: true,
-                archivedAt: now,
-                pinned: undefined,
-              });
-            });
+            const conversation = get().conversations[id];
+            if (!conversation || conversation.archived === true) return;
+            set((state) => patch(state, id, archivedFlags(now)));
+            publishSessionMuted(id, false);
           };
           const plain: string[] = [];
           const isolated: string[] = [];
@@ -2923,11 +2945,16 @@ export const useSessionsStore = create<SessionsState>()(
                   archived: true,
                   archivedAt: now,
                   pinned: undefined,
+                  muted: undefined,
                 };
                 changed = true;
               }
               return changed ? { conversations: next } : state;
             });
+            for (const id of plain) {
+              if (conversations[id]?.archived === true) continue;
+              publishSessionMuted(id, false);
+            }
           }
           for (const id of isolated) {
             const conversation = get().conversations[id];
@@ -2992,6 +3019,7 @@ export const useSessionsStore = create<SessionsState>()(
           } else if (conversation.started && conversation.status === 'running') {
             void window.electronAPI.agent.abort(id);
           }
+          publishSessionMuted(id, false);
           if (!conversation.parentId) {
             void purgeConversationAuthority(window.electronAPI.sourceAuthority, id, () =>
               crypto.randomUUID()

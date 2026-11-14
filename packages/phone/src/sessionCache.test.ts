@@ -108,6 +108,7 @@ const data = (
       pendingAskCount: 0,
       updatedAt: 123,
       pendingApprovalCount: 2,
+      muted: true,
       queued: [{ id: 'q1', text: 'later' }],
       goal: { text: 'ship', status: 'active', autoTurns: 1 },
       slashCommands: [{ name: 'review', description: 'Review changes' }],
@@ -167,6 +168,7 @@ describe('phone session cache', () => {
       compaction: 'queued',
     });
     expect(a?.catalog[0]?.pendingApprovalCount).toBe(2);
+    expect(a?.catalog[0]?.muted).toBe(true);
     expect(a?.catalog[0]?.context).toEqual(rich.catalog[0]?.context);
     expect(a?.catalog[0]?.usageTotals).toEqual(rich.catalog[0]?.usageTotals);
     expect(b?.sessions[0]?.id).toBe('b');
