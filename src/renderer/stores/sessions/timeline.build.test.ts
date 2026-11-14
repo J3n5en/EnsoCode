@@ -1,3 +1,4 @@
+import { SILENT_MARKER } from '@shared/secretary/silence';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import type { TimelineMessage } from './reducer';
@@ -11,6 +12,27 @@ import {
 import { user } from './timeline.testUtils';
 
 describe('buildTimeline', () => {
+  it('静默回传不进时间线，用户自己的消息照样显示', () => {
+    const updates = '<session-updates>\n- [turn-ended session:c1] 结束了\n</session-updates>';
+    const timeline = buildTimeline(
+      [
+        user('你好'),
+        { role: 'assistant', content: [{ type: 'text', text: '在' }] },
+        user(updates),
+        { role: 'assistant', content: [{ type: 'text', text: SILENT_MARKER }] },
+      ],
+      false
+    );
+    expect(timeline.map((item) => (item.kind === 'user' ? item.text : item.kind))).toEqual([
+      '你好',
+      'text',
+    ]);
+    expect(timeline.some((item) => item.kind === 'text' && item.text === '在')).toBe(true);
+    expect(timeline.some((item) => 'text' in item && item.text.includes('session-updates'))).toBe(
+      false
+    );
+  });
+
   it('toolResult 折进对应 toolCall 条目，不单独成行', () => {
     const timeline = buildTimeline(
       [

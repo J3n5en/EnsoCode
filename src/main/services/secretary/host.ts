@@ -1,9 +1,12 @@
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { projectNameFromPath } from '@shared/projectName';
 import { transitionProposal } from '@shared/secretary/policy';
+import { sessionIdsInUpdates, shouldSilenceTurn } from '@shared/secretary/silence';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type {
   DispatchRecord,
+  SecretaryActivity,
+  SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryResultKind,
@@ -19,13 +22,16 @@ import {
 } from './deliveries';
 import type { SecretarySessionStatus } from './readers';
 import {
+  ACTIVITY_LIMIT,
   capLastText,
   classify,
   enqueueUpdate,
+  isUrgentUpdate,
   proposalUpdate,
   type ResultEvent,
   shouldNotify,
   stalled,
+  UPDATE_WINDOW_MS,
   updateKey,
 } from './results';
 import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
@@ -51,6 +57,7 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   notify(build: (lang: 'zh' | 'en') => { title: string; body: string }): void;
   publish(): void;
   now(): number;
+  audit?(entry: SecretaryAuditEntry): void;
 }
 
 export interface SecretaryHost {
@@ -123,8 +130,30 @@ function deliveryOutcome(event: RendererAgentEvent): 'done' | 'failed' | null {
 
 export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let timer: ReturnType<typeof setInterval> | null = null;
+  let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
+  let coalesceAt: number | undefined;
   /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
   const pendingComplete = new Set<string>();
+
+  function remember(file: SecretaryDispatchFile, entry: SecretaryActivity): void {
+    file.activity = [...(file.activity ?? []), entry].slice(-ACTIVITY_LIMIT);
+  }
+
+  function armCoalesce(at: number, now: number): void {
+    if (coalesceAt !== undefined && coalesceAt <= at) return;
+    if (coalesceTimer) clearTimeout(coalesceTimer);
+    coalesceAt = at;
+    // 测试里逻辑时钟和真实时钟会差很远，延迟最多一个窗口，避免 setTimeout 溢出
+    coalesceTimer = setTimeout(
+      () => {
+        coalesceTimer = null;
+        coalesceAt = undefined;
+        flush(ports.now());
+      },
+      Math.min(60_000, Math.max(0, at - now))
+    );
+    coalesceTimer.unref?.();
+  }
 
   function recordUpdate(
     record: DispatchRecord,
@@ -164,7 +193,34 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
     const update = recordUpdate(record, kind, now);
+    const previous = file.outbox.find(
+      (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
+    );
+    if (!isUrgentUpdate(update)) {
+      const held = previous?.deliverAt;
+      update.deliverAt =
+        held !== undefined && held > now
+          ? held
+          : now + (ports.profile()?.updateWindowMs ?? UPDATE_WINDOW_MS);
+      armCoalesce(update.deliverAt, now);
+    }
+    if (previous && previous.key !== update.key) {
+      ports.audit?.({
+        at: now,
+        secretaryConversationId: record.secretaryConversationId,
+        op: 'update_coalesced',
+        targetId: record.conversationId,
+        ok: true,
+        detail: `${previous.kind} -> ${kind}`,
+      });
+    }
     file.outbox = enqueueUpdate(file.outbox, update);
+    remember(file, {
+      at: now,
+      conversationId: record.conversationId,
+      kind,
+      text: record.lastText || update.text,
+    });
     notifyResult(update, kind);
   }
 
@@ -256,6 +312,46 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           else if (change.state === 'waiting' && change.previous !== 'waiting') kind = 'needs-user';
         }
         if (kind) recordResult(file, record, kind, now);
+        else if (
+          own &&
+          event.type === 'turn-completed' &&
+          !event.aborted &&
+          goalStatusOf(rows[conversationId])
+        ) {
+          // 带目标的一轮结束本身不推给秘书，动态里仍按时间留一句
+          remember(file, {
+            at: now,
+            conversationId,
+            kind: 'turn-ended',
+            text: record.lastText || '这一轮结束了',
+          });
+        }
+        changed = true;
+      }
+
+      if (
+        event.type === 'turn-completed' &&
+        !event.aborted &&
+        event.digest &&
+        shouldSilenceTurn(event.digest.userText, event.digest.assistantText)
+      ) {
+        const ids = sessionIdsInUpdates(event.digest.userText);
+        for (const conversationId of ids) {
+          if (!file.dispatched[conversationId]) continue;
+          remember(file, {
+            at: now,
+            conversationId,
+            kind: 'seen',
+            text: '秘书已查看',
+          });
+        }
+        ports.audit?.({
+          at: now,
+          secretaryConversationId: sessionId ?? null,
+          op: 'update_silent',
+          ok: true,
+          ...(ids.length > 0 ? { detail: ids.join(',') } : {}),
+        });
         changed = true;
       }
 
@@ -339,6 +435,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (!timer) return;
       clearInterval(timer);
       timer = null;
+      if (coalesceTimer) clearTimeout(coalesceTimer);
+      coalesceTimer = null;
+      coalesceAt = undefined;
     },
   };
   return host;

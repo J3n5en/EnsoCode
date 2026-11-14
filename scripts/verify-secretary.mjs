@@ -1509,6 +1509,10 @@ async function run(cdp, pluginZipUrl) {
   assert(todoPersisted?.title === todoText, 'step10: 落盘的会话行标题也是待办文本', todoPersisted);
 
   log('== step11 等后台任务不误报，完成只在结束后推一次');
+  const profilePath = path.join(ENV, 'secretary', 'profile.json');
+  const profile = readJson(profilePath);
+  profile.updateWindowMs = 1000;
+  writeFileSync(profilePath, JSON.stringify(profile));
   const bgDispatch = await dispatchConfirmed(
     `[[tool:session_create ${JSON.stringify({
       projectId: setup.projectId,
@@ -1606,11 +1610,126 @@ async function run(cdp, pluginZipUrl) {
     'step11: goal-complete 只在会话结束后出现',
     { completeRecord, completeWhileRunning }
   );
-  await delay(2500);
+  const completeSeen = await waitFor(
+    () => secretarySaw(completeDispatch.secretaryId, completeId, 'goal-complete'),
+    'secretary saw goal-complete',
+    20_000,
+    300
+  ).catch(() => false);
+  assert(completeSeen, 'step11: 完成后秘书收到更新', completeId);
+  await delay(1500);
   assert(
     (await secretaryCount(completeDispatch.secretaryId, completeId, 'goal-complete')) === 1,
     'step11: goal-complete 只推一次',
     await secretaryCount(completeDispatch.secretaryId, completeId, 'goal-complete')
+  );
+
+  log('== step12 目标会话的中间轮不打扰，完成时才开口');
+  const quietDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '连续检查几轮',
+      title: '连续验收',
+    })}]]`,
+    { goal: '把检查做完。先不要调用 goal_complete 或 goal_blocked' }
+  );
+  assert(quietDispatch.ok, 'step12: 连续跑的目标会话建成', quietDispatch);
+  const quietId = quietDispatch.conversationId;
+  const quietTurns = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[quietId];
+      return record?.turn >= 3 ? record : null;
+    },
+    'goal session ran several turns',
+    60_000,
+    400
+  ).catch(() => null);
+  assert(quietTurns?.turn >= 3, 'step12: 目标会话连续跑了几轮', quietTurns);
+  assert(
+    !(await secretarySaw(quietDispatch.secretaryId, quietId, 'turn-ended')) &&
+      !(await secretarySaw(quietDispatch.secretaryId, quietId, 'failed')) &&
+      !(await secretarySaw(quietDispatch.secretaryId, quietId, 'goal-blocked')),
+    'step12: 中间轮没有推进秘书聊天',
+    quietId
+  );
+  const quietFeed = await page(`
+    const secretary = await SEC();
+    const board = secretary.getState().secretary.board;
+    const activity = (board.activity ?? []).filter((entry) => entry.conversationId === ${JSON.stringify(quietId)});
+    const cards = [...board.running, ...board.done, ...board.needsYou].filter(
+      (card) => card.kind === 'session' && card.conversationId === ${JSON.stringify(quietId)}
+    );
+    return JSON.stringify({ activity: activity.length, cards: cards.length, title: cards[0]?.title ?? null });
+  `);
+  assert(quietFeed.activity >= 1 && quietFeed.cards === 1, 'step12: 动态里能看到这几轮', quietFeed);
+
+  const bgQuiet = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '把检查放到后台',
+      title: '后台别打扰',
+    })}]]`,
+    { goal: '先放后台再等 [[tool:bash {"command":"sleep 8","background":true}]]' }
+  );
+  assert(bgQuiet.ok, 'step12: 等后台任务的目标会话建成', bgQuiet);
+  const bgQuietId = bgQuiet.conversationId;
+  const bgQuietSettled = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[bgQuietId];
+      return record?.turn >= 1 && (record.lastState === 'idle' || record.lastState === 'error')
+        ? record
+        : null;
+    },
+    'background goal turn settled',
+    60_000,
+    400
+  ).catch(() => null);
+  assert(
+    bgQuietSettled?.lastState === 'idle',
+    'step12: 等后台任务没有把会话打成 error',
+    bgQuietSettled
+  );
+  assert(
+    !(await secretarySaw(bgQuiet.secretaryId, bgQuietId, 'turn-ended')) &&
+      !(await secretarySaw(bgQuiet.secretaryId, bgQuietId, 'failed')),
+    'step12: 等后台任务的那一轮没有推给秘书',
+    bgQuietId
+  );
+
+  const doneDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '收尾',
+      title: '合并后开口',
+    })}]]`,
+    { goal: '收尾 [[tool:goal_complete {"summary":"step12 做完了"}]]' }
+  );
+  assert(doneDispatch.ok, 'step12: 会完成的目标会话建成', doneDispatch);
+  const doneId = doneDispatch.conversationId;
+  const doneSeen = await waitFor(
+    () => secretarySaw(doneDispatch.secretaryId, doneId, 'goal-complete'),
+    'secretary saw goal-complete',
+    30_000,
+    300
+  ).catch(() => false);
+  assert(doneSeen, 'step12: 完成后秘书收到更新', doneId);
+  const doneReply = await page(`
+    const messages = S().conversations[${JSON.stringify(doneDispatch.secretaryId)}]?.messages ?? [];
+    const body = (message) =>
+      (Array.isArray(message?.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    const hit = messages.findIndex((message) =>
+      body(message).includes(${JSON.stringify(`[goal-complete session:${doneId}]`)})
+    );
+    const reply = messages.slice(hit + 1).find((message) => message.role === 'assistant');
+    return JSON.stringify({ reply: reply ? body(reply) : null });
+  `);
+  assert(
+    Boolean(doneReply.reply) && !doneReply.reply.includes('<secretary-silent/>'),
+    'step12: 完成后秘书正常回复',
+    doneReply
   );
 
   log('== 插件：勾选后才进秘书会话');

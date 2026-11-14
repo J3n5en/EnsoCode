@@ -1,7 +1,13 @@
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type { SecretaryDispatchFile, SecretaryUpdate } from '@shared/types/secretary';
 import type { SecretarySessionStatus } from './readers';
-import { BATCH_MAX_CHARS, BATCH_MAX_ITEMS, formatSessionUpdates, takeBatch } from './results';
+import {
+  BATCH_MAX_CHARS,
+  BATCH_MAX_ITEMS,
+  dueUpdates,
+  formatSessionUpdates,
+  takeBatch,
+} from './results';
 
 export const RETRY_BASE_MS = 30_000;
 export const MAX_ATTEMPTS = 6;
@@ -128,12 +134,19 @@ interface Group {
   updates: SecretaryUpdate[];
 }
 
-function planGroups(ports: DeliveryPorts): Group[] {
+function planGroups(ports: DeliveryPorts, now: number): Group[] {
   const file = ports.file();
   const inflightKeys = new Set(file.inflight?.keys ?? []);
+  const due = new Set(
+    dueUpdates(
+      file.outbox.filter((update) => !inflightKeys.has(update.key)),
+      now
+    ).map((update) => update.key)
+  );
   const groups = new Map<string, SecretaryUpdate[]>();
   for (const update of file.outbox) {
     if (inflightKeys.has(update.key)) continue;
+    if (!due.has(update.key)) continue;
     const target = resolveTarget(ports, update.secretaryConversationId);
     if (!target) continue;
     const list = groups.get(target);
@@ -192,7 +205,7 @@ async function flushOnce(ports: DeliveryPorts, now: number): Promise<void> {
     ports.save(file);
   }
 
-  for (const group of planGroups(ports)) {
+  for (const group of planGroups(ports, now)) {
     if (ports.status(group.target).state !== 'idle') continue;
     const batch = takeBatch(group.updates, {
       max: BATCH_MAX_ITEMS,

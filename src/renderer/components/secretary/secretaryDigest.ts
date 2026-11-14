@@ -1,4 +1,5 @@
 import type {
+  SecretaryActivity,
   SecretaryBoard,
   SecretaryCard,
   SecretaryProposal,
@@ -115,15 +116,36 @@ function proposalEvent(card: Extract<SecretaryCard, { kind: 'proposal' }>): Feed
   };
 }
 
+function activityEvent(entry: SecretaryActivity, card: SessionCard | undefined): FeedEvent {
+  const feed =
+    entry.kind === 'seen'
+      ? { tone: 'idle' as const, label: 'Secretary saw this' }
+      : RESULT_FEED[entry.kind];
+  return {
+    id: `activity:${entry.conversationId}:${entry.at}:${entry.kind}`,
+    at: entry.at,
+    tone: feed.tone,
+    projectName: card?.projectName ?? '',
+    title: card?.title || entry.conversationId,
+    label: feed.label,
+    ...(entry.text ? { detail: entry.text } : {}),
+    conversationId: entry.conversationId,
+  };
+}
+
 /** 工作台首屏与侧栏摘要共用的纯投影：问候、今日战报、计数与动态时间线 */
 export function secretaryDigest(board: SecretaryBoard, now: number): SecretaryDigest {
   const sessions = [...board.needsYou, ...board.running, ...board.done].filter(
     (card): card is SessionCard => card.kind === 'session'
   );
+  const cards = new Map(sessions.map((card) => [card.conversationId, card]));
   const dayStart = startOfDay(now);
   const today = sessions.filter((card) => (card.resultAt ?? 0) >= dayStart);
   const events = [...board.needsYou, ...board.running, ...board.done]
     .map((card) => (card.kind === 'proposal' ? proposalEvent(card) : sessionEvent(card)))
+    .concat(
+      (board.activity ?? []).map((entry) => activityEvent(entry, cards.get(entry.conversationId)))
+    )
     .sort((left, right) => right.at - left.at || left.id.localeCompare(right.id));
 
   return {

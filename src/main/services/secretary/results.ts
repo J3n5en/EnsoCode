@@ -22,6 +22,9 @@ export const BATCH_MAX_ITEMS = 20;
 export const BATCH_MAX_CHARS = 12_000;
 /** 单条"最后说了什么"的上限：工作台与回传都只需要一句 */
 export const LAST_TEXT_MAX_CHARS = 500;
+/** 同一会话的普通回传先攒着，到点只投最新一条。档案里的 updateWindowMs 可改成 1–60 秒 */
+export const UPDATE_WINDOW_MS = 45_000;
+export const ACTIVITY_LIMIT = 40;
 
 /** worker 事件里与结果分类有关的部分；其余事件只刷新活动时间 */
 export type ResultEvent =
@@ -106,6 +109,16 @@ export function enqueueUpdate(
       )
     : [...outbox];
   return [...kept, update];
+}
+
+export function isUrgentUpdate(update: { kind: string }): boolean {
+  return update.kind === 'needs-user' || update.kind === 'failed';
+}
+
+/** 有需要你处理或失败时整批立刻走；否则只投已经到点的 */
+export function dueUpdates(updates: readonly SecretaryUpdate[], now: number): SecretaryUpdate[] {
+  if (updates.some((update) => isUrgentUpdate(update))) return [...updates];
+  return updates.filter((update) => update.deliverAt === undefined || update.deliverAt <= now);
 }
 
 export function takeBatch(
@@ -265,6 +278,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     running,
     done,
     todos: input.todos.filter((todo) => todo.doneAt === undefined),
+    ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
   };
 }
 

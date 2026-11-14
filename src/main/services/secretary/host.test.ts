@@ -2,6 +2,7 @@ import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { parseProfile } from '@shared/secretary/parse';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type {
+  SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProposal,
   SecretarySchedule,
@@ -60,6 +61,7 @@ interface Harness {
     notifications: { title: string; body: string }[];
     published: number;
     prompts: string[];
+    audit: SecretaryAuditEntry[];
   };
 }
 
@@ -82,6 +84,7 @@ function harness(
     notifications: [],
     published: 0,
     prompts: [],
+    audit: [],
   };
   let seq = 0;
   const ports: SecretaryHostPorts = {
@@ -122,6 +125,9 @@ function harness(
     },
     now: () => state.now,
     newId: () => `id-${++seq}`,
+    audit: (entry) => {
+      state.audit.push(entry);
+    },
   };
   return { ports, host: createSecretaryHost(ports), state };
 }
@@ -172,6 +178,72 @@ describe('派出会话的结果记录', () => {
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.outbox).toEqual([]);
     expect(h.state.file.dispatched.c1).toMatchObject({ turn: 1, lastState: 'idle' });
+    expect(h.state.file.activity).toEqual([
+      expect.objectContaining({ conversationId: 'c1', kind: 'turn-ended' }),
+    ]);
+  });
+
+  it('普通会话的 turn-ended 先攒着，needs-user 和 failed 不推迟', () => {
+    const held = harness({});
+    held.state.statuses.c1 = idle;
+    held.host.onAgentEvent(
+      event('turn-completed', { digest: { assistantText: '先这样' } }),
+      change('idle', 'running')
+    );
+    expect(held.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended', deliverAt: 45_000 });
+    expect(held.state.prompts).toEqual([]);
+
+    const urgent = harness({});
+    urgent.host.onAgentEvent(event('ask-request'), change('waiting', 'running'));
+    expect(urgent.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
+    expect(urgent.state.file.outbox[0]?.deliverAt).toBeUndefined();
+  });
+
+  it('同一会话短时间内的更新合并成最新一条，并记下被合并的那条', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'idle'));
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'failed' });
+    expect(h.state.file.activity?.map((entry) => entry.kind)).toEqual(['turn-ended', 'failed']);
+    expect(h.state.audit).toEqual([
+      expect.objectContaining({
+        op: 'update_coalesced',
+        targetId: 'c1',
+        detail: 'turn-ended -> failed',
+      }),
+    ]);
+  });
+
+  it('静默标记只收系统回传：动态记已查看，用户自己的消息不当静默', () => {
+    const h = harness({});
+    const digest = {
+      firstUserText: '',
+      userText: '<session-updates>\n- [turn-ended session:c1] 结束了\n</session-updates>',
+      assistantText: '<secretary-silent/>',
+    };
+    const silent = {
+      type: 'turn-completed',
+      identity: { sessionId: 'sec1', generation: 'g' },
+      seq: 1,
+      turnId: 't',
+      digest,
+    };
+    h.host.onAgentEvent(silent as unknown as RendererAgentEvent, []);
+    expect(h.state.file.activity).toEqual([
+      expect.objectContaining({ conversationId: 'c1', kind: 'seen', text: '秘书已查看' }),
+    ]);
+    expect(h.state.audit[0]).toMatchObject({ op: 'update_silent' });
+
+    const spoken = harness({});
+    spoken.host.onAgentEvent(
+      { ...silent, digest: { ...digest, userText: '帮我看看' } } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(spoken.state.file.activity ?? []).toEqual([]);
+    expect(spoken.state.audit).toEqual([]);
   });
 
   it('接管来的会话与派出会话一样回传结束、需要用户与失败', () => {

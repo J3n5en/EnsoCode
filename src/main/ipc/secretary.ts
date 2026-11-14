@@ -222,6 +222,7 @@ const hostPorts: SecretaryHostPorts = {
   publish: () => broadcastState(),
   now: () => Date.now(),
   newId: () => randomUUID(),
+  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
 };
 
 function parseGoalAction(

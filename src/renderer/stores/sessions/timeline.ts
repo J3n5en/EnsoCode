@@ -5,6 +5,7 @@ import { IMAGE_EXTENSIONS, mediaExtension } from '@shared/localImage';
 import { type MaskReport, mergeMaskReports } from '@shared/privacyMask/report';
 import { firstProgram, isReadOnlyCommand } from '@shared/readOnlyCommand';
 import type { RtkToolStats } from '@shared/rtk';
+import { silentMessageIndexes } from '@shared/secretary/silence';
 import { nestedToolCallParent } from '@shared/toolCallId';
 import type {
   AgentSessionCustomEntry,
@@ -956,7 +957,9 @@ function buildMessageTimeline(
   let turnUserTimestamp: number | undefined;
   let turnHadAskUser = false;
   let currentTurnUserItem: Extract<TimelineItem, { kind: 'user' }> | undefined;
+  const silent = new Set(silentMessageIndexes(messages));
   messages.forEach((message, messageIndex) => {
+    if (silent.has(messageIndex)) return;
     const isLastMessage = messageIndex === lastMessageIndex;
     const absIndex = historyBaseIndex + messageIndex;
     // 本地气泡不是 worker 的新轮次，不能截断前一轮的计时、流式和工具状态。

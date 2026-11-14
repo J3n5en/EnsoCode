@@ -152,6 +152,22 @@ describe('secretaryDigest', () => {
     });
   });
 
+  it('压掉和静默的更新按时间出现在动态里', () => {
+    const digest = secretaryDigest(
+      board({
+        running: [session('c1', { state: 'running', title: '验收' })],
+        activity: [
+          { at: NOW - 1000, conversationId: 'c1', kind: 'turn-ended', text: '第 2 轮在跑' },
+          { at: NOW, conversationId: 'c1', kind: 'seen', text: '秘书已查看' },
+        ],
+      }),
+      NOW
+    );
+    const activity = digest.events.filter((event) => event.id.startsWith('activity:'));
+    expect(activity.map((event) => event.label)).toEqual(['Secretary saw this', 'Turn ended']);
+    expect(activity[1]).toMatchObject({ title: '验收', detail: '第 2 轮在跑' });
+  });
+
   it('待确认提案进动态，标题优先用草案标题，其次提示词首行', () => {
     const titled = proposal();
     const untitled = proposal({
