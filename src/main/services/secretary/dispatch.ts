@@ -34,6 +34,7 @@ import {
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
+import { todoDispatchPrompt } from './dispatchBrief';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import {
   buildBoard,
@@ -107,6 +108,8 @@ export interface SecretaryDispatchPorts {
   ): Promise<{ ok: boolean; error?: string }>;
   newId(): string;
   now(): number;
+  /** 项目当前分支；不是 git 仓库或读失败时返回 null */
+  branch(repoPath: string): MaybePromise<string | null>;
 }
 
 const DISPATCH_OPS = [
@@ -921,12 +924,28 @@ export function createSecretaryDispatchHandlers(
         return auditFailure(ports, ctx, 'todo_item_dispatch', 'project-required', todoId);
       }
       const title = stringParam(params, 'title') ?? todoTitle(todo.text);
+      const profile = await profileOf(ports);
+      const project = (await ports.projects()).find(
+        (candidate) => candidate.projectId === projectId
+      );
+      const requested = typeof params.worktree === 'boolean' ? params.worktree : true;
+      const worktree =
+        profile.dispatchWorktree === 'never'
+          ? false
+          : profile.dispatchWorktree === 'always'
+            ? true
+            : requested;
+      const branch = project ? await ports.branch(project.canonicalPath) : null;
       const draft: DispatchDraft = {
         projectId,
-        prompt: stringParam(params, 'prompt') ?? todo.text,
+        prompt: todoDispatchPrompt(todo.text, stringParam(params, 'prompt'), {
+          projectPath: project?.canonicalPath ?? projectId,
+          branch,
+          worktree,
+        }),
         // 不给标题时会话按 prompt 开头起名，prompt 常以共同背景开头，几个会话会重名
         ...(title ? { title } : {}),
-        worktree: params.worktree === true,
+        worktree,
         todoId,
       };
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
@@ -1334,6 +1353,14 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
   },
   newId: () => randomUUID(),
   now: () => Date.now(),
+  branch: async (repoPath) => {
+    try {
+      const { currentBranch } = await import('../worktree/service');
+      return await currentBranch(repoPath);
+    } catch {
+      return null;
+    }
+  },
 };
 
 function store(): SecretaryStore {
