@@ -2,9 +2,24 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { type AssistantMessage, isRetryableAssistantError } from '@earendil-works/pi-ai';
+import {
+  Agent,
+  type AgentEvent,
+  type AgentTool,
+  type StreamFn,
+} from '@earendil-works/pi-agent-core';
+import {
+  type Api,
+  type AssistantMessage,
+  getCurrentTools,
+  isRetryableAssistantError,
+  type Message,
+  type Model,
+  type SimpleStreamOptions,
+} from '@earendil-works/pi-ai';
 import {
   type AgentSession,
+  type AgentSessionEvent,
   createAgentSession,
   createFindToolDefinition,
   createGrepToolDefinition,
@@ -24,6 +39,7 @@ import {
 import { AGENT_COMPACTION_LOG } from '@shared/agentWorkerExit';
 import type { ApprovalAllowThreshold } from '@shared/approvalReviewRecord';
 import { autoRetryOverrides, DEFAULT_AUTO_RETRY_LIMIT } from '@shared/autoRetry';
+import { snapshotMainConversation } from '@shared/btw';
 import {
   type ChildSessionIdentity,
   isSameChildSessionIdentity,
@@ -32,7 +48,13 @@ import {
 import { appendCappedLog } from '@shared/cappedLog';
 import { WORKSPACE_WRITE_TOOL_ID } from '@shared/childProfileTools';
 import { type CompactStrategy, resolveCompactStrategy } from '@shared/compactStrategy';
-import type { PluginAgentSource } from '@shared/extensionPlugins/protocol';
+import {
+  PLUGIN_AGENT_ARGS_MAX_CHARS,
+  PLUGIN_AGENT_OUTPUT_MAX_CHARS,
+  PLUGIN_AGENT_TEXT_MAX_CHARS,
+  type PluginAgentRunEvent,
+  type PluginAgentSource,
+} from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan, PluginToolDescriptor } from '@shared/extensionPlugins/types';
 import { isHeadlessRun } from '@shared/headlessRun';
 import { HUMAN_REQUEST_TIMEOUT_MS } from '@shared/humanRequestTimeout';
@@ -158,7 +180,13 @@ import {
   resolveChildReasoning,
 } from './childReasoning';
 import { createClaudeHooksExtension } from './claudeHooks';
-import { CodemodeHost, isDeferredMcp } from './codemode';
+import {
+  CODEMODE_FORBIDDEN_TOOLS,
+  CODEMODE_TOOL_NAME,
+  CodemodeHost,
+  isDeferredMcp,
+  prepareCodemodeInput,
+} from './codemode';
 import {
   collectContextOccupancy,
   estimateConversationTokens,
@@ -384,11 +412,25 @@ interface SessionFactory {
     resumeFile?: string;
     extraTools?: unknown[];
     pluginSource?: ChildPluginSource;
+    /** 临时会话：记录只在内存，不落 jsonl */
+    ephemeral?: boolean;
   }): Promise<ChildSessionResult>;
 }
 
 /** pi 未从包入口导出 `PromptDisposition`，从 `PromptOptions.preflightResult` 的参数推导。 */
 type PromptDisposition = Parameters<NonNullable<PromptOptions['preflightResult']>>[0];
+
+interface ForkBase {
+  model: Model<Api>;
+  messages: Message[];
+  options?: SimpleStreamOptions;
+  stream: StreamFn;
+  /** 这次请求的回复；正常收尾（无工具调用）时接在前缀后面 */
+  reply?: AssistantMessage;
+}
+
+/** fork 代理能真正执行的工具；其余照原样声明（保住缓存前缀）但调用时拒绝 */
+const FORK_TOOLS = new Set(['read', 'grep', 'find', 'ls']);
 
 interface ManagedSession {
   identity: SessionIdentity;
@@ -465,6 +507,8 @@ interface ManagedSession {
   parentId?: string;
   coworkerName?: string;
   pendingRole?: string;
+  /** 最近一次会话请求原样留底：插件 fork 代理据此重放前缀，命中同一份提示缓存 */
+  forkBase?: ForkBase;
   /** 仅父会话：Plan 模式状态机（设置里关闭时缺省） */
   plan?: PlanController;
   /** 父会话：按 Main 推来的禁用列表增删已注册的内置工具 */
@@ -911,6 +955,7 @@ export class SessionSupervisor {
   private readonly mcpOAuthPending = new Map<string, (result: McpOAuthRefreshResult) => void>();
   /** 插件经 Main 发起的宿主 MCP 调用，按 requestId 可取消 */
   private readonly pluginMcpCalls = new Map<string, AbortController>();
+  private readonly pluginAgentRuns = new Map<string, AbortController>();
   private readonly mcpHotplug = new Map<string, McpHotplug>();
   /** MCP access token 续期只在 Main 做（refresh_token 不进 worker）；超时按临时故障处理 */
   private readonly requestMcpOAuthRefresh = (
@@ -1373,6 +1418,14 @@ export class SessionSupervisor {
     }
     if (command.type === 'plugin-mcp-cancel') {
       this.pluginMcpCalls.get(command.requestId)?.abort();
+      return;
+    }
+    if (command.type === 'plugin-agent-cancel') {
+      this.pluginAgentRuns.get(command.requestId)?.abort();
+      return;
+    }
+    if (command.type === 'plugin-agent-run') {
+      void this.runPluginAgent(command);
       return;
     }
     if (command.type === 'plugin-mcp-list' || command.type === 'plugin-mcp-call') {
@@ -2777,6 +2830,7 @@ export class SessionSupervisor {
         resumeFile: childResume,
         extraTools = [],
         pluginSource,
+        ephemeral,
       }) => {
         // 插件能力下沉：只读档不挂插件工具（可能有副作用，
         // Plan 模式靠只读子代理保证不写）；事件只拦 tool_call（独立预算），其余只通知
@@ -2914,7 +2968,9 @@ export class SessionSupervisor {
         childCodemode.bindDeferredTools(deferredMcpLoader(childGate, decorateChild));
         const sessionManager = childResume
           ? SessionManager.open(childResume, this.options.sessionDir, cwd)
-          : SessionManager.create(cwd, this.options.sessionDir);
+          : ephemeral
+            ? SessionManager.inMemory(cwd)
+            : SessionManager.create(cwd, this.options.sessionDir);
         const { session } = await createAgentSession({
           cwd,
           agentDir: this.options.agentDir,
@@ -3500,8 +3556,19 @@ export class SessionSupervisor {
         session.sessionManager.appendCustomEntry(PRIVACY_MASK_ENTRY, record);
       };
       session.agent.streamFunction = (model, context, options) =>
-        runWithPrivacySink(privacySink, () =>
-          runWithRequestBodyObserver(
+        runWithPrivacySink(privacySink, () => {
+          if (
+            !session.isCompacting &&
+            options?.sessionId === session.sessionId &&
+            this.sessions.get(identity.sessionId) === managed
+          )
+            managed.forkBase = {
+              model,
+              messages: [...context.messages],
+              options,
+              stream: (m, c, o) => stream.call(session.agent, m, c, o),
+            };
+          return runWithRequestBodyObserver(
             (usage) => {
               // 共享 runtime/provider 不意味着共享会话；释放、换代或换模型后的尾回调不能污染新投影。
               if (
@@ -3520,8 +3587,8 @@ export class SessionSupervisor {
             },
             () => stream.call(session.agent, model, context, options),
             { sessionId: session.sessionId, signal: options?.signal }
-          )
-        );
+          );
+        });
     }
     if (opts.resumeFile) {
       const raw = this.transcript(managed);
@@ -3922,6 +3989,145 @@ export class SessionSupervisor {
     return info;
   }
 
+  /**
+   * 插件代理：用发起会话的工厂建临时只读子会话（内存记录、无人值守门），
+   * 进度与终态按 requestId 推回 Main，跑完即弃，不进会话树。
+   */
+  private async runPluginAgent(
+    command: Extract<AgentCommand, { type: 'plugin-agent-run' }>
+  ): Promise<void> {
+    const { requestId } = command;
+    const emit = (event: PluginAgentRunEvent) =>
+      this.options.emit({ type: 'plugin-agent-event', requestId, event });
+    const controller = new AbortController();
+    this.pluginAgentRuns.set(requestId, controller);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, command.timeoutMs);
+    let child: AgentSession | undefined;
+    let gate: ApprovalGate | undefined;
+    let unsubscribe: (() => void) | undefined;
+    try {
+      const parent = this.sessions.get(command.identity.sessionId);
+      if (!parent || !isSameGeneration(parent.identity, command.identity) || !parent.factory)
+        throw new Error('这个会话不能运行插件代理');
+      gate = new ApprovalGate(
+        parent.gate.mode,
+        () => {},
+        () => {},
+        { ...parent.gate.floorOptions, autoReject: true }
+      );
+      const base = command.context === 'fork' && !command.model ? forkBaseOf(parent) : undefined;
+      const { session, modelId } = await parent.factory.createChildSession({
+        agentType: { name: 'plugin-agent', description: '', systemPrompt: '', tools: 'readonly' },
+        gate,
+        ephemeral: true,
+        ...(command.model ? { modelOverride: command.model } : {}),
+      });
+      child = session;
+      const fork = base
+        ? forkAgent(base, session, parent.session.agent.state.thinkingLevel)
+        : undefined;
+      if (controller.signal.aborted) throw new Error('aborted');
+      controller.signal.addEventListener(
+        'abort',
+        () => (fork ? fork.abort() : void session.abort().catch(() => {})),
+        { once: true }
+      );
+      let lastText = '';
+      let lastTextAt = 0;
+      const onEvent = (event: AgentSessionEvent | AgentEvent) => {
+        if (event.type === 'tool_execution_start') {
+          let args = '';
+          try {
+            args = JSON.stringify(event.args) ?? '';
+          } catch {}
+          emit({
+            type: 'tool-start',
+            id: event.toolCallId,
+            name: event.toolName,
+            args: args.slice(0, PLUGIN_AGENT_ARGS_MAX_CHARS),
+            ...('parentToolCallId' in event && event.parentToolCallId
+              ? { parentId: event.parentToolCallId }
+              : {}),
+          });
+        } else if (event.type === 'tool_execution_end') {
+          emit({
+            type: 'tool-end',
+            id: event.toolCallId,
+            isError: event.isError,
+            output: pluginAgentToolOutput(event.result),
+          });
+        } else if (event.type === 'message_update' && event.message.role === 'assistant') {
+          const text = pluginAgentText(event.message);
+          const now = Date.now();
+          if (!text || text === lastText || now - lastTextAt < 300) return;
+          lastText = text;
+          lastTextAt = now;
+          emit({ type: 'text', text: text.slice(-PLUGIN_AGENT_TEXT_MAX_CHARS) });
+        }
+      };
+      const offChild = session.subscribe(onEvent);
+      const offFork = fork?.subscribe(onEvent);
+      unsubscribe = () => {
+        offChild();
+        offFork?.();
+      };
+      const parts: string[] = [];
+      if (fork)
+        parts.push(
+          `（以下是从这段对话分叉出的只读旁路请求，主对话看不到这里。只能用 ${[...fork.runnable].join(' / ')}，其他工具会被拒绝。不要继续上面的任务，只完成下面这件事。）`
+        );
+      if (command.systemPrompt) parts.push(`<role>\n${command.systemPrompt}\n</role>`);
+      if (command.context !== 'none' && !fork) {
+        const snapshot = snapshotMainConversation(parent.messages);
+        if (snapshot) parts.push(`<conversation>\n${snapshot}\n</conversation>`);
+      }
+      parts.push(command.prompt);
+      await (fork ?? session).prompt(parts.join('\n\n'));
+      if (controller.signal.aborted) throw new Error('aborted');
+      const last = [...(fork ? fork.state.messages : session.messages)]
+        .reverse()
+        .find((message): message is AssistantMessage => message.role === 'assistant');
+      if (last?.stopReason === 'error') throw new Error(last.errorMessage || '模型请求失败');
+      const text = last ? pluginAgentText(last) : '';
+      if (!text) throw new Error('代理没有给出回复');
+      emit({
+        type: 'end',
+        ok: true,
+        text: text.slice(-PLUGIN_AGENT_TEXT_MAX_CHARS),
+        model: base ? base.model.id : modelId,
+      });
+    } catch (error) {
+      const aborted = controller.signal.aborted;
+      const message = timedOut
+        ? '代理运行超时'
+        : aborted
+          ? '已取消'
+          : toErrorMessage(error) || '代理运行失败';
+      emit({
+        type: 'end',
+        ok: false,
+        error: message.slice(0, 4096),
+        ...(aborted && !timedOut ? { aborted: true } : {}),
+      });
+    } finally {
+      clearTimeout(timer);
+      this.pluginAgentRuns.delete(requestId);
+      unsubscribe?.();
+      gate?.cancelAll();
+      if (child) {
+        cancelContinuousMemory(child.sessionManager);
+        try {
+          releaseOauthPoolSession(child.sessionId);
+          child.dispose();
+        } catch {}
+      }
+    }
+  }
+
   /** 解雇 coworker：中断并销毁会话,jsonl 留盘。返回解雇名(通知/事件用) */
   private async dismissCoworker(parentId: string, coworkerId: string): Promise<string> {
     const parent = this.mustCurrent(parentId);
@@ -4300,6 +4506,8 @@ export class SessionSupervisor {
         const timing = managed.timings[index];
         if (timing) timing.completedMs = Date.now();
         this.stampContextSnapshot(managed, event.message);
+        if (event.message.role === 'assistant' && managed.forkBase && !managed.forkBase.reply)
+          managed.forkBase.reply = event.message;
         const projected = projectMessage(event.message);
         if (projected?.role === 'assistant' && managed.pendingPrivacyMask) {
           projected.privacyMask = managed.pendingPrivacyMask;
@@ -5904,6 +6112,114 @@ function consumeRole(managed: { pendingRole?: string }, text: string): string {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** 回复里的可见正文，不含 thinking 与工具调用 */
+/** 会话最近一次请求还对得上当前模型时才能分叉；换过模型就前缀不同，退回快照 */
+function forkBaseOf(parent: ManagedSession): ForkBase | undefined {
+  const base = parent.forkBase;
+  const model = parent.session.model;
+  if (!base || model?.id !== base.model.id || model.provider !== base.model.provider) return;
+  return base;
+}
+
+/**
+ * 从会话最近一次请求分叉：系统提示、工具声明、消息原样照搬，请求选项也照搬，
+ * 这样第一轮就是会话请求的前缀续写，能读到会话的提示缓存。
+ * 只有 read/grep/find/ls（及只读 codemode）真正可执行，用只读子会话的实现；其余工具保留声明、调用时拒绝。
+ */
+function forkAgent(
+  base: ForkBase,
+  child: AgentSession,
+  thinkingLevel: Agent['state']['thinkingLevel']
+): Agent & { runnable: Set<string> } {
+  const allowed = forkRunnable(child);
+  const runnable = new Map(
+    child.agent.state.tools.filter((tool) => allowed.has(tool.name)).map((t) => [t.name, t])
+  );
+  const tools: AgentTool[] = getCurrentTools(base.messages).map((decl) => {
+    const impl = runnable.get(decl.name);
+    return {
+      ...decl,
+      label: impl?.label ?? decl.name,
+      ...(impl?.prepareArguments ? { prepareArguments: impl.prepareArguments } : {}),
+      execute: impl
+        ? impl.execute.bind(impl)
+        : async () => {
+            throw new Error(`只读分叉里不能用 ${decl.name}`);
+          },
+    };
+  });
+  const reply = base.reply;
+  const settled =
+    reply?.stopReason === 'stop' && !reply.content.some((part) => part.type === 'toolCall');
+  const agent = new Agent({
+    initialState: {
+      model: base.model,
+      thinkingLevel,
+      tools,
+      messages: settled ? [...base.messages, reply] : [...base.messages],
+    },
+    streamFn: (_model, context, options) =>
+      base.stream(base.model, context, { ...base.options, signal: options?.signal }),
+    ...(base.options?.sessionId ? { sessionId: base.options.sessionId } : {}),
+    beforeToolCall: async ({ toolCall, assistantMessage, args }) => {
+      if (!runnable.has(toolCall.name))
+        return {
+          block: true,
+          reason: `只读分叉里不能用 ${toolCall.name}，只能用 ${[...runnable.keys()].join(' / ')}`,
+        };
+      if (toolCall.name !== CODEMODE_TOOL_NAME) return undefined;
+      // 直接执行绕过了子会话的 tool_call 钩子，这里补上同样的预检；
+      // 嵌套调用走子会话的工具管线，要能从子会话里找到发起这次调用的回复
+      const blocked = prepareCodemodeInput(args as Record<string, unknown>);
+      if (blocked) return blocked;
+      child.agent.state.messages = [...child.agent.state.messages, assistantMessage];
+      return undefined;
+    },
+  });
+  return Object.assign(agent, { runnable: new Set(runnable.keys()) });
+}
+
+/** 子会话能真正执行的只读工具；codemode 只在脚本里能调的也全是只读工具时放行（脚本禁用的工具不算） */
+export function forkRunnable(
+  child: Pick<AgentSession, 'agent' | 'getCallableToolNames'>
+): Set<string> {
+  const names = new Set(child.agent.state.tools.map((tool) => tool.name));
+  const allowed = new Set([...FORK_TOOLS].filter((name) => names.has(name)));
+  if (
+    names.has(CODEMODE_TOOL_NAME) &&
+    child
+      .getCallableToolNames()
+      .every((name) => FORK_TOOLS.has(name) || CODEMODE_FORBIDDEN_TOOLS.has(name))
+  )
+    allowed.add(CODEMODE_TOOL_NAME);
+  return allowed;
+}
+
+function pluginAgentText(message: { content?: unknown }): string {
+  if (!Array.isArray(message.content)) return '';
+  return message.content
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        typeof part === 'object' && part !== null && part.type === 'text'
+    )
+    .map((part) => part.text)
+    .join('')
+    .trim();
+}
+
+/** 工具结果的文本部分，截到上限；图片等非文本部分忽略 */
+function pluginAgentToolOutput(result: unknown): string {
+  const text =
+    typeof result === 'string'
+      ? result
+      : result && typeof result === 'object'
+        ? pluginAgentText(result as { content?: unknown })
+        : '';
+  return text.length > PLUGIN_AGENT_OUTPUT_MAX_CHARS
+    ? `${text.slice(0, PLUGIN_AGENT_OUTPUT_MAX_CHARS - 1)}…`
+    : text;
+}
 
 function liveCompletionText(partial: unknown): { text: string; thinking: string } {
   if (!partial || typeof partial !== 'object') return { text: '', thinking: '' };

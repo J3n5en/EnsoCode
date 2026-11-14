@@ -544,6 +544,17 @@ describe('PluginHostGate', () => {
     await expect(
       gate.handle('a.b', 'ui.viewOpen', { viewId: 'missing' }, agentCall())
     ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(
+      gate.handle('a.b', 'ui.viewClose', { viewId: 'logs' }, agentCall())
+    ).resolves.toBeNull();
+    expect(sessionUi).toHaveBeenLastCalledWith(
+      { sessionId: 's1', origin: null },
+      'closePluginView',
+      { pluginId: 'a.b', viewId: 'logs' }
+    );
+    await expect(
+      gate.handle('a.b', 'ui.viewClose', { viewId: 'missing' }, agentCall())
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
     await expect(gate.handle('a.b', 'ui.viewOpen', {}, undefined)).rejects.toMatchObject({
       code: 'NO_INVOCATION',
     });
@@ -1045,6 +1056,128 @@ describe('PluginHostGate', () => {
     expect(seen?.aborted).toBe(false);
     gate.invocations.cancel(inv);
     expect(seen?.aborted).toBe(true);
+  });
+
+  describe('agent.run', () => {
+    beforeEach(() => {
+      deps.manifest = () => manifest({ permissions: ['agent.run'] });
+      deps.agentRun = vi.fn(() => ({ ok: true as const }));
+      deps.agentCancel = vi.fn(() => true);
+      gate = new PluginHostGate(deps);
+    });
+
+    it('没有 agent.run 权限或不在调用内一律拒绝', async () => {
+      await expect(
+        gate.handle('a.b', 'agent.run', { runId: 'r1', prompt: 'x' }, undefined)
+      ).rejects.toMatchObject({ code: 'NO_INVOCATION' });
+      deps.manifest = () => manifest();
+      gate = new PluginHostGate(deps);
+      await expect(
+        gate.handle('a.b', 'agent.run', { runId: 'r1', prompt: 'x' }, agentCall())
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      await expect(
+        gate.handle('a.b', 'agent.cancel', { runId: 'r1' }, undefined)
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      expect(deps.agentRun).not.toHaveBeenCalled();
+    });
+
+    it('参数不合法时不启动代理', async () => {
+      const bad = [
+        { runId: 'bad id', prompt: 'x' },
+        { runId: 'r1', prompt: '  ' },
+        { runId: 'r1', prompt: 'x'.repeat(65 * 1024) },
+        { runId: 'r1', prompt: 'x', systemPrompt: 1 },
+        { runId: 'r1', prompt: 'x', context: 'all' },
+        { runId: 'r1', prompt: 'x', timeoutMs: 5_000 },
+        { runId: 'r1', prompt: 'x', timeoutMs: 21 * 60_000 },
+      ];
+      for (const args of bad)
+        await expect(gate.handle('a.b', 'agent.run', args, agentCall())).rejects.toMatchObject({
+          code: 'INVALID_ARGS',
+        });
+      expect(deps.agentRun).not.toHaveBeenCalled();
+    });
+
+    it('按发起会话启动，缺省不带对话、超时 10 分钟', async () => {
+      await expect(
+        gate.handle('a.b', 'agent.run', { runId: 'r1', prompt: '改写' }, agentCall())
+      ).resolves.toBeNull();
+      expect(deps.agentRun).toHaveBeenCalledWith('a.b', {
+        runId: 'r1',
+        sessionId: 's1',
+        prompt: '改写',
+        context: 'none',
+        timeoutMs: 600_000,
+      });
+      await gate.handle(
+        'a.b',
+        'agent.run',
+        { runId: 'r2', prompt: 'p', systemPrompt: 'role', context: 'conversation' },
+        agentCall()
+      );
+      expect(deps.agentRun).toHaveBeenLastCalledWith(
+        'a.b',
+        expect.objectContaining({ systemPrompt: 'role', context: 'conversation' })
+      );
+      await gate.handle(
+        'a.b',
+        'agent.run',
+        { runId: 'r3', prompt: 'p', context: 'fork' },
+        agentCall()
+      );
+      expect(deps.agentRun).toHaveBeenLastCalledWith(
+        'a.b',
+        expect.objectContaining({ context: 'fork' })
+      );
+    });
+
+    it('用插件设置解析出的模型；模型不可用时不启动', async () => {
+      const model = {
+        api: 'openai-completions' as const,
+        apiKey: 'k',
+        baseUrl: 'https://example.invalid',
+        modelId: 'm1',
+        settingsProviderId: 'p1',
+      };
+      deps.agentModel = vi.fn(async () => ({ ok: true as const, model }));
+      gate = new PluginHostGate(deps);
+      await gate.handle('a.b', 'agent.run', { runId: 'r1', prompt: 'p' }, agentCall());
+      expect(deps.agentRun).toHaveBeenLastCalledWith('a.b', expect.objectContaining({ model }));
+      expect(deps.agentModel).toHaveBeenCalledWith('a.b');
+      deps.agentModel = vi.fn(async () => ({ ok: false as const, error: '模型不可用' }));
+      gate = new PluginHostGate(deps);
+      await expect(
+        gate.handle('a.b', 'agent.run', { runId: 'r2', prompt: 'p' }, agentCall())
+      ).rejects.toMatchObject({ code: 'AGENT_FAILED', message: '模型不可用' });
+      expect(deps.agentRun).toHaveBeenCalledTimes(1);
+    });
+
+    it('会话没在运行时先拉起；启动失败如实报错', async () => {
+      const notRunning = { ok: false as const, error: '会话不在运行', notRunning: true as const };
+      let attempts = 0;
+      deps.agentRun = vi.fn(() => (++attempts < 2 ? notRunning : { ok: true as const }));
+      deps.wakeSession = vi.fn(async () => undefined);
+      gate = new PluginHostGate(deps);
+      await expect(
+        gate.handle('a.b', 'agent.run', { runId: 'r1', prompt: 'x' }, agentCall())
+      ).resolves.toBeNull();
+      expect(deps.wakeSession).toHaveBeenCalledWith('s1', null);
+      deps.agentRun = vi.fn(() => ({ ok: false as const, error: '当前环境不能运行代理' }));
+      gate = new PluginHostGate(deps);
+      await expect(
+        gate.handle('a.b', 'agent.run', { runId: 'r1', prompt: 'x' }, agentCall())
+      ).rejects.toMatchObject({ code: 'AGENT_FAILED', message: '当前环境不能运行代理' });
+    });
+
+    it('取消不需要调用上下文，只作用于本插件', async () => {
+      await expect(gate.handle('a.b', 'agent.cancel', { runId: 'r1' }, undefined)).resolves.toBe(
+        true
+      );
+      expect(deps.agentCancel).toHaveBeenCalledWith('a.b', 'r1');
+      await expect(
+        gate.handle('a.b', 'agent.cancel', { runId: '../x' }, undefined)
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import type { PluginConfigType } from '@shared/extensionPlugins/manifest';
+import { type PluginConfigType, parsePluginModelChoice } from '@shared/extensionPlugins/manifest';
 
 export function formatConfigValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) return '';
@@ -28,6 +28,10 @@ export function coerceConfigValue(
   }
   if (field.type === 'enum') {
     if (!field.options?.includes(input)) return { ok: false, error: '不在可选项里' };
+    return { ok: true, value: input };
+  }
+  if (field.type === 'model') {
+    if (!parsePluginModelChoice(input)) return { ok: false, error: '不是合法的模型选择' };
     return { ok: true, value: input };
   }
   if (input.length > 4096 || input.includes('\0')) return { ok: false, error: '值不合法' };

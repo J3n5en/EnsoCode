@@ -204,6 +204,71 @@ describe('runPluginHost', () => {
     });
   });
 
+  it('agent.run：调用返回后代理继续，进度回调、终态结算 Promise', async () => {
+    const h = harness(`let run; const seen = [];
+    export function activate(enso) {
+      enso.renderer.handle('start', async () => {
+        run = enso.agent.run({ prompt: '改写', context: 'conversation', onEvent: (e) => seen.push(e.type) })
+          .then((r) => 'ok:' + r.text, (e) => 'err:' + e.code);
+        return 'started';
+      });
+      enso.renderer.handle('result', async () => (await run) + '|' + seen.join(','));
+    }`);
+    await h.next((m) => m.t === 'ready');
+    h.deliver(call('20', 'renderer.call', { method: 'start', args: null }));
+    const hostCall = await h.next((m) => m.t === 'call' && m.api === 'agent.run');
+    if (hostCall.t !== 'call') return;
+    const args = hostCall.args as { runId: string };
+    expect(args).toEqual({ prompt: '改写', context: 'conversation', runId: expect.any(String) });
+    expect(hostCall.invocationId).toBe('inv-20');
+    h.deliver({ t: 'res', id: hostCall.id, ok: true, value: null });
+    await h.next((m) => m.t === 'res' && m.id === '20');
+    h.deliver({
+      t: 'agent-run',
+      runId: args.runId,
+      event: { type: 'tool-start', id: 't1', name: 'read', args: '{}' },
+    });
+    h.deliver({ t: 'agent-run', runId: 'other', event: { type: 'text', text: 'x' } });
+    h.deliver({ t: 'agent-run', runId: args.runId, event: { type: 'end', ok: true, text: '好' } });
+    h.deliver(call('21', 'renderer.call', { method: 'result', args: null }));
+    expect(await h.next((m) => m.t === 'res' && m.id === '21')).toMatchObject({
+      value: 'ok:好|tool-start',
+    });
+  });
+
+  it('agent.run：signal 中止时脱离调用发 agent.cancel，终态以 ABORTED 拒绝', async () => {
+    const h = harness(`let run; const ctrl = new AbortController();
+    export function activate(enso) {
+      enso.renderer.handle('start', async () => {
+        run = enso.agent.run({ prompt: 'x', signal: ctrl.signal }).catch((e) => e.code);
+        return null;
+      });
+      enso.renderer.handle('stop', async () => { ctrl.abort(); return null; });
+      enso.renderer.handle('result', async () => run);
+    }`);
+    await h.next((m) => m.t === 'ready');
+    h.deliver(call('30', 'renderer.call', { method: 'start', args: null }));
+    const hostCall = await h.next((m) => m.t === 'call' && m.api === 'agent.run');
+    if (hostCall.t !== 'call') return;
+    const { runId } = hostCall.args as { runId: string };
+    h.deliver({ t: 'res', id: hostCall.id, ok: true, value: null });
+    h.deliver(call('31', 'renderer.call', { method: 'stop', args: null }));
+    const cancel = await h.next((m) => m.t === 'call' && m.api === 'agent.cancel');
+    expect(cancel).toEqual({
+      t: 'call',
+      id: expect.any(String),
+      api: 'agent.cancel',
+      args: { runId },
+    });
+    h.deliver({
+      t: 'agent-run',
+      runId,
+      event: { type: 'end', ok: false, error: '已取消', aborted: true },
+    });
+    h.deliver(call('32', 'renderer.call', { method: 'result', args: null }));
+    expect(await h.next((m) => m.t === 'res' && m.id === '32')).toMatchObject({ value: 'ABORTED' });
+  });
+
   it('未声明的事件不能订阅', async () => {
     const h = harness(
       `export function activate(enso) { enso.events.on('session_start', () => {}); }`

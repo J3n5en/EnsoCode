@@ -174,4 +174,29 @@ describe('handleSessionRequest', () => {
       )
     ).resolves.toMatchObject({ ok: false, code: 'BAD_REQUEST' });
   });
+
+  it('关闭插件侧栏视图：校验会话与视图标识', async () => {
+    const closePluginView = vi.fn();
+    const d = deps({ closePluginView });
+    await expect(
+      handleSessionRequest(
+        {
+          sessionId: 'a',
+          op: 'closePluginView',
+          payload: { pluginId: 'enso.better', viewId: 'runs' },
+        },
+        d
+      )
+    ).resolves.toEqual({ ok: true, value: null });
+    expect(closePluginView).toHaveBeenCalledWith('a', { pluginId: 'enso.better', viewId: 'runs' });
+    await expect(
+      handleSessionRequest(
+        { sessionId: 'zz', op: 'closePluginView', payload: { pluginId: 'p', viewId: 'v' } },
+        d
+      )
+    ).resolves.toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    await expect(
+      handleSessionRequest({ sessionId: 'a', op: 'closePluginView', payload: { pluginId: 'p' } }, d)
+    ).resolves.toMatchObject({ ok: false, code: 'BAD_REQUEST' });
+  });
 });

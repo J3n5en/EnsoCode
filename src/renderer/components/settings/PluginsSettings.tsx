@@ -56,6 +56,7 @@ import { usePluginThemesStore } from '@/stores/pluginThemes';
 import { useSettingsStore } from '@/stores/settings';
 import { NewSessionBadge } from './NewSessionBadge';
 import { PluginMarket } from './PluginMarket';
+import { PluginModelConfigField } from './PluginModelConfigField';
 import { PluginReadmeDialog } from './PluginReadmeDialog';
 import { RegistryNoticeBanner } from './RegistryNoticeBanner';
 
@@ -198,6 +199,11 @@ function ExtensionPluginConfigForm({ pluginId, plain }: { pluginId: string; plai
             <Switch
               checked={checkedOf(field)}
               onCheckedChange={(checked) => setDraft((prev) => ({ ...prev, [field.key]: checked }))}
+            />
+          ) : field.type === 'model' ? (
+            <PluginModelConfigField
+              value={textOf(field)}
+              onChange={(value) => setDraft((prev) => ({ ...prev, [field.key]: value }))}
             />
           ) : (
             <Select

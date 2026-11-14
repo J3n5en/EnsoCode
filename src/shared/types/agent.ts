@@ -48,12 +48,17 @@ import {
   PLUGIN_INTERCEPT_EVENTS,
 } from '../extensionPlugins/events';
 import {
+  PLUGIN_AGENT_MAX_TIMEOUT_MS,
+  PLUGIN_AGENT_PROMPT_MAX_CHARS,
+  PLUGIN_AGENT_SYSTEM_MAX_CHARS,
   PLUGIN_INJECT_MAX_CHARS,
   PLUGIN_PROGRESS_MAX_CHARS,
+  type PluginAgentRunEvent,
   type PluginAgentSource,
   type PluginArtifactInfo,
   type PluginInjectImage,
   type PluginMessageSource,
+  parsePluginAgentRunEvent,
   parsePluginAgentSource,
   parsePluginInjectImages,
   parsePluginMessageSource,
@@ -1607,6 +1612,19 @@ export type AgentCommand =
       args: Record<string, unknown>;
     }
   | { type: 'plugin-mcp-cancel'; requestId: string }
+  /** 插件经 Main 在发起会话旁跑一个临时只读代理：用该会话的模型，不进会话记录 */
+  | {
+      type: 'plugin-agent-run';
+      requestId: string;
+      identity: SessionIdentity;
+      prompt: string;
+      systemPrompt?: string;
+      context: 'conversation' | 'fork' | 'none';
+      timeoutMs: number;
+      /** 插件设置里选的模型；缺省跟随该会话 */
+      model?: SpawnModelConfig;
+    }
+  | { type: 'plugin-agent-cancel'; requestId: string }
   /** 运行中同步代理 env；null 表示删除该键 */
   | { type: 'set-proxy-env'; env: Record<string, string | null> };
 
@@ -1877,6 +1895,7 @@ export type RendererAgentEvent =
       | McpWorkerEvent
       | WorkspaceLockEvent
       | PluginMcpResultEvent
+      | PluginAgentWorkerEvent
       | { type: 'oauth-pool-select' }
       | { type: 'privacy-mask-ledger' }
       | { type: 'tool-batch-completed' }
@@ -1921,6 +1940,12 @@ export type PluginMcpResultEvent =
   | { type: 'plugin-mcp-result'; requestId: string; ok: true; value: unknown }
   | { type: 'plugin-mcp-result'; requestId: string; ok: false; error: string };
 
+export type PluginAgentWorkerEvent = {
+  type: 'plugin-agent-event';
+  requestId: string;
+  event: PluginAgentRunEvent;
+};
+
 /** retry-skipped 的原因：busy = 会话不空闲；nothing-to-retry = 最后一条仍是已完成的 assistant */
 export const RETRY_SKIPPED_REASONS = ['busy', 'nothing-to-retry'] as const;
 export type RetrySkippedReason = (typeof RETRY_SKIPPED_REASONS)[number];
@@ -1938,6 +1963,7 @@ export type AgentWorkerEvent =
     }
   | WorkspaceLockEvent
   | PluginMcpResultEvent
+  | PluginAgentWorkerEvent
   | ParentLifecycleEvent
   | ChildLifecycleEvent
   | {
@@ -4223,6 +4249,37 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return hasExactKeys(value, ['type', 'requestId']) && isNonEmptyString(value.requestId)
         ? { type: 'plugin-mcp-cancel', requestId: value.requestId }
         : null;
+    case 'plugin-agent-run':
+      return hasOnlyKeys(value, [
+        'type',
+        'requestId',
+        'identity',
+        'prompt',
+        'systemPrompt',
+        'context',
+        'timeoutMs',
+        'model',
+      ]) &&
+        isNonEmptyString(value.requestId) &&
+        parseSessionIdentity(value.identity) &&
+        isNonEmptyString(value.prompt) &&
+        isBoundedText(value.prompt, PLUGIN_AGENT_PROMPT_MAX_CHARS) &&
+        (value.systemPrompt === undefined ||
+          (typeof value.systemPrompt === 'string' &&
+            isBoundedText(value.systemPrompt, PLUGIN_AGENT_SYSTEM_MAX_CHARS))) &&
+        (value.context === 'conversation' ||
+          value.context === 'fork' ||
+          value.context === 'none') &&
+        Number.isInteger(value.timeoutMs) &&
+        (value.timeoutMs as number) > 0 &&
+        (value.timeoutMs as number) <= PLUGIN_AGENT_MAX_TIMEOUT_MS &&
+        (value.model === undefined || parseSpawnModelConfig(value.model) !== null)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'plugin-agent-cancel':
+      return hasExactKeys(value, ['type', 'requestId']) && isNonEmptyString(value.requestId)
+        ? { type: 'plugin-agent-cancel', requestId: value.requestId }
+        : null;
     case 'set-proxy-env': {
       if (!hasExactKeys(value, ['type', 'env']) || !isRecord(value.env)) return null;
       for (const entry of Object.values(value.env)) {
@@ -4347,6 +4404,12 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       isNonEmptyString(value.error)
       ? (value as unknown as AgentWorkerEvent)
       : null;
+  }
+  if (value.type === 'plugin-agent-event') {
+    if (!hasExactKeys(value, ['type', 'requestId', 'event']) || !isNonEmptyString(value.requestId))
+      return null;
+    const event = parsePluginAgentRunEvent(value.event);
+    return event ? { type: 'plugin-agent-event', requestId: value.requestId, event } : null;
   }
   if (value.type === 'session-reloaded') {
     if (

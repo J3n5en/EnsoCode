@@ -9,6 +9,11 @@ import {
 } from '@shared/extensionPlugins/manifest';
 import { parsePluginPresetId } from '@shared/extensionPlugins/preset';
 import {
+  PLUGIN_AGENT_DEFAULT_TIMEOUT_MS,
+  PLUGIN_AGENT_MAX_TIMEOUT_MS,
+  PLUGIN_AGENT_PROMPT_MAX_CHARS,
+  PLUGIN_AGENT_RUN_ID,
+  PLUGIN_AGENT_SYSTEM_MAX_CHARS,
   PLUGIN_INJECT_MAX_CHARS,
   type PluginArtifactInfo,
   type PluginHostApi,
@@ -17,6 +22,7 @@ import {
   parsePluginInjectImages,
 } from '@shared/extensionPlugins/protocol';
 import { parseStatusPatch, type StatusPatch } from '@shared/extensionPlugins/statusItems';
+import type { SpawnModelConfig } from '@shared/types/agent';
 import { pluginError } from './process';
 
 export const GESTURE_TTL_MS = 30_000;
@@ -52,7 +58,8 @@ export type SessionUiOp =
   | 'openChildRun'
   | 'createSession'
   | 'ensureSession'
-  | 'openPluginView';
+  | 'openPluginView'
+  | 'closePluginView';
 
 /** 插件看到的会话：只有标识与展示字段，不含路径 */
 export interface PluginSessionInfo {
@@ -127,6 +134,14 @@ export interface GateDeps {
   ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
   /** 让发起窗口启动没在运行的会话（有历史就恢复）；就绪与否由注入重试判断 */
   wakeSession?(sessionId: string, origin: number | null): Promise<void>;
+  /** 在会话旁启动只读代理；进度与终态由服务推给插件进程 */
+  agentRun?(pluginId: string, input: PluginAgentRunRequest): SessionAttempt;
+  /** 按用户在插件设置里选的模型解析代理模型；model 缺省表示跟随发起会话 */
+  agentModel?(
+    pluginId: string
+  ): Promise<{ ok: true; model?: SpawnModelConfig } | { ok: false; error: string }>;
+  /** 取消本插件的代理；没有这个代理返回 false */
+  agentCancel?(pluginId: string, runId: string): boolean;
   abort?(pluginId: string, sessionId: string): { ok: true } | { ok: false; error: string };
   callPlugin?(
     callerId: string,
@@ -157,6 +172,18 @@ export interface GateDeps {
     op: SessionUiOp,
     payload: Record<string, unknown>
   ): Promise<unknown>;
+}
+
+export type SessionAttempt = { ok: true } | { ok: false; error: string; notRunning?: boolean };
+
+export interface PluginAgentRunRequest {
+  runId: string;
+  sessionId: string;
+  prompt: string;
+  systemPrompt?: string;
+  context: 'conversation' | 'fork' | 'none';
+  timeoutMs: number;
+  model?: SpawnModelConfig;
 }
 
 export interface InvocationInit {
@@ -469,7 +496,8 @@ export class PluginHostGate {
         this.deps.statusUpdate(pluginId, id, patch);
         return null;
       }
-      case 'ui.viewOpen': {
+      case 'ui.viewOpen':
+      case 'ui.viewClose': {
         permit('ui.view');
         const inv = invocation();
         const current = sessionOf(inv);
@@ -497,11 +525,14 @@ export class PluginHostGate {
             targetSessionId = candidate;
           }
         }
-        await sessionUi()(
-          { sessionId: targetSessionId, origin: inv.origin ?? null },
-          'openPluginView',
-          { pluginId, viewId: view.id, title: view.title }
-        );
+        const target = { sessionId: targetSessionId, origin: inv.origin ?? null };
+        if (api === 'ui.viewOpen')
+          await sessionUi()(target, 'openPluginView', {
+            pluginId,
+            viewId: view.id,
+            title: view.title,
+          });
+        else await sessionUi()(target, 'closePluginView', { pluginId, viewId: view.id });
         return null;
       }
       case 'composer.readDraft':
@@ -595,24 +626,72 @@ export class PluginHostGate {
           deliverAs,
           triggerTurn: a.triggerTurn === true,
         };
-        let result = bridge(pluginId, input);
-        if (!result.ok && result.notRunning && this.deps.wakeSession) {
-          try {
-            await this.deps.wakeSession(sessionId, injectInv?.origin ?? null);
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : String(error);
-            throw pluginError('INJECT_FAILED', `${result.error}，启动失败：${reason}`);
-          }
-          const deadline = this.deps.now() + WAKE_READY_MS;
-          while (!result.ok && result.notRunning && this.deps.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, WAKE_POLL_MS));
-            result = bridge(pluginId, input);
-          }
-        }
+        const result = await this.untilRunning(
+          () => bridge(pluginId, input),
+          sessionId,
+          injectInv?.origin ?? null,
+          'INJECT_FAILED'
+        );
         if (!result.ok) throw pluginError('INJECT_FAILED', result.error);
         this.noteSession(pluginId, sessionId);
         return null;
       }
+      case 'agent.run': {
+        permit('agent.run');
+        const inv = invocation();
+        const sessionId = sessionOf(inv);
+        if (typeof a.runId !== 'string' || !PLUGIN_AGENT_RUN_ID.test(a.runId))
+          throw pluginError('INVALID_ARGS', 'runId 不合法');
+        if (
+          typeof a.prompt !== 'string' ||
+          !a.prompt.trim() ||
+          a.prompt.length > PLUGIN_AGENT_PROMPT_MAX_CHARS
+        )
+          throw pluginError('INVALID_ARGS', 'prompt 不合法或超过 64K 字符');
+        if (
+          a.systemPrompt !== undefined &&
+          (typeof a.systemPrompt !== 'string' ||
+            a.systemPrompt.length > PLUGIN_AGENT_SYSTEM_MAX_CHARS)
+        )
+          throw pluginError('INVALID_ARGS', 'systemPrompt 不合法或超过 32K 字符');
+        const context = a.context ?? 'none';
+        if (context !== 'conversation' && context !== 'fork' && context !== 'none')
+          throw pluginError('INVALID_ARGS', 'context 只能是 conversation、fork 或 none');
+        const timeoutMs = a.timeoutMs ?? PLUGIN_AGENT_DEFAULT_TIMEOUT_MS;
+        if (
+          typeof timeoutMs !== 'number' ||
+          !Number.isInteger(timeoutMs) ||
+          timeoutMs < 10_000 ||
+          timeoutMs > PLUGIN_AGENT_MAX_TIMEOUT_MS
+        )
+          throw pluginError('INVALID_ARGS', 'timeoutMs 须是 10 秒到 20 分钟的整数毫秒');
+        const run = this.deps.agentRun;
+        if (!run) throw pluginError('UNSUPPORTED', '当前环境不能运行代理');
+        const picked = (await this.deps.agentModel?.(pluginId)) ?? { ok: true };
+        if (!picked.ok) throw pluginError('AGENT_FAILED', picked.error);
+        const input: PluginAgentRunRequest = {
+          runId: a.runId,
+          sessionId,
+          prompt: a.prompt,
+          ...(a.systemPrompt ? { systemPrompt: a.systemPrompt } : {}),
+          context,
+          timeoutMs,
+          ...(picked.model ? { model: picked.model } : {}),
+        };
+        const result = await this.untilRunning(
+          () => run(pluginId, input),
+          sessionId,
+          inv.origin ?? null,
+          'AGENT_FAILED'
+        );
+        if (!result.ok) throw pluginError('AGENT_FAILED', result.error);
+        return null;
+      }
+      case 'agent.cancel':
+        permit('agent.run');
+        if (typeof a.runId !== 'string' || !PLUGIN_AGENT_RUN_ID.test(a.runId))
+          throw pluginError('INVALID_ARGS', 'runId 不合法');
+        return this.deps.agentCancel?.(pluginId, a.runId) ?? false;
       case 'session.abort': {
         permit('agent.inject');
         const sessionId = this.targetSession(pluginId, a, optionalInvocation());
@@ -812,6 +891,29 @@ export class PluginHostGate {
         return { sessionId: id };
       }
     }
+  }
+
+  /** 会话没在运行时让发起窗口拉起它（有历史就恢复），再在就绪期限内重试 */
+  private async untilRunning(
+    attempt: () => SessionAttempt,
+    sessionId: string,
+    origin: number | null,
+    code: string
+  ): Promise<SessionAttempt> {
+    let result = attempt();
+    if (result.ok || !result.notRunning || !this.deps.wakeSession) return result;
+    try {
+      await this.deps.wakeSession(sessionId, origin);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw pluginError(code, `${result.error}，启动失败：${reason}`);
+    }
+    const deadline = this.deps.now() + WAKE_READY_MS;
+    while (!result.ok && result.notRunning && this.deps.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, WAKE_POLL_MS));
+      result = attempt();
+    }
+    return result;
   }
 
   /** 相对项目根解析；先 realpath，再确认仍在授权范围内，不能借符号链接逃出 */
