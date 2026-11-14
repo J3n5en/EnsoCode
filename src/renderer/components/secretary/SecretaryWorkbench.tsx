@@ -4,7 +4,17 @@ import {
   type SecretaryTodoMutate,
   type TodoProblemCode,
 } from '@shared/types/secretary';
-import { Coffee, Pencil, Plus, Send, ShieldAlert, Square, Trash2, Undo2 } from 'lucide-react';
+import {
+  ArrowUpRight,
+  Coffee,
+  Pencil,
+  Plus,
+  Send,
+  ShieldAlert,
+  Square,
+  Trash2,
+  Undo2,
+} from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
@@ -345,6 +355,7 @@ function FeedEntry({ event }: { event: FeedEvent }) {
   const face = useSecretaryFace();
   const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [stopping, setStopping] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const conversationId = event.conversationId;
   const open = conversationId ? () => selectConversation(conversationId) : undefined;
   const stop = conversationId
@@ -378,19 +389,40 @@ function FeedEntry({ event }: { event: FeedEvent }) {
       )}
       <button
         type="button"
-        disabled={!open}
-        onClick={open}
-        className="min-w-0 flex-1 text-left disabled:cursor-default"
+        data-enso="secretary-feed-expand"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+        className="min-w-0 flex-1 text-left"
       >
         <span className="block text-[11px] text-subtle-foreground">
           {feedTime(event.at, locale, Date.now())}
           {event.projectName ? ` · ${event.projectName}` : ''}
         </span>
         <span className="mt-0.5 block truncate text-[13px]">{event.title}</span>
-        <span className="mt-0.5 block line-clamp-2 text-[12px] text-muted-foreground">
+        <span
+          className={cn(
+            'mt-0.5 block text-[12px] text-muted-foreground',
+            expanded ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'
+          )}
+        >
           {event.detail ? `${t(event.label)} · ${event.detail}` : t(event.label)}
         </span>
       </button>
+      {open && (
+        <button
+          type="button"
+          data-enso="secretary-feed-open"
+          title={t('Open session')}
+          aria-label={t('Open session')}
+          onClick={(clickEvent) => {
+            clickEvent.stopPropagation();
+            open();
+          }}
+          className={ACTION_CLASS}
+        >
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </button>
+      )}
       {event.running && stop && (
         // 时间线行不着色，蒙版直接接面板底色
         <HoverActions className="from-background">
