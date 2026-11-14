@@ -370,6 +370,16 @@ export function createSecretaryTools(ports: SecretaryToolPorts): SecretaryToolSe
       // 审批与否取决于 spawn 时下发的描述符：盘上版本变了就不能拿旧会话的判定跑新代码
       if (draft.readOnly !== readOnly) return { ok: false, error: '工具已更新，请在新会话中重试' };
       const outcome = await ports.runTool(draft, args);
+      // 会改东西的工具每次执行都留痕；参数内容不记，只记结果
+      if (!draft.readOnly) {
+        audit(
+          'tool_run',
+          ctx.secretaryConversationId,
+          outcome.ok,
+          outcome.ok ? 'succeeded' : redactSecrets(outcome.error).slice(0, 500),
+          draft.name
+        );
+      }
       const source = `tool:${draft.name}`;
       return outcome.ok
         ? { ok: true, result: { output: wrapUntrusted(source, redactSecrets(outcome.output)) } }

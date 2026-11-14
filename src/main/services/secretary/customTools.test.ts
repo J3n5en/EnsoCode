@@ -368,6 +368,42 @@ describe('tool_run', () => {
     ).toMatchObject({ ok: true });
   });
 
+  it('非只读工具每次执行留一条审计，只读的不记', async () => {
+    writeSecretaryTool(dir, { ...draft, readOnly: false });
+    const h = harness();
+    h.outcome = { ok: true, output: 'done' };
+    await h.service.run(
+      { name: 'upper-text', arguments: { text: 'ARGVALUE' }, readOnly: false },
+      ctx
+    );
+    h.outcome = { ok: false, error: 'boom' };
+    await h.service.run({ name: 'upper-text', arguments: {}, readOnly: false }, ctx);
+    expect(h.audits).toEqual([
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'tool_run',
+        targetId: 'upper-text',
+        ok: true,
+        detail: 'succeeded',
+      },
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'tool_run',
+        targetId: 'upper-text',
+        ok: false,
+        detail: 'boom',
+      },
+    ]);
+    expect(JSON.stringify(h.audits)).not.toContain('ARGVALUE');
+
+    writeSecretaryTool(dir, draft);
+    h.audits.length = 0;
+    await h.service.run({ name: 'upper-text', arguments: {}, readOnly: true }, ctx);
+    expect(h.audits).toEqual([]);
+  });
+
   it('输出里的密钥先脱敏', async () => {
     writeSecretaryTool(dir, draft);
     const h = harness();
