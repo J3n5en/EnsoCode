@@ -282,18 +282,15 @@ function createdSession(
 ): ToolCardBlock | null {
   const id = str(output?.conversationId);
   if (output?.status !== 'created' || !id) return null;
-  return {
-    kind: 'session',
-    id,
-    label: ctx.t('Created 「{{title}}」', { title: sessionLabel(id, ctx) }),
-  };
+  // 状态已经在徽标里说过一次，这里只留可点的会话名
+  return { kind: 'session', id, label: sessionLabel(id, ctx) };
 }
 
 register('session_send', (call, ctx) => {
   const args = rec(call.args);
   const output = rec(parseJson(call.output));
   const id = str(args?.conversationId);
-  const title = ctx.t('Sent to 「{{title}}」', { title: sessionLabel(id, ctx) });
+  const title = ctx.t('Send message {{title}}', { title: sessionLabel(id, ctx) });
   const blocks: ToolCardBlock[] = [];
   const message = str(args?.message);
   if (message) blocks.push({ kind: 'markdown', text: message, collapsed: longText(message) });
@@ -315,7 +312,7 @@ register('session_stop', (call, ctx) => {
   const error = errorText(call, ctx);
   return view(
     call,
-    ctx.t('Stopped 「{{title}}」', { title: sessionLabel(id, ctx) }),
+    ctx.t('Stop session {{title}}', { title: sessionLabel(id, ctx) }),
     [
       ...(id ? [{ kind: 'session' as const, id, label: sessionLabel(id, ctx) }] : []),
       ...(error ? [{ kind: 'error' as const, text: error }] : []),
@@ -358,10 +355,11 @@ function dispatchCard(
   const blocks: ToolCardBlock[] = [
     ...(error ? [{ kind: 'error' as const, text: error }] : []),
     ...(rows.length > 0 ? [{ kind: 'kv' as const, rows }] : []),
-    ...(prompt ? [{ kind: 'markdown' as const, text: prompt, collapsed: longText(prompt) }] : []),
+    // 提示词在详情里再折一层，默认只留一行
+    ...(prompt ? [{ kind: 'markdown' as const, text: prompt, collapsed: true }] : []),
     ...(created ? [created] : []),
   ];
-  const key = mode === 'dispatch' ? 'Dispatch 「{{title}}」' : 'Create 「{{title}}」';
+  const key = mode === 'dispatch' ? 'Dispatch session {{title}}' : 'Create session {{title}}';
   return view(
     call,
     ctx.t(key, { title: titleText || ctx.t('New session') }),
@@ -390,7 +388,7 @@ register('todo_item_add', (call, ctx) => {
   ];
   return view(
     call,
-    ctx.t('Added to-do 「{{text}}」', { text }),
+    ctx.t('Add to-do {{text}}', { text }),
     rows.length ? [{ kind: 'kv', rows }] : []
   );
 });
@@ -459,7 +457,7 @@ register('todo_item_update', (call, ctx) => {
   else if (args?.done === false) blocks.push({ kind: 'note', text: ctx.t('Marked not done') });
   return view(
     call,
-    ctx.t('To-do 「{{text}}」', { text: todoTextOf(call, ctx) }),
+    ctx.t('Update to-do {{text}}', { text: todoTextOf(call, ctx) }),
     blocks,
     error ? { tone: 'error', label: ctx.t('Refused') } : undefined
   );
@@ -490,7 +488,7 @@ register('todo_list', (call, ctx) => {
   const error = errorText(call, ctx);
   return view(
     call,
-    ctx.t('Listed to-dos'),
+    ctx.t('List to-dos'),
     [
       ...(error ? [{ kind: 'error' as const, text: error }] : []),
       ...(items.length > 0 ? [{ kind: 'list' as const, items }] : []),
@@ -525,11 +523,11 @@ register('schedule_add', (call, ctx) => {
           },
         ]
       : []),
-    ...(prompt ? [{ kind: 'markdown' as const, text: prompt, collapsed: longText(prompt) }] : []),
+    ...(prompt ? [{ kind: 'markdown' as const, text: prompt, collapsed: true }] : []),
   ];
   return view(
     call,
-    ctx.t('Schedule 「{{name}}」', { name }),
+    ctx.t('Add schedule {{name}}', { name }),
     blocks,
     error ? { tone: 'error', label: ctx.t('Refused') } : undefined
   );
@@ -543,7 +541,7 @@ register('schedule_remove', (call, ctx) => {
   const error = errorText(call, ctx);
   return view(
     call,
-    ctx.t('Removed schedule 「{{name}}」', { name }),
+    ctx.t('Remove schedule {{name}}', { name }),
     error ? [{ kind: 'error', text: error }] : [],
     error ? { tone: 'error', label: ctx.t('Refused') } : undefined
   );
@@ -572,7 +570,7 @@ register('session_list', (call, ctx) => {
   });
   return view(
     call,
-    project ? ctx.t('Listed sessions in {{project}}', { project }) : ctx.t('Listed sessions'),
+    project ? ctx.t('List sessions in {{project}}', { project }) : ctx.t('List sessions'),
     items.length > 0 ? [{ kind: 'list', items }] : []
   );
 });
@@ -582,6 +580,7 @@ register('session_read', (call, ctx) => {
   const id = str(output?.conversationId) ?? str(rec(call.args)?.conversationId);
   const title = str(output?.title) ?? sessionLabel(id, ctx);
   const badge = stateBadge(output?.state, ctx);
+  const status: ToolCardStatus = { tone: badge.badgeTone, label: badge.badge };
   const pending = rec(output?.pending);
   const approvals = typeof pending?.approvals === 'number' ? pending.approvals : 0;
   const asks = typeof pending?.asks === 'number' ? pending.asks : 0;
@@ -595,27 +594,34 @@ register('session_read', (call, ctx) => {
       return [`${role}: ${firstLine(text)}`];
     })
     .join('\n');
+  const error = errorText(call, ctx);
   const blocks: ToolCardBlock[] = [
-    {
-      kind: 'list',
-      items: [
-        {
-          title,
-          badge: badge.badge,
-          badgeTone: badge.badgeTone,
-          detail: ctx.t('Approvals {{approvals}} · questions {{asks}}', { approvals, asks }),
-          ...(id ? { sessionId: id } : {}),
-        },
-      ],
-    },
+    ...(error ? [{ kind: 'error' as const, text: error }] : []),
+    ...(approvals > 0 || asks > 0
+      ? [
+          {
+            kind: 'kv' as const,
+            rows: [
+              { label: ctx.t('Pending approvals'), value: String(approvals) },
+              { label: ctx.t('Pending questions'), value: String(asks) },
+            ],
+          },
+        ]
+      : []),
   ];
   if (summary) blocks.push({ kind: 'markdown', text: summary, collapsed: true });
-  return view(call, ctx.t('Read 「{{title}}」', { title }), blocks);
+  // 会话状态只出现在徽标上，详情里不再重复一遍
+  return view(
+    call,
+    ctx.t('Read session {{title}}', { title }),
+    blocks,
+    error ? { tone: 'error', label: ctx.t('Refused') } : status
+  );
 });
 
 function projectBits(row: Record<string, unknown>, ctx: ToolCardContext): string {
   const git = rec(row.git);
-  const parts = [str(row.name) ?? projectLabel(str(row.projectId), ctx)];
+  const parts: string[] = [];
   if (git) {
     parts.push(str(git.branch) ?? ctx.t('No local branch'));
     parts.push(git.dirty === true ? ctx.t('Uncommitted changes') : ctx.t('Clean tree'));
@@ -627,12 +633,14 @@ register('project_list', (call, ctx) => {
   const projects = Array.isArray(rec(parseJson(call.output))?.projects)
     ? (rec(parseJson(call.output))?.projects as unknown[])
     : [];
-  return view(call, ctx.t('Projects'), [
+  return view(call, ctx.t('List projects'), [
     {
       kind: 'list',
       items: projects.flatMap((entry) => {
         const row = rec(entry);
-        return row ? [{ title: projectBits(row, ctx) }] : [];
+        if (!row) return [];
+        const name = str(row.name) ?? projectLabel(str(row.projectId), ctx);
+        return [{ title: name, detail: projectBits(row, ctx) }];
       }),
     },
   ]);
@@ -642,7 +650,9 @@ register('project_info', (call, ctx) => {
   const output = rec(parseJson(call.output)) ?? {};
   const name =
     str(output.name) ?? projectLabel(str(output.projectId) ?? str(rec(call.args)?.projectId), ctx);
-  return view(call, name, [{ kind: 'note', text: projectBits({ ...output, name }, ctx) }]);
+  return view(call, ctx.t('Project {{name}}', { name }), [
+    { kind: 'note', text: projectBits(output, ctx) },
+  ]);
 });
 
 const PROFILE_FIELDS: Record<string, string> = {
@@ -709,8 +719,8 @@ function proposalBody(call: ToolCallInput, ctx: ToolCardContext, titleKey: strin
   );
 }
 
-register('skill_propose', (call, ctx) => proposalBody(call, ctx, 'Propose skill 「{{name}}」'));
-register('tool_propose', (call, ctx) => proposalBody(call, ctx, 'Propose tool 「{{name}}」'));
+register('skill_propose', (call, ctx) => proposalBody(call, ctx, 'Propose skill {{name}}'));
+register('tool_propose', (call, ctx) => proposalBody(call, ctx, 'Propose tool {{name}}'));
 
 register('session_takeover_propose', (call, ctx) => {
   const args = rec(call.args);
@@ -720,7 +730,7 @@ register('session_takeover_propose', (call, ctx) => {
   const error = errorText(call, ctx);
   return view(
     call,
-    ctx.t('Ask to take over 「{{title}}」', { title: sessionLabel(id, ctx) }),
+    ctx.t('Ask to take over {{title}}', { title: sessionLabel(id, ctx) }),
     [
       ...(error ? [{ kind: 'error' as const, text: error }] : []),
       ...(reason ? [{ kind: 'note' as const, text: reason }] : []),
@@ -732,11 +742,9 @@ register('session_takeover_propose', (call, ctx) => {
 register('memory_search', (call, ctx) => {
   const query = str(rec(call.args)?.query) ?? '';
   const hits = parseMemorySearchHits(call.output) ?? [];
-  return view(
-    call,
-    ctx.t('Searched memory 「{{query}}」 · {{count}}', { query, count: hits.length }),
-    [{ kind: 'list', items: hits.map((hit) => ({ title: hit.title || shortId(hit.id) })) }]
-  );
+  return view(call, ctx.t('Search memory {{query}} · {{count}}', { query, count: hits.length }), [
+    { kind: 'list', items: hits.map((hit) => ({ title: hit.title || shortId(hit.id) })) },
+  ]);
 });
 
 register('memory_capture', (call, ctx) => {
@@ -753,7 +761,7 @@ register('memory_capture', (call, ctx) => {
       },
     ]);
   }
-  return view(call, ctx.t('Saved memory 「{{title}}」', { title: parsed.memory.title }), [
+  return view(call, ctx.t('Save memory {{title}}', { title: parsed.memory.title }), [
     { kind: 'note', text: firstLine(parsed.memory.content) },
   ]);
 });
@@ -766,7 +774,7 @@ register('memory_delete', (call, ctx) => {
   const error = errorText(call, ctx);
   return view(
     call,
-    ctx.t('Deleted memory 「{{title}}」', { title }),
+    ctx.t('Delete memory {{title}}', { title }),
     [
       ...(error ? [{ kind: 'error' as const, text: error }] : []),
       ...(content ? [{ kind: 'note' as const, text: firstLine(content) }] : []),
@@ -788,7 +796,7 @@ function searchSources(output: string | null): { title: string; url: string }[] 
 register('web_search', (call, ctx) => {
   const query = str(rec(call.args)?.query) ?? '';
   const sources = searchSources(call.output);
-  return view(call, ctx.t('Web search 「{{query}}」', { query }), [
+  return view(call, ctx.t('Web search {{query}}', { query }), [
     { kind: 'list', items: sources.map((source) => ({ title: source.title, detail: source.url })) },
   ]);
 });
@@ -807,7 +815,7 @@ register('web_fetch', (call, ctx) => {
   const title = /^Title: (.+)$/mu.exec(output)?.[1]?.trim();
   return view(
     call,
-    ctx.t('Fetched {{domain}}', { domain }),
+    ctx.t('Fetch {{domain}}', { domain }),
     title ? [{ kind: 'note', text: title }] : []
   );
 });

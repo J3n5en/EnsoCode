@@ -7,6 +7,7 @@ import {
   type ToolCallInput,
   type ToolCardBlock,
   type ToolCardLookup,
+  type ToolCardStatus,
   type ToolCardView,
 } from '@/lib/toolCards';
 import { cn } from '@/lib/utils';
@@ -67,83 +68,121 @@ export function ToolCallCards({ item }: { item: ToolItem }) {
     locale: locale === 'zh' ? 'zh' : 'en',
     lookup,
   });
-  const [open, setOpen] = useState(!present.grouped);
-  const cards = present.grouped && !open ? [] : present.cards;
   const state = aggregateState(present.cards.map((card) => card.state));
+  // 和普通工具行一样默认收成一行，点开才看详情
+  const [open, setOpen] = useState(false);
+  const single = present.grouped ? null : (present.cards[0] ?? null);
   return (
     <div
       data-enso="tool-card"
       data-tool={item.name}
+      data-open={open ? 'true' : 'false'}
       data-grouped={present.grouped ? 'true' : 'false'}
       data-count={present.cards.length}
-      className="my-1 w-full overflow-hidden rounded-lg border border-border/70 bg-card text-[13px] shadow-xs"
+      className="my-0.5 w-full min-w-0 text-[13px]"
     >
-      <div className="flex min-w-0 items-center gap-2 px-2.5 py-1">
+      <button
+        type="button"
+        data-enso="tool-card-expand"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="group/step flex min-h-6 w-full min-w-0 items-center gap-2 text-left text-[13px] text-muted-foreground"
+      >
         <StepDot state={state} />
-        {present.grouped ? (
-          <button
-            type="button"
-            data-enso="tool-card-expand"
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
-            className="flex min-w-0 flex-1 items-center gap-1 text-left"
-          >
-            <span className="min-w-0 flex-1 truncate font-medium">{present.title}</span>
-            <ChevronRight
-              className={cn('h-3 w-3 shrink-0 text-muted-foreground', open && 'rotate-90')}
-            />
-          </button>
-        ) : (
-          <span className="min-w-0 flex-1 truncate font-medium">{present.title}</span>
-        )}
-      </div>
-      {cards.map((card, index) => (
-        <CardBody
-          // biome-ignore lint/suspicious/noArrayIndexKey: 卡片顺序随这一次调用快照整体替换
-          key={`${card.title}-${index}`}
-          card={card}
-          known={knownSessions}
-          onOpen={selectConversation}
-          nested={present.grouped}
+        <span className="min-w-0 flex-1 truncate">
+          {present.grouped ? present.title : single?.title}
+        </span>
+        {single?.status ? <StatusBadge status={single.status} /> : null}
+        <ChevronRight
+          className={cn(
+            'h-3 w-3 shrink-0 opacity-0 transition-[opacity,transform] group-hover/step:opacity-100',
+            open && 'rotate-90 opacity-100'
+          )}
         />
-      ))}
+      </button>
+      {open && present.grouped
+        ? present.cards.map((card, index) => (
+            <NestedCard
+              // biome-ignore lint/suspicious/noArrayIndexKey: 卡片顺序随这一次调用快照整体替换
+              key={`${card.title}-${index}`}
+              card={card}
+              known={knownSessions}
+              onOpen={selectConversation}
+            />
+          ))
+        : null}
+      {open && single ? (
+        <CardDetails card={single} known={knownSessions} onOpen={selectConversation} />
+      ) : null}
     </div>
   );
 }
 
-function CardBody({
+function StatusBadge({ status }: { status: ToolCardStatus }) {
+  return (
+    <span
+      data-enso="tool-card-status"
+      data-tone={status.tone}
+      className={cn(
+        'shrink-0 rounded px-1 py-px text-[10px]',
+        status.tone === 'error' && 'bg-destructive/15 text-destructive',
+        status.tone === 'ok' && 'bg-success/15 text-success',
+        (status.tone === 'queued' || status.tone === 'pending') && 'bg-warning/15 text-warning',
+        status.tone === 'neutral' && 'bg-muted text-muted-foreground'
+      )}
+    >
+      {status.label}
+    </span>
+  );
+}
+
+function NestedCard({
   card,
   known,
   onOpen,
-  nested,
 }: {
   card: ToolCardView;
   known: Record<string, { title?: string } | undefined>;
   onOpen: (id: string) => void;
-  nested: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="pl-5">
+      <button
+        type="button"
+        data-enso="tool-card-expand"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="group/step flex min-h-6 w-full min-w-0 items-center gap-2 text-left text-[13px] text-muted-foreground"
+      >
+        <span className="min-w-0 flex-1 truncate">{card.title}</span>
+        {card.status ? <StatusBadge status={card.status} /> : null}
+        <ChevronRight
+          className={cn(
+            'h-3 w-3 shrink-0 opacity-0 transition-[opacity,transform] group-hover/step:opacity-100',
+            open && 'rotate-90 opacity-100'
+          )}
+        />
+      </button>
+      {open ? <CardDetails card={card} known={known} onOpen={onOpen} /> : null}
+    </div>
+  );
+}
+
+function CardDetails({
+  card,
+  known,
+  onOpen,
+}: {
+  card: ToolCardView;
+  known: Record<string, { title?: string } | undefined>;
+  onOpen: (id: string) => void;
 }) {
   const { t } = useI18n();
   const [raw, setRaw] = useState(false);
   return (
-    <div className={cn('border-t border-border/60 px-2.5 py-1.5', nested && 'bg-muted/20')}>
-      {nested && <p className="mb-1 truncate font-medium text-xs">{card.title}</p>}
-      {card.status && (
-        <p
-          data-enso="tool-card-status"
-          data-tone={card.status.tone}
-          className={cn(
-            'mb-1 text-xs',
-            card.status.tone === 'error' && 'font-medium text-destructive',
-            card.status.tone === 'ok' && 'text-green-700 dark:text-green-400',
-            (card.status.tone === 'queued' || card.status.tone === 'pending') &&
-              'text-amber-700 dark:text-amber-400',
-            card.status.tone === 'neutral' && 'text-muted-foreground'
-          )}
-        >
-          {card.status.label}
-        </p>
-      )}
-      <div data-enso="tool-card-body" className="space-y-1">
+    <div data-enso="tool-card-body" className="space-y-1 py-0.5 pl-5 text-[12px]">
+      <div className="space-y-1">
         {card.blocks.map((block, index) => (
           <Block
             // biome-ignore lint/suspicious/noArrayIndexKey: 块顺序随工具结果整体替换
@@ -204,11 +243,12 @@ function Block({
   }
   if (block.kind === 'markdown') {
     const collapsed = block.collapsed && !opened;
-    const text = collapsed ? block.text.split('\n').slice(0, 6).join('\n') : block.text;
     return (
       <div className="text-sm">
         {collapsed ? (
-          <p className="line-clamp-6 whitespace-pre-wrap text-xs">{text}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {block.text.split('\n').find((line) => line.trim())}
+          </p>
         ) : (
           <Markdown text={block.text} />
         )}
@@ -289,9 +329,9 @@ function Block({
               data-tone={row.badgeTone}
               className={cn(
                 'shrink-0 rounded px-1 py-px text-[10px]',
-                row.badgeTone === 'error' && 'bg-destructive/10 text-destructive',
-                row.badgeTone === 'ok' && 'bg-green-500/10 text-green-700 dark:text-green-400',
-                row.badgeTone === 'pending' && 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+                row.badgeTone === 'error' && 'bg-destructive/15 text-destructive',
+                row.badgeTone === 'ok' && 'bg-success/15 text-success',
+                row.badgeTone === 'pending' && 'bg-warning/15 text-warning',
                 (!row.badgeTone || row.badgeTone === 'neutral' || row.badgeTone === 'queued') &&
                   'bg-muted text-muted-foreground'
               )}
