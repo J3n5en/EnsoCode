@@ -123,6 +123,7 @@
 | `session.readAll` | 要看所有项目的会话 | `enso.session.list({ scope: 'all' })`，`enso.session.status` 可查任意项目的会话；涵盖 `session.read` |
 | `session.focus` | 要切换到会话 | `enso.session.focus` |
 | `session.create` | 要新建会话 | `enso.session.create` |
+| `agent.run` | 要用会话的模型跑只读代理 | `enso.agent.run`，见「只读代理」 |
 
 主题的 CSS 不进上表，也不要往 `permissions` 里写一个样式权限，未知名字会被拒绝。任一 `themes` 项带了 `css`，安装和更新对话框会多出「修改界面样式：主题 CSS 可改变应用任意界面」。这项从无到有时要重新同意。只提供调色板的主题没有这项。调色板、派生变量和锚点见 [主题](theming.md)。
 
@@ -156,7 +157,7 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
   - 全局还是预设专用：`skills`、`mcpServers`、`workflows`、`agentTypes` 里的条目没被任何预设列出时，对所有会话生效；被某个预设列出后，只在选中这个预设（或自建预设叠加了它）的会话里生效。
 - `agentTypes`：`{ name, description, systemPrompt, tools?, skills? }`，最多 20 个，见下文「子代理类型」。
 - `methods`：`{ name, timeoutMs }`，给 `renderer.handle` 注册的方法声明更长的超时，1000 到 120000 毫秒的整数。没声明的方法 2 秒超时。
-- `configuration`：`{ key, title, description?, secret?, type?, default?, options?, min?, max?, pathKind? }`，最多 20 项。`key` 匹配 `^[A-Za-z][A-Za-z0-9_]{0,31}$`，`title` 最长 60 字符。`type` 是 `string`（缺省）、`number`（可带 `min` / `max`）、`boolean`、`enum`（必须带 `options`）或 `path`（可带 `pathKind: 'file' | 'directory'`）；只有 `string` 能设 `secret`。用户在设置页或命令行里填写，插件用 `enso.config.get()` 读取。
+- `configuration`：`{ key, title, description?, secret?, type?, default?, options?, min?, max?, pathKind? }`，最多 20 项。`key` 匹配 `^[A-Za-z][A-Za-z0-9_]{0,31}$`，`title` 最长 60 字符。`type` 是 `string`（缺省）、`number`（可带 `min` / `max`）、`boolean`、`enum`（必须带 `options`）、`path`（可带 `pathKind: 'file' | 'directory'`）或 `model`（`default` 只能是 `session` 或 `title`，每个插件最多一个，决定 `agent.run` 用的模型，见「只读代理」）；只有 `string` 能设 `secret`。用户在设置页或命令行里填写，插件用 `enso.config.get()` 读取。
 - `events`：`{ event, mode?, failClosed?, tools? }`，订阅会话事件，见下文「会话事件」。
 - `schedules`：`{ id, intervalSeconds, timeoutMs? }`，最多 10 个。间隔 60 到 86400 秒，单次缺省 60 秒超时。
 - `exports`：`{ name, timeoutMs? }`，允许其他插件调用的方法。
@@ -247,6 +248,7 @@ export async function activate(enso) {
 | `session.focus(sessionId)` | 需要 `session.focus`。切换到同项目的会话（子会话切到所属主会话的对应标签）。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；会话不在本项目返回 `NOT_FOUND` |
 | `session.create({ text? })` | 需要 `session.create`。在发起会话的项目里新建会话并切过去，返回 `{ sessionId }`。`text`（不超过 32KB）只填进新会话的输入框，由用户确认后发送。只能在用户操作触发的调用里用 |
 | `host.capabilities()` | 返回 `{ host: 'desktop' \| 'server', hostVersion, notify, mcp, clipboard, openExternal, composer }`，用来在桌面和服务端之间降级 |
+| `agent.run(input)` | 见「只读代理」 |
 | `triggers.register(name, handlers)` | `handlers.candidates(query, ctx)` 与 `handlers.pick(item, ctx)` |
 | `renderer.handle(method, handler)` | 供渲染模块和侧栏页面调用，`handler(args, ctx)` |
 | `fs.readText(path)` / `fs.writeText(path, text)` | 路径相对当前会话的项目根 |
@@ -254,6 +256,7 @@ export async function activate(enso) {
 | `ui.notify(title, body?)` | 系统通知 |
 | `ui.view.emit(name, data?)` | 推一条事件到本插件已打开的侧栏页面。需要 `ui.view`，不需要用户手势，也不需要在宿主发起的调用里，所以 Agent 工具、常驻进程和定时任务都能调。`name` 是小写字母开头、最长 64 的 `a-z` `0-9` `.` `_` `-`；`data` 须可 JSON 序列化，不超过 256KB。没打开侧栏时直接丢掉。每插件每秒最多 20 条 |
 | `ui.view.open(viewId?)` | 打开当前会话的右侧栏并创建或聚焦本插件的侧栏页面（`viewId` 缺省取清单 `views` 的第一项）。需要 `ui.view`，不需要用户手势 |
+| `ui.view.close(viewId?)` | 关掉当前会话里本插件的侧栏页面；右侧栏原本是收起的、由 `open` 打开，并且这个页面仍是当前标签时，一并收起右侧栏。需要 `ui.view`，不需要用户手势 |
 | `ui.clipboard.writeText(text)` / `ui.openExternal(url)` | 写剪贴板、用系统浏览器打开链接。只能在用户操作触发的调用里用（同草稿的 30 秒手势）；链接只接受 `http`、`https`、`mailto`；剪贴板文本不超过 1MB |
 | `composer.readDraft()` / `insertText(input)` / `replaceDraft(input)` | 见下 |
 | `config.get()` | 本插件的配置值，按 `type` 返回字符串、数字或布尔值；未设置的键取 `default`，没有 `default` 就不出现。不需要权限，`activate` 里也能调 |
@@ -369,6 +372,21 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 - `images` 是 `[{ data, mimeType }]`，`data` 为 base64，`mimeType` 只能是 `image/png`、`image/jpeg`、`image/webp`、`image/gif`；最多 4 张，每张 base64 不超过 7M 字符。图片随文字一起交给模型，不合法返回 `INVALID_ARGS`。
 
 `session.abort(sessionId?)` 中止会话正在进行的一轮，权限与目标会话规则同 `session.inject`（不计入频率限制）。会话没在运行返回 `ABORT_FAILED`。
+
+### 只读代理
+
+`agent.run({ prompt, systemPrompt?, context?, timeoutMs?, onEvent?, signal? })` 在发起调用的会话旁跑一个临时代理，返回 `Promise<{ text, model? }>`（最后一条回复的正文和实际使用的模型 id）。缺省用该会话的模型和推理档位。需要 `agent.run`。适合「先读代码再改写提示词」「先调研再给建议」这类不想占用主对话的活。
+
+- 只有 `read`、`grep`、`find`、`ls` 等只读工具（不能写文件、跑命令，不加载 skill、扩展和插件工具）；需要审批的操作直接按「没人能批准」拒绝，不弹卡片。
+- 不进会话记录、不显示在会话里，结束后丢弃。会话没在运行时先请发起窗口启动它，同 `session.inject`。
+- 必须在带会话的宿主调用里发起（`NO_INVOCATION` / `NO_SESSION`），但运行不随这次调用结束：渲染方法可以发起后立刻返回，代理在后台继续，期间插件进程不会因空闲退出。
+- `prompt` 不超过 64K 字符；`systemPrompt` 不超过 32K 字符，包成 `<role>` 放在任务前；`timeoutMs` 10 秒到 20 分钟，缺省 10 分钟。
+- `context`：`none`（缺省）不带对话；`conversation` 附上会话最近 40 条对话文本；`fork` 从会话最近一次请求分叉——系统提示、工具声明、完整对话原样照搬，任务作为新的一条用户消息接在后面，所以第一轮就能读到会话的提示缓存。分叉时会话的其他工具仍在声明里（不改前缀），但只有 `read`、`grep`、`find`、`ls` 能执行（开了沙箱脚本时还有 `codemode`，脚本里同样只能调这几个只读工具），其余调用被拒绝。插件设置了模型、会话换过模型、或会话这次启动后还没发过请求时，`fork` 退回 `conversation`。
+- 只读工具也可能经 `codemode` 脚本批量调用；脚本里的调用照常上报，带 `parentId` 指向那次 `codemode`。
+- `onEvent(event)`：`{ type: 'tool-start', id, name, args, parentId? }`（`args` 是截到 4K 字符的 JSON）、`{ type: 'tool-end', id, isError, output? }`（`output` 是结果文本，截到 4K 字符）、`{ type: 'text', text }`（当前回复的完整正文，约 300ms 一次）。
+- `signal` 中止或超时后 Promise 分别以 `ABORTED` / `AGENT_FAILED` 拒绝；模型出错、没有回复也是 `AGENT_FAILED`。插件停用或进程退出时宿主取消它的代理。
+- 每个插件同时最多 2 个，超过返回 `RATE_LIMITED`。
+- 模型由用户决定，插件不能在调用里指定：清单 `configuration` 里声明一个 `type: 'model'` 的配置项，设置页就出现模型选择，可选「跟随当前会话」（`session`，缺省）、「跟随标题模型」（`title`，依次取标题模型、全局默认模型，都不可用时跟随会话）或从已配置的模型里指定一个（值为 `<providerId>::<modelId>`）。指定的模型不可用时返回 `AGENT_FAILED`。
 
 ### 状态项
 
@@ -551,6 +569,7 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 | 侧栏页面状态 | 每插件 1MB |
 | 会话拦截 | 每插件 5 秒，合计 25 秒；`before_compact` 10 秒；子代理与 coworker 只拦 `tool_call`，每插件 2 秒、合计 5 秒（单独计时），其余事件只通知、不等待 |
 | 注入消息 | 32K 字符；每插件 10 秒 5 条 |
+| 只读代理 | 任务 64K 字符，角色 32K 字符；10 秒–20 分钟，缺省 10 分钟；每插件同时 2 个 |
 | 拦截熔断 | 同事件连续失败 3 次放行 30 秒；子代理与 coworker 单独计数 |
 | 剪贴板 | 1MB |
 | 动态注册 | 工具 50 个，命令 20 个 |
@@ -602,4 +621,5 @@ iframe 只有 `allow-scripts`，没有 `allow-modals`，`alert`、`confirm`、`p
 | `QUOTA` | 动态工具或命令已达清单上限 |
 | `CALL_DEPTH` | 插件间调用嵌套超过 3 层 |
 | `INJECT_FAILED` | 会话不在运行或未接受注入 |
+| `AGENT_FAILED` | 只读代理没能启动、超时、模型出错或没有回复，`message` 是原因 |
 | `UNSUPPORTED` | 当前环境不支持（服务端的系统通知、剪贴板和外链，Agent 进程不可用时的 MCP 调用）。用 `host.capabilities()` 提前判断 |

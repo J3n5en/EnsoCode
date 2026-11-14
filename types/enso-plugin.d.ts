@@ -19,6 +19,7 @@ import type {
   ExtensionPluginPermission,
 } from '../src/shared/extensionPlugins/manifest';
 import type {
+  PluginAgentRunEvent,
   PluginAgentSource,
   PluginArtifactInfo,
   PluginHostCapabilities,
@@ -30,6 +31,7 @@ import type { StatusPatch } from '../src/shared/extensionPlugins/statusItems';
 export type {
   ExtensionPluginManifest,
   ExtensionPluginPermission,
+  PluginAgentRunEvent,
   PluginAgentSource,
   PluginArtifactInfo,
   PluginEventName,
@@ -147,6 +149,7 @@ export interface EnsoHostApi {
   'ui.notify': (title: string, body?: string) => Promise<void>;
   'ui.viewEvent': (name: string, data?: unknown) => Promise<void>;
   'ui.viewOpen': (input?: string | { viewId?: string; sessionId?: string }) => Promise<void>;
+  'ui.viewClose': (input?: string | { viewId?: string; sessionId?: string }) => Promise<void>;
   'ui.statusUpdate': (id: string, patch: StatusPatch) => Promise<void>;
   'composer.readDraft': () => Promise<EnsoDraft>;
   'composer.insertText': (input: { text: string }) => Promise<EnsoDraftRev>;
@@ -186,6 +189,33 @@ export interface EnsoHostApi {
   'session.create': (input?: { text?: string }) => Promise<{ sessionId: string }>;
   /** 内部开关，作者用 `enso.session.onTurnEnd` */
   'session.watchTurnEnd': (input: { on: boolean }) => Promise<void>;
+  /**
+   * 用发起会话的模型跑一个临时只读代理（read/grep/find/ls，不能改文件、不弹审批），需要 `agent.run`。
+   * 必须在带会话的宿主调用里发起；运行不随调用结束，可在方法返回后继续，每个插件最多同时 2 个。
+   */
+  /** model：实际使用的模型 id */
+  'agent.run': (input: EnsoAgentRunInput) => Promise<{ text: string; model?: string }>;
+  /** 内部接口，作者用 `signal` 取消 */
+  'agent.cancel': (input: { runId: string }) => Promise<boolean>;
+}
+
+export interface EnsoAgentRunInput {
+  /** 任务正文，不超过 64K 字符 */
+  prompt: string;
+  /** 角色说明，包成 `<role>` 放在任务前；不超过 32K 字符 */
+  systemPrompt?: string;
+  /**
+   * `conversation` 附上发起会话最近 40 条对话文本；
+   * `fork` 从发起会话分叉：带完整对话、同模型，复用会话的提示缓存（插件设置了模型、或会话还没发过请求时退回 `conversation`）；
+   * 缺省 `none`
+   */
+  context?: 'conversation' | 'fork' | 'none';
+  /** 10 秒到 20 分钟，缺省 10 分钟 */
+  timeoutMs?: number;
+  /** 工具开始/结束与回复正文（完整正文，节流约 300ms） */
+  onEvent?: (event: Exclude<PluginAgentRunEvent, { type: 'end' }>) => unknown;
+  /** 中止后 Promise 以 `ABORTED` 拒绝 */
+  signal?: AbortSignal;
 }
 
 export interface EnsoCallContext {
@@ -304,6 +334,7 @@ export interface EnsoMain {
     onTurnEnd(listener: (event: { sessionId: string }) => void): EnsoDisposable;
   };
   host: { capabilities: EnsoHostApi['host.capabilities'] };
+  agent: { run: EnsoHostApi['agent.run'] };
   fs: { readText: EnsoHostApi['fs.readText']; writeText: EnsoHostApi['fs.writeText'] };
   net: { fetch: EnsoHostApi['net.fetch'] };
   ui: {
@@ -313,6 +344,8 @@ export interface EnsoMain {
       emit: EnsoHostApi['ui.viewEvent'];
       /** 打开右侧栏并创建或聚焦本插件的侧栏页面（缺省首个视图）。需要 `ui.view` */
       open: EnsoHostApi['ui.viewOpen'];
+      /** 关掉本插件的侧栏页面；右侧栏是 `open` 为它打开的就一并收起。需要 `ui.view` */
+      close: EnsoHostApi['ui.viewClose'];
     };
     clipboard: { writeText: EnsoHostApi['ui.clipboard'] };
     openExternal: EnsoHostApi['ui.openExternal'];

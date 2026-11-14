@@ -23,6 +23,7 @@ const LABELS: Record<ExtensionPluginPermission, string> = {
   'session.readAll': '查看所有项目的会话列表与运行状态',
   'session.focus': '在你点击时切换到本项目的会话',
   'session.create': '在你点击时于本项目新建会话',
+  'agent.run': '用当前会话的模型运行只读代理（可读项目文件与对话内容，不能修改）',
 };
 
 export function pluginPermissionLabel(permission: string): string {

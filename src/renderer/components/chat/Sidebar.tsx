@@ -221,6 +221,7 @@ export function Sidebar({
   const keybindings = useSettingsStore((state) => state.keybindings);
   const activeRetentionMinutes = useSettingsStore((state) => state.activeRetentionMinutes);
   const headerRecentMinutes = useSettingsStore((state) => state.headerRecentMinutes);
+  const headerDismissed = useSessionSwitchState((state) => state.dismissed);
   const searchBinding = effectiveKeybindings(keybindings)['search-workspace'];
   const searchShortcut = searchBinding ? formatBinding(searchBinding) : '';
   const addProject = useSettingsStore((state) => state.addProject);
@@ -700,7 +701,8 @@ export function Sidebar({
     conversations,
     archivedProjectIds,
     { now: nowTick, ms: headerRecentMinutes * 60_000 },
-    inActiveGroup
+    inActiveGroup,
+    headerDismissed
   );
   if (activeId && conversations[activeId] && !conversations[activeId].parentId) {
     if (!headerTabIds.includes(activeId)) headerTabIds.push(activeId);

@@ -206,6 +206,24 @@ describe('PluginProcess', () => {
     expect(s.onExit).not.toHaveBeenCalled();
   });
 
+  it('有代理在跑时不因空闲退出，终态推给进程后重新计时', async () => {
+    let busy = true;
+    const s = setup({ busy: () => busy });
+    await readyProcess(s);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(s.child().inbox).not.toContainEqual({ t: 'shutdown' });
+    s.proc.notifyAgentRun('r1', { type: 'text', text: 'x' });
+    busy = false;
+    s.proc.notifyAgentRun('r1', { type: 'end', ok: true, text: 'y' });
+    expect(s.child().inbox).toContainEqual({
+      t: 'agent-run',
+      runId: 'r1',
+      event: { type: 'end', ok: true, text: 'y' },
+    });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(s.child().inbox).toContainEqual({ t: 'shutdown' });
+  });
+
   it('stop 先发 shutdown，进程自己退出就不再 kill', async () => {
     const s = setup();
     await readyProcess(s);

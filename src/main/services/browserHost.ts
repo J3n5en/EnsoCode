@@ -211,6 +211,8 @@ interface Tab {
   synthetic: number;
   /** 上一个占用该 tab 的成员会话；换人后旧快照的 ref 作废 */
   lastHolder?: string;
+  /** CDP 截图改过页面视图尺寸，下次显示时要按容器重新对齐 */
+  refit?: boolean;
 }
 
 const EMPTY_STATE: BrowserTabState = {
@@ -480,6 +482,10 @@ export class BrowserHost {
         contentView.addChildView(tab.devtools, 0);
       }
       if (onTop && this.shown) {
+        if (tab.refit) {
+          tab.refit = false;
+          tab.view.setBounds({ ...this.shown.viewport, height: this.shown.viewport.height + 1 });
+        }
         tab.view.setBounds(this.shown.viewport);
         tab.view.setBorderRadius(this.shown.viewport.radius ?? 0);
         tab.view.setVisible(true);
@@ -1650,6 +1656,7 @@ export class BrowserHost {
     tab.synthetic += 1;
     const result = await this.cdp(tab, method, params).finally(() => {
       tab.synthetic -= 1;
+      if (method === 'Page.captureScreenshot') this.refitGuest(tab);
     });
     if (result === undefined) {
       throw new Error(`CDP method ${method} returned no result`);
@@ -1699,11 +1706,26 @@ export class BrowserHost {
       tab,
       'Page.captureScreenshot',
       pageScreenshotCdpParams(clip, opts)
-    )) as { data?: unknown } | undefined;
+    ).finally(() => this.refitGuest(tab))) as { data?: unknown } | undefined;
     if (typeof shot?.data !== 'string' || !shot.data) {
       throw new Error('Screenshot is empty; the page has not painted yet.');
     }
     return { data: shot.data, mimeType: 'image/png' };
+  }
+
+  /**
+   * Page.captureScreenshot 会把页面视图 SetSize 成截图尺寸，截完还原成开始时的旧尺寸。
+   * Windows（Aura）上页面视图只在容器尺寸变化时跟随，截图期间 bounds 变过或同尺寸再显示
+   * 就卡在旧尺寸，下方残留旧帧 / 白底。容器尺寸弹一下让它重新对齐；不走 layout，免得清掉 agent 的仿真。
+   */
+  private refitGuest(tab: Tab): void {
+    if (this.shown?.tabId !== tab.id) {
+      tab.refit = true;
+      return;
+    }
+    const { viewport } = this.shown;
+    tab.view.setBounds({ ...viewport, height: viewport.height + 1 });
+    tab.view.setBounds(viewport);
   }
 
   private assertRef(tab: Tab, ref: string): void {

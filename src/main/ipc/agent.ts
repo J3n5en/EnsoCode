@@ -1718,6 +1718,7 @@ export function registerAgentHandlers(): void {
       workerEvent.type === 'privacy-mask-ledger' ||
       workerEvent.type === 'mcp-oauth-refresh' ||
       workerEvent.type === 'plugin-mcp-result' ||
+      workerEvent.type === 'plugin-agent-event' ||
       workerEvent.type === 'workspace-unlock-result'
     )
       return;

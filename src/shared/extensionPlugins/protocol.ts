@@ -38,6 +38,86 @@ export function parsePluginInjectImages(value: unknown): PluginInjectImage[] | n
 /** 插件注入消息在会话里的 customType */
 export const PLUGIN_MESSAGE_TYPE = 'enso-plugin-message';
 
+/** 插件发起的只读代理：输入上限与超时 */
+export const PLUGIN_AGENT_PROMPT_MAX_CHARS = 64 * 1024;
+export const PLUGIN_AGENT_SYSTEM_MAX_CHARS = 32 * 1024;
+export const PLUGIN_AGENT_DEFAULT_TIMEOUT_MS = 10 * 60_000;
+export const PLUGIN_AGENT_MAX_TIMEOUT_MS = 20 * 60_000;
+export const PLUGIN_AGENT_TEXT_MAX_CHARS = 64 * 1024;
+export const PLUGIN_AGENT_ARGS_MAX_CHARS = 4096;
+export const PLUGIN_AGENT_OUTPUT_MAX_CHARS = 4096;
+export const PLUGIN_AGENT_RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** 插件代理的进度与终态：worker → Main → 插件进程原样转发 */
+export type PluginAgentRunEvent =
+  /** parentId：codemode 等工具内部发起的嵌套调用 */
+  | { type: 'tool-start'; id: string; name: string; args: string; parentId?: string }
+  /** output：结果文本，截到 4K 字符 */
+  | { type: 'tool-end'; id: string; isError: boolean; output?: string }
+  /** 当前这条回复的完整正文（不是增量） */
+  | { type: 'text'; text: string }
+  /** model：实际使用的模型 id */
+  | { type: 'end'; ok: true; text: string; model?: string }
+  | { type: 'end'; ok: false; error: string; aborted?: boolean };
+
+export function parsePluginAgentRunEvent(raw: unknown): PluginAgentRunEvent | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const v = raw as Record<string, unknown>;
+  const keys = Object.keys(v);
+  const only = (...allowed: string[]) => keys.every((key) => allowed.includes(key));
+  const short = (s: unknown, max: number): s is string => typeof s === 'string' && s.length <= max;
+  const id = (s: unknown): s is string => typeof s === 'string' && s.length > 0 && s.length <= 256;
+  switch (v.type) {
+    case 'tool-start':
+      return only('type', 'id', 'name', 'args', 'parentId') &&
+        id(v.id) &&
+        id(v.name) &&
+        short(v.args, PLUGIN_AGENT_ARGS_MAX_CHARS) &&
+        (v.parentId === undefined || id(v.parentId))
+        ? {
+            type: 'tool-start',
+            id: v.id,
+            name: v.name,
+            args: v.args,
+            ...(v.parentId ? { parentId: v.parentId } : {}),
+          }
+        : null;
+    case 'tool-end':
+      return only('type', 'id', 'isError', 'output') &&
+        id(v.id) &&
+        typeof v.isError === 'boolean' &&
+        (v.output === undefined || short(v.output, PLUGIN_AGENT_OUTPUT_MAX_CHARS))
+        ? {
+            type: 'tool-end',
+            id: v.id,
+            isError: v.isError,
+            ...(v.output !== undefined ? { output: v.output } : {}),
+          }
+        : null;
+    case 'text':
+      return only('type', 'text') && short(v.text, PLUGIN_AGENT_TEXT_MAX_CHARS)
+        ? { type: 'text', text: v.text }
+        : null;
+    case 'end':
+      if (v.ok === true)
+        return only('type', 'ok', 'text', 'model') &&
+          short(v.text, PLUGIN_AGENT_TEXT_MAX_CHARS) &&
+          (v.model === undefined || id(v.model))
+          ? { type: 'end', ok: true, text: v.text, ...(v.model ? { model: v.model } : {}) }
+          : null;
+      return v.ok === false &&
+        only('type', 'ok', 'error', 'aborted') &&
+        typeof v.error === 'string' &&
+        v.error.length > 0 &&
+        v.error.length <= 4096 &&
+        (v.aborted === undefined || v.aborted === true)
+        ? { type: 'end', ok: false, error: v.error, ...(v.aborted ? { aborted: true } : {}) }
+        : null;
+    default:
+      return null;
+  }
+}
+
 /** 注入消息的来源；界面据此标明是哪个插件发的 */
 export interface PluginMessageSource {
   pluginId: string;
@@ -115,6 +195,7 @@ export const PLUGIN_HOST_APIS = [
   'ui.viewEvent',
   /** 打开右侧栏并创建或定位到本插件的侧栏页面；args { viewId? } */
   'ui.viewOpen',
+  'ui.viewClose',
   /** 改清单声明过的输入框底栏状态项；args { id, text?, tooltip?, tone?, visible? } */
   'ui.statusUpdate',
   'composer.readDraft',
@@ -154,6 +235,10 @@ export const PLUGIN_HOST_APIS = [
   'session.create',
   /** 开关本进程的回合结束订阅；args { on }，权限同 session.status */
   'session.watchTurnEnd',
+  /** 用发起会话的模型跑一个只读代理；args { runId, prompt, systemPrompt?, context?, timeoutMs? }，进度与结果经 agent-run 推送 */
+  'agent.run',
+  /** 取消本插件发起的代理；args { runId } */
+  'agent.cancel',
 ] as const;
 export type PluginHostApi = (typeof PLUGIN_HOST_APIS)[number];
 
@@ -195,6 +280,8 @@ export type MainToPluginHost =
   | { t: 'shutdown' }
   /** 订阅过的会话一轮结束（完成、失败或中止）；只发给调过 session.watchTurnEnd 的进程 */
   | { t: 'session-turn-end'; sessionId: string }
+  /** agent.run 的进度与终态；end 之后不再有这个 runId 的消息 */
+  | { t: 'agent-run'; runId: string; event: PluginAgentRunEvent }
   | PluginResponse;
 
 export type PluginHostToMain =

@@ -1981,7 +1981,8 @@ const electronAPI = {
           | 'openChildRun'
           | 'createSession'
           | 'ensureSession'
-          | 'openPluginView';
+          | 'openPluginView'
+          | 'closePluginView';
         payload: Record<string, unknown>;
       }) => void
     ): (() => void) => {

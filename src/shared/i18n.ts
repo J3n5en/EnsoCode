@@ -510,6 +510,7 @@ export const zhTranslations: Record<string, string> = {
   'Show active conversations as tabs above the conversation. Hold ⌘/Ctrl to see number shortcuts. Hidden while Bot mode is enabled.':
     '在对话区上方以标签显示活跃中的会话，按住 ⌘/Ctrl 显示数字快捷键。开启 Bot 模式时不显示。',
   'Also show recent conversations': '同时显示最近会话',
+  'Remove from title bar': '移出顶栏',
   'Conversations with messages within this window. Off shows only Active ones.':
     '这段时间内有过消息的会话；关闭则只显示活跃中的会话。',
   'Turn marks': '轮次刻度',

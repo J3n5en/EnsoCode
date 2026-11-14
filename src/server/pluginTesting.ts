@@ -78,6 +78,7 @@ export async function mountMain(activate, options = {}) {
     },
     plugins: { call: (...args) => call('plugins.call', args) },
     host: { capabilities: (...args) => call('host.capabilities', args) },
+    agent: { run: (...args) => call('agent.run', args) },
   };
 
   await activate(enso);

@@ -21,7 +21,8 @@ export interface DraftRequest {
     | 'openChildRun'
     | 'createSession'
     | 'ensureSession'
-    | 'openPluginView';
+    | 'openPluginView'
+    | 'closePluginView';
   payload: Record<string, unknown>;
 }
 

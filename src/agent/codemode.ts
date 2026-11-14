@@ -197,6 +197,29 @@ export const isDeferredMcp = (server: McpServerSpawnConfig): boolean =>
   server.loadMode === 'deferred';
 
 /** 按需服务器清单（system prompt 段）：工具名来自 Main 缓存，可能过期 */
+/** codemode 调用前的检查与改写（展开输入、预检、补超时）；就地改 `input.code`，不合格返回拦截原因 */
+export function prepareCodemodeInput(
+  input: Record<string, unknown>
+): { block: true; reason: string } | undefined {
+  const code = typeof input.code === 'string' ? input.code : '';
+  if (looksLikeShellCommand(code))
+    return {
+      block: true,
+      reason: 'codemode expects JavaScript, not a shell command. Use bash for shell.',
+    };
+  if (looksLikeApplyPatchDocument(code))
+    return {
+      block: true,
+      reason: 'codemode expects JavaScript, not an apply_patch document. Use apply_patch.',
+    };
+  if (!code) return;
+  const expanded = withCodemodeInputs(code);
+  if ('error' in expanded) return { block: true, reason: expanded.error };
+  const checked = preflightCodemodeScript(expanded.code);
+  if ('error' in checked) return { block: true, reason: checked.error };
+  input.code = withCodemodeTimeout(checked.code);
+}
+
 export function renderMcpServersSection(
   servers: readonly McpServerSpawnConfig[],
   reach: 'codemode' | 'tool_search'
@@ -327,28 +350,9 @@ export class CodemodeHost {
     }
 
     pi.on('tool_call', async (event) => {
-      const input = event.input as Record<string, unknown>;
       if (event.toolName === CODEMODE_TOOL_NAME) {
-        const code = typeof input.code === 'string' ? input.code : '';
-        if (looksLikeShellCommand(code)) {
-          return {
-            block: true,
-            reason: 'codemode expects JavaScript, not a shell command. Use bash for shell.',
-          };
-        }
-        if (looksLikeApplyPatchDocument(code)) {
-          return {
-            block: true,
-            reason: 'codemode expects JavaScript, not an apply_patch document. Use apply_patch.',
-          };
-        }
-        if (code) {
-          const expanded = withCodemodeInputs(code);
-          if ('error' in expanded) return { block: true, reason: expanded.error };
-          const checked = preflightCodemodeScript(expanded.code);
-          if ('error' in checked) return { block: true, reason: checked.error };
-          input.code = withCodemodeTimeout(checked.code);
-        }
+        const blocked = prepareCodemodeInput(event.input as Record<string, unknown>);
+        if (blocked) return blocked;
       }
       if (event.toolName === CODEMODE_TOOL_NAME || event.toolName === TOOL_SEARCH_TOOL_NAME) {
         await this.ensureDeferredTools(pi);

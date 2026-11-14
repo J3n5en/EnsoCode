@@ -533,6 +533,16 @@ describe('headerSessionTabIds', () => {
       )
     ).toEqual(['act', 'recentNew']);
   });
+
+  it('移出顶栏的会话隐藏，移出后有新消息再回来', () => {
+    expect(
+      headerSessionTabIds(['act'], headerOrder, header, [], { now, ms: 30 * min }, undefined, {
+        act: 50,
+        recentOld: now,
+        recentNew: now - 10 * min,
+      })
+    ).toEqual(['recentNew']);
+  });
 });
 
 describe('activeConversationIds', () => {
