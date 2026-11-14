@@ -32,6 +32,7 @@ import {
   linkedTodoSession,
   proposalUpdate,
   type ResultEvent,
+  SETTLED_RESULTS,
   shouldNotify,
   stalled,
   UPDATE_WINDOW_MS,
@@ -195,6 +196,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   ): void {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
+    // 收口了就不会再有后台任务唤醒它；留着这条记录会让空闲会话一直被算在跑
+    if (SETTLED_RESULTS.has(kind)) delete record.backgroundRunning;
     const update = recordUpdate(record, kind, now, detail);
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
@@ -299,6 +302,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         record.lastEventAt = now;
         if (record.lastState !== status.state) record.stateSince = now;
         record.lastState = status.state;
+        // 报错的会话不会再被后台任务唤醒，残留的记录会让它一直被算在跑
+        if (status.state === 'error') delete record.backgroundRunning;
         if (
           event.type === 'background-tasks-level' &&
           conversationId === rootIdOf(event, sessionId ?? conversationId)
@@ -402,6 +407,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (!status || record.lastState === status.state) continue;
         record.stateSince = now;
         record.lastState = status.state;
+        if (status.state === 'error') delete record.backgroundRunning;
         changed = true;
       }
       for (const { conversationId, turn } of stalled(records, statuses, now)) {

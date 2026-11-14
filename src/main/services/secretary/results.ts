@@ -218,28 +218,73 @@ export function goalStatusOf(row: Record<string, unknown> | undefined): string |
   return typeof status === 'string' ? status : undefined;
 }
 
+/** 已经收口的结果：目标做完、报错、被中断。再空闲就是真的结束了 */
+export const SETTLED_RESULTS: ReadonlySet<SecretaryResultKind> = new Set([
+  'goal-complete',
+  'failed',
+  'interrupted',
+]);
+
+export type SessionLiveState = 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+
+/** 没有会话文件的派发记录还没真正开始 */
+export function sessionLiveState(
+  row: Record<string, unknown> | undefined,
+  status: SecretarySessionStatus | undefined
+): SessionLiveState {
+  if (!row?.sessionFile) return 'not-started';
+  return status?.state ?? 'idle';
+}
+
+/** 卡片与计数共用的状态：刚 session_send 时实时状态可能还是空闲，记录已经标回运行中 */
+export function sessionStateOf(
+  record: DispatchRecord,
+  row: Record<string, unknown> | undefined,
+  status: SecretarySessionStatus | undefined
+): SessionLiveState {
+  const live = sessionLiveState(row, status);
+  return live === 'idle' && record.lastState === 'running' ? 'running' : live;
+}
+
 /**
- * 派发或接管的会话还没真正结束。
- * 正在跑、刚被重新唤起、还有后台任务、目标仍会自动续跑或在等外部事情，都算。
- * 等用户审批或提问不算，那些进「需要你处理」。
+ * 派发或接管的会话还没真正结束。顶栏、看板「进行中」和派出上限共用这一个口径。
+ * 正在跑、刚被 session_send 唤起、还有后台任务、目标还会自动续跑，都算。
+ * 报错、等用户审批或提问、还没开始、已经收口的结果都不算。
+ * 目标停在 waiting 只有后台任务的完成通知会唤醒它；没有后台任务就没人叫它，不算在跑。
  */
 export function sessionStillGoing(input: {
-  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+  state: SessionLiveState;
   recordedState?: DispatchRecord['lastState'];
   goalStatus?: string;
   backgroundRunning?: boolean;
+  lastResult?: DispatchRecord['lastResult'];
 }): boolean {
-  if (input.state === 'running' || input.recordedState === 'running') return true;
+  if (input.state === 'running') return true;
+  if (input.state !== 'idle') return false;
+  if (input.recordedState === 'running') return true;
+  if (input.lastResult && SETTLED_RESULTS.has(input.lastResult.kind)) return false;
   if (input.backgroundRunning) return true;
-  if (input.state === 'waiting' || input.state === 'error' || input.state === 'not-started')
-    return false;
-  return input.goalStatus === 'active' || input.goalStatus === 'waiting';
+  return input.goalStatus === 'active';
 }
 
-export function sessionNeedsUser(
+/** 一条派发记录此刻算不算在跑；三处计数都走这里 */
+export function countsAsRunning(
   record: DispatchRecord,
-  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started'
+  row: Record<string, unknown> | undefined,
+  status: SecretarySessionStatus | undefined
 ): boolean {
+  const state = sessionStateOf(record, row, status);
+  if (sessionNeedsUser(record, state)) return false;
+  return sessionStillGoing({
+    state,
+    recordedState: record.lastState,
+    goalStatus: goalStatusOf(row),
+    backgroundRunning: record.backgroundRunning === true,
+    lastResult: record.lastResult,
+  });
+}
+
+export function sessionNeedsUser(record: DispatchRecord, state: SessionLiveState): boolean {
   return (
     state === 'waiting' ||
     (record.lastResult !== undefined &&
@@ -262,6 +307,7 @@ export function linkedTodoSession(
     recordedState: record.lastState,
     goalStatus: goalStatusOf(row),
     backgroundRunning: record.backgroundRunning === true,
+    lastResult: record.lastResult,
   });
   return going ? { ...view, state: 'running' as const } : view;
 }
@@ -299,15 +345,8 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     const row = input.rows[record.conversationId];
     if (!row) continue;
     const status = input.statuses[record.conversationId];
-    const live = row.sessionFile ? (status?.state ?? 'idle') : 'not-started';
-    // 刚 session_send 时实时状态可能还是空闲，记录已经标回运行中
-    const state = live === 'idle' && record.lastState === 'running' ? 'running' : live;
-    const going = sessionStillGoing({
-      state: live,
-      recordedState: record.lastState,
-      goalStatus: goalStatusOf(row),
-      backgroundRunning: record.backgroundRunning === true,
-    });
+    const state = sessionStateOf(record, row, status);
+    const going = countsAsRunning(record, row, status);
     const card: SessionCard = {
       kind: 'session',
       conversationId: record.conversationId,

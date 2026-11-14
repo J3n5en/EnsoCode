@@ -7,9 +7,11 @@ import type {
   SecretaryUpdate,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
+import type { SecretarySessionStatus } from './readers';
 import {
   buildBoard,
   classify,
+  countsAsRunning,
   enqueueUpdate,
   formatSessionUpdates,
   proposalUpdate,
@@ -325,7 +327,6 @@ describe('工作台投影', () => {
         renew: record({
           conversationId: 'renew',
           lastState: 'idle',
-          lastResult: { kind: 'goal-complete', turn: 1, at: 5 },
         }),
         waiting: record({
           conversationId: 'waiting',
@@ -362,7 +363,7 @@ describe('工作台投影', () => {
     const runningIds = board.running.map((card) =>
       card.kind === 'session' ? card.conversationId : ''
     );
-    expect(runningIds).toEqual(['renew', 'live', 'waiting']);
+    expect(runningIds).toEqual(['live', 'renew', 'waiting']);
     expect(
       board.running.find((card) => card.kind === 'session' && card.conversationId === 'renew')
     ).toMatchObject({
@@ -522,5 +523,128 @@ describe('工作台投影', () => {
       cards.map((card) => (card.kind === 'session' ? card.conversationId : ''));
     expect(ids(board.needsYou)).toEqual(['pending']);
     expect(ids(board.done)).toEqual(['dismissed']);
+  });
+});
+
+describe('在跑计数', () => {
+  const projects: ProjectAuthority[] = [
+    { projectId: 'p1', canonicalPath: '/tmp/enso-code', state: 'active' },
+  ] as ProjectAuthority[];
+
+  function board(
+    file: SecretaryDispatchFile,
+    rows: Record<string, Record<string, unknown>>,
+    statuses: Record<string, SecretarySessionStatus>
+  ) {
+    return buildBoard(file, { rows, statuses, projects, todos: [] });
+  }
+
+  const ids = (cards: ReturnType<typeof buildBoard>['running']) =>
+    cards.map((card) => (card.kind === 'session' ? card.conversationId : ''));
+
+  it('目标已完成且真正结束的会话不算在跑', () => {
+    const done = record({
+      conversationId: 'done',
+      lastState: 'idle',
+      lastResult: { kind: 'goal-complete', turn: 2, at: 9 },
+    });
+    // 目标行还停在 active：完成信号已经收口，残留的目标状态不能再把它算回在跑
+    const rows = {
+      done: { title: '做完', sessionFile: '/tmp/done', goal: { status: 'active', text: '合并' } },
+    };
+    expect(countsAsRunning(done, rows.done, idle)).toBe(false);
+    expect(ids(board(emptyFile({ dispatched: { done } }), rows, { done: idle }).running)).toEqual(
+      []
+    );
+  });
+
+  it('被秘书停掉的会话不算在跑', () => {
+    const stopped = record({
+      conversationId: 'stopped',
+      lastState: 'idle',
+      lastResult: { kind: 'interrupted', turn: 3, at: 9 },
+    });
+    const rows = {
+      stopped: {
+        title: '停掉',
+        sessionFile: '/tmp/stopped',
+        goal: { status: 'paused', text: '合并' },
+      },
+    };
+    expect(countsAsRunning(stopped, rows.stopped, idle)).toBe(false);
+    expect(
+      ids(board(emptyFile({ dispatched: { stopped } }), rows, { stopped: idle }).running)
+    ).toEqual([]);
+  });
+
+  it('已经 error 的会话不算在跑', () => {
+    const broken = record({ conversationId: 'broken', lastState: 'error' });
+    const rows = { broken: { title: '报错', sessionFile: '/tmp/broken' } };
+    expect(countsAsRunning(broken, rows.broken, error)).toBe(false);
+    expect(
+      ids(board(emptyFile({ dispatched: { broken } }), rows, { broken: error }).running)
+    ).toEqual([]);
+  });
+
+  it('目标停在 waiting 但已经没人唤醒它，不算在跑', () => {
+    const stale = record({ conversationId: 'stale', lastState: 'idle' });
+    const rows = {
+      stale: {
+        title: '等验收',
+        sessionFile: '/tmp/stale',
+        goal: { status: 'waiting', text: '等验收' },
+      },
+    };
+    expect(countsAsRunning(stale, rows.stale, idle)).toBe(false);
+    // 后台任务还在时才算：完成通知会把它唤醒
+    expect(countsAsRunning({ ...stale, backgroundRunning: true }, rows.stale, idle)).toBe(true);
+  });
+
+  it('不是秘书派发或接管的会话不算在跑', () => {
+    const file = emptyFile({ dispatched: {} });
+    const rows = { other: { title: '别的项目', sessionFile: '/tmp/other', projectId: 'p9' } };
+    const result = board(file, rows, { other: running });
+    expect(ids(result.running)).toEqual([]);
+    expect(result.done).toEqual([]);
+  });
+
+  it('只有一个真正在跑时只算一个', () => {
+    const file = emptyFile({
+      dispatched: {
+        live: record({ conversationId: 'live', lastState: 'running' }),
+        finished: record({
+          conversationId: 'finished',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 5 },
+        }),
+        stale: record({ conversationId: 'stale', lastState: 'idle' }),
+        broken: record({ conversationId: 'broken', lastState: 'error' }),
+      },
+    });
+    const rows: Record<string, Record<string, unknown>> = {
+      live: { title: '真在跑', sessionFile: '/tmp/live' },
+      finished: { title: '做完', sessionFile: '/tmp/finished' },
+      stale: {
+        title: '等验收',
+        sessionFile: '/tmp/stale',
+        goal: { status: 'waiting', text: '等' },
+      },
+      broken: { title: '报错', sessionFile: '/tmp/broken' },
+    };
+    const statuses: Record<string, SecretarySessionStatus> = {
+      live: running,
+      finished: idle,
+      stale: idle,
+      broken: error,
+    };
+    const result = board(file, rows, statuses);
+    expect(ids(result.running)).toEqual(['live']);
+    // 顶栏与看板读同一个数：派发上限也走同一判定
+    expect(result.running).toHaveLength(1);
+    expect(
+      Object.values(file.dispatched).filter((entry) =>
+        countsAsRunning(entry, rows[entry.conversationId], statuses[entry.conversationId])
+      )
+    ).toHaveLength(1);
   });
 });
