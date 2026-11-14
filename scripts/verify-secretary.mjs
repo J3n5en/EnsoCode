@@ -247,8 +247,9 @@ async function prepareEnv() {
   });
   const settings = readJson(settingsFile);
   settings['enso-settings'].state.secretaryEnabled = true;
-  for (const provider of settings['enso-settings'].state.providers)
+  for (const provider of settings['enso-settings'].state.providers ?? []) {
     provider.baseUrl = `http://127.0.0.1:${FAKE_PORT}`;
+  }
   writeFileSync(settingsFile, JSON.stringify(settings));
   mkdirSync(PROJ, { recursive: true });
   writeFileSync(path.join(PROJ, 'README.md'), 'isolated dispatch target\n');
@@ -971,6 +972,162 @@ async function run(cdp, pluginZipUrl) {
     .map((line) => JSON.parse(line))
     .filter((entry) => entry.op === 'result_dismiss' && entry.targetId === dispatchedId);
   assert(dismissAudit.length === 1, 'step8: audit 里记了一条 result_dismiss', dismissAudit);
+
+  // 新开一个秘书会话出提案再带编辑确认；指令放在编辑里，fake provider 的指令解析不支持嵌套
+  const dispatchConfirmed = (directive, edits) =>
+    page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '派活 ' + ${JSON.stringify(directive)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(() => {
+      const pending = Object.values(secretary.getState().secretary.proposals).filter(
+        (p) => p.status === 'pending' && p.secretaryConversationId === fresh
+      );
+      return pending.at(-1) ?? null;
+    }, 30000);
+    if (!proposal) return JSON.stringify({ ok: false, error: 'no proposal' });
+    const resolved = await window.electronAPI.secretary.resolveProposal(
+      proposal.id, 'confirm', ${JSON.stringify(edits ?? {})}
+    );
+    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({
+      ok: done?.status === 'succeeded',
+      secretaryId: fresh,
+      conversationId: done?.conversationId,
+      error: done?.error,
+    });
+  `);
+  const secretarySaw = (secretaryId, conversationId, kind) =>
+    page(`
+    return JSON.stringify(texts(${JSON.stringify(secretaryId)}).some((text) =>
+      text.includes(${JSON.stringify(`[${kind} session:${conversationId}]`)})));
+  `);
+
+  log('== step9 等后台任务不报 needs-user，真提问才报');
+  const waitDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '跑全量测试',
+      title: '等后台任务',
+    })}]]`,
+    { goal: '跑完测试 [[tool:goal_wait {"reason":"真机验收已在后台运行，完成后会通知我"}]]' }
+  );
+  assert(waitDispatch.ok, 'step9: 带目标的派出会话建成', waitDispatch);
+  const waitId = waitDispatch.conversationId;
+  const waitGoal = await page(`
+    const row = await until(() => {
+      const r = S().conversations[${JSON.stringify(waitId)}];
+      return r?.goal?.status === 'waiting' ? r : null;
+    }, 60000);
+    return JSON.stringify({ status: row?.goal?.status ?? null });
+  `);
+  assert(waitGoal.status === 'waiting', 'step9: 派出会话调了 goal_wait 在等后台任务', waitGoal);
+  await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[waitId];
+      return record?.turn >= 1 && record.lastState === 'idle' ? record : null;
+    },
+    'goal_wait turn settled',
+    60_000,
+    500
+  );
+  await delay(2000);
+  const waitRecord = readJson(dispatchFile).dispatched[waitId];
+  assert(
+    waitRecord.lastResult?.kind !== 'needs-user',
+    'step9: goal_wait 等后台任务不记 needs-user',
+    waitRecord
+  );
+  assert(
+    !(await secretarySaw(waitDispatch.secretaryId, waitId, 'needs-user')),
+    'step9: 秘书没收到该会话的 needs-user',
+    waitId
+  );
+
+  const askDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '占位',
+      title: '真提问',
+    })}]]`,
+    { prompt: '选方案 [[tool:ask_user {"question":"用哪个方案？","options":["A","B"]}]]' }
+  );
+  assert(askDispatch.ok, 'step9: 会提问的派出会话建成', askDispatch);
+  const askId = askDispatch.conversationId;
+  const askRecord = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[askId];
+      return record?.lastResult?.kind === 'needs-user' ? record : null;
+    },
+    'ask_user needs-user recorded',
+    60_000,
+    500
+  ).catch(() => null);
+  assert(
+    Boolean(askRecord),
+    'step9: 真有 ask_user 时记 needs-user',
+    readJson(dispatchFile).dispatched[askId]
+  );
+  const askSeen = await waitFor(
+    () => secretarySaw(askDispatch.secretaryId, askId, 'needs-user'),
+    'secretary got needs-user',
+    60_000,
+    500
+  ).catch(() => false);
+  assert(askSeen, 'step9: 秘书收到该会话的 needs-user', askId);
+  const answered = await page(`
+    const id = ${JSON.stringify(askId)};
+    const ask = await until(() => (S().conversations[id]?.pendingAsks ?? [])[0] ?? null, 15000);
+    if (!ask) return JSON.stringify({ ok: false, error: 'no pending ask' });
+    const reply = await window.electronAPI.agent.respondAsk(id, ask.requestId, 'A');
+    const cleared = await until(() => (S().conversations[id]?.pendingAsks ?? []).length === 0, 30000);
+    return JSON.stringify({ ok: Boolean(cleared), reply });
+  `);
+  assert(answered.ok, 'step9: 回答后提问会话收尾', answered);
+  await waitFor(
+    () => (readJson(dispatchFile).dispatched[askId]?.lastState === 'idle' ? true : null),
+    'ask session idle',
+    30_000,
+    500
+  );
+
+  log('== step10 待办派出的会话标题用待办文本');
+  const todoText = '修复秘书通知误报';
+  const todoAdded = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.mutateTodo({
+      action: 'add', text: ${JSON.stringify(todoText)}, projectId: ${JSON.stringify(setup.projectId)},
+    }));
+  `);
+  assert(todoAdded.ok, 'step10: 建出带项目的待办', todoAdded);
+  const todoDispatch = await dispatchConfirmed(
+    `[[tool:todo_item_dispatch ${JSON.stringify({
+      todoId: todoAdded.todoId,
+      prompt: '背景：秘书功能在 feat/secretary-agent 分支上开发，这个分支检出在别处',
+    })}]]`
+  );
+  assert(todoDispatch.ok, 'step10: 待办派出会话建成', todoDispatch);
+  const todoRow = await page(`
+    const row = await until(() => S().conversations[${JSON.stringify(todoDispatch.conversationId)}], 15000);
+    return JSON.stringify({ title: row?.title ?? null });
+  `);
+  assert(todoRow.title === todoText, 'step10: 会话标题是待办文本', todoRow);
+  const todoPersisted = await waitFor(
+    () => conversationsIn()?.[todoDispatch.conversationId],
+    'todo dispatched row persisted',
+    15_000,
+    250
+  ).catch(() => null);
+  assert(todoPersisted?.title === todoText, 'step10: 落盘的会话行标题也是待办文本', todoPersisted);
 
   log('== 插件：勾选后才进秘书会话');
   const installed = await page(`

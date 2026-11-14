@@ -77,9 +77,9 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     aliases: { id: 'todoId', title: 'text', content: 'text' },
   },
   todo_item_dispatch: {
-    keys: ['todoId', 'projectId', 'prompt', 'worktree'],
+    keys: ['todoId', 'projectId', 'prompt', 'title', 'worktree'],
     booleans: ['worktree'],
-    aliases: { id: 'todoId', task: 'prompt', instruction: 'prompt' },
+    aliases: { id: 'todoId', task: 'prompt', instruction: 'prompt', name: 'title' },
   },
   schedule_add: {
     keys: ['name', 'prompt', 'at', 'cron'],
@@ -323,6 +323,12 @@ const SCHEMAS: Record<
         todoId: id('Todo id'),
         projectId: id('Target project id'),
         prompt: { type: 'string', minLength: 1, maxLength: 8000 },
+        title: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 200,
+          description: 'Optional title; defaults to the todo text',
+        },
         worktree: { type: 'boolean' },
       },
       ['todoId']

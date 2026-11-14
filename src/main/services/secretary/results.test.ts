@@ -67,14 +67,26 @@ function emptyFile(extra: Partial<SecretaryDispatchFile> = {}): SecretaryDispatc
 }
 
 describe('结果分类', () => {
-  it('目标信号决定完成、受阻与需要用户', () => {
+  it('目标信号决定完成与受阻', () => {
     expect(
       classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'complete' }, running)
     ).toBe('goal-complete');
     expect(classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'blocked' }, running)).toBe(
       'goal-blocked'
     );
-    expect(classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'wait' }, running)).toBe(
+  });
+
+  it('goal_wait 是在等外部事情（后台任务、CI），不报需要用户', () => {
+    expect(
+      classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'wait' }, running)
+    ).toBeNull();
+    expect(
+      classify(record({ goal: 'g' }), { type: 'turn-completed', goalStatus: 'waiting' }, idle)
+    ).toBeNull();
+  });
+
+  it('真有待回答的提问或待审批时 goal_wait 仍报需要用户', () => {
+    expect(classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'wait' }, waiting)).toBe(
       'needs-user'
     );
   });

@@ -67,6 +67,16 @@ function sessionIdOf(event: RendererAgentEvent): string | undefined {
   return 'sessionId' in event.identity ? event.identity.sessionId : undefined;
 }
 
+/** 子代理事件归到主会话：主会话等子代理时状态仍是 running，不刷新活动时间会误报停滞 */
+function rootIdOf(event: RendererAgentEvent, sessionId: string): string {
+  const identity = 'identity' in event ? event.identity : undefined;
+  const parent =
+    identity && 'parent' in identity ? (identity.parent as { sessionId?: unknown }) : undefined;
+  const id = typeof parent?.sessionId === 'string' ? parent.sessionId : sessionId;
+  const sep = id.indexOf('::');
+  return sep === -1 ? id : id.slice(0, sep);
+}
+
 function goalStatusOf(row: Record<string, unknown> | undefined): string | undefined {
   const goal = row?.goal;
   if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return undefined;
@@ -192,6 +202,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
       const file = ports.file();
       const rows = ports.rows();
+      if (sessionId) touched.add(rootIdOf(event, sessionId));
       let changed = false;
       for (const conversationId of touched) {
         const record = file.dispatched[conversationId];
@@ -203,7 +214,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         record.lastEventAt = now;
         record.lastState = status.state;
-        const lastText = capLastText(assistantTextOf(event));
+        const lastText = own ? capLastText(assistantTextOf(event)) : undefined;
         if (lastText) record.lastText = lastText;
 
         const change = changes.find((entry) => entry.sessionId === conversationId);

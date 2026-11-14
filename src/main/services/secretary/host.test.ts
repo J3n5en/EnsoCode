@@ -290,6 +290,51 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox).toHaveLength(1);
   });
 
+  it('goal_wait 等后台任务、goal 续跑都不记需要用户；真有提问时才记', () => {
+    const h = harness({});
+    h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'waiting' } };
+    h.host.onAgentEvent(event('goal-signal', { kind: 'wait', note: '等后台测试' }), []);
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      event('turn-completed', {
+        digest: { firstUserText: '', userText: '', assistantText: '真机验收已在后台运行' },
+      }),
+      change('idle', 'running')
+    );
+    // 后台任务完成唤醒新一轮，目标回到 active 后自动续跑
+    h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'active' } };
+    h.state.statuses.c1 = running;
+    h.host.onAgentEvent(event('status', { status: 'running' }), change('running', 'idle'));
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request'), change('waiting', 'running', { pendingAsks: 1 }));
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['needs-user']);
+  });
+
+  it('子代理的事件刷新父会话活动时间，不动父会话的轮次与最后一句', () => {
+    const h = harness({});
+    h.state.now = 20 * MINUTE;
+    h.host.onAgentEvent(
+      {
+        type: 'turn-completed',
+        identity: { sessionId: 'c1::cw-1', generation: 'g2', parent: identity },
+        seq: 2,
+        turnId: 't2',
+        digest: { firstUserText: '', userText: '', assistantText: '子代理说的话' },
+      } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(h.state.file.dispatched.c1).toMatchObject({ turn: 0, lastEventAt: 20 * MINUTE });
+    expect(h.state.file.dispatched.c1.lastText).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+    h.host.tick(25 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
   it('开关关闭时不记录、不发通知、不注入', () => {
     const h = harness({ enabled: false });
     h.state.statuses.c1 = idle;
