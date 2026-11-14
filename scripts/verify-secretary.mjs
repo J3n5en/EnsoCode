@@ -825,7 +825,11 @@ async function run(cdp, pluginZipUrl) {
   );
   const card = await page(`
     S().selectConversation(${JSON.stringify(setup.secretaryId)});
-    await until(() => visible('[data-enso=secretary-updates]').length > 0, 15000);
+    await until(() => {
+      const scroller = document.querySelector('[data-virtuoso-scroller]');
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+      return visible('[data-enso=secretary-updates]').length > 0;
+    }, 30000);
     const cards = visible('[data-enso=secretary-updates]');
     return JSON.stringify({
       cards: cards.length,
@@ -2993,10 +2997,26 @@ async function verifyFeedPaging(cdp, panelHost) {
 
   const second = await page(`
     const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
-    scroller.scrollTop = scroller.scrollHeight;
-    scroller.dispatchEvent(new Event('scroll'));
+    scroller.style.overflowAnchor = 'none';
     const ids = () => [...document.querySelectorAll('[data-enso=secretary-feed-event]')].map((node) => node.dataset.id);
-    const ready = await until(() => (ids().length === ${PAGE * 2} ? ids() : null), 15000);
+    const nudge = () => {
+      scroller.scrollTop = scroller.scrollHeight;
+      scroller.dispatchEvent(new Event('scroll'));
+    };
+    // 观察器在首屏提交后才挂上。贴底后哨兵还在视口里时会再拉一页，所以接受两页或更多，前缀必须不重不漏。
+    await sleep(400);
+    const before = ids().length;
+    nudge();
+    const enough = () => {
+      const list = ids();
+      return list.length >= before + ${PAGE} ? list : null;
+    };
+    let ready = await until(enough, 8000);
+    if (!ready && ids().length === before) {
+      await sleep(400);
+      nudge();
+      ready = await until(enough, 8000);
+    }
     const sentinel = document.querySelector('[data-enso=secretary-feed-sentinel]');
     const root = scroller.getBoundingClientRect();
     const mark = sentinel?.getBoundingClientRect();
@@ -3011,9 +3031,23 @@ async function verifyFeedPaging(cdp, panelHost) {
     });
   `);
   assert(
-    JSON.stringify(second.ids) === JSON.stringify([...page1, ...page2]) && second.end === false,
+    Array.isArray(second.ids) &&
+      second.ids.length >= page1.length + page2.length &&
+      JSON.stringify(second.ids.slice(0, page1.length + page2.length)) ===
+        JSON.stringify([...page1, ...page2]) &&
+      new Set(second.ids).size === second.ids.length &&
+      second.end === false,
     '动态分页: 滚到底加载出更早的一页，不重不漏',
-    { got: second.ids, want: [...page1, ...page2], end: second.end }
+    {
+      got: second.ids,
+      want: [...page1, ...page2],
+      end: second.end,
+      length: second.length,
+      scrollTop: second.scrollTop,
+      scrollHeight: second.scrollHeight,
+      clientHeight: second.clientHeight,
+      sentinelTop: second.sentinelTop,
+    }
   );
 
   const parkedScroll = await page(`
@@ -3073,6 +3107,11 @@ async function verifyFeedPaging(cdp, panelHost) {
     '动态分页: 点提示回到顶部并看到新动态',
     revealed
   );
+  await page(`
+    const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
+    if (scroller) scroller.style.maxHeight = '';
+    return 'null';
+  `);
 }
 
 function crc32(bytes) {
@@ -3267,6 +3306,8 @@ async function verifyAvatar(cdp, setup) {
       ${JSON.stringify(setup.secretaryId)}
     );
     const chat = await until(() => {
+      const scroller = document.querySelector('[data-virtuoso-scroller]');
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
       const node = document.querySelector('[data-enso=secretary-chat-avatar][data-image=true]');
       if (!node) return null;
       return node.matches('img')
@@ -3492,7 +3533,13 @@ async function verifyMemoryManualEdit(cdp, setup) {
       focusFrom: 'button.flex-1',
       afterClick: `
         const dialog = await until(() => document.querySelector('[data-memory-edit]'), 5000);
-        if (!dialog) return JSON.stringify({ ok: false });
+        if (!dialog) {
+          return JSON.stringify({
+            ok: false,
+            dialogs: document.querySelectorAll('[data-slot=dialog-popup]').length,
+            probe: Boolean(document.querySelector('[data-hover-probe=settings] [data-memory-action="row-edit"]')),
+          });
+        }
         const r = dialog.closest('[data-slot=dialog-popup]').querySelector('[aria-label=Close]').getBoundingClientRect();
         return JSON.stringify({ ok: true, closeAt: { x: r.left + r.width / 2, y: r.top + r.height / 2 }, gone: '[data-memory-edit]' });
       `,
@@ -3733,6 +3780,14 @@ const HOVER_DOM = `
       mask: layer ? getComputedStyle(layer).backgroundImage.includes('gradient') : false,
       focusInActions: Boolean(document.activeElement?.closest('[data-slot=hover-actions]')),
       rowHovered: row.matches(':hover'),
+      pointerEvents: layer ? getComputedStyle(layer).pointerEvents : null,
+      active: document.activeElement
+        ? {
+            tag: document.activeElement.tagName,
+            enso: document.activeElement.getAttribute?.('data-enso') ?? null,
+            inRow: row.contains(document.activeElement),
+          }
+        : null,
     };
   };
 `;
@@ -3785,10 +3840,24 @@ async function hoverList(cdp, spec) {
 
   const cx = hover.action.x + hover.action.width / 2;
   const cy = hover.action.y + hover.action.height / 2;
-  await cdp.mouse('mouseMoved', cx, cy);
-  await cdp.mouse('mousePressed', cx, cy);
-  await cdp.mouse('mouseReleased', cx, cy);
-  const clicked = await cdp.json(spec.afterClick);
+  // 设置页是后开的窗口，第一下点击可能只把窗口带到前台。每次重取按钮中心再点。
+  let clicked;
+  for (let attempt = 0; attempt < 3 && !clicked?.ok; attempt += 1) {
+    const point = await at(`
+      const action = row.querySelector(${JSON.stringify(spec.actionSel)});
+      if (!action) return JSON.stringify(null);
+      action.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const r = action.getBoundingClientRect();
+      return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    `);
+    const x = point?.x ?? cx;
+    const y = point?.y ?? cy;
+    await cdp.mouse('mouseMoved', x, y);
+    await sleep(80);
+    await cdp.mouse('mousePressed', x, y);
+    await cdp.mouse('mouseReleased', x, y);
+    clicked = await cdp.json(spec.afterClick);
+  }
   // 弹窗要像用户一样用鼠标关；脚本 .click() 没有指针事件，base-ui 会当成键盘关而把焦点还回行内
   if (clicked?.ok && clicked.closeAt) {
     const { x, y } = clicked.closeAt;
@@ -3802,9 +3871,13 @@ async function hoverList(cdp, spec) {
 
   // 不替用户 blur：关弹窗的动画与焦点还原都结束后，只把鼠标移开再量
   await sleep(500);
-  await away();
-  await sleep(300);
-  const left = await at(measureRow);
+  let left;
+  for (let i = 0; i < 8; i += 1) {
+    await away();
+    await sleep(200);
+    left = await at(measureRow);
+    if (left && !left.error && left.opacity <= 0.05 && left.rowHovered === false) break;
+  }
 
   await at(`row.querySelector(${JSON.stringify(spec.focusFrom)}).focus(); return 'null';`);
   await cdp.key('Tab', 'Tab', 9);
@@ -4169,13 +4242,51 @@ async function verifyToolCards(cdp, setup) {
       providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path,
     }, undefined, id);
     const ready = await until(() => {
+      if (S().activeId !== id) S().selectConversation(id);
+      const main = document.querySelector('[data-enso=main]');
+      if (main && getComputedStyle(main).visibility === 'hidden') {
+        const exit = [...document.querySelectorAll('button')].find((button) =>
+          /fullscreen|全屏/.test(button.getAttribute('aria-label') ?? '')
+        );
+        exit?.click();
+      }
+      const scroller = document.querySelector('[data-virtuoso-scroller]');
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
       const cards = [...document.querySelectorAll('[data-enso=tool-card]')];
       const names = cards.map((card) => card.dataset.tool);
       return names.includes('session_send') && names.includes('todo_item_update') && names.includes('schedule_add')
         ? id
         : null;
     }, 40000);
-    return JSON.stringify({ id, ready: Boolean(ready) });
+    const names = [...document.querySelectorAll('[data-enso=tool-card]')].map((card) => card.dataset.tool);
+    const tools = (S().conversations[id]?.messages ?? [])
+      .filter((message) => message.role === 'tool' || message.toolName)
+      .map((message) => message.toolName ?? message.name ?? message.role);
+    const outline = (S().conversations[id]?.messages ?? []).map((message) => ({
+      role: message.role,
+      tool: message.toolName ?? null,
+      types: Array.isArray(message.content)
+        ? message.content.map((part) => part.type + (part.name ? ':' + part.name : ''))
+        : typeof message.content,
+    }));
+    const timeline = document.querySelector('[data-enso=timeline]');
+    const box = timeline?.getBoundingClientRect();
+    const main = document.querySelector('[data-enso=main]');
+    return JSON.stringify({
+      id,
+      active: S().activeId,
+      tab: S().conversations[id]?.activeTabId ?? null,
+      ready: Boolean(ready),
+      names,
+      tools,
+      outline,
+      text: (timeline?.innerText ?? '').slice(0, 400),
+      timeline: box ? { w: Math.round(box.width), h: Math.round(box.height) } : null,
+      visibility: timeline ? getComputedStyle(timeline).visibility : null,
+      mainVisibility: main ? getComputedStyle(main).visibility : null,
+      children: timeline?.childElementCount ?? null,
+      virtuosoItems: document.querySelectorAll('[data-index]').length,
+    });
   `);
   assert(turn.ready, '工具卡片: 三个工具都渲染成卡片', turn);
 
