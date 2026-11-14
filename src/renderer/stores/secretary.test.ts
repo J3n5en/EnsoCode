@@ -18,6 +18,7 @@ const stateWith = (status: SecretaryProposal['status']): SecretaryState => ({
   persona: '',
   board: { needsYou: [], running: [], done: [], todos: [] },
   proposals: { pr1: { ...proposal, status } },
+  takeovers: [],
 });
 
 let initialState: Promise<SecretaryState>;

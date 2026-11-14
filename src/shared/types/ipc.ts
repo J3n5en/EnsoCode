@@ -42,6 +42,12 @@ export const IPC_CHANNELS = {
   SECRETARY_TOOLS_LIST: 'secretary:tools-list',
   /** 秘书：删除一个自造工具，renderer 只传 slug */
   SECRETARY_TOOL_DELETE: 'secretary:tool-delete',
+  /** 秘书：用户在会话界面把会话交给秘书接管，renderer 只传会话 id */
+  SECRETARY_TAKEOVER_GRANT: 'secretary:takeover-grant',
+  /** 秘书：撤销接管（会话界面或设置页） */
+  SECRETARY_TAKEOVER_REVOKE: 'secretary:takeover-revoke',
+  /** 秘书：列出交给秘书接管的会话，设置页用 */
+  SECRETARY_TAKEOVERS_LIST: 'secretary:takeovers-list',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

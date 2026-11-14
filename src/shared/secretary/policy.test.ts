@@ -10,6 +10,7 @@ import {
   canOperate,
   dispatchDecision,
   PROPOSAL_TTL_MS,
+  takeoverRefusal,
   transitionProposal,
   validateDispatch,
 } from './policy';
@@ -100,6 +101,60 @@ describe('canOperate', () => {
     expect(canOperate(file, 'conv1')).toBe(true);
     expect(canOperate(file, 'conv2')).toBe(true);
     expect(canOperate(file, 'conv3')).toBe(false);
+  });
+});
+
+describe('takeoverRefusal', () => {
+  const target = (overrides: Partial<Parameters<typeof takeoverRefusal>[1]> = {}) => ({
+    conversationId: 'conv9',
+    conversation: {
+      conversationId: 'conv9',
+      projectId: 'p1',
+      kind: 'root' as const,
+      lifecycle: 'ready' as const,
+      version: 1,
+    },
+    project: project(),
+    row: { id: 'conv9', projectId: 'p1' } as Record<string, unknown>,
+    visible: true,
+    ...overrides,
+  });
+
+  it('accepts a plain visible root session the user created', () => {
+    expect(takeoverRefusal(dispatchFile(), target())).toBeNull();
+  });
+
+  it('refuses secretary, bot, child, archived, invisible and already managed sessions', () => {
+    const file = dispatchFile();
+    const base = target();
+    expect(takeoverRefusal(file, target({ conversation: undefined }))).toBe('not-found');
+    expect(takeoverRefusal(file, target({ row: undefined }))).toBe('not-found');
+    expect(
+      takeoverRefusal(
+        file,
+        target({ conversation: { ...base.conversation, bot: { botId: 'b', chatId: null } } })
+      )
+    ).toBe('bot-session');
+    expect(takeoverRefusal(file, target({ project: project({ kind: 'secretary' }) }))).toBe(
+      'secretary-session'
+    );
+    expect(takeoverRefusal(file, target({ row: { ...base.row, parentId: 'x' } }))).toBe(
+      'child-session'
+    );
+    expect(takeoverRefusal(file, target({ row: { ...base.row, btwParentId: 'x' } }))).toBe(
+      'child-session'
+    );
+    expect(takeoverRefusal(file, target({ row: { ...base.row, archived: true } }))).toBe(
+      'archived'
+    );
+    expect(takeoverRefusal(file, target({ visible: false }))).toBe('not-visible');
+    expect(takeoverRefusal(file, target({ conversationId: 'conv1' }))).toBe('already-managed');
+    expect(
+      takeoverRefusal(
+        file,
+        target({ row: { ...base.row, secretaryOrigin: { secretaryConversationId: 's' } } })
+      )
+    ).toBe('already-managed');
   });
 });
 

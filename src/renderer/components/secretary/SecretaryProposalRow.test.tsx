@@ -82,6 +82,9 @@ describe('secretaryProposalId', () => {
     expect(secretaryProposalId({ name: 'secretary_profile_propose', output, state: 'ok' })).toBe(
       'pr1'
     );
+    expect(secretaryProposalId({ name: 'session_takeover_propose', output, state: 'ok' })).toBe(
+      'pr1'
+    );
     // 已建成的结果、别的工具、运行中与出错行都不是提案卡片
     expect(
       secretaryProposalId({ name: 'session_create', output: '{"status":"created"}', state: 'ok' })
@@ -292,6 +295,44 @@ describe('SecretaryProposalRow skill proposals', () => {
     expect(buttons(renderSkill({ status: 'succeeded' }))).toEqual([]);
     const failed = renderSkill({ status: 'failed', error: 'invalid skill name' });
     expect(failed).toContain('invalid skill name');
+    expect(buttons(failed)).toEqual([]);
+  });
+});
+
+const takeoverProposal: SecretaryProposal = {
+  id: 'pr4',
+  secretaryConversationId: 'sec1',
+  createdAt: 1,
+  updatedAt: 1,
+  status: 'pending',
+  kind: 'takeover',
+  draft: { conversationId: 'c9', projectId: 'p1', title: '修登录', reason: '帮你盯着构建' },
+};
+
+describe('SecretaryProposalRow takeover proposals', () => {
+  const renderTakeover = (over: Partial<SecretaryProposal> = {}): string => {
+    h.proposal = null;
+    h.extra = { pr4: { ...takeoverProposal, ...over } };
+    h.resolving = false;
+    return renderToStaticMarkup(createElement(SecretaryProposalRow, { proposalId: 'pr4' }));
+  };
+
+  it('待确认：显示项目、会话标题、理由与同意/拒绝', () => {
+    const html = renderTakeover();
+    expect(html).toContain('data-kind="takeover"');
+    expect(html).toContain('[Take over]');
+    expect(html).toContain('>enso<');
+    expect(html).toContain('修登录');
+    expect(html).toContain('帮你盯着构建');
+    expect(buttons(html)).toEqual(['[Allow takeover]', '[Reject]']);
+  });
+
+  it('终态只显示状态', () => {
+    const done = renderTakeover({ status: 'succeeded' });
+    expect(done).toContain('[Handed over to the secretary]');
+    expect(buttons(done)).toEqual([]);
+    const failed = renderTakeover({ status: 'failed', error: 'archived' });
+    expect(failed).toContain('archived');
     expect(buttons(failed)).toEqual([]);
   });
 });

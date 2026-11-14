@@ -3,6 +3,9 @@
 // 全程在隔离 userData 与 fake provider 上跑，不碰真实账号与真实数据。
 //   node scripts/verify-secretary.mjs [--keep]
 // 产物：/tmp/sec-u10/*.png 与 audit.jsonl
+// 多个会话同时跑时各用一套端口与目录，例如：
+//   SEC_VERIFY_DIR=/tmp/sec-u10-b SEC_VERIFY_CDP_PORT=9433 SEC_VERIFY_FAKE_PORT=8999 \
+//   SEC_VERIFY_PLUGIN_PORT=8998 node scripts/verify-secretary.mjs
 //
 // 步骤编号沿用计划「真机验证脚本思路」，执行顺序按依赖排：
 // 计划第 3 步（派活出卡片）先跑，第 1、2 步用它的会话断言。
@@ -24,12 +27,12 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const REPO = path.resolve(import.meta.dirname, '..');
-const ART = '/tmp/sec-u10';
-const ENV = '/tmp/sec-u10-env';
-const PROJ = '/tmp/sec-u10-proj';
-const CDP_PORT = 9333;
-const FAKE_PORT = 8899;
-const PLUGIN_PORT = 8898;
+const ART = process.env.SEC_VERIFY_DIR || '/tmp/sec-u10';
+const ENV = `${ART}-env`;
+const PROJ = `${ART}-proj`;
+const CDP_PORT = Number(process.env.SEC_VERIFY_CDP_PORT || 9333);
+const FAKE_PORT = Number(process.env.SEC_VERIFY_FAKE_PORT || 8899);
+const PLUGIN_PORT = Number(process.env.SEC_VERIFY_PLUGIN_PORT || 8898);
 const KEEP = process.argv.includes('--keep');
 
 const settingsFile = path.join(ENV, 'settings.json');
@@ -165,6 +168,9 @@ const until = async (fn, ms = 20000) => {
 };
 const texts = (id) => (S().conversations[id]?.messages ?? []).map((m) =>
   (Array.isArray(m.content) ? m.content : []).filter((c) => c.type === 'text').map((c) => c.text).join(''));
+// 缓存的其它会话与刚切过去还没渲染的面板里，卡片 innerText 为空；只认已渲染出来的最后一张
+const shown = (selector) =>
+  [...document.querySelectorAll(selector)].filter((node) => node.innerText.trim()).at(-1) ?? null;
 `;
 
 async function connect() {
@@ -241,6 +247,8 @@ async function prepareEnv() {
   });
   const settings = readJson(settingsFile);
   settings['enso-settings'].state.secretaryEnabled = true;
+  for (const provider of settings['enso-settings'].state.providers)
+    provider.baseUrl = `http://127.0.0.1:${FAKE_PORT}`;
   writeFileSync(settingsFile, JSON.stringify(settings));
   mkdirSync(PROJ, { recursive: true });
   writeFileSync(path.join(PROJ, 'README.md'), 'isolated dispatch target\n');
@@ -266,7 +274,9 @@ async function main() {
   const pluginZipUrl = await servePluginZip();
 
   log('== fake provider + dev');
-  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {});
+  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {
+    FAKE_PROVIDER_PORT: String(FAKE_PORT),
+  });
   await waitFor(
     async () => {
       try {
@@ -672,6 +682,88 @@ async function run(cdp, pluginZipUrl) {
     goalFollowUpDone
   );
 
+  log('== step6c 秘书给自己派出的会话发消息');
+  const sendText = '秘书追问：goal.txt 写好了吗？请用一句中文回答，并说明是否需要我再做什么。';
+  const sendAsk = [
+    '跟进一下派出的会话',
+    `[[tool:session_send ${JSON.stringify({ conversationId: goalSession, message: sendText })}]]`,
+    `[[tool:session_send ${JSON.stringify({ conversationId: 'not-a-dispatched-session', message: 'test' })}]]`,
+  ].join(' ');
+  const turnBeforeSend = readJson(dispatchFile).dispatched[goalSession].turn;
+  const sent = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      ${JSON.stringify(sendAsk)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const results = await until(() => {
+      const found = (S().conversations[id]?.messages ?? []).filter(
+        (message) => message.toolName === 'session_send'
+      );
+      return found.length >= 2 ? found : null;
+    }, 40000);
+    const delivered = await until(
+      () => texts(${JSON.stringify(goalSession)}).some((text) => text.includes(${JSON.stringify(sendText)})),
+      40000
+    );
+    return JSON.stringify({
+      results: (results ?? []).map((message) => ({
+        text: textOf(message),
+        isError: message.isError === true,
+      })),
+      delivered: Boolean(delivered),
+    });
+  `);
+  // worker 把成功结果原样回给模型，失败标成工具错误并带上 Main 的错误文本
+  const okResult = sent.results?.find((entry) => !entry.isError);
+  assert(
+    Boolean(okResult) && /"status":"(sent|queued)"/u.test(okResult.text),
+    'step6c: session_send 给自己派出的会话返回成功',
+    sent
+  );
+  assert(sent.delivered, 'step6c: 派出的会话收到秘书发的消息', sent);
+  const deniedResult = sent.results?.find((entry) => entry.isError)?.text;
+  assert(
+    deniedResult?.includes('permission denied (not-operable)') &&
+      !deniedResult.includes('invalid arguments'),
+    'step6c: 不可操作的会话报明确的拒绝原因，不再报 invalid arguments',
+    sent
+  );
+  const sendAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'session_send');
+  assert(
+    sendAudit.some((entry) => entry.ok && entry.targetId === goalSession) &&
+      sendAudit.some((entry) => !entry.ok && entry.detail === 'not-operable'),
+    'step6c: audit 记下一次成功发送与一次拒绝',
+    sendAudit
+  );
+  const sendTurnDone = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[goalSession];
+      return record.turn > turnBeforeSend && record.lastState === 'idle' ? record : null;
+    },
+    'dispatched session turn after session_send',
+    40_000,
+    500
+  ).catch(() => null);
+  assert(
+    Boolean(sendTurnDone),
+    'step6c: 派出的会话处理完秘书的消息回到空闲',
+    readJson(dispatchFile).dispatched[goalSession]
+  );
+
   log('== step5 并发确认');
   const secondProposal = await page(`
     const secretary = await SEC();
@@ -1026,7 +1118,7 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       id
     );
-    const card = await until(() => document.querySelector('[data-enso=secretary-proposal]'), 30000);
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=skill]'), 30000);
     if (!card)
       return JSON.stringify({
         ok: false,
@@ -1183,10 +1275,7 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       id
     );
-    const card = await until(
-      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
-      30000
-    );
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=tool]'), 30000);
     if (!card)
       return JSON.stringify({
         ok: false,
@@ -1319,10 +1408,7 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       id
     );
-    const card = await until(
-      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
-      30000
-    );
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=tool]'), 30000);
     if (!card) return JSON.stringify({ ok: false, error: 'no tool proposal card' });
     const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
     return JSON.stringify({
@@ -1453,8 +1539,263 @@ async function run(cdp, pluginZipUrl) {
     afterDelete
   );
 
+  await verifyTakeover(cdp, setup);
+
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
+}
+
+/** 新开一个秘书会话，让 fake provider 调一次秘书工具，取回工具结果原文 */
+async function secretaryTool(cdp, setup, toolName, args, ask) {
+  const prompt = `${ask} [[tool:${toolName} ${JSON.stringify(args)}]]`;
+  return cdp.json(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      ${JSON.stringify(prompt)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === ${JSON.stringify(toolName)}
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({ secretaryId: id, text: result ? textOf(result) : null });
+  `);
+}
+
+const auditLines = () =>
+  readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+
+async function verifyTakeover(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+
+  log('== 接管：用户自己开的会话');
+  const own = await page(`
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.projectId)});
+    const id = await S().newConversation(project.id);
+    S().selectConversation(id);
+    const sent = await S().send('用户自己开的会话：先打个招呼', {
+      providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path,
+    }, undefined, id);
+    const replied = await until(
+      () => (S().conversations[id]?.messages ?? []).some((m) => m.role === 'assistant'),
+      30000
+    );
+    return JSON.stringify({ id, sent, replied: Boolean(replied) });
+  `);
+  assert(own.sent === null && own.replied, '接管: 用户自己开的会话跑完一轮', own);
+  const ownId = own.id;
+  await waitFor(() => conversationsIn()?.[ownId], 'own session row persisted', 15_000, 250);
+
+  const refusedStop = await secretaryTool(
+    cdp,
+    setup,
+    'session_stop',
+    { conversationId: ownId },
+    '停掉用户的会话'
+  );
+  assert(
+    refusedStop.text?.includes('not-operable') &&
+      refusedStop.text.includes('session_takeover_propose'),
+    '接管: 未授权时 session_stop 被拒，并提示可以申请接管',
+    refusedStop
+  );
+
+  const ownSecretary = await secretaryTool(
+    cdp,
+    setup,
+    'session_takeover_propose',
+    { conversationId: setup.secretaryId },
+    '接管秘书自己的会话'
+  );
+  assert(
+    ownSecretary.text?.includes('secretary-session'),
+    '接管: 秘书会话不能被接管',
+    ownSecretary
+  );
+
+  log('== 接管：会话界面入口');
+  const granted = await page(`
+    const id = ${JSON.stringify(ownId)};
+    S().selectConversation(id);
+    const visible = (selector) =>
+      [...document.querySelectorAll(selector)].filter((node) => node.offsetParent !== null);
+    const button = await until(() => visible('[data-enso=secretary-takeover-grant]')[0] ?? null, 15000);
+    if (!button) return JSON.stringify({ ok: false, error: 'no grant button' });
+    button.click();
+    const chip = await until(() => visible('[data-enso=secretary-takeover-chip]')[0] ?? null, 15000);
+    return JSON.stringify({
+      ok: Boolean(chip),
+      chip: chip?.innerText,
+      badge: visible('[data-enso=secretary-takeover]').length,
+    });
+  `);
+  assert(granted.ok, '接管: 会话顶栏点「交给秘书接管」后显示接管中', granted);
+  assert(granted.badge >= 1, '接管: 侧栏显示「秘书接管中」', granted);
+  await cdp.shot(path.join(ART, '07-takeover-chip.png'));
+  const userGrant = readJson(dispatchFile).dispatched[ownId];
+  assert(userGrant?.takeover?.via === 'user', '接管: 界面授权落盘，来源记 user', userGrant);
+  const listed = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.listTakeovers());
+  `);
+  assert(
+    listed.ok && listed.takeovers.some((entry) => entry.conversationId === ownId),
+    '接管: 设置页清单里列出该会话',
+    listed
+  );
+  const userRevoke = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.revokeTakeover(${JSON.stringify(ownId)}));
+  `);
+  assert(
+    userRevoke.ok && !readJson(dispatchFile).dispatched[ownId],
+    '接管: 界面授权可以撤销',
+    userRevoke
+  );
+
+  log('== 接管：秘书提出 → 用户确认 → 发消息 → 撤销 → 再发被拒');
+  const proposedTakeover = await secretaryTool(
+    cdp,
+    setup,
+    'session_takeover_propose',
+    { conversationId: ownId, reason: '帮你盯着这个会话' },
+    '把用户的会话交给我接管'
+  );
+  assert(
+    proposedTakeover.text?.includes('awaiting_confirmation'),
+    '接管: 秘书提出接管只得到待确认',
+    proposedTakeover
+  );
+  assert(!readJson(dispatchFile).dispatched[ownId], '接管: 确认前没有授权');
+  const confirmedTakeover = await page(`
+    const visible = (selector) =>
+      [...document.querySelectorAll(selector)].filter((node) => node.offsetParent !== null);
+    const card = await until(
+      () => visible('[data-enso=secretary-proposal][data-kind=takeover]').at(-1) ?? null,
+      30000
+    );
+    if (!card) return JSON.stringify({ ok: false, error: 'no takeover card' });
+    const secretary = await SEC();
+    const proposal = Object.values(secretary.getState().secretary.proposals)
+      .filter((p) => p.kind === 'takeover')
+      .at(-1);
+    const cardText = card.innerText;
+    card.querySelector('button').click();
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ ok: true, cardText, status: done?.status, error: done?.error });
+  `);
+  assert(
+    confirmedTakeover.ok && confirmedTakeover.cardText.includes('帮你盯着这个会话'),
+    '接管: 聊天里出现接管确认卡',
+    confirmedTakeover
+  );
+  await cdp.shot(path.join(ART, '08-takeover-card.png'));
+  assert(confirmedTakeover.status === 'succeeded', '接管: 用户确认后接管生效', confirmedTakeover);
+  const proposalGrant = readJson(dispatchFile).dispatched[ownId];
+  assert(proposalGrant?.takeover?.via === 'proposal', '接管: 确认卡授权落盘', proposalGrant);
+
+  const sentByTakeover = await secretaryTool(
+    cdp,
+    setup,
+    'session_send',
+    { conversationId: ownId, message: '秘书接手：请回一句收到' },
+    '给接管的会话发消息'
+  );
+  assert(
+    /"status":"(sent|queued)"/u.test(sentByTakeover.text ?? ''),
+    '接管: 秘书给接管的会话发消息成功',
+    sentByTakeover
+  );
+  const arrived = await page(`
+    const hit = await until(
+      () => texts(${JSON.stringify(ownId)}).some((text) => text.includes('秘书接手：请回一句收到')),
+      30000
+    );
+    return JSON.stringify({ arrived: Boolean(hit) });
+  `);
+  assert(arrived.arrived, '接管: 目标会话收到秘书的消息', arrived);
+  const pushed = await page(`
+    const secretaryId = ${JSON.stringify(proposedTakeover.secretaryId)};
+    const target = ${JSON.stringify(ownId)};
+    const hit = await until(
+      () => texts(secretaryId).find(
+        (text) =>
+          text.startsWith('<session-updates>') && text.includes('[turn-ended session:' + target + ']')
+      ),
+      60000
+    );
+    return JSON.stringify({ received: Boolean(hit), update: hit ?? null });
+  `);
+  assert(
+    pushed.received,
+    '接管: 接管的会话跑完一轮后像派出会话一样回传给提出接管的秘书会话',
+    pushed
+  );
+  log(`  ${pushed.update?.slice(0, 300)}`);
+
+  const revoked = await page(`
+    const id = ${JSON.stringify(ownId)};
+    S().selectConversation(id);
+    const visible = (selector) =>
+      [...document.querySelectorAll(selector)].filter((node) => node.offsetParent !== null);
+    const button = await until(() => visible('[data-enso=secretary-takeover-revoke]')[0] ?? null, 15000);
+    if (!button) return JSON.stringify({ ok: false, error: 'no revoke button' });
+    button.click();
+    const back = await until(() => visible('[data-enso=secretary-takeover-grant]')[0] ?? null, 15000);
+    return JSON.stringify({ ok: Boolean(back) });
+  `);
+  assert(revoked.ok, '接管: 会话顶栏点 × 撤销后恢复成可交给秘书', revoked);
+  assert(!readJson(dispatchFile).dispatched[ownId], '接管: 撤销后授权从盘上删除');
+
+  const refusedSend = await secretaryTool(
+    cdp,
+    setup,
+    'session_send',
+    { conversationId: ownId, message: '撤销后还想再发' },
+    '撤销后再给它发消息'
+  );
+  assert(
+    refusedSend.text?.includes('not-operable') &&
+      refusedSend.text.includes('session_takeover_propose'),
+    '接管: 撤销后秘书再发消息被拒，并提示可以申请接管',
+    refusedSend
+  );
+
+  const audit = auditLines().filter(
+    (entry) => entry.targetId === ownId || entry.op === 'session_takeover_propose'
+  );
+  const count = (op, ok, detail) =>
+    audit.filter(
+      (entry) =>
+        entry.op === op && entry.ok === ok && (detail === undefined || entry.detail === detail)
+    ).length;
+  assert(
+    count('takeover_grant', true, 'user') === 1 &&
+      count('takeover_grant', true, 'proposal') === 1 &&
+      count('takeover_revoke', true) === 2 &&
+      count('session_takeover_propose', true) >= 1 &&
+      count('session_send', true) === 1 &&
+      count('session_send', false, 'not-operable') === 1 &&
+      count('session_stop', false, 'not-operable') === 1,
+    '接管: 授权、撤销与秘书发的每条消息都有审计',
+    audit
+  );
 }
 
 main()

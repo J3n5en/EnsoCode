@@ -27,6 +27,7 @@ export const EMPTY_SECRETARY_STATE: SecretaryState = {
   persona: '',
   board: { needsYou: [], running: [], done: [], todos: [] },
   proposals: {},
+  takeovers: [],
 };
 
 interface SecretaryStoreState {

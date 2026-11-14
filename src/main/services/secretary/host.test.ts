@@ -174,6 +174,42 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.dispatched.c1).toMatchObject({ turn: 1, lastState: 'idle' });
   });
 
+  it('接管来的会话与派出会话一样回传结束、需要用户与失败', () => {
+    const takenOver = (): Partial<SecretaryDispatchFile> => ({
+      dispatched: {
+        c1: {
+          conversationId: 'c1',
+          projectId: 'p1',
+          secretaryConversationId: 'sec1',
+          createdAt: 0,
+          turn: 0,
+          lastState: 'running',
+          lastEventAt: 0,
+          takeover: { grantedAt: 0, via: 'user' },
+        },
+      },
+    });
+    const ended = harness({ file: takenOver() });
+    ended.state.statuses.c1 = idle;
+    ended.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(ended.state.file.outbox[0]).toMatchObject({
+      kind: 'turn-ended',
+      conversationId: 'c1',
+      secretaryConversationId: 'sec1',
+    });
+
+    const asking = harness({ file: takenOver() });
+    asking.state.statuses.c1 = waiting;
+    asking.host.onAgentEvent(event('ask-request'), change('waiting', 'running'));
+    expect(asking.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
+
+    const failed = harness({ file: takenOver() });
+    failed.state.statuses.c1 = error;
+    failed.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'running'));
+    expect(failed.state.file.outbox[0]).toMatchObject({ kind: 'failed' });
+    expect(failed.state.file.dispatched.c1.takeover).toEqual({ grantedAt: 0, via: 'user' });
+  });
+
   it('目标完成与安全限制暂停分别记完成与受阻', () => {
     const done = harness({});
     done.state.statuses.c1 = idle;

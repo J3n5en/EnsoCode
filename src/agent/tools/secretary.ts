@@ -1,5 +1,10 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { SECRETARY_OPS, type SecretaryOp } from '@shared/secretary/tools';
+import {
+  SECRETARY_ID_MAX,
+  SECRETARY_OPS,
+  SECRETARY_SESSION_MESSAGE_MAX,
+  type SecretaryOp,
+} from '@shared/secretary/tools';
 import { THINKING_LEVELS } from '@shared/types/agent';
 import type { MemoryInvoker } from './memory';
 
@@ -55,6 +60,10 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
   session_stop: {
     keys: ['conversationId'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
+  },
+  session_takeover_propose: {
+    keys: ['conversationId', 'reason'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId', why: 'reason' },
   },
   todo_item_add: {
     keys: ['text', 'dueAt', 'projectId'],
@@ -175,7 +184,7 @@ function object(properties: Record<string, JsonSchema>, required: readonly strin
 const id = (description: string): JsonSchema => ({
   type: 'string',
   minLength: 1,
-  maxLength: 200,
+  maxLength: SECRETARY_ID_MAX,
   description,
 });
 
@@ -252,18 +261,35 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched or the user referenced. Queues behind the current turn when the session is running. Refused while the session waits for the user.',
+      'Send a message to a session you dispatched, the user referenced, or the user handed over to you. Queues behind the current turn when the session is running. Refused while the session waits for the user.',
     parameters: object(
       {
         conversationId: id('Target session id'),
-        message: { type: 'string', minLength: 1, maxLength: 8000 },
+        message: { type: 'string', minLength: 1, maxLength: SECRETARY_SESSION_MESSAGE_MAX },
       },
       ['conversationId', 'message']
     ),
   },
   session_stop: {
-    description: 'Stop a session you dispatched or the user referenced.',
+    description:
+      'Stop a session you dispatched, the user referenced, or the user handed over to you.',
     parameters: object({ conversationId: id('Target session id') }, ['conversationId']),
+  },
+  session_takeover_propose: {
+    description:
+      'Ask the user to hand over a session you did not dispatch, so you may message and stop it like your own. It is only a request: the user confirms on a card, and the result arrives later as a session update. Child sessions, archived sessions, bot sessions and sessions another secretary already manages cannot be handed over.',
+    parameters: object(
+      {
+        conversationId: id('Session id from session_list'),
+        reason: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 500,
+          description: 'One line for the user: why you want to take it over',
+        },
+      },
+      ['conversationId']
+    ),
   },
   todo_item_add: {
     description: 'Add an item to the todo column of the secretary board.',

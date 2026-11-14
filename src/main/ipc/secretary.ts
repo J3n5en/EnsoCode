@@ -16,8 +16,11 @@ import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
   buildSecretaryState,
   dismissResult,
+  grantTakeover,
+  listTakeovers,
   mutateTodo,
   resolveProposal,
+  revokeTakeover,
   secretaryDispatchPorts,
   setSecretaryStateListener,
 } from '../services/secretary/dispatch';
@@ -145,6 +148,7 @@ function disabledState(): SecretaryState {
     persona: '',
     board: { needsYou: [], running: [], done: [], todos: [] },
     proposals: {},
+    takeovers: [],
   };
 }
 
@@ -359,6 +363,32 @@ export function registerSecretaryHandlers(): void {
     const parsed = parseDismissRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
     return dismissResult(secretaryDispatchPorts, parsed.conversationId);
+  });
+
+  // 授权只认主界面上用户亲手点的；秘书的工具调用走提案，到不了这里
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TAKEOVER_GRANT, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseDismissRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return grantTakeover(secretaryDispatchPorts, parsed.conversationId, 'user', null);
+  });
+
+  // 撤销是收回权限，开关关着也允许
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TAKEOVER_REVOKE, async (event, request: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    const parsed = parseDismissRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return revokeTakeover(
+      secretaryDispatchPorts,
+      parsed.conversationId,
+      isSettingsRenderer(event.sender.id) ? 'settings' : 'session'
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST, async (event) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    return { ok: true, takeovers: await listTakeovers(secretaryDispatchPorts) };
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, async (event) => {

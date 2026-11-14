@@ -12,6 +12,7 @@ import type {
   SecretarySchedule,
   SecretaryTodo,
   SecretaryUpdate,
+  TakeoverDraft,
 } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { parseSecretarySkillDraft } from './skills';
@@ -373,7 +374,27 @@ function parseProposal(value: unknown): SecretaryProposal | undefined {
       ...(error ? { error } : {}),
     };
   }
+  if (value.kind === 'takeover') {
+    const draft = parseTakeoverDraft(value.draft);
+    if (!draft) return undefined;
+    return { ...base, kind: 'takeover', draft, ...(error ? { error } : {}) };
+  }
   return undefined;
+}
+
+export function parseTakeoverDraft(value: unknown): TakeoverDraft | undefined {
+  if (!isObject(value)) return undefined;
+  const conversationId = text(value.conversationId);
+  const projectId = text(value.projectId);
+  if (!conversationId || !projectId) return undefined;
+  const title = text(value.title);
+  const reason = text(value.reason);
+  return {
+    conversationId,
+    projectId,
+    ...(title ? { title } : {}),
+    ...(reason ? { reason } : {}),
+  };
 }
 
 function parseRecord(value: unknown): DispatchRecord | undefined {
@@ -417,6 +438,14 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
         at,
         ...(value.lastResult.dismissed === true ? { dismissed: true as const } : {}),
       };
+  }
+  if (value.takeover !== undefined) {
+    // 接管标记坏了就整条不认：不能退化成一条撤不掉的派出记录
+    if (!isObject(value.takeover)) return undefined;
+    const grantedAt = time(value.takeover.grantedAt);
+    const via = value.takeover.via;
+    if (grantedAt === undefined || (via !== 'proposal' && via !== 'user')) return undefined;
+    record.takeover = { grantedAt, via };
   }
   return record;
 }

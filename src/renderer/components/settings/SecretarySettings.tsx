@@ -5,6 +5,7 @@ import type {
   SecretaryProfileDraft,
   SecretaryScheduleView,
   SecretarySkillDraft,
+  SecretaryTakeoverView,
   SecretaryToolDraft,
 } from '@shared/types/secretary';
 import * as React from 'react';
@@ -267,6 +268,63 @@ function OwnTools({ busy }: { busy: boolean }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** 交给秘书接管的会话：随秘书状态推送刷新，取消后秘书立即失去对它的发消息与停止权限 */
+function Takeovers({ locale }: { locale: string }) {
+  const { t } = useI18n();
+  const [takeovers, setTakeovers] = React.useState<SecretaryTakeoverView[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    const result = await window.electronAPI.secretary.listTakeovers();
+    if (result.ok) setTakeovers(result.takeovers);
+    else setError(result.error);
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+    return window.electronAPI.secretary.onStateChanged(() => void load());
+  }, [load]);
+
+  const revoke = async (conversationId: string) => {
+    setError(null);
+    const result = await window.electronAPI.secretary.revokeTakeover(conversationId);
+    if (!result.ok) setError(result.error);
+    await load();
+  };
+
+  return (
+    <>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {takeovers.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t('No sessions handed over')}</p>
+      ) : (
+        <div className="divide-y rounded-md border">
+          {takeovers.map((entry) => (
+            <div
+              key={entry.conversationId}
+              className="flex items-center gap-2 px-3 py-2"
+              data-enso="secretary-takeover-row"
+              data-conversation-id={entry.conversationId}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm">{entry.title || t('Unnamed')}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {[entry.projectName, formatWhen(entry.grantedAt, locale)]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => void revoke(entry.conversationId)}>
+                {t('Take back')}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -617,6 +675,14 @@ export function SecretarySettings() {
           </div>
         </Section>
       ) : null}
+
+      <Section
+        title="Sessions handed over"
+        description="Sessions you started and handed to the secretary. It may message and stop them like the ones it dispatched; take one back to remove that right."
+        rowId="secretary.takeovers"
+      >
+        <Takeovers locale={locale} />
+      </Section>
 
       <Section title="Scheduled tasks" rowId="secretary.schedules">
         {schedules.length === 0 ? (

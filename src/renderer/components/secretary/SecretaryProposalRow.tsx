@@ -16,6 +16,7 @@ const PROPOSAL_TOOLS = new Set([
   'secretary_profile_propose',
   'skill_propose',
   'tool_propose',
+  'session_takeover_propose',
 ]);
 
 /**
@@ -101,6 +102,8 @@ export function SecretaryProposalRow({
     return <SkillProposalCard proposal={proposal} prominent={prominent} />;
   if (proposal.kind === 'tool')
     return <ToolProposalCard proposal={proposal} prominent={prominent} />;
+  if (proposal.kind === 'takeover')
+    return <TakeoverProposalCard proposal={proposal} prominent={prominent} />;
 
   const project = projects.find((entry) => entry.id === proposal.draft.projectId);
   const failed = proposal.status === 'failed';
@@ -258,6 +261,74 @@ const TOOL_STATUS_LABELS: Record<ProposalStatus, string> = {
   executing: 'Saving the tool…',
   succeeded: 'Tool saved',
 };
+
+const TAKEOVER_STATUS_LABELS: Record<ProposalStatus, string> = {
+  ...STATUS_LABELS,
+  executing: 'Handing it over…',
+  succeeded: 'Handed over to the secretary',
+};
+
+/** 接管申请卡片：用户点同意后秘书才能给这个会话发消息、停止它；之后可在会话里或设置页收回 */
+function TakeoverProposalCard({
+  proposal,
+  prominent,
+}: {
+  proposal: Extract<SecretaryProposal, { kind: 'takeover' }>;
+  prominent?: boolean;
+}) {
+  const { t } = useI18n();
+  const resolving = useSecretaryStore((state) => state.resolving[proposal.id] === true);
+  const resolveProposal = useSecretaryStore((state) => state.resolveProposal);
+  const projects = useSettingsStore((state) => state.projects);
+  const project = projects.find((entry) => entry.id === proposal.draft.projectId);
+  const failed = proposal.status === 'failed';
+
+  return (
+    <div data-enso="secretary-proposal" data-kind="takeover" className={cardClass(prominent)}>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          {t('Take over')}
+        </span>
+        {project && (
+          <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+            {projectDisplayName(project)}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate">{proposal.draft.title ?? t('Unnamed')}</span>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {t('The secretary asks to manage this session: it may message and stop it like its own.')}
+        {proposal.draft.reason ? ` ${proposal.draft.reason}` : ''}
+      </p>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <span className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}>
+          {t(TAKEOVER_STATUS_LABELS[proposal.status])}
+          {failed && proposal.error ? ` · ${proposal.error}` : ''}
+        </span>
+        {proposal.status === 'pending' && (
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              disabled={resolving}
+              onClick={() => void resolveProposal(proposal.id, 'confirm')}
+              className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {t('Allow takeover')}
+            </button>
+            <button
+              type="button"
+              disabled={resolving}
+              onClick={() => void resolveProposal(proposal.id, 'reject')}
+              className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {t('Reject')}
+            </button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /** 工具草案卡片：参数结构与代码都可折叠，同名时把旧代码一起摊开 */
 function ToolProposalCard({

@@ -54,6 +54,7 @@ const state = (over: Partial<SecretaryState> = {}): SecretaryState => ({
   persona: '',
   board: { needsYou: [], running: [], done: [], todos: [] },
   proposals: {},
+  takeovers: [],
   ...over,
 });
 

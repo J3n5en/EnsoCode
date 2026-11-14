@@ -100,6 +100,7 @@ function proposalTitle(proposal: SecretaryProposal): string {
   if (proposal.kind === 'profile') return 'Update the secretary profile';
   if (proposal.kind === 'skill') return `Skill: ${proposal.draft.name}`;
   if (proposal.kind === 'tool') return `Tool: ${proposal.draft.name}`;
+  if (proposal.kind === 'takeover') return proposal.draft.title ?? proposal.draft.conversationId;
   return proposal.draft.title?.trim() || proposal.draft.prompt.split('\n')[0]?.trim() || '';
 }
 

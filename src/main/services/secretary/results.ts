@@ -9,6 +9,7 @@ import {
   type SecretaryDispatchFile,
   type SecretaryProposal,
   type SecretaryResultKind,
+  type SecretaryTakeoverView,
   type SecretaryTodo,
   type SecretaryUpdate,
 } from '@shared/types/secretary';
@@ -167,6 +168,12 @@ export function proposalUpdate(proposal: SecretaryProposal, at: number): Secreta
 }
 
 function proposalUpdateText(proposal: SecretaryProposal): string {
+  // 接管卡回传要点名会话，秘书才知道之后能操作哪一个
+  if (proposal.kind === 'takeover') {
+    const session = `session:${proposal.draft.conversationId}`;
+    if (proposal.status === 'succeeded') return `用户同意了接管，${session} 现在交给你管`;
+    if (proposal.status === 'rejected') return `用户拒绝了接管 ${session}`;
+  }
   switch (proposal.status) {
     case 'succeeded':
       return '提案已执行';
@@ -211,7 +218,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     .map((proposal) => ({
       kind: 'proposal',
       proposal,
-      ...(proposal.kind === 'dispatch'
+      ...(proposal.kind === 'dispatch' || proposal.kind === 'takeover'
         ? { projectName: projectName(proposal.draft.projectId) }
         : {}),
     }));
@@ -234,6 +241,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       secretaryConversationId: record.secretaryConversationId,
       ...(record.lastText ? { lastText: redactSecrets(record.lastText) } : {}),
       ...(record.lastResult ? { result: record.lastResult.kind } : {}),
+      ...(record.takeover ? { takeover: true as const } : {}),
     };
     const needsYouNow =
       card.state === 'waiting' ||
@@ -253,6 +261,31 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     done,
     todos: input.todos.filter((todo) => todo.doneAt === undefined),
   };
+}
+
+/** 接管清单：会话行已删的不列；按授权时间新的在前 */
+export function takeoverViews(
+  file: SecretaryDispatchFile,
+  rows: Readonly<Record<string, Record<string, unknown>>>,
+  projects: readonly ProjectAuthority[]
+): SecretaryTakeoverView[] {
+  const views: SecretaryTakeoverView[] = [];
+  for (const record of Object.values(file.dispatched)) {
+    if (!record.takeover) continue;
+    const row = rows[record.conversationId];
+    if (!row) continue;
+    const project = projects.find((candidate) => candidate.projectId === record.projectId);
+    views.push({
+      conversationId: record.conversationId,
+      projectId: record.projectId,
+      projectName: project ? projectNameFromPath(project.canonicalPath) : '',
+      title: typeof row.title === 'string' ? row.title : '',
+      grantedAt: record.takeover.grantedAt,
+      via: record.takeover.via,
+      secretaryConversationId: record.secretaryConversationId,
+    });
+  }
+  return views.sort((left, right) => right.grantedAt - left.grantedAt);
 }
 
 /** 系统通知只补通用通知没覆盖的结果；通用路径已经报过审批、提问、轮次完成与失败 */

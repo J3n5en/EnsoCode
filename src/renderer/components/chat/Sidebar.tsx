@@ -88,6 +88,7 @@ import {
   SecretarySidebarSection,
   sidebarProjects,
 } from '@/components/secretary/SecretarySidebarSection';
+import { SecretaryTakeoverBadge, useTakeover } from '@/components/secretary/SecretaryTakeover';
 import { secretarySectionView } from '@/components/secretary/secretaryView';
 import {
   ContextMenu,
@@ -2533,6 +2534,7 @@ function ConversationRow({
     )
   );
   const [renaming, setRenaming] = useState(false);
+  const takenOver = useTakeover(id) !== undefined;
   const worktree = useSessionsStore((state) => state.conversations[id]?.worktree);
   const workspaceBusy = useSessionsStore((state) =>
     Boolean(state.conversations[id]?.workspaceMigrating)
@@ -2630,6 +2632,7 @@ function ConversationRow({
           )}
         </div>
         {conversation.secretaryOrigin && <SecretaryOriginBadge />}
+        {!conversation.secretaryOrigin && takenOver && <SecretaryTakeoverBadge />}
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
         {!renaming && (

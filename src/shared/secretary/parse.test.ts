@@ -442,6 +442,54 @@ describe('parseDispatchFile', () => {
       dismissed: true,
     });
   });
+
+  it('keeps a valid takeover mark and a takeover proposal, drops broken ones', () => {
+    const record = (conversationId: string, takeover: unknown) => ({
+      conversationId,
+      projectId: 'p1',
+      secretaryConversationId: 's1',
+      createdAt: 10,
+      turn: 0,
+      lastState: 'idle',
+      lastEventAt: 10,
+      takeover,
+    });
+    const proposal = (id: string, draft: unknown) => ({
+      id,
+      secretaryConversationId: 's1',
+      createdAt: 1,
+      updatedAt: 1,
+      status: 'pending',
+      kind: 'takeover',
+      draft,
+    });
+    const file = parseDispatchFile({
+      dispatched: {
+        a: record('a', { grantedAt: 5, via: 'user' }),
+        b: record('b', { grantedAt: 5, via: 'secretary' }),
+      },
+      proposals: {
+        ok: proposal('ok', {
+          conversationId: 'c9',
+          projectId: 'p1',
+          title: ' 修 bug ',
+          reason: '',
+        }),
+        bad: proposal('bad', { conversationId: 'c9' }),
+      },
+    });
+    expect(file.dispatched.a?.takeover).toEqual({ grantedAt: 5, via: 'user' });
+    // 标记坏了整条不认，不能退化成撤不掉的派出记录
+    expect(file.dispatched.b).toBeUndefined();
+    expect(file.proposals.ok).toMatchObject({
+      kind: 'takeover',
+      draft: { conversationId: 'c9', projectId: 'p1', title: '修 bug' },
+    });
+    expect(file.proposals.ok?.kind === 'takeover' && 'reason' in file.proposals.ok.draft).toBe(
+      false
+    );
+    expect(file.proposals.bad).toBeUndefined();
+  });
 });
 
 describe('parseTodos', () => {
