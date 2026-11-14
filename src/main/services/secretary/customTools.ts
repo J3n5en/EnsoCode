@@ -327,13 +327,18 @@ export function createSecretaryTools(ports: SecretaryToolPorts): SecretaryToolSe
     async run(params, ctx) {
       const name = nameParam(params);
       const args = params.arguments ?? {};
-      if (!name || !ctx.secretaryConversationId) return { ok: false, error: 'invalid arguments' };
+      const readOnly = params.readOnly;
+      if (!name || !ctx.secretaryConversationId || typeof readOnly !== 'boolean') {
+        return { ok: false, error: 'invalid arguments' };
+      }
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
         return { ok: false, error: 'invalid arguments' };
       }
       // 每次执行都读盘上的已确认版本：worker 传来的代码一律不认
       const draft = readSecretaryTool(ports.dir(), name);
       if (!draft) return { ok: false, error: 'not-found' };
+      // 审批与否取决于 spawn 时下发的描述符：盘上版本变了就不能拿旧会话的判定跑新代码
+      if (draft.readOnly !== readOnly) return { ok: false, error: '工具已更新，请在新会话中重试' };
       const outcome = await ports.runTool(draft, args);
       const source = `tool:${draft.name}`;
       return outcome.ok

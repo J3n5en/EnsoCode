@@ -35,7 +35,7 @@ describe('createSecretaryCustomTools', () => {
     expect(tool.annotations?.readOnlyHint).toBe(true);
   });
 
-  it('调用转成 tool_run，名字换回目录 slug，结果原样返回', async () => {
+  it('调用转成 tool_run，名字换回目录 slug，带上本次描述符的只读标记', async () => {
     const { invoker, calls } = stubInvoker({
       output: '<untrusted-content source="tool:upper-text">HELLO</untrusted-content>',
     });
@@ -50,7 +50,7 @@ describe('createSecretaryCustomTools', () => {
     expect(calls).toEqual([
       {
         op: 'tool_run',
-        params: { name: 'upper-text', arguments: { text: 'hello' } },
+        params: { name: 'upper-text', arguments: { text: 'hello' }, readOnly: true },
         timeoutMs: 305_000,
       },
     ]);

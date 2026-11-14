@@ -287,7 +287,12 @@ describe('tool_run', () => {
     const h = harness();
     h.outcome = { ok: true, output: 'HELLO' };
     const result = await h.service.run(
-      { name: 'upper-text', arguments: { text: 'hello' }, code: 'worker 传来的代码' },
+      {
+        name: 'upper-text',
+        arguments: { text: 'hello' },
+        code: 'worker 传来的代码',
+        readOnly: true,
+      },
       ctx
     );
     expect(h.ran).toEqual([{ draft, args: { text: 'hello' } }]);
@@ -296,11 +301,30 @@ describe('tool_run', () => {
     });
   });
 
+  it('描述符与盘上版本不一致时拒绝执行，不用新代码跑旧会话', async () => {
+    writeSecretaryTool(dir, { ...draft, readOnly: false });
+    const h = harness();
+    expect(await h.service.run({ name: 'upper-text', arguments: {}, readOnly: true }, ctx)).toEqual(
+      {
+        ok: false,
+        error: '工具已更新，请在新会话中重试',
+      }
+    );
+    expect(h.ran).toEqual([]);
+    expect(await h.service.run({ name: 'upper-text', arguments: {} }, ctx)).toEqual({
+      ok: false,
+      error: 'invalid arguments',
+    });
+    expect(
+      await h.service.run({ name: 'upper-text', arguments: {}, readOnly: false }, ctx)
+    ).toMatchObject({ ok: true });
+  });
+
   it('输出里的密钥先脱敏', async () => {
     writeSecretaryTool(dir, draft);
     const h = harness();
     h.outcome = { ok: true, output: 'key AKIAABCDEFGHIJKLMNOP' };
-    const result = await h.service.run({ name: 'upper-text', arguments: {} }, ctx);
+    const result = await h.service.run({ name: 'upper-text', arguments: {}, readOnly: true }, ctx);
     expect(result.ok && String((result.result as { output: string }).output)).not.toContain(
       'AKIAABCDEFGHIJKLMNOP'
     );
@@ -310,22 +334,26 @@ describe('tool_run', () => {
     writeSecretaryTool(dir, draft);
     const h = harness();
     h.outcome = { ok: false, error: 'boom' };
-    const failed = await h.service.run({ name: 'upper-text', arguments: {} }, ctx);
+    const failed = await h.service.run({ name: 'upper-text', arguments: {}, readOnly: true }, ctx);
     expect(failed).toEqual({
       ok: false,
       error: '<untrusted-content source="tool:upper-text">boom</untrusted-content>',
     });
-    expect(await h.service.run({ name: 'no-such-tool', arguments: {} }, ctx)).toEqual({
+    expect(
+      await h.service.run({ name: 'no-such-tool', arguments: {}, readOnly: true }, ctx)
+    ).toEqual({
       ok: false,
       error: 'not-found',
     });
-    expect(await h.service.run({ name: '../escape', arguments: {} }, ctx)).toEqual({
+    expect(await h.service.run({ name: '../escape', arguments: {}, readOnly: true }, ctx)).toEqual({
       ok: false,
       error: 'invalid arguments',
     });
-    expect(await h.service.run({ name: 'upper-text', arguments: [] }, ctx)).toEqual({
-      ok: false,
-      error: 'invalid arguments',
-    });
+    expect(await h.service.run({ name: 'upper-text', arguments: [], readOnly: true }, ctx)).toEqual(
+      {
+        ok: false,
+        error: 'invalid arguments',
+      }
+    );
   });
 });

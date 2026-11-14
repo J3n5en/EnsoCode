@@ -29,7 +29,7 @@ export function createSecretaryCustomTools(
         try {
           const result = await invoker.invoke(
             'tool_run',
-            { name: slugOf(name), arguments: params },
+            { name: slugOf(name), arguments: params, readOnly: descriptor.readOnly },
             signal,
             TOOL_RUN_TIMEOUT_MS
           );
