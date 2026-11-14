@@ -540,6 +540,103 @@ async function run(cdp) {
     goalOutbox
   );
 
+  // 派出时就带目标的会话：记录里留着初始目标文本，目标完成后行里的目标撤下，记录里的文本不动
+  log('== step6b 带初始目标的派出会话');
+  const goalDispatch = await page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const draft = ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '创建 goal.txt',
+      title: '写 goal.txt',
+    })};
+    await S().send(
+      '派一个带目标的活 [[tool:session_create ' + JSON.stringify(draft) + ']]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(() => {
+      const pending = Object.values(secretary.getState().secretary.proposals).filter(
+        (p) => p.status === 'pending'
+      );
+      return pending.at(-1) ?? null;
+    }, 30000);
+    if (!proposal) return JSON.stringify({ ok: false });
+    // 目标经确认时的编辑注入，不塞进 prompt 里的 session_create 指令（fake provider 的指令解析不支持嵌套）
+    const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
+      goal: '收尾 [[tool:goal_complete {"summary":"goal.txt 已写好"}]]',
+    });
+    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({
+      ok: done?.status === 'succeeded',
+      conversationId: done?.conversationId,
+    });
+  `);
+  assert(
+    goalDispatch.ok && Boolean(goalDispatch.conversationId),
+    'step6b: 带初始目标的派出会话建成',
+    goalDispatch
+  );
+  const goalSession = goalDispatch.conversationId;
+  const goalDoneRecord = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[goalSession];
+      return record?.lastResult?.kind === 'goal-complete' && record.lastState === 'idle'
+        ? record
+        : null;
+    },
+    'dispatched goal completed',
+    60_000,
+    500
+  ).catch(() => null);
+  assert(
+    Boolean(goalDoneRecord),
+    'step6b: 派出时带的目标完成',
+    readJson(dispatchFile).dispatched[goalSession]
+  );
+  assert(
+    goalDoneRecord.goal !== undefined,
+    'step6b: 派出记录里仍留着初始目标文本',
+    goalDoneRecord
+  );
+  const goalFollowUp = await page(`
+    const id = ${JSON.stringify(goalSession)};
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.projectId)});
+    const sent = await S().send('再补一句：goal.txt 写好了吗', {
+      providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path,
+    }, undefined, id);
+    return JSON.stringify({ sent });
+  `);
+  assert(goalFollowUp.sent === null, 'step6b: 目标撤下后派出会话还能收到新消息', goalFollowUp);
+  const goalFollowUpDone = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[goalSession];
+      return record?.lastResult?.kind === 'turn-ended' && record.lastState === 'idle'
+        ? record
+        : null;
+    },
+    'turn-ended after goal cleared',
+    30_000,
+    500
+  ).catch(() => null);
+  assert(
+    Boolean(goalFollowUpDone),
+    'step6b: 目标撤下后的追问轮次回报 turn-ended',
+    readJson(dispatchFile).dispatched[goalSession]
+  );
+  assert(
+    goalFollowUpDone.lastResult.turn === goalFollowUpDone.turn,
+    'step6b: 结果记在新轮次上',
+    goalFollowUpDone
+  );
+
   log('== step5 并发确认');
   const secondProposal = await page(`
     const secretary = await SEC();
@@ -596,7 +693,7 @@ async function run(cdp) {
   const records = Object.values(dispatchFinal.dispatched).filter(
     (record) => record.projectId === setup.projectId
   );
-  assert(records.length === 2, 'step5: 两个提案各一条派出记录', records.length);
+  assert(records.length === 3, 'step5: 三个派出会话各一条记录', records.length);
   const audit = readFileSync(auditFile, 'utf8')
     .trim()
     .split('\n')

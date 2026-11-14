@@ -199,6 +199,23 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
   });
 
+  it('带目标的派出会话目标撤下后再跑一轮，报新轮次的 turn-ended', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.goal = '收尾';
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({
+      kind: 'goal-complete',
+      turn: 0,
+    });
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1).toMatchObject({
+      turn: 2,
+      lastResult: { kind: 'turn-ended', turn: 2 },
+    });
+  });
+
   it('空闲的会话碰上 worker 退出不算失败', () => {
     const h = harness({});
     h.state.file.dispatched.c1.lastState = 'idle';

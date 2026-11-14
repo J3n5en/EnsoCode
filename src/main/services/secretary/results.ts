@@ -51,7 +51,8 @@ export function classify(
       // 用户亲手中断的轮次不是结果
       if (event.aborted) return null;
       if (status.pendingAsks + status.pendingApprovals > 0) return 'needs-user';
-      const goal = event.goalStatus ?? (record.goal ? 'active' : undefined);
+      // 目标是否还在只看会话行：派出记录里的 goal 是派出时的初始目标文本，目标完成后仍留着
+      const goal = event.goalStatus;
       // 目标完成后目标已撤下；host 先把 turn 加一再分类，所以本轮的完成记在 turn - 1
       const completedThisTurn =
         record.lastResult?.kind === 'goal-complete' && record.lastResult.turn === record.turn - 1;

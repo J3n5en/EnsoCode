@@ -95,6 +95,11 @@ describe('结果分类', () => {
     ).toBe('goal-blocked');
   });
 
+  it('目标撤下后轮次结束报 turn-ended，不拿派出时的初始目标兜底', () => {
+    // 行里的 goal 是派出时的初始目标文本，目标完成后仍在，不代表目标还在跑
+    expect(classify(record({ goal: 'g' }), { type: 'turn-completed' }, idle)).toBe('turn-ended');
+  });
+
   it('被中断的轮次不报结果', () => {
     expect(classify(record(), { type: 'turn-completed', aborted: true }, idle)).toBeNull();
   });
