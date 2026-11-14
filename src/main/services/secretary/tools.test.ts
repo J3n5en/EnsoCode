@@ -20,6 +20,6 @@ describe('invokeSecretaryOp', () => {
   it('参数不是对象时拒绝', async () => {
     expect(
       await invokeSecretaryOp('project_list', [], { secretaryConversationId: 'sec-1' })
-    ).toEqual({ ok: false, error: 'invalid arguments' });
+    ).toEqual({ ok: false, error: 'invalid arguments: arguments must be a JSON object' });
   });
 });

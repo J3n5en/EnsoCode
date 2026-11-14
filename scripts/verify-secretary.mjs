@@ -672,6 +672,88 @@ async function run(cdp, pluginZipUrl) {
     goalFollowUpDone
   );
 
+  log('== step6c 秘书给自己派出的会话发消息');
+  const sendText = '秘书追问：goal.txt 写好了吗？请用一句中文回答，并说明是否需要我再做什么。';
+  const sendAsk = [
+    '跟进一下派出的会话',
+    `[[tool:session_send ${JSON.stringify({ conversationId: goalSession, message: sendText })}]]`,
+    `[[tool:session_send ${JSON.stringify({ conversationId: 'not-a-dispatched-session', message: 'test' })}]]`,
+  ].join(' ');
+  const turnBeforeSend = readJson(dispatchFile).dispatched[goalSession].turn;
+  const sent = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      ${JSON.stringify(sendAsk)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const results = await until(() => {
+      const found = (S().conversations[id]?.messages ?? []).filter(
+        (message) => message.toolName === 'session_send'
+      );
+      return found.length >= 2 ? found : null;
+    }, 40000);
+    const delivered = await until(
+      () => texts(${JSON.stringify(goalSession)}).some((text) => text.includes(${JSON.stringify(sendText)})),
+      40000
+    );
+    return JSON.stringify({
+      results: (results ?? []).map((message) => ({
+        text: textOf(message),
+        isError: message.isError === true,
+      })),
+      delivered: Boolean(delivered),
+    });
+  `);
+  // worker 把成功结果原样回给模型，失败标成工具错误并带上 Main 的错误文本
+  const okResult = sent.results?.find((entry) => !entry.isError);
+  assert(
+    Boolean(okResult) && /"status":"(sent|queued)"/u.test(okResult.text),
+    'step6c: session_send 给自己派出的会话返回成功',
+    sent
+  );
+  assert(sent.delivered, 'step6c: 派出的会话收到秘书发的消息', sent);
+  const deniedResult = sent.results?.find((entry) => entry.isError)?.text;
+  assert(
+    deniedResult?.includes('permission denied (not-operable)') &&
+      !deniedResult.includes('invalid arguments'),
+    'step6c: 不可操作的会话报明确的拒绝原因，不再报 invalid arguments',
+    sent
+  );
+  const sendAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'session_send');
+  assert(
+    sendAudit.some((entry) => entry.ok && entry.targetId === goalSession) &&
+      sendAudit.some((entry) => !entry.ok && entry.detail === 'not-operable'),
+    'step6c: audit 记下一次成功发送与一次拒绝',
+    sendAudit
+  );
+  const sendTurnDone = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[goalSession];
+      return record.turn > turnBeforeSend && record.lastState === 'idle' ? record : null;
+    },
+    'dispatched session turn after session_send',
+    40_000,
+    500
+  ).catch(() => null);
+  assert(
+    Boolean(sendTurnDone),
+    'step6c: 派出的会话处理完秘书的消息回到空闲',
+    readJson(dispatchFile).dispatched[goalSession]
+  );
+
   log('== step5 并发确认');
   const secondProposal = await page(`
     const secretary = await SEC();

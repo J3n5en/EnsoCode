@@ -8,6 +8,7 @@ import {
   transitionProposal,
   validateDispatch,
 } from '@shared/secretary/policy';
+import { SECRETARY_ID_MAX, SECRETARY_SESSION_MESSAGE_MAX } from '@shared/secretary/tools';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import {
   type DispatchDraft,
@@ -94,6 +95,54 @@ const DISPATCH_OPS = [
 export type SecretaryDispatchHandlers = Record<(typeof DISPATCH_OPS)[number], SecretaryOpHandler>;
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
+
+const DENIALS = {
+  'not-operable':
+    'permission denied (not-operable): this session was not dispatched by the secretary and the user has not referenced it',
+  'not-found':
+    'not found: no root session with this id (archived, child and secretary sessions are excluded)',
+  'not-visible':
+    "permission denied (not-visible): the session's project is not in the secretary's visible projects",
+  'needs-user':
+    'refused (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+} as const;
+
+type FieldsResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** 逐字段校验，失败时写明哪个字段、哪里不合法 */
+function sessionFields(
+  params: Record<string, unknown>,
+  withMessage: boolean
+): FieldsResult<{ conversationId: string; message: string }> {
+  const allowed = withMessage ? ['conversationId', 'message'] : ['conversationId'];
+  const invalid = (detail: string) => ({
+    ok: false as const,
+    error: `invalid arguments: ${detail}`,
+  });
+  const extra = Object.keys(params).filter((key) => !allowed.includes(key));
+  if (extra.length > 0) {
+    return invalid(
+      `unexpected field ${extra.map((key) => `"${key}"`).join(', ')}; allowed fields: ${allowed.join(', ')}`
+    );
+  }
+  const text = (key: string, max: number): FieldsResult<string> => {
+    const value = params[key];
+    if (value === undefined) return invalid(`"${key}" is required`);
+    if (typeof value !== 'string') return invalid(`"${key}" must be a string, got ${typeof value}`);
+    const trimmed = value.trim();
+    if (!trimmed) return invalid(`"${key}" must not be empty`);
+    if (trimmed.length > max)
+      return invalid(`"${key}" is ${trimmed.length} characters, max ${max}`);
+    return { ok: true, value: trimmed };
+  };
+  const conversationId = text('conversationId', SECRETARY_ID_MAX);
+  if (!conversationId.ok) return conversationId;
+  if (!withMessage)
+    return { ok: true, value: { conversationId: conversationId.value, message: '' } };
+  const message = text('message', SECRETARY_SESSION_MESSAGE_MAX);
+  if (!message.ok) return message;
+  return { ok: true, value: { conversationId: conversationId.value, message: message.value } };
+}
 
 /** 工作台推送由 IPC 层注册，避免本模块静态依赖 electron 与 agent */
 let stateListener: (() => void) | null = null;
@@ -279,6 +328,18 @@ function auditFailure(
   return { ok: false, error };
 }
 
+/** 审计记短码，返回给模型的是可读的拒绝原因 */
+function deny(
+  ports: SecretaryDispatchPorts,
+  ctx: SecretaryOpContext,
+  op: string,
+  code: keyof typeof DENIALS,
+  targetId: string
+): SecretaryOpResult {
+  auditFailure(ports, ctx, op, code, targetId);
+  return { ok: false, error: DENIALS[code] };
+}
+
 function outcomeResult(
   ports: SecretaryDispatchPorts,
   ctx: SecretaryOpContext,
@@ -353,32 +414,32 @@ export function createSecretaryDispatchHandlers(
     },
 
     async session_send(params, ctx) {
-      const conversationId = stringParam(params, 'conversationId');
-      const text = stringParam(params, 'text');
-      if (!conversationId || !text) return invalidArguments;
+      const fields = sessionFields(params, true);
+      if (!fields.ok) return fields;
+      const { conversationId, message: text } = fields.value;
       const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
-        return auditFailure(ports, ctx, 'session_send', 'not-operable', conversationId);
+        return deny(ports, ctx, 'session_send', 'not-operable', conversationId);
       }
       const conversation = await targetConversation(ports, conversationId);
       if (!conversation) {
-        return auditFailure(ports, ctx, 'session_send', 'not-found', conversationId);
+        return deny(ports, ctx, 'session_send', 'not-found', conversationId);
       }
       const profile = await profileOf(ports);
       const visible = visibleProjects(await ports.projects(), profile).some(
         (project) => project.projectId === conversation.projectId
       );
       if (!visible) {
-        return auditFailure(ports, ctx, 'session_send', 'not-visible', conversationId);
+        return deny(ports, ctx, 'session_send', 'not-visible', conversationId);
       }
       const status = await ports.status(conversationId);
       // 秘书不能替用户回答提问或审批工具调用
       if (status.pendingAsks + status.pendingApprovals > 0) {
-        return auditFailure(ports, ctx, 'session_send', 'needs-user', conversationId);
+        return deny(ports, ctx, 'session_send', 'needs-user', conversationId);
       }
       if (status.state === 'running') {
         if (!(await ports.appendQueued(conversationId, { id: ports.newId(), text }))) {
-          return auditFailure(ports, ctx, 'session_send', 'not-found', conversationId);
+          return deny(ports, ctx, 'session_send', 'not-found', conversationId);
         }
         ports.audit({
           at: ports.now(),
@@ -425,11 +486,12 @@ export function createSecretaryDispatchHandlers(
     },
 
     async session_stop(params, ctx) {
-      const conversationId = stringParam(params, 'conversationId');
-      if (!conversationId) return invalidArguments;
+      const fields = sessionFields(params, false);
+      if (!fields.ok) return fields;
+      const { conversationId } = fields.value;
       const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
-        return auditFailure(ports, ctx, 'session_stop', 'not-operable', conversationId);
+        return deny(ports, ctx, 'session_stop', 'not-operable', conversationId);
       }
       await ports.abort(conversationId);
       if (file.dispatched[conversationId]?.goal) await ports.pauseGoal(conversationId);

@@ -32,6 +32,10 @@ export type SecretaryInternalOp = (typeof SECRETARY_INTERNAL_OPS)[number];
 
 export type SecretaryInvokeOp = SecretaryOp | SecretaryInternalOp;
 
+/** 模型侧 schema 与 Main 校验共用的上限：两边各写一份会漂移 */
+export const SECRETARY_ID_MAX = 200;
+export const SECRETARY_SESSION_MESSAGE_MAX = 8000;
+
 /**
  * 秘书会话可见工具的唯一来源：worker 装配时按名字做允许列表，白名单外的一律不可见。
  * 新增内置工具不会自动进入秘书会话。

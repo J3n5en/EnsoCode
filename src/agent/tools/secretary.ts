@@ -1,5 +1,10 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { SECRETARY_OPS, type SecretaryOp } from '@shared/secretary/tools';
+import {
+  SECRETARY_ID_MAX,
+  SECRETARY_OPS,
+  SECRETARY_SESSION_MESSAGE_MAX,
+  type SecretaryOp,
+} from '@shared/secretary/tools';
 import { THINKING_LEVELS } from '@shared/types/agent';
 import type { MemoryInvoker } from './memory';
 
@@ -175,7 +180,7 @@ function object(properties: Record<string, JsonSchema>, required: readonly strin
 const id = (description: string): JsonSchema => ({
   type: 'string',
   minLength: 1,
-  maxLength: 200,
+  maxLength: SECRETARY_ID_MAX,
   description,
 });
 
@@ -256,7 +261,7 @@ const SCHEMAS: Record<
     parameters: object(
       {
         conversationId: id('Target session id'),
-        message: { type: 'string', minLength: 1, maxLength: 8000 },
+        message: { type: 'string', minLength: 1, maxLength: SECRETARY_SESSION_MESSAGE_MAX },
       },
       ['conversationId', 'message']
     ),

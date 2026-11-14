@@ -33,7 +33,7 @@ export async function invokeSecretaryOp(
   ctx: SecretaryOpContext
 ): Promise<SecretaryOpResult> {
   if (!params || typeof params !== 'object' || Array.isArray(params))
-    return { ok: false, error: 'invalid arguments' };
+    return { ok: false, error: 'invalid arguments: arguments must be a JSON object' };
   const handler = SECRETARY_OP_HANDLERS[op];
   if (!handler) return { ok: false, error: `unknown op: ${String(op)}` };
   try {
