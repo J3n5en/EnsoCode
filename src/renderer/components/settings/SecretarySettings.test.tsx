@@ -8,7 +8,15 @@ import { SecretarySettings } from './SecretarySettings';
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 'en' }) }));
 vi.mock('@/stores/settings', () => ({
-  useSettingsStore: (selector: (state: unknown) => unknown) => selector({ skills: [] }),
+  useSettingsStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      skills: [],
+      projects: [
+        { id: 'p1', name: 'enso', path: '/repo/enso' },
+        { id: 'p2', name: 'beta', path: '/repo/beta' },
+        { id: 'sec', name: '秘书', path: '/repo/sec', kind: 'secretary' },
+      ],
+    }),
 }));
 const formProps = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 vi.mock('@/components/secretary/SecretaryProfileForm', () => ({
@@ -33,6 +41,7 @@ function profile(maxRunningDispatches: number, updatedAt = 1): SecretaryProfile 
     avatar: { color: '#7c5cff' },
     autonomy: 'ask-first',
     autoApproveProjectIds: [],
+    takeoverScope: { mode: 'projects', projectIds: [] },
     visibleProjectIds: 'all',
     dispatchModel: { mode: 'project' },
     dispatchWorktree: 'auto',
@@ -156,6 +165,73 @@ describe('设置 → 秘书：同时运行的派发会话上限', () => {
     expect(getTranslation('zh', 'Concurrent dispatch limit')).toBe('同时运行的派发会话上限');
     expect(getTranslation('zh', DESCRIPTION)).toBe(
       '秘书最多同时运行几个派发会话，超过上限时新派发会被拒绝。'
+    );
+  });
+});
+
+const SCOPE_ROW = '[data-settings-row="secretary.takeoverScope"]';
+const SCOPE_DESCRIPTION =
+  'Which sessions the secretary may message and stop without asking you first. Everything else still needs a confirmation card from the secretary.';
+
+function scopeButtons() {
+  return [...container.querySelectorAll(`${SCOPE_ROW} button`)] as HTMLButtonElement[];
+}
+
+describe('设置 → 秘书：可接管的会话', () => {
+  it('三个选项，默认是勾选的项目且一个都不勾', async () => {
+    api.getProfile.mockResolvedValue({ ok: true, profile: profile(3), persona: '' });
+    await mount();
+    expect(scopeButtons().map((button) => button.textContent)).toEqual([
+      'One by one',
+      'Selected projects',
+      'All visible projects',
+      'enso',
+      'beta',
+    ]);
+    expect(
+      scopeButtons()
+        .filter((button) => button.getAttribute('aria-pressed') === 'true')
+        .map((button) => button.textContent)
+    ).toEqual(['Selected projects']);
+    expect(container.querySelector(SCOPE_ROW)?.textContent).toContain(SCOPE_DESCRIPTION);
+  });
+
+  it('勾选项目只改接管范围这一项，秘书自己的项目不出现', async () => {
+    api.getProfile.mockResolvedValue({ ok: true, profile: profile(3), persona: '' });
+    api.saveProfile.mockResolvedValue({
+      ok: true,
+      profile: {
+        ...profile(3),
+        takeoverScope: { mode: 'projects', projectIds: ['p1'] },
+        updatedAt: 2,
+      },
+    });
+    await mount();
+    const project = container.querySelector(
+      `${SCOPE_ROW} [data-enso="secretary-takeover-projects"] button`
+    ) as HTMLButtonElement;
+    expect(project.textContent).toBe('enso');
+    await act(async () => project.click());
+    expect(api.saveProfile).toHaveBeenCalledWith({
+      takeoverScope: { mode: 'projects', projectIds: ['p1'] },
+    });
+    expect(scopeButtons().some((button) => button.textContent === '秘书')).toBe(false);
+  });
+
+  it('切到所有可见项目只发模式，切回逐个授权同样只发模式', async () => {
+    api.getProfile.mockResolvedValue({ ok: true, profile: profile(3), persona: '' });
+    api.saveProfile.mockResolvedValue({ ok: true, profile: profile(3, 2) });
+    await mount();
+    await act(async () => scopeButtons()[2]?.click());
+    expect(api.saveProfile).toHaveBeenLastCalledWith({ takeoverScope: { mode: 'all' } });
+    await act(async () => scopeButtons()[0]?.click());
+    expect(api.saveProfile).toHaveBeenLastCalledWith({ takeoverScope: { mode: 'explicit' } });
+  });
+
+  it('标题与说明有中文', () => {
+    expect(getTranslation('zh', 'Sessions it may take over')).toBe('可接管的会话');
+    expect(getTranslation('zh', SCOPE_DESCRIPTION)).toBe(
+      '秘书可以直接给哪些会话发消息、停止它们，不用逐个确认。范围外的会话仍然要秘书提确认卡。'
     );
   });
 });

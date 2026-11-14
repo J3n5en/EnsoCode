@@ -18,6 +18,15 @@ function replyLanguage(profile: SecretaryProfile | null, uiLanguage: Locale): st
   return LANGUAGE_LABEL[choice === 'ui' ? uiLanguage : choice];
 }
 
+/** 当前接管范围的一句话描述：提示词与工具描述都不重算规则，只说范围本身 */
+function takeoverScopeText(profile: SecretaryProfile | null): string {
+  const scope = profile?.takeoverScope;
+  if (scope?.mode === 'all') return 'every project you can see';
+  if (scope?.mode === 'projects' && scope.projectIds.length > 0)
+    return `the projects ${scope.projectIds.join(', ')}`;
+  return 'none: the user has to hand each session over on a card';
+}
+
 /**
  * 秘书会话的系统提示词。纯函数：档案、人设、界面语言都由 Main 传入，
  * 便于单测与「配置改了下一条消息生效」。
@@ -39,7 +48,7 @@ export function buildSecretarySystemPrompt(input: SecretaryPromptInput): string 
     'Results: goal-complete means the goal was reached. goal-blocked and needs-user mean the user has to act. failed, stalled and interrupted mean the run did not finish. turn-ended only means a turn ended; it does not mean the task is complete, so never report a session as done on turn-ended alone. Each result line names its session as session:<id>; pass that id as conversationId to session_read or session_send.',
     'Noise: speak only for a milestone: the work is done and submitted, it failed, the user has to act, or several sessions finished together and you are summing them up. When a <session-updates> or <secretary-schedule> message does not need the user — a normal patrol, intermediate progress, or a false alarm — call silence_turn and stop. Do not write any other text after it. That turn stays folded, does not notify, and the feed still records that you saw it. Never call silence_turn for a message the user typed themselves. Always reply normally to the user.',
     'Confirmations: session_create, todo_item_dispatch, session_takeover_propose, secretary_profile_propose and skill_propose may return { status: "awaiting_confirmation", proposalId } instead of doing the work. That is not an error. Tell the user which card is waiting for them and do not retry the same call; the outcome arrives later as a session update.',
-    'Takeovers: you may message and stop only sessions you dispatched or the user handed over to you. To manage a session the user started, ask with session_takeover_propose and wait for the user to confirm on the card; the user can also hand one over from that session, and can take it back at any time. A handed-over session reports its results to you like one you dispatched.',
+    `Takeovers: you may message and stop sessions you dispatched, sessions the user handed over to you, and sessions whose project is in your takeover scope (${takeoverScopeText(profile)}). Only the user can change that scope, and only by confirming your secretary_profile_propose draft. The scope grants no extra reporting on its own: a session in it starts reporting results to you only after you actually message or stop it, and from then on it counts as one you manage. For a session outside the scope, ask with session_takeover_propose and wait for the user to confirm on the card. The user can take any of them back at any time.`,
     'Priority: session_send queues behind the current turn by default. When you need to change what a running session is working on right now, or correct its direction, send it with mode "steer": it is injected as soon as the current tool call ends, without waiting for the turn to finish. Use steer for priority changes and course corrections, and plain queue for anything that can wait.',
     "Your queue: session_queue_list shows the messages you queued into a session and are not delivered yet; session_queue_cancel withdraws one of them. You can only withdraw what you queued yourself — the user's own queued messages are theirs. session_stop keeps queued messages by default; pass clearQueue true when stopping to drop the ones you queued, so they do not all fire at once the next time the session runs. Never try to work around a queue by stopping the session first.",
     'Skills: when the same procedure keeps coming up, offer to save it with skill_propose (a slug name, one line on when it applies, the Markdown body) and wait for the user to agree before proposing. A skill you saved is listed in <available_skills>; read it with skill_read. Never put keys, tokens or passwords in a skill.',

@@ -4,6 +4,7 @@ import type {
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryProposal,
+  SecretaryTakeoverScope,
 } from '../types/secretary';
 
 export const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
@@ -18,6 +19,35 @@ export function dispatchDecision(profile: SecretaryProfile, projectId: string): 
 
 export function canOperate(file: SecretaryDispatchFile, conversationId: string): boolean {
   return Object.hasOwn(file.dispatched, conversationId) || file.named.includes(conversationId);
+}
+
+/** 接管范围是否覆盖这个项目。explicit 与空勾选都等价于逐个授权 */
+export function inTakeoverScope(
+  scope: SecretaryTakeoverScope | undefined,
+  projectId: string | undefined
+): boolean {
+  if (!scope || scope.mode === 'explicit') return false;
+  if (scope.mode === 'all') return true;
+  return projectId !== undefined && scope.projectIds.includes(projectId);
+}
+
+/** 秘书操作一个会话的权限来源：派出的、逐个授权的，或项目在接管范围内 */
+export type OperateSource = 'dispatched' | 'granted' | 'scope';
+
+/**
+ * 发消息、停止会话的权限来源；null 表示没有权限。
+ * 范围只给权限，不建记录：跟踪与推送从秘书真正用过这个会话开始。
+ */
+export function operateSource(
+  file: SecretaryDispatchFile,
+  conversationId: string,
+  scope: SecretaryTakeoverScope | undefined,
+  projectId: string | undefined
+): OperateSource | null {
+  const record = file.dispatched[conversationId];
+  if (record) return record.takeover ? 'granted' : 'dispatched';
+  if (file.named.includes(conversationId)) return 'granted';
+  return inTakeoverScope(scope, projectId) ? 'scope' : null;
 }
 
 export type TakeoverRefusal =

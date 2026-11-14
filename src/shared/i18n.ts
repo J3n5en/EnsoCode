@@ -3544,10 +3544,14 @@ export const zhTranslations: Record<string, string> = {
   '{{name}} is managing this session: it may message and stop it.':
     '{{name}}正在接管这个会话，可以给它发消息、停止它。',
   'Take back from {{name}}': '取消{{name}}接管',
-  'Hand over to {{name}}': '交给{{name}}接管',
-  'Let {{name}} message and stop this session for you. You can take it back any time.':
-    '让{{name}}替你给这个会话发消息、停止它，随时可以收回。',
   'Takeover failed': '接管操作失败',
+  'Sessions it may take over': '可接管的会话',
+  'Which sessions the secretary may message and stop without asking you first. Everything else still needs a confirmation card from the secretary.':
+    '秘书可以直接给哪些会话发消息、停止它们，不用逐个确认。范围外的会话仍然要秘书提确认卡。',
+  'One by one': '逐个授权',
+  'All visible projects': '所有可见项目',
+  'Pick the projects it may take over': '勾选它可以接管的项目',
+  'No project in the takeover scope': '还没有项目在接管范围内',
   'Sessions handed over': '交给秘书接管的会话',
   'Sessions you started and handed to the secretary. It may message and stop them like the ones it dispatched; take one back to remove that right.':
     '你自己开的、交给秘书接管的会话。秘书可以像对派出的会话一样给它们发消息、停止它们；取消接管就收回这项权限。',

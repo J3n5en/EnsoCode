@@ -24,6 +24,7 @@ const profile: SecretaryProfile = {
   avatar: { color: '#0ea5e9' },
   autonomy: 'tell-after',
   autoApproveProjectIds: ['p1'],
+  takeoverScope: { mode: 'projects', projectIds: [] },
   pluginIds: [],
   skillIds: [],
   visibleProjectIds: 'all',

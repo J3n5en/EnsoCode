@@ -76,6 +76,7 @@ const profile: NonNullable<SecretaryState['profile']> = {
   avatar: { color: '#8b7bff' },
   autonomy: 'ask-first',
   autoApproveProjectIds: [],
+  takeoverScope: { mode: 'projects', projectIds: [] },
   visibleProjectIds: 'all',
   dispatchModel: { mode: 'project' },
   dispatchWorktree: 'auto',

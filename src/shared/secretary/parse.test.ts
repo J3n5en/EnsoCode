@@ -61,6 +61,43 @@ describe('parseProfileDraft', () => {
       ok: false,
       error: 'invalid visibleProjectIds',
     });
+    expect(parseProfileDraft({ takeoverScope: { mode: 'everyone' } })).toEqual({
+      ok: false,
+      error: 'invalid takeoverScope',
+    });
+    expect(parseProfileDraft({ takeoverScope: { mode: 'projects' } })).toEqual({
+      ok: false,
+      error: 'invalid takeoverScope',
+    });
+  });
+
+  const scopeOf = (value: unknown) => parseProfile(value)?.takeoverScope;
+
+  it('接管范围缺省是「勾选的项目」且一个都不勾，等价于逐个授权', () => {
+    expect(scopeOf({})).toEqual({ mode: 'projects', projectIds: [] });
+    // 脏值同样回默认，不会把权限悄悄放大成「所有可见项目」
+    expect(scopeOf({ takeoverScope: { mode: 'all-ish' } })).toEqual({
+      mode: 'projects',
+      projectIds: [],
+    });
+    expect(scopeOf({ takeoverScope: 'all' })).toEqual({ mode: 'projects', projectIds: [] });
+  });
+
+  it('接管范围读回三种取值，草案越界当场拒绝', () => {
+    expect(scopeOf({ takeoverScope: { mode: 'explicit' } })).toEqual({ mode: 'explicit' });
+    expect(scopeOf({ takeoverScope: { mode: 'all' } })).toEqual({ mode: 'all' });
+    expect(scopeOf({ takeoverScope: { mode: 'projects', projectIds: ['p1', 'p1', 3] } })).toEqual({
+      mode: 'projects',
+      projectIds: ['p1'],
+    });
+    expect(parseProfileDraft({ takeoverScope: { mode: 'all' } })).toEqual({
+      ok: true,
+      draft: { takeoverScope: { mode: 'all' } },
+    });
+    expect(parseProfileDraft({ takeoverScope: { mode: 'projects', projectIds: ['p1'] } })).toEqual({
+      ok: true,
+      draft: { takeoverScope: { mode: 'projects', projectIds: ['p1'] } },
+    });
   });
 
   it('派出的会话默认静音且无人值守，只有明确的 false 才关掉', () => {
@@ -145,6 +182,7 @@ describe('parseProfile', () => {
       avatar: { color: '#7c5cff' },
       autonomy: 'ask-first',
       autoApproveProjectIds: [],
+      takeoverScope: { mode: 'projects', projectIds: [] },
       pluginIds: [],
       skillIds: [],
       visibleProjectIds: 'all',
@@ -189,6 +227,7 @@ describe('parseProfile', () => {
       model: { providerId: 'openai', modelId: 'gpt', thinkingLevel: 'max' },
       autonomy: 'full',
       autoApproveProjectIds: ['p1'],
+      takeoverScope: { mode: 'projects', projectIds: [] },
       pluginIds: [],
       skillIds: [],
       visibleProjectIds: ['p1'],

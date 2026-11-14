@@ -15,6 +15,7 @@ const profile: SecretaryProfile = {
   model: { providerId: 'p', modelId: 'm', thinkingLevel: 'high' },
   autonomy: 'tell-after',
   autoApproveProjectIds: ['p1'],
+  takeoverScope: { mode: 'projects', projectIds: ['p1'] },
   visibleProjectIds: ['p1', 'p2'],
   dispatchModel: { mode: 'fixed', model: { providerId: 'p', modelId: 'm2' } },
   dispatchWorktree: 'always',

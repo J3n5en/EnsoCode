@@ -2,6 +2,15 @@ import type { ModelRef, ThinkingLevel } from './agent';
 
 export type SecretaryAutonomy = 'ask-first' | 'tell-after' | 'full';
 
+/**
+ * 秘书可以接管的会话范围：逐个授权（确认卡）、勾选的项目、所有可见项目。
+ * 缺省是「勾选的项目」且一个都不勾，等价于逐个授权，升级后权限不会突然变大。
+ */
+export type SecretaryTakeoverScope =
+  | { mode: 'explicit' }
+  | { mode: 'projects'; projectIds: string[] }
+  | { mode: 'all' };
+
 export interface SecretaryProfile {
   version: 1;
   name: string;
@@ -9,6 +18,8 @@ export interface SecretaryProfile {
   model?: ModelRef & { thinkingLevel?: ThinkingLevel };
   autonomy: SecretaryAutonomy;
   autoApproveProjectIds: string[];
+  /** 不用逐个授权就能发消息、停止会话的项目范围 */
+  takeoverScope: SecretaryTakeoverScope;
   /** 勾选给秘书用的 Enso 插件 id；插件停用或卸载后自动失效，不改写档案 */
   pluginIds?: string[];
   /** 勾选给秘书用的全局 Enso skill id；未勾选的不加载 */
@@ -77,8 +88,8 @@ export interface TakeoverDraft {
   reason?: string;
 }
 
-/** 接管授权的来源：确认卡，或用户在会话界面上亲手点的 */
-export type TakeoverVia = 'proposal' | 'user';
+/** 接管授权的来源：确认卡、用户在会话界面上亲手点的，或项目在接管范围内被秘书实际用上 */
+export type TakeoverVia = 'proposal' | 'user' | 'scope';
 
 /** 秘书自有的 skill：name 即目录名，整份内容写进该目录的 SKILL.md */
 export interface SecretarySkillDraft {
@@ -167,7 +178,10 @@ export interface DispatchRecord {
   stalledTurn?: number;
   /** dismissed：用户点过「知道了」；新结果整体替换 lastResult，标记随之失效 */
   lastResult?: { kind: SecretaryResultKind; turn: number; at: number; dismissed?: true };
-  /** 用户授权接管的会话：权限与推送同派出会话，可撤销；不计入派出上限 */
+  /**
+   * 接管来的会话：权限与推送同派出会话，可撤销；不计入派出上限。
+   * via=scope 表示项目在接管范围内、秘书实际用过它之后才建的跟踪记录。
+   */
   takeover?: { grantedAt: number; via: TakeoverVia };
 }
 

@@ -111,6 +111,7 @@ describe('project_list', () => {
           avatar: { color: '#7c5cff' },
           autonomy: 'ask-first',
           autoApproveProjectIds: [],
+          takeoverScope: { mode: 'projects', projectIds: [] },
           visibleProjectIds: ['p2'],
           dispatchModel: { mode: 'project' },
           dispatchWorktree: 'auto',

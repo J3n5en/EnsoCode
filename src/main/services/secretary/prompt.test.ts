@@ -8,6 +8,7 @@ const profile: SecretaryProfile = {
   avatar: { color: '#7c5cff' },
   autonomy: 'ask-first',
   autoApproveProjectIds: [],
+  takeoverScope: { mode: 'projects', projectIds: [] },
   visibleProjectIds: 'all',
   dispatchModel: { mode: 'project' },
   dispatchWorktree: 'auto',

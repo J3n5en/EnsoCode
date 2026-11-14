@@ -637,7 +637,7 @@ describe('session_send', () => {
         op: 'session_send',
         targetId: 'c1',
         ok: true,
-        detail: 'steered',
+        detail: 'steered (dispatched)',
       },
     ]);
   });
@@ -810,7 +810,7 @@ describe('session_stop', () => {
     const result = await call(h.handlers.session_stop, { conversationId: 'c1' });
     expect(result).toEqual({ ok: true, result: { status: 'stopped' } });
     expect(h.rows.c1.queuedMessages).toEqual(queued);
-    expect(h.audits.map((entry) => entry.detail)).toEqual(['stopped']);
+    expect(h.audits.map((entry) => entry.detail)).toEqual(['stopped (dispatched)']);
   });
 
   it('clearQueue 只清秘书自己排的，用户排的一条不动', async () => {
@@ -833,7 +833,9 @@ describe('session_stop', () => {
     });
     expect(result).toEqual({ ok: true, result: { status: 'stopped', clearedQueued: 1 } });
     expect(h.rows.c1.queuedMessages).toEqual([user, other]);
-    expect(h.audits.map((entry) => entry.detail)).toEqual(['stopped, cleared 1 queued']);
+    expect(h.audits.map((entry) => entry.detail)).toEqual([
+      'stopped (dispatched), cleared 1 queued',
+    ]);
     expect(h.aborts).toEqual(['c1']);
   });
 
@@ -944,7 +946,11 @@ describe('接管', () => {
       ok: true,
       result: { status: 'sent' },
     });
-    expect(h.audits.at(-1)).toMatchObject({ op: 'session_send', targetId: 'c1', detail: 'sent' });
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'session_send',
+      targetId: 'c1',
+      detail: 'sent (granted)',
+    });
 
     const state = await buildSecretaryState(h.ports, { enabled: true, projectId: 'sec-proj' });
     expect(state.board.running[0]).toMatchObject({ conversationId: 'c1', takeover: true });
@@ -1065,6 +1071,151 @@ describe('接管', () => {
     const resolved = await resolveProposal(h.ports, 'id-1', 'confirm');
     expect(resolved).toMatchObject({ ok: true, proposal: { status: 'failed', error: 'archived' } });
     expect(h.file.dispatched).toEqual({});
+  });
+});
+
+describe('接管范围', () => {
+  const scopeHarness = (options: Parameters<typeof harness>[0] = {}) =>
+    harness({
+      conversations: [rootConversation('c1'), rootConversation('c2', 'p2')],
+      rows: {
+        c1: { projectId: 'p1', title: '修构建', sessionFile: '/s/c1.jsonl' },
+        c2: { projectId: 'p2', title: '别的活', sessionFile: '/s/c2.jsonl' },
+      },
+      ...options,
+    });
+
+  const scoped = (projectIds: string[] = ['p1']) =>
+    profile({ takeoverScope: { mode: 'projects', projectIds } });
+
+  it('范围内的会话不用逐个授权就能发消息，从这一刻起才跟踪它', async () => {
+    const h = scopeHarness({ profile: scoped() });
+    // 发之前不建记录：范围只给权限，不把范围内会话的状态推给秘书
+    const before = await buildSecretaryState(h.ports, { enabled: true, projectId: 'sec-proj' });
+    expect(before.takeovers).toEqual([]);
+    expect(before.board.running).toEqual([]);
+
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
+      ok: true,
+      result: { status: 'sent' },
+    });
+    expect(h.prompts).toEqual([{ conversationId: 'c1', text: '继续', deliveryId: 'id-1' }]);
+    expect(h.file.dispatched.c1).toMatchObject({
+      projectId: 'p1',
+      secretaryConversationId: 'sec-1',
+      takeover: { grantedAt: NOW, via: 'scope' },
+    });
+    expect(h.audits.map((entry) => [entry.op, entry.detail])).toEqual([
+      ['takeover_grant', 'scope'],
+      ['session_send', 'sent (scope)'],
+    ]);
+
+    const after = await buildSecretaryState(h.ports, { enabled: true, projectId: 'sec-proj' });
+    expect(after.takeovers).toEqual([
+      expect.objectContaining({ conversationId: 'c1', via: 'scope', title: '修构建' }),
+    ]);
+    expect(after.board.running[0]).toMatchObject({ conversationId: 'c1', takeover: true });
+    // 范围里的其他会话仍然不跟踪，也不进接管清单
+    expect(after.takeovers.some((entry) => entry.conversationId === 'c2')).toBe(false);
+  });
+
+  it('范围外的会话仍然被拒，提示改设置或申请接管', async () => {
+    const h = scopeHarness({ profile: scoped(['p2']) });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
+    expect(result).toEqual({ ok: false, error: NOT_OPERABLE_ERROR });
+    expect(NOT_OPERABLE_ERROR).toContain('takeover scope in settings');
+    expect(NOT_OPERABLE_ERROR).toContain('session_takeover_propose');
+    expect(h.prompts).toEqual([]);
+    expect(h.file.dispatched).toEqual({});
+  });
+
+  it('选「所有可见项目」时，不可见项目照样拒绝', async () => {
+    const h = scopeHarness({
+      profile: profile({ takeoverScope: { mode: 'all' }, visibleProjectIds: ['p2'] }),
+    });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
+    expect(result.ok ? '' : result.error).toMatch(/^permission denied \(not-visible\): /u);
+    expect(h.prompts).toEqual([]);
+    expect(h.file.dispatched).toEqual({});
+  });
+
+  it('子会话、归档会话、别的秘书的会话照样拒绝', async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ projectId: 'p1', parentId: 'root' }, '子会话'],
+      [{ projectId: 'p1', btwParentId: 'root' }, 'btw 子会话'],
+      [{ projectId: 'p1', archived: true }, '归档会话'],
+      [{ projectId: 'p1', secretaryOrigin: { secretaryConversationId: 'other' } }, '别的秘书'],
+    ];
+    for (const [row, label] of cases) {
+      const h = scopeHarness({
+        profile: profile({ takeoverScope: { mode: 'all' } }),
+        rows: { c1: row },
+      });
+      expect(
+        await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' }),
+        label
+      ).toEqual({ ok: false, error: NOT_OPERABLE_ERROR });
+      expect(await call(h.handlers.session_stop, { conversationId: 'c1' }), label).toEqual({
+        ok: false,
+        error: NOT_OPERABLE_ERROR,
+      });
+      expect(h.prompts, label).toEqual([]);
+      expect(h.aborts, label).toEqual([]);
+      expect(h.file.dispatched, label).toEqual({});
+    }
+  });
+
+  it('会话在等用户时范围接管照样拒绝发消息', async () => {
+    const h = scopeHarness({
+      profile: profile({ takeoverScope: { mode: 'all' } }),
+      statuses: { c1: { state: 'waiting', pendingAsks: 1, pendingApprovals: 0 } },
+    });
+    const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '选 A' });
+    expect(result.ok ? '' : result.error).toMatch(/^refused \(needs-user\): /u);
+    expect(h.prompts).toEqual([]);
+    expect(h.file.dispatched).toEqual({});
+  });
+
+  it('停止范围内的会话同样建立跟踪，审计写明来源', async () => {
+    const h = scopeHarness({ profile: profile({ takeoverScope: { mode: 'all' } }) });
+    expect(await call(h.handlers.session_stop, { conversationId: 'c1' })).toEqual({
+      ok: true,
+      result: { status: 'stopped' },
+    });
+    expect(h.aborts).toEqual(['c1']);
+    expect(h.file.dispatched.c1.takeover).toEqual({ grantedAt: NOW, via: 'scope' });
+    expect(h.audits.map((entry) => [entry.op, entry.detail])).toEqual([
+      ['takeover_grant', 'scope'],
+      ['session_stop', 'stopped (scope)'],
+    ]);
+  });
+
+  it('默认档案等价于旧行为：范围为空时普通会话仍被拒', async () => {
+    const h = scopeHarness();
+    expect(h.profileValue?.takeoverScope).toEqual({ mode: 'projects', projectIds: [] });
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
+      ok: false,
+      error: NOT_OPERABLE_ERROR,
+    });
+    expect(h.file.dispatched).toEqual({});
+  });
+
+  it('审计分别写明 dispatched 与 granted', async () => {
+    const dispatched = harness({ file: dispatchedFile() });
+    await call(dispatched.handlers.session_send, { conversationId: 'c1', message: '继续' });
+    expect(dispatched.audits.at(-1)).toMatchObject({ detail: 'sent (dispatched)' });
+
+    const granted = harness({
+      projects: [localProject(), localProject('sec-proj', { kind: 'secretary' })],
+      conversations: [rootConversation('c1'), rootConversation('sec-chat', 'sec-proj')],
+      rows: {
+        c1: { projectId: 'p1', title: '修构建' },
+        'sec-chat': { projectId: 'sec-proj', lastActiveAt: 10 },
+      },
+    });
+    expect(await grantTakeover(granted.ports, 'c1', 'user', null)).toEqual({ ok: true });
+    await call(granted.handlers.session_send, { conversationId: 'c1', message: '继续' });
+    expect(granted.audits.at(-1)).toMatchObject({ detail: 'sent (granted)' });
   });
 });
 
