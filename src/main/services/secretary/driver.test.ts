@@ -178,6 +178,52 @@ describe('派出会话的目标续跑', () => {
     other.driver.observe(turnCompleted(digest('step')));
     expect(other.prompts).toHaveLength(0);
   });
+
+  it('后台任务还在跑时不续跑，任务结束后的下一轮才续跑', () => {
+    h.driver.observe({
+      type: 'task-started',
+      identity,
+      seq: 1,
+      task: { taskId: 't1', command: 'sleep 20', status: 'running', tail: '', startedAt: 1 },
+    } as unknown as RendererAgentEvent);
+    h.driver.observe(turnCompleted(digest('等验收跑完')));
+    expect(h.prompts).toHaveLength(0);
+    expect(goalOf(h)).toMatchObject({ status: 'active', autoTurns: 0 });
+
+    h.driver.observe({
+      type: 'task-ended',
+      identity,
+      seq: 2,
+      taskId: 't1',
+      status: 'done',
+      exitCode: 0,
+    } as unknown as RendererAgentEvent);
+    h.driver.observe(turnCompleted(digest('验收结束')));
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0].delivery.text).toContain('<goal-continuation>');
+  });
+
+  it('行上已经在跑的后台任务同样挡住续跑', () => {
+    const waiting = harness({
+      backgroundTasks: [
+        { taskId: 't1', command: 'sleep 20', status: 'running', tail: '', startedAt: 1 },
+      ],
+    });
+    waiting.driver.observe(turnCompleted(digest('等通知')));
+    expect(waiting.prompts).toHaveLength(0);
+  });
+
+  it('同一轮空闲只续跑一次，压缩结束不再投第二遍', () => {
+    h.driver.observe(turnCompleted(digest('step one')));
+    expect(h.prompts).toHaveLength(1);
+    h.driver.observe({
+      type: 'compaction',
+      identity,
+      seq: 2,
+      state: 'end',
+    } as unknown as RendererAgentEvent);
+    expect(h.prompts).toHaveLength(1);
+  });
 });
 
 describe('派出会话的排队消息', () => {

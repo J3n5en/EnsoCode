@@ -127,12 +127,43 @@ function withProgress(
 export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver {
   /** 压缩状态只在 worker 事件里有，行里没有：按会话记在内存 */
   const compacting = new Map<string, boolean>();
+  /** 这一轮空闲已经投过 goal 续跑：压缩结束不能再投一次，否则第二次 prompt 会把会话打成 error */
+  const continued = new Set<string>();
+  /** 还在跑的后台任务。等它们时不续跑，完成通知会自己唤醒会话 */
+  const runningTasks = new Map<string, Set<string>>();
   /** 自己写回触发的合并回调不能再投递，否则同一条消息发两遍 */
   let saving = false;
+
+  function taskSet(conversationId: string): Set<string> {
+    let tasks = runningTasks.get(conversationId);
+    if (!tasks) {
+      tasks = new Set();
+      runningTasks.set(conversationId, tasks);
+    }
+    return tasks;
+  }
+
+  function seedTasks(conversationId: string, row: Record<string, unknown> | undefined): void {
+    if (runningTasks.has(conversationId)) return;
+    const tasks = new Set<string>();
+    if (Array.isArray(row?.backgroundTasks)) {
+      for (const task of row.backgroundTasks) {
+        if (!task || typeof task !== 'object') continue;
+        const info = task as { taskId?: unknown; status?: unknown };
+        if (info.status === 'running' && typeof info.taskId === 'string') tasks.add(info.taskId);
+      }
+    }
+    runningTasks.set(conversationId, tasks);
+  }
+
+  function isContinuation(delivery: HeadlessDelivery | undefined): boolean {
+    return delivery?.text.includes('<goal-continuation>') === true;
+  }
 
   function runtimeOf(conversationId: string): HeadlessSessionRuntime | null {
     const row = ports.row(conversationId);
     if (row?.driver !== 'main') return null;
+    seedTasks(conversationId, row);
     const status = ports.status(conversationId);
     return {
       status: status.state,
@@ -199,7 +230,20 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
   /** 空闲时才泵队列 / 续跑目标；轮次收束与压缩结束共用 */
   function settle(conversationId: string, runtime: HeadlessSessionRuntime): void {
     if (!runtime.started || runtime.status !== 'idle') return;
-    commit(conversationId, runtime, onHeadlessIdle(runtime));
+    pump(conversationId, runtime, !continued.has(conversationId));
+  }
+
+  /** 排队消息照投；goal 续跑一轮只投一次，且后台任务还在跑时不投 */
+  function pump(
+    conversationId: string,
+    runtime: HeadlessSessionRuntime,
+    allowContinue: boolean
+  ): void {
+    const applied = onHeadlessIdle(runtime);
+    const continuation = isContinuation(applied.deliver);
+    if (continuation && (!allowContinue || taskSet(conversationId).size > 0)) return;
+    if (continuation) continued.add(conversationId);
+    commit(conversationId, runtime, applied);
   }
 
   return {
@@ -213,6 +257,26 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         compacting.set(conversationId, event.state !== 'end');
         // 压缩不发 turn-completed：压完再泵，否则排队消息会卡住
         if (event.state === 'end' && !event.abandoned) settle(conversationId, runtime);
+        return;
+      }
+      if (event.type === 'task-started') {
+        taskSet(conversationId).add(event.task.taskId);
+        return;
+      }
+      if (
+        event.type === 'task-ended' ||
+        (event.type === 'task-output' && event.status !== 'running')
+      ) {
+        taskSet(conversationId).delete(event.taskId);
+        return;
+      }
+      if (event.type === 'background-tasks-level') {
+        runningTasks.set(
+          conversationId,
+          new Set(
+            event.tasks.filter((task) => task.status === 'running').map((task) => task.taskId)
+          )
+        );
         return;
       }
       if (event.type === 'goal-signal') {
@@ -238,17 +302,17 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       }
       if (event.type !== 'turn-completed') return;
       // 中断的轮不续跑、不泵队列；压缩中的收束等压缩结束事件再收
-      if (event.aborted || compacting.get(conversationId)) return;
+      if (event.aborted || compacting.get(conversationId)) {
+        // 本轮还没投过：压缩结束时允许补投一次
+        if (!event.aborted) continued.delete(conversationId);
+        return;
+      }
+      continued.delete(conversationId);
       const guarded = withProgress(runtime, event.digest?.assistantText);
-      commit(
+      pump(
         conversationId,
-        runtime,
-        onHeadlessIdle({
-          ...guarded,
-          started: true,
-          status: 'idle',
-          abortRequested: false,
-        })
+        { ...guarded, started: true, status: 'idle', abortRequested: false },
+        true
       );
     },
 

@@ -1386,6 +1386,11 @@ async function run(cdp, pluginZipUrl) {
     return JSON.stringify(texts(${JSON.stringify(secretaryId)}).some((text) =>
       text.includes(${JSON.stringify(`[${kind} session:${conversationId}]`)})));
   `);
+  const secretaryCount = (secretaryId, conversationId, kind) =>
+    page(`
+    const needle = ${JSON.stringify(`[${kind} session:${conversationId}]`)};
+    return JSON.stringify(texts(${JSON.stringify(secretaryId)}).filter((text) => text.includes(needle)).length);
+  `);
 
   log('== step9 等后台任务不报 needs-user，真提问才报');
   const waitDispatch = await dispatchConfirmed(
@@ -1502,6 +1507,111 @@ async function run(cdp, pluginZipUrl) {
     250
   ).catch(() => null);
   assert(todoPersisted?.title === todoText, 'step10: 落盘的会话行标题也是待办文本', todoPersisted);
+
+  log('== step11 等后台任务不误报，完成只在结束后推一次');
+  const bgDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '把检查放到后台',
+      title: '等后台续跑',
+    })}]]`,
+    {
+      goal: '先把检查丢到后台再等通知 [[tool:bash {"command":"sleep 12","background":true}]]',
+    }
+  );
+  assert(bgDispatch.ok, 'step11: 等后台任务的派出会话建成', bgDispatch);
+  const bgId = bgDispatch.conversationId;
+  const bgSettled = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[bgId];
+      return record?.turn >= 1 && (record.lastState === 'idle' || record.lastState === 'error')
+        ? record
+        : null;
+    },
+    'background wait turn settled',
+    60_000,
+    400
+  ).catch(() => null);
+  assert(bgSettled?.lastState === 'idle', 'step11: 等后台任务被续跑后会话不是 error', bgSettled);
+  assert(
+    bgSettled.lastResult?.kind !== 'goal-blocked' && bgSettled.lastResult?.kind !== 'failed',
+    'step11: 等后台任务不记 goal-blocked 或 failed',
+    bgSettled
+  );
+  await delay(2500);
+  const bgAfter = readJson(dispatchFile).dispatched[bgId];
+  assert(bgAfter.lastState !== 'error', 'step11: 等过收口窗口会话仍不是 error', bgAfter);
+  assert(
+    !(await secretarySaw(bgDispatch.secretaryId, bgId, 'goal-blocked')) &&
+      !(await secretarySaw(bgDispatch.secretaryId, bgId, 'failed')),
+    'step11: 秘书没收到该会话的 goal-blocked 或 failed',
+    bgId
+  );
+
+  const blockedDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '停下来',
+      title: '真受阻',
+    })}]]`,
+    { goal: '缺决定 [[tool:goal_blocked {"reason":"缺一个只有用户知道的决定"}]]' }
+  );
+  assert(blockedDispatch.ok, 'step11: 会调用 goal_blocked 的会话建成', blockedDispatch);
+  const blockedId = blockedDispatch.conversationId;
+  const blockedSeen = await waitFor(
+    () => secretarySaw(blockedDispatch.secretaryId, blockedId, 'goal-blocked'),
+    'secretary got goal-blocked',
+    60_000,
+    400
+  ).catch(() => false);
+  assert(blockedSeen, 'step11: 真正调用 goal_blocked 时秘书能收到', blockedId);
+  await delay(2500);
+  assert(
+    (await secretaryCount(blockedDispatch.secretaryId, blockedId, 'goal-blocked')) === 1,
+    'step11: goal-blocked 只推一次',
+    await secretaryCount(blockedDispatch.secretaryId, blockedId, 'goal-blocked')
+  );
+
+  const completeDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '写完就停',
+      title: '真完成',
+    })}]]`,
+    { goal: '收尾 [[tool:goal_complete {"summary":"step11 文件已写好"}]]' }
+  );
+  assert(completeDispatch.ok, 'step11: 会调用 goal_complete 的会话建成', completeDispatch);
+  const completeId = completeDispatch.conversationId;
+  let completeWhileRunning = false;
+  const completeRecord = await waitFor(
+    async () => {
+      const record = readJson(dispatchFile).dispatched[completeId];
+      const live = await page(
+        `return JSON.stringify(S().conversations[${JSON.stringify(completeId)}]?.status ?? null)`
+      );
+      if (record?.lastResult?.kind === 'goal-complete' && live !== 'idle')
+        completeWhileRunning = true;
+      return record?.lastResult?.kind === 'goal-complete' &&
+        record.lastState === 'idle' &&
+        live === 'idle'
+        ? record
+        : null;
+    },
+    'goal-complete after idle',
+    60_000,
+    200
+  ).catch(() => null);
+  assert(
+    Boolean(completeRecord) && !completeWhileRunning,
+    'step11: goal-complete 只在会话结束后出现',
+    { completeRecord, completeWhileRunning }
+  );
+  await delay(2500);
+  assert(
+    (await secretaryCount(completeDispatch.secretaryId, completeId, 'goal-complete')) === 1,
+    'step11: goal-complete 只推一次',
+    await secretaryCount(completeDispatch.secretaryId, completeId, 'goal-complete')
+  );
 
   log('== 插件：勾选后才进秘书会话');
   const installed = await page(`

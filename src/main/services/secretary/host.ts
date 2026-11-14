@@ -123,6 +123,8 @@ function deliveryOutcome(event: RendererAgentEvent): 'done' | 'failed' | null {
 
 export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let timer: ReturnType<typeof setInterval> | null = null;
+  /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
+  const pendingComplete = new Set<string>();
 
   function recordUpdate(
     record: DispatchRecord,
@@ -159,6 +161,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     kind: SecretaryResultKind,
     now: number
   ): void {
+    if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
     const update = recordUpdate(record, kind, now);
     file.outbox = enqueueUpdate(file.outbox, update);
@@ -212,6 +215,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed')) {
           record.turn += 1;
         }
+        if (own && event.type === 'goal-signal' && event.kind === 'complete') {
+          pendingComplete.add(conversationId);
+        }
+        if (
+          own &&
+          (event.type === 'turn-failed' || (event.type === 'turn-completed' && event.aborted))
+        ) {
+          pendingComplete.delete(conversationId);
+        }
         record.lastEventAt = now;
         if (record.lastState !== status.state) record.stateSince = now;
         record.lastState = status.state;
@@ -222,9 +234,19 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         let kind: SecretaryResultKind | null = null;
         if (own) {
           const resultEvent = resultEventOf(event, rows[conversationId]);
+          if (
+            resultEvent?.type === 'turn-completed' &&
+            event.type === 'turn-completed' &&
+            !event.aborted &&
+            pendingComplete.delete(conversationId)
+          ) {
+            resultEvent.goalCompleted = true;
+          }
           if (resultEvent) kind = classify(record, resultEvent, status);
         }
-        if (!kind && change) {
+        // status=failed 总是和随后的 turn-failed 成对出现；这里再记一次会把同一次失败推两遍。
+        // worker 退出没有 turn-failed，仍靠状态变化记失败。
+        if (!kind && change && event.type !== 'status') {
           // worker 是所有会话共用的，它退出时空闲会话也会跳到 error；没在干活就不算失败
           if (
             change.state === 'error' &&

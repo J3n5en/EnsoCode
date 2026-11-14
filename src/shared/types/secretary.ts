@@ -189,6 +189,8 @@ export interface SecretaryDispatchFile {
     /** 1..6 */
     attempt: number;
     nextAttemptAt: number;
+    /** 到点且会话刚变空闲时，留给紧随其后的 turn-completed 的窗口；过了才当结束事件丢失重投 */
+    idleGraceUntil?: number;
     settled?: boolean;
   };
 }

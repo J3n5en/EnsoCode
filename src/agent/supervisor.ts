@@ -5088,13 +5088,29 @@ export class SessionSupervisor {
     managed.currentTurnId = randomUUID();
     managed.turnAborted = false;
     ensureAssistantUsage(managed.session.messages as unknown[]);
-    void this.promptTracked(
-      managed,
-      consumeRole(managed, text),
-      images ? { images } : undefined,
-      deliveryId
-    ).catch((error) => {
-      this.failTurn(managed, toErrorMessage(error));
+    const body = consumeRole(managed, text);
+    const options = images ? { images } : undefined;
+    const submit = () => this.promptTracked(managed, body, options, deliveryId);
+    void submit().catch(async (error: unknown) => {
+      const message = toErrorMessage(error);
+      // 续跑撞上刚启动的压缩：等压完再投一次，不要把会话打成 error
+      if (
+        message.includes('Cannot submit a prompt while compaction is in progress') &&
+        (await waitPromptable(
+          managed.session,
+          ZOMBIE_TURN_WAIT_MS,
+          () => managed.status === 'running'
+        ))
+      ) {
+        try {
+          await submit();
+          return;
+        } catch (retryError) {
+          this.failTurn(managed, toErrorMessage(retryError));
+          return;
+        }
+      }
+      this.failTurn(managed, message);
     });
   }
 

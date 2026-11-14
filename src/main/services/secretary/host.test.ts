@@ -210,17 +210,23 @@ describe('派出会话的结果记录', () => {
     expect(failed.state.file.dispatched.c1.takeover).toEqual({ grantedAt: 0, via: 'user' });
   });
 
-  it('目标完成与安全限制暂停分别记完成与受阻', () => {
+  it('只有 goal_blocked 记受阻；goal_complete 等轮次结束后才记完成', () => {
     const done = harness({});
     done.state.statuses.c1 = idle;
     done.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(done.state.file.outbox).toEqual([]);
+    done.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(done.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete' });
+
+    const blocked = harness({});
+    blocked.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: '缺凭据' }), []);
+    expect(blocked.state.file.outbox[0]).toMatchObject({ kind: 'goal-blocked' });
 
     const paused = harness({});
     paused.state.rows.c1 = { ...paused.state.rows.c1, goal: { text: 'g', status: 'paused' } };
     paused.state.statuses.c1 = idle;
     paused.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
-    expect(paused.state.file.outbox[0]).toMatchObject({ kind: 'goal-blocked' });
+    expect(paused.state.file.outbox).toEqual([]);
   });
 
   it('目标完成后同一轮结束只留完成，不再补一条 turn-ended', () => {
@@ -266,7 +272,7 @@ describe('派出会话的结果记录', () => {
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.dispatched.c1.lastResult).toMatchObject({
       kind: 'goal-complete',
-      turn: 0,
+      turn: 1,
     });
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.dispatched.c1).toMatchObject({
@@ -311,6 +317,19 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
     h.host.onAgentEvent(event('approval-request'), change('waiting', 'waiting'));
     expect(h.state.file.outbox).toHaveLength(1);
+  });
+
+  it('同一次失败只记一条：status=failed 不抢在 turn-failed 前面再推一次', () => {
+    const h = harness({});
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(event('status', { status: 'failed' }), change('error', 'running'));
+    expect(h.state.file.outbox).toEqual([]);
+    h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'running'));
+    expect(h.state.file.outbox).toHaveLength(1);
+    h.state.file.outbox = [];
+    h.host.onAgentEvent(event('status', { status: 'failed' }), change('error', 'error'));
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 1 });
   });
 
   it('goal_wait 等后台任务、goal 续跑都不记需要用户；真有提问时才记', () => {
@@ -441,6 +460,8 @@ describe('系统通知', () => {
     const withDone = harness({ notify: 'with-done' });
     withDone.state.statuses.c1 = idle;
     withDone.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(withDone.state.notifications).toEqual([]);
+    withDone.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(withDone.state.notifications).toHaveLength(1);
 
     const off = harness({ notify: 'off' });
