@@ -27,6 +27,8 @@ interface SidebarConversation {
   status?: string;
   spawning?: boolean;
   unread?: boolean;
+  /** 静音只影响 Dock/任务栏角标，不改变侧栏排序和未读 */
+  muted?: boolean;
   /** 仍在「活跃中」时被点开的时刻:留存窗口从它与最后一条消息中较晚者起算 */
   activeRenewedAt?: number;
   pendingAsks?: readonly { requestId: string }[];
@@ -386,7 +388,8 @@ export function waitingConversationCount(
   order: readonly string[],
   conversations: Conversations
 ): number {
-  return order.filter((id) => isWaiting(id, conversations)).length;
+  return order.filter((id) => conversations[id]?.muted !== true && isWaiting(id, conversations))
+    .length;
 }
 
 const DAY_MS = 86_400_000;

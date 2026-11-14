@@ -263,6 +263,8 @@ export interface CatalogEntry {
   /** 置顶/归档（与桌面侧栏同语义：归档与置顶互斥，归档只进单独栏目） */
   pinned?: boolean;
   archived?: boolean;
+  /** 静音：手机/PWA 不再为这个会话发推送，主屏幕角标也不计入 */
+  muted?: boolean;
   /** 会话当前选用的 provider/model 与推理档位，手机模型切换器回显用 */
   providerId?: string;
   modelId?: string;

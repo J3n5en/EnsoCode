@@ -47,6 +47,7 @@ vi.mock('../windows/MainWindow', () => ({
 }));
 
 import { maybeNotify, maybeNotifyBot, setViewedSession } from './notifications';
+import { resetSessionMuteOverrides, setSessionMuteOverride } from './sessionMuteGate';
 
 const identity = { sessionId: 'conversation-1', generation: 'g' } as const;
 
@@ -66,6 +67,7 @@ describe('maybeNotify', () => {
     appState.isPackaged = true;
     settingsState.current = undefined;
     setViewedSession(null);
+    resetSessionMuteOverrides();
     maybeNotify({ type: 'worker-exited' });
   });
 
@@ -219,6 +221,63 @@ describe('maybeNotify', () => {
     maybeNotify(askEvent('在吗'));
     expect(notifications[0]?.title).toBe('等你回答');
   });
+
+  it('静音会话不发完成、失败、提问和审批通知，子会话一起静音', () => {
+    settingsState.current = {
+      'enso-conversations': {
+        state: { conversations: { 'conversation-1': { title: '修登录', muted: true } } },
+      },
+    };
+    maybeNotify(askEvent('在吗'));
+    maybeNotify({
+      type: 'approval-request',
+      identity,
+      seq: 2,
+      request: { requestId: 'apr', tool: 'bash', kind: 'command', summary: 'ls' },
+    } as unknown as RendererAgentEvent);
+    maybeNotify({
+      type: 'turn-completed',
+      identity,
+      seq: 3,
+    } as unknown as RendererAgentEvent);
+    maybeNotify({
+      type: 'status',
+      identity,
+      seq: 4,
+      status: 'failed',
+      error: 'boom',
+    } as unknown as RendererAgentEvent);
+    maybeNotify({
+      type: 'ask-request',
+      identity: { sessionId: 'conversation-1::cw-bob', generation: 'g' },
+      seq: 5,
+      ask: { requestId: 'r3', question: '选哪个方案?' },
+    } as unknown as RendererAgentEvent);
+    expect(notifications).toHaveLength(0);
+    expect(execFileCalls).toHaveLength(0);
+  });
+
+  it('取消静音后恢复通知，别的会话不受影响', () => {
+    settingsState.current = {
+      'enso-conversations': {
+        state: { conversations: { 'conversation-1': { muted: true } } },
+      },
+    };
+    setSessionMuteOverride('conversation-1', false);
+    maybeNotify(askEvent('在吗'));
+    expect(notifications).toHaveLength(1);
+    notifications.length = 0;
+    setSessionMuteOverride('conversation-1', true);
+    maybeNotify(askEvent('在吗'));
+    maybeNotify({
+      type: 'ask-request',
+      identity: { sessionId: 'conversation-2', generation: 'g' },
+      seq: 1,
+      ask: { requestId: 'r2', question: '另一条' },
+    } as unknown as RendererAgentEvent);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]?.body).toBe('另一条');
+  });
 });
 
 describe.each(['session', 'bot'] as const)('%s approval notifications', (surface) => {
@@ -243,6 +302,8 @@ describe.each(['session', 'bot'] as const)('%s approval notifications', (surface
     windows.length = 0;
     appState.isPackaged = true;
     setViewedSession(null);
+    resetSessionMuteOverrides();
+    settingsState.current = undefined;
     await emit({ type: 'worker-exited' });
   });
 

@@ -421,6 +421,31 @@ describe('PluginHostGate', () => {
     });
   });
 
+  it('静音会话的 ui.notify 不弹系统通知，取消静音后恢复', async () => {
+    const notify = vi.fn(() => true);
+    deps.notify = notify;
+    deps.sessionMuted = (sessionId) => sessionId.startsWith('muted');
+    gate = new PluginHostGate(deps);
+    const muted = gate.invocations.create({
+      pluginId: 'a.b',
+      sessionId: 'muted-parent::cw-a',
+      projectRoot: null,
+      gesture: false,
+    });
+    await expect(
+      gate.handle('a.b', 'ui.notify', { title: 't', body: 'b' }, muted)
+    ).resolves.toBeNull();
+    expect(notify).not.toHaveBeenCalled();
+    const open = gate.invocations.create({
+      pluginId: 'a.b',
+      sessionId: 'open',
+      projectRoot: null,
+      gesture: false,
+    });
+    await expect(gate.handle('a.b', 'ui.notify', { title: 't' }, open)).resolves.toBeNull();
+    expect(notify).toHaveBeenCalledOnce();
+  });
+
   it('ui.statusUpdate 只能改清单声明过的状态项，不需要调用上下文', async () => {
     const statusUpdate = vi.fn();
     deps.statusUpdate = statusUpdate;

@@ -90,6 +90,7 @@ function buildPayload(): PairCatalogPayload {
       ...(c.parentId ? { parentId: c.parentId } : {}),
       ...(c.pinned === true ? { pinned: true } : {}),
       ...(c.archived === true ? { archived: true } : {}),
+      ...(c.muted === true ? { muted: true } : {}),
       // 当前模型与推理档位：手机切换器回显；缺省字段不占帧体积
       ...(c.lastProviderId ? { providerId: c.lastProviderId } : {}),
       ...(c.lastModelId ? { modelId: c.lastModelId } : {}),

@@ -1,10 +1,15 @@
 /** 主屏幕角标：只数「要你动手」的提问与审批，不含运行中。 */
 
 export function attentionBadgeCount(
-  entries: readonly { pendingAskCount?: number; pendingApprovalCount?: number }[]
+  entries: readonly {
+    pendingAskCount?: number;
+    pendingApprovalCount?: number;
+    muted?: boolean;
+  }[]
 ): number {
   let n = 0;
   for (const entry of entries) {
+    if (entry.muted === true) continue;
     n += positiveCount(entry.pendingAskCount);
     n += positiveCount(entry.pendingApprovalCount);
   }

@@ -127,6 +127,7 @@ import {
   remoteLinkDown,
   remoteLinkRevoked,
 } from './remoteRenderer/hostHooks';
+import { isSessionMuted } from './sessionMuteGate';
 import { onSpeechAvailabilityChange, openSpeechSession, speechAvailable } from './speech/service';
 
 /**
@@ -1608,7 +1609,8 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
           e,
           catalog.find((entry) => entry.id === flatSessionId)?.title ??
             (flatSessionId ? botPort?.sessionTitle(flatSessionId) : undefined),
-          readNotifyMainAgentOnly()
+          readNotifyMainAgentOnly(),
+          flatSessionId ? isSessionMuted(flatSessionId) : false
         );
         if (payload) void sendPush(conn.device.pairId, payload);
       }
