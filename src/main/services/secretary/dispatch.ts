@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app } from '@platform';
+import { projectNameFromPath } from '@shared/projectName';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   canOperate,
@@ -11,6 +12,7 @@ import {
   validateDispatch,
 } from '@shared/secretary/policy';
 import { SECRETARY_ID_MAX, SECRETARY_SESSION_MESSAGE_MAX } from '@shared/secretary/tools';
+import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import {
   type DispatchDraft,
@@ -28,11 +30,29 @@ import {
   type SecretaryToolDraft,
   type TakeoverVia,
 } from '@shared/types/secretary';
+import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
-import { buildBoard, proposalUpdate, takeoverViews } from './results';
+import {
+  buildBoard,
+  goalStatusOf,
+  linkedTodoSession,
+  proposalUpdate,
+  sessionNeedsUser,
+  sessionStillGoing,
+  takeoverViews,
+} from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import { SecretaryStore } from './store';
+import {
+  linkTodo,
+  markTodoProblem,
+  reopenTodo,
+  resumeLinkedTodo,
+  TODO_STATUSES,
+  type TodoStatus,
+  todoStatus,
+} from './todoLifecycle';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -92,6 +112,7 @@ const DISPATCH_OPS = [
   'session_send',
   'session_stop',
   'session_takeover_propose',
+  'todo_list',
   'todo_item_add',
   'todo_item_update',
   'todo_item_dispatch',
@@ -191,10 +212,47 @@ async function profileOf(ports: SecretaryDispatchPorts): Promise<SecretaryProfil
   return (await ports.profile()) ?? defaultProfile();
 }
 
-function runningCount(file: SecretaryDispatchFile): number {
-  return Object.values(file.dispatched).filter(
-    (record) => record.lastState === 'running' && !record.takeover
-  ).length;
+/** 派出上限只数秘书派出的会话。接管是用户交来的已有会话，不占这个名额 */
+async function runningCount(
+  ports: SecretaryDispatchPorts,
+  file: SecretaryDispatchFile
+): Promise<number> {
+  const rows = await ports.rows();
+  let count = 0;
+  for (const record of Object.values(file.dispatched)) {
+    if (record.takeover) continue;
+    const row = rows[record.conversationId];
+    const status = await ports.status(record.conversationId);
+    const live = row?.sessionFile ? status.state : (status.state ?? record.lastState);
+    const state = !row?.sessionFile && row ? 'not-started' : live;
+    if (sessionNeedsUser(record, state)) continue;
+    if (
+      sessionStillGoing({
+        state,
+        recordedState: record.lastState,
+        goalStatus: goalStatusOf(row),
+        backgroundRunning: record.backgroundRunning === true,
+      })
+    )
+      count += 1;
+  }
+  return count;
+}
+
+async function noteDispatchResumed(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<void> {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return;
+  const now = ports.now();
+  if (record.lastState !== 'running') record.stateSince = now;
+  record.lastState = 'running';
+  record.lastEventAt = now;
+  ports.saveDispatch(file);
+  const resumed = resumeLinkedTodo(await ports.todos(), conversationId, now);
+  if (resumed.changed) ports.saveTodos(resumed.todos);
 }
 
 async function dispatchContext(
@@ -209,7 +267,7 @@ async function dispatchContext(
     visible: visibleProjects(projects, profile).some(
       (candidate) => candidate.projectId === projectId
     ),
-    running: runningCount(file),
+    running: await runningCount(ports, file),
     max: profile.maxRunningDispatches,
     worktreeMode: profile.dispatchWorktree,
   };
@@ -297,6 +355,10 @@ async function executeDispatch(
     ...(draft.goal ? { goal: draft.goal } : {}),
   };
   ports.saveDispatch(file);
+  if (draft.todoId) {
+    const linked = linkTodo(await ports.todos(), draft.todoId, created.conversationId, ports.now());
+    if (linked.changed) ports.saveTodos(linked.todos);
+  }
   notifySecretaryChanged();
   return created;
 }
@@ -590,6 +652,7 @@ export function createSecretaryDispatchHandlers(
         if (!(await ports.appendQueued(conversationId, { id: ports.newId(), text }))) {
           return deny(ports, ctx, 'session_send', 'not-found', conversationId);
         }
+        await noteDispatchResumed(ports, conversationId);
         ports.audit({
           at: ports.now(),
           secretaryConversationId: ctx.secretaryConversationId,
@@ -631,6 +694,8 @@ export function createSecretaryDispatchHandlers(
         ok: true,
         detail: 'sent',
       });
+      await noteDispatchResumed(ports, conversationId);
+      notifySecretaryChanged();
       return { ok: true, result: { status: 'sent' } };
     },
 
@@ -646,6 +711,8 @@ export function createSecretaryDispatchHandlers(
       // 接管来的会话自带的目标也一并暂停，免得停下后又被续跑
       const record = file.dispatched[conversationId];
       if (record?.goal || record?.takeover) await ports.pauseGoal(conversationId);
+      const stopped = markTodoProblem(await ports.todos(), conversationId, 'stopped', ports.now());
+      if (stopped.changed) ports.saveTodos(stopped.todos);
       ports.audit({
         at: ports.now(),
         secretaryConversationId: ctx.secretaryConversationId,
@@ -656,6 +723,67 @@ export function createSecretaryDispatchHandlers(
       });
       notifySecretaryChanged();
       return { ok: true, result: { status: 'stopped' } };
+    },
+
+    async todo_list(params) {
+      const status = stringParam(params, 'status');
+      if (status && !(TODO_STATUSES as readonly string[]).includes(status)) return invalidArguments;
+      const projectId = stringParam(params, 'projectId');
+      const profile = await profileOf(ports);
+      const projects = visibleProjects(await ports.projects(), profile);
+      if (projectId && !projects.some((project) => project.projectId === projectId))
+        return { ok: false, error: 'not-found' };
+      const rows = await ports.rows();
+      const file = ports.dispatchFile();
+      const todos = [];
+      for (const todo of await ports.todos()) {
+        if (todo.projectId && !projects.some((project) => project.projectId === todo.projectId))
+          continue;
+        if (projectId && todo.projectId !== projectId) continue;
+        const session = todo.conversationId
+          ? linkedTodoSession(
+              file.dispatched[todo.conversationId],
+              rows[todo.conversationId],
+              await ports.status(todo.conversationId)
+            )
+          : null;
+        const phase = todoStatus(todo, session);
+        if (status && phase !== (status as TodoStatus)) continue;
+        const problem =
+          phase === 'problem'
+            ? (todo.problem ??
+              (!session?.present
+                ? 'deleted'
+                : session.aborted || session.result === 'interrupted'
+                  ? 'stopped'
+                  : 'failed'))
+            : undefined;
+        const project = todo.projectId
+          ? projects.find((candidate) => candidate.projectId === todo.projectId)
+          : undefined;
+        todos.push({
+          id: todo.id,
+          text: wrapUntrusted(`todo:${todo.id}`, redactSecrets(todo.text)),
+          status: phase,
+          ...(todo.projectId ? { projectId: todo.projectId } : {}),
+          ...(project
+            ? { projectName: redactSecrets(projectNameFromPath(project.canonicalPath)) }
+            : {}),
+          ...(todo.dueAt !== undefined ? { dueAt: todo.dueAt } : {}),
+          ...(todo.conversationId ? { conversationId: todo.conversationId } : {}),
+          ...(session ? { sessionState: session.present ? session.state : 'gone' } : {}),
+          ...(session?.title
+            ? {
+                sessionTitle: wrapUntrusted(
+                  `session:${todo.conversationId}`,
+                  redactSecrets(session.title)
+                ),
+              }
+            : {}),
+          ...(problem ? { problem } : {}),
+        });
+      }
+      return { ok: true, result: { todos } };
     },
 
     async session_takeover_propose(params, ctx) {
@@ -801,15 +929,6 @@ export function createSecretaryDispatchHandlers(
       };
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
       const result = outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
-      if (outcome.kind === 'created') {
-        ports.saveTodos(
-          todos.map((candidate) =>
-            candidate.id === todoId
-              ? { ...candidate, conversationId: outcome.conversationId }
-              : candidate
-          )
-        );
-      }
       return result;
     },
   };
@@ -1044,6 +1163,21 @@ export async function mutateTodo(
       at: now,
       secretaryConversationId: null,
       op: 'todo_remove',
+      targetId: request.todoId,
+      ok: true,
+    });
+    notifySecretaryChanged();
+    return { ok: true, todoId: request.todoId };
+  }
+  if (request.action === 'reopen') {
+    const current = await ports.todos();
+    const opened = reopenTodo(current, request.todoId, now);
+    if (!opened.found) return { ok: false, error: 'not-found' };
+    if (opened.changed) ports.saveTodos(opened.todos);
+    ports.audit({
+      at: now,
+      secretaryConversationId: null,
+      op: 'todo_reopen',
       targetId: request.todoId,
       ok: true,
     });

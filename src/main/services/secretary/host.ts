@@ -26,7 +26,9 @@ import {
   capLastText,
   classify,
   enqueueUpdate,
+  goalStatusOf,
   isUrgentUpdate,
+  linkedTodoSession,
   proposalUpdate,
   type ResultEvent,
   shouldNotify,
@@ -35,6 +37,7 @@ import {
   updateKey,
 } from './results';
 import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
+import { advanceTodos } from './todoLifecycle';
 
 const TICK_MS = 60_000;
 
@@ -52,6 +55,7 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   enabled(): boolean;
   profile(): SecretaryProfile | null;
   todos(): SecretaryTodo[];
+  saveTodos(todos: SecretaryTodo[]): void;
   schedules(): SecretarySchedule[];
   saveSchedules(schedules: SecretarySchedule[]): void;
   notify(build: (lang: 'zh' | 'en') => { title: string; body: string }): void;
@@ -82,13 +86,6 @@ function rootIdOf(event: RendererAgentEvent, sessionId: string): string {
   const id = typeof parent?.sessionId === 'string' ? parent.sessionId : sessionId;
   const sep = id.indexOf('::');
   return sep === -1 ? id : id.slice(0, sep);
-}
-
-function goalStatusOf(row: Record<string, unknown> | undefined): string | undefined {
-  const goal = row?.goal;
-  if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return undefined;
-  const status = (goal as Record<string, unknown>).status;
-  return typeof status === 'string' ? status : undefined;
 }
 
 function assistantTextOf(event: RendererAgentEvent): string | undefined {
@@ -283,6 +280,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         record.lastEventAt = now;
         if (record.lastState !== status.state) record.stateSince = now;
         record.lastState = status.state;
+        if (
+          event.type === 'background-tasks-level' &&
+          conversationId === rootIdOf(event, sessionId ?? conversationId)
+        ) {
+          const backgroundRunning = event.tasks.some((task) => task.status === 'running');
+          if (backgroundRunning) record.backgroundRunning = true;
+          else delete record.backgroundRunning;
+        }
         const lastText = own ? capLastText(assistantTextOf(event)) : undefined;
         if (lastText) record.lastText = lastText;
 
@@ -355,10 +360,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         changed = true;
       }
 
-      if (changed) {
-        ports.save(file);
-        ports.publish();
-      }
+      const aborted = new Set<string>();
+      if (sessionId && event.type === 'turn-completed' && event.aborted)
+        aborted.add(rootIdOf(event, sessionId));
+      if (changed) ports.save(file);
+      const todosChanged = syncLinkedTodos(ports, file, rows, aborted);
+      if (changed || todosChanged) ports.publish();
       flush(now);
     },
 
@@ -371,6 +378,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         statuses[record.conversationId] = ports.status(record.conversationId);
 
       let changed = false;
+      for (const record of records) {
+        const status = statuses[record.conversationId];
+        if (!status || record.lastState === status.state) continue;
+        record.stateSince = now;
+        record.lastState = status.state;
+        changed = true;
+      }
       for (const { conversationId, turn } of stalled(records, statuses, now)) {
         const record = file.dispatched[conversationId];
         record.stalledTurn = turn;
@@ -385,10 +399,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         changed = true;
       }
       if (fireSchedules(file, now)) changed = true;
-      if (changed) {
-        ports.save(file);
-        ports.publish();
-      }
+      if (changed) ports.save(file);
+      const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
+      if (changed || todosChanged) ports.publish();
       // 系统定时是档案与待办的派生状态，每分钟重算一次；放在触发之后，否则刚到期的待办提醒先被重算删掉
       syncSystemSchedules(ports, ports.profile(), ports.todos());
       flush(now);
@@ -415,10 +428,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       // 一次性任务错过就在启动时补投一次
       if (fireSchedules(file, now)) changed = true;
-      if (changed) {
-        ports.save(file);
-        ports.publish();
-      }
+      if (changed) ports.save(file);
+      const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
+      if (changed || todosChanged) ports.publish();
       syncSystemSchedules(ports, ports.profile(), ports.todos());
       recoverDeliveries(ports, now);
       flush(now);
@@ -441,4 +453,26 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     },
   };
   return host;
+}
+
+function syncLinkedTodos(
+  ports: SecretaryHostPorts,
+  file: SecretaryDispatchFile,
+  rows: Record<string, Record<string, unknown>>,
+  aborted: ReadonlySet<string>
+): boolean {
+  const advanced = advanceTodos(
+    ports.todos(),
+    (conversationId) =>
+      linkedTodoSession(
+        file.dispatched[conversationId],
+        rows[conversationId],
+        ports.status(conversationId),
+        aborted.has(conversationId)
+      ),
+    ports.now()
+  );
+  if (!advanced.changed) return false;
+  ports.saveTodos(advanced.todos);
+  return true;
 }

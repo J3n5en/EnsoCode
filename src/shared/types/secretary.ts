@@ -153,6 +153,8 @@ export interface DispatchRecord {
   lastState: 'running' | 'idle' | 'waiting' | 'error';
   /** 心跳：派出会话每个事件都刷新，只用于判断卡住，不能当动态时间 */
   lastEventAt: number;
+  /** 还有没结束的后台任务。实时状态是空闲时仍算在跑 */
+  backgroundRunning?: boolean;
   /** lastState 变成当前值的时间；旧记录没有，读时按派出或结果时间估 */
   stateSince?: number;
   /** 最后一轮的助手正文，工作台显示"最后说了什么" */
@@ -218,6 +220,22 @@ export interface SecretaryTodo {
   updatedAt: number;
   conversationId?: string;
   doneAt?: number;
+  /** 关联会话失败、被停止或已删除；用户放回待办或重新派发后清掉 */
+  problem?: TodoProblemCode;
+}
+
+export const TODO_PROBLEM_CODES = ['failed', 'stopped', 'deleted'] as const;
+
+export type TodoProblemCode = (typeof TODO_PROBLEM_CODES)[number];
+
+/** 工作台投影。done 不进看板，只出现在 todo_list */
+export type SecretaryTodoPhase = 'todo' | 'active' | 'problem';
+
+export interface SecretaryBoardTodo extends SecretaryTodo {
+  phase?: SecretaryTodoPhase;
+  projectName?: string;
+  sessionTitle?: string;
+  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone';
 }
 
 /** 界面对待办的操作；dispatch 是用户亲手点出，不再走自主度确认 */
@@ -225,6 +243,7 @@ export type SecretaryTodoMutate =
   | { action: 'add'; text: string; dueAt?: number; projectId?: string }
   | { action: 'update'; todoId: string; text?: string; dueAt?: number | null; done?: boolean }
   | { action: 'remove'; todoId: string }
+  | { action: 'reopen'; todoId: string }
   | { action: 'dispatch'; todoId: string; projectId?: string; prompt?: string };
 
 export type SecretarySchedule = {
@@ -276,6 +295,8 @@ export type SecretaryCard =
       result?: SecretaryResultKind;
       /** 与 result 同时出现：结果发生的时间 */
       resultAt?: number;
+      /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
+      continuing?: true;
       secretaryConversationId: string;
       unread?: boolean;
       takeover?: true;
@@ -285,7 +306,7 @@ export type SecretaryCard =
 export interface SecretaryBoard {
   needsYou: SecretaryCard[];
   running: SecretaryCard[];
-  todos: SecretaryTodo[];
+  todos: SecretaryBoardTodo[];
   done: SecretaryCard[];
   activity?: SecretaryActivity[];
 }

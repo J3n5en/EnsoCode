@@ -275,6 +275,36 @@ describe('SecretaryPanel', () => {
     });
   });
 
+  it('进行中的待办显示会话并可放回待办', async () => {
+    h.board = h.secretary.board = board({
+      todos: [
+        {
+          id: 't1',
+          text: '看构建',
+          createdAt: NOW,
+          updatedAt: NOW,
+          phase: 'active',
+          conversationId: 'c9',
+          sessionTitle: '看构建',
+          sessionState: 'running',
+        },
+      ],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    const row = container.querySelector('[data-enso="secretary-todo"]');
+    expect(row?.getAttribute('data-phase')).toBe('active');
+    expect(row?.textContent).toContain('看构建');
+    expect(row?.textContent).toContain('[Running]');
+    click('[data-enso="secretary-todo-session"]');
+    click('[data-enso="secretary-todo-reopen"]');
+    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c9' });
+    expect(h.calls).toContainEqual({
+      name: 'mutateTodo',
+      args: { action: 'reopen', todoId: 't1' },
+    });
+  });
+
   it('标签切到记忆与定时，定时分系统与秘书定的两组', async () => {
     await render(<SecretaryPanel />);
     await flush();

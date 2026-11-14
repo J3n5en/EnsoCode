@@ -10,6 +10,7 @@ export const SECRETARY_OPS = [
   'session_send',
   'session_stop',
   'session_takeover_propose',
+  'todo_list',
   'todo_item_add',
   'todo_item_update',
   'todo_item_dispatch',

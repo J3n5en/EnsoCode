@@ -85,7 +85,16 @@ describe('secretaryDigest', () => {
       board({
         needsYou: [proposal(), session('waiting', { state: 'waiting' })],
         running: [session('run', { state: 'running' })],
-        todos: [{ id: 't1', text: '写周报', createdAt: TODAY, updatedAt: TODAY }],
+        todos: [
+          { id: 't1', text: '写周报', createdAt: TODAY, updatedAt: TODAY },
+          {
+            id: 't2',
+            text: '在跑',
+            createdAt: TODAY,
+            updatedAt: TODAY,
+            phase: 'active',
+          },
+        ],
       }),
       NOW
     );
@@ -128,6 +137,25 @@ describe('secretaryDigest', () => {
       NOW
     ).events;
     expect(event).toMatchObject({ tone: 'run', label: 'Started', running: true });
+  });
+
+  it('还在等续跑时，动态不再显示上一轮的完成', () => {
+    const digest = secretaryDigest(
+      board({
+        running: [
+          session('c1', {
+            state: 'idle',
+            continuing: true,
+            result: 'goal-complete',
+            resultAt: TODAY,
+            stateSince: TODAY + 5,
+          }),
+        ],
+      }),
+      NOW
+    );
+    expect(digest.events[0]).toMatchObject({ label: 'In progress', tone: 'run', at: TODAY + 5 });
+    expect(digest.counts.running).toBe(1);
   });
 
   it('会话事件带项目、标题、最后一句与打开用的会话 id', () => {

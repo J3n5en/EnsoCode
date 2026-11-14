@@ -292,29 +292,19 @@ const shown = (selector) =>
 `;
 
 async function closeSettingsWindow(page) {
-  // 设置窗执行 window.close() 后页面销毁，Runtime.evaluate 不再回包，await 会挂住验收。
-  // 再走 CDP /json/close 关 settings target。两路都最多等 1 秒，然后断开这条连接。
+  // 页面里的 window.close() 会把 evaluate 一起挂死，不能一直等它回包。
+  // 用这条连接自己的 target 走 CDP /json/close，最多 2 秒，然后断开。
   const closed = page.evaluate('window.close()').catch(() => undefined);
-  let targetId = null;
-  try {
-    const list = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`).then((reply) =>
-      reply.json()
-    );
-    targetId =
-      [...list]
-        .reverse()
-        .find((entry) => entry.type === 'page' && String(entry.url).includes('settings.html'))
-        ?.id ?? null;
-  } catch {
-    targetId = null;
+  if (page.targetId) {
+    try {
+      await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${page.targetId}`, {
+        signal: AbortSignal.timeout(2000),
+      });
+    } catch {
+      // 窗口已经没了，或者关闭请求没有在时限内返回
+    }
   }
-  if (targetId) {
-    await Promise.race([
-      fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${targetId}`).catch(() => undefined),
-      delay(1_000),
-    ]);
-  }
-  await Promise.race([closed, delay(1_000)]);
+  await Promise.race([closed, delay(2_000)]);
   page.close();
 }
 
@@ -371,6 +361,7 @@ async function connect(entry = 'index.html') {
       log(`  shot ${file}`);
     },
     close: () => socket.close(),
+    targetId: target.id,
     async setFiles(selector, files) {
       await send('DOM.enable');
       const doc = await send('DOM.getDocument', { depth: 0 });
@@ -1216,7 +1207,6 @@ async function run(cdp, pluginZipUrl) {
     200
   ).catch(() => readJson(profileFile));
   assert(savedBack.maxRunningDispatches === 3, 'step5b: profile.json 里的上限改回 3', savedBack);
-  // 窗口自己关掉后 CDP 不会回包，await 会一直挂着；发出去就够
   await closeSettingsWindow(settingsPage);
   const unseed = readJson(dispatchFile);
   unseed.dispatched[dispatchedId].lastState = seededState;
@@ -1947,6 +1937,241 @@ async function run(cdp, pluginZipUrl) {
     'step12: 完成后秘书正常回复',
     doneReply
   );
+
+  log('== step11 待办能读、派发后进行中、完成后打勾');
+  const todosFile = path.join(ENV, 'secretary', 'todos.json');
+  const boardText = '看板验收待办';
+  const boardAdded = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.mutateTodo({
+      action: 'add',
+      text: ${JSON.stringify(boardText)},
+      projectId: ${JSON.stringify(setup.projectId)},
+    }));
+  `);
+  assert(boardAdded.ok, 'step11: 建出待办', boardAdded);
+  const beforeBoard = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const row = await until(
+      () => [...document.querySelectorAll('[data-enso=secretary-todo]')]
+        .find((node) => node.innerText.includes(${JSON.stringify(boardText)})) ?? null,
+      15000
+    );
+    return JSON.stringify({
+      phase: row?.getAttribute('data-phase') ?? null,
+      text: row?.innerText ?? null,
+    });
+  `);
+  assert(beforeBoard.phase === 'todo', 'step11: 派发前待办在待办列', beforeBoard);
+  await cdp.shot(path.join(ART, '11-todo-before.png'));
+  const listedOpen = await secretaryTool(
+    cdp,
+    setup,
+    'todo_list',
+    { status: 'todo', projectId: setup.projectId },
+    '列出这个项目还没派的待办'
+  );
+  const openRows = listedTodos(listedOpen);
+  const openRow = openRows.find((item) => item.id === boardAdded.todoId);
+  assert(
+    openRow?.status === 'todo' &&
+      openRow.projectId === setup.projectId &&
+      openRow.text.includes(`<untrusted-content source="todo:${boardAdded.todoId}">`) &&
+      openRow.text.includes(boardText),
+    'step11: todo_list 看到真实待办状态，正文是不可信内容',
+    openRow ?? listedOpen.text
+  );
+
+  const activeDispatch = await dispatchConfirmed(
+    `[[tool:todo_item_dispatch ${JSON.stringify({
+      todoId: boardAdded.todoId,
+      prompt: '先把这件事做起来',
+      title: '看板验收会话',
+    })}]]`
+  );
+  assert(activeDispatch.ok, 'step11: 待办派出发了', activeDispatch);
+  const shownActive = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const row = await until(() => {
+      const node = document.querySelector(
+        '[data-enso=secretary-todo][data-session=${JSON.stringify(activeDispatch.conversationId)}]'
+      );
+      return node?.getAttribute('data-phase') === 'active' ? node : null;
+    }, 20000);
+    return JSON.stringify({
+      phase: row?.getAttribute('data-phase') ?? null,
+      text: row?.innerText ?? null,
+    });
+  `);
+  assert(
+    shownActive.phase === 'active' && shownActive.text.includes('看板验收会话'),
+    'step11: 派发后待办进入进行中并显示会话',
+    shownActive
+  );
+  await cdp.shot(path.join(ART, '12-todo-active.png'));
+  const listedActive = await secretaryTool(
+    cdp,
+    setup,
+    'todo_list',
+    { status: 'active' },
+    '列出进行中的待办'
+  );
+  const activeRow = listedTodos(listedActive).find((item) => item.id === boardAdded.todoId);
+  assert(
+    activeRow?.status === 'active' &&
+      activeRow.conversationId === activeDispatch.conversationId &&
+      typeof activeRow.sessionState === 'string',
+    'step11: todo_list 能看到进行中和关联会话',
+    activeRow ?? listedActive.text
+  );
+
+  const goaled = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.goalAction({
+      conversationId: ${JSON.stringify(activeDispatch.conversationId)},
+      action: 'set',
+      text: '收尾 [[tool:goal_complete {"summary":"看板待办做完了"}]]',
+    }));
+  `);
+  assert(goaled.ok !== false, 'step11: 给派出会话设了完成目标', goaled);
+  const autoDone = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[activeDispatch.conversationId];
+      const todo = readJson(todosFile).find((item) => item.id === boardAdded.todoId);
+      return record?.lastResult?.kind === 'goal-complete' &&
+        record.lastState !== 'running' &&
+        todo?.doneAt
+        ? todo
+        : null;
+    },
+    'todo auto completed',
+    60_000,
+    500
+  ).catch(() => null);
+  assert(Boolean(autoDone), 'step11: 会话 goal-complete 并结束后待办自动打勾', {
+    record: readJson(dispatchFile).dispatched[activeDispatch.conversationId],
+    todo: readJson(todosFile).find((item) => item.id === boardAdded.todoId),
+  });
+  const leftBoard = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const gone = await until(
+      () => !document.querySelector(
+        '[data-enso=secretary-todo][data-session=${JSON.stringify(activeDispatch.conversationId)}]'
+      ),
+      15000
+    );
+    return JSON.stringify({ gone: Boolean(gone) });
+  `);
+  assert(leftBoard.gone, 'step11: 完成后看板不用手动刷新就离开进行中', leftBoard);
+  await cdp.shot(path.join(ART, '13-todo-done.png'));
+
+  log('== step11b 完成后被 session_send 唤起，在跑计数加回来');
+  const quiet = await page(`
+    const secretary = await SEC();
+    const board = secretary.getState().secretary.board;
+    const running = board.running
+      .filter((card) => card.kind === 'session')
+      .map((card) => card.conversationId);
+    return JSON.stringify({ running });
+  `);
+  assert(
+    !quiet.running.includes(activeDispatch.conversationId),
+    'step11b: 完成后不在在跑里',
+    quiet
+  );
+  const woken = await secretaryTool(
+    cdp,
+    setup,
+    'session_send',
+    {
+      conversationId: activeDispatch.conversationId,
+      message: '接着做，先别结束 [[slow:8000]]',
+    },
+    '把做完的会话再叫起来'
+  );
+  assert(
+    woken.text?.includes('"sent"') || woken.text?.includes('"queued"'),
+    'step11b: session_send 成功',
+    woken
+  );
+  const counted = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const secretary = await SEC();
+    const back = await until(() => {
+      const board = secretary.getState().secretary.board;
+      const running = board.running
+        .filter((card) => card.kind === 'session')
+        .map((card) => card.conversationId);
+      return running.includes(${JSON.stringify(activeDispatch.conversationId)}) ? running : null;
+    }, 20000);
+    const summary = document.querySelector('[data-enso=secretary-summary]')?.innerText ?? '';
+    const stats = [...document.querySelectorAll('[data-enso=secretary-stat]')].map((node) => node.innerText);
+    return JSON.stringify({ running: back, summary, stats });
+  `);
+  assert(Array.isArray(counted.running), 'step11b: 唤起后重新计为进行中', counted);
+  const runningText = String(counted.running.length);
+  assert(
+    counted.summary.includes(runningText) &&
+      counted.stats.some((text) => text.includes(runningText)),
+    'step11b: 顶栏和看板上的进行中是同一个数',
+    counted
+  );
+
+  log('== step12 同时改文字和完成，面板自己更新');
+  const staleText = '旧文字待办';
+  const freshText = '新文字待办';
+  const stale = await page(`
+    const added = await window.electronAPI.secretary.mutateTodo({
+      action: 'add',
+      text: ${JSON.stringify(staleText)},
+      projectId: ${JSON.stringify(setup.projectId)},
+    });
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const row = await until(
+      () => [...document.querySelectorAll('[data-enso=secretary-todo]')]
+        .find((node) => node.innerText.includes(${JSON.stringify(staleText)})) ?? null,
+      15000
+    );
+    return JSON.stringify({ ok: added.ok, todoId: added.todoId, shown: Boolean(row) });
+  `);
+  assert(stale.ok && stale.shown, 'step12: 旧文字先出现在看板上', stale);
+  await cdp.shot(path.join(ART, '14-todo-stale.png'));
+  const edited = await secretaryTool(
+    cdp,
+    setup,
+    'todo_item_update',
+    { todoId: stale.todoId, done: true, text: freshText },
+    '把这条待办改掉并完成'
+  );
+  assert(edited.text?.includes(stale.todoId), 'step12: 同时传 done 和 text 返回成功', edited);
+  const editedTodo = readJson(todosFile).find((item) => item.id === stale.todoId);
+  assert(
+    editedTodo?.text === freshText && typeof editedTodo.doneAt === 'number',
+    'step12: 磁盘上的文字和完成状态一起生效',
+    editedTodo
+  );
+  const refreshed = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const cleared = await until(
+      () => ![...document.querySelectorAll('[data-enso=secretary-todo]')]
+        .some((node) => node.innerText.includes(${JSON.stringify(staleText)})),
+      15000
+    );
+    return JSON.stringify({ cleared: Boolean(cleared) });
+  `);
+  assert(refreshed.cleared, 'step12: 面板不用手动刷新就不再显示旧文字', refreshed);
+  const listedDone = await secretaryTool(
+    cdp,
+    setup,
+    'todo_list',
+    { status: 'done' },
+    '列出已完成的待办'
+  );
+  const doneRow = listedTodos(listedDone).find((item) => item.id === stale.todoId);
+  assert(
+    doneRow?.status === 'done' && doneRow.text.includes(freshText),
+    'step12: todo_list 读到新文字和已完成',
+    doneRow ?? listedDone.text
+  );
+  await cdp.shot(path.join(ART, '15-todo-updated.png'));
 
   log('== 插件：勾选后才进秘书会话');
   const installed = await page(`
@@ -3068,6 +3293,18 @@ async function secretaryTool(cdp, setup, toolName, args, ask) {
     );
     return JSON.stringify({ secretaryId: id, text: result ? textOf(result) : null });
   `);
+}
+
+/** 工具结果经 MemoryInvoker 解开一层，正文是 `{ todos }`，不是 `{ result: { todos } }` */
+function listedTodos(payload) {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(payload?.text ?? 'null');
+  } catch {
+    return [];
+  }
+  const todos = parsed?.todos ?? parsed?.result?.todos;
+  return Array.isArray(todos) ? todos : [];
 }
 
 const auditLines = () =>

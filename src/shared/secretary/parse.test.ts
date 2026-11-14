@@ -531,6 +531,38 @@ describe('parseTodos', () => {
       },
     ]);
   });
+
+  it('keeps a known problem code and drops anything else', () => {
+    expect(
+      parseTodos([
+        {
+          id: 'a',
+          text: '看构建',
+          createdAt: 1,
+          updatedAt: 2,
+          conversationId: 'c1',
+          problem: 'failed',
+        },
+        {
+          id: 'b',
+          text: '看发布',
+          createdAt: 1,
+          updatedAt: 2,
+          problem: 'nope',
+        },
+      ])
+    ).toEqual([
+      {
+        id: 'a',
+        text: '看构建',
+        createdAt: 1,
+        updatedAt: 2,
+        conversationId: 'c1',
+        problem: 'failed',
+      },
+      { id: 'b', text: '看发布', createdAt: 1, updatedAt: 2 },
+    ]);
+  });
 });
 
 describe('parseSchedules', () => {

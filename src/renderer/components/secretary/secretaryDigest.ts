@@ -77,6 +77,7 @@ function greetingAt(now: number): string {
 
 /** 会话卡片对应的动态说明与发生时间：在跑时上一轮的结果已过时，看状态；否则有结果看结果 */
 export function sessionFeed(card: SessionCard): Feed & { at: number } {
+  if (card.continuing) return { tone: 'run', label: 'In progress', at: card.stateSince };
   return card.result && card.state !== 'running'
     ? { ...RESULT_FEED[card.result], at: card.resultAt ?? card.stateSince }
     : { ...STATE_FEED[card.state], at: card.stateSince };
@@ -160,7 +161,7 @@ export function secretaryDigest(board: SecretaryBoard, now: number): SecretaryDi
     counts: {
       needsYou: board.needsYou.length,
       running: board.running.length,
-      todos: board.todos.length,
+      todos: board.todos.filter((todo) => (todo.phase ?? 'todo') === 'todo').length,
     },
     events: events.slice(0, EVENT_LIMIT),
   };

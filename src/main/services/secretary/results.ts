@@ -15,6 +15,7 @@ import {
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
 import type { SecretarySessionStatus } from './readers';
+import { todoSessionView, todoStatus } from './todoLifecycle';
 
 /** 运行中超过这么久没有任何 worker 事件就算可能卡住 */
 export const STALL_MS = 10 * 60 * 1000;
@@ -209,6 +210,61 @@ export function capLastText(text: string | undefined): string | undefined {
     : trimmed;
 }
 
+export function goalStatusOf(row: Record<string, unknown> | undefined): string | undefined {
+  const goal = row?.goal;
+  if (!goal || typeof goal !== 'object' || Array.isArray(goal)) return undefined;
+  const status = (goal as Record<string, unknown>).status;
+  return typeof status === 'string' ? status : undefined;
+}
+
+/**
+ * 派发或接管的会话还没真正结束。
+ * 正在跑、刚被重新唤起、还有后台任务、目标仍会自动续跑或在等外部事情，都算。
+ * 等用户审批或提问不算，那些进「需要你处理」。
+ */
+export function sessionStillGoing(input: {
+  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
+  recordedState?: DispatchRecord['lastState'];
+  goalStatus?: string;
+  backgroundRunning?: boolean;
+}): boolean {
+  if (input.state === 'running' || input.recordedState === 'running') return true;
+  if (input.backgroundRunning) return true;
+  if (input.state === 'waiting' || input.state === 'error' || input.state === 'not-started')
+    return false;
+  return input.goalStatus === 'active' || input.goalStatus === 'waiting';
+}
+
+export function sessionNeedsUser(
+  record: DispatchRecord,
+  state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started'
+): boolean {
+  return (
+    state === 'waiting' ||
+    (record.lastResult !== undefined &&
+      NEEDS_YOU_RESULTS.has(record.lastResult.kind) &&
+      !record.lastResult.dismissed)
+  );
+}
+
+/** 待办看到的会话：记录上还在跑、或目标还要续时，不因实时状态暂时空闲就当成做完 */
+export function linkedTodoSession(
+  record: DispatchRecord | undefined,
+  row: Record<string, unknown> | undefined,
+  status: { state: 'running' | 'idle' | 'waiting' | 'error' } | undefined,
+  aborted = false
+) {
+  const view = todoSessionView(row, status, record?.lastResult?.kind, aborted);
+  if (!record || !view.present || view.state !== 'idle') return view;
+  const going = sessionStillGoing({
+    state: view.state,
+    recordedState: record.lastState,
+    goalStatus: goalStatusOf(row),
+    backgroundRunning: record.backgroundRunning === true,
+  });
+  return going ? { ...view, state: 'running' as const } : view;
+}
+
 export interface BoardInput {
   rows: Readonly<Record<string, Record<string, unknown>>>;
   statuses: Readonly<Record<string, SecretarySessionStatus>>;
@@ -242,13 +298,22 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     const row = input.rows[record.conversationId];
     if (!row) continue;
     const status = input.statuses[record.conversationId];
+    const live = row.sessionFile ? (status?.state ?? 'idle') : 'not-started';
+    // 刚 session_send 时实时状态可能还是空闲，记录已经标回运行中
+    const state = live === 'idle' && record.lastState === 'running' ? 'running' : live;
+    const going = sessionStillGoing({
+      state: live,
+      recordedState: record.lastState,
+      goalStatus: goalStatusOf(row),
+      backgroundRunning: record.backgroundRunning === true,
+    });
     const card: SessionCard = {
       kind: 'session',
       conversationId: record.conversationId,
       projectId: record.projectId,
       projectName: projectName(record.projectId),
       title: typeof row.title === 'string' ? row.title : '',
-      state: row.sessionFile ? (status?.state ?? 'idle') : 'not-started',
+      state,
       startedAt: record.createdAt,
       stateSince: record.stateSince ?? Math.max(record.createdAt, record.lastResult?.at ?? 0),
       secretaryConversationId: record.secretaryConversationId,
@@ -256,15 +321,12 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(record.lastResult
         ? { result: record.lastResult.kind, resultAt: record.lastResult.at }
         : {}),
+      ...(going && state !== 'running' ? { continuing: true as const } : {}),
       ...(record.takeover ? { takeover: true as const } : {}),
     };
-    const needsYouNow =
-      card.state === 'waiting' ||
-      (record.lastResult !== undefined &&
-        NEEDS_YOU_RESULTS.has(record.lastResult.kind) &&
-        !record.lastResult.dismissed);
+    const needsYouNow = sessionNeedsUser(record, state);
     if (needsYouNow) needsYou.push(card);
-    else if (record.lastState === 'running') running.push(card);
+    else if (going) running.push(card);
     else done.push(card);
   }
   const newestFirst =
@@ -277,7 +339,31 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     needsYou,
     running,
     done,
-    todos: input.todos.filter((todo) => todo.doneAt === undefined),
+    todos: input.todos.flatMap((todo) => {
+      const session = todo.conversationId
+        ? linkedTodoSession(
+            file.dispatched[todo.conversationId],
+            input.rows[todo.conversationId],
+            input.statuses[todo.conversationId]
+          )
+        : null;
+      const phase = todoStatus(todo, session);
+      if (phase === 'done') return [];
+      const project = todo.projectId
+        ? input.projects.find((candidate) => candidate.projectId === todo.projectId)
+        : undefined;
+      return [
+        {
+          ...todo,
+          phase,
+          ...(project ? { projectName: projectNameFromPath(project.canonicalPath) } : {}),
+          ...(session?.title ? { sessionTitle: redactSecrets(session.title) } : {}),
+          ...(todo.conversationId
+            ? { sessionState: session?.present ? session.state : ('gone' as const) }
+            : {}),
+        },
+      ];
+    }),
     ...(file.activity && file.activity.length > 0 ? { activity: file.activity } : {}),
   };
 }

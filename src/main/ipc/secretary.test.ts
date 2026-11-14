@@ -244,6 +244,11 @@ describe('IPC 入参收窄', () => {
       action: 'remove',
       todoId: 't1',
     });
+    expect(parseTodoMutateRequest({ action: 'reopen', todoId: 't1' })).toEqual({
+      action: 'reopen',
+      todoId: 't1',
+    });
+    expect(parseTodoMutateRequest({ action: 'reopen' })).toBeNull();
     expect(parseTodoMutateRequest({ action: 'dispatch', todoId: 't1', projectId: 'p1' })).toEqual({
       action: 'dispatch',
       todoId: 't1',
