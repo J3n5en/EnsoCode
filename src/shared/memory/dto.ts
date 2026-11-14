@@ -59,6 +59,8 @@ export function isMemoryRetrievalMode(mode: unknown): mode is 'fast' | 'deep' {
 
 export interface MemoryListQuery {
   spaceId?: string | null;
+  /** 按一组空间筛选（如「全部项目」「秘书」）；与 spaceId 同时给时以 spaceId 为准，空数组 = 无结果 */
+  spaceIds?: string[];
   query?: string;
   unitType?: UnitType;
   includeArchived?: boolean;
@@ -147,6 +149,8 @@ export interface MemoryStats {
   bySpace: Record<string, number>;
   /** space id → 项目名 / Global；缺失的 space（项目已删）不在表里 */
   spaceLabels: Record<string, string>;
+  /** space id → 空间类别（Main 按项目注册表判定秘书私有空间） */
+  spaceKinds?: Record<string, MemorySpaceKind>;
   crystals: number;
   entities: number;
   embedded: number;
@@ -154,6 +158,8 @@ export interface MemoryStats {
   /** 为什么没有向量；null = 没出过错 */
   embeddingError?: string | null;
 }
+
+export type MemorySpaceKind = 'global' | 'project' | 'secretary' | 'bot' | 'chat';
 
 export interface DistillableSessionDto {
   sessionId: string;
@@ -210,7 +216,24 @@ export interface MemoryMutationResult {
   ok: boolean;
   memory?: MemoryDetail;
   edge?: EvolvesEdgeDto;
+  impact?: MemoryDeletionImpact;
   error?: string;
+}
+
+/** 删除前的影响说明；执行时按同一规则在事务里重算 */
+export interface MemoryDeletionImpact {
+  /** target = 用户选中的；history = 被它替换掉、一起删的历史版本 */
+  deleted: { id: string; title: string; spaceId: string; role: 'target' | 'history' }[];
+  /** 删中间版本后重新接上的版本链 */
+  bridges: { olderId: string; newerId: string }[];
+  /** 只解除关系、本身保留的记忆 */
+  relations: { memoryId: string; title: string; relation: string }[];
+  /** 失去部分来源、仍是 crystal 的 */
+  crystalsUpdated: { id: string; title: string; remaining: number }[];
+  /** 来源不足、降为普通记忆的 crystal */
+  crystalsDemoted: { id: string; title: string; remaining: number }[];
+  /** 被删的 crystal 解除的来源边数（来源记忆保留） */
+  releasedSources: number;
 }
 
 /** Bot 成员写 project / global 记忆的待审批项（批准前不在 memories 里） */
@@ -232,20 +255,30 @@ export interface PendingMemoryWriteDto {
 
 export type PendingMemoryWriteDecision = 'approve' | 'reject';
 
-/** 手动编辑记忆；title 为空沿用原标题 */
+/** 手动编辑记忆；title 为空沿用原标题；unitType / importance 不给则不改 */
 export interface MemoryEditPatch {
   title: string;
   content: string;
+  unitType?: UnitType;
+  importance?: number;
 }
 
 export function isMemoryEditPatch(value: unknown): value is MemoryEditPatch {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
+  const keys = ['title', 'content', 'unitType', 'importance'];
   return (
-    Object.keys(row).every((key) => key === 'title' || key === 'content') &&
+    Object.keys(row).every((key) => keys.includes(key)) &&
     typeof row.title === 'string' &&
     typeof row.content === 'string' &&
-    row.content.trim().length > 0
+    row.content.trim().length > 0 &&
+    (row.unitType === undefined ||
+      (typeof row.unitType === 'string' && isUnitType(row.unitType))) &&
+    (row.importance === undefined ||
+      (typeof row.importance === 'number' &&
+        Number.isFinite(row.importance) &&
+        row.importance >= 0 &&
+        row.importance <= 1))
   );
 }
 
@@ -260,6 +293,13 @@ export function isMemoryListQuery(value: unknown): value is MemoryListQuery {
     return false;
   if (!Number.isSafeInteger(row.offset) || (row.offset as number) < 0) return false;
   if (row.spaceId !== undefined && row.spaceId !== null && typeof row.spaceId !== 'string')
+    return false;
+  if (
+    row.spaceIds !== undefined &&
+    (!Array.isArray(row.spaceIds) ||
+      row.spaceIds.length > 1000 ||
+      !row.spaceIds.every((id) => typeof id === 'string' && id.length > 0))
+  )
     return false;
   if (row.query !== undefined && typeof row.query !== 'string') return false;
   if (row.unitType !== undefined && (typeof row.unitType !== 'string' || !isUnitType(row.unitType)))

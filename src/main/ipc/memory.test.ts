@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   getMemoryDetail: vi.fn(() => null),
   archiveMemory: vi.fn(() => null),
   restoreMemory: vi.fn(() => null),
-  deleteMemoryPermanently: vi.fn(() => false),
+  deleteMemoriesManually: vi.fn((): unknown => null),
+  planMemoryDeletion: vi.fn((): unknown => null),
+  appendMemoryAudit: vi.fn(),
   clearFinishedMemoryJobs: vi.fn(() => 0),
   getMemoryStats: vi.fn(),
   listPendingEvolves: vi.fn(() => []),
@@ -65,7 +67,6 @@ vi.mock('../services/memoryAdmin', () => ({
   getMemoryDetail: mocks.getMemoryDetail,
   archiveMemory: mocks.archiveMemory,
   restoreMemory: mocks.restoreMemory,
-  deleteMemoryPermanently: mocks.deleteMemoryPermanently,
   clearFinishedMemoryJobs: mocks.clearFinishedMemoryJobs,
   getMemoryStats: mocks.getMemoryStats,
   listPendingEvolves: mocks.listPendingEvolves,
@@ -92,6 +93,14 @@ vi.mock('../services/memoryHost', () => ({
 vi.mock('../services/memory/pending', () => ({
   listPendingWrites: mocks.listPendingWrites,
   rejectPendingWrite: mocks.rejectPendingWrite,
+}));
+vi.mock('../services/memory/manual', () => ({
+  deleteMemoriesManually: mocks.deleteMemoriesManually,
+  planMemoryDeletion: mocks.planMemoryDeletion,
+}));
+vi.mock('../services/memory/audit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/memory/audit')>()),
+  appendMemoryAudit: mocks.appendMemoryAudit,
 }));
 vi.mock('../services/memory/graph', () => ({
   buildMemoryGraph: vi.fn(() => ({ nodes: [], edges: [], totalEntities: 0 })),
@@ -233,15 +242,33 @@ describe('memory IPC', () => {
     expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
 
     mocks.send.mockClear();
-    mocks.deleteMemoryPermanently.mockReturnValue(true);
+    mocks.deleteMemoriesManually.mockReturnValue({ deleted: [{ id: 'm1' }] });
     await handler(IPC_CHANNELS.MEMORY_DELETE)(event, 'm1');
     expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+    expect(mocks.appendMemoryAudit).toHaveBeenCalledWith(
+      '/user-data/memory',
+      expect.objectContaining({ action: 'memory.delete', actor: 'user', requested: ['m1'] })
+    );
 
     // 找不到目标时不该广播
     mocks.send.mockClear();
-    mocks.deleteMemoryPermanently.mockReturnValue(false);
+    mocks.appendMemoryAudit.mockClear();
+    mocks.deleteMemoriesManually.mockReturnValue(null);
     await handler(IPC_CHANNELS.MEMORY_DELETE)(event, 'ghost');
     expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.appendMemoryAudit).not.toHaveBeenCalled();
+  });
+
+  it('previews deletion impact only for a trusted window and a non-empty id list', async () => {
+    const preview = handler(IPC_CHANNELS.MEMORY_DELETE_PREVIEW);
+    for (const ids of [null, 'm1', [], [1], ['']]) {
+      expect(await preview(event, ids)).toBeNull();
+    }
+    expect(await preview({ sender: { id: 99 } }, ['m1'])).toBeNull();
+    expect(mocks.planMemoryDeletion).not.toHaveBeenCalled();
+    mocks.planMemoryDeletion.mockReturnValueOnce({ deleted: [] });
+    expect(await preview(event, ['m1', 'm2'])).toEqual({ deleted: [] });
+    expect(mocks.planMemoryDeletion).toHaveBeenLastCalledWith(mocks.db, ['m1', 'm2']);
   });
 
   it('edits a memory only with a trusted window and a well-formed patch', async () => {
@@ -251,7 +278,9 @@ describe('memory IPC', () => {
       { title: 'x' },
       { title: 'x', content: '   ' },
       { title: 1, content: 'x' },
-      { title: 'x', content: 'y', importance: 1 },
+      { title: 'x', content: 'y', importance: 2 },
+      { title: 'x', content: 'y', unitType: 'nope' },
+      { title: 'x', content: 'y', extra: 1 },
     ]) {
       expect(await update(event, 'm1', patch)).toMatchObject({ ok: false });
     }
@@ -273,10 +302,29 @@ describe('memory IPC', () => {
       error: 'Refused to write memory: prompt-injection',
     });
 
-    mocks.editMemory.mockReturnValueOnce({ id: 'm1' });
-    expect(await update(event, 'm1', { title: 'T', content: 'y' })).toEqual({ ok: true });
-    expect(mocks.editMemory).toHaveBeenLastCalledWith('m1', { title: 'T', content: 'y' });
+    const memory = { id: 'm1', title: 'T', content: 'y', unitType: 'fact', importance: 0.6 };
+    mocks.editMemory.mockReturnValueOnce({
+      before: { ...memory, title: 'Old', importance: 0.5 },
+      memory: { ...memory, unitType: 'decision', importance: 0.8 },
+      semanticChanged: true,
+      embedded: true,
+    });
+    const patch = { title: 'T', content: 'y', unitType: 'decision', importance: 0.8 };
+    expect(await update(event, 'm1', patch)).toEqual({ ok: true });
+    expect(mocks.editMemory).toHaveBeenLastCalledWith('m1', patch);
     expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+    expect(mocks.appendMemoryAudit).toHaveBeenCalledWith(
+      '/user-data/memory',
+      expect.objectContaining({
+        action: 'memory.edit',
+        memoryId: 'm1',
+        changes: {
+          title: { from: 'Old', to: 'T' },
+          unitType: { from: 'fact', to: 'decision' },
+          importance: { from: 0.5, to: 0.8 },
+        },
+      })
+    );
   });
 
   it('rejects invalid list input before reaching the service', async () => {

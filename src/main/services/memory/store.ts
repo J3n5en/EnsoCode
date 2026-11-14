@@ -179,7 +179,7 @@ export function vecDelete(db: Database.Database, rowid: number, dim: number | nu
 }
 
 /** embedding 失败不得阻止落库，失败返回 null */
-async function tryEmbed(embedder: Embedder | null | undefined, text: string) {
+export async function tryEmbed(embedder: Embedder | null | undefined, text: string) {
   if (!embedder) return null;
   try {
     const vec = await embedder.embed(text, 'passage');

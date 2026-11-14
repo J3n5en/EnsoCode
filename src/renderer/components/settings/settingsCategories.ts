@@ -73,6 +73,8 @@ export function isCategoryVisible(
   if (SECRETARY_PAGES.includes(category)) return secretaryEnabled;
   // Bot 模式页跟随「实验」里的开关；开关所在的实验页始终可见
   if (BOT_PAGES.includes(category)) return botModeEnabled;
+  // 秘书不受 memory 工具开关约束、始终会写自己的记忆，开着秘书就得能在这里管理它们
+  if (category === 'memory' && secretaryEnabled) return true;
   const tool = TOOL_GATED[category];
   return !tool || !disabledBuiltinTools.includes(tool);
 }

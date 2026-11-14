@@ -22,12 +22,14 @@ import { Dialog, DialogTitle } from '@/components/ui/dialog';
 import { InputGroupInput } from '@/components/ui/input-group';
 import { Select } from '@/components/ui/select';
 import {
+  deletionImpactLines,
   emptyReason,
   isPristineEmpty,
   MemoryLibrary,
   MemoryRows,
   PendingReviewSection,
   PendingWritesSection,
+  scopeFilter,
 } from './MemoryLibrary';
 
 const hooks = vi.hoisted(() => ({ current: null as LibraryHarness | null }));
@@ -264,7 +266,7 @@ describe('MemoryLibrary response ordering', () => {
           ui.query('newer');
           break;
         case 'space':
-          ui.select(1, 'project-B');
+          ui.select(2, 'project-B');
           break;
         case 'page':
           ui.click('Next');
@@ -339,7 +341,7 @@ describe('MemoryLibrary response ordering', () => {
       await Promise.resolve();
       ui.render();
       expect(memory.list).toHaveBeenCalledOnce();
-      expect(ui.props(Select, 1).items).toContainEqual({ value: 'project-B', label: 'Project B' });
+      expect(ui.props(Select, 2).items).toContainEqual({ value: 'project-B', label: 'Project B' });
       expect(ui.html()).toContain(edge.reason);
       expect(ui.rows()).toEqual([]);
     }
@@ -524,5 +526,57 @@ describe('PendingReviewSection', () => {
     // 拒绝按钮的文案不能暗示删除
     expect(html).toContain('Dismiss');
     expect(html).not.toContain('Delete');
+  });
+});
+
+describe('scopeFilter', () => {
+  const spaces = [
+    { id: 'global', kind: 'global' as const },
+    { id: 'proj:a', kind: 'project' as const },
+    { id: 'proj:b', kind: 'project' as const },
+    { id: 'proj:s', kind: 'secretary' as const },
+  ];
+  it('具体空间优先，只选类别时带上该类别全部空间，未选不过滤', () => {
+    expect(scopeFilter('project', 'proj:b', spaces)).toEqual({ spaceId: 'proj:b' });
+    expect(scopeFilter('project', null, spaces)).toEqual({ spaceIds: ['proj:a', 'proj:b'] });
+    expect(scopeFilter('secretary', null, spaces)).toEqual({ spaceIds: ['proj:s'] });
+    expect(scopeFilter('chat', null, spaces)).toEqual({ spaceIds: [] });
+    expect(scopeFilter(null, null, spaces)).toEqual({});
+  });
+});
+
+describe('deletionImpactLines', () => {
+  const empty = {
+    deleted: [{ id: 'm1', title: 'T', spaceId: 'global', role: 'target' as const }],
+    bridges: [],
+    relations: [],
+    crystalsUpdated: [],
+    crystalsDemoted: [],
+    releasedSources: 0,
+  };
+  it('没有连带影响时明确说不影响其他记忆', () => {
+    expect(deletionImpactLines(empty, t)).toEqual(['No other memories are affected.']);
+  });
+  it('逐条说明历史版本、版本链、关系和结晶的处理', () => {
+    const lines = deletionImpactLines(
+      {
+        ...empty,
+        deleted: [...empty.deleted, { id: 'm0', title: 'Old', spaceId: 'global', role: 'history' }],
+        bridges: [{ olderId: 'a', newerId: 'b' }],
+        relations: [{ memoryId: 'r', title: 'Rel', relation: 'enriches' }],
+        crystalsUpdated: [{ id: 'c1', title: 'C1', remaining: 3 }],
+        crystalsDemoted: [{ id: 'c2', title: 'C2', remaining: 2 }],
+        releasedSources: 4,
+      },
+      t
+    );
+    expect(lines).toEqual([
+      'Also deletes 1 older versions it replaced: “Old”',
+      'The older and newer versions around it are linked directly, so the history stays continuous.',
+      'Removes the relation links to “Rel”; those memories are kept.',
+      'Crystal “C1” loses this source and keeps 3 sources.',
+      'Crystal “C2” would be left with 2 sources, so it becomes a normal memory. Its content is kept.',
+      'This is a crystal: its 4 source memories are kept, only the links are removed.',
+    ]);
   });
 });
