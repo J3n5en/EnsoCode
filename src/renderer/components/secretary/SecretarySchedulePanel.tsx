@@ -1,7 +1,9 @@
 import type { SecretaryScheduleView } from '@shared/types/secretary';
 import { AlarmClock, Clock, Repeat, Sunrise, Trash2 } from 'lucide-react';
+import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock, formatRelativeTime } from '@/lib/time';
+import { cn } from '@/lib/utils';
 
 function scheduleIcon(schedule: SecretaryScheduleView) {
   if (schedule.system === 'daily-brief') return <Sunrise className="size-3.5" />;
@@ -45,7 +47,7 @@ function ScheduleRow({
     <div
       data-enso="secretary-schedule"
       data-system={schedule.system !== undefined || undefined}
-      className="group flex items-start gap-2.5 rounded-lg px-1.5 py-2 transition-colors hover:bg-foreground/5"
+      className={cn(HOVER_ROW_CLASS, 'flex items-start gap-2.5 rounded-lg px-1.5 py-2')}
     >
       <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-subtle-foreground">
         {scheduleIcon(schedule)}
@@ -57,15 +59,17 @@ function ScheduleRow({
         </p>
       </div>
       {onRemove && (
-        <button
-          type="button"
-          title={t('Delete')}
-          aria-label={t('Delete')}
-          onClick={() => onRemove(schedule.id)}
-          className="flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-destructive focus-visible:opacity-100"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        <HoverActions>
+          <button
+            type="button"
+            title={t('Delete')}
+            aria-label={t('Delete')}
+            onClick={() => onRemove(schedule.id)}
+            className="flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </HoverActions>
       )}
     </div>
   );

@@ -116,6 +116,13 @@ function str(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function plainUntrusted(value: unknown): string | undefined {
+  const raw = str(value);
+  if (!raw) return undefined;
+  const match = raw.match(/^<untrusted-content\b[^>]*>([\s\S]*)<\/untrusted-content>$/u);
+  return (match ? match[1] : raw).trim() || undefined;
+}
+
 function longText(text: string): boolean {
   return text.length > 280 || text.split('\n').length > 6;
 }
@@ -449,6 +456,40 @@ register('todo_item_update', (call, ctx) => {
     call,
     ctx.t('To-do 「{{text}}」', { text: todoTextOf(call, ctx) }),
     blocks,
+    error ? { tone: 'error', label: ctx.t('Refused') } : undefined
+  );
+});
+
+const TODO_STATUS_KEY: Record<string, string> = {
+  todo: 'To do',
+  active: 'In progress',
+  problem: 'Problem',
+  done: 'Done',
+};
+
+register('todo_list', (call, ctx) => {
+  const output = rec(parseJson(call.output));
+  const todos = Array.isArray(output?.todos) ? output.todos : [];
+  const items = todos.flatMap((entry) => {
+    const row = rec(entry);
+    if (!row) return [];
+    const status = str(row.status);
+    const label = status ? ctx.t(TODO_STATUS_KEY[status] ?? status) : undefined;
+    return [
+      {
+        title: plainUntrusted(row.text) ?? ctx.t('Not set'),
+        ...(label ? { badge: label } : {}),
+      },
+    ];
+  });
+  const error = errorText(call, ctx);
+  return view(
+    call,
+    ctx.t('Listed to-dos'),
+    [
+      ...(error ? [{ kind: 'error' as const, text: error }] : []),
+      ...(items.length > 0 ? [{ kind: 'list' as const, items }] : []),
+    ],
     error ? { tone: 'error', label: ctx.t('Refused') } : undefined
   );
 });

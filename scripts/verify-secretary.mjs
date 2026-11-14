@@ -289,6 +289,12 @@ const visible = (selector) =>
   [...document.querySelectorAll(selector)].filter((node) => node.offsetParent !== null);
 const shown = (selector) =>
   [...document.querySelectorAll(selector)].filter((node) => node.innerText.trim()).at(-1) ?? null;
+// 切过会话后 DOM 里会留着已缓存、宽高为 0 的秘书面板；只认当前看得见的那个
+const visiblePanel = () =>
+  [...document.querySelectorAll('[data-enso=secretary-panel]')].find((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }) ?? null;
 `;
 
 async function closeSettingsWindow(page) {
@@ -326,8 +332,15 @@ async function connect(entry = 'index.html') {
     socket.onopen = resolve;
     socket.onerror = reject;
   });
+  // 页面被关掉或崩了时 CDP 不会再回包；把挂着的请求都结束掉，免得整个验收无声卡死
+  const closedReply = () => ({ error: { message: `CDP socket closed (${entry})` } });
+  socket.onclose = () => {
+    for (const resolve of pending.values()) resolve(closedReply());
+    pending.clear();
+  };
   const send = (method, params = {}) =>
     new Promise((resolve) => {
+      if (socket.readyState !== WebSocket.OPEN) return resolve(closedReply());
       const next = ++id;
       pending.set(next, resolve);
       socket.send(JSON.stringify({ id: next, method, params }));
@@ -340,6 +353,7 @@ async function connect(entry = 'index.html') {
       returnByValue: true,
       awaitPromise: true,
     });
+    if (reply.error) throw new Error(`cdp ${reply.error.message}`);
     if (reply.result?.exceptionDetails) {
       const details = reply.result.exceptionDetails;
       throw new Error(
@@ -351,6 +365,7 @@ async function connect(entry = 'index.html') {
 
   return {
     evaluate,
+    send,
     async json(body) {
       const raw = await evaluate(`(async () => { ${PRELUDE} ${body} })()`);
       return raw === undefined ? undefined : JSON.parse(raw);
@@ -359,6 +374,37 @@ async function connect(entry = 'index.html') {
       const shot = await send('Page.captureScreenshot', { format: 'png' });
       writeFileSync(file, Buffer.from(shot.result.data, 'base64'));
       log(`  shot ${file}`);
+    },
+    /** 只截一块区域（CSS 像素），看清侧边栏里的行 */
+    async shotClip(file, rect) {
+      const shot = await send('Page.captureScreenshot', {
+        format: 'png',
+        clip: { ...rect, scale: 2 },
+      });
+      if (!shot.result?.data)
+        throw new Error(`shotClip ${JSON.stringify({ rect, error: shot.error })}`);
+      writeFileSync(file, Buffer.from(shot.result.data, 'base64'));
+      log(`  shot ${file}`);
+    },
+    /** 真实鼠标事件：:hover 只认这个，脚本里 dispatchEvent 触发不了 */
+    mouse: (type, x, y) =>
+      send('Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        button: type === 'mouseMoved' ? 'none' : 'left',
+        clickCount: type === 'mouseMoved' ? 0 : 1,
+      }),
+    /** 真实按键（Tab 移焦点会带 :focus-visible） */
+    async key(key, code = key, keyCode = 0) {
+      for (const type of ['keyDown', 'keyUp']) {
+        await send('Input.dispatchKeyEvent', {
+          type,
+          key,
+          code,
+          windowsVirtualKeyCode: keyCode,
+        });
+      }
     },
     close: () => socket.close(),
     targetId: target.id,
@@ -3056,6 +3102,8 @@ async function verifyMemoryManualEdit(cdp, setup) {
   const captures = [
     { title: 'Deploy window', content: 'deploy window is tuesday zebrafish' },
     { title: 'Cache layer', content: 'cache layer uses walrusdb' },
+    { title: 'Lint rule', content: 'lint rule bans quokka imports' },
+    { title: 'Backup policy', content: 'backup policy keeps axolotl snapshots' },
   ];
   for (const capture of captures) {
     const directive = `[[tool:memory_capture ${JSON.stringify({ ...capture, spaceId: 'project', importance: 0.6 })}]]`;
@@ -3084,7 +3132,11 @@ async function verifyMemoryManualEdit(cdp, setup) {
   `);
   const target = seeded.find((item) => item.title === 'Deploy window');
   const doomed = seeded.find((item) => item.title === 'Cache layer');
-  assert(target && doomed, '记忆: 两条都落在秘书私有空间', seeded);
+  const panelTarget = seeded.find((item) => item.title === 'Lint rule');
+  const panelDoomed = seeded.find((item) => item.title === 'Backup policy');
+  assert(target && doomed && panelTarget && panelDoomed, '记忆: 四条都落在秘书私有空间', seeded);
+
+  await verifyPanelMemoryActions(cdp, panelTarget, panelDoomed);
 
   log('== 记忆：设置页筛选秘书空间');
   await page(`
@@ -3138,6 +3190,27 @@ async function verifyMemoryManualEdit(cdp, setup) {
       filtered
     );
 
+    log('== 悬停操作：设置页记忆列表');
+    await settingsCdp.json(`
+      document.querySelector('[data-memory-id=${JSON.stringify(target.id)}]')?.setAttribute('data-hover-probe', 'settings');
+      return 'null';
+    `);
+    const settingsHover = await hoverList(settingsCdp, {
+      shot: '48-settings-memory',
+      areaSel: 'ul:has(> li[data-memory-id])',
+      rowSel: '[data-hover-probe=settings]',
+      contentSel: 'button.flex-1',
+      actionSel: '[data-memory-action="row-edit"]',
+      focusFrom: 'button.flex-1',
+      afterClick: `
+        const dialog = await until(() => document.querySelector('[data-memory-edit]'), 5000);
+        if (!dialog) return JSON.stringify({ ok: false });
+        const r = dialog.closest('[data-slot=dialog-popup]').querySelector('[aria-label=Close]').getBoundingClientRect();
+        return JSON.stringify({ ok: true, closeAt: { x: r.left + r.width / 2, y: r.top + r.height / 2 }, gone: '[data-memory-edit]' });
+      `,
+    });
+    assertHover('设置页记忆', settingsHover);
+
     log('== 记忆：设置页编辑一条');
     const edited = await ui(`
       ${UI}
@@ -3145,10 +3218,11 @@ async function verifyMemoryManualEdit(cdp, setup) {
       const editButton = await until(() => q('[data-memory-action="edit"]'), 10000);
       if (!editButton) return JSON.stringify({ ok: false, error: 'no edit button' });
       editButton.click();
-      const title = await until(() => q('[data-memory-field="title"]'), 5000);
+      // 编辑在独立弹窗里，字段限定在 data-memory-edit 下，别碰到正在关闭的详情框
+      const title = await until(() => q('[data-memory-edit] [data-memory-field="title"]'), 5000);
       typeInto(title, 'Release window');
-      typeInto(q('[data-memory-field="content"]'), 'release window is friday narwhal');
-      typeInto(q('[data-memory-field="importance"]'), '0.85');
+      typeInto(q('[data-memory-edit] [data-memory-field="content"]'), 'release window is friday narwhal');
+      typeInto(q('[data-memory-edit] [data-memory-field="importance"]'), '0.85');
       await sleep(200);
       q('[data-memory-action="save"]').click();
       const saved = await until(
@@ -3188,28 +3262,53 @@ async function verifyMemoryManualEdit(cdp, setup) {
       afterEdit
     );
 
-    log('== 记忆：设置页删除一条（二次确认）');
-    const deleted = await ui(`
+    log('== 记忆：设置页从列表行直接删除一条（二次确认）');
+    const asked = await ui(`
       ${UI}
-      // 详情框还开着：点另一行直接换成那条的详情，等换好再点删除，别点到上一条的按钮
-      const row = await until(() => q('[data-memory-id=${JSON.stringify(doomed.id)}] button:not([role=checkbox])'), 5000);
-      if (!row) return JSON.stringify({ ok: false, error: 'row missing' });
-      row.click();
-      const opened = await until(() => q('[data-memory-detail=${JSON.stringify(doomed.id)}]'), 10000);
-      if (!opened) return JSON.stringify({ ok: false, error: 'detail not switched' });
-      const del = q('[data-memory-action="delete"]');
-      del.click();
+      // 编辑完回到的详情框里「永久删除」应是危险色；关掉它，改从列表行尾直接删，不经过详情
+      const popup = q('[data-memory-detail]')?.closest('[data-slot=dialog-popup]');
+      const detailDelete = popup?.querySelector('[data-memory-action="delete"]');
+      // 计算色可能是 oklch，画到 1px canvas 上取回 rgb
+      const toRgb = (color) => {
+        const ctx = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d');
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      };
+      const detailDeleteColor = detailDelete ? toRgb(getComputedStyle(detailDelete).color) : [];
+      popup?.querySelector('[aria-label=Close]')?.click();
+      await until(() => !q('[data-memory-detail]'), 5000);
+      const deleteButton = q('[data-memory-id=${JSON.stringify(doomed.id)}] [data-memory-action="row-delete"]');
+      if (!deleteButton) return JSON.stringify({ ok: false, error: 'row delete missing' });
+      deleteButton.click();
       const confirm = await until(() => {
         const button = q('[data-memory-action="confirm-delete"]');
         return button && !button.disabled ? button : null;
       }, 10000);
-      if (!confirm) return JSON.stringify({ ok: false, error: 'confirm not ready' });
-      const impact = q('[data-memory-delete-impact]')?.innerText ?? '';
-      const stillThere = Boolean(await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)}));
-      confirm.click();
-      const gone = await until(() => !rowIds().includes(${JSON.stringify(doomed.id)}), 15000);
-      return JSON.stringify({ ok: Boolean(gone), impact, stillThereBeforeConfirm: stillThere });
+      return JSON.stringify({
+        ok: Boolean(confirm),
+        detailDeleteColor,
+        detailOpened: Boolean(q('[data-memory-detail]')),
+        impact: q('[data-memory-delete-impact]')?.innerText ?? '',
+        stillThereBeforeConfirm: Boolean(await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)})),
+      });
     `);
+    // 按实际渲染的文字颜色判：红色通道明显高于绿、蓝（Tailwind 类名子串不可靠）
+    const [r = 0, g = 0, b = 0] = asked.detailDeleteColor;
+    assert(r > g + 60 && r > b + 60, '记忆: 详情里的「永久删除」是危险色', asked.detailDeleteColor);
+    assert(
+      asked.ok && !asked.detailOpened,
+      '记忆: 列表行尾直接点删除就弹确认，不用先开详情',
+      asked
+    );
+    await settingsCdp.shot(path.join(ART, '41-settings-row-delete-confirm.png'));
+    const deleted = await ui(`
+      ${UI}
+      q('[data-memory-action="confirm-delete"]').click();
+      const gone = await until(() => !rowIds().includes(${JSON.stringify(doomed.id)}), 15000);
+      return JSON.stringify({ ok: Boolean(gone) });
+    `);
+    Object.assign(deleted, asked, { ok: deleted.ok });
     assert(
       deleted.stillThereBeforeConfirm &&
         (deleted.impact.includes('不影响其他记忆') ||
@@ -3234,7 +3333,7 @@ async function verifyMemoryManualEdit(cdp, setup) {
       '记忆: 删除后精确与检索模式都搜不到',
       afterDelete
     );
-    await settingsCdp.shot(path.join(ART, '41-memory-deleted.png'));
+    await settingsCdp.shot(path.join(ART, '42-settings-deleted.png'));
   } finally {
     settingsCdp.close();
   }
@@ -3264,6 +3363,429 @@ async function verifyMemoryManualEdit(cdp, setup) {
   );
   copyFileSync(memoryAuditFile, path.join(ART, 'memory-audit.jsonl'));
   log(`  copied ${path.join(ART, 'memory-audit.jsonl')}`);
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function openSecretaryTab(cdp, tab) {
+  const tabSel = `[data-enso=secretary-panel-tab][data-tab=${tab}]`;
+  const visible = () =>
+    cdp.json(`
+      const el = visiblePanel()?.querySelector(${JSON.stringify(tabSel)});
+      if (!el) return 'false';
+      const r = el.getBoundingClientRect();
+      if (!r.width || r.left >= innerWidth || r.right <= 0) return 'false';
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return JSON.stringify(Boolean(hit && el.contains(hit)));
+    `);
+  for (let attempt = 0; attempt < 3 && !(await visible()); attempt++) {
+    // 侧栏里的「新建标签页」菜单才有秘书面板入口；别的菜单打开了再点一次收起
+    await cdp.json(`
+      const buttons = [...document.querySelectorAll('button')]
+        .filter((b) => b.getAttribute('aria-label') === '新建标签页' && b.getClientRects().length)
+        .reverse();
+      for (const b of buttons) {
+        b.click();
+        await sleep(400);
+        const item = document.querySelector('[data-enso=secretary-panel-open]');
+        if (item) {
+          item.click();
+          await sleep(800);
+          return 'true';
+        }
+        b.click();
+        await sleep(200);
+      }
+      return 'false';
+    `);
+    if (await visible()) break;
+    await cdp.json(`
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+      await sleep(1200);
+      return 'null';
+    `);
+  }
+  return cdp.json(`
+    const el = visiblePanel()?.querySelector(${JSON.stringify(tabSel)});
+    if (!el) return JSON.stringify({ ok: false, error: 'tab missing', panels: document.querySelectorAll('[data-enso=secretary-panel]').length, visible: Boolean(visiblePanel()) });
+    el.click();
+    await sleep(300);
+    return JSON.stringify({ ok: el.getAttribute('aria-selected') !== 'false' });
+  `);
+}
+
+const HOVER_DOM = `
+  const effectiveOpacity = (el) => {
+    let o = 1;
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) o *= Number(getComputedStyle(n).opacity);
+    return Math.round(o * 100) / 100;
+  };
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  };
+  const measure = (row, contentSel, actionSel) => {
+    const content = row.querySelector(contentSel);
+    const action = row.querySelector(actionSel);
+    if (!content || !action) return { error: 'content or action missing' };
+    const rr = row.getBoundingClientRect();
+    const pad = parseFloat(getComputedStyle(row).paddingRight) || 0;
+    const ar = action.getBoundingClientRect();
+    const hit = document.elementFromPoint(ar.left + ar.width / 2, ar.top + ar.height / 2);
+    const layer = action.closest('[data-slot=hover-actions]');
+    return {
+      row: box(row),
+      action: box(action),
+      // 文字区右边到行内边距的距离：给按钮占位时这里会空出一截
+      gap: Math.round((rr.right - pad - content.getBoundingClientRect().right) * 10) / 10,
+      opacity: effectiveOpacity(action),
+      clickable: Boolean(hit && (hit === action || action.contains(hit))),
+      mask: layer ? getComputedStyle(layer).backgroundImage.includes('gradient') : false,
+      focusInActions: Boolean(document.activeElement?.closest('[data-slot=hover-actions]')),
+      rowHovered: row.matches(':hover'),
+    };
+  };
+`;
+
+/**
+ * 一个列表的悬停操作：平时按钮不可见、文字占满整行；鼠标悬停时按钮浮在右侧渐变蒙版上、能点；
+ * 移开后消失；键盘 Tab 聚焦到行内操作时也显示。每种状态都截面板图。
+ */
+async function hoverList(cdp, spec) {
+  const at = (body) =>
+    cdp.json(`
+      ${HOVER_DOM}
+      const row = document.querySelector(${JSON.stringify(spec.rowSel)});
+      if (!row) return JSON.stringify({ error: 'row missing' });
+      ${body}
+    `);
+  const measureRow = `return JSON.stringify(measure(row, ${JSON.stringify(spec.contentSel)}, ${JSON.stringify(spec.actionSel)}));`;
+  await at(`row.scrollIntoView({ block: 'center' }); await sleep(200); return 'null';`);
+  const panel = await cdp.json(`
+        const area = ${spec.areaSel ? `document.querySelector(${JSON.stringify(spec.areaSel)})` : 'visiblePanel()'};
+    if (!area) return JSON.stringify({ x: 0, y: 0, width: 0, height: 0 });
+    const r = area.getBoundingClientRect();
+    return JSON.stringify({ x: r.left, y: r.top, width: r.width, height: r.height });
+  `);
+  if (!(panel.width > 0 && panel.height > 0)) return { error: 'no visible area', panel };
+  // 鼠标停到区域左上角外侧（标题处），离开所有行
+  const away = () => cdp.mouse('mouseMoved', panel.x + 12, Math.max(4, panel.y - 12));
+  await away();
+  await sleep(300);
+  const rest = await at(measureRow);
+  if (rest.error) return { rest };
+  const clip = {
+    x: panel.x,
+    y: Math.max(panel.y, rest.row.y - 160),
+    width: panel.width,
+    height: Math.min(320, panel.y + panel.height - Math.max(panel.y, rest.row.y - 160)),
+  };
+  if (!(clip.height >= rest.row.height)) return { rest, error: 'row outside area', panel, clip };
+  await cdp.shotClip(path.join(ART, `${spec.shot}-rest.png`), clip);
+
+  // 刚切过标签时第一下 mouseMoved 偶尔没让行进入 :hover；在行内挪几下再量，按钮仍不出现才算失败
+  let hover;
+  for (let i = 0; i < 5; i++) {
+    await cdp.mouse('mouseMoved', rest.row.x + 24 + i * 6, rest.row.y + rest.row.height / 2);
+    await sleep(300);
+    hover = await at(measureRow);
+    if (hover.opacity >= 0.95) break;
+  }
+  await cdp.shotClip(path.join(ART, `${spec.shot}-hover.png`), clip);
+
+  const cx = hover.action.x + hover.action.width / 2;
+  const cy = hover.action.y + hover.action.height / 2;
+  await cdp.mouse('mouseMoved', cx, cy);
+  await cdp.mouse('mousePressed', cx, cy);
+  await cdp.mouse('mouseReleased', cx, cy);
+  const clicked = await cdp.json(spec.afterClick);
+  // 弹窗要像用户一样用鼠标关；脚本 .click() 没有指针事件，base-ui 会当成键盘关而把焦点还回行内
+  if (clicked?.ok && clicked.closeAt) {
+    const { x, y } = clicked.closeAt;
+    await cdp.mouse('mouseMoved', x, y);
+    await cdp.mouse('mousePressed', x, y);
+    await cdp.mouse('mouseReleased', x, y);
+    clicked.ok = await cdp.json(
+      `return JSON.stringify(Boolean(await until(() => !document.querySelector(${JSON.stringify(clicked.gone)}), 5000)));`
+    );
+  }
+
+  // 不替用户 blur：关弹窗的动画与焦点还原都结束后，只把鼠标移开再量
+  await sleep(500);
+  await away();
+  await sleep(300);
+  const left = await at(measureRow);
+
+  await at(`row.querySelector(${JSON.stringify(spec.focusFrom)}).focus(); return 'null';`);
+  await cdp.key('Tab', 'Tab', 9);
+  await sleep(300);
+  const keyboard = await at(measureRow);
+  await cdp.json(`document.activeElement?.blur(); return 'null';`);
+  return { rest, hover, clicked, left, keyboard };
+}
+
+function assertHover(name, result) {
+  const { rest, hover, clicked, left, keyboard } = result;
+  assert(
+    !result.error && rest && !rest.error && rest.opacity <= 0.05 && rest.gap <= 1,
+    `悬停操作(${name}): 平时看不到按钮，行内不给按钮留空白`,
+    result.error ? result : rest
+  );
+  assert(
+    hover && hover.opacity >= 0.95 && hover.clickable && hover.mask,
+    `悬停操作(${name}): 悬停后按钮浮在右侧渐变蒙版上，点得到`,
+    hover
+  );
+  assert(clicked?.ok, `悬停操作(${name}): 悬停时点按钮生效`, clicked);
+  assert(left && left.opacity <= 0.05, `悬停操作(${name}): 鼠标移开后按钮与蒙版一起消失`, left);
+  assert(
+    keyboard?.focusInActions && keyboard.opacity >= 0.95,
+    `悬停操作(${name}): 键盘 Tab 聚焦到行内操作时按钮显示`,
+    keyboard
+  );
+}
+
+/** 待办与记忆两个列表的悬停操作；先把两边都量完、截完图再断言，改动前跑一遍也能拿到对照图 */
+async function verifyRowHoverActions(cdp) {
+  log('== 悬停操作：待办列表');
+  const todoText = '整理下周的发布说明，确认上线窗口后同步给 J 哥，再把回滚预案补进文档';
+  const seeded = await cdp.json(`
+    const added = await window.electronAPI.secretary.mutateTodo({ action: 'add', text: ${JSON.stringify(todoText)} });
+    return JSON.stringify(added);
+  `);
+  const workbench = await openSecretaryTab(cdp, 'workbench');
+  const rowReady = await cdp.json(`
+        for (const n of document.querySelectorAll('[data-hover-probe]')) n.removeAttribute('data-hover-probe');
+    const row = await until(() => [...(visiblePanel()?.querySelectorAll('[data-enso=secretary-todo]') ?? [])]
+      .find((r) => r.innerText.includes(${JSON.stringify(todoText)})), 10000);
+    if (!row) return 'false';
+    row.setAttribute('data-hover-probe', 'todo');
+    return 'true';
+  `);
+  const todo = rowReady
+    ? await hoverList(cdp, {
+        shot: '46-todo',
+        rowSel: '[data-hover-probe=todo]',
+        contentSel: '.flex-1',
+        actionSel: 'button[title="编辑"], button[title="Edit"]',
+        focusFrom: '[data-enso=secretary-todo-done]',
+        // 点「编辑」：这一行变成输入框，Esc 退回
+        afterClick: `
+          const input = await until(() => {
+            const el = document.activeElement;
+            return el?.tagName === 'INPUT' && el.value === ${JSON.stringify(todoText)} ? el : null;
+          }, 5000);
+          if (!input) return JSON.stringify({ ok: false, active: document.activeElement?.outerHTML?.slice(0, 200) });
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                    const back = await until(() => {
+            const row = [...(visiblePanel()?.querySelectorAll('[data-enso=secretary-todo]') ?? [])]
+              .find((r) => r.innerText.includes(${JSON.stringify(todoText)}));
+            row?.setAttribute('data-hover-probe', 'todo');
+            return row;
+          }, 5000);
+          return JSON.stringify({ ok: Boolean(back) });
+        `,
+      })
+    : null;
+
+  log('== 悬停操作：记忆列表');
+  const memoryTab = await openSecretaryTab(cdp, 'memory');
+  await cdp.json(`
+        for (const n of document.querySelectorAll('[data-hover-probe]')) n.removeAttribute('data-hover-probe');
+    const row = await until(() => visiblePanel()?.querySelector('[data-enso=secretary-memory-row] > div'), 10000);
+    row?.setAttribute('data-hover-probe', 'memory');
+    return 'null';
+  `);
+  const memory = await hoverList(cdp, {
+    shot: '47-memory',
+    rowSel: '[data-hover-probe=memory]',
+    contentSel: '[data-enso=secretary-memory-open]',
+    actionSel: '[data-memory-action="row-edit"]',
+    focusFrom: '[data-enso=secretary-memory-open]',
+    // 点「编辑」：弹出编辑框，再用真鼠标点右上角关掉
+    afterClick: `
+      const dialog = await until(() => document.querySelector('[data-memory-edit]'), 5000);
+      if (!dialog) return JSON.stringify({ ok: false });
+      const r = dialog.closest('[data-slot=dialog-popup]').querySelector('[aria-label=Close]').getBoundingClientRect();
+      return JSON.stringify({ ok: true, closeAt: { x: r.left + r.width / 2, y: r.top + r.height / 2 }, gone: '[data-memory-edit]' });
+    `,
+  });
+
+  assert(seeded?.ok && workbench.ok && rowReady, '悬停操作: 造一条长待办并打开工作台', {
+    seeded,
+    workbench,
+  });
+  assertHover('待办', todo ?? {});
+  assert(memoryTab.ok, '悬停操作: 切到记忆标签', memoryTab);
+  assertHover('记忆', memory);
+}
+
+/**
+ * 右侧秘书面板「记忆」标签：每行常驻编辑 / 删除。编辑走同一个编辑弹窗，删除先预览影响再确认，
+ * 结果与设置页同源：新词搜得到、旧词搜不到、删除后搜不到，审计都落 memory/audit.jsonl。
+ */
+async function verifyPanelMemoryActions(cdp, target, doomed) {
+  const page = cdp.json.bind(cdp);
+  const DOM = `
+    const q = (s) => document.querySelector(s);
+    const typeInto = (el, value) => {
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const row = (id) => q('[data-enso="secretary-memory-row"][data-memory-id="' + id + '"]');
+    const shownOnScreen = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0 || r.left >= innerWidth || r.right <= 0) return false;
+      const style = getComputedStyle(el);
+      if (style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return Boolean(hit && (el === hit || el.contains(hit)));
+    };
+  `;
+  log('== 记忆：秘书面板「记忆」标签每行带编辑与删除');
+  const panel = await openSecretaryTab(cdp, 'memory');
+  assert(panel.ok, '面板记忆: 打开秘书面板的「记忆」标签', panel);
+  const opened = await page(`
+    ${DOM}
+    const ready = await until(() => row(${JSON.stringify(target.id)}) && row(${JSON.stringify(doomed.id)}), 15000);
+    if (!ready) return JSON.stringify({ ok: false, error: 'rows missing', text: q('[data-enso=secretary-memory]')?.innerText });
+    const actions = (id) => ({
+      edit: Boolean(row(id).querySelector('[data-memory-action="row-edit"]')),
+      remove: Boolean(row(id).querySelector('[data-memory-action="row-delete"]')),
+    });
+    return JSON.stringify({
+      ok: true,
+      target: actions(${JSON.stringify(target.id)}),
+      doomed: actions(${JSON.stringify(doomed.id)}),
+      detailOpen: Boolean(q('[data-enso="secretary-memory-detail"]')),
+    });
+  `);
+  assert(
+    opened.ok &&
+      opened.target.edit &&
+      opened.target.remove &&
+      opened.doomed.edit &&
+      opened.doomed.remove &&
+      !opened.detailOpen,
+    '面板记忆: 没点开任何一条时，每行就有编辑与删除（悬停浮出，见下一段）',
+    opened
+  );
+  await cdp.shot(path.join(ART, '43-panel-memory-actions.png'));
+  await verifyRowHoverActions(cdp);
+
+  log('== 记忆：秘书面板编辑一条');
+  const edited = await page(`
+    ${DOM}
+    row(${JSON.stringify(target.id)}).querySelector('[data-memory-action="row-edit"]').click();
+    const title = await until(
+      () => q('[data-memory-edit=${JSON.stringify(target.id)}] [data-memory-field="title"]'),
+      10000
+    );
+    if (!title) return JSON.stringify({ ok: false, error: 'edit dialog missing' });
+    typeInto(title, 'Lint policy');
+    typeInto(q('[data-memory-edit] [data-memory-field="content"]'), 'lint policy bans pangolin imports');
+    await sleep(200);
+    q('[data-memory-action="save"]').click();
+    const saved = await until(
+      () => !q('[data-memory-edit]') && row(${JSON.stringify(target.id)})?.innerText.includes('Lint policy'),
+      15000
+    );
+    return JSON.stringify({
+      ok: Boolean(saved),
+      rowText: row(${JSON.stringify(target.id)})?.innerText ?? null,
+      error: q('[data-memory-edit] .text-destructive')?.textContent ?? null,
+    });
+  `);
+  assert(edited.ok, '面板记忆: 编辑弹窗保存后行内显示新标题', edited);
+  const afterEdit = await page(`
+    const find = async (query, mode) =>
+      (await window.electronAPI.memory.list({ query, mode, limit: 20, offset: 0 })).items.map((i) => i.id);
+    return JSON.stringify({
+      newExact: await find('pangolin', 'exact'),
+      newFast: await find('pangolin', 'fast'),
+      oldExact: await find('quokka', 'exact'),
+      oldFast: await find('quokka', 'fast'),
+    });
+  `);
+  assert(
+    afterEdit.newExact.includes(target.id) &&
+      afterEdit.newFast.includes(target.id) &&
+      !afterEdit.oldExact.includes(target.id) &&
+      !afterEdit.oldFast.includes(target.id),
+    '面板记忆: 编辑后新内容搜得到、旧内容搜不到（精确与检索模式）',
+    afterEdit
+  );
+
+  log('== 记忆：秘书面板删除一条（先预览影响再确认）');
+  const asked = await page(`
+    ${DOM}
+    row(${JSON.stringify(doomed.id)}).querySelector('[data-memory-action="row-delete"]').click();
+    const confirm = await until(() => {
+      const button = q('[data-memory-action="confirm-delete"]');
+      return button && !button.disabled ? button : null;
+    }, 10000);
+    return JSON.stringify({
+      ok: Boolean(confirm),
+      impact: q('[data-memory-delete-impact]')?.innerText ?? '',
+      stillThere: Boolean(await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)})),
+    });
+  `);
+  assert(
+    asked.ok &&
+      asked.stillThere &&
+      (asked.impact.includes('不影响其他记忆') ||
+        asked.impact.includes('No other memories are affected')),
+    '面板记忆: 点删除先弹确认并说明影响，确认前不删',
+    asked
+  );
+  await cdp.shot(path.join(ART, '44-panel-delete-confirm.png'));
+  const deleted = await page(`
+    ${DOM}
+    q('[data-memory-action="confirm-delete"]').click();
+    const gone = await until(() => !row(${JSON.stringify(doomed.id)}), 15000);
+    const exact = await window.electronAPI.memory.list({ query: 'axolotl', limit: 20, offset: 0 });
+    const fast = await window.electronAPI.memory.list({ query: 'axolotl', mode: 'fast', limit: 20, offset: 0 });
+    return JSON.stringify({
+      ok: Boolean(gone),
+      detail: await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)}),
+      exact: exact.items.map((i) => i.id),
+      fast: fast.items.map((i) => i.id),
+    });
+  `);
+  assert(
+    deleted.ok &&
+      deleted.detail === null &&
+      deleted.exact.length === 0 &&
+      deleted.fast.length === 0,
+    '面板记忆: 确认后行消失，精确与检索模式都搜不到',
+    deleted
+  );
+  await cdp.shot(path.join(ART, '45-panel-after.png'));
+
+  const audit = readFileSync(memoryAuditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const editAudit = audit.filter((e) => e.action === 'memory.edit' && e.memoryId === target.id);
+  const deleteAudit = audit.filter(
+    (e) => e.action === 'memory.delete' && e.requested.includes(doomed.id)
+  );
+  assert(
+    editAudit.length === 1 &&
+      editAudit[0].changes.title?.to === 'Lint policy' &&
+      !JSON.stringify(editAudit[0]).includes('quokka'),
+    '面板记忆: 编辑记了审计，正文只留 hash',
+    editAudit
+  );
+  assert(
+    deleteAudit.length === 1 && deleteAudit[0].impact.deleted[0]?.id === doomed.id,
+    '面板记忆: 删除记了审计',
+    deleteAudit
+  );
 }
 
 /** 新开一个秘书会话，让 fake provider 调一次秘书工具，取回工具结果原文 */

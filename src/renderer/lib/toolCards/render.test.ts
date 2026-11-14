@@ -38,6 +38,11 @@ const zh: Record<string, string> = {
   'Once at {{time}}': '一次，{{time}}',
   'Next run {{time}}': '下次运行 {{time}}',
   'Listed sessions in {{project}}': '列出 {{project}} 的会话',
+  'Listed to-dos': '列出待办',
+  'To do': '待办',
+  'In progress': '进行中',
+  Problem: '出问题',
+  Done: '完成',
   'Session running': '运行中',
   'Session idle': '空闲',
   'Session needs you': '需要你',
@@ -229,6 +234,37 @@ describe('工具卡片', () => {
     );
     expect(missing.title).toBe(`待办「${shortId('d5d1e359-bbbb')}」`);
     expect(cardPlainText(missing)).toContain('标记为完成 ✓');
+  });
+
+  it('todo_list 列出待办文字和状态，不露不可信包装', () => {
+    const card = renderToolCall(
+      call(
+        'todo_list',
+        { status: 'active' },
+        {
+          todos: [
+            {
+              id: 't1',
+              text: '<untrusted-content source="todo:t1">补工具卡片单测</untrusted-content>',
+              status: 'active',
+            },
+            {
+              id: 't2',
+              text: '<untrusted-content source="todo:t2">改秘书渲染</untrusted-content>',
+              status: 'todo',
+            },
+          ],
+        }
+      ),
+      ctx()
+    );
+    expect(card.title).toBe('列出待办');
+    expect(cardPlainText(card)).toContain('补工具卡片单测');
+    expect(cardPlainText(card)).toContain('进行中');
+    expect(cardPlainText(card)).toContain('改秘书渲染');
+    expect(cardPlainText(card)).toContain('待办');
+    expect(cardPlainText(card)).not.toContain('untrusted-content');
+    expect(cardPlainText(card)).not.toContain('{"todos"');
   });
 
   it('定时显示人话频率和下一次运行', () => {

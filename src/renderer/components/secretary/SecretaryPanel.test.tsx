@@ -262,6 +262,38 @@ describe('SecretaryPanel', () => {
     expect(h.calls).toContainEqual({ name: 'abort', args: 'c1' });
   });
 
+  it('待办、动态、定时的行内操作都叠在悬停蒙版里，不占行宽', async () => {
+    h.board = h.secretary.board = board({
+      running: [sessionCard('c1', { title: '跑全量测试' })],
+      todos: [{ id: 't1', text: '写周报', createdAt: NOW, updatedAt: NOW }],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    const layered = (rowSelector: string, labels: string[]) => {
+      const row = container.querySelector(rowSelector) as HTMLElement;
+      expect(row.className).toContain('group/row');
+      expect(row.className).toContain('relative');
+      const layer = row.querySelector('[data-slot="hover-actions"]') as HTMLElement;
+      expect(layer.className).toContain('absolute');
+      expect(layer.className).toContain('opacity-0');
+      const inLayer = [...layer.querySelectorAll('button')].map((b) =>
+        b.getAttribute('aria-label')
+      );
+      expect(inLayer).toEqual(labels);
+      // 蒙版外不再有操作按钮占位
+      const outside = [...row.querySelectorAll('button')].filter((b) => !layer.contains(b));
+      expect(outside.every((b) => !labels.includes(b.getAttribute('aria-label') ?? ''))).toBe(true);
+    };
+    layered('[data-enso="secretary-todo"]', ['[Dispatch]', '[Edit]', '[Delete]']);
+    layered('[data-enso="secretary-feed-event"]', ['[Stop]']);
+    click('[data-enso="secretary-panel-tab"][data-tab="schedules"]');
+    await flush();
+    const rows = container.querySelectorAll('[data-enso="secretary-schedule"]');
+    expect(rows[0].querySelector('[data-slot="hover-actions"]')).toBeNull();
+    rows[1].setAttribute('data-probe', 'own');
+    layered('[data-probe="own"]', ['[Delete]']);
+  });
+
   it('点圆形勾选框把待办标记完成', async () => {
     h.board = h.secretary.board = board({
       todos: [{ id: 't1', text: '写周报', createdAt: NOW, updatedAt: NOW }],

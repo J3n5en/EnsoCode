@@ -3577,6 +3577,7 @@ export const zhTranslations: Record<string, string> = {
   'Once at {{time}}': '一次，{{time}}',
   'Listed sessions in {{project}}': '列出 {{project}} 的会话',
   'Listed sessions': '列出会话',
+  'Listed to-dos': '列出待办',
   'Session running': '运行中',
   'Session idle': '空闲',
   'Session needs you': '需要你',

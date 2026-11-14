@@ -7,7 +7,6 @@ import {
 import {
   type EvolvesEdgeDto,
   isMemoryRetrievalMode,
-  type MemoryDeletionImpact,
   type MemoryDetail,
   type MemoryListItem,
   type MemoryListQuery,
@@ -16,12 +15,16 @@ import {
   type PendingMemoryWriteDto,
 } from '@shared/memory/dto';
 import * as React from 'react';
+import {
+  MemoryDeleteDialog,
+  MemoryEditDialog,
+  MemoryRowActions,
+} from '@/components/memory/MemoryActionDialogs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -29,7 +32,7 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
+import { HOVER_ROW_CLASS, rowFinalFocus } from '@/components/ui/hover-actions';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import {
   Select,
@@ -39,8 +42,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { usePendingMemoryWrites, usePendingMemoryWritesStore } from '@/stores/memoryReview';
 
 /**
@@ -58,8 +61,6 @@ export function formatDateTime(iso: string): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
-
-type Translate = (key: string, params?: Record<string, string>) => string;
 
 export const SPACE_KINDS: readonly MemorySpaceKind[] = [
   'global',
@@ -95,72 +96,6 @@ function fallbackKind(spaceId: string): MemorySpaceKind {
   return spaceId.startsWith('proj:') ? 'project' : 'global';
 }
 
-interface MemoryDraft {
-  title: string;
-  content: string;
-  unitType: UnitType;
-  /** 输入框原文，保存时再校验 */
-  importance: string;
-}
-
-function titleList(titles: string[]): string {
-  const shown = titles.slice(0, 5).map((title) => `“${title}”`);
-  return titles.length > 5 ? `${shown.join('、')}…` : shown.join('、');
-}
-
-/** 删除确认框里的影响说明，一条一句 */
-export function deletionImpactLines(impact: MemoryDeletionImpact, t: Translate): string[] {
-  const lines: string[] = [];
-  const history = impact.deleted.filter((d) => d.role === 'history');
-  if (history.length > 0) {
-    lines.push(
-      t('Also deletes {{count}} older versions it replaced: {{titles}}', {
-        count: String(history.length),
-        titles: titleList(history.map((d) => d.title)),
-      })
-    );
-  }
-  if (impact.bridges.length > 0) {
-    lines.push(
-      t(
-        'The older and newer versions around it are linked directly, so the history stays continuous.'
-      )
-    );
-  }
-  if (impact.relations.length > 0) {
-    lines.push(
-      t('Removes the relation links to {{titles}}; those memories are kept.', {
-        titles: titleList(impact.relations.map((r) => r.title)),
-      })
-    );
-  }
-  for (const crystal of impact.crystalsUpdated) {
-    lines.push(
-      t('Crystal {{title}} loses this source and keeps {{count}} sources.', {
-        title: `“${crystal.title}”`,
-        count: String(crystal.remaining),
-      })
-    );
-  }
-  for (const crystal of impact.crystalsDemoted) {
-    lines.push(
-      t(
-        'Crystal {{title}} would be left with {{count}} sources, so it becomes a normal memory. Its content is kept.',
-        { title: `“${crystal.title}”`, count: String(crystal.remaining) }
-      )
-    );
-  }
-  if (impact.releasedSources > 0) {
-    lines.push(
-      t('This is a crystal: its {{count}} source memories are kept, only the links are removed.', {
-        count: String(impact.releasedSources),
-      })
-    );
-  }
-  if (lines.length === 0) lines.push(t('No other memories are affected.'));
-  return lines;
-}
-
 /** 空结果分两种：库里真的没东西 vs 当前筛选条件没命中（接口未启用时返回空而非报错） */
 export function isPristineEmpty(libraryHasRows: boolean | null, hasFilters: boolean): boolean {
   return libraryHasRows === false && !hasFilters;
@@ -185,6 +120,8 @@ export function emptyReason(
 export function MemoryRows({
   items,
   onOpen,
+  onEdit,
+  onDelete,
   t,
   selected,
   onToggle,
@@ -192,18 +129,24 @@ export function MemoryRows({
 }: {
   items: MemoryListItem[];
   onOpen: (id: string) => void;
+  onEdit?: (id: string) => void;
+  onDelete?: (id: string) => void;
   t: (key: string, params?: Record<string, string>) => string;
   selected?: ReadonlySet<string>;
   onToggle?: (id: string) => void;
   emptyLabel?: string;
 }) {
   return (
-    <ul className="divide-y rounded-lg border">
+    <ul className="divide-y overflow-hidden rounded-lg border">
       {items.length === 0 && (
         <li className="px-3 py-6 text-sm text-muted-foreground">{emptyLabel}</li>
       )}
       {items.map((item) => (
-        <li key={item.id} className="flex items-center gap-2 px-3 py-2" data-memory-id={item.id}>
+        <li
+          key={item.id}
+          className={cn(HOVER_ROW_CLASS, 'flex items-center gap-2 px-3 py-2')}
+          data-memory-id={item.id}
+        >
           {onToggle && (
             <Checkbox
               checked={selected?.has(item.id) ?? false}
@@ -233,6 +176,9 @@ export function MemoryRows({
               · {t('Retrieved {{count}} times', { count: String(item.appearances) })}
             </span>
           </button>
+          {onEdit && onDelete && (
+            <MemoryRowActions id={item.id} onEdit={onEdit} onDelete={onDelete} />
+          )}
         </li>
       ))}
     </ul>
@@ -385,13 +331,9 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
   spacesRef.current = spaces;
   const [libraryExists, setLibraryExists] = React.useState<boolean | null>(null);
   const [detail, setDetail] = React.useState<MemoryDetail | null>(null);
-  const [draft, setDraft] = React.useState<MemoryDraft | null>(null);
-  const [editError, setEditError] = React.useState<string | null>(null);
-  // impact 为 undefined = 影响说明还在加载；确认按钮在拿到之前不可点
-  const [pendingDelete, setPendingDelete] = React.useState<{
-    ids: string[];
-    impact: MemoryDeletionImpact | null | undefined;
-  } | null>(null);
+  // reopen：从详情里点的编辑，存完回到详情
+  const [editing, setEditing] = React.useState<{ id: string; reopen: boolean } | null>(null);
+  const [deleteIds, setDeleteIds] = React.useState<string[] | null>(null);
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
   const [pendingEdges, setPendingEdges] = React.useState<EvolvesEdgeDto[]>([]);
@@ -484,8 +426,6 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
   const closeDetail = () => {
     detailRequest.current++;
     setDetail(null);
-    setDraft(null);
-    setEditError(null);
   };
 
   // 串行：每次变更都要重新拉列表，并发会让分页与 total 错位
@@ -504,55 +444,16 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
 
   const bulkArchive = () => void bulkRun(selected, (id) => window.electronAPI.memory.archive(id));
 
-  const askDelete = (ids: string[]) => {
-    setPendingDelete({ ids, impact: undefined });
-    void window.electronAPI.memory.deletePreview(ids).then((impact) => {
-      if (!mounted.current) return;
-      setPendingDelete((current) => (current?.ids === ids ? { ids, impact } : current));
-    });
-  };
-
-  // 一次删一条，后面的若已作为前面那条的历史版本被删掉，Main 返回 not found，忽略即可
-  const confirmDelete = () => {
-    if (!pendingDelete) return;
-    const { ids } = pendingDelete;
-    void bulkRun(ids, (id) => window.electronAPI.memory.delete(id)).then(() => {
-      if (!mounted.current) return;
-      setPendingDelete(null);
-      if (detail && ids.includes(detail.id)) closeDetail();
-    });
-  };
-
-  const startEdit = (memory: MemoryDetail) => {
-    setEditError(null);
-    setDraft({
-      title: memory.title,
-      content: memory.content,
-      unitType: memory.unitType,
-      importance: String(memory.importance),
-    });
-  };
-
-  const saveEdit = async () => {
-    if (!detail || !draft) return;
-    const importance = Number(draft.importance);
-    if (!draft.content.trim()) return setEditError(t('Content cannot be empty.'));
-    if (draft.importance.trim() === '' || !(importance >= 0 && importance <= 1)) {
-      return setEditError(t('Importance must be between 0 and 1.'));
-    }
-    setBusy(true);
-    const result = await window.electronAPI.memory.update(detail.id, {
-      title: draft.title,
-      content: draft.content,
-      unitType: draft.unitType,
-      importance,
-    });
+  const onDeleted = (ids: readonly string[]) => {
     if (!mounted.current) return;
-    setBusy(false);
-    if (!result.ok) return setEditError(result.error ?? t('Could not save the memory.'));
-    setDraft(null);
-    setEditError(null);
-    openDetail(detail.id);
+    setSelected(new Set());
+    if (detail && ids.includes(detail.id)) closeDetail();
+    reloadRef.current();
+  };
+
+  const onSaved = (id: string) => {
+    if (!mounted.current) return;
+    if (editing?.reopen) openDetail(id);
     reloadRef.current();
   };
 
@@ -739,14 +640,14 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
             <Button variant="outline" size="sm" disabled={busy} onClick={() => bulkArchive()}>
               {t('Archive selected')}
             </Button>
-            <button
-              type="button"
+            <Button
+              variant="destructive-outline"
+              size="sm"
               disabled={busy}
-              className="text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
-              onClick={() => askDelete([...selected])}
+              onClick={() => setDeleteIds([...selected])}
             >
               {t('Delete permanently')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -754,6 +655,8 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
       <MemoryRows
         items={items}
         onOpen={openDetail}
+        onEdit={(id) => setEditing({ id, reopen: false })}
+        onDelete={(id) => setDeleteIds([id])}
         t={t}
         selected={selected}
         emptyLabel={
@@ -805,88 +708,8 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
       />
 
       <Dialog open={detail !== null} onOpenChange={(open) => !open && closeDetail()}>
-        <DialogContent>
-          {detail && draft && (
-            <>
-              <DialogHeader>
-                <DialogTitle>{t('Edit memory')}</DialogTitle>
-                <DialogDescription>
-                  {t('Search indexes are rebuilt from the new text right away.')}
-                </DialogDescription>
-              </DialogHeader>
-              <DialogPanel className="space-y-3" data-memory-edit="">
-                <label className="block space-y-1">
-                  <span className="text-muted-foreground text-xs">{t('Memory title')}</span>
-                  <Input
-                    value={draft.title}
-                    data-memory-field="title"
-                    onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                  />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-muted-foreground text-xs">{t('Content')}</span>
-                  <Textarea
-                    value={draft.content}
-                    rows={6}
-                    data-memory-field="content"
-                    onChange={(event) => setDraft({ ...draft, content: event.target.value })}
-                  />
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <span className="text-muted-foreground text-xs">{t('Type')}</span>
-                    <Select
-                      value={draft.unitType}
-                      items={UNIT_TYPES.map((type) => ({ value: type, label: type }))}
-                      onValueChange={(value) => {
-                        const next = UNIT_TYPES.find((type) => type === value);
-                        if (next) setDraft({ ...draft, unitType: next });
-                      }}
-                    >
-                      <SelectTrigger size="sm" data-memory-field="unitType">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectPopup>
-                        {UNIT_TYPES.map((type) => (
-                          <SelectItem key={type} value={type}>
-                            {type}
-                          </SelectItem>
-                        ))}
-                      </SelectPopup>
-                    </Select>
-                  </div>
-                  <label className="block space-y-1">
-                    <span className="text-muted-foreground text-xs">{t('Importance (0–1)')}</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      size="sm"
-                      value={draft.importance}
-                      data-memory-field="importance"
-                      onChange={(event) => setDraft({ ...draft, importance: event.target.value })}
-                    />
-                  </label>
-                </div>
-                {editError && <p className="text-destructive text-xs">{editError}</p>}
-              </DialogPanel>
-              <DialogFooter>
-                <Button variant="outline" size="sm" disabled={busy} onClick={() => setDraft(null)}>
-                  {t('Cancel')}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={busy}
-                  data-memory-action="save"
-                  onClick={() => void saveEdit()}
-                >
-                  {t('Save')}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-          {detail && !draft && (
+        <DialogContent finalFocus={rowFinalFocus}>
+          {detail && (
             <>
               <DialogHeader>
                 <DialogTitle>{detail.title}</DialogTitle>
@@ -967,11 +790,11 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
 
               <DialogFooter>
                 <Button
-                  variant="ghost"
+                  variant="destructive-outline"
                   size="sm"
                   className="sm:me-auto"
                   data-memory-action="delete"
-                  onClick={() => askDelete([detail.id])}
+                  onClick={() => setDeleteIds([detail.id])}
                 >
                   {t('Delete permanently')}
                 </Button>
@@ -979,7 +802,10 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
                   variant="outline"
                   size="sm"
                   data-memory-action="edit"
-                  onClick={() => startEdit(detail)}
+                  onClick={() => {
+                    closeDetail();
+                    setEditing({ id: detail.id, reopen: true });
+                  }}
                 >
                   {t('Edit')}
                 </Button>
@@ -1006,54 +832,16 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={pendingDelete !== null}
-        onOpenChange={(open) => !open && !busy && setPendingDelete(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {pendingDelete && pendingDelete.ids.length > 1
-                ? t('Delete {{count}} memories permanently?', {
-                    count: String(pendingDelete.ids.length),
-                  })
-                : t('Delete this memory permanently?')}
-            </DialogTitle>
-            <DialogDescription>
-              {t(
-                'This cannot be undone. Archiving keeps the memory out of search while preserving it.'
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel data-memory-delete-impact="">
-            {pendingDelete?.impact === undefined ? (
-              <p className="text-muted-foreground text-xs">{t('Checking what this affects…')}</p>
-            ) : pendingDelete.impact === null ? (
-              <p className="text-muted-foreground text-xs">{t('Memory not found.')}</p>
-            ) : (
-              <ul className="list-disc space-y-1 ps-4 text-xs">
-                {deletionImpactLines(pendingDelete.impact, t).map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            )}
-          </DialogPanel>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" size="sm" disabled={busy} />}>
-              {t('Cancel')}
-            </DialogClose>
-            <Button
-              variant="destructive"
-              size="sm"
-              data-memory-action="confirm-delete"
-              disabled={busy || !pendingDelete?.impact}
-              onClick={confirmDelete}
-            >
-              {t('Delete permanently')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MemoryEditDialog
+        memoryId={editing?.id ?? null}
+        onClose={() => setEditing(null)}
+        onSaved={onSaved}
+      />
+      <MemoryDeleteDialog
+        ids={deleteIds}
+        onClose={() => setDeleteIds(null)}
+        onDeleted={onDeleted}
+      />
     </div>
   );
 }
