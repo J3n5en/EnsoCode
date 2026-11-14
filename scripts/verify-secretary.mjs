@@ -619,16 +619,14 @@ async function run(cdp) {
     proposal
   );
 
-  log('== 工作台');
+  log('== 秘书面板');
   const board = await page(`
     const toggles = [...document.querySelectorAll('button')].filter(
       (b) => b.getAttribute('aria-label') === '新建标签页'
     );
     toggles.at(-1).click();
     await sleep(500);
-    const item = [...document.querySelectorAll('[role=menuitem]')].find(
-      (node) => node.innerText.trim() === '工作台'
-    );
+    const item = document.querySelector('[data-enso=secretary-panel-open]');
     if (!item) return JSON.stringify({ ok: false });
     item.click();
     await sleep(800);
@@ -636,9 +634,16 @@ async function run(cdp) {
       .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
       .click();
     await sleep(1200);
-    return JSON.stringify({ ok: document.body.innerText.includes('需要你处理') });
+    const panel = document.querySelector('[data-enso=secretary-panel]');
+    return JSON.stringify({
+      ok: Boolean(panel) && panel.innerText.includes('需要你处理'),
+      tabs: [...document.querySelectorAll('[data-enso=secretary-panel-tab]')].map(
+        (node) => node.dataset.tab
+      ),
+    });
   `);
-  assert(board.ok, '工作台面板打开', board);
+  assert(board.ok, '秘书面板打开', board);
+  assert(board.tabs?.join(',') === 'workbench,memory,schedules', '秘书面板三个标签', board.tabs);
   await cdp.shot(path.join(ART, '05-workbench.png'));
 
   log('== step7 worker 退出');

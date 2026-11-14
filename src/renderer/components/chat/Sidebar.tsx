@@ -86,9 +86,9 @@ import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialo
 import {
   SecretaryCollapsedButton,
   SecretarySidebarSection,
-  secretarySectionView,
   sidebarProjects,
 } from '@/components/secretary/SecretarySidebarSection';
+import { secretarySectionView } from '@/components/secretary/secretaryView';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -1029,7 +1029,7 @@ export function Sidebar({
                 />
               ))}
               {!secretaryFolded && secretaryConversationIds.length > SECRETARY_VISIBLE_LIMIT && (
-                <div className="flex items-center gap-1 pl-6">
+                <div className="flex items-center gap-1 px-2">
                   <button
                     type="button"
                     onClick={() => setSecretaryRevealed((prev) => !prev)}

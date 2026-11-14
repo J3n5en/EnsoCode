@@ -4,7 +4,12 @@ import { act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => `[${key}]` }) }));
+const translate = (key: string, params?: Record<string, string | number>) =>
+  params
+    ? key.replace(/\{\{(\w+)\}\}/g, (_, token: string) => String(params[token] ?? ''))
+    : `[${key}]`;
+
+vi.mock('@/i18n', () => ({ useI18n: () => ({ t: translate }) }));
 vi.mock('@/components/ui/context-menu', async () => {
   const { cloneElement, createContext, useContext, useState } = await import('react');
   const State = createContext({ open: false, show: () => {} });
@@ -38,9 +43,9 @@ vi.mock('@/components/ui/context-menu', async () => {
 import {
   SecretaryCollapsedButton,
   SecretarySidebarSection,
-  secretarySectionView,
   sidebarProjects,
 } from './SecretarySidebarSection';
+import { secretarySectionView } from './secretaryView';
 
 const state = (over: Partial<SecretaryState> = {}): SecretaryState => ({
   enabled: true,
@@ -52,7 +57,7 @@ const state = (over: Partial<SecretaryState> = {}): SecretaryState => ({
   ...over,
 });
 
-const t = (key: string) => `[${key}]`;
+const t = translate;
 
 let root: Root;
 let container: HTMLElement;
@@ -62,6 +67,34 @@ const view = (over: Partial<SecretaryState> = {}) => {
   if (!result) throw new Error('missing view');
   return result;
 };
+
+const profile: NonNullable<SecretaryState['profile']> = {
+  version: 1,
+  name: '小安',
+  avatar: { color: '#8b7bff' },
+  autonomy: 'ask-first',
+  autoApproveProjectIds: [],
+  visibleProjectIds: 'all',
+  dispatchModel: { mode: 'project' },
+  dispatchWorktree: 'auto',
+  maxRunningDispatches: 3,
+  replyLanguage: 'ui',
+  style: 'concise',
+  notify: 'needs-user',
+  updatedAt: 1,
+};
+
+const sessionCard = (conversationId: string) => ({
+  kind: 'session' as const,
+  conversationId,
+  projectId: 'p1',
+  projectName: 'enso',
+  title: '跑测试',
+  state: 'running' as const,
+  startedAt: 1,
+  updatedAt: 1,
+  secretaryConversationId: 'sec',
+});
 
 async function render(node: ReactElement) {
   await act(async () => {
@@ -103,36 +136,29 @@ describe('secretarySectionView', () => {
   });
 
   it('未完成初次设置时显示默认名「秘书」', () => {
-    expect(view()).toEqual({ name: '[Secretary]', needsYou: 0, configured: false });
+    expect(view()).toEqual({ name: '[Secretary]', needsYou: 0, running: 0, configured: false });
   });
 
-  it('已设置时用档案名与头像色，角标取需要你处理的条数', () => {
-    const board = state().board;
+  it('已设置时用档案名与头像色，摘要取等你与在跑的条数', () => {
     const result = secretarySectionView(
       state({
-        profile: {
-          version: 1,
-          name: '小安',
-          avatar: { color: '#8b7bff' },
-          autonomy: 'ask-first',
-          autoApproveProjectIds: [],
-          visibleProjectIds: 'all',
-          dispatchModel: { mode: 'project' },
-          dispatchWorktree: 'auto',
-          maxRunningDispatches: 3,
-          replyLanguage: 'ui',
-          style: 'concise',
-          notify: 'needs-user',
-          updatedAt: 1,
-        },
+        profile,
         board: {
-          ...board,
           needsYou: [{ kind: 'proposal', proposal: {} as never }],
+          running: [sessionCard('c1')],
+          done: [],
+          todos: [],
         },
       }),
       t
     );
-    expect(result).toEqual({ name: '小安', needsYou: 1, configured: true, color: '#8b7bff' });
+    expect(result).toEqual({
+      name: '小安',
+      needsYou: 1,
+      running: 1,
+      configured: true,
+      color: '#8b7bff',
+    });
   });
 });
 
@@ -156,7 +182,7 @@ describe('SecretarySidebarSection', () => {
     onReset: vi.fn(),
   });
 
-  it('未设置时显示默认名，点击整行进欢迎页，行内只有 ＋ 与 ⚙', async () => {
+  it('未设置时显示默认名与设置提示，点击整行进欢迎页，行内只有 ＋ 与 ⚙', async () => {
     const handlers = actions();
     await render(
       <SecretarySidebarSection view={view()} folded={false} {...handlers}>
@@ -164,6 +190,9 @@ describe('SecretarySidebarSection', () => {
       </SecretarySidebarSection>
     );
     expect(container.textContent).toContain('[Secretary]');
+    expect(container.querySelector('[data-enso="secretary-summary"]')?.textContent).toBe(
+      '[Click to finish setup]'
+    );
     expect(container.querySelector('[data-enso="secretary-badge"]')).toBeNull();
     expect(container.querySelectorAll('[data-enso="secretary-action"]')).toHaveLength(2);
     expect(container.querySelector('[data-slot="conversation-row"]')).not.toBeNull();
@@ -175,17 +204,66 @@ describe('SecretarySidebarSection', () => {
     expect(handlers.onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('需要你处理的数量显示为角标', async () => {
+  it('摘要显示等你与在跑的条数，等你那份用强调色', async () => {
     const handlers = actions();
     await render(
-      <SecretarySidebarSection view={{ ...view(), needsYou: 3 }} folded={false} {...handlers}>
+      <SecretarySidebarSection
+        view={{ ...view(), configured: true, needsYou: 2, running: 3 }}
+        folded={false}
+        {...handlers}
+      >
         {null}
       </SecretarySidebarSection>
     );
-    expect(container.querySelector('[data-enso="secretary-badge"]')?.textContent).toBe('3');
+    expect(container.querySelector('[data-enso="secretary-summary"]')?.textContent).toBe(
+      '2 waiting · 3 running'
+    );
+    const badge = container.querySelector('[data-enso="secretary-badge"]');
+    expect(badge?.textContent).toBe('2 waiting');
+    expect(badge?.className).toContain('text-warning');
   });
 
-  it('折叠后隐藏会话行，仍保留伪项目行与虚线分隔', async () => {
+  it('没有任何活时只说一句没有在跑的活', async () => {
+    const handlers = actions();
+    await render(
+      <SecretarySidebarSection view={{ ...view(), configured: true }} folded={false} {...handlers}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    expect(container.querySelector('[data-enso="secretary-summary"]')?.textContent).toBe(
+      '[Nothing running]'
+    );
+  });
+
+  it('头像状态点：有等你用警告色，否则在跑用成功色，都没有就不显示', async () => {
+    const handlers = actions();
+    const tone = () =>
+      container.querySelector('[data-enso="secretary-pip"]')?.getAttribute('data-tone') ?? null;
+    await render(
+      <SecretarySidebarSection
+        view={{ ...view(), needsYou: 1, running: 1 }}
+        folded={false}
+        {...handlers}
+      >
+        {null}
+      </SecretarySidebarSection>
+    );
+    expect(tone()).toBe('warn');
+    await render(
+      <SecretarySidebarSection view={{ ...view(), running: 1 }} folded={false} {...handlers}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    expect(tone()).toBe('run');
+    await render(
+      <SecretarySidebarSection view={view()} folded={false} {...handlers}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    expect(tone()).toBeNull();
+  });
+
+  it('折叠后隐藏会话行，仍保留人物卡与分隔', async () => {
     const handlers = actions();
     await render(
       <SecretarySidebarSection view={view()} folded {...handlers}>
@@ -221,14 +299,16 @@ describe('SecretarySidebarSection', () => {
 });
 
 describe('SecretaryCollapsedButton', () => {
-  it('折叠侧栏时保留图标与角标', async () => {
+  it('折叠侧栏时保留头像与状态点', async () => {
     const onClick = vi.fn();
     await render(
       <SecretaryCollapsedButton view={{ ...view(), name: '小安', needsYou: 2 }} onClick={onClick} />
     );
     const button = container.querySelector('[data-enso="secretary-collapsed"]');
     expect(button?.textContent).toContain('小');
-    expect(container.querySelector('[data-enso="secretary-badge"]')?.textContent).toBe('2');
+    expect(container.querySelector('[data-enso="secretary-pip"]')?.getAttribute('data-tone')).toBe(
+      'warn'
+    );
     act(() => (button as unknown as HTMLElement).click());
     expect(onClick).toHaveBeenCalledTimes(1);
   });

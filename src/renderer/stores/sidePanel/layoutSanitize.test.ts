@@ -95,4 +95,41 @@ describe('sanitizeSidePanelLayout', () => {
       )
     ).toBeUndefined();
   });
+
+  it('旧布局里已合并的秘书面板被丢掉，不阻断恢复', () => {
+    const sanitized = sanitizeSidePanelLayout(
+      {
+        grid: {
+          root: {
+            type: 'branch',
+            data: [
+              {
+                type: 'leaf',
+                data: {
+                  views: ['secretary-board', 'secretary-memory', 'secretary'],
+                  activeView: 'secretary-board',
+                  id: 'g1',
+                },
+                size: 100,
+              },
+            ],
+            size: 100,
+          },
+          width: 100,
+          height: 100,
+          orientation: 'HORIZONTAL',
+        },
+        panels: {
+          'secretary-board': { id: 'secretary-board', contentComponent: 'secretaryBoard' },
+          'secretary-memory': { id: 'secretary-memory', contentComponent: 'secretaryMemory' },
+          secretary: { id: 'secretary', contentComponent: 'secretary' },
+        },
+      },
+      new Set(['secretary'])
+    );
+    expect(Object.keys(sanitized?.panels ?? {})).toEqual(['secretary']);
+    const grid = JSON.stringify(sanitized?.grid);
+    expect(grid).toContain('"secretary"');
+    expect(grid).not.toContain('secretary-board');
+  });
 });

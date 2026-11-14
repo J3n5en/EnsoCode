@@ -56,12 +56,26 @@ const PROFILE_STATUS_LABELS: Record<ProposalStatus, string> = {
   succeeded: 'Profile saved',
 };
 
+/** 工作台里待处理的提案要醒目：警告色细边 + 淡底 */
+function cardClass(prominent?: boolean): string {
+  return cn(
+    'mb-1 rounded-lg border px-2.5 py-2',
+    prominent ? 'border-warning/40 bg-warning/5' : 'border-border/60 bg-muted/20'
+  );
+}
+
 /** 卡片标题：用户/秘书给的标题优先，否则取首句 */
 function dispatchTitle(proposal: Extract<SecretaryProposal, { kind: 'dispatch' }>): string {
   return proposal.draft.title?.trim() || proposal.draft.prompt.split('\n')[0]?.trim() || '';
 }
 
-export function SecretaryProposalRow({ proposalId }: { proposalId: string }) {
+export function SecretaryProposalRow({
+  proposalId,
+  prominent,
+}: {
+  proposalId: string;
+  prominent?: boolean;
+}) {
   const { t } = useI18n();
   const proposal = useSecretaryStore((state) => state.secretary.proposals[proposalId]);
   const resolving = useSecretaryStore((state) => state.resolving[proposalId] === true);
@@ -73,22 +87,20 @@ export function SecretaryProposalRow({ proposalId }: { proposalId: string }) {
     return (
       <div
         data-enso="secretary-proposal"
-        className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground"
+        className={cn(cardClass(prominent), 'text-[11px] text-muted-foreground')}
       >
         {t('Waiting for your confirmation')}
       </div>
     );
   }
-  if (proposal.kind === 'profile') return <ProfileProposalCard proposal={proposal} />;
+  if (proposal.kind === 'profile')
+    return <ProfileProposalCard proposal={proposal} prominent={prominent} />;
 
   const project = projects.find((entry) => entry.id === proposal.draft.projectId);
   const failed = proposal.status === 'failed';
 
   return (
-    <div
-      data-enso="secretary-proposal"
-      className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2"
-    >
+    <div data-enso="secretary-proposal" className={cardClass(prominent)}>
       <div className="flex items-center gap-2 text-xs">
         <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
           {t('Dispatch')}
@@ -139,8 +151,10 @@ export function SecretaryProposalRow({ proposalId }: { proposalId: string }) {
  */
 function ProfileProposalCard({
   proposal,
+  prominent,
 }: {
   proposal: Extract<SecretaryProposal, { kind: 'profile' }>;
+  prominent?: boolean;
 }) {
   const { t } = useI18n();
   const resolving = useSecretaryStore((state) => state.resolving[proposal.id] === true);
@@ -154,11 +168,7 @@ function ProfileProposalCard({
   );
 
   return (
-    <div
-      data-enso="secretary-proposal"
-      data-kind="profile"
-      className="mb-1 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2"
-    >
+    <div data-enso="secretary-proposal" data-kind="profile" className={cardClass(prominent)}>
       <div className="flex items-center gap-2 text-xs">
         <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
           {t('Profile')}

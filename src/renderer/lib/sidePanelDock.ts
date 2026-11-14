@@ -400,7 +400,7 @@ export function disposeConversationResources(conversationId: string): void {
   if (api) {
     for (const panel of [...api.panels]) {
       if (panel.id === 'changes' || panel.id === 'files') continue;
-      if (panel.id === 'secretary-board' || panel.id === 'secretary-memory') continue;
+      if (panel.id === 'secretary') continue;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) continue;
       releaseTerminal(panel.id);
       void window.electronAPI?.terminal?.dispose(panel.id);
