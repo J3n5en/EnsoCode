@@ -131,6 +131,7 @@ export const IPC_CHANNELS = {
   MEMORY_ARCHIVE: 'memory:archive',
   MEMORY_RESTORE: 'memory:restore',
   MEMORY_DELETE: 'memory:delete',
+  MEMORY_DELETE_PREVIEW: 'memory:delete-preview',
   MEMORY_UPDATE: 'memory:update',
   MEMORY_STATS: 'memory:stats',
   MEMORY_JOBS: 'memory:jobs',

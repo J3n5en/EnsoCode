@@ -12,6 +12,7 @@ import {
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
+  type MemorySpaceKind,
   type MemoryStats,
   type PendingMemoryWriteDto,
 } from '@shared/memory/dto';
@@ -36,6 +37,7 @@ import {
   setChatModelProgressSink,
   startChatModelDownload,
 } from '../services/chatModels';
+import { appendMemoryAudit, editAuditEntry } from '../services/memory/audit';
 import { createCrystal } from '../services/memory/crystal';
 import { looseParse } from '../services/memory/distill';
 import {
@@ -45,13 +47,13 @@ import {
   memoriesForEntity,
   memoriesForPrompt,
 } from '../services/memory/graph';
+import { deleteMemoriesManually, planMemoryDeletion } from '../services/memory/manual';
 import { listPendingWrites, rejectPendingWrite } from '../services/memory/pending';
 import { createSearchAssist } from '../services/memory/searchLlm';
 import { getMemory } from '../services/memory/store';
 import {
   archiveMemory,
   clearFinishedMemoryJobs,
-  deleteMemoryPermanently,
   getMemoryDetail,
   getMemoryStats,
   listMemoriesForAdmin,
@@ -107,7 +109,11 @@ function isTrustedWindow(webContentsId: number): boolean {
 }
 
 function memoryDbPath(): string {
-  return path.join(app.getPath('userData'), 'memory', 'memory.db');
+  return path.join(memoryDir(), 'memory.db');
+}
+
+function memoryDir(): string {
+  return path.join(app.getPath('userData'), 'memory');
 }
 
 function withExistingDb<T>(fallback: T, run: (db: Database.Database) => T): T {
@@ -221,29 +227,43 @@ export function registerMemoryHandlers(): void {
     );
   });
 
+  // 确认框先拿影响说明；真正删除时在事务里按同一规则重算，不信任渲染层回传的计划
+  ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE_PREVIEW, (event, ids: unknown) => {
+    if (!isTrustedWindow(event.sender.id) || !isIdList(ids)) return null;
+    return withExistingDb(null, (db) => planMemoryDeletion(db, ids));
+  });
+
   ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE, (event, id: unknown): MemoryMutationResult => {
     if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) return invalidRequest();
     return withExistingDb<MemoryMutationResult>(
       { ok: false, error: 'Memory database is not available.' },
       (db) => {
-        if (!deleteMemoryPermanently(db, id)) return { ok: false, error: 'Memory not found.' };
+        const impact = deleteMemoriesManually(db, [id]);
+        if (!impact) return { ok: false, error: 'Memory not found.' };
+        appendMemoryAudit(memoryDir(), {
+          ts: new Date().toISOString(),
+          action: 'memory.delete',
+          actor: 'user',
+          requested: [id],
+          impact,
+        });
         memoryChanged();
-        return { ok: true };
+        return { ok: true, impact };
       }
     );
   });
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_UPDATE,
-    (event, id: unknown, patch: unknown): MemoryMutationResult => {
+    async (event, id: unknown, patch: unknown): Promise<MemoryMutationResult> => {
       if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) {
         return invalidRequest();
       }
       if (!isMemoryEditPatch(patch)) return invalidRequest();
       try {
-        if (!editMemory(id, { title: patch.title, content: patch.content })) {
-          return { ok: false, error: 'Memory not found.' };
-        }
+        const result = await editMemory(id, patch);
+        if (!result) return { ok: false, error: 'Memory not found.' };
+        appendMemoryAudit(memoryDir(), editAuditEntry(result));
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -256,11 +276,15 @@ export function registerMemoryHandlers(): void {
     if (!isTrustedWindow(event.sender.id)) return EMPTY_STATS;
     const stats = withExistingDb(EMPTY_STATS, getMemoryStats);
     const label = await spaceLabeler();
+    const kind = await spaceKinder();
     return {
       ...stats,
       embeddingError: getMemoryEmbeddingError(),
       spaceLabels: Object.fromEntries(
         Object.keys(stats.bySpace).map((spaceId) => [spaceId, label(spaceId)])
+      ),
+      spaceKinds: Object.fromEntries(
+        Object.keys(stats.bySpace).map((spaceId) => [spaceId, kind(spaceId)])
       ),
     };
   });
@@ -620,6 +644,31 @@ async function projectNames(): Promise<Map<string, string>> {
 
 const GLOBAL_SPACE_LABEL = 'Global';
 const PROJECT_SPACE_PREFIX = 'proj:';
+
+function isIdList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 500 &&
+    value.every((id) => typeof id === 'string' && id.length > 0)
+  );
+}
+
+/** 秘书私有空间也是 proj: 前缀，只有项目注册表知道哪个项目是秘书 */
+async function spaceKinder(): Promise<(spaceId: string) => MemorySpaceKind> {
+  const { getSourceAuthorityRegistry } = await import('./agent');
+  const secretary = new Set(
+    (getSourceAuthorityRegistry()?.projection().projects ?? [])
+      .filter((project) => project.kind === 'secretary')
+      .map((project) => project.projectId)
+  );
+  return (spaceId) => {
+    if (spaceId.startsWith('bot:')) return 'bot';
+    if (spaceId.startsWith('chat:')) return 'chat';
+    if (!spaceId.startsWith(PROJECT_SPACE_PREFIX)) return 'global';
+    return secretary.has(spaceId.slice(PROJECT_SPACE_PREFIX.length)) ? 'secretary' : 'project';
+  };
+}
 
 /** space id → 项目名。项目已删或拿不到注册表时回退到短 id，不把 `proj:<uuid>` 原样给用户 */
 async function spaceLabeler(): Promise<(spaceId: string) => string> {

@@ -1691,6 +1691,32 @@ export const zhTranslations: Record<string, string> = {
   'Related versions': '相关版本',
   'Delete permanently': '永久删除',
   'Delete this memory permanently?': '永久删除这条记忆?',
+  'All space types': '全部空间类型',
+  'Recorded {{date}}': '记录于 {{date}}',
+  'Recorded at': '记录时间',
+  'Updated at': '更新时间',
+  'Edit memory': '编辑记忆',
+  'Search indexes are rebuilt from the new text right away.':
+    '保存后全文、向量和实体索引会立即按新内容重建，旧内容不再能被搜到。',
+  'Importance (0–1)': '重要度（0–1）',
+  'Content cannot be empty.': '内容不能为空。',
+  'Importance must be between 0 and 1.': '重要度需在 0 到 1 之间。',
+  'Could not save the memory.': '记忆保存失败。',
+  'Checking what this affects…': '正在检查删除会影响哪些记忆…',
+  'Memory not found.': '记忆不存在或已被删除。',
+  'Also deletes {{count}} older versions it replaced: {{titles}}':
+    '会一并删除被它替换掉的 {{count}} 个历史版本：{{titles}}',
+  'The older and newer versions around it are linked directly, so the history stays continuous.':
+    '它前后的版本会直接相连，版本历史保持连续。',
+  'Removes the relation links to {{titles}}; those memories are kept.':
+    '会解除与 {{titles}} 的关联，这些记忆本身保留。',
+  'Crystal {{title}} loses this source and keeps {{count}} sources.':
+    '结晶 {{title}} 会失去这条来源，剩余 {{count}} 条来源。',
+  'Crystal {{title}} would be left with {{count}} sources, so it becomes a normal memory. Its content is kept.':
+    '结晶 {{title}} 只剩 {{count}} 条来源，不再构成结晶，将转为普通记忆，正文保留。',
+  'This is a crystal: its {{count}} source memories are kept, only the links are removed.':
+    '这是一条结晶：它的 {{count}} 条来源记忆会保留，只解除结晶关系。',
+  'No other memories are affected.': '不影响其他记忆。',
   'This cannot be undone. Archiving keeps the memory out of search while preserving it.':
     '此操作不可撤销。归档可以让它不再出现在检索里,同时保留内容。',
   'Long-term memory: the agent can search, capture and consolidate durable decisions, preferences and lessons across sessions':

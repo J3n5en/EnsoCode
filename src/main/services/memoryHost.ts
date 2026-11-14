@@ -3,6 +3,7 @@ import path from 'node:path';
 import { app } from '@platform';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
 import { normalizeLocale, translate } from '@shared/i18n';
+import type { UnitType } from '@shared/memory/constants';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
 import { effectiveDisabledBuiltinTools } from '@shared/types';
@@ -45,11 +46,12 @@ import {
   retryFailedKgJobs,
   runKgJob,
 } from './memory/kg';
+import { applyManualEdit, type ManualEditResult } from './memory/manual';
 import { approvePendingWrite } from './memory/pending';
 import { getReembedJob, type ReembedJob, runReembedJob } from './memory/reembed';
 import { sanitizeMemoryWrite } from './memory/safety';
 import { distillSpaces, type MemorySpaceContext } from './memory/space';
-import { getMemory, updateMemory } from './memory/store';
+import { getMemory } from './memory/store';
 import type { Embedder, Memory } from './memory/types';
 
 // electron 只出现在这层接线：services/memory/* 保持纯 Node 以便测试注入路径
@@ -492,20 +494,38 @@ function onMemoryCreated(memory: Memory, rerunKg = false): void {
   if (job) void enqueueLlmJob(() => runOneKg(job));
 }
 
-/** 用户手动改标题 / 正文：与工具写入同样过注入扫描与脱敏；标题或正文变了重嵌并重抽实体。不存在或已删除返回 null */
-export function editMemory(id: string, patch: { title: string; content: string }): Memory | null {
+/**
+ * 用户手动编辑（原地改，id 不变）：与工具写入同样过注入扫描与脱敏；标题或正文变了当场重嵌、清掉失效的实体提及并重抽。
+ * 不存在或已删除返回 null
+ */
+export async function editMemory(
+  id: string,
+  patch: { title: string; content: string; unitType?: UnitType; importance?: number }
+): Promise<ManualEditResult | null> {
   const database = memoryDb();
   const current = getMemory(database, id);
   if (!current || current.lifecycleState === 'deleted') return null;
   const safe = sanitizeMemoryWrite({ title: patch.title, content: patch.content });
-  const updated = updateMemory(database, id, { title: safe.title ?? '', content: safe.content });
-  if (!updated) return null;
-  if (updated.content !== current.content || updated.title !== current.title) {
-    scheduleReembed();
+  const result = await applyManualEdit(
+    database,
+    id,
+    {
+      title: safe.title ?? '',
+      content: safe.content,
+      unitType: patch.unitType,
+      importance: patch.importance,
+    },
+    await memoryEmbedder()
+  );
+  if (!result) return null;
+  if (result.semanticChanged) {
+    if (!result.embedded) scheduleReembed();
     // 抽取输入含标题，但正文没变时指纹不变、不会自动重抽，只改标题要显式要求重抽
-    onMemoryCreated(updated, updated.content === current.content);
+    onMemoryCreated(result.memory, result.memory.content === result.before.content);
+  } else {
+    notifyMemoryChanged();
   }
-  return updated;
+  return result;
 }
 
 async function runOneKg(job: KgJob): Promise<void> {

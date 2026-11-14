@@ -81,6 +81,10 @@ export function listMemoriesForAdmin(
   if (query.spaceId !== undefined && query.spaceId !== null) {
     conditions.push('m.space_id = ?');
     params.push(query.spaceId);
+  } else if (query.spaceIds !== undefined) {
+    if (query.spaceIds.length === 0) return { items: [], total: 0 };
+    conditions.push(`m.space_id IN (${query.spaceIds.map(() => '?').join(',')})`);
+    params.push(...query.spaceIds);
   }
   if (query.unitType !== undefined) {
     conditions.push('m.unit_type = ?');
@@ -130,8 +134,12 @@ export async function searchMemoriesForAdmin(
 ): Promise<MemoryListResult> {
   const text = query.query?.trim() ?? '';
   if (!text) return { items: [], total: 0, approximate: true, vectorsUsed: false, assist: 'off' };
-  const spaceIds =
-    query.spaceId !== undefined && query.spaceId !== null ? [query.spaceId] : listSpaceIds(db);
+  const explicit =
+    query.spaceId !== undefined && query.spaceId !== null ? [query.spaceId] : query.spaceIds;
+  if (explicit?.length === 0) {
+    return { items: [], total: 0, approximate: true, vectorsUsed: false, assist: 'off' };
+  }
+  const spaceIds = explicit ?? listSpaceIds(db);
   const deep = query.mode === 'deep';
   const hits = await searchMemories(db, {
     q: text,
@@ -208,15 +216,20 @@ export function deleteMemoryPermanently(db: Database.Database, id: string): bool
         `${id.replace(/[\\%_]/g, (char) => `\\${char}`)}#%`
       );
       const deleted = db.prepare('DELETE FROM memories WHERE id = ?').run(id).changes > 0;
-      db.exec(`
-        DELETE FROM entities WHERE id NOT IN (SELECT entity_id FROM mentions);
-        DELETE FROM entity_aliases WHERE entity_id NOT IN (SELECT id FROM entities);
-        DELETE FROM entity_relations
-          WHERE source_id NOT IN (SELECT id FROM entities) OR target_id NOT IN (SELECT id FROM entities);
-      `);
+      deleteOrphanEntities(db);
       return deleted;
     })
     .immediate();
+}
+
+/** 没有任何提及的实体连同别名、关系一起清掉，避免旧实体名经实体 / 社区通道继续召回 */
+export function deleteOrphanEntities(db: Database.Database): void {
+  db.exec(`
+    DELETE FROM entities WHERE id NOT IN (SELECT entity_id FROM mentions);
+    DELETE FROM entity_aliases WHERE entity_id NOT IN (SELECT id FROM entities);
+    DELETE FROM entity_relations
+      WHERE source_id NOT IN (SELECT id FROM entities) OR target_id NOT IN (SELECT id FROM entities);
+  `);
 }
 
 export function deleteMemorySpace(db: Database.Database, spaceId: string): number {

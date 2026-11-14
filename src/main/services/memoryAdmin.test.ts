@@ -286,3 +286,12 @@ describe('memory admin — 清空历史任务', () => {
     expect(clearFinishedMemoryJobs(db)).toBe(0);
   });
 });
+
+it('lists only the given spaces when spaceIds is set; an empty list matches nothing', async () => {
+  const a = await add('alpha note', projectSpaceId('11111111-1111-4111-8111-111111111111'));
+  await add('beta note', 'global');
+  const ids = (spaceIds: string[]) =>
+    listMemoriesForAdmin(db, { spaceIds, limit: 10, offset: 0 }).items.map((i) => i.id);
+  expect(ids([a.spaceId])).toEqual([a.id]);
+  expect(ids([])).toEqual([]);
+});

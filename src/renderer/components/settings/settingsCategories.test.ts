@@ -30,6 +30,11 @@ describe('visibleCategories', () => {
     expect(visibleCategories(cats, []).map((c) => c.id)).toContain('memory');
   });
 
+  it('keeps the memory page while the secretary is on, so its own memories stay manageable', () => {
+    expect(visibleCategories(cats, ['memory'], false, true).map((c) => c.id)).toContain('memory');
+    expect(resolveActiveCategory('memory', ['memory'], false, true)).toBe('memory');
+  });
+
   it('never hides pages that do not depend on a tool', () => {
     const ids = visibleCategories(cats, ['memory', 'browser', 'isolated_sandbox']).map((c) => c.id);
     expect(ids).toEqual(['general', 'tools', 'usage']);
