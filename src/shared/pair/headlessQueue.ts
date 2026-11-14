@@ -6,6 +6,11 @@ export interface HeadlessQueuedMessage {
   id: string;
   text: string;
   images?: { data: string; mimeType: string }[];
+  /** 谁排的：缺省是用户自己；secretary 表示秘书排的，只有秘书能撤回 */
+  origin?: 'secretary';
+  /** 排队的秘书会话 id */
+  by?: string;
+  at?: number;
 }
 
 export interface HeadlessGoal {

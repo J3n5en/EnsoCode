@@ -33,6 +33,23 @@ describe('secretary tools', () => {
     }
   });
 
+  it('session_send 的 mode 只允许 queue 与 steer，session_stop 的 clearQueue 是布尔', () => {
+    const tools = createSecretaryTools(invoker().port);
+    const schemaOf = (name: string) =>
+      tools.find((tool) => tool.name === name)?.parameters as unknown as {
+        properties: Record<string, { type?: string; enum?: string[] }>;
+        required?: string[];
+      };
+    const send = schemaOf('session_send');
+    expect(send.properties.mode).toMatchObject({ type: 'string', enum: ['queue', 'steer'] });
+    expect(send.required).toEqual(['conversationId', 'message']);
+    const stop = schemaOf('session_stop');
+    expect(stop.properties.clearQueue).toMatchObject({ type: 'boolean' });
+    expect(stop.required).toEqual(['conversationId']);
+    expect(schemaOf('session_queue_list').required).toEqual(['conversationId']);
+    expect(schemaOf('session_queue_cancel').required).toEqual(['conversationId', 'messageId']);
+  });
+
   it('别名与类型在 schema 校验前归一化', () => {
     expect(
       normalizeSecretaryParams('session_create', {
@@ -52,6 +69,16 @@ describe('secretary tools', () => {
       conversationId: 'c1',
       message: 'hi',
     });
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversation_id: 'c1',
+        content: 'hi',
+        mode: ' steer ',
+      })
+    ).toEqual({ conversationId: 'c1', message: 'hi', mode: 'steer' });
+    expect(
+      normalizeSecretaryParams('session_stop', { conversationId: 'c1', clear_queue: 'true' })
+    ).toEqual({ conversationId: 'c1', clearQueue: true });
     expect(
       normalizeSecretaryParams('schedule_add', { name: 'n', prompt: 'p', cron: null })
     ).toEqual({
