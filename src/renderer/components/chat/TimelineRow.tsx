@@ -131,6 +131,7 @@ import { useChatHost } from './chatHost';
 import { compactionFreedPercent } from './contextBreakdown';
 import { EditDiff } from './EditDiff';
 import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
+import { GOAL_FRAME, GoalIcon, NOTICE_BOX, NOTICE_FRAME, NOTICE_ICON } from './injectedVisual';
 import { LocalFileTrigger, Markdown } from './Markdown';
 import { MemoryCaptureResult, MemorySearchResults } from './MemorySearchResults';
 import { mentionChipClass } from './MentionChip';
@@ -365,7 +366,7 @@ function SyntheticNotice({ tag, body }: { tag: string; body: string }) {
   return <RawSyntheticNotice tag={tag} body={body} />;
 }
 
-/** 目标续跑：默认一行，样式对齐工具卡片。展开后才看到完整目标和英文指令。 */
+/** 目标续跑：和 GoalBar 同一套 goal 外观，默认收成一行，点整行展开完整目标与续跑指令 */
 function GoalContinuationCard({ goal, instructions }: { goal: string; instructions: string }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -374,24 +375,21 @@ function GoalContinuationCard({ goal, instructions }: { goal: string; instructio
     <div
       data-enso="goal-continuation"
       data-open={open ? 'true' : 'false'}
-      className="my-1 w-full overflow-hidden rounded-lg border border-border/70 bg-card text-[13px] shadow-xs"
+      className={cn('my-1 w-full min-w-0', GOAL_FRAME)}
     >
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex min-h-6 w-full items-center gap-2 px-2.5 py-1 text-left"
+        className="flex w-full min-w-0 items-center gap-2 text-left text-muted-foreground hover:text-foreground"
       >
-        <StepDot state="ok" />
+        <GoalIcon />
         <span className="min-w-0 flex-1 truncate">
           {t('Continue goal: {{summary}}', { summary: summary || goal })}
         </span>
-        <ChevronRight
-          className={cn('h-3 w-3 shrink-0 text-muted-foreground', open && 'rotate-90')}
-        />
       </button>
       {open && (
-        <div className="space-y-1.5 border-t border-border/60 px-2.5 py-1.5 text-xs">
+        <div className="mt-1.5 space-y-1.5 border-t border-border/60 pt-1.5">
           <p className="whitespace-pre-wrap text-foreground">{goal}</p>
           {instructions && (
             <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
@@ -404,32 +402,31 @@ function GoalContinuationCard({ goal, instructions }: { goal: string; instructio
   );
 }
 
-/** 系统注入块：默认一行，样式对齐工具卡片；点开才看到全文，不画标签名。 */
-function FoldedInjectedCard({ enso, title, body }: { enso: string; title: string; body: string }) {
+/** 系统注入块：默认一行，点整行展开全文，不画标签名也不画右箭头。 */
+function FoldedInjectedCard({
+  enso,
+  icon: Icon,
+  title,
+  body,
+}: {
+  enso: string;
+  icon: typeof Bot;
+  title: string;
+  body: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
-    <div
-      data-enso={enso}
-      data-open={open ? 'true' : 'false'}
-      className="my-1 w-full overflow-hidden rounded-lg border border-border/70 bg-card text-[13px] shadow-xs"
-    >
+    <div data-enso={enso} data-open={open ? 'true' : 'false'} className={NOTICE_FRAME}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex min-h-6 w-full items-center gap-2 px-2.5 py-1 text-left"
+        className="flex w-full items-start gap-2 text-left enabled:hover:text-foreground"
       >
-        <StepDot state="ok" />
+        <Icon className={NOTICE_ICON} />
         <span className="min-w-0 flex-1 truncate">{title}</span>
-        <ChevronRight
-          className={cn('h-3 w-3 shrink-0 text-muted-foreground', open && 'rotate-90')}
-        />
       </button>
-      {open && body && (
-        <div className="border-t border-border/60 px-2.5 py-1.5 text-xs">
-          <p className="whitespace-pre-wrap text-foreground">{body}</p>
-        </div>
-      )}
+      {open && body && <p className="mt-1.5 whitespace-pre-wrap text-foreground">{body}</p>}
     </div>
   );
 }
@@ -471,6 +468,7 @@ function InjectedSegments({
                   // biome-ignore lint/suspicious/noArrayIndexKey: 同一条注入消息里的定时顺序即身份
                   key={foldIndex}
                   enso="secretary-schedule-card"
+                  icon={AlarmClock}
                   title={
                     fold.summary
                       ? t('Scheduled: {{summary}}', { summary: fold.summary })
@@ -490,6 +488,7 @@ function InjectedSegments({
             <FoldedInjectedCard
               key={key}
               enso="session-updates-card"
+              icon={MessagesSquare}
               title={
                 fold.summary
                   ? t('Session updates: {{summary}}', { summary: fold.summary })
@@ -510,17 +509,14 @@ function SubagentNotices({ notices }: { notices: SubagentNotice[] }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="w-full overflow-hidden rounded-lg border border-dashed border-border/60 text-xs text-muted-foreground">
+    <div className={NOTICE_BOX}>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-start gap-2 px-3 py-2 text-left hover:text-foreground"
       >
-        <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <Bot className={NOTICE_ICON} />
         <span className="min-w-0 flex-1 truncate">{notices.map((n) => n.header).join(' · ')}</span>
-        <ChevronRight
-          className={cn('mt-0.5 h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90')}
-        />
       </button>
       {expanded &&
         notices.map((n, i) => (
@@ -557,22 +553,17 @@ function RawSyntheticNotice({ tag, body }: { tag: string; body: string }) {
   const collapsible = nl > 0;
   const Icon = tag.startsWith('coworker-') || tag === 'agent-notification' ? Bot : TerminalSquare;
   return (
-    <div className="w-full rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+    <div className={NOTICE_FRAME}>
       <button
         type="button"
         disabled={!collapsible}
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-start gap-2 text-left enabled:hover:text-foreground"
       >
-        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <Icon className={NOTICE_ICON} />
         <span className={cn('min-w-0 flex-1', collapsible ? 'truncate' : 'whitespace-pre-wrap')}>
           {collapsible ? trimmed.slice(0, nl) : trimmed}
         </span>
-        {collapsible && (
-          <ChevronRight
-            className={cn('mt-0.5 h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90')}
-          />
-        )}
       </button>
       {collapsible && expanded && (
         <pre className="mt-1.5 max-h-80 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
@@ -599,10 +590,7 @@ const UPDATE_ICON: Record<SecretaryUpdateLine['kind'], typeof Bot> = {
 function SecretaryUpdatesNotice({ lines }: { lines: SecretaryUpdateLine[] }) {
   const selectConversation = useSessionsStore((state) => state.selectConversation);
   return (
-    <div
-      data-enso="secretary-updates"
-      className="w-full divide-y divide-border/60 rounded-lg border border-dashed border-border/60 text-xs text-muted-foreground"
-    >
+    <div data-enso="secretary-updates" className={cn(NOTICE_BOX, 'divide-y divide-border/60')}>
       {lines.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: 回传内容不可变，顺序即身份
         <SecretaryUpdateRow key={i} line={line} onOpen={selectConversation} />
