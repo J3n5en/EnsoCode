@@ -50,6 +50,22 @@ describe('secretary tools', () => {
     expect(schemaOf('session_queue_cancel').required).toEqual(['conversationId', 'messageId']);
   });
 
+  it('派发类工具都声明基线、依赖与取消等待派发的参数', () => {
+    const tools = createSecretaryTools(invoker().port);
+    const schemaOf = (name: string) =>
+      tools.find((tool) => tool.name === name)?.parameters as unknown as {
+        properties: Record<string, { type?: string; items?: { type?: string } }>;
+      };
+    for (const name of ['session_create', 'todo_item_dispatch']) {
+      const schema = schemaOf(name);
+      expect(schema.properties.checkout).toMatchObject({ type: 'string' });
+      expect(schema.properties.baseRef).toMatchObject({ type: 'string' });
+      expect(schema.properties.branch).toMatchObject({ type: 'string' });
+      expect(schema.properties.after).toMatchObject({ type: 'array' });
+      expect(schema.properties.after.items).toMatchObject({ type: 'string' });
+    }
+  });
+
   it('别名与类型在 schema 校验前归一化', () => {
     expect(
       normalizeSecretaryParams('session_create', {
