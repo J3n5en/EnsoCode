@@ -1059,13 +1059,27 @@ export const TimelineRow = memo(function TimelineRow({
       );
     case 'tool': {
       const proposalId = secretaryProposalId(item);
-      return (
+      const card = usesToolCard(item.name);
+      const body = (
         <>
           <PluginToolCardSlot name={item.name} output={item.output} state={item.state} />
-          {usesToolCard(item.name) ? <ToolCallCards item={item} /> : <ToolRow item={item} />}
+          {card ? <ToolCallCards item={item} /> : <ToolRow item={item} />}
           {proposalId ? <SecretaryProposalRow proposalId={proposalId} /> : null}
-          {item.pluginArtifacts ? <PluginArtifactsCard artifacts={item.pluginArtifacts} /> : null}
+          {item.pluginArtifacts ? (
+            <PluginArtifactsCard
+              artifacts={item.pluginArtifacts}
+              align={card ? 'card' : 'tool-row'}
+            />
+          ) : null}
         </>
+      );
+      // 工具卡片和紧跟的结果卡片共用聊天列宽度，避免左边缩进把上面一张挤窄
+      return card ? (
+        <div data-enso="tool-card-pair" className="w-full min-w-0">
+          {body}
+        </div>
+      ) : (
+        body
       );
     }
     case 'tool-group':
