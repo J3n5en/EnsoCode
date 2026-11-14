@@ -1,3 +1,4 @@
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { SecretarySkillDraft } from '../types/secretary';
 
 /** 目录名同时是 skill 名：只允许小写字母、数字与单连字符，天然排除路径穿越 */
@@ -33,7 +34,8 @@ export function parseSecretarySkillDraft(value: unknown): SkillDraftResult {
 }
 
 export function renderSecretarySkillFile(draft: SecretarySkillDraft): string {
-  return `---\nname: ${draft.name}\ndescription: ${draft.description}\n---\n\n${draft.body}\n`;
+  const frontmatter = stringifyYaml({ name: draft.name, description: draft.description });
+  return `---\n${frontmatter}---\n\n${draft.body}\n`;
 }
 
 /** 只认本应用写出的格式；读不懂就当作没有，免得把坏文件当成 skill 挂上去 */
@@ -42,15 +44,17 @@ export function parseSecretarySkillFile(raw: string): SecretarySkillDraft | null
   if (!text.startsWith('---')) return null;
   const end = text.indexOf('\n---', 3);
   if (end < 0) return null;
-  const fields: Record<string, string> = {};
-  for (const line of text.slice(3, end).split(/\r?\n/u)) {
-    const at = line.indexOf(':');
-    if (at <= 0) continue;
-    fields[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+  let fields: unknown;
+  try {
+    fields = parseYaml(text.slice(3, end));
+  } catch {
+    return null;
   }
+  if (!fields || typeof fields !== 'object') return null;
+  const { name, description } = fields as Record<string, unknown>;
   const parsed = parseSecretarySkillDraft({
-    name: fields.name,
-    description: fields.description,
+    name,
+    description,
     body: text.slice(end + 4),
   });
   return parsed.ok ? parsed.draft : null;

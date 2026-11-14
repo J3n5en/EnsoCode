@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import {
   isSecretarySkillName,
   parseSecretarySkillDraft,
@@ -74,6 +75,15 @@ describe('skill file format', () => {
 
   it('round-trips through the SKILL.md frontmatter', () => {
     expect(parseSecretarySkillFile(renderSecretarySkillFile(draft))).toEqual(draft);
+  });
+
+  it('writes frontmatter the skill loader can parse even with YAML-significant descriptions', () => {
+    for (const description of ['发布前: 跑测试', '[x] 列表', '"引号"开头', '#标签', 'yes']) {
+      const file = renderSecretarySkillFile({ ...draft, description });
+      const yamlText = file.slice(4, file.indexOf('\n---', 3));
+      expect(parseYaml(yamlText)).toEqual({ name: draft.name, description });
+      expect(parseSecretarySkillFile(file)).toEqual({ ...draft, description });
+    }
   });
 
   it('reads a hand-written file with extra frontmatter keys', () => {
