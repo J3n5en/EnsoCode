@@ -3,6 +3,9 @@
 // 全程在隔离 userData 与 fake provider 上跑，不碰真实账号与真实数据。
 //   node scripts/verify-secretary.mjs [--keep]
 // 产物：/tmp/sec-u10/*.png 与 audit.jsonl
+// 多个会话同时跑时各用一套端口与目录，例如：
+//   SEC_VERIFY_DIR=/tmp/sec-u10-b SEC_VERIFY_CDP_PORT=9433 SEC_VERIFY_FAKE_PORT=8999 \
+//   SEC_VERIFY_PLUGIN_PORT=8998 node scripts/verify-secretary.mjs
 //
 // 步骤编号沿用计划「真机验证脚本思路」，执行顺序按依赖排：
 // 计划第 3 步（派活出卡片）先跑，第 1、2 步用它的会话断言。
@@ -24,12 +27,12 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const REPO = path.resolve(import.meta.dirname, '..');
-const ART = '/tmp/sec-u10';
-const ENV = '/tmp/sec-u10-env';
-const PROJ = '/tmp/sec-u10-proj';
-const CDP_PORT = 9333;
-const FAKE_PORT = 8899;
-const PLUGIN_PORT = 8898;
+const ART = process.env.SEC_VERIFY_DIR || '/tmp/sec-u10';
+const ENV = `${ART}-env`;
+const PROJ = `${ART}-proj`;
+const CDP_PORT = Number(process.env.SEC_VERIFY_CDP_PORT || 9333);
+const FAKE_PORT = Number(process.env.SEC_VERIFY_FAKE_PORT || 8899);
+const PLUGIN_PORT = Number(process.env.SEC_VERIFY_PLUGIN_PORT || 8898);
 const KEEP = process.argv.includes('--keep');
 
 const settingsFile = path.join(ENV, 'settings.json');
@@ -241,6 +244,8 @@ async function prepareEnv() {
   });
   const settings = readJson(settingsFile);
   settings['enso-settings'].state.secretaryEnabled = true;
+  for (const provider of settings['enso-settings'].state.providers)
+    provider.baseUrl = `http://127.0.0.1:${FAKE_PORT}`;
   writeFileSync(settingsFile, JSON.stringify(settings));
   mkdirSync(PROJ, { recursive: true });
   writeFileSync(path.join(PROJ, 'README.md'), 'isolated dispatch target\n');
@@ -266,7 +271,9 @@ async function main() {
   const pluginZipUrl = await servePluginZip();
 
   log('== fake provider + dev');
-  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {});
+  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {
+    FAKE_PROVIDER_PORT: String(FAKE_PORT),
+  });
   await waitFor(
     async () => {
       try {
@@ -1713,10 +1720,6 @@ async function verifyTakeover(cdp, setup) {
     { conversationId: ownId, message: '秘书接手：请回一句收到' },
     '给接管的会话发消息'
   );
-  if (sentByTakeover.text?.includes('invalid arguments'))
-    log(
-      '  BLOCKED 已知 bug：session_send 对所有会话返回 invalid arguments（fix/secretary-session-send）'
-    );
   assert(
     /"status":"(sent|queued)"/u.test(sentByTakeover.text ?? ''),
     '接管: 秘书给接管的会话发消息成功',
