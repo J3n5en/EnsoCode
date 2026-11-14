@@ -1630,6 +1630,56 @@ async function run(cdp, pluginZipUrl) {
   assert(leftBoard.gone, 'step11: 完成后看板不用手动刷新就离开进行中', leftBoard);
   await cdp.shot(path.join(ART, '13-todo-done.png'));
 
+  log('== step11b 完成后被 session_send 唤起，在跑计数加回来');
+  const quiet = await page(`
+    const board = window.__stores.secretary.getState().secretary.board;
+    const running = board.running
+      .filter((card) => card.kind === 'session')
+      .map((card) => card.conversationId);
+    return JSON.stringify({ running });
+  `);
+  assert(
+    !quiet.running.includes(activeDispatch.conversationId),
+    'step11b: 完成后不在在跑里',
+    quiet
+  );
+  const woken = await secretaryTool(
+    cdp,
+    setup,
+    'session_send',
+    {
+      conversationId: activeDispatch.conversationId,
+      message: '接着做，先别结束 [[slow:8000]]',
+    },
+    '把做完的会话再叫起来'
+  );
+  assert(
+    woken.text?.includes('"sent"') || woken.text?.includes('"queued"'),
+    'step11b: session_send 成功',
+    woken
+  );
+  const counted = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const back = await until(() => {
+      const board = window.__stores.secretary.getState().secretary.board;
+      const running = board.running
+        .filter((card) => card.kind === 'session')
+        .map((card) => card.conversationId);
+      return running.includes(${JSON.stringify(activeDispatch.conversationId)}) ? running : null;
+    }, 20000);
+    const summary = document.querySelector('[data-enso=secretary-summary]')?.innerText ?? '';
+    const stats = [...document.querySelectorAll('[data-enso=secretary-stat]')].map((node) => node.innerText);
+    return JSON.stringify({ running: back, summary, stats });
+  `);
+  assert(Array.isArray(counted.running), 'step11b: 唤起后重新计为进行中', counted);
+  const runningText = String(counted.running.length);
+  assert(
+    counted.summary.includes(runningText) &&
+      counted.stats.some((text) => text.includes(runningText)),
+    'step11b: 顶栏和看板上的进行中是同一个数',
+    counted
+  );
+
   log('== step12 同时改文字和完成，面板自己更新');
   const staleText = '旧文字待办';
   const freshText = '新文字待办';

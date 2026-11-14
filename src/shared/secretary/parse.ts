@@ -435,6 +435,7 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (stalledTurn) record.stalledTurn = stalledTurn;
   const stateSince = time(value.stateSince);
   if (stateSince !== undefined) record.stateSince = stateSince;
+  if (value.backgroundRunning === true) record.backgroundRunning = true;
   if (
     isObject(value.lastResult) &&
     RESULT_KINDS.includes(value.lastResult.kind as SecretaryResultKind)

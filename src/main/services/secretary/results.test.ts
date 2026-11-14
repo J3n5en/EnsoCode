@@ -303,6 +303,61 @@ describe('工作台投影', () => {
     ]);
   });
 
+  it('空闲但仍要续跑、等后台任务，或实时已在跑，都算进行中', () => {
+    const file = emptyFile({
+      dispatched: {
+        renew: record({
+          conversationId: 'renew',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 5 },
+        }),
+        waiting: record({
+          conversationId: 'waiting',
+          lastState: 'idle',
+          backgroundRunning: true,
+        }),
+        live: record({ conversationId: 'live', lastState: 'idle' }),
+        finished: record({
+          conversationId: 'finished',
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 4 },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: {
+        renew: {
+          title: '续跑',
+          sessionFile: '/tmp/renew',
+          goal: { status: 'active', text: '把构建修好' },
+        },
+        waiting: { title: '等任务', sessionFile: '/tmp/waiting' },
+        live: { title: '又跑了', sessionFile: '/tmp/live' },
+        finished: {
+          title: '做完',
+          sessionFile: '/tmp/finished',
+          goal: { status: 'completed', text: '把构建修好' },
+        },
+      },
+      statuses: { renew: idle, waiting: idle, live: running, finished: idle },
+      projects,
+      todos: [],
+    });
+    const runningIds = board.running.map((card) =>
+      card.kind === 'session' ? card.conversationId : ''
+    );
+    expect(runningIds).toEqual(['renew', 'live', 'waiting']);
+    expect(
+      board.running.find((card) => card.kind === 'session' && card.conversationId === 'renew')
+    ).toMatchObject({
+      continuing: true,
+      state: 'idle',
+    });
+    expect(board.done.map((card) => (card.kind === 'session' ? card.conversationId : ''))).toEqual([
+      'finished',
+    ]);
+  });
+
   it('失败的派出会话进需要你处理，待办只列未完成的', () => {
     const file = emptyFile({
       dispatched: {

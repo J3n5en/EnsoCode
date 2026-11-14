@@ -660,4 +660,31 @@ describe('定时', () => {
     gone.host.tick(1_000);
     expect(gone.state.todos[0].problem).toBe('deleted');
   });
+
+  it('后台任务还在时记在派发记录上，清空后抹掉', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      event('background-tasks-level', {
+        tasks: [{ taskId: 't', command: 'sleep 30', status: 'running', tail: '', startedAt: 0 }],
+      }),
+      []
+    );
+    expect(h.state.file.dispatched.c1.backgroundRunning).toBe(true);
+    h.host.onAgentEvent(
+      event('background-tasks-level', {
+        tasks: [{ taskId: 't', command: 'sleep 30', status: 'done', tail: '', startedAt: 0 }],
+      }),
+      []
+    );
+    expect(h.state.file.dispatched.c1.backgroundRunning).toBeUndefined();
+  });
+
+  it('实时状态和派发记录不一致时，下一分钟对齐', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.state.statuses.c1 = running;
+    h.host.tick(1_000);
+    expect(h.state.file.dispatched.c1.lastState).toBe('running');
+  });
 });

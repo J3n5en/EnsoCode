@@ -33,16 +33,24 @@ import {
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
-import { buildBoard, proposalUpdate, takeoverViews } from './results';
+import {
+  buildBoard,
+  goalStatusOf,
+  linkedTodoSession,
+  proposalUpdate,
+  sessionNeedsUser,
+  sessionStillGoing,
+  takeoverViews,
+} from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import { SecretaryStore } from './store';
 import {
   linkTodo,
   markTodoProblem,
   reopenTodo,
+  resumeLinkedTodo,
   TODO_STATUSES,
   type TodoStatus,
-  todoSessionView,
   todoStatus,
 } from './todoLifecycle';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
@@ -204,10 +212,47 @@ async function profileOf(ports: SecretaryDispatchPorts): Promise<SecretaryProfil
   return (await ports.profile()) ?? defaultProfile();
 }
 
-function runningCount(file: SecretaryDispatchFile): number {
-  return Object.values(file.dispatched).filter(
-    (record) => record.lastState === 'running' && !record.takeover
-  ).length;
+/** 派出上限只数秘书派出的会话。接管是用户交来的已有会话，不占这个名额 */
+async function runningCount(
+  ports: SecretaryDispatchPorts,
+  file: SecretaryDispatchFile
+): Promise<number> {
+  const rows = await ports.rows();
+  let count = 0;
+  for (const record of Object.values(file.dispatched)) {
+    if (record.takeover) continue;
+    const row = rows[record.conversationId];
+    const status = await ports.status(record.conversationId);
+    const live = row?.sessionFile ? status.state : (status.state ?? record.lastState);
+    const state = !row?.sessionFile && row ? 'not-started' : live;
+    if (sessionNeedsUser(record, state)) continue;
+    if (
+      sessionStillGoing({
+        state,
+        recordedState: record.lastState,
+        goalStatus: goalStatusOf(row),
+        backgroundRunning: record.backgroundRunning === true,
+      })
+    )
+      count += 1;
+  }
+  return count;
+}
+
+async function noteDispatchResumed(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<void> {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return;
+  const now = ports.now();
+  if (record.lastState !== 'running') record.stateSince = now;
+  record.lastState = 'running';
+  record.lastEventAt = now;
+  ports.saveDispatch(file);
+  const resumed = resumeLinkedTodo(await ports.todos(), conversationId, now);
+  if (resumed.changed) ports.saveTodos(resumed.todos);
 }
 
 async function dispatchContext(
@@ -222,7 +267,7 @@ async function dispatchContext(
     visible: visibleProjects(projects, profile).some(
       (candidate) => candidate.projectId === projectId
     ),
-    running: runningCount(file),
+    running: await runningCount(ports, file),
     max: profile.maxRunningDispatches,
     worktreeMode: profile.dispatchWorktree,
   };
@@ -607,6 +652,7 @@ export function createSecretaryDispatchHandlers(
         if (!(await ports.appendQueued(conversationId, { id: ports.newId(), text }))) {
           return deny(ports, ctx, 'session_send', 'not-found', conversationId);
         }
+        await noteDispatchResumed(ports, conversationId);
         ports.audit({
           at: ports.now(),
           secretaryConversationId: ctx.secretaryConversationId,
@@ -648,6 +694,8 @@ export function createSecretaryDispatchHandlers(
         ok: true,
         detail: 'sent',
       });
+      await noteDispatchResumed(ports, conversationId);
+      notifySecretaryChanged();
       return { ok: true, result: { status: 'sent' } };
     },
 
@@ -693,10 +741,10 @@ export function createSecretaryDispatchHandlers(
           continue;
         if (projectId && todo.projectId !== projectId) continue;
         const session = todo.conversationId
-          ? todoSessionView(
+          ? linkedTodoSession(
+              file.dispatched[todo.conversationId],
               rows[todo.conversationId],
-              await ports.status(todo.conversationId),
-              file.dispatched[todo.conversationId]?.lastResult?.kind
+              await ports.status(todo.conversationId)
             )
           : null;
         const phase = todoStatus(todo, session);

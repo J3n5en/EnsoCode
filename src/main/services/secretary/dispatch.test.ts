@@ -326,6 +326,59 @@ describe('session_create', () => {
     ]);
   });
 
+  it('空闲但还在等后台或自动续跑的会话也占派出名额，做完的不占', async () => {
+    const waiting = emptyFile();
+    waiting.dispatched.a = {
+      conversationId: 'a',
+      projectId: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: 1,
+      turn: 1,
+      lastState: 'idle',
+      lastEventAt: 1,
+      lastResult: { kind: 'turn-ended', turn: 1, at: 1 },
+    };
+    const blocked = harness({
+      file: waiting,
+      profile: profile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: ['p1'],
+        maxRunningDispatches: 1,
+      }),
+      rows: {
+        a: { title: '等 CI', sessionFile: '/a', goal: { status: 'waiting', text: '等 CI' } },
+      },
+      statuses: { a: idle },
+    });
+    expect(
+      await call(blocked.handlers.session_create, { projectId: 'p1', prompt: '再派一个' })
+    ).toEqual({
+      ok: false,
+      error: 'dispatch-limit',
+    });
+
+    const finished = emptyFile();
+    finished.dispatched.a = {
+      ...waiting.dispatched.a,
+      lastResult: { kind: 'goal-complete', turn: 1, at: 1 },
+    };
+    const open = harness({
+      file: finished,
+      profile: profile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: ['p1'],
+        maxRunningDispatches: 1,
+      }),
+      rows: {
+        a: { title: '做完', sessionFile: '/a', goal: { status: 'completed', text: '做完' } },
+      },
+      statuses: { a: idle },
+    });
+    expect(
+      await call(open.handlers.session_create, { projectId: 'p1', prompt: '再派一个' })
+    ).toMatchObject({ ok: true, result: { status: 'created' } });
+  });
+
   it('项目不可见时拒绝', async () => {
     const h = harness({ profile: profile({ visibleProjectIds: ['p2'] }) });
     const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
@@ -452,6 +505,41 @@ describe('session_send', () => {
     expect(result).toEqual({ ok: true, result: { status: 'sent' } });
     expect(h.resumes).toEqual(['c1']);
     expect(h.prompts).toHaveLength(1);
+  });
+
+  it('完成后被重新唤起，记录回到运行中，关联待办也回到进行中', async () => {
+    const file = dispatchedFile();
+    file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 2, at: 900 };
+    const h = harness({
+      file,
+      rows: { c1: { title: '记忆', sessionFile: '/c1', projectId: 'p1' } },
+      statuses: { c1: idle },
+      todos: [
+        {
+          id: 't1',
+          text: '改记忆',
+          createdAt: 1,
+          updatedAt: 1,
+          conversationId: 'c1',
+          doneAt: 900,
+        },
+      ],
+    });
+    const before = await buildSecretaryState(h.ports, { enabled: true, projectId: 'sec' });
+    expect(before.board.running).toEqual([]);
+    expect(
+      await call(h.handlers.session_send, { conversationId: 'c1', message: '接着做' })
+    ).toEqual({
+      ok: true,
+      result: { status: 'sent' },
+    });
+    expect(h.file.dispatched.c1.lastState).toBe('running');
+    expect(h.todos[0].doneAt).toBeUndefined();
+    const after = await buildSecretaryState(h.ports, { enabled: true, projectId: 'sec' });
+    expect(
+      after.board.running.map((card) => (card.kind === 'session' ? card.conversationId : ''))
+    ).toEqual(['c1']);
+    expect(after.board.todos.map((todo) => todo.phase)).toEqual(['active']);
   });
 
   it('恢复失败时不发消息', async () => {
@@ -604,7 +692,8 @@ describe('接管', () => {
     expect(h.audits.at(-1)).toMatchObject({ op: 'session_send', targetId: 'c1', detail: 'sent' });
 
     const state = await buildSecretaryState(h.ports, { enabled: true, projectId: 'sec-proj' });
-    expect(state.board.done[0]).toMatchObject({ conversationId: 'c1', takeover: true });
+    expect(state.board.running[0]).toMatchObject({ conversationId: 'c1', takeover: true });
+    expect(state.board.done).toEqual([]);
     expect(state.takeovers).toEqual([
       {
         conversationId: 'c1',

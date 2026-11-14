@@ -151,6 +151,8 @@ export interface DispatchRecord {
   lastState: 'running' | 'idle' | 'waiting' | 'error';
   /** 心跳：派出会话每个事件都刷新，只用于判断卡住，不能当动态时间 */
   lastEventAt: number;
+  /** 还有没结束的后台任务。实时状态是空闲时仍算在跑 */
+  backgroundRunning?: boolean;
   /** lastState 变成当前值的时间；旧记录没有，读时按派出或结果时间估 */
   stateSince?: number;
   /** 最后一轮的助手正文，工作台显示"最后说了什么" */
@@ -277,6 +279,8 @@ export type SecretaryCard =
       result?: SecretaryResultKind;
       /** 与 result 同时出现：结果发生的时间 */
       resultAt?: number;
+      /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
+      continuing?: true;
       secretaryConversationId: string;
       unread?: boolean;
       takeover?: true;
