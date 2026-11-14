@@ -434,7 +434,7 @@ function InboxCard({
               <Button size="xs" variant="outline" disabled={busy} onClick={() => approve('deny')}>
                 {t('Deny')}
               </Button>
-              {!item.request.protected && (
+              {!item.request.protected && !item.request.mandatory && (
                 <Button
                   size="xs"
                   variant="outline"

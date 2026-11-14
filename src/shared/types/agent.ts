@@ -296,6 +296,8 @@ export interface ApprovalRequestInfo {
   phase?: 'reviewing';
   /** 命中受保护动作底线的类别；此类审批只能单次放行 */
   protected?: ProtectedActionCategory;
+  /** 每次都要真人：不走代审、不随切档放行、不记「本会话总是允许」 */
+  mandatory?: boolean;
   /** 等人处理的截止时间（ms）；到期由 Main 按超时拒绝 */
   expiresAt?: number;
   /** 托管判定无效（超时 / 出错 / 缺字段）退回人工的原因 */

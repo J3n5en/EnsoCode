@@ -1211,4 +1211,59 @@ describe('withMandatoryApproval', () => {
     await expect(pending).rejects.toThrow('User denied this operation');
     expect(tool.execute).not.toHaveBeenCalled();
   });
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('assistant 档不走代审：代审模型 auto_allow 也不能放行', async () => {
+    const review = vi.fn().mockResolvedValue({ decision: 'auto_allow' });
+    const { gate, requests } = makeGate('assistant', { review });
+    const tool = pluginTool(false);
+    const pending = withMandatoryApproval(gate, 'mcp', tool).execute(
+      'call-1',
+      { text: 'hi' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    await flush();
+    expect(requests).toHaveLength(1);
+    expect(gate.snapshot()[0]?.phase).toBeUndefined();
+    expect(review).not.toHaveBeenCalled();
+    expect(tool.execute).not.toHaveBeenCalled();
+    gate.respond(requests[0], 'allow');
+    await expect(pending).resolves.toBeDefined();
+  });
+
+  it('切到 full 档不自动放行挂起的强制审批', async () => {
+    const { gate, requests } = makeGate('supervised');
+    const tool = pluginTool(false);
+    const pending = withMandatoryApproval(gate, 'mcp', tool).execute(
+      'call-1',
+      { text: 'hi' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(requests).toHaveLength(1);
+    gate.mode = 'full';
+    gate.reconsider();
+    await flush();
+    expect(tool.execute).not.toHaveBeenCalled();
+    gate.respond(requests[0], 'allow');
+    await expect(pending).resolves.toBeDefined();
+  });
+
+  it('「本会话总是允许」不记进会话白名单', async () => {
+    const { gate, requests } = makeGate('supervised');
+    const tool = pluginTool(false);
+    const wrapped = withMandatoryApproval(gate, 'mcp', tool);
+    const first = wrapped.execute('call-1', {}, undefined, undefined, undefined as never);
+    gate.respond(requests[0], 'allowSession');
+    await expect(first).resolves.toBeDefined();
+    expect(gate.needsApproval('mcp', tool.name)).toBe(true);
+    const second = wrapped.execute('call-2', {}, undefined, undefined, undefined as never);
+    expect(requests).toHaveLength(2);
+    gate.respond(requests[1], 'deny');
+    await expect(second).rejects.toThrow('User denied this operation');
+  });
 });

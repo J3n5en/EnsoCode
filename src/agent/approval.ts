@@ -43,6 +43,11 @@ interface PendingApproval {
   startReview(): void;
 }
 
+/** 受保护动作与强制审批只能单次真人放行：不随档位、不随会话白名单 */
+function alwaysHuman(info: ApprovalRequestInfo): boolean {
+  return Boolean(info.protected) || info.mandatory === true;
+}
+
 export type ApprovalReviewResult =
   | { decision: 'auto_allow' | 'block'; rationale?: string; record?: ApprovalReviewRecord }
   /** 托管拒绝：只拒这一条，message 作为工具错误交回模型 */
@@ -133,11 +138,12 @@ export class ApprovalGate {
     toolCallId?: string,
     filePaths?: string[],
     protectedCategory?: ProtectedActionCategory,
-    guard?: CommandGuardHit
+    guard?: CommandGuardHit,
+    mandatory?: boolean
   ): Promise<ApprovalResult> {
     // 无人值守：不建卡片、不占人。代审能给出结论时仍先问代审（见下方 review 分支），
     // 只有「本来要问人」的路径才落到这里直接拒绝。
-    const wantsHuman = this.mode !== 'assistant' || Boolean(protectedCategory);
+    const wantsHuman = this.mode !== 'assistant' || Boolean(protectedCategory) || mandatory === true;
     if (this.autoReject && wantsHuman) return Promise.resolve('no-approver');
     const requestId = `apr-${++this.counter}-${Date.now()}`;
     const info: ApprovalRequestInfo = {
@@ -149,6 +155,7 @@ export class ApprovalGate {
       ...(toolCallId ? { toolCallId } : {}),
       ...(protectedCategory ? { protected: protectedCategory } : {}),
       ...(guard ? { guard: { ...guard } } : {}),
+      ...(mandatory ? { mandatory: true } : {}),
     };
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -209,7 +216,9 @@ export class ApprovalGate {
       }
       // 受保护动作不自动交给代审；真人点「代审」才逐条移交
       const review =
-        this.mode === 'assistant' && !info.protected ? this.options?.review : undefined;
+        this.mode === 'assistant' && !info.protected && !info.mandatory
+          ? this.options?.review
+          : undefined;
       if (!review) {
         // assistant 档没配代审模型时本来会退回真人；无人值守下没人可退，直接拒绝
         if (this.autoReject) {
@@ -235,7 +244,7 @@ export class ApprovalGate {
         entry.settle('no-approver');
         return;
       }
-      if (!entry.info.protected && !this.needsApproval(entry.info.kind, entry.info.tool)) {
+      if (!alwaysHuman(entry.info) && !this.needsApproval(entry.info.kind, entry.info.tool)) {
         entry.settle('allow');
         return;
       }
@@ -279,7 +288,7 @@ export class ApprovalGate {
         entry.settle('deny');
         return;
       case 'allowSession':
-        if (!entry.info.protected) this.sessionAllowed.add(entry.info.tool);
+        if (!alwaysHuman(entry.info)) this.sessionAllowed.add(entry.info.tool);
         entry.settle('allow');
         return;
       case 'allow':
@@ -301,8 +310,8 @@ export class ApprovalGate {
   /** 档位变更后重判挂起请求：切档即时生效，不让卡片一直等到超时 */
   reconsider(): void {
     for (const entry of [...this.pending.values()]) {
-      // 受保护动作永远要真人，不随档位放行
-      if (!entry.info.protected && !this.needsApproval(entry.info.kind, entry.info.tool)) {
+      // 受保护动作与强制审批永远要真人，不随档位放行
+      if (!alwaysHuman(entry.info) && !this.needsApproval(entry.info.kind, entry.info.tool)) {
         entry.settle('allow');
       } else if (this.autoReject) {
         entry.settle('no-approver');
@@ -401,7 +410,11 @@ export function withMandatoryApproval(
         kind,
         summarizeApproval(kind, params, definition.name),
         signal,
-        toolCallId
+        toolCallId,
+        undefined,
+        undefined,
+        undefined,
+        true
       );
       if (result === 'no-approver') {
         throw new Error(approvalNoUserMessage(definition.label || definition.name, gate.mode));

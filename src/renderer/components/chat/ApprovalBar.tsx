@@ -195,7 +195,7 @@ export function ApprovalBar({
           >
             {t('Deny')}
           </button>
-          {allowSession && !active.protected && (
+          {allowSession && !active.protected && !active.mandatory && (
             <button
               type="button"
               disabled={disabled}
