@@ -63,6 +63,8 @@ beforeEach(() => {
         listSchedules: async () => ({ ok: true, schedules: [] }),
         listSkills: async () => ({ ok: true, skills: [] }),
         listTools: async () => ({ ok: true, tools: [] }),
+        listTakeovers: async () => ({ ok: true, takeovers: [] }),
+        onStateChanged: () => () => {},
       },
       extensionPlugins: { list: async () => [] },
     },
