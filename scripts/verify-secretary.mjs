@@ -2116,11 +2116,11 @@ async function verifyMemoryManualEdit(cdp, setup) {
       typeInto(q('[data-memory-field="importance"]'), '0.85');
       await sleep(200);
       q('[data-memory-action="save"]').click();
-      const shown = await until(
+      const saved = await until(
         () => q('[data-memory-detail] [data-memory-field="content"]')?.textContent.includes('narwhal'),
         15000
       );
-      return JSON.stringify({ ok: Boolean(shown), error: q('[data-memory-edit] .text-destructive')?.textContent ?? null });
+      return JSON.stringify({ ok: Boolean(saved), error: q('[data-memory-edit] .text-destructive')?.textContent ?? null });
     `);
     assert(edited.ok, '记忆: 设置页编辑保存后详情显示新内容', edited);
     await settingsCdp.shot(path.join(ART, '40-memory-edited.png'));
