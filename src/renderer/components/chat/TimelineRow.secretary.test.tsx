@@ -66,3 +66,26 @@ it('夹在别的文字里的目标块和定时块也不露标签', () => {
   expect(out).not.toContain('<secretary-schedule>');
   expect(out).not.toContain('<agent-notification>');
 });
+
+it('多行定时收成工具卡片，默认不露出标签和完整提示词', () => {
+  const out = html(
+    user(
+      '<secretary-schedule>\n- [schedule] 巡检：巡检进行中的派发会话\n逐个看是否卡住\n</secretary-schedule>'
+    )
+  );
+  expect(out).toContain('data-enso="secretary-schedule-card"');
+  expect(out).toContain('data-open="false"');
+  expect(out).toContain('Scheduled: 巡检进行中的派发会话');
+  expect(out).not.toContain('<secretary-schedule>');
+  expect(out).not.toContain('逐个看是否卡住');
+  expect(out).not.toContain('border-dashed');
+});
+
+it('解析不了的回传也不露出标签名', () => {
+  const out = html(user('<session-updates>\n不是列表\n第二行\n</session-updates>'));
+  expect(out).toContain('data-enso="session-updates-card"');
+  expect(out).toContain('data-open="false"');
+  expect(out).toContain('Session updates: 不是列表');
+  expect(out).not.toContain('<session-updates>');
+  expect(out).not.toContain('第二行');
+});

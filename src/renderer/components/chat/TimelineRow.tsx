@@ -9,7 +9,10 @@ import type { MaskReport } from '@shared/privacyMask/report';
 import {
   goalHeadline,
   type InjectedSegment,
+  scheduleFolds,
   splitInjectedBlocks,
+  stripInjectedWrapperLines,
+  updatesFold,
 } from '@shared/secretary/injectedBlocks';
 import { parseSecretaryUpdates, type SecretaryUpdateLine } from '@shared/secretary/updatesText';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
@@ -56,6 +59,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import {
+  Fragment,
   memo,
   type ReactNode,
   useCallback,
@@ -396,6 +400,36 @@ function GoalContinuationCard({ goal, instructions }: { goal: string; instructio
   );
 }
 
+/** 系统注入块：默认一行，样式对齐工具卡片；点开才看到全文，不画标签名。 */
+function FoldedInjectedCard({ enso, title, body }: { enso: string; title: string; body: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      data-enso={enso}
+      data-open={open ? 'true' : 'false'}
+      className="my-1 w-full overflow-hidden rounded-lg border border-border/70 bg-card text-[13px] shadow-xs"
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-6 w-full items-center gap-2 px-2.5 py-1 text-left"
+      >
+        <StepDot state="ok" />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <ChevronRight
+          className={cn('h-3 w-3 shrink-0 text-muted-foreground', open && 'rotate-90')}
+        />
+      </button>
+      {open && body && (
+        <div className="border-t border-border/60 px-2.5 py-1.5 text-xs">
+          <p className="whitespace-pre-wrap text-foreground">{body}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InjectedSegments({
   segments,
   searchQuery,
@@ -405,6 +439,7 @@ function InjectedSegments({
   searchQuery: string;
   activeNth: number;
 }) {
+  const { t } = useI18n();
   return (
     <>
       {segments.map((segment, index) => {
@@ -422,12 +457,42 @@ function InjectedSegments({
               instructions={segment.instructions}
             />
           );
+        if (segment.kind === 'schedule') {
+          const folds = scheduleFolds(segment.raw);
+          const cards = folds.length > 0 ? folds : [{ summary: '', body: '' }];
+          return (
+            <Fragment key={key}>
+              {cards.map((fold, foldIndex) => (
+                <FoldedInjectedCard
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 同一条注入消息里的定时顺序即身份
+                  key={foldIndex}
+                  enso="secretary-schedule-card"
+                  title={
+                    fold.summary
+                      ? t('Scheduled: {{summary}}', { summary: fold.summary })
+                      : t('Scheduled')
+                  }
+                  body={fold.body}
+                />
+              ))}
+            </Fragment>
+          );
+        }
         if (segment.kind === 'updates') {
           const lines = parseSecretaryUpdates(segment.raw);
-          return lines ? (
-            <SecretaryUpdatesNotice key={key} lines={lines} />
-          ) : (
-            <RawSyntheticNotice key={key} tag="session-updates" body={segment.raw} />
+          if (lines) return <SecretaryUpdatesNotice key={key} lines={lines} />;
+          const fold = updatesFold(segment.raw);
+          return (
+            <FoldedInjectedCard
+              key={key}
+              enso="session-updates-card"
+              title={
+                fold.summary
+                  ? t('Session updates: {{summary}}', { summary: fold.summary })
+                  : t('Session updates')
+              }
+              body={fold.body}
+            />
           );
         }
         return <SyntheticNotice key={key} tag={segment.tag} body={segment.body} />;
@@ -482,7 +547,8 @@ function SubagentNotices({ notices }: { notices: SubagentNotice[] }) {
 
 function RawSyntheticNotice({ tag, body }: { tag: string; body: string }) {
   const [expanded, setExpanded] = useState(false);
-  const trimmed = body.trim();
+  const trimmed = stripInjectedWrapperLines(body);
+  if (!trimmed) return null;
   const nl = trimmed.indexOf('\n');
   const collapsible = nl > 0;
   const Icon = tag.startsWith('coworker-') || tag === 'agent-notification' ? Bot : TerminalSquare;
