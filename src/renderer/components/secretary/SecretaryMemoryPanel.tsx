@@ -35,22 +35,22 @@ function MemoryRow({
 }) {
   return (
     <div data-enso="secretary-memory-row" data-memory-id={item.id} className="flex flex-col">
-      <div className={cn(HOVER_ROW_CLASS, 'flex items-start rounded-lg px-1.5 py-2')}>
+      <div className={cn(HOVER_ROW_CLASS, 'w-full rounded-lg px-1.5 py-2')}>
         <button
           type="button"
           data-enso="secretary-memory-open"
           onClick={() => onOpen(item.id)}
-          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          className="block w-full min-w-0 text-left"
         >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px]">{item.title}</span>
-            {item.contentSummary && (
-              <span className="mt-0.5 line-clamp-2 block text-[12px] text-muted-foreground">
-                {item.contentSummary}
-              </span>
-            )}
+          <span className="flex w-full min-w-0 items-baseline gap-1.5">
+            <span className="min-w-0 truncate text-[13px]">{item.title}</span>
+            <span className="shrink-0 text-[11.5px] text-subtle-foreground">{trailing}</span>
           </span>
-          <span className="shrink-0 text-[11.5px] text-subtle-foreground">{trailing}</span>
+          {item.contentSummary && (
+            <span className="mt-0.5 line-clamp-2 block text-[12px] text-muted-foreground">
+              {item.contentSummary}
+            </span>
+          )}
         </button>
         <MemoryRowActions id={item.id} onEdit={onEdit} onDelete={onDelete} />
       </div>
@@ -112,8 +112,8 @@ export function SecretaryMemoryPanel() {
   );
 
   return (
-    <div data-enso="secretary-memory" className="flex flex-col gap-2 px-3 py-3">
-      <section className="flex flex-col">
+    <div data-enso="secretary-memory" className="flex w-full flex-col gap-2 px-3 py-3">
+      <section className="flex w-full flex-col">
         <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">
           {t('{{name}} remembers', { name })}
           {own.length > 0 && <span className="ml-1 tabular-nums">{own.length}</span>}
@@ -129,7 +129,7 @@ export function SecretaryMemoryPanel() {
         )}
       </section>
       {others.length > 0 && (
-        <section className="flex flex-col">
+        <section className="flex w-full flex-col">
           <h3 className="flex items-center gap-1.5 px-1.5 pb-0.5 text-[12px] text-subtle-foreground">
             {t('From your projects')}
             <Lock className="size-3" />

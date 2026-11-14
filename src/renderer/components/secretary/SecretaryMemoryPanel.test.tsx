@@ -120,6 +120,14 @@ describe('SecretaryMemoryPanel 行内操作', () => {
     expect(container.querySelector('[data-enso="secretary-memory-detail"]')).toBeNull();
   });
 
+  it('正文占满整行，时间跟在标题后面，不为右侧操作留列', () => {
+    const open = inRow('own1', '[data-enso="secretary-memory-open"]');
+    expect(open?.className).toContain('w-full');
+    const summary = open?.querySelector('.line-clamp-2');
+    expect(summary?.parentElement).toBe(open);
+    expect(summary?.textContent).toContain('summary own1');
+  });
+
   it('删除交给确认弹窗，点了不直接删', () => {
     act(() => {
       inRow('own2', '[data-memory-action="row-delete"]')?.click();
