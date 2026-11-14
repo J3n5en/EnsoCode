@@ -211,7 +211,10 @@ export function maybeNotify(event: RendererAgentEvent): void {
       );
       return;
     case 'turn-completed':
-      if (event.digest && shouldSilenceTurn(event.digest.userText, event.digest.assistantText)) {
+      if (
+        event.silent === true ||
+        (event.digest && shouldSilenceTurn(event.digest.userText, event.digest.assistantText))
+      ) {
         return;
       }
       notify(

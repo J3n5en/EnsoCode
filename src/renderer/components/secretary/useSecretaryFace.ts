@@ -23,9 +23,7 @@ export function useSecretaryFace(): SecretaryFaceModel | null {
   };
 }
 
-/** 当前聊天属于秘书项目时，回复头和空会话用这张脸 */
-export function useSecretaryChatSpeaker(): SecretaryFaceModel | null {
-  const face = useSecretaryFace();
+function useDisplayedProjectKind(): string | undefined {
   const projectId = useSessionsStore((state) => {
     const active = state.activeId ? state.conversations[state.activeId] : undefined;
     if (!active) return undefined;
@@ -34,8 +32,18 @@ export function useSecretaryChatSpeaker(): SecretaryFaceModel | null {
       : active;
     return displayed.projectId;
   });
-  const kind = useSettingsStore((state) =>
+  return useSettingsStore((state) =>
     projectId ? state.projects.find((project) => project.id === projectId)?.kind : undefined
   );
-  return kind === 'secretary' ? face : null;
+}
+
+/** 当前打开的会话属于秘书项目。档案还没建好时也算。 */
+export function useIsSecretaryChat(): boolean {
+  return useDisplayedProjectKind() === 'secretary';
+}
+
+/** 当前聊天属于秘书项目时，回复头和空会话用这张脸 */
+export function useSecretaryChatSpeaker(): SecretaryFaceModel | null {
+  const face = useSecretaryFace();
+  return useIsSecretaryChat() ? face : null;
 }

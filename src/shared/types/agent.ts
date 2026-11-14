@@ -2021,6 +2021,8 @@ export type AgentWorkerEvent =
       requestBudgetStop?: true;
       /** 预算停止后补报告那一轮出错：错误随结果交回，不丢已有输出 */
       requestBudgetError?: string;
+      /** 秘书对本轮系统回传调用了 silence_turn（或旧静默标记）：不弹通知 */
+      silent?: true;
     }
   | {
       type: 'turn-failed';
@@ -4716,6 +4718,7 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(value.turnId) &&
         (value.digest === undefined || parseTurnDigest(value.digest)) &&
         (value.aborted === undefined || value.aborted === true) &&
+        (value.silent === undefined || value.silent === true) &&
         (value.requestBudgetStop === undefined || value.requestBudgetStop === true) &&
         (value.requestBudgetError === undefined ||
           (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError)))

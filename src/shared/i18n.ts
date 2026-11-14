@@ -526,6 +526,9 @@ export const zhTranslations: Record<string, string> = {
   'While a reply is still running, wait a moment after tools and thinking finish, then fold that stretch into one row. Calls still running stay visible, and failed calls stay visible':
     '回答还在进行时，工具和思考都结束后稍等片刻，把这一段折成一行。正在跑的调用不收，失败的调用仍单独显示',
   'Worked for {{duration}}': '已工作 {{duration}}',
+  'Patrol clear': '巡检正常',
+  'Update seen': '已查看',
+  'Continue goal: {{summary}}': '继续目标：{{summary}}',
   '{{count}} thinking steps': '{{count}} 段思考',
   Activity: '过程',
   'After you send a new message, fold earlier turns down to the question, timestamp and duration; the latest turn stays expanded':
