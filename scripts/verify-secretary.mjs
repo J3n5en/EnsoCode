@@ -1226,6 +1226,10 @@ async function run(cdp, pluginZipUrl) {
   const limitBefore = readJson(registryFile).conversations.filter(
     (entry) => entry.projectId === setup.projectId
   ).length;
+  // 进行中标记写在确认前一刻。host 的 tick 和会话事件会按真实状态把 lastState 改回去
+  const limitSeedNow = readJson(dispatchFile);
+  limitSeedNow.dispatched[dispatchedId].lastState = 'running';
+  writeFileSync(dispatchFile, JSON.stringify(limitSeedNow));
   const refused = await page(`
     return JSON.stringify(
       await window.electronAPI.secretary.resolveProposal(${JSON.stringify(limitProposal.proposalId)}, 'confirm')
