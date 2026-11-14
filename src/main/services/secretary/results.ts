@@ -1,15 +1,16 @@
 import { projectNameFromPath } from '@shared/projectName';
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { ProjectAuthority } from '@shared/types/agent';
-import type {
-  DispatchRecord,
-  SecretaryBoard,
-  SecretaryCard,
-  SecretaryDispatchFile,
-  SecretaryProposal,
-  SecretaryResultKind,
-  SecretaryTodo,
-  SecretaryUpdate,
+import {
+  type DispatchRecord,
+  NEEDS_YOU_RESULTS,
+  type SecretaryBoard,
+  type SecretaryCard,
+  type SecretaryDispatchFile,
+  type SecretaryProposal,
+  type SecretaryResultKind,
+  type SecretaryTodo,
+  type SecretaryUpdate,
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
 import type { SecretarySessionStatus } from './readers';
@@ -197,8 +198,6 @@ export interface BoardInput {
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
-const NEEDS_YOU_RESULTS: ReadonlySet<SecretaryResultKind> = new Set(['failed', 'needs-user']);
-
 /** 工作台投影：与 session_list 同源（会话行 + 会话状态 + 项目），不另建一份任务数据 */
 export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): SecretaryBoard {
   const projectName = (projectId: string): string => {
@@ -238,7 +237,9 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     };
     const needsYouNow =
       card.state === 'waiting' ||
-      (record.lastResult ? NEEDS_YOU_RESULTS.has(record.lastResult.kind) : false);
+      (record.lastResult !== undefined &&
+        NEEDS_YOU_RESULTS.has(record.lastResult.kind) &&
+        !record.lastResult.dismissed);
     if (needsYouNow) needsYou.push(card);
     else if (record.lastState === 'running') running.push(card);
     else done.push(card);

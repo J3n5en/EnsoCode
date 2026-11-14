@@ -600,11 +600,7 @@ async function run(cdp) {
     'step6b: 派出时带的目标完成',
     readJson(dispatchFile).dispatched[goalSession]
   );
-  assert(
-    goalDoneRecord.goal !== undefined,
-    'step6b: 派出记录里仍留着初始目标文本',
-    goalDoneRecord
-  );
+  assert(goalDoneRecord.goal !== undefined, 'step6b: 派出记录里仍留着初始目标文本', goalDoneRecord);
   const goalFollowUp = await page(`
     const id = ${JSON.stringify(goalSession)};
     S().selectConversation(id);
@@ -769,6 +765,64 @@ async function run(cdp) {
     'step7: 回传队列里没有失败',
     afterExit.outbox
   );
+
+  // 失败结果最稳的造法是直接改隔离实例的 dispatch.json，再用一次待办写入触发推送
+  log('== step8 结果卡「知道了」');
+  const seeded = readJson(dispatchFile);
+  const seededRecord = seeded.dispatched[dispatchedId];
+  seededRecord.lastResult = { kind: 'failed', turn: seededRecord.turn, at: Date.now() };
+  writeFileSync(dispatchFile, JSON.stringify(seeded));
+  const published = await page(`
+    return JSON.stringify(
+      await window.electronAPI.secretary.mutateTodo({ action: 'add', text: '验收占位待办' })
+    );
+  `);
+  assert(published.ok, 'step8: 写盘后触发一次状态推送', published);
+  const shown = await page(`
+    const visible = (selector) =>
+      [...document.querySelectorAll(selector)].filter((node) => node.offsetParent !== null);
+    const button = await until(() => visible('[data-enso=secretary-dismiss-result]')[0] ?? null, 15000);
+    if (!button) return JSON.stringify({ ok: false });
+    const card = button.closest('[data-enso=secretary-card]');
+    return JSON.stringify({
+      ok: Boolean(card) && Boolean(card.closest('[data-enso=secretary-needs-you]')),
+      text: card?.innerText,
+    });
+  `);
+  assert(shown.ok, 'step8: 失败结果卡挂在需要你处理', shown);
+  await cdp.shot(path.join(ART, '06-result-card.png'));
+  const dismissed = await page(`
+    const visible = (selector) =>
+      [...document.querySelectorAll(selector)].filter((node) => node.offsetParent !== null);
+    const button = visible('[data-enso=secretary-dismiss-result]')[0];
+    if (!button) return JSON.stringify({ ok: false, error: 'no dismiss button' });
+    button.click();
+    const gone = await until(
+      () => visible('[data-enso=secretary-dismiss-result]').length === 0 &&
+        visible('[data-enso=secretary-needs-you]').every((node) => !node.innerText.includes('写 hello.txt')),
+      15000
+    );
+    return JSON.stringify({ ok: Boolean(gone) });
+  `);
+  assert(dismissed.ok, 'step8: 点「知道了」后卡片从需要你处理消失', dismissed);
+  const dismissedOnDisk = await waitFor(
+    () =>
+      readJson(dispatchFile).dispatched[dispatchedId]?.lastResult?.dismissed === true ? true : null,
+    'dismissed persisted',
+    15_000,
+    300
+  ).catch(() => null);
+  assert(
+    Boolean(dismissedOnDisk),
+    'step8: 磁盘上记下这条结果已清掉',
+    readJson(dispatchFile).dispatched[dispatchedId]
+  );
+  const dismissAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'result_dismiss' && entry.targetId === dispatchedId);
+  assert(dismissAudit.length === 1, 'step8: audit 里记了一条 result_dismiss', dismissAudit);
 
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);

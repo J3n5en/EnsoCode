@@ -492,6 +492,7 @@ export const IPC_PRODUCT_COVERAGE = {
     'Experimental secretary agent; not an Enso capability.'
   ),
   SECRETARY_TODO_MUTATE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_DISMISS_RESULT: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_GOAL_ACTION: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SCHEDULES_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SCHEDULE_REMOVE: excluded('Experimental secretary agent; not an Enso capability.'),

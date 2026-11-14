@@ -314,6 +314,29 @@ describe('parseDispatchFile', () => {
       }).inflight?.attempt
     ).toBe(1);
   });
+
+  it('keeps the dismissed mark on a result', () => {
+    const file = parseDispatchFile({
+      dispatched: {
+        c1: {
+          conversationId: 'c1',
+          projectId: 'p1',
+          secretaryConversationId: 's1',
+          createdAt: 10,
+          turn: 2,
+          lastState: 'error',
+          lastEventAt: 20,
+          lastResult: { kind: 'failed', turn: 1, at: 30, dismissed: true },
+        },
+      },
+    });
+    expect(file.dispatched.c1?.lastResult).toEqual({
+      kind: 'failed',
+      turn: 1,
+      at: 30,
+      dismissed: true,
+    });
+  });
 });
 
 describe('parseTodos', () => {

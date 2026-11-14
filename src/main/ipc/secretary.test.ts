@@ -7,6 +7,7 @@ import type {
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
 import {
+  parseDismissRequest,
   parseReferenceRequest,
   parseResolveProposalRequest,
   parseTodoMutateRequest,
@@ -249,5 +250,13 @@ describe('IPC 入参收窄', () => {
       projectId: 'p1',
     });
     expect(parseTodoMutateRequest({ action: 'nuke' })).toBeNull();
+  });
+
+  it('清结果请求只接受非空会话 id', () => {
+    expect(parseDismissRequest({ conversationId: 'c1' })).toEqual({ conversationId: 'c1' });
+    expect(parseDismissRequest({ conversationId: '  ' })).toBeNull();
+    expect(parseDismissRequest({ conversationId: 5 })).toBeNull();
+    expect(parseDismissRequest('c1')).toBeNull();
+    expect(parseDismissRequest(null)).toBeNull();
   });
 });

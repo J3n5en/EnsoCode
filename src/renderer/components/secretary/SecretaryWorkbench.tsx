@@ -1,4 +1,8 @@
-import type { SecretaryTodo, SecretaryTodoMutate } from '@shared/types/secretary';
+import {
+  NEEDS_YOU_RESULTS,
+  type SecretaryTodo,
+  type SecretaryTodoMutate,
+} from '@shared/types/secretary';
 import { Coffee, Pencil, Plus, Send, ShieldAlert, Square, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
@@ -65,6 +69,9 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
     setStopping(true);
     void window.electronAPI.agent.abort(card.conversationId).finally(() => setStopping(false));
   };
+  // 实时审批与提问由会话状态决定，清结果不会让它消失，所以只在原因是结果时给「知道了」
+  const dismissible =
+    card.state !== 'waiting' && card.result !== undefined && NEEDS_YOU_RESULTS.has(card.result);
   return (
     <div
       data-enso="secretary-card"
@@ -117,6 +124,16 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
         >
           {t('Open session')}
         </button>
+        {dismissible && (
+          <button
+            type="button"
+            data-enso="secretary-dismiss-result"
+            onClick={() => void window.electronAPI.secretary.dismissResult(card.conversationId)}
+            className="rounded-md px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            {t('Got it')}
+          </button>
+        )}
         {card.state === 'running' && (
           <button
             type="button"

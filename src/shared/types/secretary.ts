@@ -80,6 +80,12 @@ export type SecretaryResultKind =
   | 'stalled'
   | 'interrupted';
 
+/** 需要用户亲自看一眼的结果；其余结果只是记录，不占工作台的「需要你处理」 */
+export const NEEDS_YOU_RESULTS: ReadonlySet<SecretaryResultKind> = new Set([
+  'failed',
+  'needs-user',
+]);
+
 export interface DispatchRecord {
   conversationId: string;
   projectId: string;
@@ -95,7 +101,8 @@ export interface DispatchRecord {
   lastText?: string;
   /** 已报 stalled 的轮次，一轮只报一次 */
   stalledTurn?: number;
-  lastResult?: { kind: SecretaryResultKind; turn: number; at: number };
+  /** dismissed：用户点过「知道了」；新结果整体替换 lastResult，标记随之失效 */
+  lastResult?: { kind: SecretaryResultKind; turn: number; at: number; dismissed?: true };
 }
 
 export type SecretaryUpdate = {

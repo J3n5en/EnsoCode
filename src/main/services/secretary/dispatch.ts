@@ -9,16 +9,17 @@ import {
   validateDispatch,
 } from '@shared/secretary/policy';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
-import type {
-  DispatchDraft,
-  SecretaryAuditEntry,
-  SecretaryDispatchFile,
-  SecretaryProfile,
-  SecretaryProfileDraft,
-  SecretaryProposal,
-  SecretaryState,
-  SecretaryTodo,
-  SecretaryTodoMutate,
+import {
+  type DispatchDraft,
+  NEEDS_YOU_RESULTS,
+  type SecretaryAuditEntry,
+  type SecretaryDispatchFile,
+  type SecretaryProfile,
+  type SecretaryProfileDraft,
+  type SecretaryProposal,
+  type SecretaryState,
+  type SecretaryTodo,
+  type SecretaryTodoMutate,
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
@@ -643,6 +644,32 @@ export async function resolveProposal(
 }
 
 export type TodoMutateResult = { ok: true; todoId: string } | { ok: false; error: string };
+
+export type DismissResultResult = { ok: true } | { ok: false; error: string };
+
+/** 用户点过「知道了」：只标记这条结果，会话本身不动；新结果整体替换 lastResult，标记自然失效 */
+export function dismissResult(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): DismissResultResult {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return { ok: false, error: 'not-found' };
+  const result = record.lastResult;
+  if (!result || !NEEDS_YOU_RESULTS.has(result.kind))
+    return { ok: false, error: 'not-dismissible' };
+  record.lastResult = { ...result, dismissed: true };
+  ports.saveDispatch(file);
+  ports.audit({
+    at: ports.now(),
+    secretaryConversationId: record.secretaryConversationId,
+    op: 'result_dismiss',
+    targetId: conversationId,
+    ok: true,
+  });
+  notifySecretaryChanged();
+  return { ok: true };
+}
 
 /** 界面直接编辑待办；派出是用户亲手点的，不再走自主度确认 */
 export async function mutateTodo(

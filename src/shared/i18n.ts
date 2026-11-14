@@ -3353,6 +3353,7 @@ export const zhTranslations: Record<string, string> = {
   'Waiting for you': '等你回答',
   'Waiting on you': '需要你处理',
   'Open session': '打开会话',
+  'Got it': '知道了',
   'Show details': '展开详情',
   'Hide details': '收起详情',
   'Not started': '未开始',

@@ -383,4 +383,34 @@ describe('工作台投影', () => {
     expect(ids(board.done)).toEqual(['newer', 'older']);
     expect(ids(board.running)).toEqual(['runNewer', 'runOlder']);
   });
+
+  it('用户清掉的结果进已完成，不再挂在需要你处理', () => {
+    const file = emptyFile({
+      dispatched: {
+        dismissed: record({
+          conversationId: 'dismissed',
+          lastState: 'error',
+          lastResult: { kind: 'failed', turn: 1, at: 5, dismissed: true },
+        }),
+        pending: record({
+          conversationId: 'pending',
+          lastState: 'error',
+          lastResult: { kind: 'failed', turn: 1, at: 5 },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: {
+        dismissed: { id: 'dismissed', title: '清掉了', sessionFile: '/tmp/a.jsonl' },
+        pending: { id: 'pending', title: '还没看', sessionFile: '/tmp/b.jsonl' },
+      },
+      statuses: { dismissed: error, pending: error },
+      projects,
+      todos: [],
+    });
+    const ids = (cards: typeof board.needsYou) =>
+      cards.map((card) => (card.kind === 'session' ? card.conversationId : ''));
+    expect(ids(board.needsYou)).toEqual(['pending']);
+    expect(ids(board.done)).toEqual(['dismissed']);
+  });
 });

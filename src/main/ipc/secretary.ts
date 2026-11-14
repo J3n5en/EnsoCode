@@ -14,6 +14,7 @@ import { appendAudit } from '../services/secretary/audit';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
   buildSecretaryState,
+  dismissResult,
   mutateTodo,
   resolveProposal,
   secretaryDispatchPorts,
@@ -34,6 +35,7 @@ import {
 import { isSecretaryConversation, secretaryProjectId } from '../services/secretary/identity';
 import { secretaryProfile } from '../services/secretary/profile';
 import {
+  parseDismissRequest,
   parseReferenceRequest,
   parseResolveProposalRequest,
   parseTodoMutateRequest,
@@ -347,6 +349,14 @@ export function registerSecretaryHandlers(): void {
     const parsed = parseTodoMutateRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
     return mutateTodo(secretaryDispatchPorts, parsed);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_DISMISS_RESULT, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseDismissRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return dismissResult(secretaryDispatchPorts, parsed.conversationId);
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, async (event) => {

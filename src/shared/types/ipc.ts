@@ -18,6 +18,8 @@ export const IPC_CHANNELS = {
   SECRETARY_REFERENCE_CONVERSATIONS: 'secretary:reference-conversations',
   /** 秘书：界面编辑、删除、派出待办 */
   SECRETARY_TODO_MUTATE: 'secretary:todo-mutate',
+  /** 秘书：用户点过工作台结果卡的「知道了」，这条结果不再占需要你处理 */
+  SECRETARY_DISMISS_RESULT: 'secretary:dismiss-result',
   /** 秘书：派出会话的目标由 Main 续跑，界面只发指令 */
   SECRETARY_GOAL_ACTION: 'secretary:goal-action',
   /** 秘书：全部定时（含系统生成的每日简报与待办提醒） */

@@ -370,7 +370,12 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
     const turn = count(value.lastResult.turn);
     const at = time(value.lastResult.at);
     if (turn !== undefined && at !== undefined)
-      record.lastResult = { kind: value.lastResult.kind as SecretaryResultKind, turn, at };
+      record.lastResult = {
+        kind: value.lastResult.kind as SecretaryResultKind,
+        turn,
+        at,
+        ...(value.lastResult.dismissed === true ? { dismissed: true as const } : {}),
+      };
   }
   return record;
 }

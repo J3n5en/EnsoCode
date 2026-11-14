@@ -70,6 +70,16 @@ export interface ReferenceRequest {
   conversationIds: string[];
 }
 
+export interface DismissRequest {
+  conversationId: string;
+}
+
+export function parseDismissRequest(value: unknown): DismissRequest | null {
+  if (!isRecord(value)) return null;
+  const conversationId = nonEmpty(value.conversationId);
+  return conversationId ? { conversationId } : null;
+}
+
 export function parseReferenceRequest(value: unknown): ReferenceRequest | null {
   if (!isRecord(value)) return null;
   const secretaryConversationId = nonEmpty(value.secretaryConversationId);

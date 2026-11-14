@@ -225,6 +225,14 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
   });
 
+  it('新结果整体替换旧结果，清掉的标记随之失效', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.lastResult = { kind: 'failed', turn: 1, at: 5, dismissed: true };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toEqual({ kind: 'turn-ended', turn: 1, at: 0 });
+  });
+
   it('worker 退出记失败', () => {
     const h = harness({});
     h.state.statuses.c1 = error;

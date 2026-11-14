@@ -369,6 +369,9 @@ const electronAPI = {
       request: SecretaryTodoMutate
     ): Promise<{ ok: true; todoId: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TODO_MUTATE, request),
+    /** 结果卡「知道了」：这条结果不再占工作台的「需要你处理」 */
+    dismissResult: (conversationId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DISMISS_RESULT, { conversationId }),
     /** 派出会话的目标与队列由 Main 驱动：设/暂停/恢复/清除都交给它 */
     goalAction: (request: {
       conversationId: string;

@@ -1,6 +1,7 @@
 import { parseProfile } from '@shared/secretary/parse';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type {
+  DispatchRecord,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretaryProfile,
@@ -11,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSecretaryState,
   createSecretaryDispatchHandlers,
+  dismissResult,
   mutateTodo,
   resolveProposal,
   type SecretaryDispatchPorts,
@@ -667,6 +669,66 @@ describe('mutateTodo', () => {
     const result = await mutateTodo(h.ports, { action: 'dispatch', todoId: 't1' });
     expect(result).toEqual({ ok: true, todoId: 't1' });
     expect(h.created[0].secretaryOrigin).toEqual({ secretaryConversationId: 'sec-chat' });
+  });
+});
+
+describe('dismissResult', () => {
+  const failedFile = (over: Partial<DispatchRecord> = {}): SecretaryDispatchFile => ({
+    ...emptyFile(),
+    dispatched: {
+      c1: {
+        conversationId: 'c1',
+        projectId: 'p1',
+        secretaryConversationId: 'sec-1',
+        createdAt: 900,
+        turn: 2,
+        lastState: 'error',
+        lastEventAt: 900,
+        lastResult: { kind: 'failed', turn: 1, at: 950 },
+        ...over,
+      },
+    },
+  });
+
+  it('把需要你处理的结果标成已清掉并写审计', () => {
+    const h = harness({ file: failedFile() });
+    expect(dismissResult(h.ports, 'c1')).toEqual({ ok: true });
+    expect(h.file.dispatched.c1.lastResult).toEqual({
+      kind: 'failed',
+      turn: 1,
+      at: 950,
+      dismissed: true,
+    });
+    expect(h.audits).toEqual([
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'result_dismiss',
+        targetId: 'c1',
+        ok: true,
+      },
+    ]);
+  });
+
+  it('没有派出记录、没有结果、结果不需要处理时都拒绝', () => {
+    expect(dismissResult(harness({}).ports, 'c1')).toEqual({ ok: false, error: 'not-found' });
+
+    const noResult = harness({ file: failedFile({ lastResult: undefined }) });
+    expect(dismissResult(noResult.ports, 'c1')).toEqual({ ok: false, error: 'not-dismissible' });
+
+    const completed = harness({
+      file: failedFile({ lastResult: { kind: 'goal-complete', turn: 1, at: 950 } }),
+    });
+    expect(dismissResult(completed.ports, 'c1')).toEqual({
+      ok: false,
+      error: 'not-dismissible',
+    });
+    expect(completed.file.dispatched.c1.lastResult).toEqual({
+      kind: 'goal-complete',
+      turn: 1,
+      at: 950,
+    });
+    expect(completed.audits).toEqual([]);
   });
 });
 
