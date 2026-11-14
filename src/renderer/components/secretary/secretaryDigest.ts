@@ -74,9 +74,11 @@ function greetingAt(now: number): string {
   return 'Good evening';
 }
 
-/** 会话卡片对应的动态说明：有结果看结果，否则看会话状态 */
+/** 会话卡片对应的动态说明：在跑时上一轮的结果已过时，看状态；否则有结果看结果 */
 export function sessionFeed(card: SessionCard): Feed {
-  return card.result ? RESULT_FEED[card.result] : STATE_FEED[card.state];
+  return card.result && card.state !== 'running'
+    ? RESULT_FEED[card.result]
+    : STATE_FEED[card.state];
 }
 
 function sessionEvent(card: SessionCard): FeedEvent {

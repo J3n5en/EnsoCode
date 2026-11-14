@@ -121,6 +121,14 @@ describe('secretaryDigest', () => {
     expect(byId.new).toMatchObject({ tone: 'idle', label: 'Not started' });
   });
 
+  it('上一轮有结果、这一轮又在跑时，动态显示在跑而不是旧结果', () => {
+    const [event] = secretaryDigest(
+      board({ running: [session('again', { state: 'running', result: 'goal-complete' })] }),
+      NOW
+    ).events;
+    expect(event).toMatchObject({ tone: 'run', label: 'Started', running: true });
+  });
+
   it('会话事件带项目、标题、最后一句与打开用的会话 id', () => {
     const [event] = secretaryDigest(
       board({
