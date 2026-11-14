@@ -56,6 +56,21 @@ describe('foldTimeline 回答完成后折叠过程（collapseCompletedActivity�
     expect(kinds(group.children)).toEqual(['thinking', 'bash', 'edit', 'write', 'todo']);
   });
 
+  it('可读卡片不折进过程组，连续同名调用收成一行', () => {
+    const items = [
+      userItem('u'),
+      thinkingItem('t'),
+      toolItem('a', 'todo_item_update'),
+      toolItem('b', 'todo_item_update'),
+      toolItem('c', 'schedule_add'),
+      textItem('answer'),
+    ];
+    const folded = foldTimeline(items, false, new Set(), activityOn(items));
+    expect(kinds(folded)).toEqual(['user', 'thinking', 'todo_item_update', 'schedule_add', 'text']);
+    const todos = folded[2];
+    expect(todos.kind === 'tool' && todos.cardPeers).toHaveLength(1);
+  });
+
   it('展开后按原顺序平铺全部行', () => {
     const items = [userItem('u'), toolItem('a', 'edit', [textItem('x')]), toolItem('b', 'read')];
     const collapsed = foldTimeline(items, false, new Set(), activityOn(items));

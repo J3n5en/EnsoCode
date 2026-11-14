@@ -17,6 +17,7 @@ import type {
 } from '@shared/types/agent';
 import type { ProjectedApplyPatchOutcome, ProjectedFileChange } from '@shared/types/fileChanges';
 import { unwrapMcpProxyCall } from '@/lib/mcpToolName';
+import { mergeRuns, usesToolCard } from '@/lib/toolCards';
 import type { TimelineMessage } from './reducer';
 
 /** edit 工具的单个替换块（pi edit 工具参数 edits[] 的元素） */
@@ -123,6 +124,15 @@ export type TimelineItem =
       pluginArtifacts?: PluginArtifactInfo[];
       /** 本行是工具批次首个调用且已生成一句话标签时的标签；其它缺省 */
       batchLabel?: string;
+      /** 卡片渲染用的原始参数；其它工具缺省 */
+      args?: unknown;
+      /** 连续同名卡片调用并进来的后续几次；首条就是本行 */
+      cardPeers?: {
+        key: string;
+        args: unknown;
+        output: string | null;
+        state: 'running' | 'reviewing' | 'ok' | 'error';
+      }[];
     }
   | {
       kind: 'tool-group';
@@ -1226,6 +1236,7 @@ function buildMessageTimeline(
             kind: 'tool',
             key,
             name: call.name,
+            ...(usesToolCard(call.name) ? { args: call.args ?? null } : {}),
             summary: execSource
               ? summarizeExecSource(execSource)
               : patchPaths
@@ -1893,6 +1904,7 @@ function activityAnchor(row: TimelineItem): string {
 
 function isActivityMember(item: TimelineItem): boolean {
   if (item.kind === 'tool' && item.generatedImages?.length) return false;
+  if (item.kind === 'tool' && usesToolCard(item.name)) return false;
   if (item.kind === 'thinking' || item.kind === 'tool-group') return true;
   if (item.kind !== 'tool') return false;
   return item.state === 'ok' && !item.name.startsWith('goal_') && item.name !== 'submit_plan';
@@ -2061,6 +2073,7 @@ function foldPrepared(
 ): TimelineItem[] {
   const heldOpen = (row: TimelineItem): boolean =>
     row.kind === 'tool' && heldOpenTools?.has(row.key) === true;
+  const cardTool = (row: TimelineItem): boolean => row.kind === 'tool' && usesToolCard(row.name);
   const activityAt = (index: number): boolean =>
     collapseCompleted && !(running && index > liveFrom);
   const releasedPrefixEnd = (index: number): number => {
@@ -2081,6 +2094,7 @@ function foldPrepared(
     return end - index >= 2 ? end : index;
   };
   const inSegment = (s: TimelineItem, index: number): boolean =>
+    !cardTool(s) &&
     !heldOpen(s) &&
     !(s.kind === 'tool' && s.generatedImages?.length) &&
     (s.kind === 'thinking' ||
@@ -2207,10 +2221,21 @@ export function foldTimeline(
     expandedKeys,
     options
   );
+  const merged = mergeRuns(sourceItems, usesToolCard, (head, rest) => {
+    if (head.kind !== 'tool') return head;
+    return {
+      ...head,
+      cardPeers: rest.flatMap((item) =>
+        item.kind === 'tool'
+          ? [{ key: item.key, args: item.args ?? null, output: item.output, state: item.state }]
+          : []
+      ),
+    };
+  });
   const releasedLive =
     options.collapseLiveActivity === true ? (options.releasedLiveActivity ?? null) : null;
   return foldPrepared(
-    sourceItems,
+    merged,
     running,
     expandedKeys,
     options.compact === true,

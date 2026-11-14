@@ -1005,12 +1005,13 @@ async function run(cdp, pluginZipUrl) {
 
   log('== 秘书面板');
   const board = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    await sleep(300);
     const toggles = [...document.querySelectorAll('button')].filter(
-      (b) => b.getAttribute('aria-label') === '新建标签页'
+      (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
     );
-    toggles.at(-1).click();
-    await sleep(500);
-    const item = document.querySelector('[data-enso=secretary-panel-open]');
+    toggles.at(-1)?.click();
+    const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
     if (!item) return JSON.stringify({ ok: false });
     item.click();
     await sleep(800);
@@ -2076,6 +2077,7 @@ async function run(cdp, pluginZipUrl) {
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
 
   await verifyMemoryManualEdit(cdp, setup);
+  await verifyToolCards(cdp, setup);
 }
 
 /**
@@ -2333,6 +2335,119 @@ const auditLines = () =>
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
+
+async function verifyToolCards(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 工具卡片：可读摘要，默认不露原始 JSON');
+  const prep = await page(`
+    SET().setLanguage('zh');
+    const project = SET().projects.find((item) => item.id === ${JSON.stringify(setup.projectId)});
+    const target = await S().newConversation(project.id);
+    S().renameConversation(target, '写发布说明');
+    await S().send('先打个招呼', {
+      providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path,
+    }, undefined, target);
+    const greeted = await until(
+      () => (S().conversations[target]?.messages ?? []).some((message) => message.role === 'assistant'),
+      30000
+    );
+    const secretary = await SEC();
+    const secretaryId = await secretary.getState().newSecretaryConversation();
+    const named = await window.electronAPI.secretary.referenceConversations(secretaryId, [target]);
+    const todos = [];
+    for (const text of ['补工具卡片单测', '改秘书渲染', '补验收脚本']) {
+      todos.push(await window.electronAPI.secretary.mutateTodo({ action: 'add', text }));
+    }
+    return JSON.stringify({
+      ok: named.ok && greeted && todos.every((row) => row.ok),
+      target,
+      secretaryProjectId: secretary.getState().secretary.projectId,
+      todos,
+    });
+  `);
+  assert(prep.ok, '工具卡片: 准备会话和三条待办', prep);
+  const message = '请看一下发布说明，确认没问题就提交。';
+  const calls = [
+    `[[tool:session_send ${JSON.stringify({ conversationId: prep.target, message })}]]`,
+    ...prep.todos.map(
+      (row) => `[[tool:todo_item_update ${JSON.stringify({ todoId: row.todoId, done: true })}]]`
+    ),
+    `[[tool:schedule_add ${JSON.stringify({ name: '巡检', prompt: '看一眼构建', cron: '*/10 * * * *' })}]]`,
+  ].join('\n');
+  const turn = await page(`
+    const project = SET().projects.find((item) => item.id === ${JSON.stringify(prep.secretaryProjectId)});
+    const id = await (await SEC()).getState().newSecretaryConversation();
+    S().selectConversation(id);
+    await S().send(${JSON.stringify(calls)}, {
+      providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path,
+    }, undefined, id);
+    const ready = await until(() => {
+      const cards = [...document.querySelectorAll('[data-enso=tool-card]')];
+      const names = cards.map((card) => card.dataset.tool);
+      return names.includes('session_send') && names.includes('todo_item_update') && names.includes('schedule_add')
+        ? id
+        : null;
+    }, 40000);
+    return JSON.stringify({ id, ready: Boolean(ready) });
+  `);
+  assert(turn.ready, '工具卡片: 三个工具都渲染成卡片', turn);
+
+  const shotCard = async (tool, file) => {
+    await page(`
+      const card = document.querySelector('[data-enso=tool-card][data-tool=${JSON.stringify(tool)}]');
+      card?.scrollIntoView({ block: 'center' });
+      return JSON.stringify({ ok: Boolean(card) });
+    `);
+    await delay(300);
+    await cdp.shot(path.join(ART, file));
+  };
+
+  const visible = await page(`
+    const textOf = (tool) =>
+      document.querySelector('[data-enso=tool-card][data-tool="' + tool + '"]')?.innerText ?? '';
+    const expand = document.querySelector('[data-enso=tool-card][data-tool=todo_item_update] [data-enso=tool-card-expand]');
+    expand?.click();
+    const todos = await until(() => {
+      const text = textOf('todo_item_update');
+      return text.includes('补工具卡片单测') && text.includes('改秘书渲染') ? text : null;
+    }, 5000);
+    const send = textOf('session_send');
+    const schedule = textOf('schedule_add');
+    const raw = document.querySelector('[data-enso=tool-card-raw][aria-expanded=true]');
+    return JSON.stringify({
+      send,
+      todos,
+      schedule,
+      rawOpen: Boolean(raw),
+    });
+  `);
+  assert(
+    visible.send.includes(message) &&
+      (visible.send.includes('已送达') || visible.send.includes('已排队')) &&
+      !visible.send.includes('{"'),
+    '工具卡片: session_send 能看到正文和发送状态，默认没有原始 JSON',
+    visible.send
+  );
+  assert(
+    visible.todos?.includes('更新了 3 条待办') &&
+      visible.todos.includes('补验收脚本') &&
+      visible.todos.includes('标记为完成') &&
+      !visible.todos.includes('{"'),
+    '工具卡片: 连续更新合并成一组，展开后能看到待办文字',
+    visible.todos
+  );
+  assert(
+    visible.schedule.includes('每 10 分钟') &&
+      visible.schedule.includes('巡检') &&
+      !visible.schedule.includes('{"'),
+    '工具卡片: schedule_add 显示每 N 分钟，默认没有原始 JSON',
+    visible.schedule
+  );
+  assert(visible.rawOpen === false, '工具卡片: 原始数据默认折叠', visible);
+  await shotCard('session_send', 'after-session-send.png');
+  await shotCard('todo_item_update', 'after-todo-updates.png');
+  await shotCard('schedule_add', 'after-schedule-add.png');
+}
 
 async function verifyTakeover(cdp, setup) {
   const page = cdp.json.bind(cdp);

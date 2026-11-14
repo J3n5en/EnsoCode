@@ -321,7 +321,12 @@ export async function executeMemoryOp(
       throw new MemoryValidationError('not_found', `memory not found: ${request.id}`);
     }
     ctx.onDeleted?.(request.id);
-    return { status: 'deleted', id: request.id };
+    return {
+      status: 'deleted',
+      id: request.id,
+      title: memory.title,
+      content: memory.content.slice(0, 240),
+    };
   }
   throw new MemoryValidationError('unknown_op', `unknown memory op: ${String(op)}`);
 }

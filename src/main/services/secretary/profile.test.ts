@@ -331,7 +331,16 @@ describe('配置提案', () => {
     );
     expect(result).toEqual({
       ok: true,
-      result: { status: 'awaiting_confirmation', proposalId: 'proposal-1' },
+      result: {
+        status: 'awaiting_confirmation',
+        proposalId: 'proposal-1',
+        changes: [
+          { field: 'name', before: null, after: '小秘' },
+          { field: 'avatarColor', before: null, after: '#0ea5e9' },
+          { field: 'autonomy', before: null, after: 'tell-after' },
+          { field: 'persona', before: null, after: '简短' },
+        ],
+      },
     });
     expect(h.saved).toBeNull();
     const proposal = h.file.proposals['proposal-1'];

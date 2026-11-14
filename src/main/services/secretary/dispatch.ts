@@ -732,7 +732,15 @@ export function createSecretaryDispatchHandlers(
         ok: true,
       });
       notifySecretaryChanged();
-      return { ok: true, result: { todoId: todo.id } };
+      return {
+        ok: true,
+        result: {
+          todoId: todo.id,
+          text: todo.text,
+          ...(dueAt !== undefined ? { dueAt } : {}),
+          ...(projectId ? { projectId } : {}),
+        },
+      };
     },
 
     async todo_item_update(params, ctx) {
@@ -766,7 +774,10 @@ export function createSecretaryDispatchHandlers(
         ok: true,
       });
       notifySecretaryChanged();
-      return { ok: true, result: { todoId } };
+      return {
+        ok: true,
+        result: { todoId, before: todoSnapshot(todo), after: todoSnapshot(next) },
+      };
     },
 
     async todo_item_dispatch(params, ctx) {
@@ -803,6 +814,21 @@ export function createSecretaryDispatchHandlers(
     },
   };
   return handlers;
+}
+
+/** 渲染要看出改了什么，不能只回一个 id */
+function todoSnapshot(todo: SecretaryTodo): {
+  text: string;
+  done: boolean;
+  dueAt?: number;
+  projectId?: string;
+} {
+  return {
+    text: todo.text,
+    done: todo.doneAt !== undefined,
+    ...(todo.dueAt !== undefined ? { dueAt: todo.dueAt } : {}),
+    ...(todo.projectId ? { projectId: todo.projectId } : {}),
+  };
 }
 
 export type ResolveProposalResult =

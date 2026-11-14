@@ -127,6 +127,35 @@ describe('project_list', () => {
 
     expect((result.projects as { projectId: string }[]).map((p) => p.projectId)).toEqual(['p2']);
   });
+
+  it('本地项目带上分支和未提交改动，ssh 不跑 git', async () => {
+    let calls = 0;
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [
+          project({ projectId: 'p1' }),
+          project({ projectId: 'p2', canonicalPath: '/repo/beta', kind: 'ssh', sshHost: 'host' }),
+        ],
+        git: async () => {
+          calls += 1;
+          return { branch: 'feat/x', dirty: true };
+        },
+      })
+    );
+    const result = await run(handlers.project_list);
+    expect(result.projects).toEqual([
+      {
+        projectId: 'p1',
+        name: 'alpha',
+        kind: 'local',
+        path: '/repo/alpha',
+        lastActivityAt: null,
+        git: { branch: 'feat/x', dirty: true },
+      },
+      { projectId: 'p2', name: 'beta', kind: 'ssh', path: '/repo/beta', lastActivityAt: null },
+    ]);
+    expect(calls).toBe(1);
+  });
 });
 
 describe('project_info', () => {

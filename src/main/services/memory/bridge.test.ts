@@ -105,9 +105,12 @@ describe('executeMemoryOp：Bot 模式 space', () => {
     await expect(executeMemoryOp(db, 'delete', { id: other.memory.id }, botCtx)).rejects.toThrow(
       /not found/
     );
-    await expect(executeMemoryOp(db, 'delete', { id: mine.memory.id }, botCtx)).resolves.toEqual({
+    await expect(
+      executeMemoryOp(db, 'delete', { id: mine.memory.id }, botCtx)
+    ).resolves.toMatchObject({
       status: 'deleted',
       id: mine.memory.id,
+      content: expect.stringContaining('mine'),
     });
   });
 });
@@ -384,9 +387,10 @@ describe('executeMemoryOp', () => {
     const deleted: string[] = [];
     const ctx = { projectId: PROJECT, onDeleted: (id: string) => deleted.push(id) };
 
-    expect(await executeMemoryOp(db, 'delete', { id: own }, ctx)).toEqual({
+    expect(await executeMemoryOp(db, 'delete', { id: own }, ctx)).toMatchObject({
       status: 'deleted',
       id: own,
+      content: expect.stringContaining('旧结论'),
     });
     expect(getMemory(db, own)).toBeNull();
     expect(deleted).toEqual([own]);
@@ -592,9 +596,11 @@ describe('executeMemoryOp：秘书空间', () => {
     expect(getMemory(db, visible)).not.toBeNull();
     expect(getMemory(db, global)).not.toBeNull();
 
-    await expect(executeMemoryOp(db, 'delete', { id: own }, ctx)).resolves.toEqual({
+    await expect(executeMemoryOp(db, 'delete', { id: own }, ctx)).resolves.toMatchObject({
       status: 'deleted',
       id: own,
+      title: expect.any(String),
+      content: expect.stringContaining('私有记忆'),
     });
   });
 

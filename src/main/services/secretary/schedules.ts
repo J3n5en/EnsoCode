@@ -243,7 +243,7 @@ export function removeSchedule(
     targetId: scheduleId,
     ok: true,
   });
-  return { ok: true, result: { scheduleId } };
+  return { ok: true, result: { scheduleId, name: target.name } };
 }
 
 export type SecretaryScheduleHandlers = Record<
