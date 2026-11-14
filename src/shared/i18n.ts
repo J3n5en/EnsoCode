@@ -529,6 +529,9 @@ export const zhTranslations: Record<string, string> = {
   'Patrol clear': '巡检正常',
   'Update seen': '已查看',
   'Continue goal: {{summary}}': '继续目标：{{summary}}',
+  'Scheduled: {{summary}}': '定时：{{summary}}',
+  'Session updates': '会话更新',
+  'Session updates: {{summary}}': '会话更新：{{summary}}',
   '{{count}} thinking steps': '{{count}} 段思考',
   Activity: '过程',
   'After you send a new message, fold earlier turns down to the question, timestamp and duration; the latest turn stays expanded':
