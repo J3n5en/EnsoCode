@@ -352,3 +352,76 @@ export interface SecretaryState {
   proposals: Record<string, SecretaryProposal>;
   takeovers: SecretaryTakeoverView[];
 }
+
+/**
+ * 按天汇总的一条结果记录，追加写在 userData/secretary/daily.jsonl。
+ * activity 只留 400 条、又是 dispatch.json 的一部分，回看历史某天靠不住，所以另存一份。
+ */
+export interface SecretaryDailyRecord {
+  at: number;
+  conversationId: string;
+  kind: SecretaryResultKind;
+  projectId?: string;
+  /** 结果发生时的会话标题快照：会话删掉后仍能显示 */
+  title?: string;
+  /** 最后一轮正文，与工作台同一口径截断 */
+  text?: string;
+  /** 从最终汇报里认出来的分支与提交号；认不出就不写 */
+  branch?: string;
+  commit?: string;
+  /** 最终汇报里明确说了合并 */
+  merged?: true;
+}
+
+export type SecretaryDailyGroupKey =
+  | 'done'
+  | 'failed'
+  | 'needsYou'
+  | 'dispatched'
+  | 'todos'
+  | 'changes';
+
+/** 看板一行。title/label 是数据与 i18n key，renderer 只负责排版 */
+export interface SecretaryDailyItem {
+  id: string;
+  at: number;
+  title: string;
+  projectName?: string;
+  /** 状态小徽标的 i18n key */
+  label?: string;
+  /** 一句话摘要，列表里一行 */
+  summary?: string;
+  /** 展开后的全文 */
+  detail?: string;
+  branch?: string;
+  commit?: string;
+  conversationId?: string;
+}
+
+export interface SecretaryDailyCounts {
+  dispatched: number;
+  completed: number;
+  failed: number;
+  needsYou: number;
+  todosDone: number;
+  merged: number;
+}
+
+export interface SecretaryDailyGroup {
+  key: SecretaryDailyGroupKey;
+  items: SecretaryDailyItem[];
+}
+
+/** 看板一天的投影，由 Main 从派发记录、结果记录、审计与待办算出 */
+export interface SecretaryDaily {
+  /** 本地时区的 YYYY-MM-DD */
+  day: string;
+  today: boolean;
+  counts: SecretaryDailyCounts;
+  /** 只放有内容的分组 */
+  groups: SecretaryDailyGroup[];
+  /** 有记录的最早一天；没有记录时缺省 */
+  earliest?: string;
+  /** 结果记录的保留天数，界面据此说明能回看多久 */
+  retentionDays: number;
+}

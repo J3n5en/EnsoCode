@@ -1,6 +1,7 @@
 import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroundWatch';
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { projectNameFromPath } from '@shared/projectName';
+import { extractReportRefs } from '@shared/secretary/daily';
 import { transitionProposal } from '@shared/secretary/policy';
 import { sessionIdsInUpdates, shouldSilenceTurn } from '@shared/secretary/silence';
 import type { RendererAgentEvent } from '@shared/types/agent';
@@ -8,6 +9,7 @@ import type {
   DispatchRecord,
   SecretaryActivity,
   SecretaryAuditEntry,
+  SecretaryDailyRecord,
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryResultKind,
@@ -15,6 +17,7 @@ import type {
   SecretaryTodo,
   SecretaryUpdate,
 } from '@shared/types/secretary';
+import { redactSecrets } from '../memory/distill';
 import {
   type DeliveryPorts,
   flushDeliveries,
@@ -53,6 +56,16 @@ const RESULT_LABELS: Record<SecretaryResultKind, { zh: string; en: string }> = {
   interrupted: { zh: '应用重启时正在运行，已被中断', en: 'interrupted by app restart' },
 };
 
+/** 按天回看只记有信息量的结果：轮次结束不进 daily.jsonl，否则日志全是它 */
+const DAILY_KINDS: ReadonlySet<SecretaryResultKind> = new Set([
+  'goal-complete',
+  'goal-blocked',
+  'needs-user',
+  'failed',
+  'stalled',
+  'interrupted',
+]);
+
 export interface SecretaryHostPorts extends DeliveryPorts {
   enabled(): boolean;
   profile(): SecretaryProfile | null;
@@ -66,6 +79,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   /** 派出会话空闲等后台任务的看门狗；缺省表示没有 */
   backgroundStalls?(now: number): readonly BackgroundStall[];
   audit?(entry: SecretaryAuditEntry): void;
+  /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
+  recordDaily?(entry: SecretaryDailyRecord): void;
 }
 
 export interface SecretaryHost {
@@ -162,12 +177,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     kind: SecretaryResultKind,
     now: number,
     detail?: string
-  ): SecretaryUpdate {
+  ): { update: SecretaryUpdate; title: string } {
     const row = ports.rows()[record.conversationId];
     const project = ports.projects().find((candidate) => candidate.projectId === record.projectId);
     const projectName = project ? projectNameFromPath(project.canonicalPath) : '';
     const title = typeof row?.title === 'string' ? row.title : '';
-    return {
+    const update: SecretaryUpdate = {
       key: updateKey(record.conversationId, kind, record.turn),
       at: now,
       kind,
@@ -176,6 +191,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       text: [projectName, title, RESULT_LABELS[kind].zh, detail].filter(Boolean).join(' · '),
       ...(record.lastText ? { lastText: record.lastText } : {}),
     };
+    return { update, title };
   }
 
   function notifyResult(update: SecretaryUpdate, kind: SecretaryResultKind): void {
@@ -192,13 +208,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     record: DispatchRecord,
     kind: SecretaryResultKind,
     now: number,
-    detail?: string
+    detail?: string,
+    /** 这一轮的完整正文：分支与提交号只在原文里认，落盘仍按 lastText 截断 */
+    report?: string
   ): void {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
     // 收口了就不会再有后台任务唤醒它；留着这条记录会让空闲会话一直被算在跑
     if (SETTLED_RESULTS.has(kind)) delete record.backgroundRunning;
-    const update = recordUpdate(record, kind, now, detail);
+    const { update, title } = recordUpdate(record, kind, now, detail);
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
@@ -227,7 +245,31 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       kind,
       text: record.lastText || update.text,
     });
+    rememberDaily(record, kind, now, title, report);
     notifyResult(update, kind);
+  }
+
+  /** 按天回看的结果记录：activity 只留 400 条，历史某天要靠 daily.jsonl */
+  function rememberDaily(
+    record: DispatchRecord,
+    kind: SecretaryResultKind,
+    now: number,
+    title: string,
+    report: string | undefined
+  ): void {
+    if (!ports.recordDaily) return;
+    if (!DAILY_KINDS.has(kind)) return;
+    const body = capLastText(report) ?? record.lastText;
+    ports.recordDaily({
+      at: now,
+      conversationId: record.conversationId,
+      kind,
+      ...(record.projectId ? { projectId: record.projectId } : {}),
+      ...(title ? { title: redactSecrets(title) } : {}),
+      ...(body ? { text: redactSecrets(body) } : {}),
+      // 只认这一轮的最终汇报：停滞、中断没有正文，不能拿上一轮的提交号充数
+      ...(report ? extractReportRefs(report) : {}),
+    });
   }
 
   /** 同一轮只报一次。返回是否写进了回传队列 */
@@ -312,7 +354,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           if (backgroundRunning) record.backgroundRunning = true;
           else delete record.backgroundRunning;
         }
-        const lastText = own ? capLastText(assistantTextOf(event)) : undefined;
+        // 完整正文只用来认分支与提交号，记录与落盘都按 lastText 截断
+        const report = own ? assistantTextOf(event) : undefined;
+        const lastText = capLastText(report);
         if (lastText) record.lastText = lastText;
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
@@ -340,7 +384,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             kind = 'failed';
           else if (change.state === 'waiting' && change.previous !== 'waiting') kind = 'needs-user';
         }
-        if (kind) recordResult(file, record, kind, now);
+        if (kind) recordResult(file, record, kind, now, undefined, report);
         else if (
           own &&
           event.type === 'turn-completed' &&

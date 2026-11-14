@@ -5,16 +5,18 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { SecretaryAvatar } from './SecretaryAvatar';
+import { SecretaryDailyBoard } from './SecretaryDailyBoard';
 import { SecretaryMemoryPanel } from './SecretaryMemoryPanel';
 import { SecretaryRunningList } from './SecretaryRunningList';
 import { SecretarySchedulePanel } from './SecretarySchedulePanel';
 import { SecretaryWorkbench } from './SecretaryWorkbench';
 import { SecretarySummary, secretarySectionView } from './secretaryView';
 
-type Tab = 'workbench' | 'memory' | 'schedules';
+type Tab = 'workbench' | 'daily' | 'memory' | 'schedules';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'workbench', label: 'Workbench' },
+  { key: 'daily', label: 'Daily board' },
   { key: 'memory', label: 'Memory' },
   { key: 'schedules', label: 'Schedules' },
 ];
@@ -42,6 +44,7 @@ export function SecretaryPanel() {
 
   const badge: Record<Tab, number> = {
     workbench: view.needsYou,
+    daily: 0,
     memory: 0,
     schedules: schedules.length,
   };
@@ -125,6 +128,7 @@ export function SecretaryPanel() {
       >
         {runningOpen && <SecretaryRunningList />}
         {tab === 'workbench' && <SecretaryWorkbench name={view.name} />}
+        {tab === 'daily' && <SecretaryDailyBoard />}
         {tab === 'memory' && <SecretaryMemoryPanel />}
         {tab === 'schedules' && (
           <SecretarySchedulePanel schedules={schedules} name={view.name} onReload={loadSchedules} />
