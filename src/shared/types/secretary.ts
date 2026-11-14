@@ -373,11 +373,11 @@ export interface SecretaryDailyRecord {
   merged?: true;
 }
 
+/** 派发/接管会话按当天最终状态落一列；待办与设置变更是另外两类记录 */
 export type SecretaryDailyGroupKey =
   | 'done'
   | 'failed'
   | 'needsYou'
-  | 'dispatched'
   | 'running'
   | 'todos'
   | 'changes';
@@ -385,6 +385,7 @@ export type SecretaryDailyGroupKey =
 /** 看板一行。title/label 是数据与 i18n key，renderer 只负责排版 */
 export interface SecretaryDailyItem {
   id: string;
+  /** 状态时间：终态结果的时间；还在跑的卡片是派出时间 */
   at: number;
   title: string;
   projectName?: string;
@@ -396,6 +397,8 @@ export interface SecretaryDailyItem {
   detail?: string;
   branch?: string;
   commit?: string;
+  /** 派出时间；派发/接管会话的卡片才有 */
+  dispatchedAt?: number;
   conversationId?: string;
 }
 

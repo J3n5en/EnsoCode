@@ -112,7 +112,7 @@ describe('buildDaily', () => {
     expect(daily.earliest).toBe('2024-05-14');
   });
 
-  it('派发记录给「新派出」，待办给新增与完成', async () => {
+  it('派发记录按当天状态归列，待办给新增与完成', async () => {
     const file = dispatchFile({
       dispatched: {
         c1: {
@@ -144,7 +144,8 @@ describe('buildDaily', () => {
     );
     expect(daily.counts.dispatched).toBe(1);
     expect(daily.counts.todosDone).toBe(1);
-    expect(daily.groups.find((group) => group.key === 'dispatched')?.items[0].title).toBe(
+    // 当天派出、还没有终态结果：落在「进行中」
+    expect(daily.groups.find((group) => group.key === 'running')?.items[0].title).toBe(
       '重构登录流程'
     );
     const todos = daily.groups.find((group) => group.key === 'todos')?.items ?? [];

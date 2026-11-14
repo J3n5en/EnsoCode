@@ -35,8 +35,9 @@ const TODAY = '2024-05-15';
 const YESTERDAY = '2024-05-14';
 
 const item = (over: Partial<SecretaryDailyItem> = {}): SecretaryDailyItem => ({
-  id: 'result:c1:goal-complete:1',
+  id: 'session:c1',
   at: new Date(2024, 4, 15, 12, 30).getTime(),
+  dispatchedAt: new Date(2024, 4, 15, 12, 0).getTime(),
   title: '重构登录流程',
   projectName: 'enso-code',
   label: 'Goal complete',
@@ -144,7 +145,6 @@ describe('SecretaryDailyBoard', () => {
   it('默认打开今天，列按状态排，列头计数与卡片数一致', async () => {
     h.daily[TODAY] = daily({
       groups: [
-        { key: 'dispatched', items: [item({ id: 'd1', conversationId: 'c2' })] },
         { key: 'running', items: [item({ id: 'r1', conversationId: 'c3' })] },
         { key: 'needsYou', items: [item({ id: 'n1', conversationId: 'c4' })] },
         { key: 'failed', items: [item({ id: 'f1', conversationId: 'c5' })] },
@@ -162,7 +162,6 @@ describe('SecretaryDailyBoard', () => {
       (container.querySelector('[data-enso="secretary-daily-date"]') as HTMLInputElement).value
     ).toBe(TODAY);
     expect(columns()).toEqual([
-      { group: 'dispatched', count: '1', cards: 1 },
       { group: 'running', count: '1', cards: 1 },
       { group: 'needsYou', count: '1', cards: 1 },
       { group: 'done', count: '2', cards: 2 },
@@ -170,7 +169,9 @@ describe('SecretaryDailyBoard', () => {
       { group: 'todos', count: '1', cards: 1 },
       { group: 'changes', count: '1', cards: 1 },
     ]);
-    expect(text('[data-enso="secretary-daily-stat"]')).toBe('2/8');
+    // 没有「新派出」列：一张卡只在一列，派出数量进顶部统计
+    expect(columns().map((column) => column.group)).not.toContain('dispatched');
+    expect(text('[data-enso="secretary-daily-stat"]')).toBe('[Dispatched] 2 · 2/7');
   });
 
   it('空列照 kanban 显示图标和「暂无卡片」，不是整块隐藏', async () => {
@@ -178,18 +179,25 @@ describe('SecretaryDailyBoard', () => {
     await render(createElement(SecretaryDailyBoard));
     expect(columns().every((column) => column.count === '0' && column.cards === 0)).toBe(true);
     expect(container.querySelectorAll('[data-enso="secretary-daily-empty-column"]')).toHaveLength(
-      7
+      6
     );
     expect(text('[data-enso="secretary-daily-empty-column"]')).toBe('[No cards yet]');
-    expect(text('[data-enso="secretary-daily-stat"]')).toBe('0/0');
+    expect(text('[data-enso="secretary-daily-stat"]')).toBe('[Dispatched] 2 · 0/0');
   });
 
-  it('历史日期没有「进行中」列：实时状态只在今天成立', async () => {
+  it('卡片上显示派出与完成时间', async () => {
     await render(createElement(SecretaryDailyBoard));
-    expect(columns().map((column) => column.group)).toContain('running');
-    click('[data-enso="secretary-daily-prev"]');
-    await flush();
-    expect(columns().map((column) => column.group)).not.toContain('running');
+    expect(text('[data-enso="secretary-daily-times"]')).toBe(
+      '[Dispatched] 12:00 · [Completed] 12:30'
+    );
+  });
+
+  it('没有派出时间的卡片只显示状态时间', async () => {
+    h.daily[TODAY] = daily({
+      groups: [{ key: 'todos', items: [item({ dispatchedAt: undefined, label: 'Added' })] }],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    expect(text('[data-enso="secretary-daily-times"]')).toBe('12:30');
   });
 
   it('点卡片展开全文，点会话徽标才跳转', async () => {
@@ -273,7 +281,7 @@ describe('SecretaryDailyBoard', () => {
     const groups: SecretaryDailyGroup[] = [{ key: 'failed', items: [item({ label: 'Failed' })] }];
     h.daily[TODAY] = daily({ groups });
     await render(createElement(SecretaryDailyBoard));
-    expect(columns()).toHaveLength(7);
+    expect(columns()).toHaveLength(6);
     expect(columns().find((column) => column.group === 'failed')?.cards).toBe(1);
     expect(columns().find((column) => column.group === 'done')?.cards).toBe(0);
   });
