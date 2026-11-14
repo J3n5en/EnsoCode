@@ -5,11 +5,13 @@ import type {
   ProjectedMessage,
 } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
+import type { ObservedTask } from '../backgroundTaskTracker';
 import {
   createSecretaryReadHandlers,
   type SecretaryReadPorts,
   type SecretarySessionStatus,
 } from './readers';
+import type { GitResult, RepoStatusDeps } from './repoStatus';
 import type { SecretaryOpHandler } from './tools';
 
 const SECRET = 'sk-1234567890abcdef1234';
@@ -46,6 +48,40 @@ const row = (overrides: Record<string, unknown> = {}): Record<string, unknown> =
 
 const idle: SecretarySessionStatus = { state: 'idle', pendingAsks: 0, pendingApprovals: 0 };
 
+/** 假 git：只回答 repo_status 需要的几个子命令，其余一律失败 */
+function fakeRepo(
+  overrides: Partial<Record<string, GitResult>> = {},
+  options: { known?: string[]; common?: Record<string, string> } = {}
+): RepoStatusDeps {
+  const known = new Set(options.known ?? ['/repo/alpha']);
+  const common = options.common ?? { '/repo/alpha': '/repo/alpha/.git' };
+  const ok = (stdout: string): GitResult => ({ code: 0, stdout, stderr: '' });
+  const fail: GitResult = { code: 128, stdout: '', stderr: 'fatal' };
+  return {
+    async realpath(target) {
+      return known.has(target) ? target : null;
+    },
+    exists: () => false,
+    async git(cwd, args) {
+      const key = args.join(' ');
+      const injected = overrides[key];
+      if (injected) return injected;
+      if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') return ok(cwd);
+      if (args[0] === 'rev-parse' && args[1] === '--git-common-dir')
+        return common[cwd] ? ok(common[cwd]) : fail;
+      if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return ok('feat/x');
+      if (args[0] === 'log' && args[1] === '-1') return ok('9c23a80\u001f合并秘书分支');
+      if (args[0] === 'log') return ok('9c23a80\u001fJ\u001f1700000000\u001f合并秘书分支');
+      if (args[0] === 'status') return ok(' M src/a.ts\0');
+      if (args[0] === 'rev-parse' && args[1] === '--verify') return { ...fail, code: 1 };
+      if (args[0] === 'rev-parse' && args[1] === '--git-path') return ok(`.git/${args[2]}`);
+      if (args[0] === 'worktree')
+        return ok('worktree /repo/alpha\nHEAD 9c23a80\nbranch refs/heads/feat/x\n');
+      return fail;
+    },
+  };
+}
+
 function makePorts(overrides: Partial<SecretaryReadPorts> = {}): SecretaryReadPorts {
   return {
     projects: () => [],
@@ -55,6 +91,10 @@ function makePorts(overrides: Partial<SecretaryReadPorts> = {}): SecretaryReadPo
     history: async () => ({ ok: true, messages: [], baseIndex: 0 }),
     git: async () => null,
     profile: () => null,
+    message: async () => null,
+    activity: async () => [],
+    tasks: async () => [],
+    repo: fakeRepo(),
     ...overrides,
   };
 }
@@ -433,5 +473,294 @@ describe('session_read', () => {
         await handlers.session_read({ conversationId }, { secretaryConversationId: 'sec-1' })
       ).toEqual({ ok: false, error: 'not-found' });
     }
+  });
+});
+
+describe('session_read 的 index 模式', () => {
+  const long = 'A'.repeat(30_000) + 'B'.repeat(500);
+
+  const handlers = (message: ProjectedMessage | null) =>
+    createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        message: async () => message,
+      })
+    );
+
+  it('按 index 读全文，超过一页时给出 nextOffset', async () => {
+    const first = await run(
+      handlers({ role: 'assistant', content: [{ type: 'text', text: long }] }).session_read,
+      { conversationId: 's1', index: 7 }
+    );
+    expect(first).toMatchObject({ index: 7, role: 'assistant', offset: 0, totalChars: 30_500 });
+    expect((first.text as string).length).toBeLessThan(30_100);
+    expect(first.nextOffset).toBe(30_000);
+
+    const second = await run(
+      handlers({ role: 'assistant', content: [{ type: 'text', text: long }] }).session_read,
+      { conversationId: 's1', index: 7, offset: 30_000 }
+    );
+    expect(second.offset).toBe(30_000);
+    expect(second.nextOffset).toBeUndefined();
+    expect(second.text).toContain('B'.repeat(500));
+  });
+
+  it('全文同样包成不可信内容并脱敏', async () => {
+    const result = await run(
+      handlers({ role: 'user', content: [{ type: 'text', text: `key ${SECRET}` }] }).session_read,
+      { conversationId: 's1', index: 0 }
+    );
+    expect(result.text).toBe(
+      '<untrusted-content source="session:s1">key [REDACTED]</untrusted-content>'
+    );
+  });
+
+  it('工具结果与不存在的下标都不返回正文', async () => {
+    const toolResult = handlers({
+      role: 'toolResult',
+      content: [{ type: 'text', text: '命令输出' }],
+    });
+    expect(
+      await toolResult.session_read(
+        { conversationId: 's1', index: 3 },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'not-readable' });
+    expect(
+      await handlers(null).session_read(
+        { conversationId: 's1', index: 99 },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'not-found' });
+  });
+});
+
+describe('session_tasks', () => {
+  const task = (overrides: Partial<ObservedTask> = {}): ObservedTask => ({
+    taskId: 't1',
+    command: 'pnpm dev',
+    status: 'running',
+    startedAt: Date.now() - 5_000,
+    ...overrides,
+  });
+
+  const handlers = (tasks: ObservedTask[]) =>
+    createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        tasks: async () => tasks,
+      })
+    );
+
+  it('给出命令摘要、时长、状态与存活判断', async () => {
+    const result = await run(handlers([task({ alive: false })]).session_tasks, {
+      conversationId: 's1',
+    });
+    const [row] = result.tasks as Record<string, unknown>[];
+    expect(row).toMatchObject({
+      taskId: 't1',
+      command: '<untrusted-content source="task:s1">pnpm dev</untrusted-content>',
+      status: 'running',
+      state: 'running',
+      alive: false,
+    });
+    expect(row.ranMs as number).toBeGreaterThanOrEqual(5_000);
+  });
+
+  it('没有探测过存活时报 null，不当成活着', async () => {
+    const result = await run(handlers([task()]).session_tasks, { conversationId: 's1' });
+    expect((result.tasks as Record<string, unknown>[])[0]?.alive).toBeNull();
+  });
+
+  it('退出码区分正常退出与被杀，超期未结束标 stalled', async () => {
+    const result = await run(
+      handlers([
+        task({ taskId: 'done', status: 'done', exitCode: 0 }),
+        task({ taskId: 'killed', status: 'failed' }),
+        task({ taskId: 'late', deadlineAt: Date.now() - 1_000 }),
+      ]).session_tasks,
+      { conversationId: 's1' }
+    );
+    const rows = result.tasks as Record<string, unknown>[];
+    expect(rows.map((row) => row.state)).toEqual(['exited', 'killed', 'running']);
+    expect(rows[2]?.stalled).toBe(true);
+  });
+
+  it('不可见会话一律 not-found', async () => {
+    const handlers = createSecretaryReadHandlers(makePorts());
+    expect(
+      await handlers.session_tasks({ conversationId: 's1' }, { secretaryConversationId: 'sec-1' })
+    ).toEqual({ ok: false, error: 'not-found' });
+  });
+});
+
+describe('session_activity', () => {
+  it('只给工具名、成败、耗时与时间，命令前 120 字包成不可信内容', async () => {
+    const seen: number[] = [];
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        activity: async (_file, limit) => {
+          seen.push(limit);
+          return [
+            { name: 'bash', ok: true, durationMs: 12, at: 1_000, command: 'pnpm typecheck' },
+            { name: 'read', ok: false, pending: true, at: 2_000 },
+          ];
+        },
+      })
+    );
+    const result = await run(handlers.session_activity, { conversationId: 's1', limit: 5 });
+    expect(seen).toEqual([5]);
+    expect(result.calls).toEqual([
+      {
+        name: 'bash',
+        ok: true,
+        durationMs: 12,
+        at: 1_000,
+        command: '<untrusted-content source="session:s1">pnpm typecheck</untrusted-content>',
+      },
+      { name: 'read', ok: false, pending: true, at: 2_000 },
+    ]);
+    expect(JSON.stringify(result)).not.toContain('SECRET OUTPUT');
+  });
+
+  it('limit 收口在 1..50', async () => {
+    const seen: number[] = [];
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        activity: async (_file, limit) => {
+          seen.push(limit);
+          return [];
+        },
+      })
+    );
+    await run(handlers.session_activity, { conversationId: 's1', limit: 999 });
+    await run(handlers.session_activity, { conversationId: 's1', limit: 0 });
+    expect(seen).toEqual([50, 1]);
+  });
+});
+
+describe('repo_status', () => {
+  const handlers = (repo: RepoStatusDeps = fakeRepo(), projects = [project()]) =>
+    createSecretaryReadHandlers(makePorts({ projects: () => projects, repo }));
+
+  it('按 projectId 给出分支、HEAD、提交、改动与 worktree', async () => {
+    const result = await run(handlers().repo_status, { projectId: 'p1', limit: 5 });
+    expect(result).toMatchObject({
+      projectId: 'p1',
+      path: '/repo/alpha',
+      branch: 'feat/x',
+      head: {
+        sha: '9c23a80',
+        subject: '<untrusted-content source="repo:p1">合并秘书分支</untrusted-content>',
+      },
+      changes: { total: 1, files: [{ status: ' M', path: 'src/a.ts' }] },
+      operation: { merge: false, rebase: false },
+      worktrees: [{ path: '/repo/alpha', branch: 'feat/x', head: '9c23a80' }],
+    });
+  });
+
+  it('路径越界被拒', async () => {
+    const repo = fakeRepo({}, { known: ['/repo/alpha'] });
+    for (const requested of ['/etc', '/repo/beta', '/repo/alpha/src']) {
+      expect(
+        await handlers(repo).repo_status({ path: requested }, { secretaryConversationId: 'sec-1' })
+      ).toEqual({ ok: false, error: 'path-out-of-scope' });
+    }
+  });
+
+  it('不可见项目被拒', async () => {
+    const repo = fakeRepo({}, { known: ['/repo/alpha', '/repo/hidden'] });
+    const projects = [project()];
+    expect(
+      await handlers(repo, projects).repo_status(
+        { path: '/repo/hidden' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'path-out-of-scope' });
+    expect(
+      await handlers(repo, projects).repo_status(
+        { projectId: 'p9' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'not-found' });
+  });
+
+  it('同时给 projectId 与 path 时路径必须落在同一个项目', async () => {
+    const repo = fakeRepo(
+      {},
+      {
+        known: ['/repo/alpha', '/repo/beta'],
+        common: { '/repo/alpha': '/repo/alpha/.git', '/repo/beta': '/repo/beta/.git' },
+      }
+    );
+    const projects = [project(), project({ projectId: 'p2', canonicalPath: '/repo/beta' })];
+    expect(
+      await handlers(repo, projects).repo_status(
+        { projectId: 'p2', path: '/repo/alpha' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'path-out-of-scope' });
+  });
+
+  it('同仓 worktree 放行，contains 命中与不命中都给出结论', async () => {
+    const repo = fakeRepo(
+      {
+        'merge-base --is-ancestor 9c23a8058 HEAD': { code: 0, stdout: '', stderr: '' },
+        'merge-base --is-ancestor deadbeef HEAD': { code: 1, stdout: '', stderr: '' },
+      },
+      {
+        known: ['/repo/alpha', '/wt/alpha-1'],
+        common: { '/repo/alpha': '/repo/alpha/.git', '/wt/alpha-1': '/repo/alpha/.git' },
+      }
+    );
+    const hit = await run(handlers(repo).repo_status, {
+      path: '/wt/alpha-1',
+      contains: '9c23a8058',
+    });
+    expect(hit.contains).toEqual({ sha: '9c23a8058', inHead: true });
+    const miss = await run(handlers(repo).repo_status, {
+      path: '/wt/alpha-1',
+      contains: 'deadbeef',
+    });
+    expect(miss.contains).toEqual({ sha: 'deadbeef', inHead: false });
+  });
+
+  it('非法 base / contains 直接拒绝', async () => {
+    expect(
+      await handlers().repo_status(
+        { projectId: 'p1', base: '--upload-pack=rm -rf' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'invalid-base' });
+    expect(
+      await handlers().repo_status(
+        { projectId: 'p1', contains: 'HEAD' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'invalid-contains' });
+  });
+
+  it('ssh 项目与缺参数都拒绝', async () => {
+    const ssh = [project({ kind: 'ssh', sshHost: 'host' })];
+    expect(
+      await handlers(fakeRepo(), ssh).repo_status(
+        { projectId: 'p1' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'ssh-project' });
+    expect(await handlers().repo_status({}, { secretaryConversationId: 'sec-1' })).toEqual({
+      ok: false,
+      error: 'invalid arguments',
+    });
   });
 });

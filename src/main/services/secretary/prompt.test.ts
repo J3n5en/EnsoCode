@@ -69,4 +69,16 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toContain('silence_turn');
     expect(prompt).not.toContain('<secretary-silent/>');
   });
+
+  it('核实规则写进提示词：提交号与工作区先查 repo_status，截断按 index 读全文，卡住看 session_tasks', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    expect(prompt).toContain('repo_status');
+    expect(prompt).toMatch(/commit id, a HEAD, or that a working tree is clean/);
+    expect(prompt).toContain('truncated');
+    expect(prompt).toContain('offset');
+    expect(prompt).toContain('session_tasks');
+    expect(prompt).toContain('session_activity');
+    // 只读 git 不等于能读文件
+    expect(prompt).toMatch(/never file contents/);
+  });
 });

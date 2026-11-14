@@ -443,6 +443,20 @@ async function prepareEnv() {
   for (const provider of settings['enso-settings'].state.providers ?? []) {
     provider.baseUrl = `http://127.0.0.1:${FAKE_PORT}`;
   }
+  // 普通会话的工具行回归要用真实的 mcp__ 工具：挂一个只提供 echo 的最小 MCP 服务
+  settings['enso-settings'].state.mcpServers = [
+    ...(settings['enso-settings'].state.mcpServers ?? []),
+    {
+      id: 'fake-mcp',
+      name: 'fake',
+      description: '验收用的最小 MCP 服务',
+      transport: 'stdio',
+      command: process.execPath,
+      args: [path.join(REPO, 'scripts/fake-mcp-echo.mjs')],
+      source: 'user',
+      enabled: true,
+    },
+  ];
   writeFileSync(settingsFile, JSON.stringify(settings));
   mkdirSync(PROJ, { recursive: true });
   writeFileSync(path.join(PROJ, 'README.md'), 'isolated dispatch target\n');
@@ -4559,6 +4573,93 @@ async function verifyTakeover(cdp, setup) {
     '接管: 授权、撤销与秘书发的每条消息都有审计',
     audit
   );
+
+  // 回归：秘书卡片分支曾把普通会话里的 MCP 工具也画成秘书卡片，验收没发现
+  log('== 普通会话：mcp 与 bash 都是普通工具行，归在同一组');
+  const plainTurn = await page(`
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.projectId)});
+    const id = await S().newConversation(project.id);
+    S().selectConversation(id);
+    await S().send(
+      '跑两个工具 [[tool:mcp__fake__echo {"text":"mcp-echo-hi"}]] [[tool:bash {"command":"printf bash-row"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    // 两个工具都要审批：轮询把弹出来的审批卡都放行
+    const approved = [];
+    for (let i = 0; i < 80; i += 1) {
+      const conversation = S().conversations[id] ?? {};
+      const pending = (conversation.pendingApprovals ?? [])[0];
+      if (pending) {
+        const reply = await window.electronAPI.agent.respondApproval(id, pending.requestId, 'allow');
+        approved.push({ tool: pending.tool, ok: reply?.ok ?? null });
+      }
+      const tools = (conversation.messages ?? []).filter((message) => message.toolName);
+      if (tools.length >= 2 && conversation.status !== 'running') break;
+      await sleep(500);
+    }
+    const tools = (S().conversations[id]?.messages ?? [])
+      .filter((message) => message.toolName)
+      .map((message) => ({ name: message.toolName, isError: message.isError === true }));
+    return JSON.stringify({ id, approved, tools });
+  `);
+  assert(
+    plainTurn.tools?.length === 2 &&
+      plainTurn.tools.some((tool) => tool.name === 'mcp__fake__echo') &&
+      plainTurn.tools.some((tool) => tool.name === 'bash'),
+    '普通会话: 假模型真的触发了 mcp 与 bash 两个工具',
+    plainTurn
+  );
+  assert(
+    plainTurn.tools.every((tool) => tool.isError === false),
+    '普通会话: 两个工具都执行成功',
+    plainTurn
+  );
+  const plainRows = await page(`
+    const id = ${JSON.stringify(plainTurn.id)};
+    S().selectConversation(id);
+    const rows = () =>
+      [...document.querySelectorAll('[data-enso=tool-row]')].map((node) => node.innerText);
+    const group = await until(
+      () =>
+        [...document.querySelectorAll('[data-enso=tool-row]')].find((node) =>
+          /已工作|Worked for/.test(node.innerText)
+        ) ?? null,
+      20000
+    );
+    if (!group) return JSON.stringify({ ok: false, error: 'no tool group' });
+    const groupText = group.innerText;
+    // 完成后的过程组默认收起，点开才看得到组内原始行
+    if (!rows().some((text) => text.includes('mcp-echo-hi'))) group.click();
+    const expanded = await until(() => {
+      const texts = rows();
+      return texts.some((text) => text.includes('mcp-echo-hi')) &&
+        texts.some((text) => text.includes('bash-row'))
+        ? texts
+        : null;
+    }, 15000);
+    return JSON.stringify({
+      ok: Boolean(expanded),
+      groupText,
+      rows: expanded ?? rows(),
+      cards: document.querySelectorAll('[data-enso=tool-card]').length,
+    });
+  `);
+  assert(plainRows.ok, '普通会话: 过程组点开后两个工具行都在', plainRows);
+  assert(
+    plainRows.rows.some((text) => text.includes('mcp-echo-hi')) &&
+      plainRows.rows.some((text) => text.includes('bash-row')),
+    '普通会话: mcp 与 bash 都渲染成 tool-row',
+    plainRows
+  );
+  assert(plainRows.cards === 0, '普通会话: 一个秘书卡片都没有（tool-card 为 0）', plainRows);
+  assert(
+    /已工作|Worked for/.test(plainRows.groupText) && plainRows.groupText.includes('2 个工具调用'),
+    '普通会话: 两个工具归在同一个「已工作 Ns 2 个工具调用」分组里',
+    plainRows
+  );
+  await cdp.shot(path.join(ART, '09-plain-tool-rows.png'));
 }
 
 process.on('SIGINT', () => {

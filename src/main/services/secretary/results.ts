@@ -12,6 +12,7 @@ import {
   type SecretaryResultKind,
   type SecretaryTakeoverView,
   type SecretaryTodo,
+  type SecretaryUntrackedView,
   type SecretaryUpdate,
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
@@ -495,6 +496,31 @@ export function takeoverViews(
     });
   }
   return views.sort((left, right) => right.grantedAt - left.grantedAt);
+}
+
+/**
+ * 「不再跟踪」名单：会话行已删的不列；顺序沿用名单本身（最近收回的在前）。
+ * 记录里没有项目 id，按会话行反查。
+ */
+export function untrackedViews(
+  file: SecretaryDispatchFile,
+  rows: Readonly<Record<string, Record<string, unknown>>>,
+  projects: readonly ProjectAuthority[]
+): SecretaryUntrackedView[] {
+  const views: SecretaryUntrackedView[] = [];
+  for (const conversationId of file.untracked ?? []) {
+    const row = rows[conversationId];
+    if (!row) continue;
+    const projectId = typeof row.projectId === 'string' ? row.projectId : '';
+    const project = projects.find((candidate) => candidate.projectId === projectId);
+    views.push({
+      conversationId,
+      projectId,
+      projectName: project ? projectNameFromPath(project.canonicalPath) : '',
+      title: typeof row.title === 'string' ? row.title : '',
+    });
+  }
+  return views;
 }
 
 /** 系统通知只补通用通知没覆盖的结果；通用路径已经报过审批、提问、轮次完成与失败 */

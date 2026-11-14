@@ -613,12 +613,33 @@ register('session_read', (call, ctx) => {
   const output = rec(parseJson(call.output));
   const id = str(output?.conversationId) ?? str(rec(call.args)?.conversationId);
   const title = str(output?.title) ?? sessionLabel(id, ctx);
+  const error = errorText(call, ctx);
+  // index 模式：单条消息全文，长文按 offset 分页
+  if (typeof output?.index === 'number') {
+    const full = plainUntrusted(output.text) ?? '';
+    const blocks: ToolCardBlock[] = [];
+    if (error) blocks.push({ kind: 'error', text: error });
+    if (full) blocks.push({ kind: 'markdown', text: full, collapsed: longText(full) });
+    const next = typeof output.nextOffset === 'number' ? output.nextOffset : undefined;
+    if (next !== undefined)
+      blocks.push({ kind: 'note', text: ctx.t('More text from character {{next}}', { next }) });
+    return view(
+      call,
+      ctx.t('Read message {{index}} in {{title}}', { index: String(output.index), title }),
+      blocks,
+      error ? { tone: 'error', label: ctx.t('Refused') } : { tone: 'neutral', label: ctx.t('Read') }
+    );
+  }
   const badge = stateBadge(output?.state, ctx);
   const status: ToolCardStatus = { tone: badge.badgeTone, label: badge.badge };
   const pending = rec(output?.pending);
   const approvals = typeof pending?.approvals === 'number' ? pending.approvals : 0;
   const asks = typeof pending?.asks === 'number' ? pending.asks : 0;
   const messages = Array.isArray(output?.messages) ? output.messages : [];
+  const truncated = messages.flatMap((entry) => {
+    const row = rec(entry);
+    return row?.truncated === true && typeof row.index === 'number' ? [row.index] : [];
+  });
   const summary = messages
     .flatMap((entry) => {
       const row = rec(entry);
@@ -628,7 +649,6 @@ register('session_read', (call, ctx) => {
       return [`${role}: ${firstLine(text)}`];
     })
     .join('\n');
-  const error = errorText(call, ctx);
   const blocks: ToolCardBlock[] = [
     ...(error ? [{ kind: 'error' as const, text: error }] : []),
     ...(approvals > 0 || asks > 0
@@ -644,6 +664,13 @@ register('session_read', (call, ctx) => {
       : []),
   ];
   if (summary) blocks.push({ kind: 'markdown', text: summary, collapsed: true });
+  if (truncated.length > 0)
+    blocks.push({
+      kind: 'note',
+      text: ctx.t('Truncated messages {{indexes}}: read them by index', {
+        indexes: truncated.map((index) => `#${index}`).join(', '),
+      }),
+    });
   // 会话状态只出现在徽标上，详情里不再重复一遍
   return view(
     call,
@@ -687,6 +714,221 @@ register('project_info', (call, ctx) => {
   return view(call, ctx.t('Project {{name}}', { name }), [
     { kind: 'note', text: projectBits(output, ctx) },
   ]);
+});
+
+/** 相对时长：秘书看的是"跑了多久"，不是绝对时间 */
+function durationText(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return minutes > 0 ? `${minutes}m ${total % 60}s` : `${total}s`;
+}
+
+const TASK_STATE: Record<string, { key: string; tone: ToolCardStatus['tone'] }> = {
+  running: { key: 'Running', tone: 'ok' },
+  exited: { key: 'Exited', tone: 'neutral' },
+  killed: { key: 'Killed', tone: 'error' },
+};
+
+register('repo_status', (call, ctx) => {
+  const output = rec(parseJson(call.output)) ?? {};
+  const project = projectLabel(str(output.projectId) ?? str(rec(call.args)?.projectId), ctx);
+  const error = errorText(call, ctx);
+  const branch = str(output.branch);
+  const head = rec(output.head);
+  const changes = rec(output.changes);
+  const operation = rec(output.operation);
+  const base = rec(output.base);
+  const contains = rec(output.contains);
+  const blocks: ToolCardBlock[] = [];
+  if (error) blocks.push({ kind: 'error', text: error });
+  const total = typeof changes?.total === 'number' ? changes.total : 0;
+  const rows: { label: string; value: string }[] = [
+    { label: ctx.t('Branch'), value: branch ?? ctx.t('No local branch') },
+  ];
+  if (head) {
+    const subject = plainUntrusted(head.subject) ?? '';
+    rows.push({ label: ctx.t('HEAD'), value: `${str(head.sha) ?? ''} ${subject}`.trim() });
+  }
+  rows.push({
+    label: ctx.t('Working tree'),
+    value: total === 0 ? ctx.t('Clean tree') : ctx.t('{{count}} changed files', { count: total }),
+  });
+  if (base)
+    rows.push({
+      label: ctx.t('Against {{ref}}', { ref: str(base.ref) ?? '' }),
+      value: ctx.t('{{ahead}} ahead, {{behind}} behind', {
+        ahead: typeof base.ahead === 'number' ? base.ahead : 0,
+        behind: typeof base.behind === 'number' ? base.behind : 0,
+      }),
+    });
+  if (contains)
+    rows.push({
+      label: ctx.t('Contains {{sha}}', { sha: str(contains.sha) ?? '' }),
+      value: contains.inHead === true ? ctx.t('Yes') : ctx.t('No'),
+    });
+  const inProgress = [
+    ...(operation?.merge === true ? [ctx.t('Merge')] : []),
+    ...(operation?.rebase === true ? [ctx.t('Rebase')] : []),
+  ];
+  if (inProgress.length > 0)
+    rows.push({ label: ctx.t('In progress'), value: inProgress.join(' · ') });
+  blocks.push({ kind: 'kv', rows });
+
+  const commits = Array.isArray(output.commits) ? output.commits : [];
+  if (commits.length > 0)
+    blocks.push({
+      kind: 'list',
+      items: commits.flatMap((entry) => {
+        const row = rec(entry);
+        const sha = str(row?.sha);
+        if (!row || !sha) return [];
+        const subject = plainUntrusted(row.subject) ?? '';
+        const author = plainUntrusted(row.author) ?? '';
+        const at = typeof row.at === 'number' ? formatStamp(row.at) : '';
+        const detail = [author, at].filter(Boolean).join(' · ');
+        return [{ title: `${sha} ${subject}`.trim(), ...(detail ? { detail } : {}) }];
+      }),
+    });
+
+  const files = Array.isArray(changes?.files) ? changes.files : [];
+  if (files.length > 0)
+    blocks.push({
+      kind: 'list',
+      items: files.flatMap((entry) => {
+        const row = rec(entry);
+        const filePath = str(row?.path);
+        if (!row || !filePath) return [];
+        return [{ title: filePath, badge: str(row.status) ?? '' }];
+      }),
+    });
+
+  const worktrees = Array.isArray(output.worktrees) ? output.worktrees : [];
+  if (worktrees.length > 1)
+    blocks.push({
+      kind: 'list',
+      items: worktrees.flatMap((entry) => {
+        const row = rec(entry);
+        const worktreePath = str(row?.path);
+        if (!row || !worktreePath) return [];
+        const detail = [str(row.branch) ?? ctx.t('No local branch'), str(row.head) ?? '']
+          .filter(Boolean)
+          .join(' · ');
+        return [{ title: worktreePath, detail }];
+      }),
+    });
+
+  return view(
+    call,
+    ctx.t('Repository status {{project}}', { project }),
+    blocks,
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : { tone: 'neutral', label: branch ?? ctx.t('No local branch') }
+  );
+});
+
+register('session_tasks', (call, ctx) => {
+  const output = rec(parseJson(call.output));
+  const id = str(output?.conversationId) ?? str(rec(call.args)?.conversationId);
+  const title = sessionLabel(id, ctx);
+  const error = errorText(call, ctx);
+  const tasks = Array.isArray(output?.tasks) ? output.tasks : [];
+  const running = tasks.filter((entry) => rec(entry)?.state === 'running').length;
+  const blocks: ToolCardBlock[] = [];
+  if (error) blocks.push({ kind: 'error', text: error });
+  if (tasks.length > 0)
+    blocks.push({
+      kind: 'list',
+      items: tasks.flatMap((entry) => {
+        const row = rec(entry);
+        if (!row) return [];
+        const state = str(row.state) ?? '';
+        const known = TASK_STATE[state];
+        const ran =
+          typeof row.ranMs === 'number'
+            ? ctx.t('ran {{duration}}', { duration: durationText(row.ranMs) })
+            : '';
+        const exit =
+          typeof row.exitCode === 'number' ? ctx.t('exit {{code}}', { code: row.exitCode }) : '';
+        const alive =
+          row.alive === false
+            ? ctx.t('Process gone')
+            : row.stalled === true
+              ? ctx.t('Past its deadline')
+              : '';
+        const detail = [ran, exit, alive].filter(Boolean).join(' · ');
+        return [
+          {
+            title:
+              firstLine(plainUntrusted(row.command) ?? '') ||
+              str(row.taskId) ||
+              ctx.t('Unknown task'),
+            badge: known ? ctx.t(known.key) : state,
+            badgeTone: known?.tone ?? 'neutral',
+            ...(detail ? { detail } : {}),
+          },
+        ];
+      }),
+    });
+  return view(
+    call,
+    ctx.t('Background tasks in {{title}}', { title }),
+    blocks,
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : running > 0
+        ? { tone: 'ok', label: ctx.t('{{count}} running', { count: running }) }
+        : { tone: 'neutral', label: ctx.t('{{count}} tasks', { count: tasks.length }) }
+  );
+});
+
+register('session_activity', (call, ctx) => {
+  const output = rec(parseJson(call.output));
+  const id = str(output?.conversationId) ?? str(rec(call.args)?.conversationId);
+  const title = sessionLabel(id, ctx);
+  const error = errorText(call, ctx);
+  const calls = Array.isArray(output?.calls) ? output.calls : [];
+  const failed = calls.filter((entry) => {
+    const row = rec(entry);
+    return row?.ok === false && row.pending !== true;
+  }).length;
+  const blocks: ToolCardBlock[] = [];
+  if (error) blocks.push({ kind: 'error', text: error });
+  if (calls.length > 0)
+    blocks.push({
+      kind: 'list',
+      items: calls.flatMap((entry) => {
+        const row = rec(entry);
+        const name = str(row?.name);
+        if (!row || !name) return [];
+        const pending = row.pending === true;
+        const ok = row.ok === true;
+        const parts = [
+          typeof row.durationMs === 'number' ? durationText(row.durationMs) : '',
+          typeof row.at === 'number' ? formatStamp(row.at) : '',
+          firstLine(plainUntrusted(row.command) ?? ''),
+        ].filter(Boolean);
+        return [
+          {
+            title: friendlyName(name, ctx),
+            badge: pending ? ctx.t('Running') : ok ? ctx.t('Succeeded') : ctx.t('Failed'),
+            badgeTone: pending ? 'pending' : ok ? 'ok' : ('error' as ToolCardStatus['tone']),
+            ...(parts.length > 0 ? { detail: parts.join(' · ') } : {}),
+          },
+        ];
+      }),
+    });
+  return view(
+    call,
+    ctx.t('Recent tool calls in {{title}}', { title }),
+    blocks,
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : failed > 0
+        ? { tone: 'error', label: ctx.t('{{count}} failed', { count: failed }) }
+        : { tone: 'ok', label: ctx.t('{{count}} calls', { count: calls.length }) }
+  );
 });
 
 const PROFILE_FIELDS: Record<string, string> = {

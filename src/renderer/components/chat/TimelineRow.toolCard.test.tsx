@@ -17,7 +17,7 @@ vi.mock('@/stores/settings', () => ({
       expandLiveEdits: false,
     }),
 }));
-// 可读卡片只在秘书会话里画：这里让当前展示的会话属于秘书项目
+// 可读卡片只在秘书会话里画：会话类型由上层显式传入，不看全局当前会话
 vi.mock('@/stores/sessions', () => ({
   useSessionsStore: (select: (state: object) => unknown) =>
     select({
@@ -76,6 +76,7 @@ describe('工具卡片和结果卡片同宽', () => {
   it('session_create 的工具卡片和派活结果卡片没有左右缩进，并包在同一列里', () => {
     const markup = renderToStaticMarkup(
       createElement(TimelineRow, {
+        secretarySession: true,
         item: tool({
           name: 'session_create',
           args: { title: '写 hello.txt', prompt: '写 hello.txt', projectId: 'p1', worktree: false },
@@ -102,6 +103,7 @@ describe('工具卡片和结果卡片同宽', () => {
   it('session_send 的送达状态和 todo 更新结果都在同一张满宽卡片里', () => {
     const sent = renderToStaticMarkup(
       createElement(TimelineRow, {
+        secretarySession: true,
         item: tool({
           name: 'session_send',
           args: { conversationId: 'conv-1', message: '写好了' },
@@ -111,6 +113,7 @@ describe('工具卡片和结果卡片同宽', () => {
     );
     const updated = renderToStaticMarkup(
       createElement(TimelineRow, {
+        secretarySession: true,
         item: tool({
           name: 'todo_item_update',
           args: { todoId: 'todo-1', done: true },
@@ -138,6 +141,7 @@ describe('秘书卡片收成一行', () => {
   const created = () =>
     renderToStaticMarkup(
       createElement(TimelineRow, {
+        secretarySession: true,
         item: tool({
           name: 'session_create',
           args: {

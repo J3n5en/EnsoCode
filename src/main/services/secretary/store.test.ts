@@ -184,6 +184,19 @@ describe('SecretaryStore', () => {
     expect(new SecretaryStore(dir, now).dispatch()).toEqual(saved);
   });
 
+  it('keeps the untracked list on disk across restarts', () => {
+    const saved = store.saveDispatch({
+      version: 1,
+      dispatched: {},
+      named: [],
+      untracked: ['c1', 'c2'],
+      proposals: {},
+      outbox: [],
+    });
+    expect(saved.untracked).toEqual(['c1', 'c2']);
+    expect(new SecretaryStore(dir, now).dispatch().untracked).toEqual(['c1', 'c2']);
+  });
+
   it('round-trips todos.json and schedules.json', () => {
     expect(store.todos()).toEqual([]);
     expect(store.schedules()).toEqual([]);

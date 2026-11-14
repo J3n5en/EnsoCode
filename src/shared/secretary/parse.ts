@@ -690,6 +690,8 @@ export function parseDispatchFile(value: unknown): SecretaryDispatchFile {
     }
   }
   file.named = texts(value.named);
+  const untracked = texts(value.untracked);
+  if (untracked.length > 0) file.untracked = untracked;
   if (isObject(value.proposals)) {
     for (const item of Object.values(value.proposals)) {
       const proposal = parseProposal(item);
