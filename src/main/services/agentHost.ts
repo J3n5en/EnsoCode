@@ -1089,12 +1089,14 @@ export function spawnSession(
     ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset, secretaryPluginIds) ?? []),
     ...secretarySkillPaths(secretary),
   ];
-  const workflowPresetFiles = extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? [];
+  // 秘书不挂插件的 MCP 与 workflow：插件进程与凭据不该为它拉起，workflow 也不在它的能力里
+  const workflowPresetFiles =
+    secretary ? [] : (extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? []);
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of [
     ...(bot || secretary ? [] : plugins.mcpServers),
-    ...(extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? []),
+    ...(secretary ? [] : (extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? [])),
   ]) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);
