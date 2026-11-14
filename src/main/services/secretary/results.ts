@@ -69,7 +69,8 @@ export function classify(
   }
 }
 
-/** 运行中、十分钟无事件、该轮还没报过；等待审批与 worker 已退出都不算停滞 */
+/** 运行中、十分钟无事件、该轮还没报过；等待审批与 worker 已退出都不算停滞。
+ *  空闲等后台任务的超时、进程已死、完成未唤醒由 driver 看门狗另报，不走这里。 */
 export function stalled(
   records: readonly DispatchRecord[],
   statuses: Readonly<Record<string, SecretarySessionStatus>>,

@@ -482,6 +482,21 @@ describe('每分钟检查', () => {
     expect(h.state.file.outbox).toEqual([]);
   });
 
+  it('空闲等后台任务失败时报停滞，同一轮不重复', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.ports.backgroundStalls = () => [
+      { conversationId: 'c1', taskId: 't1', reason: 'undelivered' },
+    ];
+    h.host.tick(1_000);
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'stalled' });
+    expect(h.state.file.outbox[0].text).toContain('后台任务已完成但没有唤醒');
+    h.host.tick(30 * MINUTE);
+    expect(h.state.file.outbox).toHaveLength(1);
+  });
+
   it('待确认提案超过 24 小时过期并进回传队列', () => {
     const proposal: SecretaryProposal = {
       id: 'prop1',
