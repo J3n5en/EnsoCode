@@ -457,7 +457,31 @@ describe('待办', () => {
       projectId: 'p1',
       prompt: '看构建',
       todoId: 't1',
+      title: '看构建',
     });
+  });
+
+  it('派出待办的会话标题用待办文本而不是 prompt 开头，可用 title 覆盖', async () => {
+    const h = harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      todos: [
+        {
+          id: 't1',
+          text: '\n  修复通知误报\n顺带补单测',
+          projectId: 'p1',
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        { id: 't2', text: '修标题', projectId: 'p1', createdAt: 1, updatedAt: 1 },
+      ],
+    });
+    await call(h.handlers.todo_item_dispatch, { todoId: 't1', prompt: '背景：秘书功能在开发' });
+    await call(h.handlers.todo_item_dispatch, {
+      todoId: 't2',
+      prompt: '背景：秘书功能在开发',
+      title: '待办标题',
+    });
+    expect(h.created.map((request) => request.title)).toEqual(['修复通知误报', '待办标题']);
   });
 
   it('免确认时直接派出并把待办关联到会话', async () => {

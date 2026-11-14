@@ -157,6 +157,14 @@ async function dispatchContext(
   };
 }
 
+/** 待办文本的首个非空行就是它的标题 */
+function todoTitle(text: string): string | undefined {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+}
+
 function draftFromParams(params: Record<string, unknown>): DispatchDraft | null {
   const projectId = stringParam(params, 'projectId');
   const prompt = stringParam(params, 'prompt');
@@ -519,9 +527,12 @@ export function createSecretaryDispatchHandlers(
       if (!projectId) {
         return auditFailure(ports, ctx, 'todo_item_dispatch', 'project-required', todoId);
       }
+      const title = stringParam(params, 'title') ?? todoTitle(todo.text);
       const draft: DispatchDraft = {
         projectId,
         prompt: stringParam(params, 'prompt') ?? todo.text,
+        // 不给标题时会话按 prompt 开头起名，prompt 常以共同背景开头，几个会话会重名
+        ...(title ? { title } : {}),
         worktree: params.worktree === true,
         todoId,
       };

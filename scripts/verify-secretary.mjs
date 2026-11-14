@@ -1015,6 +1015,34 @@ async function run(cdp, pluginZipUrl) {
     500
   );
 
+  log('== step10 待办派出的会话标题用待办文本');
+  const todoText = '修复秘书通知误报';
+  const todoAdded = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.mutateTodo({
+      action: 'add', text: ${JSON.stringify(todoText)}, projectId: ${JSON.stringify(setup.projectId)},
+    }));
+  `);
+  assert(todoAdded.ok, 'step10: 建出带项目的待办', todoAdded);
+  const todoDispatch = await dispatchConfirmed(
+    `[[tool:todo_item_dispatch ${JSON.stringify({
+      todoId: todoAdded.todoId,
+      prompt: '背景：秘书功能在 feat/secretary-agent 分支上开发，这个分支检出在别处',
+    })}]]`
+  );
+  assert(todoDispatch.ok, 'step10: 待办派出会话建成', todoDispatch);
+  const todoRow = await page(`
+    const row = await until(() => S().conversations[${JSON.stringify(todoDispatch.conversationId)}], 15000);
+    return JSON.stringify({ title: row?.title ?? null });
+  `);
+  assert(todoRow.title === todoText, 'step10: 会话标题是待办文本', todoRow);
+  const todoPersisted = await waitFor(
+    () => conversationsIn()?.[todoDispatch.conversationId],
+    'todo dispatched row persisted',
+    15_000,
+    250
+  ).catch(() => null);
+  assert(todoPersisted?.title === todoText, 'step10: 落盘的会话行标题也是待办文本', todoPersisted);
+
   log('== 插件：勾选后才进秘书会话');
   const installed = await page(`
     const staged = await window.electronAPI.extensionPlugins.stageFromUrl(${JSON.stringify(pluginZipUrl)});
