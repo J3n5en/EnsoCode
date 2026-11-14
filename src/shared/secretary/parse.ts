@@ -31,7 +31,7 @@ const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
   'rejected',
   'expired',
 ];
-const RESULT_KINDS: readonly SecretaryResultKind[] = [
+export const RESULT_KINDS: readonly SecretaryResultKind[] = [
   'goal-complete',
   'goal-blocked',
   'turn-ended',

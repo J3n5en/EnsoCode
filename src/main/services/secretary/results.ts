@@ -126,7 +126,8 @@ function untrustedSource(update: SecretaryUpdate): string {
 }
 
 function formatLine(update: SecretaryUpdate): string {
-  const head = `- [${update.kind}] ${update.text}`;
+  const session = isResultUpdate(update) ? ` session:${update.conversationId}` : '';
+  const head = `- [${update.kind}${session}] ${update.text}`;
   if (!update.lastText) return head;
   return `${head}\n${wrapUntrusted(untrustedSource(update), redactSecrets(update.lastText))}`;
 }

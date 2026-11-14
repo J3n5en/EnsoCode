@@ -6,6 +6,7 @@ import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import { parseSecretaryUpdates, type SecretaryUpdateLine } from '@shared/secretary/updatesText';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
 import { splitTurnNotes } from '@shared/turnNotes';
 import type {
@@ -17,6 +18,7 @@ import type {
 import { splitUnattendedPrefix, type UnattendedNoteKind } from '@shared/unattendedNote';
 import { parseWorkflowPresetMessage } from '@shared/workflowPresetMessage';
 import {
+  AlarmClock,
   ArrowDownToLine,
   Bot,
   BoxSelect,
@@ -25,6 +27,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleX,
   ClipboardCheck,
   ClipboardList,
   Copy,
@@ -33,6 +36,7 @@ import {
   GitBranch,
   GitCompare,
   History,
+  Hourglass,
   ListTodo,
   LoaderCircle,
   MessagesSquare,
@@ -416,6 +420,83 @@ function RawSyntheticNotice({ tag, body }: { tag: string; body: string }) {
       {collapsible && expanded && (
         <pre className="mt-1.5 max-h-80 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
           {trimmed.slice(nl + 1)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+const UPDATE_ICON: Record<SecretaryUpdateLine['kind'], typeof Bot> = {
+  'goal-complete': Check,
+  'goal-blocked': CircleAlert,
+  'needs-user': UserRound,
+  'turn-ended': MessagesSquare,
+  failed: CircleX,
+  stalled: Hourglass,
+  interrupted: History,
+  proposal: ClipboardCheck,
+  schedule: AlarmClock,
+};
+
+/** 秘书收到的派出会话回传与定时提醒：每条一行，点标题打开会话，会话最后一句收起 */
+function SecretaryUpdatesNotice({ lines }: { lines: SecretaryUpdateLine[] }) {
+  const selectConversation = useSessionsStore((state) => state.selectConversation);
+  return (
+    <div
+      data-enso="secretary-updates"
+      className="w-full divide-y divide-border/60 rounded-lg border border-dashed border-border/60 text-xs text-muted-foreground"
+    >
+      {lines.map((line, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: 回传内容不可变，顺序即身份
+        <SecretaryUpdateRow key={i} line={line} onOpen={selectConversation} />
+      ))}
+    </div>
+  );
+}
+
+function SecretaryUpdateRow({
+  line,
+  onOpen,
+}: {
+  line: SecretaryUpdateLine;
+  onOpen: ((conversationId: string) => void) | null | undefined;
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const Icon = UPDATE_ICON[line.kind];
+  const conversationId = 'conversationId' in line ? line.conversationId : undefined;
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-start gap-2">
+        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        {conversationId && onOpen ? (
+          <button
+            type="button"
+            title={t('Open session')}
+            onClick={() => onOpen(conversationId)}
+            className="min-w-0 flex-1 text-left hover:text-foreground hover:underline"
+          >
+            {line.text}
+          </button>
+        ) : (
+          <span className="min-w-0 flex-1">{line.text}</span>
+        )}
+        {line.detail && (
+          <button
+            type="button"
+            aria-label={t(expanded ? 'Hide details' : 'Show details')}
+            onClick={() => setExpanded((v) => !v)}
+            className="hover:text-foreground"
+          >
+            <ChevronRight
+              className={cn('mt-0.5 h-3 w-3 transition-transform', expanded && 'rotate-90')}
+            />
+          </button>
+        )}
+      </div>
+      {line.detail && expanded && (
+        <pre className="mt-1.5 ml-5.5 max-h-60 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+          {line.detail}
         </pre>
       )}
     </div>
@@ -813,6 +894,8 @@ function UserText({
   }
   const block = SYNTHETIC_BLOCK.exec(text);
   if (block) return <SyntheticNotice tag={block[1]} body={block[2]} />;
+  const updates = parseSecretaryUpdates(text);
+  if (updates) return <SecretaryUpdatesNotice lines={updates} />;
   const role = ROLE_PREFIX.exec(text);
   const rest = role ? text.slice(role[0].length) : text;
   const fromMain = MAIN_AGENT_BLOCK.exec(rest);
