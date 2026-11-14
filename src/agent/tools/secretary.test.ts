@@ -89,6 +89,33 @@ describe('secretary tools', () => {
     expect(normalizeSecretaryParams('project_list', 'nope')).toBe('nope');
   });
 
+  it('只读核实工具的别名、snake_case 与数字在 schema 校验前归一化', () => {
+    expect(
+      normalizeSecretaryParams('repo_status', {
+        project_id: 'p1',
+        limit: '5',
+        base: ' main ',
+        sha: '9c23a8058',
+      })
+    ).toEqual({ projectId: 'p1', limit: 5, base: 'main', contains: '9c23a8058' });
+    expect(normalizeSecretaryParams('repo_status', { dir: '/repo/alpha' })).toEqual({
+      path: '/repo/alpha',
+    });
+    expect(
+      normalizeSecretaryParams('session_read', {
+        conversation_id: 'c1',
+        message_index: '7',
+        offset: '30000',
+      })
+    ).toEqual({ conversationId: 'c1', index: 7, offset: 30_000 });
+    expect(
+      normalizeSecretaryParams('session_activity', { conversation_id: 'c1', limit: '50' })
+    ).toEqual({ conversationId: 'c1', limit: 50 });
+    expect(normalizeSecretaryParams('session_tasks', { id: 'c1' })).toEqual({
+      conversationId: 'c1',
+    });
+  });
+
   it('execute 把归一化后的参数交给 Main，结果原样回给模型', async () => {
     const { invoke, port } = invoker();
     invoke.mockResolvedValueOnce({ ok: false, error: 'unavailable' });

@@ -5,8 +5,11 @@ import { SILENCE_TURN_TOOL } from './silence';
 export const SECRETARY_OPS = [
   'project_list',
   'project_info',
+  'repo_status',
   'session_list',
   'session_read',
+  'session_tasks',
+  'session_activity',
   'session_create',
   'session_send',
   'session_queue_list',
