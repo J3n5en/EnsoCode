@@ -3406,6 +3406,8 @@ export const zhTranslations: Record<string, string> = {
   Stalled: '停滞',
   'Update the secretary profile': '修改秘书档案',
   'Recent activity': '动态',
+  'No earlier activity': '没有更早的动态了',
+  '{{count}} new updates': '有 {{count}} 条新动态',
   'Nothing on your plate': '手上没活',
   'Ask {{name}} for work in the chat, or note a to-do first':
     '在聊天里让{{name}}派活，或者先记一条待办',

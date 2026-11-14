@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { checkAvatarImage } from '@shared/bots/cardPng';
+import { parseFeedQuery } from '@shared/secretary/feed';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretaryState } from '@shared/types/secretary';
@@ -19,6 +20,7 @@ import {
   grantTakeover,
   listTakeovers,
   mutateTodo,
+  pageSecretaryFeed,
   resolveProposal,
   revokeTakeover,
   secretaryDispatchPorts,
@@ -288,6 +290,15 @@ export function registerSecretaryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_STATE, async (event) => {
     if (!isMainRenderer(event.sender.id)) return disabledState();
     return secretaryState();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_FEED, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const query = parseFeedQuery(request);
+    if (!query) return { ok: false, error: 'invalid request' };
+    const page = await pageSecretaryFeed(secretaryDispatchPorts, query);
+    return { ok: true, events: page.events, hasMore: page.hasMore };
   });
 
   // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页

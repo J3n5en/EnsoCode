@@ -196,7 +196,7 @@ export interface SecretaryDispatchFile {
   named: string[];
   proposals: Record<string, SecretaryProposal>;
   outbox: SecretaryUpdate[];
-  /** 按时间的动态，最多留最近 40 条 */
+  /** 按时间的动态，最多留最近 400 条 */
   activity?: SecretaryActivity[];
   inflight?: {
     deliveryId: string;

@@ -24,6 +24,7 @@ import {
   sessionFeed,
 } from './secretaryDigest';
 import { useSecretaryFace } from './useSecretaryFace';
+import { useSecretaryFeed } from './useSecretaryFeed';
 
 function mutateTodo(request: SecretaryTodoMutate): void {
   void window.electronAPI.secretary.mutateTodo(request);
@@ -354,6 +355,7 @@ function FeedEntry({ event }: { event: FeedEvent }) {
   return (
     <div
       data-enso="secretary-feed-event"
+      data-id={event.id}
       data-tone={event.tone}
       className="group/row relative flex items-start gap-2 py-1 pl-4"
     >
@@ -439,6 +441,7 @@ export function SecretaryWorkbench({ name }: { name: string }) {
   const board = useSecretaryStore((s) => s.secretary.board);
   const [adding, setAdding] = useState(false);
   const digest = secretaryDigest(board, Date.now());
+  const feed = useSecretaryFeed();
   const empty =
     board.needsYou.length + board.running.length + board.todos.length + board.done.length === 0;
 
@@ -537,11 +540,39 @@ export function SecretaryWorkbench({ name }: { name: string }) {
       </section>
       <section data-enso="secretary-feed" className="flex flex-col">
         <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">{t('Recent activity')}</h3>
+        {feed.freshCount > 0 && (
+          <button
+            type="button"
+            data-enso="secretary-feed-fresh"
+            data-count={feed.freshCount}
+            onClick={feed.reveal}
+            className="sticky top-0 z-10 mx-1.5 h-7 -mb-7 rounded-md bg-muted px-2 text-[12px] text-foreground"
+          >
+            {t('{{count}} new updates', { count: feed.freshCount })}
+          </button>
+        )}
         <div className="ml-1.5 flex flex-col border-l border-border">
-          {digest.events.map((event) => (
+          {feed.events.map((event) => (
             <FeedEntry key={event.id} event={event} />
           ))}
+          <div ref={feed.sentinelRef} data-enso="secretary-feed-sentinel" className="h-px" />
         </div>
+        {feed.loading && (
+          <p
+            data-enso="secretary-feed-loading"
+            className="px-1.5 py-1 text-[12px] text-subtle-foreground"
+          >
+            {t('Loading…')}
+          </p>
+        )}
+        {feed.exhausted && !feed.loading && feed.events.length > 0 && (
+          <p
+            data-enso="secretary-feed-end"
+            className="px-1.5 py-1 text-[12px] text-subtle-foreground"
+          >
+            {t('No earlier activity')}
+          </p>
+        )}
       </section>
     </div>
   );

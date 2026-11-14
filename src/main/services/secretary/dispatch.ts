@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app } from '@platform';
 import { projectNameFromPath } from '@shared/projectName';
+import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   canOperate,
@@ -18,6 +19,7 @@ import {
   type DispatchDraft,
   NEEDS_YOU_RESULTS,
   type SecretaryAuditEntry,
+  type SecretaryBoard,
   type SecretaryDispatchFile,
   type SecretaryProfile,
   type SecretaryProfileDraft,
@@ -1211,6 +1213,34 @@ export async function buildSecretaryState(
   ports: SecretaryStatePorts,
   extra: { enabled: boolean; projectId: string | null }
 ): Promise<SecretaryState> {
+  const loaded = await loadSecretaryBoard(ports);
+  const { activity: _activity, ...board } = loaded.board;
+  return {
+    enabled: extra.enabled,
+    projectId: extra.projectId,
+    profile: await ports.profile(),
+    persona: await ports.persona(),
+    board,
+    proposals: loaded.file.proposals,
+    takeovers: takeoverViews(loaded.file, loaded.rows, loaded.projects),
+  };
+}
+
+/** 动态只按页离开 Main。广播里的看板不再带整份 activity */
+export async function pageSecretaryFeed(
+  ports: SecretaryStatePorts,
+  query: FeedQuery
+): Promise<FeedPage> {
+  const loaded = await loadSecretaryBoard(ports);
+  return pageFeed(feedEvents(loaded.board), query);
+}
+
+async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
+  file: SecretaryDispatchFile;
+  rows: Record<string, Record<string, unknown>>;
+  projects: readonly ProjectAuthority[];
+  board: SecretaryBoard;
+}> {
   const file = ports.dispatchFile();
   const rows = await ports.rows();
   const projects = await ports.projects();
@@ -1219,15 +1249,11 @@ export async function buildSecretaryState(
     if (!rows[record.conversationId]) continue;
     statuses[record.conversationId] = await ports.status(record.conversationId);
   }
-
   return {
-    enabled: extra.enabled,
-    projectId: extra.projectId,
-    profile: await ports.profile(),
-    persona: await ports.persona(),
+    file,
+    rows,
+    projects,
     board: buildBoard(file, { rows, statuses, projects, todos: await ports.todos() }),
-    proposals: file.proposals,
-    takeovers: takeoverViews(file, rows, projects),
   };
 }
 

@@ -25,7 +25,7 @@ export const BATCH_MAX_CHARS = 12_000;
 export const LAST_TEXT_MAX_CHARS = 500;
 /** 同一会话的普通回传先攒着，到点只投最新一条。档案里的 updateWindowMs 可改成 1–60 秒 */
 export const UPDATE_WINDOW_MS = 45_000;
-export const ACTIVITY_LIMIT = 40;
+export { ACTIVITY_LIMIT } from '@shared/secretary/feed';
 
 /** worker 事件里与结果分类有关的部分；其余事件只刷新活动时间 */
 export type ResultEvent =

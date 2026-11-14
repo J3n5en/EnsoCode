@@ -16,6 +16,7 @@ import type {
   TakeoverDraft,
 } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
+import { ACTIVITY_LIMIT } from './feed';
 import { parseSecretarySkillDraft } from './skills';
 
 const DEFAULT_AVATAR_COLOR = '#7c5cff';
@@ -558,7 +559,7 @@ export function parseDispatchFile(value: unknown): SecretaryDispatchFile {
       const entry = parseActivity(item);
       if (entry) activity.push(entry);
     }
-    if (activity.length > 0) file.activity = activity.slice(-40);
+    if (activity.length > 0) file.activity = activity.slice(-ACTIVITY_LIMIT);
   }
   return file;
 }

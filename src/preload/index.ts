@@ -60,6 +60,7 @@ import type {
   StorageSnapshot,
 } from '@shared/resources';
 import type { BrowserSearchTab } from '@shared/searchAnything';
+import type { FeedEvent } from '@shared/secretary/feed';
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import type { ShellIntegration } from '@shared/shellIntegration';
 import type {
@@ -341,6 +342,13 @@ const electronAPI = {
   secretary: {
     /** 工作台与聊天卡片读同一份 Main 状态；开关关闭时 enabled 为 false */
     getState: (): Promise<SecretaryState> => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_STATE),
+    /** 动态的一页。before 是上一页最旧一条的时间与 id，缺省取最新一页 */
+    feed: (query?: {
+      before?: { at: number; id: string };
+      limit?: number;
+    }): Promise<
+      { ok: true; events: FeedEvent[]; hasMore: boolean } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_FEED, query ?? {}),
     onStateChanged: (callback: (state: SecretaryState) => void): (() => void) => {
       const listener = (_event: unknown, state: SecretaryState) => callback(state);
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);

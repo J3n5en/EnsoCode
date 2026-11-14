@@ -1,3 +1,4 @@
+import { feedEvents, pageFeed } from '@shared/secretary/feed';
 import type { SecretaryBoard, SecretaryCard, SecretaryProposal } from '@shared/types/secretary';
 import { parseHTML } from 'linkedom';
 import { act, type ReactElement } from 'react';
@@ -169,6 +170,10 @@ beforeEach(() => {
       mutateTodo: async (request: unknown) => {
         h.calls.push({ name: 'mutateTodo', args: request });
         return { ok: true, todoId: 't1' };
+      },
+      feed: async (query?: { before?: { at: number; id: string }; limit?: number }) => {
+        const page = pageFeed(feedEvents(h.secretary.board as SecretaryBoard), query ?? {});
+        return { ok: true, ...page };
       },
     },
     memory: {

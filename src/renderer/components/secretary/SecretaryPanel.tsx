@@ -113,7 +113,10 @@ export function SecretaryPanel() {
           </button>
         ))}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div
+        data-enso="secretary-panel-scroll"
+        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto"
+      >
         {tab === 'workbench' && <SecretaryWorkbench name={view.name} />}
         {tab === 'memory' && <SecretaryMemoryPanel />}
         {tab === 'schedules' && (
