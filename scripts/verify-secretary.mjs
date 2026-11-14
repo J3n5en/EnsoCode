@@ -408,8 +408,13 @@ async function run(cdp) {
   });
 
   log('== step1 行不丢');
-  const persisted = await waitFor(conversationsIn, 'conversations persisted', 15_000, 250);
-  assert(Boolean(persisted[dispatchedId]), 'step1: Main 建的行在 settings.json 里', dispatchedId);
+  const persisted = await waitFor(
+    () => conversationsIn()?.[dispatchedId],
+    'dispatched row persisted',
+    15_000,
+    250
+  ).catch(() => null);
+  assert(Boolean(persisted), 'step1: Main 建的行在 settings.json 里', dispatchedId);
   const stored = await page(`
     const id = ${JSON.stringify(dispatchedId)};
     const row = S().conversations[id];
@@ -479,6 +484,22 @@ async function run(cdp) {
     'step4: dispatch.json 的 outbox 已清空',
     dispatchAfter.outbox
   );
+  const card = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    const visible = (selector) =>
+      [...document.querySelectorAll(selector)].filter((node) => node.offsetParent !== null);
+    await until(() => visible('[data-enso=secretary-updates]').length > 0, 15000);
+    const cards = visible('[data-enso=secretary-updates]');
+    return JSON.stringify({
+      cards: cards.length,
+      openable: cards.some((node) => node.querySelector('button[title]')),
+      raw: visible('[data-enso=message-user]').some((node) =>
+        node.textContent.includes('<session-updates>')
+      ),
+    });
+  `);
+  assert(card.cards > 0 && !card.raw, 'step4: 回传渲染成卡片，不露出标签原文', card);
+  assert(card.openable, 'step4: 回传卡片能打开派出的会话', card);
   await cdp.shot(path.join(ART, '04-secretary-updates.png'));
 
   log('== step5 并发确认');
