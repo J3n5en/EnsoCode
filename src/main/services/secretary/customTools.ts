@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -122,6 +122,36 @@ function missingRuntime(runtime: SecretaryToolRuntime): string {
     : '找不到 node 可执行文件，无法运行这个工具';
 }
 
+/**
+ * win32 没有进程组：不 detached，超时与取消靠 taskkill 连子进程一起杀；
+ * 其它平台杀整个进程组，组已不在时退回单个进程。
+ */
+export function killSecretaryTool(
+  pid: number,
+  platform: NodeJS.Platform,
+  fallback: () => void,
+  run: (file: string, args: string[]) => void = (file, args) => {
+    execFile(file, args, () => {});
+  },
+  signal: (target: number) => void = (target) => {
+    process.kill(target, 'SIGKILL');
+  }
+): void {
+  if (platform === 'win32') {
+    try {
+      run('taskkill', ['/pid', String(pid), '/T', '/F']);
+    } catch {
+      // taskkill 不可用时进程已经退出，没有别的办法
+    }
+    return;
+  }
+  try {
+    signal(-pid);
+  } catch {
+    fallback();
+  }
+}
+
 /** 参数走 stdin，结果走 stdout；超时或取消时连子进程组一起杀，免得留下孤儿 */
 export function runSecretaryTool(
   dir: string,
@@ -141,7 +171,7 @@ export function runSecretaryTool(
     const child = spawn(command, [script], {
       cwd: toolDir,
       env: toolEnv(draft.runtime),
-      detached: true,
+      detached: process.platform !== 'win32',
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -157,15 +187,13 @@ export function runSecretaryTool(
     const kill = () => {
       const pid = child.pid;
       if (pid === undefined) return;
-      try {
-        process.kill(-pid, 'SIGKILL');
-      } catch {
+      killSecretaryTool(pid, process.platform, () => {
         try {
           child.kill('SIGKILL');
         } catch {
           // 已经退出
         }
-      }
+      });
     };
     const onAbort = () => {
       kill();

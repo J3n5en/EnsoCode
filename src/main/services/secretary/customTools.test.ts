@@ -6,9 +6,10 @@ import type {
   SecretaryDispatchFile,
   SecretaryToolDraft,
 } from '@shared/types/secretary';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createSecretaryTools,
+  killSecretaryTool,
   listSecretaryTools,
   readSecretaryTool,
   removeSecretaryTool,
@@ -104,6 +105,40 @@ describe('tool files on disk', () => {
     expect(removeSecretaryTool(dir, draft.name)).toBe(true);
     expect(removeSecretaryTool(dir, draft.name)).toBe(false);
     expect(listSecretaryTools(dir)).toEqual([]);
+  });
+});
+
+describe('killSecretaryTool', () => {
+  it('win32 用 taskkill 连子进程一起杀，不动进程组', () => {
+    const calls: { file: string; args: string[] }[] = [];
+    const fallback = vi.fn();
+    killSecretaryTool(42, 'win32', fallback, (file, args) => calls.push({ file, args }));
+    expect(calls).toEqual([{ file: 'taskkill', args: ['/pid', '42', '/T', '/F'] }]);
+    expect(fallback).not.toHaveBeenCalled();
+  });
+
+  it('其它平台杀整个进程组，进程组已不在时退回单个进程', () => {
+    const fallback = vi.fn();
+    const signals: number[] = [];
+    killSecretaryTool(
+      42,
+      'linux',
+      fallback,
+      () => {},
+      (pid) => signals.push(pid)
+    );
+    expect(signals).toEqual([-42]);
+    expect(fallback).not.toHaveBeenCalled();
+    killSecretaryTool(
+      42,
+      'linux',
+      fallback,
+      () => {},
+      () => {
+        throw new Error('ESRCH');
+      }
+    );
+    expect(fallback).toHaveBeenCalledTimes(1);
   });
 });
 
