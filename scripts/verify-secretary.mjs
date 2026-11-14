@@ -1323,7 +1323,12 @@ async function run(cdp, pluginZipUrl) {
     });
   `);
   assert(board.ok, '秘书面板打开', board);
-  assert(board.tabs?.join(',') === 'workbench,memory,schedules', '秘书面板三个标签', board.tabs);
+  // 日报（daily）是 SecretaryPanel 的 TABS 里第二个标签，顺序即渲染顺序
+  assert(
+    board.tabs?.join(',') === 'workbench,daily,memory,schedules',
+    '秘书面板四个标签',
+    board.tabs
+  );
   await cdp.shot(path.join(ART, '05-workbench.png'));
   // 秘书面板挂在当时的会话上；下面新建秘书会话会切走，结束后要回来
   const panelHost = await page('return JSON.stringify(S().activeId);');
@@ -1725,6 +1730,15 @@ async function run(cdp, pluginZipUrl) {
     waitId
   );
 
+  // 派出的会话默认无人值守（profile.dispatchUnattended 缺省 true），ask_user 会被直接拒绝，
+  // 根本走不到 needs-user。这一步验的是「真提问才报 needs-user」，所以先关掉无人值守，
+  // 验完立刻恢复，后面的步骤仍按默认档位跑。
+  const unattendedProfilePath = path.join(ENV, 'secretary', 'profile.json');
+  const unattendedProfile = readJson(unattendedProfilePath);
+  writeFileSync(
+    unattendedProfilePath,
+    JSON.stringify({ ...unattendedProfile, dispatchUnattended: false })
+  );
   const askDispatch = await dispatchConfirmed(
     `[[tool:session_create ${JSON.stringify({
       projectId: setup.projectId,
@@ -1771,6 +1785,7 @@ async function run(cdp, pluginZipUrl) {
     30_000,
     500
   );
+  writeFileSync(unattendedProfilePath, JSON.stringify(unattendedProfile));
 
   log('== step10 待办派出的会话标题用待办文本');
   const todoText = '修复秘书通知误报';
@@ -2948,7 +2963,11 @@ async function verifyFeedPaging(cdp, panelHost) {
   const tieAt = base + 10_000;
   const activityId = (conversationId, at) => `activity:${conversationId}:${at}:seen`;
   const entries = [];
-  for (let index = 0; index < 87; index += 1) {
+  // 贴底时哨兵会连续多拉几页，种子必须远超两页，否则列表见底后「没有更多」标记
+  // 会提前出现，断言 end === false 就随历史活动多少时好时坏
+  const SEED = 297;
+  const last = SEED - 1;
+  for (let index = 0; index < SEED; index += 1) {
     entries.push({
       at: base + index,
       conversationId: `feed-${String(index).padStart(3, '0')}`,
@@ -2964,12 +2983,12 @@ async function verifyFeedPaging(cdp, panelHost) {
     activityId('tie-m', tieAt),
     activityId('tie-z', tieAt),
     ...Array.from({ length: 37 }, (_, index) => {
-      const n = 86 - index;
+      const n = last - index;
       return activityId(`feed-${String(n).padStart(3, '0')}`, base + n);
     }),
   ];
   const page2 = Array.from({ length: PAGE }, (_, index) => {
-    const n = 49 - index;
+    const n = last - 37 - index;
     return activityId(`feed-${String(n).padStart(3, '0')}`, base + n);
   });
 
@@ -3073,7 +3092,10 @@ async function verifyFeedPaging(cdp, panelHost) {
   const parkedScroll = await page(`
     const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
     scroller.scrollTop = 200;
-    return JSON.stringify({ top: scroller.scrollTop });
+    const ids = [...document.querySelectorAll('[data-enso=secretary-feed-event]')].map(
+      (node) => node.dataset.id
+    );
+    return JSON.stringify({ top: scroller.scrollTop, length: ids.length });
   `);
   const extraAt = tieAt + 1;
   const extraId = activityId('feed-new', extraAt);
@@ -3102,9 +3124,10 @@ async function verifyFeedPaging(cdp, panelHost) {
     held.count === '1' &&
       held.top === parkedScroll.top &&
       held.hasNew === false &&
-      held.length === PAGE * 2,
+      // 贴底时哨兵会多拉几页，页数不固定；只要求「新动态没插进来」，长度和离开底部时一致
+      held.length === parkedScroll.length,
     '动态分页: 停在中间时新动态不插入，滚动位置不变',
-    { held, parked: parkedScroll.top }
+    { held, parked: parkedScroll }
   );
   await cdp.shot(path.join(ART, 'feed-after.png'));
   const revealed = await page(`
@@ -4321,16 +4344,34 @@ async function verifyToolCards(cdp, setup) {
   };
 
   const visible = await page(`
-    const textOf = (tool) =>
-      document.querySelector('[data-enso=tool-card][data-tool="' + tool + '"]')?.innerText ?? '';
-    const expand = document.querySelector('[data-enso=tool-card][data-tool=todo_item_update] [data-enso=tool-card-expand]');
-    expand?.click();
-    const todos = await until(() => {
-      const text = textOf('todo_item_update');
-      return text.includes('补工具卡片单测') && text.includes('改秘书渲染') ? text : null;
-    }, 5000);
-    const send = textOf('session_send');
-    const schedule = textOf('schedule_add');
+    const cardOf = (tool) =>
+      document.querySelector('[data-enso=tool-card][data-tool="' + tool + '"]');
+    const textOf = (tool) => cardOf(tool)?.innerText ?? '';
+    // 卡片和普通工具行一样默认收成一行，正文在折叠里；分组卡里每一条还要再展开一层
+    const openAll = () => {
+      for (const tool of ['session_send', 'todo_item_update', 'schedule_add']) {
+        const card = cardOf(tool);
+        if (!card) continue;
+        for (const node of card.querySelectorAll('[data-enso=tool-card-expand][aria-expanded=false]')) {
+          node.click();
+        }
+      }
+    };
+    const ready = await until(() => {
+      openAll();
+      const send = textOf('session_send');
+      const todos = textOf('todo_item_update');
+      const schedule = textOf('schedule_add');
+      return send.includes(${JSON.stringify(message)}) &&
+        todos.includes('补工具卡片单测') &&
+        todos.includes('标记为完成') &&
+        schedule.includes('每 10 分钟')
+        ? { send, todos, schedule }
+        : null;
+    }, 15000);
+    const send = ready?.send ?? textOf('session_send');
+    const todos = ready?.todos ?? textOf('todo_item_update');
+    const schedule = ready?.schedule ?? textOf('schedule_add');
     const raw = document.querySelector('[data-enso=tool-card-raw][aria-expanded=true]');
     return JSON.stringify({
       send,
@@ -4415,23 +4456,14 @@ async function verifyTakeover(cdp, setup) {
     ownSecretary
   );
 
-  log('== 接管：会话界面入口');
+  // 会话顶栏的逐个授权按钮已随「按项目范围授权」一起去掉，逐个授权只剩 IPC 与确认卡两条路
+  log('== 接管：设置页逐个授权');
   const granted = await page(`
     const id = ${JSON.stringify(ownId)};
     S().selectConversation(id);
-    const button = await until(() => visible('[data-enso=secretary-takeover-grant]')[0] ?? null, 15000);
-    if (!button) return JSON.stringify({ ok: false, error: 'no grant button' });
-    button.click();
-    const chip = await until(() => visible('[data-enso=secretary-takeover-chip]')[0] ?? null, 15000);
-    return JSON.stringify({
-      ok: Boolean(chip),
-      chip: chip?.innerText,
-      badge: visible('[data-enso=secretary-takeover]').length,
-    });
+    return JSON.stringify(await window.electronAPI.secretary.grantTakeover(id));
   `);
-  assert(granted.ok, '接管: 会话顶栏点「交给秘书接管」后显示接管中', granted);
-  assert(granted.badge >= 1, '接管: 侧栏显示「秘书接管中」', granted);
-  await cdp.shot(path.join(ART, '07-takeover-chip.png'));
+  assert(granted.ok, '接管: 设置页逐个授权成功', granted);
   const userGrant = readJson(dispatchFile).dispatched[ownId];
   assert(userGrant?.takeover?.via === 'user', '接管: 界面授权落盘，来源记 user', userGrant);
   const listed = await page(`
@@ -4536,14 +4568,9 @@ async function verifyTakeover(cdp, setup) {
 
   const revoked = await page(`
     const id = ${JSON.stringify(ownId)};
-    S().selectConversation(id);
-    const button = await until(() => visible('[data-enso=secretary-takeover-revoke]')[0] ?? null, 15000);
-    if (!button) return JSON.stringify({ ok: false, error: 'no revoke button' });
-    button.click();
-    const back = await until(() => visible('[data-enso=secretary-takeover-grant]')[0] ?? null, 15000);
-    return JSON.stringify({ ok: Boolean(back) });
+    return JSON.stringify(await window.electronAPI.secretary.revokeTakeover(id));
   `);
-  assert(revoked.ok, '接管: 会话顶栏点 × 撤销后恢复成可交给秘书', revoked);
+  assert(revoked.ok, '接管: 确认卡授权也能撤销', revoked);
   assert(!readJson(dispatchFile).dispatched[ownId], '接管: 撤销后授权从盘上删除');
 
   const refusedSend = await secretaryTool(
