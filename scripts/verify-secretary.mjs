@@ -1115,7 +1115,11 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       id
     );
-    const card = await until(() => document.querySelector('[data-enso=secretary-proposal]'), 30000);
+    // 只认 skill 卡：缓存的其它会话里还留着更早的派活卡
+    const card = await until(
+      () => document.querySelector('[data-enso=secretary-proposal][data-kind=skill]'),
+      30000
+    );
     if (!card)
       return JSON.stringify({
         ok: false,
