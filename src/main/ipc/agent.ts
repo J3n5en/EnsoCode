@@ -37,6 +37,7 @@ import type {
   McpStatusPush,
   ModelRef,
   ParentHistoryTailResult,
+  ProjectedMessage,
   RendererAgentEvent,
   SpawnModelConfig,
   ThinkingLevel,
@@ -121,6 +122,7 @@ import {
 } from '../services/agentHost';
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
+import { BackgroundTaskTracker, type ObservedTask } from '../services/backgroundTaskTracker';
 import { HumanRequestTimeouts } from '../services/bots/humanRequestTimeouts';
 import { readBotSessionMessages } from '../services/bots/sessionMessages';
 import {
@@ -175,8 +177,15 @@ import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
 import { secretarySkillsDir } from '../services/secretary/skills';
 import { SecretaryStore } from '../services/secretary/store';
 import { invokeSecretaryOp } from '../services/secretary/tools';
+import {
+  ACTIVITY_LIMIT_DEFAULT,
+  ACTIVITY_LIMIT_MAX,
+  projectSessionActivity,
+  type SessionToolActivity,
+} from '../services/sessionActivity';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
+  projectParentHistoryAll,
   projectParentHistoryPage,
   projectParentHistoryTail,
   resolveParentHistoryFile,
@@ -258,6 +267,7 @@ let secretaryDriverObserver:
   | ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void)
   | null = null;
 const pluginSessionStates = new SessionStateTracker();
+const backgroundTaskStates = new BackgroundTaskTracker();
 const selectionClockOwners = new WeakSet<RendererContents>();
 
 function watchSelectionClock(sender: RendererContents): void {
@@ -290,6 +300,11 @@ export function observedSessionStatus(sessionId: string): PluginSessionStatus {
   return status.state === 'idle' && agentSessionIndex.workspaceTreeRunning(status.sessionId)
     ? { ...status, state: 'running' }
     : status;
+}
+
+/** 秘书 session_tasks 的数据源：worker 后台任务在 Main 的最近一次投影 */
+export function observedBackgroundTasks(sessionId: string): ObservedTask[] {
+  return backgroundTaskStates.tasks(sessionId);
 }
 
 /** Bot 会话宿主订阅 worker 事件（turn 结果、运行态） */
@@ -343,6 +358,7 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   handlePairHeadlessAgentEvent(event);
   // 状态汇总只算一次：插件推送、秘书驱动与回传都读同一份结果
   const changes = pluginSessionStates.observe(event);
+  backgroundTaskStates.observe(event);
   try {
     secretaryDriverObserver?.(event, changes);
   } catch (error) {
@@ -1116,6 +1132,49 @@ export async function readSessionHistoryFile(
       error: error instanceof Error ? error.message : 'Failed to read parent history.',
     };
   }
+}
+
+/**
+ * 全量投影：秘书按绝对下标读单条消息、或取最近工具调用时才走这里。
+ * 路径同样必须落在 sessions 目录内，读不到就返回空，让调用方报 not-found。
+ */
+async function readFullSessionHistory(
+  sessionFile: string | undefined
+): Promise<ProjectedMessage[]> {
+  const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
+  const resolved = resolveParentHistoryFile(sessionDir, sessionFile);
+  if (!resolved || !existsSync(resolved)) return [];
+  try {
+    const { SessionManager } = await import('@earendil-works/pi-coding-agent');
+    const manager = SessionManager.open(resolved, sessionDir);
+    return projectParentHistoryAll(manager.getBranch());
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 秘书 session_read 的 index 模式：按绝对下标取一条消息。
+ * 下标口径与列表模式的 index 一致（投影后的绝对位置，baseIndex + 偏移）。
+ */
+export async function readSessionMessage(
+  sessionFile: string | undefined,
+  index: number
+): Promise<ProjectedMessage | null> {
+  const messages = await readFullSessionHistory(sessionFile);
+  return messages[index] ?? null;
+}
+
+/** 秘书 session_activity：最近工具调用，不含任何工具输出 */
+export async function readSessionActivity(
+  sessionFile: string | undefined,
+  limit: number
+): Promise<SessionToolActivity[]> {
+  const bounded = Math.min(
+    ACTIVITY_LIMIT_MAX,
+    Math.max(1, Math.floor(Number.isFinite(limit) ? limit : ACTIVITY_LIMIT_DEFAULT))
+  );
+  return projectSessionActivity(await readFullSessionHistory(sessionFile), bounded);
 }
 
 /**

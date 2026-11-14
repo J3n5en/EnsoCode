@@ -73,6 +73,38 @@ const zh: Record<string, string> = {
   'Dispatch limit reached': '已达到同时派发上限',
   'Unknown session': '未知会话',
   'New session': '新会话',
+  'Read message {{index}} in {{title}}': '读取 {{title}} 的第 {{index}} 条消息',
+  'More text from character {{next}}': '还有正文，从第 {{next}} 字继续',
+  'Truncated messages {{indexes}}: read them by index':
+    '被截断的消息 {{indexes}}，可用 index 读全文',
+  Read: '已读取',
+  'Repository status {{project}}': '仓库状态 {{project}}',
+  Branch: '分支',
+  HEAD: 'HEAD',
+  'Working tree': '工作区',
+  '{{count}} changed files': '{{count}} 个文件有改动',
+  'Against {{ref}}': '对比 {{ref}}',
+  '{{ahead}} ahead, {{behind}} behind': '领先 {{ahead}}，落后 {{behind}}',
+  'Contains {{sha}}': '是否包含 {{sha}}',
+  Yes: '是',
+  No: '否',
+  Rebase: '变基',
+  'Background tasks in {{title}}': '{{title}} 的后台任务',
+  '{{count}} running': '{{count}} 个在跑',
+  '{{count}} tasks': '{{count}} 个任务',
+  '{{count}} calls': '{{count}} 次调用',
+  '{{count}} failed': '{{count}} 次失败',
+  'Recent tool calls in {{title}}': '{{title}} 最近的工具调用',
+  Exited: '已退出',
+  Killed: '已终止',
+  Succeeded: '成功',
+  Failed: '失败',
+  Running: '运行中',
+  'ran {{duration}}': '已跑 {{duration}}',
+  'exit {{code}}': '退出码 {{code}}',
+  'Process gone': '进程已不在',
+  'Past its deadline': '已过看门狗截止',
+  'Unknown task': '未知任务',
   '{{count}} × {{tool}}': '{{count}} 次 {{tool}}',
 };
 
@@ -598,5 +630,175 @@ describe('usesToolCard', () => {
     expect(usesToolCard('plugin_enso-github__github_list', true)).toBe(false);
     // 秘书会话里 MCP 走注册表的键值兜底，普通会话里它是原来的工具行
     expect(usesToolCard('mcp__fast_context__fast_context_search', true)).toBe(true);
+  });
+});
+
+describe('只读核实卡片', () => {
+  it('repo_status 显示分支、HEAD、改动、领先落后与提交', () => {
+    const card = renderToolCall(
+      call(
+        'repo_status',
+        { projectId: 'p1' },
+        {
+          projectId: 'p1',
+          path: '/repo/alpha',
+          branch: 'feat/x',
+          head: {
+            sha: '9c23a80',
+            subject: '<untrusted-content source="repo:p1">合并秘书分支</untrusted-content>',
+          },
+          commits: [
+            {
+              sha: '9c23a80',
+              subject: '<untrusted-content source="repo:p1">合并秘书分支</untrusted-content>',
+              author: '<untrusted-content source="repo:p1">J</untrusted-content>',
+              at: 1_700_000_000_000,
+            },
+          ],
+          base: { ref: 'main', ahead: 3, behind: 2 },
+          contains: { sha: '9c23a8058', inHead: true },
+          changes: { total: 2, files: [{ status: ' M', path: 'src/a.ts' }] },
+          operation: { merge: false, rebase: true },
+          worktrees: [
+            { path: '/repo/alpha', branch: 'feat/x', head: '9c23a80' },
+            { path: '/wt/alpha-1', branch: 'feat/y', head: '1234567' },
+          ],
+        }
+      ),
+      ctx('zh', { projectName: () => 'enso-code' })
+    );
+    expect(card.title).toBe('仓库状态 enso-code');
+    expect(card.status).toEqual({ tone: 'neutral', label: 'feat/x' });
+    const text = cardPlainText(card);
+    expect(text).toContain('9c23a80 合并秘书分支');
+    expect(text).toContain('2 个文件有改动');
+    expect(text).toContain('领先 3，落后 2');
+    expect(text).toContain('是否包含 9c23a8058');
+    expect(text).toContain('变基');
+    expect(text).toContain('/wt/alpha-1');
+    expect(text).not.toContain('untrusted-content');
+  });
+
+  it('repo_status 拒绝时只显示原因', () => {
+    const card = renderToolCall(
+      call('repo_status', { path: '/etc' }, 'path-out-of-scope', 'error'),
+      ctx('zh')
+    );
+    expect(card.status).toEqual({ tone: 'error', label: '被拒绝' });
+    expect(cardPlainText(card)).toContain('path-out-of-scope');
+  });
+
+  it('session_tasks 显示命令、状态与存活判断', () => {
+    const card = renderToolCall(
+      call(
+        'session_tasks',
+        { conversationId: 'c1' },
+        {
+          conversationId: 'c1',
+          tasks: [
+            {
+              taskId: 't1',
+              command: '<untrusted-content source="task:c1">pnpm dev</untrusted-content>',
+              ranMs: 125_000,
+              state: 'running',
+              status: 'running',
+              alive: false,
+            },
+            { taskId: 't2', command: 'pnpm test', ranMs: 3_000, state: 'killed', status: 'failed' },
+          ],
+        }
+      ),
+      ctx('zh', { sessionTitle: () => '写发布说明' })
+    );
+    expect(card.title).toBe('写发布说明 的后台任务');
+    expect(card.status).toEqual({ tone: 'ok', label: '1 个在跑' });
+    const text = cardPlainText(card);
+    expect(text).toContain('pnpm dev');
+    expect(text).toContain('运行中');
+    expect(text).toContain('已跑 2m 5s');
+    expect(text).toContain('进程已不在');
+    expect(text).toContain('已终止');
+    expect(text).not.toContain('untrusted-content');
+  });
+
+  it('session_activity 显示工具名、成败与耗时，不带输出', () => {
+    const card = renderToolCall(
+      call(
+        'session_activity',
+        { conversationId: 'c1' },
+        {
+          conversationId: 'c1',
+          calls: [
+            {
+              name: 'bash',
+              ok: true,
+              durationMs: 1_500,
+              at: 1_700_000_000_000,
+              command: '<untrusted-content source="session:c1">pnpm typecheck</untrusted-content>',
+            },
+            { name: 'read', ok: false, durationMs: 20, at: 1_700_000_001_000 },
+            { name: 'grep', ok: false, pending: true, at: 1_700_000_002_000 },
+          ],
+        }
+      ),
+      ctx('zh', { sessionTitle: () => '写发布说明' })
+    );
+    expect(card.title).toBe('写发布说明 最近的工具调用');
+    expect(card.status).toEqual({ tone: 'error', label: '1 次失败' });
+    const text = cardPlainText(card);
+    expect(text).toContain('bash');
+    expect(text).toContain('成功');
+    expect(text).toContain('失败');
+    expect(text).toContain('运行中');
+    expect(text).toContain('pnpm typecheck');
+    expect(text).toContain('2s');
+    expect(text).not.toContain('untrusted-content');
+  });
+
+  it('session_read 的 index 模式显示全文与续读位置，列表模式标出被截断的消息', () => {
+    const single = renderToolCall(
+      call(
+        'session_read',
+        { conversationId: 'c1', index: 7 },
+        {
+          conversationId: 'c1',
+          title: '写发布说明',
+          index: 7,
+          role: 'assistant',
+          totalChars: 40_000,
+          offset: 0,
+          text: '<untrusted-content source="session:c1">很长的正文</untrusted-content>',
+          nextOffset: 30_000,
+        }
+      ),
+      ctx('zh')
+    );
+    expect(single.title).toBe('读取 写发布说明 的第 7 条消息');
+    expect(cardPlainText(single)).toContain('很长的正文');
+    expect(cardPlainText(single)).toContain('还有正文，从第 30000 字继续');
+    expect(cardPlainText(single)).not.toContain('untrusted-content');
+
+    const list = renderToolCall(
+      call(
+        'session_read',
+        { conversationId: 'c1' },
+        {
+          conversationId: 'c1',
+          title: '写发布说明',
+          state: 'idle',
+          pending: { approvals: 0, asks: 0 },
+          messages: [
+            {
+              index: 3,
+              role: 'assistant',
+              text: '<untrusted-content source="session:c1">开头</untrusted-content>',
+              truncated: true,
+            },
+          ],
+        }
+      ),
+      ctx('zh')
+    );
+    expect(cardPlainText(list)).toContain('被截断的消息 #3');
   });
 });
