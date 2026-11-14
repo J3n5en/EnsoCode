@@ -133,6 +133,7 @@ import {
   setPluginMcpBridge,
   setPluginSessionBridge,
 } from './extensionPlugins';
+import { PluginAgentRuns } from './extensionPlugins/agentRuns';
 import { PluginMcpRequests } from './extensionPlugins/mcpRequests';
 import { resolveGlobalInstruction } from './instructionStore';
 import { refreshMcpOAuthAccess } from './mcpOAuthRefresh';
@@ -140,7 +141,11 @@ import { getMcpOAuthStore } from './mcpOAuthStore';
 import { getMcpToolCatalog } from './mcpToolCatalog';
 import { getModelDirectorySnapshot, onModelDirectoryChanged } from './modelDirectory';
 import { OAUTH_POOL_EXHAUSTED } from './oauthAccountPool';
-import { getOauthQuotaCoordinator, getRuntime as getOauthRuntime } from './oauthProviders';
+import {
+  getOauthQuotaCoordinator,
+  getRuntime as getOauthRuntime,
+  readStoredOauthCredentialKeys,
+} from './oauthProviders';
 import { PendingReloadRegistry } from './pendingReloads';
 import {
   enabledPlugins,
@@ -153,6 +158,7 @@ import { killAndWaitExit } from './processExit';
 import { bundledRtkPath } from './rtkBinary';
 import { pickSubagentModelRefs, type SubagentModelRef } from './subagentModels';
 import { readStoredSystemPrompt } from './systemPromptStore';
+import { titleModelCandidates } from './titleSummary';
 import { workspaceCommandBlocked } from './workspaceCommandGate';
 import { WorkspaceLockRequests } from './workspaceLockRequests';
 
@@ -408,7 +414,12 @@ export function startAgentWorker(): void {
       resolveReleaseWaiters(event);
       // 手动重读结果只回给发起 invoke 的等待者，不进普通事件流（renderer 的通用
       // snapshot 分支会顺手改 started / 清 asks，手动刷新不能有这些副作用）
-      if (pendingReloads.settle(event) || workspaceLocks.settle(event) || pluginMcp.settle(event))
+      if (
+        pendingReloads.settle(event) ||
+        workspaceLocks.settle(event) ||
+        pluginMcp.settle(event) ||
+        pluginAgents.settle(event)
+      )
         return;
       if (settleCompletion(event) || settleChoice(event)) return;
       onEvent?.(event);
@@ -435,6 +446,7 @@ export function startAgentWorker(): void {
     pendingReloads.failAll('agent worker exited');
     workspaceLocks.failAll('agent worker exited');
     pluginMcp.failAll('agent worker exited');
+    pluginAgents.failAll('agent worker exited');
     for (const [id, p] of pendingCompletions) {
       pendingCompletions.delete(id);
       p.reject(new Error('agent worker exited'));
@@ -495,6 +507,7 @@ export function recordAgentWorkerGone(details: {
 export function stopAgentWorker(): void {
   workspaceLocks.failAll('agent worker stopped');
   pluginMcp.failAll('agent worker stopped');
+  pluginAgents.failAll('agent worker stopped');
   worker?.kill();
   worker = null;
   workerReady = false;
@@ -553,6 +566,8 @@ const workspaceLocks = new WorkspaceLockRequests(sendAgentCommand);
 
 /** 插件调宿主 MCP：用用户已启用的 MCP 配置（凭据随配置下发给 worker，不经插件） */
 const pluginMcp = new PluginMcpRequests((command) => sendAgentCommand(command).ok);
+/** 插件代理在发起会话所在的 worker 里跑，用该会话的模型与只读工具 */
+const pluginAgents = new PluginAgentRuns((command) => sendAgentCommand(command).ok);
 function pluginMcpServers(): McpServerSpawnConfig[] {
   const state = readSettingsState();
   const servers = Array.isArray(state?.mcpServers) ? state.mcpServers.filter(isMcpServerEntry) : [];
@@ -1614,6 +1629,26 @@ export function registerPluginSessionBridge(
       if (!identity) return { ok: false, error: '会话不在运行' };
       const sent = abortSession(identity);
       return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法中止会话' };
+    },
+    agentRun(sessionId, input, onEvent) {
+      const identity = lookup(sessionId);
+      if (!identity) return { ok: false, error: '会话不在运行', notRunning: true };
+      return pluginAgents.start(identity, input, onEvent);
+    },
+    async resolveModel(choice) {
+      const keys = await readStoredOauthCredentialKeys();
+      if (choice === 'title') {
+        // 标题模型 → 全局默认；都不可用就跟随会话
+        for (const ref of titleModelCandidates(readSettingsState())) {
+          const resolved = resolveModelSelection(ref.providerId, ref.modelId, keys);
+          if (resolved.ok) return { ok: true, model: resolved.selection.config };
+        }
+        return { ok: true };
+      }
+      const resolved = resolveModelSelection(choice.providerId, choice.modelId, keys);
+      return resolved.ok
+        ? { ok: true, model: resolved.selection.config }
+        : { ok: false, error: `插件设置的模型不可用：${resolved.error}` };
     },
   });
 }

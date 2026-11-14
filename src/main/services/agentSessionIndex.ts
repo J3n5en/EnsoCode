@@ -18,6 +18,7 @@ import type {
   McpWorkerEvent,
   ModelRef,
   NodeStatus,
+  PluginAgentWorkerEvent,
   PluginMcpResultEvent,
   ResolvedChildProfileProof,
   WorkspaceLockEvent,
@@ -127,6 +128,7 @@ function identityOf(
     | McpWorkerEvent
     | WorkspaceLockEvent
     | PluginMcpResultEvent
+    | PluginAgentWorkerEvent
   >
 ): SessionIdentity {
   return event.identity;
@@ -474,7 +476,8 @@ export class AgentSessionIndex {
       event.type === 'privacy-mask-ledger' ||
       event.type === 'workspace-lock-result' ||
       event.type === 'workspace-unlock-result' ||
-      event.type === 'plugin-mcp-result'
+      event.type === 'plugin-mcp-result' ||
+      event.type === 'plugin-agent-event'
     )
       return false;
     // 标题总结与 MCP 旁路事件不属于任何 worker 会话（无 identity/seq），不进会话索引

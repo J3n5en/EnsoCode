@@ -35,12 +35,15 @@ import {
   isNewerPluginVersion,
   isPluginRelativePath,
   type PluginConfigContrib,
+  type PluginModelChoice,
   type PluginPresetContrib,
   parseExtensionPluginManifest,
+  parsePluginModelChoice,
 } from '@shared/extensionPlugins/manifest';
 import { parsePluginPresetId, pluginPresetId } from '@shared/extensionPlugins/preset';
 import {
   PLUGIN_PROGRESS_MAX_CHARS,
+  type PluginAgentRunEvent,
   type PluginAgentSource,
   type PluginArtifactInfo,
   type PluginCallMethod,
@@ -60,7 +63,7 @@ import type {
   PluginToolDescriptor,
   RegistryNotice,
 } from '@shared/extensionPlugins/types';
-import type { McpServerSpawnConfig } from '@shared/types/agent';
+import type { McpServerSpawnConfig, SpawnModelConfig } from '@shared/types/agent';
 import type { WorkerForkOptions, WorkerProcess } from '../../platform/types';
 import type {
   NativeAgentTypeSource,
@@ -69,7 +72,12 @@ import type {
 } from '../pluginRuntime';
 import { ArtifactStore } from './artifacts';
 import { DynamicContribs } from './dynamic';
-import { type GateDeps, PluginHostGate } from './gate';
+import {
+  type GateDeps,
+  type PluginAgentRunRequest,
+  PluginHostGate,
+  type SessionAttempt,
+} from './gate';
 import {
   commitStaged,
   discardStaged,
@@ -148,6 +156,8 @@ const UPDATE_CHECK_TIMEOUT_MS = 15_000;
 const UPDATE_CHECK_FIRST_DELAY_MS = 60_000;
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60_000;
 const MAX_PROBE_BYTES = 256 * 1024;
+/** 每个插件同时运行的代理数上限 */
+const MAX_AGENT_RUNS = 2;
 
 export interface PluginSessionBridge {
   inject(
@@ -162,6 +172,16 @@ export interface PluginSessionBridge {
     }
   ): { ok: true } | { ok: false; error: string; notRunning?: boolean };
   abort(sessionId: string): { ok: true } | { ok: false; error: string };
+  /** 在会话旁跑只读代理；事件按序回调，end 之后不再回调 */
+  agentRun?(
+    sessionId: string,
+    input: Omit<PluginAgentRunRequest, 'runId' | 'sessionId'>,
+    onEvent: (event: PluginAgentRunEvent) => void
+  ): { ok: true; cancel(): void } | { ok: false; error: string; notRunning?: boolean };
+  /** 把插件设置里的模型选择解析成下发配置；title 没有可用模型时返回空 model（跟随会话） */
+  resolveModel?(
+    choice: Exclude<PluginModelChoice, 'session'>
+  ): Promise<{ ok: true; model?: SpawnModelConfig } | { ok: false; error: string }>;
 }
 
 export interface PluginToolOutcome {
@@ -250,6 +270,8 @@ export class ExtensionPluginService {
   private readonly processes = new Map<string, PluginProcess>();
   /** 调过 session.watchTurnEnd 的进程；按进程实例记，换了进程就不再投递 */
   private readonly turnEndWatchers = new Map<string, PluginProcess>();
+  /** 插件 → 在跑的代理 runId → 取消 */
+  private readonly agentRuns = new Map<string, Map<string, () => void>>();
   private readonly staged = new Map<
     string,
     { staged: StagedPlugin; at: number; source: PluginInstallSource }
@@ -327,6 +349,13 @@ export class ExtensionPluginService {
       abort: (pluginId, sessionId) => {
         const bridge = this.enabledManifest(pluginId) ? this.options.sessionBridge?.() : null;
         return bridge ? bridge.abort(sessionId) : { ok: false, error: '当前环境不能中止会话' };
+      },
+      agentRun: (pluginId, input) => this.startAgentRun(pluginId, input),
+      agentModel: (pluginId) => this.agentModel(pluginId),
+      agentCancel: (pluginId, runId) => {
+        const cancel = this.agentRuns.get(pluginId)?.get(runId);
+        cancel?.();
+        return Boolean(cancel);
       },
       crossSessionInject: (pluginId) =>
         this.records.find((r) => r.id === pluginId)?.crossSessionInject === true,
@@ -1931,6 +1960,7 @@ export class ExtensionPluginService {
           ENSO_PLUGIN_DATA: dataDir,
         },
         resident: manifest.resident,
+        busy: () => (this.agentRuns.get(manifest.id)?.size ?? 0) > 0,
         init: {
           pluginId: manifest.id,
           pluginRoot: pluginPackagePath(this.options.root, manifest.id, dir),
@@ -1949,6 +1979,7 @@ export class ExtensionPluginService {
           if (unexpected) this.appendLog(manifest.id, 'warn', '插件进程意外退出');
           if (this.turnEndWatchers.get(manifest.id) === proc)
             this.turnEndWatchers.delete(manifest.id);
+          if (this.processes.get(manifest.id) === proc) this.cancelAgentRuns(manifest.id);
           if (this.processes.get(manifest.id) === proc && this.dynamic.clear(manifest.id))
             this.touch();
           onExit(unexpected);
@@ -1997,6 +2028,7 @@ export class ExtensionPluginService {
     this.clearInterceptBreakers(id);
     this.cancelRestart(id);
     this.gate.invocations.cancelPlugin(id);
+    this.cancelAgentRuns(id);
     this.processes.get(id)?.stop();
     this.processes.delete(id);
     this.turnEndWatchers.delete(id);
@@ -2023,6 +2055,47 @@ export class ExtensionPluginService {
 
   private emitNotice(notice: ExtensionPluginNotice): void {
     for (const listener of this.noticeListeners) listener(notice);
+  }
+
+  private startAgentRun(pluginId: string, input: PluginAgentRunRequest): SessionAttempt {
+    const bridge = this.enabledManifest(pluginId) ? this.options.sessionBridge?.() : null;
+    if (!bridge?.agentRun) return { ok: false, error: '当前环境不能运行代理' };
+    const runs = this.agentRuns.get(pluginId) ?? new Map<string, () => void>();
+    if (runs.has(input.runId)) throw pluginError('INVALID_ARGS', 'runId 已在使用');
+    if (runs.size >= MAX_AGENT_RUNS) throw pluginError('RATE_LIMITED', '同时运行的代理过多');
+    const { runId, sessionId, ...rest } = input;
+    const started = bridge.agentRun(sessionId, rest, (event) => {
+      if (event.type === 'end') {
+        runs.delete(runId);
+        if (runs.size === 0 && this.agentRuns.get(pluginId) === runs)
+          this.agentRuns.delete(pluginId);
+      }
+      this.processes.get(pluginId)?.notifyAgentRun(runId, event);
+    });
+    if (!started.ok) return started;
+    runs.set(runId, started.cancel);
+    this.agentRuns.set(pluginId, runs);
+    return { ok: true };
+  }
+
+  /** 清单里唯一的 model 配置项决定代理模型；插件自己不能指定 */
+  private async agentModel(
+    pluginId: string
+  ): Promise<{ ok: true; model?: SpawnModelConfig } | { ok: false; error: string }> {
+    const field = this.enabledManifest(pluginId)?.contributes.configuration.find(
+      (item) => item.type === 'model'
+    );
+    if (!field) return { ok: true };
+    const choice = parsePluginModelChoice(this.configValues(pluginId)[field.key] ?? field.default);
+    if (!choice || choice === 'session') return { ok: true };
+    const resolve = this.options.sessionBridge?.()?.resolveModel;
+    if (!resolve) return { ok: false, error: '当前环境不能切换代理模型' };
+    return resolve(choice);
+  }
+
+  /** 插件停用或进程退出：取消它的代理，终态回来时自然清掉登记 */
+  private cancelAgentRuns(pluginId: string): void {
+    for (const cancel of this.agentRuns.get(pluginId)?.values() ?? []) cancel();
   }
 
   private noteInjectDenied(pluginId: string): void {
@@ -2590,6 +2663,8 @@ function coerceConfig(
     return { error: `配置项 ${field.key} 不合法或过长` };
   if (field.type === 'enum' && !field.options?.includes(value))
     return { error: `配置项 ${field.key} 不在可选项里` };
+  if (field.type === 'model' && !parsePluginModelChoice(value))
+    return { error: `配置项 ${field.key} 不是合法的模型选择` };
   return value;
 }
 

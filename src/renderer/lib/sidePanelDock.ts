@@ -316,7 +316,12 @@ export function openSidePanelPluginView(opts: {
   if (!conversation) return;
   const dockId = resolveSidePanelDockConversationId(sessions.conversations, opts.conversationId);
   const api = docks.get(dockId);
+  const id = `plugin:${opts.pluginId}:${opts.viewId}`;
+  const panelWasOpen = useSidePanelStore.getState().uiByConversation[dockId]?.open === true;
   useSidePanelStore.getState().ensureOpen(dockId);
+  // 用户已开着右侧栏时清掉旧记录，免得之后 close 收起用户自己开的栏
+  if (panelWasOpen) pluginOpenedPanel.delete(`${dockId}\n${id}`);
+  else if (!api?.getPanel(id)) pluginOpenedPanel.add(`${dockId}\n${id}`);
   if (!api) {
     pendingPluginViewReveal.push({
       conversationId: dockId,
@@ -327,7 +332,6 @@ export function openSidePanelPluginView(opts: {
     });
     return;
   }
-  const id = `plugin:${opts.pluginId}:${opts.viewId}`;
   const existing = api.getPanel(id);
   if (existing) {
     existing.focus();
@@ -344,6 +348,42 @@ export function openSidePanelPluginView(opts: {
       viewId: opts.viewId,
     },
     renderer: 'always',
+  });
+}
+
+/** 右侧栏是插件 open 时才打开的：关掉该页面且它仍是当前标签时一并收起 */
+const pluginOpenedPanel = new Set<string>();
+
+export function closeSidePanelPluginView(opts: {
+  conversationId: string;
+  pluginId: string;
+  viewId: string;
+}): void {
+  const dockId = resolveSidePanelDockConversationId(
+    useSessionsStore.getState().conversations,
+    opts.conversationId
+  );
+  const id = `plugin:${opts.pluginId}:${opts.viewId}`;
+  const key = `${dockId}\n${id}`;
+  const restore = pluginOpenedPanel.delete(key);
+  pendingPluginViewReveal.splice(
+    0,
+    pendingPluginViewReveal.length,
+    ...pendingPluginViewReveal.filter(
+      (item) => !(item.conversationId === dockId && `plugin:${item.pluginId}:${item.viewId}` === id)
+    )
+  );
+  const api = docks.get(dockId);
+  const panel = api?.getPanel(id);
+  if (!api || !panel) return;
+  const active = api.activePanel?.id === id;
+  panel.api.close();
+  if (!restore || !active) return;
+  useSidePanelStore.setState((state) => {
+    const ui = state.uiByConversation[dockId];
+    return ui?.open
+      ? { uiByConversation: { ...state.uiByConversation, [dockId]: { ...ui, open: false } } }
+      : {};
   });
 }
 

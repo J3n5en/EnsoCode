@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,6 +7,7 @@ import type { PluginEventName } from '@shared/extensionPlugins/events';
 import { MAX_TOOL_TIMEOUT_MS } from '@shared/extensionPlugins/manifest';
 import type {
   MainToPluginHost,
+  PluginAgentRunEvent,
   PluginAgentSource,
   PluginCallMethod,
   PluginErrorShape,
@@ -219,6 +221,10 @@ export function runPluginHost(transport: HostTransport): void {
   const exportHandlers = new Map<string, Handler>();
   const written = new Map<string, string[]>();
   const turnEndListeners = new Set<TurnEndListener>();
+  const agentRuns = new Map<
+    string,
+    { onEvent?: (event: PluginAgentRunEvent) => unknown; settle(event: PluginAgentRunEvent): void }
+  >();
   const pendingRegs: Promise<unknown>[] = [];
   const pending = new Map<
     string,
@@ -302,6 +308,57 @@ export function runPluginHost(transport: HostTransport): void {
       } catch (error) {
         report(error);
       }
+    }
+  };
+
+  /** 代理的生命周期不随发起调用结束：进度与终态由 Main 按 runId 推回 */
+  const runAgent = (input: unknown): Promise<{ text: string; model?: string }> => {
+    if (!isRecord(input)) return Promise.reject(new TypeError('agent.run 需要参数对象'));
+    const { onEvent, signal, ...args } = input;
+    if (onEvent !== undefined && typeof onEvent !== 'function')
+      return Promise.reject(new TypeError('onEvent 必须是函数'));
+    const abortSignal = signal instanceof AbortSignal ? signal : undefined;
+    if (abortSignal?.aborted) return Promise.reject(codedError('ABORTED', '调用已取消'));
+    const runId = randomUUID();
+    const cancel = () =>
+      void current.exit(() => hostCall('agent.cancel', { runId })).catch(() => undefined);
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        agentRuns.delete(runId);
+        abortSignal?.removeEventListener('abort', cancel);
+      };
+      agentRuns.set(runId, {
+        ...(onEvent ? { onEvent: onEvent as (event: PluginAgentRunEvent) => unknown } : {}),
+        settle: (event) => {
+          if (event.type !== 'end') return;
+          done();
+          if (event.ok)
+            resolve(event.model ? { text: event.text, model: event.model } : { text: event.text });
+          else reject(codedError(event.aborted ? 'ABORTED' : 'AGENT_FAILED', event.error));
+        },
+      });
+      abortSignal?.addEventListener('abort', cancel, { once: true });
+      hostCall('agent.run', { ...args, runId }).catch((error: unknown) => {
+        if (!agentRuns.has(runId)) return;
+        done();
+        cancel();
+        reject(error);
+      });
+    });
+  };
+
+  const emitAgentRun = (runId: string, event: PluginAgentRunEvent) => {
+    const entry = agentRuns.get(runId);
+    if (!entry) return;
+    if (event.type === 'end') return entry.settle(event);
+    try {
+      const result = entry.onEvent?.(event);
+      if (result instanceof Promise)
+        result.catch((error: unknown) =>
+          transport.send(logMessage('error', ['agent.run onEvent 失败：', error]))
+        );
+    } catch (error) {
+      transport.send(logMessage('error', ['agent.run onEvent 失败：', error]));
     }
   };
 
@@ -448,6 +505,7 @@ export function runPluginHost(transport: HostTransport): void {
         onTurnEnd,
       },
       host: { capabilities: () => hostCall('host.capabilities', {}) },
+      agent: { run: runAgent },
       fs: {
         readText: (path: string) => hostCall('fs.readText', { path }),
         writeText: (path: string, text: string) => hostCall('fs.writeText', { path, text }),
@@ -463,6 +521,8 @@ export function runPluginHost(transport: HostTransport): void {
             hostCall('ui.viewEvent', { name, data: data ?? null }),
           open: (input?: string | { viewId?: string; sessionId?: string }) =>
             hostCall('ui.viewOpen', typeof input === 'string' ? { viewId: input } : (input ?? {})),
+          close: (input?: string | { viewId?: string; sessionId?: string }) =>
+            hostCall('ui.viewClose', typeof input === 'string' ? { viewId: input } : (input ?? {})),
         },
         clipboard: { writeText: (text: string) => hostCall('ui.clipboard', { text }) },
         status: {
@@ -625,6 +685,10 @@ export function runPluginHost(transport: HostTransport): void {
         return;
       case 'session-turn-end':
         if (typeof message.sessionId === 'string') emitTurnEnd(message.sessionId);
+        return;
+      case 'agent-run':
+        if (typeof message.runId === 'string' && isRecord(message.event))
+          emitAgentRun(message.runId, message.event);
         return;
       case 'cancel': {
         const invocation = invocations.get(message.invocationId);

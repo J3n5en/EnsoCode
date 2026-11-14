@@ -8,7 +8,8 @@ export interface SessionRequest {
     | 'openChildRun'
     | 'createSession'
     | 'ensureSession'
-    | 'openPluginView';
+    | 'openPluginView'
+    | 'closePluginView';
   payload: Record<string, unknown>;
 }
 
@@ -30,6 +31,8 @@ export interface SessionBridgeDeps {
     sessionId: string,
     view: { pluginId: string; viewId: string; title: string }
   ): void;
+  /** 关掉插件侧栏页面；右侧栏是为它打开的就一并收起 */
+  closePluginView?(sessionId: string, view: { pluginId: string; viewId: string }): void;
 }
 
 const fail = (code: string, error: string): DraftResult => ({ ok: false, code, error });
@@ -96,6 +99,14 @@ export async function handleSessionRequest(
     )
       return fail('BAD_REQUEST', '缺少视图标识');
     deps.openPluginView?.(req.sessionId, { pluginId, viewId, title });
+    return { ok: true, value: null };
+  }
+  if (req.op === 'closePluginView') {
+    if (!deps.conversation(req.sessionId)) return fail('NOT_FOUND', '会话不在本窗口');
+    const { pluginId, viewId } = req.payload;
+    if (typeof pluginId !== 'string' || !pluginId || typeof viewId !== 'string' || !viewId)
+      return fail('BAD_REQUEST', '缺少视图标识');
+    deps.closePluginView?.(req.sessionId, { pluginId, viewId });
     return { ok: true, value: null };
   }
   const origin = deps.conversation(req.sessionId);

@@ -19,6 +19,12 @@ describe('插件配置值转换', () => {
     });
     expect(coerceConfigValue({ type: 'path' }, '/tmp/a')).toEqual({ ok: true, value: '/tmp/a' });
     expect(coerceConfigValue({ type: 'string' }, 'hello')).toEqual({ ok: true, value: 'hello' });
+    expect(coerceConfigValue({ type: 'model' }, 'title')).toEqual({ ok: true, value: 'title' });
+    expect(coerceConfigValue({ type: 'model' }, 'p1::a/b:c')).toEqual({
+      ok: true,
+      value: 'p1::a/b:c',
+    });
+    expect(coerceConfigValue({ type: 'model' }, 'gpt').ok).toBe(false);
   });
 
   it('越界、非数字、枚举外和空值不能写成该类型', () => {

@@ -39,6 +39,7 @@ export const EXTENSION_PLUGIN_PERMISSIONS = [
   'session.readAll',
   'session.focus',
   'session.create',
+  'agent.run',
 ] as const;
 export type ExtensionPluginPermission = (typeof EXTENSION_PLUGIN_PERMISSIONS)[number];
 
@@ -116,8 +117,30 @@ export interface PluginMethodContrib {
   name: string;
   timeoutMs: number;
 }
-export const PLUGIN_CONFIG_TYPES = ['string', 'number', 'boolean', 'enum', 'path'] as const;
+export const PLUGIN_CONFIG_TYPES = [
+  'string',
+  'number',
+  'boolean',
+  'enum',
+  'path',
+  'model',
+] as const;
 export type PluginConfigType = (typeof PLUGIN_CONFIG_TYPES)[number];
+
+/** model 配置项的值：跟随发起会话、跟随标题模型，或用户指定的 `<providerId>::<modelId>` */
+export type PluginModelChoice = 'session' | 'title' | { providerId: string; modelId: string };
+
+export function parsePluginModelChoice(value: unknown): PluginModelChoice | null {
+  if (value === 'session' || value === 'title') return value;
+  if (typeof value !== 'string' || value.length > 512) return null;
+  const cut = value.indexOf('::');
+  if (cut <= 0 || cut + 2 >= value.length) return null;
+  return { providerId: value.slice(0, cut), modelId: value.slice(cut + 2) };
+}
+
+export function formatPluginModelChoice(choice: PluginModelChoice): string {
+  return typeof choice === 'string' ? choice : `${choice.providerId}::${choice.modelId}`;
+}
 export interface PluginConfigContrib {
   key: string;
   title: string;
@@ -848,6 +871,8 @@ export function parseExtensionPluginManifest(
     configuration.map((c) => ({ id: c.key })),
     '配置项'
   );
+  if (configuration.filter((c) => c.type === 'model').length > 1)
+    errors.push('model 类型的配置项最多一个');
 
   const events: PluginEventSubscription[] = [];
   for (const e of list('events')) {
@@ -1171,6 +1196,14 @@ function parseConfigField(c: unknown, reasons: string[] = []): PluginConfigContr
       if (has('default')) field.default = c.default as string;
       return field;
     }
+    case 'model':
+      if (!only('default')) return null;
+      if (has('default') && c.default !== 'session' && c.default !== 'title') {
+        reasons.push('default 只能是 session 或 title');
+        return null;
+      }
+      if (has('default')) field.default = c.default as string;
+      return field;
     default:
       if (!only('pathKind')) return null;
       if (has('pathKind') && c.pathKind !== 'file' && c.pathKind !== 'directory') {

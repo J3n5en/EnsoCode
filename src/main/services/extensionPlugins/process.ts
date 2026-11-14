@@ -1,5 +1,6 @@
 import type {
   MainToPluginHost,
+  PluginAgentRunEvent,
   PluginAgentSource,
   PluginCallMethod,
   PluginHostApi,
@@ -28,6 +29,8 @@ export interface PluginProcessDeps {
   readyTimeoutMs?: number;
   /** 常驻进程不因空闲退出 */
   resident?: boolean;
+  /** 有插件代理在跑：进程要收进度，不因空闲退出 */
+  busy?(): boolean;
 }
 
 interface Pending {
@@ -145,6 +148,13 @@ export class PluginProcess {
   /** 只推给活着的进程；不拉起、不影响空闲计时 */
   notifyTurnEnd(sessionId: string): void {
     if (this.child && !this.stopping) this.post({ t: 'session-turn-end', sessionId });
+  }
+
+  /** 只推给活着的进程；终态之后重新计算空闲 */
+  notifyAgentRun(runId: string, event: PluginAgentRunEvent): void {
+    if (!this.child || this.stopping) return;
+    this.post({ t: 'agent-run', runId, event });
+    if (event.type === 'end') this.armIdle();
   }
 
   /** 先发 shutdown，最多等 3 秒再 kill；再过 5 秒仍无 exit 则 SIGKILL 并结束等待 */
@@ -328,8 +338,11 @@ export class PluginProcess {
 
   private armIdle(): void {
     this.clearIdle();
-    if (this.deps.resident || this.pending.size > 0 || !this.child) return;
-    this.idleTimer = setTimeout(() => this.beginStop(), this.deps.idleMs ?? DEFAULT_IDLE_MS);
+    if (this.deps.resident || this.pending.size > 0 || !this.child || this.deps.busy?.()) return;
+    this.idleTimer = setTimeout(
+      () => (this.deps.busy?.() ? this.clearIdle() : this.beginStop()),
+      this.deps.idleMs ?? DEFAULT_IDLE_MS
+    );
   }
 
   private clearIdle(): void {

@@ -178,7 +178,7 @@ export function getExtensionPlugins(): ExtensionPluginService {
       sessionUi: (target, op, payload) => {
         const origin =
           target.origin ??
-          (op === 'openPluginView'
+          (op === 'openPluginView' || op === 'closePluginView'
             ? (localMainContents()?.id ?? remoteLeaderId(false) ?? null)
             : null);
         return getDraftBroker().request(

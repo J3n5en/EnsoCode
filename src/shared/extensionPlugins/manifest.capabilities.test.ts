@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseExtensionPluginManifest } from './manifest';
+import {
+  formatPluginModelChoice,
+  parseExtensionPluginManifest,
+  parsePluginModelChoice,
+} from './manifest';
 
 const base = (patch: Record<string, unknown> = {}, contributes: Record<string, unknown> = {}) => ({
   schemaVersion: 1,
@@ -281,8 +285,30 @@ describe('清单：类型化配置项', () => {
     { key: 'a', title: 'A', type: 'number', min: 1, default: 0 },
     { key: 'a', title: 'A', type: 'boolean', secret: true },
     { key: 'a', title: 'A', type: 'path', pathKind: 'socket' },
+    { key: 'a', title: 'A', type: 'model', default: 'p::m' },
+    { key: 'a', title: 'A', type: 'model', options: ['session'] },
   ])('拒绝不合法配置 %j', (item) => {
     expect(errorsOf(base({}, { configuration: [item] }))).not.toEqual([]);
+  });
+
+  it('model 配置项：缺省跟随会话、最多一个，值可解析', () => {
+    const m = manifestOf(
+      base(
+        {},
+        { configuration: [{ key: 'model', title: '模型', type: 'model', default: 'title' }] }
+      )
+    );
+    expect(m.contributes.configuration[0]).toMatchObject({ type: 'model', default: 'title' });
+    const two = [
+      { key: 'a', title: 'A', type: 'model' },
+      { key: 'b', title: 'B', type: 'model' },
+    ];
+    expect(errorsOf(base({}, { configuration: two }))).not.toEqual([]);
+    expect(parsePluginModelChoice('session')).toBe('session');
+    expect(parsePluginModelChoice('p1::org/m:1')).toEqual({ providerId: 'p1', modelId: 'org/m:1' });
+    expect(parsePluginModelChoice('::m')).toBeNull();
+    expect(parsePluginModelChoice('p::')).toBeNull();
+    expect(formatPluginModelChoice({ providerId: 'p1', modelId: 'm' })).toBe('p1::m');
   });
 });
 
