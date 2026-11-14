@@ -18,6 +18,7 @@ import {
   type TimelineItem,
   terminalErrorText,
 } from '@/stores/sessions/timeline';
+import { useSettingsStore } from '@/stores/settings';
 import { ChatFindBar, consumePendingFindQuery, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
 import { timelineSearchHits } from './chatSearch';
 import { MarkdownLinkContext } from './Markdown';
@@ -46,6 +47,9 @@ export function ChatSessionTimeline({
   timelineRef: RefObject<MessageTimelineHandle | null>;
 }) {
   const projectId = useSessionsStore((state) => state.conversations[conversationId]?.projectId);
+  const secretarySession = useSettingsStore((state) =>
+    state.projects.some((project) => project.id === projectId && project.kind === 'secretary')
+  );
   const messages = useSessionsStore(
     (state) => state.conversations[conversationId]?.messages ?? EMPTY_MESSAGES
   );
@@ -121,6 +125,7 @@ export function ChatSessionTimeline({
         toolOutputs,
         toolStartedAt,
         pendingApprovals,
+        secretarySession,
       });
     cache.current.items = items;
     return items;
@@ -135,6 +140,7 @@ export function ChatSessionTimeline({
     messages,
     pendingApprovals,
     running,
+    secretarySession,
     toolOutputs,
     toolStartedAt,
   ]);

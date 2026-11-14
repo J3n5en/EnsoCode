@@ -10,14 +10,21 @@ vi.mock('@/i18n', () => ({
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: object) => unknown) =>
     select({
-      projects: [{ id: 'p1', name: 'sec-verify-proj', alias: '', path: '/tmp/p', kind: 'local' }],
+      projects: [
+        { id: 'p1', name: 'sec-verify-proj', alias: '', path: '/tmp/p', kind: 'secretary' },
+      ],
       compactReadOnlyTools: false,
       expandLiveEdits: false,
     }),
 }));
+// 可读卡片只在秘书会话里画：这里让当前展示的会话属于秘书项目
 vi.mock('@/stores/sessions', () => ({
   useSessionsStore: (select: (state: object) => unknown) =>
-    select({ conversations: {}, selectConversation: () => undefined }),
+    select({
+      activeId: 'conv-1',
+      conversations: { 'conv-1': { projectId: 'p1' } },
+      selectConversation: () => undefined,
+    }),
 }));
 vi.mock('@/stores/secretary', () => ({
   useSecretaryStore: (select: (state: object) => unknown) =>

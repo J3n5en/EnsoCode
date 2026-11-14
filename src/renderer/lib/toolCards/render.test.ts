@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mergeRuns } from './group';
 import { cronPhrase, formatStamp, shortId } from './phrase';
-import { cardPlainText, presentToolCalls, renderToolCall } from './render';
+import { cardPlainText, presentToolCalls, renderToolCall, usesToolCard } from './render';
 import type { ToolCallInput, ToolCardContext, ToolCardLookup } from './types';
 
 const zh: Record<string, string> = {
@@ -533,5 +533,44 @@ describe('工具卡片', () => {
       })
     );
     expect(merged.map((item) => item.key)).toEqual(['a+b', 't', 'c', 'd', 'e']);
+  });
+});
+
+describe('usesToolCard', () => {
+  it('普通会话一律按工具行渲染，不看工具名', () => {
+    for (const name of [
+      'bash',
+      'read',
+      'edit',
+      'grep',
+      'mcp__fast_context__fast_context_search',
+      'plugin_enso-github__github_list',
+      'my_upper_text',
+      'memory_search',
+      'web_search',
+      'todo_item_update',
+    ]) {
+      expect(usesToolCard(name), name).toBe(false);
+    }
+  });
+
+  it('秘书会话里秘书工具和自造工具走可读卡片', () => {
+    for (const name of [
+      'todo_item_update',
+      'schedule_add',
+      'session_create',
+      'memory_search',
+      'web_fetch',
+      'my_upper_text',
+    ]) {
+      expect(usesToolCard(name, true), name).toBe(true);
+    }
+    expect(usesToolCard('bash', true)).toBe(false);
+    expect(usesToolCard('read', true)).toBe(false);
+    expect(usesToolCard('edit', true)).toBe(false);
+    // 插件工具一直由 PluginToolCardSlot 单独渲染，不进这套卡片
+    expect(usesToolCard('plugin_enso-github__github_list', true)).toBe(false);
+    // 秘书会话里 MCP 走注册表的键值兜底，普通会话里它是原来的工具行
+    expect(usesToolCard('mcp__fast_context__fast_context_search', true)).toBe(true);
   });
 });

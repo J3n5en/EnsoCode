@@ -74,7 +74,10 @@ import {
   SecretaryProposalRow,
   secretaryProposalId,
 } from '@/components/secretary/SecretaryProposalRow';
-import { useSecretaryChatSpeaker } from '@/components/secretary/useSecretaryFace';
+import {
+  useIsSecretaryChat,
+  useSecretaryChatSpeaker,
+} from '@/components/secretary/useSecretaryFace';
 import {
   Dialog,
   DialogContent,
@@ -1157,6 +1160,7 @@ export const TimelineRow = memo(function TimelineRow({
   const search = useChatSearchHighlight();
   const searchQuery = search.query;
   const activeNth = search.activeKey === item.key ? search.activeNth : -1;
+  const secretaryChat = useIsSecretaryChat();
   switch (item.kind) {
     case 'user': {
       const fromMain = item.text ? isFromMainAgent(item.text) : false;
@@ -1211,7 +1215,7 @@ export const TimelineRow = memo(function TimelineRow({
       );
     case 'tool': {
       const proposalId = secretaryProposalId(item);
-      const card = usesToolCard(item.name);
+      const card = usesToolCard(item.name, secretaryChat);
       const body = (
         <>
           <PluginToolCardSlot name={item.name} output={item.output} state={item.state} />

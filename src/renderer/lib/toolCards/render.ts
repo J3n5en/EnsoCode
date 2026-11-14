@@ -23,7 +23,12 @@ const CARD_TOOLS = new Set<string>([
   'web_fetch',
 ]);
 
-export function usesToolCard(name: string): boolean {
+/**
+ * 可读卡片只属于秘书会话，普通会话一律走原来的工具行。
+ * 会话类型由调用方显式传入，不看工具名前缀。
+ */
+export function usesToolCard(name: string, secretarySession = false): boolean {
+  if (!secretarySession) return false;
   return CARD_TOOLS.has(name) || name.startsWith('my_') || parseMcpToolName(name) !== null;
 }
 
