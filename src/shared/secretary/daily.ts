@@ -216,19 +216,30 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     results.filter((record) => NEEDS_YOU_KINDS.has(record.kind)).map(resultItem)
   );
 
-  const dispatched = input.dispatched
-    .filter((record) => !record.takeover && within(record.createdAt))
-    .map((record): SecretaryDailyItem => {
-      const meta = metaOf(record.conversationId, record.projectId);
-      const goal = record.goal?.split('\n')[0]?.trim();
-      return {
-        id: `dispatch:${record.conversationId}`,
-        at: record.createdAt,
-        title: meta.title || goal || record.conversationId,
-        ...(meta.projectName ? { projectName: meta.projectName } : {}),
-        conversationId: record.conversationId,
-      };
-    })
+  const dispatchItem = (record: DispatchRecord): SecretaryDailyItem => {
+    const meta = metaOf(record.conversationId, record.projectId);
+    const goal = record.goal?.split('\n')[0]?.trim();
+    return {
+      id: `dispatch:${record.conversationId}`,
+      at: record.createdAt,
+      title: meta.title || goal || record.conversationId,
+      ...(meta.projectName ? { projectName: meta.projectName } : {}),
+      conversationId: record.conversationId,
+    };
+  };
+  // 「进行中」读的是实时状态（lastState / 后台任务），只有今天成立；历史日期不猜当时在跑什么
+  const live = day === dayKey(input.now);
+  const runningNow = (record: DispatchRecord): boolean =>
+    record.lastState === 'running' || record.backgroundRunning === true;
+  const dispatchedRecords = input.dispatched.filter(
+    (record) => !record.takeover && within(record.createdAt)
+  );
+  const running = live
+    ? dispatchedRecords.filter(runningNow).map(dispatchItem).sort(newestFirst)
+    : [];
+  const dispatched = dispatchedRecords
+    .filter((record) => !(live && runningNow(record)))
+    .map(dispatchItem)
     .sort(newestFirst);
 
   const todoItems: SecretaryDailyItem[] = [];
@@ -273,6 +284,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       { key: 'failed', items: failed },
       { key: 'needsYou', items: needsYou },
       { key: 'dispatched', items: dispatched },
+      { key: 'running', items: running },
       { key: 'todos', items: todos },
       { key: 'changes', items: changes },
     ] as SecretaryDailyGroup[]
@@ -282,7 +294,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     day,
     today: day === dayKey(input.now),
     counts: {
-      dispatched: dispatched.length,
+      dispatched: dispatchedRecords.length,
       completed: done.length,
       failed: failed.length,
       needsYou: needsYou.length,

@@ -378,6 +378,7 @@ export type SecretaryDailyGroupKey =
   | 'failed'
   | 'needsYou'
   | 'dispatched'
+  | 'running'
   | 'todos'
   | 'changes';
 

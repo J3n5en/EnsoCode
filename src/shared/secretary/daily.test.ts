@@ -265,4 +265,35 @@ describe('一天的看板投影', () => {
     });
     expect(daily.today).toBe(false);
   });
+
+  it('今天还在跑的会话进「进行中」，不再重复算新派出', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        dispatch(),
+        dispatch({ conversationId: 'c7', lastState: 'running' }),
+        dispatch({ conversationId: 'c8', lastState: 'idle', backgroundRunning: true }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.find((group) => group.key === 'running')?.items).toHaveLength(2);
+    expect(
+      daily.groups.find((group) => group.key === 'dispatched')?.items.map((item) => item.id)
+    ).toEqual(['dispatch:c1']);
+    expect(daily.counts.dispatched).toBe(3);
+  });
+
+  it('历史日期没有「进行中」：实时状态不能倒推当天', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      day: '2024-05-14',
+      results: [],
+      dispatched: [dispatch({ createdAt: at(14, 9), lastState: 'running' })],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['dispatched']);
+  });
 });
