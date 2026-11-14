@@ -206,6 +206,7 @@ export function activeConversationIds(
 /**
  * 顶栏会话标签:活跃会话保持传入顺序(与 ⌘1–9 对齐)在前,
  * 窗口内有过消息或续期的其余会话按活跃时间追加。include 用于套用侧栏的分组过滤。
+ * dismissed 记录用户移出顶栏的时刻,其后没有新消息或续期的会话不再显示。
  */
 export function headerSessionTabIds(
   activeIds: readonly string[],
@@ -213,7 +214,8 @@ export function headerSessionTabIds(
   conversations: Conversations,
   archivedProjectIds: readonly string[],
   recent: { now: number; ms: number },
-  include: (id: string) => boolean = () => true
+  include: (id: string) => boolean = () => true,
+  dismissed: Readonly<Record<string, number>> = {}
 ): string[] {
   const leading = new Set(activeIds);
   const recentIds =
@@ -222,7 +224,13 @@ export function headerSessionTabIds(
           (id) => !leading.has(id) && include(id)
         )
       : [];
-  return [...activeIds, ...recentIds];
+  return [...activeIds, ...recentIds].filter((id) => {
+    const dismissedAt = dismissed[id];
+    if (dismissedAt === undefined) return true;
+    const conversation = sidebarRoot(id, conversations);
+    const anchor = conversation ? retentionAnchor(conversation) : undefined;
+    return anchor !== undefined && anchor > dismissedAt;
+  });
 }
 
 /** 仅靠留存窗口留在「活跃中」的会话还剩多少毫秒;不会因超时移出或已超时的返回 undefined */
