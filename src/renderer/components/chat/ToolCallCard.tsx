@@ -76,7 +76,7 @@ export function ToolCallCards({ item }: { item: ToolItem }) {
       data-tool={item.name}
       data-grouped={present.grouped ? 'true' : 'false'}
       data-count={present.cards.length}
-      className="my-1 ml-5 overflow-hidden rounded-lg border border-border/70 bg-card text-[13px] shadow-xs"
+      className="my-1 w-full overflow-hidden rounded-lg border border-border/70 bg-card text-[13px] shadow-xs"
     >
       <div className="flex min-w-0 items-center gap-2 px-2.5 py-1">
         <StepDot state={state} />

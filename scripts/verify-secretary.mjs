@@ -415,16 +415,28 @@ async function run(cdp, pluginZipUrl) {
     );
     const card = await until(() => document.querySelector('[data-enso=secretary-proposal]'), 30000);
     if (!card) return JSON.stringify({ ok: false, error: 'no proposal card' });
+    const pair = card.closest('[data-enso=tool-card-pair]');
+    pair?.scrollIntoView({ block: 'center' });
+    const tool = pair?.querySelector('[data-enso=tool-card]');
+    const toolBox = tool?.getBoundingClientRect();
+    const proposalBox = card.getBoundingClientRect();
+    const aligned = Boolean(
+      toolBox &&
+        Math.abs(toolBox.left - proposalBox.left) < 1 &&
+        Math.abs(toolBox.right - proposalBox.right) < 1
+    );
     const secretary = await SEC();
     const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
     return JSON.stringify({
       ok: proposal.status === 'pending',
+      aligned,
       proposalId: proposal.id,
       cardText: card.innerText,
       buttons: [...card.querySelectorAll('button')].map((b) => b.innerText),
     });
   `);
   assert(proposed.ok, 'step3: 聊天里出现待确认的派活卡片', proposed);
+  assert(proposed.aligned, 'step3: 工具卡片和派活结果卡片左右对齐', proposed);
   await cdp.shot(path.join(ART, '02-proposal-card.png'));
 
   const confirmed = await page(`

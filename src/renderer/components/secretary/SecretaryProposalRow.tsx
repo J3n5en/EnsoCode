@@ -62,7 +62,7 @@ const PROFILE_STATUS_LABELS: Record<ProposalStatus, string> = {
 /** 工作台里待处理的提案要醒目：警告色细边 + 淡底 */
 function cardClass(prominent?: boolean): string {
   return cn(
-    'mb-1 rounded-lg border px-2.5 py-2',
+    'mb-1 w-full rounded-lg border px-2.5 py-2',
     prominent ? 'border-warning/40 bg-warning/5' : 'border-border/60 bg-muted/20'
   );
 }
