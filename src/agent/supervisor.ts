@@ -3202,7 +3202,9 @@ export class SessionSupervisor {
         ? builtin('computer', [withComputerApproval(gate, createComputerTool(computer))])
         : []),
       ...(pluginTools
-        ? createPluginTools([...pluginToolDescriptors], pluginTools).map((tool) =>
+        ? createPluginTools([...pluginToolDescriptors], pluginTools, {
+            untrusted: secretaryMode,
+          }).map((tool) =>
             // 秘书会话里的插件工具可能以用户身份往外发消息：非只读的每次都要人确认
             secretaryMode
               ? withMandatoryApproval(gate, 'mcp', tool)
