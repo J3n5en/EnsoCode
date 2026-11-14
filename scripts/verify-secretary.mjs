@@ -2963,7 +2963,11 @@ async function verifyFeedPaging(cdp, panelHost) {
   const tieAt = base + 10_000;
   const activityId = (conversationId, at) => `activity:${conversationId}:${at}:seen`;
   const entries = [];
-  for (let index = 0; index < 87; index += 1) {
+  // 贴底时哨兵会连续多拉几页，种子必须远超两页，否则列表见底后「没有更多」标记
+  // 会提前出现，断言 end === false 就随历史活动多少时好时坏
+  const SEED = 297;
+  const last = SEED - 1;
+  for (let index = 0; index < SEED; index += 1) {
     entries.push({
       at: base + index,
       conversationId: `feed-${String(index).padStart(3, '0')}`,
@@ -2979,12 +2983,12 @@ async function verifyFeedPaging(cdp, panelHost) {
     activityId('tie-m', tieAt),
     activityId('tie-z', tieAt),
     ...Array.from({ length: 37 }, (_, index) => {
-      const n = 86 - index;
+      const n = last - index;
       return activityId(`feed-${String(n).padStart(3, '0')}`, base + n);
     }),
   ];
   const page2 = Array.from({ length: PAGE }, (_, index) => {
-    const n = 49 - index;
+    const n = last - 37 - index;
     return activityId(`feed-${String(n).padStart(3, '0')}`, base + n);
   });
 
@@ -3088,7 +3092,10 @@ async function verifyFeedPaging(cdp, panelHost) {
   const parkedScroll = await page(`
     const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
     scroller.scrollTop = 200;
-    return JSON.stringify({ top: scroller.scrollTop });
+    const ids = [...document.querySelectorAll('[data-enso=secretary-feed-event]')].map(
+      (node) => node.dataset.id
+    );
+    return JSON.stringify({ top: scroller.scrollTop, length: ids.length });
   `);
   const extraAt = tieAt + 1;
   const extraId = activityId('feed-new', extraAt);
@@ -3117,10 +3124,10 @@ async function verifyFeedPaging(cdp, panelHost) {
     held.count === '1' &&
       held.top === parkedScroll.top &&
       held.hasNew === false &&
-      // 上一段允许贴底时多拉一页，这里只要求「新动态没插进来」，长度和插入前一致
-      held.length === second.length,
+      // 贴底时哨兵会多拉几页，页数不固定；只要求「新动态没插进来」，长度和离开底部时一致
+      held.length === parkedScroll.length,
     '动态分页: 停在中间时新动态不插入，滚动位置不变',
-    { held, parked: parkedScroll.top }
+    { held, parked: parkedScroll }
   );
   await cdp.shot(path.join(ART, 'feed-after.png'));
   const revealed = await page(`
