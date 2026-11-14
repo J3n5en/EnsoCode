@@ -177,6 +177,7 @@ const driverPorts: DispatchDriverPorts = {
       delivery.images as AttachedImage[] | undefined
     ),
   newId: () => randomUUID(),
+  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
   now: () => Date.now(),
   requestWatch: () => {
     const now = Date.now();
