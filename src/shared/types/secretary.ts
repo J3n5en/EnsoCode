@@ -149,7 +149,10 @@ export interface DispatchRecord {
   /** 每次 turn-completed / turn-failed 加一 */
   turn: number;
   lastState: 'running' | 'idle' | 'waiting' | 'error';
+  /** 心跳：派出会话每个事件都刷新，只用于判断卡住，不能当动态时间 */
   lastEventAt: number;
+  /** lastState 变成当前值的时间；旧记录没有，读时按派出或结果时间估 */
+  stateSince?: number;
   /** 最后一轮的助手正文，工作台显示"最后说了什么" */
   lastText?: string;
   /** 已报 stalled 的轮次，一轮只报一次 */
@@ -250,10 +253,13 @@ export type SecretaryCard =
       title: string;
       state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
       lastText?: string;
+      /** 派出时间 */
       startedAt: number;
-      /** 最近一次结果或事件的时间，动态按它排序 */
-      updatedAt: number;
+      /** 当前状态开始的时间：「开始执行」显示它，不随会话活动刷新 */
+      stateSince: number;
       result?: SecretaryResultKind;
+      /** 与 result 同时出现：结果发生的时间 */
+      resultAt?: number;
       secretaryConversationId: string;
       unread?: boolean;
       takeover?: true;

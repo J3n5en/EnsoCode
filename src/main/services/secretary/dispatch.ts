@@ -292,6 +292,7 @@ async function executeDispatch(
     turn: 0,
     lastState: 'running',
     lastEventAt: now,
+    stateSince: now,
     ...(draft.todoId ? { todoId: draft.todoId } : {}),
     ...(draft.goal ? { goal: draft.goal } : {}),
   };

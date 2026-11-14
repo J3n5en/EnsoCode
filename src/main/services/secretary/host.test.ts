@@ -235,6 +235,29 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
   });
 
+  it('状态起始时间只在状态变化时更新，流式事件不刷新', () => {
+    const h = harness({
+      file: { dispatched: { c1: { ...emptyFile().dispatched.c1, stateSince: 0 } } },
+    });
+    const since = () => h.state.file.dispatched.c1.stateSince;
+    h.state.now = 1000;
+    h.host.onAgentEvent(event('message-delta', { delta: '写' }), []);
+    expect(since()).toBe(0);
+    expect(h.state.file.dispatched.c1.lastEventAt).toBe(1000);
+
+    h.state.now = 2000;
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(since()).toBe(2000);
+
+    h.state.now = 3000;
+    h.state.statuses.c1 = running;
+    h.host.onAgentEvent(event('message-delta', { delta: '再' }), change('running', 'idle'));
+    h.state.now = 4000;
+    h.host.onAgentEvent(event('message-delta', { delta: '来' }), []);
+    expect(since()).toBe(3000);
+  });
+
   it('带目标的派出会话目标撤下后再跑一轮，报新轮次的 turn-ended', () => {
     const h = harness({});
     h.state.file.dispatched.c1.goal = '收尾';
@@ -386,9 +409,11 @@ describe('每分钟检查', () => {
 describe('启动恢复', () => {
   it('重启时仍在运行的派出会话报中断', () => {
     const h = harness({});
+    h.state.now = 5000;
     h.host.recover();
     expect(h.state.file.dispatched.c1).toMatchObject({
       lastState: 'idle',
+      stateSince: 5000,
       lastResult: { kind: 'interrupted' },
     });
     expect(h.state.file.outbox[0]).toMatchObject({ kind: 'interrupted' });

@@ -48,7 +48,7 @@ const sessionCard = (
   title: '写 hello.txt',
   state: 'error',
   startedAt: NOW - 60_000,
-  updatedAt: NOW - 60_000,
+  stateSince: NOW - 60_000,
   secretaryConversationId: 'sec',
   ...over,
 });

@@ -213,6 +213,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           record.turn += 1;
         }
         record.lastEventAt = now;
+        if (record.lastState !== status.state) record.stateSince = now;
         record.lastState = status.state;
         const lastText = own ? capLastText(assistantTextOf(event)) : undefined;
         if (lastText) record.lastText = lastText;
@@ -287,6 +288,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (record.lastState !== 'running') continue;
         // 重启时 worker 已经不在了：不算失败，交给用户决定是否重派
         record.lastState = 'idle';
+        record.stateSince = now;
         recordResult(file, record, 'interrupted', now);
         changed = true;
       }

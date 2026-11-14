@@ -265,6 +265,7 @@ describe('parseDispatchFile', () => {
           turn: 2,
           lastState: 'running',
           lastEventAt: 20,
+          stateSince: 15,
           lastResult: { kind: 'goal-complete', turn: 2, at: 30 },
         },
         c2: { conversationId: 'c2', lastState: 'sleeping' },
@@ -306,7 +307,7 @@ describe('parseDispatchFile', () => {
       ],
     });
     expect(Object.keys(file.dispatched)).toEqual(['c1']);
-    expect(file.dispatched.c1).toMatchObject({ turn: 2, lastState: 'running' });
+    expect(file.dispatched.c1).toMatchObject({ turn: 2, lastState: 'running', stateSince: 15 });
     expect(file.named).toEqual(['c1']);
     expect(Object.keys(file.proposals)).toEqual(['ok']);
     expect(file.outbox.map((update) => update.key)).toEqual(['k1', 'k2']);

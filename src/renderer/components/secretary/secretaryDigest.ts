@@ -74,18 +74,18 @@ function greetingAt(now: number): string {
   return 'Good evening';
 }
 
-/** 会话卡片对应的动态说明：在跑时上一轮的结果已过时，看状态；否则有结果看结果 */
-export function sessionFeed(card: SessionCard): Feed {
+/** 会话卡片对应的动态说明与发生时间：在跑时上一轮的结果已过时，看状态；否则有结果看结果 */
+export function sessionFeed(card: SessionCard): Feed & { at: number } {
   return card.result && card.state !== 'running'
-    ? RESULT_FEED[card.result]
-    : STATE_FEED[card.state];
+    ? { ...RESULT_FEED[card.result], at: card.resultAt ?? card.stateSince }
+    : { ...STATE_FEED[card.state], at: card.stateSince };
 }
 
 function sessionEvent(card: SessionCard): FeedEvent {
   const feed = sessionFeed(card);
   return {
     id: `session:${card.conversationId}`,
-    at: card.updatedAt,
+    at: feed.at,
     tone: feed.tone,
     projectName: card.projectName,
     title: card.title,
@@ -121,10 +121,10 @@ export function secretaryDigest(board: SecretaryBoard, now: number): SecretaryDi
     (card): card is SessionCard => card.kind === 'session'
   );
   const dayStart = startOfDay(now);
-  const today = sessions.filter((card) => card.updatedAt >= dayStart);
+  const today = sessions.filter((card) => (card.resultAt ?? 0) >= dayStart);
   const events = [...board.needsYou, ...board.running, ...board.done]
     .map((card) => (card.kind === 'proposal' ? proposalEvent(card) : sessionEvent(card)))
-    .sort((left, right) => right.at - left.at);
+    .sort((left, right) => right.at - left.at || left.id.localeCompare(right.id));
 
   return {
     greeting: greetingAt(now),
