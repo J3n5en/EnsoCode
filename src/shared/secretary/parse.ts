@@ -18,6 +18,8 @@ import { parseSecretaryToolDraft } from './customTools';
 import { parseSecretarySkillDraft } from './skills';
 
 const DEFAULT_AVATAR_COLOR = '#7c5cff';
+export const MIN_RUNNING_DISPATCHES = 1;
+export const MAX_RUNNING_DISPATCHES = 10;
 const COLOR_RE = /^#[0-9a-f]{6}$/iu;
 const CLOCK_RE = /^([01]\d|2[0-3]):[0-5]\d$/u;
 
@@ -136,7 +138,8 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
       : 'all',
     dispatchModel: parseDispatchModel(value.dispatchModel),
     dispatchWorktree: oneOf(value.dispatchWorktree, WORKTREE_MODES, 'auto'),
-    maxRunningDispatches: clampInt(value.maxRunningDispatches, 1, 10) ?? 3,
+    maxRunningDispatches:
+      clampInt(value.maxRunningDispatches, MIN_RUNNING_DISPATCHES, MAX_RUNNING_DISPATCHES) ?? 3,
     replyLanguage: oneOf(value.replyLanguage, REPLY_LANGUAGES, 'ui'),
     style: oneOf(value.style, STYLES, 'concise'),
     notify: oneOf(value.notify, NOTIFY_MODES, 'needs-user'),
@@ -260,7 +263,12 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
   }
   if (value.maxRunningDispatches !== undefined) {
     const max = value.maxRunningDispatches;
-    if (typeof max !== 'number' || !Number.isInteger(max) || max < 1 || max > 10) {
+    if (
+      typeof max !== 'number' ||
+      !Number.isInteger(max) ||
+      max < MIN_RUNNING_DISPATCHES ||
+      max > MAX_RUNNING_DISPATCHES
+    ) {
       return { ok: false, error: 'invalid maxRunningDispatches' };
     }
     draft.maxRunningDispatches = max;

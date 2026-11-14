@@ -839,6 +839,39 @@ describe('resolveProposal', () => {
     expect(h.created).toHaveLength(1);
   });
 
+  it('档案里的上限改了之后，确认提案立即按新上限检查', async () => {
+    const file = emptyFile();
+    file.dispatched.a = {
+      conversationId: 'a',
+      projectId: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: 1,
+      turn: 0,
+      lastState: 'running',
+      lastEventAt: 1,
+    };
+    const h = harness({ file });
+    const propose = async () =>
+      (
+        (await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' })) as {
+          proposalId: string;
+        }
+      ).proposalId;
+
+    const blocked = await propose();
+    h.profileValue = profile({ maxRunningDispatches: 1 });
+    const refused = await resolveProposal(h.ports, blocked, 'confirm');
+    expect(refused.ok && refused.proposal.status).toBe('failed');
+    expect(refused.ok && refused.proposal.error).toBe('dispatch-limit');
+    expect(h.created).toEqual([]);
+
+    h.profileValue = profile({ maxRunningDispatches: 2 });
+    const allowed = await propose();
+    const confirmed = await resolveProposal(h.ports, allowed, 'confirm');
+    expect(confirmed.ok && confirmed.proposal.status).toBe('succeeded');
+    expect(h.created).toHaveLength(1);
+  });
+
   it('两端同时确认也只执行一次', async () => {
     const h = harness();
     const { proposalId } = (await run(h.handlers.session_create, {

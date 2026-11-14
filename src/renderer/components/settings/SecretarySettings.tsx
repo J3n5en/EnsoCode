@@ -1,5 +1,6 @@
 import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
 import { secretaryAvatarUrl } from '@shared/localImage';
+import { MAX_RUNNING_DISPATCHES, MIN_RUNNING_DISPATCHES } from '@shared/secretary/parse';
 import type {
   SecretaryProfile,
   SecretaryProfileDraft,
@@ -26,18 +27,28 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { PickList } from './PresetsSettings';
 
+const DISPATCH_LIMIT_OPTIONS = Array.from(
+  { length: MAX_RUNNING_DISPATCHES - MIN_RUNNING_DISPATCHES + 1 },
+  (_, index) => {
+    const value = String(MIN_RUNNING_DISPATCHES + index);
+    return { value, label: value };
+  }
+);
+
 function Chips<T extends string>({
   value,
   options,
   onChange,
+  enso,
 }: {
   value: T;
   options: readonly { value: T; label: string }[];
   onChange: (value: T) => void;
+  enso?: string;
 }) {
   const { t } = useI18n();
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-1" data-enso={enso}>
       {options.map((option) => (
         <button
           key={option.value}
@@ -522,8 +533,32 @@ export function SecretarySettings() {
           }
           submitLabel={t('Save')}
           busy={busy}
-          onSubmit={(draft) => void save(draft)}
+          hideMaxRunning
+          onSubmit={({ maxRunningDispatches: _, ...draft }) => void save(draft)}
         />
+      </Section>
+
+      <Section
+        title="Concurrent dispatch limit"
+        description="The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused."
+        rowId="secretary.dispatchLimit"
+      >
+        {profile ? (
+          <Chips
+            enso="secretary-dispatch-limit"
+            value={String(profile.maxRunningDispatches)}
+            options={DISPATCH_LIMIT_OPTIONS}
+            onChange={(value) => {
+              const maxRunningDispatches = Number(value);
+              if (busy || maxRunningDispatches === profile.maxRunningDispatches) return;
+              void save({ maxRunningDispatches });
+            }}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t('The secretary has not been set up yet.')}
+          </p>
+        )}
       </Section>
 
       <Section

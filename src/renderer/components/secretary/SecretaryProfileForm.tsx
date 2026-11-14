@@ -146,6 +146,8 @@ export interface SecretaryProfileFormProps {
   allowDefaults?: boolean;
   /** 就地修改时收起表单 */
   onCancel?: () => void;
+  /** 设置页另有独立的派发上限控件 */
+  hideMaxRunning?: boolean;
 }
 
 /** 三步档案表单：欢迎页、设置页与配置卡片的就地修改共用同一份 */
@@ -157,6 +159,7 @@ export function SecretaryProfileForm({
   error = null,
   allowDefaults = false,
   onCancel,
+  hideMaxRunning = false,
 }: SecretaryProfileFormProps) {
   const { t } = useI18n();
   const [state, dispatch] = React.useReducer(formReducer, initialDraft, initialFormState);
@@ -386,17 +389,19 @@ export function SecretaryProfileForm({
               onChange={(dispatchWorktree) => patch({ dispatchWorktree })}
             />
           </Field>
-          <Field label="Running dispatches at most">
-            <Chips
-              enso="secretary-form-max-running"
-              value={String(draft.maxRunningDispatches ?? 3)}
-              options={MAX_RUNNING_OPTIONS.map((value) => ({
-                value: String(value),
-                label: String(value),
-              }))}
-              onChange={(value) => patch({ maxRunningDispatches: Number(value) })}
-            />
-          </Field>
+          {!hideMaxRunning && (
+            <Field label="Running dispatches at most">
+              <Chips
+                enso="secretary-form-max-running"
+                value={String(draft.maxRunningDispatches ?? 3)}
+                options={MAX_RUNNING_OPTIONS.map((value) => ({
+                  value: String(value),
+                  label: String(value),
+                }))}
+                onChange={(value) => patch({ maxRunningDispatches: Number(value) })}
+              />
+            </Field>
+          )}
         </div>
       )}
 

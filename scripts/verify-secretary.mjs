@@ -173,10 +173,10 @@ const shown = (selector) =>
   [...document.querySelectorAll(selector)].filter((node) => node.innerText.trim()).at(-1) ?? null;
 `;
 
-async function connect() {
+async function connect(entry = 'index.html') {
   const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
-  const target = list.find((entry) => entry.type === 'page' && entry.url.includes('index.html'));
-  if (!target) throw new Error('main window page target not found');
+  const target = list.find((page) => page.type === 'page' && page.url.includes(entry));
+  if (!target) throw new Error(`${entry} page target not found`);
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   const pending = new Map();
   let id = 0;
@@ -843,6 +843,146 @@ async function run(cdp, pluginZipUrl) {
     'step5: 提案指向唯一会话',
     proposal
   );
+
+  // 造一条进行中的派出记录：上限 3 时提案能建，设置面板改成 1 后确认就该被拒
+  log('== step5b 设置面板改派发上限');
+  const profileFile = path.join(ENV, 'secretary', 'profile.json');
+  await waitFor(
+    () =>
+      Object.values(readJson(dispatchFile).dispatched).every(
+        (record) => record.lastState !== 'running'
+      ) || null,
+    'dispatched sessions settled',
+    60_000,
+    500
+  );
+  const limitSeed = readJson(dispatchFile);
+  const seededState = limitSeed.dispatched[dispatchedId].lastState;
+  limitSeed.dispatched[dispatchedId].lastState = 'running';
+  writeFileSync(dispatchFile, JSON.stringify(limitSeed));
+  const limitProposal = await page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const draft = ${JSON.stringify({ ...draft, prompt: '创建 limit.txt', title: '写 limit.txt' })};
+    await S().send(
+      '超限前先提个派活 [[tool:session_create ' + JSON.stringify(draft) + ']]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(() => {
+      const pending = Object.values(secretary.getState().secretary.proposals).filter(
+        (p) => p.status === 'pending' && p.secretaryConversationId === fresh
+      );
+      return pending.at(-1) ?? null;
+    }, 30000);
+    return JSON.stringify({ proposalId: proposal?.id });
+  `);
+  assert(Boolean(limitProposal.proposalId), 'step5b: 上限 3、进行中 1 时提案能建', limitProposal);
+
+  await page(`
+    await window.electronAPI.window.openSettings({
+      category: 'secretary',
+      rowId: 'secretary.dispatchLimit',
+    });
+    return 'null';
+  `);
+  const settingsPage = await waitFor(
+    async () => {
+      try {
+        return await connect('settings.html');
+      } catch {
+        return null;
+      }
+    },
+    'settings window',
+    30_000,
+    500
+  );
+  const pickLimit = (value) =>
+    settingsPage.json(`
+      const row = () => document.querySelector(
+        '[data-settings-row="secretary.dispatchLimit"] [data-enso=secretary-dispatch-limit]'
+      );
+      const pressed = () =>
+        [...(row()?.querySelectorAll('button[aria-pressed=true]') ?? [])].map((b) => b.innerText);
+      await until(() => row(), 30000);
+      const before = pressed();
+      const options = [...(row()?.querySelectorAll('button') ?? [])].map((b) => b.innerText);
+      [...row().querySelectorAll('button')].find((b) => b.innerText === ${JSON.stringify(String(value))})?.click();
+      const after = await until(
+        () => (pressed().join() === ${JSON.stringify(String(value))} ? pressed() : null),
+        15000
+      );
+      return JSON.stringify({
+        before,
+        after,
+        options,
+        text: document.querySelector('[data-settings-row="secretary.dispatchLimit"]')?.innerText,
+      });
+    `);
+  const lowered = await pickLimit(1);
+  assert(lowered.before?.join() === '3', 'step5b: 设置面板显示当前上限 3', lowered);
+  assert(
+    lowered.options?.join() === '1,2,3,4,5,6,7,8,9,10',
+    'step5b: 可选范围是 1 到 10',
+    lowered.options
+  );
+  assert(
+    lowered.text?.includes('超过上限时新派发会被拒绝'),
+    'step5b: 文案说明超限会拒绝新派发',
+    lowered.text
+  );
+  assert(lowered.after?.join() === '1', 'step5b: 面板上选中 1', lowered);
+  await settingsPage.shot(path.join(ART, '05b-dispatch-limit.png'));
+  const savedLow = await waitFor(
+    () => (readJson(profileFile).maxRunningDispatches === 1 ? readJson(profileFile) : null),
+    'profile.json limit 1',
+    10_000,
+    200
+  ).catch(() => readJson(profileFile));
+  assert(
+    savedLow.maxRunningDispatches === 1,
+    'step5b: profile.json 里的上限改成 1',
+    savedLow.maxRunningDispatches
+  );
+
+  const limitBefore = readJson(registryFile).conversations.filter(
+    (entry) => entry.projectId === setup.projectId
+  ).length;
+  const refused = await page(`
+    return JSON.stringify(
+      await window.electronAPI.secretary.resolveProposal(${JSON.stringify(limitProposal.proposalId)}, 'confirm')
+    );
+  `);
+  assert(
+    refused.ok &&
+      refused.proposal?.status === 'failed' &&
+      refused.proposal?.error === 'dispatch-limit',
+    'step5b: 不重启秘书，确认时按新上限 1 拒绝',
+    refused
+  );
+  assert(
+    readJson(registryFile).conversations.filter((entry) => entry.projectId === setup.projectId)
+      .length === limitBefore,
+    'step5b: 被拒的派发没有建会话'
+  );
+
+  const restored = await pickLimit(3);
+  assert(restored.after?.join() === '3', 'step5b: 面板改回 3', restored);
+  const savedBack = await waitFor(
+    () => (readJson(profileFile).maxRunningDispatches === 3 ? readJson(profileFile) : null),
+    'profile.json limit 3',
+    10_000,
+    200
+  ).catch(() => readJson(profileFile));
+  assert(savedBack.maxRunningDispatches === 3, 'step5b: profile.json 里的上限改回 3', savedBack);
+  await settingsPage.evaluate('window.close()').catch(() => undefined);
+  settingsPage.close();
+  const unseed = readJson(dispatchFile);
+  unseed.dispatched[dispatchedId].lastState = seededState;
+  writeFileSync(dispatchFile, JSON.stringify(unseed));
 
   log('== 秘书面板');
   const board = await page(`
