@@ -3446,6 +3446,7 @@ export const zhTranslations: Record<string, string> = {
   'Newly dispatched': '新派出',
   'To-dos': '待办',
   'Settings and capabilities': '设置和能力变更',
+  'No cards yet': '暂无卡片',
   'Nothing happened this day': '这天没有动静',
   'Look back to {{day}}': '可回看至 {{day}}',
   Branch: '分支',

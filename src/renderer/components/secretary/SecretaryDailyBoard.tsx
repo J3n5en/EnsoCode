@@ -1,147 +1,167 @@
 import { dayKey, shiftDay } from '@shared/secretary/daily';
 import type {
   SecretaryDaily,
-  SecretaryDailyCounts,
-  SecretaryDailyGroup,
   SecretaryDailyGroupKey,
   SecretaryDailyItem,
 } from '@shared/types/secretary';
-import { ArrowUpRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Inbox, Link2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 
-/** 收起时每组只露这么多条，展开看全部 */
-const PREVIEW_COUNT = 3;
-
-const GROUP_TITLE: Record<SecretaryDailyGroupKey, string> = {
-  done: 'What got done',
-  failed: 'Failed or interrupted',
-  needsYou: 'Needed you',
-  dispatched: 'Newly dispatched',
-  todos: 'To-dos',
-  changes: 'Settings and capabilities',
-};
-
-const COUNT_LABEL: { key: keyof SecretaryDailyCounts; label: string }[] = [
-  { key: 'dispatched', label: 'Dispatched' },
-  { key: 'completed', label: 'Completed' },
-  { key: 'failed', label: 'Failed' },
-  { key: 'needsYou', label: 'Needed you' },
-  { key: 'todosDone', label: 'To-dos done' },
-  { key: 'merged', label: 'Merged' },
+/**
+ * 列的顺序与配色照 EnsoCode 的 kanban 插件：色值取自插件 PALETTE，
+ * 这里按状态语义分配（灰=新派出、蓝=进行中、黄=需要你、绿=完成、红=失败）。
+ */
+const COLUMNS: { key: SecretaryDailyGroupKey; title: string; dot: string }[] = [
+  { key: 'dispatched', title: 'Newly dispatched', dot: '#8b93a1' },
+  { key: 'running', title: 'In progress', dot: '#3b82f6' },
+  { key: 'needsYou', title: 'Needed you', dot: '#f59e0b' },
+  { key: 'done', title: 'What got done', dot: '#10b981' },
+  { key: 'failed', title: 'Failed or interrupted', dot: '#ef4444' },
+  { key: 'todos', title: 'To-dos', dot: '#a855f7' },
+  { key: 'changes', title: 'Settings and capabilities', dot: '#06b6d4' },
 ];
 
-/** 状态小徽标的颜色：完成绿、出问题红、需要你黄，其余中性 */
-const TONE_DOT: Record<SecretaryDailyGroupKey, string> = {
-  done: 'bg-success',
-  failed: 'bg-destructive',
-  needsYou: 'bg-warning',
-  dispatched: 'bg-subtle-foreground',
-  todos: 'bg-subtle-foreground',
-  changes: 'bg-subtle-foreground',
-};
-
+/** 列：插件的 .col —— 55% muted 底 + 1px 内描边，窄面板纵向堆叠、宽了横排并横向滚动 */
+const COL_CLASS =
+  'flex-none rounded-lg p-1 pb-1.5 bg-[color-mix(in_oklch,var(--muted)_55%,transparent)] shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--border)_60%,transparent)] @[560px]:w-[260px]';
+/** 卡片：插件的 .card —— 细边框 + 极浅阴影，悬停加深边框与阴影 */
+const CARD_CLASS =
+  'rounded-md border border-border bg-card px-2.5 py-2 shadow-[0_1px_2px_0_rgb(0_0_0/0.05)] transition-[border-color,box-shadow] duration-200 hover:border-foreground/15 hover:shadow-[0_1px_3px_0_rgb(0_0_0/0.08)]';
+/** 徽标：插件的 .chip —— 18px 高、999 圆角、6% 前景底 */
+const CHIP_CLASS =
+  'inline-flex h-[18px] max-w-full items-center gap-1 rounded-full bg-foreground/[0.06] px-1.5 font-medium';
 const ACTION_CLASS =
   'flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
 
-function DailyRow({ item, group }: { item: SecretaryDailyItem; group: SecretaryDailyGroupKey }) {
+function DailyCard({ item }: { item: SecretaryDailyItem }) {
   const { t, locale } = useI18n();
   const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [expanded, setExpanded] = useState(false);
-  const open = item.conversationId
-    ? () => selectConversation(item.conversationId as string)
-    : undefined;
-  const refs = [item.branch ? `${t('Branch')} ${item.branch}` : '', item.commit ?? ''].filter(
-    Boolean
-  );
+  const body = item.summary ?? item.detail;
+  const detail = item.detail ?? item.summary;
   return (
-    <div
-      data-enso="secretary-daily-item"
-      data-group={group}
-      className={cn(HOVER_ROW_CLASS, 'flex items-start gap-2 rounded-lg px-1.5 py-1.5')}
-    >
+    <div data-enso="secretary-daily-card" data-item={item.id} className={CARD_CLASS}>
       <button
         type="button"
         data-enso="secretary-daily-expand"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
-        className="min-w-0 flex-1 text-left"
+        className="block w-full text-left"
       >
-        <span className="flex items-center gap-1.5">
-          <span aria-hidden className={cn('size-1.5 shrink-0 rounded-full', TONE_DOT[group])} />
-          <span className="min-w-0 flex-1 truncate text-[13px]">{item.title}</span>
+        <span className="block text-[12.5px] font-medium leading-[1.45] break-words">
+          {item.title}
         </span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-subtle-foreground">
-          <span className="tabular-nums">{formatClock(item.at, locale)}</span>
-          {item.projectName && <span>· {item.projectName}</span>}
-          {item.label && <span className="text-muted-foreground">· {t(item.label)}</span>}
-        </span>
-        {item.summary && (
+        {body && (
           <span
             className={cn(
-              'mt-0.5 block text-[12px] text-muted-foreground',
-              expanded ? 'whitespace-pre-wrap break-words' : 'line-clamp-1'
+              'mt-[3px] block whitespace-pre-wrap break-words text-[12px] text-muted-foreground',
+              expanded ? undefined : 'line-clamp-3'
             )}
           >
-            {expanded ? (item.detail ?? item.summary) : item.summary}
-          </span>
-        )}
-        {expanded && refs.length > 0 && (
-          <span
-            data-enso="secretary-daily-refs"
-            className="mt-1 flex flex-wrap gap-x-2 font-mono text-[11px] text-subtle-foreground"
-          >
-            {refs.map((ref) => (
-              <span key={ref}>{ref}</span>
-            ))}
+            {expanded ? detail : body}
           </span>
         )}
       </button>
-      {open && (
-        <HoverActions>
+      <div className="mt-[7px] flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        {item.projectName && <span className={CHIP_CLASS}>{item.projectName}</span>}
+        {item.label && <span className={CHIP_CLASS}>{t(item.label)}</span>}
+        {item.branch && (
+          <span data-enso="secretary-daily-branch" className={cn(CHIP_CLASS, 'font-mono')}>
+            {item.branch}
+          </span>
+        )}
+        {item.commit && (
+          <span data-enso="secretary-daily-commit" className={cn(CHIP_CLASS, 'font-mono')}>
+            {item.commit}
+          </span>
+        )}
+        {item.conversationId && (
           <button
             type="button"
             data-enso="secretary-daily-open"
             title={t('Open session')}
             aria-label={t('Open session')}
-            onClick={open}
-            className={ACTION_CLASS}
+            onClick={() => selectConversation(item.conversationId as string)}
+            className={cn(
+              CHIP_CLASS,
+              'cursor-pointer text-foreground transition-colors hover:bg-brand/15 hover:text-brand'
+            )}
           >
-            <ArrowUpRight className="h-3.5 w-3.5" />
+            <Link2 className="size-[11px] shrink-0" />
+            <span className="truncate">{t('Session')}</span>
           </button>
-        </HoverActions>
-      )}
+        )}
+        <span className="tabular-nums">{formatClock(item.at, locale)}</span>
+      </div>
     </div>
   );
 }
 
-function DailyGroupSection({ group }: { group: SecretaryDailyGroup }) {
+function DailyColumn({
+  column,
+  items,
+  folded,
+  onToggleFold,
+}: {
+  column: (typeof COLUMNS)[number];
+  items: SecretaryDailyItem[];
+  folded: boolean;
+  onToggleFold: () => void;
+}) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
-  const hidden = group.items.length - PREVIEW_COUNT;
-  const items = expanded ? group.items : group.items.slice(0, PREVIEW_COUNT);
   return (
-    <section data-enso="secretary-daily-group" data-group={group.key} className="flex flex-col">
-      <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">
-        {t(GROUP_TITLE[group.key])}
-        <span className="ml-1 tabular-nums">{group.items.length}</span>
-      </h3>
-      {items.map((item) => (
-        <DailyRow key={item.id} item={item} group={group.key} />
-      ))}
-      {(hidden > 0 || expanded) && (
+    <section data-enso="secretary-daily-column" data-group={column.key} className={COL_CLASS}>
+      <div className="flex min-h-[30px] items-center gap-1 pt-0.5 pb-1.5">
         <button
           type="button"
-          data-enso="secretary-daily-more"
-          onClick={() => setExpanded((value) => !value)}
-          className="self-start rounded-md px-1.5 py-0.5 text-[11.5px] text-subtle-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          data-enso="secretary-daily-fold"
+          aria-expanded={!folded}
+          aria-label={folded ? t('Expand') : t('Collapse')}
+          onClick={onToggleFold}
+          className={cn(ACTION_CLASS, 'size-6')}
         >
-          {expanded ? t('Collapse') : t('Show all {{count}}', { count: group.items.length })}
+          <ChevronDown
+            className={cn('size-3.5 transition-transform duration-300', folded && '-rotate-90')}
+          />
         </button>
+        <span
+          aria-hidden
+          className="mx-0.5 size-[7px] shrink-0 rounded-full"
+          style={{
+            background: column.dot,
+            boxShadow: `0 0 0 3px color-mix(in oklch, ${column.dot} 18%, transparent)`,
+          }}
+        />
+        <span className="min-w-0 truncate px-1.5 py-0.5 text-[12.5px] font-semibold">
+          {t(column.title)}
+        </span>
+        <span
+          data-enso="secretary-daily-count"
+          data-key={column.key}
+          className="rounded-full bg-foreground/[0.06] px-1.5 py-0.5 font-mono text-[11px] leading-none tabular-nums text-muted-foreground"
+        >
+          {items.length}
+        </span>
+      </div>
+      {!folded && (
+        <div className="flex min-h-1.5 flex-col gap-1.5">
+          {items.map((item) => (
+            <DailyCard key={item.id} item={item} />
+          ))}
+          {items.length === 0 && (
+            <div
+              data-enso="secretary-daily-empty-column"
+              className="flex flex-col items-center gap-1 px-2 pt-3.5 pb-2 text-center text-[11.5px] text-subtle-foreground"
+            >
+              <Inbox className="size-5 opacity-60" />
+              {t('No cards yet')}
+            </div>
+          )}
+        </div>
       )}
     </section>
   );
@@ -152,6 +172,7 @@ export function SecretaryDailyBoard() {
   const { t } = useI18n();
   const [day, setDay] = useState(() => dayKey(Date.now()));
   const [daily, setDaily] = useState<SecretaryDaily | null>(null);
+  const [folded, setFolded] = useState<ReadonlySet<SecretaryDailyGroupKey>>(() => new Set());
   const today = dayKey(Date.now());
 
   const load = useCallback((target: string) => {
@@ -172,10 +193,20 @@ export function SecretaryDailyBoard() {
     return window.electronAPI.secretary.onStateChanged(() => load(day));
   }, [day, load]);
 
-  const counts = daily?.counts;
-  const groups = daily?.groups ?? [];
+  const itemsOf = (key: SecretaryDailyGroupKey): SecretaryDailyItem[] =>
+    daily?.groups.find((group) => group.key === key)?.items ?? [];
+  const total = (daily?.groups ?? []).reduce((sum, group) => sum + group.items.length, 0);
+  const done = itemsOf('done').length;
+  const toggleFold = (key: SecretaryDailyGroupKey) =>
+    setFolded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   return (
-    <div data-enso="secretary-daily" className="flex flex-col gap-2 px-3 py-2">
+    <div data-enso="secretary-daily" className="@container flex flex-col gap-2 px-3 py-2">
       <div className="flex items-center gap-1">
         <button
           type="button"
@@ -210,49 +241,39 @@ export function SecretaryDailyBoard() {
         >
           <ChevronRight className="h-3.5 w-3.5" />
         </button>
+        <span
+          data-enso="secretary-daily-stat"
+          title={`${t('What got done')} / ${t('All')}`}
+          className="ml-auto font-mono text-[11.5px] tabular-nums text-muted-foreground"
+        >
+          {done}/{total}
+        </span>
         <button
           type="button"
           data-enso="secretary-daily-today"
           disabled={day === today}
           onClick={() => setDay(today)}
-          className="ml-auto rounded-md border border-border px-2 py-0.5 text-[11.5px] transition-colors hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
+          className="rounded-md border border-border px-2 py-0.5 text-[11.5px] transition-colors hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
         >
           {t('Today')}
         </button>
       </div>
-      {counts && (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          {COUNT_LABEL.map(({ key, label }) => (
-            <span
-              key={key}
-              data-enso="secretary-daily-count"
-              data-key={key}
-              className="flex items-baseline gap-1 text-[11.5px] text-muted-foreground"
-            >
-              <span
-                className={cn(
-                  'text-[14px] font-semibold tabular-nums text-foreground',
-                  key === 'needsYou' && counts.needsYou > 0 && 'text-warning'
-                )}
-              >
-                {counts[key]}
-              </span>
-              {t(label)}
-            </span>
-          ))}
-        </div>
-      )}
-      {daily && groups.length === 0 && (
-        <p
-          data-enso="secretary-daily-empty"
-          className="px-1.5 py-6 text-center text-[12.5px] text-subtle-foreground"
-        >
-          {t('Nothing happened this day')}
-        </p>
-      )}
-      {groups.map((group) => (
-        <DailyGroupSection key={group.key} group={group} />
-      ))}
+      <div
+        data-enso="secretary-daily-board"
+        className="flex flex-col gap-2.5 @[560px]:flex-row @[560px]:items-start @[560px]:overflow-x-auto @[560px]:pb-1"
+      >
+        {COLUMNS.filter((column) => column.key !== 'running' || daily?.today !== false).map(
+          (column) => (
+            <DailyColumn
+              key={column.key}
+              column={column}
+              items={itemsOf(column.key)}
+              folded={folded.has(column.key)}
+              onToggleFold={() => toggleFold(column.key)}
+            />
+          )
+        )}
+      </div>
       {daily?.earliest && (
         <p
           data-enso="secretary-daily-earliest"

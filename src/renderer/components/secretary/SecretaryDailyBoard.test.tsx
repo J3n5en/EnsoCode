@@ -96,6 +96,15 @@ function dailyCalls(): string[] {
   return h.calls.filter((call) => call.name === 'daily').map((call) => String(call.args));
 }
 
+/** 列：data-group → 列头计数与卡片数 */
+function columns(): { group: string; count: string; cards: number }[] {
+  return [...container.querySelectorAll('[data-enso="secretary-daily-column"]')].map((node) => ({
+    group: node.getAttribute('data-group') ?? '',
+    count: node.querySelector('[data-enso="secretary-daily-count"]')?.textContent ?? '',
+    cards: node.querySelectorAll('[data-enso="secretary-daily-card"]').length,
+  }));
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
@@ -132,95 +141,107 @@ afterEach(() => {
 });
 
 describe('SecretaryDailyBoard', () => {
-  it('默认打开今天，顶部一行数字', async () => {
+  it('默认打开今天，列按状态排，列头计数与卡片数一致', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        { key: 'dispatched', items: [item({ id: 'd1', conversationId: 'c2' })] },
+        { key: 'running', items: [item({ id: 'r1', conversationId: 'c3' })] },
+        { key: 'needsYou', items: [item({ id: 'n1', conversationId: 'c4' })] },
+        { key: 'failed', items: [item({ id: 'f1', conversationId: 'c5' })] },
+        {
+          key: 'done',
+          items: [item({ id: 'x1' }), item({ id: 'x2', conversationId: 'c6' })],
+        },
+        { key: 'todos', items: [item({ id: 't1', conversationId: undefined })] },
+        { key: 'changes', items: [item({ id: 'g1', conversationId: undefined })] },
+      ],
+    });
     await render(createElement(SecretaryDailyBoard));
     expect(dailyCalls()).toEqual([TODAY]);
     expect(
       (container.querySelector('[data-enso="secretary-daily-date"]') as HTMLInputElement).value
     ).toBe(TODAY);
-    const counts = [...container.querySelectorAll('[data-enso="secretary-daily-count"]')];
-    expect(counts.map((node) => node.getAttribute('data-key'))).toEqual([
-      'dispatched',
-      'completed',
-      'failed',
-      'needsYou',
-      'todosDone',
-      'merged',
+    expect(columns()).toEqual([
+      { group: 'dispatched', count: '1', cards: 1 },
+      { group: 'running', count: '1', cards: 1 },
+      { group: 'needsYou', count: '1', cards: 1 },
+      { group: 'done', count: '2', cards: 2 },
+      { group: 'failed', count: '1', cards: 1 },
+      { group: 'todos', count: '1', cards: 1 },
+      { group: 'changes', count: '1', cards: 1 },
     ]);
-    expect(counts.map((node) => node.textContent)).toEqual([
-      '2[Dispatched]',
-      '1[Completed]',
-      '0[Failed]',
-      '1[Needed you]',
-      '3[To-dos done]',
-      '1[Merged]',
-    ]);
+    expect(text('[data-enso="secretary-daily-stat"]')).toBe('2/8');
   });
 
-  it('当天没有事件就一行「这天没有动静」', async () => {
-    h.daily[TODAY] = daily({
-      groups: [],
-      counts: {
-        dispatched: 0,
-        completed: 0,
-        failed: 0,
-        needsYou: 0,
-        todosDone: 0,
-        merged: 0,
-      },
-    });
+  it('空列照 kanban 显示图标和「暂无卡片」，不是整块隐藏', async () => {
+    h.daily[TODAY] = daily({ groups: [] });
     await render(createElement(SecretaryDailyBoard));
-    expect(text('[data-enso="secretary-daily-empty"]')).toBe('[Nothing happened this day]');
-    expect(container.querySelector('[data-enso="secretary-daily-group"]')).toBeNull();
-  });
-
-  it('每组收起只露三条，展开看全部', async () => {
-    const items = Array.from({ length: 5 }, (_, index) =>
-      item({ id: `row${index}`, title: `任务 ${index}`, conversationId: `c${index}` })
+    expect(columns().every((column) => column.count === '0' && column.cards === 0)).toBe(true);
+    expect(container.querySelectorAll('[data-enso="secretary-daily-empty-column"]')).toHaveLength(
+      7
     );
-    h.daily[TODAY] = daily({ groups: [{ key: 'done', items }] });
-    await render(createElement(SecretaryDailyBoard));
-    expect(container.querySelectorAll('[data-enso="secretary-daily-item"]')).toHaveLength(3);
-    expect(text('[data-enso="secretary-daily-more"]')).toBe('Show all 5');
-    click('[data-enso="secretary-daily-more"]');
-    expect(container.querySelectorAll('[data-enso="secretary-daily-item"]')).toHaveLength(5);
-    expect(text('[data-enso="secretary-daily-more"]')).toBe('[Collapse]');
+    expect(text('[data-enso="secretary-daily-empty-column"]')).toBe('[No cards yet]');
+    expect(text('[data-enso="secretary-daily-stat"]')).toBe('0/0');
   });
 
-  it('点行主体展开详情，右侧图标才打开会话', async () => {
+  it('历史日期没有「进行中」列：实时状态只在今天成立', async () => {
+    await render(createElement(SecretaryDailyBoard));
+    expect(columns().map((column) => column.group)).toContain('running');
+    click('[data-enso="secretary-daily-prev"]');
+    await flush();
+    expect(columns().map((column) => column.group)).not.toContain('running');
+  });
+
+  it('点卡片展开全文，点会话徽标才跳转', async () => {
     await render(createElement(SecretaryDailyBoard));
     const expand = () => container.querySelector('[data-enso="secretary-daily-expand"]');
     expect(expand()?.getAttribute('aria-expanded')).toBe('false');
-    expect(container.querySelector('[data-enso="secretary-daily-refs"]')).toBeNull();
     click('[data-enso="secretary-daily-expand"]');
     expect(expand()?.getAttribute('aria-expanded')).toBe('true');
-    expect(text('[data-enso="secretary-daily-refs"]')).toContain('feat/login');
-    expect(text('[data-enso="secretary-daily-refs"]')).toContain('a1b2c3d4');
+    expect(text('[data-enso="secretary-daily-card"]')).toContain('branch: feat/login');
     expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
     click('[data-enso="secretary-daily-open"]');
     expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
   });
 
-  it('汇报里认不出提交号就不显示，也不留空位', async () => {
+  it('分支与提交号有就显示成徽标，没有就不留空位', async () => {
+    await render(createElement(SecretaryDailyBoard));
+    expect(text('[data-enso="secretary-daily-branch"]')).toBe('feat/login');
+    expect(text('[data-enso="secretary-daily-commit"]')).toBe('a1b2c3d4');
     h.daily[TODAY] = daily({
       groups: [
         {
           key: 'done',
-          items: [
-            item({
-              detail: '只改了样式',
-              summary: '只改了样式',
-              branch: undefined,
-              commit: undefined,
-            }),
-          ],
+          items: [item({ branch: undefined, commit: undefined, detail: '只改了样式' })],
         },
       ],
     });
+    await act(async () => {
+      for (const listener of h.stateListeners) listener();
+    });
+    await flush();
+    expect(container.querySelector('[data-enso="secretary-daily-branch"]')).toBeNull();
+    expect(container.querySelector('[data-enso="secretary-daily-commit"]')).toBeNull();
+  });
+
+  it('没有会话的卡片不显示跳转徽标', async () => {
+    h.daily[TODAY] = daily({
+      groups: [{ key: 'todos', items: [item({ conversationId: undefined, label: 'Added' })] }],
+    });
     await render(createElement(SecretaryDailyBoard));
-    click('[data-enso="secretary-daily-expand"]');
-    expect(container.querySelector('[data-enso="secretary-daily-refs"]')).toBeNull();
-    expect(text('[data-enso="secretary-daily-item"]')).not.toContain('a1b2c3d4');
+    expect(container.querySelector('[data-enso="secretary-daily-open"]')).toBeNull();
+  });
+
+  it('列头可以折叠，再点展开', async () => {
+    await render(createElement(SecretaryDailyBoard));
+    const fold = () =>
+      container.querySelector('[data-group="done"] [data-enso="secretary-daily-fold"]');
+    expect(fold()?.getAttribute('aria-expanded')).toBe('true');
+    click('[data-group="done"] [data-enso="secretary-daily-fold"]');
+    expect(fold()?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-enso="secretary-daily-card"]')).toBeNull();
+    click('[data-group="done"] [data-enso="secretary-daily-fold"]');
+    expect(container.querySelector('[data-enso="secretary-daily-card"]')).not.toBeNull();
   });
 
   it('选中的是今天时跟着状态推送自动刷新', async () => {
@@ -248,11 +269,12 @@ describe('SecretaryDailyBoard', () => {
     expect(dailyCalls()).toEqual([TODAY, YESTERDAY, TODAY]);
   });
 
-  it('组为空就不显示整组', async () => {
+  it('组为空时列还在，只是没有卡片', async () => {
     const groups: SecretaryDailyGroup[] = [{ key: 'failed', items: [item({ label: 'Failed' })] }];
     h.daily[TODAY] = daily({ groups });
     await render(createElement(SecretaryDailyBoard));
-    const rendered = [...container.querySelectorAll('[data-enso="secretary-daily-group"]')];
-    expect(rendered.map((node) => node.getAttribute('data-group'))).toEqual(['failed']);
+    expect(columns()).toHaveLength(7);
+    expect(columns().find((column) => column.group === 'failed')?.cards).toBe(1);
+    expect(columns().find((column) => column.group === 'done')?.cards).toBe(0);
   });
 });
