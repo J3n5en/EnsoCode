@@ -52,7 +52,10 @@ export function classify(
       if (event.aborted) return null;
       if (status.pendingAsks + status.pendingApprovals > 0) return 'needs-user';
       const goal = event.goalStatus ?? (record.goal ? 'active' : undefined);
-      if (goal === undefined) return 'turn-ended';
+      // 目标完成后目标已撤下；host 先把 turn 加一再分类，所以本轮的完成记在 turn - 1
+      const completedThisTurn =
+        record.lastResult?.kind === 'goal-complete' && record.lastResult.turn === record.turn - 1;
+      if (goal === undefined) return completedThisTurn ? null : 'turn-ended';
       // 完成与受阻由目标信号报过；轮次结束时只有安全限制暂停是新信息
       return goal === 'paused' ? 'goal-blocked' : null;
     }

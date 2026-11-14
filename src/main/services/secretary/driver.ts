@@ -216,7 +216,9 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         return;
       }
       if (event.type === 'goal-signal') {
-        save(conversationId, applyHeadlessGoalSignal(runtime, event.kind, event.note));
+        // 与桌面会话一致：完成即撤下目标；共享的 headless 逻辑保留 completed 给手机端与 server run
+        const next = applyHeadlessGoalSignal(runtime, event.kind, event.note);
+        save(conversationId, event.kind === 'complete' ? { ...next, goal: undefined } : next);
         return;
       }
       if (event.type === 'turn-failed') {

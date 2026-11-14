@@ -187,6 +187,18 @@ describe('派出会话的结果记录', () => {
     expect(paused.state.file.outbox[0]).toMatchObject({ kind: 'goal-blocked' });
   });
 
+  it('目标完成后同一轮结束只留完成，不再补一条 turn-ended', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['goal-complete']);
+
+    // 下一轮再结束就是新结果：未投递的同会话回传只留最新一条
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
+  });
+
   it('worker 退出记失败', () => {
     const h = harness({});
     h.state.statuses.c1 = error;

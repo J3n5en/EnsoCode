@@ -100,7 +100,8 @@ describe('派出会话的目标续跑', () => {
     expect(goalOf(h)).toMatchObject({ status: 'active', autoTurns: 1, noProgressRuns: 0 });
 
     h.driver.observe(goalSignal('complete', 'shipped'));
-    expect(goalOf(h)).toMatchObject({ status: 'completed', note: 'shipped' });
+    // 与桌面会话一致：完成即撤下目标，界面不留一条「已完成」
+    expect(goalOf(h)).toBeUndefined();
 
     h.driver.observe(turnCompleted(digest('step two')));
     expect(h.prompts).toHaveLength(1);

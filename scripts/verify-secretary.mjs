@@ -502,6 +502,44 @@ async function run(cdp) {
   assert(card.openable, 'step4: 回传卡片能打开派出的会话', card);
   await cdp.shot(path.join(ART, '04-secretary-updates.png'));
 
+  log('== step6 目标完成');
+  const goalSet = await page(`
+    return JSON.stringify(
+      await window.electronAPI.secretary.goalAction({
+        conversationId: ${JSON.stringify(dispatchedId)},
+        action: 'set',
+        text: '收尾 [[tool:goal_complete {"summary":"hello.txt 已写好"}]]',
+      })
+    );
+  `);
+  assert(goalSet.ok, 'step6: 派出会话设上目标', goalSet);
+  const goalDone = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[dispatchedId];
+      return record?.lastResult?.kind === 'goal-complete' && record.lastState === 'idle'
+        ? record
+        : null;
+    },
+    'goal-complete recorded',
+    60_000,
+    500
+  ).catch(() => null);
+  assert(Boolean(goalDone), 'step6: 派出会话报了目标完成', readJson(dispatchFile).dispatched);
+  await delay(1500);
+  const goalRow = await page(`
+    return JSON.stringify({ goal: S().conversations[${JSON.stringify(dispatchedId)}]?.goal ?? null });
+  `);
+  assert(goalRow.goal === null, 'step6: 目标完成后界面不再挂着目标条', goalRow);
+  assert(!conversationsIn()?.[dispatchedId]?.goal, 'step6: 落盘的会话行也撤下了目标');
+  const goalOutbox = readJson(dispatchFile).outbox.filter(
+    (update) => update.conversationId === dispatchedId
+  );
+  assert(
+    !goalOutbox.some((update) => update.kind === 'turn-ended'),
+    'step6: 完成之后没有再补一条 turn-ended',
+    goalOutbox
+  );
+
   log('== step5 并发确认');
   const secondProposal = await page(`
     const secretary = await SEC();
