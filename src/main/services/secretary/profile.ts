@@ -35,6 +35,7 @@ export interface SecretaryProfilePorts {
   todos(): MaybePromise<SecretaryTodo[]>;
   schedules(): SecretarySchedule[];
   saveSchedules(schedules: SecretarySchedule[]): void;
+  publish(): void;
   /** 秘书项目里的根会话：档案改了模型或身份后要逐个处理 */
   conversations(): MaybePromise<{ conversationId: string }[]>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
@@ -292,6 +293,7 @@ export const secretaryProfilePorts: SecretaryProfilePorts = {
   saveSchedules: (schedules) => {
     store().saveSchedules(schedules);
   },
+  publish: () => notifySecretaryChanged(),
   conversations: async () => {
     const { secretaryProjectId } = await import('./identity');
     const projectId = secretaryProjectId();

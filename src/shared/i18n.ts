@@ -3386,6 +3386,7 @@ export const zhTranslations: Record<string, string> = {
   'To add a schedule, just tell {{name}}': '想加定时，直接跟{{name}}说',
   'Every day at {{time}}': '每天 {{time}}',
   'Next: {{time}}': '下次：{{time}}',
+  'Last run {{time}}': '上次：{{time}}',
   'From a to-do': '来自待办',
   'One-off': '一次性',
   Workbench: '工作台',

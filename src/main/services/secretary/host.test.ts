@@ -462,6 +462,24 @@ describe('定时', () => {
     ]);
   });
 
+  it('启动时只跳过错过的 cron 也推送面板刷新上次运行时间', () => {
+    const h = harness({ file: { dispatched: {} } });
+    h.state.schedules = [cronSchedule()];
+    h.state.now = localAt(10);
+    h.host.recover();
+    expect(h.state.schedules[0]).toMatchObject({ lastFiredAt: localAt(10) });
+    expect(h.state.published).toBe(1);
+  });
+
+  it('每分钟重算出新的系统定时也推送面板刷新', () => {
+    const h = harness({ file: { dispatched: {} } });
+    h.state.briefAt = '09:00';
+    h.state.now = localAt(8);
+    h.host.tick(localAt(8));
+    expect(h.state.schedules).toHaveLength(1);
+    expect(h.state.published).toBe(1);
+  });
+
   it('每日简报按档案生成，到点后进队列', () => {
     const h = harness({});
     h.state.briefAt = '09:00';

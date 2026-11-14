@@ -93,6 +93,7 @@ function harness(
     saveSchedules: (schedules) => {
       h.schedules = schedules;
     },
+    publish: () => undefined,
     conversations: async () =>
       conversations.map((conversationId) => ({
         conversationId,
