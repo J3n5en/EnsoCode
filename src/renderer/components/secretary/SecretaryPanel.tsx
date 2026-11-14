@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { SecretaryAvatar } from './SecretaryAvatar';
 import { SecretaryMemoryPanel } from './SecretaryMemoryPanel';
+import { SecretaryRunningList } from './SecretaryRunningList';
 import { SecretarySchedulePanel } from './SecretarySchedulePanel';
 import { SecretaryWorkbench } from './SecretaryWorkbench';
 import { SecretarySummary, secretarySectionView } from './secretaryView';
@@ -23,6 +24,7 @@ export function SecretaryPanel() {
   const { t } = useI18n();
   const secretary = useSecretaryStore((state) => state.secretary);
   const [tab, setTab] = useState<Tab>('workbench');
+  const [runningOpen, setRunningOpen] = useState(false);
   const [schedules, setSchedules] = useState<SecretaryScheduleView[]>([]);
   const loadSchedules = useCallback(() => {
     void window.electronAPI.secretary.listSchedules().then((result) => {
@@ -61,7 +63,11 @@ export function SecretaryPanel() {
             data-enso="secretary-summary"
             className="flex min-w-0 items-center truncate text-[11.5px] text-muted-foreground"
           >
-            <SecretarySummary view={view} />
+            <SecretarySummary
+              view={view}
+              runningExpanded={runningOpen}
+              onToggleRunning={() => setRunningOpen((value) => !value)}
+            />
           </p>
         </div>
         <button
@@ -117,6 +123,7 @@ export function SecretaryPanel() {
         data-enso="secretary-panel-scroll"
         className="relative flex min-h-0 flex-1 flex-col overflow-y-auto"
       >
+        {runningOpen && <SecretaryRunningList />}
         {tab === 'workbench' && <SecretaryWorkbench name={view.name} />}
         {tab === 'memory' && <SecretaryMemoryPanel />}
         {tab === 'schedules' && (

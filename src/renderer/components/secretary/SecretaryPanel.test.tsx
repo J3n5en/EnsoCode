@@ -1,7 +1,7 @@
 import { feedEvents, pageFeed } from '@shared/secretary/feed';
 import type { SecretaryBoard, SecretaryCard, SecretaryProposal } from '@shared/types/secretary';
 import { parseHTML } from 'linkedom';
-import { act, type ReactElement } from 'react';
+import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -37,6 +37,7 @@ vi.mock('@/stores/secretary', () => ({
 }));
 
 const { SecretaryPanel } = await import('./SecretaryPanel');
+const { SecretaryRunningList } = await import('./SecretaryRunningList');
 
 const NOW = new Date(2024, 4, 15, 15, 0).getTime();
 
@@ -356,6 +357,117 @@ describe('SecretaryPanel', () => {
       name: 'mutateTodo',
       args: { action: 'reopen', todoId: 't1' },
     });
+  });
+
+  it('进行中数字点开列出会话，条数与数字一致', async () => {
+    h.board = h.secretary.board = board({
+      running: [
+        sessionCard('c1', { title: '跑全量测试' }),
+        sessionCard('c2', {
+          title: '等构建',
+          state: 'idle',
+          continuing: true,
+          backgroundRunning: true,
+        }),
+        sessionCard('c3', { title: '接管的活', state: 'idle', continuing: true, takeover: true }),
+      ],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    expect(text('[data-enso="secretary-summary"]')).toContain('3 running');
+    expect(container.querySelector('[data-enso="secretary-running"]')).toBeNull();
+
+    click('[data-enso="secretary-running-toggle"]');
+    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    expect(rows).toHaveLength(3);
+    expect(text('[data-enso="secretary-running"]')).toContain('[In progress]3');
+    expect(rows[0].textContent).toContain('[Running]');
+    expect(rows[0].textContent).toContain('跑全量测试');
+    expect(rows[0].textContent).toContain('enso-code');
+    expect(rows[1].textContent).toContain('[Waiting on a background task]');
+    expect(rows[2].textContent).toContain('[Continuing]');
+    expect(rows[2].querySelector('[data-enso="secretary-running-takeover"]')?.textContent).toBe(
+      '[Taken over]'
+    );
+    expect(rows[0].querySelector('[data-enso="secretary-running-takeover"]')).toBeNull();
+    expect(rows[0].getAttribute('data-open')).toBe('false');
+  });
+
+  it('已完成或出错的会话不进进行中列表', async () => {
+    h.board = h.secretary.board = board({
+      running: [sessionCard('c1', { title: '在跑的活' })],
+      done: [
+        sessionCard('c2', {
+          title: '做完的活',
+          state: 'idle',
+          result: 'goal-complete',
+          resultAt: NOW - 1000,
+        }),
+        sessionCard('c3', {
+          title: '挂掉的活',
+          state: 'error',
+          result: 'failed',
+          resultAt: NOW - 1000,
+        }),
+      ],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-running-toggle"]');
+    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    expect(rows).toHaveLength(1);
+    const list = container.querySelector('[data-enso="secretary-running"]')?.textContent ?? '';
+    expect(list).toContain('在跑的活');
+    expect(list).not.toContain('做完的活');
+    expect(list).not.toContain('挂掉的活');
+  });
+
+  it('进行中行点主体只展开，右侧图标才打开会话', async () => {
+    h.board = h.secretary.board = board({
+      running: [sessionCard('c1', { title: '跑全量测试', lastText: '第 3 步' })],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-running-toggle"]');
+    const expand = () => container.querySelector('[data-enso="secretary-running-expand"]');
+    const row = () => container.querySelector('[data-enso="secretary-running-row"]');
+    expect(expand()?.getAttribute('aria-expanded')).toBe('false');
+    expect(row()?.textContent).not.toContain('Started ');
+
+    click('[data-enso="secretary-running-expand"]');
+    expect(expand()?.getAttribute('aria-expanded')).toBe('true');
+    expect(row()?.getAttribute('data-open')).toBe('true');
+    expect(row()?.textContent).toContain('Started ');
+    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
+
+    click('[data-enso="secretary-running-open"]');
+    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(expand()?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('没有进行中的会话时给一行空状态', async () => {
+    await render(createElement(SecretaryRunningList));
+    await flush();
+    expect(text('[data-enso="secretary-running"]')).toBe('[In progress]0[Nothing running]');
+    expect(container.querySelector('[data-enso="secretary-running-row"]')).toBeNull();
+  });
+
+  it('Main 推送新状态后展开的列表跟着变', async () => {
+    h.board = h.secretary.board = board({ running: [sessionCard('c1', { title: '第一件' })] });
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-running-toggle"]');
+    expect(container.querySelectorAll('[data-enso="secretary-running-row"]')).toHaveLength(1);
+
+    h.board = h.secretary.board = board({
+      running: [sessionCard('c1', { title: '第一件' }), sessionCard('c2', { title: '第二件' })],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    expect(rows).toHaveLength(2);
+    expect(text('[data-enso="secretary-running"]')).toContain('[In progress]2');
+    expect(text('[data-enso="secretary-summary"]')).toContain('2 running');
   });
 
   it('标签切到记忆与定时，定时分系统与秘书定的两组', async () => {
