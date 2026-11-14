@@ -662,7 +662,7 @@ export default function App() {
               <div
                 data-enso="main"
                 className={cn(
-                  'flex min-h-0 min-w-0 flex-1 flex-col bg-background',
+                  'relative flex min-h-0 min-w-0 flex-1 flex-col bg-background',
                   desktopShell && 'overflow-hidden rounded-[10px] shadow-surface',
                   // 与右侧面板合成一张卡：接缝处直角，分割靠 1px 手柄线
                   sideInTitleRow && 'rounded-r-none'
@@ -683,6 +683,8 @@ export default function App() {
                 </ShellChromeContext.Provider>
                 {desktopShell && <UpdateBanner />}
                 {desktopShell && <ZoomBanner />}
+                {/* 初次设置只盖聊天区；远端浏览器（PWA 完整模式）同样走这条路径 */}
+                {secretaryEnabled && secretaryWelcomeOpen && <SecretaryWelcome />}
               </div>
               {sideOpen && !sideFullscreen && !isMobile && (
                 <ResizeHandle
@@ -697,8 +699,6 @@ export default function App() {
                 card={desktopShell}
                 titleRow={titleRowPanel}
               />
-              {/* 初次设置盖住主区域；远端浏览器（PWA 完整模式）同样走这条路径 */}
-              {secretaryEnabled && secretaryWelcomeOpen && <SecretaryWelcome />}
             </div>
           </DndContext>
         )}

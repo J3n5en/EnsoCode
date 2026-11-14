@@ -778,6 +778,23 @@ async function run(cdp, pluginZipUrl) {
   assert(board.tabs?.join(',') === 'workbench,memory,schedules', '秘书面板三个标签', board.tabs);
   await cdp.shot(path.join(ART, '05-workbench.png'));
 
+  const welcome = await page(`
+    const secretary = await SEC();
+    secretary.getState().openWelcome();
+    await new Promise((r) => setTimeout(r, 300));
+    const main = document.querySelector('[data-enso="main"]');
+    const heading = [...document.querySelectorAll('h2')].find((h) => h.textContent.includes('设置你的秘书'));
+    const side = document.querySelector('[data-enso="secretary-panel"]');
+    const out = { shown: Boolean(heading), inMain: Boolean(heading && main?.contains(heading)), sideVisible: Boolean(side && side.getBoundingClientRect().width > 0) };
+    secretary.getState().closeWelcome();
+    return JSON.stringify(out);
+  `);
+  assert(
+    welcome.shown && welcome.inMain && welcome.sideVisible,
+    '初次设置页只盖聊天区，右侧面板仍在',
+    welcome
+  );
+
   log('== step7 worker 退出');
   const restarted = await page(`
     return JSON.stringify(await window.electronAPI.caCert.apply('/etc/ssl/cert.pem'));
