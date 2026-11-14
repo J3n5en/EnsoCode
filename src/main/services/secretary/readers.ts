@@ -173,12 +173,21 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
         path: redactSecrets(project.canonicalPath),
         lastActivityAt: lastActivity(sessions, project.projectId),
       }));
-      rows.sort(
+      const withGit: Array<
+        (typeof rows)[number] & { git?: { branch: string | null; dirty: boolean } }
+      > = [];
+      for (const row of rows) {
+        const project = projects.find((candidate) => candidate.projectId === row.projectId);
+        const git =
+          project && project.kind !== 'ssh' ? await ports.git(project.canonicalPath) : null;
+        withGit.push(git ? { ...row, git } : row);
+      }
+      withGit.sort(
         (left, right) =>
           (right.lastActivityAt ?? 0) - (left.lastActivityAt ?? 0) ||
           left.name.localeCompare(right.name)
       );
-      return { ok: true, result: { projects: rows } };
+      return { ok: true, result: { projects: withGit } };
     },
 
     async project_info(params) {

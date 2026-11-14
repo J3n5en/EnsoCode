@@ -80,6 +80,7 @@ import { diffCacheKey } from '@/lib/diffCacheKey';
 import { parseMcpToolName } from '@/lib/mcpToolName';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { stripAnsi } from '@/lib/terminalText';
+import { usesToolCard } from '@/lib/toolCards';
 import { SUBAGENT_OP_LABEL_KEYS, TOOL_LABEL_KEYS, toolLabel } from '@/lib/toolLabels';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -131,6 +132,7 @@ import { SubagentResult } from './SubagentResult';
 import { parseSubagentReceipt } from './subagentReceipt';
 import { TerminalOutput } from './TerminalOutput';
 import { TodoList, TodoProgress } from './TodoBar';
+import { ToolCallCards } from './ToolCallCard';
 import { TurnWaterfallPanel, useTurnHasTiming } from './TurnWaterfallPanel';
 import { useToolHold } from './toolHold';
 import { ZoomableImage } from './ZoomableImage';
@@ -223,7 +225,9 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         JSON.stringify(a.subagentTitles) === JSON.stringify(b.subagentTitles) &&
         a.waiting === b.waiting &&
         a.pluginArtifacts === b.pluginArtifacts &&
-        a.shellFailure === b.shellFailure
+        a.shellFailure === b.shellFailure &&
+        JSON.stringify(a.args ?? null) === JSON.stringify(b.args ?? null) &&
+        JSON.stringify(a.cardPeers ?? null) === JSON.stringify(b.cardPeers ?? null)
       );
     case 'tool-group':
       return (
@@ -1051,7 +1055,8 @@ export const TimelineRow = memo(function TimelineRow({
       return (
         <>
           <PluginToolCardSlot name={item.name} output={item.output} state={item.state} />
-          {proposalId ? <SecretaryProposalRow proposalId={proposalId} /> : <ToolRow item={item} />}
+          {usesToolCard(item.name) ? <ToolCallCards item={item} /> : <ToolRow item={item} />}
+          {proposalId ? <SecretaryProposalRow proposalId={proposalId} /> : null}
           {item.pluginArtifacts ? <PluginArtifactsCard artifacts={item.pluginArtifacts} /> : null}
         </>
       );

@@ -732,7 +732,10 @@ describe('待办', () => {
       dueAt: 5_000,
       projectId: 'p1',
     });
-    expect(result).toEqual({ ok: true, result: { todoId: 'id-1' } });
+    expect(result).toEqual({
+      ok: true,
+      result: { todoId: 'id-1', text: '看构建', dueAt: 5_000, projectId: 'p1' },
+    });
     expect(h.todos).toEqual([
       { id: 'id-1', text: '看构建', dueAt: 5_000, projectId: 'p1', createdAt: NOW, updatedAt: NOW },
     ]);
@@ -748,7 +751,14 @@ describe('待办', () => {
       text: '看发布',
       done: true,
     });
-    expect(result).toEqual({ ok: true, result: { todoId: 't1' } });
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        todoId: 't1',
+        before: { text: '看构建', done: false },
+        after: { text: '看发布', done: true },
+      },
+    });
     expect(h.todos).toEqual([
       { id: 't1', text: '看发布', createdAt: 1, updatedAt: NOW, doneAt: NOW },
     ]);

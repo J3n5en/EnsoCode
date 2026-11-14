@@ -234,7 +234,7 @@ describe('schedule_list 与 schedule_remove', () => {
   it('删除用户条目并审计', () => {
     const h = harness([once()], at(9));
     const result = removeSchedule(h.ports, 's1', { secretaryConversationId: 'sec1' });
-    expect(result).toEqual({ ok: true, result: { scheduleId: 's1' } });
+    expect(result).toEqual({ ok: true, result: { scheduleId: 's1', name: '提醒' } });
     expect(h.state.schedules).toEqual([]);
     expect(h.state.audit[0]).toMatchObject({ op: 'schedule_remove', ok: true, targetId: 's1' });
     expect(h.state.published).toBe(1);

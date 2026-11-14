@@ -257,9 +257,60 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
         detail: 'awaiting_confirmation',
       });
       ports.notify();
-      return { ok: true, result: { status: 'awaiting_confirmation', proposalId: id } };
+      return {
+        ok: true,
+        result: {
+          status: 'awaiting_confirmation',
+          proposalId: id,
+          changes: profileChanges(ports.profile(), ports.persona(), parsed.draft),
+        },
+      };
     },
   };
+}
+
+function stable(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? null);
+  } catch {
+    return String(value);
+  }
+}
+
+/** 提案当时的旧值。确认之后档案会变，卡片不能再去读当前档案。 */
+function profileChanges(
+  before: SecretaryProfile | null,
+  persona: string,
+  draft: SecretaryProfileDraft
+): { field: string; before: unknown; after: unknown }[] {
+  const rows: { field: string; before: unknown; after: unknown }[] = [];
+  const put = (field: string, prev: unknown, next: unknown) => {
+    if (stable(prev) === stable(next)) return;
+    rows.push({ field, before: prev ?? null, after: next ?? null });
+  };
+  if (draft.name !== undefined) put('name', before?.name ?? null, draft.name);
+  if (draft.avatar?.color) put('avatarColor', before?.avatar.color ?? null, draft.avatar.color);
+  if ('model' in draft) put('model', before?.model ?? null, draft.model ?? null);
+  if (draft.autonomy) put('autonomy', before?.autonomy ?? null, draft.autonomy);
+  if (draft.autoApproveProjectIds) {
+    put('autoApproveProjectIds', before?.autoApproveProjectIds ?? [], draft.autoApproveProjectIds);
+  }
+  if (draft.visibleProjectIds)
+    put('visibleProjectIds', before?.visibleProjectIds ?? null, draft.visibleProjectIds);
+  if (draft.dispatchModel) put('dispatchModel', before?.dispatchModel ?? null, draft.dispatchModel);
+  if (draft.dispatchWorktree)
+    put('dispatchWorktree', before?.dispatchWorktree ?? null, draft.dispatchWorktree);
+  if (draft.maxRunningDispatches !== undefined) {
+    put('maxRunningDispatches', before?.maxRunningDispatches ?? null, draft.maxRunningDispatches);
+  }
+  if ('addressAs' in draft) put('addressAs', before?.addressAs ?? null, draft.addressAs ?? null);
+  if (draft.replyLanguage) put('replyLanguage', before?.replyLanguage ?? null, draft.replyLanguage);
+  if (draft.style) put('style', before?.style ?? null, draft.style);
+  if (draft.notify) put('notify', before?.notify ?? null, draft.notify);
+  if ('dailyBriefAt' in draft)
+    put('dailyBriefAt', before?.dailyBriefAt ?? null, draft.dailyBriefAt ?? null);
+  if (draft.persona !== undefined) put('persona', persona || null, draft.persona);
+  return rows;
 }
 
 function secretaryDir(): string {
