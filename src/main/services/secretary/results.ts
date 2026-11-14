@@ -362,6 +362,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
         ? { result: record.lastResult.kind, resultAt: record.lastResult.at }
         : {}),
       ...(going && state !== 'running' ? { continuing: true as const } : {}),
+      ...(going && record.backgroundRunning ? { backgroundRunning: true as const } : {}),
       ...(record.takeover ? { takeover: true as const } : {}),
     };
     const needsYouNow = sessionNeedsUser(record, state);

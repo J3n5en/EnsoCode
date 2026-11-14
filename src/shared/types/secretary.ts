@@ -301,6 +301,8 @@ export type SecretaryCard =
       resultAt?: number;
       /** 会话不在跑，但目标还要续或还在等后台任务。动态不能再显示上一轮的完成 */
       continuing?: true;
+      /** 会话空闲但还有没结束的后台任务：进行中列表要把它和续跑区分开 */
+      backgroundRunning?: true;
       secretaryConversationId: string;
       unread?: boolean;
       takeover?: true;

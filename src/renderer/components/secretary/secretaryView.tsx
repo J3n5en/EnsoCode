@@ -32,8 +32,19 @@ export function secretarySectionView(
   };
 }
 
-/** 一行摘要：等你的那份用警告色强调，都在闲时说一句没有在跑的活 */
-export function SecretarySummary({ view }: { view: SecretarySectionView }) {
+/**
+ * 一行摘要：等你的那份用警告色强调，都在闲时说一句没有在跑的活。
+ * 传了 onToggleRunning 时「进行中 N」是可点的展开开关（秘书面板），侧栏不传就只是文字。
+ */
+export function SecretarySummary({
+  view,
+  runningExpanded,
+  onToggleRunning,
+}: {
+  view: SecretarySectionView;
+  runningExpanded?: boolean;
+  onToggleRunning?: () => void;
+}) {
   const { t } = useI18n();
   if (!view.configured) return <>{t('Click to finish setup')}</>;
   if (view.needsYou === 0 && view.running === 0) return <>{t('Nothing running')}</>;
@@ -45,9 +56,20 @@ export function SecretarySummary({ view }: { view: SecretarySectionView }) {
         </span>
       )}
       {view.needsYou > 0 && view.running > 0 && ' · '}
-      {view.running > 0 && (
-        <span className="shrink-0">{t('{{n}} running', { n: view.running })}</span>
-      )}
+      {view.running > 0 &&
+        (onToggleRunning ? (
+          <button
+            type="button"
+            data-enso="secretary-running-toggle"
+            aria-expanded={runningExpanded ?? false}
+            onClick={onToggleRunning}
+            className="shrink-0 rounded px-0.5 transition-colors hover:text-foreground"
+          >
+            {t('{{n}} running', { n: view.running })}
+          </button>
+        ) : (
+          <span className="shrink-0">{t('{{n}} running', { n: view.running })}</span>
+        ))}
     </>
   );
 }
