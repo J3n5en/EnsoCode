@@ -795,4 +795,22 @@ describe('定时', () => {
     h.host.tick(1_000);
     expect(h.state.file.dispatched.c1.lastState).toBe('running');
   });
+
+  it('目标完成收口后，残留的后台任务记录一并清掉', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.backgroundRunning = true;
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult?.kind).toBe('goal-complete');
+    expect(h.state.file.dispatched.c1.backgroundRunning).toBeUndefined();
+  });
+
+  it('会话报错后，残留的后台任务记录一并清掉', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.backgroundRunning = true;
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'running'));
+    expect(h.state.file.dispatched.c1.backgroundRunning).toBeUndefined();
+  });
 });

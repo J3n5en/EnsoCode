@@ -66,6 +66,7 @@ const profile = (overrides: Partial<SecretaryProfile> = {}): SecretaryProfile =>
 });
 
 const idle: SecretarySessionStatus = { state: 'idle', pendingAsks: 0, pendingApprovals: 0 };
+const running: SecretarySessionStatus = { state: 'running', pendingAsks: 0, pendingApprovals: 0 };
 
 const emptyFile = (): SecretaryDispatchFile => ({
   version: 1,
@@ -312,6 +313,12 @@ describe('session_create', () => {
     const h = harness({
       file,
       profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      rows: {
+        a: { title: 'a', sessionFile: '/a' },
+        b: { title: 'b', sessionFile: '/b' },
+        c: { title: 'c', sessionFile: '/c' },
+      },
+      statuses: { a: running, b: running, c: running },
     });
     const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
     expect(result).toEqual({ ok: false, error: 'dispatch-limit' });
@@ -338,7 +345,7 @@ describe('session_create', () => {
       turn: 1,
       lastState: 'idle',
       lastEventAt: 1,
-      lastResult: { kind: 'turn-ended', turn: 1, at: 1 },
+      backgroundRunning: true,
     };
     const blocked = harness({
       file: waiting,
@@ -348,7 +355,7 @@ describe('session_create', () => {
         maxRunningDispatches: 1,
       }),
       rows: {
-        a: { title: '等 CI', sessionFile: '/a', goal: { status: 'waiting', text: '等 CI' } },
+        a: { title: '等后台', sessionFile: '/a', goal: { status: 'waiting', text: '等后台' } },
       },
       statuses: { a: idle },
     });
@@ -362,6 +369,7 @@ describe('session_create', () => {
     const finished = emptyFile();
     finished.dispatched.a = {
       ...waiting.dispatched.a,
+      backgroundRunning: undefined,
       lastResult: { kind: 'goal-complete', turn: 1, at: 1 },
     };
     const open = harness({
@@ -378,6 +386,34 @@ describe('session_create', () => {
     });
     expect(
       await call(open.handlers.session_create, { projectId: 'p1', prompt: '再派一个' })
+    ).toMatchObject({ ok: true, result: { status: 'created' } });
+  });
+
+  it('目标停在 waiting 却已经没有后台任务，不再占派出名额', async () => {
+    const stale = emptyFile();
+    stale.dispatched.a = {
+      conversationId: 'a',
+      projectId: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: 1,
+      turn: 1,
+      lastState: 'idle',
+      lastEventAt: 1,
+    };
+    const h = harness({
+      file: stale,
+      profile: profile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: ['p1'],
+        maxRunningDispatches: 1,
+      }),
+      rows: {
+        a: { title: '等验收', sessionFile: '/a', goal: { status: 'waiting', text: '等验收' } },
+      },
+      statuses: { a: idle },
+    });
+    expect(
+      await call(h.handlers.session_create, { projectId: 'p1', prompt: '再派一个' })
     ).toMatchObject({ ok: true, result: { status: 'created' } });
   });
 
@@ -564,6 +600,16 @@ describe('session_stop', () => {
     expect(h.aborts).toEqual(['c1']);
     expect(h.pausedGoals).toEqual(['c1']);
     expect(h.audits.map((entry) => entry.op)).toEqual(['session_stop']);
+  });
+
+  it('停止后清掉残留的运行中与后台任务记录，不再算在跑', async () => {
+    const file = dispatchedFile();
+    file.dispatched.c1.lastState = 'running';
+    file.dispatched.c1.backgroundRunning = true;
+    const h = harness({ file, rows: { c1: { title: '在跑', sessionFile: '/c1' } } });
+    await call(h.handlers.session_stop, { conversationId: 'c1' });
+    expect(h.file.dispatched.c1.lastState).toBe('idle');
+    expect(h.file.dispatched.c1.backgroundRunning).toBeUndefined();
   });
 
   it('未派出的会话拒绝停止', async () => {
@@ -1056,7 +1102,11 @@ describe('resolveProposal', () => {
       lastState: 'running',
       lastEventAt: 1,
     };
-    const h = harness({ file });
+    const h = harness({
+      file,
+      rows: { a: { title: 'a', sessionFile: '/a' } },
+      statuses: { a: running },
+    });
     const propose = async () =>
       (
         (await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' })) as {

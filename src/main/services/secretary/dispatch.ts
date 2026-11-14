@@ -38,11 +38,9 @@ import { todoDispatchPrompt } from './dispatchBrief';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import {
   buildBoard,
-  goalStatusOf,
+  countsAsRunning,
   linkedTodoSession,
   proposalUpdate,
-  sessionNeedsUser,
-  sessionStillGoing,
   takeoverViews,
 } from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
@@ -226,18 +224,13 @@ async function runningCount(
   let count = 0;
   for (const record of Object.values(file.dispatched)) {
     if (record.takeover) continue;
-    const row = rows[record.conversationId];
-    const status = await ports.status(record.conversationId);
-    const live = row?.sessionFile ? status.state : (status.state ?? record.lastState);
-    const state = !row?.sessionFile && row ? 'not-started' : live;
-    if (sessionNeedsUser(record, state)) continue;
+    // 与顶栏、看板「进行中」同一个判定，三处数字必须一致
     if (
-      sessionStillGoing({
-        state,
-        recordedState: record.lastState,
-        goalStatus: goalStatusOf(row),
-        backgroundRunning: record.backgroundRunning === true,
-      })
+      countsAsRunning(
+        record,
+        rows[record.conversationId],
+        await ports.status(record.conversationId)
+      )
     )
       count += 1;
   }
@@ -716,6 +709,14 @@ export function createSecretaryDispatchHandlers(
       // 接管来的会话自带的目标也一并暂停，免得停下后又被续跑
       const record = file.dispatched[conversationId];
       if (record?.goal || record?.takeover) await ports.pauseGoal(conversationId);
+      // 停下就收口：残留的运行中与后台任务记录会让它一直被算在跑
+      if (record) {
+        if (record.lastState !== 'idle') record.stateSince = ports.now();
+        record.lastState = 'idle';
+        delete record.backgroundRunning;
+        delete record.stalledTurn;
+        ports.saveDispatch(file);
+      }
       const stopped = markTodoProblem(await ports.todos(), conversationId, 'stopped', ports.now());
       if (stopped.changed) ports.saveTodos(stopped.todos);
       ports.audit({
