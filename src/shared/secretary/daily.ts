@@ -159,15 +159,19 @@ function newestFirst(left: SecretaryDailyItem, right: SecretaryDailyItem): numbe
   return right.at - left.at || left.id.localeCompare(right.id);
 }
 
-/** 同一会话同一类结果只留最新一条：一天里重跑多次不该刷屏 */
-function dedupe(items: readonly SecretaryDailyItem[]): SecretaryDailyItem[] {
-  const seen = new Map<string, SecretaryDailyItem>();
-  for (const item of items) {
-    const key = `${item.conversationId ?? item.id}|${item.label ?? ''}`;
-    const previous = seen.get(key);
-    if (!previous || previous.at < item.at) seen.set(key, item);
-  }
-  return [...seen.values()].sort(newestFirst);
+/** 终态结果落哪一列；中间态（turn-ended 之类）不上板 */
+function columnOf(kind: SecretaryResultKind): 'done' | 'failed' | 'needsYou' | null {
+  if (DONE_KINDS.has(kind)) return 'done';
+  if (FAILED_KINDS.has(kind)) return 'failed';
+  if (NEEDS_YOU_KINDS.has(kind)) return 'needsYou';
+  return null;
+}
+
+/** 一个会话当天最后一条终态结果；record 只在 daily.jsonl 里有原文时存在 */
+interface Terminal {
+  at: number;
+  kind: SecretaryResultKind;
+  record?: SecretaryDailyRecord;
 }
 
 /**
@@ -191,56 +195,92 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     };
   };
 
-  const resultItem = (record: SecretaryDailyRecord): SecretaryDailyItem => {
-    const meta = metaOf(record.conversationId, record.projectId);
-    const label = RESULT_LABEL[record.kind];
-    const summary = summarize(record.text);
+  const live = day === dayKey(input.now);
+  const results = input.results.filter((record) => within(record.at) && columnOf(record.kind));
+
+  // 每个会话当天只留一条终态：结果日志按时间升序覆盖，同一会话重跑多次也只留最后一次
+  const terminal = new Map<string, Terminal>();
+  for (const record of [...results].sort((left, right) => left.at - right.at)) {
+    terminal.set(record.conversationId, { at: record.at, kind: record.kind, record });
+  }
+  // 兜底：结果日志里没有这个会话当天的记录（旧版本没写 daily.jsonl），用派发记录的 lastResult
+  for (const record of input.dispatched) {
+    const last = record.lastResult;
+    if (!last || !within(last.at) || terminal.has(record.conversationId)) continue;
+    if (!columnOf(last.kind)) continue;
+    terminal.set(record.conversationId, { at: last.at, kind: last.kind });
+  }
+
+  const sessionCard = (
+    conversationId: string,
+    projectId: string | undefined,
+    at: number,
+    result: Terminal | undefined,
+    dispatchedAt: number | undefined,
+    goal: string | undefined
+  ): SecretaryDailyItem => {
+    const meta = metaOf(conversationId, projectId);
+    const record = result?.record;
+    const label = result ? RESULT_LABEL[result.kind] : undefined;
+    const summary = record ? summarize(record.text) : undefined;
     return {
-      id: `result:${record.conversationId}:${record.kind}:${record.at}`,
-      at: record.at,
-      title: record.title || meta.title || record.conversationId,
+      id: `session:${conversationId}`,
+      at,
+      title: record?.title || meta.title || goal || conversationId,
       ...(meta.projectName ? { projectName: meta.projectName } : {}),
       ...(label ? { label } : {}),
       ...(summary ? { summary } : {}),
-      ...(record.text ? { detail: record.text } : {}),
-      ...(record.branch ? { branch: record.branch } : {}),
-      ...(record.commit ? { commit: record.commit } : {}),
-      conversationId: record.conversationId,
+      ...(record?.text ? { detail: record.text } : {}),
+      ...(record?.branch ? { branch: record.branch } : {}),
+      ...(record?.commit ? { commit: record.commit } : {}),
+      ...(dispatchedAt !== undefined ? { dispatchedAt } : {}),
+      conversationId,
     };
   };
 
-  const results = input.results.filter((record) => within(record.at));
-  const done = dedupe(results.filter((record) => DONE_KINDS.has(record.kind)).map(resultItem));
-  const failed = dedupe(results.filter((record) => FAILED_KINDS.has(record.kind)).map(resultItem));
-  const needsYou = dedupe(
-    results.filter((record) => NEEDS_YOU_KINDS.has(record.kind)).map(resultItem)
-  );
-
-  const dispatchItem = (record: DispatchRecord): SecretaryDailyItem => {
-    const meta = metaOf(record.conversationId, record.projectId);
-    const goal = record.goal?.split('\n')[0]?.trim();
-    return {
-      id: `dispatch:${record.conversationId}`,
-      at: record.createdAt,
-      title: meta.title || goal || record.conversationId,
-      ...(meta.projectName ? { projectName: meta.projectName } : {}),
-      conversationId: record.conversationId,
-    };
+  // 一张卡只在一列：按当天最终状态归列，派出时间退到卡片上显示
+  const columns: Record<'running' | 'needsYou' | 'done' | 'failed', SecretaryDailyItem[]> = {
+    running: [],
+    needsYou: [],
+    done: [],
+    failed: [],
   };
-  // 「进行中」读的是实时状态（lastState / 后台任务），只有今天成立；历史日期不猜当时在跑什么
-  const live = day === dayKey(input.now);
+  const placed = new Set<string>();
   const runningNow = (record: DispatchRecord): boolean =>
     record.lastState === 'running' || record.backgroundRunning === true;
-  const dispatchedRecords = input.dispatched.filter(
+  const dispatchedToday = input.dispatched.filter(
     (record) => !record.takeover && within(record.createdAt)
   );
-  const running = live
-    ? dispatchedRecords.filter(runningNow).map(dispatchItem).sort(newestFirst)
-    : [];
-  const dispatched = dispatchedRecords
-    .filter((record) => !(live && runningNow(record)))
-    .map(dispatchItem)
-    .sort(newestFirst);
+
+  for (const record of input.dispatched) {
+    const result = terminal.get(record.conversationId);
+    const running = live && runningNow(record);
+    // 接管会话不是派出去的：只有当天有终态、或今天还在跑时才上板
+    if (record.takeover && !result && !running) continue;
+    if (!result && !within(record.createdAt)) continue;
+    placed.add(record.conversationId);
+    const goal = record.goal?.split('\n')[0]?.trim();
+    const card = sessionCard(
+      record.conversationId,
+      record.projectId,
+      result?.at ?? record.createdAt,
+      result,
+      record.createdAt,
+      goal
+    );
+    const column = result ? columnOf(result.kind) : 'running';
+    if (column) columns[column].push(card);
+  }
+  // 没有派发记录、但当天有结果的会话（记录被清理或不属于本机派发）也要上板
+  for (const [conversationId, result] of terminal) {
+    if (placed.has(conversationId)) continue;
+    const column = columnOf(result.kind);
+    if (!column) continue;
+    columns[column].push(
+      sessionCard(conversationId, result.record?.projectId, result.at, result, undefined, undefined)
+    );
+  }
+  for (const items of Object.values(columns)) items.sort(newestFirst);
 
   const todoItems: SecretaryDailyItem[] = [];
   for (const todo of input.todos) {
@@ -280,11 +320,10 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
 
   const groups = (
     [
-      { key: 'done', items: done },
-      { key: 'failed', items: failed },
-      { key: 'needsYou', items: needsYou },
-      { key: 'dispatched', items: dispatched },
-      { key: 'running', items: running },
+      { key: 'running', items: columns.running },
+      { key: 'needsYou', items: columns.needsYou },
+      { key: 'done', items: columns.done },
+      { key: 'failed', items: columns.failed },
       { key: 'todos', items: todos },
       { key: 'changes', items: changes },
     ] as SecretaryDailyGroup[]
@@ -294,10 +333,10 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     day,
     today: day === dayKey(input.now),
     counts: {
-      dispatched: dispatchedRecords.length,
-      completed: done.length,
-      failed: failed.length,
-      needsYou: needsYou.length,
+      dispatched: dispatchedToday.length,
+      completed: columns.done.length,
+      failed: columns.failed.length,
+      needsYou: columns.needsYou.length,
       todosDone: todos.filter((item) => item.label === 'Done').length,
       merged: results.filter((record) => record.merged).length,
     },

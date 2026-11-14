@@ -13,14 +13,20 @@ import { useSessionsStore } from '@/stores/sessions';
 
 /**
  * 列的顺序与配色照 EnsoCode 的 kanban 插件：色值取自插件 PALETTE，
- * 这里按状态语义分配（灰=新派出、蓝=进行中、黄=需要你、绿=完成、红=失败）。
+ * 这里按状态语义分配（蓝=进行中、黄=需要你、绿=完成、红=失败）。
+ * 一个会话当天只落一列，派出时间退到卡片上显示，所以没有「新派出」列。
  */
-const COLUMNS: { key: SecretaryDailyGroupKey; title: string; dot: string }[] = [
-  { key: 'dispatched', title: 'Newly dispatched', dot: '#8b93a1' },
+const COLUMNS: {
+  key: SecretaryDailyGroupKey;
+  title: string;
+  dot: string;
+  /** 终态时间的前缀；还在跑的列没有终态时间 */
+  stamp?: string;
+}[] = [
   { key: 'running', title: 'In progress', dot: '#3b82f6' },
-  { key: 'needsYou', title: 'Needed you', dot: '#f59e0b' },
-  { key: 'done', title: 'What got done', dot: '#10b981' },
-  { key: 'failed', title: 'Failed or interrupted', dot: '#ef4444' },
+  { key: 'needsYou', title: 'Needed you', dot: '#f59e0b', stamp: 'Needed you' },
+  { key: 'done', title: 'What got done', dot: '#10b981', stamp: 'Completed' },
+  { key: 'failed', title: 'Failed or interrupted', dot: '#ef4444', stamp: 'Failed' },
   { key: 'todos', title: 'To-dos', dot: '#a855f7' },
   { key: 'changes', title: 'Settings and capabilities', dot: '#06b6d4' },
 ];
@@ -37,12 +43,34 @@ const CHIP_CLASS =
 const ACTION_CLASS =
   'flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
 
-function DailyCard({ item }: { item: SecretaryDailyItem }) {
+/** 同一天只显示时刻，跨天补上日期，免得「派出 22:10」看不出是哪天 */
+function stampOf(at: number, day: string, locale: string): string {
+  const clock = formatClock(at, locale);
+  if (dayKey(at) === day) return clock;
+  const date = new Date(at);
+  return `${date.getMonth() + 1}/${date.getDate()} ${clock}`;
+}
+
+function DailyCard({
+  item,
+  column,
+  day,
+}: {
+  item: SecretaryDailyItem;
+  column: (typeof COLUMNS)[number];
+  day: string;
+}) {
   const { t, locale } = useI18n();
   const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [expanded, setExpanded] = useState(false);
   const body = item.summary ?? item.detail;
   const detail = item.detail ?? item.summary;
+  const times = [
+    item.dispatchedAt !== undefined
+      ? `${t('Dispatched')} ${stampOf(item.dispatchedAt, day, locale)}`
+      : '',
+    column.stamp ? `${t(column.stamp)} ${stampOf(item.at, day, locale)}` : '',
+  ].filter(Boolean);
   return (
     <div data-enso="secretary-daily-card" data-item={item.id} className={CARD_CLASS}>
       <button
@@ -95,7 +123,9 @@ function DailyCard({ item }: { item: SecretaryDailyItem }) {
             <span className="truncate">{t('Session')}</span>
           </button>
         )}
-        <span className="tabular-nums">{formatClock(item.at, locale)}</span>
+        <span data-enso="secretary-daily-times" className="tabular-nums">
+          {times.length > 0 ? times.join(' · ') : stampOf(item.at, day, locale)}
+        </span>
       </div>
     </div>
   );
@@ -106,11 +136,13 @@ function DailyColumn({
   items,
   folded,
   onToggleFold,
+  day,
 }: {
   column: (typeof COLUMNS)[number];
   items: SecretaryDailyItem[];
   folded: boolean;
   onToggleFold: () => void;
+  day: string;
 }) {
   const { t } = useI18n();
   return (
@@ -150,7 +182,7 @@ function DailyColumn({
       {!folded && (
         <div className="flex min-h-1.5 flex-col gap-1.5">
           {items.map((item) => (
-            <DailyCard key={item.id} item={item} />
+            <DailyCard key={item.id} item={item} column={column} day={day} />
           ))}
           {items.length === 0 && (
             <div
@@ -197,6 +229,7 @@ export function SecretaryDailyBoard() {
     daily?.groups.find((group) => group.key === key)?.items ?? [];
   const total = (daily?.groups ?? []).reduce((sum, group) => sum + group.items.length, 0);
   const done = itemsOf('done').length;
+  const dispatched = daily?.counts.dispatched ?? 0;
   const toggleFold = (key: SecretaryDailyGroupKey) =>
     setFolded((current) => {
       const next = new Set(current);
@@ -228,7 +261,7 @@ export function SecretaryDailyBoard() {
             const next = event.target.value;
             if (next) setDay(next);
           }}
-          className="min-w-0 rounded-[6px] border border-border bg-transparent px-1.5 py-0.5 text-[12.5px] tabular-nums outline-none focus:border-foreground/30"
+          className="min-w-0 flex-1 rounded-[6px] border border-border bg-transparent px-1.5 py-0.5 text-[12.5px] tabular-nums outline-none focus:border-foreground/30"
         />
         <button
           type="button"
@@ -243,17 +276,17 @@ export function SecretaryDailyBoard() {
         </button>
         <span
           data-enso="secretary-daily-stat"
-          title={`${t('What got done')} / ${t('All')}`}
-          className="ml-auto font-mono text-[11.5px] tabular-nums text-muted-foreground"
+          title={`${t('Dispatched')} / ${t('What got done')} / ${t('All')}`}
+          className="shrink-0 whitespace-nowrap font-mono text-[11.5px] tabular-nums text-muted-foreground"
         >
-          {done}/{total}
+          {t('Dispatched')} {dispatched} · {done}/{total}
         </span>
         <button
           type="button"
           data-enso="secretary-daily-today"
           disabled={day === today}
           onClick={() => setDay(today)}
-          className="rounded-md border border-border px-2 py-0.5 text-[11.5px] transition-colors hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
+          className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11.5px] whitespace-nowrap transition-colors hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
         >
           {t('Today')}
         </button>
@@ -262,17 +295,16 @@ export function SecretaryDailyBoard() {
         data-enso="secretary-daily-board"
         className="flex flex-col gap-2.5 @[560px]:flex-row @[560px]:items-start @[560px]:overflow-x-auto @[560px]:pb-1"
       >
-        {COLUMNS.filter((column) => column.key !== 'running' || daily?.today !== false).map(
-          (column) => (
-            <DailyColumn
-              key={column.key}
-              column={column}
-              items={itemsOf(column.key)}
-              folded={folded.has(column.key)}
-              onToggleFold={() => toggleFold(column.key)}
-            />
-          )
-        )}
+        {COLUMNS.map((column) => (
+          <DailyColumn
+            key={column.key}
+            column={column}
+            items={itemsOf(column.key)}
+            folded={folded.has(column.key)}
+            onToggleFold={() => toggleFold(column.key)}
+            day={day}
+          />
+        ))}
       </div>
       {daily?.earliest && (
         <p

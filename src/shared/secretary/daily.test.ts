@@ -159,10 +159,9 @@ describe('一天的看板投影', () => {
       merged: 1,
     });
     expect(daily.groups.map((group) => group.key)).toEqual([
+      'needsYou',
       'done',
       'failed',
-      'needsYou',
-      'dispatched',
       'todos',
       'changes',
     ]);
@@ -219,7 +218,7 @@ describe('一天的看板投影', () => {
     expect(daily.groups[0].items[0].summary).toBe('第二次');
   });
 
-  it('接管来的会话不算新派出，审计只认白名单里的成功操作', () => {
+  it('接管来的会话当天没有结果就不上板，审计只认白名单里的成功操作', () => {
     const daily = buildSecretaryDaily({
       ...base,
       results: [],
@@ -238,18 +237,17 @@ describe('一天的看板投影', () => {
     expect(daily.groups[0].items[0].title).toBe('重构登录流程');
   });
 
-  it('待办新增与完成各占一行，项目名与会话标题取不到时退回记录里的快照', () => {
+  it('待办新增与完成各占一行，会话标题取不到时退回派发记录里的目标', () => {
     const daily = buildSecretaryDaily({
       ...base,
       session: () => ({}),
-      results: [record({ at: at(15, 10) })],
+      results: [],
       dispatched: [dispatch({ goal: '重构登录流程' })],
       todos: [todo({ id: 't3', doneAt: at(15, 15) })],
       audit: [],
     });
     expect(daily.groups.find((group) => group.key === 'todos')?.items).toHaveLength(2);
-    expect(daily.groups.find((group) => group.key === 'done')?.items[0].title).toBe('重构登录流程');
-    expect(daily.groups.find((group) => group.key === 'dispatched')?.items[0].title).toBe(
+    expect(daily.groups.find((group) => group.key === 'running')?.items[0].title).toBe(
       '重构登录流程'
     );
   });
@@ -266,7 +264,105 @@ describe('一天的看板投影', () => {
     expect(daily.today).toBe(false);
   });
 
-  it('今天还在跑的会话进「进行中」，不再重复算新派出', () => {
+  it('同一会话当天派出又完成，只在「完成」列出现一次', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [record({ at: at(15, 10) })],
+      dispatched: [dispatch({ createdAt: at(15, 9) })],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(daily.groups[0].items).toHaveLength(1);
+    expect(daily.groups[0].items[0]).toMatchObject({
+      conversationId: 'c1',
+      at: at(15, 10),
+      dispatchedAt: at(15, 9),
+    });
+    expect(daily.counts.dispatched).toBe(1);
+  });
+
+  it('同一会话当天多条结果只留最后一条，按最终状态归列', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({ at: at(15, 10), kind: 'needs-user' }),
+        record({ at: at(15, 20), kind: 'goal-complete' }),
+      ],
+      dispatched: [dispatch({ createdAt: at(15, 9) })],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(daily.groups[0].items[0].at).toBe(at(15, 20));
+  });
+
+  it('结果日志缺记录时用派发记录的 lastResult 兜底', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        dispatch({
+          createdAt: at(15, 9),
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 18) },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(daily.groups[0].items[0]).toMatchObject({
+      conversationId: 'c1',
+      at: at(15, 18),
+      label: 'Goal complete',
+    });
+    // 兜底只有结果类型与时间，没有原文就没有摘要与分支
+    expect(daily.groups[0].items[0]).not.toHaveProperty('summary');
+  });
+
+  it('结果日志有记录时优先用它，不被 lastResult 覆盖', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [record({ at: at(15, 10) })],
+      dispatched: [
+        dispatch({
+          createdAt: at(15, 9),
+          lastResult: { kind: 'failed', turn: 2, at: at(15, 12) },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+  });
+
+  it('历史日期按当天结束时的状态归列', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      day: '2024-05-14',
+      results: [
+        record({ at: at(14, 10), kind: 'goal-complete' }),
+        record({ at: at(14, 11), conversationId: 'c2', kind: 'failed' }),
+        // 15 号的结果不算 14 号
+        record({ at: at(15, 1), conversationId: 'c3', kind: 'goal-complete' }),
+      ],
+      dispatched: [
+        dispatch({ createdAt: at(14, 9) }),
+        dispatch({ conversationId: 'c2', createdAt: at(14, 9) }),
+        // 14 号派出、当天没有终态：那天结束时还没收口
+        dispatch({ conversationId: 'c4', createdAt: at(14, 12) }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['running', 'done', 'failed']);
+    expect(daily.groups[0].items.map((item) => item.conversationId)).toEqual(['c4']);
+    expect(daily.groups[1].items.map((item) => item.conversationId)).toEqual(['c1']);
+    expect(daily.groups[2].items.map((item) => item.conversationId)).toEqual(['c2']);
+    expect(daily.today).toBe(false);
+  });
+
+  it('今天还在跑的会话进「进行中」，派出数量进计数', () => {
     const daily = buildSecretaryDaily({
       ...base,
       results: [],
@@ -278,22 +374,8 @@ describe('一天的看板投影', () => {
       todos: [],
       audit: [],
     });
-    expect(daily.groups.find((group) => group.key === 'running')?.items).toHaveLength(2);
-    expect(
-      daily.groups.find((group) => group.key === 'dispatched')?.items.map((item) => item.id)
-    ).toEqual(['dispatch:c1']);
+    expect(daily.groups.map((group) => group.key)).toEqual(['running']);
+    expect(daily.groups[0].items).toHaveLength(3);
     expect(daily.counts.dispatched).toBe(3);
-  });
-
-  it('历史日期没有「进行中」：实时状态不能倒推当天', () => {
-    const daily = buildSecretaryDaily({
-      ...base,
-      day: '2024-05-14',
-      results: [],
-      dispatched: [dispatch({ createdAt: at(14, 9), lastState: 'running' })],
-      todos: [],
-      audit: [],
-    });
-    expect(daily.groups.map((group) => group.key)).toEqual(['dispatched']);
   });
 });
