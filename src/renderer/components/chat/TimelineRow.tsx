@@ -28,6 +28,7 @@ import { parseWorkflowPresetMessage } from '@shared/workflowPresetMessage';
 import {
   AlarmClock,
   ArrowDownToLine,
+  ArrowUpRight,
   Bot,
   BoxSelect,
   Brain,
@@ -594,7 +595,7 @@ const UPDATE_ICON: Record<SecretaryUpdateLine['kind'], typeof Bot> = {
   schedule: AlarmClock,
 };
 
-/** 秘书收到的派出会话回传与定时提醒：每条一行，点标题打开会话，会话最后一句收起 */
+/** 秘书收到的派出会话回传与定时提醒：每条一行，点整行展开详情，右侧图标打开会话 */
 function SecretaryUpdatesNotice({ lines }: { lines: SecretaryUpdateLine[] }) {
   const selectConversation = useSessionsStore((state) => state.selectConversation);
   return (
@@ -621,34 +622,43 @@ function SecretaryUpdateRow({
   const [expanded, setExpanded] = useState(false);
   const Icon = UPDATE_ICON[line.kind];
   const conversationId = 'conversationId' in line ? line.conversationId : undefined;
+  const head = (
+    <>
+      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 flex-1">{line.text}</span>
+    </>
+  );
   return (
-    <div className="px-3 py-2">
+    <div data-enso="secretary-update" data-open={expanded ? 'true' : 'false'} className="px-3 py-2">
       <div className="flex items-start gap-2">
-        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        {line.detail ? (
+          <button
+            type="button"
+            data-enso="secretary-update-expand"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+            className="flex min-w-0 flex-1 items-start gap-2 text-left hover:text-foreground"
+          >
+            {head}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-start gap-2">{head}</div>
+        )}
         {conversationId && onOpen ? (
           <button
             type="button"
+            data-enso="secretary-update-open"
             title={t('Open session')}
-            onClick={() => onOpen(conversationId)}
-            className="min-w-0 flex-1 text-left hover:text-foreground hover:underline"
+            aria-label={t('Open session')}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen(conversationId);
+            }}
+            className="-mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            {line.text}
+            <ArrowUpRight className="h-3.5 w-3.5" />
           </button>
-        ) : (
-          <span className="min-w-0 flex-1">{line.text}</span>
-        )}
-        {line.detail && (
-          <button
-            type="button"
-            aria-label={t(expanded ? 'Hide details' : 'Show details')}
-            onClick={() => setExpanded((v) => !v)}
-            className="hover:text-foreground"
-          >
-            <ChevronRight
-              className={cn('mt-0.5 h-3 w-3 transition-transform', expanded && 'rotate-90')}
-            />
-          </button>
-        )}
+        ) : null}
       </div>
       {line.detail && expanded && (
         <pre className="mt-1.5 ml-5.5 max-h-60 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">

@@ -267,6 +267,22 @@ describe('SecretaryPanel', () => {
     expect(h.calls).toContainEqual({ name: 'abort', args: 'c1' });
   });
 
+  it('动态行点主体只展开，右侧图标才打开会话', async () => {
+    h.board = h.secretary.board = board({
+      running: [sessionCard('c1', { title: '跑全量测试', lastText: '第 3 步' })],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    const expand = () => container.querySelector('[data-enso="secretary-feed-expand"]');
+    expect(expand()?.getAttribute('aria-expanded')).toBe('false');
+    click('[data-enso="secretary-feed-expand"]');
+    expect(expand()?.getAttribute('aria-expanded')).toBe('true');
+    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
+    click('[data-enso="secretary-feed-open"]');
+    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(expand()?.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('待办、动态、定时的行内操作都叠在悬停蒙版里，不占行宽', async () => {
     h.board = h.secretary.board = board({
       running: [sessionCard('c1', { title: '跑全量测试' })],
