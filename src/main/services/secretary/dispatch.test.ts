@@ -127,6 +127,7 @@ function harness(
     todos?: SecretaryTodo[];
     file?: SecretaryDispatchFile;
     createResult?: MainSessionResult;
+    branch?: string | null;
   } = {}
 ): Harness {
   let ids = 0;
@@ -181,6 +182,7 @@ function harness(
       h.audits.push(entry);
     },
     projects: () => h.projects,
+    branch: async () => (options.branch === undefined ? 'feat/secretary-agent' : options.branch),
     conversations: () => h.conversations,
     rows: () => h.rows,
     status: (conversationId) => h.statuses.get(conversationId) ?? idle,
@@ -863,10 +865,14 @@ describe('待办', () => {
     const proposal = h.file.proposals[payload.proposalId];
     expect(proposal.kind === 'dispatch' && proposal.draft).toMatchObject({
       projectId: 'p1',
-      prompt: '看构建',
       todoId: 't1',
       title: '看构建',
+      worktree: true,
     });
+    const draft = proposal.kind === 'dispatch' ? proposal.draft : null;
+    expect(draft?.prompt).toContain('项目：/repo/alpha');
+    expect(draft?.prompt).toContain('基于 feat/secretary-agent 新建分支');
+    expect(draft?.prompt).toContain('看构建');
   });
 
   it('派出待办的会话标题用待办文本而不是 prompt 开头，可用 title 覆盖', async () => {
@@ -1337,6 +1343,26 @@ describe('mutateTodo', () => {
     const result = await mutateTodo(h.ports, { action: 'dispatch', todoId: 't1' });
     expect(result).toEqual({ ok: true, todoId: 't1' });
     expect(h.created[0].secretaryOrigin).toEqual({ secretaryConversationId: 'sec-chat' });
+    expect(h.created[0].worktree).toBe(true);
+    expect(h.created[0].prompt).toContain('项目：/repo/alpha');
+    expect(h.created[0].prompt).toContain('worktree');
+    expect(h.created[0].prompt).toContain('看构建');
+    expect(h.todos[0].conversationId).toBe('new-1');
+  });
+
+  it('秘书传入的完整说明原样派出，显式不要 worktree 时也不建', async () => {
+    const brief = '在独立 worktree 里工作，不推送不合并。\n修通知';
+    const h = harness({
+      profile: profile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: ['p1'],
+        dispatchWorktree: 'auto',
+      }),
+      todos: [{ id: 't1', text: '修通知', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    await call(h.handlers.todo_item_dispatch, { todoId: 't1', prompt: brief, worktree: false });
+    expect(h.created[0].prompt).toBe(brief);
+    expect(h.created[0].worktree).toBe(false);
   });
 });
 

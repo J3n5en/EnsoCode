@@ -242,6 +242,7 @@ function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
         {phase === 'todo' ? (
           <button
             type="button"
+            data-enso="secretary-todo-dispatch"
             title={t('Dispatch')}
             aria-label={t('Dispatch')}
             onClick={() => mutateTodo({ action: 'dispatch', todoId: todo.id })}

@@ -981,6 +981,10 @@ async function run(cdp, pluginZipUrl) {
   const limitBefore = readJson(registryFile).conversations.filter(
     (entry) => entry.projectId === setup.projectId
   ).length;
+  // tick 会把磁盘上的 lastState 对齐成真实空闲，设置窗口一开久了种子就被清掉
+  const reseed = readJson(dispatchFile);
+  reseed.dispatched[dispatchedId].lastState = 'running';
+  writeFileSync(dispatchFile, JSON.stringify(reseed));
   const refused = await page(`
     return JSON.stringify(
       await window.electronAPI.secretary.resolveProposal(${JSON.stringify(limitProposal.proposalId)}, 'confirm')
@@ -1590,9 +1594,7 @@ async function run(cdp, pluginZipUrl) {
     { status: 'active' },
     '列出进行中的待办'
   );
-  const activeRow = listedTodos(listedActive).find(
-    (item) => item.id === boardAdded.todoId
-  );
+  const activeRow = listedTodos(listedActive).find((item) => item.id === boardAdded.todoId);
   assert(
     activeRow?.status === 'active' &&
       activeRow.conversationId === activeDispatch.conversationId &&
@@ -1742,15 +1744,98 @@ async function run(cdp, pluginZipUrl) {
     { status: 'done' },
     '列出已完成的待办'
   );
-  const doneRow = listedTodos(listedDone).find(
-    (item) => item.id === stale.todoId
-  );
+  const doneRow = listedTodos(listedDone).find((item) => item.id === stale.todoId);
   assert(
     doneRow?.status === 'done' && doneRow.text.includes(freshText),
     'step12: todo_list 读到新文字和已完成',
     doneRow ?? listedDone.text
   );
   await cdp.shot(path.join(ART, '15-todo-updated.png'));
+
+  log('== step13 看板发送带上项目和 worktree');
+  const boardSendTitle = '看板发送验收';
+  const secretaryProfile = (over) => ({
+    name: '秘书',
+    avatar: { color: '#6366f1' },
+    model: null,
+    autonomy: 'ask-first',
+    autoApproveProjectIds: [],
+    visibleProjectIds: 'all',
+    dispatchModel: { mode: 'project' },
+    dispatchWorktree: 'never',
+    maxRunningDispatches: 3,
+    replyLanguage: 'ui',
+    style: 'concise',
+    notify: 'off',
+    addressAs: null,
+    dailyBriefAt: null,
+    ...over,
+  });
+  const allowBoardSend = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.saveProfile(${JSON.stringify(
+      secretaryProfile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: [setup.projectId],
+        dispatchWorktree: 'always',
+        maxRunningDispatches: 10,
+      })
+    )}));
+  `);
+  assert(allowBoardSend.ok, 'step13: 临时允许看板直接派出并建 worktree', allowBoardSend);
+  const boardSendAdded = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.mutateTodo({
+      action: 'add',
+      text: ${JSON.stringify(boardSendTitle)},
+      projectId: ${JSON.stringify(setup.projectId)},
+    }));
+  `);
+  assert(boardSendAdded.ok, 'step13: 建出只有标题的待办', boardSendAdded);
+  const boardSent = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const row = await until(
+      () => [...document.querySelectorAll('[data-enso=secretary-todo]')]
+        .find((node) => node.innerText.includes(${JSON.stringify(boardSendTitle)}) && node.getAttribute('data-phase') === 'todo') ?? null,
+      15000
+    );
+    row?.querySelector('[data-enso=secretary-todo-dispatch]')?.click();
+    const conversationId = await until(() => {
+      const node = [...document.querySelectorAll('[data-enso=secretary-todo]')]
+        .find((candidate) => candidate.innerText.includes(${JSON.stringify(boardSendTitle)}) && candidate.getAttribute('data-phase') === 'active');
+      return node?.getAttribute('data-session') || null;
+    }, 20000);
+    return JSON.stringify({ clicked: Boolean(row), conversationId });
+  `);
+  assert(boardSent.conversationId, 'step13: 点发送后待办进入进行中并关联会话', boardSent);
+  await cdp.shot(path.join(ART, '16-todo-dispatch.png'));
+  const boardPrompt = await waitFor(() => {
+    const row = conversationsIn()?.[boardSent.conversationId];
+    if (!row?.sessionFile) return null;
+    let text = '';
+    try {
+      text = readFileSync(row.sessionFile, 'utf8');
+    } catch {
+      return null;
+    }
+    if (!text.includes('worktree')) return null;
+    return { text, worktree: row?.worktree?.path ?? null };
+  }, 'step13 prompt').catch((error) => ({ text: '', worktree: null, error: String(error) }));
+  await page(`
+    return JSON.stringify(await window.electronAPI.secretary.saveProfile(${JSON.stringify(secretaryProfile())}));
+  `);
+  assert(
+    boardPrompt.text?.includes(boardSendTitle) &&
+      boardPrompt.text.includes('sec-todo-proj') &&
+      boardPrompt.text.includes('worktree') &&
+      boardPrompt.text.includes('不推送') &&
+      boardPrompt.text !== boardSendTitle,
+    'step13: 第一条消息包含项目和 worktree，不只是待办标题',
+    boardPrompt
+  );
+  assert(
+    typeof boardPrompt.worktree === 'string' && boardPrompt.worktree.length > 0,
+    'step13: 会话落在独立 worktree',
+    boardPrompt
+  );
 
   log('== 插件：勾选后才进秘书会话');
   const installed = await page(`
