@@ -230,6 +230,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       title: typeof row.title === 'string' ? row.title : '',
       state: row.sessionFile ? (status?.state ?? 'idle') : 'not-started',
       startedAt: record.createdAt,
+      updatedAt: record.lastResult?.at ?? record.lastEventAt,
       secretaryConversationId: record.secretaryConversationId,
       ...(record.lastText ? { lastText: redactSecrets(record.lastText) } : {}),
       ...(record.lastResult ? { result: record.lastResult.kind } : {}),
@@ -241,8 +242,8 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     else if (record.lastState === 'running') running.push(card);
     else done.push(card);
   }
-  running.sort((left, right) => right.startedAt - left.startedAt);
-  done.sort((left, right) => right.startedAt - left.startedAt);
+  running.sort((left, right) => right.updatedAt - left.updatedAt);
+  done.sort((left, right) => right.updatedAt - left.updatedAt);
 
   return {
     needsYou,

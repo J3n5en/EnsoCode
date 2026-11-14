@@ -1,0 +1,183 @@
+import type {
+  SecretaryBoard,
+  SecretaryCard,
+  SecretaryProposal,
+  SecretaryResultKind,
+} from '@shared/types/secretary';
+import { describe, expect, it } from 'vitest';
+import { secretaryDigest } from './secretaryDigest';
+
+const NOW = new Date(2024, 4, 15, 15, 30).getTime();
+const TODAY = new Date(2024, 4, 15, 9, 0).getTime();
+const YESTERDAY = new Date(2024, 4, 14, 23, 0).getTime();
+
+const session = (
+  conversationId: string,
+  over: Partial<Extract<SecretaryCard, { kind: 'session' }>> = {}
+): SecretaryCard => ({
+  kind: 'session',
+  conversationId,
+  projectId: 'p1',
+  projectName: 'enso-code',
+  title: `任务 ${conversationId}`,
+  state: 'idle',
+  startedAt: TODAY,
+  updatedAt: TODAY,
+  secretaryConversationId: 'sec',
+  ...over,
+});
+
+const proposal = (over: Partial<SecretaryProposal> = {}): SecretaryCard => ({
+  kind: 'proposal',
+  projectName: 'enso-code',
+  proposal: {
+    id: 'prop1',
+    secretaryConversationId: 'sec',
+    createdAt: TODAY,
+    updatedAt: TODAY,
+    status: 'pending',
+    kind: 'dispatch',
+    draft: { projectId: 'p1', prompt: '修一下侧栏', worktree: false },
+    ...over,
+  } as SecretaryProposal,
+});
+
+const board = (over: Partial<SecretaryBoard> = {}): SecretaryBoard => ({
+  needsYou: [],
+  running: [],
+  todos: [],
+  done: [],
+  ...over,
+});
+
+describe('secretaryDigest', () => {
+  it('按本地小时给问候语', () => {
+    const at = (hour: number) => secretaryDigest(board(), new Date(2024, 4, 15, hour, 0).getTime());
+    expect(at(8).greeting).toBe('Good morning');
+    expect(at(12).greeting).toBe('Good afternoon');
+    expect(at(18).greeting).toBe('Good evening');
+  });
+
+  it('今天只统计本地零点之后的派出与结果', () => {
+    const digest = secretaryDigest(
+      board({
+        running: [session('run-today', { state: 'running', updatedAt: TODAY + 60_000 })],
+        done: [
+          session('ok-today', { result: 'goal-complete', updatedAt: TODAY + 120_000 }),
+          session('ended-today', { result: 'turn-ended', updatedAt: TODAY + 180_000 }),
+          session('bad-today', { result: 'failed', updatedAt: TODAY + 240_000 }),
+          session('ok-yesterday', {
+            result: 'goal-complete',
+            startedAt: YESTERDAY,
+            updatedAt: YESTERDAY,
+          }),
+        ],
+        needsYou: [session('waiting-today', { state: 'waiting', updatedAt: TODAY + 300_000 })],
+      }),
+      NOW
+    );
+    expect(digest.today).toEqual({ dispatched: 5, completed: 2, failed: 1 });
+  });
+
+  it('计数取各组条数与待办数', () => {
+    const digest = secretaryDigest(
+      board({
+        needsYou: [proposal(), session('waiting', { state: 'waiting' })],
+        running: [session('run', { state: 'running' })],
+        todos: [{ id: 't1', text: '写周报', createdAt: TODAY, updatedAt: TODAY }],
+      }),
+      NOW
+    );
+    expect(digest.counts).toEqual({ needsYou: 2, running: 1, todos: 1 });
+  });
+
+  it('结果类型映射到颜色与说明', () => {
+    const cases: [SecretaryResultKind, string, string][] = [
+      ['goal-complete', 'ok', 'Goal complete'],
+      ['turn-ended', 'ok', 'Turn ended'],
+      ['goal-blocked', 'warn', 'Goal blocked'],
+      ['needs-user', 'warn', 'Waiting for you'],
+      ['stalled', 'warn', 'Stalled'],
+      ['interrupted', 'warn', 'Interrupted'],
+      ['failed', 'bad', 'Failed'],
+    ];
+    for (const [result, tone, label] of cases) {
+      const [event] = secretaryDigest(board({ done: [session('c1', { result })] }), NOW).events;
+      expect({ result, tone: event.tone, label: event.label }).toEqual({ result, tone, label });
+    }
+  });
+
+  it('没有结果时在跑的算开始执行，其余按状态说明', () => {
+    const digest = secretaryDigest(
+      board({
+        running: [session('run', { state: 'running' })],
+        done: [session('idle', { state: 'idle' }), session('new', { state: 'not-started' })],
+      }),
+      NOW
+    );
+    const byId = Object.fromEntries(digest.events.map((event) => [event.conversationId, event]));
+    expect(byId.run).toMatchObject({ tone: 'run', label: 'Started' });
+    expect(byId.idle).toMatchObject({ tone: 'idle', label: 'Idle' });
+    expect(byId.new).toMatchObject({ tone: 'idle', label: 'Not started' });
+  });
+
+  it('会话事件带项目、标题、最后一句与打开用的会话 id', () => {
+    const [event] = secretaryDigest(
+      board({
+        running: [
+          session('c1', { state: 'running', title: '跑全量测试', lastText: '正在跑第 3 个包' }),
+        ],
+      }),
+      NOW
+    ).events;
+    expect(event).toEqual({
+      id: 'session:c1',
+      at: TODAY,
+      tone: 'run',
+      projectName: 'enso-code',
+      title: '跑全量测试',
+      label: 'Started',
+      detail: '正在跑第 3 个包',
+      conversationId: 'c1',
+      running: true,
+    });
+  });
+
+  it('待确认提案进动态，标题优先用草案标题，其次提示词首行', () => {
+    const titled = proposal();
+    const untitled = proposal({
+      id: 'prop2',
+      createdAt: TODAY + 1000,
+      draft: { projectId: 'p1', prompt: '整理账单\n第二行不要', worktree: false },
+    } as Partial<SecretaryProposal>);
+    const digest = secretaryDigest(board({ needsYou: [titled, untitled] }), NOW);
+    expect(digest.events.map((event) => event.title)).toEqual(['整理账单', '修一下侧栏']);
+    expect(digest.events[0]).toMatchObject({
+      tone: 'warn',
+      label: 'Waiting for your confirmation',
+      projectName: 'enso-code',
+    });
+  });
+
+  it('档案提案用固定标题，没有项目就留空', () => {
+    const card = proposal({
+      kind: 'profile',
+      draft: { name: '小安' },
+    } as Partial<SecretaryProposal>);
+    const [event] = secretaryDigest(
+      board({ needsYou: [{ ...card, projectName: undefined } as SecretaryCard] }),
+      NOW
+    ).events;
+    expect(event).toMatchObject({ title: 'Update the secretary profile', projectName: '' });
+  });
+
+  it('动态按时间倒序，最多 20 条', () => {
+    const done = Array.from({ length: 25 }, (_, index) =>
+      session(`c${index}`, { updatedAt: TODAY + index * 1000, result: 'turn-ended' })
+    );
+    const digest = secretaryDigest(board({ done }), NOW);
+    expect(digest.events).toHaveLength(20);
+    expect(digest.events[0].id).toBe('session:c24');
+    expect(digest.events.at(-1)?.id).toBe('session:c5');
+  });
+});

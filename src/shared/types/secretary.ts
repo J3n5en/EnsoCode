@@ -189,6 +189,8 @@ export type SecretaryCard =
       state: 'running' | 'idle' | 'waiting' | 'error' | 'not-started';
       lastText?: string;
       startedAt: number;
+      /** 最近一次结果或事件的时间，动态按它排序 */
+      updatedAt: number;
       result?: SecretaryResultKind;
       secretaryConversationId: string;
       unread?: boolean;
