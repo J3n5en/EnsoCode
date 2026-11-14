@@ -24,12 +24,14 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const REPO = path.resolve(import.meta.dirname, '..');
-const ART = '/tmp/sec-u10';
-const ENV = '/tmp/sec-u10-env';
-const PROJ = '/tmp/sec-u10-proj';
-const CDP_PORT = 9333;
-const FAKE_PORT = 8899;
-const PLUGIN_PORT = 8898;
+// 几个 worktree 并行验收时用 SEC_VERIFY_DIR / SEC_VERIFY_PORTS=cdp,fake,plugin 错开目录与端口
+const BASE = process.env.SEC_VERIFY_DIR || '/tmp/sec-u10';
+const ART = BASE;
+const ENV = `${BASE}-env`;
+const PROJ = `${BASE}-proj`;
+const [CDP_PORT, FAKE_PORT, PLUGIN_PORT] = (process.env.SEC_VERIFY_PORTS || '9333,8899,8898')
+  .split(',')
+  .map(Number);
 const KEEP = process.argv.includes('--keep');
 
 const settingsFile = path.join(ENV, 'settings.json');
@@ -241,6 +243,9 @@ async function prepareEnv() {
   });
   const settings = readJson(settingsFile);
   settings['enso-settings'].state.secretaryEnabled = true;
+  for (const provider of settings['enso-settings'].state.providers ?? []) {
+    provider.baseUrl = `http://127.0.0.1:${FAKE_PORT}`;
+  }
   writeFileSync(settingsFile, JSON.stringify(settings));
   mkdirSync(PROJ, { recursive: true });
   writeFileSync(path.join(PROJ, 'README.md'), 'isolated dispatch target\n');
@@ -266,7 +271,9 @@ async function main() {
   const pluginZipUrl = await servePluginZip();
 
   log('== fake provider + dev');
-  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {});
+  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {
+    FAKE_PROVIDER_PORT: String(FAKE_PORT),
+  });
   await waitFor(
     async () => {
       try {
@@ -879,6 +886,134 @@ async function run(cdp, pluginZipUrl) {
     .map((line) => JSON.parse(line))
     .filter((entry) => entry.op === 'result_dismiss' && entry.targetId === dispatchedId);
   assert(dismissAudit.length === 1, 'step8: audit 里记了一条 result_dismiss', dismissAudit);
+
+  // 新开一个秘书会话出提案再带编辑确认；指令放在编辑里，fake provider 的指令解析不支持嵌套
+  const dispatchConfirmed = (directive, edits) =>
+    page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '派活 ' + ${JSON.stringify(directive)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(() => {
+      const pending = Object.values(secretary.getState().secretary.proposals).filter(
+        (p) => p.status === 'pending' && p.secretaryConversationId === fresh
+      );
+      return pending.at(-1) ?? null;
+    }, 30000);
+    if (!proposal) return JSON.stringify({ ok: false, error: 'no proposal' });
+    const resolved = await window.electronAPI.secretary.resolveProposal(
+      proposal.id, 'confirm', ${JSON.stringify(edits ?? {})}
+    );
+    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({
+      ok: done?.status === 'succeeded',
+      secretaryId: fresh,
+      conversationId: done?.conversationId,
+      error: done?.error,
+    });
+  `);
+  const secretarySaw = (secretaryId, conversationId, kind) =>
+    page(`
+    return JSON.stringify(texts(${JSON.stringify(secretaryId)}).some((text) =>
+      text.includes(${JSON.stringify(`[${kind} session:${conversationId}]`)})));
+  `);
+
+  log('== step9 等后台任务不报 needs-user，真提问才报');
+  const waitDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '跑全量测试',
+      title: '等后台任务',
+    })}]]`,
+    { goal: '跑完测试 [[tool:goal_wait {"reason":"真机验收已在后台运行，完成后会通知我"}]]' }
+  );
+  assert(waitDispatch.ok, 'step9: 带目标的派出会话建成', waitDispatch);
+  const waitId = waitDispatch.conversationId;
+  const waitGoal = await page(`
+    const row = await until(() => {
+      const r = S().conversations[${JSON.stringify(waitId)}];
+      return r?.goal?.status === 'waiting' ? r : null;
+    }, 60000);
+    return JSON.stringify({ status: row?.goal?.status ?? null });
+  `);
+  assert(waitGoal.status === 'waiting', 'step9: 派出会话调了 goal_wait 在等后台任务', waitGoal);
+  await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[waitId];
+      return record?.turn >= 1 && record.lastState === 'idle' ? record : null;
+    },
+    'goal_wait turn settled',
+    60_000,
+    500
+  );
+  await delay(2000);
+  const waitRecord = readJson(dispatchFile).dispatched[waitId];
+  assert(
+    waitRecord.lastResult?.kind !== 'needs-user',
+    'step9: goal_wait 等后台任务不记 needs-user',
+    waitRecord
+  );
+  assert(
+    !(await secretarySaw(waitDispatch.secretaryId, waitId, 'needs-user')),
+    'step9: 秘书没收到该会话的 needs-user',
+    waitId
+  );
+
+  const askDispatch = await dispatchConfirmed(
+    `[[tool:session_create ${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '占位',
+      title: '真提问',
+    })}]]`,
+    { prompt: '选方案 [[tool:ask_user {"question":"用哪个方案？","options":["A","B"]}]]' }
+  );
+  assert(askDispatch.ok, 'step9: 会提问的派出会话建成', askDispatch);
+  const askId = askDispatch.conversationId;
+  const askRecord = await waitFor(
+    () => {
+      const record = readJson(dispatchFile).dispatched[askId];
+      return record?.lastResult?.kind === 'needs-user' ? record : null;
+    },
+    'ask_user needs-user recorded',
+    60_000,
+    500
+  ).catch(() => null);
+  assert(
+    Boolean(askRecord),
+    'step9: 真有 ask_user 时记 needs-user',
+    readJson(dispatchFile).dispatched[askId]
+  );
+  const askSeen = await waitFor(
+    () => secretarySaw(askDispatch.secretaryId, askId, 'needs-user'),
+    'secretary got needs-user',
+    60_000,
+    500
+  ).catch(() => false);
+  assert(askSeen, 'step9: 秘书收到该会话的 needs-user', askId);
+  const answered = await page(`
+    const id = ${JSON.stringify(askId)};
+    const ask = await until(() => (S().conversations[id]?.pendingAsks ?? [])[0] ?? null, 15000);
+    if (!ask) return JSON.stringify({ ok: false, error: 'no pending ask' });
+    const reply = await window.electronAPI.agent.respondAsk(id, ask.requestId, 'A');
+    const cleared = await until(() => (S().conversations[id]?.pendingAsks ?? []).length === 0, 30000);
+    return JSON.stringify({ ok: Boolean(cleared), reply });
+  `);
+  assert(answered.ok, 'step9: 回答后提问会话收尾', answered);
+  await waitFor(
+    () => (readJson(dispatchFile).dispatched[askId]?.lastState === 'idle' ? true : null),
+    'ask session idle',
+    30_000,
+    500
+  );
 
   log('== 插件：勾选后才进秘书会话');
   const installed = await page(`

@@ -33,6 +33,7 @@ export type ResultEvent =
 /**
  * 结果类型判定。会话空闲不等于事情做成了：只有目标信号能说完成，
  * 无目标的轮次结束只能说"它停下了"。
+ * 需要用户只看真实挂起的提问与审批：goal_wait 是在等后台任务、CI 等外部事情，不是等用户。
  */
 export function classify(
   record: DispatchRecord,
@@ -45,7 +46,8 @@ export function classify(
       return 'failed';
     case 'goal-signal':
       if (event.kind === 'complete') return 'goal-complete';
-      return event.kind === 'blocked' ? 'goal-blocked' : 'needs-user';
+      if (event.kind === 'blocked') return 'goal-blocked';
+      return status.pendingAsks + status.pendingApprovals > 0 ? 'needs-user' : null;
     case 'needs-user':
       return 'needs-user';
     case 'turn-completed': {
