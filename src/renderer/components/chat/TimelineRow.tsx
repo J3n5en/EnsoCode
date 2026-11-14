@@ -907,6 +907,7 @@ export const TimelineRow = memo(function TimelineRow({
           {isCollapsed ? (
             <CollapsedTurnBar
               turnKey={item.key}
+              text={item.text}
               timestamp={item.timestamp}
               turnDurationMs={item.turnDurationMs}
               onToggle={onToggleTurn}
@@ -915,6 +916,7 @@ export const TimelineRow = memo(function TimelineRow({
             <UserMeta
               turnKey={item.key}
               messageIndex={Number(item.key)}
+              text={item.text}
               timestamp={item.timestamp}
               deliveryState={item.deliveryState}
               canCollapse={item.canCollapse}
@@ -1442,11 +1444,13 @@ function RewindButton({ messageIndex }: { messageIndex: number }) {
 
 function CollapsedTurnBar({
   turnKey,
+  text,
   timestamp,
   turnDurationMs,
   onToggle,
 }: {
   turnKey: string;
+  text: string;
   timestamp?: number;
   turnDurationMs?: number;
   onToggle?: (key: string, collapsed: boolean) => void;
@@ -1463,6 +1467,7 @@ function CollapsedTurnBar({
         <ChevronRight className="h-3 w-3 shrink-0" />
         <span>{t('Expand')}</span>
       </button>
+      <UserPromptCopy text={text} />
       {typeof timestamp === 'number' && <span>{formatClock(timestamp)}</span>}
       {turnDurationMs !== undefined && (
         <span>· {t('took {{duration}}', { duration: formatDuration(turnDurationMs) })}</span>
@@ -1471,9 +1476,23 @@ function CollapsedTurnBar({
   );
 }
 
+/** 用户气泡操作条上的复制：悬停才出现，和助手复制按钮同一套剪贴板反馈。空白正文不占位。 */
+function UserPromptCopy({ text }: { text: string }) {
+  if (!text.trim()) return null;
+  return (
+    <span data-enso="copy-user-prompt" className="inline-flex">
+      <CopyButton
+        text={text}
+        className="opacity-0 transition-opacity group-hover/user:opacity-100 focus-visible:opacity-100"
+      />
+    </span>
+  );
+}
+
 function UserMeta({
   turnKey,
   messageIndex,
+  text,
   timestamp,
   canCollapse,
   deliveryState,
@@ -1481,6 +1500,7 @@ function UserMeta({
 }: {
   turnKey: string;
   messageIndex: number;
+  text: string;
   timestamp?: number;
   canCollapse?: boolean;
   deliveryState?: 'pending' | 'rejected';
@@ -1492,6 +1512,7 @@ function UserMeta({
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground/75 select-none">
       <RewindButton messageIndex={messageIndex} />
       <WithdrawButton messageIndex={messageIndex} />
+      <UserPromptCopy text={text} />
       {deliveryState && (
         <span>{t(deliveryState === 'rejected' ? 'Not sent' : 'Delivery unconfirmed')}</span>
       )}
@@ -1591,7 +1612,7 @@ function TextRow({
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, className }: { text: string; className?: string }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
@@ -1603,7 +1624,7 @@ function CopyButton({ text }: { text: string }) {
           setTimeout(() => setCopied(false), 1000);
         });
       }}
-      className="flex items-center gap-1 transition-colors hover:text-foreground"
+      className={cn('flex items-center gap-1 transition-colors hover:text-foreground', className)}
       title={t('Copy')}
     >
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
