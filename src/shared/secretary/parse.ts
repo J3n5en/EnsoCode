@@ -11,6 +11,7 @@ import type {
   SecretaryProposal,
   SecretaryResultKind,
   SecretarySchedule,
+  SecretaryTakeoverScope,
   SecretaryTodo,
   SecretaryUpdate,
   TakeoverDraft,
@@ -121,6 +122,17 @@ function parseDispatchModel(value: unknown): SecretaryProfile['dispatchModel'] {
   return { mode: 'project' };
 }
 
+/** 缺省与脏值都回「勾选的项目」且一个都不勾：等价于逐个授权，不会悄悄放大权限 */
+export const DEFAULT_TAKEOVER_SCOPE: SecretaryTakeoverScope = { mode: 'projects', projectIds: [] };
+
+function parseTakeoverScope(value: unknown): SecretaryTakeoverScope {
+  if (!isObject(value)) return DEFAULT_TAKEOVER_SCOPE;
+  if (value.mode === 'all') return { mode: 'all' };
+  if (value.mode === 'explicit') return { mode: 'explicit' };
+  if (value.mode === 'projects') return { mode: 'projects', projectIds: texts(value.projectIds) };
+  return DEFAULT_TAKEOVER_SCOPE;
+}
+
 /** 缺省字段按设计稿默认值补齐，未知键丢弃；非对象视为未完成初次设置 */
 export function parseProfile(value: unknown): SecretaryProfile | null {
   if (!isObject(value)) return null;
@@ -138,6 +150,7 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     },
     autonomy: oneOf(value.autonomy, AUTONOMIES, 'ask-first'),
     autoApproveProjectIds: texts(value.autoApproveProjectIds),
+    takeoverScope: parseTakeoverScope(value.takeoverScope),
     pluginIds: texts(value.pluginIds),
     skillIds: texts(value.skillIds),
     visibleProjectIds: Array.isArray(value.visibleProjectIds)
@@ -205,6 +218,16 @@ function validIdList(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => text(item) !== undefined);
 }
 
+function parseTakeoverScopeDraft(value: unknown): SecretaryTakeoverScope | null {
+  if (!isObject(value)) return null;
+  if (value.mode === 'all') return { mode: 'all' };
+  if (value.mode === 'explicit') return { mode: 'explicit' };
+  if (value.mode === 'projects' && validIdList(value.projectIds)) {
+    return { mode: 'projects', projectIds: texts(value.projectIds) };
+  }
+  return null;
+}
+
 /**
  * 表单与配置提案的写入收窄：越界的枚举当场拒绝，而不是像读盘那样静默回默认值，
  * 否则用户勾了"完全自主"却悄悄退回"先问我"。
@@ -247,6 +270,11 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
       return { ok: false, error: 'invalid autoApproveProjectIds' };
     }
     draft.autoApproveProjectIds = texts(value.autoApproveProjectIds);
+  }
+  if (value.takeoverScope !== undefined) {
+    const scope = parseTakeoverScopeDraft(value.takeoverScope);
+    if (!scope) return { ok: false, error: 'invalid takeoverScope' };
+    draft.takeoverScope = scope;
   }
   if (value.pluginIds !== undefined) {
     if (!validIdList(value.pluginIds)) return { ok: false, error: 'invalid pluginIds' };
@@ -463,7 +491,8 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
     if (!isObject(value.takeover)) return undefined;
     const grantedAt = time(value.takeover.grantedAt);
     const via = value.takeover.via;
-    if (grantedAt === undefined || (via !== 'proposal' && via !== 'user')) return undefined;
+    if (grantedAt === undefined || (via !== 'proposal' && via !== 'user' && via !== 'scope'))
+      return undefined;
     record.takeover = { grantedAt, via };
   }
   return record;

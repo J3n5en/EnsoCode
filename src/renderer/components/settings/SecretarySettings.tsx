@@ -7,6 +7,7 @@ import type {
   SecretaryProfileDraft,
   SecretaryScheduleView,
   SecretarySkillDraft,
+  SecretaryTakeoverScope,
   SecretaryTakeoverView,
   SecretaryToolDraft,
 } from '@shared/types/secretary';
@@ -283,6 +284,87 @@ function OwnTools({ busy }: { busy: boolean }) {
           </details>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** 可接管的会话：范围只给操作权限，秘书真正用过某个会话之后才开始跟踪它 */
+function TakeoverScopePicker({
+  profile,
+  busy,
+  onChange,
+}: {
+  profile: SecretaryProfile;
+  busy: boolean;
+  onChange: (scope: SecretaryTakeoverScope) => void;
+}) {
+  const { t } = useI18n();
+  const projects = useSettingsStore((state) => state.projects);
+  const scope = profile.takeoverScope;
+  const visible = profile.visibleProjectIds;
+  // 临时会话与秘书自己不是可接管的项目；范围只在秘书看得见的项目里选
+  const candidates = projects.filter(
+    (project) =>
+      project.kind !== 'secretary' &&
+      project.kind !== 'scratch' &&
+      (visible === 'all' || visible.includes(project.id))
+  );
+  const selected = scope.mode === 'projects' ? scope.projectIds : [];
+  return (
+    <div className="space-y-2">
+      <Chips
+        enso="secretary-takeover-scope"
+        value={scope.mode}
+        options={[
+          { value: 'explicit', label: 'One by one' },
+          { value: 'projects', label: 'Selected projects' },
+          { value: 'all', label: 'All visible projects' },
+        ]}
+        onChange={(mode) =>
+          onChange(
+            mode === 'all'
+              ? { mode: 'all' }
+              : mode === 'explicit'
+                ? { mode: 'explicit' }
+                : { mode: 'projects', projectIds: selected }
+          )
+        }
+      />
+      {scope.mode === 'projects' ? (
+        candidates.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t('No project in the takeover scope')}</p>
+        ) : (
+          <div className="flex flex-wrap gap-1" data-enso="secretary-takeover-projects">
+            {candidates.map((project) => {
+              const active = selected.includes(project.id);
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  aria-pressed={active}
+                  disabled={busy}
+                  onClick={() =>
+                    onChange({
+                      mode: 'projects',
+                      projectIds: active
+                        ? selected.filter((id) => id !== project.id)
+                        : [...selected, project.id],
+                    })
+                  }
+                  className={cn(
+                    'rounded-md border px-2.5 py-1 text-xs transition-colors',
+                    active
+                      ? 'border-primary/60 bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted'
+                  )}
+                >
+                  {project.alias || project.name}
+                </button>
+              );
+            })}
+          </div>
+        )
+      ) : null}
     </div>
   );
 }
@@ -736,6 +818,24 @@ export function SecretarySettings() {
           </div>
         </Section>
       ) : null}
+
+      <Section
+        title="Sessions it may take over"
+        description="Which sessions the secretary may message and stop without asking you first. Everything else still needs a confirmation card from the secretary."
+        rowId="secretary.takeoverScope"
+      >
+        {profile ? (
+          <TakeoverScopePicker
+            profile={profile}
+            busy={busy}
+            onChange={(takeoverScope) => void save({ takeoverScope })}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t('The secretary has not been set up yet.')}
+          </p>
+        )}
+      </Section>
 
       <Section
         title="Sessions handed over"

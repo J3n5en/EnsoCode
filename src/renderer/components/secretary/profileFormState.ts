@@ -46,6 +46,10 @@ export function draftFromProfile(
     model: base.model ? { ...base.model } : null,
     autonomy: base.autonomy,
     autoApproveProjectIds: [...base.autoApproveProjectIds],
+    takeoverScope:
+      base.takeoverScope.mode === 'projects'
+        ? { mode: 'projects', projectIds: [...base.takeoverScope.projectIds] }
+        : base.takeoverScope,
     visibleProjectIds: base.visibleProjectIds === 'all' ? 'all' : [...base.visibleProjectIds],
     dispatchModel: cloneDispatchModel(base.dispatchModel),
     dispatchWorktree: base.dispatchWorktree,

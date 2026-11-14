@@ -111,6 +111,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'model',
       'autonomy',
       'autoApproveProjectIds',
+      'takeoverScope',
       'visibleProjectIds',
       'dispatchModel',
       'dispatchWorktree',
@@ -278,7 +279,7 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, the user referenced, or the user handed over to you. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes.',
+      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -311,7 +312,7 @@ const SCHEMAS: Record<
   },
   session_stop: {
     description:
-      'Stop a session you dispatched, the user referenced, or the user handed over to you. Queued messages are kept by default; pass clearQueue true to also drop the messages you queued, so they do not all fire the next time the session runs. Messages the user queued are never cleared.',
+      'Stop a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. Queued messages are kept by default; pass clearQueue true to also drop the messages you queued, so they do not all fire the next time the session runs. Messages the user queued are never cleared. A session reached through the scope starts reporting results to you only after this call.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -325,7 +326,7 @@ const SCHEMAS: Record<
   },
   session_takeover_propose: {
     description:
-      'Ask the user to hand over a session you did not dispatch, so you may message and stop it like your own. It is only a request: the user confirms on a card, and the result arrives later as a session update. Child sessions, archived sessions, bot sessions and sessions another secretary already manages cannot be handed over.',
+      'Ask the user to hand over one session that is outside your takeover scope, so you may message and stop it like your own. It is only a request: the user confirms on a card, and the result arrives later as a session update. To work on a whole project instead, ask the user to add it to your takeover scope in settings. Child sessions, archived sessions, bot sessions and sessions another secretary already manages cannot be handed over.',
     parameters: object(
       {
         conversationId: id('Session id from session_list'),
@@ -422,13 +423,40 @@ const SCHEMAS: Record<
   },
   secretary_profile_propose: {
     description:
-      'Propose a change to your own settings (name, avatar color, model, autonomy, visible projects, style, language, notifications). It is a draft: the user confirms on a card and only then is it saved. Use it for the first setup too.',
+      'Propose a change to your own settings (name, avatar color, model, autonomy, visible projects, takeover scope, style, language, notifications). It is a draft: the user confirms on a card and only then is it saved. Use it for the first setup too.',
     parameters: object({
       name: { type: 'string', minLength: 1, maxLength: 64 },
       avatarColor: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
       model: MODEL_SCHEMA,
       autonomy: { type: 'string', enum: ['ask-first', 'tell-after', 'full'] },
       autoApproveProjectIds: { type: 'array', items: { type: 'string' }, maxItems: 200 },
+      takeoverScope: {
+        description:
+          'Which sessions you may message and stop without asking each time: explicit (only the ones the user hands over on a card), projects (the listed project ids), or all (every project you can see).',
+        anyOf: [
+          {
+            type: 'object',
+            properties: { mode: { type: 'string', enum: ['explicit'] } },
+            required: ['mode'],
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            properties: {
+              mode: { type: 'string', enum: ['projects'] },
+              projectIds: { type: 'array', items: { type: 'string' }, maxItems: 200 },
+            },
+            required: ['mode', 'projectIds'],
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            properties: { mode: { type: 'string', enum: ['all'] } },
+            required: ['mode'],
+            additionalProperties: false,
+          },
+        ],
+      },
       visibleProjectIds: {
         anyOf: [
           { type: 'string', enum: ['all'] },

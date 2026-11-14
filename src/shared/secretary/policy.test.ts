@@ -9,6 +9,8 @@ import type {
 import {
   canOperate,
   dispatchDecision,
+  inTakeoverScope,
+  operateSource,
   PROPOSAL_TTL_MS,
   takeoverRefusal,
   transitionProposal,
@@ -22,6 +24,7 @@ function profile(overrides: Partial<SecretaryProfile> = {}): SecretaryProfile {
     avatar: { color: '#7c5cff' },
     autonomy: 'ask-first',
     autoApproveProjectIds: [],
+    takeoverScope: { mode: 'projects', projectIds: [] },
     visibleProjectIds: 'all',
     dispatchModel: { mode: 'project' },
     dispatchWorktree: 'auto',
@@ -103,6 +106,41 @@ describe('canOperate', () => {
     expect(canOperate(file, 'conv1')).toBe(true);
     expect(canOperate(file, 'conv2')).toBe(true);
     expect(canOperate(file, 'conv3')).toBe(false);
+  });
+});
+
+describe('inTakeoverScope', () => {
+  it('treats a missing scope, explicit and an empty selection as one-by-one', () => {
+    expect(inTakeoverScope(undefined, 'p1')).toBe(false);
+    expect(inTakeoverScope({ mode: 'explicit' }, 'p1')).toBe(false);
+    expect(inTakeoverScope({ mode: 'projects', projectIds: [] }, 'p1')).toBe(false);
+  });
+
+  it('covers the selected projects only, and every project when set to all', () => {
+    const scope = { mode: 'projects' as const, projectIds: ['p1'] };
+    expect(inTakeoverScope(scope, 'p1')).toBe(true);
+    expect(inTakeoverScope(scope, 'p2')).toBe(false);
+    expect(inTakeoverScope(scope, undefined)).toBe(false);
+    expect(inTakeoverScope({ mode: 'all' }, 'p2')).toBe(true);
+  });
+});
+
+describe('operateSource', () => {
+  const scope = { mode: 'projects' as const, projectIds: ['p1'] };
+
+  it('reports dispatched, granted and scope, and null without permission', () => {
+    const file = dispatchFile();
+    expect(operateSource(file, 'conv1', undefined, 'p1')).toBe('dispatched');
+    expect(operateSource(file, 'conv2', undefined, 'p1')).toBe('granted');
+    expect(operateSource(file, 'conv3', scope, 'p1')).toBe('scope');
+    expect(operateSource(file, 'conv3', scope, 'p2')).toBeNull();
+    expect(operateSource(file, 'conv3', undefined, 'p1')).toBeNull();
+  });
+
+  it('reports a takeover record as granted, not as dispatched', () => {
+    const file = dispatchFile();
+    file.dispatched.conv1.takeover = { grantedAt: 1, via: 'scope' };
+    expect(operateSource(file, 'conv1', undefined, 'p1')).toBe('granted');
   });
 });
 

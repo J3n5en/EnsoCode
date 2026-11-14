@@ -7,6 +7,8 @@ import { parseProfile } from '@shared/secretary/parse';
 import {
   canOperate,
   dispatchDecision,
+  type OperateSource,
+  operateSource,
   type TakeoverRefusal,
   takeoverRefusal,
   transitionProposal,
@@ -149,7 +151,7 @@ const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid argumen
 
 const DENIALS = {
   'not-operable':
-    'permission denied (not-operable): this session was not dispatched by the secretary and the user has neither referenced it nor handed it over. Ask the user, or call session_takeover_propose to request a takeover; it only takes effect after the user confirms.',
+    'permission denied (not-operable): this session was not dispatched by the secretary, the user has not handed it over, and its project is not in the takeover scope. Ask the user to add the project to the takeover scope in settings, or call session_takeover_propose to request a takeover; it only takes effect after the user confirms.',
   'not-found':
     'not found: no root session with this id (archived, child and secretary sessions are excluded)',
   'not-visible':
@@ -602,6 +604,84 @@ async function checkTakeover(
 
 export type TakeoverResult = { ok: true } | { ok: false; error: string };
 
+type OperateCheck =
+  | { ok: true; source: OperateSource; conversation: ConversationAuthority; projectId: string }
+  | { ok: false; code: keyof typeof DENIALS };
+
+/**
+ * 能不能给这个会话发消息、停止它：派出的、逐个授权的，或所属项目在接管范围内。
+ * 范围接管沿用逐个授权的边界：子会话、归档、别的秘书的会话、不可见项目一律拒绝。
+ */
+async function checkOperate(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  profile: SecretaryProfile
+): Promise<OperateCheck> {
+  const conversation = await targetConversation(ports, conversationId);
+  if (!conversation) return { ok: false, code: 'not-found' };
+  const projects = await ports.projects();
+  const project = projects.find((candidate) => candidate.projectId === conversation.projectId);
+  const visible =
+    project !== undefined &&
+    visibleProjects(projects, profile).some(
+      (candidate) => candidate.projectId === project.projectId
+    );
+  if (!visible) return { ok: false, code: 'not-visible' };
+  const file = ports.dispatchFile();
+  const source = operateSource(file, conversationId, profile.takeoverScope, conversation.projectId);
+  if (!source) return { ok: false, code: 'not-operable' };
+  const projectId = conversation.projectId;
+  if (source !== 'scope') return { ok: true, source, conversation, projectId };
+  const refusal = takeoverRefusal(file, {
+    conversationId,
+    conversation,
+    project,
+    row: (await ports.rows())[conversationId],
+    visible,
+  });
+  if (refusal === 'not-found' || refusal === 'not-visible') return { ok: false, code: refusal };
+  if (refusal) return { ok: false, code: 'not-operable' };
+  return { ok: true, source, conversation, projectId };
+}
+
+/**
+ * 范围接管的会话第一次被真正用上：从这一刻起才跟踪它的状态与结果。
+ * 之前不建记录，所以范围里的其他会话不会被推给秘书，也不改未读与静音。
+ */
+async function trackScopeSession(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  projectId: string,
+  ctx: SecretaryOpContext
+): Promise<void> {
+  const file = ports.dispatchFile();
+  if (Object.hasOwn(file.dispatched, conversationId)) return;
+  const owner = ctx.secretaryConversationId ?? (await latestSecretaryConversation(ports));
+  if (!owner) return;
+  const now = ports.now();
+  const status = await ports.status(conversationId);
+  file.dispatched[conversationId] = {
+    conversationId,
+    projectId,
+    secretaryConversationId: owner,
+    createdAt: now,
+    turn: 0,
+    lastState: status.state,
+    lastEventAt: now,
+    stateSince: now,
+    takeover: { grantedAt: now, via: 'scope' },
+  };
+  ports.saveDispatch(file);
+  ports.audit({
+    at: now,
+    secretaryConversationId: owner,
+    op: 'takeover_grant',
+    targetId: conversationId,
+    ok: true,
+    detail: 'scope',
+  });
+}
+
 /**
  * 授权接管：只由用户亲手触发（确认卡或会话界面），秘书的工具调用到不了这里。
  * 推送绑到确认卡所属的秘书会话；界面直接授权时绑最近活跃的秘书会话。
@@ -713,21 +793,14 @@ export function createSecretaryDispatchHandlers(
       const fields = sessionFields(params, ['conversationId', 'message', 'mode']);
       if (!fields.ok) return fields;
       const { conversationId, message: text, mode } = fields.value;
-      const file = ports.dispatchFile();
-      if (!canOperate(file, conversationId)) {
-        return deny(ports, ctx, 'session_send', 'not-operable', conversationId);
-      }
-      const conversation = await targetConversation(ports, conversationId);
-      if (!conversation) {
-        return deny(ports, ctx, 'session_send', 'not-found', conversationId);
-      }
       const profile = await profileOf(ports);
-      const visible = visibleProjects(await ports.projects(), profile).some(
-        (project) => project.projectId === conversation.projectId
-      );
-      if (!visible) {
-        return deny(ports, ctx, 'session_send', 'not-visible', conversationId);
-      }
+      const check = await checkOperate(ports, conversationId, profile);
+      if (!check.ok) return deny(ports, ctx, 'session_send', check.code, conversationId);
+      const source = check.source;
+      const track = async () => {
+        if (source === 'scope')
+          await trackScopeSession(ports, conversationId, check.projectId, ctx);
+      };
       const status = await ports.status(conversationId);
       // 秘书不能替用户回答提问或审批工具调用：两种模式都拒绝
       if (status.pendingAsks + status.pendingApprovals > 0) {
@@ -746,6 +819,7 @@ export function createSecretaryDispatchHandlers(
               conversationId
             );
           }
+          await track();
           await noteDispatchResumed(ports, conversationId);
           ports.audit({
             at: ports.now(),
@@ -753,7 +827,7 @@ export function createSecretaryDispatchHandlers(
             op: 'session_send',
             targetId: conversationId,
             ok: true,
-            detail: 'steered',
+            detail: `steered (${source})`,
           });
           notifySecretaryChanged();
           return { ok: true, result: { status: 'steered' } };
@@ -768,6 +842,7 @@ export function createSecretaryDispatchHandlers(
         if (!queued) {
           return deny(ports, ctx, 'session_send', 'not-found', conversationId);
         }
+        await track();
         await noteDispatchResumed(ports, conversationId);
         ports.audit({
           at: ports.now(),
@@ -775,7 +850,7 @@ export function createSecretaryDispatchHandlers(
           op: 'session_send',
           targetId: conversationId,
           ok: true,
-          detail: 'queued',
+          detail: `queued (${source})`,
         });
         notifySecretaryChanged();
         return { ok: true, result: { status: 'queued' } };
@@ -802,13 +877,14 @@ export function createSecretaryDispatchHandlers(
           conversationId
         );
       }
+      await track();
       ports.audit({
         at: ports.now(),
         secretaryConversationId: ctx.secretaryConversationId,
         op: 'session_send',
         targetId: conversationId,
         ok: true,
-        detail: 'sent',
+        detail: `sent (${source})`,
       });
       await noteDispatchResumed(ports, conversationId);
       notifySecretaryChanged();
@@ -875,10 +951,12 @@ export function createSecretaryDispatchHandlers(
       const fields = sessionFields(params, ['conversationId', 'clearQueue']);
       if (!fields.ok) return fields;
       const { conversationId, clearQueue } = fields.value;
+      const check = await checkOperate(ports, conversationId, await profileOf(ports));
+      if (!check.ok) return deny(ports, ctx, 'session_stop', check.code, conversationId);
+      // 范围接管的会话：停下也算真正用上了它，从这里开始跟踪
+      if (check.source === 'scope')
+        await trackScopeSession(ports, conversationId, check.projectId, ctx);
       const file = ports.dispatchFile();
-      if (!canOperate(file, conversationId)) {
-        return deny(ports, ctx, 'session_stop', 'not-operable', conversationId);
-      }
       // 停止默认保留队列；clearQueue 只清秘书自己排的，用户排的一条不动。
       // 先清再 abort：清队列会触发补投，会话还在跑时补投不会开新轮。
       let cleared = 0;
@@ -911,7 +989,10 @@ export function createSecretaryDispatchHandlers(
         op: 'session_stop',
         targetId: conversationId,
         ok: true,
-        detail: cleared > 0 ? `stopped, cleared ${cleared} queued` : 'stopped',
+        detail:
+          cleared > 0
+            ? `stopped (${check.source}), cleared ${cleared} queued`
+            : `stopped (${check.source})`,
       });
       notifySecretaryChanged();
       return {
