@@ -40,6 +40,19 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/** 只查会让每轮请求都失败的结构：properties 是对象、每个属性值是对象、required 指向已声明的属性 */
+function validToolParameters(parameters: Record<string, unknown>): boolean {
+  const fields = parameters.properties === undefined ? {} : record(parameters.properties);
+  if (!fields) return false;
+  if (!Object.values(fields).every((value) => record(value) !== null)) return false;
+  const required = parameters.required;
+  if (required === undefined) return true;
+  return (
+    Array.isArray(required) &&
+    required.every((name) => typeof name === 'string' && Object.hasOwn(fields, name))
+  );
+}
+
 /** 提案参数、卡片草案与磁盘内容共用同一套收窄 */
 export function parseSecretaryToolDraft(value: unknown): ToolDraftResult {
   const fields = record(value);
@@ -55,7 +68,7 @@ export function parseSecretaryToolDraft(value: unknown): ToolDraftResult {
     return { ok: false, error: 'invalid tool runtime' };
   }
   const parameters = record(fields.parameters);
-  if (parameters?.type !== 'object') {
+  if (parameters?.type !== 'object' || !validToolParameters(parameters)) {
     return { ok: false, error: 'invalid tool parameters' };
   }
   let serialized: string;

@@ -74,6 +74,26 @@ describe('parseSecretaryToolDraft', () => {
     });
   });
 
+  it('拒绝会让每轮请求都失败的结构坏参数', () => {
+    const bad = [
+      { type: 'object', properties: 'text' },
+      { type: 'object', properties: { text: 'string' } },
+      { type: 'object', properties: { text: { type: 'string' } }, required: 'text' },
+      { type: 'object', properties: { text: { type: 'string' } }, required: ['missing'] },
+      { type: 'object', properties: { text: { type: 'string' } }, required: [1] },
+      { type: 'object', required: ['text'] },
+    ];
+    for (const parameters of bad) {
+      expect(parseSecretaryToolDraft({ ...draft, parameters })).toEqual({
+        ok: false,
+        error: 'invalid tool parameters',
+      });
+    }
+    expect(
+      parseSecretaryToolDraft({ ...draft, parameters: { type: 'object', properties: {} } })
+    ).toMatchObject({ ok: true });
+  });
+
   it('拒绝未知运行时与越界超时', () => {
     expect(parseSecretaryToolDraft({ ...draft, runtime: 'ruby' })).toEqual({
       ok: false,
