@@ -213,7 +213,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           if (resultEvent) kind = classify(record, resultEvent, status);
         }
         if (!kind && change) {
-          if (change.state === 'error' && change.previous !== 'error') kind = 'failed';
+          // worker 是所有会话共用的，它退出时空闲会话也会跳到 error；没在干活就不算失败
+          if (
+            change.state === 'error' &&
+            (change.previous === 'running' || change.previous === 'waiting')
+          )
+            kind = 'failed';
           else if (change.state === 'waiting' && change.previous !== 'waiting') kind = 'needs-user';
         }
         if (kind) recordResult(file, record, kind, now);

@@ -199,6 +199,15 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
   });
 
+  it('空闲的会话碰上 worker 退出不算失败', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent({ type: 'worker-exited' } as RendererAgentEvent, change('error', 'idle'));
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+  });
+
   it('worker 退出记失败', () => {
     const h = harness({});
     h.state.statuses.c1 = error;

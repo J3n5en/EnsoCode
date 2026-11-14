@@ -641,6 +641,33 @@ async function run(cdp) {
   assert(board.ok, '工作台面板打开', board);
   await cdp.shot(path.join(ART, '05-workbench.png'));
 
+  log('== step7 worker 退出');
+  const restarted = await page(`
+    return JSON.stringify(await window.electronAPI.caCert.apply('/etc/ssl/cert.pem'));
+  `);
+  assert(restarted.source === 'setting', 'step7: 改 CA 证书让 Main 重启 agent worker', restarted);
+  const exited = await waitFor(
+    () => (readJson(dispatchFile).dispatched[dispatchedId]?.lastState === 'error' ? true : null),
+    'worker exit observed',
+    20_000,
+    300
+  ).catch(() => null);
+  assert(
+    Boolean(exited),
+    'step7: Main 看到了 worker 退出',
+    readJson(dispatchFile).dispatched[dispatchedId]
+  );
+  const afterExit = readJson(dispatchFile);
+  const failed = Object.values(afterExit.dispatched).filter(
+    (record) => record.lastResult?.kind === 'failed'
+  );
+  assert(failed.length === 0, 'step7: 空闲的派出会话不因 worker 退出记失败', failed);
+  assert(
+    !afterExit.outbox.some((update) => update.kind === 'failed'),
+    'step7: 回传队列里没有失败',
+    afterExit.outbox
+  );
+
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
 }
