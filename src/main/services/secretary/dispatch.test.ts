@@ -18,12 +18,14 @@ import {
   dismissResult,
   grantTakeover,
   listTakeovers,
+  listUntracked,
   mutateTodo,
   NOT_OPERABLE_ERROR,
   resolveProposal,
   revokeTakeover,
   type SecretaryDispatchPorts,
   type SecretaryQueuedMessage,
+  untrack,
 } from './dispatch';
 import type { SecretarySessionStatus } from './readers';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
@@ -1216,6 +1218,79 @@ describe('接管范围', () => {
     expect(await grantTakeover(granted.ports, 'c1', 'user', null)).toEqual({ ok: true });
     await call(granted.handlers.session_send, { conversationId: 'c1', message: '继续' });
     expect(granted.audits.at(-1)).toMatchObject({ detail: 'sent (granted)' });
+  });
+});
+
+describe('不再跟踪', () => {
+  const untrackedHarness = (options: Parameters<typeof harness>[0] = {}) =>
+    harness({
+      profile: profile({ takeoverScope: { mode: 'projects', projectIds: ['p1'] } }),
+      conversations: [rootConversation('c1'), rootConversation('sec-chat', 'sec-proj')],
+      projects: [localProject(), localProject('sec-proj', { kind: 'secretary' })],
+      rows: {
+        c1: { projectId: 'p1', title: '修构建', sessionFile: '/s/c1.jsonl' },
+        'sec-chat': { projectId: 'sec-proj', lastActiveAt: 10 },
+      },
+      ...options,
+    });
+
+  it('用户点 × 之后范围权限失效，发消息与停止都被拒并说明原因', async () => {
+    const h = untrackedHarness();
+    // 范围接管的会话被真正用过一次，才有记录可撤销
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
+      ok: true,
+      result: { status: 'sent' },
+    });
+    expect(revokeTakeover(h.ports, 'c1', 'session')).toEqual({ ok: true });
+    expect(h.file.dispatched).toEqual({});
+    expect(h.file.untracked).toEqual(['c1']);
+
+    const send = await call(h.handlers.session_send, { conversationId: 'c1', message: '再来' });
+    expect(send.ok ? '' : send.error).toMatch(/^permission denied \(untracked\): /u);
+    expect(send.ok ? '' : send.error).toContain('untracked list in the secretary settings');
+    expect(await call(h.handlers.session_stop, { conversationId: 'c1' })).toMatchObject({
+      ok: false,
+    });
+    // 被拒之后不再自动建记录，秘书也不能靠范围把它管回来
+    expect(h.file.dispatched).toEqual({});
+    expect(h.prompts).toHaveLength(1);
+    expect(h.aborts).toEqual([]);
+  });
+
+  it('确认卡逐个授权照常可用，确认后从名单里移除', async () => {
+    const h = untrackedHarness({ file: { ...emptyFile(), untracked: ['c1'] } });
+    const proposed = await call(h.handlers.session_takeover_propose, { conversationId: 'c1' });
+    expect(proposed).toMatchObject({ ok: true, result: { status: 'awaiting_confirmation' } });
+    const resolved = await resolveProposal(h.ports, 'id-1', 'confirm');
+    expect(resolved).toMatchObject({ ok: true, proposal: { status: 'succeeded' } });
+    expect(h.file.untracked).toEqual([]);
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
+      ok: true,
+      result: { status: 'sent' },
+    });
+  });
+
+  it('设置页移除后恢复范围权限，移除不存在的会话报 not-found', async () => {
+    const h = untrackedHarness({ file: { ...emptyFile(), untracked: ['c1'] } });
+    expect(await listUntracked(h.ports)).toEqual([
+      { conversationId: 'c1', projectId: 'p1', projectName: 'alpha', title: '修构建' },
+    ]);
+    expect(untrack(h.ports, 'c1')).toEqual({ ok: true });
+    expect(h.file.untracked).toEqual([]);
+    expect(await listUntracked(h.ports)).toEqual([]);
+    expect(untrack(h.ports, 'c1')).toEqual({ ok: false, error: 'not-found' });
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
+      ok: true,
+      result: { status: 'sent' },
+    });
+  });
+
+  it('名单只挡范围权限，派出的会话照旧可以发消息', async () => {
+    const h = untrackedHarness({ file: { ...dispatchedFile(), untracked: ['c1'] } });
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' })).toEqual({
+      ok: true,
+      result: { status: 'sent' },
+    });
   });
 });
 

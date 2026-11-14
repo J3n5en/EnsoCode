@@ -507,6 +507,8 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_TAKEOVER_GRANT: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TAKEOVER_REVOKE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TAKEOVERS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_UNTRACKED_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_UNTRACKED_REMOVE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_FEED: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_DAILY: excluded('Experimental secretary agent; not an Enso capability.'),
   REMOTE_LEADER_CHANGED: excluded('Remote desktop renderer coordination transport.'),

@@ -142,6 +142,17 @@ describe('operateSource', () => {
     file.dispatched.conv1.takeover = { grantedAt: 1, via: 'scope' };
     expect(operateSource(file, 'conv1', undefined, 'p1')).toBe('granted');
   });
+
+  it('不再跟踪的会话失去范围权限，逐个授权的仍然有效', () => {
+    const file = dispatchFile();
+    file.untracked = ['conv3'];
+    expect(operateSource(file, 'conv3', scope, 'p1')).toBeNull();
+    // 派出的与点名的授权不受名单影响
+    expect(operateSource(file, 'conv1', scope, 'p1')).toBe('dispatched');
+    expect(operateSource(file, 'conv2', scope, 'p1')).toBe('granted');
+    // 名单只作用于自己，别的会话照旧按范围
+    expect(operateSource(file, 'conv4', scope, 'p1')).toBe('scope');
+  });
 });
 
 describe('takeoverRefusal', () => {

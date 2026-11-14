@@ -75,6 +75,8 @@ beforeEach(() => {
         listSkills: async () => ({ ok: true, skills: [] }),
         listTools: async () => ({ ok: true, tools: [] }),
         listTakeovers: async () => ({ ok: true, takeovers: [] }),
+        listUntracked: async () => ({ ok: true, untracked: [] }),
+        removeUntracked: async () => ({ ok: true }),
         onStateChanged: () => () => {},
       },
       extensionPlugins: { list: async () => [] },

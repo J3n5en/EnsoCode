@@ -393,6 +393,13 @@ describe('parseDispatchFile', () => {
     expect(file.outbox.map((update) => update.key)).toEqual(['k1', 'k2']);
   });
 
+  it('keeps the untracked list, dropping blanks and duplicates', () => {
+    const file = parseDispatchFile({ untracked: ['c1', 'c1', '', 5, 'c2'] });
+    expect(file.untracked).toEqual(['c1', 'c2']);
+    // 空名单不落字段，旧文件读出来还是原来的形状
+    expect(parseDispatchFile({ untracked: [] }).untracked).toBeUndefined();
+  });
+
   it('keeps a skill proposal with its previous content and drops a bad one', () => {
     const base = {
       secretaryConversationId: 's1',

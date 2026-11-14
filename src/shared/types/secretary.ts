@@ -212,6 +212,11 @@ export interface SecretaryDispatchFile {
   version: 1;
   dispatched: Record<string, DispatchRecord>;
   named: string[];
+  /**
+   * 用户点过 × 收回的会话：范围权限不再自动覆盖它们，只能靠确认卡重新逐个授权。
+   * 只缩小权限，不会让秘书多管一个会话。
+   */
+  untracked?: string[];
   proposals: Record<string, SecretaryProposal>;
   outbox: SecretaryUpdate[];
   /** 按时间的动态，最多留最近 400 条 */
@@ -340,6 +345,14 @@ export interface SecretaryTakeoverView {
   grantedAt: number;
   via: TakeoverVia;
   secretaryConversationId: string;
+}
+
+/** 用户收回跟踪后进「不再跟踪」名单的会话，设置页可移除 */
+export interface SecretaryUntrackedView {
+  conversationId: string;
+  projectId: string;
+  projectName: string;
+  title: string;
 }
 
 export interface SecretaryState {

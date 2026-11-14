@@ -3581,6 +3581,9 @@ export const zhTranslations: Record<string, string> = {
     '你自己开的、交给秘书接管的会话。秘书可以像对派出的会话一样给它们发消息、停止它们；取消接管就收回这项权限。',
   'No sessions handed over': '还没有交给秘书接管的会话',
   'Take back': '取消接管',
+  'Not tracked: the takeover scope no longer covers these sessions. Removing one lets the scope cover it again.':
+    '不再跟踪：接管范围不再覆盖这些会话。移除后范围权限恢复。',
+  'Track again': '恢复跟踪',
   'Send message {{title}}': '发送消息 {{title}}',
   'Stop session {{title}}': '停止会话 {{title}}',
   'Create session {{title}}': '创建会话 {{title}}',

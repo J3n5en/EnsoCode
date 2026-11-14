@@ -34,6 +34,14 @@ export function inTakeoverScope(
 /** 秘书操作一个会话的权限来源：派出的、逐个授权的，或项目在接管范围内 */
 export type OperateSource = 'dispatched' | 'granted' | 'scope';
 
+/** 用户在会话界面点过 ×：范围权限不再覆盖它，只有重新逐个授权才恢复 */
+export function isUntracked(
+  file: Pick<SecretaryDispatchFile, 'untracked'>,
+  conversationId: string
+): boolean {
+  return file.untracked?.includes(conversationId) === true;
+}
+
 /**
  * 发消息、停止会话的权限来源；null 表示没有权限。
  * 范围只给权限，不建记录：跟踪与推送从秘书真正用过这个会话开始。
@@ -47,6 +55,7 @@ export function operateSource(
   const record = file.dispatched[conversationId];
   if (record) return record.takeover ? 'granted' : 'dispatched';
   if (file.named.includes(conversationId)) return 'granted';
+  if (isUntracked(file, conversationId)) return null;
   return inTakeoverScope(scope, projectId) ? 'scope' : null;
 }
 
