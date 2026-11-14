@@ -2,6 +2,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   SECRETARY_ID_MAX,
   SECRETARY_OPS,
+  SECRETARY_SEND_MODES,
   SECRETARY_SESSION_MESSAGE_MAX,
   type SecretaryOp,
 } from '@shared/secretary/tools';
@@ -49,7 +50,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     },
   },
   session_send: {
-    keys: ['conversationId', 'message'],
+    keys: ['conversationId', 'message', 'mode'],
     aliases: {
       sessionId: 'conversationId',
       id: 'conversationId',
@@ -57,8 +58,21 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       content: 'message',
     },
   },
-  session_stop: {
+  session_queue_list: {
     keys: ['conversationId'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId' },
+  },
+  session_queue_cancel: {
+    keys: ['conversationId', 'messageId'],
+    aliases: {
+      sessionId: 'conversationId',
+      id: 'messageId',
+      queuedMessageId: 'messageId',
+    },
+  },
+  session_stop: {
+    keys: ['conversationId', 'clearQueue'],
+    booleans: ['clearQueue'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
   },
   session_takeover_propose: {
@@ -264,19 +278,50 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, the user referenced, or the user handed over to you. Queues behind the current turn when the session is running. Refused while the session waits for the user.',
+      'Send a message to a session you dispatched, the user referenced, or the user handed over to you. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes.',
     parameters: object(
       {
         conversationId: id('Target session id'),
         message: { type: 'string', minLength: 1, maxLength: SECRETARY_SESSION_MESSAGE_MAX },
+        mode: {
+          type: 'string',
+          enum: [...SECRETARY_SEND_MODES],
+          description:
+            'queue (default): wait behind the current turn. steer: cut in at the next tool boundary to change priority or correct direction.',
+        },
       },
       ['conversationId', 'message']
     ),
   },
+  session_queue_list: {
+    description:
+      'List the messages you queued into a session and that are not delivered yet. Messages the user queued themselves are only counted, never listed.',
+    parameters: object({ conversationId: id('Target session id') }, ['conversationId']),
+  },
+  session_queue_cancel: {
+    description:
+      "Withdraw one message you queued into a session before it is delivered. Only messages you queued yourself can be withdrawn; the user's own queued messages cannot.",
+    parameters: object(
+      {
+        conversationId: id('Target session id'),
+        messageId: id('Queued message id from session_queue_list'),
+      },
+      ['conversationId', 'messageId']
+    ),
+  },
   session_stop: {
     description:
-      'Stop a session you dispatched, the user referenced, or the user handed over to you.',
-    parameters: object({ conversationId: id('Target session id') }, ['conversationId']),
+      'Stop a session you dispatched, the user referenced, or the user handed over to you. Queued messages are kept by default; pass clearQueue true to also drop the messages you queued, so they do not all fire the next time the session runs. Messages the user queued are never cleared.',
+    parameters: object(
+      {
+        conversationId: id('Target session id'),
+        clearQueue: {
+          type: 'boolean',
+          description: 'Also drop the messages you queued into this session (default false)',
+        },
+      },
+      ['conversationId']
+    ),
   },
   session_takeover_propose: {
     description:

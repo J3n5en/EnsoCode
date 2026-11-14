@@ -9,6 +9,8 @@ export const SECRETARY_OPS = [
   'session_read',
   'session_create',
   'session_send',
+  'session_queue_list',
+  'session_queue_cancel',
   'session_stop',
   'session_takeover_propose',
   'todo_list',
@@ -24,6 +26,14 @@ export const SECRETARY_OPS = [
 ] as const;
 
 export type SecretaryOp = (typeof SECRETARY_OPS)[number];
+
+/**
+ * session_send 的投递方式：queue 排在目标会话当前回合之后（默认），
+ * steer 在目标会话当前这次工具调用结束后立刻注入，不等整轮结束。
+ */
+export const SECRETARY_SEND_MODES = ['queue', 'steer'] as const;
+
+export type SecretarySendMode = (typeof SECRETARY_SEND_MODES)[number];
 
 /**
  * 模型看不见的内部 op：秘书自造工具的执行入口由 worker 按工具名逐个生成，

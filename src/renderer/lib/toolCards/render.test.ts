@@ -17,6 +17,8 @@ const zh: Record<string, string> = {
   'Sent {{count}} messages': '发了 {{count}} 条消息',
   Delivered: '已送达',
   'Queued until the current turn ends': '已排队（等对方这一轮结束）',
+  'Steered into the current turn': '已插话（不等这一轮结束）',
+  'Delivered as a new turn (the session was idle)': '已作为新一轮发出（会话空闲）',
   Refused: '被拒绝',
   Stopped: '已停止',
   'Created the session': '已创建',
@@ -126,6 +128,24 @@ describe('工具卡片', () => {
     );
     expect(queued.title).toBe(`发给「${shortId('missing-session-id')}」`);
     expect(queued.status?.label).toBe('已排队（等对方这一轮结束）');
+    const steered = renderToolCall(
+      call(
+        'session_send',
+        { conversationId: 'cc52649d-full', message: '先修这个', mode: 'steer' },
+        { status: 'steered' }
+      ),
+      ctx('zh', lookup)
+    );
+    expect(steered.status).toEqual({ tone: 'ok', label: '已插话（不等这一轮结束）' });
+    const idle = renderToolCall(
+      call(
+        'session_send',
+        { conversationId: 'cc52649d-full', message: '换个方向', mode: 'steer' },
+        { status: 'sent' }
+      ),
+      ctx('zh', lookup)
+    );
+    expect(idle.status?.label).toBe('已作为新一轮发出（会话空闲）');
   });
 
   it('session_send 被拒绝时给出原因', () => {

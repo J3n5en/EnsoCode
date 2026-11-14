@@ -615,6 +615,17 @@ export function promptRootFromMain(
   return promptSession(identity, text, images, deliveryId);
 }
 
+/** Main 侧插话：与用户自己插话同一条 steer 通道，pi 在当前工具调用结束后读到它 */
+export function steerRootFromMain(
+  sessionId: string,
+  text: string,
+  deliveryId: string
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return steerSession(identity, text, undefined, deliveryId);
+}
+
 export async function releaseRootFromMain(sessionId: string): Promise<AgentActionResult> {
   const identity = exactIdentity(sessionId);
   return identity

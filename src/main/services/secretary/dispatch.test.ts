@@ -23,6 +23,7 @@ import {
   resolveProposal,
   revokeTakeover,
   type SecretaryDispatchPorts,
+  type SecretaryQueuedMessage,
 } from './dispatch';
 import type { SecretarySessionStatus } from './readers';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
@@ -104,7 +105,8 @@ interface Harness {
   prompts: { conversationId: string; text: string; deliveryId: string }[];
   resumes: string[];
   aborts: string[];
-  queued: { conversationId: string; message: { id: string; text: string } }[];
+  queued: { conversationId: string; message: SecretaryQueuedMessage }[];
+  steers: { conversationId: string; text: string; deliveryId: string }[];
   pausedGoals: string[];
   profileValue: SecretaryProfile | null;
   appliedProfiles: SecretaryProfileDraft[];
@@ -141,6 +143,7 @@ function harness(
     resumes: [],
     aborts: [],
     queued: [],
+    steers: [],
     pausedGoals: [],
     profileValue: options.profile === undefined ? profile() : options.profile,
     appliedProfiles: [],
@@ -203,9 +206,26 @@ function harness(
     abort: (conversationId) => {
       h.aborts.push(conversationId);
     },
+    steer: (conversationId, text, deliveryId) => {
+      h.steers.push({ conversationId, text, deliveryId });
+      return { ok: true };
+    },
     appendQueued: (conversationId, message) => {
       h.queued.push({ conversationId, message });
+      const row = h.rows[conversationId] ?? {};
+      const queued = Array.isArray(row.queuedMessages) ? row.queuedMessages : [];
+      h.rows[conversationId] = { ...row, queuedMessages: [...queued, message] };
       return true;
+    },
+    dropQueued: (conversationId, messageIds) => {
+      const row = h.rows[conversationId];
+      const queued = Array.isArray(row?.queuedMessages) ? row.queuedMessages : [];
+      const kept = queued.filter(
+        (item) => !messageIds.includes((item as { id?: string }).id ?? '')
+      );
+      const removed = queued.length - kept.length;
+      if (row && removed > 0) h.rows[conversationId] = { ...row, queuedMessages: kept };
+      return removed;
     },
     pauseGoal: (conversationId) => {
       h.pausedGoals.push(conversationId);
@@ -526,7 +546,12 @@ describe('session_send', () => {
     });
     const result = await call(h.handlers.session_send, { conversationId: 'c1', message: '继续' });
     expect(result).toEqual({ ok: true, result: { status: 'queued' } });
-    expect(h.queued).toEqual([{ conversationId: 'c1', message: { id: 'id-1', text: '继续' } }]);
+    expect(h.queued).toEqual([
+      {
+        conversationId: 'c1',
+        message: { id: 'id-1', text: '继续', origin: 'secretary', by: 'sec-1', at: NOW },
+      },
+    ]);
     expect(h.prompts).toEqual([]);
   });
 
@@ -590,6 +615,147 @@ describe('session_send', () => {
     expect(result).toEqual({ ok: false, error: 'no session file' });
     expect(h.prompts).toEqual([]);
   });
+
+  it('mode=steer 在运行中插话，不排到回合后面', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
+    });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '先修这个',
+      mode: 'steer',
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'steered' } });
+    expect(h.steers).toEqual([{ conversationId: 'c1', text: '先修这个', deliveryId: 'id-1' }]);
+    expect(h.queued).toEqual([]);
+    expect(h.prompts).toEqual([]);
+    expect(h.audits).toEqual([
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'session_send',
+        targetId: 'c1',
+        ok: true,
+        detail: 'steered',
+      },
+    ]);
+  });
+
+  it('mode=steer 时目标空闲就开新轮，没有活轮可插', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '换个方向',
+      mode: 'steer',
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.steers).toEqual([]);
+    expect(h.prompts).toEqual([{ conversationId: 'c1', text: '换个方向', deliveryId: 'id-1' }]);
+  });
+
+  it('mode=steer 时目标在等用户也拒绝', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      statuses: { c1: { state: 'running', pendingAsks: 1, pendingApprovals: 0 } },
+    });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '先修这个',
+      mode: 'steer',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^refused \(needs-user\): /u);
+    expect(h.steers).toEqual([]);
+    expect(h.queued).toEqual([]);
+  });
+
+  it('mode 只认 queue 与 steer', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '继续',
+      mode: 'interrupt',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^invalid arguments: /u);
+    expect(result.error).toContain('mode');
+    expect(h.queued).toEqual([]);
+    expect(h.steers).toEqual([]);
+  });
+});
+
+describe('秘书自己的排队消息', () => {
+  const queuedRow = (queued: unknown[]) => ({
+    c1: { title: '在跑', sessionFile: '/c1', queuedMessages: queued },
+  });
+  const mine = { id: 'q-sec', text: '秘书排的', origin: 'secretary', by: 'sec-1', at: 900 };
+  const other = { id: 'q-sec-2', text: '别的秘书排的', origin: 'secretary', by: 'sec-2', at: 901 };
+  const user = { id: 'q-user', text: '用户排的' };
+
+  it('只列出秘书自己排的消息，用户的只报条数', async () => {
+    const h = harness({ file: dispatchedFile(), rows: queuedRow([user, mine, other]) });
+    const result = await call(h.handlers.session_queue_list, { conversationId: 'c1' });
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        conversationId: 'c1',
+        queued: [{ id: 'q-sec', text: '秘书排的', at: 900 }],
+        others: 2,
+      },
+    });
+  });
+
+  it('撤回自己排的消息并记审计', async () => {
+    const h = harness({ file: dispatchedFile(), rows: queuedRow([user, mine]) });
+    const result = await call(h.handlers.session_queue_cancel, {
+      conversationId: 'c1',
+      messageId: 'q-sec',
+    });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'cancelled', conversationId: 'c1', messageId: 'q-sec' },
+    });
+    expect(h.rows.c1.queuedMessages).toEqual([user]);
+    expect(h.audits).toEqual([
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'session_queue_cancel',
+        targetId: 'q-sec',
+        ok: true,
+        detail: 'cancelled',
+      },
+    ]);
+  });
+
+  it('用户排的与别的秘书排的都不能撤回', async () => {
+    const h = harness({ file: dispatchedFile(), rows: queuedRow([user, other]) });
+    for (const messageId of ['q-user', 'q-sec-2']) {
+      const result = await call(h.handlers.session_queue_cancel, {
+        conversationId: 'c1',
+        messageId,
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toMatch(/^refused \(not-yours\): /u);
+    }
+    expect(h.rows.c1.queuedMessages).toEqual([user, other]);
+    expect(h.audits.map((entry) => entry.detail)).toEqual(['not-yours', 'not-yours']);
+  });
+
+  it('已经投递掉的消息撤回时报 not found', async () => {
+    const h = harness({ file: dispatchedFile(), rows: queuedRow([]) });
+    const result = await call(h.handlers.session_queue_cancel, {
+      conversationId: 'c1',
+      messageId: 'q-gone',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^not found: /u);
+  });
 });
 
 describe('session_stop', () => {
@@ -629,6 +795,45 @@ describe('session_stop', () => {
     >;
     const result = await call(h.handlers.session_stop, params);
     expect(result).toEqual({ ok: true, result: { status: 'stopped' } });
+    expect(h.aborts).toEqual(['c1']);
+  });
+
+  it('默认保留队列：秘书排的和用户排的都还在', async () => {
+    const queued = [
+      { id: 'q-user', text: '用户排的' },
+      { id: 'q-sec', text: '秘书排的', origin: 'secretary', by: 'sec-1', at: 900 },
+    ];
+    const h = harness({
+      file: dispatchedFile(),
+      rows: { c1: { title: '在跑', sessionFile: '/c1', queuedMessages: queued } },
+    });
+    const result = await call(h.handlers.session_stop, { conversationId: 'c1' });
+    expect(result).toEqual({ ok: true, result: { status: 'stopped' } });
+    expect(h.rows.c1.queuedMessages).toEqual(queued);
+    expect(h.audits.map((entry) => entry.detail)).toEqual(['stopped']);
+  });
+
+  it('clearQueue 只清秘书自己排的，用户排的一条不动', async () => {
+    const user = { id: 'q-user', text: '用户排的' };
+    const other = {
+      id: 'q-sec-2',
+      text: '别的秘书排的',
+      origin: 'secretary',
+      by: 'sec-2',
+      at: 901,
+    };
+    const mine = { id: 'q-sec', text: '秘书排的', origin: 'secretary', by: 'sec-1', at: 900 };
+    const h = harness({
+      file: dispatchedFile(),
+      rows: { c1: { title: '在跑', sessionFile: '/c1', queuedMessages: [user, other, mine] } },
+    });
+    const result = await call(h.handlers.session_stop, {
+      conversationId: 'c1',
+      clearQueue: true,
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'stopped', clearedQueued: 1 } });
+    expect(h.rows.c1.queuedMessages).toEqual([user, other]);
+    expect(h.audits.map((entry) => entry.detail)).toEqual(['stopped, cleared 1 queued']);
     expect(h.aborts).toEqual(['c1']);
   });
 

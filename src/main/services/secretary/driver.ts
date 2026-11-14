@@ -100,6 +100,10 @@ function queuedFrom(value: unknown): HeadlessQueuedMessage[] {
       ...(Array.isArray(message.images)
         ? { images: message.images as HeadlessQueuedMessage['images'] }
         : {}),
+      // 秘书排的消息带来源标记：驱动者写回整份队列时不能把它洗掉，否则秘书撤不回自己排的
+      ...(message.origin === 'secretary' ? { origin: 'secretary' as const } : {}),
+      ...(typeof message.by === 'string' ? { by: message.by } : {}),
+      ...(typeof message.at === 'number' ? { at: message.at } : {}),
     });
   }
   return queued;
@@ -305,13 +309,17 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
     const result = ports.prompt(conversationId, delivery, ports.newId());
     if (result.ok) return;
     const error = result.error ?? 'prompt failed';
-    const flushed = applied.runtime.queued.length < previous.queued.length;
+    // 投递失败的那一条放回队首：来源标记跟着回来，秘书还能撤回它
+    const flushed = previous.queued.find(
+      (item) => !applied.runtime.queued.some((next) => next.id === item.id)
+    );
     save(conversationId, {
       ...applied.runtime,
       ...(flushed
         ? {
             queued: [
               {
+                ...flushed,
                 id: ports.newId(),
                 text: delivery.text,
                 ...(delivery.images ? { images: delivery.images } : {}),

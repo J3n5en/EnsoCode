@@ -12,7 +12,12 @@ import {
   transitionProposal,
   validateDispatch,
 } from '@shared/secretary/policy';
-import { SECRETARY_ID_MAX, SECRETARY_SESSION_MESSAGE_MAX } from '@shared/secretary/tools';
+import {
+  SECRETARY_ID_MAX,
+  SECRETARY_SEND_MODES,
+  SECRETARY_SESSION_MESSAGE_MAX,
+  type SecretarySendMode,
+} from '@shared/secretary/tools';
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import {
@@ -58,6 +63,16 @@ import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from '
 
 type MaybePromise<T> = T | Promise<T>;
 
+/** 秘书排进目标会话队列的消息：origin 标记来源，撤回与停止清队列只认自己排的 */
+export interface SecretaryQueuedMessage {
+  id: string;
+  text: string;
+  origin: 'secretary';
+  /** 排队的秘书会话；撤回时要求与调用方一致 */
+  by?: string;
+  at: number;
+}
+
 /** Main 侧的写数据源；测试注入假实现，生产走文件末尾的 secretaryDispatchPorts */
 export interface SecretaryDispatchPorts {
   /** null = 未完成初次设置，按 parseProfile({}) 的默认档案处理 */
@@ -82,11 +97,16 @@ export interface SecretaryDispatchPorts {
   resume(conversationId: string): Promise<{ ok: boolean; error?: string }>;
   alive(conversationId: string): MaybePromise<boolean>;
   abort(conversationId: string): MaybePromise<void>;
-  /** 追加排队消息；行不存在时返回 false */
-  appendQueued(
+  /** 插话：走用户自己的 steer 通道，在当前工具调用结束后投递 */
+  steer(
     conversationId: string,
-    message: { id: string; text: string }
-  ): MaybePromise<boolean>;
+    text: string,
+    deliveryId: string
+  ): MaybePromise<{ ok: boolean; error?: string }>;
+  /** 追加排队消息；行不存在时返回 false */
+  appendQueued(conversationId: string, message: SecretaryQueuedMessage): MaybePromise<boolean>;
+  /** 按 id 从队列里删消息，返回真正删掉的条数 */
+  dropQueued(conversationId: string, messageIds: readonly string[]): MaybePromise<number>;
   /** 有目标的会话被停止时置为暂停 */
   pauseGoal(conversationId: string): MaybePromise<void>;
   /** 确认 profile 提案：交给档案服务走同一套保存与副作用 */
@@ -113,6 +133,8 @@ export interface SecretaryDispatchPorts {
 const DISPATCH_OPS = [
   'session_create',
   'session_send',
+  'session_queue_list',
+  'session_queue_cancel',
   'session_stop',
   'session_takeover_propose',
   'todo_list',
@@ -134,18 +156,26 @@ const DENIALS = {
     "permission denied (not-visible): the session's project is not in the secretary's visible projects",
   'needs-user':
     'refused (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+  'not-yours':
+    'refused (not-yours): only messages you queued yourself can be withdrawn; this one was queued by the user or by another secretary',
 } as const;
 
 export const NOT_OPERABLE_ERROR = DENIALS['not-operable'];
 
 type FieldsResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
+interface SessionFields {
+  conversationId: string;
+  message: string;
+  mode: SecretarySendMode;
+  clearQueue: boolean;
+}
+
 /** 逐字段校验，失败时写明哪个字段、哪里不合法 */
 function sessionFields(
   params: Record<string, unknown>,
-  withMessage: boolean
-): FieldsResult<{ conversationId: string; message: string }> {
-  const allowed = withMessage ? ['conversationId', 'message'] : ['conversationId'];
+  allowed: readonly string[]
+): FieldsResult<SessionFields> {
   const invalid = (detail: string) => ({
     ok: false as const,
     error: `invalid arguments: ${detail}`,
@@ -168,11 +198,64 @@ function sessionFields(
   };
   const conversationId = text('conversationId', SECRETARY_ID_MAX);
   if (!conversationId.ok) return conversationId;
-  if (!withMessage)
-    return { ok: true, value: { conversationId: conversationId.value, message: '' } };
-  const message = text('message', SECRETARY_SESSION_MESSAGE_MAX);
+  const message = allowed.includes('message')
+    ? text('message', SECRETARY_SESSION_MESSAGE_MAX)
+    : ({ ok: true, value: '' } as const);
   if (!message.ok) return message;
-  return { ok: true, value: { conversationId: conversationId.value, message: message.value } };
+  const mode = params.mode;
+  if (mode !== undefined && !(SECRETARY_SEND_MODES as readonly unknown[]).includes(mode)) {
+    return invalid(`"mode" must be one of ${SECRETARY_SEND_MODES.join(', ')}`);
+  }
+  const clearQueue = params.clearQueue;
+  if (clearQueue !== undefined && typeof clearQueue !== 'boolean') {
+    return invalid(`"clearQueue" must be a boolean, got ${typeof clearQueue}`);
+  }
+  return {
+    ok: true,
+    value: {
+      conversationId: conversationId.value,
+      message: message.value,
+      mode: (mode as SecretarySendMode | undefined) ?? 'queue',
+      clearQueue: clearQueue === true,
+    },
+  };
+}
+
+interface QueuedItem {
+  id: string;
+  text: string;
+  at?: number;
+}
+
+/** 队列里秘书自己排的消息；others 是用户或别的秘书排的，只能看条数不能动 */
+function secretaryQueued(
+  row: Record<string, unknown> | undefined,
+  ctx: SecretaryOpContext
+): { mine: QueuedItem[]; others: number } {
+  const queued = Array.isArray(row?.queuedMessages) ? row.queuedMessages : [];
+  const mine: QueuedItem[] = [];
+  let others = 0;
+  for (const value of queued) {
+    if (!value || typeof value !== 'object') continue;
+    const item = value as {
+      id?: unknown;
+      text?: unknown;
+      origin?: unknown;
+      by?: unknown;
+      at?: unknown;
+    };
+    if (typeof item.id !== 'string') continue;
+    if (item.origin === 'secretary' && item.by === ctx.secretaryConversationId) {
+      mine.push({
+        id: item.id,
+        text: typeof item.text === 'string' ? item.text : '',
+        ...(typeof item.at === 'number' ? { at: item.at } : {}),
+      });
+    } else {
+      others += 1;
+    }
+  }
+  return { mine, others };
 }
 
 /** 工作台推送由 IPC 层注册，避免本模块静态依赖 electron 与 agent */
@@ -627,9 +710,9 @@ export function createSecretaryDispatchHandlers(
     },
 
     async session_send(params, ctx) {
-      const fields = sessionFields(params, true);
+      const fields = sessionFields(params, ['conversationId', 'message', 'mode']);
       if (!fields.ok) return fields;
-      const { conversationId, message: text } = fields.value;
+      const { conversationId, message: text, mode } = fields.value;
       const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
         return deny(ports, ctx, 'session_send', 'not-operable', conversationId);
@@ -646,12 +729,43 @@ export function createSecretaryDispatchHandlers(
         return deny(ports, ctx, 'session_send', 'not-visible', conversationId);
       }
       const status = await ports.status(conversationId);
-      // 秘书不能替用户回答提问或审批工具调用
+      // 秘书不能替用户回答提问或审批工具调用：两种模式都拒绝
       if (status.pendingAsks + status.pendingApprovals > 0) {
         return deny(ports, ctx, 'session_send', 'needs-user', conversationId);
       }
       if (status.state === 'running') {
-        if (!(await ports.appendQueued(conversationId, { id: ports.newId(), text }))) {
+        // 插话复用用户自己的 steer 通道：pi 在当前工具调用结束后读到它，不等整轮结束
+        if (mode === 'steer') {
+          const steered = await ports.steer(conversationId, text, ports.newId());
+          if (!steered.ok) {
+            return auditFailure(
+              ports,
+              ctx,
+              'session_send',
+              steered.error ?? 'steer-failed',
+              conversationId
+            );
+          }
+          await noteDispatchResumed(ports, conversationId);
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_send',
+            targetId: conversationId,
+            ok: true,
+            detail: 'steered',
+          });
+          notifySecretaryChanged();
+          return { ok: true, result: { status: 'steered' } };
+        }
+        const queued = await ports.appendQueued(conversationId, {
+          id: ports.newId(),
+          text,
+          origin: 'secretary',
+          ...(ctx.secretaryConversationId ? { by: ctx.secretaryConversationId } : {}),
+          at: ports.now(),
+        });
+        if (!queued) {
           return deny(ports, ctx, 'session_send', 'not-found', conversationId);
         }
         await noteDispatchResumed(ports, conversationId);
@@ -701,13 +815,81 @@ export function createSecretaryDispatchHandlers(
       return { ok: true, result: { status: 'sent' } };
     },
 
-    async session_stop(params, ctx) {
-      const fields = sessionFields(params, false);
+    async session_queue_list(params, ctx) {
+      const fields = sessionFields(params, ['conversationId']);
       if (!fields.ok) return fields;
       const { conversationId } = fields.value;
+      if (!canOperate(ports.dispatchFile(), conversationId)) {
+        return deny(ports, ctx, 'session_queue_list', 'not-operable', conversationId);
+      }
+      const row = (await ports.rows())[conversationId];
+      if (!row) return deny(ports, ctx, 'session_queue_list', 'not-found', conversationId);
+      const { mine, others } = secretaryQueued(row, ctx);
+      return { ok: true, result: { conversationId, queued: mine, others } };
+    },
+
+    async session_queue_cancel(params, ctx) {
+      const fields = sessionFields(params, ['conversationId', 'messageId']);
+      if (!fields.ok) return fields;
+      const { conversationId } = fields.value;
+      const messageId = stringParam(params, 'messageId');
+      if (!messageId) return invalidArguments;
+      if (!canOperate(ports.dispatchFile(), conversationId)) {
+        return deny(ports, ctx, 'session_queue_cancel', 'not-operable', conversationId);
+      }
+      const row = (await ports.rows())[conversationId];
+      if (!row) return deny(ports, ctx, 'session_queue_cancel', 'not-found', conversationId);
+      const { mine } = secretaryQueued(row, ctx);
+      if (!mine.some((item) => item.id === messageId)) {
+        // 用户排的、别的秘书排的、已经投递掉的：一律不动
+        const present =
+          Array.isArray(row.queuedMessages) &&
+          row.queuedMessages.some((value) => {
+            if (!value || typeof value !== 'object') return false;
+            return (value as { id?: unknown }).id === messageId;
+          });
+        return deny(
+          ports,
+          ctx,
+          'session_queue_cancel',
+          present ? 'not-yours' : 'not-found',
+          messageId
+        );
+      }
+      if ((await ports.dropQueued(conversationId, [messageId])) === 0) {
+        return deny(ports, ctx, 'session_queue_cancel', 'not-found', messageId);
+      }
+      ports.audit({
+        at: ports.now(),
+        secretaryConversationId: ctx.secretaryConversationId,
+        op: 'session_queue_cancel',
+        targetId: messageId,
+        ok: true,
+        detail: 'cancelled',
+      });
+      notifySecretaryChanged();
+      return { ok: true, result: { status: 'cancelled', conversationId, messageId } };
+    },
+
+    async session_stop(params, ctx) {
+      const fields = sessionFields(params, ['conversationId', 'clearQueue']);
+      if (!fields.ok) return fields;
+      const { conversationId, clearQueue } = fields.value;
       const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
         return deny(ports, ctx, 'session_stop', 'not-operable', conversationId);
+      }
+      // 停止默认保留队列；clearQueue 只清秘书自己排的，用户排的一条不动。
+      // 先清再 abort：清队列会触发补投，会话还在跑时补投不会开新轮。
+      let cleared = 0;
+      if (clearQueue) {
+        const { mine } = secretaryQueued((await ports.rows())[conversationId], ctx);
+        if (mine.length > 0) {
+          cleared = await ports.dropQueued(
+            conversationId,
+            mine.map((item) => item.id)
+          );
+        }
       }
       await ports.abort(conversationId);
       // 接管来的会话自带的目标也一并暂停，免得停下后又被续跑
@@ -729,10 +911,13 @@ export function createSecretaryDispatchHandlers(
         op: 'session_stop',
         targetId: conversationId,
         ok: true,
-        detail: 'stopped',
+        detail: cleared > 0 ? `stopped, cleared ${cleared} queued` : 'stopped',
       });
       notifySecretaryChanged();
-      return { ok: true, result: { status: 'stopped' } };
+      return {
+        ok: true,
+        result: { status: 'stopped', ...(cleared > 0 ? { clearedQueued: cleared } : {}) },
+      };
     },
 
     async todo_list(params) {
@@ -1321,6 +1506,8 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
     (await import('../../ipc/agent')).isRootSessionAlive(conversationId),
   abort: async (conversationId) =>
     (await import('../../ipc/agent')).abortRootFromMain(conversationId),
+  steer: async (conversationId, text, deliveryId) =>
+    (await import('../../ipc/agent')).steerRootFromMain(conversationId, text, deliveryId),
   appendQueued: async (conversationId, message) => {
     const { patchConversationsState } = await import('../../ipc/settings');
     let found = false;
@@ -1332,6 +1519,24 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
       state.conversations[conversationId] = { ...row, queuedMessages: [...queued, message] };
     });
     return found;
+  },
+  dropQueued: async (conversationId, messageIds) => {
+    const { patchConversationsState } = await import('../../ipc/settings');
+    const drop = new Set(messageIds);
+    let removed = 0;
+    patchConversationsState((state) => {
+      const row = state.conversations[conversationId];
+      if (!row || !Array.isArray(row.queuedMessages)) return;
+      const kept = row.queuedMessages.filter((value) => {
+        const id = value && typeof value === 'object' ? (value as { id?: unknown }).id : undefined;
+        const hit = typeof id === 'string' && drop.has(id);
+        if (hit) removed += 1;
+        return !hit;
+      });
+      if (removed === 0) return;
+      state.conversations[conversationId] = { ...row, queuedMessages: kept };
+    });
+    return removed;
   },
   pauseGoal: async (conversationId) => {
     const { patchConversationsState } = await import('../../ipc/settings');

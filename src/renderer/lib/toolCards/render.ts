@@ -293,6 +293,7 @@ register('session_send', (call, ctx) => {
   const args = rec(call.args);
   const output = rec(parseJson(call.output));
   const id = str(args?.conversationId);
+  const steer = str(args?.mode) === 'steer';
   const title = ctx.t('Sent to 「{{title}}」', { title: sessionLabel(id, ctx) });
   const blocks: ToolCardBlock[] = [];
   const message = str(args?.message);
@@ -301,10 +302,18 @@ register('session_send', (call, ctx) => {
   if (error) blocks.unshift({ kind: 'error', text: error });
   let status: ToolCardStatus | undefined;
   if (error) status = { tone: 'error', label: ctx.t('Refused') };
-  else if (output?.status === 'queued') {
+  else if (output?.status === 'steered') {
+    status = { tone: 'ok', label: ctx.t('Steered into the current turn') };
+  } else if (output?.status === 'queued') {
     status = { tone: 'queued', label: ctx.t('Queued until the current turn ends') };
-  } else if (output?.status === 'sent') status = { tone: 'ok', label: ctx.t('Delivered') };
-  else if (call.state === 'running') status = { tone: 'neutral', label: ctx.t('Sending…') };
+  } else if (output?.status === 'sent') {
+    status = {
+      tone: 'ok',
+      label: steer ? ctx.t('Delivered as a new turn (the session was idle)') : ctx.t('Delivered'),
+    };
+  } else if (call.state === 'running') {
+    status = { tone: 'neutral', label: steer ? ctx.t('Steering…') : ctx.t('Sending…') };
+  }
   const session = id ? ({ kind: 'session', id, label: sessionLabel(id, ctx) } as const) : null;
   if (session) blocks.unshift(session);
   return view(call, title, blocks, status);
