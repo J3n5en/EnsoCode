@@ -75,10 +75,7 @@ import {
   SecretaryProposalRow,
   secretaryProposalId,
 } from '@/components/secretary/SecretaryProposalRow';
-import {
-  useIsSecretaryChat,
-  useSecretaryChatSpeaker,
-} from '@/components/secretary/useSecretaryFace';
+import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import {
   Dialog,
   DialogContent,
@@ -163,6 +160,11 @@ const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
 
 interface TimelineRowProps {
   item: TimelineItem;
+  /**
+   * 这条时间线自己的会话属于秘书项目。由上层按 conversationId 判定后显式传下来：
+   * 读全局「当前打开的会话」会在切标签的一瞬间和 buildTimeline 的判断对不上。
+   */
+  secretarySession?: boolean;
   /** tool-group 组头点击展开/收拢 */
   onToggleGroup?: (key: string) => void;
   /** 轮次（Turn）折叠/展开：行自身知道目标状态，父级不必回查 */
@@ -175,6 +177,7 @@ interface TimelineRowProps {
  * onToggleGroup 引用不参与比较（父级保证语义稳定）。
  */
 function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
+  if (prev.secretarySession !== next.secretarySession) return false;
   const a = prev.item;
   const b = next.item;
   if (a === b) return true;
@@ -1106,13 +1109,17 @@ export function ReplyHeader({
   model,
   at,
   privacyMask,
+  secretarySession = false,
 }: {
   model?: string;
   at?: number;
   privacyMask?: MaskReport;
+  /** 这条时间线自己的会话属于秘书项目，与全局当前会话无关 */
+  secretarySession?: boolean;
 }) {
   const host = useChatHost();
-  const secretarySpeaker = useSecretaryChatSpeaker();
+  const face = useSecretaryFace();
+  const secretarySpeaker = secretarySession ? face : null;
   const speaker = host?.speaker ?? (host ? null : secretarySpeaker);
   const secretaryMark = !host && secretarySpeaker ? true : undefined;
   const meta = [model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ');
@@ -1152,13 +1159,14 @@ export function ReplyHeader({
 
 export const TimelineRow = memo(function TimelineRow({
   item,
+  secretarySession = false,
   onToggleGroup,
   onToggleTurn,
 }: TimelineRowProps) {
   const search = useChatSearchHighlight();
   const searchQuery = search.query;
   const activeNth = search.activeKey === item.key ? search.activeNth : -1;
-  const secretaryChat = useIsSecretaryChat();
+  const secretaryChat = secretarySession;
   switch (item.kind) {
     case 'user': {
       const fromMain = item.text ? isFromMainAgent(item.text) : false;
