@@ -1131,9 +1131,13 @@ export class SessionSupervisor {
     // 失败（含前台中止后按错误收口）同空闲：能接新回合就立即唤起，不攒到用户下一条消息
     if (managed.status !== 'running') {
       managed.roundPending = true;
-      // 合成提示不是用户输入：标 extension 让插件 input 拦截跳过
+      // 合成提示不是用户输入：标 extension 让插件 input 拦截跳过。
+      // 投影说空闲、pi 却还在跑时用 followUp 排进活轮，不抛 already processing
       void managed.session
-        .prompt(`<agent-notification>\n${text}\n</agent-notification>`, { source: 'extension' })
+        .prompt(`<agent-notification>\n${text}\n</agent-notification>`, {
+          source: 'extension',
+          streamingBehavior: 'followUp',
+        })
         .finally(() => {
           if (managed.status !== 'running') managed.roundPending = false;
         })
@@ -1895,10 +1899,10 @@ export class SessionSupervisor {
           this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
           return;
         }
-        // 活轮还在（含 resume）：照常插话；resume 只对空闲会话开新轮时生效
+        // 活轮还在（含 resume）：prompt 是排队消息，用 followUp 排到本轮之后，不插话也不报错；
+        // 插话走 steer 命令。resume 只对空闲会话开新轮时生效（promptFresh 内判流式）
         if (managed.status === 'running') {
-          await this.steerTracked(managed, command.text, images, command.deliveryId);
-          this.bgTasks.backgroundAllForeground(managed.identity.sessionId, 'steer');
+          this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
           return;
         }
         // 投影已 idle 但 pi 仍忙：压缩中（pi 拒收 prompt）不限时等压完；仍 streaming 要么
@@ -4270,7 +4274,9 @@ export class SessionSupervisor {
       if (managed.status === 'running') {
         await this.steerTracked(managed, text);
       } else {
-        void this.promptTracked(managed, consumeRole(managed, text))
+        void this.promptTracked(managed, consumeRole(managed, text), {
+          streamingBehavior: 'followUp',
+        })
           .then(() => {
             // prompt 已归但未见任何终态事件(不应发生的退化路径):不让 wait 挂死
             if (managed.status !== 'running' && managed.roundPending) this.settleRound(managed);
@@ -4745,11 +4751,13 @@ export class SessionSupervisor {
           managed.requestBudget.markWrapup();
           setImmediate(() => {
             if (managed.requestBudget?.phaseNow !== 'wrapup') return;
-            void managed.session.prompt(budgetWrapUpPrompt()).catch((error) => {
-              if (managed.requestBudget?.phaseNow !== 'wrapup') return;
-              // 补报告发不出去也按预算停止交回已有输出，错误写进结果
-              this.completeTurn(managed, { error: toErrorMessage(error) });
-            });
+            void managed.session
+              .prompt(budgetWrapUpPrompt(), { streamingBehavior: 'followUp' })
+              .catch((error) => {
+                if (managed.requestBudget?.phaseNow !== 'wrapup') return;
+                // 补报告发不出去也按预算停止交回已有输出，错误写进结果
+                this.completeTurn(managed, { error: toErrorMessage(error) });
+              });
           });
           return;
         }
@@ -4864,9 +4872,11 @@ export class SessionSupervisor {
     if (!looksLikeRefusal(text)) return false;
     managed.refusalRetriedTurn = turnId;
     managed.turnStartIndex = managed.messages.length;
-    void this.promptTracked(managed, hardening).catch((error) => {
-      this.failTurn(managed, toErrorMessage(error));
-    });
+    void this.promptTracked(managed, hardening, { streamingBehavior: 'followUp' }).catch(
+      (error) => {
+        this.failTurn(managed, toErrorMessage(error));
+      }
+    );
     return true;
   }
 
@@ -4901,7 +4911,7 @@ export class SessionSupervisor {
     if (!text) return false;
     // 重发同一请求：本轮摘要从重发点起算，避免失败的首次尝试重复计入
     managed.turnStartIndex = managed.messages.length;
-    void this.promptTracked(managed, text).catch((error) => {
+    void this.promptTracked(managed, text, { streamingBehavior: 'followUp' }).catch((error) => {
       this.failTurn(managed, toErrorMessage(error));
     });
     return true;
@@ -5085,40 +5095,59 @@ export class SessionSupervisor {
   ): void {
     this.flushPendingMcpTools(managed);
     this.flushPendingBuiltinTools(managed);
-    if (managed.session.isStreaming) {
-      void this.steerTracked(managed, text, images, deliveryId).catch((error) => {
-        this.failTurn(managed, toErrorMessage(error));
-      });
-      return;
-    }
-    if (resume) editUnfinishedAssistantForResume(managed.session);
+    // pi 在 input hook 之后才判忙，先看 isStreaming 再 prompt 永远有竞态：一律带 followUp，
+    // 活轮里由 pi 排到本轮之后，不会抛 already processing 把会话打成 error
+    if (resume && !managed.session.isStreaming) editUnfinishedAssistantForResume(managed.session);
+    const previousTurnId = managed.currentTurnId;
     managed.currentTurnId = randomUUID();
     managed.turnAborted = false;
     ensureAssistantUsage(managed.session.messages as unknown[]);
     const body = consumeRole(managed, text);
-    const options = images ? { images } : undefined;
-    const submit = () => this.promptTracked(managed, body, options, deliveryId);
-    void submit().catch(async (error: unknown) => {
-      const message = toErrorMessage(error);
-      // 续跑撞上刚启动的压缩：等压完再投一次，不要把会话打成 error
-      if (
-        message.includes('Cannot submit a prompt while compaction is in progress') &&
-        (await waitPromptable(
-          managed.session,
-          ZOMBIE_TURN_WAIT_MS,
-          () => managed.status === 'running'
-        ))
-      ) {
-        try {
-          await submit();
-          return;
-        } catch (retryError) {
-          this.failTurn(managed, toErrorMessage(retryError));
-          return;
+    const options = { ...(images ? { images } : {}), streamingBehavior: 'followUp' as const };
+    const state: PromptDeliveryState = { dispatched: false, queued: false };
+    const submit = () => this.promptTracked(managed, body, options, deliveryId, state);
+    // 没开出新轮（被拒收或排进活轮）就把轮次号还给正在跑的那一轮
+    const restoreTurn = () => {
+      if (!state.dispatched || state.queued) managed.currentTurnId = previousTurnId;
+    };
+    void submit()
+      .then(restoreTurn)
+      .catch(async (error: unknown) => {
+        const message = toErrorMessage(error);
+        // 竞态拒收：worker 的真实状态是还在跑，改用 followUp 重投，绝不当成失败
+        if (isAlreadyProcessing(message)) {
+          try {
+            await submit();
+            restoreTurn();
+            return;
+          } catch {
+            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+            restoreTurn();
+            return;
+          }
         }
-      }
-      this.failTurn(managed, message);
-    });
+        // 续跑撞上刚启动的压缩：等压完再投一次，不要把会话打成 error
+        if (
+          message.includes('Cannot submit a prompt while compaction is in progress') &&
+          (await waitPromptable(
+            managed.session,
+            ZOMBIE_TURN_WAIT_MS,
+            () => managed.status === 'running'
+          ))
+        ) {
+          try {
+            await submit();
+            restoreTurn();
+            return;
+          } catch (retryError) {
+            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+            this.failTurn(managed, toErrorMessage(retryError));
+            return;
+          }
+        }
+        if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+        this.failTurn(managed, message);
+      });
   }
 
   /**
@@ -5133,36 +5162,39 @@ export class SessionSupervisor {
     managed: ManagedSession,
     text: string,
     options?: Parameters<AgentSession['prompt']>[1],
-    deliveryId?: string
+    deliveryId?: string,
+    state?: PromptDeliveryState
   ): Promise<void> {
     const slot = { id: deliveryId ?? null };
     managed.promptDelivery = slot;
-    let dispatched = false;
     const trackedOptions = deliveryId
       ? {
           ...options,
           preflightResult: (disposition: PromptDisposition) => {
-            dispatched = true;
+            if (state) {
+              state.dispatched = true;
+              if (disposition === 'queued') state.queued = true;
+            }
             options?.preflightResult?.(disposition);
           },
         }
       : options;
     return managed.session
       .prompt(withPendingPlanNote(managed, text), trackedOptions)
-      .catch((error: unknown) => {
-        if (deliveryId && !dispatched && managed.promptDelivery === slot) {
-          this.options.emit({
-            type: 'delivery-rejected',
-            identity: managed.identity,
-            seq: ++managed.seq,
-            deliveryId,
-          });
-        }
-        throw error;
-      })
       .finally(() => {
         if (managed.promptDelivery === slot) managed.promptDelivery = undefined;
       });
+  }
+
+  /** 投递被拒收：交回执让上游重排，不把会话标成失败 */
+  private emitDeliveryRejected(managed: ManagedSession, deliveryId?: string): void {
+    if (!deliveryId) return;
+    this.options.emit({
+      type: 'delivery-rejected',
+      identity: managed.identity,
+      seq: ++managed.seq,
+      deliveryId,
+    });
   }
 
   private async steerActive(
@@ -6197,6 +6229,17 @@ function consumeRole(managed: { pendingRole?: string }, text: string): string {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** 一次 prompt 投递的去向：pi 是否受理（回调过 disposition）、是否只是排进活轮 */
+interface PromptDeliveryState {
+  dispatched: boolean;
+  queued: boolean;
+}
+
+/** pi 在活轮里拒收不带 streamingBehavior 的 prompt：会话仍在跑，不是失败 */
+function isAlreadyProcessing(message: string): boolean {
+  return message.includes('Agent is already processing');
+}
 
 /** 回复里的可见正文，不含 thinking 与工具调用 */
 /** 会话最近一次请求还对得上当前模型时才能分叉；换过模型就前缀不同，退回快照 */

@@ -2,6 +2,7 @@ import { BACKGROUND_WAKE_GRACE_MS } from '@shared/backgroundWatch';
 import type { ConversationsPatch } from '@shared/conversationsPatch';
 import type { HeadlessDelivery, HeadlessSessionRuntime } from '@shared/pair/headlessQueue';
 import type { RendererAgentEvent } from '@shared/types/agent';
+import type { SecretaryAuditEntry } from '@shared/types/secretary';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createDispatchDriver, type DispatchDriverPorts } from './driver';
 
@@ -12,6 +13,7 @@ interface Harness {
   statuses: Record<string, { state: string; pendingAsks: number; pendingApprovals: number }>;
   alive: Record<string, boolean>;
   prompts: { conversationId: string; delivery: HeadlessDelivery; deliveryId: string }[];
+  audits: SecretaryAuditEntry[];
   driver: ReturnType<typeof createDispatchDriver>;
   promptOk: { value: boolean };
 }
@@ -36,6 +38,7 @@ function harnessAt(row: Record<string, unknown> = {}, clock?: { now: number }): 
   };
   const alive: Record<string, boolean> = { [SID]: true };
   const prompts: Harness['prompts'] = [];
+  const audits: SecretaryAuditEntry[] = [];
   const promptOk = { value: true };
   let seq = 0;
   const ports: DispatchDriverPorts = {
@@ -54,9 +57,10 @@ function harnessAt(row: Record<string, unknown> = {}, clock?: { now: number }): 
       return promptOk.value ? { ok: true } : { ok: false, error: 'stale session' };
     },
     newId: () => `id-${++seq}`,
+    audit: (entry) => audits.push(entry),
     now: () => clock?.now ?? Date.now(),
   };
-  return { rows, statuses, alive, prompts, driver: createDispatchDriver(ports), promptOk };
+  return { rows, statuses, alive, prompts, audits, driver: createDispatchDriver(ports), promptOk };
 }
 
 const identity = { sessionId: SID, generation: 'g1' };
@@ -470,5 +474,74 @@ describe('派出会话的后台任务看门狗', () => {
       { conversationId: SID, taskId: 't1', reason: 'timeout' },
     ]);
     expect(h.prompts).toHaveLength(before);
+  });
+});
+
+describe('投递被拒的消息不丢', () => {
+  function rejected(deliveryId: string): RendererAgentEvent {
+    return {
+      type: 'delivery-rejected',
+      identity,
+      seq: 2,
+      deliveryId,
+    } as unknown as RendererAgentEvent;
+  }
+
+  it('worker 回执拒收：排队的消息放回队首，审计记一条', () => {
+    const h = harness({
+      queuedMessages: [{ id: 'q1', text: 'queued', origin: 'secretary', by: 'sec-1' }],
+    });
+    h.driver.observe(turnCompleted(digest('step one')));
+    expect(h.prompts).toHaveLength(1);
+    expect(h.rows[SID].queuedMessages).toEqual([]);
+
+    h.driver.observe(rejected(h.prompts[0].deliveryId));
+
+    expect(h.rows[SID].queuedMessages).toEqual([
+      expect.objectContaining({ text: 'queued', origin: 'secretary', by: 'sec-1' }),
+    ]);
+    // 排队消息被拒不该连累目标：worker 还在跑，续跑状态照旧
+    expect(goalOf(h).status).toBe('active');
+    expect(h.audits).toEqual([
+      expect.objectContaining({
+        op: 'delivery-rejected',
+        targetId: SID,
+        ok: false,
+        secretaryConversationId: 'sec-1',
+        detail: 'requeued',
+      }),
+    ]);
+  });
+
+  it('续跑被拒：目标暂停并记审计，不留空转的 active 目标', () => {
+    const h = harness();
+    h.driver.observe(turnCompleted(digest('step one')));
+    expect(h.prompts[0].delivery.text).toContain('<goal-continuation>');
+
+    h.driver.observe(rejected(h.prompts[0].deliveryId));
+
+    expect(goalOf(h)).toMatchObject({ status: 'paused', note: 'delivery rejected' });
+    expect(h.audits).toEqual([
+      expect.objectContaining({ op: 'delivery-rejected', detail: 'goal-paused' }),
+    ]);
+  });
+
+  it('已回执送达的投递不再按拒收回退，消息不会投两遍', () => {
+    const h = harness({
+      queuedMessages: [{ id: 'q1', text: 'queued', origin: 'secretary' }],
+    });
+    h.driver.observe(turnCompleted(digest('step one')));
+    const deliveryId = h.prompts[0].deliveryId;
+    h.driver.observe({
+      type: 'delivery-settled',
+      identity,
+      seq: 2,
+      deliveryId,
+    } as unknown as RendererAgentEvent);
+
+    h.driver.observe(rejected(deliveryId));
+
+    expect(h.rows[SID].queuedMessages).toEqual([]);
+    expect(h.audits).toEqual([]);
   });
 });

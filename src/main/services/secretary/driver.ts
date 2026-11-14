@@ -16,6 +16,7 @@ import {
   onHeadlessIdle,
 } from '@shared/pair/headlessQueue';
 import type { RendererAgentEvent } from '@shared/types/agent';
+import type { SecretaryAuditEntry } from '@shared/types/secretary';
 
 /** 与 renderer 的 continueGoal 同口径：连续 3 轮没有新输出就停，防无界烧钱 */
 export const NO_PROGRESS_LIMIT = 3;
@@ -43,6 +44,8 @@ export interface DispatchDriverPorts {
     deliveryId: string
   ): { ok: boolean; error?: string };
   newId(): string;
+  /** 审计：投递被拒时记一条，消息不悄悄蒸发 */
+  audit?(entry: SecretaryAuditEntry): void;
   /** 看门狗计时；缺省用墙钟。测试注入逻辑时钟 */
   now?(): number;
   /**
@@ -78,6 +81,13 @@ interface PendingStall {
   reported: boolean;
   consumed: boolean;
   promptedAt?: number;
+}
+
+/** 已投出、worker 还没回执的投递：被拒时凭它把消息放回队首 */
+interface InflightDelivery {
+  conversationId: string;
+  delivery: HeadlessDelivery;
+  item?: HeadlessQueuedMessage;
 }
 
 type Applied = { runtime: HeadlessSessionRuntime; deliver?: HeadlessDelivery };
@@ -174,6 +184,8 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
   /** 超时或进程已死之后，完成通知已经把会话跑完一轮：还要报停滞，但不要再 prompt */
   const consumedWaits = new Set<string>();
   const watchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** 投出去的投递：worker 回执 delivery-settled / delivery-rejected 时结算 */
+  const inflight = new Map<string, InflightDelivery>();
   /** 自己写回触发的合并回调不能再投递，否则同一条消息发两遍 */
   let saving = false;
 
@@ -306,13 +318,21 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
     save(conversationId, applied.runtime);
     const delivery = applied.deliver;
     if (!delivery) return;
-    const result = ports.prompt(conversationId, delivery, ports.newId());
-    if (result.ok) return;
-    const error = result.error ?? 'prompt failed';
-    // 投递失败的那一条放回队首：来源标记跟着回来，秘书还能撤回它
+    const deliveryId = ports.newId();
+    // 从队列里取出的那一条：被拒时原样放回队首，来源标记跟着回来
     const flushed = previous.queued.find(
       (item) => !applied.runtime.queued.some((next) => next.id === item.id)
     );
+    inflight.set(deliveryId, {
+      conversationId,
+      delivery,
+      ...(flushed ? { item: flushed } : {}),
+    });
+    const result = ports.prompt(conversationId, delivery, deliveryId);
+    if (result.ok) return;
+    inflight.delete(deliveryId);
+    const error = result.error ?? 'prompt failed';
+    // 投递失败的那一条放回队首：来源标记跟着回来，秘书还能撤回它
     save(conversationId, {
       ...applied.runtime,
       ...(flushed
@@ -340,6 +360,39 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
           }
         : {}),
     });
+  }
+
+  /** worker 回执拒收：消息放回队首（或暂停目标），审计记一条，绝不悄悄丢 */
+  function requeue(conversationId: string, deliveryId: string): void {
+    const pending = inflight.get(deliveryId);
+    if (!pending) return;
+    inflight.delete(deliveryId);
+    const runtime = runtimeOf(conversationId);
+    if (!runtime) return;
+    const item = pending.item;
+    save(conversationId, {
+      ...runtime,
+      ...(item ? { queued: [{ ...item, id: ports.newId() }, ...runtime.queued] } : {}),
+      // 续跑没被接住：worker 侧没有新轮，先停住目标等用户
+      ...(item || runtime.goal?.status !== 'active'
+        ? {}
+        : { goal: { ...runtime.goal, status: 'paused' as const, note: 'delivery rejected' } }),
+    });
+    ports.audit?.({
+      at: clock(),
+      secretaryConversationId: item?.by ?? null,
+      op: 'delivery-rejected',
+      targetId: conversationId,
+      ok: false,
+      detail: item ? 'requeued' : 'goal-paused',
+    });
+  }
+
+  /** 该会话的投递已有结果（轮次收束）：不再等回执 */
+  function forgetDeliveries(conversationId: string): void {
+    for (const [deliveryId, pending] of inflight) {
+      if (pending.conversationId === conversationId) inflight.delete(deliveryId);
+    }
   }
 
   /** 空闲时才泵队列 / 续跑目标；轮次收束与压缩结束共用 */
@@ -417,6 +470,14 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       const runtime = runtimeOf(conversationId);
       if (!runtime) return;
 
+      if (event.type === 'delivery-rejected') {
+        requeue(conversationId, event.deliveryId);
+        return;
+      }
+      if (event.type === 'delivery-settled') {
+        inflight.delete(event.deliveryId);
+        return;
+      }
       if (event.type === 'compaction') {
         compacting.set(conversationId, event.state !== 'end');
         // 压缩不发 turn-completed：压完再泵，否则排队消息会卡住
@@ -459,6 +520,7 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         return;
       }
       if (event.type === 'turn-failed') {
+        forgetDeliveries(conversationId);
         commit(
           conversationId,
           runtime,
@@ -474,6 +536,7 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         return;
       }
       if (event.type !== 'turn-completed') return;
+      forgetDeliveries(conversationId);
       // 中断的轮不续跑、不泵队列；压缩中的收束等压缩结束事件再收
       if (event.aborted || compacting.get(conversationId)) {
         // 本轮还没投过：压缩结束时允许补投一次
