@@ -140,6 +140,7 @@ export function runSecretaryTool(
       cwd: toolDir,
       env: toolEnv(draft.runtime),
       detached: true,
+      windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
