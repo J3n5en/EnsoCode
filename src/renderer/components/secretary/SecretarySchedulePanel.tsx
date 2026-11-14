@@ -9,21 +9,28 @@ function scheduleIcon(schedule: SecretaryScheduleView) {
   return schedule.at ? <Clock className="size-3.5" /> : <Repeat className="size-3.5" />;
 }
 
-/** 一行说明：来源（系统 / 待办 / 一次性 / 重复）加上下一次触发 */
+const when = (ts: number, locale: string) =>
+  `${formatRelativeTime(ts, locale)} ${formatClock(ts, locale)}`;
+
+/** 一行说明：来源（系统 / 待办 / 一次性 / 重复）加上下一次与上一次触发 */
 function scheduleDetail(
   schedule: SecretaryScheduleView,
   t: (key: string, params?: Record<string, string | number>) => string,
   locale: string
 ): string {
+  const parts: string[] = [];
   if (schedule.system === 'daily-brief') {
-    return t('Every day at {{time}}', {
-      time: formatClock(schedule.nextRunAt ?? Date.now(), locale),
-    });
+    parts.push(
+      t('Every day at {{time}}', { time: formatClock(schedule.nextRunAt ?? Date.now(), locale) })
+    );
+  } else {
+    parts.push(schedule.system ? t('From a to-do') : schedule.at ? t('One-off') : t('Repeats'));
+    if (schedule.nextRunAt !== undefined) parts.push(when(schedule.nextRunAt, locale));
   }
-  const kind = schedule.system ? t('From a to-do') : schedule.at ? t('One-off') : t('Repeats');
-  if (schedule.nextRunAt === undefined) return kind;
-  const when = `${formatRelativeTime(schedule.nextRunAt, locale)} ${formatClock(schedule.nextRunAt, locale)}`;
-  return `${kind} · ${when}`;
+  if (schedule.lastFiredAt !== undefined) {
+    parts.push(t('Last run {{time}}', { time: when(schedule.lastFiredAt, locale) }));
+  }
+  return parts.join(' · ');
 }
 
 function ScheduleRow({

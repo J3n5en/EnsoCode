@@ -12,6 +12,8 @@ const translate = (key: string, params?: Record<string, string | number>) =>
 const h = vi.hoisted(() => ({
   board: null as unknown as SecretaryBoard,
   calls: [] as { name: string; args: unknown }[],
+  schedules: [] as Record<string, unknown>[],
+  stateListeners: [] as (() => void)[],
   // 稳定引用：真实 store 只在推送时换对象，每次渲染新建会让订阅它的 effect 反复触发
   secretary: {} as Record<string, unknown>,
 }));
@@ -110,6 +112,24 @@ beforeEach(() => {
   vi.stubGlobal('document', dom.document);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   h.calls = [];
+  h.stateListeners = [];
+  h.schedules = [
+    {
+      id: 's1',
+      name: '每日晨报',
+      prompt: '简报',
+      cron: '0 9 * * *',
+      nextRunAt: NOW + 3_600_000,
+      system: 'daily-brief' as const,
+    },
+    {
+      id: 's2',
+      name: '每周五汇总',
+      prompt: '汇总',
+      cron: '0 18 * * 5',
+      nextRunAt: NOW + 86_400_000,
+    },
+  ];
   h.board = board();
   h.secretary = {
     enabled: true,
@@ -135,27 +155,13 @@ beforeEach(() => {
   };
   const api = {
     secretary: {
-      listSchedules: async () => ({
-        ok: true,
-        schedules: [
-          {
-            id: 's1',
-            name: '每日晨报',
-            prompt: '简报',
-            cron: '0 9 * * *',
-            nextRunAt: NOW + 3_600_000,
-            system: 'daily-brief' as const,
-          },
-          {
-            id: 's2',
-            name: '每周五汇总',
-            prompt: '汇总',
-            cron: '0 18 * * 5',
-            nextRunAt: NOW + 86_400_000,
-          },
-        ],
-      }),
-      onStateChanged: () => () => {},
+      listSchedules: async () => ({ ok: true, schedules: structuredClone(h.schedules) }),
+      onStateChanged: (listener: () => void) => {
+        h.stateListeners.push(listener);
+        return () => {
+          h.stateListeners = h.stateListeners.filter((entry) => entry !== listener);
+        };
+      },
       removeSchedule: async (id: string) => {
         h.calls.push({ name: 'removeSchedule', args: id });
         return { ok: true };
@@ -284,5 +290,38 @@ describe('SecretaryPanel', () => {
     expect(schedules?.textContent).toContain('To add a schedule, just tell 小安');
     const rows = [...container.querySelectorAll('[data-enso="secretary-schedule"]')];
     expect(rows.map((row) => row.getAttribute('data-system'))).toEqual(['true', null]);
+  });
+
+  it('Main 推送后定时标签自动重读，新增与运行时间都不用手动刷新', async () => {
+    h.schedules = [];
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-panel-tab"][data-tab="schedules"]');
+    expect(container.querySelectorAll('[data-enso="secretary-schedule"]')).toHaveLength(0);
+
+    h.schedules = [
+      { id: 's3', name: '巡检', prompt: '看看', cron: '*/10 * * * *', nextRunAt: NOW + 600_000 },
+    ];
+    act(() => {
+      for (const listener of h.stateListeners) listener();
+    });
+    await flush();
+    expect(text('[data-enso="secretary-schedules"]')).toContain('巡检');
+
+    h.schedules = [
+      {
+        id: 's3',
+        name: '巡检',
+        prompt: '看看',
+        cron: '*/10 * * * *',
+        lastFiredAt: NOW,
+        nextRunAt: NOW + 600_000,
+      },
+    ];
+    act(() => {
+      for (const listener of h.stateListeners) listener();
+    });
+    await flush();
+    expect(text('[data-enso="secretary-schedule"]')).toContain('Last run');
   });
 });

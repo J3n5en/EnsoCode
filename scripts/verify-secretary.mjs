@@ -1029,6 +1029,74 @@ async function run(cdp, pluginZipUrl) {
   assert(board.ok, '秘书面板打开', board);
   assert(board.tabs?.join(',') === 'workbench,memory,schedules', '秘书面板三个标签', board.tabs);
   await cdp.shot(path.join(ART, '05-workbench.png'));
+  // 秘书面板挂在当时的会话上；下面新建秘书会话会切走，结束后要回来
+  const panelHost = await page('return JSON.stringify(S().activeId);');
+
+  log('== 定时：秘书建的定时不刷新就出现在面板');
+  const scheduled = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=schedules]').click();
+    const rows = () => [...document.querySelectorAll('[data-enso=secretary-schedule]')]
+      .filter((node) => node.textContent.includes('验收巡检'));
+    const before = rows().length;
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '每十分钟巡检一次 [[tool:schedule_add {"name":"验收巡检","prompt":"看看进展","cron":"*/10 * * * *"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const scheduleRow = await until(() => rows()[0] ?? null, 40000);
+    return JSON.stringify({
+      before,
+      shown: Boolean(scheduleRow),
+      rowText: scheduleRow?.textContent ?? null,
+      marker: window.__secVerifyMarker,
+    });
+  `);
+  assert(scheduled.before === 0, '定时: 新建前面板里没有这条', scheduled);
+  assert(
+    scheduled.shown && scheduled.marker === setup.marker,
+    '定时: schedule_add 之后面板不用手动刷新就显示新定时',
+    scheduled
+  );
+  await cdp.shot(path.join(ART, '05b-schedules.png'));
+  const scheduleId = await page(`
+    const listed = await window.electronAPI.secretary.listSchedules();
+    const rows = Array.isArray(listed) ? listed : (listed?.schedules ?? []);
+    return JSON.stringify(rows.find((row) => row.name === '验收巡检')?.id ?? null);
+  `);
+  const unscheduled = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '不用巡检了 [[tool:schedule_remove {"scheduleId":${JSON.stringify(scheduleId ?? '')}}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const gone = await until(() => ![...document.querySelectorAll('[data-enso=secretary-schedule]')]
+      .some((node) => node.textContent.includes('验收巡检')), 40000);
+    return JSON.stringify({ gone: Boolean(gone) });
+  `);
+  assert(Boolean(scheduleId) && unscheduled.gone, '定时: schedule_remove 之后面板自动去掉这条', {
+    scheduleId,
+    ...unscheduled,
+  });
+
+  const panelBack = await page(`
+    S().selectConversation(${JSON.stringify(panelHost)});
+    const panel = await until(
+      () => document.querySelector('[data-enso=secretary-panel]')?.offsetParent != null,
+      10000
+    );
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    await sleep(300);
+    return JSON.stringify({ shown: Boolean(panel) });
+  `);
+  assert(panelBack.shown, '定时: 回到原会话后秘书面板仍在', panelBack);
 
   const welcome = await page(`
     const secretary = await SEC();

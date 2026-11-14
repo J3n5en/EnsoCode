@@ -12,6 +12,7 @@ import type {
   SecretaryUpdate,
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
+import { notifySecretaryChanged } from './dispatch';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -32,10 +33,15 @@ export interface SchedulePorts {
   audit(entry: SecretaryAuditEntry): void;
   newId(): string;
   now(): number;
+  /** 定时写盘后通知面板重读 */
+  publish(): void;
 }
 
 /** 系统定时重算只需要读写与时钟，回传宿主不必带审计与 id 生成 */
-export type SyncSchedulePorts = Pick<SchedulePorts, 'schedules' | 'saveSchedules' | 'now'>;
+export type SyncSchedulePorts = Pick<
+  SchedulePorts,
+  'schedules' | 'saveSchedules' | 'now' | 'publish'
+>;
 
 function cronOf(schedule: SecretarySchedule): ReturnType<typeof parseCron> {
   return 'cron' in schedule && schedule.cron ? parseCron(schedule.cron) : undefined;
@@ -186,6 +192,7 @@ export function syncSystemSchedules(
     desired.every((schedule, index) => sameSchedule(schedule, current[index]));
   if (unchanged) return current;
   ports.saveSchedules(desired);
+  ports.publish();
   return desired;
 }
 
@@ -228,6 +235,7 @@ export function removeSchedule(
   if (target.system)
     return auditFailure(ports, ctx, 'schedule_remove', 'system-schedule', scheduleId);
   ports.saveSchedules(schedules.filter((schedule) => schedule.id !== scheduleId));
+  ports.publish();
   ports.audit({
     at: ports.now(),
     secretaryConversationId: ctx.secretaryConversationId,
@@ -269,6 +277,7 @@ export function createSecretaryScheduleHandlers(ports: SchedulePorts): Secretary
         schedule = { id, name, prompt, createdAt: now, cron: parsed.source };
       }
       ports.saveSchedules([...ports.schedules(), schedule]);
+      ports.publish();
       ports.audit({
         at: now,
         secretaryConversationId: ctx.secretaryConversationId,
@@ -311,6 +320,7 @@ export const secretarySchedulePorts: SchedulePorts = {
   audit: (entry) => appendAudit(secretaryDir(), entry),
   newId: () => randomUUID(),
   now: () => Date.now(),
+  publish: () => notifySecretaryChanged(),
 };
 
 export const secretaryScheduleHandlers = createSecretaryScheduleHandlers(secretarySchedulePorts);

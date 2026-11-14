@@ -41,6 +41,7 @@ interface Harness {
     audit: SecretaryAuditEntry[];
     now: number;
     saves: number;
+    published: number;
   };
 }
 
@@ -50,6 +51,7 @@ function harness(schedules: SecretarySchedule[] = [], now = at(9)): Harness {
     audit: [],
     now,
     saves: 0,
+    published: 0,
   };
   let seq = 0;
   const ports: SchedulePorts = {
@@ -61,6 +63,9 @@ function harness(schedules: SecretarySchedule[] = [], now = at(9)): Harness {
     audit: (entry) => state.audit.push(entry),
     newId: () => `id-${++seq}`,
     now: () => state.now,
+    publish: () => {
+      state.published += 1;
+    },
   };
   return { ports, state };
 }
@@ -206,6 +211,14 @@ describe('schedule_add', () => {
       },
     ]);
   });
+
+  it('写入成功后推送一次面板刷新，失败不推送', async () => {
+    const h = harness([], at(9));
+    await handlers(h).schedule_add({ name: 'n', prompt: 'p', cron: '*/10 * * * *' }, ctx);
+    expect(h.state.published).toBe(1);
+    await handlers(h).schedule_add({ name: 'n', prompt: 'p', cron: '0 0 30 2 *' }, ctx);
+    expect(h.state.published).toBe(1);
+  });
 });
 
 describe('schedule_list 与 schedule_remove', () => {
@@ -224,6 +237,7 @@ describe('schedule_list 与 schedule_remove', () => {
     expect(result).toEqual({ ok: true, result: { scheduleId: 's1' } });
     expect(h.state.schedules).toEqual([]);
     expect(h.state.audit[0]).toMatchObject({ op: 'schedule_remove', ok: true, targetId: 's1' });
+    expect(h.state.published).toBe(1);
   });
 
   it('拒绝删除系统条目', () => {
@@ -232,6 +246,7 @@ describe('schedule_list 与 schedule_remove', () => {
     expect(result.ok).toBe(false);
     expect(h.state.schedules).toHaveLength(1);
     expect(h.state.audit[0]).toMatchObject({ op: 'schedule_remove', ok: false });
+    expect(h.state.published).toBe(0);
   });
 
   it('删除不存在的条目报错并审计失败', () => {
@@ -302,8 +317,16 @@ describe('系统定时', () => {
     const h = harness([once()], at(9));
     syncSystemSchedules(h.ports, profile({ dailyBriefAt: '08:30' }), []);
     const saves = h.state.saves;
+    const published = h.state.published;
     syncSystemSchedules(h.ports, profile({ dailyBriefAt: '08:30' }), []);
     expect(h.state.saves).toBe(saves);
+    expect(h.state.published).toBe(published);
     expect(h.state.schedules.map((schedule) => schedule.id)).toEqual(['s1', DAILY_BRIEF_ID]);
+  });
+
+  it('系统定时有变化时推送面板刷新', () => {
+    const h = harness([], at(9));
+    syncSystemSchedules(h.ports, profile({ dailyBriefAt: '08:30' }), []);
+    expect(h.state.published).toBe(1);
   });
 });

@@ -281,7 +281,10 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const now = ports.now();
       // 应用没运行期间错过的 cron 只算下一次，不补投
       const skipped = skipMissedCron(ports.schedules(), now);
-      if (skipped.changed) ports.saveSchedules(skipped.schedules);
+      if (skipped.changed) {
+        ports.saveSchedules(skipped.schedules);
+        ports.publish();
+      }
       const file = ports.file();
       let changed = false;
       for (const record of Object.values(file.dispatched)) {
