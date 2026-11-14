@@ -12,6 +12,19 @@ import pkg from './package.json';
 // 三段统一用 alias 指到源码入口。
 const pairAlias = path.resolve(__dirname, 'packages/pair/src/index.ts');
 
+// 验收脚本并行时不能一起撞 vite 的默认 5173。只在显式指定时绑死端口。
+function rendererDevServer(): { host: string; port: number; strictPort: true } | undefined {
+  const raw = process.env.ENSO_RENDERER_PORT?.trim();
+  if (!raw) return undefined;
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`ENSO_RENDERER_PORT must be an integer TCP port`);
+  }
+  return { host: '127.0.0.1', port, strictPort: true };
+}
+
+const rendererServer = rendererDevServer();
+
 export default defineConfig({
   main: {
     build: {
@@ -75,5 +88,6 @@ export default defineConfig({
         },
       },
     },
+    ...(rendererServer ? { server: rendererServer } : {}),
   },
 });
