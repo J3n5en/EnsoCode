@@ -252,6 +252,27 @@ describe('保存后的副作用', () => {
     expect(h.released).toEqual(['sec-1']);
   });
 
+  it('勾选的 skill 变了也释放会话，没变就不动', async () => {
+    const h = harness({ profile: baseProfile() });
+    await h.service.save({ skillIds: [] }, null);
+    expect(h.released).toEqual([]);
+    await h.service.save({ skillIds: ['s1'] }, null);
+    expect(h.released).toEqual(['sec-1']);
+  });
+
+  it('releaseSessions 直接释放空闲会话，忙的留到本轮结束', async () => {
+    const running = new Set(['sec-2']);
+    const h = harness({
+      conversations: ['sec-1', 'sec-2'],
+      status: (conversationId) =>
+        running.has(conversationId) ? { ...idle, state: 'running' } : idle,
+    });
+    await h.service.releaseSessions();
+    expect(h.released).toEqual(['sec-1']);
+    await h.service.onTurnEnded('sec-2');
+    expect(h.released).toEqual(['sec-1', 'sec-2']);
+  });
+
   it('每日简报时间变化时重算系统定时', async () => {
     const h = harness();
     await h.service.save({ dailyBriefAt: '08:30' }, null);

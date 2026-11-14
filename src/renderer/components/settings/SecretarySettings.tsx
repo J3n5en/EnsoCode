@@ -4,6 +4,7 @@ import type {
   SecretaryProfile,
   SecretaryProfileDraft,
   SecretaryScheduleView,
+  SecretarySkillDraft,
 } from '@shared/types/secretary';
 import * as React from 'react';
 import { defaultDraft, draftFromProfile } from '@/components/secretary/profileFormState';
@@ -20,6 +21,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/stores/settings';
+import { PickList } from './PresetsSettings';
 
 function Chips<T extends string>({
   value,
@@ -139,6 +142,96 @@ function PluginPicker({
         </label>
       ))}
     </div>
+  );
+}
+
+/** 秘书自有的 skill：正文可展开，删除后 Main 释放会话，下次 spawn 生效 */
+function OwnSkills({ busy }: { busy: boolean }) {
+  const { t } = useI18n();
+  const [skills, setSkills] = React.useState<SecretarySkillDraft[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    const result = await window.electronAPI.secretary.listSkills();
+    if (result.ok) setSkills(result.skills);
+    else setError(result.error);
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  const remove = async (name: string) => {
+    setError(null);
+    const result = await window.electronAPI.secretary.removeSkill(name);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await load();
+  };
+
+  if (error) return <p className="text-xs text-destructive">{error}</p>;
+  if (skills.length === 0)
+    return <p className="text-xs text-muted-foreground">{t('No skills yet')}</p>;
+  return (
+    <div className="divide-y rounded-md border">
+      {skills.map((skill) => (
+        <div key={skill.name} className="px-3 py-2" data-enso="secretary-skill-row">
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-sm">{skill.name}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void remove(skill.name)}
+            >
+              {t('Remove')}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{skill.description}</p>
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">
+              {t('Show the content')}
+            </summary>
+            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[11px]">
+              {skill.body}
+            </pre>
+          </details>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 勾选全局 Enso skill：未勾选的不进秘书会话 */
+function GlobalSkillPicker({
+  skillIds,
+  onChange,
+}: {
+  skillIds: string[];
+  onChange: (skillIds: string[]) => void;
+}) {
+  const { t } = useI18n();
+  const skills = useSettingsStore((state) => state.skills);
+  return (
+    <PickList
+      title={t('Global skills')}
+      emptyText={t('No skills yet')}
+      items={skills}
+      getName={(skill) => skill.name}
+      getSource={(skill) => skill.source}
+      isChecked={(skill) => skillIds.includes(skill.id)}
+      onToggle={(skill) =>
+        onChange(
+          skillIds.includes(skill.id)
+            ? skillIds.filter((id) => id !== skill.id)
+            : [...skillIds, skill.id]
+        )
+      }
+      placeholder={t('Filter skills...')}
+      renderDetail={(skill) => <p className="text-xs">{skill.description || skill.path}</p>}
+    />
   );
 }
 
@@ -320,6 +413,31 @@ export function SecretarySettings() {
             busy={busy}
             onChange={(pluginIds) => void save({ pluginIds })}
           />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t('The secretary has not been set up yet.')}
+          </p>
+        )}
+      </Section>
+
+      <Section
+        title="Skills"
+        description="Skills the secretary may use. It proposes new ones in the chat; you confirm before anything is written."
+        rowId="secretary.skills"
+      >
+        {profile ? (
+          <div className="space-y-3">
+            <div>
+              <p className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                {t('Secretary skills')}
+              </p>
+              <OwnSkills busy={busy} />
+            </div>
+            <GlobalSkillPicker
+              skillIds={profile.skillIds ?? []}
+              onChange={(skillIds) => void save({ skillIds })}
+            />
+          </div>
         ) : (
           <p className="text-xs text-muted-foreground">
             {t('The secretary has not been set up yet.')}

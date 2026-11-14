@@ -8,10 +8,11 @@ import {
 } from './tools';
 
 describe('secretary tool allowlist', () => {
-  it('只含 14 个秘书工具与通用只读工具，核心工具与写工具不在其中', () => {
+  it('只含秘书工具、skill_read 与通用只读工具，核心工具与写工具不在其中', () => {
     expect([...SECRETARY_TOOL_ALLOWLIST].sort()).toEqual(
       [
         ...SECRETARY_OPS,
+        'skill_read',
         'ask_user',
         'web_search',
         'web_fetch',
@@ -41,5 +42,14 @@ describe('secretary tool allowlist', () => {
     expect(isSecretaryToolAllowed('plugin_enso-tgclient__tg_send_message')).toBe(false);
     expect(isSecretaryToolAllowed('plugin_x__evil', new Set(['plugin_x__evil']))).toBe(true);
     expect(isSecretaryToolAllowed('plugin_x__evil', new Set(['plugin_x__echo']))).toBe(false);
+  });
+
+  it('skill_read 与 skill_propose 进白名单，文件工具仍然进不来', () => {
+    expect(isSecretaryToolAllowed('skill_read')).toBe(true);
+    expect(isSecretaryToolAllowed('skill_propose')).toBe(true);
+    expect(SECRETARY_OPS).toContain('skill_propose');
+    for (const banned of ['read', 'write', 'edit', 'bash']) {
+      expect(isSecretaryToolAllowed(banned), banned).toBe(false);
+    }
   });
 });

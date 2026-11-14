@@ -1005,7 +1005,14 @@ export function spawnSession(
      * 秘书会话：人设由 Main 组装，插件只按勾选的 id 挂工具与技能，MCP / hooks / 命令、
      * 子代理类型与全局指令仍然不挂，工具白名单在 worker 里按名字执行
      */
-    secretary?: { systemPrompt: string; pluginIds?: readonly string[] };
+    secretary?: {
+      systemPrompt: string;
+      pluginIds?: readonly string[];
+      /** 勾选给秘书的全局 skill id */
+      skillIds?: readonly string[];
+      /** 秘书自有 skill 的根目录，总是挂上 */
+      skillDir?: string;
+    };
     /**
      * Main 给这次 spawn 的实例号（目前只有 Bot 宿主传）：随 spawn-parent 下发，之后同会话的 prompt / steer /
      * retry 自动带上，worker 在 parent-rejected / parent-ended 里回显，调用方据此确定结束事件属于哪个实例
@@ -1077,6 +1084,7 @@ export function spawnSession(
     ...enabledSkillPaths(preset),
     ...(bot || secretary ? [] : plugins.skillPaths),
     ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset, secretaryPluginIds) ?? []),
+    ...secretarySkillPaths(secretary),
   ];
   const workflowPresetFiles = extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? [];
   const mcpServers = enabledMcpServers(preset);
@@ -2351,6 +2359,18 @@ function enabledSkillPaths(preset?: Preset): string[] {
     ? skills.filter((skill) => preset.skillIds.includes(skill.id))
     : skills.filter((skill) => skill.enabled !== false);
   return picked.map((skill) => skill.path);
+}
+
+/** 秘书的 skill：自有目录总是挂，全局 skill 只挂勾选的 */
+function secretarySkillPaths(
+  secretary?: { skillIds?: readonly string[]; skillDir?: string } | undefined
+): string[] {
+  if (!secretary) return [];
+  const ids = secretary.skillIds ?? [];
+  const state = readSettingsState();
+  const skills = Array.isArray(state?.skills) ? state.skills.filter(isSkillEntry) : [];
+  const picked = skills.filter((skill) => ids.includes(skill.id)).map((skill) => skill.path);
+  return secretary.skillDir ? [secretary.skillDir, ...picked] : picked;
 }
 
 function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {

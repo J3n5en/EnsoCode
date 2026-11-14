@@ -62,6 +62,8 @@ export interface SecretaryProfileService {
   reset(request: unknown, secretaryConversationId: string | null): Promise<ProfileResetResult>;
   /** 本轮结束：运行中改了名字或人设的会话在这里释放 worker */
   onTurnEnded(conversationId: string): Promise<void>;
+  /** 技能或插件变了：释放全部空闲秘书会话，忙的等本轮结束 */
+  releaseSessions(): Promise<void>;
   propose(params: Record<string, unknown>, ctx: SecretaryOpContext): Promise<SecretaryOpResult>;
 }
 
@@ -128,6 +130,16 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
   /** 运行中改了名字或人设的会话：本轮结束再释放，免得把正在跑的一轮打断 */
   const pendingReleases = new Set<string>();
 
+  async function releaseIfIdle(conversationId: string): Promise<void> {
+    if (!(await ports.alive(conversationId))) return;
+    const status = await ports.status(conversationId);
+    if (status.state === 'idle' && status.pendingAsks + status.pendingApprovals === 0) {
+      await ports.release(conversationId);
+    } else {
+      pendingReleases.add(conversationId);
+    }
+  }
+
   async function applyEffects(
     before: SecretaryProfile | null,
     profile: SecretaryProfile,
@@ -135,8 +147,11 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
   ): Promise<void> {
     syncSystemSchedules(ports, profile, await ports.todos());
     const modelChanged = !sameModel(before?.model, profile.model);
-    // 插件在 spawn 时定死：勾选变了，活着的会话还挂着旧工具集
-    const kitChanged = identityChanged || !sameIds(before?.pluginIds, profile.pluginIds);
+    // 插件与技能在 spawn 时定死：勾选变了，活着的会话还挂着旧工具集与旧 skill 表
+    const kitChanged =
+      identityChanged ||
+      !sameIds(before?.pluginIds, profile.pluginIds) ||
+      !sameIds(before?.skillIds, profile.skillIds);
     if (!modelChanged && !kitChanged) return;
     const model = profile.model;
     for (const { conversationId } of await ports.conversations()) {
@@ -144,13 +159,7 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
         await ports.patchRow(conversationId, modelRowPatch(model));
         if (await ports.alive(conversationId)) await ports.setModel(conversationId, model);
       }
-      if (!kitChanged || !(await ports.alive(conversationId))) continue;
-      const status = await ports.status(conversationId);
-      if (status.state === 'idle' && status.pendingAsks + status.pendingApprovals === 0) {
-        await ports.release(conversationId);
-      } else {
-        pendingReleases.add(conversationId);
-      }
+      if (kitChanged) await releaseIfIdle(conversationId);
     }
   }
 
@@ -212,6 +221,12 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     async onTurnEnded(conversationId) {
       if (!pendingReleases.delete(conversationId)) return;
       await ports.release(conversationId);
+    },
+
+    async releaseSessions() {
+      for (const { conversationId } of await ports.conversations()) {
+        await releaseIfIdle(conversationId);
+      }
     },
 
     async propose(params, ctx) {

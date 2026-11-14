@@ -324,6 +324,7 @@ import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
 import { createSecretaryTools } from './tools/secretary';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
+import { createSkillReadTool } from './tools/skills';
 import { createWebTools } from './tools/web';
 import {
   createTurnDiscardState,
@@ -3154,6 +3155,8 @@ export class SessionSupervisor {
     const sessionTools = [
       ...buildCoreTools(),
       ...(secretary ? createSecretaryTools(secretary) : []),
+      // 秘书没有 read：SKILL.md 只能按本次加载的 skill 表读
+      ...(secretaryMode ? [createSkillReadTool(() => resourceLoader.getSkills().skills)] : []),
       ...builtin(
         'browser',
         createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))

@@ -6,6 +6,7 @@ import type {
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryProfileDraft,
+  SecretarySkillDraft,
   SecretaryTodo,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
@@ -100,6 +101,7 @@ interface Harness {
   pausedGoals: string[];
   profileValue: SecretaryProfile | null;
   appliedProfiles: SecretaryProfileDraft[];
+  appliedSkills: SecretarySkillDraft[];
   projects: ProjectAuthority[];
   conversations: ConversationAuthority[];
   statuses: Map<string, SecretarySessionStatus>;
@@ -133,6 +135,7 @@ function harness(
     pausedGoals: [],
     profileValue: options.profile === undefined ? profile() : options.profile,
     appliedProfiles: [],
+    appliedSkills: [],
     projects: options.projects ?? [localProject()],
     conversations: options.conversations ?? [rootConversation('c1')],
     statuses: new Map(Object.entries(options.statuses ?? {})),
@@ -146,6 +149,10 @@ function harness(
     profile: () => h.profileValue,
     applyProfile: async (draft) => {
       h.appliedProfiles.push(draft);
+      return { ok: true };
+    },
+    applySkill: async (draft) => {
+      h.appliedSkills.push(draft);
       return { ok: true };
     },
     persona: () => '',
@@ -645,6 +652,64 @@ describe('resolveProposal', () => {
 
     expect(result.ok && result.proposal.status).toBe('failed');
     expect(result.ok && result.proposal.error).toBe('invalid autonomy');
+  });
+
+  it('确认 skill 提案时交给 skill 服务写盘', async () => {
+    const h = harness();
+    const draft = { name: 'deploy-check', description: '发布前跑一遍', body: '# 步骤' };
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'skill',
+      draft,
+    };
+
+    const result = await resolveProposal(h.ports, 'p1', 'confirm');
+
+    expect(result.ok && result.proposal.status).toBe('succeeded');
+    expect(h.appliedSkills).toEqual([draft]);
+    expect(h.file.outbox[0]).toMatchObject({ proposalId: 'p1', status: 'succeeded' });
+    expect(h.created).toEqual([]);
+  });
+
+  it('拒绝 skill 提案不写盘', async () => {
+    const h = harness();
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'skill',
+      draft: { name: 'deploy-check', description: 'd', body: 'b' },
+    };
+
+    const result = await resolveProposal(h.ports, 'p1', 'reject');
+
+    expect(result.ok && result.proposal.status).toBe('rejected');
+    expect(h.appliedSkills).toEqual([]);
+  });
+
+  it('skill 写盘失败时提案记失败并带原因', async () => {
+    const h = harness();
+    h.ports.applySkill = async () => ({ ok: false, error: 'invalid skill name' });
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'skill',
+      draft: { name: 'deploy-check', description: 'd', body: 'b' },
+    };
+
+    const result = await resolveProposal(h.ports, 'p1', 'confirm');
+
+    expect(result.ok && result.proposal.status).toBe('failed');
+    expect(result.ok && result.proposal.error).toBe('invalid skill name');
   });
 });
 

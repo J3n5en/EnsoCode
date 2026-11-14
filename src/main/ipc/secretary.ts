@@ -52,6 +52,7 @@ import {
   type MainSessionResult,
   type SessionFactoryPorts,
 } from '../services/secretary/sessionFactory';
+import { secretarySkill } from '../services/secretary/skills';
 import { SecretaryStore } from '../services/secretary/store';
 import {
   getSourceAuthorityRegistry,
@@ -363,6 +364,18 @@ export function registerSecretaryHandlers(): void {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     return { ok: true, schedules: listSchedules(secretarySchedulePorts) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILLS_LIST, async (event) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return { ok: true, skills: secretarySkill.list() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILL_DELETE, async (event, request: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return secretarySkill.remove(request, null);
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, async (event, request: unknown) => {

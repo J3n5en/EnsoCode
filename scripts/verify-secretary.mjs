@@ -989,6 +989,156 @@ async function run(cdp, pluginZipUrl) {
   );
   assert(unchecked.isError === true, '插件: 取消勾选后同一调用报错', unchecked);
 
+  log('== 技能：提案 → 确认 → 写盘 → 新会话读到');
+  const skillFile = path.join(ENV, 'secretary', 'workspace', 'skills', 'deploy-check', 'SKILL.md');
+  const skillDraft = {
+    name: 'deploy-check',
+    description: '发布前跑一遍',
+    body: '# 步骤\n\n- 跑测试',
+  };
+  // 整条指令由 JSON.stringify 注入：否则 page 源码里的 \\n 会变成真换行，fake provider 解析不出参数
+  const skillAsk = `把这个做法沉淀成 skill [[tool:skill_propose ${JSON.stringify(skillDraft)}]]`;
+  const skillProposed = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      ${JSON.stringify(skillAsk)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const card = await until(() => document.querySelector('[data-enso=secretary-proposal]'), 30000);
+    if (!card)
+      return JSON.stringify({
+        ok: false,
+        error: 'no proposal card',
+        messages: (S().conversations[id]?.messages ?? []).slice(-6).map((message) => ({
+          tool: message.toolName,
+          text: (Array.isArray(message.content) ? message.content : [])
+            .filter((part) => part.type === 'text')
+            .map((part) => part.text)
+            .join('')
+            .slice(0, 300),
+          isError: message.isError === true,
+        })),
+      });
+    const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
+    return JSON.stringify({
+      ok: proposal.status === 'pending' && proposal.kind === 'skill',
+      proposalId: proposal.id,
+      cardText: card.innerText,
+      buttons: [...card.querySelectorAll('button')].map((b) => b.innerText),
+    });
+  `);
+  assert(
+    skillProposed.ok && skillProposed.cardText.includes('deploy-check'),
+    '技能: 聊天里出现待确认的 skill 卡片',
+    skillProposed
+  );
+  await cdp.shot(path.join(ART, '09-skill-proposal.png'));
+
+  const skillConfirmed = await page(`
+    const secretary = await SEC();
+    await secretary.getState().resolveProposal(${JSON.stringify(skillProposed.proposalId)}, 'confirm');
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[${JSON.stringify(skillProposed.proposalId)}];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ status: done?.status, error: done?.error });
+  `);
+  assert(skillConfirmed.status === 'succeeded', '技能: 确认后提案执行成功', skillConfirmed);
+  const skillOnDisk = await waitFor(
+    () => (existsSync(skillFile) ? readFileSync(skillFile, 'utf8') : null),
+    'skill file on disk',
+    15_000,
+    300
+  ).catch(() => null);
+  assert(
+    Boolean(skillOnDisk?.includes('name: deploy-check') && skillOnDisk.includes('跑测试')),
+    '技能: 磁盘上出现 SKILL.md',
+    skillOnDisk
+  );
+  const skillAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'skill_save' && entry.targetId === 'deploy-check');
+  assert(
+    skillAudit.length === 1 && skillAudit[0].ok === true,
+    '技能: audit 里记了一条 skill_save',
+    skillAudit
+  );
+
+  log('== 技能：新会话里 skill_read 读到内容');
+  const skillRead = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      '读一下 deploy-check [[tool:skill_read {"name":"deploy-check"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'skill_read'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({
+      ok: Boolean(result),
+      text: result ? textOf(result) : null,
+      isError: result?.isError === true,
+    });
+  `);
+  assert(
+    skillRead.text?.includes('跑测试') && !skillRead.isError,
+    '技能: 新秘书会话里 skill_read 读到 SKILL.md 正文',
+    skillRead
+  );
+
+  log('== 技能：skill_read 只认已加载的名字');
+  const skillRejected = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      '读两个不存在的东西 [[tool:skill_read {"name":"no-such-skill"}]] [[tool:skill_read {"name":"../secretary/profile.json"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const results = await until(() => {
+      const found = (S().conversations[id]?.messages ?? []).filter(
+        (message) => message.toolName === 'skill_read'
+      );
+      return found.length >= 2 ? found : null;
+    }, 40000);
+    return JSON.stringify({
+      ok: Boolean(results),
+      texts: (results ?? []).map(textOf),
+      errors: (results ?? []).map((message) => message.isError === true),
+    });
+  `);
+  assert(
+    skillRejected.ok && skillRejected.errors.every(Boolean),
+    '技能: 不存在的名字与路径名都被拒绝',
+    skillRejected
+  );
+
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
 }

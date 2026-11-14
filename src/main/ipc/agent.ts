@@ -170,6 +170,7 @@ import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
+import { secretarySkillsDir } from '../services/secretary/skills';
 import { SecretaryStore } from '../services/secretary/store';
 import { invokeSecretaryOp } from '../services/secretary/tools';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
@@ -558,7 +559,12 @@ function secretaryStore(): SecretaryStore {
 /**
  * 模型每轮看到的都是最新配置；插件与技能勾选在 spawn 时定死，改了要释放会话。
  */
-function secretarySpawnOptions(): { systemPrompt: string; pluginIds: string[] } {
+function secretarySpawnOptions(): {
+  systemPrompt: string;
+  pluginIds: string[];
+  skillIds: string[];
+  skillDir: string;
+} {
   const store = secretaryStore();
   const profile = store.profile();
   const language = readSettingsState()?.language;
@@ -569,6 +575,8 @@ function secretarySpawnOptions(): { systemPrompt: string; pluginIds: string[] } 
       uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
     }),
     pluginIds: profile?.pluginIds ?? [],
+    skillIds: profile?.skillIds ?? [],
+    skillDir: secretarySkillsDir(),
   };
 }
 

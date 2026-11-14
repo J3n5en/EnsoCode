@@ -3438,6 +3438,15 @@ export const zhTranslations: Record<string, string> = {
   'No plugins enabled': '没有已启用的插件',
   '{{n}} tools': '{{n}} 个工具',
   'Sends messages': '会投递消息',
+  'Skills the secretary may use. It proposes new ones in the chat; you confirm before anything is written.':
+    '秘书可以用的技能。新技能由它在聊天里提案，你确认后才写盘。',
+  'Secretary skills': '秘书自有技能',
+  'Global skills': '全局技能',
+  'Show the content': '查看内容',
+  'Show the current version': '查看现有版本',
+  'Skill saved': '技能已保存',
+  'Saving the skill…': '正在保存技能…',
+  New: '新建',
   'Secretary profile': '秘书档案',
   'Name, avatar, model and how much the secretary may do on its own.':
     '名字、头像、模型，以及它能自己做到什么程度。',

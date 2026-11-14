@@ -241,3 +241,57 @@ describe('SecretaryProposalRow profile proposals', () => {
     vi.unstubAllGlobals();
   });
 });
+
+const skillProposal: SecretaryProposal = {
+  id: 'pr3',
+  secretaryConversationId: 'sec1',
+  createdAt: 1,
+  updatedAt: 1,
+  status: 'pending',
+  kind: 'skill',
+  draft: { name: 'deploy-check', description: '发布前跑一遍', body: '# 步骤\n\n- 跑测试' },
+};
+
+const renderSkill = (over: Partial<SecretaryProposal> = {}): string => {
+  h.proposal = null;
+  h.extra = { pr3: { ...skillProposal, ...over } };
+  h.resolving = false;
+  return renderToStaticMarkup(createElement(SecretaryProposalRow, { proposalId: 'pr3' }));
+};
+
+describe('SecretaryProposalRow skill proposals', () => {
+  beforeEach(() => {
+    h.proposal = null;
+    h.extra = { pr3: skillProposal };
+    h.resolving = false;
+    h.resolveProposal = vi.fn();
+  });
+
+  it('待确认：显示名字、用途与可折叠的完整内容', () => {
+    const html = renderSkill();
+    expect(html).toContain('[Skill]');
+    expect(html).toContain('deploy-check');
+    expect(html).toContain('发布前跑一遍');
+    expect(html).toContain('[New]');
+    expect(html).toContain('[Show the content]');
+    expect(html).toContain('跑测试');
+    expect(buttons(html)).toEqual(['[Confirm]', '[Reject]']);
+  });
+
+  it('同名更新时标出更新，并摊开现有版本', () => {
+    const html = renderSkill({
+      previous: { description: '旧描述', body: '# 旧步骤' },
+    } as Partial<SecretaryProposal>);
+    expect(html).toContain('[Update]');
+    expect(html).toContain('[Show the current version]');
+    expect(html).toContain('旧步骤');
+  });
+
+  it('终态只显示状态，不再给按钮', () => {
+    expect(renderSkill({ status: 'succeeded' })).toContain('[Skill saved]');
+    expect(buttons(renderSkill({ status: 'succeeded' }))).toEqual([]);
+    const failed = renderSkill({ status: 'failed', error: 'invalid skill name' });
+    expect(failed).toContain('invalid skill name');
+    expect(buttons(failed)).toEqual([]);
+  });
+});

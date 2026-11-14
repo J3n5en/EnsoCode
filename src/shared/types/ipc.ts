@@ -34,6 +34,10 @@ export const IPC_CHANNELS = {
   SECRETARY_RESET_PROFILE: 'secretary:reset-profile',
   /** 秘书：头像图片由 Main 落盘，renderer 只传字节或 null */
   SECRETARY_SET_AVATAR: 'secretary:set-avatar',
+  /** 秘书：列出秘书自有的 skill（含正文），设置页展开查看 */
+  SECRETARY_SKILLS_LIST: 'secretary:skills-list',
+  /** 秘书：删除一个自有 skill，renderer 只传 slug */
+  SECRETARY_SKILL_DELETE: 'secretary:skill-delete',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

@@ -35,7 +35,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-const state = {
+const state: Record<string, unknown> = {
   providers: [
     {
       id: 'p',
@@ -121,4 +121,51 @@ it('普通会话照旧受全局"禁用内置工具"约束：memory 仍在禁用�
   ) as Extract<AgentCommand, { type: 'spawn-parent' }>;
   expect(command.secretaryMode).toBeUndefined();
   expect(command.disabledTools).toContain('memory');
+});
+
+it('秘书 spawn-parent 挂自有 skill 目录与勾选的全局 skill', () => {
+  fork.posted.length = 0;
+  state.skills = [
+    {
+      id: 'skill-a',
+      name: 'A',
+      description: 'd',
+      path: '/skills/a',
+      source: 'local',
+      enabled: true,
+    },
+    {
+      id: 'skill-b',
+      name: 'B',
+      description: 'd',
+      path: '/skills/b',
+      source: 'local',
+      enabled: true,
+    },
+  ];
+  const result = spawnSession(
+    { sessionId: 'secretary-skills', generation: '33333333-3333-4333-8333-333333333333' },
+    {
+      sessionId: 'secretary-skills',
+      providerId: 'p',
+      modelId: 'm',
+      cwd: '/workspace',
+    },
+    new Set(),
+    undefined,
+    undefined,
+    {
+      secretary: {
+        systemPrompt: 'SECRETARY PROMPT',
+        skillIds: ['skill-a'],
+        skillDir: '/userdata/secretary/workspace/skills',
+      },
+    }
+  );
+  expect(result.ok).toBe(true);
+  const command = fork.posted.find(
+    (entry) => (entry as AgentCommand).type === 'spawn-parent'
+  ) as Extract<AgentCommand, { type: 'spawn-parent' }>;
+  expect(command.skillPaths).toEqual(['/userdata/secretary/workspace/skills', '/skills/a']);
+  state.skills = [];
 });

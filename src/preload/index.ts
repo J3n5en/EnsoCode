@@ -239,6 +239,7 @@ import type {
   SecretaryProfileDraft,
   SecretaryProposal,
   SecretaryScheduleView,
+  SecretarySkillDraft,
   SecretaryState,
   SecretaryTodoMutate,
 } from '@shared/types/secretary';
@@ -405,6 +406,14 @@ const electronAPI = {
       image: Uint8Array | null
     ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SET_AVATAR, { image }),
+    /** 秘书自有的 skill：名字即目录名，正文供设置页展开查看 */
+    listSkills: (): Promise<
+      { ok: true; skills: SecretarySkillDraft[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILLS_LIST),
+    removeSkill: (
+      name: string
+    ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_DELETE, { name }),
   },
 
   modelDirectory: {

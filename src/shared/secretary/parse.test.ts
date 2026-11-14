@@ -81,6 +81,17 @@ describe('parseProfileDraft', () => {
       error: 'invalid pluginIds',
     });
   });
+
+  it('narrows the checked skill ids the same way', () => {
+    expect(parseProfileDraft({ skillIds: ['s1', 's1'] })).toEqual({
+      ok: true,
+      draft: { skillIds: ['s1'] },
+    });
+    expect(parseProfileDraft({ skillIds: [7] })).toEqual({
+      ok: false,
+      error: 'invalid skillIds',
+    });
+  });
 });
 
 describe('parseProfile', () => {
@@ -98,6 +109,7 @@ describe('parseProfile', () => {
       autonomy: 'ask-first',
       autoApproveProjectIds: [],
       pluginIds: [],
+      skillIds: [],
       visibleProjectIds: 'all',
       dispatchModel: { mode: 'project' },
       dispatchWorktree: 'auto',
@@ -139,6 +151,7 @@ describe('parseProfile', () => {
       autonomy: 'full',
       autoApproveProjectIds: ['p1'],
       pluginIds: [],
+      skillIds: [],
       visibleProjectIds: ['p1'],
       dispatchModel: {
         mode: 'fixed',
@@ -216,6 +229,11 @@ describe('parseProfile', () => {
     ).toEqual(['enso.tgclient']);
     expect(parseProfile({ pluginIds: 'enso.tgclient' })?.pluginIds).toEqual([]);
   });
+
+  it('keeps the checked skill ids and defaults an old profile to none', () => {
+    expect(parseProfile({ skillIds: ['s1', 's1', 7] })?.skillIds).toEqual(['s1']);
+    expect(parseProfile({ name: '旧档案' })?.skillIds).toEqual([]);
+  });
 });
 
 describe('parseDispatchFile', () => {
@@ -292,6 +310,37 @@ describe('parseDispatchFile', () => {
     expect(file.named).toEqual(['c1']);
     expect(Object.keys(file.proposals)).toEqual(['ok']);
     expect(file.outbox.map((update) => update.key)).toEqual(['k1', 'k2']);
+  });
+
+  it('keeps a skill proposal with its previous content and drops a bad one', () => {
+    const base = {
+      secretaryConversationId: 's1',
+      createdAt: 1,
+      updatedAt: 2,
+      status: 'pending',
+      kind: 'skill',
+    };
+    const file = parseDispatchFile({
+      proposals: {
+        ok: {
+          ...base,
+          id: 'ok',
+          draft: { name: 'deploy-check', description: '发布前检查', body: '# 步骤' },
+          previous: { description: '旧描述', body: '# 旧步骤' },
+        },
+        traversal: {
+          ...base,
+          id: 'traversal',
+          draft: { name: '../escape', description: 'x', body: 'y' },
+        },
+      },
+    });
+    expect(Object.keys(file.proposals)).toEqual(['ok']);
+    expect(file.proposals.ok).toMatchObject({
+      kind: 'skill',
+      draft: { name: 'deploy-check' },
+      previous: { description: '旧描述' },
+    });
   });
 
   it('normalizes counters and keeps the in-flight delivery within bounds', () => {

@@ -73,22 +73,28 @@ export function renderToolCatalogSection(tools: readonly CatalogTool[]): string 
 /** 替换 pi 默认 skills 段：描述截短以减少稀释，并要求命中时先读 SKILL.md。 */
 export function renderSkillsSection(
   skills: readonly CatalogSkill[],
-  readTool: 'read' | 'bash' | undefined
+  readTool: 'read' | 'bash' | 'skill_read' | undefined
 ): string | undefined {
   const visible = skills
     .filter((item) => !item.disableModelInvocation)
     .sort((a, b) => a.name.localeCompare(b.name));
   if (!readTool || visible.length === 0) return undefined;
-  const how = readTool === 'read' ? 'the read tool' : 'bash (cat)';
+  const how =
+    readTool === 'read'
+      ? 'the read tool'
+      : readTool === 'bash'
+        ? 'bash (cat)'
+        : 'the skill_read tool with its name';
   return [
     'Skills are tested playbooks kept as SKILL.md files. Each entry: name [file] — when it applies.',
     `- When the request falls under a skill, open its file with ${how} before starting the work and follow it. Acting on a guess of its contents defeats the point.`,
     '- One read per skill per task is enough; skills unrelated to the task can be ignored.',
     '- Relative paths inside a skill resolve against the directory that contains its SKILL.md.',
     '',
-    ...visible.map(
-      (item) =>
-        `- ${oneLine(item.name, 64)} [${item.filePath}] — ${oneLine(item.description, SKILL_DESCRIPTION_MAX)}`
+    ...visible.map((item) =>
+      readTool === 'skill_read'
+        ? `- ${oneLine(item.name, 64)} — ${oneLine(item.description, SKILL_DESCRIPTION_MAX)}`
+        : `- ${oneLine(item.name, 64)} [${item.filePath}] — ${oneLine(item.description, SKILL_DESCRIPTION_MAX)}`
     ),
   ].join('\n');
 }
@@ -105,7 +111,10 @@ export const promptCatalogExtension = {
         .filter((item) => active.has(item.name) && !options.toolSnippets[item.name]);
       const catalog = renderToolCatalogSection(extra);
       if (catalog) options.sections.tool_catalog = catalog;
-      const readTool = (['read', 'bash'] as const).find((name) => active.has(name));
+      // 秘书会话没有 read / bash，只有 skill_read：不认它整段 skills 会消失
+      const readTool =
+        (['read', 'bash'] as const).find((name) => active.has(name)) ??
+        (active.has('skill_read') ? ('skill_read' as const) : undefined);
       const skills = renderSkillsSection(options.skills, readTool);
       if (skills) options.sections.skills = skills;
     });

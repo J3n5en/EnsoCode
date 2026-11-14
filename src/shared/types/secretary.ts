@@ -11,6 +11,8 @@ export interface SecretaryProfile {
   autoApproveProjectIds: string[];
   /** 勾选给秘书用的 Enso 插件 id；插件停用或卸载后自动失效，不改写档案 */
   pluginIds?: string[];
+  /** 勾选给秘书用的全局 Enso skill id；未勾选的不加载 */
+  skillIds?: string[];
   visibleProjectIds: 'all' | string[];
   dispatchModel:
     | { mode: 'project' }
@@ -61,6 +63,13 @@ export interface DispatchDraft {
   todoId?: string;
 }
 
+/** 秘书自有的 skill：name 即目录名，整份内容写进该目录的 SKILL.md */
+export interface SecretarySkillDraft {
+  name: string;
+  description: string;
+  body: string;
+}
+
 export type SecretaryProposal = {
   id: string;
   secretaryConversationId: string;
@@ -71,6 +80,12 @@ export type SecretaryProposal = {
 } & (
   | { kind: 'dispatch'; draft: DispatchDraft; conversationId?: string }
   | { kind: 'profile'; draft: SecretaryProfileDraft }
+  /** previous 是同名 skill 的旧内容，卡片据此标成更新 */
+  | {
+      kind: 'skill';
+      draft: SecretarySkillDraft;
+      previous?: { description: string; body: string };
+    }
 );
 
 export type SecretaryResultKind =

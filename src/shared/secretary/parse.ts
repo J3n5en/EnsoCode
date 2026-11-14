@@ -13,6 +13,7 @@ import type {
   SecretaryTodo,
   SecretaryUpdate,
 } from '../types/secretary';
+import { parseSecretarySkillDraft } from './skills';
 
 const DEFAULT_AVATAR_COLOR = '#7c5cff';
 const COLOR_RE = /^#[0-9a-f]{6}$/iu;
@@ -127,6 +128,7 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     autonomy: oneOf(value.autonomy, AUTONOMIES, 'ask-first'),
     autoApproveProjectIds: texts(value.autoApproveProjectIds),
     pluginIds: texts(value.pluginIds),
+    skillIds: texts(value.skillIds),
     visibleProjectIds: Array.isArray(value.visibleProjectIds)
       ? texts(value.visibleProjectIds)
       : 'all',
@@ -243,6 +245,10 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     if (!validIdList(value.pluginIds)) return { ok: false, error: 'invalid pluginIds' };
     draft.pluginIds = texts(value.pluginIds);
   }
+  if (value.skillIds !== undefined) {
+    if (!validIdList(value.skillIds)) return { ok: false, error: 'invalid skillIds' };
+    draft.skillIds = texts(value.skillIds);
+  }
   if (value.visibleProjectIds !== undefined) {
     if (value.visibleProjectIds !== 'all' && !validIdList(value.visibleProjectIds)) {
       return { ok: false, error: 'invalid visibleProjectIds' };
@@ -336,6 +342,23 @@ function parseProposal(value: unknown): SecretaryProposal | undefined {
     // 草案字段在确认写入时再经 parseProfile 归一，这里只保证是对象
     if (!isObject(value.draft)) return undefined;
     return { ...base, kind: 'profile', draft: { ...value.draft }, ...(error ? { error } : {}) };
+  }
+  if (value.kind === 'skill') {
+    const parsed = parseSecretarySkillDraft(value.draft);
+    if (!parsed.ok) return undefined;
+    const previous =
+      isObject(value.previous) &&
+      typeof value.previous.description === 'string' &&
+      typeof value.previous.body === 'string'
+        ? { description: value.previous.description, body: value.previous.body }
+        : undefined;
+    return {
+      ...base,
+      kind: 'skill',
+      draft: parsed.draft,
+      ...(previous ? { previous } : {}),
+      ...(error ? { error } : {}),
+    };
   }
   return undefined;
 }

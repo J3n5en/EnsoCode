@@ -16,6 +16,7 @@ export const SECRETARY_OPS = [
   'schedule_list',
   'schedule_remove',
   'secretary_profile_propose',
+  'skill_propose',
 ] as const;
 
 export type SecretaryOp = (typeof SECRETARY_OPS)[number];
@@ -26,6 +27,8 @@ export type SecretaryOp = (typeof SECRETARY_OPS)[number];
  */
 export const SECRETARY_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   ...SECRETARY_OPS,
+  // worker 本地只读工具：按 spawn 时实际加载的 skill 表读 SKILL.md，不碰任意路径
+  'skill_read',
   'ask_user',
   'web_search',
   'web_fetch',

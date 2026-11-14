@@ -99,6 +99,17 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     numbers: ['maxRunningDispatches'],
     aliases: { displayName: 'name', language: 'replyLanguage', about: 'persona' },
   },
+  skill_propose: {
+    keys: ['name', 'description', 'body'],
+    aliases: {
+      skillName: 'name',
+      title: 'name',
+      summary: 'description',
+      content: 'body',
+      instructions: 'body',
+      text: 'body',
+    },
+  },
 };
 
 const snakeCase = (key: string) => key.replace(/[A-Z]/gu, (char) => `_${char.toLowerCase()}`);
@@ -352,6 +363,34 @@ const SCHEMAS: Record<
       dailyBriefAt: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' },
       persona: { type: 'string', maxLength: 4000, description: 'Extra persona text' },
     }),
+  },
+  skill_propose: {
+    description:
+      'Propose one of your own skills, or an update to an existing one: a slug name, one line on when it applies, and the full SKILL.md body. The user confirms on a card and only then is it written; a same-name skill is marked as an update. Use it when the same procedure keeps coming up. Never put keys, tokens or passwords in it.',
+    parameters: object(
+      {
+        name: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 48,
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
+          description: 'Lowercase slug, also the directory name',
+        },
+        description: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+          description: 'One line: when this skill applies',
+        },
+        body: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 20000,
+          description: 'Full SKILL.md body in Markdown',
+        },
+      },
+      ['name', 'description', 'body']
+    ),
   },
 };
 

@@ -3,6 +3,7 @@ import { secretaryDispatchHandlers } from './dispatch';
 import { secretaryProfileHandlers } from './profile';
 import { secretaryReadHandlers } from './readers';
 import { secretaryScheduleHandlers } from './schedules';
+import { secretarySkillHandlers } from './skills';
 
 export type SecretaryOpResult = { ok: true; result: unknown } | { ok: false; error: string };
 
@@ -21,6 +22,7 @@ export const SECRETARY_OP_HANDLERS: Record<SecretaryOp, SecretaryOpHandler> = {
   ...secretaryDispatchHandlers,
   ...secretaryScheduleHandlers,
   ...secretaryProfileHandlers,
+  ...secretarySkillHandlers,
 };
 
 export async function invokeSecretaryOp(

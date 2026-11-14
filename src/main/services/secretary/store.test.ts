@@ -17,6 +17,7 @@ const profile: SecretaryProfile = {
   autonomy: 'tell-after',
   autoApproveProjectIds: ['p1'],
   pluginIds: [],
+  skillIds: [],
   visibleProjectIds: 'all',
   dispatchModel: { mode: 'project' },
   dispatchWorktree: 'auto',

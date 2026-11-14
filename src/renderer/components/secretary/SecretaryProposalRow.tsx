@@ -14,6 +14,7 @@ const PROPOSAL_TOOLS = new Set([
   'session_create',
   'todo_item_dispatch',
   'secretary_profile_propose',
+  'skill_propose',
 ]);
 
 /**
@@ -95,6 +96,8 @@ export function SecretaryProposalRow({
   }
   if (proposal.kind === 'profile')
     return <ProfileProposalCard proposal={proposal} prominent={prominent} />;
+  if (proposal.kind === 'skill')
+    return <SkillProposalCard proposal={proposal} prominent={prominent} />;
 
   const project = projects.find((entry) => entry.id === proposal.draft.projectId);
   const failed = proposal.status === 'failed';
@@ -237,6 +240,86 @@ function ProfileProposalCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const SKILL_STATUS_LABELS: Record<ProposalStatus, string> = {
+  ...STATUS_LABELS,
+  executing: 'Saving the skill…',
+  succeeded: 'Skill saved',
+};
+
+/** skill 草案卡片：正文可折叠，同名时把旧内容一起摊开，用户才知道自己在改什么 */
+function SkillProposalCard({
+  proposal,
+  prominent,
+}: {
+  proposal: Extract<SecretaryProposal, { kind: 'skill' }>;
+  prominent?: boolean;
+}) {
+  const { t } = useI18n();
+  const resolving = useSecretaryStore((state) => state.resolving[proposal.id] === true);
+  const resolveProposal = useSecretaryStore((state) => state.resolveProposal);
+  const draft = proposal.draft;
+  const failed = proposal.status === 'failed';
+
+  return (
+    <div data-enso="secretary-proposal" data-kind="skill" className={cardClass(prominent)}>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          {t('Skill')}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono">{draft.name}</span>
+        <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+          {proposal.previous ? t('Update') : t('New')}
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">{draft.description}</p>
+      <details className="mt-1.5 rounded border border-border/60 bg-background/40 px-2 py-1">
+        <summary className="cursor-pointer text-[11px] text-muted-foreground">
+          {t('Show the content')}
+        </summary>
+        <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[11px]">
+          {draft.body}
+        </pre>
+      </details>
+      {proposal.previous ? (
+        <details className="mt-1 rounded border border-border/60 bg-background/40 px-2 py-1">
+          <summary className="cursor-pointer text-[11px] text-muted-foreground">
+            {t('Show the current version')}
+          </summary>
+          <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[11px]">
+            {proposal.previous.body}
+          </pre>
+        </details>
+      ) : null}
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <span className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}>
+          {t(SKILL_STATUS_LABELS[proposal.status])}
+          {failed && proposal.error ? ` · ${proposal.error}` : ''}
+        </span>
+        {proposal.status === 'pending' && (
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              disabled={resolving}
+              onClick={() => void resolveProposal(proposal.id, 'confirm')}
+              className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {t('Confirm')}
+            </button>
+            <button
+              type="button"
+              disabled={resolving}
+              onClick={() => void resolveProposal(proposal.id, 'reject')}
+              className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {t('Reject')}
+            </button>
+          </span>
+        )}
+      </div>
     </div>
   );
 }
