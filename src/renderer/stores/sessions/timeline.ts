@@ -895,7 +895,8 @@ function buildMessageTimeline(
   pendingApprovals?: readonly ApprovalRequestInfo[],
   toolStartedAt?: Record<string, number>,
   historyBaseIndex = 0,
-  batchLabels?: ReadonlyMap<string, string>
+  batchLabels?: ReadonlyMap<string, string>,
+  secretarySession = false
 ): TimelineItem[] {
   const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
@@ -1239,7 +1240,7 @@ function buildMessageTimeline(
             kind: 'tool',
             key,
             name: call.name,
-            ...(usesToolCard(call.name) ? { args: call.args ?? null } : {}),
+            ...(usesToolCard(call.name, secretarySession) ? { args: call.args ?? null } : {}),
             summary: execSource
               ? summarizeExecSource(execSource)
               : patchPaths
@@ -1521,6 +1522,8 @@ export function buildTimeline(
     toolStartedAt?: Record<string, number>;
     /** 按时间插入的分隔线，at 升序 */
     runDividers?: readonly { key: string; at: number; text: string }[];
+    /** 秘书会话才给可读卡片留下参数；普通会话的工具行不需要 */
+    secretarySession?: boolean;
   }
 ): TimelineItem[] {
   const historyBaseIndex = options?.historyBaseIndex ?? 0;
@@ -1539,7 +1542,8 @@ export function buildTimeline(
     options?.pendingApprovals,
     options?.toolStartedAt,
     historyBaseIndex,
-    batchLabels
+    batchLabels,
+    options?.secretarySession === true
   );
   const merged =
     rowEntries.length === 0
@@ -1895,6 +1899,8 @@ export interface TimelinePrep {
   heldOpenTools?: ReadonlySet<string>;
   /** 秘书会话：没有实质回复的一轮，把工具卡片也收成「已工作」一行 */
   foldToolOnlyTurns?: boolean;
+  /** 秘书会话：秘书/插件/自造工具画可读卡片，不进过程组；普通会话一律按工具行折叠 */
+  readableToolCards?: boolean;
 }
 
 export type TimelineFoldOptions = TimelinePrep & {
@@ -1907,9 +1913,9 @@ function activityAnchor(row: TimelineItem): string {
   return row.kind === 'tool-group' && row.children[0] ? row.children[0].key : row.key;
 }
 
-function isActivityMember(item: TimelineItem): boolean {
+function isActivityMember(item: TimelineItem, readableCards: boolean): boolean {
   if (item.kind === 'tool' && item.generatedImages?.length) return false;
-  if (item.kind === 'tool' && usesToolCard(item.name)) return false;
+  if (item.kind === 'tool' && usesToolCard(item.name, readableCards)) return false;
   if (item.kind === 'thinking' || item.kind === 'tool-group') return true;
   if (item.kind !== 'tool') return false;
   return item.state === 'ok' && !item.name.startsWith('goal_') && item.name !== 'submit_plan';
@@ -1981,17 +1987,18 @@ function quietLiveSegments(
 ): { segments: string[][]; blocked: boolean } | null {
   if (prep.collapseLiveActivity !== true || !running) return null;
   const { sourceItems, liveFrom } = prepareTimeline(items, running, new Set(), prep);
+  const readableCards = prep.readableToolCards === true;
   const segments: string[][] = [];
   let blocked = false;
   let i = 0;
   while (i < sourceItems.length) {
-    if (!(i > liveFrom) || !isActivityMember(sourceItems[i])) {
+    if (!(i > liveFrom) || !isActivityMember(sourceItems[i], readableCards)) {
       i += 1;
       continue;
     }
     const keys: string[] = [];
     let end = i;
-    while (end < sourceItems.length && isActivityMember(sourceItems[end])) {
+    while (end < sourceItems.length && isActivityMember(sourceItems[end], readableCards)) {
       const row = sourceItems[end];
       if (row.kind === 'thinking' && row.streaming) {
         blocked = true;
@@ -2001,7 +2008,7 @@ function quietLiveSegments(
       end += 1;
     }
     if (keys.length > 0) segments.push(keys);
-    while (end < sourceItems.length && isActivityMember(sourceItems[end])) end += 1;
+    while (end < sourceItems.length && isActivityMember(sourceItems[end], readableCards)) end += 1;
     i = end;
   }
   if (segments.length === 0) return null;
@@ -2074,15 +2081,22 @@ function foldPrepared(
   releasedLive: ReadonlySet<string> | null,
   lastUserIndex: number,
   liveFrom: number,
-  heldOpenTools: ReadonlySet<string> | null
+  heldOpenTools: ReadonlySet<string> | null,
+  readableCards: boolean
 ): TimelineItem[] {
   const heldOpen = (row: TimelineItem): boolean =>
     row.kind === 'tool' && heldOpenTools?.has(row.key) === true;
-  const cardTool = (row: TimelineItem): boolean => row.kind === 'tool' && usesToolCard(row.name);
+  const cardTool = (row: TimelineItem): boolean =>
+    row.kind === 'tool' && usesToolCard(row.name, readableCards);
   const activityAt = (index: number): boolean =>
     collapseCompleted && !(running && index > liveFrom);
   const releasedPrefixEnd = (index: number): number => {
-    if (!releasedLive || !running || !(index > liveFrom) || !isActivityMember(sourceItems[index])) {
+    if (
+      !releasedLive ||
+      !running ||
+      !(index > liveFrom) ||
+      !isActivityMember(sourceItems[index], readableCards)
+    ) {
       return index;
     }
     if (heldOpen(sourceItems[index])) return index;
@@ -2090,7 +2104,7 @@ function foldPrepared(
     let end = index;
     while (
       end < sourceItems.length &&
-      isActivityMember(sourceItems[end]) &&
+      isActivityMember(sourceItems[end], readableCards) &&
       !heldOpen(sourceItems[end]) &&
       releasedLive.has(activityAnchor(sourceItems[end]))
     ) {
@@ -2361,17 +2375,22 @@ export function foldTimeline(
     expandedKeys,
     options
   );
-  const merged = mergeRuns(sourceItems, usesToolCard, (head, rest) => {
-    if (head.kind !== 'tool') return head;
-    return {
-      ...head,
-      cardPeers: rest.flatMap((item) =>
-        item.kind === 'tool'
-          ? [{ key: item.key, args: item.args ?? null, output: item.output, state: item.state }]
-          : []
-      ),
-    };
-  });
+  const readableCards = options.readableToolCards === true;
+  const merged = mergeRuns(
+    sourceItems,
+    (name) => usesToolCard(name, readableCards),
+    (head, rest) => {
+      if (head.kind !== 'tool') return head;
+      return {
+        ...head,
+        cardPeers: rest.flatMap((item) =>
+          item.kind === 'tool'
+            ? [{ key: item.key, args: item.args ?? null, output: item.output, state: item.state }]
+            : []
+        ),
+      };
+    }
+  );
   const releasedLive =
     options.collapseLiveActivity === true ? (options.releasedLiveActivity ?? null) : null;
   return foldPrepared(
@@ -2383,6 +2402,7 @@ export function foldTimeline(
     releasedLive,
     lastUserIndex,
     liveFrom,
-    options.heldOpenTools ?? null
+    options.heldOpenTools ?? null,
+    readableCards
   );
 }

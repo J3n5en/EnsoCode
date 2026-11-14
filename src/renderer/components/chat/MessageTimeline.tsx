@@ -246,6 +246,8 @@ export function MessageTimeline({
     heldOpenTools,
     turnOverrides,
     foldToolOnlyTurns: !host && secretaryChat,
+    // 必须与 TimelineRow 的卡片判断同源：卡片不进过程组，工具行照旧折
+    readableToolCards: secretaryChat,
   });
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
   const foldMotionRef = useRef({
