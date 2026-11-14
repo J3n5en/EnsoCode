@@ -5,14 +5,14 @@ import { cardPlainText, presentToolCalls, renderToolCall, usesToolCard } from '.
 import type { ToolCallInput, ToolCardContext, ToolCardLookup } from './types';
 
 const zh: Record<string, string> = {
-  'Sent to 「{{title}}」': '发给「{{title}}」',
-  'Stopped 「{{title}}」': '停止了「{{title}}」',
-  'Create 「{{title}}」': '创建「{{title}}」',
-  'Dispatch 「{{title}}」': '派出「{{title}}」',
-  'To-do 「{{text}}」': '待办「{{text}}」',
-  'Added to-do 「{{text}}」': '添加了待办「{{text}}」',
-  'Schedule 「{{name}}」': '定时「{{name}}」',
-  'Removed schedule 「{{name}}」': '删除了定时「{{name}}」',
+  'Send message {{title}}': '发送消息 {{title}}',
+  'Stop session {{title}}': '停止会话 {{title}}',
+  'Create session {{title}}': '创建会话 {{title}}',
+  'Dispatch session {{title}}': '派出会话 {{title}}',
+  'Update to-do {{text}}': '更新待办 {{text}}',
+  'Add to-do {{text}}': '添加待办 {{text}}',
+  'Add schedule {{name}}': '添加定时 {{name}}',
+  'Remove schedule {{name}}': '删除定时 {{name}}',
   'Updated {{count}} to-dos': '更新了 {{count}} 条待办',
   'Sent {{count}} messages': '发了 {{count}} 条消息',
   Delivered: '已送达',
@@ -20,7 +20,6 @@ const zh: Record<string, string> = {
   Refused: '被拒绝',
   Stopped: '已停止',
   'Created the session': '已创建',
-  'Created 「{{title}}」': '已创建「{{title}}」',
   'Waiting on {{card}} {{id}}': '等待确认（{{card}} {{id}}）',
   'Dispatch card': '派活卡',
   'Profile card': '档案卡',
@@ -37,8 +36,10 @@ const zh: Record<string, string> = {
   'To-do text': '待办文字',
   'Once at {{time}}': '一次，{{time}}',
   'Next run {{time}}': '下次运行 {{time}}',
-  'Listed sessions in {{project}}': '列出 {{project}} 的会话',
-  'Listed to-dos': '列出待办',
+  'List sessions in {{project}}': '列出 {{project}} 的会话',
+  'List sessions': '列出会话',
+  'List to-dos': '列出待办',
+  'Project {{name}}': '项目 {{name}}',
   'To do': '待办',
   'In progress': '进行中',
   Problem: '出问题',
@@ -48,22 +49,23 @@ const zh: Record<string, string> = {
   'Session needs you': '需要你',
   'Session error': '出错',
   '{{count}} pending': '{{count}} 项待处理',
-  'Approvals {{approvals}} · questions {{asks}}': '待处理审批 {{approvals}} · 提问 {{asks}}',
-  'Read 「{{title}}」': '阅读「{{title}}」',
+  'Pending approvals': '待处理审批',
+  'Pending questions': '待处理提问',
+  'Read session {{title}}': '读取会话 {{title}}',
   User: '用户',
   Assistant: '助手',
   'Uncommitted changes': '有未提交改动',
   'Clean tree': '工作区干净',
   'No local branch': '没有本机分支',
-  'Searched memory 「{{query}}」 · {{count}}': '搜索记忆「{{query}}」· {{count}} 条',
-  'Saved memory 「{{title}}」': '记下了记忆「{{title}}」',
-  'Deleted memory 「{{title}}」': '删除了记忆「{{title}}」',
-  'Web search 「{{query}}」': '搜索「{{query}}」',
-  'Fetched {{domain}}': '打开了 {{domain}}',
+  'Search memory {{query}} · {{count}}': '搜索记忆 {{query}} · {{count}} 条',
+  'Save memory {{title}}': '记住 {{title}}',
+  'Delete memory {{title}}': '删除记忆 {{title}}',
+  'Web search {{query}}': '搜索 {{query}}',
+  'Fetch {{domain}}': '打开 {{domain}}',
   'Custom tool {{name}}': '自造工具 {{name}}',
   'Propose profile changes': '提议修改档案',
-  'Propose skill 「{{name}}」': '提议技能「{{name}}」',
-  'Propose tool 「{{name}}」': '提议工具「{{name}}」',
+  'Propose skill {{name}}': '提议技能 {{name}}',
+  'Propose tool {{name}}': '提议工具 {{name}}',
   Name: '名称',
   Autonomy: '自主度',
   'Dispatch limit reached': '已达到同时派发上限',
@@ -112,7 +114,7 @@ describe('工具卡片', () => {
       ),
       ctx('zh', lookup)
     );
-    expect(sent.title).toBe('发给「写发布说明」');
+    expect(sent.title).toBe('发送消息 写发布说明');
     expect(sent.status).toEqual({ tone: 'ok', label: '已送达' });
     expect(cardPlainText(sent)).toContain('请看一下 **发布说明**');
     expect(cardPlainText(sent)).not.toContain('{"status"');
@@ -124,7 +126,7 @@ describe('工具卡片', () => {
       ),
       ctx('zh', lookup)
     );
-    expect(queued.title).toBe(`发给「${shortId('missing-session-id')}」`);
+    expect(queued.title).toBe(`发送消息 ${shortId('missing-session-id')}`);
     expect(queued.status?.label).toBe('已排队（等对方这一轮结束）');
   });
 
@@ -147,7 +149,7 @@ describe('工具卡片', () => {
       call('session_stop', { conversationId: 'abc' }, { status: 'stopped' }),
       ctx('zh', { sessionTitle: () => '写发布说明' })
     );
-    expect(card.title).toBe('停止了「写发布说明」');
+    expect(card.title).toBe('停止会话 写发布说明');
   });
 
   it('session_create 与派出待办显示项目、工作区和结果', () => {
@@ -165,7 +167,7 @@ describe('工具卡片', () => {
       ),
       ctx('zh', { projectName: () => 'enso-code', sessionTitle: () => '写 hello' })
     );
-    expect(created.title).toBe('创建「写 hello」');
+    expect(created.title).toBe('创建会话 写 hello');
     expect(cardPlainText(created)).toContain('enso-code');
     expect(cardPlainText(created)).toContain('使用隔离工作区');
     expect(cardPlainText(created)).toContain('文件落地');
@@ -184,7 +186,7 @@ describe('工具卡片', () => {
         proposal: () => ({ status: 'pending', kind: 'dispatch' }),
       })
     );
-    expect(waiting.title).toBe('派出「补单测」');
+    expect(waiting.title).toBe('派出会话 补单测');
     expect(waiting.status?.label).toContain('派活卡');
     expect(waiting.status?.label).toContain(shortId('proposal-12345678'));
     const limited = renderToolCall(
@@ -207,7 +209,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(done.title).toBe('待办「补工具卡片单测」');
+    expect(done.title).toBe('更新待办 补工具卡片单测');
     expect(cardPlainText(done)).toContain('标记为完成 ✓');
     expect(cardPlainText(done)).not.toContain('{"todoId"');
     const renamed = renderToolCall(
@@ -232,7 +234,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(missing.title).toBe(`待办「${shortId('d5d1e359-bbbb')}」`);
+    expect(missing.title).toBe(`更新待办 ${shortId('d5d1e359-bbbb')}`);
     expect(cardPlainText(missing)).toContain('标记为完成 ✓');
   });
 
@@ -277,7 +279,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(card.title).toBe('定时「巡检」');
+    expect(card.title).toBe('添加定时 巡检');
     expect(cardPlainText(card)).toContain('每 10 分钟');
     expect(cardPlainText(card)).toContain(`下次运行 ${formatStamp(next)}`);
     expect(cronPhrase('0 9 * * *', 'zh')).toBe('每天 09:00');
@@ -291,7 +293,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(removed.title).toBe('删除了定时「巡检」');
+    expect(removed.title).toBe('删除定时 巡检');
   });
 
   it('列会话、读会话、项目信息', () => {
@@ -356,8 +358,11 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(read.title).toBe('阅读「写 hello」');
-    expect(cardPlainText(read)).toContain('待处理审批 1 · 提问 2');
+    expect(read.title).toBe('读取会话 写 hello');
+    // 会话状态只在徽标里说一次，详情里只剩待处理计数
+    expect(read.status).toEqual({ tone: 'neutral', label: '空闲' });
+    expect(cardPlainText(read)).toContain('待处理审批');
+    expect(cardPlainText(read).match(/空闲/gu)).toHaveLength(1);
     expect(cardPlainText(read)).toContain('先看构建');
     expect(cardPlainText(read)).not.toContain('untrusted-content');
     const info = renderToolCall(
@@ -368,7 +373,8 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(cardPlainText(info)).toContain('enso-code · feat/x · 有未提交改动');
+    expect(info.title).toBe('项目 enso-code');
+    expect(cardPlainText(info)).toContain('feat/x · 有未提交改动');
   });
 
   it('档案、技能、工具提案', () => {
@@ -399,7 +405,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(skill.title).toBe('提议技能「ship-it」');
+    expect(skill.title).toBe('提议技能 ship-it');
     expect(cardPlainText(skill)).toContain('发布前检查');
     expect(skill.blocks.some((block) => block.kind === 'markdown' && block.collapsed)).toBe(true);
     const tool = renderToolCall(
@@ -410,7 +416,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(tool.title).toBe('提议工具「upper」');
+    expect(tool.title).toBe('提议工具 upper');
   });
 
   it('记忆和网页', () => {
@@ -427,7 +433,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(search.title).toBe('搜索记忆「发布」· 2 条');
+    expect(search.title).toBe('搜索记忆 发布 · 2 条');
     expect(cardPlainText(search)).toContain('周五发版');
     const saved = renderToolCall(
       call(
@@ -440,7 +446,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(saved.title).toBe('记下了记忆「工具卡片别折进过程组」');
+    expect(saved.title).toBe('记住 工具卡片别折进过程组');
     expect(cardPlainText(saved)).toContain('根因是折叠把卡片吞了');
     const removed = renderToolCall(
       call(
@@ -450,7 +456,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(removed.title).toBe('删除了记忆「周五发版」');
+    expect(removed.title).toBe('删除记忆 周五发版');
     const web = renderToolCall(
       call(
         'web_search',
@@ -459,7 +465,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(web.title).toBe('搜索「enso」');
+    expect(web.title).toBe('搜索 enso');
     expect(cardPlainText(web)).toContain('Enso');
     expect(cardPlainText(web)).toContain('https://enso.example/docs');
     const page = renderToolCall(
@@ -470,7 +476,7 @@ describe('工具卡片', () => {
       ),
       ctx()
     );
-    expect(page.title).toBe('打开了 enso.example');
+    expect(page.title).toBe('打开 enso.example');
     expect(cardPlainText(page)).toContain('文档');
   });
 
@@ -512,9 +518,9 @@ describe('工具卡片', () => {
     expect(group.grouped).toBe(true);
     expect(group.title).toBe('更新了 3 条待办');
     expect(group.cards.map((card) => card.title)).toEqual([
-      '待办「补工具卡片单测」',
-      '待办「改秘书渲染」',
-      '待办「补验收脚本」',
+      '更新待办 补工具卡片单测',
+      '更新待办 改秘书渲染',
+      '更新待办 补验收脚本',
     ]);
     const items = [
       { kind: 'tool', name: 'todo_item_update', key: 'a' },

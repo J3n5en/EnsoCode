@@ -129,6 +129,49 @@ describe('工具卡片和结果卡片同宽', () => {
     }
     expect(sent).toContain('data-enso="tool-card-status"');
     expect(sent).toContain('Delivered');
-    expect(updated).toContain('Marked done');
+    expect(updated).toContain('data-open="false"');
+    expect(updated).not.toContain('data-enso="tool-card-body"');
+  });
+});
+
+describe('秘书卡片收成一行', () => {
+  const created = () =>
+    renderToStaticMarkup(
+      createElement(TimelineRow, {
+        item: tool({
+          name: 'session_create',
+          args: {
+            title: '定时卡片与记忆列表悬停',
+            prompt: '把定时卡片收起来',
+            projectId: 'p1',
+            worktree: false,
+          },
+          output: JSON.stringify({ status: 'created', conversationId: 'new-1' }),
+        }),
+      })
+    );
+
+  it('默认收起，只有一行标题和一枚状态徽标', () => {
+    const markup = created();
+    expect(markup).toContain('data-open="false"');
+    // 一行：只有一个可点的行头，没有详情、键值和原始数据
+    expect(markup.match(/data-enso="tool-card-expand"/g)).toHaveLength(1);
+    expect(markup).not.toContain('data-enso="tool-card-body"');
+    expect(markup).not.toContain('<dl');
+    expect(markup).not.toContain('data-enso="tool-card-raw"');
+    expect(markup).toContain('data-enso="tool-card-status"');
+  });
+
+  it('同一个状态只出现一次，会话块不再重复「已创建」', () => {
+    const markup = created();
+    expect(markup.match(/Created the session/g)).toHaveLength(1);
+    expect(markup).not.toContain('Created 「');
+  });
+
+  it('详情默认不展开，键值和提示词都要点开才出现', () => {
+    const markup = created();
+    expect(markup).not.toContain('Worktree');
+    expect(markup).not.toContain('把定时卡片收起来');
+    expect(markup).not.toContain('View raw data');
   });
 });
