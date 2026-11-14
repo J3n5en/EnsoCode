@@ -1038,8 +1038,14 @@ async function run(cdp, pluginZipUrl) {
   );
   assert(sent.delivered, 'step6c: 派出的会话收到秘书发的消息', sent);
   const deniedResult = sent.results?.find((entry) => entry.isError)?.text;
+  // 不存在的 id 走 not-found，真实但未授权的会话走 not-operable：两者都要写明原因，
+  // 都不能退化成 invalid arguments（模型会当成参数写错而反复重试）。
+  const deniedPrefixes = [
+    'permission denied (not-operable)',
+    'not found: no root session with this id',
+  ];
   assert(
-    deniedResult?.includes('permission denied (not-operable)') &&
+    deniedPrefixes.some((prefix) => deniedResult?.includes(prefix)) &&
       !deniedResult.includes('invalid arguments'),
     'step6c: 不可操作的会话报明确的拒绝原因，不再报 invalid arguments',
     sent
@@ -1051,7 +1057,7 @@ async function run(cdp, pluginZipUrl) {
     .filter((entry) => entry.op === 'session_send');
   assert(
     sendAudit.some((entry) => entry.ok && entry.targetId === goalSession) &&
-      sendAudit.some((entry) => !entry.ok && entry.detail === 'not-operable'),
+      sendAudit.some((entry) => !entry.ok && ['not-operable', 'not-found'].includes(entry.detail)),
     'step6c: audit 记下一次成功发送与一次拒绝',
     sendAudit
   );
