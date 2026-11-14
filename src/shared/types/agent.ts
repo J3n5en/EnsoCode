@@ -340,6 +340,10 @@ export interface BackgroundTaskInfo {
   tail: string;
   startedAt: number;
   exitCode?: number;
+  /** 模型显式 timeout 的绝对截止（ms）。没有则不会因超时被看门狗收口 */
+  deadlineAt?: number;
+  /** false：直接子进程已不在。缺省表示还没探测 */
+  alive?: boolean;
 }
 
 export { SHELL_QUIET_MS } from '../shellLimits';

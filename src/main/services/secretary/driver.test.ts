@@ -1,3 +1,4 @@
+import { BACKGROUND_WAKE_GRACE_MS } from '@shared/backgroundWatch';
 import type { ConversationsPatch } from '@shared/conversationsPatch';
 import type { HeadlessDelivery, HeadlessSessionRuntime } from '@shared/pair/headlessQueue';
 import type { RendererAgentEvent } from '@shared/types/agent';
@@ -16,6 +17,10 @@ interface Harness {
 }
 
 function harness(row: Record<string, unknown> = {}): Harness {
+  return harnessAt(row);
+}
+
+function harnessAt(row: Record<string, unknown> = {}, clock?: { now: number }): Harness {
   const rows: Record<string, Record<string, unknown>> = {
     [SID]: {
       id: SID,
@@ -49,6 +54,7 @@ function harness(row: Record<string, unknown> = {}): Harness {
       return promptOk.value ? { ok: true } : { ok: false, error: 'stale session' };
     },
     newId: () => `id-${++seq}`,
+    now: () => clock?.now ?? Date.now(),
   };
   return { rows, statuses, alive, prompts, driver: createDispatchDriver(ports), promptOk };
 }
@@ -339,5 +345,130 @@ describe('界面改目标走 Main', () => {
   it('非 Main 驱动的会话拒绝改目标', () => {
     const h = harness({ driver: undefined });
     expect(h.driver.goalAction(SID, 'pause')).toMatchObject({ ok: false });
+  });
+});
+
+describe('派出会话的后台任务看门狗', () => {
+  const clock = { now: 1_000 };
+
+  function started(task: Record<string, unknown>, at = clock.now): RendererAgentEvent {
+    clock.now = at;
+    return {
+      type: 'task-started',
+      identity,
+      seq: 1,
+      task: {
+        taskId: 't1',
+        command: 'sleep 30',
+        status: 'running',
+        tail: '',
+        startedAt: at,
+        ...task,
+      },
+    } as unknown as RendererAgentEvent;
+  }
+
+  function ended(status: 'done' | 'failed', at: number): RendererAgentEvent {
+    clock.now = at;
+    return {
+      type: 'task-ended',
+      identity,
+      seq: 2,
+      taskId: 't1',
+      status,
+    } as unknown as RendererAgentEvent;
+  }
+
+  it('还在跑且未到截止时间时不唤醒', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({ deadlineAt: 60_000 }));
+    h.driver.observe(turnCompleted(digest('等着')));
+    expect(h.prompts).toHaveLength(0);
+    expect(h.driver.watch(30_000)).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it('超时先告诉秘书，宽限过后会话仍空闲才唤醒，且不重复报', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({ deadlineAt: 5_000 }, 1_000));
+    h.driver.observe(turnCompleted(digest('等着')));
+    expect(h.driver.watch(5_000)).toEqual([
+      { conversationId: SID, taskId: 't1', reason: 'timeout' },
+    ]);
+    expect(h.prompts).toHaveLength(0);
+    expect(h.driver.watch(5_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0].delivery.text).toContain('t1');
+    expect(h.prompts[0].delivery.text).toContain('timeout');
+    expect(h.prompts[0].delivery.text).toContain('<background-task-watchdog>');
+  });
+
+  it('进程已死时同样报停滞并在宽限后唤醒', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({}, 1_000));
+    h.driver.observe(turnCompleted(digest('等着')));
+    clock.now = 4_000;
+    h.driver.observe({
+      type: 'background-tasks-level',
+      identity,
+      seq: 3,
+      tasks: [
+        {
+          taskId: 't1',
+          command: 'sleep 30',
+          status: 'running',
+          tail: '',
+          startedAt: 1_000,
+          alive: false,
+        },
+      ],
+    } as unknown as RendererAgentEvent);
+    expect(h.driver.watch(4_000)).toEqual([{ conversationId: SID, taskId: 't1', reason: 'dead' }]);
+    expect(h.driver.watch(4_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
+    expect(h.prompts).toHaveLength(1);
+    expect(h.prompts[0].delivery.text).toContain('process is gone');
+  });
+
+  it('任务结束后仍空闲，过了宽限才当没唤醒；期间会话跑起来就不报', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({}, 1_000));
+    h.driver.observe(turnCompleted(digest('等通知')));
+    h.driver.observe(ended('done', 2_000));
+    expect(h.driver.watch(2_000)).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+    expect(h.driver.watch(2_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([
+      { conversationId: SID, taskId: 't1', reason: 'undelivered' },
+    ]);
+    expect(h.prompts).toHaveLength(1);
+
+    const woke = harnessAt({}, clock);
+    woke.driver.observe(started({}, 1_000));
+    woke.driver.observe(turnCompleted(digest('等通知')));
+    woke.driver.observe(ended('done', 2_000));
+    woke.statuses[SID].state = 'running';
+    expect(woke.driver.watch(2_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
+    expect(woke.prompts).toHaveLength(0);
+  });
+
+  it('还有待审批时不把后台等待报成停滞', () => {
+    const h = harnessAt({}, clock);
+    h.statuses[SID].pendingApprovals = 1;
+    h.driver.observe(started({ deadlineAt: 1_000 }, 1_000));
+    h.driver.observe(turnCompleted(digest('等着')));
+    expect(h.driver.watch(10_000)).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it('超时通知已经把会话跑完一轮时仍报停滞，但不再唤醒', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({ deadlineAt: 5_000 }, 1_000));
+    h.driver.observe(turnCompleted(digest('等着')));
+    h.driver.observe(ended('failed', 5_000));
+    h.driver.observe(turnCompleted(digest('看到超时了')));
+    const before = h.prompts.length;
+    expect(h.driver.watch(5_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([
+      { conversationId: SID, taskId: 't1', reason: 'timeout' },
+    ]);
+    expect(h.prompts).toHaveLength(before);
   });
 });

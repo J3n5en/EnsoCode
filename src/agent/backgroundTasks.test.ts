@@ -10,6 +10,7 @@ import {
   BackgroundTaskManager,
   createTaskTools,
   foregroundCommandTimeoutMs,
+  processAlive,
   resolveBackgroundLaunch,
   shellBackgroundEscape,
   shellReadHint,
@@ -275,6 +276,12 @@ describe('withBackground 命令变换(远程会话用)', () => {
 });
 
 describe('BackgroundTaskManager', () => {
+  it('processAlive 只把正整数 pid 当候选，当前进程算活着', () => {
+    expect(processAlive(0)).toBe(false);
+    expect(processAlive(-1)).toBe(false);
+    expect(processAlive(process.pid)).toBe(true);
+  });
+
   it('进程退出后等待 finalize，再由 task_output 返回最终 details', async () => {
     const { manager, ended } = makeManager();
     let finishFinalize: ((details: unknown) => void) | undefined;
@@ -319,6 +326,19 @@ describe('BackgroundTaskManager', () => {
       await until(() => ended.includes(taskId));
     }
     expect(manager.hasRunningInWorkspace(['root'])).toBe(false);
+  });
+
+  it('探针认为进程已死时收口并通知，不等 close', async () => {
+    const { manager, notified, ended } = makeManager();
+    const taskId = manager.start('s1', 'sleep 30', tmpdir());
+    try {
+      manager.watchTasks(Date.now(), () => false);
+      await until(() => ended.includes(taskId));
+      expect(notified.join('\n')).toContain(taskId);
+      expect(manager.snapshot('s1').some((task) => task.status === 'running')).toBe(false);
+    } finally {
+      manager.stop(taskId);
+    }
   });
 
   it('任务完成:输出捕获、exit 事件、未知情则自动通知(内联输出 + log 路径)', async () => {

@@ -175,6 +175,11 @@ const driverPorts: DispatchDriverPorts = {
       delivery.images as AttachedImage[] | undefined
     ),
   newId: () => randomUUID(),
+  now: () => Date.now(),
+  requestWatch: () => {
+    const now = Date.now();
+    host?.recordBackgroundStalls(driver?.watch(now) ?? [], now);
+  },
 };
 
 let driver: DispatchDriver | null = null;
@@ -224,6 +229,7 @@ const hostPorts: SecretaryHostPorts = {
   notify: (build) => void notifyDesktop().notifySecretary(build),
   publish: () => broadcastState(),
   now: () => Date.now(),
+  backgroundStalls: (now) => driver?.watch(now) ?? [],
   newId: () => randomUUID(),
   audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
 };

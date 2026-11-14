@@ -1,3 +1,10 @@
+import {
+  BACKGROUND_WAKE_GRACE_MS,
+  type BackgroundStall,
+  backgroundWaitStall,
+  backgroundWakeText,
+  type WatchedBackgroundTask,
+} from '@shared/backgroundWatch';
 import type { ConversationsPatch } from '@shared/conversationsPatch';
 import {
   applyHeadlessGoalSignal,
@@ -36,6 +43,13 @@ export interface DispatchDriverPorts {
     deliveryId: string
   ): { ok: boolean; error?: string };
   newId(): string;
+  /** 看门狗计时；缺省用墙钟。测试注入逻辑时钟 */
+  now?(): number;
+  /**
+   * 空闲等待出现超时 / 进程已死 / 完成未唤醒后，过宽限再看一眼。
+   * 由 Main 接上 host.tick 以外的短定时，避免干等下一分钟。
+   */
+  requestWatch?(): void;
 }
 
 export interface DispatchDriver {
@@ -48,6 +62,22 @@ export interface DispatchDriver {
     action: GoalAction,
     text?: string
   ): { ok: boolean; error?: string };
+  /** 看一眼后台等待：该醒的醒，并返回还没交给秘书的停滞 */
+  watch(now: number): BackgroundStall[];
+}
+
+interface TrackedTask extends WatchedBackgroundTask {
+  status: 'running' | 'done' | 'failed';
+  dead: boolean;
+  overdue: boolean;
+}
+
+interface PendingStall {
+  taskId: string;
+  reason: BackgroundStall['reason'];
+  reported: boolean;
+  consumed: boolean;
+  promptedAt?: number;
 }
 
 type Applied = { runtime: HeadlessSessionRuntime; deliver?: HeadlessDelivery };
@@ -129,31 +159,108 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
   const compacting = new Map<string, boolean>();
   /** 这一轮空闲已经投过 goal 续跑：压缩结束不能再投一次，否则第二次 prompt 会把会话打成 error */
   const continued = new Set<string>();
-  /** 还在跑的后台任务。等它们时不续跑，完成通知会自己唤醒会话 */
-  const runningTasks = new Map<string, Set<string>>();
+  /**
+   * 后台任务。等它们时不续跑，完成通知会自己唤醒会话。
+   * 通知没到、进程没了或到了截止时间，由 watch 补一次唤醒并交给秘书报停滞。
+   */
+  const tasksBySession = new Map<string, Map<string, TrackedTask>>();
+  /** 这一轮结束时还有后台任务：会话空闲是在等通知，不是做完了 */
+  const awaiting = new Set<string>();
+  const pending = new Map<string, PendingStall>();
+  /** 超时或进程已死之后，完成通知已经把会话跑完一轮：还要报停滞，但不要再 prompt */
+  const consumedWaits = new Set<string>();
+  const watchTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 自己写回触发的合并回调不能再投递，否则同一条消息发两遍 */
   let saving = false;
 
-  function taskSet(conversationId: string): Set<string> {
-    let tasks = runningTasks.get(conversationId);
+  function clock(): number {
+    return ports.now?.() ?? Date.now();
+  }
+
+  function taskMap(conversationId: string): Map<string, TrackedTask> {
+    let tasks = tasksBySession.get(conversationId);
     if (!tasks) {
-      tasks = new Set();
-      runningTasks.set(conversationId, tasks);
+      tasks = new Map();
+      tasksBySession.set(conversationId, tasks);
     }
     return tasks;
   }
 
+  function runningCount(conversationId: string): number {
+    let count = 0;
+    for (const task of taskMap(conversationId).values()) {
+      if (task.status === 'running') count += 1;
+    }
+    return count;
+  }
+
+  function hasHardFailure(conversationId: string): boolean {
+    for (const task of taskMap(conversationId).values()) {
+      if (task.overdue || task.dead) return true;
+    }
+    return false;
+  }
+
+  function rememberTask(
+    conversationId: string,
+    raw: {
+      taskId?: unknown;
+      status?: unknown;
+      deadlineAt?: unknown;
+      alive?: unknown;
+    },
+    at: number
+  ): void {
+    if (typeof raw.taskId !== 'string' || raw.taskId.length === 0) return;
+    const status =
+      raw.status === 'done' || raw.status === 'failed' || raw.status === 'running'
+        ? raw.status
+        : 'running';
+    const prev = taskMap(conversationId).get(raw.taskId);
+    const deadlineAt =
+      typeof raw.deadlineAt === 'number' && Number.isFinite(raw.deadlineAt)
+        ? raw.deadlineAt
+        : prev?.deadlineAt;
+    const dead = prev?.dead === true || raw.alive === false;
+    const overdue =
+      prev?.overdue === true ||
+      ((status === 'running' || prev?.status === 'running') &&
+        deadlineAt !== undefined &&
+        at >= deadlineAt);
+    const endedAt = status === 'running' ? undefined : (prev?.endedAt ?? at);
+    const deadAt = dead ? (prev?.deadAt ?? at) : prev?.deadAt;
+    taskMap(conversationId).set(raw.taskId, {
+      taskId: raw.taskId,
+      status,
+      dead,
+      overdue,
+      ...(deadlineAt !== undefined ? { deadlineAt } : {}),
+      ...(deadAt !== undefined ? { deadAt } : {}),
+      ...(endedAt !== undefined ? { endedAt } : {}),
+    });
+  }
+
   function seedTasks(conversationId: string, row: Record<string, unknown> | undefined): void {
-    if (runningTasks.has(conversationId)) return;
-    const tasks = new Set<string>();
+    if (tasksBySession.has(conversationId)) return;
+    taskMap(conversationId);
     if (Array.isArray(row?.backgroundTasks)) {
       for (const task of row.backgroundTasks) {
         if (!task || typeof task !== 'object') continue;
-        const info = task as { taskId?: unknown; status?: unknown };
-        if (info.status === 'running' && typeof info.taskId === 'string') tasks.add(info.taskId);
+        rememberTask(conversationId, task as { taskId?: unknown; status?: unknown }, clock());
       }
     }
-    runningTasks.set(conversationId, tasks);
+  }
+
+  /** 宽限后再看：完成通知若会到，这两秒内会话会离开 idle */
+  function armWatch(conversationId: string): void {
+    if (!ports.requestWatch || !awaiting.has(conversationId) || watchTimers.has(conversationId))
+      return;
+    const timer = setTimeout(() => {
+      watchTimers.delete(conversationId);
+      ports.requestWatch?.();
+    }, BACKGROUND_WAKE_GRACE_MS);
+    timer.unref?.();
+    watchTimers.set(conversationId, timer);
   }
 
   function isContinuation(delivery: HeadlessDelivery | undefined): boolean {
@@ -241,9 +348,58 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
   ): void {
     const applied = onHeadlessIdle(runtime);
     const continuation = isContinuation(applied.deliver);
-    if (continuation && (!allowContinue || taskSet(conversationId).size > 0)) return;
+    if (continuation && (!allowContinue || runningCount(conversationId) > 0)) return;
     if (continuation) continued.add(conversationId);
     commit(conversationId, runtime, applied);
+  }
+
+  function watchOne(conversationId: string, now: number): BackgroundStall | null {
+    const status = ports.status(conversationId);
+    for (const task of taskMap(conversationId).values()) {
+      if (task.status === 'running' && task.deadlineAt !== undefined && now >= task.deadlineAt) {
+        task.overdue = true;
+      }
+    }
+    const decision = backgroundWaitStall(
+      {
+        awaiting: awaiting.has(conversationId),
+        idle: status.state === 'idle',
+        pendingUser: status.pendingAsks + status.pendingApprovals > 0,
+        consumed:
+          pending.get(conversationId)?.consumed === true || consumedWaits.has(conversationId),
+        tasks: [...taskMap(conversationId).values()],
+      },
+      now
+    );
+    if (!decision) return null;
+    let item = pending.get(conversationId);
+    if (!item) {
+      item = {
+        taskId: decision.taskId,
+        reason: decision.reason,
+        reported: false,
+        consumed: false,
+      };
+      pending.set(conversationId, item);
+    }
+    let reported: BackgroundStall | null = null;
+    if (!item.reported) {
+      item.reported = true;
+      reported = { conversationId, taskId: item.taskId, reason: item.reason };
+    }
+    if (decision.wake && (item.promptedAt === undefined || now - item.promptedAt >= 60_000)) {
+      const result = ports.prompt(
+        conversationId,
+        { kind: 'prompt', text: backgroundWakeText(decision.reason, item.taskId) },
+        ports.newId()
+      );
+      if (result.ok) item.promptedAt = now;
+    }
+    if (item.reported && (item.consumed || consumedWaits.has(conversationId))) {
+      awaiting.delete(conversationId);
+      consumedWaits.delete(conversationId);
+    }
+    return reported;
   }
 
   return {
@@ -260,23 +416,32 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         return;
       }
       if (event.type === 'task-started') {
-        taskSet(conversationId).add(event.task.taskId);
+        rememberTask(conversationId, event.task, clock());
+        armWatch(conversationId);
         return;
       }
       if (
         event.type === 'task-ended' ||
         (event.type === 'task-output' && event.status !== 'running')
       ) {
-        taskSet(conversationId).delete(event.taskId);
+        rememberTask(conversationId, { taskId: event.taskId, status: event.status }, clock());
+        armWatch(conversationId);
         return;
       }
       if (event.type === 'background-tasks-level') {
-        runningTasks.set(
-          conversationId,
-          new Set(
-            event.tasks.filter((task) => task.status === 'running').map((task) => task.taskId)
-          )
-        );
+        const seen = new Set<string>();
+        const at = clock();
+        for (const task of event.tasks) {
+          if (!task || typeof task.taskId !== 'string') continue;
+          seen.add(task.taskId);
+          rememberTask(conversationId, task, at);
+        }
+        // 全量快照里消失的还在跑任务：进程侧已经收口，但完成通知未必送到
+        for (const [taskId, task] of taskMap(conversationId)) {
+          if (seen.has(taskId) || task.status !== 'running') continue;
+          rememberTask(conversationId, { taskId, status: 'done' }, at);
+        }
+        armWatch(conversationId);
         return;
       }
       if (event.type === 'goal-signal') {
@@ -308,6 +473,23 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
         return;
       }
       continued.delete(conversationId);
+      if (runningCount(conversationId) > 0) {
+        const item = pending.get(conversationId);
+        // 上一轮失败已经叫醒并跑完，这次又开始等：允许再报一次
+        if (item?.consumed) pending.delete(conversationId);
+        awaiting.add(conversationId);
+        armWatch(conversationId);
+      } else {
+        const item = pending.get(conversationId);
+        if (item) item.consumed = true;
+        if (hasHardFailure(conversationId) && !item?.reported) {
+          // 看门狗还没报出去，会话却已经被完成通知跑完了：留到下一次 watch 只报不唤醒
+          consumedWaits.add(conversationId);
+        } else {
+          awaiting.delete(conversationId);
+          consumedWaits.delete(conversationId);
+        }
+      }
       const guarded = withProgress(runtime, event.digest?.assistantText);
       pump(
         conversationId,
@@ -357,6 +539,16 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       );
       commit(conversationId, current, applied);
       return { ok: true };
+    },
+
+    watch(now) {
+      const stalls: BackgroundStall[] = [];
+      const ids = new Set<string>([...awaiting, ...pending.keys()]);
+      for (const conversationId of ids) {
+        const stall = watchOne(conversationId, now);
+        if (stall) stalls.push(stall);
+      }
+      return stalls;
     },
   };
 }

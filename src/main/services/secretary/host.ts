@@ -1,3 +1,4 @@
+import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroundWatch';
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { projectNameFromPath } from '@shared/projectName';
 import { transitionProposal } from '@shared/secretary/policy';
@@ -61,6 +62,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   notify(build: (lang: 'zh' | 'en') => { title: string; body: string }): void;
   publish(): void;
   now(): number;
+  /** 派出会话空闲等后台任务的看门狗；缺省表示没有 */
+  backgroundStalls?(now: number): readonly BackgroundStall[];
   audit?(entry: SecretaryAuditEntry): void;
 }
 
@@ -68,6 +71,7 @@ export interface SecretaryHost {
   /** worker 事件入口：driver 与状态发布共用同一次 observe 结果 */
   onAgentEvent(event: RendererAgentEvent, changes: readonly SessionStatusPayload[]): void;
   tick(now?: number): void;
+  recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
   recover(): void;
   start(): void;
   stop(): void;
@@ -155,7 +159,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   function recordUpdate(
     record: DispatchRecord,
     kind: SecretaryResultKind,
-    now: number
+    now: number,
+    detail?: string
   ): SecretaryUpdate {
     const row = ports.rows()[record.conversationId];
     const project = ports.projects().find((candidate) => candidate.projectId === record.projectId);
@@ -167,7 +172,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       kind,
       conversationId: record.conversationId,
       secretaryConversationId: record.secretaryConversationId,
-      text: [projectName, title, RESULT_LABELS[kind].zh].filter(Boolean).join(' · '),
+      text: [projectName, title, RESULT_LABELS[kind].zh, detail].filter(Boolean).join(' · '),
       ...(record.lastText ? { lastText: record.lastText } : {}),
     };
   }
@@ -185,11 +190,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     file: SecretaryDispatchFile,
     record: DispatchRecord,
     kind: SecretaryResultKind,
-    now: number
+    now: number,
+    detail?: string
   ): void {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
-    const update = recordUpdate(record, kind, now);
+    const update = recordUpdate(record, kind, now, detail);
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
@@ -219,6 +225,19 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       text: record.lastText || update.text,
     });
     notifyResult(update, kind);
+  }
+
+  /** 同一轮只报一次。返回是否写进了回传队列 */
+  function applyBackgroundStall(
+    file: SecretaryDispatchFile,
+    stall: BackgroundStall,
+    now: number
+  ): boolean {
+    const record = file.dispatched[stall.conversationId];
+    if (!record || record.stalledTurn === record.turn) return false;
+    record.stalledTurn = record.turn;
+    recordResult(file, record, 'stalled', now, BACKGROUND_STALL_DETAIL[stall.reason]);
+    return true;
   }
 
   function flush(now: number): void {
@@ -391,6 +410,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         recordResult(file, record, 'stalled', now);
         changed = true;
       }
+      for (const stall of ports.backgroundStalls?.(now) ?? []) {
+        if (applyBackgroundStall(file, stall, now)) changed = true;
+      }
       for (const proposal of Object.values(file.proposals)) {
         const transitioned = transitionProposal(proposal, { type: 'expire' }, now);
         if (!transitioned.changed) continue;
@@ -404,6 +426,19 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (changed || todosChanged) ports.publish();
       // 系统定时是档案与待办的派生状态，每分钟重算一次；放在触发之后，否则刚到期的待办提醒先被重算删掉
       syncSystemSchedules(ports, ports.profile(), ports.todos());
+      flush(now);
+    },
+
+    recordBackgroundStalls(stalls, now = ports.now()) {
+      if (!ports.enabled() || stalls.length === 0) return;
+      const file = ports.file();
+      let changed = false;
+      for (const stall of stalls) {
+        if (applyBackgroundStall(file, stall, now)) changed = true;
+      }
+      if (!changed) return;
+      ports.save(file);
+      ports.publish();
       flush(now);
     },
 
