@@ -367,131 +367,6 @@ async function run(cdp, pluginZipUrl) {
   assert(setup.ok, 'setup: 隔离实例里建出项目与秘书会话', setup);
   await cdp.shot(path.join(ART, '01-sidebar.png'));
 
-  log('== 插件：勾选后才进秘书会话');
-  const installed = await page(`
-    const staged = await window.electronAPI.extensionPlugins.stageFromUrl(${JSON.stringify(pluginZipUrl)});
-    if (!staged.ok) return JSON.stringify({ ok: false, error: staged.error });
-    const committed = await window.electronAPI.extensionPlugins.commit(staged.preview.token);
-    if (!committed.ok) return JSON.stringify({ ok: false, error: committed.error });
-    const enabled = await window.electronAPI.extensionPlugins.setEnabled('enso.secretarytest', true);
-    if (!enabled.ok) return JSON.stringify({ ok: false, error: enabled.error });
-    const listed = (await window.electronAPI.extensionPlugins.list()).find(
-      (plugin) => plugin.id === 'enso.secretarytest'
-    );
-    const saved = await window.electronAPI.secretary.saveProfile({
-      pluginIds: ['enso.secretarytest'],
-    });
-    if (!saved.ok) return JSON.stringify({ ok: false, error: saved.error });
-    const secretary = await SEC();
-    const id = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    await S().send(
-      '插件回显一次 [[tool:plugin_enso-secretarytest__echo {"text":"hi"}]]',
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      id
-    );
-    const textOf = (message) =>
-      (Array.isArray(message.content) ? message.content : [])
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('');
-    const result = await until(
-      () => (S().conversations[id]?.messages ?? []).find(
-        (message) => message.toolName === 'plugin_enso-secretarytest__echo'
-      ) ?? null,
-      40000
-    );
-    return JSON.stringify({
-      ok: Boolean(result),
-      state: listed?.state,
-      tools: listed?.tools.map((tool) => tool.name),
-      secretaryId: id,
-      text: result ? textOf(result) : null,
-      isError: result?.isError === true,
-    });
-  `);
-  assert(
-    installed.ok && installed.state === 'enabled',
-    '插件: 隔离实例里装好并启用测试插件',
-    installed
-  );
-  assert(
-    installed.text?.includes('echo:hi') && !installed.isError,
-    '插件: 勾选后秘书会话能调只读插件工具并拿到返回',
-    installed
-  );
-
-  log('== 插件：非只读工具每次都要审批');
-  const poked = await page(`
-    const id = ${JSON.stringify(installed.secretaryId)};
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    await S().send(
-      '发一条消息 [[tool:plugin_enso-secretarytest__poke {"text":"hello"}]]',
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      id
-    );
-    const pending = await until(() => (S().conversations[id]?.pendingApprovals ?? [])[0] ?? null, 40000);
-    if (!pending) return JSON.stringify({ ok: false, error: 'no approval card' });
-    const approved = await window.electronAPI.agent.respondApproval(id, pending.requestId, 'allow');
-    const textOf = (message) =>
-      (Array.isArray(message.content) ? message.content : [])
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('');
-    const result = await until(
-      () => (S().conversations[id]?.messages ?? []).find(
-        (message) => message.toolName === 'plugin_enso-secretarytest__poke'
-      ) ?? null,
-      40000
-    );
-    return JSON.stringify({
-      ok: Boolean(result),
-      tool: pending.tool,
-      approved: approved?.ok ?? null,
-      text: result ? textOf(result) : null,
-      isError: result?.isError === true,
-    });
-  `);
-  assert(poked.tool === 'plugin_enso-secretarytest__poke', '插件: 非只读插件工具弹出审批卡', poked);
-  assert(
-    poked.approved === true && poked.text?.includes('poked:hello') && !poked.isError,
-    '插件: 批准后非只读插件工具才执行',
-    poked
-  );
-
-  log('== 插件：取消勾选后工具不可用');
-  const unchecked = await page(`
-    const saved = await window.electronAPI.secretary.saveProfile({ pluginIds: [] });
-    if (!saved.ok) return JSON.stringify({ ok: false, error: saved.error });
-    const secretary = await SEC();
-    const id = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    await S().send(
-      '取消勾选后再回显 [[tool:plugin_enso-secretarytest__echo {"text":"again"}]]',
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      id
-    );
-    const result = await until(
-      () => (S().conversations[id]?.messages ?? []).find(
-        (message) => message.toolName === 'plugin_enso-secretarytest__echo'
-      ) ?? null,
-      40000
-    );
-    return JSON.stringify({ ok: Boolean(result), isError: result?.isError === true });
-  `);
-  const toolList = await fakeRequests().then((entries) =>
-    entries.filter((entry) => entry.lastUserText.includes('取消勾选后再回显')).at(-1)
-  );
-  assert(
-    !(toolList?.toolNames ?? []).includes('plugin_enso-secretarytest__echo'),
-    '插件: 取消勾选后新会话不再下发该插件工具',
-    toolList
-  );
-  assert(unchecked.isError === true, '插件: 取消勾选后同一调用报错', unchecked);
-
   log('== step3 派活');
   const draft = {
     projectId: setup.projectId,
@@ -501,6 +376,7 @@ async function run(cdp, pluginZipUrl) {
   const directive = `[[tool:session_create ${JSON.stringify(draft)}]]`;
   const proposed = await page(`
     const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
     await S().send(
       '看看 ${path.basename(PROJ)} 的进展，然后派个活 ${directive}',
       { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
@@ -986,6 +862,132 @@ async function run(cdp, pluginZipUrl) {
     .map((line) => JSON.parse(line))
     .filter((entry) => entry.op === 'result_dismiss' && entry.targetId === dispatchedId);
   assert(dismissAudit.length === 1, 'step8: audit 里记了一条 result_dismiss', dismissAudit);
+
+  log('== 插件：勾选后才进秘书会话');
+  const installed = await page(`
+    const staged = await window.electronAPI.extensionPlugins.stageFromUrl(${JSON.stringify(pluginZipUrl)});
+    if (!staged.ok) return JSON.stringify({ ok: false, error: staged.error });
+    const committed = await window.electronAPI.extensionPlugins.commit(staged.preview.token);
+    if (!committed.ok) return JSON.stringify({ ok: false, error: committed.error });
+    const enabled = await window.electronAPI.extensionPlugins.setEnabled('enso.secretarytest', true);
+    if (!enabled.ok) return JSON.stringify({ ok: false, error: enabled.error });
+    const listed = (await window.electronAPI.extensionPlugins.list()).find(
+      (plugin) => plugin.id === 'enso.secretarytest'
+    );
+    const saved = await window.electronAPI.secretary.saveProfile({
+      pluginIds: ['enso.secretarytest'],
+    });
+    if (!saved.ok) return JSON.stringify({ ok: false, error: saved.error });
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '插件回显一次 [[tool:plugin_enso-secretarytest__echo {"text":"hi"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'plugin_enso-secretarytest__echo'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({
+      ok: Boolean(result),
+      state: listed?.state,
+      tools: listed?.tools.map((tool) => tool.name),
+      secretaryId: id,
+      text: result ? textOf(result) : null,
+      isError: result?.isError === true,
+    });
+  `);
+  assert(
+    installed.ok && installed.state === 'enabled',
+    '插件: 隔离实例里装好并启用测试插件',
+    installed
+  );
+  assert(
+    installed.text?.includes('echo:hi') && !installed.isError,
+    '插件: 勾选后秘书会话能调只读插件工具并拿到返回',
+    installed
+  );
+
+  log('== 插件：非只读工具每次都要审批');
+  const poked = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '发一条消息 [[tool:plugin_enso-secretarytest__poke {"text":"hello"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const pending = await until(() => (S().conversations[id]?.pendingApprovals ?? [])[0] ?? null, 40000);
+    if (!pending) return JSON.stringify({ ok: false, error: 'no approval card' });
+    const approved = await window.electronAPI.agent.respondApproval(id, pending.requestId, 'allow');
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'plugin_enso-secretarytest__poke'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({
+      ok: Boolean(result),
+      tool: pending.tool,
+      approved: approved?.ok ?? null,
+      text: result ? textOf(result) : null,
+      isError: result?.isError === true,
+    });
+  `);
+  assert(poked.tool === 'plugin_enso-secretarytest__poke', '插件: 非只读插件工具弹出审批卡', poked);
+  assert(
+    poked.approved === true && poked.text?.includes('poked:hello') && !poked.isError,
+    '插件: 批准后非只读插件工具才执行',
+    poked
+  );
+
+  log('== 插件：取消勾选后工具不可用');
+  const unchecked = await page(`
+    const saved = await window.electronAPI.secretary.saveProfile({ pluginIds: [] });
+    if (!saved.ok) return JSON.stringify({ ok: false, error: saved.error });
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '取消勾选后再回显 [[tool:plugin_enso-secretarytest__echo {"text":"again"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'plugin_enso-secretarytest__echo'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({ ok: Boolean(result), isError: result?.isError === true });
+  `);
+  const toolList = await fakeRequests().then((entries) =>
+    entries.filter((entry) => entry.lastUserText.includes('取消勾选后再回显')).at(-1)
+  );
+  assert(
+    !(toolList?.toolNames ?? []).includes('plugin_enso-secretarytest__echo'),
+    '插件: 取消勾选后新会话不再下发该插件工具',
+    toolList
+  );
+  assert(unchecked.isError === true, '插件: 取消勾选后同一调用报错', unchecked);
 
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
