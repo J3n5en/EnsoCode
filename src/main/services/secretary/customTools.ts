@@ -67,7 +67,9 @@ export function readSecretaryTool(dir: string, name: string): SecretaryToolDraft
     const runtime = (JSON.parse(raw) as { runtime?: unknown } | null)?.runtime;
     if (runtime !== 'python' && runtime !== 'node') return null;
     const code = readFileSync(path.join(dir, name, secretaryToolScriptFile(runtime)), 'utf8');
-    return parseSecretaryToolFile(raw, code);
+    const parsed = parseSecretaryToolFile(raw, code);
+    // 目录名才是工具的身份：tool.json 里的 name 对不上说明这份文件被搬过或用别的名字写过
+    return parsed && parsed.name === name ? parsed : null;
   } catch {
     return null;
   }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type {
@@ -82,6 +82,19 @@ describe('tool files on disk', () => {
     writeSecretaryTool(dir, draft);
     writeSecretaryTool(dir, { ...draft, name: 'second' });
     rmSync(path.join(dir, 'second', 'main.mjs'), { force: true });
+    expect(listSecretaryTools(dir).map((tool) => tool.name)).toEqual(['upper-text']);
+    expect(secretaryToolDescriptors(dir).map((tool) => tool.name)).toEqual(['my_upper_text']);
+  });
+
+  it('以目录名为准：tool.json 里的 name 与目录不一致时按坏工具跳过', () => {
+    writeSecretaryTool(dir, draft);
+    mkdirSync(path.join(dir, 'renamed'), { recursive: true });
+    writeFileSync(
+      path.join(dir, 'renamed', 'tool.json'),
+      JSON.stringify({ ...draft, name: 'other-name', code: undefined })
+    );
+    writeFileSync(path.join(dir, 'renamed', 'main.mjs'), draft.code);
+    expect(readSecretaryTool(dir, 'renamed')).toBeNull();
     expect(listSecretaryTools(dir).map((tool) => tool.name)).toEqual(['upper-text']);
     expect(secretaryToolDescriptors(dir).map((tool) => tool.name)).toEqual(['my_upper_text']);
   });
