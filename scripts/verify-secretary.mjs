@@ -2,6 +2,8 @@
 // 秘书真机验收（U10）：派活 → 确认 → 回传 → 并发确认。
 // 全程在隔离 userData 与 fake provider 上跑，不碰真实账号与真实数据。
 //   node scripts/verify-secretary.mjs [--keep]
+// 多个会话并行验收时用环境变量错开目录与端口：
+//   SEC_VERIFY_DIR=/tmp/sec-x SEC_VERIFY_PORTS=9733,8977,8976（CDP,fake provider,插件分发）
 // 产物：/tmp/sec-u10/*.png 与 audit.jsonl
 //
 // 步骤编号沿用计划「真机验证脚本思路」，执行顺序按依赖排：
@@ -24,12 +26,12 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const REPO = path.resolve(import.meta.dirname, '..');
-const ART = '/tmp/sec-u10';
-const ENV = '/tmp/sec-u10-env';
-const PROJ = '/tmp/sec-u10-proj';
-const CDP_PORT = 9333;
-const FAKE_PORT = 8899;
-const PLUGIN_PORT = 8898;
+const ART = process.env.SEC_VERIFY_DIR || '/tmp/sec-u10';
+const ENV = `${ART}-env`;
+const PROJ = `${ART}-proj`;
+const [CDP_PORT, FAKE_PORT, PLUGIN_PORT] = (process.env.SEC_VERIFY_PORTS || '9333,8899,8898')
+  .split(',')
+  .map(Number);
 const KEEP = process.argv.includes('--keep');
 
 const settingsFile = path.join(ENV, 'settings.json');
@@ -239,7 +241,10 @@ async function prepareEnv() {
       code === 0 ? resolve() : reject(new Error(`mk-env exited ${code}`))
     );
   });
-  const settings = readJson(settingsFile);
+  // mk-env 把 provider 写死在 8899，换端口时跟着改
+  const settings = JSON.parse(
+    readFileSync(settingsFile, 'utf8').replaceAll('127.0.0.1:8899', `127.0.0.1:${FAKE_PORT}`)
+  );
   settings['enso-settings'].state.secretaryEnabled = true;
   writeFileSync(settingsFile, JSON.stringify(settings));
   mkdirSync(PROJ, { recursive: true });
@@ -266,7 +271,9 @@ async function main() {
   const pluginZipUrl = await servePluginZip();
 
   log('== fake provider + dev');
-  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {});
+  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {
+    FAKE_PROVIDER_PORT: String(FAKE_PORT),
+  });
   await waitFor(
     async () => {
       try {
