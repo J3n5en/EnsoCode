@@ -6,6 +6,11 @@ import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import {
+  goalHeadline,
+  type InjectedSegment,
+  splitInjectedBlocks,
+} from '@shared/secretary/injectedBlocks';
 import { parseSecretaryUpdates, type SecretaryUpdateLine } from '@shared/secretary/updatesText';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
 import { splitTurnNotes } from '@shared/turnNotes';
@@ -245,7 +250,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.activity?.workedMs === b.activity?.workedMs &&
         a.explore?.goal === b.explore?.goal &&
         a.explore?.report === b.explore?.report &&
-        a.explore?.steps === b.explore?.steps
+        a.explore?.steps === b.explore?.steps &&
+        a.notice === b.notice
       );
     case 'error':
       return b.kind === 'error' && a.text === b.text;
@@ -281,9 +287,6 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
   }
 }
 
-/** 系统合成的整块注入消息（coworker 雇佣通知 / 后台任务提醒） */
-const SYNTHETIC_BLOCK =
-  /^<(agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
 /** coworker 首条的角色前缀 */
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 /** 工作区迁移/回退提醒：前置在用户消息之前，渲染成系统事件行而非原始 XML */
@@ -352,6 +355,85 @@ function SyntheticNotice({ tag, body }: { tag: string; body: string }) {
   const notices = tag === 'agent-notification' ? parseAgentNotification(body) : null;
   if (notices) return <SubagentNotices notices={notices} />;
   return <RawSyntheticNotice tag={tag} body={body} />;
+}
+
+/** 目标续跑：默认一行，样式对齐工具卡片。展开后才看到完整目标和英文指令。 */
+function GoalContinuationCard({ goal, instructions }: { goal: string; instructions: string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const summary = goalHeadline(goal);
+  return (
+    <div
+      data-enso="goal-continuation"
+      data-open={open ? 'true' : 'false'}
+      className="my-1 w-full overflow-hidden rounded-lg border border-border/70 bg-card text-[13px] shadow-xs"
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-6 w-full items-center gap-2 px-2.5 py-1 text-left"
+      >
+        <StepDot state="ok" />
+        <span className="min-w-0 flex-1 truncate">
+          {t('Continue goal: {{summary}}', { summary: summary || goal })}
+        </span>
+        <ChevronRight
+          className={cn('h-3 w-3 shrink-0 text-muted-foreground', open && 'rotate-90')}
+        />
+      </button>
+      {open && (
+        <div className="space-y-1.5 border-t border-border/60 px-2.5 py-1.5 text-xs">
+          <p className="whitespace-pre-wrap text-foreground">{goal}</p>
+          {instructions && (
+            <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+              {instructions}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InjectedSegments({
+  segments,
+  searchQuery,
+  activeNth,
+}: {
+  segments: InjectedSegment[];
+  searchQuery: string;
+  activeNth: number;
+}) {
+  return (
+    <>
+      {segments.map((segment, index) => {
+        const key = `${segment.kind}-${index}`;
+        if (segment.kind === 'text') {
+          const text = segment.text.trim();
+          if (!text) return null;
+          return <UserText key={key} text={text} searchQuery={searchQuery} activeNth={activeNth} />;
+        }
+        if (segment.kind === 'goal')
+          return (
+            <GoalContinuationCard
+              key={key}
+              goal={segment.goal}
+              instructions={segment.instructions}
+            />
+          );
+        if (segment.kind === 'updates') {
+          const lines = parseSecretaryUpdates(segment.raw);
+          return lines ? (
+            <SecretaryUpdatesNotice key={key} lines={lines} />
+          ) : (
+            <RawSyntheticNotice key={key} tag="session-updates" body={segment.raw} />
+          );
+        }
+        return <SyntheticNotice key={key} tag={segment.tag} body={segment.body} />;
+      })}
+    </>
+  );
 }
 
 /** 子代理完成通知：首行作标题，展开后正文按 Markdown 渲染，用量收进底栏 */
@@ -897,8 +979,12 @@ function UserText({
       </>
     );
   }
-  const block = SYNTHETIC_BLOCK.exec(text);
-  if (block) return <SyntheticNotice tag={block[1]} body={block[2]} />;
+  const injectedBlocks = splitInjectedBlocks(text);
+  if (injectedBlocks) {
+    return (
+      <InjectedSegments segments={injectedBlocks} searchQuery={searchQuery} activeNth={activeNth} />
+    );
+  }
   const updates = parseSecretaryUpdates(text);
   if (updates) return <SecretaryUpdatesNotice lines={updates} />;
   const role = ROLE_PREFIX.exec(text);
@@ -2002,26 +2088,30 @@ function ToolGroupRow({
   }
   const explore = item.explore;
   const breathing = item.exploring || Boolean(activity && item.live);
+  const noticeLabel =
+    item.notice === 'patrol' ? t('Patrol clear') : item.notice === 'seen' ? t('Update seen') : null;
   const label = explore
     ? toolLabel('explore_fold', t)
-    : activity
-      ? activity.workedMs > 0
+    : noticeLabel
+      ? noticeLabel
+      : activity
         ? t('Worked for {{duration}}', { duration: formatDuration(activity.workedMs) })
-        : t('Activity')
-      : compact
-        ? item.exploring
-          ? t('Exploring')
-          : t('Explored')
-        : t('{{count}} tool calls', { count: item.count });
+        : compact
+          ? item.exploring
+            ? t('Exploring')
+            : t('Explored')
+          : t('{{count}} tool calls', { count: item.count });
   const detail = explore
     ? [explore.goal, t('{{count}} tool calls', { count: item.count })].filter(Boolean)
-    : item.summary && !item.exploring
-      ? [item.summary]
-      : activity
-        ? activityParts
-        : compact
-          ? explored
-          : parts;
+    : noticeLabel
+      ? activityParts
+      : item.summary && !item.exploring
+        ? [item.summary]
+        : activity
+          ? activityParts
+          : compact
+            ? explored
+            : parts;
   const head = (
     <button
       type="button"
@@ -2032,6 +2122,7 @@ function ToolGroupRow({
       title={explore?.goal}
       data-explore-head={explore ? '' : undefined}
       data-enso="tool-row"
+      data-notice={item.notice}
       className={cn(
         'group/step flex min-h-6 w-full items-center gap-2 text-left text-[13px] transition-colors hover:text-foreground',
         SUBTLE_TEXT

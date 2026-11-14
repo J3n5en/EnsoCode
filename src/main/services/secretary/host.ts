@@ -356,10 +356,10 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (
         event.type === 'turn-completed' &&
         !event.aborted &&
-        event.digest &&
-        shouldSilenceTurn(event.digest.userText, event.digest.assistantText)
+        (event.silent === true ||
+          (event.digest && shouldSilenceTurn(event.digest.userText, event.digest.assistantText)))
       ) {
-        const ids = sessionIdsInUpdates(event.digest.userText);
+        const ids = sessionIdsInUpdates(event.digest?.userText ?? '');
         for (const conversationId of ids) {
           if (!file.dispatched[conversationId]) continue;
           remember(file, {

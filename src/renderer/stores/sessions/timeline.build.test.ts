@@ -5,6 +5,7 @@ import type { TimelineMessage } from './reducer';
 import {
   buildTimeline,
   codemodeView,
+  foldTimeline,
   parseSandboxOutput,
   readImagePreviewPath,
   summarizeSandboxCalls,
@@ -12,9 +13,9 @@ import {
 import { user } from './timeline.testUtils';
 
 describe('buildTimeline', () => {
-  it('静默回传不进时间线，用户自己的消息照样显示', () => {
+  it('静默回传收成一行，用户自己的消息照样显示', () => {
     const updates = '<session-updates>\n- [turn-ended session:c1] 结束了\n</session-updates>';
-    const timeline = buildTimeline(
+    const built = buildTimeline(
       [
         user('你好'),
         { role: 'assistant', content: [{ type: 'text', text: '在' }] },
@@ -23,14 +24,11 @@ describe('buildTimeline', () => {
       ],
       false
     );
-    expect(timeline.map((item) => (item.kind === 'user' ? item.text : item.kind))).toEqual([
-      '你好',
-      'text',
-    ]);
+    const timeline = foldTimeline(built, false, new Set());
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'text', 'tool-group']);
+    expect(timeline[2]).toMatchObject({ notice: 'seen', expanded: false });
     expect(timeline.some((item) => item.kind === 'text' && item.text === '在')).toBe(true);
-    expect(timeline.some((item) => 'text' in item && item.text.includes('session-updates'))).toBe(
-      false
-    );
+    expect(JSON.stringify(timeline)).not.toContain(SILENT_MARKER);
   });
 
   it('toolResult 折进对应 toolCall 条目，不单独成行', () => {

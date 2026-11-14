@@ -89,6 +89,7 @@ import {
 } from '@shared/providers/qoder';
 import { looksLikeRefusal } from '@shared/refusalRetry';
 import type { RequestBodyUsage } from '@shared/requestBodyUsage';
+import { turnCalledSilenceTurn, turnRequestedSilence } from '@shared/secretary/silence';
 import { isSecretaryToolAllowed, type SecretaryInvokeOp } from '@shared/secretary/tools';
 import { computeStats, toUsageTotals } from '@shared/sessionStats';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
@@ -354,6 +355,7 @@ import { createRoutineProposeTool } from './tools/routinePropose';
 import { createSecretaryTools } from './tools/secretary';
 import { createSecretaryCustomTools } from './tools/secretaryCustomTools';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
+import { createSilenceTurnTool } from './tools/silenceTurn';
 import { createSkillReadTool } from './tools/skills';
 import { createWebTools } from './tools/web';
 import {
@@ -3215,6 +3217,7 @@ export class SessionSupervisor {
     const sessionTools = [
       ...buildCoreTools(),
       ...(secretary ? createSecretaryTools(secretary) : []),
+      ...(secretary ? [createSilenceTurnTool()] : []),
       // 秘书自造工具：名字与参数结构由 Main 下发，非只读的每次都要人确认
       ...(secretary
         ? createSecretaryCustomTools(secretary, secretaryToolDescriptors).map((tool) =>
@@ -4808,6 +4811,7 @@ export class SessionSupervisor {
     this.emitSessionMeta(managed);
     // 本轮摘要随 turn-completed 下发：renderer 冷会话没有正文，只能由 worker 切
     const digest = buildTurnDigest(managed.messages, managed.turnStartIndex);
+    const silent = turnRequestedSilence(managed.messages, managed.turnStartIndex);
     managed.turnStartIndex = managed.messages.length;
     this.workspaceClaims.release(managed.identity.sessionId);
     this.options.emit({
@@ -4816,6 +4820,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       ...(digest ? { digest } : {}),
+      ...(silent ? { silent: true as const } : {}),
       ...(aborted ? { aborted: true as const } : {}),
       ...(budget ? { requestBudgetStop: true } : {}),
       ...(budget?.error ? { requestBudgetError: budget.error } : {}),
@@ -4866,6 +4871,8 @@ export class SessionSupervisor {
   }
 
   private trySilentTurnRecovery(managed: ManagedSession): boolean {
+    // silence_turn 之后按提示词不再写正文。空回复是故意的，不能当成工具做完却没总结。
+    if (turnCalledSilenceTurn(managed.messages, managed.turnStartIndex)) return false;
     const kind = silentTurnKind(managed.messages);
     if (!kind) return false;
     if (managed.silentTurnNudgeUsed) {

@@ -16,6 +16,7 @@ describe('secretary tool allowlist', () => {
         ...SECRETARY_OPS,
         'skill_read',
         'ask_user',
+        'silence_turn',
         'web_search',
         'web_fetch',
         'memory_search',

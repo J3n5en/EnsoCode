@@ -61,6 +61,7 @@ describe('buildSecretarySystemPrompt', () => {
     });
     expect(prompt).toContain('叫我老板');
     expect(prompt).toContain('turn-ended');
-    expect(prompt).toContain('<secretary-silent/>');
+    expect(prompt).toContain('silence_turn');
+    expect(prompt).not.toContain('<secretary-silent/>');
   });
 });

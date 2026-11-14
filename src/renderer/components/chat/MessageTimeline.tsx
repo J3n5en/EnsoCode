@@ -13,7 +13,10 @@ import {
 } from 'react';
 import { type ListProps, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
-import { useSecretaryChatSpeaker } from '@/components/secretary/useSecretaryFace';
+import {
+  useIsSecretaryChat,
+  useSecretaryChatSpeaker,
+} from '@/components/secretary/useSecretaryFace';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -175,6 +178,7 @@ export function MessageTimeline({
   const host = useChatHost();
   const secretarySpeaker = useSecretaryChatSpeaker();
   const secretaryMark = !host && secretarySpeaker ? secretarySpeaker : null;
+  const secretaryChat = useIsSecretaryChat();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [fitsViewport, setFitsViewport] = useState(false);
@@ -241,6 +245,7 @@ export function MessageTimeline({
     liveActivityFoldDelaySec,
     heldOpenTools,
     turnOverrides,
+    foldToolOnlyTurns: !host && secretaryChat,
   });
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
   const foldMotionRef = useRef({

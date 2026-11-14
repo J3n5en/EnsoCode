@@ -35,6 +35,7 @@ export function useFoldedTimeline(
     collapseLiveActivity: live,
     releasedLiveActivity: release?.released,
     heldOpenTools: prep.heldOpenTools,
+    foldToolOnlyTurns: prep.foldToolOnlyTurns === true,
   });
 
   useEffect(() => {

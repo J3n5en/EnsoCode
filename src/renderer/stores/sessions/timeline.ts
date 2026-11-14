@@ -5,7 +5,7 @@ import { IMAGE_EXTENSIONS, mediaExtension } from '@shared/localImage';
 import { type MaskReport, mergeMaskReports } from '@shared/privacyMask/report';
 import { firstProgram, isReadOnlyCommand } from '@shared/readOnlyCommand';
 import type { RtkToolStats } from '@shared/rtk';
-import { silentMessageIndexes } from '@shared/secretary/silence';
+import { isPureSessionUpdate, isSilentMarker, SILENCE_TURN_TOOL } from '@shared/secretary/silence';
 import { nestedToolCallParent } from '@shared/toolCallId';
 import type {
   AgentSessionCustomEntry,
@@ -152,6 +152,8 @@ export type TimelineItem =
       explore?: { goal: string; report: string; steps: boolean };
       /** 组内工具批次的一句话标签（按出现顺序去重拼接）；没有标签时缺省 */
       summary?: string;
+      /** 静默的系统回传：组头用这句，而不是「已工作」 */
+      notice?: 'patrol' | 'seen';
       /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
       children: TimelineItem[];
     }
@@ -967,9 +969,7 @@ function buildMessageTimeline(
   let turnUserTimestamp: number | undefined;
   let turnHadAskUser = false;
   let currentTurnUserItem: Extract<TimelineItem, { kind: 'user' }> | undefined;
-  const silent = new Set(silentMessageIndexes(messages));
   messages.forEach((message, messageIndex) => {
-    if (silent.has(messageIndex)) return;
     const isLastMessage = messageIndex === lastMessageIndex;
     const absIndex = historyBaseIndex + messageIndex;
     // 本地气泡不是 worker 的新轮次，不能截断前一轮的计时、流式和工具状态。
@@ -1893,6 +1893,8 @@ export interface TimelinePrep {
   liveActivityFoldDelaySec?: number;
   /** 用户展开了、并且这行还在视窗里。这些工具留在过程组外面。 */
   heldOpenTools?: ReadonlySet<string>;
+  /** 秘书会话：没有实质回复的一轮，把工具卡片也收成「已工作」一行 */
+  foldToolOnlyTurns?: boolean;
 }
 
 export type TimelineFoldOptions = TimelinePrep & {
@@ -2210,16 +2212,151 @@ function foldPrepared(
  *   正在流的思考从安静前缀后面截断，不把前面已经折起的部分重新打开。
  * - 成功配对的 explore_mark → explore_fold 先收成探索组：平时独立成行，完成后并入过程组。
  * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
+ * - 系统回传上调用了 silence_turn（或旧静默标记）时，整轮收成一行，默认收起。
+ * - foldToolOnlyTurns：秘书会话里没有实质回复的一轮，工具卡片也收成「已工作」一行。有回复或失败则保持展开。
  * 纯函数。
  */
+function isTurnStart(item: TimelineItem): boolean {
+  return item.kind === 'user' && !item.deliveryState;
+}
+
+function isMarkerText(item: TimelineItem): boolean {
+  return item.kind === 'text' && isSilentMarker(item.text);
+}
+
+function isSubstantialReply(item: TimelineItem): boolean {
+  return item.kind === 'text' && item.text.trim().length > 0 && !isSilentMarker(item.text);
+}
+
+function visitTools(
+  items: readonly TimelineItem[],
+  visit: (tool: Extract<TimelineItem, { kind: 'tool' }>) => void
+): void {
+  for (const item of items) {
+    if (item.kind === 'tool') visit(item);
+    else if (item.kind === 'tool-group') visitTools(item.children, visit);
+  }
+}
+
+function toolOnlyGroup(
+  rows: TimelineItem[],
+  expandedKeys: ReadonlySet<string>,
+  notice?: 'patrol' | 'seen'
+): TimelineItem[] {
+  if (rows.length === 0) return [];
+  const stats: ToolGroupStats = { commands: 0, reads: 0, searches: 0, others: 0 };
+  let count = 0;
+  let thinking = 0;
+  let workedMs = 0;
+  visitTools(rows, (tool) => {
+    classifyTool(tool.name, tool.summary, stats, false);
+    count += 1;
+    workedMs += tool.durationMs ?? 0;
+  });
+  for (const row of rows) {
+    if (row.kind === 'thinking') {
+      thinking += 1;
+      workedMs += row.durationMs ?? 0;
+    }
+  }
+  const key = `${notice ? 'silent' : 'group'}-${rows[0].key}`;
+  const expanded = expandedKeys.has(key);
+  const summary = toolGroupSummary(rows);
+  const group: TimelineItem = {
+    kind: 'tool-group',
+    key,
+    expanded,
+    count,
+    stats,
+    exploring: false,
+    activity: { thinking, workedMs },
+    ...(notice ? { notice } : {}),
+    ...(summary && !notice ? { summary } : {}),
+    children: rows,
+  };
+  return expanded ? [group, ...rows] : [group];
+}
+
+function silenceNotice(text: string): 'patrol' | 'seen' {
+  return /<secretary-schedule>/.test(text) && !/<session-updates>/.test(text) ? 'patrol' : 'seen';
+}
+
+function turnCalledSilence(items: readonly TimelineItem[]): boolean {
+  let called = false;
+  visitTools(items, (tool) => {
+    if (tool.name === SILENCE_TURN_TOOL) called = true;
+  });
+  return called || items.some(isMarkerText);
+}
+
+/** 静默回合整轮收起；秘书的纯工具回合收成过程组。进行中的最后一轮保持展开。 */
+function foldSecretarySurface(
+  items: TimelineItem[],
+  running: boolean,
+  expandedKeys: ReadonlySet<string>,
+  foldToolOnly: boolean
+): TimelineItem[] {
+  const result: TimelineItem[] = [];
+  let index = 0;
+  while (index < items.length) {
+    if (!isTurnStart(items[index])) {
+      result.push(items[index]);
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (end < items.length && !isTurnStart(items[end])) end += 1;
+    const turn = items.slice(index, end);
+    const live = running && end === items.length;
+    result.push(...foldSecretaryTurn(turn, live, expandedKeys, foldToolOnly));
+    index = end;
+  }
+  return result;
+}
+
+function foldSecretaryTurn(
+  turn: TimelineItem[],
+  live: boolean,
+  expandedKeys: ReadonlySet<string>,
+  foldToolOnly: boolean
+): TimelineItem[] {
+  const user = turn[0];
+  if (live || user?.kind !== 'user') return turn;
+  const rest = turn.slice(1).filter((item) => !isMarkerText(item));
+  const silent = isPureSessionUpdate(user.text) && turnCalledSilence(turn.slice(1));
+  if (silent) {
+    const notice = silenceNotice(user.text);
+    return toolOnlyGroup([{ ...user, canCollapse: false }, ...rest], expandedKeys, notice);
+  }
+  if (!foldToolOnly || rest.some(isSubstantialReply)) return turn;
+  let failed = false;
+  let count = 0;
+  visitTools(rest, (tool) => {
+    count += 1;
+    if (tool.state !== 'ok') failed = true;
+  });
+  if (failed || count < 1) return turn;
+  const foreign = rest.some(
+    (item) => item.kind !== 'tool' && item.kind !== 'thinking' && item.kind !== 'tool-group'
+  );
+  if (foreign) return turn;
+  return [{ ...user, canCollapse: false }, ...toolOnlyGroup(rest, expandedKeys)];
+}
+
 export function foldTimeline(
   items: TimelineItem[],
   running: boolean,
   expandedKeys: ReadonlySet<string>,
   options: TimelineFoldOptions = {}
 ): TimelineItem[] {
-  const { sourceItems, lastUserIndex, liveFrom } = prepareTimeline(
+  const surfaced = foldSecretarySurface(
     items,
+    running,
+    expandedKeys,
+    options.foldToolOnlyTurns === true
+  );
+  const { sourceItems, lastUserIndex, liveFrom } = prepareTimeline(
+    surfaced,
     running,
     expandedKeys,
     options

@@ -1,5 +1,6 @@
 import { WORKSPACE_WRITE_TOOL_ID } from '../childProfileTools';
 import { BUILTIN_TOOLS } from '../types/builtinTools';
+import { SILENCE_TURN_TOOL } from './silence';
 
 export const SECRETARY_OPS = [
   'project_list',
@@ -47,6 +48,7 @@ export const SECRETARY_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   // worker 本地只读工具：按 spawn 时实际加载的 skill 表读 SKILL.md，不碰任意路径
   'skill_read',
   'ask_user',
+  SILENCE_TURN_TOOL,
   'web_search',
   'web_fetch',
   'memory_search',
