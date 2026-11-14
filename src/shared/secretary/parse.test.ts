@@ -71,6 +71,18 @@ describe('parseProfileDraft', () => {
     });
   });
 
+  it('drops avatar image paths and versions from a draft', () => {
+    expect(
+      parseProfileDraft({
+        avatar: { color: '#ABCDEF', imageVersion: 4, image: '/etc/passwd', path: '../a.png' },
+      })
+    ).toEqual({ ok: true, draft: { avatar: { color: '#ABCDEF' } } });
+    expect(parseProfileDraft({ avatar: { image: '/etc/passwd' } })).toEqual({
+      ok: true,
+      draft: {},
+    });
+  });
+
   it('narrows the checked plugin ids to a deduped string list', () => {
     expect(parseProfileDraft({ pluginIds: ['enso.tgclient', 'enso.tgclient'] })).toEqual({
       ok: true,

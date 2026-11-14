@@ -66,6 +66,7 @@ export function SecretarySidebarSection({
           <SecretaryAvatar
             name={view.name}
             color={view.color}
+            image={view.image}
             needsYou={view.needsYou}
             running={view.running}
           />
@@ -167,6 +168,7 @@ export function SecretaryCollapsedButton({
       <SecretaryAvatar
         name={view.name}
         color={view.color}
+        image={view.image}
         needsYou={view.needsYou}
         running={view.running}
         size="xs"

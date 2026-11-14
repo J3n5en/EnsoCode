@@ -50,6 +50,7 @@ export function SecretaryPanel() {
         <SecretaryAvatar
           name={view.name}
           color={view.color}
+          image={view.image}
           needsYou={view.needsYou}
           running={view.running}
           size="sm"

@@ -25,6 +25,7 @@ import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { deflateSync } from 'node:zlib';
 
 const REPO = path.resolve(import.meta.dirname, '..');
 const ART = process.env.SEC_VERIFY_DIR || '/tmp/sec-u10';
@@ -241,6 +242,17 @@ async function connect(entry = 'index.html') {
       log(`  shot ${file}`);
     },
     close: () => socket.close(),
+    async setFiles(selector, files) {
+      await send('DOM.enable');
+      const doc = await send('DOM.getDocument', { depth: 0 });
+      const found = await send('DOM.querySelector', {
+        nodeId: doc.result.root.nodeId,
+        selector,
+      });
+      if (!found.result?.nodeId) throw new Error(`no node ${selector}`);
+      const reply = await send('DOM.setFileInputFiles', { nodeId: found.result.nodeId, files });
+      if (reply.error) throw new Error(reply.error.message ?? 'setFileInputFiles failed');
+    },
   };
 }
 
@@ -396,6 +408,7 @@ async function run(cdp, pluginZipUrl) {
     await verifyMemoryManualEdit(cdp, setup);
     return;
   }
+  await verifyAvatar(cdp, setup);
 
   log('== step3 派活');
   const draft = {
@@ -997,7 +1010,8 @@ async function run(cdp, pluginZipUrl) {
     200
   ).catch(() => readJson(profileFile));
   assert(savedBack.maxRunningDispatches === 3, 'step5b: profile.json 里的上限改回 3', savedBack);
-  await settingsPage.evaluate('window.close()').catch(() => undefined);
+  // 窗口自己关掉后 CDP 不会回包，await 会一直挂着；发出去就够
+  void settingsPage.evaluate('window.close()').catch(() => undefined);
   settingsPage.close();
   const unseed = readJson(dispatchFile);
   unseed.dispatched[dispatchedId].lastState = seededState;
@@ -2076,6 +2090,303 @@ async function run(cdp, pluginZipUrl) {
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
 
   await verifyMemoryManualEdit(cdp, setup);
+}
+
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, 'ascii');
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+  return Buffer.concat([head, data, crc]);
+}
+
+/** 120×80 的源图：中间一条竖条，裁成正方形后竖条仍在正中，能证明是居中裁切 */
+function writeAvatarFixture(file) {
+  const width = 120;
+  const height = 80;
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (width * 4 + 1);
+    for (let x = 0; x < width; x += 1) {
+      const at = row + 1 + x * 4;
+      const inside = x >= 50 && x < 70;
+      raw[at] = inside ? 255 : 20;
+      raw[at + 1] = inside ? 0 : 20;
+      raw[at + 2] = inside ? 170 : 20;
+      raw[at + 3] = 255;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  writeFileSync(
+    file,
+    Buffer.concat([
+      PNG_SIGNATURE,
+      pngChunk('IHDR', ihdr),
+      pngChunk('IDAT', deflateSync(raw)),
+      pngChunk('IEND', Buffer.alloc(0)),
+    ])
+  );
+}
+
+/**
+ * 头像：设置页填非预设色 → 选中自定义入口并落盘 → 上传图片、居中裁切 → 侧栏/聊天/顶栏标签都换成图片
+ * → 受控接口拒绝穿越 → 移除后回到颜色加首字。全程只碰隔离 userData。
+ */
+async function verifyAvatar(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  const profileFile = path.join(ENV, 'secretary', 'profile.json');
+  const avatarFile = path.join(ENV, 'secretary', 'avatar.png');
+  const fixture = path.join(ART, 'avatar-source.png');
+  writeAvatarFixture(fixture);
+
+  log('== 头像：自定义颜色');
+  await page(`
+    await window.electronAPI.window.openSettings({
+      category: 'secretary',
+      rowId: 'secretary.profile',
+    });
+    return 'null';
+  `);
+  const settingsPage = await waitFor(
+    async () => {
+      try {
+        return await connect('settings.html');
+      } catch {
+        return null;
+      }
+    },
+    'settings window',
+    30_000,
+    500
+  );
+
+  const custom = await settingsPage.json(`
+    await until(() => document.querySelector('[data-enso=secretary-form-avatar-hex]'), 30000);
+    const input = document.querySelector('[data-enso=secretary-form-avatar-hex]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '#ff00aa');
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    const entry = () => document.querySelector('[data-enso=secretary-form-avatar-custom]');
+    const selected = await until(() => entry()?.dataset.selected === 'true', 10000);
+    const presets = [...document.querySelectorAll('[data-enso=secretary-form-avatar] > button')];
+    return JSON.stringify({
+      selected: Boolean(selected),
+      background: entry()?.style.backgroundColor,
+      presetPressed: presets.filter((b) => b.getAttribute('aria-pressed') === 'true').length,
+    });
+  `);
+  assert(custom.selected, '头像: 非预设色选中自定义入口', custom);
+  assert(custom.background === 'rgb(255, 0, 170)', '头像: 自定义入口显示当前颜色', custom);
+  assert(custom.presetPressed === 0, '头像: 非预设色时没有预设色块被选中', custom);
+  await settingsPage.shot(path.join(ART, '01b-avatar-custom-color.png'));
+
+  await settingsPage.json(`
+    document.querySelector('[data-enso=secretary-form-step][data-step=workflow]').click();
+    await sleep(300);
+    const save = [...document.querySelectorAll('[data-enso=secretary-profile-form] button')]
+      .find((b) => ['保存', 'Save'].includes(b.innerText.trim()));
+    if (!save) return JSON.stringify({ ok: false });
+    save.click();
+    return JSON.stringify({ ok: true });
+  `);
+  const colored = await waitFor(
+    () => (readJson(profileFile).avatar?.color === '#ff00aa' ? readJson(profileFile) : null),
+    'profile.json custom color',
+    15_000,
+    200
+  ).catch(() => readJson(profileFile));
+  assert(colored.avatar?.color === '#ff00aa', '头像: 自定义色落进 profile.json', colored.avatar);
+
+  const sidebarColor = await page(`
+    const face = await until(
+      () => document.querySelector('[data-enso=secretary-avatar-face]') ?? null,
+      15000
+    );
+    return JSON.stringify({
+      background: face?.style.backgroundColor,
+      image: document.querySelector('[data-enso=secretary-avatar]')?.getAttribute('data-image'),
+      text: face?.textContent?.trim(),
+    });
+  `);
+  assert(
+    sidebarColor.background === 'rgb(255, 0, 170)' && sidebarColor.image === null,
+    '头像: 侧栏用自定义色加首字',
+    sidebarColor
+  );
+
+  log('== 头像：上传图片并居中裁切');
+  await settingsPage.setFiles('[data-enso=secretary-avatar-file]', [fixture]);
+  const cropped = await settingsPage.json(`
+    const confirm = () => [...document.querySelectorAll('button')]
+      .find((b) => ['使用此头像', 'Use this avatar'].includes(b.innerText.trim()));
+    const ready = await until(() => {
+      const button = confirm();
+      return button && !button.disabled ? button : null;
+    }, 20000);
+    if (!ready) return JSON.stringify({ ok: false });
+    ready.click();
+    return JSON.stringify({ ok: true });
+  `);
+  assert(cropped.ok, '头像: 裁切弹窗可以确认', cropped);
+  const uploaded = await waitFor(
+    () => (readJson(profileFile).avatar?.imageVersion ? readJson(profileFile) : null),
+    'profile.json imageVersion',
+    20_000,
+    200
+  ).catch(() => readJson(profileFile));
+  assert(uploaded.avatar?.imageVersion >= 1, '头像: 上传后 imageVersion 落盘', uploaded.avatar);
+  assert(existsSync(avatarFile), '头像: 图片写进秘书目录', avatarFile);
+  assert(
+    !JSON.stringify(uploaded).includes('base64') &&
+      !JSON.stringify(uploaded).includes('avatar.png'),
+    '头像: profile.json 只记版本，不塞图片或路径',
+    uploaded.avatar
+  );
+  await settingsPage.shot(path.join(ART, '01c-avatar-uploaded.png'));
+
+  const shown = await page(`
+    S().selectConversation(${JSON.stringify(setup.secretaryId)});
+    const sidebar = await until(() => {
+      const node = document.querySelector('[data-enso=secretary-avatar][data-image=true]');
+      return node?.querySelector('img')?.src ?? null;
+    }, 20000);
+    const project = SET().projects.find(
+      (p) => p.id === ${JSON.stringify(setup.secretaryProjectId)}
+    );
+    await S().send(
+      '在吗',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      ${JSON.stringify(setup.secretaryId)}
+    );
+    const chat = await until(() => {
+      const node = document.querySelector('[data-enso=secretary-chat-avatar][data-image=true]');
+      if (!node) return null;
+      return node.matches('img')
+        ? node.getAttribute('src')
+        : (node.querySelector('img')?.getAttribute('src') ?? null);
+    }, 30000);
+    return JSON.stringify({ sidebar, chat });
+  `);
+  assert(
+    typeof shown.sidebar === 'string' && shown.sidebar.includes('secretary-avatar/avatar.png'),
+    '头像: 侧栏换成图片',
+    shown.sidebar
+  );
+  assert(
+    typeof shown.chat === 'string' && shown.chat.includes('secretary-avatar/avatar.png'),
+    '头像: 聊天回复头换成图片',
+    shown.chat
+  );
+
+  const tab = await page(`
+    SET().setHeaderSessionTabs(true);
+    const node = await until(
+      () => document.querySelector('[data-enso=secretary-tab-avatar][data-image=true]') ?? null,
+      20000
+    );
+    return JSON.stringify({ src: node?.getAttribute('src') ?? null });
+  `);
+  assert(
+    typeof tab.src === 'string' && tab.src.includes('secretary-avatar/avatar.png'),
+    '头像: 顶栏会话标签换成图片',
+    tab
+  );
+  await cdp.shot(path.join(ART, '01d-avatar-in-sidebar-and-chat.png'));
+
+  const guarded = await page(`
+    const ok = await fetch('local-image://secretary-avatar/avatar.png?v=1').then((r) => r.status);
+    const traversal = await fetch('local-image://secretary-avatar/../profile.json').then((r) => r.status);
+    const encoded = await fetch('local-image://secretary-avatar/%2e%2e%2fprofile.json').then((r) => r.status);
+    return JSON.stringify({ ok, traversal, encoded });
+  `);
+  assert(guarded.ok === 200, '头像: 受控接口能读到图片', guarded);
+  assert(
+    guarded.traversal === 403 && guarded.encoded === 403,
+    '头像: 受控接口拒绝路径穿越',
+    guarded
+  );
+
+  const draftGuard = await page(`
+    const before = ${JSON.stringify(uploaded.avatar.imageVersion)};
+    const saved = await window.electronAPI.secretary.saveProfile({
+      avatar: { color: '#ff00aa', imageVersion: 99 },
+    });
+    return JSON.stringify({ ok: saved.ok, version: saved.profile?.avatar?.imageVersion, before });
+  `);
+  assert(
+    draftGuard.ok && draftGuard.version === draftGuard.before,
+    '头像: 档案草案改不了图片版本',
+    draftGuard
+  );
+
+  log('== 头像：移除图片');
+  await settingsPage.json(`
+    const remove = await until(
+      () => document.querySelector('[data-enso=secretary-avatar-remove]'),
+      15000
+    );
+    remove?.click();
+    return JSON.stringify({ ok: true });
+  `);
+  const removed = await waitFor(
+    () => (readJson(profileFile).avatar?.imageVersion === undefined ? readJson(profileFile) : null),
+    'profile.json without imageVersion',
+    20_000,
+    200
+  ).catch(() => readJson(profileFile));
+  assert(removed.avatar?.imageVersion === undefined, '头像: 移除后不再记图片版本', removed.avatar);
+  assert(!existsSync(avatarFile), '头像: 移除后删掉图片文件', avatarFile);
+
+  const restored = await page(`
+    const node = await until(() => {
+      const avatar = document.querySelector('[data-enso=secretary-avatar]');
+      return avatar && avatar.getAttribute('data-image') !== 'true' ? avatar : null;
+    }, 20000);
+    const face = node?.querySelector('[data-enso=secretary-avatar-face]');
+    return JSON.stringify({
+      background: face?.style.backgroundColor,
+      text: face?.textContent?.trim(),
+      image: node?.getAttribute('data-image'),
+    });
+  `);
+  assert(
+    restored.background === 'rgb(255, 0, 170)' && restored.image === null,
+    '头像: 移除后回到颜色加首字',
+    restored
+  );
+  await cdp.shot(path.join(ART, '01e-avatar-removed.png'));
+
+  const audits = readFileSync(auditFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'profile_avatar')
+    .map((entry) => entry.detail);
+  assert(
+    audits.includes('uploaded') && audits.includes('removed'),
+    '头像: 上传与移除都记审计',
+    audits
+  );
+
+  void settingsPage.evaluate('window.close()').catch(() => undefined);
+  settingsPage.close();
 }
 
 /**

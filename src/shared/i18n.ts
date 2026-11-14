@@ -3483,6 +3483,8 @@ export const zhTranslations: Record<string, string> = {
     '名字、头像、模型，以及它能自己做到什么程度。',
   'Upload image': '上传图片',
   'Remove image': '移除图片',
+  'Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.':
+    '头像只接受 PNG、JPEG、WebP、GIF，且不超过 2 MB。',
   'The secretary has not been set up yet.': '秘书还没完成初次设置。',
   'Style and interruptions': '风格与打扰',
   'What it calls you, reply language, style and system notifications.':

@@ -12,6 +12,7 @@ import { formatClock, formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
+import { SecretaryFace } from './SecretaryFace';
 import { SecretaryProposalRow } from './SecretaryProposalRow';
 import {
   type FeedEvent,
@@ -20,6 +21,7 @@ import {
   secretaryDigest,
   sessionFeed,
 } from './secretaryDigest';
+import { useSecretaryFace } from './useSecretaryFace';
 
 function mutateTodo(request: SecretaryTodoMutate): void {
   void window.electronAPI.secretary.mutateTodo(request);
@@ -61,6 +63,7 @@ function Stat({ value, label, warn }: { value: number; label: string; warn?: boo
 /** 需要你处理的会话：就地审批与提问，主按钮打开会话 */
 function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const { t, locale } = useI18n();
+  const face = useSecretaryFace();
   const approvals = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingApprovals);
   const asks = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingAsks);
   const selectConversation = useSessionsStore((s) => s.selectConversation);
@@ -81,6 +84,15 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
       className="rounded-xl border border-warning/40 bg-warning/5 px-3 py-2.5"
     >
       <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-warning">
+        {face && (
+          <SecretaryFace
+            name={face.name}
+            color={face.color}
+            image={face.image}
+            enso="secretary-card-avatar"
+            className="size-4 rounded-[5px] text-[9px]"
+          />
+        )}
         <ShieldAlert className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{t(feed.label)}</span>
         <span className="shrink-0 font-normal text-subtle-foreground">
@@ -269,6 +281,7 @@ function AddTodoRow({ onAdd }: { onAdd: () => void }) {
 
 function FeedEntry({ event }: { event: FeedEvent }) {
   const { t, locale } = useI18n();
+  const face = useSecretaryFace();
   const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [stopping, setStopping] = useState(false);
   const conversationId = event.conversationId;
@@ -292,6 +305,15 @@ function FeedEntry({ event }: { event: FeedEvent }) {
           TONE_DOT[event.tone]
         )}
       />
+      {face && (
+        <SecretaryFace
+          name={face.name}
+          color={face.color}
+          image={face.image}
+          enso="secretary-feed-avatar"
+          className="mt-0.5 size-4 shrink-0 rounded-[5px] text-[9px]"
+        />
+      )}
       <button
         type="button"
         disabled={!open}

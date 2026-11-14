@@ -65,6 +65,7 @@ import {
   SecretaryProposalRow,
   secretaryProposalId,
 } from '@/components/secretary/SecretaryProposalRow';
+import { useSecretaryChatSpeaker } from '@/components/secretary/useSecretaryFace';
 import {
   Dialog,
   DialogContent,
@@ -953,7 +954,10 @@ export function ReplyHeader({
   at?: number;
   privacyMask?: MaskReport;
 }) {
-  const speaker = useChatHost()?.speaker;
+  const host = useChatHost();
+  const secretarySpeaker = useSecretaryChatSpeaker();
+  const speaker = host?.speaker ?? (host ? null : secretarySpeaker);
+  const secretaryMark = !host && secretarySpeaker ? true : undefined;
   const meta = [model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ');
   if (!speaker && !meta && !privacyMask) return null;
   return (
@@ -961,6 +965,8 @@ export function ReplyHeader({
       {speaker &&
         (speaker.image ? (
           <img
+            data-enso={secretaryMark ? 'secretary-chat-avatar' : undefined}
+            data-image={secretaryMark ? 'true' : undefined}
             src={speaker.image}
             alt=""
             draggable={false}
@@ -969,6 +975,7 @@ export function ReplyHeader({
           />
         ) : (
           <span
+            data-enso={secretaryMark ? 'secretary-chat-avatar' : undefined}
             className="flex size-[22px] shrink-0 items-center justify-center rounded-full font-semibold text-[11px] text-white"
             style={{ backgroundColor: speaker.color }}
           >

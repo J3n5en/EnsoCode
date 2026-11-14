@@ -1,10 +1,13 @@
 import { conversationDotTone } from '@shared/conversationDotTone';
+import { secretaryAvatarUrl } from '@shared/localImage';
 import { MessageSquare, Plus, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
+import { SecretaryFace } from '@/components/secretary/SecretaryFace';
 import { useI18n } from '@/i18n';
 import { formatBinding } from '@/lib/keybindings';
 import { cn } from '@/lib/utils';
+import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import {
   dismissHeaderTab,
@@ -146,6 +149,11 @@ function SessionTab({
           hasRunningChild: conversation.hasRunningChild,
         });
   const title = conversation.title || untitled;
+  const secretaryProjectId = useSecretaryStore((state) => state.secretary.projectId);
+  const profile = useSecretaryStore((state) =>
+    state.secretary.enabled ? state.secretary.profile : null
+  );
+  const secretaryTab = Boolean(profile && secretaryProjectId === conversation.projectId);
   return (
     <div
       data-session-tab={id}
@@ -170,7 +178,19 @@ function SessionTab({
         title={title}
       >
         <span className="flex size-3.5 shrink-0 items-center justify-center">
-          {tone === 'idle' ? (
+          {secretaryTab && profile ? (
+            <SecretaryFace
+              name={profile.name}
+              color={profile.avatar.color}
+              image={
+                profile.avatar.imageVersion
+                  ? secretaryAvatarUrl(profile.avatar.imageVersion)
+                  : undefined
+              }
+              enso="secretary-tab-avatar"
+              className="size-3.5 rounded-[4px] text-[8px]"
+            />
+          ) : tone === 'idle' ? (
             <MessageSquare className="size-3" />
           ) : (
             <ConversationStatusIndicator tone={tone} size="sm" />

@@ -191,6 +191,20 @@ describe('保存档案', () => {
     expect(h.saved?.avatar).toEqual({ color: '#222222', imageVersion: 3 });
     expect(h.audits[0]?.secretaryConversationId).toBe('sec-1');
   });
+
+  it('草案里的图片版本和路径改不了头像文件', async () => {
+    const h = harness({
+      profile: { ...baseProfile(), avatar: { color: '#111111', imageVersion: 3 } },
+    });
+    await h.service.save(
+      {
+        avatar: { color: '#abcdef', imageVersion: 99 },
+      },
+      null
+    );
+    expect(h.saved?.avatar).toEqual({ color: '#abcdef', imageVersion: 3 });
+    expect(JSON.stringify(h.saved?.avatar)).not.toContain('/etc');
+  });
 });
 
 describe('保存后的副作用', () => {
@@ -355,6 +369,29 @@ describe('配置提案', () => {
       await h.service.propose({ autonomy: 'god' }, { secretaryConversationId: 'sec-1' })
     ).toEqual({ ok: false, error: 'invalid autonomy' });
     expect(h.file.proposals).toEqual({});
+  });
+
+  it('提案不能写入图片路径或版本', async () => {
+    const h = harness({
+      profile: { ...baseProfile(), avatar: { color: '#111111', imageVersion: 3 } },
+    });
+    const result = await h.service.propose(
+      {
+        avatarColor: '#abcdef',
+        avatar: { image: '/etc/passwd', imageVersion: 9, path: '../x' },
+        image: '/tmp/avatar.png',
+        avatarPath: '../avatar.png',
+      },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(result.ok).toBe(true);
+    expect(
+      h.file.proposals['proposal-1']?.kind === 'profile'
+        ? h.file.proposals['proposal-1'].draft.avatar
+        : null
+    ).toEqual({ color: '#abcdef' });
+    expect(JSON.stringify(h.file.proposals)).not.toContain('/etc');
+    expect(JSON.stringify(h.file.proposals)).not.toContain('imageVersion');
   });
 
   it('两处同时保存不同字段时都不丢', async () => {
