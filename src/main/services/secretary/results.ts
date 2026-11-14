@@ -230,10 +230,12 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       title: typeof row.title === 'string' ? row.title : '',
       state: row.sessionFile ? (status?.state ?? 'idle') : 'not-started',
       startedAt: record.createdAt,
-      updatedAt: record.lastResult?.at ?? record.lastEventAt,
+      stateSince: record.stateSince ?? Math.max(record.createdAt, record.lastResult?.at ?? 0),
       secretaryConversationId: record.secretaryConversationId,
       ...(record.lastText ? { lastText: redactSecrets(record.lastText) } : {}),
-      ...(record.lastResult ? { result: record.lastResult.kind } : {}),
+      ...(record.lastResult
+        ? { result: record.lastResult.kind, resultAt: record.lastResult.at }
+        : {}),
     };
     const needsYouNow =
       card.state === 'waiting' ||
@@ -244,8 +246,11 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     else if (record.lastState === 'running') running.push(card);
     else done.push(card);
   }
-  running.sort((left, right) => right.updatedAt - left.updatedAt);
-  done.sort((left, right) => right.updatedAt - left.updatedAt);
+  const newestFirst =
+    (at: (card: SessionCard) => number) => (left: SessionCard, right: SessionCard) =>
+      at(right) - at(left) || left.conversationId.localeCompare(right.conversationId);
+  running.sort(newestFirst((card) => card.stateSince));
+  done.sort(newestFirst((card) => card.resultAt ?? card.stateSince));
 
   return {
     needsYou,

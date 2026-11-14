@@ -22,7 +22,7 @@ const session = (
   title: `任务 ${conversationId}`,
   state: 'idle',
   startedAt: TODAY,
-  updatedAt: TODAY,
+  stateSince: TODAY,
   secretaryConversationId: 'sec',
   ...over,
 });
@@ -61,18 +61,19 @@ describe('secretaryDigest', () => {
   it('今天只统计本地零点之后的派出与结果', () => {
     const digest = secretaryDigest(
       board({
-        running: [session('run-today', { state: 'running', updatedAt: TODAY + 60_000 })],
+        running: [session('run-today', { state: 'running', stateSince: TODAY + 60_000 })],
         done: [
-          session('ok-today', { result: 'goal-complete', updatedAt: TODAY + 120_000 }),
-          session('ended-today', { result: 'turn-ended', updatedAt: TODAY + 180_000 }),
-          session('bad-today', { result: 'failed', updatedAt: TODAY + 240_000 }),
+          session('ok-today', { result: 'goal-complete', resultAt: TODAY + 120_000 }),
+          session('ended-today', { result: 'turn-ended', resultAt: TODAY + 180_000 }),
+          session('bad-today', { result: 'failed', resultAt: TODAY + 240_000 }),
           session('ok-yesterday', {
             result: 'goal-complete',
             startedAt: YESTERDAY,
-            updatedAt: YESTERDAY,
+            stateSince: YESTERDAY,
+            resultAt: YESTERDAY,
           }),
         ],
-        needsYou: [session('waiting-today', { state: 'waiting', updatedAt: TODAY + 300_000 })],
+        needsYou: [session('waiting-today', { state: 'waiting', stateSince: TODAY + 300_000 })],
       }),
       NOW
     );
@@ -181,11 +182,68 @@ describe('secretaryDigest', () => {
 
   it('动态按时间倒序，最多 20 条', () => {
     const done = Array.from({ length: 25 }, (_, index) =>
-      session(`c${index}`, { updatedAt: TODAY + index * 1000, result: 'turn-ended' })
+      session(`c${index}`, { resultAt: TODAY + index * 1000, result: 'turn-ended' })
     );
     const digest = secretaryDigest(board({ done }), NOW);
     expect(digest.events).toHaveLength(20);
     expect(digest.events[0].id).toBe('session:c24');
     expect(digest.events.at(-1)?.id).toBe('session:c5');
+  });
+
+  it('开始执行取本次开始的时间，上一轮的结果时间不算', () => {
+    const [event] = secretaryDigest(
+      board({
+        running: [
+          session('again', {
+            state: 'running',
+            stateSince: TODAY + 60_000,
+            result: 'turn-ended',
+            resultAt: TODAY,
+          }),
+        ],
+      }),
+      NOW
+    ).events;
+    expect(event).toMatchObject({ label: 'Started', at: TODAY + 60_000 });
+  });
+
+  it('完成、需要你、失败取结果发生的时间；没有结果按状态起始时间', () => {
+    const events = secretaryDigest(
+      board({
+        needsYou: [
+          session('ask', {
+            state: 'waiting',
+            stateSince: TODAY + 1,
+            result: 'needs-user',
+            resultAt: TODAY + 2,
+          }),
+          session('bad', {
+            state: 'error',
+            stateSince: TODAY + 3,
+            result: 'failed',
+            resultAt: TODAY + 4,
+          }),
+          session('approval', { state: 'waiting', stateSince: TODAY + 5 }),
+        ],
+        done: [
+          session('ok', { stateSince: TODAY + 6, result: 'goal-complete', resultAt: TODAY + 7 }),
+        ],
+      }),
+      NOW
+    ).events;
+    expect(Object.fromEntries(events.map((event) => [event.id, event.at]))).toEqual({
+      'session:ask': TODAY + 2,
+      'session:bad': TODAY + 4,
+      'session:approval': TODAY + 5,
+      'session:ok': TODAY + 7,
+    });
+  });
+
+  it('时间相同时按条目标识兜底，与输入顺序无关', () => {
+    const cards = ['b', 'c', 'a'].map((id) => session(id, { state: 'running' }));
+    const ids = (running: SecretaryCard[]) =>
+      secretaryDigest(board({ running }), NOW).events.map((event) => event.id);
+    expect(ids(cards)).toEqual(['session:a', 'session:b', 'session:c']);
+    expect(ids([...cards].reverse())).toEqual(ids(cards));
   });
 });

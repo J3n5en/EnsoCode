@@ -48,7 +48,7 @@ const sessionCard = (
   title: `任务 ${conversationId}`,
   state: 'running',
   startedAt: NOW - 60_000,
-  updatedAt: NOW - 60_000,
+  stateSince: NOW - 60_000,
   secretaryConversationId: 'sec',
   ...over,
 });
@@ -211,7 +211,7 @@ describe('SecretaryPanel', () => {
       needsYou: [proposalCard],
       running: [sessionCard('c1')],
       todos: [{ id: 't1', text: '写周报', createdAt: NOW, updatedAt: NOW }],
-      done: [sessionCard('c2', { state: 'idle', result: 'goal-complete' })],
+      done: [sessionCard('c2', { state: 'idle', result: 'goal-complete', resultAt: NOW - 30_000 })],
     });
     await render(<SecretaryPanel />);
     await flush();

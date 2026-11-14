@@ -283,6 +283,7 @@ describe('session_create', () => {
       turn: 0,
       lastState: 'running',
       lastEventAt: NOW,
+      stateSince: NOW,
       goal: '构建通过',
     });
     expect(h.audits.map((entry) => entry.op)).toEqual(['session_create']);

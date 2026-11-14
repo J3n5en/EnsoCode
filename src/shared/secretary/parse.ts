@@ -404,6 +404,8 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (lastText) record.lastText = lastText;
   const stalledTurn = count(value.stalledTurn);
   if (stalledTurn) record.stalledTurn = stalledTurn;
+  const stateSince = time(value.stateSince);
+  if (stateSince !== undefined) record.stateSince = stateSince;
   if (
     isObject(value.lastResult) &&
     RESULT_KINDS.includes(value.lastResult.kind as SecretaryResultKind)

@@ -72,6 +72,7 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   // 实时审批与提问由会话状态决定，清结果不会让它消失，所以只在原因是结果时给「知道了」
   const dismissible =
     card.state !== 'waiting' && card.result !== undefined && NEEDS_YOU_RESULTS.has(card.result);
+  const feed = sessionFeed(card);
   return (
     <div
       data-enso="secretary-card"
@@ -81,9 +82,9 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
     >
       <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-warning">
         <ShieldAlert className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{t(sessionFeed(card).label)}</span>
+        <span className="min-w-0 flex-1 truncate">{t(feed.label)}</span>
         <span className="shrink-0 font-normal text-subtle-foreground">
-          {formatRelativeTime(card.updatedAt, locale)}
+          {formatRelativeTime(feed.at, locale)}
         </span>
       </div>
       <p className="mt-1 text-[13px] font-medium">{card.title}</p>

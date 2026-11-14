@@ -92,7 +92,7 @@ const sessionCard = (conversationId: string) => ({
   title: '跑测试',
   state: 'running' as const,
   startedAt: 1,
-  updatedAt: 1,
+  stateSince: 1,
   secretaryConversationId: 'sec',
 });
 

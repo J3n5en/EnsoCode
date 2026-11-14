@@ -165,6 +165,9 @@ const until = async (fn, ms = 20000) => {
 };
 const texts = (id) => (S().conversations[id]?.messages ?? []).map((m) =>
   (Array.isArray(m.content) ? m.content : []).filter((c) => c.type === 'text').map((c) => c.text).join(''));
+// 关着的侧栏和别的会话的 dock 里也有同一张卡片：只认真正看得见、带名字的那张
+const shownCard = (selector, name) => [...document.querySelectorAll(selector)].find(
+  (node) => node.checkVisibility({ visibilityProperty: true }) && node.innerText.includes(name));
 `;
 
 async function connect() {
@@ -795,6 +798,153 @@ async function run(cdp, pluginZipUrl) {
     welcome
   );
 
+  // 两个派出会话跨一个整分钟先后开始、慢慢流式输出：动态的时间应停在各自开始的那一分钟，顺序不跳
+  log('== 动态：各自的开始时间，运行期间顺序不变');
+  const dispatchSlow = async (title, slowMs) => {
+    const started = await page(`
+      const todo = await window.electronAPI.secretary.mutateTodo({
+        action: 'add', text: ${JSON.stringify(title)}, projectId: ${JSON.stringify(setup.projectId)},
+      });
+      if (!todo.ok) return JSON.stringify({ ok: false, error: todo.error });
+      const sent = await window.electronAPI.secretary.mutateTodo({
+        action: 'dispatch', todoId: todo.todoId, prompt: ${JSON.stringify(`慢慢回复 [[slow:${slowMs}]]`)},
+      });
+      if (!sent.ok) return JSON.stringify({ ok: false, error: sent.error });
+      const secretary = await SEC();
+      const proposal = await until(() => Object.values(secretary.getState().secretary.proposals).find(
+        (p) => p.status === 'pending' && p.kind === 'dispatch' && p.draft.todoId === todo.todoId
+      ), 5000);
+      if (proposal) {
+        const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
+          title: ${JSON.stringify(title)},
+        });
+        if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
+      }
+      return JSON.stringify({ ok: true, todoId: todo.todoId });
+    `);
+    assert(started.ok, `动态：派出「${title}」`, started);
+    return waitFor(
+      () =>
+        Object.values(readJson(dispatchFile).dispatched).find(
+          (record) => record.todoId === started.todoId
+        ) ?? null,
+      `dispatch record of ${title}`,
+      30_000,
+      300
+    );
+  };
+  const clockOf = (at) => {
+    const date = new Date(at);
+    return [date.getHours(), date.getMinutes()];
+  };
+  const sameClock = (text, at) => {
+    const match = text?.match(/(\d{1,2}):(\d{2})/);
+    const [hour, minute] = clockOf(at);
+    return Boolean(match) && Number(match[1]) % 24 === hour && Number(match[2]) === minute;
+  };
+  const sampleFeed = (ids) =>
+    page(`
+      const secretary = await SEC();
+      const board = secretary.getState().secretary.board;
+      const cards = [...board.needsYou, ...board.running, ...board.done].filter((c) => c.kind === 'session');
+      const ids = ${JSON.stringify(ids)};
+      const rows = [...document.querySelectorAll('[data-enso=secretary-feed-event]')].map((node) => ({
+        tone: node.dataset.tone,
+        text: node.innerText,
+      }));
+      const out = {};
+      for (const id of ids) {
+        const card = cards.find((c) => c.conversationId === id);
+        const index = card ? rows.findIndex((row) => row.text.includes(card.title)) : -1;
+        out[id] = { card, index, row: rows[index] ?? null };
+      }
+      return JSON.stringify(out);
+    `);
+
+  const firstMinute = 60_000 - (Date.now() % 60_000);
+  const feedA = await dispatchSlow('动态时间 A', firstMinute + 45_000);
+  // 等到墙钟进入下一分钟再派第二个，两条的开始时间落在不同的分钟里
+  await waitFor(
+    () => Math.floor(Date.now() / 60_000) > Math.floor(feedA.createdAt / 60_000) || null,
+    'next minute',
+    70_000,
+    250
+  );
+  await delay(1000);
+  const feedB = await dispatchSlow('动态时间 B', 25_000);
+  const feedIds = [feedB.conversationId, feedA.conversationId];
+  const feedSamples = [];
+  for (let index = 0; index < 6; index += 1) {
+    await delay(index === 0 ? 1500 : 2000);
+    feedSamples.push(await sampleFeed(feedIds));
+  }
+  // 刚派出时 worker 状态可能再切一次，以第一次采样为基准，之后不许再动
+  const since = Object.fromEntries(feedIds.map((id) => [id, feedSamples[0][id].card?.stateSince]));
+  assert(
+    feedIds.every(
+      (id) =>
+        typeof since[id] === 'number' &&
+        Math.abs(since[id] - feedSamples[0][id].card.startedAt) < 5000
+    ),
+    '动态：状态起始时间就是派出时间',
+    feedIds.map((id) => feedSamples[0][id].card)
+  );
+  await cdp.shot(path.join(ART, '05b-feed-running.png'));
+  const sampleIssues = feedSamples.flatMap((sample, index) =>
+    feedIds.flatMap((id) => {
+      const entry = sample[id];
+      const issues = [];
+      if (entry.card?.state !== 'running' || entry.row?.tone !== 'run') issues.push('not running');
+      if (entry.card?.stateSince !== since[id]) issues.push('stateSince moved');
+      if (!sameClock(entry.row?.text, since[id])) issues.push('clock is not the start time');
+      return issues.length > 0 ? [{ sample: index, id, issues, entry }] : [];
+    })
+  );
+  assert(sampleIssues.length === 0, '动态：运行期间两条都显示各自的开始时间', sampleIssues);
+  assert(
+    !sameClock(feedSamples[0][feedA.conversationId].row?.text, since[feedB.conversationId]),
+    '动态：两条的开始时间不同（跨了一分钟）',
+    feedSamples[0]
+  );
+  const orders = feedSamples.map((sample) => feedIds.map((id) => sample[id].index).join(','));
+  assert(
+    new Set(orders).size === 1 &&
+      feedSamples[0][feedIds[0]].index < feedSamples[0][feedIds[1]].index,
+    '动态：运行期间顺序不变，后开始的在前',
+    orders
+  );
+  const busy = readJson(dispatchFile).dispatched;
+  assert(
+    feedIds.every(
+      (id) => busy[id].lastEventAt > since[id] + 5000 && busy[id].stateSince === since[id]
+    ),
+    '动态：采样期间会话一直有活动，开始时间没被活动刷新',
+    feedIds.map((id) => busy[id])
+  );
+  const feedDone = await waitFor(
+    () => {
+      const file = readJson(dispatchFile).dispatched;
+      return feedIds.every(
+        (id) => file[id]?.lastState === 'idle' && file[id]?.lastResult?.kind === 'turn-ended'
+      )
+        ? file
+        : null;
+    },
+    'slow dispatches finished',
+    150_000,
+    500
+  );
+  const doneSample = await sampleFeed(feedIds);
+  assert(
+    feedIds.every(
+      (id) =>
+        doneSample[id].row?.tone === 'ok' &&
+        sameClock(doneSample[id].row?.text, feedDone[id].lastResult.at)
+    ),
+    '动态：结束后显示各自结束的时间',
+    { doneSample, results: feedIds.map((id) => feedDone[id].lastResult) }
+  );
+
   log('== step7 worker 退出');
   const restarted = await page(`
     return JSON.stringify(await window.electronAPI.caCert.apply('/etc/ssl/cert.pem'));
@@ -1184,7 +1334,7 @@ async function run(cdp, pluginZipUrl) {
       id
     );
     const card = await until(
-      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
+      () => shownCard('[data-enso=secretary-proposal][data-kind=tool]', 'upper-text'),
       30000
     );
     if (!card)
@@ -1320,7 +1470,7 @@ async function run(cdp, pluginZipUrl) {
       id
     );
     const card = await until(
-      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
+      () => shownCard('[data-enso=secretary-proposal][data-kind=tool]', 'stamp-file'),
       30000
     );
     if (!card) return JSON.stringify({ ok: false, error: 'no tool proposal card' });

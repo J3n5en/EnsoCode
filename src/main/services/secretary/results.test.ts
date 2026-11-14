@@ -317,43 +317,59 @@ describe('工作台投影', () => {
     expect(card.kind === 'session' ? card.lastText : '').not.toContain('sk-abcdefghijklmnop');
   });
 
-  it('卡片带最近更新时间：有结果取结果时间，否则取最后一次事件', () => {
+  it('卡片带状态起始与结果时间，不随会话活动刷新；旧记录缺状态起始时按派出或结果时间估', () => {
     const file = emptyFile({
       dispatched: {
         resulted: record({
           conversationId: 'resulted',
+          lastState: 'idle',
           lastEventAt: 900,
+          stateSince: 500,
           lastResult: { kind: 'goal-complete', turn: 1, at: 500 },
         }),
-        touched: record({ conversationId: 'touched', lastEventAt: 700 }),
+        touched: record({ conversationId: 'touched', stateSince: 300, lastEventAt: 700 }),
+        legacy: record({ conversationId: 'legacy', createdAt: 200, lastEventAt: 800 }),
+        legacyRerun: record({
+          conversationId: 'legacyRerun',
+          createdAt: 100,
+          lastEventAt: 800,
+          lastResult: { kind: 'turn-ended', turn: 1, at: 400 },
+        }),
       },
     });
     const board = buildBoard(file, {
       rows: {
         resulted: { id: 'resulted', title: '有结果', sessionFile: '/tmp/a.jsonl' },
         touched: { id: 'touched', title: '只有事件', sessionFile: '/tmp/b.jsonl' },
+        legacy: { id: 'legacy', title: '旧记录', sessionFile: '/tmp/c.jsonl' },
+        legacyRerun: { id: 'legacyRerun', title: '旧记录又跑', sessionFile: '/tmp/d.jsonl' },
       },
-      statuses: { resulted: idle, touched: running },
+      statuses: { resulted: idle, touched: running, legacy: running, legacyRerun: running },
       projects,
       todos: [],
     });
     const byId = Object.fromEntries(
       [...board.done, ...board.running].map((card) => [
         card.kind === 'session' ? card.conversationId : '',
-        card.kind === 'session' ? card.updatedAt : 0,
+        card.kind === 'session' ? [card.stateSince, card.resultAt] : [],
       ])
     );
-    expect(byId).toEqual({ resulted: 500, touched: 700 });
+    expect(byId).toEqual({
+      resulted: [500, 500],
+      touched: [300, undefined],
+      legacy: [200, undefined],
+      legacyRerun: [400, 400],
+    });
   });
 
-  it('在跑与已完成都按最近更新时间倒序', () => {
+  it('在跑按开始时间、已完成按结果时间倒序，相同时按会话标识兜底', () => {
     const file = emptyFile({
       dispatched: {
         older: record({
           conversationId: 'older',
           createdAt: 100,
           lastState: 'idle',
-          lastEventAt: 200,
+          lastEventAt: 900,
           lastResult: { kind: 'goal-complete', turn: 1, at: 200 },
         }),
         newer: record({
@@ -363,8 +379,10 @@ describe('工作台投影', () => {
           lastEventAt: 800,
           lastResult: { kind: 'turn-ended', turn: 1, at: 800 },
         }),
-        runOlder: record({ conversationId: 'runOlder', createdAt: 100, lastEventAt: 300 }),
-        runNewer: record({ conversationId: 'runNewer', createdAt: 900, lastEventAt: 400 }),
+        runOlder: record({ conversationId: 'runOlder', stateSince: 100, lastEventAt: 990 }),
+        runNewer: record({ conversationId: 'runNewer', stateSince: 900, lastEventAt: 400 }),
+        runTieB: record({ conversationId: 'runTieB', stateSince: 500, lastEventAt: 999 }),
+        runTieA: record({ conversationId: 'runTieA', stateSince: 500, lastEventAt: 1 }),
       },
     });
     const board = buildBoard(file, {
@@ -373,15 +391,24 @@ describe('工作台投影', () => {
         newer: { id: 'newer', title: '新', sessionFile: '/tmp/b.jsonl' },
         runOlder: { id: 'runOlder', title: '跑旧', sessionFile: '/tmp/c.jsonl' },
         runNewer: { id: 'runNewer', title: '跑新', sessionFile: '/tmp/d.jsonl' },
+        runTieB: { id: 'runTieB', title: '同时 B', sessionFile: '/tmp/e.jsonl' },
+        runTieA: { id: 'runTieA', title: '同时 A', sessionFile: '/tmp/f.jsonl' },
       },
-      statuses: { older: idle, newer: idle, runOlder: running, runNewer: running },
+      statuses: {
+        older: idle,
+        newer: idle,
+        runOlder: running,
+        runNewer: running,
+        runTieB: running,
+        runTieA: running,
+      },
       projects,
       todos: [],
     });
     const ids = (cards: typeof board.done) =>
       cards.map((card) => (card.kind === 'session' ? card.conversationId : ''));
     expect(ids(board.done)).toEqual(['newer', 'older']);
-    expect(ids(board.running)).toEqual(['runNewer', 'runOlder']);
+    expect(ids(board.running)).toEqual(['runNewer', 'runTieA', 'runTieB', 'runOlder']);
   });
 
   it('用户清掉的结果进已完成，不再挂在需要你处理', () => {
