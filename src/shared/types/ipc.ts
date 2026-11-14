@@ -48,6 +48,10 @@ export const IPC_CHANNELS = {
   SECRETARY_TAKEOVER_REVOKE: 'secretary:takeover-revoke',
   /** 秘书：列出交给秘书接管的会话，设置页用 */
   SECRETARY_TAKEOVERS_LIST: 'secretary:takeovers-list',
+  /** 秘书：列出用户收回跟踪后不再由范围权限覆盖的会话，设置页用 */
+  SECRETARY_UNTRACKED_LIST: 'secretary:untracked-list',
+  /** 秘书：把会话从「不再跟踪」名单里移除，renderer 只传会话 id */
+  SECRETARY_UNTRACKED_REMOVE: 'secretary:untracked-remove',
   /** 秘书：动态按时间游标分页，renderer 不拿全量再切片 */
   SECRETARY_FEED: 'secretary:feed',
   /** 秘书：按天汇总的看板（日报），入参是日期，缺省今天 */

@@ -304,6 +304,7 @@ export function ChatSessionTimeline({
         onStartReached={historyBaseIndex > 0 ? loadOlder : undefined}
         searchQuery={findOpen ? findQuery : ''}
         activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
+        secretarySession={secretarySession}
       />
     </MarkdownLinkContext.Provider>
   );

@@ -10,6 +10,7 @@ import type {
   SecretaryTakeoverScope,
   SecretaryTakeoverView,
   SecretaryToolDraft,
+  SecretaryUntrackedView,
 } from '@shared/types/secretary';
 import * as React from 'react';
 import { AvatarCropDialog } from '@/components/bots/AvatarCropDialog';
@@ -423,6 +424,64 @@ function Takeovers({ locale }: { locale: string }) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * 用户点 × 收回过的会话：范围权限不再覆盖它们，秘书只能重新提确认卡。
+ * 移除只是恢复范围权限，不会建立接管记录。
+ */
+function Untracked() {
+  const { t } = useI18n();
+  const [entries, setEntries] = React.useState<SecretaryUntrackedView[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    const result = await window.electronAPI.secretary.listUntracked();
+    if (result.ok) setEntries(result.untracked);
+    else setError(result.error);
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+    return window.electronAPI.secretary.onStateChanged(() => void load());
+  }, [load]);
+
+  const remove = async (conversationId: string) => {
+    setError(null);
+    const result = await window.electronAPI.secretary.removeUntracked(conversationId);
+    if (!result.ok) setError(result.error);
+    await load();
+  };
+
+  if (entries.length === 0 && !error) return null;
+  return (
+    <div className="mt-3 space-y-2" data-enso="secretary-untracked">
+      <p className="text-xs text-muted-foreground">
+        {t(
+          'Not tracked: the takeover scope no longer covers these sessions. Removing one lets the scope cover it again.'
+        )}
+      </p>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <div className="divide-y rounded-md border">
+        {entries.map((entry) => (
+          <div
+            key={entry.conversationId}
+            className="flex items-center gap-2 px-3 py-2"
+            data-enso="secretary-untracked-row"
+            data-conversation-id={entry.conversationId}
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm">{entry.title || t('Unnamed')}</p>
+              <p className="truncate text-xs text-muted-foreground">{entry.projectName}</p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => void remove(entry.conversationId)}>
+              {t('Track again')}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -843,6 +902,7 @@ export function SecretarySettings() {
         rowId="secretary.takeovers"
       >
         <Takeovers locale={locale} />
+        <Untracked />
       </Section>
 
       <Section title="Scheduled tasks" rowId="secretary.schedules">

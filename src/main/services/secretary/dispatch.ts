@@ -7,6 +7,8 @@ import { parseProfile } from '@shared/secretary/parse';
 import {
   canOperate,
   dispatchDecision,
+  inTakeoverScope,
+  isUntracked,
   type OperateSource,
   operateSource,
   type TakeoverRefusal,
@@ -37,6 +39,7 @@ import {
   type SecretaryTodo,
   type SecretaryTodoMutate,
   type SecretaryToolDraft,
+  type SecretaryUntrackedView,
   type TakeoverVia,
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
@@ -49,6 +52,7 @@ import {
   linkedTodoSession,
   proposalUpdate,
   takeoverViews,
+  untrackedViews,
 } from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import { SecretaryStore } from './store';
@@ -152,6 +156,8 @@ const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid argumen
 const DENIALS = {
   'not-operable':
     'permission denied (not-operable): this session was not dispatched by the secretary, the user has not handed it over, and its project is not in the takeover scope. Ask the user to add the project to the takeover scope in settings, or call session_takeover_propose to request a takeover; it only takes effect after the user confirms.',
+  untracked:
+    'permission denied (untracked): the user took this session back, so the takeover scope no longer covers it. Do not retry: the session only becomes operable again after the user confirms a new session_takeover_propose card, or removes it from the untracked list in the secretary settings.',
   'not-found':
     'not found: no root session with this id (archived, child and secretary sessions are excluded)',
   'not-visible':
@@ -163,6 +169,9 @@ const DENIALS = {
 } as const;
 
 export const NOT_OPERABLE_ERROR = DENIALS['not-operable'];
+
+/** 「不再跟踪」名单上限：只用于挡住范围权限，留最近的一批就够 */
+const UNTRACKED_LIMIT = 200;
 
 type FieldsResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -629,7 +638,14 @@ async function checkOperate(
   if (!visible) return { ok: false, code: 'not-visible' };
   const file = ports.dispatchFile();
   const source = operateSource(file, conversationId, profile.takeoverScope, conversation.projectId);
-  if (!source) return { ok: false, code: 'not-operable' };
+  if (!source) {
+    // 用户收回过的会话被拒时要说清原因，否则秘书会当成「再申请一次就能用」。
+    // 范围本来就不覆盖的项目仍报 not-operable：那和收回无关。
+    const untracked =
+      isUntracked(file, conversationId) &&
+      inTakeoverScope(profile.takeoverScope, conversation.projectId);
+    return { ok: false, code: untracked ? 'untracked' : 'not-operable' };
+  }
   const projectId = conversation.projectId;
   if (source !== 'scope') return { ok: true, source, conversation, projectId };
   const refusal = takeoverRefusal(file, {
@@ -722,6 +738,10 @@ export async function grantTakeover(
     lastEventAt: now,
     takeover: { grantedAt: now, via },
   };
+  // 逐个授权是用户亲手点的，撤销时记下的「不再跟踪」到此失效
+  if (file.untracked?.includes(conversationId)) {
+    file.untracked = file.untracked.filter((id) => id !== conversationId);
+  }
   ports.saveDispatch(file);
   ports.audit({
     at: now,
@@ -759,6 +779,11 @@ export function revokeTakeover(
   file.outbox = file.outbox.filter(
     (update) => !('conversationId' in update && update.conversationId === conversationId)
   );
+  // 记进「不再跟踪」：范围权限不会再让秘书自动管回这个会话，只有确认卡能重新授权
+  file.untracked = [
+    conversationId,
+    ...(file.untracked ?? []).filter((id) => id !== conversationId),
+  ].slice(0, UNTRACKED_LIMIT);
   ports.saveDispatch(file);
   ports.audit({
     at: ports.now(),
@@ -776,6 +801,31 @@ export async function listTakeovers(
   ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'rows' | 'projects'>
 ): Promise<SecretaryTakeoverView[]> {
   return takeoverViews(ports.dispatchFile(), await ports.rows(), await ports.projects());
+}
+
+/** 「不再跟踪」名单：设置页列出，用户可以逐个移除 */
+export async function listUntracked(
+  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'rows' | 'projects'>
+): Promise<SecretaryUntrackedView[]> {
+  return untrackedViews(ports.dispatchFile(), await ports.rows(), await ports.projects());
+}
+
+/** 把会话从「不再跟踪」名单里移除：只是恢复范围权限，不建立接管记录 */
+export function untrack(ports: SecretaryDispatchPorts, conversationId: string): TakeoverResult {
+  const file = ports.dispatchFile();
+  if (!isUntracked(file, conversationId)) return { ok: false, error: 'not-found' };
+  file.untracked = (file.untracked ?? []).filter((id) => id !== conversationId);
+  ports.saveDispatch(file);
+  ports.audit({
+    at: ports.now(),
+    secretaryConversationId: null,
+    op: 'takeover_untrack_remove',
+    targetId: conversationId,
+    ok: true,
+    detail: 'settings',
+  });
+  notifySecretaryChanged();
+  return { ok: true };
 }
 
 export function createSecretaryDispatchHandlers(

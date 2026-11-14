@@ -247,6 +247,7 @@ import type {
   SecretaryTakeoverView,
   SecretaryTodoMutate,
   SecretaryToolDraft,
+  SecretaryUntrackedView,
 } from '@shared/types/secretary';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import type {
@@ -449,6 +450,14 @@ const electronAPI = {
     listTakeovers: (): Promise<
       { ok: true; takeovers: SecretaryTakeoverView[] } | { ok: false; error: string }
     > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST),
+    /** 用户收回跟踪后不再由范围权限覆盖的会话；移除只恢复范围权限 */
+    listUntracked: (): Promise<
+      { ok: true; untracked: SecretaryUntrackedView[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_LIST),
+    removeUntracked: (
+      conversationId: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE, { conversationId }),
   },
 
   modelDirectory: {

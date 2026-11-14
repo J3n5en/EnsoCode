@@ -21,12 +21,14 @@ import {
   dismissResult,
   grantTakeover,
   listTakeovers,
+  listUntracked,
   mutateTodo,
   pageSecretaryFeed,
   resolveProposal,
   revokeTakeover,
   secretaryDispatchPorts,
   setSecretaryStateListener,
+  untrack,
 } from '../services/secretary/dispatch';
 import {
   createDispatchDriver,
@@ -425,6 +427,19 @@ export function registerSecretaryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST, async (event) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     return { ok: true, takeovers: await listTakeovers(secretaryDispatchPorts) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_UNTRACKED_LIST, async (event) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    return { ok: true, untracked: await listUntracked(secretaryDispatchPorts) };
+  });
+
+  // 移除只是恢复范围权限，不建立接管记录，开关关着也允许
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE, async (event, request: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    const parsed = parseDismissRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return untrack(secretaryDispatchPorts, parsed.conversationId);
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, async (event) => {

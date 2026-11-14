@@ -13,10 +13,7 @@ import {
 } from 'react';
 import { type ListProps, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
-import {
-  useIsSecretaryChat,
-  useSecretaryChatSpeaker,
-} from '@/components/secretary/useSecretaryFace';
+import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -146,6 +143,11 @@ interface MessageTimelineProps {
   olderCursor?: number;
   searchQuery?: string;
   activeHit?: { key: string; nth: number } | null;
+  /**
+   * 这条时间线自己的会话属于秘书项目。由上层按 conversationId 判定后传进来：
+   * 读全局「当前打开的会话」会在切标签的一瞬间与 buildTimeline 的判断不一致。
+   */
+  secretarySession?: boolean;
 }
 
 /**
@@ -173,12 +175,14 @@ export function MessageTimeline({
   olderCursor,
   searchQuery = '',
   activeHit = null,
+  secretarySession = false,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const host = useChatHost();
-  const secretarySpeaker = useSecretaryChatSpeaker();
+  const face = useSecretaryFace();
+  const secretarySpeaker = secretarySession ? face : null;
   const secretaryMark = !host && secretarySpeaker ? secretarySpeaker : null;
-  const secretaryChat = useIsSecretaryChat();
+  const secretaryChat = secretarySession;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [fitsViewport, setFitsViewport] = useState(false);
@@ -584,10 +588,16 @@ export function MessageTimeline({
             model={replyHead.replyModel}
             at={replyHead.replyAt}
             privacyMask={replyHead.replyPrivacyMask}
+            secretarySession={secretaryChat}
           />
         )}
         <RowErrorBoundary itemKey={item.key}>
-          <TimelineRow item={item} onToggleGroup={toggleGroup} onToggleTurn={setTurnCollapsed} />
+          <TimelineRow
+            item={item}
+            secretarySession={secretaryChat}
+            onToggleGroup={toggleGroup}
+            onToggleTurn={setTurnCollapsed}
+          />
         </RowErrorBoundary>
       </div>
     );
