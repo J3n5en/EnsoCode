@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // 秘书真机验收（U10）：派活 → 确认 → 回传 → 并发确认。
 // 全程在隔离 userData 与 fake provider 上跑，不碰真实账号与真实数据。
-//   node scripts/verify-secretary.mjs [--keep]
+//   node scripts/verify-secretary.mjs [--keep] [--memory-only]
+// 多个会话并行验收时用 SEC_VERIFY_ID=<后缀> 与 SEC_VERIFY_PORT_BASE=<端口基数> 错开目录与端口
 // 产物：/tmp/sec-u10/*.png 与 audit.jsonl
 //
 // 步骤编号沿用计划「真机验证脚本思路」，执行顺序按依赖排：
 // 计划第 3 步（派活出卡片）先跑，第 1、2 步用它的会话断言。
 // 计划第 1 步原本走 dev IPC `secretary:dev-create-session`；该入口已删除，
 // 这里改用正常派活路径，落的是同一个 Main 建会话函数。
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -24,17 +25,22 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const REPO = path.resolve(import.meta.dirname, '..');
-const ART = '/tmp/sec-u10';
-const ENV = '/tmp/sec-u10-env';
-const PROJ = '/tmp/sec-u10-proj';
-const CDP_PORT = 9333;
-const FAKE_PORT = 8899;
-const PLUGIN_PORT = 8898;
+const RUN_ID = process.env.SEC_VERIFY_ID ? `-${process.env.SEC_VERIFY_ID}` : '';
+const PORT_BASE = Number(process.env.SEC_VERIFY_PORT_BASE) || 0;
+const ART = `/tmp/sec-u10${RUN_ID}`;
+const ENV = `/tmp/sec-u10${RUN_ID}-env`;
+const PROJ = `/tmp/sec-u10${RUN_ID}-proj`;
+const CDP_PORT = PORT_BASE ? PORT_BASE : 9333;
+const FAKE_PORT = PORT_BASE ? PORT_BASE + 1 : 8899;
+const PLUGIN_PORT = PORT_BASE ? PORT_BASE + 2 : 8898;
 const KEEP = process.argv.includes('--keep');
+// 只跑 setup + 记忆人工编辑段，改记忆管理时用来快速复验
+const MEMORY_ONLY = process.argv.includes('--memory-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
 const auditFile = path.join(ENV, 'secretary', 'audit.jsonl');
+const memoryAuditFile = path.join(ENV, 'memory', 'audit.jsonl');
 const registryFile = path.join(ENV, 'agent', 'source-registry.json');
 const sessionsDir = path.join(ENV, 'agent', 'sessions');
 
@@ -150,6 +156,18 @@ async function stopAll() {
       // 已经退出
     }
   }
+  // electron-vite 拉起的 Electron 不在 pnpm 的进程组里，pnpm 先退出后它会成为孤儿、继续占着 CDP 端口
+  const listeners = spawnSync('lsof', ['-ti', `tcp:${CDP_PORT}`, '-sTCP:LISTEN'], {
+    encoding: 'utf8',
+  });
+  for (const pid of listeners.stdout?.split('\n').filter(Boolean) ?? []) {
+    try {
+      process.kill(Number(pid), 'SIGKILL');
+      log(`  killed orphan ${pid} on :${CDP_PORT}`);
+    } catch {
+      // 已经退出
+    }
+  }
 }
 
 // 页面内共用入口：store 必须用 /stores/<file>.ts 的完整 URL，否则拿到的是另一份实例
@@ -167,10 +185,10 @@ const texts = (id) => (S().conversations[id]?.messages ?? []).map((m) =>
   (Array.isArray(m.content) ? m.content : []).filter((c) => c.type === 'text').map((c) => c.text).join(''));
 `;
 
-async function connect() {
+async function connect(urlPart = 'index.html') {
   const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
-  const target = list.find((entry) => entry.type === 'page' && entry.url.includes('index.html'));
-  if (!target) throw new Error('main window page target not found');
+  const target = list.find((entry) => entry.type === 'page' && entry.url.includes(urlPart));
+  if (!target) throw new Error(`${urlPart} page target not found`);
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   const pending = new Map();
   let id = 0;
@@ -241,6 +259,9 @@ async function prepareEnv() {
   });
   const settings = readJson(settingsFile);
   settings['enso-settings'].state.secretaryEnabled = true;
+  for (const provider of settings['enso-settings'].state.providers ?? []) {
+    provider.baseUrl = provider.baseUrl?.replace(':8899', `:${FAKE_PORT}`);
+  }
   writeFileSync(settingsFile, JSON.stringify(settings));
   mkdirSync(PROJ, { recursive: true });
   writeFileSync(path.join(PROJ, 'README.md'), 'isolated dispatch target\n');
@@ -266,7 +287,9 @@ async function main() {
   const pluginZipUrl = await servePluginZip();
 
   log('== fake provider + dev');
-  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {});
+  start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {
+    FAKE_PROVIDER_PORT: String(FAKE_PORT),
+  });
   await waitFor(
     async () => {
       try {
@@ -366,6 +389,10 @@ async function run(cdp, pluginZipUrl) {
   `);
   assert(setup.ok, 'setup: 隔离实例里建出项目与秘书会话', setup);
   await cdp.shot(path.join(ART, '01-sidebar.png'));
+  if (MEMORY_ONLY) {
+    await verifyMemoryManualEdit(cdp, setup);
+    return;
+  }
 
   log('== step3 派活');
   const draft = {
@@ -1455,6 +1482,229 @@ async function run(cdp, pluginZipUrl) {
 
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
+
+  await verifyMemoryManualEdit(cdp, setup);
+}
+
+/**
+ * 秘书经 memory_capture 写两条私有记忆，再在设置页「记忆」里按秘书空间筛选、编辑一条、删除一条：
+ * 编辑后新词搜得到、旧词搜不到（精确与 agent 同款检索都查），删除后搜不到，两次操作都落记忆审计。
+ */
+async function verifyMemoryManualEdit(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  const spaceId = `proj:${setup.secretaryProjectId}`;
+  log('== 记忆：秘书写入私有记忆');
+  const captures = [
+    { title: 'Deploy window', content: 'deploy window is tuesday zebrafish' },
+    { title: 'Cache layer', content: 'cache layer uses walrusdb' },
+  ];
+  for (const capture of captures) {
+    const directive = `[[tool:memory_capture ${JSON.stringify({ ...capture, spaceId: 'project', importance: 0.6 })}]]`;
+    const written = await page(`
+      const secretary = await SEC();
+      const id = await secretary.getState().newSecretaryConversation();
+      S().selectConversation(id);
+      const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+      await S().send(
+        ${JSON.stringify(`记一下 ${directive}`)},
+        { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+        undefined,
+        id
+      );
+      const result = await until(
+        () => (S().conversations[id]?.messages ?? []).find((m) => m.toolName === 'memory_capture') ?? null,
+        40000
+      );
+      return JSON.stringify({ ok: Boolean(result), isError: result?.isError === true });
+    `);
+    assert(written.ok && !written.isError, `记忆: 秘书写入「${capture.title}」`, written);
+  }
+  const seeded = await page(`
+    const listed = await window.electronAPI.memory.list({ spaceId: ${JSON.stringify(spaceId)}, limit: 20, offset: 0 });
+    return JSON.stringify(listed.items.map((item) => ({ id: item.id, title: item.title })));
+  `);
+  const target = seeded.find((item) => item.title === 'Deploy window');
+  const doomed = seeded.find((item) => item.title === 'Cache layer');
+  assert(target && doomed, '记忆: 两条都落在秘书私有空间', seeded);
+
+  log('== 记忆：设置页筛选秘书空间');
+  await page(`
+    await window.electronAPI.window.openSettings({ category: 'memory', rowId: 'memory.library' });
+    return JSON.stringify(true);
+  `);
+  const settingsCdp = await waitFor(
+    () => connect('settings.html').catch(() => null),
+    'settings window',
+    30_000,
+    500
+  );
+  try {
+    const ui = settingsCdp.json.bind(settingsCdp);
+    const UI = `
+      const q = (s) => document.querySelector(s);
+      const press = (el) => {
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+          el.dispatchEvent(new (type.startsWith('pointer') ? PointerEvent : MouseEvent)(type, { bubbles: true, button: 0, pointerType: 'mouse' }));
+        }
+        el.click();
+      };
+      const typeInto = (el, value) => {
+        const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const rowIds = () => [...document.querySelectorAll('[data-memory-id]')].map((el) => el.getAttribute('data-memory-id'));
+    `;
+    const filtered = await ui(`
+      ${UI}
+      const trigger = await until(() => q('[data-memory-filter="space-kind"]'), 30000);
+      if (!trigger) return JSON.stringify({ ok: false, error: 'no space kind filter' });
+      await until(() => rowIds().length >= 2, 15000);
+      press(trigger);
+      const option = await until(
+        () => [...document.querySelectorAll('[role="option"]')].find((el) => ['秘书', 'Secretary'].includes(el.textContent.trim())),
+        5000
+      );
+      if (!option) return JSON.stringify({ ok: false, error: 'no secretary option', html: document.body.innerText.slice(0, 400) });
+      press(option);
+      await sleep(800);
+      return JSON.stringify({ ok: true, ids: rowIds(), label: trigger.textContent.trim() });
+    `);
+    assert(
+      filtered.ok &&
+        ['秘书', 'Secretary'].includes(filtered.label) &&
+        filtered.ids.includes(target.id) &&
+        filtered.ids.includes(doomed.id),
+      '记忆: 设置页按「秘书」空间筛出秘书的两条记忆',
+      filtered
+    );
+
+    log('== 记忆：设置页编辑一条');
+    const edited = await ui(`
+      ${UI}
+      q('[data-memory-id=${JSON.stringify(target.id)}] button:not([role=checkbox])').click();
+      const editButton = await until(() => q('[data-memory-action="edit"]'), 10000);
+      if (!editButton) return JSON.stringify({ ok: false, error: 'no edit button' });
+      editButton.click();
+      const title = await until(() => q('[data-memory-field="title"]'), 5000);
+      typeInto(title, 'Release window');
+      typeInto(q('[data-memory-field="content"]'), 'release window is friday narwhal');
+      typeInto(q('[data-memory-field="importance"]'), '0.85');
+      await sleep(200);
+      q('[data-memory-action="save"]').click();
+      const shown = await until(
+        () => q('[data-memory-detail] [data-memory-field="content"]')?.textContent.includes('narwhal'),
+        15000
+      );
+      return JSON.stringify({ ok: Boolean(shown), error: q('[data-memory-edit] .text-destructive')?.textContent ?? null });
+    `);
+    assert(edited.ok, '记忆: 设置页编辑保存后详情显示新内容', edited);
+    await settingsCdp.shot(path.join(ART, '40-memory-edited.png'));
+    const afterEdit = await ui(`
+      const find = async (query, mode) =>
+        (await window.electronAPI.memory.list({ query, mode, limit: 20, offset: 0 })).items.map((i) => i.id);
+      const detail = await window.electronAPI.memory.detail(${JSON.stringify(target.id)});
+      return JSON.stringify({
+        title: detail?.title,
+        importance: detail?.importance,
+        newExact: await find('narwhal', 'exact'),
+        newFast: await find('narwhal', 'fast'),
+        oldExact: await find('zebrafish', 'exact'),
+        oldFast: await find('zebrafish', 'fast'),
+      });
+    `);
+    assert(
+      afterEdit.title === 'Release window' && afterEdit.importance === 0.85,
+      '记忆: 标题与重要度已更新',
+      afterEdit
+    );
+    assert(
+      afterEdit.newExact.includes(target.id) && afterEdit.newFast.includes(target.id),
+      '记忆: 编辑后新内容在精确与检索模式都能命中',
+      afterEdit
+    );
+    assert(
+      !afterEdit.oldExact.includes(target.id) && !afterEdit.oldFast.includes(target.id),
+      '记忆: 编辑后旧内容搜不到',
+      afterEdit
+    );
+
+    log('== 记忆：设置页删除一条（二次确认）');
+    const deleted = await ui(`
+      ${UI}
+      // 详情框还开着：点另一行直接换成那条的详情，等换好再点删除，别点到上一条的按钮
+      const row = await until(() => q('[data-memory-id=${JSON.stringify(doomed.id)}] button:not([role=checkbox])'), 5000);
+      if (!row) return JSON.stringify({ ok: false, error: 'row missing' });
+      row.click();
+      const opened = await until(() => q('[data-memory-detail=${JSON.stringify(doomed.id)}]'), 10000);
+      if (!opened) return JSON.stringify({ ok: false, error: 'detail not switched' });
+      const del = q('[data-memory-action="delete"]');
+      del.click();
+      const confirm = await until(() => {
+        const button = q('[data-memory-action="confirm-delete"]');
+        return button && !button.disabled ? button : null;
+      }, 10000);
+      if (!confirm) return JSON.stringify({ ok: false, error: 'confirm not ready' });
+      const impact = q('[data-memory-delete-impact]')?.innerText ?? '';
+      const stillThere = Boolean(await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)}));
+      confirm.click();
+      const gone = await until(() => !rowIds().includes(${JSON.stringify(doomed.id)}), 15000);
+      return JSON.stringify({ ok: Boolean(gone), impact, stillThereBeforeConfirm: stillThere });
+    `);
+    assert(
+      deleted.stillThereBeforeConfirm &&
+        (deleted.impact.includes('不影响其他记忆') ||
+          deleted.impact.includes('No other memories are affected')),
+      '记忆: 删除先弹确认并说明影响，确认前不删',
+      deleted
+    );
+    assert(deleted.ok, '记忆: 确认后列表里消失', deleted);
+    const afterDelete = await ui(`
+      const listed = await window.electronAPI.memory.list({ query: 'walrusdb', limit: 20, offset: 0 });
+      const fast = await window.electronAPI.memory.list({ query: 'walrusdb', mode: 'fast', limit: 20, offset: 0 });
+      return JSON.stringify({
+        detail: await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)}),
+        exact: listed.items.map((i) => i.id),
+        fast: fast.items.map((i) => i.id),
+      });
+    `);
+    assert(
+      afterDelete.detail === null &&
+        afterDelete.exact.length === 0 &&
+        afterDelete.fast.length === 0,
+      '记忆: 删除后精确与检索模式都搜不到',
+      afterDelete
+    );
+    await settingsCdp.shot(path.join(ART, '41-memory-deleted.png'));
+  } finally {
+    settingsCdp.close();
+  }
+
+  const memoryAudit = readFileSync(memoryAuditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const editAudit = memoryAudit.filter(
+    (entry) => entry.action === 'memory.edit' && entry.memoryId === target.id
+  );
+  const deleteAudit = memoryAudit.filter(
+    (entry) => entry.action === 'memory.delete' && entry.requested.includes(doomed.id)
+  );
+  assert(
+    editAudit.length === 1 &&
+      editAudit[0].changes.title?.to === 'Release window' &&
+      editAudit[0].changes.content?.toChars > 0 &&
+      !JSON.stringify(editAudit[0]).includes('zebrafish'),
+    '记忆: 编辑记了审计，正文只留 hash',
+    editAudit
+  );
+  assert(
+    deleteAudit.length === 1 && deleteAudit[0].impact.deleted[0]?.id === doomed.id,
+    '记忆: 删除记了审计',
+    deleteAudit
+  );
+  copyFileSync(memoryAuditFile, path.join(ART, 'memory-audit.jsonl'));
+  log(`  copied ${path.join(ART, 'memory-audit.jsonl')}`);
 }
 
 main()
