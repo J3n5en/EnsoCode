@@ -7,6 +7,7 @@ import { Coffee, Pencil, Plus, Send, ShieldAlert, Square, Trash2 } from 'lucide-
 import { useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
+import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock, formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -176,7 +177,7 @@ function TodoRow({ todo }: { todo: SecretaryTodo }) {
   return (
     <div
       data-enso="secretary-todo"
-      className="group flex items-start gap-2.5 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-foreground/5"
+      className={cn(HOVER_ROW_CLASS, 'flex items-start gap-2.5 rounded-lg px-1.5 py-1.5')}
     >
       <button
         type="button"
@@ -193,7 +194,7 @@ function TodoRow({ todo }: { todo: SecretaryTodo }) {
           </p>
         )}
       </div>
-      <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <HoverActions>
         <button
           type="button"
           title={t('Dispatch')}
@@ -221,7 +222,7 @@ function TodoRow({ todo }: { todo: SecretaryTodo }) {
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
-      </span>
+      </HoverActions>
     </div>
   );
 }
@@ -283,7 +284,7 @@ function FeedEntry({ event }: { event: FeedEvent }) {
     <div
       data-enso="secretary-feed-event"
       data-tone={event.tone}
-      className="group relative flex items-start gap-2 py-1 pl-4"
+      className="group/row relative flex items-start gap-2 py-1 pl-4"
     >
       <span
         aria-hidden
@@ -308,16 +309,19 @@ function FeedEntry({ event }: { event: FeedEvent }) {
         </span>
       </button>
       {event.running && stop && (
-        <button
-          type="button"
-          title={t('Stop')}
-          aria-label={t('Stop')}
-          disabled={stopping}
-          onClick={stop}
-          className={cn(ACTION_CLASS, 'opacity-0 group-hover:opacity-100')}
-        >
-          <Square className="h-3.5 w-3.5" />
-        </button>
+        // 时间线行不着色，蒙版直接接面板底色
+        <HoverActions className="from-background">
+          <button
+            type="button"
+            title={t('Stop')}
+            aria-label={t('Stop')}
+            disabled={stopping}
+            onClick={stop}
+            className={ACTION_CLASS}
+          >
+            <Square className="h-3.5 w-3.5" />
+          </button>
+        </HoverActions>
       )}
     </div>
   );

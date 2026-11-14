@@ -104,15 +104,18 @@ afterEach(() => {
 });
 
 describe('SecretaryMemoryPanel 行内操作', () => {
-  it('每条记忆（秘书自己的和项目来的）都直接带编辑与删除，不用先点开', () => {
+  it('每条记忆（秘书自己的和项目来的）都直接带编辑与删除，不用先点开，平时叠在悬停蒙版里', () => {
     expect(rows().map((row) => row.getAttribute('data-memory-id'))).toEqual([
       'own1',
       'own2',
       'proj1',
     ]);
     for (const id of ['own1', 'own2', 'proj1']) {
-      expect(inRow(id, '[data-memory-action="row-edit"]')).not.toBeNull();
-      expect(inRow(id, '[data-memory-action="row-delete"]')).not.toBeNull();
+      const layer = inRow(id, '[data-slot="hover-actions"]');
+      expect(layer?.className).toContain('absolute');
+      expect(layer?.querySelector('[data-memory-action="row-edit"]')).not.toBeNull();
+      expect(layer?.querySelector('[data-memory-action="row-delete"]')).not.toBeNull();
+      expect(layer?.parentElement?.className).toContain('group/row');
     }
     expect(container.querySelector('[data-enso="secretary-memory-detail"]')).toBeNull();
   });

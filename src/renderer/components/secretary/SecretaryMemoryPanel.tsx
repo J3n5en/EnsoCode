@@ -7,9 +7,11 @@ import {
   MemoryEditDialog,
   MemoryRowActions,
 } from '@/components/memory/MemoryActionDialogs';
+import { HOVER_ROW_CLASS } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { secretarySpaceId } from '@/lib/secretarySpace';
 import { formatRelativeTime } from '@/lib/time';
+import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 
 const PAGE = 50;
@@ -33,7 +35,7 @@ function MemoryRow({
 }) {
   return (
     <div data-enso="secretary-memory-row" data-memory-id={item.id} className="flex flex-col">
-      <div className="flex items-start gap-1 rounded-lg px-1.5 py-2 transition-colors hover:bg-foreground/5">
+      <div className={cn(HOVER_ROW_CLASS, 'flex items-start rounded-lg px-1.5 py-2')}>
         <button
           type="button"
           data-enso="secretary-memory-open"
@@ -50,7 +52,7 @@ function MemoryRow({
           </span>
           <span className="shrink-0 text-[11.5px] text-subtle-foreground">{trailing}</span>
         </button>
-        <MemoryRowActions id={item.id} onEdit={onEdit} onDelete={onDelete} className="-my-0.5" />
+        <MemoryRowActions id={item.id} onEdit={onEdit} onDelete={onDelete} />
       </div>
       {children}
     </div>
@@ -58,7 +60,7 @@ function MemoryRow({
 }
 
 /**
- * 记忆面板：每行常驻编辑 / 删除，和设置页记忆库走同一套接口（删除先预览影响再确认）。
+ * 记忆面板：每行悬停浮出编辑 / 删除，和设置页记忆库走同一套接口（删除先预览影响再确认）。
  * 「来自你的项目」是秘书只读的项目记忆，用户自己仍可以改删。
  */
 export function SecretaryMemoryPanel() {

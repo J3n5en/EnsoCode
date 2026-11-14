@@ -32,6 +32,7 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { HOVER_ROW_CLASS, rowFinalFocus } from '@/components/ui/hover-actions';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import {
   Select,
@@ -42,6 +43,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { usePendingMemoryWrites, usePendingMemoryWritesStore } from '@/stores/memoryReview';
 
 /**
@@ -135,12 +137,16 @@ export function MemoryRows({
   emptyLabel?: string;
 }) {
   return (
-    <ul className="divide-y rounded-lg border">
+    <ul className="divide-y overflow-hidden rounded-lg border">
       {items.length === 0 && (
         <li className="px-3 py-6 text-sm text-muted-foreground">{emptyLabel}</li>
       )}
       {items.map((item) => (
-        <li key={item.id} className="flex items-center gap-2 px-3 py-2" data-memory-id={item.id}>
+        <li
+          key={item.id}
+          className={cn(HOVER_ROW_CLASS, 'flex items-center gap-2 px-3 py-2')}
+          data-memory-id={item.id}
+        >
           {onToggle && (
             <Checkbox
               checked={selected?.has(item.id) ?? false}
@@ -702,7 +708,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
       />
 
       <Dialog open={detail !== null} onOpenChange={(open) => !open && closeDetail()}>
-        <DialogContent>
+        <DialogContent finalFocus={rowFinalFocus}>
           {detail && (
             <>
               <DialogHeader>

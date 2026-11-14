@@ -13,6 +13,7 @@ import {
   DialogPanel,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { HoverActions, rowFinalFocus } from '@/components/ui/hover-actions';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -118,7 +119,7 @@ export function deletionImpactLines(impact: MemoryDeletionImpact, t: Translate):
   return lines;
 }
 
-/** 列表行尾的编辑 / 删除，常驻显示，不用先点开详情 */
+/** 行内编辑 / 删除：不用先点开详情；悬停或键盘聚焦到这一行时浮在右侧蒙版上，平时不占位 */
 export function MemoryRowActions({
   id,
   onEdit,
@@ -132,7 +133,7 @@ export function MemoryRowActions({
 }) {
   const { t } = useI18n();
   return (
-    <span className={`flex shrink-0 items-center gap-0.5 ${className ?? ''}`}>
+    <HoverActions className={className}>
       <Button
         variant="ghost"
         size="icon-xs"
@@ -155,7 +156,7 @@ export function MemoryRowActions({
       >
         <Trash2 />
       </Button>
-    </span>
+    </HoverActions>
   );
 }
 
@@ -209,7 +210,7 @@ export function MemoryEditDialog({
       open={memoryId !== null && draft !== null}
       onOpenChange={(open) => !open && !busy && onClose()}
     >
-      <DialogContent>
+      <DialogContent finalFocus={rowFinalFocus}>
         {draft && (
           <>
             <DialogHeader>
@@ -337,7 +338,7 @@ export function MemoryDeleteDialog({
 
   return (
     <Dialog open={ids !== null} onOpenChange={(open) => !open && !busy && onClose()}>
-      <DialogContent>
+      <DialogContent finalFocus={rowFinalFocus}>
         <DialogHeader>
           <DialogTitle>
             {ids && ids.length > 1
