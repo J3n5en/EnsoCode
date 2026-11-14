@@ -163,6 +163,7 @@ function parseCatalogEntry(value: unknown): CatalogEntry | null {
     !optional(value, 'updatedAt', isUint) ||
     !optional(value, 'pinned', isBoolean) ||
     !optional(value, 'archived', isBoolean) ||
+    !optional(value, 'muted', isBoolean) ||
     !optional(value, 'providerId', isString) ||
     !optional(value, 'modelId', isString) ||
     !optional(value, 'reasoningEnabled', isBoolean)
@@ -242,6 +243,7 @@ function parseCatalogEntry(value: unknown): CatalogEntry | null {
   if (typeof value.updatedAt === 'number') out.updatedAt = value.updatedAt;
   if (typeof value.pinned === 'boolean') out.pinned = value.pinned;
   if (typeof value.archived === 'boolean') out.archived = value.archived;
+  if (value.muted === true) out.muted = true;
   if (typeof value.providerId === 'string') out.providerId = value.providerId;
   if (typeof value.modelId === 'string') out.modelId = value.modelId;
   if (typeof value.reasoningEnabled === 'boolean') out.reasoningEnabled = value.reasoningEnabled;

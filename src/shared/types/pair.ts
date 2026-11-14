@@ -92,6 +92,8 @@ export interface PairCatalogPayload {
     projectId: string;
     status: string;
     unread?: boolean;
+    /** 静音：配对设备与 PWA 不再为这个会话推送 */
+    muted?: boolean;
     pendingAskCount?: number;
     parentId?: string;
     /** 挂起的工具审批数，手机角标用 */
