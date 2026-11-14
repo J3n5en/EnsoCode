@@ -11,6 +11,8 @@ export interface PersistedPairConversation {
   thinkingLevel?: string;
   presetId?: string;
   approvalMode?: string;
+  /** 无人值守：恢复后不能悄悄变回「等人确认」 */
+  autoRejectApprovals?: boolean;
 }
 
 export type PairResumePlan =
@@ -64,6 +66,7 @@ export function planPairResume(input: {
       ...(thinkingLevel ? { thinkingLevel } : {}),
       ...(conversation.presetId ? { presetId: conversation.presetId } : {}),
       ...(approvalMode ? { approvalMode } : {}),
+      ...(conversation.autoRejectApprovals ? { autoRejectApprovals: true } : {}),
     },
   };
 }

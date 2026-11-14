@@ -86,6 +86,11 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
   return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
+/** 缺省为开的布尔项：只有明确的 false 才关掉，脏值一律回默认 */
+function flag(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function parseModel(value: unknown): ModelRef | undefined {
   if (!isObject(value)) return undefined;
   const providerId = text(value.providerId);
@@ -142,6 +147,8 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     dispatchWorktree: oneOf(value.dispatchWorktree, WORKTREE_MODES, 'auto'),
     maxRunningDispatches:
       clampInt(value.maxRunningDispatches, MIN_RUNNING_DISPATCHES, MAX_RUNNING_DISPATCHES) ?? 3,
+    dispatchMuted: flag(value.dispatchMuted, true),
+    dispatchUnattended: flag(value.dispatchUnattended, true),
     replyLanguage: oneOf(value.replyLanguage, REPLY_LANGUAGES, 'ui'),
     style: oneOf(value.style, STYLES, 'concise'),
     notify: oneOf(value.notify, NOTIFY_MODES, 'needs-user'),
@@ -267,6 +274,12 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
       return { ok: false, error: 'invalid maxRunningDispatches' };
     }
     draft.maxRunningDispatches = max;
+  }
+  for (const key of ['dispatchMuted', 'dispatchUnattended'] as const) {
+    const raw = value[key];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'boolean') return { ok: false, error: `invalid ${key}` };
+    draft[key] = raw;
   }
   if (value.addressAs !== undefined) {
     if (value.addressAs === null) draft.addressAs = null;

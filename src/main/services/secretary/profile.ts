@@ -315,6 +315,12 @@ function profileChanges(
   if (draft.maxRunningDispatches !== undefined) {
     put('maxRunningDispatches', before?.maxRunningDispatches ?? null, draft.maxRunningDispatches);
   }
+  if (draft.dispatchMuted !== undefined) {
+    put('dispatchMuted', before?.dispatchMuted ?? null, draft.dispatchMuted);
+  }
+  if (draft.dispatchUnattended !== undefined) {
+    put('dispatchUnattended', before?.dispatchUnattended ?? null, draft.dispatchUnattended);
+  }
   if ('addressAs' in draft) put('addressAs', before?.addressAs ?? null, draft.addressAs ?? null);
   if (draft.replyLanguage) put('replyLanguage', before?.replyLanguage ?? null, draft.replyLanguage);
   if (draft.style) put('style', before?.style ?? null, draft.style);

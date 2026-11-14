@@ -12,6 +12,8 @@ const profile: SecretaryProfile = {
   dispatchModel: { mode: 'project' },
   dispatchWorktree: 'auto',
   maxRunningDispatches: 3,
+  dispatchMuted: true,
+  dispatchUnattended: true,
   replyLanguage: 'zh',
   style: 'concise',
   notify: 'needs-user',

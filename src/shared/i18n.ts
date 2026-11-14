@@ -3469,6 +3469,12 @@ export const zhTranslations: Record<string, string> = {
   'Secretary decides': '秘书判断',
   'Always an isolated worktree': '总是开 worktree',
   'Running dispatches at most': '进行中派出会话上限',
+  'Dispatched sessions start muted': '派出的会话默认静音',
+  'Muted sessions send no system notification, no push and no badge. Their results still reach the secretary.':
+    '静音的会话不弹系统通知、不推送、不计角标；结果仍然照常推给秘书。',
+  'Dispatched sessions start unattended': '派出的会话默认无人值守',
+  'Unattended sessions never wait for a person: actions that need your approval are refused instead, so the model decides and keeps working.':
+    '无人值守的会话不会等人：需要你确认的动作改为直接拒绝，模型自己决定后继续。',
   'Up to {{n}} at a time': '最多同时 {{n}} 个',
   'Concurrent dispatch limit': '同时运行的派发会话上限',
   'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.':

@@ -50,6 +50,8 @@ export function draftFromProfile(
     dispatchModel: cloneDispatchModel(base.dispatchModel),
     dispatchWorktree: base.dispatchWorktree,
     maxRunningDispatches: base.maxRunningDispatches,
+    dispatchMuted: base.dispatchMuted,
+    dispatchUnattended: base.dispatchUnattended,
     replyLanguage: base.replyLanguage,
     style: base.style,
     notify: base.notify,

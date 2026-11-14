@@ -91,6 +91,47 @@ function Field({
   );
 }
 
+function SwitchField({
+  label,
+  hint,
+  checked,
+  onChange,
+  enso,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  enso: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <label className="flex items-start justify-between gap-3" data-enso={enso}>
+      <span className="space-y-1">
+        <span className="block text-sm">{t(label)}</span>
+        <span className="block text-xs text-muted-foreground">{t(hint)}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          'relative mt-0.5 h-5 w-9 shrink-0 rounded-full border transition-colors',
+          checked ? 'border-primary bg-primary' : 'border-border bg-muted'
+        )}
+      >
+        <span
+          className={cn(
+            'absolute top-0.5 size-3.5 rounded-full bg-background transition-all',
+            checked ? 'left-[18px]' : 'left-0.5'
+          )}
+        />
+      </button>
+    </label>
+  );
+}
+
 function ProjectChips({
   selected,
   onChange,
@@ -387,6 +428,20 @@ export function SecretaryProfileForm({
               />
             </Field>
           )}
+          <SwitchField
+            enso="secretary-form-dispatch-muted"
+            label="Dispatched sessions start muted"
+            hint="Muted sessions send no system notification, no push and no badge. Their results still reach the secretary."
+            checked={draft.dispatchMuted ?? true}
+            onChange={(dispatchMuted) => patch({ dispatchMuted })}
+          />
+          <SwitchField
+            enso="secretary-form-dispatch-unattended"
+            label="Dispatched sessions start unattended"
+            hint="Unattended sessions never wait for a person: actions that need your approval are refused instead, so the model decides and keeps working."
+            checked={draft.dispatchUnattended ?? true}
+            onChange={(dispatchUnattended) => patch({ dispatchUnattended })}
+          />
         </div>
       )}
 

@@ -49,9 +49,34 @@ describe('parseProfileDraft', () => {
       ok: false,
       error: 'invalid maxRunningDispatches',
     });
+    expect(parseProfileDraft({ dispatchMuted: 'yes' })).toEqual({
+      ok: false,
+      error: 'invalid dispatchMuted',
+    });
+    expect(parseProfileDraft({ dispatchUnattended: 1 })).toEqual({
+      ok: false,
+      error: 'invalid dispatchUnattended',
+    });
     expect(parseProfileDraft({ visibleProjectIds: 'some' })).toEqual({
       ok: false,
       error: 'invalid visibleProjectIds',
+    });
+  });
+
+  it('派出的会话默认静音且无人值守，只有明确的 false 才关掉', () => {
+    expect(parseProfile({})).toMatchObject({ dispatchMuted: true, dispatchUnattended: true });
+    expect(parseProfile({ dispatchMuted: false, dispatchUnattended: false })).toMatchObject({
+      dispatchMuted: false,
+      dispatchUnattended: false,
+    });
+    // 脏值回默认，不让坏配置把派出的会话变成有人值守
+    expect(parseProfile({ dispatchMuted: 'nope', dispatchUnattended: null })).toMatchObject({
+      dispatchMuted: true,
+      dispatchUnattended: true,
+    });
+    expect(parseProfileDraft({ dispatchMuted: false, dispatchUnattended: false })).toEqual({
+      ok: true,
+      draft: { dispatchMuted: false, dispatchUnattended: false },
     });
   });
 
@@ -126,6 +151,8 @@ describe('parseProfile', () => {
       dispatchModel: { mode: 'project' },
       dispatchWorktree: 'auto',
       maxRunningDispatches: 3,
+      dispatchMuted: true,
+      dispatchUnattended: true,
       replyLanguage: 'ui',
       style: 'concise',
       notify: 'needs-user',
@@ -171,6 +198,8 @@ describe('parseProfile', () => {
       },
       dispatchWorktree: 'always',
       maxRunningDispatches: 5,
+      dispatchMuted: true,
+      dispatchUnattended: true,
       addressAs: '老板',
       replyLanguage: 'zh',
       style: 'detailed',

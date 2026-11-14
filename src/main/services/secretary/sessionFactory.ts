@@ -31,6 +31,10 @@ export interface MainSessionRequest {
   secretaryOrigin?: { secretaryConversationId: string };
   /** 会话目标：首条消息追加 kickoff，行里的 goal 供 Main 续跑 */
   goal?: string;
+  /** 秘书派出的会话默认静音：只落行，静音判定由 sessionMuteGate 读同一份 settings */
+  muted?: boolean;
+  /** 秘书派出的会话默认无人值守：落行并随 spawn 带给 worker */
+  unattended?: boolean;
 }
 
 export type MainSessionResult = { ok: true; conversationId: string } | { ok: false; error: string };
@@ -120,6 +124,8 @@ export async function createSessionFromMain(
     lastModelId: modelId,
     ...(defaults.presetId ? { presetId: defaults.presetId } : {}),
     approvalMode: defaults.approvalMode,
+    ...(request.muted ? { muted: true } : {}),
+    ...(request.unattended ? { autoRejectApprovals: true } : {}),
     ...(worktree ? { worktree } : {}),
     driver: 'main',
     ...(goal ? { goal: { text: goal, status: 'active', autoTurns: 0, noProgressRuns: 0 } } : {}),
@@ -141,6 +147,7 @@ export async function createSessionFromMain(
     thinkingLevel,
     ...(defaults.presetId ? { presetId: defaults.presetId } : {}),
     approvalMode: defaults.approvalMode,
+    ...(request.unattended ? { autoRejectApprovals: true } : {}),
   });
   if (!spawned.ok) {
     await rollback();

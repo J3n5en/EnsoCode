@@ -20,6 +20,10 @@ export interface SecretaryProfile {
     | { mode: 'choose'; candidates: ModelRef[] };
   dispatchWorktree: 'never' | 'auto' | 'always';
   maxRunningDispatches: number;
+  /** 新派出的会话默认静音：不弹系统通知、不推送、不计角标 */
+  dispatchMuted: boolean;
+  /** 新派出的会话默认无人值守：需要人确认的动作直接按「没人可批准」拒绝 */
+  dispatchUnattended: boolean;
   addressAs?: string;
   replyLanguage: 'ui' | 'zh' | 'en';
   style: 'concise' | 'detailed';
