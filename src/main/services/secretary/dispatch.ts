@@ -5,6 +5,8 @@ import { parseProfile } from '@shared/secretary/parse';
 import {
   canOperate,
   dispatchDecision,
+  type TakeoverRefusal,
+  takeoverRefusal,
   transitionProposal,
   validateDispatch,
 } from '@shared/secretary/policy';
@@ -19,13 +21,15 @@ import {
   type SecretaryProposal,
   type SecretarySkillDraft,
   type SecretaryState,
+  type SecretaryTakeoverView,
   type SecretaryTodo,
   type SecretaryTodoMutate,
   type SecretaryToolDraft,
+  type TakeoverVia,
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
-import { buildBoard, proposalUpdate } from './results';
+import { buildBoard, proposalUpdate, takeoverViews } from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
@@ -86,6 +90,7 @@ const DISPATCH_OPS = [
   'session_create',
   'session_send',
   'session_stop',
+  'session_takeover_propose',
   'todo_item_add',
   'todo_item_update',
   'todo_item_dispatch',
@@ -94,6 +99,10 @@ const DISPATCH_OPS = [
 export type SecretaryDispatchHandlers = Record<(typeof DISPATCH_OPS)[number], SecretaryOpHandler>;
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
+
+/** 原样回给模型：说清为什么不行，以及怎么申请 */
+export const NOT_OPERABLE_ERROR =
+  'not-operable: you did not dispatch this session and the user has not handed it over to you. Ask the user, or call session_takeover_propose to request a takeover; it only takes effect after the user confirms.';
 
 /** 工作台推送由 IPC 层注册，避免本模块静态依赖 electron 与 agent */
 let stateListener: (() => void) | null = null;
@@ -136,7 +145,9 @@ async function profileOf(ports: SecretaryDispatchPorts): Promise<SecretaryProfil
 }
 
 function runningCount(file: SecretaryDispatchFile): number {
-  return Object.values(file.dispatched).filter((record) => record.lastState === 'running').length;
+  return Object.values(file.dispatched).filter(
+    (record) => record.lastState === 'running' && !record.takeover
+  ).length;
 }
 
 async function dispatchContext(
@@ -266,7 +277,9 @@ function auditFailure(
   ctx: SecretaryOpContext,
   op: string,
   error: string,
-  targetId?: string
+  targetId?: string,
+  /** 回给模型的说明；缺省同审计里的错误码 */
+  message = error
 ): SecretaryOpResult {
   ports.audit({
     at: ports.now(),
@@ -276,7 +289,7 @@ function auditFailure(
     ok: false,
     detail: error,
   });
-  return { ok: false, error };
+  return { ok: false, error: message };
 }
 
 function outcomeResult(
@@ -341,6 +354,137 @@ async function latestSecretaryConversation(ports: SecretaryDispatchPorts): Promi
   return latest?.id ?? null;
 }
 
+type TakeoverCheck =
+  | { ok: true; conversation: ConversationAuthority; row: Record<string, unknown> }
+  | { ok: false; error: TakeoverRefusal };
+
+async function checkTakeover(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<TakeoverCheck> {
+  const conversation = (await ports.conversations()).find(
+    (candidate) => candidate.conversationId === conversationId
+  );
+  const projects = await ports.projects();
+  const project = conversation
+    ? projects.find((candidate) => candidate.projectId === conversation.projectId)
+    : undefined;
+  const row = (await ports.rows())[conversationId];
+  const profile = await profileOf(ports);
+  const visible =
+    project !== undefined &&
+    visibleProjects(projects, profile).some(
+      (candidate) => candidate.projectId === project.projectId
+    );
+  const refusal = takeoverRefusal(ports.dispatchFile(), {
+    conversationId,
+    conversation,
+    project,
+    row,
+    visible,
+  });
+  if (refusal || !conversation || !row) return { ok: false, error: refusal ?? 'not-found' };
+  return { ok: true, conversation, row };
+}
+
+export type TakeoverResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * 授权接管：只由用户亲手触发（确认卡或会话界面），秘书的工具调用到不了这里。
+ * 推送绑到确认卡所属的秘书会话；界面直接授权时绑最近活跃的秘书会话。
+ */
+export async function grantTakeover(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  via: TakeoverVia,
+  secretaryConversationId: string | null
+): Promise<TakeoverResult> {
+  const fail = (error: string, actor: string | null = secretaryConversationId) => {
+    ports.audit({
+      at: ports.now(),
+      secretaryConversationId: actor,
+      op: 'takeover_grant',
+      targetId: conversationId,
+      ok: false,
+      detail: `${via}: ${error}`,
+    });
+    return { ok: false as const, error };
+  };
+  const checked = await checkTakeover(ports, conversationId);
+  if (!checked.ok) return fail(checked.error);
+  const owner = secretaryConversationId ?? (await latestSecretaryConversation(ports));
+  if (!owner) return fail('no-secretary-conversation');
+  const status = await ports.status(conversationId);
+  // 读改写之间不留 await：并发的两次授权只有一次写进去
+  const file = ports.dispatchFile();
+  if (Object.hasOwn(file.dispatched, conversationId)) return fail('already-managed', owner);
+  const now = ports.now();
+  file.dispatched[conversationId] = {
+    conversationId,
+    projectId: checked.conversation.projectId,
+    secretaryConversationId: owner,
+    createdAt: now,
+    turn: 0,
+    lastState: status.state,
+    lastEventAt: now,
+    takeover: { grantedAt: now, via },
+  };
+  ports.saveDispatch(file);
+  ports.audit({
+    at: now,
+    secretaryConversationId: owner,
+    op: 'takeover_grant',
+    targetId: conversationId,
+    ok: true,
+    detail: via,
+  });
+  notifySecretaryChanged();
+  return { ok: true };
+}
+
+/** 撤销接管：只认接管来的记录，派出会话撤不掉；点名授权一并收回，未投递的结果不再推给秘书 */
+export function revokeTakeover(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  from: 'session' | 'settings'
+): TakeoverResult {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record?.takeover) {
+    ports.audit({
+      at: ports.now(),
+      secretaryConversationId: null,
+      op: 'takeover_revoke',
+      targetId: conversationId,
+      ok: false,
+      detail: `${from}: not-found`,
+    });
+    return { ok: false, error: 'not-found' };
+  }
+  delete file.dispatched[conversationId];
+  file.named = file.named.filter((id) => id !== conversationId);
+  file.outbox = file.outbox.filter(
+    (update) => !('conversationId' in update && update.conversationId === conversationId)
+  );
+  ports.saveDispatch(file);
+  ports.audit({
+    at: ports.now(),
+    secretaryConversationId: record.secretaryConversationId,
+    op: 'takeover_revoke',
+    targetId: conversationId,
+    ok: true,
+    detail: from,
+  });
+  notifySecretaryChanged();
+  return { ok: true };
+}
+
+export async function listTakeovers(
+  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'rows' | 'projects'>
+): Promise<SecretaryTakeoverView[]> {
+  return takeoverViews(ports.dispatchFile(), await ports.rows(), await ports.projects());
+}
+
 export function createSecretaryDispatchHandlers(
   ports: SecretaryDispatchPorts
 ): SecretaryDispatchHandlers {
@@ -358,7 +502,14 @@ export function createSecretaryDispatchHandlers(
       if (!conversationId || !text) return invalidArguments;
       const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
-        return auditFailure(ports, ctx, 'session_send', 'not-operable', conversationId);
+        return auditFailure(
+          ports,
+          ctx,
+          'session_send',
+          'not-operable',
+          conversationId,
+          NOT_OPERABLE_ERROR
+        );
       }
       const conversation = await targetConversation(ports, conversationId);
       if (!conversation) {
@@ -429,10 +580,19 @@ export function createSecretaryDispatchHandlers(
       if (!conversationId) return invalidArguments;
       const file = ports.dispatchFile();
       if (!canOperate(file, conversationId)) {
-        return auditFailure(ports, ctx, 'session_stop', 'not-operable', conversationId);
+        return auditFailure(
+          ports,
+          ctx,
+          'session_stop',
+          'not-operable',
+          conversationId,
+          NOT_OPERABLE_ERROR
+        );
       }
       await ports.abort(conversationId);
-      if (file.dispatched[conversationId]?.goal) await ports.pauseGoal(conversationId);
+      // 接管来的会话自带的目标也一并暂停，免得停下后又被续跑
+      const record = file.dispatched[conversationId];
+      if (record?.goal || record?.takeover) await ports.pauseGoal(conversationId);
       ports.audit({
         at: ports.now(),
         secretaryConversationId: ctx.secretaryConversationId,
@@ -443,6 +603,53 @@ export function createSecretaryDispatchHandlers(
       });
       notifySecretaryChanged();
       return { ok: true, result: { status: 'stopped' } };
+    },
+
+    async session_takeover_propose(params, ctx) {
+      const conversationId = stringParam(params, 'conversationId');
+      if (!conversationId || !ctx.secretaryConversationId) return invalidArguments;
+      const op = 'session_takeover_propose';
+      const checked = await checkTakeover(ports, conversationId);
+      if (!checked.ok) return auditFailure(ports, ctx, op, checked.error, conversationId);
+      const file = ports.dispatchFile();
+      const pending = Object.values(file.proposals).find(
+        (proposal) =>
+          proposal.kind === 'takeover' &&
+          proposal.status === 'pending' &&
+          proposal.draft.conversationId === conversationId
+      );
+      // 同一会话已有一张待确认的卡就复用，不再叠一张
+      const proposalId = pending?.id ?? ports.newId();
+      const now = ports.now();
+      if (!pending) {
+        const title = typeof checked.row.title === 'string' ? checked.row.title.trim() : '';
+        const reason = stringParam(params, 'reason');
+        file.proposals[proposalId] = {
+          id: proposalId,
+          secretaryConversationId: ctx.secretaryConversationId,
+          createdAt: now,
+          updatedAt: now,
+          status: 'pending',
+          kind: 'takeover',
+          draft: {
+            conversationId,
+            projectId: checked.conversation.projectId,
+            ...(title ? { title } : {}),
+            ...(reason ? { reason: reason.slice(0, 500) } : {}),
+          },
+        };
+        ports.saveDispatch(file);
+        notifySecretaryChanged();
+      }
+      ports.audit({
+        at: now,
+        secretaryConversationId: ctx.secretaryConversationId,
+        op,
+        targetId: proposalId,
+        ok: true,
+        detail: pending ? 'awaiting_confirmation (existing)' : 'awaiting_confirmation',
+      });
+      return { ok: true, result: { status: 'awaiting_confirmation', proposalId } };
     },
 
     async todo_item_add(params, ctx) {
@@ -661,6 +868,15 @@ export async function resolveProposal(
       applied.ok ? { ok: true } : { ok: false, error: applied.error ?? 'tool-save-failed' }
     );
   }
+  if (transitioned.proposal.kind === 'takeover') {
+    const granted = await grantTakeover(
+      ports,
+      transitioned.proposal.draft.conversationId,
+      'proposal',
+      proposal.secretaryConversationId
+    );
+    return finishProposal(ports, proposalId, granted);
+  }
 
   const profile = await profileOf(ports);
   const draft = mergeDraft(transitioned.proposal.draft, edits);
@@ -795,6 +1011,7 @@ export async function buildSecretaryState(
     persona: await ports.persona(),
     board: buildBoard(file, { rows, statuses, projects, todos: await ports.todos() }),
     proposals: file.proposals,
+    takeovers: takeoverViews(file, rows, projects),
   };
 }
 

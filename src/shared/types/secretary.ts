@@ -63,6 +63,17 @@ export interface DispatchDraft {
   todoId?: string;
 }
 
+/** 秘书申请接管一个不是它派出的会话；title 是提案时的快照，只给卡片显示 */
+export interface TakeoverDraft {
+  conversationId: string;
+  projectId: string;
+  title?: string;
+  reason?: string;
+}
+
+/** 接管授权的来源：确认卡，或用户在会话界面上亲手点的 */
+export type TakeoverVia = 'proposal' | 'user';
+
 /** 秘书自有的 skill：name 即目录名，整份内容写进该目录的 SKILL.md */
 export interface SecretarySkillDraft {
   name: string;
@@ -110,6 +121,7 @@ export type SecretaryProposal = {
     }
   /** previous 是同名工具的旧草案，卡片据此标成更新并摊开旧代码 */
   | { kind: 'tool'; draft: SecretaryToolDraft; previous?: SecretaryToolDraft }
+  | { kind: 'takeover'; draft: TakeoverDraft }
 );
 
 export type SecretaryResultKind =
@@ -144,6 +156,8 @@ export interface DispatchRecord {
   stalledTurn?: number;
   /** dismissed：用户点过「知道了」；新结果整体替换 lastResult，标记随之失效 */
   lastResult?: { kind: SecretaryResultKind; turn: number; at: number; dismissed?: true };
+  /** 用户授权接管的会话：权限与推送同派出会话，可撤销；不计入派出上限 */
+  takeover?: { grantedAt: number; via: TakeoverVia };
 }
 
 export type SecretaryUpdate = {
@@ -242,6 +256,7 @@ export type SecretaryCard =
       result?: SecretaryResultKind;
       secretaryConversationId: string;
       unread?: boolean;
+      takeover?: true;
     }
   | { kind: 'proposal'; proposal: SecretaryProposal; projectName?: string };
 
@@ -252,6 +267,17 @@ export interface SecretaryBoard {
   done: SecretaryCard[];
 }
 
+/** 会话界面、侧栏与设置页共用的接管清单 */
+export interface SecretaryTakeoverView {
+  conversationId: string;
+  projectId: string;
+  projectName: string;
+  title: string;
+  grantedAt: number;
+  via: TakeoverVia;
+  secretaryConversationId: string;
+}
+
 export interface SecretaryState {
   enabled: boolean;
   projectId: string | null;
@@ -260,4 +286,5 @@ export interface SecretaryState {
   persona: string;
   board: SecretaryBoard;
   proposals: Record<string, SecretaryProposal>;
+  takeovers: SecretaryTakeoverView[];
 }

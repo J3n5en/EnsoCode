@@ -1,4 +1,4 @@
-import type { ProjectAuthority } from '../types/agent';
+import type { ConversationAuthority, ProjectAuthority } from '../types/agent';
 import type {
   DispatchDraft,
   SecretaryDispatchFile,
@@ -18,6 +18,41 @@ export function dispatchDecision(profile: SecretaryProfile, projectId: string): 
 
 export function canOperate(file: SecretaryDispatchFile, conversationId: string): boolean {
   return Object.hasOwn(file.dispatched, conversationId) || file.named.includes(conversationId);
+}
+
+export type TakeoverRefusal =
+  | 'not-found'
+  | 'bot-session'
+  | 'secretary-session'
+  | 'child-session'
+  | 'archived'
+  | 'not-visible'
+  | 'already-managed';
+
+export interface TakeoverTarget {
+  conversationId: string;
+  conversation?: ConversationAuthority;
+  project?: ProjectAuthority;
+  row?: Record<string, unknown>;
+  /** 会话所属项目在秘书可见范围内 */
+  visible: boolean;
+}
+
+/** 能否交给秘书接管；null 表示可以。秘书自己的会话、子会话、已归档与已有秘书管着的都不行 */
+export function takeoverRefusal(
+  file: SecretaryDispatchFile,
+  target: TakeoverTarget
+): TakeoverRefusal | null {
+  const { conversation, project, row } = target;
+  if (conversation?.kind !== 'root' || !project || !row) return 'not-found';
+  if (conversation.bot || project.kind === 'bot-home') return 'bot-session';
+  if (project.kind === 'secretary') return 'secretary-session';
+  if (row.parentId !== undefined || row.btwParentId !== undefined) return 'child-session';
+  if (row.archived === true) return 'archived';
+  if (!target.visible) return 'not-visible';
+  if (Object.hasOwn(file.dispatched, target.conversationId) || row.secretaryOrigin !== undefined)
+    return 'already-managed';
+  return null;
 }
 
 export type ProposalAction =

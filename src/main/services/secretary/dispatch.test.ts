@@ -15,8 +15,12 @@ import {
   buildSecretaryState,
   createSecretaryDispatchHandlers,
   dismissResult,
+  grantTakeover,
+  listTakeovers,
   mutateTodo,
+  NOT_OPERABLE_ERROR,
   resolveProposal,
+  revokeTakeover,
   type SecretaryDispatchPorts,
 } from './dispatch';
 import type { SecretarySessionStatus } from './readers';
@@ -332,9 +336,12 @@ describe('session_send', () => {
   it('未派出且未点名的会话拒绝发送', async () => {
     const h = harness();
     const result = await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' });
-    expect(result).toEqual({ ok: false, error: 'not-operable' });
+    expect(result).toEqual({ ok: false, error: NOT_OPERABLE_ERROR });
+    // 拒绝原因要说清，并指出可以申请接管
+    expect(NOT_OPERABLE_ERROR).toMatch(/^not-operable: /);
+    expect(NOT_OPERABLE_ERROR).toContain('session_takeover_propose');
     expect(h.prompts).toEqual([]);
-    expect(h.audits.map((entry) => entry.ok)).toEqual([false]);
+    expect(h.audits.map((entry) => [entry.ok, entry.detail])).toEqual([[false, 'not-operable']]);
   });
 
   it('目标有待审批时拒绝并提示需要用户', async () => {
@@ -400,8 +407,225 @@ describe('session_stop', () => {
   it('未派出的会话拒绝停止', async () => {
     const h = harness();
     const result = await call(h.handlers.session_stop, { conversationId: 'c1' });
-    expect(result).toEqual({ ok: false, error: 'not-operable' });
+    expect(result).toEqual({ ok: false, error: NOT_OPERABLE_ERROR });
     expect(h.aborts).toEqual([]);
+  });
+});
+
+describe('接管', () => {
+  const takeoverHarness = (options: Parameters<typeof harness>[0] = {}) =>
+    harness({
+      projects: [localProject(), localProject('sec-proj', { kind: 'secretary' })],
+      conversations: [rootConversation('c1'), rootConversation('sec-chat', 'sec-proj')],
+      rows: {
+        c1: { projectId: 'p1', title: '修构建', sessionFile: '/s/c1.jsonl' },
+        'sec-chat': { projectId: 'sec-proj', lastActiveAt: 10 },
+      },
+      ...options,
+    });
+
+  const propose = (h: Harness, params: Record<string, unknown> = {}) =>
+    call(h.handlers.session_takeover_propose, { conversationId: 'c1', ...params });
+
+  it('秘书只能提出接管：出待确认卡，不授权', async () => {
+    const h = takeoverHarness();
+    const result = await propose(h, { reason: '帮你盯构建' });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'awaiting_confirmation', proposalId: 'id-1' },
+    });
+    expect(h.file.proposals['id-1']).toMatchObject({
+      kind: 'takeover',
+      status: 'pending',
+      secretaryConversationId: 'sec-1',
+      draft: { conversationId: 'c1', projectId: 'p1', title: '修构建', reason: '帮你盯构建' },
+    });
+    expect(h.file.dispatched).toEqual({});
+    expect(h.audits).toMatchObject([
+      { op: 'session_takeover_propose', targetId: 'id-1', ok: true },
+    ]);
+    // 同一会话再提一次复用同一张卡
+    expect(await propose(h)).toEqual({
+      ok: true,
+      result: { status: 'awaiting_confirmation', proposalId: 'id-1' },
+    });
+    expect(Object.keys(h.file.proposals)).toEqual(['id-1']);
+  });
+
+  it('秘书会话、子会话、已归档、已有秘书管着的会话都不能接管', async () => {
+    const cases: [Parameters<typeof harness>[0], string, string][] = [
+      [{}, 'sec-chat', 'secretary-session'],
+      [{ rows: { c1: { projectId: 'p1', parentId: 'root' } } }, 'c1', 'child-session'],
+      [{ rows: { c1: { projectId: 'p1', archived: true } } }, 'c1', 'archived'],
+      [{ file: dispatchedFile() }, 'c1', 'already-managed'],
+      [{ profile: profile({ visibleProjectIds: ['other'] }) }, 'c1', 'not-visible'],
+      [{}, 'missing', 'not-found'],
+    ];
+    for (const [options, conversationId, error] of cases) {
+      const h = takeoverHarness(options);
+      expect(await propose(h, { conversationId }), error).toEqual({ ok: false, error });
+      expect(Object.keys(h.file.proposals), error).toEqual([]);
+      expect(h.audits.at(-1), error).toMatchObject({ ok: false, detail: error });
+      expect(await grantTakeover(h.ports, conversationId, 'user', null), error).toEqual({
+        ok: false,
+        error,
+      });
+    }
+  });
+
+  it('用户确认后授权：秘书能发消息、能停止，状态进工作台与接管清单', async () => {
+    const h = takeoverHarness({
+      statuses: { c1: { state: 'idle', pendingAsks: 0, pendingApprovals: 0 } },
+    });
+    await propose(h);
+    const resolved = await resolveProposal(h.ports, 'id-1', 'confirm');
+    expect(resolved).toMatchObject({ ok: true, proposal: { status: 'succeeded' } });
+    expect(h.file.dispatched.c1).toEqual({
+      conversationId: 'c1',
+      projectId: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      turn: 0,
+      lastState: 'idle',
+      lastEventAt: NOW,
+      takeover: { grantedAt: NOW, via: 'proposal' },
+    });
+    expect(h.file.outbox.at(-1)).toMatchObject({ kind: 'proposal', proposalId: 'id-1' });
+    expect(h.file.outbox.at(-1)?.text).toContain('session:c1');
+    expect(h.audits.map((entry) => [entry.op, entry.detail])).toEqual(
+      expect.arrayContaining([
+        ['proposal_confirm', 'accepted'],
+        ['takeover_grant', 'proposal'],
+        ['proposal_confirm', 'succeeded'],
+      ])
+    );
+
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' })).toEqual({
+      ok: true,
+      result: { status: 'sent' },
+    });
+    expect(h.audits.at(-1)).toMatchObject({ op: 'session_send', targetId: 'c1', detail: 'sent' });
+
+    const state = await buildSecretaryState(h.ports, { enabled: true, projectId: 'sec-proj' });
+    expect(state.board.done[0]).toMatchObject({ conversationId: 'c1', takeover: true });
+    expect(state.takeovers).toEqual([
+      {
+        conversationId: 'c1',
+        projectId: 'p1',
+        projectName: 'alpha',
+        title: '修构建',
+        grantedAt: NOW,
+        via: 'proposal',
+        secretaryConversationId: 'sec-1',
+      },
+    ]);
+    expect(await listTakeovers(h.ports)).toEqual(state.takeovers);
+
+    // 自带目标的会话被秘书停下时目标一并暂停
+    expect(await call(h.handlers.session_stop, { conversationId: 'c1' })).toEqual({
+      ok: true,
+      result: { status: 'stopped' },
+    });
+    expect(h.pausedGoals).toEqual(['c1']);
+  });
+
+  it('会话在等用户时拒绝秘书发消息', async () => {
+    const h = takeoverHarness({
+      statuses: { c1: { state: 'waiting', pendingAsks: 1, pendingApprovals: 0 } },
+    });
+    expect(await grantTakeover(h.ports, 'c1', 'user', null)).toEqual({ ok: true });
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', text: '选 A' })).toEqual({
+      ok: false,
+      error: 'needs-user',
+    });
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('界面直接授权绑最近的秘书会话；没有秘书会话时拒绝', async () => {
+    const h = takeoverHarness();
+    expect(await grantTakeover(h.ports, 'c1', 'user', null)).toEqual({ ok: true });
+    expect(h.file.dispatched.c1).toMatchObject({
+      secretaryConversationId: 'sec-chat',
+      takeover: { via: 'user' },
+    });
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'takeover_grant',
+      secretaryConversationId: 'sec-chat',
+      ok: true,
+      detail: 'user',
+    });
+    // 已接管的再授权一次被拒，不覆盖原记录
+    expect(await grantTakeover(h.ports, 'c1', 'user', null)).toEqual({
+      ok: false,
+      error: 'already-managed',
+    });
+
+    const lonely = harness({ rows: { c1: { projectId: 'p1' } } });
+    expect(await grantTakeover(lonely.ports, 'c1', 'user', null)).toEqual({
+      ok: false,
+      error: 'no-secretary-conversation',
+    });
+    expect(lonely.file.dispatched).toEqual({});
+  });
+
+  it('接管的会话不占派出并发上限', async () => {
+    const h = takeoverHarness({
+      profile: profile({
+        autonomy: 'full',
+        autoApproveProjectIds: ['p1'],
+        maxRunningDispatches: 1,
+      }),
+      statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
+    });
+    await grantTakeover(h.ports, 'c1', 'user', null);
+    expect(h.file.dispatched.c1.lastState).toBe('running');
+    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+  });
+
+  it('撤销后秘书再发消息被拒；点名授权一并收回，未投递的结果丢掉', async () => {
+    const h = takeoverHarness();
+    await grantTakeover(h.ports, 'c1', 'user', null);
+    h.file.named.push('c1');
+    h.file.outbox.push({
+      key: 'c1|turn-ended|1',
+      at: NOW,
+      kind: 'turn-ended',
+      conversationId: 'c1',
+      text: 'x',
+    });
+    expect(revokeTakeover(h.ports, 'c1', 'session')).toEqual({ ok: true });
+    expect(h.file.dispatched).toEqual({});
+    expect(h.file.named).toEqual([]);
+    expect(h.file.outbox).toEqual([]);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'takeover_revoke',
+      targetId: 'c1',
+      secretaryConversationId: 'sec-chat',
+      ok: true,
+      detail: 'session',
+    });
+    expect(await call(h.handlers.session_send, { conversationId: 'c1', text: '继续' })).toEqual({
+      ok: false,
+      error: NOT_OPERABLE_ERROR,
+    });
+    expect(await listTakeovers(h.ports)).toEqual([]);
+  });
+
+  it('派出的会话不能当接管撤销', () => {
+    const h = harness({ file: dispatchedFile() });
+    expect(revokeTakeover(h.ports, 'c1', 'settings')).toEqual({ ok: false, error: 'not-found' });
+    expect(h.file.dispatched.c1).toBeDefined();
+    expect(h.audits).toMatchObject([{ op: 'takeover_revoke', ok: false }]);
+  });
+
+  it('确认时会话已被归档则提案失败，不授权', async () => {
+    const h = takeoverHarness();
+    await propose(h);
+    h.rows.c1 = { ...h.rows.c1, archived: true };
+    const resolved = await resolveProposal(h.ports, 'id-1', 'confirm');
+    expect(resolved).toMatchObject({ ok: true, proposal: { status: 'failed', error: 'archived' } });
+    expect(h.file.dispatched).toEqual({});
   });
 });
 

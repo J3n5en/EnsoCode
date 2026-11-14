@@ -3479,6 +3479,25 @@ export const zhTranslations: Record<string, string> = {
   Saved: '已保存',
   'Could not save the secretary profile. Try again.': '没能保存秘书档案，请再试一次。',
   'Could not reset the secretary. Try again.': '没能重新设置秘书，请再试一次。',
+  'Take over': '接管',
+  'The secretary asks to manage this session: it may message and stop it like its own.':
+    '秘书申请接管这个会话：同意后，它能像对自己派出的会话一样给它发消息、停止它。',
+  'Handing it over…': '正在交给秘书…',
+  'Handed over to the secretary': '已交给秘书接管',
+  'Allow takeover': '同意接管',
+  'Secretary managing': '秘书接管中',
+  '{{name}} is managing this session: it may message and stop it.':
+    '{{name}}正在接管这个会话，可以给它发消息、停止它。',
+  'Take back from the secretary': '取消秘书接管',
+  'Hand over to the secretary': '交给秘书接管',
+  'Let {{name}} message and stop this session for you. You can take it back any time.':
+    '让{{name}}替你给这个会话发消息、停止它，随时可以收回。',
+  'Takeover failed': '接管操作失败',
+  'Sessions handed over': '交给秘书接管的会话',
+  'Sessions you started and handed to the secretary. It may message and stop them like the ones it dispatched; take one back to remove that right.':
+    '你自己开的、交给秘书接管的会话。秘书可以像对派出的会话一样给它们发消息、停止它们；取消接管就收回这项权限。',
+  'No sessions handed over': '还没有交给秘书接管的会话',
+  'Take back': '取消接管',
 };
 
 export function normalizeLocale(input?: string): Locale {

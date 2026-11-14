@@ -56,6 +56,10 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     keys: ['conversationId'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
   },
+  session_takeover_propose: {
+    keys: ['conversationId', 'reason'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId', why: 'reason' },
+  },
   todo_item_add: {
     keys: ['text', 'dueAt', 'projectId'],
     numbers: ['dueAt'],
@@ -252,7 +256,7 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched or the user referenced. Queues behind the current turn when the session is running. Refused while the session waits for the user.',
+      'Send a message to a session you dispatched, the user referenced, or the user handed over to you. Queues behind the current turn when the session is running. Refused while the session waits for the user.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -262,8 +266,25 @@ const SCHEMAS: Record<
     ),
   },
   session_stop: {
-    description: 'Stop a session you dispatched or the user referenced.',
+    description:
+      'Stop a session you dispatched, the user referenced, or the user handed over to you.',
     parameters: object({ conversationId: id('Target session id') }, ['conversationId']),
+  },
+  session_takeover_propose: {
+    description:
+      'Ask the user to hand over a session you did not dispatch, so you may message and stop it like your own. It is only a request: the user confirms on a card, and the result arrives later as a session update. Child sessions, archived sessions, bot sessions and sessions another secretary already manages cannot be handed over.',
+    parameters: object(
+      {
+        conversationId: id('Session id from session_list'),
+        reason: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 500,
+          description: 'One line for the user: why you want to take it over',
+        },
+      },
+      ['conversationId']
+    ),
   },
   todo_item_add: {
     description: 'Add an item to the todo column of the secretary board.',
