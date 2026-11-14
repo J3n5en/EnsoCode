@@ -408,6 +408,26 @@ function FeedEntry({ event }: { event: FeedEvent }) {
           {event.detail ? `${t(event.label)} · ${event.detail}` : t(event.label)}
         </span>
       </button>
+      {event.running && stop && (
+        // 时间线行不着色，蒙版直接接面板底色。右侧让出跳转按钮的宽度并留出间距，
+        // 停止浮出时不会落在跳转按钮的位置上（原来两个按钮叠在一起，点跳转点到停止）。
+        <HoverActions className="from-background pr-7">
+          <button
+            type="button"
+            data-enso="secretary-feed-stop"
+            title={t('Stop')}
+            aria-label={t('Stop')}
+            disabled={stopping}
+            onClick={(clickEvent) => {
+              clickEvent.stopPropagation();
+              stop();
+            }}
+            className={cn(ACTION_CLASS, 'hover:bg-destructive/10 hover:text-destructive')}
+          >
+            <Square className="h-3.5 w-3.5" />
+          </button>
+        </HoverActions>
+      )}
       {open && (
         <button
           type="button"
@@ -418,25 +438,11 @@ function FeedEntry({ event }: { event: FeedEvent }) {
             clickEvent.stopPropagation();
             open();
           }}
-          className={ACTION_CLASS}
+          // 排在蒙版之后并定位：跳转始终画在蒙版之上，位置由行尾固定，谁也盖不住也挤不动
+          className={cn(ACTION_CLASS, 'relative')}
         >
           <ArrowUpRight className="h-3.5 w-3.5" />
         </button>
-      )}
-      {event.running && stop && (
-        // 时间线行不着色，蒙版直接接面板底色
-        <HoverActions className="from-background">
-          <button
-            type="button"
-            title={t('Stop')}
-            aria-label={t('Stop')}
-            disabled={stopping}
-            onClick={stop}
-            className={ACTION_CLASS}
-          >
-            <Square className="h-3.5 w-3.5" />
-          </button>
-        </HoverActions>
       )}
     </div>
   );
