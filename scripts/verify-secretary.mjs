@@ -4053,8 +4053,10 @@ async function verifyTakeover(cdp, setup) {
   );
   assert(!readJson(dispatchFile).dispatched[ownId], '接管: 确认前没有授权');
   const confirmedTakeover = await page(`
+    const secretaryId = ${JSON.stringify(proposedTakeover.secretaryId)};
+    if (secretaryId) S().selectConversation(secretaryId);
     const card = await until(
-      () => visible('[data-enso=secretary-proposal][data-kind=takeover]').at(-1) ?? null,
+      () => shown('[data-enso=secretary-proposal][data-kind=takeover]'),
       30000
     );
     if (!card) return JSON.stringify({ ok: false, error: 'no takeover card' });
