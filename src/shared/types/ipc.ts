@@ -50,6 +50,8 @@ export const IPC_CHANNELS = {
   SECRETARY_TAKEOVERS_LIST: 'secretary:takeovers-list',
   /** 秘书：动态按时间游标分页，renderer 不拿全量再切片 */
   SECRETARY_FEED: 'secretary:feed',
+  /** 秘书：按天汇总的看板（日报），入参是日期，缺省今天 */
+  SECRETARY_DAILY: 'secretary:daily',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

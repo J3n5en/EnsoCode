@@ -237,6 +237,7 @@ import type {
 } from '@shared/types/nodes';
 import type {
   DispatchDraft,
+  SecretaryDaily,
   SecretaryProfile,
   SecretaryProfileDraft,
   SecretaryProposal,
@@ -349,6 +350,11 @@ const electronAPI = {
     }): Promise<
       { ok: true; events: FeedEvent[]; hasMore: boolean } | { ok: false; error: string }
     > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_FEED, query ?? {}),
+    /** 按天汇总的看板：day 是本地日历日 YYYY-MM-DD，缺省今天 */
+    daily: (
+      day?: string
+    ): Promise<{ ok: true; daily: SecretaryDaily } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DAILY, day ? { day } : {}),
     onStateChanged: (callback: (state: SecretaryState) => void): (() => void) => {
       const listener = (_event: unknown, state: SecretaryState) => callback(state);
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);

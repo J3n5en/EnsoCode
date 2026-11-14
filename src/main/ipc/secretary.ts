@@ -13,6 +13,8 @@ import { onConversationsMerged } from '../services/remoteRenderer/conversationSy
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
 import { secretaryTool } from '../services/secretary/customTools';
+import { buildDaily, parseDailyRequest, secretaryDailyPorts } from '../services/secretary/daily';
+import { appendDailyRecord } from '../services/secretary/dailyLog';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
   buildSecretaryState,
@@ -235,6 +237,7 @@ const hostPorts: SecretaryHostPorts = {
   backgroundStalls: (now) => driver?.watch(now) ?? [],
   newId: () => randomUUID(),
   audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
+  recordDaily: (entry) => appendDailyRecord(path.join(app.getPath('userData'), 'secretary'), entry),
 };
 
 function parseGoalAction(
@@ -306,6 +309,15 @@ export function registerSecretaryHandlers(): void {
     if (!query) return { ok: false, error: 'invalid request' };
     const page = await pageSecretaryFeed(secretaryDispatchPorts, query);
     return { ok: true, events: page.events, hasMore: page.hasMore };
+  });
+
+  // 按天回看：日期由 renderer 传本地日历日，Main 只认 YYYY-MM-DD
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_DAILY, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const day = parseDailyRequest(request, Date.now());
+    if (!day) return { ok: false, error: 'invalid request' };
+    return { ok: true, daily: await buildDaily(secretaryDailyPorts, day) };
   });
 
   // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页
