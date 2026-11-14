@@ -143,6 +143,20 @@ describe('注入', () => {
     });
   });
 
+  it('静音的派出会话照样把结果推给秘书', async () => {
+    const h = harness({
+      file: { outbox: [update()] },
+      rows: {
+        sec1: { id: 'sec1', title: '秘书', projectId: 'sec', lastActiveAt: 10 },
+        c1: { id: 'c1', projectId: 'p1', muted: true, autoRejectApprovals: true },
+      },
+    });
+    await flushDeliveries(h.ports, 1000);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0].text).toContain('<session-updates>');
+    expect(h.state.prompts[0].text).toContain('session:c1');
+  });
+
   it('目标正在跑时不注入，留到下一轮', async () => {
     const h = harness({ file: { outbox: [update()] }, statuses: { sec1: running } });
     await flushDeliveries(h.ports, 1000);

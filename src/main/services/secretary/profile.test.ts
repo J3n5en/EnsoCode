@@ -368,6 +368,25 @@ describe('配置提案', () => {
     });
   });
 
+  it('提案能改派出的两个默认开关，卡片列出前后值', async () => {
+    const h = harness({ profile: baseProfile() });
+    const result = await h.service.propose(
+      { dispatchMuted: false, dispatchUnattended: false },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        status: 'awaiting_confirmation',
+        proposalId: 'proposal-1',
+        changes: [
+          { field: 'dispatchMuted', before: true, after: false },
+          { field: 'dispatchUnattended', before: true, after: false },
+        ],
+      },
+    });
+  });
+
   it('非秘书会话提交被拒，非法字段也拒', async () => {
     const h = harness();
     expect(await h.service.propose({ name: '小秘' }, { secretaryConversationId: null })).toEqual({

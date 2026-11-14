@@ -280,6 +280,8 @@ describe('session_create', () => {
         worktree: false,
         goal: '构建通过',
         secretaryOrigin: { secretaryConversationId: 'sec-1' },
+        muted: true,
+        unattended: true,
       },
     ]);
     expect(h.file.dispatched['new-1']).toEqual({
@@ -1465,5 +1467,72 @@ describe('buildSecretaryState', () => {
       state: 'running',
     });
     expect(state.board.done).toEqual([]);
+  });
+});
+
+describe('派出会话的默认静音与无人值守', () => {
+  const createNow = (options: Parameters<typeof harness>[0] = {}) =>
+    harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      ...options,
+    });
+
+  it('默认档案派出的会话默认静音并且无人值守', async () => {
+    const h = createNow();
+    await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(h.created[0]).toMatchObject({ muted: true, unattended: true });
+  });
+
+  it('待办派出的会话同样带上两个默认值', async () => {
+    const h = createNow({
+      todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    await call(h.handlers.todo_item_dispatch, { todoId: 't1' });
+    expect(h.created[0]).toMatchObject({ muted: true, unattended: true });
+  });
+
+  it('确认提案派出时也套用默认值', async () => {
+    const h = harness();
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+    })) as { proposalId: string };
+    await resolveProposal(h.ports, payload.proposalId, 'confirm');
+    expect(h.created[0]).toMatchObject({ muted: true, unattended: true });
+  });
+
+  it('关掉两个开关后不再套用默认值', async () => {
+    const h = createNow({
+      profile: profile({
+        autonomy: 'tell-after',
+        autoApproveProjectIds: ['p1'],
+        dispatchMuted: false,
+        dispatchUnattended: false,
+      }),
+    });
+    await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(h.created[0]).not.toHaveProperty('muted');
+    expect(h.created[0]).not.toHaveProperty('unattended');
+  });
+
+  it('接管的会话不建新会话，也不改它原来的静音与无人值守', async () => {
+    const h = harness({
+      projects: [localProject(), localProject('sec-proj', { kind: 'secretary' })],
+      conversations: [rootConversation('c1'), rootConversation('sec-chat', 'sec-proj')],
+      rows: {
+        c1: { projectId: 'p1', title: '修构建', sessionFile: '/s/c1.jsonl', muted: false },
+        'sec-chat': { projectId: 'sec-proj', lastActiveAt: 10 },
+      },
+    });
+    await call(h.handlers.session_takeover_propose, { conversationId: 'c1' });
+    expect(await resolveProposal(h.ports, 'id-1', 'confirm')).toMatchObject({ ok: true });
+    expect(h.file.dispatched.c1).toMatchObject({ takeover: { via: 'proposal' } });
+    expect(h.created).toEqual([]);
+    expect(h.rows.c1).toEqual({
+      projectId: 'p1',
+      title: '修构建',
+      sessionFile: '/s/c1.jsonl',
+      muted: false,
+    });
   });
 });

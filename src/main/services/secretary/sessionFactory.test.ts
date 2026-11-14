@@ -383,3 +383,23 @@ describe('mainSessionDefaults', () => {
     ).toBeNull();
   });
 });
+
+describe('派出会话的静音与无人值守', () => {
+  it('要求静音和无人值守时，行与 spawn 请求都带上', async () => {
+    const h = harness();
+    await createSessionFromMain(h.ports, { ...REQUEST, muted: true, unattended: true });
+    const row = h.rows.get('conv-1') ?? {};
+    expect(row.muted).toBe(true);
+    expect(row.autoRejectApprovals).toBe(true);
+    expect(h.spawns[0].autoRejectApprovals).toBe(true);
+  });
+
+  it('不要求时行与 spawn 请求都不写这两个字段', async () => {
+    const h = harness();
+    await createSessionFromMain(h.ports, REQUEST);
+    const row = h.rows.get('conv-1') ?? {};
+    expect(row.muted).toBeUndefined();
+    expect(row.autoRejectApprovals).toBeUndefined();
+    expect(h.spawns[0].autoRejectApprovals).toBeUndefined();
+  });
+});

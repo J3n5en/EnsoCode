@@ -26,6 +26,8 @@ function profile(overrides: Partial<SecretaryProfile> = {}): SecretaryProfile {
     dispatchModel: { mode: 'project' },
     dispatchWorktree: 'auto',
     maxRunningDispatches: 3,
+    dispatchMuted: true,
+    dispatchUnattended: true,
     replyLanguage: 'ui',
     style: 'concise',
     notify: 'needs-user',

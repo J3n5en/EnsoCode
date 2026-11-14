@@ -37,6 +37,8 @@ function profile(maxRunningDispatches: number, updatedAt = 1): SecretaryProfile 
     dispatchModel: { mode: 'project' },
     dispatchWorktree: 'auto',
     maxRunningDispatches,
+    dispatchMuted: true,
+    dispatchUnattended: true,
     replyLanguage: 'ui',
     style: 'concise',
     notify: 'needs-user',

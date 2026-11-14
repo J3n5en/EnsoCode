@@ -686,6 +686,7 @@ function persistedConversationForResume(
     ...(typeof row.thinkingLevel === 'string' ? { thinkingLevel: row.thinkingLevel } : {}),
     ...(typeof row.presetId === 'string' ? { presetId: row.presetId } : {}),
     ...(typeof row.approvalMode === 'string' ? { approvalMode: row.approvalMode } : {}),
+    ...(row.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
   };
 }
 

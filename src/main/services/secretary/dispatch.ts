@@ -333,7 +333,8 @@ async function saveProposal(
 async function executeDispatch(
   ports: SecretaryDispatchPorts,
   draft: DispatchDraft,
-  secretaryConversationId: string
+  secretaryConversationId: string,
+  profile: SecretaryProfile
 ): Promise<MainSessionResult> {
   const created = await ports.createSession({
     projectId: draft.projectId,
@@ -343,6 +344,9 @@ async function executeDispatch(
     ...(draft.model ? { model: draft.model } : {}),
     ...(draft.goal ? { goal: draft.goal } : {}),
     secretaryOrigin: { secretaryConversationId },
+    // 只有新派出的会话套用这两个默认值；接管的是用户已有会话，一概不碰
+    ...(profile.dispatchMuted ? { muted: true } : {}),
+    ...(profile.dispatchUnattended ? { unattended: true } : {}),
   });
   if (!created.ok) return created;
   const now = ports.now();
@@ -389,7 +393,7 @@ async function dispatchDraft(
       proposalId: await saveProposal(ports, secretaryConversationId, validated.draft),
     };
   }
-  const created = await executeDispatch(ports, validated.draft, secretaryConversationId);
+  const created = await executeDispatch(ports, validated.draft, secretaryConversationId, profile);
   return created.ok
     ? { kind: 'created', conversationId: created.conversationId }
     : { kind: 'failed', error: created.error };
@@ -1105,7 +1109,12 @@ export async function resolveProposal(
   const validated = validateDispatch(draft, await dispatchContext(ports, profile, draft.projectId));
   if (!validated.ok)
     return finishProposal(ports, proposalId, { ok: false, error: validated.error });
-  const created = await executeDispatch(ports, validated.draft, proposal.secretaryConversationId);
+  const created = await executeDispatch(
+    ports,
+    validated.draft,
+    proposal.secretaryConversationId,
+    profile
+  );
   return finishProposal(
     ports,
     proposalId,
