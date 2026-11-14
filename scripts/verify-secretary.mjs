@@ -1,13 +1,35 @@
 #!/usr/bin/env node
-// 秘书真机验收（U10）：派活 → 确认 → 回传 → 并发确认。
+// 秘书真机验收：派活 → 确认 → 回传 → 并发确认。
 // 全程在隔离 userData 与 fake provider 上跑，不碰真实账号与真实数据。
 //   node scripts/verify-secretary.mjs [--keep] [--memory-only]
-// 产物：/tmp/sec-u10/*.png 与 audit.jsonl
-// 多个会话同时跑时各用一套端口与目录，例如：
-//   SEC_VERIFY_DIR=/tmp/sec-u10-b SEC_VERIFY_CDP_PORT=9433 SEC_VERIFY_FAKE_PORT=8999 \
-//   SEC_VERIFY_PLUGIN_PORT=8998 node scripts/verify-secretary.mjs
 //
-// 步骤编号沿用计划「真机验证脚本思路」，执行顺序按依赖排：
+// 不设环境变量时，每次使用 /tmp/sec-verify-<随机> 和四个空闲端口
+// （CDP、fake provider、插件分发、renderer dev server）。显式设置时以环境变量为准：
+//   SEC_VERIFY_DIR、SEC_VERIFY_CDP_PORT、SEC_VERIFY_FAKE_PORT、
+//   SEC_VERIFY_PLUGIN_PORT、SEC_VERIFY_RENDERER_PORT
+// 自定义 SEC_VERIFY_DIR 必须位于 /tmp 下（mk-env 拒绝其它路径）。
+// SEC_VERIFY_KEEP=1 或 --keep 只保留目录供排查，本次启动的进程仍会清掉。
+// 启动时打印实际目录和端口。正常结束、失败、Ctrl-C/SIGTERM、未捕获异常都会
+// 关掉本次 spawn 的整棵进程树，再删除目录。
+//
+// 不要用 `pgrep -f` 等待本脚本或它的子进程。-f 匹配整条命令行，pgrep 自己的
+// argv 也含这段文字，会把自己算进去，等待条件永远为真，然后空转。
+// 这里只记录 spawn 返回的 pid，再沿 ppid 收集子孙（父进程先退出、子进程被
+// 领养到 launchd 之前就已经记入）。electron 即便不在 pnpm 的进程组里，只要是
+// 这棵树里的进程就会被关掉；不会按端口去杀，避免误伤其它会话。
+//
+// renderer 端口：electron-vite 默认把 vite 绑在 5173。端口被占时 vite 会自己
+// 往后探，但两个验收同时启动会一起撞上 5173。这里先挑空闲端口，再用
+// ENSO_RENDERER_PORT 让本次 vite 以 strictPort 绑死。
+//
+// 「Cannot read properties of undefined (reading 'settings')」的根因是页面没就绪，
+// 不是端口冲突：__stores 在 renderer 模块图跑完才赋值，而 electron-vite 在 preload
+// 重编时会 full-reload 主窗口。旧代码只要看到一次 window.__stores.sessions 就往下
+// eval `window.__stores.settings.getState()`，正好撞在重载后的空窗口上。现在要求
+// settings/sessions/electronAPI 与 document 同时就绪并连续三次成立，目标换了或
+// 上下文被销毁就重连重数；setup 段再兜一次重试。
+//
+// 产物：<dir>/*.png。步骤编号沿用计划「真机验证脚本思路」，执行顺序按依赖排：
 // 计划第 3 步（派活出卡片）先跑，第 1、2 步用它的会话断言。
 // 计划第 1 步原本走 dev IPC `secretary:dev-create-session`；该入口已删除，
 // 这里改用正常派活路径，落的是同一个 Main 建会话函数。
@@ -16,6 +38,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -25,15 +48,24 @@ import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import {
+  explicitPort,
+  keepRequested,
+  mergeOwnedPids,
+  ownedProcessGroups,
+  reservePorts,
+  resolveArtDir,
+} from './verify-secretary-isolation.mjs';
 
 const REPO = path.resolve(import.meta.dirname, '..');
-const ART = process.env.SEC_VERIFY_DIR || '/tmp/sec-u10';
+const ART = resolveArtDir(process.env, (prefix) => mkdtempSync(prefix));
 const ENV = `${ART}-env`;
 const PROJ = `${ART}-proj`;
-const CDP_PORT = Number(process.env.SEC_VERIFY_CDP_PORT || 9333);
-const FAKE_PORT = Number(process.env.SEC_VERIFY_FAKE_PORT || 8899);
-const PLUGIN_PORT = Number(process.env.SEC_VERIFY_PLUGIN_PORT || 8898);
-const KEEP = process.argv.includes('--keep');
+let CDP_PORT = 0;
+let FAKE_PORT = 0;
+let PLUGIN_PORT = 0;
+let RENDERER_PORT = 0;
+const KEEP = keepRequested(process.env, process.argv);
 // 只跑 setup + 记忆人工编辑段，改记忆管理时用来快速复验
 const MEMORY_ONLY = process.argv.includes('--memory-only');
 
@@ -83,13 +115,58 @@ async function waitFor(check, label, timeoutMs = 30_000, intervalMs = 250) {
   throw new Error(`timeout waiting for ${label} (last: ${JSON.stringify(last)})`);
 }
 
-function portFree(port) {
-  return new Promise((resolve) => {
+function listenLoopback(port) {
+  return new Promise((resolve, reject) => {
     const server = createServer();
-    server.once('error', () => resolve(false));
-    server.once('listening', () => server.close(() => resolve(true)));
-    server.listen(port, '127.0.0.1');
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      const address = server.address();
+      resolve({
+        port: typeof address === 'object' && address ? address.port : port,
+        close: () => new Promise((done) => server.close(() => done())),
+      });
+    });
   });
+}
+
+function listProcesses() {
+  const listed = spawnSync('ps', ['-ax', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8' });
+  if (listed.status !== 0) return [];
+  const processes = [];
+  for (const line of listed.stdout.split('\n')) {
+    const [pid, ppid, pgid] = line.trim().split(/\s+/).map(Number);
+    if (!pid || !ppid || !pgid) continue;
+    processes.push({ pid, ppid, pgid });
+  }
+  return processes;
+}
+
+const trackedPids = [];
+let portLease = null;
+
+function signalOwned(signal) {
+  const processes = listProcesses();
+  const roots = children.flatMap(({ child }) => (Number.isInteger(child.pid) ? [child.pid] : []));
+  const owned = mergeOwnedPids(trackedPids, processes, roots);
+  trackedPids.length = 0;
+  trackedPids.push(...owned);
+  const selfGroup = processes.find((proc) => proc.pid === process.pid)?.pgid;
+  for (const pgid of ownedProcessGroups(processes, owned)) {
+    if (pgid === selfGroup) continue;
+    try {
+      process.kill(-pgid, signal);
+    } catch {
+      // 这一组已经没人
+    }
+  }
+  for (const pid of owned) {
+    if (pid === process.pid) continue;
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // 已经退出
+    }
+  }
 }
 
 function packPluginZip() {
@@ -113,7 +190,10 @@ async function servePluginZip() {
     response.writeHead(200, { 'Content-Type': 'application/zip' });
     response.end(zip);
   });
-  await new Promise((resolve) => server.listen(PLUGIN_PORT, '127.0.0.1', resolve));
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PLUGIN_PORT, '127.0.0.1', resolve);
+  });
   pluginServer = server;
   return `http://127.0.0.1:${PLUGIN_PORT}/secretary-test-plugin.zip`;
 }
@@ -137,37 +217,56 @@ function start(name, command, args, env) {
 }
 
 async function stopAll() {
+  await portLease?.release();
+  portLease = null;
   pluginServer?.close();
+  pluginServer = null;
   for (const { name, child } of [...children].reverse()) {
-    if (child.exitCode !== null || child.signalCode !== null) continue;
-    try {
-      process.kill(-child.pid, 'SIGTERM');
-    } catch {
-      child.kill('SIGTERM');
-    }
-    log(`  stopped ${name} (${child.pid})`);
+    log(`  stopped ${name} (${child.pid ?? 'not-started'})`);
   }
+  signalOwned('SIGTERM');
   await delay(1500);
-  for (const { child } of children) {
-    if (child.exitCode !== null || child.signalCode !== null) continue;
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-    } catch {
-      // 已经退出
-    }
+  signalOwned('SIGKILL');
+  await delay(200);
+}
+
+function removeIsolateDirs() {
+  rmSync(ENV, { recursive: true, force: true });
+  rmSync(`${ENV}-proj`, { recursive: true, force: true });
+  rmSync(PROJ, { recursive: true, force: true });
+  rmSync(ART, { recursive: true, force: true });
+}
+
+let cleaning = null;
+function cleanup() {
+  if (!cleaning) {
+    cleaning = (async () => {
+      await stopAll();
+      if (KEEP) {
+        log(`  kept ${ART}`);
+        return;
+      }
+      removeIsolateDirs();
+      log(`  removed ${ART}`);
+    })();
   }
-  // electron-vite 拉起的 Electron 不在 pnpm 的进程组里，pnpm 先退出后它会成为孤儿、继续占着 CDP 端口
-  const listeners = spawnSync('lsof', ['-ti', `tcp:${CDP_PORT}`, '-sTCP:LISTEN'], {
-    encoding: 'utf8',
-  });
-  for (const pid of listeners.stdout?.split('\n').filter(Boolean) ?? []) {
-    try {
-      process.kill(Number(pid), 'SIGKILL');
-      log(`  killed orphan ${pid} on :${CDP_PORT}`);
-    } catch {
-      // 已经退出
-    }
+  return cleaning;
+}
+
+let finishing = null;
+function finish(code) {
+  if (!finishing) {
+    finishing = (async () => {
+      try {
+        await cleanup();
+      } catch (error) {
+        console.error(error);
+        code = 1;
+      }
+      process.exit(code);
+    })();
   }
+  return finishing;
 }
 
 // 页面内共用入口：store 必须用 /stores/<file>.ts 的完整 URL，否则拿到的是另一份实例
@@ -282,14 +381,31 @@ async function prepareEnv() {
 }
 
 async function main() {
-  log('== env');
-  for (const port of [CDP_PORT, FAKE_PORT, PLUGIN_PORT]) {
-    if (!(await portFree(port))) throw new Error(`port ${port} is already in use`);
-  }
+  portLease = await reservePorts(
+    {
+      cdp: explicitPort('SEC_VERIFY_CDP_PORT', process.env.SEC_VERIFY_CDP_PORT),
+      fake: explicitPort('SEC_VERIFY_FAKE_PORT', process.env.SEC_VERIFY_FAKE_PORT),
+      plugin: explicitPort('SEC_VERIFY_PLUGIN_PORT', process.env.SEC_VERIFY_PLUGIN_PORT),
+      renderer: explicitPort('SEC_VERIFY_RENDERER_PORT', process.env.SEC_VERIFY_RENDERER_PORT),
+    },
+    listenLoopback
+  );
+  CDP_PORT = portLease.ports.cdp;
+  FAKE_PORT = portLease.ports.fake;
+  PLUGIN_PORT = portLease.ports.plugin;
+  RENDERER_PORT = portLease.ports.renderer;
+  log('== isolation');
+  log(`  dir: ${ART}`);
+  log(`  env: ${ENV}`);
+  log(`  project: ${PROJ}`);
+  log(`  ports: cdp=${CDP_PORT} fake=${FAKE_PORT} plugin=${PLUGIN_PORT} renderer=${RENDERER_PORT}`);
+  log(`  keep: ${KEEP ? 'yes' : 'no'}`);
   await prepareEnv();
+  await portLease.release('plugin');
   const pluginZipUrl = await servePluginZip();
 
   log('== fake provider + dev');
+  await portLease.release('fake');
   start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {
     FAKE_PROVIDER_PORT: String(FAKE_PORT),
   });
@@ -304,9 +420,12 @@ async function main() {
     'fake provider',
     15_000
   );
+  await portLease.release('cdp');
+  await portLease.release('renderer');
   start('dev', 'pnpm', ['dev'], {
     ENSO_USER_DATA_DIR: ENV,
     ENSO_CDP_PORT: String(CDP_PORT),
+    ENSO_RENDERER_PORT: String(RENDERER_PORT),
   });
   await waitFor(
     async () => {
@@ -329,7 +448,7 @@ async function main() {
   );
   log('  isolated instance up');
 
-  const cdp = await connect();
+  const cdp = await waitForStableRenderer();
   try {
     await run(cdp, pluginZipUrl);
   } finally {
@@ -337,29 +456,72 @@ async function main() {
   }
 }
 
+// __stores 要等 renderer 模块图跑完才赋值。electron-vite 在预加载重编时会 full-reload，
+// 只看到一次 sessions 就往下 eval `window.__stores.settings`，会在重载窗口里抛
+// Cannot read properties of undefined (reading 'settings')。连续三次都就绪才算页面准备好；
+// 目标换了或执行上下文被销毁就重连，连续计数清零。
+async function waitForStableRenderer() {
+  let page = null;
+  let targetId = null;
+  let streak = 0;
+  try {
+    return await waitFor(
+      async () => {
+        try {
+          const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+          const target = list.find(
+            (entry) => entry.type === 'page' && entry.url.includes('index.html')
+          );
+          if (!target) {
+            streak = 0;
+            return false;
+          }
+          if (!page || target.id !== targetId) {
+            page?.close();
+            page = await connect('index.html');
+            targetId = target.id;
+            streak = 0;
+          }
+          const ready = await page.evaluate(`(() => Boolean(
+            window.__stores?.settings?.getState &&
+            window.__stores?.sessions?.getState &&
+            window.electronAPI?.settings?.read &&
+            document.readyState === 'complete' &&
+            document.getElementById('root')
+          ))()`);
+          streak = ready === true ? streak + 1 : 0;
+          return streak >= 3 ? page : false;
+        } catch {
+          streak = 0;
+          page?.close();
+          page = null;
+          targetId = null;
+          return false;
+        }
+      },
+      'renderer ready',
+      120_000,
+      400
+    );
+  } catch (error) {
+    page?.close();
+    throw error;
+  }
+}
+
 async function run(cdp, pluginZipUrl) {
   const page = cdp.json.bind(cdp);
 
-  // 主窗口首帧之前 __stores 还不存在，先等 renderer 起来
-  await waitFor(
-    async () => {
-      try {
-        return (
-          (await cdp.evaluate(
-            'typeof window.__stores === "object" && Boolean(window.__stores.sessions)'
-          )) === true
-        );
-      } catch {
-        return false;
-      }
-    },
-    'renderer stores',
-    60_000,
-    500
-  );
-
   log('== setup');
-  const setup = await page(`
+  let setup;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      setup = await page(`
+    const ready = await until(
+      () => Boolean(window.__stores?.settings?.getState && window.__stores?.sessions?.getState && window.electronAPI?.settings),
+      30000
+    );
+    if (!ready) return JSON.stringify({ ok: false, error: 'renderer stores not ready' });
     window.__secVerifyMarker = Date.now();
     await until(() => SET().projects.some((p) => p.kind === 'secretary'), 30000);
     const project = await SET().addProject(${JSON.stringify(PROJ)});
@@ -390,6 +552,22 @@ async function run(cdp, pluginZipUrl) {
       secretaryProjectId: secretary.getState().secretary.projectId,
     });
   `);
+    } catch (error) {
+      const message = String(error?.message ?? error);
+      if (
+        attempt >= 3 ||
+        !/reading 'settings'|context was destroyed|Cannot find context|WebSocket/.test(message)
+      ) {
+        throw error;
+      }
+      log(`  renderer reloaded during setup, retry ${attempt}`);
+      await delay(500);
+      continue;
+    }
+    if (setup?.error !== 'renderer stores not ready' || attempt >= 3) break;
+    log(`  renderer not ready, retry ${attempt}`);
+    await delay(500);
+  }
   assert(setup.ok, 'setup: 隔离实例里建出项目与秘书会话', setup);
   await cdp.shot(path.join(ART, '01-sidebar.png'));
   if (MEMORY_ONLY) {
@@ -2552,11 +2730,27 @@ async function verifyTakeover(cdp, setup) {
   );
 }
 
+process.on('SIGINT', () => {
+  log('\nSIGINT, cleaning up');
+  void finish(130);
+});
+process.on('SIGTERM', () => {
+  log('\nSIGTERM, cleaning up');
+  void finish(143);
+});
+process.on('uncaughtException', (error) => {
+  console.error(error);
+  void finish(1);
+});
+process.on('unhandledRejection', (error) => {
+  console.error(error);
+  void finish(1);
+});
+
 main()
   .then(async () => {
     log(`\n== ${results.filter((entry) => entry.ok).length}/${results.length} checks passed`);
-    if (!KEEP) await stopAll();
-    process.exit(0);
+    await finish(0);
   })
   .catch(async (error) => {
     console.error(`\nFAIL ${error.message}`);
@@ -2565,6 +2759,5 @@ main()
       console.error(`--- ${name} output (tail) ---`);
       console.error(chunks.join('').slice(-2000));
     }
-    if (!KEEP) await stopAll();
-    process.exit(1);
+    await finish(1);
   });
