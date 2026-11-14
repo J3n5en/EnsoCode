@@ -1,8 +1,9 @@
-import { Pause, Play, Target, X } from 'lucide-react';
+import { Pause, Play, X } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import type { SessionGoal } from '@/stores/sessions';
 import { useSessionsStore } from '@/stores/sessions';
+import { GOAL_FRAME, GoalIcon } from './injectedVisual';
 
 /** 状态色点(与 TaskBar 同款):整条保持中性,状态只落在小点上 */
 const STATUS_DOT: Record<SessionGoal['status'], string> = {
@@ -24,8 +25,8 @@ export function GoalBar({ conversationId, goal }: { conversationId: string; goal
     completed: t('completed'),
   };
   return (
-    <div className="mb-1 flex items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs">
-      <Target className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    <div className={cn('mb-1 flex items-center gap-2', GOAL_FRAME)}>
+      <GoalIcon />
       <span
         className="min-w-0 flex-1 truncate"
         title={goal.note ? `${goal.text} — ${goal.note}` : goal.text}
