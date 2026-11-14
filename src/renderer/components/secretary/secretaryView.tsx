@@ -1,3 +1,4 @@
+import { secretaryAvatarUrl } from '@shared/localImage';
 import type { SecretaryState } from '@shared/types/secretary';
 import { useI18n } from '@/i18n';
 
@@ -9,6 +10,8 @@ export interface SecretarySectionView {
   /** false = 未完成初次设置，点击进欢迎页 */
   configured: boolean;
   color?: string;
+  /** 受控头像 URL；没有图片时缺省 */
+  image?: string;
 }
 
 /** 秘书伪项目的展示状态；开关关掉时整块不出现 */
@@ -18,12 +21,14 @@ export function secretarySectionView(
 ): SecretarySectionView | null {
   if (!secretary.enabled) return null;
   const profile = secretary.profile;
+  const imageVersion = profile?.avatar.imageVersion;
   return {
     name: profile?.name.trim() || t('Secretary'),
     needsYou: secretary.board.needsYou.length,
     running: secretary.board.running.length,
     configured: profile !== null,
     ...(profile ? { color: profile.avatar.color } : {}),
+    ...(imageVersion ? { image: secretaryAvatarUrl(imageVersion) } : {}),
   };
 }
 

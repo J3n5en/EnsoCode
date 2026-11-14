@@ -312,14 +312,16 @@ export function registerSecretaryHandlers(): void {
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     const parsed = parseAvatarRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
-    const profile = secretaryStore().setAvatar(parsed.image);
+    const store = secretaryStore();
+    const hadImage = Boolean(store.profile()?.avatar.imageVersion);
+    const profile = store.setAvatar(parsed.image);
     if (!profile) return { ok: false, error: 'not-configured' };
     appendAudit(path.join(app.getPath('userData'), 'secretary'), {
       at: Date.now(),
       secretaryConversationId: null,
       op: 'profile_avatar',
       ok: true,
-      detail: parsed.image ? 'set' : 'cleared',
+      detail: parsed.image ? (hadImage ? 'replaced' : 'uploaded') : 'removed',
     });
     broadcastState();
     return { ok: true, profile };

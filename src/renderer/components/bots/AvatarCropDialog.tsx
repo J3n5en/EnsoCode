@@ -13,7 +13,7 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
-import { readDataUrl, renderSquare } from './avatarImage';
+import { readDataUrl, renderSquare } from './avatarRaster';
 
 const VIEW = 256;
 const MAX_ZOOM = 4;

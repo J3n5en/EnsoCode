@@ -12,6 +12,8 @@ import {
   useState,
 } from 'react';
 import { type ListProps, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
+import { useSecretaryChatSpeaker } from '@/components/secretary/useSecretaryFace';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -22,6 +24,7 @@ import {
   type TimelineItem,
 } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
+import { useChatHost } from './chatHost';
 import { EnsoMark } from './EnsoMark';
 import { diffFoldMotion, EMPTY_FOLD_MOTION } from './foldMotion';
 import { generationElapsedOrigin } from './generationElapsed';
@@ -169,6 +172,9 @@ export function MessageTimeline({
   activeHit = null,
 }: MessageTimelineProps) {
   const { t } = useI18n();
+  const host = useChatHost();
+  const secretarySpeaker = useSecretaryChatSpeaker();
+  const secretaryMark = !host && secretarySpeaker ? secretarySpeaker : null;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [fitsViewport, setFitsViewport] = useState(false);
@@ -636,9 +642,21 @@ export function MessageTimeline({
           {items.length === 0 && !busy ? (
             <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 overflow-y-auto px-4 text-center">
               <span className="t-stagger-line t-stagger-line--1 mb-3">
-                <span className="flex size-11 items-center justify-center rounded-[13px] border border-brand/20 bg-brand/8 text-brand dark:bg-brand/14">
-                  <EnsoMark className="size-6" />
-                </span>
+                {secretaryMark ? (
+                  <SecretaryAvatar
+                    name={secretaryMark.name}
+                    color={secretaryMark.color}
+                    image={secretaryMark.image}
+                    needsYou={0}
+                    running={0}
+                    size="lg"
+                    enso="secretary-chat-avatar"
+                  />
+                ) : (
+                  <span className="flex size-11 items-center justify-center rounded-[13px] border border-brand/20 bg-brand/8 text-brand dark:bg-brand/14">
+                    <EnsoMark className="size-6" />
+                  </span>
+                )}
               </span>
               <p className="t-stagger-line t-stagger-line--1 text-[22px] font-semibold tracking-tight">
                 {emptyTitle}

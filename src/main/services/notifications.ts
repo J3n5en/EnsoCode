@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
 import { shouldSilenceTurn } from '@shared/secretary/silence';
 import { IPC_CHANNELS } from '@shared/types';
@@ -92,7 +93,8 @@ function notify(
   sessionId: string,
   title: string,
   body: string,
-  onClick = () => void focusSession(sessionId)
+  onClick = () => void focusSession(sessionId),
+  icon?: string
 ): void {
   // macOS 未打包（未签名）app 的原生通知会被 UNUserNotificationCenter 静默丢弃，
   // 且 Electron 的 'failed' 事件是 Windows-only 兜不住——直接走 osascript
@@ -104,7 +106,12 @@ function notify(
     return;
   }
   if (!Notification.isSupported()) return;
-  const notification = new Notification({ title, body, silent: false });
+  const notification = new Notification({
+    title,
+    body,
+    silent: false,
+    ...(icon ? { icon } : {}),
+  });
   const release = () => liveNotifications.delete(notification);
   notification.on('click', () => {
     release();
@@ -164,7 +171,16 @@ export async function notifySecretary(
   const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
   if (getMainWindow()?.isFocused()) return;
   const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
-  notify('secretary', title, body, () => void focusMainWindow());
+  notify('secretary', title, body, () => void focusMainWindow(), await secretaryNotificationIcon());
+}
+
+async function secretaryNotificationIcon(): Promise<string | undefined> {
+  try {
+    const { SecretaryStore } = await import('./secretary/store');
+    return new SecretaryStore(join(app.getPath('userData'), 'secretary')).avatarPath() ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

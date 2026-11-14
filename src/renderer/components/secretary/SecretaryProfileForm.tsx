@@ -9,6 +9,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { AvatarColorField } from './AvatarColorField';
 import {
   defaultDraft,
   FORM_STEPS,
@@ -19,8 +20,6 @@ import {
   stepIndex,
 } from './profileFormState';
 import { AUTONOMY_LABELS, DISPATCH_MODEL_LABELS, WORKTREE_LABELS } from './profileLabels';
-
-const AVATAR_COLORS = ['#7c5cff', '#2f9e75', '#c2553f', '#2f7fc2', '#b07a1e', '#7a4fb5'];
 
 const THINKING_SHORT: Record<ThinkingLevel, string> = {
   minimal: 'Min',
@@ -224,24 +223,10 @@ export function SecretaryProfileForm({
             />
           </Field>
           <Field label="Avatar color">
-            <div className="flex flex-wrap gap-1.5" data-enso="secretary-form-avatar">
-              {AVATAR_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  aria-pressed={draft.avatar?.color === color}
-                  aria-label={color}
-                  onClick={() => patch({ avatar: { color } })}
-                  style={{ backgroundColor: color }}
-                  className={cn(
-                    'size-6 rounded-full border-2 transition-transform',
-                    draft.avatar?.color === color
-                      ? 'border-foreground'
-                      : 'border-transparent hover:scale-105'
-                  )}
-                />
-              ))}
-            </div>
+            <AvatarColorField
+              color={draft.avatar?.color ?? '#7c5cff'}
+              onChange={(color) => patch({ avatar: { color } })}
+            />
           </Field>
         </div>
       )}

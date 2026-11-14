@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -91,13 +99,13 @@ describe('SecretaryStore', () => {
       imageVersion: 1,
     });
     expect(existsSync(join(dir, 'avatar.png'))).toBe(true);
-    expect(store.avatarPath()).toBe(join(dir, 'avatar.png'));
+    expect(store.avatarPath()).toBe(realpathSync(join(dir, 'avatar.png')));
 
     expect(store.setAvatar(new Uint8Array([4]))?.avatar).toEqual({
       color: '#0ea5e9',
       imageVersion: 2,
     });
-    expect(store.avatarPath()).toBe(join(dir, 'avatar.png'));
+    expect(store.avatarPath()).toBe(realpathSync(join(dir, 'avatar.png')));
 
     expect(store.setAvatar(null)?.avatar).toEqual({ color: '#0ea5e9' });
     expect(existsSync(join(dir, 'avatar.png'))).toBe(false);
@@ -107,6 +115,30 @@ describe('SecretaryStore', () => {
   it('ignores an avatar write when no profile exists', () => {
     expect(store.setAvatar(new Uint8Array([1]))).toBeNull();
     expect(existsSync(join(dir, 'avatar.png'))).toBe(false);
+  });
+
+  it('does not follow an avatar symlink out of the secretary directory', () => {
+    store.saveProfile(profile);
+    store.setAvatar(new Uint8Array([1, 2, 3]));
+    const outside = join(dir, '..', `sec-escape-${process.pid}.png`);
+    writeFileSync(outside, 'secret');
+    rmSync(join(dir, 'avatar.png'));
+    symlinkSync(outside, join(dir, 'avatar.png'));
+    writeFileSync(
+      join(dir, 'profile.json'),
+      JSON.stringify({ ...profile, avatar: { color: '#0ea5e9', imageVersion: 4 } })
+    );
+    expect(store.avatarPath()).toBeNull();
+    expect(store.setAvatar(new Uint8Array([9]))?.avatar.imageVersion).toBe(5);
+    expect(readFileSync(outside, 'utf8')).toBe('secret');
+    expect(readFileSync(join(dir, 'avatar.png'))).toEqual(Buffer.from([9]));
+    const saved = JSON.parse(readFileSync(join(dir, 'profile.json'), 'utf8')) as {
+      avatar: Record<string, unknown>;
+    };
+    expect(saved.avatar).toEqual({ color: '#0ea5e9', imageVersion: 5 });
+    expect(JSON.stringify(saved)).not.toContain('base64');
+    expect(saved.avatar).not.toHaveProperty('path');
+    rmSync(outside, { force: true });
   });
 
   it('round-trips dispatch.json and normalizes it on write', () => {

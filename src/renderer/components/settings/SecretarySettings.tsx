@@ -1,3 +1,4 @@
+import { AVATAR_MAX_BYTES } from '@shared/bots/cardPng';
 import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
 import { secretaryAvatarUrl } from '@shared/localImage';
 import { MAX_RUNNING_DISPATCHES, MIN_RUNNING_DISPATCHES } from '@shared/secretary/parse';
@@ -10,12 +11,16 @@ import type {
   SecretaryToolDraft,
 } from '@shared/types/secretary';
 import * as React from 'react';
+import { AvatarCropDialog } from '@/components/bots/AvatarCropDialog';
+import { dataUrlBytes, readDataUrl } from '@/components/bots/avatarRaster';
+import { secretaryAvatarUploadError } from '@/components/secretary/avatarColor';
 import { defaultDraft, draftFromProfile } from '@/components/secretary/profileFormState';
 import {
   NOTIFY_LABELS,
   REPLY_LANGUAGE_LABELS,
   STYLE_LABELS,
 } from '@/components/secretary/profileLabels';
+import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
 import { SecretaryProfileForm } from '@/components/secretary/SecretaryProfileForm';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import { Button } from '@/components/ui/button';
@@ -381,6 +386,7 @@ export function SecretarySettings() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [resetOpen, setResetOpen] = React.useState(false);
+  const [cropSource, setCropSource] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const defaultName = t('Secretary');
 
@@ -475,38 +481,44 @@ export function SecretarySettings() {
       >
         {profile ? (
           <div className="flex items-center gap-2">
-            {profile.avatar.imageVersion ? (
-              <img
-                src={secretaryAvatarUrl(profile.avatar.imageVersion)}
-                alt={profile.name}
-                className="size-8 rounded-full object-cover"
-              />
-            ) : (
-              <span
-                aria-hidden
-                className="flex size-8 items-center justify-center rounded-full text-xs font-semibold text-white"
-                style={{ backgroundColor: profile.avatar.color }}
-              >
-                {[...profile.name][0] ?? '·'}
-              </span>
-            )}
             <input
               ref={fileRef}
               type="file"
-              accept="image/*"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              data-enso="secretary-avatar-file"
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.target.value = '';
                 if (!file) return;
-                void file.arrayBuffer().then((buffer) => setAvatar(new Uint8Array(buffer)));
+                const problem = secretaryAvatarUploadError(file, AVATAR_MAX_BYTES);
+                if (problem) {
+                  setError(t('Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.'));
+                  return;
+                }
+                void readDataUrl(file).then(setCropSource, () =>
+                  setError(t('This image cannot be used as an avatar.'))
+                );
               }}
+            />
+            <SecretaryAvatar
+              name={profile.name}
+              color={profile.avatar.color}
+              image={
+                profile.avatar.imageVersion
+                  ? secretaryAvatarUrl(profile.avatar.imageVersion)
+                  : undefined
+              }
+              needsYou={0}
+              running={0}
+              enso="secretary-settings-avatar"
             />
             <Button
               variant="outline"
               size="sm"
               disabled={busy}
               onClick={() => fileRef.current?.click()}
+              data-enso="secretary-avatar-upload"
             >
               {t('Upload image')}
             </Button>
@@ -516,10 +528,24 @@ export function SecretarySettings() {
                 size="sm"
                 disabled={busy}
                 onClick={() => void setAvatar(null)}
+                data-enso="secretary-avatar-remove"
               >
                 {t('Remove image')}
               </Button>
             ) : null}
+            <AvatarCropDialog
+              source={cropSource}
+              onCancel={() => setCropSource(null)}
+              onDone={(dataUrl) => {
+                setCropSource(null);
+                const bytes = dataUrlBytes(dataUrl);
+                if (bytes.byteLength > AVATAR_MAX_BYTES) {
+                  setError(t('Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.'));
+                  return;
+                }
+                void setAvatar(bytes);
+              }}
+            />
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">

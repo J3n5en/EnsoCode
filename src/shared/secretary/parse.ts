@@ -220,17 +220,8 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     if (color !== undefined && !(typeof color === 'string' && COLOR_RE.test(color))) {
       return { ok: false, error: 'invalid avatar' };
     }
-    const imageVersion = value.avatar.imageVersion;
-    if (
-      imageVersion !== undefined &&
-      !(typeof imageVersion === 'number' && Number.isInteger(imageVersion) && imageVersion >= 0)
-    ) {
-      return { ok: false, error: 'invalid avatar' };
-    }
-    draft.avatar = {
-      ...(typeof color === 'string' ? { color } : {}),
-      ...(typeof imageVersion === 'number' ? { imageVersion } : {}),
-    };
+    // 图片只由设置页上传写入 imageVersion。草案里的路径、版本号一律丢掉。
+    if (typeof color === 'string') draft.avatar = { color };
   }
   if (value.model !== undefined) {
     if (value.model === null) draft.model = null;

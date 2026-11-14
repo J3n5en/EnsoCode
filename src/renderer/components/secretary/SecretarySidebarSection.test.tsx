@@ -1,3 +1,4 @@
+import { REMOTE_LOCAL_IMAGE_PREFIX_KEY } from '@shared/localImage';
 import type { SecretaryState } from '@shared/types/secretary';
 import { parseHTML } from 'linkedom';
 import { act, type ReactElement, type ReactNode } from 'react';
@@ -160,6 +161,31 @@ describe('secretarySectionView', () => {
       configured: true,
       color: '#8b7bff',
     });
+  });
+
+  it('有图片时带上受控地址，配对页面走隧道前缀', () => {
+    const withImage = secretarySectionView(
+      state({
+        profile: { ...profile, avatar: { color: '#ff00aa', imageVersion: 2 } },
+      }),
+      t
+    );
+    expect(withImage?.image).toBe('local-image://secretary-avatar/avatar.png?v=2');
+    (globalThis as Record<string, unknown>)[REMOTE_LOCAL_IMAGE_PREFIX_KEY] = '/asset/li/';
+    try {
+      const remote = secretarySectionView(
+        state({
+          profile: { ...profile, avatar: { color: '#ff00aa', imageVersion: 2 } },
+        }),
+        t
+      );
+      expect(remote?.image?.startsWith('/asset/li/')).toBe(true);
+      expect(decodeURIComponent(remote?.image ?? '')).toContain(
+        'local-image://secretary-avatar/avatar.png?v=2'
+      );
+    } finally {
+      delete (globalThis as Record<string, unknown>)[REMOTE_LOCAL_IMAGE_PREFIX_KEY];
+    }
   });
 });
 

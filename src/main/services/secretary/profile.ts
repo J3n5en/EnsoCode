@@ -85,7 +85,7 @@ function mergeProfile(
   const merged: SecretaryProfile = {
     ...base,
     ...rest,
-    avatar: { ...base.avatar, ...avatar },
+    avatar: mergeAvatar(base.avatar, avatar),
     version: 1,
     updatedAt: now,
   };
@@ -110,6 +110,15 @@ function sameIds(a: readonly string[] = [], b: readonly string[] = []): boolean 
   return a.length === b.length && a.every((id) => b.includes(id));
 }
 
+/** 草案只能改颜色。图片版本留在磁盘上的那一份，上传和移除走 setAvatar。 */
+function mergeAvatar(
+  base: SecretaryProfile['avatar'],
+  patch: SecretaryProfileDraft['avatar']
+): SecretaryProfile['avatar'] {
+  const color = patch?.color ?? base.color;
+  return base.imageVersion ? { color, imageVersion: base.imageVersion } : { color };
+}
+
 /** 模型换了就改会话行；活着的会话当场换，下次 spawn 也读新行 */
 function modelRowPatch(model: ModelPatch): Record<string, unknown> {
   return {
@@ -121,9 +130,12 @@ function modelRowPatch(model: ModelPatch): Record<string, unknown> {
 
 /** 提案参数是扁平的（avatarColor / model / persona），这里转成档案草案 */
 function draftFromParams(params: Record<string, unknown>): SecretaryProfileDraft {
-  const { avatarColor, ...rest } = params;
-  const draft: Record<string, unknown> = { ...rest };
-  if (typeof avatarColor === 'string') draft.avatar = { color: avatarColor };
+  const dropped = new Set(['avatar', 'image', 'imageVersion', 'avatarPath', 'path', 'avatarColor']);
+  const draft: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (!dropped.has(key)) draft[key] = value;
+  }
+  if (typeof params.avatarColor === 'string') draft.avatar = { color: params.avatarColor };
   return draft as SecretaryProfileDraft;
 }
 

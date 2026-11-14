@@ -92,7 +92,7 @@ export async function handleLocalImageRequest(
   if (url.hostname === BOT_AVATAR_HOST) {
     return serveBotAvatar(decodeURIComponent(url.pathname.slice(1)));
   }
-  if (url.hostname === SECRETARY_AVATAR_HOST) return serveSecretaryAvatar();
+  if (url.hostname === SECRETARY_AVATAR_HOST) return serveSecretaryAvatar(url);
   if (url.hostname === PLUGIN_ASSET_HOST) return servePluginAsset(url);
   return serveLocalMedia(url, rangeHeader);
 }
@@ -151,7 +151,18 @@ async function serveBotAvatar(botId: string): Promise<Response> {
   return serveAvatarFile(file);
 }
 
-async function serveSecretaryAvatar(): Promise<Response> {
+function secretaryAvatarRequestName(url: URL): boolean {
+  let name: string;
+  try {
+    name = decodeURIComponent(url.pathname);
+  } catch {
+    return false;
+  }
+  return name === '/avatar.png';
+}
+
+async function serveSecretaryAvatar(url: URL): Promise<Response> {
+  if (!secretaryAvatarRequestName(url)) return new Response('Forbidden', { status: 403 });
   const file = secretaryAvatarResolver();
   if (!file) return new Response('Not found', { status: 404 });
   return serveAvatarFile(file);
