@@ -241,6 +241,17 @@ async function connect(entry = 'index.html') {
       log(`  shot ${file}`);
     },
     close: () => socket.close(),
+    /** 关窗口不走页面里的 window.close()：那个 evaluate 会跟着页面一起不返回 */
+    async closeTarget() {
+      try {
+        await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${target.id}`, {
+          signal: AbortSignal.timeout(2000),
+        });
+      } catch {
+        // 窗口已经没了，或者关闭请求没有在时限内返回
+      }
+      socket.close();
+    },
   };
 }
 
@@ -997,8 +1008,7 @@ async function run(cdp, pluginZipUrl) {
     200
   ).catch(() => readJson(profileFile));
   assert(savedBack.maxRunningDispatches === 3, 'step5b: profile.json 里的上限改回 3', savedBack);
-  await settingsPage.evaluate('window.close()').catch(() => undefined);
-  settingsPage.close();
+  await settingsPage.closeTarget();
   const unseed = readJson(dispatchFile);
   unseed.dispatched[dispatchedId].lastState = seededState;
   writeFileSync(dispatchFile, JSON.stringify(unseed));
@@ -1535,7 +1545,7 @@ async function run(cdp, pluginZipUrl) {
     { status: 'todo', projectId: setup.projectId },
     '列出这个项目还没派的待办'
   );
-  const openRows = JSON.parse(listedOpen.text ?? 'null')?.result?.todos ?? [];
+  const openRows = listedTodos(listedOpen);
   const openRow = openRows.find((item) => item.id === boardAdded.todoId);
   assert(
     openRow?.status === 'todo' &&
@@ -1543,7 +1553,7 @@ async function run(cdp, pluginZipUrl) {
       openRow.text.includes(`<untrusted-content source="todo:${boardAdded.todoId}">`) &&
       openRow.text.includes(boardText),
     'step11: todo_list 看到真实待办状态，正文是不可信内容',
-    openRow
+    openRow ?? listedOpen.text
   );
 
   const activeDispatch = await dispatchConfirmed(
@@ -1580,7 +1590,7 @@ async function run(cdp, pluginZipUrl) {
     { status: 'active' },
     '列出进行中的待办'
   );
-  const activeRow = (JSON.parse(listedActive.text ?? 'null')?.result?.todos ?? []).find(
+  const activeRow = listedTodos(listedActive).find(
     (item) => item.id === boardAdded.todoId
   );
   assert(
@@ -1588,7 +1598,7 @@ async function run(cdp, pluginZipUrl) {
       activeRow.conversationId === activeDispatch.conversationId &&
       typeof activeRow.sessionState === 'string',
     'step11: todo_list 能看到进行中和关联会话',
-    activeRow
+    activeRow ?? listedActive.text
   );
 
   const goaled = await page(`
@@ -1632,7 +1642,8 @@ async function run(cdp, pluginZipUrl) {
 
   log('== step11b 完成后被 session_send 唤起，在跑计数加回来');
   const quiet = await page(`
-    const board = window.__stores.secretary.getState().secretary.board;
+    const secretary = await SEC();
+    const board = secretary.getState().secretary.board;
     const running = board.running
       .filter((card) => card.kind === 'session')
       .map((card) => card.conversationId);
@@ -1660,8 +1671,9 @@ async function run(cdp, pluginZipUrl) {
   );
   const counted = await page(`
     document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const secretary = await SEC();
     const back = await until(() => {
-      const board = window.__stores.secretary.getState().secretary.board;
+      const board = secretary.getState().secretary.board;
       const running = board.running
         .filter((card) => card.kind === 'session')
         .map((card) => card.conversationId);
@@ -1730,13 +1742,13 @@ async function run(cdp, pluginZipUrl) {
     { status: 'done' },
     '列出已完成的待办'
   );
-  const doneRow = (JSON.parse(listedDone.text ?? 'null')?.result?.todos ?? []).find(
+  const doneRow = listedTodos(listedDone).find(
     (item) => item.id === stale.todoId
   );
   assert(
     doneRow?.status === 'done' && doneRow.text.includes(freshText),
     'step12: todo_list 读到新文字和已完成',
-    doneRow
+    doneRow ?? listedDone.text
   );
   await cdp.shot(path.join(ART, '15-todo-updated.png'));
 
@@ -2563,6 +2575,18 @@ async function secretaryTool(cdp, setup, toolName, args, ask) {
     );
     return JSON.stringify({ secretaryId: id, text: result ? textOf(result) : null });
   `);
+}
+
+/** 工具结果经 MemoryInvoker 解开一层，正文是 `{ todos }`，不是 `{ result: { todos } }` */
+function listedTodos(payload) {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(payload?.text ?? 'null');
+  } catch {
+    return [];
+  }
+  const todos = parsed?.todos ?? parsed?.result?.todos;
+  return Array.isArray(todos) ? todos : [];
 }
 
 const auditLines = () =>
