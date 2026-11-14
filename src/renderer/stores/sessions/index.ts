@@ -143,6 +143,7 @@ import {
   queueConversationsPatch,
   resetConversationsAppliedSeq,
 } from './remotePatch';
+import { isSecretaryOwned } from './secretaryOwned';
 import { isPairViewed, nextUnread } from './unread';
 import {
   DIRTY_MAIN_TREE,
@@ -1857,6 +1858,7 @@ export const useSessionsStore = create<SessionsState>()(
               nextStatus: (next as Conversation).status,
               prevUnread: conversation.unread,
               viewed: state.activeId === id || isPairViewed(id),
+              secretaryOwned: isSecretaryOwned(conversation),
             }),
             title,
             spawning: false,
