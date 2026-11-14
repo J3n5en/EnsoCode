@@ -17,12 +17,12 @@ import {
 } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MemoryDeleteDialog, MemoryEditDialog } from '@/components/memory/MemoryActionDialogs';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogTitle } from '@/components/ui/dialog';
 import { InputGroupInput } from '@/components/ui/input-group';
 import { Select } from '@/components/ui/select';
 import {
-  deletionImpactLines,
   emptyReason,
   isPristineEmpty,
   MemoryLibrary,
@@ -363,6 +363,32 @@ describe('MemoryLibrary response ordering', () => {
     expect(ui.rows()).toEqual(['Current refreshed']);
   });
 
+  it('row edit and delete go straight to the shared dialogs, without opening the detail', async () => {
+    const { ui, reply, memory } = setupLibrary();
+    await reply(0, ['Initial']);
+    expect(ui.props(MemoryEditDialog).memoryId).toBeNull();
+    expect(ui.props(MemoryDeleteDialog).ids).toBeNull();
+    ui.props(MemoryRows).onEdit?.('Initial');
+    ui.render();
+    expect(ui.props(MemoryEditDialog).memoryId).toBe('Initial');
+    ui.props(MemoryRows).onDelete?.('Initial');
+    ui.render();
+    expect(ui.props(MemoryDeleteDialog).ids).toEqual(['Initial']);
+    expect(memory.detail).not.toHaveBeenCalled();
+    expect(ui.props(Dialog).open).toBe(false);
+  });
+
+  it('the bulk delete button is styled as destructive and opens the impact confirm', async () => {
+    const { ui, reply } = setupLibrary();
+    await reply(0, ['Initial']);
+    ui.props(MemoryRows).onToggle?.('Initial');
+    ui.render();
+    const bulk = ui.elements(Button).find((node) => node.props.children === 'Delete permanently');
+    expect(bulk?.props.variant).toBe('destructive-outline');
+    ui.click('Delete permanently');
+    expect(ui.props(MemoryDeleteDialog).ids).toEqual(['Initial']);
+  });
+
   it('does not apply pending list, statistics, review or detail replies after unmount', async () => {
     const { ui, requests, details, unsubscribe } = setupLibrary();
     ui.props(MemoryRows).onOpen('m1');
@@ -437,6 +463,25 @@ describe('isPristineEmpty', () => {
 });
 
 describe('MemoryRows', () => {
+  it('shows inline edit and delete on every row only when the caller handles them', () => {
+    const items = [item({ id: 'a' }), item({ id: 'b' })];
+    const withActions = renderToStaticMarkup(
+      createElement(MemoryRows, {
+        t,
+        onOpen: () => {},
+        onEdit: () => {},
+        onDelete: () => {},
+        items,
+      })
+    );
+    expect(withActions.match(/data-memory-action="row-edit"/g)).toHaveLength(2);
+    expect(withActions.match(/data-memory-action="row-delete"/g)).toHaveLength(2);
+    const readOnly = renderToStaticMarkup(
+      createElement(MemoryRows, { t, onOpen: () => {}, items })
+    );
+    expect(readOnly).not.toContain('row-edit');
+  });
+
   it('marks crystals and archived rows, and shows access counts', () => {
     const html = renderToStaticMarkup(
       createElement(MemoryRows, {
@@ -542,41 +587,5 @@ describe('scopeFilter', () => {
     expect(scopeFilter('secretary', null, spaces)).toEqual({ spaceIds: ['proj:s'] });
     expect(scopeFilter('chat', null, spaces)).toEqual({ spaceIds: [] });
     expect(scopeFilter(null, null, spaces)).toEqual({});
-  });
-});
-
-describe('deletionImpactLines', () => {
-  const empty = {
-    deleted: [{ id: 'm1', title: 'T', spaceId: 'global', role: 'target' as const }],
-    bridges: [],
-    relations: [],
-    crystalsUpdated: [],
-    crystalsDemoted: [],
-    releasedSources: 0,
-  };
-  it('没有连带影响时明确说不影响其他记忆', () => {
-    expect(deletionImpactLines(empty, t)).toEqual(['No other memories are affected.']);
-  });
-  it('逐条说明历史版本、版本链、关系和结晶的处理', () => {
-    const lines = deletionImpactLines(
-      {
-        ...empty,
-        deleted: [...empty.deleted, { id: 'm0', title: 'Old', spaceId: 'global', role: 'history' }],
-        bridges: [{ olderId: 'a', newerId: 'b' }],
-        relations: [{ memoryId: 'r', title: 'Rel', relation: 'enriches' }],
-        crystalsUpdated: [{ id: 'c1', title: 'C1', remaining: 3 }],
-        crystalsDemoted: [{ id: 'c2', title: 'C2', remaining: 2 }],
-        releasedSources: 4,
-      },
-      t
-    );
-    expect(lines).toEqual([
-      'Also deletes 1 older versions it replaced: “Old”',
-      'The older and newer versions around it are linked directly, so the history stays continuous.',
-      'Removes the relation links to “Rel”; those memories are kept.',
-      'Crystal “C1” loses this source and keeps 3 sources.',
-      'Crystal “C2” would be left with 2 sources, so it becomes a normal memory. Its content is kept.',
-      'This is a crystal: its 4 source memories are kept, only the links are removed.',
-    ]);
   });
 });

@@ -2,6 +2,11 @@ import type { MemoryDetail, MemoryListItem } from '@shared/memory/dto';
 import { Lock } from 'lucide-react';
 import type * as React from 'react';
 import { useEffect, useState } from 'react';
+import {
+  MemoryDeleteDialog,
+  MemoryEditDialog,
+  MemoryRowActions,
+} from '@/components/memory/MemoryActionDialogs';
 import { useI18n } from '@/i18n';
 import { secretarySpaceId } from '@/lib/secretarySpace';
 import { formatRelativeTime } from '@/lib/time';
@@ -13,33 +18,49 @@ const OTHER_LIMIT = 10;
 function MemoryRow({
   item,
   onOpen,
+  onEdit,
+  onDelete,
   trailing,
+  children,
 }: {
   item: MemoryListItem;
   onOpen: (id: string) => void;
+  onEdit: (id: string) => void;
+  onDelete: (id: string) => void;
   trailing: React.ReactNode;
+  /** 展开的详情，紧贴在这一行下面 */
+  children?: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      data-enso="secretary-memory-row"
-      onClick={() => onOpen(item.id)}
-      className="flex w-full items-start gap-2 rounded-lg px-1.5 py-2 text-left transition-colors hover:bg-foreground/5"
-    >
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px]">{item.title}</span>
-        {item.contentSummary && (
-          <span className="mt-0.5 line-clamp-2 block text-[12px] text-muted-foreground">
-            {item.contentSummary}
+    <div data-enso="secretary-memory-row" data-memory-id={item.id} className="flex flex-col">
+      <div className="flex items-start gap-1 rounded-lg px-1.5 py-2 transition-colors hover:bg-foreground/5">
+        <button
+          type="button"
+          data-enso="secretary-memory-open"
+          onClick={() => onOpen(item.id)}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px]">{item.title}</span>
+            {item.contentSummary && (
+              <span className="mt-0.5 line-clamp-2 block text-[12px] text-muted-foreground">
+                {item.contentSummary}
+              </span>
+            )}
           </span>
-        )}
-      </span>
-      <span className="shrink-0 text-[11.5px] text-subtle-foreground">{trailing}</span>
-    </button>
+          <span className="shrink-0 text-[11.5px] text-subtle-foreground">{trailing}</span>
+        </button>
+        <MemoryRowActions id={item.id} onEdit={onEdit} onDelete={onDelete} className="-my-0.5" />
+      </div>
+      {children}
+    </div>
   );
 }
 
-/** 记忆面板：私有空间可编辑删除，其他空间只读展示来源项目 */
+/**
+ * 记忆面板：每行常驻编辑 / 删除，和设置页记忆库走同一套接口（删除先预览影响再确认）。
+ * 「来自你的项目」是秘书只读的项目记忆，用户自己仍可以改删。
+ */
 export function SecretaryMemoryPanel() {
   const { t, locale } = useI18n();
   const projectId = useSecretaryStore((s) => s.secretary.projectId);
@@ -47,7 +68,9 @@ export function SecretaryMemoryPanel() {
   const spaceId = projectId ? secretarySpaceId(projectId) : null;
   const [own, setOwn] = useState<MemoryListItem[]>([]);
   const [others, setOthers] = useState<MemoryListItem[]>([]);
-  const [detail, setDetail] = useState<{ id: string; readOnly: boolean } | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
 
   useEffect(() => {
     if (!spaceId) return;
@@ -71,6 +94,21 @@ export function SecretaryMemoryPanel() {
     };
   }, [spaceId]);
 
+  const row = (item: MemoryListItem, trailing: React.ReactNode, readOnly: boolean) => (
+    <MemoryRow
+      key={item.id}
+      item={item}
+      trailing={trailing}
+      onOpen={(id) => setOpenId(openId === id ? null : id)}
+      onEdit={setEditId}
+      onDelete={(id) => setDeleteIds([id])}
+    >
+      {openId === item.id && (
+        <MemoryDetailPane id={item.id} readOnly={readOnly} onClose={() => setOpenId(null)} />
+      )}
+    </MemoryRow>
+  );
+
   return (
     <div data-enso="secretary-memory" className="flex flex-col gap-2 px-3 py-3">
       <section className="flex flex-col">
@@ -83,14 +121,9 @@ export function SecretaryMemoryPanel() {
             {t('The secretary has not saved anything yet.')}
           </p>
         ) : (
-          own.map((item) => (
-            <MemoryRow
-              key={item.id}
-              item={item}
-              trailing={formatRelativeTime(Date.parse(item.updatedAt), locale)}
-              onOpen={(id) => setDetail({ id, readOnly: false })}
-            />
-          ))
+          own.map((item) =>
+            row(item, formatRelativeTime(Date.parse(item.updatedAt), locale), false)
+          )
         )}
       </section>
       {others.length > 0 && (
@@ -102,27 +135,22 @@ export function SecretaryMemoryPanel() {
           <p className="px-1.5 pb-1 text-[11.5px] text-subtle-foreground">
             {t('{{name}} can read these but not change them', { name })}
           </p>
-          {others.map((item) => (
-            <MemoryRow
-              key={item.id}
-              item={item}
-              trailing={item.spaceLabel}
-              onOpen={(id) => setDetail({ id, readOnly: true })}
-            />
-          ))}
+          {others.map((item) => row(item, item.spaceLabel, true))}
         </section>
       )}
-      {detail && (
-        <MemoryDetailPane
-          id={detail.id}
-          readOnly={detail.readOnly}
-          onClose={() => setDetail(null)}
-        />
-      )}
+      <MemoryEditDialog memoryId={editId} onClose={() => setEditId(null)} />
+      <MemoryDeleteDialog
+        ids={deleteIds}
+        onClose={() => setDeleteIds(null)}
+        onDeleted={(ids) => {
+          if (openId && ids.includes(openId)) setOpenId(null);
+        }}
+      />
     </div>
   );
 }
 
+/** 点开一行看完整正文；编辑删除在行尾，这里只留归档 */
 function MemoryDetailPane({
   id,
   readOnly,
@@ -134,26 +162,21 @@ function MemoryDetailPane({
 }) {
   const { t } = useI18n();
   const [detail, setDetail] = useState<MemoryDetail | null>(null);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
     void window.electronAPI.memory.detail(id).then((result) => {
-      if (!alive || !result) return;
-      setDetail(result);
-      setTitle(result.title);
-      setContent(result.content);
+      if (alive && result) setDetail(result);
     });
     return () => {
       alive = false;
     };
   }, [id]);
 
-  const run = (action: Promise<{ ok: boolean }>) => {
+  const archive = () => {
     setBusy(true);
-    void action.finally(() => {
+    void window.electronAPI.memory.archive(id).finally(() => {
       setBusy(false);
       onClose();
     });
@@ -162,12 +185,22 @@ function MemoryDetailPane({
   return (
     <div
       data-enso="secretary-memory-detail"
-      className="rounded-lg border border-border px-2.5 py-2"
+      className="mx-1.5 mb-1 rounded-lg border border-border px-2.5 py-2"
     >
       <div className="flex items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
           {detail?.spaceLabel ?? ''}
         </span>
+        {!readOnly && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={archive}
+            className="rounded-md px-2 py-0.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            {t('Archive')}
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -176,53 +209,9 @@ function MemoryDetailPane({
           {t('Close')}
         </button>
       </div>
-      {readOnly ? (
-        <>
-          <p className="mt-1 text-[13px] font-medium">{detail?.title}</p>
-          <pre className="mt-1 max-h-64 overflow-auto text-[12px] whitespace-pre-wrap text-muted-foreground">
-            {detail?.content}
-          </pre>
-        </>
-      ) : (
-        <>
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            className="mt-1 w-full bg-transparent text-[13px] font-medium outline-none"
-          />
-          <textarea
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-            className="mt-1 max-h-64 min-h-24 w-full resize-y bg-transparent text-[12px] outline-none"
-          />
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <button
-              type="button"
-              disabled={busy || !content.trim()}
-              onClick={() => run(window.electronAPI.memory.update(id, { title, content }))}
-              className="rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground disabled:opacity-50"
-            >
-              {t('Save')}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(window.electronAPI.memory.archive(id))}
-              className="rounded-md px-2.5 py-1 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              {t('Archive')}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(window.electronAPI.memory.delete(id))}
-              className="rounded-md px-2.5 py-1 text-[12px] text-muted-foreground hover:bg-muted hover:text-destructive"
-            >
-              {t('Delete')}
-            </button>
-          </div>
-        </>
-      )}
+      <pre className="mt-1 max-h-64 overflow-auto text-[12px] whitespace-pre-wrap text-muted-foreground">
+        {detail?.content}
+      </pre>
     </div>
   );
 }

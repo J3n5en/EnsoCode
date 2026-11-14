@@ -2089,6 +2089,8 @@ async function verifyMemoryManualEdit(cdp, setup) {
   const captures = [
     { title: 'Deploy window', content: 'deploy window is tuesday zebrafish' },
     { title: 'Cache layer', content: 'cache layer uses walrusdb' },
+    { title: 'Lint rule', content: 'lint rule bans quokka imports' },
+    { title: 'Backup policy', content: 'backup policy keeps axolotl snapshots' },
   ];
   for (const capture of captures) {
     const directive = `[[tool:memory_capture ${JSON.stringify({ ...capture, spaceId: 'project', importance: 0.6 })}]]`;
@@ -2117,7 +2119,11 @@ async function verifyMemoryManualEdit(cdp, setup) {
   `);
   const target = seeded.find((item) => item.title === 'Deploy window');
   const doomed = seeded.find((item) => item.title === 'Cache layer');
-  assert(target && doomed, '记忆: 两条都落在秘书私有空间', seeded);
+  const panelTarget = seeded.find((item) => item.title === 'Lint rule');
+  const panelDoomed = seeded.find((item) => item.title === 'Backup policy');
+  assert(target && doomed && panelTarget && panelDoomed, '记忆: 四条都落在秘书私有空间', seeded);
+
+  await verifyPanelMemoryActions(cdp, panelTarget, panelDoomed);
 
   log('== 记忆：设置页筛选秘书空间');
   await page(`
@@ -2178,10 +2184,11 @@ async function verifyMemoryManualEdit(cdp, setup) {
       const editButton = await until(() => q('[data-memory-action="edit"]'), 10000);
       if (!editButton) return JSON.stringify({ ok: false, error: 'no edit button' });
       editButton.click();
-      const title = await until(() => q('[data-memory-field="title"]'), 5000);
+      // 编辑在独立弹窗里，字段限定在 data-memory-edit 下，别碰到正在关闭的详情框
+      const title = await until(() => q('[data-memory-edit] [data-memory-field="title"]'), 5000);
       typeInto(title, 'Release window');
-      typeInto(q('[data-memory-field="content"]'), 'release window is friday narwhal');
-      typeInto(q('[data-memory-field="importance"]'), '0.85');
+      typeInto(q('[data-memory-edit] [data-memory-field="content"]'), 'release window is friday narwhal');
+      typeInto(q('[data-memory-edit] [data-memory-field="importance"]'), '0.85');
       await sleep(200);
       q('[data-memory-action="save"]').click();
       const saved = await until(
@@ -2221,28 +2228,53 @@ async function verifyMemoryManualEdit(cdp, setup) {
       afterEdit
     );
 
-    log('== 记忆：设置页删除一条（二次确认）');
-    const deleted = await ui(`
+    log('== 记忆：设置页从列表行直接删除一条（二次确认）');
+    const asked = await ui(`
       ${UI}
-      // 详情框还开着：点另一行直接换成那条的详情，等换好再点删除，别点到上一条的按钮
-      const row = await until(() => q('[data-memory-id=${JSON.stringify(doomed.id)}] button:not([role=checkbox])'), 5000);
-      if (!row) return JSON.stringify({ ok: false, error: 'row missing' });
-      row.click();
-      const opened = await until(() => q('[data-memory-detail=${JSON.stringify(doomed.id)}]'), 10000);
-      if (!opened) return JSON.stringify({ ok: false, error: 'detail not switched' });
-      const del = q('[data-memory-action="delete"]');
-      del.click();
+      // 编辑完回到的详情框里「永久删除」应是危险色；关掉它，改从列表行尾直接删，不经过详情
+      const popup = q('[data-memory-detail]')?.closest('[data-slot=dialog-popup]');
+      const detailDelete = popup?.querySelector('[data-memory-action="delete"]');
+      // 计算色可能是 oklch，画到 1px canvas 上取回 rgb
+      const toRgb = (color) => {
+        const ctx = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d');
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3);
+      };
+      const detailDeleteColor = detailDelete ? toRgb(getComputedStyle(detailDelete).color) : [];
+      popup?.querySelector('[aria-label=Close]')?.click();
+      await until(() => !q('[data-memory-detail]'), 5000);
+      const deleteButton = q('[data-memory-id=${JSON.stringify(doomed.id)}] [data-memory-action="row-delete"]');
+      if (!deleteButton) return JSON.stringify({ ok: false, error: 'row delete missing' });
+      deleteButton.click();
       const confirm = await until(() => {
         const button = q('[data-memory-action="confirm-delete"]');
         return button && !button.disabled ? button : null;
       }, 10000);
-      if (!confirm) return JSON.stringify({ ok: false, error: 'confirm not ready' });
-      const impact = q('[data-memory-delete-impact]')?.innerText ?? '';
-      const stillThere = Boolean(await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)}));
-      confirm.click();
-      const gone = await until(() => !rowIds().includes(${JSON.stringify(doomed.id)}), 15000);
-      return JSON.stringify({ ok: Boolean(gone), impact, stillThereBeforeConfirm: stillThere });
+      return JSON.stringify({
+        ok: Boolean(confirm),
+        detailDeleteColor,
+        detailOpened: Boolean(q('[data-memory-detail]')),
+        impact: q('[data-memory-delete-impact]')?.innerText ?? '',
+        stillThereBeforeConfirm: Boolean(await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)})),
+      });
     `);
+    // 按实际渲染的文字颜色判：红色通道明显高于绿、蓝（Tailwind 类名子串不可靠）
+    const [r = 0, g = 0, b = 0] = asked.detailDeleteColor;
+    assert(r > g + 60 && r > b + 60, '记忆: 详情里的「永久删除」是危险色', asked.detailDeleteColor);
+    assert(
+      asked.ok && !asked.detailOpened,
+      '记忆: 列表行尾直接点删除就弹确认，不用先开详情',
+      asked
+    );
+    await settingsCdp.shot(path.join(ART, '41-settings-row-delete-confirm.png'));
+    const deleted = await ui(`
+      ${UI}
+      q('[data-memory-action="confirm-delete"]').click();
+      const gone = await until(() => !rowIds().includes(${JSON.stringify(doomed.id)}), 15000);
+      return JSON.stringify({ ok: Boolean(gone) });
+    `);
+    Object.assign(deleted, asked, { ok: deleted.ok });
     assert(
       deleted.stillThereBeforeConfirm &&
         (deleted.impact.includes('不影响其他记忆') ||
@@ -2267,7 +2299,7 @@ async function verifyMemoryManualEdit(cdp, setup) {
       '记忆: 删除后精确与检索模式都搜不到',
       afterDelete
     );
-    await settingsCdp.shot(path.join(ART, '41-memory-deleted.png'));
+    await settingsCdp.shot(path.join(ART, '42-settings-deleted.png'));
   } finally {
     settingsCdp.close();
   }
@@ -2297,6 +2329,186 @@ async function verifyMemoryManualEdit(cdp, setup) {
   );
   copyFileSync(memoryAuditFile, path.join(ART, 'memory-audit.jsonl'));
   log(`  copied ${path.join(ART, 'memory-audit.jsonl')}`);
+}
+
+/**
+ * 右侧秘书面板「记忆」标签：每行常驻编辑 / 删除。编辑走同一个编辑弹窗，删除先预览影响再确认，
+ * 结果与设置页同源：新词搜得到、旧词搜不到、删除后搜不到，审计都落 memory/audit.jsonl。
+ */
+async function verifyPanelMemoryActions(cdp, target, doomed) {
+  const page = cdp.json.bind(cdp);
+  const DOM = `
+    const q = (s) => document.querySelector(s);
+    const typeInto = (el, value) => {
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const row = (id) => q('[data-enso="secretary-memory-row"][data-memory-id="' + id + '"]');
+    const shownOnScreen = (el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0 || r.left >= innerWidth || r.right <= 0) return false;
+      const style = getComputedStyle(el);
+      if (style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return Boolean(hit && (el === hit || el.contains(hit)));
+    };
+  `;
+  log('== 记忆：秘书面板「记忆」标签每行常驻编辑与删除');
+  const opened = await page(`
+    ${DOM}
+    const panelShown = () => shownOnScreen(q('[data-enso=secretary-panel-tab][data-tab=memory]'));
+    if (!panelShown()) {
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页'
+      );
+      toggles.at(-1)?.click();
+      await sleep(500);
+      q('[data-enso=secretary-panel-open]')?.click();
+      await sleep(800);
+    }
+    if (!panelShown()) {
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+    }
+    if (!(await until(panelShown, 5000))) return JSON.stringify({ ok: false, error: 'panel hidden' });
+    q('[data-enso=secretary-panel-tab][data-tab=memory]').click();
+    const ready = await until(() => row(${JSON.stringify(target.id)}) && row(${JSON.stringify(doomed.id)}), 15000);
+    if (!ready) return JSON.stringify({ ok: false, error: 'rows missing', text: q('[data-enso=secretary-memory]')?.innerText });
+    const actions = (id) => ({
+      edit: shownOnScreen(row(id).querySelector('[data-memory-action="row-edit"]')),
+      remove: shownOnScreen(row(id).querySelector('[data-memory-action="row-delete"]')),
+    });
+    return JSON.stringify({
+      ok: true,
+      target: actions(${JSON.stringify(target.id)}),
+      doomed: actions(${JSON.stringify(doomed.id)}),
+      detailOpen: Boolean(q('[data-enso="secretary-memory-detail"]')),
+    });
+  `);
+  assert(
+    opened.ok &&
+      opened.target.edit &&
+      opened.target.remove &&
+      opened.doomed.edit &&
+      opened.doomed.remove &&
+      !opened.detailOpen,
+    '面板记忆: 没点开任何一条时，每行的编辑与删除按钮都直接可见',
+    opened
+  );
+  await cdp.shot(path.join(ART, '43-panel-memory-actions.png'));
+
+  log('== 记忆：秘书面板编辑一条');
+  const edited = await page(`
+    ${DOM}
+    row(${JSON.stringify(target.id)}).querySelector('[data-memory-action="row-edit"]').click();
+    const title = await until(
+      () => q('[data-memory-edit=${JSON.stringify(target.id)}] [data-memory-field="title"]'),
+      10000
+    );
+    if (!title) return JSON.stringify({ ok: false, error: 'edit dialog missing' });
+    typeInto(title, 'Lint policy');
+    typeInto(q('[data-memory-edit] [data-memory-field="content"]'), 'lint policy bans pangolin imports');
+    await sleep(200);
+    q('[data-memory-action="save"]').click();
+    const saved = await until(
+      () => !q('[data-memory-edit]') && row(${JSON.stringify(target.id)})?.innerText.includes('Lint policy'),
+      15000
+    );
+    return JSON.stringify({
+      ok: Boolean(saved),
+      rowText: row(${JSON.stringify(target.id)})?.innerText ?? null,
+      error: q('[data-memory-edit] .text-destructive')?.textContent ?? null,
+    });
+  `);
+  assert(edited.ok, '面板记忆: 编辑弹窗保存后行内显示新标题', edited);
+  const afterEdit = await page(`
+    const find = async (query, mode) =>
+      (await window.electronAPI.memory.list({ query, mode, limit: 20, offset: 0 })).items.map((i) => i.id);
+    return JSON.stringify({
+      newExact: await find('pangolin', 'exact'),
+      newFast: await find('pangolin', 'fast'),
+      oldExact: await find('quokka', 'exact'),
+      oldFast: await find('quokka', 'fast'),
+    });
+  `);
+  assert(
+    afterEdit.newExact.includes(target.id) &&
+      afterEdit.newFast.includes(target.id) &&
+      !afterEdit.oldExact.includes(target.id) &&
+      !afterEdit.oldFast.includes(target.id),
+    '面板记忆: 编辑后新内容搜得到、旧内容搜不到（精确与检索模式）',
+    afterEdit
+  );
+
+  log('== 记忆：秘书面板删除一条（先预览影响再确认）');
+  const asked = await page(`
+    ${DOM}
+    row(${JSON.stringify(doomed.id)}).querySelector('[data-memory-action="row-delete"]').click();
+    const confirm = await until(() => {
+      const button = q('[data-memory-action="confirm-delete"]');
+      return button && !button.disabled ? button : null;
+    }, 10000);
+    return JSON.stringify({
+      ok: Boolean(confirm),
+      impact: q('[data-memory-delete-impact]')?.innerText ?? '',
+      stillThere: Boolean(await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)})),
+    });
+  `);
+  assert(
+    asked.ok &&
+      asked.stillThere &&
+      (asked.impact.includes('不影响其他记忆') ||
+        asked.impact.includes('No other memories are affected')),
+    '面板记忆: 点删除先弹确认并说明影响，确认前不删',
+    asked
+  );
+  await cdp.shot(path.join(ART, '44-panel-delete-confirm.png'));
+  const deleted = await page(`
+    ${DOM}
+    q('[data-memory-action="confirm-delete"]').click();
+    const gone = await until(() => !row(${JSON.stringify(doomed.id)}), 15000);
+    const exact = await window.electronAPI.memory.list({ query: 'axolotl', limit: 20, offset: 0 });
+    const fast = await window.electronAPI.memory.list({ query: 'axolotl', mode: 'fast', limit: 20, offset: 0 });
+    return JSON.stringify({
+      ok: Boolean(gone),
+      detail: await window.electronAPI.memory.detail(${JSON.stringify(doomed.id)}),
+      exact: exact.items.map((i) => i.id),
+      fast: fast.items.map((i) => i.id),
+    });
+  `);
+  assert(
+    deleted.ok &&
+      deleted.detail === null &&
+      deleted.exact.length === 0 &&
+      deleted.fast.length === 0,
+    '面板记忆: 确认后行消失，精确与检索模式都搜不到',
+    deleted
+  );
+  await cdp.shot(path.join(ART, '45-panel-after.png'));
+
+  const audit = readFileSync(memoryAuditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const editAudit = audit.filter((e) => e.action === 'memory.edit' && e.memoryId === target.id);
+  const deleteAudit = audit.filter(
+    (e) => e.action === 'memory.delete' && e.requested.includes(doomed.id)
+  );
+  assert(
+    editAudit.length === 1 &&
+      editAudit[0].changes.title?.to === 'Lint policy' &&
+      !JSON.stringify(editAudit[0]).includes('quokka'),
+    '面板记忆: 编辑记了审计，正文只留 hash',
+    editAudit
+  );
+  assert(
+    deleteAudit.length === 1 && deleteAudit[0].impact.deleted[0]?.id === doomed.id,
+    '面板记忆: 删除记了审计',
+    deleteAudit
+  );
 }
 
 /** 新开一个秘书会话，让 fake provider 调一次秘书工具，取回工具结果原文 */
