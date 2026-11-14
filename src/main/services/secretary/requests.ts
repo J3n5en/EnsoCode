@@ -127,6 +127,10 @@ export function parseTodoMutateRequest(value: unknown): SecretaryTodoMutate | nu
     const todoId = nonEmpty(value.todoId);
     return todoId ? { action: 'remove', todoId } : null;
   }
+  if (value.action === 'reopen') {
+    const todoId = nonEmpty(value.todoId);
+    return todoId ? { action: 'reopen', todoId } : null;
+  }
   if (value.action === 'dispatch') {
     const todoId = nonEmpty(value.todoId);
     if (!todoId) return null;

@@ -214,6 +214,9 @@ const hostPorts: SecretaryHostPorts = {
   resume: (conversationId) => resumeRootFromMain(conversationId),
   profile: () => secretaryStore().profile(),
   todos: () => secretaryStore().todos(),
+  saveTodos: (todos) => {
+    secretaryStore().saveTodos(todos);
+  },
   schedules: () => secretaryStore().schedules(),
   saveSchedules: (schedules) => {
     secretaryStore().saveSchedules(schedules);

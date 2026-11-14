@@ -202,6 +202,22 @@ export interface SecretaryTodo {
   updatedAt: number;
   conversationId?: string;
   doneAt?: number;
+  /** 关联会话失败、被停止或已删除；用户放回待办或重新派发后清掉 */
+  problem?: TodoProblemCode;
+}
+
+export const TODO_PROBLEM_CODES = ['failed', 'stopped', 'deleted'] as const;
+
+export type TodoProblemCode = (typeof TODO_PROBLEM_CODES)[number];
+
+/** 工作台投影。done 不进看板，只出现在 todo_list */
+export type SecretaryTodoPhase = 'todo' | 'active' | 'problem';
+
+export interface SecretaryBoardTodo extends SecretaryTodo {
+  phase?: SecretaryTodoPhase;
+  projectName?: string;
+  sessionTitle?: string;
+  sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone';
 }
 
 /** 界面对待办的操作；dispatch 是用户亲手点出，不再走自主度确认 */
@@ -209,6 +225,7 @@ export type SecretaryTodoMutate =
   | { action: 'add'; text: string; dueAt?: number; projectId?: string }
   | { action: 'update'; todoId: string; text?: string; dueAt?: number | null; done?: boolean }
   | { action: 'remove'; todoId: string }
+  | { action: 'reopen'; todoId: string }
   | { action: 'dispatch'; todoId: string; projectId?: string; prompt?: string };
 
 export type SecretarySchedule = {
@@ -269,7 +286,7 @@ export type SecretaryCard =
 export interface SecretaryBoard {
   needsYou: SecretaryCard[];
   running: SecretaryCard[];
-  todos: SecretaryTodo[];
+  todos: SecretaryBoardTodo[];
   done: SecretaryCard[];
 }
 

@@ -820,6 +820,107 @@ describe('待办', () => {
       error: 'project-required',
     });
   });
+
+  it('免确认派出落关联时重读，不盖掉同时改的文字和完成', async () => {
+    const h = harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.ports.createSession = async (request) => {
+      h.created.push(request);
+      await gate;
+      return h.createResult;
+    };
+    const pending = call(h.handlers.todo_item_dispatch, { todoId: 't1' });
+    for (let i = 0; i < 30 && h.created.length === 0; i += 1) await Promise.resolve();
+    expect(h.created).toHaveLength(1);
+    await call(h.handlers.todo_item_update, { todoId: 't1', text: '看发布', done: true });
+    release();
+    expect(await pending).toEqual({
+      ok: true,
+      result: { status: 'created', conversationId: 'new-1' },
+    });
+    expect(h.todos[0]).toMatchObject({
+      text: '看发布',
+      doneAt: NOW,
+      conversationId: 'new-1',
+    });
+  });
+
+  it('确认提案后关联待办，不覆盖确认前的修改', async () => {
+    const h = harness({
+      todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
+    });
+    const payload = (await run(h.handlers.todo_item_dispatch, { todoId: 't1' })) as {
+      proposalId: string;
+    };
+    expect(h.todos[0].conversationId).toBeUndefined();
+    await call(h.handlers.todo_item_update, { todoId: 't1', text: '看发布', done: true });
+    await resolveProposal(h.ports, payload.proposalId, 'confirm');
+    expect(h.todos[0]).toMatchObject({
+      text: '看发布',
+      doneAt: NOW,
+      conversationId: 'new-1',
+    });
+  });
+
+  it('todo_list 看到状态并可筛选，正文是不可信内容', async () => {
+    const h = harness({
+      projects: [localProject('p1'), localProject('p2')],
+      rows: { c1: { title: '在跑的会话', projectId: 'p1', sessionFile: '/tmp/c1' } },
+      statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
+      todos: [
+        { id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 },
+        { id: 't2', text: '已完成', projectId: 'p1', createdAt: 1, updatedAt: 1, doneAt: 2 },
+        {
+          id: 't3',
+          text: '在跑',
+          projectId: 'p1',
+          createdAt: 1,
+          updatedAt: 1,
+          conversationId: 'c1',
+        },
+        { id: 't4', text: '另一个项目', projectId: 'p2', createdAt: 1, updatedAt: 1 },
+      ],
+    });
+    const listed = (await run(h.handlers.todo_list, {})) as {
+      todos: {
+        id: string;
+        status: string;
+        text: string;
+        sessionState?: string;
+        sessionTitle?: string;
+      }[];
+    };
+    expect(listed.todos.map((item) => [item.id, item.status])).toEqual([
+      ['t1', 'todo'],
+      ['t2', 'done'],
+      ['t3', 'active'],
+      ['t4', 'todo'],
+    ]);
+    expect(listed.todos[0].text).toContain('<untrusted-content source="todo:t1">');
+    expect(listed.todos[2].sessionState).toBe('running');
+    expect(listed.todos[2].sessionTitle).toContain('在跑的会话');
+    expect(
+      (
+        (await run(h.handlers.todo_list, { status: 'done', projectId: 'p1' })) as {
+          todos: { id: string }[];
+        }
+      ).todos.map((item) => item.id)
+    ).toEqual(['t2']);
+    expect(await call(h.handlers.todo_list, { projectId: 'missing' })).toEqual({
+      ok: false,
+      error: 'not-found',
+    });
+    expect(await call(h.handlers.todo_list, { status: 'later' })).toEqual({
+      ok: false,
+      error: 'invalid arguments',
+    });
+  });
 });
 
 describe('resolveProposal', () => {

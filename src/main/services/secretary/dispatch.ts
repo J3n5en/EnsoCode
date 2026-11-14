@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app } from '@platform';
+import { projectNameFromPath } from '@shared/projectName';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   canOperate,
@@ -11,6 +12,7 @@ import {
   validateDispatch,
 } from '@shared/secretary/policy';
 import { SECRETARY_ID_MAX, SECRETARY_SESSION_MESSAGE_MAX } from '@shared/secretary/tools';
+import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import {
   type DispatchDraft,
@@ -28,11 +30,21 @@ import {
   type SecretaryToolDraft,
   type TakeoverVia,
 } from '@shared/types/secretary';
+import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import { buildBoard, proposalUpdate, takeoverViews } from './results';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import { SecretaryStore } from './store';
+import {
+  linkTodo,
+  markTodoProblem,
+  reopenTodo,
+  TODO_STATUSES,
+  type TodoStatus,
+  todoSessionView,
+  todoStatus,
+} from './todoLifecycle';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -92,6 +104,7 @@ const DISPATCH_OPS = [
   'session_send',
   'session_stop',
   'session_takeover_propose',
+  'todo_list',
   'todo_item_add',
   'todo_item_update',
   'todo_item_dispatch',
@@ -297,6 +310,10 @@ async function executeDispatch(
     ...(draft.goal ? { goal: draft.goal } : {}),
   };
   ports.saveDispatch(file);
+  if (draft.todoId) {
+    const linked = linkTodo(await ports.todos(), draft.todoId, created.conversationId, ports.now());
+    if (linked.changed) ports.saveTodos(linked.todos);
+  }
   notifySecretaryChanged();
   return created;
 }
@@ -646,6 +663,8 @@ export function createSecretaryDispatchHandlers(
       // 接管来的会话自带的目标也一并暂停，免得停下后又被续跑
       const record = file.dispatched[conversationId];
       if (record?.goal || record?.takeover) await ports.pauseGoal(conversationId);
+      const stopped = markTodoProblem(await ports.todos(), conversationId, 'stopped', ports.now());
+      if (stopped.changed) ports.saveTodos(stopped.todos);
       ports.audit({
         at: ports.now(),
         secretaryConversationId: ctx.secretaryConversationId,
@@ -656,6 +675,67 @@ export function createSecretaryDispatchHandlers(
       });
       notifySecretaryChanged();
       return { ok: true, result: { status: 'stopped' } };
+    },
+
+    async todo_list(params) {
+      const status = stringParam(params, 'status');
+      if (status && !(TODO_STATUSES as readonly string[]).includes(status)) return invalidArguments;
+      const projectId = stringParam(params, 'projectId');
+      const profile = await profileOf(ports);
+      const projects = visibleProjects(await ports.projects(), profile);
+      if (projectId && !projects.some((project) => project.projectId === projectId))
+        return { ok: false, error: 'not-found' };
+      const rows = await ports.rows();
+      const file = ports.dispatchFile();
+      const todos = [];
+      for (const todo of await ports.todos()) {
+        if (todo.projectId && !projects.some((project) => project.projectId === todo.projectId))
+          continue;
+        if (projectId && todo.projectId !== projectId) continue;
+        const session = todo.conversationId
+          ? todoSessionView(
+              rows[todo.conversationId],
+              await ports.status(todo.conversationId),
+              file.dispatched[todo.conversationId]?.lastResult?.kind
+            )
+          : null;
+        const phase = todoStatus(todo, session);
+        if (status && phase !== (status as TodoStatus)) continue;
+        const problem =
+          phase === 'problem'
+            ? (todo.problem ??
+              (!session?.present
+                ? 'deleted'
+                : session.aborted || session.result === 'interrupted'
+                  ? 'stopped'
+                  : 'failed'))
+            : undefined;
+        const project = todo.projectId
+          ? projects.find((candidate) => candidate.projectId === todo.projectId)
+          : undefined;
+        todos.push({
+          id: todo.id,
+          text: wrapUntrusted(`todo:${todo.id}`, redactSecrets(todo.text)),
+          status: phase,
+          ...(todo.projectId ? { projectId: todo.projectId } : {}),
+          ...(project
+            ? { projectName: redactSecrets(projectNameFromPath(project.canonicalPath)) }
+            : {}),
+          ...(todo.dueAt !== undefined ? { dueAt: todo.dueAt } : {}),
+          ...(todo.conversationId ? { conversationId: todo.conversationId } : {}),
+          ...(session ? { sessionState: session.present ? session.state : 'gone' } : {}),
+          ...(session?.title
+            ? {
+                sessionTitle: wrapUntrusted(
+                  `session:${todo.conversationId}`,
+                  redactSecrets(session.title)
+                ),
+              }
+            : {}),
+          ...(problem ? { problem } : {}),
+        });
+      }
+      return { ok: true, result: { todos } };
     },
 
     async session_takeover_propose(params, ctx) {
@@ -790,15 +870,6 @@ export function createSecretaryDispatchHandlers(
       };
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
       const result = outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
-      if (outcome.kind === 'created') {
-        ports.saveTodos(
-          todos.map((candidate) =>
-            candidate.id === todoId
-              ? { ...candidate, conversationId: outcome.conversationId }
-              : candidate
-          )
-        );
-      }
       return result;
     },
   };
@@ -1018,6 +1089,21 @@ export async function mutateTodo(
       at: now,
       secretaryConversationId: null,
       op: 'todo_remove',
+      targetId: request.todoId,
+      ok: true,
+    });
+    notifySecretaryChanged();
+    return { ok: true, todoId: request.todoId };
+  }
+  if (request.action === 'reopen') {
+    const current = await ports.todos();
+    const opened = reopenTodo(current, request.todoId, now);
+    if (!opened.found) return { ok: false, error: 'not-found' };
+    if (opened.changed) ports.saveTodos(opened.todos);
+    ports.audit({
+      at: now,
+      secretaryConversationId: null,
+      op: 'todo_reopen',
       targetId: request.todoId,
       ok: true,
     });

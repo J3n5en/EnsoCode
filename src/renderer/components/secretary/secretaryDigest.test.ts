@@ -85,7 +85,16 @@ describe('secretaryDigest', () => {
       board({
         needsYou: [proposal(), session('waiting', { state: 'waiting' })],
         running: [session('run', { state: 'running' })],
-        todos: [{ id: 't1', text: '写周报', createdAt: TODAY, updatedAt: TODAY }],
+        todos: [
+          { id: 't1', text: '写周报', createdAt: TODAY, updatedAt: TODAY },
+          {
+            id: 't2',
+            text: '在跑',
+            createdAt: TODAY,
+            updatedAt: TODAY,
+            phase: 'active',
+          },
+        ],
       }),
       NOW
     );

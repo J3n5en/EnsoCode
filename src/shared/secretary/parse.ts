@@ -564,6 +564,9 @@ export function parseTodos(value: unknown): SecretaryTodo[] {
     if (conversationId) todo.conversationId = conversationId;
     const doneAt = time(item.doneAt);
     if (doneAt !== undefined) todo.doneAt = doneAt;
+    if (item.problem === 'failed' || item.problem === 'stopped' || item.problem === 'deleted') {
+      todo.problem = item.problem;
+    }
     todos.push(todo);
   }
   return todos;

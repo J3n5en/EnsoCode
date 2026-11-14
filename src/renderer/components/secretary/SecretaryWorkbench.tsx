@@ -1,10 +1,11 @@
 import {
   NEEDS_YOU_RESULTS,
-  type SecretaryTodo,
+  type SecretaryBoardTodo,
   type SecretaryTodoMutate,
+  type TodoProblemCode,
 } from '@shared/types/secretary';
-import { Coffee, Pencil, Plus, Send, ShieldAlert, Square, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { Coffee, Pencil, Plus, Send, ShieldAlert, Square, Trash2, Undo2 } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { useI18n } from '@/i18n';
@@ -41,6 +42,21 @@ const TONE_DOT: Record<FeedTone, string> = {
 
 const ACTION_CLASS =
   'flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
+
+const SESSION_STATE_LABEL = {
+  running: 'Running',
+  waiting: 'Waiting for you',
+  idle: 'Idle',
+  error: 'Failed',
+  'not-started': 'Not started',
+  gone: 'The session was deleted',
+} as const;
+
+const PROBLEM_LABEL: Record<TodoProblemCode, string> = {
+  failed: 'The session failed',
+  stopped: 'The session was stopped',
+  deleted: 'The session was deleted',
+};
 
 function Stat({ value, label, warn }: { value: number; label: string; warn?: boolean }) {
   return (
@@ -150,9 +166,12 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   );
 }
 
-function TodoRow({ todo }: { todo: SecretaryTodo }) {
+function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
   const { t, locale } = useI18n();
+  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [draft, setDraft] = useState<string | null>(null);
+  const phase = todo.phase ?? 'todo';
+  const openable = Boolean(todo.conversationId) && todo.sessionState !== 'gone';
   if (draft !== null) {
     return (
       <div className="rounded-lg border border-border px-2.5 py-1.5">
@@ -176,6 +195,13 @@ function TodoRow({ todo }: { todo: SecretaryTodo }) {
   return (
     <div
       data-enso="secretary-todo"
+      data-phase={phase}
+      data-session={todo.conversationId}
+      draggable={phase !== 'todo'}
+      onDragStart={(event) => {
+        event.dataTransfer.setData('text/plain', todo.id);
+        event.dataTransfer.effectAllowed = 'move';
+      }}
       className="group flex items-start gap-2.5 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-foreground/5"
     >
       <button
@@ -187,6 +213,25 @@ function TodoRow({ todo }: { todo: SecretaryTodo }) {
       />
       <div className="min-w-0 flex-1">
         <p className="text-[13px]">{todo.text}</p>
+        {phase !== 'todo' && (
+          <button
+            type="button"
+            data-enso="secretary-todo-session"
+            disabled={!openable}
+            onClick={() => {
+              if (todo.conversationId && openable) selectConversation(todo.conversationId);
+            }}
+            className="mt-0.5 block max-w-full truncate text-left text-[12px] text-muted-foreground hover:text-foreground disabled:cursor-default"
+          >
+            {todo.sessionTitle || t('Open session')}
+            {todo.sessionState ? ` · ${t(SESSION_STATE_LABEL[todo.sessionState])}` : ''}
+          </button>
+        )}
+        {phase === 'problem' && todo.problem && (
+          <p data-enso="secretary-todo-problem" className="mt-0.5 text-[11.5px] text-destructive">
+            {t(PROBLEM_LABEL[todo.problem])}
+          </p>
+        )}
         {todo.dueAt !== undefined && (
           <p className="mt-0.5 text-[11.5px] text-subtle-foreground">
             {formatRelativeTime(todo.dueAt, locale)}
@@ -194,15 +239,28 @@ function TodoRow({ todo }: { todo: SecretaryTodo }) {
         )}
       </div>
       <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-        <button
-          type="button"
-          title={t('Dispatch')}
-          aria-label={t('Dispatch')}
-          onClick={() => mutateTodo({ action: 'dispatch', todoId: todo.id })}
-          className={ACTION_CLASS}
-        >
-          <Send className="h-3.5 w-3.5" />
-        </button>
+        {phase === 'todo' ? (
+          <button
+            type="button"
+            title={t('Dispatch')}
+            aria-label={t('Dispatch')}
+            onClick={() => mutateTodo({ action: 'dispatch', todoId: todo.id })}
+            className={ACTION_CLASS}
+          >
+            <Send className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-enso="secretary-todo-reopen"
+            title={t('Back to to-do')}
+            aria-label={t('Back to to-do')}
+            onClick={() => mutateTodo({ action: 'reopen', todoId: todo.id })}
+            className={ACTION_CLASS}
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           title={t('Edit')}
@@ -377,6 +435,10 @@ export function SecretaryWorkbench({ name }: { name: string }) {
           completed,
           failed,
         });
+  const active = board.todos.filter((todo) => todo.phase === 'active');
+  const problem = board.todos.filter((todo) => todo.phase === 'problem');
+  const open = board.todos.filter((todo) => (todo.phase ?? 'todo') === 'todo');
+  const reopenIds = new Set([...active, ...problem].map((todo) => todo.id));
 
   return (
     <div data-enso="secretary-workbench" className="flex flex-col gap-3 px-3 py-3">
@@ -408,14 +470,37 @@ export function SecretaryWorkbench({ name }: { name: string }) {
           )}
         </section>
       )}
-      <section data-enso="secretary-todos" className="flex flex-col">
+      {active.length > 0 && (
+        <TodoGroup title={t('In progress')} count={active.length} marker="secretary-active">
+          {active.map((todo) => (
+            <TodoRow key={todo.id} todo={todo} />
+          ))}
+        </TodoGroup>
+      )}
+      {problem.length > 0 && (
+        <TodoGroup title={t('Problem')} count={problem.length} marker="secretary-problem">
+          {problem.map((todo) => (
+            <TodoRow key={todo.id} todo={todo} />
+          ))}
+        </TodoGroup>
+      )}
+      <section
+        data-enso="secretary-todos"
+        className="flex flex-col"
+        onDragOver={(event) => {
+          if ([...event.dataTransfer.types].includes('text/plain')) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const todoId = event.dataTransfer.getData('text/plain');
+          if (reopenIds.has(todoId)) mutateTodo({ action: 'reopen', todoId });
+        }}
+      >
         <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">
           {t('To do')}
-          {board.todos.length > 0 && (
-            <span className="ml-1 tabular-nums">{board.todos.length}</span>
-          )}
+          {open.length > 0 && <span className="ml-1 tabular-nums">{open.length}</span>}
         </h3>
-        {board.todos.map((todo) => (
+        {open.map((todo) => (
           <TodoRow key={todo.id} todo={todo} />
         ))}
         {adding ? (
@@ -433,5 +518,27 @@ export function SecretaryWorkbench({ name }: { name: string }) {
         </div>
       </section>
     </div>
+  );
+}
+
+function TodoGroup({
+  title,
+  count,
+  marker,
+  children,
+}: {
+  title: string;
+  count: number;
+  marker: string;
+  children: ReactNode;
+}) {
+  return (
+    <section data-enso={marker} className="flex flex-col">
+      <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">
+        {title}
+        <span className="ml-1 tabular-nums">{count}</span>
+      </h3>
+      {children}
+    </section>
   );
 }

@@ -110,6 +110,9 @@ function harness(
       };
     },
     todos: () => structuredClone(state.todos),
+    saveTodos: (todos) => {
+      state.todos = structuredClone(todos);
+    },
     schedules: () => structuredClone(state.schedules),
     saveSchedules: (schedules) => {
       state.schedules = structuredClone(schedules);
@@ -614,5 +617,47 @@ describe('定时', () => {
     ]);
     h.host.tick(localAt(9) + 120_000);
     expect(scheduleUpdates(h)).toHaveLength(1);
+  });
+
+  it('目标完成且会话结束后待办自动打勾，还在跑时不打', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.todoId = 'td1';
+    h.state.todos = [
+      { id: 'td1', text: '看构建', createdAt: 0, updatedAt: 0, conversationId: 'c1' },
+    ];
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    expect(h.state.todos[0].doneAt).toBeUndefined();
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.todos[0].doneAt).toBe(0);
+  });
+
+  it('会话失败、被中断或删除时待办离开进行中', () => {
+    const failed = harness({});
+    failed.state.todos = [
+      { id: 'td1', text: '看构建', createdAt: 0, updatedAt: 0, conversationId: 'c1' },
+    ];
+    failed.state.statuses.c1 = error;
+    failed.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'running'));
+    expect(failed.state.todos[0].problem).toBe('failed');
+
+    const stopped = harness({});
+    stopped.state.todos = [
+      { id: 'td1', text: '看构建', createdAt: 0, updatedAt: 0, conversationId: 'c1' },
+    ];
+    stopped.state.statuses.c1 = idle;
+    stopped.host.onAgentEvent(
+      event('turn-completed', { aborted: true }),
+      change('idle', 'running')
+    );
+    expect(stopped.state.todos[0].problem).toBe('stopped');
+
+    const gone = harness({});
+    gone.state.todos = [
+      { id: 'td1', text: '看构建', createdAt: 0, updatedAt: 0, conversationId: 'c1' },
+    ];
+    delete gone.state.rows.c1;
+    gone.host.tick(1_000);
+    expect(gone.state.todos[0].problem).toBe('deleted');
   });
 });

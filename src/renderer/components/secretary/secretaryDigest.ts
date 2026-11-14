@@ -138,7 +138,7 @@ export function secretaryDigest(board: SecretaryBoard, now: number): SecretaryDi
     counts: {
       needsYou: board.needsYou.length,
       running: board.running.length,
-      todos: board.todos.length,
+      todos: board.todos.filter((todo) => (todo.phase ?? 'todo') === 'todo').length,
     },
     events: events.slice(0, EVENT_LIMIT),
   };

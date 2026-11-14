@@ -51,6 +51,7 @@ describe('secretary tool allowlist', () => {
     expect(isSecretaryToolAllowed('skill_propose')).toBe(true);
     expect(SECRETARY_OPS).toContain('skill_propose');
     expect(SECRETARY_OPS).toContain('tool_propose');
+    expect(SECRETARY_OPS).toContain('todo_list');
     for (const banned of ['read', 'write', 'edit', 'bash']) {
       expect(isSecretaryToolAllowed(banned), banned).toBe(false);
     }

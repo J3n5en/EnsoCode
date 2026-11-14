@@ -15,6 +15,7 @@ import {
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
 import type { SecretarySessionStatus } from './readers';
+import { todoSessionView, todoStatus } from './todoLifecycle';
 
 /** 运行中超过这么久没有任何 worker 事件就算可能卡住 */
 export const STALL_MS = 10 * 60 * 1000;
@@ -266,7 +267,31 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     needsYou,
     running,
     done,
-    todos: input.todos.filter((todo) => todo.doneAt === undefined),
+    todos: input.todos.flatMap((todo) => {
+      const session = todo.conversationId
+        ? todoSessionView(
+            input.rows[todo.conversationId],
+            input.statuses[todo.conversationId],
+            file.dispatched[todo.conversationId]?.lastResult?.kind
+          )
+        : null;
+      const phase = todoStatus(todo, session);
+      if (phase === 'done') return [];
+      const project = todo.projectId
+        ? input.projects.find((candidate) => candidate.projectId === todo.projectId)
+        : undefined;
+      return [
+        {
+          ...todo,
+          phase,
+          ...(project ? { projectName: projectNameFromPath(project.canonicalPath) } : {}),
+          ...(session?.title ? { sessionTitle: redactSecrets(session.title) } : {}),
+          ...(todo.conversationId
+            ? { sessionState: session?.present ? session.state : ('gone' as const) }
+            : {}),
+        },
+      ];
+    }),
   };
 }
 
