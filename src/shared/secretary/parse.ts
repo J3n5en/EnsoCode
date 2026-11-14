@@ -126,6 +126,7 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     },
     autonomy: oneOf(value.autonomy, AUTONOMIES, 'ask-first'),
     autoApproveProjectIds: texts(value.autoApproveProjectIds),
+    pluginIds: texts(value.pluginIds),
     visibleProjectIds: Array.isArray(value.visibleProjectIds)
       ? texts(value.visibleProjectIds)
       : 'all',
@@ -237,6 +238,10 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
       return { ok: false, error: 'invalid autoApproveProjectIds' };
     }
     draft.autoApproveProjectIds = texts(value.autoApproveProjectIds);
+  }
+  if (value.pluginIds !== undefined) {
+    if (!validIdList(value.pluginIds)) return { ok: false, error: 'invalid pluginIds' };
+    draft.pluginIds = texts(value.pluginIds);
   }
   if (value.visibleProjectIds !== undefined) {
     if (value.visibleProjectIds !== 'all' && !validIdList(value.visibleProjectIds)) {

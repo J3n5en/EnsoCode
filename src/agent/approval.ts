@@ -383,6 +383,35 @@ export function withApproval(
   };
 }
 
+/**
+ * 秘书会话的插件工具：作者没声明只读的每次都要真人确认，不受会话档位与
+ * 「本会话总是允许」影响——插件能以用户身份往外发消息，一次放行不能代表下一次。
+ */
+export function withMandatoryApproval(
+  gate: ApprovalGate,
+  kind: ApprovalKind,
+  definition: ToolDefinition
+): ToolDefinition {
+  if (definition.annotations?.readOnlyHint === true) return definition;
+  return {
+    ...definition,
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const result = await gate.ask(
+        definition.name,
+        kind,
+        summarizeApproval(kind, params, definition.name),
+        signal,
+        toolCallId
+      );
+      if (result === 'no-approver') {
+        throw new Error(approvalNoUserMessage(definition.label || definition.name, gate.mode));
+      }
+      throwUnlessAllowed(result);
+      return definition.execute(toolCallId, params, signal, onUpdate, ctx);
+    },
+  };
+}
+
 /** 平时免审的只读工具：只在底线开启且读取密钥文件时要求确认 */
 export function withProtectedFloor(
   gate: ApprovalGate,

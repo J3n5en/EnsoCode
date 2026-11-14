@@ -9,6 +9,7 @@ import type { PluginSessionStatus, SessionStatusPayload } from '@shared/extensio
 import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
+import { wrapUntrusted } from '@shared/secretary/transcript';
 import { resolveSshTarget } from '@shared/ssh';
 import {
   cleanToolBatchLabel,
@@ -149,7 +150,7 @@ import {
   voiceCorrectionModelIdFromSettings,
 } from '../services/llama/chatModels';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
-import type { Complete } from '../services/memory/distill';
+import { type Complete, redactSecrets } from '../services/memory/distill';
 import { memorySpaceContext, secretaryReadProjectIds } from '../services/memory/space';
 import {
   configureMemoryDistill,
@@ -537,7 +538,7 @@ function spawnBoundSession(
       credentialKeys,
       remoteConfigFor(request.sessionId),
       projectIdFor(request.sessionId),
-      { secretary: { systemPrompt: secretarySystemPrompt() } }
+      { secretary: secretarySpawnOptions() }
     );
   }
   return spawnSession(
@@ -554,15 +555,21 @@ function secretaryStore(): SecretaryStore {
   return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
 }
 
-/** 模型每轮看到的都是最新配置 */
-function secretarySystemPrompt(): string {
+/**
+ * 模型每轮看到的都是最新配置；插件与技能勾选在 spawn 时定死，改了要释放会话。
+ */
+function secretarySpawnOptions(): { systemPrompt: string; pluginIds: string[] } {
   const store = secretaryStore();
+  const profile = store.profile();
   const language = readSettingsState()?.language;
-  return buildSecretarySystemPrompt({
-    profile: store.profile(),
-    persona: store.readPersona(),
-    uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
-  });
+  return {
+    systemPrompt: buildSecretarySystemPrompt({
+      profile,
+      persona: store.readPersona(),
+      uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
+    }),
+    pluginIds: profile?.pluginIds ?? [],
+  };
 }
 
 /** Main 侧根会话 spawn：pair 与秘书共用，renderer 走 AGENT_SPAWN 自己的校验 */
@@ -1459,11 +1466,22 @@ async function runAgentControl(
 }
 
 export function registerAgentHandlers(): void {
-  registerPluginSessionBridge((sessionId) => {
-    const identity = agentSessionIndex.currentIdentity(sessionId);
-    if (!identity || 'parent' in identity || !agentSessionIndex.isReady(identity)) return undefined;
-    return identity;
-  });
+  registerPluginSessionBridge(
+    (sessionId) => {
+      const identity = agentSessionIndex.currentIdentity(sessionId);
+      if (!identity || 'parent' in identity || !agentSessionIndex.isReady(identity))
+        return undefined;
+      return identity;
+    },
+    // 插件消息进秘书会话一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导
+    (sessionId, pluginId, text) => {
+      const conversation = sourceAuthority?.conversation(sessionId);
+      const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+      return isSecretaryProject(project)
+        ? wrapUntrusted(`plugin:${pluginId}`, redactSecrets(text))
+        : text;
+    }
+  );
   const sessionSource = () => ({
     conversations: sourceAuthority?.projection().conversations ?? [],
     persisted: (id: string) => agentSessionIndex.persistedConversation(id),

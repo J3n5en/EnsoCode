@@ -1,6 +1,11 @@
 import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import { describe, expect, it } from 'vitest';
-import { SECRETARY_FORCED_DISABLED_TOOLS, SECRETARY_OPS, SECRETARY_TOOL_ALLOWLIST } from './tools';
+import {
+  isSecretaryToolAllowed,
+  SECRETARY_FORCED_DISABLED_TOOLS,
+  SECRETARY_OPS,
+  SECRETARY_TOOL_ALLOWLIST,
+} from './tools';
 
 describe('secretary tool allowlist', () => {
   it('只含 14 个秘书工具与通用只读工具，核心工具与写工具不在其中', () => {
@@ -30,5 +35,11 @@ describe('secretary tool allowlist', () => {
     expect(SECRETARY_FORCED_DISABLED_TOOLS).toEqual(
       expect.arrayContaining(['isolated_sandbox', 'workspace_write', 'goal'])
     );
+  });
+
+  it('插件工具只按 Main 本次下发的名字放行，不认 plugin_ 前缀', () => {
+    expect(isSecretaryToolAllowed('plugin_enso-tgclient__tg_send_message')).toBe(false);
+    expect(isSecretaryToolAllowed('plugin_x__evil', new Set(['plugin_x__evil']))).toBe(true);
+    expect(isSecretaryToolAllowed('plugin_x__evil', new Set(['plugin_x__echo']))).toBe(false);
   });
 });

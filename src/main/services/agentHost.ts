@@ -1002,10 +1002,10 @@ export function spawnSession(
       writeLock?: { label: string; ancestors: string[] };
     };
     /**
-     * 秘书会话：人设由 Main 组装，插件（工具/技能/MCP/hooks/命令）、子代理类型与全局指令全部不挂，
-     * 工具白名单在 worker 里按名字执行
+     * 秘书会话：人设由 Main 组装，插件只按勾选的 id 挂工具与技能，MCP / hooks / 命令、
+     * 子代理类型与全局指令仍然不挂，工具白名单在 worker 里按名字执行
      */
-    secretary?: { systemPrompt: string };
+    secretary?: { systemPrompt: string; pluginIds?: readonly string[] };
     /**
      * Main 给这次 spawn 的实例号（目前只有 Bot 宿主传）：随 spawn-parent 下发，之后同会话的 prompt / steer /
      * retry 自动带上，worker 在 parent-rejected / parent-ended 里回显，调用方据此确定结束事件属于哪个实例
@@ -1033,8 +1033,10 @@ export function spawnSession(
   const approvalReviewerSource = reviewer.ok ? reviewer.source : null;
   const bot = options?.bot;
   const secretary = options?.secretary;
-  // 秘书与 Bot 同口径：Enso 插件整批关掉，插件工具会带进以用户身份发消息这类能力
-  const extensionPlugins = bot || secretary ? null : getExtensionPlugins();
+  // 秘书只挂勾选的插件；Bot 会话仍然整批关掉
+  const extensionPlugins = bot ? null : getExtensionPlugins();
+  /** 只有秘书会话按勾选圈定插件；undefined 表示普通会话照旧拿全部已启用插件 */
+  const secretaryPluginIds = secretary ? (secretary.pluginIds ?? []) : undefined;
   const overlay = bot || secretary ? undefined : presetOverlay(request.presetId, resolvePreset);
   const overlayResult = extensionPlugins?.presetForSpawn(overlay?.pluginPresetId);
   if (overlayResult && !overlayResult.ok && overlay?.required) {
@@ -1074,7 +1076,7 @@ export function spawnSession(
   const skillPaths = [
     ...enabledSkillPaths(preset),
     ...(bot || secretary ? [] : plugins.skillPaths),
-    ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset) ?? []),
+    ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset, secretaryPluginIds) ?? []),
   ];
   const workflowPresetFiles = extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? [];
   const mcpServers = enabledMcpServers(preset);
@@ -1086,7 +1088,7 @@ export function spawnSession(
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);
   }
-  const pluginTools = extensionPlugins?.toolsForSpawn() ?? [];
+  const pluginTools = extensionPlugins?.toolsForSpawn(secretaryPluginIds) ?? [];
   // hooks 在本机起进程，远程会话的 cwd 不在本机
   const pluginHooks = remote || secretary ? [] : plugins.hooks;
   const subagentModels =
@@ -1157,7 +1159,7 @@ export function spawnSession(
     },
   });
   if (!presetApplied.ok) return { ok: false, error: presetApplied.error };
-  const pluginEvents = extensionPlugins?.eventPlanForSpawn() ?? null;
+  const pluginEvents = extensionPlugins?.eventPlanForSpawn(secretaryPluginIds) ?? null;
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
   const dcgPath = state?.dcgEnabled === true ? installedDcgPath(dcgRoot()) : null;
@@ -1626,12 +1628,14 @@ export function sendPluginInterceptResultToSession(
 }
 
 export function registerPluginSessionBridge(
-  lookup: (sessionId: string) => SessionIdentity | undefined
+  lookup: (sessionId: string) => SessionIdentity | undefined,
+  /** 投递前改写正文：秘书会话要把插件消息包成不可信内容 */
+  decorate?: (sessionId: string, pluginId: string, text: string) => string
 ): void {
   setPluginSessionBridge({
     inject(sessionId, message) {
-      if (message.text.length > PLUGIN_INJECT_MAX_CHARS)
-        return { ok: false, error: '注入文本过长' };
+      const text = decorate?.(sessionId, message.pluginId, message.text) ?? message.text;
+      if (text.length > PLUGIN_INJECT_MAX_CHARS) return { ok: false, error: '注入文本过长' };
       const identity = lookup(sessionId);
       if (!identity) return { ok: false, error: '会话不在运行', notRunning: true };
       const { images, ...rest } = message;
@@ -1639,6 +1643,7 @@ export function registerPluginSessionBridge(
         type: 'plugin-inject',
         identity,
         ...rest,
+        text,
         ...(images.length ? { images } : {}),
       });
       return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法注入消息' };

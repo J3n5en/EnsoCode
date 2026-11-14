@@ -103,6 +103,10 @@ function sameModel(a: SecretaryProfile['model'], b: SecretaryProfile['model']): 
   );
 }
 
+function sameIds(a: readonly string[] = [], b: readonly string[] = []): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
+
 /** 模型换了就改会话行；活着的会话当场换，下次 spawn 也读新行 */
 function modelRowPatch(model: ModelPatch): Record<string, unknown> {
   return {
@@ -131,14 +135,16 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
   ): Promise<void> {
     syncSystemSchedules(ports, profile, await ports.todos());
     const modelChanged = !sameModel(before?.model, profile.model);
-    if (!modelChanged && !identityChanged) return;
+    // 插件在 spawn 时定死：勾选变了，活着的会话还挂着旧工具集
+    const kitChanged = identityChanged || !sameIds(before?.pluginIds, profile.pluginIds);
+    if (!modelChanged && !kitChanged) return;
     const model = profile.model;
     for (const { conversationId } of await ports.conversations()) {
       if (modelChanged && model) {
         await ports.patchRow(conversationId, modelRowPatch(model));
         if (await ports.alive(conversationId)) await ports.setModel(conversationId, model);
       }
-      if (!identityChanged || !(await ports.alive(conversationId))) continue;
+      if (!kitChanged || !(await ports.alive(conversationId))) continue;
       const status = await ports.status(conversationId);
       if (status.state === 'idle' && status.pendingAsks + status.pendingApprovals === 0) {
         await ports.release(conversationId);

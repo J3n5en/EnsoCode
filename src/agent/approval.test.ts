@@ -1,6 +1,12 @@
 import type { ApprovalRequestInfo } from '@shared/types/agent';
 import { describe, expect, it, vi } from 'vitest';
-import { ApprovalGate, summarizeApproval, withApproval, withProtectedFloor } from './approval';
+import {
+  ApprovalGate,
+  summarizeApproval,
+  withApproval,
+  withMandatoryApproval,
+  withProtectedFloor,
+} from './approval';
 import { takeApprovalReview } from './approvalReviewRecords';
 
 // 契约（design.md 运行时数据流）：ApprovalGate 构造函数新增可选第 4 参 options，
@@ -1132,5 +1138,77 @@ describe('无人值守：需要审批的动作直接拒绝，不建 pending（�
     expect(requests).toHaveLength(2);
     gate.respond(gate.snapshot()[0].requestId, 'allow');
     await expect(again).resolves.toBe('allow');
+  });
+});
+
+describe('withMandatoryApproval', () => {
+  const pluginTool = (readOnly: boolean) => ({
+    name: 'plugin_enso-tgclient__tg_send_message',
+    label: 'Send message',
+    description: '',
+    parameters: {} as never,
+    ...(readOnly ? { annotations: { readOnlyHint: true } } : {}),
+    execute: vi.fn(async () => ({
+      content: [{ type: 'text' as const, text: 'ok' }],
+      details: undefined,
+    })),
+  });
+
+  it('作者声明只读的插件工具直接执行，不建卡片', async () => {
+    const { gate, requests } = makeGate('supervised');
+    const tool = pluginTool(true);
+    await withMandatoryApproval(gate, 'mcp', tool).execute(
+      'call-1',
+      {},
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(requests).toHaveLength(0);
+    expect(tool.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('非只读插件工具在 full 档与「本会话总是允许」之后仍每次要人确认', async () => {
+    const { gate, requests } = makeGate('full');
+    const tool = pluginTool(false);
+    const wrapped = withMandatoryApproval(gate, 'mcp', tool);
+    const first = wrapped.execute(
+      'call-1',
+      { text: 'hi' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(requests).toHaveLength(1);
+    gate.respond(gate.snapshot()[0].requestId, 'allowSession');
+    await expect(first).resolves.toBeDefined();
+    expect(gate.needsApproval('mcp', tool.name)).toBe(false);
+
+    const second = wrapped.execute(
+      'call-2',
+      { text: 'again' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(requests).toHaveLength(2);
+    gate.respond(gate.snapshot()[0].requestId, 'allow');
+    await expect(second).resolves.toBeDefined();
+    expect(tool.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('拒绝时不执行工具', async () => {
+    const { gate } = makeGate('supervised');
+    const tool = pluginTool(false);
+    const pending = withMandatoryApproval(gate, 'mcp', tool).execute(
+      'call-1',
+      {},
+      undefined,
+      undefined,
+      undefined as never
+    );
+    gate.respond(gate.snapshot()[0].requestId, 'deny');
+    await expect(pending).rejects.toThrow('User denied this operation');
+    expect(tool.execute).not.toHaveBeenCalled();
   });
 });

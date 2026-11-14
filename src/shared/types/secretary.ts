@@ -9,6 +9,8 @@ export interface SecretaryProfile {
   model?: ModelRef & { thinkingLevel?: ThinkingLevel };
   autonomy: SecretaryAutonomy;
   autoApproveProjectIds: string[];
+  /** 勾选给秘书用的 Enso 插件 id；插件停用或卸载后自动失效，不改写档案 */
+  pluginIds?: string[];
   visibleProjectIds: 'all' | string[];
   dispatchModel:
     | { mode: 'project' }

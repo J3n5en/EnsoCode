@@ -70,6 +70,17 @@ describe('parseProfileDraft', () => {
       draft: { name: '小秘', autonomy: 'full', dailyBriefAt: null, addressAs: null, model: null },
     });
   });
+
+  it('narrows the checked plugin ids to a deduped string list', () => {
+    expect(parseProfileDraft({ pluginIds: ['enso.tgclient', 'enso.tgclient'] })).toEqual({
+      ok: true,
+      draft: { pluginIds: ['enso.tgclient'] },
+    });
+    expect(parseProfileDraft({ pluginIds: ['enso.tgclient', 7] })).toEqual({
+      ok: false,
+      error: 'invalid pluginIds',
+    });
+  });
 });
 
 describe('parseProfile', () => {
@@ -86,6 +97,7 @@ describe('parseProfile', () => {
       avatar: { color: '#7c5cff' },
       autonomy: 'ask-first',
       autoApproveProjectIds: [],
+      pluginIds: [],
       visibleProjectIds: 'all',
       dispatchModel: { mode: 'project' },
       dispatchWorktree: 'auto',
@@ -126,6 +138,7 @@ describe('parseProfile', () => {
       model: { providerId: 'openai', modelId: 'gpt', thinkingLevel: 'max' },
       autonomy: 'full',
       autoApproveProjectIds: ['p1'],
+      pluginIds: [],
       visibleProjectIds: ['p1'],
       dispatchModel: {
         mode: 'fixed',
@@ -195,6 +208,13 @@ describe('parseProfile', () => {
         },
       })?.dispatchModel
     ).toEqual({ mode: 'choose', candidates: [{ providerId: 'a', modelId: 'b' }] });
+  });
+
+  it('keeps the checked plugin ids, dropping junk and repeats', () => {
+    expect(
+      parseProfile({ pluginIds: ['enso.tgclient', 'enso.tgclient', 7, '', null] })?.pluginIds
+    ).toEqual(['enso.tgclient']);
+    expect(parseProfile({ pluginIds: 'enso.tgclient' })?.pluginIds).toEqual([]);
   });
 });
 

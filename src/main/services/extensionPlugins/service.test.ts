@@ -234,6 +234,56 @@ describe('ExtensionPluginService', () => {
     expect(service.eventPlanForSpawn()).toBeNull();
   });
 
+  it('按插件 id 过滤 spawn 贡献：工具、技能与事件计划只算传进来的插件', async () => {
+    await install({
+      'enso-plugin.json': manifest({
+        id: 'example.alpha',
+        name: 'Alpha',
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'alpha_tool', description: 'a', parameters: { type: 'object' } }],
+          skills: ['skills/alpha'],
+          events: [{ event: 'session_start', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) { enso.tools.register('alpha_tool', async () => 'alpha'); }`,
+      'skills/alpha/SKILL.md': '---\nname: alpha\n---\nbody',
+    });
+    await install({
+      'enso-plugin.json': manifest({
+        id: 'example.beta',
+        name: 'Beta',
+        permissions: ['agent.tool', 'agent.observe'],
+        contributes: {
+          agentTools: [{ name: 'beta_tool', description: 'b', parameters: { type: 'object' } }],
+          skills: ['skills/beta'],
+          events: [{ event: 'agent_end', mode: 'observe' }],
+        },
+      }),
+      'main.mjs': `export function activate(enso) { enso.tools.register('beta_tool', async () => 'beta'); }`,
+      'skills/beta/SKILL.md': '---\nname: beta\n---\nbody',
+    });
+    await service.setEnabled('example.alpha', true);
+    await service.setEnabled('example.beta', true);
+
+    expect(service.toolsForSpawn(['example.alpha']).map((tool) => tool.pluginId)).toEqual([
+      'example.alpha',
+    ]);
+    expect(service.toolsForSpawn().map((tool) => tool.pluginId)).toEqual([
+      'example.alpha',
+      'example.beta',
+    ]);
+    expect(service.skillPathsForSpawn(undefined, ['example.beta'])).toHaveLength(1);
+    expect(service.skillPathsForSpawn(undefined, ['example.beta'])[0]).toMatch(/skills[/\\]beta$/);
+    expect(service.eventPlanForSpawn(['example.alpha'])).toEqual({
+      observe: ['session_start'],
+      intercept: [],
+      inject: false,
+    });
+    expect(service.toolsForSpawn(['example.gone'])).toEqual([]);
+    expect(service.eventPlanForSpawn(['example.gone'])).toBeNull();
+  });
+
   it('调用插件工具：会话 id 由 Main 传入', async () => {
     await install({ 'enso-plugin.json': manifest(), 'main.mjs': mainJs });
     await service.setEnabled('example.demo', true);

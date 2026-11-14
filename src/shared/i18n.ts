@@ -3433,6 +3433,11 @@ export const zhTranslations: Record<string, string> = {
   'Edit here': '就地修改',
   'Profile saved': '配置已保存',
   'Saving the profile…': '正在保存配置…',
+  'Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call.':
+    '勾选插件，秘书就能用它的 Agent 工具与技能。不是只读的工具每次调用都要你确认。',
+  'No plugins enabled': '没有已启用的插件',
+  '{{n}} tools': '{{n}} 个工具',
+  'Sends messages': '会投递消息',
   'Secretary profile': '秘书档案',
   'Name, avatar, model and how much the secretary may do on its own.':
     '名字、头像、模型，以及它能自己做到什么程度。',

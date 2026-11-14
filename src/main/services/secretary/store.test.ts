@@ -16,6 +16,7 @@ const profile: SecretaryProfile = {
   avatar: { color: '#0ea5e9' },
   autonomy: 'tell-after',
   autoApproveProjectIds: ['p1'],
+  pluginIds: [],
   visibleProjectIds: 'all',
   dispatchModel: { mode: 'project' },
   dispatchWorktree: 'auto',

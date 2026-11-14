@@ -1,3 +1,4 @@
+import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
 import { secretaryAvatarUrl } from '@shared/localImage';
 import type {
   SecretaryProfile,
@@ -14,6 +15,7 @@ import {
 import { SecretaryProfileForm } from '@/components/secretary/SecretaryProfileForm';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
@@ -82,6 +84,62 @@ function formatWhen(at: number | undefined, locale: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/** 勾选给秘书用的 Enso 插件：只列已安装且已启用的，停用后勾选自动失效 */
+function PluginPicker({
+  pluginIds,
+  busy,
+  onChange,
+}: {
+  pluginIds: string[];
+  busy: boolean;
+  onChange: (pluginIds: string[]) => void;
+}) {
+  const { t } = useI18n();
+  const [plugins, setPlugins] = React.useState<ExtensionPluginSummary[]>([]);
+  React.useEffect(() => {
+    void window.electronAPI.extensionPlugins
+      .list()
+      .then((list) => setPlugins(list))
+      .catch(() => undefined);
+  }, []);
+  const enabled = plugins.filter((plugin) => plugin.state === 'enabled');
+  if (enabled.length === 0)
+    return <p className="text-xs text-muted-foreground">{t('No plugins enabled')}</p>;
+  return (
+    <div className="divide-y rounded-md border">
+      {enabled.map((plugin) => (
+        <label
+          key={plugin.id}
+          className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm"
+          data-enso="secretary-plugin-row"
+          data-plugin-id={plugin.id}
+        >
+          <Checkbox
+            checked={pluginIds.includes(plugin.id)}
+            disabled={busy}
+            onCheckedChange={(checked) =>
+              onChange(
+                checked === true
+                  ? [...pluginIds, plugin.id]
+                  : pluginIds.filter((id) => id !== plugin.id)
+              )
+            }
+          />
+          <span className="min-w-0 flex-1 truncate">{plugin.name}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {t('{{n}} tools', { n: plugin.tools.length })}
+          </span>
+          {plugin.permissions.includes('agent.inject') ? (
+            <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+              {t('Sends messages')}
+            </span>
+          ) : null}
+        </label>
+      ))}
+    </div>
+  );
 }
 
 /** 设置 → 秘书：档案、风格与打扰、定时、重来 */
@@ -249,6 +307,24 @@ export function SecretarySettings() {
           busy={busy}
           onSubmit={(draft) => void save(draft)}
         />
+      </Section>
+
+      <Section
+        title="Plugins"
+        description="Check a plugin to give the secretary its agent tools and skills. Tools that are not read-only ask for your approval on every call."
+        rowId="secretary.plugins"
+      >
+        {profile ? (
+          <PluginPicker
+            pluginIds={profile.pluginIds ?? []}
+            busy={busy}
+            onChange={(pluginIds) => void save({ pluginIds })}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t('The secretary has not been set up yet.')}
+          </p>
+        )}
       </Section>
 
       {styleDraft ? (

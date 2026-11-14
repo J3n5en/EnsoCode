@@ -122,6 +122,7 @@ import {
   ApprovalGate,
   type ApprovalReviewResult,
   withApproval,
+  withMandatoryApproval,
   withProtectedFloor,
 } from './approval';
 import {
@@ -3189,7 +3190,10 @@ export class SessionSupervisor {
         : []),
       ...(pluginTools
         ? createPluginTools([...pluginToolDescriptors], pluginTools).map((tool) =>
-            withApproval(gate, 'mcp', tool)
+            // 秘书会话里的插件工具可能以用户身份往外发消息：非只读的每次都要人确认
+            secretaryMode
+              ? withMandatoryApproval(gate, 'mcp', tool)
+              : withApproval(gate, 'mcp', tool)
           )
         : []),
       ...builtin('ask_user', [createAskTool(askManager)]),
@@ -3252,7 +3256,9 @@ export class SessionSupervisor {
     );
     const planGated = (tools: Def[]): Def[] =>
       tools.map((tool) => withPlanGate(tool, { host: planHost, readonlyAgentTypes }));
-    // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具与插件工具都不在其中
+    // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具与插件工具都不在其中。
+    // 插件工具名只认 Main 本次下发的描述符，不按 plugin_ 前缀放行
+    const secretaryPluginToolNames = new Set(pluginToolDescriptors.map((tool) => tool.name));
     const customTools = omitNamedTools(
       decorateSessionTools(
         [
@@ -3262,7 +3268,9 @@ export class SessionSupervisor {
         { runaway, budget }
       ),
       disabledTools
-    ).filter((tool) => !secretaryMode || isSecretaryToolAllowed(tool.name));
+    ).filter(
+      (tool) => !secretaryMode || isSecretaryToolAllowed(tool.name, secretaryPluginToolNames)
+    );
     codemodeHost.bindDeferredTools(
       deferredMcpLoader(gate, (tools) =>
         decorateSessionTools(planGated(tools), { runaway, budget })
@@ -3357,7 +3365,7 @@ export class SessionSupervisor {
       const active = session.getActiveToolNames();
       // 分组会把名字加回来，秘书再与允许列表求交，否则恢复一个分组就绕过了装配时的过滤
       const next = nextActiveToolNames(active, builtinGroups, enabled).filter(
-        (name) => !secretaryMode || isSecretaryToolAllowed(name)
+        (name) => !secretaryMode || isSecretaryToolAllowed(name, secretaryPluginToolNames)
       );
       if (next.length !== active.length || next.some((name, index) => name !== active[index])) {
         session.setActiveToolsByName(next);

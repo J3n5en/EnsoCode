@@ -233,7 +233,7 @@ describe('SessionSupervisor secretary tool loadout', () => {
       expect(names, banned).not.toContain(banned);
   });
 
-  it('下发的插件工具与 MCP 工具对秘书不可见', async () => {
+  it('只放行 Main 本次下发的插件工具，MCP 工具对秘书仍不可见', async () => {
     const events: AgentWorkerEvent[] = [];
     mocks.mcpToolsFor.mockResolvedValue([
       {
@@ -248,7 +248,7 @@ describe('SessionSupervisor secretary tool loadout', () => {
       mcpServers: [{ name: 'github', transport: 'stdio', command: 'gh-mcp' }],
       pluginTools: [
         {
-          name: 'tg_send_message',
+          name: 'plugin_enso-tgclient__tg_send_message',
           description: 'send',
           parameters: { type: 'object', properties: {} },
           pluginId: 'enso.tgclient',
@@ -256,9 +256,50 @@ describe('SessionSupervisor secretary tool loadout', () => {
       ],
     });
     const names = visibleToolNames();
-    expect(names).not.toContain('tg_send_message');
+    expect(names).toContain('plugin_enso-tgclient__tg_send_message');
     expect(names).not.toContain('mcp_github_comment');
-    expect(new Set(names)).toEqual(new Set(SECRETARY_TOOL_ALLOWLIST));
+    expect(names).not.toContain('plugin_enso-tgclient__tg_watch');
+    expect(new Set(names)).toEqual(
+      new Set([...SECRETARY_TOOL_ALLOWLIST, 'plugin_enso-tgclient__tg_send_message'])
+    );
+  });
+
+  it('运行时恢复内置工具组后，插件工具仍在、白名单外的名字进不来', async () => {
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: path.join(tmpdir(), 'enso-secretary-agent'),
+      sessionDir: path.join(tmpdir(), 'enso-secretary-sessions'),
+    });
+    try {
+      supervisor.handleCommand({
+        type: 'spawn-parent',
+        identity: parent,
+        cwd: '/workspace',
+        model,
+        secretaryMode: true,
+        pluginTools: [
+          {
+            name: 'plugin_x__echo',
+            description: 'echo',
+            parameters: { type: 'object', properties: {} },
+            pluginId: 'x',
+            readOnly: true,
+          },
+        ],
+      });
+      await waitFor(events, 'parent-ready');
+      supervisor.handleCommand({ type: 'set-builtin-tools', identity: parent, disabledTools: [] });
+      await settle();
+      const active = (
+        mocks.sessions[0] as unknown as { getActiveToolNames(): string[] }
+      ).getActiveToolNames();
+      expect(active).toContain('plugin_x__echo');
+      for (const name of active)
+        expect(SECRETARY_TOOL_ALLOWLIST.has(name) || name === 'plugin_x__echo', name).toBe(true);
+    } finally {
+      await supervisor.shutdown();
+    }
   });
 
   it('运行时恢复内置工具组后激活名仍是白名单子集', async () => {

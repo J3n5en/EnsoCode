@@ -35,8 +35,15 @@ export const SECRETARY_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   'memory_delete',
 ]);
 
-export function isSecretaryToolAllowed(name: string): boolean {
-  return SECRETARY_TOOL_ALLOWLIST.has(name);
+/**
+ * 插件工具名由 Main 在 spawn 时明确下发，worker 不按 `plugin_` 前缀放行：
+ * 前缀能被任何名字伪造，只有本次真的装上的工具才算数。
+ */
+export function isSecretaryToolAllowed(
+  name: string,
+  pluginToolNames?: ReadonlySet<string>
+): boolean {
+  return SECRETARY_TOOL_ALLOWLIST.has(name) || pluginToolNames?.has(name) === true;
 }
 
 /** 白名单覆盖到的内置工具分组；其余分组对秘书一律关闭，含 codemode 所在的 isolated_sandbox */

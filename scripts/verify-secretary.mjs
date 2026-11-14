@@ -18,6 +18,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -28,6 +29,7 @@ const ENV = '/tmp/sec-u10-env';
 const PROJ = '/tmp/sec-u10-proj';
 const CDP_PORT = 9333;
 const FAKE_PORT = 8899;
+const PLUGIN_PORT = 8898;
 const KEEP = process.argv.includes('--keep');
 
 const settingsFile = path.join(ENV, 'settings.json');
@@ -38,6 +40,9 @@ const sessionsDir = path.join(ENV, 'agent', 'sessions');
 
 const children = [];
 const results = [];
+
+/** 测试插件经 http 分发的 zip：安装走 stageFromUrl，与用户粘贴链接同一入口 */
+let pluginServer = null;
 
 const log = (message) => console.log(message);
 
@@ -52,6 +57,11 @@ function assert(ok, label, detail) {
 }
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
+
+async function fakeRequests() {
+  const reply = await fetch(`http://127.0.0.1:${FAKE_PORT}/__requests`);
+  return (await reply.json()).requests;
+}
 
 /** settings.json 的落盘有 500ms 防抖，读到键之前先等一等 */
 const conversationsIn = () => readJson(settingsFile)['enso-conversations']?.state?.conversations;
@@ -76,6 +86,32 @@ function portFree(port) {
   });
 }
 
+function packPluginZip() {
+  const source = path.join(REPO, 'scripts/fixtures/secretary-test-plugin');
+  const target = path.join(ART, 'secretary-test-plugin.zip');
+  return new Promise((resolve, reject) => {
+    const child = spawn('zip', ['-qr', target, '.'], { cwd: source, stdio: 'ignore' });
+    child.on('exit', (code) =>
+      code === 0 ? resolve(target) : reject(new Error(`zip exited ${code}`))
+    );
+  });
+}
+
+async function servePluginZip() {
+  const zip = readFileSync(await packPluginZip());
+  const server = createHttpServer((request, response) => {
+    if (!request.url?.endsWith('.zip')) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': 'application/zip' });
+    response.end(zip);
+  });
+  await new Promise((resolve) => server.listen(PLUGIN_PORT, '127.0.0.1', resolve));
+  pluginServer = server;
+  return `http://127.0.0.1:${PLUGIN_PORT}/secretary-test-plugin.zip`;
+}
+
 function start(name, command, args, env) {
   const child = spawn(command, args, {
     cwd: REPO,
@@ -95,6 +131,7 @@ function start(name, command, args, env) {
 }
 
 async function stopAll() {
+  pluginServer?.close();
   for (const { name, child } of [...children].reverse()) {
     if (child.exitCode !== null || child.signalCode !== null) continue;
     try {
@@ -222,10 +259,11 @@ async function prepareEnv() {
 
 async function main() {
   log('== env');
-  for (const port of [CDP_PORT, FAKE_PORT]) {
+  for (const port of [CDP_PORT, FAKE_PORT, PLUGIN_PORT]) {
     if (!(await portFree(port))) throw new Error(`port ${port} is already in use`);
   }
   await prepareEnv();
+  const pluginZipUrl = await servePluginZip();
 
   log('== fake provider + dev');
   start('fake-provider', process.execPath, ['scripts/fake-provider-issue-27.mjs'], {});
@@ -267,13 +305,13 @@ async function main() {
 
   const cdp = await connect();
   try {
-    await run(cdp);
+    await run(cdp, pluginZipUrl);
   } finally {
     cdp.close();
   }
 }
 
-async function run(cdp) {
+async function run(cdp, pluginZipUrl) {
   const page = cdp.json.bind(cdp);
 
   // 主窗口首帧之前 __stores 还不存在，先等 renderer 起来
@@ -328,6 +366,131 @@ async function run(cdp) {
   `);
   assert(setup.ok, 'setup: 隔离实例里建出项目与秘书会话', setup);
   await cdp.shot(path.join(ART, '01-sidebar.png'));
+
+  log('== 插件：勾选后才进秘书会话');
+  const installed = await page(`
+    const staged = await window.electronAPI.extensionPlugins.stageFromUrl(${JSON.stringify(pluginZipUrl)});
+    if (!staged.ok) return JSON.stringify({ ok: false, error: staged.error });
+    const committed = await window.electronAPI.extensionPlugins.commit(staged.preview.token);
+    if (!committed.ok) return JSON.stringify({ ok: false, error: committed.error });
+    const enabled = await window.electronAPI.extensionPlugins.setEnabled('enso.secretarytest', true);
+    if (!enabled.ok) return JSON.stringify({ ok: false, error: enabled.error });
+    const listed = (await window.electronAPI.extensionPlugins.list()).find(
+      (plugin) => plugin.id === 'enso.secretarytest'
+    );
+    const saved = await window.electronAPI.secretary.saveProfile({
+      pluginIds: ['enso.secretarytest'],
+    });
+    if (!saved.ok) return JSON.stringify({ ok: false, error: saved.error });
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '插件回显一次 [[tool:plugin_enso-secretarytest__echo {"text":"hi"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'plugin_enso-secretarytest__echo'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({
+      ok: Boolean(result),
+      state: listed?.state,
+      tools: listed?.tools.map((tool) => tool.name),
+      secretaryId: id,
+      text: result ? textOf(result) : null,
+      isError: result?.isError === true,
+    });
+  `);
+  assert(
+    installed.ok && installed.state === 'enabled',
+    '插件: 隔离实例里装好并启用测试插件',
+    installed
+  );
+  assert(
+    installed.text?.includes('echo:hi') && !installed.isError,
+    '插件: 勾选后秘书会话能调只读插件工具并拿到返回',
+    installed
+  );
+
+  log('== 插件：非只读工具每次都要审批');
+  const poked = await page(`
+    const id = ${JSON.stringify(installed.secretaryId)};
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '发一条消息 [[tool:plugin_enso-secretarytest__poke {"text":"hello"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const pending = await until(() => (S().conversations[id]?.pendingApprovals ?? [])[0] ?? null, 40000);
+    if (!pending) return JSON.stringify({ ok: false, error: 'no approval card' });
+    const approved = await window.electronAPI.agent.respondApproval(id, pending.requestId, 'allow');
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'plugin_enso-secretarytest__poke'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({
+      ok: Boolean(result),
+      tool: pending.tool,
+      approved: approved?.ok ?? null,
+      text: result ? textOf(result) : null,
+      isError: result?.isError === true,
+    });
+  `);
+  assert(poked.tool === 'plugin_enso-secretarytest__poke', '插件: 非只读插件工具弹出审批卡', poked);
+  assert(
+    poked.approved === true && poked.text?.includes('poked:hello') && !poked.isError,
+    '插件: 批准后非只读插件工具才执行',
+    poked
+  );
+
+  log('== 插件：取消勾选后工具不可用');
+  const unchecked = await page(`
+    const saved = await window.electronAPI.secretary.saveProfile({ pluginIds: [] });
+    if (!saved.ok) return JSON.stringify({ ok: false, error: saved.error });
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '取消勾选后再回显 [[tool:plugin_enso-secretarytest__echo {"text":"again"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'plugin_enso-secretarytest__echo'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({ ok: Boolean(result), isError: result?.isError === true });
+  `);
+  const toolList = await fakeRequests().then((entries) =>
+    entries.filter((entry) => entry.lastUserText.includes('取消勾选后再回显')).at(-1)
+  );
+  assert(
+    !(toolList?.toolNames ?? []).includes('plugin_enso-secretarytest__echo'),
+    '插件: 取消勾选后新会话不再下发该插件工具',
+    toolList
+  );
+  assert(unchecked.isError === true, '插件: 取消勾选后同一调用报错', unchecked);
 
   log('== step3 派活');
   const draft = {
