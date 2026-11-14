@@ -2880,7 +2880,12 @@ async function verifyAvatar(cdp, setup) {
   );
 
   const custom = await settingsPage.json(`
-    await until(() => document.querySelector('[data-enso=secretary-form-avatar-hex]'), 30000);
+    // 档案还在加载时表单是空草案；加载完会按 updatedAt 重挂，把这时填的颜色丢掉。
+    // 先等到输入框变成 setup 落盘的颜色，再改。
+    await until(
+      () => document.querySelector('[data-enso=secretary-form-avatar-hex]')?.value === '#6366f1',
+      30000
+    );
     const input = document.querySelector('[data-enso=secretary-form-avatar-hex]');
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     setter.call(input, '#ff00aa');
@@ -2899,7 +2904,7 @@ async function verifyAvatar(cdp, setup) {
   assert(custom.presetPressed === 0, '头像: 非预设色时没有预设色块被选中', custom);
   await settingsPage.shot(path.join(ART, '01b-avatar-custom-color.png'));
 
-  await settingsPage.json(`
+  const savedColor = await settingsPage.json(`
     document.querySelector('[data-enso=secretary-form-step][data-step=workflow]').click();
     await sleep(300);
     const save = [...document.querySelectorAll('[data-enso=secretary-profile-form] button')]
@@ -2908,6 +2913,7 @@ async function verifyAvatar(cdp, setup) {
     save.click();
     return JSON.stringify({ ok: true });
   `);
+  assert(savedColor.ok, '头像: 点到保存', savedColor);
   const colored = await waitFor(
     () => (readJson(profileFile).avatar?.color === '#ff00aa' ? readJson(profileFile) : null),
     'profile.json custom color',
