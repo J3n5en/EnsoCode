@@ -169,3 +169,32 @@ it('秘书 spawn-parent 挂自有 skill 目录与勾选的全局 skill', () => {
   expect(command.skillPaths).toEqual(['/userdata/secretary/workspace/skills', '/skills/a']);
   state.skills = [];
 });
+
+it('秘书 spawn-parent 下发自造工具描述符', () => {
+  fork.posted.length = 0;
+  const descriptor = {
+    name: 'my_upper_text',
+    description: '把文本转成大写',
+    parameters: { type: 'object', properties: {} },
+    readOnly: true,
+  };
+  const result = spawnSession(
+    { sessionId: 'secretary-tools', generation: '44444444-4444-4444-8444-444444444444' },
+    { sessionId: 'secretary-tools', providerId: 'p', modelId: 'm', cwd: '/workspace' },
+    new Set(),
+    undefined,
+    undefined,
+    {
+      secretary: {
+        systemPrompt: 'SECRETARY PROMPT',
+        skillDir: '/userdata/secretary/workspace/skills',
+        tools: [descriptor],
+      },
+    }
+  );
+  expect(result.ok).toBe(true);
+  const command = fork.posted.find(
+    (entry) => (entry as AgentCommand).type === 'spawn-parent'
+  ) as Extract<AgentCommand, { type: 'spawn-parent' }>;
+  expect(command.secretaryTools).toEqual([descriptor]);
+});

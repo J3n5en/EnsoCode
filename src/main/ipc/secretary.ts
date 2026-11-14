@@ -11,6 +11,7 @@ import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
+import { secretaryTool } from '../services/secretary/customTools';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
   buildSecretaryState,
@@ -376,6 +377,18 @@ export function registerSecretaryHandlers(): void {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     return secretarySkill.remove(request, null);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TOOLS_LIST, async (event) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return { ok: true, tools: secretaryTool.list() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TOOL_DELETE, async (event, request: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return secretaryTool.remove(request, null);
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, async (event, request: unknown) => {

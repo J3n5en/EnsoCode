@@ -21,6 +21,7 @@ import {
   type SecretaryState,
   type SecretaryTodo,
   type SecretaryTodoMutate,
+  type SecretaryToolDraft,
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
@@ -70,6 +71,11 @@ export interface SecretaryDispatchPorts {
   /** 确认 skill 提案：交给 skill 服务写盘、审计并释放会话 */
   applySkill(
     draft: SecretarySkillDraft,
+    secretaryConversationId: string | null
+  ): Promise<{ ok: boolean; error?: string }>;
+  /** 确认工具提案：交给工具服务写盘、审计并释放会话 */
+  applyTool(
+    draft: SecretaryToolDraft,
     secretaryConversationId: string | null
   ): Promise<{ ok: boolean; error?: string }>;
   newId(): string;
@@ -644,6 +650,17 @@ export async function resolveProposal(
       applied.ok ? { ok: true } : { ok: false, error: applied.error ?? 'skill-save-failed' }
     );
   }
+  if (transitioned.proposal.kind === 'tool') {
+    const applied = await ports.applyTool(
+      transitioned.proposal.draft,
+      proposal.secretaryConversationId
+    );
+    return finishProposal(
+      ports,
+      proposalId,
+      applied.ok ? { ok: true } : { ok: false, error: applied.error ?? 'tool-save-failed' }
+    );
+  }
 
   const profile = await profileOf(ports);
   const draft = mergeDraft(transitioned.proposal.draft, edits);
@@ -849,6 +866,11 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
   applySkill: async (draft, secretaryConversationId) => {
     const { secretarySkill } = await import('./skills');
     const result = await secretarySkill.save(draft, secretaryConversationId);
+    return result.ok ? { ok: true } : result;
+  },
+  applyTool: async (draft, secretaryConversationId) => {
+    const { secretaryTool } = await import('./customTools');
+    const result = await secretaryTool.save(draft, secretaryConversationId);
     return result.ok ? { ok: true } : result;
   },
   newId: () => randomUUID(),

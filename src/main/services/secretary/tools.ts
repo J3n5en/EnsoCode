@@ -1,4 +1,5 @@
-import type { SecretaryOp } from '@shared/secretary/tools';
+import type { SecretaryInvokeOp } from '@shared/secretary/tools';
+import { secretaryToolHandlers } from './customTools';
 import { secretaryDispatchHandlers } from './dispatch';
 import { secretaryProfileHandlers } from './profile';
 import { secretaryReadHandlers } from './readers';
@@ -17,16 +18,17 @@ export type SecretaryOpHandler = (
   ctx: SecretaryOpContext
 ) => SecretaryOpResult | Promise<SecretaryOpResult>;
 
-export const SECRETARY_OP_HANDLERS: Record<SecretaryOp, SecretaryOpHandler> = {
+export const SECRETARY_OP_HANDLERS: Record<SecretaryInvokeOp, SecretaryOpHandler> = {
   ...secretaryReadHandlers,
   ...secretaryDispatchHandlers,
   ...secretaryScheduleHandlers,
   ...secretaryProfileHandlers,
   ...secretarySkillHandlers,
+  ...secretaryToolHandlers,
 };
 
 export async function invokeSecretaryOp(
-  op: SecretaryOp,
+  op: SecretaryInvokeOp,
   params: unknown,
   ctx: SecretaryOpContext
 ): Promise<SecretaryOpResult> {

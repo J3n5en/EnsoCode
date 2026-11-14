@@ -242,6 +242,7 @@ import type {
   SecretarySkillDraft,
   SecretaryState,
   SecretaryTodoMutate,
+  SecretaryToolDraft,
 } from '@shared/types/secretary';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import type {
@@ -414,6 +415,14 @@ const electronAPI = {
       name: string
     ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_DELETE, { name }),
+    /** 秘书自造的工具：名字即目录名，代码供设置页展开查看 */
+    listTools: (): Promise<
+      { ok: true; tools: SecretaryToolDraft[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOLS_LIST),
+    removeTool: (
+      name: string
+    ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOL_DELETE, { name }),
   },
 
   modelDirectory: {

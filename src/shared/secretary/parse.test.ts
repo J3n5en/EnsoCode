@@ -343,6 +343,42 @@ describe('parseDispatchFile', () => {
     });
   });
 
+  it('keeps a tool proposal with its previous draft and drops a bad one', () => {
+    const base = {
+      secretaryConversationId: 's1',
+      createdAt: 1,
+      updatedAt: 2,
+      status: 'pending',
+      kind: 'tool',
+    };
+    const toolDraft = {
+      name: 'upper-text',
+      description: '把文本转成大写',
+      runtime: 'node',
+      parameters: { type: 'object', properties: { text: { type: 'string' } } },
+      readOnly: true,
+      code: 'process.stdout.write("x")',
+    };
+    const file = parseDispatchFile({
+      proposals: {
+        ok: {
+          ...base,
+          id: 'ok',
+          draft: toolDraft,
+          previous: { ...toolDraft, code: 'old' },
+        },
+        traversal: { ...base, id: 'traversal', draft: { ...toolDraft, name: '../escape' } },
+        badRuntime: { ...base, id: 'badRuntime', draft: { ...toolDraft, runtime: 'ruby' } },
+      },
+    });
+    expect(Object.keys(file.proposals)).toEqual(['ok']);
+    expect(file.proposals.ok).toMatchObject({
+      kind: 'tool',
+      draft: { name: 'upper-text', readOnly: true },
+      previous: { code: 'old' },
+    });
+  });
+
   it('normalizes counters and keeps the in-flight delivery within bounds', () => {
     const file = parseDispatchFile({
       dispatched: {

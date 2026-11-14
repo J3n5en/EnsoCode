@@ -1139,6 +1139,303 @@ async function run(cdp, pluginZipUrl) {
     skillRejected
   );
 
+  log('== 工具：提案 → 确认 → 写盘 → 新会话调用');
+  const toolDir = path.join(ENV, 'secretary', 'workspace', 'tools', 'upper-text');
+  const upperDraft = {
+    name: 'upper-text',
+    description: '把文本转成大写',
+    runtime: 'node',
+    parameters: {
+      type: 'object',
+      properties: { text: { type: 'string' } },
+      required: ['text'],
+      additionalProperties: false,
+    },
+    readOnly: true,
+    code: 'let raw = "";\nprocess.stdin.on("data", (chunk) => (raw += chunk));\nprocess.stdin.on("end", () => {\n  process.stdout.write(JSON.parse(raw).text.toUpperCase());\n});',
+  };
+  const upperAsk = `造一个常用工具 [[tool:tool_propose ${JSON.stringify(upperDraft)}]]`;
+  const upperProposed = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      ${JSON.stringify(upperAsk)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const card = await until(
+      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
+      30000
+    );
+    if (!card)
+      return JSON.stringify({
+        ok: false,
+        error: 'no tool proposal card',
+        messages: (S().conversations[id]?.messages ?? []).slice(-4).map((message) => ({
+          tool: message.toolName,
+          text: (Array.isArray(message.content) ? message.content : [])
+            .filter((part) => part.type === 'text')
+            .map((part) => part.text)
+            .join('')
+            .slice(0, 300),
+          isError: message.isError === true,
+        })),
+      });
+    const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
+    return JSON.stringify({
+      ok: proposal.status === 'pending' && proposal.kind === 'tool',
+      proposalId: proposal.id,
+      cardText: card.innerText,
+    });
+  `);
+  assert(
+    upperProposed.ok &&
+      upperProposed.cardText.includes('upper-text') &&
+      upperProposed.cardText.includes('Node'),
+    '工具: 聊天里出现待确认的工具卡片',
+    upperProposed
+  );
+  await cdp.shot(path.join(ART, '10-tool-proposal.png'));
+
+  const upperConfirmed = await page(`
+    const secretary = await SEC();
+    await secretary.getState().resolveProposal(${JSON.stringify(upperProposed.proposalId)}, 'confirm');
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[${JSON.stringify(upperProposed.proposalId)}];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ status: done?.status, error: done?.error });
+  `);
+  assert(upperConfirmed.status === 'succeeded', '工具: 确认后提案执行成功', upperConfirmed);
+  const upperOnDisk = await waitFor(
+    () => {
+      const meta = path.join(toolDir, 'tool.json');
+      const script = path.join(toolDir, 'main.mjs');
+      if (!existsSync(meta) || !existsSync(script)) return null;
+      return { meta: readJson(meta), script: readFileSync(script, 'utf8') };
+    },
+    'tool files on disk',
+    15_000,
+    300
+  ).catch(() => null);
+  assert(
+    upperOnDisk?.meta.name === 'upper-text' &&
+      upperOnDisk.meta.readOnly === true &&
+      upperOnDisk.script.includes('toUpperCase'),
+    '工具: 磁盘上出现 tool.json 与 main.mjs',
+    upperOnDisk
+  );
+  const toolAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'tool_save' && entry.targetId === 'upper-text');
+  assert(
+    toolAudit.length === 1 && toolAudit[0].ok === true,
+    '工具: audit 里记了一条 tool_save',
+    toolAudit
+  );
+
+  log('== 工具：新会话里 my_<name> 直接执行');
+  const upperRan = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      '把 hello 转成大写 [[tool:my_upper_text {"text":"hello"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'my_upper_text'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({
+      ok: Boolean(result),
+      text: result ? textOf(result) : null,
+      isError: result?.isError === true,
+    });
+  `);
+  assert(
+    !upperRan.isError &&
+      upperRan.text?.includes('HELLO') &&
+      upperRan.text?.includes('<untrusted-content source="tool:upper-text">'),
+    '工具: 新秘书会话里只读工具直接执行并包成不可信内容',
+    upperRan
+  );
+
+  log('== 工具：非只读工具每次都要审批');
+  const stampDraft = {
+    name: 'stamp-file',
+    description: '把文本写进工具目录的 out.txt',
+    runtime: 'node',
+    parameters: {
+      type: 'object',
+      properties: { text: { type: 'string' } },
+      required: ['text'],
+      additionalProperties: false,
+    },
+    readOnly: false,
+    code: 'import { writeFileSync } from "node:fs";\nlet raw = "";\nprocess.stdin.on("data", (chunk) => (raw += chunk));\nprocess.stdin.on("end", () => {\n  writeFileSync("out.txt", JSON.parse(raw).text);\n  process.stdout.write("wrote");\n});',
+  };
+  const stampAsk = `再造一个会写文件的工具 [[tool:tool_propose ${JSON.stringify(stampDraft)}]]`;
+  const stampProposed = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      ${JSON.stringify(stampAsk)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const card = await until(
+      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
+      30000
+    );
+    if (!card) return JSON.stringify({ ok: false, error: 'no tool proposal card' });
+    const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
+    return JSON.stringify({
+      ok: proposal.status === 'pending' && proposal.kind === 'tool',
+      proposalId: proposal.id,
+      cardText: card.innerText,
+    });
+  `);
+  assert(
+    stampProposed.ok && stampProposed.cardText.includes('stamp-file'),
+    '工具: 非只读工具也走确认卡片',
+    stampProposed
+  );
+  const stampConfirmed = await page(`
+    const secretary = await SEC();
+    await secretary.getState().resolveProposal(${JSON.stringify(stampProposed.proposalId)}, 'confirm');
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[${JSON.stringify(stampProposed.proposalId)}];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ status: done?.status, error: done?.error });
+  `);
+  assert(stampConfirmed.status === 'succeeded', '工具: 非只读工具确认后写盘', stampConfirmed);
+
+  const stampRan = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      '写一下 [[tool:my_stamp_file {"text":"hi"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const pending = await until(() => (S().conversations[id]?.pendingApprovals ?? [])[0] ?? null, 40000);
+    if (!pending) return JSON.stringify({ ok: false, error: 'no approval card' });
+    const approved = await window.electronAPI.agent.respondApproval(id, pending.requestId, 'allow');
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'my_stamp_file'
+      ) ?? null,
+      40000
+    );
+    return JSON.stringify({
+      ok: Boolean(result),
+      tool: pending.tool,
+      approved: approved?.ok ?? null,
+      text: result ? textOf(result) : null,
+      isError: result?.isError === true,
+    });
+  `);
+  assert(stampRan.tool === 'my_stamp_file', '工具: 非只读工具弹出审批卡', stampRan);
+  assert(
+    stampRan.approved === true && stampRan.text?.includes('wrote') && !stampRan.isError,
+    '工具: 批准后才执行非只读工具',
+    stampRan
+  );
+  const stampOut = await waitFor(
+    () => {
+      const file = path.join(ENV, 'secretary', 'workspace', 'tools', 'stamp-file', 'out.txt');
+      return existsSync(file) ? readFileSync(file, 'utf8') : null;
+    },
+    'tool output file',
+    15_000,
+    300
+  ).catch(() => null);
+  assert(stampOut === 'hi', '工具: 非只读工具真的写到了自己的目录', stampOut);
+
+  log('== 工具：删除后新会话不再下发');
+  const toolListed = await page(`
+    const listed = await window.electronAPI.secretary.listTools();
+    return JSON.stringify({
+      ok: listed.ok,
+      names: (listed.tools ?? []).map((tool) => tool.name),
+      hasCode: (listed.tools ?? []).every((tool) => typeof tool.code === 'string' && tool.code.length > 0),
+    });
+  `);
+  assert(
+    toolListed.names?.includes('upper-text') && toolListed.hasCode === true,
+    '工具: 设置页列表带名字与代码',
+    toolListed
+  );
+
+  const toolRemoved = await page(`
+    const removed = await window.electronAPI.secretary.removeTool('upper-text');
+    return JSON.stringify(removed);
+  `);
+  assert(toolRemoved.ok === true, '工具: 删除成功', toolRemoved);
+  const toolDeleteAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'tool_delete' && entry.targetId === 'upper-text');
+  assert(
+    toolDeleteAudit.length === 1 && toolDeleteAudit[0].ok === true,
+    '工具: audit 里记了一条 tool_delete',
+    toolDeleteAudit
+  );
+
+  const toolGone = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '删除后再看看工具表',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    await until(() => (S().conversations[id]?.messages ?? []).some((m) => m.role === 'assistant'), 40000);
+    return JSON.stringify({ ok: true });
+  `);
+  assert(toolGone.ok === true, '工具: 删除后新会话照常回话', toolGone);
+  const afterDelete = await fakeRequests().then((entries) =>
+    entries.filter((entry) => entry.lastUserText.includes('删除后再看看工具表')).at(-1)
+  );
+  assert(
+    !(afterDelete?.toolNames ?? []).includes('my_upper_text') &&
+      (afterDelete?.toolNames ?? []).includes('my_stamp_file'),
+    '工具: 删除后新会话不再下发该工具，其它工具还在',
+    afterDelete
+  );
+
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
 }

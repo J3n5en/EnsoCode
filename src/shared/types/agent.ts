@@ -87,7 +87,8 @@ import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurf
 import { parseProviderHeaders } from '../providers/providerHeaders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
-import { SECRETARY_OPS, type SecretaryOp } from '../secretary/tools';
+import { parseSecretaryToolDescriptors } from '../secretary/customTools';
+import { SECRETARY_INTERNAL_OPS, SECRETARY_OPS, type SecretaryInvokeOp } from '../secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '../shellLimits';
 import { parseSmartCompactMode, type SmartCompactMode } from '../smartCompactMode';
 import { parseSshTimeoutSeconds } from '../sshTimeout';
@@ -124,6 +125,7 @@ import {
   parsePluginCommands,
   parsePluginHooks,
 } from './plugins';
+import type { SecretaryToolDescriptor } from './secretary';
 import { isWorkflowPresetId, parseWorkflowRunSnapshot, type WorkflowRunSnapshot } from './workflow';
 
 export type { ChildSessionIdentity, SessionIdentity } from '../builtinAgents';
@@ -1262,6 +1264,8 @@ export type AgentCommand =
       pluginHooks?: PluginHookSpawn[];
       /** 已启用 Enso 插件的 agent 工具；执行经 plugin-tool-invoke 回到 Main */
       pluginTools?: PluginToolDescriptor[];
+      /** 秘书自造工具；名字、描述与参数结构由 Main 下发，执行经 secretary-invoke 回到 Main */
+      secretaryTools?: SecretaryToolDescriptor[];
       /** 已启用 Enso 插件的 workflow 预设文件（绝对路径，已按插件预设圈定） */
       workflowPresetFiles?: string[];
       /** 已启用插件的事件订阅；Bot 会话不下发 */
@@ -2130,7 +2134,7 @@ export type AgentWorkerEvent =
       identity: SessionIdentity;
       seq: number;
       requestId: string;
-      op: SecretaryOp;
+      op: SecretaryInvokeOp;
       params: unknown;
     }
   | {
@@ -3636,6 +3640,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'mcpServers',
           'pluginCommands',
           'pluginTools',
+          'secretaryTools',
           'workflowPresetFiles',
           'pluginEvents',
           'pluginHooks',
@@ -3685,6 +3690,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.pluginCommands !== undefined &&
           parsePluginCommands(value.pluginCommands) === null) ||
         (value.pluginTools !== undefined && !isPluginToolList(value.pluginTools)) ||
+        (value.secretaryTools !== undefined &&
+          parseSecretaryToolDescriptors(value.secretaryTools) === null) ||
         (value.workflowPresetFiles !== undefined &&
           !(
             Array.isArray(value.workflowPresetFiles) &&
@@ -4551,7 +4558,8 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return hasExactKeys(value, ['type', 'identity', 'seq', 'requestId', 'op', 'params']) &&
         parseSessionIdentity(value.identity) &&
         isNonEmptyString(value.requestId) &&
-        SECRETARY_OPS.includes(value.op as SecretaryOp)
+        ((SECRETARY_OPS as readonly string[]).includes(value.op as string) ||
+          (SECRETARY_INTERNAL_OPS as readonly string[]).includes(value.op as string))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'computer-invoke':

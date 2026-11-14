@@ -502,6 +502,8 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_SET_AVATAR: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SKILLS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SKILL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_TOOLS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_TOOL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
   REMOTE_LEADER_CHANGED: excluded('Remote desktop renderer coordination transport.'),
   REMOTE_UPLOAD: excluded('Remote desktop browser upload transport.'),
   CONFIG_SYNC_EXPORT: excluded('Settings-only portable configuration export flow.'),

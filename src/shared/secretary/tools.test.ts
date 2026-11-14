@@ -1,8 +1,10 @@
 import { BUILTIN_TOOLS } from '@shared/types/builtinTools';
 import { describe, expect, it } from 'vitest';
+import { secretaryToolId } from './customTools';
 import {
   isSecretaryToolAllowed,
   SECRETARY_FORCED_DISABLED_TOOLS,
+  SECRETARY_INTERNAL_OPS,
   SECRETARY_OPS,
   SECRETARY_TOOL_ALLOWLIST,
 } from './tools';
@@ -48,8 +50,29 @@ describe('secretary tool allowlist', () => {
     expect(isSecretaryToolAllowed('skill_read')).toBe(true);
     expect(isSecretaryToolAllowed('skill_propose')).toBe(true);
     expect(SECRETARY_OPS).toContain('skill_propose');
+    expect(SECRETARY_OPS).toContain('tool_propose');
     for (const banned of ['read', 'write', 'edit', 'bash']) {
       expect(isSecretaryToolAllowed(banned), banned).toBe(false);
+    }
+  });
+
+  it('自造工具只按 Main 下发的名字放行，执行入口不对模型可见', () => {
+    expect(isSecretaryToolAllowed('my_upper_text')).toBe(false);
+    expect(isSecretaryToolAllowed('my_upper_text', new Set(['my_upper_text']))).toBe(true);
+    expect(isSecretaryToolAllowed('my_other', new Set(['my_upper_text']))).toBe(false);
+    for (const op of SECRETARY_INTERNAL_OPS) {
+      expect(SECRETARY_OPS as readonly string[]).not.toContain(op);
+      expect(SECRETARY_TOOL_ALLOWLIST.has(op), op).toBe(false);
+    }
+  });
+
+  it('自造工具名不与内置工具或白名单撞名', () => {
+    const builtinIds = new Set(BUILTIN_TOOLS.map((tool) => tool.id));
+    for (const name of ['upper', 'upper-text', 'a-b-c', 'x1']) {
+      const id = secretaryToolId(name);
+      expect(SECRETARY_TOOL_ALLOWLIST.has(id), id).toBe(false);
+      expect(builtinIds.has(id), id).toBe(false);
+      expect(id.startsWith('my_'), id).toBe(true);
     }
   });
 });

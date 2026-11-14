@@ -102,6 +102,7 @@ import {
   type ModelThinkingLevelOverride,
 } from '@shared/types/llm';
 import type { AgentDispatchTask } from '@shared/types/mentions';
+import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { parseDisabledWorkflowPresets } from '@shared/types/workflow';
 import {
   canBeVirtualMember,
@@ -1012,6 +1013,8 @@ export function spawnSession(
       skillIds?: readonly string[];
       /** 秘书自有 skill 的根目录，总是挂上 */
       skillDir?: string;
+      /** 秘书自造工具的描述符：worker 只按这些确切名字挂工具 */
+      tools?: readonly SecretaryToolDescriptor[];
     };
     /**
      * Main 给这次 spawn 的实例号（目前只有 Bot 宿主传）：随 spawn-parent 下发，之后同会话的 prompt / steer /
@@ -1198,6 +1201,7 @@ export function spawnSession(
     ...(plugins.commands.length > 0 ? { pluginCommands: plugins.commands } : {}),
     ...(pluginHooks.length > 0 ? { pluginHooks } : {}),
     ...(pluginTools.length > 0 ? { pluginTools } : {}),
+    ...(secretary?.tools?.length ? { secretaryTools: [...secretary.tools] } : {}),
     ...(workflowPresetFiles.length > 0 ? { workflowPresetFiles } : {}),
     ...(pluginEvents ? { pluginEvents } : {}),
     ...(presetApplied.approvalMode ? { approvalMode: presetApplied.approvalMode } : {}),

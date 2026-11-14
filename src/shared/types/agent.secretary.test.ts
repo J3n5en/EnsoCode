@@ -30,6 +30,25 @@ describe('secretary worker protocol', () => {
     expect(parseAgentWorkerEvent({ ...event, op: 'shell_exec' })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, extra: 1 })).toBeNull();
     expect(parseAgentWorkerEvent({ ...event, identity: { ...parent, sessionId: '' } })).toBeNull();
+    const toolRun = { ...event, op: 'tool_run', params: { name: 'upper-text', arguments: {} } };
+    expect(parseAgentWorkerEvent(toolRun)).toEqual(toolRun);
+  });
+
+  it('spawn-parent 接受秘书自造工具描述符，形状不对整批拒绝', () => {
+    const descriptor = {
+      name: 'my_upper_text',
+      description: '把文本转成大写',
+      parameters: { type: 'object', properties: {} },
+      readOnly: true,
+    };
+    const withTools = { ...spawn, secretaryTools: [descriptor] } as const;
+    expect(parseAgentCommand(withTools)).toEqual(withTools);
+    expect(
+      parseAgentCommand({ ...spawn, secretaryTools: [{ ...descriptor, name: 'bash' }] })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ ...spawn, secretaryTools: [{ ...descriptor, readOnly: 'yes' }] })
+    ).toBeNull();
   });
 
   it('secretary-result 成功不带 error，失败必须带 error 且不带 result', () => {

@@ -38,6 +38,10 @@ export const IPC_CHANNELS = {
   SECRETARY_SKILLS_LIST: 'secretary:skills-list',
   /** 秘书：删除一个自有 skill，renderer 只传 slug */
   SECRETARY_SKILL_DELETE: 'secretary:skill-delete',
+  /** 秘书：列出秘书自造的工具（含代码），设置页展开查看 */
+  SECRETARY_TOOLS_LIST: 'secretary:tools-list',
+  /** 秘书：删除一个自造工具，renderer 只传 slug */
+  SECRETARY_TOOL_DELETE: 'secretary:tool-delete',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

@@ -70,6 +70,28 @@ export interface SecretarySkillDraft {
   body: string;
 }
 
+export type SecretaryToolRuntime = 'python' | 'node';
+
+/** 秘书自造的常用工具：name 即目录名，tool.json 存元数据，脚本固定叫 main.py / main.mjs */
+export interface SecretaryToolDraft {
+  name: string;
+  description: string;
+  runtime: SecretaryToolRuntime;
+  /** 工具参数的 JSON Schema，必须是 object */
+  parameters: Record<string, unknown>;
+  readOnly: boolean;
+  timeoutSec?: number;
+  code: string;
+}
+
+/** 随 spawn 下发给 worker 的工具描述符；name 是 worker 里的工具名（my_*） */
+export interface SecretaryToolDescriptor {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  readOnly: boolean;
+}
+
 export type SecretaryProposal = {
   id: string;
   secretaryConversationId: string;
@@ -86,6 +108,8 @@ export type SecretaryProposal = {
       draft: SecretarySkillDraft;
       previous?: { description: string; body: string };
     }
+  /** previous 是同名工具的旧草案，卡片据此标成更新并摊开旧代码 */
+  | { kind: 'tool'; draft: SecretaryToolDraft; previous?: SecretaryToolDraft }
 );
 
 export type SecretaryResultKind =

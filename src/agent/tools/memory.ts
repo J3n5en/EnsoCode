@@ -49,14 +49,15 @@ export class MemoryInvoker<Op extends string = MemoryOp> {
     private readonly options: { timeoutMs?: number } = {}
   ) {}
 
-  invoke(op: Op, params: unknown, signal?: AbortSignal): Promise<unknown> {
+  /** timeoutMs 只给秘书自造工具用：它自己的超时可能远长于默认值 */
+  invoke(op: Op, params: unknown, signal?: AbortSignal, timeoutMs?: number): Promise<unknown> {
     if (signal?.aborted) return Promise.reject(new Error('Memory action aborted'));
     const requestId = randomUUID();
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
-    const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const waitMs = timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(
-      () => settle(new Error(`Memory action ${op} timed out after ${timeoutMs}ms`)),
-      timeoutMs
+      () => settle(new Error(`Memory action ${op} timed out after ${waitMs}ms`)),
+      waitMs
     );
     const onAbort = () => settle(new Error('Memory action aborted'));
     const settle = (outcome: unknown) => {

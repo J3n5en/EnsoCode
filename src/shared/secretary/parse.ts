@@ -13,6 +13,7 @@ import type {
   SecretaryTodo,
   SecretaryUpdate,
 } from '../types/secretary';
+import { parseSecretaryToolDraft } from './customTools';
 import { parseSecretarySkillDraft } from './skills';
 
 const DEFAULT_AVATAR_COLOR = '#7c5cff';
@@ -357,6 +358,18 @@ function parseProposal(value: unknown): SecretaryProposal | undefined {
       kind: 'skill',
       draft: parsed.draft,
       ...(previous ? { previous } : {}),
+      ...(error ? { error } : {}),
+    };
+  }
+  if (value.kind === 'tool') {
+    const parsed = parseSecretaryToolDraft(value.draft);
+    if (!parsed.ok) return undefined;
+    const previous = isObject(value.previous) ? parseSecretaryToolDraft(value.previous) : null;
+    return {
+      ...base,
+      kind: 'tool',
+      draft: parsed.draft,
+      ...(previous?.ok ? { previous: previous.draft } : {}),
       ...(error ? { error } : {}),
     };
   }

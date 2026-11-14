@@ -61,6 +61,7 @@ import {
   parseParentModelSelectionRequest,
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
+import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { isSecretFilePath, isUnderSecretDirectory } from '../../agent/protectedActions';
 import { titleSummaryTimeoutMs } from '../../agent/titleSummary';
@@ -167,6 +168,7 @@ import {
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
+import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
@@ -564,6 +566,7 @@ function secretarySpawnOptions(): {
   pluginIds: string[];
   skillIds: string[];
   skillDir: string;
+  tools: SecretaryToolDescriptor[];
 } {
   const store = secretaryStore();
   const profile = store.profile();
@@ -577,6 +580,7 @@ function secretarySpawnOptions(): {
     pluginIds: profile?.pluginIds ?? [],
     skillIds: profile?.skillIds ?? [],
     skillDir: secretarySkillsDir(),
+    tools: secretaryToolDescriptors(secretaryToolsDir()),
   };
 }
 

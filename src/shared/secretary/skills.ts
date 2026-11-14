@@ -8,9 +8,12 @@ export const SKILL_NAME_MAX = 48;
 export const SKILL_DESCRIPTION_MAX = 1024;
 export const SKILL_BODY_MAX = 20_000;
 
-export function isSecretarySkillName(value: unknown): value is string {
+/** skill 与工具共用同一套 slug 规则 */
+export function isSecretarySlug(value: unknown): value is string {
   return typeof value === 'string' && value.length <= SKILL_NAME_MAX && NAME_RE.test(value);
 }
+
+export const isSecretarySkillName = isSecretarySlug;
 
 export type SkillDraftResult =
   | { ok: true; draft: SecretarySkillDraft }

@@ -110,6 +110,20 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       text: 'body',
     },
   },
+  tool_propose: {
+    keys: ['name', 'description', 'runtime', 'parameters', 'readOnly', 'timeoutSec', 'code'],
+    numbers: ['timeoutSec'],
+    booleans: ['readOnly'],
+    aliases: {
+      toolName: 'name',
+      title: 'name',
+      summary: 'description',
+      schema: 'parameters',
+      args: 'parameters',
+      script: 'code',
+      source: 'code',
+    },
+  },
 };
 
 const snakeCase = (key: string) => key.replace(/[A-Z]/gu, (char) => `_${char.toLowerCase()}`);
@@ -390,6 +404,44 @@ const SCHEMAS: Record<
         },
       },
       ['name', 'description', 'body']
+    ),
+  },
+  tool_propose: {
+    description:
+      'Propose one of your own tools, or an update to an existing one: a slug name, one line on what it does, the runtime (python or node), a JSON Schema object for its arguments, and the script. The script reads one JSON object from stdin and writes its result to stdout. The user confirms on a card and only then is it written; a same-name tool is marked as an update. Use it for a computation or format conversion you keep repeating. Mark readOnly true only when it reads nothing outside its input and writes nothing; otherwise the user approves every call. Never put keys, tokens or passwords in the code.',
+    parameters: object(
+      {
+        name: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 48,
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$',
+          description: 'Lowercase slug, also the directory name',
+        },
+        description: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+          description: 'One line: what this tool does',
+        },
+        runtime: { type: 'string', enum: ['python', 'node'] },
+        parameters: {
+          type: 'object',
+          description: 'JSON Schema of the tool arguments; its type must be "object"',
+        },
+        readOnly: {
+          type: 'boolean',
+          description: 'True only when it reads nothing outside its input and writes nothing',
+        },
+        timeoutSec: { type: 'integer', minimum: 1, maximum: 300 },
+        code: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 50000,
+          description: 'Full script: JSON on stdin, result on stdout',
+        },
+      },
+      ['name', 'description', 'runtime', 'parameters', 'code']
     ),
   },
 };

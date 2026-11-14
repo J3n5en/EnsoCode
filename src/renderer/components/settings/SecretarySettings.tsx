@@ -5,6 +5,7 @@ import type {
   SecretaryProfileDraft,
   SecretaryScheduleView,
   SecretarySkillDraft,
+  SecretaryToolDraft,
 } from '@shared/types/secretary';
 import * as React from 'react';
 import { defaultDraft, draftFromProfile } from '@/components/secretary/profileFormState';
@@ -196,6 +197,71 @@ function OwnSkills({ busy }: { busy: boolean }) {
             </summary>
             <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[11px]">
               {skill.body}
+            </pre>
+          </details>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 秘书自造的工具：代码可展开，删除后 Main 释放会话，下次 spawn 生效 */
+function OwnTools({ busy }: { busy: boolean }) {
+  const { t } = useI18n();
+  const [tools, setTools] = React.useState<SecretaryToolDraft[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    const result = await window.electronAPI.secretary.listTools();
+    if (result.ok) setTools(result.tools);
+    else setError(result.error);
+  }, []);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  const remove = async (name: string) => {
+    setError(null);
+    const result = await window.electronAPI.secretary.removeTool(name);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await load();
+  };
+
+  if (error) return <p className="text-xs text-destructive">{error}</p>;
+  if (tools.length === 0)
+    return <p className="text-xs text-muted-foreground">{t('No tools yet')}</p>;
+  return (
+    <div className="divide-y rounded-md border">
+      {tools.map((tool) => (
+        <div key={tool.name} className="px-3 py-2" data-enso="secretary-tool-row">
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-sm">{tool.name}</span>
+            <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+              {tool.runtime === 'python' ? 'Python' : 'Node'}
+            </span>
+            <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
+              {tool.readOnly ? t('Read-only') : t('Asks every call')}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void remove(tool.name)}
+            >
+              {t('Remove')}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{tool.description}</p>
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">
+              {t('Show the code')}
+            </summary>
+            <pre className="mt-1 max-h-64 overflow-auto whitespace-pre font-mono text-[11px]">
+              {tool.code}
             </pre>
           </details>
         </div>
@@ -438,6 +504,20 @@ export function SecretarySettings() {
               onChange={(skillIds) => void save({ skillIds })}
             />
           </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t('The secretary has not been set up yet.')}
+          </p>
+        )}
+      </Section>
+
+      <Section
+        title="Tools"
+        description="Python or Node tools the secretary builds for itself. It proposes them in the chat; you confirm before anything is written. Read-only tools run directly, anything else asks for your approval on every call."
+        rowId="secretary.tools"
+      >
+        {profile ? (
+          <OwnTools busy={busy} />
         ) : (
           <p className="text-xs text-muted-foreground">
             {t('The secretary has not been set up yet.')}

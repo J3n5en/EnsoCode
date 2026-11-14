@@ -99,6 +99,7 @@ function sessionEvent(card: SessionCard): FeedEvent {
 function proposalTitle(proposal: SecretaryProposal): string {
   if (proposal.kind === 'profile') return 'Update the secretary profile';
   if (proposal.kind === 'skill') return `Skill: ${proposal.draft.name}`;
+  if (proposal.kind === 'tool') return `Tool: ${proposal.draft.name}`;
   return proposal.draft.title?.trim() || proposal.draft.prompt.split('\n')[0]?.trim() || '';
 }
 

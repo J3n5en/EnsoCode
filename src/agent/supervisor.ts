@@ -67,7 +67,7 @@ import {
 } from '@shared/providers/qoder';
 import { looksLikeRefusal } from '@shared/refusalRetry';
 import type { RequestBodyUsage } from '@shared/requestBodyUsage';
-import { isSecretaryToolAllowed, type SecretaryOp } from '@shared/secretary/tools';
+import { isSecretaryToolAllowed, type SecretaryInvokeOp } from '@shared/secretary/tools';
 import { computeStats, toUsageTotals } from '@shared/sessionStats';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
@@ -106,6 +106,7 @@ import { type EditMode, resolveEditMode } from '@shared/types/editMode';
 import type { ModelEntry } from '@shared/types/llm';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import type { PluginCommandSpawn, PluginHookSpawn } from '@shared/types/plugins';
+import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
@@ -323,6 +324,7 @@ import { createMemoryTools, MemoryInvoker } from './tools/memory';
 import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
 import { createSecretaryTools } from './tools/secretary';
+import { createSecretaryCustomTools } from './tools/secretaryCustomTools';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
 import { createSkillReadTool } from './tools/skills';
 import { createWebTools } from './tools/web';
@@ -414,7 +416,7 @@ interface ManagedSession {
   browser?: BrowserInvoker;
   memory?: MemoryInvoker;
   delegation?: MemoryInvoker<DelegationOp>;
-  secretary?: MemoryInvoker<SecretaryOp>;
+  secretary?: MemoryInvoker<SecretaryInvokeOp>;
   agentControl?: AgentControlInvoker;
   /** 已因不支持 adaptive 降级过的模型（虚拟模型下每个成员各降一次） */
   adaptiveDowngraded: Set<string>;
@@ -1739,7 +1741,8 @@ export class SessionSupervisor {
           command.autoRejectApprovals ?? false,
           command.botDiscussMode,
           command.instanceId,
-          command.workflowPresetFiles
+          command.workflowPresetFiles,
+          command.secretaryTools
         );
         return;
       case 'spawn-child':
@@ -2373,7 +2376,8 @@ export class SessionSupervisor {
     autoRejectApprovals = false,
     botDiscussMode = false,
     instanceId?: string,
-    workflowPresetFiles: readonly string[] = []
+    workflowPresetFiles: readonly string[] = [],
+    secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = []
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -3075,7 +3079,7 @@ export class SessionSupervisor {
         })
       : undefined;
     const secretary = secretaryMode
-      ? new MemoryInvoker<SecretaryOp>(identity, (request) => {
+      ? new MemoryInvoker<SecretaryInvokeOp>(identity, (request) => {
           const managed = managedRef ?? this.sessions.get(sessionId);
           if (!managed) throw new Error('Session is not ready for secretary actions.');
           this.options.emit({
@@ -3155,6 +3159,12 @@ export class SessionSupervisor {
     const sessionTools = [
       ...buildCoreTools(),
       ...(secretary ? createSecretaryTools(secretary) : []),
+      // 秘书自造工具：名字与参数结构由 Main 下发，非只读的每次都要人确认
+      ...(secretary
+        ? createSecretaryCustomTools(secretary, secretaryToolDescriptors).map((tool) =>
+            withMandatoryApproval(gate, 'mcp', tool)
+          )
+        : []),
       // 秘书没有 read：SKILL.md 只能按本次加载的 skill 表读
       ...(secretaryMode ? [createSkillReadTool(() => resourceLoader.getSkills().skills)] : []),
       ...builtin(
@@ -3259,9 +3269,12 @@ export class SessionSupervisor {
     );
     const planGated = (tools: Def[]): Def[] =>
       tools.map((tool) => withPlanGate(tool, { host: planHost, readonlyAgentTypes }));
-    // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具与插件工具都不在其中。
-    // 插件工具名只认 Main 本次下发的描述符，不按 plugin_ 前缀放行
-    const secretaryPluginToolNames = new Set(pluginToolDescriptors.map((tool) => tool.name));
+    // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具、插件工具与自造工具都不在其中。
+    // 插件工具与自造工具的名字只认 Main 本次下发的描述符，不按前缀放行
+    const secretaryExtraToolNames = new Set([
+      ...pluginToolDescriptors.map((tool) => tool.name),
+      ...secretaryToolDescriptors.map((tool) => tool.name),
+    ]);
     const customTools = omitNamedTools(
       decorateSessionTools(
         [
@@ -3272,7 +3285,7 @@ export class SessionSupervisor {
       ),
       disabledTools
     ).filter(
-      (tool) => !secretaryMode || isSecretaryToolAllowed(tool.name, secretaryPluginToolNames)
+      (tool) => !secretaryMode || isSecretaryToolAllowed(tool.name, secretaryExtraToolNames)
     );
     codemodeHost.bindDeferredTools(
       deferredMcpLoader(gate, (tools) =>
@@ -3368,7 +3381,7 @@ export class SessionSupervisor {
       const active = session.getActiveToolNames();
       // 分组会把名字加回来，秘书再与允许列表求交，否则恢复一个分组就绕过了装配时的过滤
       const next = nextActiveToolNames(active, builtinGroups, enabled).filter(
-        (name) => !secretaryMode || isSecretaryToolAllowed(name, secretaryPluginToolNames)
+        (name) => !secretaryMode || isSecretaryToolAllowed(name, secretaryExtraToolNames)
       );
       if (next.length !== active.length || next.some((name, index) => name !== active[index])) {
         session.setActiveToolsByName(next);

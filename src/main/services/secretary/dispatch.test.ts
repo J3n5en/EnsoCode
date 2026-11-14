@@ -8,6 +8,7 @@ import type {
   SecretaryProfileDraft,
   SecretarySkillDraft,
   SecretaryTodo,
+  SecretaryToolDraft,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
 import {
@@ -102,6 +103,7 @@ interface Harness {
   profileValue: SecretaryProfile | null;
   appliedProfiles: SecretaryProfileDraft[];
   appliedSkills: SecretarySkillDraft[];
+  appliedTools: SecretaryToolDraft[];
   projects: ProjectAuthority[];
   conversations: ConversationAuthority[];
   statuses: Map<string, SecretarySessionStatus>;
@@ -136,6 +138,7 @@ function harness(
     profileValue: options.profile === undefined ? profile() : options.profile,
     appliedProfiles: [],
     appliedSkills: [],
+    appliedTools: [],
     projects: options.projects ?? [localProject()],
     conversations: options.conversations ?? [rootConversation('c1')],
     statuses: new Map(Object.entries(options.statuses ?? {})),
@@ -153,6 +156,10 @@ function harness(
     },
     applySkill: async (draft) => {
       h.appliedSkills.push(draft);
+      return { ok: true };
+    },
+    applyTool: async (draft) => {
+      h.appliedTools.push(draft);
       return { ok: true };
     },
     persona: () => '',
@@ -710,6 +717,36 @@ describe('resolveProposal', () => {
 
     expect(result.ok && result.proposal.status).toBe('failed');
     expect(result.ok && result.proposal.error).toBe('invalid skill name');
+  });
+
+  it('确认工具提案才写盘，拒绝不写', async () => {
+    const h = harness();
+    const draft: SecretaryToolDraft = {
+      name: 'upper-text',
+      description: '把文本转成大写',
+      runtime: 'node',
+      parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+      readOnly: true,
+      code: 'process.stdout.write("x")',
+    };
+    h.file.proposals.p1 = {
+      id: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'tool',
+      draft,
+    };
+    h.file.proposals.p2 = { ...h.file.proposals.p1, id: 'p2' };
+
+    expect((await resolveProposal(h.ports, 'p2', 'reject')).ok).toBe(true);
+    expect(h.appliedTools).toEqual([]);
+
+    const result = await resolveProposal(h.ports, 'p1', 'confirm');
+    expect(result.ok && result.proposal.status).toBe('succeeded');
+    expect(h.appliedTools).toEqual([draft]);
+    expect(h.created).toEqual([]);
   });
 });
 
