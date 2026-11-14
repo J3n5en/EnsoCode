@@ -224,14 +224,14 @@ describe('secretaryDigest', () => {
     expect(event).toMatchObject({ title: 'Update the secretary profile', projectName: '' });
   });
 
-  it('动态按时间倒序，最多 20 条', () => {
+  it('动态按时间倒序，投影本身不截断', () => {
     const done = Array.from({ length: 25 }, (_, index) =>
       session(`c${index}`, { resultAt: TODAY + index * 1000, result: 'turn-ended' })
     );
     const digest = secretaryDigest(board({ done }), NOW);
-    expect(digest.events).toHaveLength(20);
+    expect(digest.events).toHaveLength(25);
     expect(digest.events[0].id).toBe('session:c24');
-    expect(digest.events.at(-1)?.id).toBe('session:c5');
+    expect(digest.events.at(-1)?.id).toBe('session:c0');
   });
 
   it('开始执行取本次开始的时间，上一轮的结果时间不算', () => {

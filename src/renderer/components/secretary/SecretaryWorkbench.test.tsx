@@ -86,6 +86,8 @@ beforeEach(() => {
         h.calls.push({ name: 'dismissResult', args: conversationId });
         return { ok: true };
       },
+      feed: async () => ({ ok: true, events: [], hasMore: false }),
+      onStateChanged: () => () => {},
     },
     agent: { abort: async () => undefined },
   };

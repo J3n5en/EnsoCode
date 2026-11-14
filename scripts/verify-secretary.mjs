@@ -1180,6 +1180,10 @@ async function run(cdp, pluginZipUrl) {
   const limitBefore = readJson(registryFile).conversations.filter(
     (entry) => entry.projectId === setup.projectId
   ).length;
+  // 改上限的这段时间里，宿主可能把真实的空闲状态写回。确认前再标一次进行中。
+  const reseed = readJson(dispatchFile);
+  reseed.dispatched[dispatchedId].lastState = 'running';
+  writeFileSync(dispatchFile, JSON.stringify(reseed));
   const refused = await page(`
     return JSON.stringify(
       await window.electronAPI.secretary.resolveProposal(${JSON.stringify(limitProposal.proposalId)}, 'confirm')
@@ -1861,11 +1865,25 @@ async function run(cdp, pluginZipUrl) {
   const quietFeed = await page(`
     const secretary = await SEC();
     const board = secretary.getState().secretary.board;
-    const activity = (board.activity ?? []).filter((entry) => entry.conversationId === ${JSON.stringify(quietId)});
     const cards = [...board.running, ...board.done, ...board.needsYou].filter(
       (card) => card.kind === 'session' && card.conversationId === ${JSON.stringify(quietId)}
     );
-    return JSON.stringify({ activity: activity.length, cards: cards.length, title: cards[0]?.title ?? null });
+    const quietId = ${JSON.stringify(quietId)};
+    let before = null;
+    let activity = 0;
+    for (let guard = 0; guard < 20; guard += 1) {
+      const page = await window.electronAPI.secretary.feed(
+        before ? { before, limit: 40 } : { limit: 40 }
+      );
+      if (!page.ok) break;
+      activity += page.events.filter(
+        (event) => event.conversationId === quietId && event.id.startsWith('activity:')
+      ).length;
+      const oldest = page.events.at(-1);
+      if (!page.hasMore || !oldest) break;
+      before = { at: oldest.at, id: oldest.id };
+    }
+    return JSON.stringify({ activity, cards: cards.length, title: cards[0]?.title ?? null });
   `);
   assert(quietFeed.activity >= 1 && quietFeed.cards === 1, 'step12: 动态里能看到这几轮', quietFeed);
 
@@ -2741,6 +2759,7 @@ async function run(cdp, pluginZipUrl) {
   );
 
   await verifyTakeover(cdp, setup);
+  await verifyFeedPaging(cdp, panelHost);
 
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
@@ -2750,6 +2769,168 @@ async function run(cdp, pluginZipUrl) {
 }
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+/**
+ * 动态超过两页：首屏只有一页；滚到底加载下一页且顺序正确；
+ * 停在中间时新条目不插入、滚动位置不变。
+ */
+async function verifyFeedPaging(cdp, panelHost) {
+  const page = cdp.json.bind(cdp);
+  const PAGE = 40;
+  const base = Date.now() + 1_000_000;
+  const tieAt = base + 10_000;
+  const activityId = (conversationId, at) => `activity:${conversationId}:${at}:seen`;
+  const entries = [];
+  for (let index = 0; index < 87; index += 1) {
+    entries.push({
+      at: base + index,
+      conversationId: `feed-${String(index).padStart(3, '0')}`,
+      kind: 'seen',
+      text: `feed-${String(index).padStart(3, '0')}`,
+    });
+  }
+  for (const name of ['m', 'a', 'z']) {
+    entries.push({ at: tieAt, conversationId: `tie-${name}`, kind: 'seen', text: `tie-${name}` });
+  }
+  const page1 = [
+    activityId('tie-a', tieAt),
+    activityId('tie-m', tieAt),
+    activityId('tie-z', tieAt),
+    ...Array.from({ length: 37 }, (_, index) => {
+      const n = 86 - index;
+      return activityId(`feed-${String(n).padStart(3, '0')}`, base + n);
+    }),
+  ];
+  const page2 = Array.from({ length: PAGE }, (_, index) => {
+    const n = 49 - index;
+    return activityId(`feed-${String(n).padStart(3, '0')}`, base + n);
+  });
+
+  log('== 动态分页');
+  const shown = await page(`
+    S().selectConversation(${JSON.stringify(panelHost)});
+    const panel = await until(() => {
+      const node = document.querySelector('[data-enso=secretary-panel]');
+      return node && node.offsetParent != null && node.getBoundingClientRect().width > 0 ? true : null;
+    }, 10000);
+    return JSON.stringify({ ok: Boolean(panel) });
+  `);
+  assert(shown.ok, '动态分页: 秘书面板在屏幕上', shown);
+  const parked = await page(`
+    const panel = document.querySelector('[data-enso=secretary-panel]');
+    if (!panel) return JSON.stringify({ ok: false, error: 'panel closed' });
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=memory]')?.click();
+    const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
+    if (scroller) scroller.style.maxHeight = '420px';
+    return JSON.stringify({ ok: Boolean(scroller) });
+  `);
+  assert(parked.ok, '动态分页: 先离开工作台，避免旧列表被整页顶上', parked);
+
+  const file = readJson(dispatchFile);
+  file.activity = [...(file.activity ?? []), ...entries].slice(-400);
+  writeFileSync(dispatchFile, JSON.stringify(file));
+  const published = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.mutateTodo({ action: 'add', text: '动态分页占位' }));
+  `);
+  assert(published.ok, '动态分页: 写盘后推送状态', published);
+
+  const first = await page(`
+    document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
+    const ids = () => [...document.querySelectorAll('[data-enso=secretary-feed-event]')].map((node) => node.dataset.id);
+    const ready = await until(() => (ids().length === ${PAGE} ? ids() : null), 15000);
+    await sleep(400);
+    return JSON.stringify({ ids: ids(), stable: ids().length === ${PAGE}, ready: Boolean(ready) });
+  `);
+  assert(
+    first.stable && JSON.stringify(first.ids) === JSON.stringify(page1),
+    '动态分页: 首屏只有最新一页，相同时间按 id 排',
+    { got: first.ids, want: page1 }
+  );
+  await cdp.shot(path.join(ART, 'feed-before.png'));
+
+  const second = await page(`
+    const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
+    scroller.scrollTop = scroller.scrollHeight;
+    scroller.dispatchEvent(new Event('scroll'));
+    const ids = () => [...document.querySelectorAll('[data-enso=secretary-feed-event]')].map((node) => node.dataset.id);
+    const ready = await until(() => (ids().length === ${PAGE * 2} ? ids() : null), 15000);
+    const sentinel = document.querySelector('[data-enso=secretary-feed-sentinel]');
+    const root = scroller.getBoundingClientRect();
+    const mark = sentinel?.getBoundingClientRect();
+    return JSON.stringify({
+      ids: ready,
+      end: Boolean(document.querySelector('[data-enso=secretary-feed-end]')),
+      length: ids().length,
+      scrollTop: scroller.scrollTop,
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight,
+      sentinelTop: mark ? Math.round(mark.top - root.bottom) : null,
+    });
+  `);
+  assert(
+    JSON.stringify(second.ids) === JSON.stringify([...page1, ...page2]) && second.end === false,
+    '动态分页: 滚到底加载出更早的一页，不重不漏',
+    { got: second.ids, want: [...page1, ...page2], end: second.end }
+  );
+
+  const parkedScroll = await page(`
+    const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
+    scroller.scrollTop = 200;
+    return JSON.stringify({ top: scroller.scrollTop });
+  `);
+  const extraAt = tieAt + 1;
+  const extraId = activityId('feed-new', extraAt);
+  const again = readJson(dispatchFile);
+  again.activity = [
+    ...(again.activity ?? []),
+    { at: extraAt, conversationId: 'feed-new', kind: 'seen', text: 'feed-new' },
+  ];
+  writeFileSync(dispatchFile, JSON.stringify(again));
+  const nudged = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.mutateTodo({ action: 'add', text: '动态分页新条目' }));
+  `);
+  assert(nudged.ok, '动态分页: 新条目触发推送', nudged);
+  const held = await page(`
+    const banner = await until(() => document.querySelector('[data-enso=secretary-feed-fresh]'), 15000);
+    const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
+    const ids = [...document.querySelectorAll('[data-enso=secretary-feed-event]')].map((node) => node.dataset.id);
+    return JSON.stringify({
+      count: banner?.dataset.count ?? null,
+      top: scroller.scrollTop,
+      hasNew: ids.includes(${JSON.stringify(extraId)}),
+      length: ids.length,
+    });
+  `);
+  assert(
+    held.count === '1' &&
+      held.top === parkedScroll.top &&
+      held.hasNew === false &&
+      held.length === PAGE * 2,
+    '动态分页: 停在中间时新动态不插入，滚动位置不变',
+    { held, parked: parkedScroll.top }
+  );
+  await cdp.shot(path.join(ART, 'feed-after.png'));
+  const revealed = await page(`
+    document.querySelector('[data-enso=secretary-feed-fresh]').click();
+    const scroller = document.querySelector('[data-enso=secretary-panel-scroll]');
+    const want = ${JSON.stringify(extraId)};
+    const ready = await until(() => {
+      const firstId = document.querySelector('[data-enso=secretary-feed-event]')?.dataset.id ?? null;
+      const banner = Boolean(document.querySelector('[data-enso=secretary-feed-fresh]'));
+      return firstId === want && !banner ? { top: scroller.scrollTop, firstId, banner } : null;
+    }, 15000);
+    return JSON.stringify(ready ?? {
+      top: scroller.scrollTop,
+      firstId: document.querySelector('[data-enso=secretary-feed-event]')?.dataset.id ?? null,
+      banner: true,
+    });
+  `);
+  assert(
+    revealed.top === 0 && revealed.firstId === extraId && revealed.banner === false,
+    '动态分页: 点提示回到顶部并看到新动态',
+    revealed
+  );
+}
 
 function crc32(bytes) {
   let crc = 0xffffffff;
@@ -2834,7 +3015,13 @@ async function verifyAvatar(cdp, setup) {
   );
 
   const custom = await settingsPage.json(`
-    await until(() => document.querySelector('[data-enso=secretary-form-avatar-hex]'), 30000);
+    // 档案还没读回来时表单是空草案，读回来会按 key 重挂、把刚填的颜色清掉。先等上限芯片出现。
+    await until(() => {
+      const pressed = document.querySelector(
+        '[data-enso=secretary-dispatch-limit] button[aria-pressed=true]'
+      );
+      return pressed?.innerText === '3' ? true : null;
+    }, 15000);
     const input = document.querySelector('[data-enso=secretary-form-avatar-hex]');
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     setter.call(input, '#ff00aa');
@@ -2853,15 +3040,20 @@ async function verifyAvatar(cdp, setup) {
   assert(custom.presetPressed === 0, '头像: 非预设色时没有预设色块被选中', custom);
   await settingsPage.shot(path.join(ART, '01b-avatar-custom-color.png'));
 
-  await settingsPage.json(`
+  const savedColor = await settingsPage.json(`
     document.querySelector('[data-enso=secretary-form-step][data-step=workflow]').click();
-    await sleep(300);
-    const save = [...document.querySelectorAll('[data-enso=secretary-profile-form] button')]
-      .find((b) => ['保存', 'Save'].includes(b.innerText.trim()));
+    const save = await until(
+      () =>
+        [...document.querySelectorAll('[data-enso=secretary-profile-form] button')].find((b) =>
+          ['保存', 'Save'].includes(b.innerText.trim())
+        ) ?? null,
+      10000
+    );
     if (!save) return JSON.stringify({ ok: false });
     save.click();
     return JSON.stringify({ ok: true });
   `);
+  assert(savedColor.ok, '头像: 点到保存', savedColor);
   const colored = await waitFor(
     () => (readJson(profileFile).avatar?.color === '#ff00aa' ? readJson(profileFile) : null),
     'profile.json custom color',
