@@ -168,6 +168,9 @@ const until = async (fn, ms = 20000) => {
 };
 const texts = (id) => (S().conversations[id]?.messages ?? []).map((m) =>
   (Array.isArray(m.content) ? m.content : []).filter((c) => c.type === 'text').map((c) => c.text).join(''));
+// 缓存的其它会话与刚切过去还没渲染的面板里，卡片 innerText 为空；只认已渲染出来的最后一张
+const shown = (selector) =>
+  [...document.querySelectorAll(selector)].filter((node) => node.innerText.trim()).at(-1) ?? null;
 `;
 
 async function connect() {
@@ -1115,11 +1118,7 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       id
     );
-    // 只认 skill 卡：缓存的其它会话里还留着更早的派活卡
-    const card = await until(
-      () => document.querySelector('[data-enso=secretary-proposal][data-kind=skill]'),
-      30000
-    );
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=skill]'), 30000);
     if (!card)
       return JSON.stringify({
         ok: false,
@@ -1276,10 +1275,7 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       id
     );
-    const card = await until(
-      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
-      30000
-    );
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=tool]'), 30000);
     if (!card)
       return JSON.stringify({
         ok: false,
@@ -1412,10 +1408,7 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       id
     );
-    const card = await until(
-      () => document.querySelector('[data-enso=secretary-proposal][data-kind=tool]'),
-      30000
-    );
+    const card = await until(() => shown('[data-enso=secretary-proposal][data-kind=tool]'), 30000);
     if (!card) return JSON.stringify({ ok: false, error: 'no tool proposal card' });
     const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
     return JSON.stringify({
@@ -1742,7 +1735,8 @@ async function verifyTakeover(cdp, setup) {
     const target = ${JSON.stringify(ownId)};
     const hit = await until(
       () => texts(secretaryId).find(
-        (text) => text.startsWith('<session-updates>') && text.includes(target)
+        (text) =>
+          text.startsWith('<session-updates>') && text.includes('[turn-ended session:' + target + ']')
       ),
       60000
     );
