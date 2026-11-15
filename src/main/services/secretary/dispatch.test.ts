@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseDispatchFile, parseProfile } from '@shared/secretary/parse';
@@ -17,7 +17,7 @@ import type {
   SecretaryTodo,
   SecretaryToolDraft,
 } from '@shared/types/secretary';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSecretaryTools, normalizeSecretaryParams } from '../../../agent/tools/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import {
@@ -52,6 +52,12 @@ import type { SecretaryOpHandler } from './tools';
 
 const ctx = { secretaryConversationId: 'sec-1' };
 const NOW = 1_000;
+
+/** 24 字节的 png 头（4x3）：只按文件头判格式，够用 */
+const PNG = Uint8Array.from([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 4, 0, 0, 0, 3, 8, 6, 0, 0,
+  0,
+]);
 
 const localProject = (projectId = 'p1', overrides: Partial<ProjectAuthority> = {}) =>
   ({
@@ -783,6 +789,128 @@ describe('session_send', () => {
     expect(result.error).toContain('mode');
     expect(h.queued).toEqual([]);
     expect(h.steers).toEqual([]);
+  });
+});
+
+describe('session_send 转发图片', () => {
+  let dir = '';
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'enso-attach-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** 真文件：白名单校验走的是真实路径与文件头，不模拟 */
+  function image(name: string, bytes: Uint8Array = PNG): string {
+    const file = join(dir, name);
+    writeFileSync(file, bytes);
+    // 白名单按真实路径判定：macOS 上 /var 是 /private/var 的符号链接
+    return realpathSync(file);
+  }
+
+  it('带 attachments 时把图片引用追加到消息末尾，并审计路径与大小', async () => {
+    const shot = image('shot.png');
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '这个界面丑，按图改',
+      attachments: [shot],
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    const text = h.prompts[0]?.text ?? '';
+    expect(text).toContain('这个界面丑，按图改');
+    expect(text).toContain(`[图片 1] ${shot}`);
+    expect(text).toContain('用 image_view 查看这些图片。');
+    const audit = h.audits.find((entry) => entry.op === 'session_send' && entry.ok);
+    expect(audit?.detail).toContain(`images: ${shot} (${PNG.length} B)`);
+  });
+
+  it('排队与插话也带上图片引用', async () => {
+    const shot = image('shot.png');
+    const queued = harness({ file: dispatchedFile(), statuses: { c1: running } });
+    await call(queued.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [shot],
+    });
+    expect(queued.queued[0]?.message.text).toContain(`[图片 1] ${shot}`);
+
+    const steered = harness({ file: dispatchedFile(), statuses: { c1: running } });
+    await call(steered.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      mode: 'steer',
+      attachments: [shot],
+    });
+    expect(steered.steers[0]?.text).toContain(`[图片 1] ${shot}`);
+  });
+
+  it('目标会话没有 image_view 时说明看不了图', async () => {
+    const shot = image('shot.png');
+    const h = harness({ file: dispatchedFile(), rows: { c1: { tools: ['read', 'bash'] } } });
+    await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [shot],
+    });
+    expect(h.prompts[0]?.text).toContain('当前会话无法查看图片');
+  });
+
+  it('路径越界时指出是哪一张、为什么，且什么都不发', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [image('ok.png'), '/etc/hosts'],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('attachments[2] /etc/hosts');
+    expect(result.error).toContain('out of scope');
+    expect(h.prompts).toEqual([]);
+    expect(h.queued).toEqual([]);
+    expect(h.audits.some((entry) => entry.op === 'session_send' && !entry.ok)).toBe(true);
+  });
+
+  it('文件不存在时拒绝', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [join(dir, 'missing.png')],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('no such file');
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('不是图片时拒绝', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: [image('fake.png', Uint8Array.from([1, 2, 3, 4]))],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('not a supported image');
+  });
+
+  it('超过 5 张直接拒绝', async () => {
+    const h = harness({ file: dispatchedFile() });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: Array.from({ length: 6 }, (_unused, index) => image(`a${index}.png`)),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('max 5 images per call');
+    expect(h.prompts).toEqual([]);
   });
 });
 

@@ -349,6 +349,7 @@ import { createDelegationTools, type DelegationOp } from './tools/delegation';
 import { createGroupHistoryTool } from './tools/groupHistory';
 import { createGroupTasksTool } from './tools/groupTasks';
 import { confirmImageReference, createImageGenTool } from './tools/imageGen';
+import { createImageViewTool } from './tools/imageView';
 import { createMemoryTools, MemoryInvoker } from './tools/memory';
 import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
@@ -603,6 +604,8 @@ export interface SupervisorOptions {
   workflowDir?: string;
   /** 应用 agent 数据目录（ENSO_AGENT_DATA_DIR）；给出时压缩取消原因追加到 compaction.log */
   dataDir?: string;
+  /** 应用存放用户图片的目录（ENSO_USER_IMAGE_DIRS）：编码会话的 image_view 白名单里带上它 */
+  userImageDirs?: readonly string[];
 }
 
 /** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份；开关打开时追加项目内其它 harness 的规则文件。 */
@@ -3243,6 +3246,11 @@ export class SessionSupervisor {
         : []),
       // 秘书没有 read：SKILL.md 只能按本次加载的 skill 表读
       ...(secretaryMode ? [createSkillReadTool(() => resourceLoader.getSkills().skills)] : []),
+      // 编码会话看图：白名单是自己的工作目录、系统临时目录与应用存放用户图片的目录。
+      // 远程会话的文件不在本机，装了只会读到错的路径
+      ...(secretaryMode || remote
+        ? []
+        : [createImageViewTool({ cwd, userImageDirs: this.options.userImageDirs })]),
       ...builtin(
         'browser',
         createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
