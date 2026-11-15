@@ -398,6 +398,11 @@ const electronAPI = {
       action: 'done' | 'undo'
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_MARK_RESULT, { conversationId, action }),
+    /** 看板「停止遗留任务」：停掉这条派发记录里还在跑的后台任务 */
+    stopTasks: (
+      conversationId: string
+    ): Promise<{ ok: true; stopped: string[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_STOP_TASKS, { conversationId }),
     /** 派出会话的目标与队列由 Main 驱动：设/暂停/恢复/清除都交给它 */
     goalAction: (request: {
       conversationId: string;

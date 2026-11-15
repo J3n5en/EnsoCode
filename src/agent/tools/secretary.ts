@@ -107,6 +107,10 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     booleans: ['clearQueue'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
   },
+  session_task_stop: {
+    keys: ['conversationId', 'taskId'],
+    aliases: { sessionId: 'conversationId', id: 'taskId', backgroundTaskId: 'taskId' },
+  },
   session_answer: {
     keys: ['conversationId', 'askId', 'answer'],
     aliases: { sessionId: 'conversationId', id: 'askId', requestId: 'askId' },
@@ -174,6 +178,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'maxRunningDispatches',
       'patrolEnabled',
       'patrolIntervalMinutes',
+      'orphanTaskPatrol',
       'addressAs',
       'replyLanguage',
       'style',
@@ -484,6 +489,17 @@ const SCHEMAS: Record<
       ['conversationId']
     ),
   },
+  session_task_stop: {
+    description:
+      'Stop one background task of a session you dispatched or track, without stopping the session itself. Use it for leftover tasks: a dev server or http.server the session forgot to stop, or a command that has clearly hung (check session_tasks first for its state, how long it has run and whether the process is still alive). Only tasks of sessions you dispatched, took over, or already track are accepted; the session id and task id must both come from session_tasks. The call is audited. Nothing else is killed: the session, its goal and its queued messages are untouched.',
+    parameters: object(
+      {
+        conversationId: id('Session id from session_tasks'),
+        taskId: id('taskId from session_tasks'),
+      },
+      ['conversationId', 'taskId']
+    ),
+  },
   session_answer: {
     description:
       'Answer a question a dispatched or tracked session is waiting on (ask_user). The question reaches you as an ask-relay session update with its askId; the session continues with your answer as soon as you call this. Answer with one of the options or with free text. Decide yourself when the question is a technical detail, a choice between equivalent implementations, or something you have enough context for, and say why in your reply. Ask the user with your own ask_user first when it is irreversible, touches their data, accounts or money, pushes or publishes, merges to main, deletes branches, or is a product or preference call — then pass their answer here unchanged. Whoever answers first wins: if the user answered in that session directly, or the question timed out, this is refused and you must not retry.',
@@ -713,6 +729,11 @@ const SCHEMAS: Record<
           'Watch running sessions automatically and report only anomalies. On by default.',
       },
       patrolIntervalMinutes: { type: 'integer', minimum: 5, maximum: 120 },
+      orphanTaskPatrol: {
+        type: 'boolean',
+        description:
+          'Scan finished sessions hourly for background tasks still running (dead process, over 2 hours, or a service left after the session ended) and report them. Never kills anything. On by default.',
+      },
       addressAs: { type: 'string', minLength: 1, maxLength: 64 },
       replyLanguage: { type: 'string', enum: ['ui', 'zh', 'en'] },
       style: { type: 'string', enum: ['concise', 'detailed'] },

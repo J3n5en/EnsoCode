@@ -246,8 +246,10 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     failed: [],
   };
   const placed = new Set<string>();
+  // 已经标了遗留任务的会话不算在跑：残留的 running 与后台任务都不能把它挂在进行中
   const runningNow = (record: DispatchRecord): boolean =>
-    record.lastState === 'running' || record.backgroundRunning === true;
+    record.leftoverTasks === undefined &&
+    (record.lastState === 'running' || record.backgroundRunning === true);
   const dispatchedToday = input.dispatched.filter(
     (record) => !record.takeover && within(record.createdAt)
   );
@@ -279,6 +281,11 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       : running || record.lastResult === undefined
         ? 'running'
         : 'done';
+    // 已完成但还有没结束的后台任务：卡片标出来，并给一个停止遗留任务的操作
+    if (column === 'done' && record.leftoverTasks)
+      card.leftover = { count: record.leftoverTasks.count };
+    // 还在跑但带着常驻服务：和「正在跑」区分开
+    if (column === 'running' && record.backgroundPersistent) card.persistent = true;
     if (column) columns[column].push(card);
   }
   // 没有派发记录、但当天有结果的会话（记录被清理或不属于本机派发）也要上板

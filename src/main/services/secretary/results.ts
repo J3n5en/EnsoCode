@@ -99,7 +99,8 @@ function isResultUpdate(
   update: SecretaryUpdate
 ): update is Extract<SecretaryUpdate, { kind: SecretaryResultKind }> {
   // 转交提问也带会话 id，但它不是这一轮的结果：不参与「同一会话只留最新结果」的替换
-  return 'conversationId' in update && update.kind !== 'ask-relay';
+  // 遗留巡检同理：它说的是后台任务，不是这一轮的结论
+  return 'conversationId' in update && update.kind !== 'ask-relay' && update.kind !== 'leftover';
 }
 
 /** 同一件事只入队一次；同一会话只保留最新结果，旧状态已被新状态取代 */
@@ -289,7 +290,8 @@ export function sessionStateOf(
 
 /**
  * 派发或接管的会话还没真正结束。顶栏、看板「进行中」和派出上限共用这一个口径。
- * 正在跑、刚被 session_send 唤起、还有后台任务、目标还会自动续跑，都算。
+ * 正在跑、刚被 session_send 唤起、还有等唤醒的后台任务、目标还会自动续跑，都算。
+ * 常驻服务（dev server、http.server）不会自己结束，只标出来，不算在跑。
  * 报错、等用户审批或提问、还没开始、已经收口的结果都不算。
  * 目标停在 waiting 只有后台任务的完成通知会唤醒它；没有后台任务就没人叫它，不算在跑。
  * 已经有终态结果的会话被重新唤起时，只有这一轮还没结束（reopened）才算在跑：
@@ -414,6 +416,10 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going && state !== 'running' ? { continuing: true as const } : {}),
       ...(going && record.backgroundRunning ? { backgroundRunning: true as const } : {}),
+      ...(going && record.backgroundPersistent ? { backgroundPersistent: true as const } : {}),
+      ...(!going && record.leftoverTasks
+        ? { leftoverTasks: { count: record.leftoverTasks.count } }
+        : {}),
       ...(record.takeover ? { takeover: true as const } : {}),
       ...(record.checkout ? { checkout: record.checkout } : {}),
       ...(record.baseRef ? { baseRef: record.baseRef } : {}),

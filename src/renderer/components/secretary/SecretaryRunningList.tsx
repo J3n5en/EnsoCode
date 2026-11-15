@@ -22,6 +22,7 @@ const BADGE_STYLE: Record<ContactBadge, { label: string; className: string }> = 
   waiting: { label: 'Waiting for you', className: 'bg-warning/15 text-warning' },
   running: { label: 'Running', className: 'bg-success/15 text-success' },
   background: { label: 'Waiting on a background task', className: 'bg-warning/15 text-warning' },
+  persistent: { label: 'Service running', className: 'bg-warning/15 text-warning' },
   continuing: { label: 'Continuing', className: 'bg-success/15 text-success' },
   idle: { label: 'Idle', className: 'bg-muted text-muted-foreground' },
 };

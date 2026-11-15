@@ -326,6 +326,9 @@ function profileChanges(
       draft.patrolIntervalMinutes
     );
   }
+  if (draft.orphanTaskPatrol !== undefined) {
+    put('orphanTaskPatrol', before?.orphanTaskPatrol ?? null, draft.orphanTaskPatrol);
+  }
   if (draft.dispatchMuted !== undefined) {
     put('dispatchMuted', before?.dispatchMuted ?? null, draft.dispatchMuted);
   }

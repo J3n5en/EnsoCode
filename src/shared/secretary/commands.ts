@@ -128,7 +128,14 @@ export function formatClock(at: number): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-export type ContactBadge = 'running' | 'waiting' | 'background' | 'continuing' | 'idle' | 'failed';
+export type ContactBadge =
+  | 'running'
+  | 'waiting'
+  | 'background'
+  | 'persistent'
+  | 'continuing'
+  | 'idle'
+  | 'failed';
 
 /** 与侧栏「进行中」列表同一套徽标文案 */
 const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
@@ -136,6 +143,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     running: '运行中',
     waiting: '等你回答',
     background: '等后台任务',
+    persistent: '有常驻服务',
     continuing: '续跑中',
     idle: '空闲',
     failed: '失败',
@@ -144,6 +152,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     running: 'Running',
     waiting: 'Waiting for you',
     background: 'Waiting on a background task',
+    persistent: 'Service running',
     continuing: 'Continuing',
     idle: 'Idle',
     failed: 'Failed',
@@ -161,12 +170,15 @@ export function badgeText(lang: ContactLang, badge: ContactBadge): string {
 export function sessionBadge(card: {
   state: string;
   backgroundRunning?: boolean;
+  backgroundPersistent?: boolean;
   continuing?: boolean;
 }): ContactBadge {
   if (card.state === 'error') return 'failed';
   if (card.state === 'waiting') return 'waiting';
   if (card.state === 'running') return 'running';
   if (card.backgroundRunning) return 'background';
+  // 常驻服务不会自己结束，和「等后台任务」分开说，免得看起来像还在干活
+  if (card.backgroundPersistent) return 'persistent';
   if (card.continuing) return 'continuing';
   return 'idle';
 }

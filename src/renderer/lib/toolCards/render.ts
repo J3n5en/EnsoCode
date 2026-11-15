@@ -50,6 +50,7 @@ const GROUP_TITLES: Record<string, string> = {
   todo_item_add: 'Added {{count}} to-dos',
   session_send: 'Sent {{count}} messages',
   session_stop: 'Stopped {{count}} sessions',
+  session_task_stop: 'Stopped {{count}} background tasks',
   session_answer: 'Answered {{count}} questions',
   session_create: 'Created {{count}} sessions',
   todo_item_dispatch: 'Dispatched {{count}} to-dos',
@@ -349,6 +350,30 @@ register('session_answer', (call, ctx) => {
         ? { tone: 'ok', label: ctx.t('Answered') }
         : call.state === 'running'
           ? { tone: 'neutral', label: ctx.t('Answering…') }
+          : undefined
+  );
+});
+
+register('session_task_stop', (call, ctx) => {
+  const args = rec(call.args);
+  const id = str(args?.conversationId);
+  const taskId = str(args?.taskId);
+  const output = rec(parseJson(call.output));
+  const error = errorText(call, ctx);
+  return view(
+    call,
+    ctx.t('Stop background task {{task}}', { task: taskId ?? '' }),
+    [
+      ...(id ? [{ kind: 'session' as const, id, label: sessionLabel(id, ctx) }] : []),
+      ...(taskId ? [{ kind: 'note' as const, text: taskId }] : []),
+      ...(error ? [{ kind: 'error' as const, text: error }] : []),
+    ],
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : output?.status === 'stopped'
+        ? { tone: 'ok', label: ctx.t('Stopped') }
+        : call.state === 'running'
+          ? { tone: 'neutral', label: ctx.t('Stopping…') }
           : undefined
   );
 });
@@ -894,7 +919,9 @@ register('session_tasks', (call, ctx) => {
             : row.stalled === true
               ? ctx.t('Past its deadline')
               : '';
-        const detail = [ran, exit, alive].filter(Boolean).join(' · ');
+        const service = row.persistent === true ? ctx.t('Persistent service') : '';
+        const leftover = str(row.leftover) ? ctx.t('Leftover') : '';
+        const detail = [ran, exit, alive, service, leftover].filter(Boolean).join(' · ');
         return [
           {
             title:

@@ -418,3 +418,92 @@ describe('一天的看板投影', () => {
     });
   });
 });
+
+describe('已完成但还有遗留后台任务', () => {
+  const base = {
+    day: '2024-05-15',
+    now: at(15, 20),
+    session: () => ({ title: '看图与收尾清理', projectName: 'enso-code' }),
+    projectName: () => 'enso-code',
+  };
+
+  it('常驻服务不再挂在进行中，完成卡标出遗留任务数', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        dispatch({
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 10) },
+          backgroundPersistent: true,
+          leftoverTasks: {
+            count: 2,
+            commands: ['python3 -m http.server 8931', 'pnpm typecheck && pnpm test'],
+            taskIds: ['t1', 't2'],
+            at: at(15, 19),
+          },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(daily.groups[0].items[0]).toMatchObject({
+      conversationId: 'c1',
+      leftover: { count: 2 },
+    });
+  });
+
+  it('还有普通后台任务的空闲会话仍算进行中，不标遗留', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [dispatch({ lastState: 'idle', backgroundRunning: true })],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['running']);
+    expect(daily.groups[0].items[0]?.leftover).toBeUndefined();
+  });
+
+  it('残留的 running 也不把遗留会话挂回进行中', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        dispatch({
+          lastState: 'running',
+          lastResult: { kind: 'turn-ended', turn: 2, at: at(15, 10) },
+          leftoverTasks: {
+            count: 1,
+            commands: ['pnpm typecheck && pnpm test'],
+            taskIds: ['t1'],
+            at: at(15, 19),
+          },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(daily.groups[0].items[0]).toMatchObject({ leftover: { count: 1 } });
+  });
+});
+
+describe('还在跑但带着常驻服务', () => {
+  it('进行中的卡片标出常驻服务', () => {
+    const daily = buildSecretaryDaily({
+      day: '2024-05-15',
+      now: at(15, 20),
+      session: () => ({ title: '起服务调试' }),
+      projectName: () => 'enso-code',
+      results: [],
+      dispatched: [
+        dispatch({ lastState: 'running', backgroundRunning: true, backgroundPersistent: true }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups[0].items[0]).toMatchObject({ persistent: true });
+  });
+});

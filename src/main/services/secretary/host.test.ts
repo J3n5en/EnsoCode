@@ -11,6 +11,7 @@ import type {
   SecretaryTodo,
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
+import type { ObservedTask } from '../backgroundTaskTracker';
 import { createSecretaryHost, type SecretaryHost, type SecretaryHostPorts } from './host';
 
 const MINUTE = 60_000;
@@ -65,6 +66,8 @@ interface Harness {
     published: number;
     prompts: string[];
     audit: SecretaryAuditEntry[];
+    /** 会话的后台任务投影 */
+    tasks: Record<string, ObservedTask[]>;
     contact: {
       milestones: { kind: string; title: string; conversationId: string; lastText?: string }[];
       relayAsks: { conversationId: string; question: string; label: string }[];
@@ -83,6 +86,7 @@ function harness(
     enabled?: boolean;
     patrolEnabled?: boolean;
     notify?: Harness['state']['notify'];
+    tasks?: Record<string, ObservedTask[]>;
     /** 这些会话 id 算秘书自己的会话：它们的提问与回复要发到手机 */
     secretaryIds?: string[];
   } = {}
@@ -101,6 +105,7 @@ function harness(
     published: 0,
     prompts: [],
     audit: [],
+    tasks: options.tasks ?? {},
     contact: {
       milestones: [],
       relayAsks: [],
@@ -153,6 +158,7 @@ function harness(
       state.published += 1;
     },
     now: () => state.now,
+    tasks: (conversationId) => state.tasks[conversationId] ?? [],
     newId: () => `id-${++seq}`,
     audit: (entry) => {
       state.audit.push(entry);
@@ -1281,5 +1287,80 @@ describe('联系方式转发', () => {
       change('waiting', 'running')
     );
     expect(h.state.contact.asks).toHaveLength(1);
+  });
+});
+
+describe('遗留后台任务', () => {
+  const settledFile = (extra: Partial<DispatchRecord> = {}) => ({
+    dispatched: {
+      c1: {
+        ...emptyFile().dispatched.c1,
+        lastState: 'idle' as const,
+        lastResult: { kind: 'goal-complete' as const, turn: 0, at: 0 },
+        ...extra,
+      },
+    },
+  });
+
+  const task = (extra: Partial<ObservedTask> = {}): ObservedTask => ({
+    taskId: 't1',
+    command: 'python3 -m http.server 8931 --directory /tmp',
+    status: 'running',
+    startedAt: 0,
+    ...extra,
+  });
+
+  it('已完成会话的常驻服务标成遗留，每小时只推一次', () => {
+    const h = harness({ file: settledFile(), tasks: { c1: [task()] } });
+    h.state.statuses.c1 = idle;
+    h.state.now = 11 * MINUTE;
+    h.host.tick();
+    expect(h.state.file.dispatched.c1.leftoverTasks).toMatchObject({ count: 1 });
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['leftover']);
+    expect(h.state.file.outbox[0]?.text).toContain('python3 -m http.server 8931');
+    expect(h.state.file.outbox[0]?.text).toContain('已跑 11 分钟');
+
+    // 同一批任务再扫一次：不重复推
+    h.state.now = 12 * MINUTE;
+    h.host.tick();
+    expect(h.state.file.outbox).toHaveLength(1);
+  });
+
+  it('进程已不在的普通任务也算遗留，换了一批任务才再推', () => {
+    const h = harness({
+      file: settledFile(),
+      tasks: { c1: [task({ command: 'pnpm typecheck && pnpm test', alive: false })] },
+    });
+    h.state.statuses.c1 = idle;
+    h.state.now = 5 * MINUTE;
+    h.host.tick();
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['leftover']);
+    expect(h.state.file.outbox[0]?.text).toContain('进程已不在');
+
+    // 换了任务：下一个小时点再推一条
+    h.state.tasks.c1 = [task({ taskId: 't2', command: 'pnpm dev', startedAt: 0 })];
+    h.state.now = 70 * MINUTE;
+    h.host.tick();
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['leftover', 'leftover']);
+  });
+
+  it('会话还在跑时不标遗留，后台任务照常算在跑', () => {
+    const h = harness({ file: settledFile({ lastResult: undefined }), tasks: { c1: [task()] } });
+    h.state.statuses.c1 = running;
+    h.state.now = MINUTE;
+    h.host.tick();
+    expect(h.state.file.dispatched.c1.leftoverTasks).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('goal-complete 回传带上还在跑的后台任务', () => {
+    const h = harness({ tasks: { c1: [task({ command: 'pnpm test' })] } });
+    h.state.now = 5 * MINUTE;
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete' });
+    expect(h.state.file.outbox[0]?.text).toContain('还有 1 个后台任务在跑');
+    expect(h.state.file.outbox[0]?.text).toContain('pnpm test');
   });
 });

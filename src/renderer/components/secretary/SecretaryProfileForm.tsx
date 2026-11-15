@@ -463,6 +463,13 @@ export function SecretaryProfileForm({
               />
             </Field>
           )}
+          <SwitchField
+            enso="secretary-form-orphan-task-patrol"
+            label="Scan finished sessions for leftover background tasks"
+            hint="Every hour the secretary looks at finished sessions: a task whose process is gone, one that has run for over 2 hours, or a service (dev server, http.server) still running 10 minutes after the session ended. It only reports them; nothing is killed."
+            checked={draft.orphanTaskPatrol ?? true}
+            onChange={(orphanTaskPatrol) => patch({ orphanTaskPatrol })}
+          />
         </div>
       )}
 

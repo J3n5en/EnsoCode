@@ -249,7 +249,8 @@ async function collectCleanupSessions(
     if (!visible.has(record.projectId)) continue;
     const row = rows[record.conversationId];
     if (!row || row.archived === true) continue;
-    if (record.lastState !== 'idle' || record.backgroundRunning) continue;
+    // 还有后台任务（含常驻服务）的会话先不收：等遗留处理完再归档
+    if (record.lastState !== 'idle' || record.backgroundRunning || record.leftoverTasks) continue;
     if (record.lastResult?.kind !== 'goal-complete') continue;
     const at = record.lastResult.at;
     if (!Number.isFinite(at) || now - at < CLEANUP_IDLE_MS) continue;
