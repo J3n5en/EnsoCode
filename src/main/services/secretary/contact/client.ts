@@ -86,6 +86,11 @@ export interface TelegramApi {
     timeout?: number;
     signal?: AbortSignal;
   }): Promise<TelegramUpdate[]>;
+  /**
+   * 「正在输入…」：Telegram 侧只亮约 5 秒，要一直显示得由调用方续发。
+   * 没有返回值，失败照样抛 TelegramApiError。
+   */
+  sendChatAction(params: { chatId: number; action: 'typing' }): Promise<void>;
   sendMessage(params: {
     chatId: number;
     text: string;
@@ -187,6 +192,9 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         signal,
         LONG_POLL_TIMEOUT_MS
       ),
+    sendChatAction: async ({ chatId, action }) => {
+      await request<boolean>(base, token, 'sendChatAction', { chat_id: chatId, action });
+    },
     sendMessage: async ({ chatId, text, replyMarkup, parseMode }) => {
       const sent = await request<TelegramMessage>(base, token, 'sendMessage', {
         chat_id: chatId,

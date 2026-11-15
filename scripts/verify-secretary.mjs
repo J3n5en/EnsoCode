@@ -3014,6 +3014,8 @@ async function startFakeTelegram(port) {
     deleted: [],
     menuButtons: [],
     callbacks: [],
+    /** 「正在输入…」：只记 chat 与 action */
+    chatActions: [],
     polls: 0,
     queue: [],
     waiters: [],
@@ -3081,6 +3083,11 @@ async function startFakeTelegram(port) {
         const messageId = state.sent.length + 1;
         state.sent.push({ ...body, message_id: messageId });
         reply({ ok: true, result: { message_id: messageId } });
+        return;
+      }
+      if (method === 'sendChatAction') {
+        state.chatActions.push({ chat_id: body.chat_id, action: body.action });
+        reply({ ok: true, result: true });
         return;
       }
       if (method === 'editMessageText') {
@@ -3430,6 +3437,7 @@ async function verifyTelegramContact(cdp, setup) {
 
   log('== 联系方式：手机发话进秘书会话，回复再发回手机');
   const sentBefore = tg.sent.length;
+  const actionsBefore = tg.chatActions.length;
   push({
     update_id: 3,
     message: {
@@ -3521,6 +3529,12 @@ async function verifyTelegramContact(cdp, setup) {
   );
   assert(reply.text === 'fake-ok', '联系方式: 秘书的回复发回手机', reply.text);
   assert(reply.parse_mode === 'HTML', '联系方式: 出站带 parse_mode=HTML', reply);
+  const typing = tg.chatActions.slice(actionsBefore).filter((action) => action.chat_id === 777001);
+  assert(
+    typing.length > 0 && typing.every((action) => action.action === 'typing'),
+    '联系方式: 处理手机消息时发 sendChatAction typing',
+    tg.chatActions.slice(actionsBefore)
+  );
 
   log('== 联系方式：出站 markdown 转 Telegram HTML');
   const sentMark = tg.sent.length;
@@ -3918,6 +3932,7 @@ async function verifyTelegramContact(cdp, setup) {
 
   let turnBefore = await assistantCount();
   mark = tg.sent.length;
+  const syncActionsBefore = tg.chatActions.length;
   await secretaryTurn('[[reply:同步验证]]');
   await waitTurnSettled(turnBefore, 'secretary turn settled');
   const appReply = await lastAssistantText();
@@ -3932,6 +3947,14 @@ async function verifyTelegramContact(cdp, setup) {
     expected,
     sent: tg.sent.slice(mark),
   });
+  const syncTyping = tg.chatActions
+    .slice(syncActionsBefore)
+    .filter((action) => action.chat_id === 777001);
+  assert(
+    syncTyping.length > 0 && syncTyping.every((action) => action.action === 'typing'),
+    '联系方式: /sync 打开时应用内回合也发 sendChatAction typing',
+    tg.chatActions.slice(syncActionsBefore)
+  );
 
   turnBefore = await assistantCount();
   mark = tg.sent.length;

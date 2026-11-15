@@ -75,6 +75,7 @@ interface Harness {
       resolved: { conversationId: string; requestId: string }[];
       replies: { conversationId: string; text: string }[];
       silent: { conversationId: string; updates: number }[];
+      turns: { conversationId: string; kind: 'start' | 'end' }[];
       cards: { count: number; approval?: boolean; conversationId?: string }[];
       approvalsResolved: string[];
     };
@@ -114,6 +115,7 @@ function harness(
       resolved: [],
       replies: [],
       silent: [],
+      turns: [],
       cards: [],
       approvalsResolved: [],
     },
@@ -180,6 +182,12 @@ function harness(
       },
       onTurnReply: (conversationId, text) => {
         state.contact.replies.push({ conversationId, text });
+      },
+      onTurnStart: (conversationId) => {
+        state.contact.turns.push({ conversationId, kind: 'start' });
+      },
+      onTurnEnd: (conversationId) => {
+        state.contact.turns.push({ conversationId, kind: 'end' });
       },
       onTurnSilent: (conversationId, updates) => {
         state.contact.silent.push({ conversationId, updates });
@@ -1313,6 +1321,88 @@ describe('联系方式转发', () => {
       change('waiting', 'running')
     );
     expect(h.state.contact.asks).toHaveLength(1);
+  });
+
+  it('回合开始与收尾都通知联系方式：running 起 typing，idle/failed 收掉', () => {
+    const h = harness({ secretaryIds: ['sec-1'] });
+    const secretary = (type: string, extra: Record<string, unknown> = {}) =>
+      ({
+        type,
+        identity: { sessionId: 'sec-1', generation: 'g1' },
+        seq: 1,
+        ...extra,
+      }) as unknown as RendererAgentEvent;
+    const status = (value: string) =>
+      h.host.onAgentEvent(secretary('status', { status: value }), []);
+
+    h.host.onAgentEvent(
+      secretary('message-upsert', {
+        index: 0,
+        message: { role: 'user', content: [{ type: 'text', text: '在吗' }] },
+      }),
+      []
+    );
+    status('running');
+    status('idle');
+    // 出错同样要收掉，不能留着续发
+    status('running');
+    status('failed');
+    expect(h.state.contact.turns).toEqual([
+      { conversationId: 'sec-1', kind: 'start' },
+      { conversationId: 'sec-1', kind: 'end' },
+      { conversationId: 'sec-1', kind: 'start' },
+      { conversationId: 'sec-1', kind: 'end' },
+    ]);
+
+    // 别的会话的状态变化不碰联系方式
+    h.host.onAgentEvent(
+      { type: 'status', identity, seq: 2, status: 'running' } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(h.state.contact.turns).toHaveLength(4);
+  });
+
+  it('纯系统回传的回合不亮 typing：静默回合本来就不打扰', () => {
+    const h = harness({ secretaryIds: ['sec-1'] });
+    const secretary = (type: string, extra: Record<string, unknown> = {}) =>
+      ({
+        type,
+        identity: { sessionId: 'sec-1', generation: 'g1' },
+        seq: 1,
+        ...extra,
+      }) as unknown as RendererAgentEvent;
+
+    h.host.onAgentEvent(
+      secretary('message-upsert', {
+        index: 0,
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: '<session-updates>\n- [goal-complete a] 完成\n</session-updates>',
+            },
+          ],
+        },
+      }),
+      []
+    );
+    h.host.onAgentEvent(secretary('status', { status: 'running' }), []);
+    expect(h.state.contact.turns.filter((turn) => turn.kind === 'start')).toEqual([]);
+
+    // 用户自己打的字照常亮
+    h.host.onAgentEvent(secretary('status', { status: 'idle' }), []);
+    h.host.onAgentEvent(
+      secretary('message-upsert', {
+        index: 1,
+        message: { role: 'user', content: [{ type: 'text', text: '在吗' }] },
+      }),
+      []
+    );
+    h.host.onAgentEvent(secretary('status', { status: 'running' }), []);
+    expect(h.state.contact.turns.filter((turn) => turn.kind === 'start')).toEqual([
+      { conversationId: 'sec-1', kind: 'start' },
+    ]);
   });
 });
 
