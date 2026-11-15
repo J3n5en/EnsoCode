@@ -588,6 +588,35 @@ describe('在跑计数', () => {
     { projectId: 'p1', canonicalPath: '/tmp/enso-code', state: 'active' },
   ] as ProjectAuthority[];
 
+  it('巡检报过停住的会话在看板上带 stalled，有新活动就不再带', () => {
+    const rows = {
+      c1: { title: '打包安装', sessionFile: '/tmp/c1', goal: { status: 'active', text: '装好' } },
+    };
+    const stalledRecord = record({
+      lastState: 'idle',
+      lastEventAt: 0,
+      patrol: { reason: 'goal-idle-stalled', turn: 0, at: 3 * MINUTE },
+    });
+    const board = buildBoard(emptyFile({ dispatched: { c1: stalledRecord } }), {
+      rows,
+      statuses: { c1: idle },
+      projects,
+      todos: [],
+    });
+    const card = board.running[0];
+    expect(card?.kind === 'session' ? card.stalled : undefined).toEqual({
+      reason: 'goal-idle-stalled',
+      at: 3 * MINUTE,
+    });
+    // 会话又动过：标记还在记录里，但看板不再算停住
+    const resumed = buildBoard(
+      emptyFile({ dispatched: { c1: { ...stalledRecord, lastEventAt: 4 * MINUTE } } }),
+      { rows, statuses: { c1: idle }, projects, todos: [] }
+    );
+    const resumedCard = resumed.running[0];
+    expect(resumedCard?.kind === 'session' ? resumedCard.stalled : undefined).toBeUndefined();
+  });
+
   function board(
     file: SecretaryDispatchFile,
     rows: Record<string, Record<string, unknown>>,

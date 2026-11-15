@@ -407,6 +407,14 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
     const status = input.statuses[record.conversationId];
     const state = sessionStateOf(record, row, status);
     const going = countsAsRunning(record, row, status);
+    // 巡检报过停住、之后没有新活动：进行中列表标「已停住」，等它真的动起来才消失
+    const stalled =
+      going &&
+      record.patrol &&
+      record.patrol.turn === record.turn &&
+      record.lastEventAt <= record.patrol.at
+        ? { reason: record.patrol.reason, at: record.patrol.at }
+        : undefined;
     const card: SessionCard = {
       kind: 'session',
       conversationId: record.conversationId,
@@ -425,6 +433,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(going && state !== 'running' ? { continuing: true as const } : {}),
       ...(going && record.backgroundRunning ? { backgroundRunning: true as const } : {}),
       ...(going && record.backgroundPersistent ? { backgroundPersistent: true as const } : {}),
+      ...(stalled ? { stalled } : {}),
       ...(!going && record.leftoverTasks
         ? { leftoverTasks: { count: record.leftoverTasks.count } }
         : {}),

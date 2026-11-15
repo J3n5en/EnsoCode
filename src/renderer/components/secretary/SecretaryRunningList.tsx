@@ -27,11 +27,12 @@ const BADGE_STYLE: Record<ContactBadge, { label: string; className: string }> = 
   persistent: { label: 'Service running', className: 'bg-warning/15 text-warning' },
   continuing: { label: 'Continuing', className: 'bg-success/15 text-success' },
   interrupted: { label: 'Interrupted', className: 'bg-warning/15 text-warning' },
+  stalled: { label: 'Stalled, no activity', className: 'bg-destructive/15 text-destructive' },
   idle: { label: 'Idle', className: 'bg-muted text-muted-foreground' },
 };
 
 function badgeOf(card: SessionCard): { label: string; className: string } {
-  return BADGE_STYLE[sessionBadge(card)];
+  return BADGE_STYLE[sessionBadge({ ...card, stalled: card.stalled !== undefined })];
 }
 
 /** 一行进行中的会话：点主体展开更多进度，右侧图标才打开会话 */

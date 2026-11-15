@@ -24,9 +24,18 @@ import type {
   SecretaryUpdate,
   TakeoverDraft,
 } from '../types/secretary';
-import { CLEANUP_ITEM_KINDS, RELAY_ASK_STATUSES } from '../types/secretary';
+import {
+  CLEANUP_ITEM_KINDS,
+  PATROL_REASONS as PATROL_REASON_KINDS,
+  RELAY_ASK_STATUSES,
+} from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
+import {
+  DEFAULT_PATROL_IDLE_GOAL_MINUTES,
+  MAX_PATROL_IDLE_GOAL_MINUTES,
+  MIN_PATROL_IDLE_GOAL_MINUTES,
+} from './patrol';
 import { parseSecretarySkillDraft } from './skills';
 
 const DEFAULT_AVATAR_COLOR = '#7c5cff';
@@ -43,7 +52,7 @@ const NOTIFY_MODES = ['needs-user', 'with-done', 'off'] as const;
 export const MIN_PATROL_INTERVAL_MINUTES = 5;
 export const MAX_PATROL_INTERVAL_MINUTES = 120;
 export const DEFAULT_PATROL_INTERVAL_MINUTES = 15;
-const PATROL_REASONS: readonly PatrolReason[] = ['idle-stalled', 'running-stalled'];
+const PATROL_REASONS: readonly PatrolReason[] = PATROL_REASON_KINDS;
 const PENDING_PROBLEMS: readonly PendingProblem[] = [
   'dependency-failed',
   'dependency-stopped',
@@ -187,6 +196,12 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
         MIN_PATROL_INTERVAL_MINUTES,
         MAX_PATROL_INTERVAL_MINUTES
       ) ?? DEFAULT_PATROL_INTERVAL_MINUTES,
+    patrolIdleGoalMinutes:
+      clampInt(
+        value.patrolIdleGoalMinutes,
+        MIN_PATROL_IDLE_GOAL_MINUTES,
+        MAX_PATROL_IDLE_GOAL_MINUTES
+      ) ?? DEFAULT_PATROL_IDLE_GOAL_MINUTES,
     orphanTaskPatrol: flag(value.orphanTaskPatrol, true),
     dispatchMuted: flag(value.dispatchMuted, true),
     dispatchUnattended: flag(value.dispatchUnattended, true),
@@ -351,6 +366,18 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
       return { ok: false, error: 'invalid patrolIntervalMinutes' };
     }
     draft.patrolIntervalMinutes = minutes;
+  }
+  if (value.patrolIdleGoalMinutes !== undefined) {
+    const minutes = value.patrolIdleGoalMinutes;
+    if (
+      typeof minutes !== 'number' ||
+      !Number.isInteger(minutes) ||
+      minutes < MIN_PATROL_IDLE_GOAL_MINUTES ||
+      minutes > MAX_PATROL_IDLE_GOAL_MINUTES
+    ) {
+      return { ok: false, error: 'invalid patrolIdleGoalMinutes' };
+    }
+    draft.patrolIdleGoalMinutes = minutes;
   }
   for (const key of [
     'dispatchMuted',

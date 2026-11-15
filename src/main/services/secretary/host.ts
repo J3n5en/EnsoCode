@@ -4,7 +4,13 @@ import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { projectNameFromPath } from '@shared/projectName';
 import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
-import { type PatrolFacts, patrolAnomalies, patrolIntervalMs } from '@shared/secretary/patrol';
+import {
+  type PatrolFacts,
+  patrolAnomalies,
+  patrolIdleGoalMs,
+  patrolIntervalMs,
+  patrolStallDetail,
+} from '@shared/secretary/patrol';
 import { transitionProposal } from '@shared/secretary/policy';
 import {
   isPureSessionUpdate,
@@ -74,7 +80,7 @@ const RESULT_LABELS: Record<SecretaryResultKind, { zh: string; en: string }> = {
   'turn-ended': { zh: '这一轮结束了，不代表完成', en: 'turn ended, not necessarily done' },
   'needs-user': { zh: '需要你处理', en: 'needs you' },
   failed: { zh: '失败', en: 'failed' },
-  stalled: { zh: '超过十分钟没有动静', en: 'no activity for 10 minutes' },
+  stalled: { zh: '停住了', en: 'stalled' },
   interrupted: { zh: '应用重启时正在运行，已被中断', en: 'interrupted by app restart' },
 };
 
@@ -298,12 +304,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     }
     return changed;
   }
-
-  /** 巡检异常的中文说明：与现有停滞检测分开措辞，秘书一眼能看出是自动巡检发现的 */
-  const PATROL_DETAIL: Record<'idle-stalled' | 'running-stalled', string> = {
-    'idle-stalled': '自动巡检：空闲超过 20 分钟，目标还没完成，也没有待处理项',
-    'running-stalled': '自动巡检：运行超过 30 分钟没有任何事件',
-  };
 
   function remember(file: SecretaryDispatchFile, entry: SecretaryActivity): void {
     file.activity = [...(file.activity ?? []), entry].slice(-ACTIVITY_LIMIT);
@@ -622,6 +622,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const profile = ports.profile();
     if (!profile?.patrolEnabled) return false;
     const rows = ports.rows();
+    const idleGoalMs = patrolIdleGoalMs(profile.patrolIdleGoalMinutes);
     let changed = false;
     for (const record of records) {
       if (!record.patrol) continue;
@@ -638,7 +639,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       return changed;
     }
     if (patrolAt !== undefined && now < patrolAt) return changed;
-    patrolAt = now + patrolIntervalMs(profile.patrolIntervalMinutes);
+    // 停住阈值比巡检间隔小时按阈值走：3 分钟的判定不该被 15 分钟的间隔拖住
+    patrolAt = now + Math.min(patrolIntervalMs(profile.patrolIntervalMinutes), idleGoalMs);
     const facts: PatrolFacts[] = live.map((record) => {
       const status = statuses[record.conversationId];
       const row = rows[record.conversationId];
@@ -655,13 +657,27 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         ...(record.patrol ? { patrol: record.patrol } : {}),
         stallReported: record.stalledTurn === record.turn,
         ...(record.lastResult ? { result: record.lastResult.kind } : {}),
+        ...(record.lastText ? { lastText: record.lastText } : {}),
       };
     });
-    for (const anomaly of patrolAnomalies(facts, now)) {
+    for (const anomaly of patrolAnomalies(facts, now, { idleGoalMs })) {
       const record = file.dispatched[anomaly.conversationId];
       if (!record) continue;
       record.patrol = { reason: anomaly.reason, turn: record.turn, at: now };
-      recordResult(file, record, 'stalled', now, PATROL_DETAIL[anomaly.reason]);
+      const goalStatus = goalStatusOf(rows[record.conversationId]);
+      recordResult(
+        file,
+        record,
+        'stalled',
+        now,
+        patrolStallDetail({
+          reason: anomaly.reason,
+          idleMinutes: (now - record.lastEventAt) / 60_000,
+          ...(goalStatus ? { goalStatus } : {}),
+          backgroundRunning: record.backgroundRunning === true,
+          ...(record.lastText ? { lastText: record.lastText } : {}),
+        })
+      );
       changed = true;
     }
     return changed;

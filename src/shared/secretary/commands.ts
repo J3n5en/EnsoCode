@@ -163,6 +163,7 @@ export type ContactBadge =
   | 'persistent'
   | 'continuing'
   | 'interrupted'
+  | 'stalled'
   | 'idle'
   | 'failed';
 
@@ -175,6 +176,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     persistent: '有常驻服务',
     continuing: '续跑中',
     interrupted: '已中断',
+    stalled: '已停住',
     idle: '空闲',
     failed: '失败',
   },
@@ -185,6 +187,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     persistent: 'Service running',
     continuing: 'Continuing',
     interrupted: 'Interrupted',
+    stalled: 'Stalled, no activity',
     idle: 'Idle',
     failed: 'Failed',
   },
@@ -205,10 +208,13 @@ export function sessionBadge(card: {
   backgroundRunning?: boolean;
   backgroundPersistent?: boolean;
   continuing?: boolean;
+  /** 巡检判定停住：会话还挂着但已经不动了，比「在跑」「续跑中」更该说 */
+  stalled?: boolean;
 }): ContactBadge {
   if (card.result === 'interrupted') return 'interrupted';
   if (card.state === 'error') return 'failed';
   if (card.state === 'waiting') return 'waiting';
+  if (card.stalled) return 'stalled';
   if (card.state === 'running') return 'running';
   if (card.backgroundRunning) return 'background';
   // 常驻服务不会自己结束，和「等后台任务」分开说，免得看起来像还在干活
