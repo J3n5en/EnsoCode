@@ -16,8 +16,8 @@ export interface ContactFile {
   allowDispatchConfirm: boolean;
   /** getUpdates 的游标：先落盘再处理，重启不重放已经产生过副作用的更新 */
   pollOffset: number;
-  /** 绑定向导中间态：码与过期时间，绑完即清 */
-  bind?: { code: string; expiresAt: number };
+  /** 绑定向导中间态：码、过期时间与已经对不上的次数，绑完即清 */
+  bind?: { code: string; expiresAt: number; failures: number };
 }
 
 export function emptyContactFile(): ContactFile {
@@ -58,7 +58,11 @@ export function parseContactFile(raw: unknown): ContactFile {
   const chat = parseChat(raw.chat);
   const bind = isRecord(raw.bind)
     ? typeof raw.bind.code === 'string' && typeof raw.bind.expiresAt === 'number'
-      ? { code: raw.bind.code, expiresAt: raw.bind.expiresAt }
+      ? {
+          code: raw.bind.code,
+          expiresAt: raw.bind.expiresAt,
+          failures: typeof raw.bind.failures === 'number' ? raw.bind.failures : 0,
+        }
       : undefined
     : undefined;
   return {

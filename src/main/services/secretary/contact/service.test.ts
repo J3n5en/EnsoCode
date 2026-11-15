@@ -191,6 +191,24 @@ describe('绑定码', () => {
     expect(h.service.state().telegram.bind?.expiresAt).toBe(h.clock.now + 10 * 60 * 1000);
   });
 
+  it('对不上太多次就作废这个码，要求重新生成', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      h.api.push(privateMessage(`/start 00000${attempt}`));
+      await waitFor(
+        () => h.audits.filter((entry) => entry.op === 'contact_bind_rejected').length > attempt,
+        `rejected ${attempt}`
+      );
+    }
+    const telegram = h.service.state().telegram;
+    expect(telegram.bind).toBeUndefined();
+    expect(telegram.status).toBe('unbound');
+    expect(h.audits.at(-1)?.detail).toBe('too-many-attempts');
+    // bot 与 token 留着：界面上直接重新生成
+    expect(telegram.bot?.username).toBe('enso_secretary_bot');
+  });
+
   it('群里的 /start 不算，只认私聊', async () => {
     const h = harness();
     await h.service.bind(TOKEN);
@@ -248,6 +266,21 @@ describe('入站只认绑定的 chat', () => {
     const inbound = h.audits.find((entry) => entry.op === 'contact_inbound');
     expect(inbound?.detail).toMatch(/^len=\d+ hash=[0-9a-f]{12}$/);
     expect(JSON.stringify(h.audits)).not.toContain('把登录修一下');
+  });
+
+  it('过长的回复截断后再发，不会因为超限整条丢掉', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.api.push(privateMessage('写个长报告'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    const before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', 'x'.repeat(5000));
+    await waitFor(() => h.api.sent.length > before, 'reply sent');
+    const sent = h.api.sent.at(-1)?.text ?? '';
+    expect(sent.length).toBeLessThanOrEqual(3901);
+    expect(sent.endsWith('…')).toBe(true);
   });
 
   it('秘书的回复在用户从手机说话后回发手机', async () => {

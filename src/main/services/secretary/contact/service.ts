@@ -6,6 +6,8 @@ import {
   bindDeepLink,
   botTokenHint,
   CONTACT_BIND_CODE_TTL_MS,
+  CONTACT_BIND_MAX_FAILURES,
+  CONTACT_OUTBOUND_MAX_CHARS,
   type ContactLang,
   cardCallbackData,
   cardCallbackToast,
@@ -266,7 +268,7 @@ export class TelegramContactService implements SecretaryContactPort {
     this.store.save({
       ...this.store.file(),
       bot,
-      bind: { code, expiresAt: this.ports.now() + CONTACT_BIND_CODE_TTL_MS },
+      bind: { code, expiresAt: this.ports.now() + CONTACT_BIND_CODE_TTL_MS, failures: 0 },
     });
     this.audit('contact_bind_start', true, `bot=${bot.id}`);
     this.poller.start();
@@ -469,13 +471,18 @@ export class TelegramContactService implements SecretaryContactPort {
   ): Promise<{ ok: true } | { ok: false; error: ContactError }> {
     const token = this.store.token();
     if (!token) return { ok: false, error: 'token-required' };
+    // Telegram 单条 4096 上限：长回复截断，别让整条发不出去
+    const body =
+      text.length > CONTACT_OUTBOUND_MAX_CHARS
+        ? `${text.slice(0, CONTACT_OUTBOUND_MAX_CHARS)}…`
+        : text;
     try {
       await this.apiFor(token).sendMessage({
         chatId,
-        text,
+        text: body,
         ...(replyMarkup ? { replyMarkup } : {}),
       });
-      this.audit('contact_outbound', true, describe(text));
+      this.audit('contact_outbound', true, describe(body));
       return { ok: true };
     } catch (error) {
       const code = errorCode(error);
@@ -507,6 +514,17 @@ export class TelegramContactService implements SecretaryContactPort {
         return;
       }
       if (!bindCodeUsable(file.bind, code, this.ports.now())) {
+        const failures = file.bind.failures + 1;
+        if (failures >= CONTACT_BIND_MAX_FAILURES) {
+          // 猜太多次：这个码作废，要求重新生成
+          const rest = { ...file };
+          delete rest.bind;
+          this.store.save(rest);
+          this.audit('contact_bind_rejected', false, 'too-many-attempts');
+          this.ports.publish();
+          return;
+        }
+        this.store.save({ ...file, bind: { ...file.bind, failures } });
         this.audit('contact_bind_rejected', false, 'code-mismatch');
         return;
       }

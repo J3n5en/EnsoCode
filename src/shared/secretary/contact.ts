@@ -3,6 +3,10 @@ import type { SecretaryResultKind } from '../types/secretary';
 /** 绑定码有效期：与 deepchat 的配对码同一量级，够慢手操作，又不给陌生人留窗口 */
 export const CONTACT_BIND_CODE_TTL_MS = 10 * 60 * 1000;
 export const CONTACT_BIND_CODE_LENGTH = 6;
+/** 对不上太多次就作废这个码：陌生人猜码猜不穿 10 分钟窗口 */
+export const CONTACT_BIND_MAX_FAILURES = 5;
+/** Telegram 单条上限 4096，留点余量给省略号 */
+export const CONTACT_OUTBOUND_MAX_CHARS = 3900;
 /** 手机上一屏能读完的正文上限 */
 export const CONTACT_TEXT_MAX_CHARS = 180;
 
