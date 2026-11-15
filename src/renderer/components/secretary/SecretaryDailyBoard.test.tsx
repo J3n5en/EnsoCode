@@ -132,6 +132,10 @@ beforeEach(() => {
         h.calls.push({ name: 'markResult', args: [conversationId, action] });
         return { ok: true };
       },
+      stopTasks: async (conversationId: string) => {
+        h.calls.push({ name: 'stopTasks', args: conversationId });
+        return { ok: true, stopped: ['t1'] };
+      },
     },
   };
   (dom.window as unknown as Record<string, unknown>).electronAPI = api;
@@ -317,5 +321,31 @@ describe('SecretaryDailyBoard', () => {
     expect(columns()).toHaveLength(6);
     expect(columns().find((column) => column.group === 'failed')?.cards).toBe(1);
     expect(columns().find((column) => column.group === 'done')?.cards).toBe(0);
+  });
+});
+
+describe('遗留任务', () => {
+  it('完成卡标出遗留任务数，行内按钮停掉它们', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        {
+          key: 'done',
+          items: [item({ tracked: true, leftover: { count: 2 } })],
+        },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    expect(text('[data-enso="secretary-daily-leftover"]')).toContain('2');
+    click('[data-enso="secretary-daily-stop-leftover"]');
+    await flush();
+    expect(h.calls).toContainEqual({ name: 'stopTasks', args: 'c1' });
+  });
+
+  it('进行中卡标出常驻服务', async () => {
+    h.daily[TODAY] = daily({
+      groups: [{ key: 'running', items: [item({ label: undefined, persistent: true })] }],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    expect(text('[data-enso="secretary-daily-persistent"]')).toContain('Service running');
   });
 });

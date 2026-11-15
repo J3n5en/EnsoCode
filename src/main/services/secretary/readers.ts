@@ -23,6 +23,7 @@ import {
   type SessionToolActivity,
 } from '../sessionActivity';
 import { currentBranch, repoIsClean } from '../worktree/service';
+import { leftoverReason, taskIsPersistent } from './leftover';
 import {
   REPO_STATUS_COMMIT_DEFAULT,
   REPO_STATUS_COMMIT_MAX,
@@ -390,21 +391,27 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       if (!session) return notFound;
       const now = Date.now();
       const source = `task:${conversationId}`;
-      const tasks = (await ports.tasks(conversationId)).map((task) => ({
-        taskId: task.taskId,
-        command: wrapUntrusted(source, redactSecrets(task.command)),
-        startedAt: task.startedAt,
-        ranMs: Math.max(0, now - task.startedAt),
-        status: task.status,
-        state: taskState(task),
-        ...(task.exitCode === undefined ? {} : { exitCode: task.exitCode }),
-        // null：worker 看门狗还没探测过，不能当成"活着"
-        alive: task.alive ?? null,
-        ...(task.deadlineAt === undefined ? {} : { deadlineAt: task.deadlineAt }),
-        ...(task.status === 'running' && task.deadlineAt !== undefined && now >= task.deadlineAt
-          ? { stalled: true }
-          : {}),
-      }));
+      const tasks = (await ports.tasks(conversationId)).map((task) => {
+        const leftover = leftoverReason(task, { now });
+        return {
+          taskId: task.taskId,
+          command: wrapUntrusted(source, redactSecrets(task.command)),
+          startedAt: task.startedAt,
+          ranMs: Math.max(0, now - task.startedAt),
+          status: task.status,
+          state: taskState(task),
+          ...(task.exitCode === undefined ? {} : { exitCode: task.exitCode }),
+          // null：worker 看门狗还没探测过，不能当成"活着"
+          alive: task.alive ?? null,
+          ...(task.deadlineAt === undefined ? {} : { deadlineAt: task.deadlineAt }),
+          ...(task.status === 'running' && task.deadlineAt !== undefined && now >= task.deadlineAt
+            ? { stalled: true }
+            : {}),
+          // 常驻服务不会自己结束；遗留只按进程与时长判定，不看会话是否收口
+          ...(task.status === 'running' && taskIsPersistent(task, now) ? { persistent: true } : {}),
+          ...(leftover ? { leftover } : {}),
+        };
+      });
       return {
         ok: true,
         result: { conversationId, projectId: session.projectId, tasks },

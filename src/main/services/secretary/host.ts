@@ -19,6 +19,7 @@ import type {
   SecretaryTodo,
   SecretaryUpdate,
 } from '@shared/types/secretary';
+import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
 import type { SecretaryContactPort } from './contact/service';
 import {
@@ -27,6 +28,13 @@ import {
   recoverDeliveries,
   settleDelivery,
 } from './deliveries';
+import {
+  leftoverNote,
+  leftoverReason,
+  leftoverUpdateText,
+  summarizeCommand,
+  taskIsPersistent,
+} from './leftover';
 import type { SecretarySessionStatus } from './readers';
 import { closeRelayAsk, dropRelay, openRelayAsk, pendingRelay, sessionLabel } from './relay';
 import {
@@ -51,6 +59,8 @@ import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 import { advanceTodos } from './todoLifecycle';
 
 const TICK_MS = 60_000;
+/** 遗留任务巡检间隔：每小时扫一遍已完成会话 */
+const LEFTOVER_PATROL_MS = 60 * 60 * 1000;
 
 const RESULT_LABELS: Record<SecretaryResultKind, { zh: string; en: string }> = {
   'goal-complete': { zh: '目标已完成', en: 'goal completed' },
@@ -88,6 +98,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   now(): number;
   /** 派出会话空闲等后台任务的看门狗；缺省表示没有 */
   backgroundStalls?(now: number): readonly BackgroundStall[];
+  /** 会话最近一次已知的后台任务；缺省表示没有投影 */
+  tasks?(conversationId: string): readonly ObservedTask[];
   /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
   startPending?(pendingIds: readonly string[], now: number): void;
   audit?(entry: SecretaryAuditEntry): void;
@@ -167,6 +179,112 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   const pendingComplete = new Set<string>();
   /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
   let patrolAt: number | undefined;
+  /** 下一次遗留任务巡检的时间；与进行中巡检分开计时，没有进行中的会话也照常扫 */
+  let leftoverAt: number | undefined;
+
+  /**
+   * 后台任务分两路：常驻服务不会自己结束，不能算「等后台任务」，
+   * 否则会话收口后一个没关的 dev server 就能把它永远挂在进行中。
+   */
+  function applyTasks(record: DispatchRecord, tasks: readonly ObservedTask[], now: number): void {
+    const running = tasks.filter((task) => task.status === 'running');
+    const persistent = running.filter((task) => taskIsPersistent(task, now));
+    if (running.length > persistent.length) record.backgroundRunning = true;
+    else delete record.backgroundRunning;
+    if (persistent.length > 0) record.backgroundPersistent = true;
+    else delete record.backgroundPersistent;
+  }
+
+  /**
+   * 遗留标记：会话已经不在跑，但还有没结束的后台任务。
+   * 只做标记，不杀进程；任务结束或会话重新跑起来就自动清掉。
+   */
+  function refreshLeftovers(
+    records: readonly DispatchRecord[],
+    statuses: Readonly<Record<string, SecretarySessionStatus>>,
+    now: number
+  ): boolean {
+    let changed = false;
+    const rows = ports.rows();
+    for (const record of records) {
+      const tasks = ports.tasks?.(record.conversationId) ?? [];
+      const before = JSON.stringify([
+        record.backgroundRunning ?? false,
+        record.backgroundPersistent ?? false,
+        record.leftoverTasks?.taskIds ?? [],
+      ]);
+      applyTasks(record, tasks, now);
+      const going = countsAsRunning(
+        record,
+        rows[record.conversationId],
+        statuses[record.conversationId]
+      );
+      const running = tasks.filter((task) => task.status === 'running');
+      if (!going && running.length > 0) {
+        record.leftoverTasks = {
+          count: running.length,
+          commands: running.slice(0, 3).map((task) => summarizeCommand(task.command)),
+          taskIds: running.map((task) => task.taskId),
+          at: now,
+        };
+      } else {
+        delete record.leftoverTasks;
+      }
+      const after = JSON.stringify([
+        record.backgroundRunning ?? false,
+        record.backgroundPersistent ?? false,
+        record.leftoverTasks?.taskIds ?? [],
+      ]);
+      if (before !== after) changed = true;
+    }
+    return changed;
+  }
+
+  /**
+   * 遗留任务巡检：每小时扫一遍，只推不杀。
+   * 同一批任务只推一次；任务变了（换了或多了）才再推一条。
+   */
+  function runLeftoverPatrol(
+    file: SecretaryDispatchFile,
+    records: readonly DispatchRecord[],
+    now: number
+  ): boolean {
+    if (ports.profile()?.orphanTaskPatrol === false) return false;
+    if (leftoverAt !== undefined && now < leftoverAt) return false;
+    leftoverAt = now + LEFTOVER_PATROL_MS;
+    let changed = false;
+    for (const record of records) {
+      const leftover = record.leftoverTasks;
+      if (!leftover || leftover.count === 0) {
+        if (record.leftoverPatrol) {
+          delete record.leftoverPatrol;
+          changed = true;
+        }
+        continue;
+      }
+      const taskIds = [...leftover.taskIds].sort();
+      const signature = taskIds.join(',');
+      if (record.leftoverPatrol?.taskIds === signature) continue;
+      const settledAt = record.lastResult?.at;
+      const entries = (ports.tasks?.(record.conversationId) ?? []).flatMap((task) => {
+        if (!taskIds.includes(task.taskId)) return [];
+        const reason = leftoverReason(task, { now, settledAt });
+        return reason ? [{ task, reason }] : [];
+      });
+      if (entries.length === 0) continue;
+      record.leftoverPatrol = { taskIds: signature, at: now };
+      file.outbox = enqueueUpdate(file.outbox, {
+        key: `leftover:${record.conversationId}:${signature}`,
+        at: now,
+        kind: 'leftover',
+        conversationId: record.conversationId,
+        secretaryConversationId: record.secretaryConversationId,
+        text: leftoverUpdateText(labelOf(file, record.conversationId), entries, now),
+      });
+      changed = true;
+    }
+    return changed;
+  }
 
   /** 巡检异常的中文说明：与现有停滞检测分开措辞，秘书一眼能看出是自动巡检发现的 */
   const PATROL_DETAIL: Record<'idle-stalled' | 'running-stalled', string> = {
@@ -358,8 +476,21 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     // 有了新结果，用户撤销标记的「放回进行中」到此为止
     delete record.manualUndoneAt;
     // 收口了就不会再有后台任务唤醒它；留着这条记录会让空闲会话一直被算在跑
-    if (SETTLED_RESULTS.has(kind)) delete record.backgroundRunning;
-    const { update, title, projectName } = recordUpdate(record, kind, now, detail);
+    if (SETTLED_RESULTS.has(kind)) {
+      delete record.backgroundRunning;
+      delete record.backgroundPersistent;
+    }
+    // 完成回传里点名还在跑的后台任务：秘书收到完成通知就知道有遗留
+    const leftover =
+      kind === 'goal-complete'
+        ? leftoverNote(ports.tasks?.(record.conversationId) ?? [])
+        : undefined;
+    const { update, title, projectName } = recordUpdate(
+      record,
+      kind,
+      now,
+      [detail, leftover].filter(Boolean).join('；') || undefined
+    );
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
@@ -440,6 +571,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     };
     // 收口了就不会再有后台任务唤醒它；留着这条记录会让空闲会话一直被算在跑
     delete record.backgroundRunning;
+    delete record.backgroundPersistent;
   }
 
   /** 同一轮只报一次。返回是否写进了回传队列 */
@@ -617,14 +749,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (record.lastState !== status.state) record.stateSince = now;
         record.lastState = status.state;
         // 报错的会话不会再被后台任务唤醒，残留的记录会让它一直被算在跑
-        if (status.state === 'error') delete record.backgroundRunning;
+        if (status.state === 'error') {
+          delete record.backgroundRunning;
+          delete record.backgroundPersistent;
+        }
         if (
           event.type === 'background-tasks-level' &&
           conversationId === rootIdOf(event, sessionId ?? conversationId)
         ) {
-          const backgroundRunning = event.tasks.some((task) => task.status === 'running');
-          if (backgroundRunning) record.backgroundRunning = true;
-          else delete record.backgroundRunning;
+          applyTasks(record, event.tasks, now);
         }
         // 完整正文只用来认分支与提交号，记录与落盘都按 lastText 截断
         const report = own ? assistantTextOf(event) : undefined;
@@ -737,9 +870,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (!status || record.lastState === status.state) continue;
         record.stateSince = now;
         record.lastState = status.state;
-        if (status.state === 'error') delete record.backgroundRunning;
+        if (status.state === 'error') {
+          delete record.backgroundRunning;
+          delete record.backgroundPersistent;
+        }
         changed = true;
       }
+      // 任务表是权威：常驻服务与遗留标记每分钟按它重算一次，跑过阈值也能及时升级
+      if (refreshLeftovers(records, statuses, now)) changed = true;
       for (const { conversationId, turn } of stalled(records, statuses, now)) {
         const record = file.dispatched[conversationId];
         record.stalledTurn = turn;
@@ -765,6 +903,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       // 自动巡检：正常时什么都不推，异常时按会话与原因各推一次
       if (runPatrol(file, records, statuses, now)) changed = true;
+      // 遗留任务巡检：已完成会话里还在跑的后台任务，每小时推一次，不自动杀
+      if (runLeftoverPatrol(file, records, now)) changed = true;
       for (const proposal of Object.values(file.proposals)) {
         const transitioned = transitionProposal(proposal, { type: 'expire' }, now);
         if (!transitioned.changed) continue;

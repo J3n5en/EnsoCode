@@ -56,6 +56,7 @@ export function draftFromProfile(
     maxRunningDispatches: base.maxRunningDispatches,
     patrolEnabled: base.patrolEnabled,
     patrolIntervalMinutes: base.patrolIntervalMinutes,
+    orphanTaskPatrol: base.orphanTaskPatrol,
     dispatchMuted: base.dispatchMuted,
     dispatchUnattended: base.dispatchUnattended,
     replyLanguage: base.replyLanguage,

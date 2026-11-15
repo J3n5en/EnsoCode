@@ -823,3 +823,96 @@ describe('等依赖的派发卡片', () => {
     expect(formatSessionUpdates([update])).toContain('- [pending pending:pend-1]');
   });
 });
+
+describe('常驻服务与遗留任务', () => {
+  const projects: ProjectAuthority[] = [];
+  const leftover = {
+    count: 1,
+    commands: ['python3 -m http.server 8931 --directory /tmp'],
+    taskIds: ['t1'],
+    at: 6,
+  };
+
+  it('已终态 + 空闲 + 遗留任务不再算在跑，完成卡标出遗留', () => {
+    const file = emptyFile({
+      dispatched: {
+        c1: record({
+          lastState: 'idle',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 5 },
+          backgroundRunning: true,
+          backgroundPersistent: true,
+          leftoverTasks: leftover,
+        }),
+      },
+    });
+    const row = { id: 'c1', title: '做完', sessionFile: '/tmp/c1.jsonl' };
+    expect(countsAsRunning(file.dispatched.c1, row, idle)).toBe(false);
+    const board = buildBoard(file, {
+      rows: { c1: row },
+      statuses: { c1: idle },
+      projects,
+      todos: [],
+    });
+    expect(board.running).toEqual([]);
+    expect(board.done[0]).toMatchObject({
+      conversationId: 'c1',
+      result: 'goal-complete',
+      leftoverTasks: { count: 1 },
+    });
+  });
+
+  it('会话还在跑时后台任务照常算在跑', () => {
+    const file = emptyFile({
+      dispatched: {
+        c1: record({
+          lastState: 'running',
+          lastResult: { kind: 'goal-complete', turn: 1, at: 5 },
+          backgroundRunning: true,
+        }),
+      },
+    });
+    const row = { id: 'c1', title: '又跑了', sessionFile: '/tmp/c1.jsonl' };
+    expect(countsAsRunning(file.dispatched.c1, row, running)).toBe(true);
+  });
+
+  it('空闲等普通后台任务仍算在跑，只有常驻服务不算', () => {
+    const waiting = record({
+      lastState: 'idle',
+      lastResult: { kind: 'turn-ended', turn: 1, at: 5 },
+      backgroundRunning: true,
+    });
+    expect(countsAsRunning(waiting, { sessionFile: '/tmp/c1' }, idle)).toBe(true);
+
+    const service = record({
+      lastState: 'idle',
+      lastResult: { kind: 'turn-ended', turn: 1, at: 5 },
+      backgroundPersistent: true,
+      leftoverTasks: leftover,
+    });
+    expect(countsAsRunning(service, { sessionFile: '/tmp/c1' }, idle)).toBe(false);
+  });
+
+  it('会话在跑但还有常驻服务：进行中卡片标「有常驻服务」', () => {
+    const file = emptyFile({
+      dispatched: {
+        c1: record({
+          lastState: 'idle',
+          lastResult: { kind: 'turn-ended', turn: 1, at: 5 },
+          backgroundRunning: true,
+          backgroundPersistent: true,
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: { c1: { title: '在跑', sessionFile: '/tmp/c1.jsonl' } },
+      statuses: { c1: idle },
+      projects,
+      todos: [],
+    });
+    expect(board.running[0]).toMatchObject({
+      conversationId: 'c1',
+      backgroundRunning: true,
+      backgroundPersistent: true,
+    });
+  });
+});

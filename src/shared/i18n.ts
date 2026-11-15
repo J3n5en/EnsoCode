@@ -2998,6 +2998,17 @@ export const zhTranslations: Record<string, string> = {
   'Telegram messages are not end-to-end encrypted and stay on Telegram servers. /status, /board and /feed show titles and short summaries; /last and /sync send conversation text. Memory text and tool output never leave the app.':
     'Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。/status、/board、/feed 只显示标题与简短摘要；/last 与 /sync 会发会话正文。记忆正文与工具输出不会离开应用。',
   'Waiting on a background task': '等后台任务',
+  'Service running': '有常驻服务',
+  'Scan finished sessions for leftover background tasks': '巡检已完成会话的遗留后台任务',
+  'Every hour the secretary looks at finished sessions: a task whose process is gone, one that has run for over 2 hours, or a service (dev server, http.server) still running 10 minutes after the session ended. It only reports them; nothing is killed.':
+    '每小时看一遍已完成的会话：进程已经不在了、跑了超过 2 小时、或者会话结束后常驻服务（dev server、http.server）还跑了 10 分钟以上。只汇报，不杀进程。',
+  'Done ({{count}} leftover tasks)': '已完成（{{count}} 个遗留任务）',
+  'Stop leftover tasks': '停止遗留任务',
+  'Stop background task {{task}}': '停止后台任务 {{task}}',
+  'Stopped {{count}} background tasks': '停止了 {{count}} 个后台任务',
+  'Stopping…': '正在停止…',
+  'Persistent service': '常驻服务',
+  Leftover: '疑似遗留',
   Continuing: '续跑中',
   'Taken over': '已接管',
   'Started {{time}}': '派出于 {{time}}',

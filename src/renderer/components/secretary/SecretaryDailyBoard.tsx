@@ -4,7 +4,16 @@ import type {
   SecretaryDailyGroupKey,
   SecretaryDailyItem,
 } from '@shared/types/secretary';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Inbox, Link2, Undo2 } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Inbox,
+  Link2,
+  Square,
+  Undo2,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
@@ -64,6 +73,7 @@ function DailyCard({
   const { t, locale } = useI18n();
   const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [expanded, setExpanded] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const body = item.summary ?? item.detail;
   const detail = item.detail ?? item.summary;
   const times = [
@@ -80,34 +90,58 @@ function DailyCard({
       : column.key === 'running'
         ? 'done'
         : null;
+  // 已完成但还有遗留任务：行内停掉，不自动杀，用户点了才动
+  const stopLeftover = item.leftover && item.conversationId ? item.conversationId : null;
   return (
     <div
       data-enso="secretary-daily-card"
       data-item={item.id}
       className={cn(CARD_CLASS, 'group/row relative')}
     >
-      {mark && (
+      {(mark || stopLeftover) && (
         <HoverActions className="from-card">
-          <button
-            type="button"
-            data-enso={mark === 'done' ? 'secretary-daily-mark-done' : 'secretary-daily-mark-undo'}
-            title={mark === 'done' ? t('Mark done') : t('Undo mark done')}
-            aria-label={mark === 'done' ? t('Mark done') : t('Undo mark done')}
-            onClick={() => {
-              if (!item.conversationId) return;
-              void window.electronAPI.secretary.markResult(item.conversationId, mark);
-            }}
-            className={cn(
-              ACTION_CLASS,
-              mark === 'done' ? 'hover:bg-success/10 hover:text-success' : undefined
-            )}
-          >
-            {mark === 'done' ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <Undo2 className="h-3.5 w-3.5" />
-            )}
-          </button>
+          {stopLeftover && (
+            <button
+              type="button"
+              data-enso="secretary-daily-stop-leftover"
+              title={t('Stop leftover tasks')}
+              aria-label={t('Stop leftover tasks')}
+              disabled={stopping}
+              onClick={() => {
+                setStopping(true);
+                void window.electronAPI.secretary
+                  .stopTasks(stopLeftover)
+                  .finally(() => setStopping(false));
+              }}
+              className={cn(ACTION_CLASS, 'hover:bg-destructive/10 hover:text-destructive')}
+            >
+              <Square className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {mark && (
+            <button
+              type="button"
+              data-enso={
+                mark === 'done' ? 'secretary-daily-mark-done' : 'secretary-daily-mark-undo'
+              }
+              title={mark === 'done' ? t('Mark done') : t('Undo mark done')}
+              aria-label={mark === 'done' ? t('Mark done') : t('Undo mark done')}
+              onClick={() => {
+                if (!item.conversationId) return;
+                void window.electronAPI.secretary.markResult(item.conversationId, mark);
+              }}
+              className={cn(
+                ACTION_CLASS,
+                mark === 'done' ? 'hover:bg-success/10 hover:text-success' : undefined
+              )}
+            >
+              {mark === 'done' ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Undo2 className="h-3.5 w-3.5" />
+              )}
+            </button>
+          )}
         </HoverActions>
       )}
       <button
@@ -134,6 +168,16 @@ function DailyCard({
       <div className="mt-[7px] flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
         {item.projectName && <span className={CHIP_CLASS}>{item.projectName}</span>}
         {item.label && <span className={CHIP_CLASS}>{t(item.label)}</span>}
+        {item.leftover && (
+          <span data-enso="secretary-daily-leftover" className={cn(CHIP_CLASS, 'text-warning')}>
+            {t('Done ({{count}} leftover tasks)', { count: item.leftover.count })}
+          </span>
+        )}
+        {item.persistent && (
+          <span data-enso="secretary-daily-persistent" className={cn(CHIP_CLASS, 'text-warning')}>
+            {t('Service running')}
+          </span>
+        )}
         {item.branch && (
           <span data-enso="secretary-daily-branch" className={cn(CHIP_CLASS, 'font-mono')}>
             {item.branch}

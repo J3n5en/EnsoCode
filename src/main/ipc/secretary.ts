@@ -31,6 +31,7 @@ import {
   setSecretaryForgetListener,
   setSecretaryStateListener,
   startPendingDispatches,
+  stopLeftoverTasks,
   untrack,
 } from '../services/secretary/dispatch';
 import {
@@ -80,6 +81,7 @@ import { SecretaryStore } from '../services/secretary/store';
 import {
   getSourceAuthorityRegistry,
   isRootSessionAlive,
+  observedBackgroundTasks,
   observedSessionStatus,
   promptRootFromMain,
   releaseRootFromMain,
@@ -258,6 +260,7 @@ const hostPorts: SecretaryHostPorts = {
   publish: () => broadcastState(),
   now: () => Date.now(),
   backgroundStalls: (now) => driver?.watch(now) ?? [],
+  tasks: (conversationId) => observedBackgroundTasks(conversationId),
   startPending: (pendingIds, now) => {
     void startPendingDispatches(secretaryDispatchPorts, pendingIds, now).catch((error: unknown) => {
       console.warn(
@@ -533,6 +536,15 @@ export function registerSecretaryHandlers(): void {
     const parsed = parseMarkResultRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
     return markResult(secretaryDispatchPorts, parsed.conversationId, parsed.action);
+  });
+
+  // 看板上的「停止遗留任务」：只停这条派发记录里还在跑的后台任务
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_STOP_TASKS, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseDismissRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return stopLeftoverTasks(secretaryDispatchPorts, parsed.conversationId);
   });
 
   // 撤销是收回权限，开关关着也允许

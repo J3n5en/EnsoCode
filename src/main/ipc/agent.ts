@@ -720,6 +720,16 @@ export function abortRootFromMain(sessionId: string): void {
   if (identity) abortSession(identity);
 }
 
+/** 秘书停后台任务：身份由 Main 按会话 id 解析，模型只能给任务 id */
+export function stopTaskFromMain(
+  sessionId: string,
+  taskId: string
+): { ok: boolean; error?: string } {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: 'stale generation' };
+  return stopBackgroundTask(identity, taskId);
+}
+
 /** 秘书给已释放的派出会话续发消息：按持久化元数据恢复 worker，之后走普通 prompt 路径 */
 export async function resumeRootFromMain(sessionId: string): Promise<AgentActionResult> {
   const row = readPersistedConversation(sessionId);

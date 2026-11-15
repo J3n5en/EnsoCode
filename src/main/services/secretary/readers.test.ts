@@ -596,6 +596,23 @@ describe('session_tasks', () => {
       await handlers.session_tasks({ conversationId: 's1' }, { secretaryConversationId: 'sec-1' })
     ).toEqual({ ok: false, error: 'not-found' });
   });
+
+  it('常驻服务标 persistent，进程已不在的标 leftover', async () => {
+    const result = await run(
+      handlers([
+        task({ taskId: 'service', command: 'python3 -m http.server 8931' }),
+        task({ taskId: 'dead', command: 'pnpm typecheck', alive: false }),
+        task({ taskId: 'plain', command: 'pnpm test' }),
+      ]).session_tasks,
+      { conversationId: 's1' }
+    );
+    const rows = result.tasks as Record<string, unknown>[];
+    expect(rows[0]).toMatchObject({ persistent: true });
+    expect(rows[0]?.leftover).toBeUndefined();
+    expect(rows[1]).toMatchObject({ leftover: 'process-gone' });
+    expect(rows[2]?.persistent).toBeUndefined();
+    expect(rows[2]?.leftover).toBeUndefined();
+  });
 });
 
 describe('session_activity', () => {
