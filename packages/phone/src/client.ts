@@ -226,7 +226,8 @@ export class PairClient {
     private device: PairedDevice,
     private events: ClientEvents,
     directFactory: DirectPeerFactory | null = createBrowserDirectPeerFactory(),
-    private cache: PhoneCacheStore = phoneCache
+    private cache: PhoneCacheStore = phoneCache,
+    private desk = false
   ) {
     this.contentKey = fromBase64Url(device.contentKey);
     this.direct = new DirectLink({
@@ -1013,7 +1014,7 @@ export class PairClient {
     if (this.closed || this.revoked || this.roomPrimed) return;
     if (this.ws?.readyState !== 1) return;
     this.roomPrimed = true;
-    this.send({ type: 'snapshot' });
+    this.send(this.desk ? { type: 'snapshot', desk: true } : { type: 'snapshot' });
     if (this.subscribedId) this.subscribe(this.subscribedId);
   }
 

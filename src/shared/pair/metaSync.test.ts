@@ -5,6 +5,7 @@ import {
   changedMetaChannels,
   channelsForMetaPush,
   forgetGuestSyncMeta,
+  guestMetaChannels,
   mergeStableMeta,
   PAIR_META_CHANNELS,
   pairJsonFingerprint,
@@ -258,6 +259,13 @@ describe('channelsForMetaPush', () => {
       'pushConfig',
       'hostInfo',
     ]);
+  });
+});
+
+describe('guestMetaChannels', () => {
+  it('完整模式只收 host-info 与推送配置，手机版照旧', () => {
+    expect(guestMetaChannels([...PAIR_META_CHANNELS], true)).toEqual(['pushConfig', 'hostInfo']);
+    expect(guestMetaChannels([...PAIR_META_CHANNELS], false)).toEqual([...PAIR_META_CHANNELS]);
   });
 });
 

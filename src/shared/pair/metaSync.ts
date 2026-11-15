@@ -94,6 +94,16 @@ export function providerChannelsToSend(
   };
 }
 
+/** 完整模式只用 host-info 与推送配置；目录/项目/模型表/外观走 renderer 隧道 */
+const DESK_META_CHANNELS = new Set<PairMetaChannel>(['pushConfig', 'hostInfo']);
+
+export function guestMetaChannels(
+  channels: readonly PairMetaChannel[],
+  desk: boolean
+): PairMetaChannel[] {
+  return desk ? channels.filter((key) => DESK_META_CHANNELS.has(key)) : [...channels];
+}
+
 /** 列表会话剥掉聊天专用字段；当前订阅保留 cwd/排队/模型 */
 const CATALOG_CHAT_KEYS = [
   'cwd',

@@ -15,7 +15,8 @@ export const UPSERT_MARK = '__ensoUpsert';
 
 const DELTA_RATIO = 0.5;
 const UPSERT_BASES = 32;
-const READ_CACHE_ENTRIES = 16;
+/** 历史尾窗等读取会挤占条数：太小时回前台读设置找不到基线，只能整份重发 */
+const READ_CACHE_ENTRIES = 64;
 const READ_CACHE_CHARS = 16 * 1024 * 1024;
 const CLIENT_CACHE_CHARS = 8 * 1024 * 1024;
 

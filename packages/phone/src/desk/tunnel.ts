@@ -15,12 +15,14 @@ import {
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { type ConnState, PairClient } from '../client';
 import type { PhoneCacheStore } from '../sessionCache';
-import { stallDelay } from './stall';
+import { needsRehello, stallDelay } from './stall';
 
 export interface DeskLinkHooks {
   onTransport?(transport: 'relay' | 'direct'): void;
   onRtt?(rttMs: number): void;
   onPushConfig?(key: string): void;
+  /** 在线但有 renderer 还没续上 */
+  onResuming?(active: boolean): void;
 }
 
 export interface DeskAsset {
@@ -37,10 +39,16 @@ interface Slot {
   kind: RemoteKind;
   ready: boolean;
   everReady: boolean;
+  helloAt: number;
   queue: RemoteToHost[];
   pending: Map<
     number,
-    { message: Request; resolve: (payload: string) => void; reject: (error: Error) => void }
+    {
+      message: Request;
+      at: number;
+      resolve: (payload: string) => void;
+      reject: (error: Error) => void;
+    }
   >;
   /** 最近发出的 rpc-send：链路可能在察觉前已断，续上后重发（宿主按 id 去重） */
   sends: Request[];
@@ -69,6 +77,7 @@ const ASSET_RETRY_MS = 10_000;
 /** 大帧走中继、小帧走直连会乱序；缺口期间这么久没收到任何数据视为丢帧 */
 const GAP_RESYNC_MS = 8_000;
 const MAX_RECENT_SENDS = 200;
+const WATCH_MS = 2_000;
 /** 每收这么多分片字节回报一次，宿主据此放行下一段（窗口 512KB） */
 const ACK_STEP = 128 * 1024;
 const CAN_GUNZIP = typeof DecompressionStream === 'function';
@@ -107,6 +116,7 @@ export class DeskTunnel {
   /** 线上收到的大帧字符数（分片、整帧资源、整帧压缩）：启动画面据此显示首次下载进度 */
   downloadedBytes = 0;
   private ackedBytes = 0;
+  private resuming = false;
   leader = false;
   private readOnly = false;
   /** 本次页面加载：宿主据此回收旧页面遗留的 renderer */
@@ -139,7 +149,8 @@ export class DeskTunnel {
         },
       },
       undefined,
-      NO_CACHE
+      NO_CACHE,
+      true
     );
   }
 
@@ -151,6 +162,7 @@ export class DeskTunnel {
   start(): void {
     const client = this.client;
     client.connect();
+    setInterval(() => this.watch(), WATCH_MS);
     const visible = () => document.visibilityState === 'visible';
     document.addEventListener('visibilitychange', () => {
       if (visible()) client.nudge('visibility');
@@ -180,18 +192,54 @@ export class DeskTunnel {
     this.online = state === 'online';
     if (this.online && was) {
       // 已在线又收到 host-online：桌面到中继的连接重建过，之前发过去的请求、发过来的帧可能都丢在旧连接上。
-      // 按 seq 重新 hello 让宿主补发，在途资源重新请求
+      // 按 seq 重新 hello 让宿主补发，在途资源重新请求；宿主换链时清了 gzip/流控，先重新声明
+      this.ack();
       for (const slot of this.slots.values()) if (slot.ready) this.hello(slot);
       for (const { message } of this.assets.values()) this.post(message);
       return;
     }
-    if (this.online === was) return;
-    for (const slot of this.slots.values()) slot.ready = false;
-    if (!this.online) return;
-    // 先声明会回报进度，宿主随即对大帧限流
-    this.ack();
-    for (const slot of this.slots.values()) this.hello(slot);
-    for (const { message } of this.assets.values()) this.post(message);
+    if (this.online !== was) {
+      for (const slot of this.slots.values()) slot.ready = false;
+      if (this.online) {
+        // 先声明会回报进度，宿主随即对大帧限流
+        this.ack();
+        for (const slot of this.slots.values()) this.hello(slot);
+        for (const { message } of this.assets.values()) this.post(message);
+      }
+    }
+    this.reportResuming();
+  }
+
+  private watch(): void {
+    if (this.online) {
+      const now = Date.now();
+      let acked = false;
+      for (const slot of this.slots.values()) {
+        let pendingAt: number | undefined;
+        for (const entry of slot.pending.values())
+          pendingAt = Math.min(pendingAt ?? entry.at, entry.at);
+        if (
+          !needsRehello(
+            now,
+            { ready: slot.ready, helloAt: slot.helloAt, pendingAt },
+            this.lastInbound
+          )
+        )
+          continue;
+        if (!acked) this.ack();
+        acked = true;
+        this.hello(slot);
+      }
+    }
+    this.reportResuming();
+  }
+
+  private reportResuming(): void {
+    const active =
+      this.online && [...this.slots.values()].some((slot) => slot.everReady && !slot.ready);
+    if (active === this.resuming) return;
+    this.resuming = active;
+    this.link.onResuming?.(active);
   }
 
   private post(message: RemoteToHost): void {
@@ -210,6 +258,7 @@ export class DeskTunnel {
   }
 
   private hello(slot: Slot): void {
+    slot.helloAt = Date.now();
     this.post({
       type: 'rpc-hello',
       cid: slot.cid,
@@ -348,6 +397,7 @@ export class DeskTunnel {
         const queued = slot.queue;
         slot.queue = [];
         for (const message of queued) this.post(message);
+        this.reportResuming();
         return;
       }
       case 'rpc-result':
@@ -379,6 +429,7 @@ export class DeskTunnel {
       kind,
       ready: false,
       everReady: false,
+      helloAt: 0,
       queue: [],
       pending: new Map(),
       sends: [],
@@ -399,7 +450,7 @@ export class DeskTunnel {
             ch: channel,
             args: JSON.parse(payload),
           };
-          slot.pending.set(message.id as number, { message, resolve, reject });
+          slot.pending.set(message.id as number, { message, at: Date.now(), resolve, reject });
           this.enqueue(slot, message);
         }),
       send: (channel, payload) => {

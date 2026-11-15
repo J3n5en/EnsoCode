@@ -95,11 +95,20 @@ const LOADING_TEXT: Partial<Record<ConnState, string>> = {
 
 /** 正盖着上次的界面快照：在线时提示还在同步、暂不能操作 */
 let syncing = false;
+/** 已在线但 renderer 还没续上（回前台换链后）：别让界面看着像卡死 */
+let resuming = false;
 let lastState: ConnState = 'connecting';
 
 function renderStatus(): void {
   const el = $('status');
-  const text = lastState === 'online' ? (syncing ? '正在同步…' : '') : STATE_TEXT[lastState];
+  const text =
+    lastState === 'online'
+      ? syncing
+        ? '正在同步…'
+        : resuming
+          ? '正在恢复连接…'
+          : ''
+      : STATE_TEXT[lastState];
   el.textContent = text;
   // 启动画面已在说明进度时不再叠一个状态胶囊
   el.style.display = text && !loading ? 'block' : 'none';
@@ -223,6 +232,10 @@ async function main(): Promise<void> {
       onTransport: (transport) =>
         publishLink(reduceDeskLink(link, { type: 'transport', transport })),
       onRtt: (rttMs) => publishLink(reduceDeskLink(link, { type: 'rtt', rttMs })),
+      onResuming: (active) => {
+        resuming = active;
+        renderStatus();
+      },
       onPushConfig: (key) => {
         publishLink(reduceDeskLink(link, { type: 'push-config', key }));
         if (localStorage.getItem(PHONE_PUSH_ENABLED_KEY) !== 'on') return;

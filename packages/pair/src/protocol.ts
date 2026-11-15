@@ -74,7 +74,8 @@ export type PhoneToHost =
   | { type: 'abort'; sessionId: string }
   | { type: 'approval-respond'; sessionId: string; requestId: string; decision: ApprovalDecision }
   | { type: 'ask-respond'; sessionId: string; requestId: string; answer: string }
-  | { type: 'snapshot' }
+  /** desk：完整模式，宿主只回 host-info/推送配置，不推目录与会话事件 */
+  | { type: 'snapshot'; desk?: true }
   | {
       type: 'subscribe';
       sessionId: string | null;
