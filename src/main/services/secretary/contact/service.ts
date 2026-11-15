@@ -131,6 +131,10 @@ export interface SecretaryContactPort {
   onAskResolved(conversationId: string, requestId: string): void;
   /** 审批在应用里收尾：那条提示的按钮跟着失效 */
   onApprovalResolved(conversationId: string): void;
+  /** 回合开始：这一轮的回复会发到手机时点亮「正在输入…」 */
+  onTurnStart(conversationId: string): void;
+  /** 回合收尾（完成 / 出错 / 被停）：立刻停掉续发 */
+  onTurnEnd(conversationId: string): void;
   onTurnReply(conversationId: string, text: string): void;
   /** 静默回合：/sync 打开时只发一行摘要，正文不发 */
   onTurnSilent(conversationId: string, updates: number): void;
@@ -195,6 +199,9 @@ const MAX_PENDING_ASKS = 8;
 /** 一条提示消息里最多几张卡：再多手机上也没法点 */
 const MAX_CARD_BUTTONS = 4;
 
+/** Telegram 的「正在输入…」只亮约 5 秒：4 秒续一次，留出网络抖动 */
+const TYPING_REFRESH_MS = 4_000;
+
 /** 已经发到手机上的确认卡：处理掉之后要把那条消息的按钮清掉 */
 interface TrackedCard extends ContactCardRef {
   slot: number;
@@ -246,6 +253,11 @@ export class TelegramContactService implements SecretaryContactPort {
   private slot = 1;
   /** 从手机发来消息后，等这一轮的正文再回发手机 */
   private readonly awaitingReply = new Set<string>();
+  /**
+   * 正在续发「正在输入…」的那一轮。同一时间只跑一个循环：
+   * 万一多个回合叠在一起，也不会对同一个 chat 重复发。
+   */
+  private typing: { conversationId: string; timer: ReturnType<typeof setTimeout> } | null = null;
   /** /feed 的翻页游标：按钮上只带短编号，重启后按钮失效即可 */
   private readonly feedCursors = new Map<string, FeedCursor>();
   private feedSeq = 1;
@@ -311,6 +323,7 @@ export class TelegramContactService implements SecretaryContactPort {
   }
 
   async stop(): Promise<void> {
+    this.stopTyping();
     await this.poller.stop();
   }
 
@@ -388,6 +401,7 @@ export class TelegramContactService implements SecretaryContactPort {
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
+    this.stopTyping();
     this.audit('contact_unbind', true);
     this.ports.publish();
     return { ok: true };
@@ -405,6 +419,7 @@ export class TelegramContactService implements SecretaryContactPort {
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
+    this.stopTyping();
     this.audit('contact_forget_bot', true);
     this.ports.publish();
     return { ok: true };
@@ -507,10 +522,31 @@ export class TelegramContactService implements SecretaryContactPort {
   }
 
   /**
+   * 回合开始：这一轮的回复会发到手机（手机发起，或 /sync 打开）就点亮「正在输入…」。
+   * 判定与 onTurnReply 一致；已有循环在跑时不重复起。
+   */
+  onTurnStart(conversationId: string): void {
+    if (this.typing) return;
+    const file = this.store.file();
+    if (!file.chat) return;
+    if (!this.awaitingReply.has(conversationId) && !file.syncMirror) return;
+    const timer = setTimeout(() => this.refreshTyping(), TYPING_REFRESH_MS);
+    this.typing = { conversationId, timer };
+    void this.sendTyping();
+  }
+
+  /** 回合收尾：完成、出错、被停都走这里，回复发出后不再续发 */
+  onTurnEnd(conversationId: string): void {
+    if (this.typing?.conversationId !== conversationId) return;
+    this.stopTyping();
+  }
+
+  /**
    * 秘书这一轮的正文。用户刚从手机发来的那一轮本来就回发，只发一次；
    * 其余回合只有 /sync 打开时才镜像，关闭时只发里程碑。
    */
   onTurnReply(conversationId: string, text: string): void {
+    this.onTurnEnd(conversationId);
     const fromPhone = this.awaitingReply.delete(conversationId);
     const file = this.store.file();
     const body = text.trim();
@@ -527,6 +563,8 @@ export class TelegramContactService implements SecretaryContactPort {
 
   /** 静默回合：正文是空的，/sync 打开时补一行摘要，让手机知道秘书看过 */
   onTurnSilent(conversationId: string, updates: number): void {
+    // 静默就是不打扰：先收掉「正在输入…」，摘要发完也不再续
+    this.onTurnEnd(conversationId);
     // 手机发起的回合一定会回话，静默只可能来自系统回传
     if (this.awaitingReply.delete(conversationId)) return;
     const file = this.store.file();
@@ -746,6 +784,8 @@ export class TelegramContactService implements SecretaryContactPort {
     if (action !== 'status') {
       const on = action === 'on';
       this.store.save({ ...this.store.file(), syncMirror: on });
+      // 关掉同步后这一轮不再镜像，也就没必要继续亮「正在输入…」
+      if (!on) this.stopTyping();
       this.audit('contact_sync', true, on ? 'on' : 'off');
       this.ports.publish();
     }
@@ -882,6 +922,41 @@ export class TelegramContactService implements SecretaryContactPort {
   private menuCommands(): { command: string; description: string }[] {
     const allowMemory = this.store.file().allowMemory;
     return botCommands().filter((entry) => entry.command !== 'memory' || allowMemory);
+  }
+
+  /** 续发一次，再排下一次；循环只由 stopTyping 结束 */
+  private refreshTyping(): void {
+    const typing = this.typing;
+    if (!typing) return;
+    void this.sendTyping();
+    typing.timer = setTimeout(() => this.refreshTyping(), TYPING_REFRESH_MS);
+  }
+
+  /**
+   * 发一次 sendChatAction。只是提示：失败只记审计、不抛错也不重试，
+   * 顺手停掉循环，免得每一轮都撞同一堵墙。
+   */
+  private async sendTyping(): Promise<void> {
+    const token = this.store.token();
+    const chat = this.store.file().chat;
+    // 解绑后立刻停：没有 chat 就不再发
+    if (!token || !chat) {
+      this.stopTyping();
+      return;
+    }
+    try {
+      await this.apiFor(token).sendChatAction({ chatId: chat.id, action: 'typing' });
+    } catch (error) {
+      this.audit('contact_typing', false, errorCode(error));
+      this.stopTyping();
+    }
+  }
+
+  private stopTyping(): void {
+    const typing = this.typing;
+    if (!typing) return;
+    this.typing = null;
+    clearTimeout(typing.timer);
   }
 
   private apiFor(token: string): TelegramApi {
