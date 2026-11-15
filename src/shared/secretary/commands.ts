@@ -76,9 +76,9 @@ export function commandListText(lang: ContactLang, allowMemory: boolean): string
 }
 
 /** Telegram 的 HTML 模式只认这三个实体，正文里的特殊字符一律转义 */
-export function escapeHtml(text: string): string {
-  return text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
-}
+import { escapeHtml } from './telegramHtml';
+
+export { escapeHtml };
 
 /** 一行里放得下的正文：压成一行并截断，避免一条进度把整条消息撑爆 */
 export function shortText(text: string | undefined, max = 90): string {

@@ -6,6 +6,7 @@ import { isBtwIsolationPrompt } from '@shared/btw';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import { parseInboundMessage } from '@shared/secretary/inbound';
 import {
   goalHeadline,
   type InjectedSegment,
@@ -76,6 +77,7 @@ import {
   SecretaryProposalRow,
   secretaryProposalId,
 } from '@/components/secretary/SecretaryProposalRow';
+import { TelegramInboundCard } from '@/components/secretary/TelegramInboundCard';
 import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import {
   Dialog,
@@ -931,6 +933,9 @@ function UserText({
   const { t } = useI18n();
   const host = useChatHost();
   const botHost = Boolean(host?.speaker || host?.botSession);
+  // 手机发来的话：卡片展示，正文按 markdown 渲染，不露包裹层
+  const inbound = parseInboundMessage(text);
+  if (inbound) return <TelegramInboundCard message={inbound} />;
   const injected = botHost ? parseBotInjectedMessage(text) : null;
   if (injected) return <InjectedMessageCard message={injected} />;
   // Main 投递前追加的笔记更新块不展示
