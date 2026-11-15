@@ -5917,8 +5917,57 @@ async function verifyImageViewAndCleanup(cdp, setup) {
   gitIn(['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'open']);
   gitIn(['checkout', '-q', current]);
 
-  const listed = await secretaryTool(cdp, setup, 'cleanup_list', {}, '看看有什么可以清理的');
-  const items = parseToolJson(listed.text)?.items ?? [];
+  // 默认是精简摘要：数量 + 每类前几条，正文两千字以内，秘书自己就能读完，不用 read/grep
+  const listed = await secretaryTool(
+    cdp,
+    setup,
+    'cleanup_list',
+    { kind: 'branch' },
+    '看看有什么可以清理的'
+  );
+  const summary = parseToolJson(listed.text);
+  const summaryItems = Array.isArray(summary?.items) ? summary.items : [];
+  assert(
+    summary?.mode === 'summary' &&
+      summary.total >= 2 &&
+      summary.counts?.branch === summary.total &&
+      summaryItems.length === summary.total &&
+      summaryItems.length <= 5 &&
+      JSON.stringify(summary).length <= 2000 &&
+      typeof summary.hint === 'string' &&
+      summary.hint.includes('detail: true'),
+    'cleanup: 默认返回精简摘要，正文两千字以内',
+    summary ?? listed.text
+  );
+  const summaryMerged = summaryItems.find((item) => item.name === 'feat/verify-cleanup');
+  assert(
+    Boolean(summaryMerged?.id) &&
+      summaryMerged.path === undefined &&
+      summaryMerged.repoPath === undefined &&
+      summaryMerged.mergedInto === undefined,
+    'cleanup: 摘要每条只有 id、名字与大小',
+    summaryMerged ?? summaryItems
+  );
+
+  const detailed = await secretaryTool(
+    cdp,
+    setup,
+    'cleanup_list',
+    { detail: true, kind: 'branch' },
+    '要完整清单'
+  );
+  const detail = parseToolJson(detailed.text);
+  const items = Array.isArray(detail?.items) ? detail.items : [];
+  assert(
+    detail?.mode === 'detail' &&
+      detail.page === 1 &&
+      detail.pageSize <= 20 &&
+      detail.hasMore === false &&
+      detail.total === items.length &&
+      JSON.stringify(detail).length <= 4000,
+    'cleanup: detail 给分页字段，正文四千字以内',
+    detail ?? detailed.text
+  );
   const merged = items.find(
     (item) => item.kind === 'branch' && item.name === 'feat/verify-cleanup'
   );
@@ -5927,6 +5976,11 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     merged && !merged.blocked && (merged.mergedInto ?? []).includes('feat/secretary-agent'),
     'cleanup: 已合入的分支列出来且可清理',
     merged ?? items
+  );
+  assert(
+    summaryMerged?.id === merged?.id,
+    'cleanup: 摘要里的 id 与完整清单一致，能直接传给 cleanup_apply',
+    { summary: summaryMerged?.id, detail: merged?.id }
   );
   assert(
     open && open.blocked === 'not-merged',
@@ -5943,7 +5997,8 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     cdp,
     setup,
     'cleanup_apply',
-    { ids: [merged.id] },
+    // 直接用精简模式给的 id：秘书拿到的就是这一份
+    { ids: [summaryMerged.id] },
     '把这条已合入的分支清掉'
   );
   const appliedMeta = parseToolJson(applied.text);
@@ -5974,8 +6029,11 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     });
   `);
   assert(
-    card.ok && (card.text ?? '').includes('feat/verify-cleanup') && card.items >= 1,
-    'cleanup: 确认卡上列出会删的分支',
+    card.ok &&
+      (card.text ?? '').includes('feat/verify-cleanup') &&
+      card.items >= 1 &&
+      card.items <= 5,
+    'cleanup: 确认卡上列出会删的分支，最多五行',
     card
   );
   await cdp.shot(path.join(ART, '21-cleanup-card.png'));

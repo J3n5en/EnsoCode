@@ -403,6 +403,21 @@ describe('SecretaryProposalRow cleanup proposals', () => {
     expect(buttons(html)).toEqual([]);
   });
 
+  it('几十条时卡片只列前几条，剩下的只给数量', () => {
+    const items = Array.from({ length: 30 }, (_, index) => ({
+      id: `branch|/repo|feat/b-${index}`,
+      kind: 'branch' as const,
+      name: `feat/b-${index}`,
+    }));
+    const html = renderCleanup({ draft: { items } });
+    expect([...html.matchAll(/data-enso="secretary-cleanup-kind"/g)].length).toBe(5);
+    expect(html).toContain('feat/b-4');
+    expect(html).not.toContain('feat/b-5');
+    expect(html).toContain('[and {{count}} more]');
+    // 数量摘要还在：30 条分支
+    expect(html).toContain('30 [Branch]');
+  });
+
   it('cleanup_apply 的结果也算提案卡片', () => {
     const output = '{"status":"awaiting_confirmation","proposalId":"pr5"}';
     expect(secretaryProposalId({ name: 'cleanup_apply', output, state: 'ok' })).toBe('pr5');

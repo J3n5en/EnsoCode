@@ -545,9 +545,12 @@ function cleanupSize(bytes: number | undefined): string | null {
   return `${bytes} B`;
 }
 
+/** 确认卡最多列这么多条：几十行会把卡片撑得没法看，数量摘要才是重点 */
+const CLEANUP_CARD_ITEMS = 5;
+
 /**
- * 清理确认卡：把会删的每一条都列出来，用户点确认才执行。
- * 已合入、占用空间与最后活动时间都写在行里，别让人凭记忆点按钮。
+ * 清理确认卡：数量摘要 + 前几条，用户点确认才执行。
+ * 每行带已合入与占用空间，别让人凭记忆点按钮；剩下的条数用一行说明。
  */
 function CleanupProposalCard({
   proposal,
@@ -560,6 +563,8 @@ function CleanupProposalCard({
   const resolving = useSecretaryStore((state) => state.resolving[proposal.id] === true);
   const resolveProposal = useSecretaryStore((state) => state.resolveProposal);
   const items = proposal.draft.items;
+  const shown = items.slice(0, CLEANUP_CARD_ITEMS);
+  const rest = items.length - shown.length;
   const failed = proposal.status === 'failed';
   const counts = items.reduce<Record<string, number>>((acc, item) => {
     acc[item.kind] = (acc[item.kind] ?? 0) + 1;
@@ -587,7 +592,7 @@ function CleanupProposalCard({
         )}
       </div>
       <ul data-enso="secretary-cleanup-items" className="mt-1.5 space-y-0.5">
-        {items.map((item) => {
+        {shown.map((item) => {
           const size = cleanupSize(item.sizeBytes);
           const detail = [
             item.mergedInto?.length
@@ -611,6 +616,11 @@ function CleanupProposalCard({
             </li>
           );
         })}
+        {rest > 0 && (
+          <li data-enso="secretary-cleanup-rest" className="text-[11px] text-muted-foreground">
+            {t('and {{count}} more', { count: rest })}
+          </li>
+        )}
       </ul>
       <div className="mt-1.5 flex items-center gap-1.5">
         <span className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}>

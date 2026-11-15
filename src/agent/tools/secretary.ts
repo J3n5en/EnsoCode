@@ -138,11 +138,17 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     keys: ['path'],
     aliases: { file: 'path', filePath: 'path', file_path: 'path', image: 'path', src: 'path' },
   },
-  cleanup_list: { keys: ['projectId'], aliases: { id: 'projectId' } },
+  cleanup_list: {
+    keys: ['projectId', 'kind', 'page', 'detail'],
+    numbers: ['page'],
+    booleans: ['detail'],
+    aliases: { id: 'projectId', type: 'kind', full: 'detail' },
+  },
   cleanup_apply: {
-    keys: ['ids'],
+    keys: ['ids', 'all', 'projectId'],
     arrays: ['ids'],
-    aliases: { id: 'ids', items: 'ids', cleanupIds: 'ids' },
+    booleans: ['all'],
+    aliases: { id: 'ids', items: 'ids', cleanupIds: 'ids', everything: 'all' },
   },
   todo_list: {
     keys: ['status', 'projectId'],
@@ -594,26 +600,44 @@ const SCHEMAS: Record<
   },
   cleanup_list: {
     description:
-      'List what dispatches left behind: local branches starting with feat/, fix/ or chore/ that are already merged into feat/secretary-agent or main, the worktrees of those branches under the session worktree root, and dispatched sessions that reached goal-complete and have been idle for more than a day. Each row has a kind, a name, whether it is merged, its last activity and, for worktrees, the disk space it takes. Read-only: nothing is deleted. Items that cannot be cleaned carry a blocked reason.',
+      'List what dispatches left behind: local branches starting with feat/, fix/ or chore/ that are already merged into feat/secretary-agent or main, the worktrees of those branches under the session worktree root, and dispatched sessions that reached goal-complete and have been idle for more than a day. Read-only: nothing is deleted. By default it returns a compact summary you can read in full: total, a count per kind, the estimated space a cleanup frees, and the first 5 of each kind with only id, name and size, so pass those ids straight to cleanup_apply. Pass detail: true for the full rows (merged refs, paths, last activity, blocked reason), 20 per page; add page to turn pages. kind narrows it to branch, worktree or session. Items that cannot be cleaned carry a blocked code and are refused by cleanup_apply.',
     parameters: object({
       projectId: id('Optional: only this project'),
+      kind: {
+        type: 'string',
+        enum: ['branch', 'worktree', 'session'],
+        description: 'Optional: only this kind of item',
+      },
+      detail: {
+        type: 'boolean',
+        description:
+          'Optional: return the full paged list instead of the compact summary. Default false.',
+      },
+      page: {
+        type: 'integer',
+        minimum: 1,
+        description: 'Optional: page of the detail list, 1-based. Default 1.',
+      },
     }),
   },
   cleanup_apply: {
     description:
-      'Ask the user to confirm deleting the given cleanup_list ids. Nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted. Tell the user which card is waiting and do not retry the same call.',
-    parameters: object(
-      {
-        ids: {
-          type: 'array',
-          items: { type: 'string', minLength: 1, maxLength: 1024 },
-          minItems: 1,
-          maxItems: 100,
-          description: 'Ids returned by cleanup_list',
-        },
+      'Ask the user to confirm deleting the given cleanup_list ids. Nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. Pass ids from cleanup_list (the compact summary ids work as they are), or all: true to clean every item that is cleanable right now without collecting ids yourself. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted. Tell the user which card is waiting and do not retry the same call.',
+    parameters: object({
+      ids: {
+        type: 'array',
+        items: { type: 'string', minLength: 1, maxLength: 1024 },
+        minItems: 1,
+        maxItems: 100,
+        description: 'Ids returned by cleanup_list. Omit when all is true.',
       },
-      ['ids']
-    ),
+      all: {
+        type: 'boolean',
+        description:
+          'Optional: clean every item that is cleanable right now instead of passing ids. Still opens the confirmation card. Refused when more than 100 items are cleanable.',
+      },
+      projectId: id('Optional with all: only this project'),
+    }),
   },
   todo_list: {
     description:
