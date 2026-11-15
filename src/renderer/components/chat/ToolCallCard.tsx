@@ -265,6 +265,17 @@ function Block({
       </div>
     );
   }
+  if (block.kind === 'image') {
+    return (
+      <img
+        data-enso="tool-card-image"
+        src={block.src}
+        alt={block.alt ?? ''}
+        loading="lazy"
+        className="max-h-64 max-w-full rounded border border-border/60 object-contain"
+      />
+    );
+  }
   if (block.kind === 'session') {
     if (!known[block.id]) return <p className="text-xs">{block.label}</p>;
     return (

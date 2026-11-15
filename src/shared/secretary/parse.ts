@@ -1,6 +1,9 @@
 import type { ModelRef, ThinkingLevel } from '../types/agent';
 import { THINKING_LEVELS } from '../types/agent';
 import type {
+  CleanupDraft,
+  CleanupItem,
+  CleanupItemKind,
   DispatchDraft,
   DispatchRecord,
   PatrolReason,
@@ -21,7 +24,7 @@ import type {
   SecretaryUpdate,
   TakeoverDraft,
 } from '../types/secretary';
-import { RELAY_ASK_STATUSES } from '../types/secretary';
+import { CLEANUP_ITEM_KINDS, RELAY_ASK_STATUSES } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
 import { parseSecretarySkillDraft } from './skills';
@@ -450,6 +453,11 @@ function parseProposal(value: unknown): SecretaryProposal | undefined {
     status: value.status as ProposalStatus,
   };
   const error = text(value.error);
+  const report = text(value.report);
+  const extra = {
+    ...(error ? { error } : {}),
+    ...(report ? { report } : {}),
+  };
   if (value.kind === 'dispatch') {
     const draft = parseDraft(value.draft);
     if (!draft) return undefined;
@@ -459,13 +467,13 @@ function parseProposal(value: unknown): SecretaryProposal | undefined {
       kind: 'dispatch',
       draft,
       ...(conversationId ? { conversationId } : {}),
-      ...(error ? { error } : {}),
+      ...extra,
     };
   }
   if (value.kind === 'profile') {
     // 草案字段在确认写入时再经 parseProfile 归一，这里只保证是对象
     if (!isObject(value.draft)) return undefined;
-    return { ...base, kind: 'profile', draft: { ...value.draft }, ...(error ? { error } : {}) };
+    return { ...base, kind: 'profile', draft: { ...value.draft }, ...extra };
   }
   if (value.kind === 'skill') {
     const parsed = parseSecretarySkillDraft(value.draft);
@@ -481,7 +489,7 @@ function parseProposal(value: unknown): SecretaryProposal | undefined {
       kind: 'skill',
       draft: parsed.draft,
       ...(previous ? { previous } : {}),
-      ...(error ? { error } : {}),
+      ...extra,
     };
   }
   if (value.kind === 'tool') {
@@ -493,15 +501,58 @@ function parseProposal(value: unknown): SecretaryProposal | undefined {
       kind: 'tool',
       draft: parsed.draft,
       ...(previous?.ok ? { previous: previous.draft } : {}),
-      ...(error ? { error } : {}),
+      ...extra,
     };
   }
   if (value.kind === 'takeover') {
     const draft = parseTakeoverDraft(value.draft);
     if (!draft) return undefined;
-    return { ...base, kind: 'takeover', draft, ...(error ? { error } : {}) };
+    return { ...base, kind: 'takeover', draft, ...extra };
+  }
+  if (value.kind === 'cleanup') {
+    const draft = parseCleanupDraft(value.draft);
+    if (!draft) return undefined;
+    return { ...base, kind: 'cleanup', draft, ...extra };
   }
   return undefined;
+}
+
+/** 清理项：id 与名字是唯一必需字段，判定结果与大小都只是快照 */
+function parseCleanupItem(value: unknown): CleanupItem | undefined {
+  if (!isObject(value)) return undefined;
+  const id = text(value.id);
+  const name = text(value.name);
+  if (!id || !name) return undefined;
+  if (!CLEANUP_ITEM_KINDS.includes(value.kind as CleanupItemKind)) return undefined;
+  const projectId = text(value.projectId);
+  const repoPath = text(value.repoPath);
+  const itemPath = text(value.path);
+  const mergedInto = texts(value.mergedInto);
+  const lastActivityAt = time(value.lastActivityAt);
+  const sizeBytes = time(value.sizeBytes);
+  const blocked = text(value.blocked);
+  return {
+    id,
+    kind: value.kind as CleanupItemKind,
+    name,
+    ...(projectId ? { projectId } : {}),
+    ...(repoPath ? { repoPath } : {}),
+    ...(itemPath ? { path: itemPath } : {}),
+    ...(mergedInto.length > 0 ? { mergedInto } : {}),
+    ...(lastActivityAt !== undefined ? { lastActivityAt } : {}),
+    ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+    ...(blocked ? { blocked } : {}),
+  };
+}
+
+export function parseCleanupDraft(value: unknown): CleanupDraft | undefined {
+  if (!isObject(value) || !Array.isArray(value.items)) return undefined;
+  const items: CleanupItem[] = [];
+  for (const entry of value.items) {
+    const item = parseCleanupItem(entry);
+    if (item) items.push(item);
+  }
+  return items.length === value.items.length ? { items } : undefined;
 }
 
 export function parseTakeoverDraft(value: unknown): TakeoverDraft | undefined {

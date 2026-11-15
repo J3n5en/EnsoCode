@@ -219,6 +219,11 @@ export function pendingUpdate(pending: PendingDispatch, at: number): SecretaryUp
 }
 
 function proposalUpdateText(proposal: SecretaryProposal): string {
+  // 清理卡回传要带上执行结果：删了几个、跳过了什么，秘书才知道要不要再提一次
+  if (proposal.kind === 'cleanup') {
+    if (proposal.status === 'succeeded') return `清理完成：${proposal.report ?? '无动作'}`;
+    if (proposal.status === 'rejected') return '用户拒绝了这次清理，什么都没删';
+  }
   // 接管卡回传要点名会话，秘书才知道之后能操作哪一个
   if (proposal.kind === 'takeover') {
     const session = `session:${proposal.draft.conversationId}`;

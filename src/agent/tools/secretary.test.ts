@@ -147,6 +147,62 @@ describe('secretary tools', () => {
     expect(result.content).toEqual([{ type: 'text', text: '{"ok":false,"error":"unavailable"}' }]);
   });
 
+  it('image_view 把图片字节拆成图片块，文本里只剩元数据', async () => {
+    const { invoke, port } = invoker();
+    invoke.mockResolvedValueOnce({
+      path: '/tmp/shot.png',
+      size: 2048,
+      format: 'png',
+      mimeType: 'image/png',
+      width: 1280,
+      height: 720,
+      data: 'AAAA',
+    } as never);
+    const tool = createSecretaryTools(port).find((entry) => entry.name === 'image_view')!;
+    const result = await tool.execute(
+      'call-3',
+      { path: '/tmp/shot.png' } as never,
+      undefined,
+      undefined as never,
+      undefined as never
+    );
+    expect(result.content[0]).toEqual({
+      type: 'text',
+      text: '{"path":"/tmp/shot.png","size":2048,"width":1280,"height":720,"mimeType":"image/png"}',
+    });
+    expect(result.content[1]).toEqual({ type: 'image', data: 'AAAA', mimeType: 'image/png' });
+    // base64 不进文本，会话文件里不会多一份
+    expect(JSON.stringify(result.content[0])).not.toContain('AAAA');
+  });
+
+  it('image_view 失败时照常返回错误文本', async () => {
+    const { invoke, port } = invoker();
+    invoke.mockRejectedValueOnce(new Error('path is out of scope'));
+    const tool = createSecretaryTools(port).find((entry) => entry.name === 'image_view')!;
+    const result = await tool.execute(
+      'call-4',
+      { path: '/Users/me/x.png' } as never,
+      undefined,
+      undefined as never,
+      undefined as never
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: 'path is out of scope' }]);
+  });
+
+  it('看图与清理的参数别名在 schema 校验前归一化', () => {
+    expect(normalizeSecretaryParams('image_view', { file_path: ' /tmp/a.png ' })).toEqual({
+      path: '/tmp/a.png',
+    });
+    // 只给一个 id 字符串时包成数组，schema 不会因此拒绝
+    expect(normalizeSecretaryParams('cleanup_apply', { id: 'branch|/repo|feat/x' })).toEqual({
+      ids: ['branch|/repo|feat/x'],
+    });
+    expect(normalizeSecretaryParams('cleanup_list', { project_id: 'p1' })).toEqual({
+      projectId: 'p1',
+    });
+  });
+
   it('invoker 抛错时标成工具失败，不把错误当结果', async () => {
     const { invoke, port } = invoker();
     invoke.mockRejectedValueOnce(new Error('Main is gone'));

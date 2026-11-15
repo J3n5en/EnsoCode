@@ -70,6 +70,18 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).not.toContain('<secretary-silent/>');
   });
 
+  it('看图与清理规则写进提示词', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    // 会话说截图在某路径时先自己看一眼
+    expect(prompt).toContain('image_view');
+    expect(prompt).toMatch(/screenshot or an image is at some path/);
+    // 定期看清单，清理走确认卡，不自己删
+    expect(prompt).toContain('cleanup_list');
+    expect(prompt).toContain('cleanup_apply');
+    expect(prompt).toMatch(/Never delete anything on your own/);
+    expect(prompt).toContain('confirmation card');
+  });
+
   it('核实规则写进提示词：提交号与工作区先查 repo_status，截断按 index 读全文，卡住看 session_tasks', () => {
     const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
     expect(prompt).toContain('repo_status');

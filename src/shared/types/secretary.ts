@@ -136,6 +136,39 @@ export interface TakeoverDraft {
   reason?: string;
 }
 
+/** 收尾清理能处理的三类东西：本地分支、会话 worktree、已完成的派发会话 */
+export const CLEANUP_ITEM_KINDS = ['branch', 'worktree', 'session'] as const;
+
+export type CleanupItemKind = (typeof CLEANUP_ITEM_KINDS)[number];
+
+/**
+ * 一条可清理项。id 由类型与名字拼成，cleanup_apply 只认 cleanup_list 原样给出的 id；
+ * blocked 有值表示这次不能动（未合入、在用、有未提交改动），原因直接给模型看。
+ */
+export interface CleanupItem {
+  id: string;
+  kind: CleanupItemKind;
+  /** 分支名 / worktree 路径 / 会话标题 */
+  name: string;
+  projectId?: string;
+  /** 分支与 worktree 所属仓库的检出目录 */
+  repoPath?: string;
+  /** worktree 的绝对路径 */
+  path?: string;
+  /** 已经合入的基线分支 */
+  mergedInto?: string[];
+  /** 分支或 worktree 的最后提交时间，会话的最后活动时间 */
+  lastActivityAt?: number;
+  /** worktree 的 du 估算（字节） */
+  sizeBytes?: number;
+  blocked?: string;
+}
+
+/** 清理确认卡的草案：确认前只读，确认后按 id 重新校验再执行 */
+export interface CleanupDraft {
+  items: CleanupItem[];
+}
+
 /** 接管授权的来源：确认卡、用户在会话界面上亲手点的，或项目在接管范围内被秘书实际用上 */
 export type TakeoverVia = 'proposal' | 'user' | 'scope';
 
@@ -175,6 +208,8 @@ export type SecretaryProposal = {
   updatedAt: number;
   status: ProposalStatus;
   error?: string;
+  /** 执行结果摘要：清理这类一次动很多条的动作要把结果原样告诉秘书 */
+  report?: string;
 } & (
   | { kind: 'dispatch'; draft: DispatchDraft; conversationId?: string }
   | { kind: 'profile'; draft: SecretaryProfileDraft }
@@ -187,6 +222,7 @@ export type SecretaryProposal = {
   /** previous 是同名工具的旧草案，卡片据此标成更新并摊开旧代码 */
   | { kind: 'tool'; draft: SecretaryToolDraft; previous?: SecretaryToolDraft }
   | { kind: 'takeover'; draft: TakeoverDraft }
+  | { kind: 'cleanup'; draft: CleanupDraft }
 );
 
 export type SecretaryResultKind =

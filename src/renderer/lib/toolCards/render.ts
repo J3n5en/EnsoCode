@@ -1,3 +1,4 @@
+import { toLocalImageUrl } from '@shared/localImage';
 import { SECRETARY_OPS } from '@shared/secretary/tools';
 import { parseMemoryCapture, parseMemorySearchHits } from '@/components/chat/memorySearchHits';
 import { parseMcpToolName } from '@/lib/mcpToolName';
@@ -253,6 +254,7 @@ const CARD_KIND: Record<string, string> = {
   skill: 'Skill card',
   tool: 'Tool card',
   takeover: 'Takeover card',
+  cleanup: 'Cleanup card',
 };
 
 function confirmation(
@@ -1036,6 +1038,114 @@ register('session_takeover_propose', (call, ctx) => {
       ...(error ? [{ kind: 'error' as const, text: error }] : []),
       ...(reason ? [{ kind: 'note' as const, text: reason }] : []),
     ],
+    error ? { tone: 'error', label: ctx.t('Refused') } : confirmation(output, ctx)
+  );
+});
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+const CLEANUP_KIND_LABELS: Record<string, string> = {
+  branch: 'Branch',
+  worktree: 'Worktree',
+  session: 'Session',
+};
+
+function fileName(target: string): string {
+  const parts = target.split(/[\\/]/u).filter(Boolean);
+  return parts.at(-1) ?? target;
+}
+
+const BLOCKED_REASONS: Record<string, string> = {
+  'not-merged': 'Not merged yet',
+  'current-branch': 'Currently checked out',
+  'used-by-worktree': 'Used by a worktree',
+  'detached-head': 'Detached HEAD',
+  'uncommitted-changes': 'Has uncommitted changes',
+};
+
+/** 清理项的一行：名字 + 类型徽标 + 合入/占用/大小 */
+function cleanupRow(item: Record<string, unknown>, ctx: ToolCardContext) {
+  const kind = str(item.kind) ?? '';
+  const blocked = str(item.blocked);
+  const mergedInto = Array.isArray(item.mergedInto)
+    ? item.mergedInto.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const sizeBytes = typeof item.sizeBytes === 'number' ? item.sizeBytes : null;
+  const details: string[] = [];
+  if (mergedInto.length > 0)
+    details.push(ctx.t('merged into {{refs}}', { refs: mergedInto.join(', ') }));
+  if (sizeBytes !== null) details.push(formatBytes(sizeBytes));
+  if (blocked) details.push(ctx.t(BLOCKED_REASONS[blocked] ?? blocked));
+  return {
+    title: str(item.name) ?? ctx.t('Not set'),
+    badge: ctx.t(CLEANUP_KIND_LABELS[kind] ?? kind),
+    badgeTone: blocked ? ('error' as const) : ('ok' as const),
+    ...(details.length > 0 ? { detail: details.join(' · ') } : {}),
+  };
+}
+
+register('image_view', (call, ctx) => {
+  const args = rec(call.args);
+  const output = rec(parseJson(call.output));
+  const target = str(output?.path) ?? str(args?.path) ?? '';
+  const width = typeof output?.width === 'number' ? output.width : null;
+  const height = typeof output?.height === 'number' ? output.height : null;
+  const size = typeof output?.size === 'number' ? output.size : null;
+  const error = errorText(call, ctx);
+  const name = target ? fileName(target) : ctx.t('Not set');
+  const blocks: ToolCardBlock[] = [];
+  if (error) blocks.push({ kind: 'error', text: error });
+  else if (target)
+    blocks.push({
+      kind: 'image',
+      src: toLocalImageUrl(target),
+      alt: name,
+      ...(width && height ? { width, height } : {}),
+    });
+  const rows: { label: string; value: string }[] = [];
+  if (width && height) rows.push({ label: ctx.t('Dimensions'), value: `${width} × ${height}` });
+  if (size !== null) rows.push({ label: ctx.t('File size'), value: formatBytes(size) });
+  if (rows.length > 0) blocks.push({ kind: 'kv', rows });
+  return view(
+    call,
+    ctx.t('Look at {{name}}', { name }),
+    blocks,
+    error ? { tone: 'error', label: ctx.t('Refused') } : undefined
+  );
+});
+
+register('cleanup_list', (call, ctx) => {
+  const output = rec(parseJson(call.output));
+  const items = Array.isArray(output?.items)
+    ? output.items.map(rec).filter((item): item is Record<string, unknown> => item !== null)
+    : [];
+  const error = errorText(call, ctx);
+  return view(
+    call,
+    ctx.t('Cleanup candidates · {{count}}', { count: items.length }),
+    [
+      ...(error ? [{ kind: 'error' as const, text: error }] : []),
+      ...(items.length > 0
+        ? [{ kind: 'list' as const, items: items.map((item) => cleanupRow(item, ctx)) }]
+        : []),
+    ],
+    error ? { tone: 'error', label: ctx.t('Refused') } : undefined
+  );
+});
+
+register('cleanup_apply', (call, ctx) => {
+  const args = rec(call.args);
+  const output = rec(parseJson(call.output));
+  const ids = Array.isArray(args?.ids) ? args.ids.length : 0;
+  const error = errorText(call, ctx);
+  return view(
+    call,
+    ctx.t('Clean up {{count}} items', { count: ids }),
+    error ? [{ kind: 'error', text: error }] : [],
     error ? { tone: 'error', label: ctx.t('Refused') } : confirmation(output, ctx)
   );
 });

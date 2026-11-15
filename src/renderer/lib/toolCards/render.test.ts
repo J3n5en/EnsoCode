@@ -57,6 +57,14 @@ const zh: Record<string, string> = {
   User: '用户',
   Assistant: '助手',
   'Uncommitted changes': '有未提交改动',
+  'Look at {{name}}': '查看 {{name}}',
+  Dimensions: '尺寸',
+  'File size': '文件大小',
+  'Cleanup candidates · {{count}}': '可清理项 · {{count}}',
+  'Clean up {{count}} items': '清理 {{count}} 项',
+  'merged into {{refs}}': '已合入 {{refs}}',
+  'Not merged yet': '还没合入',
+  'Cleanup card': '清理卡片',
   'Clean tree': '工作区干净',
   'No local branch': '没有本机分支',
   'Search memory {{query}} · {{count}}': '搜索记忆 {{query}} · {{count}} 条',
@@ -800,5 +808,87 @@ describe('只读核实卡片', () => {
       ctx('zh')
     );
     expect(cardPlainText(list)).toContain('被截断的消息 #3');
+  });
+});
+
+describe('看图与清理卡片', () => {
+  it('image_view 显示文件名、缩略图与尺寸', () => {
+    const card = renderToolCall(
+      call(
+        'image_view',
+        { path: '/tmp/shot.png' },
+        { path: '/tmp/shot.png', size: 2048, width: 1280, height: 720, mimeType: 'image/png' }
+      ),
+      ctx('zh')
+    );
+    expect(card.title).toBe('查看 shot.png');
+    const image = card.blocks.find((block) => block.kind === 'image');
+    expect(image).toMatchObject({ src: 'local-image://posix/tmp/shot.png', alt: 'shot.png' });
+    const text = cardPlainText(card);
+    expect(text).toContain('1280 × 720');
+    expect(text).toContain('2 KB');
+  });
+
+  it('image_view 被拒时只显示原因，不显示缩略图', () => {
+    const card = renderToolCall(
+      call('image_view', { path: '/Users/me/x.png' }, 'path is out of scope', 'error'),
+      ctx('zh')
+    );
+    expect(card.status).toEqual({ tone: 'error', label: '被拒绝' });
+    expect(card.blocks.some((block) => block.kind === 'image')).toBe(false);
+    expect(cardPlainText(card)).toContain('path is out of scope');
+  });
+
+  it('cleanup_list 列出条目、合入基线与占用空间', () => {
+    const card = renderToolCall(
+      call(
+        'cleanup_list',
+        {},
+        {
+          items: [
+            {
+              id: 'branch|/repo|feat/done',
+              kind: 'branch',
+              name: 'feat/done',
+              mergedInto: ['feat/secretary-agent'],
+            },
+            {
+              id: 'worktree|/wt/1',
+              kind: 'worktree',
+              name: 'feat/wt',
+              mergedInto: ['main'],
+              sizeBytes: 5 * 1024 * 1024,
+            },
+            {
+              id: 'branch|/repo|feat/open',
+              kind: 'branch',
+              name: 'feat/open',
+              blocked: 'not-merged',
+            },
+          ],
+        }
+      ),
+      ctx('zh')
+    );
+    expect(card.title).toBe('可清理项 · 3');
+    const text = cardPlainText(card);
+    expect(text).toContain('feat/done');
+    expect(text).toContain('已合入 feat/secretary-agent');
+    expect(text).toContain('5.0 MB');
+    expect(text).toContain('还没合入');
+  });
+
+  it('cleanup_apply 等确认卡时显示等待状态', () => {
+    const card = renderToolCall(
+      call(
+        'cleanup_apply',
+        { ids: ['branch|/repo|feat/done'] },
+        { status: 'awaiting_confirmation', proposalId: 'pr9' }
+      ),
+      ctx('zh', { proposal: () => ({ status: 'pending', kind: 'cleanup' }) })
+    );
+    expect(card.title).toBe('清理 1 项');
+    expect(card.status?.tone).toBe('pending');
+    expect(card.status?.label).toContain('清理卡片');
   });
 });

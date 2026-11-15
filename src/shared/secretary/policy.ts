@@ -98,7 +98,14 @@ export type ProposalAction =
   | { type: 'confirm' }
   | { type: 'reject' }
   | { type: 'expire' }
-  | { type: 'finish'; ok: boolean; error?: string; conversationId?: string };
+  | {
+      type: 'finish';
+      ok: boolean;
+      error?: string;
+      conversationId?: string;
+      /** 一次动很多条的动作（清理）把结果摘要带回去，秘书才知道到底删了什么 */
+      report?: string;
+    };
 
 export function transitionProposal(
   proposal: SecretaryProposal,
@@ -127,7 +134,12 @@ export function transitionProposal(
         };
       }
       const { error: _stale, ...rest } = proposal;
-      const succeeded = { ...rest, status: 'succeeded' as const, updatedAt: now };
+      const succeeded = {
+        ...rest,
+        status: 'succeeded' as const,
+        updatedAt: now,
+        ...(action.report ? { report: action.report } : {}),
+      };
       if (succeeded.kind !== 'dispatch' || !action.conversationId) {
         return { proposal: succeeded, changed: true };
       }
