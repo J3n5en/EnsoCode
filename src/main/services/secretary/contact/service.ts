@@ -558,7 +558,8 @@ export class TelegramContactService implements SecretaryContactPort {
     this.audit(
       'contact_inbound',
       delivered.ok,
-      delivered.ok ? describe(text) : (delivered.error ?? 'deliver-failed')
+      delivered.ok ? describe(text) : (delivered.error ?? 'deliver-failed'),
+      conversationId
     );
     if (!delivered.ok) this.awaitingReply.delete(conversationId);
   }
@@ -690,10 +691,10 @@ export class TelegramContactService implements SecretaryContactPort {
     this.ports.onError?.(code, error instanceof Error ? error.message : undefined);
   }
 
-  private audit(op: string, ok: boolean, detail?: string): void {
+  private audit(op: string, ok: boolean, detail?: string, conversationId?: string): void {
     this.ports.audit({
       at: this.ports.now(),
-      secretaryConversationId: null,
+      secretaryConversationId: conversationId ?? null,
       op,
       ok,
       ...(detail ? { detail } : {}),

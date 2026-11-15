@@ -3045,6 +3045,7 @@ async function startFakeTelegram(port) {
         reply({ ok: false, error_code: 401, description: 'Unauthorized' });
         return;
       }
+      if (state.polls <= 2 || method !== 'getUpdates') log(`  tg: ${method}`);
       if (method === 'getMe') {
         reply({ ok: true, result: state.me });
         return;
@@ -3062,7 +3063,9 @@ async function startFakeTelegram(port) {
           state.waiters = state.waiters.filter((entry) => entry !== waiter);
           reply({ ok: true, result: [] });
         }, 2000);
-        request.on('close', () => {
+        // 注意听 response 的 close：request 的 close 在请求体读完就触发，
+        // 会把这次长轮询的回复一起取消掉，客户端只能干等超时
+        response.on('close', () => {
           clearTimeout(timer);
           state.waiters = state.waiters.filter((entry) => entry !== waiter);
         });
@@ -3192,11 +3195,16 @@ async function verifyTelegramContact(cdp, setup) {
   });
   const bound = await waitFor(
     async () => {
-      const text = await page(`
+      const probe = await page(`
         const node = (${PANEL})?.querySelector('[data-enso=secretary-contact-bound]');
-        return JSON.stringify({ text: node?.innerText ?? null });
+        const state = await window.electronAPI.secretary.contactState();
+        return JSON.stringify({
+          text: node?.innerText ?? null,
+          status: state?.telegram?.status ?? null,
+          poll: state?.telegram?.poll ?? null,
+        });
       `);
-      return text.text?.includes('j3n5en') ? text : null;
+      return probe.text?.includes('j3n5en') ? probe : null;
     },
     'telegram bound',
     20_000,
@@ -3362,14 +3370,29 @@ async function verifyTelegramContact(cdp, setup) {
       text: '在吗，帮我看下进度',
     },
   });
+  // 投到哪个秘书会话由 Main 决定：从审计里读回目标会话，再选中它读正文
+  const inboundTarget = await waitFor(
+    () => {
+      const entries = readFileSync(auditFile, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.op === 'contact_inbound');
+      const last = entries.at(-1);
+      return last?.ok && last.secretaryConversationId ? last.secretaryConversationId : null;
+    },
+    'telegram inbound delivered',
+    40_000,
+    500
+  );
   const inbound = await waitFor(
     async () => {
       const state = await page(`
-        const hit = Object.keys(S().conversations).find((id) => texts(id).includes('来自 Telegram'));
-        const text = hit ? texts(hit).find((entry) => entry.includes('来自 Telegram')) : null;
-        return JSON.stringify({ id: hit ?? null, text: text ?? null });
+        S().selectConversation(${JSON.stringify(inboundTarget)});
+        const text = texts(${JSON.stringify(inboundTarget)}).find((entry) => entry.includes('来自 Telegram'));
+        return JSON.stringify({ id: ${JSON.stringify(inboundTarget)}, text: text ?? null });
       `);
-      return state.id ? state : null;
+      return state.text ? state : null;
     },
     'telegram inbound in secretary session',
     40_000,

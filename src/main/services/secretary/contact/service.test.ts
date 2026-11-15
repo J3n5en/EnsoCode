@@ -265,6 +265,8 @@ describe('入站只认绑定的 chat', () => {
     // 审计只记长度与 hash，不记正文
     const inbound = h.audits.find((entry) => entry.op === 'contact_inbound');
     expect(inbound?.detail).toMatch(/^len=\d+ hash=[0-9a-f]{12}$/);
+    // 记下投到哪个秘书会话：排查「手机说的话去哪了」只看审计就够
+    expect(inbound?.secretaryConversationId).toBe('sec-1');
     expect(JSON.stringify(h.audits)).not.toContain('把登录修一下');
   });
 
