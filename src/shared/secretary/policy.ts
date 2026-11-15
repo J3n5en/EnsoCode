@@ -148,6 +148,83 @@ export function transitionProposal(
   }
 }
 
+/** 键序稳定的 JSON：同一份草案换个构造顺序也算同一张卡 */
+function stableKey(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableKey).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableKey(item)}`).join(',')}}`;
+}
+
+/**
+ * 提案的去重指纹：同一类操作、参数一致才算同一张卡。
+ * 清理只比 id 集合——大小、路径每次扫都可能变，比进去同一张卡永远对不上。
+ */
+export function proposalSignature(proposal: SecretaryProposal): string {
+  switch (proposal.kind) {
+    case 'cleanup':
+      return `cleanup:${proposal.draft.items
+        .map((item) => item.id)
+        .sort()
+        .join(',')}`;
+    case 'dispatch':
+      return `dispatch:${stableKey(proposal.draft)}`;
+    case 'takeover':
+      return `takeover:${proposal.draft.conversationId}`;
+    case 'profile':
+      return `profile:${stableKey(proposal.draft)}`;
+    case 'skill':
+      return `skill:${stableKey(proposal.draft)}`;
+    case 'tool':
+      return `tool:${stableKey(proposal.draft)}`;
+  }
+}
+
+export interface PendingProposalMatch {
+  /** 参数完全一致、还没处理完：复用这张卡，不再新建 */
+  same?: SecretaryProposal;
+  /** 同类但参数不同：新建一张，但要告诉秘书上一张还没处理 */
+  other?: SecretaryProposal;
+}
+
+/** 还在处理中的提案：等确认的和正在执行的都算，两者都不能再叠一张 */
+const IN_FLIGHT: ReadonlySet<SecretaryProposal['status']> = new Set(['pending', 'executing']);
+
+/** 同一秘书会话里还没处理完的提案：same 复用，other 只用来提示 */
+export function pendingProposalMatch(
+  proposals: Readonly<Record<string, SecretaryProposal>>,
+  secretaryConversationId: string,
+  candidate: { kind: SecretaryProposal['kind']; signature: string }
+): PendingProposalMatch {
+  const match: PendingProposalMatch = {};
+  for (const proposal of Object.values(proposals)) {
+    if (!IN_FLIGHT.has(proposal.status)) continue;
+    if (proposal.secretaryConversationId !== secretaryConversationId) continue;
+    if (proposalSignature(proposal) === candidate.signature) {
+      match.same = proposal;
+      return match;
+    }
+    if (!match.other && proposal.kind === candidate.kind) match.other = proposal;
+  }
+  return match;
+}
+
+/** 工具结果里给秘书的一句话：卡已经在等，别再提一张 */
+export function pendingProposalNote(match: {
+  same?: { id: string; status?: SecretaryProposal['status'] };
+  other?: { id: string; status?: SecretaryProposal['status'] };
+}): string | undefined {
+  if (match.same)
+    return match.same.status === 'executing'
+      ? `The card for this exact request is already running (proposalId=${match.same.id}). Nothing new was created: wait for its result instead of proposing it again.`
+      : `A card for this exact request is already waiting for you (proposalId=${match.same.id}). Nothing new was created: tell the user about that card and wait for its result.`;
+  if (match.other)
+    return `Another card of the same kind is still ${match.other.status === 'executing' ? 'running' : 'waiting for you'} (proposalId=${match.other.id}). This request differs, so it got its own card; mention both to the user.`;
+  return undefined;
+}
+
 export interface DispatchContext {
   project?: ProjectAuthority;
   visible: boolean;

@@ -226,22 +226,26 @@ export function pendingUpdate(pending: PendingDispatch, at: number): SecretaryUp
 function proposalUpdateText(proposal: SecretaryProposal): string {
   // 清理卡回传要带上执行结果：删了几个、跳过了什么，秘书才知道要不要再提一次
   if (proposal.kind === 'cleanup') {
+    if (proposal.status === 'executing') return '已确认，正在执行清理';
     if (proposal.status === 'succeeded') return `清理完成：${proposal.report ?? '无动作'}`;
-    if (proposal.status === 'rejected') return '用户拒绝了这次清理，什么都没删';
+    if (proposal.status === 'rejected') return '用户取消了这次清理，什么都没删';
   }
   // 接管卡回传要点名会话，秘书才知道之后能操作哪一个
   if (proposal.kind === 'takeover') {
     const session = `session:${proposal.draft.conversationId}`;
+    if (proposal.status === 'executing') return `用户已确认接管 ${session}，正在处理`;
     if (proposal.status === 'succeeded') return `用户同意了接管，${session} 现在交给你管`;
-    if (proposal.status === 'rejected') return `用户拒绝了接管 ${session}`;
+    if (proposal.status === 'rejected') return `用户取消了接管 ${session}`;
   }
   switch (proposal.status) {
+    case 'executing':
+      return '已确认，正在执行';
     case 'succeeded':
       return '提案已执行';
     case 'failed':
       return `提案执行失败：${proposal.error ?? 'unknown'}`;
     case 'rejected':
-      return '用户拒绝了提案';
+      return '用户取消了提案';
     case 'expired':
       return '提案超过 24 小时未处理，已过期';
     default:

@@ -455,7 +455,7 @@ describe('cleanup_apply 走确认卡', () => {
       ...ports,
       saveProposal: async (items) => {
         proposals.push(items);
-        return 'proposal-1';
+        return { proposalId: 'proposal-1', reused: false };
       },
     });
     return { handlers, calls, audits, proposals };
@@ -486,6 +486,31 @@ describe('cleanup_apply 走确认卡', () => {
     );
     expect(result.ok).toBe(false);
     expect(proposals).toEqual([]);
+  });
+
+  it('同类卡已经在等时把复用结果原样回给秘书', async () => {
+    const { ports, audits } = makePorts({ repos: [baseRepo()] });
+    const handlers = createSecretaryCleanupHandlers({
+      ...ports,
+      saveProposal: async () => ({
+        proposalId: 'proposal-1',
+        reused: true,
+        note: 'A card for this exact request is already waiting for you (proposalId=proposal-1).',
+      }),
+    });
+    const result = await handlers.cleanup_apply(
+      { ids: [branchItemId(ROOT, 'feat/done')] },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toMatchObject({
+      status: 'awaiting_confirmation',
+      proposalId: 'proposal-1',
+      reused: true,
+    });
+    expect((result.result as { note?: string }).note).toContain('proposalId=proposal-1');
+    expect(audits.at(-1)).toMatchObject({ detail: 'awaiting_confirmation (existing)' });
   });
 
   it('cleanup_list 只读，返回条目与审计', async () => {
@@ -532,7 +557,7 @@ function bulkPorts(branches: number, worktrees: number, options: { longName?: bo
     ...made.ports,
     saveProposal: async (items) => {
       proposals.push(items);
-      return 'proposal-1';
+      return { proposalId: 'proposal-1', reused: false };
     },
   });
   return { ...made, handlers, proposals };

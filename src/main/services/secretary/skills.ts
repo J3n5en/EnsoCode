@@ -17,6 +17,7 @@ import type {
 import { writeAtomic } from '../bots/files';
 import { appendAudit } from './audit';
 import { notifySecretaryChanged } from './dispatch';
+import { saveProposalRecord } from './proposals';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -210,10 +211,9 @@ export function createSecretarySkills(ports: SecretarySkillPorts): SecretarySkil
       const dir = ports.dir();
       const existing = readSecretarySkill(dir, parsed.draft.name);
       const now = ports.now();
-      const id = ports.newId();
       const file = ports.dispatchFile();
-      file.proposals[id] = {
-        id,
+      const { saved, changed } = saveProposalRecord(file, {
+        id: ports.newId(),
         secretaryConversationId: ctx.secretaryConversationId,
         createdAt: now,
         updatedAt: now,
@@ -223,17 +223,27 @@ export function createSecretarySkills(ports: SecretarySkillPorts): SecretarySkil
         ...(existing
           ? { previous: { description: existing.description, body: existing.body } }
           : {}),
-      };
-      ports.saveDispatch(file);
+      });
+      if (changed) {
+        ports.saveDispatch(file);
+        ports.notify();
+      }
       audit(
         'secretary_skill_propose',
         ctx.secretaryConversationId,
         true,
-        'awaiting_confirmation',
-        id
+        saved.reused ? 'awaiting_confirmation (existing)' : 'awaiting_confirmation',
+        saved.proposalId
       );
-      ports.notify();
-      return { ok: true, result: { status: 'awaiting_confirmation', proposalId: id } };
+      return {
+        ok: true,
+        result: {
+          status: 'awaiting_confirmation',
+          proposalId: saved.proposalId,
+          ...(saved.reused ? { reused: true } : {}),
+          ...(saved.note ? { note: saved.note } : {}),
+        },
+      };
     },
 
     async save(draft, secretaryConversationId) {

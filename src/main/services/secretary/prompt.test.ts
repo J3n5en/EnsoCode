@@ -93,4 +93,15 @@ describe('buildSecretarySystemPrompt', () => {
     // 只读 git 不等于能读文件
     expect(prompt).toMatch(/never file contents/);
   });
+
+  it('确认卡规则写进提示词：记住 proposalId、等结果、不重复提', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    expect(prompt).toMatch(/remember its proposalId/);
+    expect(prompt).toMatch(/do not call that op again/);
+    // 重提不会开第二张卡，只会拿回同一个 proposalId
+    expect(prompt).toMatch(/does not open a second card/);
+    // 确认与取消各有回传
+    expect(prompt).toMatch(/one update saying it is running/);
+    expect(prompt).toMatch(/saying it was cancelled/);
+  });
 });
