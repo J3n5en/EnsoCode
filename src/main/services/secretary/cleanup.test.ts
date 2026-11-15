@@ -1,6 +1,8 @@
 import type { ProjectAuthority } from '@shared/types/agent';
 import type {
   CleanupItem,
+  CleanupListDetail,
+  CleanupListSummary,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
 } from '@shared/types/secretary';
@@ -8,7 +10,11 @@ import { describe, expect, it } from 'vitest';
 import {
   applyCleanup,
   branchItemId,
+  CLEANUP_DETAIL_MAX_CHARS,
+  CLEANUP_DETAIL_PAGE_SIZE,
   CLEANUP_IDLE_MS,
+  CLEANUP_SUMMARY_MAX_CHARS,
+  CLEANUP_SUMMARY_PER_KIND,
   type CleanupPorts,
   cleanupReportText,
   collectCleanupItems,
@@ -487,9 +493,207 @@ describe('cleanup_apply 走确认卡', () => {
     const result = await handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      const items = (result.result as { items: CleanupItem[] }).items;
-      expect(items.some((entry) => entry.name === 'feat/done')).toBe(true);
+      const summary = result.result as CleanupListSummary;
+      expect(summary.mode).toBe('summary');
+      expect(summary.items.some((entry) => entry.name === 'feat/done')).toBe(true);
     }
     expect(audits.at(-1)).toMatchObject({ op: 'cleanup_list', ok: true });
+  });
+});
+
+/** 造一批条目：分支、worktree、会话都够多，用来量精简与分页的字数 */
+function bulkPorts(branches: number, worktrees: number, options: { longName?: boolean } = {}) {
+  const map: Record<string, string[]> = { 'feat/secretary-agent': [], main: [] };
+  const suffix = options.longName ? `-${'x'.repeat(160)}` : '';
+  for (let i = 0; i < branches; i += 1) map[`feat/b-${i}${suffix}`] = ['main'];
+  const sizes: Record<string, number> = {};
+  const worktreeList = Array.from({ length: worktrees }, (_, i) => {
+    const target = `${WT_ROOT}/wt-${i}`;
+    sizes[target] = (i + 1) * 1024 * 1024;
+    return { path: target, branch: `feat/b-${i}${suffix}` };
+  });
+  const now = 10 * CLEANUP_IDLE_MS;
+  const dispatched: SecretaryDispatchFile['dispatched'] = {};
+  const rows: Record<string, Record<string, unknown>> = {};
+  for (let i = 0; i < 6; i += 1) {
+    const id = `c-${i}`;
+    dispatched[id] = record(id, 'goal-complete', 'idle', now - CLEANUP_IDLE_MS - 1);
+    rows[id] = { title: `会话 ${i}` };
+  }
+  const made = makePorts({
+    repos: [baseRepo({ branches: map, worktrees: worktreeList })],
+    sizes,
+    now,
+    rows,
+    file: { ...emptyFile(), dispatched },
+  });
+  const proposals: CleanupItem[][] = [];
+  const handlers = createSecretaryCleanupHandlers({
+    ...made.ports,
+    saveProposal: async (items) => {
+      proposals.push(items);
+      return 'proposal-1';
+    },
+  });
+  return { ...made, handlers, proposals };
+}
+
+describe('cleanup_list 精简模式', () => {
+  it('只给总数、分组数量、估算空间与每类前几条', async () => {
+    const { handlers } = bulkPorts(12, 7);
+    const result = await handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const summary = result.result as CleanupListSummary;
+    expect(summary.mode).toBe('summary');
+    expect(summary.total).toBe(12 + 7 + 6);
+    expect(summary.counts).toEqual({ branch: 12, worktree: 7, session: 6 });
+    // 7 条分支被 worktree 占用，剩下的 5 条分支、7 个 worktree 与 6 个会话都能清
+    expect(summary.cleanable).toBe(5 + 7 + 6);
+    expect(summary.estimatedBytes).toBe(
+      Array.from({ length: 7 }, (_, i) => (i + 1) * 1024 * 1024).reduce((a, b) => a + b, 0)
+    );
+    for (const kind of ['branch', 'worktree', 'session'] as const)
+      expect(summary.items.filter((item) => item.kind === kind).length).toBeLessThanOrEqual(
+        CLEANUP_SUMMARY_PER_KIND
+      );
+    // 每条只有 id、名字、大小与短原因码，没有路径与合入详情
+    const allowed = new Set(['id', 'kind', 'name', 'sizeBytes', 'blocked']);
+    for (const item of summary.items)
+      for (const key of Object.keys(item)) expect(allowed.has(key), key).toBe(true);
+    expect(summary.hint).toContain('detail: true');
+  });
+
+  it('正文不超过两千字，名字再长也一样', async () => {
+    const { handlers } = bulkPorts(12, 7, { longName: true });
+    const result = await handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(JSON.stringify(result.result).length).toBeLessThanOrEqual(CLEANUP_SUMMARY_MAX_CHARS);
+  });
+
+  it('可清理的排在前几条，blocked 的带短原因码', async () => {
+    const { handlers } = bulkPorts(6, 0);
+    const result = await handlers.cleanup_list(
+      { kind: 'branch' },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const summary = result.result as CleanupListSummary;
+    expect(summary.items.every((item) => item.kind === 'branch')).toBe(true);
+    expect(summary.items.every((item) => item.blocked === undefined)).toBe(true);
+    expect(summary.counts.branch).toBe(6);
+  });
+});
+
+describe('cleanup_list detail 模式', () => {
+  it('分页给出 total、page、pageSize、hasMore，翻页不漏不重', async () => {
+    const { handlers } = bulkPorts(30, 12);
+    const seen: string[] = [];
+    let page = 1;
+    let expectedPageSize = 0;
+    for (;;) {
+      const result = await handlers.cleanup_list(
+        { detail: true, page },
+        { secretaryConversationId: 'sec-1' }
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const detail = result.result as CleanupListDetail;
+      expect(detail.mode).toBe('detail');
+      expect(detail.total).toBe(30 + 12 + 6);
+      expect(detail.page).toBe(page);
+      expect(detail.pageSize).toBeLessThanOrEqual(CLEANUP_DETAIL_PAGE_SIZE);
+      if (expectedPageSize === 0) expectedPageSize = detail.pageSize;
+      // 每页条数固定：按页临时缩会让翻页漏条目
+      expect(detail.pageSize).toBe(expectedPageSize);
+      expect(JSON.stringify(detail).length).toBeLessThanOrEqual(CLEANUP_DETAIL_MAX_CHARS);
+      seen.push(...detail.items.map((item) => item.id));
+      if (!detail.hasMore) break;
+      page += 1;
+    }
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(seen.length).toBe(30 + 12 + 6);
+  });
+
+  it('超出末页时给空页且 hasMore 为假', async () => {
+    const { handlers } = bulkPorts(3, 0);
+    const result = await handlers.cleanup_list(
+      { detail: true, page: 99 },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const detail = result.result as CleanupListDetail;
+    expect(detail.items).toEqual([]);
+    expect(detail.hasMore).toBe(false);
+  });
+});
+
+describe('cleanup_list 筛选', () => {
+  it('kind 只返回这一类，未知 kind 直接报错', async () => {
+    const { handlers } = bulkPorts(4, 2);
+    const worktrees = await handlers.cleanup_list(
+      { kind: 'worktree' },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(worktrees.ok).toBe(true);
+    if (worktrees.ok) {
+      const summary = worktrees.result as CleanupListSummary;
+      expect(summary.total).toBe(2);
+      expect(summary.items.every((item) => item.kind === 'worktree')).toBe(true);
+    }
+    const bad = await handlers.cleanup_list(
+      { kind: 'branch2' },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('unknown kind');
+  });
+});
+
+describe('cleanup_apply 的 id 与 all', () => {
+  it('精简模式给出的 id 可以直接传给 cleanup_apply', async () => {
+    const { handlers, proposals } = bulkPorts(6, 0);
+    const listed = await handlers.cleanup_list(
+      { kind: 'branch' },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    const id = (listed.result as CleanupListSummary).items[0]?.id ?? '';
+    expect(id).not.toBe('');
+    const applied = await handlers.cleanup_apply(
+      { ids: [id] },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(applied.ok).toBe(true);
+    expect(proposals[0]?.map((item) => item.id)).toEqual([id]);
+  });
+
+  it('all: true 收下当前所有可清理项，仍然只落确认卡', async () => {
+    const { handlers, proposals, calls } = bulkPorts(6, 0);
+    const applied = await handlers.cleanup_apply(
+      { all: true },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(applied.ok).toBe(true);
+    expect(proposals[0]?.length).toBe(6 + 6);
+    expect(proposals[0]?.every((item) => !item.blocked)).toBe(true);
+    expect(calls.some((call) => call.includes('branch -D'))).toBe(false);
+    // 回给模型的只有总数与前几条，清单在确认卡上
+    if (applied.ok) {
+      const result = applied.result as { total: number; items: CleanupItem[] };
+      expect(result.total).toBe(12);
+      expect(result.items.length).toBe(CLEANUP_SUMMARY_PER_KIND);
+    }
+  });
+
+  it('既没 ids 也没 all 时说清楚怎么给', async () => {
+    const { handlers } = bulkPorts(1, 0);
+    const applied = await handlers.cleanup_apply({}, { secretaryConversationId: 'sec-1' });
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) expect(applied.error).toContain('all: true');
   });
 });

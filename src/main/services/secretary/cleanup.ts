@@ -17,9 +17,14 @@ import type { ProjectAuthority } from '@shared/types/agent';
 import type {
   CleanupDraft,
   CleanupItem,
+  CleanupItemKind,
+  CleanupListDetail,
+  CleanupListSummary,
+  CleanupSummaryItem,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
 } from '@shared/types/secretary';
+import { CLEANUP_ITEM_KINDS } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { type GitRunner, parseWorktrees, runGit } from './repoStatus';
 import { SecretaryStore } from './store';
@@ -38,6 +43,16 @@ export const CLEANUP_IDLE_MS = 24 * 60 * 60 * 1000;
 
 /** 一次最多处理这么多条，避免一次确认删掉半个仓库 */
 export const CLEANUP_MAX_ITEMS = 100;
+
+/** 精简模式每类给几条：够秘书点单，又不至于把正文撑爆 */
+export const CLEANUP_SUMMARY_PER_KIND = 5;
+/** 精简模式正文上限（JSON 字符数）：秘书没有 read/grep，超了就是读不到的回执 */
+export const CLEANUP_SUMMARY_MAX_CHARS = 2000;
+/** detail 模式每页条数与正文上限 */
+export const CLEANUP_DETAIL_PAGE_SIZE = 20;
+export const CLEANUP_DETAIL_MAX_CHARS = 4000;
+/** 名字上限：一条超长标题不能吃掉整页预算 */
+export const CLEANUP_NAME_MAX = 60;
 
 const SEP = '|';
 
@@ -270,6 +285,95 @@ export type CleanupSelectionResult =
   | { ok: true; items: CleanupItem[] }
   | { ok: false; error: string };
 
+function clipName(name: string): string {
+  return name.length > CLEANUP_NAME_MAX ? `${name.slice(0, CLEANUP_NAME_MAX - 1)}…` : name;
+}
+
+/**
+ * 精简模式：数量摘要 + 每类前几条（只有 id、名字、大小）。
+ * 可清理的排在前面，否则前几条全是 blocked，秘书看到的清单一条也用不上。
+ */
+export function summarizeCleanupItems(items: readonly CleanupItem[]): CleanupListSummary {
+  const counts: Record<CleanupItemKind, number> = { branch: 0, worktree: 0, session: 0 };
+  let cleanable = 0;
+  let estimatedBytes = 0;
+  for (const item of items) {
+    counts[item.kind] += 1;
+    if (item.blocked) continue;
+    cleanable += 1;
+    if (item.sizeBytes) estimatedBytes += item.sizeBytes;
+  }
+  const ordered = [...items].sort((a, b) => Number(!!a.blocked) - Number(!!b.blocked));
+  const picked: CleanupSummaryItem[] = [];
+  for (const kind of CLEANUP_ITEM_KINDS) {
+    let taken = 0;
+    for (const item of ordered) {
+      if (taken >= CLEANUP_SUMMARY_PER_KIND) break;
+      if (item.kind !== kind) continue;
+      taken += 1;
+      picked.push({
+        id: item.id,
+        kind: item.kind,
+        name: clipName(item.name),
+        ...(item.sizeBytes !== undefined ? { sizeBytes: item.sizeBytes } : {}),
+        ...(item.blocked ? { blocked: item.blocked } : {}),
+      });
+    }
+  }
+  const summary: CleanupListSummary = {
+    mode: 'summary',
+    total: items.length,
+    counts,
+    cleanable,
+    estimatedBytes,
+    items: picked,
+    hint: `Compact view: counts plus the first ${CLEANUP_SUMMARY_PER_KIND} per kind, names only. Pass these ids straight to cleanup_apply; ids with a blocked code are refused. For the full list pass detail: true (${CLEANUP_DETAIL_PAGE_SIZE} per page, add page to turn pages) and kind to filter by branch, worktree or session.`,
+  };
+  // 名字已经截断；还超预算就从尾部丢条目：宁可少列几条，也不能让秘书只拿到一份回执
+  while (JSON.stringify(summary).length > CLEANUP_SUMMARY_MAX_CHARS && summary.items.length > 0)
+    summary.items.pop();
+  return summary;
+}
+
+function detailPage(
+  items: readonly CleanupItem[],
+  page: number,
+  pageSize: number
+): CleanupListDetail {
+  const start = (page - 1) * pageSize;
+  const slice = items.slice(start, start + pageSize);
+  return {
+    mode: 'detail',
+    total: items.length,
+    page,
+    pageSize,
+    hasMore: start + slice.length < items.length,
+    items: slice.map((item) => ({ ...item, name: clipName(item.name) })),
+  };
+}
+
+/**
+ * detail 模式的一页。每页条数按整份清单的最坏一页定：按页临时缩会
+ * 让第 2 页比第 1 页多，翻页就会漏条目。
+ */
+export function cleanupDetailPage(items: readonly CleanupItem[], page: number): CleanupListDetail {
+  const pages = (size: number) => Math.max(1, Math.ceil(items.length / size));
+  const fits = (size: number): boolean => {
+    for (let index = 1; index <= pages(size); index += 1)
+      if (JSON.stringify(detailPage(items, index, size)).length > CLEANUP_DETAIL_MAX_CHARS)
+        return false;
+    return true;
+  };
+  let pageSize = Math.min(CLEANUP_DETAIL_PAGE_SIZE, Math.max(1, items.length));
+  while (pageSize > 1 && !fits(pageSize)) pageSize -= 1;
+  return detailPage(items, page, pageSize);
+}
+
+function positiveInt(value: unknown): number | undefined {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /**
  * 把 id 列表收窄回真实条目：未知 id、带 blocked 的、基线分支一律拒绝并说明。
  * 确认卡与执行都用同一份判定，卡片上看到的就是会发生的。
@@ -278,7 +382,12 @@ export async function selectCleanupItems(
   ports: CleanupPorts,
   ids: readonly string[]
 ): Promise<CleanupSelectionResult> {
-  if (ids.length === 0) return { ok: false, error: 'ids is empty: pass the ids from cleanup_list' };
+  if (ids.length === 0)
+    return {
+      ok: false,
+      error:
+        'ids is empty: pass the ids from cleanup_list, or all: true to clean everything cleanable',
+    };
   if (ids.length > CLEANUP_MAX_ITEMS)
     return { ok: false, error: `too many ids: ${ids.length}, the limit is ${CLEANUP_MAX_ITEMS}` };
   const all = await collectCleanupItems(ports);
@@ -307,6 +416,23 @@ export async function selectCleanupItems(
     };
   if (selected.length === 0) return { ok: false, error: 'nothing to clean up' };
   return { ok: true, items: selected };
+}
+
+/** all: true 的选择：当前所有可清理项，仍然受 CLEANUP_MAX_ITEMS 约束 */
+export async function selectAllCleanupItems(
+  ports: CleanupPorts,
+  projectId = ''
+): Promise<CleanupSelectionResult> {
+  const items = (await collectCleanupItems(ports)).filter(
+    (item) => !item.blocked && (!projectId || item.projectId === projectId)
+  );
+  if (items.length === 0) return { ok: false, error: 'nothing to clean up' };
+  if (items.length > CLEANUP_MAX_ITEMS)
+    return {
+      ok: false,
+      error: `too many items to clean at once: ${items.length}, the limit is ${CLEANUP_MAX_ITEMS}. Pass ids from cleanup_list detail: true in batches instead.`,
+    };
+  return { ok: true, items };
 }
 
 export interface CleanupActionReport {
@@ -528,22 +654,40 @@ export function createSecretaryCleanupHandlers(ports: CleanupHandlerPorts): {
   return {
     async cleanup_list(params, ctx): Promise<SecretaryOpResult> {
       const projectId = typeof params.projectId === 'string' ? params.projectId.trim() : '';
+      const kind = typeof params.kind === 'string' ? params.kind.trim() : '';
+      if (kind && !(CLEANUP_ITEM_KINDS as readonly string[]).includes(kind))
+        return {
+          ok: false,
+          error: `unknown kind: ${kind}, expected one of ${CLEANUP_ITEM_KINDS.join(', ')}`,
+        };
+      const detail = params.detail === true;
+      const page = positiveInt(params.page) ?? 1;
       const items = (await collectCleanupItems(ports)).filter(
-        (item) => !projectId || item.projectId === projectId
+        (item) =>
+          (!projectId || item.projectId === projectId) &&
+          (!kind || item.kind === (kind as CleanupItemKind))
       );
       ports.audit({
         at: ports.now(),
         secretaryConversationId: ctx.secretaryConversationId,
         op: 'cleanup_list',
         ok: true,
-        detail: `${items.length} items`,
+        detail: `${items.length} items ${detail ? `page ${page}` : 'summary'}`,
       });
-      return { ok: true, result: { items } };
+      return {
+        ok: true,
+        result: detail ? cleanupDetailPage(items, page) : summarizeCleanupItems(items),
+      };
     },
 
     async cleanup_apply(params, ctx): Promise<SecretaryOpResult> {
-      const ids = parseIds(params.ids);
-      const selection = await selectCleanupItems(ports, ids);
+      // all: true 表示"现在就清理所有可清理项"：id 由 Main 按同一套规则重新取，
+      // 秘书不用翻页拼几十个长 id，确认卡照旧拦一道
+      const all = params.all === true;
+      const projectId = typeof params.projectId === 'string' ? params.projectId.trim() : '';
+      const selection: CleanupSelectionResult = all
+        ? await selectAllCleanupItems(ports, projectId)
+        : await selectCleanupItems(ports, parseIds(params.ids));
       if (!selection.ok) {
         ports.audit({
           at: ports.now(),
@@ -568,7 +712,11 @@ export function createSecretaryCleanupHandlers(ports: CleanupHandlerPorts): {
         result: {
           status: 'awaiting_confirmation',
           proposalId,
-          items: selection.items.map((item) => ({ id: item.id, kind: item.kind, name: item.name })),
+          total: selection.items.length,
+          // 清单在确认卡上；这里只回前几条，几十条 id 会把工具结果撑大
+          items: selection.items
+            .slice(0, CLEANUP_SUMMARY_PER_KIND)
+            .map((item) => ({ id: item.id, kind: item.kind, name: item.name })),
         },
       };
     },

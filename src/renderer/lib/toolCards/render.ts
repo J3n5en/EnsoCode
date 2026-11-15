@@ -1163,10 +1163,12 @@ register('cleanup_list', (call, ctx) => {
   const items = Array.isArray(output?.items)
     ? output.items.map(rec).filter((item): item is Record<string, unknown> => item !== null)
     : [];
+  // 精简模式只给每类前几条，标题上的数量用总数，别让人以为只有这么点
+  const total = typeof output?.total === 'number' ? output.total : items.length;
   const error = errorText(call, ctx);
   return view(
     call,
-    ctx.t('Cleanup candidates · {{count}}', { count: items.length }),
+    ctx.t('Cleanup candidates · {{count}}', { count: total }),
     [
       ...(error ? [{ kind: 'error' as const, text: error }] : []),
       ...(items.length > 0
@@ -1181,10 +1183,12 @@ register('cleanup_apply', (call, ctx) => {
   const args = rec(call.args);
   const output = rec(parseJsonLine(call.output));
   const ids = Array.isArray(args?.ids) ? args.ids.length : 0;
+  // all: true 时没有 ids，数量以 Main 回的总数为准
+  const count = typeof output?.total === 'number' ? output.total : ids;
   const error = errorText(call, ctx);
   return view(
     call,
-    ctx.t('Clean up {{count}} items', { count: ids }),
+    ctx.t('Clean up {{count}} items', { count }),
     error ? [{ kind: 'error', text: error }] : [],
     error ? { tone: 'error', label: ctx.t('Refused') } : confirmation(output, ctx)
   );

@@ -892,4 +892,16 @@ describe('看图与清理卡片', () => {
     expect(card.status?.tone).toBe('pending');
     expect(card.status?.label).toContain('清理卡片');
   });
+
+  it('cleanup_apply 用 all: true 时按 Main 回的总数显示', () => {
+    const card = renderToolCall(
+      call(
+        'cleanup_apply',
+        { all: true },
+        { status: 'awaiting_confirmation', proposalId: 'pr9', total: 7, items: [] }
+      ),
+      ctx('zh', { proposal: () => ({ status: 'pending', kind: 'cleanup' }) })
+    );
+    expect(card.title).toBe('清理 7 项');
+  });
 });
