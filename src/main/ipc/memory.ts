@@ -100,7 +100,7 @@ import {
   startEmbeddingModelDownload,
 } from '../services/memoryModels';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
-import { readSettings } from './settings';
+import { readSettings, readSettingsState } from './settings';
 
 const EMPTY_LIST: MemoryListResult = { items: [], total: 0 };
 const EMPTY_STATS: MemoryStats = {
@@ -412,9 +412,17 @@ export function registerMemoryHandlers(): void {
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_EVOLVES_PENDING, (event) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_EVOLVES_PENDING, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return [];
-    return withExistingDb([], listPendingEvolves);
+    const items = withExistingDb([], listPendingEvolves);
+    if (items.length === 0) return [];
+    // 空间名要项目注册表，服务层只知道 space id
+    const label = await spaceLabeler();
+    return items.map((item) => ({
+      ...item,
+      older: { ...item.older, spaceLabel: label(item.older.spaceId) },
+      newer: { ...item.newer, spaceLabel: label(item.newer.spaceId) },
+    }));
   });
 
   ipcMain.handle(
@@ -758,11 +766,29 @@ async function spaceKinder(): Promise<(spaceId: string) => MemorySpaceKind> {
   };
 }
 
+/**
+ * 设置里的项目名。注册表只含本次运行打开过的项目，未打开过的项目在这里还有名字，
+ * 否则待审阅 / 列表里会退化成 `proj:` 的短 id，用户看不出这是哪个空间。
+ */
+function settingsProjectNames(): Map<string, string> {
+  const names = new Map<string, string>();
+  const projects = readSettingsState().projects;
+  if (!Array.isArray(projects)) return names;
+  for (const entry of projects) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name } = entry as { id?: unknown; name?: unknown };
+    if (typeof id === 'string' && typeof name === 'string' && name.trim()) {
+      names.set(id, name.trim());
+    }
+  }
+  return names;
+}
+
 /** space id → 项目名。项目已删或拿不到注册表时回退到短 id，不把 `proj:<uuid>` 原样给用户 */
 async function spaceLabeler(): Promise<(spaceId: string) => string> {
   const { getSourceAuthorityRegistry } = await import('./agent');
   const registry = getSourceAuthorityRegistry();
-  const names = new Map<string, string>();
+  const names = settingsProjectNames();
   for (const project of registry?.projection().projects ?? []) {
     if (project.kind === 'bot-home') continue;
     if (project.kind === 'scratch') {

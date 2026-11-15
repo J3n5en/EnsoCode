@@ -1773,6 +1773,20 @@ export const zhTranslations: Record<string, string> = {
   'Needs review': '待审阅',
   'Reviewing only records your judgement. Nothing is deleted and no memory is superseded.':
     '审阅只记录你的判断,不会删除任何记忆,也不会让任何一条被取代。',
+  'Accept: recorded as a confirmed contradiction. Both memories stay and stay searchable — you just stop being asked.':
+    '接受：记为「确认矛盾」。两条记忆都保留、都还能被检索，只是不再提示你。',
+  'Dismiss: recorded as not a contradiction. Both memories stay unchanged and you stop being asked.':
+    '忽略：记为「不算矛盾」。两条记忆都保持原样，也不再提示你。',
+  'Nothing to review. When a new memory contradicts an existing one, the pair shows up here.':
+    '没有待审阅的矛盾。新记忆与已有记忆冲突时，这一对会出现在这里。',
+  '{{count}} contradictions are waiting for review. Clear them in bulk so real conflicts do not get buried.':
+    '已有 {{count}} 条矛盾待审阅，建议批量处理，别让真正的冲突被埋掉。',
+  'Accept selected': '批量接受',
+  'Dismiss selected': '批量忽略',
+  'Earlier memory': '旧记忆',
+  'Newer memory': '新记忆',
+  'Why they conflict': '矛盾理由',
+  'No reason recorded for this pair.': '这一对没有记录矛盾理由。',
   Accept: '接受',
   Dismiss: '忽略',
   Type: '类型',

@@ -42,6 +42,16 @@ export interface EvolvesEdgeDto {
   createdAt: string;
 }
 
+/**
+ * 待审阅的矛盾关系：只给 id 无法判断，两端记忆的标题与摘要必须一起给。
+ * 任一端已删除的边不出现（删除时关系边一并清掉，这里只是兜底）。
+ */
+export interface PendingEvolvesReviewDto {
+  edge: EvolvesEdgeDto;
+  older: MemoryListItem;
+  newer: MemoryListItem;
+}
+
 export interface CrystalSourceDto extends MemoryListItem {
   contributionWeight: number;
 }
