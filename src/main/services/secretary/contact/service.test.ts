@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FeedCursor } from '@shared/secretary/feed';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   TelegramApi,
   TelegramCommandOptions,
@@ -40,9 +40,13 @@ class FakeApi implements TelegramApi {
   deleted: (TelegramCommandOptions | undefined)[] = [];
   menuButtons: TelegramMenuButton[] = [];
   callbacks: { callbackQueryId: string; text?: string }[] = [];
+  /** 「正在输入…」：只记 chat 与 action */
+  chatActions: { chatId: number; action: 'typing' }[] = [];
   polls = 0;
   /** 菜单接口失败时用 */
   menuError: Error | null = null;
+  /** sendChatAction 失败时用 */
+  typingError: Error | null = null;
   /** 带 parse_mode 的发送一律报解析错误，用来看降级 */
   rejectHtml = false;
   me: TelegramUser = { id: 42, username: 'enso_secretary_bot', first_name: 'Enso' };
@@ -95,6 +99,11 @@ class FakeApi implements TelegramApi {
     parseMode?: 'HTML';
   }): Promise<void> {
     this.edited.push(params);
+  }
+
+  async sendChatAction(params: { chatId: number; action: 'typing' }): Promise<void> {
+    if (this.typingError) throw this.typingError;
+    this.chatActions.push(params);
   }
 
   async setMyCommands(
@@ -245,6 +254,7 @@ function privateMessage(text: string, chatId = 777): TelegramUpdate {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1329,5 +1339,158 @@ describe('/sync 镜像秘书会话', () => {
     );
     expect(h.service.state().telegram.syncMirror).toBe(false);
     expect(h.api.sent).toEqual([]);
+  });
+});
+
+describe('「正在输入…」', () => {
+  /** 直接落盘成已绑定：不走 /start 向导，按需起轮询 */
+  async function boundStore(
+    h: ReturnType<typeof harness>,
+    options: { syncMirror?: boolean; poll?: boolean } = {}
+  ): Promise<void> {
+    await h.store.saveToken(TOKEN);
+    h.store.save({ ...h.store.file(), chat: { id: 777 }, syncMirror: options.syncMirror === true });
+    if (options.poll) await h.service.start();
+    h.api.sent.length = 0;
+  }
+
+  it('手机发起的回合会发 typing', async () => {
+    const h = harness();
+    await boundStore(h, { poll: true });
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => h.api.chatActions.length === 1, 'typing');
+    expect(h.api.chatActions).toEqual([{ chatId: 777, action: 'typing' }]);
+    h.service.onTurnEnd('sec-1');
+    await h.service.stop();
+  });
+
+  it('/sync 打开时应用内回合会发 typing', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => h.api.chatActions.length === 1, 'typing');
+    expect(h.api.chatActions).toEqual([{ chatId: 777, action: 'typing' }]);
+    h.service.onTurnEnd('sec-1');
+  });
+
+  it('/sync 关闭且不是手机发起时不发', async () => {
+    const h = harness();
+    await boundStore(h);
+    h.service.onTurnStart('sec-1');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.chatActions).toEqual([]);
+  });
+
+  it('没绑定 chat 时不发', async () => {
+    const h = harness();
+    h.service.onTurnStart('sec-1');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.chatActions).toEqual([]);
+  });
+
+  it('超过 5 秒每 4 秒续发一次', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.api.chatActions).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(h.api.chatActions).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(h.api.chatActions).toHaveLength(3);
+  });
+
+  it('回合结束就停：定时器清掉，不再续发', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(h.api.chatActions).toHaveLength(2);
+    h.service.onTurnEnd('sec-1');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.api.chatActions).toHaveLength(2);
+  });
+
+  it('回复发出后不再续发', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    h.service.onTurnReply('sec-1', '巡检正常');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.api.chatActions).toHaveLength(1);
+    expect(h.api.sent.at(-1)?.text).toContain('巡检正常');
+  });
+
+  it('静默回合收尾就停，不再续发', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    h.service.onTurnSilent('sec-1', 3);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.api.chatActions).toHaveLength(1);
+    expect(h.api.sent.at(-1)?.text).toBe('（静默处理了 3 条更新）');
+  });
+
+  it('会话停止时定时器清掉', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    await h.service.stop();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.api.chatActions).toHaveLength(1);
+  });
+
+  it('解绑后立刻停，不再续发', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    await h.service.unbind();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.api.chatActions).toHaveLength(1);
+  });
+
+  it('同一时间只有一个循环，重复开始不叠加定时器', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.service.onTurnStart('sec-1');
+    h.service.onTurnStart('sec-1');
+    h.service.onTurnStart('other');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.api.chatActions).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(h.api.chatActions).toHaveLength(2);
+  });
+
+  it('sendChatAction 失败只记审计，回复照发，也不重试', async () => {
+    const h = harness();
+    await boundStore(h, { syncMirror: true });
+    vi.useFakeTimers();
+    h.api.typingError = new TelegramApiError('api', 'Bad Request: chat not found');
+    h.service.onTurnStart('sec-1');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.audits.find((entry) => entry.op === 'contact_typing')).toMatchObject({
+      ok: false,
+      detail: 'api',
+    });
+    // 失败后不再重试：续发循环停了
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(h.api.chatActions).toEqual([]);
+    expect(h.audits.filter((entry) => entry.op === 'contact_typing')).toHaveLength(1);
+    h.service.onTurnReply('sec-1', '在，刚把登录修完');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.api.sent.at(-1)?.text).toContain('在，刚把登录修完');
   });
 });

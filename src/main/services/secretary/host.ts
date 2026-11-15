@@ -5,7 +5,12 @@ import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
 import { type PatrolFacts, patrolAnomalies, patrolIntervalMs } from '@shared/secretary/patrol';
 import { transitionProposal } from '@shared/secretary/policy';
-import { sessionIdsInUpdates, shouldSilenceTurn } from '@shared/secretary/silence';
+import {
+  isPureSessionUpdate,
+  messageText,
+  sessionIdsInUpdates,
+  shouldSilenceTurn,
+} from '@shared/secretary/silence';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type {
   DispatchRecord,
@@ -663,6 +668,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     return true;
   }
 
+  /** 秘书会话最近一条用户消息：纯系统回传的回合不打扰，不亮「正在输入…」 */
+  const lastUserText = new Map<string, string>();
+
   /**
    * 联系方式：秘书自己会话里的提问、回复与审批同步到手机。
    * 派出会话的提问走 ask-relay，在 applyRelayEvent 里另发一条，不在这里重复。
@@ -670,6 +678,26 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   function forwardToContact(event: RendererAgentEvent, conversationId: string): void {
     const contact = ports.contact;
     if (!contact) return;
+    if (event.type === 'message-upsert') {
+      if (event.message.role === 'user') {
+        lastUserText.set(conversationId, messageText(event.message));
+      }
+      return;
+    }
+    if (event.type === 'status') {
+      // 回合开始/收尾：running 点亮「正在输入…」，idle/failed 立刻收掉（含用户停止）
+      if (event.status !== 'running') {
+        // 收尾就清掉：下一轮没拿到用户消息时按「不是系统回传」处理，宁可多亮一次
+        lastUserText.delete(conversationId);
+        contact.onTurnEnd(conversationId);
+        return;
+      }
+      // 静默只可能来自纯系统回传（silence_turn / 静默标记都要求这一条），不发 typing
+      if (!isPureSessionUpdate(lastUserText.get(conversationId) ?? '')) {
+        contact.onTurnStart(conversationId);
+      }
+      return;
+    }
     if (event.type === 'ask-request' && event.ask && !event.ask.relay) {
       contact.onAskRequest(conversationId, event.ask);
       return;
