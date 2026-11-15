@@ -24,6 +24,7 @@ const stateWith = (status: SecretaryProposal['status']): SecretaryState => ({
 let initialState: Promise<SecretaryState>;
 let listener: ((state: SecretaryState) => void) | null = null;
 const off = vi.fn();
+const offOpen = vi.fn();
 const resolveProposal = vi.fn(async (_proposalId: string, _action: 'confirm' | 'reject') => ({
   ok: true as const,
   proposal,
@@ -58,6 +59,7 @@ vi.stubGlobal('window', {
         listener = callback;
         return off;
       },
+      onOpenConversation: () => offOpen,
       resolveProposal,
     },
   },
@@ -71,6 +73,7 @@ describe('useSecretaryStore', () => {
   beforeEach(() => {
     listener = null;
     off.mockClear();
+    offOpen.mockClear();
     resolveProposal.mockClear();
     useSecretaryStore.setState({ secretary: EMPTY_SECRETARY_STATE, resolving: {} });
   });
@@ -86,6 +89,7 @@ describe('useSecretaryStore', () => {
 
     unbind();
     expect(off).toHaveBeenCalledTimes(1);
+    expect(offOpen).toHaveBeenCalledTimes(1);
   });
 
   it('推送先到时，晚回来的初始快照不把它盖回去', async () => {

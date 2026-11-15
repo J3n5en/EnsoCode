@@ -1,6 +1,49 @@
 export type Locale = 'en' | 'zh';
 
 export const zhTranslations: Record<string, string> = {
+  Contacts: '联系方式',
+  'Reach the secretary from your phone. Milestones go out; your replies come back.':
+    '不在电脑前也能找到秘书：里程碑推到手机，你在手机上回话就是跟秘书说话。',
+  'Telegram returned an error': 'Telegram 返回了一个错误',
+  'Cannot reach api.telegram.org. Check the proxy.': '连不上 api.telegram.org，检查代理。',
+  'Bound to @{{username}}': '已绑定 @{{username}}',
+  'Bot @{{bot}}': '机器人 @{{bot}}',
+  'Send a test message': '发一条测试消息',
+  'Test message sent': '测试消息已发出',
+  Unbind: '解绑',
+  'Change bot': '更换 bot',
+  'Allow confirming dispatch cards from Telegram': '允许从 Telegram 确认派发类卡片',
+  'Off by default. Turning it on lets a message from your phone start work in your projects. Approvals are never handled from Telegram.':
+    '默认关闭。打开后，手机上的一条消息就能在你的项目里开工。审批无论如何都不能从 Telegram 处理。',
+  'No system keychain available: the bot token is stored unencrypted on this machine.':
+    '系统钥匙串不可用：bot token 会以明文存在这台机器上。',
+  'Bot verified': 'bot 已校验',
+  'Open the bot and press Start': '打开 bot 点 Start',
+  'Binding QR code': '绑定二维码',
+  'Binding code': '绑定码',
+  'Valid for {{minutes}} more minutes': '还有 {{minutes}} 分钟有效',
+  'Open @{{bot}}': '打开 @{{bot}}',
+  'Copy link': '复制链接',
+  'Link copied': '链接已复制',
+  'New code': '重新生成',
+  'The code works once, in a private chat with this bot only.':
+    '这个码只能用一次，且只在这个 bot 的私聊里有效。',
+  'Create a bot with @BotFather': '找 @BotFather 建一个 bot',
+  'Send /newbot, pick a name, and copy the token it gives you.':
+    '发 /newbot，起个名字，把它给的 token 复制过来。',
+  'Open @BotFather': '打开 @BotFather',
+  'Paste the bot token': '粘贴 bot token',
+  'Verify and continue': '校验并继续',
+  'Bind again with @{{bot}}': '用 @{{bot}} 重新绑定',
+  'The token is stored with the system keychain and never written to logs.':
+    'token 存在系统钥匙串里，不会写进日志。',
+  'That does not look like a bot token': '这不像一个 bot token',
+  'Telegram rejected this token': 'Telegram 拒绝了这个 token',
+  'Paste a bot token first': '先粘贴 bot token',
+  'Not bound yet': '还没绑定',
+  'No secretary conversation is available': '没有可用的秘书会话',
+  'Could not reach the secretary session': '没能把消息送到秘书会话',
+  'Not allowed from this window': '这个窗口没有权限',
   Privacy: '隐私',
   'Privacy masking': '隐私脱敏',
   'Replace API keys and personal data with placeholders before requests leave this device, and restore them in replies. Original values stay in memory on this device only.':

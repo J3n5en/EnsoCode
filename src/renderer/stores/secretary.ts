@@ -87,7 +87,14 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
         set({ secretary });
       })
       .catch(() => undefined);
-    return off;
+    // 手机上的里程碑消息带 enso://secretary?conversation=<id>：点开回到应用并选中那个会话
+    const offOpen = window.electronAPI.secretary.onOpenConversation((conversationId) => {
+      useSessionsStore.getState().selectConversation(conversationId);
+    });
+    return () => {
+      off();
+      offOpen();
+    };
   },
 
   newSecretaryConversation: async (options) => {

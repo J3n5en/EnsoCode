@@ -5,6 +5,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { SecretaryAvatar } from './SecretaryAvatar';
+import { SecretaryContactPanel } from './SecretaryContactPanel';
 import { SecretaryDailyBoard } from './SecretaryDailyBoard';
 import { SecretaryMemoryPanel } from './SecretaryMemoryPanel';
 import { SecretaryRunningList } from './SecretaryRunningList';
@@ -12,13 +13,14 @@ import { SecretarySchedulePanel } from './SecretarySchedulePanel';
 import { SecretaryWorkbench } from './SecretaryWorkbench';
 import { SecretarySummary, secretarySectionView } from './secretaryView';
 
-type Tab = 'workbench' | 'daily' | 'memory' | 'schedules';
+type Tab = 'workbench' | 'daily' | 'memory' | 'schedules' | 'contact';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'workbench', label: 'Workbench' },
   { key: 'daily', label: 'Daily board' },
   { key: 'memory', label: 'Memory' },
   { key: 'schedules', label: 'Schedules' },
+  { key: 'contact', label: 'Contacts' },
 ];
 
 /** 秘书面板：身份行 + 工作台 / 记忆 / 定时三个标签，替代原来的两块独立面板 */
@@ -47,6 +49,7 @@ export function SecretaryPanel() {
     daily: 0,
     memory: 0,
     schedules: schedules.length,
+    contact: 0,
   };
 
   return (
@@ -130,6 +133,7 @@ export function SecretaryPanel() {
         {tab === 'workbench' && <SecretaryWorkbench name={view.name} />}
         {tab === 'daily' && <SecretaryDailyBoard />}
         {tab === 'memory' && <SecretaryMemoryPanel />}
+        {tab === 'contact' && <SecretaryContactPanel />}
         {tab === 'schedules' && (
           <SecretarySchedulePanel schedules={schedules} name={view.name} onReload={loadSchedules} />
         )}

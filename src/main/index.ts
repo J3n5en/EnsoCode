@@ -17,8 +17,10 @@ import {
   noteOpenFolderArgv,
   notifyOpenFolderRequested,
   openPluginInstallFromProtocol,
+  openSecretaryConversationFromProtocol,
 } from './ipc/window';
 import { createPluginInstallInbox } from './protocol/pluginInstall';
+import { createSecretaryLinkInbox } from './protocol/secretaryLink';
 import {
   agentWorkerAlive,
   recordAgentWorkerGone,
@@ -113,6 +115,7 @@ if (app.isPackaged && process.platform !== 'win32') {
 
 const gotTheLock = app.requestSingleInstanceLock();
 const pluginInstallInbox = createPluginInstallInbox(process.platform);
+const secretaryLinkInbox = createSecretaryLinkInbox(process.platform);
 
 function registerEnsoProtocol(): void {
   if (process.defaultApp && process.argv.length >= 2) {
@@ -127,10 +130,12 @@ if (!gotTheLock) {
 } else {
   registerEnsoProtocol();
   pluginInstallInbox.noteArgv(process.argv);
+  secretaryLinkInbox.noteArgv(process.argv);
   noteOpenFolderArgv(process.argv);
   app.on('open-url', (event, url) => {
     event.preventDefault();
     pluginInstallInbox.noteLink(url);
+    secretaryLinkInbox.noteLink(url);
   });
   // macOS：拖到 Dock 图标或 `open -a EnsoCode <dir>`；冷启动早于 ready，由渲染端挂载时取走
   app.on('open-file', (event, folder) => {
@@ -141,6 +146,7 @@ if (!gotTheLock) {
   app.on('second-instance', (_event, argv) => {
     restoreFromSecondInstance();
     pluginInstallInbox.noteArgv(argv);
+    secretaryLinkInbox.noteArgv(argv);
     noteOpenFolderArgv(argv);
     notifyOpenFolderRequested();
   });
@@ -217,6 +223,9 @@ if (!gotTheLock) {
       startModelsDevRefreshSchedule();
     });
     pluginInstallInbox.start((url) => openPluginInstallFromProtocol(url));
+    secretaryLinkInbox.start((conversationId) =>
+      openSecretaryConversationFromProtocol(conversationId)
+    );
     setTrayToggleHandler(() => {
       if (isServerMode()) leaveServerMode();
       else void enterServerMode();
