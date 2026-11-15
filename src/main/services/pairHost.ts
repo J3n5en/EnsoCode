@@ -44,6 +44,7 @@ import {
   catalogSyncFingerprint,
   channelsForMetaPush,
   forgetGuestSyncMeta,
+  guestMetaChannels,
   mergeStableMeta,
   type PairMetaFingerprints,
   pairJsonFingerprint,
@@ -199,6 +200,8 @@ interface Connection {
   remoteWindow: BulkWindow<HostToPhone>;
   /** 浏览器声明能解 gzip：大帧压缩后再发（桌面上行常是瓶颈） */
   remoteGzip: boolean;
+  /** 对端是完整模式（进房 snapshot 声明）：不推手机版目录/事件，跨重连保留，下次 snapshot 改写 */
+  deskGuest: boolean;
   voiceUploads: VoiceUploads;
   /** 直连和中继共用：一帧只封一次 */
   replay: FrameReplay;
@@ -686,6 +689,7 @@ function openConnection(device: PairedDevice): void {
     remoteParts: createRemotePartAssembler(),
     remoteWindow: new BulkWindow((frame) => sendRemoteFrame(conn, frame)),
     remoteGzip: false,
+    deskGuest: false,
     voiceUploads: new VoiceUploads({
       open: openSpeechSession,
       // 每处 ioEpoch++ 都伴随 voiceUploads.clear()，旧连接的会话已取消，中间结果不会再出来
@@ -1057,6 +1061,7 @@ async function handleFrame(
     case 'snapshot':
       // 只要目录；会话正文走 subscribe。peer-joined 已经 forget 过 catalog，
       // 这里再 forget 会把刚发出的 14kB 瘦目录再打一遍。
+      conn.deskGuest = command.desk === true;
       resyncGuestMeta(conn, false);
       break;
     case 'set-model': {
@@ -1390,7 +1395,7 @@ function resyncGuestMeta(conn: Connection, forgetCatalog = true): void {
     conn.providersSentAt = undefined;
   }
   requestMeta(conn);
-  botPort?.resync(conn.device.pairId, (message) => send(conn, message));
+  if (!conn.deskGuest) botPort?.resync(conn.device.pairId, (message) => send(conn, message));
 }
 
 async function sendMeta(conn: Connection): Promise<void> {
@@ -1428,10 +1433,14 @@ async function sendMeta(conn: Connection): Promise<void> {
   // host 重启后 guest 往往已在房里，peer-joined 先于 renderer 首推到达，空 catalog 当真目录发出去
   // 会让 guest 把仍在订阅的会话误判为幽灵。被扣下的通道不进 next，flushChangedMeta 只记实际发出的。
   const last = mergeStableMeta(stableMetaByPair.get(conn.device.pairId), conn.sentMeta);
-  const providerPlan = next.providers
-    ? planProviderEmit(conn.providersSentFp, conn.providersSentAt, next.providers, Date.now())
-    : ({ kind: 'unchanged' } as const);
-  const emit = providerChannelsToSend(channelsForMetaPush(last, next, catalogReady), providerPlan);
+  const providerPlan =
+    next.providers && !conn.deskGuest
+      ? planProviderEmit(conn.providersSentFp, conn.providersSentAt, next.providers, Date.now())
+      : ({ kind: 'unchanged' } as const);
+  const emit = providerChannelsToSend(
+    guestMetaChannels(channelsForMetaPush(last, next, catalogReady), conn.deskGuest),
+    providerPlan
+  );
   if (emit.deferMs !== undefined) scheduleProvidersResync(conn, emit.deferMs);
   const allowed = new Set(emit.channels);
   const remembered = rememberStableMeta(stableMetaByPair.get(conn.device.pairId), allowed, next);
@@ -1616,6 +1625,8 @@ export function forwardAgentEvent(event: RendererAgentEvent): void {
       }
       if (!conn.phoneOnline) continue;
     }
+    // 完整模式经 renderer 隧道收事件，手机协议这份没人看
+    if (conn.deskGuest) continue;
     // snapshot/replay 响应已先入发送队列；在途期间不让被快照覆盖的会话事件抢跑。
     const sync = conn.pendingSync;
     if (sync && flatSessionId === conn.subscribedId && conn.syncLiveRevision !== sync.revision) {

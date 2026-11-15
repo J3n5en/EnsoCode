@@ -139,7 +139,8 @@ export class DeskTunnel {
         },
       },
       undefined,
-      NO_CACHE
+      NO_CACHE,
+      true
     );
   }
 
