@@ -162,6 +162,7 @@ export type ContactBadge =
   | 'background'
   | 'persistent'
   | 'continuing'
+  | 'interrupted'
   | 'idle'
   | 'failed';
 
@@ -173,6 +174,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     background: '等后台任务',
     persistent: '有常驻服务',
     continuing: '续跑中',
+    interrupted: '已中断',
     idle: '空闲',
     failed: '失败',
   },
@@ -182,6 +184,7 @@ const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
     background: 'Waiting on a background task',
     persistent: 'Service running',
     continuing: 'Continuing',
+    interrupted: 'Interrupted',
     idle: 'Idle',
     failed: 'Failed',
   },
@@ -197,10 +200,13 @@ export function badgeText(lang: ContactLang, badge: ContactBadge): string {
  */
 export function sessionBadge(card: {
   state: string;
+  /** 这一轮的结果：被应用退出打断的会话不是「进行中」，看板与手机都显示已中断 */
+  result?: string;
   backgroundRunning?: boolean;
   backgroundPersistent?: boolean;
   continuing?: boolean;
 }): ContactBadge {
+  if (card.result === 'interrupted') return 'interrupted';
   if (card.state === 'error') return 'failed';
   if (card.state === 'waiting') return 'waiting';
   if (card.state === 'running') return 'running';

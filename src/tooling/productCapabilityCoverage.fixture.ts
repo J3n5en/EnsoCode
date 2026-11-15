@@ -642,6 +642,9 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_RETRY: surfaces('conversations.retry-turn'),
   AGENT_EVENT: excluded('Worker-to-renderer event stream transport.'),
   AGENT_SNAPSHOT: excluded('Worker recovery/debug snapshot transport.'),
+  AGENT_TAKE_INTERRUPTED_TURNS: excluded(
+    'Read-only startup handoff of turns interrupted by app exit; no spawn, no execution rights.'
+  ),
   AGENT_CHILD_HISTORY_READ: excluded(
     'Read-only replay of an ended child safe journal; no product capability, no execution rights.'
   ),

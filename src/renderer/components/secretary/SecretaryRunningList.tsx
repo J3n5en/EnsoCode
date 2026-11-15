@@ -26,6 +26,7 @@ const BADGE_STYLE: Record<ContactBadge, { label: string; className: string }> = 
   background: { label: 'Waiting on a background task', className: 'bg-warning/15 text-warning' },
   persistent: { label: 'Service running', className: 'bg-warning/15 text-warning' },
   continuing: { label: 'Continuing', className: 'bg-success/15 text-success' },
+  interrupted: { label: 'Interrupted', className: 'bg-warning/15 text-warning' },
   idle: { label: 'Idle', className: 'bg-muted text-muted-foreground' },
 };
 

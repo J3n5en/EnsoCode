@@ -268,6 +268,8 @@ export const IPC_CHANNELS = {
   AGENT_RETRY: 'agent:retry',
   AGENT_EVENT: 'agent:event',
   AGENT_SNAPSHOT: 'agent:snapshot',
+  /** 取走上次应用退出时被打断的回合（取一次即清空） */
+  AGENT_TAKE_INTERRUPTED_TURNS: 'agent:take-interrupted-turns',
   /** 已结束 child 的 safe journal 只读回放（路径由 Main 推导，请求只带 conversationId） */
   AGENT_CHILD_HISTORY_READ: 'agent:child-history-read',
   /** 父会话的子运行目录（只回摘要，不回路径） */

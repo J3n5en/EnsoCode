@@ -8,7 +8,6 @@ import {
   type AskRequestInfo,
   type BackgroundTaskInfo,
   type DispatchMainEvent,
-  type NodeStatus,
   type ProjectedMessage,
   type RendererAgentEvent,
   type SessionIdentity,
@@ -18,6 +17,7 @@ import {
   shouldApplyDispatchMainEvent,
 } from '@shared/types/agent';
 import { splitUnattendedPrefix } from '@shared/unattendedNote';
+import type { ConversationStatus, InterruptedTurnState } from './interrupted';
 import { extractEdits, extractWriteContent } from './timeline';
 
 /**
@@ -253,8 +253,13 @@ export interface SessionProjection {
   generation?: string;
   /** 本代 spawn 的真实拒绝原因：其后同代的 STALE 拒绝不得覆盖它、也不触发自愈 */
   spawnRejection?: { generation: string; reason: string };
-  status: NodeStatus;
+  status: ConversationStatus;
   error?: string;
+  /**
+   * 应用退出（含安装更新时被杀）打断的一轮：不是 idle 也不是 failed。
+   * 随会话持久化，重试或新回合开始时清除。
+   */
+  interrupted?: InterruptedTurnState;
   messages: TimelineMessage[];
   customEntries: AgentSessionCustomEntry[];
   commands: SlashCommand[];
@@ -535,6 +540,8 @@ export function applyAgentEvent(
         status: event.status,
         error: event.error,
         retry: undefined,
+        // 新一轮开始：上一次被应用退出打断的提示到此为止
+        ...(event.status === 'running' ? { interrupted: undefined } : {}),
         lastSeq: event.seq,
       };
     }
@@ -763,6 +770,25 @@ export function applyAgentEvent(
     case 'commands':
       return { ...current, commands: event.commands, lastSeq: event.seq };
     case 'turn-failed':
+      // 退出窗口内的断流/断连不是会话失败：Main 已改判成「被应用退出打断」，
+      // 不落红、不写 error，交给时间线的系统提示说明原因
+      if (event.interrupted)
+        return {
+          ...settleTiming(current, now),
+          pendingAsks: current.pendingAsks.filter((ask) => !ask.answered),
+          status: 'interrupted',
+          interrupted: {
+            at: event.interrupted.at,
+            kind: event.interrupted.kind,
+            unfinishedTools: [],
+          },
+          error: undefined,
+          retry: undefined,
+          toolOutputs: {},
+          toolStartedAt: {},
+          toolDeadlineAt: {},
+          lastSeq: event.seq,
+        };
       return {
         ...settleTiming(current, now),
         pendingAsks: current.pendingAsks.filter((ask) => !ask.answered),

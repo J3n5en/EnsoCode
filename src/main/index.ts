@@ -43,6 +43,11 @@ import { getCaCertConfig } from './services/caCert';
 import { computerHost } from './services/computerHost';
 import { startDesktopConfigCli, stopDesktopConfigCli } from './services/configCli';
 import { installDesktopHooks } from './services/desktopHooks';
+import {
+  recordRunningSessionsAtExit,
+  startExitInterruptRecovery,
+  startRunningSessionsHeartbeat,
+} from './services/exitInterruptHost';
 import { releaseLocalChatSlot } from './services/llama/chat';
 import { disposeLlamaRuntime, llamaRuntimeActive } from './services/llama/runtime';
 import {
@@ -130,6 +135,16 @@ if (!gotTheLock) {
   app.quit();
 } else {
   registerEnsoProtocol();
+  // 被安装脚本 pkill（SIGTERM）时也要留下「退出时正在跑什么」：默认行为是直接终止，
+  // 这里先同步写记录再走正常退出，来不及（SIGKILL）则由心跳兜底。
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => {
+      recordRunningSessionsAtExit();
+      app.quit();
+    });
+  }
+  startRunningSessionsHeartbeat();
+  startExitInterruptRecovery();
   pluginInstallInbox.noteArgv(process.argv);
   secretaryLinkInbox.noteArgv(process.argv);
   noteOpenFolderArgv(process.argv);
@@ -293,6 +308,8 @@ if (!gotTheLock) {
 
   // Electron 退出即断开中继，手机侧收到 host-offline
   app.on('before-quit', () => {
+    // 退出记录要赶在 worker 与终端收尾之前：此刻会话状态还是权威的
+    recordRunningSessionsAtExit();
     stopDesktopConfigCli();
     stopTrayToggleShortcut();
     stopPairHost();

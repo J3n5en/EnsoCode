@@ -549,6 +549,8 @@ interface SessionsState {
   forkFromEntry(conversationId: string, entryId: string): Promise<string | null>;
   /** 终态失败后不新增 user 消息，从当前上下文续跑 */
   retry(conversationId: string): void;
+  /** 被应用退出打断的一轮：冷会话先唤醒，再从断点续跑（只续未完成的回合） */
+  retryInterrupted(conversationId: string): Promise<void>;
   /** ChatInput 消费预填文本后清除 */
   clearDraft(conversationId: string): void;
   /** 设定会话目标并立即开跑 */
@@ -4134,6 +4136,21 @@ export const useSessionsStore = create<SessionsState>()(
             return;
           }
           void window.electronAPI.agent.retry(conversationId);
+        },
+
+        async retryInterrupted(conversationId) {
+          const conversation = get().conversations[conversationId];
+          if (!conversation || conversation.spawning || conversation.status === 'running') return;
+          try {
+            // 重启后会话是冷的：先按 jsonl 唤醒，等 worker ready 再续跑，否则 Main 会拒
+            if (!conversation.started) await get().resumeConversation(conversationId);
+            const phase = await waitForWorkerReady(conversationId, conversation.sessionFile);
+            if (phase !== 'ready') return;
+            if (get().conversations[conversationId]?.status === 'running') return;
+            await window.electronAPI.agent.retry(conversationId, { unfinishedOnly: true });
+          } catch {
+            // 唤醒失败就保持中断提示，用户还能再点一次
+          }
         },
 
         clearDraft(conversationId) {

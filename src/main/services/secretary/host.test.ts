@@ -68,6 +68,8 @@ interface Harness {
     audit: SecretaryAuditEntry[];
     /** 会话的后台任务投影 */
     tasks: Record<string, ObservedTask[]>;
+    /** 上次应用退出打断这一轮的原因（启动恢复用） */
+    interruptDetails: Record<string, string>;
     contact: {
       milestones: { kind: string; title: string; conversationId: string; lastText?: string }[];
       relayAsks: { conversationId: string; question: string; label: string }[];
@@ -109,6 +111,7 @@ function harness(
     prompts: [],
     audit: [],
     tasks: options.tasks ?? {},
+    interruptDetails: {},
     contact: {
       milestones: [],
       relayAsks: [],
@@ -165,6 +168,7 @@ function harness(
     },
     now: () => state.now,
     tasks: (conversationId) => state.tasks[conversationId] ?? [],
+    interruptDetail: (conversationId) => state.interruptDetails[conversationId],
     newId: () => `id-${++seq}`,
     audit: (entry) => {
       state.audit.push(entry);
@@ -879,6 +883,34 @@ describe('启动恢复', () => {
     h.state.file.dispatched.c1.lastState = 'idle';
     h.host.recover();
     expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('中断回传带上退出原因，不报成失败', () => {
+    const h = harness({});
+    h.state.interruptDetails.c1 = '应用在 20:26:52 被关闭（安装更新），这一轮被中断。';
+    h.host.recover();
+    const update = h.state.file.outbox[0];
+    expect(update).toMatchObject({ kind: 'interrupted' });
+    expect(update.text).toContain('20:26:52');
+    expect(update.text).toContain('安装更新');
+  });
+
+  it('退出窗口内的断流事件按 interrupted 回传，不报 failed', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      {
+        type: 'turn-failed',
+        identity: { sessionId: 'c1', generation: 'g1' },
+        seq: 2,
+        turnId: 't1',
+        error: 'OpenAI Responses stream ended before a terminal response event',
+        interrupted: { at: 1_700_000_000_000, kind: 'quit' },
+      } as RendererAgentEvent,
+      change('idle', 'running')
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted' });
+    expect(h.state.file.outbox.map((entry) => entry.kind)).toEqual(['interrupted']);
   });
 
   it('存量脏数据：记录还写着进行中、会话已空闲且已有终态，启动时直接收口', () => {

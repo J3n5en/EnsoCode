@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SecretaryDaily, SecretaryScheduleView } from '../types/secretary';
 import {
+  badgeText,
   botCommands,
   commandListText,
   escapeHtml,
@@ -16,6 +17,7 @@ import {
   parseBoardDay,
   parseContactCommand,
   parseFollowingArg,
+  sessionBadge,
 } from './commands';
 import { CONTACT_OUTBOUND_MAX_CHARS } from './contact';
 
@@ -316,5 +318,20 @@ describe('命令清单', () => {
     expect(closed).toContain('/status —');
     expect(closed).not.toContain('/memory');
     expect(commandListText('zh', true)).toContain('/memory —');
+  });
+});
+
+describe('会话徽标', () => {
+  it('被应用退出打断的会话显示已中断，不显示进行中', () => {
+    expect(sessionBadge({ state: 'running', result: 'interrupted' })).toBe('interrupted');
+    expect(sessionBadge({ state: 'idle', result: 'interrupted' })).toBe('interrupted');
+    expect(badgeText('zh', 'interrupted')).toBe('已中断');
+  });
+
+  it('其余状态照旧', () => {
+    expect(sessionBadge({ state: 'running' })).toBe('running');
+    expect(sessionBadge({ state: 'idle' })).toBe('idle');
+    expect(sessionBadge({ state: 'error' })).toBe('failed');
+    expect(sessionBadge({ state: 'idle', result: 'failed' })).toBe('idle');
   });
 });

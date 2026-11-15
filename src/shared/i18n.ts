@@ -224,6 +224,8 @@ export const zhTranslations: Record<string, string> = {
     '当前回合结束后将自动重启并更新到 {{version}}。',
   'Continued {{count}} conversation(s) interrupted by the update':
     '已从断点继续 {{count}} 个因更新中断的会话',
+  '{{count}} conversation(s) interrupted by app exit':
+    '{{count}} 个会话因应用退出被中断，已在会话里说明原因',
   'Update failed: {{error}}': '更新失败：{{error}}',
   'Download update': '下载更新',
   'Release notes': '更新日志',

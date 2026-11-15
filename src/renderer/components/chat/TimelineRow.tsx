@@ -3,6 +3,7 @@ import { parseBotInjectedMessage } from '@shared/bots/injectedMessage';
 import { stripBotNotesUpdate } from '@shared/bots/notes';
 import { stripBrowserElementBlocks } from '@shared/browser/designAnnotation';
 import { isBtwIsolationPrompt } from '@shared/btw';
+import { interruptNotice } from '@shared/exitInterrupt';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
@@ -270,6 +271,13 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
       );
     case 'error':
       return b.kind === 'error' && a.text === b.text;
+    case 'interrupted':
+      return (
+        b.kind === 'interrupted' &&
+        a.at === b.at &&
+        a.exitKind === b.exitKind &&
+        a.unfinishedTools.length === b.unfinishedTools.length
+      );
     case 'task-note':
       return b.kind === 'task-note' && a.detail === b.detail;
     case 'compaction':
@@ -1265,6 +1273,8 @@ export const TimelineRow = memo(function TimelineRow({
           <RetryTurnButton />
         </div>
       );
+    case 'interrupted':
+      return <InterruptedRow item={item} />;
     case 'task-note':
       return <TaskNoteRow item={item} />;
     case 'compaction':
@@ -1495,6 +1505,53 @@ function displayedConversation(state: ReturnType<typeof useSessionsStore.getStat
 }
 
 const noSubscribe = () => () => {};
+
+/**
+ * 应用退出打断的一轮：说明是应用被关掉（含安装更新）而不是模型出错，
+ * 有未完成的工具调用要点名，最后引导重试。
+ */
+function InterruptedRow({ item }: { item: Extract<TimelineItem, { kind: 'interrupted' }> }) {
+  const { locale } = useI18n();
+  const text = interruptNotice({
+    at: item.at,
+    kind: item.exitKind,
+    unfinishedTools: item.unfinishedTools,
+    lang: locale,
+  });
+  return (
+    <div data-enso="timeline-interrupted" className="flex items-start gap-2 text-sm text-warning">
+      <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <p className="min-w-0 flex-1 whitespace-pre-wrap">{text}</p>
+      <InterruptedRetryButton />
+    </div>
+  );
+}
+
+/** 中断的续跑入口：冷会话也能点（先唤醒再从断点续跑），与更新重启的续跑同一条路 */
+function InterruptedRetryButton() {
+  const { t } = useI18n();
+  const canRetry = useSessionsStore((state) => {
+    const conversation = displayedConversation(state);
+    return Boolean(conversation && !conversation.spawning && conversation.status !== 'running');
+  });
+  if (!canRetry) return null;
+  return (
+    <button
+      type="button"
+      data-enso="timeline-interrupted-retry"
+      title={t('Retry')}
+      onClick={() => {
+        const conversation = displayedConversation(useSessionsStore.getState());
+        if (!conversation) return;
+        void useSessionsStore.getState().retryInterrupted(conversation.id);
+      }}
+      className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+    >
+      <RefreshCw className="h-3 w-3" />
+      {t('Retry')}
+    </button>
+  );
+}
 
 /** 终态错误后续跑：已 spawn 且非 running 才显示（手机 stub started=false 自动隐藏） */
 export function RetryTurnButton() {

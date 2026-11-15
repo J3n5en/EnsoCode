@@ -6,6 +6,7 @@ type PersistableConversation = {
   createdAt: number;
   started: boolean;
   sessionFile?: string;
+  status?: string;
 } & Partial<Record<keyof Conversation, unknown>>;
 
 export interface SessionsPersistSlice {
@@ -77,7 +78,8 @@ function persistOne(conversation: PersistableConversation): PersistableConversat
     error: undefined,
     ...(conversation.started && !conversation.sessionFile
       ? { status: 'failed', error: 'Session ended — history not restored' }
-      : { status: 'idle' }),
+      : // 被应用退出打断的会话重启后仍是 interrupted：用户要能看到原因再决定重试
+        { status: conversation.status === 'interrupted' ? 'interrupted' : 'idle' }),
     started: false,
     runStartedAt: undefined,
     lastOutputAt: undefined,

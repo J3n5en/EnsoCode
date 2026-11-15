@@ -33,6 +33,8 @@ export { ACTIVITY_LIMIT } from '@shared/secretary/feed';
 export type ResultEvent =
   | { type: 'turn-completed'; aborted?: boolean; goalStatus?: string; goalCompleted?: boolean }
   | { type: 'turn-failed'; error?: string }
+  /** 应用退出（含安装更新）打断的一轮：不是失败，也不是用户主动中止 */
+  | { type: 'turn-interrupted'; at: number; kind: 'quit' | 'update' }
   | { type: 'worker-exited' }
   | { type: 'goal-signal'; kind: 'complete' | 'blocked' | 'wait' }
   | { type: 'needs-user' };
@@ -53,6 +55,8 @@ export function classify(
     case 'worker-exited':
     case 'turn-failed':
       return 'failed';
+    case 'turn-interrupted':
+      return 'interrupted';
     case 'goal-signal':
       if (event.kind === 'complete') return null;
       if (event.kind === 'blocked') return 'goal-blocked';
