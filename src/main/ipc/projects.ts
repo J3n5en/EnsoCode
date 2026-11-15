@@ -14,6 +14,7 @@ import { createHostDir, listHostDirs } from '../services/hostDirs';
 import { openInApps } from '../services/openInApps';
 import { getRecentProjects } from '../services/recentProjects';
 import { isMainRenderer } from '../services/renderers';
+import { unfollowTarget } from '../services/secretary/following';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { sshProbeDirectory } from '../services/sshProbe';
@@ -223,6 +224,8 @@ export function registerProjectHandlers(): void {
           conversationId: conversation.conversationId,
           ...(conversation.sessionFile ? { sessionFile: conversation.sessionFile } : {}),
         });
+        // 项目删了，会话也不在了：手机关注里的这些一并移除
+        unfollowTarget(conversation.conversationId);
       }
     }
     return result;

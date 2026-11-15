@@ -8,12 +8,14 @@ import {
   formatBoardMessage,
   formatElapsed,
   formatFeedMessage,
+  formatFollowingMessage,
   formatMemoryMessage,
   formatSchedulesMessage,
   formatStatusMessage,
   formatTodoMessage,
   parseBoardDay,
   parseContactCommand,
+  parseFollowingArg,
 } from './commands';
 import { CONTACT_OUTBOUND_MAX_CHARS } from './contact';
 
@@ -50,6 +52,7 @@ describe('命令解析', () => {
       'feed',
       'todo',
       'schedules',
+      'following',
       'last',
       'sync',
       'memory',
@@ -57,6 +60,38 @@ describe('命令解析', () => {
     ]);
     expect(commands.every((entry) => /^[a-z]+$/u.test(entry.command))).toBe(true);
     expect(commands[0]?.description).toContain('进行中');
+  });
+});
+
+describe('/following', () => {
+  it('参数：不带是列表，clear 全清，cancel <序号> 取消一项', () => {
+    expect(parseFollowingArg('')).toEqual({ action: 'list' });
+    expect(parseFollowingArg('clear')).toEqual({ action: 'clear' });
+    expect(parseFollowingArg('全清')).toEqual({ action: 'clear' });
+    expect(parseFollowingArg('cancel 2')).toEqual({ action: 'cancel', index: 2 });
+    expect(parseFollowingArg('取消 #3')).toEqual({ action: 'cancel', index: 3 });
+    expect(parseFollowingArg('cancel 0')).toBeNull();
+    expect(parseFollowingArg('随便')).toBeNull();
+  });
+
+  it('列表按序号列摘要，序号与按钮一致', () => {
+    const text = formatFollowingMessage('zh', {
+      items: [
+        { id: 'session:c1', kind: 'session', summary: 'apple-table 加 Score 字段', at: NOW },
+        { id: 'schedule:sch1', kind: 'schedule', summary: '每天早上看 CI', at: NOW },
+      ],
+      now: NOW,
+    });
+    expect(text).toContain('手机关注 2');
+    expect(text).toContain('1. ▸ 会话 · apple-table 加 Score 字段');
+    expect(text).toContain('2. ▸ 定时 · 每天早上看 CI');
+    expect(text).toContain('/following clear 全清');
+  });
+
+  it('一条都没有时说清怎么才会有', () => {
+    const text = formatFollowingMessage('zh', { items: [], now: NOW });
+    expect(text).toContain('还没有关注的任务');
+    expect(formatFollowingMessage('en', { items: [], now: NOW })).toContain('Nothing is followed');
   });
 });
 

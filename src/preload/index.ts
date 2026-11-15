@@ -506,6 +506,11 @@ const electronAPI = {
       allowMemory?: boolean;
     }): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
+    /** 手机关注的任务：取消一项或全清 */
+    contactFollowing: (
+      request: { action: 'cancel'; id: string } | { action: 'clear' }
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FOLLOWING, request),
     /** 深链 enso://secretary?conversation=<id>[&proposal=<id>]：选中会话，带卡就定位那张卡 */
     onOpenConversation: (
       callback: (target: { conversationId: string; proposalId?: string }) => void

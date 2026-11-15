@@ -60,6 +60,7 @@ import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
 import { todoDispatchPrompt } from './dispatchBrief';
+import { recordPhoneFollow, renameFollowedTarget, unfollowTarget } from './following';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import { closeRelayAsk, dropRelaysFor, pendingRelay, relayKey, sessionLabel } from './relay';
 import {
@@ -229,6 +230,19 @@ export interface SecretaryDispatchPorts {
   resolveModel(
     ref: DispatchModelRef
   ): MaybePromise<{ ok: true; model: DispatchModelRef } | { ok: false; error: string }>;
+  /**
+   * 手机发起的回合里派生的会话记进「手机关注」：之后的结果一直推到手机上。
+   * 缺省表示不记；等待中的派发与待确认的卡先记自己的 id，建出会话后由 refollow 改挂。
+   */
+  follow?(input: {
+    targetId: string;
+    summary: string;
+    secretaryConversationId: string | null;
+  }): void;
+  /** 等待中的派发/待确认的卡变成真实会话：关注项改挂到会话上 */
+  refollow?(from: string, to: string): void;
+  /** 会话被归档、删除或收回接管：关注项一并移除 */
+  unfollow?(targetId: string): void;
 }
 
 const DISPATCH_OPS = [
@@ -779,12 +793,45 @@ async function dispatchDraft(
   const base = await checkBase(ports, validated.draft);
   if (!base.ok) return { kind: 'failed', error: base.error };
   if (dispatchDecision(profile, wanted.projectId) === 'confirm') {
-    return {
-      kind: 'proposal',
-      proposalId: await saveProposal(ports, secretaryConversationId, validated.draft),
-    };
+    const proposalId = await saveProposal(ports, secretaryConversationId, validated.draft);
+    const confirmOutcome: DispatchOutcome = { kind: 'proposal', proposalId };
+    noteFollow(ports, secretaryConversationId, validated.draft, confirmOutcome);
+    return confirmOutcome;
   }
-  return startDispatch(ports, validated.draft, secretaryConversationId, profile);
+  const outcome = await startDispatch(ports, validated.draft, secretaryConversationId, profile);
+  noteFollow(ports, secretaryConversationId, validated.draft, outcome);
+  return outcome;
+}
+
+/** 原始需求的一句话摘要：标题优先，没有就取 prompt 的首个非空行 */
+function draftSummary(draft: DispatchDraft): string {
+  const title = draft.title?.trim();
+  if (title) return title;
+  return todoTitle(draft.prompt) ?? draft.prompt.trim();
+}
+
+/**
+ * 手机发起的回合里派生的会话：记进「手机关注」，结果一直推到手机上。
+ * 等待中的派发与待确认的卡先记自己的 id，真正建出会话后由 refollow 改挂。
+ */
+function noteFollow(
+  ports: SecretaryDispatchPorts,
+  secretaryConversationId: string,
+  draft: DispatchDraft,
+  outcome: DispatchOutcome
+): void {
+  if (!ports.follow || outcome.kind === 'failed') return;
+  const targetId =
+    outcome.kind === 'created'
+      ? outcome.conversationId
+      : outcome.kind === 'pending'
+        ? outcome.pendingId
+        : outcome.proposalId;
+  ports.follow({
+    targetId,
+    summary: draftSummary(draft),
+    secretaryConversationId,
+  });
 }
 
 function auditFailure(
@@ -1003,6 +1050,8 @@ export async function startPendingDispatches(
       await failPending(ports, pending, 'dispatch-failed', undefined, created.error);
       continue;
     }
+    // 关注项从等待中的派发改挂到真正建出来的会话上
+    ports.refollow?.(pendingId, created.conversationId);
     ports.audit({
       at: now,
       secretaryConversationId: pending.secretaryConversationId,
@@ -1320,6 +1369,8 @@ export function revokeTakeover(
   }
   delete file.dispatched[conversationId];
   file.named = file.named.filter((id) => id !== conversationId);
+  // 收回接管：这个会话的结果不再推给秘书，手机关注也一并结束
+  ports.unfollow?.(conversationId);
   file.outbox = file.outbox.filter(
     (update) => !('conversationId' in update && update.conversationId === conversationId)
   );
@@ -1708,6 +1759,8 @@ export function createSecretaryDispatchHandlers(
         try {
           await ports.cleanup.archive(conversationId, ports.now());
           results.push({ conversationId, status: 'archived' });
+          // 归档的会话不会再报结果：关注项一并移除
+          ports.unfollow?.(conversationId);
           ports.audit({
             at: ports.now(),
             secretaryConversationId: ctx.secretaryConversationId,
@@ -2186,6 +2239,8 @@ export async function resolveProposal(
     ...(action === 'confirm' ? { detail: 'accepted' } : {}),
   });
   if (action === 'reject') {
+    // 卡被拒了：关注列表里那条待确认的派发不会再有结果
+    ports.unfollow?.(proposalId);
     notifySecretaryChanged();
     return { ok: true, proposal: transitioned.proposal };
   }
@@ -2261,6 +2316,9 @@ export async function resolveProposal(
     proposal.secretaryConversationId,
     profile
   );
+  // 关注项从卡片改挂到真正建出来的会话（或等待中的派发）上
+  if (started.kind === 'created') ports.refollow?.(proposalId, started.conversationId);
+  else if (started.kind === 'pending') ports.refollow?.(proposalId, started.pendingId);
   return finishProposal(
     ports,
     proposalId,
@@ -2687,6 +2745,16 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
       model: { ...model, ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}) },
     };
   },
+  follow: (input) => {
+    recordPhoneFollow({
+      kind: 'session',
+      targetId: input.targetId,
+      summary: input.summary,
+      secretaryConversationId: input.secretaryConversationId,
+    });
+  },
+  refollow: (from, to) => renameFollowedTarget(from, to),
+  unfollow: (targetId) => unfollowTarget(targetId),
 };
 
 function store(): SecretaryStore {

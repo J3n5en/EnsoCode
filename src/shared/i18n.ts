@@ -2995,6 +2995,11 @@ export const zhTranslations: Record<string, string> = {
     '秘书会话里每一轮回复都会发到手机，不再只发里程碑；静默回合只发一行摘要。Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。在 Telegram 发 /sync off 可以关掉。',
   'Only milestones go to Telegram. Send /sync in Telegram to mirror every reply; /last replays the latest round.':
     '目前只把里程碑发到 Telegram。在 Telegram 发 /sync 可以把每一轮回复都同步过去；/last 回看最近一轮。',
+  'Followed from the phone: {{count}}': '手机关注的 {{count}} 个任务',
+  'Clear all': '全部清空',
+  'What you dispatch or schedule from the phone keeps reporting here until it finishes or fails once, even with /sync off.':
+    '从手机派出的会话或加的定时会一直把结果推到这里，直到完成或失败推过一次，/sync 关着也一样。',
+  Drop: '取消',
   'Telegram messages are not end-to-end encrypted and stay on Telegram servers. /status, /board and /feed show titles and short summaries; /last and /sync send conversation text. Memory text and tool output never leave the app.':
     'Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。/status、/board、/feed 只显示标题与简短摘要；/last 与 /sync 会发会话正文。记忆正文与工具输出不会离开应用。',
   'Waiting on a background task': '等后台任务',

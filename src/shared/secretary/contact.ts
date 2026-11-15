@@ -113,15 +113,44 @@ function oneLine(text: string | undefined): string {
   return flat.length > CONTACT_TEXT_MAX_CHARS ? `${flat.slice(0, CONTACT_TEXT_MAX_CHARS)}…` : flat;
 }
 
-/** 手机上读的一条里程碑：一行状态 + 会话标题，一句正文，一个回应用的链接 */
+/**
+ * 手机上读的一条里程碑：一行状态 + 会话标题，一句正文，一个回应用的链接。
+ * 手机发起的任务带上原始需求摘要，一眼看出是「你让我做的那件事」。
+ */
 export function formatMilestoneMessage(
   lang: ContactLang,
-  input: { kind: SecretaryResultKind; title: string; lastText?: string; link?: string }
+  input: {
+    kind: SecretaryResultKind;
+    title: string;
+    lastText?: string;
+    link?: string;
+    summary?: string;
+  }
 ): string {
   const lines = [`${MILESTONE_LABEL[lang][input.kind]} · ${input.title.trim()}`];
+  const summary = oneLine(input.summary);
+  if (summary) {
+    lines.push(lang === 'zh' ? `你让我做的「${summary}」` : `The task you gave me: "${summary}"`);
+  }
   const body = oneLine(input.lastText);
   if (body) lines.push(body);
   if (input.link) lines.push(input.link);
+  return lines.join('\n');
+}
+
+/** 手机关注里的定时到点了：只推这一次，推完就结束关注 */
+export function formatFollowedScheduleMessage(
+  lang: ContactLang,
+  input: { summary: string; text?: string }
+): string {
+  const summary = oneLine(input.summary);
+  const lines = [
+    lang === 'zh'
+      ? `⏰ 你让我设的「${summary}」到点了`
+      : `⏰ The schedule you set fired: "${summary}"`,
+  ];
+  const body = oneLine(input.text);
+  if (body && body !== summary) lines.push(body);
   return lines.join('\n');
 }
 
@@ -345,6 +374,20 @@ export function feedCallbackData(token: string): string {
 export function parseFeedCallback(data: string): string | null {
   const match = /^feed:([A-Za-z0-9]{1,8})$/u.exec(data.trim());
   return match ? match[1] : null;
+}
+
+/** 关注列表的按钮：fo:c:<序号> 取消一项，fo:x 全清；序号是列表里的 1 起编号 */
+export function followCallbackData(action: 'cancel' | 'clear', index?: number): string {
+  return action === 'clear' ? 'fo:x' : `fo:c:${index ?? 0}`;
+}
+
+export function parseFollowCallback(
+  data: string
+): { action: 'cancel' | 'clear'; index?: number } | null {
+  const text = data.trim();
+  if (text === 'fo:x') return { action: 'clear' };
+  const match = /^fo:c:(\d{1,3})$/u.exec(text);
+  return match ? { action: 'cancel', index: Number(match[1]) } : null;
 }
 
 /** 手机点按钮后 Telegram 顶部的提示 */

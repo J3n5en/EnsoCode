@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parseDispatchFile, parseProfile } from '@shared/secretary/parse';
 import type { DispatchBaseFacts } from '@shared/secretary/policy';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
@@ -13,7 +16,7 @@ import type {
   SecretaryTodo,
   SecretaryToolDraft,
 } from '@shared/types/secretary';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createSecretaryTools, normalizeSecretaryParams } from '../../../agent/tools/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import {
@@ -34,6 +37,13 @@ import {
   stopLeftoverTasks,
   untrack,
 } from './dispatch';
+import {
+  type FollowDeps,
+  FollowingStore,
+  recordPhoneFollow,
+  renameFollowedTarget,
+  unfollowTarget,
+} from './following';
 import type { SecretarySessionStatus } from './readers';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import type { SecretaryOpHandler } from './tools';
@@ -3159,5 +3169,148 @@ describe('看板停止遗留任务', () => {
     const h = harness({});
     expect(await stopLeftoverTasks(h.ports, 'c1')).toEqual({ ok: false, error: 'not-found' });
     expect(h.stoppedTasks).toEqual([]);
+  });
+});
+
+describe('手机关注：派发把派生出来的会话交出去', () => {
+  const dirs: string[] = [];
+  const tempDir = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'secretary-dispatch-follow-'));
+    dirs.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** 探针：phone 里的秘书会话算手机发起，chat 固定 777 */
+  function followDeps(dir: string, phone: Set<string>): FollowDeps {
+    return {
+      store: new FollowingStore(dir),
+      probe: (conversationId) => (conversationId && phone.has(conversationId) ? 777 : null),
+      audit: () => {},
+      now: () => NOW,
+    };
+  }
+
+  /** 与生产端口同一条路：follow 出口交给 recordPhoneFollow */
+  function wireFollow(h: Harness, deps: FollowDeps): void {
+    h.ports.follow = (input) => {
+      recordPhoneFollow({ kind: 'session', ...input }, deps);
+    };
+  }
+
+  it('手机发起的回合里 session_create 记进关注，桌面发起的不记', async () => {
+    const dir = tempDir();
+    const phone = new Set(['sec-1']);
+    const deps = followDeps(dir, phone);
+    const h = harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+    });
+    wireFollow(h, deps);
+    await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '给 apple-table 加 Score 字段',
+    });
+    expect(new FollowingStore(dir).list()).toMatchObject([
+      {
+        kind: 'session',
+        targetId: 'new-1',
+        chatId: 777,
+        summary: '给 apple-table 加 Score 字段',
+      },
+    ]);
+    // 桌面上发起的回合：探针说不是手机，什么都不记
+    phone.clear();
+    await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(new FollowingStore(dir).list()).toMatchObject([
+      { targetId: 'new-1', summary: '给 apple-table 加 Score 字段' },
+    ]);
+  });
+
+  it('todo_item_dispatch 派生的会话也记进关注，摘要用待办标题', async () => {
+    const dir = tempDir();
+    const deps = followDeps(dir, new Set(['sec-1']));
+    const h = harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      todos: [
+        { id: 't1', text: '看构建\n顺带补单测', projectId: 'p1', createdAt: 1, updatedAt: 1 },
+      ],
+    });
+    wireFollow(h, deps);
+    await run(h.handlers.todo_item_dispatch, { todoId: 't1' });
+    expect(new FollowingStore(dir).list()).toMatchObject([
+      { kind: 'session', targetId: 'new-1', summary: '看构建' },
+    ]);
+  });
+
+  it('待确认的卡先记提案 id，确认后改挂到会话上', async () => {
+    const dir = tempDir();
+    const deps = followDeps(dir, new Set(['sec-1']));
+    const h = harness();
+    wireFollow(h, deps);
+    h.ports.refollow = (from, to) => renameFollowedTarget(from, to, deps);
+    h.ports.unfollow = (targetId) => unfollowTarget(targetId, deps);
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+    })) as { proposalId: string };
+    expect(new FollowingStore(dir).list()).toMatchObject([{ targetId: payload.proposalId }]);
+    await resolveProposal(h.ports, payload.proposalId, 'confirm');
+    expect(new FollowingStore(dir).list()).toMatchObject([{ targetId: 'new-1' }]);
+  });
+
+  it('卡被拒时关注项一并移除', async () => {
+    const dir = tempDir();
+    const deps = followDeps(dir, new Set(['sec-1']));
+    const h = harness();
+    wireFollow(h, deps);
+    h.ports.refollow = (from, to) => renameFollowedTarget(from, to, deps);
+    h.ports.unfollow = (targetId) => unfollowTarget(targetId, deps);
+    const payload = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+    })) as { proposalId: string };
+    await resolveProposal(h.ports, payload.proposalId, 'reject');
+    expect(new FollowingStore(dir).list()).toEqual([]);
+  });
+
+  it('归档与收回接管都会结束关注', async () => {
+    const dir = tempDir();
+    const deps = followDeps(dir, new Set(['sec-1']));
+    const file = dispatchedFile('c1');
+    file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 0, at: 900 };
+    file.dispatched.c2 = {
+      conversationId: 'c2',
+      projectId: 'p1',
+      secretaryConversationId: 'sec-1',
+      createdAt: 900,
+      turn: 0,
+      lastState: 'idle',
+      lastEventAt: 900,
+      takeover: { grantedAt: 900, via: 'proposal' },
+    };
+    const h = harness({ file, rows: { c1: { id: 'c1' } } });
+    h.ports.unfollow = (targetId) => unfollowTarget(targetId, deps);
+    deps.store.add({
+      kind: 'session',
+      targetId: 'c1',
+      chatId: 777,
+      at: NOW,
+      summary: '修构建',
+    });
+    expect(await call(h.handlers.session_archive, { conversationId: 'c1' })).toMatchObject({
+      ok: true,
+    });
+    expect(new FollowingStore(dir).list()).toEqual([]);
+    deps.store.add({
+      kind: 'session',
+      targetId: 'c2',
+      chatId: 777,
+      at: NOW,
+      summary: '接管来的',
+    });
+    revokeTakeover(h.ports, 'c2', 'settings');
+    expect(new FollowingStore(dir).list()).toEqual([]);
   });
 });

@@ -664,6 +664,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const fired = fireDue(ports.schedules(), now);
     if (fired.changed) ports.saveSchedules(fired.schedules);
     if (fired.updates.length === 0) return false;
+    // 手机发起的回合里加的定时：到点推一次手机，推完就结束关注
+    for (const update of fired.updates) {
+      if (!('scheduleId' in update) || !update.scheduleId) continue;
+      ports.contact?.onScheduleFired({ scheduleId: update.scheduleId, text: update.text });
+    }
     file.outbox = fired.updates.reduce(enqueueUpdate, file.outbox);
     return true;
   }

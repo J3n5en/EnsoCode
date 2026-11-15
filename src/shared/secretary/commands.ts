@@ -1,4 +1,8 @@
-import type { SecretaryDaily, SecretaryScheduleView } from '../types/secretary';
+import type {
+  SecretaryDaily,
+  SecretaryFollowingView,
+  SecretaryScheduleView,
+} from '../types/secretary';
 import { CONTACT_OUTBOUND_MAX_CHARS, type ContactLang, conversationDeepLink } from './contact';
 import { dayKey, parseDayKey, shiftDay } from './daily';
 
@@ -13,12 +17,16 @@ export type ContactCommandName =
   | 'todo'
   | 'schedules'
   | 'memory'
+  | 'following'
   | 'last'
   | 'sync'
   | 'help';
 
-/** 只读命令：查面板同一份数据；/last 与 /sync 由联系方式服务自己处理 */
-export type ContactReadCommandName = Exclude<ContactCommandName, 'last' | 'sync'>;
+/**
+ * 只读命令：查面板同一份数据；
+ * /last、/sync 与 /following 由联系方式服务自己处理（后两者会改状态）
+ */
+export type ContactReadCommandName = Exclude<ContactCommandName, 'last' | 'sync' | 'following'>;
 
 export interface ContactCommandSpec {
   name: ContactCommandName;
@@ -43,6 +51,11 @@ export const CONTACT_COMMANDS: readonly ContactCommandSpec[] = [
   { name: 'feed', zh: '最近的动态，底部可翻更早', en: 'Recent activity, with an older button' },
   { name: 'todo', zh: '未完成的待办', en: 'Open todos' },
   { name: 'schedules', zh: '定时任务与下次运行时间', en: 'Scheduled tasks and next run' },
+  {
+    name: 'following',
+    zh: '手机关注的任务；/following clear 全清',
+    en: 'Tasks followed from the phone; /following clear drops all',
+  },
   {
     name: 'last',
     zh: '回看秘书会话最近一轮；/last 3 看最近三轮',
@@ -313,6 +326,64 @@ export function syncUsageText(lang: ContactLang): string {
   return lang === 'zh'
     ? '用法：/sync 看状态，/sync on 打开，/sync off 关闭。'
     : 'Usage: /sync shows the state, /sync on turns it on, /sync off turns it off.';
+}
+
+/** /following 的参数：不带参数是列表，clear 全清，cancel <序号> 取消一项 */
+export type FollowingArg =
+  | { action: 'list' }
+  | { action: 'clear' }
+  | { action: 'cancel'; index: number };
+
+export function parseFollowingArg(arg: string): FollowingArg | null {
+  const text = arg.trim().toLowerCase();
+  if (!text) return { action: 'list' };
+  if (text === 'clear' || text === 'all' || text === '全清' || text === '清空') {
+    return { action: 'clear' };
+  }
+  const match = /^(?:cancel|drop|取消)\s*#?(\d{1,3})$/u.exec(text);
+  if (!match) return null;
+  const index = Number(match[1]);
+  return index >= 1 ? { action: 'cancel', index } : null;
+}
+
+export function followKindLabel(lang: ContactLang, kind: SecretaryFollowingView['kind']): string {
+  if (kind === 'schedule') return lang === 'zh' ? '定时' : 'scheduled';
+  return lang === 'zh' ? '会话' : 'session';
+}
+
+export function followingEmptyText(lang: ContactLang): string {
+  return lang === 'zh'
+    ? '手机还没有关注的任务。从手机派活或加定时之后，结果会一直跟到这里，完成或失败推一次就结束。'
+    : 'Nothing is followed yet. Dispatch or schedule something from the phone and its result keeps coming here until it finishes or fails once.';
+}
+
+export function followingUsageText(lang: ContactLang): string {
+  return lang === 'zh'
+    ? '用法：/following 看列表，/following cancel 2 取消一项，/following clear 全清。'
+    : 'Usage: /following lists them, /following cancel 2 drops one, /following clear drops all.';
+}
+
+/** /following：手机关注的任务，序号与按钮一一对应 */
+export function formatFollowingMessage(
+  lang: ContactLang,
+  input: { items: readonly SecretaryFollowingView[]; now: number }
+): string {
+  if (input.items.length === 0) return followingEmptyText(lang);
+  const zh = lang === 'zh';
+  const lines = [`<b>${zh ? '手机关注' : 'Following'} ${input.items.length}</b>`];
+  for (const [index, item] of input.items.entries()) {
+    const kind = followKindLabel(lang, item.kind);
+    const summary = escapeHtml(shortText(item.summary, 60)) || item.id;
+    lines.push(
+      `${index + 1}. ▸ ${kind} · ${summary} · ${formatElapsed(input.now - item.at, lang)}`
+    );
+  }
+  lines.push(
+    zh
+      ? '点按钮取消；/following clear 全清。完成或失败推过一次就自动结束。'
+      : 'Tap a button to drop one; /following clear drops all. A follow ends after one done or failed push.'
+  );
+  return fitLines(lines, lang);
 }
 
 const DAILY_GROUP_LABEL: Record<ContactLang, Record<string, string>> = {

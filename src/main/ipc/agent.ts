@@ -174,6 +174,7 @@ import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { ContactStore } from '../services/secretary/contact/store';
 import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
 import { secretaryEnabled } from '../services/secretary/enabled';
+import { unfollowTarget } from '../services/secretary/following';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
 import { secretarySkillDirs, secretarySkillsDir } from '../services/secretary/skills';
@@ -2413,6 +2414,8 @@ export function registerAgentHandlers(): void {
     if (result.accepted) {
       sourceBindings!.invalidateConversation(parsed.conversationId);
       removeConversationFiles(result.value);
+      // 会话删了就不会再有结果：手机关注里的这一条一并移除
+      unfollowTarget(parsed.conversationId);
     }
     return result;
   });

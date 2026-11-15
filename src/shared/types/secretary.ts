@@ -665,6 +665,18 @@ export interface SecretaryContactChat {
   name?: string;
 }
 
+/** 手机关注的任务：手机发起的回合里派生出来的会话或定时 */
+export type SecretaryFollowKind = 'session' | 'schedule';
+
+export interface SecretaryFollowingView {
+  /** kind:targetId */
+  id: string;
+  kind: SecretaryFollowKind;
+  /** 原始需求一句话摘要：推送与列表都用它认出是哪件事 */
+  summary: string;
+  at: number;
+}
+
 export interface SecretaryContactBind {
   /** 一次性绑定码：/start <code> 或 https://t.me/<username>?start=<code> */
   code: string;
@@ -694,6 +706,11 @@ export interface SecretaryContactTelegram {
    * 静默回合只发一行摘要；解绑或换 bot 时自动关掉。
    */
   syncMirror: boolean;
+  /**
+   * 手机关注的任务：手机发起的回合里派生的会话与定时，结果会一直推到手机上，
+   * 与 /sync 无关。完成或失败推过一次就从列表里移除。
+   */
+  following: SecretaryFollowingView[];
   poll: { state: SecretaryContactPollState; lastError?: string };
   /** safeStorage 是否可用：不可用时 token 明文落盘，界面要提示 */
   secure: boolean;

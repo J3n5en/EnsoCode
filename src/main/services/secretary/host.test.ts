@@ -78,6 +78,7 @@ interface Harness {
       turns: { conversationId: string; kind: 'start' | 'end' }[];
       cards: { count: number; approval?: boolean; conversationId?: string }[];
       approvalsResolved: string[];
+      scheduleFired: { scheduleId: string; text: string }[];
     };
   };
 }
@@ -118,6 +119,7 @@ function harness(
       turns: [],
       cards: [],
       approvalsResolved: [],
+      scheduleFired: [],
     },
   };
   let seq = 0;
@@ -170,6 +172,9 @@ function harness(
     contact: {
       onMilestone: (input) => {
         state.contact.milestones.push(input);
+      },
+      onScheduleFired: (input) => {
+        state.contact.scheduleFired.push(input);
       },
       onRelayAsk: (input) => {
         state.contact.relayAsks.push(input);
@@ -1066,6 +1071,13 @@ describe('定时', () => {
     expect(scheduleUpdates(h)[0]).toMatchObject({ scheduleId: 'sch1' });
     expect(h.state.schedules).toEqual([]);
     expect(h.state.published).toBe(1);
+  });
+
+  it('手机关注的定时到点推一次手机：交给联系方式，由它决定推不推', () => {
+    const h = harness({});
+    h.state.schedules = [onceSchedule()];
+    h.host.tick(localAt(9));
+    expect(h.state.contact.scheduleFired).toEqual([{ scheduleId: 'sch1', text: '提醒：看看进展' }]);
   });
 
   it('开关关闭时不触发定时', () => {
