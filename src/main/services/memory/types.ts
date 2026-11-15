@@ -97,6 +97,10 @@ export interface Memory {
   accessCount: number;
   appearances: number;
   clicks: number;
+  /** 最后一次被检索返回的时间；只给维护筛选，不参与打分 */
+  lastHitAt: string | null;
+  /** 被检索返回的累计次数；只给维护筛选，不参与打分 */
+  hitCount: number;
   embeddingModel: string | null;
   embeddingDim: number | null;
   embeddingVersion: number | null;
