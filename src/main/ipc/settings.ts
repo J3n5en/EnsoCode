@@ -191,6 +191,12 @@ export const SETTINGS_STATE_FIELDS = [
   'voiceVocabulary',
   'voiceGeminiApiKey',
   'memoryKgEnabled',
+  'memoryDecayEnabled',
+  'memoryDecayArchiveCandidates',
+  'memoryDecayAutoArchive',
+  'memoryDecayStaleDays',
+  'memoryDecayMaxImportance',
+  'memoryDecayIntervalDays',
   'onboarded',
   'keybindings',
   'projects',
@@ -237,6 +243,13 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'memoryEmbeddingAutoDownload',
   'memoryModelIdleMinutes',
   'memoryEmbeddingRemoteProviderId',
+  // 记忆库每台机器一份（userData/memory/memory.db），遗忘策略作用于本机库，不跨机同步
+  'memoryDecayEnabled',
+  'memoryDecayArchiveCandidates',
+  'memoryDecayAutoArchive',
+  'memoryDecayStaleDays',
+  'memoryDecayMaxImportance',
+  'memoryDecayIntervalDays',
   'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
@@ -277,12 +290,14 @@ function notifyMemoryEmbeddingSettings(settings: Record<string, unknown>): void 
       ({
         syncMemoryEmbeddingFromSettings,
         syncMemoryDistillFromSettings,
+        syncMemoryForgettingFromSettings,
         syncMemoryKgFromSettings,
       }) => {
         const state = settingsStateOf(settings);
         syncMemoryEmbeddingFromSettings(state);
         syncMemoryDistillFromSettings(state);
         syncMemoryKgFromSettings(state);
+        syncMemoryForgettingFromSettings(state);
       }
     )
     .catch(() => {});

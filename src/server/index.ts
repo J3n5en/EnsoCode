@@ -20,6 +20,7 @@ import {
   closeMemoryDb,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
+  syncMemoryForgettingFromSettings,
   syncMemoryKgFromSettings,
 } from '../main/services/memoryHost';
 import {
@@ -174,6 +175,7 @@ async function serve(web: WebConfig | null): Promise<void> {
   syncMemoryEmbeddingFromSettings(state);
   syncMemoryDistillFromSettings(state);
   syncMemoryKgFromSettings(state);
+  syncMemoryForgettingFromSettings(state);
   // 目录平时由 leader 渲染器推送；重启后先用快照，headless 接管的会话才有据可依
   const snapshot = loadPairCatalogSnapshot();
   if (snapshot) updatePairCatalog(snapshot);

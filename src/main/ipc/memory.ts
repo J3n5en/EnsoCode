@@ -9,6 +9,9 @@ import {
   isMemoryListQuery,
   isMemoryRetrievalMode,
   isPendingMemoryWriteDecision,
+  type MemoryArchiveCandidatesResult,
+  type MemoryArchiveConfirmResult,
+  type MemoryDecayRunDto,
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
@@ -41,6 +44,11 @@ import { appendMemoryAudit, editAuditEntry } from '../services/memory/audit';
 import { createCrystal } from '../services/memory/crystal';
 import { looseParse } from '../services/memory/distill';
 import {
+  archiveCandidatesConfirmed,
+  getForgettingState,
+  listArchiveCandidates,
+} from '../services/memory/forgetting';
+import {
   buildMemoryGraph,
   buildMemoryTree,
   entityMemoryIds,
@@ -63,11 +71,13 @@ import {
   reviewEvolvesEdge,
   searchMemoriesForAdmin,
   toMemoryJobsSnapshot,
+  toMemoryListItem,
 } from '../services/memoryAdmin';
 import {
   approvePendingMemoryWrite,
   distillSessionNow,
   editMemory,
+  forgettingSettings,
   getMemoryCompletion,
   getMemoryDistillJobs,
   getMemoryEmbedder,
@@ -79,6 +89,7 @@ import {
   memoryLanguage,
   refreshMemoryEmbedding,
   retryFailedMemoryKg,
+  runMemoryForgettingNow,
   setMemoryChangeListener,
 } from '../services/memoryHost';
 import {
@@ -102,6 +113,7 @@ const EMPTY_STATS: MemoryStats = {
   databaseBytes: 0,
   neverHit: 0,
   addedLast7Days: 0,
+  forgetting: { lastRunAt: null, lastRun: null, candidates: 0 },
 };
 const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null, kgFailed: 0 };
 const EMPTY_GRAPH: MemoryGraphDto = { nodes: [], edges: [], totalEntities: 0 };
@@ -229,6 +241,56 @@ export function registerMemoryHandlers(): void {
     );
   });
 
+  // 立即运行：走 memoryHost 的共享连接（与蒸馏 / 重嵌同一条写通道），跑完广播让列表刷新
+  ipcMain.handle(IPC_CHANNELS.MEMORY_FORGETTING_RUN, (event): MemoryDecayRunDto | null => {
+    if (!isTrustedWindow(event.sender.id)) return null;
+    const summary = runMemoryForgettingNow();
+    memoryChanged();
+    return summary;
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES,
+    async (event, request: unknown): Promise<MemoryArchiveCandidatesResult> => {
+      if (!isTrustedWindow(event.sender.id)) return { items: [], total: 0 };
+      // 与 list / delete-preview 同口径：入参不合法就返回空，不猜用户想要哪一页
+      if (!isCandidateQuery(request)) return { items: [], total: 0 };
+      const query = request ?? { limit: 50, offset: 0 };
+      const result = withExistingDb<ReturnType<typeof listArchiveCandidates>>(
+        { items: [], total: 0 },
+        (db) => listArchiveCandidates(db, forgettingSettings(), query)
+      );
+      const label = await spaceLabeler();
+      return {
+        total: result.total,
+        items: result.items.map((memory) => {
+          const item = toMemoryListItem(memory);
+          return { ...item, spaceLabel: label(item.spaceId) };
+        }),
+      };
+    }
+  );
+
+  // 批量确认归档：只改 lifecycle_state（可还原），不删除；条件在 Main 侧重算，不信任回传的列表
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES_CONFIRM,
+    (event, ids: unknown): MemoryArchiveConfirmResult => {
+      if (!isTrustedWindow(event.sender.id) || !isIdList(ids)) return { archived: 0, skipped: 0 };
+      const result = withExistingDb<MemoryArchiveConfirmResult>(
+        { archived: 0, skipped: 0 },
+        (db) => {
+          const outcome = archiveCandidatesConfirmed(db, forgettingSettings(), ids, {
+            audit: (entry) => appendMemoryAudit(memoryDir(), entry),
+          });
+          // 只回传用户要的两个数；命中的 id 列表留在 Main（审计用）
+          return { archived: outcome.archived, skipped: outcome.skipped };
+        }
+      );
+      if (result.archived > 0) memoryChanged();
+      return result;
+    }
+  );
+
   // 确认框先拿影响说明；真正删除时在事务里按同一规则重算，不信任渲染层回传的计划
   ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE_PREVIEW, (event, ids: unknown) => {
     if (!isTrustedWindow(event.sender.id) || !isIdList(ids)) return null;
@@ -276,7 +338,11 @@ export function registerMemoryHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_STATS, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return EMPTY_STATS;
-    const stats = withExistingDb(EMPTY_STATS, getMemoryStats);
+    // 遗忘状态并进 stats：同一次开库算完，不再为它多开一条连接
+    const stats = withExistingDb(EMPTY_STATS, (db) => ({
+      ...getMemoryStats(db),
+      forgetting: getForgettingState(db, forgettingSettings()),
+    }));
     const label = await spaceLabeler();
     const kind = await spaceKinder();
     return {
@@ -654,6 +720,26 @@ function isIdList(value: unknown): value is string[] {
     value.length <= 500 &&
     value.every((id) => typeof id === 'string' && id.length > 0)
   );
+}
+
+/** 候选列表分页参数；缺省按第一页，脏值直接回落而不是报错 */
+function isCandidateQuery(value: unknown): value is { limit?: number; offset?: number } {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if (
+    row.limit !== undefined &&
+    (!Number.isSafeInteger(row.limit) || (row.limit as number) < 1 || (row.limit as number) > 200)
+  ) {
+    return false;
+  }
+  if (
+    row.offset !== undefined &&
+    (!Number.isSafeInteger(row.offset) || (row.offset as number) < 0)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /** 秘书私有空间也是 proj: 前缀，只有项目注册表知道哪个项目是秘书 */

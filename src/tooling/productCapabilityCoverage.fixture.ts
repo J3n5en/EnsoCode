@@ -55,6 +55,12 @@ export const SETTINGS_DATA_COVERAGE = {
     'Memory remote embedding provider is a device-local reference.'
   ),
   memoryDistillEnabled: excluded('Memory auto-distillation preference; not an Enso capability.'),
+  memoryDecayEnabled: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayArchiveCandidates: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayAutoArchive: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayStaleDays: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayMaxImportance: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayIntervalDays: excluded('Memory forgetting preference; not an Enso capability.'),
   memoryKgEnabled: excluded('Memory entity-graph extraction preference; not an Enso capability.'),
   voiceInputEnabled: excluded('Voice input is a device-local composer preference.'),
   protectedActionsInCode: excluded(
@@ -240,6 +246,14 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Memory remote embedding provider is a device-local reference.'
   ),
   setMemoryDistillEnabled: excluded('Memory auto-distillation preference; not an Enso capability.'),
+  setMemoryDecayEnabled: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayArchiveCandidates: excluded(
+    'Memory forgetting preference; not an Enso capability.'
+  ),
+  setMemoryDecayAutoArchive: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayStaleDays: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayMaxImportance: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayIntervalDays: excluded('Memory forgetting preference; not an Enso capability.'),
   setMemoryKgEnabled: excluded(
     'Memory entity-graph extraction preference; not an Enso capability.'
   ),
@@ -958,6 +972,9 @@ export const IPC_PRODUCT_COVERAGE = {
   MEMORY_DETAIL: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_ARCHIVE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_RESTORE: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_FORGETTING_RUN: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_ARCHIVE_CANDIDATES: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_ARCHIVE_CANDIDATES_CONFIRM: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_DELETE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_DELETE_PREVIEW: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_UPDATE: excluded('Memory desktop UI; not an Enso capability.'),

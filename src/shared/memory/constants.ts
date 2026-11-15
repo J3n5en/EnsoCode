@@ -48,6 +48,26 @@ export const FREQUENCY_MAX_COUNT = 100;
 export const MIN_FLOOR = 0.3;
 export const IMP_MULT = 0.2;
 export const DECAY_WEIGHT = 0.15;
+
+// 遗忘（设置页「自动遗忘」）：默认只做「降权」——衰减进检索排序，不归档也不删除。
+// 归档候选只标记，自动归档默认关且只把 lifecycle_state 改成 archived（永不 delete）。
+// staleDays 90 天：短于这个数就归档候选，会把「最近没搜到但还在用」的记忆一起卷进来。
+export const FORGETTING_DEFAULT_STALE_DAYS = 90;
+// 默认 0.5 = 提炼允许写库的最低档（DISTILL_MIN_IMPORTANCE），所以默认只收最低档；
+// 判定用 <=，否则提炼出来的记忆（importance 恒 ≥0.5）永远进不了候选。
+export const FORGETTING_DEFAULT_MAX_IMPORTANCE = 0.5;
+export const FORGETTING_DEFAULT_INTERVAL_DAYS = 7;
+export const FORGETTING_STALE_DAYS_MIN = 7;
+export const FORGETTING_STALE_DAYS_MAX = 3650;
+export const FORGETTING_MAX_IMPORTANCE_MIN = 0.1;
+export const FORGETTING_MAX_IMPORTANCE_MAX = 0.9;
+export const FORGETTING_INTERVAL_DAYS_MIN = 1;
+export const FORGETTING_INTERVAL_DAYS_MAX = 90;
+/** 设置页可选的档位；范围之外的保存值由 normalizeForgettingSettings 夹到边界 */
+export const FORGETTING_STALE_DAYS_OPTIONS = [30, 60, 90, 180, 365] as const;
+export const FORGETTING_MAX_IMPORTANCE_OPTIONS = [0.3, 0.5, 0.6, 0.7] as const;
+export const FORGETTING_INTERVAL_DAYS_OPTIONS = [1, 7, 14, 30] as const;
+
 /** 查询年份与记忆 event_start 年份一致时的加分上限；只作同分附近的次要依据，不能压过语义 */
 export const TEMPORAL_YEAR_BOOST = 0.1;
 
