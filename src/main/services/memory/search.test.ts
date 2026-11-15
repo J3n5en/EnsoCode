@@ -226,11 +226,15 @@ describe('searchMemories — 双时间检索', () => {
   it('相对时间词既不加分也不过滤（#166）', async () => {
     await add('parameter sweep paired design', 'global', undefined, { eventStart: '2026-10-29' });
     await add('parameter sweep notes');
+    // 命中计数是衰减的输入：两次查询之间要清掉，否则第二次的得分会因为这轮命中而升高，
+    // 测的就不是「相对时间词有没有加分」了
+    const resetHits = () => db.exec('UPDATE memories SET hit_count = 0, last_hit_at = NULL');
     const plain = await searchMemories(db, {
       q: 'parameter sweep',
       spaceIds: ['global'],
       now: NOW,
     });
+    resetHits();
     const before = await searchMemories(db, {
       q: '之前 parameter sweep',
       spaceIds: ['global'],
@@ -392,7 +396,7 @@ describe('searchMemories — hybrid', () => {
       embed: async () => Float32Array.from([1]),
     });
     const stale =
-      "UPDATE memories SET last_accessed_at = '2000-01-01T00:00:00.000Z', importance = ? WHERE id = ?";
+      "UPDATE memories SET last_hit_at = '2000-01-01T00:00:00.000Z', importance = ? WHERE id = ?";
     db.prepare(stale).run(0, a.id);
     db.prepare(stale).run(1, b.id);
     let hits = await searchMemories(db, { q: 'zebra', spaceIds: ['global'], embedder: emb });
@@ -769,7 +773,7 @@ describe('searchMemories — decay 在候选池上生效', () => {
     const rank2 = created[10];
     const rank3 = created[9];
     const tail = created[0];
-    db.prepare('UPDATE memories SET last_accessed_at = ?, access_count = 100 WHERE id = ?').run(
+    db.prepare('UPDATE memories SET last_hit_at = ?, hit_count = 100 WHERE id = ?').run(
       SEARCH_NOW.toISOString(),
       rank3
     );

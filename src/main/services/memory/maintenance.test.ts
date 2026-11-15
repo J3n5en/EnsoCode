@@ -303,24 +303,26 @@ describe('命中采集', () => {
     expect(hitRows(db).find((r) => r.id === c.id)?.hitCount).toBe(0);
   });
 
-  it('累计命中次数，且不参与打分（同一查询两次得分完全相同）', async () => {
+  it('累计命中次数，并作为下一轮衰减的输入', async () => {
     await seed();
     const now = new Date('2025-06-01T00:00:00.000Z');
     const opts = { q: 'alpha', spaceIds: ['global'], now, mmr: false };
     const first = await searchMemories(db, opts);
     const second = await searchMemories(db, opts);
-    expect(second.map((h) => [h.memory.id, h.score])).toEqual(
-      first.map((h) => [h.memory.id, h.score])
-    );
+    // 命中写在排序之后，所以一次查询不影响它自己的名次；已累计的命中会抬高下一轮的 decay
+    expect(second.map((h) => h.memory.id)).toEqual(first.map((h) => h.memory.id));
+    for (const [i, hit] of second.entries()) {
+      expect(hit.decay).toBeGreaterThan(first[i].decay);
+      expect(hit.score).toBeGreaterThan(first[i].score);
+    }
     expect(hitRows(db).filter((r) => r.hitCount > 0)).toHaveLength(first.length);
     expect(Math.max(...hitRows(db).map((r) => r.hitCount))).toBe(2);
 
-    // 把命中次数和命中时间拉满，得分不变：这两列不读进排序
+    // 把命中次数拉满：频率项到 1，decay 顶到上限
     db.exec("UPDATE memories SET hit_count = 999, last_hit_at = '2025-06-01T00:00:00.000Z'");
     const third = await searchMemories(db, opts);
-    expect(third.map((h) => [h.memory.id, h.score])).toEqual(
-      first.map((h) => [h.memory.id, h.score])
-    );
+    expect(third[0].decay).toBeGreaterThan(second[0].decay);
+    expect(third[0].decay).toBeLessThanOrEqual(1);
   });
 
   it('按未命中天数筛选：从未命中的按创建时间算，归档与近期命中的不算', () => {
