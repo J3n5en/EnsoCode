@@ -3000,7 +3000,26 @@ async function run(cdp, pluginZipUrl) {
 }
 
 /**
- * 假 Telegram Bot API：只实现联系方式要用的四个方法。
+ * 照 Telegram 的规则校验按钮：url 只认 http(s) 与 tg://（enso:// 会被整条拒掉），
+ * callback_data 最多 64 字节。返回错误描述，合法时返回 null。
+ */
+function keyboardError(markup) {
+  for (const row of markup?.inline_keyboard ?? []) {
+    for (const button of row) {
+      if (!button.callback_data && !button.url) return 'Bad Request: BUTTON_DATA_INVALID';
+      if (button.callback_data && Buffer.byteLength(button.callback_data) > 64) {
+        return 'Bad Request: BUTTON_DATA_INVALID';
+      }
+      if (button.url && !/^(?:https?:\/\/|tg:\/\/)/iu.test(button.url)) {
+        return 'Bad Request: BUTTON_URL_INVALID';
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 假 Telegram Bot API：只实现联系方式要用的几个方法。
  * 用例通过 push() 注入「用户在手机上做了什么」，出站全部记在 sent 里。
  */
 async function startFakeTelegram(port) {
@@ -3016,6 +3035,8 @@ async function startFakeTelegram(port) {
     callbacks: [],
     /** 「正在输入…」：只记 chat 与 action */
     chatActions: [],
+    /** 只换按钮不动正文的那些调用 */
+    markupEdits: [],
     polls: 0,
     queue: [],
     waiters: [],
@@ -3080,6 +3101,11 @@ async function startFakeTelegram(port) {
         return;
       }
       if (method === 'sendMessage') {
+        const invalid = keyboardError(body.reply_markup);
+        if (invalid) {
+          reply({ ok: false, error_code: 400, description: invalid });
+          return;
+        }
         const messageId = state.sent.length + 1;
         state.sent.push({ ...body, message_id: messageId });
         reply({ ok: true, result: { message_id: messageId } });
@@ -3091,12 +3117,29 @@ async function startFakeTelegram(port) {
         return;
       }
       if (method === 'editMessageText') {
+        const invalid = keyboardError(body.reply_markup);
+        if (invalid) {
+          reply({ ok: false, error_code: 400, description: invalid });
+          return;
+        }
         state.edited.push(body);
         const target = state.sent.find((message) => message.message_id === body.message_id);
         if (target) {
           target.text = body.text;
           target.reply_markup = body.reply_markup;
         }
+        reply({ ok: true, result: true });
+        return;
+      }
+      if (method === 'editMessageReplyMarkup') {
+        const invalid = keyboardError(body.reply_markup);
+        if (invalid) {
+          reply({ ok: false, error_code: 400, description: invalid });
+          return;
+        }
+        state.markupEdits.push(body);
+        const target = state.sent.find((message) => message.message_id === body.message_id);
+        if (target) target.reply_markup = body.reply_markup;
         reply({ ok: true, result: true });
         return;
       }
@@ -3132,6 +3175,61 @@ async function startFakeTelegram(port) {
     server.listen(port, '127.0.0.1', resolve);
   });
   return { ...state, push, server, state };
+}
+
+/**
+ * 把假 Telegram 收到的卡片消息按 Telegram 的样子画在页面上截一张图。
+ * 正文与按钮都取自真实出站 payload，所以这张图就是手机上会看到的样子。
+ */
+async function shotTelegramCard(cdp, message, file) {
+  const rect = await cdp.json(`
+    document.getElementById('tg-card-preview')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'tg-card-preview';
+    wrap.style.cssText =
+      'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;' +
+      'background:#0e1621;font-family:-apple-system,system-ui,sans-serif';
+    const chat = document.createElement('div');
+    chat.style.cssText = 'width:560px;padding:24px';
+    const bubble = document.createElement('div');
+    bubble.style.cssText =
+      'background:#182533;color:#f5f5f5;border-radius:14px;padding:14px 16px;font-size:15px;' +
+      'line-height:1.55;white-space:pre-wrap;word-break:break-word';
+    bubble.innerHTML = ${JSON.stringify(message.text)};
+    for (const code of bubble.querySelectorAll('code')) {
+      code.style.cssText =
+        'font-family:ui-monospace,Menlo,monospace;background:#0f1a26;border-radius:4px;' +
+        'padding:1px 4px;font-size:12.5px;color:#9ad1ff';
+    }
+    const keyboard = document.createElement('div');
+    keyboard.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:6px';
+    for (const row of ${JSON.stringify(message.reply_markup?.inline_keyboard ?? [])}) {
+      const line = document.createElement('div');
+      line.style.cssText = 'display:flex;gap:6px';
+      for (const button of row) {
+        const node = document.createElement('div');
+        node.textContent = button.text;
+        node.style.cssText =
+          'flex:1;text-align:center;background:#182533;color:#6ab3f3;border-radius:10px;' +
+          'padding:11px 12px;font-size:15px;font-weight:500';
+        line.appendChild(node);
+      }
+      keyboard.appendChild(line);
+    }
+    chat.append(bubble, keyboard);
+    wrap.appendChild(chat);
+    document.body.appendChild(wrap);
+    await sleep(150);
+    const box = chat.getBoundingClientRect();
+    return JSON.stringify({
+      x: Math.round(box.x) - 12,
+      y: Math.round(box.y) - 12,
+      width: Math.round(box.width) + 24,
+      height: Math.round(box.height) + 24,
+    });
+  `);
+  await cdp.shotClip(file, rect);
+  await cdp.evaluate(`document.getElementById('tg-card-preview')?.remove(); 'ok'`);
 }
 
 /** 联系方式：绑定向导、里程碑出站、手机发话、按钮回答，全程打假 Telegram */
@@ -3375,6 +3473,13 @@ async function verifyTelegramContact(cdp, setup) {
   assert(
     milestone.text.includes(`enso://secretary?conversation=${loudRun.conversationId}`),
     '联系方式: 里程碑带回应用的深链',
+    milestone.text
+  );
+  assert(
+    milestone.text.includes(
+      `应用内链接（可复制）：<code>enso://secretary?conversation=${loudRun.conversationId}</code>`
+    ),
+    '联系方式: 里程碑的深链用等宽字体包起来，方便复制',
     milestone.text
   );
 
@@ -4008,12 +4113,12 @@ async function verifyTelegramContact(cdp, setup) {
   );
 
   log('== 联系方式：确认卡带按钮，开关决定能不能在手机上确认');
-  // 造一张挂着不确认的派发卡：手机上应当收到一条带按钮的提示
-  const cardOff = await page(`
+  const makeCard = (title) =>
+    page(`
     const secretary = await SEC();
     const fresh = await secretary.getState().newSecretaryConversation();
     const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const draft = { projectId: ${JSON.stringify(setup.projectId)}, prompt: '占位', title: '卡片验证一' };
+    const draft = { projectId: ${JSON.stringify(setup.projectId)}, prompt: '占位', title: ${JSON.stringify(title)} };
     const directive = '[[tool:session_create ' + JSON.stringify(draft) + ']]';
     await S().send(
       '派活 ' + directive,
@@ -4026,6 +4131,18 @@ async function verifyTelegramContact(cdp, setup) {
       .at(-1) ?? null, 30000);
     return JSON.stringify({ ok: Boolean(proposal), proposalId: proposal?.id ?? null });
   `);
+  const proposalStatus = (id) =>
+    page(`
+    const state = await window.electronAPI.secretary.getState();
+    return JSON.stringify({ status: state.proposals[${JSON.stringify(id)}]?.status ?? null });
+  `);
+
+  // 先关掉开关：按钮照样在，但点了只提醒回应用处理
+  const cardSwitchOff = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.contactSettings({ allowCardConfirm: false }));
+  `);
+  assert(cardSwitchOff.ok, '联系方式: 关掉确认卡开关', cardSwitchOff);
+  const cardOff = await makeCard('卡片验证一');
   assert(cardOff.ok, '联系方式: 造一张待确认的派发卡', cardOff);
   const noticeOff = await waitFor(
     () => tg.sent.find((message) => message.text?.includes('卡片验证一')) ?? null,
@@ -4035,61 +4152,66 @@ async function verifyTelegramContact(cdp, setup) {
   );
   const offButtons = noticeOff.reply_markup?.inline_keyboard?.flat() ?? [];
   assert(
-    offButtons.map((button) => button.text).join(',') === '在应用里打开',
-    '联系方式: 开关关闭时只给「在应用里打开」，没有确认按钮',
+    offButtons.map((button) => button.text).join(',') === '确认派发：卡片验证一,在应用里打开',
+    '联系方式: 开关关着时按钮照样在（确认 + 在应用里打开）',
     offButtons
   );
   assert(
-    noticeOff.text.includes('请回应用确认'),
-    '联系方式: 开关关闭时说明要回应用确认',
+    noticeOff.text.includes('关着手机确认'),
+    '联系方式: 开关关着时说明点确认只会提醒回应用处理',
     noticeOff.text
   );
   assert(
-    noticeOff.text.includes(`proposal=${cardOff.proposalId}`),
-    '联系方式: 提示消息的深链能定位到那张卡',
+    noticeOff.text.includes('<code>enso://secretary?conversation=') &&
+      noticeOff.text.includes(`proposal=${cardOff.proposalId}</code>`),
+    '联系方式: 深链在正文里用等宽字体给出（Telegram 不认 enso:// 的 url 按钮）',
+    noticeOff.text
+  );
+  assert(!offButtons.some((button) => button.url), '联系方式: enso:// 不做成 url 按钮', offButtons);
+  assert(
+    !noticeOff.text.includes('点下面的按钮'),
+    '联系方式: 不再说「点下面的按钮」又甩一段裸链接',
     noticeOff.text
   );
   push({
     update_id: 28,
     callback_query: {
-      id: 'cb-card-open',
+      id: 'cb-card-off-confirm',
       data: offButtons[0].callback_data,
       message: { message_id: noticeOff.message_id, chat: { id: 777001, type: 'private' } },
     },
   });
-  await waitFor(
-    () => tg.callbacks.some((callback) => callback.text?.includes('已在应用里打开')),
-    'card opened in app',
+  const refused = await waitFor(
+    () => tg.sent.find((message) => message.text?.includes('已在设置里关闭手机确认')) ?? null,
+    'card confirm refused',
     20_000,
     300
   );
-  const stillPending = await page(`
-    const state = await window.electronAPI.secretary.getState();
-    return JSON.stringify({ status: state.proposals[${JSON.stringify(cardOff.proposalId)}]?.status ?? null });
-  `);
-  assert(stillPending.status === 'pending', '联系方式: 「在应用里打开」不会确认卡片', stillPending);
+  assert(
+    tg.callbacks.some((callback) => callback.text?.includes('已在设置里关闭手机确认')),
+    '联系方式: 开关关着点确认只回说明',
+    tg.callbacks.slice(-2)
+  );
+  assert(
+    (refused.reply_markup?.inline_keyboard?.flat() ?? []).map((button) => button.text).join(',') ===
+      '在应用里打开',
+    '联系方式: 说明里附「在应用里打开」',
+    refused.reply_markup
+  );
+  const stillPending = await proposalStatus(cardOff.proposalId);
+  assert(stillPending.status === 'pending', '联系方式: 开关关着时点确认不会执行', stillPending);
+  assert(
+    !tg.edited.some((edit) => edit.message_id === noticeOff.message_id),
+    '联系方式: 开关关着时原消息不动',
+    tg.edited.filter((edit) => edit.message_id === noticeOff.message_id)
+  );
 
+  // 打开开关：手机上直接确认
   const cardSwitch = await page(`
     return JSON.stringify(await window.electronAPI.secretary.contactSettings({ allowCardConfirm: true }));
   `);
   assert(cardSwitch.ok, '联系方式: 打开确认卡开关', cardSwitch);
-  const cardOn = await page(`
-    const secretary = await SEC();
-    const fresh = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const draft = { projectId: ${JSON.stringify(setup.projectId)}, prompt: '占位', title: '卡片验证二' };
-    const directive = '[[tool:session_create ' + JSON.stringify(draft) + ']]';
-    await S().send(
-      '派活 ' + directive,
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      fresh
-    );
-    const proposal = await until(() => Object.values(secretary.getState().secretary.proposals)
-      .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
-      .at(-1) ?? null, 30000);
-    return JSON.stringify({ ok: Boolean(proposal), proposalId: proposal?.id ?? null });
-  `);
+  const cardOn = await makeCard('卡片验证二');
   assert(cardOn.ok, '联系方式: 开关打开后再造一张派发卡', cardOn);
   const noticeOn = await waitFor(
     () => tg.sent.find((message) => message.text?.includes('卡片验证二')) ?? null,
@@ -4099,16 +4221,27 @@ async function verifyTelegramContact(cdp, setup) {
   );
   const onRows = noticeOn.reply_markup?.inline_keyboard ?? [];
   assert(
-    onRows[0]?.[0]?.text === '确认派发：卡片验证二',
-    '联系方式: 开关打开后按钮是「确认派发：标题」',
+    onRows
+      .flat()
+      .map((button) => button.text)
+      .join(',') === '确认派发：卡片验证二,在应用里打开',
+    '联系方式: 开关打开后是「确认派发：标题」+「在应用里打开」',
     onRows.map((row) => row.map((button) => button.text))
   );
   assert(
-    noticeOn.text.includes('点下面的按钮直接确认') &&
+    onRows[0][0].callback_data.includes(cardOn.proposalId),
+    '联系方式: 确认按钮的回调数据带上卡片 id',
+    onRows[0][0]
+  );
+  assert(
+    noticeOn.text.includes('点「确认」直接处理') &&
       noticeOn.text.includes('审批永远只能在应用里处理'),
     '联系方式: 开关打开后说明可以直接确认，审批仍在应用里',
     noticeOn.text
   );
+  // 假 Telegram 收到的 payload 按 Telegram 的样子画出来截一张：手机上就是这两个按钮
+  await shotTelegramCard(cdp, noticeOn, path.join(ART, '10-telegram-card.png'));
+
   push({
     update_id: 29,
     callback_query: {
@@ -4152,12 +4285,27 @@ async function verifyTelegramContact(cdp, setup) {
     300
   );
   assert(
-    settledOn.text.includes('已处理') && settledOn.reply_markup?.inline_keyboard?.length === 0,
-    '联系方式: 卡片处理后补一行已处理并清掉按钮',
-    settledOn
+    settledOn.text === '✅ 已确认：派发 卡片验证二',
+    '联系方式: 原消息整条换成「✅ 已确认：…」',
+    settledOn.text
+  );
+  assert(
+    settledOn.reply_markup?.inline_keyboard?.length === 0,
+    '联系方式: 确认后按钮清掉',
+    settledOn.reply_markup
+  );
+  assert(
+    !settledOn.text.includes('· 已处理'),
+    '联系方式: 不再留下「· 已处理」残渣',
+    settledOn.text
+  );
+  assert(
+    tg.sent.some((message) => message.text === '✅ 已确认：派发 卡片验证二'),
+    '联系方式: 确认后另回一条结果',
+    tg.sent.slice(-3)
   );
 
-  // 在应用里处理掉第一张：手机那条消息的按钮也要失效
+  // 在应用里处理掉第一张：手机那条消息也整条换成已处理
   await page(`
     return JSON.stringify(
       await window.electronAPI.secretary.resolveProposal(${JSON.stringify(cardOff.proposalId)}, 'reject')
@@ -4170,6 +4318,11 @@ async function verifyTelegramContact(cdp, setup) {
     300
   );
   assert(
+    settledOff.text === '✅ 已处理：派发 卡片验证一',
+    '联系方式: 在应用里处理掉之后正文换成「✅ 已处理：…」',
+    settledOff.text
+  );
+  assert(
     settledOff.reply_markup?.inline_keyboard?.length === 0,
     '联系方式: 在应用里处理掉之后按钮也失效',
     settledOff.reply_markup
@@ -4180,8 +4333,13 @@ async function verifyTelegramContact(cdp, setup) {
     .map((line) => JSON.parse(line))
     .filter((entry) => entry.op === 'contact_card_confirm');
   assert(
-    cardAudit.some((entry) => entry.ok && entry.detail === '派发'),
+    cardAudit.some((entry) => entry.ok && entry.detail?.startsWith('派发')),
     '联系方式: 从手机确认记审计（哪张卡、什么类型）',
+    cardAudit
+  );
+  assert(
+    cardAudit.some((entry) => !entry.ok && entry.detail === 'disabled'),
+    '联系方式: 开关关着时的点击也记审计',
     cardAudit
   );
 
@@ -4254,7 +4412,23 @@ async function verifyTelegramContact(cdp, setup) {
     '---\nname: verify-skill\ndescription: 验收用的技能\n---\n\n# 步骤\n\n- 跑一遍验收\n'
   );
   const skillsTab = await page(`
-    const panel = ${PANEL};
+    const panelOf = () => ${PANEL};
+    if (!panelOf()) {
+      S().selectConversation(${JSON.stringify(setup.secretaryId)});
+      await sleep(300);
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+      await sleep(1200);
+    }
+    const panel = panelOf();
     if (!panel) return JSON.stringify({ ok: false, error: 'no panel' });
     panel.querySelector('[data-enso=secretary-panel-tab][data-tab=skills]')?.click();
     await sleep(800);

@@ -13,8 +13,8 @@ export interface ContactFile {
   chat?: SecretaryContactChat;
   boundAt?: number;
   /**
-   * 默认关闭：确认卡不允许从手机确认。打开后覆盖派发、设置、技能、工具与接管，
-   * 审批永远不在手机上确认。
+   * 默认打开：手机上一按就能确认派发、设置、技能、工具与接管卡片。
+   * 显式关掉后按钮还在，但点了只提醒回应用处理；审批永远不在手机上确认。
    */
   allowCardConfirm: boolean;
   /** 默认关闭：记忆标题不往 Telegram 发（消息会留在 Telegram 服务器上） */
@@ -33,7 +33,7 @@ export interface ContactFile {
 export function emptyContactFile(): ContactFile {
   return {
     version: 1,
-    allowCardConfirm: false,
+    allowCardConfirm: true,
     allowMemory: false,
     syncMirror: false,
     pollOffset: 0,
@@ -86,8 +86,11 @@ export function parseContactFile(raw: unknown): ContactFile {
     ...(bot ? { bot } : {}),
     ...(chat ? { chat } : {}),
     ...(typeof raw.boundAt === 'number' ? { boundAt: raw.boundAt } : {}),
-    // 老配置里这个开关叫 allowDispatchConfirm：升级后沿用，不把用户的选择丢掉
-    allowCardConfirm: raw.allowCardConfirm === true || raw.allowDispatchConfirm === true,
+    // 默认打开；老配置里这个开关叫 allowDispatchConfirm，升级后沿用，不把用户的选择丢掉
+    allowCardConfirm:
+      raw.allowCardConfirm === undefined && raw.allowDispatchConfirm === undefined
+        ? true
+        : raw.allowCardConfirm === true || raw.allowDispatchConfirm === true,
     allowMemory: raw.allowMemory === true,
     syncMirror: raw.syncMirror === true,
     pollOffset: typeof raw.pollOffset === 'number' && raw.pollOffset > 0 ? raw.pollOffset : 0,

@@ -8,6 +8,7 @@ import {
   cardCallbackData,
   cardCallbackToast,
   cardConfirmButtonText,
+  cardSettledText,
   conversationDeepLink,
   createBindCode,
   followCallbackData,
@@ -23,6 +24,7 @@ import {
   proposalDeepLink,
   shouldForwardMilestone,
   startCommandCode,
+  telegramUrlButtonSupported,
 } from './contact';
 import { wrapInboundMessage } from './inbound';
 
@@ -122,7 +124,8 @@ describe('手机上的消息格式', () => {
     });
     expect(text.split('\n')[0]).toBe('✅ 完成 · EnsoCode · 修登录');
     expect(text).toContain('已合并到 main，提交 1a2b3c4');
-    expect(text).toContain('enso://secretary?conversation=c1');
+    // 深链做不成 url 按钮：等宽字体包起来，长按就能复制
+    expect(text).toContain('应用内链接（可复制）：`enso://secretary?conversation=c1`');
   });
 
   it('手机发起的任务带上原始需求摘要：一眼看出是哪件事', () => {
@@ -192,20 +195,59 @@ describe('手机上的消息格式', () => {
     expect(text).toContain('先答');
   });
 
-  it('确认卡默认只提示回应用处理', () => {
+  it('开关关着时说明点确认只会提醒回应用处理', () => {
     const text = formatCardWaitingMessage('zh', { count: 2 });
     expect(text).toContain('有一张卡在等你');
-    expect(text).toContain('回应用确认');
+    expect(text).toContain('关着手机确认');
     expect(text).toContain('共 2 张');
   });
 
-  it('开关允许时改说可以在下面确认，审批永远只说在应用里处理', () => {
+  it('开关允许时改说点确认直接处理，审批永远只说在应用里处理', () => {
     const text = formatCardWaitingMessage('zh', { count: 1, confirmable: true });
-    expect(text).toContain('点下面的按钮直接确认');
+    expect(text).toContain('点「确认」直接处理');
     expect(text).toContain('审批永远只能在应用里处理');
     const approval = formatCardWaitingMessage('zh', { count: 1, approval: true });
     expect(approval).toContain('审批只能在应用里处理');
-    expect(approval).not.toContain('点下面的按钮直接确认');
+    expect(approval).not.toContain('点「确认」直接处理');
+  });
+
+  it('文案与实际形态一致：有按钮就不在正文里重复裸链接', () => {
+    const withButton = formatCardWaitingMessage('zh', {
+      count: 1,
+      confirmable: true,
+      title: '修登录',
+    });
+    expect(withButton).not.toContain('enso://');
+    expect(withButton).not.toContain('点下面的按钮');
+    // 做不成 url 按钮的深链：等宽字体包起来，正文说清怎么用
+    const withText = formatCardWaitingMessage('zh', {
+      count: 1,
+      confirmable: true,
+      link: 'enso://secretary?conversation=c1&proposal=p1',
+    });
+    expect(withText).toContain('应用内链接（可复制）：`enso://secretary?conversation=c1');
+    expect(withText).toContain('点「确认」直接处理');
+  });
+
+  it('Telegram 的 url 按钮只认 http(s) 与 tg://', () => {
+    expect(telegramUrlButtonSupported('https://example.com/a')).toBe(true);
+    expect(telegramUrlButtonSupported('http://example.com')).toBe(true);
+    expect(telegramUrlButtonSupported('tg://user?id=1')).toBe(true);
+    expect(telegramUrlButtonSupported('enso://secretary?conversation=c1')).toBe(false);
+    expect(telegramUrlButtonSupported('mailto:a@b.c')).toBe(false);
+    expect(telegramUrlButtonSupported('')).toBe(false);
+  });
+
+  it('卡片收尾整条替换，不留「· 已处理」后缀', () => {
+    expect(cardSettledText('zh', 'confirm', '派发 修登录')).toBe('✅ 已确认：派发 修登录');
+    expect(cardSettledText('zh', 'reject', '派发 修登录')).toBe('✅ 已拒绝：派发 修登录');
+    expect(cardSettledText('zh', 'handled', '审批')).toBe('✅ 已处理：审批');
+    expect(cardSettledText('en', 'confirm', 'dispatch fix login')).toBe(
+      '✅ Confirmed: dispatch fix login'
+    );
+    for (const action of ['confirm', 'reject', 'handled'] as const) {
+      expect(cardSettledText('zh', action, '派发 修登录')).not.toContain('· 已处理');
+    }
   });
 
   it('卡片按钮文案带类型与标题，确认提示说清确认了哪一张', () => {
@@ -221,10 +263,19 @@ describe('手机上的消息格式', () => {
   });
 
   it('卡片按钮的回调数据能原样解析回来', () => {
-    expect(cardCallbackData(3, 'confirm')).toBe('card:3:c');
-    expect(cardCallbackData(3, 'reject')).toBe('card:3:r');
-    expect(parseCardCallbackData('card:3:r')).toEqual({ slot: 3, action: 'reject' });
+    const id = 'ec79a47f-5129-44d9-86f2-08ac43e76e53';
+    expect(cardCallbackData(id, 'confirm')).toBe(`card:c:${id}`);
+    expect(cardCallbackData(id, 'reject')).toBe(`card:r:${id}`);
+    expect(cardCallbackData('approval:3', 'open')).toBe('card:o:approval:3');
+    expect(parseCardCallbackData(`card:r:${id}`)).toEqual({ id, action: 'reject' });
+    expect(parseCardCallbackData('card:o:approval:3')).toEqual({
+      id: 'approval:3',
+      action: 'open',
+    });
+    // 提案 uuid 装得下：Telegram 的 callback_data 只有 64 字节
+    expect(Buffer.byteLength(cardCallbackData(id, 'confirm'))).toBeLessThanOrEqual(64);
     expect(parseCardCallbackData('card:3:x')).toBeNull();
+    expect(parseCardCallbackData('card:c:has space')).toBeNull();
     expect(parseCardCallbackData('ask:3:0')).toBeNull();
   });
 

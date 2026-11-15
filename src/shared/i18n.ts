@@ -14,8 +14,8 @@ export const zhTranslations: Record<string, string> = {
   Unbind: '解绑',
   'Change bot': '更换 bot',
   'Allow confirming cards from Telegram': '允许从 Telegram 确认卡片',
-  'Off by default. Turning it on lets a tap on your phone confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.':
-    '默认关闭。打开后，手机上的一个按钮就能确认派发、设置、技能、工具与接管卡片——这些卡片能改秘书的自主程度、可见项目、接管范围，也能装 skill 和工具。审批无论如何都不能从 Telegram 处理。',
+  'On by default. A tap on your phone can confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.':
+    '默认打开：手机上的一个按钮就能确认派发、设置、技能、工具与接管卡片——这些卡片能改秘书的自主程度、可见项目、接管范围，也能装 skill 和工具。审批无论如何都不能从 Telegram 处理。',
   'No system keychain available: the bot token is stored unencrypted on this machine.':
     '系统钥匙串不可用：bot token 会以明文存在这台机器上。',
   'Bot verified': 'bot 已校验',

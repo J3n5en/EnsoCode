@@ -52,9 +52,14 @@ export interface TelegramUpdate {
   callback_query?: TelegramCallbackQuery;
 }
 
+/**
+ * 一个按钮要么带 callback_data（点了回机器人），要么带 url（Telegram 自己打开）。
+ * url 只认 http(s) 与 tg://：别的 scheme 会被 BUTTON_URL_INVALID 整条拒掉。
+ */
 export interface TelegramInlineButton {
   text: string;
-  callback_data: string;
+  callback_data?: string;
+  url?: string;
 }
 
 export interface TelegramInlineKeyboard {
@@ -105,6 +110,12 @@ export interface TelegramApi {
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
     parseMode?: 'HTML';
+  }): Promise<void>;
+  /** 只换按钮不动正文：正文改不动时至少把按钮清掉 */
+  editMessageReplyMarkup(params: {
+    chatId: number;
+    messageId: number;
+    replyMarkup: TelegramInlineKeyboard;
   }): Promise<void>;
   /** 命令菜单：只登记当前可用的命令 */
   setMyCommands(
@@ -211,6 +222,13 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         text,
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         ...(parseMode ? { parse_mode: parseMode } : {}),
+      });
+    },
+    editMessageReplyMarkup: async ({ chatId, messageId, replyMarkup }) => {
+      await request<unknown>(base, token, 'editMessageReplyMarkup', {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: replyMarkup,
       });
     },
     setMyCommands: async (commands, options) => {
