@@ -138,6 +138,39 @@ export interface TakeoverDraft {
   reason?: string;
 }
 
+/** 收尾清理能处理的三类东西：本地分支、会话 worktree、已完成的派发会话 */
+export const CLEANUP_ITEM_KINDS = ['branch', 'worktree', 'session'] as const;
+
+export type CleanupItemKind = (typeof CLEANUP_ITEM_KINDS)[number];
+
+/**
+ * 一条可清理项。id 由类型与名字拼成，cleanup_apply 只认 cleanup_list 原样给出的 id；
+ * blocked 有值表示这次不能动（未合入、在用、有未提交改动），原因直接给模型看。
+ */
+export interface CleanupItem {
+  id: string;
+  kind: CleanupItemKind;
+  /** 分支名 / worktree 路径 / 会话标题 */
+  name: string;
+  projectId?: string;
+  /** 分支与 worktree 所属仓库的检出目录 */
+  repoPath?: string;
+  /** worktree 的绝对路径 */
+  path?: string;
+  /** 已经合入的基线分支 */
+  mergedInto?: string[];
+  /** 分支或 worktree 的最后提交时间，会话的最后活动时间 */
+  lastActivityAt?: number;
+  /** worktree 的 du 估算（字节） */
+  sizeBytes?: number;
+  blocked?: string;
+}
+
+/** 清理确认卡的草案：确认前只读，确认后按 id 重新校验再执行 */
+export interface CleanupDraft {
+  items: CleanupItem[];
+}
+
 /** 接管授权的来源：确认卡、用户在会话界面上亲手点的，或项目在接管范围内被秘书实际用上 */
 export type TakeoverVia = 'proposal' | 'user' | 'scope';
 
@@ -192,6 +225,8 @@ export type SecretaryProposal = {
   updatedAt: number;
   status: ProposalStatus;
   error?: string;
+  /** 执行结果摘要：清理这类一次动很多条的动作要把结果原样告诉秘书 */
+  report?: string;
 } & (
   | { kind: 'dispatch'; draft: DispatchDraft; conversationId?: string }
   | { kind: 'profile'; draft: SecretaryProfileDraft }
@@ -204,6 +239,7 @@ export type SecretaryProposal = {
   /** previous 是同名工具的旧草案，卡片据此标成更新并摊开旧代码 */
   | { kind: 'tool'; draft: SecretaryToolDraft; previous?: SecretaryToolDraft }
   | { kind: 'takeover'; draft: TakeoverDraft }
+  | { kind: 'cleanup'; draft: CleanupDraft }
 );
 
 export type SecretaryResultKind =
@@ -266,7 +302,21 @@ export interface DispatchRecord {
   /** 已报 stalled 的轮次，一轮只报一次 */
   stalledTurn?: number;
   /** dismissed：用户点过「知道了」；新结果整体替换 lastResult，标记随之失效 */
-  lastResult?: { kind: SecretaryResultKind; turn: number; at: number; dismissed?: true };
+  lastResult?: {
+    kind: SecretaryResultKind;
+    turn: number;
+    at: number;
+    dismissed?: true;
+    /** 用户手动标记完成：卡片给「撤销标记」，新结果整体替换后自然失效 */
+    manual?: true;
+  };
+  /**
+   * 已有终态结果后被 session_send 重新唤起的时间：这一轮还没结束，仍算在跑。
+   * 轮次一结束就清掉，会话真正空闲时回到原来的终态。
+   */
+  reopenedAt?: number;
+  /** 用户撤销手动标记的时间：放回进行中，直到这一轮出现新结果 */
+  manualUndoneAt?: number;
   /**
    * 接管来的会话：权限与推送同派出会话，可撤销；不计入派出上限。
    * via=scope 表示项目在接管范围内、秘书实际用过它之后才建的跟踪记录。
@@ -431,6 +481,8 @@ export type SecretaryCard =
       continuing?: true;
       /** 会话空闲但还有没结束的后台任务：进行中列表要把它和续跑区分开 */
       backgroundRunning?: true;
+      /** 用户手动标记完成：完成列的卡片据此给「撤销标记」 */
+      manual?: true;
       secretaryConversationId: string;
       unread?: boolean;
       takeover?: true;
@@ -528,6 +580,10 @@ export interface SecretaryDailyItem {
   /** 派出时间；派发/接管会话的卡片才有 */
   dispatchedAt?: number;
   conversationId?: string;
+  /** 有派发或接管记录：只有这类会话才给「标记完成」 */
+  tracked?: true;
+  /** 用户手动标记完成：完成列的卡片据此给「撤销标记」 */
+  manual?: true;
 }
 
 export interface SecretaryDailyCounts {

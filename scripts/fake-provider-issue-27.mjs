@@ -121,6 +121,14 @@ function toolUseReply(calls) {
   return events;
 }
 
+/** 验收用：最后一条用户消息里写 `[[reply:正文]]` 就回这段，方便验 markdown 转换 */
+function replyOverride(messages) {
+  const last = (messages ?? []).at(-1);
+  const text = last ? messageText(last) : '';
+  const match = /\[\[reply:([\s\S]*?)\]\]/u.exec(text);
+  return match ? match[1] : null;
+}
+
 function textReply(text, parts = 1) {
   return [
     {
@@ -214,7 +222,7 @@ const server = createServer((req, res) => {
     if (calls.length > 0) return void sse(res, toolUseReply(calls));
     const slow = slowMs(messages);
     const parts = slow > 0 ? Math.max(2, Math.round(slow / 500)) : 1;
-    void sse(res, textReply('fake-ok', parts), slow / parts);
+    void sse(res, textReply(replyOverride(messages) ?? 'fake-ok', parts), slow / parts);
   });
 });
 

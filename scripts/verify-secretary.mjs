@@ -2995,6 +2995,7 @@ async function run(cdp, pluginZipUrl) {
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
 
   await verifyMemoryManualEdit(cdp, setup);
+  await verifyImageViewAndCleanup(cdp, setup);
   await verifyToolCards(cdp, setup);
 }
 
@@ -3362,6 +3363,7 @@ async function verifyTelegramContact(cdp, setup) {
     30_000,
     500
   );
+  assert(milestone.parse_mode === 'HTML', '联系方式: 里程碑也带 parse_mode=HTML', milestone);
   assert(milestone.text.includes('写 tg.txt'), '联系方式: 里程碑带会话标题', milestone.text);
   assert(
     milestone.text.includes(`enso://secretary?conversation=${loudRun.conversationId}`),
@@ -3434,6 +3436,7 @@ async function verifyTelegramContact(cdp, setup) {
       message_id: 3,
       chat: { id: 777001, type: 'private' },
       from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      date: Math.floor(Date.now() / 1000),
       text: '在吗，帮我看下进度',
     },
   });
@@ -3471,6 +3474,36 @@ async function verifyTelegramContact(cdp, setup) {
     '联系方式: 外部文本包成不可信内容',
     inbound.text
   );
+  assert(
+    (inbound.text.match(/<untrusted-content/gu) ?? []).length === 1,
+    '联系方式: 入站只包一层',
+    inbound.text
+  );
+  assert(
+    (inbound.text.match(/来自 Telegram/gu) ?? []).length === 1,
+    '联系方式: 来源标注只出现一次',
+    inbound.text
+  );
+
+  // 界面上是卡片：发送者 + 时间 + 正文，包裹层不外露
+  const card = await page(`
+    const node = document.querySelector('[data-telegram-inbound]');
+    return JSON.stringify({
+      found: Boolean(node),
+      text: node?.textContent ?? '',
+      markdown: Boolean(node?.querySelector('[data-markdown], .markdown, p')),
+    });
+  `);
+  assert(card.found, '联系方式: 入站消息渲染成卡片', card);
+  assert(card.text.includes('@j3n5en'), '联系方式: 卡片显示发送者', card.text);
+  assert(/\d{2}:\d{2}/u.test(card.text), '联系方式: 卡片显示时间', card.text);
+  assert(card.text.includes('在吗，帮我看下进度'), '联系方式: 卡片显示正文', card.text);
+  assert(!card.text.includes('untrusted-content'), '联系方式: 卡片里不露包裹标签', card.text);
+  assert(
+    (card.text.match(/来自 Telegram/gu) ?? []).length === 1,
+    '联系方式: 卡片只有一层来源标注',
+    card.text
+  );
   const reply = await waitFor(
     () =>
       tg.sent
@@ -3486,6 +3519,43 @@ async function verifyTelegramContact(cdp, setup) {
     500
   );
   assert(reply.text === 'fake-ok', '联系方式: 秘书的回复发回手机', reply.text);
+  assert(reply.parse_mode === 'HTML', '联系方式: 出站带 parse_mode=HTML', reply);
+
+  log('== 联系方式：出站 markdown 转 Telegram HTML');
+  const sentMark = tg.sent.length;
+  push({
+    update_id: 5,
+    message: {
+      message_id: 5,
+      chat: { id: 777001, type: 'private' },
+      from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      date: Math.floor(Date.now() / 1000),
+      text: '再来一次 [[reply:**在的**\n\n- 进度 80%\n- 改了 `a.ts`\n\n```ts\nconst a = 1;\n```]]',
+    },
+  });
+  const htmlReply = await waitFor(
+    () =>
+      tg.sent
+        .slice(sentMark)
+        .find((message) => message.chat_id === 777001 && message.text?.includes('在的')) ?? null,
+    'markdown reply to phone',
+    40_000,
+    500
+  );
+  assert(htmlReply.parse_mode === 'HTML', '联系方式: markdown 回复走 HTML', htmlReply);
+  assert(htmlReply.text.includes('<b>在的</b>'), '联系方式: 粗体转成 b 标签', htmlReply.text);
+  assert(htmlReply.text.includes('• 进度 80%'), '联系方式: 列表转成圆点', htmlReply.text);
+  assert(
+    htmlReply.text.includes('<code>a.ts</code>'),
+    '联系方式: 行内代码转成 code',
+    htmlReply.text
+  );
+  assert(
+    htmlReply.text.includes('<pre>const a = 1;</pre>'),
+    '联系方式: 代码块转成 pre',
+    htmlReply.text
+  );
+  assert(!htmlReply.text.includes('**'), '联系方式: 不再露出 markdown 源码', htmlReply.text);
 
   log('== 联系方式：只读命令与面板一致');
   // 造一个「需要你处理」的派出会话：面板与 /status 都该看到它
@@ -5341,6 +5411,200 @@ const auditLines = () =>
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
+
+/** 工具结果可能是「单行 JSON + <source_reference> 行」：只解析第一行 */
+function parseToolJson(text) {
+  try {
+    return JSON.parse(String(text ?? '').split('\n', 1)[0]);
+  } catch {
+    return null;
+  }
+}
+
+/** 纯色 PNG：秘书看图那一步用，宽高写进 IHDR，验收断言读得出来 */
+function writePngFixture(file, width, height) {
+  const raw = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y += 1) {
+    const row = y * (width * 4 + 1);
+    for (let x = 0; x < width; x += 1) {
+      const at = row + 1 + x * 4;
+      raw[at] = 40;
+      raw[at + 1] = 120;
+      raw[at + 2] = 220;
+      raw[at + 3] = 255;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  writeFileSync(
+    file,
+    Buffer.concat([
+      PNG_SIGNATURE,
+      pngChunk('IHDR', ihdr),
+      pngChunk('IDAT', deflateSync(raw)),
+      pngChunk('IEND', Buffer.alloc(0)),
+    ])
+  );
+}
+
+/**
+ * 看图与收尾清理：/tmp 下的图片读得到、越界路径被拒、cleanup_list 列出分支、
+ * cleanup_apply 只落确认卡，确认后真的删掉已合入的分支。
+ */
+async function verifyImageViewAndCleanup(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 看图与收尾清理');
+
+  const imageFile = path.join('/tmp', `sec-verify-${process.pid}-${Date.now()}.png`);
+  writePngFixture(imageFile, 64, 48);
+  const viewed = await secretaryTool(cdp, setup, 'image_view', { path: imageFile }, '看看这张截图');
+  // 带 path 参数的工具结果后面会追加一行 <source_reference>，只取第一行
+  const viewedMeta = parseToolJson(viewed.text);
+  assert(
+    // 返回的是解析过符号链接的真实路径：/tmp 在 macOS 上是 /private/tmp
+    path.basename(viewedMeta?.path ?? '') === path.basename(imageFile) &&
+      viewedMeta?.width === 64 &&
+      viewedMeta?.height === 48 &&
+      typeof viewedMeta?.size === 'number',
+    'image: /tmp 下的图片读得到，尺寸与文件大小一起回来',
+    viewedMeta ?? viewed.text
+  );
+  const thumb = await page(`
+    document
+      .querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-expand]')
+      ?.click();
+    const image = await until(
+      () => document.querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-image]'),
+      15000
+    );
+    return JSON.stringify({
+      src: image?.getAttribute('src') ?? null,
+      alt: image?.getAttribute('alt') ?? null,
+      text: image?.closest('[data-enso=tool-card-body]')?.innerText ?? null,
+    });
+  `);
+  assert(
+    typeof thumb.src === 'string' && thumb.src.startsWith('local-image://'),
+    'image: 工具卡片用缩略图显示图片',
+    thumb
+  );
+  assert((thumb.text ?? '').includes('64 × 48'), 'image: 卡片上写着尺寸', thumb);
+  await cdp.shot(path.join(ART, '20-image-view.png'));
+
+  const outOfScope = path.join(process.env.HOME ?? '/root', '.ssh', 'id_rsa');
+  const denied = await secretaryTool(cdp, setup, 'image_view', { path: outOfScope }, '再看看这个');
+  assert(
+    typeof denied.text === 'string' && denied.text.includes('out of scope'),
+    'image: 白名单外的路径被拒绝并说明原因',
+    denied.text
+  );
+
+  // 造两条分支：一条与基线同点（等于已合入），一条多一个提交（未合入）
+  const gitIn = (args) => spawnSync('git', args, { cwd: PROJ, encoding: 'utf8' });
+  const current = (gitIn(['rev-parse', '--abbrev-ref', 'HEAD']).stdout ?? '').trim();
+  if (current !== 'feat/secretary-agent') gitIn(['branch', '-f', 'feat/secretary-agent']);
+  gitIn(['branch', '-f', 'feat/verify-cleanup']);
+  gitIn(['checkout', '-q', '-B', 'feat/verify-open']);
+  writeFileSync(path.join(PROJ, 'open.txt'), 'not merged yet\n');
+  gitIn(['add', '-A']);
+  gitIn(['-c', 'user.email=a@b', '-c', 'user.name=t', 'commit', '-qm', 'open']);
+  gitIn(['checkout', '-q', current]);
+
+  const listed = await secretaryTool(cdp, setup, 'cleanup_list', {}, '看看有什么可以清理的');
+  const items = parseToolJson(listed.text)?.items ?? [];
+  const merged = items.find(
+    (item) => item.kind === 'branch' && item.name === 'feat/verify-cleanup'
+  );
+  const open = items.find((item) => item.kind === 'branch' && item.name === 'feat/verify-open');
+  assert(
+    merged && !merged.blocked && (merged.mergedInto ?? []).includes('feat/secretary-agent'),
+    'cleanup: 已合入的分支列出来且可清理',
+    merged ?? items
+  );
+  assert(
+    open && open.blocked === 'not-merged',
+    'cleanup: 未合入的分支带上 not-merged',
+    open ?? items
+  );
+  assert(
+    !items.some((item) => item.name === 'feat/secretary-agent' || item.name === 'main'),
+    'cleanup: 基线分支不进清单',
+    items.map((item) => item.name)
+  );
+
+  const applied = await secretaryTool(
+    cdp,
+    setup,
+    'cleanup_apply',
+    { ids: [merged.id] },
+    '把这条已合入的分支清掉'
+  );
+  const appliedMeta = parseToolJson(applied.text);
+  assert(
+    appliedMeta?.status === 'awaiting_confirmation' && typeof appliedMeta?.proposalId === 'string',
+    'cleanup: 先返回待确认，不直接删',
+    appliedMeta ?? applied.text
+  );
+  assert(
+    (gitIn(['branch', '--list', 'feat/verify-cleanup']).stdout ?? '').includes(
+      'feat/verify-cleanup'
+    ),
+    'cleanup: 确认前分支还在',
+    null
+  );
+
+  const card = await page(`
+    const node = await until(
+      () => document.querySelector('[data-enso=secretary-proposal][data-kind=cleanup]'),
+      20000
+    );
+    if (!node) return JSON.stringify({ ok: false });
+    node.scrollIntoView({ block: 'center' });
+    return JSON.stringify({
+      ok: true,
+      text: node.innerText,
+      items: node.querySelectorAll('[data-enso=secretary-cleanup-kind]').length,
+    });
+  `);
+  assert(
+    card.ok && (card.text ?? '').includes('feat/verify-cleanup') && card.items >= 1,
+    'cleanup: 确认卡上列出会删的分支',
+    card
+  );
+  await cdp.shot(path.join(ART, '21-cleanup-card.png'));
+
+  const confirmed = await page(`
+    document.querySelector('[data-enso=secretary-cleanup-confirm]')?.click();
+    const secretary = await SEC();
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[${JSON.stringify(appliedMeta.proposalId)}];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ status: done?.status, report: done?.report ?? null });
+  `).catch((error) => ({ status: 'error', report: String(error?.message ?? error) }));
+  assert(
+    confirmed.status === 'succeeded' && (confirmed.report ?? '').includes('deleted 1'),
+    'cleanup: 确认后执行并回报删了什么',
+    confirmed
+  );
+  assert(
+    !(gitIn(['branch', '--list', 'feat/verify-cleanup']).stdout ?? '').includes(
+      'feat/verify-cleanup'
+    ),
+    'cleanup: 确认后分支真的删掉了',
+    null
+  );
+  const cleanupAudit = auditLines().filter((line) => line.op === 'cleanup_branch');
+  assert(
+    cleanupAudit.length === 1 && cleanupAudit[0].ok === true,
+    'cleanup: 每个动作都记审计',
+    cleanupAudit
+  );
+  rmSync(imageFile, { force: true });
+}
 
 async function verifyToolCards(cdp, setup) {
   const page = cdp.json.bind(cdp);

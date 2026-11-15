@@ -2,6 +2,7 @@ export type Locale = 'en' | 'zh';
 
 export const zhTranslations: Record<string, string> = {
   Contacts: '联系方式',
+  'From Telegram': '来自 Telegram',
   'Reach the secretary from your phone. Milestones go out; your replies come back.':
     '不在电脑前也能找到秘书：里程碑推到手机，你在手机上回话就是跟秘书说话。',
   'Telegram returned an error': 'Telegram 返回了一个错误',
@@ -1625,6 +1626,9 @@ export const zhTranslations: Record<string, string> = {
     '没有可用于向量化的模型：需要填了 API Key 的服务商，且其中有向量模型（如 text-embedding-3-small）。订阅登录不能用于向量化。',
   'Database size': '库体积',
   Spaces: '空间数',
+  'Never retrieved': '从未命中',
+  '{{percent}}% of library': '占 {{percent}}%',
+  'Added in 7 days': '近 7 天新增',
   'Distill past sessions': '提炼历史会话',
   'The automatic switch only covers sessions that end from now on. Distill earlier sessions here to fill the library.':
     '自动开关只对从现在开始结束或被回收的会话生效。早于此的会话在这里手动提炼，否则记忆库一直是空的。',
@@ -3348,6 +3352,7 @@ export const zhTranslations: Record<string, string> = {
   'Send reply': '发送回复',
   'Reply not sent': '回复未发送',
   'Mark done': '标记完成',
+  'Undo mark done': '撤销标记',
   'Cancel task': '取消任务',
   'Acceptance check': '验收条件',
   'Acceptance check (optional)': '验收条件（可选）',
@@ -3643,6 +3648,21 @@ export const zhTranslations: Record<string, string> = {
   Saved: '已保存',
   'Could not save the secretary profile. Try again.': '没能保存秘书档案，请再试一次。',
   'Could not reset the secretary. Try again.': '没能重新设置秘书，请再试一次。',
+  'Look at {{name}}': '查看 {{name}}',
+  Dimensions: '尺寸',
+  'File size': '文件大小',
+  'Cleanup candidates · {{count}}': '可清理项 · {{count}}',
+  'Clean up {{count}} items': '清理 {{count}} 项',
+  '{{count}} items': '{{count}} 项',
+  'Cleanup card': '清理卡片',
+  'Cleaning up…': '正在清理…',
+  'Cleanup done': '清理完成',
+  'Confirm cleanup': '确认清理',
+  'merged into {{refs}}': '已合入 {{refs}}',
+  'Not merged yet': '还没合入',
+  'Currently checked out': '当前检出',
+  'Used by a worktree': '有 worktree 在用',
+  'Has uncommitted changes': '有未提交改动',
   'Take over': '接管',
   'The secretary asks to manage this session: it may message and stop it like its own.':
     '秘书申请接管这个会话：同意后，它能像对自己派出的会话一样给它发消息、停止它。',

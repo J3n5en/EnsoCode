@@ -28,6 +28,8 @@ import {
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import {
+  type CleanupDraft,
+  type CleanupItem,
   type DispatchDraft,
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
@@ -49,6 +51,7 @@ import {
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
+import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
 import { todoDispatchPrompt } from './dispatchBrief';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import { closeRelayAsk, dropRelaysFor, pendingRelay, relayKey, sessionLabel } from './relay';
@@ -59,6 +62,7 @@ import {
   linkedTodoSession,
   pendingUpdate,
   proposalUpdate,
+  SETTLED_RESULTS,
   takeoverViews,
   untrackedViews,
 } from './results';
@@ -129,6 +133,8 @@ export interface SecretaryDispatchPorts {
   dropQueued(conversationId: string, messageIds: readonly string[]): MaybePromise<number>;
   /** 有目标的会话被停止时置为暂停 */
   pauseGoal(conversationId: string): MaybePromise<void>;
+  /** 收尾清理要的 git / 目录 / 归档能力；清理提案确认时用 */
+  cleanup: CleanupPorts;
   /** 确认 profile 提案：交给档案服务走同一套保存与副作用 */
   applyProfile(
     draft: SecretaryProfileDraft,
@@ -406,6 +412,8 @@ async function noteDispatchResumed(
   if (record.lastState !== 'running') record.stateSince = now;
   record.lastState = 'running';
   record.lastEventAt = now;
+  // 已经有终态结果的会话被重新唤起：这一轮结束前仍算在跑，结束后回到原来的终态
+  if (record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)) record.reopenedAt = now;
   ports.saveDispatch(file);
   const resumed = resumeLinkedTodo(await ports.todos(), conversationId, now);
   if (resumed.changed) ports.saveTodos(resumed.todos);
@@ -531,6 +539,34 @@ async function saveProposal(
   const file = ports.dispatchFile();
   file.proposals[id] = proposal;
   ports.saveDispatch(file);
+  notifySecretaryChanged();
+  return id;
+}
+
+/**
+ * 清理提案：卡片上列出会删什么，用户确认后才执行。
+ * 与派活提案共用同一套状态机与推送，只是执行体换成 applyCleanup。
+ */
+export function saveCleanupProposal(
+  items: CleanupItem[],
+  secretaryConversationId: string | null
+): string {
+  if (!secretaryConversationId) throw new Error('cleanup needs a secretary conversation');
+  const now = Date.now();
+  const id = randomUUID();
+  const draft: CleanupDraft = { items };
+  const proposal: SecretaryProposal = {
+    id,
+    secretaryConversationId,
+    createdAt: now,
+    updatedAt: now,
+    status: 'pending',
+    kind: 'cleanup',
+    draft,
+  };
+  const file = secretaryDispatchPorts.dispatchFile();
+  file.proposals[id] = proposal;
+  secretaryDispatchPorts.saveDispatch(file);
   notifySecretaryChanged();
   return id;
 }
@@ -1409,6 +1445,7 @@ export function createSecretaryDispatchHandlers(
         record.lastState = 'idle';
         record.stoppedAt = now;
         delete record.backgroundRunning;
+        delete record.reopenedAt;
         delete record.stalledTurn;
         delete record.patrol;
         ports.saveDispatch(file);
@@ -1800,7 +1837,7 @@ export type ResolveProposalResult =
 async function finishProposal(
   ports: SecretaryDispatchPorts,
   proposalId: string,
-  outcome: { ok: true; conversationId?: string } | { ok: false; error: string }
+  outcome: { ok: true; conversationId?: string; report?: string } | { ok: false; error: string }
 ): Promise<ResolveProposalResult> {
   const file = ports.dispatchFile();
   const current = file.proposals[proposalId];
@@ -1912,6 +1949,18 @@ export async function resolveProposal(
       applied.ok ? { ok: true } : { ok: false, error: applied.error ?? 'tool-save-failed' }
     );
   }
+  if (transitioned.proposal.kind === 'cleanup') {
+    // 卡片上的清单只是快照：执行时按 id 重新校验一遍，未合入、在用、有未提交改动的都跳过
+    const applied = await applyCleanup(
+      ports.cleanup,
+      transitioned.proposal.draft,
+      transitioned.proposal.secretaryConversationId
+    );
+    return finishProposal(ports, proposalId, {
+      ok: true,
+      report: cleanupReportText(applied),
+    });
+  }
   if (transitioned.proposal.kind === 'takeover') {
     const granted = await grantTakeover(
       ports,
@@ -1952,6 +2001,52 @@ export async function resolveProposal(
 export type TodoMutateResult = { ok: true; todoId: string } | { ok: false; error: string };
 
 export type DismissResultResult = { ok: true } | { ok: false; error: string };
+
+export type MarkResultAction = 'done' | 'undo';
+
+export type MarkResultResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * 用户手动收口一条派发记录：done 记成完成并标 manual（卡片给撤销），
+ * undo 把这条手动结果撤掉、放回进行中。只认派发或接管的记录，普通会话不动。
+ */
+export function markResult(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  action: MarkResultAction
+): MarkResultResult {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return { ok: false, error: 'not-found' };
+  const now = ports.now();
+  const op = action === 'done' ? 'result_mark_done' : 'result_mark_undo';
+  if (action === 'done') {
+    record.lastResult = { kind: 'goal-complete', turn: record.turn, at: now, manual: true };
+    if (record.lastState !== 'idle') record.stateSince = now;
+    record.lastState = 'idle';
+    delete record.backgroundRunning;
+    delete record.reopenedAt;
+    delete record.manualUndoneAt;
+  } else {
+    // 只撤销用户自己标的完成：会话给出的结果不能被界面抹掉
+    if (record.lastResult?.manual !== true) return { ok: false, error: 'not-manual' };
+    delete record.lastResult;
+    if (record.lastState !== 'running') record.stateSince = now;
+    record.lastState = 'running';
+    record.manualUndoneAt = now;
+  }
+  ports.saveDispatch(file);
+  ports.audit({
+    at: now,
+    secretaryConversationId: record.secretaryConversationId,
+    op,
+    targetId: conversationId,
+    ok: true,
+    detail: 'manual',
+  });
+  notifySecretaryChanged();
+  return { ok: true };
+}
 
 /** 用户点过「知道了」：只标记这条结果，会话本身不动；新结果整体替换 lastResult，标记自然失效 */
 export function dismissResult(
@@ -2132,6 +2227,7 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
     store().saveTodos(todos);
   },
   audit: (entry) => appendAudit(secretaryDir(), entry),
+  cleanup: realCleanupPorts(),
   projects: async () =>
     (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
   conversations: async () =>

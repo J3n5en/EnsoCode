@@ -35,6 +35,8 @@ export interface TelegramMessage {
   chat: TelegramChat;
   from?: TelegramUser;
   text?: string;
+  /** 秒级时间戳 */
+  date?: number;
 }
 
 export interface TelegramCallbackQuery {

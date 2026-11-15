@@ -1,5 +1,5 @@
 import { projectDisplayName } from '@shared/projectName';
-import type { ProposalStatus, SecretaryProposal } from '@shared/types/secretary';
+import type { CleanupItem, ProposalStatus, SecretaryProposal } from '@shared/types/secretary';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -17,6 +17,7 @@ const PROPOSAL_TOOLS = new Set([
   'skill_propose',
   'tool_propose',
   'session_takeover_propose',
+  'cleanup_apply',
 ]);
 
 /**
@@ -104,6 +105,8 @@ export function SecretaryProposalRow({
     return <ToolProposalCard proposal={proposal} prominent={prominent} />;
   if (proposal.kind === 'takeover')
     return <TakeoverProposalCard proposal={proposal} prominent={prominent} />;
+  if (proposal.kind === 'cleanup')
+    return <CleanupProposalCard proposal={proposal} prominent={prominent} />;
 
   const project = projects.find((entry) => entry.id === proposal.draft.projectId);
   const failed = proposal.status === 'failed';
@@ -492,6 +495,132 @@ function SkillProposalCard({
               className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               {t('Confirm')}
+            </button>
+            <button
+              type="button"
+              disabled={resolving}
+              onClick={() => void resolveProposal(proposal.id, 'reject')}
+              className="rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {t('Reject')}
+            </button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const CLEANUP_STATUS_LABELS: Record<ProposalStatus, string> = {
+  ...STATUS_LABELS,
+  executing: 'Cleaning up…',
+  succeeded: 'Cleanup done',
+};
+
+const CLEANUP_KIND_LABELS: Record<CleanupItem['kind'], string> = {
+  branch: 'Branch',
+  worktree: 'Worktree',
+  session: 'Session',
+};
+
+const CLEANUP_BLOCKED_LABELS: Record<string, string> = {
+  'not-merged': 'Not merged yet',
+  'current-branch': 'Currently checked out',
+  'used-by-worktree': 'Used by a worktree',
+  'detached-head': 'Detached HEAD',
+  'uncommitted-changes': 'Has uncommitted changes',
+};
+
+function cleanupSize(bytes: number | undefined): string | null {
+  if (bytes === undefined) return null;
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
+
+/**
+ * 清理确认卡：把会删的每一条都列出来，用户点确认才执行。
+ * 已合入、占用空间与最后活动时间都写在行里，别让人凭记忆点按钮。
+ */
+function CleanupProposalCard({
+  proposal,
+  prominent,
+}: {
+  proposal: Extract<SecretaryProposal, { kind: 'cleanup' }>;
+  prominent?: boolean;
+}) {
+  const { t } = useI18n();
+  const resolving = useSecretaryStore((state) => state.resolving[proposal.id] === true);
+  const resolveProposal = useSecretaryStore((state) => state.resolveProposal);
+  const items = proposal.draft.items;
+  const failed = proposal.status === 'failed';
+  const counts = items.reduce<Record<string, number>>((acc, item) => {
+    acc[item.kind] = (acc[item.kind] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <div data-enso="secretary-proposal" data-kind="cleanup" className={cardClass(prominent)}>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          {t('Clean up')}
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          {t('{{count}} items', { count: items.length })}
+        </span>
+        {(['branch', 'worktree', 'session'] as const).map((kind) =>
+          counts[kind] ? (
+            <span
+              key={kind}
+              className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground"
+            >
+              {counts[kind]} {t(CLEANUP_KIND_LABELS[kind])}
+            </span>
+          ) : null
+        )}
+      </div>
+      <ul data-enso="secretary-cleanup-items" className="mt-1.5 space-y-0.5">
+        {items.map((item) => {
+          const size = cleanupSize(item.sizeBytes);
+          const detail = [
+            item.mergedInto?.length
+              ? t('merged into {{refs}}', { refs: item.mergedInto.join(', ') })
+              : null,
+            size,
+            item.blocked ? t(CLEANUP_BLOCKED_LABELS[item.blocked] ?? item.blocked) : null,
+          ].filter(Boolean);
+          return (
+            <li key={item.id} className="flex min-w-0 items-baseline gap-1.5 text-[11px]">
+              <span
+                data-enso="secretary-cleanup-kind"
+                className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground"
+              >
+                {t(CLEANUP_KIND_LABELS[item.kind])}
+              </span>
+              <span className="min-w-0 truncate font-mono">{item.name}</span>
+              {detail.length > 0 && (
+                <span className="min-w-0 truncate text-muted-foreground">{detail.join(' · ')}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <span className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}>
+          {t(CLEANUP_STATUS_LABELS[proposal.status])}
+          {failed && proposal.error ? ` · ${proposal.error}` : ''}
+          {proposal.report ? ` · ${proposal.report}` : ''}
+        </span>
+        {proposal.status === 'pending' && (
+          <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              data-enso="secretary-cleanup-confirm"
+              disabled={resolving}
+              onClick={() => void resolveProposal(proposal.id, 'confirm')}
+              className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {t('Confirm cleanup')}
             </button>
             <button
               type="button"

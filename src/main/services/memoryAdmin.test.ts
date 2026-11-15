@@ -205,6 +205,26 @@ describe('memory admin', () => {
     expect(result.items[0].contentSummary.length).toBeLessThanOrEqual(241);
   });
 
+  it('staleDays 只列超过 N 天没被检索命中的记忆（从未命中的按创建时间算）', async () => {
+    const stale = await add('stale one');
+    const fresh = await add('fresh one');
+    const hit = await add('hit one');
+    db.prepare("UPDATE memories SET created_at = '2025-01-01T00:00:00.000Z'").run();
+    db.prepare('UPDATE memories SET created_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      fresh.id
+    );
+    db.prepare('UPDATE memories SET hit_count = 1, last_hit_at = ? WHERE id = ?').run(
+      new Date().toISOString(),
+      hit.id
+    );
+    const result = listMemoriesForAdmin(db, { staleDays: 7, limit: 50, offset: 0 });
+    expect(result.items.map((item) => item.id)).toEqual([stale.id]);
+    expect(result.total).toBe(1);
+    // 不带筛选时三条都在
+    expect(listMemoriesForAdmin(db, { limit: 50, offset: 0 }).total).toBe(3);
+  });
+
   it('archives and restores without deleting the row', async () => {
     const memory = await add('keep this row');
     expect(archiveMemory(db, memory.id)?.lifecycleState).toBe('archived');

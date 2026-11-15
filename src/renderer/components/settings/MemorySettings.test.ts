@@ -130,6 +130,8 @@ describe('embeddingErrorNotice', () => {
     entities: 0,
     embedded: 0,
     databaseBytes: 1024,
+    neverHit: 0,
+    addedLast7Days: 0,
   };
 
   it('surfaces the reason instead of silently showing 0/N', () => {

@@ -22,6 +22,10 @@ export interface MemoryListItem {
   updatedAt: string;
   /** 被检索返回的次数；不代表被真正用上 */
   appearances: number;
+  /** 最后一次被检索返回的时间；只给维护筛选用，不参与排序 */
+  lastHitAt: string | null;
+  /** 被检索返回的累计次数（与 appearances 同源，语义更直白）；只给维护筛选用 */
+  hitCount: number;
 }
 
 export interface EvolvesEdgeDto {
@@ -64,6 +68,11 @@ export interface MemoryListQuery {
   query?: string;
   unitType?: UnitType;
   includeArchived?: boolean;
+  /**
+   * 维护筛选：只列超过这么多天没被检索命中的记忆（从未命中的按创建时间算）。
+   * 只读筛选，不改任何状态；exact 模式可精确分页，语义模式在结果上后过滤。
+   */
+  staleDays?: number;
   limit: number;
   offset: number;
   /**
@@ -155,6 +164,10 @@ export interface MemoryStats {
   entities: number;
   embedded: number;
   databaseBytes: number;
+  /** 从未被检索命中的条数（hit_count = 0），供用户判断要不要整理 */
+  neverHit: number;
+  /** 最近 7 天新增条数 */
+  addedLast7Days: number;
   /** 为什么没有向量；null = 没出过错 */
   embeddingError?: string | null;
 }
@@ -305,6 +318,11 @@ export function isMemoryListQuery(value: unknown): value is MemoryListQuery {
   if (row.unitType !== undefined && (typeof row.unitType !== 'string' || !isUnitType(row.unitType)))
     return false;
   if (row.includeArchived !== undefined && typeof row.includeArchived !== 'boolean') return false;
+  if (
+    row.staleDays !== undefined &&
+    (typeof row.staleDays !== 'number' || !Number.isFinite(row.staleDays) || row.staleDays < 0)
+  )
+    return false;
   if (row.mode !== undefined && row.mode !== 'exact' && row.mode !== 'fast' && row.mode !== 'deep')
     return false;
   return true;

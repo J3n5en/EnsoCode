@@ -4,8 +4,9 @@ import type {
   SecretaryDailyGroupKey,
   SecretaryDailyItem,
 } from '@shared/types/secretary';
-import { ChevronDown, ChevronLeft, ChevronRight, Inbox, Link2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Inbox, Link2, Undo2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -71,8 +72,44 @@ function DailyCard({
       : '',
     column.stamp ? `${t(column.stamp)} ${stampOf(item.at, day, locale)}` : '',
   ].filter(Boolean);
+  // 手动收口只对派发或接管跟踪的会话开放，普通会话不显示
+  const mark = !item.tracked
+    ? null
+    : item.manual && column.key === 'done'
+      ? 'undo'
+      : column.key === 'running'
+        ? 'done'
+        : null;
   return (
-    <div data-enso="secretary-daily-card" data-item={item.id} className={CARD_CLASS}>
+    <div
+      data-enso="secretary-daily-card"
+      data-item={item.id}
+      className={cn(CARD_CLASS, 'group/row relative')}
+    >
+      {mark && (
+        <HoverActions className="from-card">
+          <button
+            type="button"
+            data-enso={mark === 'done' ? 'secretary-daily-mark-done' : 'secretary-daily-mark-undo'}
+            title={mark === 'done' ? t('Mark done') : t('Undo mark done')}
+            aria-label={mark === 'done' ? t('Mark done') : t('Undo mark done')}
+            onClick={() => {
+              if (!item.conversationId) return;
+              void window.electronAPI.secretary.markResult(item.conversationId, mark);
+            }}
+            className={cn(
+              ACTION_CLASS,
+              mark === 'done' ? 'hover:bg-success/10 hover:text-success' : undefined
+            )}
+          >
+            {mark === 'done' ? (
+              <Check className="h-3.5 w-3.5" />
+            ) : (
+              <Undo2 className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </HoverActions>
+      )}
       <button
         type="button"
         data-enso="secretary-daily-expand"

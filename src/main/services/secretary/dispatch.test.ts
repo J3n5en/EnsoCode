@@ -21,6 +21,7 @@ import {
   grantTakeover,
   listTakeovers,
   listUntracked,
+  markResult,
   mutateTodo,
   NOT_OPERABLE_ERROR,
   resolveProposal,
@@ -127,6 +128,7 @@ interface Harness {
   baseFacts: DispatchBaseFacts;
   baseFactsCalls: { projectPath: string; checkout?: string; baseRef?: string; branch?: string }[];
   forgotten: string[];
+  archived: { conversationId: string; at: number }[];
   answers: { conversationId: string; askId: string; answer: string; name: string }[];
   relays: { conversationId: string; relay: { name: string } | null }[];
 }
@@ -178,6 +180,7 @@ function harness(
     },
     baseFactsCalls: [],
     forgotten: [],
+    archived: [],
     answers: [],
     relays: [],
     ports: undefined as unknown as SecretaryDispatchPorts,
@@ -254,6 +257,22 @@ function harness(
     },
     pauseGoal: (conversationId) => {
       h.pausedGoals.push(conversationId);
+    },
+    cleanup: {
+      git: async () => ({ code: 1, stdout: '', stderr: '' }),
+      realpath: async (target) => target,
+      worktreeRoots: () => [],
+      size: async () => null,
+      projects: () => h.projects,
+      rows: () => h.rows,
+      dispatchFile: () => structuredClone(h.file),
+      archive: (conversationId, at) => {
+        h.archived.push({ conversationId, at });
+      },
+      audit: (entry) => {
+        h.audits.push(entry);
+      },
+      now: () => NOW,
     },
     newId: () => `id-${++ids}`,
     now: () => NOW,
@@ -1673,6 +1692,52 @@ describe('待办', () => {
   });
 });
 
+describe('清理提案', () => {
+  it('确认后才执行，结果摘要写回提案', async () => {
+    const h = harness({ rows: { 'c-done': { title: '写发布说明' } } });
+    const proposalId = 'cleanup-1';
+    h.file.proposals[proposalId] = {
+      id: proposalId,
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'cleanup',
+      draft: {
+        items: [{ id: 'session|c-done', kind: 'session', name: '写发布说明' }],
+      },
+    };
+    // 还没确认：什么都没归档
+    expect(h.archived).toEqual([]);
+
+    const resolved = await resolveProposal(h.ports, proposalId, 'confirm');
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.proposal.status).toBe('succeeded');
+    expect(resolved.proposal.kind === 'cleanup' && resolved.proposal.report).toContain(
+      'archived 1'
+    );
+    expect(h.archived).toEqual([{ conversationId: 'c-done', at: NOW }]);
+    expect(h.audits.some((entry) => entry.op === 'cleanup_session')).toBe(true);
+  });
+
+  it('拒绝时一条都不动', async () => {
+    const h = harness({ rows: { 'c-done': { title: '写发布说明' } } });
+    h.file.proposals['cleanup-2'] = {
+      id: 'cleanup-2',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'cleanup',
+      draft: { items: [{ id: 'session|c-done', kind: 'session', name: '写发布说明' }] },
+    };
+    const rejected = await resolveProposal(h.ports, 'cleanup-2', 'reject');
+    expect(rejected.ok && rejected.proposal.status).toBe('rejected');
+    expect(h.archived).toEqual([]);
+  });
+});
+
 describe('resolveProposal', () => {
   it('同一提案确认两次只执行一次', async () => {
     const h = harness();
@@ -2082,6 +2147,68 @@ describe('dismissResult', () => {
       at: 950,
     });
     expect(completed.audits).toEqual([]);
+  });
+});
+
+describe('markResult', () => {
+  const file = (over: Partial<DispatchRecord> = {}): SecretaryDispatchFile => ({
+    ...emptyFile(),
+    dispatched: {
+      c1: {
+        conversationId: 'c1',
+        projectId: 'p1',
+        secretaryConversationId: 'sec-1',
+        createdAt: 900,
+        turn: 2,
+        lastState: 'running',
+        lastEventAt: 900,
+        ...over,
+      },
+    },
+  });
+
+  it('手动标记完成：收口成完成并标 manual，审计写明是手动', () => {
+    const h = harness({ file: file({ backgroundRunning: true }) });
+    expect(markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
+    expect(h.file.dispatched.c1).toMatchObject({
+      lastState: 'idle',
+      lastResult: { kind: 'goal-complete', turn: 2, at: NOW, manual: true },
+    });
+    expect(h.file.dispatched.c1.backgroundRunning).toBeUndefined();
+    expect(h.audits).toEqual([
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'result_mark_done',
+        targetId: 'c1',
+        ok: true,
+        detail: 'manual',
+      },
+    ]);
+  });
+
+  it('撤销标记：放回进行中，只对用户手动标的结果生效', () => {
+    const manual = harness({
+      file: file({ lastResult: { kind: 'goal-complete', turn: 2, at: 950, manual: true } }),
+    });
+    expect(markResult(manual.ports, 'c1', 'undo')).toEqual({ ok: true });
+    expect(manual.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(manual.file.dispatched.c1).toMatchObject({ lastState: 'running', manualUndoneAt: NOW });
+    expect(manual.audits[0]).toMatchObject({ op: 'result_mark_undo', detail: 'manual' });
+
+    // 会话自己给出的结果不能被界面抹掉
+    const real = harness({
+      file: file({ lastResult: { kind: 'goal-complete', turn: 2, at: 950 } }),
+    });
+    expect(markResult(real.ports, 'c1', 'undo')).toEqual({ ok: false, error: 'not-manual' });
+    expect(real.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    expect(real.audits).toEqual([]);
+  });
+
+  it('普通会话没有派发记录：不动也不写审计', () => {
+    const h = harness({});
+    expect(markResult(h.ports, 'other', 'done')).toEqual({ ok: false, error: 'not-found' });
+    expect(h.audits).toEqual([]);
   });
 });
 

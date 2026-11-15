@@ -378,4 +378,43 @@ describe('一天的看板投影', () => {
     expect(daily.groups[0].items).toHaveLength(3);
     expect(daily.counts.dispatched).toBe(3);
   });
+
+  it('报过结果、这一轮又没给新结果的会话进「完成」，不再挂在进行中', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        // 被重新唤起后以 turn-ended 收尾：没有终态结果，但活已经干完
+        dispatch({ lastResult: { kind: 'turn-ended', turn: 2, at: at(15, 10) } }),
+        // 前一天完成过、今天又跑了一轮没给结果
+        dispatch({
+          conversationId: 'c9',
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(14, 10) },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(daily.groups[0].items.map((item) => item.conversationId)).toEqual(['c1', 'c9']);
+  });
+
+  it('派发会话的卡片带 tracked，手动标记完成的带 manual', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        dispatch({
+          lastResult: { kind: 'goal-complete', turn: 2, at: at(15, 10), manual: true },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups[0].items[0]).toMatchObject({
+      tracked: true,
+      manual: true,
+      label: 'Goal complete',
+    });
+  });
 });

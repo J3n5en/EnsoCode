@@ -311,7 +311,7 @@ ${hit.memory.content}`
   hits.splice(0, window.length, ...window);
 }
 
-// 多通道并发（单通道失败只记日志）→ 融合去重 → decay 混分 → 排序 → appearances+1（best-effort）。
+// 多通道并发（单通道失败只记日志）→ 融合去重 → decay 混分 → 排序 → 命中计数（best-effort，不进排序）。
 // 融合用 RRF(k=60)；deep 才按查询意图加权，并可并行 LLM 辅助（失败回退）。混分见 finalScore。
 export async function searchMemories(
   db: Database.Database,
@@ -408,11 +408,18 @@ export async function searchMemories(
     hits.push(...picked);
   }
   hits.splice(limit);
+  if (hits.length === 0) return hits;
 
+  // 命中采集：只写「最终返回给调用方的这几条」，被 limit / MMR 截掉的候选不算命中。
+  // hit_count 与 appearances 同一句里自增（后者是更早的展示用计数，两者不会漂移）。
+  // last_hit_at / hit_count 只给维护筛选（listStaleMemories）用，绝不读进打分——
+  // 把「被检索返回」接进排序就是越排越前的正反馈，与上面 decay 那条注释同一个设计意图。
   try {
     db.prepare(
-      `UPDATE memories SET appearances = appearances + 1 WHERE id IN (${hits.map(() => '?').join(',')})`
-    ).run(...hits.map((h) => h.memory.id));
+      `UPDATE memories
+       SET appearances = appearances + 1, hit_count = hit_count + 1, last_hit_at = ?
+       WHERE id IN (${hits.map(() => '?').join(',')})`
+    ).run(now.toISOString(), ...hits.map((h) => h.memory.id));
   } catch {
     // best-effort 计数，不参与排序也不影响返回
   }

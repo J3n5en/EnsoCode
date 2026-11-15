@@ -128,6 +128,10 @@ beforeEach(() => {
           h.stateListeners = h.stateListeners.filter((entry) => entry !== listener);
         };
       },
+      markResult: async (conversationId: string, action: string) => {
+        h.calls.push({ name: 'markResult', args: [conversationId, action] });
+        return { ok: true };
+      },
     },
   };
   (dom.window as unknown as Record<string, unknown>).electronAPI = api;
@@ -275,6 +279,35 @@ describe('SecretaryDailyBoard', () => {
     click('[data-enso="secretary-daily-today"]');
     await flush();
     expect(dailyCalls()).toEqual([TODAY, YESTERDAY, TODAY]);
+  });
+
+  it('进行中的卡片可以就地标记完成，手动标过的在完成列可以撤销', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        { key: 'running', items: [item({ id: 'r1', conversationId: 'c3', tracked: true })] },
+        {
+          key: 'done',
+          items: [item({ id: 'd1', conversationId: 'c4', tracked: true, manual: true })],
+        },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    click('[data-group="running"] [data-enso="secretary-daily-mark-done"]');
+    expect(h.calls).toContainEqual({ name: 'markResult', args: ['c3', 'done'] });
+    click('[data-group="done"] [data-enso="secretary-daily-mark-undo"]');
+    expect(h.calls).toContainEqual({ name: 'markResult', args: ['c4', 'undo'] });
+  });
+
+  it('普通会话的卡片没有标记完成，也没法撤销', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        { key: 'running', items: [item({ id: 'r1', conversationId: 'c5' })] },
+        { key: 'done', items: [item({ id: 'd1', conversationId: 'c6' })] },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    expect(container.querySelector('[data-enso="secretary-daily-mark-done"]')).toBeNull();
+    expect(container.querySelector('[data-enso="secretary-daily-mark-undo"]')).toBeNull();
   });
 
   it('组为空时列还在，只是没有卡片', async () => {

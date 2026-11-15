@@ -260,15 +260,25 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     if (!result && !within(record.createdAt)) continue;
     placed.add(record.conversationId);
     const goal = record.goal?.split('\n')[0]?.trim();
-    const card = sessionCard(
-      record.conversationId,
-      record.projectId,
-      result?.at ?? record.createdAt,
-      result,
-      record.createdAt,
-      goal
-    );
-    const column = result ? columnOf(result.kind) : 'running';
+    const card: SecretaryDailyItem = {
+      ...sessionCard(
+        record.conversationId,
+        record.projectId,
+        result?.at ?? record.createdAt,
+        result,
+        record.createdAt,
+        goal
+      ),
+      tracked: true,
+      ...(record.lastResult?.manual ? { manual: true as const } : {}),
+    };
+    // 当天没有终态结果时：真在跑、或从来没报过结果的才进「进行中」。
+    // 报过结果、这一轮又没给新结果的会话，活已经干完，不能一直挂在进行中。
+    const column = result
+      ? columnOf(result.kind)
+      : running || record.lastResult === undefined
+        ? 'running'
+        : 'done';
     if (column) columns[column].push(card);
   }
   // 没有派发记录、但当天有结果的会话（记录被清理或不属于本机派发）也要上板
