@@ -449,6 +449,17 @@ describe('SecretaryPanel', () => {
     expect(expand()?.getAttribute('aria-expanded')).toBe('true');
   });
 
+  it('进行中行显示派发时实际用到的模型', async () => {
+    h.board = h.secretary.board = board({
+      running: [sessionCard('c1', { model: { providerId: 'anthropic', modelId: 'opus' } })],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-running-toggle"]');
+    const model = container.querySelector('[data-enso="secretary-running-model"]');
+    expect(model?.textContent).toContain('opus');
+  });
+
   it('进行中行悬停可以就地标记完成，不占位置也不打开会话', async () => {
     h.board = h.secretary.board = board({
       running: [sessionCard('c1', { title: '跑全量测试' })],

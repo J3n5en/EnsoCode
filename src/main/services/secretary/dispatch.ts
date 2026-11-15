@@ -26,11 +26,17 @@ import {
   type SecretarySendMode,
 } from '@shared/secretary/tools';
 import { wrapUntrusted } from '@shared/secretary/transcript';
-import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
+import {
+  type ConversationAuthority,
+  type ProjectAuthority,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+} from '@shared/types/agent';
 import {
   type CleanupDraft,
   type CleanupItem,
   type DispatchDraft,
+  type DispatchModelRef,
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
   type PendingProblem,
@@ -216,6 +222,13 @@ export interface SecretaryDispatchPorts {
   tasks(conversationId: string): MaybePromise<readonly ObservedTask[]>;
   /** 停一个后台任务：只停这个会话自己的任务 */
   stopTask(conversationId: string, taskId: string): MaybePromise<{ ok: boolean; error?: string }>;
+  /**
+   * 派发模型的可用性判定：provider 存在且启用、有凭证、模型行启用（虚拟模型按目录），
+   * 与子代理可选模型同一套判定。返回解析后的引用，不可用就报错，绝不静默回退。
+   */
+  resolveModel(
+    ref: DispatchModelRef
+  ): MaybePromise<{ ok: true; model: DispatchModelRef } | { ok: false; error: string }>;
 }
 
 const DISPATCH_OPS = [
@@ -393,12 +406,17 @@ function stringParam(params: Record<string, unknown>, key: string): string | und
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function modelParam(value: unknown): DispatchDraft['model'] {
+/** 派发模型：providerId + modelId 必填，thinkingLevel 可选；形状与秘书档案的 model 一致 */
+function modelParam(value: unknown): DispatchModelRef | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const model = value as Record<string, unknown>;
   const providerId = stringParam(model, 'providerId');
   const modelId = stringParam(model, 'modelId');
-  return providerId && modelId ? { providerId, modelId } : undefined;
+  if (!providerId || !modelId) return undefined;
+  const thinkingLevel = (THINKING_LEVELS as readonly unknown[]).includes(model.thinkingLevel)
+    ? (model.thinkingLevel as ThinkingLevel)
+    : undefined;
+  return { providerId, modelId, ...(thinkingLevel ? { thinkingLevel } : {}) };
 }
 
 function defaultProfile(): SecretaryProfile {
@@ -631,7 +649,10 @@ async function executeDispatch(
     prompt: draft.prompt,
     worktree: draft.worktree,
     ...(draft.title ? { title: draft.title } : {}),
-    ...(draft.model ? { model: draft.model } : {}),
+    ...(draft.model
+      ? { model: { providerId: draft.model.providerId, modelId: draft.model.modelId } }
+      : {}),
+    ...(draft.model?.thinkingLevel ? { thinkingLevel: draft.model.thinkingLevel } : {}),
     ...(draft.goal ? { goal: draft.goal } : {}),
     ...(draft.checkout ? { checkout: draft.checkout } : {}),
     ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
@@ -660,6 +681,7 @@ async function executeDispatch(
     ...(draft.checkout ? { checkout: draft.checkout } : {}),
     ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
     ...(draft.branch ? { branch: draft.branch } : {}),
+    ...(draft.model ? { model: draft.model } : {}),
   };
   ports.saveDispatch(file);
   if (draft.todoId) {
@@ -722,16 +744,33 @@ async function startDispatch(
     : { kind: 'failed', error: created.error };
 }
 
+/**
+ * 派发模型：显式指定优先，没指定才用档案里的固定模型（choose 模式仍按项目默认）。
+ * 指定了就一定校验：provider 或 model 不可用就当场失败，绝不静默回退到默认模型。
+ */
+async function resolveDraftModel(
+  ports: SecretaryDispatchPorts,
+  draft: DispatchDraft,
+  profile: SecretaryProfile
+): Promise<{ ok: true; draft: DispatchDraft } | { ok: false; error: string }> {
+  const wanted =
+    draft.model ?? (profile.dispatchModel.mode === 'fixed' ? profile.dispatchModel.model : null);
+  if (!wanted) return { ok: true, draft };
+  const resolved = await ports.resolveModel(wanted);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  return { ok: true, draft: { ...draft, model: resolved.model } };
+}
+
 async function dispatchDraft(
   ports: SecretaryDispatchPorts,
   secretaryConversationId: string,
   draft: DispatchDraft
 ): Promise<DispatchOutcome> {
   const profile = await profileOf(ports);
-  const wanted: DispatchDraft =
-    profile.dispatchModel.mode === 'fixed'
-      ? { ...draft, model: profile.dispatchModel.model }
-      : draft;
+  // 显式指定的模型优先；没指定才走档案里的派发模型设置
+  const withModel = await resolveDraftModel(ports, draft, profile);
+  if (!withModel.ok) return { kind: 'failed', error: withModel.error };
+  const wanted = withModel.draft;
   const validated = validateDispatch(
     wanted,
     await dispatchContext(ports, profile, wanted.projectId, (wanted.after?.length ?? 0) > 0)
@@ -778,6 +817,11 @@ function deny(
   return { ok: false, error: DENIALS[code] };
 }
 
+/** 审计里带上实际用到的模型：事后能查清这次派发用的是哪个模型 */
+function modelDetail(model: DispatchModelRef | undefined): string {
+  return model ? ` · model ${model.providerId}/${model.modelId}` : '';
+}
+
 function outcomeResult(
   ports: SecretaryDispatchPorts,
   ctx: SecretaryOpContext,
@@ -787,28 +831,34 @@ function outcomeResult(
 ): SecretaryOpResult {
   if (outcome.kind === 'failed') return auditFailure(ports, ctx, op, outcome.error, targetId);
   const at = ports.now();
-  if (outcome.kind === 'pending') return pendingResult(ports, ctx, op, outcome.pendingId);
+  // 审计记的是真正落盘的那个模型：档案固定模型与显式指定都算
+  const file = ports.dispatchFile();
+  if (outcome.kind === 'pending')
+    return pendingResult(ports, ctx, op, outcome.pendingId, file.pending?.[outcome.pendingId]);
   if (outcome.kind === 'proposal') {
+    const proposal = file.proposals[outcome.proposalId];
+    const model = proposal?.kind === 'dispatch' ? proposal.draft.model : undefined;
     ports.audit({
       at,
       secretaryConversationId: ctx.secretaryConversationId,
       op,
       targetId: outcome.proposalId,
       ok: true,
-      detail: 'awaiting_confirmation',
+      detail: `awaiting_confirmation${modelDetail(model)}`,
     });
     return {
       ok: true,
       result: { status: 'awaiting_confirmation', proposalId: outcome.proposalId },
     };
   }
+  const model = file.dispatched[outcome.conversationId]?.model;
   ports.audit({
     at,
     secretaryConversationId: ctx.secretaryConversationId,
     op,
     targetId: outcome.conversationId,
     ok: true,
-    detail: 'created',
+    detail: `created${modelDetail(model)}`,
   });
   return { ok: true, result: { status: 'created', conversationId: outcome.conversationId } };
 }
@@ -818,7 +868,8 @@ function pendingResult(
   ports: SecretaryDispatchPorts,
   ctx: SecretaryOpContext,
   op: string,
-  pendingId: string
+  pendingId: string,
+  pending?: PendingDispatch
 ): SecretaryOpResult {
   ports.audit({
     at: ports.now(),
@@ -826,7 +877,7 @@ function pendingResult(
     op,
     targetId: pendingId,
     ok: true,
-    detail: 'waiting_dependencies',
+    detail: `waiting_dependencies${modelDetail(pending?.draft.model)}`,
   });
   return { ok: true, result: { status: 'waiting', pendingId } };
 }
@@ -2029,9 +2080,10 @@ export function createSecretaryDispatchHandlers(
       };
       const after = afterParam(params);
       if (after) draft.after = after;
+      const model = modelParam(params.model);
+      if (model) draft.model = model;
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
-      const result = outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
-      return result;
+      return outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
     },
   };
   return handlers;
@@ -2612,6 +2664,29 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
     (await import('../../ipc/agent')).observedBackgroundTasks(conversationId),
   stopTask: async (conversationId, taskId) =>
     (await import('../../ipc/agent')).stopTaskFromMain(conversationId, taskId),
+  /**
+   * 与子代理可选模型同一套可用性判定：provider 存在且启用、有凭证、非分类器专用、
+   * 模型行启用；虚拟模型按目录解析。这里只判定，不改任何配置。
+   */
+  resolveModel: async (ref) => {
+    const { modelRefForSpawnConfig, resolveModelSelection } = await import('../agentHost');
+    const { readStoredOauthCredentialKeys } = await import('../oauthProviders');
+    let keys: ReadonlySet<string>;
+    try {
+      keys = await readStoredOauthCredentialKeys();
+    } catch {
+      return { ok: false, error: 'model credentials unavailable' };
+    }
+    const resolved = resolveModelSelection(ref.providerId, ref.modelId, keys, {
+      allowVirtual: true,
+    });
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const model = modelRefForSpawnConfig(resolved.selection.config);
+    return {
+      ok: true,
+      model: { ...model, ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}) },
+    };
+  },
 };
 
 function store(): SecretaryStore {

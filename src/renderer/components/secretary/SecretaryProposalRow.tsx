@@ -2,6 +2,7 @@ import { projectDisplayName } from '@shared/projectName';
 import type { CleanupItem, ProposalStatus, SecretaryProposal } from '@shared/types/secretary';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
+import { modelLabel } from '@/lib/modelLabel';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSettingsStore } from '@/stores/settings';
@@ -85,6 +86,7 @@ export function SecretaryProposalRow({
   const resolving = useSecretaryStore((state) => state.resolving[proposalId] === true);
   const resolveProposal = useSecretaryStore((state) => state.resolveProposal);
   const projects = useSettingsStore((state) => state.projects);
+  const providers = useSettingsStore((state) => state.providers) ?? [];
 
   // 状态推送还没到时只占位：卡片不能把这一行吞掉
   if (!proposal) {
@@ -110,6 +112,7 @@ export function SecretaryProposalRow({
 
   const project = projects.find((entry) => entry.id === proposal.draft.projectId);
   const failed = proposal.status === 'failed';
+  const model = modelLabel(providers, proposal.draft.model);
 
   return (
     <div data-enso="secretary-proposal" className={cardClass(prominent)}>
@@ -129,6 +132,7 @@ export function SecretaryProposalRow({
       </div>
       {(proposal.draft.branch ||
         proposal.draft.baseRef ||
+        model ||
         (proposal.draft.after?.length ?? 0) > 0) && (
         <div
           data-enso="secretary-proposal-base"
@@ -137,6 +141,9 @@ export function SecretaryProposalRow({
           {proposal.draft.branch && <span>{proposal.draft.branch}</span>}
           {proposal.draft.baseRef && (
             <span>{t('from {{ref}}', { ref: proposal.draft.baseRef })}</span>
+          )}
+          {model && (
+            <span data-enso="secretary-proposal-model">{t('Model: {{model}}', { model })}</span>
           )}
           {proposal.draft.after && proposal.draft.after.length > 0 && (
             <span>{t('After {{ids}}', { ids: proposal.draft.after.join(', ') })}</span>

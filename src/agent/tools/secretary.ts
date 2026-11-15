@@ -13,6 +13,8 @@ type JsonSchema = Record<string, unknown>;
 
 const MODEL_SCHEMA: JsonSchema = {
   type: 'object',
+  description:
+    'Optional: an exact provider and model, checked before anything is created. An unknown, disabled or credential-less provider or model is refused with an error and is never silently replaced by the default. Omit it to use the dispatch model from your settings.',
   properties: {
     providerId: { type: 'string', minLength: 1, maxLength: 200 },
     modelId: { type: 'string', minLength: 1, maxLength: 200 },
@@ -162,6 +164,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'projectId',
       'prompt',
       'title',
+      'model',
       'worktree',
       'checkout',
       'baseRef',
@@ -650,7 +653,7 @@ const SCHEMAS: Record<
   },
   todo_item_dispatch: {
     description:
-      'Turn a todo item into a dispatched session. Same confirmation rules as session_create, and the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions.',
+      'Turn a todo item into a dispatched session. Same confirmation rules as session_create, and the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions, plus the same optional model.',
     parameters: object(
       {
         todoId: id('Todo id'),
@@ -662,6 +665,7 @@ const SCHEMAS: Record<
           maxLength: 200,
           description: 'Optional title; defaults to the todo text',
         },
+        model: MODEL_SCHEMA,
         worktree: { type: 'boolean' },
         ...BASE_PARAMS,
         after: AFTER_PARAM,

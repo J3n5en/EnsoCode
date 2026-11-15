@@ -424,6 +424,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(record.checkout ? { checkout: record.checkout } : {}),
       ...(record.baseRef ? { baseRef: record.baseRef } : {}),
       ...(record.branch ? { branch: record.branch } : {}),
+      ...(record.model ? { model: record.model } : {}),
     };
     const needsYouNow = sessionNeedsUser(record, state);
     if (needsYouNow) needsYou.push(card);

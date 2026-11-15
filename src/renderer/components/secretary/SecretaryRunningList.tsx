@@ -4,10 +4,12 @@ import { ArrowUpRight, Check } from 'lucide-react';
 import { useState } from 'react';
 import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
+import { modelLabel } from '@/lib/modelLabel';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
+import { useSettingsStore } from '@/stores/settings';
 
 type SessionCard = Extract<SecretaryCard, { kind: 'session' }>;
 
@@ -35,8 +37,10 @@ function badgeOf(card: SessionCard): { label: string; className: string } {
 function RunningRow({ card }: { card: SessionCard }) {
   const { t, locale } = useI18n();
   const selectConversation = useSessionsStore((state) => state.selectConversation);
+  const providers = useSettingsStore((state) => state.providers) ?? [];
   const [expanded, setExpanded] = useState(false);
   const badge = badgeOf(card);
+  const model = modelLabel(providers, card.model);
   return (
     <div
       data-enso="secretary-running-row"
@@ -78,6 +82,14 @@ function RunningRow({ card }: { card: SessionCard }) {
           >
             {card.branch ?? ''}
             {card.baseRef ? ` · ${t('from {{ref}}', { ref: card.baseRef })}` : ''}
+          </span>
+        )}
+        {model && (
+          <span
+            data-enso="secretary-running-model"
+            className="mt-0.5 block truncate text-[11.5px] text-subtle-foreground"
+          >
+            {t('Model: {{model}}', { model })}
           </span>
         )}
         {card.lastText && (
