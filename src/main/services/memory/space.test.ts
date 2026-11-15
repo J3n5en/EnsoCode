@@ -5,6 +5,8 @@ import {
   distillSpaces,
   memorySpaceContext,
   resolveSpaceIds,
+  secretaryPrivateSpace,
+  secretaryReadProjectIds,
 } from './space';
 import {
   botSpaceId,
@@ -18,6 +20,9 @@ import {
 const PROJECT = '11111111-1111-4111-8111-111111111111';
 const BOT = '22222222-2222-4222-8222-222222222222';
 const CHAT = '33333333-3333-4333-8333-333333333333';
+const SECRETARY = '55555555-5555-4555-8555-555555555555';
+const VISIBLE = '66666666-6666-4666-8666-666666666666';
+const VISIBLE_2 = '77777777-7777-4777-8777-777777777777';
 
 describe('space id', () => {
   it('bot:/chat: 构造与解析往返，id 必须是 uuid', () => {
@@ -132,5 +137,70 @@ describe('memorySpaceContext（会话权威 → 记忆上下文）', () => {
     expect(memorySpaceContext({ projectId: null, bot: { botId: BOT, chatId: 'y' } })).toEqual({
       botId: BOT,
     });
+  });
+});
+
+describe('秘书记忆空间', () => {
+  const ctx = { projectId: SECRETARY, secretary: { readProjectIds: [VISIBLE, VISIBLE_2] } };
+
+  it("'all' = 私有 + 可见项目 + global；'project' 只给私有空间", () => {
+    expect(resolveSpaceIds('all', ctx)).toEqual([
+      projectSpaceId(SECRETARY),
+      projectSpaceId(VISIBLE),
+      projectSpaceId(VISIBLE_2),
+      'global',
+    ]);
+    expect(resolveSpaceIds('project', ctx)).toEqual([projectSpaceId(SECRETARY)]);
+    expect(resolveSpaceIds('global', ctx)).toEqual(['global']);
+  });
+
+  it('可见项目里重复的、或就是私有项目本身的 id 只出现一次', () => {
+    expect(
+      resolveSpaceIds('all', {
+        projectId: SECRETARY,
+        secretary: { readProjectIds: [SECRETARY, VISIBLE, VISIBLE] },
+      })
+    ).toEqual([projectSpaceId(SECRETARY), projectSpaceId(VISIBLE), 'global']);
+  });
+
+  it('私有空间缺失（秘书项目还没登记）时只剩可见项目与 global', () => {
+    expect(
+      resolveSpaceIds('all', { projectId: null, secretary: { readProjectIds: [VISIBLE] } })
+    ).toEqual([projectSpaceId(VISIBLE), 'global']);
+    expect(
+      resolveSpaceIds('project', { projectId: null, secretary: { readProjectIds: [] } })
+    ).toEqual([]);
+  });
+
+  it('secretaryPrivateSpace：秘书给私有空间，其它会话没有限制', () => {
+    expect(secretaryPrivateSpace(ctx)).toBe(projectSpaceId(SECRETARY));
+    expect(secretaryPrivateSpace({ projectId: PROJECT })).toBeNull();
+    expect(
+      secretaryPrivateSpace({ projectId: null, secretary: { readProjectIds: [] } })
+    ).toBeNull();
+  });
+
+  it('secretaryReadProjectIds：未完成设置按默认档案（全部可见）；all 只给用户自己的项目；列表取交集', () => {
+    const projects = [
+      { projectId: VISIBLE, state: 'active' as const },
+      { projectId: VISIBLE_2, kind: 'local' as const, state: 'active' as const },
+      { projectId: 'ssh-1', kind: 'ssh' as const, state: 'active' as const },
+      { projectId: 'removed-1', state: 'removed' as const },
+      { projectId: 'scratch-1', kind: 'scratch' as const, state: 'active' as const },
+      { projectId: SECRETARY, kind: 'secretary' as const, state: 'active' as const },
+      { projectId: 'bot-home-1', kind: 'bot-home' as const, state: 'active' as const },
+    ];
+    expect(secretaryReadProjectIds(null, projects)).toEqual([VISIBLE, VISIBLE_2, 'ssh-1']);
+    expect(secretaryReadProjectIds({ visibleProjectIds: 'all' }, projects)).toEqual([
+      VISIBLE,
+      VISIBLE_2,
+      'ssh-1',
+    ]);
+    expect(
+      secretaryReadProjectIds(
+        { visibleProjectIds: [VISIBLE_2, 'bot-home-1', 'removed-1'] },
+        projects
+      )
+    ).toEqual([VISIBLE_2]);
   });
 });

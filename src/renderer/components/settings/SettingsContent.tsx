@@ -13,6 +13,7 @@ import {
   Keyboard,
   Layers,
   LayoutTemplate,
+  MessagesSquare,
   Mic,
   Palette,
   Plug,
@@ -54,6 +55,7 @@ import { PresetsSettings } from './PresetsSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { ProvidersSettings } from './ProvidersSettings';
 import { ResourcesSettings } from './ResourcesSettings';
+import { SecretarySettings } from './SecretarySettings';
 import { SkillsSettings } from './SkillsSettings';
 import { SshSettings } from './SshSettings';
 import {
@@ -99,6 +101,7 @@ export function SettingsContent() {
   };
   const disabledBuiltinTools = useSettingsStore((state) => state.disabledBuiltinTools);
   const botModeEnabled = useSettingsStore((state) => state.botModeEnabled);
+  const secretaryEnabled = useSettingsStore((state) => state.secretaryEnabled);
   // 水合前 botModeEnabled 恒为 false：此时不据此把指向 Bot 页的深链改落到实验页
   const hydrated = React.useSyncExternalStore(
     (onChange) => useSettingsStore.persist?.onFinishHydration?.(onChange) ?? (() => {}),
@@ -174,8 +177,14 @@ export function SettingsContent() {
     { id: 'experimental', icon: FlaskConical, label: 'Experimental' },
     { id: 'bots', icon: BotMessageSquare, label: 'Bot mode', sub: true },
     { id: 'botTemplates', icon: LayoutTemplate, label: 'Bot templates', sub: true },
+    { id: 'secretary', icon: MessagesSquare, label: 'Secretary', sub: true },
   ];
-  const categories = visibleCategories(allCategories, disabledBuiltinTools, botModeEnabled);
+  const categories = visibleCategories(
+    allCategories,
+    disabledBuiltinTools,
+    botModeEnabled,
+    secretaryEnabled || !hydrated
+  );
   const groupedCategories = groupCategories(
     searchCategories(categories, settingsCatalog, settingsQuery, t)
   );
@@ -184,7 +193,8 @@ export function SettingsContent() {
   const resolvedCategory = resolveActiveCategory(
     activeCategory,
     disabledBuiltinTools,
-    botModeEnabled || !hydrated
+    botModeEnabled || !hydrated,
+    secretaryEnabled || !hydrated
   );
   React.useEffect(() => {
     if (resolvedCategory !== activeCategory) setActiveCategory(resolvedCategory);
@@ -348,6 +358,7 @@ export function SettingsContent() {
             )}
             {activeCategory === 'bots' && <BotSettings />}
             {activeCategory === 'botTemplates' && <BotTemplatesSettings />}
+            {activeCategory === 'secretary' && <SecretarySettings />}
           </div>
         </div>
       )}

@@ -79,6 +79,35 @@ describe('SourceAuthorityRegistry', () => {
     expect(conversation.accepted).toBe(true);
   });
 
+  it('secretary 项目由 Main 幂等登记，renderer 不能创建或删除，但可以选中和建会话', () => {
+    const root = temporary();
+    const registry = new SourceAuthorityRegistry({
+      registryFile: path.join(root, 'registry.json'),
+    });
+    const dir = path.join(root, 'secretary', 'workspace');
+    const first = registry.ensureSecretaryProject(dir);
+    expect(first?.kind).toBe('secretary');
+    expect(registry.ensureSecretaryProject(dir)?.projectId).toBe(first?.projectId);
+    if (!first) return;
+
+    expect(registry.rendererProjection().projects.map((project) => project.kind)).toContain(
+      'secretary'
+    );
+    expect(registry.createProject({ requestId: 'p', path: dir, kind: 'secretary' }).accepted).toBe(
+      false
+    );
+    expect(
+      registry.selectProject({ requestId: 's', projectId: first.projectId, version: 1 }).accepted
+    ).toBe(true);
+    expect(
+      registry.removeProject({ requestId: 'r', projectId: first.projectId, version: 1 }).accepted
+    ).toBe(false);
+    expect(
+      registry.createConversation({ requestId: 'c', projectId: first.projectId, projectVersion: 1 })
+        .accepted
+    ).toBe(true);
+  });
+
   it('bot 会话只由 Main 创建/结束，renderer 投影和通用会话操作拒绝它', () => {
     const root = temporary();
     const registryFile = path.join(root, 'registry.json');

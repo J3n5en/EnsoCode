@@ -1024,19 +1024,20 @@ export class ExtensionPluginService {
     });
   }
 
-  toolsForSpawn(): PluginToolDescriptor[] {
-    return this.enabled().flatMap(({ id, manifest }) => [
+  /** ids 只给秘书这类按勾选圈定的会话用；不传就是全部已启用插件 */
+  toolsForSpawn(ids?: readonly string[]): PluginToolDescriptor[] {
+    return this.enabled(ids).flatMap(({ id, manifest }) => [
       ...manifest.contributes.agentTools.map((tool) => this.describeTool(id, tool)),
       ...this.dynamic.toolsFor(id).map((tool) => this.describeTool(id, tool)),
     ]);
   }
 
   /** 无订阅且没有 agent.inject 时不给会话下发事件计划 */
-  eventPlanForSpawn(): PluginEventPlan | null {
+  eventPlanForSpawn(ids?: readonly string[]): PluginEventPlan | null {
     const observe = new Set<string>();
     const intercept: { event: string; tools?: string[] }[] = [];
     let inject = false;
-    for (const { manifest } of this.enabled()) {
+    for (const { manifest } of this.enabled(ids)) {
       if (manifest.permissions.includes('agent.inject')) inject = true;
       for (const sub of manifest.contributes.events) {
         if (isHostPluginEvent(sub.event)) continue;
@@ -1107,8 +1108,8 @@ export class ExtensionPluginService {
     );
   }
 
-  skillPathsForSpawn(activePresetId?: string): string[] {
-    return this.enabled().flatMap(({ id, dir, manifest }) => {
+  skillPathsForSpawn(activePresetId?: string, ids?: readonly string[]): string[] {
+    return this.enabled(ids).flatMap(({ id, dir, manifest }) => {
       const root = pluginPackagePath(this.options.root, id, dir);
       return this.contributedSkills(id, manifest, activePresetId).map((rel) => resolve(root, rel));
     });
@@ -2342,9 +2343,11 @@ export class ExtensionPluginService {
     }
   }
 
-  private enabled(): (Loaded & { id: string })[] {
+  private enabled(ids?: readonly string[]): (Loaded & { id: string })[] {
+    const allowed = ids ? new Set(ids) : null;
     return this.records.flatMap((r) => {
       if (r.state !== 'enabled') return [];
+      if (allowed && !allowed.has(r.id)) return [];
       const manifest = this.load(r.id, r.dir);
       return manifest ? [{ id: r.id, dir: r.dir, manifest }] : [];
     });

@@ -49,14 +49,15 @@ export class MemoryInvoker<Op extends string = MemoryOp> {
     private readonly options: { timeoutMs?: number } = {}
   ) {}
 
-  invoke(op: Op, params: unknown, signal?: AbortSignal): Promise<unknown> {
+  /** timeoutMs 只给秘书自造工具用：它自己的超时可能远长于默认值 */
+  invoke(op: Op, params: unknown, signal?: AbortSignal, timeoutMs?: number): Promise<unknown> {
     if (signal?.aborted) return Promise.reject(new Error('Memory action aborted'));
     const requestId = randomUUID();
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
-    const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const waitMs = timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(
-      () => settle(new Error(`Memory action ${op} timed out after ${timeoutMs}ms`)),
-      timeoutMs
+      () => settle(new Error(`Memory action ${op} timed out after ${waitMs}ms`)),
+      waitMs
     );
     const onAbort = () => settle(new Error('Memory action aborted'));
     const settle = (outcome: unknown) => {
@@ -237,7 +238,7 @@ export function createMemoryTools(
         'would answer; never store raw chat transcripts or transient task chatter. A typical ' +
         'session yields at most 1-3 memories. If the result is ' +
         "status='candidates_found', NOTHING was written: similar memories already exist. Either drop " +
-        'the capture, resubmit with evolvesFromId + evolvesRelation to record how it relates to one ' +
+        'the capture, resubmit with evolvesFromId + evolvesRelation + evolvesReason to record how it relates to one ' +
         'of them, or resubmit with force=true to store it as a separate memory.',
       schema(
         {
@@ -295,8 +296,17 @@ export function createMemoryTools(
             enum: [...EVOLVES_RELATIONS],
             description:
               'Only with a non-empty evolvesFromId; a valid relation paired with an empty id is ignored. ' +
-              'replaces = supersedes the old memory (it stops being latest); enriches = adds detail; ' +
-              'confirms = restates it; challenges = contradicts it (both stay latest, flagged for review)',
+              'replaces = supersedes the old memory (it stops being latest); enriches = adds detail or a ' +
+              'newer state of the same fact without contradicting it; confirms = restates it; ' +
+              'challenges = the two claims cannot both be true (both stay latest, flagged for the user ' +
+              'to review). Pick enriches when the new memory merely updates or extends the old one. ' +
+              'Always pair it with evolvesReason.',
+          },
+          evolvesReason: {
+            type: 'string',
+            description:
+              'Only with evolvesRelation: one sentence on why they relate or conflict. It is shown to the ' +
+              'user when a contradiction is reviewed, so say what changed or which claim disagrees.',
           },
         },
         ['content']

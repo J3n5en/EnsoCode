@@ -62,4 +62,18 @@ describe('conversationCwd', () => {
       conversationCwd({ kind: 'scratch', canonicalPath: '/data/scratch/', conversationId: ID })
     ).toBe(`/data/scratch/${ID}`);
   });
+
+  it('secretary 会话目录是项目根，忽略 worktree', () => {
+    expect(
+      conversationCwd({
+        kind: 'secretary',
+        canonicalPath: '/data/secretary/workspace',
+        conversationId: ID,
+        worktreePath: '/worktrees/feature',
+      })
+    ).toBe('/data/secretary/workspace');
+    expect(
+      conversationCwd({ kind: 'secretary', canonicalPath: '', conversationId: ID })
+    ).toBeNull();
+  });
 });

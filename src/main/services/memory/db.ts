@@ -5,7 +5,15 @@ import Database from 'better-sqlite3';
 import { getLoadablePath } from 'sqlite-vec';
 import { contentHash } from './contentHash';
 
-export const MEMORY_SCHEMA_VERSION = 9;
+export const MEMORY_SCHEMA_VERSION = 11;
+
+/**
+ * vec0 的 chunk 是定长预分配：一个 chunk 恒定占 chunk_size × dim × 4 字节，与里面实际有几行无关。
+ * 默认 chunk_size = 1024，而 model / space_id 都是 partition key —— 每个 (model, space) 分区至少一个 chunk，
+ * 57 个 space 就是 58 × 1024 × 512 × 4 ≈ 116 MB，而真实向量只有 9.5 MB。
+ * 64 行/chunk 时同一份数据 14 MB，KNN 还更快（小分区只扫一个 64 行的 chunk，不用扫满 1024 槽）。
+ */
+export const VEC_CHUNK_SIZE = 64;
 
 /** 已知最大的 embedding 维度是 qwen3-8b 的 4096；留 4 倍余量，再大视为脏数据 */
 export const MAX_EMBEDDING_DIM = 16_384;
@@ -34,13 +42,15 @@ export function vecTableName(dim: number): string {
  * 一个维度一张 vec0 表，多模型共存。`model` / `space_id` 做 partition key：KNN 在 vec 层就按
  * 模型与 space 分区，避免 global 记忆占满 top-k 后 JOIN 过滤把项目内命中挤光（3a 评审 Major 4）。
  * 表内只索引 is_latest = 1 的行，历史版本不进 KNN 名额。
+ * chunk_size 必须显式给：默认 1024 会让每个分区固定吃掉 chunk_size × dim × 4 字节（见 VEC_CHUNK_SIZE）。
  */
 export function ensureVecTable(db: Database.Database, dim: number): string {
   const table = vecTableName(dim);
   db.exec(
     `CREATE VIRTUAL TABLE IF NOT EXISTS ${table}
      USING vec0(embedding float[${dim}] distance_metric=cosine,
-                model text partition key, space_id text partition key)`
+                model text partition key, space_id text partition key,
+                chunk_size=${VEC_CHUNK_SIZE})`
   );
   return table;
 }
@@ -322,6 +332,42 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // v10：向量表瘦身 + 命中采集。
+  // vec0 不能 ALTER chunk_size，只能整表重建；memories.embedding 是权威副本，重建不丢向量，
+  // 中途失败下次开库由 syncVecTables 补齐。腾出来的页要等 VACUUM 才还给文件系统，
+  // 那一步在 maintenance.ts 里单独做（不能在迁移事务内跑）。
+  // last_hit_at / hit_count 只给维护筛选用，不进排序（写入点见 search.ts）。
+  (db) => {
+    const cols = db.prepare('PRAGMA table_info(memories)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'last_hit_at')) {
+      db.exec('ALTER TABLE memories ADD COLUMN last_hit_at TEXT');
+    }
+    if (!cols.some((c) => c.name === 'hit_count')) {
+      db.exec('ALTER TABLE memories ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_maintenance (
+        kind       TEXT PRIMARY KEY,
+        phase      TEXT NOT NULL,
+        detail     TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    for (const t of listVecTables(db)) db.exec(`DROP TABLE IF EXISTS ${vecTableName(t.dim)}`);
+    syncVecTables(db);
+  },
+  // v11：遗忘巡检。archive_candidate_at 只标「建议归档」，归档动作仍要用户确认（或显式打开自动归档），
+  // 巡检本身永不删除行。decay_score_cached 自建表起恒为 1.0（从没被写过），改由巡检写入真实衰减分。
+  (db) => {
+    const cols = db.prepare('PRAGMA table_info(memories)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'archive_candidate_at')) {
+      db.exec('ALTER TABLE memories ADD COLUMN archive_candidate_at TEXT');
+    }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS memories_archive_candidate
+        ON memories (archive_candidate_at) WHERE archive_candidate_at IS NOT NULL;
+    `);
+  },
 ];
 
 /**

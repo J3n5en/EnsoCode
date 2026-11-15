@@ -1,4 +1,9 @@
-import { type ConversationsPatch, mergeConversationOrder } from '@shared/conversationsPatch';
+import {
+  type ConversationsPatch,
+  mergeConversationOrder,
+  parseConversationsPatch,
+  type SequencedConversationsPatch,
+} from '@shared/conversationsPatch';
 import { RUNTIME_CONVERSATION_KEYS } from './persistSnapshot';
 
 const RUNTIME_KEYS: ReadonlySet<string> = new Set(RUNTIME_CONVERSATION_KEYS);
@@ -39,4 +44,44 @@ export function applyConversationsPatchToState<C extends object>(
   const order = [...added, ...base];
   const activeId = state.activeId && !exists(state.activeId) ? (order[0] ?? null) : state.activeId;
   return { conversations, order, activeId };
+}
+
+/** 已应用补丁的序号，persist 写回时作为确认号上报给 Main */
+let appliedSeq = 0;
+let hydrated = false;
+const buffered: SequencedConversationsPatch[] = [];
+
+export const conversationsAppliedSeq = (): number => appliedSeq;
+
+/** 磁盘读回的序号：之后推送的补丁都还没应用 */
+export function resetConversationsAppliedSeq(seq: number): void {
+  appliedSeq = seq;
+}
+
+/** 先推进确认号再返回新状态：persist 在 setState 的同步回调里读到的确认号与值一致 */
+export function applySequencedConversationsPatch<C extends object>(
+  state: PatchTarget<C>,
+  patch: SequencedConversationsPatch
+): PatchTarget<C> {
+  appliedSeq = Math.max(appliedSeq, patch.seq);
+  return applyConversationsPatchToState(state, patch);
+}
+
+/**
+ * 水合前的补丁只缓存：水合会用磁盘值盖掉内存，丢弃等于永久丢失 Main 的插入。
+ * 水合后返回补丁由调用方立即应用。
+ */
+export function queueConversationsPatch(value: unknown): SequencedConversationsPatch | null {
+  const patch = parseConversationsPatch(value);
+  if (!patch) return null;
+  if (!hydrated) {
+    buffered.push(patch);
+    return null;
+  }
+  return patch;
+}
+
+export function flushBufferedConversationsPatches(): SequencedConversationsPatch[] {
+  hydrated = true;
+  return buffered.splice(0);
 }

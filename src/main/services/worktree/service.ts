@@ -7,7 +7,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionWorktree, WorktreeStatus } from '../../../shared/types/worktree';
@@ -45,9 +45,13 @@ export interface CreateWorktreeOptions {
   projectId: string;
   /** worktree 托管根目录（userData/worktrees） */
   root: string;
+  /** 基线：分支名或提交号。缺省用 HEAD */
+  baseRef?: string;
+  /** 指定的新分支名。已存在时直接报错，绝不覆盖 */
+  branch?: string;
 }
 
-/** 从主工作树 HEAD 为会话创建隔离 worktree（新分支，命名自动避让冲突） */
+/** 从基线为会话创建隔离 worktree（新分支，命名自动避让冲突） */
 export async function createSessionWorktree(
   options: CreateWorktreeOptions
 ): Promise<SessionWorktree> {
@@ -58,24 +62,36 @@ export async function createSessionWorktree(
   if (!(await gitOk(repoPath, 'rev-parse', 'HEAD'))) {
     throw new Error('repository has no commits; create an initial commit first');
   }
-  const baseCommit = await git(repoPath, 'rev-parse', 'HEAD');
-  const currentBranch = await git(repoPath, 'branch', '--show-current');
-  const baseBranch = currentBranch || null;
+  const wanted = options.branch?.trim();
+  if (wanted) {
+    if (!(await branchNameValid(repoPath, wanted))) {
+      throw new Error(`invalid branch name: ${wanted}`);
+    }
+    if (await branchExists(repoPath, wanted)) {
+      throw new Error(`branch already exists: ${wanted}`);
+    }
+  }
+  const baseRef = options.baseRef?.trim();
+  // 基线不存在时 rev-parse 直接失败，不建任何东西
+  const baseCommit = await git(repoPath, 'rev-parse', `${baseRef || 'HEAD'}^{commit}`);
+  const baseBranch = baseRef
+    ? await baseBranchName(repoPath, baseRef)
+    : (await git(repoPath, 'branch', '--show-current')) || null;
 
   const base = shortId(conversationId);
-  // 分支冲突时追加时间戳避让（同会话重建/重复创建场景）
+  let branch = wanted || `enso/${base}`;
   let suffix = '';
-  let branch = `enso/${base}`;
+  // 指定了分支名时只避让目录；没指定时分支冲突也追加时间戳（同会话重复创建场景）
   for (let attempt = 0; attempt < 5; attempt++) {
-    const existing = await git(repoPath, 'branch', '--list', branch);
+    const existing = wanted ? false : Boolean(await git(repoPath, 'branch', '--list', branch));
     const dirTaken = existsSync(join(root, projectId, `${base}${suffix}`));
     if (!existing && !dirTaken) break;
     suffix = `-${Date.now().toString(36)}${attempt || ''}`;
-    branch = `enso/${base}${suffix}`;
+    if (!wanted) branch = `enso/${base}${suffix}`;
   }
   const path = join(root, projectId, `${base}${suffix}`);
   await mkdir(join(root, projectId), { recursive: true });
-  await git(repoPath, 'worktree', 'add', '-b', branch, path, 'HEAD');
+  await git(repoPath, 'worktree', 'add', '-b', branch, path, baseCommit);
 
   return {
     conversationId,
@@ -87,6 +103,104 @@ export async function createSessionWorktree(
     baseCommit,
     createdAt: Date.now(),
   };
+}
+
+async function branchExists(repoPath: string, branch: string): Promise<boolean> {
+  return gitOk(repoPath, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`);
+}
+
+/** 基线是本地分支时记下名字，worktreeStatus 用它算领先提交；提交号只留 baseCommit */
+async function baseBranchName(repoPath: string, baseRef: string): Promise<string | null> {
+  return (await branchExists(repoPath, baseRef)) ? baseRef : null;
+}
+
+async function branchNameValid(repoPath: string, branch: string): Promise<boolean> {
+  return gitOk(repoPath, 'check-ref-format', '--branch', branch);
+}
+
+export interface DispatchBaseProbe {
+  /** checkout 是这个项目的一个现有检出：项目目录本身，或它的某个 worktree */
+  knownCheckout: boolean;
+  /** checkout 与项目是同一个 git 仓库 */
+  sameRepo: boolean;
+  baseRefExists: boolean;
+  branchExists: boolean;
+  branchValid: boolean;
+}
+
+export interface DispatchBaseProbeInput {
+  projectPath: string;
+  checkout?: string;
+  baseRef?: string;
+  branch?: string;
+}
+
+function physical(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** 仓库的公共 git 目录：同一个仓库的检出（含 worktree）解析到同一处 */
+async function commonDir(cwd: string): Promise<string | null> {
+  try {
+    const raw = await git(cwd, 'rev-parse', '--git-common-dir');
+    return physical(raw.startsWith('/') ? raw : join(cwd, raw));
+  } catch {
+    return null;
+  }
+}
+
+/** 项目的全部现有检出：项目目录 + git 认得的 worktree */
+async function knownCheckouts(projectPath: string): Promise<Set<string>> {
+  const paths = new Set<string>([physical(projectPath)]);
+  try {
+    const listed = await git(projectPath, 'worktree', 'list', '--porcelain');
+    for (const line of listed.split('\n')) {
+      if (!line.startsWith('worktree ')) continue;
+      paths.add(physical(line.slice('worktree '.length).trim()));
+    }
+  } catch {
+    // 不是仓库：只剩项目目录本身
+  }
+  return paths;
+}
+
+/**
+ * 派发基线的既成事实：checkout 必须是这个项目的现有检出、同一个仓库，
+ * baseRef 必须能解析，branch 必须合法且没被占用。派发前一次性查清，失败就不建会话。
+ */
+export async function probeDispatchBase(input: DispatchBaseProbeInput): Promise<DispatchBaseProbe> {
+  const { projectPath, checkout, baseRef, branch } = input;
+  const projectRepo = await commonDir(projectPath);
+  const facts: DispatchBaseProbe = {
+    knownCheckout: true,
+    sameRepo: true,
+    baseRefExists: true,
+    branchExists: false,
+    branchValid: true,
+  };
+  if (checkout) {
+    facts.knownCheckout = (await knownCheckouts(projectPath)).has(physical(checkout));
+    const checkoutRepo = await commonDir(checkout);
+    facts.sameRepo = projectRepo !== null && projectRepo === checkoutRepo;
+  }
+  if (baseRef) {
+    facts.baseRefExists = await gitOk(
+      projectPath,
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `${baseRef}^{commit}`
+    );
+  }
+  if (branch) {
+    facts.branchValid = await branchNameValid(projectPath, branch);
+    facts.branchExists = await branchExists(projectPath, branch);
+  }
+  return facts;
 }
 
 /** worktree 轻量状态：存在性 / 未提交 / 领先 base 的提交数 */
@@ -118,6 +232,11 @@ export async function repoIsClean(repoPath: string): Promise<boolean> {
   await git(repoPath, 'rev-parse', '--is-inside-work-tree');
   const porcelain = await git(repoPath, 'status', '--porcelain');
   return porcelain.length === 0;
+}
+
+/** 当前分支名；detached HEAD 返回 null，非 git 目录抛错 */
+export async function currentBranch(repoPath: string): Promise<string | null> {
+  return (await git(repoPath, 'branch', '--show-current')) || null;
 }
 
 /**

@@ -1,6 +1,7 @@
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { artifactPreviewKind } from './artifacts';
 import { decodeUtf8Base64 } from './viewBridge';
 
@@ -134,9 +135,21 @@ export function PluginArtifactList({
 }
 
 /** 插件工具卡片下方的产出 */
-export function PluginArtifactsCard({ artifacts }: { artifacts: PluginArtifactInfo[] }) {
+export function PluginArtifactsCard({
+  artifacts,
+  align = 'tool-row',
+}: {
+  artifacts: PluginArtifactInfo[];
+  /** card：跟可读工具卡片同宽；tool-row：缩进到旧工具行正文下 */
+  align?: 'card' | 'tool-row';
+}) {
   return (
-    <div className="mt-1 mb-1.5 ml-[30px] rounded-lg border border-border/70 bg-card px-3 py-2">
+    <div
+      className={cn(
+        'mt-1 mb-1.5 rounded-lg border border-border/70 bg-card px-3 py-2',
+        align === 'card' ? 'w-full' : 'ml-[30px]'
+      )}
+    >
       <p className="mb-1 text-[11px] text-muted-foreground">产出文件</p>
       <PluginArtifactList artifacts={artifacts} />
     </div>

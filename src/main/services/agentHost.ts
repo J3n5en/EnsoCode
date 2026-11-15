@@ -46,6 +46,11 @@ import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
+import { appUserImageDirs } from '@shared/secretary/imageView';
+import {
+  SECRETARY_ALWAYS_ENABLED_TOOLS,
+  SECRETARY_FORCED_DISABLED_TOOLS,
+} from '@shared/secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '@shared/shellLimits';
 import { parseSmartCompactMode } from '@shared/smartCompactMode';
 import {
@@ -98,6 +103,7 @@ import {
   type ModelThinkingLevelOverride,
 } from '@shared/types/llm';
 import type { AgentDispatchTask } from '@shared/types/mentions';
+import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { parseDisabledWorkflowPresets } from '@shared/types/workflow';
 import {
   canBeVirtualMember,
@@ -123,7 +129,7 @@ import {
   takeAgentWorkerCrash,
 } from './agentWorkerExit';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
-import { BuiltinToolScopes, sessionDisabledTools } from './builtinToolScopes';
+import { BuiltinToolScopes, sessionDisabledTools, withoutKeepEnabled } from './builtinToolScopes';
 import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { dcgRoot, installedDcgPath } from './dcgBinary';
@@ -329,6 +335,8 @@ export function startAgentWorker(): void {
       ...process.env,
       ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
       ENSO_AGENT_DATA_DIR: agentDataDir(),
+      // 编码会话的 image_view 白名单：应用存放用户图片的目录（bot-chats/<chatId>/media）
+      ENSO_USER_IMAGE_DIRS: appUserImageDirs(app.getPath('userData')).join(path.delimiter),
       PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
       ENSO_MODELS_DEV_CACHE: path.join(app.getPath('userData'), 'models-dev-cache.json'),
       ENSO_RTK_PATH: bundledRtkPath({
@@ -1013,6 +1021,20 @@ export function spawnSession(
       writeLock?: { label: string; ancestors: string[] };
     };
     /**
+     * 秘书会话：人设由 Main 组装，插件只按勾选的 id 挂工具与技能，MCP / hooks / 命令、
+     * 子代理类型与全局指令仍然不挂，工具白名单在 worker 里按名字执行
+     */
+    secretary?: {
+      systemPrompt: string;
+      pluginIds?: readonly string[];
+      /** 勾选给秘书的全局 skill id */
+      skillIds?: readonly string[];
+      /** 秘书自有 skill 的目录（已按启用状态筛过），总是挂上 */
+      skillDirs?: readonly string[];
+      /** 秘书自造工具的描述符：worker 只按这些确切名字挂工具 */
+      tools?: readonly SecretaryToolDescriptor[];
+    };
+    /**
      * Main 给这次 spawn 的实例号（目前只有 Bot 宿主传）：随 spawn-parent 下发，之后同会话的 prompt / steer /
      * retry 自动带上，worker 在 parent-rejected / parent-ended 里回显，调用方据此确定结束事件属于哪个实例
      */
@@ -1038,71 +1060,92 @@ export function spawnSession(
   }
   const approvalReviewerSource = reviewer.ok ? reviewer.source : null;
   const bot = options?.bot;
+  const secretary = options?.secretary;
+  // 秘书只挂勾选的插件；Bot 会话仍然整批关掉
   const extensionPlugins = bot ? null : getExtensionPlugins();
-  const overlay = bot ? undefined : presetOverlay(request.presetId, resolvePreset);
+  /** 只有秘书会话按勾选圈定插件；undefined 表示普通会话照旧拿全部已启用插件 */
+  const secretaryPluginIds = secretary ? (secretary.pluginIds ?? []) : undefined;
+  const overlay = bot || secretary ? undefined : presetOverlay(request.presetId, resolvePreset);
   const overlayResult = extensionPlugins?.presetForSpawn(overlay?.pluginPresetId);
   if (overlayResult && !overlayResult.ok && overlay?.required) {
     return { ok: false, error: overlayResult.error };
   }
   // 自建预设叠加的插件预设失效（插件停用/卸载）时退回只用自建预设
   const pluginPreset = overlayResult?.ok ? overlayResult : undefined;
-  const preset: Preset | undefined = bot
-    ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
-    : overlay?.preset;
-  const ownKit = bot
-    ? { ok: true as const, systemPrompt: bot.systemPrompt }
-    : resolvePresetPromptKit(preset);
+  const preset: Preset | undefined = secretary
+    ? { id: 'secretary', name: 'secretary', skillIds: [], mcpServerIds: [] }
+    : bot
+      ? { id: 'bot', name: 'bot', skillIds: bot.skillIds, mcpServerIds: bot.mcpServerIds }
+      : overlay?.preset;
+  const ownKit = secretary
+    ? { ok: true as const, systemPrompt: secretary.systemPrompt }
+    : bot
+      ? { ok: true as const, systemPrompt: bot.systemPrompt }
+      : resolvePresetPromptKit(preset);
   if (!ownKit.ok) {
     return { ok: false, error: '自定义系统提示词正文读取失败，请重新保存或恢复默认。' };
   }
   const promptKit = mergePresetPromptKit(ownKit, pluginPreset);
-  const instruction = bot
-    ? bot.instruction
-    : pluginPresetInstruction(pluginPreset?.instruction, () =>
-        resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined)
-      );
+  // 秘书不加载全局指令：那是给写代码的会话的
+  const instruction = secretary
+    ? undefined
+    : bot
+      ? bot.instruction
+      : pluginPresetInstruction(pluginPreset?.instruction, () =>
+          resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined)
+        );
   const state = readSettingsState();
   // Claude 插件：按各自开关现读安装目录，不受预设影响
-  const plugins = enabledPlugins(state);
+  const plugins = secretary
+    ? { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] }
+    : enabledPlugins(state);
   // Enso 插件：顺序在预设、Claude 插件之后；Bot 会话不合并
   const activePluginPreset = pluginPreset ? overlay?.pluginPresetId : undefined;
   const skillPaths = [
     ...enabledSkillPaths(preset),
-    ...(bot ? [] : plugins.skillPaths),
-    ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset) ?? []),
+    ...(bot || secretary ? [] : plugins.skillPaths),
+    ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset, secretaryPluginIds) ?? []),
+    ...secretarySkillPaths(secretary),
   ];
-  const workflowPresetFiles = extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? [];
+  // 秘书不挂插件的 MCP 与 workflow：插件进程与凭据不该为它拉起，workflow 也不在它的能力里
+  const workflowPresetFiles = secretary
+    ? []
+    : (extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? []);
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
   for (const server of [
-    ...(bot ? [] : plugins.mcpServers),
-    ...(extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? []),
+    ...(bot || secretary ? [] : plugins.mcpServers),
+    ...(secretary ? [] : (extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? [])),
   ]) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);
   }
-  const pluginTools = extensionPlugins?.toolsForSpawn() ?? [];
+  const pluginTools = extensionPlugins?.toolsForSpawn(secretaryPluginIds) ?? [];
   // hooks 在本机起进程，远程会话的 cwd 不在本机
-  const pluginHooks = remote ? [] : plugins.hooks;
-  const subagentModels = options?.omitDispatchTools
-    ? []
-    : configuredSubagentModels(authenticatedAccountKeys);
-  const agentTypes = options?.omitDispatchTools
-    ? []
-    : configuredAgentTypes(
-        authenticatedAccountKeys,
-        subagentModels.length > 0,
-        plugins,
-        // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
-        bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
-      );
+  const pluginHooks = remote || secretary ? [] : plugins.hooks;
+  const subagentModels =
+    options?.omitDispatchTools || secretary
+      ? []
+      : configuredSubagentModels(authenticatedAccountKeys);
+  const agentTypes =
+    options?.omitDispatchTools || secretary
+      ? []
+      : configuredAgentTypes(
+          authenticatedAccountKeys,
+          subagentModels.length > 0,
+          plugins,
+          // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
+          bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
+        );
   // 当前平台不能操作桌面时禁用 computer，避免模型反复调用必失败的工具
-  const extraDisabledTools = options?.extraDisabledTools ?? [];
-  const disabledTools = sessionDisabledTools(
-    state,
-    projectId,
-    extraDisabledTools,
-    isComputerPlatformSupported()
+  const extraDisabledTools = [
+    ...(options?.extraDisabledTools ?? []),
+    ...(secretary ? SECRETARY_FORCED_DISABLED_TOOLS : []),
+  ];
+  // 记忆是秘书的核心能力：全局"禁用内置工具"对秘书会话不生效
+  const disabledTools = withoutKeepEnabled(
+    sessionDisabledTools(state, projectId, extraDisabledTools, isComputerPlatformSupported()),
+    secretary ? SECRETARY_ALWAYS_ENABLED_TOOLS : []
   );
   const loadHarnessAssets = state?.loadHarnessAssets === true;
   const trustedProjectCode = projectTrustedCode(state?.projects, projectId);
@@ -1148,7 +1191,7 @@ export function spawnSession(
     },
   });
   if (!presetApplied.ok) return { ok: false, error: presetApplied.error };
-  const pluginEvents = extensionPlugins?.eventPlanForSpawn() ?? null;
+  const pluginEvents = extensionPlugins?.eventPlanForSpawn(secretaryPluginIds) ?? null;
   // worker 崩溃/退出后不自动拉起的话，所有会话都只能靠重启 app 恢复；在 spawn 入口按需重建
   if (!worker && workerExited) startAgentWorker();
   const dcgPath = state?.dcgEnabled === true ? installedDcgPath(dcgRoot()) : null;
@@ -1179,10 +1222,12 @@ export function spawnSession(
     ...(plugins.commands.length > 0 ? { pluginCommands: plugins.commands } : {}),
     ...(pluginHooks.length > 0 ? { pluginHooks } : {}),
     ...(pluginTools.length > 0 ? { pluginTools } : {}),
+    ...(secretary?.tools?.length ? { secretaryTools: [...secretary.tools] } : {}),
     ...(workflowPresetFiles.length > 0 ? { workflowPresetFiles } : {}),
     ...(pluginEvents ? { pluginEvents } : {}),
     ...(presetApplied.approvalMode ? { approvalMode: presetApplied.approvalMode } : {}),
     ...(request.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
+    ...(request.askRelay ? { askRelay: request.askRelay } : {}),
     ...(request.planMode !== undefined ? { planMode: request.planMode } : {}),
     ...approvalReviewerSpawnFields(approvalReviewerSource),
     ...(agentTypes.length > 0 ? { agentTypes } : {}),
@@ -1198,6 +1243,7 @@ export function spawnSession(
     ...(promptKit.systemPromptBoost ? { systemPromptBoost: promptKit.systemPromptBoost } : {}),
     ...(promptKit.refusalRetryPrompt ? { refusalRetryPrompt: promptKit.refusalRetryPrompt } : {}),
     ...(options?.bot ? { botMode: true } : {}),
+    ...(secretary ? { secretaryMode: true } : {}),
     ...(options?.bot?.groupTasks ? { botGroupTasks: true } : {}),
     ...(options?.bot?.groupTasks && options.bot.discussMode ? { botDiscussMode: true } : {}),
     ...(options?.bot?.routines ? { botRoutines: true } : {}),
@@ -1211,7 +1257,8 @@ export function spawnSession(
       identity,
       projectId,
       extraDisabledTools,
-      presetApplied.disabledTools
+      presetApplied.disabledTools,
+      secretary ? SECRETARY_ALWAYS_ENABLED_TOOLS : []
     );
     rememberParentInstance(identity.sessionId, options?.instanceId);
     rememberParentToolProfile(identity.sessionId, {
@@ -1574,6 +1621,14 @@ export function sendDelegationResultToSession(
   return sendAgentCommand({ type: 'delegation-result', identity, requestId, ...outcome });
 }
 
+export function sendSecretaryResultToSession(
+  identity: SessionIdentity,
+  requestId: string,
+  outcome: { ok: true; result: unknown } | { ok: false; error: string }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'secretary-result', identity, requestId, ...outcome });
+}
+
 export function sendComputerResultToSession(
   identity: SessionIdentity | ChildSessionIdentity,
   requestId: string,
@@ -1607,12 +1662,14 @@ export function sendPluginInterceptResultToSession(
 }
 
 export function registerPluginSessionBridge(
-  lookup: (sessionId: string) => SessionIdentity | undefined
+  lookup: (sessionId: string) => SessionIdentity | undefined,
+  /** 投递前改写正文：秘书会话要把插件消息包成不可信内容 */
+  decorate?: (sessionId: string, pluginId: string, text: string) => string
 ): void {
   setPluginSessionBridge({
     inject(sessionId, message) {
-      if (message.text.length > PLUGIN_INJECT_MAX_CHARS)
-        return { ok: false, error: '注入文本过长' };
+      const text = decorate?.(sessionId, message.pluginId, message.text) ?? message.text;
+      if (text.length > PLUGIN_INJECT_MAX_CHARS) return { ok: false, error: '注入文本过长' };
       const identity = lookup(sessionId);
       if (!identity) return { ok: false, error: '会话不在运行', notRunning: true };
       const { images, ...rest } = message;
@@ -1620,6 +1677,7 @@ export function registerPluginSessionBridge(
         type: 'plugin-inject',
         identity,
         ...rest,
+        text,
         ...(images.length ? { images } : {}),
       });
       return sent.ok ? { ok: true } : { ok: false, error: sent.error ?? '无法注入消息' };
@@ -2004,9 +2062,30 @@ export function respondApproval(
 export function respondAsk(
   identity: SessionIdentity,
   requestId: string,
-  answer: string
+  answer: string,
+  /** 谁答的：缺省是用户亲手答；relay 是秘书代答，原会话据此显示「X 已回答」 */
+  meta?: { by?: 'user' | 'relay'; name?: string }
 ): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'ask-respond', identity, requestId, answer });
+  return sendAgentCommand({
+    type: 'ask-respond',
+    identity,
+    requestId,
+    answer,
+    ...(meta?.by ? { by: meta.by } : {}),
+    ...(meta?.name ? { name: meta.name } : {}),
+  });
+}
+
+/** 秘书派出/跟踪的会话：把 ask_user 转给它；relay 缺省表示恢复成直接问用户 */
+export function setSessionAskRelay(
+  identity: SessionIdentity,
+  relay?: { name: string }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'set-ask-relay',
+    identity,
+    ...(relay ? { relay } : {}),
+  });
 }
 
 export function compactSession(
@@ -2349,6 +2428,18 @@ function enabledSkillPaths(preset?: Preset): string[] {
   return picked.map((skill) => skill.path);
 }
 
+/** 秘书的 skill：启用的自有目录总是挂，全局 skill 只挂勾选的 */
+function secretarySkillPaths(
+  secretary?: { skillIds?: readonly string[]; skillDirs?: readonly string[] } | undefined
+): string[] {
+  if (!secretary) return [];
+  const ids = secretary.skillIds ?? [];
+  const state = readSettingsState();
+  const skills = Array.isArray(state?.skills) ? state.skills.filter(isSkillEntry) : [];
+  const picked = skills.filter((skill) => ids.includes(skill.id)).map((skill) => skill.path);
+  return [...(secretary.skillDirs ?? []), ...picked];
+}
+
 function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {
   const state = readSettingsState();
   const servers = Array.isArray(state?.mcpServers) ? state.mcpServers.filter(isMcpServerEntry) : [];
@@ -2397,7 +2488,7 @@ export function toSessionMcpConfig(
   return { ...config, loadMode: 'deferred', ...(toolNames ? { toolNames } : {}) };
 }
 
-function asModelRef(value: unknown): DefaultModelRef | null {
+export function asModelRef(value: unknown): DefaultModelRef | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as { providerId?: unknown; modelId?: unknown };
   return typeof candidate.providerId === 'string' &&
@@ -2658,11 +2749,11 @@ export function readSettingsState(): Record<string, unknown> | undefined {
   return persistedSettingsState(readSettings()?.['enso-settings']);
 }
 
-function virtualModelsFromSettings(): VirtualModelEntry[] {
+export function virtualModelsFromSettings(): VirtualModelEntry[] {
   return parseVirtualModels(readSettingsState()?.virtualModels);
 }
 
-function providersFromSettings(): ModelProvider[] {
+export function providersFromSettings(): ModelProvider[] {
   const providers = readSettingsState()?.providers;
   const raw = Array.isArray(providers)
     ? providers.filter(

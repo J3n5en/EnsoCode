@@ -173,4 +173,22 @@ describe('cachedPartializeSessions', () => {
     expect(persisted.order).toEqual(['a']);
     expect(persisted.activeId).toBe('a');
   });
+
+  it('被应用退出打断的会话重启后仍是 interrupted，提示与原因一起留着', () => {
+    const persisted = cachedPartializeSessions({
+      conversations: {
+        cut: {
+          ...conv('cut'),
+          status: 'interrupted',
+          interrupted: { at: 9, kind: 'update', unfinishedTools: ['bash'] },
+        },
+      },
+      order: ['cut'],
+      activeId: 'cut',
+    });
+    expect(persisted.conversations.cut).toMatchObject({
+      status: 'interrupted',
+      interrupted: { at: 9, kind: 'update', unfinishedTools: ['bash'] },
+    });
+  });
 });

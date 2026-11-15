@@ -29,6 +29,10 @@ import {
   normalizeMaxActiveCoworkers,
 } from '@shared/maxActiveCoworkers';
 import {
+  DEFAULT_FORGETTING_SETTINGS,
+  normalizeForgettingSettings,
+} from '@shared/memory/forgetting';
+import {
   DEFAULT_MEMORY_MODEL_IDLE_MINUTES,
   normalizeMemoryModelIdleMinutes,
 } from '@shared/memory/modelIdle';
@@ -210,10 +214,18 @@ const initialState = {
   memoryEmbeddingRemoteProviderId: null as string | null,
   memoryDistillEnabled: false,
   memoryKgEnabled: false,
+  // 遗忘：默认只开「降权」。标记候选与自动归档都要用户显式打开，升级后不会突然归档任何东西。
+  memoryDecayEnabled: DEFAULT_FORGETTING_SETTINGS.enabled,
+  memoryDecayArchiveCandidates: DEFAULT_FORGETTING_SETTINGS.archiveCandidates,
+  memoryDecayAutoArchive: DEFAULT_FORGETTING_SETTINGS.autoArchive,
+  memoryDecayStaleDays: DEFAULT_FORGETTING_SETTINGS.staleDays,
+  memoryDecayMaxImportance: DEFAULT_FORGETTING_SETTINGS.maxImportance,
+  memoryDecayIntervalDays: DEFAULT_FORGETTING_SETTINGS.intervalDays,
   voiceInputEnabled: false,
   botModeEnabled: false,
   scratchSessionsEnabled: false,
   dropShelfEnabled: false,
+  secretaryEnabled: false,
   botRouteClassifier: null as VirtualClassifierConfig | null,
   botAssistantModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   botMaxRunningTurns: DEFAULT_BOT_MAX_RUNNING_TURNS,
@@ -415,10 +427,18 @@ export const useSettingsStore = create<SettingsState>()(
         set({ memoryEmbeddingRemoteProviderId }),
       setMemoryDistillEnabled: (memoryDistillEnabled) => set({ memoryDistillEnabled }),
       setMemoryKgEnabled: (memoryKgEnabled) => set({ memoryKgEnabled }),
+      setMemoryDecayEnabled: (memoryDecayEnabled) => set({ memoryDecayEnabled }),
+      setMemoryDecayArchiveCandidates: (memoryDecayArchiveCandidates) =>
+        set({ memoryDecayArchiveCandidates }),
+      setMemoryDecayAutoArchive: (memoryDecayAutoArchive) => set({ memoryDecayAutoArchive }),
+      setMemoryDecayStaleDays: (memoryDecayStaleDays) => set({ memoryDecayStaleDays }),
+      setMemoryDecayMaxImportance: (memoryDecayMaxImportance) => set({ memoryDecayMaxImportance }),
+      setMemoryDecayIntervalDays: (memoryDecayIntervalDays) => set({ memoryDecayIntervalDays }),
       setVoiceInputEnabled: (voiceInputEnabled) => set({ voiceInputEnabled }),
       setBotModeEnabled: (botModeEnabled) => set({ botModeEnabled }),
       setScratchSessionsEnabled: (scratchSessionsEnabled) => set({ scratchSessionsEnabled }),
       setDropShelfEnabled: (dropShelfEnabled) => set({ dropShelfEnabled }),
+      setSecretaryEnabled: (secretaryEnabled) => set({ secretaryEnabled }),
       setBotRouteClassifier: (botRouteClassifier) => set({ botRouteClassifier }),
       setBotAssistantModel: (botAssistantModel) => set({ botAssistantModel }),
       setBotMaxRunningTurns: (value) =>
@@ -1248,6 +1268,19 @@ export const useSettingsStore = create<SettingsState>()(
         if (memoryModelIdleMinutes !== s.memoryModelIdleMinutes) {
           useSettingsStore.setState({ memoryModelIdleMinutes });
         }
+        // 遗忘阈值来自 settings.json，手改坏了要夹回范围，否则巡检按脏值跑
+        const forgetting = normalizeForgettingSettings(s);
+        if (
+          forgetting.staleDays !== s.memoryDecayStaleDays ||
+          forgetting.maxImportance !== s.memoryDecayMaxImportance ||
+          forgetting.intervalDays !== s.memoryDecayIntervalDays
+        ) {
+          useSettingsStore.setState({
+            memoryDecayStaleDays: forgetting.staleDays,
+            memoryDecayMaxImportance: forgetting.maxImportance,
+            memoryDecayIntervalDays: forgetting.intervalDays,
+          });
+        }
         const maxActiveCoworkers = normalizeMaxActiveCoworkers(s.maxActiveCoworkers);
         if (maxActiveCoworkers !== s.maxActiveCoworkers) {
           useSettingsStore.setState({ maxActiveCoworkers });
@@ -1365,7 +1398,9 @@ function applyProjectAuthorityProjection(projection: SourceAuthorityProjection):
             }
           : project.kind === 'scratch'
             ? { kind: 'scratch' as const, name: 'Temporary chats' }
-            : {}),
+            : project.kind === 'secretary'
+              ? { kind: 'secretary' as const, name: 'Secretary' }
+              : {}),
       };
     });
   // 投影未变时必须不写 state：persist 的每次 setState 都会落盘并广播 SETTINGS_CHANGED，

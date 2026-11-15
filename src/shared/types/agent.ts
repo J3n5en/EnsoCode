@@ -28,6 +28,7 @@ import {
 } from '../capabilities/types';
 import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
 import type { DefaultModelRef } from '../defaultModel';
+import type { ExitKind } from '../exitInterrupt';
 import { parsePluginArtifactInfo } from '../extensionPlugins/artifacts';
 import type {
   InterceptPayload,
@@ -92,6 +93,8 @@ import { PRODUCT_SURFACE_INVENTORY, type ProductSurfaceId } from '../productSurf
 import { parseProviderHeaders } from '../providers/providerHeaders';
 import { parseRequestBodyUsage, type RequestBodyUsage } from '../requestBodyUsage';
 import { parseRtkToolStats, type RtkToolStats } from '../rtk';
+import { parseSecretaryToolDescriptors } from '../secretary/customTools';
+import { SECRETARY_INTERNAL_OPS, SECRETARY_OPS, type SecretaryInvokeOp } from '../secretary/tools';
 import { resolveShellLimits, type ShellLimits } from '../shellLimits';
 import { parseSmartCompactMode, type SmartCompactMode } from '../smartCompactMode';
 import { parseSshTimeoutSeconds } from '../sshTimeout';
@@ -128,6 +131,7 @@ import {
   parsePluginCommands,
   parsePluginHooks,
 } from './plugins';
+import type { SecretaryToolDescriptor } from './secretary';
 import { isWorkflowPresetId, parseWorkflowRunSnapshot, type WorkflowRunSnapshot } from './workflow';
 
 export type { ChildSessionIdentity, SessionIdentity } from '../builtinAgents';
@@ -298,6 +302,8 @@ export interface ApprovalRequestInfo {
   phase?: 'reviewing';
   /** 命中受保护动作底线的类别；此类审批只能单次放行 */
   protected?: ProtectedActionCategory;
+  /** 每次都要真人：不走代审、不随切档放行、不记「本会话总是允许」 */
+  mandatory?: boolean;
   /** 等人处理的截止时间（ms）；到期由 Main 按超时拒绝 */
   expiresAt?: number;
   /** 托管判定无效（超时 / 出错 / 缺字段）退回人工的原因 */
@@ -305,6 +311,10 @@ export interface ApprovalRequestInfo {
   /** dcg 命令守卫命中的规则与原因 */
   guard?: { ruleId: string; reason: string };
 }
+
+/** 提问是谁收的尾：用户在原会话里直接答、秘书代答、超时兜底 */
+export const ASK_ANSWER_BY = ['user', 'relay', 'timeout'] as const;
+export type AskAnswerBy = (typeof ASK_ANSWER_BY)[number];
 
 /** agent 向用户的提问（ask_user 工具,阻塞等答复） */
 export interface AskRequestInfo {
@@ -316,6 +326,10 @@ export interface AskRequestInfo {
   recommended?: string;
   /** 等人回答的截止时间（ms）；到期由 Main 按未回答处理 */
   expiresAt?: number;
+  /** 已转给秘书：原会话不弹给用户，只留一行「已转给 X」，用户仍可直接回答 */
+  relay?: { name: string };
+  /** 渲染层投影：提问已收尾，用来在原会话里留一行状态；worker 不下发 */
+  answered?: { by: AskAnswerBy; name?: string; answer?: string };
 }
 
 /** 审批决策：revise 打回换更安全的命令；review 把这一条交给助手代审 */
@@ -335,6 +349,10 @@ export interface BackgroundTaskInfo {
   tail: string;
   startedAt: number;
   exitCode?: number;
+  /** 模型显式 timeout 的绝对截止（ms）。没有则不会因超时被看门狗收口 */
+  deadlineAt?: number;
+  /** false：直接子进程已不在。缺省表示还没探测 */
+  alive?: boolean;
 }
 
 export { SHELL_QUIET_MS } from '../shellLimits';
@@ -904,8 +922,9 @@ export interface ModelRef {
 /**
  * bot-home：Bot 成员 / 群独立工作区的隐藏项目，只由 Main 创建，不投影给 renderer。
  * scratch：临时会话的隐藏项目，Main 登记，会投影给 renderer，但不能由 renderer 创建或删除。
+ * secretary：秘书会话的隐藏项目，同 scratch，但不参与任何项目列表与手机目录。
  */
-export type ProjectKind = 'local' | 'ssh' | 'bot-home' | 'scratch';
+export type ProjectKind = 'local' | 'ssh' | 'bot-home' | 'scratch' | 'secretary';
 
 export interface ProjectAuthority {
   projectId: string;
@@ -1265,6 +1284,8 @@ export type AgentCommand =
       pluginHooks?: PluginHookSpawn[];
       /** 已启用 Enso 插件的 agent 工具；执行经 plugin-tool-invoke 回到 Main */
       pluginTools?: PluginToolDescriptor[];
+      /** 秘书自造工具；名字、描述与参数结构由 Main 下发，执行经 secretary-invoke 回到 Main */
+      secretaryTools?: SecretaryToolDescriptor[];
       /** 已启用 Enso 插件的 workflow 预设文件（绝对路径，已按插件预设圈定） */
       workflowPresetFiles?: string[];
       /** 已启用插件的事件订阅；Bot 会话不下发 */
@@ -1273,6 +1294,8 @@ export type AgentCommand =
       approvalMode?: ApprovalMode;
       /** 无人值守：需要人工确认的动作直接拒绝，不等真人 */
       autoRejectApprovals?: boolean;
+      /** 秘书派出/跟踪的会话：ask_user 先转给秘书，名字用于原会话里的「已转给 X」 */
+      askRelay?: { name: string };
       /** 助手代审模型；仅 approvalMode=assistant 时有意义 */
       approvalReviewer?: SpawnModelConfig;
       /** 代审改用分类器（System One）；与 approvalReviewer 互斥 */
@@ -1317,6 +1340,11 @@ export type AgentCommand =
       instanceId?: string;
       /** Bot 私聊 / 群聊成员会话（非委派）：挂 routine_propose / send_image 工具 */
       botRoutines?: boolean;
+      /**
+       * 秘书会话：worker 按名字做工具允许列表，插件、MCP、codemode、子代理一律不挂。
+       * 由 Main 按项目 kind 决定，renderer 传不进来。
+       */
+      secretaryMode?: boolean;
       /** Bot 挂看板任务的委派会话：挂 report_blocked 工具 */
       botDelegationTask?: boolean;
       /** Bot 写成员：同工作区按文件占用、全局命令短独占；祖先会话（委派链）互不阻塞 */
@@ -1422,6 +1450,8 @@ export type AgentCommand =
       /** 省略表示不改动无人值守开关 */
       autoReject?: boolean;
     }
+  /** 秘书派出/跟踪的会话：ask_user 先转给秘书；缺省 relay 表示恢复成直接问用户 */
+  | { type: 'set-ask-relay'; identity: SessionIdentity; relay?: { name: string } }
   | { type: 'set-plan-mode'; identity: SessionIdentity; active: boolean }
   | {
       type: 'plan-respond';
@@ -1459,7 +1489,16 @@ export type AgentCommand =
   /** 统一模型目录 + 自定义 provider 全量注册信息。载荷在 worker 内再收窄。 */
   | { type: 'set-model-directory'; snapshot: unknown; customProviders: unknown }
   | { type: 'compact'; identity: SessionIdentity; instructions?: string }
-  | { type: 'ask-respond'; identity: SessionIdentity; requestId: string; answer: string }
+  | {
+      type: 'ask-respond';
+      identity: SessionIdentity;
+      requestId: string;
+      answer: string;
+      /** 谁答的：缺省是用户亲手答；relay 是秘书代答（原会话据此显示「X 已回答」） */
+      by?: 'user' | 'relay';
+      /** 代答的秘书名字 */
+      name?: string;
+    }
   | {
       type: 'browser-result';
       identity: SessionIdentity | ChildSessionIdentity;
@@ -1471,6 +1510,14 @@ export type AgentCommand =
   | {
       type: 'memory-result' | 'delegation-result';
       identity: SessionIdentity | ChildSessionIdentity;
+      requestId: string;
+      ok: boolean;
+      result?: unknown;
+      error?: string;
+    }
+  | {
+      type: 'secretary-result';
+      identity: SessionIdentity;
       requestId: string;
       ok: boolean;
       result?: unknown;
@@ -1814,6 +1861,8 @@ export interface AgentSpawnRequest {
   approvalMode?: ApprovalMode;
   /** 无人值守：新会话一起带上该开关，避免恢复后悄悄变回「等人确认」 */
   autoRejectApprovals?: boolean;
+  /** 秘书派出/跟踪的会话：ask_user 先转给秘书；恢复时一起带上，避免悄悄变回直接问用户 */
+  askRelay?: { name: string };
   planMode?: boolean;
 }
 
@@ -1975,7 +2024,15 @@ export type AgentWorkerEvent =
   | { type: 'delivery-settled'; identity: SessionIdentity; seq: number; deliveryId: string }
   | { type: 'delivery-rejected'; identity: SessionIdentity; seq: number; deliveryId: string }
   | { type: 'delivery-deferred'; identity: SessionIdentity; seq: number; deliveryId: string }
-  | { type: 'status'; identity: SessionIdentity; seq: number; status: NodeStatus; error?: string }
+  | {
+      type: 'status';
+      identity: SessionIdentity;
+      seq: number;
+      status: NodeStatus;
+      error?: string;
+      /** running 时带上当前回合 id：Main 退出记录靠它把中断归到具体一轮 */
+      turnId?: string;
+    }
   | {
       type: 'message-upsert';
       identity: SessionIdentity;
@@ -1996,6 +2053,8 @@ export type AgentWorkerEvent =
       requestBudgetStop?: true;
       /** 预算停止后补报告那一轮出错：错误随结果交回，不丢已有输出 */
       requestBudgetError?: string;
+      /** 秘书对本轮系统回传调用了 silence_turn（或旧静默标记）：不弹通知 */
+      silent?: true;
     }
   | {
       type: 'turn-failed';
@@ -2007,6 +2066,8 @@ export type AgentWorkerEvent =
       undelivered?: true;
       /** pi 回合内自动重试已用尽、最终仍是它判定的瞬态错误（网络 / 限流 / 5xx） */
       retryExhausted?: true;
+      /** 应用退出窗口内的断流/断连：不是会话失败，按 interrupted 收口（Main 判定） */
+      interrupted?: { at: number; kind: ExitKind };
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
@@ -2094,7 +2155,17 @@ export type AgentWorkerEvent =
       requestId: string;
     }
   | { type: 'ask-request'; identity: SessionIdentity; seq: number; ask: AskRequestInfo }
-  | { type: 'ask-resolved'; identity: SessionIdentity; seq: number; requestId: string }
+  | {
+      type: 'ask-resolved';
+      identity: SessionIdentity;
+      seq: number;
+      requestId: string;
+      /** 谁收的尾；缺省表示取消（abort/dismiss），不是回答 */
+      by?: AskAnswerBy;
+      answer?: string;
+      /** 秘书代答时的名字 */
+      name?: string;
+    }
   | { type: 'subagent-update'; identity: SessionIdentity; seq: number; agent: SubagentInfo }
   | {
       type: 'coworker-update';
@@ -2134,6 +2205,14 @@ export type AgentWorkerEvent =
         | 'routine_propose'
         | 'send_image'
         | 'report_blocked';
+      params: unknown;
+    }
+  | {
+      type: 'secretary-invoke';
+      identity: SessionIdentity;
+      seq: number;
+      requestId: string;
+      op: SecretaryInvokeOp;
       params: unknown;
     }
   | {
@@ -2967,6 +3046,9 @@ function isValidProjectRemoteFields(value: Record<string, unknown>): boolean {
   if (value.kind === 'scratch') {
     return value.sshHost === undefined && value.sshConnectionId === undefined;
   }
+  if (value.kind === 'secretary') {
+    return value.sshHost === undefined && value.sshConnectionId === undefined;
+  }
   return false;
 }
 
@@ -3636,12 +3718,14 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'mcpServers',
           'pluginCommands',
           'pluginTools',
+          'secretaryTools',
           'workflowPresetFiles',
           'pluginEvents',
           'pluginHooks',
           'instruction',
           'approvalMode',
           'autoRejectApprovals',
+          'askRelay',
           'approvalReviewer',
           'approvalReviewerClassifier',
           'approvalReviewerManaged',
@@ -3662,6 +3746,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'botGroupTasks',
           'botDiscussMode',
           'botRoutines',
+          'secretaryMode',
           'botDelegationTask',
           'botWriteLock',
           'protectedActions',
@@ -3684,6 +3769,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.pluginCommands !== undefined &&
           parsePluginCommands(value.pluginCommands) === null) ||
         (value.pluginTools !== undefined && !isPluginToolList(value.pluginTools)) ||
+        (value.secretaryTools !== undefined &&
+          parseSecretaryToolDescriptors(value.secretaryTools) === null) ||
         (value.workflowPresetFiles !== undefined &&
           !(
             Array.isArray(value.workflowPresetFiles) &&
@@ -3720,6 +3807,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
         (value.approvalReviewer !== undefined &&
           parseSpawnModelConfig(value.approvalReviewer) === null) ||
+        (value.askRelay !== undefined &&
+          (!isRecord(value.askRelay) || !isNonEmptyString(value.askRelay.name))) ||
         (value.approvalReviewerAllowThreshold !== undefined &&
           (!isApprovalAllowThreshold(value.approvalReviewerAllowThreshold) ||
             value.approvalReviewerClassifier === undefined)) ||
@@ -3740,6 +3829,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.botDiscussMode === true &&
           (value.botMode !== true || value.botGroupTasks !== true)) ||
         (value.botRoutines !== undefined && typeof value.botRoutines !== 'boolean') ||
+        (value.secretaryMode !== undefined && typeof value.secretaryMode !== 'boolean') ||
         (value.botDelegationTask !== undefined && typeof value.botDelegationTask !== 'boolean') ||
         (value.botWriteLock !== undefined &&
           (!isRecord(value.botWriteLock) ||
@@ -3967,6 +4057,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.autoReject === undefined || typeof value.autoReject === 'boolean')
         ? (value as unknown as AgentCommand)
         : null;
+    case 'set-ask-relay':
+      return hasOnlyKeys(value, ['type', 'identity', 'relay']) &&
+        parseAnySessionIdentity(value.identity) &&
+        (value.relay === undefined || (isRecord(value.relay) && isNonEmptyString(value.relay.name)))
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'set-plan-mode':
       return hasExactKeys(value, ['type', 'identity', 'active']) &&
         parseSessionIdentity(value.identity) &&
@@ -4054,10 +4150,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'ask-respond':
-      return hasExactKeys(value, ['type', 'identity', 'requestId', 'answer']) &&
+      return hasOnlyKeys(value, ['type', 'identity', 'requestId', 'answer', 'by', 'name']) &&
         parseAnySessionIdentity(value.identity) &&
         isNonEmptyString(value.requestId) &&
-        isNonEmptyString(value.answer)
+        isNonEmptyString(value.answer) &&
+        (value.by === undefined || value.by === 'user' || value.by === 'relay') &&
+        (value.name === undefined || isNonEmptyString(value.name))
         ? (value as unknown as AgentCommand)
         : null;
     case 'browser-result':
@@ -4068,6 +4166,20 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       if (
         !hasOnlyKeys(value, ['type', 'identity', 'requestId', 'ok', 'result', 'error']) ||
         !parseAnySessionIdentity(value.identity) ||
+        !isNonEmptyString(value.requestId) ||
+        typeof value.ok !== 'boolean'
+      ) {
+        return null;
+      }
+      const shapeOk = value.ok
+        ? value.error === undefined
+        : isNonEmptyString(value.error) && value.result === undefined;
+      return shapeOk ? (value as unknown as AgentCommand) : null;
+    }
+    case 'secretary-result': {
+      if (
+        !hasOnlyKeys(value, ['type', 'identity', 'requestId', 'ok', 'result', 'error']) ||
+        !parseSessionIdentity(value.identity) ||
         !isNonEmptyString(value.requestId) ||
         typeof value.ok !== 'boolean'
       ) {
@@ -4568,6 +4680,14 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
           value.op === 'report_blocked')
         ? (value as unknown as AgentWorkerEvent)
         : null;
+    case 'secretary-invoke':
+      return hasExactKeys(value, ['type', 'identity', 'seq', 'requestId', 'op', 'params']) &&
+        parseSessionIdentity(value.identity) &&
+        isNonEmptyString(value.requestId) &&
+        ((SECRETARY_OPS as readonly string[]).includes(value.op as string) ||
+          (SECRETARY_INTERNAL_OPS as readonly string[]).includes(value.op as string))
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'computer-invoke':
       return hasExactKeys(value, ['type', 'identity', 'seq', 'requestId', 'op', 'params']) &&
         isNonEmptyString(value.requestId) &&
@@ -4640,7 +4760,8 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'status':
-      return value.status === 'idle' || value.status === 'running' || value.status === 'failed'
+      return (value.status === 'idle' || value.status === 'running' || value.status === 'failed') &&
+        (value.turnId === undefined || isNonEmptyString(value.turnId))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'message-upsert':
@@ -4653,6 +4774,7 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       return isNonEmptyString(value.turnId) &&
         (value.digest === undefined || parseTurnDigest(value.digest)) &&
         (value.aborted === undefined || value.aborted === true) &&
+        (value.silent === undefined || value.silent === true) &&
         (value.requestBudgetStop === undefined || value.requestBudgetStop === true) &&
         (value.requestBudgetError === undefined ||
           (value.requestBudgetStop === true && isNonEmptyString(value.requestBudgetError)))
@@ -4746,15 +4868,24 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'approval-resolved':
-    case 'ask-resolved':
       return isNonEmptyString(value.requestId) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'ask-resolved':
+      return isNonEmptyString(value.requestId) &&
+        (value.by === undefined || (ASK_ANSWER_BY as readonly unknown[]).includes(value.by)) &&
+        (value.answer === undefined || typeof value.answer === 'string') &&
+        (value.name === undefined || isNonEmptyString(value.name))
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'ask-request':
       return isRecord(value.ask) &&
         isNonEmptyString(value.ask.requestId) &&
         isNonEmptyString(value.ask.question) &&
         isOptionalTimestamp(value.ask.expiresAt) &&
         (value.ask.recommended === undefined ||
-          (Array.isArray(value.ask.options) && value.ask.options.includes(value.ask.recommended)))
+          (Array.isArray(value.ask.options) &&
+            value.ask.options.includes(value.ask.recommended))) &&
+        (value.ask.relay === undefined ||
+          (isRecord(value.ask.relay) && isNonEmptyString(value.ask.relay.name)))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'subagent-update':

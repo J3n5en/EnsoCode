@@ -141,6 +141,7 @@ function activeDock(): { api: DockviewApi; conversationId: string; projectId: st
 export function addSidePanelTerminal(): void {
   const active = activeDock();
   if (!active) return;
+  if (isSecretaryProject(active.projectId)) return;
   useSidePanelStore.getState().ensureOpen();
   const count = active.api.panels.length;
   active.api.addPanel({
@@ -154,6 +155,8 @@ export function addSidePanelTerminal(): void {
 export function addSidePanelChanges(opts?: { title?: string }): void {
   const active = activeDock();
   if (!active) return;
+  // 秘书会话没有代码可看：终端、文件、改动都不给入口
+  if (isSecretaryProject(active.projectId)) return;
   useSidePanelStore.getState().ensureOpen();
   const existing = active.api.getPanel('changes');
   if (existing) {
@@ -171,8 +174,22 @@ export function addSidePanelChanges(opts?: { title?: string }): void {
 export function addSidePanelFiles(opts?: { title?: string }): void {
   const active = activeDock();
   if (!active) return;
+  if (isSecretaryProject(active.projectId)) return;
   useSidePanelStore.getState().ensureOpen();
   revealFilesPanel(active.api, active.conversationId, active.projectId, opts?.title);
+}
+
+/** 秘书会话只留浏览器、工作台与记忆三种面板 */
+export function selectIsSecretaryProject(
+  projects: readonly { id: string; kind?: string }[],
+  projectId: string | undefined
+): boolean {
+  if (!projectId) return false;
+  return projects.some((project) => project.id === projectId && project.kind === 'secretary');
+}
+
+export function isSecretaryProject(projectId: string | undefined): boolean {
+  return selectIsSecretaryProject(useSettingsStore.getState().projects, projectId);
 }
 
 function revealFilesPanel(
@@ -206,7 +223,7 @@ export function openSidePanelFile(
   const sessions = useSessionsStore.getState();
   const dockId = resolveSidePanelDockConversationId(sessions.conversations, conversationId);
   const projectId = sessions.conversations[dockId]?.projectId;
-  if (!projectId) return;
+  if (!projectId || isSecretaryProject(projectId)) return;
   useSidePanelStore.getState().ensureOpen(dockId);
   const target: FileTarget = viewer ? [rel, line, viewer] : line ? [rel, line] : [rel];
   const open = filesOpeners.get(dockId);
@@ -423,6 +440,7 @@ export function disposeConversationResources(conversationId: string): void {
   if (api) {
     for (const panel of [...api.panels]) {
       if (panel.id === 'changes' || panel.id === 'files') continue;
+      if (panel.id === 'secretary') continue;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) continue;
       releaseTerminal(panel.id);
       void window.electronAPI?.terminal?.dispose(panel.id);

@@ -14,6 +14,7 @@ import { createHostDir, listHostDirs } from '../services/hostDirs';
 import { openInApps } from '../services/openInApps';
 import { getRecentProjects } from '../services/recentProjects';
 import { isMainRenderer } from '../services/renderers';
+import { unfollowTarget } from '../services/secretary/following';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { sshProbeDirectory } from '../services/sshProbe';
@@ -57,8 +58,10 @@ function resolveLocalCwd(parsed: {
   const registry = getSourceAuthorityRegistry();
   const project = registry?.project(parsed.projectId);
   if (project?.state !== 'active') return { error: 'unavailable' };
-  // ssh 项目的路径在远端，本机打不开；bot-home 只走 Bot 通道
-  if (project.kind === 'ssh' || project.kind === 'bot-home') return { error: 'unsupported' };
+  // ssh 项目的路径在远端，本机打不开；bot-home 只走 Bot 通道；秘书项目没有可操作的工作区
+  if (project.kind === 'ssh' || project.kind === 'bot-home' || project.kind === 'secretary') {
+    return { error: 'unsupported' };
+  }
   if (project.kind === 'scratch') {
     if (!parsed.conversationId) return { error: 'unsupported' };
     const conversation = registry?.conversation(parsed.conversationId);
@@ -221,6 +224,8 @@ export function registerProjectHandlers(): void {
           conversationId: conversation.conversationId,
           ...(conversation.sessionFile ? { sessionFile: conversation.sessionFile } : {}),
         });
+        // 项目删了，会话也不在了：手机关注里的这些一并移除
+        unfollowTarget(conversation.conversationId);
       }
     }
     return result;

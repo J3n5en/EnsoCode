@@ -62,6 +62,9 @@ export interface MemoryRow {
   access_count: number;
   appearances: number;
   clicks: number;
+  last_hit_at: string | null;
+  hit_count: number;
+  archive_candidate_at: string | null;
   embedding: Buffer | null;
   embedding_model: string | null;
   embedding_dim: number | null;
@@ -74,6 +77,7 @@ export const MEMORY_COLUMNS =
   'is_latest, version, is_crystal, crystal_title, source_unit_count, lifecycle_state, ' +
   'temporal_context, temporal_type, event_start, event_end, ' +
   'temporal_precision, created_at, updated_at, last_accessed_at, access_count, appearances, clicks, ' +
+  'last_hit_at, hit_count, archive_candidate_at, ' +
   'embedding_model, embedding_dim, embedding_version, idempotency_key';
 
 export function rowToMemory(r: MemoryRow): Memory {
@@ -104,6 +108,9 @@ export function rowToMemory(r: MemoryRow): Memory {
     accessCount: r.access_count,
     appearances: r.appearances,
     clicks: r.clicks,
+    lastHitAt: r.last_hit_at,
+    hitCount: r.hit_count,
+    archiveCandidateAt: r.archive_candidate_at,
     embeddingModel: r.embedding_model,
     embeddingDim: r.embedding_dim,
     embeddingVersion: r.embedding_version,
@@ -179,7 +186,7 @@ export function vecDelete(db: Database.Database, rowid: number, dim: number | nu
 }
 
 /** embedding 失败不得阻止落库，失败返回 null */
-async function tryEmbed(embedder: Embedder | null | undefined, text: string) {
+export async function tryEmbed(embedder: Embedder | null | undefined, text: string) {
   if (!embedder) return null;
   try {
     const vec = await embedder.embed(text, 'passage');
@@ -569,6 +576,14 @@ export function listEvolves(db: Database.Database, memoryId: string): Evolves[] 
       'SELECT * FROM evolves WHERE older_id = ? OR newer_id = ? ORDER BY created_at ASC, id ASC'
     )
     .all(memoryId, memoryId) as EvolvesRow[];
+  return rows.map(rowToEvolves);
+}
+
+/** 全部待审阅的边（review_state = 'pending'），按创建时间排序 */
+export function listPendingEvolvesEdges(db: Database.Database): Evolves[] {
+  const rows = db
+    .prepare("SELECT * FROM evolves WHERE review_state = 'pending' ORDER BY created_at ASC, id ASC")
+    .all() as EvolvesRow[];
   return rows.map(rowToEvolves);
 }
 

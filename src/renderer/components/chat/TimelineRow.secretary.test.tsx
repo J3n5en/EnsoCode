@@ -1,0 +1,93 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, it, vi } from 'vitest';
+import type { TimelineItem } from '@/stores/sessions/timeline';
+import { TimelineRow } from './TimelineRow';
+
+vi.mock('@/i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, vars?: Record<string, unknown>) =>
+      vars ? key.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(vars[name] ?? '')) : key,
+  }),
+}));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: (select: (state: object) => unknown) => select({}),
+}));
+vi.mock('@/stores/sessions', () => ({ useSessionsStore: () => null }));
+vi.mock('./Markdown', () => ({ Markdown: ({ text }: { text: string }) => text }));
+
+const user = (text: string): TimelineItem => ({ kind: 'user', key: 'u', text, images: [] });
+const html = (item: TimelineItem) => renderToStaticMarkup(createElement(TimelineRow, { item }));
+
+it('秘书收到的回传渲染成通知卡片，标签与不可信包裹都不露出', () => {
+  const out = html(
+    user(
+      '<session-updates>\n- [goal-complete session:c1] app · 修登录 · 目标完成\n' +
+        '<untrusted-content source="session:c1">登录已修好</untrusted-content>\n' +
+        '- [proposal] 提案已执行\n</session-updates>'
+    )
+  );
+  expect(out).toContain('app · 修登录 · 目标完成');
+  expect(out).toContain('提案已执行');
+  expect(out).not.toContain('session-updates');
+  expect(out).not.toContain('untrusted-content');
+  expect(out).not.toContain('登录已修好');
+});
+
+it('普通用户消息仍是气泡原文', () => {
+  expect(html(user('帮我看看进展'))).toContain('帮我看看进展');
+});
+
+it('目标续跑收成一行，标签和英文指令默认不露', () => {
+  const out = html(
+    user(
+      '<goal-continuation>\nSession goal: 修好登录跳转。然后补测试\n' +
+        'Continue working toward it. If it is genuinely done, call goal_complete with evidence;\n' +
+        '</goal-continuation>'
+    )
+  );
+  expect(out).toContain('data-enso="goal-continuation"');
+  expect(out).toContain('data-open="false"');
+  expect(out).toContain('Continue goal: 修好登录跳转。');
+  expect(out).not.toContain('<goal-continuation>');
+  expect(out).not.toContain('call goal_complete');
+});
+
+it('夹在别的文字里的目标块和定时块也不露标签', () => {
+  const out = html(
+    user(
+      '先看这个\n\n<secretary-schedule>\n- [schedule] 巡检\n</secretary-schedule>\n' +
+        '<agent-notification>\nworker finished\nmore\n</agent-notification>'
+    )
+  );
+  expect(out).toContain('先看这个');
+  expect(out).toContain('巡检');
+  expect(out).toContain('worker finished');
+  expect(out).not.toContain('<secretary-schedule>');
+  expect(out).not.toContain('<agent-notification>');
+});
+
+it('多行定时收成一行系统通知，默认不露出标签和完整提示词', () => {
+  const out = html(
+    user(
+      '<secretary-schedule>\n- [schedule] 巡检：巡检进行中的派发会话\n逐个看是否卡住\n</secretary-schedule>'
+    )
+  );
+  expect(out).toContain('data-enso="secretary-schedule-card"');
+  expect(out).toContain('data-open="false"');
+  expect(out).toContain('Scheduled: 巡检进行中的派发会话');
+  expect(out).not.toContain('<secretary-schedule>');
+  expect(out).not.toContain('逐个看是否卡住');
+  // 和其他系统注入块同一套虚线框，不再是带阴影的实线卡片
+  expect(out).toContain('border-dashed');
+  expect(out).not.toContain('shadow');
+});
+
+it('解析不了的回传也不露出标签名', () => {
+  const out = html(user('<session-updates>\n不是列表\n第二行\n</session-updates>'));
+  expect(out).toContain('data-enso="session-updates-card"');
+  expect(out).toContain('data-open="false"');
+  expect(out).toContain('Session updates: 不是列表');
+  expect(out).not.toContain('<session-updates>');
+  expect(out).not.toContain('第二行');
+});

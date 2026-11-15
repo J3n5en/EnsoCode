@@ -647,6 +647,26 @@ describe('typed multi-entity mentions', () => {
     ]);
   });
 
+  it('carries the conversation id into the payload without touching the wire text', () => {
+    const segments = [
+      { type: 'text' as const, text: 'check ' },
+      {
+        type: 'chat' as const,
+        label: 'fix login',
+        sessionFile: '/s/c1.jsonl',
+        conversationId: 'c1',
+      },
+    ];
+    const payload = createEditorPayload({ segments, slashes: [], images: [] });
+    expect(payload.text).toBe(
+      'check [Referenced past chat "fix login" — transcript file: /s/c1.jsonl (pi session jsonl; read it if relevant)]'
+    );
+    // 秘书点名授权按会话 id 走，jsonl 路径只是给模型看的引用
+    expect(payload.mentions).toEqual([
+      { kind: 'chat', id: 'c1', label: 'fix login', sessionFile: '/s/c1.jsonl' },
+    ]);
+  });
+
   it('round-trips a ui-element segment: wire is the single-line ref; history has no image binding', () => {
     const ui = {
       type: 'ui-element' as const,

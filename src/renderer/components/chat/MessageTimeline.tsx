@@ -12,6 +12,8 @@ import {
   useState,
 } from 'react';
 import { type ListProps, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
+import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -22,6 +24,7 @@ import {
   type TimelineItem,
 } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
+import { useChatHost } from './chatHost';
 import { EnsoMark } from './EnsoMark';
 import { diffFoldMotion, EMPTY_FOLD_MOTION } from './foldMotion';
 import { generationElapsedOrigin } from './generationElapsed';
@@ -140,6 +143,11 @@ interface MessageTimelineProps {
   olderCursor?: number;
   searchQuery?: string;
   activeHit?: { key: string; nth: number } | null;
+  /**
+   * 这条时间线自己的会话属于秘书项目。由上层按 conversationId 判定后传进来：
+   * 读全局「当前打开的会话」会在切标签的一瞬间与 buildTimeline 的判断不一致。
+   */
+  secretarySession?: boolean;
 }
 
 /**
@@ -167,8 +175,14 @@ export function MessageTimeline({
   olderCursor,
   searchQuery = '',
   activeHit = null,
+  secretarySession = false,
 }: MessageTimelineProps) {
   const { t } = useI18n();
+  const host = useChatHost();
+  const face = useSecretaryFace();
+  const secretarySpeaker = secretarySession ? face : null;
+  const secretaryMark = !host && secretarySpeaker ? secretarySpeaker : null;
+  const secretaryChat = secretarySession;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [fitsViewport, setFitsViewport] = useState(false);
@@ -235,6 +249,9 @@ export function MessageTimeline({
     liveActivityFoldDelaySec,
     heldOpenTools,
     turnOverrides,
+    foldToolOnlyTurns: !host && secretaryChat,
+    // 必须与 TimelineRow 的卡片判断同源：卡片不进过程组，工具行照旧折
+    readableToolCards: secretaryChat,
   });
   // 探后折叠组动效：渲染期读上一帧 DOM 量折前跨度（提交后旧行已卸载）
   const foldMotionRef = useRef({
@@ -571,10 +588,16 @@ export function MessageTimeline({
             model={replyHead.replyModel}
             at={replyHead.replyAt}
             privacyMask={replyHead.replyPrivacyMask}
+            secretarySession={secretaryChat}
           />
         )}
         <RowErrorBoundary itemKey={item.key}>
-          <TimelineRow item={item} onToggleGroup={toggleGroup} onToggleTurn={setTurnCollapsed} />
+          <TimelineRow
+            item={item}
+            secretarySession={secretaryChat}
+            onToggleGroup={toggleGroup}
+            onToggleTurn={setTurnCollapsed}
+          />
         </RowErrorBoundary>
       </div>
     );
@@ -636,9 +659,21 @@ export function MessageTimeline({
           {items.length === 0 && !busy ? (
             <EmptyReveal className="flex h-full flex-col items-center justify-center gap-2 overflow-y-auto px-4 text-center">
               <span className="t-stagger-line t-stagger-line--1 mb-3">
-                <span className="flex size-11 items-center justify-center rounded-[13px] border border-brand/20 bg-brand/8 text-brand dark:bg-brand/14">
-                  <EnsoMark className="size-6" />
-                </span>
+                {secretaryMark ? (
+                  <SecretaryAvatar
+                    name={secretaryMark.name}
+                    color={secretaryMark.color}
+                    image={secretaryMark.image}
+                    needsYou={0}
+                    running={0}
+                    size="lg"
+                    enso="secretary-chat-avatar"
+                  />
+                ) : (
+                  <span className="flex size-11 items-center justify-center rounded-[13px] border border-brand/20 bg-brand/8 text-brand dark:bg-brand/14">
+                    <EnsoMark className="size-6" />
+                  </span>
+                )}
               </span>
               <p className="t-stagger-line t-stagger-line--1 text-[22px] font-semibold tracking-tight">
                 {emptyTitle}

@@ -1,4 +1,5 @@
 import type { MemoryCaptureSpace, MemorySearchSpace } from '@shared/memory/toolParams';
+import type { ProjectAuthority, ProjectKind } from '@shared/types/agent';
 import { isBotChatId, isBotId } from '@shared/types/bot';
 import {
   botSpaceId,
@@ -13,6 +14,8 @@ export interface MemorySpaceContext {
   projectId?: string | null;
   botId?: string;
   chatId?: string;
+  /** 秘书会话：projectId 是私有空间，这里列出可只读检索的其它项目 */
+  secretary?: { readProjectIds: readonly string[] };
 }
 
 /** 推导所需的会话权威记录子集（ConversationAuthority） */
@@ -60,7 +63,8 @@ export function distillSpaces(ctx: MemorySpaceContext): { self: string; chat?: s
 
 /**
  * 模型只说 space 语义，这里换成真实 space_id。`project` 无项目时返回空集合让调用方决定拒绝还是空结果；
- * `bot` / `chat` 没有对应上下文直接报错。`all` 的顺序：bot → chat → project → global。
+ * `bot` / `chat` 没有对应上下文直接报错。`all` 的顺序：bot → chat → project → 只读项目 → global。
+ * 秘书会话的 `project` 是私有空间，其它项目只能通过 `all` 只读检索。
  */
 export function resolveSpaceIds(space: MemorySearchSpace, ctx: MemorySpaceContext): string[] {
   const project = ctx.projectId ? [projectSpaceId(ctx.projectId)] : [];
@@ -88,6 +92,43 @@ export function resolveSpaceIds(space: MemorySearchSpace, ctx: MemorySpaceContex
       }
       return chat;
     default:
-      return [...bot, ...chat, ...project, GLOBAL_SPACE];
+      return [...bot, ...chat, ...project, ...readOnlyProjectSpaces(ctx), GLOBAL_SPACE];
   }
+}
+
+/** 秘书可只读检索的项目空间：去掉私有空间自己与重复项 */
+function readOnlyProjectSpaces(ctx: MemorySpaceContext): string[] {
+  if (!ctx.secretary) return [];
+  const ids = new Set(ctx.secretary.readProjectIds);
+  if (ctx.projectId) ids.delete(ctx.projectId);
+  return [...ids].map(projectSpaceId);
+}
+
+/** 秘书会话的私有空间：写入、结晶与删除只允许它；非秘书会话没有这个限制（null） */
+export function secretaryPrivateSpace(ctx: MemorySpaceContext): string | null {
+  return ctx.secretary && ctx.projectId ? projectSpaceId(ctx.projectId) : null;
+}
+
+/** 隐藏项目（Bot 工作区、临时会话、秘书自己）不参与秘书的只读检索 */
+const HIDDEN_PROJECT_KINDS: ReadonlySet<ProjectKind> = new Set([
+  'bot-home',
+  'scratch',
+  'secretary',
+]);
+
+/**
+ * profile 的可见项目 → 秘书可只读检索的项目 id。未完成初次设置时按默认档案（全部可见），
+ * 与项目、会话读取同口径。
+ */
+export function secretaryReadProjectIds(
+  profile: { visibleProjectIds: 'all' | readonly string[] } | null,
+  projects: readonly Pick<ProjectAuthority, 'projectId' | 'kind' | 'state'>[]
+): string[] {
+  const allowed = profile?.visibleProjectIds ?? 'all';
+  const visible = allowed === 'all' ? null : new Set(allowed);
+  return projects
+    .filter((project) => project.state === 'active')
+    .filter((project) => !HIDDEN_PROJECT_KINDS.has(project.kind ?? 'local'))
+    .map((project) => project.projectId)
+    .filter((projectId) => !visible || visible.has(projectId));
 }

@@ -105,9 +105,12 @@ describe('executeMemoryOp：Bot 模式 space', () => {
     await expect(executeMemoryOp(db, 'delete', { id: other.memory.id }, botCtx)).rejects.toThrow(
       /not found/
     );
-    await expect(executeMemoryOp(db, 'delete', { id: mine.memory.id }, botCtx)).resolves.toEqual({
+    await expect(
+      executeMemoryOp(db, 'delete', { id: mine.memory.id }, botCtx)
+    ).resolves.toMatchObject({
       status: 'deleted',
       id: mine.memory.id,
+      content: expect.stringContaining('mine'),
     });
   });
 });
@@ -384,9 +387,10 @@ describe('executeMemoryOp', () => {
     const deleted: string[] = [];
     const ctx = { projectId: PROJECT, onDeleted: (id: string) => deleted.push(id) };
 
-    expect(await executeMemoryOp(db, 'delete', { id: own }, ctx)).toEqual({
+    expect(await executeMemoryOp(db, 'delete', { id: own }, ctx)).toMatchObject({
       status: 'deleted',
       id: own,
+      content: expect.stringContaining('旧结论'),
     });
     expect(getMemory(db, own)).toBeNull();
     expect(deleted).toEqual([own]);
@@ -527,5 +531,106 @@ describe('executeMemoryOp search assist', () => {
     const fallback = await search(async () => 'not json');
     expect(fallback.assist).toBe('fallback');
     expect(fallback.assistReason).toBe('unparseable');
+  });
+});
+
+describe('executeMemoryOp：秘书空间', () => {
+  const SECRETARY = '55555555-5555-4555-8555-555555555555';
+  const VISIBLE = '66666666-6666-4666-8666-666666666666';
+  const OTHER = '77777777-7777-4777-8777-777777777777';
+  const ctx = { projectId: SECRETARY, secretary: { readProjectIds: [VISIBLE] } };
+  const readOnly = (run: Promise<unknown>) =>
+    expect(run).rejects.toMatchObject({ code: 'read_only' });
+  const add = async (content: string, spaceId: string) => {
+    const r = await createMemory(db, { content, spaceId });
+    if (r.status !== 'inserted') throw new Error('setup');
+    return r.memory.id;
+  };
+
+  it('capture 缺省落私有空间；写 global 被拒且不落库', async () => {
+    const r = (await executeMemoryOp(
+      db,
+      'capture',
+      { content: '用户偏好周报在周五', importance: 0.6 },
+      ctx
+    )) as { status: string; memory: { spaceId: string } };
+    expect(r.status).toBe('inserted');
+    expect(r.memory.spaceId).toBe(projectSpaceId(SECRETARY));
+
+    await readOnly(executeMemoryOp(db, 'capture', capture('x', { spaceId: 'global' }), ctx));
+    expect(db.prepare('SELECT COUNT(*) AS n FROM memories').get()).toEqual({ n: 1 });
+  });
+
+  it('search all 只含私有 + 可见项目 + global；非私有结果脱敏并包进不可信标签', async () => {
+    await add('周报 私有：用户喜欢周五发', projectSpaceId(SECRETARY));
+    await add('周报 可见项目：token=abcdef123456', projectSpaceId(VISIBLE));
+    await add('周报 全局：api_key=sk-live-abcdefghijkl', 'global');
+    await add('周报 不可见项目', projectSpaceId(OTHER));
+
+    const r = (await executeMemoryOp(
+      db,
+      'search',
+      { query: '周报', limit: 10, spaceId: 'all' },
+      ctx
+    )) as { results: Record<string, unknown>[] };
+    expect(r.results.map((hit) => hit.spaceId).sort()).toEqual(
+      [projectSpaceId(SECRETARY), projectSpaceId(VISIBLE), 'global'].sort()
+    );
+    const own = r.results.find((hit) => hit.spaceId === projectSpaceId(SECRETARY));
+    expect(own?.content).toBe('周报 私有：用户喜欢周五发');
+    for (const hit of r.results.filter((x) => x.spaceId !== projectSpaceId(SECRETARY))) {
+      expect(String(hit.content)).toMatch(/^<untrusted-content source="memory:[^"]+">/);
+      expect(String(hit.content)).toMatch(/<\/untrusted-content>$/);
+      expect(String(hit.content)).not.toMatch(/abcdef123456|sk-live/);
+      expect(String(hit.content)).toContain('[REDACTED]');
+    }
+  });
+
+  it('delete：私有空间可删，可见项目与 global 的记忆被拒', async () => {
+    const own = await add('私有记忆', projectSpaceId(SECRETARY));
+    const visible = await add('可见项目记忆', projectSpaceId(VISIBLE));
+    const global = await add('全局记忆', 'global');
+
+    await readOnly(executeMemoryOp(db, 'delete', { id: visible }, ctx));
+    await readOnly(executeMemoryOp(db, 'delete', { id: global }, ctx));
+    expect(getMemory(db, visible)).not.toBeNull();
+    expect(getMemory(db, global)).not.toBeNull();
+
+    await expect(executeMemoryOp(db, 'delete', { id: own }, ctx)).resolves.toMatchObject({
+      status: 'deleted',
+      id: own,
+      title: expect.any(String),
+      content: expect.stringContaining('私有记忆'),
+    });
+  });
+
+  it('crystallize：源在可见项目 → 拒；源在私有空间 → 写入私有空间', async () => {
+    const visible = [
+      await add('可见项目 a', projectSpaceId(VISIBLE)),
+      await add('可见项目 b', projectSpaceId(VISIBLE)),
+      await add('可见项目 c', projectSpaceId(VISIBLE)),
+    ];
+    await readOnly(
+      executeMemoryOp(
+        db,
+        'crystallize',
+        { content: '汇总', title: '汇总', sourceIds: visible },
+        ctx
+      )
+    );
+
+    const own = [
+      await add('私有 a', projectSpaceId(SECRETARY)),
+      await add('私有 b', projectSpaceId(SECRETARY)),
+      await add('私有 c', projectSpaceId(SECRETARY)),
+    ];
+    const r = (await executeMemoryOp(
+      db,
+      'crystallize',
+      { content: '私有汇总', title: '私有汇总', sourceIds: own },
+      ctx
+    )) as { status: string; memory: { spaceId: string } };
+    expect(r.status).toBe('inserted');
+    expect(r.memory.spaceId).toBe(projectSpaceId(SECRETARY));
   });
 });

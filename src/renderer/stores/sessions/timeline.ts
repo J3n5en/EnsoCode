@@ -1,10 +1,12 @@
 import type { ApprovalReviewRecord } from '@shared/approvalReviewRecord';
+import type { ExitKind } from '@shared/exitInterrupt';
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import { liveActivityFoldDelayMs } from '@shared/liveActivityFoldDelay';
 import { IMAGE_EXTENSIONS, mediaExtension } from '@shared/localImage';
 import { type MaskReport, mergeMaskReports } from '@shared/privacyMask/report';
 import { firstProgram, isReadOnlyCommand } from '@shared/readOnlyCommand';
 import type { RtkToolStats } from '@shared/rtk';
+import { isPureSessionUpdate, isSilentMarker, SILENCE_TURN_TOOL } from '@shared/secretary/silence';
 import { nestedToolCallParent } from '@shared/toolCallId';
 import type {
   AgentSessionCustomEntry,
@@ -17,6 +19,7 @@ import type {
 } from '@shared/types/agent';
 import type { ProjectedApplyPatchOutcome, ProjectedFileChange } from '@shared/types/fileChanges';
 import { unwrapMcpProxyCall } from '@/lib/mcpToolName';
+import { mergeRuns, usesToolCard } from '@/lib/toolCards';
 import type { TimelineMessage } from './reducer';
 
 /** edit 工具的单个替换块（pi edit 工具参数 edits[] 的元素） */
@@ -123,6 +126,15 @@ export type TimelineItem =
       pluginArtifacts?: PluginArtifactInfo[];
       /** 本行是工具批次首个调用且已生成一句话标签时的标签；其它缺省 */
       batchLabel?: string;
+      /** 卡片渲染用的原始参数；其它工具缺省 */
+      args?: unknown;
+      /** 连续同名卡片调用并进来的后续几次；首条就是本行 */
+      cardPeers?: {
+        key: string;
+        args: unknown;
+        output: string | null;
+        state: 'running' | 'reviewing' | 'ok' | 'error';
+      }[];
     }
   | {
       kind: 'tool-group';
@@ -141,6 +153,8 @@ export type TimelineItem =
       explore?: { goal: string; report: string; steps: boolean };
       /** 组内工具批次的一句话标签（按出现顺序去重拼接）；没有标签时缺省 */
       summary?: string;
+      /** 静默的系统回传：组头用这句，而不是「已工作」 */
+      notice?: 'patrol' | 'seen';
       /** 组内原始行（tool + 夹在其间的 thinking），展开时平铺为顶层行 */
       children: TimelineItem[];
     }
@@ -170,6 +184,16 @@ export type TimelineItem =
     }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
   | { kind: 'task-note'; key: string; summary: string; detail: string }
+  /** 应用退出打断的一轮：系统提示，说明原因并引导重试（不是模型错误） */
+  | {
+      kind: 'interrupted';
+      key: string;
+      /** 应用关闭时刻 */
+      at: number;
+      exitKind: ExitKind;
+      /** 中断时没有结果的工具调用名 */
+      unfinishedTools: readonly string[];
+    }
   /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
   | { kind: 'session-custom'; key: string; entry: AgentSessionCustomEntry }
   /** 带字分隔线（委派子会话的「第 N 次执行」） */
@@ -882,7 +906,10 @@ function buildMessageTimeline(
   pendingApprovals?: readonly ApprovalRequestInfo[],
   toolStartedAt?: Record<string, number>,
   historyBaseIndex = 0,
-  batchLabels?: ReadonlyMap<string, string>
+  batchLabels?: ReadonlyMap<string, string>,
+  secretarySession = false,
+  /** 被判定为「退出导致」的模型错误原文：这是应用退出，不是模型出错，不渲染成红行 */
+  suppressedError?: string
 ): TimelineItem[] {
   const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
@@ -1226,6 +1253,7 @@ function buildMessageTimeline(
             kind: 'tool',
             key,
             name: call.name,
+            ...(usesToolCard(call.name, secretarySession) ? { args: call.args ?? null } : {}),
             summary: execSource
               ? summarizeExecSource(execSource)
               : patchPaths
@@ -1295,7 +1323,8 @@ function buildMessageTimeline(
       // 只有真正的终态错误（非 running 的末次尝试）才落红。
       const retried = messages[messageIndex + 1]?.role === 'assistant';
       const pendingRetry = running && messageIndex === messages.length - 1;
-      if (!retried && !pendingRetry) {
+      const exitCaused = suppressedError !== undefined && message.errorMessage === suppressedError;
+      if (!retried && !pendingRetry && !exitCaused) {
         items.push({ kind: 'error', key: `${absIndex}-err`, text: message.errorMessage });
       }
     }
@@ -1507,6 +1536,18 @@ export function buildTimeline(
     toolStartedAt?: Record<string, number>;
     /** 按时间插入的分隔线，at 升序 */
     runDividers?: readonly { key: string; at: number; text: string }[];
+    /** 秘书会话才给可读卡片留下参数；普通会话的工具行不需要 */
+    secretarySession?: boolean;
+    /**
+     * 应用退出打断的一轮：正文里被判定为「退出导致」的模型错误不再渲染，
+     * 底部改钉一条系统提示说明原因。
+     */
+    interrupted?: {
+      at: number;
+      kind: ExitKind;
+      unfinishedTools: readonly string[];
+      suppressedError?: string;
+    };
   }
 ): TimelineItem[] {
   const historyBaseIndex = options?.historyBaseIndex ?? 0;
@@ -1525,7 +1566,9 @@ export function buildTimeline(
     options?.pendingApprovals,
     options?.toolStartedAt,
     historyBaseIndex,
-    batchLabels
+    batchLabels,
+    options?.secretarySession === true,
+    options?.interrupted?.suppressedError
   );
   const merged =
     rowEntries.length === 0
@@ -1584,12 +1627,23 @@ export function buildTimeline(
         historyBaseIndex === 0
       )
     : ordered;
-  return appendCompactionChrome(
+  const withChrome = appendCompactionChrome(
     withDividers,
     options?.compaction,
     options?.compactionNoticeAt,
     options?.compactionTokensAfter
   );
+  if (!options?.interrupted) return withChrome;
+  return [
+    ...withChrome,
+    {
+      kind: 'interrupted' as const,
+      key: 'interrupted',
+      at: options.interrupted.at,
+      exitKind: options.interrupted.kind,
+      unfinishedTools: options.interrupted.unfinishedTools,
+    },
+  ];
 }
 
 const DIVIDER_LEAD_MS = 10_000;
@@ -1633,6 +1687,7 @@ function isTurnSwallowable(item: TimelineItem): boolean {
     case 'divider':
     case 'plugin-message':
     case 'discarded-turn':
+    case 'interrupted':
       return false;
     default:
       return true;
@@ -1879,6 +1934,10 @@ export interface TimelinePrep {
   liveActivityFoldDelaySec?: number;
   /** 用户展开了、并且这行还在视窗里。这些工具留在过程组外面。 */
   heldOpenTools?: ReadonlySet<string>;
+  /** 秘书会话：没有实质回复的一轮，把工具卡片也收成「已工作」一行 */
+  foldToolOnlyTurns?: boolean;
+  /** 秘书会话：秘书/插件/自造工具画可读卡片，不进过程组；普通会话一律按工具行折叠 */
+  readableToolCards?: boolean;
 }
 
 export type TimelineFoldOptions = TimelinePrep & {
@@ -1891,8 +1950,9 @@ function activityAnchor(row: TimelineItem): string {
   return row.kind === 'tool-group' && row.children[0] ? row.children[0].key : row.key;
 }
 
-function isActivityMember(item: TimelineItem): boolean {
+function isActivityMember(item: TimelineItem, readableCards: boolean): boolean {
   if (item.kind === 'tool' && item.generatedImages?.length) return false;
+  if (item.kind === 'tool' && usesToolCard(item.name, readableCards)) return false;
   if (item.kind === 'thinking' || item.kind === 'tool-group') return true;
   if (item.kind !== 'tool') return false;
   return item.state === 'ok' && !item.name.startsWith('goal_') && item.name !== 'submit_plan';
@@ -1964,17 +2024,18 @@ function quietLiveSegments(
 ): { segments: string[][]; blocked: boolean } | null {
   if (prep.collapseLiveActivity !== true || !running) return null;
   const { sourceItems, liveFrom } = prepareTimeline(items, running, new Set(), prep);
+  const readableCards = prep.readableToolCards === true;
   const segments: string[][] = [];
   let blocked = false;
   let i = 0;
   while (i < sourceItems.length) {
-    if (!(i > liveFrom) || !isActivityMember(sourceItems[i])) {
+    if (!(i > liveFrom) || !isActivityMember(sourceItems[i], readableCards)) {
       i += 1;
       continue;
     }
     const keys: string[] = [];
     let end = i;
-    while (end < sourceItems.length && isActivityMember(sourceItems[end])) {
+    while (end < sourceItems.length && isActivityMember(sourceItems[end], readableCards)) {
       const row = sourceItems[end];
       if (row.kind === 'thinking' && row.streaming) {
         blocked = true;
@@ -1984,7 +2045,7 @@ function quietLiveSegments(
       end += 1;
     }
     if (keys.length > 0) segments.push(keys);
-    while (end < sourceItems.length && isActivityMember(sourceItems[end])) end += 1;
+    while (end < sourceItems.length && isActivityMember(sourceItems[end], readableCards)) end += 1;
     i = end;
   }
   if (segments.length === 0) return null;
@@ -2057,14 +2118,22 @@ function foldPrepared(
   releasedLive: ReadonlySet<string> | null,
   lastUserIndex: number,
   liveFrom: number,
-  heldOpenTools: ReadonlySet<string> | null
+  heldOpenTools: ReadonlySet<string> | null,
+  readableCards: boolean
 ): TimelineItem[] {
   const heldOpen = (row: TimelineItem): boolean =>
     row.kind === 'tool' && heldOpenTools?.has(row.key) === true;
+  const cardTool = (row: TimelineItem): boolean =>
+    row.kind === 'tool' && usesToolCard(row.name, readableCards);
   const activityAt = (index: number): boolean =>
     collapseCompleted && !(running && index > liveFrom);
   const releasedPrefixEnd = (index: number): number => {
-    if (!releasedLive || !running || !(index > liveFrom) || !isActivityMember(sourceItems[index])) {
+    if (
+      !releasedLive ||
+      !running ||
+      !(index > liveFrom) ||
+      !isActivityMember(sourceItems[index], readableCards)
+    ) {
       return index;
     }
     if (heldOpen(sourceItems[index])) return index;
@@ -2072,7 +2141,7 @@ function foldPrepared(
     let end = index;
     while (
       end < sourceItems.length &&
-      isActivityMember(sourceItems[end]) &&
+      isActivityMember(sourceItems[end], readableCards) &&
       !heldOpen(sourceItems[end]) &&
       releasedLive.has(activityAnchor(sourceItems[end]))
     ) {
@@ -2081,6 +2150,7 @@ function foldPrepared(
     return end - index >= 2 ? end : index;
   };
   const inSegment = (s: TimelineItem, index: number): boolean =>
+    !cardTool(s) &&
     !heldOpen(s) &&
     !(s.kind === 'tool' && s.generatedImages?.length) &&
     (s.kind === 'thinking' ||
@@ -2193,24 +2263,175 @@ function foldPrepared(
  *   正在流的思考从安静前缀后面截断，不把前面已经折起的部分重新打开。
  * - 成功配对的 explore_mark → explore_fold 先收成探索组：平时独立成行，完成后并入过程组。
  * - expandedKeys 含组 key 时组头后平铺 children（参与虚拟化）。
+ * - 系统回传上调用了 silence_turn（或旧静默标记）时，整轮收成一行，默认收起。
+ * - foldToolOnlyTurns：秘书会话里没有实质回复的一轮，工具卡片也收成「已工作」一行。有回复或失败则保持展开。
  * 纯函数。
  */
+function isTurnStart(item: TimelineItem): boolean {
+  return item.kind === 'user' && !item.deliveryState;
+}
+
+function isMarkerText(item: TimelineItem): boolean {
+  return item.kind === 'text' && isSilentMarker(item.text);
+}
+
+function isSubstantialReply(item: TimelineItem): boolean {
+  return item.kind === 'text' && item.text.trim().length > 0 && !isSilentMarker(item.text);
+}
+
+function visitTools(
+  items: readonly TimelineItem[],
+  visit: (tool: Extract<TimelineItem, { kind: 'tool' }>) => void
+): void {
+  for (const item of items) {
+    if (item.kind === 'tool') visit(item);
+    else if (item.kind === 'tool-group') visitTools(item.children, visit);
+  }
+}
+
+function toolOnlyGroup(
+  rows: TimelineItem[],
+  expandedKeys: ReadonlySet<string>,
+  notice?: 'patrol' | 'seen'
+): TimelineItem[] {
+  if (rows.length === 0) return [];
+  const stats: ToolGroupStats = { commands: 0, reads: 0, searches: 0, others: 0 };
+  let count = 0;
+  let thinking = 0;
+  let workedMs = 0;
+  visitTools(rows, (tool) => {
+    classifyTool(tool.name, tool.summary, stats, false);
+    count += 1;
+    workedMs += tool.durationMs ?? 0;
+  });
+  for (const row of rows) {
+    if (row.kind === 'thinking') {
+      thinking += 1;
+      workedMs += row.durationMs ?? 0;
+    }
+  }
+  const key = `${notice ? 'silent' : 'group'}-${rows[0].key}`;
+  const expanded = expandedKeys.has(key);
+  const summary = toolGroupSummary(rows);
+  const group: TimelineItem = {
+    kind: 'tool-group',
+    key,
+    expanded,
+    count,
+    stats,
+    exploring: false,
+    activity: { thinking, workedMs },
+    ...(notice ? { notice } : {}),
+    ...(summary && !notice ? { summary } : {}),
+    children: rows,
+  };
+  return expanded ? [group, ...rows] : [group];
+}
+
+function silenceNotice(text: string): 'patrol' | 'seen' {
+  return /<secretary-schedule>/.test(text) && !/<session-updates>/.test(text) ? 'patrol' : 'seen';
+}
+
+function turnCalledSilence(items: readonly TimelineItem[]): boolean {
+  let called = false;
+  visitTools(items, (tool) => {
+    if (tool.name === SILENCE_TURN_TOOL) called = true;
+  });
+  return called || items.some(isMarkerText);
+}
+
+/** 静默回合整轮收起；秘书的纯工具回合收成过程组。进行中的最后一轮保持展开。 */
+function foldSecretarySurface(
+  items: TimelineItem[],
+  running: boolean,
+  expandedKeys: ReadonlySet<string>,
+  foldToolOnly: boolean
+): TimelineItem[] {
+  const result: TimelineItem[] = [];
+  let index = 0;
+  while (index < items.length) {
+    if (!isTurnStart(items[index])) {
+      result.push(items[index]);
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    while (end < items.length && !isTurnStart(items[end])) end += 1;
+    const turn = items.slice(index, end);
+    const live = running && end === items.length;
+    result.push(...foldSecretaryTurn(turn, live, expandedKeys, foldToolOnly));
+    index = end;
+  }
+  return result;
+}
+
+function foldSecretaryTurn(
+  turn: TimelineItem[],
+  live: boolean,
+  expandedKeys: ReadonlySet<string>,
+  foldToolOnly: boolean
+): TimelineItem[] {
+  const user = turn[0];
+  if (live || user?.kind !== 'user') return turn;
+  const rest = turn.slice(1).filter((item) => !isMarkerText(item));
+  const silent = isPureSessionUpdate(user.text) && turnCalledSilence(turn.slice(1));
+  if (silent) {
+    const notice = silenceNotice(user.text);
+    return toolOnlyGroup([{ ...user, canCollapse: false }, ...rest], expandedKeys, notice);
+  }
+  if (!foldToolOnly || rest.some(isSubstantialReply)) return turn;
+  let failed = false;
+  let count = 0;
+  visitTools(rest, (tool) => {
+    count += 1;
+    if (tool.state !== 'ok') failed = true;
+  });
+  if (failed || count < 1) return turn;
+  const foreign = rest.some(
+    (item) => item.kind !== 'tool' && item.kind !== 'thinking' && item.kind !== 'tool-group'
+  );
+  if (foreign) return turn;
+  return [{ ...user, canCollapse: false }, ...toolOnlyGroup(rest, expandedKeys)];
+}
+
 export function foldTimeline(
   items: TimelineItem[],
   running: boolean,
   expandedKeys: ReadonlySet<string>,
   options: TimelineFoldOptions = {}
 ): TimelineItem[] {
-  const { sourceItems, lastUserIndex, liveFrom } = prepareTimeline(
+  const surfaced = foldSecretarySurface(
     items,
+    running,
+    expandedKeys,
+    options.foldToolOnlyTurns === true
+  );
+  const { sourceItems, lastUserIndex, liveFrom } = prepareTimeline(
+    surfaced,
     running,
     expandedKeys,
     options
   );
+  const readableCards = options.readableToolCards === true;
+  const merged = mergeRuns(
+    sourceItems,
+    (name) => usesToolCard(name, readableCards),
+    (head, rest) => {
+      if (head.kind !== 'tool') return head;
+      return {
+        ...head,
+        cardPeers: rest.flatMap((item) =>
+          item.kind === 'tool'
+            ? [{ key: item.key, args: item.args ?? null, output: item.output, state: item.state }]
+            : []
+        ),
+      };
+    }
+  );
   const releasedLive =
     options.collapseLiveActivity === true ? (options.releasedLiveActivity ?? null) : null;
   return foldPrepared(
-    sourceItems,
+    merged,
     running,
     expandedKeys,
     options.compact === true,
@@ -2218,6 +2439,7 @@ export function foldTimeline(
     releasedLive,
     lastUserIndex,
     liveFrom,
-    options.heldOpenTools ?? null
+    options.heldOpenTools ?? null,
+    readableCards
   );
 }

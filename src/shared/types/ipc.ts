@@ -6,6 +6,82 @@ export const IPC_CHANNELS = {
   SETTINGS_CHANGED: 'settings:changed',
   /** main → 主界面 renderer：其他主界面（远程浏览器/桌面）改动的会话元数据补丁 */
   CONVERSATIONS_PATCH: 'conversations:patch',
+  /** 主界面 renderer 读整份会话记录，同时重置自己的会话账本 */
+  CONVERSATIONS_READ: 'conversations:read',
+  /** 秘书：工作台与聊天卡片读的同一份 Main 状态 */
+  SECRETARY_GET_STATE: 'secretary:get-state',
+  /** main → 主界面 renderer：秘书状态变化 */
+  SECRETARY_STATE_CHANGED: 'secretary:state-changed',
+  /** 秘书：确认或拒绝提案 */
+  SECRETARY_RESOLVE_PROPOSAL: 'secretary:resolve-proposal',
+  /** 秘书：用户把会话点名叫给秘书 */
+  SECRETARY_REFERENCE_CONVERSATIONS: 'secretary:reference-conversations',
+  /** 秘书：界面编辑、删除、派出待办 */
+  SECRETARY_TODO_MUTATE: 'secretary:todo-mutate',
+  /** 秘书：用户点过工作台结果卡的「知道了」，这条结果不再占需要你处理 */
+  SECRETARY_DISMISS_RESULT: 'secretary:dismiss-result',
+  /** 秘书：用户手动把一条派发记录标记完成，或撤销这个标记放回进行中 */
+  SECRETARY_MARK_RESULT: 'secretary:mark-result',
+  /** 秘书：停掉一条派发记录里遗留的后台任务（常驻服务、卡死的命令） */
+  SECRETARY_STOP_TASKS: 'secretary:stop-tasks',
+  /** 秘书：派出会话的目标由 Main 续跑，界面只发指令 */
+  SECRETARY_GOAL_ACTION: 'secretary:goal-action',
+  /** 秘书：全部定时（含系统生成的每日简报与待办提醒） */
+  SECRETARY_SCHEDULES_LIST: 'secretary:schedules-list',
+  /** 秘书：删除一条定时；系统生成的条目由档案与待办派生，不接受删除 */
+  SECRETARY_SCHEDULE_REMOVE: 'secretary:schedule-remove',
+  /** 秘书：读档案与人设；profile 为 null 表示还没完成初次设置 */
+  SECRETARY_GET_PROFILE: 'secretary:get-profile',
+  /** 秘书：表单写入档案（部分字段合并），越界取值当场拒绝 */
+  SECRETARY_SAVE_PROFILE: 'secretary:save-profile',
+  /** 秘书：重新设置，可选清空私有记忆 */
+  SECRETARY_RESET_PROFILE: 'secretary:reset-profile',
+  /** 秘书：头像图片由 Main 落盘，renderer 只传字节或 null */
+  SECRETARY_SET_AVATAR: 'secretary:set-avatar',
+  /** 秘书：列出秘书可用的 skill（自有 + 勾选的全局），设置页与右侧面板共用 */
+  SECRETARY_SKILLS_LIST: 'secretary:skills-list',
+  /** 秘书：删除一个自有 skill，renderer 只传 slug */
+  SECRETARY_SKILL_DELETE: 'secretary:skill-delete',
+  /** 秘书：启用或停用一个 skill（自有写档案，全局改勾选） */
+  SECRETARY_SKILL_SET_ENABLED: 'secretary:skill-set-enabled',
+  /** 秘书：读一个 skill 的 SKILL.md 正文，只给用户看 */
+  SECRETARY_SKILL_READ: 'secretary:skill-read',
+  /** 秘书：列出秘书自造的工具（含代码），设置页展开查看 */
+  SECRETARY_TOOLS_LIST: 'secretary:tools-list',
+  /** 秘书：删除一个自造工具，renderer 只传 slug */
+  SECRETARY_TOOL_DELETE: 'secretary:tool-delete',
+  /** 秘书：撤销接管（会话界面或设置页） */
+  SECRETARY_TAKEOVER_REVOKE: 'secretary:takeover-revoke',
+  /** 秘书：列出交给秘书接管的会话，设置页用 */
+  SECRETARY_TAKEOVERS_LIST: 'secretary:takeovers-list',
+  /** 秘书：列出用户收回跟踪后不再由范围权限覆盖的会话，设置页用 */
+  SECRETARY_UNTRACKED_LIST: 'secretary:untracked-list',
+  /** 秘书：把会话从「不再跟踪」名单里移除，renderer 只传会话 id */
+  SECRETARY_UNTRACKED_REMOVE: 'secretary:untracked-remove',
+  /** 秘书：动态按时间游标分页，renderer 不拿全量再切片 */
+  SECRETARY_FEED: 'secretary:feed',
+  /** 秘书：按天汇总的看板（日报），入参是日期，缺省今天 */
+  SECRETARY_DAILY: 'secretary:daily',
+  /** 秘书联系方式：读绑定状态（不含 token） */
+  SECRETARY_CONTACT_STATE: 'secretary:contact-state',
+  /** main → 主界面 renderer：联系方式状态变化 */
+  SECRETARY_CONTACT_CHANGED: 'secretary:contact-changed',
+  /** 秘书联系方式：校验 token 并生成一次性绑定码；只带码时重新生成 */
+  SECRETARY_CONTACT_BIND: 'secretary:contact-bind',
+  /** 秘书联系方式：退出绑定向导 */
+  SECRETARY_CONTACT_CANCEL: 'secretary:contact-cancel',
+  /** 秘书联系方式：解绑（清 chat，停轮询，保留 bot 与 token） */
+  SECRETARY_CONTACT_UNBIND: 'secretary:contact-unbind',
+  /** 秘书联系方式：更换 bot（token 一起清） */
+  SECRETARY_CONTACT_FORGET_BOT: 'secretary:contact-forget-bot',
+  /** 秘书联系方式：发一条测试消息 */
+  SECRETARY_CONTACT_TEST: 'secretary:contact-test',
+  /** 秘书联系方式：扩权开关 */
+  SECRETARY_CONTACT_SETTINGS: 'secretary:contact-settings',
+  /** 秘书联系方式：手机关注的任务，取消一项或全清 */
+  SECRETARY_CONTACT_FOLLOWING: 'secretary:contact-following',
+  /** main → 主界面 renderer：深链 enso://secretary 要求选中某个会话，可再定位到某张确认卡 */
+  SECRETARY_OPEN_CONVERSATION: 'secretary:open-conversation',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',
@@ -88,7 +164,11 @@ export const IPC_CHANNELS = {
   MEMORY_DETAIL: 'memory:detail',
   MEMORY_ARCHIVE: 'memory:archive',
   MEMORY_RESTORE: 'memory:restore',
+  MEMORY_FORGETTING_RUN: 'memory:forgetting-run',
+  MEMORY_ARCHIVE_CANDIDATES: 'memory:archive-candidates',
+  MEMORY_ARCHIVE_CANDIDATES_CONFIRM: 'memory:archive-candidates-confirm',
   MEMORY_DELETE: 'memory:delete',
+  MEMORY_DELETE_PREVIEW: 'memory:delete-preview',
   MEMORY_UPDATE: 'memory:update',
   MEMORY_STATS: 'memory:stats',
   MEMORY_JOBS: 'memory:jobs',
@@ -191,6 +271,8 @@ export const IPC_CHANNELS = {
   AGENT_RETRY: 'agent:retry',
   AGENT_EVENT: 'agent:event',
   AGENT_SNAPSHOT: 'agent:snapshot',
+  /** 取走上次应用退出时被打断的回合（取一次即清空） */
+  AGENT_TAKE_INTERRUPTED_TURNS: 'agent:take-interrupted-turns',
   /** 已结束 child 的 safe journal 只读回放（路径由 Main 推导，请求只带 conversationId） */
   AGENT_CHILD_HISTORY_READ: 'agent:child-history-read',
   /** 父会话的子运行目录（只回摘要，不回路径） */

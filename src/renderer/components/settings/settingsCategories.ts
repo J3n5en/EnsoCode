@@ -14,6 +14,7 @@ const TOOL_GATED: Partial<Record<SettingsCategory, string>> = {
   workflows: 'workflow',
 };
 const BOT_PAGES: readonly SettingsCategory[] = ['bots', 'botTemplates'];
+const SECRETARY_PAGES: readonly SettingsCategory[] = ['secretary'];
 
 export type SettingsGroupId = 'app' | 'agent' | 'extensions' | 'connections' | 'system';
 
@@ -45,7 +46,7 @@ export const SETTINGS_GROUPS: readonly {
   {
     id: 'system',
     label: 'System',
-    categories: ['usage', 'resources', 'experimental', 'bots', 'botTemplates'],
+    categories: ['usage', 'resources', 'experimental', 'bots', 'botTemplates', 'secretary'],
   },
 ];
 
@@ -65,10 +66,15 @@ export function groupCategories<T extends { id: SettingsCategory }>(
 export function isCategoryVisible(
   category: SettingsCategory,
   disabledBuiltinTools: readonly string[],
-  botModeEnabled = false
+  botModeEnabled = false,
+  secretaryEnabled = false
 ): boolean {
+  // 秘书页跟随「实验」里的开关，开关所在的实验页始终可见
+  if (SECRETARY_PAGES.includes(category)) return secretaryEnabled;
   // Bot 模式页跟随「实验」里的开关；开关所在的实验页始终可见
   if (BOT_PAGES.includes(category)) return botModeEnabled;
+  // 秘书不受 memory 工具开关约束、始终会写自己的记忆，开着秘书就得能在这里管理它们
+  if (category === 'memory' && secretaryEnabled) return true;
   const tool = TOOL_GATED[category];
   return !tool || !disabledBuiltinTools.includes(tool);
 }
@@ -76,9 +82,12 @@ export function isCategoryVisible(
 export function visibleCategories<T extends { id: SettingsCategory }>(
   categories: readonly T[],
   disabledBuiltinTools: readonly string[],
-  botModeEnabled = false
+  botModeEnabled = false,
+  secretaryEnabled = false
 ): T[] {
-  return categories.filter((c) => isCategoryVisible(c.id, disabledBuiltinTools, botModeEnabled));
+  return categories.filter((c) =>
+    isCategoryVisible(c.id, disabledBuiltinTools, botModeEnabled, secretaryEnabled)
+  );
 }
 
 /**
@@ -89,10 +98,12 @@ export function visibleCategories<T extends { id: SettingsCategory }>(
 export function resolveActiveCategory(
   active: SettingsCategory,
   disabledBuiltinTools: readonly string[],
-  botModeEnabled = false
+  botModeEnabled = false,
+  secretaryEnabled = false
 ): SettingsCategory {
-  if (isCategoryVisible(active, disabledBuiltinTools, botModeEnabled)) return active;
-  return BOT_PAGES.includes(active) ? 'experimental' : 'tools';
+  if (isCategoryVisible(active, disabledBuiltinTools, botModeEnabled, secretaryEnabled))
+    return active;
+  return BOT_PAGES.includes(active) || SECRETARY_PAGES.includes(active) ? 'experimental' : 'tools';
 }
 
 export function searchCategories<T extends { id: SettingsCategory; label: string }>(

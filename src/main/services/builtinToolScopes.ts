@@ -21,10 +21,20 @@ export function sessionDisabledTools(
   return disabled;
 }
 
+/** 会话固定开启的开关从有效禁用列表里去掉（秘书的记忆分组不受全局设置影响） */
+export function withoutKeepEnabled(
+  disabled: readonly string[],
+  keepEnabled: readonly string[]
+): string[] {
+  return disabled.filter((id) => !keepEnabled.includes(id));
+}
+
 interface Scope {
   identity: SessionIdentity;
   projectId?: string;
   extra: readonly string[];
+  /** 会话固定开启的开关：设置变化重算后仍然去掉，不推回给 worker */
+  keepEnabled: readonly string[];
   sent: string;
 }
 
@@ -36,13 +46,15 @@ export class BuiltinToolScopes {
     identity: SessionIdentity,
     projectId: string | undefined,
     extra: readonly string[],
-    disabled: readonly string[]
+    disabled: readonly string[],
+    keepEnabled: readonly string[] = []
   ): void {
     this.scopes.set(identity.sessionId, {
       identity,
       ...(projectId ? { projectId } : {}),
       extra: [...extra],
-      sent: JSON.stringify(disabled),
+      keepEnabled: [...keepEnabled],
+      sent: JSON.stringify(withoutKeepEnabled(disabled, keepEnabled)),
     });
   }
 
@@ -56,11 +68,9 @@ export class BuiltinToolScopes {
   ): Array<{ identity: SessionIdentity; disabledTools: string[] }> {
     const out: Array<{ identity: SessionIdentity; disabledTools: string[] }> = [];
     for (const scope of this.scopes.values()) {
-      const disabledTools = sessionDisabledTools(
-        state,
-        scope.projectId,
-        scope.extra,
-        computerSupported
+      const disabledTools = withoutKeepEnabled(
+        sessionDisabledTools(state, scope.projectId, scope.extra, computerSupported),
+        scope.keepEnabled
       );
       const key = JSON.stringify(disabledTools);
       if (key === scope.sent) continue;

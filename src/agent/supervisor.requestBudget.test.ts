@@ -319,7 +319,9 @@ describe('SessionSupervisor 子代理请求预算', () => {
     endRound(worker);
     await settle();
     expect(completed(events)).toHaveLength(0);
-    expect(worker.prompt).toHaveBeenLastCalledWith(budgetWrapUpPrompt());
+    expect(worker.prompt).toHaveBeenLastCalledWith(budgetWrapUpPrompt(), {
+      streamingBehavior: 'followUp',
+    });
 
     request(worker, finalAnswer('partial findings'));
     endRound(worker);

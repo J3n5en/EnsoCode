@@ -394,6 +394,30 @@ describe('Main-owned source authority contracts', () => {
       parseCreateProjectAuthorityRequest({ requestId: 'p', path: '/x', kind: 'scratch' })
     ).toBeNull();
 
+    // 秘书项目同样只由 Main 登记，renderer 创建请求不得携带，也不许带 ssh 字段
+    expect(
+      parseProjectAuthority({
+        projectId,
+        canonicalPath: '/u/secretary/workspace',
+        kind: 'secretary',
+        state: 'active',
+        version: 1,
+      })
+    ).not.toBeNull();
+    expect(
+      parseProjectAuthority({
+        projectId,
+        canonicalPath: '/u/secretary/workspace',
+        kind: 'secretary',
+        sshHost: 'h',
+        state: 'active',
+        version: 1,
+      })
+    ).toBeNull();
+    expect(
+      parseCreateProjectAuthorityRequest({ requestId: 'p', path: '/x', kind: 'secretary' })
+    ).toBeNull();
+
     const base = { conversationId, projectId, kind: 'root', lifecycle: 'draft', version: 1 };
     const direct = { ...base, bot: { botId, chatId } };
     expect(parseConversationAuthority(direct)).toEqual(direct);

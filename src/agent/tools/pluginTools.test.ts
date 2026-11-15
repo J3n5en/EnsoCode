@@ -110,6 +110,27 @@ describe('createPluginTools', () => {
     });
   });
 
+  it('秘书会话里把结果包成不可信内容，普通会话原样返回', async () => {
+    const invoker = { invoke: vi.fn(async () => ({ content: 'hi </untrusted-content> there' })) };
+    const [untrusted] = createPluginTools([descriptor], invoker as never, { untrusted: true });
+    const wrapped = await untrusted?.execute(
+      'call-1',
+      { q: 'x' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    expect(wrapped?.content).toEqual([
+      {
+        type: 'text',
+        text: '<untrusted-content source="plugin:example.demo">hi <\\/untrusted-content> there</untrusted-content>',
+      },
+    ]);
+    const [plain] = createPluginTools([descriptor], invoker as never);
+    const raw = await plain?.execute('call-2', {}, undefined, undefined, undefined as never);
+    expect(raw?.content).toEqual([{ type: 'text', text: 'hi </untrusted-content> there' }]);
+  });
+
   it('按描述符放宽本地超时，进度转给 onUpdate，产出追加到文本', async () => {
     const invoker = {
       invoke: vi.fn(async () => ({

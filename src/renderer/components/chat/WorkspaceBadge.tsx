@@ -36,9 +36,11 @@ export function WorkspaceBadge({
 }) {
   const { t } = useI18n();
   const [apps, setApps] = useState<OpenInApp[]>([]);
-  // 远端客户端：打开 / 用应用打开都发生在宿主机上，只留复制路径
-  const local = project.kind !== 'ssh' && !window.electronAPI.remote;
   const scratch = project.kind === 'scratch';
+  // 临时会话与秘书项目都没有可操作的工作区：不给打开方式、不显示分支
+  const noWorkspace = scratch || project.kind === 'secretary';
+  // 远端客户端：打开 / 用应用打开都发生在宿主机上，只留复制路径
+  const local = project.kind !== 'ssh' && !noWorkspace && !window.electronAPI.remote;
   const label = scratch ? t('Temporary chats') : projectDisplayName(project);
   const refreshApps = useCallback(() => {
     if (!local) return;
@@ -59,8 +61,8 @@ export function WorkspaceBadge({
     <Menu onOpenChange={(next) => next && refreshApps()}>
       <MenuTrigger
         className="group ml-1.5 flex h-6 min-w-0 shrink-0 items-center rounded-full border border-border/60 px-2 font-mono text-[11.5px] text-muted-foreground outline-none transition-colors duration-(--duration-quick) hover:border-border focus-visible:border-border data-popup-open:border-border"
-        title={scratch ? label : path}
-        aria-label={branch && !scratch ? `${label} / ${branch}` : label}
+        title={noWorkspace ? label : path}
+        aria-label={branch && !noWorkspace ? `${label} / ${branch}` : label}
         onPointerEnter={refreshApps}
       >
         <Folder className="h-3 w-3 shrink-0" />
@@ -69,7 +71,7 @@ export function WorkspaceBadge({
         >
           <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap pl-1.5">
             <span className="max-w-40 truncate">{label}</span>
-            {branch && !scratch && (
+            {branch && !noWorkspace && (
               <>
                 <span className="opacity-40">/</span>
                 <GitBranch className="h-3 w-3 shrink-0" />

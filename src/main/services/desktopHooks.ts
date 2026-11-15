@@ -29,6 +29,7 @@ export interface NotifyDesktop {
     event: RendererAgentEvent,
     bot: { enabled: boolean; chatId: string | null; name: string; conversationId: string }
   ): Promise<void>;
+  notifySecretary(build: (lang: 'zh' | 'en') => { title: string; body: string }): Promise<void>;
   setViewedSession(sessionId: string | null): void;
 }
 
@@ -79,6 +80,7 @@ const botDesktopNoop: BotDesktop = {
 const notifyDesktopNoop: NotifyDesktop = {
   maybeNotify() {},
   async maybeNotifyBot() {},
+  async notifySecretary() {},
   setViewedSession() {},
 };
 

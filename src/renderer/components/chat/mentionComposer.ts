@@ -133,7 +133,8 @@ export type InlineSegment = { type: 'text'; text: string } | { type: 'file'; pat
 export type MentionSegment =
   | { type: 'text'; text: string }
   | { type: 'file'; path: string; label?: string }
-  | { type: 'chat'; label: string; sessionFile: string }
+  /** conversationId 只在编辑器里有（wire 文本不携带）：秘书点名授权按它走 */
+  | { type: 'chat'; label: string; sessionFile: string; conversationId?: string }
   | { type: 'ui-element'; id: string; label: string; path: string; text: string; imageId: string };
 
 /** 编辑器段 → wire text：文件原位 @path（含空白时 @"path"），会话/选区原位内联引用块 */
@@ -331,7 +332,8 @@ export function createEditorPayload(input: {
       if (segment.type === 'chat') {
         return {
           kind: 'chat' as const,
-          id: segment.sessionFile,
+          // 从 wire 解回的段没有会话 id，退回 jsonl 路径（Main 会拒掉非会话 id）
+          id: segment.conversationId ?? segment.sessionFile,
           label: segment.label,
           sessionFile: segment.sessionFile,
         };

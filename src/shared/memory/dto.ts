@@ -22,6 +22,12 @@ export interface MemoryListItem {
   updatedAt: string;
   /** 被检索返回的次数；不代表被真正用上 */
   appearances: number;
+  /** 最后一次被检索返回的时间；只给维护筛选用，不参与排序 */
+  lastHitAt: string | null;
+  /** 被检索返回的累计次数（与 appearances 同源，语义更直白）；只给维护筛选用 */
+  hitCount: number;
+  /** 遗忘巡检标上的「建议归档」时间；null = 不是候选。归档要用户确认或显式开启自动归档 */
+  archiveCandidateAt: string | null;
 }
 
 export interface EvolvesEdgeDto {
@@ -34,6 +40,16 @@ export interface EvolvesEdgeDto {
   reviewState: EvolvesReviewStateDto;
   reviewedAt: string | null;
   createdAt: string;
+}
+
+/**
+ * 待审阅的矛盾关系：只给 id 无法判断，两端记忆的标题与摘要必须一起给。
+ * 任一端已删除的边不出现（删除时关系边一并清掉，这里只是兜底）。
+ */
+export interface PendingEvolvesReviewDto {
+  edge: EvolvesEdgeDto;
+  older: MemoryListItem;
+  newer: MemoryListItem;
 }
 
 export interface CrystalSourceDto extends MemoryListItem {
@@ -59,9 +75,18 @@ export function isMemoryRetrievalMode(mode: unknown): mode is 'fast' | 'deep' {
 
 export interface MemoryListQuery {
   spaceId?: string | null;
+  /** 按一组空间筛选（如「全部项目」「秘书」）；与 spaceId 同时给时以 spaceId 为准，空数组 = 无结果 */
+  spaceIds?: string[];
   query?: string;
   unitType?: UnitType;
   includeArchived?: boolean;
+  /**
+   * 维护筛选：只列超过这么多天没被检索命中的记忆（从未命中的按创建时间算）。
+   * 只读筛选，不改任何状态；exact 模式可精确分页，语义模式在结果上后过滤。
+   */
+  staleDays?: number;
+  /** 只看遗忘巡检标出的归档候选（与 staleDays 独立：候选还要求重要度低、且不受保护规则保护） */
+  archiveCandidate?: boolean;
   limit: number;
   offset: number;
   /**
@@ -147,12 +172,52 @@ export interface MemoryStats {
   bySpace: Record<string, number>;
   /** space id → 项目名 / Global；缺失的 space（项目已删）不在表里 */
   spaceLabels: Record<string, string>;
+  /** space id → 空间类别（Main 按项目注册表判定秘书私有空间） */
+  spaceKinds?: Record<string, MemorySpaceKind>;
   crystals: number;
   entities: number;
   embedded: number;
   databaseBytes: number;
+  /** 从未被检索命中的条数（hit_count = 0），供用户判断要不要整理 */
+  neverHit: number;
+  /** 最近 7 天新增条数 */
+  addedLast7Days: number;
   /** 为什么没有向量；null = 没出过错 */
   embeddingError?: string | null;
+  /** 遗忘巡检状态；库未启用 / 未开过库时缺省 */
+  forgetting?: MemoryForgettingStateDto;
+}
+
+export type MemorySpaceKind = 'global' | 'project' | 'secretary' | 'bot' | 'chat';
+
+/** 遗忘巡检的一次运行摘要（memory_maintenance 里 kind=decay 的 detail） */
+export interface MemoryDecayRunDto {
+  ranAt: string;
+  scored: number;
+  candidates: number;
+  archived: number;
+  staleDays: number;
+  maxImportance: number;
+  autoArchive: boolean;
+  durationMs: number;
+}
+
+export interface MemoryForgettingStateDto {
+  lastRunAt: string | null;
+  lastRun: MemoryDecayRunDto | null;
+  /** 当前候选条数（实时统计） */
+  candidates: number;
+}
+
+export interface MemoryArchiveCandidatesResult {
+  items: MemoryListItem[];
+  total: number;
+}
+
+export interface MemoryArchiveConfirmResult {
+  archived: number;
+  /** 期间被检索到 / 重要度被调高 / 已归档而跳过的条数 */
+  skipped: number;
 }
 
 export interface DistillableSessionDto {
@@ -210,7 +275,24 @@ export interface MemoryMutationResult {
   ok: boolean;
   memory?: MemoryDetail;
   edge?: EvolvesEdgeDto;
+  impact?: MemoryDeletionImpact;
   error?: string;
+}
+
+/** 删除前的影响说明；执行时按同一规则在事务里重算 */
+export interface MemoryDeletionImpact {
+  /** target = 用户选中的；history = 被它替换掉、一起删的历史版本 */
+  deleted: { id: string; title: string; spaceId: string; role: 'target' | 'history' }[];
+  /** 删中间版本后重新接上的版本链 */
+  bridges: { olderId: string; newerId: string }[];
+  /** 只解除关系、本身保留的记忆 */
+  relations: { memoryId: string; title: string; relation: string }[];
+  /** 失去部分来源、仍是 crystal 的 */
+  crystalsUpdated: { id: string; title: string; remaining: number }[];
+  /** 来源不足、降为普通记忆的 crystal */
+  crystalsDemoted: { id: string; title: string; remaining: number }[];
+  /** 被删的 crystal 解除的来源边数（来源记忆保留） */
+  releasedSources: number;
 }
 
 /** Bot 成员写 project / global 记忆的待审批项（批准前不在 memories 里） */
@@ -232,20 +314,30 @@ export interface PendingMemoryWriteDto {
 
 export type PendingMemoryWriteDecision = 'approve' | 'reject';
 
-/** 手动编辑记忆；title 为空沿用原标题 */
+/** 手动编辑记忆；title 为空沿用原标题；unitType / importance 不给则不改 */
 export interface MemoryEditPatch {
   title: string;
   content: string;
+  unitType?: UnitType;
+  importance?: number;
 }
 
 export function isMemoryEditPatch(value: unknown): value is MemoryEditPatch {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
+  const keys = ['title', 'content', 'unitType', 'importance'];
   return (
-    Object.keys(row).every((key) => key === 'title' || key === 'content') &&
+    Object.keys(row).every((key) => keys.includes(key)) &&
     typeof row.title === 'string' &&
     typeof row.content === 'string' &&
-    row.content.trim().length > 0
+    row.content.trim().length > 0 &&
+    (row.unitType === undefined ||
+      (typeof row.unitType === 'string' && isUnitType(row.unitType))) &&
+    (row.importance === undefined ||
+      (typeof row.importance === 'number' &&
+        Number.isFinite(row.importance) &&
+        row.importance >= 0 &&
+        row.importance <= 1))
   );
 }
 
@@ -261,10 +353,23 @@ export function isMemoryListQuery(value: unknown): value is MemoryListQuery {
   if (!Number.isSafeInteger(row.offset) || (row.offset as number) < 0) return false;
   if (row.spaceId !== undefined && row.spaceId !== null && typeof row.spaceId !== 'string')
     return false;
+  if (
+    row.spaceIds !== undefined &&
+    (!Array.isArray(row.spaceIds) ||
+      row.spaceIds.length > 1000 ||
+      !row.spaceIds.every((id) => typeof id === 'string' && id.length > 0))
+  )
+    return false;
   if (row.query !== undefined && typeof row.query !== 'string') return false;
   if (row.unitType !== undefined && (typeof row.unitType !== 'string' || !isUnitType(row.unitType)))
     return false;
   if (row.includeArchived !== undefined && typeof row.includeArchived !== 'boolean') return false;
+  if (
+    row.staleDays !== undefined &&
+    (typeof row.staleDays !== 'number' || !Number.isFinite(row.staleDays) || row.staleDays < 0)
+  )
+    return false;
+  if (row.archiveCandidate !== undefined && typeof row.archiveCandidate !== 'boolean') return false;
   if (row.mode !== undefined && row.mode !== 'exact' && row.mode !== 'fast' && row.mode !== 'deep')
     return false;
   return true;

@@ -1,3 +1,4 @@
+import { conversationDotTone } from '@shared/conversationDotTone';
 import { describe, expect, it } from 'vitest';
 import { isPairViewed, nextUnread, setPairViewedSession } from './unread';
 
@@ -30,6 +31,14 @@ describe('nextUnread', () => {
     expect(
       nextUnread({ prevStatus: 'failed', nextStatus: 'failed', prevUnread: false, viewed: false })
     ).toBe(false);
+  });
+
+  it('秘书负责的会话跑完不标未读，侧栏不出绿点；普通会话照旧', () => {
+    const dot = (unread: boolean) => conversationDotTone({ status: 'idle', unread });
+    const finish = (secretaryOwned: boolean) =>
+      dot(nextUnread({ prevStatus: 'running', nextStatus: 'idle', viewed: false, secretaryOwned }));
+    expect(finish(true)).toBe('idle');
+    expect(finish(false)).toBe('unread');
   });
 });
 

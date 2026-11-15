@@ -9,9 +9,13 @@ import {
   isMemoryListQuery,
   isMemoryRetrievalMode,
   isPendingMemoryWriteDecision,
+  type MemoryArchiveCandidatesResult,
+  type MemoryArchiveConfirmResult,
+  type MemoryDecayRunDto,
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
+  type MemorySpaceKind,
   type MemoryStats,
   type PendingMemoryWriteDto,
 } from '@shared/memory/dto';
@@ -36,8 +40,14 @@ import {
   setChatModelProgressSink,
   startChatModelDownload,
 } from '../services/chatModels';
+import { appendMemoryAudit, editAuditEntry } from '../services/memory/audit';
 import { createCrystal } from '../services/memory/crystal';
 import { looseParse } from '../services/memory/distill';
+import {
+  archiveCandidatesConfirmed,
+  getForgettingState,
+  listArchiveCandidates,
+} from '../services/memory/forgetting';
 import {
   buildMemoryGraph,
   buildMemoryTree,
@@ -45,13 +55,13 @@ import {
   memoriesForEntity,
   memoriesForPrompt,
 } from '../services/memory/graph';
+import { deleteMemoriesManually, planMemoryDeletion } from '../services/memory/manual';
 import { listPendingWrites, rejectPendingWrite } from '../services/memory/pending';
 import { createSearchAssist } from '../services/memory/searchLlm';
 import { getMemory } from '../services/memory/store';
 import {
   archiveMemory,
   clearFinishedMemoryJobs,
-  deleteMemoryPermanently,
   getMemoryDetail,
   getMemoryStats,
   listMemoriesForAdmin,
@@ -61,11 +71,13 @@ import {
   reviewEvolvesEdge,
   searchMemoriesForAdmin,
   toMemoryJobsSnapshot,
+  toMemoryListItem,
 } from '../services/memoryAdmin';
 import {
   approvePendingMemoryWrite,
   distillSessionNow,
   editMemory,
+  forgettingSettings,
   getMemoryCompletion,
   getMemoryDistillJobs,
   getMemoryEmbedder,
@@ -77,6 +89,7 @@ import {
   memoryLanguage,
   refreshMemoryEmbedding,
   retryFailedMemoryKg,
+  runMemoryForgettingNow,
   setMemoryChangeListener,
 } from '../services/memoryHost';
 import {
@@ -87,7 +100,7 @@ import {
   startEmbeddingModelDownload,
 } from '../services/memoryModels';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
-import { readSettings } from './settings';
+import { readSettings, readSettingsState } from './settings';
 
 const EMPTY_LIST: MemoryListResult = { items: [], total: 0 };
 const EMPTY_STATS: MemoryStats = {
@@ -98,6 +111,9 @@ const EMPTY_STATS: MemoryStats = {
   entities: 0,
   embedded: 0,
   databaseBytes: 0,
+  neverHit: 0,
+  addedLast7Days: 0,
+  forgetting: { lastRunAt: null, lastRun: null, candidates: 0 },
 };
 const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null, kgFailed: 0 };
 const EMPTY_GRAPH: MemoryGraphDto = { nodes: [], edges: [], totalEntities: 0 };
@@ -107,7 +123,11 @@ function isTrustedWindow(webContentsId: number): boolean {
 }
 
 function memoryDbPath(): string {
-  return path.join(app.getPath('userData'), 'memory', 'memory.db');
+  return path.join(memoryDir(), 'memory.db');
+}
+
+function memoryDir(): string {
+  return path.join(app.getPath('userData'), 'memory');
 }
 
 function withExistingDb<T>(fallback: T, run: (db: Database.Database) => T): T {
@@ -221,29 +241,93 @@ export function registerMemoryHandlers(): void {
     );
   });
 
+  // 立即运行：走 memoryHost 的共享连接（与蒸馏 / 重嵌同一条写通道），跑完广播让列表刷新
+  ipcMain.handle(IPC_CHANNELS.MEMORY_FORGETTING_RUN, (event): MemoryDecayRunDto | null => {
+    if (!isTrustedWindow(event.sender.id)) return null;
+    const summary = runMemoryForgettingNow();
+    memoryChanged();
+    return summary;
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES,
+    async (event, request: unknown): Promise<MemoryArchiveCandidatesResult> => {
+      if (!isTrustedWindow(event.sender.id)) return { items: [], total: 0 };
+      // 与 list / delete-preview 同口径：入参不合法就返回空，不猜用户想要哪一页
+      if (!isCandidateQuery(request)) return { items: [], total: 0 };
+      const query = request ?? { limit: 50, offset: 0 };
+      const result = withExistingDb<ReturnType<typeof listArchiveCandidates>>(
+        { items: [], total: 0 },
+        (db) => listArchiveCandidates(db, forgettingSettings(), query)
+      );
+      const label = await spaceLabeler();
+      return {
+        total: result.total,
+        items: result.items.map((memory) => {
+          const item = toMemoryListItem(memory);
+          return { ...item, spaceLabel: label(item.spaceId) };
+        }),
+      };
+    }
+  );
+
+  // 批量确认归档：只改 lifecycle_state（可还原），不删除；条件在 Main 侧重算，不信任回传的列表
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES_CONFIRM,
+    (event, ids: unknown): MemoryArchiveConfirmResult => {
+      if (!isTrustedWindow(event.sender.id) || !isIdList(ids)) return { archived: 0, skipped: 0 };
+      const result = withExistingDb<MemoryArchiveConfirmResult>(
+        { archived: 0, skipped: 0 },
+        (db) => {
+          const outcome = archiveCandidatesConfirmed(db, forgettingSettings(), ids, {
+            audit: (entry) => appendMemoryAudit(memoryDir(), entry),
+          });
+          // 只回传用户要的两个数；命中的 id 列表留在 Main（审计用）
+          return { archived: outcome.archived, skipped: outcome.skipped };
+        }
+      );
+      if (result.archived > 0) memoryChanged();
+      return result;
+    }
+  );
+
+  // 确认框先拿影响说明；真正删除时在事务里按同一规则重算，不信任渲染层回传的计划
+  ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE_PREVIEW, (event, ids: unknown) => {
+    if (!isTrustedWindow(event.sender.id) || !isIdList(ids)) return null;
+    return withExistingDb(null, (db) => planMemoryDeletion(db, ids));
+  });
+
   ipcMain.handle(IPC_CHANNELS.MEMORY_DELETE, (event, id: unknown): MemoryMutationResult => {
     if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) return invalidRequest();
     return withExistingDb<MemoryMutationResult>(
       { ok: false, error: 'Memory database is not available.' },
       (db) => {
-        if (!deleteMemoryPermanently(db, id)) return { ok: false, error: 'Memory not found.' };
+        const impact = deleteMemoriesManually(db, [id]);
+        if (!impact) return { ok: false, error: 'Memory not found.' };
+        appendMemoryAudit(memoryDir(), {
+          ts: new Date().toISOString(),
+          action: 'memory.delete',
+          actor: 'user',
+          requested: [id],
+          impact,
+        });
         memoryChanged();
-        return { ok: true };
+        return { ok: true, impact };
       }
     );
   });
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_UPDATE,
-    (event, id: unknown, patch: unknown): MemoryMutationResult => {
+    async (event, id: unknown, patch: unknown): Promise<MemoryMutationResult> => {
       if (!isTrustedWindow(event.sender.id) || typeof id !== 'string' || !id) {
         return invalidRequest();
       }
       if (!isMemoryEditPatch(patch)) return invalidRequest();
       try {
-        if (!editMemory(id, { title: patch.title, content: patch.content })) {
-          return { ok: false, error: 'Memory not found.' };
-        }
+        const result = await editMemory(id, patch);
+        if (!result) return { ok: false, error: 'Memory not found.' };
+        appendMemoryAudit(memoryDir(), editAuditEntry(result));
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -254,13 +338,21 @@ export function registerMemoryHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.MEMORY_STATS, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return EMPTY_STATS;
-    const stats = withExistingDb(EMPTY_STATS, getMemoryStats);
+    // 遗忘状态并进 stats：同一次开库算完，不再为它多开一条连接
+    const stats = withExistingDb(EMPTY_STATS, (db) => ({
+      ...getMemoryStats(db),
+      forgetting: getForgettingState(db, forgettingSettings()),
+    }));
     const label = await spaceLabeler();
+    const kind = await spaceKinder();
     return {
       ...stats,
       embeddingError: getMemoryEmbeddingError(),
       spaceLabels: Object.fromEntries(
         Object.keys(stats.bySpace).map((spaceId) => [spaceId, label(spaceId)])
+      ),
+      spaceKinds: Object.fromEntries(
+        Object.keys(stats.bySpace).map((spaceId) => [spaceId, kind(spaceId)])
       ),
     };
   });
@@ -320,9 +412,17 @@ export function registerMemoryHandlers(): void {
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.MEMORY_EVOLVES_PENDING, (event) => {
+  ipcMain.handle(IPC_CHANNELS.MEMORY_EVOLVES_PENDING, async (event) => {
     if (!isTrustedWindow(event.sender.id)) return [];
-    return withExistingDb([], listPendingEvolves);
+    const items = withExistingDb([], listPendingEvolves);
+    if (items.length === 0) return [];
+    // 空间名要项目注册表，服务层只知道 space id
+    const label = await spaceLabeler();
+    return items.map((item) => ({
+      ...item,
+      older: { ...item.older, spaceLabel: label(item.older.spaceId) },
+      newer: { ...item.newer, spaceLabel: label(item.newer.spaceId) },
+    }));
   });
 
   ipcMain.handle(
@@ -609,6 +709,10 @@ async function projectNames(): Promise<Map<string, string>> {
       names.set(project.projectId, '临时会话');
       continue;
     }
+    if (project.kind === 'secretary') {
+      names.set(project.projectId, '秘书');
+      continue;
+    }
     names.set(project.projectId, basename(project.canonicalPath));
   }
   return names;
@@ -617,15 +721,82 @@ async function projectNames(): Promise<Map<string, string>> {
 const GLOBAL_SPACE_LABEL = 'Global';
 const PROJECT_SPACE_PREFIX = 'proj:';
 
+function isIdList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 500 &&
+    value.every((id) => typeof id === 'string' && id.length > 0)
+  );
+}
+
+/** 候选列表分页参数；缺省按第一页，脏值直接回落而不是报错 */
+function isCandidateQuery(value: unknown): value is { limit?: number; offset?: number } {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if (
+    row.limit !== undefined &&
+    (!Number.isSafeInteger(row.limit) || (row.limit as number) < 1 || (row.limit as number) > 200)
+  ) {
+    return false;
+  }
+  if (
+    row.offset !== undefined &&
+    (!Number.isSafeInteger(row.offset) || (row.offset as number) < 0)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** 秘书私有空间也是 proj: 前缀，只有项目注册表知道哪个项目是秘书 */
+async function spaceKinder(): Promise<(spaceId: string) => MemorySpaceKind> {
+  const { getSourceAuthorityRegistry } = await import('./agent');
+  const secretary = new Set(
+    (getSourceAuthorityRegistry()?.projection().projects ?? [])
+      .filter((project) => project.kind === 'secretary')
+      .map((project) => project.projectId)
+  );
+  return (spaceId) => {
+    if (spaceId.startsWith('bot:')) return 'bot';
+    if (spaceId.startsWith('chat:')) return 'chat';
+    if (!spaceId.startsWith(PROJECT_SPACE_PREFIX)) return 'global';
+    return secretary.has(spaceId.slice(PROJECT_SPACE_PREFIX.length)) ? 'secretary' : 'project';
+  };
+}
+
+/**
+ * 设置里的项目名。注册表只含本次运行打开过的项目，未打开过的项目在这里还有名字，
+ * 否则待审阅 / 列表里会退化成 `proj:` 的短 id，用户看不出这是哪个空间。
+ */
+function settingsProjectNames(): Map<string, string> {
+  const names = new Map<string, string>();
+  const projects = readSettingsState().projects;
+  if (!Array.isArray(projects)) return names;
+  for (const entry of projects) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name } = entry as { id?: unknown; name?: unknown };
+    if (typeof id === 'string' && typeof name === 'string' && name.trim()) {
+      names.set(id, name.trim());
+    }
+  }
+  return names;
+}
+
 /** space id → 项目名。项目已删或拿不到注册表时回退到短 id，不把 `proj:<uuid>` 原样给用户 */
 async function spaceLabeler(): Promise<(spaceId: string) => string> {
   const { getSourceAuthorityRegistry } = await import('./agent');
   const registry = getSourceAuthorityRegistry();
-  const names = new Map<string, string>();
+  const names = settingsProjectNames();
   for (const project of registry?.projection().projects ?? []) {
     if (project.kind === 'bot-home') continue;
     if (project.kind === 'scratch') {
       names.set(project.projectId, '临时会话');
+      continue;
+    }
+    if (project.kind === 'secretary') {
+      names.set(project.projectId, '秘书');
       continue;
     }
     names.set(project.projectId, basename(project.canonicalPath));

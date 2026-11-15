@@ -1,0 +1,247 @@
+import { SECRETARY_OPS, SECRETARY_TOOL_ALLOWLIST, type SecretaryOp } from '@shared/secretary/tools';
+import { describe, expect, it, vi } from 'vitest';
+import type { MemoryInvoker } from './memory';
+import { createSecretaryTools, normalizeSecretaryParams } from './secretary';
+
+function invoker() {
+  const invoke = vi.fn(async () => ({ ok: false, error: 'unavailable' }));
+  return { invoke, port: { invoke } as unknown as MemoryInvoker<SecretaryOp> };
+}
+
+describe('secretary tools', () => {
+  it('每个 op 一个工具，名字与白名单一致', () => {
+    const tools = createSecretaryTools(invoker().port);
+    expect(tools.map((tool) => tool.name)).toEqual([...SECRETARY_OPS]);
+    for (const tool of tools) expect(SECRETARY_TOOL_ALLOWLIST.has(tool.name)).toBe(true);
+  });
+
+  it('schema 声明完整类型、必填项在属性里、禁止额外键', () => {
+    for (const tool of createSecretaryTools(invoker().port)) {
+      const schema = tool.parameters as unknown as {
+        type: string;
+        properties: Record<string, { type?: unknown; anyOf?: unknown[] }>;
+        required?: string[];
+        additionalProperties?: boolean;
+      };
+      expect(schema.type).toBe('object');
+      expect(schema.additionalProperties).toBe(false);
+      expect(typeof schema.properties).toBe('object');
+      for (const [key, property] of Object.entries(schema.properties))
+        expect(property.type ?? property.anyOf, `${tool.name}.${key}`).toBeDefined();
+      for (const key of schema.required ?? [])
+        expect(Object.keys(schema.properties)).toContain(key);
+    }
+  });
+
+  it('session_send 的 mode 只允许 queue 与 steer，session_stop 的 clearQueue 是布尔', () => {
+    const tools = createSecretaryTools(invoker().port);
+    const schemaOf = (name: string) =>
+      tools.find((tool) => tool.name === name)?.parameters as unknown as {
+        properties: Record<
+          string,
+          { type?: string; enum?: string[]; maxItems?: number; items?: { type?: string } }
+        >;
+        required?: string[];
+      };
+    const send = schemaOf('session_send');
+    expect(send.properties.mode).toMatchObject({ type: 'string', enum: ['queue', 'steer'] });
+    expect(send.properties.attachments).toMatchObject({
+      type: 'array',
+      maxItems: 5,
+      items: { type: 'string' },
+    });
+    expect(send.required).toEqual(['conversationId', 'message']);
+    const stop = schemaOf('session_stop');
+    expect(stop.properties.clearQueue).toMatchObject({ type: 'boolean' });
+    expect(stop.required).toEqual(['conversationId']);
+    expect(schemaOf('session_queue_list').required).toEqual(['conversationId']);
+    expect(schemaOf('session_queue_cancel').required).toEqual(['conversationId', 'messageId']);
+  });
+
+  it('派发类工具都声明基线、依赖与取消等待派发的参数', () => {
+    const tools = createSecretaryTools(invoker().port);
+    const schemaOf = (name: string) =>
+      tools.find((tool) => tool.name === name)?.parameters as unknown as {
+        properties: Record<string, { type?: string; items?: { type?: string } }>;
+      };
+    for (const name of ['session_create', 'todo_item_dispatch']) {
+      const schema = schemaOf(name);
+      expect(schema.properties.checkout).toMatchObject({ type: 'string' });
+      expect(schema.properties.baseRef).toMatchObject({ type: 'string' });
+      expect(schema.properties.branch).toMatchObject({ type: 'string' });
+      expect(schema.properties.after).toMatchObject({ type: 'array' });
+      expect(schema.properties.after.items).toMatchObject({ type: 'string' });
+    }
+  });
+
+  it('别名与类型在 schema 校验前归一化', () => {
+    expect(
+      normalizeSecretaryParams('session_create', {
+        project_id: 'p1',
+        task: '  fix the build  ',
+        worktree: 'true',
+        title: '',
+      })
+    ).toEqual({ projectId: 'p1', prompt: 'fix the build', worktree: true });
+    expect(normalizeSecretaryParams('session_read', { conversation_id: 'c1', limit: '5' })).toEqual(
+      {
+        conversationId: 'c1',
+        limit: 5,
+      }
+    );
+    expect(normalizeSecretaryParams('session_send', { conversationId: 'c1', text: 'hi' })).toEqual({
+      conversationId: 'c1',
+      message: 'hi',
+    });
+    // 单张图片写成字符串时包成数组，别名 images / imagePaths 都认
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversationId: 'c1',
+        message: '按图改',
+        attachments: ' /tmp/a.png ',
+      })
+    ).toEqual({ conversationId: 'c1', message: '按图改', attachments: ['/tmp/a.png'] });
+    expect(
+      normalizeSecretaryParams('session_send', {
+        sessionId: 'c1',
+        text: '按图改',
+        images: ['/tmp/a.png', '/tmp/b.png'],
+      })
+    ).toEqual({
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: ['/tmp/a.png', '/tmp/b.png'],
+    });
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversation_id: 'c1',
+        content: 'hi',
+        mode: ' steer ',
+      })
+    ).toEqual({ conversationId: 'c1', message: 'hi', mode: 'steer' });
+    expect(
+      normalizeSecretaryParams('session_stop', { conversationId: 'c1', clear_queue: 'true' })
+    ).toEqual({ conversationId: 'c1', clearQueue: true });
+    expect(
+      normalizeSecretaryParams('schedule_add', { name: 'n', prompt: 'p', cron: null })
+    ).toEqual({
+      name: 'n',
+      prompt: 'p',
+    });
+    // 非对象原样返回，交给 schema 拒绝
+    expect(normalizeSecretaryParams('project_list', 'nope')).toBe('nope');
+  });
+
+  it('只读核实工具的别名、snake_case 与数字在 schema 校验前归一化', () => {
+    expect(
+      normalizeSecretaryParams('repo_status', {
+        project_id: 'p1',
+        limit: '5',
+        base: ' main ',
+        sha: '9c23a8058',
+      })
+    ).toEqual({ projectId: 'p1', limit: 5, base: 'main', contains: '9c23a8058' });
+    expect(normalizeSecretaryParams('repo_status', { dir: '/repo/alpha' })).toEqual({
+      path: '/repo/alpha',
+    });
+    expect(
+      normalizeSecretaryParams('session_read', {
+        conversation_id: 'c1',
+        message_index: '7',
+        offset: '30000',
+      })
+    ).toEqual({ conversationId: 'c1', index: 7, offset: 30_000 });
+    expect(
+      normalizeSecretaryParams('session_activity', { conversation_id: 'c1', limit: '50' })
+    ).toEqual({ conversationId: 'c1', limit: 50 });
+    expect(normalizeSecretaryParams('session_tasks', { id: 'c1' })).toEqual({
+      conversationId: 'c1',
+    });
+  });
+
+  it('execute 把归一化后的参数交给 Main，结果原样回给模型', async () => {
+    const { invoke, port } = invoker();
+    invoke.mockResolvedValueOnce({ ok: false, error: 'unavailable' });
+    const tool = createSecretaryTools(port).find((entry) => entry.name === 'project_info')!;
+    const result = await tool.execute(
+      'call-1',
+      { project_id: 'p1' } as never,
+      undefined,
+      undefined as never,
+      undefined as never
+    );
+    expect(invoke).toHaveBeenCalledWith('project_info', { projectId: 'p1' }, undefined);
+    expect(result.content).toEqual([{ type: 'text', text: '{"ok":false,"error":"unavailable"}' }]);
+  });
+
+  it('image_view 把图片字节拆成图片块，文本里只剩元数据', async () => {
+    const { invoke, port } = invoker();
+    invoke.mockResolvedValueOnce({
+      path: '/tmp/shot.png',
+      size: 2048,
+      format: 'png',
+      mimeType: 'image/png',
+      width: 1280,
+      height: 720,
+      data: 'AAAA',
+    } as never);
+    const tool = createSecretaryTools(port).find((entry) => entry.name === 'image_view')!;
+    const result = await tool.execute(
+      'call-3',
+      { path: '/tmp/shot.png' } as never,
+      undefined,
+      undefined as never,
+      undefined as never
+    );
+    expect(result.content[0]).toEqual({
+      type: 'text',
+      text: '{"path":"/tmp/shot.png","size":2048,"width":1280,"height":720,"mimeType":"image/png"}',
+    });
+    expect(result.content[1]).toEqual({ type: 'image', data: 'AAAA', mimeType: 'image/png' });
+    // base64 不进文本，会话文件里不会多一份
+    expect(JSON.stringify(result.content[0])).not.toContain('AAAA');
+  });
+
+  it('image_view 失败时照常返回错误文本', async () => {
+    const { invoke, port } = invoker();
+    invoke.mockRejectedValueOnce(new Error('path is out of scope'));
+    const tool = createSecretaryTools(port).find((entry) => entry.name === 'image_view')!;
+    const result = await tool.execute(
+      'call-4',
+      { path: '/Users/me/x.png' } as never,
+      undefined,
+      undefined as never,
+      undefined as never
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: 'path is out of scope' }]);
+  });
+
+  it('看图与清理的参数别名在 schema 校验前归一化', () => {
+    expect(normalizeSecretaryParams('image_view', { file_path: ' /tmp/a.png ' })).toEqual({
+      path: '/tmp/a.png',
+    });
+    // 只给一个 id 字符串时包成数组，schema 不会因此拒绝
+    expect(normalizeSecretaryParams('cleanup_apply', { id: 'branch|/repo|feat/x' })).toEqual({
+      ids: ['branch|/repo|feat/x'],
+    });
+    expect(normalizeSecretaryParams('cleanup_list', { project_id: 'p1' })).toEqual({
+      projectId: 'p1',
+    });
+  });
+
+  it('invoker 抛错时标成工具失败，不把错误当结果', async () => {
+    const { invoke, port } = invoker();
+    invoke.mockRejectedValueOnce(new Error('Main is gone'));
+    const tool = createSecretaryTools(port).find((entry) => entry.name === 'session_list')!;
+    const result = await tool.execute(
+      'call-2',
+      {} as never,
+      undefined,
+      undefined as never,
+      undefined as never
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: 'Main is gone' }]);
+  });
+});

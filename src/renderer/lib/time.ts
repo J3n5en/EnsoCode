@@ -10,3 +10,12 @@ export function formatRelativeTime(ts: number, locale: string, now: number = Dat
   if (abs < 365 * 86_400_000) return rtf.format(Math.trunc(diff / (30 * 86_400_000)), 'month');
   return rtf.format(Math.trunc(diff / (365 * 86_400_000)), 'year');
 }
+
+/** 24 小时制钟点，用于时间线与定时列表 */
+export function formatClock(ts: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(ts);
+}

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const writeKey = vi.fn(async () => undefined);
+const writeKey = vi.fn(async () => true);
 let readSettings: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>;
 
 vi.stubGlobal('window', {
@@ -12,7 +12,9 @@ vi.stubGlobal('window', {
   },
 });
 
-const { electronStorage, openPersistWriteGate } = await import('./storage');
+const { createElectronPersistStorage, electronStorage, openPersistWriteGate } = await import(
+  './storage'
+);
 
 const payload = (state: Record<string, unknown>) => JSON.stringify({ state, version: 2 });
 
@@ -69,5 +71,47 @@ describe('electronStorage hydration write gate', () => {
     await electronStorage.setItem('enso-settings-fail', payload({ providers: [] }));
 
     expect(writeKey).not.toHaveBeenCalled();
+  });
+});
+
+describe('createElectronPersistStorage 确认号', () => {
+  const deferred = () => {
+    let resolve!: (value: boolean) => void;
+    const promise = new Promise<boolean>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  const value = (revision: number) => ({ state: { revision }, version: 1 });
+
+  beforeEach(() => {
+    writeKey.mockReset();
+    writeKey.mockResolvedValue(true);
+  });
+
+  it('确认号在入队时绑定，合并待写值时取最后一次', async () => {
+    let ackSeq = 3;
+    const storage = createElectronPersistStorage<{ revision: number }>({ ackSeq: () => ackSeq });
+    openPersistWriteGate('ack-bound');
+    const first = deferred();
+    writeKey.mockReturnValueOnce(first.promise);
+
+    const drained = storage.setItem('ack-bound', value(1));
+    ackSeq = 4;
+    storage.setItem('ack-bound', value(2));
+    expect(writeKey).toHaveBeenCalledWith('ack-bound', value(1), 3);
+
+    first.resolve(true);
+    await drained;
+    expect(writeKey).toHaveBeenLastCalledWith('ack-bound', value(2), 4);
+  });
+
+  it('未配置确认号的 store 保持两参数 IPC', async () => {
+    const storage = createElectronPersistStorage<{ revision: number }>();
+    openPersistWriteGate('ack-none');
+
+    await storage.setItem('ack-none', value(1));
+
+    expect(writeKey).toHaveBeenCalledWith('ack-none', value(1));
   });
 });

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "enso.secretarytest",
+  "name": "Secretary Test",
+  "version": "1.0.0",
+  "description": "秘书验收用的最小插件：一个只读工具与一个会对外发消息的非只读工具。",
+  "main": "main.mjs",
+  "permissions": ["agent.tool"],
+  "contributes": {
+    "agentTools": [
+      {
+        "name": "echo",
+        "description": "Echo the given text back.",
+        "readOnly": true,
+        "parameters": {
+          "type": "object",
+          "properties": { "text": { "type": "string", "description": "Text to echo" } },
+          "required": ["text"],
+          "additionalProperties": false
+        }
+      },
+      {
+        "name": "poke",
+        "description": "Send the given text out as the user.",
+        "parameters": {
+          "type": "object",
+          "properties": { "text": { "type": "string", "description": "Text to send" } },
+          "additionalProperties": false
+        }
+      }
+    ]
+  }
+}

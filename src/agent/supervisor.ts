@@ -89,6 +89,8 @@ import {
 } from '@shared/providers/qoder';
 import { looksLikeRefusal } from '@shared/refusalRetry';
 import type { RequestBodyUsage } from '@shared/requestBodyUsage';
+import { turnCalledSilenceTurn, turnRequestedSilence } from '@shared/secretary/silence';
+import { isSecretaryToolAllowed, type SecretaryInvokeOp } from '@shared/secretary/tools';
 import { computeStats, toUsageTotals } from '@shared/sessionStats';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
@@ -127,6 +129,7 @@ import { type EditMode, resolveEditMode } from '@shared/types/editMode';
 import type { ModelEntry } from '@shared/types/llm';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import type { PluginCommandSpawn, PluginHookSpawn } from '@shared/types/plugins';
+import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
@@ -143,6 +146,7 @@ import {
   ApprovalGate,
   type ApprovalReviewResult,
   withApproval,
+  withMandatoryApproval,
   withProtectedFloor,
 } from './approval';
 import {
@@ -345,10 +349,15 @@ import { createDelegationTools, type DelegationOp } from './tools/delegation';
 import { createGroupHistoryTool } from './tools/groupHistory';
 import { createGroupTasksTool } from './tools/groupTasks';
 import { confirmImageReference, createImageGenTool } from './tools/imageGen';
+import { createImageViewTool } from './tools/imageView';
 import { createMemoryTools, MemoryInvoker } from './tools/memory';
 import { createPluginTools, PluginToolInvoker } from './tools/pluginTools';
 import { createRoutineProposeTool } from './tools/routinePropose';
+import { createSecretaryTools } from './tools/secretary';
+import { createSecretaryCustomTools } from './tools/secretaryCustomTools';
 import { confirmOutsideImage, createSendImageTool } from './tools/sendImage';
+import { createSilenceTurnTool } from './tools/silenceTurn';
+import { createSkillReadTool } from './tools/skills';
 import { createWebTools } from './tools/web';
 import {
   createTurnDiscardState,
@@ -452,6 +461,7 @@ interface ManagedSession {
   browser?: BrowserInvoker;
   memory?: MemoryInvoker;
   delegation?: MemoryInvoker<DelegationOp>;
+  secretary?: MemoryInvoker<SecretaryInvokeOp>;
   agentControl?: AgentControlInvoker;
   /** 已因不支持 adaptive 降级过的模型（虚拟模型下每个成员各降一次） */
   adaptiveDowngraded: Set<string>;
@@ -571,6 +581,7 @@ const PENDING_COUNTERS: Record<PendingCounterKey, true> = {
   browser: true,
   memory: true,
   delegation: true,
+  secretary: true,
   agentControl: true,
   computer: true,
   pluginTools: true,
@@ -593,6 +604,8 @@ export interface SupervisorOptions {
   workflowDir?: string;
   /** 应用 agent 数据目录（ENSO_AGENT_DATA_DIR）；给出时压缩取消原因追加到 compaction.log */
   dataDir?: string;
+  /** 应用存放用户图片的目录（ENSO_USER_IMAGE_DIRS）：编码会话的 image_view 白名单里带上它 */
+  userImageDirs?: readonly string[];
 }
 
 /** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份；开关打开时追加项目内其它 harness 的规则文件。 */
@@ -1121,9 +1134,13 @@ export class SessionSupervisor {
     // 失败（含前台中止后按错误收口）同空闲：能接新回合就立即唤起，不攒到用户下一条消息
     if (managed.status !== 'running') {
       managed.roundPending = true;
-      // 合成提示不是用户输入：标 extension 让插件 input 拦截跳过
+      // 合成提示不是用户输入：标 extension 让插件 input 拦截跳过。
+      // 投影说空闲、pi 却还在跑时用 followUp 排进活轮，不抛 already processing
       void managed.session
-        .prompt(`<agent-notification>\n${text}\n</agent-notification>`, { source: 'extension' })
+        .prompt(`<agent-notification>\n${text}\n</agent-notification>`, {
+          source: 'extension',
+          streamingBehavior: 'followUp',
+        })
         .finally(() => {
           if (managed.status !== 'running') managed.roundPending = false;
         })
@@ -1308,6 +1325,7 @@ export class SessionSupervisor {
     managed.browser?.cancelAll('Session released');
     managed.memory?.cancelAll('Session released');
     managed.delegation?.cancelAll('Session released');
+    managed.secretary?.cancelAll('Session released');
     managed.agentControl?.close('Session released');
     managed.computer?.cancelAll('Session released');
     managed.pluginTools?.cancelAll('Session released');
@@ -1617,6 +1635,7 @@ export class SessionSupervisor {
       command.type === 'browser-result' ||
       command.type === 'memory-result' ||
       command.type === 'delegation-result' ||
+      command.type === 'secretary-result' ||
       command.type === 'computer-result' ||
       command.type === 'plugin-tool-result' ||
       command.type === 'plugin-tool-progress' ||
@@ -1775,6 +1794,7 @@ export class SessionSupervisor {
           command.botGroupTasks,
           command.protectedActions,
           command.botRoutines,
+          command.secretaryMode ?? false,
           command.botWriteLock,
           command.botDelegationTask,
           command.pluginTools,
@@ -1783,7 +1803,9 @@ export class SessionSupervisor {
           command.autoRejectApprovals ?? false,
           command.botDiscussMode,
           command.instanceId,
-          command.workflowPresetFiles
+          command.workflowPresetFiles,
+          command.secretaryTools,
+          command.askRelay
         );
         return;
       case 'spawn-child':
@@ -1881,10 +1903,10 @@ export class SessionSupervisor {
           this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
           return;
         }
-        // 活轮还在（含 resume）：照常插话；resume 只对空闲会话开新轮时生效
+        // 活轮还在（含 resume）：prompt 是排队消息，用 followUp 排到本轮之后，不插话也不报错；
+        // 插话走 steer 命令。resume 只对空闲会话开新轮时生效（promptFresh 内判流式）
         if (managed.status === 'running') {
-          await this.steerTracked(managed, command.text, images, command.deliveryId);
-          this.bgTasks.backgroundAllForeground(managed.identity.sessionId, 'steer');
+          this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
           return;
         }
         // 投影已 idle 但 pi 仍忙：压缩中（pi 拒收 prompt）不限时等压完；仍 streaming 要么
@@ -2065,6 +2087,12 @@ export class SessionSupervisor {
       case 'set-plan-mode':
         this.must(command.identity).plan?.setActive(command.active);
         return;
+      case 'set-ask-relay': {
+        const managed = this.must(command.identity);
+        if (command.relay) managed.asks.relay = command.relay;
+        else delete managed.asks.relay;
+        return;
+      }
       case 'plan-respond': {
         const managed = this.must(command.identity);
         const plan = managed.plan;
@@ -2084,7 +2112,10 @@ export class SessionSupervisor {
         );
         return;
       case 'ask-respond':
-        this.must(command.identity).asks.respond(command.requestId, command.answer);
+        this.must(command.identity).asks.respond(command.requestId, command.answer, {
+          ...(command.by ? { by: command.by } : {}),
+          ...(command.name ? { name: command.name } : {}),
+        });
         return;
       case 'browser-result': {
         const managed = this.must(command.identity);
@@ -2102,6 +2133,10 @@ export class SessionSupervisor {
       }
       case 'delegation-result': {
         this.must(command.identity).delegation?.resolve(command);
+        return;
+      }
+      case 'secretary-result': {
+        this.must(command.identity).secretary?.resolve(command);
         return;
       }
       case 'computer-result': {
@@ -2404,6 +2439,7 @@ export class SessionSupervisor {
     botGroupTasks = false,
     protectedActions = false,
     botRoutines = false,
+    secretaryMode = false,
     botWriteLock?: { label: string; ancestors: string[] },
     botDelegationTask = false,
     pluginToolDescriptors: readonly PluginToolDescriptor[] = [],
@@ -2412,7 +2448,9 @@ export class SessionSupervisor {
     autoRejectApprovals = false,
     botDiscussMode = false,
     instanceId?: string,
-    workflowPresetFiles: readonly string[] = []
+    workflowPresetFiles: readonly string[] = [],
+    secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = [],
+    askRelay?: { name: string }
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -2481,7 +2519,7 @@ export class SessionSupervisor {
     const deferredMcp = sessionMcp.filter(isDeferredMcp);
     const directMcp = sessionMcp.filter((server) => !isDeferredMcp(server));
     const codemodeHost = new CodemodeHost({
-      codemode: toolEnabled('isolated_sandbox'),
+      codemode: toolEnabled('isolated_sandbox') && !secretaryMode,
       deferredServers: deferredMcp,
     });
     // 非 Bot 会话即使启动时没有任何插件也挂上注入入口：插件可能在会话之后才启用
@@ -2511,6 +2549,8 @@ export class SessionSupervisor {
       cwd,
       agentDir: this.options.agentDir,
       noSkills: loadLocalSkills === false,
+      // 磁盘上的扩展会自行 registerTool，绕过按名字的允许列表；秘书只保留 inline 工厂
+      ...(secretaryMode ? { noExtensions: true } : {}),
       skillPaths,
       instruction,
       remoteAgentsFiles,
@@ -3068,6 +3108,8 @@ export class SessionSupervisor {
     });
     const askManager = this.createAskManager(identity, gate.humanTimeoutMs);
     askManager.autoReject = gate.autoReject;
+    // 秘书派出/跟踪的会话：ask_user 先转给秘书，而不是按无人值守直接拒绝
+    if (askRelay) askManager.relay = askRelay;
     // 可热切的内置工具始终注册；激活与否由 applyBuiltinTools 按当前设置决定
     const builtinGroups = new Map<string, string[]>();
     const builtin = (id: string, tools: Def[]): Def[] => {
@@ -3106,6 +3148,20 @@ export class SessionSupervisor {
           if (!managed) throw new Error('Session is not ready for delegations.');
           this.options.emit({
             type: 'delegation-invoke',
+            identity: managed.identity,
+            seq: ++managed.seq,
+            requestId: request.requestId,
+            op: request.op,
+            params: request.params,
+          });
+        })
+      : undefined;
+    const secretary = secretaryMode
+      ? new MemoryInvoker<SecretaryInvokeOp>(identity, (request) => {
+          const managed = managedRef ?? this.sessions.get(sessionId);
+          if (!managed) throw new Error('Session is not ready for secretary actions.');
+          this.options.emit({
+            type: 'secretary-invoke',
             identity: managed.identity,
             seq: ++managed.seq,
             requestId: request.requestId,
@@ -3180,6 +3236,21 @@ export class SessionSupervisor {
         : undefined;
     const sessionTools = [
       ...buildCoreTools(),
+      ...(secretary ? createSecretaryTools(secretary) : []),
+      ...(secretary ? [createSilenceTurnTool()] : []),
+      // 秘书自造工具：名字与参数结构由 Main 下发，非只读的每次都要人确认
+      ...(secretary
+        ? createSecretaryCustomTools(secretary, secretaryToolDescriptors).map((tool) =>
+            withMandatoryApproval(gate, 'mcp', tool)
+          )
+        : []),
+      // 秘书没有 read：SKILL.md 只能按本次加载的 skill 表读
+      ...(secretaryMode ? [createSkillReadTool(() => resourceLoader.getSkills().skills)] : []),
+      // 编码会话看图：白名单是自己的工作目录、系统临时目录与应用存放用户图片的目录。
+      // 远程会话的文件不在本机，装了只会读到错的路径
+      ...(secretaryMode || remote
+        ? []
+        : [createImageViewTool({ cwd, userImageDirs: this.options.userImageDirs })]),
       ...builtin(
         'browser',
         createBrowserTools(browser).map((tool) => withNavigateApproval(gate, tool))
@@ -3215,8 +3286,13 @@ export class SessionSupervisor {
         ? builtin('computer', [withComputerApproval(gate, createComputerTool(computer))])
         : []),
       ...(pluginTools
-        ? createPluginTools([...pluginToolDescriptors], pluginTools).map((tool) =>
-            withApproval(gate, 'mcp', tool)
+        ? createPluginTools([...pluginToolDescriptors], pluginTools, {
+            untrusted: secretaryMode,
+          }).map((tool) =>
+            // 秘书会话里的插件工具可能以用户身份往外发消息：非只读的每次都要人确认
+            secretaryMode
+              ? withMandatoryApproval(gate, 'mcp', tool)
+              : withApproval(gate, 'mcp', tool)
           )
         : []),
       ...builtin('ask_user', [createAskTool(askManager)]),
@@ -3279,6 +3355,12 @@ export class SessionSupervisor {
     );
     const planGated = (tools: Def[]): Def[] =>
       tools.map((tool) => withPlanGate(tool, { host: planHost, readonlyAgentTypes }));
+    // 秘书按名字做允许列表：黑名单只能关掉已知分组，核心工具、插件工具与自造工具都不在其中。
+    // 插件工具与自造工具的名字只认 Main 本次下发的描述符，不按前缀放行
+    const secretaryExtraToolNames = new Set([
+      ...pluginToolDescriptors.map((tool) => tool.name),
+      ...secretaryToolDescriptors.map((tool) => tool.name),
+    ]);
     const customTools = omitNamedTools(
       decorateSessionTools(
         [
@@ -3288,6 +3370,8 @@ export class SessionSupervisor {
         { runaway, budget }
       ),
       disabledTools
+    ).filter(
+      (tool) => !secretaryMode || isSecretaryToolAllowed(tool.name, secretaryExtraToolNames)
     );
     codemodeHost.bindDeferredTools(
       deferredMcpLoader(gate, (tools) =>
@@ -3330,9 +3414,10 @@ export class SessionSupervisor {
       checkpoints,
       runawayGuard: runaway,
     });
+    // 秘书不订阅 MCP 热插拔：之后连上的 MCP 工具不走装配时的允许列表
     this.rememberMcpHotplug(
       sessionId,
-      new Set(directMcp.map((server) => this.mcpServerKey(server))),
+      new Set(secretaryMode ? [] : directMcp.map((server) => this.mcpServerKey(server))),
       (tools) => {
         for (const tool of tools) {
           if (!mcpTools.some((existing) => existing.name === tool.name)) mcpTools.push(tool);
@@ -3380,7 +3465,10 @@ export class SessionSupervisor {
     managed.applyBuiltinTools = (disabled) => {
       const enabled = enabledHotBuiltins(disabled);
       const active = session.getActiveToolNames();
-      const next = nextActiveToolNames(active, builtinGroups, enabled);
+      // 分组会把名字加回来，秘书再与允许列表求交，否则恢复一个分组就绕过了装配时的过滤
+      const next = nextActiveToolNames(active, builtinGroups, enabled).filter(
+        (name) => !secretaryMode || isSecretaryToolAllowed(name, secretaryExtraToolNames)
+      );
       if (next.length !== active.length || next.some((name, index) => name !== active[index])) {
         session.setActiveToolsByName(next);
       }
@@ -3398,6 +3486,7 @@ export class SessionSupervisor {
     managedRef.pluginTools = pluginTools;
     managedRef.pluginEvents = pluginEventInvoker;
     managedRef.delegation = delegation;
+    managedRef.secretary = secretary;
     if (pluginEventInvoker) {
       await emitPluginSessionStart(session, resumeFile ? 'resume' : 'startup');
     }
@@ -3424,7 +3513,7 @@ export class SessionSupervisor {
           });
         }
       },
-      (requestId) => {
+      (requestId, resolution) => {
         const managed = this.sessions.get(identity.sessionId);
         if (managed && isSameGeneration(managed.identity, identity)) {
           this.options.emit({
@@ -3432,6 +3521,9 @@ export class SessionSupervisor {
             identity: managed.identity,
             seq: ++managed.seq,
             requestId,
+            ...(resolution?.by ? { by: resolution.by } : {}),
+            ...(resolution?.answer ? { answer: resolution.answer } : {}),
+            ...(resolution?.name ? { name: resolution.name } : {}),
           });
         }
       },
@@ -4206,7 +4298,9 @@ export class SessionSupervisor {
       if (managed.status === 'running') {
         await this.steerTracked(managed, text);
       } else {
-        void this.promptTracked(managed, consumeRole(managed, text))
+        void this.promptTracked(managed, consumeRole(managed, text), {
+          streamingBehavior: 'followUp',
+        })
           .then(() => {
             // prompt 已归但未见任何终态事件(不应发生的退化路径):不让 wait 挂死
             if (managed.status !== 'running' && managed.roundPending) this.settleRound(managed);
@@ -4681,11 +4775,13 @@ export class SessionSupervisor {
           managed.requestBudget.markWrapup();
           setImmediate(() => {
             if (managed.requestBudget?.phaseNow !== 'wrapup') return;
-            void managed.session.prompt(budgetWrapUpPrompt()).catch((error) => {
-              if (managed.requestBudget?.phaseNow !== 'wrapup') return;
-              // 补报告发不出去也按预算停止交回已有输出，错误写进结果
-              this.completeTurn(managed, { error: toErrorMessage(error) });
-            });
+            void managed.session
+              .prompt(budgetWrapUpPrompt(), { streamingBehavior: 'followUp' })
+              .catch((error) => {
+                if (managed.requestBudget?.phaseNow !== 'wrapup') return;
+                // 补报告发不出去也按预算停止交回已有输出，错误写进结果
+                this.completeTurn(managed, { error: toErrorMessage(error) });
+              });
           });
           return;
         }
@@ -4747,6 +4843,7 @@ export class SessionSupervisor {
     this.emitSessionMeta(managed);
     // 本轮摘要随 turn-completed 下发：renderer 冷会话没有正文，只能由 worker 切
     const digest = buildTurnDigest(managed.messages, managed.turnStartIndex);
+    const silent = turnRequestedSilence(managed.messages, managed.turnStartIndex);
     managed.turnStartIndex = managed.messages.length;
     this.workspaceClaims.release(managed.identity.sessionId);
     this.options.emit({
@@ -4755,6 +4852,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       ...(digest ? { digest } : {}),
+      ...(silent ? { silent: true as const } : {}),
       ...(aborted ? { aborted: true as const } : {}),
       ...(budget ? { requestBudgetStop: true } : {}),
       ...(budget?.error ? { requestBudgetError: budget.error } : {}),
@@ -4798,13 +4896,17 @@ export class SessionSupervisor {
     if (!looksLikeRefusal(text)) return false;
     managed.refusalRetriedTurn = turnId;
     managed.turnStartIndex = managed.messages.length;
-    void this.promptTracked(managed, hardening).catch((error) => {
-      this.failTurn(managed, toErrorMessage(error));
-    });
+    void this.promptTracked(managed, hardening, { streamingBehavior: 'followUp' }).catch(
+      (error) => {
+        this.failTurn(managed, toErrorMessage(error));
+      }
+    );
     return true;
   }
 
   private trySilentTurnRecovery(managed: ManagedSession): boolean {
+    // silence_turn 之后按提示词不再写正文。空回复是故意的，不能当成工具做完却没总结。
+    if (turnCalledSilenceTurn(managed.messages, managed.turnStartIndex)) return false;
     const kind = silentTurnKind(managed.messages);
     if (!kind) return false;
     if (managed.silentTurnNudgeUsed) {
@@ -4833,7 +4935,7 @@ export class SessionSupervisor {
     if (!text) return false;
     // 重发同一请求：本轮摘要从重发点起算，避免失败的首次尝试重复计入
     managed.turnStartIndex = managed.messages.length;
-    void this.promptTracked(managed, text).catch((error) => {
+    void this.promptTracked(managed, text, { streamingBehavior: 'followUp' }).catch((error) => {
       this.failTurn(managed, toErrorMessage(error));
     });
     return true;
@@ -5017,24 +5119,59 @@ export class SessionSupervisor {
   ): void {
     this.flushPendingMcpTools(managed);
     this.flushPendingBuiltinTools(managed);
-    if (managed.session.isStreaming) {
-      void this.steerTracked(managed, text, images, deliveryId).catch((error) => {
-        this.failTurn(managed, toErrorMessage(error));
-      });
-      return;
-    }
-    if (resume) editUnfinishedAssistantForResume(managed.session);
+    // pi 在 input hook 之后才判忙，先看 isStreaming 再 prompt 永远有竞态：一律带 followUp，
+    // 活轮里由 pi 排到本轮之后，不会抛 already processing 把会话打成 error
+    if (resume && !managed.session.isStreaming) editUnfinishedAssistantForResume(managed.session);
+    const previousTurnId = managed.currentTurnId;
     managed.currentTurnId = randomUUID();
     managed.turnAborted = false;
     ensureAssistantUsage(managed.session.messages as unknown[]);
-    void this.promptTracked(
-      managed,
-      consumeRole(managed, text),
-      images ? { images } : undefined,
-      deliveryId
-    ).catch((error) => {
-      this.failTurn(managed, toErrorMessage(error));
-    });
+    const body = consumeRole(managed, text);
+    const options = { ...(images ? { images } : {}), streamingBehavior: 'followUp' as const };
+    const state: PromptDeliveryState = { dispatched: false, queued: false };
+    const submit = () => this.promptTracked(managed, body, options, deliveryId, state);
+    // 没开出新轮（被拒收或排进活轮）就把轮次号还给正在跑的那一轮
+    const restoreTurn = () => {
+      if (!state.dispatched || state.queued) managed.currentTurnId = previousTurnId;
+    };
+    void submit()
+      .then(restoreTurn)
+      .catch(async (error: unknown) => {
+        const message = toErrorMessage(error);
+        // 竞态拒收：worker 的真实状态是还在跑，改用 followUp 重投，绝不当成失败
+        if (isAlreadyProcessing(message)) {
+          try {
+            await submit();
+            restoreTurn();
+            return;
+          } catch {
+            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+            restoreTurn();
+            return;
+          }
+        }
+        // 续跑撞上刚启动的压缩：等压完再投一次，不要把会话打成 error
+        if (
+          message.includes('Cannot submit a prompt while compaction is in progress') &&
+          (await waitPromptable(
+            managed.session,
+            ZOMBIE_TURN_WAIT_MS,
+            () => managed.status === 'running'
+          ))
+        ) {
+          try {
+            await submit();
+            restoreTurn();
+            return;
+          } catch (retryError) {
+            if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+            this.failTurn(managed, toErrorMessage(retryError));
+            return;
+          }
+        }
+        if (!state.dispatched) this.emitDeliveryRejected(managed, deliveryId);
+        this.failTurn(managed, message);
+      });
   }
 
   /**
@@ -5049,36 +5186,39 @@ export class SessionSupervisor {
     managed: ManagedSession,
     text: string,
     options?: Parameters<AgentSession['prompt']>[1],
-    deliveryId?: string
+    deliveryId?: string,
+    state?: PromptDeliveryState
   ): Promise<void> {
     const slot = { id: deliveryId ?? null };
     managed.promptDelivery = slot;
-    let dispatched = false;
     const trackedOptions = deliveryId
       ? {
           ...options,
           preflightResult: (disposition: PromptDisposition) => {
-            dispatched = true;
+            if (state) {
+              state.dispatched = true;
+              if (disposition === 'queued') state.queued = true;
+            }
             options?.preflightResult?.(disposition);
           },
         }
       : options;
     return managed.session
       .prompt(withPendingPlanNote(managed, text), trackedOptions)
-      .catch((error: unknown) => {
-        if (deliveryId && !dispatched && managed.promptDelivery === slot) {
-          this.options.emit({
-            type: 'delivery-rejected',
-            identity: managed.identity,
-            seq: ++managed.seq,
-            deliveryId,
-          });
-        }
-        throw error;
-      })
       .finally(() => {
         if (managed.promptDelivery === slot) managed.promptDelivery = undefined;
       });
+  }
+
+  /** 投递被拒收：交回执让上游重排，不把会话标成失败 */
+  private emitDeliveryRejected(managed: ManagedSession, deliveryId?: string): void {
+    if (!deliveryId) return;
+    this.options.emit({
+      type: 'delivery-rejected',
+      identity: managed.identity,
+      seq: ++managed.seq,
+      deliveryId,
+    });
   }
 
   private async steerActive(
@@ -5228,6 +5368,10 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       status: managed.status,
       ...(error ? { error } : {}),
+      // 回合 id 只在 running 有意义：Main 退出记录据此把中断归到具体一轮
+      ...(managed.status === 'running' && managed.currentTurnId
+        ? { turnId: managed.currentTurnId }
+        : {}),
     });
     if (managed.status !== 'running') this.settleRound(managed);
   }
@@ -5525,6 +5669,7 @@ export class SessionSupervisor {
       managed.browser?.cancelAll('Enso worker shutdown');
       managed.memory?.cancelAll('Enso worker shutdown');
       managed.delegation?.cancelAll('Enso worker shutdown');
+      managed.secretary?.cancelAll('Enso worker shutdown');
       managed.agentControl?.close('Enso worker shutdown');
       managed.currentTurnId = undefined;
       managed.computer?.cancelAll('Enso worker shutdown');
@@ -6112,6 +6257,17 @@ function consumeRole(managed: { pendingRole?: string }, text: string): string {
 
 const toErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** 一次 prompt 投递的去向：pi 是否受理（回调过 disposition）、是否只是排进活轮 */
+interface PromptDeliveryState {
+  dispatched: boolean;
+  queued: boolean;
+}
+
+/** pi 在活轮里拒收不带 streamingBehavior 的 prompt：会话仍在跑，不是失败 */
+function isAlreadyProcessing(message: string): boolean {
+  return message.includes('Agent is already processing');
+}
 
 /** 回复里的可见正文，不含 thinking 与工具调用 */
 /** 会话最近一次请求还对得上当前模型时才能分叉；换过模型就前缀不同，退回快照 */

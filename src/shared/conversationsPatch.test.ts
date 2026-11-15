@@ -117,8 +117,20 @@ describe('conversations patch', () => {
     expect(parseConversationsPatch({ upserts: {}, removes: [] })).toEqual({
       upserts: {},
       removes: [],
+      seq: 0,
     });
     expect(parseConversationsPatch({ upserts: { a: { set: 1 } }, removes: [] })).toBeNull();
     expect(parseConversationsPatch(null)).toBeNull();
+  });
+
+  it('parses the sequence number Main attaches to a pushed patch', () => {
+    expect(parseConversationsPatch({ upserts: {}, removes: [], seq: 4 })).toEqual({
+      upserts: {},
+      removes: [],
+      seq: 4,
+    });
+    expect(parseConversationsPatch({ upserts: {}, removes: [], seq: -1 })?.seq).toBe(0);
+    expect(parseConversationsPatch({ upserts: {}, removes: [], seq: 1.5 })?.seq).toBe(0);
+    expect(parseConversationsPatch({ upserts: {}, removes: [], seq: 'x' })?.seq).toBe(0);
   });
 });

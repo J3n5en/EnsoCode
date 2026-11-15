@@ -81,6 +81,8 @@ interface Task {
   /** 到点被截止时间杀掉：既不是模型主动停，也不是命令本身失败 */
   killedByDeadline?: boolean;
   deadlineTimer?: NodeJS.Timeout;
+  /** 直接子进程；没有 pid 的（前台移交）不做存活探针 */
+  pid?: number;
   waiters: Array<() => void>;
   details?: unknown;
   finalize?: () => Promise<unknown>;
@@ -228,6 +230,7 @@ export class BackgroundTaskManager {
       finalize: spawnOpts?.finalize,
       kill: (signal) => killProcessTree(child, signal),
     });
+    task.pid = child.pid;
     child.stdout?.on('data', (chunk: Buffer) => this.append(task, chunk));
     child.stderr?.on('data', (chunk: Buffer) => this.append(task, chunk));
     child.on('error', (error) => {
@@ -274,6 +277,7 @@ export class BackgroundTaskManager {
    */
   private armDeadline(task: Task, remainingSec: number): void {
     task.deadlineSec = remainingSec;
+    task.info.deadlineAt = Date.now() + Math.max(0, remainingSec) * 1000;
     task.deadlineTimer = setTimeout(
       () => {
         task.deadlineTimer = undefined;
@@ -566,6 +570,7 @@ export class BackgroundTaskManager {
 
   private ensureTimer(): void {
     this.timer ??= setInterval(() => {
+      this.watchTasks();
       let anyRunning = false;
       for (const task of this.tasks.values()) {
         if (task.info.status === 'running') anyRunning = true;
@@ -579,6 +584,34 @@ export class BackgroundTaskManager {
         this.timer = null;
       }
     }, EMIT_INTERVAL_MS);
+  }
+
+  /**
+   * 直接子进程已经不在，或显式截止到了但定时器没把它杀掉：收口并走完成通知。
+   * alive 可注入，测试不必真的杀进程才走这条路径。
+   */
+  watchTasks(now = Date.now(), alive: (pid: number) => boolean = processAlive): void {
+    for (const task of this.tasks.values()) {
+      if (task.info.status !== 'running' || task.settling) continue;
+      if (task.pid !== undefined && !alive(task.pid)) {
+        task.info.alive = false;
+        task.output += '\n[process gone; watchdog settled the task]';
+        task.kill('SIGKILL');
+        this.exited(task, null, null);
+        continue;
+      }
+      if (
+        task.info.deadlineAt !== undefined &&
+        now >= task.info.deadlineAt &&
+        !task.killedByDeadline
+      ) {
+        task.killedByDeadline = true;
+        task.kill('SIGTERM');
+        setTimeout(() => {
+          if (task.info.status === 'running') task.kill('SIGKILL');
+        }, this.limits.killGraceMs).unref?.();
+      }
+    }
   }
 
   /**
@@ -801,6 +834,17 @@ function spawnBackground(
     });
   }
   return spawn(command, { shell: true, cwd, env, detached: true, stdio });
+}
+
+/** 信号 0 只探测存活。pid 0 会打到进程组，不当成活着 */
+export function processAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
 }
 
 export type BackgroundLaunch = {

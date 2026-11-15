@@ -56,6 +56,24 @@ const event = {
   phase: 'running',
 } as const;
 
+describe('秘书接管 IPC 出口', () => {
+  const api = () => mocks.exposeInMainWorld.mock.calls[0]?.[1] as ElectronAPI;
+
+  it('逐个授权通道已删除，取消接管仍然暴露', () => {
+    expect(api().secretary).not.toHaveProperty('grantTakeover');
+    expect(typeof api().secretary.revokeTakeover).toBe('function');
+    expect(Object.values(IPC_CHANNELS)).not.toContain('secretary:takeover-grant');
+  });
+
+  it('取消接管仍走 SECRETARY_TAKEOVER_REVOKE', async () => {
+    mocks.invoke.mockResolvedValueOnce({ ok: true });
+    await expect(api().secretary.revokeTakeover('c1')).resolves.toEqual({ ok: true });
+    expect(mocks.invoke).toHaveBeenCalledWith(IPC_CHANNELS.SECRETARY_TAKEOVER_REVOKE, {
+      conversationId: 'c1',
+    });
+  });
+});
+
 describe('preload agentDispatch.onEvent', () => {
   it('window 出口不含 summonAgent / onAgentComposerPrefill', () => {
     expect(noSummonExports).toBe(true);

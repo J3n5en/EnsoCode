@@ -264,6 +264,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
       'Adds a Code | Bot switch to the sidebar. Create members with their own persona, model and tools, and chat with them alone or in groups.',
   },
   {
+    id: 'experimental.secretary',
+    category: 'experimental',
+    title: 'Secretary',
+    description:
+      'A global agent that watches your projects and sessions, creates sessions to do the work, and reports results back to you.',
+  },
+  {
     id: 'bots.routeClassifier',
     category: 'bots',
     title: 'Group reply picker model',
@@ -275,6 +282,37 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     category: 'bots',
     title: 'Bot assistant model',
     description: 'Used for helper tasks such as auto-configuring member abilities.',
+  },
+  { id: 'secretary.root', category: 'secretary', title: 'Secretary' },
+  {
+    id: 'secretary.profile',
+    category: 'secretary',
+    title: 'Secretary profile',
+    description: 'Name, avatar, model and how much the secretary may do on its own.',
+  },
+  {
+    id: 'secretary.dispatchLimit',
+    category: 'secretary',
+    title: 'Concurrent dispatch limit',
+    description:
+      'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.',
+  },
+  {
+    id: 'secretary.style',
+    category: 'secretary',
+    title: 'Style and interruptions',
+    description: 'What it calls you, reply language, style and system notifications.',
+  },
+  {
+    id: 'secretary.schedules',
+    category: 'secretary',
+    title: 'Scheduled tasks',
+    description: 'Daily brief, to-do reminders and one-off or recurring prompts.',
+  },
+  {
+    id: 'secretary.reset',
+    category: 'secretary',
+    title: 'Reset the secretary and start over',
   },
   { id: 'shortcuts.root', category: 'shortcuts', title: 'Shortcuts' },
   { id: 'appearance.theme', category: 'appearance', title: 'Theme mode' },

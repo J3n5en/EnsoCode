@@ -56,6 +56,24 @@ describe('foldTimeline 回答完成后折叠过程（collapseCompletedActivity�
     expect(kinds(group.children)).toEqual(['thinking', 'bash', 'edit', 'write', 'todo']);
   });
 
+  it('秘书会话的可读卡片不折进过程组，连续同名调用收成一行', () => {
+    const items = [
+      userItem('u'),
+      thinkingItem('t'),
+      toolItem('a', 'todo_item_update'),
+      toolItem('b', 'todo_item_update'),
+      toolItem('c', 'schedule_add'),
+      textItem('answer'),
+    ];
+    const folded = foldTimeline(items, false, new Set(), {
+      ...activityOn(items),
+      readableToolCards: true,
+    });
+    expect(kinds(folded)).toEqual(['user', 'thinking', 'todo_item_update', 'schedule_add', 'text']);
+    const todos = folded[2];
+    expect(todos.kind === 'tool' && todos.cardPeers).toHaveLength(1);
+  });
+
   it('展开后按原顺序平铺全部行', () => {
     const items = [userItem('u'), toolItem('a', 'edit', [textItem('x')]), toolItem('b', 'read')];
     const collapsed = foldTimeline(items, false, new Set(), activityOn(items));
@@ -1093,4 +1111,45 @@ it('丢弃的一轮在其所属用户轮次自动折叠时仍保留为一行', (
   ];
   const folded = foldTimeline(items, false, new Set(), { autoCollapseCompletedTurns: true });
   expect(folded.map((item) => item.key)).toEqual(['u1', 'discard-p', 'u2']);
+});
+
+describe('foldTimeline 可读卡片只在秘书会话生效', () => {
+  type Group = Extract<TimelineItem, { kind: 'tool-group' }>;
+  const kinds = (items: TimelineItem[]) =>
+    items.map((item) => (item.kind === 'tool' ? item.name : item.kind));
+  const mcp = 'mcp__fast_context__fast_context_search';
+  const mixed = () => [
+    userItem('u'),
+    thinkingItem('t'),
+    toolItem('a', mcp),
+    toolItem('b', 'bash'),
+    textItem('answer'),
+  ];
+
+  it('普通会话：mcp 与 bash 都走工具行，折进同一个过程组', () => {
+    const items = mixed();
+    const folded = foldTimeline(items, false, new Set(), activityOn(items));
+    expect(kinds(folded)).toEqual(['user', 'tool-group', 'text']);
+    const group = folded[1] as Group;
+    expect(group.count).toBe(2);
+    expect(kinds(group.children)).toEqual(['thinking', mcp, 'bash']);
+    expect(group.children.some((row) => row.kind === 'tool' && row.cardPeers)).toBe(false);
+  });
+
+  it('秘书会话：秘书工具留在过程组外，其余工具照旧折', () => {
+    const items = [
+      userItem('u'),
+      thinkingItem('t'),
+      toolItem('a', 'todo_item_update'),
+      toolItem('b', 'bash'),
+      toolItem('c', 'read'),
+      textItem('answer'),
+    ];
+    const folded = foldTimeline(items, false, new Set(), {
+      collapseCompletedActivity: true,
+      readableToolCards: true,
+    });
+    expect(kinds(folded)).toEqual(['user', 'thinking', 'todo_item_update', 'tool-group', 'text']);
+    expect(kinds((folded[3] as Group).children)).toEqual(['bash', 'read']);
+  });
 });

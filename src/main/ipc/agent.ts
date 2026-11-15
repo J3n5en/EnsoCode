@@ -5,7 +5,12 @@ import { app, ipcMain, powerMonitor, type RendererContents } from '@platform';
 import { browserSessionKey } from '@shared/bots/browser';
 import { type ChildSessionIdentity, isUuid, type SessionIdentity } from '@shared/builtinAgents';
 import { conversationCwd } from '@shared/conversationCwd';
+import type { InterruptedTurn } from '@shared/exitInterrupt';
+import type { PluginSessionStatus, SessionStatusPayload } from '@shared/extensionPlugins/events';
+import { normalizeLocale } from '@shared/i18n';
+import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
+import { wrapUntrusted } from '@shared/secretary/transcript';
 import { resolveSshTarget } from '@shared/ssh';
 import {
   cleanToolBatchLabel,
@@ -26,15 +31,19 @@ import type {
   AgentSpawnRequest,
   AgentWorkerEvent,
   ApprovalMode,
+  AttachedImage,
   ChildHistoryResult,
   ChildRunListResult,
   ConversationReloadResult,
   McpStatusPush,
+  ModelRef,
   ParentHistoryTailResult,
+  ProjectedMessage,
   RendererAgentEvent,
   SpawnModelConfig,
   ThinkingLevel,
   TitleSummaryInput,
+  WorkerExitedEvent,
 } from '@shared/types/agent';
 import {
   APPROVAL_MODES,
@@ -55,6 +64,7 @@ import {
   parseParentModelSelectionRequest,
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
+import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { isSecretFilePath, isUnderSecretDirectory } from '../../agent/protectedActions';
 import { titleSummaryTimeoutMs } from '../../agent/titleSummary';
@@ -96,9 +106,11 @@ import {
   sendPluginInterceptResultToSession,
   sendPluginToolProgressToSession,
   sendPluginToolResultToSession,
+  sendSecretaryResultToSession,
   setAgentEventListener,
   setPinnedSessions,
   setSessionApprovalMode,
+  setSessionAskRelay,
   setSessionModel,
   setSessionReasoning,
   setSessionThinking,
@@ -113,6 +125,7 @@ import {
 } from '../services/agentHost';
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
+import { BackgroundTaskTracker, type ObservedTask } from '../services/backgroundTaskTracker';
 import { HumanRequestTimeouts } from '../services/bots/humanRequestTimeouts';
 import { readBotSessionMessages } from '../services/bots/sessionMessages';
 import {
@@ -125,6 +138,8 @@ import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
 import { reloadConversation } from '../services/conversationReload';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
+import { takeInterruptedTurns } from '../services/exitInterruptHost';
+import { exitInterruptionOf } from '../services/exitWindow';
 import {
   getExtensionPlugins,
   peekExtensionPlugins,
@@ -143,8 +158,8 @@ import {
   voiceCorrectionModelIdFromSettings,
 } from '../services/llama/chatModels';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
-import type { Complete } from '../services/memory/distill';
-import { memorySpaceContext } from '../services/memory/space';
+import { type Complete, redactSecrets } from '../services/memory/distill';
+import { memorySpaceContext, secretaryReadProjectIds } from '../services/memory/space';
 import {
   configureMemoryDistill,
   invokeMemory,
@@ -160,8 +175,24 @@ import {
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
+import { ContactStore } from '../services/secretary/contact/store';
+import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
+import { secretaryEnabled } from '../services/secretary/enabled';
+import { unfollowTarget } from '../services/secretary/following';
+import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
+import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
+import { secretarySkillDirs, secretarySkillsDir } from '../services/secretary/skills';
+import { SecretaryStore } from '../services/secretary/store';
+import { invokeSecretaryOp } from '../services/secretary/tools';
+import {
+  ACTIVITY_LIMIT_DEFAULT,
+  ACTIVITY_LIMIT_MAX,
+  projectSessionActivity,
+  type SessionToolActivity,
+} from '../services/sessionActivity';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
+  projectParentHistoryAll,
   projectParentHistoryPage,
   projectParentHistoryTail,
   resolveParentHistoryFile,
@@ -189,7 +220,7 @@ import {
   sendImageTool,
 } from './bots';
 import { agentSessionIndex } from './sessionIndex';
-import { readSettings, readSshTimeoutSeconds } from './settings';
+import { readPersistedConversation, readSettings, readSshTimeoutSeconds } from './settings';
 import {
   removeRegisteredWorktree,
   sessionWorktree,
@@ -239,7 +270,11 @@ let sourceBindings: ActiveConversationRegistry | null = null;
 let sourceAuthority: SourceAuthorityRegistry | null = null;
 let botWorkerObserver: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null =
   null;
+let secretaryDriverObserver:
+  | ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void)
+  | null = null;
 const pluginSessionStates = new SessionStateTracker();
+const backgroundTaskStates = new BackgroundTaskTracker();
 const selectionClockOwners = new WeakSet<RendererContents>();
 
 function watchSelectionClock(sender: RendererContents): void {
@@ -263,11 +298,48 @@ export function getSourceAuthorityRegistry(): SourceAuthorityRegistry | null {
   return sourceAuthority;
 }
 
+/**
+ * 只读会话状态：秘书的 session_list / session_read 与插件查询同源。
+ * worker 活着但状态跟踪器还没收到事件时按运行中算，避免把在跑的会话报成空闲。
+ */
+export function observedSessionStatus(sessionId: string): PluginSessionStatus {
+  const status = pluginSessionStates.status(sessionId);
+  return status.state === 'idle' && agentSessionIndex.workspaceTreeRunning(status.sessionId)
+    ? { ...status, state: 'running' }
+    : status;
+}
+
+/** 秘书 session_tasks 的数据源：worker 后台任务在 Main 的最近一次投影 */
+export function observedBackgroundTasks(sessionId: string): ObservedTask[] {
+  return backgroundTaskStates.tasks(sessionId);
+}
+
 /** Bot 会话宿主订阅 worker 事件（turn 结果、运行态） */
 export function setBotWorkerEventObserver(
   observer: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null
 ): void {
   botWorkerObserver = observer;
+}
+
+/**
+ * 秘书派出会话的驱动者与回传宿主订阅 worker 事件；由 ipc/secretary 组合后注册，
+ * 避免事件入口静态依赖秘书模块。状态变化由调用方算一次后一起传下去。
+ */
+export function setSecretaryDriverObserver(
+  observer: ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void) | null
+): void {
+  secretaryDriverObserver = observer;
+}
+
+/**
+ * 退出窗口内的断流/断连不是会话失败：进程被杀时模型层只会看到连接断掉。
+ * 在这里统一改判，渲染层、秘书与看板拿到的是同一份「被退出打断」。
+ */
+function markExitInterrupted<T extends AgentWorkerEvent | WorkerExitedEvent>(event: T): T {
+  if (event.type !== 'turn-failed') return event;
+  const interruption = exitInterruptionOf(event.error, Date.now());
+  if (!interruption) return event;
+  return { ...event, interrupted: { at: interruption.at, kind: interruption.kind } } as T;
 }
 
 function broadcastAgentEvent(event: RendererAgentEvent): void {
@@ -302,7 +374,15 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
   // 手机第二屏：按订阅过滤后加密下发（host 在 main，不依赖窗口焦点）
   forwardAgentEvent(event);
   handlePairHeadlessAgentEvent(event);
-  publishPluginSessionStatus(event);
+  // 状态汇总只算一次：插件推送、秘书驱动与回传都读同一份结果
+  const changes = pluginSessionStates.observe(event);
+  backgroundTaskStates.observe(event);
+  try {
+    secretaryDriverObserver?.(event, changes);
+  } catch (error) {
+    console.warn('[secretary] driver failed:', error instanceof Error ? error.message : error);
+  }
+  publishPluginSessionStatus(changes);
   publishPluginTurnEnd(event);
 }
 
@@ -310,16 +390,17 @@ function broadcastAgentEvent(event: RendererAgentEvent): void {
 function publishPluginTurnEnd(event: RendererAgentEvent): void {
   const sessionId = turnEndSessionId(event);
   if (!sessionId) return;
-  // 与其他插件事件一致：Bot 会话不发
-  if (sourceAuthority?.conversation(sessionId)?.bot) return;
+  // 与其他插件事件一致：Bot 与秘书会话不发
+  if (sourceAuthority?.conversation(sessionId)?.bot || isSecretaryConversation(sessionId)) return;
   peekExtensionPlugins()?.notifyTurnEnd(sessionId);
 }
 
 /** 主会话汇总状态变化时通知订阅了 session_status 的插件 */
-function publishPluginSessionStatus(event: RendererAgentEvent): void {
-  for (const change of pluginSessionStates.observe(event)) {
-    // 与其他插件事件一致：Bot 会话不发
+function publishPluginSessionStatus(changes: readonly SessionStatusPayload[]): void {
+  for (const change of changes) {
+    // 与其他插件事件一致：Bot 与秘书会话不发
     if (sourceAuthority?.conversation(change.sessionId)?.bot) continue;
+    if (isSecretaryConversation(change.sessionId)) continue;
     void getExtensionPlugins()
       .dispatchEvent({
         sessionId: change.sessionId,
@@ -369,7 +450,7 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   return cwd !== null && cwd === request.cwd;
 }
 
-/** cwd 只从权威记录推导。scratch 固定为 `<根>/<会话 id>`，不接受 worktree 或其他路径。 */
+/** cwd 只从权威记录推导。scratch 固定为 `<根>/<会话 id>`，secretary 固定为项目根，都不接受 worktree。 */
 function authoritativeSpawnCwd(sessionId: string): string | null {
   const conversation = sourceAuthority?.conversation(sessionId);
   const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
@@ -385,7 +466,7 @@ function authoritativeSpawnCwd(sessionId: string): string | null {
     canonicalPath: project.canonicalPath,
     conversationId: sessionId,
     worktreePath:
-      project.kind === 'ssh' || project.kind === 'scratch'
+      project.kind === 'ssh' || project.kind === 'scratch' || project.kind === 'secretary'
         ? undefined
         : sessionWorktree(sessionId)?.path,
   });
@@ -466,7 +547,10 @@ export function resolveConversationWorkspace(conversationId: string): {
     kind: project.kind,
     canonicalPath: project.canonicalPath,
     conversationId,
-    worktreePath: project.kind === 'ssh' || project.kind === 'scratch' ? undefined : cwd,
+    worktreePath:
+      project.kind === 'ssh' || project.kind === 'scratch' || project.kind === 'secretary'
+        ? undefined
+        : cwd,
   });
   if (!resolved) return null;
   const remote = remoteConfigFor(conversationId);
@@ -478,9 +562,22 @@ function spawnBoundSession(
   request: AgentSpawnRequest,
   credentialKeys: ReadonlySet<string>
 ) {
+  const conversation = sourceAuthority?.conversation(request.sessionId);
   // bot 会话的人设 / 工作区只能由 Main 的 BotSessionHost 组装，通用 spawn 路径一律拒绝
-  if (sourceAuthority?.conversation(request.sessionId)?.bot) {
+  if (conversation?.bot) {
     return { ok: false, error: 'bot conversation must be spawned by bot host' };
+  }
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  if (isSecretaryProject(project)) {
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    return spawnSession(
+      identity,
+      request,
+      credentialKeys,
+      remoteConfigFor(request.sessionId),
+      projectIdFor(request.sessionId),
+      { secretary: secretarySpawnOptions() }
+    );
   }
   return spawnSession(
     identity,
@@ -489,6 +586,215 @@ function spawnBoundSession(
     remoteConfigFor(request.sessionId),
     projectIdFor(request.sessionId)
   );
+}
+
+/** 秘书档案、人设与派发状态只在 Main 读盘 */
+function secretaryStore(): SecretaryStore {
+  return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+}
+
+/** 联系方式绑过没有：只读 contact.json 的 chat，不碰 token */
+function contactBoundFor(): boolean {
+  return (
+    new ContactStore(path.join(app.getPath('userData'), 'secretary')).file().chat !== undefined
+  );
+}
+
+/**
+ * 模型每轮看到的都是最新配置；插件与技能勾选在 spawn 时定死，改了要释放会话。
+ */
+function secretarySpawnOptions(): {
+  systemPrompt: string;
+  pluginIds: string[];
+  skillIds: string[];
+  /** 启用的自有 skill 目录：停用的不挂，改了要释放会话 */
+  skillDirs: string[];
+  tools: SecretaryToolDescriptor[];
+} {
+  const store = secretaryStore();
+  const profile = store.profile();
+  const language = readSettingsState()?.language;
+  return {
+    systemPrompt: buildSecretarySystemPrompt({
+      profile,
+      persona: store.readPersona(),
+      uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
+      contactBound: contactBoundFor(),
+    }),
+    pluginIds: profile?.pluginIds ?? [],
+    skillIds: profile?.skillIds ?? [],
+    skillDirs: secretarySkillDirs(secretarySkillsDir(), profile?.disabledSkillNames ?? []),
+    tools: secretaryToolDescriptors(secretaryToolsDir()),
+  };
+}
+
+/** Main 侧根会话 spawn：pair 与秘书共用，renderer 走 AGENT_SPAWN 自己的校验 */
+export async function spawnRootFromMain(
+  request: AgentSpawnRequest
+): Promise<{ ok: boolean; error?: string }> {
+  const identity = rootIdentity(request.sessionId) ?? {
+    sessionId: request.sessionId,
+    generation: randomUUID(),
+  };
+  agentSessionIndex.prepareParent(identity);
+  let credentialKeys: ReadonlySet<string>;
+  try {
+    credentialKeys = await readStoredOauthCredentialKeys();
+  } catch {
+    return { ok: false, error: 'model credentials unavailable' };
+  }
+  return spawnBoundSession(identity, request, credentialKeys);
+}
+
+/** Main 侧给根会话发消息：deliveryId 由 Main 生成，供回执去重 */
+export function promptRootFromMain(
+  sessionId: string,
+  text: string,
+  deliveryId: string,
+  images?: AttachedImage[]
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return promptSession(identity, text, images, deliveryId);
+}
+
+/** Main 侧插话：与用户自己插话同一条 steer 通道，pi 在当前工具调用结束后读到它 */
+export function steerRootFromMain(
+  sessionId: string,
+  text: string,
+  deliveryId: string
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return steerSession(identity, text, undefined, deliveryId);
+}
+
+export async function releaseRootFromMain(sessionId: string): Promise<AgentActionResult> {
+  const identity = exactIdentity(sessionId);
+  return identity
+    ? await releaseParentSession(identity)
+    : { ok: false, error: STALE_SESSION_ERROR };
+}
+
+export function isRootSessionAlive(sessionId: string): boolean {
+  return agentSessionIndex.isAlive(sessionId);
+}
+
+/** 秘书代答派出/接管会话的提问：原会话据此显示「X 已回答」，秘书那边的转交同时失效 */
+export function answerAskFromMain(
+  sessionId: string,
+  requestId: string,
+  answer: string,
+  name: string
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return respondAsk(identity, requestId, answer, { by: 'relay', name });
+}
+
+/** 用户在手机（Telegram）上回答秘书的提问：与在应用里亲手答同一条路径，谁先答算谁的 */
+export function answerAskAsUserFromMain(
+  sessionId: string,
+  requestId: string,
+  answer: string
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return respondAsk(identity, requestId, answer);
+}
+
+/** 秘书开始/结束跟踪一个会话：把 ask_user 转给它，撤销时恢复成直接问用户 */
+export function setAskRelayFromMain(
+  sessionId: string,
+  relay?: { name: string }
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return setSessionAskRelay(identity, relay);
+}
+
+/** 档案改了模型：活着的根会话当场换，下次 spawn 读会话行 */
+export async function setRootSessionModelFromMain(
+  sessionId: string,
+  model: ModelRef & { thinkingLevel?: ThinkingLevel }
+): Promise<AgentActionResult> {
+  const identity = rootIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  let credentialKeys: ReadonlySet<string>;
+  try {
+    credentialKeys = await readStoredOauthCredentialKeys();
+  } catch {
+    return { ok: false, error: 'model credentials unavailable' };
+  }
+  const changed = setSessionModel(identity, model.providerId, model.modelId, credentialKeys);
+  if (!changed.ok || !model.thinkingLevel) return changed;
+  return setSessionThinking(identity, model.thinkingLevel);
+}
+
+export function abortRootFromMain(sessionId: string): void {
+  const identity = exactIdentity(sessionId);
+  if (identity) abortSession(identity);
+}
+
+/** 秘书停后台任务：身份由 Main 按会话 id 解析，模型只能给任务 id */
+export function stopTaskFromMain(
+  sessionId: string,
+  taskId: string
+): { ok: boolean; error?: string } {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: 'stale generation' };
+  return stopBackgroundTask(identity, taskId);
+}
+
+/** 秘书给已释放的派出会话续发消息：按持久化元数据恢复 worker，之后走普通 prompt 路径 */
+export async function resumeRootFromMain(sessionId: string): Promise<AgentActionResult> {
+  const row = readPersistedConversation(sessionId);
+  const conversation = row ? persistedConversationForResume(sessionId, row) : null;
+  const worktree = sessionWorktree(sessionId);
+  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+  const plan = planPairResume({
+    alive: agentSessionIndex.isAlive(sessionId),
+    conversation,
+    projectPath: project?.state === 'active' ? project.canonicalPath : undefined,
+    worktreePath: worktree?.path,
+    worktreeMissing: Boolean(worktree && !existsSync(worktree.path)),
+    loadLocalSkills: readSettingsState()?.loadLocalSkills === true,
+  });
+  if (plan.type === 'snapshot') return { ok: true };
+  if (plan.type === 'skip') return { ok: false, error: plan.reason };
+  // 秘书跟踪中的会话恢复后仍要把 ask_user 转给秘书，否则悄悄变回直接问用户
+  const relay = await secretaryRelayFor(sessionId);
+  return spawnRootFromMain({ ...plan.request, ...(relay ? { askRelay: relay } : {}) });
+}
+
+/** 秘书派出/跟踪的会话：恢复 worker 时一起带上转交开关 */
+async function secretaryRelayFor(sessionId: string): Promise<{ name: string } | undefined> {
+  const { secretaryDispatchPorts } = await import('../services/secretary/dispatch');
+  if (!secretaryDispatchPorts.dispatchFile().dispatched[sessionId]) return undefined;
+  const name = (await secretaryDispatchPorts.profile())?.name.trim();
+  return name ? { name } : undefined;
+}
+
+function persistedConversationForResume(
+  sessionId: string,
+  row: Record<string, unknown>
+): PersistedPairConversation | null {
+  const projectId = typeof row.projectId === 'string' ? row.projectId : '';
+  if (!projectId) return null;
+  return {
+    sessionId,
+    projectId,
+    ...(typeof row.sessionFile === 'string' ? { sessionFile: row.sessionFile } : {}),
+    ...(typeof row.lastProviderId === 'string' ? { lastProviderId: row.lastProviderId } : {}),
+    ...(typeof row.lastModelId === 'string' ? { lastModelId: row.lastModelId } : {}),
+    ...(typeof row.reasoningEnabled === 'boolean'
+      ? { reasoningEnabled: row.reasoningEnabled }
+      : {}),
+    ...(typeof row.thinkingLevel === 'string' ? { thinkingLevel: row.thinkingLevel } : {}),
+    ...(typeof row.presetId === 'string' ? { presetId: row.presetId } : {}),
+    ...(typeof row.approvalMode === 'string' ? { approvalMode: row.approvalMode } : {}),
+    ...(row.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
+  };
 }
 
 /**
@@ -510,6 +816,7 @@ function spawnRequestKeys(): readonly (keyof AgentSpawnRequest)[] {
     'presetId',
     'approvalMode',
     'autoRejectApprovals',
+    'askRelay',
     'planMode',
   ] as const;
   // 少登记字段时这里编译失败，而不是等到真机上整条请求被拒
@@ -546,6 +853,8 @@ function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
       !APPROVAL_MODES.includes(request.approvalMode as ApprovalMode)) ||
     (request.autoRejectApprovals !== undefined &&
       typeof request.autoRejectApprovals !== 'boolean') ||
+    (request.askRelay !== undefined &&
+      (!asRecord(request.askRelay) || !isNonEmptyString(asRecord(request.askRelay)?.name))) ||
     (request.planMode !== undefined && typeof request.planMode !== 'boolean')
   ) {
     return null;
@@ -909,6 +1218,49 @@ export async function readSessionHistoryFile(
 }
 
 /**
+ * 全量投影：秘书按绝对下标读单条消息、或取最近工具调用时才走这里。
+ * 路径同样必须落在 sessions 目录内，读不到就返回空，让调用方报 not-found。
+ */
+async function readFullSessionHistory(
+  sessionFile: string | undefined
+): Promise<ProjectedMessage[]> {
+  const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
+  const resolved = resolveParentHistoryFile(sessionDir, sessionFile);
+  if (!resolved || !existsSync(resolved)) return [];
+  try {
+    const { SessionManager } = await import('@earendil-works/pi-coding-agent');
+    const manager = SessionManager.open(resolved, sessionDir);
+    return projectParentHistoryAll(manager.getBranch());
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 秘书 session_read 的 index 模式：按绝对下标取一条消息。
+ * 下标口径与列表模式的 index 一致（投影后的绝对位置，baseIndex + 偏移）。
+ */
+export async function readSessionMessage(
+  sessionFile: string | undefined,
+  index: number
+): Promise<ProjectedMessage | null> {
+  const messages = await readFullSessionHistory(sessionFile);
+  return messages[index] ?? null;
+}
+
+/** 秘书 session_activity：最近工具调用，不含任何工具输出 */
+export async function readSessionActivity(
+  sessionFile: string | undefined,
+  limit: number
+): Promise<SessionToolActivity[]> {
+  const bounded = Math.min(
+    ACTIVITY_LIMIT_MAX,
+    Math.max(1, Math.floor(Number.isFinite(limit) ? limit : ACTIVITY_LIMIT_DEFAULT))
+  );
+  return projectSessionActivity(await readFullSessionHistory(sessionFile), bounded);
+}
+
+/**
  * 手机第二屏只持有裸 sessionId，而会话命令已收紧为 exact identity。身份解析与 spawn
  * 准入是策略，留在本文件（与渲染层走同一套 exactIdentity / persistedRootSpawn 守卫）；
  * pairHost 只做传输。解析不出身份就丢弃命令，不降级成按 sessionId 盲发。
@@ -1003,20 +1355,7 @@ function wirePairAgentBridge(): void {
       const identity = exactIdentity(sessionId);
       if (identity) respondAsk(identity, requestId, answer);
     },
-    spawn: async (request) => {
-      const identity = rootIdentity(request.sessionId) ?? {
-        sessionId: request.sessionId,
-        generation: randomUUID(),
-      };
-      agentSessionIndex.prepareParent(identity);
-      let credentialKeys: ReadonlySet<string>;
-      try {
-        credentialKeys = await readStoredOauthCredentialKeys();
-      } catch {
-        return { ok: false, error: 'model credentials unavailable' };
-      }
-      return spawnBoundSession(identity, request, credentialKeys);
-    },
+    spawn: (request) => spawnRootFromMain(request),
   });
 }
 
@@ -1095,20 +1434,7 @@ function wirePairSessionHost(): void {
     requestSnapshot: (sessionId) => {
       requestSnapshot(sessionId);
     },
-    spawn: async (request) => {
-      const identity = rootIdentity(request.sessionId) ?? {
-        sessionId: request.sessionId,
-        generation: randomUUID(),
-      };
-      agentSessionIndex.prepareParent(identity);
-      let credentialKeys: ReadonlySet<string>;
-      try {
-        credentialKeys = await readStoredOauthCredentialKeys();
-      } catch {
-        return { ok: false, error: 'model credentials unavailable' };
-      }
-      return spawnBoundSession(identity, request, credentialKeys);
-    },
+    spawn: (request) => spawnRootFromMain(request),
     prompt: (sessionId, text, images) => {
       const rejected = botControlError(sessionId);
       if (rejected) return rejected;
@@ -1307,11 +1633,22 @@ async function runAgentControl(
 }
 
 export function registerAgentHandlers(): void {
-  registerPluginSessionBridge((sessionId) => {
-    const identity = agentSessionIndex.currentIdentity(sessionId);
-    if (!identity || 'parent' in identity || !agentSessionIndex.isReady(identity)) return undefined;
-    return identity;
-  });
+  registerPluginSessionBridge(
+    (sessionId) => {
+      const identity = agentSessionIndex.currentIdentity(sessionId);
+      if (!identity || 'parent' in identity || !agentSessionIndex.isReady(identity))
+        return undefined;
+      return identity;
+    },
+    // 插件消息进秘书会话一律按不可信内容包起来：插件能读到外部消息，也能被外部消息诱导
+    (sessionId, pluginId, text) => {
+      const conversation = sourceAuthority?.conversation(sessionId);
+      const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+      return isSecretaryProject(project)
+        ? wrapUntrusted(`plugin:${pluginId}`, redactSecrets(text))
+        : text;
+    }
+  );
   const sessionSource = () => ({
     conversations: sourceAuthority?.projection().conversations ?? [],
     persisted: (id: string) => agentSessionIndex.persistedConversation(id),
@@ -1325,12 +1662,7 @@ export function registerAgentHandlers(): void {
         ...sessionSource(),
         projects: sourceAuthority?.projection().projects ?? [],
       }),
-    status: (sessionId) => {
-      const status = pluginSessionStates.status(sessionId);
-      return status.state === 'idle' && agentSessionIndex.workspaceTreeRunning(status.sessionId)
-        ? { ...status, state: 'running' }
-        : status;
-    },
+    status: (sessionId) => observedSessionStatus(sessionId),
   });
   wirePairAgentBridge();
   wirePairSessionHost();
@@ -1350,6 +1682,9 @@ export function registerAgentHandlers(): void {
     },
   });
   sourceAuthority.ensureScratchProject(path.join(app.getPath('userData'), 'scratch'));
+  sourceAuthority.ensureSecretaryProject(
+    path.join(app.getPath('userData'), 'secretary', 'workspace')
+  );
   setBrowserFileRootResolver((conversationId) => {
     const conversation = sourceAuthority?.conversation(conversationId);
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
@@ -1505,7 +1840,8 @@ export function registerAgentHandlers(): void {
   setInterval(() => humanTimeouts.check(), 1000).unref();
   powerMonitor.on('resume', () => humanTimeouts.check());
 
-  setAgentEventListener((workerEvent) => {
+  setAgentEventListener((incomingEvent) => {
+    const workerEvent = markExitInterrupted(incomingEvent);
     // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
     if (workerEvent.type === 'mcp-status') {
       recordMcpStatus(workerEvent);
@@ -1693,9 +2029,24 @@ export function registerAgentHandlers(): void {
       const conversation = sourceAuthority?.conversation(rootSessionId(identity));
       const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
       const projectId = project?.state === 'active' ? project.projectId : null;
+      // 秘书：projectId 是私有空间，可见项目只读
+      const secretary = isSecretaryProject(project);
       const memory = conversation?.bot
         ? getBotServices()?.memory.context({ ...conversation, projectId })
-        : { enabled: true, context: memorySpaceContext({ projectId }) };
+        : {
+            enabled: true,
+            context: secretary
+              ? {
+                  ...memorySpaceContext({ projectId }),
+                  secretary: {
+                    readProjectIds: secretaryReadProjectIds(
+                      secretaryStore().profile(),
+                      sourceAuthority?.projection().projects ?? []
+                    ),
+                  },
+                }
+              : memorySpaceContext({ projectId }),
+          };
       if (!memory?.enabled) {
         sendMemoryResultToSession(identity, requestId, { ok: false, error: '该成员已关闭记忆' });
         return;
@@ -1704,7 +2055,8 @@ export function registerAgentHandlers(): void {
       const disabled = resolveDisabledBuiltinTools(state.disabledBuiltinTools, {
         disabledBuiltinTools: projectDisabledBuiltinTools(state.projects, projectId ?? undefined),
       });
-      if (disabled.includes('memory')) {
+      // 记忆是秘书的核心能力：全局"禁用内置工具"对它不生效（spawn 时同样去掉 memory 分组）
+      if (!secretary && disabled.includes('memory')) {
         sendMemoryResultToSession(identity, requestId, {
           ok: false,
           error: 'Memory tool is disabled',
@@ -1817,6 +2169,32 @@ export function registerAgentHandlers(): void {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+      return;
+    }
+    if (workerEvent.type === 'secretary-invoke') {
+      const { identity, requestId, op, params } = workerEvent;
+      // 调用方必须是当前代的秘书会话，且开关仍开着：worker 侧的白名单不代替这层校验
+      const conversation = sourceAuthority?.conversation(identity.sessionId);
+      const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
+      const allowed =
+        secretaryEnabled() && isSecretaryProject(project) && agentSessionIndex.isCurrent(identity);
+      if (!allowed) {
+        sendSecretaryResultToSession(identity, requestId, { ok: false, error: 'disabled' });
+        return;
+      }
+      void invokeSecretaryOp(op, params, { secretaryConversationId: identity.sessionId }).then(
+        (result) =>
+          sendSecretaryResultToSession(
+            identity,
+            requestId,
+            result.ok ? { ok: true, result: result.result } : { ok: false, error: result.error }
+          ),
+        (error: unknown) =>
+          sendSecretaryResultToSession(identity, requestId, {
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          })
+      );
       return;
     }
     if (workerEvent.type === 'computer-cancel') {
@@ -2052,6 +2430,8 @@ export function registerAgentHandlers(): void {
     if (result.accepted) {
       sourceBindings!.invalidateConversation(parsed.conversationId);
       removeConversationFiles(result.value);
+      // 会话删了就不会再有结果：手机关注里的这一条一并移除
+      unfollowTarget(parsed.conversationId);
     }
     return result;
   });
@@ -2392,6 +2772,13 @@ export function registerAgentHandlers(): void {
     IPC_CHANNELS.AGENT_SNAPSHOT,
     (_event, sessionId: unknown): AgentActionResult =>
       requestSnapshot(typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : undefined)
+  );
+
+  // 上次应用退出（含安装更新时被 pkill）打断的回合：渲染层启动时取一次，用来把会话标成
+  // interrupted 并插系统提示。取一次即清空，刷新窗口不会重复标记。
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_TAKE_INTERRUPTED_TURNS,
+    (): Promise<InterruptedTurn[]> => takeInterruptedTurns()
   );
 
   ipcMain.handle(

@@ -10,6 +10,7 @@ import type {
   MemoryListQuery,
   MemoryListResult,
   MemoryStats,
+  PendingEvolvesReviewDto,
   ReembedJobDto,
 } from '@shared/memory/dto';
 import { searchAssistReport } from '@shared/memory/searchAssist';
@@ -19,11 +20,13 @@ import { openMemoryDb, vecTableExists } from './memory/db';
 import { type DistillJob, listDistillJobs } from './memory/distill';
 import { buildFtsMatchQuery } from './memory/fts';
 import { countFailedKgJobs, type KgJob, listEntityNames, listKgJobs } from './memory/kg';
+import { getHitStats, staleCutoffIso } from './memory/maintenance';
 import { getReembedJob, type ReembedJob } from './memory/reembed';
 import { searchMemories } from './memory/search';
 import {
   getMemory,
   listEvolves,
+  listPendingEvolvesEdges,
   MEMORY_COLUMNS,
   type MemoryRow,
   reviewEvolves,
@@ -42,7 +45,7 @@ function summarize(content: string): string {
     : `${chars.slice(0, SUMMARY_CHARS).join('')}…`;
 }
 
-function toListItem(memory: Memory): MemoryListItem {
+export function toMemoryListItem(memory: Memory): MemoryListItem {
   return {
     id: memory.id,
     title: memory.title,
@@ -58,6 +61,9 @@ function toListItem(memory: Memory): MemoryListItem {
     createdAt: memory.createdAt,
     updatedAt: memory.updatedAt,
     appearances: memory.appearances,
+    lastHitAt: memory.lastHitAt,
+    hitCount: memory.hitCount,
+    archiveCandidateAt: memory.archiveCandidateAt,
   };
 }
 
@@ -68,7 +74,7 @@ function toEvolvesDto(edge: Evolves): EvolvesEdgeDto {
 function toCrystalSourceDto(
   source: ReturnType<typeof listCrystalSources>[number]
 ): CrystalSourceDto {
-  return { ...toListItem(source.memory), contributionWeight: source.contributionWeight };
+  return { ...toMemoryListItem(source.memory), contributionWeight: source.contributionWeight };
 }
 
 export function listMemoriesForAdmin(
@@ -81,11 +87,20 @@ export function listMemoriesForAdmin(
   if (query.spaceId !== undefined && query.spaceId !== null) {
     conditions.push('m.space_id = ?');
     params.push(query.spaceId);
+  } else if (query.spaceIds !== undefined) {
+    if (query.spaceIds.length === 0) return { items: [], total: 0 };
+    conditions.push(`m.space_id IN (${query.spaceIds.map(() => '?').join(',')})`);
+    params.push(...query.spaceIds);
   }
   if (query.unitType !== undefined) {
     conditions.push('m.unit_type = ?');
     params.push(query.unitType);
   }
+  if (query.staleDays !== undefined) {
+    conditions.push('COALESCE(m.last_hit_at, m.created_at) < ?');
+    params.push(staleCutoffIso(query.staleDays));
+  }
+  if (query.archiveCandidate === true) conditions.push('m.archive_candidate_at IS NOT NULL');
   const text = query.query?.trim() ?? '';
   if (text) {
     const { match, short } = buildFtsMatchQuery(text);
@@ -114,7 +129,7 @@ export function listMemoriesForAdmin(
        ORDER BY m.updated_at DESC, m.id ASC LIMIT ? OFFSET ?`
     )
     .all(...params, query.limit, query.offset) as MemoryRow[];
-  return { items: rows.map(rowToMemory).map(toListItem), total };
+  return { items: rows.map(rowToMemory).map(toMemoryListItem), total };
 }
 
 /**
@@ -130,8 +145,12 @@ export async function searchMemoriesForAdmin(
 ): Promise<MemoryListResult> {
   const text = query.query?.trim() ?? '';
   if (!text) return { items: [], total: 0, approximate: true, vectorsUsed: false, assist: 'off' };
-  const spaceIds =
-    query.spaceId !== undefined && query.spaceId !== null ? [query.spaceId] : listSpaceIds(db);
+  const explicit =
+    query.spaceId !== undefined && query.spaceId !== null ? [query.spaceId] : query.spaceIds;
+  if (explicit?.length === 0) {
+    return { items: [], total: 0, approximate: true, vectorsUsed: false, assist: 'off' };
+  }
+  const spaceIds = explicit ?? listSpaceIds(db);
   const deep = query.mode === 'deep';
   const hits = await searchMemories(db, {
     q: text,
@@ -142,10 +161,13 @@ export async function searchMemoriesForAdmin(
     mode: deep ? 'deep' : 'fast',
     assist: deep ? assist : undefined,
   });
-  // unitType 在语义通道里没有下推，只能在结果上后过滤
+  // unitType / staleDays / archiveCandidate 在语义通道里没有下推，只能在结果上后过滤
+  const staleCutoff = query.staleDays === undefined ? null : staleCutoffIso(query.staleDays);
   const items = hits
-    .map((hit) => toListItem(hit.memory))
-    .filter((item) => query.unitType === undefined || item.unitType === query.unitType);
+    .map((hit) => toMemoryListItem(hit.memory))
+    .filter((item) => query.unitType === undefined || item.unitType === query.unitType)
+    .filter((item) => staleCutoff === null || (item.lastHitAt ?? item.createdAt) < staleCutoff)
+    .filter((item) => query.archiveCandidate !== true || item.archiveCandidateAt !== null);
   return {
     items,
     total: items.length,
@@ -171,7 +193,7 @@ export function getMemoryDetail(db: Database.Database, id: string): MemoryDetail
   const memory = getMemory(db, id);
   if (!memory || memory.lifecycleState === 'deleted') return null;
   return {
-    ...toListItem(memory),
+    ...toMemoryListItem(memory),
     content: memory.content,
     eventStart: memory.eventStart,
     eventEnd: memory.eventEnd,
@@ -208,15 +230,20 @@ export function deleteMemoryPermanently(db: Database.Database, id: string): bool
         `${id.replace(/[\\%_]/g, (char) => `\\${char}`)}#%`
       );
       const deleted = db.prepare('DELETE FROM memories WHERE id = ?').run(id).changes > 0;
-      db.exec(`
-        DELETE FROM entities WHERE id NOT IN (SELECT entity_id FROM mentions);
-        DELETE FROM entity_aliases WHERE entity_id NOT IN (SELECT id FROM entities);
-        DELETE FROM entity_relations
-          WHERE source_id NOT IN (SELECT id FROM entities) OR target_id NOT IN (SELECT id FROM entities);
-      `);
+      deleteOrphanEntities(db);
       return deleted;
     })
     .immediate();
+}
+
+/** 没有任何提及的实体连同别名、关系一起清掉，避免旧实体名经实体 / 社区通道继续召回 */
+export function deleteOrphanEntities(db: Database.Database): void {
+  db.exec(`
+    DELETE FROM entities WHERE id NOT IN (SELECT entity_id FROM mentions);
+    DELETE FROM entity_aliases WHERE entity_id NOT IN (SELECT id FROM entities);
+    DELETE FROM entity_relations
+      WHERE source_id NOT IN (SELECT id FROM entities) OR target_id NOT IN (SELECT id FROM entities);
+  `);
 }
 
 export function deleteMemorySpace(db: Database.Database, spaceId: string): number {
@@ -242,20 +269,29 @@ export function deleteMemorySpace(db: Database.Database, spaceId: string): numbe
     .immediate();
 }
 
-export function listPendingEvolves(db: Database.Database): EvolvesEdgeDto[] {
+/**
+ * 待审阅的 challenges：一次查边、一次查两端记忆。
+ * 只给 id 用户没法判断，所以两端都带上标题 / 摘要 / 空间 / 时间；任一端已删的边跳过。
+ */
+export function listPendingEvolves(db: Database.Database): PendingEvolvesReviewDto[] {
+  const edges = listPendingEvolvesEdges(db);
+  if (edges.length === 0) return [];
+  const ids = [...new Set(edges.flatMap((edge) => [edge.olderId, edge.newerId]))];
   const rows = db
-    .prepare(
-      "SELECT older_id AS olderId FROM evolves WHERE review_state = 'pending' ORDER BY created_at, id"
-    )
-    .all() as { olderId: string }[];
-  const seen = new Set<string>();
-  const result: EvolvesEdgeDto[] = [];
-  for (const row of rows) {
-    for (const edge of listEvolves(db, row.olderId)) {
-      if (edge.reviewState !== 'pending' || seen.has(edge.id)) continue;
-      seen.add(edge.id);
-      result.push(toEvolvesDto(edge));
-    }
+    .prepare(`SELECT ${MEMORY_COLUMNS} FROM memories WHERE id IN (${ids.map(() => '?').join(',')})`)
+    .all(...ids) as MemoryRow[];
+  const byId = new Map(rows.map((row) => [row.id, rowToMemory(row)]));
+  const result: PendingEvolvesReviewDto[] = [];
+  for (const edge of edges) {
+    const older = byId.get(edge.olderId);
+    const newer = byId.get(edge.newerId);
+    if (!older || !newer) continue;
+    if (older.lifecycleState === 'deleted' || newer.lifecycleState === 'deleted') continue;
+    result.push({
+      edge: toEvolvesDto(edge),
+      older: toMemoryListItem(older),
+      newer: toMemoryListItem(newer),
+    });
   }
   return result;
 }
@@ -269,7 +305,7 @@ export function reviewEvolvesEdge(
   return edge ? toEvolvesDto(edge) : null;
 }
 
-export function getMemoryStats(db: Database.Database): MemoryStats {
+export function getMemoryStats(db: Database.Database, now: Date = new Date()): MemoryStats {
   const aggregate = db
     .prepare(
       `SELECT count(*) AS total,
@@ -291,6 +327,7 @@ export function getMemoryStats(db: Database.Database): MemoryStats {
   try {
     databaseBytes = statSync(db.name).size;
   } catch {}
+  const hits = getHitStats(db, now);
   return {
     total: aggregate.total,
     bySpace: Object.fromEntries(spaces.map((row) => [row.spaceId, row.total])),
@@ -299,6 +336,8 @@ export function getMemoryStats(db: Database.Database): MemoryStats {
     entities,
     embedded: aggregate.embedded ?? 0,
     databaseBytes,
+    neverHit: hits.neverHit,
+    addedLast7Days: hits.addedLast7Days,
   };
 }
 

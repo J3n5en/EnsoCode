@@ -22,7 +22,7 @@ export interface Project {
   /** 用户自定义别名；非空时优先于 name 展示，name/path 仍参与搜索 */
   alias?: string;
   /** 缺省 local;ssh 项目的工具调用全部在远端执行 */
-  kind?: 'local' | 'ssh' | 'scratch';
+  kind?: 'local' | 'ssh' | 'scratch' | 'secretary';
   /** kind='ssh' 时的 ssh 目标(user@host 或 ssh config 别名) */
   sshHost?: string;
   sshConnectionId?: string;

@@ -11,6 +11,7 @@ import { useModelDirectoryStore } from '@/stores/modelDirectory';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { pairProviderSyncPlan } from '@/stores/pairCatalogProviders';
+import { catalogHiddenProjectIds, catalogListedProject } from '@/stores/pairCatalogVisibility';
 import { useSessionsStore } from '@/stores/sessions';
 import { lastActiveAt } from '@/stores/sessions/pinned';
 import { setPairViewedSession } from '@/stores/sessions/unread';
@@ -40,11 +41,9 @@ function buildPayload(): PairCatalogPayload {
   const sessions = useSessionsStore.getState();
   // 与桌面侧栏一致的项目手动顺序（拖拽偏好存 localStorage，不进 settings store）
   const orderedProjects = applyProjectOrder(settings.projects, readSidebarOrder(PROJECT_ORDER_KEY));
-  const scratchIds = new Set(
-    settings.projects.filter((project) => project.kind === 'scratch').map((project) => project.id)
-  );
   const listedProjects = orderedProjects.filter(
-    (project): project is typeof project & { kind?: 'local' | 'ssh' } => project.kind !== 'scratch'
+    (project): project is typeof project & { kind?: 'local' | 'ssh' } =>
+      catalogListedProject(project.kind)
   );
   const archivedProjects = new Set(readSidebarOrder(ARCHIVED_PROJECTS_KEY));
   const scratchLabel = translate(normalizeLocale(settings.language), 'Temporary chats');
@@ -140,9 +139,11 @@ function buildPayload(): PairCatalogPayload {
   );
 
   const catalog = [...topLevel, ...children].map(toEntry);
-  const visibleCatalog = settings.scratchSessionsEnabled
-    ? catalog
-    : catalog.filter((entry) => !scratchIds.has(entry.projectId));
+  const hiddenProjectIds = catalogHiddenProjectIds(
+    settings.projects,
+    settings.scratchSessionsEnabled
+  );
+  const visibleCatalog = catalog.filter((entry) => !hiddenProjectIds.has(entry.projectId));
 
   // 与桌面选择器同一套可用口径（启用 + 凭证真实可用 + 启用模型），并剥掉密钥。
   // OAuth 未就绪的空列表不结算，main 会扣下这一帧，避免手机显示没有模型服务。

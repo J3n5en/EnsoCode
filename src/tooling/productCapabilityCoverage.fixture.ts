@@ -55,6 +55,12 @@ export const SETTINGS_DATA_COVERAGE = {
     'Memory remote embedding provider is a device-local reference.'
   ),
   memoryDistillEnabled: excluded('Memory auto-distillation preference; not an Enso capability.'),
+  memoryDecayEnabled: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayArchiveCandidates: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayAutoArchive: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayStaleDays: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayMaxImportance: excluded('Memory forgetting preference; not an Enso capability.'),
+  memoryDecayIntervalDays: excluded('Memory forgetting preference; not an Enso capability.'),
   memoryKgEnabled: excluded('Memory entity-graph extraction preference; not an Enso capability.'),
   voiceInputEnabled: excluded('Voice input is a device-local composer preference.'),
   protectedActionsInCode: excluded(
@@ -66,6 +72,9 @@ export const SETTINGS_DATA_COVERAGE = {
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
   ),
   dropShelfEnabled: excluded('Experimental macOS drop shelf toggle; device-local window.'),
+  secretaryEnabled: excluded(
+    'Experimental secretary agent toggle; device-local, not an Enso capability.'
+  ),
   botMaxRunningTurns: excluded('Device-local Bot concurrency limit; not an Enso capability.'),
   botDiscussModeEnabled: excluded(
     'Experimental Bot group discussion toggle; device-local, not an Enso capability.'
@@ -237,6 +246,14 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Memory remote embedding provider is a device-local reference.'
   ),
   setMemoryDistillEnabled: excluded('Memory auto-distillation preference; not an Enso capability.'),
+  setMemoryDecayEnabled: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayArchiveCandidates: excluded(
+    'Memory forgetting preference; not an Enso capability.'
+  ),
+  setMemoryDecayAutoArchive: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayStaleDays: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayMaxImportance: excluded('Memory forgetting preference; not an Enso capability.'),
+  setMemoryDecayIntervalDays: excluded('Memory forgetting preference; not an Enso capability.'),
   setMemoryKgEnabled: excluded(
     'Memory entity-graph extraction preference; not an Enso capability.'
   ),
@@ -248,6 +265,9 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Experimental temporary chats toggle; device-local, not an Enso capability.'
   ),
   setDropShelfEnabled: excluded('Experimental macOS drop shelf toggle; device-local window.'),
+  setSecretaryEnabled: excluded(
+    'Experimental secretary agent toggle; device-local, not an Enso capability.'
+  ),
   setBotRouteClassifier: excluded(
     'Bot group smart-routing model preference; not an Enso capability.'
   ),
@@ -478,6 +498,46 @@ export const IPC_PRODUCT_COVERAGE = {
   SETTINGS_WRITE_KEY: excluded('Raw store-key write is replaced by controlled field patches.'),
   SETTINGS_CHANGED: excluded('Cross-window persistence notification transport.'),
   CONVERSATIONS_PATCH: excluded('Cross-renderer conversation persistence transport.'),
+  CONVERSATIONS_READ: excluded('Conversation persistence read; Enso uses typed domain handlers.'),
+  SECRETARY_GET_STATE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_STATE_CHANGED: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_RESOLVE_PROPOSAL: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_REFERENCE_CONVERSATIONS: excluded(
+    'Experimental secretary agent; not an Enso capability.'
+  ),
+  SECRETARY_TODO_MUTATE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_DISMISS_RESULT: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_MARK_RESULT: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_STOP_TASKS: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_GOAL_ACTION: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SCHEDULES_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SCHEDULE_REMOVE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_GET_PROFILE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SAVE_PROFILE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_RESET_PROFILE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SET_AVATAR: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SKILLS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SKILL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SKILL_SET_ENABLED: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SKILL_READ: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_TOOLS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_TOOL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_TAKEOVER_REVOKE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_TAKEOVERS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_UNTRACKED_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_UNTRACKED_REMOVE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_FEED: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_DAILY: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_STATE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_CHANGED: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_BIND: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_CANCEL: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_UNBIND: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_FORGET_BOT: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_TEST: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_SETTINGS: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_FOLLOWING: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_OPEN_CONVERSATION: excluded('Experimental secretary agent; not an Enso capability.'),
   REMOTE_LEADER_CHANGED: excluded('Remote desktop renderer coordination transport.'),
   REMOTE_UPLOAD: excluded('Remote desktop browser upload transport.'),
   CONFIG_SYNC_EXPORT: excluded('Settings-only portable configuration export flow.'),
@@ -596,6 +656,9 @@ export const IPC_PRODUCT_COVERAGE = {
   AGENT_RETRY: surfaces('conversations.retry-turn'),
   AGENT_EVENT: excluded('Worker-to-renderer event stream transport.'),
   AGENT_SNAPSHOT: excluded('Worker recovery/debug snapshot transport.'),
+  AGENT_TAKE_INTERRUPTED_TURNS: excluded(
+    'Read-only startup handoff of turns interrupted by app exit; no spawn, no execution rights.'
+  ),
   AGENT_CHILD_HISTORY_READ: excluded(
     'Read-only replay of an ended child safe journal; no product capability, no execution rights.'
   ),
@@ -909,7 +972,11 @@ export const IPC_PRODUCT_COVERAGE = {
   MEMORY_DETAIL: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_ARCHIVE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_RESTORE: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_FORGETTING_RUN: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_ARCHIVE_CANDIDATES: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_ARCHIVE_CANDIDATES_CONFIRM: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_DELETE: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_DELETE_PREVIEW: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_UPDATE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_STATS: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_JOBS: excluded('Memory desktop UI; not an Enso capability.'),

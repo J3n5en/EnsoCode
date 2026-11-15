@@ -38,6 +38,22 @@ function openSettingsDeepLink(link: ReturnType<typeof parseOpenSettingsRequest>)
   sendToWindow(win, IPC_CHANNELS.SETTINGS_DEEP_LINK, link);
 }
 
+/**
+ * 系统用 enso://secretary?conversation=<id>[&proposal=<id>] 唤起后，
+ * 聚焦主窗口、选中那个会话，带 proposal 时再定位到那张确认卡。
+ */
+export function openSecretaryConversationFromProtocol(target: {
+  conversationId?: string;
+  proposalId?: string;
+}): void {
+  // 没有会话就没有可定位的东西：只把窗口叫到前面
+  if (!target.conversationId) {
+    focusMainWindow();
+    return;
+  }
+  sendToWindow(focusMainWindow(), IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, target);
+}
+
 /** 系统用 enso://install-plugin 唤起后，打开插件设置并开始暂存 */
 export function openPluginInstallFromProtocol(httpsUrl: string): void {
   openSettingsDeepLink(pluginInstallSettingsLink(httpsUrl));

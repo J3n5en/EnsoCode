@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { localImageUrlToPath, pluginAssetUrl } from '@shared/localImage';
 import { afterEach, describe, expect, it } from 'vitest';
-import { handleLocalImageRequest, setPluginAssetResolver } from './localImageProtocol';
+import {
+  handleLocalImageRequest,
+  setPluginAssetResolver,
+  setSecretaryAvatarResolver,
+} from './localImageProtocol';
 
 describe('plugin-asset', () => {
   let dir = '';
@@ -55,5 +59,42 @@ describe('plugin-asset', () => {
 
   it('不把 plugin-asset 当成磁盘路径', () => {
     expect(localImageUrlToPath(new URL(pluginAssetUrl('acme.theme', 'a.png', 'b1')))).toBeNull();
+  });
+});
+
+describe('secretary-avatar', () => {
+  afterEach(() => setSecretaryAvatarResolver(() => null));
+
+  async function respond(url: string) {
+    return handleLocalImageRequest(url, null);
+  }
+
+  it('路径不是固定文件名时拒绝，并且不去读盘', async () => {
+    let calls = 0;
+    setSecretaryAvatarResolver(() => {
+      calls += 1;
+      return '/tmp/not-the-avatar.png';
+    });
+    expect((await respond('local-image://secretary-avatar/../etc/passwd')).status).toBe(403);
+    expect((await respond('local-image://secretary-avatar/%2e%2e%2fpasswd')).status).toBe(403);
+    expect(
+      (await respond('local-image://secretary-avatar/avatar.png/../../etc/passwd')).status
+    ).toBe(403);
+    expect(calls).toBe(0);
+  });
+
+  it('固定文件名才交给解析器，并按内容返回图片', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sec-avatar-proto-'));
+    const file = join(dir, 'avatar.png');
+    writeFileSync(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]));
+    setSecretaryAvatarResolver(() => file);
+    try {
+      const response = await respond('local-image://secretary-avatar/avatar.png?v=2');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/png');
+      expect(response.headers.get('access-control-allow-origin')).toBe('*');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

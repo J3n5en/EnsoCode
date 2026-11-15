@@ -76,6 +76,14 @@ describe('renderSkillsSection', () => {
     expect(section).toMatch(/\bread\b/);
     expect(renderSkillsSection([skill('a', 'A')], 'bash')).toMatch(/\bbash\b/);
   });
+
+  it('只有 skill_read 时按名字读，且不暴露文件路径', () => {
+    const section =
+      renderSkillsSection([skill('deploy-check', '发布前跑一遍')], 'skill_read') ?? '';
+    expect(section).toContain('skill_read');
+    expect(section).toContain('deploy-check');
+    expect(section).not.toContain('/skills/deploy-check/SKILL.md');
+  });
 });
 
 describe('promptCatalogExtension', () => {
@@ -121,5 +129,18 @@ describe('promptCatalogExtension', () => {
       { name: 'read', description: 'Read a file.' },
     ]);
     expect(sections).toEqual({});
+  });
+
+  it('秘书会话没有 read / bash，靠 skill_read 出 skills 段', () => {
+    const sections = run(
+      {
+        selectedTools: ['skill_read', 'session_list'],
+        toolSnippets: { session_list: 'List sessions' },
+        skills: [skill('deploy-check', '发布前跑一遍')],
+      },
+      [{ name: 'skill_read', description: 'Read a skill.' }]
+    );
+    expect(sections.skills).toContain('skill_read');
+    expect(sections.skills).toContain('deploy-check');
   });
 });

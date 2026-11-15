@@ -83,6 +83,18 @@ function setState(overrides: Record<string, unknown> = {}) {
     setMemoryDistillEnabled: vi.fn(),
     memoryKgEnabled: false,
     setMemoryKgEnabled: vi.fn(),
+    memoryDecayEnabled: true,
+    setMemoryDecayEnabled: vi.fn(),
+    memoryDecayArchiveCandidates: false,
+    setMemoryDecayArchiveCandidates: vi.fn(),
+    memoryDecayAutoArchive: false,
+    setMemoryDecayAutoArchive: vi.fn(),
+    memoryDecayStaleDays: 90,
+    setMemoryDecayStaleDays: vi.fn(),
+    memoryDecayMaxImportance: 0.5,
+    setMemoryDecayMaxImportance: vi.fn(),
+    memoryDecayIntervalDays: 7,
+    setMemoryDecayIntervalDays: vi.fn(),
     ...overrides,
   };
 }
@@ -113,6 +125,9 @@ beforeEach(() => {
           cancelModelDownload: () => Promise.resolve(true),
           deleteModel: () => Promise.resolve(true),
           onModelProgress: () => () => {},
+          runForgetting: () => Promise.resolve(null),
+          archiveCandidates: () => Promise.resolve({ items: [], total: 0 }),
+          confirmArchiveCandidates: () => Promise.resolve({ archived: 0, skipped: 0 }),
         },
       },
       setInterval: () => 0,
@@ -130,6 +145,8 @@ describe('embeddingErrorNotice', () => {
     entities: 0,
     embedded: 0,
     databaseBytes: 1024,
+    neverHit: 0,
+    addedLast7Days: 0,
   };
 
   it('surfaces the reason instead of silently showing 0/N', () => {
@@ -247,6 +264,27 @@ describe('MemorySettings', () => {
     expect(html).toContain(`>${zh}</span>`);
     expect(html).toContain('空闲自动卸载');
     expect(html).toContain('空闲达到此时长后释放本地模型内存，下次需要时会自动加载。');
+  });
+
+  it('遗忘分区：三档开关常驻，阈值只在降权打开时出现', () => {
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    for (const row of [
+      'memory.decay',
+      'memory.decayCandidates',
+      'memory.decayAutoArchive',
+      'memory.decayStaleDays',
+      'memory.decayMaxImportance',
+      'memory.decayInterval',
+    ]) {
+      expect(html).toContain(`data-settings-row="${row}"`);
+    }
+    // 标记关掉时如实说「没在标记」，而不是显示一个 0 让人以为是「没有候选」
+    expect(html).toContain('Archive candidates: marking is off');
+
+    setState({ memoryDecayEnabled: false });
+    const off = renderToStaticMarkup(createElement(MemorySettings));
+    expect(off).toContain('data-settings-row="memory.decay"');
+    expect(off).not.toContain('data-settings-row="memory.decayStaleDays"');
   });
 
   it('显示空闲自动卸载和下次自动加载的说明', () => {

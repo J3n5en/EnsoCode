@@ -1,9 +1,11 @@
+import { SILENT_MARKER } from '@shared/secretary/silence';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import type { TimelineMessage } from './reducer';
 import {
   buildTimeline,
   codemodeView,
+  foldTimeline,
   parseSandboxOutput,
   readImagePreviewPath,
   summarizeSandboxCalls,
@@ -11,6 +13,24 @@ import {
 import { user } from './timeline.testUtils';
 
 describe('buildTimeline', () => {
+  it('静默回传收成一行，用户自己的消息照样显示', () => {
+    const updates = '<session-updates>\n- [turn-ended session:c1] 结束了\n</session-updates>';
+    const built = buildTimeline(
+      [
+        user('你好'),
+        { role: 'assistant', content: [{ type: 'text', text: '在' }] },
+        user(updates),
+        { role: 'assistant', content: [{ type: 'text', text: SILENT_MARKER }] },
+      ],
+      false
+    );
+    const timeline = foldTimeline(built, false, new Set());
+    expect(timeline.map((item) => item.kind)).toEqual(['user', 'text', 'tool-group']);
+    expect(timeline[2]).toMatchObject({ notice: 'seen', expanded: false });
+    expect(timeline.some((item) => item.kind === 'text' && item.text === '在')).toBe(true);
+    expect(JSON.stringify(timeline)).not.toContain(SILENT_MARKER);
+  });
+
   it('toolResult 折进对应 toolCall 条目，不单独成行', () => {
     const timeline = buildTimeline(
       [
@@ -1089,5 +1109,39 @@ describe('buildTimeline', () => {
         },
       },
     ]);
+  });
+});
+
+describe('buildTimeline 应用退出打断的一轮', () => {
+  const STREAM_ERROR = 'OpenAI Responses stream ended before a terminal response event';
+  const half = {
+    role: 'assistant',
+    content: [{ type: 'text' as const, text: 'half' }],
+    errorMessage: STREAM_ERROR,
+    timestamp: 2,
+  } as ProjectedMessage;
+
+  it('退出窗口内被吞掉的模型错误不落红，底部钉一条系统提示', () => {
+    const timeline = buildTimeline([user('go'), half], false, [], undefined, {
+      interrupted: {
+        at: 1_000,
+        kind: 'update',
+        unfinishedTools: ['bash'],
+        suppressedError: STREAM_ERROR,
+      },
+    });
+    expect(timeline.some((item) => item.kind === 'error')).toBe(false);
+    expect(timeline.at(-1)).toMatchObject({
+      kind: 'interrupted',
+      at: 1_000,
+      exitKind: 'update',
+      unfinishedTools: ['bash'],
+    });
+  });
+
+  it('没有中断记录时同一错误照常落红', () => {
+    const timeline = buildTimeline([user('go'), half], false);
+    expect(timeline.some((item) => item.kind === 'error')).toBe(true);
+    expect(timeline.some((item) => item.kind === 'interrupted')).toBe(false);
   });
 });

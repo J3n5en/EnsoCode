@@ -3,9 +3,20 @@ import { parseBotInjectedMessage } from '@shared/bots/injectedMessage';
 import { stripBotNotesUpdate } from '@shared/bots/notes';
 import { stripBrowserElementBlocks } from '@shared/browser/designAnnotation';
 import { isBtwIsolationPrompt } from '@shared/btw';
+import { interruptNotice } from '@shared/exitInterrupt';
 import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
+import { parseInboundMessage } from '@shared/secretary/inbound';
+import {
+  goalHeadline,
+  type InjectedSegment,
+  scheduleFolds,
+  splitInjectedBlocks,
+  stripInjectedWrapperLines,
+  updatesFold,
+} from '@shared/secretary/injectedBlocks';
+import { parseSecretaryUpdates, type SecretaryUpdateLine } from '@shared/secretary/updatesText';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
 import { splitTurnNotes } from '@shared/turnNotes';
 import type {
@@ -17,7 +28,9 @@ import type {
 import { splitUnattendedPrefix, type UnattendedNoteKind } from '@shared/unattendedNote';
 import { parseWorkflowPresetMessage } from '@shared/workflowPresetMessage';
 import {
+  AlarmClock,
   ArrowDownToLine,
+  ArrowUpRight,
   Bot,
   BoxSelect,
   Brain,
@@ -25,6 +38,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleX,
   ClipboardCheck,
   ClipboardList,
   Copy,
@@ -33,8 +47,10 @@ import {
   GitBranch,
   GitCompare,
   History,
+  Hourglass,
   ListTodo,
   LoaderCircle,
+  MessageCircleQuestion,
   MessagesSquare,
   PackageMinus,
   RefreshCw,
@@ -47,6 +63,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import {
+  Fragment,
   memo,
   type ReactNode,
   useCallback,
@@ -56,6 +73,13 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { InjectedMessageCard } from '@/components/bots/InjectedMessageCard';
+import { conversationIdBySessionFile } from '@/components/chat/sessionRefJump';
+import {
+  SecretaryProposalRow,
+  secretaryProposalId,
+} from '@/components/secretary/SecretaryProposalRow';
+import { TelegramInboundCard } from '@/components/secretary/TelegramInboundCard';
+import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import {
   Dialog,
   DialogContent,
@@ -71,6 +95,7 @@ import { diffCacheKey } from '@/lib/diffCacheKey';
 import { parseMcpToolName } from '@/lib/mcpToolName';
 import { addSidePanelChanges } from '@/lib/sidePanelDock';
 import { stripAnsi } from '@/lib/terminalText';
+import { usesToolCard } from '@/lib/toolCards';
 import { SUBAGENT_OP_LABEL_KEYS, TOOL_LABEL_KEYS, toolLabel } from '@/lib/toolLabels';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
@@ -107,6 +132,7 @@ import { useChatHost } from './chatHost';
 import { compactionFreedPercent } from './contextBreakdown';
 import { EditDiff } from './EditDiff';
 import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
+import { GOAL_FRAME, GoalIcon, NOTICE_BOX, NOTICE_FRAME, NOTICE_ICON } from './injectedVisual';
 import { LocalFileTrigger, Markdown } from './Markdown';
 import { MemoryCaptureResult, MemorySearchResults } from './MemorySearchResults';
 import { mentionChipClass } from './MentionChip';
@@ -122,6 +148,7 @@ import { SubagentResult } from './SubagentResult';
 import { parseSubagentReceipt } from './subagentReceipt';
 import { TerminalOutput } from './TerminalOutput';
 import { TodoList, TodoProgress } from './TodoBar';
+import { ToolCallCards } from './ToolCallCard';
 import { TurnWaterfallPanel, useTurnHasTiming } from './TurnWaterfallPanel';
 import { useToolHold } from './toolHold';
 import { ZoomableImage } from './ZoomableImage';
@@ -137,6 +164,11 @@ const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
 
 interface TimelineRowProps {
   item: TimelineItem;
+  /**
+   * 这条时间线自己的会话属于秘书项目。由上层按 conversationId 判定后显式传下来：
+   * 读全局「当前打开的会话」会在切标签的一瞬间和 buildTimeline 的判断对不上。
+   */
+  secretarySession?: boolean;
   /** tool-group 组头点击展开/收拢 */
   onToggleGroup?: (key: string) => void;
   /** 轮次（Turn）折叠/展开：行自身知道目标状态，父级不必回查 */
@@ -149,6 +181,7 @@ interface TimelineRowProps {
  * onToggleGroup 引用不参与比较（父级保证语义稳定）。
  */
 function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
+  if (prev.secretarySession !== next.secretarySession) return false;
   const a = prev.item;
   const b = next.item;
   if (a === b) return true;
@@ -214,7 +247,9 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         JSON.stringify(a.subagentTitles) === JSON.stringify(b.subagentTitles) &&
         a.waiting === b.waiting &&
         a.pluginArtifacts === b.pluginArtifacts &&
-        a.shellFailure === b.shellFailure
+        a.shellFailure === b.shellFailure &&
+        JSON.stringify(a.args ?? null) === JSON.stringify(b.args ?? null) &&
+        JSON.stringify(a.cardPeers ?? null) === JSON.stringify(b.cardPeers ?? null)
       );
     case 'tool-group':
       return (
@@ -231,10 +266,18 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.activity?.workedMs === b.activity?.workedMs &&
         a.explore?.goal === b.explore?.goal &&
         a.explore?.report === b.explore?.report &&
-        a.explore?.steps === b.explore?.steps
+        a.explore?.steps === b.explore?.steps &&
+        a.notice === b.notice
       );
     case 'error':
       return b.kind === 'error' && a.text === b.text;
+    case 'interrupted':
+      return (
+        b.kind === 'interrupted' &&
+        a.at === b.at &&
+        a.exitKind === b.exitKind &&
+        a.unfinishedTools.length === b.unfinishedTools.length
+      );
     case 'task-note':
       return b.kind === 'task-note' && a.detail === b.detail;
     case 'compaction':
@@ -267,9 +310,6 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
   }
 }
 
-/** 系统合成的整块注入消息（coworker 雇佣通知 / 后台任务提醒） */
-const SYNTHETIC_BLOCK =
-  /^<(agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update)>\n?([\s\S]*?)\n?<\/\1>\s*$/;
 /** coworker 首条的角色前缀 */
 const ROLE_PREFIX = /^<role>\n?([\s\S]*?)\n?<\/role>\s*/;
 /** 工作区迁移/回退提醒：前置在用户消息之前，渲染成系统事件行而非原始 XML */
@@ -340,22 +380,157 @@ function SyntheticNotice({ tag, body }: { tag: string; body: string }) {
   return <RawSyntheticNotice tag={tag} body={body} />;
 }
 
+/** 目标续跑：和 GoalBar 同一套 goal 外观，默认收成一行，点整行展开完整目标与续跑指令 */
+function GoalContinuationCard({ goal, instructions }: { goal: string; instructions: string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const summary = goalHeadline(goal);
+  return (
+    <div
+      data-enso="goal-continuation"
+      data-open={open ? 'true' : 'false'}
+      className={cn('my-1 w-full min-w-0', GOAL_FRAME)}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full min-w-0 items-center gap-2 text-left text-muted-foreground hover:text-foreground"
+      >
+        <GoalIcon />
+        <span className="min-w-0 flex-1 truncate">
+          {t('Continue goal: {{summary}}', { summary: summary || goal })}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5 border-t border-border/60 pt-1.5">
+          <p className="whitespace-pre-wrap text-foreground">{goal}</p>
+          {instructions && (
+            <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground">
+              {instructions}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 系统注入块：默认一行，点整行展开全文，不画标签名也不画右箭头。 */
+function FoldedInjectedCard({
+  enso,
+  icon: Icon,
+  title,
+  body,
+}: {
+  enso: string;
+  icon: typeof Bot;
+  title: string;
+  body: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div data-enso={enso} data-open={open ? 'true' : 'false'} className={NOTICE_FRAME}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-start gap-2 text-left enabled:hover:text-foreground"
+      >
+        <Icon className={NOTICE_ICON} />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+      </button>
+      {open && body && <p className="mt-1.5 whitespace-pre-wrap text-foreground">{body}</p>}
+    </div>
+  );
+}
+
+function InjectedSegments({
+  segments,
+  searchQuery,
+  activeNth,
+}: {
+  segments: InjectedSegment[];
+  searchQuery: string;
+  activeNth: number;
+}) {
+  const { t } = useI18n();
+  return (
+    <>
+      {segments.map((segment, index) => {
+        const key = `${segment.kind}-${index}`;
+        if (segment.kind === 'text') {
+          const text = segment.text.trim();
+          if (!text) return null;
+          return <UserText key={key} text={text} searchQuery={searchQuery} activeNth={activeNth} />;
+        }
+        if (segment.kind === 'goal')
+          return (
+            <GoalContinuationCard
+              key={key}
+              goal={segment.goal}
+              instructions={segment.instructions}
+            />
+          );
+        if (segment.kind === 'schedule') {
+          const folds = scheduleFolds(segment.raw);
+          const cards = folds.length > 0 ? folds : [{ summary: '', body: '' }];
+          return (
+            <Fragment key={key}>
+              {cards.map((fold, foldIndex) => (
+                <FoldedInjectedCard
+                  // biome-ignore lint/suspicious/noArrayIndexKey: 同一条注入消息里的定时顺序即身份
+                  key={foldIndex}
+                  enso="secretary-schedule-card"
+                  icon={AlarmClock}
+                  title={
+                    fold.summary
+                      ? t('Scheduled: {{summary}}', { summary: fold.summary })
+                      : t('Scheduled')
+                  }
+                  body={fold.body}
+                />
+              ))}
+            </Fragment>
+          );
+        }
+        if (segment.kind === 'updates') {
+          const lines = parseSecretaryUpdates(segment.raw);
+          if (lines) return <SecretaryUpdatesNotice key={key} lines={lines} />;
+          const fold = updatesFold(segment.raw);
+          return (
+            <FoldedInjectedCard
+              key={key}
+              enso="session-updates-card"
+              icon={MessagesSquare}
+              title={
+                fold.summary
+                  ? t('Session updates: {{summary}}', { summary: fold.summary })
+                  : t('Session updates')
+              }
+              body={fold.body}
+            />
+          );
+        }
+        return <SyntheticNotice key={key} tag={segment.tag} body={segment.body} />;
+      })}
+    </>
+  );
+}
+
 /** 子代理完成通知：首行作标题，展开后正文按 Markdown 渲染，用量收进底栏 */
 function SubagentNotices({ notices }: { notices: SubagentNotice[] }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="w-full overflow-hidden rounded-lg border border-dashed border-border/60 text-xs text-muted-foreground">
+    <div className={NOTICE_BOX}>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-start gap-2 px-3 py-2 text-left hover:text-foreground"
       >
-        <Bot className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <Bot className={NOTICE_ICON} />
         <span className="min-w-0 flex-1 truncate">{notices.map((n) => n.header).join(' · ')}</span>
-        <ChevronRight
-          className={cn('mt-0.5 h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90')}
-        />
       </button>
       {expanded &&
         notices.map((n, i) => (
@@ -386,31 +561,113 @@ function SubagentNotices({ notices }: { notices: SubagentNotice[] }) {
 
 function RawSyntheticNotice({ tag, body }: { tag: string; body: string }) {
   const [expanded, setExpanded] = useState(false);
-  const trimmed = body.trim();
+  const trimmed = stripInjectedWrapperLines(body);
+  if (!trimmed) return null;
   const nl = trimmed.indexOf('\n');
   const collapsible = nl > 0;
   const Icon = tag.startsWith('coworker-') || tag === 'agent-notification' ? Bot : TerminalSquare;
   return (
-    <div className="w-full rounded-lg border border-dashed border-border/60 px-3 py-2 text-xs text-muted-foreground">
+    <div className={NOTICE_FRAME}>
       <button
         type="button"
         disabled={!collapsible}
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-start gap-2 text-left enabled:hover:text-foreground"
       >
-        <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <Icon className={NOTICE_ICON} />
         <span className={cn('min-w-0 flex-1', collapsible ? 'truncate' : 'whitespace-pre-wrap')}>
           {collapsible ? trimmed.slice(0, nl) : trimmed}
         </span>
-        {collapsible && (
-          <ChevronRight
-            className={cn('mt-0.5 h-3 w-3 shrink-0 transition-transform', expanded && 'rotate-90')}
-          />
-        )}
       </button>
       {collapsible && expanded && (
         <pre className="mt-1.5 max-h-80 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
           {trimmed.slice(nl + 1)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+const UPDATE_ICON: Record<SecretaryUpdateLine['kind'], typeof Bot> = {
+  'goal-complete': Check,
+  'goal-blocked': CircleAlert,
+  'needs-user': UserRound,
+  'turn-ended': MessagesSquare,
+  failed: CircleX,
+  stalled: Hourglass,
+  interrupted: History,
+  proposal: ClipboardCheck,
+  schedule: AlarmClock,
+  pending: Hourglass,
+  'ask-relay': MessageCircleQuestion,
+  leftover: Hourglass,
+};
+
+/** 秘书收到的派出会话回传与定时提醒：每条一行，点整行展开详情，右侧图标打开会话 */
+function SecretaryUpdatesNotice({ lines }: { lines: SecretaryUpdateLine[] }) {
+  const selectConversation = useSessionsStore((state) => state.selectConversation);
+  return (
+    <div data-enso="secretary-updates" className={cn(NOTICE_BOX, 'divide-y divide-border/60')}>
+      {lines.map((line, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: 回传内容不可变，顺序即身份
+        <SecretaryUpdateRow key={i} line={line} onOpen={selectConversation} />
+      ))}
+    </div>
+  );
+}
+
+function SecretaryUpdateRow({
+  line,
+  onOpen,
+}: {
+  line: SecretaryUpdateLine;
+  onOpen: ((conversationId: string) => void) | null | undefined;
+}) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const Icon = UPDATE_ICON[line.kind];
+  const conversationId = 'conversationId' in line ? line.conversationId : undefined;
+  const head = (
+    <>
+      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 flex-1">{line.text}</span>
+    </>
+  );
+  return (
+    <div data-enso="secretary-update" data-open={expanded ? 'true' : 'false'} className="px-3 py-2">
+      <div className="flex items-start gap-2">
+        {line.detail ? (
+          <button
+            type="button"
+            data-enso="secretary-update-expand"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+            className="flex min-w-0 flex-1 items-start gap-2 text-left hover:text-foreground"
+          >
+            {head}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-start gap-2">{head}</div>
+        )}
+        {conversationId && onOpen ? (
+          <button
+            type="button"
+            data-enso="secretary-update-open"
+            title={t('Open session')}
+            aria-label={t('Open session')}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen(conversationId);
+            }}
+            className="-mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
+      </div>
+      {line.detail && expanded && (
+        <pre className="mt-1.5 ml-5.5 max-h-60 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+          {line.detail}
         </pre>
       )}
     </div>
@@ -567,6 +824,29 @@ function InlineMentionCard({
   );
 }
 
+/** chat 引用卡片：会话还在本机就点得开，找不到时保持不可点 */
+function ChatRefCard({ label, sessionFile }: { label: string; sessionFile: string }) {
+  const conversations = useSessionsStore((state) => state.conversations);
+  const selectConversation = useSessionsStore((state) => state.selectConversation);
+  const conversationId = conversationIdBySessionFile(conversations, sessionFile);
+  if (!conversationId) return <InlineMentionCard kind="chat" label={label} title={sessionFile} />;
+  return (
+    <button
+      type="button"
+      data-enso="chat-ref"
+      onClick={() => selectConversation(conversationId)}
+      title={sessionFile}
+      className={cn(
+        mentionChipClass('chat'),
+        'mx-0.5 inline-flex max-w-52 items-center gap-1 rounded-md px-1.5 align-middle leading-4 hover:bg-muted'
+      )}
+    >
+      <History className="h-3 w-3 shrink-0" />
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
 /** 正文里的 @path / chat 引用块原位渲染成卡片，其余文本原样 */
 function InlineMentionText({
   text,
@@ -592,12 +872,11 @@ function InlineMentionText({
             />
           </LocalFileTrigger>
         ) : segment.type === 'chat' ? (
-          <InlineMentionCard
+          <ChatRefCard
             // biome-ignore lint/suspicious/noArrayIndexKey: 分段随文本快照整体替换
             key={index}
-            kind="chat"
             label={segment.label}
-            title={segment.sessionFile}
+            sessionFile={segment.sessionFile}
           />
         ) : segment.type === 'ui-element' ? (
           <InlineMentionCard
@@ -663,6 +942,9 @@ function UserText({
   const { t } = useI18n();
   const host = useChatHost();
   const botHost = Boolean(host?.speaker || host?.botSession);
+  // 手机发来的话：卡片展示，正文按 markdown 渲染，不露包裹层
+  const inbound = parseInboundMessage(text);
+  if (inbound) return <TelegramInboundCard message={inbound} />;
   const injected = botHost ? parseBotInjectedMessage(text) : null;
   if (injected) return <InjectedMessageCard message={injected} />;
   // Main 投递前追加的笔记更新块不展示
@@ -784,8 +1066,14 @@ function UserText({
       </>
     );
   }
-  const block = SYNTHETIC_BLOCK.exec(text);
-  if (block) return <SyntheticNotice tag={block[1]} body={block[2]} />;
+  const injectedBlocks = splitInjectedBlocks(text);
+  if (injectedBlocks) {
+    return (
+      <InjectedSegments segments={injectedBlocks} searchQuery={searchQuery} activeNth={activeNth} />
+    );
+  }
+  const updates = parseSecretaryUpdates(text);
+  if (updates) return <SecretaryUpdatesNotice lines={updates} />;
   const role = ROLE_PREFIX.exec(text);
   const rest = role ? text.slice(role[0].length) : text;
   const fromMain = MAIN_AGENT_BLOCK.exec(rest);
@@ -838,12 +1126,19 @@ export function ReplyHeader({
   model,
   at,
   privacyMask,
+  secretarySession = false,
 }: {
   model?: string;
   at?: number;
   privacyMask?: MaskReport;
+  /** 这条时间线自己的会话属于秘书项目，与全局当前会话无关 */
+  secretarySession?: boolean;
 }) {
-  const speaker = useChatHost()?.speaker;
+  const host = useChatHost();
+  const face = useSecretaryFace();
+  const secretarySpeaker = secretarySession ? face : null;
+  const speaker = host?.speaker ?? (host ? null : secretarySpeaker);
+  const secretaryMark = !host && secretarySpeaker ? true : undefined;
   const meta = [model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ');
   if (!speaker && !meta && !privacyMask) return null;
   return (
@@ -851,6 +1146,8 @@ export function ReplyHeader({
       {speaker &&
         (speaker.image ? (
           <img
+            data-enso={secretaryMark ? 'secretary-chat-avatar' : undefined}
+            data-image={secretaryMark ? 'true' : undefined}
             src={speaker.image}
             alt=""
             draggable={false}
@@ -859,6 +1156,7 @@ export function ReplyHeader({
           />
         ) : (
           <span
+            data-enso={secretaryMark ? 'secretary-chat-avatar' : undefined}
             className="flex size-[22px] shrink-0 items-center justify-center rounded-full font-semibold text-[11px] text-white"
             style={{ backgroundColor: speaker.color }}
           >
@@ -878,12 +1176,14 @@ export function ReplyHeader({
 
 export const TimelineRow = memo(function TimelineRow({
   item,
+  secretarySession = false,
   onToggleGroup,
   onToggleTurn,
 }: TimelineRowProps) {
   const search = useChatSearchHighlight();
   const searchQuery = search.query;
   const activeNth = search.activeKey === item.key ? search.activeNth : -1;
+  const secretaryChat = secretarySession;
   switch (item.kind) {
     case 'user': {
       const fromMain = item.text ? isFromMainAgent(item.text) : false;
@@ -938,14 +1238,31 @@ export const TimelineRow = memo(function TimelineRow({
           startedAt={item.startedAt}
         />
       );
-    case 'tool':
-      return (
+    case 'tool': {
+      const proposalId = secretaryProposalId(item);
+      const card = usesToolCard(item.name, secretaryChat);
+      const body = (
         <>
           <PluginToolCardSlot name={item.name} output={item.output} state={item.state} />
-          <ToolRow item={item} />
-          {item.pluginArtifacts ? <PluginArtifactsCard artifacts={item.pluginArtifacts} /> : null}
+          {card ? <ToolCallCards item={item} /> : <ToolRow item={item} />}
+          {proposalId ? <SecretaryProposalRow proposalId={proposalId} /> : null}
+          {item.pluginArtifacts ? (
+            <PluginArtifactsCard
+              artifacts={item.pluginArtifacts}
+              align={card ? 'card' : 'tool-row'}
+            />
+          ) : null}
         </>
       );
+      // 工具卡片和紧跟的结果卡片共用聊天列宽度，避免左边缩进把上面一张挤窄
+      return card ? (
+        <div data-enso="tool-card-pair" className="w-full min-w-0">
+          {body}
+        </div>
+      ) : (
+        body
+      );
+    }
     case 'tool-group':
       return <ToolGroupRow item={item} onToggle={onToggleGroup} />;
     case 'error':
@@ -956,6 +1273,8 @@ export const TimelineRow = memo(function TimelineRow({
           <RetryTurnButton />
         </div>
       );
+    case 'interrupted':
+      return <InterruptedRow item={item} />;
     case 'task-note':
       return <TaskNoteRow item={item} />;
     case 'compaction':
@@ -1186,6 +1505,53 @@ function displayedConversation(state: ReturnType<typeof useSessionsStore.getStat
 }
 
 const noSubscribe = () => () => {};
+
+/**
+ * 应用退出打断的一轮：说明是应用被关掉（含安装更新）而不是模型出错，
+ * 有未完成的工具调用要点名，最后引导重试。
+ */
+function InterruptedRow({ item }: { item: Extract<TimelineItem, { kind: 'interrupted' }> }) {
+  const { locale } = useI18n();
+  const text = interruptNotice({
+    at: item.at,
+    kind: item.exitKind,
+    unfinishedTools: item.unfinishedTools,
+    lang: locale,
+  });
+  return (
+    <div data-enso="timeline-interrupted" className="flex items-start gap-2 text-sm text-warning">
+      <CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <p className="min-w-0 flex-1 whitespace-pre-wrap">{text}</p>
+      <InterruptedRetryButton />
+    </div>
+  );
+}
+
+/** 中断的续跑入口：冷会话也能点（先唤醒再从断点续跑），与更新重启的续跑同一条路 */
+function InterruptedRetryButton() {
+  const { t } = useI18n();
+  const canRetry = useSessionsStore((state) => {
+    const conversation = displayedConversation(state);
+    return Boolean(conversation && !conversation.spawning && conversation.status !== 'running');
+  });
+  if (!canRetry) return null;
+  return (
+    <button
+      type="button"
+      data-enso="timeline-interrupted-retry"
+      title={t('Retry')}
+      onClick={() => {
+        const conversation = displayedConversation(useSessionsStore.getState());
+        if (!conversation) return;
+        void useSessionsStore.getState().retryInterrupted(conversation.id);
+      }}
+      className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+    >
+      <RefreshCw className="h-3 w-3" />
+      {t('Retry')}
+    </button>
+  );
+}
 
 /** 终态错误后续跑：已 spawn 且非 running 才显示（手机 stub started=false 自动隐藏） */
 export function RetryTurnButton() {
@@ -1885,26 +2251,30 @@ function ToolGroupRow({
   }
   const explore = item.explore;
   const breathing = item.exploring || Boolean(activity && item.live);
+  const noticeLabel =
+    item.notice === 'patrol' ? t('Patrol clear') : item.notice === 'seen' ? t('Update seen') : null;
   const label = explore
     ? toolLabel('explore_fold', t)
-    : activity
-      ? activity.workedMs > 0
+    : noticeLabel
+      ? noticeLabel
+      : activity
         ? t('Worked for {{duration}}', { duration: formatDuration(activity.workedMs) })
-        : t('Activity')
-      : compact
-        ? item.exploring
-          ? t('Exploring')
-          : t('Explored')
-        : t('{{count}} tool calls', { count: item.count });
+        : compact
+          ? item.exploring
+            ? t('Exploring')
+            : t('Explored')
+          : t('{{count}} tool calls', { count: item.count });
   const detail = explore
     ? [explore.goal, t('{{count}} tool calls', { count: item.count })].filter(Boolean)
-    : item.summary && !item.exploring
-      ? [item.summary]
-      : activity
-        ? activityParts
-        : compact
-          ? explored
-          : parts;
+    : noticeLabel
+      ? activityParts
+      : item.summary && !item.exploring
+        ? [item.summary]
+        : activity
+          ? activityParts
+          : compact
+            ? explored
+            : parts;
   const head = (
     <button
       type="button"
@@ -1915,6 +2285,7 @@ function ToolGroupRow({
       title={explore?.goal}
       data-explore-head={explore ? '' : undefined}
       data-enso="tool-row"
+      data-notice={item.notice}
       className={cn(
         'group/step flex min-h-6 w-full items-center gap-2 text-left text-[13px] transition-colors hover:text-foreground',
         SUBTLE_TEXT

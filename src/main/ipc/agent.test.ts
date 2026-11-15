@@ -133,6 +133,7 @@ vi.mock('../services/desktopHooks', async (importOriginal) => {
     notify: {
       maybeNotify: vi.fn(),
       maybeNotifyBot: mocks.maybeNotifyBot,
+      notifySecretary: vi.fn(async () => {}),
       setViewedSession: vi.fn(),
     },
   });
@@ -176,7 +177,10 @@ vi.mock('./sessionIndex', () => ({
     isDetached: mocks.isDetached,
   },
 }));
-vi.mock('./settings', () => ({ readSettings: mocks.readSettings }));
+vi.mock('./settings', () => ({
+  readSettings: mocks.readSettings,
+  readSettingsState: mocks.readSettingsState,
+}));
 vi.mock('../services/memoryHost', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/memoryHost')>()),
   scheduleMemoryDistill: mocks.scheduleMemoryDistill,
@@ -209,7 +213,7 @@ vi.mock('./worktree', () => ({
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { app } from 'electron';
 import { resolveSubagentModelSelection, rewindSession } from '../services/agentHost';
-import { getSourceAuthorityRegistry, registerAgentHandlers } from './agent';
+import { getSourceAuthorityRegistry, registerAgentHandlers, spawnRootFromMain } from './agent';
 
 const sender = {
   id: 1,
@@ -364,6 +368,48 @@ describe('agent IPC Main identity boundary', () => {
     });
     expect(result).toMatchObject({ ok: false });
     expect(mocks.spawnSession).not.toHaveBeenCalled();
+  });
+
+  it('秘书会话 spawn：开关关闭直接拒绝，打开后由 Main 装配系统提示词与强制禁用列表', async () => {
+    const authority = getSourceAuthorityRegistry()!;
+    vi.spyOn(authority, 'conversation').mockReturnValue({
+      conversationId: 'secretary-1',
+      projectId: 'sp',
+      kind: 'root',
+      lifecycle: 'draft',
+      version: 1,
+    });
+    vi.spyOn(authority, 'project').mockReturnValue({
+      projectId: 'sp',
+      canonicalPath: '/secretary',
+      state: 'active',
+      version: 1,
+      kind: 'secretary',
+    });
+    const request = {
+      sessionId: 'secretary-1',
+      providerId: 'provider',
+      modelId: 'model',
+      cwd: '/secretary',
+    };
+    try {
+      mocks.readSettingsState.mockReturnValue({});
+      await expect(spawnRootFromMain(request)).resolves.toMatchObject({
+        ok: false,
+        error: 'disabled',
+      });
+      expect(mocks.spawnSession).not.toHaveBeenCalled();
+
+      mocks.readSettingsState.mockReturnValue({ secretaryEnabled: true });
+      await spawnRootFromMain(request);
+      expect(mocks.spawnSession).toHaveBeenCalledTimes(1);
+      const options = mocks.spawnSession.mock.calls[0][5] as {
+        secretary?: { systemPrompt: string };
+      };
+      expect(options.secretary?.systemPrompt).toContain('<untrusted-content');
+    } finally {
+      mocks.readSettingsState.mockReturnValue(undefined);
+    }
   });
 
   it('Bot authority rejects generic execution and policy changes but keeps abort available', async () => {

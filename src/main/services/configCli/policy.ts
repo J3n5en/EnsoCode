@@ -9,6 +9,8 @@ export const HIDDEN = '***';
 
 const SECRET_NAME =
   /api[-_]?key|secret|passw(?:or)?d|credential|authorization|cookie|token$|(?:^|[-_])token(?:[-_]|$)|^env$/i;
+/** 名字里含 secret 字样但不是密钥的字段（`secret` 子串匹配会误伤） */
+const NOT_SECRET_FIELDS = new Set(['secretaryEnabled']);
 const PATH_OR_EXEC_NAME = /^(?:path|dir|root|cwd|command|args)$|(?:Path|Dir|Root)$/;
 const UNSAFE_SEGMENT = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -42,7 +44,8 @@ export type SetPlan =
   | { ok: false; error: string }
   | { ok: false; requiresRestart: true; reason: string };
 
-export const isSecretName = (name: string): boolean => SECRET_NAME.test(name);
+export const isSecretName = (name: string): boolean =>
+  !NOT_SECRET_FIELDS.has(name) && SECRET_NAME.test(name);
 const isPathOrExecName = (name: string): boolean => PATH_OR_EXEC_NAME.test(name);
 
 export interface KeySchema {

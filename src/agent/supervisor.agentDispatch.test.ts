@@ -1114,7 +1114,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     ).deliverNotification(parent.sessionId, 'task done');
     expect(live.prompt).toHaveBeenLastCalledWith(
       '<agent-notification>\ntask done\n</agent-notification>',
-      { source: 'extension' }
+      { source: 'extension', streamingBehavior: 'followUp' }
     );
     await supervisor.shutdown();
   });
@@ -1152,7 +1152,10 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     const parentSession = mocks.sessions[0] as ReturnType<typeof session>;
     supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'ordinary coding task' });
     await settle();
-    expect(parentSession.prompt).toHaveBeenCalledWith('ordinary coding task', undefined);
+    expect(parentSession.prompt).toHaveBeenCalledWith(
+      'ordinary coding task',
+      expect.objectContaining({ streamingBehavior: 'followUp' })
+    );
     parentSession.prompt.mockClear();
     const scout = {
       sessionId: 'parent::cw-scout',
@@ -1201,6 +1204,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     await messageMain!.execute('call', { message: 'explicit handoff', urgent: true });
     expect(parentSession.prompt).toHaveBeenCalledWith(expect.stringContaining('explicit handoff'), {
       source: 'extension',
+      streamingBehavior: 'followUp',
     });
   });
 
@@ -1456,7 +1460,10 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     });
     supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'follow up' });
     await vi.waitFor(() =>
-      expect(parentSession.prompt).toHaveBeenCalledWith('follow up', undefined)
+      expect(parentSession.prompt).toHaveBeenCalledWith(
+        'follow up',
+        expect.objectContaining({ streamingBehavior: 'followUp' })
+      )
     );
     expect(parentSession.steer).not.toHaveBeenCalled();
   });
@@ -1520,7 +1527,10 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
 
       release();
       await vi.advanceTimersByTimeAsync(10);
-      expect(piSession.prompt).toHaveBeenCalledWith('queued', undefined);
+      expect(piSession.prompt).toHaveBeenCalledWith(
+        'queued',
+        expect.objectContaining({ streamingBehavior: 'followUp' })
+      );
       expect(events.some((event) => event.type === 'turn-failed')).toBe(false);
       await supervisor.shutdown();
     } finally {
@@ -1592,7 +1602,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     expect(piSession.prompt).not.toHaveBeenCalled();
 
     finish();
-    await vi.waitFor(() => expect(piSession.prompt).toHaveBeenCalledWith('queued', undefined));
+    await vi.waitFor(() =>
+      expect(piSession.prompt).toHaveBeenCalledWith(
+        'queued',
+        expect.objectContaining({ streamingBehavior: 'followUp' })
+      )
+    );
     expect(events.some((event) => event.type === 'turn-failed')).toBe(false);
   });
 
@@ -1608,7 +1623,10 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
 
       finish();
       await vi.advanceTimersByTimeAsync(10);
-      expect(piSession.prompt).toHaveBeenCalledWith('queued', undefined);
+      expect(piSession.prompt).toHaveBeenCalledWith(
+        'queued',
+        expect.objectContaining({ streamingBehavior: 'followUp' })
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -1633,7 +1651,12 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
 
     piSession.isCompacting = false;
     idle.resolve(undefined);
-    await vi.waitFor(() => expect(piSession.prompt).toHaveBeenCalledWith('after abort', undefined));
+    await vi.waitFor(() =>
+      expect(piSession.prompt).toHaveBeenCalledWith(
+        'after abort',
+        expect.objectContaining({ streamingBehavior: 'followUp' })
+      )
+    );
   });
 
   it('重试倒计时中 abort：pi 不再发 agent_end，按失败收口并放弃排队压缩', async () => {
@@ -2185,6 +2208,97 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       })
     );
     expect(mocks.createAgentSession).toHaveBeenCalledTimes(1);
+  });
+
+  describe('活轮里的 prompt 投递', () => {
+    /** pi 在 input hook 之后才判忙，这里复刻它的拒收口径 */
+    const alreadyProcessing = () =>
+      new Error(
+        "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
+      );
+    const promptOptions = (piSession: ReturnType<typeof session>, call = 0) =>
+      (piSession.prompt.mock.calls[call] as unknown[] | undefined)?.[1] as
+        | { streamingBehavior?: string }
+        | undefined;
+    const failed = (events: AgentWorkerEvent[]) =>
+      events.some(
+        (event) =>
+          event.type === 'turn-failed' || (event.type === 'status' && event.status === 'failed')
+      );
+
+    it('空闲会话的 prompt 也带 followUp：不先判状态再投，避免竞态', async () => {
+      const { supervisor, piSession } = await spawnParent();
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd1' });
+      await settle();
+      expect(promptOptions(piSession)).toMatchObject({ streamingBehavior: 'followUp' });
+      await supervisor.shutdown();
+    });
+
+    it('处理中的排队消息走 followUp，不插话也不报错', async () => {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.emit({ type: 'agent_start' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        identity: parent,
+        text: 'queued',
+        deliveryId: 'd1',
+      });
+      await settle();
+      expect(piSession.steer).not.toHaveBeenCalled();
+      expect(promptOptions(piSession)).toMatchObject({ streamingBehavior: 'followUp' });
+      expect(failed(events)).toBe(false);
+      await supervisor.shutdown();
+    });
+
+    it('投递撞上 already processing：改用 followUp 重投，会话不进 error', async () => {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.prompt.mockRejectedValueOnce(alreadyProcessing());
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd1' });
+      await vi.waitFor(() => expect(piSession.prompt).toHaveBeenCalledTimes(2));
+      expect(promptOptions(piSession, 1)).toMatchObject({ streamingBehavior: 'followUp' });
+      expect(failed(events)).toBe(false);
+      expect(events.some((event) => event.type === 'delivery-rejected')).toBe(false);
+      await supervisor.shutdown();
+    });
+
+    it('重投仍被拒：只回执 delivery-rejected，不推 failed、不标 error', async () => {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.prompt.mockRejectedValue(alreadyProcessing());
+      supervisor.handleCommand({ type: 'prompt', identity: parent, text: 'hi', deliveryId: 'd1' });
+      await vi.waitFor(() =>
+        expect(events.some((event) => event.type === 'delivery-rejected')).toBe(true)
+      );
+      expect(events.filter((event) => event.type === 'delivery-rejected')).toEqual([
+        expect.objectContaining({ deliveryId: 'd1' }),
+      ]);
+      expect(failed(events)).toBe(false);
+      await supervisor.shutdown();
+    });
+
+    it('goal-continuation 在处理中排队，不与活轮撞车', async () => {
+      const { events, supervisor, piSession } = await spawnParent();
+      piSession.emit({ type: 'agent_start' });
+      supervisor.handleCommand({
+        type: 'prompt',
+        identity: parent,
+        text: '<goal-continuation>\nSession goal: ship it\n</goal-continuation>',
+        deliveryId: 'g1',
+      });
+      await settle();
+      expect(promptOptions(piSession)).toMatchObject({ streamingBehavior: 'followUp' });
+      expect(failed(events)).toBe(false);
+      await supervisor.shutdown();
+    });
+
+    it('处理中的 steer 仍走 steer 通道', async () => {
+      const { supervisor, piSession } = await spawnParent();
+      piSession.isStreaming = true;
+      supervisor.handleCommand({ type: 'steer', identity: parent, text: 'now', deliveryId: 's1' });
+      await settle();
+      expect(piSession.steer).toHaveBeenCalledTimes(1);
+      expect(piSession.prompt).not.toHaveBeenCalled();
+      await supervisor.shutdown();
+    });
   });
 });
 

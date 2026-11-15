@@ -308,3 +308,103 @@ describe('模块级常量的 i18n key（#5）', () => {
     }
   });
 });
+
+describe('秘书派活卡片文案', () => {
+  it('卡片上的每个状态与按钮都有中文译文', () => {
+    for (const key of [
+      'Dispatch',
+      'Confirm dispatch',
+      'Reject',
+      'Isolated worktree',
+      'Project checkout',
+      'Waiting for your confirmation',
+      'Creating the session…',
+      'Session created',
+      'Failed',
+      'Rejected',
+      'Expired',
+    ]) {
+      expect(getTranslation('en', key)).toBe(key);
+      expect(getTranslation('zh', key), key).not.toBe(key);
+    }
+  });
+});
+
+describe('秘书初次设置与设置页文案', () => {
+  it('欢迎页、三步表单、配置卡片与设置页的每个词条都有中文译文', () => {
+    for (const key of [
+      'The secretary is not part of any project. It watches your projects, dispatches sessions and reports results back. It never reads or writes code itself.',
+      'Set up with a form',
+      'Three steps: name and avatar, model, how it works. Every step has a default.',
+      'Set up by chatting',
+      'The secretary asks a few questions and hands you a profile card to confirm.',
+      'Use all defaults and start',
+      'Could not start the secretary. Try again.',
+      'Name and avatar',
+      'How it works',
+      'Avatar color',
+      'Secretary model',
+      'Used for the secretary itself. Dispatched sessions use their own project defaults.',
+      'Use default model',
+      'Autonomy',
+      'Ask before dispatching',
+      'Tell me after dispatching',
+      'Fully autonomous',
+      'Projects without confirmation',
+      'Only applies when autonomy is not "ask first". Other projects always show a confirmation card.',
+      'Visible projects',
+      'All projects',
+      'Selected projects',
+      'Dispatch model',
+      'Follow the project',
+      'Fixed model',
+      'The secretary picks from candidates',
+      'Dispatch worktree',
+      'Never an isolated worktree',
+      'Secretary decides',
+      'Always an isolated worktree',
+      'Running dispatches at most',
+      'Up to {{n}} at a time',
+      'Concurrent dispatch limit',
+      'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.',
+      'Confirm',
+      'Edit here',
+      'Profile saved',
+      'Saving the profile…',
+      'Secretary profile',
+      'Name, avatar, model and how much the secretary may do on its own.',
+      'Upload image',
+      'Remove image',
+      'The secretary has not been set up yet.',
+      'Style and interruptions',
+      'What it calls you, reply language, style and system notifications.',
+      'What to call you',
+      'Optional',
+      'Reply language',
+      'Follow the interface language',
+      'Chinese',
+      'English',
+      'Communication style',
+      'Concise',
+      'Detailed',
+      'System notifications',
+      'Only what needs you',
+      'Include finished work',
+      'Daily brief time',
+      'Persona',
+      'Scheduled tasks',
+      'Nothing scheduled',
+      'Daily brief, to-do reminders and one-off or recurring prompts.',
+      'Reset the secretary and start over',
+      'Sessions and dispatch history are kept either way.',
+      'Saved',
+      'Could not save the secretary profile. Try again.',
+      'Could not reset the secretary. Try again.',
+      'Also delete the secretary private memory',
+      'Secretary settings',
+    ]) {
+      expect(getTranslation('en', key)).toBe(key);
+      expect(getTranslation('zh', key), key).not.toBe(key);
+    }
+  });
+});

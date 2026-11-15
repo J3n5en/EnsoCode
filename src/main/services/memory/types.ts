@@ -97,6 +97,12 @@ export interface Memory {
   accessCount: number;
   appearances: number;
   clicks: number;
+  /** 最后一次被检索返回的时间；衰减公式的 recency 项（从未命中时调用方回落到 createdAt） */
+  lastHitAt: string | null;
+  /** 被检索返回的累计次数；衰减公式的 frequency 项 */
+  hitCount: number;
+  /** 遗忘巡检标上的「建议归档」时间；null = 不是候选。归档动作本身仍要用户确认或显式开启自动归档 */
+  archiveCandidateAt: string | null;
   embeddingModel: string | null;
   embeddingDim: number | null;
   embeddingVersion: number | null;

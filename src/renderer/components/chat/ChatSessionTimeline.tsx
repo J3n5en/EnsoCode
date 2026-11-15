@@ -18,6 +18,7 @@ import {
   type TimelineItem,
   terminalErrorText,
 } from '@/stores/sessions/timeline';
+import { useSettingsStore } from '@/stores/settings';
 import { ChatFindBar, consumePendingFindQuery, OPEN_CHAT_FIND_EVENT } from './ChatFindBar';
 import { timelineSearchHits } from './chatSearch';
 import { MarkdownLinkContext } from './Markdown';
@@ -46,6 +47,9 @@ export function ChatSessionTimeline({
   timelineRef: RefObject<MessageTimelineHandle | null>;
 }) {
   const projectId = useSessionsStore((state) => state.conversations[conversationId]?.projectId);
+  const secretarySession = useSettingsStore((state) =>
+    state.projects.some((project) => project.id === projectId && project.kind === 'secretary')
+  );
   const messages = useSessionsStore(
     (state) => state.conversations[conversationId]?.messages ?? EMPTY_MESSAGES
   );
@@ -96,6 +100,8 @@ export function ChatSessionTimeline({
   const syncStalled = useSessionsStore(
     (state) => state.conversations[conversationId]?.syncStalled === true
   );
+  /** 应用退出打断的一轮：正文里被吞掉的模型错误不再渲染，底部钉系统提示 */
+  const interrupted = useSessionsStore((state) => state.conversations[conversationId]?.interrupted);
 
   const cache = useRef<{ conversationId: string; items: TimelineItem[] }>({
     conversationId: '',
@@ -121,6 +127,8 @@ export function ChatSessionTimeline({
         toolOutputs,
         toolStartedAt,
         pendingApprovals,
+        secretarySession,
+        interrupted,
       });
     cache.current.items = items;
     return items;
@@ -132,9 +140,11 @@ export function ChatSessionTimeline({
     cwd,
     customEntries,
     historyBaseIndex,
+    interrupted,
     messages,
     pendingApprovals,
     running,
+    secretarySession,
     toolOutputs,
     toolStartedAt,
   ]);
@@ -298,6 +308,7 @@ export function ChatSessionTimeline({
         onStartReached={historyBaseIndex > 0 ? loadOlder : undefined}
         searchQuery={findOpen ? findQuery : ''}
         activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
+        secretarySession={secretarySession}
       />
     </MarkdownLinkContext.Provider>
   );

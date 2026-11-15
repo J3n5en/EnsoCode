@@ -116,6 +116,20 @@ describe('maybeNotify', () => {
     expect(notifications).toHaveLength(0);
   });
 
+  it('静默回传的轮次完成不弹通知', () => {
+    maybeNotify({
+      type: 'turn-completed',
+      identity: { sessionId: 'sec1', generation: 'g' },
+      seq: 1,
+      digest: {
+        firstUserText: '',
+        userText: '<session-updates>\n- [turn-ended session:c1] 结束了\n</session-updates>',
+        assistantText: '<secretary-silent/>',
+      },
+    } as unknown as RendererAgentEvent);
+    expect(notifications).toHaveLength(0);
+  });
+
   it('coworker 的 turn-completed 不弹,但 ask-request 照弹(阻塞必须提醒)', () => {
     const coworker = { sessionId: 'conversation-1::cw-bob', generation: 'g' } as const;
     maybeNotify({

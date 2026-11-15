@@ -1,9 +1,9 @@
 import type {
-  EvolvesEdgeDto,
   MemoryDetail,
   MemoryListItem,
   MemoryListQuery,
   MemoryListResult,
+  PendingEvolvesReviewDto,
 } from '@shared/memory/dto';
 import {
   Children,
@@ -17,17 +17,22 @@ import {
 } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MemoryDeleteDialog, MemoryEditDialog } from '@/components/memory/MemoryActionDialogs';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogTitle } from '@/components/ui/dialog';
 import { InputGroupInput } from '@/components/ui/input-group';
 import { Select } from '@/components/ui/select';
 import {
   emptyReason,
+  groupPendingReviews,
   isPristineEmpty,
   MemoryLibrary,
   MemoryRows,
+  PENDING_REVIEW_ALERT,
+  PENDING_REVIEW_GROUP_AT,
   PendingReviewSection,
   PendingWritesSection,
+  scopeFilter,
 } from './MemoryLibrary';
 
 const hooks = vi.hoisted(() => ({ current: null as LibraryHarness | null }));
@@ -51,7 +56,12 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 
-vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, string>) =>
+      params ? key.replace(/\{\{(\w+)\}\}/g, (_, k: string) => params[k] ?? '') : key,
+  }),
+}));
 
 const t = (key: string, params?: Record<string, string>) =>
   params ? key.replace(/\{\{(\w+)\}\}/g, (_, k: string) => params[k] ?? '') : key;
@@ -71,21 +81,45 @@ function item(overrides: Partial<MemoryListItem> = {}): MemoryListItem {
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-02T00:00:00.000Z',
     appearances: 3,
+    lastHitAt: '2025-01-02T00:00:00.000Z',
+    hitCount: 3,
+    archiveCandidateAt: null,
     ...overrides,
   };
 }
 
-const edge: EvolvesEdgeDto = {
-  id: 'e1',
-  olderId: 'older-id-1234',
-  newerId: 'newer-id-5678',
-  relation: 'challenges',
-  confidence: 0.8,
-  reason: 'Contradicts the earlier note',
-  reviewState: 'pending',
-  reviewedAt: null,
-  createdAt: '2025-01-03T00:00:00.000Z',
-};
+function review(overrides: Partial<PendingEvolvesReviewDto> = {}): PendingEvolvesReviewDto {
+  return {
+    edge: {
+      id: 'e1',
+      olderId: 'older-id-1234',
+      newerId: 'newer-id-5678',
+      relation: 'challenges',
+      confidence: 1,
+      reason: 'Contradicts the earlier note',
+      reviewState: 'pending',
+      reviewedAt: null,
+      createdAt: '2025-01-03T00:00:00.000Z',
+    },
+    older: item({
+      id: 'older-id-1234',
+      title: 'Workflow removed; do not add back',
+      contentSummary: 'The scripted workflow was deleted on purpose',
+      spaceId: 'project-A',
+      spaceLabel: 'Project A',
+    }),
+    newer: item({
+      id: 'newer-id-5678',
+      title: 'Wants a DeepSeek-style workflow',
+      contentSummary: 'User asked for a scripted workflow again',
+      spaceId: 'project-A',
+      spaceLabel: 'Project A',
+    }),
+    ...overrides,
+  };
+}
+
+const edge = review();
 
 // Node 环境下保留 hook 身份、依赖比较和 cleanup；交互走 JSX，不依赖 state 下标。
 class LibraryHarness {
@@ -202,7 +236,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function setupLibrary() {
+function setupLibrary(pending: PendingEvolvesReviewDto[] = [edge]) {
   const requests: {
     query: MemoryListQuery;
     response: ReturnType<typeof deferred<MemoryListResult>>;
@@ -221,7 +255,8 @@ function setupLibrary() {
       spaceLabels: { 'project-A': 'Project A', 'project-B': 'Project B' },
       total: 2,
     })),
-    evolvesPending: vi.fn(async () => [edge]),
+    evolvesPending: vi.fn(async () => pending),
+    evolvesReview: vi.fn(async () => ({ ok: true })),
     detail: vi.fn(() => {
       const response = deferred<MemoryDetail | null>();
       details.push(response);
@@ -264,7 +299,7 @@ describe('MemoryLibrary response ordering', () => {
           ui.query('newer');
           break;
         case 'space':
-          ui.select(1, 'project-B');
+          ui.select(2, 'project-B');
           break;
         case 'page':
           ui.click('Next');
@@ -339,8 +374,8 @@ describe('MemoryLibrary response ordering', () => {
       await Promise.resolve();
       ui.render();
       expect(memory.list).toHaveBeenCalledOnce();
-      expect(ui.props(Select, 1).items).toContainEqual({ value: 'project-B', label: 'Project B' });
-      expect(ui.html()).toContain(edge.reason);
+      expect(ui.props(Select, 2).items).toContainEqual({ value: 'project-B', label: 'Project B' });
+      expect(ui.html()).toContain(edge.edge.reason);
       expect(ui.rows()).toEqual([]);
     }
   );
@@ -359,6 +394,62 @@ describe('MemoryLibrary response ordering', () => {
     expect(requests.at(-1)?.query.query).toBe('current');
     await reply(2, ['Current refreshed']);
     expect(ui.rows()).toEqual(['Current refreshed']);
+  });
+
+  it('row edit and delete go straight to the shared dialogs, without opening the detail', async () => {
+    const { ui, reply, memory } = setupLibrary();
+    await reply(0, ['Initial']);
+    expect(ui.props(MemoryEditDialog).memoryId).toBeNull();
+    expect(ui.props(MemoryDeleteDialog).ids).toBeNull();
+    ui.props(MemoryRows).onEdit?.('Initial');
+    ui.render();
+    expect(ui.props(MemoryEditDialog).memoryId).toBe('Initial');
+    ui.props(MemoryRows).onDelete?.('Initial');
+    ui.render();
+    expect(ui.props(MemoryDeleteDialog).ids).toEqual(['Initial']);
+    expect(memory.detail).not.toHaveBeenCalled();
+    expect(ui.props(Dialog).open).toBe(false);
+  });
+
+  it('the bulk delete button is styled as destructive and opens the impact confirm', async () => {
+    const { ui, reply } = setupLibrary();
+    await reply(0, ['Initial']);
+    ui.props(MemoryRows).onToggle?.('Initial');
+    ui.render();
+    const bulk = ui.elements(Button).find((node) => node.props.children === 'Delete permanently');
+    expect(bulk?.props.variant).toBe('destructive-outline');
+    ui.click('Delete permanently');
+    expect(ui.props(MemoryDeleteDialog).ids).toEqual(['Initial']);
+  });
+
+  it('批量审阅：全选后一次提交所选矛盾，逐条落库并清空勾选', async () => {
+    const second = review({ edge: { ...edge.edge, id: 'e2' } });
+    const { ui, memory, reply } = setupLibrary([edge, second]);
+    await reply(0, ['Initial']);
+    expect(ui.props(PendingReviewSection).items).toHaveLength(2);
+    ui.props(PendingReviewSection).onToggleAll(true);
+    ui.render();
+    const selected = ui.props(PendingReviewSection).selected;
+    expect([...selected]).toEqual(['e1', 'e2']);
+    ui.props(PendingReviewSection).onReview([...selected], 'accepted');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(memory.evolvesReview.mock.calls).toEqual([
+      ['e1', 'accepted'],
+      ['e2', 'accepted'],
+    ]);
+    ui.render();
+    expect(ui.props(PendingReviewSection).selected.size).toBe(0);
+  });
+
+  it('单条审阅只提交这一条，忽略记为 rejected', async () => {
+    const second = review({ edge: { ...edge.edge, id: 'e2' } });
+    const { ui, memory, reply } = setupLibrary([edge, second]);
+    await reply(0, ['Initial']);
+    ui.props(PendingReviewSection).onReview(['e2'], 'rejected');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(memory.evolvesReview.mock.calls).toEqual([['e2', 'rejected']]);
   });
 
   it('does not apply pending list, statistics, review or detail replies after unmount', async () => {
@@ -435,6 +526,25 @@ describe('isPristineEmpty', () => {
 });
 
 describe('MemoryRows', () => {
+  it('shows inline edit and delete on every row only when the caller handles them', () => {
+    const items = [item({ id: 'a' }), item({ id: 'b' })];
+    const withActions = renderToStaticMarkup(
+      createElement(MemoryRows, {
+        t,
+        onOpen: () => {},
+        onEdit: () => {},
+        onDelete: () => {},
+        items,
+      })
+    );
+    expect(withActions.match(/data-memory-action="row-edit"/g)).toHaveLength(2);
+    expect(withActions.match(/data-memory-action="row-delete"/g)).toHaveLength(2);
+    const readOnly = renderToStaticMarkup(
+      createElement(MemoryRows, { t, onOpen: () => {}, items })
+    );
+    expect(readOnly).not.toContain('row-edit');
+  });
+
   it('marks crystals and archived rows, and shows access counts', () => {
     const html = renderToStaticMarkup(
       createElement(MemoryRows, {
@@ -469,6 +579,20 @@ describe('MemoryRows', () => {
 });
 
 describe('PendingReviewSection', () => {
+  const section = (overrides: Partial<Parameters<typeof PendingReviewSection>[0]> = {}) =>
+    renderToStaticMarkup(
+      createElement(PendingReviewSection, {
+        t,
+        items: [edge],
+        selected: new Set<string>(),
+        onToggle: () => {},
+        onToggleAll: () => {},
+        onReview: () => {},
+        onOpen: () => {},
+        ...overrides,
+      })
+    );
+
   it('lists Bot memory writes awaiting approval with target space and redaction note', () => {
     expect(
       renderToStaticMarkup(
@@ -504,25 +628,118 @@ describe('PendingReviewSection', () => {
     expect(html).toContain('Reject');
   });
 
-  it('is absent when nothing is pending', () => {
-    const html = renderToStaticMarkup(
-      createElement(PendingReviewSection, { t, edges: [], onReview: () => {} })
-    );
-    expect(html).toBe('');
+  it('shows both memories by title and summary instead of bare ids', () => {
+    const html = section();
+    expect(html).toContain('Workflow removed; do not add back');
+    expect(html).toContain('The scripted workflow was deleted on purpose');
+    expect(html).toContain('Wants a DeepSeek-style workflow');
+    expect(html).toContain('User asked for a scripted workflow again');
+    // 空间与时间：判断这条矛盾发生在哪、什么时候
+    expect(html).toContain('Project A');
+    expect(html).toContain('2025-01-03');
+    // 不再用 id 前缀当标题
+    expect(html).not.toContain('older-id-1234 →');
   });
 
-  it('states that reviewing never deletes or supersedes anything', () => {
-    const html = renderToStaticMarkup(
-      createElement(PendingReviewSection, { t, edges: [edge], onReview: () => {} })
-    );
+  it('勾选后才出现批量操作，一次处理所选矛盾', () => {
+    const html = section({ selected: new Set(['e1']) });
+    expect(html).toContain('1 selected');
+    expect(html).toContain('Accept selected');
+    expect(html).toContain('Dismiss selected');
+    expect(html).toContain('Clear selection');
+    // 没勾选时不占地方
+    expect(section()).not.toContain('Accept selected');
+  });
+
+  it('states what accepting and dismissing actually do', () => {
+    const html = section();
     expect(html).toContain('Needs review');
     expect(html).toContain('challenges');
     expect(html).toContain('Contradicts the earlier note');
     expect(html).toContain(
       'Reviewing only records your judgement. Nothing is deleted and no memory is superseded.'
     );
+    expect(html).toContain(
+      'Accept: recorded as a confirmed contradiction. Both memories stay and stay searchable — you just stop being asked.'
+    );
+    expect(html).toContain(
+      'Dismiss: recorded as not a contradiction. Both memories stay unchanged and you stop being asked.'
+    );
     // 拒绝按钮的文案不能暗示删除
     expect(html).toContain('Dismiss');
     expect(html).not.toContain('Delete');
+  });
+
+  it('says so when the model recorded no reason', () => {
+    const html = section({
+      items: [{ ...edge, edge: { ...edge.edge, reason: null } }],
+    });
+    expect(html).toContain('No reason recorded for this pair.');
+  });
+
+  it('explains the empty state instead of leaving a blank block', () => {
+    const html = section({ items: [] });
+    expect(html).toContain('Needs review');
+    expect(html).toContain(
+      'Nothing to review. When a new memory contradicts an existing one, the pair shows up here.'
+    );
+    expect(html).not.toContain('Accept');
+  });
+
+  it('warns once the backlog passes the alert threshold', () => {
+    const many = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        review({
+          edge: {
+            ...edge.edge,
+            id: `e${index}`,
+            createdAt: `2025-01-0${(index % 9) + 1}T00:00:00.000Z`,
+          },
+        })
+      );
+    expect(section({ items: many(PENDING_REVIEW_ALERT) })).not.toContain(
+      'contradictions are waiting for review'
+    );
+    const html = section({ items: many(PENDING_REVIEW_ALERT + 1) });
+    expect(html).toContain(
+      `${PENDING_REVIEW_ALERT + 1} contradictions are waiting for review. Clear them in bulk so real conflicts do not get buried.`
+    );
+  });
+
+  it('groups by space only when the list gets long', () => {
+    const short = groupPendingReviews([edge, review({ edge: { ...edge.edge, id: 'e2' } })]);
+    expect(short).toHaveLength(1);
+    expect(short[0].label).toBe('');
+    const long = Array.from({ length: PENDING_REVIEW_GROUP_AT + 1 }, (_, index) =>
+      review({
+        edge: { ...edge.edge, id: `e${index}` },
+        older: item({
+          id: `o${index}`,
+          spaceId: index % 2 === 0 ? 'project-A' : 'global',
+          spaceLabel: index % 2 === 0 ? 'Project A' : 'Global',
+        }),
+      })
+    );
+    const groups = groupPendingReviews(long);
+    expect(groups.map((group) => group.label)).toEqual(['Global', 'Project A']);
+    expect(groups.reduce((sum, group) => sum + group.items.length, 0)).toBe(long.length);
+    // 组内最新的矛盾在前
+    expect(groups[0].items[0].edge.createdAt >= groups[0].items[1].edge.createdAt).toBe(true);
+  });
+});
+
+describe('scopeFilter', () => {
+  const spaces = [
+    { id: 'global', kind: 'global' as const },
+    { id: 'proj:a', kind: 'project' as const },
+    { id: 'proj:b', kind: 'project' as const },
+    { id: 'proj:s', kind: 'secretary' as const },
+  ];
+  it('具体空间优先，只选类别时带上该类别全部空间，未选不过滤', () => {
+    expect(scopeFilter('project', 'proj:b', spaces)).toEqual({ spaceId: 'proj:b' });
+    expect(scopeFilter('project', null, spaces)).toEqual({ spaceIds: ['proj:a', 'proj:b'] });
+    expect(scopeFilter('secretary', null, spaces)).toEqual({ spaceIds: ['proj:s'] });
+    expect(scopeFilter('chat', null, spaces)).toEqual({ spaceIds: [] });
+    expect(scopeFilter(null, null, spaces)).toEqual({});
   });
 });

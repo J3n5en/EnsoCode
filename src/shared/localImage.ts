@@ -32,6 +32,11 @@ export const BOT_AVATAR_HOST = 'bot-avatar';
 export const botAvatarUrl = (botId: string, version: number): string =>
   routed(`${LOCAL_IMAGE_SCHEME}://${BOT_AVATAR_HOST}/${encodeURIComponent(botId)}?v=${version}`);
 
+/** 秘书头像的保留 host：只有一个秘书，路径由 Main 推导；v 为头像版本（缓存失效） */
+export const SECRETARY_AVATAR_HOST = 'secretary-avatar';
+export const secretaryAvatarUrl = (version: number): string =>
+  routed(`${LOCAL_IMAGE_SCHEME}://${SECRETARY_AVATAR_HOST}/avatar.png?v=${version}`);
+
 /** 插件目录内图片和字体的保留 host。v 是安装代号，换包后缓存失效 */
 export const PLUGIN_ASSET_HOST = 'plugin-asset';
 
@@ -103,7 +108,13 @@ export function toLocalImageUrl(filePath: string): string {
 /** local-image:// URL → 本地绝对路径；形状不合法返回 null */
 export function localImageUrlToPath(url: URL): string | null {
   const host = url.hostname;
-  if (!host || host === REMOTE_FETCH_HOST || host === BOT_AVATAR_HOST || host === PLUGIN_ASSET_HOST)
+  if (
+    !host ||
+    host === REMOTE_FETCH_HOST ||
+    host === BOT_AVATAR_HOST ||
+    host === SECRETARY_AVATAR_HOST ||
+    host === PLUGIN_ASSET_HOST
+  )
     return null;
   const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   if (host === POSIX_HOST) {

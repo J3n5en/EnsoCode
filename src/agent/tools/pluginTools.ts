@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import type { PluginToolDescriptor } from '@shared/extensionPlugins/types';
+import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { SessionIdentity } from '@shared/types/agent';
 
 export interface PluginToolInvokeRequest {
@@ -136,7 +137,8 @@ export class PluginToolInvoker {
 
 export function createPluginTools(
   descriptors: PluginToolDescriptor[],
-  invoker: Pick<PluginToolInvoker, 'invoke'>
+  invoker: Pick<PluginToolInvoker, 'invoke'>,
+  options: { untrusted?: boolean } = {}
 ): ToolDefinition[] {
   return descriptors.map((descriptor) => ({
     name: descriptor.name,
@@ -152,11 +154,13 @@ export function createPluginTools(
       const artifacts = Array.isArray(result?.artifacts) ? result.artifacts.filter(isArtifact) : [];
       const text = typeof result?.content === 'string' ? result.content : '';
       const artifactsLine = formatPluginArtifactLine(artifacts);
+      const body = artifactsLine ? (text ? `${text}\n${artifactsLine}` : artifactsLine) : text;
       return {
         content: [
           {
             type: 'text' as const,
-            text: artifactsLine ? (text ? `${text}\n${artifactsLine}` : artifactsLine) : text,
+            // 秘书会话里插件结果可能与用户对话同源：按不可信数据处理
+            text: options.untrusted ? wrapUntrusted(`plugin:${descriptor.pluginId}`, body) : body,
           },
         ],
         details: { details: result?.details, artifacts },

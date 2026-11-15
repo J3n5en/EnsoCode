@@ -95,6 +95,14 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   },
   memoryDistillEnabled: { mode: 'portable' },
   memoryKgEnabled: { mode: 'portable' },
+  // 记忆库是每台机器一份（userData/memory/memory.db），遗忘策略作用于本机库：
+  // 同步到另一台机器等于在那边按同一阈值归档，属于不该跨机复制的数据决策
+  memoryDecayEnabled: { mode: 'excluded', reason: 'device-local memory library policy' },
+  memoryDecayArchiveCandidates: { mode: 'excluded', reason: 'device-local memory library policy' },
+  memoryDecayAutoArchive: { mode: 'excluded', reason: 'device-local memory library policy' },
+  memoryDecayStaleDays: { mode: 'excluded', reason: 'device-local memory library policy' },
+  memoryDecayMaxImportance: { mode: 'excluded', reason: 'device-local memory library policy' },
+  memoryDecayIntervalDays: { mode: 'excluded', reason: 'device-local memory library policy' },
   voiceInputEnabled: { mode: 'excluded', reason: 'speech model lives on this device' },
   botModeEnabled: { mode: 'excluded', reason: 'bot members and chats live on this device' },
   scratchSessionsEnabled: {
@@ -102,6 +110,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
     reason: 'temporary chats are a device-local experiment',
   },
   dropShelfEnabled: { mode: 'excluded', reason: 'macOS drop shelf is a device-local experiment' },
+  secretaryEnabled: { mode: 'excluded', reason: 'secretary lives on this device' },
   botMaxRunningTurns: { mode: 'excluded', reason: 'device-local Bot concurrency limit' },
   botDiscussModeEnabled: {
     mode: 'excluded',

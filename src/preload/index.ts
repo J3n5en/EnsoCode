@@ -10,12 +10,16 @@ import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
 import type { CaCertStatus } from '@shared/caCert';
 import type { DropShelfDelivery } from '@shared/dropShelf';
 import type { ElevationRequestView } from '@shared/elevation';
+import type { InterruptedTurn } from '@shared/exitInterrupt';
 import type {
   ChatModelDto,
   DistillableSessionDto,
   EmbeddingDownloadProgressDto,
   EmbeddingModelDto,
-  EvolvesEdgeDto,
+  MemoryArchiveCandidatesResult,
+  MemoryArchiveConfirmResult,
+  MemoryDecayRunDto,
+  MemoryDeletionImpact,
   MemoryDetail,
   MemoryEditPatch,
   MemoryJobsSnapshot,
@@ -23,6 +27,7 @@ import type {
   MemoryListResult,
   MemoryMutationResult,
   MemoryStats,
+  PendingEvolvesReviewDto,
   PendingMemoryWriteDecision,
   PendingMemoryWriteDto,
 } from '@shared/memory/dto';
@@ -59,6 +64,7 @@ import type {
   StorageSnapshot,
 } from '@shared/resources';
 import type { BrowserSearchTab } from '@shared/searchAnything';
+import type { FeedEvent } from '@shared/secretary/feed';
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import type { ShellIntegration } from '@shared/shellIntegration';
 import type {
@@ -233,6 +239,21 @@ import type {
   NodePairResult,
   NodesStatus,
 } from '@shared/types/nodes';
+import type {
+  DispatchDraft,
+  SecretaryContactState,
+  SecretaryDaily,
+  SecretaryProfile,
+  SecretaryProfileDraft,
+  SecretaryProposal,
+  SecretaryScheduleView,
+  SecretarySkillView,
+  SecretaryState,
+  SecretaryTakeoverView,
+  SecretaryTodoMutate,
+  SecretaryToolDraft,
+  SecretaryUntrackedView,
+} from '@shared/types/secretary';
 import type { ExternalSessionSource, SimpleMessage } from '@shared/types/sessionImport';
 import type {
   TerminalCreateRequest,
@@ -306,8 +327,11 @@ const electronAPI = {
     write: (data: Record<string, unknown>): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE, data),
     /** 只更新单个顶层键（多 store 并发写不互相覆盖）；value undefined 表示删除该键 */
-    writeKey: (name: string, value: unknown): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE_KEY, name, value),
+    writeKey: (name: string, value: unknown, ackSeq?: number): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_WRITE_KEY, name, value, ackSeq),
+    /** 会话记录读回，带补丁序号；读的同时把本 renderer 的会话账本重置为磁盘值 */
+    readConversations: (): Promise<{ value: unknown; seq: number }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_READ),
     /** 其他窗口修改设置后触发，用于多窗口同步 */
     onChanged: (callback: () => void): (() => void) => {
       const listener = () => callback();
@@ -319,6 +343,186 @@ const electronAPI = {
       const listener = (_event: unknown, patch: unknown) => callback(patch);
       ipcRenderer.on(IPC_CHANNELS.CONVERSATIONS_PATCH, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.CONVERSATIONS_PATCH, listener);
+    },
+  },
+
+  secretary: {
+    /** 工作台与聊天卡片读同一份 Main 状态；开关关闭时 enabled 为 false */
+    getState: (): Promise<SecretaryState> => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_STATE),
+    /** 动态的一页。before 是上一页最旧一条的时间与 id，缺省取最新一页 */
+    feed: (query?: {
+      before?: { at: number; id: string };
+      limit?: number;
+    }): Promise<
+      { ok: true; events: FeedEvent[]; hasMore: boolean } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_FEED, query ?? {}),
+    /** 按天汇总的看板：day 是本地日历日 YYYY-MM-DD，缺省今天 */
+    daily: (
+      day?: string
+    ): Promise<{ ok: true; daily: SecretaryDaily } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DAILY, day ? { day } : {}),
+    onStateChanged: (callback: (state: SecretaryState) => void): (() => void) => {
+      const listener = (_event: unknown, state: SecretaryState) => callback(state);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);
+    },
+    /** 同一提案确认两次只执行一次 */
+    resolveProposal: (
+      proposalId: string,
+      action: 'confirm' | 'reject',
+      edits?: Partial<DispatchDraft>,
+      /** 档案提案卡片上就地改过的整份草案 */
+      profileDraft?: SecretaryProfileDraft
+    ): Promise<{ ok: true; proposal: SecretaryProposal } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_RESOLVE_PROPOSAL, {
+        proposalId,
+        action,
+        ...(edits ? { edits } : {}),
+        ...(profileDraft ? { profileDraft } : {}),
+      }),
+    /** 用户把会话点名叫给秘书；Main 逐个校验，只返回通过的 id */
+    referenceConversations: (
+      secretaryConversationId: string,
+      conversationIds: string[]
+    ): Promise<{ ok: true; named: string[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_REFERENCE_CONVERSATIONS, {
+        secretaryConversationId,
+        conversationIds,
+      }),
+    mutateTodo: (
+      request: SecretaryTodoMutate
+    ): Promise<{ ok: true; todoId: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TODO_MUTATE, request),
+    /** 结果卡「知道了」：这条结果不再占工作台的「需要你处理」 */
+    dismissResult: (conversationId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DISMISS_RESULT, { conversationId }),
+    /** 用户手动把一条派发记录标记完成，或撤销这个标记放回进行中 */
+    markResult: (
+      conversationId: string,
+      action: 'done' | 'undo'
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_MARK_RESULT, { conversationId, action }),
+    /** 看板「停止遗留任务」：停掉这条派发记录里还在跑的后台任务 */
+    stopTasks: (
+      conversationId: string
+    ): Promise<{ ok: true; stopped: string[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_STOP_TASKS, { conversationId }),
+    /** 派出会话的目标与队列由 Main 驱动：设/暂停/恢复/清除都交给它 */
+    goalAction: (request: {
+      conversationId: string;
+      action: 'set' | 'pause' | 'resume' | 'clear';
+      text?: string;
+    }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GOAL_ACTION, request),
+    /** 全部定时（含系统生成的每日简报与待办提醒），下一次触发时间由 Main 算 */
+    listSchedules: (): Promise<
+      { ok: true; schedules: SecretaryScheduleView[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST),
+    /** 系统生成的条目由档案与待办派生，删除会被拒绝 */
+    removeSchedule: (
+      scheduleId: string
+    ): Promise<{ ok: true; scheduleId: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, { scheduleId }),
+    /** profile 为 null 表示还没完成初次设置 */
+    getProfile: (): Promise<
+      { ok: true; profile: SecretaryProfile | null; persona: string } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_PROFILE),
+    /** 只带要改的字段；null 清掉该可选字段。越界取值由 Main 拒绝 */
+    saveProfile: (
+      draft: SecretaryProfileDraft
+    ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SAVE_PROFILE, draft),
+    /** 重新设置：默认保留会话与私有记忆 */
+    resetProfile: (clearMemory: boolean): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_RESET_PROFILE, { clearMemory }),
+    /** image=null 移除图片头像，恢复颜色头像 */
+    setAvatar: (
+      image: Uint8Array | null
+    ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SET_AVATAR, { image }),
+    /** 秘书可用的 skill：自有 + 勾选的全局，设置页与右侧面板共用 */
+    listSkills: (): Promise<
+      { ok: true; skills: SecretarySkillView[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILLS_LIST),
+    removeSkill: (
+      name: string
+    ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_DELETE, { name }),
+    /** 启用或停用：自有写档案的停用名单，全局改勾选；都走档案同一条写入路径 */
+    setSkillEnabled: (request: {
+      id: string;
+      source: 'own' | 'global';
+      enabled: boolean;
+    }): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_SET_ENABLED, request),
+    /** 读 SKILL.md 正文：只给用户看，不喂给秘书 */
+    readSkill: (request: {
+      id: string;
+      source: 'own' | 'global';
+    }): Promise<{ ok: true; body: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_READ, request),
+    /** 秘书自造的工具：名字即目录名，代码供设置页展开查看 */
+    listTools: (): Promise<
+      { ok: true; tools: SecretaryToolDraft[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOLS_LIST),
+    removeTool: (
+      name: string
+    ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOL_DELETE, { name }),
+    revokeTakeover: (
+      conversationId: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TAKEOVER_REVOKE, { conversationId }),
+    listTakeovers: (): Promise<
+      { ok: true; takeovers: SecretaryTakeoverView[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST),
+    /** 用户收回跟踪后不再由范围权限覆盖的会话；移除只恢复范围权限 */
+    listUntracked: (): Promise<
+      { ok: true; untracked: SecretaryUntrackedView[] } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_LIST),
+    removeUntracked: (
+      conversationId: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE, { conversationId }),
+    /** 联系方式：绑定状态里不含 token，只有前几位提示 */
+    contactState: (): Promise<SecretaryContactState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_STATE),
+    onContactChanged: (callback: (state: SecretaryContactState) => void): (() => void) => {
+      const listener = (_event: unknown, state: SecretaryContactState) => callback(state);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, listener);
+    },
+    /** 第 2 步：校验 token 并生成绑定码；不带 token 表示用已存的 bot 重新生成 */
+    contactBind: (token?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_BIND, token ? { token } : {}),
+    contactCancel: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_CANCEL),
+    /** 解绑：清 chat、停轮询，保留 bot 与 token */
+    contactUnbind: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_UNBIND),
+    /** 更换 bot：token 一起清，向导回到第 1 步 */
+    contactForgetBot: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT),
+    contactTest: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST),
+    contactSettings: (patch: {
+      allowCardConfirm?: boolean;
+      allowMemory?: boolean;
+    }): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
+    /** 手机关注的任务：取消一项或全清 */
+    contactFollowing: (
+      request: { action: 'cancel'; id: string } | { action: 'clear' }
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FOLLOWING, request),
+    /** 深链 enso://secretary?conversation=<id>[&proposal=<id>]：选中会话，带卡就定位那张卡 */
+    onOpenConversation: (
+      callback: (target: { conversationId: string; proposalId?: string }) => void
+    ): (() => void) => {
+      const listener = (_event: unknown, target: { conversationId: string; proposalId?: string }) =>
+        callback(target);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
     },
   },
 
@@ -411,8 +615,19 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ARCHIVE, id),
     restore: (id: string): Promise<MemoryMutationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RESTORE, id),
+    runForgetting: (): Promise<MemoryDecayRunDto | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FORGETTING_RUN),
+    archiveCandidates: (query?: {
+      limit?: number;
+      offset?: number;
+    }): Promise<MemoryArchiveCandidatesResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES, query),
+    confirmArchiveCandidates: (ids: string[]): Promise<MemoryArchiveConfirmResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES_CONFIRM, ids),
     delete: (id: string): Promise<MemoryMutationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_DELETE, id),
+    deletePreview: (ids: string[]): Promise<MemoryDeletionImpact | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_DELETE_PREVIEW, ids),
     update: (id: string, patch: MemoryEditPatch): Promise<MemoryMutationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_UPDATE, id, patch),
     stats: (): Promise<MemoryStats> => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_STATS),
@@ -420,7 +635,7 @@ const electronAPI = {
     clearJobs: (): Promise<number> => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_JOBS_CLEAR),
     retryFailedKgJobs: (): Promise<number> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED),
-    evolvesPending: (): Promise<EvolvesEdgeDto[]> =>
+    evolvesPending: (): Promise<PendingEvolvesReviewDto[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_EVOLVES_PENDING),
     evolvesReview: (id: string, state: 'accepted' | 'rejected'): Promise<MemoryMutationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_EVOLVES_REVIEW, id, state),
@@ -924,6 +1139,9 @@ const electronAPI = {
     /** 请求 worker 投影快照（结果经 onEvent 回来）。传 sessionId 只补这一路。 */
     requestSnapshot: (sessionId?: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT, sessionId),
+    /** 取走上次应用退出（含安装更新）打断的回合（取一次即清空） */
+    takeInterruptedTurns: (): Promise<InterruptedTurn[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_TAKE_INTERRUPTED_TURNS),
     /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
     readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),

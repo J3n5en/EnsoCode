@@ -189,6 +189,34 @@ describe('capture 版本参数（force / evolvesFromId / evolvesRelation）', ()
     expect(parseMemoryCaptureRequest({ ...base, force: 'true' })).toBeNull();
   });
 
+  it('理由跟着关系走：没有关系就不产出，收窄时只接受字符串', () => {
+    expect(normalizeMemoryCaptureParams({ content: 'c' })).not.toHaveProperty('evolvesReason');
+    // 没有关系的理由没有意义，别写进库
+    expect(
+      normalizeMemoryCaptureParams({ content: 'c', evolvesReason: ' 旧结论已被推翻 ' })
+    ).not.toHaveProperty('evolvesReason');
+    expect(
+      normalizeMemoryCaptureParams({
+        content: 'c',
+        evolvesFromId: 'm1',
+        evolvesRelation: 'Challenges',
+        evolvesReason: ' 旧结论已被推翻 ',
+      })
+    ).toMatchObject({ evolvesRelation: 'challenges', evolvesReason: '旧结论已被推翻' });
+    const base = normalizeMemoryCaptureParams({
+      content: 'c',
+      evolvesFromId: 'm1',
+      evolvesRelation: 'challenges',
+    }) as object;
+    expect(parseMemoryCaptureRequest({ ...base, evolvesReason: '两条结论相反' })).toMatchObject({
+      evolvesReason: '两条结论相反',
+    });
+    expect(parseMemoryCaptureRequest({ ...base, evolvesReason: 1 })).toBeNull();
+    expect(parseMemoryCaptureRequest({ ...base, evolvesReason: '   ' })).not.toHaveProperty(
+      'evolvesReason'
+    );
+  });
+
   it('strict 界面填齐：空白 evolvesFromId + 合法枚举 relation 当本轮不演进，成对丢弃', () => {
     const raw = {
       content: '用户偏好深色主题',

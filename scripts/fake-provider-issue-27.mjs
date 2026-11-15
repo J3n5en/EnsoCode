@@ -16,6 +16,7 @@
  * 脚本在 prompt 里写 `[[tool:<工具名> <JSON 参数>]]` 即可指定要发的调用，
  * 可写多个（验证危险操作排队）。已有工具结果的回合则返回纯文本收尾，
  * 避免无限循环。
+ * 写 `[[slow:<毫秒>]]` 则文本回复拆成多段，在这段时间里慢慢流完（验证会话运行期间的界面）。
  *
  * 目的是让真机验收不触碰真实账号、不花 token、且行为可预期：
  * - 回复内容固定，便于断言
@@ -29,7 +30,7 @@ const requests = [];
 /** 接下来 N 次模型请求直接返回指定状态码（验证自动重试链路）：GET /__fail?count=2&status=503 */
 const failNext = { count: 0, status: 503 };
 
-function sse(res, events) {
+async function sse(res, events, gapMs = 0) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -37,6 +38,8 @@ function sse(res, events) {
   });
   for (const e of events) {
     res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);
+    if (gapMs > 0 && e.type === 'content_block_delta')
+      await new Promise((resolve) => setTimeout(resolve, gapMs));
   }
   res.end();
 }
@@ -62,6 +65,11 @@ function parseToolDirectives(messages) {
     m = re.exec(text);
   }
   return out;
+}
+
+function slowMs(messages) {
+  const m = /\[\[slow:(\d+)\]\]/.exec((messages ?? []).map(messageText).join('\n'));
+  return m ? Number(m[1]) : 0;
 }
 
 /** 本轮是否已有工具结果（有则收尾，不再发工具调用） */
@@ -113,7 +121,15 @@ function toolUseReply(calls) {
   return events;
 }
 
-function textReply(text) {
+/** 验收用：最后一条用户消息里写 `[[reply:正文]]` 就回这段，方便验 markdown 转换 */
+function replyOverride(messages) {
+  const last = (messages ?? []).at(-1);
+  const text = last ? messageText(last) : '';
+  const match = /\[\[reply:([\s\S]*?)\]\]/u.exec(text);
+  return match ? match[1] : null;
+}
+
+function textReply(text, parts = 1) {
   return [
     {
       type: 'message_start',
@@ -128,7 +144,11 @@ function textReply(text) {
       },
     },
     { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+    ...Array.from({ length: parts }, (_, index) => ({
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: index === 0 ? text : '.' },
+    })),
     { type: 'content_block_stop', index: 0 },
     {
       type: 'message_delta',
@@ -199,7 +219,10 @@ const server = createServer((req, res) => {
 
     const messages = parsed?.messages;
     const calls = hasToolResult(messages) ? [] : parseToolDirectives(messages);
-    sse(res, calls.length > 0 ? toolUseReply(calls) : textReply('fake-ok'));
+    if (calls.length > 0) return void sse(res, toolUseReply(calls));
+    const slow = slowMs(messages);
+    const parts = slow > 0 ? Math.max(2, Math.round(slow / 500)) : 1;
+    void sse(res, textReply(replyOverride(messages) ?? 'fake-ok', parts), slow / parts);
   });
 });
 

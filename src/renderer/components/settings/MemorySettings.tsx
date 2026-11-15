@@ -1,8 +1,14 @@
+import {
+  FORGETTING_INTERVAL_DAYS_OPTIONS,
+  FORGETTING_MAX_IMPORTANCE_OPTIONS,
+  FORGETTING_STALE_DAYS_OPTIONS,
+} from '@shared/memory/constants';
 import type {
   ChatModelDto,
   DistillableSessionDto,
   EmbeddingDownloadProgressDto,
   EmbeddingModelDto,
+  MemoryArchiveCandidatesResult,
   MemoryJobsSnapshot,
   MemoryStats,
 } from '@shared/memory/dto';
@@ -17,6 +23,7 @@ import * as React from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogClose,
@@ -39,6 +46,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
+import { formatDateTime } from './MemoryLibrary';
 import { type JobKind, toJobRows } from './memoryJobRows';
 import {
   embeddingBackendSelectValue,
@@ -159,6 +167,18 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** exp).toFixed(exp === 0 ? 0 : 1)} ${units[exp]}`;
 }
 
+/** 下拉档位；保存值不在档位表里（手改过 settings.json）时补进去，避免 Select 显示空 */
+function numberItems(
+  options: readonly number[],
+  current: number,
+  format: (value: number) => string
+): { value: string; label: string }[] {
+  const values = options.includes(current)
+    ? [...options]
+    : [...options, current].sort((a, b) => a - b);
+  return values.map((value) => ({ value: String(value), label: format(value) }));
+}
+
 function SwitchRow({
   title,
   description,
@@ -192,6 +212,53 @@ function SwitchRow({
   );
 }
 
+function SelectRow({
+  title,
+  description,
+  value,
+  items,
+  onChange,
+  rowId,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  value: string;
+  items: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  rowId?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+      data-settings-row={rowId}
+    >
+      <div className="min-w-0">
+        <p className="text-sm">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Select
+        value={value}
+        items={items}
+        onValueChange={(next) => onChange(String(next))}
+        disabled={disabled}
+      >
+        <SelectTrigger className="w-40 shrink-0">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectPopup>
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
+    </div>
+  );
+}
+
 export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => void } = {}) {
   const { t } = useI18n();
   const disabledBuiltinTools = useSettingsStore((state) => state.disabledBuiltinTools);
@@ -208,6 +275,18 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const setDistillEnabled = useSettingsStore((state) => state.setMemoryDistillEnabled);
   const kgEnabled = useSettingsStore((state) => state.memoryKgEnabled);
   const setKgEnabled = useSettingsStore((state) => state.setMemoryKgEnabled);
+  const decayEnabled = useSettingsStore((state) => state.memoryDecayEnabled);
+  const setDecayEnabled = useSettingsStore((state) => state.setMemoryDecayEnabled);
+  const decayCandidates = useSettingsStore((state) => state.memoryDecayArchiveCandidates);
+  const setDecayCandidates = useSettingsStore((state) => state.setMemoryDecayArchiveCandidates);
+  const decayAutoArchive = useSettingsStore((state) => state.memoryDecayAutoArchive);
+  const setDecayAutoArchive = useSettingsStore((state) => state.setMemoryDecayAutoArchive);
+  const decayStaleDays = useSettingsStore((state) => state.memoryDecayStaleDays);
+  const setDecayStaleDays = useSettingsStore((state) => state.setMemoryDecayStaleDays);
+  const decayMaxImportance = useSettingsStore((state) => state.memoryDecayMaxImportance);
+  const setDecayMaxImportance = useSettingsStore((state) => state.setMemoryDecayMaxImportance);
+  const decayIntervalDays = useSettingsStore((state) => state.memoryDecayIntervalDays);
+  const setDecayIntervalDays = useSettingsStore((state) => state.setMemoryDecayIntervalDays);
   const distillModel = useSettingsStore((state) => state.memoryDistillModel);
   const setDistillModel = useSettingsStore((state) => state.setMemoryDistillModel);
   const chatModel = useSettingsStore((state) => state.memoryChatModel) || 'remote';
@@ -267,6 +346,21 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const [bulkPrompt, setBulkPrompt] = React.useState<BulkPrompt | null>(null);
   const [backfilling, setBackfilling] = React.useState(false);
   const [allJobs, setAllJobs] = React.useState(false);
+  const [candidates, setCandidates] = React.useState<MemoryArchiveCandidatesResult | null>(null);
+  const [candidateSelection, setCandidateSelection] = React.useState<ReadonlySet<string>>(
+    new Set()
+  );
+  const [forgettingBusy, setForgettingBusy] = React.useState<'run' | 'archive' | null>(null);
+  const forgetting = stats?.forgetting ?? null;
+  const lastRun = forgetting?.lastRun ?? null;
+  const lastRunText = lastRun
+    ? t('Last run {{date}}: {{scored}} scored, {{candidates}} candidates, {{archived}} archived', {
+        date: formatDateTime(lastRun.ranAt),
+        scored: String(lastRun.scored),
+        candidates: String(lastRun.candidates),
+        archived: String(lastRun.archived),
+      })
+    : t('Never run yet');
   // 轮询回调里要读最新值，state 会被闭包定住
   const backfillingRef = React.useRef(false);
   backfillingRef.current = backfilling;
@@ -341,6 +435,35 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
 
   const groups = groupSessionsByProject(sessions);
   const pendingSessions = sessions.filter((session) => !session.distilled);
+
+  // 遗忘：跑一轮巡检 / 看候选 / 批量确认归档。归档只改 lifecycle_state，随时能在库里还原。
+  const runForgetting = () => {
+    setForgettingBusy('run');
+    void window.electronAPI.memory.runForgetting().then(() => {
+      setForgettingBusy(null);
+      loadRef.current?.();
+    });
+  };
+
+  const openCandidates = () => {
+    void window.electronAPI.memory.archiveCandidates({ limit: 200, offset: 0 }).then((result) => {
+      setCandidates(result);
+      // 默认不勾选：一次误点不该把整批归档掉，全选留给用户显式点
+      setCandidateSelection(new Set());
+    });
+  };
+
+  const archiveSelected = () => {
+    const ids = [...candidateSelection];
+    if (ids.length === 0) return;
+    setForgettingBusy('archive');
+    void window.electronAPI.memory.confirmArchiveCandidates(ids).then(() => {
+      setForgettingBusy(null);
+      openCandidates();
+      loadRef.current?.();
+      onLibraryChanged?.();
+    });
+  };
 
   // 串行跑：后台 LLM 本就是一条 FIFO 链，并发发起只会让进度不可读。
   // 耗时完全取决于模型，不预设常量，只用已完成的真实耗时推剩余
@@ -828,6 +951,120 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
         />
       </section>
 
+      <section className="space-y-2" data-settings-row="memory.forgetting">
+        <h3 className="text-sm font-medium">{t('Forgetting')}</h3>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            'Decay only changes how search ranks a memory. Archiving keeps it and can be undone; nothing on this page ever deletes a memory.'
+          )}
+        </p>
+        <SwitchRow
+          rowId="memory.decay"
+          title={t('Rank lower when never retrieved')}
+          description={t(
+            'Memories that have not been retrieved for a long time rank lower. This changes ranking only — nothing is archived or deleted.'
+          )}
+          checked={decayEnabled}
+          onChange={setDecayEnabled}
+          disabled={!memoryEnabled}
+        />
+        <SwitchRow
+          rowId="memory.decayCandidates"
+          title={t('Mark archive candidates')}
+          description={t(
+            'Mark cold, low-importance memories as candidates and show them in the library. Marking alone changes nothing.'
+          )}
+          checked={decayCandidates}
+          onChange={setDecayCandidates}
+          disabled={!memoryEnabled || !decayEnabled}
+        />
+        <SwitchRow
+          rowId="memory.decayAutoArchive"
+          title={t('Archive candidates automatically')}
+          description={t(
+            'Archive candidates at the end of each run. Archived memories are hidden from search but kept and can be restored.'
+          )}
+          checked={decayAutoArchive}
+          onChange={setDecayAutoArchive}
+          disabled={!memoryEnabled || !decayEnabled || !decayCandidates}
+        />
+        {decayEnabled && (
+          <>
+            <SelectRow
+              rowId="memory.decayStaleDays"
+              title={t('Not retrieved for')}
+              description={t(
+                'Counted from the last retrieval; a memory that was never retrieved counts from creation.'
+              )}
+              value={String(decayStaleDays)}
+              items={numberItems(FORGETTING_STALE_DAYS_OPTIONS, decayStaleDays, (value) =>
+                t('{{count}} days', { count: String(value) })
+              )}
+              onChange={(value) => setDecayStaleDays(Number(value))}
+              disabled={!memoryEnabled}
+            />
+            <SelectRow
+              rowId="memory.decayMaxImportance"
+              title={t('Importance at most')}
+              description={t(
+                'Only memories at or below this importance can become candidates. 0.5 is the lowest tier distillation writes.'
+              )}
+              value={String(decayMaxImportance)}
+              items={numberItems(FORGETTING_MAX_IMPORTANCE_OPTIONS, decayMaxImportance, (value) =>
+                value.toFixed(2)
+              )}
+              onChange={(value) => setDecayMaxImportance(Number(value))}
+              disabled={!memoryEnabled}
+            />
+            <SelectRow
+              rowId="memory.decayInterval"
+              title={t('Run every')}
+              description={t(
+                'Checked when the library opens; there is no separate background timer.'
+              )}
+              value={String(decayIntervalDays)}
+              items={numberItems(FORGETTING_INTERVAL_DAYS_OPTIONS, decayIntervalDays, (value) =>
+                t('{{count}} days', { count: String(value) })
+              )}
+              onChange={(value) => setDecayIntervalDays(Number(value))}
+              disabled={!memoryEnabled}
+            />
+          </>
+        )}
+        {decayEnabled && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-sm">
+                {decayCandidates || decayAutoArchive
+                  ? t('Archive candidates: {{count}}', {
+                      count: String(forgetting?.candidates ?? 0),
+                    })
+                  : t('Archive candidates: marking is off')}
+              </p>
+              <p className="text-xs text-muted-foreground">{lastRunText}</p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={forgettingBusy !== null || !memoryEnabled}
+                onClick={runForgetting}
+              >
+                {forgettingBusy === 'run' ? t('Running…') : t('Run now')}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!decayCandidates || (forgetting?.candidates ?? 0) === 0}
+                onClick={openCandidates}
+              >
+                {t('Review candidates')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </section>
+
       <section className="space-y-2" data-settings-row="memory.stats">
         <h3 className="text-sm font-medium">{t('Library')}</h3>
         {stats === null || stats.total === 0 ? (
@@ -866,6 +1103,20 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
               />
               <Stat label={t('Database size')} value={formatBytes(stats.databaseBytes)} />
               <Stat label={t('Spaces')} value={String(Object.keys(stats.bySpace).length)} />
+              <Stat
+                label={t('Never retrieved')}
+                value={`${stats.neverHit}/${stats.total}`}
+                action={
+                  <span className="text-muted-foreground text-xs">
+                    {t('{{percent}}% of library', {
+                      percent: String(
+                        stats.total > 0 ? Math.round((stats.neverHit / stats.total) * 100) : 0
+                      ),
+                    })}
+                  </span>
+                }
+              />
+              <Stat label={t('Added in 7 days')} value={String(stats.addedLast7Days)} />
             </div>
           </>
         )}
@@ -1130,6 +1381,100 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           </ul>
         )}
       </section>
+
+      <Dialog open={candidates !== null} onOpenChange={(open) => !open && setCandidates(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('Archive candidates')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                'Cold and low-importance memories. Archiving keeps them, hides them from search, and can be undone from the library.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            {candidates && candidates.items.length > 0 ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {t('{{selected}} of {{total}} selected', {
+                      selected: String(candidateSelection.size),
+                      total: String(candidates.items.length),
+                    })}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      setCandidateSelection(
+                        candidateSelection.size === candidates.items.length
+                          ? new Set()
+                          : new Set(candidates.items.map((item) => item.id))
+                      )
+                    }
+                  >
+                    {candidateSelection.size === candidates.items.length
+                      ? t('Clear selection')
+                      : t('Select all')}
+                  </Button>
+                </div>
+                <ul className="divide-y rounded-lg border">
+                  {candidates.items.map((item) => (
+                    <li key={item.id} className="flex items-start gap-2 px-3 py-2">
+                      <Checkbox
+                        checked={candidateSelection.has(item.id)}
+                        onCheckedChange={() =>
+                          setCandidateSelection((current) => {
+                            const next = new Set(current);
+                            if (next.has(item.id)) next.delete(item.id);
+                            else next.add(item.id);
+                            return next;
+                          })
+                        }
+                        aria-label={t('Select memory')}
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {item.spaceLabel} ·{' '}
+                          {t('Importance {{value}}', { value: item.importance.toFixed(2) })} ·{' '}
+                          {item.lastHitAt
+                            ? t('Last retrieved {{date}}', {
+                                date: formatDateTime(item.lastHitAt),
+                              })
+                            : t('Never retrieved')}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {candidates.total > candidates.items.length && (
+                  <p className="text-xs text-muted-foreground">
+                    {t('Showing the first {{shown}} of {{total}}.', {
+                      shown: String(candidates.items.length),
+                      total: String(candidates.total),
+                    })}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {t('No archive candidates right now.')}
+              </p>
+            )}
+          </DialogPanel>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" size="sm" />}>{t('Close')}</DialogClose>
+            <Button
+              size="sm"
+              disabled={candidateSelection.size === 0 || forgettingBusy !== null}
+              onClick={archiveSelected}
+            >
+              {forgettingBusy === 'archive' ? t('Archiving…') : t('Archive selected')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -17,8 +17,10 @@ import {
   noteOpenFolderArgv,
   notifyOpenFolderRequested,
   openPluginInstallFromProtocol,
+  openSecretaryConversationFromProtocol,
 } from './ipc/window';
 import { createPluginInstallInbox } from './protocol/pluginInstall';
+import { createSecretaryLinkInbox } from './protocol/secretaryLink';
 import {
   agentWorkerAlive,
   recordAgentWorkerGone,
@@ -41,6 +43,11 @@ import { getCaCertConfig } from './services/caCert';
 import { computerHost } from './services/computerHost';
 import { startDesktopConfigCli, stopDesktopConfigCli } from './services/configCli';
 import { installDesktopHooks } from './services/desktopHooks';
+import {
+  recordRunningSessionsAtExit,
+  startExitInterruptRecovery,
+  startRunningSessionsHeartbeat,
+} from './services/exitInterruptHost';
 import { releaseLocalChatSlot } from './services/llama/chat';
 import { disposeLlamaRuntime, llamaRuntimeActive } from './services/llama/runtime';
 import {
@@ -48,6 +55,7 @@ import {
   closeMemoryDb,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
+  syncMemoryForgettingFromSettings,
   syncMemoryKgFromSettings,
 } from './services/memoryHost';
 import { registerNodeSettingsProtocolHandler } from './services/nodeRemote';
@@ -55,12 +63,14 @@ import {
   maybeNotify,
   maybeNotifyBot,
   notifyBotChat,
+  notifySecretary,
   setViewedSession,
 } from './services/notifications';
 import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { getProxyConfig } from './services/proxyConfig';
 import { setupRemoteRenderer } from './services/remoteRenderer';
+import { setSecretaryOpenTarget } from './services/secretary/links';
 import { readySecureStores } from './services/secureStores';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { syncSpeechFromSettings } from './services/speech/service';
@@ -112,6 +122,7 @@ if (app.isPackaged && process.platform !== 'win32') {
 
 const gotTheLock = app.requestSingleInstanceLock();
 const pluginInstallInbox = createPluginInstallInbox(process.platform);
+const secretaryLinkInbox = createSecretaryLinkInbox(process.platform);
 
 function registerEnsoProtocol(): void {
   if (process.defaultApp && process.argv.length >= 2) {
@@ -125,11 +136,23 @@ if (!gotTheLock) {
   app.quit();
 } else {
   registerEnsoProtocol();
+  // 被安装脚本 pkill（SIGTERM）时也要留下「退出时正在跑什么」：默认行为是直接终止，
+  // 这里先同步写记录再走正常退出，来不及（SIGKILL）则由心跳兜底。
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => {
+      recordRunningSessionsAtExit();
+      app.quit();
+    });
+  }
+  startRunningSessionsHeartbeat();
+  startExitInterruptRecovery();
   pluginInstallInbox.noteArgv(process.argv);
+  secretaryLinkInbox.noteArgv(process.argv);
   noteOpenFolderArgv(process.argv);
   app.on('open-url', (event, url) => {
     event.preventDefault();
     pluginInstallInbox.noteLink(url);
+    secretaryLinkInbox.noteLink(url);
   });
   // macOS：拖到 Dock 图标或 `open -a EnsoCode <dir>`；冷启动早于 ready，由渲染端挂载时取走
   app.on('open-file', (event, folder) => {
@@ -140,6 +163,7 @@ if (!gotTheLock) {
   app.on('second-instance', (_event, argv) => {
     restoreFromSecondInstance();
     pluginInstallInbox.noteArgv(argv);
+    secretaryLinkInbox.noteArgv(argv);
     noteOpenFolderArgv(argv);
     notifyOpenFolderRequested();
   });
@@ -187,7 +211,7 @@ if (!gotTheLock) {
         closeBrowser: (key) => browserHost.closeSession(key),
         notifyChat: (chatId, build) => notifyBotChat(chatId, build),
       },
-      notify: { maybeNotify, maybeNotifyBot, setViewedSession },
+      notify: { maybeNotify, maybeNotifyBot, notifySecretary, setViewedSession },
       file: {
         openPdf: openBotPdfWindow,
         openWorkspacePdf: openDesktopPdfWindow,
@@ -216,6 +240,9 @@ if (!gotTheLock) {
       startModelsDevRefreshSchedule();
     });
     pluginInstallInbox.start((url) => openPluginInstallFromProtocol(url));
+    // 手机上的「在应用里打开」与深链走同一个入口
+    setSecretaryOpenTarget((target) => openSecretaryConversationFromProtocol(target));
+    secretaryLinkInbox.start((target) => openSecretaryConversationFromProtocol(target));
     setTrayToggleHandler(() => {
       if (isServerMode()) leaveServerMode();
       else void enterServerMode();
@@ -243,6 +270,7 @@ if (!gotTheLock) {
     syncMemoryEmbeddingFromSettings(persistedState);
     syncMemoryDistillFromSettings(persistedState);
     syncMemoryKgFromSettings(persistedState);
+    syncMemoryForgettingFromSettings(persistedState);
     syncSpeechFromSettings(persistedState);
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
@@ -282,6 +310,8 @@ if (!gotTheLock) {
 
   // Electron 退出即断开中继，手机侧收到 host-offline
   app.on('before-quit', () => {
+    // 退出记录要赶在 worker 与终端收尾之前：此刻会话状态还是权威的
+    recordRunningSessionsAtExit();
     stopDesktopConfigCli();
     stopTrayToggleShortcut();
     stopPairHost();

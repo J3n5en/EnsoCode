@@ -102,7 +102,6 @@ import { BotInboxStore } from '../services/bots/inboxStore';
 import { mediaFile, ScreenshotCache, sendImage, storeMedia } from '../services/bots/media';
 import { compressImage } from '../services/bots/mediaImage';
 import { createMemberTaskClassifier } from '../services/bots/memberTaskClassifier';
-import { removeBotMemorySpace } from '../services/bots/memoryCleanup';
 import {
   briefErrorReason,
   createModelProbe,
@@ -128,6 +127,7 @@ import { searchFiles } from '../services/fileSearch';
 import { resolveGlobalInstruction } from '../services/instructionStore';
 import { setBotAvatarResolver } from '../services/localImageProtocol';
 import { listMemories } from '../services/memory/store';
+import { removeMemorySpace } from '../services/memoryCleanup';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import {
   botChatPasteOwner,
@@ -793,7 +793,10 @@ export function getBotServices(): BotServices | null {
     isCodeProject: (id) => {
       const project = authority.project(id);
       return (
-        project?.state === 'active' && project.kind !== 'bot-home' && project.kind !== 'scratch'
+        project?.state === 'active' &&
+        project.kind !== 'bot-home' &&
+        project.kind !== 'scratch' &&
+        project.kind !== 'secretary'
       );
     },
     schedule: async (payload) =>
@@ -910,7 +913,9 @@ function resolveWorkspaceInput(
   if (project.kind === 'ssh' || project.kind === 'bot-home') {
     return { error: 'workspace-unsupported' };
   }
-  if (project.kind === 'scratch') return { error: 'workspace-unsupported' };
+  if (project.kind === 'scratch' || project.kind === 'secretary') {
+    return { error: 'workspace-unsupported' };
+  }
   return { kind: 'project', projectId: project.projectId };
 }
 
@@ -1866,7 +1871,7 @@ export function registerBotHandlers(): void {
       if (result.ok) {
         // discardBot 会连带删掉该成员的私聊：按删除前后的差集认出这些聊天，像删聊天那样清本地副本
         const removed = before.filter((id) => !chats.get(id));
-        await removeBotMemorySpace(app.getPath('userData'), `bot:${botId}`);
+        await removeMemorySpace(app.getPath('userData'), `bot:${botId}`);
         for (const id of removed) await removeChatCopies(id);
       }
       return result.ok
@@ -2003,7 +2008,7 @@ export function registerBotHandlers(): void {
         chatId,
         threads.map((thread) => thread.id)
       );
-      await removeBotMemorySpace(app.getPath('userData'), `chat:${chatId}`);
+      await removeMemorySpace(app.getPath('userData'), `chat:${chatId}`);
       return { ok: true };
     }
   );

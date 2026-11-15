@@ -354,13 +354,15 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
 
   const running = useSessionsStore((s) => s.conversations[conversationId]?.status === 'running');
   const root = useSessionsStore((s) =>
-    project?.kind === 'scratch'
-      ? (conversationCwd({
-          kind: 'scratch',
-          canonicalPath: project.path,
-          conversationId,
-        }) ?? undefined)
-      : (s.conversations[conversationId]?.worktree?.path ?? project?.path)
+    project?.kind === 'secretary'
+      ? undefined
+      : project?.kind === 'scratch'
+        ? (conversationCwd({
+            kind: 'scratch',
+            canonicalPath: project.path,
+            conversationId,
+          }) ?? undefined)
+        : (s.conversations[conversationId]?.worktree?.path ?? project?.path)
   );
   const historyBaseIndex = useSessionsStore(
     (s) => s.conversations[conversationId]?.historyBaseIndex

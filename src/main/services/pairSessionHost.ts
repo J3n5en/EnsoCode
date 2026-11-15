@@ -176,9 +176,15 @@ function deliver(sessionId: string, delivery: HeadlessDelivery): void {
   else agent?.prompt(sessionId, delivery.text, delivery.images);
 }
 
+/** Main 的派出驱动者拥有这些会话的排队与目标：headless 宿主让出，否则轮次收束会各发一遍 */
+function isMainDriven(sessionId: string): boolean {
+  return readPersistedConversation(sessionId)?.driver === 'main';
+}
+
 function seedRuntimes(): void {
   runtimes.clear();
   for (const entry of getPairCatalog()) {
+    if (isMainDriven(entry.id)) continue;
     const persisted = readPersistedConversation(entry.id);
     const queued = Array.isArray(persisted?.queuedMessages)
       ? persisted.queuedMessages.filter(
@@ -229,6 +235,7 @@ function persistedForResume(sessionId: string): PersistedPairConversation | null
     ...(typeof row.thinkingLevel === 'string' ? { thinkingLevel: row.thinkingLevel } : {}),
     ...(typeof row.presetId === 'string' ? { presetId: row.presetId } : {}),
     ...(typeof row.approvalMode === 'string' ? { approvalMode: row.approvalMode } : {}),
+    ...(row.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
   };
 }
 
@@ -362,6 +369,7 @@ export function applyPairQueueActionHeadless(action: PairQueueAction): void {
     agent?.stopSubagent(sessionId, action.agentId);
     return;
   }
+  if (isMainDriven(sessionId)) return;
   const applied = applyHeadlessQueueAction(runtimeOf(sessionId), action, randomUUID);
   setRuntime(sessionId, applied.runtime);
   persistRuntime(sessionId, applied.runtime);
@@ -387,6 +395,7 @@ export function handlePairHeadlessAgentEvent(event: RendererAgentEvent): void {
         ? event.sessionId
         : undefined;
   if (typeof sessionId !== 'string' || !sessionId) return;
+  if (isMainDriven(sessionId)) return;
   const runtime = runtimeOf(sessionId);
   touchBeat(sessionId, event, runtime.status);
   if (event.type === 'message-upsert' && event.message.role === 'user') {

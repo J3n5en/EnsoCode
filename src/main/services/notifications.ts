@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
+import { join } from 'node:path';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
+import { shouldSilenceTurn } from '@shared/secretary/silence';
 import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import { app, BrowserWindow, Notification } from 'electron';
@@ -92,7 +94,8 @@ function notify(
   sessionId: string,
   title: string,
   body: string,
-  onClick = () => void focusSession(sessionId)
+  onClick = () => void focusSession(sessionId),
+  icon?: string
 ): void {
   // macOS 未打包（未签名）app 的原生通知会被 UNUserNotificationCenter 静默丢弃，
   // 且 Electron 的 'failed' 事件是 Windows-only 兜不住——直接走 osascript
@@ -104,7 +107,12 @@ function notify(
     return;
   }
   if (!Notification.isSupported()) return;
-  const notification = new Notification({ title, body, silent: false });
+  const notification = new Notification({
+    title,
+    body,
+    silent: false,
+    ...(icon ? { icon } : {}),
+  });
   const release = () => liveNotifications.delete(notification);
   notification.on('click', () => {
     release();
@@ -158,6 +166,25 @@ export async function notifyBotChat(
   });
 }
 
+/** 秘书的派出结果通知：主窗口聚焦时不弹，点击只把主窗口拉回前台 */
+export async function notifySecretary(
+  build: (lang: 'zh' | 'en') => { title: string; body: string }
+): Promise<void> {
+  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
+  if (getMainWindow()?.isFocused()) return;
+  const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
+  notify('secretary', title, body, () => void focusMainWindow(), await secretaryNotificationIcon());
+}
+
+async function secretaryNotificationIcon(): Promise<string | undefined> {
+  try {
+    const { SecretaryStore } = await import('./secretary/store');
+    return new SecretaryStore(join(app.getPath('userData'), 'secretary')).avatarPath() ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 后台通知：对待审批/轮完成/会话失败弹系统通知。
  * 仅当「主窗口聚焦且用户正看着事件所属会话」时抑制——看别的会话/设置页照弹。
@@ -172,6 +199,8 @@ export function maybeNotify(event: RendererAgentEvent): void {
   const t = texts();
   switch (event.type) {
     case 'ask-request':
+      // 转给秘书的提问不弹给用户：秘书会答，用户也可以在那个会话里自己答
+      if (event.ask.relay) return;
       // agent 在等答复才能继续,不提醒会静默卡住整个会话
       notify(
         event.identity.sessionId,
@@ -187,6 +216,12 @@ export function maybeNotify(event: RendererAgentEvent): void {
       );
       return;
     case 'turn-completed':
+      if (
+        event.silent === true ||
+        (event.digest && shouldSilenceTurn(event.digest.userText, event.digest.assistantText))
+      ) {
+        return;
+      }
       notify(
         event.identity.sessionId,
         eventTitle(event.identity.sessionId, t.turnDone),

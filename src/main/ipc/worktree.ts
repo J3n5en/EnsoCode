@@ -161,6 +161,49 @@ export async function removeRegisteredWorktree(
 
 export type WorktreeResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
+/** Main 内部建 worktree（秘书派活）：与 WORKTREE_CREATE 同一套校验与串行化 */
+export async function createConversationWorktree(
+  conversationId: string,
+  projectId: string,
+  base?: { checkout?: string; baseRef?: string; branch?: string }
+): Promise<WorktreeResult<SessionWorktree>> {
+  const repoPath = resolveRepoPath(projectId);
+  if (!repoPath || activeRoot(conversationId)?.projectId !== projectId) {
+    return { ok: false, error: 'unknown or inactive conversation project' };
+  }
+  if (sessionWorktree(conversationId) || sessionWorktreeBusy(conversationId)) {
+    return { ok: false, error: 'conversation already has a worktree operation' };
+  }
+  let release!: () => void;
+  bindingConversations.set(
+    conversationId,
+    new Promise<void>((resolve) => {
+      release = resolve;
+    })
+  );
+  try {
+    const record = await createSessionWorktree({
+      repoPath,
+      conversationId,
+      projectId,
+      root: worktreesRoot(),
+      ...(base?.baseRef ? { baseRef: base.baseRef } : {}),
+      ...(base?.branch ? { branch: base.branch } : {}),
+    });
+    if (activeRoot(conversationId)?.projectId !== projectId) {
+      await removeSessionWorktree(record);
+      return { ok: false, error: 'conversation authority changed' };
+    }
+    ensureRegistry().set(record);
+    return { ok: true, value: record };
+  } catch (error) {
+    return fail(error);
+  } finally {
+    bindingConversations.delete(conversationId);
+    release();
+  }
+}
+
 const fail = (error: unknown): { ok: false; error: string } => ({
   ok: false,
   error: error instanceof Error ? error.message : String(error),
@@ -173,8 +216,10 @@ const isNonEmptyString = (value: unknown): value is string =>
 function resolveRepoPath(projectId: string): string | null {
   const authority = getSourceAuthorityRegistry();
   const project = authority?.project(projectId);
-  // ssh 项目的 canonicalPath 是远端路径，本地 git worktree 操作无意义，一律拒绝（UI 已隐藏，此处防御）
-  if (project?.kind === 'ssh' || project?.kind === 'scratch') return null;
+  // ssh 项目的 canonicalPath 是远端路径，本地 git worktree 操作无意义；scratch / secretary 没有仓库
+  if (project?.kind === 'ssh' || project?.kind === 'scratch' || project?.kind === 'secretary') {
+    return null;
+  }
   return project?.state === 'active' ? project.canonicalPath : null;
 }
 
@@ -615,39 +660,7 @@ export function registerWorktreeHandlers(): void {
         return { ok: false, error: 'invalid worktree create request' };
       }
       const { conversationId, projectId } = request;
-      const repoPath = resolveRepoPath(projectId);
-      if (!repoPath || activeRoot(conversationId)?.projectId !== projectId) {
-        return { ok: false, error: 'unknown or inactive conversation project' };
-      }
-      if (sessionWorktree(conversationId) || sessionWorktreeBusy(conversationId)) {
-        return { ok: false, error: 'conversation already has a worktree operation' };
-      }
-      let release!: () => void;
-      bindingConversations.set(
-        conversationId,
-        new Promise<void>((resolve) => {
-          release = resolve;
-        })
-      );
-      try {
-        const record = await createSessionWorktree({
-          repoPath,
-          conversationId,
-          projectId,
-          root: worktreesRoot(),
-        });
-        if (activeRoot(conversationId)?.projectId !== projectId) {
-          await removeSessionWorktree(record);
-          return { ok: false, error: 'conversation authority changed' };
-        }
-        ensureRegistry().set(record);
-        return { ok: true, value: record };
-      } catch (error) {
-        return fail(error);
-      } finally {
-        bindingConversations.delete(conversationId);
-        release();
-      }
+      return createConversationWorktree(conversationId, projectId);
     }
   );
 

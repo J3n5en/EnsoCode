@@ -169,6 +169,7 @@ export const agentSetApprovalMode = vi.fn(
   async (_id: string, _mode: string, _autoReject?: boolean) =>
     ({ ok: true }) as { ok: boolean; error?: string }
 );
+export const secretaryGoalAction = vi.fn(async (_request: unknown) => ({ ok: true }));
 
 export function installSessionGlobals(options?: { captureAsks?: boolean }) {
   const onDispatch = options?.captureAsks
@@ -191,6 +192,7 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
     electronAPI: {
       settings: {
         read: vi.fn(async () => null),
+        readConversations: vi.fn(async () => ({ value: null, seq: 0 })),
         writeKey: vi.fn(async () => true),
         onChanged: vi.fn(),
       },
@@ -225,6 +227,9 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
         dispose: btwDispose,
         prompt: vi.fn(),
         abort: vi.fn(),
+      },
+      secretary: {
+        goalAction: secretaryGoalAction,
       },
       agentDispatch: {
         bindSource,
@@ -272,6 +277,7 @@ export async function seedParent() {
 
 export async function resetSessionHarness() {
   agentPrompt.mockClear();
+  secretaryGoalAction.mockClear();
   dispatch.mockReset();
   registerModelSelection.mockClear();
   bindSource.mockClear();

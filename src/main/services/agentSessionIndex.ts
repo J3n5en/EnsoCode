@@ -7,6 +7,7 @@ import {
   isSameChildSessionIdentity,
   type SessionIdentity,
 } from '@shared/builtinAgents';
+import type { RunningAtExitEntry } from '@shared/exitInterrupt';
 import {
   DEFAULT_MAX_ACTIVE_COWORKERS,
   normalizeMaxActiveCoworkers,
@@ -42,6 +43,11 @@ interface IndexedSession {
   coworkers: Map<string, CoworkerInfo>;
   /** worker 侧已无此会话（ended / rejected / worker 退出），重新 prepareParent 或 parent-ready 前不可投递 */
   detached?: boolean;
+  /** 当前回合 id 与开始时刻：退出记录用它把中断归到具体一轮 */
+  turnId?: string;
+  turnStartedAt?: number;
+  /** 已见过的最大消息下标：退出记录里的「最后一条消息」 */
+  lastMessageIndex?: number;
 }
 
 export interface ChildReservation {
@@ -85,6 +91,7 @@ export interface AgentSessionIndexOptions {
   randomUuid?: () => string;
   /** 设置后，child-ready / 带 sessionFile 的 coworker-update 追加子运行目录。函数形式避免在 app ready 前取 userData。 */
   sessionDir?: string | (() => string);
+  now?: () => number;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -159,6 +166,10 @@ export class AgentSessionIndex {
 
   constructor(private readonly options: AgentSessionIndexOptions) {
     this.randomUuid = options.randomUuid ?? randomUUID;
+  }
+
+  private now(): number {
+    return (this.options.now ?? Date.now)();
   }
 
   private rememberChildRun(
@@ -238,6 +249,24 @@ export class AgentSessionIndex {
           !('parent' in session.identity) && session.alive && session.status === 'running'
       )
       .map((session) => session.identity.sessionId);
+  }
+
+  /** 退出记录：正在跑回合的父会话 + 回合 id / 开始时刻 / 最后一条消息下标 */
+  runningTurnSnapshot(): RunningAtExitEntry[] {
+    const at = this.now();
+    return [...this.sessions.values()]
+      .filter(
+        (session) =>
+          !('parent' in session.identity) && session.alive && session.status === 'running'
+      )
+      .map((session) => ({
+        conversationId: session.identity.sessionId,
+        ...(session.turnId ? { turnId: session.turnId } : {}),
+        startedAt: session.turnStartedAt ?? at,
+        ...(session.lastMessageIndex === undefined
+          ? {}
+          : { lastMessageIndex: session.lastMessageIndex }),
+      }));
   }
 
   workspaceRoot(sessionId: string): string {
@@ -599,8 +628,20 @@ export class AgentSessionIndex {
     if (!current) return false;
     if (event.type === 'status') {
       current.started = true;
+      if (event.status === 'running') {
+        if (current.status !== 'running' || !current.turnStartedAt)
+          current.turnStartedAt = this.now();
+        if (event.turnId) current.turnId = event.turnId;
+      } else {
+        current.turnId = undefined;
+        current.turnStartedAt = undefined;
+      }
       current.status = event.status;
       current.alive = event.status !== 'failed';
+      return true;
+    }
+    if (event.type === 'message-upsert') {
+      current.lastMessageIndex = Math.max(current.lastMessageIndex ?? -1, event.index);
       return true;
     }
     if (event.type === 'session-meta') {

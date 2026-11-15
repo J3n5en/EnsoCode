@@ -13,6 +13,7 @@ import {
   mediaExtension,
   PLUGIN_ASSET_HOST,
   REMOTE_FETCH_HOST,
+  SECRETARY_AVATAR_HOST,
 } from '@shared/localImage';
 import { isBotId } from '@shared/types/bot';
 
@@ -20,6 +21,12 @@ let botAvatarResolver: (botId: string) => string | null = () => null;
 
 export function setBotAvatarResolver(resolve: (botId: string) => string | null): void {
   botAvatarResolver = resolve;
+}
+
+let secretaryAvatarResolver: () => string | null = () => null;
+
+export function setSecretaryAvatarResolver(resolve: () => string | null): void {
+  secretaryAvatarResolver = resolve;
 }
 
 let pluginAssetResolver: ((pluginId: string, rel: string) => string | null) | null = null;
@@ -85,6 +92,7 @@ export async function handleLocalImageRequest(
   if (url.hostname === BOT_AVATAR_HOST) {
     return serveBotAvatar(decodeURIComponent(url.pathname.slice(1)));
   }
+  if (url.hostname === SECRETARY_AVATAR_HOST) return serveSecretaryAvatar(url);
   if (url.hostname === PLUGIN_ASSET_HOST) return servePluginAsset(url);
   return serveLocalMedia(url, rangeHeader);
 }
@@ -140,11 +148,32 @@ async function servePluginAsset(url: URL): Promise<Response> {
 async function serveBotAvatar(botId: string): Promise<Response> {
   const file = botAvatarFile(botId);
   if (!file) return new Response('Not found', { status: 404 });
+  return serveAvatarFile(file);
+}
+
+function secretaryAvatarRequestName(url: URL): boolean {
+  let name: string;
+  try {
+    name = decodeURIComponent(url.pathname);
+  } catch {
+    return false;
+  }
+  return name === '/avatar.png';
+}
+
+async function serveSecretaryAvatar(url: URL): Promise<Response> {
+  if (!secretaryAvatarRequestName(url)) return new Response('Forbidden', { status: 403 });
+  const file = secretaryAvatarResolver();
+  if (!file) return new Response('Not found', { status: 404 });
+  return serveAvatarFile(file);
+}
+
+async function serveAvatarFile(file: string): Promise<Response> {
   try {
     const data = new Uint8Array(await readFile(file));
     const format = sniffImage(data);
     if (!format) return new Response('Forbidden', { status: 403 });
-    // URL 带版本号，同一 URL 内容不变；CORS 供导出人物卡时 fetch 读字节
+    // URL 带版本号，同一 URL 内容不变；CORS 供导出人物卡等 fetch 读字节
     return new Response(data, {
       headers: {
         'Content-Type': `image/${format}`,

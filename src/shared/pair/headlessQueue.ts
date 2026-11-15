@@ -6,6 +6,11 @@ export interface HeadlessQueuedMessage {
   id: string;
   text: string;
   images?: { data: string; mimeType: string }[];
+  /** 谁排的：缺省是用户自己；secretary 表示秘书排的，只有秘书能撤回 */
+  origin?: 'secretary';
+  /** 排队的秘书会话 id */
+  by?: string;
+  at?: number;
 }
 
 export interface HeadlessGoal {
@@ -13,6 +18,10 @@ export interface HeadlessGoal {
   status: 'active' | 'paused' | 'completed' | 'blocked' | 'waiting';
   note?: string;
   autoTurns: number;
+  /** 连续无进展轮数；Main 与 renderer 都写进同一行的 goal，3 次暂停 */
+  noProgressRuns?: number;
+  /** 上一轮最终 assistant 文本的归一化指纹 */
+  lastOutput?: string;
 }
 
 export interface HeadlessSessionRuntime {
