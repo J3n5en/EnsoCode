@@ -148,13 +148,21 @@ export function formatAskMessage(
 export type SecretaryCardKind = SecretaryProposal['kind'];
 
 const CARD_KIND_LABEL: Record<ContactLang, Record<SecretaryCardKind, string>> = {
-  zh: { dispatch: '派发', profile: '设置', skill: '技能', tool: '工具', takeover: '接管' },
+  zh: {
+    dispatch: '派发',
+    profile: '设置',
+    skill: '技能',
+    tool: '工具',
+    takeover: '接管',
+    cleanup: '清理',
+  },
   en: {
     dispatch: 'dispatch',
     profile: 'settings',
     skill: 'skill',
     tool: 'tool',
     takeover: 'takeover',
+    cleanup: 'cleanup',
   },
 };
 
@@ -164,7 +172,8 @@ export function isSecretaryCardKind(value: unknown): value is SecretaryCardKind 
     value === 'profile' ||
     value === 'skill' ||
     value === 'tool' ||
-    value === 'takeover'
+    value === 'takeover' ||
+    value === 'cleanup'
   );
 }
 
@@ -182,6 +191,10 @@ export function proposalCardTitle(proposal: SecretaryProposal): string | undefin
       return proposal.draft.name;
     case 'takeover':
       return proposal.draft.title?.trim() || proposal.draft.conversationId;
+    case 'cleanup':
+      return proposal.draft.items.length > 0
+        ? `${proposal.draft.items.length} 项待清理`
+        : undefined;
   }
 }
 

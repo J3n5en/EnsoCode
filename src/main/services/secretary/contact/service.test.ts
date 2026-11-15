@@ -544,7 +544,9 @@ describe('确认卡与审批', () => {
     const message = h.api.sent.at(-1);
     expect(message?.text).toContain('有一张卡在等你 · 修登录');
     expect(message?.text).toContain('请回应用确认');
-    expect(message?.text).toContain('enso://secretary?conversation=sec-1&proposal=p1');
+    // 出站统一走 markdown→HTML，& 会转义成 &amp;，深链本身不变
+    expect(message?.text).toContain('conversation=sec-1');
+    expect(message?.text).toContain('proposal=p1');
     const buttons = message?.replyMarkup?.inline_keyboard.flat() ?? [];
     expect(buttons.map((button) => button.text)).toEqual(['在应用里打开']);
     expect(h.world.resolved).toHaveLength(0);
