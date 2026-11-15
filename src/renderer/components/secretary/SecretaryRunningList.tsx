@@ -1,3 +1,4 @@
+import { type ContactBadge, sessionBadge } from '@shared/secretary/commands';
 import type { PendingDispatch, SecretaryCard } from '@shared/types/secretary';
 import { ArrowUpRight } from 'lucide-react';
 import { useState } from 'react';
@@ -16,17 +17,17 @@ const BADGE_CLASS = 'shrink-0 rounded px-1 py-px text-[10px]';
  * 状态徽标。等后台任务和续跑都是「空闲但还没收口」，靠 backgroundRunning 区分；
  * 需要你、出错按 countsAsRunning 的口径不进这张表，这里只是把状态列全。
  */
+const BADGE_STYLE: Record<ContactBadge, { label: string; className: string }> = {
+  failed: { label: 'Failed', className: 'bg-destructive/15 text-destructive' },
+  waiting: { label: 'Waiting for you', className: 'bg-warning/15 text-warning' },
+  running: { label: 'Running', className: 'bg-success/15 text-success' },
+  background: { label: 'Waiting on a background task', className: 'bg-warning/15 text-warning' },
+  continuing: { label: 'Continuing', className: 'bg-success/15 text-success' },
+  idle: { label: 'Idle', className: 'bg-muted text-muted-foreground' },
+};
+
 function badgeOf(card: SessionCard): { label: string; className: string } {
-  if (card.state === 'error')
-    return { label: 'Failed', className: 'bg-destructive/15 text-destructive' };
-  if (card.state === 'waiting')
-    return { label: 'Waiting for you', className: 'bg-warning/15 text-warning' };
-  if (card.state === 'running')
-    return { label: 'Running', className: 'bg-success/15 text-success' };
-  if (card.backgroundRunning)
-    return { label: 'Waiting on a background task', className: 'bg-warning/15 text-warning' };
-  if (card.continuing) return { label: 'Continuing', className: 'bg-success/15 text-success' };
-  return { label: 'Idle', className: 'bg-muted text-muted-foreground' };
+  return BADGE_STYLE[sessionBadge(card)];
 }
 
 /** 一行进行中的会话：点主体展开更多进度，右侧图标才打开会话 */
