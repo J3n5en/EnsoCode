@@ -4488,16 +4488,47 @@ async function verifyTakeover(cdp, setup) {
     ownSecretary
   );
 
-  // 会话顶栏的逐个授权按钮已随「按项目范围授权」一起去掉，逐个授权只剩 IPC 与确认卡两条路
-  log('== 接管：设置页逐个授权');
-  const granted = await page(`
-    const id = ${JSON.stringify(ownId)};
-    S().selectConversation(id);
-    return JSON.stringify(await window.electronAPI.secretary.grantTakeover(id));
+  // 会话顶栏的逐个授权按钮与对应 IPC 都已删除，逐个授权只剩确认卡这一条路
+  log('== 接管：秘书提出 → 用户确认 → 撤销');
+  const proposedGrant = await secretaryTool(
+    cdp,
+    setup,
+    'session_takeover_propose',
+    { conversationId: ownId, reason: '帮你盯着这个会话' },
+    '把用户的会话交给我接管'
+  );
+  assert(
+    proposedGrant.text?.includes('awaiting_confirmation'),
+    '接管: 秘书提出接管只得到待确认',
+    proposedGrant
+  );
+  assert(!readJson(dispatchFile).dispatched[ownId], '接管: 确认前没有授权');
+  const confirmedGrant = await page(`
+    const secretaryId = ${JSON.stringify(proposedGrant.secretaryId)};
+    if (secretaryId) S().selectConversation(secretaryId);
+    const card = await until(
+      () => shown('[data-enso=secretary-proposal][data-kind=takeover]'),
+      30000
+    );
+    if (!card) return JSON.stringify({ ok: false, error: 'no takeover card' });
+    const secretary = await SEC();
+    const proposal = Object.values(secretary.getState().secretary.proposals)
+      .filter((p) => p.kind === 'takeover')
+      .at(-1);
+    card.querySelector('button').click();
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ ok: true, status: done?.status, error: done?.error });
   `);
-  assert(granted.ok, '接管: 设置页逐个授权成功', granted);
-  const userGrant = readJson(dispatchFile).dispatched[ownId];
-  assert(userGrant?.takeover?.via === 'user', '接管: 界面授权落盘，来源记 user', userGrant);
+  assert(
+    confirmedGrant.ok && confirmedGrant.status === 'succeeded',
+    '接管: 用户确认后接管生效',
+    confirmedGrant
+  );
+  const grantedByCard = readJson(dispatchFile).dispatched[ownId];
+  assert(grantedByCard?.takeover?.via === 'proposal', '接管: 确认卡授权落盘', grantedByCard);
   const listed = await page(`
     return JSON.stringify(await window.electronAPI.secretary.listTakeovers());
   `);
@@ -4511,7 +4542,7 @@ async function verifyTakeover(cdp, setup) {
   `);
   assert(
     userRevoke.ok && !readJson(dispatchFile).dispatched[ownId],
-    '接管: 界面授权可以撤销',
+    '接管: 取消接管仍然可用',
     userRevoke
   );
 
@@ -4628,8 +4659,9 @@ async function verifyTakeover(cdp, setup) {
         entry.op === op && entry.ok === ok && (detail === undefined || entry.detail === detail)
     ).length;
   assert(
-    count('takeover_grant', true, 'user') === 1 &&
-      count('takeover_grant', true, 'proposal') === 1 &&
+    // 逐个授权的 IPC 已删除：授权只从确认卡来，不再有 via=user 的记录
+    count('takeover_grant', true, 'user') === 0 &&
+      count('takeover_grant', true, 'proposal') === 2 &&
       count('takeover_revoke', true) === 2 &&
       count('session_takeover_propose', true) >= 1 &&
       count('session_send', true) === 1 &&
