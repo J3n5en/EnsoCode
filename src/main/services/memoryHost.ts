@@ -4,6 +4,11 @@ import { app } from '@platform';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
 import { normalizeLocale, translate } from '@shared/i18n';
 import type { UnitType } from '@shared/memory/constants';
+import {
+  DEFAULT_FORGETTING_SETTINGS,
+  type ForgettingSettings,
+  normalizeForgettingSettings,
+} from '@shared/memory/forgetting';
 import { normalizeMemoryModelIdleMinutes } from '@shared/memory/modelIdle';
 import { remoteEmbeddingIssue, remoteEmbeddingIssueMessage } from '@shared/memory/remoteEmbedding';
 import { effectiveDisabledBuiltinTools } from '@shared/types';
@@ -11,6 +16,7 @@ import type { MemoryOp } from '@shared/types/agent';
 import type { ModelProvider } from '@shared/types/llm';
 import type Database from 'better-sqlite3';
 import { holdLocalChat, syncLocalChatFromSettings } from './llama/chat';
+import { appendMemoryAudit } from './memory/audit';
 import { executeMemoryOp } from './memory/bridge';
 import { openMemoryDb } from './memory/db';
 import {
@@ -36,6 +42,11 @@ import {
 } from './memory/embedding/registry';
 import { type RemoteEmbeddingOptions, remoteModelName } from './memory/embedding/remote';
 import type { EmbeddingModelSpec, EmbeddingProvider } from './memory/embedding/types';
+import {
+  type ForgettingRunSummary,
+  lastForgettingRunAt,
+  runForgettingPass,
+} from './memory/forgetting';
 import {
   countFailedKgJobs,
   ensureKgJob,
@@ -185,6 +196,7 @@ function memoryDb(): Database.Database {
     resumeMemoryDistill();
     resumeMemoryKg();
     scheduleMemoryMaintenance();
+    scheduleForgetting();
   }
   return db;
 }
@@ -207,6 +219,58 @@ function scheduleMemoryMaintenance(): void {
     }
   }, MAINTENANCE_DELAY_MS);
   timer.unref?.();
+}
+
+let forgettingConfig: ForgettingSettings = DEFAULT_FORGETTING_SETTINGS;
+
+/** 设置层调用；改了间隔 / 开关后重新排一次巡检（已排过的不重复排） */
+export function syncMemoryForgettingFromSettings(state: Record<string, unknown>): void {
+  forgettingConfig = normalizeForgettingSettings(state);
+  if (db) scheduleForgetting();
+}
+
+export function forgettingSettings(): ForgettingSettings {
+  return forgettingConfig;
+}
+
+/** 审计落 userData/memory/audit.jsonl；写失败由 appendMemoryAudit 自己吞掉 */
+const auditSink = (entry: Parameters<typeof appendMemoryAudit>[1]): void => {
+  appendMemoryAudit(memoryRoot(), entry);
+};
+
+// 遗忘巡检：不另起定时器，只在开库后按 intervalDays 判断是否到期。
+// 延后执行避开启动时的重嵌 / 蒸馏抢锁；进程被杀不影响正确性——下次开库重新算（巡检本身幂等）。
+const FORGETTING_DELAY_MS = 30_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+let forgettingScheduled = false;
+
+function scheduleForgetting(): void {
+  if (forgettingScheduled || !db) return;
+  forgettingScheduled = true;
+  const conn = db;
+  const timer = setTimeout(() => {
+    forgettingScheduled = false;
+    try {
+      if (!forgettingConfig.enabled) return;
+      const last = lastForgettingRunAt(conn);
+      if (last && Date.now() - new Date(last).getTime() < forgettingConfig.intervalDays * DAY_MS) {
+        return;
+      }
+      const summary = runForgettingPass(conn, forgettingConfig, { audit: auditSink });
+      if (summary.archived > 0) notifyMemoryChanged();
+    } catch {
+      /* 巡检失败不影响前台读写，下次开库重试 */
+    }
+  }, FORGETTING_DELAY_MS);
+  timer.unref?.();
+}
+
+/** 设置页「立即运行」：用共享连接跑一轮，返回本次摘要 */
+export function runMemoryForgettingNow(): ForgettingRunSummary {
+  const conn = memoryDb();
+  const summary = runForgettingPass(conn, forgettingConfig, { audit: auditSink });
+  if (summary.archived > 0) notifyMemoryChanged();
+  return summary;
 }
 
 /**

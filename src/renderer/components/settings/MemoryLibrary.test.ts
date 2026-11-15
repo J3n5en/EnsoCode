@@ -75,6 +75,7 @@ function item(overrides: Partial<MemoryListItem> = {}): MemoryListItem {
     appearances: 3,
     lastHitAt: '2025-01-02T00:00:00.000Z',
     hitCount: 3,
+    archiveCandidateAt: null,
     ...overrides,
   };
 }

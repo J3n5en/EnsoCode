@@ -55,6 +55,7 @@ import {
   closeMemoryDb,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
+  syncMemoryForgettingFromSettings,
   syncMemoryKgFromSettings,
 } from './services/memoryHost';
 import { registerNodeSettingsProtocolHandler } from './services/nodeRemote';
@@ -269,6 +270,7 @@ if (!gotTheLock) {
     syncMemoryEmbeddingFromSettings(persistedState);
     syncMemoryDistillFromSettings(persistedState);
     syncMemoryKgFromSettings(persistedState);
+    syncMemoryForgettingFromSettings(persistedState);
     syncSpeechFromSettings(persistedState);
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();

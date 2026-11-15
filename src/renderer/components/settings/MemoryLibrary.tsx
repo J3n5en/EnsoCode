@@ -167,6 +167,14 @@ export function MemoryRows({
               {item.lifecycleState === 'archived' && (
                 <Badge variant="outline">{t('Archived')}</Badge>
               )}
+              {item.archiveCandidateAt && (
+                <Badge
+                  variant="warning"
+                  title={t('Marked by the forgetting pass: cold and low importance')}
+                >
+                  {t('Archive candidate')}
+                </Badge>
+              )}
             </span>
             <span className="line-clamp-2 text-muted-foreground text-xs">
               {item.contentSummary}
@@ -317,6 +325,8 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
   const [spaceId, setSpaceId] = React.useState<string>(ALL);
   const [unitType, setUnitType] = React.useState<string>(ALL);
   const [includeArchived, setIncludeArchived] = React.useState(false);
+  // 遗忘巡检标出的候选：只读筛选，归档仍要在这里显式选 + 确认
+  const [candidatesOnly, setCandidatesOnly] = React.useState(false);
   const [offset, setOffset] = React.useState(0);
   const [mode, setMode] = React.useState<MemorySearchMode>('exact');
   const [approximate, setApproximate] = React.useState(false);
@@ -371,6 +381,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
         ...scopeFilter(kind, spaceId === ALL ? null : spaceId, spacesRef.current),
         unitType: unitType === ALL ? undefined : (unitType as UnitType),
         includeArchived,
+        archiveCandidate: candidatesOnly || undefined,
         limit: MEMORY_PAGE_SIZE,
         offset,
         mode,
@@ -397,7 +408,7 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
     void window.electronAPI.memory.evolvesPending().then((edges) => {
       if (mounted.current) setPendingEdges(edges);
     });
-  }, [query, spaceKind, spaceId, unitType, includeArchived, offset, mode]);
+  }, [query, spaceKind, spaceId, unitType, includeArchived, candidatesOnly, offset, mode]);
 
   React.useEffect(() => {
     reload();
@@ -608,6 +619,18 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
               }}
             />
             {t('Show archived')}
+          </label>
+        )}
+        {mode === 'exact' && (
+          <label className="flex items-center gap-2 text-muted-foreground text-sm">
+            <Switch
+              checked={candidatesOnly}
+              onCheckedChange={(value) => {
+                setOffset(0);
+                setCandidatesOnly(value === true);
+              }}
+            />
+            {t('Archive candidates only')}
           </label>
         )}
       </div>

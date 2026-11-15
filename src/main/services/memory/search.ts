@@ -372,11 +372,15 @@ export async function searchMemories(
   fused.forEach(([id, rrfScore], i) => {
     const memory = byId.get(id);
     if (!memory) return;
-    // last_accessed_at 只在创建时写入、access_count 从不写：衰减实际按创建时间算，访问频率一项恒为 0（#169）。
-    // 不把「被检索返回」记成访问：会形成越排越前的正反馈，自动召回也会把次数刷虚
+    // 衰减读「被检索命中」而不是 last_accessed_at / access_count——那两个只在建行时写过一次、
+    // access_count 从不写，用它等于按创建时间算衰减、频率项恒 0（#169）。
+    // 从未命中的行回落到 createdAt，所以「老且没人再搜到」的记忆会自然掉分。
+    // 命中计数在本函数末尾、排序与截断之后才写，一次查询不会影响它自己的排序；
+    // 历史命中进打分的幅度受 DECAY_WEIGHT(0.15) 与 floor(0.3+0.2·importance) 双重约束，
+    // 不会滚成「越排越前」的正反馈。
     const decay = computeDecayScore({
-      lastAccessedAt: memory.lastAccessedAt,
-      accessCount: memory.accessCount,
+      lastHitAt: memory.lastHitAt ?? memory.createdAt,
+      hitCount: memory.hitCount,
       importance: memory.importance,
       now,
     });
@@ -412,8 +416,8 @@ export async function searchMemories(
 
   // 命中采集：只写「最终返回给调用方的这几条」，被 limit / MMR 截掉的候选不算命中。
   // hit_count 与 appearances 同一句里自增（后者是更早的展示用计数，两者不会漂移）。
-  // last_hit_at / hit_count 只给维护筛选（listStaleMemories）用，绝不读进打分——
-  // 把「被检索返回」接进排序就是越排越前的正反馈，与上面 decay 那条注释同一个设计意图。
+  // last_hit_at / hit_count 是下一轮衰减的输入（上面那条注释），写法上必须留在排序之后：
+  // 写在前面就等于拿本次查询的结果给自己加分。
   try {
     db.prepare(
       `UPDATE memories

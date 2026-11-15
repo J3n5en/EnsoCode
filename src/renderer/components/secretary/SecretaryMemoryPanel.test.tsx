@@ -60,6 +60,7 @@ const item = (id: string, spaceId: string): MemoryListItem => ({
   createdAt: '2025-01-01T00:00:00.000Z',
   lastHitAt: null,
   hitCount: 0,
+  archiveCandidateAt: null,
   updatedAt: '2025-01-01T00:00:00.000Z',
   appearances: 0,
 });

@@ -1600,6 +1600,45 @@ export const zhTranslations: Record<string, string> = {
   'Extract entities': '抽取实体',
   'Build an entity graph so a memory can be recalled by a name it does not literally contain.':
     '建立实体图谱,让正文里没出现该词的记忆也能被这个名字召回。',
+  Forgetting: '遗忘',
+  'Decay only changes how search ranks a memory. Archiving keeps it and can be undone; nothing on this page ever deletes a memory.':
+    '衰减只影响检索排序。归档会保留记忆、可随时还原；这一页的任何操作都不会删除记忆。',
+  'Rank lower when never retrieved': '久未命中则降权',
+  'Memories that have not been retrieved for a long time rank lower. This changes ranking only — nothing is archived or deleted.':
+    '很久没被检索到的记忆排序靠后。只改排序，不归档也不删除。',
+  'Mark archive candidates': '标记归档候选',
+  'Mark cold, low-importance memories as candidates and show them in the library. Marking alone changes nothing.':
+    '把「冷且不重要」的记忆标成候选，并在记忆库里显示。只标记，不改变任何状态。',
+  'Archive candidates automatically': '自动归档候选',
+  'Archive candidates at the end of each run. Archived memories are hidden from search but kept and can be restored.':
+    '每轮巡检结束时把候选归档。归档后不参与检索，但记忆仍在，可随时还原。',
+  'Not retrieved for': '未命中超过',
+  'Counted from the last retrieval; a memory that was never retrieved counts from creation.':
+    '从最后一次被检索命中算起；从未命中的按创建时间算。',
+  'Importance at most': '重要度不高于',
+  'Only memories at or below this importance can become candidates. 0.5 is the lowest tier distillation writes.':
+    '只有重要度不高于这个值的记忆才可能成为候选。0.5 是提炼允许写库的最低档。',
+  'Run every': '巡检间隔',
+  'Checked when the library opens; there is no separate background timer.':
+    '开库时检查是否到期，不另起后台定时器。',
+  'Archive candidates: {{count}}': '归档候选：{{count}} 条',
+  'Archive candidates: marking is off': '归档候选：未开启标记',
+  'Running…': '运行中…',
+  'Review candidates': '查看候选',
+  'Never run yet': '还没有运行过',
+  'Last run {{date}}: {{scored}} scored, {{candidates}} candidates, {{archived}} archived':
+    '上次运行 {{date}}：计算 {{scored}} 条，候选 {{candidates}} 条，归档 {{archived}} 条',
+  'Last retrieved {{date}}': '最后命中 {{date}}',
+  'No archive candidates right now.': '当前没有归档候选。',
+  'Archiving…': '归档中…',
+  'Archive candidate': '建议归档',
+  'Marked by the forgetting pass: cold and low importance': '遗忘巡检标记：久未命中且重要度低',
+  'Archive candidates only': '只看归档候选',
+  'Archive candidates': '归档候选',
+  'Showing the first {{shown}} of {{total}}.': '只显示前 {{shown}} 条，共 {{total}} 条。',
+  '{{selected}} of {{total}} selected': '已选 {{selected}}/{{total}}',
+  'Cold and low-importance memories. Archiving keeps them, hides them from search, and can be undone from the library.':
+    '久未命中且重要度低的记忆。归档会保留它们、从检索里隐藏，随时能在记忆库还原。',
   Library: '记忆库',
   'No memories stored yet.': '还没有存下任何记忆。',
   'Memory is not enabled.': '记忆未启用。',

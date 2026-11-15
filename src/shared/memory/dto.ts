@@ -26,6 +26,8 @@ export interface MemoryListItem {
   lastHitAt: string | null;
   /** 被检索返回的累计次数（与 appearances 同源，语义更直白）；只给维护筛选用 */
   hitCount: number;
+  /** 遗忘巡检标上的「建议归档」时间；null = 不是候选。归档要用户确认或显式开启自动归档 */
+  archiveCandidateAt: string | null;
 }
 
 export interface EvolvesEdgeDto {
@@ -73,6 +75,8 @@ export interface MemoryListQuery {
    * 只读筛选，不改任何状态；exact 模式可精确分页，语义模式在结果上后过滤。
    */
   staleDays?: number;
+  /** 只看遗忘巡检标出的归档候选（与 staleDays 独立：候选还要求重要度低、且不受保护规则保护） */
+  archiveCandidate?: boolean;
   limit: number;
   offset: number;
   /**
@@ -170,9 +174,41 @@ export interface MemoryStats {
   addedLast7Days: number;
   /** 为什么没有向量；null = 没出过错 */
   embeddingError?: string | null;
+  /** 遗忘巡检状态；库未启用 / 未开过库时缺省 */
+  forgetting?: MemoryForgettingStateDto;
 }
 
 export type MemorySpaceKind = 'global' | 'project' | 'secretary' | 'bot' | 'chat';
+
+/** 遗忘巡检的一次运行摘要（memory_maintenance 里 kind=decay 的 detail） */
+export interface MemoryDecayRunDto {
+  ranAt: string;
+  scored: number;
+  candidates: number;
+  archived: number;
+  staleDays: number;
+  maxImportance: number;
+  autoArchive: boolean;
+  durationMs: number;
+}
+
+export interface MemoryForgettingStateDto {
+  lastRunAt: string | null;
+  lastRun: MemoryDecayRunDto | null;
+  /** 当前候选条数（实时统计） */
+  candidates: number;
+}
+
+export interface MemoryArchiveCandidatesResult {
+  items: MemoryListItem[];
+  total: number;
+}
+
+export interface MemoryArchiveConfirmResult {
+  archived: number;
+  /** 期间被检索到 / 重要度被调高 / 已归档而跳过的条数 */
+  skipped: number;
+}
 
 export interface DistillableSessionDto {
   sessionId: string;
@@ -323,6 +359,7 @@ export function isMemoryListQuery(value: unknown): value is MemoryListQuery {
     (typeof row.staleDays !== 'number' || !Number.isFinite(row.staleDays) || row.staleDays < 0)
   )
     return false;
+  if (row.archiveCandidate !== undefined && typeof row.archiveCandidate !== 'boolean') return false;
   if (row.mode !== undefined && row.mode !== 'exact' && row.mode !== 'fast' && row.mode !== 'deep')
     return false;
   return true;

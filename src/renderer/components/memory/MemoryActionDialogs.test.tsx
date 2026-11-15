@@ -85,6 +85,7 @@ const detail = (over: Partial<MemoryDetail> = {}): MemoryDetail => ({
   appearances: 0,
   lastHitAt: null,
   hitCount: 0,
+  archiveCandidateAt: null,
   eventStart: null,
   eventEnd: null,
   temporalPrecision: null,
