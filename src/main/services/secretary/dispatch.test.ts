@@ -21,6 +21,7 @@ import {
   grantTakeover,
   listTakeovers,
   listUntracked,
+  markResult,
   mutateTodo,
   NOT_OPERABLE_ERROR,
   resolveProposal,
@@ -2082,6 +2083,68 @@ describe('dismissResult', () => {
       at: 950,
     });
     expect(completed.audits).toEqual([]);
+  });
+});
+
+describe('markResult', () => {
+  const file = (over: Partial<DispatchRecord> = {}): SecretaryDispatchFile => ({
+    ...emptyFile(),
+    dispatched: {
+      c1: {
+        conversationId: 'c1',
+        projectId: 'p1',
+        secretaryConversationId: 'sec-1',
+        createdAt: 900,
+        turn: 2,
+        lastState: 'running',
+        lastEventAt: 900,
+        ...over,
+      },
+    },
+  });
+
+  it('手动标记完成：收口成完成并标 manual，审计写明是手动', () => {
+    const h = harness({ file: file({ backgroundRunning: true }) });
+    expect(markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
+    expect(h.file.dispatched.c1).toMatchObject({
+      lastState: 'idle',
+      lastResult: { kind: 'goal-complete', turn: 2, at: NOW, manual: true },
+    });
+    expect(h.file.dispatched.c1.backgroundRunning).toBeUndefined();
+    expect(h.audits).toEqual([
+      {
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'result_mark_done',
+        targetId: 'c1',
+        ok: true,
+        detail: 'manual',
+      },
+    ]);
+  });
+
+  it('撤销标记：放回进行中，只对用户手动标的结果生效', () => {
+    const manual = harness({
+      file: file({ lastResult: { kind: 'goal-complete', turn: 2, at: 950, manual: true } }),
+    });
+    expect(markResult(manual.ports, 'c1', 'undo')).toEqual({ ok: true });
+    expect(manual.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(manual.file.dispatched.c1).toMatchObject({ lastState: 'running', manualUndoneAt: NOW });
+    expect(manual.audits[0]).toMatchObject({ op: 'result_mark_undo', detail: 'manual' });
+
+    // 会话自己给出的结果不能被界面抹掉
+    const real = harness({
+      file: file({ lastResult: { kind: 'goal-complete', turn: 2, at: 950 } }),
+    });
+    expect(markResult(real.ports, 'c1', 'undo')).toEqual({ ok: false, error: 'not-manual' });
+    expect(real.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    expect(real.audits).toEqual([]);
+  });
+
+  it('普通会话没有派发记录：不动也不写审计', () => {
+    const h = harness({});
+    expect(markResult(h.ports, 'other', 'done')).toEqual({ ok: false, error: 'not-found' });
+    expect(h.audits).toEqual([]);
   });
 });
 

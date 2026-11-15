@@ -172,6 +172,10 @@ beforeEach(() => {
         h.calls.push({ name: 'mutateTodo', args: request });
         return { ok: true, todoId: 't1' };
       },
+      markResult: async (conversationId: string, action: string) => {
+        h.calls.push({ name: 'markResult', args: [conversationId, action] });
+        return { ok: true };
+      },
       feed: async (query?: { before?: { at: number; id: string }; limit?: number }) => {
         const page = pageFeed(feedEvents(h.secretary.board as SecretaryBoard), query ?? {});
         return { ok: true, ...page };
@@ -443,6 +447,21 @@ describe('SecretaryPanel', () => {
     click('[data-enso="secretary-running-open"]');
     expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
     expect(expand()?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('进行中行悬停可以就地标记完成，不占位置也不打开会话', async () => {
+    h.board = h.secretary.board = board({
+      running: [sessionCard('c1', { title: '跑全量测试' })],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-running-toggle"]');
+    const row = container.querySelector('[data-enso="secretary-running-row"]');
+    expect(row?.querySelector('[data-slot="hover-actions"]')).not.toBeNull();
+
+    click('[data-enso="secretary-running-mark-done"]');
+    expect(h.calls).toContainEqual({ name: 'markResult', args: ['c1', 'done'] });
+    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
   });
 
   it('没有进行中的会话时给一行空状态', async () => {

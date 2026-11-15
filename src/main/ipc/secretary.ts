@@ -21,6 +21,7 @@ import {
   dismissResult,
   listTakeovers,
   listUntracked,
+  markResult,
   mutateTodo,
   pageSecretaryFeed,
   resolveProposal,
@@ -47,6 +48,7 @@ import { isSecretaryConversation, secretaryProjectId } from '../services/secreta
 import { secretaryProfile } from '../services/secretary/profile';
 import {
   parseDismissRequest,
+  parseMarkResultRequest,
   parseReferenceRequest,
   parseResolveProposalRequest,
   parseTodoMutateRequest,
@@ -451,6 +453,14 @@ export function registerSecretaryHandlers(): void {
     const parsed = parseDismissRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
     return dismissResult(secretaryDispatchPorts, parsed.conversationId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_MARK_RESULT, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseMarkResultRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    return markResult(secretaryDispatchPorts, parsed.conversationId, parsed.action);
   });
 
   // 撤销是收回权限，开关关着也允许

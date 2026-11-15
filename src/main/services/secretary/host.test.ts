@@ -2,6 +2,7 @@ import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { parseProfile } from '@shared/secretary/parse';
 import type { RendererAgentEvent } from '@shared/types/agent';
 import type {
+  DispatchRecord,
   PendingDispatch,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
@@ -765,6 +766,65 @@ describe('自动巡检', () => {
   });
 });
 
+describe('被 session_send 重新唤起后的收口', () => {
+  /** 已经 goal-complete 的会话又被唤起：reopenedAt 已记，lastState 标回运行中 */
+  const reopened = (over: Partial<DispatchRecord> = {}) => ({
+    dispatched: {
+      c1: {
+        ...emptyFile().dispatched.c1,
+        turn: 2,
+        lastState: 'running' as const,
+        lastResult: { kind: 'goal-complete' as const, turn: 2, at: 10 },
+        reopenedAt: 20,
+        ...over,
+      },
+    },
+  });
+
+  it('这一轮以 turn-ended 收尾、会话空闲：回到原来的完成，不重复推送', () => {
+    const h = harness({ file: reopened() });
+    h.state.statuses.c1 = idle;
+    h.state.now = 30;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toEqual({
+      kind: 'goal-complete',
+      turn: 3,
+      at: 30,
+    });
+    expect(h.state.file.dispatched.c1.lastState).toBe('idle');
+    expect(h.state.file.dispatched.c1.reopenedAt).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('这一轮失败：更新成失败', () => {
+    const h = harness({ file: reopened() });
+    h.state.statuses.c1 = error;
+    h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 3 });
+    expect(h.state.file.dispatched.c1.reopenedAt).toBeUndefined();
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'failed' });
+  });
+
+  it('这一轮又调了 goal_complete：照常记完成', () => {
+    const h = harness({ file: reopened() });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({
+      kind: 'goal-complete',
+      turn: 3,
+    });
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['goal-complete']);
+  });
+
+  it('不是重新唤起的那一轮照旧记 turn-ended', () => {
+    const h = harness({ file: reopened({ reopenedAt: undefined }) });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'turn-ended', turn: 3 });
+  });
+});
+
 describe('启动恢复', () => {
   it('重启时仍在运行的派出会话报中断', () => {
     const h = harness({});
@@ -783,6 +843,56 @@ describe('启动恢复', () => {
     h.state.file.dispatched.c1.lastState = 'idle';
     h.host.recover();
     expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('存量脏数据：记录还写着进行中、会话已空闲且已有终态，启动时直接收口', () => {
+    const h = harness({});
+    h.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 2, at: 900 };
+    h.state.file.dispatched.c1.reopenedAt = 950;
+    h.state.statuses.c1 = idle;
+    h.state.now = 5000;
+    h.host.recover();
+    expect(h.state.file.dispatched.c1).toMatchObject({
+      lastState: 'idle',
+      stateSince: 5000,
+      lastResult: { kind: 'goal-complete', turn: 2, at: 900 },
+    });
+    expect(h.state.file.dispatched.c1.reopenedAt).toBeUndefined();
+    // 不报中断，也不重复推一条回传
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.audit.filter((entry) => entry.op === 'dispatch_settle')).toEqual([
+      {
+        at: 5000,
+        secretaryConversationId: 'sec1',
+        op: 'dispatch_settle',
+        targetId: 'c1',
+        ok: true,
+        detail: 'startup goal-complete',
+      },
+    ]);
+  });
+
+  it('没有终态、还有后台任务或待处理项时不收口，仍按中断处理', () => {
+    const noResult = harness({});
+    noResult.state.statuses.c1 = idle;
+    noResult.host.recover();
+    expect(noResult.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted' });
+    expect(noResult.state.audit).toEqual([]);
+
+    const background = harness({});
+    background.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 2, at: 900 };
+    background.state.file.dispatched.c1.backgroundRunning = true;
+    background.state.statuses.c1 = idle;
+    background.host.recover();
+    expect(background.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted' });
+    expect(background.state.audit).toEqual([]);
+
+    const pending = harness({});
+    pending.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 2, at: 900 };
+    pending.state.statuses.c1 = waiting;
+    pending.host.recover();
+    expect(pending.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'interrupted' });
+    expect(pending.state.audit).toEqual([]);
   });
 });
 

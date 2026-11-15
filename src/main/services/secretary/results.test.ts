@@ -677,6 +677,86 @@ describe('在跑计数', () => {
   });
 });
 
+describe('终态会话被重新唤起', () => {
+  const projects: ProjectAuthority[] = [
+    { projectId: 'p1', canonicalPath: '/tmp/enso-code', state: 'active' },
+  ] as ProjectAuthority[];
+
+  const rows = { c1: { id: 'c1', title: '做完的活', sessionFile: '/tmp/c1.jsonl' } };
+
+  const settled = (extra: Partial<DispatchRecord> = {}) =>
+    record({
+      conversationId: 'c1',
+      lastState: 'idle',
+      lastResult: { kind: 'goal-complete', turn: 2, at: 9 },
+      ...extra,
+    });
+
+  const view = (entry: DispatchRecord, status: SecretarySessionStatus) =>
+    buildBoard(emptyFile({ dispatched: { c1: entry } }), {
+      rows,
+      statuses: { c1: status },
+      projects,
+      todos: [],
+    });
+
+  it('被唤起后这一轮结束、会话空闲：回到完成，不再挂在进行中', () => {
+    // 收口时记录已经回到空闲（host 的 restoreSettled 会写回 idle）
+    const card = settled({ lastState: 'idle', turn: 3 });
+    expect(countsAsRunning(card, rows.c1, idle)).toBe(false);
+    const board = view(card, idle);
+    expect(board.running).toEqual([]);
+    expect(board.done).toHaveLength(1);
+  });
+
+  it('被唤起后还在跑（或还没真正开始）仍算进行中', () => {
+    const reopened = settled({ lastState: 'running', turn: 2, reopenedAt: 20 });
+    expect(countsAsRunning(reopened, rows.c1, running)).toBe(true);
+    // 刚 session_send、worker 还没起来：这一轮还没结束，仍算在跑
+    expect(countsAsRunning(reopened, rows.c1, idle)).toBe(true);
+    expect(view(reopened, idle).running).toHaveLength(1);
+  });
+
+  it('被唤起后失败：更新成失败，进需要你处理', () => {
+    const failed = settled({
+      lastState: 'idle',
+      turn: 3,
+      lastResult: { kind: 'failed', turn: 3, at: 30 },
+    });
+    expect(countsAsRunning(failed, rows.c1, error)).toBe(false);
+    const board = view(failed, error);
+    expect(board.running).toEqual([]);
+    expect(board.needsYou).toHaveLength(1);
+  });
+
+  it('没有终态的会话不受影响：还在跑就是进行中', () => {
+    const fresh = record({ conversationId: 'c1', lastState: 'running', turn: 1 });
+    expect(countsAsRunning(fresh, rows.c1, idle)).toBe(true);
+    expect(view(fresh, idle).running).toHaveLength(1);
+  });
+
+  it('用户撤销手动标记后放回进行中，直到出现新结果', () => {
+    const undone = record({ conversationId: 'c1', lastState: 'idle', turn: 3, manualUndoneAt: 40 });
+    expect(countsAsRunning(undone, rows.c1, idle)).toBe(true);
+    expect(
+      countsAsRunning(
+        { ...undone, lastResult: { kind: 'goal-complete', turn: 4, at: 50 } },
+        rows.c1,
+        idle
+      )
+    ).toBe(false);
+  });
+
+  it('手动标记完成的卡片带 manual，界面据此给撤销', () => {
+    const manual = settled({
+      turn: 3,
+      lastResult: { kind: 'goal-complete', turn: 3, at: 60, manual: true },
+    });
+    expect(view(manual, idle).done[0]).toMatchObject({ manual: true, result: 'goal-complete' });
+    expect(view(settled(), idle).done[0]).not.toHaveProperty('manual');
+  });
+});
+
 describe('等依赖的派发卡片', () => {
   const projects: ProjectAuthority[] = [
     { projectId: 'p1', canonicalPath: '/tmp/enso-code', state: 'active' },

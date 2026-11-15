@@ -80,6 +80,19 @@ export function parseDismissRequest(value: unknown): DismissRequest | null {
   return conversationId ? { conversationId } : null;
 }
 
+export interface MarkResultRequest {
+  conversationId: string;
+  action: 'done' | 'undo';
+}
+
+export function parseMarkResultRequest(value: unknown): MarkResultRequest | null {
+  if (!isRecord(value)) return null;
+  const conversationId = nonEmpty(value.conversationId);
+  if (!conversationId) return null;
+  if (value.action !== 'done' && value.action !== 'undo') return null;
+  return { conversationId, action: value.action };
+}
+
 export function parseReferenceRequest(value: unknown): ReferenceRequest | null {
   if (!isRecord(value)) return null;
   const secretaryConversationId = nonEmpty(value.secretaryConversationId);
