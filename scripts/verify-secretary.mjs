@@ -3008,7 +3008,10 @@ async function startFakeTelegram(port) {
     me: { id: 424242, is_bot: true, username: 'enso_verify_bot', first_name: 'Enso Verify' },
     sent: [],
     edited: [],
+    /** 每次 setMyCommands 连 scope 与 language_code 一起记 */
     commands: [],
+    deleted: [],
+    menuButtons: [],
     callbacks: [],
     polls: 0,
     queue: [],
@@ -3090,7 +3093,21 @@ async function startFakeTelegram(port) {
         return;
       }
       if (method === 'setMyCommands') {
-        state.commands.push(body.commands ?? []);
+        state.commands.push({
+          commands: body.commands ?? [],
+          scope: body.scope,
+          language_code: body.language_code,
+        });
+        reply({ ok: true, result: true });
+        return;
+      }
+      if (method === 'deleteMyCommands') {
+        state.deleted.push({ scope: body.scope, language_code: body.language_code });
+        reply({ ok: true, result: true });
+        return;
+      }
+      if (method === 'setChatMenuButton') {
+        state.menuButtons.push(body.menu_button);
         reply({ ok: true, result: true });
         return;
       }
@@ -3236,6 +3253,38 @@ async function verifyTelegramContact(cdp, setup) {
     '联系方式: 绑定成功后 bot 发了一条欢迎消息',
     tg.sent.slice(-3)
   );
+
+  log('== 联系方式：命令菜单注册');
+  await waitFor(async () => tg.menuButtons.length > 0, 10_000, 200);
+  const chatScoped = tg.commands.filter((call) => call.scope?.type === 'chat');
+  assert(
+    chatScoped.length > 0 && chatScoped.at(-1).scope.chat_id === 777001,
+    '联系方式: 命令只注册到绑定的 chat（BotCommandScopeChat）',
+    tg.commands.slice(-4)
+  );
+  const chatNames = chatScoped.at(-1)?.commands.map((entry) => entry.command) ?? [];
+  assert(
+    chatNames.includes('status') && chatNames.includes('board') && chatNames.includes('help'),
+    '联系方式: chat scope 里是那几条只读命令',
+    chatNames
+  );
+  assert(
+    chatScoped.at(-1)?.commands.every((entry) => /[\u4e00-\u9fa5]/.test(entry.description)),
+    '联系方式: 命令描述是中文',
+    chatScoped.at(-1)?.commands
+  );
+  assert(
+    tg.commands.some((call) => call.language_code === 'zh') &&
+      tg.commands.some((call) => !call.scope && !call.language_code),
+    '联系方式: 另注册一份 language_code=zh 与一份默认',
+    tg.commands.slice(-4)
+  );
+  assert(
+    tg.menuButtons.at(-1)?.type === 'commands',
+    '联系方式: 左下角菜单按钮设成 commands',
+    tg.menuButtons
+  );
+  assert(!chatNames.includes('memory'), '联系方式: 记忆关着时菜单里没有 /memory', chatNames);
 
   log('== 联系方式：里程碑出站遵循 notify');
   const runDispatch = () =>
@@ -3589,7 +3638,9 @@ async function verifyTelegramContact(cdp, setup) {
     '联系方式: /memory 默认关闭只提示开关',
     memoryClosed.text
   );
-  const memoryMenu = tg.commands.at(-1)?.map((entry) => entry.command) ?? [];
+  const chatMenu = () =>
+    [...tg.commands].reverse().find((call) => call.scope?.type === 'chat')?.commands ?? [];
+  const memoryMenu = chatMenu().map((entry) => entry.command);
   assert(!memoryMenu.includes('memory'), '联系方式: 关着时菜单里没有 /memory', memoryMenu);
 
   const memorySwitch = await page(`
@@ -3611,9 +3662,11 @@ async function verifyTelegramContact(cdp, setup) {
     memoryOpen.text
   );
   assert(
-    (tg.commands.at(-1)?.map((entry) => entry.command) ?? []).includes('memory'),
+    chatMenu()
+      .map((entry) => entry.command)
+      .includes('memory'),
     '联系方式: 打开后菜单里出现 /memory',
-    tg.commands.at(-1)
+    chatMenu()
   );
 
   mark = tg.sent.length;
@@ -3658,6 +3711,18 @@ async function verifyTelegramContact(cdp, setup) {
     return JSON.stringify({ result, status: state.telegram.status, chat: state.telegram.chat ?? null });
   `);
   assert(unbound.result.ok, '联系方式: 解绑成功', unbound);
+  assert(
+    tg.deleted.some((call) => call.scope?.type === 'chat' && call.scope.chat_id === 777001) &&
+      tg.deleted.some((call) => call.language_code === 'zh') &&
+      tg.deleted.some((call) => !call.scope && !call.language_code),
+    '联系方式: 解绑时删掉 chat 与默认 scope 的菜单',
+    tg.deleted
+  );
+  assert(
+    tg.menuButtons.at(-1)?.type === 'default',
+    '联系方式: 解绑后菜单按钮回默认',
+    tg.menuButtons
+  );
   assert(
     unbound.status === 'unbound' && unbound.chat === null,
     '联系方式: 解绑后清掉 chat',
