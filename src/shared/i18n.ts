@@ -2,6 +2,7 @@ export type Locale = 'en' | 'zh';
 
 export const zhTranslations: Record<string, string> = {
   Contacts: '联系方式',
+  'From Telegram': '来自 Telegram',
   'Reach the secretary from your phone. Milestones go out; your replies come back.':
     '不在电脑前也能找到秘书：里程碑推到手机，你在手机上回话就是跟秘书说话。',
   'Telegram returned an error': 'Telegram 返回了一个错误',
