@@ -658,6 +658,11 @@ export interface SecretaryContactTelegram {
   allowCardConfirm: boolean;
   /** 默认关闭：记忆标题不往 Telegram 发（消息会留在 Telegram 服务器上） */
   allowMemory: boolean;
+  /**
+   * 默认关闭：只发里程碑。打开后秘书会话每一轮回复都镜像到手机，
+   * 静默回合只发一行摘要；解绑或换 bot 时自动关掉。
+   */
+  syncMirror: boolean;
   poll: { state: SecretaryContactPollState; lastError?: string };
   /** safeStorage 是否可用：不可用时 token 明文落盘，界面要提示 */
   secure: boolean;

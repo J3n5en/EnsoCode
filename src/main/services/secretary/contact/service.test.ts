@@ -13,7 +13,7 @@ import type {
   TelegramUser,
 } from './client';
 import { TelegramApiError } from './client';
-import { TelegramContactService } from './service';
+import { type ContactServicePorts, TelegramContactService } from './service';
 import { ContactStore } from './store';
 
 const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
@@ -151,15 +151,24 @@ function harness() {
     proposalOk: true,
     resolved: [] as { proposalId: string; action: 'confirm' | 'reject' }[],
     opened: [] as { conversationId?: string; proposalId?: string }[],
+    /** /last 读到的秘书会话消息 */
+    recap: [] as { role: 'user' | 'assistant'; text: string }[],
+    recapCalls: [] as number[],
+    name: '爱酱',
   };
-  const service = new TelegramContactService(store, {
+  const ports: ContactServicePorts = {
     audit: (entry) => audits.push(entry),
     publish: () => {},
     now: () => clock.now,
     random: () => 0.123456,
     lang: () => 'zh',
     notifyMode: () => world.mode,
+    secretaryName: () => world.name,
     secretaryConversationId: () => world.conversationId,
+    recentTurns: async (rounds) => {
+      world.recapCalls.push(rounds);
+      return world.recap;
+    },
     deliver: async (_id, text) => {
       world.delivered.push(text);
       return world.deliverOk ? { ok: true } : { ok: false, error: 'stale-session' };
@@ -199,8 +208,19 @@ function harness() {
         return { text: world.feedPages[1] ?? '更早的动态' };
       },
     },
-  });
-  return { dir, store, api, audits, clock, world, service };
+  };
+  const service = new TelegramContactService(store, ports);
+  return {
+    dir,
+    store,
+    api,
+    audits,
+    clock,
+    world,
+    service,
+    /** 模拟重启：新的 store 从磁盘读，新的服务没有内存态 */
+    restart: () => new TelegramContactService(new ContactStore(dir), ports),
+  };
 }
 
 async function waitFor(check: () => boolean, label: string, timeoutMs = 3_000): Promise<void> {
@@ -1068,5 +1088,246 @@ describe('只读命令', () => {
       await waitFor(() => h.api.sent.length > 0, 'command reply');
       expect(h.api.sent.at(-1)?.parseMode).toBe('HTML');
     });
+  });
+});
+
+describe('/last 回看最近几轮', () => {
+  async function bound(h: ReturnType<typeof harness>): Promise<void> {
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.api.sent.length = 0;
+    h.world.delivered.length = 0;
+    h.world.commandCalls.length = 0;
+  }
+
+  const rounds = [
+    { role: 'user' as const, text: '早' },
+    { role: 'assistant' as const, text: '早，今天有三件事' },
+    { role: 'user' as const, text: '登录修好了吗' },
+    { role: 'assistant' as const, text: '修好了' },
+  ];
+
+  it('不带参数只发最近一轮，用「你：」与秘书昵称开头', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.recap = rounds;
+    h.api.push(privateMessage('/last'));
+    await waitFor(() => h.api.sent.length > 0, 'last');
+    const sent = h.api.sent.at(-1);
+    expect(sent?.text).toContain('你：登录修好了吗');
+    expect(sent?.text).toContain('爱酱：修好了');
+    expect(sent?.text).not.toContain('早，今天有三件事');
+    expect(sent?.parseMode).toBe('HTML');
+    // 只读：不进会话、不唤醒模型
+    expect(h.world.delivered).toEqual([]);
+    expect(h.world.commandCalls).toEqual([]);
+    expect(h.world.recapCalls).toEqual([1]);
+    expect(h.audits.find((entry) => entry.op === 'contact_command')).toMatchObject({
+      ok: true,
+      detail: 'last 1',
+    });
+  });
+
+  it('带参数就回看几轮', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.recap = rounds;
+    h.api.push(privateMessage('/last 2'));
+    await waitFor(() => h.api.sent.length > 0, 'last 2');
+    const text = h.api.sent.at(-1)?.text ?? '';
+    expect(text).toContain('你：早');
+    expect(text).toContain('你：登录修好了吗');
+    expect(h.world.recapCalls).toEqual([2]);
+  });
+
+  it('超过十轮算写错：只回用法，不读会话', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/last 11'));
+    await waitFor(() => h.api.sent.length > 0, 'usage');
+    expect(h.api.sent.at(-1)?.text).toContain('/last 3');
+    expect(h.world.recapCalls).toEqual([]);
+  });
+
+  it('超长按行分条，代码块整块搬不切断', async () => {
+    const h = harness();
+    await bound(h);
+    const code = [
+      '```',
+      ...Array.from({ length: 200 }, (_v, index) => `line ${index} ${'x'.repeat(40)}`),
+      '```',
+    ];
+    h.world.recap = [
+      { role: 'user', text: '看日志' },
+      { role: 'assistant', text: code.join('\n') },
+    ];
+    h.api.push(privateMessage('/last'));
+    await waitFor(() => h.api.sent.length > 1, 'split');
+    const sent = h.api.sent;
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.every((entry) => entry.text.length <= 3900)).toBe(true);
+    for (const entry of sent) {
+      expect(entry.text.split('<pre>').length).toBe(entry.text.split('</pre>').length);
+    }
+    expect(sent.map((entry) => entry.text).join('\n')).toContain('line 199');
+  });
+
+  it('没有可回看的对话时说明白，不发空消息', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.recap = [];
+    h.api.push(privateMessage('/last'));
+    await waitFor(() => h.api.sent.length > 0, 'empty');
+    expect(h.api.sent.at(-1)?.text).toContain('还没有可以回看的对话');
+  });
+
+  it('别的 chat 发 /last 一律忽略', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.recap = rounds;
+    h.api.push(privateMessage('/last', 999));
+    await waitFor(
+      () => h.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
+      'rejected'
+    );
+    expect(h.api.sent).toEqual([]);
+    expect(h.world.recapCalls).toEqual([]);
+  });
+});
+
+describe('/sync 镜像秘书会话', () => {
+  async function bound(h: ReturnType<typeof harness>): Promise<void> {
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.api.sent.length = 0;
+    h.world.delivered.length = 0;
+  }
+
+  it('不带参数只报当前状态，默认关闭', async () => {
+    const h = harness();
+    await bound(h);
+    expect(h.service.state().telegram.syncMirror).toBe(false);
+    h.api.push(privateMessage('/sync'));
+    await waitFor(() => h.api.sent.length > 0, 'status');
+    expect(h.api.sent.at(-1)?.text).toContain('同步已关闭');
+    expect(h.service.state().telegram.syncMirror).toBe(false);
+    // 查状态不是开关动作，不记 contact_sync
+    expect(h.audits.some((entry) => entry.op === 'contact_sync')).toBe(false);
+  });
+
+  it('/sync on 打开并记审计，之后每一轮回复都发', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/sync on'));
+    await waitFor(() => h.api.sent.length > 0, 'on');
+    expect(h.api.sent.at(-1)?.text).toContain('已打开同步');
+    expect(h.service.state().telegram.syncMirror).toBe(true);
+    expect(h.audits.find((entry) => entry.op === 'contact_sync')).toMatchObject({
+      ok: true,
+      detail: 'on',
+    });
+
+    h.api.sent.length = 0;
+    h.service.onTurnReply('sec-1', '巡检正常，没有异常');
+    await waitFor(
+      () => h.audits.some((entry) => entry.op === 'contact_mirror' && entry.ok),
+      'mirrored'
+    );
+    expect(h.api.sent.at(-1)?.text).toContain('巡检正常');
+  });
+
+  it('/sync off 立刻恢复成只发里程碑', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/sync on'));
+    await waitFor(() => h.service.state().telegram.syncMirror, 'on');
+    h.api.push(privateMessage('/sync off'));
+    await waitFor(() => !h.service.state().telegram.syncMirror, 'off');
+    expect(h.audits.filter((entry) => entry.op === 'contact_sync').map((e) => e.detail)).toEqual([
+      'on',
+      'off',
+    ]);
+    h.api.sent.length = 0;
+    h.service.onTurnReply('sec-1', '巡检正常');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toEqual([]);
+  });
+
+  it('静默回合只发一行摘要，正文不发', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/sync on'));
+    await waitFor(() => h.service.state().telegram.syncMirror, 'on');
+    h.api.sent.length = 0;
+    h.service.onTurnSilent('sec-1', 3);
+    await waitFor(
+      () => h.audits.some((entry) => entry.op === 'contact_mirror' && entry.detail === 'silent'),
+      'silent summary'
+    );
+    expect(h.api.sent.at(-1)?.text).toBe('（静默处理了 3 条更新）');
+  });
+
+  it('同步关着时静默回合一条都不发', async () => {
+    const h = harness();
+    await bound(h);
+    h.service.onTurnSilent('sec-1', 3);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toEqual([]);
+  });
+
+  it('手机发起的回合只回一次，不重复镜像', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/sync on'));
+    await waitFor(() => h.service.state().telegram.syncMirror, 'on');
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    h.api.sent.length = 0;
+    h.service.onTurnReply('sec-1', '在，刚把登录修完');
+    await waitFor(() => h.api.sent.length > 0, 'reply');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toHaveLength(1);
+    expect(h.audits.some((entry) => entry.op === 'contact_reply' && entry.ok)).toBe(true);
+    expect(h.audits.some((entry) => entry.op === 'contact_mirror')).toBe(false);
+  });
+
+  it('重启后状态还在', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/sync on'));
+    await waitFor(() => h.service.state().telegram.syncMirror, 'on');
+    const restarted = h.restart();
+    expect(restarted.state().telegram.syncMirror).toBe(true);
+  });
+
+  it('解绑与更换 bot 都自动关掉同步', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/sync on'));
+    await waitFor(() => h.service.state().telegram.syncMirror, 'on');
+    await h.service.unbind();
+    expect(h.service.state().telegram.syncMirror).toBe(false);
+    expect(h.store.file().syncMirror).toBe(false);
+
+    await bound(h);
+    h.api.push(privateMessage('/sync on'));
+    await waitFor(() => h.service.state().telegram.syncMirror, 'on');
+    await h.service.forgetBot();
+    expect(h.service.state().telegram.syncMirror).toBe(false);
+    expect(h.store.file().syncMirror).toBe(false);
+  });
+
+  it('别的 chat 发 /sync 不改状态，只记审计', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('/sync on', 999));
+    await waitFor(
+      () => h.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
+      'rejected'
+    );
+    expect(h.service.state().telegram.syncMirror).toBe(false);
+    expect(h.api.sent).toEqual([]);
   });
 });

@@ -3,8 +3,10 @@ import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { normalizeLocale } from '@shared/i18n';
 import type { ContactLang } from '@shared/secretary/contact';
+import { projectReadableMessages } from '@shared/secretary/transcript';
 import { IPC_CHANNELS } from '@shared/types';
 import type { SecretaryContactState, SecretaryProfile } from '@shared/types/secretary';
+import { redactSecrets } from '../services/memory/distill';
 import { listMemoriesForAdmin, openExistingMemoryDb } from '../services/memoryAdmin';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
@@ -23,7 +25,12 @@ import {
 } from '../services/secretary/dispatch';
 import { secretaryProjectId } from '../services/secretary/identity';
 import { listSchedules, secretarySchedulePorts } from '../services/secretary/schedules';
-import { answerAskAsUserFromMain, promptRootFromMain, resumeRootFromMain } from './agent';
+import {
+  answerAskAsUserFromMain,
+  promptRootFromMain,
+  readSessionHistoryFile,
+  resumeRootFromMain,
+} from './agent';
 import { readSettingsState } from './settings';
 
 /**
@@ -98,7 +105,27 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
     random: () => Math.random(),
     lang: () => replyLang(deps.profile()),
     notifyMode: () => deps.profile()?.notify ?? null,
+    secretaryName: () => deps.profile()?.name ?? 'Secretary',
     secretaryConversationId: () => resolveTarget(deps.delivery),
+    // /last：读秘书会话的 jsonl 尾窗，按轮切好交回去；只读，不进会话
+    recentTurns: async (rounds) => {
+      const conversationId = resolveTarget(deps.delivery);
+      if (!conversationId) return [];
+      const conversation = deps.delivery
+        .conversations()
+        .find((candidate) => candidate.conversationId === conversationId);
+      const page = await readSessionHistoryFile(conversation?.sessionFile);
+      if (!page.ok) return [];
+      // 一轮两条消息，留出系统回传与工具轮被跳过的余量
+      const readable = projectReadableMessages(page.messages, {
+        limit: rounds * 4 + 8,
+        baseIndex: page.baseIndex,
+      });
+      return readable.messages.map((message) => ({
+        role: message.role,
+        text: redactSecrets(message.text),
+      }));
+    },
     // 手机发来的话进秘书会话：worker 已经释放就先恢复，再投
     deliver: async (conversationId, text) => {
       const first = promptRootFromMain(conversationId, text, randomUUID());

@@ -3781,6 +3781,209 @@ async function verifyTelegramContact(cdp, setup) {
     commandAudit.map((entry) => entry.detail)
   );
 
+  log('== 联系方式：/last 回看最近一轮');
+  const profileName = await page(`
+    const state = await window.electronAPI.secretary.getState();
+    return JSON.stringify({ name: state?.profile?.name ?? '' });
+  `);
+  mark = tg.sent.length;
+  say('/last', 40);
+  const lastReply = await replySince(
+    mark,
+    (message) => (message.text?.includes('你：') ? message : null),
+    'last reply',
+    40_000
+  );
+  assert(lastReply.text.includes('你：'), '联系方式: /last 用「你：」开头', lastReply.text);
+  assert(
+    lastReply.text.includes(`${profileName.name}：`),
+    '联系方式: /last 用秘书昵称开头',
+    lastReply.text
+  );
+  assert(lastReply.parse_mode === 'HTML', '联系方式: /last 走现有出站路径（HTML）', lastReply);
+
+  mark = tg.sent.length;
+  say('/last 99', 41);
+  const lastUsage = await replySince(
+    mark,
+    (message) => (message.text?.includes('/last 3') ? message : null),
+    'last usage'
+  );
+  assert(lastUsage.text.includes('最多 10 轮'), '联系方式: /last 超过十轮只回用法', lastUsage.text);
+
+  log('== 联系方式：/sync 打开后镜像秘书会话的每一轮回复');
+  mark = tg.sent.length;
+  say('/sync', 42);
+  const syncStatus = await replySince(
+    mark,
+    (message) => (message.text?.includes('同步已关闭') ? message : null),
+    'sync status'
+  );
+  assert(syncStatus.text.includes('同步已关闭'), '联系方式: /sync 不带参数报当前状态', syncStatus);
+
+  mark = tg.sent.length;
+  say('/sync on', 43);
+  const syncOn = await replySince(
+    mark,
+    (message) => (message.text?.includes('已打开同步') ? message : null),
+    'sync on'
+  );
+  assert(syncOn.text.includes('已打开同步'), '联系方式: /sync on 打开同步', syncOn);
+  const syncPanel = await page(`
+    const panelOf = () => ${PANEL};
+    if (!panelOf()) {
+      S().selectConversation(${JSON.stringify(setup.secretaryId)});
+      await sleep(300);
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+      await sleep(1200);
+    }
+    const panel = panelOf();
+    panel?.querySelector('[data-enso=secretary-panel-tab][data-tab=contact]')?.click();
+    await sleep(400);
+    const state = await window.electronAPI.secretary.contactState();
+    const node = panel?.querySelector('[data-enso=secretary-contact-sync]');
+    return JSON.stringify({ on: state?.telegram?.syncMirror ?? null, panel: node?.innerText ?? null });
+  `);
+  assert(syncPanel.on === true, '联系方式: 状态里同步已打开', syncPanel);
+  assert(
+    syncPanel.panel?.includes('正在把所有对话同步到 Telegram'),
+    '联系方式: 联系方式页显示醒目提示',
+    syncPanel.panel
+  );
+  assert(
+    syncPanel.panel?.includes('不是端到端加密'),
+    '联系方式: 提示里说明 Telegram 不端到端加密',
+    syncPanel.panel
+  );
+
+  // 用一个新的秘书会话跑同步：worker 是新的，不受前面步骤留下的状态影响
+  const syncTarget = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    await sleep(300);
+    return JSON.stringify({ id });
+  `);
+  const secretaryTurn = (text) =>
+    page(`
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      ${JSON.stringify(text)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      ${JSON.stringify(syncTarget.id)}
+    );
+    return JSON.stringify({ ok: true });
+  `);
+  const assistantCount = async () => {
+    const state = await page(`
+      const row = S().conversations[${JSON.stringify(syncTarget.id)}];
+      return JSON.stringify({ n: (row?.messages ?? []).filter((m) => m.role === 'assistant').length });
+    `);
+    return state.n;
+  };
+  const lastAssistantText = async () => {
+    const state = await page(`
+      const row = S().conversations[${JSON.stringify(syncTarget.id)}];
+      const last = (row?.messages ?? []).filter((m) => m.role === 'assistant').at(-1);
+      const content = last?.content;
+      const text = Array.isArray(content)
+        ? content.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('')
+        : typeof content === 'string'
+          ? content
+          : '';
+      return JSON.stringify({ text });
+    `);
+    return state.text;
+  };
+  /** 应用里这一轮真的收口了：assistant 条数涨了再往下走，不然断言会空转 */
+  const waitTurnSettled = async (before, label) => {
+    await waitFor(
+      async () => ((await assistantCount()) > before ? true : null),
+      label,
+      60_000,
+      500
+    );
+    await delay(800);
+  };
+
+  let turnBefore = await assistantCount();
+  mark = tg.sent.length;
+  await secretaryTurn('[[reply:同步验证]]');
+  await waitTurnSettled(turnBefore, 'secretary turn settled');
+  const appReply = await lastAssistantText();
+  const expected = appReply.includes('同步验证') ? '同步验证' : 'fake-ok';
+  const mirrored = await waitFor(
+    () => tg.sent.slice(mark).find((message) => message.text?.includes(expected)) ?? null,
+    'mirrored reply',
+    30_000,
+    300
+  ).catch(() => null);
+  assert(mirrored, '联系方式: 普通一轮的回复也发到手机', {
+    expected,
+    sent: tg.sent.slice(mark),
+  });
+
+  turnBefore = await assistantCount();
+  mark = tg.sent.length;
+  // 纯系统回传 + silence_turn：两条静默判据都写上，假 provider 走哪条都算静默
+  await secretaryTurn(
+    '<session-updates>\n- [goal-complete session:abc] 完成 [[tool:silence_turn]] [[reply:<secretary-silent/>]]\n</session-updates>'
+  );
+  await waitTurnSettled(turnBefore, 'silent turn settled');
+  const silentLine = await waitFor(
+    () => tg.sent.slice(mark).find((message) => message.text?.includes('静默处理')) ?? null,
+    'silent summary',
+    30_000,
+    300
+  ).catch(() => null);
+  assert(silentLine, '联系方式: 静默回合只发一行摘要', tg.sent.slice(mark));
+
+  mark = tg.sent.length;
+  say('/sync off', 44);
+  const syncOff = await replySince(
+    mark,
+    (message) => (message.text?.includes('同步已关闭') ? message : null),
+    'sync off'
+  );
+  assert(syncOff.text.includes('同步已关闭'), '联系方式: /sync off 关掉同步', syncOff);
+  mark = tg.sent.length;
+  turnBefore = await assistantCount();
+  await secretaryTurn('[[reply:关掉后不该发]]');
+  await waitTurnSettled(turnBefore, 'turn settled after sync off');
+  const offReply = await lastAssistantText();
+  await delay(1500);
+  assert(
+    !tg.sent
+      .slice(mark)
+      .some(
+        (message) =>
+          message.text?.includes('关掉后不该发') || message.text?.includes(offReply || 'fake-ok')
+      ),
+    '联系方式: 关掉后不再镜像普通回合',
+    tg.sent.slice(mark)
+  );
+
+  const syncAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'contact_sync');
+  assert(
+    syncAudit.map((entry) => entry.detail).join(',') === 'on,off',
+    '联系方式: 开关动作记审计',
+    syncAudit
+  );
+
   log('== 联系方式：确认卡带按钮，开关决定能不能在手机上确认');
   // 造一张挂着不确认的派发卡：手机上应当收到一条带按钮的提示
   const cardOff = await page(`

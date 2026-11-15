@@ -71,6 +71,7 @@ interface Harness {
       asks: { conversationId: string; requestId: string }[];
       resolved: { conversationId: string; requestId: string }[];
       replies: { conversationId: string; text: string }[];
+      silent: { conversationId: string; updates: number }[];
       cards: { count: number; approval?: boolean; conversationId?: string }[];
       approvalsResolved: string[];
     };
@@ -107,6 +108,7 @@ function harness(
       asks: [],
       resolved: [],
       replies: [],
+      silent: [],
       cards: [],
       approvalsResolved: [],
     },
@@ -172,6 +174,9 @@ function harness(
       },
       onTurnReply: (conversationId, text) => {
         state.contact.replies.push({ conversationId, text });
+      },
+      onTurnSilent: (conversationId, updates) => {
+        state.contact.silent.push({ conversationId, updates });
       },
       onCardWaiting: (input) => {
         state.contact.cards.push(input);
@@ -973,6 +978,26 @@ describe('投递结算', () => {
     expect(h.state.file.outbox).toEqual([]);
   });
 
+  it('静默回合把这一批回传的条数交给手机，批次照常结算', () => {
+    const h = harness({
+      secretaryIds: ['sec1'],
+      file: { ...pending(), inflight: { ...inflight, keys: ['a', 'b', 'c'] } },
+    });
+    h.host.onAgentEvent(
+      {
+        type: 'turn-completed',
+        identity: { sessionId: 'sec1', generation: 'g' },
+        seq: 1,
+        turnId: 't',
+        silent: true,
+      } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(h.state.contact.silent).toEqual([{ conversationId: 'sec1', updates: 3 }]);
+    expect(h.state.contact.replies).toEqual([]);
+    expect(h.state.file.inflight).toBeUndefined();
+  });
+
   it('秘书这一轮失败时批次留着重投', () => {
     const h = harness({ file: pending() });
     h.host.onAgentEvent(
@@ -1265,7 +1290,7 @@ describe('联系方式转发', () => {
       { conversationId: 'sec-1', text: '在，刚把登录修完' },
     ]);
 
-    // 静默回合不发
+    // 静默回合不发正文，只把这一批回传的条数交出去
     h.host.onAgentEvent(
       secretaryEvent('turn-completed', {
         silent: true,
@@ -1274,6 +1299,7 @@ describe('联系方式转发', () => {
       []
     );
     expect(h.state.contact.replies).toHaveLength(1);
+    expect(h.state.contact.silent).toEqual([{ conversationId: 'sec-1', updates: 0 }]);
 
     // 不是秘书会话：一个都不发
     h.host.onAgentEvent(

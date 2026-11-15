@@ -19,6 +19,11 @@ export interface ContactFile {
   allowCardConfirm: boolean;
   /** 默认关闭：记忆标题不往 Telegram 发（消息会留在 Telegram 服务器上） */
   allowMemory: boolean;
+  /**
+   * 默认关闭：只发里程碑。打开后秘书会话里每一轮回复都镜像到手机，
+   * 静默回合只发一行摘要。解绑或换 bot 时自动关掉。
+   */
+  syncMirror: boolean;
   /** getUpdates 的游标：先落盘再处理，重启不重放已经产生过副作用的更新 */
   pollOffset: number;
   /** 绑定向导中间态：码、过期时间与已经对不上的次数，绑完即清 */
@@ -26,7 +31,13 @@ export interface ContactFile {
 }
 
 export function emptyContactFile(): ContactFile {
-  return { version: 1, allowCardConfirm: false, allowMemory: false, pollOffset: 0 };
+  return {
+    version: 1,
+    allowCardConfirm: false,
+    allowMemory: false,
+    syncMirror: false,
+    pollOffset: 0,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -78,6 +89,7 @@ export function parseContactFile(raw: unknown): ContactFile {
     // 老配置里这个开关叫 allowDispatchConfirm：升级后沿用，不把用户的选择丢掉
     allowCardConfirm: raw.allowCardConfirm === true || raw.allowDispatchConfirm === true,
     allowMemory: raw.allowMemory === true,
+    syncMirror: raw.syncMirror === true,
     pollOffset: typeof raw.pollOffset === 'number' && raw.pollOffset > 0 ? raw.pollOffset : 0,
     ...(bind ? { bind } : {}),
   };
@@ -129,6 +141,8 @@ export class ContactStore {
       ...(current.bot ? { bot: current.bot } : {}),
       allowCardConfirm: current.allowCardConfirm,
       allowMemory: current.allowMemory,
+      // 解绑就没人收镜像了：同步自动关闭，重新绑定后要再发一次 /sync
+      syncMirror: false,
       pollOffset: 0,
     });
   }
@@ -141,6 +155,7 @@ export class ContactStore {
       version: 1,
       allowCardConfirm: current.allowCardConfirm,
       allowMemory: current.allowMemory,
+      syncMirror: false,
       pollOffset: 0,
     });
   }
