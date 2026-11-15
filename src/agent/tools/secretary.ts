@@ -13,6 +13,8 @@ type JsonSchema = Record<string, unknown>;
 
 const MODEL_SCHEMA: JsonSchema = {
   type: 'object',
+  description:
+    'Optional: an exact provider and model, checked before anything is created. An unknown, disabled or credential-less provider or model is refused with an error and is never silently replaced by the default. Omit it to use the dispatch model from your settings.',
   properties: {
     providerId: { type: 'string', minLength: 1, maxLength: 200 },
     modelId: { type: 'string', minLength: 1, maxLength: 200 },
@@ -111,6 +113,19 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     keys: ['conversationId', 'taskId'],
     aliases: { sessionId: 'conversationId', id: 'taskId', backgroundTaskId: 'taskId' },
   },
+  session_archive: {
+    keys: ['conversationId', 'ids'],
+    arrays: ['ids'],
+    aliases: { sessionId: 'conversationId', conversationIds: 'ids', id: 'ids' },
+  },
+  result_mark_done: {
+    keys: ['conversationId'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId' },
+  },
+  result_mark_undo: {
+    keys: ['conversationId'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId' },
+  },
   session_answer: {
     keys: ['conversationId', 'askId', 'answer'],
     aliases: { sessionId: 'conversationId', id: 'askId', requestId: 'askId' },
@@ -149,6 +164,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'projectId',
       'prompt',
       'title',
+      'model',
       'worktree',
       'checkout',
       'baseRef',
@@ -500,6 +516,34 @@ const SCHEMAS: Record<
       ['conversationId', 'taskId']
     ),
   },
+  session_archive: {
+    description:
+      'Archive sessions you dispatched or track, once they are finished and idle. Pass one conversationId or up to 20 ids. A session is only archived when it already has a terminal result (goal-complete, failed or interrupted), is not running, has no unfinished background task and is not waiting for the user; anything else is skipped with the reason and must not be retried. Archiving is the same as the user archiving it by hand: it leaves the sidebar list and shows up under archived sessions. Nothing is deleted. The call is audited per session and returns one row per id: status archived, skipped or failed, with the reason.',
+    parameters: object({
+      conversationId: id('Session id from session_list or session_tasks'),
+      ids: {
+        type: 'array',
+        items: { type: 'string', minLength: 1, maxLength: SECRETARY_ID_MAX },
+        minItems: 1,
+        maxItems: 20,
+        description: 'Session ids to archive in one call, at most 20',
+      },
+    }),
+  },
+  result_mark_done: {
+    description:
+      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. Only sessions you dispatched or track are accepted; the session itself is not touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone.',
+    parameters: object({ conversationId: id('Session id from session_list or the board') }, [
+      'conversationId',
+    ]),
+  },
+  result_mark_undo: {
+    description:
+      'Undo a manual mark done on a dispatch you track and put it back into the in-progress list. Only a mark set by hand (by the user or by you with result_mark_done) can be undone; a result the session reported itself cannot be erased. The call is audited.',
+    parameters: object({ conversationId: id('Session id from session_list or the board') }, [
+      'conversationId',
+    ]),
+  },
   session_answer: {
     description:
       'Answer a question a dispatched or tracked session is waiting on (ask_user). The question reaches you as an ask-relay session update with its askId; the session continues with your answer as soon as you call this. Answer with one of the options or with free text. Decide yourself when the question is a technical detail, a choice between equivalent implementations, or something you have enough context for, and say why in your reply. Ask the user with your own ask_user first when it is irreversible, touches their data, accounts or money, pushes or publishes, merges to main, deletes branches, or is a product or preference call — then pass their answer here unchanged. Whoever answers first wins: if the user answered in that session directly, or the question timed out, this is refused and you must not retry.',
@@ -609,7 +653,7 @@ const SCHEMAS: Record<
   },
   todo_item_dispatch: {
     description:
-      'Turn a todo item into a dispatched session. Same confirmation rules as session_create, and the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions.',
+      'Turn a todo item into a dispatched session. Same confirmation rules as session_create, and the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions, plus the same optional model.',
     parameters: object(
       {
         todoId: id('Todo id'),
@@ -621,6 +665,7 @@ const SCHEMAS: Record<
           maxLength: 200,
           description: 'Optional title; defaults to the todo text',
         },
+        model: MODEL_SCHEMA,
         worktree: { type: 'boolean' },
         ...BASE_PARAMS,
         after: AFTER_PARAM,

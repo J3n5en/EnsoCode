@@ -342,6 +342,62 @@ describe('parseDispatchFile', () => {
     });
   });
 
+  it('派发记录与提案草案里的模型（含思考档位）读回来还在', () => {
+    const file = parseDispatchFile({
+      dispatched: {
+        c1: {
+          conversationId: 'c1',
+          projectId: 'p1',
+          secretaryConversationId: 's1',
+          createdAt: 10,
+          turn: 1,
+          lastState: 'idle',
+          lastEventAt: 20,
+          model: { providerId: 'anthropic', modelId: 'opus', thinkingLevel: 'high' },
+        },
+        c2: {
+          conversationId: 'c2',
+          projectId: 'p1',
+          secretaryConversationId: 's1',
+          createdAt: 10,
+          turn: 1,
+          lastState: 'idle',
+          lastEventAt: 20,
+          model: { providerId: 'anthropic' },
+        },
+      },
+      proposals: {
+        pr1: {
+          id: 'pr1',
+          secretaryConversationId: 's1',
+          createdAt: 1,
+          updatedAt: 2,
+          status: 'pending',
+          kind: 'dispatch',
+          draft: {
+            projectId: 'p1',
+            prompt: '写测试',
+            worktree: false,
+            model: { providerId: 'anthropic', modelId: 'opus', thinkingLevel: 'low' },
+          },
+        },
+      },
+    });
+    expect(file.dispatched.c1.model).toEqual({
+      providerId: 'anthropic',
+      modelId: 'opus',
+      thinkingLevel: 'high',
+    });
+    // 缺 modelId 的模型整条丢掉，不留下半截引用
+    expect(file.dispatched.c2.model).toBeUndefined();
+    const proposal = file.proposals.pr1;
+    expect(proposal?.kind === 'dispatch' ? proposal.draft.model : undefined).toEqual({
+      providerId: 'anthropic',
+      modelId: 'opus',
+      thinkingLevel: 'low',
+    });
+  });
+
   it('keeps valid records and drops the broken ones one by one', () => {
     const file = parseDispatchFile({
       dispatched: {

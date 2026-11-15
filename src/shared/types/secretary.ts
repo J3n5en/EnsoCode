@@ -78,12 +78,18 @@ export type ProposalStatus =
   | 'rejected'
   | 'expired';
 
+/**
+ * 派发时用的模型：与秘书档案的 model 同一形状（provider + model + 可选思考档位），
+ * Main 在派发前按同一套可用性判定解析，解析后的值落进派发记录，卡片据此显示。
+ */
+export type DispatchModelRef = ModelRef & { thinkingLevel?: ThinkingLevel };
+
 export interface DispatchDraft {
   projectId: string;
   prompt: string;
   title?: string;
   goal?: string;
-  model?: ModelRef;
+  model?: DispatchModelRef;
   worktree: boolean;
   todoId?: string;
   /** 基线：从项目的哪个现有检出、哪个 ref 起新分支。只在 worktree 为真时生效 */
@@ -337,6 +343,8 @@ export interface DispatchRecord {
   checkout?: string;
   baseRef?: string;
   branch?: string;
+  /** 派发时实际用到的模型：卡片显示，缺省表示跟随项目默认模型 */
+  model?: DispatchModelRef;
   /** 秘书停止的时间：after 依赖据此判定「被停止」 */
   stoppedAt?: number;
   /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
@@ -507,6 +515,8 @@ export type SecretaryCard =
       checkout?: string;
       baseRef?: string;
       branch?: string;
+      /** 派发时实际用到的模型 */
+      model?: DispatchModelRef;
     }
   /** 等依赖的派发：等待中在进行中，出问题在需要你处理 */
   | { kind: 'pending'; pending: PendingDispatch; projectName: string }

@@ -26,11 +26,17 @@ import {
   type SecretarySendMode,
 } from '@shared/secretary/tools';
 import { wrapUntrusted } from '@shared/secretary/transcript';
-import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
+import {
+  type ConversationAuthority,
+  type ProjectAuthority,
+  THINKING_LEVELS,
+  type ThinkingLevel,
+} from '@shared/types/agent';
 import {
   type CleanupDraft,
   type CleanupItem,
   type DispatchDraft,
+  type DispatchModelRef,
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
   type PendingProblem,
@@ -87,6 +93,40 @@ export const STOP_CONFIRM_TIMEOUT_MS = 10_000;
 
 /** 一次派发最多等几个依赖 */
 export const MAX_DISPATCH_DEPENDENCIES = 10;
+
+/** 一次最多归档几个会话：和看板批量操作同一个量级 */
+export const MAX_ARCHIVE_IDS = 20;
+
+/** 归档一条会话的结果：skipped 是前置条件不满足，failed 是写盘出错 */
+export type ArchiveStatus = 'archived' | 'skipped' | 'failed';
+
+export interface ArchiveOutcome {
+  conversationId: string;
+  status: ArchiveStatus;
+  reason?: string;
+}
+
+/** 归档被拒的原因码，模型看到的是可读说明 */
+const ARCHIVE_REFUSALS: Record<string, string> = {
+  'not-operable':
+    'skipped (not-operable): only sessions you dispatched or already track can be archived; this one is not yours to tidy up',
+  'not-found': 'skipped (not-found): no such session, it may already be deleted',
+  'already-archived': 'skipped (already-archived): this session is already in the archived list',
+  'not-terminal':
+    'skipped (not-terminal): the session has no finished result yet (goal-complete, failed or interrupted); wait for it to finish',
+  running:
+    'skipped (running): the session is still running or still has an unfinished background task; stop it first with session_stop or session_task_stop',
+  'needs-user':
+    'skipped (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+};
+
+/** 手动收口被拒的原因码，模型看到的是可读说明 */
+const MARK_REFUSALS: Record<string, string> = {
+  'not-found':
+    'refused (not-found): only a session you dispatched or track has a dispatch record to mark; this one is not yours',
+  'not-manual':
+    'refused (not-manual): this result was reported by the session itself, so nothing manual can be undone',
+};
 
 /** 秘书排进目标会话队列的消息：origin 标记来源，撤回与停止清队列只认自己排的 */
 export interface SecretaryQueuedMessage {
@@ -182,6 +222,13 @@ export interface SecretaryDispatchPorts {
   tasks(conversationId: string): MaybePromise<readonly ObservedTask[]>;
   /** 停一个后台任务：只停这个会话自己的任务 */
   stopTask(conversationId: string, taskId: string): MaybePromise<{ ok: boolean; error?: string }>;
+  /**
+   * 派发模型的可用性判定：provider 存在且启用、有凭证、模型行启用（虚拟模型按目录），
+   * 与子代理可选模型同一套判定。返回解析后的引用，不可用就报错，绝不静默回退。
+   */
+  resolveModel(
+    ref: DispatchModelRef
+  ): MaybePromise<{ ok: true; model: DispatchModelRef } | { ok: false; error: string }>;
 }
 
 const DISPATCH_OPS = [
@@ -191,6 +238,9 @@ const DISPATCH_OPS = [
   'session_queue_cancel',
   'session_stop',
   'session_task_stop',
+  'session_archive',
+  'result_mark_done',
+  'result_mark_undo',
   'session_answer',
   'session_takeover_propose',
   'todo_list',
@@ -356,12 +406,17 @@ function stringParam(params: Record<string, unknown>, key: string): string | und
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function modelParam(value: unknown): DispatchDraft['model'] {
+/** 派发模型：providerId + modelId 必填，thinkingLevel 可选；形状与秘书档案的 model 一致 */
+function modelParam(value: unknown): DispatchModelRef | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const model = value as Record<string, unknown>;
   const providerId = stringParam(model, 'providerId');
   const modelId = stringParam(model, 'modelId');
-  return providerId && modelId ? { providerId, modelId } : undefined;
+  if (!providerId || !modelId) return undefined;
+  const thinkingLevel = (THINKING_LEVELS as readonly unknown[]).includes(model.thinkingLevel)
+    ? (model.thinkingLevel as ThinkingLevel)
+    : undefined;
+  return { providerId, modelId, ...(thinkingLevel ? { thinkingLevel } : {}) };
 }
 
 function defaultProfile(): SecretaryProfile {
@@ -594,7 +649,10 @@ async function executeDispatch(
     prompt: draft.prompt,
     worktree: draft.worktree,
     ...(draft.title ? { title: draft.title } : {}),
-    ...(draft.model ? { model: draft.model } : {}),
+    ...(draft.model
+      ? { model: { providerId: draft.model.providerId, modelId: draft.model.modelId } }
+      : {}),
+    ...(draft.model?.thinkingLevel ? { thinkingLevel: draft.model.thinkingLevel } : {}),
     ...(draft.goal ? { goal: draft.goal } : {}),
     ...(draft.checkout ? { checkout: draft.checkout } : {}),
     ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
@@ -623,6 +681,7 @@ async function executeDispatch(
     ...(draft.checkout ? { checkout: draft.checkout } : {}),
     ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
     ...(draft.branch ? { branch: draft.branch } : {}),
+    ...(draft.model ? { model: draft.model } : {}),
   };
   ports.saveDispatch(file);
   if (draft.todoId) {
@@ -685,16 +744,33 @@ async function startDispatch(
     : { kind: 'failed', error: created.error };
 }
 
+/**
+ * 派发模型：显式指定优先，没指定才用档案里的固定模型（choose 模式仍按项目默认）。
+ * 指定了就一定校验：provider 或 model 不可用就当场失败，绝不静默回退到默认模型。
+ */
+async function resolveDraftModel(
+  ports: SecretaryDispatchPorts,
+  draft: DispatchDraft,
+  profile: SecretaryProfile
+): Promise<{ ok: true; draft: DispatchDraft } | { ok: false; error: string }> {
+  const wanted =
+    draft.model ?? (profile.dispatchModel.mode === 'fixed' ? profile.dispatchModel.model : null);
+  if (!wanted) return { ok: true, draft };
+  const resolved = await ports.resolveModel(wanted);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  return { ok: true, draft: { ...draft, model: resolved.model } };
+}
+
 async function dispatchDraft(
   ports: SecretaryDispatchPorts,
   secretaryConversationId: string,
   draft: DispatchDraft
 ): Promise<DispatchOutcome> {
   const profile = await profileOf(ports);
-  const wanted: DispatchDraft =
-    profile.dispatchModel.mode === 'fixed'
-      ? { ...draft, model: profile.dispatchModel.model }
-      : draft;
+  // 显式指定的模型优先；没指定才走档案里的派发模型设置
+  const withModel = await resolveDraftModel(ports, draft, profile);
+  if (!withModel.ok) return { kind: 'failed', error: withModel.error };
+  const wanted = withModel.draft;
   const validated = validateDispatch(
     wanted,
     await dispatchContext(ports, profile, wanted.projectId, (wanted.after?.length ?? 0) > 0)
@@ -741,6 +817,11 @@ function deny(
   return { ok: false, error: DENIALS[code] };
 }
 
+/** 审计里带上实际用到的模型：事后能查清这次派发用的是哪个模型 */
+function modelDetail(model: DispatchModelRef | undefined): string {
+  return model ? ` · model ${model.providerId}/${model.modelId}` : '';
+}
+
 function outcomeResult(
   ports: SecretaryDispatchPorts,
   ctx: SecretaryOpContext,
@@ -750,28 +831,34 @@ function outcomeResult(
 ): SecretaryOpResult {
   if (outcome.kind === 'failed') return auditFailure(ports, ctx, op, outcome.error, targetId);
   const at = ports.now();
-  if (outcome.kind === 'pending') return pendingResult(ports, ctx, op, outcome.pendingId);
+  // 审计记的是真正落盘的那个模型：档案固定模型与显式指定都算
+  const file = ports.dispatchFile();
+  if (outcome.kind === 'pending')
+    return pendingResult(ports, ctx, op, outcome.pendingId, file.pending?.[outcome.pendingId]);
   if (outcome.kind === 'proposal') {
+    const proposal = file.proposals[outcome.proposalId];
+    const model = proposal?.kind === 'dispatch' ? proposal.draft.model : undefined;
     ports.audit({
       at,
       secretaryConversationId: ctx.secretaryConversationId,
       op,
       targetId: outcome.proposalId,
       ok: true,
-      detail: 'awaiting_confirmation',
+      detail: `awaiting_confirmation${modelDetail(model)}`,
     });
     return {
       ok: true,
       result: { status: 'awaiting_confirmation', proposalId: outcome.proposalId },
     };
   }
+  const model = file.dispatched[outcome.conversationId]?.model;
   ports.audit({
     at,
     secretaryConversationId: ctx.secretaryConversationId,
     op,
     targetId: outcome.conversationId,
     ok: true,
-    detail: 'created',
+    detail: `created${modelDetail(model)}`,
   });
   return { ok: true, result: { status: 'created', conversationId: outcome.conversationId } };
 }
@@ -781,7 +868,8 @@ function pendingResult(
   ports: SecretaryDispatchPorts,
   ctx: SecretaryOpContext,
   op: string,
-  pendingId: string
+  pendingId: string,
+  pending?: PendingDispatch
 ): SecretaryOpResult {
   ports.audit({
     at: ports.now(),
@@ -789,7 +877,7 @@ function pendingResult(
     op,
     targetId: pendingId,
     ok: true,
-    detail: 'waiting_dependencies',
+    detail: `waiting_dependencies${modelDetail(pending?.draft.model)}`,
   });
   return { ok: true, result: { status: 'waiting', pendingId } };
 }
@@ -1074,6 +1162,43 @@ async function checkOperate(
   return { ok: true, source, conversation, projectId };
 }
 
+/** 归档的目标：单个 conversationId 与 ids 列表合并去重，超上限整单拒绝 */
+function archiveIds(params: Record<string, unknown>): string[] | null {
+  const ids: string[] = [];
+  const single = stringParam(params, 'conversationId');
+  if (single) ids.push(single);
+  const list = params.ids;
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const id = typeof item === 'string' ? item.trim() : '';
+      if (id) ids.push(id);
+    }
+  }
+  const unique = [...new Set(ids)];
+  return unique.length > 0 && unique.length <= MAX_ARCHIVE_IDS ? unique : null;
+}
+
+/**
+ * 归档一条会话的前置条件：只认派发或接管跟踪的记录，且已经终态、空闲、没有待处理项。
+ * 返回原因码，null 表示可以归档。
+ */
+async function archiveRefusal(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<string | null> {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return 'not-operable';
+  const row = (await ports.rows())[conversationId];
+  if (!row) return 'not-found';
+  if (row.archived === true) return 'already-archived';
+  const status = await ports.status(conversationId);
+  if (status.pendingAsks + status.pendingApprovals > 0) return 'needs-user';
+  if (countsAsRunning(record, row, status)) return 'running';
+  if (!record.lastResult || !SETTLED_RESULTS.has(record.lastResult.kind)) return 'not-terminal';
+  return null;
+}
+
 /**
  * 范围接管的会话第一次被真正用上：从这一刻起才跟踪它的状态与结果。
  * 之前不建记录，所以范围里的其他会话不会被推给秘书，也不改未读与静音。
@@ -1249,6 +1374,28 @@ export function untrack(ports: SecretaryDispatchPorts, conversationId: string): 
   });
   notifySecretaryChanged();
   return { ok: true };
+}
+
+/** 秘书侧的手动收口：与看板按钮同一条逻辑，审计里标明是秘书点的 */
+function markResultOp(
+  ports: SecretaryDispatchPorts,
+  ctx: SecretaryOpContext,
+  params: Record<string, unknown>,
+  action: MarkResultAction
+): SecretaryOpResult {
+  const fields = sessionFields(params, ['conversationId']);
+  if (!fields.ok) return fields;
+  const { conversationId } = fields.value;
+  const result = markResult(ports, conversationId, action, 'secretary');
+  if (!result.ok) {
+    const op = action === 'done' ? 'result_mark_done' : 'result_mark_undo';
+    auditFailure(ports, ctx, op, result.error, conversationId);
+    return { ok: false, error: MARK_REFUSALS[result.error] ?? result.error };
+  }
+  return {
+    ok: true,
+    result: { status: action === 'done' ? 'marked-done' : 'undone', conversationId },
+  };
 }
 
 export function createSecretaryDispatchHandlers(
@@ -1529,6 +1676,84 @@ export function createSecretaryDispatchHandlers(
       notifySecretaryChanged();
       if (!stopped.ok) return { ok: false, error: stopped.error ?? 'stop failed' };
       return { ok: true, result: { status: 'stopped', conversationId, taskId } };
+    },
+
+    /**
+     * 归档会话：效果与用户手动归档一致（侧栏消失、进归档区），只认派发或接管跟踪的记录，
+     * 且必须已经终态、空闲、没有待处理项。批量逐条给结果，逐条审计。
+     */
+    async session_archive(params, ctx) {
+      const ids = archiveIds(params);
+      if (!ids) {
+        return {
+          ok: false,
+          error: `invalid arguments: pass "conversationId" or "ids" with 1-${MAX_ARCHIVE_IDS} session ids`,
+        };
+      }
+      const results: ArchiveOutcome[] = [];
+      for (const conversationId of ids) {
+        const refusal = await archiveRefusal(ports, conversationId);
+        if (refusal) {
+          results.push({ conversationId, status: 'skipped', reason: refusal });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_archive',
+            targetId: conversationId,
+            ok: false,
+            detail: refusal,
+          });
+          continue;
+        }
+        try {
+          await ports.cleanup.archive(conversationId, ports.now());
+          results.push({ conversationId, status: 'archived' });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_archive',
+            targetId: conversationId,
+            ok: true,
+            detail: 'archived',
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'archive failed';
+          results.push({ conversationId, status: 'failed', reason });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_archive',
+            targetId: conversationId,
+            ok: false,
+            detail: reason,
+          });
+        }
+      }
+      notifySecretaryChanged();
+      const count = (status: ArchiveStatus) =>
+        results.filter((entry) => entry.status === status).length;
+      return {
+        ok: true,
+        result: {
+          results: results.map((entry) => ({
+            ...entry,
+            ...(entry.reason ? { reason: ARCHIVE_REFUSALS[entry.reason] ?? entry.reason } : {}),
+          })),
+          archived: count('archived'),
+          skipped: count('skipped'),
+          failed: count('failed'),
+        },
+      };
+    },
+
+    /** 看板「标记完成」：把派发记录收口为完成，与用户点按钮走同一条逻辑 */
+    async result_mark_done(params, ctx) {
+      return markResultOp(ports, ctx, params, 'done');
+    },
+
+    /** 看板「撤销标记」：只撤销手动标记的完成 */
+    async result_mark_undo(params, ctx) {
+      return markResultOp(ports, ctx, params, 'undo');
     },
 
     async session_answer(params, ctx) {
@@ -1855,9 +2080,10 @@ export function createSecretaryDispatchHandlers(
       };
       const after = afterParam(params);
       if (after) draft.after = after;
+      const model = modelParam(params.model);
+      if (model) draft.model = model;
       const outcome = await dispatchDraft(ports, ctx.secretaryConversationId, draft);
-      const result = outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
-      return result;
+      return outcomeResult(ports, ctx, 'todo_item_dispatch', outcome, todoId);
     },
   };
   return handlers;
@@ -2054,6 +2280,9 @@ export type MarkResultAction = 'done' | 'undo';
 
 export type MarkResultResult = { ok: true } | { ok: false; error: string };
 
+/** 谁点的：用户界面按钮，还是秘书的工具调用。审计里分开记 */
+export type MarkResultSource = 'ui' | 'secretary';
+
 /**
  * 用户手动收口一条派发记录：done 记成完成并标 manual（卡片给撤销），
  * undo 把这条手动结果撤掉、放回进行中。只认派发或接管的记录，普通会话不动。
@@ -2061,7 +2290,8 @@ export type MarkResultResult = { ok: true } | { ok: false; error: string };
 export function markResult(
   ports: SecretaryDispatchPorts,
   conversationId: string,
-  action: MarkResultAction
+  action: MarkResultAction,
+  source: MarkResultSource = 'ui'
 ): MarkResultResult {
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
@@ -2092,7 +2322,7 @@ export function markResult(
     op,
     targetId: conversationId,
     ok: true,
-    detail: 'manual',
+    detail: source === 'secretary' ? 'secretary' : 'manual',
   });
   notifySecretaryChanged();
   return { ok: true };
@@ -2434,6 +2664,29 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
     (await import('../../ipc/agent')).observedBackgroundTasks(conversationId),
   stopTask: async (conversationId, taskId) =>
     (await import('../../ipc/agent')).stopTaskFromMain(conversationId, taskId),
+  /**
+   * 与子代理可选模型同一套可用性判定：provider 存在且启用、有凭证、非分类器专用、
+   * 模型行启用；虚拟模型按目录解析。这里只判定，不改任何配置。
+   */
+  resolveModel: async (ref) => {
+    const { modelRefForSpawnConfig, resolveModelSelection } = await import('../agentHost');
+    const { readStoredOauthCredentialKeys } = await import('../oauthProviders');
+    let keys: ReadonlySet<string>;
+    try {
+      keys = await readStoredOauthCredentialKeys();
+    } catch {
+      return { ok: false, error: 'model credentials unavailable' };
+    }
+    const resolved = resolveModelSelection(ref.providerId, ref.modelId, keys, {
+      allowVirtual: true,
+    });
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const model = modelRefForSpawnConfig(resolved.selection.config);
+    return {
+      ok: true,
+      model: { ...model, ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}) },
+    };
+  },
 };
 
 function store(): SecretaryStore {

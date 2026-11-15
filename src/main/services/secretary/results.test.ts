@@ -817,6 +817,28 @@ describe('等依赖的派发卡片', () => {
     expect(board.running[0]).toMatchObject({ baseRef: 'feat/base', branch: 'feat/x' });
   });
 
+  it('派出的会话卡片带实际用到的模型', () => {
+    const board = buildBoard(
+      emptyFile({
+        dispatched: {
+          c1: record({
+            conversationId: 'c1',
+            model: { providerId: 'anthropic', modelId: 'opus', thinkingLevel: 'high' },
+          }),
+        },
+      }),
+      {
+        rows: { c1: { id: 'c1', title: '改构建', sessionFile: '/tmp/c1.jsonl' } },
+        statuses: { c1: running },
+        projects,
+        todos: [],
+      }
+    );
+    expect(board.running[0]).toMatchObject({
+      model: { providerId: 'anthropic', modelId: 'opus', thinkingLevel: 'high' },
+    });
+  });
+
   it('等依赖的回传带 pending:<id>，秘书能按 id 取消', () => {
     const update = pendingUpdate(pending({ status: 'failed', problem: 'dependency-failed' }), 20);
     expect(update).toMatchObject({ kind: 'pending', pendingId: 'pend-1', status: 'failed' });

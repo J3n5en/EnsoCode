@@ -402,7 +402,7 @@ function parseDraft(value: unknown): DispatchDraft | undefined {
   if (title) draft.title = title;
   const goal = text(value.goal);
   if (goal) draft.goal = goal;
-  const model = parseModel(value.model);
+  const model = parseProfileModel(value.model);
   if (model) draft.model = model;
   const todoId = text(value.todoId);
   if (todoId) draft.todoId = todoId;
@@ -617,6 +617,8 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (baseRef) record.baseRef = baseRef;
   const branch = text(value.branch);
   if (branch) record.branch = branch;
+  const model = parseProfileModel(value.model);
+  if (model) record.model = model;
   const stoppedAt = time(value.stoppedAt);
   if (stoppedAt !== undefined) record.stoppedAt = stoppedAt;
   if (

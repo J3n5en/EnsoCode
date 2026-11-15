@@ -2,6 +2,7 @@ import { parseDispatchFile, parseProfile } from '@shared/secretary/parse';
 import type { DispatchBaseFacts } from '@shared/secretary/policy';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type {
+  DispatchModelRef,
   DispatchRecord,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
@@ -136,6 +137,8 @@ interface Harness {
   /** 会话的后台任务投影与停任务记录 */
   tasks: Map<string, ObservedTask[]>;
   stoppedTasks: { conversationId: string; taskId: string }[];
+  /** 派发模型的解析请求：按调用顺序记下 */
+  resolvedModels: DispatchModelRef[];
 }
 
 function harness(
@@ -152,6 +155,8 @@ function harness(
     baseFacts?: Partial<DispatchBaseFacts>;
     waitStopped?: 'running' | 'idle' | 'waiting' | 'error';
     tasks?: Record<string, ObservedTask[]>;
+    /** 可用模型白名单（`providerId/modelId`）；缺省表示都可用 */
+    models?: string[];
   } = {}
 ): Harness {
   let ids = 0;
@@ -191,6 +196,7 @@ function harness(
     relays: [],
     tasks: new Map(Object.entries(options.tasks ?? {})),
     stoppedTasks: [],
+    resolvedModels: [],
     ports: undefined as unknown as SecretaryDispatchPorts,
     handlers: undefined as unknown as ReturnType<typeof createSecretaryDispatchHandlers>,
   };
@@ -303,6 +309,14 @@ function harness(
     stopTask: async (conversationId, taskId) => {
       h.stoppedTasks.push({ conversationId, taskId });
       return { ok: true };
+    },
+    // 可用模型白名单：不传则全部可用；不可用的按真实报错文案拒绝
+    resolveModel: async (ref) => {
+      h.resolvedModels.push(ref);
+      const key = `${ref.providerId}/${ref.modelId}`;
+      if (options.models && !options.models.includes(key))
+        return { ok: false, error: 'Model is unavailable: model-missing' };
+      return { ok: true, model: ref };
     },
   };
   h.handlers = createSecretaryDispatchHandlers(h.ports);
@@ -2769,6 +2783,341 @@ describe('session_task_stop', () => {
     const result = await call(h.handlers.session_task_stop, { conversationId: 'c1' });
     expect(result.ok).toBe(false);
     expect(h.stoppedTasks).toEqual([]);
+  });
+});
+
+/** 已经终态的空闲派发记录：归档的合法输入 */
+const settledFile = (
+  conversationIds: string[] = ['c1'],
+  kind: 'goal-complete' | 'failed' = 'goal-complete'
+): SecretaryDispatchFile => ({
+  ...emptyFile(),
+  dispatched: Object.fromEntries(
+    conversationIds.map((conversationId) => [
+      conversationId,
+      {
+        conversationId,
+        projectId: 'p1',
+        secretaryConversationId: 'sec-1',
+        createdAt: 900,
+        turn: 1,
+        lastState: 'idle' as const,
+        lastEventAt: 900,
+        stateSince: 900,
+        lastResult: { kind, turn: 1, at: 950 },
+      },
+    ])
+  ),
+});
+
+const settledRows = (conversationIds: string[]) =>
+  Object.fromEntries(
+    conversationIds.map((id) => [
+      id,
+      { projectId: 'p1', title: `会话 ${id}`, sessionFile: `/s/${id}.jsonl` },
+    ])
+  );
+
+describe('session_archive', () => {
+  it('终态空闲的派发会话能归档，效果与手动归档一致', async () => {
+    const h = harness({
+      file: settledFile(['c1']),
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c1' });
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        results: [{ conversationId: 'c1', status: 'archived' }],
+        archived: 1,
+        skipped: 0,
+        failed: 0,
+      },
+    });
+    expect(h.archived).toEqual([{ conversationId: 'c1', at: NOW }]);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'session_archive',
+      targetId: 'c1',
+      ok: true,
+      detail: 'archived',
+    });
+  });
+
+  it('还在跑的会话拒绝归档并说明原因', async () => {
+    const h = harness({
+      file: {
+        ...settledFile(['c1']),
+        dispatched: {
+          c1: { ...settledFile(['c1']).dispatched.c1, lastState: 'running', lastResult: undefined },
+        },
+      },
+      rows: settledRows(['c1']),
+      statuses: { c1: running },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c1' });
+    expect(result.ok).toBe(true);
+    const payload = (result as { result: { results: { status: string; reason?: string }[] } })
+      .result;
+    expect(payload.results[0]?.status).toBe('skipped');
+    expect(payload.results[0]?.reason).toContain('still running');
+    expect(h.archived).toEqual([]);
+    expect(h.audits.at(-1)).toMatchObject({ op: 'session_archive', ok: false, detail: 'running' });
+  });
+
+  it('没有终态结果的会话拒绝归档', async () => {
+    const h = harness({
+      file: dispatchedFile('c1'),
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c1' });
+    const payload = (result as { result: { results: { status: string; reason?: string }[] } })
+      .result;
+    expect(payload.results[0]?.status).toBe('skipped');
+    expect(payload.results[0]?.reason).toContain('no finished result');
+    expect(h.archived).toEqual([]);
+  });
+
+  it('非派发会话拒绝归档', async () => {
+    const h = harness({
+      profile: { ...profile(), takeoverScope: { mode: 'projects', projectIds: ['p1'] } },
+      conversations: [rootConversation('c2')],
+      rows: settledRows(['c2']),
+      statuses: { c2: idle },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c2' });
+    const payload = (result as { result: { results: { status: string; reason?: string }[] } })
+      .result;
+    expect(payload.results[0]?.status).toBe('skipped');
+    expect(payload.results[0]?.reason).toContain('not-operable');
+    expect(h.archived).toEqual([]);
+  });
+
+  it('批量归档逐条给结果，部分成功部分跳过', async () => {
+    const h = harness({
+      file: settledFile(['c1', 'c2']),
+      rows: settledRows(['c1', 'c2']),
+      statuses: { c1: idle, c2: running },
+    });
+    const result = await call(h.handlers.session_archive, { ids: ['c1', 'c2', 'c3'] });
+    expect(result.ok).toBe(true);
+    const payload = (
+      result as {
+        result: {
+          results: { conversationId: string; status: string }[];
+          archived: number;
+          skipped: number;
+        };
+      }
+    ).result;
+    expect(payload.results.map((entry) => [entry.conversationId, entry.status])).toEqual([
+      ['c1', 'archived'],
+      ['c2', 'skipped'],
+      ['c3', 'skipped'],
+    ]);
+    expect(payload.archived).toBe(1);
+    expect(payload.skipped).toBe(2);
+    expect(h.archived.map((entry) => entry.conversationId)).toEqual(['c1']);
+    // 每一条都留一条审计，成功与跳过都算
+    expect(h.audits.filter((entry) => entry.op === 'session_archive')).toHaveLength(3);
+  });
+
+  it('超过 20 个或没给 id 按参数错误拒绝', async () => {
+    const h = harness({ file: settledFile(['c1']), rows: settledRows(['c1']) });
+    const tooMany = await call(h.handlers.session_archive, {
+      ids: Array.from({ length: 21 }, (_, index) => `c${index}`),
+    });
+    expect(tooMany.ok).toBe(false);
+    const empty = await call(h.handlers.session_archive, {});
+    expect(empty.ok).toBe(false);
+    expect(h.archived).toEqual([]);
+  });
+});
+
+describe('派发时指定模型', () => {
+  const strong = { providerId: 'anthropic', modelId: 'opus', thinkingLevel: 'high' as const };
+
+  it('指定可用模型：建会话时用它，记录与审计都记下', async () => {
+    const h = harness({
+      models: ['anthropic/opus'],
+      profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }),
+    });
+    const result = await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+      model: strong,
+    });
+    expect(result).toMatchObject({ status: 'created', conversationId: 'new-1' });
+    expect(h.resolvedModels).toEqual([strong]);
+    expect(h.created[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'opus' });
+    expect(h.created[0]?.thinkingLevel).toBe('high');
+    expect(h.file.dispatched['new-1']?.model).toEqual(strong);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'session_create',
+      ok: true,
+      detail: 'created · model anthropic/opus',
+    });
+  });
+
+  it('不可用的模型直接报错，不静默回退也不建会话', async () => {
+    const h = harness({
+      models: ['anthropic/opus'],
+      profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }),
+    });
+    const result = await call(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+      model: { providerId: 'anthropic', modelId: 'gone' },
+    });
+    expect(result.ok).toBe(false);
+    expect((result as { error: string }).error).toContain('unavailable');
+    expect(h.created).toEqual([]);
+    expect(h.audits.at(-1)).toMatchObject({ op: 'session_create', ok: false });
+  });
+
+  it('不传模型时走档案里的固定派发模型', async () => {
+    const h = harness({
+      models: ['anthropic/opus'],
+      profile: profile({
+        autonomy: 'full',
+        autoApproveProjectIds: ['p1'],
+        dispatchModel: { mode: 'fixed', model: { providerId: 'anthropic', modelId: 'opus' } },
+      }),
+    });
+    await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(h.resolvedModels).toEqual([{ providerId: 'anthropic', modelId: 'opus' }]);
+    expect(h.created[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'opus' });
+    expect(h.audits.at(-1)).toMatchObject({ detail: 'created · model anthropic/opus' });
+  });
+
+  it('显式指定的模型优先于档案里的固定模型', async () => {
+    const h = harness({
+      models: ['anthropic/opus', 'anthropic/sonnet'],
+      profile: profile({
+        autonomy: 'full',
+        autoApproveProjectIds: ['p1'],
+        dispatchModel: { mode: 'fixed', model: { providerId: 'anthropic', modelId: 'sonnet' } },
+      }),
+    });
+    await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+      model: { providerId: 'anthropic', modelId: 'opus' },
+    });
+    expect(h.created[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'opus' });
+  });
+
+  it('不传模型且档案按项目默认时不解析模型，行为与以前一致', async () => {
+    const h = harness({ profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }) });
+    await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(h.resolvedModels).toEqual([]);
+    expect(h.created[0]?.model).toBeUndefined();
+    expect(h.audits.at(-1)).toMatchObject({ detail: 'created' });
+  });
+
+  it('todo_item_dispatch 也能指定模型', async () => {
+    const h = harness({
+      models: ['anthropic/opus'],
+      profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }),
+      todos: [
+        {
+          id: 't1',
+          text: '修构建',
+          doneAt: undefined,
+          createdAt: 1,
+          projectId: 'p1',
+        } as SecretaryTodo,
+      ],
+    });
+    const result = await run(h.handlers.todo_item_dispatch, {
+      todoId: 't1',
+      model: { providerId: 'anthropic', modelId: 'opus' },
+    });
+    expect(result).toMatchObject({ status: 'created', conversationId: 'new-1' });
+    expect(h.created[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'opus' });
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'todo_item_dispatch',
+      detail: 'created · model anthropic/opus',
+    });
+  });
+});
+
+describe('result_mark_done / result_mark_undo', () => {
+  it('把派发记录收口为完成，审计标明是秘书点的', async () => {
+    const h = harness({
+      file: dispatchedFile('c1', 'running'),
+      rows: settledRows(['c1']),
+      statuses: { c1: running },
+    });
+    const result = await call(h.handlers.result_mark_done, { conversationId: 'c1' });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'marked-done', conversationId: 'c1' },
+    });
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
+    expect(h.file.dispatched.c1.lastState).toBe('idle');
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_done',
+      targetId: 'c1',
+      ok: true,
+      detail: 'secretary',
+    });
+  });
+
+  it('撤销手动标记，放回进行中', async () => {
+    const h = harness({
+      file: {
+        ...dispatchedFile('c1'),
+        dispatched: {
+          c1: {
+            ...dispatchedFile('c1').dispatched.c1,
+            lastResult: { kind: 'goal-complete', turn: 1, at: 950, manual: true },
+          },
+        },
+      },
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.result_mark_undo, { conversationId: 'c1' });
+    expect(result).toEqual({ ok: true, result: { status: 'undone', conversationId: 'c1' } });
+    expect(h.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.file.dispatched.c1.manualUndoneAt).toBe(NOW);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_undo',
+      targetId: 'c1',
+      ok: true,
+      detail: 'secretary',
+    });
+  });
+
+  it('只对派发或跟踪的会话有效，其他会话拒绝', async () => {
+    const h = harness({
+      profile: { ...profile(), takeoverScope: { mode: 'projects', projectIds: ['p1'] } },
+      conversations: [rootConversation('c2')],
+      rows: settledRows(['c2']),
+      statuses: { c2: running },
+    });
+    const result = await call(h.handlers.result_mark_done, { conversationId: 'c2' });
+    expect(result.ok).toBe(false);
+    expect(h.audits.at(-1)).toMatchObject({ op: 'result_mark_done', ok: false });
+    expect(h.file.dispatched.c2).toBeUndefined();
+  });
+
+  it('会话自己报的结果不能撤销', async () => {
+    const h = harness({
+      file: settledFile(['c1']),
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.result_mark_undo, { conversationId: 'c1' });
+    expect(result.ok).toBe(false);
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_undo',
+      ok: false,
+      detail: 'not-manual',
+    });
   });
 });
 

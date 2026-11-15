@@ -124,6 +124,18 @@ describe('SecretaryProposalRow', () => {
     expect(html).not.toContain('[Isolated worktree]');
   });
 
+  it('指定了模型的提案把模型显示出来', () => {
+    const html = render({
+      draft: {
+        ...base.draft,
+        model: { providerId: 'anthropic', modelId: 'opus', thinkingLevel: 'high' },
+      },
+    } as Partial<SecretaryProposal>);
+    expect(html).toContain('secretary-proposal-model');
+    // i18n 在测试里是直通 mock，只验模型行被渲染出来
+    expect(html).toContain('[Model: {{model}}]');
+  });
+
   it('处理中：按钮禁用，避免重复提交', () => {
     const html = render({}, true);
     expect(html).toContain('[Confirm dispatch]');
