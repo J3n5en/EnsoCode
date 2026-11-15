@@ -1,0 +1,157 @@
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { app, ipcMain } from '@platform';
+import { normalizeLocale } from '@shared/i18n';
+import type { ContactLang } from '@shared/secretary/contact';
+import { IPC_CHANNELS } from '@shared/types';
+import type { SecretaryContactState, SecretaryProfile } from '@shared/types/secretary';
+import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
+import { appendAudit } from '../services/secretary/audit';
+import {
+  type ContactServicePorts,
+  TelegramContactService,
+} from '../services/secretary/contact/service';
+import { ContactStore } from '../services/secretary/contact/store';
+import { type DeliveryPorts, resolveTarget } from '../services/secretary/deliveries';
+import { answerAskAsUserFromMain, promptRootFromMain, resumeRootFromMain } from './agent';
+import { readSettingsState } from './settings';
+
+/**
+ * 联系方式（Telegram）的 Main 侧装配：存储、投递、审计都复用秘书现有那套。
+ * 单独成文件是为了让 secretary.ts 只多一行调用。
+ */
+export interface SecretaryContactDeps {
+  /** 秘书目录：contact.json 与 contact-token.bin 都放这里 */
+  dir(): string;
+  /** 回传宿主的端口：目标会话解析与投递复用同一口径 */
+  delivery: DeliveryPorts;
+  profile(): SecretaryProfile | null;
+  /** 秘书状态推送：联系方式状态变化时一起刷新界面 */
+  publish(): void;
+  /** 派发卡片在手机上确认时用；审批没有这条路径 */
+  resolveProposal(
+    proposalId: string,
+    action: 'confirm' | 'reject'
+  ): Promise<{ ok: boolean; error?: string }>;
+}
+
+export interface SecretaryContact {
+  service: TelegramContactService;
+  /** 读一次状态，供深链与启动时使用 */
+  state(): SecretaryContactState;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  register(): void;
+}
+
+function isEditor(webContentsId: number): boolean {
+  return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
+}
+
+function replyLang(profile: SecretaryProfile | null): ContactLang {
+  const choice = profile?.replyLanguage ?? 'ui';
+  if (choice === 'zh' || choice === 'en') return choice;
+  const language = readSettingsState().language;
+  return normalizeLocale(typeof language === 'string' ? language : undefined) === 'en'
+    ? 'en'
+    : 'zh';
+}
+
+/** 只接受字符串 token；其余一律当「没给」，用已存的 token 重新生成码 */
+function readToken(request: unknown): string | undefined {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return undefined;
+  const token = (request as { token?: unknown }).token;
+  return typeof token === 'string' ? token : undefined;
+}
+
+function readFlag(request: unknown): boolean | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const value = (request as { allowDispatchConfirm?: unknown }).allowDispatchConfirm;
+  return typeof value === 'boolean' ? value : null;
+}
+
+export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryContact {
+  const store = new ContactStore(deps.dir());
+  let service: TelegramContactService | null = null;
+
+  const broadcast = (): void => {
+    if (!service) return;
+    broadcastToRenderers(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, service.state());
+  };
+
+  const ports: ContactServicePorts = {
+    audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
+    publish: broadcast,
+    now: () => Date.now(),
+    random: () => Math.random(),
+    lang: () => replyLang(deps.profile()),
+    notifyMode: () => deps.profile()?.notify ?? null,
+    secretaryConversationId: () => resolveTarget(deps.delivery),
+    // 手机发来的话进秘书会话：worker 已经释放就先恢复，再投
+    deliver: async (conversationId, text) => {
+      const first = promptRootFromMain(conversationId, text, randomUUID());
+      if (first.ok) return { ok: true };
+      const resumed = await resumeRootFromMain(conversationId);
+      if (!resumed.ok) return { ok: false, error: resumed.error ?? 'resume-failed' };
+      const retried = promptRootFromMain(conversationId, text, randomUUID());
+      return retried.ok ? { ok: true } : { ok: false, error: retried.error ?? 'prompt-failed' };
+    },
+    // 与在应用里亲手答同一条路径：谁先答算谁的
+    answerAsk: (conversationId, requestId, answer) =>
+      answerAskAsUserFromMain(conversationId, requestId, answer),
+    resolveProposal: (proposalId, action) => deps.resolveProposal(proposalId, action),
+    onError: (code, detail) => {
+      console.warn(`[secretary-contact] ${code}${detail ? `: ${detail}` : ''}`);
+    },
+  };
+
+  service = new TelegramContactService(store, ports);
+
+  return {
+    service,
+    state: () => service.state(),
+    start: () => service.start(),
+    stop: () => service.stop(),
+    register() {
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_STATE, async (event) => {
+        if (!isEditor(event.sender.id))
+          return { telegram: { ...service.state().telegram, status: 'unbound' } };
+        return service.state();
+      });
+
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_BIND, async (event, request: unknown) => {
+        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        return service.bind(readToken(request));
+      });
+
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_CANCEL, async (event) => {
+        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        await service.cancelBind();
+        return { ok: true };
+      });
+
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_UNBIND, async (event) => {
+        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        return service.unbind();
+      });
+
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT, async (event) => {
+        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        return service.forgetBot();
+      });
+
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_TEST, async (event) => {
+        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        return service.sendTest();
+      });
+
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, async (event, request: unknown) => {
+        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        const value = readFlag(request);
+        if (value === null) return { ok: false, error: 'invalid request' };
+        service.setAllowDispatchConfirm(value);
+        return { ok: true };
+      });
+    },
+  };
+}

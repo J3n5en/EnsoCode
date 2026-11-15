@@ -64,6 +64,14 @@ interface Harness {
     published: number;
     prompts: string[];
     audit: SecretaryAuditEntry[];
+    contact: {
+      milestones: { kind: string; title: string; conversationId: string; lastText?: string }[];
+      relayAsks: { conversationId: string; question: string; label: string }[];
+      asks: { conversationId: string; requestId: string }[];
+      resolved: { conversationId: string; requestId: string }[];
+      replies: { conversationId: string; text: string }[];
+      cards: { count: number; title?: string }[];
+    };
   };
 }
 
@@ -73,6 +81,8 @@ function harness(
     enabled?: boolean;
     patrolEnabled?: boolean;
     notify?: Harness['state']['notify'];
+    /** 这些会话 id 算秘书自己的会话：它们的提问与回复要发到手机 */
+    secretaryIds?: string[];
   } = {}
 ): Harness {
   const state: Harness['state'] = {
@@ -89,6 +99,7 @@ function harness(
     published: 0,
     prompts: [],
     audit: [],
+    contact: { milestones: [], relayAsks: [], asks: [], resolved: [], replies: [], cards: [] },
   };
   let seq = 0;
   const ports: SecretaryHostPorts = {
@@ -136,6 +147,28 @@ function harness(
     audit: (entry) => {
       state.audit.push(entry);
     },
+    contact: {
+      onMilestone: (input) => {
+        state.contact.milestones.push(input);
+      },
+      onRelayAsk: (input) => {
+        state.contact.relayAsks.push(input);
+      },
+      onAskRequest: (conversationId, ask) => {
+        state.contact.asks.push({ conversationId, requestId: ask.requestId });
+      },
+      onAskResolved: (conversationId, requestId) => {
+        state.contact.resolved.push({ conversationId, requestId });
+      },
+      onTurnReply: (conversationId, text) => {
+        state.contact.replies.push({ conversationId, text });
+      },
+      onCardWaiting: (input) => {
+        state.contact.cards.push(input);
+      },
+    },
+    isSecretaryConversation: (conversationId) =>
+      (options.secretaryIds ?? []).includes(conversationId),
   };
   return { ports, host: createSecretaryHost(ports), state };
 }
@@ -1029,5 +1062,102 @@ describe('定时', () => {
     h.state.statuses.c1 = error;
     h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'running'));
     expect(h.state.file.dispatched.c1.backgroundRunning).toBeUndefined();
+  });
+});
+
+describe('联系方式转发', () => {
+  it('里程碑按 notify 走：with-done 发完成，off 一条不发', () => {
+    const loud = harness({ notify: 'with-done' });
+    loud.state.statuses.c1 = idle;
+    loud.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    loud.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(loud.state.contact.milestones).toEqual([
+      expect.objectContaining({ kind: 'goal-complete', conversationId: 'c1' }),
+    ]);
+
+    const quiet = harness({ notify: 'off' });
+    quiet.state.statuses.c1 = idle;
+    quiet.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    quiet.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(quiet.state.contact.milestones).toEqual([]);
+  });
+
+  it('中间进度（一轮结束）不转发', () => {
+    const h = harness({ notify: 'with-done' });
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
+    expect(h.state.contact.milestones).toEqual([]);
+  });
+
+  it('派出会话的提问转给秘书时，手机上也提示一条', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(
+      event('ask-request', {
+        ask: {
+          requestId: 'ask-1',
+          question: '用哪个方案？',
+          options: ['A', 'B'],
+          relay: { name: '小秘' },
+        },
+      }),
+      change('waiting', 'running')
+    );
+    expect(h.state.contact.relayAsks).toEqual([
+      expect.objectContaining({ conversationId: 'c1', question: '用哪个方案？' }),
+    ]);
+  });
+
+  it('秘书自己会话里的提问、收尾与审批都转发；别的会话不转发', () => {
+    const h = harness({ secretaryIds: ['sec-1'] });
+    const secretaryEvent = (type: string, extra: Record<string, unknown> = {}) =>
+      ({
+        type,
+        identity: { sessionId: 'sec-1', generation: 'g1' },
+        seq: 1,
+        ...extra,
+      }) as unknown as RendererAgentEvent;
+
+    h.host.onAgentEvent(
+      secretaryEvent('ask-request', {
+        ask: { requestId: 'ask-9', question: '发版吗？', options: ['发', '不发'] },
+      }),
+      []
+    );
+    expect(h.state.contact.asks).toEqual([{ conversationId: 'sec-1', requestId: 'ask-9' }]);
+
+    h.host.onAgentEvent(secretaryEvent('ask-resolved', { requestId: 'ask-9', by: 'user' }), []);
+    expect(h.state.contact.resolved).toEqual([{ conversationId: 'sec-1', requestId: 'ask-9' }]);
+
+    h.host.onAgentEvent(secretaryEvent('approval-request', { request: { requestId: 'ap-1' } }), []);
+    expect(h.state.contact.cards).toEqual([{ count: 1 }]);
+
+    h.host.onAgentEvent(
+      secretaryEvent('turn-completed', {
+        digest: { userText: '在吗', assistantText: '在，刚把登录修完' },
+      }),
+      []
+    );
+    expect(h.state.contact.replies).toEqual([
+      { conversationId: 'sec-1', text: '在，刚把登录修完' },
+    ]);
+
+    // 静默回合不发
+    h.host.onAgentEvent(
+      secretaryEvent('turn-completed', {
+        silent: true,
+        digest: { userText: '巡检', assistantText: '巡检正常' },
+      }),
+      []
+    );
+    expect(h.state.contact.replies).toHaveLength(1);
+
+    // 不是秘书会话：一个都不发
+    h.host.onAgentEvent(
+      event('ask-request', { ask: { requestId: 'ask-2', question: '继续吗？' } }),
+      change('waiting', 'running')
+    );
+    expect(h.state.contact.asks).toHaveLength(1);
   });
 });

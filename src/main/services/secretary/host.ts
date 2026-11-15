@@ -1,6 +1,7 @@
 import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroundWatch';
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { projectNameFromPath } from '@shared/projectName';
+import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
 import { type PatrolFacts, patrolAnomalies, patrolIntervalMs } from '@shared/secretary/patrol';
 import { transitionProposal } from '@shared/secretary/policy';
@@ -19,6 +20,7 @@ import type {
   SecretaryUpdate,
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
+import type { SecretaryContactPort } from './contact/service';
 import {
   type DeliveryPorts,
   flushDeliveries,
@@ -78,6 +80,10 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   schedules(): SecretarySchedule[];
   saveSchedules(schedules: SecretarySchedule[]): void;
   notify(build: (lang: 'zh' | 'en') => { title: string; body: string }): void;
+  /** 联系方式（Telegram）：只转发里程碑、提问与卡片提示，不改回传与工作台 */
+  contact?: SecretaryContactPort;
+  /** 这个会话是不是秘书自己的会话：决定哪些提问与回复要发到手机 */
+  isSecretaryConversation?(conversationId: string): boolean;
   publish(): void;
   now(): number;
   /** 派出会话空闲等后台任务的看门狗；缺省表示没有 */
@@ -224,6 +230,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       });
       if (!update) return false;
       file.outbox = enqueueUpdate(file.outbox, update);
+      // 手机上也提示一条：J 哥不在电脑前时，回一句话就进秘书会话
+      ports.contact?.onRelayAsk({
+        conversationId,
+        question: event.ask.question,
+        ...(event.ask.options ? { options: event.ask.options } : {}),
+        label: labelOf(file, conversationId),
+      });
       return true;
     }
     if (event.type !== 'ask-resolved') return false;
@@ -290,7 +303,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     kind: SecretaryResultKind,
     now: number,
     detail?: string
-  ): { update: SecretaryUpdate; title: string } {
+  ): { update: SecretaryUpdate; title: string; projectName: string } {
     const row = ports.rows()[record.conversationId];
     const project = ports.projects().find((candidate) => candidate.projectId === record.projectId);
     const projectName = project ? projectNameFromPath(project.canonicalPath) : '';
@@ -304,16 +317,31 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       text: [projectName, title, RESULT_LABELS[kind].zh, detail].filter(Boolean).join(' · '),
       ...(record.lastText ? { lastText: record.lastText } : {}),
     };
-    return { update, title };
+    return { update, title, projectName };
   }
 
-  function notifyResult(update: SecretaryUpdate, kind: SecretaryResultKind): void {
+  function notifyResult(
+    update: SecretaryUpdate,
+    kind: SecretaryResultKind,
+    extra: { title: string; projectName: string; conversationId: string; lastText?: string }
+  ): void {
     const profile = ports.profile();
-    if (!profile || !shouldNotify(profile.notify, kind)) return;
-    ports.notify((lang) => ({
-      title: `${profile.name} · ${RESULT_LABELS[kind][lang]}`,
-      body: update.text.slice(0, 100),
-    }));
+    if (!profile) return;
+    if (shouldNotify(profile.notify, kind)) {
+      ports.notify((lang) => ({
+        title: `${profile.name} · ${RESULT_LABELS[kind][lang]}`,
+        body: update.text.slice(0, 100),
+      }));
+    }
+    // 手机上读的一条：项目 · 会话标题，加一句正文与回应用的深链。
+    // 与系统通知同一个 notify 口径，联系方式服务里再兜一次
+    if (!shouldForwardMilestone(profile.notify, kind)) return;
+    ports.contact?.onMilestone({
+      kind,
+      title: [extra.projectName, extra.title].filter(Boolean).join(' · ') || extra.conversationId,
+      ...(extra.lastText ? { lastText: extra.lastText } : {}),
+      conversationId: extra.conversationId,
+    });
   }
 
   function recordResult(
@@ -329,7 +357,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     record.lastResult = { kind, turn: record.turn, at: now };
     // 收口了就不会再有后台任务唤醒它；留着这条记录会让空闲会话一直被算在跑
     if (SETTLED_RESULTS.has(kind)) delete record.backgroundRunning;
-    const { update, title } = recordUpdate(record, kind, now, detail);
+    const { update, title, projectName } = recordUpdate(record, kind, now, detail);
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
@@ -359,7 +387,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       text: record.lastText || update.text,
     });
     rememberDaily(record, kind, now, title, report);
-    notifyResult(update, kind);
+    notifyResult(update, kind, {
+      title,
+      projectName,
+      conversationId: record.conversationId,
+      ...(record.lastText ? { lastText: record.lastText } : {}),
+    });
   }
 
   /** 按天回看的结果记录：activity 只留 400 条，历史某天要靠 daily.jsonl */
@@ -474,12 +507,40 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     return true;
   }
 
+  /**
+   * 联系方式：秘书自己会话里的提问、回复与审批同步到手机。
+   * 派出会话的提问走 ask-relay，在 applyRelayEvent 里另发一条，不在这里重复。
+   */
+  function forwardToContact(event: RendererAgentEvent, conversationId: string): void {
+    const contact = ports.contact;
+    if (!contact) return;
+    if (event.type === 'ask-request' && event.ask && !event.ask.relay) {
+      contact.onAskRequest(conversationId, event.ask);
+      return;
+    }
+    if (event.type === 'ask-resolved') {
+      contact.onAskResolved(conversationId, event.requestId);
+      return;
+    }
+    if (event.type === 'approval-request') {
+      contact.onCardWaiting({ count: 1 });
+      return;
+    }
+    if (event.type === 'turn-completed' && !event.aborted && !event.silent) {
+      const text = event.digest?.assistantText?.trim();
+      if (text) contact.onTurnReply(conversationId, text);
+    }
+  }
+
   const host: SecretaryHost = {
     onAgentEvent(event, changes) {
       if (!ports.enabled()) return;
       const sessionId = sessionIdOf(event);
       // 没有身份也没有状态变化的事件与派出会话无关，不读盘
       if (!sessionId && changes.length === 0) return;
+      if (sessionId && ports.contact && ports.isSecretaryConversation?.(sessionId)) {
+        forwardToContact(event, sessionId);
+      }
       const now = ports.now();
       const touched = new Set<string>(changes.map((change) => change.sessionId));
       if (sessionId) touched.add(sessionId);

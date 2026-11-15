@@ -75,6 +75,7 @@ import {
   setSecretaryDriverObserver,
   spawnRootFromMain,
 } from './agent';
+import { createSecretaryContact, type SecretaryContact } from './secretaryContact';
 import {
   patchConversationsState,
   readPersistedConversation,
@@ -192,6 +193,7 @@ const driverPorts: DispatchDriverPorts = {
 
 let driver: DispatchDriver | null = null;
 let host: SecretaryHost | null = null;
+let contact: SecretaryContact | null = null;
 
 function secretaryStore(): SecretaryStore {
   return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
@@ -235,6 +237,11 @@ const hostPorts: SecretaryHostPorts = {
     secretaryStore().saveSchedules(schedules);
   },
   notify: (build) => void notifyDesktop().notifySecretary(build),
+  // 联系方式在 registerSecretaryHandlers 里建：这里用 getter 拿到当前实例
+  get contact() {
+    return contact?.service;
+  },
+  isSecretaryConversation: (conversationId) => isSecretaryConversation(conversationId),
   publish: () => broadcastState(),
   now: () => Date.now(),
   backgroundStalls: (now) => driver?.watch(now) ?? [],
@@ -283,10 +290,30 @@ function secretaryState(): Promise<SecretaryState> {
   });
 }
 
+/** 已经提示过的待确认提案：同一张卡只往手机推一次 */
+let announcedProposals = new Set<string>();
+
+/** 有新的确认卡在等用户：手机上只提示回应用确认，审批与派发都不在手机上处理 */
+function announceWaitingCards(state: SecretaryState): void {
+  const pending = Object.values(state.proposals).filter(
+    (proposal) => proposal.status === 'pending'
+  );
+  const fresh = pending.filter((proposal) => !announcedProposals.has(proposal.id));
+  announcedProposals = new Set(pending.map((proposal) => proposal.id));
+  if (fresh.length === 0) return;
+  const draft = fresh[0].draft as { title?: unknown };
+  const title =
+    typeof draft.title === 'string' && draft.title.trim() ? draft.title.trim() : undefined;
+  contact?.service.onCardWaiting({ count: pending.length, ...(title ? { title } : {}) });
+}
+
 /** 聊天卡片与工作台读同一份 Main 状态 */
 function broadcastState(): void {
   void secretaryState()
-    .then((state) => broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state))
+    .then((state) => {
+      broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state);
+      announceWaitingCards(state);
+    })
     .catch(() => undefined);
 }
 
@@ -297,6 +324,18 @@ export function registerSecretaryHandlers(): void {
   setSecretaryAvatarResolver(() => (secretaryEnabled() ? secretaryStore().avatarPath() : null));
   driver = createDispatchDriver(driverPorts);
   host = createSecretaryHost(hostPorts);
+  contact = createSecretaryContact({
+    dir: () => path.join(app.getPath('userData'), 'secretary'),
+    delivery: hostPorts,
+    profile: () => secretaryStore().profile(),
+    publish: broadcastState,
+    // 派发卡片在手机上确认时走与界面同一条路径；审批不在这个入口
+    resolveProposal: (proposalId, action) =>
+      resolveProposal(secretaryDispatchPorts, proposalId, action),
+  });
+  contact.register();
+  // 上次已经绑过就接着轮询；没绑过什么也不做
+  void contact.start();
   // 同一次 observe 的结果既给驱动也给回传宿主，事件入口只调一次
   setSecretaryDriverObserver((event, changes) => {
     driver?.observe(event);
