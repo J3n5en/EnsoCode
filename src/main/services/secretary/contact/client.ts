@@ -59,6 +59,24 @@ export interface TelegramInlineKeyboard {
   inline_keyboard: TelegramInlineButton[][];
 }
 
+/**
+ * 命令的作用范围。chat 只对绑定的那个私聊生效；
+ * 注意 Telegram 不支持给 chat scope 单独指定 language_code。
+ */
+export type TelegramCommandScope =
+  | { type: 'default' }
+  | { type: 'all_private_chats' }
+  | { type: 'chat'; chat_id: number };
+
+export interface TelegramCommandOptions {
+  scope?: TelegramCommandScope;
+  languageCode?: string;
+}
+
+export interface TelegramMenuButton {
+  type: 'default' | 'commands';
+}
+
 export interface TelegramApi {
   getMe(): Promise<TelegramUser>;
   getUpdates(params: {
@@ -82,7 +100,13 @@ export interface TelegramApi {
     parseMode?: 'HTML';
   }): Promise<void>;
   /** 命令菜单：只登记当前可用的命令 */
-  setMyCommands(commands: { command: string; description: string }[]): Promise<void>;
+  setMyCommands(
+    commands: { command: string; description: string }[],
+    options?: TelegramCommandOptions
+  ): Promise<void>;
+  deleteMyCommands(options?: TelegramCommandOptions): Promise<void>;
+  /** 左下角菜单按钮：commands 才会弹出命令面板 */
+  setChatMenuButton(menuButton: TelegramMenuButton): Promise<void>;
   answerCallbackQuery(params: { callbackQueryId: string; text?: string }): Promise<void>;
 }
 
@@ -90,6 +114,15 @@ export interface TelegramApi {
 export function telegramApiBase(): string {
   const override = process.env.ENSO_TELEGRAM_API_BASE?.trim();
   return (override || 'https://api.telegram.org').replace(/\/+$/, '');
+}
+
+/** scope 与 language_code 只在给了的时候才带上 */
+function scopeBody(options?: TelegramCommandOptions): Record<string, unknown> {
+  if (!options) return {};
+  return {
+    ...(options.scope ? { scope: options.scope } : {}),
+    ...(options.languageCode ? { language_code: options.languageCode } : {}),
+  };
 }
 
 type ApiEnvelope<T> = { ok: boolean; result?: T; description?: string; error_code?: number };
@@ -170,8 +203,17 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         ...(parseMode ? { parse_mode: parseMode } : {}),
       });
     },
-    setMyCommands: async (commands) => {
-      await request<boolean>(base, token, 'setMyCommands', { commands });
+    setMyCommands: async (commands, options) => {
+      await request<boolean>(base, token, 'setMyCommands', {
+        commands,
+        ...scopeBody(options),
+      });
+    },
+    deleteMyCommands: async (options) => {
+      await request<boolean>(base, token, 'deleteMyCommands', scopeBody(options));
+    },
+    setChatMenuButton: async (menuButton) => {
+      await request<boolean>(base, token, 'setChatMenuButton', { menu_button: menuButton });
     },
     answerCallbackQuery: async ({ callbackQueryId, text }) => {
       await request<boolean>(base, token, 'answerCallbackQuery', {

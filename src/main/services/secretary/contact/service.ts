@@ -293,7 +293,6 @@ export class TelegramContactService implements SecretaryContactPort {
     });
     this.audit('contact_bind_start', true, `bot=${bot.id}`);
     this.poller.start();
-    this.syncCommands();
     this.ports.publish();
     return { ok: true };
   }
@@ -317,8 +316,10 @@ export class TelegramContactService implements SecretaryContactPort {
 
   /** 解绑：清 chat 与绑定码，停止轮询；bot 与 token 留着，重新绑定不必再贴一次 */
   async unbind(): Promise<ContactResult> {
+    const chatId = this.store.file().chat?.id;
     await this.poller.stop();
     this.store.saveUnbound();
+    await this.clearCommands(chatId);
     this.asks.length = 0;
     this.awaitingReply.clear();
     this.audit('contact_unbind', true);
@@ -328,7 +329,10 @@ export class TelegramContactService implements SecretaryContactPort {
 
   /** 更换 bot：token、bot 身份、chat 一起清，向导回到第 1 步 */
   async forgetBot(): Promise<ContactResult> {
+    const chatId = this.store.file().chat?.id;
     await this.poller.stop();
+    // token 还在时才能调 API：先清菜单，再忘掉 bot
+    await this.clearCommands(chatId);
     await this.store.saveForgotten();
     this.asks.length = 0;
     this.awaitingReply.clear();
@@ -562,15 +566,66 @@ export class TelegramContactService implements SecretaryContactPort {
     };
   }
 
-  /** 命令菜单：只登记当前真的能用的命令（记忆默认不出现） */
+  /**
+   * 命令菜单：绑定的 chat 单独注册一份（打 / 立刻能看到），默认 scope 再放中文与兜底两份，
+   * 并把左下角菜单按钮设成 commands。失败只记审计，不影响收发消息。
+   */
   private syncCommands(): void {
     const token = this.store.token();
+    const chatId = this.store.file().chat?.id;
+    if (!token || !chatId) return;
+    const commands = this.menuCommands();
+    const api = this.apiFor(token);
+    void this.runMenuCalls([
+      {
+        detail: 'set:chat',
+        run: () => api.setMyCommands(commands, { scope: { type: 'chat', chat_id: chatId } }),
+      },
+      { detail: 'set:zh', run: () => api.setMyCommands(commands, { languageCode: 'zh' }) },
+      { detail: 'set:default', run: () => api.setMyCommands(commands) },
+      { detail: 'menu:commands', run: () => api.setChatMenuButton({ type: 'commands' }) },
+    ]);
+  }
+
+  /** 解绑或换 bot：把菜单清掉，别让旧命令留在手机上 */
+  private async clearCommands(chatId: number | undefined): Promise<void> {
+    const token = this.store.token();
     if (!token) return;
+    const api = this.apiFor(token);
+    await this.runMenuCalls([
+      ...(chatId
+        ? [
+            {
+              detail: 'delete:chat',
+              run: () => api.deleteMyCommands({ scope: { type: 'chat', chat_id: chatId } }),
+            },
+          ]
+        : []),
+      { detail: 'delete:zh', run: () => api.deleteMyCommands({ languageCode: 'zh' }) },
+      { detail: 'delete:default', run: () => api.deleteMyCommands() },
+      { detail: 'menu:default', run: () => api.setChatMenuButton({ type: 'default' }) },
+    ]);
+  }
+
+  /** 一条失败不影响后面的，也不往上抛 */
+  private async runMenuCalls(
+    calls: { detail: string; run: () => Promise<unknown> }[]
+  ): Promise<void> {
+    for (const call of calls) {
+      try {
+        await call.run();
+        this.audit('contact_commands', true, call.detail);
+      } catch (error) {
+        this.audit('contact_commands', false, call.detail);
+        this.ports.onError?.(errorCode(error), error instanceof Error ? error.message : undefined);
+      }
+    }
+  }
+
+  /** 记忆默认不出现；关着时菜单里也没有 /memory */
+  private menuCommands(): { command: string; description: string }[] {
     const allowMemory = this.store.file().allowMemory;
-    const commands = botCommands().filter((entry) => entry.command !== 'memory' || allowMemory);
-    void this.apiFor(token)
-      .setMyCommands(commands)
-      .catch((error) => this.reportError(error));
+    return botCommands().filter((entry) => entry.command !== 'memory' || allowMemory);
   }
 
   private apiFor(token: string): TelegramApi {

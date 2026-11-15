@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import type { FeedCursor } from '@shared/secretary/feed';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { TelegramApi, TelegramInlineKeyboard, TelegramUpdate, TelegramUser } from './client';
+import type {
+  TelegramApi,
+  TelegramCommandOptions,
+  TelegramInlineKeyboard,
+  TelegramMenuButton,
+  TelegramUpdate,
+  TelegramUser,
+} from './client';
 import { TelegramContactService } from './service';
 import { ContactStore } from './store';
 
@@ -24,9 +31,17 @@ class FakeApi implements TelegramApi {
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
   }[] = [];
-  commands: { command: string; description: string }[][] = [];
+  /** 每次 setMyCommands 连同 scope/language_code 一起记下来 */
+  commands: {
+    commands: { command: string; description: string }[];
+    options?: TelegramCommandOptions;
+  }[] = [];
+  deleted: (TelegramCommandOptions | undefined)[] = [];
+  menuButtons: TelegramMenuButton[] = [];
   callbacks: { callbackQueryId: string; text?: string }[] = [];
   polls = 0;
+  /** 菜单接口失败时用 */
+  menuError: Error | null = null;
   me: TelegramUser = { id: 42, username: 'enso_secretary_bot', first_name: 'Enso' };
   meError: Error | null = null;
   private queue: TelegramUpdate[] = [];
@@ -76,8 +91,28 @@ class FakeApi implements TelegramApi {
     this.edited.push(params);
   }
 
-  async setMyCommands(commands: { command: string; description: string }[]): Promise<void> {
-    this.commands.push(commands);
+  async setMyCommands(
+    commands: { command: string; description: string }[],
+    options?: TelegramCommandOptions
+  ): Promise<void> {
+    if (this.menuError) throw this.menuError;
+    this.commands.push({ commands, options });
+  }
+
+  async deleteMyCommands(options?: TelegramCommandOptions): Promise<void> {
+    if (this.menuError) throw this.menuError;
+    this.deleted.push(options);
+  }
+
+  async setChatMenuButton(menuButton: TelegramMenuButton): Promise<void> {
+    if (this.menuError) throw this.menuError;
+    this.menuButtons.push(menuButton);
+  }
+
+  /** 最近一次注册里某 scope 的命令名 */
+  menuNames(pick: (options?: TelegramCommandOptions) => boolean): string[] {
+    const entry = [...this.commands].reverse().find((call) => pick(call.options));
+    return entry?.commands.map((command) => command.command) ?? [];
   }
 
   async answerCallbackQuery(params: { callbackQueryId: string; text?: string }): Promise<void> {
@@ -746,13 +781,15 @@ describe('只读命令', () => {
     const welcome = h.api.sent.find((message) => message.text.includes('已连上'));
     expect(welcome?.text).toContain('/status');
     expect(welcome?.text).not.toContain('/memory');
-    const menu = h.api.commands.at(-1)?.map((entry) => entry.command) ?? [];
+    const menu = h.api.menuNames((options) => options?.scope?.type === 'chat');
     expect(menu).toContain('status');
     expect(menu).not.toContain('memory');
 
     h.service.setAllowMemory(true);
-    const after = h.api.commands.at(-1)?.map((entry) => entry.command) ?? [];
-    expect(after).toContain('memory');
+    await waitFor(
+      () => h.api.menuNames((options) => options?.scope?.type === 'chat').includes('memory'),
+      'menu'
+    );
   });
 
   it('解绑后轮询停掉，命令不会再被执行', async () => {
@@ -766,5 +803,98 @@ describe('只读命令', () => {
     expect(h.world.commandCalls).toEqual([]);
     expect(h.api.sent).toEqual([]);
     expect(h.service.state().telegram.status).toBe('unbound');
+  });
+
+  describe('命令菜单注册', () => {
+    async function bound(h: ReturnType<typeof harness>): Promise<void> {
+      await h.service.bind(TOKEN);
+      h.api.push(privateMessage('/start 123456'));
+      await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    }
+
+    const chatScope = (options?: TelegramCommandOptions) =>
+      options?.scope?.type === 'chat' && options.scope.chat_id === 777;
+
+    it('绑定成功：chat scope 只对绑定的 chat，另发中文与兜底两份，按钮设成 commands', async () => {
+      const h = harness();
+      await bound(h);
+      await waitFor(() => h.api.menuButtons.length > 0, 'menu button');
+
+      const chat = h.api.commands.filter((call) => chatScope(call.options)).at(-1);
+      expect(chat?.options?.scope).toEqual({ type: 'chat', chat_id: 777 });
+      expect(chat?.options?.languageCode).toBeUndefined();
+      expect(chat?.commands.map((entry) => entry.command)).toContain('status');
+      expect(chat?.commands[0]?.description).toMatch(/[\u4e00-\u9fa5]/);
+
+      expect(h.api.commands.some((call) => call.options?.languageCode === 'zh')).toBe(true);
+      expect(h.api.commands.some((call) => call.options === undefined)).toBe(true);
+      expect(h.api.menuButtons.at(-1)).toEqual({ type: 'commands' });
+      expect(h.audits.some((entry) => entry.op === 'contact_commands' && entry.ok)).toBe(true);
+    });
+
+    it('启动时已绑定：幂等地重新注册一次', async () => {
+      const h = harness();
+      await bound(h);
+      await waitFor(() => h.api.menuButtons.length > 0, 'menu button');
+      const before = h.api.commands.length;
+      await h.service.stop();
+      await h.service.start();
+      await waitFor(() => h.api.commands.length > before, 're-register');
+      expect(h.api.commands.filter((call) => chatScope(call.options)).length).toBeGreaterThan(1);
+    });
+
+    it('切换记忆开关：重新注册，关掉后菜单里没有 /memory', async () => {
+      const h = harness();
+      await bound(h);
+      await waitFor(() => h.api.menuButtons.length > 0, 'menu button');
+      const names = () => h.api.menuNames(chatScope);
+
+      h.service.setAllowMemory(true);
+      await waitFor(() => names().includes('memory'), 'memory on');
+      h.service.setAllowMemory(false);
+      await waitFor(() => !names().includes('memory'), 'memory off');
+    });
+
+    it('解绑：删掉 chat 与默认 scope 的菜单，按钮回默认', async () => {
+      const h = harness();
+      await bound(h);
+      await waitFor(() => h.api.menuButtons.length > 0, 'menu button');
+      h.api.deleted.length = 0;
+      h.api.menuButtons.length = 0;
+
+      await h.service.unbind();
+      expect(h.api.deleted).toContainEqual({ scope: { type: 'chat', chat_id: 777 } });
+      expect(h.api.deleted).toContainEqual({ languageCode: 'zh' });
+      expect(h.api.deleted).toContainEqual(undefined);
+      expect(h.api.menuButtons.at(-1)).toEqual({ type: 'default' });
+    });
+
+    it('更换 bot：先清菜单再忘掉 token', async () => {
+      const h = harness();
+      await bound(h);
+      await waitFor(() => h.api.menuButtons.length > 0, 'menu button');
+      h.api.deleted.length = 0;
+
+      await h.service.forgetBot();
+      expect(h.api.deleted).toHaveLength(3);
+      expect(h.store.token()).toBe('');
+      expect(h.service.state().telegram.status).toBe('unbound');
+    });
+
+    it('注册失败只记审计，不影响收发消息', async () => {
+      const h = harness();
+      h.api.menuError = new Error('boom');
+      await bound(h);
+      await waitFor(
+        () => h.audits.some((entry) => entry.op === 'contact_commands' && !entry.ok),
+        'failed audit'
+      );
+      expect(h.service.state().telegram.status).toBe('bound');
+
+      h.api.sent.length = 0;
+      h.api.push(privateMessage('/status'));
+      await waitFor(() => h.api.sent.length > 0, 'command reply');
+      expect(h.api.sent.at(-1)?.text).toContain('进行中');
+    });
   });
 });
