@@ -2772,6 +2772,155 @@ describe('session_task_stop', () => {
   });
 });
 
+/** 已经终态的空闲派发记录：归档的合法输入 */
+const settledFile = (
+  conversationIds: string[] = ['c1'],
+  kind: 'goal-complete' | 'failed' = 'goal-complete'
+): SecretaryDispatchFile => ({
+  ...emptyFile(),
+  dispatched: Object.fromEntries(
+    conversationIds.map((conversationId) => [
+      conversationId,
+      {
+        conversationId,
+        projectId: 'p1',
+        secretaryConversationId: 'sec-1',
+        createdAt: 900,
+        turn: 1,
+        lastState: 'idle' as const,
+        lastEventAt: 900,
+        stateSince: 900,
+        lastResult: { kind, turn: 1, at: 950 },
+      },
+    ])
+  ),
+});
+
+const settledRows = (conversationIds: string[]) =>
+  Object.fromEntries(
+    conversationIds.map((id) => [
+      id,
+      { projectId: 'p1', title: `会话 ${id}`, sessionFile: `/s/${id}.jsonl` },
+    ])
+  );
+
+describe('session_archive', () => {
+  it('终态空闲的派发会话能归档，效果与手动归档一致', async () => {
+    const h = harness({
+      file: settledFile(['c1']),
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c1' });
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        results: [{ conversationId: 'c1', status: 'archived' }],
+        archived: 1,
+        skipped: 0,
+        failed: 0,
+      },
+    });
+    expect(h.archived).toEqual([{ conversationId: 'c1', at: NOW }]);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'session_archive',
+      targetId: 'c1',
+      ok: true,
+      detail: 'archived',
+    });
+  });
+
+  it('还在跑的会话拒绝归档并说明原因', async () => {
+    const h = harness({
+      file: {
+        ...settledFile(['c1']),
+        dispatched: {
+          c1: { ...settledFile(['c1']).dispatched.c1, lastState: 'running', lastResult: undefined },
+        },
+      },
+      rows: settledRows(['c1']),
+      statuses: { c1: running },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c1' });
+    expect(result.ok).toBe(true);
+    const payload = (result as { result: { results: { status: string; reason?: string }[] } })
+      .result;
+    expect(payload.results[0]?.status).toBe('skipped');
+    expect(payload.results[0]?.reason).toContain('still running');
+    expect(h.archived).toEqual([]);
+    expect(h.audits.at(-1)).toMatchObject({ op: 'session_archive', ok: false, detail: 'running' });
+  });
+
+  it('没有终态结果的会话拒绝归档', async () => {
+    const h = harness({
+      file: dispatchedFile('c1'),
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c1' });
+    const payload = (result as { result: { results: { status: string; reason?: string }[] } })
+      .result;
+    expect(payload.results[0]?.status).toBe('skipped');
+    expect(payload.results[0]?.reason).toContain('no finished result');
+    expect(h.archived).toEqual([]);
+  });
+
+  it('非派发会话拒绝归档', async () => {
+    const h = harness({
+      profile: { ...profile(), takeoverScope: { mode: 'projects', projectIds: ['p1'] } },
+      conversations: [rootConversation('c2')],
+      rows: settledRows(['c2']),
+      statuses: { c2: idle },
+    });
+    const result = await call(h.handlers.session_archive, { conversationId: 'c2' });
+    const payload = (result as { result: { results: { status: string; reason?: string }[] } })
+      .result;
+    expect(payload.results[0]?.status).toBe('skipped');
+    expect(payload.results[0]?.reason).toContain('not-operable');
+    expect(h.archived).toEqual([]);
+  });
+
+  it('批量归档逐条给结果，部分成功部分跳过', async () => {
+    const h = harness({
+      file: settledFile(['c1', 'c2']),
+      rows: settledRows(['c1', 'c2']),
+      statuses: { c1: idle, c2: running },
+    });
+    const result = await call(h.handlers.session_archive, { ids: ['c1', 'c2', 'c3'] });
+    expect(result.ok).toBe(true);
+    const payload = (
+      result as {
+        result: {
+          results: { conversationId: string; status: string }[];
+          archived: number;
+          skipped: number;
+        };
+      }
+    ).result;
+    expect(payload.results.map((entry) => [entry.conversationId, entry.status])).toEqual([
+      ['c1', 'archived'],
+      ['c2', 'skipped'],
+      ['c3', 'skipped'],
+    ]);
+    expect(payload.archived).toBe(1);
+    expect(payload.skipped).toBe(2);
+    expect(h.archived.map((entry) => entry.conversationId)).toEqual(['c1']);
+    // 每一条都留一条审计，成功与跳过都算
+    expect(h.audits.filter((entry) => entry.op === 'session_archive')).toHaveLength(3);
+  });
+
+  it('超过 20 个或没给 id 按参数错误拒绝', async () => {
+    const h = harness({ file: settledFile(['c1']), rows: settledRows(['c1']) });
+    const tooMany = await call(h.handlers.session_archive, {
+      ids: Array.from({ length: 21 }, (_, index) => `c${index}`),
+    });
+    expect(tooMany.ok).toBe(false);
+    const empty = await call(h.handlers.session_archive, {});
+    expect(empty.ok).toBe(false);
+    expect(h.archived).toEqual([]);
+  });
+});
+
 describe('看板停止遗留任务', () => {
   it('停掉记录里所有还在跑的任务并清掉遗留标记', async () => {
     const h = harness({

@@ -51,6 +51,7 @@ const GROUP_TITLES: Record<string, string> = {
   session_send: 'Sent {{count}} messages',
   session_stop: 'Stopped {{count}} sessions',
   session_task_stop: 'Stopped {{count}} background tasks',
+  session_archive: 'Archived {{count}} sessions',
   session_answer: 'Answered {{count}} questions',
   session_create: 'Created {{count}} sessions',
   todo_item_dispatch: 'Dispatched {{count}} to-dos',

@@ -111,6 +111,11 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     keys: ['conversationId', 'taskId'],
     aliases: { sessionId: 'conversationId', id: 'taskId', backgroundTaskId: 'taskId' },
   },
+  session_archive: {
+    keys: ['conversationId', 'ids'],
+    arrays: ['ids'],
+    aliases: { sessionId: 'conversationId', conversationIds: 'ids', id: 'ids' },
+  },
   session_answer: {
     keys: ['conversationId', 'askId', 'answer'],
     aliases: { sessionId: 'conversationId', id: 'askId', requestId: 'askId' },
@@ -499,6 +504,20 @@ const SCHEMAS: Record<
       },
       ['conversationId', 'taskId']
     ),
+  },
+  session_archive: {
+    description:
+      'Archive sessions you dispatched or track, once they are finished and idle. Pass one conversationId or up to 20 ids. A session is only archived when it already has a terminal result (goal-complete, failed or interrupted), is not running, has no unfinished background task and is not waiting for the user; anything else is skipped with the reason and must not be retried. Archiving is the same as the user archiving it by hand: it leaves the sidebar list and shows up under archived sessions. Nothing is deleted. The call is audited per session and returns one row per id: status archived, skipped or failed, with the reason.',
+    parameters: object({
+      conversationId: id('Session id from session_list or session_tasks'),
+      ids: {
+        type: 'array',
+        items: { type: 'string', minLength: 1, maxLength: SECRETARY_ID_MAX },
+        minItems: 1,
+        maxItems: 20,
+        description: 'Session ids to archive in one call, at most 20',
+      },
+    }),
   },
   session_answer: {
     description:

@@ -88,6 +88,32 @@ export const STOP_CONFIRM_TIMEOUT_MS = 10_000;
 /** 一次派发最多等几个依赖 */
 export const MAX_DISPATCH_DEPENDENCIES = 10;
 
+/** 一次最多归档几个会话：和看板批量操作同一个量级 */
+export const MAX_ARCHIVE_IDS = 20;
+
+/** 归档一条会话的结果：skipped 是前置条件不满足，failed 是写盘出错 */
+export type ArchiveStatus = 'archived' | 'skipped' | 'failed';
+
+export interface ArchiveOutcome {
+  conversationId: string;
+  status: ArchiveStatus;
+  reason?: string;
+}
+
+/** 归档被拒的原因码，模型看到的是可读说明 */
+const ARCHIVE_REFUSALS: Record<string, string> = {
+  'not-operable':
+    'skipped (not-operable): only sessions you dispatched or already track can be archived; this one is not yours to tidy up',
+  'not-found': 'skipped (not-found): no such session, it may already be deleted',
+  'already-archived': 'skipped (already-archived): this session is already in the archived list',
+  'not-terminal':
+    'skipped (not-terminal): the session has no finished result yet (goal-complete, failed or interrupted); wait for it to finish',
+  running:
+    'skipped (running): the session is still running or still has an unfinished background task; stop it first with session_stop or session_task_stop',
+  'needs-user':
+    'skipped (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+};
+
 /** 秘书排进目标会话队列的消息：origin 标记来源，撤回与停止清队列只认自己排的 */
 export interface SecretaryQueuedMessage {
   id: string;
@@ -191,6 +217,7 @@ const DISPATCH_OPS = [
   'session_queue_cancel',
   'session_stop',
   'session_task_stop',
+  'session_archive',
   'session_answer',
   'session_takeover_propose',
   'todo_list',
@@ -1074,6 +1101,43 @@ async function checkOperate(
   return { ok: true, source, conversation, projectId };
 }
 
+/** 归档的目标：单个 conversationId 与 ids 列表合并去重，超上限整单拒绝 */
+function archiveIds(params: Record<string, unknown>): string[] | null {
+  const ids: string[] = [];
+  const single = stringParam(params, 'conversationId');
+  if (single) ids.push(single);
+  const list = params.ids;
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      const id = typeof item === 'string' ? item.trim() : '';
+      if (id) ids.push(id);
+    }
+  }
+  const unique = [...new Set(ids)];
+  return unique.length > 0 && unique.length <= MAX_ARCHIVE_IDS ? unique : null;
+}
+
+/**
+ * 归档一条会话的前置条件：只认派发或接管跟踪的记录，且已经终态、空闲、没有待处理项。
+ * 返回原因码，null 表示可以归档。
+ */
+async function archiveRefusal(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<string | null> {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return 'not-operable';
+  const row = (await ports.rows())[conversationId];
+  if (!row) return 'not-found';
+  if (row.archived === true) return 'already-archived';
+  const status = await ports.status(conversationId);
+  if (status.pendingAsks + status.pendingApprovals > 0) return 'needs-user';
+  if (countsAsRunning(record, row, status)) return 'running';
+  if (!record.lastResult || !SETTLED_RESULTS.has(record.lastResult.kind)) return 'not-terminal';
+  return null;
+}
+
 /**
  * 范围接管的会话第一次被真正用上：从这一刻起才跟踪它的状态与结果。
  * 之前不建记录，所以范围里的其他会话不会被推给秘书，也不改未读与静音。
@@ -1529,6 +1593,74 @@ export function createSecretaryDispatchHandlers(
       notifySecretaryChanged();
       if (!stopped.ok) return { ok: false, error: stopped.error ?? 'stop failed' };
       return { ok: true, result: { status: 'stopped', conversationId, taskId } };
+    },
+
+    /**
+     * 归档会话：效果与用户手动归档一致（侧栏消失、进归档区），只认派发或接管跟踪的记录，
+     * 且必须已经终态、空闲、没有待处理项。批量逐条给结果，逐条审计。
+     */
+    async session_archive(params, ctx) {
+      const ids = archiveIds(params);
+      if (!ids) {
+        return {
+          ok: false,
+          error: `invalid arguments: pass "conversationId" or "ids" with 1-${MAX_ARCHIVE_IDS} session ids`,
+        };
+      }
+      const results: ArchiveOutcome[] = [];
+      for (const conversationId of ids) {
+        const refusal = await archiveRefusal(ports, conversationId);
+        if (refusal) {
+          results.push({ conversationId, status: 'skipped', reason: refusal });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_archive',
+            targetId: conversationId,
+            ok: false,
+            detail: refusal,
+          });
+          continue;
+        }
+        try {
+          await ports.cleanup.archive(conversationId, ports.now());
+          results.push({ conversationId, status: 'archived' });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_archive',
+            targetId: conversationId,
+            ok: true,
+            detail: 'archived',
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'archive failed';
+          results.push({ conversationId, status: 'failed', reason });
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_archive',
+            targetId: conversationId,
+            ok: false,
+            detail: reason,
+          });
+        }
+      }
+      notifySecretaryChanged();
+      const count = (status: ArchiveStatus) =>
+        results.filter((entry) => entry.status === status).length;
+      return {
+        ok: true,
+        result: {
+          results: results.map((entry) => ({
+            ...entry,
+            ...(entry.reason ? { reason: ARCHIVE_REFUSALS[entry.reason] ?? entry.reason } : {}),
+          })),
+          archived: count('archived'),
+          skipped: count('skipped'),
+          failed: count('failed'),
+        },
+      };
     },
 
     async session_answer(params, ctx) {

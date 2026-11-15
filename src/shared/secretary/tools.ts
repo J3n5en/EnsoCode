@@ -16,6 +16,7 @@ export const SECRETARY_OPS = [
   'session_queue_cancel',
   'session_stop',
   'session_task_stop',
+  'session_archive',
   'session_answer',
   'session_takeover_propose',
   'image_view',
