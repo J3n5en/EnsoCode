@@ -14,6 +14,8 @@ export interface ContactFile {
   boundAt?: number;
   /** 默认关闭：派发类确认卡不允许从手机确认 */
   allowDispatchConfirm: boolean;
+  /** 默认关闭：记忆标题不往 Telegram 发（消息会留在 Telegram 服务器上） */
+  allowMemory: boolean;
   /** getUpdates 的游标：先落盘再处理，重启不重放已经产生过副作用的更新 */
   pollOffset: number;
   /** 绑定向导中间态：码、过期时间与已经对不上的次数，绑完即清 */
@@ -21,7 +23,7 @@ export interface ContactFile {
 }
 
 export function emptyContactFile(): ContactFile {
-  return { version: 1, allowDispatchConfirm: false, pollOffset: 0 };
+  return { version: 1, allowDispatchConfirm: false, allowMemory: false, pollOffset: 0 };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,6 +73,7 @@ export function parseContactFile(raw: unknown): ContactFile {
     ...(chat ? { chat } : {}),
     ...(typeof raw.boundAt === 'number' ? { boundAt: raw.boundAt } : {}),
     allowDispatchConfirm: raw.allowDispatchConfirm === true,
+    allowMemory: raw.allowMemory === true,
     pollOffset: typeof raw.pollOffset === 'number' && raw.pollOffset > 0 ? raw.pollOffset : 0,
     ...(bind ? { bind } : {}),
   };
@@ -121,6 +124,7 @@ export class ContactStore {
       version: 1,
       ...(current.bot ? { bot: current.bot } : {}),
       allowDispatchConfirm: current.allowDispatchConfirm,
+      allowMemory: current.allowMemory,
       pollOffset: 0,
     });
   }
@@ -128,9 +132,11 @@ export class ContactStore {
   /** 更换或删除 bot：token、bot 身份、chat 一起清 */
   async saveForgotten(): Promise<ContactFile> {
     await this.saveToken(null);
+    const current = this.file();
     return this.save({
       version: 1,
-      allowDispatchConfirm: this.file().allowDispatchConfirm,
+      allowDispatchConfirm: current.allowDispatchConfirm,
+      allowMemory: current.allowMemory,
       pollOffset: 0,
     });
   }

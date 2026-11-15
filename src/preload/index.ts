@@ -477,10 +477,11 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT),
     contactTest: (): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST),
-    contactSettings: (
-      allowDispatchConfirm: boolean
-    ): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, { allowDispatchConfirm }),
+    contactSettings: (patch: {
+      allowDispatchConfirm?: boolean;
+      allowMemory?: boolean;
+    }): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
     /** 深链 enso://secretary?conversation=<id>：Main 要求选中某个会话 */
     onOpenConversation: (callback: (conversationId: string) => void): (() => void) => {
       const listener = (_event: unknown, conversationId: string) => callback(conversationId);

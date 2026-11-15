@@ -1,0 +1,445 @@
+import type { SecretaryDaily, SecretaryScheduleView } from '../types/secretary';
+import { CONTACT_OUTBOUND_MAX_CHARS, type ContactLang, conversationDeepLink } from './contact';
+import { dayKey, parseDayKey, shiftDay } from './daily';
+
+/**
+ * 手机上的只读命令：由 Main 直接查面板同一份数据、格式化后回复，
+ * 不进秘书会话、不唤醒模型。命令名是 Telegram 规范的小写英文。
+ */
+export type ContactCommandName =
+  | 'status'
+  | 'board'
+  | 'feed'
+  | 'todo'
+  | 'schedules'
+  | 'memory'
+  | 'help';
+
+export interface ContactCommandSpec {
+  name: ContactCommandName;
+  /** setMyCommands 里的中文描述 */
+  zh: string;
+  en: string;
+  /** 默认关闭：记忆标题会留在 Telegram 服务器上 */
+  gated?: true;
+}
+
+export const CONTACT_COMMANDS: readonly ContactCommandSpec[] = [
+  {
+    name: 'status',
+    zh: '进行中的会话，以及需要你处理的',
+    en: 'Running sessions and what needs you',
+  },
+  {
+    name: 'board',
+    zh: '今天的看板；可带日期，如 /board 2026-05-20 或 yesterday',
+    en: "Today's board; optional date",
+  },
+  { name: 'feed', zh: '最近的动态，底部可翻更早', en: 'Recent activity, with an older button' },
+  { name: 'todo', zh: '未完成的待办', en: 'Open todos' },
+  { name: 'schedules', zh: '定时任务与下次运行时间', en: 'Scheduled tasks and next run' },
+  {
+    name: 'memory',
+    zh: '秘书记得的标题（默认关闭）',
+    en: 'Memory titles (off by default)',
+    gated: true,
+  },
+  { name: 'help', zh: '列出所有命令', en: 'List every command' },
+];
+
+/** setMyCommands 的入参：命令名不带斜杠，描述用中文 */
+export function botCommands(): { command: string; description: string }[] {
+  return CONTACT_COMMANDS.map((spec) => ({ command: spec.name, description: spec.zh }));
+}
+
+/**
+ * 解析一条命令。群里 Telegram 会带 @botname 后缀，一并认。
+ * 不认识的返回 null，由调用方决定是提示还是当成普通消息。
+ */
+export function parseContactCommand(
+  text: string
+): { name: ContactCommandName; arg: string } | null {
+  const match = /^\/([A-Za-z][A-Za-z0-9_]{0,31})(?:@\w+)?(?:\s+([\s\S]*))?$/.exec(text.trim());
+  if (!match) return null;
+  const name = match[1].toLowerCase();
+  const arg = (match[2] ?? '').trim();
+  if (name === 'start') return { name: 'help', arg };
+  const known = CONTACT_COMMANDS.find((spec) => spec.name === name);
+  return known ? { name: known.name, arg } : null;
+}
+
+/** /help 与欢迎消息里的命令清单 */
+export function commandListText(lang: ContactLang, allowMemory: boolean): string {
+  return CONTACT_COMMANDS.filter((spec) => !spec.gated || allowMemory)
+    .map((spec) => `/${spec.name} — ${lang === 'zh' ? spec.zh : spec.en}`)
+    .join('\n');
+}
+
+/** Telegram 的 HTML 模式只认这三个实体，正文里的特殊字符一律转义 */
+export function escapeHtml(text: string): string {
+  return text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
+}
+
+/** 一行里放得下的正文：压成一行并截断，避免一条进度把整条消息撑爆 */
+export function shortText(text: string | undefined, max = 90): string {
+  const flat = (text ?? '').replace(/\s+/gu, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/**
+ * 按行拼到上限为止：整行丢弃，不会把 HTML 标签或实体切两半。
+ * 超了就在末尾说明还有多少行没显示。
+ */
+export function fitLines(lines: readonly string[], lang: ContactLang): string {
+  const kept: string[] = [];
+  let size = 0;
+  for (const line of lines) {
+    const next = size + line.length + (kept.length > 0 ? 1 : 0);
+    if (next > CONTACT_OUTBOUND_MAX_CHARS - 24) {
+      const rest = lines.length - kept.length;
+      kept.push(lang === 'zh' ? `…还有 ${rest} 行没显示` : `…${rest} more lines`);
+      break;
+    }
+    kept.push(line);
+    size = next;
+  }
+  return kept.join('\n');
+}
+
+/** 跑了多久：手机上一眼能读的粗粒度 */
+export function formatElapsed(ms: number, lang: ContactLang): string {
+  const zh = lang === 'zh';
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return zh ? '刚刚' : 'just now';
+  if (minutes < 60) return zh ? `${minutes} 分钟` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rest = minutes % 60;
+    if (rest === 0) return zh ? `${hours} 小时` : `${hours}h`;
+    return zh ? `${hours} 小时 ${rest} 分` : `${hours}h ${rest}m`;
+  }
+  return zh ? `${Math.floor(hours / 24)} 天` : `${Math.floor(hours / 24)}d`;
+}
+
+/** 本地时间：手机上要能直接对上钟点，不带时区缩写 */
+export function formatClock(at: number): string {
+  const date = new Date(at);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export type ContactBadge = 'running' | 'waiting' | 'background' | 'continuing' | 'idle' | 'failed';
+
+/** 与侧栏「进行中」列表同一套徽标文案 */
+const BADGE_TEXT: Record<ContactLang, Record<ContactBadge, string>> = {
+  zh: {
+    running: '运行中',
+    waiting: '等你回答',
+    background: '等后台任务',
+    continuing: '续跑中',
+    idle: '空闲',
+    failed: '失败',
+  },
+  en: {
+    running: 'Running',
+    waiting: 'Waiting for you',
+    background: 'Waiting on a background task',
+    continuing: 'Continuing',
+    idle: 'Idle',
+    failed: 'Failed',
+  },
+};
+
+export function badgeText(lang: ContactLang, badge: ContactBadge): string {
+  return BADGE_TEXT[lang][badge];
+}
+
+/**
+ * 侧栏「进行中」列表与手机 /status 共用的判定：
+ * 出错、等你、在跑优先；空闲时再看是不是在等后台任务或还要续跑。
+ */
+export function sessionBadge(card: {
+  state: string;
+  backgroundRunning?: boolean;
+  continuing?: boolean;
+}): ContactBadge {
+  if (card.state === 'error') return 'failed';
+  if (card.state === 'waiting') return 'waiting';
+  if (card.state === 'running') return 'running';
+  if (card.backgroundRunning) return 'background';
+  if (card.continuing) return 'continuing';
+  return 'idle';
+}
+
+/** 看板与动态的标签是共享常量，面板靠 i18n 翻，手机上在这里翻 */
+const LABEL_ZH: Record<string, string> = {
+  'Goal complete': '完成',
+  'Turn ended': '一轮结束',
+  'Goal blocked': '目标受阻',
+  'Waiting for you': '等你回答',
+  Stalled: '停滞',
+  Interrupted: '已中断',
+  Failed: '失败',
+  Started: '开始',
+  Idle: '空闲',
+  'Not started': '未开始',
+  'In progress': '进行中',
+  'Waiting on a background task': '等后台任务',
+  'Waiting for your confirmation': '等你确认',
+  'Waiting for dependencies': '等依赖',
+  'Dispatch problem': '派发出问题',
+  'Secretary saw this': '秘书看到了',
+  Added: '新增',
+  Done: '完成',
+};
+
+export function labelText(lang: ContactLang, label: string): string {
+  return lang === 'zh' ? (LABEL_ZH[label] ?? label) : label;
+}
+
+export interface ContactStatusRow {
+  title: string;
+  projectName: string;
+  badge: ContactBadge;
+  since: number;
+  lastText?: string;
+  conversationId: string;
+}
+
+function linkedTitle(row: { title: string; conversationId?: string }): string {
+  const title = escapeHtml(row.title.trim() || '未命名');
+  if (!row.conversationId) return title;
+  return `<a href="${conversationDeepLink(row.conversationId)}">${title}</a>`;
+}
+
+function statusBlock(lang: ContactLang, row: ContactStatusRow, now: number): string[] {
+  const meta = [badgeText(lang, row.badge), formatElapsed(now - row.since, lang)];
+  const project = row.projectName ? ` · ${escapeHtml(row.projectName)}` : '';
+  const lines = [`▸ ${linkedTitle(row)}${project}`, `   ${meta.join(' · ')}`];
+  const last = shortText(row.lastText);
+  if (last) lines.push(`   ${escapeHtml(last)}`);
+  return lines;
+}
+
+/** /status：进行中 + 需要你处理，两块分开列 */
+export function formatStatusMessage(
+  lang: ContactLang,
+  input: {
+    running: readonly ContactStatusRow[];
+    needsYou: readonly ContactStatusRow[];
+    now: number;
+  }
+): string {
+  const zh = lang === 'zh';
+  const lines: string[] = [];
+  if (input.running.length === 0 && input.needsYou.length === 0) {
+    return zh
+      ? '现在没有在跑的会话，也没有等你处理的。'
+      : 'Nothing is running and nothing needs you.';
+  }
+  if (input.running.length > 0) {
+    lines.push(`<b>${zh ? '进行中' : 'Running'} ${input.running.length}</b>`);
+    for (const row of input.running) lines.push(...statusBlock(lang, row, input.now));
+  }
+  if (input.needsYou.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push(`<b>${zh ? '需要你处理' : 'Needs you'} ${input.needsYou.length}</b>`);
+    for (const row of input.needsYou) lines.push(...statusBlock(lang, row, input.now));
+  }
+  return fitLines(lines, lang);
+}
+
+/** /board 的日期参数：今天、昨天、或 YYYY-MM-DD */
+export function parseBoardDay(arg: string, now: number): string | null {
+  const value = arg.trim().toLowerCase();
+  const today = dayKey(now);
+  if (value === '' || value === 'today' || value === '今天') return today;
+  if (value === 'yesterday' || value === '昨天') return shiftDay(today, -1);
+  return parseDayKey(value);
+}
+
+const DAILY_GROUP_LABEL: Record<ContactLang, Record<string, string>> = {
+  zh: {
+    running: '进行中',
+    needsYou: '需要你',
+    done: '完成',
+    failed: '失败',
+    todos: '待办',
+    changes: '设置变更',
+  },
+  en: {
+    running: 'Running',
+    needsYou: 'Needs you',
+    done: 'Done',
+    failed: 'Failed',
+    todos: 'Todos',
+    changes: 'Changes',
+  },
+};
+
+/** /board：一行统计，再按列列卡片标题 */
+export function formatBoardMessage(
+  lang: ContactLang,
+  daily: SecretaryDaily,
+  options: { perGroup?: number } = {}
+): string {
+  const zh = lang === 'zh';
+  const perGroup = options.perGroup ?? 8;
+  const counts = daily.counts;
+  const head = zh
+    ? `<b>${daily.day}${daily.today ? '（今天）' : ''}</b>`
+    : `<b>${daily.day}${daily.today ? ' (today)' : ''}</b>`;
+  const stats = zh
+    ? `派出 ${counts.dispatched} · 完成 ${counts.completed} · 失败 ${counts.failed} · 需要你 ${counts.needsYou}`
+    : `dispatched ${counts.dispatched} · done ${counts.completed} · failed ${counts.failed} · needs you ${counts.needsYou}`;
+  const lines = [head, stats];
+  if (daily.groups.length === 0) {
+    lines.push(zh ? '这一天没有记录。' : 'No records for this day.');
+    return fitLines(lines, lang);
+  }
+  for (const group of daily.groups) {
+    lines.push('');
+    lines.push(`<b>${DAILY_GROUP_LABEL[lang][group.key] ?? group.key} ${group.items.length}</b>`);
+    for (const item of group.items.slice(0, perGroup)) {
+      const link = linkedTitle({
+        title: shortText(item.title || item.id, 70),
+        ...(item.conversationId ? { conversationId: item.conversationId } : {}),
+      });
+      const label = item.label ? ` · ${escapeHtml(labelText(lang, item.label))}` : '';
+      const project = item.projectName ? ` · ${escapeHtml(item.projectName)}` : '';
+      lines.push(`▸ ${link}${project}${label}`);
+    }
+    if (group.items.length > perGroup) {
+      const rest = group.items.length - perGroup;
+      lines.push(zh ? `…还有 ${rest} 条` : `…${rest} more`);
+    }
+  }
+  return fitLines(lines, lang);
+}
+
+export interface ContactFeedRow {
+  id: string;
+  at: number;
+  title: string;
+  projectName: string;
+  label: string;
+  detail?: string;
+  conversationId?: string;
+}
+
+/** /feed：最近几条动态，新的在前 */
+export function formatFeedMessage(
+  lang: ContactLang,
+  input: { events: readonly ContactFeedRow[]; hasMore: boolean }
+): string {
+  const zh = lang === 'zh';
+  if (input.events.length === 0) return zh ? '还没有动态。' : 'No activity yet.';
+  const lines = [`<b>${zh ? '最近动态' : 'Recent activity'}</b>`];
+  for (const event of input.events) {
+    const time = formatClock(event.at);
+    const project = event.projectName ? ` · ${escapeHtml(event.projectName)}` : '';
+    lines.push(
+      `▸ ${time} ${linkedTitle(event)}${project} · ${escapeHtml(labelText(lang, event.label))}`
+    );
+    const detail = shortText(event.detail, 70);
+    if (detail) lines.push(`   ${escapeHtml(detail)}`);
+  }
+  if (input.hasMore) {
+    lines.push('');
+    lines.push(zh ? '点下面的按钮看更早的。' : 'Tap below for older.');
+  }
+  return fitLines(lines, lang);
+}
+
+export interface ContactTodoRow {
+  text: string;
+  phase?: string;
+  projectName?: string;
+}
+
+/** /todo：进行中与待办分开，problem 的标一下 */
+export function formatTodoMessage(lang: ContactLang, todos: readonly ContactTodoRow[]): string {
+  const zh = lang === 'zh';
+  const active = todos.filter((todo) => todo.phase === 'active');
+  const open = todos.filter((todo) => todo.phase !== 'active');
+  if (active.length === 0 && open.length === 0) {
+    return zh ? '没有未完成的待办。' : 'No open todos.';
+  }
+  const lines: string[] = [];
+  const block = (label: string, items: readonly ContactTodoRow[]): void => {
+    if (items.length === 0) return;
+    if (lines.length > 0) lines.push('');
+    lines.push(`<b>${label} ${items.length}</b>`);
+    for (const todo of items) {
+      const mark = todo.phase === 'problem' ? ' ⚠' : '';
+      const project = todo.projectName ? ` · ${escapeHtml(todo.projectName)}` : '';
+      lines.push(`▸ ${escapeHtml(shortText(todo.text, 70))}${project}${mark}`);
+    }
+  };
+  block(zh ? '进行中' : 'Active', active);
+  block(zh ? '待办' : 'To do', open);
+  return fitLines(lines, lang);
+}
+
+/** /schedules：名称、人话周期、下次运行 */
+export function formatSchedulesMessage(
+  lang: ContactLang,
+  input: {
+    schedules: readonly (SecretaryScheduleView & { human?: string })[];
+    now: number;
+  }
+): string {
+  const zh = lang === 'zh';
+  if (input.schedules.length === 0) return zh ? '没有定时任务。' : 'No scheduled tasks.';
+  const lines = [`<b>${zh ? '定时任务' : 'Scheduled'} ${input.schedules.length}</b>`];
+  for (const schedule of input.schedules) {
+    const when = schedule.human ?? schedule.cron ?? schedule.at ?? '';
+    const next =
+      schedule.nextRunAt !== undefined
+        ? zh
+          ? `下次 ${formatClock(schedule.nextRunAt)}`
+          : `next ${formatClock(schedule.nextRunAt)}`
+        : zh
+          ? '下次时间未定'
+          : 'next run unknown';
+    lines.push(`▸ ${escapeHtml(shortText(schedule.name, 50))} · ${escapeHtml(when)} · ${next}`);
+  }
+  return fitLines(lines, lang);
+}
+
+/** /memory：只给标题，正文一律不出手机 */
+export function formatMemoryMessage(
+  lang: ContactLang,
+  input: { titles: readonly string[]; total: number }
+): string {
+  const zh = lang === 'zh';
+  if (input.titles.length === 0) return zh ? '秘书记得的还不多。' : 'Nothing saved yet.';
+  const lines = [`<b>${zh ? '秘书记得' : 'Remembered'} ${input.total}</b>`];
+  for (const title of input.titles) lines.push(`▸ ${escapeHtml(shortText(title, 70))}`);
+  if (input.total > input.titles.length) {
+    const rest = input.total - input.titles.length;
+    lines.push(zh ? `…还有 ${rest} 条` : `…${rest} more`);
+  }
+  lines.push(zh ? '只显示标题；正文留在应用里。' : 'Titles only; the full text stays in the app.');
+  return fitLines(lines, lang);
+}
+
+/** /memory 关闭时的回复 */
+export function memoryDisabledText(lang: ContactLang): string {
+  return lang === 'zh'
+    ? '记忆标题默认不在 Telegram 显示。要看得在应用的「联系方式」页打开开关。'
+    : 'Memory titles are hidden on Telegram by default. Turn it on in the app under Contacts.';
+}
+
+/** 不认识的命令：给个清单，不要静默 */
+export function unknownCommandText(lang: ContactLang, allowMemory: boolean): string {
+  const head = lang === 'zh' ? '没有这个命令。可用的有：' : 'Unknown command. Available:';
+  return `${head}\n${commandListText(lang, allowMemory)}`;
+}
+
+/** /board 日期写错时的提示 */
+export function badDayText(lang: ContactLang): string {
+  return lang === 'zh'
+    ? '日期看不懂。用 /board 2026-05-20 或 /board yesterday。'
+    : 'Unrecognized date. Use /board 2026-05-20 or /board yesterday.';
+}

@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { FeedCursor } from '@shared/secretary/feed';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TelegramApi, TelegramInlineKeyboard, TelegramUpdate, TelegramUser } from './client';
@@ -11,7 +12,19 @@ const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
 
 /** 假 Telegram：不碰网络，更新由用例 push，出站全部记下来 */
 class FakeApi implements TelegramApi {
-  sent: { chatId: number; text: string; replyMarkup?: TelegramInlineKeyboard }[] = [];
+  sent: {
+    chatId: number;
+    text: string;
+    replyMarkup?: TelegramInlineKeyboard;
+    parseMode?: 'HTML';
+  }[] = [];
+  edited: {
+    chatId: number;
+    messageId: number;
+    text: string;
+    replyMarkup?: TelegramInlineKeyboard;
+  }[] = [];
+  commands: { command: string; description: string }[][] = [];
   callbacks: { callbackQueryId: string; text?: string }[] = [];
   polls = 0;
   me: TelegramUser = { id: 42, username: 'enso_secretary_bot', first_name: 'Enso' };
@@ -47,9 +60,24 @@ class FakeApi implements TelegramApi {
     chatId: number;
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
+    parseMode?: 'HTML';
   }): Promise<number> {
     this.sent.push(params);
     return this.sent.length;
+  }
+
+  async editMessageText(params: {
+    chatId: number;
+    messageId: number;
+    text: string;
+    replyMarkup?: TelegramInlineKeyboard;
+    parseMode?: 'HTML';
+  }): Promise<void> {
+    this.edited.push(params);
+  }
+
+  async setMyCommands(commands: { command: string; description: string }[]): Promise<void> {
+    this.commands.push(commands);
   }
 
   async answerCallbackQuery(params: { callbackQueryId: string; text?: string }): Promise<void> {
@@ -68,6 +96,12 @@ function harness() {
   const clock = { now: 1_000_000 };
   const world = {
     mode: 'with-done' as SecretaryProfile['notify'],
+    /** 手机命令读到的假数据 */
+    statusText: '进行中 1\n▸ 修登录',
+    memoryText: '秘书记得 1\n▸ 部署窗口',
+    feedPages: [] as string[],
+    memoryAllowed: false,
+    commandCalls: [] as string[],
     conversationId: 'sec-1' as string | null,
     delivered: [] as string[],
     answers: [] as { requestId: string; answer: string }[],
@@ -99,6 +133,27 @@ function harness() {
       return { ok: true };
     },
     api: () => api,
+    commands: {
+      run: async (name) => {
+        world.commandCalls.push(name);
+        if (name === 'memory') {
+          return {
+            text: store.file().allowMemory ? world.memoryText : '记忆标题默认不在 Telegram 显示。',
+          };
+        }
+        if (name === 'feed') {
+          return {
+            text: world.feedPages[0] ?? '最近动态',
+            next: { at: 10, id: 'e1' } as FeedCursor,
+          };
+        }
+        return { text: world.statusText };
+      },
+      feedPage: async (before) => {
+        world.commandCalls.push(`feed:${before.id}`);
+        return { text: world.feedPages[1] ?? '更早的动态' };
+      },
+    },
   });
   return { dir, store, api, audits, clock, world, service };
 }
@@ -563,5 +618,153 @@ describe('解绑与更换 bot', () => {
     await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
     expect(await h.service.sendTest()).toEqual({ ok: true });
     expect(h.api.sent.at(-1)?.text).toContain('测试消息');
+  });
+});
+
+describe('只读命令', () => {
+  async function bound(h: ReturnType<typeof harness>): Promise<void> {
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+  }
+
+  it('绑定的 chat 发 /status：直接回面板数据，不进秘书会话', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.delivered.length = 0;
+    h.api.sent.length = 0;
+    h.api.push(privateMessage('/status'));
+    await waitFor(() => h.api.sent.length > 0, 'command reply');
+    expect(h.api.sent.at(-1)?.text).toContain('进行中 1');
+    expect(h.api.sent.at(-1)?.parseMode).toBe('HTML');
+    // 不唤醒秘书：没有任何投递
+    expect(h.world.delivered).toEqual([]);
+    expect(h.world.commandCalls).toEqual(['status']);
+    // 审计只记命令名
+    const entry = h.audits.find((item) => item.op === 'contact_command');
+    expect(entry).toMatchObject({ ok: true, detail: 'status' });
+    expect(JSON.stringify(entry)).not.toContain('修登录');
+  });
+
+  it('别的 chat 发命令一律忽略，只记审计', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.commandCalls.length = 0;
+    h.api.sent.length = 0;
+    h.api.push(privateMessage('/status', 999));
+    await waitFor(
+      () => h.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
+      'rejected'
+    );
+    expect(h.world.commandCalls).toEqual([]);
+    expect(h.api.sent).toEqual([]);
+    expect(h.audits.some((entry) => entry.op === 'contact_command')).toBe(false);
+  });
+
+  it('/memory 关着时只提示开关，打开后才给标题', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.sent.length = 0;
+    h.api.push(privateMessage('/memory'));
+    await waitFor(() => h.api.sent.length > 0, 'memory closed');
+    expect(h.api.sent.at(-1)?.text).toContain('默认不在 Telegram 显示');
+
+    h.service.setAllowMemory(true);
+    h.api.sent.length = 0;
+    h.api.push(privateMessage('/memory'));
+    await waitFor(() => h.api.sent.length > 0, 'memory open');
+    expect(h.api.sent.at(-1)?.text).toContain('部署窗口');
+    expect(h.service.state().telegram.allowMemory).toBe(true);
+  });
+
+  it('/feed 带「更早」按钮，点了原地换下一页', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.sent.length = 0;
+    h.api.push(privateMessage('/feed'));
+    await waitFor(() => h.api.sent.length > 0, 'feed');
+    const button = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard?.[0]?.[0];
+    expect(button?.text).toBe('更早');
+    expect(button?.callback_data).toMatch(/^feed:f\d+$/u);
+
+    h.api.push({
+      update_id: 9,
+      callback_query: {
+        id: 'cb-feed',
+        data: button?.callback_data,
+        message: { message_id: 55, chat: { id: 777, type: 'private' } },
+      },
+    });
+    await waitFor(() => h.api.edited.length > 0, 'feed edited');
+    expect(h.api.edited.at(-1)).toMatchObject({ messageId: 55, text: '更早的动态' });
+    expect(h.world.commandCalls).toContain('feed:e1');
+    expect(h.api.callbacks.at(-1)?.callbackQueryId).toBe('cb-feed');
+  });
+
+  it('翻页按钮过期只提示，不改消息', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push({
+      update_id: 10,
+      callback_query: {
+        id: 'cb-old',
+        data: 'feed:f999',
+        message: { message_id: 56, chat: { id: 777, type: 'private' } },
+      },
+    });
+    await waitFor(() => h.api.callbacks.length > 0, 'expired toast');
+    expect(h.api.edited).toEqual([]);
+    expect(h.api.callbacks.at(-1)?.text).toContain('失效');
+  });
+
+  it('写错的命令给清单，也不进秘书会话', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.delivered.length = 0;
+    h.api.sent.length = 0;
+    h.api.push(privateMessage('/deploy'));
+    await waitFor(() => h.api.sent.length > 0, 'unknown command');
+    expect(h.api.sent.at(-1)?.text).toContain('/status');
+    expect(h.world.delivered).toEqual([]);
+    expect(h.audits.find((entry) => entry.op === 'contact_command')?.detail).toBe('unknown');
+  });
+
+  it('带斜杠的普通句子照常进秘书会话，不被当成命令', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.delivered.length = 0;
+    h.api.push(privateMessage('/etc/hosts 这个文件要不要改'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(h.world.delivered[0]).toContain('/etc/hosts');
+  });
+
+  it('绑定成功：欢迎消息带命令清单，菜单里先不登记 /memory', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    const welcome = h.api.sent.find((message) => message.text.includes('已连上'));
+    expect(welcome?.text).toContain('/status');
+    expect(welcome?.text).not.toContain('/memory');
+    const menu = h.api.commands.at(-1)?.map((entry) => entry.command) ?? [];
+    expect(menu).toContain('status');
+    expect(menu).not.toContain('memory');
+
+    h.service.setAllowMemory(true);
+    const after = h.api.commands.at(-1)?.map((entry) => entry.command) ?? [];
+    expect(after).toContain('memory');
+  });
+
+  it('解绑后轮询停掉，命令不会再被执行', async () => {
+    const h = harness();
+    await bound(h);
+    await h.service.unbind();
+    h.world.commandCalls.length = 0;
+    h.api.sent.length = 0;
+    h.api.push(privateMessage('/status'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(h.world.commandCalls).toEqual([]);
+    expect(h.api.sent).toEqual([]);
+    expect(h.service.state().telegram.status).toBe('unbound');
   });
 });

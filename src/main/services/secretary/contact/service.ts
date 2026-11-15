@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
+  botCommands,
+  type ContactCommandName,
+  commandListText,
+  escapeHtml,
+  parseContactCommand,
+  unknownCommandText,
+} from '@shared/secretary/commands';
+import {
   askCallbackData,
   askCallbackToast,
   bindCodeUsable,
@@ -12,6 +20,7 @@ import {
   cardCallbackData,
   cardCallbackToast,
   createBindCode,
+  feedCallbackData,
   formatAskMessage,
   formatCardWaitingMessage,
   formatInboundMessage,
@@ -22,9 +31,11 @@ import {
   normalizeBotToken,
   parseAskCallbackData,
   parseCardCallbackData,
+  parseFeedCallback,
   shouldForwardMilestone,
   startCommandCode,
 } from '@shared/secretary/contact';
+import type { FeedCursor } from '@shared/secretary/feed';
 import type { AskRequestInfo } from '@shared/types/agent';
 import type {
   SecretaryAuditEntry,
@@ -40,6 +51,7 @@ import {
   type TelegramMessage,
   type TelegramUpdate,
 } from './client';
+import type { ContactCommands } from './commands';
 import { ContactPoller } from './poller';
 import type { ContactStore } from './store';
 
@@ -113,6 +125,8 @@ export interface ContactServicePorts {
   ): Promise<{ ok: boolean; error?: string }>;
   /** 出站失败只提示，不打断秘书 */
   onError?(code: ContactError, detail?: string): void;
+  /** 只读命令：由 Main 查面板同一份数据，不进秘书会话 */
+  commands?: ContactCommands;
   /** 测试注入假 API；生产按 token 现建 */
   api?(token: string): TelegramApi;
 }
@@ -170,6 +184,9 @@ export class TelegramContactService implements SecretaryContactPort {
   private slot = 1;
   /** 从手机发来消息后，等这一轮的正文再回发手机 */
   private readonly awaitingReply = new Set<string>();
+  /** /feed 的翻页游标：按钮上只带短编号，重启后按钮失效即可 */
+  private readonly feedCursors = new Map<string, FeedCursor>();
+  private feedSeq = 1;
 
   constructor(
     private readonly store: ContactStore,
@@ -214,6 +231,7 @@ export class TelegramContactService implements SecretaryContactPort {
           : {}),
         ...(token ? { tokenHint: botTokenHint(token) } : {}),
         allowDispatchConfirm: file.allowDispatchConfirm,
+        allowMemory: file.allowMemory,
         poll: this.poller.status(),
         secure: this.store.isSecure(),
       },
@@ -223,7 +241,10 @@ export class TelegramContactService implements SecretaryContactPort {
   /** 启动时接着轮询：上次已经绑过、token 还在 */
   async start(): Promise<void> {
     await this.store.ready();
-    if (this.store.file().chat && this.store.token()) this.poller.start();
+    if (this.store.file().chat && this.store.token()) {
+      this.poller.start();
+      this.syncCommands();
+    }
   }
 
   async stop(): Promise<void> {
@@ -272,6 +293,7 @@ export class TelegramContactService implements SecretaryContactPort {
     });
     this.audit('contact_bind_start', true, `bot=${bot.id}`);
     this.poller.start();
+    this.syncCommands();
     this.ports.publish();
     return { ok: true };
   }
@@ -327,6 +349,14 @@ export class TelegramContactService implements SecretaryContactPort {
   setAllowDispatchConfirm(value: boolean): void {
     this.store.save({ ...this.store.file(), allowDispatchConfirm: value === true });
     this.audit('contact_settings', true, `allowDispatchConfirm=${value === true}`);
+    this.ports.publish();
+  }
+
+  /** 记忆标题的开关：关掉时命令菜单里也不出现 /memory */
+  setAllowMemory(value: boolean): void {
+    this.store.save({ ...this.store.file(), allowMemory: value === true });
+    this.audit('contact_settings', true, `allowMemory=${value === true}`);
+    this.syncCommands();
     this.ports.publish();
   }
 
@@ -454,6 +484,95 @@ export class TelegramContactService implements SecretaryContactPort {
     });
   }
 
+  /** 只读命令：查面板数据、格式化、回一条；审计只记命令名 */
+  private async runCommand(name: ContactCommandName, arg: string): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    const commands = this.ports.commands;
+    if (!chatId || !commands) return;
+    const reply = await commands.run(name, arg);
+    const sent = await this.send(chatId, reply.text, this.feedKeyboard(reply.next), 'HTML');
+    this.audit('contact_command', sent.ok, name);
+  }
+
+  /** 写错的命令：给一份清单，不进秘书会话 */
+  private async runUnknownCommand(): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    if (!chatId) return;
+    const text = unknownCommandText(this.ports.lang(), this.store.file().allowMemory);
+    const sent = await this.send(chatId, text, undefined, 'HTML');
+    this.audit('contact_command', sent.ok, 'unknown');
+  }
+
+  /** 「更早」：原地换掉这一条，翻页不刷屏 */
+  private async handleFeedCallback(query: TelegramCallbackQuery, token: string): Promise<void> {
+    const cursor = this.feedCursors.get(token);
+    const chatId = this.store.file().chat?.id;
+    const messageId = query.message?.message_id;
+    const commands = this.ports.commands;
+    if (!cursor || !chatId || messageId === undefined || !commands) {
+      await this.answerCallback(
+        query.id,
+        this.ports.lang() === 'zh'
+          ? '这一页已经失效了，发 /feed 重新看'
+          : 'Expired, send /feed again'
+      );
+      return;
+    }
+    const reply = await commands.feedPage(cursor);
+    const keyboard = this.feedKeyboard(reply.next);
+    const tokenValue = this.store.token();
+    if (!tokenValue) return;
+    try {
+      await this.apiFor(tokenValue).editMessageText({
+        chatId,
+        messageId,
+        text: reply.text,
+        ...(keyboard ? { replyMarkup: keyboard } : {}),
+        parseMode: 'HTML',
+      });
+      this.audit('contact_command', true, 'feed');
+    } catch (error) {
+      this.audit('contact_command', false, 'feed');
+      this.reportError(error);
+    }
+    await this.answerCallback(query.id, undefined);
+  }
+
+  /** 翻页按钮：有下一页才给，游标留在内存里 */
+  private feedKeyboard(
+    next?: FeedCursor
+  ): { inline_keyboard: { text: string; callback_data: string }[][] } | undefined {
+    if (!next) return undefined;
+    const token = `f${this.feedSeq++}`;
+    this.feedCursors.set(token, next);
+    while (this.feedCursors.size > 20) {
+      const oldest = this.feedCursors.keys().next().value;
+      if (oldest === undefined) break;
+      this.feedCursors.delete(oldest);
+    }
+    return {
+      inline_keyboard: [
+        [
+          {
+            text: this.ports.lang() === 'zh' ? '更早' : 'Older',
+            callback_data: feedCallbackData(token),
+          },
+        ],
+      ],
+    };
+  }
+
+  /** 命令菜单：只登记当前真的能用的命令（记忆默认不出现） */
+  private syncCommands(): void {
+    const token = this.store.token();
+    if (!token) return;
+    const allowMemory = this.store.file().allowMemory;
+    const commands = botCommands().filter((entry) => entry.command !== 'memory' || allowMemory);
+    void this.apiFor(token)
+      .setMyCommands(commands)
+      .catch((error) => this.reportError(error));
+  }
+
   private apiFor(token: string): TelegramApi {
     const injected = this.ports.api?.(token);
     if (injected) return injected;
@@ -467,7 +586,8 @@ export class TelegramContactService implements SecretaryContactPort {
   private async send(
     chatId: number,
     text: string,
-    replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] }
+    replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] },
+    parseMode?: 'HTML'
   ): Promise<{ ok: true } | { ok: false; error: ContactError }> {
     const token = this.store.token();
     if (!token) return { ok: false, error: 'token-required' };
@@ -481,6 +601,7 @@ export class TelegramContactService implements SecretaryContactPort {
         chatId,
         text: body,
         ...(replyMarkup ? { replyMarkup } : {}),
+        ...(parseMode ? { parseMode } : {}),
       });
       this.audit('contact_outbound', true, describe(body));
       return { ok: true };
@@ -537,6 +658,18 @@ export class TelegramContactService implements SecretaryContactPort {
       return;
     }
 
+    // 只读命令：Main 直接查面板数据回一条，不进秘书会话、不唤醒模型
+    const command = parseContactCommand(text);
+    if (command) {
+      await this.runCommand(command.name, command.arg);
+      return;
+    }
+    // 光秃秃的 /xxx 当成写错的命令，别让它落进秘书会话
+    if (/^\/[A-Za-z][A-Za-z0-9_]{0,31}$/u.test(text)) {
+      await this.runUnknownCommand();
+      return;
+    }
+
     // 挂着提问时，这句话就是回答：与应用里先答的那一边一致
     const pending = this.newestAsk();
     if (pending) {
@@ -565,6 +698,11 @@ export class TelegramContactService implements SecretaryContactPort {
   }
 
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
+    const feedToken = query.data ? parseFeedCallback(query.data) : null;
+    if (feedToken !== null) {
+      await this.handleFeedCallback(query, feedToken);
+      return;
+    }
     const card = query.data ? parseCardCallbackData(query.data) : null;
     if (card) {
       await this.handleCardCallback(query, card.slot, card.action);
@@ -672,10 +810,13 @@ export class TelegramContactService implements SecretaryContactPort {
     this.store.save({ ...rest, chat, boundAt: this.ports.now() });
     this.audit('contact_bound', true, `chat=${chat.id}`);
     this.ports.publish();
-    await this.send(chat.id, formatWelcomeMessage(this.ports.lang(), bot.name));
+    this.syncCommands();
+    const welcome = formatWelcomeMessage(this.ports.lang(), escapeHtml(bot.name));
+    const commands = commandListText(this.ports.lang(), this.store.file().allowMemory);
+    await this.send(chat.id, `${welcome}\n\n${commands}`, undefined, 'HTML');
   }
 
-  private async answerCallback(callbackQueryId: string, text: string): Promise<void> {
+  private async answerCallback(callbackQueryId: string, text?: string): Promise<void> {
     const token = this.store.token();
     if (!token) return;
     try {

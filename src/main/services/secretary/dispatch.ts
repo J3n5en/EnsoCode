@@ -2088,6 +2088,11 @@ export async function pageSecretaryFeed(
   return pageFeed(feedEvents(loaded.board), query);
 }
 
+/** 面板的工作台投影：手机上的只读命令与侧栏读同一份，不另拼一套 */
+export async function secretaryBoard(ports: SecretaryStatePorts): Promise<SecretaryBoard> {
+  return (await loadSecretaryBoard(ports)).board;
+}
+
 async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
   file: SecretaryDispatchFile;
   rows: Record<string, Record<string, unknown>>;

@@ -1,3 +1,4 @@
+import { CONTACT_COMMANDS } from '@shared/secretary/commands';
 import type { SecretaryContactState } from '@shared/types/secretary';
 import {
   Check,
@@ -197,7 +198,11 @@ export function SecretaryContactPanel() {
                 className="mt-0.5"
                 checked={telegram.allowDispatchConfirm}
                 onChange={(event) =>
-                  run(() => window.electronAPI.secretary.contactSettings(event.target.checked))
+                  run(() =>
+                    window.electronAPI.secretary.contactSettings({
+                      allowDispatchConfirm: event.target.checked,
+                    })
+                  )
                 }
               />
               <span className="min-w-0 flex-1">
@@ -211,6 +216,53 @@ export function SecretaryContactPanel() {
                 </span>
               </span>
             </label>
+          </div>
+
+          <div className={STEP_CLASS}>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                data-enso="secretary-contact-allow-memory"
+                className="mt-0.5"
+                checked={telegram.allowMemory}
+                onChange={(event) =>
+                  run(() =>
+                    window.electronAPI.secretary.contactSettings({
+                      allowMemory: event.target.checked,
+                    })
+                  )
+                }
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12.5px]">
+                  {t('Allow viewing memory titles on Telegram')}
+                </span>
+                <span className="mt-0.5 block text-[11.5px] text-muted-foreground">
+                  {t('Off by default. /memory lists titles only, never the memory text.')}
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div data-enso="secretary-contact-commands" className={STEP_CLASS}>
+            <div className="text-[12px] font-medium text-muted-foreground">
+              {t('Commands you can send')}
+            </div>
+            <ul className="mt-1 flex flex-col gap-0.5">
+              {CONTACT_COMMANDS.filter((spec) => !spec.gated || telegram.allowMemory).map(
+                (spec) => (
+                  <li key={spec.name} className="text-[12px]">
+                    <code className="rounded bg-muted px-1 text-[11.5px]">/{spec.name}</code>{' '}
+                    <span className="text-muted-foreground">{t(spec.en)}</span>
+                  </li>
+                )
+              )}
+            </ul>
+            <p className="mt-1.5 text-[11.5px] text-muted-foreground">
+              {t(
+                'Telegram messages are not end-to-end encrypted and stay on Telegram servers. Commands only show titles and short summaries, never full conversations, memory text or tool output.'
+              )}
+            </p>
           </div>
 
           {!telegram.secure && (

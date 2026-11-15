@@ -580,6 +580,8 @@ export interface SecretaryContactTelegram {
   tokenHint?: string;
   /** 默认关闭：派发类确认卡不允许从手机确认 */
   allowDispatchConfirm: boolean;
+  /** 默认关闭：记忆标题不往 Telegram 发（消息会留在 Telegram 服务器上） */
+  allowMemory: boolean;
   poll: { state: SecretaryContactPollState; lastError?: string };
   /** safeStorage 是否可用：不可用时 token 明文落盘，界面要提示 */
   secure: boolean;

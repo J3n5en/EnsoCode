@@ -70,7 +70,19 @@ export interface TelegramApi {
     chatId: number;
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
+    /** 命令回复用 HTML：正文由调用方转义，避免特殊字符发不出去 */
+    parseMode?: 'HTML';
   }): Promise<number>;
+  /** 翻页时原地换掉这一条，不刷屏 */
+  editMessageText(params: {
+    chatId: number;
+    messageId: number;
+    text: string;
+    replyMarkup?: TelegramInlineKeyboard;
+    parseMode?: 'HTML';
+  }): Promise<void>;
+  /** 命令菜单：只登记当前可用的命令 */
+  setMyCommands(commands: { command: string; description: string }[]): Promise<void>;
   answerCallbackQuery(params: { callbackQueryId: string; text?: string }): Promise<void>;
 }
 
@@ -140,13 +152,26 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         signal,
         LONG_POLL_TIMEOUT_MS
       ),
-    sendMessage: async ({ chatId, text, replyMarkup }) => {
+    sendMessage: async ({ chatId, text, replyMarkup, parseMode }) => {
       const sent = await request<TelegramMessage>(base, token, 'sendMessage', {
         chat_id: chatId,
         text,
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        ...(parseMode ? { parse_mode: parseMode } : {}),
       });
       return sent.message_id;
+    },
+    editMessageText: async ({ chatId, messageId, text, replyMarkup, parseMode }) => {
+      await request<unknown>(base, token, 'editMessageText', {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        ...(parseMode ? { parse_mode: parseMode } : {}),
+      });
+    },
+    setMyCommands: async (commands) => {
+      await request<boolean>(base, token, 'setMyCommands', { commands });
     },
     answerCallbackQuery: async ({ callbackQueryId, text }) => {
       await request<boolean>(base, token, 'answerCallbackQuery', {
