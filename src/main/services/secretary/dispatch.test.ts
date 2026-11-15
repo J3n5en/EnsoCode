@@ -14,6 +14,7 @@ import type {
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
 import { createSecretaryTools, normalizeSecretaryParams } from '../../../agent/tools/secretary';
+import type { ObservedTask } from '../backgroundTaskTracker';
 import {
   buildSecretaryState,
   createSecretaryDispatchHandlers,
@@ -29,6 +30,7 @@ import {
   type SecretaryDispatchPorts,
   type SecretaryQueuedMessage,
   startPendingDispatches,
+  stopLeftoverTasks,
   untrack,
 } from './dispatch';
 import type { SecretarySessionStatus } from './readers';
@@ -131,6 +133,9 @@ interface Harness {
   archived: { conversationId: string; at: number }[];
   answers: { conversationId: string; askId: string; answer: string; name: string }[];
   relays: { conversationId: string; relay: { name: string } | null }[];
+  /** 会话的后台任务投影与停任务记录 */
+  tasks: Map<string, ObservedTask[]>;
+  stoppedTasks: { conversationId: string; taskId: string }[];
 }
 
 function harness(
@@ -146,6 +151,7 @@ function harness(
     branch?: string | null;
     baseFacts?: Partial<DispatchBaseFacts>;
     waitStopped?: 'running' | 'idle' | 'waiting' | 'error';
+    tasks?: Record<string, ObservedTask[]>;
   } = {}
 ): Harness {
   let ids = 0;
@@ -183,6 +189,8 @@ function harness(
     archived: [],
     answers: [],
     relays: [],
+    tasks: new Map(Object.entries(options.tasks ?? {})),
+    stoppedTasks: [],
     ports: undefined as unknown as SecretaryDispatchPorts,
     handlers: undefined as unknown as ReturnType<typeof createSecretaryDispatchHandlers>,
   };
@@ -290,6 +298,11 @@ function harness(
     },
     relayAsk: (conversationId, relay) => {
       h.relays.push({ conversationId, relay });
+    },
+    tasks: (conversationId) => h.tasks.get(conversationId) ?? [],
+    stopTask: async (conversationId, taskId) => {
+      h.stoppedTasks.push({ conversationId, taskId });
+      return { ok: true };
     },
   };
   h.handlers = createSecretaryDispatchHandlers(h.ports);
@@ -2676,5 +2689,126 @@ describe('等依赖的派发与确认卡', () => {
       problem: 'dispatch-failed',
     });
     expect(h.file.outbox[0]).toMatchObject({ kind: 'pending', status: 'failed' });
+  });
+});
+
+describe('session_task_stop', () => {
+  const runningTask = (taskId = 't1'): ObservedTask => ({
+    taskId,
+    command: 'python3 -m http.server 8931 --directory /tmp',
+    status: 'running',
+    startedAt: 0,
+  });
+
+  it('停掉自己派发会话的后台任务并记审计', async () => {
+    const h = harness({
+      file: dispatchedFile('c1'),
+      rows: { c1: { projectId: 'p1', title: '改构建', sessionFile: '/s/c1.jsonl' } },
+      statuses: { c1: idle },
+      tasks: { c1: [runningTask()] },
+    });
+    const result = await call(h.handlers.session_task_stop, {
+      conversationId: 'c1',
+      taskId: 't1',
+    });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'stopped', conversationId: 'c1', taskId: 't1' },
+    });
+    expect(h.stoppedTasks).toEqual([{ conversationId: 'c1', taskId: 't1' }]);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'session_task_stop',
+      targetId: 'c1',
+      ok: true,
+      detail: 'stopped t1',
+    });
+  });
+
+  it('只允许停自己派发或跟踪的会话：范围里没跟踪过的会话被拒', async () => {
+    const h = harness({
+      profile: {
+        ...profile(),
+        takeoverScope: { mode: 'projects', projectIds: ['p1'] },
+      },
+      conversations: [rootConversation('c1'), rootConversation('c2')],
+      rows: { c2: { projectId: 'p1', title: '别人的会话', sessionFile: '/s/c2.jsonl' } },
+      statuses: { c2: idle },
+      tasks: { c2: [runningTask()] },
+    });
+    const result = await call(h.handlers.session_task_stop, {
+      conversationId: 'c2',
+      taskId: 't1',
+    });
+    expect(result.ok).toBe(false);
+    expect(h.stoppedTasks).toEqual([]);
+    expect(h.audits.at(-1)).toMatchObject({ op: 'session_task_stop', ok: false });
+  });
+
+  it('任务不属于这个会话、或已经结束时拒绝', async () => {
+    const h = harness({
+      file: dispatchedFile('c1'),
+      rows: { c1: { projectId: 'p1', sessionFile: '/s/c1.jsonl' } },
+      statuses: { c1: idle },
+      tasks: { c1: [{ ...runningTask(), taskId: 'other', status: 'done' }] },
+    });
+    const missing = await call(h.handlers.session_task_stop, {
+      conversationId: 'c1',
+      taskId: 't1',
+    });
+    expect(missing.ok).toBe(false);
+    const ended = await call(h.handlers.session_task_stop, {
+      conversationId: 'c1',
+      taskId: 'other',
+    });
+    expect(ended.ok).toBe(false);
+    expect(h.stoppedTasks).toEqual([]);
+  });
+
+  it('缺 taskId 直接按参数错误拒绝', async () => {
+    const h = harness({ file: dispatchedFile('c1'), statuses: { c1: idle } });
+    const result = await call(h.handlers.session_task_stop, { conversationId: 'c1' });
+    expect(result.ok).toBe(false);
+    expect(h.stoppedTasks).toEqual([]);
+  });
+});
+
+describe('看板停止遗留任务', () => {
+  it('停掉记录里所有还在跑的任务并清掉遗留标记', async () => {
+    const h = harness({
+      file: {
+        ...dispatchedFile('c1'),
+        dispatched: {
+          c1: {
+            ...dispatchedFile('c1').dispatched.c1,
+            backgroundPersistent: true,
+            leftoverTasks: {
+              count: 2,
+              commands: ['pnpm dev', 'pnpm test'],
+              taskIds: ['t1', 't2'],
+              at: 1,
+            },
+          },
+        },
+      },
+      tasks: {
+        c1: [
+          { taskId: 't1', command: 'pnpm dev', status: 'running', startedAt: 0 },
+          { taskId: 't2', command: 'pnpm test', status: 'running', startedAt: 0 },
+          { taskId: 't3', command: 'git status', status: 'done', startedAt: 0 },
+        ],
+      },
+    });
+    const result = await stopLeftoverTasks(h.ports, 'c1');
+    expect(result).toEqual({ ok: true, stopped: ['t1', 't2'] });
+    expect(h.stoppedTasks.map((entry) => entry.taskId)).toEqual(['t1', 't2']);
+    expect(h.file.dispatched.c1.leftoverTasks).toBeUndefined();
+    expect(h.file.dispatched.c1.backgroundPersistent).toBeUndefined();
+    expect(h.audits.at(-1)).toMatchObject({ op: 'session_task_stop', detail: 'ui: t1,t2' });
+  });
+
+  it('没有派发记录的会话不给停', async () => {
+    const h = harness({});
+    expect(await stopLeftoverTasks(h.ports, 'c1')).toEqual({ ok: false, error: 'not-found' });
+    expect(h.stoppedTasks).toEqual([]);
   });
 });

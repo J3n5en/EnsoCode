@@ -37,6 +37,8 @@ export interface SecretaryProfile {
   patrolEnabled: boolean;
   /** 巡检间隔，分钟 */
   patrolIntervalMinutes: number;
+  /** 遗留任务巡检：已完成会话里还在跑的后台任务，每小时扫一次，只推不杀。缺省开启 */
+  orphanTaskPatrol?: boolean;
   /** 新派出的会话默认静音：不弹系统通知、不推送、不计角标 */
   dispatchMuted: boolean;
   /** 新派出的会话默认无人值守：需要人确认的动作直接按「没人可批准」拒绝 */
@@ -295,6 +297,15 @@ export interface DispatchRecord {
   lastEventAt: number;
   /** 还有没结束的后台任务。实时状态是空闲时仍算在跑 */
   backgroundRunning?: boolean;
+  /** 还有常驻服务（dev server、http.server、--watch）在跑：不算在跑，卡片单独标出来 */
+  backgroundPersistent?: boolean;
+  /**
+   * 会话已经收口/空闲，但还有没结束的后台任务：看板显示「已完成（有遗留任务）」，
+   * 并给一个停止遗留任务的行内操作。由 Main 的 tick 按任务表重算。
+   */
+  leftoverTasks?: { count: number; commands: string[]; taskIds: string[]; at: number };
+  /** 已经推过遗留巡检的这批任务：同一批只推一次，任务变了才再推 */
+  leftoverPatrol?: { taskIds: string; at: number };
   /** lastState 变成当前值的时间；旧记录没有，读时按派出或结果时间估 */
   stateSince?: number;
   /** 最后一轮的助手正文，工作台显示"最后说了什么" */
@@ -345,6 +356,8 @@ export type SecretaryUpdate = {
   | { kind: SecretaryResultKind; conversationId: string }
   /** 转交给秘书的提问：pending 要秘书处理，其余是收尾通知 */
   | { kind: 'ask-relay'; conversationId: string; askId: string; status: RelayAskStatus }
+  /** 遗留任务巡检：说明哪个会话、什么命令、跑了多久；不自动杀进程 */
+  | { kind: 'leftover'; conversationId: string }
   | { kind: 'proposal'; proposalId: string; status: ProposalStatus }
   | { kind: 'schedule'; scheduleId: string }
   | {
@@ -481,6 +494,10 @@ export type SecretaryCard =
       continuing?: true;
       /** 会话空闲但还有没结束的后台任务：进行中列表要把它和续跑区分开 */
       backgroundRunning?: true;
+      /** 会话空闲但还有常驻服务在跑：显示成「有常驻服务」，与「正在跑」区分 */
+      backgroundPersistent?: true;
+      /** 已收口但还有没结束的后台任务：完成列显示「已完成（有遗留任务）」 */
+      leftoverTasks?: { count: number };
       /** 用户手动标记完成：完成列的卡片据此给「撤销标记」 */
       manual?: true;
       secretaryConversationId: string;
@@ -584,6 +601,10 @@ export interface SecretaryDailyItem {
   tracked?: true;
   /** 用户手动标记完成：完成列的卡片据此给「撤销标记」 */
   manual?: true;
+  /** 已完成但还有没结束的后台任务：卡片显示「已完成（有遗留任务）」并给停止操作 */
+  leftover?: { count: number };
+  /** 还在跑但带着常驻服务：卡片标「有常驻服务」，与「正在跑」区分 */
+  persistent?: true;
 }
 
 export interface SecretaryDailyCounts {

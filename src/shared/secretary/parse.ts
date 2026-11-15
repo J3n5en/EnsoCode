@@ -187,6 +187,7 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
         MIN_PATROL_INTERVAL_MINUTES,
         MAX_PATROL_INTERVAL_MINUTES
       ) ?? DEFAULT_PATROL_INTERVAL_MINUTES,
+    orphanTaskPatrol: flag(value.orphanTaskPatrol, true),
     dispatchMuted: flag(value.dispatchMuted, true),
     dispatchUnattended: flag(value.dispatchUnattended, true),
     replyLanguage: oneOf(value.replyLanguage, REPLY_LANGUAGES, 'ui'),
@@ -351,7 +352,12 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     }
     draft.patrolIntervalMinutes = minutes;
   }
-  for (const key of ['dispatchMuted', 'dispatchUnattended', 'patrolEnabled'] as const) {
+  for (const key of [
+    'dispatchMuted',
+    'dispatchUnattended',
+    'patrolEnabled',
+    'orphanTaskPatrol',
+  ] as const) {
     const raw = value[key];
     if (raw === undefined) continue;
     if (typeof raw !== 'boolean') return { ok: false, error: `invalid ${key}` };
@@ -630,6 +636,21 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   const stateSince = time(value.stateSince);
   if (stateSince !== undefined) record.stateSince = stateSince;
   if (value.backgroundRunning === true) record.backgroundRunning = true;
+  if (value.backgroundPersistent === true) record.backgroundPersistent = true;
+  if (isObject(value.leftoverTasks) && count(value.leftoverTasks.count) !== undefined) {
+    record.leftoverTasks = {
+      count: count(value.leftoverTasks.count) as number,
+      commands: texts(value.leftoverTasks.commands),
+      taskIds: texts(value.leftoverTasks.taskIds),
+      at: time(value.leftoverTasks.at) ?? 0,
+    };
+  }
+  if (isObject(value.leftoverPatrol) && text(value.leftoverPatrol.taskIds) !== undefined) {
+    record.leftoverPatrol = {
+      taskIds: text(value.leftoverPatrol.taskIds) as string,
+      at: time(value.leftoverPatrol.at) ?? 0,
+    };
+  }
   if (
     isObject(value.lastResult) &&
     RESULT_KINDS.includes(value.lastResult.kind as SecretaryResultKind)
@@ -687,6 +708,11 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
     const conversationId = text(value.conversationId);
     if (!conversationId) return undefined;
     return { ...base, ...scope, kind: value.kind as SecretaryResultKind, conversationId };
+  }
+  if (value.kind === 'leftover') {
+    const conversationId = text(value.conversationId);
+    if (!conversationId) return undefined;
+    return { ...base, ...scope, kind: 'leftover', conversationId };
   }
   if (value.kind === 'proposal') {
     const proposalId = text(value.proposalId);

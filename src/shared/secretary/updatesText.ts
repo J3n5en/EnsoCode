@@ -4,7 +4,7 @@ import { RESULT_KINDS } from './parse';
 export type SecretaryUpdateLine =
   | { kind: SecretaryResultKind; text: string; conversationId?: string; detail?: string }
   | { kind: 'proposal' | 'schedule' | 'pending'; text: string; detail?: string }
-  | { kind: 'ask-relay'; text: string; conversationId?: string; detail?: string };
+  | { kind: 'ask-relay' | 'leftover'; text: string; conversationId?: string; detail?: string };
 
 const BLOCK = /^<(session-updates|secretary-schedule)>\n([\s\S]*?)\n<\/\1>(?:\n|$)/;
 const HEAD = /^- \[([a-z-]+)(?: (?:session|pending):([^\]\s]+))?\] ([^\n]*)(?:\n|$)/;
@@ -28,6 +28,8 @@ function lineOf(
   if (kind === 'pending') return { kind, text };
   // 转交提问要点名会话：秘书据此用 session_answer 回答
   if (kind === 'ask-relay') return conversationId ? { kind, text, conversationId } : null;
+  // 遗留巡检也要点名会话：秘书据此用 session_task_stop 停掉
+  if (kind === 'leftover') return conversationId ? { kind, text, conversationId } : null;
   if (!isResultKind(kind)) return null;
   return conversationId ? { kind, text, conversationId } : { kind, text };
 }

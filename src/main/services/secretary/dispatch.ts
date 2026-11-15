@@ -49,6 +49,7 @@ import {
   type SecretaryUntrackedView,
   type TakeoverVia,
 } from '@shared/types/secretary';
+import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
@@ -177,6 +178,10 @@ export interface SecretaryDispatchPorts {
   ): MaybePromise<{ ok: boolean; error?: string }>;
   /** 开始/结束跟踪：把 ask_user 转给秘书，撤销时恢复成直接问用户 */
   relayAsk(conversationId: string, relay: { name: string } | null): void;
+  /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
+  tasks(conversationId: string): MaybePromise<readonly ObservedTask[]>;
+  /** 停一个后台任务：只停这个会话自己的任务 */
+  stopTask(conversationId: string, taskId: string): MaybePromise<{ ok: boolean; error?: string }>;
 }
 
 const DISPATCH_OPS = [
@@ -185,6 +190,7 @@ const DISPATCH_OPS = [
   'session_queue_list',
   'session_queue_cancel',
   'session_stop',
+  'session_task_stop',
   'session_answer',
   'session_takeover_propose',
   'todo_list',
@@ -224,6 +230,7 @@ interface SessionFields {
   message: string;
   mode: SecretarySendMode;
   clearQueue: boolean;
+  taskId: string;
 }
 
 /** 逐字段校验，失败时写明哪个字段、哪里不合法 */
@@ -265,6 +272,10 @@ function sessionFields(
   if (clearQueue !== undefined && typeof clearQueue !== 'boolean') {
     return invalid(`"clearQueue" must be a boolean, got ${typeof clearQueue}`);
   }
+  const taskId = allowed.includes('taskId')
+    ? text('taskId', SECRETARY_ID_MAX)
+    : ({ ok: true, value: '' } as const);
+  if (!taskId.ok) return taskId;
   return {
     ok: true,
     value: {
@@ -272,6 +283,7 @@ function sessionFields(
       message: message.value,
       mode: (mode as SecretarySendMode | undefined) ?? 'queue',
       clearQueue: clearQueue === true,
+      taskId: taskId.value,
     },
   };
 }
@@ -1483,6 +1495,42 @@ export function createSecretaryDispatchHandlers(
       };
     },
 
+    /**
+     * 停一个后台任务。只允许停自己派发或跟踪的会话里的任务：
+     * 范围权限还没真正用上的会话没有记录，一律拒绝。不杀进程以外的任何东西，审计留痕。
+     */
+    async session_task_stop(params, ctx) {
+      const fields = sessionFields(params, ['conversationId', 'taskId']);
+      if (!fields.ok) return fields;
+      const { conversationId, taskId } = fields.value;
+      const check = await checkOperate(ports, conversationId, await profileOf(ports));
+      if (!check.ok) return deny(ports, ctx, 'session_task_stop', check.code, conversationId);
+      if (check.source === 'scope' && !ports.dispatchFile().dispatched[conversationId])
+        return deny(ports, ctx, 'session_task_stop', 'not-operable', conversationId);
+      const task = (await ports.tasks(conversationId)).find(
+        (candidate) => candidate.taskId === taskId
+      );
+      if (!task)
+        return {
+          ok: false,
+          error: 'not-found: no background task with this id in that session',
+        };
+      if (task.status !== 'running')
+        return { ok: false, error: `not-running: the task already ${task.status}` };
+      const stopped = await ports.stopTask(conversationId, taskId);
+      ports.audit({
+        at: ports.now(),
+        secretaryConversationId: ctx.secretaryConversationId,
+        op: 'session_task_stop',
+        targetId: conversationId,
+        ok: stopped.ok,
+        detail: stopped.ok ? `stopped ${taskId}` : `${taskId}: ${stopped.error ?? 'failed'}`,
+      });
+      notifySecretaryChanged();
+      if (!stopped.ok) return { ok: false, error: stopped.error ?? 'stop failed' };
+      return { ok: true, result: { status: 'stopped', conversationId, taskId } };
+    },
+
     async session_answer(params, ctx) {
       const conversationId = stringParam(params, 'conversationId');
       if (!conversationId)
@@ -2025,6 +2073,8 @@ export function markResult(
     if (record.lastState !== 'idle') record.stateSince = now;
     record.lastState = 'idle';
     delete record.backgroundRunning;
+    delete record.backgroundPersistent;
+    delete record.leftoverTasks;
     delete record.reopenedAt;
     delete record.manualUndoneAt;
   } else {
@@ -2070,6 +2120,47 @@ export function dismissResult(
   });
   notifySecretaryChanged();
   return { ok: true };
+}
+
+/**
+ * 看板「停止遗留任务」：停掉这条派发记录里所有还在跑的后台任务。
+ * 只认派发或接管的记录；停完把遗留标记清掉，不等下一次 tick。
+ */
+export async function stopLeftoverTasks(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<{ ok: true; stopped: string[] } | { ok: false; error: string }> {
+  const record = ports.dispatchFile().dispatched[conversationId];
+  if (!record) return { ok: false, error: 'not-found' };
+  const running = (await ports.tasks(conversationId)).filter(
+    (task: ObservedTask) => task.status === 'running'
+  );
+  const stopped: string[] = [];
+  for (const task of running) {
+    const result = await ports.stopTask(conversationId, task.taskId);
+    if (result.ok) stopped.push(task.taskId);
+  }
+  if (stopped.length > 0) {
+    const file = ports.dispatchFile();
+    const current = file.dispatched[conversationId];
+    if (current) {
+      delete current.backgroundRunning;
+      delete current.backgroundPersistent;
+      delete current.leftoverTasks;
+      delete current.leftoverPatrol;
+      ports.saveDispatch(file);
+    }
+  }
+  ports.audit({
+    at: ports.now(),
+    secretaryConversationId: record.secretaryConversationId,
+    op: 'session_task_stop',
+    targetId: conversationId,
+    ok: true,
+    detail: stopped.length > 0 ? `ui: ${stopped.join(',')}` : 'ui: nothing running',
+  });
+  notifySecretaryChanged();
+  return { ok: true, stopped };
 }
 
 /** 界面直接编辑待办；派出是用户亲手点的，不再走自主度确认 */
@@ -2339,6 +2430,10 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
       .then((agent) => agent.setAskRelayFromMain(conversationId, relay ?? undefined))
       .catch(() => undefined);
   },
+  tasks: async (conversationId) =>
+    (await import('../../ipc/agent')).observedBackgroundTasks(conversationId),
+  stopTask: async (conversationId, taskId) =>
+    (await import('../../ipc/agent')).stopTaskFromMain(conversationId, taskId),
 };
 
 function store(): SecretaryStore {
