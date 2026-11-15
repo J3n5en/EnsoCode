@@ -397,6 +397,28 @@ describe('SecretaryPanel', () => {
     expect(rows[0].getAttribute('data-open')).toBe('false');
   });
 
+  it('停住的会话在进行中列表标出已停住', async () => {
+    h.board = h.secretary.board = board({
+      running: [
+        sessionCard('c1', {
+          title: '打包安装',
+          state: 'idle',
+          continuing: true,
+          stalled: { reason: 'goal-idle-stalled', at: NOW - 3 * 60_000 },
+        }),
+      ],
+    });
+    await render(<SecretaryPanel />);
+    await flush();
+    click('[data-enso="secretary-running-toggle"]');
+    const rows = [...container.querySelectorAll('[data-enso="secretary-running-row"]')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector('[data-enso="secretary-running-badge"]')?.textContent).toBe(
+      '[Stalled, no activity]'
+    );
+    expect(rows[0].textContent).toContain('打包安装');
+  });
+
   it('已完成或出错的会话不进进行中列表', async () => {
     h.board = h.secretary.board = board({
       running: [sessionCard('c1', { title: '在跑的活' })],

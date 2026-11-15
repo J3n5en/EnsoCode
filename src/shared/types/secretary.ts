@@ -37,6 +37,8 @@ export interface SecretaryProfile {
   patrolEnabled: boolean;
   /** 巡检间隔，分钟 */
   patrolIntervalMinutes: number;
+  /** goal 会话空闲多久算停住，分钟。缺省 3，可配 1–30 */
+  patrolIdleGoalMinutes?: number;
   /** 遗留任务巡检：已完成会话里还在跑的后台任务，每小时扫一次，只推不杀。缺省开启 */
   orphanTaskPatrol?: boolean;
   /** 新派出的会话默认静音：不弹系统通知、不推送、不计角标 */
@@ -133,8 +135,12 @@ export interface PendingDispatch {
   failedDependency?: string;
 }
 
-/** 自动巡检的异常类型：同一会话同一原因只推一次，恢复后清除 */
-export const PATROL_REASONS = ['idle-stalled', 'running-stalled'] as const;
+/**
+ * 自动巡检的异常类型：同一会话同一次停住只推一次，恢复后清除。
+ * goal-idle-stalled：goal 会话空闲、没有后台任务、最后一条不是完成汇报（默认 3 分钟）；
+ * idle-stalled：空闲 20 分钟兜底（典型是后台任务卡住）；running-stalled：运行 30 分钟没有事件。
+ */
+export const PATROL_REASONS = ['goal-idle-stalled', 'idle-stalled', 'running-stalled'] as const;
 
 export type PatrolReason = (typeof PATROL_REASONS)[number];
 
@@ -540,6 +546,8 @@ export type SecretaryCard =
       backgroundRunning?: true;
       /** 会话空闲但还有常驻服务在跑：显示成「有常驻服务」，与「正在跑」区分 */
       backgroundPersistent?: true;
+      /** 巡检判定停住：进行中列表标「已停住」，会话有了新活动就消失 */
+      stalled?: { reason: PatrolReason; at: number };
       /** 已收口但还有没结束的后台任务：完成列显示「已完成（有遗留任务）」 */
       leftoverTasks?: { count: number };
       /** 用户手动标记完成：完成列的卡片据此给「撤销标记」 */

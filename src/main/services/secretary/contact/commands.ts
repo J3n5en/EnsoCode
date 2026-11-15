@@ -50,7 +50,7 @@ export interface ContactCommandReply {
 
 /** 侧栏徽标与手机同一口径：状态先看实时，再看后台任务与续跑 */
 export function badgeOf(card: SessionCard): ContactBadge {
-  return sessionBadge(card);
+  return sessionBadge({ ...card, stalled: card.stalled !== undefined });
 }
 
 function statusRow(card: SessionCard): ContactStatusRow {

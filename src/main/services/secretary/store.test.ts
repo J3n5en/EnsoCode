@@ -33,6 +33,7 @@ const profile: SecretaryProfile = {
   maxRunningDispatches: 3,
   patrolEnabled: true,
   patrolIntervalMinutes: 15,
+  patrolIdleGoalMinutes: 3,
   orphanTaskPatrol: true,
   dispatchMuted: true,
   dispatchUnattended: true,

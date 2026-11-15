@@ -94,6 +94,8 @@ function harness(
     tasks?: Record<string, ObservedTask[]>;
     /** 这些会话 id 算秘书自己的会话：它们的提问与回复要发到手机 */
     secretaryIds?: string[];
+    /** goal 会话空闲多久算停住，分钟 */
+    patrolIdleGoalMinutes?: number;
   } = {}
 ): Harness {
   const state: Harness['state'] = {
@@ -149,6 +151,9 @@ function harness(
         ...base,
         patrolEnabled: state.patrolEnabled,
         notify: state.notify,
+        ...(options.patrolIdleGoalMinutes !== undefined
+          ? { patrolIdleGoalMinutes: options.patrolIdleGoalMinutes }
+          : {}),
         ...(state.briefAt ? { dailyBriefAt: state.briefAt } : {}),
       };
     },
@@ -727,6 +732,8 @@ describe('自动巡检', () => {
   it('空闲超过 20 分钟、目标没完成时推一条 stalled，同一原因不重复', () => {
     const h = harness({});
     idleWithGoal(h);
+    // 有后台任务但任务卡住：走 20 分钟兜底规则
+    h.state.tasks.c1 = [{ taskId: 't1', command: 'pnpm build', status: 'running', startedAt: 0 }];
     h.host.tick(20 * MINUTE + 1);
     const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
     expect(stalled).toHaveLength(1);
@@ -740,31 +747,117 @@ describe('自动巡检', () => {
   it('正常时不推任何东西', () => {
     const h = harness({});
     idleWithGoal(h);
-    h.host.tick(5 * MINUTE);
+    h.host.tick(2 * MINUTE);
     expect(h.state.file.outbox).toEqual([]);
     expect(h.state.notifications).toEqual([]);
   });
 
-  it('会话有了新事件就算恢复，之后再次卡住会重新推', () => {
+  it('goal 会话空闲 3 分钟、没有后台任务就报停住，正文带标题、时长、最后一条与 goal 状态', () => {
     const h = harness({});
     idleWithGoal(h);
+    h.state.file.dispatched.c1.lastText = '我仍在运行，检查安装脚本是否真的执行了';
+    h.host.tick(3 * MINUTE + 1);
+    const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
+    expect(stalled).toHaveLength(1);
+    // 会话标题、停了多久、goal 状态、有没有后台任务、最后一条摘要
+    expect(stalled[0].text).toContain('派出会话');
+    expect(stalled[0].text).toContain('已空闲 3 分钟');
+    expect(stalled[0].text).toContain('目标 active');
+    expect(stalled[0].text).toContain('没有后台任务');
+    expect(stalled[0].text).toContain('最后一条：我仍在运行，检查安装脚本是否真的执行了');
+    expect(h.state.file.dispatched.c1.patrol).toMatchObject({ reason: 'goal-idle-stalled' });
+    // 同一次停住只推一次：20 分钟兜底不再补一条
     h.host.tick(20 * MINUTE + 1);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
+  it('有存活后台任务的 idle 会话不走 3 分钟规则，20 分钟才兜底报', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.state.tasks.c1 = [{ taskId: 't1', command: 'pnpm build', status: 'running', startedAt: 0 }];
+    h.host.tick(3 * MINUTE + 1);
+    expect(h.state.file.outbox).toEqual([]);
+    h.host.tick(20 * MINUTE + 1);
+    const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].text).toContain('有后台任务');
+    expect(h.state.file.dispatched.c1.patrol).toMatchObject({ reason: 'idle-stalled' });
+  });
+
+  it('刚 goal_complete 的会话不报停住', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    h.host.tick(3 * MINUTE + 1);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toEqual([]);
+  });
+
+  it('刚被 session_send 唤起、还在处理的不报停住', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    // session_send 唤起：记录标回运行中、活动时间刷新，实时状态还是空闲
+    h.state.file.dispatched.c1.lastState = 'running';
+    h.state.file.dispatched.c1.lastEventAt = 10 * MINUTE;
+    h.state.now = 10 * MINUTE;
+    h.host.tick(11 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+    // 这一轮结束、又静了 3 分钟以上：才按停住报
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.host.tick(14 * MINUTE + 1);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
+  it('等用户回答的会话不报停住', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.state.statuses.c1 = { state: 'waiting', pendingAsks: 1, pendingApprovals: 0 };
+    h.host.tick(3 * MINUTE + 1);
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('最后一条是完成汇报的不走 3 分钟规则，仍按 20 分钟兜底', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.state.file.dispatched.c1.lastText = '已完成：打包并安装 EnsoCode';
+    h.host.tick(3 * MINUTE + 1);
+    expect(h.state.file.outbox).toEqual([]);
+    h.host.tick(20 * MINUTE + 1);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
+  it('会话有了新事件就算恢复，之后再次停住会重新推', () => {
+    const h = harness({});
+    idleWithGoal(h);
+    h.host.tick(3 * MINUTE + 1);
     expect(h.state.file.dispatched.c1.patrol).toBeDefined();
-    // 21 分钟时来了一次事件：下一次巡检把标记清掉，且因为刚动过不报
-    h.state.now = 21 * MINUTE;
+    // 4 分钟时来了一次事件：下一次巡检把标记清掉，且因为刚动过不报
+    h.state.now = 4 * MINUTE;
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     h.state.statuses.c1 = idle;
-    h.host.tick(36 * MINUTE);
+    h.host.tick(6 * MINUTE + 1);
     expect(h.state.file.dispatched.c1.patrol).toBeUndefined();
     expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
-    // 之后又静了 20 分钟以上：同一种异常按新的一轮重新推一次（同一会话只留最新一条）
-    h.host.tick(60 * MINUTE);
+    // 之后又静了 3 分钟以上：按新的一轮重新推一次（同一会话只留最新一条）
+    h.host.tick(10 * MINUTE);
     expect(h.state.file.dispatched.c1.patrol).toMatchObject({
-      reason: 'idle-stalled',
+      reason: 'goal-idle-stalled',
       turn: 1,
-      at: 60 * MINUTE,
+      at: 10 * MINUTE,
     });
     expect(h.state.file.outbox.map((update) => update.key)).toEqual(['c1|stalled|1']);
+  });
+
+  it('停住阈值可配：调到 5 分钟就按 5 分钟报', () => {
+    const h = harness({ patrolIdleGoalMinutes: 5 });
+    idleWithGoal(h);
+    h.host.tick(3 * MINUTE + 1);
+    expect(h.state.file.outbox).toEqual([]);
+    // 巡检节奏跟着阈值走：下一次在 5 分钟后的检查点
+    h.host.tick(8 * MINUTE + 1);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
   });
 
   it('没有进行中的会话时巡检不跑', () => {

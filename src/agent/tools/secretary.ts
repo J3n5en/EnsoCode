@@ -200,6 +200,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'maxRunningDispatches',
       'patrolEnabled',
       'patrolIntervalMinutes',
+      'patrolIdleGoalMinutes',
       'orphanTaskPatrol',
       'addressAs',
       'replyLanguage',
@@ -208,7 +209,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'dailyBriefAt',
       'persona',
     ],
-    numbers: ['maxRunningDispatches', 'patrolIntervalMinutes'],
+    numbers: ['maxRunningDispatches', 'patrolIntervalMinutes', 'patrolIdleGoalMinutes'],
     aliases: { displayName: 'name', language: 'replyLanguage', about: 'persona' },
   },
   skill_propose: {
@@ -798,6 +799,13 @@ const SCHEMAS: Record<
           'Watch running sessions automatically and report only anomalies. On by default.',
       },
       patrolIntervalMinutes: { type: 'integer', minimum: 5, maximum: 120 },
+      patrolIdleGoalMinutes: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 30,
+        description:
+          'Minutes a goal session may sit idle with no background task and an unfinished goal before the patrol reports it as stalled. Default 3.',
+      },
       orphanTaskPatrol: {
         type: 'boolean',
         description:

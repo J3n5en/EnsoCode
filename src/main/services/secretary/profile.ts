@@ -326,6 +326,13 @@ function profileChanges(
       draft.patrolIntervalMinutes
     );
   }
+  if (draft.patrolIdleGoalMinutes !== undefined) {
+    put(
+      'patrolIdleGoalMinutes',
+      before?.patrolIdleGoalMinutes ?? null,
+      draft.patrolIdleGoalMinutes
+    );
+  }
   if (draft.orphanTaskPatrol !== undefined) {
     put('orphanTaskPatrol', before?.orphanTaskPatrol ?? null, draft.orphanTaskPatrol);
   }

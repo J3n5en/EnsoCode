@@ -3519,6 +3519,7 @@ export const zhTranslations: Record<string, string> = {
   'Goal complete': '目标完成',
   'Turn ended': '这一轮结束',
   Stalled: '停滞',
+  'Stalled, no activity': '已停住',
   'Update the secretary profile': '修改秘书档案',
   'Recent activity': '动态',
   'No earlier activity': '没有更早的动态了',

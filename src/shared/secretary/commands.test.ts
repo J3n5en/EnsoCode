@@ -334,4 +334,13 @@ describe('会话徽标', () => {
     expect(sessionBadge({ state: 'error' })).toBe('failed');
     expect(sessionBadge({ state: 'idle', result: 'failed' })).toBe('idle');
   });
+
+  it('停住的会话显示已停住，和运行中、等后台任务分开', () => {
+    expect(sessionBadge({ state: 'idle', continuing: true, stalled: true })).toBe('stalled');
+    // 运行中卡住也算停住：30 分钟没有事件比「在跑」更该说
+    expect(sessionBadge({ state: 'running', stalled: true })).toBe('stalled');
+    expect(sessionBadge({ state: 'idle', backgroundRunning: true })).toBe('background');
+    expect(badgeText('zh', 'stalled')).toBe('已停住');
+    expect(badgeText('en', 'stalled')).toBe('Stalled, no activity');
+  });
 });
