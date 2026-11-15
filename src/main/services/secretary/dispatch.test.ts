@@ -2921,6 +2921,84 @@ describe('session_archive', () => {
   });
 });
 
+describe('result_mark_done / result_mark_undo', () => {
+  it('把派发记录收口为完成，审计标明是秘书点的', async () => {
+    const h = harness({
+      file: dispatchedFile('c1', 'running'),
+      rows: settledRows(['c1']),
+      statuses: { c1: running },
+    });
+    const result = await call(h.handlers.result_mark_done, { conversationId: 'c1' });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'marked-done', conversationId: 'c1' },
+    });
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
+    expect(h.file.dispatched.c1.lastState).toBe('idle');
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_done',
+      targetId: 'c1',
+      ok: true,
+      detail: 'secretary',
+    });
+  });
+
+  it('撤销手动标记，放回进行中', async () => {
+    const h = harness({
+      file: {
+        ...dispatchedFile('c1'),
+        dispatched: {
+          c1: {
+            ...dispatchedFile('c1').dispatched.c1,
+            lastResult: { kind: 'goal-complete', turn: 1, at: 950, manual: true },
+          },
+        },
+      },
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.result_mark_undo, { conversationId: 'c1' });
+    expect(result).toEqual({ ok: true, result: { status: 'undone', conversationId: 'c1' } });
+    expect(h.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.file.dispatched.c1.manualUndoneAt).toBe(NOW);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_undo',
+      targetId: 'c1',
+      ok: true,
+      detail: 'secretary',
+    });
+  });
+
+  it('只对派发或跟踪的会话有效，其他会话拒绝', async () => {
+    const h = harness({
+      profile: { ...profile(), takeoverScope: { mode: 'projects', projectIds: ['p1'] } },
+      conversations: [rootConversation('c2')],
+      rows: settledRows(['c2']),
+      statuses: { c2: running },
+    });
+    const result = await call(h.handlers.result_mark_done, { conversationId: 'c2' });
+    expect(result.ok).toBe(false);
+    expect(h.audits.at(-1)).toMatchObject({ op: 'result_mark_done', ok: false });
+    expect(h.file.dispatched.c2).toBeUndefined();
+  });
+
+  it('会话自己报的结果不能撤销', async () => {
+    const h = harness({
+      file: settledFile(['c1']),
+      rows: settledRows(['c1']),
+      statuses: { c1: idle },
+    });
+    const result = await call(h.handlers.result_mark_undo, { conversationId: 'c1' });
+    expect(result.ok).toBe(false);
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_undo',
+      ok: false,
+      detail: 'not-manual',
+    });
+  });
+});
+
 describe('看板停止遗留任务', () => {
   it('停掉记录里所有还在跑的任务并清掉遗留标记', async () => {
     const h = harness({

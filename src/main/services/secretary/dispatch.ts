@@ -114,6 +114,14 @@ const ARCHIVE_REFUSALS: Record<string, string> = {
     'skipped (needs-user): the session is waiting for the user to answer a question or approve a tool call',
 };
 
+/** 手动收口被拒的原因码，模型看到的是可读说明 */
+const MARK_REFUSALS: Record<string, string> = {
+  'not-found':
+    'refused (not-found): only a session you dispatched or track has a dispatch record to mark; this one is not yours',
+  'not-manual':
+    'refused (not-manual): this result was reported by the session itself, so nothing manual can be undone',
+};
+
 /** 秘书排进目标会话队列的消息：origin 标记来源，撤回与停止清队列只认自己排的 */
 export interface SecretaryQueuedMessage {
   id: string;
@@ -218,6 +226,8 @@ const DISPATCH_OPS = [
   'session_stop',
   'session_task_stop',
   'session_archive',
+  'result_mark_done',
+  'result_mark_undo',
   'session_answer',
   'session_takeover_propose',
   'todo_list',
@@ -1315,6 +1325,28 @@ export function untrack(ports: SecretaryDispatchPorts, conversationId: string): 
   return { ok: true };
 }
 
+/** 秘书侧的手动收口：与看板按钮同一条逻辑，审计里标明是秘书点的 */
+function markResultOp(
+  ports: SecretaryDispatchPorts,
+  ctx: SecretaryOpContext,
+  params: Record<string, unknown>,
+  action: MarkResultAction
+): SecretaryOpResult {
+  const fields = sessionFields(params, ['conversationId']);
+  if (!fields.ok) return fields;
+  const { conversationId } = fields.value;
+  const result = markResult(ports, conversationId, action, 'secretary');
+  if (!result.ok) {
+    const op = action === 'done' ? 'result_mark_done' : 'result_mark_undo';
+    auditFailure(ports, ctx, op, result.error, conversationId);
+    return { ok: false, error: MARK_REFUSALS[result.error] ?? result.error };
+  }
+  return {
+    ok: true,
+    result: { status: action === 'done' ? 'marked-done' : 'undone', conversationId },
+  };
+}
+
 export function createSecretaryDispatchHandlers(
   ports: SecretaryDispatchPorts
 ): SecretaryDispatchHandlers {
@@ -1661,6 +1693,16 @@ export function createSecretaryDispatchHandlers(
           failed: count('failed'),
         },
       };
+    },
+
+    /** 看板「标记完成」：把派发记录收口为完成，与用户点按钮走同一条逻辑 */
+    async result_mark_done(params, ctx) {
+      return markResultOp(ports, ctx, params, 'done');
+    },
+
+    /** 看板「撤销标记」：只撤销手动标记的完成 */
+    async result_mark_undo(params, ctx) {
+      return markResultOp(ports, ctx, params, 'undo');
     },
 
     async session_answer(params, ctx) {
@@ -2186,6 +2228,9 @@ export type MarkResultAction = 'done' | 'undo';
 
 export type MarkResultResult = { ok: true } | { ok: false; error: string };
 
+/** 谁点的：用户界面按钮，还是秘书的工具调用。审计里分开记 */
+export type MarkResultSource = 'ui' | 'secretary';
+
 /**
  * 用户手动收口一条派发记录：done 记成完成并标 manual（卡片给撤销），
  * undo 把这条手动结果撤掉、放回进行中。只认派发或接管的记录，普通会话不动。
@@ -2193,7 +2238,8 @@ export type MarkResultResult = { ok: true } | { ok: false; error: string };
 export function markResult(
   ports: SecretaryDispatchPorts,
   conversationId: string,
-  action: MarkResultAction
+  action: MarkResultAction,
+  source: MarkResultSource = 'ui'
 ): MarkResultResult {
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
@@ -2224,7 +2270,7 @@ export function markResult(
     op,
     targetId: conversationId,
     ok: true,
-    detail: 'manual',
+    detail: source === 'secretary' ? 'secretary' : 'manual',
   });
   notifySecretaryChanged();
   return { ok: true };

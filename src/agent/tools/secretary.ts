@@ -116,6 +116,14 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     arrays: ['ids'],
     aliases: { sessionId: 'conversationId', conversationIds: 'ids', id: 'ids' },
   },
+  result_mark_done: {
+    keys: ['conversationId'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId' },
+  },
+  result_mark_undo: {
+    keys: ['conversationId'],
+    aliases: { sessionId: 'conversationId', id: 'conversationId' },
+  },
   session_answer: {
     keys: ['conversationId', 'askId', 'answer'],
     aliases: { sessionId: 'conversationId', id: 'askId', requestId: 'askId' },
@@ -518,6 +526,20 @@ const SCHEMAS: Record<
         description: 'Session ids to archive in one call, at most 20',
       },
     }),
+  },
+  result_mark_done: {
+    description:
+      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. Only sessions you dispatched or track are accepted; the session itself is not touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone.',
+    parameters: object({ conversationId: id('Session id from session_list or the board') }, [
+      'conversationId',
+    ]),
+  },
+  result_mark_undo: {
+    description:
+      'Undo a manual mark done on a dispatch you track and put it back into the in-progress list. Only a mark set by hand (by the user or by you with result_mark_done) can be undone; a result the session reported itself cannot be erased. The call is audited.',
+    parameters: object({ conversationId: id('Session id from session_list or the board') }, [
+      'conversationId',
+    ]),
   },
   session_answer: {
     description:
