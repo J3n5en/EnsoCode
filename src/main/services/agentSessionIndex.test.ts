@@ -97,6 +97,36 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     expect(sessions.runningRootSessionIds()).toEqual([]);
   });
 
+  it('runningTurnSnapshot 只列在跑的父会话，带回合 id、开始时刻与最后消息下标', () => {
+    const sessions = new AgentSessionIndex({
+      readSettings: () => null,
+      now: () => 1000,
+    });
+    sessions.prepareParent(parent);
+    sessions.observe({
+      type: 'parent-ready',
+      identity: parent,
+      seq: 1,
+      sessionFile: '/tmp/a.jsonl',
+      model: { providerId: 'p', modelId: 'm' },
+    });
+    expect(sessions.runningTurnSnapshot()).toEqual([]);
+    sessions.observe({ type: 'status', identity: parent, seq: 2, status: 'running', turnId: 't1' });
+    sessions.observe({
+      type: 'message-upsert',
+      identity: parent,
+      seq: 3,
+      index: 5,
+      message: { role: 'assistant', content: [] },
+    });
+    expect(sessions.runningTurnSnapshot()).toEqual([
+      { conversationId: parent.sessionId, turnId: 't1', startedAt: 1000, lastMessageIndex: 5 },
+    ]);
+    // 回合结束后不再进退出记录
+    sessions.observe({ type: 'status', identity: parent, seq: 4, status: 'idle' });
+    expect(sessions.runningTurnSnapshot()).toEqual([]);
+  });
+
   it('distinguishes preparing workers from ended identities for worktree rebuilds', () => {
     const sessions = index();
     expect(sessions.isAlive(parent.sessionId)).toBe(false);

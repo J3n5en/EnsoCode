@@ -100,6 +100,8 @@ export function ChatSessionTimeline({
   const syncStalled = useSessionsStore(
     (state) => state.conversations[conversationId]?.syncStalled === true
   );
+  /** 应用退出打断的一轮：正文里被吞掉的模型错误不再渲染，底部钉系统提示 */
+  const interrupted = useSessionsStore((state) => state.conversations[conversationId]?.interrupted);
 
   const cache = useRef<{ conversationId: string; items: TimelineItem[] }>({
     conversationId: '',
@@ -126,6 +128,7 @@ export function ChatSessionTimeline({
         toolStartedAt,
         pendingApprovals,
         secretarySession,
+        interrupted,
       });
     cache.current.items = items;
     return items;
@@ -137,6 +140,7 @@ export function ChatSessionTimeline({
     cwd,
     customEntries,
     historyBaseIndex,
+    interrupted,
     messages,
     pendingApprovals,
     running,

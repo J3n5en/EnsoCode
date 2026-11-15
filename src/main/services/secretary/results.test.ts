@@ -71,6 +71,13 @@ function emptyFile(extra: Partial<SecretaryDispatchFile> = {}): SecretaryDispatc
 }
 
 describe('结果分类', () => {
+  it('应用退出打断的一轮归 interrupted，不报 failed', () => {
+    expect(classify(record(), { type: 'turn-interrupted', at: 1_000, kind: 'update' }, idle)).toBe(
+      'interrupted'
+    );
+    expect(classify(record(), { type: 'turn-failed', error: 'x' }, idle)).toBe('failed');
+  });
+
   it('目标信号决定完成与受阻', () => {
     expect(
       classify(record({ goal: 'g' }), { type: 'goal-signal', kind: 'complete' }, running)
@@ -347,6 +354,28 @@ describe('工作台投影', () => {
     expect(board.done.map((card) => (card.kind === 'session' ? card.conversationId : ''))).toEqual([
       'done',
     ]);
+  });
+
+  it('被应用退出打断的会话不在进行中，落成 interrupted 结果', () => {
+    const file = emptyFile({
+      dispatched: {
+        cut: record({
+          conversationId: 'cut',
+          projectId: 'p1',
+          lastState: 'idle',
+          lastResult: { kind: 'interrupted', turn: 1, at: 9 },
+        }),
+      },
+    });
+    const board = buildBoard(file, {
+      rows: { cut: { id: 'cut', title: '被中断', sessionFile: '/tmp/cut.jsonl' } },
+      statuses: { cut: idle },
+      projects,
+      todos: [],
+    });
+    expect(board.running).toEqual([]);
+    expect(board.done).toHaveLength(1);
+    expect(board.done[0]).toMatchObject({ conversationId: 'cut', result: 'interrupted' });
   });
 
   it('空闲但仍要续跑、等后台任务，或实时已在跑，都算进行中', () => {

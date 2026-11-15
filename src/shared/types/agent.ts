@@ -28,6 +28,7 @@ import {
 } from '../capabilities/types';
 import { type CompactStrategy, parseCompactStrategy } from '../compactStrategy';
 import type { DefaultModelRef } from '../defaultModel';
+import type { ExitKind } from '../exitInterrupt';
 import { parsePluginArtifactInfo } from '../extensionPlugins/artifacts';
 import type {
   InterceptPayload,
@@ -2023,7 +2024,15 @@ export type AgentWorkerEvent =
   | { type: 'delivery-settled'; identity: SessionIdentity; seq: number; deliveryId: string }
   | { type: 'delivery-rejected'; identity: SessionIdentity; seq: number; deliveryId: string }
   | { type: 'delivery-deferred'; identity: SessionIdentity; seq: number; deliveryId: string }
-  | { type: 'status'; identity: SessionIdentity; seq: number; status: NodeStatus; error?: string }
+  | {
+      type: 'status';
+      identity: SessionIdentity;
+      seq: number;
+      status: NodeStatus;
+      error?: string;
+      /** running 时带上当前回合 id：Main 退出记录靠它把中断归到具体一轮 */
+      turnId?: string;
+    }
   | {
       type: 'message-upsert';
       identity: SessionIdentity;
@@ -2057,6 +2066,8 @@ export type AgentWorkerEvent =
       undelivered?: true;
       /** pi 回合内自动重试已用尽、最终仍是它判定的瞬态错误（网络 / 限流 / 5xx） */
       retryExhausted?: true;
+      /** 应用退出窗口内的断流/断连：不是会话失败，按 interrupted 收口（Main 判定） */
+      interrupted?: { at: number; kind: ExitKind };
     }
   | {
       /** 瞬态错误后 pi 将自动重试：非终态，不 settle 轮次；下一个 status/turn-* 事件清除 */
@@ -4749,7 +4760,8 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'status':
-      return value.status === 'idle' || value.status === 'running' || value.status === 'failed'
+      return (value.status === 'idle' || value.status === 'running' || value.status === 'failed') &&
+        (value.turnId === undefined || isNonEmptyString(value.turnId))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'message-upsert':

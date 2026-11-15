@@ -5360,6 +5360,10 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       status: managed.status,
       ...(error ? { error } : {}),
+      // 回合 id 只在 running 有意义：Main 退出记录据此把中断归到具体一轮
+      ...(managed.status === 'running' && managed.currentTurnId
+        ? { turnId: managed.currentTurnId }
+        : {}),
     });
     if (managed.status !== 'running') this.settleRound(managed);
   }

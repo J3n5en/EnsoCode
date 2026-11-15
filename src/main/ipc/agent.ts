@@ -5,6 +5,7 @@ import { app, ipcMain, powerMonitor, type RendererContents } from '@platform';
 import { browserSessionKey } from '@shared/bots/browser';
 import { type ChildSessionIdentity, isUuid, type SessionIdentity } from '@shared/builtinAgents';
 import { conversationCwd } from '@shared/conversationCwd';
+import type { InterruptedTurn } from '@shared/exitInterrupt';
 import type { PluginSessionStatus, SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
@@ -42,6 +43,7 @@ import type {
   SpawnModelConfig,
   ThinkingLevel,
   TitleSummaryInput,
+  WorkerExitedEvent,
 } from '@shared/types/agent';
 import {
   APPROVAL_MODES,
@@ -136,6 +138,8 @@ import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
 import { reloadConversation } from '../services/conversationReload';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
+import { takeInterruptedTurns } from '../services/exitInterruptHost';
+import { exitInterruptionOf } from '../services/exitWindow';
 import {
   getExtensionPlugins,
   peekExtensionPlugins,
@@ -325,6 +329,17 @@ export function setSecretaryDriverObserver(
   observer: ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void) | null
 ): void {
   secretaryDriverObserver = observer;
+}
+
+/**
+ * 退出窗口内的断流/断连不是会话失败：进程被杀时模型层只会看到连接断掉。
+ * 在这里统一改判，渲染层、秘书与看板拿到的是同一份「被退出打断」。
+ */
+function markExitInterrupted<T extends AgentWorkerEvent | WorkerExitedEvent>(event: T): T {
+  if (event.type !== 'turn-failed') return event;
+  const interruption = exitInterruptionOf(event.error, Date.now());
+  if (!interruption) return event;
+  return { ...event, interrupted: { at: interruption.at, kind: interruption.kind } } as T;
 }
 
 function broadcastAgentEvent(event: RendererAgentEvent): void {
@@ -1825,7 +1840,8 @@ export function registerAgentHandlers(): void {
   setInterval(() => humanTimeouts.check(), 1000).unref();
   powerMonitor.on('resume', () => humanTimeouts.check());
 
-  setAgentEventListener((workerEvent) => {
+  setAgentEventListener((incomingEvent) => {
+    const workerEvent = markExitInterrupted(incomingEvent);
     // MCP 旁路事件不属于任何会话：只转发到独立通道 / 落 token，不进 dispatch 与会话广播
     if (workerEvent.type === 'mcp-status') {
       recordMcpStatus(workerEvent);
@@ -2756,6 +2772,13 @@ export function registerAgentHandlers(): void {
     IPC_CHANNELS.AGENT_SNAPSHOT,
     (_event, sessionId: unknown): AgentActionResult =>
       requestSnapshot(typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : undefined)
+  );
+
+  // 上次应用退出（含安装更新时被 pkill）打断的回合：渲染层启动时取一次，用来把会话标成
+  // interrupted 并插系统提示。取一次即清空，刷新窗口不会重复标记。
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_TAKE_INTERRUPTED_TURNS,
+    (): Promise<InterruptedTurn[]> => takeInterruptedTurns()
   );
 
   ipcMain.handle(

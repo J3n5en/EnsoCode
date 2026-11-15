@@ -58,8 +58,11 @@ import { useAutoArchiveScan } from '@/hooks/useAutoArchiveScan';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useDockBadge } from '@/hooks/useDockBadge';
 import { useGenerationStallTimeout } from '@/hooks/useGenerationStallTimeout';
+import {
+  useRecoverInterruptedTurns,
+  useResumeInterruptedByUpdate,
+} from '@/hooks/useInterruptedSessionRecovery';
 import { useOpenFolderRequests } from '@/hooks/useOpenFolderRequests';
-import { useResumeInterruptedByUpdate } from '@/hooks/useResumeInterruptedByUpdate';
 import { isMobileWidth, useIsMobile, useViewportWidth } from '@/hooks/useViewport';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
 import { useI18n } from '@/i18n';
@@ -127,6 +130,7 @@ export default function App() {
   useGenerationStallTimeout();
   useAutoArchiveScan();
   useResumeInterruptedByUpdate();
+  useRecoverInterruptedTurns();
   useOpenFolderRequests();
   useDockBadge();
   const [searchOpen, setSearchOpen] = useState(false);

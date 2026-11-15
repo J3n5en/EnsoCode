@@ -1111,3 +1111,37 @@ describe('buildTimeline', () => {
     ]);
   });
 });
+
+describe('buildTimeline 应用退出打断的一轮', () => {
+  const STREAM_ERROR = 'OpenAI Responses stream ended before a terminal response event';
+  const half = {
+    role: 'assistant',
+    content: [{ type: 'text' as const, text: 'half' }],
+    errorMessage: STREAM_ERROR,
+    timestamp: 2,
+  } as ProjectedMessage;
+
+  it('退出窗口内被吞掉的模型错误不落红，底部钉一条系统提示', () => {
+    const timeline = buildTimeline([user('go'), half], false, [], undefined, {
+      interrupted: {
+        at: 1_000,
+        kind: 'update',
+        unfinishedTools: ['bash'],
+        suppressedError: STREAM_ERROR,
+      },
+    });
+    expect(timeline.some((item) => item.kind === 'error')).toBe(false);
+    expect(timeline.at(-1)).toMatchObject({
+      kind: 'interrupted',
+      at: 1_000,
+      exitKind: 'update',
+      unfinishedTools: ['bash'],
+    });
+  });
+
+  it('没有中断记录时同一错误照常落红', () => {
+    const timeline = buildTimeline([user('go'), half], false);
+    expect(timeline.some((item) => item.kind === 'error')).toBe(true);
+    expect(timeline.some((item) => item.kind === 'interrupted')).toBe(false);
+  });
+});

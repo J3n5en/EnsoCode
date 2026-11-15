@@ -8,6 +8,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretarySkillView, SecretaryState } from '@shared/types/secretary';
 import { notifyDesktop } from '../services/desktopHooks';
+import { interruptedTurnReason } from '../services/interruptedTurns';
 import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
@@ -261,6 +262,9 @@ const hostPorts: SecretaryHostPorts = {
   now: () => Date.now(),
   backgroundStalls: (now) => driver?.watch(now) ?? [],
   tasks: (conversationId) => observedBackgroundTasks(conversationId),
+  // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
+  interruptDetail: (conversationId) =>
+    interruptedTurnReason(path.join(app.getPath('userData'), 'agent'), conversationId),
   startPending: (pendingIds, now) => {
     void startPendingDispatches(secretaryDispatchPorts, pendingIds, now).catch((error: unknown) => {
       console.warn(

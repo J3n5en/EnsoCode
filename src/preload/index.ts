@@ -10,6 +10,7 @@ import type { AgentTypeRegistrySnapshot } from '@shared/builtinAgents';
 import type { CaCertStatus } from '@shared/caCert';
 import type { DropShelfDelivery } from '@shared/dropShelf';
 import type { ElevationRequestView } from '@shared/elevation';
+import type { InterruptedTurn } from '@shared/exitInterrupt';
 import type {
   ChatModelDto,
   DistillableSessionDto,
@@ -1126,6 +1127,9 @@ const electronAPI = {
     /** 请求 worker 投影快照（结果经 onEvent 回来）。传 sessionId 只补这一路。 */
     requestSnapshot: (sessionId?: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SNAPSHOT, sessionId),
+    /** 取走上次应用退出（含安装更新）打断的回合（取一次即清空） */
+    takeInterruptedTurns: (): Promise<InterruptedTurn[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_TAKE_INTERRUPTED_TURNS),
     /** 已结束 child 的只读历史；只传 conversationId，路径由 Main 推导 */
     readChildHistory: (conversationId: string): Promise<ChildHistoryResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_CHILD_HISTORY_READ, { conversationId }),

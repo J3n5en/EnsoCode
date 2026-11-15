@@ -8,6 +8,7 @@ import electronUpdater from 'electron-updater';
 import { agentSessionIndex } from '../../ipc/sessionIndex';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
+import { markExitForUpdate } from '../exitInterruptHost';
 import { IdleRestartGate } from './idleRestartGate';
 import { currentIdleRestartObservation } from './idleRestartSnapshot';
 import { recordInterruptedSessions } from './interruptedSessions';
@@ -170,6 +171,8 @@ class AutoUpdaterService {
   private quitAndInstall(): void {
     if (!this.updateDownloaded) return;
     this.quittingForUpdate = true;
+    // 退出记录要写明是安装更新：会话里的系统提示据此说清原因
+    markExitForUpdate();
     try {
       recordInterruptedSessions(app.getPath('userData'), agentSessionIndex.runningRootSessionIds());
     } catch (error) {

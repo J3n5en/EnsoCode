@@ -1,4 +1,5 @@
 import { BACKGROUND_STALL_DETAIL, type BackgroundStall } from '@shared/backgroundWatch';
+import { interruptReason } from '@shared/exitInterrupt';
 import type { SessionStatusPayload } from '@shared/extensionPlugins/events';
 import { projectNameFromPath } from '@shared/projectName';
 import { shouldForwardMilestone } from '@shared/secretary/contact';
@@ -105,6 +106,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   backgroundStalls?(now: number): readonly BackgroundStall[];
   /** 会话最近一次已知的后台任务；缺省表示没有投影 */
   tasks?(conversationId: string): readonly ObservedTask[];
+  /** 上次应用退出打断这一轮的原因（启动恢复时说明）；缺省表示没有记录 */
+  interruptDetail?(conversationId: string): string | undefined;
   /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
   startPending?(pendingIds: readonly string[], now: number): void;
   audit?(entry: SecretaryAuditEntry): void;
@@ -156,6 +159,9 @@ function resultEventOf(
       };
     }
     case 'turn-failed':
+      // 应用退出窗口内的断流：Main 已改判成中断，不能报成失败
+      if (event.interrupted)
+        return { type: 'turn-interrupted', at: event.interrupted.at, kind: event.interrupted.kind };
       return { type: 'turn-failed', error: event.error };
     case 'goal-signal':
       return { type: 'goal-signal', kind: event.kind };
@@ -804,6 +810,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed'))
           delete record.reopenedAt;
         let kind: SecretaryResultKind | null = null;
+        /** 中断原因：秘书收到的回传里要说清是应用被关掉，而不是模型出错 */
+        let detail: string | undefined;
         if (own) {
           const resultEvent = resultEventOf(event, rows[conversationId]);
           if (
@@ -815,6 +823,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             resultEvent.goalCompleted = true;
           }
           if (resultEvent) kind = classify(record, resultEvent, status);
+          if (resultEvent?.type === 'turn-interrupted')
+            detail = interruptReason({
+              at: resultEvent.at,
+              kind: resultEvent.kind,
+              unfinishedTools: [],
+              lang: 'zh',
+            });
         }
         // status=failed 总是和随后的 turn-failed 成对出现；这里再记一次会把同一次失败推两遍。
         // worker 退出没有 turn-failed，仍靠状态变化记失败。
@@ -836,7 +851,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (kind === 'turn-ended' && reopened && previous && SETTLED_RESULTS.has(previous.kind))
           // session_send 唤起的一轮结束了、没有再给结果：回到原来的终态，不重复推送
           restoreSettled(record, previous, now);
-        else if (kind) recordResult(file, record, kind, now, undefined, report);
+        else if (kind) recordResult(file, record, kind, now, detail, report);
         else if (
           own &&
           event.type === 'turn-completed' &&
@@ -1028,7 +1043,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         // 重启时 worker 已经不在了：不算失败，交给用户决定是否重派
         record.lastState = 'idle';
         record.stateSince = now;
-        recordResult(file, record, 'interrupted', now);
+        recordResult(
+          file,
+          record,
+          'interrupted',
+          now,
+          ports.interruptDetail?.(record.conversationId)
+        );
         changed = true;
       }
       // 一次性任务错过就在启动时补投一次

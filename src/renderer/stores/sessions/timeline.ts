@@ -1,4 +1,5 @@
 import type { ApprovalReviewRecord } from '@shared/approvalReviewRecord';
+import type { ExitKind } from '@shared/exitInterrupt';
 import type { PluginArtifactInfo } from '@shared/extensionPlugins/protocol';
 import { liveActivityFoldDelayMs } from '@shared/liveActivityFoldDelay';
 import { IMAGE_EXTENSIONS, mediaExtension } from '@shared/localImage';
@@ -183,6 +184,16 @@ export type TimelineItem =
     }
   /** 后台任务完成的合成注入消息（<background-task-update>），渲染为系统通知行 */
   | { kind: 'task-note'; key: string; summary: string; detail: string }
+  /** 应用退出打断的一轮：系统提示，说明原因并引导重试（不是模型错误） */
+  | {
+      kind: 'interrupted';
+      key: string;
+      /** 应用关闭时刻 */
+      at: number;
+      exitKind: ExitKind;
+      /** 中断时没有结果的工具调用名 */
+      unfinishedTools: readonly string[];
+    }
   /** 不进入 LLM context 的 parent/child SessionManager custom entry。 */
   | { kind: 'session-custom'; key: string; entry: AgentSessionCustomEntry }
   /** 带字分隔线（委派子会话的「第 N 次执行」） */
@@ -896,7 +907,9 @@ function buildMessageTimeline(
   toolStartedAt?: Record<string, number>,
   historyBaseIndex = 0,
   batchLabels?: ReadonlyMap<string, string>,
-  secretarySession = false
+  secretarySession = false,
+  /** 被判定为「退出导致」的模型错误原文：这是应用退出，不是模型出错，不渲染成红行 */
+  suppressedError?: string
 ): TimelineItem[] {
   const reviewingIds = reviewingToolCallIds(pendingApprovals);
   const results = new Map<
@@ -1310,7 +1323,8 @@ function buildMessageTimeline(
       // 只有真正的终态错误（非 running 的末次尝试）才落红。
       const retried = messages[messageIndex + 1]?.role === 'assistant';
       const pendingRetry = running && messageIndex === messages.length - 1;
-      if (!retried && !pendingRetry) {
+      const exitCaused = suppressedError !== undefined && message.errorMessage === suppressedError;
+      if (!retried && !pendingRetry && !exitCaused) {
         items.push({ kind: 'error', key: `${absIndex}-err`, text: message.errorMessage });
       }
     }
@@ -1524,6 +1538,16 @@ export function buildTimeline(
     runDividers?: readonly { key: string; at: number; text: string }[];
     /** 秘书会话才给可读卡片留下参数；普通会话的工具行不需要 */
     secretarySession?: boolean;
+    /**
+     * 应用退出打断的一轮：正文里被判定为「退出导致」的模型错误不再渲染，
+     * 底部改钉一条系统提示说明原因。
+     */
+    interrupted?: {
+      at: number;
+      kind: ExitKind;
+      unfinishedTools: readonly string[];
+      suppressedError?: string;
+    };
   }
 ): TimelineItem[] {
   const historyBaseIndex = options?.historyBaseIndex ?? 0;
@@ -1543,7 +1567,8 @@ export function buildTimeline(
     options?.toolStartedAt,
     historyBaseIndex,
     batchLabels,
-    options?.secretarySession === true
+    options?.secretarySession === true,
+    options?.interrupted?.suppressedError
   );
   const merged =
     rowEntries.length === 0
@@ -1602,12 +1627,23 @@ export function buildTimeline(
         historyBaseIndex === 0
       )
     : ordered;
-  return appendCompactionChrome(
+  const withChrome = appendCompactionChrome(
     withDividers,
     options?.compaction,
     options?.compactionNoticeAt,
     options?.compactionTokensAfter
   );
+  if (!options?.interrupted) return withChrome;
+  return [
+    ...withChrome,
+    {
+      kind: 'interrupted' as const,
+      key: 'interrupted',
+      at: options.interrupted.at,
+      exitKind: options.interrupted.kind,
+      unfinishedTools: options.interrupted.unfinishedTools,
+    },
+  ];
 }
 
 const DIVIDER_LEAD_MS = 10_000;
@@ -1651,6 +1687,7 @@ function isTurnSwallowable(item: TimelineItem): boolean {
     case 'divider':
     case 'plugin-message':
     case 'discarded-turn':
+    case 'interrupted':
       return false;
     default:
       return true;
