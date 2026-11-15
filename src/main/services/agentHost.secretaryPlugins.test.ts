@@ -93,7 +93,7 @@ it('秘书会话不挂插件的 MCP 与 workflow，即使插件已被勾选', ()
       secretary: {
         systemPrompt: 'SECRETARY PROMPT',
         pluginIds: ['enso.tgclient'],
-        skillDir: '/userdata/secretary/workspace/skills',
+        skillDirs: ['/userdata/secretary/workspace/skills'],
       },
     }
   );

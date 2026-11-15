@@ -38,11 +38,13 @@ export interface SecretaryContactDeps {
   profile(): SecretaryProfile | null;
   /** 秘书状态推送：联系方式状态变化时一起刷新界面 */
   publish(): void;
-  /** 派发卡片在手机上确认时用；审批没有这条路径 */
+  /** 确认卡在手机上确认时用；审批没有这条路径 */
   resolveProposal(
     proposalId: string,
     action: 'confirm' | 'reject'
   ): Promise<{ ok: boolean; error?: string }>;
+  /** 手机上点「在应用里打开」：聚焦窗口并定位到那张卡 */
+  openInApp(target: { conversationId?: string; proposalId?: string }): void;
 }
 
 export interface SecretaryContact {
@@ -74,7 +76,7 @@ function readToken(request: unknown): string | undefined {
   return typeof token === 'string' ? token : undefined;
 }
 
-function readFlag(request: unknown, key: 'allowDispatchConfirm' | 'allowMemory'): boolean | null {
+function readFlag(request: unknown, key: 'allowCardConfirm' | 'allowMemory'): boolean | null {
   if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
   const value = (request as Record<string, unknown>)[key];
   return typeof value === 'boolean' ? value : null;
@@ -110,6 +112,7 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
     answerAsk: (conversationId, requestId, answer) =>
       answerAskAsUserFromMain(conversationId, requestId, answer),
     resolveProposal: (proposalId, action) => deps.resolveProposal(proposalId, action),
+    openInApp: (target) => deps.openInApp(target),
     onError: (code, detail) => {
       console.warn(`[secretary-contact] ${code}${detail ? `: ${detail}` : ''}`);
     },
@@ -198,10 +201,10 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
 
       ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, async (event, request: unknown) => {
         if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        const dispatch = readFlag(request, 'allowDispatchConfirm');
+        const cards = readFlag(request, 'allowCardConfirm');
         const memory = readFlag(request, 'allowMemory');
-        if (dispatch === null && memory === null) return { ok: false, error: 'invalid request' };
-        if (dispatch !== null) service.setAllowDispatchConfirm(dispatch);
+        if (cards === null && memory === null) return { ok: false, error: 'invalid request' };
+        if (cards !== null) service.setAllowCardConfirm(cards);
         if (memory !== null) service.setAllowMemory(memory);
         return { ok: true };
       });

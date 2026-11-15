@@ -523,7 +523,12 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       return;
     }
     if (event.type === 'approval-request') {
-      contact.onCardWaiting({ count: 1 });
+      // 审批永远不能在手机上确认，只给一条回应用的入口
+      contact.onCardWaiting({ count: 1, approval: true, conversationId });
+      return;
+    }
+    if (event.type === 'approval-resolved') {
+      contact.onApprovalResolved(conversationId);
       return;
     }
     if (event.type === 'turn-completed' && !event.aborted && !event.silent) {

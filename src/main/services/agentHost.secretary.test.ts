@@ -158,7 +158,7 @@ it('秘书 spawn-parent 挂自有 skill 目录与勾选的全局 skill', () => {
       secretary: {
         systemPrompt: 'SECRETARY PROMPT',
         skillIds: ['skill-a'],
-        skillDir: '/userdata/secretary/workspace/skills',
+        skillDirs: ['/userdata/secretary/workspace/skills'],
       },
     }
   );
@@ -187,7 +187,7 @@ it('秘书 spawn-parent 下发自造工具描述符', () => {
     {
       secretary: {
         systemPrompt: 'SECRETARY PROMPT',
-        skillDir: '/userdata/secretary/workspace/skills',
+        skillDirs: ['/userdata/secretary/workspace/skills'],
         tools: [descriptor],
       },
     }

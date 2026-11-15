@@ -196,22 +196,22 @@ export function SecretaryContactPanel() {
                 type="checkbox"
                 data-enso="secretary-contact-allow-dispatch"
                 className="mt-0.5"
-                checked={telegram.allowDispatchConfirm}
+                checked={telegram.allowCardConfirm}
                 onChange={(event) =>
                   run(() =>
                     window.electronAPI.secretary.contactSettings({
-                      allowDispatchConfirm: event.target.checked,
+                      allowCardConfirm: event.target.checked,
                     })
                   )
                 }
               />
               <span className="min-w-0 flex-1">
                 <span className="block text-[12.5px]">
-                  {t('Allow confirming dispatch cards from Telegram')}
+                  {t('Allow confirming cards from Telegram')}
                 </span>
                 <span className="mt-0.5 block text-[11.5px] text-muted-foreground">
                   {t(
-                    'Off by default. Turning it on lets a message from your phone start work in your projects. Approvals are never handled from Telegram.'
+                    'Off by default. Turning it on lets a tap on your phone confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.'
                   )}
                 </span>
               </span>

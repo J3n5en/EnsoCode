@@ -144,6 +144,7 @@ function harness() {
     deliverOk: true,
     proposalOk: true,
     resolved: [] as { proposalId: string; action: 'confirm' | 'reject' }[],
+    opened: [] as { conversationId?: string; proposalId?: string }[],
   };
   const service = new TelegramContactService(store, {
     audit: (entry) => audits.push(entry),
@@ -166,6 +167,9 @@ function harness() {
       if (!world.proposalOk) return { ok: false, error: 'not-found' };
       world.resolved.push({ proposalId, action });
       return { ok: true };
+    },
+    openInApp: (target) => {
+      world.opened.push(target);
     },
     api: () => api,
     commands: {
@@ -519,63 +523,173 @@ describe('提问：两边谁先答算谁的', () => {
   });
 });
 
-describe('确认卡与审批不从手机处理', () => {
-  it('开关关闭时只提示回应用确认，没有任何按钮', async () => {
+describe('确认卡与审批', () => {
+  it('开关关闭时只给「在应用里打开」，没有任何确认按钮', async () => {
     const h = harness();
     await h.service.bind(TOKEN);
     h.api.push(privateMessage('/start 123456'));
     await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
-    h.service.onCardWaiting({
-      count: 2,
-      title: '派发：修登录',
-      cards: [{ id: 'p1', kind: 'dispatch' }],
-    });
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '修登录', conversationId: 'sec-1' },
+    ]);
     await waitFor(() => h.api.sent.length > 1, 'card notice sent');
-    const text = h.api.sent.at(-1)?.text ?? '';
-    expect(text).toContain('有一张卡在等你');
-    expect(text).toContain('请回应用确认');
-    expect(h.api.sent.at(-1)?.replyMarkup).toBeUndefined();
+    const message = h.api.sent.at(-1);
+    expect(message?.text).toContain('有一张卡在等你 · 修登录');
+    expect(message?.text).toContain('请回应用确认');
+    expect(message?.text).toContain('enso://secretary?conversation=sec-1&proposal=p1');
+    const buttons = message?.replyMarkup?.inline_keyboard.flat() ?? [];
+    expect(buttons.map((button) => button.text)).toEqual(['在应用里打开']);
     expect(h.world.resolved).toHaveLength(0);
   });
 
-  it('打开开关后只有派发卡片能确认，设置与接管卡片仍然只提示', async () => {
+  it('开关打开后每张卡一个「确认<类型>：<标题>」按钮，点一下直接确认', async () => {
     const h = harness();
     await h.service.bind(TOKEN);
     h.api.push(privateMessage('/start 123456'));
     await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
-    h.service.setAllowDispatchConfirm(true);
-    h.service.onCardWaiting({
-      count: 2,
-      cards: [
-        { id: 'p-dispatch', kind: 'dispatch' },
-        { id: 'p-profile', kind: 'profile' },
-      ],
+    h.service.setAllowCardConfirm(true);
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '秘书看板改用 kanban', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => h.api.sent.length > 1, 'card notice');
+    const message = h.api.sent.at(-1);
+    const rows = message?.replyMarkup?.inline_keyboard ?? [];
+    expect(rows[0].map((button) => button.text)).toEqual(['确认派发：秘书看板改用 kanban']);
+    expect(rows[1].map((button) => button.text)).toEqual(['在应用里打开']);
+    h.api.push({
+      update_id: 2,
+      callback_query: { id: 'cb-1', data: rows[0][0].callback_data },
     });
-    await waitFor(() => h.api.sent.length > 1, 'card notice sent');
-    const buttons = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard.flat() ?? [];
-    expect(buttons.map((button) => button.text)).toEqual(['确认派发', '拒绝']);
-    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: buttons[0].callback_data } });
     await waitFor(() => h.world.resolved.length > 0, 'proposal resolved');
-    expect(h.world.resolved[0]).toEqual({ proposalId: 'p-dispatch', action: 'confirm' });
-    expect(h.api.callbacks.at(-1)?.text).toBe('已确认派发');
-
-    // 设置卡片即使开关打开也只提示
-    h.service.onCardWaiting({ count: 1, cards: [{ id: 'p-profile', kind: 'profile' }] });
-    await waitFor(() => h.api.sent.length > 2, 'profile card notice');
-    expect(h.api.sent.at(-1)?.replyMarkup).toBeUndefined();
-    expect(h.api.sent.at(-1)?.text).toContain('请回应用确认');
+    expect(h.world.resolved[0]).toEqual({ proposalId: 'p1', action: 'confirm' });
+    expect(h.api.callbacks.at(-1)?.text).toBe('已确认：派发 秘书看板改用 kanban');
+    expect(
+      h.audits.some(
+        (entry) => entry.op === 'contact_card_confirm' && entry.ok && entry.detail === '派发'
+      )
+    ).toBe(true);
   });
 
-  it('审批只有提示，没有确认入口', async () => {
+  it('开关打开后设置、技能、工具、接管卡片都能确认，按钮文案带类型', async () => {
     const h = harness();
     await h.service.bind(TOKEN);
     h.api.push(privateMessage('/start 123456'));
     await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
-    h.service.setAllowDispatchConfirm(true);
-    h.service.onCardWaiting({ count: 1 });
+    h.service.setAllowCardConfirm(true);
+    h.service.syncPendingCards([
+      { id: 'p-profile', kind: 'profile', title: '秘书', conversationId: 'sec-1' },
+      { id: 'p-skill', kind: 'skill', title: 'review', conversationId: 'sec-1' },
+      { id: 'p-tool', kind: 'tool', title: 'upper', conversationId: 'sec-1' },
+      { id: 'p-takeover', kind: 'takeover', title: '修登录', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => h.api.sent.length > 1, 'card notice');
+    const rows = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard ?? [];
+    expect(rows.slice(0, 4).map((row) => row[0].text)).toEqual([
+      '确认设置：秘书',
+      '确认技能：review',
+      '确认工具：upper',
+      '确认接管：修登录',
+    ]);
+    for (const [index, proposalId] of ['p-profile', 'p-skill', 'p-tool', 'p-takeover'].entries()) {
+      h.api.push({
+        update_id: 10 + index,
+        callback_query: { id: `cb-${index}`, data: rows[index][0].callback_data },
+      });
+      await waitFor(() => h.world.resolved.length === index + 1, `resolved ${proposalId}`);
+    }
+    expect(h.world.resolved.map((entry) => entry.proposalId)).toEqual([
+      'p-profile',
+      'p-skill',
+      'p-tool',
+      'p-takeover',
+    ]);
+  });
+
+  it('审批永远只有提示与回应用入口，没有确认按钮', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.setAllowCardConfirm(true);
+    h.service.onCardWaiting({ count: 1, approval: true, conversationId: 'sec-1' });
     await waitFor(() => h.api.sent.length > 1, 'approval notice');
-    expect(h.api.sent.at(-1)?.replyMarkup).toBeUndefined();
+    const message = h.api.sent.at(-1);
+    expect(message?.text).toContain('审批只能在应用里处理');
+    const buttons = message?.replyMarkup?.inline_keyboard.flat() ?? [];
+    expect(buttons.map((button) => button.text)).toEqual(['在应用里打开']);
     expect(h.world.resolved).toHaveLength(0);
+  });
+
+  it('「在应用里打开」只把卡片交给 Main，不确认', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '修登录', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => h.api.sent.length > 1, 'card notice');
+    const open = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard[0][0];
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: open?.callback_data ?? '' } });
+    await waitFor(() => h.world.opened.length > 0, 'opened in app');
+    expect(h.world.opened[0]).toEqual({ conversationId: 'sec-1', proposalId: 'p1' });
+    expect(h.world.resolved).toHaveLength(0);
+    expect(h.api.callbacks.at(-1)?.text).toBe('已在应用里打开');
+  });
+
+  it('确认之后按钮清掉并补一行已处理', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.setAllowCardConfirm(true);
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '修登录', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => h.api.sent.length > 1, 'card notice');
+    const messageId = h.api.sent.length;
+    const data = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard[0][0].callback_data ?? '';
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data } });
+    await waitFor(() => h.api.edited.length > 0, 'message edited');
+    const edited = h.api.edited.at(-1);
+    expect(edited?.messageId).toBe(messageId);
+    expect(edited?.text).toContain('已处理');
+    expect(edited?.replyMarkup).toEqual({ inline_keyboard: [] });
+  });
+
+  it('卡片在应用里处理掉之后按钮也失效', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.setAllowCardConfirm(true);
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '修登录', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => h.api.sent.length > 1, 'card notice');
+    // 界面里确认了：下一次状态同步里这张卡不再 pending
+    h.service.syncPendingCards([]);
+    await waitFor(() => h.api.edited.length > 0, 'message settled');
+    expect(h.api.edited.at(-1)?.replyMarkup).toEqual({ inline_keyboard: [] });
+    const data = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard[0][0].callback_data ?? '';
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data } });
+    await waitFor(() => h.api.callbacks.length > 0, 'callback');
+    expect(h.api.callbacks.at(-1)?.text).toBe('这张卡已经处理过了');
+    expect(h.world.resolved).toHaveLength(0);
+  });
+
+  it('同一张卡只推一次', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    const card = { id: 'p1', kind: 'dispatch' as const, conversationId: 'sec-1' };
+    h.service.syncPendingCards([card]);
+    await waitFor(() => h.api.sent.length > 1, 'card notice');
+    const sent = h.api.sent.length;
+    h.service.syncPendingCards([card]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(h.api.sent.length).toBe(sent);
   });
 
   it('卡片已经处理过再点按钮只提示', async () => {
@@ -583,8 +697,10 @@ describe('确认卡与审批不从手机处理', () => {
     await h.service.bind(TOKEN);
     h.api.push(privateMessage('/start 123456'));
     await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
-    h.service.setAllowDispatchConfirm(true);
-    h.service.onCardWaiting({ count: 1, cards: [{ id: 'p1', kind: 'dispatch' }] });
+    h.service.setAllowCardConfirm(true);
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '修登录', conversationId: 'sec-1' },
+    ]);
     await waitFor(() => h.api.sent.length > 1, 'card notice');
     const data = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard[0][0].callback_data ?? '';
     h.world.proposalOk = false;

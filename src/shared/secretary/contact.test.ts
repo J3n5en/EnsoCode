@@ -6,6 +6,8 @@ import {
   botTokenHint,
   CONTACT_TEXT_MAX_CHARS,
   cardCallbackData,
+  cardCallbackToast,
+  cardConfirmButtonText,
   conversationDeepLink,
   createBindCode,
   formatAskMessage,
@@ -16,6 +18,7 @@ import {
   normalizeBotToken,
   parseAskCallbackData,
   parseCardCallbackData,
+  proposalDeepLink,
   shouldForwardMilestone,
   startCommandCode,
 } from './contact';
@@ -119,6 +122,13 @@ describe('手机上的消息格式', () => {
     expect(text).toContain('enso://secretary?conversation=c1');
   });
 
+  it('确认卡的深链能定位到具体那张卡', () => {
+    expect(proposalDeepLink('c1', 'p1')).toBe('enso://secretary?conversation=c1&proposal=p1');
+    expect(proposalDeepLink('c 1', 'p/1')).toBe(
+      'enso://secretary?conversation=c%201&proposal=p%2F1'
+    );
+  });
+
   it('正文压成一行并截断，没有正文与链接就不留空行', () => {
     const long = 'x'.repeat(CONTACT_TEXT_MAX_CHARS + 50);
     const text = formatMilestoneMessage('en', {
@@ -146,10 +156,25 @@ describe('手机上的消息格式', () => {
     expect(text).toContain('共 2 张');
   });
 
-  it('派发卡片被允许从手机确认时改说可以在下面确认', () => {
+  it('开关允许时改说可以在下面确认，审批永远只说在应用里处理', () => {
     const text = formatCardWaitingMessage('zh', { count: 1, confirmable: true });
-    expect(text).toContain('可以直接在下面确认');
-    expect(text).toContain('设置、技能、工具与接管卡片请回应用处理');
+    expect(text).toContain('点下面的按钮直接确认');
+    expect(text).toContain('审批永远只能在应用里处理');
+    const approval = formatCardWaitingMessage('zh', { count: 1, approval: true });
+    expect(approval).toContain('审批只能在应用里处理');
+    expect(approval).not.toContain('点下面的按钮直接确认');
+  });
+
+  it('卡片按钮文案带类型与标题，确认提示说清确认了哪一张', () => {
+    expect(cardConfirmButtonText('zh', 'dispatch', '秘书看板改用 kanban')).toBe(
+      '确认派发：秘书看板改用 kanban'
+    );
+    expect(cardConfirmButtonText('zh', 'skill', undefined)).toBe('确认技能');
+    expect(cardConfirmButtonText('zh', 'dispatch', 'x'.repeat(40))).toHaveLength(30);
+    expect(cardCallbackToast('zh', 'confirm', { kind: 'dispatch', title: '修登录' })).toBe(
+      '已确认：派发 修登录'
+    );
+    expect(cardCallbackToast('zh', 'open')).toBe('已在应用里打开');
   });
 
   it('卡片按钮的回调数据能原样解析回来', () => {

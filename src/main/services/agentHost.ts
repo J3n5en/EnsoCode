@@ -1026,8 +1026,8 @@ export function spawnSession(
       pluginIds?: readonly string[];
       /** 勾选给秘书的全局 skill id */
       skillIds?: readonly string[];
-      /** 秘书自有 skill 的根目录，总是挂上 */
-      skillDir?: string;
+      /** 秘书自有 skill 的目录（已按启用状态筛过），总是挂上 */
+      skillDirs?: readonly string[];
       /** 秘书自造工具的描述符：worker 只按这些确切名字挂工具 */
       tools?: readonly SecretaryToolDescriptor[];
     };
@@ -2425,16 +2425,16 @@ function enabledSkillPaths(preset?: Preset): string[] {
   return picked.map((skill) => skill.path);
 }
 
-/** 秘书的 skill：自有目录总是挂，全局 skill 只挂勾选的 */
+/** 秘书的 skill：启用的自有目录总是挂，全局 skill 只挂勾选的 */
 function secretarySkillPaths(
-  secretary?: { skillIds?: readonly string[]; skillDir?: string } | undefined
+  secretary?: { skillIds?: readonly string[]; skillDirs?: readonly string[] } | undefined
 ): string[] {
   if (!secretary) return [];
   const ids = secretary.skillIds ?? [];
   const state = readSettingsState();
   const skills = Array.isArray(state?.skills) ? state.skills.filter(isSkillEntry) : [];
   const picked = skills.filter((skill) => ids.includes(skill.id)).map((skill) => skill.path);
-  return secretary.skillDir ? [secretary.skillDir, ...picked] : picked;
+  return [...(secretary.skillDirs ?? []), ...picked];
 }
 
 function enabledMcpServers(preset?: Preset): McpServerSpawnConfig[] {

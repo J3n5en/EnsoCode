@@ -19,6 +19,10 @@ import {
   type ContactLang,
   cardCallbackData,
   cardCallbackToast,
+  cardConfirmButtonText,
+  cardHandledLine,
+  cardKindLabel,
+  cardOpenButtonText,
   createBindCode,
   feedCallbackData,
   formatAskMessage,
@@ -32,6 +36,8 @@ import {
   parseAskCallbackData,
   parseCardCallbackData,
   parseFeedCallback,
+  proposalDeepLink,
+  type SecretaryCardKind,
   shouldForwardMilestone,
   startCommandCode,
 } from '@shared/secretary/contact';
@@ -76,11 +82,20 @@ export interface ContactMilestoneInput {
   conversationId: string;
 }
 
+/** 一张待确认的卡：类型决定按钮文案，标题让用户认出是哪一张 */
+export interface ContactCardRef {
+  id: string;
+  kind: SecretaryCardKind;
+  title?: string;
+  /** 卡片属于哪个秘书会话：深链与「在应用里打开」都回到这里 */
+  conversationId?: string;
+}
+
 export interface ContactCardWaitingInput {
   count: number;
-  title?: string;
-  /** 待确认的卡片：只有派发类卡片可能在手机上确认 */
-  cards?: readonly { id: string; kind: string }[];
+  /** 审批：永远不能在手机上确认，只给一条回应用的入口 */
+  approval?: boolean;
+  conversationId?: string;
 }
 
 export interface ContactRelayAskInput {
@@ -97,6 +112,8 @@ export interface SecretaryContactPort {
   onRelayAsk(input: ContactRelayAskInput): void;
   onAskRequest(conversationId: string, ask: AskRequestInfo): void;
   onAskResolved(conversationId: string, requestId: string): void;
+  /** 审批在应用里收尾：那条提示的按钮跟着失效 */
+  onApprovalResolved(conversationId: string): void;
   onTurnReply(conversationId: string, text: string): void;
   onCardWaiting(input: ContactCardWaitingInput): void;
 }
@@ -118,11 +135,13 @@ export interface ContactServicePorts {
     requestId: string,
     answer: string
   ): { ok: boolean; error?: string };
-  /** 只有「允许从 Telegram 确认派发类卡片」打开时才用；审批永远不走这里 */
+  /** 只有「允许从 Telegram 确认卡片」打开时才用；审批永远不走这里 */
   resolveProposal(
     proposalId: string,
     action: 'confirm' | 'reject'
   ): Promise<{ ok: boolean; error?: string }>;
+  /** 手机上点「在应用里打开」：聚焦窗口并定位到这张卡（或这个会话） */
+  openInApp(target: { conversationId?: string; proposalId?: string }): void;
   /** 出站失败只提示，不打断秘书 */
   onError?(code: ContactError, detail?: string): void;
   /** 只读命令：由 Main 查面板同一份数据，不进秘书会话 */
@@ -150,6 +169,21 @@ interface PendingAsk {
 
 const MAX_PENDING_ASKS = 8;
 
+/** 一条提示消息里最多几张卡：再多手机上也没法点 */
+const MAX_CARD_BUTTONS = 4;
+
+/** 已经发到手机上的确认卡：处理掉之后要把那条消息的按钮清掉 */
+interface TrackedCard extends ContactCardRef {
+  slot: number;
+  chatId: number;
+  messageId: number | null;
+  /** 这条消息发出去没有：清按钮要等它拿到 messageId */
+  ready: Promise<void>;
+  /** 原正文：清按钮时补一行「已处理」 */
+  text: string;
+  settled: boolean;
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
@@ -174,13 +208,18 @@ function errorCode(error: unknown): ContactError {
 
 /**
  * Telegram 联系方式：绑定向导、长轮询、出站里程碑、入站消息与提问按钮。
- * 只认绑定的那个 chat；确认卡与审批一律不在手机上处理。
+ * 只认绑定的那个 chat；确认卡按开关决定能不能在手机上确认，审批一律不在手机上处理。
  */
 export class TelegramContactService implements SecretaryContactPort {
   private readonly poller: ContactPoller;
   private readonly apis = new Map<string, TelegramApi>();
   private readonly asks: PendingAsk[] = [];
-  private readonly cards = new Map<number, { proposalId: string; at: number }>();
+  /** 按钮槽位 → 卡片；重启后按钮自然失效 */
+  private readonly cardSlots = new Map<number, TrackedCard>();
+  /** 提案 id → 已经提示过的那条消息：同一张卡只推一次，处理掉再清按钮 */
+  private readonly cardMessages = new Map<string, TrackedCard>();
+  /** 会话 id → 审批提示：审批在应用里收尾后清按钮 */
+  private readonly approvalCards = new Map<string, TrackedCard[]>();
   private slot = 1;
   /** 从手机发来消息后，等这一轮的正文再回发手机 */
   private readonly awaitingReply = new Set<string>();
@@ -230,7 +269,7 @@ export class TelegramContactService implements SecretaryContactPort {
             }
           : {}),
         ...(token ? { tokenHint: botTokenHint(token) } : {}),
-        allowDispatchConfirm: file.allowDispatchConfirm,
+        allowCardConfirm: file.allowCardConfirm,
         allowMemory: file.allowMemory,
         poll: this.poller.status(),
         secure: this.store.isSecure(),
@@ -321,6 +360,9 @@ export class TelegramContactService implements SecretaryContactPort {
     this.store.saveUnbound();
     await this.clearCommands(chatId);
     this.asks.length = 0;
+    this.cardSlots.clear();
+    this.cardMessages.clear();
+    this.approvalCards.clear();
     this.awaitingReply.clear();
     this.audit('contact_unbind', true);
     this.ports.publish();
@@ -335,6 +377,9 @@ export class TelegramContactService implements SecretaryContactPort {
     await this.clearCommands(chatId);
     await this.store.saveForgotten();
     this.asks.length = 0;
+    this.cardSlots.clear();
+    this.cardMessages.clear();
+    this.approvalCards.clear();
     this.awaitingReply.clear();
     this.audit('contact_forget_bot', true);
     this.ports.publish();
@@ -350,9 +395,9 @@ export class TelegramContactService implements SecretaryContactPort {
     return sent.ok ? { ok: true } : { ok: false, error: sent.error };
   }
 
-  setAllowDispatchConfirm(value: boolean): void {
-    this.store.save({ ...this.store.file(), allowDispatchConfirm: value === true });
-    this.audit('contact_settings', true, `allowDispatchConfirm=${value === true}`);
+  setAllowCardConfirm(value: boolean): void {
+    this.store.save({ ...this.store.file(), allowCardConfirm: value === true });
+    this.audit('contact_settings', true, `allowCardConfirm=${value === true}`);
     this.ports.publish();
   }
 
@@ -449,43 +494,157 @@ export class TelegramContactService implements SecretaryContactPort {
   }
 
   /**
-   * 有卡在等用户：默认只提示回应用确认。
-   * 打开「允许从 Telegram 确认派发类卡片」后，只有派发卡片带确认按钮；
-   * 设置、技能、工具、接管卡片与审批永远只提示。
+   * 审批：永远不能在手机上确认，只给一条回应用的入口。
+   * 确认卡走 syncPendingCards，与界面状态同步。
    */
   onCardWaiting(input: ContactCardWaitingInput): void {
     const file = this.store.file();
     if (!file.chat || input.count <= 0) return;
-    const dispatchCards = file.allowDispatchConfirm
-      ? (input.cards ?? []).filter((card) => card.kind === 'dispatch').slice(0, 3)
-      : [];
-    const confirmable = dispatchCards.length > 0;
-    const text = formatCardWaitingMessage(this.ports.lang(), {
+    const lang = this.ports.lang();
+    const text = formatCardWaitingMessage(lang, {
       count: input.count,
-      ...(input.title ? { title: input.title } : {}),
-      ...(confirmable ? { confirmable } : {}),
+      ...(input.approval ? { approval: true } : {}),
+      ...(input.conversationId
+        ? { link: `enso://secretary?conversation=${encodeURIComponent(input.conversationId)}` }
+        : {}),
     });
-    const replyMarkup = confirmable
-      ? {
-          inline_keyboard: dispatchCards.map((card) => {
-            const slot = this.slot++;
-            this.cards.set(slot, { proposalId: card.id, at: this.ports.now() });
-            return [
-              {
-                text: this.ports.lang() === 'zh' ? '确认派发' : 'Confirm',
-                callback_data: cardCallbackData(slot, 'confirm'),
-              },
-              {
-                text: this.ports.lang() === 'zh' ? '拒绝' : 'Reject',
-                callback_data: cardCallbackData(slot, 'reject'),
-              },
-            ];
-          }),
-        }
-      : undefined;
-    void this.send(file.chat.id, text, replyMarkup).then((sent) => {
-      this.audit('contact_card_waiting', sent.ok, sent.ok ? undefined : sent.error);
+    const slot = this.slot++;
+    const entry: TrackedCard = {
+      id: `approval:${slot}`,
+      kind: 'dispatch',
+      slot,
+      chatId: file.chat.id,
+      messageId: null,
+      ready: Promise.resolve(),
+      text,
+      settled: false,
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    };
+    this.cardSlots.set(slot, entry);
+    if (input.conversationId) {
+      const list = this.approvalCards.get(input.conversationId) ?? [];
+      list.push(entry);
+      this.approvalCards.set(input.conversationId, list);
+    }
+    const replyMarkup = {
+      inline_keyboard: [
+        [{ text: cardOpenButtonText(lang), callback_data: cardCallbackData(slot, 'open') }],
+      ],
+    };
+    entry.ready = this.send(file.chat.id, text, replyMarkup).then((sent) => {
+      this.audit('contact_card_waiting', sent.ok, sent.ok ? 'approval' : sent.error);
+      if (sent.ok) entry.messageId = sent.messageId;
     });
+  }
+
+  /** 审批在应用里答完了：那条提示的按钮一起清掉 */
+  onApprovalResolved(conversationId: string): void {
+    const list = this.approvalCards.get(conversationId);
+    if (!list) return;
+    this.approvalCards.delete(conversationId);
+    for (const entry of list) void this.settleCard(entry);
+  }
+
+  /**
+   * 待确认的卡与界面状态同步：新卡发一条带按钮的提示，处理掉的卡把按钮清掉。
+   * 开关关着时只给「在应用里打开」，不提供确认。
+   */
+  syncPendingCards(cards: readonly ContactCardRef[]): void {
+    const file = this.store.file();
+    if (!file.chat) return;
+    const pending = new Set(cards.map((card) => card.id));
+    for (const tracked of this.cardMessages.values()) {
+      if (!pending.has(tracked.id)) void this.settleCard(tracked);
+    }
+    const fresh = cards.filter((card) => !this.cardMessages.has(card.id));
+    if (fresh.length === 0) return;
+    this.announceCards(file.chat.id, fresh, cards.length);
+  }
+
+  /** 一条提示里每张卡一个按钮，文案是「确认<类型>：<标题>」 */
+  private announceCards(chatId: number, cards: readonly ContactCardRef[], total: number): void {
+    const lang = this.ports.lang();
+    const confirmable = this.store.file().allowCardConfirm;
+    const shown = cards.slice(0, MAX_CARD_BUTTONS);
+    const first = shown[0];
+    const text = formatCardWaitingMessage(lang, {
+      count: total,
+      ...(first?.title ? { title: first.title } : {}),
+      ...(confirmable ? { confirmable: true } : {}),
+      ...(first?.conversationId ? { link: proposalDeepLink(first.conversationId, first.id) } : {}),
+    });
+    const tracked: TrackedCard[] = [];
+    const rows: { text: string; callback_data: string }[][] = [];
+    for (const card of shown) {
+      const slot = this.slot++;
+      const entry: TrackedCard = {
+        ...card,
+        slot,
+        chatId,
+        messageId: null,
+        ready: Promise.resolve(),
+        text,
+        settled: false,
+      };
+      tracked.push(entry);
+      this.cardSlots.set(slot, entry);
+      this.cardMessages.set(card.id, entry);
+      rows.push([
+        confirmable
+          ? {
+              text: cardConfirmButtonText(lang, card.kind, card.title),
+              callback_data: cardCallbackData(slot, 'confirm'),
+            }
+          : { text: cardOpenButtonText(lang), callback_data: cardCallbackData(slot, 'open') },
+      ]);
+    }
+    // 开关打开时也留一条回应用的入口：确认前想先看全文
+    if (confirmable && tracked[0]) {
+      rows.push([
+        {
+          text: cardOpenButtonText(lang),
+          callback_data: cardCallbackData(tracked[0].slot, 'open'),
+        },
+      ]);
+    }
+    const sending = this.send(chatId, text, { inline_keyboard: rows }).then((sent) => {
+      this.audit(
+        'contact_card_waiting',
+        sent.ok,
+        sent.ok
+          ? `${shown.map((card) => cardKindLabel(lang, card.kind)).join(',')}${confirmable ? '' : ' readonly'}`
+          : sent.error
+      );
+      if (!sent.ok) return;
+      for (const entry of tracked) entry.messageId = sent.messageId;
+    });
+    for (const entry of tracked) entry.ready = sending;
+  }
+
+  /** 卡片被处理掉（哪边处理都一样）：补一行「已处理」并清掉按钮 */
+  private async settleCard(tracked: TrackedCard): Promise<void> {
+    if (tracked.settled) return;
+    await tracked.ready;
+    const token = this.store.token();
+    if (!token || tracked.messageId === null) {
+      // 消息本来就没发出去：没有按钮可清，不用再试
+      tracked.settled = true;
+      return;
+    }
+    const lang = this.ports.lang();
+    try {
+      await this.apiFor(token).editMessageText({
+        chatId: tracked.chatId,
+        messageId: tracked.messageId,
+        text: `${tracked.text}\n${cardHandledLine(lang)}`,
+        replyMarkup: { inline_keyboard: [] },
+      });
+      tracked.settled = true;
+      this.audit('contact_card_settled', true, cardKindLabel(lang, tracked.kind));
+    } catch (error) {
+      this.audit('contact_card_settled', false, errorCode(error));
+      this.reportError(error);
+    }
   }
 
   /** 只读命令：查面板数据、格式化、回一条；审计只记命令名 */
@@ -643,7 +802,7 @@ export class TelegramContactService implements SecretaryContactPort {
     text: string,
     replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] },
     parseMode?: 'HTML'
-  ): Promise<{ ok: true } | { ok: false; error: ContactError }> {
+  ): Promise<{ ok: true; messageId: number } | { ok: false; error: ContactError }> {
     const token = this.store.token();
     if (!token) return { ok: false, error: 'token-required' };
     // Telegram 单条 4096 上限：长回复截断，别让整条发不出去
@@ -652,14 +811,14 @@ export class TelegramContactService implements SecretaryContactPort {
         ? `${text.slice(0, CONTACT_OUTBOUND_MAX_CHARS)}…`
         : text;
     try {
-      await this.apiFor(token).sendMessage({
+      const messageId = await this.apiFor(token).sendMessage({
         chatId,
         text: body,
         ...(replyMarkup ? { replyMarkup } : {}),
         ...(parseMode ? { parseMode } : {}),
       });
       this.audit('contact_outbound', true, describe(body));
-      return { ok: true };
+      return { ok: true, messageId };
     } catch (error) {
       const code = errorCode(error);
       this.audit('contact_outbound', false, code);
@@ -796,31 +955,61 @@ export class TelegramContactService implements SecretaryContactPort {
     );
   }
 
-  /** 派发卡片的确认/拒绝：卡片已经不在待确认里就只提示 */
+  /**
+   * 确认卡的按钮：确认直接执行，打开只回到应用。
+   * 卡片已经处理过（哪边处理的都算）就只提示，并把这条消息的按钮清掉。
+   */
   private async handleCardCallback(
     query: TelegramCallbackQuery,
     slot: number,
-    action: 'confirm' | 'reject'
+    action: 'confirm' | 'reject' | 'open'
   ): Promise<void> {
-    const card = this.cards.get(slot);
+    const lang = this.ports.lang();
+    const card = this.cardSlots.get(slot);
     if (!card) {
       await this.answerCallback(
         query.id,
-        this.ports.lang() === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
+        lang === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
       );
       return;
     }
-    this.cards.delete(slot);
-    const result = await this.ports.resolveProposal(card.proposalId, action);
-    this.audit('contact_card_resolve', result.ok, result.ok ? action : (result.error ?? 'failed'));
-    await this.answerCallback(
-      query.id,
-      result.ok
-        ? cardCallbackToast(this.ports.lang(), action)
-        : this.ports.lang() === 'zh'
-          ? '这张卡已经处理过了'
-          : 'That card is gone'
+    if (action === 'open') {
+      this.ports.openInApp({
+        ...(card.conversationId ? { conversationId: card.conversationId } : {}),
+        ...(card.settled ? {} : { proposalId: card.id }),
+      });
+      this.audit('contact_card_open', true, cardKindLabel(lang, card.kind));
+      await this.answerCallback(query.id, cardCallbackToast(lang, 'open'));
+      return;
+    }
+    if (card.settled) {
+      await this.answerCallback(
+        query.id,
+        lang === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
+      );
+      return;
+    }
+    const result = await this.ports.resolveProposal(card.id, action);
+    this.audit(
+      action === 'confirm' ? 'contact_card_confirm' : 'contact_card_reject',
+      result.ok,
+      result.ok ? cardKindLabel(lang, card.kind) : (result.error ?? 'failed')
     );
+    if (result.ok) {
+      await this.answerCallback(
+        query.id,
+        cardCallbackToast(lang, action, {
+          kind: card.kind,
+          ...(card.title ? { title: card.title } : {}),
+        })
+      );
+    } else {
+      await this.answerCallback(
+        query.id,
+        lang === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
+      );
+    }
+    await this.settleCard(card);
   }
 
   private answerPendingAsk(pending: PendingAsk, text: string): void {

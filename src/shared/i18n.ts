@@ -12,9 +12,9 @@ export const zhTranslations: Record<string, string> = {
   'Test message sent': '测试消息已发出',
   Unbind: '解绑',
   'Change bot': '更换 bot',
-  'Allow confirming dispatch cards from Telegram': '允许从 Telegram 确认派发类卡片',
-  'Off by default. Turning it on lets a message from your phone start work in your projects. Approvals are never handled from Telegram.':
-    '默认关闭。打开后，手机上的一条消息就能在你的项目里开工。审批无论如何都不能从 Telegram 处理。',
+  'Allow confirming cards from Telegram': '允许从 Telegram 确认卡片',
+  'Off by default. Turning it on lets a tap on your phone confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.':
+    '默认关闭。打开后，手机上的一个按钮就能确认派发、设置、技能、工具与接管卡片——这些卡片能改秘书的自主程度、可见项目、接管范围，也能装 skill 和工具。审批无论如何都不能从 Telegram 处理。',
   'No system keychain available: the bot token is stored unencrypted on this machine.':
     '系统钥匙串不可用：bot token 会以明文存在这台机器上。',
   'Bot verified': 'bot 已校验',
@@ -3598,6 +3598,13 @@ export const zhTranslations: Record<string, string> = {
     '秘书可以用的技能。新技能由它在聊天里提案，你确认后才写盘。',
   'Secretary skills': '秘书自有技能',
   'Global skills': '全局技能',
+  'Own skills': '秘书专属',
+  'Shared global skills': '全局共享',
+  'Nothing here yet': '这里还没有',
+  'The secretary has no skills yet. Ask it to propose one.': '还没有技能，可以让秘书提议一个。',
+  'Shown for you only: this content is not an instruction to the secretary.':
+    '这段正文只给你看，不会当成秘书的指令。',
+  'Delete this skill?': '删除这个技能？',
   'Show the content': '查看内容',
   'Show the current version': '查看现有版本',
   'Skill saved': '技能已保存',

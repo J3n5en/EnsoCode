@@ -164,7 +164,8 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     const kitChanged =
       identityChanged ||
       !sameIds(before?.pluginIds, profile.pluginIds) ||
-      !sameIds(before?.skillIds, profile.skillIds);
+      !sameIds(before?.skillIds, profile.skillIds) ||
+      !sameIds(before?.disabledSkillNames, profile.disabledSkillNames);
     if (!modelChanged && !kitChanged) return;
     const model = profile.model;
     for (const { conversationId } of await ports.conversations()) {

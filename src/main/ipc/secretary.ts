@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { checkAvatarImage } from '@shared/bots/cardPng';
+import { proposalCardTitle } from '@shared/secretary/contact';
 import { parseFeedQuery } from '@shared/secretary/feed';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
-import type { SecretaryState } from '@shared/types/secretary';
+import type { SecretarySkillView, SecretaryState } from '@shared/types/secretary';
 import { notifyDesktop } from '../services/desktopHooks';
 import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
 import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
@@ -44,6 +45,7 @@ import {
   type SecretaryHostPorts,
 } from '../services/secretary/host';
 import { isSecretaryConversation, secretaryProjectId } from '../services/secretary/identity';
+import { openSecretaryTarget } from '../services/secretary/links';
 import { secretaryProfile } from '../services/secretary/profile';
 import {
   parseDismissRequest,
@@ -63,7 +65,15 @@ import {
   type MainSessionResult,
   type SessionFactoryPorts,
 } from '../services/secretary/sessionFactory';
-import { secretarySkill } from '../services/secretary/skills';
+import {
+  readGlobalSkillBody,
+  readSecretarySkill,
+  secretarySkill,
+  secretarySkillsDir,
+  secretarySkillViews,
+  withGlobalSkillEnabled,
+  withOwnSkillEnabled,
+} from '../services/secretary/skills';
 import { SecretaryStore } from '../services/secretary/store';
 import {
   getSourceAuthorityRegistry,
@@ -80,6 +90,7 @@ import {
   patchConversationsState,
   readPersistedConversation,
   readPersistedConversations,
+  readSettingsState,
 } from './settings';
 import { createConversationWorktree, removeRegisteredWorktree } from './worktree';
 
@@ -290,21 +301,25 @@ function secretaryState(): Promise<SecretaryState> {
   });
 }
 
-/** 已经提示过的待确认提案：同一张卡只往手机推一次 */
-let announcedProposals = new Set<string>();
-
-/** 有新的确认卡在等用户：手机上只提示回应用确认，审批与派发都不在手机上处理 */
-function announceWaitingCards(state: SecretaryState): void {
+/**
+ * 待确认的卡与手机同步：新卡推一条带按钮的提示，处理掉的卡把按钮清掉。
+ * 同一张卡只推一次由联系方式服务自己记着。
+ */
+function syncWaitingCards(state: SecretaryState): void {
   const pending = Object.values(state.proposals).filter(
     (proposal) => proposal.status === 'pending'
   );
-  const fresh = pending.filter((proposal) => !announcedProposals.has(proposal.id));
-  announcedProposals = new Set(pending.map((proposal) => proposal.id));
-  if (fresh.length === 0) return;
-  const draft = fresh[0].draft as { title?: unknown };
-  const title =
-    typeof draft.title === 'string' && draft.title.trim() ? draft.title.trim() : undefined;
-  contact?.service.onCardWaiting({ count: pending.length, ...(title ? { title } : {}) });
+  contact?.service.syncPendingCards(
+    pending.map((proposal) => {
+      const title = proposalCardTitle(proposal);
+      return {
+        id: proposal.id,
+        kind: proposal.kind,
+        conversationId: proposal.secretaryConversationId,
+        ...(title ? { title } : {}),
+      };
+    })
+  );
 }
 
 /** 聊天卡片与工作台读同一份 Main 状态 */
@@ -312,9 +327,64 @@ function broadcastState(): void {
   void secretaryState()
     .then((state) => {
       broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state);
-      announceWaitingCards(state);
+      syncWaitingCards(state);
     })
     .catch(() => undefined);
+}
+
+/** 设置里的全局 skill：坏条目跳过，路径只认这里给出的 */
+function globalSkillEntries(): { id: string; name: string; description: string; path: string }[] {
+  const raw = readSettingsState()?.skills;
+  if (!Array.isArray(raw)) return [];
+  const entries: { id: string; name: string; description: string; path: string }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === 'string' ? record.id : '';
+    const name = typeof record.name === 'string' ? record.name : '';
+    const skillPath = typeof record.path === 'string' ? record.path : '';
+    if (!id || !name || !skillPath) continue;
+    entries.push({
+      id,
+      name,
+      description: typeof record.description === 'string' ? record.description : '',
+      path: skillPath,
+    });
+  }
+  return entries;
+}
+
+/** 设置页与右侧面板共用的一份 skill 视图 */
+function skillViews(): SecretarySkillView[] {
+  const profile = secretaryStore().profile();
+  return secretarySkillViews({
+    own: secretarySkill.list(),
+    disabledOwn: profile?.disabledSkillNames ?? [],
+    global: globalSkillEntries(),
+    enabledGlobalIds: profile?.skillIds ?? [],
+  });
+}
+
+function parseSkillRequest(
+  value: unknown
+): { id: string; source: 'own' | 'global'; enabled: boolean } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const id = typeof record.id === 'string' ? record.id.trim() : '';
+  const source = record.source;
+  if (!id || (source !== 'own' && source !== 'global')) return null;
+  if (record.enabled !== undefined && typeof record.enabled !== 'boolean') return null;
+  return { id, source, enabled: record.enabled !== false };
+}
+
+/** skill 删掉后不再记在停用名单里：名单只留真实存在的目录 */
+async function forgetDisabledSkill(name: string): Promise<void> {
+  const profile = secretaryStore().profile();
+  if (!profile?.disabledSkillNames?.includes(name)) return;
+  await secretaryProfile.save(
+    { disabledSkillNames: profile.disabledSkillNames.filter((entry) => entry !== name) },
+    null
+  );
 }
 
 export function registerSecretaryHandlers(): void {
@@ -329,9 +399,11 @@ export function registerSecretaryHandlers(): void {
     delivery: hostPorts,
     profile: () => secretaryStore().profile(),
     publish: broadcastState,
-    // 派发卡片在手机上确认时走与界面同一条路径；审批不在这个入口
+    // 确认卡在手机上确认时走与界面同一条路径；审批不在这个入口
     resolveProposal: (proposalId, action) =>
       resolveProposal(secretaryDispatchPorts, proposalId, action),
+    // 「在应用里打开」：与深链同一条路，聚焦窗口并把工作台滚到那张卡
+    openInApp: (target) => openSecretaryTarget(target),
   });
   contact.register();
   // 上次已经绑过就接着轮询；没绑过什么也不做
@@ -492,13 +564,50 @@ export function registerSecretaryHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILLS_LIST, async (event) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return { ok: true, skills: secretarySkill.list() };
+    return { ok: true, skills: skillViews() };
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILL_DELETE, async (event, request: unknown) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return secretarySkill.remove(request, null);
+    const removed = await secretarySkill.remove(request, null);
+    if (removed.ok) await forgetDisabledSkill(removed.name);
+    return removed;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILL_SET_ENABLED, async (event, request: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseSkillRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    const profile = secretaryStore().profile();
+    if (!profile) return { ok: false, error: 'not-configured' };
+    const draft =
+      parsed.source === 'own'
+        ? {
+            disabledSkillNames: withOwnSkillEnabled(
+              profile.disabledSkillNames ?? [],
+              parsed.id,
+              parsed.enabled
+            ),
+          }
+        : { skillIds: withGlobalSkillEnabled(profile.skillIds ?? [], parsed.id, parsed.enabled) };
+    return secretaryProfile.save(draft, null);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILL_READ, async (event, request: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed = parseSkillRequest(request);
+    if (!parsed) return { ok: false, error: 'invalid request' };
+    if (parsed.source === 'own') {
+      const skill = readSecretarySkill(secretarySkillsDir(), parsed.id);
+      return skill ? { ok: true, body: skill.body } : { ok: false, error: 'not-found' };
+    }
+    // 路径只从设置里的权威条目取，renderer 传的 id 不是路径
+    const entry = globalSkillEntries().find((skill) => skill.id === parsed.id);
+    const body = entry ? readGlobalSkillBody(entry.path) : null;
+    return body === null ? { ok: false, error: 'not-found' } : { ok: true, body };
   });
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_TOOLS_LIST, async (event) => {

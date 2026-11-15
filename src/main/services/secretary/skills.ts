@@ -12,6 +12,7 @@ import type {
   SecretaryAuditEntry,
   SecretaryDispatchFile,
   SecretarySkillDraft,
+  SecretarySkillView,
 } from '@shared/types/secretary';
 import { writeAtomic } from '../bots/files';
 import { appendAudit } from './audit';
@@ -20,6 +21,92 @@ import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
 const SKILL_FILE = 'SKILL.md';
+
+/** 全局 skill 的正文上限：只给用户看，读不出来就当没有 */
+const SKILL_BODY_READ_MAX = 200_000;
+
+export interface GlobalSkillRef {
+  id: string;
+  name: string;
+  description: string;
+}
+
+/**
+ * 设置页与右侧面板共用的一份视图：自有在前，全局在后。
+ * 自有的正文随列表给出（本来就在秘书目录里），全局展开时再读。
+ */
+export function secretarySkillViews(input: {
+  own: readonly SecretarySkillDraft[];
+  disabledOwn: readonly string[];
+  global: readonly GlobalSkillRef[];
+  enabledGlobalIds: readonly string[];
+}): SecretarySkillView[] {
+  const disabled = new Set(input.disabledOwn);
+  const enabledIds = new Set(input.enabledGlobalIds);
+  return [
+    ...input.own.map((skill) => ({
+      id: skill.name,
+      name: skill.name,
+      description: skill.description,
+      source: 'own' as const,
+      enabled: !disabled.has(skill.name),
+      body: skill.body,
+    })),
+    ...input.global.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: 'global' as const,
+      enabled: enabledIds.has(skill.id),
+    })),
+  ];
+}
+
+/** 停用的自有 skill 记在档案里：文件还在，只是不进会话 */
+export function withOwnSkillEnabled(
+  disabled: readonly string[],
+  name: string,
+  enabled: boolean
+): string[] {
+  const rest = disabled.filter((entry) => entry !== name);
+  return enabled ? rest : [...rest, name];
+}
+
+/** 全局 skill 的启用就是设置里的勾选：勾上或去掉一个 id */
+export function withGlobalSkillEnabled(
+  ids: readonly string[],
+  id: string,
+  enabled: boolean
+): string[] {
+  const rest = ids.filter((entry) => entry !== id);
+  return enabled ? [...rest, id] : rest;
+}
+
+/** 全局 skill 的 SKILL.md 正文：路径由设置里的条目给出，只读这一层 */
+export function readGlobalSkillBody(dir: string): string | null {
+  try {
+    const file = path.join(dir, SKILL_FILE);
+    if (!existsSync(file) || statSync(file).size > SKILL_BODY_READ_MAX) return null;
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** 挂给会话的自有 skill 目录：停用的不挂，读不出 SKILL.md 的目录也不挂 */
+export function secretarySkillDirs(dir: string, disabled: readonly string[]): string[] {
+  const skip = new Set(disabled);
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((name) => isSecretarySkillName(name) && !skip.has(name))
+    .map((name) => path.join(dir, name))
+    .filter((full) => existsSync(path.join(full, SKILL_FILE)));
+}
 
 export type SkillSaveResult = { ok: true; name: string } | { ok: false; error: string };
 

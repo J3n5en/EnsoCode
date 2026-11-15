@@ -57,6 +57,7 @@ import {
 } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
+import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import { useSidePanelStore } from '@/stores/sidePanel';
@@ -603,6 +604,14 @@ function SidePanelHeaderActions({
   const topRight = useIsTopRightGroup(containerApi, group);
   const toggleOpen = useSidePanelStore((s) => s.toggleOpen);
   const windows = useWindowChromeKind() === 'windows';
+  // 深链或手机按钮要求定位某张卡时把秘书面板叫出来；同一个请求只处理一次
+  const focusProposal = useSecretaryStore((s) => s.focusProposal);
+  const handledFocus = useRef(0);
+  useEffect(() => {
+    if (!focusProposal || !secretary || focusProposal.at === handledFocus.current) return;
+    handledFocus.current = focusProposal.at;
+    addSecretaryPanel(containerApi, conversationId, projectId, secretaryName);
+  }, [focusProposal, secretary, containerApi, conversationId, projectId, secretaryName]);
   return (
     <div className="flex h-full items-center gap-0.5">
       <NewTabMenu

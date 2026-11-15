@@ -243,7 +243,7 @@ import type {
   SecretaryProfileDraft,
   SecretaryProposal,
   SecretaryScheduleView,
-  SecretarySkillDraft,
+  SecretarySkillView,
   SecretaryState,
   SecretaryTakeoverView,
   SecretaryTodoMutate,
@@ -425,14 +425,27 @@ const electronAPI = {
       image: Uint8Array | null
     ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SET_AVATAR, { image }),
-    /** 秘书自有的 skill：名字即目录名，正文供设置页展开查看 */
+    /** 秘书可用的 skill：自有 + 勾选的全局，设置页与右侧面板共用 */
     listSkills: (): Promise<
-      { ok: true; skills: SecretarySkillDraft[] } | { ok: false; error: string }
+      { ok: true; skills: SecretarySkillView[] } | { ok: false; error: string }
     > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILLS_LIST),
     removeSkill: (
       name: string
     ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_DELETE, { name }),
+    /** 启用或停用：自有写档案的停用名单，全局改勾选；都走档案同一条写入路径 */
+    setSkillEnabled: (request: {
+      id: string;
+      source: 'own' | 'global';
+      enabled: boolean;
+    }): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_SET_ENABLED, request),
+    /** 读 SKILL.md 正文：只给用户看，不喂给秘书 */
+    readSkill: (request: {
+      id: string;
+      source: 'own' | 'global';
+    }): Promise<{ ok: true; body: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_READ, request),
     /** 秘书自造的工具：名字即目录名，代码供设置页展开查看 */
     listTools: (): Promise<
       { ok: true; tools: SecretaryToolDraft[] } | { ok: false; error: string }
@@ -478,13 +491,16 @@ const electronAPI = {
     contactTest: (): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST),
     contactSettings: (patch: {
-      allowDispatchConfirm?: boolean;
+      allowCardConfirm?: boolean;
       allowMemory?: boolean;
     }): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
-    /** 深链 enso://secretary?conversation=<id>：Main 要求选中某个会话 */
-    onOpenConversation: (callback: (conversationId: string) => void): (() => void) => {
-      const listener = (_event: unknown, conversationId: string) => callback(conversationId);
+    /** 深链 enso://secretary?conversation=<id>[&proposal=<id>]：选中会话，带卡就定位那张卡 */
+    onOpenConversation: (
+      callback: (target: { conversationId: string; proposalId?: string }) => void
+    ): (() => void) => {
+      const listener = (_event: unknown, target: { conversationId: string; proposalId?: string }) =>
+        callback(target);
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
     },

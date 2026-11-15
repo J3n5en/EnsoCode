@@ -502,6 +502,8 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_SET_AVATAR: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SKILLS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_SKILL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SKILL_SET_ENABLED: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_SKILL_READ: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TOOLS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TOOL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TAKEOVER_REVOKE: excluded('Experimental secretary agent; not an Enso capability.'),

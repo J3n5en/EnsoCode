@@ -23,13 +23,16 @@ const stateWith = (status: SecretaryProposal['status']): SecretaryState => ({
 
 let initialState: Promise<SecretaryState>;
 let listener: ((state: SecretaryState) => void) | null = null;
+let openListener: ((target: { conversationId: string; proposalId?: string }) => void) | null = null;
 const off = vi.fn();
 const offOpen = vi.fn();
+const ensureOpen = vi.fn();
 const resolveProposal = vi.fn(async (_proposalId: string, _action: 'confirm' | 'reject') => ({
   ok: true as const,
   proposal,
 }));
 const sessions = {
+  selectConversation: vi.fn(),
   newConversation: vi.fn(async (_projectId: string) => 'conv-1' as string | null),
   setModel: vi.fn(),
   setThinking: vi.fn(),
@@ -44,6 +47,9 @@ const settings = {
 };
 
 vi.mock('@/stores/sessions', () => ({ useSessionsStore: { getState: () => sessions } }));
+vi.mock('@/stores/sidePanel', () => ({
+  useSidePanelStore: { getState: () => ({ ensureOpen }) },
+}));
 vi.mock('@/stores/settings', () => ({ useSettingsStore: { getState: () => settings } }));
 vi.mock('@/stores/modelDirectory/useProviders', () => ({ readMaterializedProviders: () => [] }));
 vi.mock('@/stores/oauthCredentials', () => ({
@@ -59,7 +65,12 @@ vi.stubGlobal('window', {
         listener = callback;
         return off;
       },
-      onOpenConversation: () => offOpen,
+      onOpenConversation: (
+        callback: (target: { conversationId: string; proposalId?: string }) => void
+      ) => {
+        openListener = callback;
+        return offOpen;
+      },
       resolveProposal,
     },
   },
@@ -125,6 +136,22 @@ describe('useSecretaryStore', () => {
     resolveProposal.mockRejectedValueOnce(new Error('boom'));
     await useSecretaryStore.getState().resolveProposal('pr1', 'reject');
     expect(useSecretaryStore.getState().resolving.pr1).toBeUndefined();
+  });
+
+  it('深链带卡时选中会话、打开面板并定位那张卡', () => {
+    useSecretaryStore.getState().bind();
+    openListener?.({ conversationId: 'conv-9', proposalId: 'pr1' });
+    expect(sessions.selectConversation).toHaveBeenCalledWith('conv-9');
+    expect(ensureOpen).toHaveBeenCalledWith('conv-9');
+    expect(useSecretaryStore.getState().focusProposal?.proposalId).toBe('pr1');
+  });
+
+  it('深链只带会话时不动工作台的定位', () => {
+    useSecretaryStore.setState({ focusProposal: null });
+    useSecretaryStore.getState().bind();
+    openListener?.({ conversationId: 'conv-9' });
+    expect(sessions.selectConversation).toHaveBeenCalledWith('conv-9');
+    expect(useSecretaryStore.getState().focusProposal).toBeNull();
   });
 
   it('重来后（档案从有到无）主界面回到欢迎页，首次启动不会自己弹出来', () => {

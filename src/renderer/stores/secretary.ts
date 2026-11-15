@@ -12,6 +12,7 @@ import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthC
 import { useSessionsStore } from '@/stores/sessions';
 import { setTakenOverSessions } from '@/stores/sessions/secretaryOwned';
 import { useSettingsStore } from '@/stores/settings';
+import { useSidePanelStore } from '@/stores/sidePanel';
 
 /** 秘书会话的开场白：初次设置走「聊着设置」时由用户侧发一条固定引导语（D5） */
 const SETUP_GREETING =
@@ -36,9 +37,13 @@ interface SecretaryStoreState {
   resolving: Record<string, true>;
   /** 未完成初次设置时主区域显示欢迎页（页面本身由设置流程提供） */
   welcomeOpen: boolean;
+  /** 深链或手机按钮要求定位的那张确认卡：工作台滚过去并高亮 */
+  focusProposal: { proposalId: string; at: number } | null;
   bind: () => () => void;
   openWelcome: () => void;
   closeWelcome: () => void;
+  focusProposalCard: (proposalId: string) => void;
+  clearFocusProposal: () => void;
   /**
    * 新建一个秘书会话。greeting 只在初次设置走「聊着设置」时发；
    * profile 覆盖刚写完、推送还没到的档案，免得按旧档案选模型。
@@ -59,9 +64,12 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
   secretary: EMPTY_SECRETARY_STATE,
   resolving: {},
   welcomeOpen: false,
+  focusProposal: null,
 
   openWelcome: () => set({ welcomeOpen: true }),
   closeWelcome: () => set({ welcomeOpen: false }),
+  focusProposalCard: (proposalId) => set({ focusProposal: { proposalId, at: Date.now() } }),
+  clearFocusProposal: () => set({ focusProposal: null }),
 
   bind: () => {
     let pushed = false;
@@ -87,9 +95,12 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
         set({ secretary });
       })
       .catch(() => undefined);
-    // 手机上的里程碑消息带 enso://secretary?conversation=<id>：点开回到应用并选中那个会话
-    const offOpen = window.electronAPI.secretary.onOpenConversation((conversationId) => {
-      useSessionsStore.getState().selectConversation(conversationId);
+    // 手机上的消息带 enso://secretary?conversation=<id>[&proposal=<id>]：
+    // 点开回到应用、选中那个会话；带卡时再让工作台定位到那张卡
+    const offOpen = window.electronAPI.secretary.onOpenConversation((target) => {
+      useSessionsStore.getState().selectConversation(target.conversationId);
+      useSidePanelStore.getState().ensureOpen(target.conversationId);
+      if (target.proposalId) get().focusProposalCard(target.proposalId);
     });
     return () => {
       off();
