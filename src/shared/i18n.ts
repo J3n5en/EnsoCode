@@ -3684,6 +3684,7 @@ export const zhTranslations: Record<string, string> = {
   'Cleaning up…': '正在清理…',
   'Cleanup done': '清理完成',
   'Confirm cleanup': '确认清理',
+  'and {{count}} more': '还有 {{count}} 条',
   'merged into {{refs}}': '已合入 {{refs}}',
   'Not merged yet': '还没合入',
   'Currently checked out': '当前检出',

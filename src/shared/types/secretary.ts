@@ -179,6 +179,42 @@ export interface CleanupDraft {
   items: CleanupItem[];
 }
 
+/**
+ * cleanup_list 精简模式的一条：只有 id、名字与大小。
+ * 秘书没有 read/grep，正文一大就会被外置成 artifact 读不到，所以默认只给这么多。
+ */
+export interface CleanupSummaryItem {
+  id: string;
+  kind: CleanupItemKind;
+  name: string;
+  sizeBytes?: number;
+  /** 不能清理时的短原因码；带它的 id 传给 cleanup_apply 会被拒 */
+  blocked?: string;
+}
+
+/** cleanup_list 的默认返回：数量摘要 + 每类前几条，正文控制在两千字以内 */
+export interface CleanupListSummary {
+  mode: 'summary';
+  total: number;
+  counts: Record<CleanupItemKind, number>;
+  /** 可以直接传给 cleanup_apply 的条数 */
+  cleanable: number;
+  /** 可清理 worktree 的占用总和；分支与会话不计 */
+  estimatedBytes: number;
+  items: CleanupSummaryItem[];
+  hint: string;
+}
+
+/** cleanup_list 传 detail: true 时返回的一页完整清单，正文控制在四千字以内 */
+export interface CleanupListDetail {
+  mode: 'detail';
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  items: CleanupItem[];
+}
+
 /** 接管授权的来源：确认卡、用户在会话界面上亲手点的，或项目在接管范围内被秘书实际用上 */
 export type TakeoverVia = 'proposal' | 'user' | 'scope';
 
