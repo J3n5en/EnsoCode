@@ -10,9 +10,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createSecretarySkills,
   listSecretarySkills,
+  readGlobalSkillBody,
   readSecretarySkill,
   removeSecretarySkill,
   type SecretarySkillPorts,
+  secretarySkillDirs,
+  secretarySkillViews,
+  withGlobalSkillEnabled,
+  withOwnSkillEnabled,
   writeSecretarySkill,
 } from './skills';
 
@@ -225,5 +230,69 @@ describe('skill save and delete', () => {
       ok: false,
       error: 'invalid request',
     });
+  });
+});
+
+describe('skill 视图与启停', () => {
+  it('自有在前、全局在后，停用的标出来', () => {
+    const views = secretarySkillViews({
+      own: [draft],
+      disabledOwn: [],
+      global: [
+        { id: 's-review', name: 'review', description: '审代码' },
+        { id: 's-deploy', name: 'deploy', description: '' },
+      ],
+      enabledGlobalIds: ['s-review'],
+    });
+    expect(views).toEqual([
+      {
+        id: 'deploy-check',
+        name: 'deploy-check',
+        description: '发布前跑一遍',
+        source: 'own',
+        enabled: true,
+        body: '# 步骤\n\n- 跑测试',
+      },
+      {
+        id: 's-review',
+        name: 'review',
+        description: '审代码',
+        source: 'global',
+        enabled: true,
+      },
+      { id: 's-deploy', name: 'deploy', description: '', source: 'global', enabled: false },
+    ]);
+    expect(
+      secretarySkillViews({
+        own: [draft],
+        disabledOwn: ['deploy-check'],
+        global: [],
+        enabledGlobalIds: [],
+      })[0].enabled
+    ).toBe(false);
+  });
+
+  it('启停只动自己那一条，重复开关不会留下脏数据', () => {
+    expect(withOwnSkillEnabled([], 'deploy-check', false)).toEqual(['deploy-check']);
+    expect(withOwnSkillEnabled(['deploy-check'], 'deploy-check', true)).toEqual([]);
+    expect(withOwnSkillEnabled(['a'], 'b', false)).toEqual(['a', 'b']);
+    expect(withGlobalSkillEnabled([], 's-review', true)).toEqual(['s-review']);
+    expect(withGlobalSkillEnabled(['s-review'], 's-review', true)).toEqual(['s-review']);
+    expect(withGlobalSkillEnabled(['s-review', 's-deploy'], 's-review', false)).toEqual([
+      's-deploy',
+    ]);
+  });
+
+  it('全局 skill 的正文只从它自己的目录读，读不到就是 null', () => {
+    writeSecretarySkill(dir, draft);
+    expect(readGlobalSkillBody(path.join(dir, 'deploy-check'))).toContain('# 步骤');
+    expect(readGlobalSkillBody(path.join(dir, 'missing'))).toBeNull();
+  });
+
+  it('挂给会话的自有目录跳过停用的与读不懂的', () => {
+    writeSecretarySkill(dir, draft);
+    writeSecretarySkill(dir, { ...draft, name: 'review' });
+    const dirs = secretarySkillDirs(dir, ['review']);
+    expect(dirs.map((entry) => path.basename(entry))).toEqual(['deploy-check']);
   });
 });

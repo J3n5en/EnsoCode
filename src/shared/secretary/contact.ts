@@ -1,4 +1,4 @@
-import type { SecretaryResultKind } from '../types/secretary';
+import type { SecretaryProposal, SecretaryResultKind } from '../types/secretary';
 
 /** 绑定码有效期：与 deepchat 的配对码同一量级，够慢手操作，又不给陌生人留窗口 */
 export const CONTACT_BIND_CODE_TTL_MS = 10 * 60 * 1000;
@@ -103,6 +103,11 @@ export function conversationDeepLink(conversationId: string): string {
   return `enso://secretary?conversation=${encodeURIComponent(conversationId)}`;
 }
 
+/** 定位到具体那张确认卡：会话选中后再把工作台滚到这张卡 */
+export function proposalDeepLink(conversationId: string, proposalId: string): string {
+  return `${conversationDeepLink(conversationId)}&proposal=${encodeURIComponent(proposalId)}`;
+}
+
 function oneLine(text: string | undefined): string {
   const flat = (text ?? '').replace(/\s+/g, ' ').trim();
   return flat.length > CONTACT_TEXT_MAX_CHARS ? `${flat.slice(0, CONTACT_TEXT_MAX_CHARS)}…` : flat;
@@ -139,44 +144,166 @@ export function formatAskMessage(
   return lines.join('\n');
 }
 
+/** 手机上能看到的卡片类型：按钮与提示都用它说清是哪一类 */
+export type SecretaryCardKind = SecretaryProposal['kind'];
+
+const CARD_KIND_LABEL: Record<ContactLang, Record<SecretaryCardKind, string>> = {
+  zh: {
+    dispatch: '派发',
+    profile: '设置',
+    skill: '技能',
+    tool: '工具',
+    takeover: '接管',
+    cleanup: '清理',
+  },
+  en: {
+    dispatch: 'dispatch',
+    profile: 'settings',
+    skill: 'skill',
+    tool: 'tool',
+    takeover: 'takeover',
+    cleanup: 'cleanup',
+  },
+};
+
+export function isSecretaryCardKind(value: unknown): value is SecretaryCardKind {
+  return (
+    value === 'dispatch' ||
+    value === 'profile' ||
+    value === 'skill' ||
+    value === 'tool' ||
+    value === 'takeover' ||
+    value === 'cleanup'
+  );
+}
+
+/** 卡片的一句话标签：派发取标题或首句，其余取名字，接管取会话标题 */
+export function proposalCardTitle(proposal: SecretaryProposal): string | undefined {
+  switch (proposal.kind) {
+    case 'dispatch':
+      return (
+        proposal.draft.title?.trim() || proposal.draft.prompt.split('\n')[0]?.trim() || undefined
+      );
+    case 'profile':
+      return proposal.draft.name?.trim() || undefined;
+    case 'skill':
+    case 'tool':
+      return proposal.draft.name;
+    case 'takeover':
+      return proposal.draft.title?.trim() || proposal.draft.conversationId;
+    case 'cleanup':
+      return proposal.draft.items.length > 0
+        ? `${proposal.draft.items.length} 项待清理`
+        : undefined;
+  }
+}
+
+/** Telegram 按钮文案上限 64 字节，中文按 3 字节算，标题留 24 个字 */
+const CARD_TITLE_MAX_CHARS = 24;
+
+function shortTitle(title: string | undefined): string {
+  const flat = (title ?? '').replace(/\s+/g, ' ').trim();
+  return flat.length > CARD_TITLE_MAX_CHARS ? `${flat.slice(0, CARD_TITLE_MAX_CHARS)}…` : flat;
+}
+
+/** 「确认派发：秘书看板改用 kanban」：一眼看出确认的是哪张卡 */
+export function cardConfirmButtonText(
+  lang: ContactLang,
+  kind: SecretaryCardKind,
+  title?: string
+): string {
+  const label = CARD_KIND_LABEL[lang][kind];
+  const head = lang === 'zh' ? `确认${label}` : `Confirm ${label}`;
+  const rest = shortTitle(title);
+  return rest ? `${head}：${rest}` : head;
+}
+
+export function cardOpenButtonText(lang: ContactLang): string {
+  return lang === 'zh' ? '在应用里打开' : 'Open in the app';
+}
+
+/** 卡片类型的一句话标签，审计与提示共用 */
+export function cardKindLabel(lang: ContactLang, kind: SecretaryCardKind): string {
+  return CARD_KIND_LABEL[lang][kind];
+}
+
 /**
  * 确认卡与审批：默认只提示回应用确认。
- * confirmable 只在「允许从 Telegram 确认派发类卡片」打开且这张卡是派发时才是真的。
+ * confirmable 只在「允许从 Telegram 确认卡片」打开且这条消息带的是确认卡时才是真的；
+ * 审批永远只有提示。
  */
 export function formatCardWaitingMessage(
   lang: ContactLang,
-  input: { count: number; title?: string; confirmable?: boolean }
+  input: {
+    count: number;
+    title?: string;
+    confirmable?: boolean;
+    approval?: boolean;
+    link?: string;
+  }
 ): string {
   const head = lang === 'zh' ? '🗂 有一张卡在等你' : '🗂 A card is waiting';
-  const body = input.confirmable
-    ? lang === 'zh'
-      ? '这是派发卡片，可以直接在下面确认；设置、技能、工具与接管卡片请回应用处理。'
-      : 'This is a dispatch card and can be confirmed below. Settings, skill, tool and takeover cards stay in the app.'
-    : lang === 'zh'
-      ? '请回应用确认。手机不能确认派发、设置与审批。'
-      : 'Confirm it in the app. Dispatch, settings and approvals cannot be confirmed here.';
+  let body: string;
+  if (input.approval) {
+    body =
+      lang === 'zh'
+        ? '审批只能在应用里处理，手机上没有确认入口。'
+        : 'Approvals can only be handled in the app; there is no confirm button here.';
+  } else if (input.confirmable) {
+    body =
+      lang === 'zh'
+        ? '点下面的按钮直接确认。审批永远只能在应用里处理。'
+        : 'Tap a button below to confirm. Approvals always stay in the app.';
+  } else {
+    body =
+      lang === 'zh'
+        ? '请回应用确认：开关关着，手机上不提供确认按钮。审批永远只能在应用里处理。'
+        : 'Confirm it in the app: the switch is off, so there is no confirm button here. Approvals always stay in the app.';
+  }
   const lines = [input.title ? `${head} · ${input.title}` : head, body];
   if (input.count > 1) lines.push(lang === 'zh' ? `共 ${input.count} 张` : `${input.count} cards`);
+  if (input.link) lines.push(input.link);
   return lines.join('\n');
 }
 
-/** 派发卡片的确认按钮：card:<槽位>:c|r，槽位同样是内存里的短编号 */
-export function cardCallbackData(slot: number, action: 'confirm' | 'reject'): string {
-  return `card:${slot}:${action === 'confirm' ? 'c' : 'r'}`;
+/** 卡片处理掉之后原消息补一行，按钮同时清掉 */
+export function cardHandledLine(lang: ContactLang): string {
+  return lang === 'zh' ? '· 已处理' : '· Handled';
+}
+
+/** 确认卡片的按钮：card:<槽位>:c|r|o，槽位同样是内存里的短编号 */
+export function cardCallbackData(slot: number, action: 'confirm' | 'reject' | 'open'): string {
+  const code = action === 'confirm' ? 'c' : action === 'reject' ? 'r' : 'o';
+  return `card:${slot}:${code}`;
 }
 
 export function parseCardCallbackData(
   data: string
-): { slot: number; action: 'confirm' | 'reject' } | null {
-  const match = /^card:(\d{1,6}):([cr])$/.exec(data.trim());
+): { slot: number; action: 'confirm' | 'reject' | 'open' } | null {
+  const match = /^card:(\d{1,6}):([cro])$/.exec(data.trim());
   if (!match) return null;
-  return { slot: Number(match[1]), action: match[2] === 'c' ? 'confirm' : 'reject' };
+  const action = match[2] === 'c' ? 'confirm' : match[2] === 'r' ? 'reject' : 'open';
+  return { slot: Number(match[1]), action };
 }
 
-/** 派发卡片确认后的提示 */
-export function cardCallbackToast(lang: ContactLang, action: 'confirm' | 'reject'): string {
-  if (action === 'confirm') return lang === 'zh' ? '已确认派发' : 'Dispatch confirmed';
-  return lang === 'zh' ? '已拒绝这张卡' : 'Card rejected';
+/** 卡片确认后的提示：说清确认了哪一类哪一张 */
+export function cardCallbackToast(
+  lang: ContactLang,
+  action: 'confirm' | 'reject' | 'open',
+  card?: { kind: SecretaryCardKind; title?: string }
+): string {
+  if (action === 'open') return lang === 'zh' ? '已在应用里打开' : 'Opened in the app';
+  const label = card ? cardKindLabel(lang, card.kind) : '';
+  const title = shortTitle(card?.title);
+  const target = [label, title].filter(Boolean).join(' ');
+  if (action === 'reject') {
+    return lang === 'zh'
+      ? `已拒绝${target ? `：${target}` : '这张卡'}`
+      : `Rejected${target ? `: ${target}` : ' the card'}`;
+  }
+  return lang === 'zh'
+    ? `已确认${target ? `：${target}` : '这张卡'}`
+    : `Confirmed${target ? `: ${target}` : ' the card'}`;
 }
 
 /** 绑定完成后的欢迎消息：告诉 J 哥现在能做什么 */

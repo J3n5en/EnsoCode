@@ -24,6 +24,8 @@ export interface SecretaryProfile {
   pluginIds?: string[];
   /** 勾选给秘书用的全局 Enso skill id；未勾选的不加载 */
   skillIds?: string[];
+  /** 秘书自有 skill 里被停用的目录名：文件还在，只是不进会话 */
+  disabledSkillNames?: string[];
   visibleProjectIds: 'all' | string[];
   dispatchModel:
     | { mode: 'project' }
@@ -177,6 +179,21 @@ export interface SecretarySkillDraft {
   name: string;
   description: string;
   body: string;
+}
+
+/**
+ * 设置页与右侧面板共用的 skill 视图：own 是秘书自己目录下的，global 是设置里勾给秘书的。
+ * 正文只给用户看，不进秘书的指令。
+ */
+export interface SecretarySkillView {
+  /** own 是目录名，global 是设置里的 skill id */
+  id: string;
+  name: string;
+  description: string;
+  source: 'own' | 'global';
+  enabled: boolean;
+  /** own 的正文随列表一起给；global 展开时再读 */
+  body?: string;
 }
 
 export type SecretaryToolRuntime = 'python' | 'node';
@@ -634,8 +651,11 @@ export interface SecretaryContactTelegram {
   bind?: SecretaryContactBind;
   /** token 前几位，界面上只显示这么点 */
   tokenHint?: string;
-  /** 默认关闭：派发类确认卡不允许从手机确认 */
-  allowDispatchConfirm: boolean;
+  /**
+   * 默认关闭：确认卡不允许从手机确认。打开后覆盖派发、设置、技能、工具与接管；
+   * 审批永远不在手机上确认。
+   */
+  allowCardConfirm: boolean;
   /** 默认关闭：记忆标题不往 Telegram 发（消息会留在 Telegram 服务器上） */
   allowMemory: boolean;
   poll: { state: SecretaryContactPollState; lastError?: string };

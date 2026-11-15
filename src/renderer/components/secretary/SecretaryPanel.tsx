@@ -10,10 +10,11 @@ import { SecretaryDailyBoard } from './SecretaryDailyBoard';
 import { SecretaryMemoryPanel } from './SecretaryMemoryPanel';
 import { SecretaryRunningList } from './SecretaryRunningList';
 import { SecretarySchedulePanel } from './SecretarySchedulePanel';
+import { SecretarySkillsPanel } from './SecretarySkillsPanel';
 import { SecretaryWorkbench } from './SecretaryWorkbench';
 import { SecretarySummary, secretarySectionView } from './secretaryView';
 
-type Tab = 'workbench' | 'daily' | 'memory' | 'schedules' | 'contact';
+type Tab = 'workbench' | 'daily' | 'memory' | 'schedules' | 'contact' | 'skills';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'workbench', label: 'Workbench' },
@@ -21,12 +22,14 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'memory', label: 'Memory' },
   { key: 'schedules', label: 'Schedules' },
   { key: 'contact', label: 'Contacts' },
+  { key: 'skills', label: 'Skills' },
 ];
 
 /** 秘书面板：身份行 + 工作台 / 记忆 / 定时三个标签，替代原来的两块独立面板 */
 export function SecretaryPanel() {
   const { t } = useI18n();
   const secretary = useSecretaryStore((state) => state.secretary);
+  const focusProposal = useSecretaryStore((state) => state.focusProposal);
   const [tab, setTab] = useState<Tab>('workbench');
   const [runningOpen, setRunningOpen] = useState(false);
   const [schedules, setSchedules] = useState<SecretaryScheduleView[]>([]);
@@ -40,6 +43,10 @@ export function SecretaryPanel() {
     loadSchedules();
     return window.electronAPI.secretary.onStateChanged(loadSchedules);
   }, [loadSchedules]);
+  // 深链或手机按钮要定位某张卡：切回工作台，卡片由工作台滚过去并高亮
+  useEffect(() => {
+    if (focusProposal) setTab('workbench');
+  }, [focusProposal]);
 
   const view = secretarySectionView(secretary, t);
   if (!view) return null;
@@ -50,6 +57,7 @@ export function SecretaryPanel() {
     memory: 0,
     schedules: schedules.length,
     contact: 0,
+    skills: 0,
   };
 
   return (
@@ -134,6 +142,7 @@ export function SecretaryPanel() {
         {tab === 'daily' && <SecretaryDailyBoard />}
         {tab === 'memory' && <SecretaryMemoryPanel />}
         {tab === 'contact' && <SecretaryContactPanel />}
+        {tab === 'skills' && <SecretarySkillsPanel />}
         {tab === 'schedules' && (
           <SecretarySchedulePanel schedules={schedules} name={view.name} onReload={loadSchedules} />
         )}

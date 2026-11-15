@@ -196,6 +196,9 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
   };
   const updateWindowMs = clampInt(value.updateWindowMs, 1_000, 60_000);
   if (updateWindowMs !== undefined) profile.updateWindowMs = updateWindowMs;
+  // 停用名单缺省不落盘：大多数档案一个停用都没有
+  const disabledSkillNames = texts(value.disabledSkillNames);
+  if (disabledSkillNames.length > 0) profile.disabledSkillNames = disabledSkillNames;
   const model = parseProfileModel(value.model);
   if (model) profile.model = model;
   const addressAs = text(value.addressAs);
@@ -310,6 +313,12 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
   if (value.skillIds !== undefined) {
     if (!validIdList(value.skillIds)) return { ok: false, error: 'invalid skillIds' };
     draft.skillIds = texts(value.skillIds);
+  }
+  if (value.disabledSkillNames !== undefined) {
+    if (!validIdList(value.disabledSkillNames)) {
+      return { ok: false, error: 'invalid disabledSkillNames' };
+    }
+    draft.disabledSkillNames = texts(value.disabledSkillNames);
   }
   if (value.visibleProjectIds !== undefined) {
     if (value.visibleProjectIds !== 'all' && !validIdList(value.visibleProjectIds)) {

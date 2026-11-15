@@ -6,7 +6,7 @@ import type {
   SecretaryProfile,
   SecretaryProfileDraft,
   SecretaryScheduleView,
-  SecretarySkillDraft,
+  SecretarySkillView,
   SecretaryTakeoverScope,
   SecretaryTakeoverView,
   SecretaryToolDraft,
@@ -165,15 +165,15 @@ function PluginPicker({
   );
 }
 
-/** 秘书自有的 skill：正文可展开，删除后 Main 释放会话，下次 spawn 生效 */
+/** 秘书自有的 skill：与右侧面板同一份列表，正文可展开，删除后 Main 释放会话 */
 function OwnSkills({ busy }: { busy: boolean }) {
   const { t } = useI18n();
-  const [skills, setSkills] = React.useState<SecretarySkillDraft[]>([]);
+  const [skills, setSkills] = React.useState<SecretarySkillView[]>([]);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     const result = await window.electronAPI.secretary.listSkills();
-    if (result.ok) setSkills(result.skills);
+    if (result.ok) setSkills(result.skills.filter((skill) => skill.source === 'own'));
     else setError(result.error);
   }, []);
 
@@ -200,6 +200,11 @@ function OwnSkills({ busy }: { busy: boolean }) {
         <div key={skill.name} className="px-3 py-2" data-enso="secretary-skill-row">
           <div className="flex items-center gap-2">
             <span className="min-w-0 flex-1 truncate font-mono text-sm">{skill.name}</span>
+            {!skill.enabled && (
+              <span className="shrink-0 rounded bg-warning/10 px-1 text-[10px] text-warning">
+                {t('Disabled')}
+              </span>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -215,7 +220,7 @@ function OwnSkills({ busy }: { busy: boolean }) {
               {t('Show the content')}
             </summary>
             <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[11px]">
-              {skill.body}
+              {skill.body ?? ''}
             </pre>
           </details>
         </div>

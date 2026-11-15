@@ -1340,8 +1340,8 @@ async function run(cdp, pluginZipUrl) {
   assert(board.ok, '秘书面板打开', board);
   // 日报（daily）是 SecretaryPanel 的 TABS 里第二个标签，顺序即渲染顺序
   assert(
-    board.tabs?.join(',') === 'workbench,daily,memory,schedules,contact',
-    '秘书面板五个标签',
+    board.tabs?.join(',') === 'workbench,daily,memory,schedules,contact,skills',
+    '秘书面板六个标签（技能排在联系方式后面）',
     board.tabs
   );
   await cdp.shot(path.join(ART, '05-workbench.png'));
@@ -3486,8 +3486,9 @@ async function verifyTelegramContact(cdp, setup) {
   );
 
   // 界面上是卡片：发送者 + 时间 + 正文，包裹层不外露
+  // 刚切过去的会话要等一帧才渲染完，这里等节点出现，别抢在渲染前查
   const card = await page(`
-    const node = document.querySelector('[data-telegram-inbound]');
+    const node = await until(() => document.querySelector('[data-telegram-inbound]'), 15000);
     return JSON.stringify({
       found: Boolean(node),
       text: node?.textContent ?? '',
@@ -3684,7 +3685,13 @@ async function verifyTelegramContact(cdp, setup) {
       message: { message_id: feedReply.message_id, chat: { id: 777001, type: 'private' } },
     },
   });
-  const olderPage = await waitFor(() => tg.edited.at(-1) ?? null, 'feed paged', 20_000, 300);
+  // 同一时刻可能还有别的消息被原地改（卡片处理掉的收尾），只认这一条的编辑
+  const olderPage = await waitFor(
+    () => tg.edited.find((edit) => edit.message_id === feedReply.message_id) ?? null,
+    'feed paged',
+    20_000,
+    300
+  );
   assert(
     olderPage.message_id === feedReply.message_id && olderPage.text.includes('最近动态'),
     '联系方式: 点「更早」原地翻到更早一页',
@@ -3774,6 +3781,184 @@ async function verifyTelegramContact(cdp, setup) {
     commandAudit.map((entry) => entry.detail)
   );
 
+  log('== 联系方式：确认卡带按钮，开关决定能不能在手机上确认');
+  // 造一张挂着不确认的派发卡：手机上应当收到一条带按钮的提示
+  const cardOff = await page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const draft = { projectId: ${JSON.stringify(setup.projectId)}, prompt: '占位', title: '卡片验证一' };
+    const directive = '[[tool:session_create ' + JSON.stringify(draft) + ']]';
+    await S().send(
+      '派活 ' + directive,
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(() => Object.values(secretary.getState().secretary.proposals)
+      .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
+      .at(-1) ?? null, 30000);
+    return JSON.stringify({ ok: Boolean(proposal), proposalId: proposal?.id ?? null });
+  `);
+  assert(cardOff.ok, '联系方式: 造一张待确认的派发卡', cardOff);
+  const noticeOff = await waitFor(
+    () => tg.sent.find((message) => message.text?.includes('卡片验证一')) ?? null,
+    'card notice with switch off',
+    30_000,
+    300
+  );
+  const offButtons = noticeOff.reply_markup?.inline_keyboard?.flat() ?? [];
+  assert(
+    offButtons.map((button) => button.text).join(',') === '在应用里打开',
+    '联系方式: 开关关闭时只给「在应用里打开」，没有确认按钮',
+    offButtons
+  );
+  assert(
+    noticeOff.text.includes('请回应用确认'),
+    '联系方式: 开关关闭时说明要回应用确认',
+    noticeOff.text
+  );
+  assert(
+    noticeOff.text.includes(`proposal=${cardOff.proposalId}`),
+    '联系方式: 提示消息的深链能定位到那张卡',
+    noticeOff.text
+  );
+  push({
+    update_id: 28,
+    callback_query: {
+      id: 'cb-card-open',
+      data: offButtons[0].callback_data,
+      message: { message_id: noticeOff.message_id, chat: { id: 777001, type: 'private' } },
+    },
+  });
+  await waitFor(
+    () => tg.callbacks.some((callback) => callback.text?.includes('已在应用里打开')),
+    'card opened in app',
+    20_000,
+    300
+  );
+  const stillPending = await page(`
+    const state = await window.electronAPI.secretary.getState();
+    return JSON.stringify({ status: state.proposals[${JSON.stringify(cardOff.proposalId)}]?.status ?? null });
+  `);
+  assert(stillPending.status === 'pending', '联系方式: 「在应用里打开」不会确认卡片', stillPending);
+
+  const cardSwitch = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.contactSettings({ allowCardConfirm: true }));
+  `);
+  assert(cardSwitch.ok, '联系方式: 打开确认卡开关', cardSwitch);
+  const cardOn = await page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const draft = { projectId: ${JSON.stringify(setup.projectId)}, prompt: '占位', title: '卡片验证二' };
+    const directive = '[[tool:session_create ' + JSON.stringify(draft) + ']]';
+    await S().send(
+      '派活 ' + directive,
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(() => Object.values(secretary.getState().secretary.proposals)
+      .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
+      .at(-1) ?? null, 30000);
+    return JSON.stringify({ ok: Boolean(proposal), proposalId: proposal?.id ?? null });
+  `);
+  assert(cardOn.ok, '联系方式: 开关打开后再造一张派发卡', cardOn);
+  const noticeOn = await waitFor(
+    () => tg.sent.find((message) => message.text?.includes('卡片验证二')) ?? null,
+    'card notice with switch on',
+    30_000,
+    300
+  );
+  const onRows = noticeOn.reply_markup?.inline_keyboard ?? [];
+  assert(
+    onRows[0]?.[0]?.text === '确认派发：卡片验证二',
+    '联系方式: 开关打开后按钮是「确认派发：标题」',
+    onRows.map((row) => row.map((button) => button.text))
+  );
+  assert(
+    noticeOn.text.includes('点下面的按钮直接确认') &&
+      noticeOn.text.includes('审批永远只能在应用里处理'),
+    '联系方式: 开关打开后说明可以直接确认，审批仍在应用里',
+    noticeOn.text
+  );
+  push({
+    update_id: 29,
+    callback_query: {
+      id: 'cb-card-confirm',
+      data: onRows[0][0].callback_data,
+      message: { message_id: noticeOn.message_id, chat: { id: 777001, type: 'private' } },
+    },
+  });
+  const confirmed = await waitFor(
+    async () => {
+      const state = await page(`
+        const state = await window.electronAPI.secretary.getState();
+        const proposal = state.proposals[${JSON.stringify(cardOn.proposalId)}];
+        return JSON.stringify({
+          status: proposal?.status ?? null,
+          conversationId: proposal?.conversationId ?? null,
+        });
+      `);
+      return state.status && state.status !== 'pending' && state.status !== 'executing'
+        ? state
+        : null;
+    },
+    'card confirmed from telegram',
+    60_000,
+    500
+  );
+  assert(
+    confirmed.status === 'succeeded' && Boolean(confirmed.conversationId),
+    '联系方式: 手机点按钮真的把卡确认了（派出会话建成）',
+    confirmed
+  );
+  assert(
+    tg.callbacks.some((callback) => callback.text?.includes('已确认：派发')),
+    '联系方式: 手机收到「已确认：派发 …」',
+    tg.callbacks.slice(-2)
+  );
+  const settledOn = await waitFor(
+    () => tg.edited.find((edit) => edit.message_id === noticeOn.message_id) ?? null,
+    'card message settled',
+    20_000,
+    300
+  );
+  assert(
+    settledOn.text.includes('已处理') && settledOn.reply_markup?.inline_keyboard?.length === 0,
+    '联系方式: 卡片处理后补一行已处理并清掉按钮',
+    settledOn
+  );
+
+  // 在应用里处理掉第一张：手机那条消息的按钮也要失效
+  await page(`
+    return JSON.stringify(
+      await window.electronAPI.secretary.resolveProposal(${JSON.stringify(cardOff.proposalId)}, 'reject')
+    );
+  `);
+  const settledOff = await waitFor(
+    () => tg.edited.find((edit) => edit.message_id === noticeOff.message_id) ?? null,
+    'first card settled from the app',
+    20_000,
+    300
+  );
+  assert(
+    settledOff.reply_markup?.inline_keyboard?.length === 0,
+    '联系方式: 在应用里处理掉之后按钮也失效',
+    settledOff.reply_markup
+  );
+  const cardAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'contact_card_confirm');
+  assert(
+    cardAudit.some((entry) => entry.ok && entry.detail === '派发'),
+    '联系方式: 从手机确认记审计（哪张卡、什么类型）',
+    cardAudit
+  );
+
   log('== 联系方式：解绑后停止轮询');
   const unbound = await page(`
     const result = await window.electronAPI.secretary.contactUnbind();
@@ -3832,6 +4017,110 @@ async function verifyTelegramContact(cdp, setup) {
     ),
     '联系方式: 审计里不记正文',
     contactAudit.slice(-3)
+  );
+
+  log('== 面板：技能标签列出秘书可用的 skill');
+  // 直接往隔离 userData 的秘书目录写一份自有 skill：与设置页读的是同一份磁盘数据
+  const skillsDir = path.join(ENV, 'secretary', 'workspace', 'skills');
+  mkdirSync(path.join(skillsDir, 'verify-skill'), { recursive: true });
+  writeFileSync(
+    path.join(skillsDir, 'verify-skill', 'SKILL.md'),
+    '---\nname: verify-skill\ndescription: 验收用的技能\n---\n\n# 步骤\n\n- 跑一遍验收\n'
+  );
+  const skillsTab = await page(`
+    const panel = ${PANEL};
+    if (!panel) return JSON.stringify({ ok: false, error: 'no panel' });
+    panel.querySelector('[data-enso=secretary-panel-tab][data-tab=skills]')?.click();
+    await sleep(800);
+    const rows = [...panel.querySelectorAll('[data-enso=secretary-skill-row]')];
+    return JSON.stringify({
+      ok: rows.length > 0,
+      tabs: [...panel.querySelectorAll('[data-enso=secretary-panel-tab]')].map((node) => node.dataset.tab),
+      groups: [...panel.querySelectorAll('[data-enso=secretary-skill-group]')].map((node) => node.dataset.group),
+      rows: rows.map((row) => ({
+        source: row.dataset.source,
+        enabled: row.dataset.enabled,
+        text: row.innerText,
+      })),
+    });
+  `);
+  assert(skillsTab.ok, '面板: 技能标签能列出 skill', skillsTab);
+  assert(
+    skillsTab.tabs?.indexOf('skills') === skillsTab.tabs?.indexOf('contact') + 1,
+    '面板: 技能标签排在联系方式后面',
+    skillsTab.tabs
+  );
+  assert(
+    skillsTab.groups?.join(',') === 'own,global',
+    '面板: 技能分「秘书专属」与「全局共享」两组',
+    skillsTab.groups
+  );
+  const ownRow = skillsTab.rows.find((row) => row.text.includes('verify-skill'));
+  assert(
+    ownRow?.source === 'own' && ownRow.text.includes('验收用的技能') && ownRow.enabled === 'true',
+    '面板: 专属 skill 显示名称、说明、来源与启用状态',
+    ownRow
+  );
+  const skillBody = await page(`
+    const panel = ${PANEL};
+    const row = [...panel.querySelectorAll('[data-enso=secretary-skill-row]')]
+      .find((node) => node.innerText.includes('verify-skill'));
+    row?.querySelector('[data-enso=secretary-skill-expand]')?.click();
+    await sleep(600);
+    const body = row?.querySelector('[data-enso=secretary-skill-body]');
+    return JSON.stringify({
+      text: body?.innerText ?? null,
+      untrusted: body?.innerText?.includes('只给你看') ?? false,
+      markdown: Boolean(body?.querySelector('h1, pre, code, p')),
+    });
+  `);
+  await cdp.shot(path.join(ART, '13-panel-skills.png'));
+  assert(
+    skillBody.text?.includes('跑一遍验收'),
+    '面板: 点开能看完整 SKILL.md 正文',
+    skillBody.text
+  );
+  assert(skillBody.untrusted, '面板: 正文标成只给用户看，不当指令', skillBody);
+  assert(skillBody.markdown, '面板: 正文按 markdown 渲染', skillBody);
+  const skillToggle = await page(`
+    const panel = ${PANEL};
+    const row = [...panel.querySelectorAll('[data-enso=secretary-skill-row]')]
+      .find((node) => node.innerText.includes('verify-skill'));
+    row?.querySelector('[data-enso=secretary-skill-toggle]')?.click();
+    await sleep(900);
+    const after = [...panel.querySelectorAll('[data-enso=secretary-skill-row]')]
+      .find((node) => node.innerText.includes('verify-skill'));
+    const profile = await window.electronAPI.secretary.getProfile();
+    return JSON.stringify({
+      enabled: after?.dataset.enabled ?? null,
+      disabled: profile.profile?.disabledSkillNames ?? [],
+    });
+  `);
+  assert(
+    skillToggle.enabled === 'false' && skillToggle.disabled?.includes('verify-skill'),
+    '面板: 停用写进档案，列表跟着变',
+    skillToggle
+  );
+  const skillDelete = await page(`
+    const panel = ${PANEL};
+    const row = [...panel.querySelectorAll('[data-enso=secretary-skill-row]')]
+      .find((node) => node.innerText.includes('verify-skill'));
+    row?.querySelector('[data-enso=secretary-skill-delete]')?.click();
+    await sleep(300);
+    const confirm = row?.querySelector('[data-enso=secretary-skill-confirm]');
+    if (!confirm) return JSON.stringify({ ok: false, error: 'no confirm' });
+    confirm.querySelector('[data-enso=secretary-skill-confirm-delete]')?.click();
+    await sleep(900);
+    const listed = await window.electronAPI.secretary.listSkills();
+    return JSON.stringify({
+      ok: !(listed.skills ?? []).some((skill) => skill.name === 'verify-skill'),
+    });
+  `);
+  assert(skillDelete.ok, '面板: 删除要二次确认，确认后从列表消失', skillDelete);
+  assert(
+    !existsSync(path.join(skillsDir, 'verify-skill')),
+    '面板: 删除后秘书目录里的 skill 也没了',
+    path.join(skillsDir, 'verify-skill')
   );
 }
 
@@ -5185,9 +5474,12 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     viewedMeta ?? viewed.text
   );
   const thumb = await page(`
-    document
-      .querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-expand]')
-      ?.click();
+    // 工具卡片是异步渲染的：先等卡片出现再展开，否则点击落空、缩略图永远不出来
+    const card = await until(
+      () => document.querySelector('[data-enso=tool-card][data-tool=image_view]'),
+      15000
+    );
+    card?.querySelector('[data-enso=tool-card-expand]')?.click();
     const image = await until(
       () => document.querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-image]'),
       15000

@@ -64,6 +64,7 @@ import { startPairGuest, stopPairGuest } from './services/pairGuest';
 import { startPairHost, stopPairHost } from './services/pairHost';
 import { getProxyConfig } from './services/proxyConfig';
 import { setupRemoteRenderer } from './services/remoteRenderer';
+import { setSecretaryOpenTarget } from './services/secretary/links';
 import { readySecureStores } from './services/secureStores';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
 import { syncSpeechFromSettings } from './services/speech/service';
@@ -223,9 +224,9 @@ if (!gotTheLock) {
       startModelsDevRefreshSchedule();
     });
     pluginInstallInbox.start((url) => openPluginInstallFromProtocol(url));
-    secretaryLinkInbox.start((conversationId) =>
-      openSecretaryConversationFromProtocol(conversationId)
-    );
+    // 手机上的「在应用里打开」与深链走同一个入口
+    setSecretaryOpenTarget((target) => openSecretaryConversationFromProtocol(target));
+    secretaryLinkInbox.start((target) => openSecretaryConversationFromProtocol(target));
     setTrayToggleHandler(() => {
       if (isServerMode()) leaveServerMode();
       else void enterServerMode();

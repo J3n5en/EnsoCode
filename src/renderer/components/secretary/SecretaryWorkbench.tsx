@@ -16,7 +16,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
@@ -511,11 +511,29 @@ function EmptyState({ name, onAdd }: { name: string; onAdd: () => void }) {
 export function SecretaryWorkbench({ name }: { name: string }) {
   const { t } = useI18n();
   const board = useSecretaryStore((s) => s.secretary.board);
+  const focusProposal = useSecretaryStore((s) => s.focusProposal);
   const [adding, setAdding] = useState(false);
+  /** 深链定位过来的那张卡：滚到它并闪一下，2 秒后恢复 */
+  const [highlight, setHighlight] = useState<string | null>(null);
   const digest = secretaryDigest(board, Date.now());
   const feed = useSecretaryFeed();
   const empty =
     board.needsYou.length + board.running.length + board.todos.length + board.done.length === 0;
+
+  useEffect(() => {
+    if (!focusProposal) return;
+    setHighlight(focusProposal.proposalId);
+    const node = document.querySelector(
+      `[data-enso=secretary-proposal-focus][data-proposal-id="${focusProposal.proposalId}"]`
+    );
+    node?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // 定位只做一次：高亮收掉时把这个请求清掉，下次打开面板不会又跳回来
+    const timer = setTimeout(() => {
+      setHighlight(null);
+      useSecretaryStore.getState().clearFocusProposal();
+    }, 2_400);
+    return () => clearTimeout(timer);
+  }, [focusProposal]);
 
   if (empty) {
     return adding ? (
@@ -560,11 +578,17 @@ export function SecretaryWorkbench({ name }: { name: string }) {
         <section data-enso="secretary-needs-you" className="flex flex-col gap-1.5">
           {board.needsYou.map((card) =>
             card.kind === 'proposal' ? (
-              <SecretaryProposalRow
+              <div
                 key={card.proposal.id}
-                proposalId={card.proposal.id}
-                prominent
-              />
+                data-enso="secretary-proposal-focus"
+                data-proposal-id={card.proposal.id}
+                className={cn(
+                  'rounded-lg transition-shadow',
+                  highlight === card.proposal.id && 'ring-2 ring-warning'
+                )}
+              >
+                <SecretaryProposalRow proposalId={card.proposal.id} prominent />
+              </div>
             ) : card.kind === 'pending' ? (
               <PendingProblemCard key={card.pending.id} pending={card.pending} />
             ) : (

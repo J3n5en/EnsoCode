@@ -12,8 +12,11 @@ export interface ContactFile {
   bot?: SecretaryContactBot;
   chat?: SecretaryContactChat;
   boundAt?: number;
-  /** 默认关闭：派发类确认卡不允许从手机确认 */
-  allowDispatchConfirm: boolean;
+  /**
+   * 默认关闭：确认卡不允许从手机确认。打开后覆盖派发、设置、技能、工具与接管，
+   * 审批永远不在手机上确认。
+   */
+  allowCardConfirm: boolean;
   /** 默认关闭：记忆标题不往 Telegram 发（消息会留在 Telegram 服务器上） */
   allowMemory: boolean;
   /** getUpdates 的游标：先落盘再处理，重启不重放已经产生过副作用的更新 */
@@ -23,7 +26,7 @@ export interface ContactFile {
 }
 
 export function emptyContactFile(): ContactFile {
-  return { version: 1, allowDispatchConfirm: false, allowMemory: false, pollOffset: 0 };
+  return { version: 1, allowCardConfirm: false, allowMemory: false, pollOffset: 0 };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -72,7 +75,8 @@ export function parseContactFile(raw: unknown): ContactFile {
     ...(bot ? { bot } : {}),
     ...(chat ? { chat } : {}),
     ...(typeof raw.boundAt === 'number' ? { boundAt: raw.boundAt } : {}),
-    allowDispatchConfirm: raw.allowDispatchConfirm === true,
+    // 老配置里这个开关叫 allowDispatchConfirm：升级后沿用，不把用户的选择丢掉
+    allowCardConfirm: raw.allowCardConfirm === true || raw.allowDispatchConfirm === true,
     allowMemory: raw.allowMemory === true,
     pollOffset: typeof raw.pollOffset === 'number' && raw.pollOffset > 0 ? raw.pollOffset : 0,
     ...(bind ? { bind } : {}),
@@ -123,7 +127,7 @@ export class ContactStore {
     return this.save({
       version: 1,
       ...(current.bot ? { bot: current.bot } : {}),
-      allowDispatchConfirm: current.allowDispatchConfirm,
+      allowCardConfirm: current.allowCardConfirm,
       allowMemory: current.allowMemory,
       pollOffset: 0,
     });
@@ -135,7 +139,7 @@ export class ContactStore {
     const current = this.file();
     return this.save({
       version: 1,
-      allowDispatchConfirm: current.allowDispatchConfirm,
+      allowCardConfirm: current.allowCardConfirm,
       allowMemory: current.allowMemory,
       pollOffset: 0,
     });

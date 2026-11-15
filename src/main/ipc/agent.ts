@@ -176,7 +176,7 @@ import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secreta
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
-import { secretarySkillsDir } from '../services/secretary/skills';
+import { secretarySkillDirs, secretarySkillsDir } from '../services/secretary/skills';
 import { SecretaryStore } from '../services/secretary/store';
 import { invokeSecretaryOp } from '../services/secretary/tools';
 import {
@@ -591,7 +591,8 @@ function secretarySpawnOptions(): {
   systemPrompt: string;
   pluginIds: string[];
   skillIds: string[];
-  skillDir: string;
+  /** 启用的自有 skill 目录：停用的不挂，改了要释放会话 */
+  skillDirs: string[];
   tools: SecretaryToolDescriptor[];
 } {
   const store = secretaryStore();
@@ -606,7 +607,7 @@ function secretarySpawnOptions(): {
     }),
     pluginIds: profile?.pluginIds ?? [],
     skillIds: profile?.skillIds ?? [],
-    skillDir: secretarySkillsDir(),
+    skillDirs: secretarySkillDirs(secretarySkillsDir(), profile?.disabledSkillNames ?? []),
     tools: secretaryToolDescriptors(secretaryToolsDir()),
   };
 }
