@@ -3007,6 +3007,8 @@ async function startFakeTelegram(port) {
     token: '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw',
     me: { id: 424242, is_bot: true, username: 'enso_verify_bot', first_name: 'Enso Verify' },
     sent: [],
+    edited: [],
+    commands: [],
     callbacks: [],
     polls: 0,
     queue: [],
@@ -3072,8 +3074,24 @@ async function startFakeTelegram(port) {
         return;
       }
       if (method === 'sendMessage') {
-        state.sent.push(body);
-        reply({ ok: true, result: { message_id: state.sent.length } });
+        const messageId = state.sent.length + 1;
+        state.sent.push({ ...body, message_id: messageId });
+        reply({ ok: true, result: { message_id: messageId } });
+        return;
+      }
+      if (method === 'editMessageText') {
+        state.edited.push(body);
+        const target = state.sent.find((message) => message.message_id === body.message_id);
+        if (target) {
+          target.text = body.text;
+          target.reply_markup = body.reply_markup;
+        }
+        reply({ ok: true, result: true });
+        return;
+      }
+      if (method === 'setMyCommands') {
+        state.commands.push(body.commands ?? []);
+        reply({ ok: true, result: true });
         return;
       }
       if (method === 'answerCallbackQuery') {
@@ -3419,6 +3437,219 @@ async function verifyTelegramContact(cdp, setup) {
     500
   );
   assert(reply.text === 'fake-ok', '联系方式: 秘书的回复发回手机', reply.text);
+
+  log('== 联系方式：只读命令与面板一致');
+  // 造一个「需要你处理」的派出会话：面板与 /status 都该看到它
+  const cmdDispatch = await page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const directive = '[[tool:session_create ' + JSON.stringify(${JSON.stringify({
+      projectId: setup.projectId,
+      prompt: '占位',
+      title: '命令验证',
+    })}) + ']]';
+    await S().send(
+      '派活 ' + directive,
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(() => Object.values(secretary.getState().secretary.proposals)
+      .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
+      .at(-1) ?? null, 30000);
+    if (!proposal) return JSON.stringify({ ok: false, error: 'no proposal' });
+    const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
+      prompt: '选方案 [[tool:ask_user {"question":"用哪个方案？","options":["A","B"]}]]',
+    });
+    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ ok: done?.status === 'succeeded', conversationId: done?.conversationId });
+  `);
+  assert(cmdDispatch.ok, '联系方式: 造一个等待中的派出会话', cmdDispatch);
+  const cmdId = cmdDispatch.conversationId;
+  const panelBoard = await waitFor(
+    async () => {
+      const state = await page(`
+        const state = await window.electronAPI.secretary.getState();
+        return JSON.stringify({
+          needsYou: (state.board?.needsYou ?? []).map((card) => card.conversationId),
+          running: (state.board?.running ?? []).map((card) => card.conversationId),
+        });
+      `);
+      return state.needsYou.includes(cmdId) ? state : null;
+    },
+    'panel needsYou has the dispatch',
+    60_000,
+    500
+  );
+  assert(panelBoard.needsYou.includes(cmdId), '联系方式: 面板的「需要你」里有这个会话', panelBoard);
+
+  const say = (text, updateId) =>
+    push({
+      update_id: updateId,
+      message: {
+        message_id: updateId,
+        chat: { id: 777001, type: 'private' },
+        from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+        text,
+      },
+    });
+  const replySince = (from, match, label, timeout = 20_000) =>
+    waitFor(() => tg.sent.slice(from).find(match) ?? null, label, timeout, 300);
+
+  let mark = tg.sent.length;
+  say('/status', 20);
+  const statusReply = await replySince(
+    mark,
+    (message) => (message.text?.includes('需要你处理') ? message : null),
+    'status reply'
+  );
+  assert(
+    statusReply.text.includes('命令验证'),
+    '联系方式: /status 列出面板里的会话标题',
+    statusReply.text
+  );
+  assert(
+    statusReply.text.includes('等你回答'),
+    '联系方式: /status 带状态徽标文字',
+    statusReply.text
+  );
+  assert(
+    statusReply.text.includes(`enso://secretary?conversation=${cmdId}`),
+    '联系方式: /status 每行带回应用的深链',
+    statusReply.text
+  );
+  assert(statusReply.parse_mode === 'HTML', '联系方式: /status 用 HTML 格式发送', statusReply);
+
+  mark = tg.sent.length;
+  say('/board', 21);
+  const boardReply = await replySince(
+    mark,
+    (message) => (message.text?.includes('派出') ? message : null),
+    'board reply'
+  );
+  assert(boardReply.text.includes('完成'), '联系方式: /board 开头一行统计', boardReply.text);
+  assert(boardReply.text.includes('命令验证'), '联系方式: /board 列出当天的卡片', boardReply.text);
+
+  mark = tg.sent.length;
+  say('/board 2020-01-01', 22);
+  const oldBoard = await replySince(
+    mark,
+    (message) => (message.text?.includes('2020-01-01') ? message : null),
+    'board with date'
+  );
+  assert(oldBoard.text.includes('这一天没有记录'), '联系方式: /board 带日期查历史', oldBoard.text);
+
+  mark = tg.sent.length;
+  say('/feed', 23);
+  const feedReply = await replySince(
+    mark,
+    (message) => (message.text?.includes('最近动态') ? message : null),
+    'feed reply'
+  );
+  const olderButton = feedReply.reply_markup?.inline_keyboard?.[0]?.[0];
+  assert(
+    olderButton?.text === '更早',
+    '联系方式: /feed 底部有「更早」按钮',
+    feedReply.reply_markup
+  );
+  push({
+    update_id: 24,
+    callback_query: {
+      id: 'cb-feed-verify',
+      data: olderButton.callback_data,
+      message: { message_id: feedReply.message_id, chat: { id: 777001, type: 'private' } },
+    },
+  });
+  const olderPage = await waitFor(() => tg.edited.at(-1) ?? null, 'feed paged', 20_000, 300);
+  assert(
+    olderPage.message_id === feedReply.message_id && olderPage.text.includes('最近动态'),
+    '联系方式: 点「更早」原地翻到更早一页',
+    olderPage
+  );
+  assert(
+    tg.callbacks.some((callback) => callback.callback_query_id === 'cb-feed-verify'),
+    '联系方式: 翻页回调被应答',
+    tg.callbacks.slice(-2)
+  );
+
+  mark = tg.sent.length;
+  say('/memory', 25);
+  const memoryClosed = await replySince(
+    mark,
+    (message) => (message.text?.includes('记忆') ? message : null),
+    'memory closed'
+  );
+  assert(
+    memoryClosed.text.includes('默认不在 Telegram 显示'),
+    '联系方式: /memory 默认关闭只提示开关',
+    memoryClosed.text
+  );
+  const memoryMenu = tg.commands.at(-1)?.map((entry) => entry.command) ?? [];
+  assert(!memoryMenu.includes('memory'), '联系方式: 关着时菜单里没有 /memory', memoryMenu);
+
+  const memorySwitch = await page(`
+    return JSON.stringify(
+      await window.electronAPI.secretary.contactSettings({ allowMemory: true })
+    );
+  `);
+  assert(memorySwitch.ok, '联系方式: 打开记忆开关', memorySwitch);
+  mark = tg.sent.length;
+  say('/memory', 26);
+  const memoryOpen = await replySince(
+    mark,
+    (message) => (message.text?.includes('秘书记得') ? message : null),
+    'memory open'
+  );
+  assert(
+    !memoryOpen.text.includes('默认不在 Telegram 显示'),
+    '联系方式: 打开后 /memory 给出标题列表',
+    memoryOpen.text
+  );
+  assert(
+    (tg.commands.at(-1)?.map((entry) => entry.command) ?? []).includes('memory'),
+    '联系方式: 打开后菜单里出现 /memory',
+    tg.commands.at(-1)
+  );
+
+  mark = tg.sent.length;
+  push({
+    update_id: 27,
+    message: {
+      message_id: 27,
+      chat: { id: 999001, type: 'private' },
+      from: { id: 999001, username: 'stranger' },
+      text: '/status',
+    },
+  });
+  await delay(1500);
+  assert(
+    !tg.sent.slice(mark).some((message) => message.text?.includes('需要你处理')),
+    '联系方式: 别的 chat 发命令一律不执行',
+    tg.sent.slice(mark)
+  );
+
+  const commandAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op === 'contact_command');
+  assert(
+    commandAudit.length >= 5 && commandAudit.every((entry) => entry.detail),
+    '联系方式: 命令执行记审计',
+    commandAudit
+  );
+  assert(
+    commandAudit.every((entry) =>
+      ['status', 'board', 'feed', 'memory', 'unknown'].includes(entry.detail)
+    ),
+    '联系方式: 审计只记命令名，不记返回内容',
+    commandAudit.map((entry) => entry.detail)
+  );
 
   log('== 联系方式：解绑后停止轮询');
   const unbound = await page(`
