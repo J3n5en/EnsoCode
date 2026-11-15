@@ -15,7 +15,6 @@ import {
   botTokenHint,
   CONTACT_BIND_CODE_TTL_MS,
   CONTACT_BIND_MAX_FAILURES,
-  CONTACT_OUTBOUND_MAX_CHARS,
   type ContactLang,
   cardCallbackData,
   cardCallbackToast,
@@ -23,7 +22,6 @@ import {
   feedCallbackData,
   formatAskMessage,
   formatCardWaitingMessage,
-  formatInboundMessage,
   formatMilestoneMessage,
   formatTestMessage,
   formatWelcomeMessage,
@@ -36,6 +34,12 @@ import {
   startCommandCode,
 } from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
+import { wrapInboundMessage } from '@shared/secretary/inbound';
+import {
+  htmlToPlain,
+  markdownToTelegramChunks,
+  packTelegramHtml,
+} from '@shared/secretary/telegramHtml';
 import type { AskRequestInfo } from '@shared/types/agent';
 import type {
   SecretaryAuditEntry,
@@ -424,7 +428,7 @@ export class TelegramContactService implements SecretaryContactPort {
               ]),
           }
         : undefined;
-    void this.send(file.chat.id, text, replyMarkup).then((sent) => {
+    void this.send(file.chat.id, text, { replyMarkup }).then((sent) => {
       this.audit('contact_ask_forward', sent.ok, sent.ok ? undefined : sent.error);
     });
   }
@@ -483,7 +487,7 @@ export class TelegramContactService implements SecretaryContactPort {
           }),
         }
       : undefined;
-    void this.send(file.chat.id, text, replyMarkup).then((sent) => {
+    void this.send(file.chat.id, text, { replyMarkup }).then((sent) => {
       this.audit('contact_card_waiting', sent.ok, sent.ok ? undefined : sent.error);
     });
   }
@@ -494,7 +498,10 @@ export class TelegramContactService implements SecretaryContactPort {
     const commands = this.ports.commands;
     if (!chatId || !commands) return;
     const reply = await commands.run(name, arg);
-    const sent = await this.send(chatId, reply.text, this.feedKeyboard(reply.next), 'HTML');
+    const sent = await this.send(chatId, reply.text, {
+      ...(this.feedKeyboard(reply.next) ? { replyMarkup: this.feedKeyboard(reply.next) } : {}),
+      format: 'html',
+    });
     this.audit('contact_command', sent.ok, name);
   }
 
@@ -503,7 +510,7 @@ export class TelegramContactService implements SecretaryContactPort {
     const chatId = this.store.file().chat?.id;
     if (!chatId) return;
     const text = unknownCommandText(this.ports.lang(), this.store.file().allowMemory);
-    const sent = await this.send(chatId, text, undefined, 'HTML');
+    const sent = await this.send(chatId, text, { format: 'html' });
     this.audit('contact_command', sent.ok, 'unknown');
   }
 
@@ -638,34 +645,73 @@ export class TelegramContactService implements SecretaryContactPort {
     return api;
   }
 
+  /**
+   * 出站统一入口：markdown 转 Telegram HTML、超长切条、解析失败降级纯文本。
+   * 键盘只挂在最后一条上，翻页/选项不会散在几条消息里。
+   */
   private async send(
     chatId: number,
     text: string,
-    replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] },
-    parseMode?: 'HTML'
+    options?: {
+      replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] };
+      format?: 'markdown' | 'html';
+    }
   ): Promise<{ ok: true } | { ok: false; error: ContactError }> {
     const token = this.store.token();
     if (!token) return { ok: false, error: 'token-required' };
-    // Telegram 单条 4096 上限：长回复截断，别让整条发不出去
-    const body =
-      text.length > CONTACT_OUTBOUND_MAX_CHARS
-        ? `${text.slice(0, CONTACT_OUTBOUND_MAX_CHARS)}…`
-        : text;
+    const chunks =
+      options?.format === 'html'
+        ? packTelegramHtml(text).map((html) => ({ html, plain: htmlToPlain(html) }))
+        : markdownToTelegramChunks(text);
+    for (const [index, chunk] of chunks.entries()) {
+      const keyboard = index === chunks.length - 1 ? options?.replyMarkup : undefined;
+      const sent = await this.sendChunk(chatId, token, chunk, keyboard);
+      if (!sent.ok) return sent;
+    }
+    this.audit('contact_outbound', true, describe(text));
+    return { ok: true };
+  }
+
+  /** 单条：HTML 发不出去（Telegram 报解析错误）就原样纯文本再发一次 */
+  private async sendChunk(
+    chatId: number,
+    token: string,
+    chunk: { html: string; plain: string },
+    replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] }
+  ): Promise<{ ok: true } | { ok: false; error: ContactError }> {
+    const api = this.apiFor(token);
     try {
-      await this.apiFor(token).sendMessage({
+      await api.sendMessage({
         chatId,
-        text: body,
+        text: chunk.html,
+        parseMode: 'HTML',
         ...(replyMarkup ? { replyMarkup } : {}),
-        ...(parseMode ? { parseMode } : {}),
       });
-      this.audit('contact_outbound', true, describe(body));
       return { ok: true };
     } catch (error) {
-      const code = errorCode(error);
-      this.audit('contact_outbound', false, code);
-      this.ports.onError?.(code);
-      return { ok: false, error: code };
+      if (!(error instanceof TelegramApiError) || error.kind !== 'api') {
+        return this.failSend(error);
+      }
+      this.audit('contact_format', false, 'html-rejected');
+      try {
+        await api.sendMessage({
+          chatId,
+          text: chunk.plain,
+          ...(replyMarkup ? { replyMarkup } : {}),
+        });
+        this.audit('contact_format', true, 'plain-fallback');
+        return { ok: true };
+      } catch (retryError) {
+        return this.failSend(retryError);
+      }
     }
+  }
+
+  private failSend(error: unknown): { ok: false; error: ContactError } {
+    const code = errorCode(error);
+    this.audit('contact_outbound', false, code);
+    this.ports.onError?.(code);
+    return { ok: false, error: code };
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
@@ -737,8 +783,10 @@ export class TelegramContactService implements SecretaryContactPort {
       this.audit('contact_inbound', false, 'no-secretary');
       return;
     }
-    const body = formatInboundMessage(this.ports.lang(), {
+    // 入站只在这里包一次：所有渠道都走 wrapInboundMessage
+    const body = wrapInboundMessage('telegram', this.ports.lang(), {
       ...(message.from?.username ? { username: message.from.username } : {}),
+      ...(message.date ? { at: message.date * 1000 } : {}),
       text,
     });
     this.awaitingReply.add(conversationId);
@@ -868,7 +916,7 @@ export class TelegramContactService implements SecretaryContactPort {
     this.syncCommands();
     const welcome = formatWelcomeMessage(this.ports.lang(), escapeHtml(bot.name));
     const commands = commandListText(this.ports.lang(), this.store.file().allowMemory);
-    await this.send(chat.id, `${welcome}\n\n${commands}`, undefined, 'HTML');
+    await this.send(chat.id, `${welcome}\n\n${commands}`, { format: 'html' });
   }
 
   private async answerCallback(callbackQueryId: string, text?: string): Promise<void> {
