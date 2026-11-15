@@ -12,6 +12,7 @@ import type {
   TelegramUpdate,
   TelegramUser,
 } from './client';
+import { TelegramApiError } from './client';
 import { TelegramContactService } from './service';
 import { ContactStore } from './store';
 
@@ -42,6 +43,8 @@ class FakeApi implements TelegramApi {
   polls = 0;
   /** 菜单接口失败时用 */
   menuError: Error | null = null;
+  /** 带 parse_mode 的发送一律报解析错误，用来看降级 */
+  rejectHtml = false;
   me: TelegramUser = { id: 42, username: 'enso_secretary_bot', first_name: 'Enso' };
   meError: Error | null = null;
   private queue: TelegramUpdate[] = [];
@@ -77,6 +80,9 @@ class FakeApi implements TelegramApi {
     replyMarkup?: TelegramInlineKeyboard;
     parseMode?: 'HTML';
   }): Promise<number> {
+    if (this.rejectHtml && params.parseMode) {
+      throw new TelegramApiError('api', "Bad Request: can't parse entities");
+    }
     this.sent.push(params);
     return this.sent.length;
   }
@@ -360,7 +366,7 @@ describe('入站只认绑定的 chat', () => {
     expect(JSON.stringify(h.audits)).not.toContain('把登录修一下');
   });
 
-  it('过长的回复截断后再发，不会因为超限整条丢掉', async () => {
+  it('过长的回复分条发，不会因为超限整条丢掉', async () => {
     const h = harness();
     await h.service.bind(TOKEN);
     h.api.push(privateMessage('/start 123456'));
@@ -369,10 +375,12 @@ describe('入站只认绑定的 chat', () => {
     await waitFor(() => h.world.delivered.length > 0, 'delivered');
     const before = h.api.sent.length;
     h.service.onTurnReply('sec-1', 'x'.repeat(5000));
-    await waitFor(() => h.api.sent.length > before, 'reply sent');
-    const sent = h.api.sent.at(-1)?.text ?? '';
-    expect(sent.length).toBeLessThanOrEqual(3901);
-    expect(sent.endsWith('…')).toBe(true);
+    await waitFor(() => h.api.sent.length > before + 1, 'reply split');
+    const sent = h.api.sent.slice(before);
+    expect(sent.length).toBe(2);
+    expect(sent.every((entry) => entry.text.length <= 3900)).toBe(true);
+    expect(sent.every((entry) => entry.parseMode === 'HTML')).toBe(true);
+    expect(sent.map((entry) => entry.text).join('')).toHaveLength(5000);
   });
 
   it('秘书的回复在用户从手机说话后回发手机', async () => {
@@ -895,6 +903,52 @@ describe('只读命令', () => {
       h.api.push(privateMessage('/status'));
       await waitFor(() => h.api.sent.length > 0, 'command reply');
       expect(h.api.sent.at(-1)?.text).toContain('进行中');
+    });
+  });
+
+  describe('出站格式', () => {
+    async function bound(h: ReturnType<typeof harness>): Promise<void> {
+      await h.service.bind(TOKEN);
+      h.api.push(privateMessage('/start 123456'));
+      await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+      h.api.push(privateMessage('写个总结'));
+      await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    }
+
+    it('秘书的 markdown 转成 Telegram HTML 再发', async () => {
+      const h = harness();
+      await bound(h);
+      h.api.sent.length = 0;
+      h.service.onTurnReply('sec-1', '**完成**\n\n- 改了 `a.ts`\n- 跑了测试');
+      await waitFor(() => h.api.sent.length > 0, 'reply');
+      const sent = h.api.sent.at(-1);
+      expect(sent?.parseMode).toBe('HTML');
+      expect(sent?.text).toContain('<b>完成</b>');
+      expect(sent?.text).toContain('• 改了 <code>a.ts</code>');
+      expect(sent?.text).not.toContain('**');
+    });
+
+    it('解析失败降级成纯文本重发，并记审计', async () => {
+      const h = harness();
+      await bound(h);
+      h.api.sent.length = 0;
+      h.api.rejectHtml = true;
+      h.service.onTurnReply('sec-1', '**重点**：看这里');
+      await waitFor(() => h.api.sent.length > 0, 'fallback');
+      const sent = h.api.sent.at(-1);
+      expect(sent?.parseMode).toBeUndefined();
+      expect(sent?.text).toBe('重点：看这里');
+      expect(h.audits.some((entry) => entry.op === 'contact_format' && !entry.ok)).toBe(true);
+      expect(h.audits.some((entry) => entry.op === 'contact_format' && entry.ok)).toBe(true);
+    });
+
+    it('只读命令的回复也走同一套：HTML 发送', async () => {
+      const h = harness();
+      await bound(h);
+      h.api.sent.length = 0;
+      h.api.push(privateMessage('/status'));
+      await waitFor(() => h.api.sent.length > 0, 'command reply');
+      expect(h.api.sent.at(-1)?.parseMode).toBe('HTML');
     });
   });
 });

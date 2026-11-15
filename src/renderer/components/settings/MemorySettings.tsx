@@ -866,6 +866,20 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
               />
               <Stat label={t('Database size')} value={formatBytes(stats.databaseBytes)} />
               <Stat label={t('Spaces')} value={String(Object.keys(stats.bySpace).length)} />
+              <Stat
+                label={t('Never retrieved')}
+                value={`${stats.neverHit}/${stats.total}`}
+                action={
+                  <span className="text-muted-foreground text-xs">
+                    {t('{{percent}}% of library', {
+                      percent: String(
+                        stats.total > 0 ? Math.round((stats.neverHit / stats.total) * 100) : 0
+                      ),
+                    })}
+                  </span>
+                }
+              />
+              <Stat label={t('Added in 7 days')} value={String(stats.addedLast7Days)} />
             </div>
           </>
         )}

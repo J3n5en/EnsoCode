@@ -73,6 +73,8 @@ function item(overrides: Partial<MemoryListItem> = {}): MemoryListItem {
     createdAt: '2025-01-01T00:00:00.000Z',
     updatedAt: '2025-01-02T00:00:00.000Z',
     appearances: 3,
+    lastHitAt: '2025-01-02T00:00:00.000Z',
+    hitCount: 3,
     ...overrides,
   };
 }

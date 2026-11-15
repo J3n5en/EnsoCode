@@ -3363,6 +3363,7 @@ async function verifyTelegramContact(cdp, setup) {
     30_000,
     500
   );
+  assert(milestone.parse_mode === 'HTML', '联系方式: 里程碑也带 parse_mode=HTML', milestone);
   assert(milestone.text.includes('写 tg.txt'), '联系方式: 里程碑带会话标题', milestone.text);
   assert(
     milestone.text.includes(`enso://secretary?conversation=${loudRun.conversationId}`),
@@ -3435,6 +3436,7 @@ async function verifyTelegramContact(cdp, setup) {
       message_id: 3,
       chat: { id: 777001, type: 'private' },
       from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      date: Math.floor(Date.now() / 1000),
       text: '在吗，帮我看下进度',
     },
   });
@@ -3472,6 +3474,36 @@ async function verifyTelegramContact(cdp, setup) {
     '联系方式: 外部文本包成不可信内容',
     inbound.text
   );
+  assert(
+    (inbound.text.match(/<untrusted-content/gu) ?? []).length === 1,
+    '联系方式: 入站只包一层',
+    inbound.text
+  );
+  assert(
+    (inbound.text.match(/来自 Telegram/gu) ?? []).length === 1,
+    '联系方式: 来源标注只出现一次',
+    inbound.text
+  );
+
+  // 界面上是卡片：发送者 + 时间 + 正文，包裹层不外露
+  const card = await page(`
+    const node = document.querySelector('[data-telegram-inbound]');
+    return JSON.stringify({
+      found: Boolean(node),
+      text: node?.textContent ?? '',
+      markdown: Boolean(node?.querySelector('[data-markdown], .markdown, p')),
+    });
+  `);
+  assert(card.found, '联系方式: 入站消息渲染成卡片', card);
+  assert(card.text.includes('@j3n5en'), '联系方式: 卡片显示发送者', card.text);
+  assert(/\d{2}:\d{2}/u.test(card.text), '联系方式: 卡片显示时间', card.text);
+  assert(card.text.includes('在吗，帮我看下进度'), '联系方式: 卡片显示正文', card.text);
+  assert(!card.text.includes('untrusted-content'), '联系方式: 卡片里不露包裹标签', card.text);
+  assert(
+    (card.text.match(/来自 Telegram/gu) ?? []).length === 1,
+    '联系方式: 卡片只有一层来源标注',
+    card.text
+  );
   const reply = await waitFor(
     () =>
       tg.sent
@@ -3487,6 +3519,43 @@ async function verifyTelegramContact(cdp, setup) {
     500
   );
   assert(reply.text === 'fake-ok', '联系方式: 秘书的回复发回手机', reply.text);
+  assert(reply.parse_mode === 'HTML', '联系方式: 出站带 parse_mode=HTML', reply);
+
+  log('== 联系方式：出站 markdown 转 Telegram HTML');
+  const sentMark = tg.sent.length;
+  push({
+    update_id: 5,
+    message: {
+      message_id: 5,
+      chat: { id: 777001, type: 'private' },
+      from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      date: Math.floor(Date.now() / 1000),
+      text: '再来一次 [[reply:**在的**\n\n- 进度 80%\n- 改了 `a.ts`\n\n```ts\nconst a = 1;\n```]]',
+    },
+  });
+  const htmlReply = await waitFor(
+    () =>
+      tg.sent
+        .slice(sentMark)
+        .find((message) => message.chat_id === 777001 && message.text?.includes('在的')) ?? null,
+    'markdown reply to phone',
+    40_000,
+    500
+  );
+  assert(htmlReply.parse_mode === 'HTML', '联系方式: markdown 回复走 HTML', htmlReply);
+  assert(htmlReply.text.includes('<b>在的</b>'), '联系方式: 粗体转成 b 标签', htmlReply.text);
+  assert(htmlReply.text.includes('• 进度 80%'), '联系方式: 列表转成圆点', htmlReply.text);
+  assert(
+    htmlReply.text.includes('<code>a.ts</code>'),
+    '联系方式: 行内代码转成 code',
+    htmlReply.text
+  );
+  assert(
+    htmlReply.text.includes('<pre>const a = 1;</pre>'),
+    '联系方式: 代码块转成 pre',
+    htmlReply.text
+  );
+  assert(!htmlReply.text.includes('**'), '联系方式: 不再露出 markdown 源码', htmlReply.text);
 
   log('== 联系方式：只读命令与面板一致');
   // 造一个「需要你处理」的派出会话：面板与 /status 都该看到它

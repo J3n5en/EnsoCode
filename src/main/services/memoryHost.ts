@@ -46,6 +46,7 @@ import {
   retryFailedKgJobs,
   runKgJob,
 } from './memory/kg';
+import { runVecCompaction } from './memory/maintenance';
 import { applyManualEdit, type ManualEditResult } from './memory/manual';
 import { approvePendingWrite } from './memory/pending';
 import { getReembedJob, type ReembedJob, runReembedJob } from './memory/reembed';
@@ -183,8 +184,29 @@ function memoryDb(): Database.Database {
     scheduleReembed();
     resumeMemoryDistill();
     resumeMemoryKg();
+    scheduleMemoryMaintenance();
   }
   return db;
+}
+
+// 向量表瘦身 + 空间回收：迁移本身在 openMemoryDb 里同步做完（只是重建虚拟表），
+// 但把空闲页还给文件系统要 VACUUM，不能在迁移事务里跑，也不该卡在开库那一刻。
+// 延后执行避开启动时的重嵌 / 蒸馏抢锁；撞锁或进程被杀都停在 memory_maintenance 的断点上，下次启动续跑。
+const MAINTENANCE_DELAY_MS = 20_000;
+let maintenanceScheduled = false;
+
+function scheduleMemoryMaintenance(): void {
+  if (maintenanceScheduled || !db) return;
+  maintenanceScheduled = true;
+  const conn = db;
+  const timer = setTimeout(() => {
+    try {
+      runVecCompaction(conn, path.join(memoryRoot(), 'memory.db'));
+    } catch {
+      /* 维护失败不影响前台读写，下次启动从断点重试 */
+    }
+  }, MAINTENANCE_DELAY_MS);
+  timer.unref?.();
 }
 
 /**
