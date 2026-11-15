@@ -125,6 +125,19 @@ export function formatMilestoneMessage(
   return lines.join('\n');
 }
 
+/**
+ * /sync 打开时静默回合的那一行：正文不发，但要让 J 哥知道秘书看过、
+ * 看过几条，不然手机上会以为它没动静。
+ */
+export function formatSilentTurnLine(lang: ContactLang, updates: number): string {
+  if (updates <= 0) {
+    return lang === 'zh' ? '（静默处理了一批更新）' : '(Handled an update quietly)';
+  }
+  return lang === 'zh'
+    ? `（静默处理了 ${updates} 条更新）`
+    : `(Handled ${updates} update${updates === 1 ? '' : 's'} quietly)`;
+}
+
 const ASK_HINT: Record<ContactLang, string> = {
   zh: '点按钮，或直接回一句话。应用里先答了就以那边为准。',
   en: 'Tap a button or just reply. Whichever side answers first wins.',

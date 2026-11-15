@@ -105,11 +105,12 @@ test('auto ports differ across overlapping reservations and a busy explicit port
       reservePorts({ cdp: null, fake: null, plugin: null, renderer: null }, open),
     ]);
     const values = [...Object.values(first.ports), ...Object.values(second.ports)];
-    assert.equal(values.length, 8);
-    assert.equal(new Set(values).size, 8);
-    assert.equal(held.size, 9);
+    // 每份都挑 cdp/fake/plugin/renderer/telegram 五个端口
+    assert.equal(values.length, 10);
+    assert.equal(new Set(values).size, 10);
+    assert.equal(held.size, 11);
     await first.release('cdp');
-    assert.equal(held.size, 8);
+    assert.equal(held.size, 10);
     await first.release();
     await second.release();
     assert.deepEqual([...held], [busy.port]);

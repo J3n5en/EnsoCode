@@ -5,6 +5,7 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  RadioTower,
   RefreshCw,
   Send,
   ShieldAlert,
@@ -244,6 +245,31 @@ export function SecretaryContactPanel() {
             </label>
           </div>
 
+          <div
+            data-enso="secretary-contact-sync"
+            className={cn(STEP_CLASS, telegram.syncMirror && 'border-warning/50 bg-warning/5')}
+          >
+            {telegram.syncMirror ? (
+              <>
+                <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-warning">
+                  <RadioTower className="size-3.5 shrink-0" />
+                  {t('Mirroring every conversation to Telegram')}
+                </div>
+                <p className="mt-1 text-[11.5px] text-muted-foreground">
+                  {t(
+                    'Every reply in the secretary conversation is sent to your phone, not just milestones. Silent turns arrive as a one-line summary. Telegram messages are not end-to-end encrypted and stay on Telegram servers. Send /sync off in Telegram to stop.'
+                  )}
+                </p>
+              </>
+            ) : (
+              <p className="text-[11.5px] text-muted-foreground">
+                {t(
+                  'Only milestones go to Telegram. Send /sync in Telegram to mirror every reply; /last replays the latest round.'
+                )}
+              </p>
+            )}
+          </div>
+
           <div data-enso="secretary-contact-commands" className={STEP_CLASS}>
             <div className="text-[12px] font-medium text-muted-foreground">
               {t('Commands you can send')}
@@ -260,7 +286,7 @@ export function SecretaryContactPanel() {
             </ul>
             <p className="mt-1.5 text-[11.5px] text-muted-foreground">
               {t(
-                'Telegram messages are not end-to-end encrypted and stay on Telegram servers. Commands only show titles and short summaries, never full conversations, memory text or tool output.'
+                'Telegram messages are not end-to-end encrypted and stay on Telegram servers. /status, /board and /feed show titles and short summaries; /last and /sync send conversation text. Memory text and tool output never leave the app.'
               )}
             </p>
           </div>

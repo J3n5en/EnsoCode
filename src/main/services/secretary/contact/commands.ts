@@ -2,8 +2,8 @@ import { describeCron } from '@shared/bots/cron';
 import {
   badDayText,
   type ContactBadge,
-  type ContactCommandName,
   type ContactFeedRow,
+  type ContactReadCommandName,
   type ContactStatusRow,
   type ContactTodoRow,
   commandListText,
@@ -141,7 +141,7 @@ export function createContactCommands(ports: ContactCommandPorts) {
 
   return {
     /** 翻页也走这里：同一个 /feed，只是带上了游标 */
-    async run(name: ContactCommandName, arg: string): Promise<ContactCommandReply> {
+    async run(name: ContactReadCommandName, arg: string): Promise<ContactCommandReply> {
       if (name === 'status') return status();
       if (name === 'board') return board(arg);
       if (name === 'feed') return feed();

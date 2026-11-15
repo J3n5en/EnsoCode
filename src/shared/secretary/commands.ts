@@ -13,7 +13,12 @@ export type ContactCommandName =
   | 'todo'
   | 'schedules'
   | 'memory'
+  | 'last'
+  | 'sync'
   | 'help';
+
+/** 只读命令：查面板同一份数据；/last 与 /sync 由联系方式服务自己处理 */
+export type ContactReadCommandName = Exclude<ContactCommandName, 'last' | 'sync'>;
 
 export interface ContactCommandSpec {
   name: ContactCommandName;
@@ -38,6 +43,16 @@ export const CONTACT_COMMANDS: readonly ContactCommandSpec[] = [
   { name: 'feed', zh: '最近的动态，底部可翻更早', en: 'Recent activity, with an older button' },
   { name: 'todo', zh: '未完成的待办', en: 'Open todos' },
   { name: 'schedules', zh: '定时任务与下次运行时间', en: 'Scheduled tasks and next run' },
+  {
+    name: 'last',
+    zh: '回看秘书会话最近一轮；/last 3 看最近三轮',
+    en: 'Replay the last round; /last 3 for three',
+  },
+  {
+    name: 'sync',
+    zh: '把所有回复同步到手机；/sync off 关掉',
+    en: 'Mirror every reply here; /sync off stops it',
+  },
   {
     name: 'memory',
     zh: '秘书记得的标题（默认关闭）',
@@ -268,6 +283,36 @@ export function parseBoardDay(arg: string, now: number): string | null {
   if (value === '' || value === 'today' || value === '今天') return today;
   if (value === 'yesterday' || value === '昨天') return shiftDay(today, -1);
   return parseDayKey(value);
+}
+
+export type SyncAction = 'on' | 'off' | 'status';
+
+/** /sync 的参数：不带就是查状态；只认 on/off（也认 开/关） */
+export function parseSyncArg(arg: string): SyncAction | null {
+  const value = arg.trim().toLowerCase();
+  if (!value) return 'status';
+  if (value === 'on' || value === '开') return 'on';
+  if (value === 'off' || value === '关') return 'off';
+  return null;
+}
+
+/** /sync 的回复：开、关、查状态都走这一条 */
+export function formatSyncMessage(lang: ContactLang, on: boolean): string {
+  const zh = lang === 'zh';
+  if (on) {
+    return zh
+      ? '🔔 已打开同步：秘书会话里每一轮回复都会发到这里，静默回合只发一行摘要。发 /sync off 关掉。'
+      : '🔔 Sync is on: every reply in the secretary conversation comes here, silent turns as a one-line summary. Send /sync off to stop.';
+  }
+  return zh
+    ? '🔕 同步已关闭：只发完成、失败、需要你这类里程碑。发 /sync on 打开。'
+    : '🔕 Sync is off: only milestones go out. Send /sync on to mirror every reply.';
+}
+
+export function syncUsageText(lang: ContactLang): string {
+  return lang === 'zh'
+    ? '用法：/sync 看状态，/sync on 打开，/sync off 关闭。'
+    : 'Usage: /sync shows the state, /sync on turns it on, /sync off turns it off.';
 }
 
 const DAILY_GROUP_LABEL: Record<ContactLang, Record<string, string>> = {

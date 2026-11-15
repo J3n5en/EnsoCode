@@ -50,6 +50,8 @@ describe('命令解析', () => {
       'feed',
       'todo',
       'schedules',
+      'last',
+      'sync',
       'memory',
       'help',
     ]);

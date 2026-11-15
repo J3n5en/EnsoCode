@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
   botCommands,
-  type ContactCommandName,
+  type ContactReadCommandName,
   commandListText,
   escapeHtml,
+  formatSyncMessage,
   parseContactCommand,
+  parseSyncArg,
+  syncUsageText,
   unknownCommandText,
 } from '@shared/secretary/commands';
 import {
@@ -27,6 +30,7 @@ import {
   formatAskMessage,
   formatCardWaitingMessage,
   formatMilestoneMessage,
+  formatSilentTurnLine,
   formatTestMessage,
   formatWelcomeMessage,
   isBoundChat,
@@ -41,6 +45,14 @@ import {
 } from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
 import { wrapInboundMessage } from '@shared/secretary/inbound';
+import {
+  buildRecapTurns,
+  formatRecapMessage,
+  parseRecapRounds,
+  type RecapMessage,
+  recapEmptyText,
+  recapUsageText,
+} from '@shared/secretary/recap';
 import {
   htmlToPlain,
   markdownToTelegramChunks,
@@ -120,6 +132,8 @@ export interface SecretaryContactPort {
   /** 审批在应用里收尾：那条提示的按钮跟着失效 */
   onApprovalResolved(conversationId: string): void;
   onTurnReply(conversationId: string, text: string): void;
+  /** 静默回合：/sync 打开时只发一行摘要，正文不发 */
+  onTurnSilent(conversationId: string, updates: number): void;
   onCardWaiting(input: ContactCardWaitingInput): void;
 }
 
@@ -132,8 +146,12 @@ export interface ContactServicePorts {
   lang(): ContactLang;
   /** 出站是否发送由档案的 notify 决定 */
   notifyMode(): SecretaryProfile['notify'] | null;
+  /** 秘书昵称：/last 的回复用它开头 */
+  secretaryName(): string;
   /** 手机发来的话投给哪个秘书会话；没有可用会话时返回 null */
   secretaryConversationId(): string | null;
+  /** /last：秘书会话最近的消息，Main 读 jsonl 后交回来；缺省表示读不到 */
+  recentTurns?(rounds: number): Promise<readonly RecapMessage[]>;
   deliver(conversationId: string, text: string): Promise<{ ok: boolean; error?: string }>;
   answerAsk(
     conversationId: string,
@@ -276,6 +294,7 @@ export class TelegramContactService implements SecretaryContactPort {
         ...(token ? { tokenHint: botTokenHint(token) } : {}),
         allowCardConfirm: file.allowCardConfirm,
         allowMemory: file.allowMemory,
+        syncMirror: file.syncMirror,
         poll: this.poller.status(),
         secure: this.store.isSecure(),
       },
@@ -487,14 +506,33 @@ export class TelegramContactService implements SecretaryContactPort {
     if (index >= 0) this.asks.splice(index, 1);
   }
 
-  /** 秘书这一轮的正文：只在用户刚从手机发来消息时回发，避免把每轮都推一遍 */
+  /**
+   * 秘书这一轮的正文。用户刚从手机发来的那一轮本来就回发，只发一次；
+   * 其余回合只有 /sync 打开时才镜像，关闭时只发里程碑。
+   */
   onTurnReply(conversationId: string, text: string): void {
-    if (!this.awaitingReply.delete(conversationId)) return;
+    const fromPhone = this.awaitingReply.delete(conversationId);
     const file = this.store.file();
     const body = text.trim();
     if (!file.chat || !body) return;
+    if (!fromPhone && !file.syncMirror) return;
     void this.send(file.chat.id, body).then((sent) => {
-      this.audit('contact_reply', sent.ok, sent.ok ? undefined : sent.error);
+      this.audit(
+        fromPhone ? 'contact_reply' : 'contact_mirror',
+        sent.ok,
+        sent.ok ? undefined : sent.error
+      );
+    });
+  }
+
+  /** 静默回合：正文是空的，/sync 打开时补一行摘要，让手机知道秘书看过 */
+  onTurnSilent(conversationId: string, updates: number): void {
+    // 手机发起的回合一定会回话，静默只可能来自系统回传
+    if (this.awaitingReply.delete(conversationId)) return;
+    const file = this.store.file();
+    if (!file.chat || !file.syncMirror) return;
+    void this.send(file.chat.id, formatSilentTurnLine(this.ports.lang(), updates)).then((sent) => {
+      this.audit('contact_mirror', sent.ok, sent.ok ? 'silent' : sent.error);
     });
   }
 
@@ -657,7 +695,7 @@ export class TelegramContactService implements SecretaryContactPort {
   }
 
   /** 只读命令：查面板数据、格式化、回一条；审计只记命令名 */
-  private async runCommand(name: ContactCommandName, arg: string): Promise<void> {
+  private async runCommand(name: ContactReadCommandName, arg: string): Promise<void> {
     const chatId = this.store.file().chat?.id;
     const commands = this.ports.commands;
     if (!chatId || !commands) return;
@@ -667,6 +705,53 @@ export class TelegramContactService implements SecretaryContactPort {
       format: 'html',
     });
     this.audit('contact_command', sent.ok, name);
+  }
+
+  /**
+   * /last：把秘书会话最近几轮读出来发过去。只读，不进会话、不唤醒模型，
+   * 也不记成用户消息；正文交给现有出站路径切条与转义。
+   */
+  private async runLast(arg: string): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    if (!chatId) return;
+    const lang = this.ports.lang();
+    const rounds = parseRecapRounds(arg);
+    if (rounds === null) {
+      const sent = await this.send(chatId, recapUsageText(lang));
+      this.audit('contact_command', sent.ok, 'last');
+      return;
+    }
+    const messages = (await this.ports.recentTurns?.(rounds)) ?? [];
+    const turns = buildRecapTurns(messages, rounds);
+    const text =
+      turns.length === 0
+        ? recapEmptyText(lang)
+        : formatRecapMessage(lang, { turns, name: this.ports.secretaryName() });
+    const sent = await this.send(chatId, text);
+    this.audit('contact_command', sent.ok, sent.ok ? `last ${rounds}` : 'last');
+  }
+
+  /** /sync：不带参数查状态，on/off 开关；开关动作单独记一条审计 */
+  private async runSync(arg: string): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    if (!chatId) return;
+    const lang = this.ports.lang();
+    const action = parseSyncArg(arg);
+    if (action === null) {
+      const sent = await this.send(chatId, syncUsageText(lang));
+      this.audit('contact_command', sent.ok, 'sync');
+      return;
+    }
+    const current = this.store.file().syncMirror;
+    if (action !== 'status') {
+      const on = action === 'on';
+      this.store.save({ ...this.store.file(), syncMirror: on });
+      this.audit('contact_sync', true, on ? 'on' : 'off');
+      this.ports.publish();
+    }
+    const on = action === 'status' ? current : action === 'on';
+    const sent = await this.send(chatId, formatSyncMessage(lang, on));
+    this.audit('contact_command', sent.ok, 'sync');
   }
 
   /** 写错的命令：给一份清单，不进秘书会话 */
@@ -929,6 +1014,14 @@ export class TelegramContactService implements SecretaryContactPort {
     // 只读命令：Main 直接查面板数据回一条，不进秘书会话、不唤醒模型
     const command = parseContactCommand(text);
     if (command) {
+      if (command.name === 'last') {
+        await this.runLast(command.arg);
+        return;
+      }
+      if (command.name === 'sync') {
+        await this.runSync(command.arg);
+        return;
+      }
       await this.runCommand(command.name, command.arg);
       return;
     }

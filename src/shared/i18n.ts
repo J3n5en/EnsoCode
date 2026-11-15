@@ -2983,13 +2983,20 @@ export const zhTranslations: Record<string, string> = {
   'Open todos': '未完成的待办',
   'Scheduled tasks and next run': '定时任务与下次运行时间',
   'Memory titles (off by default)': '秘书记得的标题（默认关闭）',
+  'Replay the last round; /last 3 for three': '回看秘书会话最近一轮；/last 3 看最近三轮',
+  'Mirror every reply here; /sync off stops it': '把所有回复同步到手机；/sync off 关掉',
   'List every command': '列出所有命令',
   'Commands you can send': '可以发的命令',
   'Allow viewing memory titles on Telegram': '允许在 Telegram 查看记忆标题',
   'Off by default. /memory lists titles only, never the memory text.':
     '默认关闭。/memory 只列标题，不显示记忆正文。',
-  'Telegram messages are not end-to-end encrypted and stay on Telegram servers. Commands only show titles and short summaries, never full conversations, memory text or tool output.':
-    'Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。命令只显示标题与简短摘要，不显示会话全文、记忆正文与工具输出。',
+  'Mirroring every conversation to Telegram': '正在把所有对话同步到 Telegram',
+  'Every reply in the secretary conversation is sent to your phone, not just milestones. Silent turns arrive as a one-line summary. Telegram messages are not end-to-end encrypted and stay on Telegram servers. Send /sync off in Telegram to stop.':
+    '秘书会话里每一轮回复都会发到手机，不再只发里程碑；静默回合只发一行摘要。Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。在 Telegram 发 /sync off 可以关掉。',
+  'Only milestones go to Telegram. Send /sync in Telegram to mirror every reply; /last replays the latest round.':
+    '目前只把里程碑发到 Telegram。在 Telegram 发 /sync 可以把每一轮回复都同步过去；/last 回看最近一轮。',
+  'Telegram messages are not end-to-end encrypted and stay on Telegram servers. /status, /board and /feed show titles and short summaries; /last and /sync send conversation text. Memory text and tool output never leave the app.':
+    'Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。/status、/board、/feed 只显示标题与简短摘要；/last 与 /sync 会发会话正文。记忆正文与工具输出不会离开应用。',
   'Waiting on a background task': '等后台任务',
   'Service running': '有常驻服务',
   'Scan finished sessions for leftover background tasks': '巡检已完成会话的遗留后台任务',
