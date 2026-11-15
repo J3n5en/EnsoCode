@@ -39,7 +39,7 @@ export interface WatchedBackgroundTask {
   /** 截止已到时任务还在跑 */
   overdue?: boolean;
   deadlineAt?: number;
-  /** 还在等的时候进程已经不在 */
+  /** 还在等的时候进程已经不在；未探测（alive 缺省）不算，按未知处理 */
   dead?: boolean;
   /** 第一次确认进程已死的时刻；宽限从这里算，不能用调用时的 now */
   deadAt?: number;
@@ -64,8 +64,13 @@ export function backgroundWaitStall(
   now: number
 ): { taskId: string; reason: BackgroundWatchReason; wake: boolean } | null {
   if (!input.awaiting || input.pendingUser) return null;
-  const overdue = input.tasks.find((task) => task.overdue);
-  const dead = input.tasks.find((task) => task.dead);
+  // 还在跑的任务才是会话在等的东西。进程已死只对它们成立：已结束的（exited / killed）
+  // 算退出，由下面「完成没唤醒」那条处理；拿一条早就结束的任务去报还在等别的任务的会话，
+  // 就是误报。
+  const running = input.tasks.filter((task) => task.status === 'running');
+  const dead = running.find((task) => task.dead);
+  // 超时不看任务是否已收口（到点被杀也要告诉秘书），但会话还在等别的任务时不拿旧任务报
+  const overdue = (running.length > 0 ? running : input.tasks).find((task) => task.overdue);
   const failure = overdue
     ? { taskId: overdue.taskId, reason: 'timeout' as const, at: overdue.deadlineAt ?? now }
     : dead
@@ -79,7 +84,8 @@ export function backgroundWaitStall(
     };
   }
   if (!input.idle || input.consumed) return null;
-  if (input.tasks.some((task) => task.status === 'running')) return null;
+  // 还有任务在跑：等它自己的完成通知，别把已经结束的那条当成没唤醒
+  if (running.length > 0) return null;
   const ended = input.tasks.filter((task) => task.endedAt !== undefined);
   if (ended.length === 0) return null;
   const oldest = ended.reduce((left, right) =>

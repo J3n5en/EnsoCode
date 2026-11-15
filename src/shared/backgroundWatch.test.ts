@@ -100,6 +100,51 @@ describe('backgroundWaitStall', () => {
       )
     ).toBeNull();
   });
+
+  it('还有任务在跑时，不拿已经死掉的旧任务报进程已死', () => {
+    // 真实误报：会话等 task-33（还在跑），旧任务 task-28 的进程早就没了
+    const tasks = [
+      { taskId: 'task-33', status: 'running' as const },
+      { taskId: 'task-28', status: 'failed' as const, dead: true, deadAt: 0, endedAt: 0 },
+    ];
+    expect(backgroundWaitStall(input({ tasks }), 60_000)).toBeNull();
+    expect(backgroundWaitStall(input({ tasks }), 60_000 + BACKGROUND_WAKE_GRACE_MS)).toBeNull();
+  });
+
+  it('alive 还没探测（没有 dead 标记）时按未知处理，不报进程已死', () => {
+    // worker 只在确认进程不在时才把 alive 置 false；缺省 / null 都是「还没探测」
+    const tasks = [{ taskId: 't1', status: 'running' as const }];
+    expect(backgroundWaitStall(input({ tasks }), 60_000)).toBeNull();
+    expect(backgroundWaitStall(input({ tasks }), 60_000 + BACKGROUND_WAKE_GRACE_MS)).toBeNull();
+  });
+
+  it('所有任务都已退出时报没唤醒，不报进程已死', () => {
+    const tasks = [
+      { taskId: 'done', status: 'done' as const, endedAt: 0 },
+      { taskId: 'killed', status: 'failed' as const, dead: true, deadAt: 0, endedAt: 0 },
+    ];
+    expect(backgroundWaitStall(input({ tasks }), 0)).toBeNull();
+    expect(backgroundWaitStall(input({ tasks }), BACKGROUND_WAKE_GRACE_MS)).toMatchObject({
+      reason: 'undelivered',
+      wake: true,
+    });
+  });
+
+  it('多个任务混合状态：在跑的那条没超时就不报，超时了才报超时', () => {
+    const mixed = [
+      { taskId: 'run', status: 'running' as const },
+      { taskId: 'killed', status: 'failed' as const, dead: true, deadAt: 0, endedAt: 0 },
+      { taskId: 'done', status: 'done' as const, endedAt: 0 },
+    ];
+    expect(backgroundWaitStall(input({ tasks: mixed }), 60_000)).toBeNull();
+    const late = mixed.map((task) =>
+      task.taskId === 'run' ? { ...task, overdue: true, deadlineAt: 50_000 } : task
+    );
+    expect(backgroundWaitStall(input({ tasks: late }), 60_000)).toMatchObject({
+      taskId: 'run',
+      reason: 'timeout',
+    });
+  });
 });
 
 describe('backgroundWakeText', () => {

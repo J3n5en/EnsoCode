@@ -383,6 +383,25 @@ describe('派出会话的后台任务看门狗', () => {
     } as unknown as RendererAgentEvent;
   }
 
+  function level(tasks: Record<string, unknown>[], at: number): RendererAgentEvent {
+    clock.now = at;
+    return {
+      type: 'background-tasks-level',
+      identity,
+      seq: 3,
+      tasks,
+    } as unknown as RendererAgentEvent;
+  }
+
+  function task(
+    taskId: string,
+    status: 'running' | 'done' | 'failed',
+    startedAt: number,
+    extra: Record<string, unknown> = {}
+  ): Record<string, unknown> {
+    return { taskId, command: 'sleep 30', status, tail: '', startedAt, ...extra };
+  }
+
   it('还在跑且未到截止时间时不唤醒', () => {
     const h = harnessAt({}, clock);
     h.driver.observe(started({ deadlineAt: 60_000 }));
@@ -431,6 +450,51 @@ describe('派出会话的后台任务看门狗', () => {
     expect(h.driver.watch(4_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
     expect(h.prompts).toHaveLength(1);
     expect(h.prompts[0].delivery.text).toContain('process is gone');
+  });
+
+  it('alive 为 null（还没探测）时不报进程已死', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({}, 1_000));
+    h.driver.observe(turnCompleted(digest('等着')));
+    h.driver.observe(level([task('t1', 'running', 1_000, { alive: null })], 4_000));
+    expect(h.driver.watch(4_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it('还有任务在跑时，不拿已经死掉的旧任务报停住', () => {
+    // 真实误报：会话等 task-33（running，alive 未探测），旧任务 task-28 的进程早就没了
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({ taskId: 'task-28' }, 1_000));
+    h.driver.observe(started({ taskId: 'task-33' }, 2_000));
+    h.driver.observe(turnCompleted(digest('等 verify-secretary')));
+    h.driver.observe(
+      level(
+        [
+          task('task-33', 'running', 2_000, { alive: null }),
+          task('task-28', 'failed', 1_000, { alive: false }),
+        ],
+        158_000
+      )
+    );
+    expect(h.driver.watch(158_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([]);
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it('任务全部退出后才报没唤醒', () => {
+    const h = harnessAt({}, clock);
+    h.driver.observe(started({ taskId: 'a' }, 1_000));
+    h.driver.observe(started({ taskId: 'b' }, 1_000));
+    h.driver.observe(turnCompleted(digest('等两个')));
+    h.driver.observe(
+      level(
+        [task('a', 'done', 1_000, { exitCode: 0 }), task('b', 'failed', 1_000, { alive: false })],
+        5_000
+      )
+    );
+    expect(h.driver.watch(5_000)).toEqual([]);
+    expect(h.driver.watch(5_000 + BACKGROUND_WAKE_GRACE_MS)).toEqual([
+      { conversationId: SID, taskId: 'a', reason: 'undelivered' },
+    ]);
   });
 
   it('任务结束后仍空闲，过了宽限才当没唤醒；期间会话跑起来就不报', () => {

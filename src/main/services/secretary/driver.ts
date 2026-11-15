@@ -239,14 +239,16 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       typeof raw.deadlineAt === 'number' && Number.isFinite(raw.deadlineAt)
         ? raw.deadlineAt
         : prev?.deadlineAt;
-    const dead = prev?.dead === true || raw.alive === false;
+    // alive 缺省或 null = worker 看门狗还没探测过，按未知处理，绝不当成已退出；
+    // 进程已死也只对还在跑的任务有意义，结束之后由完成通知收口。
+    const dead = status === 'running' && (prev?.dead === true || raw.alive === false);
     const overdue =
       prev?.overdue === true ||
       ((status === 'running' || prev?.status === 'running') &&
         deadlineAt !== undefined &&
         at >= deadlineAt);
     const endedAt = status === 'running' ? undefined : (prev?.endedAt ?? at);
-    const deadAt = dead ? (prev?.deadAt ?? at) : prev?.deadAt;
+    const deadAt = dead ? (prev?.deadAt ?? at) : undefined;
     taskMap(conversationId).set(raw.taskId, {
       taskId: raw.taskId,
       status,

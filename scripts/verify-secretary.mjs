@@ -1897,6 +1897,13 @@ async function run(cdp, pluginZipUrl) {
     'step11: 等后台任务不记 goal-blocked 或 failed',
     bgSettled
   );
+  // 还在跑的后台任务（sleep 12）不该被看门狗当成「后台进程已退出」
+  assert(
+    bgSettled.lastResult?.kind !== 'stalled' &&
+      !(await secretarySaw(bgDispatch.secretaryId, bgId, 'stalled')),
+    'step11: 等还在跑的后台任务时不报停住',
+    bgSettled.lastResult
+  );
   await delay(2500);
   const bgAfter = readJson(dispatchFile).dispatched[bgId];
   assert(bgAfter.lastState !== 'error', 'step11: 等过收口窗口会话仍不是 error', bgAfter);
