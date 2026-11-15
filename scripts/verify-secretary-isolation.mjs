@@ -69,7 +69,7 @@ export async function reservePorts(requested, open) {
   const held = [];
   const ports = {};
   try {
-    for (const key of ['cdp', 'fake', 'plugin', 'renderer']) {
+    for (const key of ['cdp', 'fake', 'plugin', 'renderer', 'telegram']) {
       const want = requested[key];
       let listener;
       try {

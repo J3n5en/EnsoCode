@@ -171,6 +171,7 @@ import {
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
+import { ContactStore } from '../services/secretary/contact/store';
 import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
@@ -576,6 +577,13 @@ function secretaryStore(): SecretaryStore {
   return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
 }
 
+/** 联系方式绑过没有：只读 contact.json 的 chat，不碰 token */
+function contactBoundFor(): boolean {
+  return (
+    new ContactStore(path.join(app.getPath('userData'), 'secretary')).file().chat !== undefined
+  );
+}
+
 /**
  * 模型每轮看到的都是最新配置；插件与技能勾选在 spawn 时定死，改了要释放会话。
  */
@@ -594,6 +602,7 @@ function secretarySpawnOptions(): {
       profile,
       persona: store.readPersona(),
       uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
+      contactBound: contactBoundFor(),
     }),
     pluginIds: profile?.pluginIds ?? [],
     skillIds: profile?.skillIds ?? [],
@@ -664,6 +673,17 @@ export function answerAskFromMain(
   const identity = exactIdentity(sessionId);
   if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
   return respondAsk(identity, requestId, answer, { by: 'relay', name });
+}
+
+/** 用户在手机（Telegram）上回答秘书的提问：与在应用里亲手答同一条路径，谁先答算谁的 */
+export function answerAskAsUserFromMain(
+  sessionId: string,
+  requestId: string,
+  answer: string
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return respondAsk(identity, requestId, answer);
 }
 
 /** 秘书开始/结束跟踪一个会话：把 ask_user 转给它，撤销时恢复成直接问用户 */

@@ -66,6 +66,9 @@ let CDP_PORT = 0;
 let FAKE_PORT = 0;
 let PLUGIN_PORT = 0;
 let RENDERER_PORT = 0;
+let TG_PORT = 0;
+/** 假 Telegram Bot API：getMe / getUpdates / sendMessage / answerCallbackQuery */
+let telegram = null;
 const KEEP = keepRequested(process.env, process.argv);
 // 只跑 setup + 记忆人工编辑段，改记忆管理时用来快速复验
 const MEMORY_ONLY = process.argv.includes('--memory-only');
@@ -222,6 +225,8 @@ async function stopAll() {
   portLease = null;
   pluginServer?.close();
   pluginServer = null;
+  telegram?.server?.close();
+  telegram = null;
   for (const { name, child } of [...children].reverse()) {
     log(`  stopped ${name} (${child.pid ?? 'not-started'})`);
   }
@@ -480,6 +485,7 @@ async function main() {
       fake: explicitPort('SEC_VERIFY_FAKE_PORT', process.env.SEC_VERIFY_FAKE_PORT),
       plugin: explicitPort('SEC_VERIFY_PLUGIN_PORT', process.env.SEC_VERIFY_PLUGIN_PORT),
       renderer: explicitPort('SEC_VERIFY_RENDERER_PORT', process.env.SEC_VERIFY_RENDERER_PORT),
+      telegram: explicitPort('SEC_VERIFY_TG_PORT', process.env.SEC_VERIFY_TG_PORT),
     },
     listenLoopback
   );
@@ -487,11 +493,14 @@ async function main() {
   FAKE_PORT = portLease.ports.fake;
   PLUGIN_PORT = portLease.ports.plugin;
   RENDERER_PORT = portLease.ports.renderer;
+  TG_PORT = portLease.ports.telegram;
   log('== isolation');
   log(`  dir: ${ART}`);
   log(`  env: ${ENV}`);
   log(`  project: ${PROJ}`);
-  log(`  ports: cdp=${CDP_PORT} fake=${FAKE_PORT} plugin=${PLUGIN_PORT} renderer=${RENDERER_PORT}`);
+  log(
+    `  ports: cdp=${CDP_PORT} fake=${FAKE_PORT} plugin=${PLUGIN_PORT} renderer=${RENDERER_PORT} telegram=${TG_PORT}`
+  );
   log(`  keep: ${KEEP ? 'yes' : 'no'}`);
   await prepareEnv();
   await portLease.release('plugin');
@@ -513,12 +522,18 @@ async function main() {
     'fake provider',
     15_000
   );
+  log('== fake telegram');
+  await portLease.release('telegram');
+  telegram = await startFakeTelegram(TG_PORT);
+  log(`  listening on http://127.0.0.1:${TG_PORT}`);
   await portLease.release('cdp');
   await portLease.release('renderer');
   start('dev', 'pnpm', ['dev'], {
     ENSO_USER_DATA_DIR: ENV,
     ENSO_CDP_PORT: String(CDP_PORT),
     ENSO_RENDERER_PORT: String(RENDERER_PORT),
+    // 联系方式只打这个假服务，不碰真实的 api.telegram.org
+    ENSO_TELEGRAM_API_BASE: `http://127.0.0.1:${TG_PORT}`,
   });
   await waitFor(
     async () => {
@@ -1325,8 +1340,8 @@ async function run(cdp, pluginZipUrl) {
   assert(board.ok, '秘书面板打开', board);
   // 日报（daily）是 SecretaryPanel 的 TABS 里第二个标签，顺序即渲染顺序
   assert(
-    board.tabs?.join(',') === 'workbench,daily,memory,schedules',
-    '秘书面板四个标签',
+    board.tabs?.join(',') === 'workbench,daily,memory,schedules,contact',
+    '秘书面板五个标签',
     board.tabs
   );
   await cdp.shot(path.join(ART, '05-workbench.png'));
@@ -2974,12 +2989,484 @@ async function run(cdp, pluginZipUrl) {
 
   await verifyTakeover(cdp, setup);
   await verifyFeedPaging(cdp, panelHost);
+  await verifyTelegramContact(cdp, setup);
 
   copyFileSync(auditFile, path.join(ART, 'audit.jsonl'));
   log(`  copied ${path.join(ART, 'audit.jsonl')}`);
 
   await verifyMemoryManualEdit(cdp, setup);
   await verifyToolCards(cdp, setup);
+}
+
+/**
+ * 假 Telegram Bot API：只实现联系方式要用的四个方法。
+ * 用例通过 push() 注入「用户在手机上做了什么」，出站全部记在 sent 里。
+ */
+async function startFakeTelegram(port) {
+  const state = {
+    token: '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw',
+    me: { id: 424242, is_bot: true, username: 'enso_verify_bot', first_name: 'Enso Verify' },
+    sent: [],
+    callbacks: [],
+    polls: 0,
+    queue: [],
+    waiters: [],
+  };
+  const push = (update) => {
+    const waiter = state.waiters.shift();
+    if (waiter) waiter([update]);
+    else state.queue.push(update);
+  };
+  const server = createHttpServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      let done = false;
+      const reply = (payload) => {
+        if (done) return;
+        done = true;
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(payload));
+      };
+      const url = new URL(request.url || '/', 'http://127.0.0.1');
+      const match = /^\/bot([^/]+)\/([A-Za-z]+)$/.exec(url.pathname);
+      if (!match) {
+        reply({ ok: false, error_code: 404, description: 'Not Found' });
+        return;
+      }
+      const [, token, method] = match;
+      let body = {};
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+      } catch {
+        body = {};
+      }
+      if (token !== state.token) {
+        reply({ ok: false, error_code: 401, description: 'Unauthorized' });
+        return;
+      }
+      if (state.polls <= 2 || method !== 'getUpdates') log(`  tg: ${method}`);
+      if (method === 'getMe') {
+        reply({ ok: true, result: state.me });
+        return;
+      }
+      if (method === 'getUpdates') {
+        state.polls += 1;
+        if (state.queue.length > 0) {
+          reply({ ok: true, result: state.queue.splice(0) });
+          return;
+        }
+        const waiter = (updates) => reply({ ok: true, result: updates });
+        state.waiters.push(waiter);
+        // 长轮询挂 2 秒回空：客户端自己再来，验收结束时不会留下挂死的请求
+        const timer = setTimeout(() => {
+          state.waiters = state.waiters.filter((entry) => entry !== waiter);
+          reply({ ok: true, result: [] });
+        }, 2000);
+        // 注意听 response 的 close：request 的 close 在请求体读完就触发，
+        // 会把这次长轮询的回复一起取消掉，客户端只能干等超时
+        response.on('close', () => {
+          clearTimeout(timer);
+          state.waiters = state.waiters.filter((entry) => entry !== waiter);
+        });
+        return;
+      }
+      if (method === 'sendMessage') {
+        state.sent.push(body);
+        reply({ ok: true, result: { message_id: state.sent.length } });
+        return;
+      }
+      if (method === 'answerCallbackQuery') {
+        state.callbacks.push(body);
+        reply({ ok: true, result: true });
+        return;
+      }
+      reply({ ok: false, error_code: 400, description: 'Unsupported method' });
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  return { ...state, push, server, state };
+}
+
+/** 联系方式：绑定向导、里程碑出站、手机发话、按钮回答，全程打假 Telegram */
+async function verifyTelegramContact(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  // state 是活对象（sent/polls 随轮询变），push 挂在返回的控制器上
+  const tg = telegram.state;
+  const push = telegram.push;
+  const PANEL = `[...document.querySelectorAll('[data-enso=secretary-panel]')].find((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  })`;
+
+  log('== 联系方式：绑定向导第 1 步');
+  const opened = await page(`
+    const panelOf = () => ${PANEL};
+    if (!panelOf()) {
+      S().selectConversation(${JSON.stringify(setup.secretaryId)});
+      await sleep(300);
+      const toggles = [...document.querySelectorAll('button')].filter(
+        (b) => b.getAttribute('aria-label') === '新建标签页' && b.offsetParent !== null
+      );
+      toggles.at(-1)?.click();
+      const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+      item?.click();
+      await sleep(800);
+      [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === '折叠/展开右侧面板')
+        ?.click();
+      await sleep(1200);
+    }
+    const panel = panelOf();
+    if (!panel) return JSON.stringify({ ok: false, error: 'no panel' });
+    panel.querySelector('[data-enso=secretary-panel-tab][data-tab=contact]')?.click();
+    await sleep(400);
+    const step1 = panel.querySelector('[data-enso=secretary-contact-step1]');
+    const botfather = panel.querySelector('[data-enso=secretary-contact-botfather]');
+    const input = panel.querySelector('[data-enso=secretary-contact-token]');
+    return JSON.stringify({
+      ok: Boolean(step1 && botfather && input),
+      href: botfather?.getAttribute('href') ?? null,
+      tabs: [...panel.querySelectorAll('[data-enso=secretary-panel-tab]')].map((n) => n.dataset.tab),
+    });
+  `);
+  assert(opened.ok, '联系方式: 侧边栏有入口，第 1 步引导去 BotFather', opened);
+  assert(
+    opened.href === 'https://t.me/BotFather',
+    '联系方式: 一键打开 BotFather 的链接',
+    opened.href
+  );
+  assert(opened.tabs?.includes('contact'), '联系方式: 面板上有联系方式标签', opened.tabs);
+  await cdp.shot(path.join(ART, '10-contact-step1.png'));
+
+  log('== 联系方式：粘贴 token 校验并生成绑定码');
+  const verified = await page(`
+    const panel = ${PANEL};
+    const input = panel.querySelector('[data-enso=secretary-contact-token]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, ${JSON.stringify(tg.token)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(120);
+    panel.querySelector('[data-enso=secretary-contact-verify]').click();
+    const code = await until(
+      () => panel.querySelector('[data-enso=secretary-contact-code-value]'),
+      20000
+    );
+    const qr = panel.querySelector('[data-enso=secretary-contact-qr]');
+    const open = panel.querySelector('[data-enso=secretary-contact-open-bot]');
+    return JSON.stringify({
+      ok: Boolean(code),
+      code: code?.textContent?.trim() ?? null,
+      href: open?.getAttribute('href') ?? null,
+      qr: Boolean(qr?.src?.startsWith('data:image/png')),
+      verified: panel.querySelector('[data-enso=secretary-contact-verified]')?.innerText ?? null,
+    });
+  `);
+  assert(
+    verified.ok && /^\d{6}$/.test(verified.code ?? ''),
+    '联系方式: 粘贴 token 后显示 6 位绑定码',
+    verified
+  );
+  assert(
+    verified.href === `https://t.me/enso_verify_bot?start=${verified.code}`,
+    '联系方式: 深链带绑定码',
+    verified.href
+  );
+  assert(verified.qr === true, '联系方式: 显示绑定二维码', verified);
+  assert(
+    verified.verified?.includes('@enso_verify_bot'),
+    '联系方式: 显示 getMe 校验到的 bot 名字与 username',
+    verified.verified
+  );
+  await cdp.shot(path.join(ART, '10-contact-step3.png'));
+
+  log('== 联系方式：在 Telegram 里点 Start 完成绑定');
+  push({
+    update_id: 1,
+    message: {
+      message_id: 1,
+      chat: { id: 777001, type: 'private' },
+      from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      text: `/start ${verified.code}`,
+    },
+  });
+  const bound = await waitFor(
+    async () => {
+      const probe = await page(`
+        const node = (${PANEL})?.querySelector('[data-enso=secretary-contact-bound]');
+        const state = await window.electronAPI.secretary.contactState();
+        return JSON.stringify({
+          text: node?.innerText ?? null,
+          status: state?.telegram?.status ?? null,
+          poll: state?.telegram?.poll ?? null,
+        });
+      `);
+      return probe.text?.includes('j3n5en') ? probe : null;
+    },
+    'telegram bound',
+    20_000,
+    500
+  );
+  assert(bound.text.includes('@j3n5en'), '联系方式: 界面立刻显示已绑定 @j3n5en', bound.text);
+  await cdp.shot(path.join(ART, '10-contact-bound.png'));
+  const welcome = tg.sent.find((message) => message.chat_id === 777001);
+  assert(
+    welcome?.text?.includes('已连上'),
+    '联系方式: 绑定成功后 bot 发了一条欢迎消息',
+    tg.sent.slice(-3)
+  );
+
+  log('== 联系方式：里程碑出站遵循 notify');
+  const runDispatch = () =>
+    page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    const draft = ${JSON.stringify({ projectId: setup.projectId, prompt: '创建 tg.txt', title: '写 tg.txt' })};
+    await S().send(
+      '派一个活 [[tool:session_create ' + JSON.stringify(draft) + ']]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const proposal = await until(
+      () => Object.values(secretary.getState().secretary.proposals)
+        .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
+        .at(-1) ?? null,
+      30000
+    );
+    if (!proposal) return JSON.stringify({ ok: false, error: 'no proposal' });
+    const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
+      goal: '收尾 [[tool:goal_complete {"summary":"tg.txt 已写好"}]]',
+    });
+    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ ok: done?.status === 'succeeded', conversationId: done?.conversationId });
+  `);
+  const waitGoal = (conversationId) =>
+    waitFor(
+      () => {
+        const record = readJson(dispatchFile).dispatched[conversationId];
+        return record?.lastResult?.kind === 'goal-complete' && record.lastState === 'idle'
+          ? record
+          : null;
+      },
+      `goal-complete ${conversationId}`,
+      90_000,
+      500
+    );
+
+  // notify=off：做完也不发
+  const quietRun = await runDispatch();
+  assert(
+    quietRun.ok && Boolean(quietRun.conversationId),
+    '联系方式: 派出会话建成（notify=off）',
+    quietRun
+  );
+  await waitGoal(quietRun.conversationId);
+  await delay(1500);
+  assert(
+    !tg.sent.some((message) => message.text?.includes('✅ 完成')),
+    '联系方式: notify=off 时里程碑一条都不发',
+    tg.sent.slice(-3)
+  );
+
+  // 改成 with-done：做完发一条，带会话标题与回应用的深链
+  const notifySet = await page(`
+    return JSON.stringify(await window.electronAPI.secretary.saveProfile({ notify: 'with-done' }));
+  `);
+  assert(notifySet.ok, '联系方式: 档案改成 with-done', notifySet);
+  const loudRun = await runDispatch();
+  assert(
+    loudRun.ok && Boolean(loudRun.conversationId),
+    '联系方式: 派出会话建成（notify=with-done）',
+    loudRun
+  );
+  await waitGoal(loudRun.conversationId);
+  const milestone = await waitFor(
+    () => tg.sent.find((message) => message.text?.includes('✅ 完成')) ?? null,
+    'telegram milestone',
+    30_000,
+    500
+  );
+  assert(milestone.text.includes('写 tg.txt'), '联系方式: 里程碑带会话标题', milestone.text);
+  assert(
+    milestone.text.includes(`enso://secretary?conversation=${loudRun.conversationId}`),
+    '联系方式: 里程碑带回应用的深链',
+    milestone.text
+  );
+
+  log('== 联系方式：ask_user 从手机按钮回答');
+  const ask = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation();
+    S().selectConversation(id);
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      '问一下 [[tool:ask_user {"question":"用哪个分支？","options":["main","dev"]}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const pending = await until(() => (S().conversations[id]?.pendingAsks ?? [])[0] ?? null, 40000);
+    return JSON.stringify({
+      ok: Boolean(pending),
+      requestId: pending?.requestId ?? null,
+      conversationId: id,
+    });
+  `);
+  assert(ask.ok, '联系方式: 秘书的 ask_user 挂起', ask);
+  const askMessage = await waitFor(
+    () => tg.sent.find((message) => message.text?.includes('用哪个分支？')) ?? null,
+    'telegram ask',
+    20_000,
+    300
+  );
+  const buttons = askMessage.reply_markup?.inline_keyboard?.flat() ?? [];
+  assert(
+    buttons.map((button) => button.text).join(',') === 'main,dev',
+    '联系方式: 提问带 inline 选项按钮',
+    buttons
+  );
+  push({ update_id: 2, callback_query: { id: 'cb-verify-1', data: buttons[1].callback_data } });
+  const answered = await waitFor(
+    async () => {
+      const state = await page(`
+        const row = S().conversations[${JSON.stringify(ask.conversationId)}];
+        return JSON.stringify({
+          pending: (row?.pendingAsks ?? []).length,
+          // 回答落在工具结果里，不是 text 段：整条消息序列化后再找
+          text: (row?.messages ?? []).map((message) => JSON.stringify(message.content ?? '')).join(' '),
+        });
+      `);
+      return state.pending === 0 ? state : null;
+    },
+    'ask answered from telegram',
+    30_000,
+    500
+  );
+  assert(answered.pending === 0, '联系方式: 手机点按钮后提问收尾', answered);
+  assert(answered.text.includes('dev'), '联系方式: 回答进了秘书会话', answered.text);
+  assert(
+    tg.callbacks.some((callback) => callback.text?.includes('已回答')),
+    '联系方式: 手机收到「已回答」提示',
+    tg.callbacks
+  );
+
+  log('== 联系方式：手机发话进秘书会话，回复再发回手机');
+  const sentBefore = tg.sent.length;
+  push({
+    update_id: 3,
+    message: {
+      message_id: 3,
+      chat: { id: 777001, type: 'private' },
+      from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      text: '在吗，帮我看下进度',
+    },
+  });
+  // 投到哪个秘书会话由 Main 决定：从审计里读回目标会话，再选中它读正文
+  const inboundTarget = await waitFor(
+    () => {
+      const entries = readFileSync(auditFile, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter((entry) => entry.op === 'contact_inbound');
+      const last = entries.at(-1);
+      return last?.ok && last.secretaryConversationId ? last.secretaryConversationId : null;
+    },
+    'telegram inbound delivered',
+    40_000,
+    500
+  );
+  const inbound = await waitFor(
+    async () => {
+      const state = await page(`
+        S().selectConversation(${JSON.stringify(inboundTarget)});
+        const text = texts(${JSON.stringify(inboundTarget)}).find((entry) => entry.includes('来自 Telegram'));
+        return JSON.stringify({ id: ${JSON.stringify(inboundTarget)}, text: text ?? null });
+      `);
+      return state.text ? state : null;
+    },
+    'telegram inbound in secretary session',
+    40_000,
+    500
+  );
+  assert(inbound.text.includes('来自 Telegram'), '联系方式: 标注来自 Telegram', inbound.text);
+  assert(
+    inbound.text.includes('<untrusted-content'),
+    '联系方式: 外部文本包成不可信内容',
+    inbound.text
+  );
+  const reply = await waitFor(
+    () =>
+      tg.sent
+        .slice(sentBefore)
+        .find(
+          (message) =>
+            message.chat_id === 777001 &&
+            !message.text?.includes('用哪个分支') &&
+            !message.text?.startsWith('✅')
+        ) ?? null,
+    'secretary reply to phone',
+    40_000,
+    500
+  );
+  assert(reply.text === 'fake-ok', '联系方式: 秘书的回复发回手机', reply.text);
+
+  log('== 联系方式：解绑后停止轮询');
+  const unbound = await page(`
+    const result = await window.electronAPI.secretary.contactUnbind();
+    const state = await window.electronAPI.secretary.contactState();
+    return JSON.stringify({ result, status: state.telegram.status, chat: state.telegram.chat ?? null });
+  `);
+  assert(unbound.result.ok, '联系方式: 解绑成功', unbound);
+  assert(
+    unbound.status === 'unbound' && unbound.chat === null,
+    '联系方式: 解绑后清掉 chat',
+    unbound
+  );
+  const pollsAfterUnbind = tg.polls;
+  push({
+    update_id: 4,
+    message: {
+      message_id: 4,
+      chat: { id: 777001, type: 'private' },
+      from: { id: 777001, username: 'j3n5en' },
+      text: '解绑后还能说话吗',
+    },
+  });
+  await delay(2500);
+  assert(tg.polls === pollsAfterUnbind, '联系方式: 解绑后不再轮询', {
+    before: pollsAfterUnbind,
+    after: tg.polls,
+  });
+  const contactAudit = readFileSync(auditFile, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.op?.startsWith('contact_'));
+  assert(contactAudit.length > 0, '联系方式: 出入站都记了审计', contactAudit.length);
+  assert(
+    contactAudit.every((entry) => !JSON.stringify(entry).includes(tg.token)),
+    '联系方式: 审计里没有 token',
+    contactAudit.slice(-3)
+  );
+  assert(
+    contactAudit.every(
+      (entry) =>
+        !JSON.stringify(entry).includes('在吗，帮我看下进度') &&
+        !JSON.stringify(entry).includes('用哪个分支')
+    ),
+    '联系方式: 审计里不记正文',
+    contactAudit.slice(-3)
+  );
 }
 
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);

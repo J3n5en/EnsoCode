@@ -540,3 +540,51 @@ export interface SecretaryDaily {
   /** 结果记录的保留天数，界面据此说明能回看多久 */
   retentionDays: number;
 }
+
+/**
+ * 联系方式：秘书不在电脑前时，把里程碑与提问推到手机上，也能从手机回话。
+ * 第一个渠道是 Telegram Bot；state 里不含 token，只留前几位提示。
+ */
+export type SecretaryContactStatus = 'unbound' | 'awaiting-start' | 'bound';
+
+export type SecretaryContactPollState = 'stopped' | 'starting' | 'running' | 'backoff' | 'error';
+
+export interface SecretaryContactBot {
+  id: number;
+  username: string;
+  name: string;
+}
+
+export interface SecretaryContactChat {
+  id: number;
+  username?: string;
+  name?: string;
+}
+
+export interface SecretaryContactBind {
+  /** 一次性绑定码：/start <code> 或 https://t.me/<username>?start=<code> */
+  code: string;
+  /** 手机上点一下就完成的深链 */
+  link: string;
+  expiresAt: number;
+}
+
+export interface SecretaryContactTelegram {
+  status: SecretaryContactStatus;
+  bot?: SecretaryContactBot;
+  chat?: SecretaryContactChat;
+  boundAt?: number;
+  /** 只在等待 /start 时给界面 */
+  bind?: SecretaryContactBind;
+  /** token 前几位，界面上只显示这么点 */
+  tokenHint?: string;
+  /** 默认关闭：派发类确认卡不允许从手机确认 */
+  allowDispatchConfirm: boolean;
+  poll: { state: SecretaryContactPollState; lastError?: string };
+  /** safeStorage 是否可用：不可用时 token 明文落盘，界面要提示 */
+  secure: boolean;
+}
+
+export interface SecretaryContactState {
+  telegram: SecretaryContactTelegram;
+}

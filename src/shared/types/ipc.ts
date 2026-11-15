@@ -54,6 +54,24 @@ export const IPC_CHANNELS = {
   SECRETARY_FEED: 'secretary:feed',
   /** 秘书：按天汇总的看板（日报），入参是日期，缺省今天 */
   SECRETARY_DAILY: 'secretary:daily',
+  /** 秘书联系方式：读绑定状态（不含 token） */
+  SECRETARY_CONTACT_STATE: 'secretary:contact-state',
+  /** main → 主界面 renderer：联系方式状态变化 */
+  SECRETARY_CONTACT_CHANGED: 'secretary:contact-changed',
+  /** 秘书联系方式：校验 token 并生成一次性绑定码；只带码时重新生成 */
+  SECRETARY_CONTACT_BIND: 'secretary:contact-bind',
+  /** 秘书联系方式：退出绑定向导 */
+  SECRETARY_CONTACT_CANCEL: 'secretary:contact-cancel',
+  /** 秘书联系方式：解绑（清 chat，停轮询，保留 bot 与 token） */
+  SECRETARY_CONTACT_UNBIND: 'secretary:contact-unbind',
+  /** 秘书联系方式：更换 bot（token 一起清） */
+  SECRETARY_CONTACT_FORGET_BOT: 'secretary:contact-forget-bot',
+  /** 秘书联系方式：发一条测试消息 */
+  SECRETARY_CONTACT_TEST: 'secretary:contact-test',
+  /** 秘书联系方式：扩权开关 */
+  SECRETARY_CONTACT_SETTINGS: 'secretary:contact-settings',
+  /** main → 主界面 renderer：深链 enso://secretary 要求选中某个会话 */
+  SECRETARY_OPEN_CONVERSATION: 'secretary:open-conversation',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */
   REMOTE_LEADER_CHANGED: 'remote:leader-changed',
   REMOTE_UPLOAD: 'remote:upload',

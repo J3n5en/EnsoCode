@@ -237,6 +237,7 @@ import type {
 } from '@shared/types/nodes';
 import type {
   DispatchDraft,
+  SecretaryContactState,
   SecretaryDaily,
   SecretaryProfile,
   SecretaryProfileDraft,
@@ -455,6 +456,37 @@ const electronAPI = {
       conversationId: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE, { conversationId }),
+    /** 联系方式：绑定状态里不含 token，只有前几位提示 */
+    contactState: (): Promise<SecretaryContactState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_STATE),
+    onContactChanged: (callback: (state: SecretaryContactState) => void): (() => void) => {
+      const listener = (_event: unknown, state: SecretaryContactState) => callback(state);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, listener);
+    },
+    /** 第 2 步：校验 token 并生成绑定码；不带 token 表示用已存的 bot 重新生成 */
+    contactBind: (token?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_BIND, token ? { token } : {}),
+    contactCancel: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_CANCEL),
+    /** 解绑：清 chat、停轮询，保留 bot 与 token */
+    contactUnbind: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_UNBIND),
+    /** 更换 bot：token 一起清，向导回到第 1 步 */
+    contactForgetBot: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT),
+    contactTest: (): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST),
+    contactSettings: (
+      allowDispatchConfirm: boolean
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, { allowDispatchConfirm }),
+    /** 深链 enso://secretary?conversation=<id>：Main 要求选中某个会话 */
+    onOpenConversation: (callback: (conversationId: string) => void): (() => void) => {
+      const listener = (_event: unknown, conversationId: string) => callback(conversationId);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_OPEN_CONVERSATION, listener);
+    },
   },
 
   modelDirectory: {
