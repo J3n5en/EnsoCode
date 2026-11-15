@@ -208,6 +208,64 @@ describe('SecretaryDailyBoard', () => {
     expect(text('[data-enso="secretary-daily-times"]')).toBe('12:30');
   });
 
+  it('合并后的待办卡同时显示新增与完成时间，已完成的划掉', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        {
+          key: 'todos',
+          items: [
+            item({
+              id: 'todo:t1',
+              conversationId: undefined,
+              title: '看板脏数据',
+              label: 'Done',
+              at: new Date(2024, 4, 15, 13, 48).getTime(),
+              dispatchedAt: undefined,
+              summary: undefined,
+              detail: undefined,
+              addedAt: new Date(2024, 4, 15, 8, 35).getTime(),
+              doneAt: new Date(2024, 4, 15, 13, 48).getTime(),
+            }),
+          ],
+        },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    expect(text('[data-enso="secretary-daily-times"]')).toBe('[Added] 08:35 · [Done] 13:48');
+    expect(text('[data-group="todos"] [data-enso="secretary-daily-card"]')).toContain('[Done]');
+    expect(
+      container.querySelector('[data-enso="secretary-daily-card"]')?.getAttribute('data-done')
+    ).toBe('true');
+  });
+
+  it('只新增的待办卡只显示新增时间，不划掉', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        {
+          key: 'todos',
+          items: [
+            item({
+              id: 'todo:t2',
+              conversationId: undefined,
+              title: '写周报',
+              label: 'Added',
+              at: new Date(2024, 4, 15, 8, 35).getTime(),
+              dispatchedAt: undefined,
+              summary: undefined,
+              detail: undefined,
+              addedAt: new Date(2024, 4, 15, 8, 35).getTime(),
+            }),
+          ],
+        },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    expect(text('[data-enso="secretary-daily-times"]')).toBe('[Added] 08:35');
+    expect(
+      container.querySelector('[data-enso="secretary-daily-card"]')?.getAttribute('data-done')
+    ).toBeNull();
+  });
+
   it('点卡片展开全文，点会话徽标才跳转', async () => {
     await render(createElement(SecretaryDailyBoard));
     const expand = () => container.querySelector('[data-enso="secretary-daily-expand"]');

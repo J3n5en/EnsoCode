@@ -37,6 +37,7 @@ const COLUMNS: {
   { key: 'needsYou', title: 'Needed you', dot: '#f59e0b', stamp: 'Needed you' },
   { key: 'done', title: 'What got done', dot: '#10b981', stamp: 'Completed' },
   { key: 'failed', title: 'Failed or interrupted', dot: '#ef4444', stamp: 'Failed' },
+  /** 待办列放当天新增或当天完成的待办：一条待办一张卡，完成的划掉 */
   { key: 'todos', title: 'To-dos', dot: '#a855f7' },
   { key: 'changes', title: 'Settings and capabilities', dot: '#06b6d4' },
 ];
@@ -76,10 +77,14 @@ function DailyCard({
   const [stopping, setStopping] = useState(false);
   const body = item.summary ?? item.detail;
   const detail = item.detail ?? item.summary;
+  // 待办卡把新增与完成时间都挂在卡上，已完成的划掉，与未完成区分开
+  const done = item.doneAt !== undefined;
   const times = [
     item.dispatchedAt !== undefined
       ? `${t('Dispatched')} ${stampOf(item.dispatchedAt, day, locale)}`
       : '',
+    item.addedAt !== undefined ? `${t('Added')} ${stampOf(item.addedAt, day, locale)}` : '',
+    item.doneAt !== undefined ? `${t('Done')} ${stampOf(item.doneAt, day, locale)}` : '',
     column.stamp ? `${t(column.stamp)} ${stampOf(item.at, day, locale)}` : '',
   ].filter(Boolean);
   // 手动收口只对派发或接管跟踪的会话开放，普通会话不显示
@@ -96,6 +101,7 @@ function DailyCard({
     <div
       data-enso="secretary-daily-card"
       data-item={item.id}
+      data-done={done ? 'true' : undefined}
       className={cn(CARD_CLASS, 'group/row relative')}
     >
       {(mark || stopLeftover) && (
@@ -151,7 +157,12 @@ function DailyCard({
         onClick={() => setExpanded((value) => !value)}
         className="block w-full text-left"
       >
-        <span className="block text-[12.5px] font-medium leading-[1.45] break-words">
+        <span
+          className={cn(
+            'block text-[12.5px] font-medium leading-[1.45] break-words',
+            done && 'text-muted-foreground line-through'
+          )}
+        >
           {item.title}
         </span>
         {body && (

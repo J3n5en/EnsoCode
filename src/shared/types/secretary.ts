@@ -606,6 +606,10 @@ export interface SecretaryDailyItem {
   commit?: string;
   /** 派出时间；派发/接管会话的卡片才有 */
   dispatchedAt?: number;
+  /** 待办新增时间：只有待办卡片有 */
+  addedAt?: number;
+  /** 待办完成时间：只有待办卡片有，有值表示这条待办已完成 */
+  doneAt?: number;
   conversationId?: string;
   /** 有派发或接管记录：只有这类会话才给「标记完成」 */
   tracked?: true;
