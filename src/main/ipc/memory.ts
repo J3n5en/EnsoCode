@@ -100,6 +100,8 @@ const EMPTY_STATS: MemoryStats = {
   entities: 0,
   embedded: 0,
   databaseBytes: 0,
+  neverHit: 0,
+  addedLast7Days: 0,
 };
 const EMPTY_JOBS: MemoryJobsSnapshot = { distill: [], kg: [], reembed: null, kgFailed: 0 };
 const EMPTY_GRAPH: MemoryGraphDto = { nodes: [], edges: [], totalEntities: 0 };

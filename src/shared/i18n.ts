@@ -1626,6 +1626,9 @@ export const zhTranslations: Record<string, string> = {
     '没有可用于向量化的模型：需要填了 API Key 的服务商，且其中有向量模型（如 text-embedding-3-small）。订阅登录不能用于向量化。',
   'Database size': '库体积',
   Spaces: '空间数',
+  'Never retrieved': '从未命中',
+  '{{percent}}% of library': '占 {{percent}}%',
+  'Added in 7 days': '近 7 天新增',
   'Distill past sessions': '提炼历史会话',
   'The automatic switch only covers sessions that end from now on. Distill earlier sessions here to fill the library.':
     '自动开关只对从现在开始结束或被回收的会话生效。早于此的会话在这里手动提炼，否则记忆库一直是空的。',

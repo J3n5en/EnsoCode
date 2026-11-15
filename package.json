@@ -31,6 +31,7 @@
     "knowledge:check": "npx tsx scripts/knowledge.ts check",
     "knowledge:clean": "npx tsx scripts/knowledge.ts clean",
     "knowledge:compact": "npx tsx scripts/knowledge.ts compact",
+    "memory:compact": "npx tsx scripts/memory-compact.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

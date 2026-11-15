@@ -58,6 +58,8 @@ const item = (id: string, spaceId: string): MemoryListItem => ({
   isLatest: true,
   lifecycleState: 'active',
   createdAt: '2025-01-01T00:00:00.000Z',
+  lastHitAt: null,
+  hitCount: 0,
   updatedAt: '2025-01-01T00:00:00.000Z',
   appearances: 0,
 });

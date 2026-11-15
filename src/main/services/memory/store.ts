@@ -62,6 +62,8 @@ export interface MemoryRow {
   access_count: number;
   appearances: number;
   clicks: number;
+  last_hit_at: string | null;
+  hit_count: number;
   embedding: Buffer | null;
   embedding_model: string | null;
   embedding_dim: number | null;
@@ -74,6 +76,7 @@ export const MEMORY_COLUMNS =
   'is_latest, version, is_crystal, crystal_title, source_unit_count, lifecycle_state, ' +
   'temporal_context, temporal_type, event_start, event_end, ' +
   'temporal_precision, created_at, updated_at, last_accessed_at, access_count, appearances, clicks, ' +
+  'last_hit_at, hit_count, ' +
   'embedding_model, embedding_dim, embedding_version, idempotency_key';
 
 export function rowToMemory(r: MemoryRow): Memory {
@@ -104,6 +107,8 @@ export function rowToMemory(r: MemoryRow): Memory {
     accessCount: r.access_count,
     appearances: r.appearances,
     clicks: r.clicks,
+    lastHitAt: r.last_hit_at,
+    hitCount: r.hit_count,
     embeddingModel: r.embedding_model,
     embeddingDim: r.embedding_dim,
     embeddingVersion: r.embedding_version,
