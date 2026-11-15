@@ -5124,6 +5124,15 @@ const auditLines = () =>
     .split('\n')
     .map((line) => JSON.parse(line));
 
+/** 工具结果可能是「单行 JSON + <source_reference> 行」：只解析第一行 */
+function parseToolJson(text) {
+  try {
+    return JSON.parse(String(text ?? '').split('\n', 1)[0]);
+  } catch {
+    return null;
+  }
+}
+
 /** 纯色 PNG：秘书看图那一步用，宽高写进 IHDR，验收断言读得出来 */
 function writePngFixture(file, width, height) {
   const raw = Buffer.alloc((width * 4 + 1) * height);
@@ -5164,14 +5173,14 @@ async function verifyImageViewAndCleanup(cdp, setup) {
   const imageFile = path.join('/tmp', `sec-verify-${process.pid}-${Date.now()}.png`);
   writePngFixture(imageFile, 64, 48);
   const viewed = await secretaryTool(cdp, setup, 'image_view', { path: imageFile }, '看看这张截图');
-  let viewedMeta = null;
-  try {
-    viewedMeta = JSON.parse(viewed.text ?? 'null');
-  } catch {
-    viewedMeta = null;
-  }
+  // 带 path 参数的工具结果后面会追加一行 <source_reference>，只取第一行
+  const viewedMeta = parseToolJson(viewed.text);
   assert(
-    viewedMeta?.path === imageFile && viewedMeta?.width === 64 && viewedMeta?.height === 48,
+    // 返回的是解析过符号链接的真实路径：/tmp 在 macOS 上是 /private/tmp
+    path.basename(viewedMeta?.path ?? '') === path.basename(imageFile) &&
+      viewedMeta?.width === 64 &&
+      viewedMeta?.height === 48 &&
+      typeof viewedMeta?.size === 'number',
     'image: /tmp 下的图片读得到，尺寸与文件大小一起回来',
     viewedMeta ?? viewed.text
   );
@@ -5217,12 +5226,7 @@ async function verifyImageViewAndCleanup(cdp, setup) {
   gitIn(['checkout', '-q', current]);
 
   const listed = await secretaryTool(cdp, setup, 'cleanup_list', {}, '看看有什么可以清理的');
-  let items = [];
-  try {
-    items = JSON.parse(listed.text ?? 'null')?.items ?? [];
-  } catch {
-    items = [];
-  }
+  const items = parseToolJson(listed.text)?.items ?? [];
   const merged = items.find(
     (item) => item.kind === 'branch' && item.name === 'feat/verify-cleanup'
   );
@@ -5250,12 +5254,7 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     { ids: [merged.id] },
     '把这条已合入的分支清掉'
   );
-  let appliedMeta = null;
-  try {
-    appliedMeta = JSON.parse(applied.text ?? 'null');
-  } catch {
-    appliedMeta = null;
-  }
+  const appliedMeta = parseToolJson(applied.text);
   assert(
     appliedMeta?.status === 'awaiting_confirmation' && typeof appliedMeta?.proposalId === 'string',
     'cleanup: 先返回待确认，不直接删',

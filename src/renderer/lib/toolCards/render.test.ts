@@ -813,11 +813,12 @@ describe('只读核实卡片', () => {
 
 describe('看图与清理卡片', () => {
   it('image_view 显示文件名、缩略图与尺寸', () => {
+    // 带 path 参数的工具结果会被追加一行 <source_reference>，卡片只解析第一行 JSON
     const card = renderToolCall(
       call(
         'image_view',
         { path: '/tmp/shot.png' },
-        { path: '/tmp/shot.png', size: 2048, width: 1280, height: 720, mimeType: 'image/png' }
+        `${JSON.stringify({ path: '/tmp/shot.png', size: 2048, width: 1280, height: 720, mimeType: 'image/png' })}\n<source_reference type="file" path="/tmp/shot.png" />`
       ),
       ctx('zh')
     );

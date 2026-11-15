@@ -119,6 +119,16 @@ function parseJson(text: string | null): unknown {
   }
 }
 
+/**
+ * 工具结果可能是「单行 JSON + <source_reference> 行」（带 path 参数的工具会被追加一行），
+ * 整段解析失败时退回只解析第一行。
+ */
+function parseJsonLine(text: string | null): unknown {
+  const whole = parseJson(text);
+  if (whole !== null) return whole;
+  return parseJson(text?.split('\n', 1)[0] ?? null);
+}
+
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
@@ -1090,7 +1100,7 @@ function cleanupRow(item: Record<string, unknown>, ctx: ToolCardContext) {
 
 register('image_view', (call, ctx) => {
   const args = rec(call.args);
-  const output = rec(parseJson(call.output));
+  const output = rec(parseJsonLine(call.output));
   const target = str(output?.path) ?? str(args?.path) ?? '';
   const width = typeof output?.width === 'number' ? output.width : null;
   const height = typeof output?.height === 'number' ? output.height : null;
@@ -1119,7 +1129,7 @@ register('image_view', (call, ctx) => {
 });
 
 register('cleanup_list', (call, ctx) => {
-  const output = rec(parseJson(call.output));
+  const output = rec(parseJsonLine(call.output));
   const items = Array.isArray(output?.items)
     ? output.items.map(rec).filter((item): item is Record<string, unknown> => item !== null)
     : [];
@@ -1139,7 +1149,7 @@ register('cleanup_list', (call, ctx) => {
 
 register('cleanup_apply', (call, ctx) => {
   const args = rec(call.args);
-  const output = rec(parseJson(call.output));
+  const output = rec(parseJsonLine(call.output));
   const ids = Array.isArray(args?.ids) ? args.ids.length : 0;
   const error = errorText(call, ctx);
   return view(
