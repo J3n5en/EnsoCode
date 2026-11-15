@@ -237,16 +237,110 @@ describe('一天的看板投影', () => {
     expect(daily.groups[0].items[0].title).toBe('重构登录流程');
   });
 
-  it('待办新增与完成各占一行，会话标题取不到时退回派发记录里的目标', () => {
+  it('同一待办的新增与完成合并成一张卡，两个时间都挂在卡上', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [],
+      todos: [todo({ id: 't3', createdAt: at(15, 8), doneAt: at(15, 13) })],
+      audit: [],
+    });
+    const items = daily.groups.find((group) => group.key === 'todos')?.items ?? [];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: 'todo:t3',
+      at: at(15, 13),
+      title: '写周报',
+      label: 'Done',
+      addedAt: at(15, 8),
+      doneAt: at(15, 13),
+    });
+    expect(daily.counts.todosDone).toBe(1);
+  });
+
+  it('待办只新增、只完成、两者都有时字段与文案各不相同', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [],
+      todos: [
+        todo({ id: 'only-add', createdAt: at(15, 8) }),
+        todo({ id: 'only-done', createdAt: at(14, 8), doneAt: at(15, 9) }),
+        todo({ id: 'both', createdAt: at(15, 10), doneAt: at(15, 11) }),
+        // 前一天新增、还没完成：今天不上板
+        todo({ id: 'stale', createdAt: at(14, 8) }),
+      ],
+      audit: [],
+    });
+    const items = daily.groups.find((group) => group.key === 'todos')?.items ?? [];
+    expect(items.map((item) => item.id)).toEqual(['todo:both', 'todo:only-done', 'todo:only-add']);
+    const byId = new Map(items.map((item) => [item.id, item]));
+    expect(byId.get('todo:only-add')).toMatchObject({
+      label: 'Added',
+      at: at(15, 8),
+      addedAt: at(15, 8),
+    });
+    expect(byId.get('todo:only-add')?.doneAt).toBeUndefined();
+    expect(byId.get('todo:only-done')).toMatchObject({
+      label: 'Done',
+      at: at(15, 9),
+      doneAt: at(15, 9),
+    });
+    expect(byId.get('todo:only-done')?.addedAt).toBeUndefined();
+    expect(byId.get('todo:both')).toMatchObject({ addedAt: at(15, 10), doneAt: at(15, 11) });
+    expect(daily.counts.todosDone).toBe(2);
+  });
+
+  it('同一个提案的提交与确认只出一张卡，同一天重复保存同一对象也合并', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [],
+      todos: [],
+      audit: [
+        // 提案提交不在白名单里，本来就不上板
+        audit({ at: at(15, 9), op: 'secretary_skill_propose', targetId: 'deploy-check' }),
+        audit({ at: at(15, 10), op: 'skill_save', targetId: 'deploy-check' }),
+        audit({ at: at(15, 14), op: 'skill_save', targetId: 'deploy-check' }),
+        audit({ at: at(15, 11), op: 'skill_save', targetId: 'other' }),
+      ],
+    });
+    const items = daily.groups.find((group) => group.key === 'changes')?.items ?? [];
+    expect(items.map((item) => item.id)).toEqual([
+      'audit:skill_save:deploy-check',
+      'audit:skill_save:other',
+    ]);
+    // 留最后一次的时间
+    expect(items[0].at).toBe(at(15, 14));
+  });
+
+  it('一个会话当天只出一张卡，多条结果与派出记录都不重复', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({ at: at(15, 10), kind: 'needs-user' }),
+        record({ at: at(15, 12), kind: 'goal-complete' }),
+      ],
+      dispatched: [dispatch({ createdAt: at(15, 8) })],
+      todos: [],
+      audit: [],
+    });
+    const all = daily.groups.flatMap((group) => group.items);
+    expect(all).toHaveLength(1);
+    expect(all[0].id).toBe('session:c1');
+    expect(all[0].dispatchedAt).toBe(at(15, 8));
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+  });
+
+  it('会话标题取不到时退回派发记录里的目标', () => {
     const daily = buildSecretaryDaily({
       ...base,
       session: () => ({}),
       results: [],
       dispatched: [dispatch({ goal: '重构登录流程' })],
-      todos: [todo({ id: 't3', doneAt: at(15, 15) })],
+      todos: [],
       audit: [],
     });
-    expect(daily.groups.find((group) => group.key === 'todos')?.items).toHaveLength(2);
     expect(daily.groups.find((group) => group.key === 'running')?.items[0].title).toBe(
       '重构登录流程'
     );

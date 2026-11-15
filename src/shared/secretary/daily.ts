@@ -299,41 +299,46 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   }
   for (const items of Object.values(columns)) items.sort(newestFirst);
 
+  // 待办按 id 合并：同一条待办当天只出一张卡，新增与完成时间都挂在卡上
   const todoItems: SecretaryDailyItem[] = [];
   for (const todo of input.todos) {
-    if (within(todo.createdAt))
-      todoItems.push({
-        id: `todo:${todo.id}:add`,
-        at: todo.createdAt,
-        title: todo.text,
-        label: 'Added',
-      });
-    if (within(todo.doneAt))
-      todoItems.push({
-        id: `todo:${todo.id}:done`,
-        at: todo.doneAt,
-        title: todo.text,
-        label: 'Done',
-      });
+    const added = within(todo.createdAt) ? todo.createdAt : undefined;
+    const done = within(todo.doneAt) ? todo.doneAt : undefined;
+    // 状态时间取最近一次：完成了是完成时间，只新增是新增时间
+    const at = done ?? added;
+    if (at === undefined) continue;
+    todoItems.push({
+      id: `todo:${todo.id}`,
+      at,
+      title: todo.text,
+      ...(added !== undefined ? { addedAt: added } : {}),
+      ...(done !== undefined ? { doneAt: done } : {}),
+      label: done !== undefined ? 'Done' : 'Added',
+    });
   }
   const todos = todoItems.sort(newestFirst);
 
-  const changes = input.audit
-    .filter((entry) => entry.ok && CHANGE_LABEL[entry.op] !== undefined && within(entry.at))
-    .map((entry): SecretaryDailyItem => {
-      const target = entry.targetId;
-      const takeover = entry.op.startsWith('takeover_');
-      const meta = takeover && target ? metaOf(target) : undefined;
-      return {
-        id: `audit:${entry.op}:${target ?? ''}:${entry.at}`,
-        at: entry.at,
-        title: meta?.title || (takeover && target ? target : ''),
-        ...(meta?.projectName ? { projectName: meta.projectName } : {}),
-        label: CHANGE_LABEL[entry.op],
-        ...(takeover && target ? { conversationId: target } : {}),
-      };
-    })
-    .sort(newestFirst);
+  // 同一操作作用在同一对象上只出一张卡：提案的提交与确认、同一天重复保存都算一次变更
+  const changeByKey = new Map<string, SecretaryDailyItem>();
+  for (const entry of input.audit) {
+    if (!entry.ok || CHANGE_LABEL[entry.op] === undefined || !within(entry.at)) continue;
+    const target = entry.targetId;
+    const takeover = entry.op.startsWith('takeover_');
+    const meta = takeover && target ? metaOf(target) : undefined;
+    const key = `${entry.op}:${target ?? ''}`;
+    // 审计按时间追加，同一键留最后一次
+    const previous = changeByKey.get(key);
+    if (previous && previous.at > entry.at) continue;
+    changeByKey.set(key, {
+      id: `audit:${key}`,
+      at: entry.at,
+      title: meta?.title || (takeover && target ? target : ''),
+      ...(meta?.projectName ? { projectName: meta.projectName } : {}),
+      label: CHANGE_LABEL[entry.op],
+      ...(takeover && target ? { conversationId: target } : {}),
+    });
+  }
+  const changes = [...changeByKey.values()].sort(newestFirst);
 
   const groups = (
     [
@@ -354,7 +359,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       completed: columns.done.length,
       failed: columns.failed.length,
       needsYou: columns.needsYou.length,
-      todosDone: todos.filter((item) => item.label === 'Done').length,
+      todosDone: todos.filter((item) => item.doneAt !== undefined).length,
       merged: results.filter((record) => record.merged).length,
     },
     groups,
