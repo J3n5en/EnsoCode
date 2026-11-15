@@ -12,6 +12,9 @@ import {
   inTakeoverScope,
   operateSource,
   PROPOSAL_TTL_MS,
+  pendingProposalMatch,
+  pendingProposalNote,
+  proposalSignature,
   takeoverRefusal,
   transitionProposal,
   validateDispatch,
@@ -432,5 +435,69 @@ describe('validateDispatchBase', () => {
       error: 'branch-invalid',
     });
     expect(validateDispatchBase(base, facts)).toEqual({ ok: true });
+  });
+});
+
+describe('提案去重', () => {
+  const cleanup = (id: string, names: string[], status: 'pending' | 'succeeded' = 'pending') =>
+    ({
+      id,
+      secretaryConversationId: 'sec1',
+      createdAt: 1,
+      updatedAt: 1,
+      status,
+      kind: 'cleanup',
+      draft: { items: names.map((name) => ({ id: `branch|${name}`, kind: 'branch', name })) },
+    }) as SecretaryProposal;
+
+  it('清理只比 id 集合：顺序与大小不影响指纹', () => {
+    expect(proposalSignature(cleanup('a', ['x', 'y']))).toBe(
+      proposalSignature(cleanup('b', ['y', 'x']))
+    );
+    expect(proposalSignature(cleanup('a', ['x']))).not.toBe(proposalSignature(cleanup('b', ['y'])));
+  });
+
+  it('参数一致就是同一张卡，参数不同只算同类', () => {
+    const existing = cleanup('a', ['x']);
+    const same = pendingProposalMatch({ a: existing }, 'sec1', {
+      kind: 'cleanup',
+      signature: proposalSignature(cleanup('b', ['x'])),
+    });
+    expect(same.same?.id).toBe('a');
+    expect(same.other).toBeUndefined();
+
+    const other = pendingProposalMatch({ a: existing }, 'sec1', {
+      kind: 'cleanup',
+      signature: proposalSignature(cleanup('b', ['y'])),
+    });
+    expect(other.same).toBeUndefined();
+    expect(other.other?.id).toBe('a');
+  });
+
+  it('只看同一秘书会话、只看还没处理的卡', () => {
+    const done = cleanup('a', ['x'], 'succeeded');
+    const elsewhere = { ...cleanup('b', ['x']), secretaryConversationId: 'sec2' };
+    expect(
+      pendingProposalMatch({ a: done, b: elsewhere }, 'sec1', {
+        kind: 'cleanup',
+        signature: proposalSignature(cleanup('c', ['x'])),
+      })
+    ).toEqual({});
+  });
+
+  it('正在执行的卡同样算还没处理完', () => {
+    const running = { ...cleanup('a', ['x']), status: 'executing' as const };
+    const match = pendingProposalMatch({ a: running }, 'sec1', {
+      kind: 'cleanup',
+      signature: proposalSignature(cleanup('b', ['x'])),
+    });
+    expect(match.same?.id).toBe('a');
+    expect(pendingProposalNote(match)).toContain('already running');
+  });
+
+  it('提示语点名 proposalId，没有待处理的卡就没有提示', () => {
+    expect(pendingProposalNote({ same: { id: 'p1' } })).toContain('proposalId=p1');
+    expect(pendingProposalNote({ other: { id: 'p2' } })).toContain('proposalId=p2');
+    expect(pendingProposalNote({})).toBeUndefined();
   });
 });

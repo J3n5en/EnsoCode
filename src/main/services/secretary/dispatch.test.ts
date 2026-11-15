@@ -5,6 +5,7 @@ import { parseDispatchFile, parseProfile } from '@shared/secretary/parse';
 import type { DispatchBaseFacts } from '@shared/secretary/policy';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type {
+  CleanupItem,
   DispatchModelRef,
   DispatchRecord,
   SecretaryAuditEntry,
@@ -33,6 +34,7 @@ import {
   revokeTakeover,
   type SecretaryDispatchPorts,
   type SecretaryQueuedMessage,
+  saveCleanupProposal,
   startPendingDispatches,
   stopLeftoverTasks,
   untrack,
@@ -1104,7 +1106,12 @@ describe('接管', () => {
     // 同一会话再提一次复用同一张卡
     expect(await propose(h)).toEqual({
       ok: true,
-      result: { status: 'awaiting_confirmation', proposalId: 'id-1' },
+      result: {
+        status: 'awaiting_confirmation',
+        proposalId: 'id-1',
+        reused: true,
+        note: expect.stringContaining('proposalId=id-1'),
+      },
     });
     expect(Object.keys(h.file.proposals)).toEqual(['id-1']);
   });
@@ -1775,6 +1782,122 @@ describe('清理提案', () => {
   });
 });
 
+describe('确认卡去重', () => {
+  const cleanupItems = (name: string): CleanupItem[] => [
+    { id: `branch|${name}`, kind: 'branch', name },
+  ];
+
+  it('清理：同类同参再调用返回已有提案，不新建', () => {
+    const h = harness();
+    const first = saveCleanupProposal(cleanupItems('feat/a'), 'sec-1', h.ports);
+    const second = saveCleanupProposal(cleanupItems('feat/a'), 'sec-1', h.ports);
+
+    expect(first.reused).toBe(false);
+    expect(second.proposalId).toBe(first.proposalId);
+    expect(second.reused).toBe(true);
+    expect(second.note).toContain(`proposalId=${first.proposalId}`);
+    expect(Object.keys(h.file.proposals)).toEqual([first.proposalId]);
+  });
+
+  it('清理：参数不同另开一张，并提示上一张还没处理', () => {
+    const h = harness();
+    const first = saveCleanupProposal(cleanupItems('feat/a'), 'sec-1', h.ports);
+    const second = saveCleanupProposal(cleanupItems('feat/b'), 'sec-1', h.ports);
+
+    expect(second.proposalId).not.toBe(first.proposalId);
+    expect(second.reused).toBe(false);
+    expect(second.otherPendingId).toBe(first.proposalId);
+    expect(second.note).toContain(`proposalId=${first.proposalId}`);
+    expect(Object.keys(h.file.proposals).sort()).toEqual(
+      [first.proposalId, second.proposalId].sort()
+    );
+  });
+
+  it('派发：同一请求再提一次复用同一张卡', async () => {
+    const h = harness();
+    const params = { projectId: 'p1', prompt: '修构建' };
+    const first = (await run(h.handlers.session_create, params)) as {
+      proposalId: string;
+      reused?: boolean;
+    };
+    const second = (await run(h.handlers.session_create, params)) as {
+      proposalId: string;
+      reused?: boolean;
+      note?: string;
+    };
+
+    expect(second.proposalId).toBe(first.proposalId);
+    expect(second.reused).toBe(true);
+    expect(second.note).toContain(`proposalId=${first.proposalId}`);
+    expect(Object.keys(h.file.proposals)).toEqual([first.proposalId]);
+  });
+
+  it('派发：参数不同另开一张，并提示上一张还没处理', async () => {
+    const h = harness();
+    const first = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修构建',
+    })) as { proposalId: string };
+    const second = (await run(h.handlers.session_create, {
+      projectId: 'p1',
+      prompt: '修发布',
+    })) as { proposalId: string; otherPendingId?: string; note?: string };
+
+    expect(second.proposalId).not.toBe(first.proposalId);
+    expect(second.otherPendingId).toBe(first.proposalId);
+    expect(second.note).toContain(`proposalId=${first.proposalId}`);
+    expect(Object.keys(h.file.proposals)).toHaveLength(2);
+  });
+});
+
+describe('确认卡的两段式回传', () => {
+  it('点确认后立刻推「已确认，正在执行」，执行完再推完成', async () => {
+    const h = harness({ rows: { 'c-done': { title: '写发布说明' } } });
+    h.file.proposals['cleanup-1'] = {
+      id: 'cleanup-1',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'cleanup',
+      draft: { items: [{ id: 'session|c-done', kind: 'session', name: '写发布说明' }] },
+    };
+
+    const pending = resolveProposal(h.ports, 'cleanup-1', 'confirm');
+    // 执行体还没跑完：秘书这边已经能看到「已确认」
+    expect(h.file.outbox.map((update) => update.text)).toEqual(['已确认，正在执行清理']);
+
+    const resolved = await pending;
+    expect(resolved.ok && resolved.proposal.status).toBe('succeeded');
+    expect(h.file.outbox.map((update) => update.text)).toEqual([
+      '已确认，正在执行清理',
+      expect.stringContaining('清理完成'),
+    ]);
+    expect(h.file.outbox.map((update) => update.key)).toEqual([
+      'proposal:cleanup-1:executing',
+      'proposal:cleanup-1:succeeded',
+    ]);
+  });
+
+  it('取消时立刻推「已取消」', async () => {
+    const h = harness({ rows: { 'c-done': { title: '写发布说明' } } });
+    h.file.proposals['cleanup-2'] = {
+      id: 'cleanup-2',
+      secretaryConversationId: 'sec-1',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'pending',
+      kind: 'cleanup',
+      draft: { items: [{ id: 'session|c-done', kind: 'session', name: '写发布说明' }] },
+    };
+
+    await resolveProposal(h.ports, 'cleanup-2', 'reject');
+
+    expect(h.file.outbox.map((update) => update.text)).toEqual(['用户取消了这次清理，什么都没删']);
+    expect(h.archived).toEqual([]);
+  });
+});
+
 describe('resolveProposal', () => {
   it('同一提案确认两次只执行一次', async () => {
     const h = harness();
@@ -1878,8 +2001,10 @@ describe('resolveProposal', () => {
     expect(result.ok && result.proposal.status).toBe('failed');
     expect(result.ok && result.proposal.error).toBe('project-missing');
     expect(h.created).toEqual([]);
-    expect(h.file.outbox.map((update) => update.kind)).toEqual(['proposal']);
-    expect(h.file.outbox[0]).toMatchObject({ proposalId, status: 'failed' });
+    // 点确认先推一条「已确认，正在执行」，执行失败再推一条
+    expect(h.file.outbox.map((update) => update.kind)).toEqual(['proposal', 'proposal']);
+    expect(h.file.outbox[0]).toMatchObject({ proposalId, status: 'executing' });
+    expect(h.file.outbox.at(-1)).toMatchObject({ proposalId, status: 'failed' });
   });
 
   it('拒绝提案不执行', async () => {
@@ -1933,7 +2058,7 @@ describe('resolveProposal', () => {
 
     expect(result.ok && result.proposal.status).toBe('succeeded');
     expect(h.appliedProfiles).toEqual([draft]);
-    expect(h.file.outbox[0]).toMatchObject({ proposalId: 'p1', status: 'succeeded' });
+    expect(h.file.outbox.at(-1)).toMatchObject({ proposalId: 'p1', status: 'succeeded' });
     expect(h.created).toEqual([]);
   });
 
@@ -2011,7 +2136,7 @@ describe('resolveProposal', () => {
 
     expect(result.ok && result.proposal.status).toBe('succeeded');
     expect(h.appliedSkills).toEqual([draft]);
-    expect(h.file.outbox[0]).toMatchObject({ proposalId: 'p1', status: 'succeeded' });
+    expect(h.file.outbox.at(-1)).toMatchObject({ proposalId: 'p1', status: 'succeeded' });
     expect(h.created).toEqual([]);
   });
 
