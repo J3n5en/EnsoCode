@@ -162,6 +162,7 @@ export async function executeMemoryOp(
           ...(request.force ? { force: true } : {}),
           ...(request.evolvesFromId ? { evolvesFromId: request.evolvesFromId } : {}),
           ...(request.evolvesRelation ? { evolvesRelation: request.evolvesRelation } : {}),
+          ...(request.evolvesReason ? { evolvesReason: request.evolvesReason } : {}),
         },
       });
     }
@@ -180,6 +181,7 @@ export async function executeMemoryOp(
         force: request.force,
         evolvesFromId: request.evolvesFromId ?? null,
         evolvesRelation: request.evolvesRelation ?? null,
+        evolvesReason: request.evolvesReason ?? null,
       },
       { embedder: ctx.embedder, now: ctx.now, onCreated: ctx.onCreated }
     );

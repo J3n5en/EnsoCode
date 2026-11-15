@@ -10,6 +10,7 @@ import type {
   MemoryListQuery,
   MemoryListResult,
   MemoryStats,
+  PendingEvolvesReviewDto,
   ReembedJobDto,
 } from '@shared/memory/dto';
 import { searchAssistReport } from '@shared/memory/searchAssist';
@@ -25,6 +26,7 @@ import { searchMemories } from './memory/search';
 import {
   getMemory,
   listEvolves,
+  listPendingEvolvesEdges,
   MEMORY_COLUMNS,
   type MemoryRow,
   reviewEvolves,
@@ -267,20 +269,29 @@ export function deleteMemorySpace(db: Database.Database, spaceId: string): numbe
     .immediate();
 }
 
-export function listPendingEvolves(db: Database.Database): EvolvesEdgeDto[] {
+/**
+ * 待审阅的 challenges：一次查边、一次查两端记忆。
+ * 只给 id 用户没法判断，所以两端都带上标题 / 摘要 / 空间 / 时间；任一端已删的边跳过。
+ */
+export function listPendingEvolves(db: Database.Database): PendingEvolvesReviewDto[] {
+  const edges = listPendingEvolvesEdges(db);
+  if (edges.length === 0) return [];
+  const ids = [...new Set(edges.flatMap((edge) => [edge.olderId, edge.newerId]))];
   const rows = db
-    .prepare(
-      "SELECT older_id AS olderId FROM evolves WHERE review_state = 'pending' ORDER BY created_at, id"
-    )
-    .all() as { olderId: string }[];
-  const seen = new Set<string>();
-  const result: EvolvesEdgeDto[] = [];
-  for (const row of rows) {
-    for (const edge of listEvolves(db, row.olderId)) {
-      if (edge.reviewState !== 'pending' || seen.has(edge.id)) continue;
-      seen.add(edge.id);
-      result.push(toEvolvesDto(edge));
-    }
+    .prepare(`SELECT ${MEMORY_COLUMNS} FROM memories WHERE id IN (${ids.map(() => '?').join(',')})`)
+    .all(...ids) as MemoryRow[];
+  const byId = new Map(rows.map((row) => [row.id, rowToMemory(row)]));
+  const result: PendingEvolvesReviewDto[] = [];
+  for (const edge of edges) {
+    const older = byId.get(edge.olderId);
+    const newer = byId.get(edge.newerId);
+    if (!older || !newer) continue;
+    if (older.lifecycleState === 'deleted' || newer.lifecycleState === 'deleted') continue;
+    result.push({
+      edge: toEvolvesDto(edge),
+      older: toMemoryListItem(older),
+      newer: toMemoryListItem(newer),
+    });
   }
   return result;
 }

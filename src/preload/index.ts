@@ -16,7 +16,6 @@ import type {
   DistillableSessionDto,
   EmbeddingDownloadProgressDto,
   EmbeddingModelDto,
-  EvolvesEdgeDto,
   MemoryArchiveCandidatesResult,
   MemoryArchiveConfirmResult,
   MemoryDecayRunDto,
@@ -28,6 +27,7 @@ import type {
   MemoryListResult,
   MemoryMutationResult,
   MemoryStats,
+  PendingEvolvesReviewDto,
   PendingMemoryWriteDecision,
   PendingMemoryWriteDto,
 } from '@shared/memory/dto';
@@ -635,7 +635,7 @@ const electronAPI = {
     clearJobs: (): Promise<number> => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_JOBS_CLEAR),
     retryFailedKgJobs: (): Promise<number> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_KG_RETRY_FAILED),
-    evolvesPending: (): Promise<EvolvesEdgeDto[]> =>
+    evolvesPending: (): Promise<PendingEvolvesReviewDto[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_EVOLVES_PENDING),
     evolvesReview: (id: string, state: 'accepted' | 'rejected'): Promise<MemoryMutationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_EVOLVES_REVIEW, id, state),

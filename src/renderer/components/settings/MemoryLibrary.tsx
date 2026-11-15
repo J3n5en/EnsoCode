@@ -5,13 +5,13 @@ import {
   type UnitType,
 } from '@shared/memory/constants';
 import {
-  type EvolvesEdgeDto,
   isMemoryRetrievalMode,
   type MemoryDetail,
   type MemoryListItem,
   type MemoryListQuery,
   type MemorySearchMode,
   type MemorySpaceKind,
+  type PendingEvolvesReviewDto,
   type PendingMemoryWriteDto,
 } from '@shared/memory/dto';
 import * as React from 'react';
@@ -225,41 +225,192 @@ function ImportanceBadge({
   );
 }
 
+/** 超过这个条数就按空间分组，避免一长串没有结构的列表 */
+export const PENDING_REVIEW_GROUP_AT = 6;
+/** 积压到这个条数在记忆区提醒一次，别让它无声堆积 */
+export const PENDING_REVIEW_ALERT = 50;
+
+export interface PendingReviewGroup {
+  key: string;
+  label: string;
+  items: PendingEvolvesReviewDto[];
+}
+
+/** 数量多时按空间分组；组内最新的矛盾在前（刚发生的冲突更值得先看） */
+export function groupPendingReviews(
+  items: readonly PendingEvolvesReviewDto[]
+): PendingReviewGroup[] {
+  const sorted = [...items].sort(
+    (a, b) => b.edge.createdAt.localeCompare(a.edge.createdAt) || a.edge.id.localeCompare(b.edge.id)
+  );
+  if (sorted.length <= PENDING_REVIEW_GROUP_AT) return [{ key: '', label: '', items: sorted }];
+  const groups = new Map<string, PendingReviewGroup>();
+  for (const item of sorted) {
+    const key = item.older.spaceId;
+    const group = groups.get(key) ?? { key, label: item.older.spaceLabel, items: [] };
+    group.items.push(item);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** 一条记忆的可点击摘要：标题 + 两行正文，点开看全文 */
+function ReviewMemorySide({
+  label,
+  memory,
+  onOpen,
+}: {
+  label: string;
+  memory: MemoryListItem;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(memory.id)}
+      className="block w-full space-y-0.5 rounded-md px-1 py-0.5 text-left hover:bg-accent/40"
+      data-memory-review-side={memory.id}
+    >
+      <span className="flex items-center gap-2">
+        <span className="shrink-0 text-muted-foreground text-xs">{label}</span>
+        <span className="truncate text-sm">{memory.title}</span>
+      </span>
+      <span className="line-clamp-2 text-muted-foreground text-xs">{memory.contentSummary}</span>
+    </button>
+  );
+}
+
+/**
+ * 待审阅的矛盾：两边记忆都要给出标题与摘要，否则只有 id 无法判断。
+ * 审阅只改 review_state，不动 is_latest、不删关系，所以文案必须如实说明后果。
+ */
 export function PendingReviewSection({
-  edges,
+  items,
+  selected,
+  onToggle,
+  onToggleAll,
   onReview,
+  onOpen,
   t,
 }: {
-  edges: EvolvesEdgeDto[];
-  onReview: (id: string, state: 'accepted' | 'rejected') => void;
-  t: (key: string) => string;
+  items: PendingEvolvesReviewDto[];
+  selected: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+  onToggleAll: (next: boolean) => void;
+  onReview: (ids: readonly string[], state: 'accepted' | 'rejected') => void;
+  onOpen: (id: string) => void;
+  t: (key: string, params?: Record<string, string>) => string;
 }) {
-  if (edges.length === 0) return null;
+  if (items.length === 0) {
+    return (
+      <section className="space-y-2" data-settings-row="memory.review">
+        <h3 className="text-sm font-medium">{t('Needs review')}</h3>
+        <p className="text-muted-foreground text-xs">
+          {t(
+            'Nothing to review. When a new memory contradicts an existing one, the pair shows up here.'
+          )}
+        </p>
+      </section>
+    );
+  }
+  const allSelected = items.every((item) => selected.has(item.edge.id));
   return (
     <section className="space-y-2" data-settings-row="memory.review">
-      <h3 className="text-sm font-medium">{t('Needs review')}</h3>
-      <p className="text-xs text-muted-foreground">
-        {t(
-          'Reviewing only records your judgement. Nothing is deleted and no memory is superseded.'
-        )}
-      </p>
-      {edges.map((edge) => (
-        <div key={edge.id} className="space-y-1 rounded-lg border px-3 py-2">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">{edge.relation}</Badge>
-            <span className="text-xs text-muted-foreground">
-              {edge.olderId.slice(0, 8)} → {edge.newerId.slice(0, 8)}
-            </span>
-          </div>
-          {edge.reason && <p className="text-xs text-muted-foreground">{edge.reason}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">{t('Needs review')}</h3>
+        <label className="flex items-center gap-2 text-muted-foreground text-xs">
+          <Checkbox
+            checked={allSelected}
+            onCheckedChange={() => onToggleAll(!allSelected)}
+            aria-label={t('Select all')}
+          />
+          {t('{{count}} pending', { count: String(items.length) })}
+        </label>
+      </div>
+      <div className="space-y-0.5 text-muted-foreground text-xs">
+        <p>
+          {t(
+            'Reviewing only records your judgement. Nothing is deleted and no memory is superseded.'
+          )}
+        </p>
+        <p>
+          {t(
+            'Accept: recorded as a confirmed contradiction. Both memories stay and stay searchable — you just stop being asked.'
+          )}
+        </p>
+        <p>
+          {t(
+            'Dismiss: recorded as not a contradiction. Both memories stay unchanged and you stop being asked.'
+          )}
+        </p>
+      </div>
+      {items.length > PENDING_REVIEW_ALERT && (
+        <p className="text-warning text-xs" data-memory-review-alert>
+          {t(
+            '{{count}} contradictions are waiting for review. Clear them in bulk so real conflicts do not get buried.',
+            { count: String(items.length) }
+          )}
+        </p>
+      )}
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-accent/30 px-3 py-2">
+          <span className="text-sm">
+            {t('{{count}} selected', { count: String(selected.size) })}
+          </span>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => onReview(edge.id, 'accepted')}>
-              {t('Accept')}
+            <Button variant="ghost" size="sm" onClick={() => onToggleAll(false)}>
+              {t('Clear selection')}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => onReview(edge.id, 'rejected')}>
-              {t('Dismiss')}
+            <Button variant="outline" size="sm" onClick={() => onReview([...selected], 'accepted')}>
+              {t('Accept selected')}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => onReview([...selected], 'rejected')}>
+              {t('Dismiss selected')}
             </Button>
           </div>
+        </div>
+      )}
+      {groupPendingReviews(items).map((group) => (
+        <div key={group.key} className="space-y-2">
+          {group.label && (
+            <h4 className="text-muted-foreground text-xs">
+              {group.label} · {t('{{count}} pending', { count: String(group.items.length) })}
+            </h4>
+          )}
+          {group.items.map(({ edge, older, newer }) => (
+            <div
+              key={edge.id}
+              className="space-y-1.5 rounded-lg border px-3 py-2"
+              data-memory-review={edge.id}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Checkbox
+                  checked={selected.has(edge.id)}
+                  onCheckedChange={() => onToggle(edge.id)}
+                  aria-label={t('Select memory')}
+                />
+                <Badge variant="outline">{edge.relation}</Badge>
+                <span className="text-muted-foreground text-xs">
+                  {older.spaceLabel} · {formatDateTime(edge.createdAt)}
+                </span>
+              </div>
+              <ReviewMemorySide label={t('Earlier memory')} memory={older} onOpen={onOpen} />
+              <ReviewMemorySide label={t('Newer memory')} memory={newer} onOpen={onOpen} />
+              <p className="text-muted-foreground text-xs">
+                {edge.reason
+                  ? `${t('Why they conflict')}: ${edge.reason}`
+                  : t('No reason recorded for this pair.')}
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => onReview([edge.id], 'accepted')}>
+                  {t('Accept')}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => onReview([edge.id], 'rejected')}>
+                  {t('Dismiss')}
+                </Button>
+              </div>
+            </div>
+          ))}
         </div>
       ))}
     </section>
@@ -346,7 +497,9 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
   const [deleteIds, setDeleteIds] = React.useState<string[] | null>(null);
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = React.useState(false);
-  const [pendingEdges, setPendingEdges] = React.useState<EvolvesEdgeDto[]>([]);
+  const [pendingEdges, setPendingEdges] = React.useState<PendingEvolvesReviewDto[]>([]);
+  // 待审阅的勾选与列表勾选分开：两者动作不同，混在一起会误删
+  const [reviewSelected, setReviewSelected] = React.useState<ReadonlySet<string>>(new Set());
 
   const mounted = React.useRef(false);
   const listRequest = React.useRef(0);
@@ -454,6 +607,23 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
   };
 
   const bulkArchive = () => void bulkRun(selected, (id) => window.electronAPI.memory.archive(id));
+
+  // 审阅只改 review_state：串行提交，每批结束后清空勾选并重拉待审阅列表
+  const bulkReview = (ids: readonly string[], state: 'accepted' | 'rejected') => {
+    if (ids.length === 0) return;
+    setBusy(true);
+    void (async () => {
+      try {
+        for (const id of ids) await window.electronAPI.memory.evolvesReview(id, state);
+      } finally {
+        if (mounted.current) {
+          setBusy(false);
+          setReviewSelected(new Set());
+          reloadRef.current();
+        }
+      }
+    })();
+  };
 
   const onDeleted = (ids: readonly string[]) => {
     if (!mounted.current) return;
@@ -725,9 +895,19 @@ export function MemoryLibrary({ revision = 0 }: { revision?: number } = {}) {
       <PendingWritesReview t={t} />
 
       <PendingReviewSection
-        edges={pendingEdges}
+        items={pendingEdges}
+        selected={reviewSelected}
+        onToggle={(id) => {
+          const next = new Set(reviewSelected);
+          if (!next.delete(id)) next.add(id);
+          setReviewSelected(next);
+        }}
+        onToggleAll={(next) =>
+          setReviewSelected(next ? new Set(pendingEdges.map((item) => item.edge.id)) : new Set())
+        }
+        onOpen={openDetail}
+        onReview={bulkReview}
         t={t}
-        onReview={(id, state) => runMutation(window.electronAPI.memory.evolvesReview(id, state))}
       />
 
       <Dialog open={detail !== null} onOpenChange={(open) => !open && closeDetail()}>

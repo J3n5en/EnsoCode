@@ -117,6 +117,7 @@ function captureInput(pending: PendingWrite, force: boolean): CreateMemoryInput 
     eventEnd: str(p.eventEnd) ?? null,
     evolvesFromId: str(p.evolvesFromId) ?? null,
     evolvesRelation: (str(p.evolvesRelation) as CreateMemoryInput['evolvesRelation']) ?? null,
+    evolvesReason: str(p.evolvesReason) ?? null,
     force,
   };
 }

@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   appendMemoryAudit: vi.fn(),
   clearFinishedMemoryJobs: vi.fn(() => 0),
   getMemoryStats: vi.fn(),
-  listPendingEvolves: vi.fn(() => []),
+  listPendingEvolves: vi.fn((): unknown[] => []),
   reviewEvolvesEdge: vi.fn(() => null),
   toMemoryJobsSnapshot: vi.fn(() => ({ distill: [], kg: [], reembed: null })),
   getMemoryDistillJobs: vi.fn(() => []),
@@ -71,7 +71,12 @@ vi.mock('electron', () => ({
 vi.mock('./agent', () => ({
   getSourceAuthorityRegistry: () => mocks.registry,
 }));
-vi.mock('./settings', () => ({ readSettings: () => mocks.settings }));
+vi.mock('./settings', () => ({
+  readSettings: () => mocks.settings,
+  readSettingsState: () =>
+    (mocks.settings?.['enso-settings'] as { state?: Record<string, unknown> } | undefined)?.state ??
+    {},
+}));
 vi.mock('../services/renderers', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../services/renderers')>()),
   isMainRenderer: (id: number) => id === 1,
@@ -413,6 +418,28 @@ describe('memory IPC', () => {
       await handler(IPC_CHANNELS.MEMORY_EVOLVES_REVIEW)(event, 'edge-id', 'pending')
     ).toMatchObject({ ok: false });
     expect(mocks.reviewEvolvesEdge).not.toHaveBeenCalled();
+  });
+
+  it('待审阅带上两端记忆，并用设置里的项目名标注空间（注册表没有该项目时）', async () => {
+    const older = { id: 'o1', title: 'Workflow removed', spaceId: 'proj:p1', importance: 0.9 };
+    const newer = { id: 'n1', title: 'Wants a workflow', spaceId: 'proj:p1', importance: 0.8 };
+    mocks.listPendingEvolves.mockReturnValueOnce([
+      {
+        edge: { id: 'e1', olderId: 'o1', newerId: 'n1', relation: 'challenges' },
+        older,
+        newer,
+      },
+    ]);
+    mocks.settings = {
+      'enso-settings': { state: { projects: [{ id: 'p1', name: 'enso-code' }] } },
+    };
+    mocks.registry = null;
+    const [item] = (await handler(IPC_CHANNELS.MEMORY_EVOLVES_PENDING)(event)) as {
+      older: { spaceLabel: string };
+      newer: { spaceLabel: string };
+    }[];
+    expect(item.older.spaceLabel).toBe('enso-code');
+    expect(item.newer.spaceLabel).toBe('enso-code');
   });
 
   it('gets job snapshots from memoryHost without opening the database', async () => {
