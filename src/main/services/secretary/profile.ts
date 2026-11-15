@@ -12,6 +12,7 @@ import type {
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { notifySecretaryChanged } from './dispatch';
+import { saveProposalRecord } from './proposals';
 import type { SecretarySessionStatus } from './readers';
 import { syncSystemSchedules } from './schedules';
 import { SecretaryStore } from './store';
@@ -249,33 +250,36 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
       if (!parsed.ok) return parsed;
       if (Object.keys(parsed.draft).length === 0) return { ok: false, error: 'invalid arguments' };
       const now = ports.now();
-      const id = ports.newId();
       const file = ports.dispatchFile();
-      file.proposals[id] = {
-        id,
+      const { saved, changed } = saveProposalRecord(file, {
+        id: ports.newId(),
         secretaryConversationId: ctx.secretaryConversationId,
         createdAt: now,
         updatedAt: now,
         status: 'pending',
         kind: 'profile',
         draft: parsed.draft,
-      };
-      ports.saveDispatch(file);
+      });
+      if (changed) {
+        ports.saveDispatch(file);
+        ports.notify();
+      }
       ports.audit({
         at: now,
         secretaryConversationId: ctx.secretaryConversationId,
         op: 'secretary_profile_propose',
-        targetId: id,
+        targetId: saved.proposalId,
         ok: true,
-        detail: 'awaiting_confirmation',
+        detail: saved.reused ? 'awaiting_confirmation (existing)' : 'awaiting_confirmation',
       });
-      ports.notify();
       return {
         ok: true,
         result: {
           status: 'awaiting_confirmation',
-          proposalId: id,
+          proposalId: saved.proposalId,
           changes: profileChanges(ports.profile(), ports.persona(), parsed.draft),
+          ...(saved.reused ? { reused: true } : {}),
+          ...(saved.note ? { note: saved.note } : {}),
         },
       };
     },

@@ -26,6 +26,7 @@ import type {
 } from '@shared/types/secretary';
 import { CLEANUP_ITEM_KINDS } from '@shared/types/secretary';
 import { appendAudit } from './audit';
+import type { SavedProposal } from './proposals';
 import { type GitRunner, parseWorktrees, runGit } from './repoStatus';
 import { SecretaryStore } from './store';
 import type { SecretaryOpHandler, SecretaryOpResult } from './tools';
@@ -630,8 +631,11 @@ export function cleanupReportText(result: CleanupApplyResult): string {
 }
 
 export interface CleanupHandlerPorts extends CleanupPorts {
-  /** 落一条待确认的清理提案，返回提案 id */
-  saveProposal(items: CleanupItem[], secretaryConversationId: string | null): Promise<string>;
+  /** 落一条待确认的清理提案；同类同参的卡已经在等就复用，不再叠一张 */
+  saveProposal(
+    items: CleanupItem[],
+    secretaryConversationId: string | null
+  ): Promise<SavedProposal>;
 }
 
 function parseIds(value: unknown): string[] {
@@ -698,25 +702,28 @@ export function createSecretaryCleanupHandlers(ports: CleanupHandlerPorts): {
         });
         return { ok: false, error: selection.error };
       }
-      const proposalId = await ports.saveProposal(selection.items, ctx.secretaryConversationId);
+      const saved = await ports.saveProposal(selection.items, ctx.secretaryConversationId);
       ports.audit({
         at: ports.now(),
         secretaryConversationId: ctx.secretaryConversationId,
         op: 'cleanup_apply',
-        targetId: proposalId,
+        targetId: saved.proposalId,
         ok: true,
-        detail: 'awaiting_confirmation',
+        detail: saved.reused ? 'awaiting_confirmation (existing)' : 'awaiting_confirmation',
       });
       return {
         ok: true,
         result: {
           status: 'awaiting_confirmation',
-          proposalId,
+          proposalId: saved.proposalId,
           total: selection.items.length,
           // 清单在确认卡上；这里只回前几条，几十条 id 会把工具结果撑大
           items: selection.items
             .slice(0, CLEANUP_SUMMARY_PER_KIND)
             .map((item) => ({ id: item.id, kind: item.kind, name: item.name })),
+          ...(saved.reused ? { reused: true } : {}),
+          ...(saved.otherPendingId ? { otherPendingId: saved.otherPendingId } : {}),
+          ...(saved.note ? { note: saved.note } : {}),
         },
       };
     },

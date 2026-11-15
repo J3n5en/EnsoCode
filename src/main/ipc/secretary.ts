@@ -29,6 +29,7 @@ import {
   resolveProposal,
   revokeTakeover,
   secretaryDispatchPorts,
+  setProposalAcceptedListener,
   setSecretaryForgetListener,
   setSecretaryStateListener,
   startPendingDispatches,
@@ -403,6 +404,8 @@ export function registerSecretaryHandlers(): void {
   setSecretaryAvatarResolver(() => (secretaryEnabled() ? secretaryStore().avatarPath() : null));
   driver = createDispatchDriver(driverPorts);
   host = createSecretaryHost(hostPorts);
+  // 用户点确认后立刻把「已确认，正在执行」投给秘书，不等下一分钟的 tick
+  setProposalAcceptedListener(() => host?.flushNow());
   contact = createSecretaryContact({
     dir: () => path.join(app.getPath('userData'), 'secretary'),
     delivery: hostPorts,

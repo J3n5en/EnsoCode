@@ -33,7 +33,6 @@ import {
   type ThinkingLevel,
 } from '@shared/types/agent';
 import {
-  type CleanupDraft,
   type CleanupItem,
   type DispatchDraft,
   type DispatchModelRef,
@@ -61,6 +60,7 @@ import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
 import { todoDispatchPrompt } from './dispatchBrief';
 import { recordPhoneFollow, renameFollowedTarget, unfollowTarget } from './following';
+import { type SavedProposal, saveProposalRecord } from './proposals';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import { closeRelayAsk, dropRelaysFor, pendingRelay, relayKey, sessionLabel } from './relay';
 import {
@@ -413,6 +413,24 @@ export function notifySecretaryChanged(): void {
   }
 }
 
+/**
+ * 用户点了确认：立刻把「已确认，正在执行」投给秘书，不等下一分钟的 tick。
+ * 由 IPC 层注册，避免本模块静态依赖回传宿主。
+ */
+let acceptedListener: (() => void) | null = null;
+
+export function setProposalAcceptedListener(listener: (() => void) | null): void {
+  acceptedListener = listener;
+}
+
+function notifyProposalAccepted(): void {
+  try {
+    acceptedListener?.();
+  } catch {
+    // 投递失败不影响执行
+  }
+}
+
 function stringParam(params: Record<string, unknown>, key: string): string | undefined {
   const value = params[key];
   if (typeof value !== 'string') return undefined;
@@ -577,7 +595,7 @@ function afterParam(params: Record<string, unknown>): string[] | undefined {
 }
 
 type DispatchOutcome =
-  | { kind: 'proposal'; proposalId: string }
+  | ({ kind: 'proposal' } & SavedProposal)
   | { kind: 'created'; conversationId: string }
   | { kind: 'pending'; pendingId: string }
   | { kind: 'failed'; error: string };
@@ -605,11 +623,10 @@ async function saveProposal(
   ports: SecretaryDispatchPorts,
   secretaryConversationId: string,
   draft: DispatchDraft
-): Promise<string> {
+): Promise<SavedProposal> {
   const now = ports.now();
-  const id = ports.newId();
   const proposal: SecretaryProposal = {
-    id,
+    id: ports.newId(),
     secretaryConversationId,
     createdAt: now,
     updatedAt: now,
@@ -618,10 +635,11 @@ async function saveProposal(
     draft,
   };
   const file = ports.dispatchFile();
-  file.proposals[id] = proposal;
+  const { saved, changed } = saveProposalRecord(file, proposal);
+  if (!changed) return saved;
   ports.saveDispatch(file);
   notifySecretaryChanged();
-  return id;
+  return saved;
 }
 
 /**
@@ -630,26 +648,26 @@ async function saveProposal(
  */
 export function saveCleanupProposal(
   items: CleanupItem[],
-  secretaryConversationId: string | null
-): string {
+  secretaryConversationId: string | null,
+  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'saveDispatch'> = secretaryDispatchPorts
+): SavedProposal {
   if (!secretaryConversationId) throw new Error('cleanup needs a secretary conversation');
   const now = Date.now();
-  const id = randomUUID();
-  const draft: CleanupDraft = { items };
   const proposal: SecretaryProposal = {
-    id,
+    id: randomUUID(),
     secretaryConversationId,
     createdAt: now,
     updatedAt: now,
     status: 'pending',
     kind: 'cleanup',
-    draft,
+    draft: { items },
   };
-  const file = secretaryDispatchPorts.dispatchFile();
-  file.proposals[id] = proposal;
-  secretaryDispatchPorts.saveDispatch(file);
+  const file = ports.dispatchFile();
+  const { saved, changed } = saveProposalRecord(file, proposal);
+  if (!changed) return saved;
+  ports.saveDispatch(file);
   notifySecretaryChanged();
-  return id;
+  return saved;
 }
 
 async function executeDispatch(
@@ -793,8 +811,8 @@ async function dispatchDraft(
   const base = await checkBase(ports, validated.draft);
   if (!base.ok) return { kind: 'failed', error: base.error };
   if (dispatchDecision(profile, wanted.projectId) === 'confirm') {
-    const proposalId = await saveProposal(ports, secretaryConversationId, validated.draft);
-    const confirmOutcome: DispatchOutcome = { kind: 'proposal', proposalId };
+    const saved = await saveProposal(ports, secretaryConversationId, validated.draft);
+    const confirmOutcome: DispatchOutcome = { kind: 'proposal', ...saved };
     noteFollow(ports, secretaryConversationId, validated.draft, confirmOutcome);
     return confirmOutcome;
   }
@@ -891,11 +909,17 @@ function outcomeResult(
       op,
       targetId: outcome.proposalId,
       ok: true,
-      detail: `awaiting_confirmation${modelDetail(model)}`,
+      detail: `awaiting_confirmation${outcome.reused ? ' (existing)' : ''}${modelDetail(model)}`,
     });
     return {
       ok: true,
-      result: { status: 'awaiting_confirmation', proposalId: outcome.proposalId },
+      result: {
+        status: 'awaiting_confirmation',
+        proposalId: outcome.proposalId,
+        ...(outcome.reused ? { reused: true } : {}),
+        ...(outcome.otherPendingId ? { otherPendingId: outcome.otherPendingId } : {}),
+        ...(outcome.note ? { note: outcome.note } : {}),
+      },
     };
   }
   const model = file.dispatched[outcome.conversationId]?.model;
@@ -1976,32 +2000,25 @@ export function createSecretaryDispatchHandlers(
       const checked = await checkTakeover(ports, conversationId);
       if (!checked.ok) return auditFailure(ports, ctx, op, checked.error, conversationId);
       const file = ports.dispatchFile();
-      const pending = Object.values(file.proposals).find(
-        (proposal) =>
-          proposal.kind === 'takeover' &&
-          proposal.status === 'pending' &&
-          proposal.draft.conversationId === conversationId
-      );
-      // 同一会话已有一张待确认的卡就复用，不再叠一张
-      const proposalId = pending?.id ?? ports.newId();
       const now = ports.now();
-      if (!pending) {
-        const title = typeof checked.row.title === 'string' ? checked.row.title.trim() : '';
-        const reason = stringParam(params, 'reason');
-        file.proposals[proposalId] = {
-          id: proposalId,
-          secretaryConversationId: ctx.secretaryConversationId,
-          createdAt: now,
-          updatedAt: now,
-          status: 'pending',
-          kind: 'takeover',
-          draft: {
-            conversationId,
-            projectId: checked.conversation.projectId,
-            ...(title ? { title } : {}),
-            ...(reason ? { reason: reason.slice(0, 500) } : {}),
-          },
-        };
+      const title = typeof checked.row.title === 'string' ? checked.row.title.trim() : '';
+      const reason = stringParam(params, 'reason');
+      // 同一会话已有一张待确认的卡就复用，不再叠一张
+      const { saved, changed } = saveProposalRecord(file, {
+        id: ports.newId(),
+        secretaryConversationId: ctx.secretaryConversationId,
+        createdAt: now,
+        updatedAt: now,
+        status: 'pending',
+        kind: 'takeover',
+        draft: {
+          conversationId,
+          projectId: checked.conversation.projectId,
+          ...(title ? { title } : {}),
+          ...(reason ? { reason: reason.slice(0, 500) } : {}),
+        },
+      });
+      if (changed) {
         ports.saveDispatch(file);
         notifySecretaryChanged();
       }
@@ -2009,11 +2026,19 @@ export function createSecretaryDispatchHandlers(
         at: now,
         secretaryConversationId: ctx.secretaryConversationId,
         op,
-        targetId: proposalId,
+        targetId: saved.proposalId,
         ok: true,
-        detail: pending ? 'awaiting_confirmation (existing)' : 'awaiting_confirmation',
+        detail: saved.reused ? 'awaiting_confirmation (existing)' : 'awaiting_confirmation',
       });
-      return { ok: true, result: { status: 'awaiting_confirmation', proposalId } };
+      return {
+        ok: true,
+        result: {
+          status: 'awaiting_confirmation',
+          proposalId: saved.proposalId,
+          ...(saved.reused ? { reused: true } : {}),
+          ...(saved.note ? { note: saved.note } : {}),
+        },
+      };
     },
 
     async todo_item_add(params, ctx) {
@@ -2228,7 +2253,9 @@ export async function resolveProposal(
   if (!transitioned.changed) return { ok: false, error: 'not-pending' };
 
   file.proposals[proposalId] = transitioned.proposal;
-  if (action === 'reject') file.outbox.push(proposalUpdate(transitioned.proposal, now));
+  // 点了就推：确认先推「已确认，正在执行」，取消直接推「已取消」。
+  // 等执行完再推，秘书会以为卡还没被点，于是又提一张。
+  file.outbox = enqueueUpdate(file.outbox, proposalUpdate(transitioned.proposal, now));
   ports.saveDispatch(file);
   ports.audit({
     at: now,
@@ -2238,12 +2265,14 @@ export async function resolveProposal(
     ok: true,
     ...(action === 'confirm' ? { detail: 'accepted' } : {}),
   });
+  notifySecretaryChanged();
   if (action === 'reject') {
     // 卡被拒了：关注列表里那条待确认的派发不会再有结果
     ports.unfollow?.(proposalId);
-    notifySecretaryChanged();
     return { ok: true, proposal: transitioned.proposal };
   }
+  // 立刻投递，不等下一分钟的 tick
+  notifyProposalAccepted();
   // 档案提案走同一套状态机，确认后才写入；拒绝不写
   if (transitioned.proposal.kind === 'profile') {
     const applied = await ports.applyProfile(

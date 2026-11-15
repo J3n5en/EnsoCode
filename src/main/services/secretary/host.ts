@@ -125,6 +125,8 @@ export interface SecretaryHost {
   /** worker 事件入口：driver 与状态发布共用同一次 observe 结果 */
   onAgentEvent(event: RendererAgentEvent, changes: readonly SessionStatusPayload[]): void;
   tick(now?: number): void;
+  /** 立刻投递 outbox：用户刚点了确认，别等下一分钟的 tick */
+  flushNow(now?: number): void;
   recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
   recover(): void;
   start(): void;
@@ -1000,6 +1002,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (!changed) return;
       ports.save(file);
       ports.publish();
+      flush(now);
+    },
+
+    flushNow(now = ports.now()) {
+      if (!ports.enabled()) return;
       flush(now);
     },
 
