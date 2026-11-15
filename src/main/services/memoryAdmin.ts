@@ -19,6 +19,7 @@ import { openMemoryDb, vecTableExists } from './memory/db';
 import { type DistillJob, listDistillJobs } from './memory/distill';
 import { buildFtsMatchQuery } from './memory/fts';
 import { countFailedKgJobs, type KgJob, listEntityNames, listKgJobs } from './memory/kg';
+import { getHitStats, staleCutoffIso } from './memory/maintenance';
 import { getReembedJob, type ReembedJob } from './memory/reembed';
 import { searchMemories } from './memory/search';
 import {
@@ -58,6 +59,8 @@ function toListItem(memory: Memory): MemoryListItem {
     createdAt: memory.createdAt,
     updatedAt: memory.updatedAt,
     appearances: memory.appearances,
+    lastHitAt: memory.lastHitAt,
+    hitCount: memory.hitCount,
   };
 }
 
@@ -89,6 +92,10 @@ export function listMemoriesForAdmin(
   if (query.unitType !== undefined) {
     conditions.push('m.unit_type = ?');
     params.push(query.unitType);
+  }
+  if (query.staleDays !== undefined) {
+    conditions.push('COALESCE(m.last_hit_at, m.created_at) < ?');
+    params.push(staleCutoffIso(query.staleDays));
   }
   const text = query.query?.trim() ?? '';
   if (text) {
@@ -150,10 +157,12 @@ export async function searchMemoriesForAdmin(
     mode: deep ? 'deep' : 'fast',
     assist: deep ? assist : undefined,
   });
-  // unitType 在语义通道里没有下推，只能在结果上后过滤
+  // unitType / staleDays 在语义通道里没有下推，只能在结果上后过滤
+  const staleCutoff = query.staleDays === undefined ? null : staleCutoffIso(query.staleDays);
   const items = hits
     .map((hit) => toListItem(hit.memory))
-    .filter((item) => query.unitType === undefined || item.unitType === query.unitType);
+    .filter((item) => query.unitType === undefined || item.unitType === query.unitType)
+    .filter((item) => staleCutoff === null || (item.lastHitAt ?? item.createdAt) < staleCutoff);
   return {
     items,
     total: items.length,
@@ -282,7 +291,7 @@ export function reviewEvolvesEdge(
   return edge ? toEvolvesDto(edge) : null;
 }
 
-export function getMemoryStats(db: Database.Database): MemoryStats {
+export function getMemoryStats(db: Database.Database, now: Date = new Date()): MemoryStats {
   const aggregate = db
     .prepare(
       `SELECT count(*) AS total,
@@ -304,6 +313,7 @@ export function getMemoryStats(db: Database.Database): MemoryStats {
   try {
     databaseBytes = statSync(db.name).size;
   } catch {}
+  const hits = getHitStats(db, now);
   return {
     total: aggregate.total,
     bySpace: Object.fromEntries(spaces.map((row) => [row.spaceId, row.total])),
@@ -312,6 +322,8 @@ export function getMemoryStats(db: Database.Database): MemoryStats {
     entities,
     embedded: aggregate.embedded ?? 0,
     databaseBytes,
+    neverHit: hits.neverHit,
+    addedLast7Days: hits.addedLast7Days,
   };
 }
 
