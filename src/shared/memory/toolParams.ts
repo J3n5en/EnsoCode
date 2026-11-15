@@ -56,6 +56,8 @@ export interface MemoryCaptureRequest {
   /** 与 evolvesRelation 成对：声明与已有记忆的版本关系 */
   evolvesFromId?: string;
   evolvesRelation?: EvolvesRelation;
+  /** 与 evolvesRelation 一起给：一句话说明为什么这样判定，矛盾的审阅界面会原样展示 */
+  evolvesReason?: string;
 }
 
 /** 结晶：space 不由模型指定，Main 从源记忆推导（源必须同 space 且对本会话可见） */
@@ -137,6 +139,7 @@ export function normalizeMemoryCaptureParams(raw: unknown): unknown {
   const force = record.force === true || record.force === 'true';
   const evolvesFromId = optionalText(record.evolvesFromId);
   const evolvesRelation = optionalText(record.evolvesRelation)?.toLowerCase();
+  const evolvesReason = optionalText(record.evolvesReason);
   // 部分调用端会填齐可选字段：空目标旁的合法关系枚举只是占位，须一起去掉。
   const emptyEvolutionTarget =
     typeof record.evolvesFromId === 'string' &&
@@ -157,6 +160,8 @@ export function normalizeMemoryCaptureParams(raw: unknown): unknown {
     ...(force ? { force } : {}),
     ...(evolvesFromId ? { evolvesFromId } : {}),
     ...(evolvesRelation && !emptyEvolutionTarget ? { evolvesRelation } : {}),
+    // 理由只跟着关系走：没有关系的理由没有意义，别写进库
+    ...(evolvesReason && evolvesRelation && !emptyEvolutionTarget ? { evolvesReason } : {}),
   };
 }
 
@@ -295,6 +300,7 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
       'force',
       'evolvesFromId',
       'evolvesRelation',
+      'evolvesReason',
     ]) ||
     typeof record.content !== 'string' ||
     !record.content.trim() ||
@@ -308,6 +314,7 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
     (record.eventStart !== undefined && typeof record.eventStart !== 'string') ||
     (record.eventEnd !== undefined && typeof record.eventEnd !== 'string') ||
     (record.force !== undefined && typeof record.force !== 'boolean') ||
+    (record.evolvesReason !== undefined && typeof record.evolvesReason !== 'string') ||
     // 关系与目标必须成对，关系限闭集
     (record.evolvesFromId === undefined) !== (record.evolvesRelation === undefined) ||
     (record.evolvesFromId !== undefined &&
@@ -337,6 +344,9 @@ export function parseMemoryCaptureRequest(value: unknown): MemoryCaptureRequest 
     ...(record.force !== undefined ? { force: record.force } : {}),
     ...(typeof record.evolvesFromId === 'string' && isEvolvesRelation(record.evolvesRelation)
       ? { evolvesFromId: record.evolvesFromId, evolvesRelation: record.evolvesRelation }
+      : {}),
+    ...(typeof record.evolvesReason === 'string' && record.evolvesReason.trim()
+      ? { evolvesReason: record.evolvesReason.trim() }
       : {}),
   };
 }

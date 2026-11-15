@@ -141,6 +141,12 @@ describe('createMemoryTools', () => {
         { content: 'c', force: true, evolvesFromId: 'm1', evolvesRelation: 'challenges' },
         {
           content: 'c',
+          evolvesFromId: 'm1',
+          evolvesRelation: 'challenges',
+          evolvesReason: '两条结论相反',
+        },
+        {
+          content: 'c',
           title: 't',
           unitType: 'preference',
           importance: 0.6,

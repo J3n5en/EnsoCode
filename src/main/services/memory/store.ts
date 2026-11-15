@@ -579,6 +579,14 @@ export function listEvolves(db: Database.Database, memoryId: string): Evolves[] 
   return rows.map(rowToEvolves);
 }
 
+/** 全部待审阅的边（review_state = 'pending'），按创建时间排序 */
+export function listPendingEvolvesEdges(db: Database.Database): Evolves[] {
+  const rows = db
+    .prepare("SELECT * FROM evolves WHERE review_state = 'pending' ORDER BY created_at ASC, id ASC")
+    .all() as EvolvesRow[];
+  return rows.map(rowToEvolves);
+}
+
 /** 审阅只改 review_state / reviewed_at；拒绝 challenge 不删关系也不动任何 is_latest */
 export function reviewEvolves(
   db: Database.Database,
