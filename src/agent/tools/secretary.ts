@@ -105,6 +105,10 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     booleans: ['clearQueue'],
     aliases: { sessionId: 'conversationId', id: 'conversationId' },
   },
+  session_answer: {
+    keys: ['conversationId', 'askId', 'answer'],
+    aliases: { sessionId: 'conversationId', id: 'askId', requestId: 'askId' },
+  },
   session_takeover_propose: {
     keys: ['conversationId', 'reason'],
     aliases: { sessionId: 'conversationId', id: 'conversationId', why: 'reason' },
@@ -462,6 +466,23 @@ const SCHEMAS: Record<
         },
       },
       ['conversationId']
+    ),
+  },
+  session_answer: {
+    description:
+      'Answer a question a dispatched or tracked session is waiting on (ask_user). The question reaches you as an ask-relay session update with its askId; the session continues with your answer as soon as you call this. Answer with one of the options or with free text. Decide yourself when the question is a technical detail, a choice between equivalent implementations, or something you have enough context for, and say why in your reply. Ask the user with your own ask_user first when it is irreversible, touches their data, accounts or money, pushes or publishes, merges to main, deletes branches, or is a product or preference call — then pass their answer here unchanged. Whoever answers first wins: if the user answered in that session directly, or the question timed out, this is refused and you must not retry.',
+    parameters: object(
+      {
+        conversationId: id('Session id from the ask-relay update'),
+        askId: id('askId from the ask-relay update'),
+        answer: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4000,
+          description: 'The answer, either one of the options or free text',
+        },
+      },
+      ['conversationId', 'askId', 'answer']
     ),
   },
   session_takeover_propose: {

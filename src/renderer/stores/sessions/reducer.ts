@@ -633,12 +633,34 @@ export function applyAgentEvent(
         lastOutputAt: now,
         lastSeq: event.seq,
       };
-    case 'ask-resolved':
+    case 'ask-resolved': {
+      const settled = current.pendingAsks.find((ask) => ask.requestId === event.requestId);
+      // 转交给秘书的提问收尾后留一行状态（「X 已回答：…」/「超时未答」），这一轮结束再清掉
+      if (settled?.relay && event.by) {
+        const by = event.by;
+        return {
+          ...current,
+          pendingAsks: current.pendingAsks.map((ask) =>
+            ask.requestId === event.requestId
+              ? {
+                  ...ask,
+                  answered: {
+                    by,
+                    ...(event.name ? { name: event.name } : {}),
+                    ...(event.answer ? { answer: event.answer } : {}),
+                  },
+                }
+              : ask
+          ),
+          lastSeq: event.seq,
+        };
+      }
       return {
         ...current,
         pendingAsks: current.pendingAsks.filter((ask) => ask.requestId !== event.requestId),
         lastSeq: event.seq,
       };
+    }
     case 'subagent-update': {
       const exists = current.subagents.some((agent) => agent.id === event.agent.id);
       return {
@@ -704,6 +726,8 @@ export function applyAgentEvent(
     case 'turn-completed':
       return {
         ...settleTiming(current, now),
+        // 转交提问的「已回答」只是这一轮的状态，轮次结束就收掉
+        pendingAsks: current.pendingAsks.filter((ask) => !ask.answered),
         retry: undefined,
         toolOutputs: {},
         toolStartedAt: {},
@@ -741,6 +765,7 @@ export function applyAgentEvent(
     case 'turn-failed':
       return {
         ...settleTiming(current, now),
+        pendingAsks: current.pendingAsks.filter((ask) => !ask.answered),
         // 从未提交给 pi 的消息：乐观回显不会被任何 upsert 确认，留着就是“看起来发出去了”的假象。
         // worker 按会话串行处理 prompt，失败回流与发送同序：收回最早一条未确认消息，而非尾部
         ...(event.undelivered ? { messages: dropOldestOptimistic(current.messages) } : {}),

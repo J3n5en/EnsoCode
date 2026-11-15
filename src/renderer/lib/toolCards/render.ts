@@ -49,6 +49,7 @@ const GROUP_TITLES: Record<string, string> = {
   todo_item_add: 'Added {{count}} to-dos',
   session_send: 'Sent {{count}} messages',
   session_stop: 'Stopped {{count}} sessions',
+  session_answer: 'Answered {{count}} questions',
   session_create: 'Created {{count}} sessions',
   todo_item_dispatch: 'Dispatched {{count}} to-dos',
   schedule_add: 'Added {{count}} schedules',
@@ -314,6 +315,30 @@ register('session_send', (call, ctx) => {
   const session = id ? ({ kind: 'session', id, label: sessionLabel(id, ctx) } as const) : null;
   if (session) blocks.unshift(session);
   return view(call, title, blocks, status);
+});
+
+register('session_answer', (call, ctx) => {
+  const args = rec(call.args);
+  const output = rec(parseJson(call.output));
+  const id = str(args?.conversationId);
+  const answer = str(args?.answer);
+  const error = errorText(call, ctx);
+  return view(
+    call,
+    ctx.t('Answer {{title}}', { title: sessionLabel(id, ctx) }),
+    [
+      ...(id ? [{ kind: 'session' as const, id, label: sessionLabel(id, ctx) }] : []),
+      ...(answer ? [{ kind: 'note' as const, text: answer }] : []),
+      ...(error ? [{ kind: 'error' as const, text: error }] : []),
+    ],
+    error
+      ? { tone: 'error', label: ctx.t('Refused') }
+      : output?.status === 'answered'
+        ? { tone: 'ok', label: ctx.t('Answered') }
+        : call.state === 'running'
+          ? { tone: 'neutral', label: ctx.t('Answering…') }
+          : undefined
+  );
 });
 
 register('session_stop', (call, ctx) => {

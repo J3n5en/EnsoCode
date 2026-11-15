@@ -1224,6 +1224,7 @@ export function spawnSession(
     ...(pluginEvents ? { pluginEvents } : {}),
     ...(presetApplied.approvalMode ? { approvalMode: presetApplied.approvalMode } : {}),
     ...(request.autoRejectApprovals === true ? { autoRejectApprovals: true } : {}),
+    ...(request.askRelay ? { askRelay: request.askRelay } : {}),
     ...(request.planMode !== undefined ? { planMode: request.planMode } : {}),
     ...approvalReviewerSpawnFields(approvalReviewerSource),
     ...(agentTypes.length > 0 ? { agentTypes } : {}),
@@ -2058,9 +2059,30 @@ export function respondApproval(
 export function respondAsk(
   identity: SessionIdentity,
   requestId: string,
-  answer: string
+  answer: string,
+  /** 谁答的：缺省是用户亲手答；relay 是秘书代答，原会话据此显示「X 已回答」 */
+  meta?: { by?: 'user' | 'relay'; name?: string }
 ): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'ask-respond', identity, requestId, answer });
+  return sendAgentCommand({
+    type: 'ask-respond',
+    identity,
+    requestId,
+    answer,
+    ...(meta?.by ? { by: meta.by } : {}),
+    ...(meta?.name ? { name: meta.name } : {}),
+  });
+}
+
+/** 秘书派出/跟踪的会话：把 ask_user 转给它；relay 缺省表示恢复成直接问用户 */
+export function setSessionAskRelay(
+  identity: SessionIdentity,
+  relay?: { name: string }
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({
+    type: 'set-ask-relay',
+    identity,
+    ...(relay ? { relay } : {}),
+  });
 }
 
 export function compactSession(

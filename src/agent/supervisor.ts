@@ -1801,7 +1801,8 @@ export class SessionSupervisor {
           command.botDiscussMode,
           command.instanceId,
           command.workflowPresetFiles,
-          command.secretaryTools
+          command.secretaryTools,
+          command.askRelay
         );
         return;
       case 'spawn-child':
@@ -2083,6 +2084,12 @@ export class SessionSupervisor {
       case 'set-plan-mode':
         this.must(command.identity).plan?.setActive(command.active);
         return;
+      case 'set-ask-relay': {
+        const managed = this.must(command.identity);
+        if (command.relay) managed.asks.relay = command.relay;
+        else delete managed.asks.relay;
+        return;
+      }
       case 'plan-respond': {
         const managed = this.must(command.identity);
         const plan = managed.plan;
@@ -2102,7 +2109,10 @@ export class SessionSupervisor {
         );
         return;
       case 'ask-respond':
-        this.must(command.identity).asks.respond(command.requestId, command.answer);
+        this.must(command.identity).asks.respond(command.requestId, command.answer, {
+          ...(command.by ? { by: command.by } : {}),
+          ...(command.name ? { name: command.name } : {}),
+        });
         return;
       case 'browser-result': {
         const managed = this.must(command.identity);
@@ -2436,7 +2446,8 @@ export class SessionSupervisor {
     botDiscussMode = false,
     instanceId?: string,
     workflowPresetFiles: readonly string[] = [],
-    secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = []
+    secretaryToolDescriptors: readonly SecretaryToolDescriptor[] = [],
+    askRelay?: { name: string }
   ): Promise<void> {
     const sessionId = identity.sessionId;
     const sessionEditMode = resolveEditMode(requestedEditMode, hashlineEditEnabled);
@@ -3094,6 +3105,8 @@ export class SessionSupervisor {
     });
     const askManager = this.createAskManager(identity, gate.humanTimeoutMs);
     askManager.autoReject = gate.autoReject;
+    // 秘书派出/跟踪的会话：ask_user 先转给秘书，而不是按无人值守直接拒绝
+    if (askRelay) askManager.relay = askRelay;
     // 可热切的内置工具始终注册；激活与否由 applyBuiltinTools 按当前设置决定
     const builtinGroups = new Map<string, string[]>();
     const builtin = (id: string, tools: Def[]): Def[] => {
@@ -3492,7 +3505,7 @@ export class SessionSupervisor {
           });
         }
       },
-      (requestId) => {
+      (requestId, resolution) => {
         const managed = this.sessions.get(identity.sessionId);
         if (managed && isSameGeneration(managed.identity, identity)) {
           this.options.emit({
@@ -3500,6 +3513,9 @@ export class SessionSupervisor {
             identity: managed.identity,
             seq: ++managed.seq,
             requestId,
+            ...(resolution?.by ? { by: resolution.by } : {}),
+            ...(resolution?.answer ? { answer: resolution.answer } : {}),
+            ...(resolution?.name ? { name: resolution.name } : {}),
           });
         }
       },

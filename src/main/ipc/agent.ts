@@ -108,6 +108,7 @@ import {
   setAgentEventListener,
   setPinnedSessions,
   setSessionApprovalMode,
+  setSessionAskRelay,
   setSessionModel,
   setSessionReasoning,
   setSessionThinking,
@@ -653,6 +654,28 @@ export function isRootSessionAlive(sessionId: string): boolean {
   return agentSessionIndex.isAlive(sessionId);
 }
 
+/** 秘书代答派出/接管会话的提问：原会话据此显示「X 已回答」，秘书那边的转交同时失效 */
+export function answerAskFromMain(
+  sessionId: string,
+  requestId: string,
+  answer: string,
+  name: string
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return respondAsk(identity, requestId, answer, { by: 'relay', name });
+}
+
+/** 秘书开始/结束跟踪一个会话：把 ask_user 转给它，撤销时恢复成直接问用户 */
+export function setAskRelayFromMain(
+  sessionId: string,
+  relay?: { name: string }
+): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return setSessionAskRelay(identity, relay);
+}
+
 /** 档案改了模型：活着的根会话当场换，下次 spawn 读会话行 */
 export async function setRootSessionModelFromMain(
   sessionId: string,
@@ -692,7 +715,17 @@ export async function resumeRootFromMain(sessionId: string): Promise<AgentAction
   });
   if (plan.type === 'snapshot') return { ok: true };
   if (plan.type === 'skip') return { ok: false, error: plan.reason };
-  return spawnRootFromMain(plan.request);
+  // 秘书跟踪中的会话恢复后仍要把 ask_user 转给秘书，否则悄悄变回直接问用户
+  const relay = await secretaryRelayFor(sessionId);
+  return spawnRootFromMain({ ...plan.request, ...(relay ? { askRelay: relay } : {}) });
+}
+
+/** 秘书派出/跟踪的会话：恢复 worker 时一起带上转交开关 */
+async function secretaryRelayFor(sessionId: string): Promise<{ name: string } | undefined> {
+  const { secretaryDispatchPorts } = await import('../services/secretary/dispatch');
+  if (!secretaryDispatchPorts.dispatchFile().dispatched[sessionId]) return undefined;
+  const name = (await secretaryDispatchPorts.profile())?.name.trim();
+  return name ? { name } : undefined;
 }
 
 function persistedConversationForResume(
@@ -736,6 +769,7 @@ function spawnRequestKeys(): readonly (keyof AgentSpawnRequest)[] {
     'presetId',
     'approvalMode',
     'autoRejectApprovals',
+    'askRelay',
     'planMode',
   ] as const;
   // 少登记字段时这里编译失败，而不是等到真机上整条请求被拒
@@ -772,6 +806,8 @@ function parseSpawnRequest(value: unknown): AgentSpawnRequest | null {
       !APPROVAL_MODES.includes(request.approvalMode as ApprovalMode)) ||
     (request.autoRejectApprovals !== undefined &&
       typeof request.autoRejectApprovals !== 'boolean') ||
+    (request.askRelay !== undefined &&
+      (!asRecord(request.askRelay) || !isNonEmptyString(asRecord(request.askRelay)?.name))) ||
     (request.planMode !== undefined && typeof request.planMode !== 'boolean')
   ) {
     return null;

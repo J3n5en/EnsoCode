@@ -7,6 +7,7 @@ import type {
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryProfileDraft,
+  SecretaryRelayAsk,
   SecretarySkillDraft,
   SecretaryTodo,
   SecretaryToolDraft,
@@ -126,6 +127,8 @@ interface Harness {
   baseFacts: DispatchBaseFacts;
   baseFactsCalls: { projectPath: string; checkout?: string; baseRef?: string; branch?: string }[];
   forgotten: string[];
+  answers: { conversationId: string; askId: string; answer: string; name: string }[];
+  relays: { conversationId: string; relay: { name: string } | null }[];
 }
 
 function harness(
@@ -175,6 +178,8 @@ function harness(
     },
     baseFactsCalls: [],
     forgotten: [],
+    answers: [],
+    relays: [],
     ports: undefined as unknown as SecretaryDispatchPorts,
     handlers: undefined as unknown as ReturnType<typeof createSecretaryDispatchHandlers>,
   };
@@ -260,6 +265,13 @@ function harness(
     forget: (conversationId) => {
       h.forgotten.push(conversationId);
     },
+    answer: async (conversationId, askId, answer, name) => {
+      h.answers.push({ conversationId, askId, answer, name });
+      return { ok: true };
+    },
+    relayAsk: (conversationId, relay) => {
+      h.relays.push({ conversationId, relay });
+    },
   };
   h.handlers = createSecretaryDispatchHandlers(h.ports);
   return h;
@@ -331,6 +343,7 @@ describe('session_create', () => {
         secretaryOrigin: { secretaryConversationId: 'sec-1' },
         muted: true,
         unattended: true,
+        askRelay: { name: h.profileValue?.name },
       },
     ]);
     expect(h.file.dispatched['new-1']).toEqual({
@@ -882,6 +895,124 @@ describe('session_stop', () => {
   });
 });
 
+describe('session_answer', () => {
+  const relayFile = (overrides: Partial<SecretaryRelayAsk> = {}): SecretaryDispatchFile => ({
+    ...dispatchedFile(),
+    relays: {
+      'c1|ask-1': {
+        conversationId: 'c1',
+        askId: 'ask-1',
+        question: '用哪个方案？',
+        options: ['A', 'B'],
+        at: 900,
+        status: 'pending',
+        ...overrides,
+      },
+    },
+  });
+
+  it('秘书代答：答案送进原会话，记录收尾并审计', async () => {
+    const h = harness({ file: relayFile() });
+    const result = await call(h.handlers.session_answer, {
+      conversationId: 'c1',
+      askId: 'ask-1',
+      answer: 'A',
+    });
+    expect(result).toEqual({
+      ok: true,
+      result: { status: 'answered', conversationId: 'c1', askId: 'ask-1' },
+    });
+    expect(h.answers).toEqual([
+      { conversationId: 'c1', askId: 'ask-1', answer: 'A', name: h.profileValue?.name },
+    ]);
+    expect(h.file.relays?.['c1|ask-1']).toMatchObject({
+      status: 'answered',
+      answer: 'A',
+      answeredAt: NOW,
+    });
+    expect(h.audits).toMatchObject([
+      { op: 'session_answer', targetId: 'c1', ok: true, detail: 'ask-1' },
+    ]);
+  });
+
+  it('用户已经直接答过：拒绝，不再送答案', async () => {
+    const h = harness({ file: relayFile({ status: 'user-answered', answer: 'B' }) });
+    const result = await call(h.handlers.session_answer, {
+      conversationId: 'c1',
+      askId: 'ask-1',
+      answer: 'A',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('the user answered it directly');
+    expect(h.answers).toEqual([]);
+  });
+
+  it('没有这个提问时拒绝', async () => {
+    const h = harness({ file: relayFile() });
+    const result = await call(h.handlers.session_answer, {
+      conversationId: 'c1',
+      askId: 'ask-9',
+      answer: 'A',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('not-found');
+    expect(h.answers).toEqual([]);
+  });
+
+  it('已经超时：按超时收尾并拒绝，不再送答案', async () => {
+    const h = harness({ file: relayFile({ expiresAt: NOW - 1 }) });
+    const result = await call(h.handlers.session_answer, {
+      conversationId: 'c1',
+      askId: 'ask-1',
+      answer: 'A',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('timed-out');
+    expect(h.file.relays?.['c1|ask-1'].status).toBe('timed-out');
+    expect(h.file.outbox).toMatchObject([{ kind: 'ask-relay', status: 'timed-out' }]);
+    expect(h.answers).toEqual([]);
+  });
+
+  it('不是秘书管着的会话：拒绝', async () => {
+    const h = harness({
+      file: relayFile(),
+      conversations: [rootConversation('c1'), rootConversation('c2')],
+    });
+    const result = await call(h.handlers.session_answer, {
+      conversationId: 'c2',
+      askId: 'ask-1',
+      answer: 'A',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('not-operable');
+    expect(h.answers).toEqual([]);
+  });
+
+  it.each([
+    ['缺 askId', { conversationId: 'c1', answer: 'A' }, 'askId'],
+    ['缺 answer', { conversationId: 'c1', askId: 'ask-1' }, 'answer'],
+  ])('参数不合法时指出字段：%s', async (_label, params, field) => {
+    const h = harness({ file: relayFile() });
+    const result = await call(h.handlers.session_answer, params);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain(field);
+    expect(h.answers).toEqual([]);
+  });
+
+  it('派出的会话一律把 ask_user 转给秘书', async () => {
+    const h = harness({
+      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+    });
+    await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(h.created[0]).toMatchObject({ askRelay: { name: h.profileValue?.name } });
+  });
+});
+
 describe('接管', () => {
   const takeoverHarness = (options: Parameters<typeof harness>[0] = {}) =>
     harness({
@@ -941,6 +1072,15 @@ describe('接管', () => {
         error,
       });
     }
+  });
+
+  it('授权后把 ask_user 转给秘书，撤销后恢复成直接问用户', async () => {
+    const h = takeoverHarness();
+    await propose(h);
+    expect(await resolveProposal(h.ports, 'id-1', 'confirm')).toMatchObject({ ok: true });
+    expect(h.relays).toEqual([{ conversationId: 'c1', relay: { name: h.profileValue?.name } }]);
+    expect(revokeTakeover(h.ports, 'c1', 'session')).toEqual({ ok: true });
+    expect(h.relays.at(-1)).toEqual({ conversationId: 'c1', relay: null });
   });
 
   it('用户确认后授权：秘书能发消息、能停止，状态进工作台与接管清单', async () => {

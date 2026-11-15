@@ -1,10 +1,21 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { ASK_TIMEOUT_ERROR } from '@shared/humanRequestTimeout';
-import type { AskRequestInfo } from '@shared/types/agent';
+import type { AskAnswerBy, AskRequestInfo } from '@shared/types/agent';
+
+/** 转交给秘书的提问等多久：秘书一直不答就按默认值收尾，没有默认值按无人值守拒绝 */
+export const ASK_RELAY_TIMEOUT_MS = 30 * 60_000;
+
+/** 提问收尾的信息：原会话据此显示「X 已回答」，Main 据此把结果记到转交记录上 */
+export interface AskResolution {
+  by: AskAnswerBy;
+  answer?: string;
+  /** 秘书代答时的名字 */
+  name?: string;
+}
 
 interface PendingAsk {
   info: AskRequestInfo;
-  resolve(answer: string): void;
+  resolve(answer: string, resolution?: AskResolution): void;
   reject(error: Error): void;
   expire(): void;
 }
@@ -23,10 +34,15 @@ export class AskManager {
   private readonly pending = new Map<string, PendingAsk>();
   /** 无人值守：没人能回答，提问前就失败，不占卡片也不干等超时 */
   autoReject = false;
+  /**
+   * 秘书派出/跟踪的会话：提问不自动拒绝，也不在原会话里弹给用户，
+   * 而是挂起并转给秘书；秘书答不了再由它自己问用户。
+   */
+  relay?: { name: string };
 
   constructor(
     private readonly onRequest: (info: AskRequestInfo) => void,
-    private readonly onResolved: (requestId: string) => void,
+    private readonly onResolved: (requestId: string, resolution?: AskResolution) => void,
     /** 等真人回答的时限：提问带 expiresAt，由 Main 到期发 request-timeout */
     readonly humanTimeoutMs?: number
   ) {}
@@ -36,7 +52,10 @@ export class AskManager {
     options?: string[],
     opts: { signal?: AbortSignal; timeoutMs?: number; defaultAnswer?: string } = {}
   ): Promise<string> {
-    if (this.autoReject) return Promise.reject(new Error(ASK_NO_USER_ERROR));
+    const relay = this.relay;
+    if (this.autoReject && !relay) return Promise.reject(new Error(ASK_NO_USER_ERROR));
+    // 转交的提问一定有超时：秘书不回也不能把会话永久卡住
+    const timeoutMs = opts.timeoutMs ?? (relay ? ASK_RELAY_TIMEOUT_MS : undefined);
     const requestId = `ask-${++counter}-${Date.now().toString(36)}`;
     const info: AskRequestInfo = {
       requestId,
@@ -45,52 +64,67 @@ export class AskManager {
       ...(opts.defaultAnswer && options?.includes(opts.defaultAnswer)
         ? { recommended: opts.defaultAnswer }
         : {}),
-      ...(this.humanTimeoutMs ? { expiresAt: Date.now() + this.humanTimeoutMs } : {}),
+      ...(relay ? { relay } : {}),
+      ...(timeoutMs
+        ? { expiresAt: Date.now() + timeoutMs }
+        : this.humanTimeoutMs
+          ? { expiresAt: Date.now() + this.humanTimeoutMs }
+          : {}),
     };
     return new Promise<string>((resolve, reject) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const settle = (fn: () => void) => {
+      const settle = (fn: () => void, resolution?: AskResolution) => {
         if (timer) clearTimeout(timer);
         this.pending.delete(requestId);
-        this.onResolved(requestId);
+        this.onResolved(requestId, resolution);
         fn();
       };
       this.pending.set(requestId, {
         info,
-        resolve: (answer) => settle(() => resolve(answer)),
+        resolve: (answer, resolution) => settle(() => resolve(answer), resolution),
         reject: (error) => settle(() => reject(error)),
         expire: () => {
           opts.signal?.removeEventListener('abort', onAbort);
-          settle(() =>
-            opts.defaultAnswer
-              ? resolve(`${opts.defaultAnswer} (auto-selected: no response in 10 minutes)`)
-              : reject(new Error(ASK_TIMEOUT_ERROR))
+          settle(
+            () =>
+              opts.defaultAnswer
+                ? resolve(`${opts.defaultAnswer} (auto-selected: no response in time)`)
+                : reject(new Error(relay ? ASK_NO_USER_ERROR : ASK_TIMEOUT_ERROR)),
+            { by: 'timeout' }
           );
         },
       });
       const onAbort = () => settle(() => reject(new Error('question cancelled')));
       opts.signal?.addEventListener('abort', onAbort, { once: true });
       // 超时:有默认答案则视为选中(无人值守不永久卡死),否则取消
-      if (opts.timeoutMs && opts.timeoutMs > 0) {
+      if (timeoutMs && timeoutMs > 0) {
         timer = setTimeout(() => {
           opts.signal?.removeEventListener('abort', onAbort);
-          settle(() =>
-            opts.defaultAnswer
-              ? resolve(`${opts.defaultAnswer} (auto-selected: no response in time)`)
-              : reject(new Error('question timed out'))
+          settle(
+            () =>
+              opts.defaultAnswer
+                ? resolve(`${opts.defaultAnswer} (auto-selected: no response in time)`)
+                : reject(new Error(relay ? ASK_NO_USER_ERROR : 'question timed out')),
+            { by: 'timeout' }
           );
-        }, opts.timeoutMs);
+        }, timeoutMs);
       }
       this.onRequest(info);
     });
   }
 
-  respond(requestId: string, answer: string): void {
+  respond(
+    requestId: string,
+    answer: string,
+    meta?: { by?: 'user' | 'relay'; name?: string }
+  ): void {
     const entry = this.pending.get(requestId);
     if (!entry) return;
-    this.pending.delete(requestId);
-    this.onResolved(requestId);
-    entry.resolve(answer);
+    entry.resolve(answer, {
+      by: meta?.by ?? 'user',
+      answer,
+      ...(meta?.name ? { name: meta.name } : {}),
+    });
   }
 
   /** Main 判定等人超时：按未回答收尾 */

@@ -504,7 +504,6 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_SKILL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TOOLS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TOOL_DELETE: excluded('Experimental secretary agent; not an Enso capability.'),
-  SECRETARY_TAKEOVER_GRANT: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TAKEOVER_REVOKE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_TAKEOVERS_LIST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_UNTRACKED_LIST: excluded('Experimental secretary agent; not an Enso capability.'),

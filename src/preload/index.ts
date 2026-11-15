@@ -440,9 +440,6 @@ const electronAPI = {
       name: string
     ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOL_DELETE, { name }),
-    /** 用户把会话交给秘书接管；只能由用户在界面上点，秘书自己只能提案 */
-    grantTakeover: (conversationId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TAKEOVER_GRANT, { conversationId }),
     revokeTakeover: (
       conversationId: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>

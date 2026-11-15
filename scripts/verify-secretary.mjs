@@ -1730,15 +1730,9 @@ async function run(cdp, pluginZipUrl) {
     waitId
   );
 
-  // 派出的会话默认无人值守（profile.dispatchUnattended 缺省 true），ask_user 会被直接拒绝，
-  // 根本走不到 needs-user。这一步验的是「真提问才报 needs-user」，所以先关掉无人值守，
-  // 验完立刻恢复，后面的步骤仍按默认档位跑。
-  const unattendedProfilePath = path.join(ENV, 'secretary', 'profile.json');
-  const unattendedProfile = readJson(unattendedProfilePath);
-  writeFileSync(
-    unattendedProfilePath,
-    JSON.stringify({ ...unattendedProfile, dispatchUnattended: false })
-  );
+  // 派出的会话默认无人值守，但 ask_user 不再被直接拒绝：提问先转给秘书，秘书用 session_answer
+  // 代答，原会话拿到答案继续跑。这一步不需要临时关掉无人值守。
+  log('== step9b 派出会话的 ask_user 先转给秘书');
   const askDispatch = await dispatchConfirmed(
     `[[tool:session_create ${JSON.stringify({
       projectId: setup.projectId,
@@ -1749,43 +1743,81 @@ async function run(cdp, pluginZipUrl) {
   );
   assert(askDispatch.ok, 'step9: 会提问的派出会话建成', askDispatch);
   const askId = askDispatch.conversationId;
-  const askRecord = await waitFor(
+  const relayRecord = await waitFor(
     () => {
-      const record = readJson(dispatchFile).dispatched[askId];
-      return record?.lastResult?.kind === 'needs-user' ? record : null;
+      const relays = readJson(dispatchFile).relays ?? {};
+      return (
+        Object.values(relays).find(
+          (relay) => relay.conversationId === askId && relay.status === 'pending'
+        ) ?? null
+      );
     },
-    'ask_user needs-user recorded',
+    'ask relay recorded',
     60_000,
     500
-  ).catch(() => null);
+  );
+  assert(relayRecord.question.includes('用哪个方案'), 'step9: 提问原文进了转交记录', relayRecord);
+  assert(relayRecord.options?.join(',') === 'A,B', 'step9: 选项一起转交', relayRecord);
   assert(
-    Boolean(askRecord),
-    'step9: 真有 ask_user 时记 needs-user',
+    !readJson(dispatchFile).dispatched[askId]?.lastResult,
+    'step9: 转交的提问不再记 needs-user',
     readJson(dispatchFile).dispatched[askId]
   );
-  const askSeen = await waitFor(
-    () => secretarySaw(askDispatch.secretaryId, askId, 'needs-user'),
-    'secretary got needs-user',
+  const relaySeen = await waitFor(
+    () => secretarySaw(askDispatch.secretaryId, askId, 'ask-relay'),
+    'secretary got ask-relay',
     60_000,
     500
   ).catch(() => false);
-  assert(askSeen, 'step9: 秘书收到该会话的 needs-user', askId);
-  const answered = await page(`
+  assert(relaySeen, 'step9: 秘书收到该会话的 ask-relay 回传', askId);
+  const relayedCard = await page(`
     const id = ${JSON.stringify(askId)};
     const ask = await until(() => (S().conversations[id]?.pendingAsks ?? [])[0] ?? null, 15000);
-    if (!ask) return JSON.stringify({ ok: false, error: 'no pending ask' });
-    const reply = await window.electronAPI.agent.respondAsk(id, ask.requestId, 'A');
-    const cleared = await until(() => (S().conversations[id]?.pendingAsks ?? []).length === 0, 30000);
-    return JSON.stringify({ ok: Boolean(cleared), reply });
+    return JSON.stringify({ relay: ask?.relay ?? null, question: ask?.question ?? null });
   `);
-  assert(answered.ok, 'step9: 回答后提问会话收尾', answered);
+  assert(relayedCard.relay?.name, 'step9: 原会话的提问卡标着已转给秘书', relayedCard);
+  const answered = await secretaryTool(
+    cdp,
+    setup,
+    'session_answer',
+    { conversationId: askId, askId: relayRecord.askId, answer: 'A' },
+    '替它决定用哪个方案'
+  );
+  assert(
+    answered.text?.includes('"status":"answered"'),
+    'step9: 秘书用 session_answer 代答成功',
+    answered
+  );
+  const continued = await page(`
+    const id = ${JSON.stringify(askId)};
+    const cleared = await until(
+      () => (S().conversations[id]?.pendingAsks ?? []).length === 0,
+      30000
+    );
+    return JSON.stringify({ cleared: Boolean(cleared) });
+  `);
+  assert(continued.cleared, 'step9: 回答后原会话的提问卡消失', continued);
   await waitFor(
     () => (readJson(dispatchFile).dispatched[askId]?.lastState === 'idle' ? true : null),
     'ask session idle',
-    30_000,
+    60_000,
     500
   );
-  writeFileSync(unattendedProfilePath, JSON.stringify(unattendedProfile));
+  const answeredRecord = readJson(dispatchFile).relays?.[`${askId}|${relayRecord.askId}`];
+  assert(
+    answeredRecord?.status === 'answered' && answeredRecord.answer === 'A',
+    'step9: 转交记录收尾为已代答',
+    answeredRecord
+  );
+  const relayAudit = auditLines().filter(
+    (entry) => entry.targetId === askId && String(entry.op).startsWith('ask_relay')
+  );
+  assert(
+    relayAudit.some((entry) => entry.op === 'ask_relay') &&
+      relayAudit.some((entry) => entry.op === 'ask_relay_answer'),
+    'step9: 转交与代答都记了审计',
+    relayAudit
+  );
 
   log('== step10 待办派出的会话标题用待办文本');
   const todoText = '修复秘书通知误报';
@@ -4456,16 +4488,47 @@ async function verifyTakeover(cdp, setup) {
     ownSecretary
   );
 
-  // 会话顶栏的逐个授权按钮已随「按项目范围授权」一起去掉，逐个授权只剩 IPC 与确认卡两条路
-  log('== 接管：设置页逐个授权');
-  const granted = await page(`
-    const id = ${JSON.stringify(ownId)};
-    S().selectConversation(id);
-    return JSON.stringify(await window.electronAPI.secretary.grantTakeover(id));
+  // 会话顶栏的逐个授权按钮与对应 IPC 都已删除，逐个授权只剩确认卡这一条路
+  log('== 接管：秘书提出 → 用户确认 → 撤销');
+  const proposedGrant = await secretaryTool(
+    cdp,
+    setup,
+    'session_takeover_propose',
+    { conversationId: ownId, reason: '帮你盯着这个会话' },
+    '把用户的会话交给我接管'
+  );
+  assert(
+    proposedGrant.text?.includes('awaiting_confirmation'),
+    '接管: 秘书提出接管只得到待确认',
+    proposedGrant
+  );
+  assert(!readJson(dispatchFile).dispatched[ownId], '接管: 确认前没有授权');
+  const confirmedGrant = await page(`
+    const secretaryId = ${JSON.stringify(proposedGrant.secretaryId)};
+    if (secretaryId) S().selectConversation(secretaryId);
+    const card = await until(
+      () => shown('[data-enso=secretary-proposal][data-kind=takeover]'),
+      30000
+    );
+    if (!card) return JSON.stringify({ ok: false, error: 'no takeover card' });
+    const secretary = await SEC();
+    const proposal = Object.values(secretary.getState().secretary.proposals)
+      .filter((p) => p.kind === 'takeover')
+      .at(-1);
+    card.querySelector('button').click();
+    const done = await until(() => {
+      const p = secretary.getState().secretary.proposals[proposal.id];
+      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
+    }, 30000);
+    return JSON.stringify({ ok: true, status: done?.status, error: done?.error });
   `);
-  assert(granted.ok, '接管: 设置页逐个授权成功', granted);
-  const userGrant = readJson(dispatchFile).dispatched[ownId];
-  assert(userGrant?.takeover?.via === 'user', '接管: 界面授权落盘，来源记 user', userGrant);
+  assert(
+    confirmedGrant.ok && confirmedGrant.status === 'succeeded',
+    '接管: 用户确认后接管生效',
+    confirmedGrant
+  );
+  const grantedByCard = readJson(dispatchFile).dispatched[ownId];
+  assert(grantedByCard?.takeover?.via === 'proposal', '接管: 确认卡授权落盘', grantedByCard);
   const listed = await page(`
     return JSON.stringify(await window.electronAPI.secretary.listTakeovers());
   `);
@@ -4479,7 +4542,7 @@ async function verifyTakeover(cdp, setup) {
   `);
   assert(
     userRevoke.ok && !readJson(dispatchFile).dispatched[ownId],
-    '接管: 界面授权可以撤销',
+    '接管: 取消接管仍然可用',
     userRevoke
   );
 
@@ -4596,8 +4659,9 @@ async function verifyTakeover(cdp, setup) {
         entry.op === op && entry.ok === ok && (detail === undefined || entry.detail === detail)
     ).length;
   assert(
-    count('takeover_grant', true, 'user') === 1 &&
-      count('takeover_grant', true, 'proposal') === 1 &&
+    // 逐个授权的 IPC 已删除：授权只从确认卡来，不再有 via=user 的记录
+    count('takeover_grant', true, 'user') === 0 &&
+      count('takeover_grant', true, 'proposal') === 2 &&
       count('takeover_revoke', true) === 2 &&
       count('session_takeover_propose', true) >= 1 &&
       count('session_send', true) === 1 &&
