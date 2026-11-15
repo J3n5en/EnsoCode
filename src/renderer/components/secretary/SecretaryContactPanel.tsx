@@ -213,7 +213,7 @@ export function SecretaryContactPanel() {
                 </span>
                 <span className="mt-0.5 block text-[11.5px] text-muted-foreground">
                   {t(
-                    'Off by default. Turning it on lets a tap on your phone confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.'
+                    'On by default. A tap on your phone can confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.'
                   )}
                 </span>
               </span>

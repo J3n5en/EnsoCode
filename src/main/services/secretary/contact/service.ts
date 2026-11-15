@@ -27,9 +27,11 @@ import {
   cardCallbackData,
   cardCallbackToast,
   cardConfirmButtonText,
-  cardHandledLine,
   cardKindLabel,
+  cardLabel,
   cardOpenButtonText,
+  cardSettledText,
+  conversationDeepLink,
   createBindCode,
   feedCallbackData,
   followCallbackData,
@@ -50,6 +52,7 @@ import {
   type SecretaryCardKind,
   shouldForwardMilestone,
   startCommandCode,
+  telegramUrlButtonSupported,
 } from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
 import { wrapInboundMessage } from '@shared/secretary/inbound';
@@ -64,7 +67,6 @@ import {
 import {
   htmlToPlain,
   markdownToTelegramChunks,
-  markdownToTelegramHtml,
   packTelegramHtml,
 } from '@shared/secretary/telegramHtml';
 import type { AskRequestInfo } from '@shared/types/agent';
@@ -80,6 +82,7 @@ import {
   type TelegramApi,
   TelegramApiError,
   type TelegramCallbackQuery,
+  type TelegramInlineButton,
   type TelegramMessage,
   type TelegramUpdate,
 } from './client';
@@ -228,13 +231,17 @@ const FOLLOW_END_KINDS: ReadonlySet<SecretaryResultKind> = new Set(['goal-comple
 
 /** 已经发到手机上的确认卡：处理掉之后要把那条消息的按钮清掉 */
 interface TrackedCard extends ContactCardRef {
-  slot: number;
   chatId: number;
   messageId: number | null;
   /** 这条消息发出去没有：清按钮要等它拿到 messageId */
   ready: Promise<void>;
-  /** 原正文：清按钮时补一行「已处理」 */
-  text: string;
+  /** 「派发 修登录」：收尾时整条消息换成「✅ 已确认：…」 */
+  label: string;
+  /**
+   * 手机上点的是哪个动作。界面同步可能先一步把这条消息收尾，
+   * 收尾文案要按这个动作写，不能一律写成「已处理」。
+   */
+  pendingAction?: 'confirm' | 'reject';
   settled: boolean;
 }
 
@@ -268,8 +275,8 @@ export class TelegramContactService implements SecretaryContactPort {
   private readonly poller: ContactPoller;
   private readonly apis = new Map<string, TelegramApi>();
   private readonly asks: PendingAsk[] = [];
-  /** 按钮槽位 → 卡片；重启后按钮自然失效 */
-  private readonly cardSlots = new Map<number, TrackedCard>();
+  /** 卡片 id → 已经发出去的那条消息：按钮回调只带 id，重启后照样认得出是哪张卡 */
+  private readonly cardsById = new Map<string, TrackedCard>();
   /** 提案 id → 已经提示过的那条消息：同一张卡只推一次，处理掉再清按钮 */
   private readonly cardMessages = new Map<string, TrackedCard>();
   /** 会话 id → 审批提示：审批在应用里收尾后清按钮 */
@@ -444,7 +451,7 @@ export class TelegramContactService implements SecretaryContactPort {
     this.store.saveUnbound();
     await this.clearCommands(chatId);
     this.asks.length = 0;
-    this.cardSlots.clear();
+    this.cardsById.clear();
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
@@ -464,7 +471,7 @@ export class TelegramContactService implements SecretaryContactPort {
     await this.clearCommands(chatId);
     await this.store.saveForgotten();
     this.asks.length = 0;
-    this.cardSlots.clear();
+    this.cardsById.clear();
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
@@ -526,14 +533,22 @@ export class TelegramContactService implements SecretaryContactPort {
     const file = this.store.file();
     if (!file.chat) return;
     const follow = this.ports.following?.find('session', input.conversationId);
+    const link = conversationDeepLink(input.conversationId);
+    // Telegram 只认 http(s)/tg 的 url 按钮；enso:// 只能当等宽文本发出去让人复制
+    const asButton = telegramUrlButtonSupported(link);
     const text = formatMilestoneMessage(this.ports.lang(), {
       kind: input.kind,
       title: input.title,
       ...(input.lastText ? { lastText: input.lastText } : {}),
       ...(follow ? { summary: follow.summary } : {}),
-      link: `enso://secretary?conversation=${encodeURIComponent(input.conversationId)}`,
+      ...(asButton ? {} : { link }),
     });
-    void this.send(file.chat.id, text).then((sent) => {
+    const replyMarkup = asButton
+      ? {
+          inline_keyboard: [[{ text: cardOpenButtonText(this.ports.lang()), url: link }]],
+        }
+      : undefined;
+    void this.send(file.chat.id, text, replyMarkup ? { replyMarkup } : {}).then((sent) => {
       this.audit(
         follow ? 'contact_follow_push' : 'contact_milestone',
         sent.ok,
@@ -681,36 +696,33 @@ export class TelegramContactService implements SecretaryContactPort {
     const file = this.store.file();
     if (!file.chat || input.count <= 0) return;
     const lang = this.ports.lang();
+    const link = input.conversationId ? conversationDeepLink(input.conversationId) : undefined;
+    const asButton = link !== undefined && telegramUrlButtonSupported(link);
     const text = formatCardWaitingMessage(lang, {
       count: input.count,
       ...(input.approval ? { approval: true } : {}),
-      ...(input.conversationId
-        ? { link: `enso://secretary?conversation=${encodeURIComponent(input.conversationId)}` }
-        : {}),
+      // 做成 url 按钮的深链不再在正文里重复一遍
+      ...(link && !asButton ? { link } : {}),
     });
     const slot = this.slot++;
     const entry: TrackedCard = {
       id: `approval:${slot}`,
       kind: 'dispatch',
-      slot,
       chatId: file.chat.id,
       messageId: null,
       ready: Promise.resolve(),
-      text,
+      label: lang === 'zh' ? '审批' : 'approval',
       settled: false,
       ...(input.conversationId ? { conversationId: input.conversationId } : {}),
     };
-    this.cardSlots.set(slot, entry);
+    this.cardsById.set(entry.id, entry);
     if (input.conversationId) {
       const list = this.approvalCards.get(input.conversationId) ?? [];
       list.push(entry);
       this.approvalCards.set(input.conversationId, list);
     }
-    const replyMarkup = {
-      inline_keyboard: [
-        [{ text: cardOpenButtonText(lang), callback_data: cardCallbackData(slot, 'open') }],
-      ],
-    };
+    // 审批永远只有一个回应用的入口：手机上不给确认按钮
+    const replyMarkup = { inline_keyboard: [[this.openButton(lang, entry, link)]] };
     entry.ready = this.send(file.chat.id, text, { replyMarkup }).then((sent) => {
       this.audit('contact_card_waiting', sent.ok, sent.ok ? 'approval' : sent.error);
       if (sent.ok) entry.messageId = sent.messageId ?? null;
@@ -727,7 +739,7 @@ export class TelegramContactService implements SecretaryContactPort {
 
   /**
    * 待确认的卡与界面状态同步：新卡发一条带按钮的提示，处理掉的卡把按钮清掉。
-   * 开关关着时只给「在应用里打开」，不提供确认。
+   * 开关关着时按钮照样在，但点了只提醒回应用处理。
    */
   syncPendingCards(cards: readonly ContactCardRef[]): void {
     const file = this.store.file();
@@ -741,51 +753,59 @@ export class TelegramContactService implements SecretaryContactPort {
     this.announceCards(file.chat.id, fresh, cards.length);
   }
 
-  /** 一条提示里每张卡一个按钮，文案是「确认<类型>：<标题>」 */
+  /**
+   * 「在应用里打开」：http(s)/tg 深链做成 url 按钮（Telegram 自己打开），
+   * enso:// 这类自定义 scheme 只能走回调，由 Main 聚焦窗口并定位到这张卡。
+   */
+  private openButton(lang: ContactLang, card: TrackedCard, link?: string): TelegramInlineButton {
+    return link && telegramUrlButtonSupported(link)
+      ? { text: cardOpenButtonText(lang), url: link }
+      : { text: cardOpenButtonText(lang), callback_data: cardCallbackData(card.id, 'open') };
+  }
+
+  /** 一条提示里每张卡一个「确认<类型>：<标题>」按钮，再加一个回应用的入口 */
   private announceCards(chatId: number, cards: readonly ContactCardRef[], total: number): void {
     const lang = this.ports.lang();
     const confirmable = this.store.file().allowCardConfirm;
     const shown = cards.slice(0, MAX_CARD_BUTTONS);
     const first = shown[0];
+    const link = first?.conversationId
+      ? proposalDeepLink(first.conversationId, first.id)
+      : undefined;
+    const asButton = link !== undefined && telegramUrlButtonSupported(link);
     const text = formatCardWaitingMessage(lang, {
       count: total,
       ...(first?.title ? { title: first.title } : {}),
       ...(confirmable ? { confirmable: true } : {}),
-      ...(first?.conversationId ? { link: proposalDeepLink(first.conversationId, first.id) } : {}),
+      // 做成 url 按钮的深链不再在正文里重复一遍
+      ...(link && !asButton ? { link } : {}),
     });
     const tracked: TrackedCard[] = [];
-    const rows: { text: string; callback_data: string }[][] = [];
+    const rows: TelegramInlineButton[][] = [];
     for (const card of shown) {
-      const slot = this.slot++;
       const entry: TrackedCard = {
         ...card,
-        slot,
         chatId,
         messageId: null,
         ready: Promise.resolve(),
-        text,
+        label: cardLabel(lang, card.kind, card.title),
         settled: false,
       };
       tracked.push(entry);
-      this.cardSlots.set(slot, entry);
+      this.cardsById.set(card.id, entry);
       this.cardMessages.set(card.id, entry);
       rows.push([
-        confirmable
-          ? {
-              text: cardConfirmButtonText(lang, card.kind, card.title),
-              callback_data: cardCallbackData(slot, 'confirm'),
-            }
-          : { text: cardOpenButtonText(lang), callback_data: cardCallbackData(slot, 'open') },
-      ]);
-    }
-    // 开关打开时也留一条回应用的入口：确认前想先看全文
-    if (confirmable && tracked[0]) {
-      rows.push([
         {
-          text: cardOpenButtonText(lang),
-          callback_data: cardCallbackData(tracked[0].slot, 'open'),
+          text: cardConfirmButtonText(lang, card.kind, card.title),
+          callback_data: cardCallbackData(card.id, 'confirm'),
         },
       ]);
+    }
+    // 确认前想先看全文：一张卡时并排，多张卡时单独一行
+    if (tracked[0]) {
+      const open = this.openButton(lang, tracked[0], link);
+      if (shown.length === 1) rows[0]?.push(open);
+      else rows.push([open]);
     }
     const sending = this.send(chatId, text, {
       replyMarkup: { inline_keyboard: rows },
@@ -803,8 +823,14 @@ export class TelegramContactService implements SecretaryContactPort {
     for (const entry of tracked) entry.ready = sending;
   }
 
-  /** 卡片被处理掉（哪边处理都一样）：补一行「已处理」并清掉按钮 */
-  private async settleCard(tracked: TrackedCard): Promise<void> {
+  /**
+   * 卡片被处理掉（哪边处理都一样）：整条消息换成「✅ 已确认：…」并清掉按钮。
+   * 不再往原文后面拼半截后缀——那正是手机上看到的「· 已处理」残渣。
+   */
+  private async settleCard(
+    tracked: TrackedCard,
+    action: 'confirm' | 'reject' | 'handled' = tracked.pendingAction ?? 'handled'
+  ): Promise<void> {
     if (tracked.settled) return;
     await tracked.ready;
     const token = this.store.token();
@@ -814,13 +840,15 @@ export class TelegramContactService implements SecretaryContactPort {
       return;
     }
     const lang = this.ports.lang();
+    const api = this.apiFor(token);
+    const replyMarkup = { inline_keyboard: [] };
     try {
-      await this.apiFor(token).editMessageText({
+      await api.editMessageText({
         chatId: tracked.chatId,
         messageId: tracked.messageId,
-        // 原消息按 markdown 转成 HTML 发的，收尾这一版走同一套转换
-        text: markdownToTelegramHtml(`${tracked.text}\n${cardHandledLine(lang)}`),
-        replyMarkup: { inline_keyboard: [] },
+        // 整条替换：标题里可能有 markdown 字符，这里只转义不解析
+        text: escapeHtml(cardSettledText(lang, action, tracked.label)),
+        replyMarkup,
         parseMode: 'HTML',
       });
       tracked.settled = true;
@@ -828,6 +856,18 @@ export class TelegramContactService implements SecretaryContactPort {
     } catch (error) {
       this.audit('contact_card_settled', false, errorCode(error));
       this.reportError(error);
+      // 正文改不动至少把按钮清掉：手机上不能再点第二次
+      try {
+        await api.editMessageReplyMarkup({
+          chatId: tracked.chatId,
+          messageId: tracked.messageId,
+          replyMarkup,
+        });
+        tracked.settled = true;
+        this.audit('contact_card_settled', true, 'markup-only');
+      } catch {
+        // 下一次状态同步还会再试
+      }
     }
   }
 
@@ -1224,7 +1264,7 @@ export class TelegramContactService implements SecretaryContactPort {
     chatId: number,
     text: string,
     options?: {
-      replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] };
+      replyMarkup?: { inline_keyboard: TelegramInlineButton[][] };
       format?: 'markdown' | 'html';
     }
   ): Promise<{ ok: true; messageId?: number } | { ok: false; error: ContactError }> {
@@ -1251,7 +1291,7 @@ export class TelegramContactService implements SecretaryContactPort {
     chatId: number,
     token: string,
     chunk: { html: string; plain: string },
-    replyMarkup?: { inline_keyboard: { text: string; callback_data: string }[][] }
+    replyMarkup?: { inline_keyboard: TelegramInlineButton[][] }
   ): Promise<{ ok: true; messageId: number } | { ok: false; error: ContactError }> {
     const api = this.apiFor(token);
     try {
@@ -1399,7 +1439,15 @@ export class TelegramContactService implements SecretaryContactPort {
     }
     const card = query.data ? parseCardCallbackData(query.data) : null;
     if (card) {
-      await this.handleCardCallback(query, card.slot, card.action);
+      await this.handleCardCallback(query, card.id, card.action);
+      return;
+    }
+    // 老版本的卡片按钮（card:<槽位>:c）已经失效：别落到提问分支上答错话
+    if (query.data?.startsWith('card:')) {
+      await this.answerCallback(
+        query.id,
+        this.ports.lang() === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
+      );
       return;
     }
     const parsed = query.data ? parseAskCallbackData(query.data) : null;
@@ -1437,66 +1485,123 @@ export class TelegramContactService implements SecretaryContactPort {
 
   /**
    * 确认卡的按钮：确认直接执行，打开只回到应用。
+   * 开关关着时按钮还在，但点了只提醒回应用处理；审批根本没有确认按钮。
    * 卡片已经处理过（哪边处理的都算）就只提示，并把这条消息的按钮清掉。
    */
   private async handleCardCallback(
     query: TelegramCallbackQuery,
-    slot: number,
+    id: string,
     action: 'confirm' | 'reject' | 'open'
   ): Promise<void> {
     const lang = this.ports.lang();
-    const card = this.cardSlots.get(slot);
-    if (!card) {
-      await this.answerCallback(
-        query.id,
-        lang === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
-      );
-      return;
-    }
+    // 重启后内存里没有这条记录：确认照样交给 Main 校验，只是改不动那条消息
+    const card = this.cardsById.get(id);
     if (action === 'open') {
       this.ports.openInApp({
-        ...(card.conversationId ? { conversationId: card.conversationId } : {}),
-        ...(card.settled ? {} : { proposalId: card.id }),
+        ...(card?.conversationId ? { conversationId: card.conversationId } : {}),
+        ...(card?.settled ? {} : { proposalId: id }),
       });
-      this.audit('contact_card_open', true, cardKindLabel(lang, card.kind));
+      this.audit('contact_card_open', true, card ? cardKindLabel(lang, card.kind) : 'unknown');
       await this.answerCallback(query.id, cardCallbackToast(lang, 'open'));
       return;
     }
-    if (card.settled) {
+    if (card?.settled) {
       await this.answerCallback(
         query.id,
         lang === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
       );
       return;
     }
+    if (!this.store.file().allowCardConfirm) {
+      // 开关关着：按钮还在，但点了只提醒回应用处理，绝不执行
+      const op = action === 'confirm' ? 'contact_card_confirm' : 'contact_card_reject';
+      this.audit(op, false, 'disabled');
+      await this.answerCallback(
+        query.id,
+        lang === 'zh'
+          ? '已在设置里关闭手机确认，请回应用处理'
+          : 'Phone confirm is off in settings; handle it in the app'
+      );
+      await this.replyOpenOnly(lang, id, card);
+      return;
+    }
     // 手机上确认出来的会话也算手机发起的任务：确认期间派生的东西记进关注列表
-    if (card.conversationId) this.phoneOrigin.add(card.conversationId);
+    if (card?.conversationId) this.phoneOrigin.add(card.conversationId);
+    // 先记下点的是哪个动作：界面同步可能抢在收尾之前把这条消息改掉
+    if (card) card.pendingAction = action;
     let result: { ok: boolean; error?: string };
     try {
-      result = await this.ports.resolveProposal(card.id, action);
+      result = await this.ports.resolveProposal(id, action);
     } finally {
-      if (card.conversationId) this.phoneOrigin.delete(card.conversationId);
+      if (card?.conversationId) this.phoneOrigin.delete(card.conversationId);
     }
     this.audit(
       action === 'confirm' ? 'contact_card_confirm' : 'contact_card_reject',
       result.ok,
-      result.ok ? cardKindLabel(lang, card.kind) : (result.error ?? 'failed')
+      result.ok
+        ? card
+          ? `${cardKindLabel(lang, card.kind)} ${id}`
+          : id
+        : (result.error ?? 'failed')
     );
     if (result.ok) {
       await this.answerCallback(
         query.id,
-        cardCallbackToast(lang, action, {
-          kind: card.kind,
-          ...(card.title ? { title: card.title } : {}),
-        })
+        cardCallbackToast(
+          lang,
+          action,
+          card ? { kind: card.kind, ...(card.title ? { title: card.title } : {}) } : undefined
+        )
       );
+      // 回一条结果，再把原消息整条换成「✅ 已确认：…」并清掉按钮
+      await this.replySettled(lang, action, card?.label ?? this.fallbackLabel(lang));
     } else {
       await this.answerCallback(
         query.id,
         lang === 'zh' ? '这张卡已经处理过了' : 'That card is gone'
       );
     }
-    await this.settleCard(card);
+    if (card) await this.settleCard(card, action);
+  }
+
+  /** 重启后内存里没有卡片记录：收尾文案只能给一句泛的 */
+  private fallbackLabel(lang: ContactLang): string {
+    return lang === 'zh' ? '这张卡' : 'the card';
+  }
+
+  /** 确认/拒绝成功后的回执：手机上再发一条结果，不用回原消息确认 */
+  private async replySettled(
+    lang: ContactLang,
+    action: 'confirm' | 'reject',
+    label: string
+  ): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    if (!chatId) return;
+    const sent = await this.send(chatId, cardSettledText(lang, action, label));
+    this.audit('contact_card_result', sent.ok, sent.ok ? action : sent.error);
+  }
+
+  /** 开关关着时点「确认」：只回一条说明，附「在应用里打开」，不执行任何动作 */
+  private async replyOpenOnly(
+    lang: ContactLang,
+    id: string,
+    card: TrackedCard | undefined
+  ): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    if (!chatId) return;
+    const link = card?.conversationId ? proposalDeepLink(card.conversationId, id) : undefined;
+    const text =
+      lang === 'zh'
+        ? '已在设置里关闭手机确认，请回应用处理。'
+        : 'Phone confirm is off in settings; handle it in the app.';
+    const open =
+      link && telegramUrlButtonSupported(link)
+        ? { text: cardOpenButtonText(lang), url: link }
+        : { text: cardOpenButtonText(lang), callback_data: cardCallbackData(id, 'open') };
+    const sent = await this.send(chatId, text, {
+      replyMarkup: { inline_keyboard: [[open]] },
+    });
+    this.audit('contact_card_readonly', sent.ok, sent.ok ? 'disabled' : sent.error);
   }
 
   private answerPendingAsk(pending: PendingAsk, text: string): void {
