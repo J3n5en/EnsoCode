@@ -5,14 +5,24 @@ import { normalizeLocale } from '@shared/i18n';
 import type { ContactLang } from '@shared/secretary/contact';
 import { IPC_CHANNELS } from '@shared/types';
 import type { SecretaryContactState, SecretaryProfile } from '@shared/types/secretary';
+import { listMemoriesForAdmin, openExistingMemoryDb } from '../services/memoryAdmin';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
+import { createContactCommands } from '../services/secretary/contact/commands';
 import {
   type ContactServicePorts,
   TelegramContactService,
 } from '../services/secretary/contact/service';
 import { ContactStore } from '../services/secretary/contact/store';
+import { buildDaily, secretaryDailyPorts } from '../services/secretary/daily';
 import { type DeliveryPorts, resolveTarget } from '../services/secretary/deliveries';
+import {
+  pageSecretaryFeed,
+  secretaryBoard,
+  secretaryDispatchPorts,
+} from '../services/secretary/dispatch';
+import { secretaryProjectId } from '../services/secretary/identity';
+import { listSchedules, secretarySchedulePorts } from '../services/secretary/schedules';
 import { answerAskAsUserFromMain, promptRootFromMain, resumeRootFromMain } from './agent';
 import { readSettingsState } from './settings';
 
@@ -64,9 +74,9 @@ function readToken(request: unknown): string | undefined {
   return typeof token === 'string' ? token : undefined;
 }
 
-function readFlag(request: unknown): boolean | null {
+function readFlag(request: unknown, key: 'allowDispatchConfirm' | 'allowMemory'): boolean | null {
   if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
-  const value = (request as { allowDispatchConfirm?: unknown }).allowDispatchConfirm;
+  const value = (request as Record<string, unknown>)[key];
   return typeof value === 'boolean' ? value : null;
 }
 
@@ -105,6 +115,47 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
     },
   };
 
+  // 手机命令的数据源与侧栏面板完全同一份：看板、动态、待办都走秘书现有的投影
+  const commands = createContactCommands({
+    lang: () => replyLang(deps.profile()),
+    now: () => Date.now(),
+    allowMemory: () => store.file().allowMemory,
+    board: () => secretaryBoard(secretaryDispatchPorts),
+    daily: (day) => buildDaily(secretaryDailyPorts, day),
+    feed: async (query) => {
+      const page = await pageSecretaryFeed(secretaryDispatchPorts, query);
+      return {
+        events: page.events.map((event) => ({
+          id: event.id,
+          at: event.at,
+          title: event.title,
+          projectName: event.projectName,
+          label: event.label,
+          ...(event.detail ? { detail: event.detail } : {}),
+          ...(event.conversationId ? { conversationId: event.conversationId } : {}),
+        })),
+        hasMore: page.hasMore,
+      };
+    },
+    schedules: async () => listSchedules(secretarySchedulePorts),
+    memories: async () => {
+      const projectId = secretaryProjectId();
+      const db = openExistingMemoryDb(path.join(app.getPath('userData'), 'memory', 'memory.db'));
+      if (!db || !projectId) return { titles: [], total: 0 };
+      try {
+        const result = listMemoriesForAdmin(db, {
+          spaceId: `proj:${projectId}`,
+          limit: 20,
+          offset: 0,
+        });
+        return { titles: result.items.map((item) => item.title), total: result.total };
+      } finally {
+        db.close();
+      }
+    },
+  });
+
+  ports.commands = commands;
   service = new TelegramContactService(store, ports);
 
   return {
@@ -147,9 +198,11 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
 
       ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, async (event, request: unknown) => {
         if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        const value = readFlag(request);
-        if (value === null) return { ok: false, error: 'invalid request' };
-        service.setAllowDispatchConfirm(value);
+        const dispatch = readFlag(request, 'allowDispatchConfirm');
+        const memory = readFlag(request, 'allowMemory');
+        if (dispatch === null && memory === null) return { ok: false, error: 'invalid request' };
+        if (dispatch !== null) service.setAllowDispatchConfirm(dispatch);
+        if (memory !== null) service.setAllowMemory(memory);
         return { ok: true };
       });
     },

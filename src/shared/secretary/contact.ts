@@ -197,6 +197,16 @@ export function parseAskCallbackData(data: string): { slot: number; index: numbe
   return { slot: Number(match[1]), index: Number(match[2]) };
 }
 
+/** /feed 的「更早」按钮：游标存在 Main 内存里，按钮上只带短编号 */
+export function feedCallbackData(token: string): string {
+  return `feed:${token}`;
+}
+
+export function parseFeedCallback(data: string): string | null {
+  const match = /^feed:([A-Za-z0-9]{1,8})$/u.exec(data.trim());
+  return match ? match[1] : null;
+}
+
 /** 手机点按钮后 Telegram 顶部的提示 */
 export function askCallbackToast(lang: ContactLang, option: string): string {
   const capped = option.length > 40 ? `${option.slice(0, 40)}…` : option;
