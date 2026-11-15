@@ -32,6 +32,23 @@ const mocks = vi.hoisted(() => ({
   ),
   editMemory: vi.fn((): unknown => null),
   retryFailedMemoryKg: vi.fn(() => 0),
+  runMemoryForgettingNow: vi.fn(() => ({
+    ranAt: '2026-06-01T00:00:00.000Z',
+    scored: 1,
+    candidates: 0,
+    archived: 0,
+    staleDays: 90,
+    maxImportance: 0.5,
+    autoArchive: false,
+    durationMs: 1,
+  })),
+  getForgettingState: vi.fn(() => ({
+    lastRunAt: '2026-06-01T00:00:00.000Z',
+    lastRun: null,
+    candidates: 3,
+  })),
+  listArchiveCandidates: vi.fn(() => ({ items: [], total: 0 })),
+  archiveCandidatesConfirmed: vi.fn(() => ({ archived: 0, skipped: 0, ids: [] as string[] })),
   registry: null as { projection: () => unknown } | null,
   settings: null as Record<string, unknown> | null,
   send: vi.fn(),
@@ -72,6 +89,24 @@ vi.mock('../services/memoryAdmin', () => ({
   listPendingEvolves: mocks.listPendingEvolves,
   reviewEvolvesEdge: mocks.reviewEvolvesEdge,
   toMemoryJobsSnapshot: mocks.toMemoryJobsSnapshot,
+  toMemoryListItem: (memory: Record<string, unknown>) => ({
+    id: memory.id,
+    title: memory.title,
+    contentSummary: '',
+    unitType: 'fact',
+    spaceId: memory.spaceId,
+    spaceLabel: memory.spaceId,
+    importance: memory.importance,
+    isCrystal: false,
+    isLatest: true,
+    lifecycleState: 'active',
+    createdAt: '',
+    updatedAt: '',
+    appearances: 0,
+    lastHitAt: null,
+    hitCount: 0,
+    archiveCandidateAt: null,
+  }),
 }));
 vi.mock('../services/memoryHost', () => ({
   getMemoryDistillJobs: mocks.getMemoryDistillJobs,
@@ -89,10 +124,24 @@ vi.mock('../services/memoryHost', () => ({
   approvePendingMemoryWrite: mocks.approvePendingMemoryWrite,
   editMemory: mocks.editMemory,
   retryFailedMemoryKg: mocks.retryFailedMemoryKg,
+  forgettingSettings: () => ({
+    enabled: true,
+    archiveCandidates: true,
+    autoArchive: false,
+    staleDays: 90,
+    maxImportance: 0.5,
+    intervalDays: 7,
+  }),
+  runMemoryForgettingNow: mocks.runMemoryForgettingNow,
 }));
 vi.mock('../services/memory/pending', () => ({
   listPendingWrites: mocks.listPendingWrites,
   rejectPendingWrite: mocks.rejectPendingWrite,
+}));
+vi.mock('../services/memory/forgetting', () => ({
+  getForgettingState: mocks.getForgettingState,
+  listArchiveCandidates: mocks.listArchiveCandidates,
+  archiveCandidatesConfirmed: mocks.archiveCandidatesConfirmed,
 }));
 vi.mock('../services/memory/manual', () => ({
   deleteMemoriesManually: mocks.deleteMemoriesManually,
@@ -466,5 +515,58 @@ describe('memory IPC', () => {
     mocks.approvePendingMemoryWrite.mockResolvedValue({ ok: true });
     expect(await review(event, 'p2', 'approve')).toEqual({ ok: true });
     expect(mocks.approvePendingMemoryWrite).toHaveBeenCalledWith('p2');
+  });
+
+  it('forgetting: stats 带上巡检状态，不额外开库', async () => {
+    mocks.getMemoryStats.mockReturnValue({
+      total: 1,
+      bySpace: { global: 1 },
+      spaceLabels: {},
+      crystals: 0,
+      entities: 0,
+      embedded: 0,
+      databaseBytes: 0,
+      neverHit: 1,
+      addedLast7Days: 1,
+    });
+    const stats = (await handler(IPC_CHANNELS.MEMORY_STATS)(event)) as {
+      forgetting?: { candidates: number };
+    };
+    expect(stats.forgetting).toEqual({
+      lastRunAt: '2026-06-01T00:00:00.000Z',
+      lastRun: null,
+      candidates: 3,
+    });
+    expect(mocks.openExistingMemoryDb).toHaveBeenCalledTimes(1);
+  });
+
+  it('forgetting: 立即运行走 memoryHost 并广播', async () => {
+    const run = handler(IPC_CHANNELS.MEMORY_FORGETTING_RUN);
+    expect(run({ sender: { id: 99 } })).toBeNull();
+    expect(mocks.runMemoryForgettingNow).not.toHaveBeenCalled();
+
+    const summary = run(event) as { scored: number };
+    expect(summary.scored).toBe(1);
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+  });
+
+  it('forgetting: 候选列表与确认归档都收窄入参', async () => {
+    const list = handler(IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES);
+    expect(await list({ sender: { id: 99 } })).toEqual({ items: [], total: 0 });
+    expect(await list(event, { limit: 0 })).toEqual({ items: [], total: 0 });
+    expect(await list(event, { limit: 10, offset: 0 })).toEqual({ items: [], total: 0 });
+    expect(mocks.listArchiveCandidates).toHaveBeenCalledTimes(1);
+
+    const confirm = handler(IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES_CONFIRM);
+    for (const ids of [null, 'm1', [], [1], ['']]) {
+      expect(confirm(event, ids)).toEqual({ archived: 0, skipped: 0 });
+    }
+    expect(confirm({ sender: { id: 99 } }, ['m1'])).toEqual({ archived: 0, skipped: 0 });
+    expect(mocks.archiveCandidatesConfirmed).not.toHaveBeenCalled();
+
+    mocks.archiveCandidatesConfirmed.mockReturnValue({ archived: 1, skipped: 0, ids: ['m1'] });
+    expect(confirm(event, ['m1'])).toEqual({ archived: 1, skipped: 0 });
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+    expect(mocks.appendMemoryAudit).not.toHaveBeenCalled();
   });
 });

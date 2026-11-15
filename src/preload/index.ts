@@ -17,6 +17,9 @@ import type {
   EmbeddingDownloadProgressDto,
   EmbeddingModelDto,
   EvolvesEdgeDto,
+  MemoryArchiveCandidatesResult,
+  MemoryArchiveConfirmResult,
+  MemoryDecayRunDto,
   MemoryDeletionImpact,
   MemoryDetail,
   MemoryEditPatch,
@@ -612,6 +615,15 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ARCHIVE, id),
     restore: (id: string): Promise<MemoryMutationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RESTORE, id),
+    runForgetting: (): Promise<MemoryDecayRunDto | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FORGETTING_RUN),
+    archiveCandidates: (query?: {
+      limit?: number;
+      offset?: number;
+    }): Promise<MemoryArchiveCandidatesResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES, query),
+    confirmArchiveCandidates: (ids: string[]): Promise<MemoryArchiveConfirmResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES_CONFIRM, ids),
     delete: (id: string): Promise<MemoryMutationResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_DELETE, id),
     deletePreview: (ids: string[]): Promise<MemoryDeletionImpact | null> =>

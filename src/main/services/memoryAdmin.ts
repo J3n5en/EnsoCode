@@ -43,7 +43,7 @@ function summarize(content: string): string {
     : `${chars.slice(0, SUMMARY_CHARS).join('')}…`;
 }
 
-function toListItem(memory: Memory): MemoryListItem {
+export function toMemoryListItem(memory: Memory): MemoryListItem {
   return {
     id: memory.id,
     title: memory.title,
@@ -61,6 +61,7 @@ function toListItem(memory: Memory): MemoryListItem {
     appearances: memory.appearances,
     lastHitAt: memory.lastHitAt,
     hitCount: memory.hitCount,
+    archiveCandidateAt: memory.archiveCandidateAt,
   };
 }
 
@@ -71,7 +72,7 @@ function toEvolvesDto(edge: Evolves): EvolvesEdgeDto {
 function toCrystalSourceDto(
   source: ReturnType<typeof listCrystalSources>[number]
 ): CrystalSourceDto {
-  return { ...toListItem(source.memory), contributionWeight: source.contributionWeight };
+  return { ...toMemoryListItem(source.memory), contributionWeight: source.contributionWeight };
 }
 
 export function listMemoriesForAdmin(
@@ -97,6 +98,7 @@ export function listMemoriesForAdmin(
     conditions.push('COALESCE(m.last_hit_at, m.created_at) < ?');
     params.push(staleCutoffIso(query.staleDays));
   }
+  if (query.archiveCandidate === true) conditions.push('m.archive_candidate_at IS NOT NULL');
   const text = query.query?.trim() ?? '';
   if (text) {
     const { match, short } = buildFtsMatchQuery(text);
@@ -125,7 +127,7 @@ export function listMemoriesForAdmin(
        ORDER BY m.updated_at DESC, m.id ASC LIMIT ? OFFSET ?`
     )
     .all(...params, query.limit, query.offset) as MemoryRow[];
-  return { items: rows.map(rowToMemory).map(toListItem), total };
+  return { items: rows.map(rowToMemory).map(toMemoryListItem), total };
 }
 
 /**
@@ -157,12 +159,13 @@ export async function searchMemoriesForAdmin(
     mode: deep ? 'deep' : 'fast',
     assist: deep ? assist : undefined,
   });
-  // unitType / staleDays 在语义通道里没有下推，只能在结果上后过滤
+  // unitType / staleDays / archiveCandidate 在语义通道里没有下推，只能在结果上后过滤
   const staleCutoff = query.staleDays === undefined ? null : staleCutoffIso(query.staleDays);
   const items = hits
-    .map((hit) => toListItem(hit.memory))
+    .map((hit) => toMemoryListItem(hit.memory))
     .filter((item) => query.unitType === undefined || item.unitType === query.unitType)
-    .filter((item) => staleCutoff === null || (item.lastHitAt ?? item.createdAt) < staleCutoff);
+    .filter((item) => staleCutoff === null || (item.lastHitAt ?? item.createdAt) < staleCutoff)
+    .filter((item) => query.archiveCandidate !== true || item.archiveCandidateAt !== null);
   return {
     items,
     total: items.length,
@@ -188,7 +191,7 @@ export function getMemoryDetail(db: Database.Database, id: string): MemoryDetail
   const memory = getMemory(db, id);
   if (!memory || memory.lifecycleState === 'deleted') return null;
   return {
-    ...toListItem(memory),
+    ...toMemoryListItem(memory),
     content: memory.content,
     eventStart: memory.eventStart,
     eventEnd: memory.eventEnd,

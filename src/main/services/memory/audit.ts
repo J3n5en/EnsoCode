@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { MemoryDeletionImpact } from '@shared/memory/dto';
 import { contentHash } from './contentHash';
+import type { ForgettingRunSummary } from './forgetting';
 import type { ManualEditResult } from './manual';
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -27,6 +28,21 @@ export type MemoryAuditEntry =
       actor: 'user';
       requested: string[];
       impact: MemoryDeletionImpact;
+    }
+  /** 遗忘巡检每跑一次记一条：处理了多少条、多少进候选、自动归档了多少 */
+  | {
+      ts: string;
+      action: 'memory.decay';
+      actor: 'system';
+      summary: ForgettingRunSummary;
+    }
+  /** 归档（只改 lifecycle_state，可还原）；删除不在这里记，走 memory.delete */
+  | {
+      ts: string;
+      action: 'memory.archive';
+      actor: 'user' | 'system';
+      ids: string[];
+      reason: 'candidates' | 'auto';
     };
 
 export function editAuditEntry(result: ManualEditResult, now = new Date()): MemoryAuditEntry {

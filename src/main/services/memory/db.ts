@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { getLoadablePath } from 'sqlite-vec';
 import { contentHash } from './contentHash';
 
-export const MEMORY_SCHEMA_VERSION = 10;
+export const MEMORY_SCHEMA_VERSION = 11;
 
 /**
  * vec0 的 chunk 是定长预分配：一个 chunk 恒定占 chunk_size × dim × 4 字节，与里面实际有几行无关。
@@ -355,6 +355,18 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
     `);
     for (const t of listVecTables(db)) db.exec(`DROP TABLE IF EXISTS ${vecTableName(t.dim)}`);
     syncVecTables(db);
+  },
+  // v11：遗忘巡检。archive_candidate_at 只标「建议归档」，归档动作仍要用户确认（或显式打开自动归档），
+  // 巡检本身永不删除行。decay_score_cached 自建表起恒为 1.0（从没被写过），改由巡检写入真实衰减分。
+  (db) => {
+    const cols = db.prepare('PRAGMA table_info(memories)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'archive_candidate_at')) {
+      db.exec('ALTER TABLE memories ADD COLUMN archive_candidate_at TEXT');
+    }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS memories_archive_candidate
+        ON memories (archive_candidate_at) WHERE archive_candidate_at IS NOT NULL;
+    `);
   },
 ];
 

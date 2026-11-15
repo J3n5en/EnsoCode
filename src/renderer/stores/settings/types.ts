@@ -175,6 +175,18 @@ export interface SettingsState {
   memoryDistillEnabled: boolean;
   /** 记忆创建后是否用 LLM 异步抽取实体图谱；缺省关 */
   memoryKgEnabled: boolean;
+  /** 自动遗忘第一档：衰减进检索排序（只降权，不改状态）。缺省开 */
+  memoryDecayEnabled: boolean;
+  /** 自动遗忘第二档：把「冷且不重要」的记忆标成归档候选（只标记）。缺省关 */
+  memoryDecayArchiveCandidates: boolean;
+  /** 自动遗忘第三档：每轮把候选直接归档（只归档不删除）。缺省关 */
+  memoryDecayAutoArchive: boolean;
+  /** 超过这么多天没被检索命中算「冷」；缺省 90 天 */
+  memoryDecayStaleDays: number;
+  /** 重要度 <= 这个值算「不重要」；缺省 0.5（提炼允许写库的最低档） */
+  memoryDecayMaxImportance: number;
+  /** 巡检间隔（天）；缺省 7 */
+  memoryDecayIntervalDays: number;
   /** 语音输入：开启后才提示下载本地识别模型；缺省关 */
   voiceInputEnabled: boolean;
   /** 实验功能：Bot 模式；缺省关，关闭时 Main 不启动 Bot 后台逻辑 */
@@ -414,6 +426,12 @@ export interface SettingsState {
   setMemoryEmbeddingRemoteProviderId: (value: string | null) => void;
   setMemoryDistillEnabled: (value: boolean) => void;
   setMemoryKgEnabled: (value: boolean) => void;
+  setMemoryDecayEnabled: (value: boolean) => void;
+  setMemoryDecayArchiveCandidates: (value: boolean) => void;
+  setMemoryDecayAutoArchive: (value: boolean) => void;
+  setMemoryDecayStaleDays: (value: number) => void;
+  setMemoryDecayMaxImportance: (value: number) => void;
+  setMemoryDecayIntervalDays: (value: number) => void;
   setVoiceInputEnabled: (value: boolean) => void;
   setBotModeEnabled: (value: boolean) => void;
   setScratchSessionsEnabled: (value: boolean) => void;
