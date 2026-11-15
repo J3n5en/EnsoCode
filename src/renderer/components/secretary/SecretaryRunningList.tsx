@@ -1,8 +1,8 @@
 import { type ContactBadge, sessionBadge } from '@shared/secretary/commands';
 import type { PendingDispatch, SecretaryCard } from '@shared/types/secretary';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, Check } from 'lucide-react';
 import { useState } from 'react';
-import { HOVER_ROW_CLASS } from '@/components/ui/hover-actions';
+import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
@@ -95,6 +95,22 @@ function RunningRow({ card }: { card: SessionCard }) {
           </span>
         )}
       </button>
+      {/* 行内收口：只有派发或接管跟踪的会话才会出现在这张表里 */}
+      <HoverActions className="pr-7">
+        <button
+          type="button"
+          data-enso="secretary-running-mark-done"
+          title={t('Mark done')}
+          aria-label={t('Mark done')}
+          onClick={(event) => {
+            event.stopPropagation();
+            void window.electronAPI.secretary.markResult(card.conversationId, 'done');
+          }}
+          className="flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-success/10 hover:text-success"
+        >
+          <Check className="h-3.5 w-3.5" />
+        </button>
+      </HoverActions>
       <button
         type="button"
         data-enso="secretary-running-open"
@@ -104,7 +120,7 @@ function RunningRow({ card }: { card: SessionCard }) {
           event.stopPropagation();
           selectConversation(card.conversationId);
         }}
-        className="flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="relative flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         <ArrowUpRight className="h-3.5 w-3.5" />
       </button>

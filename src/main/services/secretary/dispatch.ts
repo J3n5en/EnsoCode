@@ -59,6 +59,7 @@ import {
   linkedTodoSession,
   pendingUpdate,
   proposalUpdate,
+  SETTLED_RESULTS,
   takeoverViews,
   untrackedViews,
 } from './results';
@@ -406,6 +407,8 @@ async function noteDispatchResumed(
   if (record.lastState !== 'running') record.stateSince = now;
   record.lastState = 'running';
   record.lastEventAt = now;
+  // 已经有终态结果的会话被重新唤起：这一轮结束前仍算在跑，结束后回到原来的终态
+  if (record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)) record.reopenedAt = now;
   ports.saveDispatch(file);
   const resumed = resumeLinkedTodo(await ports.todos(), conversationId, now);
   if (resumed.changed) ports.saveTodos(resumed.todos);
@@ -1409,6 +1412,7 @@ export function createSecretaryDispatchHandlers(
         record.lastState = 'idle';
         record.stoppedAt = now;
         delete record.backgroundRunning;
+        delete record.reopenedAt;
         delete record.stalledTurn;
         delete record.patrol;
         ports.saveDispatch(file);
@@ -1952,6 +1956,52 @@ export async function resolveProposal(
 export type TodoMutateResult = { ok: true; todoId: string } | { ok: false; error: string };
 
 export type DismissResultResult = { ok: true } | { ok: false; error: string };
+
+export type MarkResultAction = 'done' | 'undo';
+
+export type MarkResultResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * 用户手动收口一条派发记录：done 记成完成并标 manual（卡片给撤销），
+ * undo 把这条手动结果撤掉、放回进行中。只认派发或接管的记录，普通会话不动。
+ */
+export function markResult(
+  ports: SecretaryDispatchPorts,
+  conversationId: string,
+  action: MarkResultAction
+): MarkResultResult {
+  const file = ports.dispatchFile();
+  const record = file.dispatched[conversationId];
+  if (!record) return { ok: false, error: 'not-found' };
+  const now = ports.now();
+  const op = action === 'done' ? 'result_mark_done' : 'result_mark_undo';
+  if (action === 'done') {
+    record.lastResult = { kind: 'goal-complete', turn: record.turn, at: now, manual: true };
+    if (record.lastState !== 'idle') record.stateSince = now;
+    record.lastState = 'idle';
+    delete record.backgroundRunning;
+    delete record.reopenedAt;
+    delete record.manualUndoneAt;
+  } else {
+    // 只撤销用户自己标的完成：会话给出的结果不能被界面抹掉
+    if (record.lastResult?.manual !== true) return { ok: false, error: 'not-manual' };
+    delete record.lastResult;
+    if (record.lastState !== 'running') record.stateSince = now;
+    record.lastState = 'running';
+    record.manualUndoneAt = now;
+  }
+  ports.saveDispatch(file);
+  ports.audit({
+    at: now,
+    secretaryConversationId: record.secretaryConversationId,
+    op,
+    targetId: conversationId,
+    ok: true,
+    detail: 'manual',
+  });
+  notifySecretaryChanged();
+  return { ok: true };
+}
 
 /** 用户点过「知道了」：只标记这条结果，会话本身不动；新结果整体替换 lastResult，标记自然失效 */
 export function dismissResult(

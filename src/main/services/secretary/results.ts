@@ -287,6 +287,8 @@ export function sessionStateOf(
  * 正在跑、刚被 session_send 唤起、还有后台任务、目标还会自动续跑，都算。
  * 报错、等用户审批或提问、还没开始、已经收口的结果都不算。
  * 目标停在 waiting 只有后台任务的完成通知会唤醒它；没有后台任务就没人叫它，不算在跑。
+ * 已经有终态结果的会话被重新唤起时，只有这一轮还没结束（reopened）才算在跑：
+ * 轮次一结束就回到终态，不能因为 lastState 还残留 running 一直挂在进行中。
  */
 export function sessionStillGoing(input: {
   state: SessionLiveState;
@@ -294,11 +296,14 @@ export function sessionStillGoing(input: {
   goalStatus?: string;
   backgroundRunning?: boolean;
   lastResult?: DispatchRecord['lastResult'];
+  /** 终态之后被重新唤起、这一轮还没结束 */
+  reopened?: boolean;
 }): boolean {
   if (input.state === 'running') return true;
   if (input.state !== 'idle') return false;
+  if (input.lastResult && SETTLED_RESULTS.has(input.lastResult.kind))
+    return input.reopened === true;
   if (input.recordedState === 'running') return true;
-  if (input.lastResult && SETTLED_RESULTS.has(input.lastResult.kind)) return false;
   if (input.backgroundRunning) return true;
   return input.goalStatus === 'active';
 }
@@ -311,12 +316,15 @@ export function countsAsRunning(
 ): boolean {
   const state = sessionStateOf(record, row, status);
   if (sessionNeedsUser(record, state)) return false;
+  // 用户撤销手动标记：放回进行中，直到这一轮出现新结果
+  if (record.manualUndoneAt !== undefined && record.lastResult === undefined) return true;
   return sessionStillGoing({
     state,
     recordedState: record.lastState,
     goalStatus: goalStatusOf(row),
     backgroundRunning: record.backgroundRunning === true,
     lastResult: record.lastResult,
+    reopened: record.reopenedAt !== undefined,
   });
 }
 
@@ -344,6 +352,7 @@ export function linkedTodoSession(
     goalStatus: goalStatusOf(row),
     backgroundRunning: record.backgroundRunning === true,
     lastResult: record.lastResult,
+    reopened: record.reopenedAt !== undefined,
   });
   return going ? { ...view, state: 'running' as const } : view;
 }
@@ -397,6 +406,7 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
       ...(record.lastResult
         ? { result: record.lastResult.kind, resultAt: record.lastResult.at }
         : {}),
+      ...(record.lastResult?.manual ? { manual: true as const } : {}),
       ...(going && state !== 'running' ? { continuing: true as const } : {}),
       ...(going && record.backgroundRunning ? { backgroundRunning: true as const } : {}),
       ...(record.takeover ? { takeover: true as const } : {}),

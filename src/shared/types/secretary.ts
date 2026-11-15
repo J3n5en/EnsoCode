@@ -249,7 +249,21 @@ export interface DispatchRecord {
   /** 已报 stalled 的轮次，一轮只报一次 */
   stalledTurn?: number;
   /** dismissed：用户点过「知道了」；新结果整体替换 lastResult，标记随之失效 */
-  lastResult?: { kind: SecretaryResultKind; turn: number; at: number; dismissed?: true };
+  lastResult?: {
+    kind: SecretaryResultKind;
+    turn: number;
+    at: number;
+    dismissed?: true;
+    /** 用户手动标记完成：卡片给「撤销标记」，新结果整体替换后自然失效 */
+    manual?: true;
+  };
+  /**
+   * 已有终态结果后被 session_send 重新唤起的时间：这一轮还没结束，仍算在跑。
+   * 轮次一结束就清掉，会话真正空闲时回到原来的终态。
+   */
+  reopenedAt?: number;
+  /** 用户撤销手动标记的时间：放回进行中，直到这一轮出现新结果 */
+  manualUndoneAt?: number;
   /**
    * 接管来的会话：权限与推送同派出会话，可撤销；不计入派出上限。
    * via=scope 表示项目在接管范围内、秘书实际用过它之后才建的跟踪记录。
@@ -414,6 +428,8 @@ export type SecretaryCard =
       continuing?: true;
       /** 会话空闲但还有没结束的后台任务：进行中列表要把它和续跑区分开 */
       backgroundRunning?: true;
+      /** 用户手动标记完成：完成列的卡片据此给「撤销标记」 */
+      manual?: true;
       secretaryConversationId: string;
       unread?: boolean;
       takeover?: true;
@@ -511,6 +527,10 @@ export interface SecretaryDailyItem {
   /** 派出时间；派发/接管会话的卡片才有 */
   dispatchedAt?: number;
   conversationId?: string;
+  /** 有派发或接管记录：只有这类会话才给「标记完成」 */
+  tracked?: true;
+  /** 用户手动标记完成：完成列的卡片据此给「撤销标记」 */
+  manual?: true;
 }
 
 export interface SecretaryDailyCounts {
