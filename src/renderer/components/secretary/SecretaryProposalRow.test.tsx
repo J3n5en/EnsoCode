@@ -336,3 +336,63 @@ describe('SecretaryProposalRow takeover proposals', () => {
     expect(buttons(failed)).toEqual([]);
   });
 });
+
+const cleanupProposal: SecretaryProposal = {
+  id: 'pr5',
+  secretaryConversationId: 'sec1',
+  createdAt: 1,
+  updatedAt: 1,
+  status: 'pending',
+  kind: 'cleanup',
+  draft: {
+    items: [
+      {
+        id: 'branch|/repo|feat/done',
+        kind: 'branch',
+        name: 'feat/done',
+        mergedInto: ['feat/secretary-agent'],
+      },
+      {
+        id: 'worktree|/wt/1',
+        kind: 'worktree',
+        name: 'feat/wt',
+        mergedInto: ['main'],
+        sizeBytes: 3 * 1024 * 1024,
+      },
+      { id: 'session|c9', kind: 'session', name: '写发布说明' },
+    ],
+  },
+};
+
+describe('SecretaryProposalRow cleanup proposals', () => {
+  const renderCleanup = (over: Partial<SecretaryProposal> = {}): string => {
+    h.proposal = null;
+    h.extra = { pr5: { ...cleanupProposal, ...over } };
+    h.resolving = false;
+    return renderToStaticMarkup(createElement(SecretaryProposalRow, { proposalId: 'pr5' }));
+  };
+
+  it('确认卡把会删的每一条都列出来', () => {
+    const html = renderCleanup();
+    expect(html).toContain('data-kind="cleanup"');
+    expect(html).toContain('[Clean up]');
+    expect(html).toContain('feat/done');
+    expect(html).toContain('feat/wt');
+    expect(html).toContain('写发布说明');
+    expect(html).toContain('[merged into {{refs}}]');
+    expect(html).toContain('3.0 MB');
+    expect(buttons(html)).toEqual(['[Confirm cleanup]', '[Reject]']);
+  });
+
+  it('确认后显示执行摘要，不再有按钮', () => {
+    const html = renderCleanup({ status: 'succeeded', report: 'deleted 2; archived 1' });
+    expect(html).toContain('[Cleanup done]');
+    expect(html).toContain('deleted 2; archived 1');
+    expect(buttons(html)).toEqual([]);
+  });
+
+  it('cleanup_apply 的结果也算提案卡片', () => {
+    const output = '{"status":"awaiting_confirmation","proposalId":"pr5"}';
+    expect(secretaryProposalId({ name: 'cleanup_apply', output, state: 'ok' })).toBe('pr5');
+  });
+});

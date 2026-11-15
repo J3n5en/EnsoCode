@@ -28,6 +28,8 @@ import {
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import {
+  type CleanupDraft,
+  type CleanupItem,
   type DispatchDraft,
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
@@ -49,6 +51,7 @@ import {
 } from '@shared/types/secretary';
 import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
+import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
 import { todoDispatchPrompt } from './dispatchBrief';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import { closeRelayAsk, dropRelaysFor, pendingRelay, relayKey, sessionLabel } from './relay';
@@ -130,6 +133,8 @@ export interface SecretaryDispatchPorts {
   dropQueued(conversationId: string, messageIds: readonly string[]): MaybePromise<number>;
   /** 有目标的会话被停止时置为暂停 */
   pauseGoal(conversationId: string): MaybePromise<void>;
+  /** 收尾清理要的 git / 目录 / 归档能力；清理提案确认时用 */
+  cleanup: CleanupPorts;
   /** 确认 profile 提案：交给档案服务走同一套保存与副作用 */
   applyProfile(
     draft: SecretaryProfileDraft,
@@ -534,6 +539,34 @@ async function saveProposal(
   const file = ports.dispatchFile();
   file.proposals[id] = proposal;
   ports.saveDispatch(file);
+  notifySecretaryChanged();
+  return id;
+}
+
+/**
+ * 清理提案：卡片上列出会删什么，用户确认后才执行。
+ * 与派活提案共用同一套状态机与推送，只是执行体换成 applyCleanup。
+ */
+export function saveCleanupProposal(
+  items: CleanupItem[],
+  secretaryConversationId: string | null
+): string {
+  if (!secretaryConversationId) throw new Error('cleanup needs a secretary conversation');
+  const now = Date.now();
+  const id = randomUUID();
+  const draft: CleanupDraft = { items };
+  const proposal: SecretaryProposal = {
+    id,
+    secretaryConversationId,
+    createdAt: now,
+    updatedAt: now,
+    status: 'pending',
+    kind: 'cleanup',
+    draft,
+  };
+  const file = secretaryDispatchPorts.dispatchFile();
+  file.proposals[id] = proposal;
+  secretaryDispatchPorts.saveDispatch(file);
   notifySecretaryChanged();
   return id;
 }
@@ -1804,7 +1837,7 @@ export type ResolveProposalResult =
 async function finishProposal(
   ports: SecretaryDispatchPorts,
   proposalId: string,
-  outcome: { ok: true; conversationId?: string } | { ok: false; error: string }
+  outcome: { ok: true; conversationId?: string; report?: string } | { ok: false; error: string }
 ): Promise<ResolveProposalResult> {
   const file = ports.dispatchFile();
   const current = file.proposals[proposalId];
@@ -1915,6 +1948,18 @@ export async function resolveProposal(
       proposalId,
       applied.ok ? { ok: true } : { ok: false, error: applied.error ?? 'tool-save-failed' }
     );
+  }
+  if (transitioned.proposal.kind === 'cleanup') {
+    // 卡片上的清单只是快照：执行时按 id 重新校验一遍，未合入、在用、有未提交改动的都跳过
+    const applied = await applyCleanup(
+      ports.cleanup,
+      transitioned.proposal.draft,
+      transitioned.proposal.secretaryConversationId
+    );
+    return finishProposal(ports, proposalId, {
+      ok: true,
+      report: cleanupReportText(applied),
+    });
   }
   if (transitioned.proposal.kind === 'takeover') {
     const granted = await grantTakeover(
@@ -2182,6 +2227,7 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
     store().saveTodos(todos);
   },
   audit: (entry) => appendAudit(secretaryDir(), entry),
+  cleanup: realCleanupPorts(),
   projects: async () =>
     (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
   conversations: async () =>

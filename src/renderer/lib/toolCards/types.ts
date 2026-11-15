@@ -39,7 +39,9 @@ export type ToolCardBlock =
         sessionId?: string;
       }[];
     }
-  | { kind: 'session'; id: string; label: string };
+  | { kind: 'session'; id: string; label: string }
+  /** 缩略图：src 是 local-image:// URL，宽高只用于占位，实际按 CSS 收边 */
+  | { kind: 'image'; src: string; alt?: string; width?: number; height?: number };
 
 export interface ToolCardView {
   name: string;
