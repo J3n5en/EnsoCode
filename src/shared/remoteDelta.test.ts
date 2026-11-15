@@ -111,6 +111,16 @@ describe('远端只读结果缓存', () => {
     expect(a).not.toBe(b);
     expect(calls).toBe(1);
   });
+
+  it('其他读取较多时仍保留旧基线，回来只发增量', () => {
+    const host = new RemoteReadCache(hash);
+    const v1 = { s: 'q'.repeat(3000), n: 1 };
+    const base = host.respond(v1, '').__ensoCached.h;
+    for (let i = 0; i < 40; i++) host.respond({ tail: i }, '');
+    const reply = host.respond({ ...v1, n: 2 }, base).__ensoCached;
+    expect(reply.ops).toBeDefined();
+    expect(reply.v).toBeUndefined();
+  });
 });
 
 describe('流式消息增量', () => {
