@@ -59,6 +59,9 @@ export type SecretaryInvokeOp = SecretaryOp | SecretaryInternalOp;
 /** 模型侧 schema 与 Main 校验共用的上限：两边各写一份会漂移 */
 export const SECRETARY_ID_MAX = 200;
 export const SECRETARY_SESSION_MESSAGE_MAX = 8000;
+/** session_send 一次最多转发几张图；路径上限与 image_view 一致 */
+export const SECRETARY_ATTACHMENT_MAX = 5;
+export const SECRETARY_ATTACHMENT_PATH_MAX = 1024;
 
 /**
  * 秘书会话可见工具的唯一来源：worker 装配时按名字做允许列表，白名单外的一律不可见。

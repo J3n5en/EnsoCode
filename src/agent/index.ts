@@ -26,7 +26,16 @@ const supervisor = new SessionSupervisor({
   sessionDir: path.join(dataDir, 'sessions'),
   workflowDir: path.join(dataDir, 'workflows'),
   dataDir,
+  userImageDirs: userImageDirsFromEnv(),
 });
+
+/** Main 下发的应用用户图片目录（冒号分隔）：编码会话的 image_view 白名单里带上它 */
+function userImageDirsFromEnv(): string[] {
+  return (process.env.ENSO_USER_IMAGE_DIRS ?? '')
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.startsWith('/'));
+}
 
 port.onMessage((data) => {
   const command = parseAgentCommand(data);

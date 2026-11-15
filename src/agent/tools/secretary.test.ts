@@ -37,11 +37,19 @@ describe('secretary tools', () => {
     const tools = createSecretaryTools(invoker().port);
     const schemaOf = (name: string) =>
       tools.find((tool) => tool.name === name)?.parameters as unknown as {
-        properties: Record<string, { type?: string; enum?: string[] }>;
+        properties: Record<
+          string,
+          { type?: string; enum?: string[]; maxItems?: number; items?: { type?: string } }
+        >;
         required?: string[];
       };
     const send = schemaOf('session_send');
     expect(send.properties.mode).toMatchObject({ type: 'string', enum: ['queue', 'steer'] });
+    expect(send.properties.attachments).toMatchObject({
+      type: 'array',
+      maxItems: 5,
+      items: { type: 'string' },
+    });
     expect(send.required).toEqual(['conversationId', 'message']);
     const stop = schemaOf('session_stop');
     expect(stop.properties.clearQueue).toMatchObject({ type: 'boolean' });
@@ -84,6 +92,25 @@ describe('secretary tools', () => {
     expect(normalizeSecretaryParams('session_send', { conversationId: 'c1', text: 'hi' })).toEqual({
       conversationId: 'c1',
       message: 'hi',
+    });
+    // 单张图片写成字符串时包成数组，别名 images / imagePaths 都认
+    expect(
+      normalizeSecretaryParams('session_send', {
+        conversationId: 'c1',
+        message: '按图改',
+        attachments: ' /tmp/a.png ',
+      })
+    ).toEqual({ conversationId: 'c1', message: '按图改', attachments: ['/tmp/a.png'] });
+    expect(
+      normalizeSecretaryParams('session_send', {
+        sessionId: 'c1',
+        text: '按图改',
+        images: ['/tmp/a.png', '/tmp/b.png'],
+      })
+    ).toEqual({
+      conversationId: 'c1',
+      message: '按图改',
+      attachments: ['/tmp/a.png', '/tmp/b.png'],
     });
     expect(
       normalizeSecretaryParams('session_send', {
