@@ -3486,8 +3486,9 @@ async function verifyTelegramContact(cdp, setup) {
   );
 
   // 界面上是卡片：发送者 + 时间 + 正文，包裹层不外露
+  // 刚切过去的会话要等一帧才渲染完，这里等节点出现，别抢在渲染前查
   const card = await page(`
-    const node = document.querySelector('[data-telegram-inbound]');
+    const node = await until(() => document.querySelector('[data-telegram-inbound]'), 15000);
     return JSON.stringify({
       found: Boolean(node),
       text: node?.textContent ?? '',
@@ -5473,9 +5474,12 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     viewedMeta ?? viewed.text
   );
   const thumb = await page(`
-    document
-      .querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-expand]')
-      ?.click();
+    // 工具卡片是异步渲染的：先等卡片出现再展开，否则点击落空、缩略图永远不出来
+    const card = await until(
+      () => document.querySelector('[data-enso=tool-card][data-tool=image_view]'),
+      15000
+    );
+    card?.querySelector('[data-enso=tool-card-expand]')?.click();
     const image = await until(
       () => document.querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-image]'),
       15000
