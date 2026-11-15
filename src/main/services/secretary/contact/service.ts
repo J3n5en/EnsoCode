@@ -4,8 +4,13 @@ import {
   type ContactReadCommandName,
   commandListText,
   escapeHtml,
+  followingEmptyText,
+  followingUsageText,
+  followKindLabel,
+  formatFollowingMessage,
   formatSyncMessage,
   parseContactCommand,
+  parseFollowingArg,
   parseSyncArg,
   syncUsageText,
   unknownCommandText,
@@ -27,8 +32,10 @@ import {
   cardOpenButtonText,
   createBindCode,
   feedCallbackData,
+  followCallbackData,
   formatAskMessage,
   formatCardWaitingMessage,
+  formatFollowedScheduleMessage,
   formatMilestoneMessage,
   formatSilentTurnLine,
   formatTestMessage,
@@ -38,6 +45,7 @@ import {
   parseAskCallbackData,
   parseCardCallbackData,
   parseFeedCallback,
+  parseFollowCallback,
   proposalDeepLink,
   type SecretaryCardKind,
   shouldForwardMilestone,
@@ -66,6 +74,7 @@ import type {
   SecretaryProfile,
   SecretaryResultKind,
 } from '@shared/types/secretary';
+import { type FollowedTask, type FollowingPort, followingViews } from '../following';
 import {
   createTelegramApi,
   type TelegramApi,
@@ -86,6 +95,7 @@ export type ContactError =
   | 'unauthorized'
   | 'api'
   | 'not-bound'
+  | 'not-found'
   | 'no-secretary'
   | 'deliver-failed';
 
@@ -123,9 +133,18 @@ export interface ContactRelayAskInput {
   label: string;
 }
 
+/** 手机关注里的定时到点了：推一次就结束关注 */
+export interface ContactScheduleFiredInput {
+  scheduleId: string;
+  /** 定时自己的名字与内容，推文里补一句 */
+  text: string;
+}
+
 /** 回传宿主转发给手机的那几件事；TelegramContactService 就是它的实现 */
 export interface SecretaryContactPort {
   onMilestone(input: ContactMilestoneInput): void;
+  /** 手机关注里的定时触发：与里程碑同一个出口，推一次就结束关注 */
+  onScheduleFired(input: ContactScheduleFiredInput): void;
   onRelayAsk(input: ContactRelayAskInput): void;
   onAskRequest(conversationId: string, ask: AskRequestInfo): void;
   onAskResolved(conversationId: string, requestId: string): void;
@@ -173,6 +192,8 @@ export interface ContactServicePorts {
   onError?(code: ContactError, detail?: string): void;
   /** 只读命令：由 Main 查面板同一份数据，不进秘书会话 */
   commands?: ContactCommands;
+  /** 手机关注的任务：派发与定时写、这里读与取消 */
+  following?: FollowingPort;
   /** 测试注入假 API；生产按 token 现建 */
   api?(token: string): TelegramApi;
 }
@@ -201,6 +222,9 @@ const MAX_CARD_BUTTONS = 4;
 
 /** Telegram 的「正在输入…」只亮约 5 秒：4 秒续一次，留出网络抖动 */
 const TYPING_REFRESH_MS = 4_000;
+
+/** 推过一次就结束关注的里程碑：完成与失败；「需要你」这类还在等，继续跟 */
+const FOLLOW_END_KINDS: ReadonlySet<SecretaryResultKind> = new Set(['goal-complete', 'failed']);
 
 /** 已经发到手机上的确认卡：处理掉之后要把那条消息的按钮清掉 */
 interface TrackedCard extends ContactCardRef {
@@ -253,6 +277,11 @@ export class TelegramContactService implements SecretaryContactPort {
   private slot = 1;
   /** 从手机发来消息后，等这一轮的正文再回发手机 */
   private readonly awaitingReply = new Set<string>();
+  /**
+   * 手机上正在确认卡片：确认出来的会话也算手机发起的任务，
+   * 这一小段时间里派生的东西同样记进关注列表。
+   */
+  private readonly phoneOrigin = new Set<string>();
   /**
    * 正在续发「正在输入…」的那一轮。同一时间只跑一个循环：
    * 万一多个回合叠在一起，也不会对同一个 chat 重复发。
@@ -307,10 +336,28 @@ export class TelegramContactService implements SecretaryContactPort {
         allowCardConfirm: file.allowCardConfirm,
         allowMemory: file.allowMemory,
         syncMirror: file.syncMirror,
+        following: followingViews(this.followingList()),
         poll: this.poller.status(),
         secure: this.store.isSecure(),
       },
     };
+  }
+
+  /**
+   * 手机发起的回合：等待回复的那一轮，或正在手机上确认卡片的那一会儿。
+   * 返回发起它的 chat，派发与定时据此决定要不要记进关注列表。
+   */
+  phoneTurnChat(conversationId: string): number | null {
+    const chat = this.store.file().chat;
+    if (!chat) return null;
+    if (this.awaitingReply.has(conversationId) || this.phoneOrigin.has(conversationId)) {
+      return chat.id;
+    }
+    return null;
+  }
+
+  private followingList(): FollowedTask[] {
+    return this.ports.following?.list() ?? [];
   }
 
   /** 启动时接着轮询：上次已经绑过、token 还在 */
@@ -401,6 +448,8 @@ export class TelegramContactService implements SecretaryContactPort {
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
+    this.phoneOrigin.clear();
+    this.clearFollowing('contact_unbind');
     this.stopTyping();
     this.audit('contact_unbind', true);
     this.ports.publish();
@@ -419,6 +468,8 @@ export class TelegramContactService implements SecretaryContactPort {
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
+    this.phoneOrigin.clear();
+    this.clearFollowing('contact_forget_bot');
     this.stopTyping();
     this.audit('contact_forget_bot', true);
     this.ports.publish();
@@ -448,20 +499,68 @@ export class TelegramContactService implements SecretaryContactPort {
     this.ports.publish();
   }
 
-  /** 秘书对 J 哥说的里程碑：与系统通知同一批结果，按 notify 决定发不发 */
+  /** 设置页里的「取消关注」：按关注项 id 移除，推文不再跟这条任务 */
+  unfollow(id: string): ContactResult {
+    const removed = this.ports.following?.remove(id) ?? false;
+    this.audit('contact_follow_cancel', removed, removed ? id : 'not-found');
+    if (!removed) return { ok: false, error: 'not-found' };
+    this.ports.publish();
+    return { ok: true };
+  }
+
+  /** 设置页里的「全部清空」 */
+  clearFollowed(): ContactResult {
+    const count = this.ports.following?.clear() ?? 0;
+    this.audit('contact_follow_clear', true, `cleared ${count} (settings)`);
+    this.ports.publish();
+    return { ok: true };
+  }
+
+  /**
+   * 秘书对 J 哥说的里程碑：与系统通知同一批结果，按 notify 决定发不发。
+   * 手机发起的任务带上原始需求摘要；完成或失败推过一次就结束关注。
+   */
   onMilestone(input: ContactMilestoneInput): void {
     const mode = this.ports.notifyMode();
     if (!mode || !shouldForwardMilestone(mode, input.kind)) return;
     const file = this.store.file();
     if (!file.chat) return;
+    const follow = this.ports.following?.find('session', input.conversationId);
     const text = formatMilestoneMessage(this.ports.lang(), {
       kind: input.kind,
       title: input.title,
       ...(input.lastText ? { lastText: input.lastText } : {}),
+      ...(follow ? { summary: follow.summary } : {}),
       link: `enso://secretary?conversation=${encodeURIComponent(input.conversationId)}`,
     });
     void this.send(file.chat.id, text).then((sent) => {
-      this.audit('contact_milestone', sent.ok, sent.ok ? input.kind : sent.error);
+      this.audit(
+        follow ? 'contact_follow_push' : 'contact_milestone',
+        sent.ok,
+        sent.ok ? input.kind : sent.error
+      );
+      if (!sent.ok || !follow) return;
+      // 推出去才算结束：发失败的关注留着，下一次结果还能再推
+      if (!FOLLOW_END_KINDS.has(input.kind)) return;
+      this.ports.following?.take('session', input.conversationId);
+      this.audit('contact_follow_done', true, `${input.kind} ${follow.summary}`);
+    });
+  }
+
+  /** 手机关注里的定时到点了：只推这一次，推完就结束关注 */
+  onScheduleFired(input: ContactScheduleFiredInput): void {
+    const file = this.store.file();
+    const follow = this.ports.following?.find('schedule', input.scheduleId);
+    if (!file.chat || !follow) return;
+    const text = formatFollowedScheduleMessage(this.ports.lang(), {
+      summary: follow.summary,
+      text: input.text,
+    });
+    void this.send(file.chat.id, text).then((sent) => {
+      this.audit('contact_follow_push', sent.ok, sent.ok ? 'schedule' : sent.error);
+      if (!sent.ok) return;
+      this.ports.following?.take('schedule', input.scheduleId);
+      this.audit('contact_follow_done', true, `schedule ${follow.summary}`);
     });
   }
 
@@ -803,6 +902,154 @@ export class TelegramContactService implements SecretaryContactPort {
     this.audit('contact_command', sent.ok, 'unknown');
   }
 
+  /** 解绑与换 bot：关注列表一起清掉，没人收推送了 */
+  private clearFollowing(reason: string): void {
+    const count = this.ports.following?.clear() ?? 0;
+    if (count > 0) this.audit('contact_follow_clear', true, `cleared ${count} (${reason})`);
+  }
+
+  /**
+   * /following：列出手机关注的任务，可以逐个取消或全清。
+   * 与 /sync 一样由服务自己处理：列表要带按钮，取消要落盘。
+   */
+  private async runFollowing(arg: string): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    if (!chatId) return;
+    const lang = this.ports.lang();
+    const following = this.ports.following;
+    const parsed = parseFollowingArg(arg);
+    if (!parsed || !following) {
+      const sent = await this.send(chatId, followingUsageText(lang));
+      this.audit('contact_command', sent.ok, 'following');
+      return;
+    }
+    if (parsed.action === 'clear') {
+      const count = following.clear();
+      if (count > 0) this.audit('contact_follow_clear', true, `cleared ${count}`);
+      const sent = await this.send(
+        chatId,
+        count > 0
+          ? lang === 'zh'
+            ? `已清空 ${count} 个关注的任务。`
+            : `Cleared ${count} followed task${count === 1 ? '' : 's'}.`
+          : followingEmptyText(lang)
+      );
+      this.audit('contact_command', sent.ok, 'following');
+      return;
+    }
+    if (parsed.action === 'cancel') {
+      const item = following.list()[parsed.index - 1];
+      if (!item) {
+        const sent = await this.send(chatId, followingUsageText(lang));
+        this.audit('contact_command', sent.ok, 'following');
+        return;
+      }
+      following.remove(item.id);
+      this.audit(
+        'contact_follow_cancel',
+        true,
+        `${followKindLabel(lang, item.kind)} ${item.summary}`
+      );
+    }
+    await this.sendFollowingList(chatId);
+  }
+
+  /** 关注列表与按钮：序号与 /following cancel <序号> 一致 */
+  private async sendFollowingList(chatId: number): Promise<void> {
+    const lang = this.ports.lang();
+    const items = this.followingList();
+    const text = formatFollowingMessage(lang, {
+      items: followingViews(items),
+      now: this.ports.now(),
+    });
+    const keyboard = this.followingKeyboard(items);
+    const sent = await this.send(chatId, text, {
+      format: 'html',
+      ...(keyboard ? { replyMarkup: keyboard } : {}),
+    });
+    this.audit('contact_command', sent.ok, 'following');
+  }
+
+  /** 每项一个「取消 N」按钮，最后一行是全清；没有关注项就不给按钮 */
+  private followingKeyboard(
+    items: readonly FollowedTask[]
+  ): { inline_keyboard: { text: string; callback_data: string }[][] } | undefined {
+    if (items.length === 0) return undefined;
+    const lang = this.ports.lang();
+    const rows = items.slice(0, MAX_CARD_BUTTONS).map((_item, index) => [
+      {
+        text: lang === 'zh' ? `取消 ${index + 1}` : `Drop ${index + 1}`,
+        callback_data: followCallbackData('cancel', index + 1),
+      },
+    ]);
+    rows.push([
+      {
+        text: lang === 'zh' ? '全清' : 'Drop all',
+        callback_data: followCallbackData('clear'),
+      },
+    ]);
+    return { inline_keyboard: rows };
+  }
+
+  /** 取消一项或全清：原地换掉这条消息，按钮跟着列表一起变 */
+  private async handleFollowCallback(
+    query: TelegramCallbackQuery,
+    action: { action: 'cancel' | 'clear'; index?: number }
+  ): Promise<void> {
+    const lang = this.ports.lang();
+    const following = this.ports.following;
+    if (!following) {
+      await this.answerCallback(query.id, followingEmptyText(lang));
+      return;
+    }
+    if (action.action === 'clear') {
+      const count = following.clear();
+      if (count > 0) this.audit('contact_follow_clear', true, `cleared ${count}`);
+      await this.answerCallback(
+        query.id,
+        lang === 'zh' ? `已清空 ${count} 个` : `Cleared ${count}`
+      );
+      await this.refreshFollowingMessage(query);
+      return;
+    }
+    const item = following.list()[(action.index ?? 0) - 1];
+    if (!item) {
+      await this.answerCallback(query.id, lang === 'zh' ? '这条关注已经结束了' : 'Already gone');
+      await this.refreshFollowingMessage(query);
+      return;
+    }
+    following.remove(item.id);
+    this.audit(
+      'contact_follow_cancel',
+      true,
+      `${followKindLabel(lang, item.kind)} ${item.summary}`
+    );
+    await this.answerCallback(query.id, lang === 'zh' ? '已取消关注' : 'Dropped');
+    await this.refreshFollowingMessage(query);
+  }
+
+  /** 原地重画关注列表；消息太旧改不动就再发一条新的 */
+  private async refreshFollowingMessage(query: TelegramCallbackQuery): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    const messageId = query.message?.message_id;
+    const token = this.store.token();
+    if (!chatId || messageId === undefined || !token) return;
+    const lang = this.ports.lang();
+    const items = this.followingList();
+    try {
+      await this.apiFor(token).editMessageText({
+        chatId,
+        messageId,
+        text: formatFollowingMessage(lang, { items: followingViews(items), now: this.ports.now() }),
+        replyMarkup: this.followingKeyboard(items) ?? { inline_keyboard: [] },
+        parseMode: 'HTML',
+      });
+    } catch (error) {
+      this.audit('contact_command', false, 'following');
+      this.reportError(error);
+    }
+  }
+
   /** 「更早」：原地换掉这一条，翻页不刷屏 */
   private async handleFeedCallback(query: TelegramCallbackQuery, token: string): Promise<void> {
     const cursor = this.feedCursors.get(token);
@@ -1097,6 +1344,10 @@ export class TelegramContactService implements SecretaryContactPort {
         await this.runSync(command.arg);
         return;
       }
+      if (command.name === 'following') {
+        await this.runFollowing(command.arg);
+        return;
+      }
       await this.runCommand(command.name, command.arg);
       return;
     }
@@ -1139,6 +1390,11 @@ export class TelegramContactService implements SecretaryContactPort {
     const feedToken = query.data ? parseFeedCallback(query.data) : null;
     if (feedToken !== null) {
       await this.handleFeedCallback(query, feedToken);
+      return;
+    }
+    const follow = query.data ? parseFollowCallback(query.data) : null;
+    if (follow) {
+      await this.handleFollowCallback(query, follow);
       return;
     }
     const card = query.data ? parseCardCallbackData(query.data) : null;
@@ -1213,7 +1469,14 @@ export class TelegramContactService implements SecretaryContactPort {
       );
       return;
     }
-    const result = await this.ports.resolveProposal(card.id, action);
+    // 手机上确认出来的会话也算手机发起的任务：确认期间派生的东西记进关注列表
+    if (card.conversationId) this.phoneOrigin.add(card.conversationId);
+    let result: { ok: boolean; error?: string };
+    try {
+      result = await this.ports.resolveProposal(card.id, action);
+    } finally {
+      if (card.conversationId) this.phoneOrigin.delete(card.conversationId);
+    }
     this.audit(
       action === 'confirm' ? 'contact_card_confirm' : 'contact_card_reject',
       result.ok,

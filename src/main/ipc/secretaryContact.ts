@@ -23,6 +23,7 @@ import {
   secretaryBoard,
   secretaryDispatchPorts,
 } from '../services/secretary/dispatch';
+import { FollowingStore, setPhoneTurnChatProbe } from '../services/secretary/following';
 import { secretaryProjectId } from '../services/secretary/identity';
 import { listSchedules, secretarySchedulePorts } from '../services/secretary/schedules';
 import {
@@ -89,6 +90,18 @@ function readFlag(request: unknown, key: 'allowCardConfirm' | 'allowMemory'): bo
   return typeof value === 'boolean' ? value : null;
 }
 
+/** 关注列表的操作：取消一项要带 id，全清不带 */
+function readFollowingRequest(
+  request: unknown
+): { action: 'cancel'; id: string } | { action: 'clear' } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const record = request as Record<string, unknown>;
+  if (record.action === 'clear') return { action: 'clear' };
+  if (record.action !== 'cancel') return null;
+  const id = typeof record.id === 'string' ? record.id.trim() : '';
+  return id ? { action: 'cancel', id } : null;
+}
+
 export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryContact {
   const store = new ContactStore(deps.dir());
   let service: TelegramContactService | null = null;
@@ -140,6 +153,8 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
       answerAskAsUserFromMain(conversationId, requestId, answer),
     resolveProposal: (proposalId, action) => deps.resolveProposal(proposalId, action),
     openInApp: (target) => deps.openInApp(target),
+    // 手机关注的任务：派发与定时写、这里读与取消，重启后还在
+    following: new FollowingStore(deps.dir()),
     onError: (code, detail) => {
       console.warn(`[secretary-contact] ${code}${detail ? `: ${detail}` : ''}`);
     },
@@ -187,6 +202,8 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
 
   ports.commands = commands;
   service = new TelegramContactService(store, ports);
+  // 派发与定时不认识联系方式：只通过这个探针问一句「这一轮是手机发起的吗」
+  setPhoneTurnChatProbe((conversationId) => service?.phoneTurnChat(conversationId) ?? null);
 
   return {
     service,
@@ -234,6 +251,15 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
         if (cards !== null) service.setAllowCardConfirm(cards);
         if (memory !== null) service.setAllowMemory(memory);
         return { ok: true };
+      });
+
+      // 手机关注的任务：取消一项或全清；列表跟着联系方式状态一起推
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_FOLLOWING, async (event, request: unknown) => {
+        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        const parsed = readFollowingRequest(request);
+        if (!parsed) return { ok: false, error: 'invalid request' };
+        if (parsed.action === 'clear') return service.clearFollowed();
+        return service.unfollow(parsed.id);
       });
     },
   };

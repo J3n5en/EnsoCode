@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { FeedCursor } from '@shared/secretary/feed';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { FollowingStore } from '../following';
 import type {
   TelegramApi,
   TelegramCommandOptions,
@@ -141,6 +142,7 @@ function harness() {
   const dir = mkdtempSync(join(tmpdir(), 'secretary-contact-'));
   dirs.push(dir);
   const store = new ContactStore(dir);
+  const following = new FollowingStore(dir);
   const api = new FakeApi();
   const audits: SecretaryAuditEntry[] = [];
   const clock = { now: 1_000_000 };
@@ -195,6 +197,7 @@ function harness() {
     openInApp: (target) => {
       world.opened.push(target);
     },
+    following,
     api: () => api,
     commands: {
       run: async (name) => {
@@ -222,6 +225,8 @@ function harness() {
   return {
     dir,
     store,
+    following,
+    ports,
     api,
     audits,
     clock,
@@ -1492,5 +1497,183 @@ describe('「正在输入…」', () => {
     h.service.onTurnReply('sec-1', '在，刚把登录修完');
     await vi.advanceTimersByTimeAsync(0);
     expect(h.api.sent.at(-1)?.text).toContain('在，刚把登录修完');
+  });
+});
+
+describe('手机关注的任务', () => {
+  /** 已绑定、轮询在跑：命令与按钮回调都从这里进来 */
+  async function bound(h: ReturnType<typeof harness>): Promise<void> {
+    await h.store.saveToken(TOKEN);
+    h.store.save({ ...h.store.file(), chat: { id: 777 } });
+    await h.service.start();
+    h.api.sent.length = 0;
+  }
+
+  function follow(
+    h: ReturnType<typeof harness>,
+    kind: 'session' | 'schedule',
+    targetId: string,
+    summary: string
+  ): void {
+    h.following.add({ kind, targetId, chatId: 777, at: h.clock.now, summary });
+  }
+
+  it('关注的会话完成时推手机，带上原始需求摘要，推过一次就结束关注', async () => {
+    const h = harness();
+    await bound(h);
+    follow(h, 'session', 'c1', 'apple-table 加 Score 字段');
+    h.service.onMilestone({ kind: 'goal-complete', title: 'alpha · 加字段', conversationId: 'c1' });
+    await waitFor(() => h.api.sent.length > 0, 'milestone');
+    const text = h.api.sent.at(-1)?.text ?? '';
+    expect(text).toContain('✅ 完成 · alpha · 加字段');
+    expect(text).toContain('你让我做的「apple-table 加 Score 字段」');
+    await waitFor(() => h.following.list().length === 0, 'follow ended');
+    expect(h.audits.find((entry) => entry.op === 'contact_follow_push')).toMatchObject({
+      ok: true,
+      detail: 'goal-complete',
+    });
+    expect(h.audits.some((entry) => entry.op === 'contact_follow_done')).toBe(true);
+  });
+
+  it('推过一次后不会重复推：第二次完成不再带摘要', async () => {
+    const h = harness();
+    await bound(h);
+    follow(h, 'session', 'c1', '加字段');
+    h.service.onMilestone({ kind: 'goal-complete', title: 'A · B', conversationId: 'c1' });
+    await waitFor(() => h.following.list().length === 0, 'follow ended');
+    expect(h.api.sent.at(-1)?.text).toContain('你让我做的「加字段」');
+    h.service.onMilestone({ kind: 'goal-complete', title: 'A · B', conversationId: 'c1' });
+    await waitFor(() => h.api.sent.length > 1, 'second');
+    expect(h.api.sent.at(-1)?.text).not.toContain('你让我做的');
+  });
+
+  it('需要你处理这类不结束关注，继续跟到完成', async () => {
+    const h = harness();
+    await bound(h);
+    follow(h, 'session', 'c1', '加字段');
+    h.service.onMilestone({ kind: 'needs-user', title: 'A · B', conversationId: 'c1' });
+    await waitFor(() => h.api.sent.length > 0, 'needs-user');
+    expect(h.following.list()).toHaveLength(1);
+    h.service.onMilestone({ kind: 'failed', title: 'A · B', conversationId: 'c1' });
+    await waitFor(() => h.following.list().length === 0, 'failed ends follow');
+  });
+
+  it('/sync 打开时不重复推：一条里程碑只发一次', async () => {
+    const h = harness();
+    await bound(h);
+    h.store.save({ ...h.store.file(), syncMirror: true });
+    follow(h, 'session', 'c1', '加字段');
+    h.service.onMilestone({ kind: 'goal-complete', title: 'A · B', conversationId: 'c1' });
+    await waitFor(() => h.api.sent.length > 0, 'milestone');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toHaveLength(1);
+    expect(h.api.sent[0]?.text).toContain('你让我做的「加字段」');
+    expect(h.following.list()).toEqual([]);
+  });
+
+  it('关注的定时到点推一次手机，推完结束关注；没关注的不推', async () => {
+    const h = harness();
+    await bound(h);
+    follow(h, 'schedule', 'sch1', '每天早上看 CI');
+    h.service.onScheduleFired({ scheduleId: 'sch1', text: '每天早上看 CI：看 CI 结果' });
+    await waitFor(() => h.api.sent.length > 0, 'schedule push');
+    expect(h.api.sent.at(-1)?.text).toContain('⏰ 你让我设的「每天早上看 CI」到点了');
+    await waitFor(() => h.following.list().length === 0, 'schedule follow ended');
+    h.service.onScheduleFired({ scheduleId: 'sch2', text: '别的定时' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toHaveLength(1);
+  });
+
+  it('/following 列出、逐个取消、clear', async () => {
+    const h = harness();
+    await bound(h);
+    follow(h, 'session', 'c1', '加字段');
+    follow(h, 'schedule', 'sch1', '看 CI');
+    h.api.push(privateMessage('/following'));
+    await waitFor(() => h.api.sent.length > 0, 'listed');
+    const listed = h.api.sent.at(-1);
+    expect(listed?.text).toContain('手机关注 2');
+    expect(listed?.text).toContain('加字段');
+    expect(listed?.text).toContain('看 CI');
+    expect(listed?.replyMarkup?.inline_keyboard.flat().map((row) => row.callback_data)).toEqual([
+      'fo:c:1',
+      'fo:c:2',
+      'fo:x',
+    ]);
+    // 取消第 1 项：列表原地重画
+    h.api.push({
+      update_id: 2,
+      callback_query: { id: 'cb-1', data: 'fo:c:1', message: { message_id: 9, chat: { id: 777 } } },
+    });
+    await waitFor(() => h.following.list().length === 1, 'cancelled');
+    expect(h.following.list()).toMatchObject([{ targetId: 'sch1' }]);
+    expect(h.api.edited.at(-1)?.text).toContain('手机关注 1');
+    expect(h.api.callbacks.at(-1)?.text).toBe('已取消关注');
+    // /following clear 全清
+    h.api.push(privateMessage('/following clear'));
+    await waitFor(() => h.following.list().length === 0, 'cleared');
+    expect(h.api.sent.at(-1)?.text).toContain('已清空 1');
+  });
+
+  it('解绑时关注列表一起清空', async () => {
+    const h = harness();
+    await bound(h);
+    follow(h, 'session', 'c1', '加字段');
+    follow(h, 'schedule', 'sch1', '看 CI');
+    await h.service.unbind();
+    expect(h.following.list()).toEqual([]);
+    expect(h.audits.some((entry) => entry.op === 'contact_follow_clear')).toBe(true);
+  });
+
+  it('关注列表跟着联系方式状态一起给界面', async () => {
+    const h = harness();
+    await bound(h);
+    expect(h.service.state().telegram.following).toEqual([]);
+    follow(h, 'session', 'c1', '加字段');
+    expect(h.service.state().telegram.following).toMatchObject([
+      { id: 'session:c1', kind: 'session', summary: '加字段' },
+    ]);
+  });
+
+  it('重启后关注列表还在', async () => {
+    const h = harness();
+    await bound(h);
+    follow(h, 'session', 'c1', '加字段');
+    const restarted = h.restart();
+    expect(restarted.state().telegram.following).toMatchObject([{ id: 'session:c1' }]);
+  });
+
+  it('只有手机发起的回合才算手机发起：回复发出后就不再算', async () => {
+    const h = harness();
+    await bound(h);
+    expect(h.service.phoneTurnChat('sec-1')).toBeNull();
+    h.api.push(privateMessage('给 apple-table 加个字段'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(h.service.phoneTurnChat('sec-1')).toBe(777);
+    expect(h.service.phoneTurnChat('other')).toBeNull();
+    h.service.onTurnReply('sec-1', '要你点确认卡');
+    expect(h.service.phoneTurnChat('sec-1')).toBeNull();
+  });
+
+  it('手机上确认卡片期间派生的会话也算手机发起', async () => {
+    const h = harness();
+    await bound(h);
+    h.store.save({ ...h.store.file(), allowCardConfirm: true });
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '加字段', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => h.api.sent.length > 0, 'card');
+    const button = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard.flat()[0];
+    expect(button?.callback_data).toBe('card:1:c');
+    const seen: (number | null)[] = [];
+    h.ports.resolveProposal = async () => {
+      seen.push(h.service.phoneTurnChat('sec-1'));
+      return { ok: true };
+    };
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'card:1:c' } });
+    await waitFor(() => seen.length > 0, 'confirmed');
+    expect(seen).toEqual([777]);
+    // 确认完就收回：之后桌面上的派发不算手机发起
+    expect(h.service.phoneTurnChat('sec-1')).toBeNull();
   });
 });

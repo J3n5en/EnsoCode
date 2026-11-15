@@ -10,13 +10,16 @@ import {
   cardConfirmButtonText,
   conversationDeepLink,
   createBindCode,
+  followCallbackData,
   formatAskMessage,
   formatCardWaitingMessage,
+  formatFollowedScheduleMessage,
   formatMilestoneMessage,
   isBoundChat,
   normalizeBotToken,
   parseAskCallbackData,
   parseCardCallbackData,
+  parseFollowCallback,
   proposalDeepLink,
   shouldForwardMilestone,
   startCommandCode,
@@ -120,6 +123,46 @@ describe('手机上的消息格式', () => {
     expect(text.split('\n')[0]).toBe('✅ 完成 · EnsoCode · 修登录');
     expect(text).toContain('已合并到 main，提交 1a2b3c4');
     expect(text).toContain('enso://secretary?conversation=c1');
+  });
+
+  it('手机发起的任务带上原始需求摘要：一眼看出是哪件事', () => {
+    const text = formatMilestoneMessage('zh', {
+      kind: 'goal-complete',
+      title: 'EnsoCode · 加字段',
+      summary: 'apple-table 加 Score 字段',
+      lastText: '已提交 1a2b3c4',
+    });
+    expect(text.split('\n')[1]).toBe('你让我做的「apple-table 加 Score 字段」');
+    expect(
+      formatMilestoneMessage('en', { kind: 'failed', title: 'T', summary: 'add a field' })
+    ).toContain('The task you gave me: "add a field"');
+    // 没有摘要就不多一行
+    expect(formatMilestoneMessage('zh', { kind: 'failed', title: 'T' }).split('\n')).toHaveLength(
+      1
+    );
+  });
+
+  it('关注的定时到点：只推一次，摘要与内容不重复', () => {
+    const text = formatFollowedScheduleMessage('zh', {
+      summary: '每天早上看 CI',
+      text: '每天早上看 CI：看 CI 结果',
+    });
+    expect(text.split('\n')).toEqual([
+      '⏰ 你让我设的「每天早上看 CI」到点了',
+      '每天早上看 CI：看 CI 结果',
+    ]);
+    expect(
+      formatFollowedScheduleMessage('en', { summary: 'daily CI', text: 'daily CI' }).split('\n')
+    ).toHaveLength(1);
+  });
+
+  it('关注列表的按钮回调：取消第 N 项与全清', () => {
+    expect(followCallbackData('cancel', 2)).toBe('fo:c:2');
+    expect(followCallbackData('clear')).toBe('fo:x');
+    expect(parseFollowCallback('fo:c:2')).toEqual({ action: 'cancel', index: 2 });
+    expect(parseFollowCallback('fo:x')).toEqual({ action: 'clear' });
+    expect(parseFollowCallback('fo:c:0')).toEqual({ action: 'cancel', index: 0 });
+    expect(parseFollowCallback('card:1:c')).toBeNull();
   });
 
   it('确认卡的深链能定位到具体那张卡', () => {

@@ -26,6 +26,7 @@ const ERROR_TEXT: Record<string, string> = {
   api: 'Telegram returned an error',
   'token-required': 'Paste a bot token first',
   'not-bound': 'Not bound yet',
+  'not-found': 'That task is already gone',
   'no-secretary': 'No secretary conversation is available',
   'deliver-failed': 'Could not reach the secretary session',
   'invalid sender': 'Not allowed from this window',
@@ -267,6 +268,62 @@ export function SecretaryContactPanel() {
                   'Only milestones go to Telegram. Send /sync in Telegram to mirror every reply; /last replays the latest round.'
                 )}
               </p>
+            )}
+          </div>
+
+          <div data-enso="secretary-contact-following" className={STEP_CLASS}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[12.5px] font-medium">
+                {t('Followed from the phone: {{count}}', { count: telegram.following.length })}
+              </div>
+              {telegram.following.length > 0 && (
+                <button
+                  type="button"
+                  data-enso="secretary-contact-following-clear"
+                  disabled={busy}
+                  className={BUTTON_CLASS}
+                  onClick={() =>
+                    run(() => window.electronAPI.secretary.contactFollowing({ action: 'clear' }))
+                  }
+                >
+                  {t('Clear all')}
+                </button>
+              )}
+            </div>
+            <p className="mt-1 text-[11.5px] text-muted-foreground">
+              {t(
+                'What you dispatch or schedule from the phone keeps reporting here until it finishes or fails once, even with /sync off.'
+              )}
+            </p>
+            {telegram.following.length > 0 && (
+              <ul className="mt-1.5 flex flex-col gap-1">
+                {telegram.following.map((item) => (
+                  <li key={item.id} className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 flex-1 text-[12px]">
+                      <span className="text-muted-foreground">
+                        {item.kind === 'schedule' ? t('Scheduled') : t('Session')} ·{' '}
+                      </span>
+                      {item.summary}
+                    </span>
+                    <button
+                      type="button"
+                      data-enso="secretary-contact-following-cancel"
+                      disabled={busy}
+                      className={BUTTON_CLASS}
+                      onClick={() =>
+                        run(() =>
+                          window.electronAPI.secretary.contactFollowing({
+                            action: 'cancel',
+                            id: item.id,
+                          })
+                        )
+                      }
+                    >
+                      {t('Drop')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 

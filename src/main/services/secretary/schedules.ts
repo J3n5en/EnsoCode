@@ -13,6 +13,7 @@ import type {
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { notifySecretaryChanged } from './dispatch';
+import { recordPhoneFollow } from './following';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -35,6 +36,12 @@ export interface SchedulePorts {
   now(): number;
   /** 定时写盘后通知面板重读 */
   publish(): void;
+  /** 手机发起的回合里加的定时记进「手机关注」；缺省表示不记 */
+  follow?(input: {
+    targetId: string;
+    summary: string;
+    secretaryConversationId: string | null;
+  }): void;
 }
 
 /** 系统定时重算只需要读写与时钟，回传宿主不必带审计与 id 生成 */
@@ -278,6 +285,12 @@ export function createSecretaryScheduleHandlers(ports: SchedulePorts): Secretary
       }
       ports.saveSchedules([...ports.schedules(), schedule]);
       ports.publish();
+      // 手机发起的回合里加的定时：到点推一次手机，推完结束关注
+      ports.follow?.({
+        targetId: id,
+        summary: name,
+        secretaryConversationId: ctx.secretaryConversationId,
+      });
       ports.audit({
         at: now,
         secretaryConversationId: ctx.secretaryConversationId,
@@ -321,6 +334,14 @@ export const secretarySchedulePorts: SchedulePorts = {
   newId: () => randomUUID(),
   now: () => Date.now(),
   publish: () => notifySecretaryChanged(),
+  follow: (input) => {
+    recordPhoneFollow({
+      kind: 'schedule',
+      targetId: input.targetId,
+      summary: input.summary,
+      secretaryConversationId: input.secretaryConversationId,
+    });
+  },
 };
 
 export const secretaryScheduleHandlers = createSecretaryScheduleHandlers(secretarySchedulePorts);

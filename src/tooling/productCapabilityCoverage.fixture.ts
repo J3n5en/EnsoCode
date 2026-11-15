@@ -522,6 +522,7 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_CONTACT_FORGET_BOT: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_CONTACT_TEST: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_CONTACT_SETTINGS: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_CONTACT_FOLLOWING: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_OPEN_CONVERSATION: excluded('Experimental secretary agent; not an Enso capability.'),
   REMOTE_LEADER_CHANGED: excluded('Remote desktop renderer coordination transport.'),
   REMOTE_UPLOAD: excluded('Remote desktop browser upload transport.'),
