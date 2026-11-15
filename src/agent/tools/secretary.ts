@@ -1,5 +1,7 @@
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
+  SECRETARY_ATTACHMENT_MAX,
+  SECRETARY_ATTACHMENT_PATH_MAX,
   SECRETARY_ID_MAX,
   SECRETARY_OPS,
   SECRETARY_SEND_MODES,
@@ -84,12 +86,15 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     },
   },
   session_send: {
-    keys: ['conversationId', 'message', 'mode'],
+    keys: ['conversationId', 'message', 'mode', 'attachments'],
+    arrays: ['attachments'],
     aliases: {
       sessionId: 'conversationId',
       id: 'conversationId',
       text: 'message',
       content: 'message',
+      images: 'attachments',
+      imagePaths: 'attachments',
     },
   },
   session_queue_list: {
@@ -467,7 +472,7 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call.',
+      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -477,6 +482,18 @@ const SCHEMAS: Record<
           enum: [...SECRETARY_SEND_MODES],
           description:
             'queue (default): wait behind the current turn. steer: cut in at the next tool boundary to change priority or correct direction.',
+        },
+        attachments: {
+          type: 'array',
+          items: {
+            type: 'string',
+            minLength: 1,
+            maxLength: SECRETARY_ATTACHMENT_PATH_MAX,
+          },
+          minItems: 1,
+          maxItems: SECRETARY_ATTACHMENT_MAX,
+          description:
+            'Optional: absolute paths of up to 5 images to forward. Each must be a png, jpg, jpeg, webp or gif under the session worktree root, a system temp directory or the app chat image directory, at most 10MB. The paths are appended to the message so the target session can open them with image_view.',
         },
       },
       ['conversationId', 'message']
@@ -586,7 +603,7 @@ const SCHEMAS: Record<
   },
   image_view: {
     description:
-      'Open one image file and look at it yourself. Only images under ~/project/worktree, /tmp, /private/tmp or /private/var/folders can be opened; every other path, including the user home, project checkouts and app data, is refused. Only png, jpg, jpeg, webp and gif are accepted, judged by the file header, not the extension, up to 10MB. Returns the image plus its size and pixel dimensions. Use it when a session says a screenshot is at some path, before you report on it.',
+      'Open one image file and look at it yourself. Only images under ~/project/worktree, /tmp, /private/tmp, /private/var/folders or the app chat image directory (userData/bot-chats) can be opened; every other path, including the user home and project checkouts, is refused. Only png, jpg, jpeg, webp and gif are accepted, judged by the file header, not the extension, up to 10MB. Returns the image plus its size and pixel dimensions. Use it when a session says a screenshot is at some path, before you report on it, and before you forward that path with session_send.',
     parameters: object(
       {
         path: {

@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app } from '@platform';
 import { projectNameFromPath } from '@shared/projectName';
+import {
+  describeForwardedImages,
+  type ForwardedImage,
+  formatAttachmentBlock,
+} from '@shared/secretary/attachments';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
+import { probeImageView } from '@shared/secretary/imageView';
 import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
 import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
 import {
@@ -20,6 +26,8 @@ import {
   validateDispatchBase,
 } from '@shared/secretary/policy';
 import {
+  SECRETARY_ATTACHMENT_MAX,
+  SECRETARY_ATTACHMENT_PATH_MAX,
   SECRETARY_ID_MAX,
   SECRETARY_SEND_MODES,
   SECRETARY_SESSION_MESSAGE_MAX,
@@ -60,6 +68,7 @@ import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
 import { todoDispatchPrompt } from './dispatchBrief';
 import { recordPhoneFollow, renameFollowedTarget, unfollowTarget } from './following';
+import { realImageViewDeps } from './imageView';
 import { type SavedProposal, saveProposalRecord } from './proposals';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
 import { closeRelayAsk, dropRelaysFor, pendingRelay, relayKey, sessionLabel } from './relay';
@@ -295,6 +304,8 @@ interface SessionFields {
   mode: SecretarySendMode;
   clearQueue: boolean;
   taskId: string;
+  /** 要转发的图片路径（未做文件校验）；不转发时为空数组 */
+  attachments: string[];
 }
 
 /** 逐字段校验，失败时写明哪个字段、哪里不合法 */
@@ -340,6 +351,10 @@ function sessionFields(
     ? text('taskId', SECRETARY_ID_MAX)
     : ({ ok: true, value: '' } as const);
   if (!taskId.ok) return taskId;
+  const attachments = allowed.includes('attachments')
+    ? attachmentPaths(params.attachments)
+    : ({ ok: true, value: [] as string[] } as const);
+  if (!attachments.ok) return attachments;
   return {
     ok: true,
     value: {
@@ -348,8 +363,67 @@ function sessionFields(
       mode: (mode as SecretarySendMode | undefined) ?? 'queue',
       clearQueue: clearQueue === true,
       taskId: taskId.value,
+      attachments: attachments.value,
     },
   };
+}
+
+/** attachments 只收字符串数组：单张路径越界、格式不对在文件校验里逐张报 */
+function attachmentPaths(value: unknown): FieldsResult<string[]> {
+  if (value === undefined) return { ok: true, value: [] };
+  const invalid = (detail: string) => ({
+    ok: false as const,
+    error: `invalid arguments: ${detail}`,
+  });
+  if (!Array.isArray(value)) return invalid(`"attachments" must be an array, got ${typeof value}`);
+  if (value.length > SECRETARY_ATTACHMENT_MAX)
+    return invalid(
+      `"attachments" has ${value.length} entries, max ${SECRETARY_ATTACHMENT_MAX} images per call`
+    );
+  const paths: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== 'string')
+      return invalid(`"attachments" entry ${index + 1} must be a string, got ${typeof entry}`);
+    const trimmed = entry.trim();
+    if (!trimmed) return invalid(`"attachments" entry ${index + 1} must not be empty`);
+    if (trimmed.length > SECRETARY_ATTACHMENT_PATH_MAX)
+      return invalid(
+        `"attachments" entry ${index + 1} is ${trimmed.length} characters, max ${SECRETARY_ATTACHMENT_PATH_MAX}`
+      );
+    paths.push(trimmed);
+  }
+  return { ok: true, value: paths };
+}
+
+/**
+ * 逐张校验要转发的图片：越界、不存在、不是图片、太大都写明是哪一张、为什么。
+ * 只读文件头，不把图片读进 Main 内存。
+ */
+async function probeAttachments(
+  paths: readonly string[]
+): Promise<{ ok: true; value: ForwardedImage[] } | { ok: false; error: string }> {
+  const images: ForwardedImage[] = [];
+  for (const [index, requested] of paths.entries()) {
+    const probe = await probeImageView(realImageViewDeps, requested);
+    if (!probe.ok)
+      return { ok: false, error: `attachments[${index + 1}] ${requested}: ${probe.error}` };
+    images.push({ path: probe.path, size: probe.size });
+  }
+  return { ok: true, value: images };
+}
+
+/**
+ * 目标会话是否装了 image_view：会话行里记着工具表就以它为准，
+ * 读不到按可用处理（根会话默认装配这一份）。
+ */
+export async function targetCanViewImages(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<boolean> {
+  const row = (await ports.rows())[conversationId];
+  const tools = row?.tools;
+  if (!Array.isArray(tools)) return true;
+  return tools.includes('image_view');
 }
 
 interface QueuedItem {
@@ -1485,13 +1559,23 @@ export function createSecretaryDispatchHandlers(
     },
 
     async session_send(params, ctx) {
-      const fields = sessionFields(params, ['conversationId', 'message', 'mode']);
+      const fields = sessionFields(params, ['conversationId', 'message', 'mode', 'attachments']);
       if (!fields.ok) return fields;
-      const { conversationId, message: text, mode } = fields.value;
+      const { conversationId, message: text, mode, attachments } = fields.value;
       const profile = await profileOf(ports);
       const check = await checkOperate(ports, conversationId, profile);
       if (!check.ok) return deny(ports, ctx, 'session_send', check.code, conversationId);
       const source = check.source;
+      // 权限过了再读文件：图片全部校验通过才投递，任何一张不合法都在发出之前拒绝
+      const forwarded = await probeAttachments(attachments);
+      if (!forwarded.ok)
+        return auditFailure(ports, ctx, 'session_send', forwarded.error, conversationId);
+      const images = forwarded.value;
+      const imageNote = images.length > 0 ? `; images: ${describeForwardedImages(images)}` : '';
+      const body =
+        images.length === 0
+          ? text
+          : `${text}\n\n${formatAttachmentBlock(images, await targetCanViewImages(ports, conversationId))}`;
       const track = async () => {
         if (source === 'scope')
           await trackScopeSession(ports, conversationId, check.projectId, ctx);
@@ -1504,7 +1588,7 @@ export function createSecretaryDispatchHandlers(
       if (status.state === 'running') {
         // 插话复用用户自己的 steer 通道：pi 在当前工具调用结束后读到它，不等整轮结束
         if (mode === 'steer') {
-          const steered = await ports.steer(conversationId, text, ports.newId());
+          const steered = await ports.steer(conversationId, body, ports.newId());
           if (!steered.ok) {
             return auditFailure(
               ports,
@@ -1522,14 +1606,14 @@ export function createSecretaryDispatchHandlers(
             op: 'session_send',
             targetId: conversationId,
             ok: true,
-            detail: `steered (${source})`,
+            detail: `steered (${source})${imageNote}`,
           });
           notifySecretaryChanged();
           return { ok: true, result: { status: 'steered' } };
         }
         const queued = await ports.appendQueued(conversationId, {
           id: ports.newId(),
-          text,
+          text: body,
           origin: 'secretary',
           ...(ctx.secretaryConversationId ? { by: ctx.secretaryConversationId } : {}),
           at: ports.now(),
@@ -1545,7 +1629,7 @@ export function createSecretaryDispatchHandlers(
           op: 'session_send',
           targetId: conversationId,
           ok: true,
-          detail: `queued (${source})`,
+          detail: `queued (${source})${imageNote}`,
         });
         notifySecretaryChanged();
         return { ok: true, result: { status: 'queued' } };
@@ -1562,7 +1646,7 @@ export function createSecretaryDispatchHandlers(
           );
         }
       }
-      const prompted = await ports.prompt(conversationId, text, ports.newId());
+      const prompted = await ports.prompt(conversationId, body, ports.newId());
       if (!prompted.ok) {
         return auditFailure(
           ports,
@@ -1579,7 +1663,7 @@ export function createSecretaryDispatchHandlers(
         op: 'session_send',
         targetId: conversationId,
         ok: true,
-        detail: `sent (${source})`,
+        detail: `sent (${source})${imageNote}`,
       });
       await noteDispatchResumed(ports, conversationId);
       notifySecretaryChanged();

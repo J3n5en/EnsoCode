@@ -41,6 +41,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -2996,6 +2997,7 @@ async function run(cdp, pluginZipUrl) {
 
   await verifyMemoryManualEdit(cdp, setup);
   await verifyImageViewAndCleanup(cdp, setup);
+  await verifyForwardImages(cdp, setup);
   await verifyToolCards(cdp, setup);
 }
 
@@ -6065,6 +6067,156 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     'cleanup: 每个动作都记审计',
     cleanupAudit
   );
+  rmSync(imageFile, { force: true });
+}
+
+/**
+ * 转发图片：编码会话自己能用 image_view 看图，秘书能把截图路径通过
+ * session_send attachments 交过去，目标会话时间线上出现图片引用。
+ */
+async function verifyForwardImages(cdp, setup) {
+  const page = cdp.json.bind(cdp);
+  log('== 转发图片：编码会话看图 + session_send attachments');
+
+  const imageFile = path.join('/tmp', `sec-verify-fwd-${process.pid}-${Date.now()}.png`);
+  writePngFixture(imageFile, 32, 24);
+  const realImage = realpathSync(imageFile);
+
+  // 接管范围放到 all：这一节要往一个普通会话里发消息，范围权限是最轻的一条路
+  const scoped = await page(`
+    const saved = await window.electronAPI.secretary.saveProfile({ takeoverScope: { mode: 'all' } });
+    return JSON.stringify({ ok: saved.ok === true, error: saved.error ?? null });
+  `);
+  assert(scoped.ok, '转发图片: 接管范围改成 all', scoped);
+
+  const plain = await page(`
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.projectId)});
+    const id = await S().newConversation(project.id);
+    S().selectConversation(id);
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      '看看这张截图 [[tool:image_view {"path": ${JSON.stringify(imageFile)}}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const viewed = await until(
+      () => (S().conversations[id]?.messages ?? []).find((m) => m.toolName === 'image_view') ?? null,
+      40000
+    );
+    return JSON.stringify({
+      id,
+      text: viewed ? textOf(viewed) : null,
+      isError: viewed?.isError === true,
+    });
+  `);
+  const meta = parseToolJson(plain.text);
+  assert(
+    plain.isError === false &&
+      meta?.width === 32 &&
+      meta?.height === 24 &&
+      typeof meta?.size === 'number',
+    '编码会话: image_view 看得到 /tmp 下的截图，尺寸与大小一起回来',
+    plain
+  );
+
+  const denied = await page(`
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.projectId)});
+    // 假 provider 只要看到历史里有工具结果就不再发工具调用，所以越界这一条另开一个会话
+    const id = await S().newConversation(project.id);
+    S().selectConversation(id);
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
+    await S().send(
+      '再看看这个 [[tool:image_view {"path": "/etc/hosts"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const last = await until(
+      () => (S().conversations[id]?.messages ?? []).find((m) => m.toolName === 'image_view') ?? null,
+      40000
+    );
+    return JSON.stringify({
+      id,
+      text: last ? textOf(last) : null,
+      isError: last?.isError === true,
+    });
+  `);
+  assert(
+    denied.isError === true && String(denied.text).includes('out of scope'),
+    '编码会话: 白名单外的路径被拒绝并说明原因',
+    denied
+  );
+
+  const forwarded = await secretaryTool(
+    cdp,
+    setup,
+    'session_send',
+    { conversationId: plain.id, message: '按这张图改', attachments: [imageFile] },
+    '把这张截图转给会话'
+  );
+  assert(
+    parseToolJson(forwarded.text)?.status === 'sent',
+    '转发图片: 秘书把截图路径发进目标会话',
+    forwarded.text
+  );
+  const received = await page(`
+    const id = ${JSON.stringify(plain.id)};
+    S().selectConversation(id);
+    const found = await until(
+      () =>
+        (S().conversations[id]?.messages ?? []).find(
+          (m) =>
+            m.role === 'user' &&
+            JSON.stringify(m.content ?? '').includes(${JSON.stringify(`[图片 1] ${realImage}`)})
+        ) ?? null,
+      40000
+    );
+    const text = found
+      ? (Array.isArray(found.content) ? found.content : [])
+          .filter((part) => part.type === 'text')
+          .map((part) => part.text)
+          .join('')
+      : '';
+    return JSON.stringify({ text });
+  `);
+  assert(
+    String(received.text).includes(`[图片 1] ${realImage}`) &&
+      String(received.text).includes('用 image_view 查看这些图片。'),
+    '转发图片: 目标会话收到带图片引用的消息',
+    received
+  );
+  const sendAudit = auditLines().filter(
+    (line) => line.op === 'session_send' && line.ok === true && line.detail?.includes('images:')
+  );
+  assert(
+    sendAudit.some((line) => line.detail.includes(realImage)),
+    '转发图片: 审计里记下转发了哪张图',
+    sendAudit.at(-1) ?? null
+  );
+
+  const refused = await secretaryTool(
+    cdp,
+    setup,
+    'session_send',
+    { conversationId: plain.id, message: '按图改', attachments: ['/etc/hosts'] },
+    '把越界路径转过去'
+  );
+  assert(
+    String(refused.text).includes('attachments[1] /etc/hosts') &&
+      String(refused.text).includes('out of scope'),
+    '转发图片: 越界路径被拒绝，并指出是哪一张',
+    refused.text
+  );
+
   rmSync(imageFile, { force: true });
 }
 

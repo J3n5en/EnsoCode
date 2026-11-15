@@ -46,6 +46,7 @@ import { isClassifierOnlyProvider } from '@shared/providerCatalog';
 import { parseProviderHeaders } from '@shared/providers/providerHeaders';
 import { providerKeyFor } from '@shared/providers/providerKey';
 import { proxyEnvPatchFromEnv } from '@shared/proxy';
+import { appUserImageDirs } from '@shared/secretary/imageView';
 import {
   SECRETARY_ALWAYS_ENABLED_TOOLS,
   SECRETARY_FORCED_DISABLED_TOOLS,
@@ -334,6 +335,8 @@ export function startAgentWorker(): void {
       ...process.env,
       ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
       ENSO_AGENT_DATA_DIR: agentDataDir(),
+      // 编码会话的 image_view 白名单：应用存放用户图片的目录（bot-chats/<chatId>/media）
+      ENSO_USER_IMAGE_DIRS: appUserImageDirs(app.getPath('userData')).join(path.delimiter),
       PI_CODING_AGENT_DIR: path.join(app.getPath('userData'), 'agent', 'pi-agent'),
       ENSO_MODELS_DEV_CACHE: path.join(app.getPath('userData'), 'models-dev-cache.json'),
       ENSO_RTK_PATH: bundledRtkPath({
