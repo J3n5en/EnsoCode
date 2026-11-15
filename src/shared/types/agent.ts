@@ -311,6 +311,10 @@ export interface ApprovalRequestInfo {
   guard?: { ruleId: string; reason: string };
 }
 
+/** 提问是谁收的尾：用户在原会话里直接答、秘书代答、超时兜底 */
+export const ASK_ANSWER_BY = ['user', 'relay', 'timeout'] as const;
+export type AskAnswerBy = (typeof ASK_ANSWER_BY)[number];
+
 /** agent 向用户的提问（ask_user 工具,阻塞等答复） */
 export interface AskRequestInfo {
   requestId: string;
@@ -321,6 +325,10 @@ export interface AskRequestInfo {
   recommended?: string;
   /** 等人回答的截止时间（ms）；到期由 Main 按未回答处理 */
   expiresAt?: number;
+  /** 已转给秘书：原会话不弹给用户，只留一行「已转给 X」，用户仍可直接回答 */
+  relay?: { name: string };
+  /** 渲染层投影：提问已收尾，用来在原会话里留一行状态；worker 不下发 */
+  answered?: { by: AskAnswerBy; name?: string; answer?: string };
 }
 
 /** 审批决策：revise 打回换更安全的命令；review 把这一条交给助手代审 */
@@ -1285,6 +1293,8 @@ export type AgentCommand =
       approvalMode?: ApprovalMode;
       /** 无人值守：需要人工确认的动作直接拒绝，不等真人 */
       autoRejectApprovals?: boolean;
+      /** 秘书派出/跟踪的会话：ask_user 先转给秘书，名字用于原会话里的「已转给 X」 */
+      askRelay?: { name: string };
       /** 助手代审模型；仅 approvalMode=assistant 时有意义 */
       approvalReviewer?: SpawnModelConfig;
       /** 代审改用分类器（System One）；与 approvalReviewer 互斥 */
@@ -1439,6 +1449,8 @@ export type AgentCommand =
       /** 省略表示不改动无人值守开关 */
       autoReject?: boolean;
     }
+  /** 秘书派出/跟踪的会话：ask_user 先转给秘书；缺省 relay 表示恢复成直接问用户 */
+  | { type: 'set-ask-relay'; identity: SessionIdentity; relay?: { name: string } }
   | { type: 'set-plan-mode'; identity: SessionIdentity; active: boolean }
   | {
       type: 'plan-respond';
@@ -1476,7 +1488,16 @@ export type AgentCommand =
   /** 统一模型目录 + 自定义 provider 全量注册信息。载荷在 worker 内再收窄。 */
   | { type: 'set-model-directory'; snapshot: unknown; customProviders: unknown }
   | { type: 'compact'; identity: SessionIdentity; instructions?: string }
-  | { type: 'ask-respond'; identity: SessionIdentity; requestId: string; answer: string }
+  | {
+      type: 'ask-respond';
+      identity: SessionIdentity;
+      requestId: string;
+      answer: string;
+      /** 谁答的：缺省是用户亲手答；relay 是秘书代答（原会话据此显示「X 已回答」） */
+      by?: 'user' | 'relay';
+      /** 代答的秘书名字 */
+      name?: string;
+    }
   | {
       type: 'browser-result';
       identity: SessionIdentity | ChildSessionIdentity;
@@ -1839,6 +1860,8 @@ export interface AgentSpawnRequest {
   approvalMode?: ApprovalMode;
   /** 无人值守：新会话一起带上该开关，避免恢复后悄悄变回「等人确认」 */
   autoRejectApprovals?: boolean;
+  /** 秘书派出/跟踪的会话：ask_user 先转给秘书；恢复时一起带上，避免悄悄变回直接问用户 */
+  askRelay?: { name: string };
   planMode?: boolean;
 }
 
@@ -2121,7 +2144,17 @@ export type AgentWorkerEvent =
       requestId: string;
     }
   | { type: 'ask-request'; identity: SessionIdentity; seq: number; ask: AskRequestInfo }
-  | { type: 'ask-resolved'; identity: SessionIdentity; seq: number; requestId: string }
+  | {
+      type: 'ask-resolved';
+      identity: SessionIdentity;
+      seq: number;
+      requestId: string;
+      /** 谁收的尾；缺省表示取消（abort/dismiss），不是回答 */
+      by?: AskAnswerBy;
+      answer?: string;
+      /** 秘书代答时的名字 */
+      name?: string;
+    }
   | { type: 'subagent-update'; identity: SessionIdentity; seq: number; agent: SubagentInfo }
   | {
       type: 'coworker-update';
@@ -3681,6 +3714,7 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'instruction',
           'approvalMode',
           'autoRejectApprovals',
+          'askRelay',
           'approvalReviewer',
           'approvalReviewerClassifier',
           'approvalReviewerManaged',
@@ -3762,6 +3796,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             value.subagentModels.some((entry) => parseSubagentModelOption(entry) === null))) ||
         (value.approvalReviewer !== undefined &&
           parseSpawnModelConfig(value.approvalReviewer) === null) ||
+        (value.askRelay !== undefined &&
+          (!isRecord(value.askRelay) || !isNonEmptyString(value.askRelay.name))) ||
         (value.approvalReviewerAllowThreshold !== undefined &&
           (!isApprovalAllowThreshold(value.approvalReviewerAllowThreshold) ||
             value.approvalReviewerClassifier === undefined)) ||
@@ -4010,6 +4046,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         (value.autoReject === undefined || typeof value.autoReject === 'boolean')
         ? (value as unknown as AgentCommand)
         : null;
+    case 'set-ask-relay':
+      return hasOnlyKeys(value, ['type', 'identity', 'relay']) &&
+        parseAnySessionIdentity(value.identity) &&
+        (value.relay === undefined || (isRecord(value.relay) && isNonEmptyString(value.relay.name)))
+        ? (value as unknown as AgentCommand)
+        : null;
     case 'set-plan-mode':
       return hasExactKeys(value, ['type', 'identity', 'active']) &&
         parseSessionIdentity(value.identity) &&
@@ -4097,10 +4139,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'ask-respond':
-      return hasExactKeys(value, ['type', 'identity', 'requestId', 'answer']) &&
+      return hasOnlyKeys(value, ['type', 'identity', 'requestId', 'answer', 'by', 'name']) &&
         parseAnySessionIdentity(value.identity) &&
         isNonEmptyString(value.requestId) &&
-        isNonEmptyString(value.answer)
+        isNonEmptyString(value.answer) &&
+        (value.by === undefined || value.by === 'user' || value.by === 'relay') &&
+        (value.name === undefined || isNonEmptyString(value.name))
         ? (value as unknown as AgentCommand)
         : null;
     case 'browser-result':
@@ -4812,15 +4856,24 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'approval-resolved':
-    case 'ask-resolved':
       return isNonEmptyString(value.requestId) ? (value as unknown as AgentWorkerEvent) : null;
+    case 'ask-resolved':
+      return isNonEmptyString(value.requestId) &&
+        (value.by === undefined || (ASK_ANSWER_BY as readonly unknown[]).includes(value.by)) &&
+        (value.answer === undefined || typeof value.answer === 'string') &&
+        (value.name === undefined || isNonEmptyString(value.name))
+        ? (value as unknown as AgentWorkerEvent)
+        : null;
     case 'ask-request':
       return isRecord(value.ask) &&
         isNonEmptyString(value.ask.requestId) &&
         isNonEmptyString(value.ask.question) &&
         isOptionalTimestamp(value.ask.expiresAt) &&
         (value.ask.recommended === undefined ||
-          (Array.isArray(value.ask.options) && value.ask.options.includes(value.ask.recommended)))
+          (Array.isArray(value.ask.options) &&
+            value.ask.options.includes(value.ask.recommended))) &&
+        (value.ask.relay === undefined ||
+          (isRecord(value.ask.relay) && isNonEmptyString(value.ask.relay.name)))
         ? (value as unknown as AgentWorkerEvent)
         : null;
     case 'subagent-update':

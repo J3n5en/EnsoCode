@@ -39,6 +39,8 @@ export interface MainSessionRequest {
   muted?: boolean;
   /** 秘书派出的会话默认无人值守：落行并随 spawn 带给 worker */
   unattended?: boolean;
+  /** 秘书派出的会话：ask_user 先转给秘书，而不是按无人值守直接拒绝 */
+  askRelay?: { name: string };
 }
 
 export type MainSessionResult = { ok: true; conversationId: string } | { ok: false; error: string };
@@ -160,6 +162,7 @@ export async function createSessionFromMain(
     ...(defaults.presetId ? { presetId: defaults.presetId } : {}),
     approvalMode: defaults.approvalMode,
     ...(request.unattended ? { autoRejectApprovals: true } : {}),
+    ...(request.askRelay ? { askRelay: request.askRelay } : {}),
   });
   if (!spawned.ok) {
     await rollback();

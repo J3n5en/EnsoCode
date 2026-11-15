@@ -154,6 +154,129 @@ function change(
   return [{ sessionId: 'c1', state, previous, pendingAsks: 0, pendingApprovals: 0, ...extra }];
 }
 
+describe('转交给秘书的提问', () => {
+  const relayAsk = (extra: Record<string, unknown> = {}) => ({
+    ask: {
+      requestId: 'ask-1',
+      question: '用哪个方案？',
+      options: ['A', 'B'],
+      recommended: 'A',
+      expiresAt: 30 * MINUTE,
+      relay: { name: '小秘' },
+      ...extra,
+    },
+  });
+
+  it('派出会话的 ask_user 转给秘书：不报 needs-user，推一条 ask-relay 并落盘', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request', relayAsk()), change('waiting', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([
+      expect.objectContaining({
+        kind: 'ask-relay',
+        conversationId: 'c1',
+        askId: 'ask-1',
+        status: 'pending',
+      }),
+    ]);
+    expect(h.state.file.outbox[0]?.text).toContain('用哪个方案？');
+    expect(h.state.file.outbox[0]?.lastText).toContain('默认值：A');
+    expect(h.state.file.relays?.['c1|ask-1']).toMatchObject({
+      status: 'pending',
+      question: '用哪个方案？',
+      options: ['A', 'B'],
+      defaultOption: 'A',
+      expiresAt: 30 * MINUTE,
+    });
+    expect(h.state.audit).toEqual([expect.objectContaining({ op: 'ask_relay', targetId: 'c1' })]);
+  });
+
+  it('用户在原会话里先答：记录 user-answered 并回传一条，秘书那边失效', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request', relayAsk()), change('waiting', 'running'));
+    h.state.file.outbox = [];
+    h.host.onAgentEvent(event('ask-resolved', { requestId: 'ask-1', by: 'user', answer: 'B' }), []);
+    expect(h.state.file.relays?.['c1|ask-1']).toMatchObject({
+      status: 'user-answered',
+      answer: 'B',
+    });
+    expect(h.state.file.outbox).toEqual([
+      expect.objectContaining({ kind: 'ask-relay', status: 'user-answered' }),
+    ]);
+    expect(h.state.file.outbox[0]?.text).toContain('用户已直接回答：B');
+    expect(h.state.audit.at(-1)).toMatchObject({ op: 'ask_relay_closed', targetId: 'c1' });
+  });
+
+  it('秘书代答：记录 answered，不再回传一条', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request', relayAsk()), change('waiting', 'running'));
+    h.state.file.outbox = [];
+    h.host.onAgentEvent(
+      event('ask-resolved', { requestId: 'ask-1', by: 'relay', answer: 'A', name: '小秘' }),
+      []
+    );
+    expect(h.state.file.relays?.['c1|ask-1']).toMatchObject({ status: 'answered', answer: 'A' });
+    expect(h.state.file.outbox).toEqual([]);
+    expect(h.state.audit.at(-1)).toMatchObject({ op: 'ask_relay_answer' });
+  });
+
+  it('没人答到点：按超时收尾，有默认值时说明按默认值处理', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request', relayAsk()), change('waiting', 'running'));
+    h.state.file.outbox = [];
+    h.state.now = 30 * MINUTE;
+    h.host.tick();
+    expect(h.state.file.relays?.['c1|ask-1']).toMatchObject({ status: 'timed-out' });
+    expect(h.state.file.outbox).toEqual([
+      expect.objectContaining({ kind: 'ask-relay', status: 'timed-out' }),
+    ]);
+    expect(h.state.file.outbox[0]?.text).toContain('已按默认值「A」处理');
+  });
+
+  it('普通会话的 ask_user 不受影响：照旧记 needs-user，不建转交记录', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(
+      event('ask-request', { ask: { requestId: 'ask-2', question: '继续吗？' } }),
+      change('waiting', 'running')
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'needs-user' });
+    expect(h.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
+    expect(h.state.file.relays).toBeUndefined();
+  });
+
+  it('重启后 worker 已经不在了：挂起的转交记录作废并记审计', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request', relayAsk()), change('waiting', 'running'));
+    expect(h.state.file.relays?.['c1|ask-1']).toBeDefined();
+    h.host.recover();
+    expect(h.state.file.relays).toBeUndefined();
+    expect(h.state.audit.at(-1)).toMatchObject({
+      op: 'ask_relay_cancel',
+      targetId: 'c1',
+      detail: 'ask-1 restart',
+    });
+  });
+
+  it('审批照旧：无人值守的派出会话等审批仍记 needs-user，不进转交', () => {
+    const h = harness({});
+    h.state.statuses.c1 = { state: 'waiting', pendingAsks: 0, pendingApprovals: 1 };
+    h.host.onAgentEvent(
+      event('approval-request', {
+        request: { requestId: 'ap-1', tool: 'bash', kind: 'command', summary: 'rm -rf build' },
+      }),
+      change('waiting', 'running')
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'needs-user' });
+    expect(h.state.file.relays).toBeUndefined();
+  });
+});
+
 describe('派出会话的结果记录', () => {
   it('无目标的会话轮次结束记一条 turn-ended 并更新状态', () => {
     const h = harness({});

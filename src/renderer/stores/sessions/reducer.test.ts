@@ -1915,6 +1915,62 @@ describe('background-tasks-level', () => {
   });
 });
 
+describe('转交提问在原会话里的状态', () => {
+  const relayedAsk = (seq: number): RendererAgentEvent => ({
+    type: 'ask-request',
+    identity: identity(),
+    seq,
+    ask: {
+      requestId: 'ask-1',
+      question: '用哪个方案？',
+      options: ['A', 'B'],
+      relay: { name: '小秘' },
+    },
+  });
+
+  it('秘书代答后留一行「已回答」，这一轮结束再清掉', () => {
+    const asked = applyAgentEvent(base, 's1', relayedAsk(1));
+    expect(asked.pendingAsks).toMatchObject([{ requestId: 'ask-1', relay: { name: '小秘' } }]);
+    const answered = applyAgentEvent(asked, 's1', {
+      type: 'ask-resolved',
+      identity: identity(),
+      seq: 2,
+      requestId: 'ask-1',
+      by: 'relay',
+      answer: 'A',
+      name: '小秘',
+    });
+    expect(answered.pendingAsks).toMatchObject([
+      { requestId: 'ask-1', answered: { by: 'relay', answer: 'A', name: '小秘' } },
+    ]);
+    const done = applyAgentEvent(answered, 's1', {
+      type: 'turn-completed',
+      identity: identity(),
+      seq: 3,
+      turnId: 't1',
+    });
+    expect(done.pendingAsks).toEqual([]);
+  });
+
+  it('普通会话的提问收尾后直接消失，不留状态行', () => {
+    const asked = applyAgentEvent(base, 's1', {
+      type: 'ask-request',
+      identity: identity(),
+      seq: 1,
+      ask: { requestId: 'ask-2', question: '继续吗？' },
+    });
+    const resolved = applyAgentEvent(asked, 's1', {
+      type: 'ask-resolved',
+      identity: identity(),
+      seq: 2,
+      requestId: 'ask-2',
+      by: 'user',
+      answer: '继续',
+    });
+    expect(resolved.pendingAsks).toEqual([]);
+  });
+});
+
 describe('joinsMidStream', () => {
   it('flags adopting a generation after earlier events were missed', () => {
     // 另一个窗口建的会话经补丁才到：status:running 等早期事件已因会话不存在被丢

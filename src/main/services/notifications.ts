@@ -199,6 +199,8 @@ export function maybeNotify(event: RendererAgentEvent): void {
   const t = texts();
   switch (event.type) {
     case 'ask-request':
+      // 转给秘书的提问不弹给用户：秘书会答，用户也可以在那个会话里自己答
+      if (event.ask.relay) return;
       // agent 在等答复才能继续,不提醒会静默卡住整个会话
       notify(
         event.identity.sessionId,

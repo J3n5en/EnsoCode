@@ -15,6 +15,7 @@ export const SECRETARY_OPS = [
   'session_queue_list',
   'session_queue_cancel',
   'session_stop',
+  'session_answer',
   'session_takeover_propose',
   'todo_list',
   'todo_item_add',

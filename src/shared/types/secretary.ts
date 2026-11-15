@@ -198,6 +198,30 @@ export type SecretaryResultKind =
   | 'stalled'
   | 'interrupted';
 
+/** 转交提问的收尾方式：秘书代答、用户在原会话里直接答、超时兜底 */
+export const RELAY_ASK_STATUSES = ['pending', 'answered', 'user-answered', 'timed-out'] as const;
+
+export type RelayAskStatus = (typeof RELAY_ASK_STATUSES)[number];
+
+/**
+ * 派出/接管会话里 ask_user 的提问先送到秘书：秘书用 session_answer 代答，
+ * 决定不了就用它自己的 ask_user 问用户。用户在原会话里直接答也算收尾，谁先答算谁的。
+ */
+export interface SecretaryRelayAsk {
+  conversationId: string;
+  askId: string;
+  question: string;
+  options?: string[];
+  defaultOption?: string;
+  /** 到点没回答就按默认值处理；没有默认值按无人值守拒绝 */
+  expiresAt?: number;
+  at: number;
+  status: RelayAskStatus;
+  /** 收尾的答案：秘书代答或用户直接答 */
+  answer?: string;
+  answeredAt?: number;
+}
+
 /** 需要用户亲自看一眼的结果；其余结果只是记录，不占工作台的「需要你处理」 */
 export const NEEDS_YOU_RESULTS: ReadonlySet<SecretaryResultKind> = new Set([
   'failed',
@@ -252,6 +276,8 @@ export type SecretaryUpdate = {
   deliverAt?: number;
 } & (
   | { kind: SecretaryResultKind; conversationId: string }
+  /** 转交给秘书的提问：pending 要秘书处理，其余是收尾通知 */
+  | { kind: 'ask-relay'; conversationId: string; askId: string; status: RelayAskStatus }
   | { kind: 'proposal'; proposalId: string; status: ProposalStatus }
   | { kind: 'schedule'; scheduleId: string }
   | {
@@ -273,6 +299,8 @@ export interface SecretaryActivity {
 export interface SecretaryDispatchFile {
   version: 1;
   dispatched: Record<string, DispatchRecord>;
+  /** 转交给秘书的提问；key 是 `${conversationId}|${askId}` */
+  relays?: Record<string, SecretaryRelayAsk>;
   /** 等依赖的派发；开始或出问题后从这里移走 */
   pending?: Record<string, PendingDispatch>;
   named: string[];

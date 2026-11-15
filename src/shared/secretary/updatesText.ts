@@ -3,7 +3,8 @@ import { RESULT_KINDS } from './parse';
 
 export type SecretaryUpdateLine =
   | { kind: SecretaryResultKind; text: string; conversationId?: string; detail?: string }
-  | { kind: 'proposal' | 'schedule' | 'pending'; text: string; detail?: string };
+  | { kind: 'proposal' | 'schedule' | 'pending'; text: string; detail?: string }
+  | { kind: 'ask-relay'; text: string; conversationId?: string; detail?: string };
 
 const BLOCK = /^<(session-updates|secretary-schedule)>\n([\s\S]*?)\n<\/\1>(?:\n|$)/;
 const HEAD = /^- \[([a-z-]+)(?: (?:session|pending):([^\]\s]+))?\] ([^\n]*)(?:\n|$)/;
@@ -25,6 +26,8 @@ function lineOf(
   if (kind === 'proposal') return conversationId ? null : { kind, text };
   // 等依赖的派发没有会话可打开，pending:<id> 只用来区分行，不进结果
   if (kind === 'pending') return { kind, text };
+  // 转交提问要点名会话：秘书据此用 session_answer 回答
+  if (kind === 'ask-relay') return conversationId ? { kind, text, conversationId } : null;
   if (!isResultKind(kind)) return null;
   return conversationId ? { kind, text, conversationId } : { kind, text };
 }

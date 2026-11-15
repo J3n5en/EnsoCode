@@ -97,8 +97,9 @@ export function updateKey(conversationId: string, kind: SecretaryResultKind, tur
 
 function isResultUpdate(
   update: SecretaryUpdate
-): update is Extract<SecretaryUpdate, { conversationId: string }> {
-  return 'conversationId' in update;
+): update is Extract<SecretaryUpdate, { kind: SecretaryResultKind }> {
+  // 转交提问也带会话 id，但它不是这一轮的结果：不参与「同一会话只留最新结果」的替换
+  return 'conversationId' in update && update.kind !== 'ask-relay';
 }
 
 /** 同一件事只入队一次；同一会话只保留最新结果，旧状态已被新状态取代 */
@@ -116,7 +117,7 @@ export function enqueueUpdate(
 }
 
 export function isUrgentUpdate(update: { kind: string }): boolean {
-  return update.kind === 'needs-user' || update.kind === 'failed';
+  return update.kind === 'needs-user' || update.kind === 'failed' || update.kind === 'ask-relay';
 }
 
 /** 有需要你处理或失败时整批立刻走；否则只投已经到点的 */
@@ -145,15 +146,16 @@ export function takeBatch(
 }
 
 function untrustedSource(update: SecretaryUpdate): string {
-  return isResultUpdate(update) ? `session:${update.conversationId}` : 'secretary';
+  return 'conversationId' in update ? `session:${update.conversationId}` : 'secretary';
 }
 
 function formatLine(update: SecretaryUpdate): string {
-  const marker = isResultUpdate(update)
-    ? ` session:${update.conversationId}`
-    : update.kind === 'pending'
-      ? ` pending:${update.pendingId}`
-      : '';
+  const marker =
+    'conversationId' in update
+      ? ` session:${update.conversationId}`
+      : update.kind === 'pending'
+        ? ` pending:${update.pendingId}`
+        : '';
   const head = `- [${update.kind}${marker}] ${update.text}`;
   if (!update.lastText) return head;
   return `${head}\n${wrapUntrusted(untrustedSource(update), redactSecrets(update.lastText))}`;

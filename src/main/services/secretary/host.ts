@@ -26,6 +26,7 @@ import {
   settleDelivery,
 } from './deliveries';
 import type { SecretarySessionStatus } from './readers';
+import { closeRelayAsk, dropRelay, openRelayAsk, pendingRelay, sessionLabel } from './relay';
 import {
   ACTIVITY_LIMIT,
   capLastText,
@@ -135,7 +136,9 @@ function resultEventOf(
       return { type: 'turn-failed', error: event.error };
     case 'goal-signal':
       return { type: 'goal-signal', kind: event.kind };
+    // 转交给秘书的提问不算「需要用户处理」：秘书会答，用户也可能在原会话里直接答
     case 'ask-request':
+      return event.ask?.relay ? null : { type: 'needs-user' };
     case 'approval-request':
       return { type: 'needs-user' };
     default:
@@ -167,6 +170,103 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
   function remember(file: SecretaryDispatchFile, entry: SecretaryActivity): void {
     file.activity = [...(file.activity ?? []), entry].slice(-ACTIVITY_LIMIT);
+  }
+
+  /** 会话的一句话标签：项目 · 标题，回传正文与卡片都用它 */
+  function labelOf(file: SecretaryDispatchFile, conversationId: string): string {
+    const record = file.dispatched[conversationId];
+    const row = ports.rows()[conversationId];
+    const project = record
+      ? ports.projects().find((candidate) => candidate.projectId === record.projectId)
+      : undefined;
+    return sessionLabel(
+      project ? projectNameFromPath(project.canonicalPath) : '',
+      typeof row?.title === 'string' ? row.title : '',
+      conversationId
+    );
+  }
+
+  /**
+   * 派出/接管会话的 ask_user 先送到秘书：记下挂起的提问并推一条；
+   * 收尾时（秘书代答、用户在原会话里直接答、超时）把状态记回记录。
+   */
+  function applyRelayEvent(
+    file: SecretaryDispatchFile,
+    event: RendererAgentEvent,
+    conversationId: string | undefined,
+    now: number
+  ): boolean {
+    if (!conversationId) return false;
+    const record = file.dispatched[conversationId];
+    if (!record) return false;
+    if (event.type === 'ask-request') {
+      if (!event.ask?.relay) return false;
+      const update = openRelayAsk(
+        file,
+        {
+          conversationId,
+          askId: event.ask.requestId,
+          question: event.ask.question,
+          ...(event.ask.options ? { options: event.ask.options } : {}),
+          ...(event.ask.recommended ? { defaultOption: event.ask.recommended } : {}),
+          ...(event.ask.expiresAt !== undefined ? { expiresAt: event.ask.expiresAt } : {}),
+          label: labelOf(file, conversationId),
+        },
+        now
+      );
+      ports.audit?.({
+        at: now,
+        secretaryConversationId: record.secretaryConversationId,
+        op: 'ask_relay',
+        targetId: conversationId,
+        ok: true,
+        detail: event.ask.requestId,
+      });
+      if (!update) return false;
+      file.outbox = enqueueUpdate(file.outbox, update);
+      return true;
+    }
+    if (event.type !== 'ask-resolved') return false;
+    if (!pendingRelay(file, conversationId, event.requestId)) return false;
+    // 取消（会话中止、worker 换代）：提问没人等了，记录作废，不再回传
+    if (!event.by) {
+      const dropped = dropRelay(file, conversationId, event.requestId);
+      if (dropped) {
+        ports.audit?.({
+          at: now,
+          secretaryConversationId: record.secretaryConversationId,
+          op: 'ask_relay_cancel',
+          targetId: conversationId,
+          ok: true,
+          detail: event.requestId,
+        });
+      }
+      return dropped;
+    }
+    const closed = closeRelayAsk(
+      file,
+      {
+        conversationId,
+        askId: event.requestId,
+        by: event.by,
+        ...(event.answer ? { answer: event.answer } : {}),
+      },
+      now,
+      labelOf(file, conversationId)
+    );
+    if (!closed.relay) return false;
+    // 秘书代答时它自己知道，不用再回传；用户直接答或超时要说一声，免得秘书继续等
+    if (closed.update && event.by !== 'relay')
+      file.outbox = enqueueUpdate(file.outbox, closed.update);
+    ports.audit?.({
+      at: now,
+      secretaryConversationId: record.secretaryConversationId,
+      op: event.by === 'relay' ? 'ask_relay_answer' : 'ask_relay_closed',
+      targetId: conversationId,
+      ok: true,
+      detail: `${event.requestId} ${event.by}`,
+    });
+    return true;
   }
 
   function armCoalesce(at: number, now: number): void {
@@ -394,7 +494,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const file = ports.file();
       const rows = ports.rows();
       if (sessionId) touched.add(rootIdOf(event, sessionId));
-      let changed = false;
+      let changed = applyRelayEvent(file, event, sessionId, now);
       for (const conversationId of touched) {
         const record = file.dispatched[conversationId];
         if (!record) continue;
@@ -453,7 +553,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             (change.previous === 'running' || change.previous === 'waiting')
           )
             kind = 'failed';
-          else if (change.state === 'waiting' && change.previous !== 'waiting') kind = 'needs-user';
+          // 转交给秘书的提问不报 needs-user：秘书会答，用户也可能直接答
+          else if (
+            change.state === 'waiting' &&
+            change.previous !== 'waiting' &&
+            !(event.type === 'ask-request' && event.ask?.relay)
+          )
+            kind = 'needs-user';
         }
         if (kind) recordResult(file, record, kind, now, undefined, report);
         else if (
@@ -534,6 +640,20 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       for (const stall of ports.backgroundStalls?.(now) ?? []) {
         if (applyBackgroundStall(file, stall, now)) changed = true;
       }
+      // 转交提问到点还没人答：按超时收尾。worker 自己的定时器也会收尾，这里兜住 worker 已经不在了的情况
+      for (const relay of Object.values(file.relays ?? {})) {
+        if (relay.status !== 'pending' || relay.expiresAt === undefined) continue;
+        if (relay.expiresAt > now) continue;
+        const closed = closeRelayAsk(
+          file,
+          { conversationId: relay.conversationId, askId: relay.askId, by: 'timeout' },
+          now,
+          labelOf(file, relay.conversationId)
+        );
+        if (!closed.update) continue;
+        file.outbox = enqueueUpdate(file.outbox, closed.update);
+        changed = true;
+      }
       // 自动巡检：正常时什么都不推，异常时按会话与原因各推一次
       if (runPatrol(file, records, statuses, now)) changed = true;
       for (const proposal of Object.values(file.proposals)) {
@@ -581,6 +701,22 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       const file = ports.file();
       let changed = false;
+      // 重启后 worker 已经不在，挂起的提问没人等了：记录作废，免得秘书答到死提问上
+      for (const relay of Object.values(file.relays ?? {})) {
+        if (relay.status !== 'pending') continue;
+        if (dropRelay(file, relay.conversationId, relay.askId)) {
+          ports.audit?.({
+            at: now,
+            secretaryConversationId:
+              file.dispatched[relay.conversationId]?.secretaryConversationId ?? null,
+            op: 'ask_relay_cancel',
+            targetId: relay.conversationId,
+            ok: true,
+            detail: `${relay.askId} restart`,
+          });
+          changed = true;
+        }
+      }
       for (const record of Object.values(file.dispatched)) {
         if (record.lastState !== 'running') continue;
         // 重启时 worker 已经不在了：不算失败，交给用户决定是否重派

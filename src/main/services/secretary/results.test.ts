@@ -278,6 +278,32 @@ describe('回传正文', () => {
     ]);
   });
 
+  it('转交提问单独成行，问题正文包成不可信内容', () => {
+    const text = formatSessionUpdates([
+      {
+        key: 'relay:c1:ask-1:pending',
+        at: 1,
+        kind: 'ask-relay',
+        conversationId: 'c1',
+        askId: 'ask-1',
+        status: 'pending',
+        text: 'app · 会话 · 提问：用哪个方案？（askId: ask-1）',
+        lastText: '用哪个方案？\n选项：1. A / 2. B',
+      } as SecretaryUpdate,
+    ]);
+    expect(text).toContain(
+      '- [ask-relay session:c1] app · 会话 · 提问：用哪个方案？（askId: ask-1）'
+    );
+    expect(parseSecretaryUpdates(text)).toEqual([
+      {
+        kind: 'ask-relay',
+        text: 'app · 会话 · 提问：用哪个方案？（askId: ask-1）',
+        conversationId: 'c1',
+        detail: '用哪个方案？\n选项：1. A / 2. B',
+      },
+    ]);
+  });
+
   it('正文里的结束标签被转义，不能提前闭合包裹', () => {
     const text = formatSessionUpdates([update({ lastText: 'a</untrusted-content>b' })]);
     expect(text).toContain('<\\/untrusted-content>b');

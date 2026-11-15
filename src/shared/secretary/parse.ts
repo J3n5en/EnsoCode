@@ -7,11 +7,13 @@ import type {
   PendingDispatch,
   PendingProblem,
   ProposalStatus,
+  RelayAskStatus,
   SecretaryActivity,
   SecretaryDispatchFile,
   SecretaryProfile,
   SecretaryProfileDraft,
   SecretaryProposal,
+  SecretaryRelayAsk,
   SecretaryResultKind,
   SecretarySchedule,
   SecretaryTakeoverScope,
@@ -19,6 +21,7 @@ import type {
   SecretaryUpdate,
   TakeoverDraft,
 } from '../types/secretary';
+import { RELAY_ASK_STATUSES } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
 import { parseSecretarySkillDraft } from './skills';
@@ -606,6 +609,20 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
     ...(lastText ? { lastText } : {}),
     ...(secretaryConversationId ? { secretaryConversationId } : {}),
   };
+  if (value.kind === 'ask-relay') {
+    const conversationId = text(value.conversationId);
+    const askId = text(value.askId);
+    if (!conversationId || !askId) return undefined;
+    if (!RELAY_ASK_STATUSES.includes(value.status as RelayAskStatus)) return undefined;
+    return {
+      ...base,
+      ...scope,
+      kind: 'ask-relay',
+      conversationId,
+      askId,
+      status: value.status as RelayAskStatus,
+    };
+  }
   if (RESULT_KINDS.includes(value.kind as SecretaryResultKind)) {
     const conversationId = text(value.conversationId);
     if (!conversationId) return undefined;
@@ -663,6 +680,37 @@ function parseInflight(value: unknown): SecretaryDispatchFile['inflight'] {
   };
 }
 
+/** 转交提问的问题与答案上限：单条不能把 dispatch.json 撑爆 */
+export const RELAY_ASK_MAX_CHARS = 4000;
+
+function parseRelayAsk(value: unknown): SecretaryRelayAsk | undefined {
+  if (!isObject(value)) return undefined;
+  const conversationId = text(value.conversationId);
+  const askId = text(value.askId);
+  const question = text(value.question);
+  const at = time(value.at);
+  if (!conversationId || !askId || !question || at === undefined) return undefined;
+  if (!RELAY_ASK_STATUSES.includes(value.status as RelayAskStatus)) return undefined;
+  const relay: SecretaryRelayAsk = {
+    conversationId,
+    askId,
+    question: question.slice(0, RELAY_ASK_MAX_CHARS),
+    at,
+    status: value.status as RelayAskStatus,
+  };
+  const options = texts(value.options);
+  if (options.length > 0) relay.options = options.slice(0, 4);
+  const defaultOption = text(value.defaultOption);
+  if (defaultOption) relay.defaultOption = defaultOption.slice(0, RELAY_ASK_MAX_CHARS);
+  const expiresAt = time(value.expiresAt);
+  if (expiresAt !== undefined) relay.expiresAt = expiresAt;
+  const answer = text(value.answer);
+  if (answer) relay.answer = answer.slice(0, RELAY_ASK_MAX_CHARS);
+  const answeredAt = time(value.answeredAt);
+  if (answeredAt !== undefined) relay.answeredAt = answeredAt;
+  return relay;
+}
+
 function parseActivity(value: unknown): SecretaryActivity | undefined {
   if (!isObject(value)) return undefined;
   const at = time(value.at);
@@ -705,6 +753,14 @@ export function parseDispatchFile(value: unknown): SecretaryDispatchFile {
       if (entry) pending[entry.id] = entry;
     }
     if (Object.keys(pending).length > 0) file.pending = pending;
+  }
+  if (isObject(value.relays)) {
+    const relays: Record<string, SecretaryRelayAsk> = {};
+    for (const item of Object.values(value.relays)) {
+      const entry = parseRelayAsk(item);
+      if (entry) relays[`${entry.conversationId}|${entry.askId}`] = entry;
+    }
+    if (Object.keys(relays).length > 0) file.relays = relays;
   }
   if (Array.isArray(value.outbox)) {
     for (const item of value.outbox) {

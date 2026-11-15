@@ -3,7 +3,7 @@ import path from 'node:path';
 import { app } from '@platform';
 import { projectNameFromPath } from '@shared/projectName';
 import { type FeedPage, type FeedQuery, feedEvents, pageFeed } from '@shared/secretary/feed';
-import { parseProfile } from '@shared/secretary/parse';
+import { parseProfile, RELAY_ASK_MAX_CHARS } from '@shared/secretary/parse';
 import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending';
 import {
   canOperate,
@@ -51,6 +51,7 @@ import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { todoDispatchPrompt } from './dispatchBrief';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
+import { closeRelayAsk, dropRelaysFor, pendingRelay, relayKey, sessionLabel } from './relay';
 import {
   buildBoard,
   countsAsRunning,
@@ -161,6 +162,15 @@ export interface SecretaryDispatchPorts {
   ): Promise<'running' | 'idle' | 'waiting' | 'error'>;
   /** 撤掉驱动者的续跑与看门狗：停止后不许它再被唤醒 */
   forget?(conversationId: string): void;
+  /** 代答派出/接管会话挂起的提问；by 固定是 relay，原会话据此显示「X 已回答」 */
+  answer(
+    conversationId: string,
+    askId: string,
+    answer: string,
+    name: string
+  ): MaybePromise<{ ok: boolean; error?: string }>;
+  /** 开始/结束跟踪：把 ask_user 转给秘书，撤销时恢复成直接问用户 */
+  relayAsk(conversationId: string, relay: { name: string } | null): void;
 }
 
 const DISPATCH_OPS = [
@@ -169,6 +179,7 @@ const DISPATCH_OPS = [
   'session_queue_list',
   'session_queue_cancel',
   'session_stop',
+  'session_answer',
   'session_takeover_propose',
   'todo_list',
   'todo_item_add',
@@ -367,6 +378,23 @@ async function runningCount(
   return count;
 }
 
+/** 会话的一句话标签：项目名 · 标题，回传正文与卡片共用 */
+async function sessionLabelOf(
+  ports: SecretaryDispatchPorts,
+  conversationId: string
+): Promise<string> {
+  const record = ports.dispatchFile().dispatched[conversationId];
+  const row = (await ports.rows())[conversationId];
+  const project = record
+    ? (await ports.projects()).find((candidate) => candidate.projectId === record.projectId)
+    : undefined;
+  return sessionLabel(
+    project ? projectNameFromPath(project.canonicalPath) : '',
+    typeof row?.title === 'string' ? row.title : '',
+    conversationId
+  );
+}
+
 async function noteDispatchResumed(
   ports: SecretaryDispatchPorts,
   conversationId: string
@@ -527,6 +555,8 @@ async function executeDispatch(
     // 只有新派出的会话套用这两个默认值；接管的是用户已有会话，一概不碰
     ...(profile.dispatchMuted ? { muted: true } : {}),
     ...(profile.dispatchUnattended ? { unattended: true } : {}),
+    // 派出的会话一律把 ask_user 先转给秘书：无人值守时不再直接拒绝，也不会卡住
+    ...(profile.name ? { askRelay: { name: profile.name } } : {}),
   });
   if (!created.ok) return created;
   const now = ports.now();
@@ -1032,6 +1062,8 @@ async function trackScopeSession(
     ok: true,
     detail: 'scope',
   });
+  const name = (await profileOf(ports)).name;
+  if (name) ports.relayAsk(conversationId, { name });
 }
 
 /**
@@ -1088,6 +1120,9 @@ export async function grantTakeover(
     detail: via,
   });
   notifySecretaryChanged();
+  // 接管生效：这个会话的 ask_user 从此先转给秘书
+  const name = (await profileOf(ports)).name;
+  if (name) ports.relayAsk(conversationId, { name });
   return { ok: true };
 }
 
@@ -1115,6 +1150,8 @@ export function revokeTakeover(
   file.outbox = file.outbox.filter(
     (update) => !('conversationId' in update && update.conversationId === conversationId)
   );
+  // 挂起的转交提问一并作废：撤销后秘书不能再代答
+  dropRelaysFor(file, conversationId);
   // 记进「不再跟踪」：范围权限不会再让秘书自动管回这个会话，只有确认卡能重新授权
   file.untracked = [
     conversationId,
@@ -1130,6 +1167,8 @@ export function revokeTakeover(
     detail: from,
   });
   notifySecretaryChanged();
+  // 权限收回：ask_user 恢复成直接问用户
+  ports.relayAsk(conversationId, null);
   return { ok: true };
 }
 
@@ -1405,6 +1444,105 @@ export function createSecretaryDispatchHandlers(
         ok: true,
         result: { status: 'stopped', ...(cleared > 0 ? { clearedQueued: cleared } : {}) },
       };
+    },
+
+    async session_answer(params, ctx) {
+      const conversationId = stringParam(params, 'conversationId');
+      if (!conversationId)
+        return { ok: false, error: 'invalid arguments: "conversationId" is required' };
+      const askId = stringParam(params, 'askId');
+      if (!askId) return { ok: false, error: 'invalid arguments: "askId" is required' };
+      const answer = stringParam(params, 'answer');
+      if (!answer) return { ok: false, error: 'invalid arguments: "answer" is required' };
+      if (!ctx.secretaryConversationId) return invalidArguments;
+      const op = 'session_answer';
+      if (answer.length > RELAY_ASK_MAX_CHARS) {
+        return auditFailure(
+          ports,
+          ctx,
+          op,
+          `invalid arguments: "answer" is ${answer.length} characters, max ${RELAY_ASK_MAX_CHARS}`,
+          conversationId
+        );
+      }
+      const profile = await profileOf(ports);
+      const check = await checkOperate(ports, conversationId, profile);
+      if (!check.ok) return deny(ports, ctx, op, check.code, conversationId);
+      const label = await sessionLabelOf(ports, conversationId);
+      // 读改写之间不留 await：并发的两次回答只有一次写进去
+      const file = ports.dispatchFile();
+      const relay = pendingRelay(file, conversationId, askId);
+      if (!relay)
+        return auditFailure(
+          ports,
+          ctx,
+          op,
+          'not-found: no question with this id is waiting in that session',
+          conversationId
+        );
+      const now = ports.now();
+      if (relay.status !== 'pending') {
+        const who =
+          relay.status === 'answered'
+            ? 'you already answered it'
+            : relay.status === 'user-answered'
+              ? 'the user answered it directly'
+              : 'it timed out';
+        return auditFailure(ports, ctx, op, `already-closed: ${who}`, conversationId);
+      }
+      if (relay.expiresAt !== undefined && now >= relay.expiresAt) {
+        const closed = closeRelayAsk(file, { conversationId, askId, by: 'timeout' }, now, label);
+        if (closed.update) file.outbox = enqueueUpdate(file.outbox, closed.update);
+        ports.saveDispatch(file);
+        return auditFailure(
+          ports,
+          ctx,
+          op,
+          'timed-out: the question already expired, so the session went on without an answer',
+          conversationId
+        );
+      }
+      closeRelayAsk(file, { conversationId, askId, by: 'relay', answer }, now, label);
+      ports.saveDispatch(file);
+      const delivered = await ports.answer(conversationId, askId, answer, profile.name);
+      if (!delivered.ok) {
+        // 送不进去：把记录退回挂起，会话恢复后秘书还能再答一次
+        const retry = ports.dispatchFile();
+        const current = pendingRelay(retry, conversationId, askId);
+        if (current?.status === 'answered') {
+          retry.relays = {
+            ...(retry.relays ?? {}),
+            [relayKey(conversationId, askId)]: {
+              conversationId,
+              askId,
+              question: current.question,
+              at: current.at,
+              status: 'pending',
+              ...(current.options ? { options: current.options } : {}),
+              ...(current.defaultOption ? { defaultOption: current.defaultOption } : {}),
+              ...(current.expiresAt !== undefined ? { expiresAt: current.expiresAt } : {}),
+            },
+          };
+          ports.saveDispatch(retry);
+        }
+        return auditFailure(
+          ports,
+          ctx,
+          op,
+          `deliver-failed: ${delivered.error ?? 'unknown'}`,
+          conversationId
+        );
+      }
+      ports.audit({
+        at: now,
+        secretaryConversationId: ctx.secretaryConversationId,
+        op,
+        targetId: conversationId,
+        ok: true,
+        detail: askId,
+      });
+      notifySecretaryChanged();
+      return { ok: true, result: { status: 'answered', conversationId, askId } };
     },
 
     async todo_list(params) {
@@ -2092,6 +2230,13 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
   },
   forget: (conversationId) => {
     forgetListener?.(conversationId);
+  },
+  answer: async (conversationId, askId, answer, name) =>
+    (await import('../../ipc/agent')).answerAskFromMain(conversationId, askId, answer, name),
+  relayAsk: (conversationId, relay) => {
+    void import('../../ipc/agent')
+      .then((agent) => agent.setAskRelayFromMain(conversationId, relay ?? undefined))
+      .catch(() => undefined);
   },
 };
 

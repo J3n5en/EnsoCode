@@ -3717,6 +3717,14 @@ export const zhTranslations: Record<string, string> = {
   'Run in a worktree': '使用隔离工作区',
   'Run in the project checkout': '在项目目录里',
   'Created the session': '已创建',
+  'Handed to {{name}}': '已转给 {{name}}',
+  'No answer in time': '超时未答',
+  '{{name}} answered: {{answer}}': '{{name}} 已回答：{{answer}}',
+  'Answered: {{answer}}': '已回答：{{answer}}',
+  'Answer {{title}}': '回答 {{title}}',
+  Answered: '已回答',
+  'Answering…': '回答中…',
+  'Answered {{count}} questions': '回答了 {{count}} 个提问',
 };
 
 export function normalizeLocale(input?: string): Locale {
