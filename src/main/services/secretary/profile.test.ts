@@ -7,6 +7,7 @@ import type {
 } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
 import { createSecretaryProfile, type SecretaryProfilePorts } from './profile';
+import { buildSecretarySystemPrompt } from './prompt';
 import type { SecretarySessionStatus } from './readers';
 
 const NOW = 5_000;
@@ -38,6 +39,8 @@ interface Harness {
   file: SecretaryDispatchFile;
   setModel: { conversationId: string; model: unknown }[];
   released: string[];
+  /** 活着的会话当前用的系统提示词：spawn 与就地刷新都按盘上档案现拼 */
+  prompts: Record<string, string>;
   clearedMemory: number;
   clearedFiles: number;
   notified: number;
@@ -64,6 +67,7 @@ function harness(
     file: emptyFile(),
     setModel: [],
     released: [],
+    prompts: {},
     clearedMemory: 0,
     clearedFiles: 0,
     notified: 0,
@@ -107,7 +111,11 @@ function harness(
     },
     release: async (conversationId) => {
       h.released.push(conversationId);
+      delete h.prompts[conversationId];
       return { ok: true };
+    },
+    refreshPrompt: (conversationId) => {
+      h.prompts[conversationId] = promptFrom(h);
     },
     patchRow: (conversationId, patch) => {
       h.rows[conversationId] = { ...h.rows[conversationId], ...patch };
@@ -127,6 +135,15 @@ function harness(
   };
   h.service = createSecretaryProfile(h.ports);
   return h;
+}
+
+/** 与 Main 的 secretarySystemPrompt 同口径：每次现读档案与人设 */
+function promptFrom(h: Harness): string {
+  return buildSecretarySystemPrompt({
+    profile: h.ports.profile(),
+    persona: h.ports.persona(),
+    uiLanguage: 'zh',
+  });
 }
 
 describe('保存档案', () => {
@@ -286,6 +303,52 @@ describe('保存后的副作用', () => {
     expect(h.released).toEqual(['sec-1']);
     await h.service.onTurnEnded('sec-2');
     expect(h.released).toEqual(['sec-1', 'sec-2']);
+  });
+
+  it('改称呼后新会话的提示词用新称呼', async () => {
+    const h = harness({ profile: { ...baseProfile(), addressAs: 'J 哥' }, conversations: [] });
+    await h.service.save({ addressAs: '哥哥' }, null);
+    expect(h.saved?.addressAs).toBe('哥哥');
+    const prompt = promptFrom(h);
+    expect(prompt).toContain('Address the user as "哥哥"');
+    expect(prompt).not.toContain('J 哥');
+  });
+
+  it('改称呼后活着的旧会话就地换提示词：空闲与运行中都换，不释放、不重建', async () => {
+    const h = harness({
+      profile: { ...baseProfile(), addressAs: 'J 哥' },
+      conversations: ['sec-1', 'sec-2', 'sec-dead'],
+      status: (conversationId) =>
+        conversationId === 'sec-2' ? { ...idle, state: 'running' } : idle,
+      alive: (conversationId) => conversationId !== 'sec-dead',
+    });
+    await h.service.save({ addressAs: '哥哥' }, null);
+    expect(Object.keys(h.prompts).sort()).toEqual(['sec-1', 'sec-2']);
+    for (const prompt of Object.values(h.prompts)) {
+      expect(prompt).toContain('Address the user as "哥哥"');
+      expect(prompt).not.toContain('J 哥');
+    }
+    expect(h.released).toEqual([]);
+    await h.service.onTurnEnded('sec-2');
+    expect(h.released).toEqual([]);
+  });
+
+  it('旧会话重启后用新称呼', async () => {
+    const h = harness({ profile: { ...baseProfile(), addressAs: 'J 哥' } });
+    h.prompts['sec-1'] = promptFrom(h);
+    await h.service.save({ addressAs: '哥哥' }, null);
+    // 重启 = 释放后按盘上档案重新 spawn
+    await h.ports.release('sec-1');
+    h.prompts['sec-1'] = promptFrom(h);
+    expect(h.prompts['sec-1']).toContain('Address the user as "哥哥"');
+    expect(h.prompts['sec-1']).not.toContain('J 哥');
+  });
+
+  it('清掉称呼后提示词回到默认：不写称呼', async () => {
+    const h = harness({ profile: { ...baseProfile(), addressAs: 'J 哥' } });
+    await h.service.save({ addressAs: null }, null);
+    expect(h.saved?.addressAs).toBeUndefined();
+    expect(h.prompts['sec-1']).not.toContain('Address the user as');
   });
 
   it('每日简报时间变化时重算系统定时', async () => {

@@ -95,7 +95,6 @@ import { computeStats, toUsageTotals } from '@shared/sessionStats';
 import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import { DEFAULT_SSH_TIMEOUT_SECONDS } from '@shared/sshTimeout';
-import { replacePersonaParagraph } from '@shared/systemPrompt';
 import { toolBatchDigest } from '@shared/toolBatchLabel';
 import { prependTurnNote } from '@shared/turnNotes';
 import type {
@@ -260,6 +259,7 @@ import {
 import { outputLimitRecoveryExtension } from './outputLimitRecovery';
 import { withPathHints } from './pathHints';
 import { PendingNotificationStore } from './pendingNotifications';
+import { type PersonaHolder, personaExtension } from './personaExtension';
 import { createSubmitPlanTool, PlanController, withPlanGate } from './planMode';
 import {
   childPluginEventPlan,
@@ -517,6 +517,8 @@ interface ManagedSession {
   parentId?: string;
   coworkerName?: string;
   pendingRole?: string;
+  /** 父会话 spawn 时带了系统提示词：秘书档案改了就地换正文 */
+  persona?: PersonaHolder;
   /** 最近一次会话请求原样留底：插件 fork 代理据此重放前缀，命中同一份提示缓存 */
   forkBase?: ForkBase;
   /** 仅父会话：Plan 模式状态机（设置里关闭时缺省） */
@@ -667,7 +669,7 @@ function createSessionResourceLoader(options: {
   /** 已打开会话共用；设置变更后原地改，下一次压缩读最新模型 */
   compactRoute?: EnsoCompactOptions;
   /** 仅普通 parent：替换 pi 默认提示词开头的角色段落；会强制整段提示词，故排在扩展最后。 */
-  persona?: string;
+  persona?: PersonaHolder;
   /** skills/cwd 之后的真尾 */
   systemPromptAppend?: string;
   /** 真尾之后的短覆盖块 */
@@ -789,19 +791,7 @@ function createSessionResourceLoader(options: {
       ...(options.systemPromptBoost
         ? [tailSystemPromptSection('preset_boost', options.systemPromptBoost)]
         : []),
-      ...(persona
-        ? [
-            {
-              name: 'custom-persona',
-              hidden: true,
-              factory: (pi) => {
-                pi.on('before_agent_start', (event) => ({
-                  systemPrompt: replacePersonaParagraph(event.systemPrompt, persona),
-                }));
-              },
-            } satisfies InlineExtension,
-          ]
-        : []),
+      ...(persona ? [personaExtension(persona)] : []),
     ],
     agentsFilesOverride: options.remoteAgentsFiles
       ? () => ({
@@ -2041,6 +2031,11 @@ export class SessionSupervisor {
         });
         return;
       }
+      case 'set-system-prompt': {
+        const managed = this.must(command.identity);
+        if (managed.persona) managed.persona.current = command.systemPrompt;
+        return;
+      }
       case 'set-reasoning': {
         const managed = this.must(command.identity);
         if (managed.session.model) {
@@ -2463,6 +2458,9 @@ export class SessionSupervisor {
       }
       // Main 已把这次 spawn 记成新实例：改绑实例号，之后结束时回显的是 Main 当前认的号
       existing.instanceId = instanceId;
+      // 秘书重启时 worker 仍在：沿用旧会话与历史，但提示词换成 Main 刚按档案拼的
+      if (secretaryMode && systemPrompt && existing.persona)
+        existing.persona.current = systemPrompt;
       this.options.emit({
         type: 'parent-ready',
         identity,
@@ -2538,6 +2536,7 @@ export class SessionSupervisor {
         })
       : undefined;
     const reminders = new SystemReminderRegistry();
+    const persona: PersonaHolder | undefined = systemPrompt ? { current: systemPrompt } : undefined;
     const resourceLoader = createSessionResourceLoader({
       branchContext: this.branchContextExtension(() => managedRef),
       oauthPoolRecovery: this.oauthPoolRecovery(),
@@ -2564,7 +2563,7 @@ export class SessionSupervisor {
       turnDiscard,
       reminders,
       codemode: codemodeHost.extension,
-      persona: systemPrompt,
+      persona,
       systemPromptAppend,
       systemPromptBoost,
       autoRejectApprovals,
@@ -3438,6 +3437,7 @@ export class SessionSupervisor {
     managedRef.agentControl = agentControl;
     managedRef.workflowRuns = workflowRuns;
     if (rolePrompt && !resumeFile) managedRef.pendingRole = rolePrompt;
+    if (persona) managedRef.persona = persona;
     if (refusalRetryPrompt) managedRef.refusalRetryPrompt = refusalRetryPrompt;
     managedRef.browser = browser;
     managedRef.memory = memory;

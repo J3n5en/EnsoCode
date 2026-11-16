@@ -194,6 +194,22 @@ describe('agent control tool protocol', () => {
       expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
   });
 
+  it('set-system-prompt 只接受父会话 identity 与非空正文', () => {
+    const command = {
+      type: 'set-system-prompt',
+      identity: parent,
+      systemPrompt: 'Address the user as "哥哥".',
+    };
+    expect(parseAgentCommand(command)).toEqual(command);
+    for (const patch of [
+      { systemPrompt: '' },
+      { systemPrompt: 1 },
+      { identity: child },
+      { extra: true },
+    ])
+      expect(parseAgentCommand({ ...command, ...patch })).toBeNull();
+  });
+
   it.each(['delivery-settled', 'delivery-rejected', 'delivery-deferred'])(
     '%s 只接受精确 identity、seq 与 deliveryId',
     (type) => {
