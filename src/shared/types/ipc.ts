@@ -8,6 +8,10 @@ export const IPC_CHANNELS = {
   CONVERSATIONS_PATCH: 'conversations:patch',
   /** 主界面 renderer 读整份会话记录，同时重置自己的会话账本 */
   CONVERSATIONS_READ: 'conversations:read',
+  /** 用户明确删除这些会话：Main 按 id 删行并推补丁，不经写回的整表删除守卫 */
+  CONVERSATIONS_REMOVE: 'conversations:remove',
+  /** main → 主界面 renderer：它的会话写回被拒收，需重新读会话 */
+  CONVERSATIONS_RESYNC: 'conversations:resync',
   /** 秘书：工作台与聊天卡片读的同一份 Main 状态 */
   SECRETARY_GET_STATE: 'secretary:get-state',
   /** main → 主界面 renderer：秘书状态变化 */

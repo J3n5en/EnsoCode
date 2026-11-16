@@ -1011,6 +1011,17 @@ export function registerSettingsHandlers(): void {
     return readConversationsFor(event.sender, data[CONVERSATIONS_KEY]);
   });
 
+  // 用户明确删除：先在 Main 删行并推补丁，随后该窗口的空表写回已无可删，不触发整表守卫
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_REMOVE, async (_event, ids: unknown) => {
+    if (!Array.isArray(ids)) return false;
+    const targets = new Set(ids.filter((id): id is string => typeof id === 'string'));
+    if (targets.size === 0) return true;
+    return patchConversationsState((state) => {
+      for (const id of targets) delete state.conversations[id];
+      state.order = state.order.filter((id) => !targets.has(id));
+    });
+  });
+
   // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖
   ipcMain.handle(
     IPC_CHANNELS.SETTINGS_WRITE_KEY,

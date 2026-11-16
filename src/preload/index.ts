@@ -332,6 +332,15 @@ const electronAPI = {
     /** 会话记录读回，带补丁序号；读的同时把本 renderer 的会话账本重置为磁盘值 */
     readConversations: (): Promise<{ value: unknown; seq: number }> =>
       ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_READ),
+    /** 用户明确删除会话：Main 先删行，空表写回不会被整表删除守卫拦下 */
+    removeConversations: (ids: string[]): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_REMOVE, ids),
+    /** Main 拒收本窗口的会话写回，要求重新读会话 */
+    onConversationsResync: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.CONVERSATIONS_RESYNC, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.CONVERSATIONS_RESYNC, listener);
+    },
     /** 其他窗口修改设置后触发，用于多窗口同步 */
     onChanged: (callback: () => void): (() => void) => {
       const listener = () => callback();
