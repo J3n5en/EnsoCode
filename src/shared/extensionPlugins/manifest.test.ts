@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isNewerPluginVersion, parseExtensionPluginManifest } from './manifest';
+import {
+  isNewerPluginVersion,
+  parseExtensionPluginManifest,
+  pluginDomainAllowed,
+} from './manifest';
 
 const base = () => ({
   schemaVersion: 1,
@@ -304,9 +308,12 @@ describe('parseExtensionPluginManifest', () => {
     ).not.toEqual([]);
   });
 
+  // `*.example.com` 是允许的子域通配（见「秘书联系方式渠道」），过宽或写法不对的仍然拒绝
   it.each([
     '*',
-    '*.example.com',
+    '*.com',
+    '*.*.example.com',
+    'api.*.example.com',
     'https://api.example.com',
     'api.example.com:8443',
     'API.example.com',
@@ -746,5 +753,64 @@ describe('isNewerPluginVersion', () => {
   it('看不懂的版本号只有字面不同才算更新', () => {
     expect(isNewerPluginVersion('2024-06', '2024-05')).toBe(true);
     expect(isNewerPluginVersion('nightly', 'nightly')).toBe(false);
+  });
+});
+
+describe('秘书联系方式渠道', () => {
+  const contact = (patch: Record<string, unknown> = {}) => ({
+    ...base(),
+    resident: true,
+    permissions: ['agent.tool', 'secretary.contact', 'process.background', 'ui.view', 'net.fetch'],
+    net: { domains: ['ilinkai.weixin.qq.com', '*.weixin.qq.com'] },
+    contributes: {
+      ...base().contributes,
+      contactChannels: [
+        { id: 'wechat', title: '微信', icon: 'icon.svg', settingsView: 'view.html' },
+      ],
+    },
+    ...patch,
+  });
+
+  it('解析渠道声明与通配域名', () => {
+    const result = parseExtensionPluginManifest(contact(), '0.2.12');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.contactChannels).toEqual([
+      { id: 'wechat', title: '微信', icon: 'icon.svg', settingsView: 'view.html' },
+    ]);
+    expect(result.manifest.net.domains).toContain('*.weixin.qq.com');
+  });
+
+  it('声明渠道要 secretary.contact，登录页要 ui.view', () => {
+    expect(
+      errorsOf(
+        contact({ permissions: ['agent.tool', 'process.background', 'ui.view', 'net.fetch'] })
+      )
+    ).toContain('contactChannels 需要权限 secretary.contact');
+    expect(
+      errorsOf(
+        contact({
+          permissions: ['agent.tool', 'secretary.contact', 'process.background', 'net.fetch'],
+        })
+      )
+    ).toContain('contactChannels.settingsView 需要权限 ui.view');
+  });
+
+  it('坏渠道与过宽的通配都不认', () => {
+    expect(
+      errorsOf(
+        contact({
+          contributes: { ...base().contributes, contactChannels: [{ id: 'Bad Id', title: 'x' }] },
+        })
+      )
+    ).toContain('联系方式渠道不合法');
+    expect(errorsOf(contact({ net: { domains: ['*.com'] } }))).toContain('net.domains 不合法');
+  });
+
+  it('通配只放行子域，不放行同后缀的别家域名', () => {
+    expect(pluginDomainAllowed(['*.weixin.qq.com'], 'sh.ilinkai.weixin.qq.com')).toBe(true);
+    expect(pluginDomainAllowed(['*.weixin.qq.com'], 'weixin.qq.com')).toBe(false);
+    expect(pluginDomainAllowed(['*.weixin.qq.com'], 'evilweixin.qq.com')).toBe(false);
+    expect(pluginDomainAllowed(['api.example.com'], 'API.example.com')).toBe(true);
   });
 });

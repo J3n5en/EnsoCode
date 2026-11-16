@@ -24,6 +24,7 @@ const LABELS: Record<ExtensionPluginPermission, string> = {
   'session.focus': '在你点击时切换到本项目的会话',
   'session.create': '在你点击时于本项目新建会话',
   'agent.run': '用当前会话的模型运行只读代理（可读项目文件与对话内容，不能修改）',
+  'secretary.contact': '作为秘书的联系方式：收发你与秘书之间的消息（里程碑、提问、确认卡提示）',
 };
 
 export function pluginPermissionLabel(permission: string): string {

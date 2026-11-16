@@ -187,6 +187,12 @@ const ASK_HINT: Record<ContactLang, string> = {
   en: 'Tap a button or just reply. Whichever side answers first wins.',
 };
 
+/** 没有按钮的渠道：回序号就是选这一项 */
+const PLAIN_ASK_HINT: Record<ContactLang, string> = {
+  zh: '回复序号选一项，或直接回一句话。先答的那一边算数。',
+  en: 'Reply with a number to pick, or just reply. Whichever side answers first wins.',
+};
+
 /**
  * 回推正文里的确认提示：手机上既看不到确认卡也处理不了审批，
  * 秘书说「已确认」时必须在同一条里点明还得回应用点一下。
@@ -200,14 +206,14 @@ export function formatNeedsAppConfirmLine(lang: ContactLang): string {
 /** 秘书用 ask_user 问 J 哥：问题、选项、怎么答，一条说完 */
 export function formatAskMessage(
   lang: ContactLang,
-  input: { question: string; options?: readonly string[]; title?: string }
+  input: { question: string; options?: readonly string[]; title?: string; plain?: boolean }
 ): string {
   const lines = [input.title ? `❓ ${input.title}` : lang === 'zh' ? '❓ 秘书问你' : '❓ Question'];
   lines.push(input.question.trim());
   if (input.options && input.options.length > 0) {
     lines.push(...input.options.map((option, index) => `${index + 1}. ${option}`));
   }
-  lines.push(ASK_HINT[lang]);
+  lines.push(input.plain ? PLAIN_ASK_HINT[lang] : ASK_HINT[lang]);
   return lines.join('\n');
 }
 

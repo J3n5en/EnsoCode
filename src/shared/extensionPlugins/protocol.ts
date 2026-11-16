@@ -183,6 +183,8 @@ export const PLUGIN_CALL_METHODS = [
   'schedule.run',
   /** 其他插件调用本插件的导出方法；payload { name, args, caller } */
   'export.call',
+  /** 秘书联系方式往插件渠道发东西；payload { channelId, op: 'sendText' | 'typing', peerId, text? } */
+  'contact.call',
 ] as const;
 export type PluginCallMethod = (typeof PLUGIN_CALL_METHODS)[number];
 
@@ -221,6 +223,12 @@ export const PLUGIN_HOST_APIS = [
   'contrib.unregister',
   /** 宿主能力探测 */
   'host.capabilities',
+  /** 秘书联系方式：注册渠道实现；args { channelId, caps } */
+  'contact.register',
+  /** 渠道收到一句话；args { channelId, peerId, text, name?, at? } */
+  'contact.inbound',
+  /** 渠道状态；args { channelId, status, detail?, peers? } */
+  'contact.setStatus',
   /** 列出会话及其状态；args { scope? }：缺省同项目，'all' 为所有项目（需 session.readAll）；返回 { current, sessions } */
   'session.list',
   /** 会话汇总状态；args { sessionId? } 缺省发起会话，返回 { sessionId, state, pendingAsks, pendingApprovals } */

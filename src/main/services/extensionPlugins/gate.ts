@@ -6,6 +6,7 @@ import {
   type ExtensionPluginManifest,
   type ExtensionPluginPermission,
   isPluginRelativePath,
+  pluginDomainAllowed,
 } from '@shared/extensionPlugins/manifest';
 import { parsePluginPresetId } from '@shared/extensionPlugins/preset';
 import {
@@ -42,6 +43,47 @@ const MAX_CLIPBOARD_BYTES = 1024 * 1024;
 const OPEN_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 const INJECT_PER_WINDOW = 5;
 const INJECT_WINDOW_MS = 10_000;
+/** 联系方式渠道入站：一个插件 10 秒最多 20 条，挡住失控的轮询刷进秘书会话 */
+const CONTACT_INBOUND_PER_WINDOW = 20;
+const CONTACT_PEER_MAX = 256;
+const CONTACT_NAME_MAX = 64;
+const CONTACT_MAX_PEERS = 8;
+const CONTACT_STATUSES = new Set(['unconfigured', 'pending', 'connected', 'error']);
+const CONTACT_FORMATS = new Set(['html', 'markdown', 'plain']);
+
+/** 插件上报的渠道能力：每项必须给全，缺一项就不认 */
+export interface PluginContactCaps {
+  buttons: boolean;
+  urlButtons: boolean;
+  edit: boolean;
+  typing: boolean;
+  format: 'html' | 'markdown' | 'plain';
+  maxChars: number;
+  commandMenu: boolean;
+}
+
+export function parsePluginContactCaps(raw: unknown): PluginContactCaps | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const v = raw as Record<string, unknown>;
+  const flags = ['buttons', 'urlButtons', 'edit', 'typing', 'commandMenu'] as const;
+  if (flags.some((key) => typeof v[key] !== 'boolean')) return null;
+  if (typeof v.format !== 'string' || !CONTACT_FORMATS.has(v.format)) return null;
+  if (
+    !Number.isInteger(v.maxChars) ||
+    (v.maxChars as number) < 100 ||
+    (v.maxChars as number) > 65_536
+  )
+    return null;
+  return {
+    buttons: v.buttons as boolean,
+    urlButtons: v.urlButtons as boolean,
+    edit: v.edit as boolean,
+    typing: v.typing as boolean,
+    format: v.format as PluginContactCaps['format'],
+    maxChars: v.maxChars as number,
+    commandMenu: v.commandMenu as boolean,
+  };
+}
 const VIEW_EVENT_PER_SECOND = 20;
 const MAX_ANCHORS = 32;
 const VIEW_EVENT_NAME = /^[a-z][a-z0-9._-]{0,63}$/;
@@ -162,6 +204,24 @@ export interface GateDeps {
   registerContrib?(pluginId: string, input: Record<string, unknown>): void;
   unregisterContrib?(pluginId: string, input: Record<string, unknown>): void;
   capabilities?(): PluginHostCapabilities;
+  /** 秘书联系方式；channelId 已拼成 `<pluginId>:<id>` 并校验在清单里 */
+  contact?: {
+    register(pluginId: string, channelId: string, caps: PluginContactCaps): void;
+    inbound(
+      pluginId: string,
+      channelId: string,
+      input: { peerId: string; text: string; name?: string; at?: number }
+    ): void;
+    setStatus(
+      pluginId: string,
+      channelId: string,
+      input: {
+        status: 'unconfigured' | 'pending' | 'connected' | 'error';
+        detail?: string;
+        peers?: string[];
+      }
+    ): void;
+  };
   sessions?: {
     /** 与 sessionId 同项目的主会话；按最近活动排序 */
     list(sessionId: string): PluginSessionInfo[];
@@ -365,6 +425,16 @@ export class PluginHostGate {
     if (recent.length >= INJECT_PER_WINDOW) throw pluginError('RATE_LIMITED', '注入消息过于频繁');
     recent.push(now);
     this.injects.set(pluginId, recent);
+  }
+
+  private admitContact(pluginId: string): void {
+    const now = this.deps.now();
+    const key = `contact:${pluginId}`;
+    const recent = (this.injects.get(key) ?? []).filter((t) => now - t < INJECT_WINDOW_MS);
+    if (recent.length >= CONTACT_INBOUND_PER_WINDOW)
+      throw pluginError('RATE_LIMITED', '联系方式入站过于频繁');
+    recent.push(now);
+    this.injects.set(key, recent);
   }
 
   /** 每个插件每秒最多 20 条，避免 agent 把侧栏刷爆 */
@@ -759,6 +829,65 @@ export class PluginHostGate {
       case 'contrib.unregister':
         this.deps.unregisterContrib?.(pluginId, a);
         return null;
+      case 'contact.register':
+      case 'contact.inbound':
+      case 'contact.setStatus': {
+        permit('secretary.contact');
+        const contact = this.deps.contact;
+        if (!contact) throw pluginError('UNSUPPORTED', '当前环境没有秘书联系方式');
+        const local = typeof a.channelId === 'string' ? a.channelId : '';
+        if (!(manifest.contributes.contactChannels ?? []).some((item) => item.id === local))
+          throw pluginError('INVALID_ARGS', `清单未声明联系方式渠道 ${local}`);
+        const channelId = `${pluginId}:${local}`;
+        if (api === 'contact.register') {
+          const caps = parsePluginContactCaps(a.caps);
+          if (!caps) throw pluginError('INVALID_ARGS', 'caps 不合法');
+          contact.register(pluginId, channelId, caps);
+          return null;
+        }
+        if (api === 'contact.inbound') {
+          const peerId = a.peerId;
+          if (typeof peerId !== 'string' || !peerId || peerId.length > CONTACT_PEER_MAX)
+            throw pluginError('INVALID_ARGS', 'peerId 不合法');
+          if (
+            typeof a.text !== 'string' ||
+            !a.text.trim() ||
+            a.text.length > PLUGIN_INJECT_MAX_CHARS
+          )
+            throw pluginError('INVALID_ARGS', 'text 不合法或过长');
+          if (
+            a.name !== undefined &&
+            (typeof a.name !== 'string' || a.name.length > CONTACT_NAME_MAX)
+          )
+            throw pluginError('INVALID_ARGS', 'name 不合法');
+          if (a.at !== undefined && (typeof a.at !== 'number' || !Number.isFinite(a.at)))
+            throw pluginError('INVALID_ARGS', 'at 不合法');
+          this.admitContact(pluginId);
+          contact.inbound(pluginId, channelId, {
+            peerId,
+            text: a.text,
+            ...(typeof a.name === 'string' && a.name ? { name: a.name } : {}),
+            ...(typeof a.at === 'number' ? { at: a.at } : {}),
+          });
+          return null;
+        }
+        if (typeof a.status !== 'string' || !CONTACT_STATUSES.has(a.status))
+          throw pluginError('INVALID_ARGS', 'status 不合法');
+        const peers = a.peers;
+        if (
+          peers !== undefined &&
+          (!Array.isArray(peers) ||
+            peers.length > CONTACT_MAX_PEERS ||
+            peers.some((p) => typeof p !== 'string' || !p || p.length > CONTACT_PEER_MAX))
+        )
+          throw pluginError('INVALID_ARGS', 'peers 不合法');
+        contact.setStatus(pluginId, channelId, {
+          status: a.status as 'unconfigured' | 'pending' | 'connected' | 'error',
+          ...(typeof a.detail === 'string' && a.detail ? { detail: a.detail.slice(0, 200) } : {}),
+          ...(peers ? { peers: peers as string[] } : {}),
+        });
+        return null;
+      }
       case 'host.capabilities':
         return (
           this.deps.capabilities?.() ?? {
@@ -1005,7 +1134,11 @@ export class PluginHostGate {
       }
       if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')
         throw pluginError('INVALID_ARGS', '只支持 http / https');
-      if (parsed.username || parsed.password || !manifest.net.domains.includes(parsed.hostname))
+      if (
+        parsed.username ||
+        parsed.password ||
+        !pluginDomainAllowed(manifest.net.domains, parsed.hostname)
+      )
         throw pluginError('PERMISSION_DENIED', `域名未授权：${parsed.hostname}`);
       const response = await this.deps.fetch(parsed.href, {
         method,

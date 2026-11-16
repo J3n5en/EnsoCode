@@ -3440,7 +3440,10 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
   function followDeps(dir: string, phone: Set<string>): FollowDeps {
     return {
       store: new FollowingStore(dir),
-      probe: (conversationId) => (conversationId && phone.has(conversationId) ? 777 : null),
+      probe: (conversationId) =>
+        conversationId && phone.has(conversationId)
+          ? { channelId: 'telegram', peerId: '777' }
+          : null,
       audit: () => {},
       now: () => NOW,
     };
@@ -3469,7 +3472,7 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
       {
         kind: 'session',
         targetId: 'new-1',
-        chatId: 777,
+        origin: { channelId: 'telegram', peerId: '777' },
         summary: '给 apple-table 加 Score 字段',
       },
     ]);
@@ -3548,7 +3551,7 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
     deps.store.add({
       kind: 'session',
       targetId: 'c1',
-      chatId: 777,
+      origin: { channelId: 'telegram', peerId: '777' },
       at: NOW,
       summary: '修构建',
     });
@@ -3559,7 +3562,7 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
     deps.store.add({
       kind: 'session',
       targetId: 'c2',
-      chatId: 777,
+      origin: { channelId: 'telegram', peerId: '777' },
       at: NOW,
       summary: '接管来的',
     });

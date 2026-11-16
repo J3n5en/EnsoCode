@@ -36,7 +36,10 @@ export function PluginMarket({
   disabled,
   installedKey,
   onInstall,
+  initialQuery = '',
 }: {
+  /** 打开时预填的搜索词；按 id、名称、描述与标签匹配 */
+  initialQuery?: string;
   disabled: boolean;
   /** 已装插件版本变化时刷新安装状态 */
   installedKey: string;
@@ -46,7 +49,7 @@ export function PluginMarket({
   const api = window.electronAPI.extensionPlugins;
   const [list, setList] = React.useState<ExtensionPluginMarketList | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [query, setQuery] = React.useState('');
+  const [query, setQuery] = React.useState(initialQuery);
   const [section, setSection] = React.useState<MarketSection>('all');
   const [selected, setSelected] = React.useState<string | null>(null);
   const [loadRequest, setLoadRequest] = React.useState(() => openMarketLoadRequest(installedKey));

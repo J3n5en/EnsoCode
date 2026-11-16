@@ -766,5 +766,50 @@ export interface SecretaryContactTelegram {
 }
 
 export interface SecretaryContactState {
+  /** 总开关：关掉后不收不发，界面也不画渠道列表 */
+  enabled: boolean;
+  /** 渠道卡片：Telegram 内置固定第一位，插件渠道跟在后面 */
+  channels: SecretaryContactChannelView[];
   telegram: SecretaryContactTelegram;
+}
+
+export type SecretaryContactChannelStatus = 'unconfigured' | 'pending' | 'connected' | 'error';
+
+/** 渠道能力：不支持的能力界面不画成能用，核心按它降级 */
+export interface SecretaryContactCaps {
+  buttons: boolean;
+  urlButtons: boolean;
+  edit: boolean;
+  typing: boolean;
+  format: 'html' | 'markdown' | 'plain';
+  maxChars: number;
+  commandMenu: boolean;
+}
+
+/** 每个渠道的通用开关：宿主统一画，存在 contact.json */
+export interface SecretaryContactChannelPrefs {
+  enabled: boolean;
+  /** 里程碑、提问、确认卡、审批往这个渠道主动推 */
+  push: boolean;
+  /** 手机上直接确认卡片；审批永远不行 */
+  cardConfirm: boolean;
+  /** 秘书每一轮回复都镜像过去 */
+  syncMirror: boolean;
+  /** 允许发记忆标题 */
+  memory: boolean;
+}
+
+export interface SecretaryContactChannelView {
+  id: string;
+  title: string;
+  builtin: boolean;
+  pluginId?: string;
+  /** 插件内图标相对路径 */
+  icon?: string;
+  /** 插件内登录页相对路径 */
+  settingsView?: string;
+  status: SecretaryContactChannelStatus;
+  detail?: string;
+  caps: SecretaryContactCaps;
+  prefs: SecretaryContactChannelPrefs;
 }
