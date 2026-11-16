@@ -42,6 +42,8 @@ const DEFAULT_AVATAR_COLOR = '#7c5cff';
 export const MIN_RUNNING_DISPATCHES = 1;
 export const MAX_RUNNING_DISPATCHES = 10;
 const COLOR_RE = /^#[0-9a-f]{6}$/iu;
+/** 头像字节的短指纹（sha1 前 8 位十六进制） */
+const IMAGE_HASH_RE = /^[0-9a-f]{8}$/u;
 const CLOCK_RE = /^([01]\d|2[0-3]):[0-5]\d$/u;
 
 const AUTONOMIES = ['ask-first', 'tell-after', 'full'] as const;
@@ -167,6 +169,10 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
   if (!isObject(value)) return null;
   const avatar = isObject(value.avatar) ? value.avatar : {};
   const imageVersion = count(avatar.imageVersion);
+  const imageHash =
+    typeof avatar.imageHash === 'string' && IMAGE_HASH_RE.test(avatar.imageHash)
+      ? avatar.imageHash
+      : undefined;
   const profile: SecretaryProfile = {
     version: 1,
     name: text(value.name) ?? '秘书',
@@ -175,7 +181,9 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
         typeof avatar.color === 'string' && COLOR_RE.test(avatar.color)
           ? avatar.color
           : DEFAULT_AVATAR_COLOR,
-      ...(imageVersion && imageVersion > 0 ? { imageVersion } : {}),
+      ...(imageVersion && imageVersion > 0
+        ? { imageVersion, ...(imageHash ? { imageHash } : {}) }
+        : {}),
     },
     autonomy: oneOf(value.autonomy, AUTONOMIES, 'ask-first'),
     autoApproveProjectIds: texts(value.autoApproveProjectIds),
@@ -297,7 +305,7 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     if (color !== undefined && !(typeof color === 'string' && COLOR_RE.test(color))) {
       return { ok: false, error: 'invalid avatar' };
     }
-    // 图片只由设置页上传写入 imageVersion。草案里的路径、版本号一律丢掉。
+    // 图片只由设置页上传写入 imageVersion / imageHash。草案里的路径、版本号、指纹一律丢掉。
     if (typeof color === 'string') draft.avatar = { color };
   }
   if (value.model !== undefined) {

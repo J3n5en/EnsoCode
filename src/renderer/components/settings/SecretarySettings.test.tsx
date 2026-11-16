@@ -30,6 +30,32 @@ vi.mock('@/components/secretary/SecretaryResetDialog', () => ({
 }));
 vi.mock('./PresetsSettings', () => ({ PickList: () => null }));
 
+/** 裁切弹窗与读文件都换成可控桩：这里只验上传状态机，不验 canvas */
+const raster = vi.hoisted(() => ({ readDataUrl: vi.fn() }));
+vi.mock('@/components/bots/avatarRaster', () => ({
+  readDataUrl: raster.readDataUrl,
+  dataUrlBytes: (url: string) => new TextEncoder().encode(url),
+}));
+vi.mock('@/components/bots/AvatarCropDialog', () => ({
+  AvatarCropDialog: ({
+    source,
+    onDone,
+  }: {
+    source: string | null;
+    onDone: (dataUrl: string) => void;
+  }) =>
+    source === null ? null : (
+      <button
+        type="button"
+        data-enso="crop-confirm"
+        data-source={source}
+        onClick={() => onDone(source)}
+      >
+        Use this avatar
+      </button>
+    ),
+}));
+
 const ROW = '[data-settings-row="secretary.dispatchLimit"]';
 const DESCRIPTION =
   'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.';
@@ -60,6 +86,7 @@ function profile(maxRunningDispatches: number, updatedAt = 1): SecretaryProfile 
 const api = {
   getProfile: vi.fn(),
   saveProfile: vi.fn(),
+  setAvatar: vi.fn(),
 };
 
 let root: Root | undefined;
@@ -68,6 +95,9 @@ let container: HTMLElement;
 beforeEach(() => {
   api.getProfile.mockReset();
   api.saveProfile.mockReset();
+  api.setAvatar.mockReset();
+  raster.readDataUrl.mockReset();
+  raster.readDataUrl.mockImplementation(async (file: { name: string }) => `data:${file.name}`);
   const dom = parseHTML('<html><body><div id="root"></div></body></html>');
   Object.assign(dom.window, {
     electronAPI: {
@@ -237,5 +267,115 @@ describe('设置 → 秘书：可接管的会话', () => {
     expect(getTranslation('zh', SCOPE_DESCRIPTION)).toBe(
       '秘书可以直接给哪些会话发消息、停止它们，不用逐个确认。范围外的会话仍然要秘书提确认卡。'
     );
+  });
+});
+
+const AVATAR_INPUT = '[data-enso="secretary-avatar-file"]';
+const CROP_CONFIRM = '[data-enso="crop-confirm"]';
+const AVATAR_PROBLEM = '[data-enso="secretary-avatar-problem"]';
+
+function avatarProfile(
+  imageVersion: number | undefined,
+  imageHash?: string,
+  updatedAt = 1
+): SecretaryProfile {
+  return {
+    ...profile(3, updatedAt),
+    avatar: {
+      color: '#7c5cff',
+      ...(imageVersion ? { imageVersion, ...(imageHash ? { imageHash } : {}) } : {}),
+    },
+  };
+}
+
+function avatarSrc(): string | null {
+  return (
+    container.querySelector('[data-enso="secretary-settings-avatar"] img')?.getAttribute('src') ??
+    null
+  );
+}
+
+function cropSource(): string | null {
+  return container.querySelector(CROP_CONFIRM)?.getAttribute('data-source') ?? null;
+}
+
+async function pick(name: string, type = 'image/png', size = 10) {
+  const input = container.querySelector(AVATAR_INPUT) as HTMLInputElement;
+  Object.defineProperty(input, 'files', {
+    value: [{ name, type, size }],
+    configurable: true,
+  });
+  await act(async () => {
+    input.dispatchEvent(new window.Event('change', { bubbles: true }));
+  });
+}
+
+async function confirmCrop() {
+  const button = container.querySelector(CROP_CONFIRM) as HTMLButtonElement;
+  await act(async () => button.click());
+}
+
+describe('设置 → 秘书：头像上传', () => {
+  it('连续换两张图：第二次裁切的是第二张，地址也跟着换', async () => {
+    api.getProfile.mockResolvedValue({
+      ok: true,
+      profile: avatarProfile(1, 'aaaaaaaa'),
+      persona: '',
+    });
+    api.setAvatar
+      .mockResolvedValueOnce({ ok: true, profile: avatarProfile(2, 'bbbbbbbb', 2) })
+      .mockResolvedValueOnce({ ok: true, profile: avatarProfile(3, 'cccccccc', 3) });
+    await mount();
+    expect(avatarSrc()).toBe('local-image://secretary-avatar/avatar.png?v=1&h=aaaaaaaa');
+
+    await pick('first.png');
+    expect(cropSource()).toBe('data:first.png');
+    await confirmCrop();
+    expect(api.setAvatar).toHaveBeenCalledTimes(1);
+    expect(avatarSrc()).toBe('local-image://secretary-avatar/avatar.png?v=2&h=bbbbbbbb');
+
+    await pick('second.png');
+    expect(cropSource()).toBe('data:second.png');
+    await confirmCrop();
+    expect(api.setAvatar).toHaveBeenCalledTimes(2);
+    expect(new TextDecoder().decode(api.setAvatar.mock.calls[1]?.[0] as Uint8Array)).toBe(
+      'data:second.png'
+    );
+    expect(avatarSrc()).toBe('local-image://secretary-avatar/avatar.png?v=3&h=cccccccc');
+  });
+
+  it('不合规图片被拒后，再选合规图片照常生效', async () => {
+    api.getProfile.mockResolvedValue({ ok: true, profile: avatarProfile(undefined), persona: '' });
+    api.setAvatar.mockResolvedValue({ ok: true, profile: avatarProfile(1, 'aaaaaaaa', 2) });
+    await mount();
+
+    await pick('notes.txt', 'text/plain');
+    expect(container.querySelector(CROP_CONFIRM)).toBeNull();
+    expect(container.querySelector(AVATAR_PROBLEM)?.textContent).toContain('PNG');
+    expect(api.setAvatar).not.toHaveBeenCalled();
+
+    await pick('ok.png');
+    expect(cropSource()).toBe('data:ok.png');
+    await confirmCrop();
+    expect(api.setAvatar).toHaveBeenCalledTimes(1);
+    expect(avatarSrc()).toBe('local-image://secretary-avatar/avatar.png?v=1&h=aaaaaaaa');
+  });
+
+  it('保存失败会提示并清掉待裁切的图，下一次仍能正常上传', async () => {
+    api.getProfile.mockResolvedValue({ ok: true, profile: avatarProfile(undefined), persona: '' });
+    api.setAvatar.mockResolvedValueOnce({ ok: false, error: 'disk full' });
+    await mount();
+
+    await pick('first.png');
+    await confirmCrop();
+    expect(container.textContent).toContain('disk full');
+    expect(container.querySelector(AVATAR_PROBLEM)).not.toBeNull();
+    expect(container.querySelector(CROP_CONFIRM)).toBeNull();
+    expect(avatarSrc()).toBeNull();
+
+    api.setAvatar.mockResolvedValue({ ok: true, profile: avatarProfile(1, 'aaaaaaaa', 2) });
+    await pick('second.png');
+    expect(cropSource()).toBe('data:second.png');
+    expect(container.querySelector(AVATAR_PROBLEM)).toBeNull();
   });
 });

@@ -26,7 +26,7 @@ export function useSecretaryFace(): SecretaryFaceModel | null {
   return {
     name: profile.name.trim() || '·',
     color: profile.avatar.color,
-    ...(imageVersion ? { image: secretaryAvatarUrl(imageVersion) } : {}),
+    ...(imageVersion ? { image: secretaryAvatarUrl(imageVersion, profile.avatar.imageHash) } : {}),
   };
 }
 

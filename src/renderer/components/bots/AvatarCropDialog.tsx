@@ -100,15 +100,17 @@ export function AvatarCropDialog({
   const { t } = useI18n();
   const imageRef = useRef<HTMLImageElement>(null);
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  /** 已经解码好的那张图。只有它的地址和当前 source 一致才算数，免得拿上一张的位图去裁 */
+  const [loaded, setLoaded] = useState<{ source: string; w: number; h: number } | null>(null);
   const [view, setView] = useState<View>({ zoom: 1, x: 0, y: 0 });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 换图时重置
   useEffect(() => {
-    setSize(null);
+    setLoaded(null);
     setView({ zoom: 1, x: 0, y: 0 });
   }, [source]);
 
+  const size = loaded && loaded.source === source ? { w: loaded.w, h: loaded.h } : null;
   const scale = (zoom: number) => (size ? (VIEW / Math.min(size.w, size.h)) * zoom : 1);
   const clamp = (next: View): View => {
     if (!size) return next;
@@ -179,12 +181,14 @@ export function AvatarCropDialog({
                 src={source}
                 alt=""
                 draggable={false}
-                onLoad={(event) =>
-                  setSize({
-                    w: event.currentTarget.naturalWidth,
-                    h: event.currentTarget.naturalHeight,
-                  })
-                }
+                onLoad={(event) => {
+                  const image = event.currentTarget;
+                  setLoaded({
+                    source: image.getAttribute('src') ?? '',
+                    w: image.naturalWidth,
+                    h: image.naturalHeight,
+                  });
+                }}
                 onError={() => {
                   addToast({ type: 'error', title: t('This image cannot be used as an avatar.') });
                   onCancel();

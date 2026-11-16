@@ -14,7 +14,8 @@ export type SecretaryTakeoverScope =
 export interface SecretaryProfile {
   version: 1;
   name: string;
-  avatar: { color: string; imageVersion?: number };
+  /** imageHash 是当前图片字节的短指纹：URL 带上它，换图后一定换地址 */
+  avatar: { color: string; imageVersion?: number; imageHash?: string };
   model?: ModelRef & { thinkingLevel?: ThinkingLevel };
   autonomy: SecretaryAutonomy;
   autoApproveProjectIds: string[];

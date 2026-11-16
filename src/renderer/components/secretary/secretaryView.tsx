@@ -28,7 +28,7 @@ export function secretarySectionView(
     running: secretary.board.running.length,
     configured: profile !== null,
     ...(profile ? { color: profile.avatar.color } : {}),
-    ...(imageVersion ? { image: secretaryAvatarUrl(imageVersion) } : {}),
+    ...(imageVersion ? { image: secretaryAvatarUrl(imageVersion, profile?.avatar.imageHash) } : {}),
   };
 }
 

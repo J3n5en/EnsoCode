@@ -293,6 +293,20 @@ describe('parseProfile', () => {
     expect(profile?.avatar).not.toHaveProperty('imageVersion');
   });
 
+  it('keeps only a well-formed avatar hash, and only with a version', () => {
+    expect(
+      parseProfile({ avatar: { color: '#0EA5E9', imageVersion: 2, imageHash: 'a1b2c3d4' } })?.avatar
+    ).toEqual({ color: '#0EA5E9', imageVersion: 2, imageHash: 'a1b2c3d4' });
+    // 脏值丢掉，不影响版本号本身
+    expect(
+      parseProfile({ avatar: { color: '#0EA5E9', imageVersion: 2, imageHash: '../x.png' } })?.avatar
+    ).toEqual({ color: '#0EA5E9', imageVersion: 2 });
+    // 没有版本号就没有图，指纹也一起丢掉
+    expect(parseProfile({ avatar: { color: '#0EA5E9', imageHash: 'a1b2c3d4' } })?.avatar).toEqual({
+      color: '#0EA5E9',
+    });
+  });
+
   it('clamps the concurrency limit into 1..10', () => {
     expect(parseProfile({ maxRunningDispatches: 0 })?.maxRunningDispatches).toBe(1);
     expect(parseProfile({ maxRunningDispatches: -3 })?.maxRunningDispatches).toBe(1);

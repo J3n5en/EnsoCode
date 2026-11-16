@@ -117,7 +117,13 @@ function mergeAvatar(
   patch: SecretaryProfileDraft['avatar']
 ): SecretaryProfile['avatar'] {
   const color = patch?.color ?? base.color;
-  return base.imageVersion ? { color, imageVersion: base.imageVersion } : { color };
+  return base.imageVersion
+    ? {
+        color,
+        imageVersion: base.imageVersion,
+        ...(base.imageHash ? { imageHash: base.imageHash } : {}),
+      }
+    : { color };
 }
 
 /** 模型换了就改会话行；活着的会话当场换，下次 spawn 也读新行 */
