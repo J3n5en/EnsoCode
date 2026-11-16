@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
+import { ChatAreaFrame } from '@/components/app/ChatAreaFrame';
 import { HeaderSessionTabs } from '@/components/app/HeaderSessionTabs';
 import { ProjectDropOverlay } from '@/components/app/ProjectDropOverlay';
 import { TitleBar } from '@/components/app/TitleBar';
@@ -682,9 +683,12 @@ export default function App() {
                 }
               >
                 <PluginUiHost />
-                <ShellChromeContext.Provider value={shellChrome}>
-                  <ChatView />
-                </ShellChromeContext.Provider>
+                {/* 秘书引导是独占页：透明背景下面板色 alpha 为 0，背后的空会话必须停止绘制 */}
+                <ChatAreaFrame hidden={secretaryEnabled && secretaryWelcomeOpen}>
+                  <ShellChromeContext.Provider value={shellChrome}>
+                    <ChatView />
+                  </ShellChromeContext.Provider>
+                </ChatAreaFrame>
                 {desktopShell && <UpdateBanner />}
                 {desktopShell && <ZoomBanner />}
                 {/* 初次设置只盖聊天区；远端浏览器（PWA 完整模式）同样走这条路径 */}
