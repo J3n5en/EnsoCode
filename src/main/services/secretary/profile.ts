@@ -43,6 +43,8 @@ export interface SecretaryProfilePorts {
   alive(conversationId: string): MaybePromise<boolean>;
   setModel(conversationId: string, model: ModelPatch): Promise<{ ok: boolean; error?: string }>;
   release(conversationId: string): Promise<{ ok: boolean; error?: string }>;
+  /** 活着的会话就地换成按盘上档案现拼的系统提示词，下一条消息生效 */
+  refreshPrompt(conversationId: string): MaybePromise<unknown>;
   patchRow(conversationId: string, patch: Record<string, unknown>): MaybePromise<void>;
   dispatchFile(): SecretaryDispatchFile;
   saveDispatch(file: SecretaryDispatchFile): void;
@@ -173,9 +175,14 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
       !sameIds(before?.pluginIds, profile.pluginIds) ||
       !sameIds(before?.skillIds, profile.skillIds) ||
       !sameIds(before?.disabledSkillNames, profile.disabledSkillNames);
+    const conversations = await ports.conversations();
+    // 称呼、语言、风格等只进提示词：活着的会话就地换，不释放、不丢历史
+    for (const { conversationId } of conversations) {
+      if (await ports.alive(conversationId)) await ports.refreshPrompt(conversationId);
+    }
     if (!modelChanged && !kitChanged) return;
     const model = profile.model;
-    for (const { conversationId } of await ports.conversations()) {
+    for (const { conversationId } of conversations) {
       if (modelChanged && model) {
         await ports.patchRow(conversationId, modelRowPatch(model));
         if (await ports.alive(conversationId)) await ports.setModel(conversationId, model);
@@ -414,6 +421,8 @@ export const secretaryProfilePorts: SecretaryProfilePorts = {
     (await import('../../ipc/agent')).setRootSessionModelFromMain(conversationId, model),
   release: async (conversationId) =>
     (await import('../../ipc/agent')).releaseRootFromMain(conversationId),
+  refreshPrompt: async (conversationId) =>
+    (await import('../../ipc/agent')).refreshSecretaryPromptFromMain(conversationId),
   patchRow: async (conversationId, patch) => {
     const { patchConversationsState } = await import('../../ipc/settings');
     patchConversationsState((state) => {
