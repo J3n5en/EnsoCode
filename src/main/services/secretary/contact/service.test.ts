@@ -1602,9 +1602,17 @@ describe('手机关注的任务', () => {
     h: ReturnType<typeof harness>,
     kind: 'session' | 'schedule',
     targetId: string,
-    summary: string
+    summary: string,
+    secretaryConversationId?: string
   ): void {
-    h.following.add({ kind, targetId, chatId: 777, at: h.clock.now, summary });
+    h.following.add({
+      kind,
+      targetId,
+      chatId: 777,
+      at: h.clock.now,
+      summary,
+      ...(secretaryConversationId ? { secretaryConversationId } : {}),
+    });
   }
 
   it('关注的会话完成时推手机，带上原始需求摘要，推过一次就结束关注', async () => {
@@ -1645,6 +1653,17 @@ describe('手机关注的任务', () => {
     expect(h.following.list()).toHaveLength(1);
     h.service.onMilestone({ kind: 'failed', title: 'A · B', conversationId: 'c1' });
     await waitFor(() => h.following.list().length === 0, 'failed ends follow');
+  });
+
+  it('notify=off 也不挡手机关注任务的结果：完成照样推，推完结束关注', async () => {
+    const h = harness();
+    await bound(h);
+    h.world.mode = 'off';
+    follow(h, 'session', 'c1', '加字段');
+    h.service.onMilestone({ kind: 'goal-complete', title: 'A · B', conversationId: 'c1' });
+    await waitFor(() => h.api.sent.length > 0, 'milestone');
+    expect(h.api.sent.at(-1)?.text).toContain('✅ 完成');
+    await waitFor(() => h.following.list().length === 0, 'follow ended');
   });
 
   it('/sync 打开时不重复推：一条里程碑只发一次', async () => {
@@ -1742,6 +1761,93 @@ describe('手机关注的任务', () => {
     expect(h.service.phoneTurnChat('other')).toBeNull();
     h.service.onTurnReply('sec-1', '要你点确认卡');
     expect(h.service.phoneTurnChat('sec-1')).toBeNull();
+  });
+
+  it('手机发起后派了会话：结果回传注入的那一轮也回推同一个 chat', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('透明背景下 onboarding 遮罩叠了空会话页'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    // 秘书派了编码会话：关注项挂在秘书会话上，链就一直活着
+    follow(h, 'session', 'c1', '修 onboarding 遮罩', 'sec-1');
+    h.service.onTurnReply('sec-1', '已派 c1 去修，修完回你', { turnId: 't1' });
+    await waitFor(() => h.api.sent.length === 1, 'first reply');
+    expect(h.api.sent[0]?.chatId).toBe(777);
+    // 编码会话收口：关注结束，结果回传注入秘书会话
+    h.following.remove('session:c1');
+    h.service.onTurnReply('sec-1', '修好了，提交 1a2b3c4', { delivery: true, turnId: 't2' });
+    await waitFor(() => h.api.sent.length === 2, 'result reply');
+    expect(h.api.sent[1]?.chatId).toBe(777);
+    expect(h.api.sent[1]?.text).toContain('修好了');
+    // 链断了：之后应用里自己聊的不再推
+    h.service.onTurnReply('sec-1', '巡检正常', { turnId: 't3' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toHaveLength(2);
+  });
+
+  it('同一轮只回推一次：事件重放与镜像撞车都只发一条', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    h.service.onTurnReply('sec-1', '在', { turnId: 't1' });
+    await waitFor(() => h.api.sent.length === 1, 'reply');
+    // 同一轮重放：awaitingReply 已经用掉，落到镜像分支也不该再发
+    h.store.save({ ...h.store.file(), syncMirror: true });
+    h.service.onTurnReply('sec-1', '在', { turnId: 't1' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toHaveLength(1);
+  });
+
+  it('silence_turn 的轮次不投递：手机发起的与链上的都不发', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    follow(h, 'session', 'c1', '修 onboarding 遮罩', 'sec-1');
+    h.service.onTurnSilent('sec-1', 2);
+    h.following.remove('session:c1');
+    h.service.onTurnSilent('sec-1', 1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toEqual([]);
+  });
+
+  it('链上的超长回复一样分条发，不因 4096 上限整条丢掉', async () => {
+    const h = harness();
+    await bound(h);
+    h.api.push(privateMessage('写个长报告'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    follow(h, 'session', 'c1', '写长报告', 'sec-1');
+    h.service.onTurnReply('sec-1', '已派发', { turnId: 't1' });
+    await waitFor(() => h.api.sent.length === 1, 'first');
+    h.following.remove('session:c1');
+    h.service.onTurnReply('sec-1', 'x'.repeat(5000), { delivery: true, turnId: 't2' });
+    await waitFor(() => h.api.sent.length > 2, 'split');
+    const chunks = h.api.sent.slice(1);
+    expect(chunks.length).toBe(2);
+    expect(chunks.every((entry) => entry.text.length <= 3900)).toBe(true);
+    expect(chunks.map((entry) => entry.text).join('')).toHaveLength(5000);
+  });
+
+  it('不是手机发起的回合不回推：应用里自己聊的、系统回传的都不发', async () => {
+    const h = harness();
+    await bound(h);
+    h.service.onTurnReply('sec-1', '巡检正常', { turnId: 't1' });
+    h.service.onTurnReply('sec-1', '结果回传', { delivery: true, turnId: 't2' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent).toEqual([]);
+  });
+
+  it('回复里带确认卡或审批时点明「需要在应用里确认」', async () => {
+    const h = harness();
+    await bound(h);
+    h.service.onCardWaiting({ count: 1, approval: true, conversationId: 'sec-1' });
+    await waitFor(() => h.api.sent.length === 1, 'approval notice');
+    h.api.push(privateMessage('把登录修一下'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    h.service.onTurnReply('sec-1', '已经确认了，正在跑', { turnId: 't1' });
+    await waitFor(() => h.api.sent.length === 2, 'reply');
+    expect(h.api.sent[1]?.text).toContain('需要在应用里确认');
   });
 
   it('手机上确认卡片期间派生的会话也算手机发起', async () => {

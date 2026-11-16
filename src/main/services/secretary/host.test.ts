@@ -75,7 +75,7 @@ interface Harness {
       relayAsks: { conversationId: string; question: string; label: string }[];
       asks: { conversationId: string; requestId: string }[];
       resolved: { conversationId: string; requestId: string }[];
-      replies: { conversationId: string; text: string }[];
+      replies: { conversationId: string; text: string; delivery?: boolean; turnId?: string }[];
       silent: { conversationId: string; updates: number }[];
       turns: { conversationId: string; kind: 'start' | 'end' }[];
       cards: { count: number; approval?: boolean; conversationId?: string }[];
@@ -194,8 +194,13 @@ function harness(
       onAskResolved: (conversationId, requestId) => {
         state.contact.resolved.push({ conversationId, requestId });
       },
-      onTurnReply: (conversationId, text) => {
-        state.contact.replies.push({ conversationId, text });
+      onTurnReply: (conversationId, text, options) => {
+        state.contact.replies.push({
+          conversationId,
+          text,
+          ...(options?.delivery ? { delivery: true } : {}),
+          ...(options?.turnId ? { turnId: options.turnId } : {}),
+        });
       },
       onTurnStart: (conversationId) => {
         state.contact.turns.push({ conversationId, kind: 'start' });
@@ -1386,6 +1391,49 @@ describe('联系方式转发', () => {
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
     expect(h.state.contact.milestones).toEqual([]);
+  });
+
+  it('手机关注中的任务不受 notify 降噪：完成也回推，一轮结束仍然不发', () => {
+    const h = harness({ notify: 'needs-user' });
+    if (h.ports.contact) h.ports.contact.follows = (conversationId) => conversationId === 'c1';
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.contact.milestones).toEqual([]);
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.contact.milestones).toEqual([
+      expect.objectContaining({ kind: 'goal-complete', conversationId: 'c1' }),
+    ]);
+  });
+
+  it('系统回传注入的回合带上 delivery 与 turnId，应用里自己聊的不带', () => {
+    const h = harness({ secretaryIds: ['sec-1'] });
+    const secretary = (extra: Record<string, unknown> = {}) =>
+      ({
+        type: 'turn-completed',
+        identity: { sessionId: 'sec-1', generation: 'g1' },
+        seq: 1,
+        ...extra,
+      }) as unknown as RendererAgentEvent;
+    h.state.file.inflight = {
+      deliveryId: 'd1',
+      secretaryConversationId: 'sec-1',
+      keys: ['k1'],
+      attempt: 1,
+      nextAttemptAt: 0,
+    };
+    h.host.onAgentEvent(
+      secretary({ turnId: 't9', digest: { userText: '回传', assistantText: '修好了' } }),
+      []
+    );
+    h.host.onAgentEvent(
+      secretary({ turnId: 't10', digest: { userText: '在吗', assistantText: '在' } }),
+      []
+    );
+    expect(h.state.contact.replies).toEqual([
+      { conversationId: 'sec-1', text: '修好了', delivery: true, turnId: 't9' },
+      { conversationId: 'sec-1', text: '在', turnId: 't10' },
+    ]);
   });
 
   it('派出会话的提问转给秘书时，手机上也提示一条', () => {

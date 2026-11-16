@@ -187,6 +187,16 @@ const ASK_HINT: Record<ContactLang, string> = {
   en: 'Tap a button or just reply. Whichever side answers first wins.',
 };
 
+/**
+ * 回推正文里的确认提示：手机上既看不到确认卡也处理不了审批，
+ * 秘书说「已确认」时必须在同一条里点明还得回应用点一下。
+ */
+export function formatNeedsAppConfirmLine(lang: ContactLang): string {
+  return lang === 'zh'
+    ? '⚠️ 需要在应用里确认：这条回复涉及确认卡或审批，手机上处理不了。'
+    : '⚠️ Confirm in the app: this reply involves a card or approval that the phone cannot handle.';
+}
+
 /** 秘书用 ask_user 问 J 哥：问题、选项、怎么答，一条说完 */
 export function formatAskMessage(
   lang: ContactLang,
