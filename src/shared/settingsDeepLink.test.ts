@@ -98,3 +98,17 @@ describe('parseSettingsDeepLink', () => {
     ).toBeNull();
   });
 });
+
+describe('插件市场搜索深链', () => {
+  it('只在插件分类下接受短标签', () => {
+    expect(
+      parseSettingsDeepLink({ category: 'plugins', rowId: 'plugins.enso', marketQuery: 'contact' })
+    ).toEqual({ category: 'plugins', rowId: 'plugins.enso', marketQuery: 'contact' });
+    expect(
+      parseSettingsDeepLink({ category: 'plugins', rowId: 'plugins.enso', marketQuery: 'a b<' })
+    ).toBeNull();
+    expect(
+      parseSettingsDeepLink({ category: 'secretary', rowId: 'x', marketQuery: 'contact' })
+    ).toBeNull();
+  });
+});

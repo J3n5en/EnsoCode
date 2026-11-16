@@ -37,7 +37,11 @@ export interface SettingsDeepLink {
   pluginInstallUrl?: string;
   /** 打开插件设置并展开该插件详情 */
   pluginId?: string;
+  /** 打开插件市场并预填搜索词（按标签筛，如 contact） */
+  marketQuery?: string;
 }
+
+const MARKET_QUERY = /^[a-z0-9-]{1,32}$/u;
 
 const CATEGORY_SET = new Set<string>(SETTINGS_CATEGORIES);
 
@@ -49,7 +53,10 @@ export function parseSettingsDeepLink(raw: unknown): SettingsDeepLink | null {
   if (typeof rowId !== 'string' || !rowId) return null;
   const pluginInstallUrl = (raw as { pluginInstallUrl?: unknown }).pluginInstallUrl;
   if (pluginInstallUrl === undefined)
-    return attachPluginId({ category: category as SettingsCategory, rowId }, raw);
+    return attachMarketQuery(
+      attachPluginId({ category: category as SettingsCategory, rowId }, raw),
+      raw
+    );
   if (typeof pluginInstallUrl !== 'string') return null;
   const parsed = parsePluginInstallUrl(pluginInstallUrl);
   if (!parsed.ok) return null;
@@ -59,6 +66,13 @@ export function parseSettingsDeepLink(raw: unknown): SettingsDeepLink | null {
     pluginInstallUrl: parsed.url.href,
   };
   return attachPluginId(link, raw);
+}
+
+function attachMarketQuery(link: SettingsDeepLink | null, raw: object): SettingsDeepLink | null {
+  const marketQuery = (raw as { marketQuery?: unknown }).marketQuery;
+  if (!link || marketQuery === undefined) return link;
+  if (link.category !== 'plugins' || typeof marketQuery !== 'string') return null;
+  return MARKET_QUERY.test(marketQuery) ? { ...link, marketQuery } : null;
 }
 
 function attachPluginId(link: SettingsDeepLink, raw: object): SettingsDeepLink | null {

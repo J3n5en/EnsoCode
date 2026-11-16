@@ -219,6 +219,7 @@ export function runPluginHost(transport: HostTransport): void {
   const eventHandlers = new Map<string, Handler>();
   const scheduleHandlers = new Map<string, Handler>();
   const exportHandlers = new Map<string, Handler>();
+  const contactChannels = new Map<string, { sendText: Handler; typing?: Handler }>();
   const written = new Map<string, string[]>();
   const turnEndListeners = new Set<TurnEndListener>();
   const agentRuns = new Map<
@@ -505,6 +506,30 @@ export function runPluginHost(transport: HostTransport): void {
         onTurnEnd,
       },
       host: { capabilities: () => hostCall('host.capabilities', {}) },
+      contact: {
+        register: async (channelId: unknown, impl: unknown) => {
+          if (typeof channelId !== 'string' || !isRecord(impl))
+            throw new TypeError('contact.register 参数不合法');
+          if (typeof impl.sendText !== 'function') throw new TypeError('渠道需要 sendText');
+          if (impl.typing !== undefined && typeof impl.typing !== 'function')
+            throw new TypeError('typing 必须是函数');
+          // 常驻渠道属于进程而不是某次调用：脱离调用上下文注册
+          await current.exit(() => hostCall('contact.register', { channelId, caps: impl.caps }));
+          contactChannels.set(channelId, {
+            sendText: impl.sendText as Handler,
+            ...(typeof impl.typing === 'function' ? { typing: impl.typing as Handler } : {}),
+          });
+          return () => contactChannels.delete(channelId);
+        },
+        inbound: (channelId: string, message: unknown) =>
+          current.exit(() =>
+            hostCall('contact.inbound', { ...(isRecord(message) ? message : {}), channelId })
+          ),
+        setStatus: (channelId: string, status: unknown) =>
+          current.exit(() =>
+            hostCall('contact.setStatus', { ...(isRecord(status) ? status : {}), channelId })
+          ),
+      },
       agent: { run: runAgent },
       fs: {
         readText: (path: string) => hostCall('fs.readText', { path }),
@@ -580,6 +605,21 @@ export function runPluginHost(transport: HostTransport): void {
         if (!handler) throw codedError('NOT_FOUND', `插件没有注册定时任务 ${String(p.id)}`);
         await handler(ctx);
         return null;
+      }
+      case 'contact.call': {
+        const channel =
+          typeof p.channelId === 'string' ? contactChannels.get(p.channelId) : undefined;
+        if (!channel)
+          throw codedError('NOT_FOUND', `插件没有注册联系方式渠道 ${String(p.channelId)}`);
+        const peerId = String(p.peerId ?? '');
+        if (p.op === 'typing') {
+          await channel.typing?.(peerId, { on: true });
+          return null;
+        }
+        const value = await channel.sendText(peerId, { text: String(p.text ?? '') });
+        return isRecord(value) && typeof value.messageId === 'string'
+          ? { messageId: value.messageId }
+          : {};
       }
       case 'export.call': {
         const handler = typeof p.name === 'string' ? exportHandlers.get(p.name) : undefined;

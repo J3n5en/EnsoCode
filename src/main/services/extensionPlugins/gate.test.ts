@@ -1302,3 +1302,113 @@ describe('常驻进程里的会话操作', () => {
     expect(abort).toHaveBeenCalledWith('a.b', 's1');
   });
 });
+
+describe('秘书联系方式', () => {
+  const contactManifest = (permissions: ExtensionPluginManifest['permissions']) =>
+    manifest({
+      permissions,
+      net: { domains: ['*.weixin.qq.com'] },
+      contributes: {
+        ...manifest().contributes,
+        contactChannels: [{ id: 'wechat', title: '微信' }],
+      },
+    });
+  const caps = {
+    buttons: false,
+    urlButtons: false,
+    edit: false,
+    typing: true,
+    format: 'plain',
+    maxChars: 2000,
+    commandMenu: false,
+  };
+
+  function contactGate(permissions: ExtensionPluginManifest['permissions']) {
+    const contact = { register: vi.fn(), inbound: vi.fn(), setStatus: vi.fn() };
+    const g = new PluginHostGate({
+      ...deps,
+      manifest: (id) => (id === 'a.b' ? contactManifest(permissions) : null),
+      contact,
+    });
+    return { g, contact };
+  }
+
+  it('没有 secretary.contact 权限一律拒绝', async () => {
+    const { g, contact } = contactGate(['net.fetch']);
+    await expect(
+      g.handle('a.b', 'contact.register', { channelId: 'wechat', caps }, undefined)
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(contact.register).not.toHaveBeenCalled();
+  });
+
+  it('只认清单声明的渠道，channelId 拼成 <pluginId>:<id> 交给秘书', async () => {
+    const { g, contact } = contactGate(['net.fetch', 'secretary.contact']);
+    await expect(
+      g.handle('a.b', 'contact.register', { channelId: 'other', caps }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await g.handle('a.b', 'contact.register', { channelId: 'wechat', caps }, undefined);
+    expect(contact.register).toHaveBeenCalledWith('a.b', 'a.b:wechat', caps);
+    await expect(
+      g.handle(
+        'a.b',
+        'contact.register',
+        { channelId: 'wechat', caps: { ...caps, edit: 1 } },
+        undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+  });
+
+  it('入站校验 peerId 与正文并限流；状态只接受四种', async () => {
+    const { g, contact } = contactGate(['net.fetch', 'secretary.contact']);
+    await g.handle(
+      'a.b',
+      'contact.inbound',
+      { channelId: 'wechat', peerId: 'wx-1', text: '在吗', name: '我', at: 5 },
+      undefined
+    );
+    expect(contact.inbound).toHaveBeenCalledWith('a.b', 'a.b:wechat', {
+      peerId: 'wx-1',
+      text: '在吗',
+      name: '我',
+      at: 5,
+    });
+    await expect(
+      g.handle('a.b', 'contact.inbound', { channelId: 'wechat', peerId: '', text: 'x' }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    for (let index = 0; index < 19; index += 1) {
+      await g.handle(
+        'a.b',
+        'contact.inbound',
+        { channelId: 'wechat', peerId: 'p', text: 'x' },
+        undefined
+      );
+    }
+    await expect(
+      g.handle('a.b', 'contact.inbound', { channelId: 'wechat', peerId: 'p', text: 'x' }, undefined)
+    ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    await expect(
+      g.handle('a.b', 'contact.setStatus', { channelId: 'wechat', status: 'ok' }, undefined)
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await g.handle(
+      'a.b',
+      'contact.setStatus',
+      { channelId: 'wechat', status: 'connected', peers: ['wx-1'] },
+      undefined
+    );
+    expect(contact.setStatus).toHaveBeenCalledWith('a.b', 'a.b:wechat', {
+      status: 'connected',
+      peers: ['wx-1'],
+    });
+  });
+
+  it('通配域名只放行子域：扫码后重定向的 base url 也能访问', async () => {
+    const { g } = contactGate(['net.fetch', 'secretary.contact']);
+    await g.handle('a.b', 'net.fetch', { url: 'https://sh.ilinkai.weixin.qq.com/x' }, undefined);
+    await expect(
+      g.handle('a.b', 'net.fetch', { url: 'https://weixin.qq.com.evil.com/x' }, undefined)
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(
+      g.handle('a.b', 'net.fetch', { url: 'https://evilweixin.qq.com/x' }, undefined)
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+});

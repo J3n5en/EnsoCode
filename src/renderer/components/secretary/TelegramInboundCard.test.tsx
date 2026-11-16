@@ -1,5 +1,9 @@
 import { type Locale, translate } from '@shared/i18n';
-import { parseInboundMessage, wrapInboundMessage } from '@shared/secretary/inbound';
+import {
+  parseInboundMessage,
+  TELEGRAM_INBOUND,
+  wrapInboundMessage,
+} from '@shared/secretary/inbound';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { TelegramInboundCard } from './TelegramInboundCard';
@@ -25,7 +29,7 @@ function render(text: string): string {
 describe('TelegramInboundCard', () => {
   it('显示发送者与时间，默认收起', () => {
     const html = render(
-      wrapInboundMessage('telegram', 'zh', {
+      wrapInboundMessage(TELEGRAM_INBOUND, 'zh', {
         username: '@jas0n_Ng',
         at: new Date(2026, 4, 20, 14, 32).getTime(),
         text: '现在你还缺少什么能力呢？',
@@ -41,7 +45,7 @@ describe('TelegramInboundCard', () => {
 
   it('正文按 markdown 渲染，不露包裹层与标签', () => {
     const html = render(
-      wrapInboundMessage('telegram', 'zh', {
+      wrapInboundMessage(TELEGRAM_INBOUND, 'zh', {
         username: '@j3n5en',
         text: '**重点**\n\n- 第一条\n- 第二条',
       })
@@ -53,7 +57,9 @@ describe('TelegramInboundCard', () => {
   });
 
   it('收起的预览只取第一行', () => {
-    const html = render(wrapInboundMessage('telegram', 'zh', { text: '## 标题行\n\n正文在这里' }));
+    const html = render(
+      wrapInboundMessage(TELEGRAM_INBOUND, 'zh', { text: '## 标题行\n\n正文在这里' })
+    );
     const summary = html.slice(html.indexOf('<summary'), html.indexOf('</summary>'));
     expect(summary).toContain('标题行');
     expect(summary).not.toContain('正文在这里');

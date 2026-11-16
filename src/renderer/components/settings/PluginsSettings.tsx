@@ -453,11 +453,16 @@ export function EnsoPluginsSettings({
   onRequestedInstallUrlConsumed,
   focusPluginId = null,
   onFocusPluginConsumed,
+  requestedMarketQuery = null,
+  onRequestedMarketQueryConsumed,
 }: {
   requestedInstallUrl?: string | null;
   onRequestedInstallUrlConsumed?: () => void;
   focusPluginId?: string | null;
   onFocusPluginConsumed?: () => void;
+  /** 深链带搜索词：直接打开市场并按它筛选 */
+  requestedMarketQuery?: string | null;
+  onRequestedMarketQueryConsumed?: () => void;
 } = {}) {
   const { t } = useI18n();
   const pluginAutoUpdate = useSettingsStore((state) => state.pluginAutoUpdate !== false);
@@ -479,6 +484,14 @@ export function EnsoPluginsSettings({
   const [checkResult, setCheckResult] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<RegistryNotice | null>(null);
   const [marketOpen, setMarketOpen] = React.useState(false);
+  const [marketQuery, setMarketQuery] = React.useState('');
+
+  React.useEffect(() => {
+    if (!requestedMarketQuery) return;
+    setMarketQuery(requestedMarketQuery);
+    setMarketOpen(true);
+    onRequestedMarketQueryConsumed?.();
+  }, [requestedMarketQuery, onRequestedMarketQueryConsumed]);
   const [guide, setGuide] = React.useState<{
     id: string;
     name: string;
@@ -643,7 +656,13 @@ export function EnsoPluginsSettings({
               {t('Check for updates')}
             </Button>
           )}
-          <Button size="sm" onClick={() => setMarketOpen(true)}>
+          <Button
+            size="sm"
+            onClick={() => {
+              setMarketQuery('');
+              setMarketOpen(true);
+            }}
+          >
             <Store className="size-4" />
             {t('Marketplace')}
           </Button>
@@ -716,6 +735,8 @@ export function EnsoPluginsSettings({
           </DialogHeader>
           <DialogPanel>
             <PluginMarket
+              key={marketQuery}
+              initialQuery={marketQuery}
               disabled={busy || downloading}
               installedKey={plugins.map((p) => `${p.id}@${p.version}`).join(',')}
               onInstall={(id) => {

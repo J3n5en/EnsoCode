@@ -33,6 +33,16 @@ let mcpBridge: PluginMcpBridge | null = null;
 let draftBroker: DraftBroker | null = null;
 let sessionBridge: PluginSessionBridge | null = null;
 let sessionDirectory: PluginSessionDirectory | null = null;
+let contactBridge: PluginContactBridge | null = null;
+
+/** 秘书联系方式由 secretary 模块接上；没接上时插件调 contact.* 报不支持 */
+export type PluginContactBridge = NonNullable<GateDeps['contact']>;
+
+export function setPluginContactBridge(bridge: PluginContactBridge | null): void {
+  contactBridge = bridge;
+}
+
+const noContact = () => pluginError('UNSUPPORTED', '秘书联系方式还没就绪');
 
 export function setPluginSessionBridge(bridge: PluginSessionBridge | null): void {
   sessionBridge = bridge;
@@ -155,6 +165,20 @@ export function getExtensionPlugins(): ExtensionPluginService {
     }),
     gate: {
       fetch: (url, init) => fetch(url, init),
+      contact: {
+        register: (pluginId, channelId, caps) => {
+          if (!contactBridge) throw noContact();
+          contactBridge.register(pluginId, channelId, caps);
+        },
+        inbound: (pluginId, channelId, input) => {
+          if (!contactBridge) throw noContact();
+          contactBridge.inbound(pluginId, channelId, input);
+        },
+        setStatus: (pluginId, channelId, input) => {
+          if (!contactBridge) throw noContact();
+          contactBridge.setStatus(pluginId, channelId, input);
+        },
+      },
       notify: (title, body) => {
         if (!notification.isSupported()) return false;
         notification.show({ title, body });

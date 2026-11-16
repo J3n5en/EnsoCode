@@ -6,6 +6,7 @@ import type { FeedCursor } from '@shared/secretary/feed';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FollowingStore } from '../following';
+import type { ChannelCaps, ChannelMessage, ContactChannel } from './channel';
 import type {
   TelegramApi,
   TelegramCommandOptions,
@@ -15,7 +16,7 @@ import type {
   TelegramUser,
 } from './client';
 import { TelegramApiError } from './client';
-import { type ContactServicePorts, TelegramContactService } from './service';
+import { ContactService, type ContactServicePorts } from './service';
 import { ContactStore } from './store';
 import { deliverToSecretary } from './wake';
 
@@ -270,7 +271,7 @@ function harness() {
       },
     },
   };
-  const service = new TelegramContactService(store, ports);
+  const service = new ContactService(store, ports);
   return {
     dir,
     store,
@@ -282,7 +283,7 @@ function harness() {
     world,
     service,
     /** 模拟重启：新的 store 从磁盘读，新的服务没有内存态 */
-    restart: () => new TelegramContactService(new ContactStore(dir), ports),
+    restart: () => new ContactService(new ContactStore(dir), ports),
   };
 }
 
@@ -1725,7 +1726,7 @@ describe('手机关注的任务', () => {
     h.following.add({
       kind,
       targetId,
-      chatId: 777,
+      origin: { channelId: 'telegram', peerId: '777' },
       at: h.clock.now,
       summary,
       ...(secretaryConversationId ? { secretaryConversationId } : {}),
@@ -1874,7 +1875,7 @@ describe('手机关注的任务', () => {
     expect(h.service.phoneTurnChat('sec-1')).toBeNull();
     h.api.push(privateMessage('给 apple-table 加个字段'));
     await waitFor(() => h.world.delivered.length > 0, 'delivered');
-    expect(h.service.phoneTurnChat('sec-1')).toBe(777);
+    expect(h.service.phoneTurnChat('sec-1')).toEqual({ channelId: 'telegram', peerId: '777' });
     expect(h.service.phoneTurnChat('other')).toBeNull();
     h.service.onTurnReply('sec-1', '要你点确认卡');
     expect(h.service.phoneTurnChat('sec-1')).toBeNull();
@@ -1977,14 +1978,14 @@ describe('手机关注的任务', () => {
     await waitFor(() => h.api.sent.length > 0, 'card');
     const button = h.api.sent.at(-1)?.replyMarkup?.inline_keyboard.flat()[0];
     expect(button?.callback_data).toBe('card:c:p1');
-    const seen: (number | null)[] = [];
+    const seen: unknown[] = [];
     h.ports.resolveProposal = async () => {
       seen.push(h.service.phoneTurnChat('sec-1'));
       return { ok: true };
     };
     h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'card:c:p1' } });
     await waitFor(() => seen.length > 0, 'confirmed');
-    expect(seen).toEqual([777]);
+    expect(seen).toEqual([{ channelId: 'telegram', peerId: '777' }]);
     // 确认完就收回：之后桌面上的派发不算手机发起
     expect(h.service.phoneTurnChat('sec-1')).toBeNull();
   });
@@ -2081,4 +2082,267 @@ describe('秘书会话被回收后的入站', () => {
       expect(h.world.delivered).toEqual([]);
     }
   );
+});
+
+/** 假的插件渠道：没按钮、不能改消息，出站全部记下来 */
+class FakePlainChannel implements ContactChannel {
+  readonly id = 'enso.clawbot:wechat';
+  sent: { peerId: string; kind: string; text: string }[] = [];
+  typings: string[] = [];
+  settles = 0;
+  private seq = 0;
+  constructor(private readonly extra: Partial<ChannelCaps> = {}) {}
+  caps(): ChannelCaps {
+    return {
+      buttons: false,
+      urlButtons: false,
+      edit: false,
+      typing: true,
+      format: 'plain',
+      maxChars: 2000,
+      commandMenu: false,
+      ...this.extra,
+    };
+  }
+  private record(kind: string, peerId: string, message: ChannelMessage) {
+    expect(message.buttons ?? []).toEqual([]);
+    this.sent.push({ peerId, kind, text: message.text });
+    this.seq += 1;
+    return Promise.resolve({ ok: true as const, messageId: `m${this.seq}` });
+  }
+  sendText(peerId: string, message: ChannelMessage) {
+    return this.record('text', peerId, message);
+  }
+  ask(peerId: string, message: ChannelMessage) {
+    return this.record('ask', peerId, message);
+  }
+  confirmCards(peerId: string, message: ChannelMessage) {
+    return this.record('cards', peerId, message);
+  }
+  approvalNotice(peerId: string, message: ChannelMessage) {
+    return this.record('approval', peerId, message);
+  }
+  settle() {
+    this.settles += 1;
+    return Promise.resolve({ ok: true as const });
+  }
+  typing(peerId: string) {
+    this.typings.push(peerId);
+    return Promise.resolve({ ok: true as const });
+  }
+}
+
+describe('多渠道联系方式', () => {
+  const WECHAT = 'enso.clawbot:wechat';
+  const wxPeer = { channelId: WECHAT, peerId: 'wx-me' };
+
+  async function boundTelegram() {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    return h;
+  }
+
+  function addWechat(
+    h: ReturnType<typeof harness>,
+    options: { push?: boolean; cardConfirm?: boolean; caps?: Partial<ChannelCaps> } = {}
+  ) {
+    const channel = new FakePlainChannel(options.caps);
+    h.service.declareChannel({
+      id: WECHAT,
+      title: '微信',
+      builtin: false,
+      pluginId: 'enso.clawbot',
+    });
+    h.service.attachChannel(WECHAT, channel);
+    h.service.setChannelStatus(WECHAT, { status: 'connected', peers: ['wx-me'] });
+    h.service.setChannelPrefs(WECHAT, {
+      enabled: true,
+      push: options.push ?? true,
+      cardConfirm: options.cardConfirm ?? false,
+    });
+    return channel;
+  }
+
+  it('Telegram 固定第一位并标成内置；插件渠道默认关着', () => {
+    const h = harness();
+    h.service.declareChannel({
+      id: WECHAT,
+      title: '微信',
+      builtin: false,
+      pluginId: 'enso.clawbot',
+    });
+    const channels = h.service.state().channels;
+    expect(channels.map((item) => [item.id, item.builtin, item.status])).toEqual([
+      ['telegram', true, 'unconfigured'],
+      [WECHAT, false, 'unconfigured'],
+    ]);
+    expect(channels[1]?.prefs.enabled).toBe(false);
+    expect(h.service.state().enabled).toBe(true);
+  });
+
+  it('里程碑发给所有启用、已连接、打开推送的渠道；关掉推送的不发', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    const before = h.api.sent.length;
+    h.service.onMilestone({ kind: 'goal-complete', title: 'p · 修登录', conversationId: 'c1' });
+    await waitFor(() => wechat.sent.length === 1 && h.api.sent.length === before + 1, 'both');
+    // 没有 url 按钮的渠道：深链写进正文
+    expect(wechat.sent[0]?.text).toContain('enso://');
+    h.service.setChannelPrefs(WECHAT, { push: false });
+    h.service.onMilestone({ kind: 'failed', title: 'p · 修构建', conversationId: 'c2' });
+    await waitFor(() => h.api.sent.length === before + 2, 'telegram only');
+    expect(wechat.sent).toHaveLength(1);
+  });
+
+  it('插件渠道发来的话带渠道名进秘书会话，回复只回原来的联系人', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '把登录修一下', name: '小明' });
+    expect(h.world.delivered.at(-1)).toMatch(
+      /^\[来自 微信 @小明\]\n<untrusted-content source="enso\.clawbot:wechat:@小明">把登录修一下<\/untrusted-content>$/u
+    );
+    expect(h.service.phoneTurnChat('sec-1')).toEqual(wxPeer);
+    h.service.onTurnStart('sec-1');
+    await waitFor(() => wechat.typings.length > 0, 'typing');
+    expect(h.api.chatActions).toHaveLength(0);
+    const before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', '好的，已经派出去了');
+    await waitFor(() => wechat.sent.length > 0, 'reply');
+    expect(wechat.sent.at(-1)?.text).toBe('好的，已经派出去了');
+    expect(h.api.sent.length).toBe(before);
+  });
+
+  it('同一轮两个渠道都说话，就两边都回', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '在吗' });
+    h.api.push(privateMessage('还有这个'));
+    await waitFor(() => h.world.delivered.length === 2, 'both delivered');
+    const before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', '都收到了');
+    await waitFor(() => wechat.sent.length > 0 && h.api.sent.length > before, 'both replied');
+    expect(h.api.sent.at(-1)?.text).toContain('都收到了');
+  });
+
+  it('提问在没按钮的渠道变成编号文本；回序号就是选这一项，Telegram 那条跟着收尾', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    h.service.onAskRequest('sec-1', {
+      requestId: 'r1',
+      question: '用哪个分支？',
+      options: ['main', 'dev'],
+    } as never);
+    await waitFor(() => wechat.sent.length > 0 && h.api.sent.length > 1, 'ask sent');
+    expect(wechat.sent[0]?.text).toContain('1. main');
+    expect(wechat.sent[0]?.text).toContain('回复序号');
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '2' });
+    expect(h.world.answers).toEqual([{ requestId: 'r1', answer: 'dev' }]);
+    await waitFor(() => h.api.edited.length > 0, 'telegram settled');
+    expect(h.api.edited.at(-1)?.text).toContain('dev');
+    // 没编辑能力的渠道不改旧消息
+    expect(wechat.settles).toBe(0);
+  });
+
+  it('确认卡：没按钮的渠道回「确认 1」，开关关着时绝不执行', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h, { cardConfirm: false });
+    h.service.syncPendingCards([
+      { id: 'p1', kind: 'dispatch', title: '修登录', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => wechat.sent.length > 0, 'card');
+    expect(wechat.sent[0]?.text).toContain('关着手机确认');
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '确认 1' });
+    expect(h.world.resolved).toEqual([]);
+
+    h.service.setChannelPrefs(WECHAT, { cardConfirm: true });
+    h.service.syncPendingCards([]);
+    h.service.syncPendingCards([
+      { id: 'p2', kind: 'dispatch', title: '加字段', conversationId: 'sec-1' },
+    ]);
+    await waitFor(() => wechat.sent.some((item) => item.text.includes('确认 1')), 'card 2');
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '确认 1' });
+    expect(h.world.resolved).toEqual([{ proposalId: 'p2', action: 'confirm' }]);
+    // 谁先答算谁的：Telegram 上同一张卡随后收尾
+    await waitFor(
+      () => h.api.edited.some((item) => item.text.includes('加字段')),
+      'telegram card settled'
+    );
+  });
+
+  it('审批在任何渠道都不能确认', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h, { cardConfirm: true });
+    h.service.onCardWaiting({ count: 1, approval: true, conversationId: 'sec-1' });
+    await waitFor(() => wechat.sent.length > 0, 'approval');
+    expect(wechat.sent[0]?.text).toContain('审批只能在应用里处理');
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '确认 1' });
+    expect(h.world.resolved).toEqual([]);
+    h.api.push({ update_id: 9, callback_query: { id: 'cb', data: 'card:c:approval:1' } });
+    await waitFor(() => h.api.callbacks.length > 0, 'callback');
+    expect(h.world.resolved).toEqual([]);
+  });
+
+  it('总开关关掉：不收不发，只读命令也不回', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    await h.service.setEnabled(false);
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '/status' });
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '在吗' });
+    h.service.onMilestone({ kind: 'goal-complete', title: 'x', conversationId: 'c1' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(wechat.sent).toEqual([]);
+    expect(h.world.delivered).toEqual([]);
+    expect(h.world.commandCalls).toEqual([]);
+    expect(h.store.file().enabled).toBe(false);
+    expect(h.service.state().enabled).toBe(false);
+  });
+
+  it('只读命令在插件渠道也不进秘书会话', async () => {
+    const h = harness();
+    const wechat = addWechat(h);
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '/status' });
+    expect(h.world.delivered).toEqual([]);
+    expect(wechat.sent.at(-1)?.text).toContain('修登录');
+  });
+
+  it('关注项记的是发起它的联系人；任务结果只回那里', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    h.following.add({ kind: 'session', targetId: 'c9', origin: wxPeer, at: 1, summary: '修登录' });
+    const before = h.api.sent.length;
+    h.service.onMilestone({ kind: 'goal-complete', title: 'p · 修登录', conversationId: 'c9' });
+    await waitFor(() => wechat.sent.length > 0, 'pushed');
+    expect(h.api.sent.length).toBe(before);
+    await waitFor(() => h.following.list().length === 0, 'follow done');
+  });
+
+  it('插件停用：卡片消失，关注项与待收尾记录清掉，入站不再路由', async () => {
+    const h = await boundTelegram();
+    addWechat(h);
+    h.following.add({ kind: 'session', targetId: 'c9', origin: wxPeer, at: 1, summary: '修登录' });
+    h.following.add({
+      kind: 'session',
+      targetId: 'c8',
+      origin: { channelId: 'telegram', peerId: '777' },
+      at: 2,
+      summary: 'tg',
+    });
+    h.service.removeChannel(WECHAT);
+    expect(h.service.state().channels.map((item) => item.id)).toEqual(['telegram']);
+    expect(h.following.list().map((item) => item.targetId)).toEqual(['c8']);
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '在吗' });
+    expect(h.world.delivered).toEqual([]);
+  });
+
+  it('重新扫码换了人：旧联系人的等待回复作废', async () => {
+    const h = harness();
+    const wechat = addWechat(h);
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '在吗' });
+    h.service.setChannelStatus(WECHAT, { status: 'connected', peers: ['wx-other'] });
+    h.service.onTurnReply('sec-1', '回你');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(wechat.sent).toEqual([]);
+  });
 });

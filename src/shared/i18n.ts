@@ -3,6 +3,33 @@ export type Locale = 'en' | 'zh';
 export const zhTranslations: Record<string, string> = {
   Contacts: '联系方式',
   'From Telegram': '来自 Telegram',
+  'From {{name}}': '来自 {{name}}',
+  'Not set up': '未配置',
+  'Waiting to bind': '等待绑定',
+  'Enable {{name}}': '启用{{name}}',
+  'Push to this channel': '主动推送',
+  'Milestones, questions from the secretary, cards and approval notices go out here.':
+    '里程碑、秘书的提问、确认卡与审批提示会推到这里。',
+  'Confirm cards from the phone': '手机确认卡',
+  'Off by default. Approvals are never handled from the phone.':
+    '默认关闭。审批永远不能在手机上处理。',
+  'Off by default. Reply "confirm 1" to confirm a card. Approvals are never handled from the phone.':
+    '默认关闭。回复「确认 1」确认对应的卡；审批永远不能在手机上处理。',
+  'Mirror every reply': '同步镜像',
+  'Off by default. Every reply in the secretary conversation is sent here, not just milestones.':
+    '默认关闭。秘书会话里每一轮回复都发到这里，不只是里程碑。',
+  'Allow viewing memory titles': '允许查看记忆标题',
+  'No buttons: questions and cards arrive as numbered text.':
+    '没有按钮：提问和确认卡会变成编号文本。',
+  'Cannot edit sent messages: answered questions are not marked there.':
+    '不能改已发出的消息：答过的提问不会在这里标记。',
+  'No typing indicator.': '不显示「正在输入」。',
+  "The Telegram remote plugin (enso.telegram) is enabled. Do not give both the same bot token: only one place can poll a bot, so they would steal each other's messages.":
+    '已启用 Telegram 远程插件（enso.telegram）。两边不要用同一个 bot token：一个 bot 只能有一处在轮询，会互相抢消息。',
+  'Enable contacts': '启用联系方式',
+  'Contacts are off: nothing is sent or received on any channel.':
+    '联系方式已关闭：所有渠道都不收不发。',
+  'Find more contact channels in the plugin market': '从插件市场找更多联系方式',
   'Reach the secretary from your phone. Milestones go out; your replies come back.':
     '不在电脑前也能找到秘书：里程碑推到手机，你在手机上回话就是跟秘书说话。',
   'Telegram returned an error': 'Telegram 返回了一个错误',

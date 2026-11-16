@@ -35,6 +35,7 @@ import {
   isNewerPluginVersion,
   isPluginRelativePath,
   type PluginConfigContrib,
+  type PluginContactChannelContrib,
   type PluginModelChoice,
   type PluginPresetContrib,
   parseExtensionPluginManifest,
@@ -712,6 +713,31 @@ export class ExtensionPluginService {
       if (result.ok) this.syncBackground();
       return result;
     });
+  }
+
+  /** 已启用且获准作为秘书联系方式的插件渠道；停用、卸载后就不在里面 */
+  contactChannels(): { pluginId: string; channels: PluginContactChannelContrib[] }[] {
+    return this.records.flatMap((record) => {
+      const manifest = this.enabledManifest(record.id);
+      const channels = manifest?.contributes.contactChannels ?? [];
+      if (!manifest?.permissions.includes('secretary.contact') || channels.length === 0) return [];
+      return [{ pluginId: record.id, channels }];
+    });
+  }
+
+  /** 秘书联系方式往插件渠道发东西：不属于任何会话，按后台事件调用 */
+  async callContact(
+    pluginId: string,
+    channelId: string,
+    request: { op: 'sendText'; peerId: string; text: string } | { op: 'typing'; peerId: string }
+  ): Promise<unknown> {
+    if (!this.enabledManifest(pluginId)) throw pluginError('PLUGIN_DISABLED', '插件未启用');
+    return this.invoke(
+      pluginId,
+      'contact.call',
+      { channelId, ...request },
+      { sessionId: null, projectRoot: null, gesture: false, timeoutMs: 30_000, kind: 'event' }
+    );
   }
 
   /** 允许或禁止插件向非发起会话注入消息；只对申请了 agent.inject 的插件有效 */

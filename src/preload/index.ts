@@ -241,6 +241,7 @@ import type {
 } from '@shared/types/nodes';
 import type {
   DispatchDraft,
+  SecretaryContactChannelPrefs,
   SecretaryContactState,
   SecretaryDaily,
   SecretaryProfile,
@@ -514,10 +515,12 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT),
     contactTest: (): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST),
-    contactSettings: (patch: {
-      allowCardConfirm?: boolean;
-      allowMemory?: boolean;
-    }): Promise<{ ok: true } | { ok: false; error: string }> =>
+    /** 总开关 enabled、Telegram 老开关，或某个渠道卡片上的通用开关 */
+    contactSettings: (
+      patch:
+        | { enabled?: boolean; allowCardConfirm?: boolean; allowMemory?: boolean }
+        | { channelId: string; prefs: Partial<SecretaryContactChannelPrefs> }
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
     /** 手机关注的任务：取消一项或全清 */
     contactFollowing: (

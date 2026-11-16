@@ -89,7 +89,7 @@
 | `renderer` | 可选，渲染模块的相对路径 |
 | `permissions` | 见下表，重复项自动去重 |
 | `fs.read` / `fs.write` | 相对项目根的目录范围，`.` 表示整个项目。填了就必须申请对应权限 |
-| `net.domains` | 主机名，如 `api.github.com`，不含协议和路径。填了就必须申请 `net.fetch` |
+| `net.domains` | 主机名，如 `api.github.com`，不含协议和路径。`*.example.com` 放行它的任意子域（不含 `example.com` 本身，不能写 `*.com`），用于服务端会把请求重定向到子域的情况。填了就必须申请 `net.fetch` |
 | `mcp.tools` | 允许调用的宿主 MCP 工具名（字母、数字、`_ . -`，最长 64）。填了就必须申请 `mcp.call`，申请了 `mcp.call` 也必须填 |
 | `resident` | 可选，`true` 表示常驻：启用即拉起进程，不因空闲退出。需要 `process.background` |
 | `env` | 可选，额外透传给插件进程的环境变量名，最多 20 个。不能是 `ENSO_*`、`ELECTRON_*`、`LD_*`、`DYLD_*`、`NODE_OPTIONS`、`NODE_PATH`、`NODE_EXTRA_CA_CERTS` |
@@ -124,6 +124,7 @@
 | `session.focus` | 要切换到会话 | `enso.session.focus` |
 | `session.create` | 要新建会话 | `enso.session.create` |
 | `agent.run` | 要用会话的模型跑只读代理 | `enso.agent.run`，见「只读代理」 |
+| `secretary.contact` | 要做秘书的联系方式渠道（如微信） | `enso.contact.*`，见「秘书联系方式」 |
 
 主题的 CSS 不进上表，也不要往 `permissions` 里写一个样式权限，未知名字会被拒绝。任一 `themes` 项带了 `css`，安装和更新对话框会多出「修改界面样式：主题 CSS 可改变应用任意界面」。这项从无到有时要重新同意。只提供调色板的主题没有这项。调色板、派生变量和锚点见 [主题](theming.md)。
 
@@ -162,6 +163,7 @@ Enso 安装插件时只复制目录，不会执行 `npm install`，也不会在�
 - `schedules`：`{ id, intervalSeconds, timeoutMs? }`，最多 10 个。间隔 60 到 86400 秒，单次缺省 60 秒超时。
 - `exports`：`{ name, timeoutMs? }`，允许其他插件调用的方法。
 - `dynamic`：`{ tools?, commands? }`，运行期最多能额外注册多少工具（0–50）和命令（0–20），缺省都是 0。
+- `contactChannels`：`{ id, title, icon?, settingsView? }`，需要 `secretary.contact`。秘书联系方式页多一张渠道卡片；`settingsView` 是插件内的 `.html` 登录页（如扫码），嵌在卡片里，需要 `ui.view`。见「秘书联系方式」。
 - `themes`：`{ id, name, path, css? }`。一项一个主题。`id` 不含 `/`，并匹配 `^[a-z][a-z0-9-]{0,31}$`，和插件 id 组成 `<插件 id>/<主题 id>`。`path` 与可选的 `css` 是插件目录内的相对路径，规则与其他路径相同。`path` 必须以 `.json` 结尾，`css` 必须以 `.css` 结尾。见 [主题](theming.md)。
 
 同一类贡献里的 `id` 或 `name` 不能重复。
@@ -387,6 +389,16 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 - `signal` 中止或超时后 Promise 分别以 `ABORTED` / `AGENT_FAILED` 拒绝；模型出错、没有回复也是 `AGENT_FAILED`。插件停用或进程退出时宿主取消它的代理。
 - 每个插件同时最多 2 个，超过返回 `RATE_LIMITED`。
 - 模型由用户决定，插件不能在调用里指定：清单 `configuration` 里声明一个 `type: 'model'` 的配置项，设置页就出现模型选择，可选「跟随当前会话」（`session`，缺省）、「跟随标题模型」（`title`，依次取标题模型、全局默认模型，都不可用时跟随会话）或从已配置的模型里指定一个（值为 `<providerId>::<modelId>`）。指定的模型不可用时返回 `AGENT_FAILED`。
+
+### 秘书联系方式
+
+清单 `contactChannels` 声明的渠道启用后出现在秘书联系方式页，排在内置的 Telegram 后面。宿主画通用开关（启用、主动推送、手机确认卡、同步镜像、记忆标题），插件只管收发：
+
+- `enso.contact.register(channelId, { caps, sendText(peerId, { text }), typing?(peerId, { on }) })`：交出实现。`caps` 必须给全 `{ buttons, urlButtons, edit, typing, format, maxChars, commandMenu }`（`maxChars` 100–65536）。这一版协议只带纯文本，宿主一律按没有按钮、不能改消息处理：提问与确认卡变成编号文本，回「确认 1」确认卡片，审批永远不能在手机上确认。`sendText` 可以返回 `{ messageId }`。
+- `enso.contact.inbound(channelId, { peerId, text, name?, at? })`：对方发来一句话。插件自己负责只放行绑定的那个人；宿主再按总开关与渠道开关过滤，正文包成 `[来自 <渠道名> @名字 · 时间]` 加不可信内容交给秘书。只读命令（`/status` 等）不进秘书会话。10 秒最多 20 条。
+- `enso.contact.setStatus(channelId, { status, detail?, peers? })`：`status` 是 `unconfigured`、`pending`、`connected`、`error`；`peers` 是主动推送的对象（最多 8 个）。换了人或断开时，发往旧联系人的待收尾记录作废。
+
+`peerId` 一律是字符串。回复、正在输入、任务结果只回发消息的那个人；里程碑、提问、确认卡与审批发给所有启用、已连接且打开主动推送的渠道，谁先答算谁的。插件停用或卸载时卡片消失，这个渠道的关注项与待收尾记录一起清掉。
 
 ### 状态项
 

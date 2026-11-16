@@ -86,6 +86,7 @@ export function SettingsContent() {
   const [flashRowId, setFlashRowId] = React.useState<string | null>(null);
   const [pluginInstallUrl, setPluginInstallUrl] = React.useState<string | null>(null);
   const [focusPluginId, setFocusPluginId] = React.useState<string | null>(null);
+  const [marketQuery, setMarketQuery] = React.useState<string | null>(null);
   // 提炼写入记忆后让记忆库重新拉数据（两个组件各自持有列表）
   const [memoryRevision, setMemoryRevision] = React.useState(0);
   // 窄屏下分类列表与内容逐级进入
@@ -114,6 +115,7 @@ export function SettingsContent() {
     setFlashRowId(link.rowId);
     if (link.pluginInstallUrl) setPluginInstallUrl(link.pluginInstallUrl);
     setFocusPluginId(link.pluginId ?? null);
+    setMarketQuery(link.marketQuery ?? null);
   }, []);
 
   React.useEffect(() => {
@@ -331,6 +333,8 @@ export function SettingsContent() {
                 onRequestedInstallUrlConsumed={() => setPluginInstallUrl(null)}
                 focusPluginId={focusPluginId}
                 onFocusPluginConsumed={() => setFocusPluginId(null)}
+                requestedMarketQuery={marketQuery}
+                onRequestedMarketQueryConsumed={() => setMarketQuery(null)}
               />
             )}
             {activeCategory === 'claudePlugins' && <ClaudePluginsSettings />}
