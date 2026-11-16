@@ -4759,7 +4759,7 @@ function pngChunk(type, data) {
 }
 
 /** 120×80 的源图：中间一条竖条，裁成正方形后竖条仍在正中，能证明是居中裁切 */
-function writeAvatarFixture(file) {
+function writeAvatarFixture(file, bar = [255, 0, 170]) {
   const width = 120;
   const height = 80;
   const raw = Buffer.alloc((width * 4 + 1) * height);
@@ -4768,9 +4768,9 @@ function writeAvatarFixture(file) {
     for (let x = 0; x < width; x += 1) {
       const at = row + 1 + x * 4;
       const inside = x >= 50 && x < 70;
-      raw[at] = inside ? 255 : 20;
-      raw[at + 1] = inside ? 0 : 20;
-      raw[at + 2] = inside ? 170 : 20;
+      raw[at] = inside ? bar[0] : 20;
+      raw[at + 1] = inside ? bar[1] : 20;
+      raw[at + 2] = inside ? bar[2] : 20;
       raw[at + 3] = 255;
     }
   }
@@ -4916,6 +4916,50 @@ async function verifyAvatar(cdp, setup) {
   );
   await settingsPage.shot(path.join(ART, '01c-avatar-uploaded.png'));
 
+  // 连续换图：第二次必须当场生效（版本与指纹都变），不需要先失败一次
+  const second = path.join(ART, 'avatar-source-2.png');
+  writeAvatarFixture(second, [0, 170, 255]);
+  await settingsPage.setFiles('[data-enso=secretary-avatar-file]', [second]);
+  const recropped = await settingsPage.json(`
+    const confirm = () => [...document.querySelectorAll('button')]
+      .find((b) => ['使用此头像', 'Use this avatar'].includes(b.innerText.trim()));
+    const ready = await until(() => {
+      const button = confirm();
+      return button && !button.disabled ? button : null;
+    }, 20000);
+    if (!ready) return JSON.stringify({ ok: false });
+    ready.click();
+    return JSON.stringify({ ok: true });
+  `);
+  assert(recropped.ok, '头像: 第二次换图也能确认裁切', recropped);
+  const replaced = await waitFor(
+    () => ((readJson(profileFile).avatar?.imageVersion ?? 0) >= 2 ? readJson(profileFile) : null),
+    'profile.json imageVersion 2',
+    20_000,
+    200
+  ).catch(() => readJson(profileFile));
+  assert(replaced.avatar?.imageVersion >= 2, '头像: 连续换图第二次当场生效', replaced.avatar);
+  assert(
+    Boolean(replaced.avatar?.imageHash) &&
+      replaced.avatar?.imageHash !== uploaded.avatar?.imageHash,
+    '头像: 换图后 URL 上的图片指纹跟着变',
+    replaced.avatar
+  );
+  const secondSrc = await settingsPage.json(`
+    const img = await until(
+      () => document.querySelector('[data-enso=secretary-settings-avatar] img'),
+      20000
+    );
+    return JSON.stringify({ src: img?.getAttribute('src') ?? null });
+  `);
+  assert(
+    typeof secondSrc.src === 'string' &&
+      secondSrc.src.includes(`v=${replaced.avatar.imageVersion}`) &&
+      secondSrc.src.includes(`h=${replaced.avatar.imageHash}`),
+    '头像: 设置页头像地址带上新版本与新指纹',
+    secondSrc
+  );
+
   const faces = await page(`
     S().selectConversation(${JSON.stringify(setup.secretaryId)});
     const sidebar = await until(() => {
@@ -4982,7 +5026,7 @@ async function verifyAvatar(cdp, setup) {
   );
 
   const draftGuard = await page(`
-    const before = ${JSON.stringify(uploaded.avatar.imageVersion)};
+    const before = ${JSON.stringify(replaced.avatar.imageVersion)};
     const saved = await window.electronAPI.secretary.saveProfile({
       avatar: { color: '#ff00aa', imageVersion: 99 },
     });

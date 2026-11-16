@@ -140,4 +140,18 @@ describe('BotStore', () => {
     expect(store.avatarPath(id)).toBeNull();
     expect(store.setAvatar('missing', null)).toEqual({ ok: false, reason: 'not-found' });
   });
+
+  it('档案没写成功就把头像图片回滚，不留下「字节换了、版本没换」的半成品', () => {
+    const created = store.create({ name: 'Alice' }, []);
+    if (!created.ok) throw new Error('create failed');
+    const id = created.bot.id;
+    const file = join(root, id, 'avatar.png');
+    store.setAvatar(id, Uint8Array.of(1, 2, 3));
+    const broken = new BotStore(root, now);
+    (broken as unknown as { persist: () => void }).persist = () => {
+      throw new Error('disk full');
+    };
+    expect(() => broken.setAvatar(id, Uint8Array.of(9, 9, 9))).toThrow('disk full');
+    expect([...readFileSync(file)]).toEqual([1, 2, 3]);
+  });
 });

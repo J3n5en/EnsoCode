@@ -32,10 +32,17 @@ export const BOT_AVATAR_HOST = 'bot-avatar';
 export const botAvatarUrl = (botId: string, version: number): string =>
   routed(`${LOCAL_IMAGE_SCHEME}://${BOT_AVATAR_HOST}/${encodeURIComponent(botId)}?v=${version}`);
 
-/** 秘书头像的保留 host：只有一个秘书，路径由 Main 推导；v 为头像版本（缓存失效） */
+/**
+ * 秘书头像的保留 host：只有一个秘书，路径由 Main 推导。
+ * v 是版本号，h 是图片字节的短指纹：两者都在 URL 上，换图后地址一定变，不吃旧缓存。
+ */
 export const SECRETARY_AVATAR_HOST = 'secretary-avatar';
-export const secretaryAvatarUrl = (version: number): string =>
-  routed(`${LOCAL_IMAGE_SCHEME}://${SECRETARY_AVATAR_HOST}/avatar.png?v=${version}`);
+export const secretaryAvatarUrl = (version: number, hash?: string): string =>
+  routed(
+    `${LOCAL_IMAGE_SCHEME}://${SECRETARY_AVATAR_HOST}/avatar.png?v=${version}${
+      hash ? `&h=${encodeURIComponent(hash)}` : ''
+    }`
+  );
 
 /** 插件目录内图片和字体的保留 host。v 是安装代号，换包后缓存失效 */
 export const PLUGIN_ASSET_HOST = 'plugin-asset';

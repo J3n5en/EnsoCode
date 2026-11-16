@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -14,6 +15,19 @@ import type {
 } from '../../../shared/types/secretary';
 import { readJson, writeAtomic, writeJsonAtomic } from '../bots/files';
 import { prepareSecretaryAvatarWrite, readableSecretaryAvatar } from './avatarFile';
+
+/** 头像字节的短指纹：同一张图同一个值，换图必变，用作 URL 的缓存失效参数 */
+export function imageHash(bytes: Uint8Array): string {
+  return createHash('sha1').update(bytes).digest('hex').slice(0, 8);
+}
+
+function readAvatarBytes(file: string): Uint8Array | null {
+  try {
+    return readFileSync(file);
+  } catch {
+    return null;
+  }
+}
 
 /** userData/secretary/{profile.json, persona.md, avatar.png, dispatch.json, todos.json, schedules.json} */
 export class SecretaryStore {
@@ -64,14 +78,28 @@ export class SecretaryStore {
     if (!current) return null;
     const file = prepareSecretaryAvatarWrite(this.dir);
     if (!file) return null;
+    const previous = readAvatarBytes(file);
     if (image) writeAtomic(file, image);
     else rmSync(file, { force: true });
-    const imageVersion = image ? (current.avatar.imageVersion ?? 0) + 1 : undefined;
-    return this.saveProfile({
-      ...current,
-      avatar: { color: current.avatar.color, ...(imageVersion ? { imageVersion } : {}) },
-      updatedAt: this.now(),
-    });
+    const avatar = image
+      ? {
+          color: current.avatar.color,
+          imageVersion: (current.avatar.imageVersion ?? 0) + 1,
+          imageHash: imageHash(image),
+        }
+      : { color: current.avatar.color };
+    try {
+      return this.saveProfile({
+        ...current,
+        avatar,
+        updatedAt: this.now(),
+      });
+    } catch (error) {
+      // 档案没落盘就回滚图片：字节换了、版本没换时 URL 不变，界面会一直显示旧图
+      if (previous) writeAtomic(file, previous);
+      else rmSync(file, { force: true });
+      throw error;
+    }
   }
 
   dispatch(): SecretaryDispatchFile {

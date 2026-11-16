@@ -101,22 +101,34 @@ describe('SecretaryStore', () => {
 
   it('stores avatar.png and bumps its version, then removes both', () => {
     store.saveProfile(profile);
-    expect(store.setAvatar(new Uint8Array([1, 2, 3]))?.avatar).toEqual({
-      color: '#0ea5e9',
-      imageVersion: 1,
-    });
+    const first = store.setAvatar(new Uint8Array([1, 2, 3]))?.avatar;
+    expect(first).toMatchObject({ color: '#0ea5e9', imageVersion: 1 });
+    expect(first?.imageHash).toMatch(/^[0-9a-f]{8}$/u);
     expect(existsSync(join(dir, 'avatar.png'))).toBe(true);
     expect(store.avatarPath()).toBe(realpathSync(join(dir, 'avatar.png')));
 
-    expect(store.setAvatar(new Uint8Array([4]))?.avatar).toEqual({
-      color: '#0ea5e9',
-      imageVersion: 2,
-    });
+    const second = store.setAvatar(new Uint8Array([4]))?.avatar;
+    expect(second).toMatchObject({ color: '#0ea5e9', imageVersion: 2 });
+    // 换图后 URL 上的指纹必须跟着变：只靠版本号在档案被重来后可能撞回同一个地址
+    expect(second?.imageHash).not.toBe(first?.imageHash);
     expect(store.avatarPath()).toBe(realpathSync(join(dir, 'avatar.png')));
 
     expect(store.setAvatar(null)?.avatar).toEqual({ color: '#0ea5e9' });
     expect(existsSync(join(dir, 'avatar.png'))).toBe(false);
     expect(store.avatarPath()).toBeNull();
+  });
+
+  it('档案没写成功就把图片回滚，不留下「字节换了、版本没换」的半成品', () => {
+    store.saveProfile(profile);
+    store.setAvatar(new Uint8Array([1, 2, 3]));
+    const before = readFileSync(join(dir, 'avatar.png'));
+    const broken = new SecretaryStore(dir, now);
+    broken.saveProfile = () => {
+      throw new Error('disk full');
+    };
+    expect(() => broken.setAvatar(new Uint8Array([9, 9, 9]))).toThrow('disk full');
+    expect(readFileSync(join(dir, 'avatar.png'))).toEqual(before);
+    expect(store.profile()?.avatar.imageVersion).toBe(1);
   });
 
   it('ignores an avatar write when no profile exists', () => {
@@ -142,7 +154,8 @@ describe('SecretaryStore', () => {
     const saved = JSON.parse(readFileSync(join(dir, 'profile.json'), 'utf8')) as {
       avatar: Record<string, unknown>;
     };
-    expect(saved.avatar).toEqual({ color: '#0ea5e9', imageVersion: 5 });
+    expect(saved.avatar).toMatchObject({ color: '#0ea5e9', imageVersion: 5 });
+    expect(saved.avatar.imageHash).toMatch(/^[0-9a-f]{8}$/u);
     expect(JSON.stringify(saved)).not.toContain('base64');
     expect(saved.avatar).not.toHaveProperty('path');
     rmSync(outside, { force: true });

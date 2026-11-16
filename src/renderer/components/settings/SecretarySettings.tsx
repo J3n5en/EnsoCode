@@ -16,6 +16,11 @@ import * as React from 'react';
 import { AvatarCropDialog } from '@/components/bots/AvatarCropDialog';
 import { dataUrlBytes, readDataUrl } from '@/components/bots/avatarRaster';
 import { secretaryAvatarUploadError } from '@/components/secretary/avatarColor';
+import {
+  type AvatarUploadProblem,
+  avatarUpload,
+  IDLE_AVATAR_UPLOAD,
+} from '@/components/secretary/avatarUpload';
 import { defaultDraft, draftFromProfile } from '@/components/secretary/profileFormState';
 import {
   NOTIFY_LABELS,
@@ -41,6 +46,14 @@ const DISPATCH_LIMIT_OPTIONS = Array.from(
     return { value, label: value };
   }
 );
+
+/** 头像上传失败的原因 → 给用户看的一句话 */
+const AVATAR_PROBLEM_TEXT: Record<AvatarUploadProblem, string> = {
+  type: 'Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.',
+  size: 'Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.',
+  read: 'This image cannot be used as an avatar.',
+  save: 'Could not save the secretary profile. Try again.',
+};
 
 function Chips<T extends string>({
   value,
@@ -532,7 +545,7 @@ export function SecretarySettings() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [resetOpen, setResetOpen] = React.useState(false);
-  const [cropSource, setCropSource] = React.useState<string | null>(null);
+  const [avatar, dispatchAvatar] = React.useReducer(avatarUpload, IDLE_AVATAR_UPLOAD);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const defaultName = t('Secretary');
 
@@ -579,20 +592,21 @@ export function SecretarySettings() {
   };
 
   const setAvatar = async (image: Uint8Array | null) => {
-    setBusy(true);
+    dispatchAvatar({ type: 'saving' });
     setError(null);
     try {
       const result = await window.electronAPI.secretary.setAvatar(image);
       if (!result.ok) {
+        dispatchAvatar({ type: 'save-failed' });
         setError(result.error);
         return;
       }
       setProfile(result.profile);
       setStyleDraft(draftFromProfile(result.profile, defaultName));
+      dispatchAvatar({ type: 'saved' });
     } catch {
+      dispatchAvatar({ type: 'save-failed' });
       setError(t('Could not save the secretary profile. Try again.'));
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -618,6 +632,11 @@ export function SecretarySettings() {
       </div>
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {avatar.problem ? (
+        <p className="text-xs text-destructive" data-enso="secretary-avatar-problem">
+          {t(AVATAR_PROBLEM_TEXT[avatar.problem])}
+        </p>
+      ) : null}
       {notice ? <p className="text-xs text-muted-foreground">{notice}</p> : null}
 
       <Section
@@ -638,12 +657,12 @@ export function SecretarySettings() {
                 event.target.value = '';
                 if (!file) return;
                 const problem = secretaryAvatarUploadError(file, AVATAR_MAX_BYTES);
-                if (problem) {
-                  setError(t('Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.'));
-                  return;
-                }
-                void readDataUrl(file).then(setCropSource, () =>
-                  setError(t('This image cannot be used as an avatar.'))
+                // 每次选图都先回到干净状态：上一次的弹窗、错误、忙碌都不带过来
+                dispatchAvatar({ type: 'pick', problem });
+                if (problem) return;
+                void readDataUrl(file).then(
+                  (source) => dispatchAvatar({ type: 'picked', source }),
+                  () => dispatchAvatar({ type: 'read-failed' })
                 );
               }}
             />
@@ -652,7 +671,7 @@ export function SecretarySettings() {
               color={profile.avatar.color}
               image={
                 profile.avatar.imageVersion
-                  ? secretaryAvatarUrl(profile.avatar.imageVersion)
+                  ? secretaryAvatarUrl(profile.avatar.imageVersion, profile.avatar.imageHash)
                   : undefined
               }
               needsYou={0}
@@ -662,7 +681,7 @@ export function SecretarySettings() {
             <Button
               variant="outline"
               size="sm"
-              disabled={busy}
+              disabled={avatar.busy}
               onClick={() => fileRef.current?.click()}
               data-enso="secretary-avatar-upload"
             >
@@ -672,7 +691,7 @@ export function SecretarySettings() {
               <Button
                 variant="ghost"
                 size="sm"
-                disabled={busy}
+                disabled={avatar.busy}
                 onClick={() => void setAvatar(null)}
                 data-enso="secretary-avatar-remove"
               >
@@ -680,15 +699,13 @@ export function SecretarySettings() {
               </Button>
             ) : null}
             <AvatarCropDialog
-              source={cropSource}
-              onCancel={() => setCropSource(null)}
+              source={avatar.cropSource}
+              onCancel={() => dispatchAvatar({ type: 'crop-cancelled' })}
               onDone={(dataUrl) => {
-                setCropSource(null);
                 const bytes = dataUrlBytes(dataUrl);
-                if (bytes.byteLength > AVATAR_MAX_BYTES) {
-                  setError(t('Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.'));
-                  return;
-                }
+                const tooLarge = bytes.byteLength > AVATAR_MAX_BYTES;
+                dispatchAvatar({ type: 'cropped', tooLarge });
+                if (tooLarge) return;
                 void setAvatar(bytes);
               }}
             />

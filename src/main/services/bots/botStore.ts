@@ -74,6 +74,7 @@ export class BotStore {
     const current = this.bots.get(id);
     if (!current) return { ok: false, reason: 'not-found' };
     const file = join(this.dir(id), 'avatar.png');
+    const previous = existsSync(file) ? readFileSync(file) : null;
     if (image) writeAtomic(file, image);
     else rmSync(file, { force: true });
     const version = current.version + 1;
@@ -83,8 +84,15 @@ export class BotStore {
       updatedAt: this.now(),
       version,
     };
-    this.persist(bot);
-    return { ok: true, bot };
+    try {
+      this.persist(bot);
+      return { ok: true, bot };
+    } catch (error) {
+      // 档案没落盘就回滚图片：字节换了、版本没换时 URL 不变，界面会一直显示旧图
+      if (previous) writeAtomic(file, previous);
+      else rmSync(file, { force: true });
+      throw error;
+    }
   }
 
   readPersona(id: string): string {

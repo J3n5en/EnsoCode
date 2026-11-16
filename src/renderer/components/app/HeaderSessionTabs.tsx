@@ -184,7 +184,7 @@ function SessionTab({
               color={profile.avatar.color}
               image={
                 profile.avatar.imageVersion
-                  ? secretaryAvatarUrl(profile.avatar.imageVersion)
+                  ? secretaryAvatarUrl(profile.avatar.imageVersion, profile.avatar.imageHash)
                   : undefined
               }
               enso="secretary-tab-avatar"
