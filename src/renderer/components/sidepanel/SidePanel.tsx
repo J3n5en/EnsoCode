@@ -79,6 +79,7 @@ import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
+import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
 import { TerminalView } from './TerminalView';
 import { idsToClose, type TabCloseKind } from './tabCloseActions';
@@ -317,10 +318,19 @@ function useWorkflowAvailable(projectId: string | undefined): boolean {
   return useSettingsStore((state) => selectWorkflowAvailable(state, projectId));
 }
 
-/** 秘书会话只留浏览器、工作台与记忆；开关关掉时与普通会话一样 */
+/** 秘书会话只留浏览器、秘书面板与勾选插件的页面；开关关掉时与普通会话一样 */
 function useSecretaryConversation(projectId: string | undefined): boolean {
   return useSettingsStore(
     (state) => state.secretaryEnabled && selectIsSecretaryProject(state.projects, projectId)
+  );
+}
+
+const NO_PLUGINS: readonly string[] = [];
+
+/** 秘书设置里勾选的插件 id；档案还没到时为 null */
+function useSecretaryPluginIds(): readonly string[] | null {
+  return useSecretaryStore((state) =>
+    state.secretary.profile ? (state.secretary.profile.pluginIds ?? NO_PLUGINS) : null
   );
 }
 
@@ -501,6 +511,7 @@ function NewTabMenu({
   onNewSecretary,
   secretaryLabel,
   onNewPluginView,
+  secretaryPluginIds,
   compact,
 }: {
   /** 缺省 = 该会话不提供这个入口（秘书会话没有终端、文件、改动） */
@@ -513,10 +524,16 @@ function NewTabMenu({
   onNewSecretary?: () => void;
   secretaryLabel?: string;
   onNewPluginView?: (view: PluginViewRef) => void;
+  /** 秘书会话传入：只列勾选了的插件页面 */
+  secretaryPluginIds?: readonly string[] | null;
   compact?: boolean;
 }) {
   const { t } = useI18n();
-  const pluginViews = usePluginViews();
+  const allPluginViews = usePluginViews();
+  const pluginViews =
+    secretaryPluginIds === undefined
+      ? allPluginViews
+      : secretaryPluginViews(allPluginViews, secretaryPluginIds ?? undefined);
   return (
     <Menu>
       <MenuTrigger
@@ -598,6 +615,7 @@ function SidePanelHeaderActions({
   const toggleFullscreen = useSidePanelStore((s) => s.toggleFullscreen);
   const workflowAvailable = useWorkflowAvailable(projectId);
   const secretary = useSecretaryConversation(projectId);
+  const secretaryPluginIds = useSecretaryPluginIds();
   const secretaryName = useSecretaryName();
   const isMobile = useIsMobile();
   const titleRow = useContext(TitleRowContext);
@@ -675,11 +693,10 @@ function SidePanelHeaderActions({
             : undefined
         }
         secretaryLabel={secretaryName}
-        onNewPluginView={
-          secretary
-            ? undefined
-            : (view) => addPluginViewPanel(containerApi, conversationId, projectId, view, group)
+        onNewPluginView={(view) =>
+          addPluginViewPanel(containerApi, conversationId, projectId, view, group)
         }
+        secretaryPluginIds={secretary ? secretaryPluginIds : undefined}
       />
       <button
         type="button"
@@ -724,6 +741,7 @@ function Watermark(props: IWatermarkPanelProps) {
   const { conversationId, projectId } = useContext(PanelContext);
   const workflowAvailable = useWorkflowAvailable(projectId);
   const secretary = useSecretaryConversation(projectId);
+  const secretaryPluginIds = useSecretaryPluginIds();
   const secretaryName = useSecretaryName();
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -770,11 +788,10 @@ function Watermark(props: IWatermarkPanelProps) {
               : undefined
           }
           secretaryLabel={secretaryName}
-          onNewPluginView={
-            secretary
-              ? undefined
-              : (view) => addPluginViewPanel(props.containerApi, conversationId, projectId, view)
+          onNewPluginView={(view) =>
+            addPluginViewPanel(props.containerApi, conversationId, projectId, view)
           }
+          secretaryPluginIds={secretary ? secretaryPluginIds : undefined}
         />
       </div>
     </div>
@@ -835,11 +852,21 @@ function ConversationDock({
 }) {
   const isDark = useIsDark();
   const workflowAvailable = useWorkflowAvailable(projectId);
+  const secretary = useSecretaryConversation(projectId);
+  const secretaryPluginIds = useSecretaryPluginIds();
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
   // 关掉工具时收起已开的工作流 tab；恢复布局带回来的也一并收掉
   useEffect(() => {
     if (!workflowAvailable) dockApi?.getPanel('workflow')?.api.close();
   }, [dockApi, workflowAvailable]);
+  // 秘书设置里取消勾选插件：收起该插件已开的页面；恢复布局带回来的也一并收掉
+  useEffect(() => {
+    if (!dockApi || !secretary) return;
+    const ids = dockApi.panels.map((panel) => panel.id);
+    for (const id of secretaryPluginPanelsToClose(ids, secretaryPluginIds)) {
+      dockApi.getPanel(id)?.api.close();
+    }
+  }, [dockApi, secretary, secretaryPluginIds]);
 
   const onReady = (event: DockviewReadyEvent) => {
     bindSidePanelDock(conversationId, event.api);
