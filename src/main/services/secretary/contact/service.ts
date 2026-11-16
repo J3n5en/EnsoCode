@@ -16,8 +16,10 @@ import {
   unknownCommandText,
 } from '@shared/secretary/commands';
 import {
+  type AskSettledOutcome,
   askCallbackData,
   askCallbackToast,
+  askSettledLine,
   bindCodeUsable,
   bindDeepLink,
   botTokenHint,
@@ -70,7 +72,7 @@ import {
   markdownToTelegramChunks,
   packTelegramHtml,
 } from '@shared/secretary/telegramHtml';
-import type { AskRequestInfo } from '@shared/types/agent';
+import type { AskAnswerBy, AskRequestInfo } from '@shared/types/agent';
 import type {
   SecretaryAuditEntry,
   SecretaryContactState,
@@ -144,6 +146,12 @@ export interface ContactScheduleFiredInput {
   text: string;
 }
 
+/** 提问在应用侧怎么收的尾：谁答的、答了什么；缺省 by 表示取消/作废 */
+export interface AskResolvedInfo {
+  by?: AskAnswerBy;
+  answer?: string;
+}
+
 /** 回传宿主转发给手机的那几件事；TelegramContactService 就是它的实现 */
 export interface SecretaryContactPort {
   onMilestone(input: ContactMilestoneInput): void;
@@ -151,7 +159,8 @@ export interface SecretaryContactPort {
   onScheduleFired(input: ContactScheduleFiredInput): void;
   onRelayAsk(input: ContactRelayAskInput): void;
   onAskRequest(conversationId: string, ask: AskRequestInfo): void;
-  onAskResolved(conversationId: string, requestId: string): void;
+  /** 提问收尾（应用里答了、超时、作废）：手机那条消息跟着标成已回答或已过期 */
+  onAskResolved(conversationId: string, requestId: string, resolution?: AskResolvedInfo): void;
   /** 审批在应用里收尾：那条提示的按钮跟着失效 */
   onApprovalResolved(conversationId: string): void;
   /** 回合开始：这一轮的回复会发到手机时点亮「正在输入…」 */
@@ -227,6 +236,14 @@ interface PendingAsk {
   requestId: string;
   options: string[];
   at: number;
+  /** 发出去的那条消息：收尾时原地换成「已回答」，按钮一起清掉 */
+  chatId: number;
+  /** 原问题正文（未转义）：收尾只往后追加一行，问题留着回看 */
+  text: string;
+  messageId: number | null;
+  /** 这条消息发出去没有：改消息要等它拿到 messageId */
+  ready: Promise<void>;
+  settled: boolean;
 }
 
 const MAX_PENDING_ASKS = 8;
@@ -278,6 +295,13 @@ function errorCode(error: unknown): ContactError {
   return 'api';
 }
 
+/** 应用侧收尾的来路：超时/作废算过期，真人答过算「已在应用里回答」 */
+function askOutcomeFromResolution(resolution?: AskResolvedInfo): AskSettledOutcome {
+  if (resolution?.by === 'timeout' || resolution?.by === undefined) return { kind: 'expired' };
+  if (resolution.by === 'user') return { kind: 'app' };
+  return resolution.answer ? { kind: 'answered', answer: resolution.answer } : { kind: 'app' };
+}
+
 /**
  * Telegram 联系方式：绑定向导、长轮询、出站里程碑、入站消息与提问按钮。
  * 只认绑定的那个 chat；确认卡按开关决定能不能在手机上确认，审批一律不在手机上处理。
@@ -286,6 +310,8 @@ export class TelegramContactService implements SecretaryContactPort {
   private readonly poller: ContactPoller;
   private readonly apis = new Map<string, TelegramApi>();
   private readonly asks: PendingAsk[] = [];
+  /** 已经收尾的提问槽位：旧按钮再点一次只回「已经回答过了」 */
+  private readonly settledAsks = new Map<number, AskSettledOutcome['kind']>();
   /** 卡片 id → 已经发出去的那条消息：按钮回调只带 id，重启后照样认得出是哪张卡 */
   private readonly cardsById = new Map<string, TrackedCard>();
   /** 提案 id → 已经提示过的那条消息：同一张卡只推一次，处理掉再清按钮 */
@@ -506,6 +532,7 @@ export class TelegramContactService implements SecretaryContactPort {
     this.store.saveUnbound();
     await this.clearCommands(chatId);
     this.asks.length = 0;
+    this.settledAsks.clear();
     this.cardsById.clear();
     this.cardMessages.clear();
     this.approvalCards.clear();
@@ -528,6 +555,7 @@ export class TelegramContactService implements SecretaryContactPort {
     await this.clearCommands(chatId);
     await this.store.saveForgotten();
     this.asks.length = 0;
+    this.settledAsks.clear();
     this.cardsById.clear();
     this.cardMessages.clear();
     this.approvalCards.clear();
@@ -660,19 +688,28 @@ export class TelegramContactService implements SecretaryContactPort {
     if (!file.chat) return;
     const options = (ask.options ?? []).filter((option) => typeof option === 'string');
     const slot = this.slot++;
+    const text = formatAskMessage(this.ports.lang(), {
+      question: ask.question,
+      ...(options.length > 0 ? { options } : {}),
+    });
     const pending: PendingAsk = {
       slot,
       conversationId,
       requestId: ask.requestId,
       options,
       at: this.ports.now(),
+      chatId: file.chat.id,
+      text,
+      messageId: null,
+      ready: Promise.resolve(),
+      settled: false,
     };
     this.asks.push(pending);
-    while (this.asks.length > MAX_PENDING_ASKS) this.asks.shift();
-    const text = formatAskMessage(this.ports.lang(), {
-      question: ask.question,
-      ...(options.length > 0 ? { options } : {}),
-    });
+    while (this.asks.length > MAX_PENDING_ASKS) {
+      // 挤出去的提问也收尾：手机上那条标成已过期，按钮不能一直留着
+      const dropped = this.asks.shift();
+      if (dropped) void this.settleAsk(dropped, { kind: 'expired' });
+    }
     const replyMarkup =
       options.length > 0
         ? {
@@ -683,17 +720,79 @@ export class TelegramContactService implements SecretaryContactPort {
               ]),
           }
         : undefined;
-    void this.send(file.chat.id, text, { replyMarkup }).then((sent) => {
+    pending.ready = this.send(file.chat.id, text, { replyMarkup }).then((sent) => {
       this.audit('contact_ask_forward', sent.ok, sent.ok ? undefined : sent.error);
+      if (sent.ok) pending.messageId = sent.messageId ?? null;
     });
   }
 
   /** 提问收尾（应用里先答了、超时、取消）：手机上的按钮随之失效 */
-  onAskResolved(conversationId: string, requestId: string): void {
+  onAskResolved(conversationId: string, requestId: string, resolution?: AskResolvedInfo): void {
     const index = this.asks.findIndex(
       (ask) => ask.conversationId === conversationId && ask.requestId === requestId
     );
-    if (index >= 0) this.asks.splice(index, 1);
+    if (index < 0) return;
+    const [pending] = this.asks.splice(index, 1);
+    if (pending) void this.settleAsk(pending, askOutcomeFromResolution(resolution));
+  }
+
+  /**
+   * 提问收尾：手机那条消息原地换成「已回答 / 已过期」，按钮清掉。
+   * 消息太旧或被删就静默降级，只记一笔审计——不能因为改不动一条旧消息打断回答。
+   */
+  private async settleAsk(pending: PendingAsk, outcome: AskSettledOutcome): Promise<void> {
+    if (pending.settled) return;
+    pending.settled = true;
+    this.rememberSettledAsk(pending.slot, outcome.kind);
+    await pending.ready;
+    const token = this.store.token();
+    if (!token || pending.messageId === null) return;
+    const api = this.apiFor(token);
+    const replyMarkup = { inline_keyboard: [] };
+    try {
+      await api.editMessageText({
+        chatId: pending.chatId,
+        messageId: pending.messageId,
+        // 原问题整条留着，只在后面追加一行；正文按 HTML 转义，不解析
+        text: escapeHtml(`${pending.text}\n\n${askSettledLine(this.ports.lang(), outcome)}`),
+        replyMarkup,
+        parseMode: 'HTML',
+      });
+      this.audit('contact_ask_settled', true, outcome.kind);
+    } catch (error) {
+      this.audit('contact_ask_settled', false, `${outcome.kind} ${errorCode(error)}`);
+      // 正文改不动至少把按钮清掉：手机上不能再点第二次
+      try {
+        await api.editMessageReplyMarkup({
+          chatId: pending.chatId,
+          messageId: pending.messageId,
+          replyMarkup,
+        });
+        this.audit('contact_ask_settled', true, `${outcome.kind} markup-only`);
+      } catch {
+        // 消息被删或太旧：静默降级，下一次也没有可改的东西
+      }
+    }
+  }
+
+  /** 已经收尾的提问：旧按钮再点一次只回「已经回答过了」，不重复触发 */
+  private rememberSettledAsk(slot: number, kind: AskSettledOutcome['kind']): void {
+    this.settledAsks.set(slot, kind);
+    while (this.settledAsks.size > MAX_PENDING_ASKS * 4) {
+      const oldest = this.settledAsks.keys().next().value;
+      if (oldest === undefined) break;
+      this.settledAsks.delete(oldest);
+    }
+  }
+
+  /** 旧按钮的提示：答过的说「已经回答过了」，过期/作废的说「已经结束了」 */
+  private staleAskToast(slot: number | undefined): string {
+    const lang = this.ports.lang();
+    const kind = slot === undefined ? undefined : this.settledAsks.get(slot);
+    if (kind === 'answered' || kind === 'app') {
+      return lang === 'zh' ? '已经回答过了' : 'Already answered';
+    }
+    return lang === 'zh' ? '这条提问已经结束了' : 'Already answered';
   }
 
   /**
@@ -1533,10 +1632,7 @@ export class TelegramContactService implements SecretaryContactPort {
     const parsed = query.data ? parseAskCallbackData(query.data) : null;
     const pending = parsed ? this.asks.find((ask) => ask.slot === parsed.slot) : undefined;
     if (!parsed || !pending) {
-      await this.answerCallback(
-        query.id,
-        this.ports.lang() === 'zh' ? '这条提问已经结束了' : 'Already answered'
-      );
+      await this.answerCallback(query.id, this.staleAskToast(parsed?.slot));
       return;
     }
     const option = pending.options[parsed.index];
@@ -1548,19 +1644,21 @@ export class TelegramContactService implements SecretaryContactPort {
       return;
     }
     const answered = this.ports.answerAsk(pending.conversationId, pending.requestId, option);
+    this.asks.splice(this.asks.indexOf(pending), 1);
     if (answered.ok) {
-      this.asks.splice(this.asks.indexOf(pending), 1);
       this.audit('contact_ask_answer', true, `ask=${pending.slot}`);
       await this.answerCallback(query.id, askCallbackToast(this.ports.lang(), option));
+      // 原消息立刻换成「已回答」并清掉按钮，手机上不会看着像没答过
+      await this.settleAsk(pending, { kind: 'answered', answer: option });
       return;
     }
     // 应用里先答了：手机这边自动失效
-    this.asks.splice(this.asks.indexOf(pending), 1);
     this.audit('contact_ask_answer', false, 'already-answered');
     await this.answerCallback(
       query.id,
       this.ports.lang() === 'zh' ? '已在应用里回答过了' : 'Already answered in the app'
     );
+    await this.settleAsk(pending, { kind: 'app' });
   }
 
   /**
@@ -1691,6 +1789,11 @@ export class TelegramContactService implements SecretaryContactPort {
       'contact_ask_answer',
       answered.ok,
       answered.ok ? describe(text) : (answered.error ?? 'already-answered')
+    );
+    // 原消息跟着标成已回答：再回看时看得出这条已经答过
+    void this.settleAsk(
+      pending,
+      answered.ok ? { kind: 'answered', answer: text } : { kind: 'app' }
     );
     const file = this.store.file();
     if (!file.chat) return;

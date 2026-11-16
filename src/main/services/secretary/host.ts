@@ -734,7 +734,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       return;
     }
     if (event.type === 'ask-resolved') {
-      contact.onAskResolved(conversationId, event.requestId);
+      // by/answer 决定手机那条提示写成「已回答」还是「已过期」
+      contact.onAskResolved(conversationId, event.requestId, {
+        ...(event.by ? { by: event.by } : {}),
+        ...(event.answer ? { answer: event.answer } : {}),
+      });
       return;
     }
     if (event.type === 'approval-request') {
