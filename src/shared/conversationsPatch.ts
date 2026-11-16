@@ -50,6 +50,12 @@ export function isEmptyConversationsPatch(patch: ConversationsPatch): boolean {
   return Object.keys(patch.upserts).length === 0 && patch.removes.length === 0 && !patch.order;
 }
 
+/** persist blob 的 conversations 与 order 同时为空（含缺 key / 非对象） */
+export function isEmptyConversationsStore(value: unknown): boolean {
+  const { conversations, order } = sliceOf(value);
+  return Object.keys(conversations).length === 0 && order.length === 0;
+}
+
 export function diffConversations(previous: unknown, next: unknown): ConversationsPatch {
   const before = sliceOf(previous);
   const after = sliceOf(next);

@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { app, ipcMain, type RendererContents } from '@platform';
-import { diffConversations } from '@shared/conversationsPatch';
+import { diffConversations, isEmptyConversationsStore } from '@shared/conversationsPatch';
 import {
   type ContextMenuOpen,
   type FileOpenRule,
@@ -434,11 +434,18 @@ function settingsState(data: Record<string, unknown> | null): Record<string, unk
 function destructiveFields(prev: Record<string, unknown> | null, next: Record<string, unknown>) {
   const before = settingsState(prev);
   const after = settingsState(next);
-  return PROTECTED_FIELDS.filter((field) => {
+  const fields: string[] = PROTECTED_FIELDS.filter((field) => {
     const was = before[field];
     const now = after[field];
     return Array.isArray(was) && was.length > 0 && (!Array.isArray(now) || now.length === 0);
   });
+  if (
+    !isEmptyConversationsStore(prev?.[CONVERSATIONS_KEY]) &&
+    isEmptyConversationsStore(next[CONVERSATIONS_KEY])
+  ) {
+    fields.push(CONVERSATIONS_KEY);
+  }
+  return fields;
 }
 
 /** 快照当前磁盘文件为 settings.backup-<ts>.json，只留最近 MAX_BACKUPS 份。失败不影响写入。 */

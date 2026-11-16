@@ -186,4 +186,39 @@ describe('会话账本', () => {
     sync.mergeConversationsWrite(desktop, pinned, disk, 1);
     expect(seen).toHaveLength(1);
   });
+
+  it('多 renderer 时空写入不清空磁盘会话表', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const desktop = peer();
+    const browser = peer();
+    peers.local = desktop;
+    peers.remote = [browser];
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    sync.noteConversationsRead(browser, disk);
+
+    const merged = sync.mergeConversationsWrite(browser, disk, blob({}, []), 0) as Blob;
+
+    expect(merged.state.conversations).toEqual({ a: row('a') });
+    expect(merged.state.order).toEqual(['a']);
+    expect(desktop.sent).toEqual([]);
+    expect(String(warn.mock.calls[0]?.[0])).toContain('拒绝整表清空写入');
+    warn.mockRestore();
+  });
+
+  it('空基线被非空值纠正后不再按空表 diff', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.noteConversationsRead(desktop, blob({}, []));
+    sync.noteConversationsRead(desktop, disk);
+
+    const seen: unknown[] = [];
+    const off = sync.onConversationsMerged((patch) => seen.push(patch));
+    const merged = sync.mergeConversationsWrite(desktop, disk, disk, 0) as Blob;
+    off();
+
+    expect(merged.state.conversations).toEqual({ a: row('a') });
+    expect(seen).toHaveLength(0);
+  });
 });

@@ -3,6 +3,7 @@ import {
   type ConversationsPatch,
   diffConversations,
   isEmptyConversationsPatch,
+  isEmptyConversationsStore,
   type SequencedConversationsPatch,
 } from '@shared/conversationsPatch';
 import { IPC_CHANNELS } from '@shared/types';
@@ -58,9 +59,12 @@ function track(sender: SenderLike): void {
   sender.once('destroyed', () => ledgers.delete(sender.id));
 }
 
-/** 只在该 sender 还没有账本时建账：settings store 的重读频繁，不能重置会话账本 */
+/** 非空基线锁定（settings 重读不能重置账本）；空基线可被后续非空读纠正 */
 export function noteConversationsRead(sender: SenderLike, value: unknown): void {
-  if (ledgers.has(sender.id)) return;
+  const existing = ledgers.get(sender.id);
+  if (existing && (!isEmptyConversationsStore(existing.base) || isEmptyConversationsStore(value))) {
+    return;
+  }
   track(sender);
   ledgers.set(sender.id, { base: value, pending: [] });
 }
@@ -97,6 +101,10 @@ export function mergeConversationsWrite(
   ackSeq = 0
 ): unknown {
   track(sender);
+  if (isEmptyConversationsStore(value) && !isEmptyConversationsStore(current)) {
+    console.warn('[conversations] 拒绝整表清空写入');
+    return current;
+  }
   if (value === undefined) {
     ledgers.set(sender.id, { base: undefined, pending: [] });
     return undefined;
