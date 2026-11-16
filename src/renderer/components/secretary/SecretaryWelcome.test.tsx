@@ -81,6 +81,14 @@ describe('SecretaryWelcome', () => {
     expect(button('Use all defaults and start')).toBeDefined();
   });
 
+  it('引导层盖满聊天区并自己铺实底：透明背景下面板色 alpha 为 0，不能靠 bg-background', () => {
+    const overlay = container.querySelector('[data-enso="secretary-welcome"]') as HTMLElement;
+    expect(overlay.className).toContain('absolute');
+    expect(overlay.className).toContain('inset-0');
+    // 实底取原始令牌 --background；bg-background 在 html.bg-image-enabled 下被重映射成全透
+    expect(overlay.getAttribute('style')).toContain('var(--background)');
+  });
+
   it('选「聊着设置」：建秘书会话并发引导语，然后让出主区域', async () => {
     await click('Set up by chatting');
     expect(h.newSecretaryConversation).toHaveBeenCalledWith({ greeting: true });
