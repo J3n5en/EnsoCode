@@ -465,8 +465,10 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }));
     }
     // 手机上读的一条：项目 · 会话标题，加一句正文与回应用的深链。
-    // 与系统通知同一个 notify 口径，联系方式服务里再兜一次
-    if (!shouldForwardMilestone(profile.notify, kind)) return;
+    // 与系统通知同一个 notify 口径；手机关注中的任务是 J 哥亲手要的答案，一定要回推
+    if (!shouldForwardMilestone(profile.notify, kind)) {
+      if (kind === 'turn-ended' || !ports.contact?.follows?.(extra.conversationId)) return;
+    }
     ports.contact?.onMilestone({
       kind,
       title: [extra.projectName, extra.title].filter(Boolean).join(' · ') || extra.conversationId,
@@ -751,7 +753,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       return;
     }
     const text = event.digest?.assistantText?.trim();
-    if (text) contact.onTurnReply(conversationId, text);
+    if (!text) return;
+    // 系统回传注入的回合：手机发起的任务链上，这一轮也算「回给手机」
+    const delivery = ports.file().inflight?.secretaryConversationId === conversationId;
+    contact.onTurnReply(conversationId, text, {
+      ...(delivery ? { delivery: true } : {}),
+      ...(event.turnId ? { turnId: event.turnId } : {}),
+    });
   }
 
   /** 这一轮正在处理的回传批次有几条：静默摘要用；没有在途批次就是 0 */

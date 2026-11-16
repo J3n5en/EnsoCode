@@ -39,6 +39,7 @@ import {
   formatCardWaitingMessage,
   formatFollowedScheduleMessage,
   formatMilestoneMessage,
+  formatNeedsAppConfirmLine,
   formatSilentTurnLine,
   formatTestMessage,
   formatWelcomeMessage,
@@ -157,7 +158,17 @@ export interface SecretaryContactPort {
   onTurnStart(conversationId: string): void;
   /** 回合收尾（完成 / 出错 / 被停）：立刻停掉续发 */
   onTurnEnd(conversationId: string): void;
-  onTurnReply(conversationId: string, text: string): void;
+  /**
+   * 秘书这一轮的正文。delivery 表示这一轮是系统回传注入的（派出会话的结果），
+   * 不是用户亲手发的；turnId 用来保证同一轮只回推一次。
+   */
+  onTurnReply(
+    conversationId: string,
+    text: string,
+    options?: { delivery?: boolean; turnId?: string }
+  ): void;
+  /** 手机关注中的任务：结果一定要回推，不受 notify 降噪影响 */
+  follows?(conversationId: string): boolean;
   /** 静默回合：/sync 打开时只发一行摘要，正文不发 */
   onTurnSilent(conversationId: string, updates: number): void;
   onCardWaiting(input: ContactCardWaitingInput): void;
@@ -285,6 +296,14 @@ export class TelegramContactService implements SecretaryContactPort {
   /** 从手机发来消息后，等这一轮的正文再回发手机 */
   private readonly awaitingReply = new Set<string>();
   /**
+   * 手机发起的那条任务链：从手机下发开始，链上每一轮的正文都要回推同一个 chat，
+   * 包括派出会话的结果回传注入的那几轮。链上还有关注中的任务就一直留着，
+   * 都收口了才断——不然应用里自己聊的回合会被误推到手机。
+   */
+  private readonly phoneChain = new Set<string>();
+  /** 会话 id → 最近一次回推的轮次：事件重放、镜像与回发撞车时只推一次 */
+  private readonly relayed = new Map<string, { turnId?: string; text: string }>();
+  /**
    * 手机上正在确认卡片：确认出来的会话也算手机发起的任务，
    * 这一小段时间里派生的东西同样记进关注列表。
    */
@@ -357,10 +376,46 @@ export class TelegramContactService implements SecretaryContactPort {
   phoneTurnChat(conversationId: string): number | null {
     const chat = this.store.file().chat;
     if (!chat) return null;
-    if (this.awaitingReply.has(conversationId) || this.phoneOrigin.has(conversationId)) {
+    if (
+      this.awaitingReply.has(conversationId) ||
+      this.phoneOrigin.has(conversationId) ||
+      this.phoneChain.has(conversationId)
+    ) {
       return chat.id;
     }
     return null;
+  }
+
+  /** 手机关注中的任务：结果一定要回推，不受 notify 降噪影响 */
+  follows(conversationId: string): boolean {
+    return this.ports.following?.find('session', conversationId) !== undefined;
+  }
+
+  /** 链上的任务都收口了就把这条链断掉：之后的回合不再回推手机 */
+  private prunePhoneChain(conversationId: string): void {
+    if (this.followingList().some((item) => item.secretaryConversationId === conversationId)) {
+      return;
+    }
+    this.phoneChain.delete(conversationId);
+  }
+
+  /** 同一轮只回推一次：有 turnId 认 turnId，没有就认正文 */
+  private alreadyRelayed(conversationId: string, text: string, turnId?: string): boolean {
+    const last = this.relayed.get(conversationId);
+    const same =
+      last !== undefined && (turnId !== undefined ? last.turnId === turnId : last.text === text);
+    if (same) return true;
+    this.relayed.set(conversationId, { ...(turnId ? { turnId } : {}), text });
+    return false;
+  }
+
+  /** 这个会话上还有手机上处理不了的卡或审批 */
+  private needsAppConfirm(conversationId: string): boolean {
+    if (this.approvalCards.has(conversationId)) return true;
+    for (const card of this.cardsById.values()) {
+      if (!card.settled && card.conversationId === conversationId) return true;
+    }
+    return false;
   }
 
   private followingList(): FollowedTask[] {
@@ -455,6 +510,8 @@ export class TelegramContactService implements SecretaryContactPort {
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
+    this.phoneChain.clear();
+    this.relayed.clear();
     this.phoneOrigin.clear();
     this.clearFollowing('contact_unbind');
     this.stopTyping();
@@ -475,6 +532,8 @@ export class TelegramContactService implements SecretaryContactPort {
     this.cardMessages.clear();
     this.approvalCards.clear();
     this.awaitingReply.clear();
+    this.phoneChain.clear();
+    this.relayed.clear();
     this.phoneOrigin.clear();
     this.clearFollowing('contact_forget_bot');
     this.stopTyping();
@@ -529,10 +588,12 @@ export class TelegramContactService implements SecretaryContactPort {
    */
   onMilestone(input: ContactMilestoneInput): void {
     const mode = this.ports.notifyMode();
-    if (!mode || !shouldForwardMilestone(mode, input.kind)) return;
     const file = this.store.file();
     if (!file.chat) return;
     const follow = this.ports.following?.find('session', input.conversationId);
+    // 手机关注中的任务是 J 哥亲手要的答案：notify 降噪不挡它，一轮结束仍然不发
+    if (input.kind === 'turn-ended') return;
+    if (!follow && (!mode || !shouldForwardMilestone(mode, input.kind))) return;
     const link = conversationDeepLink(input.conversationId);
     // Telegram 只认 http(s)/tg 的 url 按钮；enso:// 只能当等宽文本发出去让人复制
     const asButton = telegramUrlButtonSupported(link);
@@ -656,19 +717,31 @@ export class TelegramContactService implements SecretaryContactPort {
   }
 
   /**
-   * 秘书这一轮的正文。用户刚从手机发来的那一轮本来就回发，只发一次；
-   * 其余回合只有 /sync 打开时才镜像，关闭时只发里程碑。
+   * 秘书这一轮的正文。三种来源都回推同一个 chat：用户刚从手机发来的那一轮、
+   * 手机发起任务链上系统回传注入的回合、/sync 打开时的镜像。
+   * 同一轮只推一次；链上的任务都收口后这条链就断掉，应用里自己聊的不再误推。
    */
-  onTurnReply(conversationId: string, text: string): void {
+  onTurnReply(
+    conversationId: string,
+    text: string,
+    options?: { delivery?: boolean; turnId?: string }
+  ): void {
     this.onTurnEnd(conversationId);
     const fromPhone = this.awaitingReply.delete(conversationId);
+    const chained = options?.delivery === true && this.phoneChain.has(conversationId);
+    this.prunePhoneChain(conversationId);
     const file = this.store.file();
     const body = text.trim();
     if (!file.chat || !body) return;
-    if (!fromPhone && !file.syncMirror) return;
-    void this.send(file.chat.id, body).then((sent) => {
+    if (!fromPhone && !chained && !file.syncMirror) return;
+    if (this.alreadyRelayed(conversationId, body, options?.turnId)) return;
+    // 手机上看不到确认卡也处理不了审批：同一条里点明还得回应用点一下
+    const payload = this.needsAppConfirm(conversationId)
+      ? `${body}\n\n${formatNeedsAppConfirmLine(this.ports.lang())}`
+      : body;
+    void this.send(file.chat.id, payload).then((sent) => {
       this.audit(
-        fromPhone ? 'contact_reply' : 'contact_mirror',
+        fromPhone || chained ? 'contact_reply' : 'contact_mirror',
         sent.ok,
         sent.ok ? undefined : sent.error
       );
@@ -680,7 +753,9 @@ export class TelegramContactService implements SecretaryContactPort {
     // 静默就是不打扰：先收掉「正在输入…」，摘要发完也不再续
     this.onTurnEnd(conversationId);
     // 手机发起的回合一定会回话，静默只可能来自系统回传
-    if (this.awaitingReply.delete(conversationId)) return;
+    const fromPhone = this.awaitingReply.delete(conversationId);
+    this.prunePhoneChain(conversationId);
+    if (fromPhone) return;
     const file = this.store.file();
     if (!file.chat || !file.syncMirror) return;
     void this.send(file.chat.id, formatSilentTurnLine(this.ports.lang(), updates)).then((sent) => {
@@ -1416,6 +1491,8 @@ export class TelegramContactService implements SecretaryContactPort {
       text,
     });
     this.awaitingReply.add(conversationId);
+    // 这条消息发起了一条任务链：链上每一轮的正文都要回推这个 chat
+    this.phoneChain.add(conversationId);
     const delivered = await this.ports.deliver(conversationId, body);
     this.audit(
       'contact_inbound',
@@ -1423,7 +1500,10 @@ export class TelegramContactService implements SecretaryContactPort {
       delivered.ok ? describe(text) : (delivered.error ?? 'deliver-failed'),
       conversationId
     );
-    if (!delivered.ok) this.awaitingReply.delete(conversationId);
+    if (!delivered.ok) {
+      this.awaitingReply.delete(conversationId);
+      this.phoneChain.delete(conversationId);
+    }
   }
 
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
