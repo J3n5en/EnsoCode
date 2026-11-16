@@ -1,11 +1,13 @@
 import { applyConversationsPatch, diffConversations } from '@shared/conversationsPatch';
+import { IPC_CHANNELS } from '@shared/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface FakePeer {
   id: number;
   kind: 'main';
   sent: Array<Record<string, unknown>>;
-  send: (channel: string, payload: unknown) => void;
+  signals: string[];
+  send: (channel: string, payload?: unknown) => void;
 }
 
 const peers = vi.hoisted(() => ({ local: null as unknown, remote: [] as unknown[] }));
@@ -16,11 +18,17 @@ vi.mock('./senders', () => ({ remoteSenders: () => peers.remote }));
 let nextId = 1;
 function peer(): FakePeer {
   const sent: Array<Record<string, unknown>> = [];
+  const signals: string[] = [];
   return {
     id: nextId++,
     kind: 'main',
     sent,
-    send: (_channel, payload) => sent.push(payload as Record<string, unknown>),
+    signals,
+    send: (channel, payload) => {
+      if (channel === IPC_CHANNELS.CONVERSATIONS_PATCH)
+        sent.push(payload as Record<string, unknown>);
+      else signals.push(channel);
+    },
   };
 }
 
@@ -185,5 +193,128 @@ describe('会话账本', () => {
     off();
     sync.mergeConversationsWrite(desktop, pinned, disk, 1);
     expect(seen).toHaveLength(1);
+  });
+
+  it('多 renderer 时空写入不清空磁盘会话表，并要求写回方重读', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const desktop = peer();
+    const browser = peer();
+    peers.local = desktop;
+    peers.remote = [browser];
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+    sync.noteConversationsRead(browser, disk);
+
+    const merged = sync.mergeConversationsWrite(browser, disk, blob({}, []), 0);
+
+    expect(merged).toBe(disk);
+    expect(desktop.sent).toEqual([]);
+    expect(desktop.signals).toEqual([]);
+    expect(browser.signals).toEqual([IPC_CHANNELS.CONVERSATIONS_RESYNC]);
+    expect(String(warn.mock.calls[0]?.[0])).toContain('拒绝整表删除写入');
+    warn.mockRestore();
+  });
+
+  it('P2：空表加 1 行的写回删光磁盘其余会话时同样拒收', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const desktop = peer();
+    const browser = peer();
+    peers.local = desktop;
+    peers.remote = [browser];
+    const disk = blob({ a: row('a'), b: row('b'), c: row('c') }, ['a', 'b', 'c']);
+    sync.readConversationsFor(desktop, disk);
+    sync.readConversationsFor(browser, disk);
+    const seen: unknown[] = [];
+    const off = sync.onConversationsMerged((patch) => seen.push(patch));
+
+    const merged = sync.mergeConversationsWrite(browser, disk, blob({ x: row('x') }, ['x']), 0);
+    off();
+
+    expect(merged).toBe(disk);
+    expect(desktop.sent).toEqual([]);
+    expect(seen).toEqual([]);
+    expect(browser.signals).toEqual([IPC_CHANNELS.CONVERSATIONS_RESYNC]);
+
+    // 重读后基线是磁盘值，同一行再写回只追加 x
+    sync.readConversationsFor(browser, disk);
+    const resynced = blob({ a: row('a'), b: row('b'), c: row('c'), x: row('x') }, [
+      'x',
+      'a',
+      'b',
+      'c',
+    ]);
+    const after = sync.mergeConversationsWrite(browser, disk, resynced, 0) as Blob;
+    expect(Object.keys(after.state.conversations).sort()).toEqual(['a', 'b', 'c', 'x']);
+    warn.mockRestore();
+  });
+
+  it('结构不合法的写回拒收', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+
+    expect(sync.mergeConversationsWrite(desktop, disk, { version: 3 }, 0)).toBe(disk);
+    expect(sync.mergeConversationsWrite(desktop, disk, 'oops', 0)).toBe(disk);
+    expect(sync.mergeConversationsWrite(desktop, disk, { state: { conversations: {} } }, 0)).toBe(
+      disk
+    );
+    expect(desktop.signals).toHaveLength(3);
+    warn.mockRestore();
+  });
+
+  it('只删部分会话的写回照常合并', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a'), b: row('b') }, ['a', 'b']);
+    sync.readConversationsFor(desktop, disk);
+
+    const merged = sync.mergeConversationsWrite(desktop, disk, blob({ b: row('b') }, ['b']), 0);
+    expect((merged as Blob).state.order).toEqual(['b']);
+    expect(desktop.signals).toEqual([]);
+  });
+
+  it('P1：Main 先按 id 删掉最后一个会话，随后的空表写回落盘为空且无幽灵行', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+
+    const removed = sync.applyMainConversationsPatch(disk, { upserts: {}, removes: ['a'] });
+    const merged = sync.mergeConversationsWrite(desktop, removed, blob({}, []), 0) as Blob;
+
+    expect(merged.state.conversations).toEqual({});
+    expect(merged.state.order).toEqual([]);
+    expect(desktop.signals).toEqual([]);
+  });
+
+  it('P3：空基线下 Main 插入未确认、settings 重读后写回，两行都保留', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const empty = blob({}, []);
+    sync.noteConversationsRead(desktop, empty);
+    const inserted = sync.applyMainConversationsPatch(empty, insert('m', ['m']));
+
+    sync.noteConversationsRead(desktop, inserted);
+    const merged = sync.mergeConversationsWrite(
+      desktop,
+      inserted,
+      blob({ r: row('r') }, ['r']),
+      0
+    ) as Blob;
+
+    expect(merged.state.order).toEqual(['m', 'r']);
+    expect(Object.keys(merged.state.conversations).sort()).toEqual(['m', 'r']);
+  });
+
+  it('写入 undefined 删除整个键', () => {
+    const desktop = peer();
+    peers.local = desktop;
+    const disk = blob({ a: row('a') }, ['a']);
+    sync.readConversationsFor(desktop, disk);
+
+    expect(sync.mergeConversationsWrite(desktop, disk, undefined, 0)).toBeUndefined();
+    expect(desktop.signals).toEqual([]);
   });
 });

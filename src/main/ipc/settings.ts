@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { app, ipcMain, type RendererContents } from '@platform';
-import { diffConversations } from '@shared/conversationsPatch';
+import { diffConversations, isEmptyConversationsStore } from '@shared/conversationsPatch';
 import {
   type ContextMenuOpen,
   type FileOpenRule,
@@ -434,11 +434,18 @@ function settingsState(data: Record<string, unknown> | null): Record<string, unk
 function destructiveFields(prev: Record<string, unknown> | null, next: Record<string, unknown>) {
   const before = settingsState(prev);
   const after = settingsState(next);
-  return PROTECTED_FIELDS.filter((field) => {
+  const fields: string[] = PROTECTED_FIELDS.filter((field) => {
     const was = before[field];
     const now = after[field];
     return Array.isArray(was) && was.length > 0 && (!Array.isArray(now) || now.length === 0);
   });
+  if (
+    !isEmptyConversationsStore(prev?.[CONVERSATIONS_KEY]) &&
+    isEmptyConversationsStore(next[CONVERSATIONS_KEY])
+  ) {
+    fields.push(CONVERSATIONS_KEY);
+  }
+  return fields;
 }
 
 /** 快照当前磁盘文件为 settings.backup-<ts>.json，只留最近 MAX_BACKUPS 份。失败不影响写入。 */
@@ -1002,6 +1009,17 @@ export function registerSettingsHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_READ, async (event) => {
     const data = readSettings() ?? {};
     return readConversationsFor(event.sender, data[CONVERSATIONS_KEY]);
+  });
+
+  // 用户明确删除：先在 Main 删行并推补丁，随后该窗口的空表写回已无可删，不触发整表守卫
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_REMOVE, async (_event, ids: unknown) => {
+    if (!Array.isArray(ids)) return false;
+    const targets = new Set(ids.filter((id): id is string => typeof id === 'string'));
+    if (targets.size === 0) return true;
+    return patchConversationsState((state) => {
+      for (const id of targets) delete state.conversations[id];
+      state.order = state.order.filter((id) => !targets.has(id));
+    });
   });
 
   // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖

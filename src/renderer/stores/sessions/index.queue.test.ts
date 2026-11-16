@@ -9,6 +9,9 @@ import {
   installSessionGlobals,
   loadSessionModules,
   onAgentEvent,
+  onConversationsResync,
+  readConversations,
+  removeConversations,
   resetSessionHarness,
   secretaryGoalAction,
   sessionsModule,
@@ -121,11 +124,37 @@ describe('typed Agent child projection', () => {
     }));
     agentRelease.mockClear();
     agentAbort.mockClear();
+    removeConversations.mockClear();
 
     sessionsModule.useSessionsStore.getState().removeConversation('parent');
 
     expect(agentRelease).toHaveBeenCalledWith('parent');
     expect(agentAbort).not.toHaveBeenCalled();
+    expect(removeConversations).toHaveBeenCalledWith(['parent']);
+    expect(sessionsModule.useSessionsStore.getState().conversations.parent).toBeUndefined();
+  });
+
+  it('写回被拒后重读磁盘，补回磁盘行且保留本地新行', async () => {
+    const store = sessionsModule.useSessionsStore;
+    const local = store.getState().conversations.parent;
+    expect(local).toBeDefined();
+    readConversations.mockResolvedValueOnce({
+      value: {
+        state: {
+          conversations: { disk: { id: 'disk', projectId: 'project', title: 'Disk' } },
+          order: ['disk'],
+        },
+        version: 3,
+      },
+      seq: 0,
+    });
+
+    onConversationsResync?.();
+    await vi.waitFor(() => expect(store.getState().conversations.disk).toBeDefined());
+
+    expect(store.getState().conversations.disk).toMatchObject({ title: 'Disk', messages: [] });
+    expect(store.getState().conversations.parent).toBe(local);
+    expect(store.getState().order).toContain('disk');
   });
 
   it('enqueueMessage queues for the given conversation without touching activeId', () => {

@@ -50,6 +50,29 @@ export function isEmptyConversationsPatch(patch: ConversationsPatch): boolean {
   return Object.keys(patch.upserts).length === 0 && patch.removes.length === 0 && !patch.order;
 }
 
+/** persist blob 的 conversations 与 order 同时为空（含缺 key / 非对象） */
+export function isEmptyConversationsStore(value: unknown): boolean {
+  const { conversations, order } = sliceOf(value);
+  return Object.keys(conversations).length === 0 && order.length === 0;
+}
+
+/** persist blob 形状完整：state.conversations 是对象、state.order 是数组 */
+export function isConversationsStore(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isRecord(value.state) &&
+    isRecord(value.state.conversations) &&
+    Array.isArray(value.state.order)
+  );
+}
+
+/** 补丁会删掉 target 上现有的全部会话（target 本身为空不算） */
+export function removesAllConversations(target: unknown, patch: ConversationsPatch): boolean {
+  const ids = Object.keys(sliceOf(target).conversations);
+  const removes = new Set(patch.removes);
+  return ids.length > 0 && ids.every((id) => removes.has(id));
+}
+
 export function diffConversations(previous: unknown, next: unknown): ConversationsPatch {
   const before = sliceOf(previous);
   const after = sliceOf(next);

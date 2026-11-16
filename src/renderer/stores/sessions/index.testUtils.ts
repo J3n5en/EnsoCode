@@ -12,6 +12,7 @@ import type * as SessionsModule from './index';
 
 export let onAgentEvent: ((event: RendererAgentEvent) => void) | undefined;
 export let onDispatchEvent: ((event: DispatchMainEvent) => void) | undefined;
+export let onConversationsResync: (() => void) | undefined;
 
 export interface SessionProjectionState {
   sourceProjection: SourceAuthorityProjection;
@@ -28,6 +29,13 @@ export function bindSessionProjection(state: SessionProjectionState) {
 }
 
 export const agentPrompt = vi.fn(async () => ({ ok: true }));
+export const readConversations = vi.fn(
+  async (): Promise<{ value: unknown; seq: number }> => ({
+    value: null,
+    seq: 0,
+  })
+);
+export const removeConversations = vi.fn(async (_ids: string[]) => true);
 export const agentWithdrawSteer = vi.fn(
   async (_id: string, _deliveryId: string): Promise<{ ok: boolean; error?: string }> => ({
     ok: true,
@@ -192,7 +200,12 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
     electronAPI: {
       settings: {
         read: vi.fn(async () => null),
-        readConversations: vi.fn(async () => ({ value: null, seq: 0 })),
+        readConversations,
+        removeConversations,
+        onConversationsResync: vi.fn((callback: () => void) => {
+          onConversationsResync = callback;
+          return vi.fn();
+        }),
         writeKey: vi.fn(async () => true),
         onChanged: vi.fn(),
       },

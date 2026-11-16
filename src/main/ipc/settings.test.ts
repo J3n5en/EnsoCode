@@ -344,6 +344,46 @@ describe('settings广播策略', () => {
     expect(second.value.state.conversations).toHaveProperty('a');
   });
 
+  it('整表删除写回被拒并要求重读；明确删除最后一个会话落盘为空；undefined 删除整个键', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const settings = await import('./settings');
+    settings.registerSettingsHandlers();
+    const write = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE_KEY);
+    const read = mocks.handlers.get(IPC_CHANNELS.CONVERSATIONS_READ);
+    const remove = mocks.handlers.get(IPC_CHANNELS.CONVERSATIONS_REMOVE);
+    if (!write || !read || !remove) throw new Error('conversations handlers missing');
+    const [owner] = mocks.windows;
+    const sender = { sender: owner.webContents };
+    const empty = { state: { conversations: {}, order: [] }, version: 3 };
+    const disk = () => {
+      settings.flushSettings();
+      return JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))[
+        'enso-conversations'
+      ] as { state: { conversations: Record<string, unknown>; order: string[] } } | undefined;
+    };
+
+    settings.patchConversationsState((state) => {
+      for (const id of Object.keys(state.conversations)) delete state.conversations[id];
+      state.conversations.a = { id: 'a', title: 'a' };
+      state.order = ['a'];
+    });
+    const { seq } = (await read(sender)) as { seq: number };
+
+    mocks.sends[0].mockClear();
+    await write(sender, 'enso-conversations', empty, seq);
+    expect(disk()?.state.conversations).toEqual({ a: { id: 'a', title: 'a' } });
+    expect(mocks.sends[0]).toHaveBeenCalledWith(IPC_CHANNELS.CONVERSATIONS_RESYNC);
+
+    expect(await remove(sender, ['a'])).toBe(true);
+    await write(sender, 'enso-conversations', empty, seq);
+    expect(disk()?.state).toMatchObject({ conversations: {}, order: [] });
+
+    await write(sender, 'enso-conversations', undefined, seq);
+    expect(settings.readSettings()).not.toHaveProperty('enso-conversations');
+    expect(disk()).toBeUndefined();
+    warn.mockRestore();
+  });
+
   it('阻止息屏开关与休眠策略互不覆盖', async () => {
     const {
       readTrayPreventDisplaySleep,

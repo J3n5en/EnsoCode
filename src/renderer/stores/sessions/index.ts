@@ -1,6 +1,7 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { conversationCwd } from '@shared/conversationCwd';
+import { diffConversations } from '@shared/conversationsPatch';
 import {
   type DefaultModelRef,
   defaultApprovalMode,
@@ -137,6 +138,7 @@ import {
   readCurrentRememberedActive,
 } from './remoteActive';
 import {
+  applyConversationsPatchToState,
   applySequencedConversationsPatch,
   conversationsAppliedSeq,
   flushBufferedConversationsPatches,
@@ -3051,6 +3053,11 @@ export const useSessionsStore = create<SessionsState>()(
               crypto.randomUUID()
             );
           }
+          // 先让 Main 删行：删掉最后一个会话时，随后的空表写回才不会被整表删除守卫拒收
+          void window.electronAPI.settings.removeConversations?.([
+            id,
+            ...(conversation.coworkerIds ?? []),
+          ]);
           set((state) => {
             const conversations = { ...state.conversations };
             for (const coworkerId of conversation.coworkerIds ?? []) {
@@ -4607,4 +4614,17 @@ window.electronAPI.settings?.onConversationsPatch?.((value) => {
   const remotePatch = queueConversationsPatch(value);
   if (!remotePatch) return;
   useSessionsStore.setState((state) => applySequencedConversationsPatch(state, remotePatch));
+});
+
+// 写回被 Main 拒收：重读磁盘并把磁盘行补回内存，之后的写回以这份磁盘值为基线
+window.electronAPI.settings?.onConversationsResync?.(() => {
+  void window.electronAPI.settings
+    .readConversations()
+    .then(({ value, seq }) => {
+      resetConversationsAppliedSeq(seq);
+      useSessionsStore.setState((state) =>
+        applyConversationsPatchToState(state, diffConversations(undefined, value))
+      );
+    })
+    .catch(() => {});
 });

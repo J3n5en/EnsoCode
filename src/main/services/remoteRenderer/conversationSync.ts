@@ -2,7 +2,9 @@ import {
   applyConversationsPatch,
   type ConversationsPatch,
   diffConversations,
+  isConversationsStore,
   isEmptyConversationsPatch,
+  removesAllConversations,
   type SequencedConversationsPatch,
 } from '@shared/conversationsPatch';
 import { IPC_CHANNELS } from '@shared/types';
@@ -50,7 +52,11 @@ function mainPeers(): Peer[] {
   return peers;
 }
 
-type SenderLike = { id: number; once?: (event: 'destroyed', listener: () => void) => unknown };
+type SenderLike = {
+  id: number;
+  once?: (event: 'destroyed', listener: () => void) => unknown;
+  send?: (channel: string, ...args: unknown[]) => void;
+};
 
 function track(sender: SenderLike): void {
   if (watched.has(sender) || typeof sender.once !== 'function') return;
@@ -86,9 +92,17 @@ function notifyMerged(patch: ConversationsPatch): void {
   for (const listener of mergedListeners) listener(patch);
 }
 
+/** 拒收写回：磁盘与账本都不动，让写回方按 conversations:read 重新水合，免得带着坏内存再写 */
+function rejectWrite(sender: SenderLike, current: unknown, reason: string): unknown {
+  console.warn(`[conversations] 拒绝${reason}写入`);
+  sender.send?.(IPC_CHANNELS.CONVERSATIONS_RESYNC);
+  return current;
+}
+
 /**
  * renderer 整份写回：回放已确认的补丁得到它写这份值时看到的磁盘状态，
  * 只把差量合并进磁盘，再以新序号推给其他主界面。
+ * 差量会删光磁盘上现有的全部会话时拒收（用户明确删除走 Main 的删除入口，不经这里）。
  */
 export function mergeConversationsWrite(
   sender: SenderLike,
@@ -101,6 +115,7 @@ export function mergeConversationsWrite(
     ledgers.set(sender.id, { base: undefined, pending: [] });
     return undefined;
   }
+  if (!isConversationsStore(value)) return rejectWrite(sender, current, '结构不合法的');
   const ledger = ledgers.get(sender.id) ?? { base: current, pending: [] };
   let expected = ledger.base;
   const pending: { seq: number; patch: ConversationsPatch }[] = [];
@@ -108,8 +123,9 @@ export function mergeConversationsWrite(
     if (entry.seq <= ackSeq) expected = applyConversationsPatch(expected, entry.patch);
     else pending.push(entry);
   }
-  ledgers.set(sender.id, { base: value, pending });
   const local = diffConversations(expected, value);
+  if (removesAllConversations(current, local)) return rejectWrite(sender, current, '整表删除');
+  ledgers.set(sender.id, { base: value, pending });
   const peers = mainPeers().filter((peer) => peer.id !== sender.id);
   const empty = isEmptyConversationsPatch(local);
   const merged = empty ? (current ?? value) : applyConversationsPatch(current, local);

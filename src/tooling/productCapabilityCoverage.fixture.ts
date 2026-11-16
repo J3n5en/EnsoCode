@@ -499,6 +499,8 @@ export const IPC_PRODUCT_COVERAGE = {
   SETTINGS_CHANGED: excluded('Cross-window persistence notification transport.'),
   CONVERSATIONS_PATCH: excluded('Cross-renderer conversation persistence transport.'),
   CONVERSATIONS_READ: excluded('Conversation persistence read; Enso uses typed domain handlers.'),
+  CONVERSATIONS_REMOVE: excluded('Conversation persistence delete transport for user removal.'),
+  CONVERSATIONS_RESYNC: excluded('Conversation persistence resync notification transport.'),
   SECRETARY_GET_STATE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_STATE_CHANGED: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_RESOLVE_PROPOSAL: excluded('Experimental secretary agent; not an Enso capability.'),

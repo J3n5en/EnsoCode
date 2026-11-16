@@ -62,4 +62,30 @@ describe('settings 破坏性写入护栏', () => {
     expect(backups().length).toBeLessThanOrEqual(5);
     expect(existsSync(settingsPath)).toBe(true);
   });
+
+  it('enso-conversations 普通写入不触发快照，整表清空才快照', () => {
+    const before = backups();
+    settings.patchConversationsState((state) => {
+      state.conversations.keep = { id: 'keep', title: 'keep' };
+      if (!state.order.includes('keep')) state.order.push('keep');
+    });
+    expect(backups()).toEqual(before);
+    expect(warn).not.toHaveBeenCalled();
+
+    settings.patchConversationsState((state) => {
+      for (const id of Object.keys(state.conversations)) delete state.conversations[id];
+      state.order.length = 0;
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain('enso-conversations');
+    const newest = backups().sort().at(-1);
+    expect(newest).toBeTruthy();
+    const snapshot = JSON.parse(readFileSync(path.join(userData, newest!), 'utf-8')) as {
+      'enso-conversations'?: { state?: { conversations?: Record<string, unknown> } };
+    };
+    expect(snapshot['enso-conversations']?.state?.conversations?.keep).toEqual({
+      id: 'keep',
+      title: 'keep',
+    });
+  });
 });
