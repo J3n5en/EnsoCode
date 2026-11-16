@@ -449,6 +449,25 @@ export function askCallbackToast(lang: ContactLang, option: string): string {
   return lang === 'zh' ? `已回答：${capped}` : `Answered: ${capped}`;
 }
 
+/** 提问怎么收的尾：手机答的、应用里答的、超时或作废 */
+export type AskSettledOutcome =
+  | { kind: 'answered'; answer: string }
+  | { kind: 'app' }
+  | { kind: 'expired' };
+
+/**
+ * 提问收尾后追加在原问题后面的一行：原问题留着方便回看，
+ * 但手机上一眼就能看出这条已经答过、不用再点。
+ */
+export function askSettledLine(lang: ContactLang, outcome: AskSettledOutcome): string {
+  if (outcome.kind === 'expired') return lang === 'zh' ? '⌛ 已过期' : '⌛ Expired';
+  if (outcome.kind === 'app') {
+    return lang === 'zh' ? '✅ 已在应用里回答' : '✅ Answered in the app';
+  }
+  const answer = oneLine(outcome.answer);
+  return lang === 'zh' ? `✅ 已回答：${answer}` : `✅ Answered: ${answer}`;
+}
+
 /**
  * 手机发来的一句话进秘书会话时的正文：应用写的那一行说明「这是用户本人从手机发的」，
  * 用户正文按外部文本包裹——转发来的内容里可能藏着指令，只有用户真的要求才执行。

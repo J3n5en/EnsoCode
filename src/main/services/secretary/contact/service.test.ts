@@ -33,6 +33,7 @@ class FakeApi implements TelegramApi {
     messageId: number;
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
+    parseMode?: 'HTML';
   }[] = [];
   /** 只换按钮不动正文的那些调用 */
   markupEdits: {
@@ -59,6 +60,8 @@ class FakeApi implements TelegramApi {
   rejectHtml = false;
   /** 正文改不动：editMessageText 报错，用来看是否退到只清按钮 */
   editTextError: Error | null = null;
+  /** 连按钮都清不掉：消息被删或太旧 */
+  markupError: Error | null = null;
   me: TelegramUser = { id: 42, username: 'enso_secretary_bot', first_name: 'Enso' };
   meError: Error | null = null;
   private queue: TelegramUpdate[] = [];
@@ -119,6 +122,7 @@ class FakeApi implements TelegramApi {
     messageId: number;
     replyMarkup: TelegramInlineKeyboard;
   }): Promise<void> {
+    if (this.markupError) throw this.markupError;
     this.check(undefined, params.replyMarkup);
     this.markupEdits.push(params);
   }
@@ -596,6 +600,118 @@ describe('提问：两边谁先答算谁的', () => {
     h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'ask:1:0' } });
     await waitFor(() => h.api.callbacks.length > 0, 'callback answered');
     expect(h.api.callbacks.at(-1)?.text).toBe('这条提问已经结束了');
+  });
+
+  it('点了按钮：原消息换成已回答，按钮一起清掉', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.onAskRequest('sec-1', {
+      requestId: 'ask-1',
+      question: '用哪个分支？',
+      options: ['main', 'dev'],
+    });
+    await waitFor(() => h.api.sent.length > 1, 'ask sent');
+    // 假 API 的 sendMessage 返回已发条数，也就是这条提问的 message_id
+    const askMessageId = h.api.sent.length;
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'ask:1:1' } });
+    await waitFor(() => h.api.edited.length > 0, 'ask edited');
+    const edited = h.api.edited.at(-1);
+    expect(edited?.messageId).toBe(askMessageId);
+    expect(edited?.replyMarkup?.inline_keyboard).toEqual([]);
+    // 原问题留着方便回看，只在后面追加一行
+    expect(edited?.text).toContain('用哪个分支？');
+    expect(edited?.text).toContain('✅ 已回答：dev');
+    expect(edited?.parseMode).toBe('HTML');
+    expect(h.audits.at(-1)?.op).toBe('contact_ask_settled');
+    expect(h.audits.at(-1)?.detail).toBe('answered');
+  });
+
+  it('应用里先答了：手机那条消息同步标成已在应用里回答', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.onAskRequest('sec-1', { requestId: 'ask-1', question: '走哪条？', options: ['A'] });
+    await waitFor(() => h.api.sent.length > 1, 'ask sent');
+    h.service.onAskResolved('sec-1', 'ask-1', { by: 'user', answer: 'A' });
+    await waitFor(() => h.api.edited.length > 0, 'ask edited');
+    expect(h.api.edited.at(-1)?.text).toContain('✅ 已在应用里回答');
+    expect(h.api.edited.at(-1)?.replyMarkup?.inline_keyboard).toEqual([]);
+    expect(h.audits.at(-1)?.detail).toBe('app');
+  });
+
+  it('超时收尾：手机那条消息标成已过期', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.onAskRequest('sec-1', {
+      requestId: 'ask-1',
+      question: '几点发版？',
+      options: ['八点'],
+    });
+    await waitFor(() => h.api.sent.length > 1, 'ask sent');
+    h.service.onAskResolved('sec-1', 'ask-1', { by: 'timeout' });
+    await waitFor(() => h.api.edited.length > 0, 'ask edited');
+    expect(h.api.edited.at(-1)?.text).toContain('⌛ 已过期');
+    expect(h.api.edited.at(-1)?.replyMarkup?.inline_keyboard).toEqual([]);
+  });
+
+  it('重复点同一个按钮：只回已经回答过了，不再触发一次', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.onAskRequest('sec-1', { requestId: 'ask-1', question: '走哪条？', options: ['A'] });
+    await waitFor(() => h.api.sent.length > 1, 'ask sent');
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'ask:1:0' } });
+    await waitFor(() => h.world.answers.length > 0, 'answered');
+    h.api.push({ update_id: 3, callback_query: { id: 'cb-2', data: 'ask:1:0' } });
+    await waitFor(() => h.api.callbacks.length > 1, 'second callback');
+    expect(h.api.callbacks.at(-1)?.text).toBe('已经回答过了');
+    expect(h.world.answers).toHaveLength(1);
+  });
+
+  it('消息太旧改不动：退到只清按钮，不抛异常', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.onAskRequest('sec-1', { requestId: 'ask-1', question: '走哪条？', options: ['A'] });
+    await waitFor(() => h.api.sent.length > 1, 'ask sent');
+    h.api.editTextError = new TelegramApiError('api', 'Bad Request: message to edit not found');
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'ask:1:0' } });
+    await waitFor(() => h.api.markupEdits.length > 0, 'markup only');
+    expect(h.api.markupEdits.at(-1)?.replyMarkup.inline_keyboard).toEqual([]);
+    expect(h.world.answers).toHaveLength(1);
+    // 先记一条正文改不动的失败，再记一条「只清按钮」的成功
+    const settled = h.audits.filter((entry) => entry.op === 'contact_ask_settled').at(-1);
+    expect(settled?.ok).toBe(true);
+    expect(settled?.detail).toBe('answered markup-only');
+  });
+
+  it('连按钮都清不掉：静默降级，回答照旧生效', async () => {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.service.onAskRequest('sec-1', { requestId: 'ask-1', question: '走哪条？', options: ['A'] });
+    await waitFor(() => h.api.sent.length > 1, 'ask sent');
+    h.api.editTextError = new TelegramApiError('api', 'Bad Request: message to edit not found');
+    h.api.markupError = new TelegramApiError('api', 'Bad Request: message to edit not found');
+    h.api.push({ update_id: 2, callback_query: { id: 'cb-1', data: 'ask:1:0' } });
+    await waitFor(
+      () => h.audits.some((entry) => entry.op === 'contact_ask_settled' && !entry.ok),
+      'settle failed silently'
+    );
+    expect(h.world.answers).toHaveLength(1);
+    expect(h.audits.find((entry) => entry.op === 'contact_ask_settled')?.detail).toBe(
+      'answered api'
+    );
+    // 不改消息失败不能变成给用户的错误提示
+    expect(h.audits.some((entry) => entry.op === 'contact_error')).toBe(false);
   });
 
   it('回调数据伪造或过期一律不认', async () => {
