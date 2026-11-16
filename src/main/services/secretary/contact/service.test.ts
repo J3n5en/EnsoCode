@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { telegramUrlButtonSupported } from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
+import { parseInboundMessage } from '@shared/secretary/inbound';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FollowingStore } from '../following';
@@ -2316,6 +2317,32 @@ describe('多渠道联系方式', () => {
     await waitFor(() => wechat.sent.length > 0, 'pushed');
     expect(h.api.sent.length).toBe(before);
     await waitFor(() => h.following.list().length === 0, 'follow done');
+  });
+
+  it('微信发起：用户消息进桌面秘书会话，回复与完成结果只回微信，Telegram 未发起收不到', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    const conversations: string[] = [];
+    const deliver = h.ports.deliver;
+    h.ports.deliver = (conversationId, text) => {
+      conversations.push(conversationId);
+      return deliver(conversationId, text);
+    };
+    await h.service.inbound({ kind: 'text', peer: wxPeer, text: '把登录修一下' });
+    expect(conversations).toEqual(['sec-1']);
+    expect(parseInboundMessage(h.world.delivered.at(-1) ?? '')).toMatchObject({
+      channel: WECHAT,
+      body: '把登录修一下',
+    });
+    const before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', '已派出去修了', { turnId: 't1' });
+    await waitFor(() => wechat.sent.length === 1, 'reply');
+    h.following.add({ kind: 'session', targetId: 'c1', origin: wxPeer, at: 1, summary: '修登录' });
+    h.service.onMilestone({ kind: 'goal-complete', title: 'p · 修登录', conversationId: 'c1' });
+    await waitFor(() => wechat.sent.length === 2, 'result');
+    expect(wechat.sent[1]?.text).toContain('✅ 完成 · p · 修登录');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.api.sent.length).toBe(before);
   });
 
   it('插件停用：卡片消失，关注项与待收尾记录清掉，入站不再路由', async () => {

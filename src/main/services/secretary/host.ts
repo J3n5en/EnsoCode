@@ -509,7 +509,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
-    if (!isUrgentUpdate(update)) {
+    // 手机关注的任务结果会马上推给发起渠道：桌面秘书会话同一时刻也要收到，不等合并窗口
+    const followed = kind !== 'turn-ended' && ports.contact?.follows?.(record.conversationId);
+    if (!isUrgentUpdate(update) && !followed) {
       const held = previous?.deliverAt;
       update.deliverAt =
         held !== undefined && held > now

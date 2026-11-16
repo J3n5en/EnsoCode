@@ -1406,6 +1406,46 @@ describe('联系方式转发', () => {
     ]);
   });
 
+  it('手机关注的任务完成：发起渠道收到的同时，桌面秘书会话也马上收到一条，不等合并窗口', async () => {
+    const desktop = async (follows: boolean) => {
+      const h = harness({ notify: 'needs-user' });
+      if (h.ports.contact && follows)
+        h.ports.contact.follows = (conversationId) => conversationId === 'c1';
+      h.ports.projects = () => [
+        { projectId: 'sp', canonicalPath: '/s', kind: 'secretary', state: 'active', version: 1 },
+      ];
+      h.ports.conversations = () => [
+        { conversationId: 'sec1', projectId: 'sp', kind: 'root', lifecycle: 'ready', version: 1 },
+      ];
+      h.state.rows.sec1 = { id: 'sec1', title: '秘书' };
+      h.state.statuses.c1 = idle;
+      h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+      // 上一次投递检查收尾后再来下一个事件，与真实事件流一致
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      h.host.onAgentEvent(
+        event('turn-completed', { digest: { assistantText: '修好了，提交 1a2b3c4' } }),
+        change('idle', 'running')
+      );
+      return h;
+    };
+
+    const followed = await desktop(true);
+    expect(followed.state.contact.milestones).toHaveLength(1);
+    expect(followed.state.prompts).toHaveLength(1);
+    expect(followed.state.prompts[0]).toMatch(/^sec1:<session-updates>/u);
+    expect(followed.state.prompts[0]).toContain('[goal-complete session:c1]');
+    expect(followed.state.prompts[0]).toContain('修好了，提交 1a2b3c4');
+    // 同一结果再来一次事件也不重投
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    followed.host.onAgentEvent(event('status', { status: 'idle' }), []);
+    expect(followed.state.prompts).toHaveLength(1);
+
+    // 没人在手机上等的结果照旧攒一个窗口再给秘书
+    const quiet = await desktop(false);
+    expect(quiet.state.prompts).toEqual([]);
+    expect(quiet.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete', deliverAt: 45_000 });
+  });
+
   it('系统回传注入的回合带上 delivery 与 turnId，应用里自己聊的不带', () => {
     const h = harness({ secretaryIds: ['sec-1'] });
     const secretary = (extra: Record<string, unknown> = {}) =>
