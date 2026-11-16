@@ -40,6 +40,7 @@ export const EXTENSION_PLUGIN_PERMISSIONS = [
   'session.focus',
   'session.create',
   'agent.run',
+  'secretary.contact',
 ] as const;
 export type ExtensionPluginPermission = (typeof EXTENSION_PLUGIN_PERMISSIONS)[number];
 
@@ -94,6 +95,15 @@ export interface PluginFileViewerContrib {
   extensions: string[];
   /** 匹配的文件默认用它打开，否则只出现在切换按钮里 */
   default: boolean;
+}
+/** 秘书联系方式渠道：设置里多一张渠道卡片，登录页嵌 settingsView */
+export interface PluginContactChannelContrib {
+  id: string;
+  title: string;
+  /** 插件内图片相对路径 */
+  icon?: string;
+  /** 插件内 .html 相对路径：设置卡片里嵌的登录页（如扫码） */
+  settingsView?: string;
 }
 /** 主题：path 是调色板 JSON，css 可选且可改任意界面（grant.styles） */
 export interface PluginThemeContrib {
@@ -239,6 +249,8 @@ export interface ExtensionPluginManifest {
     schedules: PluginScheduleContrib[];
     exports: PluginExportContrib[];
     themes: PluginThemeContrib[];
+    /** 秘书联系方式渠道；没声明时缺省 */
+    contactChannels?: PluginContactChannelContrib[];
     /** 运行期可额外注册的工具 / 命令上限 */
     dynamic: { tools: number; commands: number };
   };
@@ -253,6 +265,16 @@ const TOOL = /^[a-z][a-z0-9_]*$/;
 const LOCAL_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const FILE_SUFFIX = /^\.[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)*$/;
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+/** `*.example.com`：只匹配子域，不含 example.com 本身；至少两级，不能写 `*.com` */
+const WILDCARD_DOMAIN = /^\*\.(?=.{1,251}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/** net.domains 是否放行这个主机名：精确匹配，或 `*.` 通配的任意子域 */
+export function pluginDomainAllowed(domains: readonly string[], hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return domains.some((domain) =>
+    domain.startsWith('*.') ? host.endsWith(domain.slice(1)) : domain === host
+  );
+}
 const ENGINE = /^>=(\d+)\.(\d+)\.(\d+)$/;
 const METHOD = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const MCP_TOOL = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -436,7 +458,7 @@ export function parseExtensionPluginManifest(
     domains: stringList(
       isRecord(netRaw) ? netRaw.domains : undefined,
       'net.domains',
-      (d) => typeof d === 'string' && DOMAIN.test(d)
+      (d) => typeof d === 'string' && (DOMAIN.test(d) || WILDCARD_DOMAIN.test(d))
     ),
   };
   const mcpRaw = raw.mcp === undefined ? {} : raw.mcp;
@@ -553,6 +575,28 @@ export function parseExtensionPluginManifest(
     else views.push({ id: v.id, title: v.title as string, entry: v.entry });
   }
   uniqueIds(views, '侧栏页面');
+
+  const contactChannels: PluginContactChannelContrib[] = [];
+  for (const v of list('contactChannels')) {
+    if (
+      !isRecord(v) ||
+      typeof v.id !== 'string' ||
+      !LOCAL_ID.test(v.id) ||
+      !isNonEmptyString(v.title, 40) ||
+      (v.icon !== undefined && !isPluginRelativePath(v.icon)) ||
+      (v.settingsView !== undefined &&
+        (!isPluginRelativePath(v.settingsView) || !v.settingsView.endsWith('.html')))
+    )
+      errors.push('联系方式渠道不合法');
+    else
+      contactChannels.push({
+        id: v.id,
+        title: (v.title as string).trim(),
+        ...(typeof v.icon === 'string' ? { icon: v.icon } : {}),
+        ...(typeof v.settingsView === 'string' ? { settingsView: v.settingsView } : {}),
+      });
+  }
+  uniqueIds(contactChannels, '联系方式渠道');
 
   const fileViewers: PluginFileViewerContrib[] = [];
   for (const v of list('fileViewers')) {
@@ -971,6 +1015,14 @@ export function parseExtensionPluginManifest(
   need(triggers.length > 0, 'ui.slot', 'triggers');
   need(views.length > 0, 'ui.view', 'views');
   need(fileViewers.length > 0, 'ui.view', 'fileViewers');
+  need(contactChannels.length > 0, 'secretary.contact', 'contactChannels');
+  need(
+    contactChannels.some((channel) => channel.settingsView !== undefined),
+    'ui.view',
+    'contactChannels.settingsView'
+  );
+  if (permissions.includes('secretary.contact') && !main)
+    errors.push('secretary.contact 需要 main 来收发消息');
   need(mcpServers.length > 0, 'mcp.server', 'mcpServers');
   need(fs.read.length > 0, 'fs.read', 'fs.read');
   need(fs.write.length > 0, 'fs.write', 'fs.write');
@@ -1033,6 +1085,7 @@ export function parseExtensionPluginManifest(
         schedules,
         exports: exportsList,
         themes,
+        ...(contactChannels.length > 0 ? { contactChannels } : {}),
         dynamic,
       },
     },

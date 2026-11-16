@@ -1,5 +1,9 @@
 import { join } from 'node:path';
-import type { SecretaryContactBot, SecretaryContactChat } from '@shared/types/secretary';
+import type {
+  SecretaryContactBot,
+  SecretaryContactChannelPrefs,
+  SecretaryContactChat,
+} from '@shared/types/secretary';
 import { readJson, writeJsonAtomic } from '../../bots/files';
 import { SecureJsonFile } from '../../secureFile';
 
@@ -9,6 +13,13 @@ import { SecureJsonFile } from '../../secureFile';
  */
 export interface ContactFile {
   version: 1;
+  /** 总开关：默认打开，老配置升级后照常工作 */
+  enabled: boolean;
+  /**
+   * 渠道开关：Telegram 只存 enabled/push（其余三项沿用下面的老字段），
+   * 插件渠道按 `<pluginId>:<id>` 存整份。
+   */
+  channels: Record<string, Partial<SecretaryContactChannelPrefs>>;
   bot?: SecretaryContactBot;
   chat?: SecretaryContactChat;
   boundAt?: number;
@@ -33,6 +44,8 @@ export interface ContactFile {
 export function emptyContactFile(): ContactFile {
   return {
     version: 1,
+    enabled: true,
+    channels: {},
     allowCardConfirm: true,
     allowMemory: false,
     syncMirror: false,
@@ -67,6 +80,63 @@ function parseChat(raw: unknown): SecretaryContactChat | undefined {
   };
 }
 
+export const TELEGRAM_CHANNEL_ID = 'telegram';
+
+const CHANNEL_ID = /^[a-z0-9][a-z0-9._:-]{0,95}$/u;
+const PREF_KEYS = ['enabled', 'push', 'cardConfirm', 'syncMirror', 'memory'] as const;
+
+function parseChannels(raw: unknown): ContactFile['channels'] {
+  if (!isRecord(raw)) return {};
+  const out: ContactFile['channels'] = {};
+  for (const [id, value] of Object.entries(raw)) {
+    if (!CHANNEL_ID.test(id) || !isRecord(value)) continue;
+    const prefs: Partial<SecretaryContactChannelPrefs> = {};
+    for (const key of PREF_KEYS) if (typeof value[key] === 'boolean') prefs[key] = value[key];
+    out[id] = prefs;
+  }
+  return out;
+}
+
+/** 一个渠道的通用开关：Telegram 默认启用并推送，插件渠道默认关着等用户打开 */
+export function channelPrefs(file: ContactFile, id: string): SecretaryContactChannelPrefs {
+  const saved = file.channels[id] ?? {};
+  if (id === TELEGRAM_CHANNEL_ID) {
+    return {
+      enabled: saved.enabled ?? true,
+      push: saved.push ?? true,
+      cardConfirm: file.allowCardConfirm,
+      syncMirror: file.syncMirror,
+      memory: file.allowMemory,
+    };
+  }
+  return {
+    enabled: saved.enabled ?? false,
+    push: saved.push ?? true,
+    cardConfirm: saved.cardConfirm ?? false,
+    syncMirror: saved.syncMirror ?? false,
+    memory: saved.memory ?? false,
+  };
+}
+
+/** 改一个渠道的开关：Telegram 的三项写回老字段，别的存进 channels */
+export function withChannelPrefs(
+  file: ContactFile,
+  id: string,
+  patch: Partial<SecretaryContactChannelPrefs>
+): ContactFile {
+  if (id !== TELEGRAM_CHANNEL_ID) {
+    return { ...file, channels: { ...file.channels, [id]: { ...file.channels[id], ...patch } } };
+  }
+  const { cardConfirm, syncMirror, memory, ...rest } = patch;
+  return {
+    ...file,
+    ...(cardConfirm !== undefined ? { allowCardConfirm: cardConfirm } : {}),
+    ...(syncMirror !== undefined ? { syncMirror } : {}),
+    ...(memory !== undefined ? { allowMemory: memory } : {}),
+    channels: { ...file.channels, [id]: { ...file.channels[id], ...rest } },
+  };
+}
+
 /** 坏配置一律当空：绑定信息读不出来就当没绑，重新走一次向导即可 */
 export function parseContactFile(raw: unknown): ContactFile {
   if (!isRecord(raw)) return emptyContactFile();
@@ -83,6 +153,8 @@ export function parseContactFile(raw: unknown): ContactFile {
     : undefined;
   return {
     version: 1,
+    enabled: raw.enabled !== false,
+    channels: parseChannels(raw.channels),
     ...(bot ? { bot } : {}),
     ...(chat ? { chat } : {}),
     ...(typeof raw.boundAt === 'number' ? { boundAt: raw.boundAt } : {}),
@@ -141,6 +213,8 @@ export class ContactStore {
     const current = this.file();
     return this.save({
       version: 1,
+      enabled: current.enabled,
+      channels: current.channels,
       ...(current.bot ? { bot: current.bot } : {}),
       allowCardConfirm: current.allowCardConfirm,
       allowMemory: current.allowMemory,
@@ -156,6 +230,8 @@ export class ContactStore {
     const current = this.file();
     return this.save({
       version: 1,
+      enabled: current.enabled,
+      channels: current.channels,
       allowCardConfirm: current.allowCardConfirm,
       allowMemory: current.allowMemory,
       syncMirror: false,

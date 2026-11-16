@@ -32,7 +32,9 @@ function deps(dir: string, phone: readonly string[] = ['sec-1']): FollowDeps {
   return {
     store: new FollowingStore(dir),
     probe: (conversationId) =>
-      conversationId !== null && phone.includes(conversationId) ? 777 : null,
+      conversationId !== null && phone.includes(conversationId)
+        ? { channelId: 'telegram', peerId: '777' }
+        : null,
     audit: (entry) => audits.push(entry),
     now: () => (now += 1),
   };
@@ -58,7 +60,7 @@ describe('手机关注列表', () => {
         id: 'session:c1',
         kind: 'session',
         targetId: 'c1',
-        chatId: 777,
+        origin: { channelId: 'telegram', peerId: '777' },
         at: 1_001,
         summary: 'apple-table 加 Score 字段',
         secretaryConversationId: 'sec-1',
@@ -91,7 +93,12 @@ describe('手机关注列表', () => {
     );
     // 新的 store 从磁盘读：内存态没有留下任何东西
     expect(new FollowingStore(dir).list()).toMatchObject([
-      { id: 'schedule:sch1', kind: 'schedule', summary: '每天早上看 CI', chatId: 777 },
+      {
+        id: 'schedule:sch1',
+        kind: 'schedule',
+        summary: '每天早上看 CI',
+        origin: { channelId: 'telegram', peerId: '777' },
+      },
     ]);
   });
 
@@ -170,7 +177,30 @@ describe('手机关注列表', () => {
       }),
       'utf8'
     );
-    expect(new FollowingStore(dir).list()).toMatchObject([{ targetId: 'c1', summary: '好的' }]);
+    expect(new FollowingStore(dir).list()).toMatchObject([
+      { targetId: 'c1', summary: '好的', origin: { channelId: 'telegram', peerId: '7' } },
+    ]);
     expect(parseFollowingFile('nonsense')).toEqual({ version: 1, items: [] });
+  });
+
+  it('按渠道清关注：只清这个渠道发起的', () => {
+    const dir = tempDir();
+    const store = new FollowingStore(dir);
+    store.add({
+      kind: 'session',
+      targetId: 'a',
+      origin: { channelId: 'telegram', peerId: '777' },
+      at: 1,
+      summary: 'a',
+    });
+    store.add({
+      kind: 'session',
+      targetId: 'b',
+      origin: { channelId: 'enso.clawbot:wechat', peerId: 'wx-1' },
+      at: 2,
+      summary: 'b',
+    });
+    expect(store.clearChannel('enso.clawbot:wechat')).toBe(1);
+    expect(store.list().map((item) => item.targetId)).toEqual(['a']);
   });
 });

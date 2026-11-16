@@ -24,7 +24,11 @@ export function TelegramInboundCard({ message }: { message: InboundMessage }) {
       <details className="group">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted-foreground">
           <Send className="size-3.5 shrink-0" />
-          <span className="shrink-0">{t('From Telegram')}</span>
+          <span className="shrink-0">
+            {message.channel === 'telegram'
+              ? t('From Telegram')
+              : t('From {{name}}', { name: message.title })}
+          </span>
           {who && <span className="shrink-0 text-foreground">{who}</span>}
           {message.time && <span className="shrink-0">· {message.time}</span>}
           <span className="min-w-0 truncate font-normal group-open:hidden">

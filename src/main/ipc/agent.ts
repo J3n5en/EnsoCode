@@ -113,6 +113,7 @@ import {
   setSessionAskRelay,
   setSessionModel,
   setSessionReasoning,
+  setSessionSystemPrompt,
   setSessionThinking,
   spawnChildSession,
   spawnSession,
@@ -613,19 +614,34 @@ function secretarySpawnOptions(): {
 } {
   const store = secretaryStore();
   const profile = store.profile();
-  const language = readSettingsState()?.language;
   return {
-    systemPrompt: buildSecretarySystemPrompt({
-      profile,
-      persona: store.readPersona(),
-      uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
-      contactBound: contactBoundFor(),
-    }),
+    systemPrompt: secretarySystemPrompt(store, profile),
     pluginIds: profile?.pluginIds ?? [],
     skillIds: profile?.skillIds ?? [],
     skillDirs: secretarySkillDirs(secretarySkillsDir(), profile?.disabledSkillNames ?? []),
     tools: secretaryToolDescriptors(secretaryToolsDir()),
   };
+}
+
+/** 每次现读档案与人设：spawn 与档案保存后的就地刷新共用 */
+function secretarySystemPrompt(
+  store: SecretaryStore = secretaryStore(),
+  profile = store.profile()
+): string {
+  const language = readSettingsState()?.language;
+  return buildSecretarySystemPrompt({
+    profile,
+    persona: store.readPersona(),
+    uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
+    contactBound: contactBoundFor(),
+  });
+}
+
+/** 秘书档案改了：活着的秘书会话就地换系统提示词，下一条消息生效，会话与历史不动 */
+export function refreshSecretaryPromptFromMain(sessionId: string): AgentActionResult {
+  const identity = exactIdentity(sessionId);
+  if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
+  return setSessionSystemPrompt(identity, secretarySystemPrompt());
 }
 
 /** Main 侧根会话 spawn：pair 与秘书共用，renderer 走 AGENT_SPAWN 自己的校验 */

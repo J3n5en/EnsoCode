@@ -141,6 +141,41 @@ export type EnsoContribRegister =
     }
   | { kind: 'command'; name: string; title: string };
 
+/** 秘书联系方式渠道的能力：核心按它降级（没按钮就编号文本，没编辑就不改旧消息） */
+export interface EnsoContactCaps {
+  buttons: boolean;
+  urlButtons: boolean;
+  edit: boolean;
+  typing: boolean;
+  format: 'html' | 'markdown' | 'plain';
+  /** 单条上限，100–65536；超长由核心切条 */
+  maxChars: number;
+  commandMenu: boolean;
+}
+
+/** 渠道实现：核心只调这两个；peerId 一律字符串 */
+export interface EnsoContactChannel {
+  caps: EnsoContactCaps;
+  sendText(peerId: string, message: { text: string }): Promise<{ messageId?: string } | undefined>;
+  typing?(peerId: string, state: { on: boolean }): Promise<unknown>;
+}
+
+export interface EnsoContactInbound {
+  peerId: string;
+  text: string;
+  /** 显示名，进秘书会话头一行 */
+  name?: string;
+  /** 毫秒时间戳 */
+  at?: number;
+}
+
+export interface EnsoContactStatus {
+  status: 'unconfigured' | 'pending' | 'connected' | 'error';
+  detail?: string;
+  /** 主动推送发给谁：只报扫码/绑定的那个人 */
+  peers?: string[];
+}
+
 /** 每个 `PluginHostApi` 在作者侧的对应函数。动态注册走 contrib.*，进度走 `ctx.progress`。 */
 export interface EnsoHostApi {
   'fs.readText': (path: string) => Promise<string>;
@@ -174,6 +209,10 @@ export interface EnsoHostApi {
   'contrib.register': (input: EnsoContribRegister) => Promise<void>;
   'contrib.unregister': (input: { kind: 'tool' | 'command'; name: string }) => Promise<void>;
   'host.capabilities': () => Promise<PluginHostCapabilities>;
+  /** 需要 `secretary.contact`；channelId 是清单 contactChannels 里的 id */
+  'contact.register': (channelId: string, channel: EnsoContactChannel) => Promise<EnsoDisposable>;
+  'contact.inbound': (channelId: string, message: EnsoContactInbound) => Promise<void>;
+  'contact.setStatus': (channelId: string, status: EnsoContactStatus) => Promise<void>;
   'session.list': {
     (options?: { scope?: 'project' }): Promise<{ current: string; sessions: EnsoSessionInfo[] }>;
     /** 所有项目的会话，需 `session.readAll`；不在宿主发起的调用里时 current 为 null */
@@ -334,6 +373,12 @@ export interface EnsoMain {
     onTurnEnd(listener: (event: { sessionId: string }) => void): EnsoDisposable;
   };
   host: { capabilities: EnsoHostApi['host.capabilities'] };
+  /** 秘书联系方式渠道：register 交出收发实现，inbound 把对方的话交给秘书，setStatus 报登录状态 */
+  contact: {
+    register: EnsoHostApi['contact.register'];
+    inbound: EnsoHostApi['contact.inbound'];
+    setStatus: EnsoHostApi['contact.setStatus'];
+  };
   agent: { run: EnsoHostApi['agent.run'] };
   fs: { readText: EnsoHostApi['fs.readText']; writeText: EnsoHostApi['fs.writeText'] };
   net: { fetch: EnsoHostApi['net.fetch'] };

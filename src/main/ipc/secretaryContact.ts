@@ -5,16 +5,19 @@ import { normalizeLocale } from '@shared/i18n';
 import type { ContactLang } from '@shared/secretary/contact';
 import { projectReadableMessages } from '@shared/secretary/transcript';
 import { IPC_CHANNELS } from '@shared/types';
-import type { SecretaryContactState, SecretaryProfile } from '@shared/types/secretary';
+import type {
+  SecretaryContactChannelPrefs,
+  SecretaryContactState,
+  SecretaryProfile,
+} from '@shared/types/secretary';
+import { getExtensionPlugins, setPluginContactBridge } from '../services/extensionPlugins';
 import { redactSecrets } from '../services/memory/distill';
 import { listMemoriesForAdmin, openExistingMemoryDb } from '../services/memoryAdmin';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
 import { createContactCommands } from '../services/secretary/contact/commands';
-import {
-  type ContactServicePorts,
-  TelegramContactService,
-} from '../services/secretary/contact/service';
+import { connectPluginChannels } from '../services/secretary/contact/plugins';
+import { ContactService, type ContactServicePorts } from '../services/secretary/contact/service';
 import { ContactStore } from '../services/secretary/contact/store';
 import { deliverToSecretary } from '../services/secretary/contact/wake';
 import { buildDaily, secretaryDailyPorts } from '../services/secretary/daily';
@@ -58,7 +61,7 @@ export interface SecretaryContactDeps {
 }
 
 export interface SecretaryContact {
-  service: TelegramContactService;
+  service: ContactService;
   /** 读一次状态，供深链与启动时使用 */
   state(): SecretaryContactState;
   start(): Promise<void>;
@@ -86,10 +89,32 @@ function readToken(request: unknown): string | undefined {
   return typeof token === 'string' ? token : undefined;
 }
 
-function readFlag(request: unknown, key: 'allowCardConfirm' | 'allowMemory'): boolean | null {
+function readFlag(
+  request: unknown,
+  key: 'allowCardConfirm' | 'allowMemory' | 'enabled'
+): boolean | null {
   if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
   const value = (request as Record<string, unknown>)[key];
   return typeof value === 'boolean' ? value : null;
+}
+
+const PREF_KEYS = ['enabled', 'push', 'cardConfirm', 'syncMirror', 'memory'] as const;
+
+/** 渠道卡片上的开关：{ channelId, prefs: { enabled?, push?, ... } } */
+function readChannelPrefs(
+  request: unknown
+): { channelId: string; prefs: Partial<SecretaryContactChannelPrefs> } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const record = request as Record<string, unknown>;
+  const channelId = typeof record.channelId === 'string' ? record.channelId : '';
+  const raw = record.prefs;
+  if (!channelId || !raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const prefs: Partial<SecretaryContactChannelPrefs> = {};
+  for (const key of PREF_KEYS) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (typeof value === 'boolean') prefs[key] = value;
+  }
+  return Object.keys(prefs).length > 0 ? { channelId, prefs } : null;
 }
 
 /** 关注列表的操作：取消一项要带 id，全清不带 */
@@ -106,7 +131,7 @@ function readFollowingRequest(
 
 export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryContact {
   const store = new ContactStore(deps.dir());
-  let service: TelegramContactService | null = null;
+  let service: ContactService | null = null;
 
   const broadcast = (): void => {
     if (!service) return;
@@ -168,7 +193,8 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
   const commands = createContactCommands({
     lang: () => replyLang(deps.profile()),
     now: () => Date.now(),
-    allowMemory: () => store.file().allowMemory,
+    // 发命令那个人的渠道开着记忆才给看
+    allowMemory: () => service?.memoryAllowed() ?? store.file().allowMemory,
     board: () => secretaryBoard(secretaryDispatchPorts),
     daily: (day) => buildDaily(secretaryDailyPorts, day),
     feed: async (query) => {
@@ -205,19 +231,48 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
   });
 
   ports.commands = commands;
-  service = new TelegramContactService(store, ports);
+  service = new ContactService(store, ports);
   // 派发与定时不认识联系方式：只通过这个探针问一句「这一轮是手机发起的吗」
   setPhoneTurnChatProbe((conversationId) => service?.phoneTurnChat(conversationId) ?? null);
+
+  let unplug: (() => void) | null = null;
 
   return {
     service,
     state: () => service.state(),
-    start: () => service.start(),
-    stop: () => service.stop(),
+    start: async () => {
+      // 插件渠道：清单声明的先出卡片，插件 register 后再收发；停用卸载时一起清掉
+      if (!unplug) {
+        const plugins = getExtensionPlugins();
+        const wired = connectPluginChannels(service, {
+          contactChannels: () => plugins.contactChannels(),
+          callContact: (pluginId, channelId, request) =>
+            plugins.callContact(pluginId, channelId, request),
+          onChange: (listener) => plugins.onChange(listener),
+        });
+        setPluginContactBridge(wired.handlers);
+        unplug = () => {
+          setPluginContactBridge(null);
+          wired.dispose();
+        };
+      }
+      await service.start();
+    },
+    stop: async () => {
+      unplug?.();
+      unplug = null;
+      await service.stop();
+    },
     register() {
       ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_STATE, async (event) => {
-        if (!isEditor(event.sender.id))
-          return { telegram: { ...service.state().telegram, status: 'unbound' } };
+        if (!isEditor(event.sender.id)) {
+          const state = service.state();
+          return {
+            enabled: false,
+            channels: [],
+            telegram: { ...state.telegram, status: 'unbound' },
+          };
+        }
         return service.state();
       });
 
@@ -249,9 +304,14 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
 
       ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, async (event, request: unknown) => {
         if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        const channel = readChannelPrefs(request);
+        if (channel) return service.setChannelPrefs(channel.channelId, channel.prefs);
+        const enabled = readFlag(request, 'enabled');
         const cards = readFlag(request, 'allowCardConfirm');
         const memory = readFlag(request, 'allowMemory');
-        if (cards === null && memory === null) return { ok: false, error: 'invalid request' };
+        if (enabled === null && cards === null && memory === null)
+          return { ok: false, error: 'invalid request' };
+        if (enabled !== null) await service.setEnabled(enabled);
         if (cards !== null) service.setAllowCardConfirm(cards);
         if (memory !== null) service.setAllowMemory(memory);
         return { ok: true };

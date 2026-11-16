@@ -7,6 +7,7 @@ import type {
 } from '@shared/types/secretary';
 import { readJson, writeJsonAtomic } from '../bots/files';
 import { appendAudit } from './audit';
+import type { Peer } from './contact/channel';
 
 /** 手机关注的任务上限：超过按时间淘汰最旧的 */
 export const FOLLOWING_LIMIT = 20;
@@ -16,7 +17,7 @@ const SUMMARY_MAX = 80;
 
 /**
  * 一条关注：手机发起的回合里派生出来的会话或定时。
- * 记下 chat 与摘要，之后的结果推送即使 /sync 关着也能对上是哪件事。
+ * 记下发起它的联系人与摘要，之后的结果推送即使 /sync 关着也能对上是哪件事。
  */
 export interface FollowedTask {
   /** kind:targetId，去重与取消都认它 */
@@ -24,7 +25,8 @@ export interface FollowedTask {
   kind: SecretaryFollowKind;
   /** 会话 id 或定时 id；等待中的派发先记 pendingId，建出会话后改挂 */
   targetId: string;
-  chatId: number;
+  /** 结果只回发起它的那个联系人 */
+  origin: Peer;
   at: number;
   summary: string;
   secretaryConversationId?: string;
@@ -43,6 +45,8 @@ export interface FollowingPort {
   take(kind: SecretaryFollowKind, targetId: string): FollowedTask | undefined;
   remove(id: string): boolean;
   clear(): number;
+  /** 渠道解绑或插件停用：只清这个渠道发起的关注 */
+  clearChannel(channelId: string): number;
 }
 
 export function followKey(kind: SecretaryFollowKind, targetId: string): string {
@@ -67,18 +71,32 @@ function summaryOf(value: unknown): string {
   return flat.length > SUMMARY_MAX ? `${flat.slice(0, SUMMARY_MAX)}…` : flat;
 }
 
+/** 老数据只有 Telegram 的 chatId：升级成 { channelId:'telegram', peerId } */
+function parseOrigin(raw: Record<string, unknown>): Peer {
+  const origin = raw.origin;
+  if (
+    isRecord(origin) &&
+    typeof origin.channelId === 'string' &&
+    origin.channelId &&
+    typeof origin.peerId === 'string'
+  ) {
+    return { channelId: origin.channelId, peerId: origin.peerId };
+  }
+  const chatId = typeof raw.chatId === 'number' && Number.isInteger(raw.chatId) ? raw.chatId : 0;
+  return { channelId: 'telegram', peerId: String(chatId) };
+}
+
 function parseItem(raw: unknown): FollowedTask | null {
   if (!isRecord(raw)) return null;
   const kind = raw.kind;
   const targetId = typeof raw.targetId === 'string' ? raw.targetId.trim() : '';
-  const chatId = typeof raw.chatId === 'number' && Number.isInteger(raw.chatId) ? raw.chatId : 0;
   const at = typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : 0;
   if (!isKind(kind) || !targetId) return null;
   return {
     id: followKey(kind, targetId),
     kind,
     targetId,
-    chatId,
+    origin: parseOrigin(raw),
     at,
     summary: summaryOf(raw.summary),
     ...(typeof raw.secretaryConversationId === 'string' && raw.secretaryConversationId
@@ -125,7 +143,7 @@ export class FollowingStore implements FollowingPort {
   add(input: {
     kind: SecretaryFollowKind;
     targetId: string;
-    chatId: number;
+    origin: Peer;
     at: number;
     summary: string;
     secretaryConversationId?: string;
@@ -134,7 +152,7 @@ export class FollowingStore implements FollowingPort {
       id: followKey(input.kind, input.targetId),
       kind: input.kind,
       targetId: input.targetId,
-      chatId: input.chatId,
+      origin: { channelId: input.origin.channelId, peerId: input.origin.peerId },
       at: input.at,
       summary: summaryOf(input.summary),
       ...(input.secretaryConversationId
@@ -173,6 +191,13 @@ export class FollowingStore implements FollowingPort {
     return count;
   }
 
+  clearChannel(channelId: string): number {
+    const items = this.list();
+    const rest = items.filter((entry) => entry.origin.channelId !== channelId);
+    if (rest.length !== items.length) this.save(rest);
+    return items.length - rest.length;
+  }
+
   /** 等待中的派发/待确认的卡变成真实会话：关注项改挂到会话上 */
   renameTarget(from: string, to: string): boolean {
     const items = this.list();
@@ -184,7 +209,7 @@ export class FollowingStore implements FollowingPort {
   }
 }
 
-/** 界面与手机命令共用的一份视图：不带 chatId 这类内部字段 */
+/** 界面与手机命令共用的一份视图：不带 origin 这类内部字段 */
 export function followingViews(items: readonly FollowedTask[]): SecretaryFollowingView[] {
   return items.map((item) => ({
     id: item.id,
@@ -195,18 +220,18 @@ export function followingViews(items: readonly FollowedTask[]): SecretaryFollowi
 }
 
 /**
- * 手机发起的回合：由联系方式服务登记，返回发起它的 chat。
+ * 手机发起的回合：由联系方式服务登记，返回发起它的联系人。
  * 派发与定时都不认识联系方式，只通过这个探针问一句「这一轮是手机发起的吗」。
  */
-let phoneTurnChat: ((conversationId: string) => number | null) | null = null;
+let phoneTurnChat: ((conversationId: string) => Peer | null) | null = null;
 
 export function setPhoneTurnChatProbe(
-  probe: ((conversationId: string) => number | null) | null
+  probe: ((conversationId: string) => Peer | null) | null
 ): void {
   phoneTurnChat = probe;
 }
 
-export function phoneTurnChatOf(conversationId: string | null): number | null {
+export function phoneTurnChatOf(conversationId: string | null): Peer | null {
   if (!conversationId) return null;
   try {
     return phoneTurnChat?.(conversationId) ?? null;
@@ -226,7 +251,7 @@ function store(): FollowingStore {
 /** 写关注要的三件事：存储、探针与审计；测试整份换掉，生产走磁盘 */
 export interface FollowDeps {
   store: FollowingStore;
-  probe(conversationId: string | null): number | null;
+  probe(conversationId: string | null): Peer | null;
   audit(entry: SecretaryAuditEntry): void;
   now(): number;
 }
@@ -261,12 +286,12 @@ export function recordPhoneFollow(
   },
   deps: FollowDeps = productionDeps()
 ): boolean {
-  const chatId = deps.probe(input.secretaryConversationId);
-  if (chatId === null) return false;
+  const origin = deps.probe(input.secretaryConversationId);
+  if (origin === null) return false;
   const item = deps.store.add({
     kind: input.kind,
     targetId: input.targetId,
-    chatId,
+    origin,
     at: deps.now(),
     summary: input.summary,
     ...(input.secretaryConversationId
