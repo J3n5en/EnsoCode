@@ -1423,6 +1423,8 @@ export type AgentCommand =
     }
   | { type: 'set-model'; identity: SessionIdentity; model: SpawnModelConfig }
   | { type: 'set-thinking'; identity: SessionIdentity; level: ThinkingLevel }
+  /** 仅带人设 spawn 的父会话（秘书）：就地换系统提示词，下一轮生效 */
+  | { type: 'set-system-prompt'; identity: SessionIdentity; systemPrompt: string }
   | {
       type: 'set-reasoning';
       identity: SessionIdentity;
@@ -4020,6 +4022,12 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
       return hasExactKeys(value, ['type', 'identity', 'level']) &&
         parseAnySessionIdentity(value.identity) &&
         THINKING_LEVELS.includes(value.level as ThinkingLevel)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-system-prompt':
+      return hasExactKeys(value, ['type', 'identity', 'systemPrompt']) &&
+        parseSessionIdentity(value.identity) &&
+        isNonEmptyString(value.systemPrompt)
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-reasoning':

@@ -1718,6 +1718,14 @@ export function setSessionThinking(
   return sendAgentCommand({ type: 'set-thinking', identity, level });
 }
 
+/** 秘书档案改了：活着的会话就地换系统提示词，不重建、不丢历史 */
+export function setSessionSystemPrompt(
+  identity: SessionIdentity,
+  systemPrompt: string
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'set-system-prompt', identity, systemPrompt });
+}
+
 export function setSessionReasoning(
   identity: SessionIdentity,
   enabled: boolean,
