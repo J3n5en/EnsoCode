@@ -32,6 +32,20 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toMatch(/bash|file/i);
   });
 
+  it('称呼按档案写进提示词，没设置时不写称呼（默认）', () => {
+    expect(
+      buildSecretarySystemPrompt({
+        profile: { ...profile, addressAs: '哥哥' },
+        persona: '',
+        uiLanguage: 'en',
+      })
+    ).toContain('Address the user as "哥哥".');
+    for (const p of [profile, null])
+      expect(
+        buildSecretarySystemPrompt({ profile: p, persona: '', uiLanguage: 'en' })
+      ).not.toContain('Address the user as');
+  });
+
   it('回复语言跟随档案，ui 时跟随界面语言', () => {
     expect(buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' })).toContain(
       'Chinese'
