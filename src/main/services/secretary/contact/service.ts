@@ -1581,6 +1581,7 @@ export class TelegramContactService implements SecretaryContactPort {
     const conversationId = this.ports.secretaryConversationId();
     if (!conversationId) {
       this.audit('contact_inbound', false, 'no-secretary');
+      await this.notifyUndelivered();
       return;
     }
     // 入站只在这里包一次：所有渠道都走 wrapInboundMessage
@@ -1602,7 +1603,20 @@ export class TelegramContactService implements SecretaryContactPort {
     if (!delivered.ok) {
       this.awaitingReply.delete(conversationId);
       this.phoneChain.delete(conversationId);
+      await this.notifyUndelivered();
     }
+  }
+
+  /** 秘书没拉起来或没有可用会话：回一句，别让手机那边干等 */
+  private async notifyUndelivered(): Promise<void> {
+    const chatId = this.store.file().chat?.id;
+    if (!chatId) return;
+    await this.send(
+      chatId,
+      this.ports.lang() === 'zh'
+        ? '秘书没能启动，这条消息没送到。稍后再发，或在电脑上打开秘书看看。'
+        : "Couldn't start the secretary, so this message wasn't delivered. Try again later or open the secretary on your computer."
+    );
   }
 
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {

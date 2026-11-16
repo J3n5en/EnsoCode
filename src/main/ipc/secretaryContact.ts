@@ -16,6 +16,7 @@ import {
   TelegramContactService,
 } from '../services/secretary/contact/service';
 import { ContactStore } from '../services/secretary/contact/store';
+import { deliverToSecretary } from '../services/secretary/contact/wake';
 import { buildDaily, secretaryDailyPorts } from '../services/secretary/daily';
 import { type DeliveryPorts, resolveTarget } from '../services/secretary/deliveries';
 import {
@@ -28,6 +29,7 @@ import { secretaryProjectId } from '../services/secretary/identity';
 import { listSchedules, secretarySchedulePorts } from '../services/secretary/schedules';
 import {
   answerAskAsUserFromMain,
+  isRootSessionAlive,
   promptRootFromMain,
   readSessionHistoryFile,
   resumeRootFromMain,
@@ -139,15 +141,17 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
         text: redactSecrets(message.text),
       }));
     },
-    // 手机发来的话进秘书会话：worker 已经释放就先恢复，再投
-    deliver: async (conversationId, text) => {
-      const first = promptRootFromMain(conversationId, text, randomUUID());
-      if (first.ok) return { ok: true };
-      const resumed = await resumeRootFromMain(conversationId);
-      if (!resumed.ok) return { ok: false, error: resumed.error ?? 'resume-failed' };
-      const retried = promptRootFromMain(conversationId, text, randomUUID());
-      return retried.ok ? { ok: true } : { ok: false, error: retried.error ?? 'prompt-failed' };
-    },
+    // 手机发来的话进秘书会话：worker 已被回收就先恢复，再投
+    deliver: (conversationId, text) =>
+      deliverToSecretary(
+        {
+          alive: isRootSessionAlive,
+          resume: resumeRootFromMain,
+          prompt: (id, body) => promptRootFromMain(id, body, randomUUID()),
+        },
+        conversationId,
+        text
+      ),
     // 与在应用里亲手答同一条路径：谁先答算谁的
     answerAsk: (conversationId, requestId, answer) =>
       answerAskAsUserFromMain(conversationId, requestId, answer),

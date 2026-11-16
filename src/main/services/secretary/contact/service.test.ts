@@ -17,6 +17,7 @@ import type {
 import { TelegramApiError } from './client';
 import { type ContactServicePorts, TelegramContactService } from './service';
 import { ContactStore } from './store';
+import { deliverToSecretary } from './wake';
 
 const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
 
@@ -1987,4 +1988,97 @@ describe('手机关注的任务', () => {
     // 确认完就收回：之后桌面上的派发不算手机发起
     expect(h.service.phoneTurnChat('sec-1')).toBeNull();
   });
+});
+
+describe('秘书会话被回收后的入站', () => {
+  /** 真实投递口：先看 worker 在不在，不在就拉起再投 */
+  function wakeable(h: ReturnType<typeof harness>, alive: boolean, resumeOk = true) {
+    const calls: string[] = [];
+    h.ports.deliver = (id, text) =>
+      deliverToSecretary(
+        {
+          alive: () => alive,
+          resume: async (target) => {
+            calls.push(`resume:${target}`);
+            if (resumeOk) alive = true;
+            return resumeOk ? { ok: true } : { ok: false, error: 'no remembered model' };
+          },
+          prompt: (target, body) => {
+            calls.push(`prompt:${target}`);
+            h.world.delivered.push(body);
+            return { ok: true };
+          },
+        },
+        id,
+        text
+      );
+    return calls;
+  }
+
+  async function bound(h: ReturnType<typeof harness>): Promise<void> {
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    h.api.sent.length = 0;
+  }
+
+  it('秘书没在跑：入站文本先拉起会话，再送入这句话', async () => {
+    const h = harness();
+    const calls = wakeable(h, false);
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(calls).toEqual(['resume:sec-1', 'prompt:sec-1']);
+    expect(h.world.delivered[0]).toContain('在吗');
+    expect(h.audits.find((entry) => entry.op === 'contact_inbound')?.ok).toBe(true);
+  });
+
+  it('会话已在跑：直接投，不重复拉起', async () => {
+    const h = harness();
+    const calls = wakeable(h, true);
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
+    h.api.push(privateMessage('还在吗'));
+    await waitFor(() => h.world.delivered.length > 1, 'delivered');
+    expect(calls).toEqual(['prompt:sec-1', 'prompt:sec-1']);
+  });
+
+  it('拉起失败：给这个 chat 回一句失败说明，不静默', async () => {
+    const h = harness();
+    const calls = wakeable(h, false, false);
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.api.sent.length > 0, 'failure notice');
+    expect(calls).toEqual(['resume:sec-1']);
+    expect(h.world.delivered).toEqual([]);
+    expect(h.api.sent.at(-1)?.chatId).toBe(777);
+    expect(h.api.sent.at(-1)?.text).toContain('没送到');
+    expect(h.audits.find((entry) => entry.op === 'contact_inbound')).toMatchObject({
+      ok: false,
+      detail: 'no remembered model',
+    });
+  });
+
+  it('没有可用的秘书会话：也回一句说明', async () => {
+    const h = harness();
+    h.world.conversationId = null;
+    await bound(h);
+    h.api.push(privateMessage('在吗'));
+    await waitFor(() => h.api.sent.length > 0, 'failure notice');
+    expect(h.world.delivered).toEqual([]);
+    expect(h.api.sent.at(-1)?.text).toContain('没送到');
+  });
+
+  it.each(['/status', '/board', '/feed', '/todo', '/schedules', '/memory', '/help'])(
+    '只读命令 %s 由 Main 直接回，不拉起秘书',
+    async (command) => {
+      const h = harness();
+      const calls = wakeable(h, false);
+      await bound(h);
+      h.api.push(privateMessage(command));
+      await waitFor(() => h.api.sent.length > 0, 'command reply');
+      expect(calls).toEqual([]);
+      expect(h.world.delivered).toEqual([]);
+    }
+  );
 });
