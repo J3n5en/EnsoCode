@@ -1,3 +1,4 @@
+import { SHELL_TIMEOUT_HINT } from '@shared/shellTimeoutHint';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -53,5 +54,35 @@ describe('普通会话的工具行', () => {
       expect(markup, name).toContain('data-enso="tool-row"');
       expect(markup, name).not.toContain('data-enso="tool-card"');
     }
+  });
+});
+
+/** 卡片标题那一格（工具名后的 font-mono 文本） */
+function headline(item: TimelineItem): string {
+  const markup = renderToStaticMarkup(createElement(TimelineRow, { item }));
+  const match = /<span class="min-w-0 flex-1 truncate font-mono[^"]*">([^<]*)<\/span>/.exec(markup);
+  return match?.[1] ?? '';
+}
+
+describe('命令失败卡片标题', () => {
+  it('输出以 timeout 提示开头时，标题跳过提示和空行，显示真实错误', () => {
+    const output = `${SHELL_TIMEOUT_HINT}\n\nError: Cannot find module 'x'\n\nCommand exited with code 1`;
+    expect(headline(tool('bash', { state: 'error', output }))).toBe(
+      'Error: Cannot find module &#x27;x&#x27;'
+    );
+  });
+
+  it('没有 timeout 提示时仍取输出第一行', () => {
+    const output = 'head: command not found\nCommand exited with code 1';
+    expect(headline(tool('powershell', { state: 'error', output }))).toBe(
+      'head: command not found'
+    );
+  });
+
+  it('成功时标题仍是命令摘要，不受输出里的提示影响', () => {
+    const output = `${SHELL_TIMEOUT_HINT}\n\nok`;
+    expect(headline(tool('bash', { state: 'ok', output, summary: 'pnpm build' }))).toBe(
+      'pnpm build'
+    );
   });
 });

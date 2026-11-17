@@ -17,6 +17,7 @@ import {
   updatesFold,
 } from '@shared/secretary/injectedBlocks';
 import { parseSecretaryUpdates, type SecretaryUpdateLine } from '@shared/secretary/updatesText';
+import { skipShellTimeoutHint } from '@shared/shellTimeoutHint';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
 import { splitTurnNotes } from '@shared/turnNotes';
 import type {
@@ -2655,7 +2656,7 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
             {item.state === 'error' && item.output
               ? summary && item.name === 'apply_patch' && hasFileChanges
                 ? `${headerSummary} · ${firstLine(item.output)}`
-                : firstLine(item.output)
+                : firstLine(skipShellTimeoutHint(item.output))
               : summary
                 ? headerSummary
                 : null}

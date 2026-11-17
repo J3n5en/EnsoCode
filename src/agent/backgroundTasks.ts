@@ -5,6 +5,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
 import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
+import { SHELL_TIMEOUT_HINT } from '@shared/shellTimeoutHint';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
 import {
   bindForegroundCommand,
@@ -796,11 +797,7 @@ const TIMEOUT_HINT_MIN_SEC = SHELL_LIMITS.yieldDefaultMs / 1000;
  */
 export function shellTimeoutHint(timeoutSec: number | undefined): string {
   if (timeoutSec === undefined || timeoutSec < TIMEOUT_HINT_MIN_SEC) return '';
-  return (
-    'timeout only kills the process; it does not keep this call in the foreground. ' +
-    'If the command may outlast the yield, set background: true and end your turn — completion wakes you. ' +
-    'Do not poll with sleep, ps, pgrep, or task_output loops.'
-  );
+  return SHELL_TIMEOUT_HINT;
 }
 
 /** 把提示附在工具结果前面：规则写进结果里才不会在长会话中被冲淡 */
