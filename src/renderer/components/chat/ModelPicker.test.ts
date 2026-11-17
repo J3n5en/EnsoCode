@@ -7,9 +7,11 @@ import type {
   ThinkingLevel,
 } from '@shared/types';
 import { VIRTUAL_PROVIDER_ID, type VirtualModelEntry } from '@shared/virtualModels';
-import { createElement, type ReactNode } from 'react';
+import { parseHTML } from 'linkedom';
+import { act, createElement, type ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   duplicateModelLabels,
   expandWorkbenchGroups,
@@ -30,6 +32,9 @@ interface ClickWrapperProps extends WrapperProps {
 
 const harness = vi.hoisted(() => ({
   menuItemClicks: [] as Array<() => void>,
+  menuOnOpenChange: undefined as
+    | ((open: boolean, details?: { cancel: () => void; allowPropagation: () => void }) => void)
+    | undefined,
   switchProps: null as Record<string, unknown> | null,
   buttons: [] as Record<string, unknown>[],
   meta: {} as Record<string, unknown>,
@@ -68,6 +73,18 @@ vi.mock('@/hooks/useAccountUsage', () => ({
 
 vi.mock('@/components/ui/menu', () => {
   const Wrap = ({ children }: WrapperProps) => createElement('div', null, children);
+  const Menu = ({
+    children,
+    onOpenChange,
+  }: WrapperProps & {
+    onOpenChange?: (
+      open: boolean,
+      details?: { cancel: () => void; allowPropagation: () => void }
+    ) => void;
+  }) => {
+    harness.menuOnOpenChange = onOpenChange;
+    return createElement('div', null, children);
+  };
   const MenuItem = ({ children, onClick }: ClickWrapperProps) => {
     if (onClick) harness.menuItemClicks.push(onClick);
     return createElement('div', null, children);
@@ -75,7 +92,7 @@ vi.mock('@/components/ui/menu', () => {
   const MenuTrigger = ({ children, title }: WrapperProps & { title?: string }) =>
     createElement('button', { type: 'button', title }, children);
   return {
-    Menu: Wrap,
+    Menu,
     MenuGroup: Wrap,
     MenuGroupLabel: Wrap,
     MenuItem,
@@ -138,6 +155,7 @@ const commonProps = {
 
 beforeEach(() => {
   harness.menuItemClicks = [];
+  harness.menuOnOpenChange = undefined;
   harness.switchProps = null;
   harness.buttons = [];
   harness.meta = {};
@@ -1074,5 +1092,109 @@ describe('model picker workbench', () => {
     expect(html).not.toContain('data-model-picker="account-tabs"');
     expect(html).toContain('Gateway model');
     expect(harness.usageAccountKeys).toEqual([]);
+  });
+});
+
+describe('model picker 打开时滚到当前渠道', () => {
+  const vendorProviders: ModelProvider[] = [
+    {
+      ...providers[0],
+      id: 'work',
+      name: 'Work',
+      oauthAccountKey: 'openai',
+      models: [{ id: 'gpt', label: 'GPT Work' }],
+    },
+    {
+      ...providers[0],
+      id: 'gateway',
+      name: 'Gateway',
+      models: [{ id: 'gw', label: 'Gateway model' }],
+    },
+    {
+      ...providers[0],
+      id: 'relay',
+      name: 'Relay',
+      baseUrl: 'https://relay.example.test/v1',
+      models: [{ id: 'rl', label: 'Relay model' }],
+    },
+  ];
+
+  const scrolled: Element[] = [];
+  const openDetails = { cancel() {}, allowPropagation() {} };
+  let root: Root;
+  let scrollIntoView: ReturnType<typeof vi.fn>;
+
+  async function mount(props: { providerId: string; modelId: string }) {
+    await act(async () => {
+      root.render(
+        createElement(ModelPicker, {
+          ...commonProps,
+          providers: vendorProviders,
+          ...props,
+        })
+      );
+    });
+  }
+
+  async function setOpen(next: boolean) {
+    await act(async () => {
+      harness.menuOnOpenChange?.(next, openDetails);
+    });
+  }
+
+  beforeEach(() => {
+    scrolled.length = 0;
+    scrollIntoView = vi.fn(function (this: Element) {
+      scrolled.push(this);
+    });
+    const dom = parseHTML('<html><body><div id="root"></div></body></html>');
+    Object.assign(dom.window, {
+      electronAPI: { providers: { listOauth: () => Promise.resolve([]) } },
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    (
+      dom.window.HTMLElement.prototype as unknown as { scrollIntoView: typeof scrollIntoView }
+    ).scrollIntoView = scrollIntoView;
+    const container = dom.document.getElementById('root') as unknown as HTMLElement;
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it('打开时把第三个厂商组滚进可视区', async () => {
+    await mount({ providerId: 'relay', modelId: 'rl' });
+    await setOpen(true);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect((scrolled[0] as HTMLElement).getAttribute('data-model-picker-vendor')).toBe(
+      '__custom:relay'
+    );
+  });
+
+  it('未选中模型时不滚动', async () => {
+    await mount({ providerId: '', modelId: '' });
+    await setOpen(true);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('关闭再打开时滚到新的当前渠道', async () => {
+    await mount({ providerId: 'relay', modelId: 'rl' });
+    await setOpen(true);
+    expect((scrolled[0] as HTMLElement).getAttribute('data-model-picker-vendor')).toBe(
+      '__custom:relay'
+    );
+    await setOpen(false);
+    scrolled.length = 0;
+    scrollIntoView.mockClear();
+    await mount({ providerId: 'work', modelId: 'gpt' });
+    await setOpen(true);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect((scrolled[0] as HTMLElement).getAttribute('data-model-picker-vendor')).toBe('openai');
   });
 });
