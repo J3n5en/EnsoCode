@@ -162,6 +162,8 @@ function isAgentTypeEntry(value: unknown): value is AgentTypeEntry {
 export class AgentSessionIndex {
   private readonly sessions = new Map<string, IndexedSession>();
   private readonly reservations = new Map<string, ChildReservation>();
+  /** btw 旁路会话 → 父会话：旁路不落盘，只能在 Main 内存里记住归属 */
+  private readonly btwParents = new Map<string, string>();
   private readonly randomUuid: () => string;
 
   constructor(private readonly options: AgentSessionIndexOptions) {
@@ -295,6 +297,30 @@ export class AgentSessionIndex {
         return true;
     }
     return false;
+  }
+
+  linkBtw(sessionId: string, parentConversationId: string): void {
+    this.btwParents.set(sessionId, parentConversationId);
+  }
+
+  unlinkBtw(sessionId: string): void {
+    this.btwParents.delete(sessionId);
+  }
+
+  /** 挂在 rootId 工作区树下、worker 里还活着的 btw 旁路会话 */
+  btwSessionIds(rootId: string): string[] {
+    return [...this.btwParents]
+      .filter(
+        ([id, parentId]) => this.workspaceRoot(parentId) === rootId && this.sessions.get(id)?.alive
+      )
+      .map(([id]) => id);
+  }
+
+  btwTreeRunning(rootId: string): boolean {
+    return this.btwSessionIds(rootId).some((id) => {
+      const session = this.sessions.get(id);
+      return Boolean(session && (!session.ready || session.status === 'running'));
+    });
   }
 
   isCurrent(identity: SessionIdentity): boolean {

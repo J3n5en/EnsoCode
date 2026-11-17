@@ -95,6 +95,28 @@ export function sessionWorktreeBusy(conversationId: string): boolean {
   return bindingConversations.has(rootId) || Boolean(cwd && workspaceOperation(cwd));
 }
 
+/** 移动会话前判定：工作区正被操作，或共用该 worktree 的任一会话（含 btw 旁路、子会话预约）在跑 */
+export function sessionWorktreeInUse(conversationId: string): boolean {
+  if (sessionWorktreeBusy(conversationId)) return true;
+  const record = sessionWorktree(agentSessionIndex.workspaceRoot(conversationId));
+  return Boolean(
+    record &&
+      ensureRegistry()
+        .bindings(record)
+        .some(
+          ({ conversationId: id }) =>
+            sessionWorktreeBusy(id) ||
+            agentSessionIndex.workspaceTreeRunning(id) ||
+            agentSessionIndex.btwTreeRunning(id)
+        )
+  );
+}
+
+/** 只解除会话与 worktree 的登记，不删目录；其他共用它的会话保持绑定 */
+export function unbindSessionWorktree(conversationId: string): void {
+  ensureRegistry().delete(conversationId);
+}
+
 const physicalPath = workspaceIdentityPath;
 
 function workspaceOperation(cwd: string): Promise<void> | undefined {

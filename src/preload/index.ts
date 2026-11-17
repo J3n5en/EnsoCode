@@ -336,6 +336,12 @@ const electronAPI = {
     /** 用户明确删除会话：Main 先删行，空表写回不会被整表删除守卫拦下 */
     removeConversations: (ids: string[]): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_REMOVE, ids),
+    moveConversation: (input: {
+      conversationId: string;
+      targetProjectId: string;
+    }): Promise<
+      { ok: true; value: ConversationAuthorityProjection } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_MOVE, input),
     /** Main 拒收本窗口的会话写回，要求重新读会话 */
     onConversationsResync: (callback: () => void): (() => void) => {
       const listener = () => callback();

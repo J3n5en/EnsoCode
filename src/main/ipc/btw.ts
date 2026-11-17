@@ -100,6 +100,7 @@ export function registerBtwHandlers(): void {
         ? existing
         : { sessionId: parsed.sessionId, generation: randomUUID() };
     agentSessionIndex.prepareParent(identity);
+    agentSessionIndex.linkBtw(parsed.sessionId, parsed.parentConversationId);
     let credentialKeys: ReadonlySet<string>;
     try {
       credentialKeys = await readStoredOauthCredentialKeys();
@@ -147,6 +148,7 @@ export function registerBtwHandlers(): void {
       abortSession(identity);
       await releaseParentSession(identity);
     }
+    agentSessionIndex.unlinkBtw(parsed.sessionId);
     removeConversationSessionFiles({
       sessionDir: path.join(app.getPath('userData'), 'agent', 'sessions'),
       conversationId: parsed.sessionId,

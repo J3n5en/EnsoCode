@@ -1022,6 +1022,56 @@ export function registerSettingsHandlers(): void {
     });
   });
 
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_MOVE, async (_event, input: unknown) => {
+    const { handleConversationsMove } = await import('./conversationsMove');
+    const { getSourceAuthorityRegistry, releaseRootFromMain } = await import('./agent');
+    const { agentSessionIndex } = await import('./sessionIndex');
+    const { sessionWorktreeInUse, unbindSessionWorktree } = await import('./worktree');
+    const { removeScratchWorkspace } = await import('../services/sessionFileCleanup');
+    const registry = getSourceAuthorityRegistry();
+    if (!registry) return { ok: false, error: 'unavailable' };
+    return handleConversationsMove(input, {
+      moveConversation: (conversationId, targetProjectId, options) =>
+        registry.moveConversation(conversationId, targetProjectId, options),
+      isRunning: (conversationId) =>
+        agentSessionIndex.workspaceTreeRunning(conversationId) ||
+        agentSessionIndex.btwTreeRunning(conversationId),
+      worktreeBusy: sessionWorktreeInUse,
+      source: (conversationId) => {
+        const conversation = registry.conversation(conversationId);
+        if (!conversation) return undefined;
+        const project = registry.project(conversation.projectId);
+        return {
+          projectId: conversation.projectId,
+          ...(project?.kind === 'scratch' ? { scratchRoot: project.canonicalPath } : {}),
+        };
+      },
+      readConversations: readPersistedConversations,
+      patchProjectIds: (ids, targetProjectId, rootId) => {
+        patchConversationsState((state) => {
+          for (const id of ids) {
+            const row = state.conversations[id];
+            if (row) row.projectId = targetProjectId;
+          }
+          const root = state.conversations[rootId];
+          if (root) {
+            delete root.worktree;
+            delete root.worktreeMissing;
+          }
+        });
+      },
+      unbindWorktree: unbindSessionWorktree,
+      releaseSessions: async (conversationId) => {
+        const ids = [conversationId, ...agentSessionIndex.btwSessionIds(conversationId)].filter(
+          (id) => agentSessionIndex.isAlive(id)
+        );
+        const results = await Promise.all(ids.map((id) => releaseRootFromMain(id)));
+        return results.every((result) => result.ok);
+      },
+      removeScratchWorkspace,
+    });
+  });
+
   // 按键合并写：只更新单个顶层键,避免多 store 并发 read-modify-write 互相覆盖
   ipcMain.handle(
     IPC_CHANNELS.SETTINGS_WRITE_KEY,

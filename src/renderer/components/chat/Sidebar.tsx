@@ -75,6 +75,11 @@ import {
 import { GroupChips } from '@/components/chat/GroupChips';
 import { GroupEditorDialog } from '@/components/chat/GroupEditorDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
+import {
+  canMoveConversationFrom,
+  moveConversationFromMenu,
+  moveConversationTargets,
+} from '@/components/chat/moveConversationAction';
 import { openDirectoryFromMenu, openDirectoryLabel } from '@/components/chat/openDirectoryAction';
 import { ProjectSettingsDialog } from '@/components/chat/ProjectSettingsDialog';
 import {
@@ -2522,6 +2527,9 @@ function ConversationRow({
   onRemove,
 }: ConversationRowProps) {
   const { t } = useI18n();
+  const projects = useSettingsStore((state) => state.projects);
+  const movable = canMoveConversationFrom(projects, conversation.projectId);
+  const moveTargets = moveConversationTargets(projects, conversation.projectId);
   const localProject = useSettingsStore((state) =>
     state.projects.some(
       (project) =>
@@ -2811,6 +2819,30 @@ function ConversationRow({
                     {t('Move to worktree')}
                   </ContextMenuItem>
                 ))}
+          {!movable ? null : moveTargets.length > 0 ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Folders />
+                {scratchProject ? t('Add to project…') : t('Move to project…')}
+              </ContextMenuSubTrigger>
+              <ContextMenuSubPopup className="min-w-36">
+                {moveTargets.map((project) => (
+                  <ContextMenuItem
+                    key={project.id}
+                    disabled={worktreeDisabled}
+                    onClick={() => void moveConversationFromMenu(id, project.id, t)}
+                  >
+                    {projectDisplayName(project)}
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubPopup>
+            </ContextMenuSub>
+          ) : (
+            <ContextMenuItem disabled>
+              <Folders />
+              {scratchProject ? t('Add to project…') : t('Move to project…')}
+            </ContextMenuItem>
+          )}
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onClick={() => onRemove(id)}>
             <Trash2 />

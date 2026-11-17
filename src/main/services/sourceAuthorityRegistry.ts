@@ -470,6 +470,43 @@ export class SourceAuthorityRegistry {
     return { accepted: true, value: this.copyConversation(conversation) };
   }
 
+  moveConversation(
+    conversationId: string,
+    targetProjectId: string,
+    options?: { running?: boolean; worktreeBusy?: boolean }
+  ): AuthorityMutationResult<ConversationAuthorityProjection> {
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || conversation.bot) {
+      return { accepted: false, error: 'not-found' };
+    }
+    if (this.projects.get(conversation.projectId)?.kind === 'secretary') {
+      return { accepted: false, error: 'source-secretary' };
+    }
+    const target = this.projects.get(targetProjectId);
+    if (target?.state !== 'active') {
+      return { accepted: false, error: 'target-unavailable' };
+    }
+    if (target.kind === 'bot-home' || target.kind === 'secretary') {
+      return { accepted: false, error: 'target-unavailable' };
+    }
+    if (target.kind === 'scratch') {
+      return { accepted: false, error: 'target-scratch' };
+    }
+    if (conversation.projectId === target.projectId) {
+      return { accepted: true, value: this.copyConversation(conversation) };
+    }
+    if (options?.running) {
+      return { accepted: false, error: 'running' };
+    }
+    if (options?.worktreeBusy) {
+      return { accepted: false, error: 'worktree-busy' };
+    }
+    conversation.projectId = target.projectId;
+    conversation.version += 1;
+    this.commit();
+    return { accepted: true, value: this.copyConversation(conversation) };
+  }
+
   updateSelection(
     request: UpdateConversationSelectionRequest
   ): AuthorityMutationResult<ConversationAuthorityProjection> {

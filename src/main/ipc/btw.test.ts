@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   authorityConversation: vi.fn(),
   workspace: vi.fn(),
   prepareParent: vi.fn(),
+  linkBtw: vi.fn(),
+  unlinkBtw: vi.fn(),
   currentIdentity: vi.fn(),
   sessionFile: vi.fn(),
   cleanup: vi.fn(),
@@ -59,6 +61,8 @@ vi.mock('./agent', () => ({
 vi.mock('./sessionIndex', () => ({
   agentSessionIndex: {
     prepareParent: mocks.prepareParent,
+    linkBtw: mocks.linkBtw,
+    unlinkBtw: mocks.unlinkBtw,
     currentIdentity: mocks.currentIdentity,
     sessionFile: mocks.sessionFile,
   },
@@ -92,6 +96,8 @@ describe('btw IPC', () => {
     mocks.authorityConversation.mockReset().mockReturnValue(undefined);
     mocks.workspace.mockReset().mockReturnValue({ cwd: '/repo', projectId: 'p' });
     mocks.prepareParent.mockReset();
+    mocks.linkBtw.mockReset();
+    mocks.unlinkBtw.mockReset();
     mocks.currentIdentity.mockReset().mockReturnValue(undefined);
     mocks.sessionFile.mockReset();
     mocks.cleanup.mockReset();
@@ -178,6 +184,7 @@ describe('btw IPC', () => {
       })
     ).resolves.toEqual({ ok: true });
     expect(mocks.prepareParent).toHaveBeenCalled();
+    expect(mocks.linkBtw).toHaveBeenCalledWith('btw-1', 'parent-1');
     expect(mocks.spawnSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'btw-1' }),
       expect.objectContaining({
@@ -238,6 +245,7 @@ describe('btw IPC', () => {
       sessionId: 'btw-1',
       generation: 'g1',
     });
+    expect(mocks.unlinkBtw).toHaveBeenCalledWith('btw-1');
     expect(mocks.cleanup).toHaveBeenCalledWith(
       expect.objectContaining({
         conversationId: 'btw-1',
