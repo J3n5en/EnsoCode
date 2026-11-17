@@ -60,6 +60,8 @@ let root: Root;
 let container: HTMLElement;
 let state: SecretaryContactState;
 let contactSettings: ReturnType<typeof vi.fn>;
+let contactTest: ReturnType<typeof vi.fn>;
+let pushState: (next: SecretaryContactState) => void;
 
 const groupsBox = () => container.querySelector('[data-enso="secretary-contact-groups"]');
 const addButton = () =>
@@ -95,11 +97,17 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   state = contactState([]);
   contactSettings = vi.fn(async () => ({ ok: true }));
+  contactTest = vi.fn(async () => ({ ok: true }));
+  pushState = () => {};
   (dom.window as unknown as Record<string, unknown>).electronAPI = {
     secretary: {
       contactState: vi.fn(async () => state),
-      onContactChanged: vi.fn(() => () => {}),
+      onContactChanged: vi.fn((callback: (next: SecretaryContactState) => void) => {
+        pushState = callback;
+        return () => {};
+      }),
       contactSettings,
+      contactTest,
     },
     extensionPlugins: { list: vi.fn(async () => []), onChanged: vi.fn(() => () => {}) },
   };
@@ -110,6 +118,66 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   vi.unstubAllGlobals();
+});
+
+const UNREACHABLE = 'Cannot reach api.telegram.org. Check the proxy.';
+const errorBanner = () =>
+  container.querySelector('[data-enso="secretary-contact-error"]')?.textContent ?? null;
+
+function withPoll(poll: SecretaryContactState['telegram']['poll']): SecretaryContactState {
+  const next = contactState([]);
+  return { ...next, telegram: { ...next.telegram, poll } };
+}
+
+/** Main 推一次新状态；load() 之后读到的也是它 */
+async function publish(next: SecretaryContactState): Promise<void> {
+  state = next;
+  await act(async () => pushState(next));
+}
+
+describe('连不上 api.telegram.org 提示', () => {
+  it('轮询失败显示；随后成功隐藏；再失败再显示', async () => {
+    await render();
+    expect(errorBanner()).toBeNull();
+    await publish(withPoll({ state: 'backoff', lastError: 'fetch failed' }));
+    expect(errorBanner()).toContain(UNREACHABLE);
+    await publish(withPoll({ state: 'running' }));
+    expect(errorBanner()).toBeNull();
+    await publish(withPoll({ state: 'backoff', lastError: 'fetch failed' }));
+    expect(errorBanner()).toContain(UNREACHABLE);
+  });
+
+  it('测试消息连不上后，轮询恢复即隐藏，不靠再点一次按钮', async () => {
+    await render();
+    contactTest.mockImplementationOnce(async () => {
+      await publish(withPoll({ state: 'backoff', lastError: 'fetch failed' }));
+      return { ok: false, error: 'network' };
+    });
+    await act(async () => {
+      (
+        container.querySelector('[data-enso="secretary-contact-test"]') as HTMLButtonElement
+      ).click();
+    });
+    expect(errorBanner()).toContain(UNREACHABLE);
+
+    await publish(withPoll({ state: 'running' }));
+    expect(errorBanner()).toBeNull();
+
+    await publish(withPoll({ state: 'backoff', lastError: 'fetch failed' }));
+    expect(errorBanner()).toContain(UNREACHABLE);
+  });
+
+  it('轮询没在跑（比如还没绑定）时，动作连不上照常显示', async () => {
+    state = withPoll({ state: 'stopped' });
+    await render();
+    contactTest.mockResolvedValueOnce({ ok: false, error: 'network' });
+    await act(async () => {
+      (
+        container.querySelector('[data-enso="secretary-contact-test"]') as HTMLButtonElement
+      ).click();
+    });
+    expect(errorBanner()).toContain(UNREACHABLE);
+  });
 });
 
 describe('Telegram 群白名单', () => {
