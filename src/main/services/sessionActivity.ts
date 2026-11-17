@@ -11,8 +11,8 @@ export const ACTIVITY_LIMIT_MAX = 50;
 
 export interface SessionToolActivity {
   name: string;
-  /** 有结果且不是错误才算成功；没有结果时见 pending */
-  ok: boolean;
+  /** 有结果时给出成败；还没有结果（pending）时不给，避免被读成失败 */
+  ok?: boolean;
   /** 还没有 toolResult：仍在执行或那一轮被中断 */
   pending?: boolean;
   durationMs?: number;
@@ -78,8 +78,7 @@ export function projectSessionActivity(
     const result = call.id ? results.get(call.id) : undefined;
     return {
       name: call.name,
-      ok: result ? !result.isError : false,
-      ...(result ? {} : { pending: true }),
+      ...(result ? { ok: !result.isError } : { pending: true }),
       ...(result?.durationMs === undefined ? {} : { durationMs: result.durationMs }),
       ...(result?.at === undefined && call.at === undefined ? {} : { at: result?.at ?? call.at }),
       ...(call.command ? { command: call.command } : {}),

@@ -37,9 +37,8 @@ describe('projectSessionActivity', () => {
 
   it('没有 toolResult 的调用标 pending，不当成失败', () => {
     const activity = projectSessionActivity([call('c1', 'bash', { command: 'sleep 999' }, 7_000)]);
-    expect(activity).toEqual([
-      { name: 'bash', ok: false, pending: true, at: 7_000, command: 'sleep 999' },
-    ]);
+    expect(activity).toEqual([{ name: 'bash', pending: true, at: 7_000, command: 'sleep 999' }]);
+    expect(activity[0]).not.toHaveProperty('ok');
   });
 
   it('命令摘要截到上限，非命令参数不外泄', () => {
@@ -49,7 +48,7 @@ describe('projectSessionActivity', () => {
       call('c2', 'read', { path: '/secret/path.ts', content: 'body' }),
     ]);
     expect(activity[0]?.command).toBe(`${'x'.repeat(ACTIVITY_COMMAND_MAX)}…`);
-    expect(activity[1]).toEqual({ name: 'read', ok: false, pending: true, at: 1_000 });
+    expect(activity[1]).toEqual({ name: 'read', pending: true, at: 1_000 });
   });
 
   it('只保留最近 limit 个调用', () => {

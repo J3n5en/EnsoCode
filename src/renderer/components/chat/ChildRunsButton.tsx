@@ -146,6 +146,7 @@ export function ChildRunsButton({
         title={viewing ? childRunLabel(viewing) : ''}
         read={read}
         botSession={false}
+        running={viewing?.live === true}
         onClose={() => setViewing(null)}
       />
     </>
