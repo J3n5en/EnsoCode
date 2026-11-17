@@ -108,6 +108,17 @@ export function telegramErrorCode(error: unknown): ChannelErrorCode {
   return 'api';
 }
 
+/** 轮询以外的请求结果交给轮询器判断连通性；getUpdates 由轮询器自己管 */
+function tracked(api: TelegramApi, poller: ContactPoller): TelegramApi {
+  return new Proxy(api, {
+    get(target, key, receiver) {
+      const value: unknown = Reflect.get(target, key, receiver);
+      if (key === 'getUpdates' || typeof value !== 'function') return value;
+      return (...args: unknown[]) => poller.track(() => value.apply(target, args));
+    },
+  });
+}
+
 function keyboard(rows: ChannelMessage['buttons']): TelegramInlineKeyboard | undefined {
   if (!rows || rows.length === 0) return undefined;
   return {
@@ -538,10 +549,10 @@ export class TelegramChannel implements ContactChannel {
 
   private apiFor(token: string): TelegramApi {
     const injected = this.ports.api?.(token);
-    if (injected) return injected;
+    if (injected) return tracked(injected, this.poller);
     const cached = this.apis.get(token);
     if (cached) return cached;
-    const api = createTelegramApi(token);
+    const api = tracked(createTelegramApi(token), this.poller);
     this.apis.set(token, api);
     return api;
   }
