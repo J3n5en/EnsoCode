@@ -369,6 +369,9 @@ export function SecretaryContactPanel() {
   const setPrefs = (channelId: string, prefs: Partial<SecretaryContactChannelPrefs>) =>
     run(() => window.electronAPI.secretary.contactSettings({ channelId, prefs }));
   const pollFailed = telegram.poll.state === 'error' || telegram.poll.state === 'backoff';
+  // 轮询在跑时连不上与否以它为准：动作留下的 network 结果不单独挂着，否则恢复后没人撤
+  const pollAlive = telegram.poll.state !== 'stopped' && telegram.poll.state !== 'error';
+  const shownError = error === 'network' && pollAlive ? null : error;
   const groups = telegram.groups ?? [];
   const groupDraft = groupInput.trim();
   const setGroup = (action: 'add' | 'remove', chatId: string) =>
@@ -756,15 +759,15 @@ export function SecretaryContactPanel() {
         </p>
       ) : (
         <>
-          {(error || pollFailed) && (
+          {(shownError || pollFailed) && (
             <div
               data-enso="secretary-contact-error"
               className="flex items-start gap-1.5 rounded-lg border border-destructive/40 bg-destructive/5 px-2.5 py-2 text-[12px] text-destructive"
             >
               <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
               <span className="min-w-0 flex-1">
-                {error
-                  ? t(ERROR_TEXT[error] ?? 'Telegram returned an error')
+                {shownError
+                  ? t(ERROR_TEXT[shownError] ?? 'Telegram returned an error')
                   : t('Cannot reach api.telegram.org. Check the proxy.')}
               </span>
             </div>
