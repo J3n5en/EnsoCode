@@ -759,14 +759,14 @@ export class ContactService implements SecretaryContactPort {
     const caps = channel.caps();
     let sent: ChannelSend;
     if (caps.buttons) {
-      sent = await channel[kind](peer.peerId, message);
+      sent = await channel[kind](peer.peerId, message, peer.topicId);
     } else {
       const base = message.format === 'html' ? htmlToPlain(message.text) : message.text;
       const extra = plainButtonsText(message.buttons);
       const text = extra ? `${base}\n${extra}` : base;
       sent = { ok: true };
       for (const chunk of splitPlain(text, caps.maxChars)) {
-        sent = await channel[kind](peer.peerId, { text: chunk });
+        sent = await channel[kind](peer.peerId, { text: chunk }, peer.topicId);
         if (!sent.ok) break;
       }
     }
@@ -1324,7 +1324,12 @@ export class ContactService implements SecretaryContactPort {
         : { id: peer.channelId, title: meta?.title ?? peer.channelId },
       this.ports.lang(),
       {
-        ...(message.name ? { username: message.name } : {}),
+        chatId: peer.peerId,
+        ...(peer.topicId ? { topicId: peer.topicId } : {}),
+        ...(message.chatType ? { chatType: message.chatType } : {}),
+        ...(message.chatTitle ? { chatTitle: message.chatTitle } : {}),
+        ...(message.senderId ? { senderId: message.senderId } : {}),
+        ...(message.name ? { senderName: message.name } : {}),
         ...(message.at ? { at: message.at } : {}),
         text,
       }
@@ -1823,7 +1828,7 @@ export class ContactService implements SecretaryContactPort {
         this.stopTyping();
         return;
       }
-      const result = await channel.typing(peer.peerId);
+      const result = await channel.typing(peer.peerId, peer.topicId);
       if (result.ok) continue;
       // 解绑后立刻停：没有 token 或 chat 不算出错
       if (result.error !== 'token-required') this.audit('contact_typing', false, result.error);

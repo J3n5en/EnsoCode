@@ -395,7 +395,7 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 清单 `contactChannels` 声明的渠道启用后出现在秘书联系方式页，排在内置的 Telegram 后面。宿主画通用开关（启用、主动推送、手机确认卡、同步镜像、记忆标题），插件只管收发：
 
 - `enso.contact.register(channelId, { caps, sendText(peerId, { text }), typing?(peerId, { on }) })`：交出实现。`caps` 必须给全 `{ buttons, urlButtons, edit, typing, format, maxChars, commandMenu }`（`maxChars` 100–65536）。这一版协议只带纯文本，宿主一律按没有按钮、不能改消息处理：提问与确认卡变成编号文本，回「确认 1」确认卡片，审批永远不能在手机上确认。`sendText` 可以返回 `{ messageId }`。
-- `enso.contact.inbound(channelId, { peerId, text, name?, at? })`：对方发来一句话。插件自己负责只放行绑定的那个人；宿主再按总开关与渠道开关过滤，正文包成 `[来自 <渠道名> @名字 · 时间]` 加不可信内容交给秘书。只读命令（`/status` 等）不进秘书会话。10 秒最多 20 条。
+- `enso.contact.inbound(channelId, { peerId, text, senderId?, chatType?, chatTitle?, name?, at? })`：对方发来一句话。`peerId` 是会话 id（私聊或群，回复发回这里）；`senderId` 是发送者的稳定 id，协议里有就必须带；`chatType` 只能是 `private` 或 `group`，不知道就别填；`chatTitle` 是群名，`name` 是发送者名字。插件自己负责只放行绑定的那个人；宿主再按总开关与渠道开关过滤，正文包成 `[来自 <渠道名> 私聊|群「群名」 chatId=… senderId=… @名字 · 时间]` 加不可信内容（`source="<渠道 id> chatId=… senderId=…"`）交给秘书；没给 `senderId` 时写「发送者未知」，不拿名字凑。只读命令（`/status` 等）不进秘书会话。10 秒最多 20 条。
 - `enso.contact.setStatus(channelId, { status, detail?, peers? })`：`status` 是 `unconfigured`、`pending`、`connected`、`error`；`peers` 是主动推送的对象（最多 8 个）。换了人或断开时，发往旧联系人的待收尾记录作废。
 
 `peerId` 一律是字符串。回复、正在输入、任务结果只回发消息的那个人；里程碑、提问、确认卡与审批发给所有启用、已连接且打开主动推送的渠道，谁先答算谁的。插件停用或卸载时卡片消失，这个渠道的关注项与待收尾记录一起清掉。

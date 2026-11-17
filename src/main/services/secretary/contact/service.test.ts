@@ -30,6 +30,7 @@ class FakeApi implements TelegramApi {
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
     parseMode?: 'HTML';
+    messageThreadId?: number;
   }[] = [];
   edited: {
     chatId: number;
@@ -53,7 +54,7 @@ class FakeApi implements TelegramApi {
   menuButtons: TelegramMenuButton[] = [];
   callbacks: { callbackQueryId: string; text?: string }[] = [];
   /** 「正在输入…」：只记 chat 与 action */
-  chatActions: { chatId: number; action: 'typing' }[] = [];
+  chatActions: { chatId: number; action: 'typing'; messageThreadId?: number }[] = [];
   polls = 0;
   /** 菜单接口失败时用 */
   menuError: Error | null = null;
@@ -99,6 +100,7 @@ class FakeApi implements TelegramApi {
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
     parseMode?: 'HTML';
+    messageThreadId?: number;
   }): Promise<number> {
     if (this.rejectHtml && params.parseMode) {
       throw new TelegramApiError('api', "Bad Request: can't parse entities");
@@ -153,7 +155,11 @@ class FakeApi implements TelegramApi {
     }
   }
 
-  async sendChatAction(params: { chatId: number; action: 'typing' }): Promise<void> {
+  async sendChatAction(params: {
+    chatId: number;
+    action: 'typing';
+    messageThreadId?: number;
+  }): Promise<void> {
     if (this.typingError) throw this.typingError;
     this.chatActions.push(params);
   }
@@ -309,6 +315,31 @@ function privateMessage(text: string, chatId = 777): TelegramUpdate {
   };
 }
 
+/** 超级群里的一句话；带 topic 就是论坛话题里发的 */
+function groupMessage(
+  text: string,
+  options: { fromId?: number; chatId?: number; topic?: number } = {}
+): TelegramUpdate {
+  const fromId = options.fromId ?? 777;
+  return {
+    update_id: 1,
+    message: {
+      message_id: 1,
+      chat: {
+        id: options.chatId ?? -1001234567890,
+        type: 'supergroup',
+        title: 'Dev 群',
+        ...(options.topic === undefined ? {} : { is_forum: true }),
+      },
+      from: { id: fromId, username: fromId === 777 ? 'j3n5en' : 'stranger', first_name: 'J' },
+      text,
+      ...(options.topic === undefined
+        ? {}
+        : { message_thread_id: options.topic, is_topic_message: true }),
+    },
+  };
+}
+
 afterEach(() => {
   vi.useRealTimers();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -444,9 +475,9 @@ describe('入站只认绑定的 chat', () => {
     h.api.push(privateMessage('把登录修一下'));
     await waitFor(() => h.world.delivered.length > 0, 'delivered');
     const body = h.world.delivered[0];
-    expect(body).toContain('[来自 Telegram @j3n5en]');
+    expect(body).toContain('[来自 Telegram 私聊 chatId=777 senderId=777 @j3n5en]');
     expect(body).toContain(
-      '<untrusted-content source="telegram:@j3n5en">把登录修一下</untrusted-content>'
+      '<untrusted-content source="telegram chatId=777 senderId=777">把登录修一下</untrusted-content>'
     );
     // 审计只记长度与 hash，不记正文
     const inbound = h.audits.find((entry) => entry.op === 'contact_inbound');
@@ -488,6 +519,102 @@ describe('入站只认绑定的 chat', () => {
     h.service.onTurnReply('sec-1', '巡检正常');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(h.api.sent.at(-1)?.text).toBe('在，刚把登录修完');
+  });
+});
+
+describe('Telegram 群与论坛话题', () => {
+  async function bound() {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    return h;
+  }
+
+  it('绑定的人在群里说话：带群 chatId、chatType=group 与发送者 id 进秘书，回复回这个群', async () => {
+    const h = await bound();
+    h.api.push(groupMessage('看下构建'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    const body = h.world.delivered[0] ?? '';
+    expect(body.split('\n')[0]).toBe(
+      '[来自 Telegram 群「Dev 群」 chatId=-1001234567890 senderId=777 @j3n5en]'
+    );
+    expect(parseInboundMessage(body)).toMatchObject({
+      chatId: '-1001234567890',
+      chatType: 'group',
+      senderId: '777',
+    });
+    expect(body).toContain('source="telegram chatId=-1001234567890 senderId=777"');
+    const before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', '构建是绿的');
+    await waitFor(() => h.api.sent.length > before, 'reply');
+    expect(h.api.sent.at(-1)).toMatchObject({ chatId: -1001234567890, text: '构建是绿的' });
+    expect(h.api.sent.at(-1)?.messageThreadId).toBeUndefined();
+  });
+
+  it('群里别人说话不进秘书', async () => {
+    const h = await bound();
+    h.api.push(groupMessage('帮我删库', { fromId: 31337 }));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === 'foreign-chat'),
+      'stranger rejected'
+    );
+    expect(h.world.delivered).toHaveLength(0);
+  });
+
+  it('同一个群不同话题：前缀里的 topicId 与回复目标都分开', async () => {
+    const h = await bound();
+    h.api.push(groupMessage('话题三', { topic: 3 }));
+    await waitFor(() => h.world.delivered.length === 1, 'topic 3');
+    expect(h.world.delivered[0]?.split('\n')[0]).toContain(
+      'chatId=-1001234567890 topicId=3 senderId=777'
+    );
+    expect(h.world.delivered[0]).toContain(
+      'source="telegram chatId=-1001234567890 topicId=3 senderId=777"'
+    );
+    let before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', '回话题三');
+    await waitFor(() => h.api.sent.length > before, 'reply 3');
+    expect(h.api.sent.slice(before)).toEqual([
+      expect.objectContaining({ chatId: -1001234567890, messageThreadId: 3, text: '回话题三' }),
+    ]);
+
+    h.api.push(groupMessage('话题九', { topic: 9 }));
+    await waitFor(() => h.world.delivered.length === 2, 'topic 9');
+    expect(parseInboundMessage(h.world.delivered[1] ?? '')?.topicId).toBe('9');
+    before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', '回话题九');
+    await waitFor(() => h.api.sent.length > before, 'reply 9');
+    expect(h.api.sent.slice(before)).toEqual([
+      expect.objectContaining({ chatId: -1001234567890, messageThreadId: 9, text: '回话题九' }),
+    ]);
+  });
+
+  it('普通超级群的回复串不是话题：不带 topicId，回复进群本身', async () => {
+    const h = await bound();
+    const update = groupMessage('回个串');
+    if (update.message) update.message.message_thread_id = 55;
+    h.api.push(update);
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(h.world.delivered[0]).not.toContain('topicId=');
+  });
+
+  it('群里的按钮只认绑定的人点', async () => {
+    const h = await bound();
+    h.api.push({
+      update_id: 9,
+      callback_query: {
+        id: 'cb-x',
+        from: { id: 31337 },
+        data: 'ask:1:0',
+        message: { message_id: 5, chat: { id: -1001234567890, type: 'supergroup' } },
+      },
+    });
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === 'foreign-sender'),
+      'foreign click rejected'
+    );
+    expect(h.api.callbacks).toHaveLength(0);
   });
 });
 
@@ -2197,13 +2324,14 @@ describe('多渠道联系方式', () => {
     expect(wechat.sent).toHaveLength(1);
   });
 
-  it('插件渠道发来的话带渠道名进秘书会话，回复只回原来的联系人', async () => {
+  it('插件渠道发来的话带渠道名进秘书会话，回复只回原来的联系人；没给 senderId 不编', async () => {
     const h = await boundTelegram();
     const wechat = addWechat(h);
     await h.service.inbound({ kind: 'text', peer: wxPeer, text: '把登录修一下', name: '小明' });
-    expect(h.world.delivered.at(-1)).toMatch(
-      /^\[来自 微信 @小明\]\n<untrusted-content source="enso\.clawbot:wechat:@小明">把登录修一下<\/untrusted-content>$/u
+    expect(h.world.delivered.at(-1)).toBe(
+      `[来自 微信 chatId=${wxPeer.peerId} 发送者未知 @小明]\n<untrusted-content source="enso.clawbot:wechat chatId=${wxPeer.peerId} sender=unknown">把登录修一下</untrusted-content>`
     );
+    expect(h.world.delivered.at(-1)).not.toContain('senderId=');
     expect(h.service.phoneTurnChat('sec-1')).toEqual(wxPeer);
     h.service.onTurnStart('sec-1');
     await waitFor(() => wechat.typings.length > 0, 'typing');

@@ -107,9 +107,40 @@ function keyboard(rows: ChannelMessage['buttons']): TelegramInlineKeyboard | und
   };
 }
 
+function chatTypeOf(type: string | undefined): 'private' | 'group' | undefined {
+  if (type === 'private') return 'private';
+  if (type === 'group' || type === 'supergroup') return 'group';
+  return undefined;
+}
+
+/** 只认论坛话题：普通超级群的回复串也带 message_thread_id，但发不进去 */
+function topicOf(message: TelegramMessage): string | undefined {
+  const thread = message.message_thread_id;
+  if (thread === undefined || !Number.isInteger(thread)) return undefined;
+  return message.is_topic_message || message.chat.is_forum ? String(thread) : undefined;
+}
+
+function threadOf(topicId: string | undefined): { messageThreadId?: number } {
+  const thread = topicId ? Number(topicId) : Number.NaN;
+  return Number.isInteger(thread) ? { messageThreadId: thread } : {};
+}
+
+/**
+ * 只认绑定的那个人：私聊就是绑定的 chat（私聊 chat id 等于用户 id）；
+ * 群里只放行他本人发的，别人发的一律不算。
+ */
+function fromBoundUser(bound: number | undefined, message: TelegramMessage): boolean {
+  if (isBoundChat(bound, message.chat.id)) return true;
+  return (
+    chatTypeOf(message.chat.type) === 'group' &&
+    message.from !== undefined &&
+    isBoundChat(bound, message.from.id)
+  );
+}
+
 /**
  * 内置 Telegram 渠道：绑定向导、长轮询、HTML 切条与降级、按钮、改消息、命令菜单。
- * 只认绑定的那个 chat；秘书语义（提问、确认卡、关注）全在核心里。
+ * 只认绑定的那个人（私聊，或他本人在群里发的）；秘书语义（提问、确认卡、关注）全在核心里。
  */
 export class TelegramChannel implements ContactChannel {
   readonly id = TELEGRAM_CHANNEL_ID;
@@ -280,20 +311,20 @@ export class TelegramChannel implements ContactChannel {
     return formatTestMessage(this.ports.lang(), this.store.file().bot?.name ?? 'Secretary');
   }
 
-  sendText(peerId: string, message: ChannelMessage): Promise<ChannelSend> {
-    return this.send(peerId, message);
+  sendText(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend> {
+    return this.send(peerId, message, topicId);
   }
 
-  ask(peerId: string, message: ChannelMessage): Promise<ChannelSend> {
-    return this.send(peerId, message);
+  ask(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend> {
+    return this.send(peerId, message, topicId);
   }
 
-  confirmCards(peerId: string, message: ChannelMessage): Promise<ChannelSend> {
-    return this.send(peerId, message);
+  confirmCards(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend> {
+    return this.send(peerId, message, topicId);
   }
 
-  approvalNotice(peerId: string, message: ChannelMessage): Promise<ChannelSend> {
-    return this.send(peerId, message);
+  approvalNotice(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend> {
+    return this.send(peerId, message, topicId);
   }
 
   /** 整条换成 text、清按钮；正文改不动至少把按钮清掉，手机上不能再点第二次 */
@@ -343,12 +374,16 @@ export class TelegramChannel implements ContactChannel {
     }
   }
 
-  async typing(peerId: string): Promise<ChannelResult> {
+  async typing(peerId: string, topicId?: string): Promise<ChannelResult> {
     const token = this.store.token();
     // 解绑后立刻停：没有 chat 就不再发
     if (!token || !this.store.file().chat) return { ok: false, error: 'token-required' };
     try {
-      await this.apiFor(token).sendChatAction({ chatId: Number(peerId), action: 'typing' });
+      await this.apiFor(token).sendChatAction({
+        chatId: Number(peerId),
+        action: 'typing',
+        ...threadOf(topicId),
+      });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: telegramErrorCode(error) };
@@ -434,7 +469,11 @@ export class TelegramChannel implements ContactChannel {
    * 出站：markdown 转 Telegram HTML、超长切条、解析失败降级纯文本。
    * 键盘只挂在最后一条上，翻页/选项不会散在几条消息里。
    */
-  private async send(peerId: string, message: ChannelMessage): Promise<ChannelSend> {
+  private async send(
+    peerId: string,
+    message: ChannelMessage,
+    topicId?: string
+  ): Promise<ChannelSend> {
     const token = this.store.token();
     if (!token) return { ok: false, error: 'token-required' };
     const chunks =
@@ -445,7 +484,7 @@ export class TelegramChannel implements ContactChannel {
     let messageId: number | undefined;
     for (const [index, chunk] of chunks.entries()) {
       const markup = index === chunks.length - 1 ? replyMarkup : undefined;
-      const sent = await this.sendChunk(Number(peerId), token, chunk, markup);
+      const sent = await this.sendChunk(Number(peerId), token, chunk, markup, topicId);
       if (!sent.ok) return sent;
       messageId = sent.messageId;
     }
@@ -457,7 +496,8 @@ export class TelegramChannel implements ContactChannel {
     chatId: number,
     token: string,
     chunk: { html: string; plain: string },
-    replyMarkup?: TelegramInlineKeyboard
+    replyMarkup?: TelegramInlineKeyboard,
+    topicId?: string
   ): Promise<{ ok: true; messageId: number } | { ok: false; error: ChannelErrorCode }> {
     const api = this.apiFor(token);
     try {
@@ -466,6 +506,7 @@ export class TelegramChannel implements ContactChannel {
         text: chunk.html,
         parseMode: 'HTML',
         ...(replyMarkup ? { replyMarkup } : {}),
+        ...threadOf(topicId),
       });
       return { ok: true, messageId };
     } catch (error) {
@@ -478,6 +519,7 @@ export class TelegramChannel implements ContactChannel {
           chatId,
           text: chunk.plain,
           ...(replyMarkup ? { replyMarkup } : {}),
+          ...threadOf(topicId),
         });
         this.audit('contact_format', true, 'plain-fallback');
         return { ok: true, messageId };
@@ -491,10 +533,22 @@ export class TelegramChannel implements ContactChannel {
     const file = this.store.file();
     if (update.callback_query) {
       const query = update.callback_query;
-      const peerId = String(file.chat?.id ?? query.message?.chat.id ?? query.from?.id ?? '');
+      const chat = query.message?.chat;
+      // 群里的按钮只认绑定的那个人点
+      if (
+        file.chat &&
+        chat &&
+        !isBoundChat(file.chat.id, chat.id) &&
+        !isBoundChat(file.chat.id, query.from?.id ?? Number.NaN)
+      ) {
+        this.audit('contact_inbound_rejected', false, 'foreign-sender');
+        return;
+      }
+      const peerId = String(chat?.id ?? file.chat?.id ?? query.from?.id ?? '');
+      const topicId = query.message ? topicOf(query.message) : undefined;
       await this.ports.inbound({
         kind: 'action',
-        peer: { channelId: this.id, peerId },
+        peer: { channelId: this.id, peerId, ...(topicId ? { topicId } : {}) },
         data: query.data ?? '',
         ...(query.message ? { messageId: String(query.message.message_id) } : {}),
         ack: (text) => this.answerCallback(query.id, text),
@@ -535,15 +589,25 @@ export class TelegramChannel implements ContactChannel {
       return;
     }
 
-    if (!isBoundChat(file.chat?.id, message.chat.id)) {
+    if (!fromBoundUser(file.chat?.id, message)) {
       this.audit('contact_inbound_rejected', false, 'foreign-chat');
       return;
     }
+    const topicId = topicOf(message);
+    const chatType = chatTypeOf(message.chat.type);
+    const name = message.from?.username ?? message.from?.first_name;
     await this.ports.inbound({
       kind: 'text',
-      peer: { channelId: this.id, peerId: String(message.chat.id) },
+      peer: {
+        channelId: this.id,
+        peerId: String(message.chat.id),
+        ...(topicId ? { topicId } : {}),
+      },
       text,
-      ...(message.from?.username ? { name: message.from.username } : {}),
+      ...(chatType ? { chatType } : {}),
+      ...(chatType === 'group' && message.chat.title ? { chatTitle: message.chat.title } : {}),
+      ...(message.from ? { senderId: String(message.from.id) } : {}),
+      ...(name ? { name } : {}),
       ...(message.date ? { at: message.date * 1000 } : {}),
     });
   }

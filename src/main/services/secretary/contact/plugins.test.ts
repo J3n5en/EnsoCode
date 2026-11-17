@@ -107,11 +107,16 @@ describe('插件渠道接入', () => {
 
     h.handlers.inbound('enso.clawbot', 'enso.clawbot:wechat', {
       peerId: 'wx-me',
+      senderId: 'wx-me',
+      chatType: 'private',
       text: '在吗',
       name: '我',
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(h.delivered.at(-1)).toContain('[来自 微信 @我]');
+    expect(h.delivered.at(-1)).toContain('[来自 微信 私聊 chatId=wx-me senderId=wx-me @我]');
+    expect(h.delivered.at(-1)).toContain(
+      'source="enso.clawbot:wechat chatId=wx-me senderId=wx-me"'
+    );
     h.service.onTurnReply('sec-1', '在的');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(h.calls).toContainEqual({

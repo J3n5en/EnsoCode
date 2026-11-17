@@ -292,12 +292,14 @@ describe('手机上的消息格式', () => {
 describe('入站正文', () => {
   it('标注来自 Telegram，正文包成不可信内容', () => {
     const text = wrapInboundMessage(TELEGRAM_INBOUND, 'zh', {
-      username: '@j3n5en',
+      chatId: '42',
+      senderId: '42',
+      senderName: '@j3n5en',
       text: '把登录修一下',
     });
-    expect(text.split('\n')[0]).toContain('[来自 Telegram @j3n5en]');
+    expect(text.split('\n')[0]).toContain('[来自 Telegram chatId=42 senderId=42 @j3n5en]');
     expect(text).toContain(
-      '<untrusted-content source="telegram:@j3n5en">把登录修一下</untrusted-content>'
+      '<untrusted-content source="telegram chatId=42 senderId=42">把登录修一下</untrusted-content>'
     );
   });
 
