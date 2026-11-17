@@ -36,7 +36,6 @@ function fakeDock() {
     addPanel: (opts: { id: string; params: unknown }) => {
       panels.push({ id: opts.id, params: opts.params, focus: vi.fn() });
     },
-    onDidRemovePanel: () => ({ dispose: () => undefined }),
   };
   return { api: api as unknown as DockviewApi, panels };
 }

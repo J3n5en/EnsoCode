@@ -33,7 +33,11 @@ vi.mock('@/stores/sidePanel', () => ({
 }));
 vi.mock('@/lib/terminalRegistry', () => ({ releaseTerminal: vi.fn() }));
 
-import { bindSidePanelDock, disposeConversationResources } from './sidePanelDock';
+import {
+  bindSidePanelDock,
+  disposeConversationResources,
+  watchSidePanelAutoCollapse,
+} from './sidePanelDock';
 
 function fakeDock() {
   const panels: { id: string }[] = [];
@@ -59,6 +63,14 @@ function fakeDock() {
       if (index < 0) return;
       const [panel] = panels.splice(index, 1);
       for (const listener of listeners) listener(panel);
+    },
+    /** 模拟 dockview fromJSON：先清空现有 panel（逐个触发 remove），再建已存布局里的 */
+    restore: (ids: string[]) => {
+      while (panels.length > 0) {
+        const [panel] = panels.splice(0, 1);
+        for (const listener of listeners) listener(panel);
+      }
+      for (const id of ids) panels.push({ id });
     },
     listenerCount: () => listeners.size,
   };
@@ -86,7 +98,7 @@ describe('resolveSidePanelDockConversationId', () => {
   });
 });
 
-describe('bindSidePanelDock 关完最后一个 tab 收起侧栏', () => {
+describe('watchSidePanelAutoCollapse 关完最后一个 tab 收起侧栏', () => {
   beforeEach(() => {
     vi.stubGlobal('window', {});
     disposeConversationResources('dock');
@@ -99,6 +111,7 @@ describe('bindSidePanelDock 关完最后一个 tab 收起侧栏', () => {
     dock.add('files');
     dock.add('terminal');
     bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
     harness.setStateCalls = 0;
 
     dock.remove('terminal');
@@ -111,6 +124,7 @@ describe('bindSidePanelDock 关完最后一个 tab 收起侧栏', () => {
     const dock = fakeDock();
     dock.add('files');
     bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
     harness.setStateCalls = 0;
 
     dock.remove('files');
@@ -124,6 +138,7 @@ describe('bindSidePanelDock 关完最后一个 tab 收起侧栏', () => {
     const dock = fakeDock();
     dock.add('files');
     bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
     harness.setStateCalls = 0;
 
     dock.remove('files');
@@ -136,6 +151,7 @@ describe('bindSidePanelDock 关完最后一个 tab 收起侧栏', () => {
     const dock = fakeDock();
     dock.add('files');
     bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
     disposeConversationResources('dock');
     harness.uiByConversation = { dock: { open: true, width: 400 } };
     harness.setStateCalls = 0;
@@ -145,5 +161,20 @@ describe('bindSidePanelDock 关完最后一个 tab 收起侧栏', () => {
     expect(harness.uiByConversation.dock.open).toBe(true);
     expect(harness.setStateCalls).toBe(0);
     expect(dock.listenerCount()).toBe(0);
+  });
+
+  it('先补建面板、再恢复已存布局，侧栏保持打开；之后用户关掉最后一个 tab 仍收起', () => {
+    const dock = fakeDock();
+    bindSidePanelDock('dock', dock.api);
+    dock.add('browser:pending');
+    dock.restore(['files']);
+    watchSidePanelAutoCollapse('dock', dock.api);
+
+    expect(harness.uiByConversation.dock.open).toBe(true);
+    expect(harness.setStateCalls).toBe(0);
+
+    dock.remove('files');
+
+    expect(harness.uiByConversation.dock.open).toBe(false);
   });
 });

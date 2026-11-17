@@ -73,8 +73,8 @@ export function registerFilesOpener(
   };
 }
 
-export function bindSidePanelDock(conversationId: string, api: DockviewApi): void {
-  docks.set(conversationId, api);
+/** 关掉最后一个 tab 时收起侧栏；须在 fromJSON 恢复布局之后挂，否则恢复时清空 dock 会误收起 */
+export function watchSidePanelAutoCollapse(conversationId: string, api: DockviewApi): void {
   dockRemoveDisposers.get(conversationId)?.dispose();
   dockRemoveDisposers.set(
     conversationId,
@@ -94,6 +94,10 @@ export function bindSidePanelDock(conversationId: string, api: DockviewApi): voi
       });
     })
   );
+}
+
+export function bindSidePanelDock(conversationId: string, api: DockviewApi): void {
+  docks.set(conversationId, api);
   if (pendingFilesReveal.delete(conversationId)) {
     // 等 onReady 里的布局恢复完再建，免得被 fromJSON 覆盖
     queueMicrotask(() => {
