@@ -1,8 +1,9 @@
-import { SHELL_TIMEOUT_HINT } from '@shared/shellTimeoutHint';
+import { SHELL_READ_HINT, SHELL_TIMEOUT_HINT } from '@shared/shellHints';
+import type { ProjectedMessage } from '@shared/types/agent';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { TimelineItem } from '@/stores/sessions/timeline';
+import { buildTimeline, type TimelineItem } from '@/stores/sessions/timeline';
 import { TimelineRow } from './TimelineRow';
 
 vi.mock('@/i18n', () => ({
@@ -84,5 +85,72 @@ describe('命令失败卡片标题', () => {
     expect(headline(tool('bash', { state: 'ok', output, summary: 'pnpm build' }))).toBe(
       'pnpm build'
     );
+  });
+
+  it('读文件提示和前面成功命令的输出不占标题，显示真实报错', () => {
+    const output = `${SHELL_READ_HINT}\n\nimport { a } from './a';\nls: lib: No such file or directory\n\nCommand exited with code 1`;
+    expect(headline(tool('bash', { state: 'error', output }))).toBe(
+      'ls: lib: No such file or directory'
+    );
+  });
+});
+
+/** 一次 bash 调用的时间线行；result 缺省表示结果还没回来 */
+function bashRow(
+  running: boolean,
+  result?: { output: string; isError: boolean }
+): Extract<TimelineItem, { kind: 'tool' }> {
+  const messages: ProjectedMessage[] = [
+    { role: 'user', content: [{ type: 'text', text: 'run' }] },
+    {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'pnpm lint' } }],
+    },
+  ];
+  if (result) {
+    messages.push({
+      role: 'toolResult',
+      toolCallId: 'c1',
+      toolName: 'bash',
+      isError: result.isError,
+      content: [{ type: 'text', text: result.output }],
+    });
+  }
+  const row = buildTimeline(messages, running).find((item) => item.kind === 'tool');
+  if (row?.kind !== 'tool') throw new Error('missing tool row');
+  return row;
+}
+
+const looksFailed = (item: TimelineItem): boolean => {
+  const markup = renderToStaticMarkup(createElement(TimelineRow, { item }));
+  return markup.includes('text-destructive') || markup.includes('bg-destructive');
+};
+
+describe('工具行失败样式', () => {
+  it('退出码 0 但输出含 error、stderr 有内容：不是失败样式', () => {
+    const output = [
+      'Checked 120 files in 80ms. No fixes applied.',
+      'stderr | src/a.test.ts > logs an error',
+      'Error: expected failure logged by the test',
+      ' ✓ 12 passed',
+    ].join('\n');
+    const row = bashRow(false, { output, isError: false });
+    expect(row.state).toBe('ok');
+    expect(looksFailed(row)).toBe(false);
+    expect(headline(row)).toBe('pnpm lint');
+  });
+
+  it('退出码非 0：仍是失败样式，标题是真实报错', () => {
+    const output = 'src/a.ts:1:1 lint/style ━━━\n  × Found 1 error.\n\nCommand exited with code 1';
+    const row = bashRow(false, { output, isError: true });
+    expect(row.state).toBe('error');
+    expect(looksFailed(row)).toBe(true);
+    expect(headline(row)).toBe('× Found 1 error.');
+  });
+
+  it('运行中：结果回来之前不是失败样式', () => {
+    const row = bashRow(true);
+    expect(row.state).toBe('running');
+    expect(looksFailed(row)).toBe(false);
   });
 });
