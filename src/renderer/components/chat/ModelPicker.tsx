@@ -704,6 +704,8 @@ export function ModelPicker({
   const pendingSearchFocusRef = useRef(false);
   const openRef = useRef(open);
   openRef.current = open;
+  const selectedNavRef = useRef<HTMLButtonElement | null>(null);
+  const didScrollNavOnOpenRef = useRef(false);
   const [oauthInfos, setOauthInfos] = useState<OauthProviderInfo[]>([]);
   const [metaByProvider, setMetaByProvider] = useState<Record<string, Record<string, ModelMeta>>>(
     {}
@@ -796,6 +798,18 @@ export function ModelPicker({
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      didScrollNavOnOpenRef.current = false;
+      return;
+    }
+    if (didScrollNavOnOpenRef.current) return;
+    const el = selectedNavRef.current;
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest' });
+    didScrollNavOnOpenRef.current = true;
   }, [open]);
 
   useEffect(() => {
@@ -1214,6 +1228,7 @@ export function ModelPicker({
                     <button
                       type="button"
                       data-model-picker-nav="favorites"
+                      ref={providerId === VIRTUAL_PROVIDER_ID ? selectedNavRef : undefined}
                       onMouseEnter={() => setActiveNav({ kind: 'favorites' })}
                       onClick={() => setActiveNav({ kind: 'favorites' })}
                       className={cn(
@@ -1251,6 +1266,7 @@ export function ModelPicker({
                         type="button"
                         data-model-picker-nav={`vendor:${group.vendorId}`}
                         data-model-picker-vendor={group.vendorId}
+                        ref={selectedHere ? selectedNavRef : undefined}
                         onMouseEnter={() =>
                           setActiveNav({ kind: 'vendor', vendorId: group.vendorId })
                         }
