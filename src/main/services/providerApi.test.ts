@@ -810,6 +810,33 @@ describe('listModels 集成行为与鉴权兼容', () => {
   });
 });
 
+describe('listModels 无模型列表服务商', () => {
+  afterEach(() => {
+    net.fetch = originalNetFetch;
+  });
+
+  const voyage = {
+    api: 'openai-completions' as const,
+    apiKey: 'k',
+    baseUrl: 'https://api.voyageai.com/v1',
+  };
+
+  it('默认 GET /models 返回 404 时提示手动添加模型', async () => {
+    net.fetch = vi.fn(async () => mockResponse(404, undefined, 'Not Found'));
+    const result = await listModels(voyage);
+    expect(result.ok).toBe(false);
+    expect(result.models).toEqual([]);
+    expect(result.error).toContain('does not expose GET /models');
+  });
+
+  it('500 仍走原来的 httpError 文案', async () => {
+    net.fetch = vi.fn(async () => mockResponse(500, undefined, 'Internal Server Error'));
+    const result = await listModels(voyage);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('HTTP 500 Internal Server Error');
+  });
+});
+
 function requestBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
   const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
   return JSON.parse(String(init?.body));

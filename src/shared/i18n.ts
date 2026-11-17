@@ -1692,6 +1692,10 @@ export const zhTranslations: Record<string, string> = {
     '服务商「{{provider}}」下没有向量模型（「{{model}}」是对话模型）：请在该服务商里添加支持 /embeddings 的模型（如 text-embedding-3-small），或改用本地向量模型。',
   'No model can be used for embeddings: it needs a provider with an API key and an embedding model (e.g. text-embedding-3-small). Subscription sign-in cannot be used for embeddings.':
     '没有可用于向量化的模型：需要填了 API Key 的服务商，且其中有向量模型（如 text-embedding-3-small）。订阅登录不能用于向量化。',
+  '{{name}}: missing API key': '{{name}}：没有 API Key',
+  '{{name}}: missing Base URL': '{{name}}：没有 Base URL',
+  '{{name}}: no matching embedding model (model names must contain keywords like embed/voyage/bge)':
+    '{{name}}：没有匹配的向量模型（模型名需包含 embed/voyage/bge 等关键词）',
   'Database size': '库体积',
   Spaces: '空间数',
   'Never retrieved': '从未命中',
