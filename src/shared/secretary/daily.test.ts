@@ -511,6 +511,77 @@ describe('一天的看板投影', () => {
       label: 'Goal complete',
     });
   });
+
+  it('秘书停止或取消的会话离开进行中，单独进「已停止」', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        // 从来没报过结果就被停掉：不能因为没有结果继续挂在进行中
+        dispatch({ stoppedAt: at(15, 11) }),
+        // 停掉时后台任务记录还残留：停止是明确的收口，也不能算在跑
+        dispatch({
+          conversationId: 'c2',
+          lastState: 'running',
+          backgroundRunning: true,
+          stoppedAt: at(15, 12),
+        }),
+        // 移出只是从看板上拿掉：不在进行中，也不算完成
+        dispatch({ conversationId: 'c3', stoppedAt: at(15, 13), dismissedFromBoard: true }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['stopped']);
+    expect(daily.groups[0].items.map((item) => item.conversationId)).toEqual(['c2', 'c1']);
+    expect(daily.groups[0].items[0]).toMatchObject({ label: 'Stopped', tracked: true });
+    expect(daily.counts.completed).toBe(0);
+  });
+
+  it('停止后又手动标记完成：按完成归列，不再是已停止', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [],
+      dispatched: [
+        dispatch({
+          stoppedAt: at(15, 11),
+          lastResult: { kind: 'goal-complete', turn: 1, at: at(15, 12), manual: true },
+        }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+    expect(daily.groups[0].items[0]).toMatchObject({ manual: true, label: 'Goal complete' });
+  });
+
+  it('goal-complete 仍是完成，不被停止标记改成已停止', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [record({ at: at(15, 10), kind: 'goal-complete' })],
+      dispatched: [dispatch({ createdAt: at(15, 9), lastState: 'idle', stoppedAt: at(15, 8) })],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['done']);
+  });
+
+  it('失败与需要你处理的结果不被停止标记改列', () => {
+    const daily = buildSecretaryDaily({
+      ...base,
+      results: [
+        record({ at: at(15, 10), kind: 'failed' }),
+        record({ at: at(15, 11), conversationId: 'c2', kind: 'needs-user' }),
+      ],
+      dispatched: [
+        dispatch({ stoppedAt: at(15, 12) }),
+        dispatch({ conversationId: 'c2', createdAt: at(15, 9), stoppedAt: at(15, 12) }),
+      ],
+      todos: [],
+      audit: [],
+    });
+    expect(daily.groups.map((group) => group.key)).toEqual(['needsYou', 'failed']);
+  });
 });
 
 describe('已完成但还有遗留后台任务', () => {

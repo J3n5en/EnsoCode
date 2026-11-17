@@ -171,6 +171,7 @@ describe('SecretaryDailyBoard', () => {
     ).toBe(TODAY);
     expect(columns()).toEqual([
       { group: 'running', count: '1', cards: 1 },
+      { group: 'stopped', count: '0', cards: 0 },
       { group: 'needsYou', count: '1', cards: 1 },
       { group: 'done', count: '2', cards: 2 },
       { group: 'failed', count: '1', cards: 1 },
@@ -187,7 +188,7 @@ describe('SecretaryDailyBoard', () => {
     await render(createElement(SecretaryDailyBoard));
     expect(columns().every((column) => column.count === '0' && column.cards === 0)).toBe(true);
     expect(container.querySelectorAll('[data-enso="secretary-daily-empty-column"]')).toHaveLength(
-      6
+      7
     );
     expect(text('[data-enso="secretary-daily-empty-column"]')).toBe('[No cards yet]');
     expect(text('[data-enso="secretary-daily-stat"]')).toBe('[Dispatched] 2 · 0/0');
@@ -372,11 +373,28 @@ describe('SecretaryDailyBoard', () => {
     expect(container.querySelector('[data-enso="secretary-daily-mark-undo"]')).toBeNull();
   });
 
+  it('已停止的卡片始终显示标记完成与移出，不需要悬停', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        { key: 'stopped', items: [item({ id: 's1', conversationId: 'c7', tracked: true })] },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    const card = container.querySelector(
+      '[data-group="stopped"] [data-enso="secretary-daily-card"]'
+    );
+    expect(card?.querySelector('[data-enso="secretary-daily-actions"]')).not.toBeNull();
+    click('[data-group="stopped"] [data-enso="secretary-daily-mark-done"]');
+    expect(h.calls).toContainEqual({ name: 'markResult', args: ['c7', 'done'] });
+    click('[data-group="stopped"] [data-enso="secretary-daily-dismiss"]');
+    expect(h.calls).toContainEqual({ name: 'markResult', args: ['c7', 'dismiss'] });
+  });
+
   it('组为空时列还在，只是没有卡片', async () => {
     const groups: SecretaryDailyGroup[] = [{ key: 'failed', items: [item({ label: 'Failed' })] }];
     h.daily[TODAY] = daily({ groups });
     await render(createElement(SecretaryDailyBoard));
-    expect(columns()).toHaveLength(6);
+    expect(columns()).toHaveLength(7);
     expect(columns().find((column) => column.group === 'failed')?.cards).toBe(1);
     expect(columns().find((column) => column.group === 'done')?.cards).toBe(0);
   });

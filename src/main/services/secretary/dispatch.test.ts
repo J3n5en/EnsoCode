@@ -1005,6 +1005,8 @@ describe('session_stop', () => {
     await call(h.handlers.session_stop, { conversationId: 'c1' });
     expect(h.file.dispatched.c1.lastState).toBe('idle');
     expect(h.file.dispatched.c1.backgroundRunning).toBeUndefined();
+    // 停止要留一个看板能认出来的标记：只写 idle 会被当成「报过结果又没给新结果」直接算完成
+    expect(h.file.dispatched.c1.stoppedAt).toBe(NOW);
   });
 
   it('未派出的会话拒绝停止', async () => {
@@ -2499,6 +2501,24 @@ describe('markResult', () => {
     const h = harness({});
     expect(markResult(h.ports, 'other', 'done')).toEqual({ ok: false, error: 'not-found' });
     expect(h.audits).toEqual([]);
+  });
+
+  it('移出：只从看板上拿掉，不标完成，会话记录还在', () => {
+    const h = harness({
+      file: file({ lastState: 'idle', stoppedAt: 950, backgroundRunning: true }),
+    });
+    expect(markResult(h.ports, 'c1', 'dismiss')).toEqual({ ok: true });
+    expect(h.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.file.dispatched.c1).toMatchObject({ lastState: 'idle', dismissedFromBoard: true });
+    expect(h.file.dispatched.c1.backgroundRunning).toBeUndefined();
+    expect(h.audits[0]).toMatchObject({ op: 'result_dismiss_board', detail: 'manual' });
+  });
+
+  it('移出后再标记完成：按完成收口，移出标记清掉', () => {
+    const h = harness({ file: file({ dismissedFromBoard: true, stoppedAt: 950 }) });
+    expect(markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
+    expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
+    expect(h.file.dispatched.c1.dismissedFromBoard).toBeUndefined();
   });
 });
 

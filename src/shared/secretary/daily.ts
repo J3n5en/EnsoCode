@@ -124,6 +124,9 @@ const RESULT_LABEL: Partial<Record<SecretaryResultKind, string>> = {
   'goal-blocked': 'Goal blocked',
 };
 
+/** 被秘书停止、又没有新结果的会话：单独一列，不算完成 */
+const STOPPED_LABEL = 'Stopped';
+
 /** 审计里算「设置和能力变更」的操作；其余操作（会话、待办、回传）不进看板 */
 const CHANGE_LABEL: Record<string, string> = {
   profile_save: 'Secretary profile updated',
@@ -245,6 +248,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     done: [],
     failed: [],
   };
+  const stopped: SecretaryDailyItem[] = [];
   const placed = new Set<string>();
   // 已经标了遗留任务的会话不算在跑：残留的 running 与后台任务都不能把它挂在进行中
   const runningNow = (record: DispatchRecord): boolean =>
@@ -274,6 +278,18 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
       tracked: true,
       ...(record.lastResult?.manual ? { manual: true as const } : {}),
     };
+    // 移出只影响看板：记录还在，但哪一列都不进
+    if (record.dismissedFromBoard === true && !result) continue;
+    // 秘书停止或取消、之后没有新结果：离开进行中，单独显示「已停止」。
+    // 停止是明确的收口，残留的 running 与后台任务记录都不能把它挂回去；
+    // 当天有终态结果（完成、失败、需要你）时结果优先，停止不改列。
+    const stoppedBySecretary = record.stoppedAt !== undefined && !result;
+    if (stoppedBySecretary) {
+      card.label = STOPPED_LABEL;
+      card.at = record.stoppedAt as number;
+      stopped.push(card);
+      continue;
+    }
     // 当天没有终态结果时：真在跑、或从来没报过结果的才进「进行中」。
     // 报过结果、这一轮又没给新结果的会话，活已经干完，不能一直挂在进行中。
     const column = result
@@ -298,6 +314,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
     );
   }
   for (const items of Object.values(columns)) items.sort(newestFirst);
+  stopped.sort(newestFirst);
 
   // 待办按 id 合并：同一条待办当天只出一张卡，新增与完成时间都挂在卡上
   const todoItems: SecretaryDailyItem[] = [];
@@ -343,6 +360,7 @@ export function buildSecretaryDaily(input: DailyInput): SecretaryDaily {
   const groups = (
     [
       { key: 'running', items: columns.running },
+      { key: 'stopped', items: stopped },
       { key: 'needsYou', items: columns.needsYou },
       { key: 'done', items: columns.done },
       { key: 'failed', items: columns.failed },

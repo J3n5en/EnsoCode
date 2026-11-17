@@ -82,14 +82,14 @@ export function parseDismissRequest(value: unknown): DismissRequest | null {
 
 export interface MarkResultRequest {
   conversationId: string;
-  action: 'done' | 'undo';
+  action: 'done' | 'undo' | 'dismiss';
 }
 
 export function parseMarkResultRequest(value: unknown): MarkResultRequest | null {
   if (!isRecord(value)) return null;
   const conversationId = nonEmpty(value.conversationId);
   if (!conversationId) return null;
-  if (value.action !== 'done' && value.action !== 'undo') return null;
+  if (value.action !== 'done' && value.action !== 'undo' && value.action !== 'dismiss') return null;
   return { conversationId, action: value.action };
 }
 

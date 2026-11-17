@@ -3465,6 +3465,7 @@ export const zhTranslations: Record<string, string> = {
   'Send reply': '发送回复',
   'Reply not sent': '回复未发送',
   'Mark done': '标记完成',
+  'Move off the board': '移出',
   'Model: {{model}}': '模型：{{model}}',
   'Undo mark done': '撤销标记',
   'Cancel task': '取消任务',

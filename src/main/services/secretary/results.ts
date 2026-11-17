@@ -293,6 +293,8 @@ export function sessionStateOf(
   status: SecretarySessionStatus | undefined
 ): SessionLiveState {
   const live = sessionLiveState(row, status);
+  // 秘书停止过的不算：停止写了 idle，残留的 running 是停止之前的旧记录
+  if (record.stoppedAt !== undefined) return live;
   return live === 'idle' && record.lastState === 'running' ? 'running' : live;
 }
 
@@ -313,11 +315,14 @@ export function sessionStillGoing(input: {
   lastResult?: DispatchRecord['lastResult'];
   /** 终态之后被重新唤起、这一轮还没结束 */
   reopened?: boolean;
+  /** 秘书停止或取消过：停止是明确的收口，残留的运行中与后台任务记录都不能再算在跑 */
+  stopped?: boolean;
 }): boolean {
   if (input.state === 'running') return true;
   if (input.state !== 'idle') return false;
   if (input.lastResult && SETTLED_RESULTS.has(input.lastResult.kind))
     return input.reopened === true;
+  if (input.stopped) return false;
   if (input.recordedState === 'running') return true;
   if (input.backgroundRunning) return true;
   return input.goalStatus === 'active';
@@ -340,6 +345,7 @@ export function countsAsRunning(
     backgroundRunning: record.backgroundRunning === true,
     lastResult: record.lastResult,
     reopened: record.reopenedAt !== undefined,
+    stopped: record.stoppedAt !== undefined,
   });
 }
 
@@ -368,6 +374,7 @@ export function linkedTodoSession(
     backgroundRunning: record.backgroundRunning === true,
     lastResult: record.lastResult,
     reopened: record.reopenedAt !== undefined,
+    stopped: record.stoppedAt !== undefined,
   });
   return going ? { ...view, state: 'running' as const } : view;
 }
@@ -404,6 +411,8 @@ export function buildBoard(file: SecretaryDispatchFile, input: BoardInput): Secr
   for (const record of Object.values(file.dispatched)) {
     const row = input.rows[record.conversationId];
     if (!row) continue;
+    // 用户从看板上移出：记录与会话都还在，只是不再占工作台的列
+    if (record.dismissedFromBoard === true) continue;
     const status = input.statuses[record.conversationId];
     const state = sessionStateOf(record, row, status);
     const going = countsAsRunning(record, row, status);

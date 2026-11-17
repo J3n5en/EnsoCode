@@ -656,6 +656,7 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (model) record.model = model;
   const stoppedAt = time(value.stoppedAt);
   if (stoppedAt !== undefined) record.stoppedAt = stoppedAt;
+  if (value.dismissedFromBoard === true) record.dismissedFromBoard = true;
   if (
     isObject(value.patrol) &&
     PATROL_REASONS.includes(value.patrol.reason as PatrolReason) &&

@@ -663,6 +663,33 @@ describe('在跑计数', () => {
     ).toEqual([]);
   });
 
+  it('秘书停止后即使残留运行中与后台任务记录也不算在跑', () => {
+    const stopped = record({
+      conversationId: 'stopped',
+      lastState: 'running',
+      backgroundRunning: true,
+      stoppedAt: 12,
+    });
+    const rows = { stopped: { title: '停掉', sessionFile: '/tmp/stopped' } };
+    expect(countsAsRunning(stopped, rows.stopped, idle)).toBe(false);
+    const result = board(emptyFile({ dispatched: { stopped } }), rows, { stopped: idle });
+    expect(ids(result.running)).toEqual([]);
+    expect(ids(result.done)).toEqual(['stopped']);
+  });
+
+  it('从看板上移出的会话既不在进行中也不在完成', () => {
+    const dismissed = record({
+      conversationId: 'dismissed',
+      lastState: 'idle',
+      stoppedAt: 12,
+      dismissedFromBoard: true,
+    });
+    const rows = { dismissed: { title: '移出', sessionFile: '/tmp/dismissed' } };
+    const result = board(emptyFile({ dispatched: { dismissed } }), rows, { dismissed: idle });
+    expect(ids(result.running)).toEqual([]);
+    expect(result.done).toEqual([]);
+  });
+
   it('已经 error 的会话不算在跑', () => {
     const broken = record({ conversationId: 'broken', lastState: 'error' });
     const rows = { broken: { title: '报错', sessionFile: '/tmp/broken' } };
