@@ -5,25 +5,18 @@ import {
   pairNode,
   removeNode,
   renameNode,
-  sendToNode,
-  setNodesMessageListener,
   setNodesStatusListener,
 } from '../services/pairGuest';
-import { parseGuestOutbound } from '../services/pairGuestPolicy';
-import { broadcastToRenderers, isMainRenderer, sendToLocalMain } from '../services/renderers';
+import { broadcastToRenderers } from '../services/renderers';
 
 /**
  * 「连接到节点」：本机作为 guest 连别的 EnsoCode 桌面。
  * 主窗口 UI 跑在独立的顶层 WebContentsView 里，`win.webContents` 是没有 preload 监听的空壳；
- * 推送一律走 sendToWindow / getWindowWebContents，否则渲染层收不到状态与下行帧。
+ * 推送一律走 sendToWindow / getWindowWebContents，否则渲染层收不到状态。
  */
 export function registerNodesHandlers(): void {
   setNodesStatusListener((status) => {
     broadcastToRenderers(IPC_CHANNELS.NODES_STATUS_CHANGED, status);
-  });
-  // 下行帧只给主窗口：设置窗口不渲染会话
-  setNodesMessageListener((message) => {
-    sendToLocalMain(IPC_CHANNELS.NODES_MESSAGE, message);
   });
 
   ipcMain.handle(IPC_CHANNELS.NODES_LIST, () => getNodesStatus());
@@ -40,14 +33,5 @@ export function registerNodesHandlers(): void {
       return { ok: false, error: 'invalid arguments' };
     }
     return renameNode(nodeId, label);
-  });
-  ipcMain.handle(IPC_CHANNELS.NODES_SEND, (event, nodeId: unknown, command: unknown) => {
-    if (!isMainRenderer(event.sender.id)) {
-      return { ok: false, error: 'Only MainWindow can talk to nodes.' };
-    }
-    if (typeof nodeId !== 'string' || !nodeId) return { ok: false, error: 'invalid nodeId' };
-    const parsed = parseGuestOutbound(command);
-    if (!parsed.ok) return { ok: false, error: parsed.error };
-    return sendToNode(nodeId, parsed.command);
   });
 }

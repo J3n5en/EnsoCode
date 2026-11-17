@@ -538,11 +538,8 @@ export const IPC_CHANNELS = {
   NODES_PAIR: 'nodes:pair',
   NODES_REMOVE: 'nodes:remove',
   NODES_RENAME: 'nodes:rename',
-  NODES_SEND: 'nodes:send',
   /** main → renderer：节点列表/连接状态变化 */
   NODES_STATUS_CHANGED: 'nodes:status-changed',
-  /** main → renderer：解密后的 host 下行帧 */
-  NODES_MESSAGE: 'nodes:message',
   /** 主窗口打开某节点的设置窗口（宿主 renderer 经 rpc 隧道） */
   NODES_OPEN_SETTINGS: 'nodes:open-settings',
   /** 主窗口可见层切到本机或某节点（节点界面层由 main 叠在本机 workbench 之上） */

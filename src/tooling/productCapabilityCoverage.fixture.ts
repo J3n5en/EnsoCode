@@ -860,7 +860,6 @@ export const IPC_PRODUCT_COVERAGE = {
   NODES_PAIR: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_REMOVE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_RENAME: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
-  NODES_SEND: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_OPEN_SETTINGS: excluded('Remote node settings window transport; not an Enso capability.'),
   NODES_SWITCH: excluded('Remote node (desktop guest) view switching; not an Enso capability.'),
   NODES_ACTIVE: excluded('Remote node (desktop guest) view switching; not an Enso capability.'),
@@ -877,7 +876,6 @@ export const IPC_PRODUCT_COVERAGE = {
   NODES_STATUS_CHANGED: excluded(
     'Remote node (desktop guest) pairing transport; not an Enso capability.'
   ),
-  NODES_MESSAGE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   TERMINAL_CREATE: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_WRITE: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_RESIZE: excluded('Side panel terminal pty transport; renderer UI only.'),

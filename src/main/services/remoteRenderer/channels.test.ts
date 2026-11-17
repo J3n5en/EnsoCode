@@ -38,7 +38,7 @@ describe('isRemoteChannelAllowed', () => {
       IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION,
       IPC_CHANNELS.NODES_LIST,
       IPC_CHANNELS.NODES_PAIR,
-      IPC_CHANNELS.NODES_SEND,
+      IPC_CHANNELS.NODES_SWITCH,
       'computer:anything',
       'browser:navigate',
       'updater:check',

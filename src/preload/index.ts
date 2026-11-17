@@ -233,12 +233,7 @@ import type {
   ParentSourceBindingRequest,
   ParentSourceBindingResult,
 } from '@shared/types/mentions';
-import type {
-  NodeActionResult,
-  NodeMessage,
-  NodePairResult,
-  NodesStatus,
-} from '@shared/types/nodes';
+import type { NodeActionResult, NodePairResult, NodesStatus } from '@shared/types/nodes';
 import type {
   DispatchDraft,
   SecretaryContactChannelPrefs,
@@ -1565,19 +1560,10 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.NODES_ACTIVE_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_ACTIVE_CHANGED, listener);
     },
-    /** 发 @enso/pair 的 PhoneToHost 命令（main 按白名单校验后加密上行） */
-    send: (nodeId: string, command: unknown): Promise<NodeActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.NODES_SEND, nodeId, command),
     onStatusChanged: (callback: (status: NodesStatus) => void): (() => void) => {
       const listener = (_: unknown, status: NodesStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.NODES_STATUS_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_STATUS_CHANGED, listener);
-    },
-    /** 解密后的 host 下行帧（catalog/projects/providers/agent-event/history） */
-    onMessage: (callback: (message: NodeMessage) => void): (() => void) => {
-      const listener = (_: unknown, message: NodeMessage) => callback(message);
-      ipcRenderer.on(IPC_CHANNELS.NODES_MESSAGE, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_MESSAGE, listener);
     },
   },
 
