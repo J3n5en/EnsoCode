@@ -451,6 +451,7 @@ async function main() {
     '焦点在可见层，Cmd+N 在 B 新建会话',
     'B 输入框有斜杠命令',
     'B 的右侧面板与终端可打开',
+    'B 界面按本机原生窗口布局：窗口控件可用，无精简版入口',
     'B 界面左下角节点切换器列出本机与 B',
     '经 B 界面切回本机，本机界面未重载',
     '再切 B 复用同一 webContents（不重新加载）',
@@ -537,6 +538,18 @@ async function main() {
           label: '终端 xterm',
         }
       );
+    });
+
+    await step('B 界面按本机原生窗口布局：窗口控件可用，无精简版入口', async () => {
+      const state = await overlay.eval(`(async () => ({
+        nativePlatform: window.electronAPI.remote?.nativePlatform ?? null,
+        maximized: await window.electronAPI.window.isMaximized().catch((e) => String(e)),
+        compact: !!document.querySelector('[title="Compact view"]'),
+      }))()`);
+      check(state.nativePlatform === process.platform, `nativePlatform=${state.nativePlatform}`);
+      check(typeof state.maximized === 'boolean', `isMaximized=${state.maximized}`);
+      check(!state.compact, '仍有精简版入口');
+      return JSON.stringify(state);
     });
 
     await step('B 界面左下角节点切换器列出本机与 B', async () => {

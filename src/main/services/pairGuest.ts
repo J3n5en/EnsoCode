@@ -88,6 +88,8 @@ export interface NodeRemoteHooks {
   /** online=true 也会在已在线时重复触发（中继重建），隧道据此重新 hello */
   online(nodeId: string, online: boolean): void;
   removed(nodeId: string): void;
+  /** 节点列表/状态变化：远程节点主界面里的节点切换器列的也是本机的节点 */
+  status(status: NodesStatus): void;
 }
 let remoteHooks: NodeRemoteHooks | null = null;
 
@@ -130,7 +132,10 @@ export function getNodesStatus(): NodesStatus {
 }
 
 function notifyStatus(): void {
-  onStatusChange?.(getNodesStatus());
+  if (!onStatusChange && !remoteHooks) return;
+  const status = getNodesStatus();
+  onStatusChange?.(status);
+  remoteHooks?.status(status);
 }
 
 // ── 生命周期 ──────────────────────────────────────────────────────────

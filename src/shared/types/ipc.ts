@@ -301,6 +301,8 @@ export const IPC_CHANNELS = {
   NOTIFICATION_FOCUS_SESSION: 'notification:focus-session',
   /** renderer → main：上报当前正在查看的会话，供系统通知抑制判断 */
   NOTIFICATION_ACTIVE_SESSION: 'notification:active-session',
+  /** 宿主 main → 远程主界面：系统通知内容，由界面所在电脑（远程节点 guest 的 main）弹出 */
+  NOTIFICATION_SHOW: 'notification:show',
   /** renderer → main：会话静音立即生效（落盘前也不推送）。走 agent: 前缀，远端界面可以同步 */
   AGENT_SESSION_MUTED: 'agent:session-muted',
   AGENT_TASK_STOP: 'agent:task-stop',
@@ -555,6 +557,10 @@ export const IPC_CHANNELS = {
   NODE_REMOTE_DETACH: 'node-remote:detach',
   NODE_REMOTE_CLOSE: 'node-remote:close',
   NODE_REMOTE_EVENT: 'node-remote:event',
+  /** 主窗口节点层 ↔ 本机 main：远程界面里本机窗口、节点切换与通知的调用（main 按白名单裁决） */
+  NODE_REMOTE_LOCAL_INVOKE: 'node-remote:local-invoke',
+  NODE_REMOTE_LOCAL_SEND: 'node-remote:local-send',
+  NODE_REMOTE_LOCAL_EVENT: 'node-remote:local-event',
 
   WORKSPACE_SEARCH_QUERY: 'workspace-search:query',
 

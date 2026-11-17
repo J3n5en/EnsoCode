@@ -46,7 +46,15 @@ vi.mock('../windows/MainWindow', () => ({
   focusMainWindow: vi.fn(),
 }));
 
-import { maybeNotify, maybeNotifyBot, setViewedSession } from './notifications';
+import type { HostToRemote } from '@enso/pair';
+import {
+  maybeNotify,
+  maybeNotifyBot,
+  notifyFromNode,
+  setLocalLayerVisible,
+  setViewedSession,
+} from './notifications';
+import { addRemoteSender, RemoteSender } from './remoteRenderer/senders';
 import { resetSessionMuteOverrides, setSessionMuteOverride } from './sessionMuteGate';
 
 const identity = { sessionId: 'conversation-1', generation: 'g' } as const;
@@ -67,6 +75,7 @@ describe('maybeNotify', () => {
     appState.isPackaged = true;
     settingsState.current = undefined;
     setViewedSession(null);
+    setLocalLayerVisible(true);
     resetSessionMuteOverrides();
     maybeNotify({ type: 'worker-exited' });
   });
@@ -96,6 +105,49 @@ describe('maybeNotify', () => {
     setViewedSession('conversation-2');
     maybeNotify(askEvent('在吗'));
     expect(notifications).toHaveLength(1);
+  });
+
+  it('主窗口盖着远程节点界面时，本机正看着的会话也照弹', () => {
+    windows.push({ isFocused: () => true });
+    setViewedSession('conversation-1');
+    setLocalLayerVisible(false);
+    maybeNotify(askEvent('在吗'));
+    expect(notifications).toHaveLength(1);
+  });
+
+  it('通知内容转给以远程节点方式连来的主界面（不转设置页），本机抑制不影响转发', () => {
+    const delivered: Record<'main' | 'settings', HostToRemote[]> = { main: [], settings: [] };
+    const senders = (['main', 'settings'] as const).map((kind) => {
+      const sender = new RemoteSender('pair-1', `cid-${kind}`, kind, (frame) =>
+        delivered[kind].push(frame)
+      );
+      addRemoteSender(sender);
+      return sender;
+    });
+    try {
+      windows.push({ isFocused: () => true });
+      setViewedSession('conversation-1');
+      maybeNotify(askEvent('在吗'));
+      expect(notifications).toHaveLength(0);
+      expect(delivered.main).toEqual([
+        expect.objectContaining({
+          type: 'rpc-event',
+          ch: 'notification:show',
+          args: [{ sessionId: 'conversation-1', title: '等你回答', body: '在吗' }],
+        }),
+      ]);
+      expect(delivered.settings).toEqual([]);
+      setSessionMuteOverride('conversation-1', true);
+      maybeNotify(askEvent('静音了'));
+      expect(delivered.main).toHaveLength(1);
+    } finally {
+      for (const sender of senders) sender.destroy();
+    }
+  });
+
+  it('远程节点转来的通知标题带节点名，点击交给调用方', () => {
+    notifyFromNode('B', { sessionId: 's1', title: '修登录 · 回复完成', body: 'done' }, () => {});
+    expect(notifications).toEqual([{ title: 'B · 修登录 · 回复完成', body: 'done' }]);
   });
 
   it('窗口聚焦但没在看任何会话(如设置页)时照弹', () => {

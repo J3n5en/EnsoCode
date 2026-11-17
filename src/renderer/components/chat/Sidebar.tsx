@@ -942,10 +942,10 @@ export function Sidebar({
               <Archive className="h-4 w-4" />
             </button>
           )}
-          {window.electronAPI.remote && (
+          {window.electronAPI.remote?.exitDesk && (
             <button
               type="button"
-              onClick={() => window.electronAPI.remote?.exitDesk()}
+              onClick={() => window.electronAPI.remote?.exitDesk?.()}
               className={ICON_BUTTON_CLASS}
               title={t('Compact view')}
             >
@@ -1734,10 +1734,10 @@ export function Sidebar({
               <Archive className="h-4 w-4" />
             </button>
           )}
-          {window.electronAPI.remote && (
+          {window.electronAPI.remote?.exitDesk && (
             <button
               type="button"
-              onClick={() => window.electronAPI.remote?.exitDesk()}
+              onClick={() => window.electronAPI.remote?.exitDesk?.()}
               className={ICON_BUTTON_CLASS}
               title={t('Compact view')}
             >

@@ -124,6 +124,7 @@ vi.mock('./pairRelayOpen', () => ({
 vi.mock('./pairStore', () => ({ loadRelayHostCache: () => null }));
 vi.mock('./nodeStore', () => ({
   adoptHostname: (nodes: unknown) => nodes,
+  isNodeStoreSecure: () => true,
   loadNodes: () => [mocks.node],
   removeNode: (nodes: unknown) => nodes,
   renameNode: (nodes: unknown) => nodes,
@@ -175,6 +176,7 @@ beforeEach(async () => {
     frame: (_nodeId, frame) => received.push(frame),
     online: (_nodeId, value) => online.push(value),
     removed: () => {},
+    status: () => {},
   });
   startPairGuest();
   await flush();

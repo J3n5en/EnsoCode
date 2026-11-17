@@ -695,6 +695,9 @@ export const IPC_PRODUCT_COVERAGE = {
   NOTIFICATION_ACTIVE_SESSION: excluded(
     'Renderer reports the currently viewed conversation id so Main can suppress redundant system notifications; no execution rights.'
   ),
+  NOTIFICATION_SHOW: excluded(
+    'Host forwards a system notification to remote desktop views; the guest main shows it; no execution rights.'
+  ),
   AGENT_SESSION_MUTED: excluded(
     'Renderer reports a conversation mute toggle so Main stops system notifications and paired-device pushes immediately; no execution rights.'
   ),
@@ -873,6 +876,15 @@ export const IPC_PRODUCT_COVERAGE = {
   NODE_REMOTE_DETACH: excluded('Remote node settings window transport; not an Enso capability.'),
   NODE_REMOTE_CLOSE: excluded('Remote node settings window transport; not an Enso capability.'),
   NODE_REMOTE_EVENT: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_LOCAL_INVOKE: excluded(
+    'Remote node view bridge to the guest main process; not an Enso capability.'
+  ),
+  NODE_REMOTE_LOCAL_SEND: excluded(
+    'Remote node view bridge to the guest main process; not an Enso capability.'
+  ),
+  NODE_REMOTE_LOCAL_EVENT: excluded(
+    'Remote node view bridge to the guest main process; not an Enso capability.'
+  ),
   NODES_STATUS_CHANGED: excluded(
     'Remote node (desktop guest) pairing transport; not an Enso capability.'
   ),

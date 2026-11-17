@@ -1,11 +1,12 @@
 import { join } from 'node:path';
-import { ipcMain } from '@platform';
+import { type IpcInvokeEvent, ipcMain } from '@platform';
 import {
   NODE_SETTINGS_SCHEME,
   type NodeShellPage,
   nodeShellUrl,
   parseNodeSettingsUrl,
 } from '@shared/nodeSettings';
+import { parseSettingsDeepLink, type SettingsDeepLink } from '@shared/settingsDeepLink';
 import { IPC_CHANNELS } from '@shared/types';
 import type { NodeActionResult } from '@shared/types/nodes';
 import { BrowserWindow, protocol, type WebContents, WebContentsView } from 'electron';
@@ -14,12 +15,16 @@ import {
   attachEditContextMenu,
   getWindowWebContents,
   setWindowCover,
+  TRAFFIC_LIGHT_POSITION,
 } from '../../windows/createAppWindow';
-import { getMainWindow } from '../../windows/MainWindow';
+import { focusMainWindow, getMainWindow } from '../../windows/MainWindow';
 import { attachPinnedWorkbenchBoundsSync, pinnedWorkbenchBounds } from '../../windows/win32Restore';
 import { loadNodes } from '../nodeStore';
+import { notifyFromNode, setLocalLayerVisible } from '../notifications';
 import { isNodeHostOnline, sendRemoteToNode, setNodeRemoteHooks } from '../pairGuest';
+import { registeredHandler } from '../remoteRenderer/ipcRegistry';
 import { broadcastToRenderers, isMainRenderer } from '../renderers';
+import { type LocalCall, parseHostNotification, parseLocalCall } from './boundary';
 import { type ActiveNode, NodeLayers } from './layers';
 import { type NodeAsset, NodeRemoteTunnel } from './tunnel';
 
@@ -28,6 +33,7 @@ import { type NodeAsset, NodeRemoteTunnel } from './tunnel';
  * - 主窗口节点层：WebContentsView 盖在本机 workbench 上，壳页确认节点在线后整页跳到 r/index.html；
  * - 节点设置窗口：壳页里 iframe 加载 r/settings.html。
  * nodeRemote preload 挂 `__ensoRemote`，web-preload 经它走 main 侧 rpc 隧道；资源经 enso-node:// 向宿主取。
+ * 主界面里本机窗口、节点切换与系统通知的调用经 local 通道回到本机 main（boundary.ts 白名单）。
  */
 
 interface Surface {
@@ -36,12 +42,16 @@ interface Surface {
   contents: WebContents;
   /** 该页面 attach 的 cid */
   cids: Set<string>;
+  /** 主界面上报的正在查看的会话：本机弹该节点通知时按它抑制 */
+  viewed: string | null;
 }
 
 const tunnels = new Map<string, NodeRemoteTunnel>();
 const windows = new Map<string, BrowserWindow>();
 /** webContents.id → 节点设置窗口或主窗口节点层 */
 const surfaces = new Map<number, Surface>();
+/** 节点设置窗口新开时带的深链，壳页 init 时取走 */
+const pendingLinks = new Map<string, SettingsDeepLink>();
 
 const ASSET_TIMEOUT_MS = 60_000;
 /** 带内容 hash 的构建产物不会变，按节点缓存在内存，再次打开窗口免下载 */
@@ -137,7 +147,7 @@ function shellPreferences(): Electron.WebPreferences {
 /** 登记节点界面并收紧导航：只许留在该节点的 enso-node 页面内，外链交给系统浏览器 */
 function attachSurface(contents: WebContents, nodeId: string, page: NodeShellPage): void {
   const id = contents.id;
-  surfaces.set(id, { nodeId, page, contents, cids: new Set() });
+  surfaces.set(id, { nodeId, page, contents, cids: new Set(), viewed: null });
   contents.setWindowOpenHandler(({ url }) => {
     openExternalWebUrl(url);
     return { action: 'deny' };
@@ -152,15 +162,21 @@ function attachSurface(contents: WebContents, nodeId: string, page: NodeShellPag
   });
 }
 
-export function openNodeSettingsWindow(nodeId: string): boolean {
+export function openNodeSettingsWindow(
+  nodeId: string,
+  link: SettingsDeepLink | null = null
+): boolean {
   const node = loadNodes().find((n) => n.nodeId === nodeId);
   if (!node) return false;
   const existing = windows.get(nodeId);
   if (existing && !existing.isDestroyed()) {
     if (existing.isMinimized()) existing.restore();
     existing.focus();
+    if (link) sendSettingsLink(nodeId, link);
     return true;
   }
+  if (link) pendingLinks.set(nodeId, link);
+  else pendingLinks.delete(nodeId);
   const win = new BrowserWindow({
     width: 960,
     height: 680,
@@ -179,6 +195,70 @@ export function openNodeSettingsWindow(nodeId: string): boolean {
   return true;
 }
 
+/** 设置页已开：按宿主事件的形状把深链交给它（web-preload 订阅的 settings:deep-link） */
+function sendSettingsLink(nodeId: string, link: SettingsDeepLink): void {
+  for (const surface of surfaces.values()) {
+    if (surface.nodeId !== nodeId || surface.page !== 'settings') continue;
+    for (const cid of surface.cids) {
+      surface.contents.send(
+        IPC_CHANNELS.NODE_REMOTE_EVENT,
+        cid,
+        IPC_CHANNELS.SETTINGS_DEEP_LINK,
+        JSON.stringify([link])
+      );
+    }
+  }
+}
+
+// ── 主界面 ↔ 本机 main ────────────────────────────────────────────────
+
+function sendToNodeView(surface: Surface, channel: string, ...args: unknown[]): void {
+  if (surface.page !== 'main' || surface.contents.isDestroyed()) return;
+  surface.contents.send(IPC_CHANNELS.NODE_REMOTE_LOCAL_EVENT, channel, JSON.stringify(args));
+}
+
+/** 本机状态推给各节点主界面（节点列表、可见层、窗口最大化/全屏） */
+export function sendToNodeViews(channel: string, ...args: unknown[]): void {
+  for (const surface of surfaces.values()) sendToNodeView(surface, channel, ...args);
+}
+
+async function runLocalCall(surface: Surface, call: LocalCall): Promise<unknown> {
+  switch (call.channel) {
+    case IPC_CHANNELS.WINDOW_OPEN_SETTINGS:
+      openNodeSettingsWindow(surface.nodeId, parseSettingsDeepLink(call.args[0]));
+      return undefined;
+    case IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION:
+      surface.viewed = call.args[0] as string | null;
+      return undefined;
+    default: {
+      // 其余与本机窗口同一批 handler：sender 是节点层，窗口控件作用于它所在的主窗口
+      const handler = registeredHandler(call.channel);
+      if (!handler) throw new Error(`No handler registered for '${call.channel}'`);
+      return handler({ sender: surface.contents } as unknown as IpcInvokeEvent, ...call.args);
+    }
+  }
+}
+
+function notifyFromHost(surface: Surface, payload: string): void {
+  const content = parseHostNotification(payload);
+  if (!content) return;
+  const win = layersWindow;
+  const watching =
+    win !== null &&
+    !win.isDestroyed() &&
+    win.isFocused() &&
+    layers.active === surface.nodeId &&
+    surface.viewed === content.sessionId;
+  if (watching) return;
+  const label = loadNodes().find((node) => node.nodeId === surface.nodeId)?.label ?? '';
+  notifyFromNode(label, content, () => {
+    focusMainWindow();
+    if (switchNode(surface.nodeId).ok) {
+      sendToNodeView(surface, IPC_CHANNELS.NOTIFICATION_FOCUS_SESSION, content.sessionId);
+    }
+  });
+}
+
 // ── 主窗口节点层 ──────────────────────────────────────────────────────
 
 /** 节点层所在的主窗口；主窗口关掉（进托盘）时各层随之销毁，重建后从本机开始 */
@@ -186,7 +266,11 @@ let layersWindow: BrowserWindow | null = null;
 
 const layers = new NodeLayers<WebContentsView>(
   { create: createNodeView, show: showNodeView, destroy: destroyNodeView },
-  (active) => broadcastToRenderers(IPC_CHANNELS.NODES_ACTIVE_CHANGED, active)
+  (active) => {
+    setLocalLayerVisible(active === 'local');
+    broadcastToRenderers(IPC_CHANNELS.NODES_ACTIVE_CHANGED, active);
+    sendToNodeViews(IPC_CHANNELS.NODES_ACTIVE_CHANGED, active);
+  }
 );
 
 function layerWindow(): BrowserWindow | null {
@@ -227,6 +311,11 @@ function showNodeView(view: WebContentsView | null): void {
   if (!win || win.isDestroyed()) return;
   for (const other of layers.all()) if (other !== view) other.setVisible(false);
   setWindowCover(win, view);
+  // 红绿灯显隐由当前层的弹窗控制；换层后按新层从显示开始，免得被上一层藏住
+  if (process.platform === 'darwin') {
+    win.setWindowButtonVisibility(true);
+    win.setWindowButtonPosition(TRAFFIC_LIGHT_POSITION);
+  }
   if (view) {
     view.setVisible(true);
     view.webContents.focus();
@@ -278,6 +367,7 @@ export function registerNodeRemoteHandlers(): void {
       windows.get(nodeId)?.close();
       dropTunnel(nodeId);
     },
+    status: (status) => sendToNodeViews(IPC_CHANNELS.NODES_STATUS_CHANGED, status),
   });
 
   ipcMain.handle(IPC_CHANNELS.NODES_OPEN_SETTINGS, (event, nodeId: unknown) => {
@@ -307,7 +397,9 @@ export function registerNodeRemoteHandlers(): void {
     try {
       const parsed = JSON.parse(new TextDecoder().decode(meta.body)) as { platform?: unknown };
       if (typeof parsed.platform !== 'string') return { ok: false, error: 'host-outdated' };
-      return { ok: true, platform: parsed.platform };
+      const link = entry.page === 'settings' ? pendingLinks.get(entry.nodeId) : undefined;
+      pendingLinks.delete(entry.nodeId);
+      return { ok: true, platform: parsed.platform, ...(link ? { link } : {}) };
     } catch {
       return { ok: false, error: 'host-outdated' };
     }
@@ -319,9 +411,12 @@ export function registerNodeRemoteHandlers(): void {
     const { contents } = entry;
     const cid = tunnelFor(entry.nodeId).attach(entry.page, {
       onEvent: (channel, payload) => {
-        if (!contents.isDestroyed()) {
-          contents.send(IPC_CHANNELS.NODE_REMOTE_EVENT, cid, channel, payload);
+        if (contents.isDestroyed()) return;
+        if (channel === IPC_CHANNELS.NOTIFICATION_SHOW) {
+          if (entry.page === 'main') notifyFromHost(entry, payload);
+          return;
         }
+        contents.send(IPC_CHANNELS.NODE_REMOTE_EVENT, cid, channel, payload);
       },
       onReset: () => {
         entry.cids.delete(cid);
@@ -378,5 +473,37 @@ export function registerNodeRemoteHandlers(): void {
     const entry = surfaceOf(event);
     if (entry?.page === 'settings') windows.get(entry.nodeId)?.close();
     else if (entry?.page === 'main') switchNode('local');
+  });
+
+  const localCall = (event: { sender: { id: number } }, channel: unknown, payload: unknown) => {
+    const surface = surfaceOf(event);
+    const call = surface?.page === 'main' ? parseLocalCall(channel, payload) : null;
+    return surface && call ? { surface, call } : null;
+  };
+
+  ipcMain.handle(
+    IPC_CHANNELS.NODE_REMOTE_LOCAL_INVOKE,
+    async (event, channel: unknown, payload: unknown): Promise<string> => {
+      const target = localCall(event, channel, payload);
+      if (!target) {
+        return JSON.stringify({
+          ok: false,
+          error: `Channel '${String(channel)}' is not available`,
+        });
+      }
+      try {
+        return JSON.stringify({ ok: true, value: await runLocalCall(target.surface, target.call) });
+      } catch (error) {
+        return JSON.stringify({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  );
+
+  ipcMain.on(IPC_CHANNELS.NODE_REMOTE_LOCAL_SEND, (event, channel: unknown, payload: unknown) => {
+    const target = localCall(event, channel, payload);
+    if (target) void runLocalCall(target.surface, target.call).catch(() => {});
   });
 }

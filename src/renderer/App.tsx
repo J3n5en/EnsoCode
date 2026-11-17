@@ -218,11 +218,11 @@ export default function App() {
     bindPairCatalogSync();
   }, []);
 
-  // 连接到节点只在本机桌面可用：远程界面的 nodes: 被宿主拒绝，不订阅
-  useEffect(
-    () => (window.electronAPI.remote ? undefined : useRemoteNodesStore.getState().bind()),
-    []
-  );
+  // 节点列表与可见层来自界面所在电脑：本机桌面，或以远程节点层跑在另一台桌面里（nodes: 交给那台的 main）
+  useEffect(() => {
+    const remote = window.electronAPI.remote;
+    return remote && !remote.nativePlatform ? undefined : useRemoteNodesStore.getState().bind();
+  }, []);
   const botModeActive = useBotModeActive();
   const botModeEnabled = useSettingsStore((s) => s.botModeEnabled);
   const headerSessionTabsEnabled = useSettingsStore((s) => s.headerSessionTabs);

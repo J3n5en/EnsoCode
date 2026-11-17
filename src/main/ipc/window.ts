@@ -6,6 +6,7 @@ import { parseTitleBarAppearance, windowSurfaceColor } from '@shared/windowContr
 import { BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
 import { installAppMenu } from '../services/appMenu';
+import { sendToNodeViews } from '../services/nodeRemote';
 import {
   getWindowWebContents,
   sendToWindow,
@@ -215,6 +216,7 @@ export function registerWindowHandlers(): void {
 export function attachWindowStateEvents(win: BrowserWindow): void {
   const send = (channel: string, value: boolean) => {
     sendToWindow(win, channel, value);
+    sendToNodeViews(channel, value);
   };
 
   win.on('maximize', () => send(IPC_CHANNELS.WINDOW_MAXIMIZED_CHANGED, true));

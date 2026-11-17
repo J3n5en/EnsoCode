@@ -58,17 +58,47 @@ function attach(kind: RemoteFrameKind): RemoteBridgeFrame {
   };
 }
 
-function remoteBridge(platform: string): RemoteBridge {
+function remoteBridge(platform: string, settingsLink: unknown = null): RemoteBridge {
+  let link = settingsLink;
   return {
     platform,
     attach,
     leader: () => false,
     openSettings: () => {},
     closeSettings: () => ipcRenderer.send(IPC_CHANNELS.NODE_REMOTE_CLOSE),
-    consumeSettingsLink: () => null,
-    exitDesk: () => {},
-    // 不提供 linkStatus / onLinkStatus / vapidPublicKey / setPushSubscription / setPushPending：
-    // 节点界面没有「手机→桌面」链路与浏览器推送，宿主界面按缺省隐藏这组入口。
+    consumeSettingsLink: () => {
+      const value = link;
+      link = null;
+      return value;
+    },
+    // 不提供 exitDesk / linkStatus / vapidPublicKey / setPush* 等手机壳专属方法：
+    // 节点界面没有手机版、「手机→桌面」链路与浏览器推送，宿主界面按缺省隐藏这组入口。
+  };
+}
+
+/** 主界面里交给本机 main 的调用（本机窗口、节点切换、系统通知），由 main 按白名单裁决 */
+function nativeLocal(): RemoteBridge['local'] {
+  const localListeners = new Map<string, Set<(payload: string) => void>>();
+  ipcRenderer.on(
+    IPC_CHANNELS.NODE_REMOTE_LOCAL_EVENT,
+    (_event, channel: string, payload: string) => {
+      for (const fn of [...(localListeners.get(channel) ?? [])]) fn(payload);
+    }
+  );
+  return {
+    invoke: (channel, payload) =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODE_REMOTE_LOCAL_INVOKE, channel, payload),
+    send: (channel, payload) =>
+      ipcRenderer.send(IPC_CHANNELS.NODE_REMOTE_LOCAL_SEND, channel, payload),
+    on: (channel, listener) => {
+      let set = localListeners.get(channel);
+      if (!set) {
+        set = new Set();
+        localListeners.set(channel, set);
+      }
+      set.add(listener);
+      return () => set.delete(listener);
+    },
   };
 }
 
@@ -94,7 +124,7 @@ async function runShell(page: NodeShellPage): Promise<void> {
   if (page === 'main') document.documentElement.classList.add('drag');
   showStatus(TEXT.connecting);
   const init = (await ipcRenderer.invoke(IPC_CHANNELS.NODE_REMOTE_INIT)) as
-    | { ok: true; platform: string }
+    | { ok: true; platform: string; link?: unknown }
     | { ok: false; error: string };
   if (!init.ok) {
     showStatus(init.error === 'offline' ? TEXT.offline : TEXT.outdated, true);
@@ -110,7 +140,7 @@ async function runShell(page: NodeShellPage): Promise<void> {
     location.replace(nodeMainRendererPath(init.platform));
     return;
   }
-  contextBridge.exposeInMainWorld('__ensoRemote', remoteBridge(init.platform));
+  contextBridge.exposeInMainWorld('__ensoRemote', remoteBridge(init.platform, init.link ?? null));
   showStatus(TEXT.loading);
   const frame = document.createElement('iframe');
   // 资源下完、页面跑起来后再露出，期间保留 loading
@@ -129,7 +159,11 @@ async function runShell(page: NodeShellPage): Promise<void> {
 const route = nodeShellRoute(location.href);
 if (route?.kind === 'main') {
   // 主界面是顶层文档：web-preload 同步读 __ensoRemote，必须在页面脚本之前挂上
-  contextBridge.exposeInMainWorld('__ensoRemote', remoteBridge(route.platform));
+  contextBridge.exposeInMainWorld('__ensoRemote', {
+    ...remoteBridge(route.platform),
+    local: nativeLocal(),
+    localPlatform: process.platform,
+  });
 } else if (route?.kind === 'shell') {
   const { page } = route;
   window.addEventListener('DOMContentLoaded', () => void runShell(page));

@@ -15,9 +15,17 @@ remoteFrame.on(IPC_CHANNELS.REMOTE_LEADER_CHANGED, (value) => {
   leader = value === true;
 });
 
-// 只有手机壳提供链路/推送；节点设置窗口没有这组方法，此时保留原来的节点切换器
-const { linkStatus, onLinkStatus, vapidPublicKey, setPushSubscription, setPushPending } =
-  remoteBridge;
+// 只有手机壳提供链路/推送与回手机版；桌面远程节点层提供所在电脑的平台（原生窗口与节点切换器）
+const {
+  linkStatus,
+  onLinkStatus,
+  vapidPublicKey,
+  setPushSubscription,
+  setPushPending,
+  exitDesk,
+  local,
+  localPlatform,
+} = remoteBridge;
 
 const remote: RemoteApi = {
   isLeader: () => leader,
@@ -25,7 +33,8 @@ const remote: RemoteApi = {
     remoteFrame.on(IPC_CHANNELS.REMOTE_LEADER_CHANGED, (value) => callback(value === true)),
   upload: uploadToHost,
   localImagePrefix,
-  exitDesk: () => remoteBridge.exitDesk(),
+  ...(exitDesk ? { exitDesk: () => remoteBridge.exitDesk?.() } : {}),
+  ...(local && localPlatform ? { nativePlatform: localPlatform } : {}),
   ...(linkStatus && onLinkStatus && vapidPublicKey && setPushSubscription && setPushPending
     ? { linkStatus, onLinkStatus, vapidPublicKey, setPushSubscription, setPushPending }
     : {}),
