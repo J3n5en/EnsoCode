@@ -91,6 +91,38 @@ describe('withBackground promptSnippet 跟随工具名', () => {
     expect(wrapped.promptSnippet).toMatch(/^powershell:/);
   });
 
+  it('powershell 的说明与规则用 PowerShell 写法，不把 bash 命令写给模型', () => {
+    const manager = makeManager().manager;
+    const tool = (name: string) =>
+      withBackground(
+        {
+          name,
+          label: name,
+          description: `Execute a ${name} command.`,
+          parameters: { type: 'object', properties: {} },
+          execute: async () => ({ content: [], details: undefined }),
+        } as unknown as ToolDefinition,
+        manager,
+        's1',
+        '/tmp'
+      );
+    const ps = tool('powershell');
+    const psText = [ps.description, ps.promptSnippet, ...(ps.promptGuidelines ?? [])].join('\n');
+    expect(ps.promptSnippet).toMatch(/PowerShell/);
+    expect(ps.description).toMatch(/Select-Object -First/);
+    expect(ps.description).toMatch(/\$env:TEMP/);
+    expect(ps.description).toMatch(/Get-Content/);
+    expect(ps.promptGuidelines?.[2]).toMatch(/timeout only kills/i);
+    expect(ps.promptGuidelines?.[2]).toMatch(/Start-Sleep/);
+    for (const bashOnly of [/\bexport\b/, /cat\/head/, /pgrep/, /nohup/, /setsid/, /disown/]) {
+      expect(psText).not.toMatch(bashOnly);
+    }
+    const bash = tool('bash');
+    expect(bash.description).toMatch(/cat\/head\/tail\/sed\/nl/);
+    expect(bash.description).not.toMatch(/Select-Object|Get-Content|\$env:/);
+    expect(bash.promptGuidelines?.[0]).toMatch(/nohup/);
+  });
+
   it('提示词：snippet 讲让位语义，rules 追加后台/让位/timeout 三条且保留原工具的', () => {
     const manager = makeManager().manager;
     const base = {

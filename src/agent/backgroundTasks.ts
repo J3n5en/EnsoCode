@@ -878,6 +878,35 @@ function explicitTimeoutSec(record: Record<string, unknown>): number | undefined
     : undefined;
 }
 
+/** 说明里点名的命令按工具所在的 shell 写：PowerShell 会话不能看到 bash 写法 */
+function shellTerms(name: string) {
+  return name === 'powershell'
+    ? {
+        kind: 'PowerShell',
+        syntax:
+          'Commands run in PowerShell, not bash: there is no head, tail or /tmp — use ' +
+          'Select-Object -First N / -Last N and $env:TEMP, and chain with ; (&& and || need PowerShell 7). ',
+        sessionState: 'Set-Location, $env: changes',
+        follow: 'Get-Content -Wait',
+        readCommands: 'Get-Content',
+        searchCommands: 'Select-String or Get-ChildItem -Recurse',
+        poll: 'Start-Sleep, Get-Process',
+        pollJob: 'Start-Sleep, Get-Process',
+        detach: 'Start-Job, Start-Process or a trailing &',
+      }
+    : {
+        kind: 'shell',
+        syntax: '',
+        sessionState: 'cd, export',
+        follow: 'tail -f',
+        readCommands: 'cat/head/tail/sed/nl',
+        searchCommands: 'rg/grep/find',
+        poll: 'sleep, ps, pgrep',
+        pollJob: 'sleep, ps, pgrep, top',
+        detach: '&, nohup, setsid or disown',
+      };
+}
+
 function detachedResult(
   error: ForegroundDetachedError,
   context: { commandClass: CommandClass; startedAt: number; logPath: string; waitCapSec: number }
@@ -968,6 +997,8 @@ export function withBackground(
 ): ToolDefinition {
   // 描述文案按建工具时的时限生成（新会话随设置更新）；执行路径每次现读 manager.limits
   const limits = manager.limits;
+  const name = definition.name;
+  const terms = shellTerms(name);
   const baseParams = definition.parameters as unknown as {
     properties?: Record<string, unknown>;
     [key: string]: unknown;
@@ -990,17 +1021,16 @@ export function withBackground(
           'Run in the background and return immediately with a job id. Use this whenever the command ' +
           `may outlast the foreground yield (~${yieldSec(limits.yieldDefaultMs)}s; ` +
           `~${yieldSec(limits.yieldBuildMs)}s for builds/tests; servers/watchers ~${yieldSec(limits.yieldServerMs)}s). ` +
-          'Required for anything that does not exit on its own (dev servers, watch modes, tail -f). ' +
+          `Required for anything that does not exit on its own (dev servers, watch modes, ${terms.follow}). ` +
           'You will be notified automatically when it finishes — do not poll or sleep-wait; end your turn instead.',
       },
     },
   } as ToolDefinition['parameters'];
-  const name = definition.name;
   return {
     ...definition,
     parameters,
     description:
-      `${definition.description} Each call runs in a fresh shell: cd, export and activated ` +
+      `${definition.description} ${terms.syntax}Each call runs in a fresh shell: ${terms.sessionState} and activated ` +
       'virtualenvs do not persist between calls, so chain them in one command. A foreground call ' +
       `still running at its yield point (~${yieldSec(limits.yieldDefaultMs)}s; ` +
       `~${yieldSec(limits.yieldBuildMs)}s for builds, tests and installs; ` +
@@ -1008,20 +1038,20 @@ export function withBackground(
       'job and returns a receipt with the job id and log path — that is not a failure. timeout only ' +
       'kills the command when reached. There is no interactive input: password prompts, ' +
       'confirmations and editors fail immediately, so use non-interactive flags. ' +
-      'Read files with read (offset/limit) instead of cat/head/tail/sed/nl; ' +
-      'search with grep and locate with find instead of running rg/grep/find in a shell command. ' +
-      'Do not poll a running job with sleep, ps, pgrep, top, or task_output loops. ' +
+      `Read files with read (offset/limit) instead of ${terms.readCommands}; ` +
+      `search with grep and locate with find instead of running ${terms.searchCommands} in a shell command. ` +
+      `Do not poll a running job with ${terms.pollJob}, or task_output loops. ` +
       'If you already know the command will outlast the yield, set background: true instead of a large timeout.',
     promptSnippet:
-      `${name}: run shell commands as tracked jobs. Anything that can outlive the call must use ` +
+      `${name}: run ${terms.kind} commands as tracked jobs. Anything that can outlive the call must use ` +
       `background=true. timeout only kills; it does not extend the wait. Foreground calls yield back ` +
       `with a receipt at ~${yieldSec(limits.yieldServerMs)}–${yieldSec(limits.yieldBuildMs)}s ` +
       `depending on the command, instead of blocking the turn.`,
     promptGuidelines: [
       ...(definition.promptGuidelines ?? []),
-      `Never background a command with &, nohup, setsid or disown — set background: true on ${name}, which tracks the job and wakes you when it ends.`,
+      `Never background a command with ${terms.detach} — set background: true on ${name}, which tracks the job and wakes you when it ends.`,
       `A ${name} yield receipt means the command is still running as a background job, not that it failed: do not rerun it and do not poll it (task_output loops, sleep) — continue other work or end your turn; its completion wakes you automatically.`,
-      `timeout only kills — it does not extend the foreground wait. If a command may outlast the yield (~${yieldSec(limits.yieldDefaultMs)}s; ~${yieldSec(limits.yieldBuildMs)}s for builds), set background: true from the start and end your turn. Never poll with sleep, ps, pgrep, or task_output loops.`,
+      `timeout only kills — it does not extend the foreground wait. If a command may outlast the yield (~${yieldSec(limits.yieldDefaultMs)}s; ~${yieldSec(limits.yieldBuildMs)}s for builds), set background: true from the start and end your turn. Never poll with ${terms.poll}, or task_output loops.`,
     ],
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
