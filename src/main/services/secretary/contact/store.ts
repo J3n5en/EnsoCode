@@ -39,6 +39,10 @@ export interface ContactFile {
   pollOffset: number;
   /** 绑定向导中间态：码、过期时间与已经对不上的次数，绑完即清 */
   bind?: { code: string; expiresAt: number; failures: number };
+  /** Telegram 群白名单（群 chatId）：空名单不收任何群；名单里的群也只认绑定的那个人 */
+  telegramGroups: string[];
+  /** 见过的群名，只给界面认群用；只记绑定的人或名单里的群发来的 */
+  telegramGroupTitles: Record<string, string>;
 }
 
 export function emptyContactFile(): ContactFile {
@@ -50,6 +54,8 @@ export function emptyContactFile(): ContactFile {
     allowMemory: false,
     syncMirror: false,
     pollOffset: 0,
+    telegramGroups: [],
+    telegramGroupTitles: {},
   };
 }
 
@@ -81,6 +87,70 @@ function parseChat(raw: unknown): SecretaryContactChat | undefined {
 }
 
 export const TELEGRAM_CHANNEL_ID = 'telegram';
+
+const GROUP_ID = /^-?\d{1,20}$/u;
+const GROUP_TITLE_MAX = 256;
+const GROUP_TITLES_MAX = 50;
+
+function groupId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const id = raw.trim();
+  return GROUP_ID.test(id) ? id : null;
+}
+
+function parseGroups(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = raw.map(groupId).filter((id): id is string => id !== null);
+  return [...new Set(ids)];
+}
+
+function parseGroupTitles(raw: unknown): Record<string, string> {
+  if (!isRecord(raw)) return {};
+  const entries = Object.entries(raw).filter(
+    (entry): entry is [string, string] =>
+      groupId(entry[0]) === entry[0] && typeof entry[1] === 'string' && entry[1].length > 0
+  );
+  return Object.fromEntries(
+    entries.slice(-GROUP_TITLES_MAX).map(([id, title]) => [id, title.slice(0, GROUP_TITLE_MAX)])
+  );
+}
+
+export function telegramGroupAllowed(file: ContactFile, chatId: number): boolean {
+  return file.telegramGroups.includes(String(chatId));
+}
+
+/** 输入做 trim；空的、不是数字 id 的不加，重复的原样返回 */
+export function withTelegramGroupAdded(
+  file: ContactFile,
+  raw: unknown
+): { ok: true; file: ContactFile } | { ok: false } {
+  const id = groupId(raw);
+  if (!id) return { ok: false };
+  if (file.telegramGroups.includes(id)) return { ok: true, file };
+  return { ok: true, file: { ...file, telegramGroups: [...file.telegramGroups, id] } };
+}
+
+export function withTelegramGroupRemoved(file: ContactFile, raw: unknown): ContactFile {
+  const id = typeof raw === 'string' ? raw.trim() : '';
+  return { ...file, telegramGroups: file.telegramGroups.filter((group) => group !== id) };
+}
+
+/** 记下群名；没变返回 null，省一次写盘。新的排最后，超出上限丢最旧的 */
+export function withTelegramGroupTitle(
+  file: ContactFile,
+  chatId: string,
+  title: string
+): ContactFile | null {
+  const clean = title.slice(0, GROUP_TITLE_MAX);
+  if (!clean || groupId(chatId) !== chatId || file.telegramGroupTitles[chatId] === clean) {
+    return null;
+  }
+  const rest = Object.entries(file.telegramGroupTitles).filter(([id]) => id !== chatId);
+  return {
+    ...file,
+    telegramGroupTitles: Object.fromEntries([...rest, [chatId, clean]].slice(-GROUP_TITLES_MAX)),
+  };
+}
 
 const CHANNEL_ID = /^[a-z0-9][a-z0-9._:-]{0,95}$/u;
 const PREF_KEYS = ['enabled', 'push', 'cardConfirm', 'syncMirror', 'memory'] as const;
@@ -167,6 +237,8 @@ export function parseContactFile(raw: unknown): ContactFile {
     syncMirror: raw.syncMirror === true,
     pollOffset: typeof raw.pollOffset === 'number' && raw.pollOffset > 0 ? raw.pollOffset : 0,
     ...(bind ? { bind } : {}),
+    telegramGroups: parseGroups(raw.telegramGroups),
+    telegramGroupTitles: parseGroupTitles(raw.telegramGroupTitles),
   };
 }
 
@@ -221,6 +293,8 @@ export class ContactStore {
       // 解绑就没人收镜像了：同步自动关闭，重新绑定后要再发一次 /sync
       syncMirror: false,
       pollOffset: 0,
+      telegramGroups: current.telegramGroups,
+      telegramGroupTitles: current.telegramGroupTitles,
     });
   }
 
@@ -236,6 +310,8 @@ export class ContactStore {
       allowMemory: current.allowMemory,
       syncMirror: false,
       pollOffset: 0,
+      telegramGroups: current.telegramGroups,
+      telegramGroupTitles: current.telegramGroupTitles,
     });
   }
 }

@@ -528,6 +528,7 @@ describe('Telegram 群与论坛话题', () => {
     await h.service.bind(TOKEN);
     h.api.push(privateMessage('/start 123456'));
     await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    expect(h.service.setTelegramGroup('add', '-1001234567890')).toEqual({ ok: true });
     return h;
   }
 
@@ -615,6 +616,122 @@ describe('Telegram 群与论坛话题', () => {
       'foreign click rejected'
     );
     expect(h.api.callbacks).toHaveLength(0);
+  });
+});
+
+describe('Telegram 群白名单', () => {
+  const GROUP = -1001234567890;
+
+  async function bound() {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    return h;
+  }
+
+  it('默认空名单：群消息不进，私聊照常进', async () => {
+    const h = await bound();
+    expect(h.service.state().telegram.groups).toEqual([]);
+    h.api.push(groupMessage('群里说一句'));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === `group-not-allowed chat=${GROUP}`),
+      'group dropped'
+    );
+    h.api.push(privateMessage('私聊说一句'));
+    await waitFor(() => h.world.delivered.length > 0, 'private delivered');
+    expect(h.world.delivered).toHaveLength(1);
+    expect(h.world.delivered[0]).toContain('私聊说一句');
+  });
+
+  it('名单里的群：绑定的人进，群里别人不进也不回话', async () => {
+    const h = await bound();
+    h.service.setTelegramGroup('add', String(GROUP));
+    const before = h.api.sent.length;
+    h.api.push(groupMessage('别人的话', { fromId: 31337 }));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === 'foreign-chat'),
+      'stranger dropped'
+    );
+    h.api.push(groupMessage('我的话'));
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(h.world.delivered).toHaveLength(1);
+    expect(h.world.delivered[0]).toContain('我的话');
+    expect(h.api.sent.length).toBe(before);
+  });
+
+  it('不在名单里的群：绑定的人发的也丢', async () => {
+    const h = await bound();
+    h.service.setTelegramGroup('add', '-1009999');
+    h.api.push(groupMessage('我的话'));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === `group-not-allowed chat=${GROUP}`),
+      'dropped'
+    );
+    expect(h.world.delivered).toHaveLength(0);
+  });
+
+  it('按钮：名单外的群连绑定的人点也丢，名单内只认绑定的人', async () => {
+    const h = await bound();
+    const tap = (fromId: number, id: string): TelegramUpdate => ({
+      update_id: 9,
+      callback_query: {
+        id,
+        from: { id: fromId },
+        data: 'ask:1:0',
+        message: { message_id: 5, chat: { id: GROUP, type: 'supergroup' } },
+      },
+    });
+    h.api.push(tap(777, 'cb-1'));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === `group-not-allowed chat=${GROUP}`),
+      'outside group click dropped'
+    );
+    h.service.setTelegramGroup('add', String(GROUP));
+    h.api.push(tap(31337, 'cb-2'));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === 'foreign-sender'),
+      'stranger click dropped'
+    );
+    expect(h.api.callbacks).toHaveLength(0);
+  });
+
+  it('增删名单落在 contact.json，重启后还在；不写别处', async () => {
+    const h = await bound();
+    expect(h.service.setTelegramGroup('add', ' -1001 ')).toEqual({ ok: true });
+    expect(h.service.setTelegramGroup('add', '-1001')).toEqual({ ok: true });
+    expect(h.service.setTelegramGroup('add', '-1002')).toEqual({ ok: true });
+    expect(h.service.setTelegramGroup('add', '')).toEqual({ ok: false, error: 'invalid-chat-id' });
+    expect(h.service.setTelegramGroup('remove', '-1001')).toEqual({ ok: true });
+    const saved = JSON.parse(readFileSync(join(h.dir, 'contact.json'), 'utf8')) as {
+      telegramGroups: string[];
+    };
+    expect(saved.telegramGroups).toEqual(['-1002']);
+    expect(h.restart().state().telegram.groups).toEqual([{ id: '-1002' }]);
+    // 解绑不清名单
+    await h.service.unbind();
+    expect(h.restart().state().telegram.groups).toEqual([{ id: '-1002' }]);
+  });
+
+  it('见过的群显示标题，没见过只给 id', async () => {
+    const h = await bound();
+    h.api.push(groupMessage('名单外先说一句'));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === `group-not-allowed chat=${GROUP}`),
+      'dropped'
+    );
+    // 陌生人拉进的群不记标题
+    h.api.push(groupMessage('陌生群', { fromId: 31337, chatId: -100777 }));
+    await waitFor(
+      () => h.audits.some((entry) => entry.detail === 'group-not-allowed chat=-100777'),
+      'stranger group dropped'
+    );
+    h.service.setTelegramGroup('add', String(GROUP));
+    h.service.setTelegramGroup('add', '-100777');
+    expect(h.restart().state().telegram.groups).toEqual([
+      { id: String(GROUP), title: 'Dev 群' },
+      { id: '-100777' },
+    ]);
   });
 });
 
