@@ -12,6 +12,7 @@ import { useSidePanelStore } from '@/stores/sidePanel';
 import { resolveSidePanelDockConversationId } from './sidePanelDockId';
 
 const docks = new Map<string, DockviewApi>();
+const dockRemoveDisposers = new Map<string, { dispose: () => void }>();
 const filesTabClosers = new Map<string, () => boolean>();
 type FileTarget = [rel: string, line?: number, viewer?: 'text' | 'markdown'];
 const filesOpeners = new Map<string, (...target: FileTarget) => void>();
@@ -74,6 +75,25 @@ export function registerFilesOpener(
 
 export function bindSidePanelDock(conversationId: string, api: DockviewApi): void {
   docks.set(conversationId, api);
+  dockRemoveDisposers.get(conversationId)?.dispose();
+  dockRemoveDisposers.set(
+    conversationId,
+    api.onDidRemovePanel(() => {
+      if (api.panels.length !== 0) return;
+      if (useSidePanelStore.getState().uiByConversation[conversationId]?.open !== true) return;
+      useSidePanelStore.setState((state) => {
+        const ui = state.uiByConversation[conversationId];
+        return ui?.open
+          ? {
+              uiByConversation: {
+                ...state.uiByConversation,
+                [conversationId]: { ...ui, open: false },
+              },
+            }
+          : {};
+      });
+    })
+  );
   if (pendingFilesReveal.delete(conversationId)) {
     // 等 onReady 里的布局恢复完再建，免得被 fromJSON 覆盖
     queueMicrotask(() => {
@@ -415,6 +435,8 @@ export function closeSidePanelBrowser(conversationId: string, tabId: string): vo
 export function disposeConversationResources(conversationId: string): void {
   const api = docks.get(conversationId);
   docks.delete(conversationId);
+  dockRemoveDisposers.get(conversationId)?.dispose();
+  dockRemoveDisposers.delete(conversationId);
   filesTabClosers.delete(conversationId);
   filesOpeners.delete(conversationId);
   pendingFileOpens.delete(conversationId);
