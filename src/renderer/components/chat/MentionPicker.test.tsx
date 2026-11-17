@@ -70,16 +70,16 @@ function PickerHarness() {
   );
 }
 
-describe('MentionPicker 移动端底部抽屉', () => {
-  it('窄屏用 fixed 底部抽屉，不用 absolute bottom-full', () => {
+describe('MentionPicker 移动端', () => {
+  it('窄屏贴着输入框上方铺满宽度，不贴屏幕底部', () => {
     mobile = true;
     const html = renderPicker({});
     expect(html).toContain('data-slot="mention-picker"');
-    expect(html).toContain('fixed inset-x-0 bottom-0 z-50');
-    expect(html).toContain('max-h-[60vh]');
+    expect(html).toContain('absolute inset-x-0 bottom-full');
+    expect(html).toContain('max-h-[50dvh]');
     expect(html).toContain('w-full');
-    expect(html).toContain('rounded-t-lg');
-    expect(html).not.toContain('absolute bottom-full');
+    expect(html).not.toContain('fixed');
+    expect(html).not.toContain('bottom-0');
     expect(html).not.toContain('data-slot="mention-flyout"');
   });
 
@@ -127,7 +127,8 @@ describe('MentionPicker 桌面端', () => {
     const html = renderPicker({ openFolderId: 'agents' });
     expect(html).toContain('data-slot="mention-picker"');
     expect(html).toContain('absolute bottom-full');
-    expect(html).not.toContain('fixed inset-x-0 bottom-0');
+    expect(html).toContain('absolute bottom-full z-10 mb-1.5 max-w-full');
+    expect(html).not.toContain('inset-x-0');
     expect(html).toContain('data-slot="mention-flyout"');
     expect(html).toContain('left-full');
     expect(html).toContain('Worker');

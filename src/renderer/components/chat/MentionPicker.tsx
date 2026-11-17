@@ -152,7 +152,7 @@ export function MentionPicker({
       data-slot="mention-picker"
       className={
         isMobile
-          ? 'fixed inset-x-0 bottom-0 z-50 pb-[env(safe-area-inset-bottom)]'
+          ? 'absolute inset-x-0 bottom-full z-10 mb-1.5 w-full'
           : 'absolute bottom-full z-10 mb-1.5 max-w-full'
       }
       style={isMobile ? undefined : { left }}
@@ -163,7 +163,7 @@ export function MentionPicker({
         aria-label={t('Mention suggestions')}
         className={
           isMobile
-            ? 'max-h-[60vh] w-full overflow-y-auto rounded-t-lg border bg-popover p-1 shadow-md'
+            ? 'max-h-[50dvh] w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md'
             : 'max-h-72 w-80 max-w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md'
         }
       >
