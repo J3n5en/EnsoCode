@@ -89,6 +89,16 @@ export interface TelegramMenuButton {
   type: 'default' | 'commands';
 }
 
+/** sendPhoto / sendDocument 的 multipart 上传；threadId 回到原话题 */
+export interface TelegramUpload {
+  chatId: number;
+  threadId?: number;
+  data: Buffer;
+  fileName: string;
+  mimeType?: string;
+  caption?: string;
+}
+
 export interface TelegramApi {
   getMe(): Promise<TelegramUser>;
   getUpdates(params: {
@@ -137,6 +147,10 @@ export interface TelegramApi {
   /** 左下角菜单按钮：commands 才会弹出命令面板 */
   setChatMenuButton(menuButton: TelegramMenuButton): Promise<void>;
   answerCallbackQuery(params: { callbackQueryId: string; text?: string }): Promise<void>;
+  /** 图片：multipart 上传，≤10MB，宽高之和 ≤10000，caption ≤1024 */
+  sendPhoto(params: TelegramUpload): Promise<number>;
+  /** 文件：multipart 上传，≤50MB，caption ≤1024 */
+  sendDocument(params: TelegramUpload): Promise<number>;
 }
 
 /** 测试与真机验收用假服务替换；生产不设这个变量 */
@@ -159,12 +173,14 @@ type ApiEnvelope<T> = { ok: boolean; result?: T; description?: string; error_cod
 const REQUEST_TIMEOUT_MS = 15_000;
 /** 长轮询要等 25 秒，超时必须比它长，否则每轮都被自己掐断 */
 const LONG_POLL_TIMEOUT_MS = 40_000;
+/** 上传 10MB 走代理可能很慢 */
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 async function request<T>(
   base: string,
   token: string,
   method: string,
-  body: Record<string, unknown> | undefined,
+  body: Record<string, unknown> | FormData | undefined,
   signal?: AbortSignal,
   timeoutMs = REQUEST_TIMEOUT_MS
 ): Promise<T> {
@@ -174,10 +190,12 @@ async function request<T>(
   signal?.addEventListener('abort', onAbort, { once: true });
   let response: Response;
   try {
+    // FormData 由 fetch 自己写 multipart 边界，不能手动设 Content-Type
     response = await fetch(`${base}/bot${token}/${method}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body ?? {}),
+      ...(body instanceof FormData
+        ? { body }
+        : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) }),
       signal: controller.signal,
     });
   } catch (error) {
@@ -202,7 +220,34 @@ async function request<T>(
   throw new TelegramApiError('api', description);
 }
 
+function uploadForm(field: 'photo' | 'document', params: TelegramUpload): FormData {
+  const form = new FormData();
+  form.set('chat_id', String(params.chatId));
+  if (params.threadId !== undefined) form.set('message_thread_id', String(params.threadId));
+  if (params.caption) form.set('caption', params.caption);
+  const blob = new Blob([new Uint8Array(params.data)], {
+    type: params.mimeType ?? 'application/octet-stream',
+  });
+  form.set(field, blob, params.fileName);
+  return form;
+}
+
 export function createTelegramApi(token: string, base = telegramApiBase()): TelegramApi {
+  const upload = async (
+    method: 'sendPhoto' | 'sendDocument',
+    field: 'photo' | 'document',
+    params: TelegramUpload
+  ): Promise<number> => {
+    const sent = await request<TelegramMessage>(
+      base,
+      token,
+      method,
+      uploadForm(field, params),
+      undefined,
+      UPLOAD_TIMEOUT_MS
+    );
+    return sent.message_id;
+  };
   return {
     getMe: () => request<TelegramUser>(base, token, 'getMe', undefined),
     getUpdates: ({ offset, timeout, signal }) =>
@@ -265,5 +310,7 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         ...(text ? { text } : {}),
       });
     },
+    sendPhoto: (params) => upload('sendPhoto', 'photo', params),
+    sendDocument: (params) => upload('sendDocument', 'document', params),
   };
 }

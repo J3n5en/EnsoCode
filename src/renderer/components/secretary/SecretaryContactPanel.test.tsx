@@ -26,6 +26,8 @@ function contactState(groups: SecretaryContactState['telegram']['groups']): Secr
     format: 'html' as const,
     maxChars: 4096,
     commandMenu: true,
+    images: true,
+    files: true,
   };
   return {
     enabled: true,

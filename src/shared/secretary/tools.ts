@@ -22,6 +22,7 @@ export const SECRETARY_OPS = [
   'session_answer',
   'session_takeover_propose',
   'image_view',
+  'contact_send_file',
   'cleanup_list',
   'cleanup_apply',
   'todo_list',
@@ -62,6 +63,8 @@ export const SECRETARY_SESSION_MESSAGE_MAX = 8000;
 /** session_send 一次最多转发几张图；路径上限与 image_view 一致 */
 export const SECRETARY_ATTACHMENT_MAX = 5;
 export const SECRETARY_ATTACHMENT_PATH_MAX = 1024;
+/** contact_send_file 的说明文字上限；超过渠道自己的 caption 上限时由渠道另发一条 */
+export const SECRETARY_CONTACT_CAPTION_MAX = 2000;
 
 /**
  * 秘书会话可见工具的唯一来源：worker 装配时按名字做允许列表，白名单外的一律不可见。

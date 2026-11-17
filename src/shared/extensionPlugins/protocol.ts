@@ -183,10 +183,23 @@ export const PLUGIN_CALL_METHODS = [
   'schedule.run',
   /** 其他插件调用本插件的导出方法；payload { name, args, caller } */
   'export.call',
-  /** 秘书联系方式往插件渠道发东西；payload { channelId, op: 'sendText' | 'typing', peerId, text? } */
+  /** 秘书联系方式往插件渠道发东西；payload { channelId, ...PluginContactRequest } */
   'contact.call',
 ] as const;
 export type PluginCallMethod = (typeof PLUGIN_CALL_METHODS)[number];
+
+/** contact.call 的请求：媒体字节按 base64 过进程边界，插件宿主转成 Buffer 再交给渠道 */
+export type PluginContactRequest =
+  | { op: 'sendText'; peerId: string; text: string }
+  | { op: 'typing'; peerId: string }
+  | {
+      op: 'sendImage' | 'sendFile';
+      peerId: string;
+      data: string;
+      fileName: string;
+      mimeType?: string;
+      caption?: string;
+    };
 
 export const PLUGIN_HOST_APIS = [
   'fs.readText',

@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import { commandListText, escapeHtml } from '@shared/secretary/commands';
 import {
   bindCodeUsable,
@@ -26,6 +27,8 @@ import type {
 import type {
   ChannelCaps,
   ChannelErrorCode,
+  ChannelFile,
+  ChannelImage,
   ChannelInbound,
   ChannelMessage,
   ChannelResult,
@@ -41,6 +44,7 @@ import {
   type TelegramInlineKeyboard,
   type TelegramMessage,
   type TelegramUpdate,
+  type TelegramUpload,
 } from './client';
 import { ContactPoller } from './poller';
 import {
@@ -59,7 +63,12 @@ export const TELEGRAM_CAPS: ChannelCaps = {
   format: 'html',
   maxChars: 4096,
   commandMenu: true,
+  images: true,
+  files: true,
 };
+
+/** sendPhoto / sendDocument 的 caption 上限（按字符计） */
+const TELEGRAM_CAPTION_MAX = 1024;
 
 export interface TelegramChannelPorts {
   audit(entry: SecretaryAuditEntry): void;
@@ -154,6 +163,8 @@ export class TelegramChannel implements ContactChannel {
   readonly id = TELEGRAM_CHANNEL_ID;
   private readonly poller: ContactPoller;
   private readonly apis = new Map<string, TelegramApi>();
+  /** chat → 最近一条入站消息所在的话题：发图片和文件时回到原话题 */
+  private readonly threads = new Map<string, number>();
 
   constructor(
     private readonly store: ContactStore,
@@ -306,6 +317,7 @@ export class TelegramChannel implements ContactChannel {
   async unbind(): Promise<void> {
     const chatId = this.store.file().chat?.id;
     await this.poller.stop();
+    this.threads.clear();
     this.store.saveUnbound();
     await this.clearCommands(chatId);
   }
@@ -400,6 +412,63 @@ export class TelegramChannel implements ContactChannel {
     } catch (error) {
       return { ok: false, error: telegramErrorCode(error) };
     }
+  }
+
+  sendImage(peerId: string, image: ChannelImage): Promise<ChannelSend> {
+    return this.upload(peerId, 'photo', image);
+  }
+
+  sendFile(peerId: string, file: ChannelFile): Promise<ChannelSend> {
+    return this.upload(peerId, 'document', file);
+  }
+
+  /**
+   * 图片走 sendPhoto，文件走 sendDocument，都带回原话题的 message_thread_id。
+   * caption 超过 1024 就不放在媒体上，媒体发完再另发一条文字。
+   * sendPhoto 被拒（尺寸、比例不合要求）时退成 sendDocument 原样发出。
+   */
+  private async upload(
+    peerId: string,
+    kind: 'photo' | 'document',
+    media: ChannelImage
+  ): Promise<ChannelSend> {
+    const token = this.store.token();
+    if (!token || !this.store.file().chat) return { ok: false, error: 'token-required' };
+    const data = media.buffer;
+    if (!data) return { ok: false, error: 'api' };
+    const caption = media.caption?.trim() ?? '';
+    const inline = caption.length <= TELEGRAM_CAPTION_MAX;
+    const threadId = this.threads.get(peerId);
+    const params: TelegramUpload = {
+      chatId: Number(peerId),
+      ...(threadId !== undefined ? { threadId } : {}),
+      data,
+      fileName: media.fileName || basename(media.path ?? '') || 'file',
+      ...(media.mimeType ? { mimeType: media.mimeType } : {}),
+      ...(caption && inline ? { caption } : {}),
+    };
+    const api = this.apiFor(token);
+    let messageId: number;
+    try {
+      messageId = kind === 'photo' ? await api.sendPhoto(params) : await api.sendDocument(params);
+    } catch (error) {
+      if (kind !== 'photo' || telegramErrorCode(error) !== 'api') {
+        this.reportError(error);
+        return { ok: false, error: telegramErrorCode(error) };
+      }
+      this.audit('contact_media', false, 'photo-rejected');
+      try {
+        messageId = await api.sendDocument(params);
+      } catch (retryError) {
+        this.reportError(retryError);
+        return { ok: false, error: telegramErrorCode(retryError) };
+      }
+    }
+    if (caption && !inline) {
+      const rest = await this.send(peerId, { text: caption });
+      if (!rest.ok) return rest;
+    }
+    return { ok: true, messageId: String(messageId) };
   }
 
   /**
@@ -615,6 +684,7 @@ export class TelegramChannel implements ContactChannel {
       this.reject(verdict === 'foreign-sender' ? 'foreign-chat' : verdict, message.chat.id);
       return;
     }
+    this.rememberThread(message);
     const topicId = topicOf(message);
     const name = message.from?.username ?? message.from?.first_name;
     await this.ports.inbound({
@@ -672,6 +742,16 @@ export class TelegramChannel implements ContactChannel {
       format: 'html',
     });
     if (sent.ok) this.audit('contact_outbound', true, 'welcome');
+  }
+
+  /** 话题消息记下话题；在 General 里说话就清掉，之后回到 General */
+  private rememberThread(message: TelegramMessage): void {
+    const chatId = String(message.chat.id);
+    if (message.is_topic_message && message.message_thread_id !== undefined) {
+      this.threads.set(chatId, message.message_thread_id);
+    } else {
+      this.threads.delete(chatId);
+    }
   }
 
   private async answerCallback(callbackQueryId: string, text?: string): Promise<void> {

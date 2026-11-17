@@ -394,7 +394,8 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 
 清单 `contactChannels` 声明的渠道启用后出现在秘书联系方式页，排在内置的 Telegram 后面。宿主画通用开关（启用、主动推送、手机确认卡、同步镜像、记忆标题），插件只管收发：
 
-- `enso.contact.register(channelId, { caps, sendText(peerId, { text }), typing?(peerId, { on }) })`：交出实现。`caps` 必须给全 `{ buttons, urlButtons, edit, typing, format, maxChars, commandMenu }`（`maxChars` 100–65536）。这一版协议只带纯文本，宿主一律按没有按钮、不能改消息处理：提问与确认卡变成编号文本，回「确认 1」确认卡片，审批永远不能在手机上确认。`sendText` 可以返回 `{ messageId }`。
+- `enso.contact.register(channelId, { caps, sendText(peerId, { text }), typing?(peerId, { on }), sendImage?(peerId, media), sendFile?(peerId, media) })`：交出实现。`caps` 必须给全 `{ buttons, urlButtons, edit, typing, format, maxChars, commandMenu }`（`maxChars` 100–65536），可选 `images`、`files`（缺省 `false`）。宿主一律按没有按钮、不能改消息处理：提问与确认卡变成编号文本，回「确认 1」确认卡片，审批永远不能在手机上确认。`sendText` 可以返回 `{ messageId }`。
+- 图片与文件：`caps.images` / `caps.files` 为 `true` 且实现了 `sendImage` / `sendFile` 时，秘书发的图片、文件交给插件，`media` 是 `{ data: Buffer, fileName, mimeType?, caption? }`（单个不超过 10MB），可以返回 `{ messageId }`，抛错算发送失败，宿主会给对方回一句说明。不支持时宿主改发一句文字，写明发不了并附上电脑上的路径。单次调用最长 120 秒。
 - `enso.contact.inbound(channelId, { peerId, text, senderId?, chatType?, chatTitle?, name?, at? })`：对方发来一句话。`peerId` 是会话 id（私聊或群，回复发回这里）；`senderId` 是发送者的稳定 id，协议里有就必须带；`chatType` 只能是 `private` 或 `group`，不知道就别填；`chatTitle` 是群名，`name` 是发送者名字。插件自己负责只放行绑定的那个人；宿主再按总开关与渠道开关过滤，正文包成 `[来自 <渠道名> 私聊|群「群名」 chatId=… senderId=… @名字 · 时间]` 加不可信内容（`source="<渠道 id> chatId=… senderId=…"`）交给秘书；没给 `senderId` 时写「发送者未知」，不拿名字凑。只读命令（`/status` 等）不进秘书会话。10 秒最多 20 条。
 - `enso.contact.setStatus(channelId, { status, detail?, peers? })`：`status` 是 `unconfigured`、`pending`、`connected`、`error`；`peers` 是主动推送的对象（最多 8 个）。换了人或断开时，发往旧联系人的待收尾记录作废。
 
@@ -420,7 +421,7 @@ Agent 用 `subagent` 工具派出的子代理和 coworker（下称子会话）�
 
 ### 网络
 
-`net.fetch` 只接受 `http` 和 `https`，主机名必须在 `net.domains` 里，不允许 URL 内嵌用户名密码。`init` 支持 `method`、`headers`、`body`、`responseType`。返回 `{ status, headers, body }`，`body` 是字符串；`responseType: 'base64'` 时为响应原始字节的 base64，用于下载图片等二进制内容。响应不超过 5MB，最多跟随 5 次重定向，重定向到未授权的域名会被拒绝。
+`net.fetch` 只接受 `http` 和 `https`，主机名必须在 `net.domains` 里，不允许 URL 内嵌用户名密码。`init` 支持 `method`、`headers`、`body`、`bodyEncoding`、`responseType`。`bodyEncoding: 'base64'` 时 `body` 是请求体原始字节的 base64，用于上传图片、文件等二进制内容，解码后不超过 16MB。返回 `{ status, headers, body }`，`body` 是字符串；`responseType: 'base64'` 时为响应原始字节的 base64，用于下载图片等二进制内容。响应不超过 5MB，最多跟随 5 次重定向，重定向到未授权的域名会被拒绝。
 
 ### 文件
 

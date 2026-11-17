@@ -7,13 +7,20 @@ import { parseInboundMessage } from '@shared/secretary/inbound';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FollowingStore } from '../following';
-import type { ChannelCaps, ChannelMessage, ContactChannel } from './channel';
+import type {
+  ChannelCaps,
+  ChannelFile,
+  ChannelImage,
+  ChannelMessage,
+  ContactChannel,
+} from './channel';
 import type {
   TelegramApi,
   TelegramCommandOptions,
   TelegramInlineKeyboard,
   TelegramMenuButton,
   TelegramUpdate,
+  TelegramUpload,
   TelegramUser,
 } from './client';
 import { TelegramApiError } from './client';
@@ -55,6 +62,12 @@ class FakeApi implements TelegramApi {
   callbacks: { callbackQueryId: string; text?: string }[] = [];
   /** 「正在输入…」：只记 chat 与 action */
   chatActions: { chatId: number; action: 'typing'; messageThreadId?: number }[] = [];
+  /** sendPhoto / sendDocument 的上传参数 */
+  uploads: { method: 'sendPhoto' | 'sendDocument'; params: TelegramUpload }[] = [];
+  /** sendPhoto 失败时用 */
+  photoError: Error | null = null;
+  /** sendDocument 失败时用 */
+  documentError: Error | null = null;
   polls = 0;
   /** 菜单接口失败时用 */
   menuError: Error | null = null;
@@ -190,6 +203,18 @@ class FakeApi implements TelegramApi {
 
   async answerCallbackQuery(params: { callbackQueryId: string; text?: string }): Promise<void> {
     this.callbacks.push(params);
+  }
+
+  async sendPhoto(params: TelegramUpload): Promise<number> {
+    if (this.photoError) throw this.photoError;
+    this.uploads.push({ method: 'sendPhoto', params });
+    return 900 + this.uploads.length;
+  }
+
+  async sendDocument(params: TelegramUpload): Promise<number> {
+    if (this.documentError) throw this.documentError;
+    this.uploads.push({ method: 'sendDocument', params });
+    return 900 + this.uploads.length;
   }
 }
 
@@ -2346,6 +2371,8 @@ class FakePlainChannel implements ContactChannel {
       format: 'plain',
       maxChars: 2000,
       commandMenu: false,
+      images: false,
+      files: false,
       ...this.extra,
     };
   }
@@ -2373,6 +2400,25 @@ class FakePlainChannel implements ContactChannel {
   }
   typing(peerId: string) {
     this.typings.push(peerId);
+    return Promise.resolve({ ok: true as const });
+  }
+  media: { peerId: string; kind: string; fileName?: string; size: number }[] = [];
+  sendImage(peerId: string, image: ChannelImage) {
+    this.media.push({
+      peerId,
+      kind: 'image',
+      fileName: image.fileName,
+      size: image.buffer?.length ?? 0,
+    });
+    return Promise.resolve({ ok: true as const });
+  }
+  sendFile(peerId: string, file: ChannelFile) {
+    this.media.push({
+      peerId,
+      kind: 'file',
+      fileName: file.fileName,
+      size: file.buffer?.length ?? 0,
+    });
     return Promise.resolve({ ok: true as const });
   }
 }
@@ -2616,5 +2662,177 @@ describe('多渠道联系方式', () => {
     h.service.onTurnReply('sec-1', '回你');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(wechat.sent).toEqual([]);
+  });
+});
+
+describe('出站图片与文件', () => {
+  const WECHAT = 'enso.clawbot:wechat';
+  const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+
+  async function boundTelegram() {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    return h;
+  }
+
+  function image(caption?: string) {
+    return {
+      kind: 'image' as const,
+      path: '/tmp/shot_1.png',
+      buffer: PNG,
+      fileName: 'shot_1.png',
+      mimeType: 'image/png',
+      ...(caption ? { caption } : {}),
+    };
+  }
+
+  function file(caption?: string) {
+    return {
+      kind: 'file' as const,
+      path: '/tmp/report.pdf',
+      buffer: Buffer.from('%PDF-1.4'),
+      fileName: 'report.pdf',
+      mimeType: 'application/pdf',
+      ...(caption ? { caption } : {}),
+    };
+  }
+
+  function addWechat(h: ReturnType<typeof harness>, caps: Partial<ChannelCaps> = {}) {
+    const channel = new FakePlainChannel(caps);
+    h.service.declareChannel({
+      id: WECHAT,
+      title: '微信',
+      builtin: false,
+      pluginId: 'enso.clawbot',
+    });
+    h.service.attachChannel(WECHAT, channel);
+    h.service.setChannelStatus(WECHAT, { status: 'connected', peers: ['wx-me'] });
+    h.service.setChannelPrefs(WECHAT, { enabled: true, push: true });
+    return channel;
+  }
+
+  it('Telegram 图片走 sendPhoto：chat、文件名、字节与 caption 都带上', async () => {
+    const h = await boundTelegram();
+    const result = await h.service.sendMedia(null, image('今天的截图'));
+    expect(result).toEqual({ ok: true, outcomes: [{ channelId: 'telegram', status: 'sent' }] });
+    expect(h.api.uploads).toHaveLength(1);
+    const upload = h.api.uploads[0]!;
+    expect(upload.method).toBe('sendPhoto');
+    expect(upload.params).toMatchObject({
+      chatId: 777,
+      fileName: 'shot_1.png',
+      mimeType: 'image/png',
+      caption: '今天的截图',
+    });
+    expect(upload.params.threadId).toBeUndefined();
+    expect(Buffer.compare(upload.params.data, PNG)).toBe(0);
+  });
+
+  it('Telegram 文件走 sendDocument', async () => {
+    const h = await boundTelegram();
+    const result = await h.service.sendMedia(null, file());
+    expect(result.ok && result.outcomes[0]?.status).toBe('sent');
+    expect(h.api.uploads.map((item) => item.method)).toEqual(['sendDocument']);
+    expect(h.api.uploads[0]?.params).toMatchObject({
+      chatId: 777,
+      fileName: 'report.pdf',
+      mimeType: 'application/pdf',
+    });
+    expect(h.api.uploads[0]?.params.caption).toBeUndefined();
+  });
+
+  it('话题里说的话：图片与文件都带 message_thread_id 回到原话题；回到 General 后不再带', async () => {
+    const h = await boundTelegram();
+    const topic = privateMessage('发我截图');
+    topic.message = { ...topic.message!, message_thread_id: 42, is_topic_message: true };
+    h.api.push(topic);
+    await waitFor(() => h.world.delivered.length === 1, 'delivered');
+    await h.service.sendMedia('sec-1', image());
+    await h.service.sendMedia('sec-1', file());
+    expect(h.api.uploads.map((item) => [item.method, item.params.threadId])).toEqual([
+      ['sendPhoto', 42],
+      ['sendDocument', 42],
+    ]);
+    h.api.push(privateMessage('再发一次'));
+    await waitFor(() => h.world.delivered.length === 2, 'delivered again');
+    await h.service.sendMedia('sec-1', image());
+    expect(h.api.uploads.at(-1)?.params.threadId).toBeUndefined();
+  });
+
+  it('caption 超过 1024：媒体不带 caption，随后另发一条文字', async () => {
+    const h = await boundTelegram();
+    const before = h.api.sent.length;
+    const long = '说'.repeat(1500);
+    await h.service.sendMedia(null, image(long));
+    expect(h.api.uploads[0]?.params.caption).toBeUndefined();
+    expect(
+      h.api.sent
+        .slice(before)
+        .map((item) => item.text)
+        .join('')
+    ).toContain(long);
+  });
+
+  it('sendPhoto 被拒（尺寸不合）时改用 sendDocument 发出', async () => {
+    const h = await boundTelegram();
+    h.api.photoError = new TelegramApiError('api', 'Bad Request: PHOTO_INVALID_DIMENSIONS');
+    const result = await h.service.sendMedia(null, image());
+    expect(result.ok && result.outcomes[0]?.status).toBe('sent');
+    expect(h.api.uploads.map((item) => item.method)).toEqual(['sendDocument']);
+  });
+
+  it('发送失败：回一句说明带路径，不静默', async () => {
+    const h = await boundTelegram();
+    h.api.documentError = new TelegramApiError('network', 'fetch failed');
+    const before = h.api.sent.length;
+    const result = await h.service.sendMedia(null, file());
+    expect(result).toEqual({
+      ok: true,
+      outcomes: [{ channelId: 'telegram', status: 'failed', error: 'network' }],
+    });
+    const note = h.api.sent
+      .slice(before)
+      .map((item) => item.text)
+      .join('\n');
+    expect(note).toContain('文件发送失败');
+    expect(note).toContain('/tmp/report.pdf');
+    expect(h.audits.some((entry) => entry.op === 'contact_media' && !entry.ok)).toBe(true);
+  });
+
+  it('不支持图片与文件的渠道：降级成一句文字，写明发不了并附路径', async () => {
+    const h = await boundTelegram();
+    const wechat = addWechat(h);
+    const result = await h.service.sendMedia(null, image('看这里'));
+    expect(result.ok && result.outcomes).toEqual([
+      { channelId: 'telegram', status: 'sent' },
+      { channelId: WECHAT, status: 'fallback' },
+    ]);
+    expect(wechat.media).toEqual([]);
+    expect(wechat.sent).toHaveLength(1);
+    expect(wechat.sent[0]?.text).toContain('这个渠道发不了图片');
+    expect(wechat.sent[0]?.text).toContain('/tmp/shot_1.png');
+    expect(wechat.sent[0]?.text).toContain('看这里');
+    await h.service.sendMedia(null, file());
+    expect(wechat.sent[1]?.text).toContain('这个渠道发不了文件');
+    expect(wechat.sent[1]?.text).toContain('report.pdf');
+  });
+
+  it('插件渠道声明 images/files 才调 sendImage/sendFile', async () => {
+    const h = harness();
+    const wechat = addWechat(h, { images: true, files: true });
+    await h.service.sendMedia(null, image());
+    await h.service.sendMedia(null, file());
+    expect(wechat.media).toEqual([
+      { peerId: 'wx-me', kind: 'image', fileName: 'shot_1.png', size: PNG.length },
+      { peerId: 'wx-me', kind: 'file', fileName: 'report.pdf', size: 8 },
+    ]);
+    expect(wechat.sent).toEqual([]);
+  });
+
+  it('没有已连接的渠道：返回 not-bound', async () => {
+    const h = harness();
+    expect(await h.service.sendMedia('sec-1', image())).toEqual({ ok: false, error: 'not-bound' });
   });
 });

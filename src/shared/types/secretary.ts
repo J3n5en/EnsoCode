@@ -786,6 +786,10 @@ export interface SecretaryContactCaps {
   format: 'html' | 'markdown' | 'plain';
   maxChars: number;
   commandMenu: boolean;
+  /** 能发图片；false 时核心降级成一句文字说明 */
+  images: boolean;
+  /** 能发文件；false 时同上 */
+  files: boolean;
 }
 
 /** 每个渠道的通用开关：宿主统一画，存在 contact.json */

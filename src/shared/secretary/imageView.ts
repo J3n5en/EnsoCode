@@ -86,16 +86,20 @@ function scopeError(resolved: string, roots: readonly string[]): string {
   return `path is out of scope: ${resolved}. Allowed roots: ${allowed}`;
 }
 
-/** 越界、不存在、不是普通文件、太大都在这里拒绝；只有全部通过才读文件头 */
-async function validate(
+/**
+ * 越界、不存在、不是普通文件、太大都在这里拒绝；只有全部通过才读文件头。
+ * 秘书往手机发文件也走这一道：同一套白名单与 10MB 上限。
+ */
+export async function validateScopedFile(
   deps: ImageViewDeps,
-  requested: string
+  requested: string,
+  noun: 'image' | 'file' = 'image'
 ): Promise<{ ok: true; path: string; size: number } | { ok: false; error: string }> {
   const trimmed = requested.trim();
   if (!trimmed) return { ok: false, error: 'path is required' };
   // 相对路径没有可判定的边界，直接拒绝，不去猜调用方想的是哪个目录
   if (!path.isAbsolute(trimmed))
-    return { ok: false, error: 'path must be absolute; give the full path of the image' };
+    return { ok: false, error: `path must be absolute; give the full path of the ${noun}` };
   const resolved = await deps.realpath(trimmed);
   if (!resolved) return { ok: false, error: `no such file: ${trimmed}` };
   const roots = deps.roots();
@@ -105,10 +109,12 @@ async function validate(
   if (size > IMAGE_VIEW_MAX_BYTES)
     return {
       ok: false,
-      error: `image is too large: ${formatMegabytes(size)}, the limit is ${formatMegabytes(IMAGE_VIEW_MAX_BYTES)}`,
+      error: `${noun} is too large: ${formatMegabytes(size)}, the limit is ${formatMegabytes(IMAGE_VIEW_MAX_BYTES)}`,
     };
   return { ok: true, path: resolved, size };
 }
+
+const validate = validateScopedFile;
 
 async function readHead(deps: ImageViewDeps, target: string): Promise<Uint8Array | null> {
   if (deps.head) return deps.head(target, HEAD_BYTES);

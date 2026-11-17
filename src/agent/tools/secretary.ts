@@ -2,6 +2,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   SECRETARY_ATTACHMENT_MAX,
   SECRETARY_ATTACHMENT_PATH_MAX,
+  SECRETARY_CONTACT_CAPTION_MAX,
   SECRETARY_ID_MAX,
   SECRETARY_OPS,
   SECRETARY_SEND_MODES,
@@ -142,6 +143,19 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
   image_view: {
     keys: ['path'],
     aliases: { file: 'path', filePath: 'path', file_path: 'path', image: 'path', src: 'path' },
+  },
+  contact_send_file: {
+    keys: ['path', 'as', 'caption'],
+    aliases: {
+      file: 'path',
+      filePath: 'path',
+      file_path: 'path',
+      image: 'path',
+      kind: 'as',
+      type: 'as',
+      text: 'caption',
+      message: 'caption',
+    },
   },
   cleanup_list: {
     keys: ['projectId', 'kind', 'page', 'detail'],
@@ -611,6 +625,32 @@ const SCHEMAS: Record<
           minLength: 1,
           maxLength: 1024,
           description: 'Absolute path of the image, e.g. /tmp/shot.png',
+        },
+      },
+      ['path']
+    ),
+  },
+  contact_send_file: {
+    description:
+      "Send one image or file to the user's phone through the connected contact channels (Telegram, WeChat and others). It goes to whoever this turn replies to on the phone; when the user is talking in the app it goes to the channels with push on. Use it when the user asks you to send them a screenshot, an image or a file. Only files under ~/project/worktree, /tmp, /private/tmp, /private/var/folders or the app chat image directory (userData/bot-chats) can be sent, resolved through symlinks first, up to 10MB. png, jpg and webp go as an image, anything else as a file; set as to override. A channel that cannot send images or files gets a text line with the path instead, and a failed send also leaves the user a note. The result lists per channel: sent, fallback (text only) or failed. Do not also paste the file content into your reply.",
+    parameters: object(
+      {
+        path: {
+          type: 'string',
+          minLength: 1,
+          maxLength: SECRETARY_ATTACHMENT_PATH_MAX,
+          description: 'Absolute path of the file, e.g. /tmp/shot.png',
+        },
+        as: {
+          type: 'string',
+          enum: ['image', 'file'],
+          description:
+            'Optional: "image" to show it as a picture (must be png, jpg, webp or gif), "file" to send it as a document. Default: picked from the file header.',
+        },
+        caption: {
+          type: 'string',
+          maxLength: SECRETARY_CONTACT_CAPTION_MAX,
+          description: 'Optional: one or two lines shown with the file',
         },
       },
       ['path']

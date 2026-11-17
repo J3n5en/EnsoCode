@@ -82,6 +82,61 @@ describe('runPluginHost', () => {
     });
   });
 
+  it('contact.call 的 sendImage / sendFile：base64 还原成 Buffer 交给渠道；没实现报 UNSUPPORTED', async () => {
+    const h = harness(`export function activate(enso) {
+      void enso.contact.register('wechat', {
+        caps: {},
+        sendText: async () => ({}),
+        sendImage: async (peerId, media) => ({
+          messageId: [peerId, media.fileName, Buffer.isBuffer(media.data), [...media.data].join('.'), media.mimeType, media.caption].join('|'),
+        }),
+      });
+    }`);
+    const register = await h.next((m) => m.t === 'call' && m.api === 'contact.register');
+    if (register.t !== 'call') return;
+    h.deliver({ t: 'res', id: register.id, ok: true, value: null });
+    await h.next((m) => m.t === 'ready');
+    const contactCall = (id: string, payload: unknown) =>
+      ({
+        t: 'call',
+        id,
+        method: 'contact.call',
+        payload,
+        invocationId: `inv-${id}`,
+        sessionId: null,
+        projectRoot: null,
+      }) as unknown as MainToPluginHost;
+    await new Promise((r) => setTimeout(r, 10));
+    h.deliver(
+      contactCall('c1', {
+        channelId: 'wechat',
+        op: 'sendImage',
+        peerId: 'wx-me',
+        data: Buffer.from([1, 2, 3]).toString('base64'),
+        fileName: 'a.png',
+        mimeType: 'image/png',
+        caption: '截图',
+      })
+    );
+    expect(await h.next((m) => m.t === 'res' && m.id === 'c1')).toMatchObject({
+      ok: true,
+      value: { messageId: 'wx-me|a.png|true|1.2.3|image/png|截图' },
+    });
+    h.deliver(
+      contactCall('c2', {
+        channelId: 'wechat',
+        op: 'sendFile',
+        peerId: 'wx-me',
+        data: '',
+        fileName: 'b.zip',
+      })
+    );
+    expect(await h.next((m) => m.t === 'res' && m.id === 'c2')).toMatchObject({
+      ok: false,
+      error: { code: 'UNSUPPORTED' },
+    });
+  });
+
   it('执行工具并把字符串结果规整成 { content }', async () => {
     const h = harness(
       `export function activate(enso) { enso.tools.register('lookup', async (args, ctx) => 'hi ' + args.q + ' ' + ctx.sessionId); }`
