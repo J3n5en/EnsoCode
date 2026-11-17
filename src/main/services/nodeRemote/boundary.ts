@@ -1,9 +1,10 @@
+import { parseNodeSettingsUrl } from '@shared/nodeSettings';
 import { IPC_CHANNELS } from '@shared/types';
 
 /**
  * 远程节点主界面是对方下发的代码，跑在本机进程里。它能请本机 main 代办的只有这里列出的：
- * 节点切换器与配对对话框、所在窗口的控件、打开该节点的设置、上报正在看的会话；参数在此收窄。
- * 节点增删改、本机文件夹、外壳集成、标题栏外观等一律拒绝。
+ * 节点切换器、请本机切回本机界面打开配对对话框、所在窗口的控件、打开该节点的设置、上报正在看的会话；
+ * 参数在此收窄。配对（链接只能由用户在本机界面输入）、节点增删改、本机文件夹、外壳集成、标题栏外观等一律拒绝。
  */
 
 export interface LocalCall {
@@ -37,7 +38,7 @@ const LOCAL_CALLS = new Map<string, Narrow>([
   [IPC_CHANNELS.NODES_LIST, none],
   [IPC_CHANNELS.NODES_ACTIVE, none],
   [IPC_CHANNELS.NODES_SWITCH, ([target]) => (text(target) ? [target] : null)],
-  [IPC_CHANNELS.NODES_PAIR, ([uri]) => (text(uri) ? [uri] : null)],
+  [IPC_CHANNELS.NODES_REQUEST_PAIR, none],
   [IPC_CHANNELS.WINDOW_MINIMIZE, none],
   [IPC_CHANNELS.WINDOW_MAXIMIZE, none],
   [IPC_CHANNELS.WINDOW_CLOSE, none],
@@ -85,4 +86,9 @@ export function parseHostNotification(payload: string): HostNotification | null 
   const { sessionId, title, body } = value as Record<string, unknown>;
   if (!text(sessionId) || typeof title !== 'string' || typeof body !== 'string') return null;
   return { sessionId, title: title.slice(0, 200), body: body.slice(0, 300) };
+}
+
+/** 节点界面带 __ensoRemote：只许留在该节点的 enso-node 页面内 */
+export function isNodePageUrl(url: string, nodeId: string): boolean {
+  return parseNodeSettingsUrl(url)?.nodeId === nodeId;
 }

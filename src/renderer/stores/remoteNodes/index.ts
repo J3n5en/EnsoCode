@@ -13,10 +13,14 @@ interface RemoteNodesState {
   secureStorage: boolean;
   /** 主窗口当前可见层（main 为权威源，经 nodes:active-changed 同步） */
   activeNodeId: ActiveNode;
+  pairDialogOpen: boolean;
   /** 订阅 main 的状态与可见层推送，返回清理函数 */
   bind: () => () => void;
   /** 请 main 切换主窗口可见层；activeNodeId 随 main 广播更新 */
   switchNode: (nodeId: ActiveNode) => void;
+  /** 节点层里不在此配对：请所在电脑切回本机，由本机界面打开对话框，配对链接只在本机界面输入 */
+  requestPairDialog: () => void;
+  setPairDialogOpen: (open: boolean) => void;
   /** 重新配对/解绑等外部动作后刷新列表 */
   refresh: () => Promise<void>;
 }
@@ -30,15 +34,18 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set) => {
     nodes: [],
     secureStorage: true,
     activeNodeId: 'local',
+    pairDialogOpen: false,
 
     bind: () => {
       const offStatus = window.electronAPI.nodes.onStatusChanged(applyStatus);
       const offActive = window.electronAPI.nodes.onActiveChanged(applyActive);
+      const offPair = window.electronAPI.nodes.onPairRequested(() => set({ pairDialogOpen: true }));
       void window.electronAPI.nodes.list().then(applyStatus);
       void window.electronAPI.nodes.active().then(applyActive);
       return () => {
         offStatus();
         offActive();
+        offPair();
       };
     },
 
@@ -49,5 +56,12 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set) => {
     switchNode: (nodeId) => {
       void window.electronAPI.nodes.switch(nodeId);
     },
+
+    requestPairDialog: () => {
+      if (window.electronAPI.remote?.nativePlatform) void window.electronAPI.nodes.requestPair();
+      else set({ pairDialogOpen: true });
+    },
+
+    setPairDialogOpen: (pairDialogOpen) => set({ pairDialogOpen }),
   };
 });

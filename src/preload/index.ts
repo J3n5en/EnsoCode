@@ -1544,6 +1544,14 @@ const electronAPI = {
     /** 粘贴对方的配对链接（https 或 enso://） */
     pair: (inviteUri: string): Promise<NodePairResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_PAIR, inviteUri),
+    /** 节点层里：请所在电脑切回本机界面并打开配对对话框 */
+    requestPair: (): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_REQUEST_PAIR),
+    onPairRequested: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.NODES_PAIR_REQUESTED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_PAIR_REQUESTED, listener);
+    },
     remove: (nodeId: string): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_REMOVE, nodeId),
     rename: (nodeId: string, label: string): Promise<NodeActionResult> =>

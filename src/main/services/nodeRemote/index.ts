@@ -10,7 +10,7 @@ import { parseSettingsDeepLink, type SettingsDeepLink } from '@shared/settingsDe
 import { IPC_CHANNELS } from '@shared/types';
 import type { NodeActionResult } from '@shared/types/nodes';
 import { BrowserWindow, protocol, type WebContents, WebContentsView } from 'electron';
-import { openExternalWebUrl } from '../../windows/appNavigation';
+import { attachNavigationGuard, openExternalWebUrl } from '../../windows/appNavigation';
 import {
   attachEditContextMenu,
   getWindowWebContents,
@@ -23,8 +23,8 @@ import { loadNodes } from '../nodeStore';
 import { notifyFromNode, setLocalLayerVisible } from '../notifications';
 import { isNodeHostOnline, sendRemoteToNode, setNodeRemoteHooks } from '../pairGuest';
 import { registeredHandler } from '../remoteRenderer/ipcRegistry';
-import { broadcastToRenderers, isMainRenderer } from '../renderers';
-import { type LocalCall, parseHostNotification, parseLocalCall } from './boundary';
+import { broadcastToRenderers, isMainRenderer, sendToLocalMain } from '../renderers';
+import { isNodePageUrl, type LocalCall, parseHostNotification, parseLocalCall } from './boundary';
 import { type ActiveNode, NodeLayers } from './layers';
 import { type NodeAsset, NodeRemoteTunnel } from './tunnel';
 
@@ -144,7 +144,7 @@ function shellPreferences(): Electron.WebPreferences {
   };
 }
 
-/** 登记节点界面并收紧导航：只许留在该节点的 enso-node 页面内，外链交给系统浏览器 */
+/** 登记节点界面并收紧导航 */
 function attachSurface(contents: WebContents, nodeId: string, page: NodeShellPage): void {
   const id = contents.id;
   surfaces.set(id, { nodeId, page, contents, cids: new Set(), viewed: null });
@@ -152,9 +152,7 @@ function attachSurface(contents: WebContents, nodeId: string, page: NodeShellPag
     openExternalWebUrl(url);
     return { action: 'deny' };
   });
-  contents.on('will-navigate', (event, url) => {
-    if (parseNodeSettingsUrl(url)?.nodeId !== nodeId) event.preventDefault();
-  });
+  attachNavigationGuard(contents, (url) => isNodePageUrl(url, nodeId));
   contents.once('destroyed', () => {
     const entry = surfaces.get(id);
     surfaces.delete(id);
@@ -193,6 +191,10 @@ export function openNodeSettingsWindow(
   win.on('closed', () => windows.delete(nodeId));
   void win.loadURL(nodeShellUrl(nodeId, 'settings'));
   return true;
+}
+
+export function closeNodeSettingsWindows(): void {
+  for (const win of [...windows.values()]) if (!win.isDestroyed()) win.close();
 }
 
 /** 设置页已开：按宿主事件的形状把深链交给它（web-preload 订阅的 settings:deep-link） */
@@ -385,6 +387,15 @@ export function registerNodeRemoteHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.NODES_ACTIVE, (): ActiveNode => layers.active);
+
+  ipcMain.handle(IPC_CHANNELS.NODES_REQUEST_PAIR, (event) => {
+    if (!isMainRenderer(event.sender.id) && surfaceOf(event)?.page !== 'main') {
+      return { ok: false, error: 'forbidden' };
+    }
+    const result = switchNode('local');
+    if (result.ok) sendToLocalMain(IPC_CHANNELS.NODES_PAIR_REQUESTED);
+    return result;
+  });
 
   ipcMain.handle(IPC_CHANNELS.NODE_REMOTE_INIT, async (event) => {
     const entry = surfaceOf(event);

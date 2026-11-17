@@ -538,6 +538,10 @@ export const IPC_CHANNELS = {
   // 远程节点：本机作为 guest 连接另一台 EnsoCode 桌面端
   NODES_LIST: 'nodes:list',
   NODES_PAIR: 'nodes:pair',
+  /** 节点层里点「连接到节点…」：本机切回本机界面并在那里打开配对对话框（配对链接只在本机界面输入） */
+  NODES_REQUEST_PAIR: 'nodes:request-pair',
+  /** main → 本机主窗口 renderer：打开配对对话框 */
+  NODES_PAIR_REQUESTED: 'nodes:pair-requested',
   NODES_REMOVE: 'nodes:remove',
   NODES_RENAME: 'nodes:rename',
   /** main → renderer：节点列表/连接状态变化 */

@@ -87,6 +87,12 @@ export function setLocalLayerVisible(visible: boolean): void {
   localLayerVisible = visible;
 }
 
+/** 用户正看着本机界面：主窗口聚焦且没被远程节点界面盖住 */
+async function localUiInFront(): Promise<boolean> {
+  const { getMainWindow } = await import('../windows/MainWindow');
+  return localLayerVisible && getMainWindow()?.isFocused() === true;
+}
+
 /** 点击通知：聚焦（托盘模式下重建）主窗口，renderer 加载完再切到对应会话 */
 async function focusSession(sessionId: string): Promise<void> {
   const { focusMainWindow } = await import('../windows/MainWindow');
@@ -158,9 +164,10 @@ export async function maybeNotifyBot(
   if (!bot.enabled) return;
   if (event.type !== 'approval-request' && event.type !== 'ask-request') return;
   if (isSessionMuted(event.identity.sessionId)) return;
-  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
+  const { focusMainWindow } = await import('../windows/MainWindow');
+  const inFront = await localUiInFront();
   if (!isCurrent()) return;
-  if (getMainWindow()?.isFocused()) return;
+  if (inFront) return;
   const title = `${bot.name} · ${event.type === 'ask-request' ? texts().ask : texts().approval}`;
   const body =
     event.type === 'ask-request'
@@ -181,8 +188,8 @@ export async function notifyBotChat(
   chatId: string,
   build: (lang: 'zh' | 'en') => { title: string; body: string }
 ): Promise<void> {
-  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
-  if (getMainWindow()?.isFocused()) return;
+  const { focusMainWindow } = await import('../windows/MainWindow');
+  if (await localUiInFront()) return;
   const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
   notify(`bot-chat:${chatId}`, title, body, () => {
     sendToWindow(focusMainWindow(), IPC_CHANNELS.BOT_EVENT, { kind: 'open', chatId });
@@ -193,8 +200,8 @@ export async function notifyBotChat(
 export async function notifySecretary(
   build: (lang: 'zh' | 'en') => { title: string; body: string }
 ): Promise<void> {
-  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
-  if (getMainWindow()?.isFocused()) return;
+  const { focusMainWindow } = await import('../windows/MainWindow');
+  if (await localUiInFront()) return;
   const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
   notify('secretary', title, body, () => void focusMainWindow(), await secretaryNotificationIcon());
 }

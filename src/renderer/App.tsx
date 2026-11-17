@@ -38,6 +38,7 @@ import { ChatView } from '@/components/chat/ChatView';
 import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
+import { PairNodeDialog } from '@/components/nodes/PairNodeDialog';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
@@ -223,6 +224,7 @@ export default function App() {
     const remote = window.electronAPI.remote;
     return remote && !remote.nativePlatform ? undefined : useRemoteNodesStore.getState().bind();
   }, []);
+  const pairDialogOpen = useRemoteNodesStore((s) => s.pairDialogOpen);
   const botModeActive = useBotModeActive();
   const botModeEnabled = useSettingsStore((s) => s.botModeEnabled);
   const headerSessionTabsEnabled = useSettingsStore((s) => s.headerSessionTabs);
@@ -698,6 +700,10 @@ export default function App() {
       </div>
       {settingsHydrated && !onboarded && !window.electronAPI.remote && <Onboarding />}
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <PairNodeDialog
+        open={pairDialogOpen}
+        onOpenChange={useRemoteNodesStore.getState().setPairDialogOpen}
+      />
       <AlertDialog
         open={closeRequestId !== null}
         onOpenChange={(open) => {

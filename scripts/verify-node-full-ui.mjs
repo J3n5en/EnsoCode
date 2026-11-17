@@ -457,6 +457,7 @@ async function main() {
     '再切 B 复用同一 webContents（不重新加载）',
     'B 的设置可从完整界面打开',
     'B 会话完成后由 A 弹出系统通知',
+    'B 界面不能直接配对，「连接到节点…」回到本机界面打开配对对话框',
   ];
   if (!fullUi) {
     for (const name of dependent) {
@@ -654,6 +655,37 @@ async function main() {
         { timeout: 30_000, label: `A 的通知（B 侧通知 ${JSON.stringify(await B.notes())}）` }
       );
       return notes.join(' | ').slice(0, 200);
+    });
+
+    await step('B 界面不能直接配对，「连接到节点…」回到本机界面打开配对对话框', async () => {
+      const r = await A.local.eval(clickNodeOption(JSON.stringify(nodeLabel)));
+      check(r === 'clicked', `切到 B ${r}`);
+      await waitFor(async () => nodeUrl.test((await A.topLayer())?.url ?? ''), {
+        timeout: 10_000,
+        label: '顶层为 B',
+      });
+      const before = (await A.local.eval('window.electronAPI.nodes.list()')).nodes.length;
+      const pair = await overlay.eval(
+        `window.electronAPI.nodes.pair('https://relay.invalid/#pk=1').then((v) => JSON.stringify(v), (e) => 'rejected: ' + e.message)`
+      );
+      check(!/"ok":true/.test(pair), `B 界面 nodes:pair 未被拒 ${pair}`);
+      const after = (await A.local.eval('window.electronAPI.nodes.list()')).nodes.length;
+      check(after === before, `节点数 ${before} → ${after}`);
+      const click = await overlay.eval(clickNodeOption(JSON.stringify('Connect to a node')));
+      check(click === 'clicked', click);
+      await waitFor(async () => /\/renderer\/index\.html/.test((await A.topLayer())?.url ?? ''), {
+        timeout: 10_000,
+        label: '顶层回到本机 workbench',
+      });
+      await waitFor(
+        () =>
+          A.local.eval(
+            `[...document.querySelectorAll('[role="dialog"]')].some((d) => d.innerText.includes('Connect to a node'))`
+          ),
+        { timeout: 10_000, label: '本机界面打开配对对话框' }
+      );
+      await A.local.shot(path.join(OUT, 'a-local-pair-dialog.png'));
+      return pair;
     });
   }
 
