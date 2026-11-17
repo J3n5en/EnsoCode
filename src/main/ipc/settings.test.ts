@@ -229,6 +229,21 @@ describe('settings广播策略', () => {
     reloaded.flushSettings();
   });
 
+  it('秘书开关关掉后落盘为 false，重启重读仍是关', async () => {
+    vi.resetModules();
+    const settings = await import('./settings');
+    settings.patchSettingsState('secretaryEnabled', true);
+    expect(settings.patchSettingsState('secretaryEnabled', false)).toMatchObject({ ok: true });
+    settings.flushSettings();
+    expect(
+      JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))['enso-settings'].state
+        .secretaryEnabled
+    ).toBe(false);
+    vi.resetModules();
+    const { secretaryEnabled } = await import('../services/secretary/enabled');
+    expect(secretaryEnabled()).toBe(false);
+  });
+
   it('旧字段写请求收敛到 canonical mode，不形成双状态', async () => {
     const { patchSettingsState, readSettings } = await import('./settings');
     expect(patchSettingsState('hashlineEditEnabled', true)).toMatchObject({

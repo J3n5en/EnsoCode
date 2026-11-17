@@ -52,6 +52,7 @@ vi.mock('@/stores/sidePanel', () => ({
 }));
 vi.mock('@/stores/settings', () => ({ useSettingsStore: { getState: () => settings } }));
 vi.mock('@/stores/modelDirectory/useProviders', () => ({ readMaterializedProviders: () => [] }));
+vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/stores/oauthCredentials', () => ({
   useOauthCredentialStore: { getState: () => ({ snapshot: {} }) },
   oauthCredentialContext: () => ({}),
@@ -77,6 +78,8 @@ vi.stubGlobal('window', {
 });
 
 const { EMPTY_SECRETARY_STATE, useSecretaryStore } = await import('./secretary');
+const { secretarySectionView } = await import('@/components/secretary/secretaryView');
+const { isSecretaryOwned } = await import('@/stores/sessions/secretaryOwned');
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -165,6 +168,64 @@ describe('useSecretaryStore', () => {
 
     listener?.({ ...stateWith('pending'), profile: null });
     expect(useSecretaryStore.getState().welcomeOpen).toBe(true);
+  });
+});
+
+describe('秘书开关关闭', () => {
+  const sidebarEntry = () => secretarySectionView(useSecretaryStore.getState().secretary, String);
+  const takenOver: SecretaryState = {
+    ...stateWith('pending'),
+    takeovers: [
+      {
+        conversationId: 'conv-t',
+        projectId: 'p1',
+        projectName: 'p',
+        title: 't',
+        grantedAt: 1,
+        via: 'manual' as SecretaryState['takeovers'][number]['via'],
+        secretaryConversationId: 'sec1',
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    useSecretaryStore.setState({ secretary: EMPTY_SECRETARY_STATE, welcomeOpen: false });
+  });
+
+  it('退订后入口消失、接管名单清空，开着时的快照不残留', async () => {
+    initialState = Promise.resolve(takenOver);
+    const unbind = useSecretaryStore.getState().bind();
+    await flush();
+    expect(sidebarEntry()).not.toBeNull();
+    expect(isSecretaryOwned({ id: 'conv-t' })).toBe(true);
+
+    unbind();
+    expect(useSecretaryStore.getState().secretary.enabled).toBe(false);
+    expect(sidebarEntry()).toBeNull();
+    expect(isSecretaryOwned({ id: 'conv-t' })).toBe(false);
+  });
+
+  it('关掉时还在途的首帧回包不能把入口写回来', async () => {
+    let settle: (state: SecretaryState) => void = () => {};
+    initialState = new Promise<SecretaryState>((resolve) => {
+      settle = resolve;
+    });
+    const unbind = useSecretaryStore.getState().bind();
+    unbind();
+    settle(stateWith('pending'));
+    await flush();
+    expect(sidebarEntry()).toBeNull();
+  });
+
+  it('重新打开后入口回来', async () => {
+    initialState = Promise.resolve(stateWith('pending'));
+    useSecretaryStore.getState().bind()();
+    await flush();
+    expect(sidebarEntry()).toBeNull();
+
+    useSecretaryStore.getState().bind();
+    await flush();
+    expect(sidebarEntry()).not.toBeNull();
   });
 });
 

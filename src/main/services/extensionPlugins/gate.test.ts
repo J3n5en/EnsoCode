@@ -1428,10 +1428,45 @@ describe('秘书联系方式', () => {
       name: '我',
       at: 5,
     });
+    await g.handle(
+      'a.b',
+      'contact.inbound',
+      {
+        channelId: 'wechat',
+        peerId: 'grp-1',
+        senderId: 'wx-1',
+        chatType: 'group',
+        chatTitle: '家',
+        text: '在吗',
+      },
+      undefined
+    );
+    expect(contact.inbound).toHaveBeenLastCalledWith('a.b', 'a.b:wechat', {
+      peerId: 'grp-1',
+      senderId: 'wx-1',
+      chatType: 'group',
+      chatTitle: '家',
+      text: '在吗',
+    });
+    for (const bad of [
+      { senderId: '' },
+      { senderId: 7 },
+      { chatType: 'channel' },
+      { chatTitle: 1 },
+    ]) {
+      await expect(
+        g.handle(
+          'a.b',
+          'contact.inbound',
+          { channelId: 'wechat', peerId: 'p', text: 'x', ...bad },
+          undefined
+        )
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    }
     await expect(
       g.handle('a.b', 'contact.inbound', { channelId: 'wechat', peerId: '', text: 'x' }, undefined)
     ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
-    for (let index = 0; index < 19; index += 1) {
+    for (let index = 0; index < 18; index += 1) {
       await g.handle(
         'a.b',
         'contact.inbound',

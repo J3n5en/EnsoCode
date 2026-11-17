@@ -102,6 +102,22 @@ describe('手机关注列表', () => {
     ]);
   });
 
+  it('论坛话题发起的关注：重启后 topicId 还在，结果回同一个话题', () => {
+    const dir = tempDir();
+    new FollowingStore(dir).add({
+      kind: 'session',
+      targetId: 'c7',
+      origin: { channelId: 'telegram', peerId: '-100777', topicId: '3' },
+      at: 1,
+      summary: '修构建',
+    });
+    expect(new FollowingStore(dir).list()[0]?.origin).toEqual({
+      channelId: 'telegram',
+      peerId: '-100777',
+      topicId: '3',
+    });
+  });
+
   it(`最多 ${FOLLOWING_LIMIT} 条，超过按时间淘汰最旧的`, () => {
     const dir = tempDir();
     const d = deps(dir);

@@ -80,7 +80,11 @@ function parseOrigin(raw: Record<string, unknown>): Peer {
     origin.channelId &&
     typeof origin.peerId === 'string'
   ) {
-    return { channelId: origin.channelId, peerId: origin.peerId };
+    return {
+      channelId: origin.channelId,
+      peerId: origin.peerId,
+      ...(typeof origin.topicId === 'string' && origin.topicId ? { topicId: origin.topicId } : {}),
+    };
   }
   const chatId = typeof raw.chatId === 'number' && Number.isInteger(raw.chatId) ? raw.chatId : 0;
   return { channelId: 'telegram', peerId: String(chatId) };
@@ -152,7 +156,11 @@ export class FollowingStore implements FollowingPort {
       id: followKey(input.kind, input.targetId),
       kind: input.kind,
       targetId: input.targetId,
-      origin: { channelId: input.origin.channelId, peerId: input.origin.peerId },
+      origin: {
+        channelId: input.origin.channelId,
+        peerId: input.origin.peerId,
+        ...(input.origin.topicId ? { topicId: input.origin.topicId } : {}),
+      },
       at: input.at,
       summary: summaryOf(input.summary),
       ...(input.secretaryConversationId

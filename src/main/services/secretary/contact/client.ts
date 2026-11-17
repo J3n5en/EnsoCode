@@ -28,6 +28,8 @@ export interface TelegramChat {
   username?: string;
   title?: string;
   first_name?: string;
+  /** 超级群开了论坛话题 */
+  is_forum?: boolean;
 }
 
 export interface TelegramMessage {
@@ -37,7 +39,7 @@ export interface TelegramMessage {
   text?: string;
   /** 秒级时间戳 */
   date?: number;
-  /** 论坛话题（超级群或开了话题模式的机器人私聊）；配合 is_topic_message 才算话题 */
+  /** 论坛话题 id；普通超级群里回复串也会带，要配合 is_topic_message 看 */
   message_thread_id?: number;
   is_topic_message?: boolean;
 }
@@ -108,13 +110,19 @@ export interface TelegramApi {
    * 「正在输入…」：Telegram 侧只亮约 5 秒，要一直显示得由调用方续发。
    * 没有返回值，失败照样抛 TelegramApiError。
    */
-  sendChatAction(params: { chatId: number; action: 'typing' }): Promise<void>;
+  sendChatAction(params: {
+    chatId: number;
+    action: 'typing';
+    messageThreadId?: number;
+  }): Promise<void>;
   sendMessage(params: {
     chatId: number;
     text: string;
     replyMarkup?: TelegramInlineKeyboard;
     /** 命令回复用 HTML：正文由调用方转义，避免特殊字符发不出去 */
     parseMode?: 'HTML';
+    /** 发进论坛话题；缺省进群的 General */
+    messageThreadId?: number;
   }): Promise<number>;
   /** 翻页时原地换掉这一条，不刷屏 */
   editMessageText(params: {
@@ -251,15 +259,20 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
         signal,
         LONG_POLL_TIMEOUT_MS
       ),
-    sendChatAction: async ({ chatId, action }) => {
-      await request<boolean>(base, token, 'sendChatAction', { chat_id: chatId, action });
+    sendChatAction: async ({ chatId, action, messageThreadId }) => {
+      await request<boolean>(base, token, 'sendChatAction', {
+        chat_id: chatId,
+        action,
+        ...(messageThreadId === undefined ? {} : { message_thread_id: messageThreadId }),
+      });
     },
-    sendMessage: async ({ chatId, text, replyMarkup, parseMode }) => {
+    sendMessage: async ({ chatId, text, replyMarkup, parseMode, messageThreadId }) => {
       const sent = await request<TelegramMessage>(base, token, 'sendMessage', {
         chat_id: chatId,
         text,
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         ...(parseMode ? { parse_mode: parseMode } : {}),
+        ...(messageThreadId === undefined ? {} : { message_thread_id: messageThreadId }),
       });
       return sent.message_id;
     },

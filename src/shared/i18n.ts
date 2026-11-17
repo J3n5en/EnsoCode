@@ -3069,6 +3069,14 @@ export const zhTranslations: Record<string, string> = {
   'Mirror every reply here; /sync off stops it': '把所有回复同步到手机；/sync off 关掉',
   'List every command': '列出所有命令',
   'Commands you can send': '可以发的命令',
+  'Allowed groups': '允许的群',
+  'Only groups on this list reach the secretary, and only messages from the bound account count. Messages from anyone else in the group are not received.':
+    '只有名单里的群会进秘书，而且只认绑定的那个账号。群里其他人的话不会收。',
+  'No groups yet: group messages are not received.': '名单为空：群消息一律不收。',
+  'Group chat ID, e.g. -1001234567890': '群 chatId，例如 -1001234567890',
+  'Add group': '添加',
+  'Remove {{name}}': '删除 {{name}}',
+  'Group chat IDs are numbers, e.g. -1001234567890': '群 chatId 是数字，例如 -1001234567890',
   'Allow viewing memory titles on Telegram': '允许在 Telegram 查看记忆标题',
   'Off by default. /memory lists titles only, never the memory text.':
     '默认关闭。/memory 只列标题，不显示记忆正文。',

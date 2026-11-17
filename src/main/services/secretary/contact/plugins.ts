@@ -17,7 +17,16 @@ export interface PluginContactBridgeHandlers {
   inbound(
     pluginId: string,
     channelId: string,
-    input: { peerId: string; text: string; name?: string; at?: number }
+    input: {
+      /** 会话 id（私聊或群），也是回复目标 */
+      peerId: string;
+      text: string;
+      senderId?: string;
+      chatType?: 'private' | 'group';
+      chatTitle?: string;
+      name?: string;
+      at?: number;
+    }
   ): void;
   setStatus(pluginId: string, channelId: string, input: ChannelStatusInput): void;
 }
@@ -83,6 +92,9 @@ export function connectPluginChannels(
         kind: 'text',
         peer: { channelId, peerId: input.peerId },
         text: input.text,
+        ...(input.senderId ? { senderId: input.senderId } : {}),
+        ...(input.chatType ? { chatType: input.chatType } : {}),
+        ...(input.chatTitle ? { chatTitle: input.chatTitle } : {}),
         ...(input.name ? { name: input.name } : {}),
         ...(input.at ? { at: input.at } : {}),
       });

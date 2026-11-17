@@ -85,7 +85,14 @@ import {
 } from './channel';
 import type { TelegramApi } from './client';
 import type { ContactCommands } from './commands';
-import { type ContactStore, channelPrefs, TELEGRAM_CHANNEL_ID, withChannelPrefs } from './store';
+import {
+  type ContactStore,
+  channelPrefs,
+  TELEGRAM_CHANNEL_ID,
+  withChannelPrefs,
+  withTelegramGroupAdded,
+  withTelegramGroupRemoved,
+} from './store';
 import { TELEGRAM_CAPS, TelegramChannel } from './telegram';
 
 /** 界面按码翻译成自己的文案；这里只回稳定的错误码 */
@@ -98,7 +105,8 @@ export type ContactError =
   | 'not-bound'
   | 'not-found'
   | 'no-secretary'
-  | 'deliver-failed';
+  | 'deliver-failed'
+  | 'invalid-chat-id';
 
 export type ContactResult = { ok: true } | { ok: false; error: ContactError };
 
@@ -597,6 +605,23 @@ export class ContactService implements SecretaryContactPort {
     this.setChannelPrefs(TELEGRAM_CHANNEL_ID, { memory: value === true });
   }
 
+  /** Telegram 群白名单的增删：存在 contact.json，重复添加不算错 */
+  setTelegramGroup(action: 'add' | 'remove', chatId: unknown): ContactResult {
+    const file = this.store.file();
+    let next = file;
+    if (action === 'add') {
+      const added = withTelegramGroupAdded(file, chatId);
+      if (!added.ok) return { ok: false, error: 'invalid-chat-id' };
+      next = added.file;
+    } else {
+      next = withTelegramGroupRemoved(file, chatId);
+    }
+    this.store.save(next);
+    this.audit('contact_settings', true, `telegramGroups=${next.telegramGroups.length}`);
+    this.ports.publish();
+    return { ok: true };
+  }
+
   /** 总开关：关掉后 Telegram 停止轮询，插件渠道不再路由 */
   async setEnabled(value: boolean): Promise<void> {
     const on = value === true;
@@ -786,14 +811,14 @@ export class ContactService implements SecretaryContactPort {
     const caps = channel.caps();
     let sent: ChannelSend;
     if (caps.buttons) {
-      sent = await channel[kind](peer.peerId, message);
+      sent = await channel[kind](peer.peerId, message, peer.topicId);
     } else {
       const base = message.format === 'html' ? htmlToPlain(message.text) : message.text;
       const extra = plainButtonsText(message.buttons);
       const text = extra ? `${base}\n${extra}` : base;
       sent = { ok: true };
       for (const chunk of splitPlain(text, caps.maxChars)) {
-        sent = await channel[kind](peer.peerId, { text: chunk });
+        sent = await channel[kind](peer.peerId, { text: chunk }, peer.topicId);
         if (!sent.ok) break;
       }
     }
@@ -1423,7 +1448,12 @@ export class ContactService implements SecretaryContactPort {
         : { id: peer.channelId, title: meta?.title ?? peer.channelId },
       this.ports.lang(),
       {
-        ...(message.name ? { username: message.name } : {}),
+        chatId: peer.peerId,
+        ...(peer.topicId ? { topicId: peer.topicId } : {}),
+        ...(message.chatType ? { chatType: message.chatType } : {}),
+        ...(message.chatTitle ? { chatTitle: message.chatTitle } : {}),
+        ...(message.senderId ? { senderId: message.senderId } : {}),
+        ...(message.name ? { senderName: message.name } : {}),
         ...(message.at ? { at: message.at } : {}),
         text,
       }
@@ -1922,7 +1952,7 @@ export class ContactService implements SecretaryContactPort {
         this.stopTyping();
         return;
       }
-      const result = await channel.typing(peer.peerId);
+      const result = await channel.typing(peer.peerId, peer.topicId);
       if (result.ok) continue;
       // 解绑后立刻停：没有 token 或 chat 不算出错
       if (result.error !== 'token-required') this.audit('contact_typing', false, result.error);

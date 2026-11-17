@@ -238,7 +238,7 @@ export const PLUGIN_HOST_APIS = [
   'host.capabilities',
   /** 秘书联系方式：注册渠道实现；args { channelId, caps } */
   'contact.register',
-  /** 渠道收到一句话；args { channelId, peerId, text, name?, at? } */
+  /** 渠道收到一句话；args { channelId, peerId, text, senderId?, chatType?, chatTitle?, name?, at? } */
   'contact.inbound',
   /** 渠道状态；args { channelId, status, detail?, peers? } */
   'contact.setStatus',
