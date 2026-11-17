@@ -16,7 +16,15 @@ import {
   type VirtualModelEntry,
 } from '@shared/virtualModels';
 import { Brain, Check, ChevronDown, Loader2, RefreshCw, Shuffle, Star } from 'lucide-react';
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { providerDisplayName } from '@/components/settings/chatgptPool';
 import { applyFetchedModels, fetchAllProviderModels } from '@/components/settings/providerFetch';
 import { Badge } from '@/components/ui/badge';
@@ -86,6 +94,16 @@ export function expandWorkbenchGroups(groups: readonly ProviderGroup[]): Provide
     }
   }
   return out;
+}
+
+/** 让 item 在 list 内尽量垂直居中的 scrollTop；item.offsetParent 须为 list。 */
+export function centeredScrollTop(
+  list: { clientHeight: number; scrollHeight: number },
+  item: { offsetTop: number; offsetHeight: number }
+): number {
+  const max = Math.max(0, list.scrollHeight - list.clientHeight);
+  const target = item.offsetTop - (list.clientHeight - item.offsetHeight) / 2;
+  return Math.min(max, Math.max(0, Math.round(target)));
 }
 
 export function resolveActiveWorkbenchView(options: {
@@ -704,8 +722,23 @@ export function ModelPicker({
   const pendingSearchFocusRef = useRef(false);
   const openRef = useRef(open);
   openRef.current = open;
-  const selectedNavRef = useRef<HTMLButtonElement | null>(null);
-  const didScrollNavOnOpenRef = useRef(false);
+  // 弹层在 base-ui 门户里，打开那次提交时内容尚未挂载；渠道列表挂载时再滚，每次打开只滚一次
+  const navListRef = useRef<HTMLDivElement | null>(null);
+  const navScrollPendingRef = useRef(false);
+  const scrollNavToSelectedOnce = useCallback(() => {
+    const list = navListRef.current;
+    if (!list || !navScrollPendingRef.current) return;
+    navScrollPendingRef.current = false;
+    const item = list.querySelector<HTMLElement>('[data-model-picker-nav-selected]');
+    if (item) list.scrollTop = centeredScrollTop(list, item);
+  }, []);
+  const setNavList = useCallback(
+    (node: HTMLDivElement | null) => {
+      navListRef.current = node;
+      scrollNavToSelectedOnce();
+    },
+    [scrollNavToSelectedOnce]
+  );
   const [oauthInfos, setOauthInfos] = useState<OauthProviderInfo[]>([]);
   const [metaByProvider, setMetaByProvider] = useState<Record<string, Record<string, ModelMeta>>>(
     {}
@@ -800,17 +833,10 @@ export function ModelPicker({
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) {
-      didScrollNavOnOpenRef.current = false;
-      return;
-    }
-    if (didScrollNavOnOpenRef.current) return;
-    const el = selectedNavRef.current;
-    if (!el) return;
-    el.scrollIntoView({ block: 'nearest' });
-    didScrollNavOnOpenRef.current = true;
-  }, [open]);
+  useLayoutEffect(() => {
+    navScrollPendingRef.current = open;
+    if (open) scrollNavToSelectedOnce();
+  }, [open, scrollNavToSelectedOnce]);
 
   useEffect(() => {
     if (!listenHotkey) return;
@@ -1223,12 +1249,18 @@ export function ModelPicker({
               </p>
             ) : (
               <div data-model-picker="workbench" className="-mx-1.5 flex h-[268px] overflow-hidden">
-                <div className="w-48 shrink-0 space-y-0.5 overflow-y-auto border-r bg-muted/15 p-1.5">
+                <div
+                  ref={setNavList}
+                  data-model-picker="nav-list"
+                  className="relative w-48 shrink-0 space-y-0.5 overflow-y-auto border-r bg-muted/15 p-1.5"
+                >
                   {view.showFavoritesNav && (
                     <button
                       type="button"
                       data-model-picker-nav="favorites"
-                      ref={providerId === VIRTUAL_PROVIDER_ID ? selectedNavRef : undefined}
+                      data-model-picker-nav-selected={
+                        providerId === VIRTUAL_PROVIDER_ID ? '' : undefined
+                      }
                       onMouseEnter={() => setActiveNav({ kind: 'favorites' })}
                       onClick={() => setActiveNav({ kind: 'favorites' })}
                       className={cn(
@@ -1266,7 +1298,7 @@ export function ModelPicker({
                         type="button"
                         data-model-picker-nav={`vendor:${group.vendorId}`}
                         data-model-picker-vendor={group.vendorId}
-                        ref={selectedHere ? selectedNavRef : undefined}
+                        data-model-picker-nav-selected={selectedHere ? '' : undefined}
                         onMouseEnter={() =>
                           setActiveNav({ kind: 'vendor', vendorId: group.vendorId })
                         }

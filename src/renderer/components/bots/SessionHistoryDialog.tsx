@@ -23,6 +23,8 @@ interface SessionHistoryDialogProps {
   read?: (beforeIndex?: number) => Promise<ParentHistoryTailResult>;
   /** 缺省 true。子代理查看不是 bot 会话，调用方传 false */
   botSession?: boolean;
+  /** 会话仍在运行：未回结果的工具按运行中显示，不当成失败 */
+  running?: boolean;
   onClose: () => void;
 }
 
@@ -35,6 +37,7 @@ export function SessionHistoryDialog({
   turnFooter,
   read,
   botSession = true,
+  running = false,
   onClose,
 }: SessionHistoryDialogProps) {
   const { t } = useI18n();
@@ -98,12 +101,12 @@ export function SessionHistoryDialog({
   const items = useMemo(
     () =>
       page
-        ? buildTimeline(page.messages, false, [], undefined, {
+        ? buildTimeline(page.messages, running, [], undefined, {
             historyBaseIndex: page.baseIndex,
             runDividers,
           })
         : [],
-    [page, runDividers]
+    [page, running, runDividers]
   );
   const loadOlderPage = useCallback(() => void loadOlder(), [loadOlder]);
   const highlight = useMessageFocus({

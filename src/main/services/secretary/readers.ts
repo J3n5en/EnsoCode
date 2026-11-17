@@ -428,8 +428,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const source = `session:${conversationId}`;
       const calls = (await ports.activity(session.sessionFile, limit)).map((call) => ({
         name: call.name,
-        ok: call.ok,
-        ...(call.pending ? { pending: true } : {}),
+        ...(call.pending ? { pending: true } : { ok: call.ok === true }),
         ...(call.durationMs === undefined ? {} : { durationMs: call.durationMs }),
         ...(call.at === undefined ? {} : { at: call.at }),
         ...(call.command ? { command: wrapUntrusted(source, redactSecrets(call.command)) } : {}),

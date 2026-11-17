@@ -8,11 +8,12 @@ import type {
 } from '@shared/types';
 import { VIRTUAL_PROVIDER_ID, type VirtualModelEntry } from '@shared/virtualModels';
 import { parseHTML } from 'linkedom';
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement, type ReactNode, useLayoutEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  centeredScrollTop,
   duplicateModelLabels,
   expandWorkbenchGroups,
   ModelPicker,
@@ -32,6 +33,8 @@ interface ClickWrapperProps extends WrapperProps {
 
 const harness = vi.hoisted(() => ({
   menuItemClicks: [] as Array<() => void>,
+  menuOpen: false,
+  deferPopup: false,
   menuOnOpenChange: undefined as
     | ((open: boolean, details?: { cancel: () => void; allowPropagation: () => void }) => void)
     | undefined,
@@ -75,15 +78,28 @@ vi.mock('@/components/ui/menu', () => {
   const Wrap = ({ children }: WrapperProps) => createElement('div', null, children);
   const Menu = ({
     children,
+    open,
     onOpenChange,
   }: WrapperProps & {
+    open?: boolean;
     onOpenChange?: (
       open: boolean,
       details?: { cancel: () => void; allowPropagation: () => void }
     ) => void;
   }) => {
+    harness.menuOpen = Boolean(open);
     harness.menuOnOpenChange = onOpenChange;
     return createElement('div', null, children);
+  };
+  // 仿 base-ui FloatingPortal：打开那次提交只建门户节点，下一次渲染才挂载弹层内容
+  const DeferredPortal = ({ children }: WrapperProps) => {
+    const [mounted, setMounted] = useState(false);
+    useLayoutEffect(() => setMounted(true), []);
+    return mounted ? createElement('div', null, children) : null;
+  };
+  const MenuPopup = ({ children }: WrapperProps) => {
+    if (!harness.deferPopup) return createElement('div', null, children);
+    return harness.menuOpen ? createElement(DeferredPortal, null, children) : null;
   };
   const MenuItem = ({ children, onClick }: ClickWrapperProps) => {
     if (onClick) harness.menuItemClicks.push(onClick);
@@ -96,7 +112,7 @@ vi.mock('@/components/ui/menu', () => {
     MenuGroup: Wrap,
     MenuGroupLabel: Wrap,
     MenuItem,
-    MenuPopup: Wrap,
+    MenuPopup,
     MenuSub: Wrap,
     MenuSubPopup: Wrap,
     MenuSubTrigger: Wrap,
@@ -155,6 +171,8 @@ const commonProps = {
 
 beforeEach(() => {
   harness.menuItemClicks = [];
+  harness.menuOpen = false;
+  harness.deferPopup = false;
   harness.menuOnOpenChange = undefined;
   harness.switchProps = null;
   harness.buttons = [];
@@ -1095,6 +1113,25 @@ describe('model picker workbench', () => {
   });
 });
 
+describe('centeredScrollTop', () => {
+  const list = { clientHeight: 100, scrollHeight: 600 };
+
+  it('把目标项放到可视区中间', () => {
+    expect(centeredScrollTop(list, { offsetTop: 300, offsetHeight: 30 })).toBe(265);
+  });
+
+  it('靠近顶部或底部时夹在可滚范围内', () => {
+    expect(centeredScrollTop(list, { offsetTop: 10, offsetHeight: 30 })).toBe(0);
+    expect(centeredScrollTop(list, { offsetTop: 580, offsetHeight: 20 })).toBe(500);
+    expect(
+      centeredScrollTop(
+        { clientHeight: 100, scrollHeight: 80 },
+        { offsetTop: 40, offsetHeight: 20 }
+      )
+    ).toBe(0);
+  });
+});
+
 describe('model picker 打开时滚到当前渠道', () => {
   const vendorProviders: ModelProvider[] = [
     {
@@ -1119,19 +1156,19 @@ describe('model picker 打开时滚到当前渠道', () => {
     },
   ];
 
-  const scrolled: Element[] = [];
+  const ROW = 30;
+  const LIST_HEIGHT = 40;
   const openDetails = { cancel() {}, allowPropagation() {} };
+  const layoutProps = ['scrollTop', 'clientHeight', 'scrollHeight', 'offsetTop', 'offsetHeight'];
+  let scrollWrites: Array<{ el: HTMLElement; value: number }>;
+  let proto: object;
+  let doc: Document;
   let root: Root;
-  let scrollIntoView: ReturnType<typeof vi.fn>;
 
-  async function mount(props: { providerId: string; modelId: string }) {
+  async function mount(props: Partial<Parameters<typeof ModelPicker>[0]>) {
     await act(async () => {
       root.render(
-        createElement(ModelPicker, {
-          ...commonProps,
-          providers: vendorProviders,
-          ...props,
-        })
+        createElement(ModelPicker, { ...commonProps, providers: vendorProviders, ...props })
       );
     });
   }
@@ -1142,11 +1179,13 @@ describe('model picker 打开时滚到当前渠道', () => {
     });
   }
 
+  const navList = () => doc.querySelector('[data-model-picker="nav-list"]') as HTMLElement | null;
+  const navItem = (vendor: string) =>
+    doc.querySelector(`[data-model-picker-vendor="${vendor}"]`) as HTMLElement;
+
   beforeEach(() => {
-    scrolled.length = 0;
-    scrollIntoView = vi.fn(function (this: Element) {
-      scrolled.push(this);
-    });
+    harness.deferPopup = true;
+    scrollWrites = [];
     const dom = parseHTML('<html><body><div id="root"></div></body></html>');
     Object.assign(dom.window, {
       electronAPI: { providers: { listOauth: () => Promise.resolve([]) } },
@@ -1154,47 +1193,91 @@ describe('model picker 打开时滚到当前渠道', () => {
     vi.stubGlobal('window', dom.window);
     vi.stubGlobal('document', dom.document);
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    (
-      dom.window.HTMLElement.prototype as unknown as { scrollIntoView: typeof scrollIntoView }
-    ).scrollIntoView = scrollIntoView;
-    const container = dom.document.getElementById('root') as unknown as HTMLElement;
-    root = createRoot(container);
+    doc = dom.document as unknown as Document;
+    // linkedom 不做布局：每个导航项高 ROW，按兄弟序号排；渠道列表可视高 LIST_HEIGHT
+    proto = dom.window.HTMLElement.prototype;
+    const scrollTops = new WeakMap<object, number>();
+    Object.defineProperties(proto, {
+      scrollTop: {
+        configurable: true,
+        get(this: HTMLElement) {
+          return scrollTops.get(this) ?? 0;
+        },
+        set(this: HTMLElement, value: number) {
+          scrollTops.set(this, value);
+          scrollWrites.push({ el: this, value });
+        },
+      },
+      clientHeight: { configurable: true, get: () => LIST_HEIGHT },
+      scrollHeight: {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.children.length * ROW + 12;
+        },
+      },
+      offsetHeight: { configurable: true, get: () => ROW },
+      offsetTop: {
+        configurable: true,
+        get(this: HTMLElement) {
+          return 6 + Array.from(this.parentElement?.children ?? []).indexOf(this) * ROW;
+        },
+      },
+    });
+    root = createRoot(dom.document.getElementById('root') as unknown as HTMLElement);
   });
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    for (const key of layoutProps) delete (proto as Record<string, unknown>)[key];
     vi.unstubAllGlobals();
   });
 
-  it('打开时把第三个厂商组滚进可视区', async () => {
+  it('弹层内容延后挂载时，打开后仍把当前渠道滚到中间', async () => {
     await mount({ providerId: 'relay', modelId: 'rl' });
+    expect(navList()).toBeNull();
     await setOpen(true);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
-    expect((scrolled[0] as HTMLElement).getAttribute('data-model-picker-vendor')).toBe(
-      '__custom:relay'
-    );
+    const list = navList();
+    expect(list).not.toBeNull();
+    const target = navItem('__custom:relay');
+    expect(target.offsetTop).toBeGreaterThan(LIST_HEIGHT);
+    expect(scrollWrites).toEqual([
+      { el: list, value: centeredScrollTop(list as HTMLElement, target) },
+    ]);
+    expect(list?.scrollTop).toBeGreaterThan(0);
   });
 
-  it('未选中模型时不滚动', async () => {
+  it('没有选中项时不滚动', async () => {
     await mount({ providerId: '', modelId: '' });
     await setOpen(true);
-    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(navList()).not.toBeNull();
+    expect(scrollWrites).toEqual([]);
   });
 
-  it('关闭再打开时滚到新的当前渠道', async () => {
+  it('用户滚动后，重渲染与列表重挂载都不再拽回', async () => {
     await mount({ providerId: 'relay', modelId: 'rl' });
     await setOpen(true);
-    expect((scrolled[0] as HTMLElement).getAttribute('data-model-picker-vendor')).toBe(
-      '__custom:relay'
-    );
-    await setOpen(false);
-    scrolled.length = 0;
-    scrollIntoView.mockClear();
-    await mount({ providerId: 'work', modelId: 'gpt' });
+    expect(scrollWrites).toHaveLength(1);
+    const list = navList() as HTMLElement;
+    list.scrollTop = 0;
+    scrollWrites = [];
+    await mount({ providerId: 'gateway', modelId: 'gw' });
+    await mount({ providers: [], providerId: 'relay', modelId: 'rl' });
+    expect(navList()).toBeNull();
+    await mount({ providerId: 'relay', modelId: 'rl' });
+    expect(navList()).not.toBeNull();
+    expect(scrollWrites).toEqual([]);
+  });
+
+  it('关闭再打开时重新滚到新的当前渠道', async () => {
+    await mount({ providerId: 'relay', modelId: 'rl' });
     await setOpen(true);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
-    expect((scrolled[0] as HTMLElement).getAttribute('data-model-picker-vendor')).toBe('openai');
+    await setOpen(false);
+    expect(navList()).toBeNull();
+    scrollWrites = [];
+    await mount({ providerId: 'gateway', modelId: 'gw' });
+    await setOpen(true);
+    const list = navList() as HTMLElement;
+    const target = navItem('__custom:gateway');
+    expect(scrollWrites).toEqual([{ el: list, value: centeredScrollTop(list, target) }]);
   });
 });

@@ -627,7 +627,7 @@ describe('session_activity', () => {
           seen.push(limit);
           return [
             { name: 'bash', ok: true, durationMs: 12, at: 1_000, command: 'pnpm typecheck' },
-            { name: 'read', ok: false, pending: true, at: 2_000 },
+            { name: 'read', pending: true, at: 2_000 },
           ];
         },
       })
@@ -642,7 +642,7 @@ describe('session_activity', () => {
         at: 1_000,
         command: '<untrusted-content source="session:s1">pnpm typecheck</untrusted-content>',
       },
-      { name: 'read', ok: false, pending: true, at: 2_000 },
+      { name: 'read', pending: true, at: 2_000 },
     ]);
     expect(JSON.stringify(result)).not.toContain('SECRET OUTPUT');
   });

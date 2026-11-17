@@ -65,16 +65,22 @@ vi.mock('@/components/bots/SessionHistoryDialog', () => ({
     conversationId,
     read,
     botSession,
+    running,
   }: {
     conversationId: string | null;
     read?: (beforeIndex?: number) => Promise<unknown>;
     botSession?: boolean;
+    running?: boolean;
   }) => {
     useEffect(() => {
       if (conversationId && read) void read();
     }, [conversationId, read]);
     return conversationId ? (
-      <div data-history={conversationId} data-bot={String(botSession)} />
+      <div
+        data-history={conversationId}
+        data-bot={String(botSession)}
+        data-running={String(running)}
+      />
     ) : null;
   },
 }));
@@ -161,7 +167,23 @@ describe('ChildRunsButton', () => {
     expect(readChildRun).toHaveBeenCalledWith(PARENT, CHILD, undefined);
     expect(container.querySelector('[data-history]')?.getAttribute('data-history')).toBe(CHILD);
     expect(container.querySelector('[data-history]')?.getAttribute('data-bot')).toBe('false');
+    expect(container.querySelector('[data-history]')?.getAttribute('data-running')).toBe('false');
     expect(selectTab).not.toHaveBeenCalled();
+  });
+
+  it('仍在跑的子代理按运行中查看，未回结果的工具不显示成失败', async () => {
+    await render([{ ...ended, live: true }]);
+    const trigger = container.querySelector('[aria-label="Subagent history"]');
+    await act(async () => {
+      (trigger as HTMLButtonElement).click();
+    });
+    const row = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Scout')
+    );
+    await act(async () => {
+      row?.click();
+    });
+    expect(container.querySelector('[data-history]')?.getAttribute('data-running')).toBe('true');
   });
 
   it('行上显示任务标题；没有标题时去掉哈希，自定义类型显示配置名', async () => {

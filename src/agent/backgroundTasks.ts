@@ -4,8 +4,8 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
 import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { SHELL_READ_HINT, SHELL_SLEEP_HINT, SHELL_TIMEOUT_HINT } from '@shared/shellHints';
 import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
-import { SHELL_TIMEOUT_HINT } from '@shared/shellTimeoutHint';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
 import {
   bindForegroundCommand,
@@ -761,10 +761,7 @@ const READLIKE_SHELL = [
  */
 export function shellReadHint(command: string): string {
   if (!READLIKE_SHELL.some((pattern) => pattern.test(command))) return '';
-  return (
-    'Shell read-only shortcut: prefer read (offset/limit) for files, grep for content, ' +
-    'find for paths — the dedicated tools handle line ranges and stream far less output.'
-  );
+  return SHELL_READ_HINT;
 }
 
 const SLEEP_UNIT_SEC: Record<string, number> = { '': 1, s: 1, m: 60, h: 3600 };
@@ -782,11 +779,7 @@ export function shellSleepHint(command: string): string {
   if (sleeps.length === 0) return '';
   const loop = /(?:^|[;&|\s])(?:while|until|for)\s/.test(bare);
   if (!loop && sleeps.reduce((sum, value) => sum + value, 0) < SLEEP_HINT_MIN_SEC) return '';
-  return (
-    'Sleep-waiting in a foreground command costs a model round per check. Put the whole wait in one ' +
-    'command that exits when the condition holds (e.g. `until <check>; do sleep 10; done; <report>`) ' +
-    'and run it with background: true — you are notified when it finishes, then end your turn.'
-  );
+  return SHELL_SLEEP_HINT;
 }
 
 const TIMEOUT_HINT_MIN_SEC = SHELL_LIMITS.yieldDefaultMs / 1000;
