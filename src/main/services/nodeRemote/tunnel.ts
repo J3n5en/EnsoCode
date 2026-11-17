@@ -22,6 +22,8 @@ export interface NodeFrameHandlers {
   onEvent(channel: string, payload: string): void;
   /** 宿主已丢失该 renderer：调用方重载页面 */
   onReset(): void;
+  /** 宿主接纳（含续上）该帧；leader = 宿主本机主窗口不在时由它承担 pair 目录推送 */
+  onReady?(leader: boolean): void;
 }
 
 type Sequenced = Extract<HostToRemote, { type: 'rpc-result' | 'rpc-event' }>;
@@ -52,6 +54,8 @@ const ACK_STEP = 128 * 1024;
  * 上线即发 remote-ack(gzip)：宿主才会压缩大帧，并按回报的字节数限流。
  */
 export class NodeRemoteTunnel {
+  /** 本隧道的页面代际：宿主据此回收本机上一代（如重启前）留下的 renderer */
+  readonly page = randomUUID();
   private online = false;
   private seq = 0;
   private receivedBytes = 0;
@@ -70,7 +74,13 @@ export class NodeRemoteTunnel {
   }
 
   private hello(slot: Slot): void {
-    this.post({ type: 'rpc-hello', cid: slot.cid, kind: slot.kind, seq: slot.stream.applied });
+    this.post({
+      type: 'rpc-hello',
+      cid: slot.cid,
+      kind: slot.kind,
+      seq: slot.stream.applied,
+      page: this.page,
+    });
   }
 
   private ack(): void {
@@ -230,6 +240,7 @@ export class NodeRemoteTunnel {
         const queue = slot.queue;
         slot.queue = [];
         for (const message of queue) this.postSplit(message);
+        slot.handlers.onReady?.(frame.leader);
         return;
       }
       case 'rpc-result':

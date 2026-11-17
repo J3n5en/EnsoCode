@@ -9,7 +9,10 @@ const mock = vi.hoisted(() => ({
   bounds: [] as { width: number; height: number }[],
   workbench: { name: 'workbench', setBounds() {} } as any,
 }));
-vi.mock('../windows/createAppWindow', () => ({ getWorkbenchView: () => mock.workbench }));
+vi.mock('../windows/createAppWindow', () => ({
+  getWorkbenchView: () => mock.workbench,
+  raiseWindowCover: () => {},
+}));
 vi.mock('./proxyConfig', () => ({ getProxyConfig: () => ({ attachSession: () => {} }) }));
 vi.mock('electron', () => ({
   app: { getPath: () => mock.dir, isPackaged: false },

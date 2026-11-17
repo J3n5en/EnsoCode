@@ -65,7 +65,7 @@ import type {
 } from '@shared/types/browser';
 import type { BrowserWindow, Session, WebContents } from 'electron';
 import { app, session, WebContentsView } from 'electron';
-import { getWorkbenchView } from '../windows/createAppWindow';
+import { getWorkbenchView, raiseWindowCover } from '../windows/createAppWindow';
 import { pinnedWorkbenchBounds } from '../windows/win32Restore';
 import { assertBrowserUrl, resolveLocalCwdForBrowser } from './browserFileRoot';
 import { isBrowserPartition, partitionName } from './browserPartition';
@@ -515,6 +515,7 @@ export class BrowserHost {
     }
     this.ensureWorkbenchOnTop(window);
     for (const view of raise) contentView.addChildView(view);
+    raiseWindowCover(window);
   }
 
   /** host 内白名单 CDP；模型永远摸不到 */

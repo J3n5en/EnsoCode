@@ -9,14 +9,14 @@ function setup() {
   return { sent, tunnel };
 }
 
-const ready = (cid: string, resumed = false): HostToRemote => ({
+const ready = (cid: string, resumed = false, leader = false): HostToRemote => ({
   type: 'rpc-ready',
   cid,
   ok: true,
   resumed,
   version: 'v',
   platform: 'darwin',
-  leader: false,
+  leader,
   replay: true,
 });
 
@@ -29,7 +29,7 @@ describe('NodeRemoteTunnel', () => {
     tunnel.setOnline(true);
     expect(sent).toEqual([
       { type: 'remote-ack', bytes: 0, gzip: true },
-      { type: 'rpc-hello', cid, kind: 'settings', seq: 0 },
+      { type: 'rpc-hello', cid, kind: 'settings', seq: 0, page: expect.any(String) },
     ]);
     tunnel.receive(ready(cid));
     const invoke = sent[2] as Extract<RemoteToHost, { type: 'rpc-invoke' }>;
@@ -51,6 +51,27 @@ describe('NodeRemoteTunnel', () => {
     tunnel.receive({ type: 'rpc-event', cid, ch: 'a', args: [1], seq: 1 });
     tunnel.receive({ type: 'rpc-event', cid, ch: 'a', args: [1], seq: 1 });
     expect(events).toEqual(['a[1]', 'b[2]']);
+  });
+
+  it('同一隧道的各帧 hello 带同一 page，ready 时回报宿主给的 leader', () => {
+    const { sent, tunnel } = setup();
+    const leaders: boolean[] = [];
+    const main = tunnel.attach('main', {
+      onEvent() {},
+      onReset() {},
+      onReady: (leader) => leaders.push(leader),
+    });
+    tunnel.attach('settings', { onEvent() {}, onReset() {} });
+    tunnel.setOnline(true);
+    const hellos = sent.filter(
+      (frame): frame is Extract<RemoteToHost, { type: 'rpc-hello' }> => frame.type === 'rpc-hello'
+    );
+    expect(hellos.map((h) => h.kind)).toEqual(['main', 'settings']);
+    expect(hellos[0]?.page).toBeTruthy();
+    expect(hellos[1]?.page).toBe(hellos[0]?.page);
+    expect(new NodeRemoteTunnel(() => {}).page).not.toBe(hellos[0]?.page);
+    tunnel.receive(ready(main, false, true));
+    expect(leaders).toEqual([true]);
   });
 
   it('续不上（resumed=false）则拒绝在途请求并通知重载', async () => {

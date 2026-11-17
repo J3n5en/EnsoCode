@@ -1,23 +1,47 @@
 import { join } from 'node:path';
 import { ipcMain } from '@platform';
-import { NODE_SETTINGS_SCHEME, nodeSettingsUrl, parseNodeSettingsUrl } from '@shared/nodeSettings';
+import {
+  NODE_SETTINGS_SCHEME,
+  type NodeShellPage,
+  nodeShellUrl,
+  parseNodeSettingsUrl,
+} from '@shared/nodeSettings';
 import { IPC_CHANNELS } from '@shared/types';
-import { BrowserWindow, protocol, shell } from 'electron';
+import type { NodeActionResult } from '@shared/types/nodes';
+import { BrowserWindow, protocol, type WebContents, WebContentsView } from 'electron';
+import { openExternalWebUrl } from '../../windows/appNavigation';
+import {
+  attachEditContextMenu,
+  getWindowWebContents,
+  setWindowCover,
+} from '../../windows/createAppWindow';
+import { getMainWindow } from '../../windows/MainWindow';
+import { attachPinnedWorkbenchBoundsSync, pinnedWorkbenchBounds } from '../../windows/win32Restore';
 import { loadNodes } from '../nodeStore';
 import { isNodeHostOnline, sendRemoteToNode, setNodeRemoteHooks } from '../pairGuest';
-import { isMainRenderer } from '../renderers';
+import { broadcastToRenderers, isMainRenderer } from '../renderers';
+import { type ActiveNode, NodeLayers } from './layers';
 import { type NodeAsset, NodeRemoteTunnel } from './tunnel';
 
 /**
- * 节点设置窗口：在本机窗口里跑宿主的设置页 renderer。
- * 壳页（shell.html）由专用 preload 挂 `__ensoRemote`，iframe 加载宿主下发的 r/settings.html，
- * 其 web-preload 经该桥走 main 侧 rpc 隧道；资源经 enso-node:// 协议向宿主取。
+ * 在本机跑宿主（对方桌面）的 renderer：
+ * - 主窗口节点层：WebContentsView 盖在本机 workbench 上，壳页确认节点在线后整页跳到 r/index.html；
+ * - 节点设置窗口：壳页里 iframe 加载 r/settings.html。
+ * nodeRemote preload 挂 `__ensoRemote`，web-preload 经它走 main 侧 rpc 隧道；资源经 enso-node:// 向宿主取。
  */
+
+interface Surface {
+  nodeId: string;
+  page: NodeShellPage;
+  contents: WebContents;
+  /** 该页面 attach 的 cid */
+  cids: Set<string>;
+}
 
 const tunnels = new Map<string, NodeRemoteTunnel>();
 const windows = new Map<string, BrowserWindow>();
-/** webContents.id → { nodeId, 该页面 attach 的 cid } */
-const senders = new Map<number, { nodeId: string; cids: Set<string> }>();
+/** webContents.id → 节点设置窗口或主窗口节点层 */
+const surfaces = new Map<number, Surface>();
 
 const ASSET_TIMEOUT_MS = 60_000;
 /** 带内容 hash 的构建产物不会变，按节点缓存在内存，再次打开窗口免下载 */
@@ -68,15 +92,17 @@ iframe.on{opacity:1}
 #s{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
 #s i{width:20px;height:20px;border:2px solid #8884;border-top-color:#888;border-radius:50%;animation:r .8s linear infinite}
 #s.err i{display:none}
+#b{font:inherit;padding:4px 12px;border-radius:6px;border:1px solid #8886;background:transparent;color:CanvasText;-webkit-app-region:no-drag}
+html.drag{-webkit-app-region:drag}
 @keyframes r{to{transform:rotate(360deg)}}</style></head>
-<body><div id="s"><i></i><span></span></div></body></html>`;
+<body><div id="s"><i></i><span></span><button id="b" hidden></button></div></body></html>`;
 
 /** scheme 特权与 local-image 在 localImageScheme.ts 一次登记（registerSchemesAsPrivileged 后调用会覆盖前者） */
 export function registerNodeSettingsProtocolHandler(): void {
   protocol.handle(NODE_SETTINGS_SCHEME, async (request) => {
     const parsed = parseNodeSettingsUrl(request.url);
-    // 只为已打开的节点设置窗口服务
-    if (!parsed || !windows.has(parsed.nodeId)) return new Response(null, { status: 404 });
+    // 只为已打开的节点界面服务
+    if (!parsed || !isSurfaceOpen(parsed.nodeId)) return new Response(null, { status: 404 });
     const { nodeId, path } = parsed;
     if (path === 'shell.html') {
       return new Response(SHELL_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
@@ -96,6 +122,36 @@ export function registerNodeSettingsProtocolHandler(): void {
   });
 }
 
+const isSurfaceOpen = (nodeId: string): boolean =>
+  [...surfaces.values()].some((surface) => surface.nodeId === nodeId);
+
+function shellPreferences(): Electron.WebPreferences {
+  return {
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: false,
+    preload: join(import.meta.dirname, '../preload/nodeRemote.mjs'),
+  };
+}
+
+/** 登记节点界面并收紧导航：只许留在该节点的 enso-node 页面内，外链交给系统浏览器 */
+function attachSurface(contents: WebContents, nodeId: string, page: NodeShellPage): void {
+  const id = contents.id;
+  surfaces.set(id, { nodeId, page, contents, cids: new Set() });
+  contents.setWindowOpenHandler(({ url }) => {
+    openExternalWebUrl(url);
+    return { action: 'deny' };
+  });
+  contents.on('will-navigate', (event, url) => {
+    if (parseNodeSettingsUrl(url)?.nodeId !== nodeId) event.preventDefault();
+  });
+  contents.once('destroyed', () => {
+    const entry = surfaces.get(id);
+    surfaces.delete(id);
+    for (const cid of entry?.cids ?? []) tunnels.get(nodeId)?.detach(cid);
+  });
+}
+
 export function openNodeSettingsWindow(nodeId: string): boolean {
   const node = loadNodes().find((n) => n.nodeId === nodeId);
   if (!node) return false;
@@ -112,45 +168,113 @@ export function openNodeSettingsWindow(nodeId: string): boolean {
     minHeight: 480,
     title: node.label,
     show: false,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: false,
-      preload: join(import.meta.dirname, '../preload/nodeSettings.mjs'),
-    },
+    webPreferences: shellPreferences(),
   });
-  const contents = win.webContents;
-  const id = contents.id;
   windows.set(nodeId, win);
-  senders.set(id, { nodeId, cids: new Set() });
+  attachSurface(win.webContents, nodeId, 'settings');
   win.on('page-title-updated', (event) => event.preventDefault());
   win.once('ready-to-show', () => win.show());
-  contents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https:') || url.startsWith('http:')) void shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  contents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(`${NODE_SETTINGS_SCHEME}:`)) event.preventDefault();
-  });
-  win.on('closed', () => {
-    const entry = senders.get(id);
-    senders.delete(id);
-    windows.delete(nodeId);
-    for (const cid of entry?.cids ?? []) tunnels.get(nodeId)?.detach(cid);
-  });
-  void win.loadURL(nodeSettingsUrl(nodeId));
+  win.on('closed', () => windows.delete(nodeId));
+  void win.loadURL(nodeShellUrl(nodeId, 'settings'));
   return true;
 }
 
-function senderEntry(event: { sender: { id: number } }) {
-  return senders.get(event.sender.id);
+// ── 主窗口节点层 ──────────────────────────────────────────────────────
+
+/** 节点层所在的主窗口；主窗口关掉（进托盘）时各层随之销毁，重建后从本机开始 */
+let layersWindow: BrowserWindow | null = null;
+
+const layers = new NodeLayers<WebContentsView>(
+  { create: createNodeView, show: showNodeView, destroy: destroyNodeView },
+  (active) => broadcastToRenderers(IPC_CHANNELS.NODES_ACTIVE_CHANGED, active)
+);
+
+function layerWindow(): BrowserWindow | null {
+  const win = getMainWindow();
+  if (!win || win.isDestroyed()) return null;
+  if (layersWindow === win) return win;
+  layersWindow = win;
+  attachPinnedWorkbenchBoundsSync(win, {
+    setBounds: (bounds) => {
+      for (const view of layers.all()) view.setBounds(bounds);
+    },
+  });
+  win.once('closed', () => {
+    if (layersWindow === win) layersWindow = null;
+    layers.reset();
+  });
+  return win;
+}
+
+function createNodeView(nodeId: string): WebContentsView {
+  const win = layersWindow as BrowserWindow;
+  const view = new WebContentsView({ webPreferences: shellPreferences() });
+  view.setBackgroundColor('#00000000');
+  const bounds = pinnedWorkbenchBounds(win);
+  if (bounds) view.setBounds(bounds);
+  const contents = view.webContents;
+  attachSurface(contents, nodeId, 'main');
+  attachEditContextMenu(win, contents);
+  contents.on('render-process-gone', () => {
+    if (!contents.isDestroyed()) void contents.loadURL(nodeShellUrl(nodeId, 'main'));
+  });
+  void contents.loadURL(nodeShellUrl(nodeId, 'main'));
+  return view;
+}
+
+function showNodeView(view: WebContentsView | null): void {
+  const win = layersWindow;
+  if (!win || win.isDestroyed()) return;
+  for (const other of layers.all()) if (other !== view) other.setVisible(false);
+  setWindowCover(win, view);
+  if (view) {
+    view.setVisible(true);
+    view.webContents.focus();
+  } else {
+    getWindowWebContents(win).focus();
+  }
+}
+
+function destroyNodeView(view: WebContentsView): void {
+  const win = layersWindow;
+  if (win && !win.isDestroyed()) win.contentView.removeChildView(view);
+  if (!view.webContents.isDestroyed()) view.webContents.close();
+}
+
+export function switchNode(target: ActiveNode): NodeActionResult {
+  if (target !== 'local' && !loadNodes().some((node) => node.nodeId === target)) {
+    return { ok: false, error: 'node not found' };
+  }
+  if (!layerWindow()) return { ok: false, error: 'main window unavailable' };
+  layers.switchTo(target);
+  return { ok: true };
+}
+
+/** 节点在线后，停在离线提示上的节点层重新走一遍壳页 */
+function retryOfflineShell(nodeId: string): void {
+  const contents = layers.view(nodeId)?.webContents;
+  if (
+    contents &&
+    !contents.isDestroyed() &&
+    parseNodeSettingsUrl(contents.getURL())?.path === 'shell.html'
+  ) {
+    contents.reload();
+  }
+}
+
+function surfaceOf(event: { sender: { id: number } }) {
+  return surfaces.get(event.sender.id);
 }
 
 export function registerNodeRemoteHandlers(): void {
   setNodeRemoteHooks({
     frame: (nodeId, frame) => tunnels.get(nodeId)?.receive(frame),
-    online: (nodeId, online) => tunnels.get(nodeId)?.setOnline(online),
+    online: (nodeId, online) => {
+      tunnels.get(nodeId)?.setOnline(online);
+      if (online) retryOfflineShell(nodeId);
+    },
     removed: (nodeId) => {
+      layers.drop(nodeId);
       windows.get(nodeId)?.close();
       dropTunnel(nodeId);
     },
@@ -162,8 +286,18 @@ export function registerNodeRemoteHandlers(): void {
     return openNodeSettingsWindow(nodeId) ? { ok: true } : { ok: false, error: 'node not found' };
   });
 
+  ipcMain.handle(IPC_CHANNELS.NODES_SWITCH, (event, target: unknown) => {
+    if (!isMainRenderer(event.sender.id) && surfaceOf(event)?.page !== 'main') {
+      return { ok: false, error: 'forbidden' };
+    }
+    if (typeof target !== 'string' || !target) return { ok: false, error: 'invalid node' };
+    return switchNode(target);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.NODES_ACTIVE, (): ActiveNode => layers.active);
+
   ipcMain.handle(IPC_CHANNELS.NODE_REMOTE_INIT, async (event) => {
-    const entry = senderEntry(event);
+    const entry = surfaceOf(event);
     if (!entry) return { ok: false, error: 'forbidden' };
     if (!isNodeHostOnline(entry.nodeId)) return { ok: false, error: 'offline' };
     const meta = await fetchAsset(entry.nodeId, 'meta');
@@ -180,10 +314,10 @@ export function registerNodeRemoteHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.NODE_REMOTE_ATTACH, (event, kind: unknown) => {
-    const entry = senderEntry(event);
-    if (!entry || kind !== 'settings') return null;
-    const contents = event.sender;
-    const cid = tunnelFor(entry.nodeId).attach('settings', {
+    const entry = surfaceOf(event);
+    if (!entry || kind !== entry.page) return null;
+    const { contents } = entry;
+    const cid = tunnelFor(entry.nodeId).attach(entry.page, {
       onEvent: (channel, payload) => {
         if (!contents.isDestroyed()) {
           contents.send(IPC_CHANNELS.NODE_REMOTE_EVENT, cid, channel, payload);
@@ -191,8 +325,17 @@ export function registerNodeRemoteHandlers(): void {
       },
       onReset: () => {
         entry.cids.delete(cid);
-        const win = windows.get(entry.nodeId);
-        if (win && !win.isDestroyed()) win.webContents.reload();
+        if (!contents.isDestroyed()) contents.reload();
+      },
+      onReady: (leader) => {
+        if (entry.page !== 'main' || contents.isDestroyed()) return;
+        // 宿主只在 rpc-ready 里给初始 leader，之后才发变化事件；按事件补给 web-preload
+        contents.send(
+          IPC_CHANNELS.NODE_REMOTE_EVENT,
+          cid,
+          IPC_CHANNELS.REMOTE_LEADER_CHANGED,
+          JSON.stringify([leader])
+        );
       },
     });
     entry.cids.add(cid);
@@ -200,7 +343,7 @@ export function registerNodeRemoteHandlers(): void {
   });
 
   const owned = (event: { sender: { id: number } }, cid: unknown) => {
-    const entry = senderEntry(event);
+    const entry = surfaceOf(event);
     return entry && typeof cid === 'string' && entry.cids.has(cid) ? entry : null;
   };
 
@@ -232,7 +375,8 @@ export function registerNodeRemoteHandlers(): void {
   });
 
   ipcMain.on(IPC_CHANNELS.NODE_REMOTE_CLOSE, (event) => {
-    const entry = senderEntry(event);
-    if (entry) windows.get(entry.nodeId)?.close();
+    const entry = surfaceOf(event);
+    if (entry?.page === 'settings') windows.get(entry.nodeId)?.close();
+    else if (entry?.page === 'main') switchNode('local');
   });
 }

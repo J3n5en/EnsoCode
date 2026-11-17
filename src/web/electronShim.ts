@@ -16,8 +16,9 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import { decodeRemoteValue, encodeRemoteValue } from '../../packages/pair/src/remote';
 import { isRemoteChannelAllowed } from '../main/services/remoteRenderer/channels';
 
+// 手机壳与节点设置窗口里 renderer 是 iframe，桥在父页面；桌面节点层的主界面是顶层文档，parent 即自身
 const bridge = (window.parent as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote;
-if (!bridge || window.parent === window) {
+if (!bridge) {
   throw new Error('EnsoCode remote bridge is missing');
 }
 

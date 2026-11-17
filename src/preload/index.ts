@@ -1556,6 +1556,15 @@ const electronAPI = {
     /** 在本机新窗口打开该节点的设置（宿主设置页经隧道运行） */
     openSettings: (nodeId: string): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_OPEN_SETTINGS, nodeId),
+    /** 主窗口可见层切到本机（'local'）或某节点的完整界面 */
+    switch: (target: string): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_SWITCH, target),
+    active: (): Promise<string> => ipcRenderer.invoke(IPC_CHANNELS.NODES_ACTIVE),
+    onActiveChanged: (callback: (active: string) => void): (() => void) => {
+      const listener = (_: unknown, active: string) => callback(active);
+      ipcRenderer.on(IPC_CHANNELS.NODES_ACTIVE_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_ACTIVE_CHANGED, listener);
+    },
     /** 发 @enso/pair 的 PhoneToHost 命令（main 按白名单校验后加密上行） */
     send: (nodeId: string, command: unknown): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_SEND, nodeId, command),

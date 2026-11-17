@@ -21,7 +21,6 @@ import {
 
 export type ActiveNode = 'local' | string;
 
-const ACTIVE_NODE_KEY = 'enso-active-node';
 const cursorKey = (nodeId: string) => `enso-node-cursors:${nodeId}`;
 const lastSessionKey = (nodeId: string) => `enso-node-last-session:${nodeId}`;
 
@@ -45,13 +44,15 @@ function saveCursor(nodeId: string, sessionId: string, index: number): void {
 interface RemoteNodesState {
   nodes: RemoteNodeStatus[];
   secureStorage: boolean;
+  /** 主窗口当前可见层（main 为权威源，经 nodes:active-changed 同步） */
   activeNodeId: ActiveNode;
   byNode: Record<string, NodeView>;
   /** 本机刚 spawn、尚未收到目录的会话：首次订阅不进 syncing */
   freshIds: ReadonlySet<string>;
 
-  /** 订阅 main 的状态/消息推送；App 挂载时调一次，返回清理函数 */
+  /** 订阅 main 的状态/可见层/消息推送；App 挂载时调一次，返回清理函数 */
   bind: () => () => void;
+  /** 请 main 切换主窗口可见层；activeNodeId 随 main 广播更新 */
   switchNode: (nodeId: ActiveNode) => void;
   selectSession: (nodeId: string, sessionId: string | null) => void;
   send: (nodeId: string, command: PhoneToHost) => void;
@@ -117,27 +118,33 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
     }
   };
 
+  const applyActive = (active: ActiveNode): void => {
+    if (get().activeNodeId === active) return;
+    set({ activeNodeId: active });
+    if (active !== 'local') enterNode(active);
+  };
+
   return {
     nodes: [],
     secureStorage: true,
-    activeNodeId: (localStorage.getItem(ACTIVE_NODE_KEY) as ActiveNode | null) ?? 'local',
+    activeNodeId: 'local',
     byNode: {},
     freshIds: new Set(),
 
     bind: () => {
       // 先挂监听再拉状态/发 snapshot：否则 NODES_LIST 回放和 host 重发的目录帧会再次丢
       const offStatus = window.electronAPI.nodes.onStatusChanged(applyStatus);
+      const offActive = window.electronAPI.nodes.onActiveChanged(applyActive);
       const offMessage = window.electronAPI.nodes.onMessage((message: NodeMessage) => {
         const r = applyNodeMessage(viewOf(message.nodeId), message.payload);
         if (r.view === get().byNode[message.nodeId]) return;
         commit(message.nodeId, r.view, r.effects);
       });
       void get().refresh();
-      // 窗口重载后仍停在远程节点：main 侧连接没断，只需重新订阅并要一次目录
-      const active = get().activeNodeId;
-      if (active !== 'local') enterNode(active);
+      void window.electronAPI.nodes.active().then(applyActive);
       return () => {
         offStatus();
+        offActive();
         offMessage();
       };
     },
@@ -148,11 +155,7 @@ export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
     },
 
     switchNode: (nodeId) => {
-      const current = get().activeNodeId;
-      if (current === nodeId) return;
-      localStorage.setItem(ACTIVE_NODE_KEY, nodeId);
-      set({ activeNodeId: nodeId });
-      if (nodeId !== 'local') enterNode(nodeId);
+      void window.electronAPI.nodes.switch(nodeId);
     },
 
     selectSession: (nodeId, sessionId) => {
