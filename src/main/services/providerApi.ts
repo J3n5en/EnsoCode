@@ -86,6 +86,7 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
     }
     let url: string;
     let headers: Record<string, string> = {};
+    let usesDefaultModelsList = false;
     switch (config.api) {
       case 'anthropic-messages':
         // 官方默认每页 20 条且带 has_more；同步需要完整清单，取单页上限
@@ -101,6 +102,7 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
       default:
         url = `${base}/models`;
         headers = { Authorization: `Bearer ${key}` };
+        usesDefaultModelsList = true;
     }
     headers = withProviderHeaders(headers, config.headers);
 
@@ -121,7 +123,13 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
       });
     }
 
-    if (!response.ok) return { ok: false, models: [], error: httpError(response) };
+    if (!response.ok) {
+      const error =
+        response.status === 404 && usesDefaultModelsList
+          ? 'GET /models returned 404: the provider may not support /models, or the Base URL may be wrong (e.g. missing /v1). If the Base URL is correct, add models manually in the model center.'
+          : httpError(response);
+      return { ok: false, models: [], error };
+    }
 
     const data = await response.json();
     if (!isValidModelListPayload(config.api, data)) {

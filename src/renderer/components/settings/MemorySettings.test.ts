@@ -407,6 +407,9 @@ describe('MemorySettings', () => {
     expect(html).not.toContain('data-model-picker=');
     expect(html).toContain('没有可用于向量化的模型');
     expect(html).toContain('订阅登录不能用于向量化');
+    expect(html).toContain(
+      'CHATONLY：没有匹配的向量模型（模型名需包含 embed/voyage/bge 等关键词）'
+    );
   });
 
   it('flags a saved chat-model selection right in the remote row', () => {

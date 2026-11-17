@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { translate } from '../i18n';
 import {
+  explainRemoteEmbeddingRejections,
   isLikelyEmbeddingModelId,
   REMOTE_EMBEDDING_SENTINEL_MODEL,
   type RemoteEmbeddingIssue,
@@ -141,5 +142,57 @@ describe('remoteEmbeddingIssueMessage', () => {
     );
     expect(en).toContain('Claude');
     expect(en).not.toContain('{{');
+  });
+});
+
+describe('explainRemoteEmbeddingRejections', () => {
+  const provider = (overrides: {
+    id?: string;
+    name?: string;
+    apiKey?: string;
+    baseUrl?: string;
+    models?: string[];
+  }) => ({
+    id: overrides.id ?? 'p',
+    name: overrides.name ?? 'Acme',
+    apiKey: overrides.apiKey ?? '',
+    baseUrl: overrides.baseUrl ?? '',
+    models: (overrides.models ?? []).map((id) => ({ id })),
+  });
+
+  it('有 apiKey+baseUrl 但模型名不匹配 → no-embedding-models', () => {
+    expect(
+      explainRemoteEmbeddingRejections([
+        provider({
+          id: 'voyage',
+          name: 'VoyageAI',
+          apiKey: 'k',
+          baseUrl: 'https://api.voyageai.com/v1',
+          models: ['rerank-2'],
+        }),
+      ])
+    ).toEqual([{ providerId: 'voyage', name: 'VoyageAI', reason: 'no-embedding-models' }]);
+  });
+
+  it('有 baseUrl 无 apiKey → no-api-key', () => {
+    expect(
+      explainRemoteEmbeddingRejections([
+        provider({
+          id: 'open',
+          name: 'OpenAI',
+          apiKey: '',
+          baseUrl: 'https://api.openai.com/v1',
+          models: ['text-embedding-3-small'],
+        }),
+      ])
+    ).toEqual([{ providerId: 'open', name: 'OpenAI', reason: 'no-api-key' }]);
+  });
+
+  it('完全空配置不出现在结果里', () => {
+    expect(
+      explainRemoteEmbeddingRejections([
+        provider({ id: 'empty', name: 'Empty', apiKey: '', baseUrl: '', models: [] }),
+      ])
+    ).toEqual([]);
   });
 });
