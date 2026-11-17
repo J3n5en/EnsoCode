@@ -40,8 +40,29 @@ export type ChannelSettle =
   | { ok: false; error: ChannelErrorCode };
 
 /**
+ * 出站媒体。核心已校验过路径并读出字节：buffer 是权威内容，path 只用来取文件名，
+ * 渠道不应再按 path 重新读盘。
+ */
+export interface ChannelImage {
+  path?: string;
+  buffer?: Buffer;
+  fileName?: string;
+  mimeType?: string;
+  caption?: string;
+}
+
+export interface ChannelFile {
+  path: string;
+  buffer?: Buffer;
+  fileName?: string;
+  mimeType?: string;
+  caption?: string;
+}
+
+/**
  * 语义接口：核心只说「发一条提问」「这张卡收尾了」，怎么画由渠道决定。
- * 能力缺失时核心不会调用对应方法（edit=false 不调 settle/edit，typing=false 不调 typing）。
+ * 能力缺失时核心不会调用对应方法（edit=false 不调 settle/edit，typing=false 不调 typing，
+ * images/files=false 不调 sendImage/sendFile）。
  */
 export interface ContactChannel {
   readonly id: string;
@@ -56,6 +77,10 @@ export interface ContactChannel {
   edit?(peerId: string, messageId: string, message: ChannelMessage): Promise<ChannelResult>;
   /** 「正在输入…」；只在 caps.typing 时调用 */
   typing(peerId: string): Promise<ChannelResult>;
+  /** 发图片；只在 caps.images 时调用 */
+  sendImage?(peerId: string, image: ChannelImage): Promise<ChannelSend>;
+  /** 发文件；只在 caps.files 时调用 */
+  sendFile?(peerId: string, file: ChannelFile): Promise<ChannelSend>;
   /** 命令菜单；null 表示清掉 */
   setCommands?(
     peerId: string,

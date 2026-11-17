@@ -94,6 +94,8 @@ export interface EnsoFetchInit {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  /** base64：body 是请求体原始字节的 base64，用于上传二进制；解码后 ≤16MB */
+  bodyEncoding?: 'text' | 'base64';
   responseType?: 'text' | 'base64';
 }
 
@@ -151,13 +153,28 @@ export interface EnsoContactCaps {
   /** 单条上限，100–65536；超长由核心切条 */
   maxChars: number;
   commandMenu: boolean;
+  /** 能发图片（需实现 sendImage）；缺省 false，核心改发一句带路径的文字 */
+  images?: boolean;
+  /** 能发文件（需实现 sendFile）；缺省 false */
+  files?: boolean;
 }
 
-/** 渠道实现：核心只调这两个；peerId 一律字符串 */
+/** 秘书发出的一张图片或一个文件：单个 ≤10MB */
+export interface EnsoContactMedia {
+  /** 运行时是 Node 的 Buffer */
+  data: Uint8Array;
+  fileName: string;
+  mimeType?: string;
+  caption?: string;
+}
+
+/** 渠道实现：peerId 一律字符串；sendImage / sendFile 只在 caps 声明后调用，抛错算发送失败 */
 export interface EnsoContactChannel {
   caps: EnsoContactCaps;
   sendText(peerId: string, message: { text: string }): Promise<{ messageId?: string } | undefined>;
   typing?(peerId: string, state: { on: boolean }): Promise<unknown>;
+  sendImage?(peerId: string, media: EnsoContactMedia): Promise<{ messageId?: string } | undefined>;
+  sendFile?(peerId: string, media: EnsoContactMedia): Promise<{ messageId?: string } | undefined>;
 }
 
 export interface EnsoContactInbound {

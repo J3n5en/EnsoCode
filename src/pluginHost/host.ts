@@ -219,7 +219,10 @@ export function runPluginHost(transport: HostTransport): void {
   const eventHandlers = new Map<string, Handler>();
   const scheduleHandlers = new Map<string, Handler>();
   const exportHandlers = new Map<string, Handler>();
-  const contactChannels = new Map<string, { sendText: Handler; typing?: Handler }>();
+  const contactChannels = new Map<
+    string,
+    { sendText: Handler; typing?: Handler; sendImage?: Handler; sendFile?: Handler }
+  >();
   const written = new Map<string, string[]>();
   const turnEndListeners = new Set<TurnEndListener>();
   const agentRuns = new Map<
@@ -513,11 +516,18 @@ export function runPluginHost(transport: HostTransport): void {
           if (typeof impl.sendText !== 'function') throw new TypeError('渠道需要 sendText');
           if (impl.typing !== undefined && typeof impl.typing !== 'function')
             throw new TypeError('typing 必须是函数');
+          for (const key of ['sendImage', 'sendFile'] as const)
+            if (impl[key] !== undefined && typeof impl[key] !== 'function')
+              throw new TypeError(`${key} 必须是函数`);
           // 常驻渠道属于进程而不是某次调用：脱离调用上下文注册
           await current.exit(() => hostCall('contact.register', { channelId, caps: impl.caps }));
           contactChannels.set(channelId, {
             sendText: impl.sendText as Handler,
             ...(typeof impl.typing === 'function' ? { typing: impl.typing as Handler } : {}),
+            ...(typeof impl.sendImage === 'function'
+              ? { sendImage: impl.sendImage as Handler }
+              : {}),
+            ...(typeof impl.sendFile === 'function' ? { sendFile: impl.sendFile as Handler } : {}),
           });
           return () => contactChannels.delete(channelId);
         },
@@ -616,7 +626,19 @@ export function runPluginHost(transport: HostTransport): void {
           await channel.typing?.(peerId, { on: true });
           return null;
         }
-        const value = await channel.sendText(peerId, { text: String(p.text ?? '') });
+        let value: unknown;
+        if (p.op === 'sendImage' || p.op === 'sendFile') {
+          const handler = p.op === 'sendImage' ? channel.sendImage : channel.sendFile;
+          if (!handler) throw codedError('UNSUPPORTED', `渠道没有实现 ${p.op}`);
+          value = await handler(peerId, {
+            data: Buffer.from(String(p.data ?? ''), 'base64'),
+            fileName: String(p.fileName ?? 'file'),
+            ...(typeof p.mimeType === 'string' ? { mimeType: p.mimeType } : {}),
+            ...(typeof p.caption === 'string' ? { caption: p.caption } : {}),
+          });
+        } else {
+          value = await channel.sendText(peerId, { text: String(p.text ?? '') });
+        }
         return isRecord(value) && typeof value.messageId === 'string'
           ? { messageId: value.messageId }
           : {};

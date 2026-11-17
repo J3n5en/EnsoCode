@@ -48,6 +48,7 @@ import {
   type PluginAgentSource,
   type PluginArtifactInfo,
   type PluginCallMethod,
+  type PluginContactRequest,
   type PluginHostCapabilities,
   type PluginInjectImage,
   type PluginToolResult,
@@ -729,14 +730,22 @@ export class ExtensionPluginService {
   async callContact(
     pluginId: string,
     channelId: string,
-    request: { op: 'sendText'; peerId: string; text: string } | { op: 'typing'; peerId: string }
+    request: PluginContactRequest
   ): Promise<unknown> {
     if (!this.enabledManifest(pluginId)) throw pluginError('PLUGIN_DISABLED', '插件未启用');
+    // 媒体要上传，给足时间；文字与正在输入仍是 30 秒
+    const media = request.op === 'sendImage' || request.op === 'sendFile';
     return this.invoke(
       pluginId,
       'contact.call',
       { channelId, ...request },
-      { sessionId: null, projectRoot: null, gesture: false, timeoutMs: 30_000, kind: 'event' }
+      {
+        sessionId: null,
+        projectRoot: null,
+        gesture: false,
+        timeoutMs: media ? 120_000 : 30_000,
+        kind: 'event',
+      }
     );
   }
 

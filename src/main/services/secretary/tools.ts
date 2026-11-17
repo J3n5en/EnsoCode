@@ -1,5 +1,6 @@
 import type { SecretaryInvokeOp } from '@shared/secretary/tools';
 import { secretaryCleanupHandlers } from './cleanup';
+import { secretaryContactSendFileHandler } from './contactSend';
 import { secretaryToolHandlers } from './customTools';
 import { secretaryDispatchHandlers } from './dispatch';
 import { secretaryImageViewHandler } from './imageView';
@@ -23,6 +24,7 @@ export type SecretaryOpHandler = (
 export const SECRETARY_OP_HANDLERS: Record<SecretaryInvokeOp, SecretaryOpHandler> = {
   ...secretaryReadHandlers,
   image_view: secretaryImageViewHandler,
+  contact_send_file: secretaryContactSendFileHandler,
   ...secretaryCleanupHandlers,
   ...secretaryDispatchHandlers,
   ...secretaryScheduleHandlers,

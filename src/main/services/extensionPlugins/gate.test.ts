@@ -245,6 +245,35 @@ describe('PluginHostGate', () => {
     ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
   });
 
+  it('net.fetch 的 bodyEncoding base64：解码成原始字节再发；编码名不对被拒', async () => {
+    const seen: unknown[] = [];
+    deps.fetch = vi.fn(async (_url: string, init: RequestInit) => {
+      seen.push(init.body);
+      return new Response('ok');
+    });
+    gate = new PluginHostGate(deps);
+    const bytes = Buffer.from([0, 255, 1, 128]);
+    await gate.handle(
+      'a.b',
+      'net.fetch',
+      {
+        url: 'https://api.example.com/up',
+        init: { method: 'POST', body: bytes.toString('base64'), bodyEncoding: 'base64' },
+      },
+      undefined
+    );
+    expect(seen[0]).toBeInstanceOf(Uint8Array);
+    expect([...(seen[0] as Uint8Array)]).toEqual([0, 255, 1, 128]);
+    await expect(
+      gate.handle(
+        'a.b',
+        'net.fetch',
+        { url: 'https://api.example.com/up', init: { body: 'x', bodyEncoding: 'hex' } },
+        undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+  });
+
   it('net.fetch 无 content-length 时超限立即停止读取', async () => {
     const chunk = 1024 * 1024;
     let pulled = 0;
@@ -1341,13 +1370,40 @@ describe('秘书联系方式', () => {
     expect(contact.register).not.toHaveBeenCalled();
   });
 
+  it('caps 里 images / files 可选：给了就照传，不是布尔值就拒绝', async () => {
+    const { g, contact } = contactGate(['net.fetch', 'secretary.contact']);
+    await g.handle(
+      'a.b',
+      'contact.register',
+      { channelId: 'wechat', caps: { ...caps, images: true, files: true } },
+      undefined
+    );
+    expect(contact.register).toHaveBeenCalledWith('a.b', 'a.b:wechat', {
+      ...caps,
+      images: true,
+      files: true,
+    });
+    await expect(
+      g.handle(
+        'a.b',
+        'contact.register',
+        { channelId: 'wechat', caps: { ...caps, images: 'yes' } },
+        undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+  });
+
   it('只认清单声明的渠道，channelId 拼成 <pluginId>:<id> 交给秘书', async () => {
     const { g, contact } = contactGate(['net.fetch', 'secretary.contact']);
     await expect(
       g.handle('a.b', 'contact.register', { channelId: 'other', caps }, undefined)
     ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
     await g.handle('a.b', 'contact.register', { channelId: 'wechat', caps }, undefined);
-    expect(contact.register).toHaveBeenCalledWith('a.b', 'a.b:wechat', caps);
+    expect(contact.register).toHaveBeenCalledWith('a.b', 'a.b:wechat', {
+      ...caps,
+      images: false,
+      files: false,
+    });
     await expect(
       g.handle(
         'a.b',

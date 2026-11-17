@@ -1,4 +1,5 @@
 import type { PluginContactChannelContrib } from '@shared/extensionPlugins/manifest';
+import type { PluginContactRequest } from '@shared/extensionPlugins/protocol';
 import type { ChannelCaps, ChannelMeta } from './channel';
 import { PluginContactChannel } from './pluginChannel';
 import type { ChannelStatusInput, ContactService } from './service';
@@ -6,11 +7,7 @@ import type { ChannelStatusInput, ContactService } from './service';
 /** 插件服务里联系方式要用的那几样：已启用的渠道声明、往插件发、变化通知 */
 export interface PluginContactSource {
   contactChannels(): { pluginId: string; channels: PluginContactChannelContrib[] }[];
-  callContact(
-    pluginId: string,
-    channelId: string,
-    request: { op: 'sendText'; peerId: string; text: string } | { op: 'typing'; peerId: string }
-  ): Promise<unknown>;
+  callContact(pluginId: string, channelId: string, request: PluginContactRequest): Promise<unknown>;
   onChange(listener: () => void): () => void;
 }
 

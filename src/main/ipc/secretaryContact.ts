@@ -20,6 +20,7 @@ import { connectPluginChannels } from '../services/secretary/contact/plugins';
 import { ContactService, type ContactServicePorts } from '../services/secretary/contact/service';
 import { ContactStore } from '../services/secretary/contact/store';
 import { deliverToSecretary } from '../services/secretary/contact/wake';
+import { setContactMediaSender } from '../services/secretary/contactSend';
 import { buildDaily, secretaryDailyPorts } from '../services/secretary/daily';
 import { type DeliveryPorts, resolveTarget } from '../services/secretary/deliveries';
 import {
@@ -234,6 +235,8 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
   service = new ContactService(store, ports);
   // 派发与定时不认识联系方式：只通过这个探针问一句「这一轮是手机发起的吗」
   setPhoneTurnChatProbe((conversationId) => service?.phoneTurnChat(conversationId) ?? null);
+  // 秘书的 contact_send_file 只认这个出口，不认识具体渠道
+  setContactMediaSender((conversationId, media) => service.sendMedia(conversationId, media));
 
   let unplug: (() => void) | null = null;
 

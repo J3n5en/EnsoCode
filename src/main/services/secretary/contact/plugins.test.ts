@@ -21,6 +21,8 @@ const CAPS = {
   format: 'html' as const,
   maxChars: 2000,
   commandMenu: true,
+  images: false,
+  files: false,
 };
 
 function setup() {
@@ -148,5 +150,51 @@ describe('插件渠道接入', () => {
     h.handlers.inbound('enso.clawbot', 'enso.clawbot:wechat', { peerId: 'wx-me', text: '在吗' });
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(h.delivered).toEqual([]);
+  });
+
+  it('插件声明 images/files：图片与文件按 base64 交给插件；没声明就降级成文字', async () => {
+    const h = setup();
+    h.handlers.register('enso.clawbot', 'enso.clawbot:wechat', { ...CAPS, images: true });
+    h.handlers.setStatus('enso.clawbot', 'enso.clawbot:wechat', {
+      status: 'connected',
+      peers: ['wx-me'],
+    });
+    h.service.setChannelPrefs('enso.clawbot:wechat', { enabled: true, push: true });
+    const card = h.service.state().channels.find((item) => item.id === 'enso.clawbot:wechat');
+    expect(card?.caps).toMatchObject({ images: true, files: false });
+    const bytes = Buffer.from([1, 2, 3, 4]);
+    const sent = await h.service.sendMedia(null, {
+      kind: 'image',
+      path: '/tmp/a.png',
+      buffer: bytes,
+      fileName: 'a.png',
+      mimeType: 'image/png',
+      caption: '截图',
+    });
+    expect(sent).toEqual({
+      ok: true,
+      outcomes: [{ channelId: 'enso.clawbot:wechat', status: 'sent' }],
+    });
+    expect(h.calls).toContainEqual({
+      pluginId: 'enso.clawbot',
+      channelId: 'wechat',
+      op: 'sendImage',
+      peerId: 'wx-me',
+      data: bytes.toString('base64'),
+      fileName: 'a.png',
+      mimeType: 'image/png',
+      caption: '截图',
+    });
+    const fallback = await h.service.sendMedia(null, {
+      kind: 'file',
+      path: '/tmp/b.zip',
+      buffer: bytes,
+      fileName: 'b.zip',
+    });
+    expect(fallback.ok && fallback.outcomes[0]?.status).toBe('fallback');
+    const last = h.calls.at(-1) as { op: string; text: string };
+    expect(last.op).toBe('sendText');
+    expect(last.text).toContain('这个渠道发不了文件');
+    expect(last.text).toContain('/tmp/b.zip');
   });
 });

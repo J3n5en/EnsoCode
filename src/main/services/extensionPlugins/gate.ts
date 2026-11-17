@@ -29,6 +29,8 @@ import { pluginError } from './process';
 export const GESTURE_TTL_MS = 30_000;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_FETCH_BYTES = 5 * 1024 * 1024;
+/** 请求体上限：秘书发的媒体最大 10MB，加密补齐后略大 */
+const MAX_FETCH_BODY_BYTES = 16 * 1024 * 1024;
 const MAX_DRAFT_BYTES = 32 * 1024;
 const MAX_REDIRECTS = 5;
 const SENSITIVE_REQUEST_HEADERS = new Set([
@@ -51,7 +53,7 @@ const CONTACT_MAX_PEERS = 8;
 const CONTACT_STATUSES = new Set(['unconfigured', 'pending', 'connected', 'error']);
 const CONTACT_FORMATS = new Set(['html', 'markdown', 'plain']);
 
-/** 插件上报的渠道能力：每项必须给全，缺一项就不认 */
+/** 插件上报的渠道能力：每项必须给全，缺一项就不认；images / files 是后加的，缺省 false */
 export interface PluginContactCaps {
   buttons: boolean;
   urlButtons: boolean;
@@ -60,6 +62,8 @@ export interface PluginContactCaps {
   format: 'html' | 'markdown' | 'plain';
   maxChars: number;
   commandMenu: boolean;
+  images: boolean;
+  files: boolean;
 }
 
 export function parsePluginContactCaps(raw: unknown): PluginContactCaps | null {
@@ -67,6 +71,8 @@ export function parsePluginContactCaps(raw: unknown): PluginContactCaps | null {
   const v = raw as Record<string, unknown>;
   const flags = ['buttons', 'urlButtons', 'edit', 'typing', 'commandMenu'] as const;
   if (flags.some((key) => typeof v[key] !== 'boolean')) return null;
+  const media = ['images', 'files'] as const;
+  if (media.some((key) => v[key] !== undefined && typeof v[key] !== 'boolean')) return null;
   if (typeof v.format !== 'string' || !CONTACT_FORMATS.has(v.format)) return null;
   if (
     !Number.isInteger(v.maxChars) ||
@@ -82,6 +88,8 @@ export function parsePluginContactCaps(raw: unknown): PluginContactCaps | null {
     format: v.format as PluginContactCaps['format'],
     maxChars: v.maxChars as number,
     commandMenu: v.commandMenu as boolean,
+    images: v.images === true,
+    files: v.files === true,
   };
 }
 const VIEW_EVENT_PER_SECOND = 20;
@@ -1120,7 +1128,21 @@ export class PluginHostGate {
     if (isRecord(init.headers))
       for (const [k, v] of Object.entries(init.headers)) if (typeof v === 'string') headers[k] = v;
     const replayable = init.body === undefined || typeof init.body === 'string';
-    let body = typeof init.body === 'string' ? init.body : undefined;
+    const bodyEncoding = init.bodyEncoding ?? 'text';
+    if (bodyEncoding !== 'text' && bodyEncoding !== 'base64')
+      throw pluginError('INVALID_ARGS', 'bodyEncoding 只能是 text 或 base64');
+    // base64：插件上传二进制（加密后的图片、文件）时用，宿主解码成原始字节再发
+    let body: string | Uint8Array<ArrayBuffer> | undefined =
+      typeof init.body !== 'string'
+        ? undefined
+        : bodyEncoding === 'base64'
+          ? new Uint8Array(Buffer.from(init.body, 'base64'))
+          : init.body;
+    if (
+      body !== undefined &&
+      (typeof body === 'string' ? utf8Bytes(body) : body.length) > MAX_FETCH_BODY_BYTES
+    )
+      throw pluginError('TOO_LARGE', '请求体过大');
     const responseType = init.responseType ?? 'text';
     if (responseType !== 'text' && responseType !== 'base64')
       throw pluginError('INVALID_ARGS', 'responseType 只能是 text 或 base64');
