@@ -126,7 +126,7 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
     if (!response.ok) {
       const error =
         response.status === 404 && usesDefaultModelsList
-          ? 'This provider does not expose GET /models. Add models manually in the model center.'
+          ? 'GET /models returned 404: the provider may not support /models, or the Base URL may be wrong (e.g. missing /v1). If the Base URL is correct, add models manually in the model center.'
           : httpError(response);
       return { ok: false, models: [], error };
     }

@@ -821,12 +821,14 @@ describe('listModels 无模型列表服务商', () => {
     baseUrl: 'https://api.voyageai.com/v1',
   };
 
-  it('默认 GET /models 返回 404 时提示手动添加模型', async () => {
+  it('默认 GET /models 返回 404 时提示可能不支持或 Base URL 不对，再手动添加', async () => {
     net.fetch = vi.fn(async () => mockResponse(404, undefined, 'Not Found'));
     const result = await listModels(voyage);
     expect(result.ok).toBe(false);
     expect(result.models).toEqual([]);
-    expect(result.error).toContain('does not expose GET /models');
+    expect(result.error).toContain('may not support /models');
+    expect(result.error).toContain('Base URL may be wrong (e.g. missing /v1)');
+    expect(result.error).toContain('add models manually');
   });
 
   it('500 仍走原来的 httpError 文案', async () => {
