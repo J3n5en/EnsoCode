@@ -520,6 +520,7 @@ const electronAPI = {
       patch:
         | { enabled?: boolean; allowCardConfirm?: boolean; allowMemory?: boolean }
         | { channelId: string; prefs: Partial<SecretaryContactChannelPrefs> }
+        | { telegramGroup: { action: 'add' | 'remove'; chatId: string } }
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
     /** 手机关注的任务：取消一项或全清 */

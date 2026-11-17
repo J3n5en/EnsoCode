@@ -85,7 +85,14 @@ import {
 } from './channel';
 import type { TelegramApi } from './client';
 import type { ContactCommands } from './commands';
-import { type ContactStore, channelPrefs, TELEGRAM_CHANNEL_ID, withChannelPrefs } from './store';
+import {
+  type ContactStore,
+  channelPrefs,
+  TELEGRAM_CHANNEL_ID,
+  withChannelPrefs,
+  withTelegramGroupAdded,
+  withTelegramGroupRemoved,
+} from './store';
 import { TELEGRAM_CAPS, TelegramChannel } from './telegram';
 
 /** 界面按码翻译成自己的文案；这里只回稳定的错误码 */
@@ -98,7 +105,8 @@ export type ContactError =
   | 'not-bound'
   | 'not-found'
   | 'no-secretary'
-  | 'deliver-failed';
+  | 'deliver-failed'
+  | 'invalid-chat-id';
 
 export type ContactResult = { ok: true } | { ok: false; error: ContactError };
 
@@ -568,6 +576,23 @@ export class ContactService implements SecretaryContactPort {
   /** 记忆标题的开关：关掉时命令菜单里也不出现 /memory */
   setAllowMemory(value: boolean): void {
     this.setChannelPrefs(TELEGRAM_CHANNEL_ID, { memory: value === true });
+  }
+
+  /** Telegram 群白名单的增删：存在 contact.json，重复添加不算错 */
+  setTelegramGroup(action: 'add' | 'remove', chatId: unknown): ContactResult {
+    const file = this.store.file();
+    let next = file;
+    if (action === 'add') {
+      const added = withTelegramGroupAdded(file, chatId);
+      if (!added.ok) return { ok: false, error: 'invalid-chat-id' };
+      next = added.file;
+    } else {
+      next = withTelegramGroupRemoved(file, chatId);
+    }
+    this.store.save(next);
+    this.audit('contact_settings', true, `telegramGroups=${next.telegramGroups.length}`);
+    this.ports.publish();
+    return { ok: true };
   }
 
   /** 总开关：关掉后 Telegram 停止轮询，插件渠道不再路由 */

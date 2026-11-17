@@ -117,6 +117,16 @@ function readChannelPrefs(
   return Object.keys(prefs).length > 0 ? { channelId, prefs } : null;
 }
 
+/** Telegram 群白名单：{ telegramGroup: { action: 'add' | 'remove', chatId } } */
+function readTelegramGroup(request: unknown): { action: 'add' | 'remove'; chatId: string } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const raw = (request as Record<string, unknown>).telegramGroup;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const { action, chatId } = raw as Record<string, unknown>;
+  if ((action !== 'add' && action !== 'remove') || typeof chatId !== 'string') return null;
+  return { action, chatId };
+}
+
 /** 关注列表的操作：取消一项要带 id，全清不带 */
 function readFollowingRequest(
   request: unknown
@@ -306,6 +316,8 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
         if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
         const channel = readChannelPrefs(request);
         if (channel) return service.setChannelPrefs(channel.channelId, channel.prefs);
+        const group = readTelegramGroup(request);
+        if (group) return service.setTelegramGroup(group.action, group.chatId);
         const enabled = readFlag(request, 'enabled');
         const cards = readFlag(request, 'allowCardConfirm');
         const memory = readFlag(request, 'allowMemory');

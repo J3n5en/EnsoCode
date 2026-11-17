@@ -13,12 +13,14 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  Plus,
   RadioTower,
   RefreshCw,
   Search,
   Send,
   ShieldAlert,
   Unlink,
+  X,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
@@ -41,6 +43,7 @@ const ERROR_TEXT: Record<string, string> = {
   'not-found': 'That task is already gone',
   'no-secretary': 'No secretary conversation is available',
   'deliver-failed': 'Could not reach the secretary session',
+  'invalid-chat-id': 'Group chat IDs are numbers, e.g. -1001234567890',
   'invalid sender': 'Not allowed from this window',
 };
 
@@ -293,6 +296,7 @@ export function SecretaryContactPanel() {
   const [qr, setQr] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
   const [plugins, setPlugins] = useState<ExtensionPluginSummary[]>([]);
+  const [groupInput, setGroupInput] = useState('');
 
   useEffect(() => {
     const api = window.electronAPI.extensionPlugins;
@@ -365,6 +369,17 @@ export function SecretaryContactPanel() {
   const setPrefs = (channelId: string, prefs: Partial<SecretaryContactChannelPrefs>) =>
     run(() => window.electronAPI.secretary.contactSettings({ channelId, prefs }));
   const pollFailed = telegram.poll.state === 'error' || telegram.poll.state === 'backoff';
+  const groups = telegram.groups ?? [];
+  const groupDraft = groupInput.trim();
+  const setGroup = (action: 'add' | 'remove', chatId: string) =>
+    run(() =>
+      window.electronAPI.secretary
+        .contactSettings({ telegramGroup: { action, chatId } })
+        .then((result) => {
+          if (result.ok && action === 'add') setGroupInput('');
+          return result;
+        })
+    );
   const minutes = telegram.bind
     ? Math.max(0, Math.round((telegram.bind.expiresAt - Date.now()) / 60_000))
     : 0;
@@ -436,6 +451,85 @@ export function SecretaryContactPanel() {
                 {t('Change bot')}
               </button>
             </div>
+          </div>
+          <div data-enso="secretary-contact-groups" className={STEP_CLASS}>
+            <div className="text-[12px] font-medium text-muted-foreground">
+              {t('Allowed groups')}
+            </div>
+            <p className="mt-1 text-[11.5px] text-muted-foreground">
+              {t(
+                'Only groups on this list reach the secretary, and only messages from the bound account count. Messages from anyone else in the group are not received.'
+              )}
+            </p>
+            {groups.length === 0 ? (
+              <p className="mt-1.5 text-[11.5px] text-subtle-foreground">
+                {t('No groups yet: group messages are not received.')}
+              </p>
+            ) : (
+              <ul className="mt-1.5 flex flex-col gap-1">
+                {groups.map((group) => (
+                  <li
+                    key={group.id}
+                    data-enso="secretary-contact-group"
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[12px]">
+                      {group.title ? (
+                        <>
+                          {group.title}{' '}
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {group.id}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="font-mono text-[11.5px]">{group.id}</span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      data-enso="secretary-contact-group-remove"
+                      disabled={busy}
+                      aria-label={t('Remove {{name}}', { name: group.title ?? group.id })}
+                      className={BUTTON_CLASS}
+                      onClick={() => setGroup('remove', group.id)}
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form
+              className="mt-2 flex gap-1.5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!groupDraft) return;
+                if (groups.some((group) => group.id === groupDraft)) {
+                  setGroupInput('');
+                  return;
+                }
+                setGroup('add', groupDraft);
+              }}
+            >
+              <input
+                data-enso="secretary-contact-group-input"
+                value={groupInput}
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={t('Group chat ID, e.g. -1001234567890')}
+                onChange={(event) => setGroupInput(event.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-border bg-transparent px-2.5 py-1.5 font-mono text-[12px] outline-none focus:border-foreground/40"
+              />
+              <button
+                type="submit"
+                data-enso="secretary-contact-group-add"
+                disabled={busy || !groupDraft}
+                className={BUTTON_CLASS}
+              >
+                <Plus className="size-3.5" />
+                {t('Add group')}
+              </button>
+            </form>
           </div>
           <div
             data-enso="secretary-contact-sync"

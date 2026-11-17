@@ -43,7 +43,13 @@ import {
   type TelegramUpdate,
 } from './client';
 import { ContactPoller } from './poller';
-import { type ContactStore, TELEGRAM_CHANNEL_ID } from './store';
+import {
+  type ContactFile,
+  type ContactStore,
+  TELEGRAM_CHANNEL_ID,
+  telegramGroupAllowed,
+  withTelegramGroupTitle,
+} from './store';
 
 export const TELEGRAM_CAPS: ChannelCaps = {
   buttons: true,
@@ -127,20 +133,22 @@ function threadOf(topicId: string | undefined): { messageThreadId?: number } {
 
 /**
  * 只认绑定的那个人：私聊就是绑定的 chat（私聊 chat id 等于用户 id）；
- * 群里只放行他本人发的，别人发的一律不算。
+ * 群要在白名单里（空名单不收任何群），且只放行他本人发的。别人的一律静默丢掉。
  */
-function fromBoundUser(bound: number | undefined, message: TelegramMessage): boolean {
-  if (isBoundChat(bound, message.chat.id)) return true;
-  return (
-    chatTypeOf(message.chat.type) === 'group' &&
-    message.from !== undefined &&
-    isBoundChat(bound, message.from.id)
-  );
+function admitChat(
+  file: ContactFile,
+  chat: { id: number; type?: string },
+  fromId: number | undefined
+): 'ok' | 'foreign-chat' | 'group-not-allowed' | 'foreign-sender' {
+  if (isBoundChat(file.chat?.id, chat.id)) return 'ok';
+  if (chatTypeOf(chat.type) !== 'group') return 'foreign-chat';
+  if (!telegramGroupAllowed(file, chat.id)) return 'group-not-allowed';
+  return isBoundChat(file.chat?.id, fromId ?? Number.NaN) ? 'ok' : 'foreign-sender';
 }
 
 /**
  * 内置 Telegram 渠道：绑定向导、长轮询、HTML 切条与降级、按钮、改消息、命令菜单。
- * 只认绑定的那个人（私聊，或他本人在群里发的）；秘书语义（提问、确认卡、关注）全在核心里。
+ * 只认绑定的那个人（私聊，或他本人在白名单群里发的）；秘书语义（提问、确认卡、关注）全在核心里。
  */
 export class TelegramChannel implements ContactChannel {
   readonly id = TELEGRAM_CHANNEL_ID;
@@ -212,6 +220,10 @@ export class TelegramChannel implements ContactChannel {
       allowCardConfirm: file.allowCardConfirm,
       allowMemory: file.allowMemory,
       syncMirror: file.syncMirror,
+      groups: file.telegramGroups.map((id) => {
+        const title = file.telegramGroupTitles[id];
+        return title ? { id, title } : { id };
+      }),
       poll: this.poller.status(),
       secure: this.store.isSecure(),
     };
@@ -534,15 +546,13 @@ export class TelegramChannel implements ContactChannel {
     if (update.callback_query) {
       const query = update.callback_query;
       const chat = query.message?.chat;
-      // 群里的按钮只认绑定的那个人点
-      if (
-        file.chat &&
-        chat &&
-        !isBoundChat(file.chat.id, chat.id) &&
-        !isBoundChat(file.chat.id, query.from?.id ?? Number.NaN)
-      ) {
-        this.audit('contact_inbound_rejected', false, 'foreign-sender');
-        return;
+      // 群里的按钮：群在白名单里，且只认绑定的那个人点
+      if (file.chat && chat) {
+        const verdict = admitChat(file, chat, query.from?.id);
+        if (verdict !== 'ok') {
+          this.reject(verdict, chat.id);
+          return;
+        }
       }
       const peerId = String(chat?.id ?? file.chat?.id ?? query.from?.id ?? '');
       const topicId = query.message ? topicOf(query.message) : undefined;
@@ -589,12 +599,23 @@ export class TelegramChannel implements ContactChannel {
       return;
     }
 
-    if (!fromBoundUser(file.chat?.id, message)) {
-      this.audit('contact_inbound_rejected', false, 'foreign-chat');
+    const chatType = chatTypeOf(message.chat.type);
+    const verdict = admitChat(file, message.chat, message.from?.id);
+    // 认群用的标题：只记绑定的人或名单里的群发来的，陌生人拉的群不落盘
+    if (
+      chatType === 'group' &&
+      message.chat.title &&
+      (verdict !== 'group-not-allowed' ||
+        isBoundChat(file.chat?.id, message.from?.id ?? Number.NaN))
+    ) {
+      const titled = withTelegramGroupTitle(file, String(message.chat.id), message.chat.title);
+      if (titled) this.store.save(titled);
+    }
+    if (verdict !== 'ok') {
+      this.reject(verdict === 'foreign-sender' ? 'foreign-chat' : verdict, message.chat.id);
       return;
     }
     const topicId = topicOf(message);
-    const chatType = chatTypeOf(message.chat.type);
     const name = message.from?.username ?? message.from?.first_name;
     await this.ports.inbound({
       kind: 'text',
@@ -610,6 +631,18 @@ export class TelegramChannel implements ContactChannel {
       ...(name ? { name } : {}),
       ...(message.date ? { at: message.date * 1000 } : {}),
     });
+  }
+
+  /** 静默丢掉：不回话，只记审计；名单外的群带上 chatId，方便用户查到要加哪个 */
+  private reject(
+    reason: 'foreign-chat' | 'group-not-allowed' | 'foreign-sender',
+    chatId: number
+  ): void {
+    this.audit(
+      'contact_inbound_rejected',
+      false,
+      reason === 'group-not-allowed' ? `${reason} chat=${chatId}` : reason
+    );
   }
 
   private async completeBind(message: TelegramMessage): Promise<void> {
