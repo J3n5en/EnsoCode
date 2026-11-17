@@ -705,3 +705,93 @@ describe('normalizeRemoteProjectPath', () => {
     expect(normalizeRemoteProjectPath('/srv/./app')).toBeNull();
   });
 });
+
+describe('SourceAuthorityRegistry.moveConversation', () => {
+  const setup = () => {
+    const root = temporary();
+    const pathA = path.join(root, 'a');
+    const pathB = path.join(root, 'b');
+    mkdirSync(pathA);
+    mkdirSync(pathB);
+    const registryFile = path.join(root, 'registry.json');
+    const registry = new SourceAuthorityRegistry({ registryFile });
+    const projectA = registry.createProject({ requestId: 'a', path: pathA });
+    const projectB = registry.createProject({ requestId: 'b', path: pathB });
+    if (!projectA.accepted || !projectB.accepted) throw new Error('setup projects');
+    const conversation = registry.createConversation({
+      requestId: 'c',
+      projectId: projectA.value.projectId,
+      projectVersion: projectA.value.version,
+    });
+    if (!conversation.accepted) throw new Error('setup conversation');
+    return {
+      registryFile,
+      registry,
+      projectA: projectA.value,
+      projectB: projectB.value,
+      conversation: conversation.value,
+    };
+  };
+
+  it('moves a conversation to another active project and persists', () => {
+    const { registry, registryFile, projectB, conversation } = setup();
+    const moved = registry.moveConversation(conversation.conversationId, projectB.projectId);
+    expect(moved.accepted).toBe(true);
+    if (!moved.accepted) return;
+    expect(moved.value.projectId).toBe(projectB.projectId);
+    expect(moved.value.version).toBe(conversation.version + 1);
+    expect(
+      new SourceAuthorityRegistry({ registryFile }).conversation(conversation.conversationId)
+        ?.projectId
+    ).toBe(projectB.projectId);
+  });
+
+  it('rejects a missing target project', () => {
+    const { registry, conversation } = setup();
+    expect(
+      registry.moveConversation(conversation.conversationId, '99999999-9999-4999-8999-999999999999')
+    ).toEqual({ accepted: false, error: 'target-unavailable' });
+    expect(registry.conversation(conversation.conversationId)?.projectId).toBe(
+      conversation.projectId
+    );
+  });
+
+  it('rejects a scratch target', () => {
+    const { registry, conversation } = setup();
+    const scratch = registry.ensureScratchProject(path.join(temporary(), 'scratch'));
+    if (!scratch) throw new Error('setup scratch');
+    expect(registry.moveConversation(conversation.conversationId, scratch.projectId)).toEqual({
+      accepted: false,
+      error: 'target-scratch',
+    });
+    expect(registry.conversation(conversation.conversationId)?.projectId).toBe(
+      conversation.projectId
+    );
+  });
+
+  it('rejects a running conversation', () => {
+    const { registry, projectB, conversation } = setup();
+    expect(
+      registry.moveConversation(conversation.conversationId, projectB.projectId, { running: true })
+    ).toEqual({ accepted: false, error: 'running' });
+    expect(registry.conversation(conversation.conversationId)?.projectId).toBe(
+      conversation.projectId
+    );
+  });
+
+  it('is idempotent when source and target are the same', () => {
+    const { registry, projectA, conversation } = setup();
+    const moved = registry.moveConversation(conversation.conversationId, projectA.projectId);
+    expect(moved.accepted).toBe(true);
+    if (!moved.accepted) return;
+    expect(moved.value.projectId).toBe(projectA.projectId);
+    expect(moved.value.version).toBe(conversation.version);
+  });
+
+  it('rejects an unknown conversation', () => {
+    const { registry, projectB } = setup();
+    expect(
+      registry.moveConversation('99999999-9999-4999-8999-999999999999', projectB.projectId)
+    ).toEqual({ accepted: false, error: 'not-found' });
+  });
+});
