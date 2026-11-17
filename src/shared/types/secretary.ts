@@ -390,6 +390,11 @@ export interface DispatchRecord {
   model?: DispatchModelRef;
   /** 秘书停止的时间：after 依赖据此判定「被停止」 */
   stoppedAt?: number;
+  /**
+   * 用户从看板上移出：记录与会话都还在，只是不再上看板。
+   * 新结果、重新派出或手动标记完成都会清掉它。
+   */
+  dismissedFromBoard?: true;
   /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
   patrol?: { reason: PatrolReason; turn: number; at: number };
 }
@@ -631,6 +636,7 @@ export type SecretaryDailyGroupKey =
   | 'failed'
   | 'needsYou'
   | 'running'
+  | 'stopped'
   | 'todos'
   | 'changes';
 

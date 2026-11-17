@@ -13,6 +13,7 @@ import {
   Link2,
   Square,
   Undo2,
+  X,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { HoverActions } from '@/components/ui/hover-actions';
@@ -34,6 +35,7 @@ const COLUMNS: {
   stamp?: string;
 }[] = [
   { key: 'running', title: 'In progress', dot: '#3b82f6' },
+  { key: 'stopped', title: 'Stopped', dot: '#64748b', stamp: 'Stopped' },
   { key: 'needsYou', title: 'Needed you', dot: '#f59e0b', stamp: 'Needed you' },
   { key: 'done', title: 'What got done', dot: '#10b981', stamp: 'Completed' },
   { key: 'failed', title: 'Failed or interrupted', dot: '#ef4444', stamp: 'Failed' },
@@ -87,14 +89,10 @@ function DailyCard({
     item.doneAt !== undefined ? `${t('Done')} ${stampOf(item.doneAt, day, locale)}` : '',
     column.stamp ? `${t(column.stamp)} ${stampOf(item.at, day, locale)}` : '',
   ].filter(Boolean);
-  // 手动收口只对派发或接管跟踪的会话开放，普通会话不显示
-  const mark = !item.tracked
-    ? null
-    : item.manual && column.key === 'done'
-      ? 'undo'
-      : column.key === 'running'
-        ? 'done'
-        : null;
+  // 手动收口只对派发或接管跟踪的会话开放，普通会话不显示。
+  // 已停止的会话同时给「标记完成」和「移出」：一个收口成完成，一个只从看板上拿掉。
+  const mark = !item.tracked ? null : item.manual && column.key === 'done' ? 'undo' : null;
+  const settle = item.tracked && (column.key === 'running' || column.key === 'stopped');
   // 已完成但还有遗留任务：行内停掉，不自动杀，用户点了才动
   const stopLeftover = item.leftover && item.conversationId ? item.conversationId : null;
   return (
@@ -104,51 +102,64 @@ function DailyCard({
       data-done={done ? 'true' : undefined}
       className={cn(CARD_CLASS, 'group/row relative')}
     >
-      {(mark || stopLeftover) && (
+      {stopLeftover && (
         <HoverActions className="from-card">
-          {stopLeftover && (
+          <button
+            type="button"
+            data-enso="secretary-daily-stop-leftover"
+            title={t('Stop leftover tasks')}
+            aria-label={t('Stop leftover tasks')}
+            disabled={stopping}
+            onClick={() => {
+              setStopping(true);
+              void window.electronAPI.secretary
+                .stopTasks(stopLeftover)
+                .finally(() => setStopping(false));
+            }}
+            className={cn(ACTION_CLASS, 'hover:bg-destructive/10 hover:text-destructive')}
+          >
+            <Square className="h-3.5 w-3.5" />
+          </button>
+        </HoverActions>
+      )}
+      {(mark || settle) && (
+        <div data-enso="secretary-daily-actions" className="mb-1.5 flex items-center gap-1">
+          {(mark || settle) && (
             <button
               type="button"
-              data-enso="secretary-daily-stop-leftover"
-              title={t('Stop leftover tasks')}
-              aria-label={t('Stop leftover tasks')}
-              disabled={stopping}
-              onClick={() => {
-                setStopping(true);
-                void window.electronAPI.secretary
-                  .stopTasks(stopLeftover)
-                  .finally(() => setStopping(false));
-              }}
-              className={cn(ACTION_CLASS, 'hover:bg-destructive/10 hover:text-destructive')}
-            >
-              <Square className="h-3.5 w-3.5" />
-            </button>
-          )}
-          {mark && (
-            <button
-              type="button"
-              data-enso={
-                mark === 'done' ? 'secretary-daily-mark-done' : 'secretary-daily-mark-undo'
-              }
-              title={mark === 'done' ? t('Mark done') : t('Undo mark done')}
-              aria-label={mark === 'done' ? t('Mark done') : t('Undo mark done')}
+              data-enso={settle ? 'secretary-daily-mark-done' : 'secretary-daily-mark-undo'}
+              title={settle ? t('Mark done') : t('Undo mark done')}
+              aria-label={settle ? t('Mark done') : t('Undo mark done')}
               onClick={() => {
                 if (!item.conversationId) return;
-                void window.electronAPI.secretary.markResult(item.conversationId, mark);
+                void window.electronAPI.secretary.markResult(
+                  item.conversationId,
+                  settle ? 'done' : 'undo'
+                );
               }}
-              className={cn(
-                ACTION_CLASS,
-                mark === 'done' ? 'hover:bg-success/10 hover:text-success' : undefined
-              )}
+              className={cn(CHIP_CLASS, 'cursor-pointer hover:bg-foreground/10')}
             >
-              {mark === 'done' ? (
-                <Check className="h-3.5 w-3.5" />
-              ) : (
-                <Undo2 className="h-3.5 w-3.5" />
-              )}
+              {settle ? <Check className="size-[11px]" /> : <Undo2 className="size-[11px]" />}
+              <span>{settle ? t('Mark done') : t('Undo mark done')}</span>
             </button>
           )}
-        </HoverActions>
+          {settle && (
+            <button
+              type="button"
+              data-enso="secretary-daily-dismiss"
+              title={t('Move off the board')}
+              aria-label={t('Move off the board')}
+              onClick={() => {
+                if (!item.conversationId) return;
+                void window.electronAPI.secretary.markResult(item.conversationId, 'dismiss');
+              }}
+              className={cn(CHIP_CLASS, 'cursor-pointer hover:bg-foreground/10')}
+            >
+              <X className="size-[11px]" />
+              <span>{t('Move off the board')}</span>
+            </button>
+          )}
+        </div>
       )}
       <button
         type="button"

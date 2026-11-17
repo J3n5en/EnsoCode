@@ -409,7 +409,7 @@ const electronAPI = {
     /** 用户手动把一条派发记录标记完成，或撤销这个标记放回进行中 */
     markResult: (
       conversationId: string,
-      action: 'done' | 'undo'
+      action: 'done' | 'undo' | 'dismiss'
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_MARK_RESULT, { conversationId, action }),
     /** 看板「停止遗留任务」：停掉这条派发记录里还在跑的后台任务 */

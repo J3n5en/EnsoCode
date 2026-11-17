@@ -585,6 +585,9 @@ async function noteDispatchResumed(
   if (record.lastState !== 'running') record.stateSince = now;
   record.lastState = 'running';
   record.lastEventAt = now;
+  // 重新派活就是重新开始：上一次的停止与移出都不再生效
+  delete record.stoppedAt;
+  delete record.dismissedFromBoard;
   // 已经有终态结果的会话被重新唤起：这一轮结束前仍算在跑，结束后回到原来的终态
   if (record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)) record.reopenedAt = now;
   ports.saveDispatch(file);
@@ -1537,13 +1540,21 @@ function markResultOp(
   const { conversationId } = fields.value;
   const result = markResult(ports, conversationId, action, 'secretary');
   if (!result.ok) {
-    const op = action === 'done' ? 'result_mark_done' : 'result_mark_undo';
+    const op =
+      action === 'done'
+        ? 'result_mark_done'
+        : action === 'undo'
+          ? 'result_mark_undo'
+          : 'result_dismiss_board';
     auditFailure(ports, ctx, op, result.error, conversationId);
     return { ok: false, error: MARK_REFUSALS[result.error] ?? result.error };
   }
   return {
     ok: true,
-    result: { status: action === 'done' ? 'marked-done' : 'undone', conversationId },
+    result: {
+      status: action === 'done' ? 'marked-done' : action === 'undo' ? 'undone' : 'dismissed',
+      conversationId,
+    },
   };
 }
 
@@ -2447,7 +2458,7 @@ export type TodoMutateResult = { ok: true; todoId: string } | { ok: false; error
 
 export type DismissResultResult = { ok: true } | { ok: false; error: string };
 
-export type MarkResultAction = 'done' | 'undo';
+export type MarkResultAction = 'done' | 'undo' | 'dismiss';
 
 export type MarkResultResult = { ok: true } | { ok: false; error: string };
 
@@ -2468,7 +2479,12 @@ export function markResult(
   const record = file.dispatched[conversationId];
   if (!record) return { ok: false, error: 'not-found' };
   const now = ports.now();
-  const op = action === 'done' ? 'result_mark_done' : 'result_mark_undo';
+  const op =
+    action === 'done'
+      ? 'result_mark_done'
+      : action === 'undo'
+        ? 'result_mark_undo'
+        : 'result_dismiss_board';
   if (action === 'done') {
     record.lastResult = { kind: 'goal-complete', turn: record.turn, at: now, manual: true };
     if (record.lastState !== 'idle') record.stateSince = now;
@@ -2478,6 +2494,16 @@ export function markResult(
     delete record.leftoverTasks;
     delete record.reopenedAt;
     delete record.manualUndoneAt;
+    delete record.dismissedFromBoard;
+  } else if (action === 'dismiss') {
+    // 移出只动看板记录：不标完成，不碰会话与历史
+    if (record.lastState !== 'idle') record.stateSince = now;
+    record.lastState = 'idle';
+    record.dismissedFromBoard = true;
+    delete record.backgroundRunning;
+    delete record.backgroundPersistent;
+    delete record.reopenedAt;
+    delete record.manualUndoneAt;
   } else {
     // 只撤销用户自己标的完成：会话给出的结果不能被界面抹掉
     if (record.lastResult?.manual !== true) return { ok: false, error: 'not-manual' };
@@ -2485,6 +2511,7 @@ export function markResult(
     if (record.lastState !== 'running') record.stateSince = now;
     record.lastState = 'running';
     record.manualUndoneAt = now;
+    delete record.dismissedFromBoard;
   }
   ports.saveDispatch(file);
   ports.audit({
