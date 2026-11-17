@@ -3,18 +3,24 @@ import type { SecretaryContactCaps, SecretaryContactChannelStatus } from '@share
 /** 渠道能力：核心按它决定画按钮、改旧消息还是降级成编号文本 */
 export type ChannelCaps = SecretaryContactCaps;
 
-/** 一个联系人：渠道 id 加渠道内的对端 id（一律字符串） */
+/** 一个联系人：渠道 id 加渠道内的会话 id（私聊或群，一律字符串）；群里的论坛话题另算一个 */
 export interface Peer {
   channelId: string;
   peerId: string;
+  /** 论坛话题：回复要回到同一个话题 */
+  topicId?: string;
 }
 
 export function peerKey(peer: Peer): string {
-  return `${peer.channelId}\u0000${peer.peerId}`;
+  return `${peer.channelId}\u0000${peer.peerId}\u0000${peer.topicId ?? ''}`;
 }
 
 export function samePeer(left: Peer, right: Peer): boolean {
-  return left.channelId === right.channelId && left.peerId === right.peerId;
+  return (
+    left.channelId === right.channelId &&
+    left.peerId === right.peerId &&
+    (left.topicId ?? '') === (right.topicId ?? '')
+  );
 }
 
 /** 回调按钮带 data，链接按钮带 url；渠道不支持就由核心降级成文本 */
@@ -42,20 +48,21 @@ export type ChannelSettle =
 /**
  * 语义接口：核心只说「发一条提问」「这张卡收尾了」，怎么画由渠道决定。
  * 能力缺失时核心不会调用对应方法（edit=false 不调 settle/edit，typing=false 不调 typing）。
+ * topicId 只有论坛话题才带；不认识话题的渠道忽略它。
  */
 export interface ContactChannel {
   readonly id: string;
   caps(): ChannelCaps;
-  sendText(peerId: string, message: ChannelMessage): Promise<ChannelSend>;
-  ask(peerId: string, message: ChannelMessage): Promise<ChannelSend>;
-  confirmCards(peerId: string, message: ChannelMessage): Promise<ChannelSend>;
-  approvalNotice(peerId: string, message: ChannelMessage): Promise<ChannelSend>;
+  sendText(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend>;
+  ask(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend>;
+  confirmCards(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend>;
+  approvalNotice(peerId: string, message: ChannelMessage, topicId?: string): Promise<ChannelSend>;
   /** 收尾：整条换成 text 并清掉按钮；只在 caps.edit 时调用 */
   settle(peerId: string, messageId: string, text: string): Promise<ChannelSettle>;
   /** 原地重画（翻页、关注列表）；只在 caps.edit 时调用 */
   edit?(peerId: string, messageId: string, message: ChannelMessage): Promise<ChannelResult>;
   /** 「正在输入…」；只在 caps.typing 时调用 */
-  typing(peerId: string): Promise<ChannelResult>;
+  typing(peerId: string, topicId?: string): Promise<ChannelResult>;
   /** 命令菜单；null 表示清掉 */
   setCommands?(
     peerId: string,
@@ -63,9 +70,23 @@ export interface ContactChannel {
   ): Promise<void>;
 }
 
-/** 渠道回调：一句话，或点了按钮（提问选项、确认卡、翻页、关注） */
+/**
+ * 渠道回调：一句话，或点了按钮（提问选项、确认卡、翻页、关注）。
+ * 一句话的会话 id 是 peer.peerId、话题是 peer.topicId；发送者 id 渠道有就必须带。
+ */
 export type ChannelInbound =
-  | { kind: 'text'; peer: Peer; text: string; name?: string; at?: number }
+  | {
+      kind: 'text';
+      peer: Peer;
+      text: string;
+      /** 渠道没给类型就不填，不猜成群 */
+      chatType?: 'private' | 'group';
+      chatTitle?: string;
+      senderId?: string;
+      /** 发送者名字 */
+      name?: string;
+      at?: number;
+    }
   | {
       kind: 'action';
       peer: Peer;

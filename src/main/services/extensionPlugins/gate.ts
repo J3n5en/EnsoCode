@@ -210,7 +210,15 @@ export interface GateDeps {
     inbound(
       pluginId: string,
       channelId: string,
-      input: { peerId: string; text: string; name?: string; at?: number }
+      input: {
+        peerId: string;
+        text: string;
+        senderId?: string;
+        chatType?: 'private' | 'group';
+        chatTitle?: string;
+        name?: string;
+        at?: number;
+      }
     ): void;
     setStatus(
       pluginId: string,
@@ -860,12 +868,29 @@ export class PluginHostGate {
             (typeof a.name !== 'string' || a.name.length > CONTACT_NAME_MAX)
           )
             throw pluginError('INVALID_ARGS', 'name 不合法');
+          const senderId = a.senderId;
+          if (
+            senderId !== undefined &&
+            (typeof senderId !== 'string' || !senderId || senderId.length > CONTACT_PEER_MAX)
+          )
+            throw pluginError('INVALID_ARGS', 'senderId 不合法');
+          const chatType = a.chatType;
+          if (chatType !== undefined && chatType !== 'private' && chatType !== 'group')
+            throw pluginError('INVALID_ARGS', 'chatType 只能是 private 或 group');
+          if (
+            a.chatTitle !== undefined &&
+            (typeof a.chatTitle !== 'string' || a.chatTitle.length > CONTACT_NAME_MAX)
+          )
+            throw pluginError('INVALID_ARGS', 'chatTitle 不合法');
           if (a.at !== undefined && (typeof a.at !== 'number' || !Number.isFinite(a.at)))
             throw pluginError('INVALID_ARGS', 'at 不合法');
           this.admitContact(pluginId);
           contact.inbound(pluginId, channelId, {
             peerId,
             text: a.text,
+            ...(senderId ? { senderId } : {}),
+            ...(chatType ? { chatType } : {}),
+            ...(typeof a.chatTitle === 'string' && a.chatTitle ? { chatTitle: a.chatTitle } : {}),
             ...(typeof a.name === 'string' && a.name ? { name: a.name } : {}),
             ...(typeof a.at === 'number' ? { at: a.at } : {}),
           });

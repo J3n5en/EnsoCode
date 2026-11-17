@@ -30,7 +30,7 @@ describe('TelegramInboundCard', () => {
   it('显示发送者与时间，默认收起', () => {
     const html = render(
       wrapInboundMessage(TELEGRAM_INBOUND, 'zh', {
-        username: '@jas0n_Ng',
+        senderName: '@jas0n_Ng',
         at: new Date(2026, 4, 20, 14, 32).getTime(),
         text: '现在你还缺少什么能力呢？',
       })
@@ -46,7 +46,7 @@ describe('TelegramInboundCard', () => {
   it('正文按 markdown 渲染，不露包裹层与标签', () => {
     const html = render(
       wrapInboundMessage(TELEGRAM_INBOUND, 'zh', {
-        username: '@j3n5en',
+        senderName: '@j3n5en',
         text: '**重点**\n\n- 第一条\n- 第二条',
       })
     );
