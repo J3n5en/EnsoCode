@@ -12,6 +12,7 @@ import { useSidePanelStore } from '@/stores/sidePanel';
 import { resolveSidePanelDockConversationId } from './sidePanelDockId';
 
 const docks = new Map<string, DockviewApi>();
+const dockRemoveDisposers = new Map<string, { dispose: () => void }>();
 const filesTabClosers = new Map<string, () => boolean>();
 type FileTarget = [rel: string, line?: number, viewer?: 'text' | 'markdown'];
 const filesOpeners = new Map<string, (...target: FileTarget) => void>();
@@ -70,6 +71,29 @@ export function registerFilesOpener(
   return () => {
     if (filesOpeners.get(conversationId) === open) filesOpeners.delete(conversationId);
   };
+}
+
+/** 关掉最后一个 tab 时收起侧栏；须在 fromJSON 恢复布局之后挂，否则恢复时清空 dock 会误收起 */
+export function watchSidePanelAutoCollapse(conversationId: string, api: DockviewApi): void {
+  dockRemoveDisposers.get(conversationId)?.dispose();
+  dockRemoveDisposers.set(
+    conversationId,
+    api.onDidRemovePanel(() => {
+      if (api.panels.length !== 0) return;
+      if (useSidePanelStore.getState().uiByConversation[conversationId]?.open !== true) return;
+      useSidePanelStore.setState((state) => {
+        const ui = state.uiByConversation[conversationId];
+        return ui?.open
+          ? {
+              uiByConversation: {
+                ...state.uiByConversation,
+                [conversationId]: { ...ui, open: false },
+              },
+            }
+          : {};
+      });
+    })
+  );
 }
 
 export function bindSidePanelDock(conversationId: string, api: DockviewApi): void {
@@ -415,6 +439,8 @@ export function closeSidePanelBrowser(conversationId: string, tabId: string): vo
 export function disposeConversationResources(conversationId: string): void {
   const api = docks.get(conversationId);
   docks.delete(conversationId);
+  dockRemoveDisposers.get(conversationId)?.dispose();
+  dockRemoveDisposers.delete(conversationId);
   filesTabClosers.delete(conversationId);
   filesOpeners.delete(conversationId);
   pendingFileOpens.delete(conversationId);

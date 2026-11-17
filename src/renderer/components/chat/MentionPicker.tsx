@@ -1,5 +1,5 @@
 import type { MentionCandidate } from '@shared/types/mentions';
-import { Bot, ChevronRight, FileText, Folder, History, Users } from 'lucide-react';
+import { Bot, ChevronLeft, ChevronRight, FileText, Folder, History, Users } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -7,6 +7,7 @@ import {
   type MentionFolderId,
   type MentionSearchGroups,
 } from '@/hooks/useMentionSearch';
+import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { distinguishingPathLabels } from './mentionPathLabel';
@@ -43,6 +44,7 @@ export function MentionPicker({
   flyoutSide = 'right',
 }: MentionPickerProps) {
   const { t } = useI18n();
+  const isMobile = useIsMobile();
   const items = useMemo(() => flattenMentionRoot(groups, query), [groups, query]);
   const filePathLabels = useMemo(
     () => distinguishingPathLabels(groups.files.map((file) => file.relativePath)),
@@ -70,6 +72,39 @@ export function MentionPicker({
   const folderIcons: Record<FolderId, typeof Bot> = { agents: Bot, members: Users, chats: History };
   const folderItems = openFolderId ? groups[openFolderId] : [];
   let flatIndex = 0;
+
+  const renderFolderItems = () =>
+    folderItems.map((candidate, index) => (
+      <MentionOption
+        key={`sub:${candidate.id}`}
+        ref={(node) => {
+          if (node) subRefs.current.set(index, node);
+          else subRefs.current.delete(index);
+        }}
+        id={`${id}-sub-${index}`}
+        candidate={candidate}
+        active={index === folderIndex}
+        onHover={() => onFolderIndexChange(index)}
+        onSelect={() => onSelect(candidate)}
+      />
+    ));
+
+  const showMobileFolder = Boolean(isMobile && openFolderId && folderItems.length > 0);
+
+  const renderMobileFolder = (folderId: FolderId) => (
+    <>
+      <button
+        type="button"
+        data-slot="mention-sheet-back"
+        onClick={() => onOpenFolderIdChange(null)}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
+      >
+        <ChevronLeft className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 font-medium">{folderLabels[folderId]}</span>
+      </button>
+      {renderFolderItems()}
+    </>
+  );
 
   const renderGroup = (group: FolderId | 'files', pad: boolean) => {
     const candidates = groups[group];
@@ -115,16 +150,26 @@ export function MentionPicker({
   return (
     <div
       data-slot="mention-picker"
-      className="absolute bottom-full z-10 mb-1.5 max-w-full"
-      style={{ left }}
+      className={
+        isMobile
+          ? 'absolute inset-x-0 bottom-full z-10 mb-1.5 w-full'
+          : 'absolute bottom-full z-10 mb-1.5 max-w-full'
+      }
+      style={isMobile ? undefined : { left }}
     >
       <div
         id={id}
         role="listbox"
         aria-label={t('Mention suggestions')}
-        className="max-h-72 w-80 max-w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
+        className={
+          isMobile
+            ? 'max-h-[50dvh] w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md'
+            : 'max-h-72 w-80 max-w-full overflow-y-auto rounded-lg border bg-popover p-1 shadow-md'
+        }
       >
-        {nested ? (
+        {showMobileFolder && openFolderId ? (
+          renderMobileFolder(openFolderId)
+        ) : nested ? (
           <>
             {items
               .filter((item): item is { type: 'folder'; id: FolderId } => item.type === 'folder')
@@ -149,7 +194,7 @@ export function MentionPicker({
                     }}
                     onMouseMove={() => {
                       onActiveIndexChange(index);
-                      if (openFolderId !== folder.id) {
+                      if (!isMobile && openFolderId !== folder.id) {
                         onOpenFolderIdChange(folder.id);
                         onFolderIndexChange(0);
                       }
@@ -181,7 +226,7 @@ export function MentionPicker({
           </>
         )}
       </div>
-      {openFolderId && folderItems.length > 0 && (
+      {!isMobile && openFolderId && folderItems.length > 0 && (
         <div
           role="listbox"
           aria-label={folderLabels[openFolderId]}
@@ -191,20 +236,7 @@ export function MentionPicker({
             flyoutSide === 'right' ? 'left-full ml-1' : 'right-full mr-1'
           )}
         >
-          {folderItems.map((candidate, index) => (
-            <MentionOption
-              key={`sub:${candidate.id}`}
-              ref={(node) => {
-                if (node) subRefs.current.set(index, node);
-                else subRefs.current.delete(index);
-              }}
-              id={`${id}-sub-${index}`}
-              candidate={candidate}
-              active={index === folderIndex}
-              onHover={() => onFolderIndexChange(index)}
-              onSelect={() => onSelect(candidate)}
-            />
-          ))}
+          {renderFolderItems()}
         </div>
       )}
     </div>

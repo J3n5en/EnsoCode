@@ -54,6 +54,7 @@ import {
   disposeConversationResources,
   selectIsSecretaryProject,
   selectWorkflowAvailable,
+  watchSidePanelAutoCollapse,
 } from '@/lib/sidePanelDock';
 import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
@@ -884,6 +885,7 @@ function ConversationDock({
         ignoreEmptySave = true;
       }
     }
+    watchSidePanelAutoCollapse(conversationId, event.api);
     event.api.onDidLayoutChange(() => {
       const json = event.api.toJSON();
       if (ignoreEmptySave && Object.keys(json.panels ?? {}).length === 0) return;
