@@ -1,5 +1,80 @@
-import { describe, expect, it } from 'vitest';
+import type { DockviewApi } from 'dockview-react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveSidePanelDockConversationId } from './sidePanelDockId';
+
+const harness = vi.hoisted(() => ({
+  uiByConversation: {} as Record<string, { open: boolean; width: number }>,
+  setStateCalls: 0,
+}));
+
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: { getState: () => ({ activeId: 'dock', conversations: {} }) },
+}));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: { getState: () => ({ disabledBuiltinTools: [], projects: [] }) },
+}));
+vi.mock('@/stores/sidePanel', () => ({
+  useSidePanelStore: {
+    getState: () => ({
+      uiByConversation: harness.uiByConversation,
+      ensureOpen: vi.fn(),
+      forgetConversation: vi.fn(),
+    }),
+    setState: (
+      updater: (state: { uiByConversation: typeof harness.uiByConversation }) => {
+        uiByConversation?: typeof harness.uiByConversation;
+      }
+    ) => {
+      harness.setStateCalls += 1;
+      const next = updater({ uiByConversation: harness.uiByConversation });
+      if (next.uiByConversation) harness.uiByConversation = next.uiByConversation;
+    },
+  },
+}));
+vi.mock('@/lib/terminalRegistry', () => ({ releaseTerminal: vi.fn() }));
+
+import {
+  bindSidePanelDock,
+  disposeConversationResources,
+  watchSidePanelAutoCollapse,
+} from './sidePanelDock';
+
+function fakeDock() {
+  const panels: { id: string }[] = [];
+  const listeners = new Set<(panel: { id: string }) => void>();
+  const api = {
+    panels,
+    getPanel: (id: string) => panels.find((panel) => panel.id === id),
+    addPanel: (opts: { id: string }) => {
+      panels.push({ id: opts.id });
+    },
+    onDidRemovePanel: (listener: (panel: { id: string }) => void) => {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+  };
+  return {
+    api: api as unknown as DockviewApi,
+    add: (id: string) => {
+      panels.push({ id });
+    },
+    remove: (id: string) => {
+      const index = panels.findIndex((panel) => panel.id === id);
+      if (index < 0) return;
+      const [panel] = panels.splice(index, 1);
+      for (const listener of listeners) listener(panel);
+    },
+    /** 模拟 dockview fromJSON：先清空现有 panel（逐个触发 remove），再建已存布局里的 */
+    restore: (ids: string[]) => {
+      while (panels.length > 0) {
+        const [panel] = panels.splice(0, 1);
+        for (const listener of listeners) listener(panel);
+      }
+      for (const id of ids) panels.push({ id });
+    },
+    listenerCount: () => listeners.size,
+  };
+}
 
 describe('resolveSidePanelDockConversationId', () => {
   it('普通会话用自身 id', () => {
@@ -20,5 +95,86 @@ describe('resolveSidePanelDockConversationId', () => {
 
   it('未知会话保持原 id', () => {
     expect(resolveSidePanelDockConversationId({}, 'missing')).toBe('missing');
+  });
+});
+
+describe('watchSidePanelAutoCollapse 关完最后一个 tab 收起侧栏', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', {});
+    disposeConversationResources('dock');
+    harness.uiByConversation = { dock: { open: true, width: 400 } };
+    harness.setStateCalls = 0;
+  });
+
+  it('还有其他 panel 时关掉一个，open 仍为 true', () => {
+    const dock = fakeDock();
+    dock.add('files');
+    dock.add('terminal');
+    bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
+    harness.setStateCalls = 0;
+
+    dock.remove('terminal');
+
+    expect(harness.uiByConversation.dock.open).toBe(true);
+    expect(harness.setStateCalls).toBe(0);
+  });
+
+  it('关掉最后一个 panel 后 open 变为 false', () => {
+    const dock = fakeDock();
+    dock.add('files');
+    bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
+    harness.setStateCalls = 0;
+
+    dock.remove('files');
+
+    expect(harness.uiByConversation.dock.open).toBe(false);
+    expect(harness.setStateCalls).toBe(1);
+  });
+
+  it('已经收起时关掉最后一个 panel 不产生多余 setState', () => {
+    harness.uiByConversation = { dock: { open: false, width: 400 } };
+    const dock = fakeDock();
+    dock.add('files');
+    bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
+    harness.setStateCalls = 0;
+
+    dock.remove('files');
+
+    expect(harness.uiByConversation.dock.open).toBe(false);
+    expect(harness.setStateCalls).toBe(0);
+  });
+
+  it('解绑后不再响应 panel 移除', () => {
+    const dock = fakeDock();
+    dock.add('files');
+    bindSidePanelDock('dock', dock.api);
+    watchSidePanelAutoCollapse('dock', dock.api);
+    disposeConversationResources('dock');
+    harness.uiByConversation = { dock: { open: true, width: 400 } };
+    harness.setStateCalls = 0;
+
+    dock.remove('files');
+
+    expect(harness.uiByConversation.dock.open).toBe(true);
+    expect(harness.setStateCalls).toBe(0);
+    expect(dock.listenerCount()).toBe(0);
+  });
+
+  it('先补建面板、再恢复已存布局，侧栏保持打开；之后用户关掉最后一个 tab 仍收起', () => {
+    const dock = fakeDock();
+    bindSidePanelDock('dock', dock.api);
+    dock.add('browser:pending');
+    dock.restore(['files']);
+    watchSidePanelAutoCollapse('dock', dock.api);
+
+    expect(harness.uiByConversation.dock.open).toBe(true);
+    expect(harness.setStateCalls).toBe(0);
+
+    dock.remove('files');
+
+    expect(harness.uiByConversation.dock.open).toBe(false);
   });
 });

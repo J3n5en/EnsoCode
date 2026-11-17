@@ -46,6 +46,43 @@ export function remoteEmbeddingCandidates<P extends ModelProvider>(providers: re
   });
 }
 
+export type RemoteEmbeddingRejection = 'no-api-key' | 'no-base-url' | 'no-embedding-models';
+
+/** 被候选过滤掉、但有 apiKey 或 baseUrl 痕迹的服务商；完全空配置不列。 */
+export function explainRemoteEmbeddingRejections(
+  providers: readonly (Pick<ModelProvider, 'id' | 'name' | 'apiKey' | 'baseUrl'> & {
+    models?: readonly Pick<ModelEntry, 'id'>[];
+  })[]
+): { providerId: string; name: string; reason: RemoteEmbeddingRejection }[] {
+  const rejected: { providerId: string; name: string; reason: RemoteEmbeddingRejection }[] = [];
+  for (const provider of providers) {
+    const hasApiKey = Boolean(provider.apiKey);
+    const hasBaseUrl = typeof provider.baseUrl === 'string' && Boolean(provider.baseUrl.trim());
+    if (!hasApiKey && !hasBaseUrl) continue;
+    let reason: RemoteEmbeddingRejection | null = null;
+    if (!hasApiKey) reason = 'no-api-key';
+    else if (!hasBaseUrl) reason = 'no-base-url';
+    else if (embeddingModelsOf(provider).length === 0) reason = 'no-embedding-models';
+    if (reason) rejected.push({ providerId: provider.id, name: provider.name, reason });
+  }
+  return rejected;
+}
+
+export const REMOTE_EMBEDDING_REJECTION_KEYS: Record<RemoteEmbeddingRejection, string> = {
+  'no-api-key': '{{name}}: missing API key',
+  'no-base-url': '{{name}}: missing Base URL',
+  'no-embedding-models':
+    '{{name}}: no matching embedding model (model names must contain keywords like embed/voyage/bge)',
+};
+
+export function remoteEmbeddingRejectionMessage(
+  reason: RemoteEmbeddingRejection,
+  name: string,
+  t: (key: string, params?: Record<string, string>) => string
+): string {
+  return t(REMOTE_EMBEDDING_REJECTION_KEYS[reason], { name });
+}
+
 /** provider 为 undefined 表示 providerId 在设置里找不到（已删除） */
 export function remoteEmbeddingIssue(input: {
   providerId: string | null;

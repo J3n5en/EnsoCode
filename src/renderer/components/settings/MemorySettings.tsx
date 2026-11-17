@@ -14,10 +14,12 @@ import type {
 } from '@shared/memory/dto';
 import { MEMORY_MODEL_IDLE_MINUTES } from '@shared/memory/modelIdle';
 import {
+  explainRemoteEmbeddingRejections,
   NO_REMOTE_EMBEDDING_CANDIDATES,
   remoteEmbeddingCandidates,
   remoteEmbeddingIssue,
   remoteEmbeddingIssueMessage,
+  remoteEmbeddingRejectionMessage,
 } from '@shared/memory/remoteEmbedding';
 import * as React from 'react';
 import { MODEL_PICKER_FORM_TRIGGER_CLASS, ModelPicker } from '@/components/chat/ModelPicker';
@@ -303,6 +305,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const remoteEmbeddingModel = remoteEmbeddingModelId(embeddingModel);
   const embeddingCandidates = React.useMemo(
     () => remoteEmbeddingCandidates(modelCandidates),
+    [modelCandidates]
+  );
+  const embeddingRejections = React.useMemo(
+    () => explainRemoteEmbeddingRejections(modelCandidates),
     [modelCandidates]
   );
   const embeddingProvider = remoteProviderId
@@ -724,9 +730,14 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
                 />
               </div>
             ) : (
-              <p className="w-56 shrink-0 text-xs text-destructive">
-                {t(NO_REMOTE_EMBEDDING_CANDIDATES)}
-              </p>
+              <div className="w-56 shrink-0 space-y-1">
+                <p className="text-xs text-destructive">{t(NO_REMOTE_EMBEDDING_CANDIDATES)}</p>
+                {embeddingRejections.map((item) => (
+                  <p key={item.providerId} className="text-xs text-muted-foreground">
+                    {remoteEmbeddingRejectionMessage(item.reason, item.name, t)}
+                  </p>
+                ))}
+              </div>
             )}
           </div>
         )}
