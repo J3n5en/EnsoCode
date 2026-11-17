@@ -12,6 +12,7 @@ vi.mock('@/stores/sessions', () => ({
 }));
 
 import {
+  canMoveConversationFrom,
   conversationMoveErrorTitle,
   moveConversationFromMenu,
   moveConversationTargets,
@@ -34,11 +35,24 @@ describe('moveConversationTargets', () => {
   it('keeps every non-reserved project when moving a scratch session', () => {
     expect(moveConversationTargets([local, scratch, secretary], 'scratch')).toEqual([local]);
   });
+
+  it('offers no target for a secretary conversation', () => {
+    expect(canMoveConversationFrom([local, secretary], 'sec')).toBe(false);
+    expect(moveConversationTargets([local, other, secretary], 'sec')).toEqual([]);
+    expect(canMoveConversationFrom([local, secretary], 'local')).toBe(true);
+    expect(canMoveConversationFrom([local, scratch], 'scratch')).toBe(true);
+  });
 });
 
 describe('conversationMoveErrorTitle', () => {
   it('uses a specific title for a running session', () => {
     expect(conversationMoveErrorTitle('running')).toBe('Cannot move a running conversation');
+    expect(conversationMoveErrorTitle('worktree-busy')).toBe(
+      'Cannot move while its worktree is in use'
+    );
+    expect(conversationMoveErrorTitle('source-secretary')).toBe(
+      'Secretary conversations cannot be moved'
+    );
     expect(conversationMoveErrorTitle('not-found')).toBe('Failed to move conversation');
   });
 });
@@ -56,27 +70,29 @@ describe('moveConversationFromMenu', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('sends identifiers to Main and updates local projectId', async () => {
-    mocks.setState.mockImplementation(
-      (
-        fn: (state: {
-          conversations: Record<string, { projectId: string; parentId?: string }>;
-        }) => unknown
-      ) => {
-        fn({
-          conversations: {
-            c1: { projectId: 'p1' },
-            child: { projectId: 'p1', parentId: 'c1' },
-          },
-        });
-      }
-    );
+  it('sends identifiers to Main, updates local projectId and drops the worktree binding', async () => {
+    let next: unknown;
+    mocks.setState.mockImplementation((fn: (state: unknown) => unknown) => {
+      next = fn({
+        conversations: {
+          c1: { projectId: 'p1', worktree: { path: '/wt' }, worktreeMissing: true },
+          child: { projectId: 'p1', parentId: 'c1' },
+        },
+        worktreeStatuses: { c1: { exists: true }, other: { exists: true } },
+      });
+    });
     await moveConversationFromMenu('c1', 'p2', (s) => s);
     expect(mocks.moveConversation).toHaveBeenCalledWith({
       conversationId: 'c1',
       targetProjectId: 'p2',
     });
-    expect(mocks.setState).toHaveBeenCalled();
+    expect(next).toEqual({
+      conversations: {
+        c1: { projectId: 'p2', worktree: undefined, worktreeMissing: undefined },
+        child: { projectId: 'p2', parentId: 'c1' },
+      },
+      worktreeStatuses: { other: { exists: true } },
+    });
     expect(mocks.addToast).not.toHaveBeenCalled();
   });
 

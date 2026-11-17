@@ -81,11 +81,15 @@ export function removeConversationSessionFiles(
       rmSync(path.join(pendingRoot, entry), { force: true });
     } catch {}
   }
-  if (!options.scratchRoot) return;
+  if (options.scratchRoot) removeScratchWorkspace(options.scratchRoot, options.conversationId);
+}
+
+/** 只删 scratch 根下 `<会话 id>` 这一层；id 非法时什么都不删 */
+export function removeScratchWorkspace(scratchRoot: string, conversationId: string): void {
   const scratchDir = conversationCwd({
     kind: 'scratch',
-    canonicalPath: options.scratchRoot,
-    conversationId: options.conversationId,
+    canonicalPath: scratchRoot,
+    conversationId,
   });
   if (!scratchDir) return;
   try {

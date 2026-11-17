@@ -68,6 +68,39 @@ describe('AgentSessionIndex generation and reservation authority', () => {
     sessions.observe({ type: 'worker-exited' });
     expect(sessions.workspaceTreeRunning(parent.sessionId)).toBe(false);
   });
+  it('btwTreeRunning 把挂在父会话下的 btw 旁路算进运行中，跑完或释放后放行', () => {
+    const sessions = index();
+    const btw: SessionIdentity = { sessionId: 'btw-1', generation: parent.generation };
+    const ready = (identity: SessionIdentity) =>
+      sessions.observe({
+        type: 'parent-ready',
+        identity,
+        seq: 1,
+        sessionFile: `/tmp/${identity.sessionId}.jsonl`,
+        model: { providerId: 'p', modelId: 'm' },
+      });
+    sessions.prepareParent(parent);
+    ready(parent);
+    sessions.prepareParent(btw);
+    sessions.linkBtw(btw.sessionId, parent.sessionId);
+    expect(sessions.btwTreeRunning(parent.sessionId)).toBe(true);
+    ready(btw);
+    expect(sessions.btwTreeRunning(parent.sessionId)).toBe(false);
+    sessions.observe({ type: 'status', identity: btw, seq: 2, status: 'running' });
+    expect(sessions.btwTreeRunning(parent.sessionId)).toBe(true);
+    expect(sessions.btwTreeRunning('unrelated')).toBe(false);
+    expect(sessions.workspaceTreeRunning(parent.sessionId)).toBe(false);
+    expect(sessions.btwSessionIds(parent.sessionId)).toEqual([btw.sessionId]);
+    sessions.observe({ type: 'status', identity: btw, seq: 3, status: 'idle' });
+    expect(sessions.btwTreeRunning(parent.sessionId)).toBe(false);
+    sessions.observe({ type: 'status', identity: btw, seq: 4, status: 'running' });
+    sessions.observe({ type: 'parent-ended', identity: btw, seq: 5, reason: 'released' });
+    expect(sessions.btwTreeRunning(parent.sessionId)).toBe(false);
+    expect(sessions.btwSessionIds(parent.sessionId)).toEqual([]);
+    sessions.unlinkBtw(btw.sessionId);
+    sessions.prepareParent({ ...btw, generation: '22222222-2222-4222-8222-222222222222' });
+    expect(sessions.btwTreeRunning(parent.sessionId)).toBe(false);
+  });
   it('runningRootSessionIds 只列自身在跑的父会话，不含子会话与空闲会话', () => {
     const sessions = index();
     const other: SessionIdentity = { sessionId: 'other', generation: parent.generation };

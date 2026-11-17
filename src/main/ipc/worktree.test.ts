@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   conversation: vi.fn(),
   currentIdentity: vi.fn(),
   isAlive: vi.fn((_id: string) => false),
+  treeRunning: vi.fn((_id: string) => false),
+  btwRunning: vi.fn((_id: string) => false),
   remove: vi.fn(async () => {}),
   create: vi.fn(),
   status: vi.fn(async () => ({ exists: true, dirty: false, ahead: 0 })),
@@ -41,6 +43,8 @@ vi.mock('./sessionIndex', () => ({
     currentIdentity: mocks.currentIdentity,
     isAlive: mocks.isAlive,
     workspaceRoot: (id: string) => id,
+    workspaceTreeRunning: mocks.treeRunning,
+    btwTreeRunning: mocks.btwRunning,
   },
 }));
 vi.mock('../services/worktree/service', () => ({
@@ -78,6 +82,8 @@ beforeEach(async () => {
   }));
   mocks.currentIdentity.mockReturnValue(undefined);
   mocks.isAlive.mockReturnValue(false);
+  mocks.treeRunning.mockReturnValue(false);
+  mocks.btwRunning.mockReturnValue(false);
   mocks.status.mockResolvedValue({ exists: true, dirty: false, ahead: 0 });
   const { registerWorktreeHandlers } = await import('./worktree');
   registerWorktreeHandlers();
@@ -213,5 +219,44 @@ describe('shared lifecycle', () => {
     mocks.status.mockResolvedValue({ exists: false, dirty: false, ahead: 0 });
     await invoke(IPC_CHANNELS.WORKTREE_REBUILD, 'source');
     expect(readRegistry().get('target')?.path).toBe('/rebuilt');
+  });
+});
+
+describe('move guard', () => {
+  it('treats the worktree as in use while any binding (or its btw side session) runs', async () => {
+    const { sessionWorktreeInUse } = await import('./worktree');
+    await invoke('worktree:bind', 'target', 'source');
+    expect(sessionWorktreeInUse('source')).toBe(false);
+    mocks.treeRunning.mockImplementation((id: string) => id === 'target');
+    expect(sessionWorktreeInUse('source')).toBe(true);
+    mocks.treeRunning.mockReturnValue(false);
+    mocks.btwRunning.mockImplementation((id: string) => id === 'source');
+    expect(sessionWorktreeInUse('target')).toBe(true);
+    mocks.btwRunning.mockReturnValue(false);
+    expect(sessionWorktreeInUse('unbound')).toBe(false);
+  });
+
+  it('treats an in-flight binding as in use', async () => {
+    const { sessionWorktreeInUse } = await import('./worktree');
+    let during: boolean | undefined;
+    mocks.status.mockImplementationOnce(async () => {
+      during = sessionWorktreeInUse('target');
+      return { exists: true, dirty: false, ahead: 0 };
+    });
+    expect((await invoke('worktree:bind', 'target', 'source')).ok).toBe(true);
+    expect(during).toBe(true);
+    expect(sessionWorktreeInUse('target')).toBe(false);
+  });
+
+  it('unbinds only the moved conversation and never removes the worktree directory', async () => {
+    const { unbindSessionWorktree, sessionWorktree } = await import('./worktree');
+    await invoke('worktree:bind', 'target', 'source');
+    unbindSessionWorktree('source');
+    expect(sessionWorktree('source')).toBeUndefined();
+    expect(readRegistry().get('source')).toBeUndefined();
+    expect(readRegistry().get('target')?.path).toBe(record.path);
+    unbindSessionWorktree('target');
+    expect(readRegistry().list()).toEqual([]);
+    expect(mocks.remove).not.toHaveBeenCalled();
   });
 });

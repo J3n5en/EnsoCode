@@ -3,10 +3,18 @@ import { addToast } from '@/components/ui/toast';
 import type { TFunction } from '@/i18n';
 import { useSessionsStore } from '@/stores/sessions';
 
-export { moveConversationTargets } from '@shared/moveConversation';
+export { canMoveConversationFrom, moveConversationTargets } from '@shared/moveConversation';
+
+const MOVE_ERROR_TITLES: Record<string, string> = {
+  running: 'Cannot move a running conversation',
+  'worktree-busy': 'Cannot move while its worktree is in use',
+  'source-secretary': 'Secretary conversations cannot be moved',
+};
 
 export function conversationMoveErrorTitle(error: string): string {
-  return error === 'running' ? 'Cannot move a running conversation' : 'Failed to move conversation';
+  return Object.hasOwn(MOVE_ERROR_TITLES, error)
+    ? MOVE_ERROR_TITLES[error]
+    : 'Failed to move conversation';
 }
 
 export async function moveConversationFromMenu(
@@ -23,7 +31,7 @@ export async function moveConversationFromMenu(
       addToast({
         type: 'error',
         title: t(conversationMoveErrorTitle(result.error)),
-        ...(result.error === 'running' ? {} : { description: result.error }),
+        ...(Object.hasOwn(MOVE_ERROR_TITLES, result.error) ? {} : { description: result.error }),
       });
       return;
     }
@@ -34,7 +42,16 @@ export async function moveConversationFromMenu(
         const row = conversations[id];
         if (row) conversations[id] = { ...row, projectId: targetProjectId };
       }
-      return { conversations };
+      // Main 已解除 worktree 绑定：根会话回到新项目根目录
+      const root = conversations[conversationId];
+      if (root)
+        conversations[conversationId] = {
+          ...root,
+          worktree: undefined,
+          worktreeMissing: undefined,
+        };
+      const { [conversationId]: _dropped, ...worktreeStatuses } = state.worktreeStatuses;
+      return { conversations, worktreeStatuses };
     });
   } catch (error) {
     addToast({

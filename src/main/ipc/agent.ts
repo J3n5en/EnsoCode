@@ -138,6 +138,7 @@ import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
 import { reloadConversation } from '../services/conversationReload';
+import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
 import { takeInterruptedTurns } from '../services/exitInterruptHost';
 import { exitInterruptionOf } from '../services/exitWindow';
@@ -451,26 +452,8 @@ function persistedRootSpawn(request: AgentSpawnRequest, ownerWebContentsId: numb
   return cwd !== null && cwd === request.cwd;
 }
 
-/** cwd 只从权威记录推导。scratch 固定为 `<根>/<会话 id>`，secretary 固定为项目根，都不接受 worktree。 */
 function authoritativeSpawnCwd(sessionId: string): string | null {
-  const conversation = sourceAuthority?.conversation(sessionId);
-  const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
-  if (
-    conversation?.kind !== 'root' ||
-    conversation.lifecycle === 'ended' ||
-    project?.state !== 'active'
-  ) {
-    return null;
-  }
-  return conversationCwd({
-    kind: project.kind,
-    canonicalPath: project.canonicalPath,
-    conversationId: sessionId,
-    worktreePath:
-      project.kind === 'ssh' || project.kind === 'scratch' || project.kind === 'secretary'
-        ? undefined
-        : sessionWorktree(sessionId)?.path,
-  });
+  return spawnCwdFromAuthority(sourceAuthority, (id) => sessionWorktree(id)?.path, sessionId);
 }
 
 /** 插件 fs 代办的项目根：只认权威记录；SSH 会话的目录不在本机，返回 null */

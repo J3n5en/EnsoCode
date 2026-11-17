@@ -37,10 +37,21 @@ export function conversationIdsToMove(
   return [...ids];
 }
 
+/** 秘书项目的会话固定在秘书里，Main 同样拒绝（source-secretary） */
+export function canMoveConversationFrom<T extends { id: string; kind?: string }>(
+  projects: readonly T[],
+  currentProjectId: string
+): boolean {
+  return !projects.some(
+    (project) => project.id === currentProjectId && project.kind === 'secretary'
+  );
+}
+
 export function moveConversationTargets<T extends { id: string; kind?: string }>(
   projects: readonly T[],
   currentProjectId: string
 ): T[] {
+  if (!canMoveConversationFrom(projects, currentProjectId)) return [];
   return projects.filter(
     (project) =>
       project.id !== currentProjectId && project.kind !== 'scratch' && project.kind !== 'secretary'

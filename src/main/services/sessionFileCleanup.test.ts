@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { recordChildRun } from './childRunCatalog';
-import { removeConversationSessionFiles } from './sessionFileCleanup';
+import { removeConversationSessionFiles, removeScratchWorkspace } from './sessionFileCleanup';
 
 const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -149,6 +149,19 @@ describe('removeConversationSessionFiles', () => {
       scratchRoot,
     });
     expect(existsSync(scratchRoot)).toBe(true);
+  });
+
+  it('removeScratchWorkspace 只删 scratch 根下该会话一层，非法 id 不删', () => {
+    const scratchRoot = path.join(root, 'scratch-move');
+    const own = path.join(scratchRoot, CONVERSATION_ID);
+    mkdirSync(own, { recursive: true });
+    writeFileSync(path.join(scratchRoot, 'keep.txt'), 'y');
+    removeScratchWorkspace(scratchRoot, '..');
+    removeScratchWorkspace(scratchRoot, '');
+    expect(existsSync(own)).toBe(true);
+    removeScratchWorkspace(scratchRoot, CONVERSATION_ID);
+    expect(existsSync(own)).toBe(false);
+    expect(existsSync(path.join(scratchRoot, 'keep.txt'))).toBe(true);
   });
 
   it('删除父会话时连带删除 catalog 登记的普通子 pi jsonl', () => {

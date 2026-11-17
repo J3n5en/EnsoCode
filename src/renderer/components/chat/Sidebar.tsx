@@ -76,6 +76,7 @@ import { GroupChips } from '@/components/chat/GroupChips';
 import { GroupEditorDialog } from '@/components/chat/GroupEditorDialog';
 import { ImportSessionDialog } from '@/components/chat/ImportSessionDialog';
 import {
+  canMoveConversationFrom,
   moveConversationFromMenu,
   moveConversationTargets,
 } from '@/components/chat/moveConversationAction';
@@ -2527,6 +2528,7 @@ function ConversationRow({
 }: ConversationRowProps) {
   const { t } = useI18n();
   const projects = useSettingsStore((state) => state.projects);
+  const movable = canMoveConversationFrom(projects, conversation.projectId);
   const moveTargets = moveConversationTargets(projects, conversation.projectId);
   const localProject = useSettingsStore((state) =>
     state.projects.some(
@@ -2817,7 +2819,7 @@ function ConversationRow({
                     {t('Move to worktree')}
                   </ContextMenuItem>
                 ))}
-          {moveTargets.length > 0 ? (
+          {!movable ? null : moveTargets.length > 0 ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <Folders />

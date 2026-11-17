@@ -794,4 +794,43 @@ describe('SourceAuthorityRegistry.moveConversation', () => {
       registry.moveConversation('99999999-9999-4999-8999-999999999999', projectB.projectId)
     ).toEqual({ accepted: false, error: 'not-found' });
   });
+
+  it('rejects moving a conversation out of the secretary project', () => {
+    const { registry, projectB } = setup();
+    const secretary = registry.ensureSecretaryProject(path.join(temporary(), 'secretary'));
+    if (!secretary) throw new Error('setup secretary');
+    const created = registry.createConversation({
+      requestId: 's',
+      projectId: secretary.projectId,
+      projectVersion: secretary.version,
+    });
+    if (!created.accepted) throw new Error('setup secretary conversation');
+    expect(registry.moveConversation(created.value.conversationId, projectB.projectId)).toEqual({
+      accepted: false,
+      error: 'source-secretary',
+    });
+    expect(registry.conversation(created.value.conversationId)?.projectId).toBe(
+      secretary.projectId
+    );
+  });
+
+  it('still moves between ordinary projects in both directions', () => {
+    const { registry, projectA, projectB, conversation } = setup();
+    const there = registry.moveConversation(conversation.conversationId, projectB.projectId);
+    const back = registry.moveConversation(conversation.conversationId, projectA.projectId);
+    expect(there.accepted && there.value.projectId).toBe(projectB.projectId);
+    expect(back.accepted && back.value.projectId).toBe(projectA.projectId);
+  });
+
+  it('rejects a conversation whose worktree is in use', () => {
+    const { registry, projectB, conversation } = setup();
+    expect(
+      registry.moveConversation(conversation.conversationId, projectB.projectId, {
+        worktreeBusy: true,
+      })
+    ).toEqual({ accepted: false, error: 'worktree-busy' });
+    expect(registry.conversation(conversation.conversationId)?.projectId).toBe(
+      conversation.projectId
+    );
+  });
 });

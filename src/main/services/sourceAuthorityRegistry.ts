@@ -473,11 +473,14 @@ export class SourceAuthorityRegistry {
   moveConversation(
     conversationId: string,
     targetProjectId: string,
-    options?: { running?: boolean }
+    options?: { running?: boolean; worktreeBusy?: boolean }
   ): AuthorityMutationResult<ConversationAuthorityProjection> {
     const conversation = this.conversations.get(conversationId);
     if (!conversation || conversation.bot) {
       return { accepted: false, error: 'not-found' };
+    }
+    if (this.projects.get(conversation.projectId)?.kind === 'secretary') {
+      return { accepted: false, error: 'source-secretary' };
     }
     const target = this.projects.get(targetProjectId);
     if (target?.state !== 'active') {
@@ -494,6 +497,9 @@ export class SourceAuthorityRegistry {
     }
     if (options?.running) {
       return { accepted: false, error: 'running' };
+    }
+    if (options?.worktreeBusy) {
+      return { accepted: false, error: 'worktree-busy' };
     }
     conversation.projectId = target.projectId;
     conversation.version += 1;
