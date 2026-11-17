@@ -73,6 +73,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
 
   bind: () => {
     let pushed = false;
+    let bound = true;
     const off = window.electronAPI.secretary.onStateChanged((secretary) => {
       pushed = true;
       setTakenOverSessions(secretary.takeovers.map((entry) => entry.conversationId));
@@ -90,7 +91,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       .getState()
       // 推送比首帧快时以推送为准，否则旧快照会盖掉刚确认的提案
       .then((secretary) => {
-        if (pushed) return;
+        if (pushed || !bound) return;
         setTakenOverSessions(secretary.takeovers.map((entry) => entry.conversationId));
         set({ secretary });
       })
@@ -103,8 +104,12 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       if (target.proposalId) get().focusProposalCard(target.proposalId);
     });
     return () => {
+      bound = false;
       off();
       offOpen();
+      // 开关关掉后 Main 不再推送：清掉最后一份快照，入口随之消失；会话本身不动
+      setTakenOverSessions([]);
+      set({ secretary: EMPTY_SECRETARY_STATE, welcomeOpen: false, focusProposal: null });
     };
   },
 
