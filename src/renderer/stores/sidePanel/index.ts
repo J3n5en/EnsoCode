@@ -170,7 +170,8 @@ export const useSidePanelStore = create<SidePanelState>()(
       },
 
       togglePinnedTab: (tab) => {
-        const pinnedTabs = get().pinnedTabs;
+        const current = get().pinnedTabs;
+        const pinnedTabs = Array.isArray(current) ? current : [];
         set({
           pinnedTabs: pinnedTabs.includes(tab)
             ? pinnedTabs.filter((item) => item !== tab)
