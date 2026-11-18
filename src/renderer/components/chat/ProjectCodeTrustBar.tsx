@@ -26,6 +26,7 @@ export function ProjectCodeTrustBar({
 
   useEffect(() => {
     let cancelled = false;
+    setSources(EMPTY);
     setDismissed(false);
     setJustTrusted(false);
     void window.electronAPI.projects

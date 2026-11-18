@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   attachBackgroundCommandHooks,
   BackgroundTaskManager,
+  backgroundSpawnMode,
   createTaskTools,
   foregroundCommandTimeoutMs,
   processAlive,
@@ -184,6 +185,34 @@ describe('resolveBackgroundLaunch', () => {
   it('工具名为 bash 且无 transform 时,只回原样 command/cwd', () => {
     const result = resolveBackgroundLaunch('bash', 'echo hi', '/tmp');
     expect(result).toEqual({ command: 'echo hi', cwd: '/tmp' });
+  });
+
+  it('win32 下 powershell 走 file 分支：powershell.exe + 完整参数前缀，命令作为最后一个参数', () => {
+    const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command'];
+    const result = resolveBackgroundLaunch(
+      'powershell',
+      'Write-Output ENSO_NATIVE_STARTED; exit 23',
+      'C:\\proj',
+      undefined,
+      () => ({ shell: 'powershell.exe', args })
+    );
+    expect(result).toEqual({
+      command: 'Write-Output ENSO_NATIVE_STARTED; exit 23',
+      cwd: 'C:\\proj',
+      file: 'powershell.exe',
+      argsPrefix: args,
+    });
+    expect(result.argsPrefix).not.toBe(args);
+  });
+});
+
+describe('backgroundSpawnMode', () => {
+  it('win32 不 detached（detached 下 powershell.exe 不执行命令却退出 0），并隐藏控制台窗口', () => {
+    expect(backgroundSpawnMode('win32')).toEqual({ detached: false, windowsHide: true });
+  });
+
+  it.each(['linux', 'darwin'] as const)('%s 保持 detached 独立进程组', (platform) => {
+    expect(backgroundSpawnMode(platform)).toEqual({ detached: true });
   });
 });
 
@@ -408,6 +437,45 @@ describe('BackgroundTaskManager', () => {
     expect(result?.status).toBe('done');
     expect(result?.exitCode).toBe(0);
     expect(result?.output).toContain('read-rc=1');
+  });
+
+  // file+argsPrefix 分支（powershell 同路径）：命令必须真的执行，非零退出码原样上报为 failed
+  it.skipIf(process.platform === 'win32')(
+    'file 分支后台命令真实执行：输出标记、退出码 23、状态 failed',
+    async () => {
+      const { manager, notified, ended } = makeManager();
+      const taskId = manager.start('s1', 'echo ENSO_NATIVE_STARTED; exit 23', '/tmp', {
+        file: '/bin/sh',
+        argsPrefix: ['-c'],
+      });
+      await until(() => ended.includes(taskId));
+      const result = await manager.read(taskId);
+      expect(result?.output).toContain('ENSO_NATIVE_STARTED');
+      expect(result?.exitCode).toBe(23);
+      expect(result?.status).toBe('failed');
+      expect(notified).toHaveLength(1);
+      expect(notified[0]).toContain('ENSO_NATIVE_STARTED');
+      expect(notified[0]).not.toContain('exit 0');
+    }
+  );
+
+  it('spawn 失败立即标 failed，错误写进输出，只结束并通知一次', async () => {
+    const { manager, notified, ended } = makeManager();
+    const missing = path.join(tmpdir(), 'enso-missing-shell-binary');
+    const taskId = manager.start('s1', 'echo never', tmpdir(), {
+      file: missing,
+      argsPrefix: ['-c'],
+    });
+    await until(() => ended.includes(taskId));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const result = await manager.read(taskId);
+    expect(result?.status).toBe('failed');
+    expect(result?.output).toContain('[spawn error]');
+    expect(result?.output).toContain('ENOENT');
+    expect(ended).toEqual([taskId]);
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain('[spawn error]');
+    expect(notified[0]).not.toContain('exit 0');
   });
 
   it('完成通知超长时保留头 20% 尾 80%，标注省略字节并指向完整日志', async () => {

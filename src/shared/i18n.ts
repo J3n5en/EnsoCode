@@ -2594,19 +2594,9 @@ export const zhTranslations: Record<string, string> = {
   Project: '项目',
   'No conversations': '没有会话',
   'Connecting…': '连接中…',
-  'Syncing…': '同步中…',
   'Remote desktop is offline': '对方桌面离线',
-  'The remote desktop has no projects yet': '对方桌面还没有项目',
-  'Select a conversation on the left, or create one': '从左侧选择会话，或新建一个',
-  'New remote conversation': '新建远程会话',
-  'Add a directory on the remote computer as a project.': '把对方电脑上的目录添加为项目。',
-  'The remote desktop did not respond. It may need to be updated.':
-    '对方桌面没有响应，可能需要升级。',
   'Directory not found.': '目录不存在。',
   'Project path is not a directory.': '项目路径不是目录。',
-  'Node settings': '节点设置',
-  'The conversation runs on the remote computer with its projects, models and keys.':
-    '会话在对方电脑上运行，用的是对方的项目、模型与密钥。',
   'On the other computer open Settings → Devices, generate a pairing code and copy the link. Paste it here.':
     '在对方电脑打开「设置 → 设备」，生成配对码并复制链接，粘到这里。',
   'That is not an EnsoCode pairing link.': '这不是 EnsoCode 配对链接。',

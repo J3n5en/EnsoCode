@@ -51,10 +51,12 @@ function mapCatalogFallback(modelId: string, catalog: CatalogModelEntry | undefi
   const meta: ModelMeta = { modelId, source: 'catalog-fallback' };
   if (typeof catalog.reasoning === 'boolean') {
     meta.reasoning = catalog.reasoning;
-    meta.thinkingLevels = supportedProjectThinkingLevels({
-      reasoning: catalog.reasoning,
-      thinkingLevelMap: catalog.thinkingLevelMap,
-    });
+    if (!catalog.reasoning || !catalog.thinkingLevelsUnknown) {
+      meta.thinkingLevels = supportedProjectThinkingLevels({
+        reasoning: catalog.reasoning,
+        thinkingLevelMap: catalog.thinkingLevelMap,
+      });
+    }
   }
   attachWindow(meta, catalog);
   return meta;

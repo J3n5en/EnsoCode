@@ -301,6 +301,8 @@ export const IPC_CHANNELS = {
   NOTIFICATION_FOCUS_SESSION: 'notification:focus-session',
   /** renderer → main：上报当前正在查看的会话，供系统通知抑制判断 */
   NOTIFICATION_ACTIVE_SESSION: 'notification:active-session',
+  /** 宿主 main → 远程主界面：系统通知内容，由界面所在电脑（远程节点 guest 的 main）弹出 */
+  NOTIFICATION_SHOW: 'notification:show',
   /** renderer → main：会话静音立即生效（落盘前也不推送）。走 agent: 前缀，远端界面可以同步 */
   AGENT_SESSION_MUTED: 'agent:session-muted',
   AGENT_TASK_STOP: 'agent:task-stop',
@@ -536,15 +538,21 @@ export const IPC_CHANNELS = {
   // 远程节点：本机作为 guest 连接另一台 EnsoCode 桌面端
   NODES_LIST: 'nodes:list',
   NODES_PAIR: 'nodes:pair',
+  /** 节点层里点「连接到节点…」：本机切回本机界面并在那里打开配对对话框（配对链接只在本机界面输入） */
+  NODES_REQUEST_PAIR: 'nodes:request-pair',
+  /** main → 本机主窗口 renderer：打开配对对话框 */
+  NODES_PAIR_REQUESTED: 'nodes:pair-requested',
   NODES_REMOVE: 'nodes:remove',
   NODES_RENAME: 'nodes:rename',
-  NODES_SEND: 'nodes:send',
   /** main → renderer：节点列表/连接状态变化 */
   NODES_STATUS_CHANGED: 'nodes:status-changed',
-  /** main → renderer：解密后的 host 下行帧 */
-  NODES_MESSAGE: 'nodes:message',
   /** 主窗口打开某节点的设置窗口（宿主 renderer 经 rpc 隧道） */
   NODES_OPEN_SETTINGS: 'nodes:open-settings',
+  /** 主窗口可见层切到本机或某节点（节点界面层由 main 叠在本机 workbench 之上） */
+  NODES_SWITCH: 'nodes:switch',
+  NODES_ACTIVE: 'nodes:active',
+  /** main → renderer：主窗口可见层变化 */
+  NODES_ACTIVE_CHANGED: 'nodes:active-changed',
   /** 节点设置窗口专用 preload ↔ main（只认该窗口的 sender） */
   NODE_REMOTE_INIT: 'node-remote:init',
   NODE_REMOTE_ATTACH: 'node-remote:attach',
@@ -553,6 +561,10 @@ export const IPC_CHANNELS = {
   NODE_REMOTE_DETACH: 'node-remote:detach',
   NODE_REMOTE_CLOSE: 'node-remote:close',
   NODE_REMOTE_EVENT: 'node-remote:event',
+  /** 主窗口节点层 ↔ 本机 main：远程界面里本机窗口、节点切换与通知的调用（main 按白名单裁决） */
+  NODE_REMOTE_LOCAL_INVOKE: 'node-remote:local-invoke',
+  NODE_REMOTE_LOCAL_SEND: 'node-remote:local-send',
+  NODE_REMOTE_LOCAL_EVENT: 'node-remote:local-event',
 
   WORKSPACE_SEARCH_QUERY: 'workspace-search:query',
 

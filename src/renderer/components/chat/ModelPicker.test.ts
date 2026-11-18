@@ -466,6 +466,23 @@ describe('ModelPicker reasoning controls mode', () => {
     expect(oauth.reasoning).toBeUndefined();
   });
 
+  it('自定义模型收到只有推理开关和窗口的元数据后仍保留最高档', () => {
+    const render = () =>
+      renderToStaticMarkup(createElement(ModelPicker, { ...commonProps, thinkingLevel: 'max' }));
+    const maxTick = 'data-thinking-tick="max" aria-pressed="true"';
+    expect(render()).toContain(maxTick);
+
+    harness.meta = {
+      model: {
+        modelId: 'model',
+        source: 'catalog-fallback',
+        reasoning: true,
+        contextWindow: 128_000,
+      },
+    };
+    expect(render()).toContain(maxTick);
+  });
+
   it.each<{
     row: Partial<ModelEntry>;
     meta: ModelMeta;

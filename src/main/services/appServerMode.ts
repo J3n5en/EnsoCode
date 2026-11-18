@@ -27,6 +27,7 @@ import { createMainWindow, getMainWindow, isMainWindowAlive } from '../windows/M
 import { getSettingsWindow } from '../windows/SettingsWindow';
 import { allowAppQuit, destroyWithoutCloseConfirm } from './appCloseConfirm';
 import { browserHost } from './browserHost';
+import { closeNodeSettingsWindows } from './nodeRemote';
 import { refreshPowerKeepAlive } from './pairHost';
 import { setPairHeadless } from './pairSessionHost';
 
@@ -189,6 +190,7 @@ export async function enterServerMode(): Promise<void> {
   refreshPowerKeepAlive();
   const settings = getSettingsWindow();
   if (settings && !settings.isDestroyed()) settings.close();
+  closeNodeSettingsWindows();
   ensureTray();
   await browserHost.hibernateAll();
   // 等待期间用户已唤回（Dock / 托盘 / 快捷键 / 二次启动）：不能再销毁窗口、隐藏 Dock

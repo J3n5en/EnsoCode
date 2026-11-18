@@ -224,7 +224,7 @@ export class BackgroundTaskManager {
     }
   ): string {
     const taskId = this.reserveId(sessionId);
-    // detached：POSIX 下是独立进程组；kill 时整棵树一起清（Windows 走 taskkill /T）
+    // POSIX 下 detached 独立进程组；kill 时整棵树一起清（Windows 不 detached，走 taskkill /T）
     const child = spawnBackground(command, cwd, spawnOpts);
     const task = this.register(sessionId, taskId, spawnOpts?.displayCommand ?? command, {
       details: spawnOpts?.details,
@@ -236,6 +236,7 @@ export class BackgroundTaskManager {
     child.stderr?.on('data', (chunk: Buffer) => this.append(task, chunk));
     child.on('error', (error) => {
       task.output += `\n[spawn error] ${error.message}`;
+      if (task.info.status === 'running' && !task.settling) void this.settle(task, 'failed');
     });
     // close 在 stdio 全部排空后触发；统计必须看到完整执行并晚于输出收集。
     child.on('close', (code, signal) => this.exited(task, code, signal));
@@ -807,6 +808,14 @@ function withCommandHints<T>(result: T, command: string, timeoutSec?: number): T
   return result;
 }
 
+/** Windows 下 detached 会让 powershell.exe 不执行命令直接退出 0；进程树由 taskkill /T 清理，不依赖进程组 */
+export function backgroundSpawnMode(platform: string): {
+  detached: boolean;
+  windowsHide?: boolean;
+} {
+  return platform === 'win32' ? { detached: false, windowsHide: true } : { detached: true };
+}
+
 function spawnBackground(
   command: string,
   cwd: string,
@@ -815,15 +824,16 @@ function spawnBackground(
   const env = spawnOpts?.env ?? process.env;
   // stdin 关闭与前台（pi bash）一致：读 stdin 立即 EOF，交互提示 fail-fast 而不是挂到让位点；远程包装即 ssh -n
   const stdio: ['ignore', 'pipe', 'pipe'] = ['ignore', 'pipe', 'pipe'];
+  const mode = backgroundSpawnMode(process.platform);
   if (spawnOpts?.file) {
     return spawn(spawnOpts.file, [...(spawnOpts.argsPrefix ?? []), command], {
       cwd,
       env,
-      detached: true,
+      ...mode,
       stdio,
     });
   }
-  return spawn(command, { shell: true, cwd, env, detached: true, stdio });
+  return spawn(command, { shell: true, cwd, env, ...mode, stdio });
 }
 
 /** 信号 0 只探测存活。pid 0 会打到进程组，不当成活着 */

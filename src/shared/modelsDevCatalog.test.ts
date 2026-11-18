@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveCustomModelCapabilities, resolveCustomModelView } from './modelCatalog';
 import {
   cloneModelsDevOauthModel,
   MODELS_DEV_TTL_MS,
@@ -122,6 +123,77 @@ describe('mergeCatalogEntry', () => {
       reasoning: true,
       thinkingLevelMap: { xhigh: 'xhigh' },
     });
+  });
+
+  it('仅被 models.dev 收录的推理模型沿用项目默认六档', () => {
+    const merged = mergeCatalogEntry(undefined, {
+      id: 'codex/gpt-6.2-sol',
+      provider: 'codex',
+      reasoning: true,
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    });
+
+    const resolved = resolveCustomModelCapabilities(merged);
+
+    expect(resolved).toMatchObject({
+      reasoning: true,
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    });
+    expect(resolved.thinkingLevels).toEqual(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+    expect(resolved.thinkingLevelMap).toEqual({ xhigh: 'xhigh', max: 'max' });
+  });
+
+  it('pi 推理模型叠加 models.dev 后仍保留四档', () => {
+    const merged = mergeCatalogEntry(
+      { id: 'claude-sonnet-4-5', reasoning: true },
+      { id: 'claude-sonnet-4-5', provider: 'anthropic', reasoning: true, contextWindow: 200_000 }
+    );
+
+    expect(resolveCustomModelCapabilities(merged).thinkingLevels).toEqual([
+      'minimal',
+      'low',
+      'medium',
+      'high',
+    ]);
+  });
+
+  it('仅被 models.dev 收录且明确不支持推理的模型解析出空档位', () => {
+    const merged = mergeCatalogEntry(undefined, {
+      id: 'test-models-dev-chat',
+      provider: 'test-provider',
+      reasoning: false,
+    });
+
+    expect(resolveCustomModelCapabilities(merged)).toMatchObject({
+      reasoning: false,
+      thinkingLevels: [],
+    });
+  });
+
+  it('仅被 models.dev 收录的非推理模型手动开启推理并继承档位时，worker 与 UI 都保留四档', () => {
+    const modelId = 'test-models-dev-chat';
+    const entry = { reasoning: 'on' as const };
+    const merged = mergeCatalogEntry(undefined, {
+      id: modelId,
+      provider: 'test-provider',
+      reasoning: false,
+    });
+
+    const worker = resolveCustomModelCapabilities(merged, entry);
+    const view = resolveCustomModelView(entry, {
+      modelId,
+      source: 'catalog-fallback',
+      reasoning: false,
+      thinkingLevels: [],
+    });
+    const expectedLevels = ['minimal', 'low', 'medium', 'high'];
+
+    expect(view.reasoning).toBe(true);
+    expect(view.thinkingLevels).toEqual(expectedLevels);
+    expect(worker.reasoning).toBe(true);
+    expect(worker.thinkingLevels).toEqual(expectedLevels);
   });
 
   it('returns the pi entry unchanged when models.dev has no match', () => {

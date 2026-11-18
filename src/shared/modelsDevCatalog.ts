@@ -199,6 +199,7 @@ export function mergeCatalogEntry<T extends CatalogModelEntry>(
   if (!pi) {
     return {
       id: dev.id,
+      thinkingLevelsUnknown: true,
       ...(dev.provider ? { provider: dev.provider } : {}),
       ...(dev.contextWindow ? { contextWindow: dev.contextWindow } : {}),
       ...(dev.maxTokens ? { maxTokens: dev.maxTokens } : {}),

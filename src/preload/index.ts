@@ -233,12 +233,7 @@ import type {
   ParentSourceBindingRequest,
   ParentSourceBindingResult,
 } from '@shared/types/mentions';
-import type {
-  NodeActionResult,
-  NodeMessage,
-  NodePairResult,
-  NodesStatus,
-} from '@shared/types/nodes';
+import type { NodeActionResult, NodePairResult, NodesStatus } from '@shared/types/nodes';
 import type {
   DispatchDraft,
   SecretaryContactChannelPrefs,
@@ -1549,6 +1544,14 @@ const electronAPI = {
     /** 粘贴对方的配对链接（https 或 enso://） */
     pair: (inviteUri: string): Promise<NodePairResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_PAIR, inviteUri),
+    /** 节点层里：请所在电脑切回本机界面并打开配对对话框 */
+    requestPair: (): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_REQUEST_PAIR),
+    onPairRequested: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.NODES_PAIR_REQUESTED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_PAIR_REQUESTED, listener);
+    },
     remove: (nodeId: string): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_REMOVE, nodeId),
     rename: (nodeId: string, label: string): Promise<NodeActionResult> =>
@@ -1556,19 +1559,19 @@ const electronAPI = {
     /** 在本机新窗口打开该节点的设置（宿主设置页经隧道运行） */
     openSettings: (nodeId: string): Promise<NodeActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.NODES_OPEN_SETTINGS, nodeId),
-    /** 发 @enso/pair 的 PhoneToHost 命令（main 按白名单校验后加密上行） */
-    send: (nodeId: string, command: unknown): Promise<NodeActionResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.NODES_SEND, nodeId, command),
+    /** 主窗口可见层切到本机（'local'）或某节点的完整界面 */
+    switch: (target: string): Promise<NodeActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.NODES_SWITCH, target),
+    active: (): Promise<string> => ipcRenderer.invoke(IPC_CHANNELS.NODES_ACTIVE),
+    onActiveChanged: (callback: (active: string) => void): (() => void) => {
+      const listener = (_: unknown, active: string) => callback(active);
+      ipcRenderer.on(IPC_CHANNELS.NODES_ACTIVE_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_ACTIVE_CHANGED, listener);
+    },
     onStatusChanged: (callback: (status: NodesStatus) => void): (() => void) => {
       const listener = (_: unknown, status: NodesStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.NODES_STATUS_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_STATUS_CHANGED, listener);
-    },
-    /** 解密后的 host 下行帧（catalog/projects/providers/agent-event/history） */
-    onMessage: (callback: (message: NodeMessage) => void): (() => void) => {
-      const listener = (_: unknown, message: NodeMessage) => callback(message);
-      ipcRenderer.on(IPC_CHANNELS.NODES_MESSAGE, listener);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.NODES_MESSAGE, listener);
     },
   },
 

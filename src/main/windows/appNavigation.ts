@@ -39,13 +39,6 @@ export function isAppNavigationAllowed(target: string, appUrl: string): boolean 
   return path.startsWith(root);
 }
 
-/** 子 frame 另外放行 srcdoc / 空白页：插件页面与产物预览靠 srcdoc iframe 承载 */
-export function isAppFrameNavigationAllowed(target: string, appUrl: string): boolean {
-  return (
-    target === 'about:srcdoc' || target === 'about:blank' || isAppNavigationAllowed(target, appUrl)
-  );
-}
-
 /** 与 setWindowOpenHandler 相同：只把 http(s) 交给系统浏览器 */
 export function openExternalWebUrl(url: string): void {
   if (url.startsWith('https:') || url.startsWith('http:')) void shell.openExternal(url);
@@ -57,21 +50,30 @@ export function openExternalWebUrl(url: string): void {
  * 目标仍是本页，照常放行。
  */
 export function attachAppNavigationGuard(contents: WebContents, appUrl: string): void {
+  attachNavigationGuard(contents, (url) => isAppNavigationAllowed(url, appUrl));
+}
+
+/** 主 frame 只许去 allowed 放行的页面；子 frame 另外放行 srcdoc / 空白页（插件页面与产物预览靠 srcdoc iframe 承载） */
+export function attachNavigationGuard(
+  contents: WebContents,
+  allowed: (url: string) => boolean
+): void {
   contents.on('will-navigate', (event) => {
-    if (isAppNavigationAllowed(event.url, appUrl)) return;
+    if (allowed(event.url)) return;
     event.preventDefault();
     openExternalWebUrl(event.url);
   });
   // dev server 下同源 302 只走 will-redirect，不走 will-navigate。主 frame 与 will-navigate 同一策略
   contents.on('will-redirect', (event) => {
     if (!event.isMainFrame) return;
-    if (isAppNavigationAllowed(event.url, appUrl)) return;
+    if (allowed(event.url)) return;
     event.preventDefault();
     openExternalWebUrl(event.url);
   });
   contents.on('will-frame-navigate', (event) => {
     // 主 frame 交给 will-navigate；子 frame 的内容可能是插件脚本，拦下但不替它打开浏览器
     if (event.isMainFrame) return;
-    if (!isAppFrameNavigationAllowed(event.url, appUrl)) event.preventDefault();
+    if (event.url === 'about:srcdoc' || event.url === 'about:blank' || allowed(event.url)) return;
+    event.preventDefault();
   });
 }

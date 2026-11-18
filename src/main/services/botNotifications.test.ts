@@ -34,7 +34,13 @@ vi.mock('../windows/createAppWindow', () => ({
   getWindowWebContents: () => ({ isLoading: () => env.loading, once: env.onceLoad }),
 }));
 
-import { maybeNotify, maybeNotifyBot, notifyBotChat } from './notifications';
+import {
+  maybeNotify,
+  maybeNotifyBot,
+  notifyBotChat,
+  notifySecretary,
+  setLocalLayerVisible,
+} from './notifications';
 
 const event = {
   type: 'ask-request' as const,
@@ -47,6 +53,7 @@ beforeEach(() => {
   env.focused = false;
   env.loading = false;
   env.focus.mockReset();
+  setLocalLayerVisible(true);
 });
 it('code session notices focus the main window and open the session on click', async () => {
   const win = { id: 'main' };
@@ -121,4 +128,15 @@ it('bot chat notices use the language setting, open the chat on click and stay q
   env.focused = true;
   await notifyBotChat('chat', build);
   expect(env.show).toHaveBeenCalledOnce();
+});
+it('主窗口聚焦但盖着远程节点界面时，Bot 与秘书通知照弹', async () => {
+  env.focused = true;
+  setLocalLayerVisible(false);
+  await maybeNotifyBot(
+    { ...event, seq: 9, ask: { ...event.ask, requestId: 'layer' } },
+    { enabled: true, chatId: 'chat', name: 'Alice', conversationId: 's' }
+  );
+  await notifyBotChat('chat', () => ({ title: 't', body: 'b' }));
+  await notifySecretary(() => ({ title: 't', body: 'b' }));
+  expect(env.show).toHaveBeenCalledTimes(3);
 });

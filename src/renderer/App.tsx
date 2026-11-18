@@ -38,7 +38,7 @@ import { ChatView } from '@/components/chat/ChatView';
 import { requestFocusComposer } from '@/components/chat/composerMentionBridge';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { Sidebar } from '@/components/chat/Sidebar';
-import { RemoteNodeView } from '@/components/nodes/RemoteNodeView';
+import { PairNodeDialog } from '@/components/nodes/PairNodeDialog';
 import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBootstrap';
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
@@ -96,7 +96,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
-import { useSidePanelStore } from '@/stores/sidePanel';
+import { bindSidePanelFullscreen, useSidePanelStore } from '@/stores/sidePanel';
 import { SIDE_PANEL_GAP_WIDTH, SIDE_PANEL_HANDLE_WIDTH } from '@/stores/sidePanel/width';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
@@ -173,6 +173,8 @@ export default function App() {
   useEffect(() => {
     if (sideFullscreen && !sideOpen) useSidePanelStore.getState().setFullscreen(false);
   }, [sideOpen, sideFullscreen]);
+  // 全屏按会话记。挂载时补当前会话，读回本地状态和之后的切换再各补一次。
+  useEffect(() => bindSidePanelFullscreen(), []);
   useEffect(() => {
     document.documentElement.classList.add('enso-main-shell');
     return () => document.documentElement.classList.remove('enso-main-shell');
@@ -219,28 +221,23 @@ export default function App() {
     bindPairCatalogSync();
   }, []);
 
-  // 连接到节点只在本机桌面可用。远程界面的 nodes: 被拒绝，不要订阅，也不要停在空的节点视图上
+  // 节点列表与可见层来自界面所在电脑：本机桌面，或以远程节点层跑在另一台桌面里（nodes: 交给那台的 main）
   useEffect(() => {
-    const store = useRemoteNodesStore.getState();
-    if (window.electronAPI.remote) {
-      if (store.activeNodeId !== 'local') store.switchNode('local');
-      return;
-    }
-    return store.bind();
+    const remote = window.electronAPI.remote;
+    return remote && !remote.nativePlatform ? undefined : useRemoteNodesStore.getState().bind();
   }, []);
-  const activeNodeId = useRemoteNodesStore((s) => s.activeNodeId);
-  const remoteNodeActive = activeNodeId !== 'local';
+  const pairDialogOpen = useRemoteNodesStore((s) => s.pairDialogOpen);
   const botModeActive = useBotModeActive();
   const botModeEnabled = useSettingsStore((s) => s.botModeEnabled);
   const headerSessionTabsEnabled = useSettingsStore((s) => s.headerSessionTabs);
   const appMode = useAppModeStore((s) => s.mode);
-  // 关闭实验开关或切到远程节点：回到 Code（设置未水合前 botModeEnabled 恒为 false，不能据此回退）
+  // 关闭实验开关：回到 Code（设置未水合前 botModeEnabled 恒为 false，不能据此回退）
   useEffect(() => {
     const hydrated = useSettingsStore.persist?.hasHydrated?.() ?? true;
-    if (appMode === 'bot' && ((hydrated && !botModeEnabled) || remoteNodeActive)) {
+    if (appMode === 'bot' && hydrated && !botModeEnabled) {
       useAppModeStore.getState().setMode('code');
     }
-  }, [appMode, botModeEnabled, remoteNodeActive]);
+  }, [appMode, botModeEnabled]);
 
   // Bot 模式开关打开即常驻订阅：Code 模式下也要实时计数待处理，并响应通知点击跳转
   useEffect(() => {
@@ -263,7 +260,7 @@ export default function App() {
     [secretaryEnabled]
   );
 
-  // Code 会话通知点击：当前在远程节点或 Bot 模式时先切回本机 Code，会话由 sessions store 选中
+  // Code 会话通知点击：在 Bot 模式时先切回 Code，会话由 sessions store 选中
   useEffect(
     () =>
       window.electronAPI.agent.onFocusSession((sessionId) => {
@@ -296,27 +293,26 @@ export default function App() {
       if (!pressed) return;
       if (pressed === bindings['toggle-app-mode']) {
         const settings = useSettingsStore.getState();
-        if (!settings.botModeEnabled || useRemoteNodesStore.getState().activeNodeId !== 'local')
-          return;
+        if (!settings.botModeEnabled) return;
         e.preventDefault();
         const modes = useAppModeStore.getState();
         modes.setMode(modes.mode === 'bot' ? 'code' : 'bot');
         return;
       }
-      // 远程节点 / Bot 模式：本机 Code 会话相关的快捷键不响应（新对话/tab 切换/右侧面板/查找）
-      const remote = useRemoteNodesStore.getState().activeNodeId !== 'local' || isBotModeActive();
-      if (isBotModeActive() && pressed === bindings['toggle-side-panel']) {
+      // Bot 模式：Code 会话相关的快捷键不响应（新对话/tab 切换/右侧面板/查找）
+      const bot = isBotModeActive();
+      if (bot && pressed === bindings['toggle-side-panel']) {
         e.preventDefault();
         useBotsStore.getState().togglePanel();
         return;
       }
-      if (isBotModeActive() && pressed === bindings['search-workspace']) {
+      if (bot && pressed === bindings['search-workspace']) {
         e.preventDefault();
         useBotsStore.getState().setSearchOpen(true);
         return;
       }
       if (
-        remote &&
+        bot &&
         [
           'new-conversation',
           'next-tab',
@@ -379,7 +375,7 @@ export default function App() {
       } else if (pressed === bindings['search-workspace']) {
         e.preventDefault();
         setSearchOpen(true);
-      } else if (!remote) {
+      } else if (!bot) {
         const command = resolvePluginKeybindings(
           pluginCommands(),
           keybindings,
@@ -404,7 +400,6 @@ export default function App() {
     if (!sideOpen || !sideFullscreen) return;
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (useRemoteNodesStore.getState().activeNodeId !== 'local') return;
       if (isBotModeActive()) return;
       e.preventDefault();
       useSidePanelStore.getState().setFullscreen(false);
@@ -420,8 +415,8 @@ export default function App() {
   );
 
   const chromeKind = useWindowChromeKind();
-  // Bot / 远程节点视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
-  const desktopShell = chromeKind !== 'mobile' && !remoteNodeActive && !botModeActive;
+  // Bot 视图仍走整行 TitleBar；Code 视图在桌面端把 chrome 并进卡片顶栏
+  const desktopShell = chromeKind !== 'mobile' && !botModeActive;
   const handleSideResize = useCallback(
     (deltaX: number) => {
       const workspace = workspaceRef.current;
@@ -440,13 +435,12 @@ export default function App() {
     },
     [desktopShell]
   );
-  const modeSwitch = botModeEnabled && !remoteNodeActive ? <ModeSwitch /> : null;
+  const modeSwitch = botModeEnabled ? <ModeSwitch /> : null;
   // 桌面外壳：右侧面板顶到窗口顶部，tab 条与顶栏同一行；Windows 原生按钮由面板 tab 条右端让位，
   // Linux 自绘按钮在顶栏里会被面板盖住，保持独立卡片；网页版没有窗口按钮，同 mac
   const titleRowPanel =
     desktopShell && (chromeKind === 'mac' || chromeKind === 'windows' || chromeKind === 'web');
-  const sideInTitleRow =
-    titleRowPanel && sideOpen && !isMobile && !botModeActive && !remoteNodeActive;
+  const sideInTitleRow = titleRowPanel && sideOpen && !isMobile && !botModeActive;
   // Bot 模式开启时顶栏居中是 Bot 切换器，标签会与之重叠，整体让位
   const headerSessionTabs =
     headerSessionTabsEnabled &&
@@ -455,7 +449,7 @@ export default function App() {
     !(sideInTitleRow && sideFullscreen) ? (
       <HeaderSessionTabs onNew={startNewConversation} />
     ) : null;
-  const sideToggle = remoteNodeActive ? null : (
+  const sideToggle = (
     <button
       type="button"
       className={cn(
@@ -509,29 +503,27 @@ export default function App() {
         <TitleBar
           leading={
             <div className="flex items-center gap-0.5">
-              {!remoteNodeActive && (
-                // Windows/Linux 顶栏贴左：开关居中落在折叠栏宽度内，与下方图标同一竖线
-                <div
-                  className={cn(
-                    chromeKind !== 'mac' && 'flex justify-center',
-                    chromeKind !== 'mac' && (desktopShell ? 'w-[48px]' : 'w-12')
-                  )}
+              {/* Windows/Linux 顶栏贴左：开关居中落在折叠栏宽度内，与下方图标同一竖线 */}
+              <div
+                className={cn(
+                  chromeKind !== 'mac' && 'flex justify-center',
+                  chromeKind !== 'mac' && (desktopShell ? 'w-[48px]' : 'w-12')
+                )}
+              >
+                <button
+                  type="button"
+                  data-enso="sidebar-toggle"
+                  className={TOOLBAR_BUTTON}
+                  onClick={() => setCollapsed((v) => !v)}
+                  title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
                 >
-                  <button
-                    type="button"
-                    data-enso="sidebar-toggle"
-                    className={TOOLBAR_BUTTON}
-                    onClick={() => setCollapsed((v) => !v)}
-                    title={collapsed ? t('Expand sidebar') : t('Collapse sidebar')}
-                  >
-                    {collapsed ? (
-                      <PanelLeft className="h-4 w-4" />
-                    ) : (
-                      <PanelLeftClose className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              )}
+                  {collapsed ? (
+                    <PanelLeft className="h-4 w-4" />
+                  ) : (
+                    <PanelLeftClose className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
               {desktopShell && (
                 <>
                   <button
@@ -560,7 +552,7 @@ export default function App() {
           centered={(sideInTitleRow && sideFullscreen ? null : modeSwitch) ?? undefined}
           middle={headerSessionTabs}
           className={cn(
-            chromeKind !== 'mac' && !remoteNodeActive && 'pl-0',
+            chromeKind !== 'mac' && 'pl-0',
             desktopShell && 'border-b-0',
             // 顶栏落在画布上：原生按钮底色随它透明，壁纸与侧栏一样透出来
             desktopShell && 'bg-transparent',
@@ -574,7 +566,7 @@ export default function App() {
           title="EnsoCode"
           centered={modeSwitch ?? undefined}
           leading={
-            isMobile && !remoteNodeActive && !botModeActive ? (
+            isMobile && !botModeActive ? (
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
@@ -598,10 +590,7 @@ export default function App() {
       {!desktopShell && <UpdateBanner />}
       {!desktopShell && <ZoomBanner />}
       <div className="flex min-h-0 flex-1">
-        {remoteNodeActive ? (
-          // 远程节点态：整块换成对方的目录与会话；本机 Sidebar/ChatView/SidePanel 卸载
-          <RemoteNodeView nodeId={activeNodeId} sidebarWidth={width} />
-        ) : botModeActive ? (
+        {botModeActive ? (
           // Bot 模式：成员/群聊侧栏 + 聊天区；Code 侧栏/会话/右侧面板卸载
           <BotView
             sidebarWidth={width}
@@ -713,6 +702,10 @@ export default function App() {
       </div>
       {settingsHydrated && !onboarded && !window.electronAPI.remote && <Onboarding />}
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <PairNodeDialog
+        open={pairDialogOpen}
+        onOpenChange={useRemoteNodesStore.getState().setPairDialogOpen}
+      />
       <AlertDialog
         open={closeRequestId !== null}
         onOpenChange={(open) => {

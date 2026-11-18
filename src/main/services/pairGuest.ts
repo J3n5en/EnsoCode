@@ -26,7 +26,6 @@ import {
 import { powerMonitor } from '@platform';
 import type {
   NodeActionResult,
-  NodeMessage,
   NodePairResult,
   NodesStatus,
   RemoteNodeStatus,
@@ -50,8 +49,8 @@ import { loadRelayHostCache } from './pairStore';
 
 /**
  * 「连接到节点」guest 端：本机连到别的 EnsoCode 桌面（对方是 pairHost）。
- * 与 pairHost 对称——每个节点一条 role=guest 的 WSS、心跳、退避重连、解密后推 renderer。
- * 密钥与连接都留在 main：渲染层刷新不掉线，contentKey 不进渲染层。
+ * 与 pairHost 对称——每个节点一条 role=guest 的 WSS、心跳、退避重连；解密后的远程界面帧交给 nodeRemote 隧道。
+ * 密钥与连接都留在 main：界面刷新不掉线，contentKey 不进渲染层。
  */
 
 interface Connection {
@@ -63,8 +62,6 @@ interface Connection {
   dropRelay: (() => void) | null;
   /** WebRTC 直连：业务帧优先出口；信令与在线态仍走中继 */
   direct: DirectLink;
-  /** renderer 最后一次订阅：切通道 resync 时原样重发（游标偏旧只会多重放，按 index 幂等） */
-  lastSubscribe: PhoneToHost | null;
   hostOnline: boolean;
   /** 当前业务通道 RTT（ms）；切通道时清空 */
   rttMs: number | null;
@@ -84,14 +81,15 @@ interface Connection {
 
 const connections = new Map<string, Connection>();
 let onStatusChange: ((status: NodesStatus) => void) | null = null;
-let onMessage: ((message: NodeMessage) => void) | null = null;
 
-/** 节点设置窗口的 rpc 隧道（nodeRemote）：远程 renderer 帧与宿主在线变化 */
+/** 远程节点界面的 rpc 隧道（nodeRemote）：远程 renderer 帧与宿主在线变化 */
 export interface NodeRemoteHooks {
   frame(nodeId: string, frame: HostToRemote): void;
   /** online=true 也会在已在线时重复触发（中继重建），隧道据此重新 hello */
   online(nodeId: string, online: boolean): void;
   removed(nodeId: string): void;
+  /** 节点列表/状态变化：远程节点主界面里的节点切换器列的也是本机的节点 */
+  status(status: NodesStatus): void;
 }
 let remoteHooks: NodeRemoteHooks | null = null;
 
@@ -110,10 +108,6 @@ export function sendRemoteToNode(nodeId: string, frame: RemoteToHost): void {
 
 export function setNodesStatusListener(listener: (status: NodesStatus) => void): void {
   onStatusChange = listener;
-}
-
-export function setNodesMessageListener(listener: (message: NodeMessage) => void): void {
-  onMessage = listener;
 }
 
 export function getNodesStatus(): NodesStatus {
@@ -138,7 +132,10 @@ export function getNodesStatus(): NodesStatus {
 }
 
 function notifyStatus(): void {
-  onStatusChange?.(getNodesStatus());
+  if (!onStatusChange && !remoteHooks) return;
+  const status = getNodesStatus();
+  onStatusChange?.(status);
+  remoteHooks?.status(status);
 }
 
 // ── 生命周期 ──────────────────────────────────────────────────────────
@@ -301,7 +298,6 @@ function openConnection(node: RemoteNode): void {
     heartbeat: null,
     dropRelay: null,
     direct: null as unknown as DirectLink,
-    lastSubscribe: null,
     hostOnline: false,
     rttMs: null,
     attempt: 0,
@@ -327,11 +323,8 @@ function openConnection(node: RemoteNode): void {
       conn.rttMs = ms;
       notifyStatus();
     },
-    // 切通道瞬间旧通道在途帧可能丢：重要目录 + 重发订阅（renderer 不感知通道切换，由 main 代补）
-    onResync: () => {
-      void sendFrame(conn, { type: 'snapshot' });
-      if (conn.lastSubscribe) void sendFrame(conn, conn.lastSubscribe);
-    },
+    // 切通道瞬间旧通道在途帧可能丢：远程界面隧道重新 hello，宿主按 seq 补发（界面不感知通道切换）
+    onResync: () => remoteHooks?.online(conn.node.nodeId, true),
     onDiagnostic: (line) => console.log(`[nodes] ${conn.node.label}: ${line}`),
     onNeedRelayProbe: () => {
       conn.probeNonce = (conn.probeNonce + 1) >>> 0;
@@ -417,7 +410,6 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
       try {
         const control = JSON.parse(event.data) as { type?: string };
         if (control.type === 'host-online') {
-          const wasOnline = conn.hostOnline;
           // 防重放只在这里重置：host 进房时同样收到 peer-joined 一起重置。中继重连尝试不能重置，
           // 否则直连上的帧退回随机 nonce，被仍锁定旧前缀的 host 静默丢弃
           conn.replay.peerReset();
@@ -425,11 +417,6 @@ function attachGuestSocket(conn: Connection, ws: WebSocket, generation: number):
           conn.direct.peerOnline(true);
           notifyStatus();
           remoteHooks?.online(conn.node.nodeId, true);
-          // 进房即要目录（host 收 peer-joined 也会推，双保险防时序丢帧）
-          void sendFrame(conn, { type: 'snapshot' });
-          // host 换新连接顶替半开旧连接时不发 host-offline：在线态没经历 false→true，renderer
-          // 不会重订阅，而 host 进房已清空本设备订阅，由 main 代补（false→true 时交给 renderer）
-          if (wasOnline && conn.lastSubscribe) void sendFrame(conn, conn.lastSubscribe);
         } else if (control.type === 'host-offline') {
           conn.hostOnline = false;
           conn.direct.peerOnline(false);
@@ -466,7 +453,7 @@ function scheduleReconnect(conn: Connection): void {
   conn.timer = setTimeout(() => connect(conn), delay);
 }
 
-// ── 收：解密 → 过滤 → 推 renderer ────────────────────────────────────
+// ── 收：解密 → 远程界面帧交给隧道，其余只取连接元信息 ──────────────────
 
 /** 按到达顺序逐帧处理（同 pairHost）：否则大快照后紧跟的 status 会先应用，再被快照盖回旧状态 */
 function enqueueFrame(conn: Connection, frame: Uint8Array): void {
@@ -526,21 +513,6 @@ async function handleFrame(conn: Connection, frame: Uint8Array): Promise<void> {
         conn.probeSentAt = null;
       }
       return;
-    // 桌面保留自己的主题；桌面没有 Web Push
-    case 'appearance':
-    case 'push-config':
-      return;
-    // 远程节点不提供 Bot 模式
-    case 'bot-catalog':
-    case 'bot-chats':
-    case 'group-timeline':
-    case 'bot-event':
-    case 'bot-chat-state':
-    case 'bot-send-result':
-    case 'bot-activity':
-      return;
-    default:
-      onMessage?.({ nodeId: conn.node.nodeId, payload });
   }
 }
 
@@ -575,12 +547,4 @@ async function sendViaRelay(conn: Connection, command: PhoneToHost): Promise<voi
   } catch (error) {
     console.warn('[nodes] signal send failed', error);
   }
-}
-
-/** 已过 parseGuestOutbound 校验的命令发给指定节点 */
-export function sendToNode(nodeId: string, command: PhoneToHost): Promise<NodeActionResult> {
-  const conn = connections.get(nodeId);
-  if (!conn) return Promise.resolve({ ok: false, error: 'node not found' });
-  if (command.type === 'subscribe') conn.lastSubscribe = command.sessionId ? command : null;
-  return sendFrame(conn, command);
 }

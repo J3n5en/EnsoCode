@@ -1,5 +1,6 @@
 import { app, type BrowserWindow } from 'electron';
 import { attachAppCloseConfirm } from '../services/appCloseConfirm';
+import { switchNode } from '../services/nodeRemote';
 import { isRemoteMainSender } from '../services/remoteRenderer/senders';
 import { createAppWindow, getWindowWebContents, sendToWindow } from './createAppWindow';
 
@@ -21,7 +22,10 @@ export function createMainWindow(): BrowserWindow {
   attachAppCloseConfirm(
     mainWindow,
     (channel, ...args) => {
-      if (mainWindow && !mainWindow.isDestroyed()) sendToWindow(mainWindow, channel, ...args);
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      // 确认框画在本机界面里：盖着远程节点时先切回本机
+      switchNode('local');
+      sendToWindow(mainWindow, channel, ...args);
     },
     () => getWindowWebContents(mainWindow as BrowserWindow),
     {
@@ -61,10 +65,12 @@ export function isMainWebContents(webContentsId: number): boolean {
   return !contents.isDestroyed() && contents.id === webContentsId;
 }
 
+/** 唤起主窗口的都是本机意图（本机通知、打开文件夹、秘书、投放架等），盖着远程节点时切回本机 */
 export function focusMainWindow(): BrowserWindow {
   const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createMainWindow();
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+  switchNode('local');
   return window;
 }
