@@ -19,6 +19,7 @@ import {
   MessageCircle,
   Minimize2,
   PanelRight,
+  Pin,
   Plus,
   SquareTerminal,
   Workflow,
@@ -80,6 +81,7 @@ import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
+import { pinnableTabForId, planPinnedPanels } from './pinnedTabs';
 import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
 import { TerminalView } from './TerminalView';
@@ -220,11 +222,12 @@ function addBtwPanel(
   api: DockviewApi,
   conversationId: string | undefined,
   projectId: string | undefined,
-  label: string
+  label: string,
+  tabId?: string
 ): void {
   const count = api.panels.filter((panel) => panel.id.startsWith('btw:')).length;
   api.addPanel({
-    id: `btw:${crypto.randomUUID()}`,
+    id: tabId ?? `btw:${crypto.randomUUID()}`,
     component: 'btw',
     title: count === 0 ? label : `${label} ${count + 1}`,
     params: { conversationId, projectId },
@@ -401,6 +404,10 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
   const [title, setTitle] = useState(props.api.title ?? '');
   const [favicon, setFavicon] = useState<string | null>(props.params.favicon ?? null);
   const [faviconBroken, setFaviconBroken] = useState(false);
+  const pinnedTabs = useSidePanelStore((state) => state.pinnedTabs);
+  const togglePinnedTab = useSidePanelStore((state) => state.togglePinnedTab);
+  const pinnableTab = pinnableTabForId(props.api.id);
+  const pinned = pinnableTab ? pinnedTabs.includes(pinnableTab) : false;
   useEffect(() => {
     const a = props.api.onDidActiveChange(() => setActive(props.api.isActive));
     const t = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ''));
@@ -470,6 +477,28 @@ function SidePanelTab(props: IDockviewPanelHeaderProps<{ favicon?: string | null
         <SquareTerminal className="h-3 w-3 shrink-0" />
       )}
       <span className="max-w-32 truncate">{title}</span>
+      {pinnableTab ? (
+        <button
+          type="button"
+          aria-label={t(pinned ? 'Unpin default tab' : 'Pin as default tab')}
+          aria-pressed={pinned}
+          title={t(pinned ? 'Unpin default tab' : 'Pin as default tab')}
+          className={cn(
+            'rounded p-0.5 transition-opacity hover:text-foreground',
+            pinned
+              ? 'text-primary'
+              : 'text-muted-foreground opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100'
+          )}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            togglePinnedTab(pinnableTab);
+          }}
+        >
+          <Pin className="h-3 w-3" />
+        </button>
+      ) : null}
       <button
         type="button"
         className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/tab:opacity-100"
@@ -851,11 +880,18 @@ function ConversationDock({
   conversationId: string;
   projectId: string;
 }) {
+  const { t } = useI18n();
   const isDark = useIsDark();
   const workflowAvailable = useWorkflowAvailable(projectId);
   const secretary = useSecretaryConversation(projectId);
   const secretaryPluginIds = useSecretaryPluginIds();
+  const pluginViews = usePluginViews();
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
+  const activeConversationId = useSessionsStore((state) => state.activeId);
+  const sidePanelOpen = useSidePanelStore(
+    (state) => state.uiByConversation[conversationId]?.open ?? false
+  );
+  const pinnedTabs = useSidePanelStore((state) => state.pinnedTabs);
   // 关掉工具时收起已开的工作流 tab；恢复布局带回来的也一并收掉
   useEffect(() => {
     if (!workflowAvailable) dockApi?.getPanel('workflow')?.api.close();
@@ -868,6 +904,74 @@ function ConversationDock({
       dockApi.getPanel(id)?.api.close();
     }
   }, [dockApi, secretary, secretaryPluginIds]);
+
+  useEffect(() => {
+    if (!dockApi || !sidePanelOpen || activeConversationId !== conversationId) return;
+
+    const plans = planPinnedPanels({
+      pinnedTabs,
+      openPanelIds: dockApi.panels.map((panel) => panel.id),
+      secretary,
+      workflowAvailable,
+      pluginViews,
+      secretaryPluginIds,
+    });
+    if (plans.length === 0) return;
+
+    const wasEmpty = dockApi.panels.length === 0;
+    let firstAddedId: string | undefined;
+    for (const plan of plans) {
+      if (plan.kind === 'terminal') {
+        const id = crypto.randomUUID();
+        dockApi.addPanel({
+          id,
+          component: 'terminal',
+          title: t('Terminal'),
+          params: { conversationId, projectId },
+        });
+        firstAddedId ??= id;
+      } else if (plan.kind === 'changes') {
+        addChangesPanel(dockApi, conversationId, projectId, t('Changes'));
+        firstAddedId ??= 'changes';
+      } else if (plan.kind === 'files') {
+        addFilesPanel(dockApi, conversationId, projectId, t('Files'));
+        firstAddedId ??= 'files';
+      } else if (plan.kind === 'browser') {
+        const id = `browser:${crypto.randomUUID()}`;
+        addBrowserPanel(dockApi, conversationId, projectId, t('Browser'), id);
+        firstAddedId ??= id;
+      } else if (plan.kind === 'btw') {
+        const id = `btw:${crypto.randomUUID()}`;
+        addBtwPanel(dockApi, conversationId, projectId, t('Btw'), id);
+        firstAddedId ??= id;
+      } else if (plan.kind === 'workflow') {
+        addWorkflowPanel(dockApi, conversationId, projectId, t('Workflow'));
+        firstAddedId ??= 'workflow';
+      } else {
+        const view = pluginViews.find(
+          (entry) => entry.pluginId === plan.pluginId && entry.id === plan.viewId
+        );
+        if (!view) continue;
+        const id = `plugin:${plan.pluginId}:${plan.viewId}`;
+        addPluginViewPanel(dockApi, conversationId, projectId, view);
+        firstAddedId ??= id;
+      }
+    }
+
+    if (wasEmpty && firstAddedId) dockApi.getPanel(firstAddedId)?.focus();
+  }, [
+    activeConversationId,
+    conversationId,
+    dockApi,
+    pluginViews,
+    pinnedTabs,
+    projectId,
+    secretary,
+    secretaryPluginIds,
+    sidePanelOpen,
+    t,
+    workflowAvailable,
+  ]);
 
   const onReady = (event: DockviewReadyEvent) => {
     bindSidePanelDock(conversationId, event.api);

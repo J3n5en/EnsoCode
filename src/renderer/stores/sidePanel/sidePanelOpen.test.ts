@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
-import { bindSidePanelFullscreen, useSidePanelStore } from './index';
+import { bindSidePanelFullscreen, type PinnableSidePanelTab, useSidePanelStore } from './index';
 import { SIDE_PANEL_VERSION } from './migrate';
 
 const sessionListeners = vi.hoisted(() => ({
@@ -55,6 +55,23 @@ function sessions(activeId: string) {
     },
   } as unknown as ReturnType<typeof useSessionsStore.getState>);
 }
+
+describe('固定默认标签', () => {
+  it('固定、取消固定，脏值也能重新记成列表', () => {
+    useSidePanelStore.setState({ pinnedTabs: [] });
+    useSidePanelStore.getState().togglePinnedTab('files');
+    useSidePanelStore.getState().togglePinnedTab('browser');
+    expect(useSidePanelStore.getState().pinnedTabs).toEqual(['files', 'browser']);
+    useSidePanelStore.getState().togglePinnedTab('files');
+    expect(useSidePanelStore.getState().pinnedTabs).toEqual(['browser']);
+
+    useSidePanelStore.setState({
+      pinnedTabs: 'files' as unknown as PinnableSidePanelTab[],
+    });
+    expect(() => useSidePanelStore.getState().togglePinnedTab('changes')).not.toThrow();
+    expect(useSidePanelStore.getState().pinnedTabs).toEqual(['changes']);
+  });
+});
 
 describe('侧栏开关按会话独立', () => {
   beforeEach(() => {

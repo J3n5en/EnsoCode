@@ -10,6 +10,14 @@ import { resizeSidePanelWidth, SIDE_PANEL_DEFAULT_WIDTH } from './width';
 export { SIDE_PANEL_DEFAULT_WIDTH, SIDE_PANEL_MIN_WIDTH } from './width';
 
 export type ChangesMode = 'all' | 'git';
+export type PinnableSidePanelTab =
+  | 'terminal'
+  | 'changes'
+  | 'files'
+  | 'browser'
+  | 'btw'
+  | 'workflow'
+  | `plugin:${string}:${string}`;
 
 export type SidePanelUi = { open: boolean; width: number };
 
@@ -27,6 +35,8 @@ interface SidePanelState {
   browserHoles: Record<string, ScreenRect>;
   /** conversationId -> dockview 序列化布局(分屏结构 + tab 集合) */
   layouts: Record<string, SerializedDockview | undefined>;
+  /** 新会话打开侧栏时自动创建的面板类型 */
+  pinnedTabs: PinnableSidePanelTab[];
   changesModeByConversation: Record<string, ChangesMode>;
   /**
    * Changes「Session」模式的编辑前全文，按会话惰性从主进程回读（运行态，不 persist）。
@@ -43,6 +53,7 @@ interface SidePanelState {
   nudgeWidth: (delta: number, workspaceWidth: number, handleWidth: number) => void;
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
+  togglePinnedTab: (tab: PinnableSidePanelTab) => void;
   saveLayout: (conversationId: string, layout: SerializedDockview) => void;
   forgetConversation: (conversationId: string) => void;
   setChangesMode: (conversationId: string, mode: ChangesMode) => void;
@@ -85,6 +96,7 @@ export const useSidePanelStore = create<SidePanelState>()(
       uiByConversation: {},
       browserHoles: {},
       layouts: {},
+      pinnedTabs: [],
       changesModeByConversation: {},
       snapshotsByConversation: {},
 
@@ -154,6 +166,16 @@ export const useSidePanelStore = create<SidePanelState>()(
         set({
           fullscreen,
           ...(id ? { fullscreenByConversation: rememberFullscreen(get(), id, fullscreen) } : {}),
+        });
+      },
+
+      togglePinnedTab: (tab) => {
+        const current = get().pinnedTabs;
+        const pinnedTabs = Array.isArray(current) ? current : [];
+        set({
+          pinnedTabs: pinnedTabs.includes(tab)
+            ? pinnedTabs.filter((item) => item !== tab)
+            : [...pinnedTabs, tab],
         });
       },
 
@@ -228,6 +250,7 @@ export const useSidePanelStore = create<SidePanelState>()(
         uiByConversation: state.uiByConversation,
         fullscreenByConversation: state.fullscreenByConversation,
         layouts: state.layouts,
+        pinnedTabs: state.pinnedTabs,
         changesModeByConversation: state.changesModeByConversation,
       }),
       migrate: (persisted, version) => {

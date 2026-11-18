@@ -430,6 +430,8 @@ export const zhTranslations: Record<string, string> = {
   conflicted: '冲突',
   Browser: '浏览器',
   'New tab': '新建标签页',
+  'Pin as default tab': '固定为默认标签页',
+  'Unpin default tab': '取消固定默认标签页',
   Soon: '即将支持',
   Forward: '前进',
   'Enter a URL': '输入网址',
