@@ -173,6 +173,17 @@ export default function App() {
   useEffect(() => {
     if (sideFullscreen && !sideOpen) useSidePanelStore.getState().setFullscreen(false);
   }, [sideOpen, sideFullscreen]);
+  // 全屏是按会话记的：切会话后换成这个会话自己的，秘书的全屏层不再盖住别的会话。
+  // 订阅放在 effect 里而不是依赖数组：会话 id 只决定何时跑，不参与渲染。
+  useEffect(
+    () =>
+      useSessionsStore.subscribe((state, prev) => {
+        if (state.activeId !== prev.activeId) {
+          useSidePanelStore.getState().reconcileForActiveConversation();
+        }
+      }),
+    []
+  );
   useEffect(() => {
     document.documentElement.classList.add('enso-main-shell');
     return () => document.documentElement.classList.remove('enso-main-shell');
