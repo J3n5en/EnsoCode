@@ -139,7 +139,6 @@ import { openSecretary } from '@/lib/openSecretary';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
-import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import {
@@ -792,7 +791,6 @@ export function Sidebar({
       const switchMode = mod && !e.shiftKey && !e.altKey;
       setModHeld(switchMode);
       if (!switchMode || e.repeat) return;
-      if (useRemoteNodesStore.getState().activeNodeId !== 'local') return;
       const n = Number(e.key);
       if (n < 1 || n > 9) return;
       const id = switchSlotsRef.current[n - 1];
@@ -944,10 +942,10 @@ export function Sidebar({
               <Archive className="h-4 w-4" />
             </button>
           )}
-          {window.electronAPI.remote && (
+          {window.electronAPI.remote?.exitDesk && (
             <button
               type="button"
-              onClick={() => window.electronAPI.remote?.exitDesk()}
+              onClick={() => window.electronAPI.remote?.exitDesk?.()}
               className={ICON_BUTTON_CLASS}
               title={t('Compact view')}
             >
@@ -1736,10 +1734,10 @@ export function Sidebar({
               <Archive className="h-4 w-4" />
             </button>
           )}
-          {window.electronAPI.remote && (
+          {window.electronAPI.remote?.exitDesk && (
             <button
               type="button"
-              onClick={() => window.electronAPI.remote?.exitDesk()}
+              onClick={() => window.electronAPI.remote?.exitDesk?.()}
               className={ICON_BUTTON_CLASS}
               title={t('Compact view')}
             >

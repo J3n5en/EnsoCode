@@ -1,4 +1,4 @@
-import type { NodeMessage } from '@shared/types/nodes';
+import type { HostToRemote } from '@enso/pair';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface TestSocket {
@@ -124,6 +124,7 @@ vi.mock('./pairRelayOpen', () => ({
 vi.mock('./pairStore', () => ({ loadRelayHostCache: () => null }));
 vi.mock('./nodeStore', () => ({
   adoptHostname: (nodes: unknown) => nodes,
+  isNodeStoreSecure: () => true,
   loadNodes: () => [mocks.node],
   removeNode: (nodes: unknown) => nodes,
   renameNode: (nodes: unknown) => nodes,
@@ -133,8 +134,8 @@ vi.mock('./nodeStore', () => ({
 
 import {
   isPairClaimRejected,
-  sendToNode,
-  setNodesMessageListener,
+  sendRemoteToNode,
+  setNodeRemoteHooks,
   startPairGuest,
   stopPairGuest,
 } from './pairGuest';
@@ -160,7 +161,8 @@ function deliver(socket: TestSocket, frame: Uint8Array): void {
 }
 
 const NODE_ID = mocks.node.nodeId;
-let received: NodeMessage[] = [];
+let received: HostToRemote[] = [];
+let online: boolean[] = [];
 
 beforeEach(async () => {
   vi.useFakeTimers();
@@ -169,7 +171,13 @@ beforeEach(async () => {
   mocks.directSent = [];
   mocks.openGates = [];
   received = [];
-  setNodesMessageListener((message) => received.push(message));
+  online = [];
+  setNodeRemoteHooks({
+    frame: (_nodeId, frame) => received.push(frame),
+    online: (_nodeId, value) => online.push(value),
+    removed: () => {},
+    status: () => {},
+  });
   startPairGuest();
   await flush();
   expect(mocks.sockets).toHaveLength(1);
@@ -180,13 +188,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function sentSubscribes(socket: TestSocket): Promise<unknown[]> {
-  const payloads = await Promise.all(socket.sent.map((frame) => frames.open(key, frame)));
-  return payloads.filter((payload) => (payload as { type?: string }).type === 'subscribe');
-}
-
 describe('pairGuest 收帧顺序', () => {
-  // 真实场景：大快照后紧跟 status / upsert，各帧并发解密时小帧先解完被先应用，随后快照把状态盖回旧值
+  // 真实场景：大帧（资源、快照事件）后紧跟小帧，各帧并发解密时小帧先解完被先交给隧道，顺序就乱了
   it('先到的大帧解密慢时，后到的小帧也要等它应用完再应用', async () => {
     const socket = mocks.sockets[0];
     openSocket(socket);
@@ -196,54 +199,27 @@ describe('pairGuest 收帧顺序', () => {
         release = resolve;
       })
     );
-    deliver(
-      socket,
-      await frames.seal(key, { type: 'agent-event', event: { type: 'snapshot', sessions: [] } })
-    );
-    deliver(
-      socket,
-      await frames.seal(key, {
-        type: 'agent-event',
-        event: { type: 'status', sessionId: 's1', status: 'idle' },
-      })
-    );
+    deliver(socket, await frames.seal(key, { type: 'rpc-event', cid: 'c', ch: 'big', args: [] }));
+    deliver(socket, await frames.seal(key, { type: 'rpc-event', cid: 'c', ch: 'small', args: [] }));
     await flush();
     release();
     await flush();
     expect(
-      received.map((message) => (message.payload as { event: { type: string } }).event.type)
-    ).toEqual(['snapshot', 'status']);
+      received.map((frame) => (frame as Extract<HostToRemote, { type: 'rpc-event' }>).ch)
+    ).toEqual(['big', 'small']);
   });
 });
 
-describe('pairGuest host 重新进房', () => {
-  // 真实场景：host 新连接顶替半开旧连接时中继只发 host-online、不发 host-offline，host 进房已清空本设备订阅；
-  // 在线态没经历 false→true，渲染层不会重订阅，节点正在看的会话正文冻结
-  it('host 重新进房只来 host-online 时补发最后一次订阅', async () => {
+describe('pairGuest host 进出房', () => {
+  // host 换新连接顶替半开旧连接时中继只发 host-online、不发 host-offline：每次都要告诉隧道，让它重新 hello 续上
+  it('每条 host-online / host-offline 都通知远程界面隧道', async () => {
     const socket = mocks.sockets[0];
     openSocket(socket);
     control(socket, 'host-online');
-    await sendToNode(NODE_ID, { type: 'subscribe', sessionId: 's1', sinceIndex: 3 });
-    await flush();
-    expect(await sentSubscribes(socket)).toHaveLength(1);
     control(socket, 'host-online');
-    await flush();
-    const subscribes = await sentSubscribes(socket);
-    expect(subscribes).toHaveLength(2);
-    expect(subscribes[1]).toMatchObject({ type: 'subscribe', sessionId: 's1' });
-  });
-
-  // host 掉线再上线（或节点重连后的首条 host-online）在线态 false→true，渲染层会带最新游标重订阅，main 不重复补发
-  it('在线态 false→true 的 host-online 不由 main 重复补发订阅', async () => {
-    const socket = mocks.sockets[0];
-    openSocket(socket);
-    control(socket, 'host-online');
-    await sendToNode(NODE_ID, { type: 'subscribe', sessionId: 's1', sinceIndex: 3 });
-    await flush();
     control(socket, 'host-offline');
-    control(socket, 'host-online');
     await flush();
-    expect(await sentSubscribes(socket)).toHaveLength(1);
+    expect(online).toEqual([true, true, false]);
   });
 });
 
@@ -256,10 +232,11 @@ describe('pairGuest 中继重连与防重放', () => {
     const socket = mocks.sockets[0];
     openSocket(socket);
     control(socket, 'host-online');
+    sendRemoteToNode(NODE_ID, { type: 'remote-ack', bytes: 0, gzip: true });
     await flush();
-    // 握手：host 从进房 snapshot 学到质询；节点收到带回声的帧后回 replay-hello，双方锁定
+    // 握手：host 从节点的首帧学到质询；节点收到带回声的帧后回 replay-hello，双方锁定
     for (const frame of socket.sent) await host.open(key, frame);
-    deliver(socket, await host.seal(key, { type: 'catalog', entries: [] }));
+    deliver(socket, await host.seal(key, { type: 'rpc-event', cid: 'c', ch: 'x', args: [] }));
     await flush();
     const hello = socket.sent.at(-1) as Uint8Array;
     expect(await host.open(key, hello)).toEqual({ type: 'replay-hello' });
@@ -269,9 +246,10 @@ describe('pairGuest 中继重连与防重放', () => {
     socket.onclose?.({ code: 1006 });
     await flush();
     expect(mocks.sockets).toHaveLength(2);
-    await sendToNode(NODE_ID, { type: 'prompt', sessionId: 's1', text: 'hi' });
+    sendRemoteToNode(NODE_ID, { type: 'rpc-send', cid: 'c', id: 1, ch: 'agent:prompt', args: [] });
+    await flush();
     const prompt = mocks.directSent.at(-1) as Uint8Array;
-    expect(await host.open(key, prompt)).toMatchObject({ type: 'prompt', text: 'hi' });
+    expect(await host.open(key, prompt)).toMatchObject({ type: 'rpc-send', ch: 'agent:prompt' });
     // 防重放不能被削弱：同一帧再到、握手阶段的旧帧再到都要丢
     expect(await host.open(key, prompt)).toBeUndefined();
     expect(await host.open(key, hello)).toBeUndefined();

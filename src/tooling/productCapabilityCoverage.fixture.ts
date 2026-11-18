@@ -695,6 +695,9 @@ export const IPC_PRODUCT_COVERAGE = {
   NOTIFICATION_ACTIVE_SESSION: excluded(
     'Renderer reports the currently viewed conversation id so Main can suppress redundant system notifications; no execution rights.'
   ),
+  NOTIFICATION_SHOW: excluded(
+    'Host forwards a system notification to remote desktop views; the guest main shows it; no execution rights.'
+  ),
   AGENT_SESSION_MUTED: excluded(
     'Renderer reports a conversation mute toggle so Main stops system notifications and paired-device pushes immediately; no execution rights.'
   ),
@@ -858,10 +861,20 @@ export const IPC_PRODUCT_COVERAGE = {
   PAIR_QUEUE_ACTION: excluded('Phone second-screen pairing transport; not an Enso capability.'),
   NODES_LIST: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_PAIR: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
+  NODES_REQUEST_PAIR: excluded(
+    'Remote node (desktop guest) pairing transport; not an Enso capability.'
+  ),
+  NODES_PAIR_REQUESTED: excluded(
+    'Remote node (desktop guest) pairing transport; not an Enso capability.'
+  ),
   NODES_REMOVE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_RENAME: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
-  NODES_SEND: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   NODES_OPEN_SETTINGS: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODES_SWITCH: excluded('Remote node (desktop guest) view switching; not an Enso capability.'),
+  NODES_ACTIVE: excluded('Remote node (desktop guest) view switching; not an Enso capability.'),
+  NODES_ACTIVE_CHANGED: excluded(
+    'Remote node (desktop guest) view switching; not an Enso capability.'
+  ),
   NODE_REMOTE_INIT: excluded('Remote node settings window transport; not an Enso capability.'),
   NODE_REMOTE_ATTACH: excluded('Remote node settings window transport; not an Enso capability.'),
   NODE_REMOTE_INVOKE: excluded('Remote node settings window transport; not an Enso capability.'),
@@ -869,10 +882,18 @@ export const IPC_PRODUCT_COVERAGE = {
   NODE_REMOTE_DETACH: excluded('Remote node settings window transport; not an Enso capability.'),
   NODE_REMOTE_CLOSE: excluded('Remote node settings window transport; not an Enso capability.'),
   NODE_REMOTE_EVENT: excluded('Remote node settings window transport; not an Enso capability.'),
+  NODE_REMOTE_LOCAL_INVOKE: excluded(
+    'Remote node view bridge to the guest main process; not an Enso capability.'
+  ),
+  NODE_REMOTE_LOCAL_SEND: excluded(
+    'Remote node view bridge to the guest main process; not an Enso capability.'
+  ),
+  NODE_REMOTE_LOCAL_EVENT: excluded(
+    'Remote node view bridge to the guest main process; not an Enso capability.'
+  ),
   NODES_STATUS_CHANGED: excluded(
     'Remote node (desktop guest) pairing transport; not an Enso capability.'
   ),
-  NODES_MESSAGE: excluded('Remote node (desktop guest) pairing transport; not an Enso capability.'),
   TERMINAL_CREATE: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_WRITE: excluded('Side panel terminal pty transport; renderer UI only.'),
   TERMINAL_RESIZE: excluded('Side panel terminal pty transport; renderer UI only.'),

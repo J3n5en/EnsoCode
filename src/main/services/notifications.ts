@@ -8,6 +8,7 @@ import { app, BrowserWindow, Notification } from 'electron';
 import { readSettings } from '../ipc/settings';
 import { getWindowWebContents, sendToWindow } from '../windows/createAppWindow';
 import { ApprovalNotificationGate } from './approvalNotificationGate';
+import { sendToRemoteRenderers } from './remoteRenderer/senders';
 import { isSessionMuted } from './sessionMuteGate';
 
 const approvalNotifications = new ApprovalNotificationGate();
@@ -75,9 +76,21 @@ const mainWindowFocused = (): boolean =>
 
 /** renderer 上报的「当前正在查看的会话」（tab 生效时为 tab 的 session id） */
 let viewedSessionId: string | null = null;
+/** 主窗口盖着远程节点界面时，本机正在看的会话并不在眼前，不据此抑制 */
+let localLayerVisible = true;
 
 export function setViewedSession(sessionId: string | null): void {
   viewedSessionId = sessionId;
+}
+
+export function setLocalLayerVisible(visible: boolean): void {
+  localLayerVisible = visible;
+}
+
+/** 用户正看着本机界面：主窗口聚焦且没被远程节点界面盖住 */
+async function localUiInFront(): Promise<boolean> {
+  const { getMainWindow } = await import('../windows/MainWindow');
+  return localLayerVisible && getMainWindow()?.isFocused() === true;
 }
 
 /** 点击通知：聚焦（托盘模式下重建）主窗口，renderer 加载完再切到对应会话 */
@@ -94,7 +107,7 @@ function notify(
   sessionId: string,
   title: string,
   body: string,
-  onClick = () => void focusSession(sessionId),
+  onClick: () => void = () => void focusSession(sessionId),
   icon?: string
 ): void {
   // macOS 未打包（未签名）app 的原生通知会被 UNUserNotificationCenter 静默丢弃，
@@ -126,6 +139,22 @@ function notify(
   notification.show();
 }
 
+interface NotificationContent {
+  sessionId: string;
+  title: string;
+  body: string;
+}
+
+/** 远程节点（对方桌面）转来的通知：标题带节点名，点击由调用方切到该节点 */
+export function notifyFromNode(
+  nodeLabel: string,
+  content: NotificationContent,
+  onClick: () => void
+): void {
+  const title = nodeLabel ? `${nodeLabel} · ${content.title}` : content.title;
+  notify(content.sessionId, title, content.body, onClick);
+}
+
 export async function maybeNotifyBot(
   event: RendererAgentEvent,
   bot: { enabled: boolean; chatId: string | null; name: string; conversationId: string }
@@ -135,9 +164,10 @@ export async function maybeNotifyBot(
   if (!bot.enabled) return;
   if (event.type !== 'approval-request' && event.type !== 'ask-request') return;
   if (isSessionMuted(event.identity.sessionId)) return;
-  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
+  const { focusMainWindow } = await import('../windows/MainWindow');
+  const inFront = await localUiInFront();
   if (!isCurrent()) return;
-  if (getMainWindow()?.isFocused()) return;
+  if (inFront) return;
   const title = `${bot.name} · ${event.type === 'ask-request' ? texts().ask : texts().approval}`;
   const body =
     event.type === 'ask-request'
@@ -158,8 +188,8 @@ export async function notifyBotChat(
   chatId: string,
   build: (lang: 'zh' | 'en') => { title: string; body: string }
 ): Promise<void> {
-  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
-  if (getMainWindow()?.isFocused()) return;
+  const { focusMainWindow } = await import('../windows/MainWindow');
+  if (await localUiInFront()) return;
   const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
   notify(`bot-chat:${chatId}`, title, body, () => {
     sendToWindow(focusMainWindow(), IPC_CHANNELS.BOT_EVENT, { kind: 'open', chatId });
@@ -170,8 +200,8 @@ export async function notifyBotChat(
 export async function notifySecretary(
   build: (lang: 'zh' | 'en') => { title: string; body: string }
 ): Promise<void> {
-  const { focusMainWindow, getMainWindow } = await import('../windows/MainWindow');
-  if (getMainWindow()?.isFocused()) return;
+  const { focusMainWindow } = await import('../windows/MainWindow');
+  if (await localUiInFront()) return;
   const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
   notify('secretary', title, body, () => void focusMainWindow(), await secretaryNotificationIcon());
 }
@@ -188,56 +218,59 @@ async function secretaryNotificationIcon(): Promise<string | undefined> {
 /**
  * 后台通知：对待审批/轮完成/会话失败弹系统通知。
  * 仅当「主窗口聚焦且用户正看着事件所属会话」时抑制——看别的会话/设置页照弹。
+ * 同时转给以远程节点方式连来的桌面主界面，由它所在的电脑按自己的可见层决定是否弹。
  * 挂在 main 的 agent 事件广播流上,与 renderer 转发互不影响。
  */
 export function maybeNotify(event: RendererAgentEvent): void {
   if (!approvalNotifications.observe(event)) return;
   const sessionId = (event as { identity?: { sessionId?: string } }).identity?.sessionId;
   if (sessionId && isSessionMuted(sessionId)) return;
-  if (mainWindowFocused() && sessionId !== undefined && sessionId === viewedSessionId) return;
   if (shouldMuteCoworkerCompletionNotification(event, readNotifyMainAgentOnly())) return;
+  const content = notificationContent(event);
+  if (!content) return;
+  sendToRemoteRenderers(IPC_CHANNELS.NOTIFICATION_SHOW, [content], undefined, 'settings');
+  if (localLayerVisible && mainWindowFocused() && content.sessionId === viewedSessionId) return;
+  notify(content.sessionId, content.title, content.body);
+}
+
+function notificationContent(event: RendererAgentEvent): NotificationContent | null {
   const t = texts();
   switch (event.type) {
     case 'ask-request':
       // 转给秘书的提问不弹给用户：秘书会答，用户也可以在那个会话里自己答
-      if (event.ask.relay) return;
+      if (event.ask.relay) return null;
       // agent 在等答复才能继续,不提醒会静默卡住整个会话
-      notify(
-        event.identity.sessionId,
-        eventTitle(event.identity.sessionId, t.ask),
-        event.ask.question.slice(0, 100)
-      );
-      return;
+      return {
+        sessionId: event.identity.sessionId,
+        title: eventTitle(event.identity.sessionId, t.ask),
+        body: event.ask.question.slice(0, 100),
+      };
     case 'approval-request':
-      notify(
-        event.identity.sessionId,
-        eventTitle(event.identity.sessionId, t.approval),
-        `${event.request.tool} · ${event.request.summary.slice(0, 80)}`
-      );
-      return;
+      return {
+        sessionId: event.identity.sessionId,
+        title: eventTitle(event.identity.sessionId, t.approval),
+        body: `${event.request.tool} · ${event.request.summary.slice(0, 80)}`,
+      };
     case 'turn-completed':
       if (
         event.silent === true ||
         (event.digest && shouldSilenceTurn(event.digest.userText, event.digest.assistantText))
       ) {
-        return;
+        return null;
       }
-      notify(
-        event.identity.sessionId,
-        eventTitle(event.identity.sessionId, t.turnDone),
-        t.turnDoneBody
-      );
-      return;
+      return {
+        sessionId: event.identity.sessionId,
+        title: eventTitle(event.identity.sessionId, t.turnDone),
+        body: t.turnDoneBody,
+      };
     case 'status':
-      if (event.status === 'failed' && event.error) {
-        notify(
-          event.identity.sessionId,
-          eventTitle(event.identity.sessionId, t.failed),
-          event.error.slice(0, 100)
-        );
-      }
-      return;
+      if (event.status !== 'failed' || !event.error) return null;
+      return {
+        sessionId: event.identity.sessionId,
+        title: eventTitle(event.identity.sessionId, t.failed),
+        body: event.error.slice(0, 100),
+      };
     default:
-      return;
+      return null;
   }
 }

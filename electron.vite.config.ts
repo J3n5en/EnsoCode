@@ -51,8 +51,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: path.resolve(__dirname, 'src/preload/index.ts'),
-          // 节点设置窗口壳页：只暴露 __ensoRemote
-          nodeSettings: path.resolve(__dirname, 'src/preload/nodeSettings.ts'),
+          // 远程节点壳（主窗口节点层与节点设置窗口）：只暴露 __ensoRemote
+          nodeRemote: path.resolve(__dirname, 'src/preload/nodeRemote.ts'),
           // 拖放浮窗：不暴露 API，只处理拖放
           dropShelf: path.resolve(__dirname, 'src/preload/dropShelf.ts'),
         },

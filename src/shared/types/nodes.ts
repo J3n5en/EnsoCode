@@ -28,12 +28,6 @@ export interface NodesStatus {
   secureStorage: boolean;
 }
 
-/** main → renderer：解密后的 host 下行帧（appearance/push-config 已在 main 过滤） */
-export interface NodeMessage {
-  nodeId: string;
-  payload: unknown;
-}
-
 export type NodePairError = 'invalid-uri' | 'expired-or-claimed' | 'relay-unreachable';
 
 export type NodePairResult =

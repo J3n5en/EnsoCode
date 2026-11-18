@@ -2,7 +2,6 @@ import type { BotEvent } from '@shared/types/botIpc';
 import { create } from 'zustand';
 import { useBotsStore } from '@/stores/bots';
 import { openTarget } from '@/stores/bots/delegations';
-import { useRemoteNodesStore } from '@/stores/remoteNodes';
 import { useSettingsStore } from '@/stores/settings';
 
 export type AppMode = 'code' | 'bot';
@@ -22,23 +21,18 @@ export const useAppModeStore = create<AppModeState>()((set) => ({
   },
 }));
 
-/** 实际处于 Bot 模式：开关打开、停在本机、且选了 Bot */
+/** 实际处于 Bot 模式：开关打开且选了 Bot */
 export function isBotModeActive(): boolean {
-  return (
-    useSettingsStore.getState().botModeEnabled &&
-    useRemoteNodesStore.getState().activeNodeId === 'local' &&
-    useAppModeStore.getState().mode === 'bot'
-  );
+  return useSettingsStore.getState().botModeEnabled && useAppModeStore.getState().mode === 'bot';
 }
 
 export function useBotModeActive(): boolean {
   const enabled = useSettingsStore((s) => s.botModeEnabled);
-  const local = useRemoteNodesStore((s) => s.activeNodeId === 'local');
   const mode = useAppModeStore((s) => s.mode);
-  return enabled && local && mode === 'bot';
+  return enabled && mode === 'bot';
 }
 
-/** 系统通知点击：切回本机 Bot 模式并打开对应聊天（委派子会话归到委派所属聊天，找不到则收件箱） */
+/** 系统通知点击：切到 Bot 模式并打开对应聊天（委派子会话归到委派所属聊天，找不到则收件箱） */
 export async function openBotNotification(event: BotEvent): Promise<void> {
   if (!useSettingsStore.getState().botModeEnabled) return;
   const chatId = typeof event.chatId === 'string' ? event.chatId : undefined;
@@ -46,8 +40,6 @@ export async function openBotNotification(event: BotEvent): Promise<void> {
     typeof event.conversationId === 'string' ? event.conversationId : undefined;
   const bots = useBotsStore.getState();
   if (!chatId) await bots.refreshDelegations();
-  if (useRemoteNodesStore.getState().activeNodeId !== 'local')
-    useRemoteNodesStore.getState().switchNode('local');
   useAppModeStore.getState().setMode('bot');
   const target = openTarget({ chatId, conversationId }, useBotsStore.getState().delegations);
   if (target.kind === 'chat') {
@@ -57,9 +49,7 @@ export async function openBotNotification(event: BotEvent): Promise<void> {
   bots.setView(target);
 }
 
-/** Code 会话通知点击：从远程节点 / Bot 模式切回本机 Code 视图，选中会话由 sessions store 负责 */
+/** Code 会话通知点击：从 Bot 模式切回 Code 视图，选中会话由 sessions store 负责 */
 export function showLocalCodeView(): void {
-  if (useRemoteNodesStore.getState().activeNodeId !== 'local')
-    useRemoteNodesStore.getState().switchNode('local');
   useAppModeStore.getState().setMode('code');
 }

@@ -1,189 +1,67 @@
-import type { PhoneToHost } from '@enso/pair';
-import type { NodeMessage, NodesStatus, RemoteNodeStatus } from '@shared/types/nodes';
+import type { NodesStatus, RemoteNodeStatus } from '@shared/types/nodes';
 import { create } from 'zustand';
-import {
-  applyNodeMessage,
-  type Cursors,
-  emptyNodeView,
-  type NodeEffect,
-  type NodeView,
-  onHostOnlineChanged,
-  requestHistory as reduceRequestHistory,
-  resumeRememberedSession as reduceResumeRememberedSession,
-  selectSession as reduceSelectSession,
-} from './reducer';
 
 /**
- * 远程节点 store：本机作为 guest 看到的别的桌面。
- * 传输与密钥在 main（pairGuest），这里只持有目录/会话投影与订阅状态。
- * 与本机 useSessionsStore 完全独立：切到远程节点时整个侧栏+聊天区换成 RemoteNodeView。
+ * 远程节点 store：本机作为 guest 连上的别的桌面（列表与在线状态）及主窗口当前可见层。
+ * 连接、密钥与可见层都在 main：切到节点时 main 在主窗口叠上对方的完整界面。
  */
 
 export type ActiveNode = 'local' | string;
 
-const ACTIVE_NODE_KEY = 'enso-active-node';
-const cursorKey = (nodeId: string) => `enso-node-cursors:${nodeId}`;
-const lastSessionKey = (nodeId: string) => `enso-node-last-session:${nodeId}`;
-
-function loadCursors(nodeId: string): Cursors {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(cursorKey(nodeId)) ?? '{}');
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Cursors) : {};
-  } catch {
-    return {};
-  }
-}
-
-/** 直接覆写（可回退）：截断/压缩后游标必须能退，否则 host 会把后续新消息当旧消息过掉 */
-function saveCursor(nodeId: string, sessionId: string, index: number): void {
-  const cursors = loadCursors(nodeId);
-  if (cursors[sessionId] === index) return;
-  cursors[sessionId] = index;
-  localStorage.setItem(cursorKey(nodeId), JSON.stringify(cursors));
-}
-
 interface RemoteNodesState {
   nodes: RemoteNodeStatus[];
   secureStorage: boolean;
+  /** 主窗口当前可见层（main 为权威源，经 nodes:active-changed 同步） */
   activeNodeId: ActiveNode;
-  byNode: Record<string, NodeView>;
-  /** 本机刚 spawn、尚未收到目录的会话：首次订阅不进 syncing */
-  freshIds: ReadonlySet<string>;
-
-  /** 订阅 main 的状态/消息推送；App 挂载时调一次，返回清理函数 */
+  pairDialogOpen: boolean;
+  /** 订阅 main 的状态与可见层推送，返回清理函数 */
   bind: () => () => void;
+  /** 请 main 切换主窗口可见层；activeNodeId 随 main 广播更新 */
   switchNode: (nodeId: ActiveNode) => void;
-  selectSession: (nodeId: string, sessionId: string | null) => void;
-  send: (nodeId: string, command: PhoneToHost) => void;
-  requestHistory: (nodeId: string, sessionId: string) => void;
-  /** 新建远程会话：本地生成 sessionId、发 spawn、立即选中 */
-  spawn: (
-    nodeId: string,
-    request: Omit<Extract<PhoneToHost, { type: 'spawn' }>, 'type' | 'sessionId'>
-  ) => string;
+  /** 节点层里不在此配对：请所在电脑切回本机，由本机界面打开对话框，配对链接只在本机界面输入 */
+  requestPairDialog: () => void;
+  setPairDialogOpen: (open: boolean) => void;
   /** 重新配对/解绑等外部动作后刷新列表 */
   refresh: () => Promise<void>;
 }
 
-export const useRemoteNodesStore = create<RemoteNodesState>()((set, get) => {
-  const viewOf = (nodeId: string): NodeView => get().byNode[nodeId] ?? emptyNodeView();
-
-  const runEffects = (nodeId: string, effects: NodeEffect[]): void => {
-    for (const effect of effects) {
-      switch (effect.kind) {
-        case 'send':
-          void window.electronAPI.nodes.send(nodeId, effect.command);
-          break;
-        case 'cursor':
-          saveCursor(nodeId, effect.sessionId, effect.index);
-          break;
-        case 'ghost':
-          // reducer 已清 activeSessionId；这里只需把「最近会话」记忆抹掉
-          localStorage.removeItem(lastSessionKey(nodeId));
-          break;
-      }
-    }
-  };
-
-  const commit = (nodeId: string, view: NodeView, effects: NodeEffect[]): void => {
-    set({ byNode: { ...get().byNode, [nodeId]: view } });
-    runEffects(nodeId, effects);
-  };
-
-  /**
-   * 进入远程节点视图（切换或窗口重载后仍停在该节点）：恢复上次看的会话并订阅，再要一次目录。
-   * 目录可能还没到（刷新后 store 是空的）：此时先按记忆的会话 id 订阅，目录到达后由 UI 兑现。
-   */
-  const enterNode = (nodeId: string): void => {
-    const last = localStorage.getItem(lastSessionKey(nodeId));
-    const r = reduceResumeRememberedSession(viewOf(nodeId), last, loadCursors(nodeId));
-    commit(nodeId, r.view, [...r.effects, { kind: 'send', command: { type: 'snapshot' } }]);
-  };
-
-  const applyStatus = (status: NodesStatus): void => {
-    const prev = get().nodes;
+export const useRemoteNodesStore = create<RemoteNodesState>()((set) => {
+  const applyStatus = (status: NodesStatus): void =>
     set({ nodes: status.nodes, secureStorage: status.secureStorage });
-    // 节点被删（解绑/被对方解绑）：正在看它就切回本机
-    const known = new Set(status.nodes.map((n) => n.nodeId));
-    const active = get().activeNodeId;
-    if (active !== 'local' && !known.has(active)) get().switchNode('local');
-    // 对方上线：重订阅 + 拉目录
-    for (const node of status.nodes) {
-      const before = prev.find((n) => n.nodeId === node.nodeId)?.hostOnline ?? false;
-      if (!before && node.hostOnline) {
-        const r = onHostOnlineChanged(viewOf(node.nodeId), true, loadCursors(node.nodeId));
-        commit(node.nodeId, r.view, r.effects);
-      }
-    }
-  };
+  const applyActive = (activeNodeId: ActiveNode): void => set({ activeNodeId });
 
   return {
     nodes: [],
     secureStorage: true,
-    activeNodeId: (localStorage.getItem(ACTIVE_NODE_KEY) as ActiveNode | null) ?? 'local',
-    byNode: {},
-    freshIds: new Set(),
+    activeNodeId: 'local',
+    pairDialogOpen: false,
 
     bind: () => {
-      // 先挂监听再拉状态/发 snapshot：否则 NODES_LIST 回放和 host 重发的目录帧会再次丢
       const offStatus = window.electronAPI.nodes.onStatusChanged(applyStatus);
-      const offMessage = window.electronAPI.nodes.onMessage((message: NodeMessage) => {
-        const r = applyNodeMessage(viewOf(message.nodeId), message.payload);
-        if (r.view === get().byNode[message.nodeId]) return;
-        commit(message.nodeId, r.view, r.effects);
-      });
-      void get().refresh();
-      // 窗口重载后仍停在远程节点：main 侧连接没断，只需重新订阅并要一次目录
-      const active = get().activeNodeId;
-      if (active !== 'local') enterNode(active);
+      const offActive = window.electronAPI.nodes.onActiveChanged(applyActive);
+      const offPair = window.electronAPI.nodes.onPairRequested(() => set({ pairDialogOpen: true }));
+      void window.electronAPI.nodes.list().then(applyStatus);
+      void window.electronAPI.nodes.active().then(applyActive);
       return () => {
         offStatus();
-        offMessage();
+        offActive();
+        offPair();
       };
     },
 
     refresh: async () => {
-      const status = await window.electronAPI.nodes.list();
-      applyStatus(status);
+      applyStatus(await window.electronAPI.nodes.list());
     },
 
     switchNode: (nodeId) => {
-      const current = get().activeNodeId;
-      if (current === nodeId) return;
-      localStorage.setItem(ACTIVE_NODE_KEY, nodeId);
-      set({ activeNodeId: nodeId });
-      if (nodeId !== 'local') enterNode(nodeId);
+      void window.electronAPI.nodes.switch(nodeId);
     },
 
-    selectSession: (nodeId, sessionId) => {
-      const fresh = sessionId !== null && get().freshIds.has(sessionId);
-      const r = reduceSelectSession(viewOf(nodeId), sessionId, loadCursors(nodeId), { fresh });
-      if (fresh) {
-        const next = new Set(get().freshIds);
-        next.delete(sessionId);
-        set({ freshIds: next });
-      }
-      if (sessionId) localStorage.setItem(lastSessionKey(nodeId), sessionId);
-      else localStorage.removeItem(lastSessionKey(nodeId));
-      commit(nodeId, r.view, r.effects);
+    requestPairDialog: () => {
+      if (window.electronAPI.remote?.nativePlatform) void window.electronAPI.nodes.requestPair();
+      else set({ pairDialogOpen: true });
     },
 
-    send: (nodeId, command) => {
-      void window.electronAPI.nodes.send(nodeId, command);
-    },
-
-    requestHistory: (nodeId, sessionId) => {
-      const r = reduceRequestHistory(viewOf(nodeId), sessionId);
-      if (r.effects.length === 0) return;
-      commit(nodeId, r.view, r.effects);
-    },
-
-    spawn: (nodeId, request) => {
-      const sessionId = crypto.randomUUID();
-      void window.electronAPI.nodes.send(nodeId, { type: 'spawn', sessionId, ...request });
-      set({ freshIds: new Set([...get().freshIds, sessionId]) });
-      get().selectSession(nodeId, sessionId);
-      return sessionId;
-    },
+    setPairDialogOpen: (pairDialogOpen) => set({ pairDialogOpen }),
   };
 });

@@ -2,7 +2,11 @@
  * 浏览器里替代 `electron` 模块：web-preload 构建时把 preload 的 electron 导入指到这里，
  * ipcRenderer 走父页面（PWA 壳）持有的加密隧道；作用于宿主桌面的通道在本地实现。
  */
-import type { RemoteBridge, RemoteFrameKind } from '@shared/remoteBridge';
+import {
+  REMOTE_LOCAL_PREFIXES,
+  type RemoteBridge,
+  type RemoteFrameKind,
+} from '@shared/remoteBridge';
 import {
   RemoteReadClient,
   type RemoteReadStore,
@@ -16,8 +20,9 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import { decodeRemoteValue, encodeRemoteValue } from '../../packages/pair/src/remote';
 import { isRemoteChannelAllowed } from '../main/services/remoteRenderer/channels';
 
+// 手机壳与节点设置窗口里 renderer 是 iframe，桥在父页面；桌面节点层的主界面是顶层文档，parent 即自身
 const bridge = (window.parent as Window & { __ensoRemote?: RemoteBridge }).__ensoRemote;
-if (!bridge || window.parent === window) {
+if (!bridge) {
   throw new Error('EnsoCode remote bridge is missing');
 }
 
@@ -167,6 +172,32 @@ export const remoteFrame = {
   },
 };
 
+/**
+ * 桌面远程节点层：本机窗口、节点切换与系统通知交给所在电脑的 main（由它白名单裁决），
+ * 其余照旧经隧道到宿主。手机壳与节点设置窗口没有 bridge.local，不走这里。
+ */
+const native = bridge.local;
+const isNativeChannel = (channel: string): boolean =>
+  native !== undefined && REMOTE_LOCAL_PREFIXES.some((prefix) => channel.startsWith(prefix));
+
+const nativeFrame = {
+  async invoke(channel: string, args: unknown[]): Promise<unknown> {
+    const raw = (await native?.invoke(channel, JSON.stringify(args))) ?? '{"ok":false}';
+    const reply = JSON.parse(raw) as { ok: boolean; value?: unknown; error?: string };
+    if (!reply.ok) throw new Error(reply.error ?? `Channel '${channel}' is not available`);
+    return reply.value;
+  },
+  send(channel: string, args: unknown[]): void {
+    native?.send(channel, JSON.stringify(args));
+  },
+  on(channel: string, listener: (...args: unknown[]) => void): () => void {
+    return (
+      native?.on(channel, (payload) => listener(...(JSON.parse(payload) as unknown[]))) ??
+      (() => {})
+    );
+  },
+};
+
 // preload 在模块顶层读 process.platform：快捷键与路径展示跟随宿主
 (globalThis as { process?: unknown }).process = {
   platform: bridge.platform,
@@ -275,7 +306,8 @@ function subscribe(channel: string, listener: Listener, once = false): void {
     subscriptions.set(channel, byListener);
   }
   if (byListener.has(listener)) return;
-  const off = remoteFrame.on(channel, (...args) => {
+  const target = isNativeChannel(channel) ? nativeFrame : remoteFrame;
+  const off = target.on(channel, (...args) => {
     if (once) unsubscribe(channel, listener);
     listener({ sender: null }, ...args);
   });
@@ -290,11 +322,16 @@ function unsubscribe(channel: string, listener: Listener): void {
 
 export const ipcRenderer = {
   invoke(channel: string, ...args: unknown[]): Promise<unknown> {
+    if (isNativeChannel(channel)) return nativeFrame.invoke(channel, args);
     const handler = local[channel];
     if (handler) return Promise.resolve().then(() => handler(...args));
     return remoteFrame.invoke(channel, args);
   },
   send(channel: string, ...args: unknown[]): void {
+    if (isNativeChannel(channel)) {
+      nativeFrame.send(channel, args);
+      return;
+    }
     const handler = local[channel];
     if (handler) {
       void handler(...args);

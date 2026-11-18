@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   dock: { hide: vi.fn(), show: vi.fn(async () => undefined) },
   hibernate: { release: () => {} },
   win: null as null | Record<string, ReturnType<typeof vi.fn>>,
+  closeNodeSettingsWindows: vi.fn(),
 }));
 Object.assign(process, { resourcesPath: '/resources' });
 
@@ -68,6 +69,7 @@ vi.mock('./browserHost', () => ({
 }));
 vi.mock('./pairHost', () => ({ refreshPowerKeepAlive: vi.fn() }));
 vi.mock('./pairSessionHost', () => ({ setPairHeadless: vi.fn() }));
+vi.mock('./nodeRemote', () => ({ closeNodeSettingsWindows: mocks.closeNodeSettingsWindows }));
 
 import { app } from 'electron';
 import { attachAppCloseConfirm } from './appCloseConfirm';
@@ -112,6 +114,16 @@ describe('app server mode dock visibility', () => {
     leaveServerMode();
     expect(mocks.dock.show).toHaveBeenCalledTimes(1);
     expect(isServerMode()).toBe(false);
+  });
+
+  it('进托盘时一并关掉远程节点的设置窗口', async () => {
+    mocks.closeNodeSettingsWindows.mockClear();
+    const entering = enterServerMode();
+    await vi.waitFor(() => expect(isServerMode()).toBe(true));
+    mocks.hibernate.release();
+    await entering;
+    expect(mocks.closeNodeSettingsWindows).toHaveBeenCalledOnce();
+    leaveServerMode();
   });
 });
 

@@ -1,10 +1,6 @@
 import { shell, type WebContents } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  attachAppNavigationGuard,
-  isAppFrameNavigationAllowed,
-  isAppNavigationAllowed,
-} from './appNavigation';
+import { attachAppNavigationGuard, isAppNavigationAllowed } from './appNavigation';
 
 const DEV = 'http://localhost:5173/index.html';
 const PROD =
@@ -96,19 +92,6 @@ describe('isAppNavigationAllowed 危险协议与坏输入', () => {
   });
 });
 
-describe('isAppFrameNavigationAllowed 子 frame', () => {
-  it('插件壳页面与 srcdoc 预览放行', () => {
-    expect(isAppFrameNavigationAllowed(`${RENDERER}/plugin-view.html`, PROD)).toBe(true);
-    expect(isAppFrameNavigationAllowed('about:srcdoc', PROD)).toBe(true);
-    expect(isAppFrameNavigationAllowed('about:blank', PROD)).toBe(true);
-  });
-
-  it('外站和 data: 仍然拒绝', () => {
-    expect(isAppFrameNavigationAllowed('https://evil.example/', PROD)).toBe(false);
-    expect(isAppFrameNavigationAllowed('data:text/html,hi', PROD)).toBe(false);
-  });
-});
-
 type Listener = (event: Record<string, unknown>) => void;
 function fakeContents() {
   const listeners = new Map<string, Listener>();
@@ -166,9 +149,17 @@ describe('attachAppNavigationGuard', () => {
       fire('will-frame-navigate', { url: 'https://evil.example/', isMainFrame: false })
     ).toHaveBeenCalled();
     expect(
-      fire('will-frame-navigate', { url: 'about:srcdoc', isMainFrame: false })
-    ).not.toHaveBeenCalled();
+      fire('will-frame-navigate', { url: 'data:text/html,hi', isMainFrame: false })
+    ).toHaveBeenCalled();
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('子 frame 的插件壳页面与 srcdoc / 空白页预览放行', () => {
+    const { contents, fire } = fakeContents();
+    attachAppNavigationGuard(contents, PROD);
+    for (const url of [`${RENDERER}/plugin-view.html`, 'about:srcdoc', 'about:blank']) {
+      expect(fire('will-frame-navigate', { url, isMainFrame: false }), url).not.toHaveBeenCalled();
+    }
   });
 
   // dev server 下同源 302 走 will-redirect，不走 will-navigate

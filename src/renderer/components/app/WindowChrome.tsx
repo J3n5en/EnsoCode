@@ -7,13 +7,17 @@ import { useWindowMaximized } from '@/hooks/useWindowMaximized';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 
-/** mobile = 窄屏：沿用整行 TitleBar；web = 宽屏远程浏览器：同桌面外壳布局，但没有系统窗口控件 */
+/**
+ * mobile = 窄屏：沿用整行 TitleBar；web = 宽屏远程浏览器：同桌面外壳布局，但没有系统窗口控件。
+ * 远程节点层跑在另一台桌面的原生窗口里，窗口外观随那台电脑的平台。
+ */
 export type WindowChromeKind = 'mobile' | 'web' | 'mac' | 'windows' | 'linux';
 
 export function useWindowChromeKind(): WindowChromeKind {
   if (useIsMobile()) return 'mobile';
-  if (window.electronAPI.remote) return 'web';
-  const { platform } = window.electronAPI.env;
+  const remote = window.electronAPI.remote;
+  if (remote && !remote.nativePlatform) return 'web';
+  const platform = remote?.nativePlatform ?? window.electronAPI.env.platform;
   return platform === 'darwin' ? 'mac' : platform === 'win32' ? 'windows' : 'linux';
 }
 

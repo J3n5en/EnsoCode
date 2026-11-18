@@ -57,9 +57,26 @@ function loadWindowState(stateFile: string, defaults: WindowState): WindowState 
 }
 
 const workbenchViews = new WeakMap<BrowserWindow, WebContentsView>();
+const coverViews = new WeakMap<BrowserWindow, WebContentsView>();
 
 export function getWorkbenchView(win: BrowserWindow): WebContentsView | undefined {
   return workbenchViews.get(win);
+}
+
+/** 盖在 workbench 之上铺满窗口的层（远程节点界面）；null 撤掉 */
+export function setWindowCover(win: BrowserWindow, view: WebContentsView | null): void {
+  if (!view) {
+    coverViews.delete(win);
+    return;
+  }
+  coverViews.set(win, view);
+  win.contentView.addChildView(view);
+}
+
+/** 调整过子视图层级后（browserHost 会把 workbench 与网页提到最上）把覆盖层放回最上 */
+export function raiseWindowCover(win: BrowserWindow): void {
+  const view = coverViews.get(win);
+  if (view) win.contentView.addChildView(view);
 }
 
 /** 主窗口 UI 的 webContents（pin 后不是 win.webContents） */
@@ -96,7 +113,7 @@ function webPreferences(): Electron.WebPreferences {
   };
 }
 
-function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, entry: string): void {
+export function attachEditContextMenu(win: BrowserWindow, contents: WebContents): void {
   contents.on('context-menu', (event, params) => {
     if (params.isEditable) {
       event.preventDefault();
@@ -118,7 +135,10 @@ function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, en
       });
     }
   });
+}
 
+function attachWebContentsHandlers(win: BrowserWindow, contents: WebContents, entry: string): void {
+  attachEditContextMenu(win, contents);
   contents.setWindowOpenHandler(({ url }) => {
     openExternalWebUrl(url);
     return { action: 'deny' };
