@@ -390,6 +390,30 @@ describe('SecretaryDailyBoard', () => {
     expect(h.calls).toContainEqual({ name: 'markResult', args: ['c7', 'dismiss'] });
   });
 
+  it('进行中与已停止的标记完成、移出是与卡片标签同量级的紧凑按钮', async () => {
+    h.daily[TODAY] = daily({
+      groups: [
+        { key: 'running', items: [item({ id: 'r1', conversationId: 'c8', tracked: true })] },
+        { key: 'stopped', items: [item({ id: 's1', conversationId: 'c9', tracked: true })] },
+      ],
+    });
+    await render(createElement(SecretaryDailyBoard));
+    for (const group of ['running', 'stopped']) {
+      const actions = container.querySelector(
+        `[data-group="${group}"] [data-enso="secretary-daily-actions"]`
+      );
+      expect(actions?.className).toContain('justify-start');
+      for (const name of ['secretary-daily-mark-done', 'secretary-daily-dismiss']) {
+        const classes = actions?.querySelector(`[data-enso="${name}"]`)?.classList;
+        expect(classes?.contains('h-[18px]')).toBe(true);
+        expect(classes?.contains('text-[11px]')).toBe(true);
+        for (const large of ['w-full', 'flex-1', 'h-7', 'h-8', 'text-sm', 'text-[12.5px]']) {
+          expect(classes?.contains(large)).toBe(false);
+        }
+      }
+    }
+  });
+
   it('组为空时列还在，只是没有卡片', async () => {
     const groups: SecretaryDailyGroup[] = [{ key: 'failed', items: [item({ label: 'Failed' })] }];
     h.daily[TODAY] = daily({ groups });

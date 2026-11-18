@@ -53,6 +53,11 @@ const CARD_CLASS =
 /** 徽标：插件的 .chip —— 18px 高、999 圆角、6% 前景底 */
 const CHIP_CLASS =
   'inline-flex h-[18px] max-w-full items-center gap-1 rounded-full bg-foreground/[0.06] px-1.5 font-medium';
+/** 卡片顶部的收口按钮：与底部徽标同量级，伪元素把可点区域上下各扩 4px */
+const SETTLE_CLASS = cn(
+  CHIP_CLASS,
+  "relative shrink-0 text-[11px] leading-none text-muted-foreground transition-colors before:absolute before:inset-x-0 before:-inset-y-1 before:content-[''] hover:bg-foreground/10 hover:text-foreground"
+);
 const ACTION_CLASS =
   'flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground';
 
@@ -123,7 +128,10 @@ function DailyCard({
         </HoverActions>
       )}
       {(mark || settle) && (
-        <div data-enso="secretary-daily-actions" className="mb-1.5 flex items-center gap-1">
+        <div
+          data-enso="secretary-daily-actions"
+          className="mb-1.5 flex flex-wrap items-center justify-start gap-1"
+        >
           {(mark || settle) && (
             <button
               type="button"
@@ -137,7 +145,7 @@ function DailyCard({
                   settle ? 'done' : 'undo'
                 );
               }}
-              className={cn(CHIP_CLASS, 'cursor-pointer hover:bg-foreground/10')}
+              className={SETTLE_CLASS}
             >
               {settle ? <Check className="size-[11px]" /> : <Undo2 className="size-[11px]" />}
               <span>{settle ? t('Mark done') : t('Undo mark done')}</span>
@@ -153,7 +161,7 @@ function DailyCard({
                 if (!item.conversationId) return;
                 void window.electronAPI.secretary.markResult(item.conversationId, 'dismiss');
               }}
-              className={cn(CHIP_CLASS, 'cursor-pointer hover:bg-foreground/10')}
+              className={SETTLE_CLASS}
             >
               <X className="size-[11px]" />
               <span>{t('Move off the board')}</span>
