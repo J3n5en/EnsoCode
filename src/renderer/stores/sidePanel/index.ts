@@ -244,3 +244,20 @@ export const useSidePanelStore = create<SidePanelState>()(
     }
   )
 );
+
+/**
+ * 全屏记忆会持久化，全局 fullscreen 不会。启动时当前会话不会再发一次切换，
+ * 所以要在挂载、读回本地状态、以及之后的切换时把记忆补到全局 fullscreen 上。
+ */
+export function bindSidePanelFullscreen(): () => void {
+  const reconcile = () => useSidePanelStore.getState().reconcileForActiveConversation();
+  reconcile();
+  const unsubHydrate = useSidePanelStore.persist?.onFinishHydration(reconcile);
+  const unsubSessions = useSessionsStore.subscribe((state, prev) => {
+    if (state.activeId !== prev.activeId) reconcile();
+  });
+  return () => {
+    unsubHydrate?.();
+    unsubSessions();
+  };
+}
