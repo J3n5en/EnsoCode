@@ -396,7 +396,11 @@ export function ChatView() {
             project.kind !== 'scratch' &&
             project.kind !== 'secretary' &&
             !chrome.displayedParentId && (
-              <ProjectCodeTrustBar projectId={project.id} conversationId={chrome.id} />
+              <ProjectCodeTrustBar
+                key={`${project.id}:${chrome.id}`}
+                projectId={project.id}
+                conversationId={chrome.id}
+              />
             )}
           {chrome.retry && (
             <RetryBar
