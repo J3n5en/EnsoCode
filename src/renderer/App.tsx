@@ -96,7 +96,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
-import { useSidePanelStore } from '@/stores/sidePanel';
+import { bindSidePanelFullscreen, useSidePanelStore } from '@/stores/sidePanel';
 import { SIDE_PANEL_GAP_WIDTH, SIDE_PANEL_HANDLE_WIDTH } from '@/stores/sidePanel/width';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
@@ -173,17 +173,8 @@ export default function App() {
   useEffect(() => {
     if (sideFullscreen && !sideOpen) useSidePanelStore.getState().setFullscreen(false);
   }, [sideOpen, sideFullscreen]);
-  // 全屏是按会话记的：切会话后换成这个会话自己的，秘书的全屏层不再盖住别的会话。
-  // 订阅放在 effect 里而不是依赖数组：会话 id 只决定何时跑，不参与渲染。
-  useEffect(
-    () =>
-      useSessionsStore.subscribe((state, prev) => {
-        if (state.activeId !== prev.activeId) {
-          useSidePanelStore.getState().reconcileForActiveConversation();
-        }
-      }),
-    []
-  );
+  // 全屏按会话记。挂载时补当前会话，读回本地状态和之后的切换再各补一次。
+  useEffect(() => bindSidePanelFullscreen(), []);
   useEffect(() => {
     document.documentElement.classList.add('enso-main-shell');
     return () => document.documentElement.classList.remove('enso-main-shell');

@@ -1,10 +1,45 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
-import { useSidePanelStore } from './index';
+import { bindSidePanelFullscreen, useSidePanelStore } from './index';
+import { SIDE_PANEL_VERSION } from './migrate';
+
+const sessionListeners = vi.hoisted(() => ({
+  current: new Set<
+    (state: { activeId: string | null }, prev: { activeId: string | null }) => void
+  >(),
+}));
+
+vi.hoisted(() => {
+  const memory = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      memory.set(key, value);
+    },
+    removeItem: (key: string) => {
+      memory.delete(key);
+    },
+  };
+  Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true });
+  Object.defineProperty(globalThis, 'window', {
+    value: { localStorage: storage },
+    configurable: true,
+  });
+});
 
 vi.mock('@/stores/sessions', () => ({
-  useSessionsStore: { getState: vi.fn() },
+  useSessionsStore: {
+    getState: vi.fn(),
+    subscribe: (
+      listener: (state: { activeId: string | null }, prev: { activeId: string | null }) => void
+    ) => {
+      sessionListeners.current.add(listener);
+      return () => {
+        sessionListeners.current.delete(listener);
+      };
+    },
+  },
 }));
 
 vi.mock('@/stores/settings', () => ({
@@ -70,6 +105,70 @@ describe('侧栏开关按会话独立', () => {
     expect(state.fullscreen).toBe(true);
     expect(state.uiByConversation.normal?.open).toBe(true);
     expect(state.fullscreenByConversation.normal).toBe(false);
+  });
+
+  it('当前会话的全屏记忆已在内存里时，绑定后不用切会话也会进入全屏', () => {
+    sessions('secretary');
+    useSidePanelStore.setState((state) => ({
+      ...state,
+      fullscreen: false,
+      fullscreenByConversation: { secretary: true },
+      uiByConversation: { secretary: { open: true, width: state.lastWidth } },
+    }));
+
+    const stop = bindSidePanelFullscreen();
+    try {
+      expect(useSidePanelStore.getState().fullscreen).toBe(true);
+    } finally {
+      stop();
+    }
+  });
+
+  it('重新读入已保存的全屏记忆后，当前会话直接进入全屏', async () => {
+    sessions('secretary');
+    localStorage.setItem(
+      'enso-side-panel',
+      JSON.stringify({
+        state: {
+          lastWidth: 480,
+          uiByConversation: { secretary: { open: true, width: 480 } },
+          fullscreenByConversation: { secretary: true },
+          layouts: {},
+          changesModeByConversation: {},
+        },
+        version: SIDE_PANEL_VERSION,
+      })
+    );
+
+    const stop = bindSidePanelFullscreen();
+    try {
+      await useSidePanelStore.persist.rehydrate();
+      const state = useSidePanelStore.getState();
+      expect(state.fullscreenByConversation.secretary).toBe(true);
+      expect(state.uiByConversation.secretary?.open).toBe(true);
+      expect(state.fullscreen).toBe(true);
+    } finally {
+      stop();
+      localStorage.removeItem('enso-side-panel');
+    }
+  });
+
+  it('绑定期间切会话会换成目标会话自己的全屏', () => {
+    sessions('secretary');
+    useSidePanelStore.getState().toggleOpen();
+    useSidePanelStore.getState().toggleFullscreen();
+    const stop = bindSidePanelFullscreen();
+    try {
+      sessions('normal');
+      for (const listener of sessionListeners.current) {
+        listener({ activeId: 'normal' }, { activeId: 'secretary' });
+      }
+      const state = useSidePanelStore.getState();
+      expect(state.fullscreen).toBe(false);
+      expect(state.fullscreenByConversation.secretary).toBe(true);
+    } finally {
+      stop();
+    }
   });
 
   it('秘书侧栏关着时切走，切回来仍然关着', () => {
