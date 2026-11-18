@@ -16,6 +16,8 @@ export type SidePanelUi = { open: boolean; width: number };
 interface SidePanelState {
   /** 铺满中间工作区;不 persist,关面板 / 切到关着的会话时清掉 */
   fullscreen: boolean;
+  /** 各会话自己的全屏记忆；全局 fullscreen 只反映当前会话，避免秘书的全屏盖住别的会话 */
+  fullscreenByConversation: Record<string, boolean>;
   /**
    * 最近一次手动调整的宽度，仅作为尚无面板设置的会话的初始值，随会话偏好一起保存。
    */
@@ -33,6 +35,11 @@ interface SidePanelState {
   snapshotsByConversation: Record<string, SessionChangeSnapshots>;
   toggleOpen: () => void;
   ensureOpen: (conversationId?: string) => void;
+  /**
+   * 当前会话换了之后调用：把全局 fullscreen 换成这个会话自己记住的，
+   * 免得秘书会话的全屏层继续盖住别的会话、点「打开侧栏」没有可见变化。
+   */
+  reconcileForActiveConversation: () => void;
   nudgeWidth: (delta: number, workspaceWidth: number, handleWidth: number) => void;
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
@@ -52,6 +59,14 @@ function uiFor(state: SidePanelState, id: string): SidePanelUi {
   return state.uiByConversation[id] ?? { open: false, width: state.lastWidth };
 }
 
+function rememberFullscreen(
+  state: SidePanelState,
+  id: string,
+  fullscreen: boolean
+): Record<string, boolean> {
+  return { ...state.fullscreenByConversation, [id]: fullscreen };
+}
+
 function patchUi(
   state: SidePanelState,
   id: string,
@@ -65,6 +80,7 @@ export const useSidePanelStore = create<SidePanelState>()(
   persist(
     (set, get) => ({
       fullscreen: false,
+      fullscreenByConversation: {},
       lastWidth: SIDE_PANEL_DEFAULT_WIDTH,
       uiByConversation: {},
       browserHoles: {},
@@ -79,7 +95,14 @@ export const useSidePanelStore = create<SidePanelState>()(
         set({
           uiByConversation: patchUi(get(), id, { open }),
           fullscreen: open ? get().fullscreen : false,
+          fullscreenByConversation: rememberFullscreen(get(), id, open ? get().fullscreen : false),
         });
+      },
+
+      reconcileForActiveConversation: () => {
+        const id = activeConversationId();
+        const fullscreen = id ? (get().fullscreenByConversation[id] ?? false) : false;
+        if (fullscreen !== get().fullscreen) set({ fullscreen });
       },
 
       ensureOpen: (conversationId) => {
@@ -105,19 +128,33 @@ export const useSidePanelStore = create<SidePanelState>()(
         if (!id) return;
         const { fullscreen } = get();
         if (!uiFor(get(), id).open) {
-          set({ uiByConversation: patchUi(get(), id, { open: true }), fullscreen: true });
+          set({
+            uiByConversation: patchUi(get(), id, { open: true }),
+            fullscreen: true,
+            fullscreenByConversation: rememberFullscreen(get(), id, true),
+          });
           return;
         }
-        set({ fullscreen: !fullscreen });
+        set({
+          fullscreen: !fullscreen,
+          fullscreenByConversation: rememberFullscreen(get(), id, !fullscreen),
+        });
       },
 
       setFullscreen: (fullscreen) => {
         const id = activeConversationId();
         if (fullscreen && id) {
-          set({ fullscreen: true, uiByConversation: patchUi(get(), id, { open: true }) });
+          set({
+            fullscreen: true,
+            uiByConversation: patchUi(get(), id, { open: true }),
+            fullscreenByConversation: rememberFullscreen(get(), id, true),
+          });
           return;
         }
-        set({ fullscreen });
+        set({
+          fullscreen,
+          ...(id ? { fullscreenByConversation: rememberFullscreen(get(), id, fullscreen) } : {}),
+        });
       },
 
       setBrowserHole: (key, rect) => {
@@ -134,11 +171,19 @@ export const useSidePanelStore = create<SidePanelState>()(
       forgetConversation: (conversationId) => {
         const { [conversationId]: _layout, ...layouts } = get().layouts;
         const { [conversationId]: _ui, ...uiByConversation } = get().uiByConversation;
+        const { [conversationId]: _fullscreen, ...fullscreenByConversation } =
+          get().fullscreenByConversation;
         const { [conversationId]: _mode, ...changesModeByConversation } =
           get().changesModeByConversation;
         const { [conversationId]: _snap, ...snapshotsByConversation } =
           get().snapshotsByConversation;
-        set({ layouts, uiByConversation, changesModeByConversation, snapshotsByConversation });
+        set({
+          layouts,
+          uiByConversation,
+          fullscreenByConversation,
+          changesModeByConversation,
+          snapshotsByConversation,
+        });
       },
 
       setChangesMode: (conversationId, mode) => {
@@ -181,6 +226,7 @@ export const useSidePanelStore = create<SidePanelState>()(
       partialize: (state) => ({
         lastWidth: state.lastWidth,
         uiByConversation: state.uiByConversation,
+        fullscreenByConversation: state.fullscreenByConversation,
         layouts: state.layouts,
         changesModeByConversation: state.changesModeByConversation,
       }),
