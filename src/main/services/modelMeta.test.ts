@@ -1,9 +1,17 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import {
+  MODELS_DEV_CACHE_NAME,
+  MODELS_DEV_SCHEMA_VERSION,
+  MODELS_DEV_URL,
+  type ModelsDevCache,
+} from '@shared/modelsDevCatalog';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const userData = mkdtempSync(path.join(tmpdir(), 'enso-model-meta-'));
+const modelsDevOnlyId = 'codex/gpt-6.2-sol';
+const nonReasoningModelsDevOnlyId = 'test-models-dev-chat';
 
 vi.mock('electron', () => ({
   app: { getPath: () => userData, getName: () => 'enso-code', on: () => {} },
@@ -24,6 +32,22 @@ beforeAll(() => {
       },
     })
   );
+  const modelsDevCache: ModelsDevCache = {
+    schemaVersion: MODELS_DEV_SCHEMA_VERSION,
+    source: MODELS_DEV_URL,
+    fetchedAt: Date.now(),
+    models: [
+      {
+        id: modelsDevOnlyId,
+        provider: 'codex',
+        reasoning: true,
+        contextWindow: 1_000_000,
+        maxTokens: 128_000,
+      },
+      { id: nonReasoningModelsDevOnlyId, provider: 'test-provider', reasoning: false },
+    ],
+  };
+  writeFileSync(path.join(userData, MODELS_DEV_CACHE_NAME), JSON.stringify(modelsDevCache));
 });
 
 afterAll(() => {
@@ -66,8 +90,46 @@ describe('queryModelMeta', () => {
     expect(result.ok).toBe(true);
     expect(result.models[0]?.source).toBe('catalog-fallback');
     expect(result.models[0]?.reasoning).toBe(catalog?.reasoning);
-    expect(Array.isArray(result.models[0]?.thinkingLevels)).toBe(true);
+    expect(result.models[0]?.thinkingLevels).toEqual(['minimal', 'low', 'medium', 'high']);
     expect(result.models[0]?.contextWindow).toBe(catalog?.contextWindow);
+  });
+
+  it('仅被 models.dev 收录的自定义推理模型保留窗口且省略未知档位', async () => {
+    const { queryModelMeta } = await import('./modelMeta');
+
+    const result = await queryModelMeta({ modelIds: [modelsDevOnlyId] });
+
+    expect(result).toMatchObject({
+      ok: true,
+      models: [
+        {
+          modelId: modelsDevOnlyId,
+          source: 'catalog-fallback',
+          reasoning: true,
+          contextWindow: 1_000_000,
+          maxTokens: 128_000,
+        },
+      ],
+    });
+    expect(result.models[0]).not.toHaveProperty('thinkingLevels');
+  });
+
+  it('仅被 models.dev 收录且明确不支持推理的模型返回空档位', async () => {
+    const { queryModelMeta } = await import('./modelMeta');
+
+    const result = await queryModelMeta({ modelIds: [nonReasoningModelsDevOnlyId] });
+
+    expect(result).toMatchObject({
+      ok: true,
+      models: [
+        {
+          modelId: nonReasoningModelsDevOnlyId,
+          source: 'catalog-fallback',
+          reasoning: false,
+          thinkingLevels: [],
+        },
+      ],
+    });
   });
 
   it('catalog 未命中时 source=unknown，可选字段缺失', async () => {
