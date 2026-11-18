@@ -8,13 +8,19 @@ import type {
 import { MODEL_REASONING_OVERRIDES, MODEL_THINKING_LEVEL_OVERRIDES } from './types/llm';
 import type { ModelMeta } from './types/modelMeta';
 
-/** runtime.getModels() 条目里 resolve / ModelMeta 实际会读的字段 */
+/** 能力解析与 ModelMeta 共用的目录条目。 */
 export interface CatalogModelEntry {
   id: string;
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
   thinkingLevelMap?: Record<string, string | null | undefined>;
+  /**
+   * 目录未提供档位信息。Pi 条目缺少映射时仍使用 Pi 默认支持集。
+   *
+   * The catalog omitted level information. Pi entries with no map still use Pi's default set.
+   */
+  thinkingLevelsUnknown?: true;
 }
 
 /** 自定义模型能力分层：行覆盖 > 精确 catalog id > 乐观默认 */
@@ -217,7 +223,7 @@ export function resolveCustomModelCapabilities(
   const catalogHit = catalog !== undefined;
 
   const reasoning = resolveReasoning(catalog, picked);
-  const thinking = resolveThinkingLevelMap(catalog, picked, catalogHit, reasoning.value);
+  const thinking = resolveThinkingLevelMap(catalog, picked, reasoning.value);
   const contextWindow = resolvePositive(
     picked.contextWindow,
     catalogHit ? positiveFiniteNumber(catalog?.contextWindow) : undefined,
@@ -263,7 +269,6 @@ function resolveReasoning(
 function resolveThinkingLevelMap(
   catalog: CatalogModelEntry | undefined,
   picked: ModelCapabilityOverrides,
-  catalogHit: boolean,
   reasoningEnabled: boolean
 ): {
   value: Record<string, string | null | undefined> | undefined;
@@ -275,9 +280,12 @@ function resolveThinkingLevelMap(
       source: 'override',
     };
   }
-  if (catalogHit) {
+  // 目录明确关闭推理时，手动开启仍沿用目录档位或 Pi 的默认四档。
+  //
+  // Manually enabling reasoning for a catalog-disabled model keeps its map or Pi's four defaults.
+  if (catalog && (!catalog.thinkingLevelsUnknown || catalog.reasoning === false)) {
     return {
-      value: catalog?.thinkingLevelMap,
+      value: catalog.thinkingLevelMap,
       source: 'catalog',
     };
   }
@@ -296,6 +304,7 @@ export function catalogFromModelMeta(meta: ModelMeta | undefined): CatalogModelE
     contextWindow: meta.contextWindow,
     maxTokens: meta.maxTokens,
     thinkingLevelMap: thinkingLevelMapFromProjectLevels(meta.reasoning, meta.thinkingLevels),
+    ...(meta.thinkingLevels === undefined ? { thinkingLevelsUnknown: true } : {}),
   };
 }
 
