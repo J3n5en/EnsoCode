@@ -137,6 +137,9 @@ async function runShell(page: NodeShellPage): Promise<void> {
     return;
   }
   if (page === 'main') {
+    // 整页拖拽区在换文档后仍留在窗口上，新页若没声明区域（没跑起来）就整窗只能拖不能点；先撤掉并等它生效
+    document.documentElement.classList.remove('drag');
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     location.replace(nodeMainRendererPath(init.platform));
     return;
   }

@@ -24,6 +24,7 @@ import { notifyFromNode, setLocalLayerVisible } from '../notifications';
 import { isNodeHostOnline, sendRemoteToNode, setNodeRemoteHooks } from '../pairGuest';
 import { registeredHandler } from '../remoteRenderer/ipcRegistry';
 import { broadcastToRenderers, isMainRenderer, sendToLocalMain } from '../renderers';
+import { waitUntil } from './boot';
 import { isNodePageUrl, type LocalCall, parseHostNotification, parseLocalCall } from './boundary';
 import { type ActiveNode, NodeLayers } from './layers';
 import { type NodeAsset, NodeRemoteTunnel } from './tunnel';
@@ -44,6 +45,8 @@ interface Surface {
   cids: Set<string>;
   /** 主界面上报的正在查看的会话：本机弹该节点通知时按它抑制 */
   viewed: string | null;
+  /** 主界面没能在本页跑起来（宿主 renderer 不支持顶层运行）；壳页停在版本过旧提示，节点重连后重试 */
+  bootFailed: boolean;
 }
 
 const tunnels = new Map<string, NodeRemoteTunnel>();
@@ -147,7 +150,7 @@ function shellPreferences(): Electron.WebPreferences {
 /** 登记节点界面并收紧导航 */
 function attachSurface(contents: WebContents, nodeId: string, page: NodeShellPage): void {
   const id = contents.id;
-  surfaces.set(id, { nodeId, page, contents, cids: new Set(), viewed: null });
+  surfaces.set(id, { nodeId, page, contents, cids: new Set(), viewed: null, bootFailed: false });
   contents.setWindowOpenHandler(({ url }) => {
     openExternalWebUrl(url);
     return { action: 'deny' };
@@ -304,8 +307,30 @@ function createNodeView(nodeId: string): WebContentsView {
   contents.on('render-process-gone', () => {
     if (!contents.isDestroyed()) void contents.loadURL(nodeShellUrl(nodeId, 'main'));
   });
+  contents.on('did-finish-load', () => void watchMainBoot(nodeId, contents));
   void contents.loadURL(nodeShellUrl(nodeId, 'main'));
   return view;
+}
+
+const BOOT_TIMEOUT_MS = 5_000;
+const BOOT_PROBE = `!!window.electronAPI && (document.getElementById('root')?.childElementCount ?? 0) > 0`;
+
+/**
+ * 旧宿主（或残留旧构建）的 web-preload 要求在 iframe 里运行，顶层文档里直接抛错：
+ * 页面透明、#root 为空，看到的是底下的本机界面却全被盖层吃掉点击。没挂上就退回壳页给出返回按钮。
+ */
+async function watchMainBoot(nodeId: string, contents: WebContents): Promise<void> {
+  const url = contents.getURL();
+  if (parseNodeSettingsUrl(url)?.path !== 'r/index.html') return;
+  const gone = () => contents.isDestroyed() || contents.getURL() !== url;
+  const booted = await waitUntil(
+    async () => gone() || (await contents.executeJavaScript(BOOT_PROBE)) === true,
+    { timeoutMs: BOOT_TIMEOUT_MS, intervalMs: 250 }
+  );
+  if (booted || gone()) return;
+  const entry = surfaces.get(contents.id);
+  if (entry) entry.bootFailed = true;
+  void contents.loadURL(nodeShellUrl(nodeId, 'main'));
 }
 
 function showNodeView(view: WebContentsView | null): void {
@@ -362,7 +387,11 @@ export function registerNodeRemoteHandlers(): void {
     frame: (nodeId, frame) => tunnels.get(nodeId)?.receive(frame),
     online: (nodeId, online) => {
       tunnels.get(nodeId)?.setOnline(online);
-      if (online) retryOfflineShell(nodeId);
+      if (!online) return;
+      for (const surface of surfaces.values()) {
+        if (surface.nodeId === nodeId) surface.bootFailed = false;
+      }
+      retryOfflineShell(nodeId);
     },
     removed: (nodeId) => {
       layers.drop(nodeId);
@@ -400,6 +429,7 @@ export function registerNodeRemoteHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.NODE_REMOTE_INIT, async (event) => {
     const entry = surfaceOf(event);
     if (!entry) return { ok: false, error: 'forbidden' };
+    if (entry.bootFailed) return { ok: false, error: 'host-outdated' };
     if (!isNodeHostOnline(entry.nodeId)) return { ok: false, error: 'offline' };
     const meta = await fetchAsset(entry.nodeId, 'meta');
     if (meta.status !== 200) {
