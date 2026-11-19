@@ -1086,6 +1086,16 @@ export const useSessionsStore = create<SessionsState>()(
         return created.accepted;
       }
 
+      /** 远端主界面的整表写回经中继，丢一帧就整条写回链卡住：新建的根会话直接请 Main 登记落盘形状的一行 */
+      function registerConversationRow(conversationId: string): void {
+        const row = cachedPartializeSessions(get()).conversations[conversationId];
+        const register = window.electronAPI.settings.registerConversation;
+        if (!row || !register) return;
+        void Promise.resolve()
+          .then(() => register(row))
+          .catch(() => {});
+      }
+
       async function activateConversationAuthority(
         conversationId: string,
         epoch = ++conversationSelectionEpoch
@@ -2670,6 +2680,7 @@ export const useSessionsStore = create<SessionsState>()(
               activeId: existing,
               conversations: patch(state, existing, { unread: false }).conversations,
             }));
+            registerConversationRow(existing);
             return existing;
           }
           const project = projection.projects.find(
@@ -2754,6 +2765,7 @@ export const useSessionsStore = create<SessionsState>()(
             order: [id, ...state.order],
             activeId: id,
           }));
+          registerConversationRow(id);
           await activateConversationAuthority(id);
           return id;
         },
@@ -2787,7 +2799,9 @@ export const useSessionsStore = create<SessionsState>()(
           }));
           // 手机 spawn 自带 sessionId，桌面 newConversation 才会走 Main 发号。
           // 不登记的话点开会话会被当成 history-only。
-          void adoptMissingRootAuthority(session.sessionId, session.projectId);
+          void adoptMissingRootAuthority(session.sessionId, session.projectId).then((adopted) => {
+            if (adopted) registerConversationRow(session.sessionId);
+          });
         },
 
         markConversationRead(id) {

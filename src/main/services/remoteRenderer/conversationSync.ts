@@ -154,10 +154,14 @@ function withWriterFields(merged: unknown, value: unknown): unknown {
   };
 }
 
-/** Main 侧写入入口：把补丁并进磁盘值并推给所有主界面，返回应落盘的值 */
-export function applyMainConversationsPatch(current: unknown, patch: ConversationsPatch): unknown {
+/** Main 侧写入入口：把补丁并进磁盘值并推给主界面（exceptId 是已有这份变化的发起方），返回应落盘的值 */
+export function applyMainConversationsPatch(
+  current: unknown,
+  patch: ConversationsPatch,
+  exceptId?: number
+): unknown {
   if (isEmptyConversationsPatch(patch)) return current;
-  for (const peer of mainPeers()) pushTo(peer, patch);
+  for (const peer of mainPeers()) if (peer.id !== exceptId) pushTo(peer, patch);
   notifyMerged(patch);
   return applyConversationsPatch(current, patch);
 }

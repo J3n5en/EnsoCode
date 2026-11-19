@@ -36,6 +36,7 @@ export const readConversations = vi.fn(
   })
 );
 export const removeConversations = vi.fn(async (_ids: string[]) => true);
+export const registerConversation = vi.fn(async (_row: unknown) => true);
 export const agentWithdrawSteer = vi.fn(
   async (_id: string, _deliveryId: string): Promise<{ ok: boolean; error?: string }> => ({
     ok: true,
@@ -202,6 +203,7 @@ export function installSessionGlobals(options?: { captureAsks?: boolean }) {
         read: vi.fn(async () => null),
         readConversations,
         removeConversations,
+        registerConversation,
         onConversationsResync: vi.fn((callback: () => void) => {
           onConversationsResync = callback;
           return vi.fn();
