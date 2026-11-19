@@ -18,7 +18,7 @@ import {
   sessionIdsInUpdates,
   shouldSilenceTurn,
 } from '@shared/secretary/silence';
-import type { RendererAgentEvent } from '@shared/types/agent';
+import type { RendererAgentEvent, TurnReport } from '@shared/types/agent';
 import type {
   DispatchRecord,
   SecretaryActivity,
@@ -60,6 +60,7 @@ import {
   linkedTodoSession,
   proposalUpdate,
   type ResultEvent,
+  reportLastText,
   SETTLED_RESULTS,
   sessionStateOf,
   shouldNotify,
@@ -447,7 +448,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     record: DispatchRecord,
     kind: SecretaryResultKind,
     now: number,
-    detail?: string
+    detail?: string,
+    body = record.lastText
   ): { update: SecretaryUpdate; title: string; projectName: string } {
     const row = ports.rows()[record.conversationId];
     const project = ports.projects().find((candidate) => candidate.projectId === record.projectId);
@@ -460,7 +462,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       conversationId: record.conversationId,
       secretaryConversationId: record.secretaryConversationId,
       text: [projectName, title, RESULT_LABELS[kind].zh, detail].filter(Boolean).join(' · '),
-      ...(record.lastText ? { lastText: record.lastText } : {}),
+      ...(body ? { lastText: body } : {}),
     };
     return { update, title, projectName };
   }
@@ -498,7 +500,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     now: number,
     detail?: string,
     /** 这一轮的完整正文：分支与提交号只在原文里认，落盘仍按 lastText 截断 */
-    report?: string
+    report?: string,
+    /** 这一轮的结论原文：只有终态回传带上，手机与工作台仍用短正文 */
+    turnReport?: TurnReport
   ): void {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
@@ -518,7 +522,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       record,
       kind,
       now,
-      [detail, leftover].filter(Boolean).join('；') || undefined
+      [detail, leftover].filter(Boolean).join('；') || undefined,
+      reportLastText(kind, turnReport) ?? record.lastText
     );
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
@@ -846,6 +851,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         // 完整正文只用来认分支与提交号，记录与落盘都按 lastText 截断
         const report = own ? assistantTextOf(event) : undefined;
+        const turnReport = own && event.type === 'turn-completed' ? event.report : undefined;
         const lastText = capLastText(report);
         if (lastText) record.lastText = lastText;
 
@@ -898,7 +904,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (kind === 'turn-ended' && reopened && previous && SETTLED_RESULTS.has(previous.kind))
           // session_send 唤起的一轮结束了、没有再给结果：回到原来的终态，不重复推送
           restoreSettled(record, previous, now);
-        else if (kind && !awaiting) recordResult(file, record, kind, now, detail, report);
+        else if (kind && !awaiting)
+          recordResult(file, record, kind, now, detail, report, turnReport);
         else if (
           own &&
           event.type === 'turn-completed' &&

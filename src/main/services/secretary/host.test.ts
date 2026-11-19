@@ -402,6 +402,35 @@ describe('派出会话的结果记录', () => {
     ]);
   });
 
+  it('终态回传带完整汇报，中间进度仍按短上限截断', () => {
+    const report = `${'过程'.repeat(1500)}\n测试 812 passed，提交 1a2b3c4`;
+    const done = harness({});
+    done.state.statuses.c1 = idle;
+    done.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    done.host.onAgentEvent(
+      event('turn-completed', {
+        digest: { assistantText: report.slice(-1500) },
+        report: { text: report },
+      }),
+      change('idle', 'running')
+    );
+    expect(done.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete', lastText: report });
+    // 工作台卡片与手机里程碑仍用短正文
+    expect(done.state.file.dispatched.c1.lastText?.length).toBeLessThanOrEqual(501);
+
+    const progress = harness({});
+    progress.state.statuses.c1 = idle;
+    progress.host.onAgentEvent(
+      event('turn-completed', {
+        digest: { assistantText: report.slice(-1500) },
+        report: { text: report },
+      }),
+      change('idle', 'running')
+    );
+    expect(progress.state.file.outbox[0]?.kind).toBe('turn-ended');
+    expect(progress.state.file.outbox[0]?.lastText).toHaveLength(501);
+  });
+
   it('普通会话的 turn-ended 先攒着，needs-user 和 failed 不推迟', () => {
     const held = harness({});
     held.state.statuses.c1 = idle;
