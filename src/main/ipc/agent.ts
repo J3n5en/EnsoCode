@@ -138,7 +138,7 @@ import {
 import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
-import { wakeColdRestartSession } from '../services/coldRestart';
+import { settleColdResume, wakeColdRestartSession } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
@@ -1952,6 +1952,7 @@ export function registerAgentHandlers(): void {
       }
     }
     if (workerEvent.type === 'parent-ready') {
+      settleColdResume(workerEvent.identity.sessionId);
       sourceAuthority?.markReady(
         workerEvent.identity.sessionId,
         workerEvent.sessionFile,
@@ -1964,6 +1965,7 @@ export function registerAgentHandlers(): void {
       workerEvent.type === 'parent-rejected' &&
       !workerEvent.reason.startsWith(STALE_SESSION_ERROR)
     ) {
+      settleColdResume(workerEvent.identity.sessionId);
       const selection = sourceAuthority?.conversation(workerEvent.identity.sessionId)?.selection;
       console.warn('[agent] spawn rejected', {
         sessionId: workerEvent.identity.sessionId,

@@ -212,13 +212,20 @@ Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会
 按原 generation 重走普通 spawn（cwd / 会话文件只认权威记录，凭据现取），续跑的会话从退出 / 更新中断记录里剔除。
 安装更新失败时 `cancelAgentQuitCheckpoint` 撤掉清单，并按断点换代让会话接着跑。
 菜单「重启」（`appMenu` → `services/appRestart.ts`）是整个应用重启：`app.relaunch()` 后窗口不关，先
-`prepareAgentWorkerForQuit` 等安全点；worker 报告有工具在跑时进入 waiting-for-tools：主窗口弹自绘等待层
-（`renderer/components/app/RestartWaitDialog.tsx`，`APP_RESTART_WAITING` 推送），菜单项变为不可点的
+`prepareAgentWorkerForQuit` 等安全点。主窗口重启弹层（`renderer/components/app/RestartWaitDialog.tsx`，
+`ipc/appRestart.setRestartOverlay` 经 `APP_RESTART_WAITING` 推 `RestartOverlayState`，`restartOverlayFor` 由
+重启状态推出）点下去立刻是「正在重启」；worker 报告有工具在跑时进入 waiting-for-tools，弹层改成等命令，
+等到了切回「正在重启」。菜单项变为不可点的
 「等命令跑完再重启…」。弹层「强制退出」走 `APP_RESTART_FORCE` → `appRestart.forceQuit()` →
 `forceAgentWorkerQuit()`（按超时收尾并记日志）后立即放行退出，`stopAgentWorkerForQuit` 照常尽量补写清单。
-等到结果（含超时）先关弹层再放行关窗确认、`app.quit()`，will-quit 收尾拿同一个结果。同一进程只登记一次
+等到结果（含超时）放行关窗确认、`app.quit()`，will-quit 收尾拿同一个结果。同一进程只登记一次
 relaunch（多次会起多个实例），进行中菜单项不可点。
 它不调用只换 worker 的 `requestGracefulWorkerRestart`。
+新实例冷启动清单里有要续跑的会话时，同一个弹层显示「正在恢复会话」（`coldRestart.trackColdResume`）：
+每个续跑会话收到 worker `parent-ready`、非 STALE 的 `parent-rejected`，或派发就失败即算结算，全部结算关掉；
+`COLD_RESUME_OVERLAY_TIMEOUT_MS`（30s）到点没结算完也关并记日志。没有要续跑的会话不显示。启动时推送可能
+早于渲染层订阅，主窗口挂载时经 `APP_RESTART_WAITING_GET` 补取；状态只推本机主窗口、只回本机主窗口的取值，
+节点页面 / 远程浏览器（`electronAPI.remote`）不订阅。按阶段关（`clearRestartOverlay`），恢复结束不会关掉随后点的重启弹层。
 
 重启跨过转后台的命令（菜单「重启」与安装更新带 `keepBackgroundTasks`，普通退出不带，照旧停掉）：
 本地 POSIX bash 的前台命令（`sessionShell` → `shell/detachedRun.withFileBackedExec`，仅

@@ -1,6 +1,7 @@
+import type { RestartWaitReason } from '@shared/types/ipc';
 import { describe, expect, it, vi } from 'vitest';
 
-import { type AppRestartState, createAppRestart } from './appRestart';
+import { type AppRestartState, createAppRestart, restartOverlayFor } from './appRestart';
 
 function setup(overrides: { relaunch?: () => void } = {}) {
   const order: string[] = [];
@@ -17,7 +18,7 @@ function setup(overrides: { relaunch?: () => void } = {}) {
       onWaitingForTools = waiting;
       return prepared.promise;
     }),
-    stateChanged: vi.fn((state: AppRestartState, reason?: string) => {
+    stateChanged: vi.fn((state: AppRestartState, reason?: RestartWaitReason) => {
       states.push(state);
       reasons.push(reason);
     }),
@@ -139,5 +140,28 @@ describe('createAppRestart', () => {
     waitingForTools('background-not-detachable');
     expect(states).toEqual(['restarting', 'waiting-for-tools', 'waiting-for-tools']);
     expect(reasons).toEqual([undefined, 'tool', 'background-not-detachable']);
+  });
+
+  it('弹层：没有命令在跑，点下去立刻是「正在重启」', () => {
+    const { host, restart } = setup();
+    restart.restart();
+    expect(host.stateChanged.mock.calls.map(([s, r]) => restartOverlayFor(s, r))).toEqual([
+      { phase: 'restarting' },
+    ]);
+  });
+
+  it('弹层：有命令在跑，先「正在等当前命令结束」，等到了切成「正在重启」', async () => {
+    const { host, prepared, restart, waitingForTools } = setup();
+    restart.restart();
+    waitingForTools('tool');
+    prepared.resolve('checkpointed');
+    await vi.waitFor(() => expect(host.quit).toHaveBeenCalledTimes(1));
+    expect(host.stateChanged.mock.calls.map(([s, r]) => restartOverlayFor(s, r))).toEqual([
+      { phase: 'restarting' },
+      { phase: 'waiting', reason: 'tool' },
+      { phase: 'restarting' },
+    ]);
+    expect(restartOverlayFor('idle')).toBeNull();
+    expect(restartOverlayFor('waiting-for-tools')).toEqual({ phase: 'waiting', reason: 'tool' });
   });
 });

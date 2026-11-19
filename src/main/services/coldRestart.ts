@@ -77,7 +77,49 @@ export async function wakeColdRestartSession(
   }));
 }
 
-/** 逐个重走 spawn；单个失败只记日志，不影响其他会话 */
+/** 「正在恢复会话」最多挡这么久：恢复卡住也要让用户能用 */
+export const COLD_RESUME_OVERLAY_TIMEOUT_MS = 30_000;
+
+let resumePending: Set<string> | null = null;
+let endResume: (() => void) | undefined;
+
+/**
+ * 有会话要续跑就开「正在恢复会话」：清单里要续跑的会话全部结算（worker 报 parent-ready、spawn 被拒，
+ * 或派发失败）即关；到上限还没结算完也关并记日志。没有要续跑的会话不开，免得每次启动都闪一下
+ */
+export function trackColdResume(
+  current: ColdRestartPlan | null,
+  setResuming: (resuming: boolean) => void,
+  timeoutMs = COLD_RESUME_OVERLAY_TIMEOUT_MS
+): void {
+  endResume?.();
+  const pending = new Set(current?.resume.map((entry) => entry.sessionId));
+  if (pending.size === 0) return;
+  const end = () => {
+    if (resumePending !== pending) return;
+    resumePending = null;
+    endResume = undefined;
+    clearTimeout(timer);
+    setResuming(false);
+  };
+  const timer = setTimeout(() => {
+    console.warn(
+      `[graceful-restart] 恢复会话 ${timeoutMs / 1000}s 未完成，关掉恢复提示；未就绪：${[...pending].map((id) => id.slice(0, 8)).join(', ')}`
+    );
+    end();
+  }, timeoutMs);
+  resumePending = pending;
+  endResume = end;
+  setResuming(true);
+}
+
+/** 一个续跑会话有了结果（就绪 / 失败）；清单外的、已结算的忽略 */
+export function settleColdResume(sessionId: string): void {
+  if (!resumePending?.delete(sessionId)) return;
+  if (resumePending.size === 0) endResume?.();
+}
+
+/** 逐个重走 spawn；单个失败只记日志，不影响其他会话；派发失败的直接算结算，不等 worker */
 export async function resumeColdRestartSessions(
   current: ColdRestartPlan,
   resume: (entry: RestartManifestEntry) => Promise<{ ok: boolean; error?: string }>
@@ -90,5 +132,6 @@ export async function resumeColdRestartSessions(
     console.log(
       `[graceful-restart] cold resume ${entry.sessionId.slice(0, 8)} ${result.ok ? 'ok' : `failed: ${result.error}`}`
     );
+    if (!result.ok) settleColdResume(entry.sessionId);
   }
 }

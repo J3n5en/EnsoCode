@@ -262,6 +262,8 @@ export const zhTranslations: Record<string, string> = {
   'Restarting…': '正在重启…',
   'Waiting for running commands to restart…': '等命令跑完再重启…',
   'Waiting for the current command to finish': '正在等当前命令结束',
+  'Restarting EnsoCode…': '正在重启 EnsoCode…',
+  'Restoring sessions…': '正在恢复会话…',
   'EnsoCode will restart once the current command finishes.': '当前命令结束后再重启 EnsoCode。',
   'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so the restart waits for it.':
     '有转到后台的命令没法脱离 EnsoCode 继续跑（如远程会话或 Windows 上的命令），所以要等它结束。',

@@ -11,7 +11,11 @@ import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
 import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
 import { resumeRootFromRestartManifest } from './ipc/agent';
-import { notifyRestartWaiting, registerAppRestartHandlers } from './ipc/appRestart';
+import {
+  clearRestartOverlay,
+  registerAppRestartHandlers,
+  setRestartOverlay,
+} from './ipc/appRestart';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
 import { agentSessionIndex } from './ipc/sessionIndex';
 import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
@@ -36,7 +40,7 @@ import {
 import { allowAppQuit } from './services/appCloseConfirm';
 import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
-import { createAppRestart } from './services/appRestart';
+import { createAppRestart, restartOverlayFor } from './services/appRestart';
 import {
   ensureTray,
   enterServerMode,
@@ -48,7 +52,11 @@ import {
 } from './services/appServerMode';
 import { browserHost } from './services/browserHost';
 import { getCaCertConfig } from './services/caCert';
-import { coldRestartPlan, resumeColdRestartSessions } from './services/coldRestart';
+import {
+  coldRestartPlan,
+  resumeColdRestartSessions,
+  trackColdResume,
+} from './services/coldRestart';
 import { computerHost } from './services/computerHost';
 import { startDesktopConfigCli, stopDesktopConfigCli } from './services/configCli';
 import { installDesktopHooks } from './services/desktopHooks';
@@ -142,8 +150,8 @@ function showMenuError(message: string): void {
   ).catch((error: unknown) => console.error('[app-menu] 提示框失败:', error));
 }
 
-// 菜单「重启」：先等 agent 安全点（有命令在跑就等它结束，主窗口弹等待层、可强制退出），再退出；
-// will-quit 收尾拿同一个结果，新实例冷启动按清单续跑
+// 菜单「重启」：点下去主窗口立刻弹「正在重启」；先等 agent 安全点（有命令在跑弹层改成等命令、可强制退出），
+// 再退出；will-quit 收尾拿同一个结果，新实例冷启动按清单续跑
 const appRestart = createAppRestart({
   relaunch: () => app.relaunch(),
   allowQuit: allowAppQuit,
@@ -158,7 +166,7 @@ const appRestart = createAppRestart({
     }),
   stateChanged: (state, waitReason) => {
     installAppMenu(readLocale());
-    notifyRestartWaiting(state === 'waiting-for-tools', waitReason);
+    setRestartOverlay(restartOverlayFor(state, waitReason));
   },
   abandonPrepare: () => void forceAgentWorkerQuit(),
 });
@@ -280,6 +288,10 @@ if (!gotTheLock) {
     await secureStores;
     // 上次退出 / 安装更新前停在安全点的会话：先读清单（渲染层取中断记录前就要知道哪些会续跑）
     const coldRestart = coldRestartPlan(agentDataDir());
+    // 有会话要续跑：主窗口在恢复完成前显示「正在恢复会话」（有上限）
+    trackColdResume(coldRestart, (resuming) =>
+      resuming ? setRestartOverlay({ phase: 'resuming' }) : clearRestartOverlay('resuming')
+    );
     registerIpcHandlers();
     registerDesktopIpcHandlers();
     void startDesktopConfigCli();

@@ -583,7 +583,10 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   APP_FLUSH_PERSIST_RESPONSE: excluded('Renderer-to-main persist flush ack.'),
   APP_RESTART_WAITING: excluded(
-    'Main-to-renderer wait overlay while menu restart waits for commands.'
+    'Main-to-renderer restart overlay: waiting for commands, restarting, or resuming sessions.'
+  ),
+  APP_RESTART_WAITING_GET: excluded(
+    'Local main window reads the current restart overlay on mount.'
   ),
   APP_RESTART_FORCE: excluded('Renderer-to-main force quit from the restart wait overlay.'),
   APP_SET_BADGE_COUNT: excluded('Renderer-to-main Dock badge count for waiting conversations.'),

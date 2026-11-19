@@ -1,6 +1,16 @@
-import type { RestartWaitReason } from '@shared/types/ipc';
+import type { RestartOverlayState, RestartWaitReason } from '@shared/types/ipc';
 
 export type AppRestartState = 'idle' | 'restarting' | 'waiting-for-tools';
+
+/** 主窗口弹层：点下去立刻是「正在重启」，有命令在跑改成等命令，等到了切回「正在重启」 */
+export function restartOverlayFor(
+  state: AppRestartState,
+  waitReason?: RestartWaitReason
+): RestartOverlayState | null {
+  if (state === 'restarting') return { phase: 'restarting' };
+  if (state === 'waiting-for-tools') return { phase: 'waiting', reason: waitReason ?? 'tool' };
+  return null;
+}
 
 export interface AppRestartHost {
   /** 当前进程退出后再拉起一个新实例（app.relaunch） */

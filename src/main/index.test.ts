@@ -87,13 +87,15 @@ vi.mock('./services/agentHost', () => ({
 }));
 vi.mock('./ipc/agent', () => ({ resumeRootFromRestartManifest: vi.fn() }));
 vi.mock('./ipc/appRestart', () => ({
-  notifyRestartWaiting: vi.fn(),
+  clearRestartOverlay: vi.fn(),
   registerAppRestartHandlers: vi.fn(),
+  setRestartOverlay: vi.fn(),
 }));
 vi.mock('./ipc/sessionIndex', () => ({ agentSessionIndex: { runningRootSessionIds: () => [] } }));
 vi.mock('./services/coldRestart', () => ({
   coldRestartPlan: () => null,
   resumeColdRestartSessions: vi.fn(),
+  trackColdResume: vi.fn(),
 }));
 vi.mock('./services/proxyConfig', () => ({
   getProxyConfig: () => ({
