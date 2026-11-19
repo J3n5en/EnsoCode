@@ -104,4 +104,58 @@ describe('GracefulWorkerRestart', () => {
     expect(restart.ready({}, checkpoint([entry]))).toBe(false);
     expect(restart.ready({}, { sessions: 'bad' })).toBe(false);
   });
+
+  it('退出用：同一套安全点，菜单重启在等时并入，换代中不再等', () => {
+    const worker = {};
+    const restart = new GracefulWorkerRestart<object>();
+    expect(restart.requestQuit(worker)).toBe('no-session');
+    restart.record(spawn);
+    expect(restart.request(worker)).toBe('requested');
+    expect(restart.requestQuit(worker)).toBe('joined');
+    expect(restart.quitting).toBe(true);
+    expect(restart.ready(worker, checkpoint([entry]))).toBe(true);
+    expect(restart.requestQuit(worker)).toBe('busy');
+    // 退出没成：改回换代，worker 已落断点，应让它退出换新进程
+    expect(restart.cancelQuit()).toBe(true);
+    expect(restart.exited(worker)).toMatchObject({ swap: true });
+  });
+
+  it('恢复清单用的会话设置：spawn 请求去掉 sessionId / resumeFile，跟着之后的设置走；凭据只能从内存里收集', () => {
+    const restart = new GracefulWorkerRestart<object>();
+    restart.rememberRequest(identity, {
+      sessionId: 's1',
+      providerId: 'p',
+      modelId: 'm',
+      cwd: '/w',
+    });
+    expect(restart.restartSettingsOf('s1', 'g1')).toBeUndefined();
+    restart.record(spawn);
+    restart.rememberRequest(identity, {
+      sessionId: 's1',
+      providerId: 'p',
+      modelId: 'm',
+      cwd: '/w',
+      resumeFile: '/data/sessions/s1.jsonl',
+      askRelay: { name: 'sec' },
+    });
+    restart.record({ type: 'set-reasoning', identity, enabled: true, level: 'max' });
+    restart.record({ type: 'set-approval-mode', identity, mode: 'supervised', autoReject: true });
+    restart.record({ type: 'set-ask-relay', identity });
+    restart.record({ type: 'set-plan-mode', identity, active: true });
+    restart.recordModel(identity, 'p2', 'm2');
+    restart.recordModel({ sessionId: 's1', generation: 'stale' }, 'p3', 'm3');
+    expect(restart.restartSettingsOf('s1', 'g1')).toEqual({
+      providerId: 'p2',
+      modelId: 'm2',
+      cwd: '/w',
+      reasoningEnabled: true,
+      thinkingLevel: 'max',
+      approvalMode: 'supervised',
+      autoRejectApprovals: true,
+      planMode: true,
+    });
+    expect(restart.restartSettingsOf('s1', 'stale')).toBeUndefined();
+    restart.record({ ...spawn, model: { ...model, apiKey: 'sk-memory-only-0123456789' } });
+    expect(restart.knownSecrets()).toEqual(['sk-memory-only-0123456789']);
+  });
 });

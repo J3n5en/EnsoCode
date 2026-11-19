@@ -10,7 +10,9 @@ import { installDesktopLocalUi } from './desktop/localUi';
 import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
 import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
+import { resumeRootFromRestartManifest } from './ipc/agent';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
+import { agentSessionIndex } from './ipc/sessionIndex';
 import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
 import {
   noteOpenFolder,
@@ -22,7 +24,9 @@ import {
 import { createPluginInstallInbox } from './protocol/pluginInstall';
 import { createSecretaryLinkInbox } from './protocol/secretaryLink';
 import {
+  agentDataDir,
   agentWorkerAlive,
+  prepareAgentWorkerForQuit,
   recordAgentWorkerGone,
   requestGracefulWorkerRestart,
   startAgentWorker,
@@ -41,6 +45,7 @@ import {
 } from './services/appServerMode';
 import { browserHost } from './services/browserHost';
 import { getCaCertConfig } from './services/caCert';
+import { coldRestartPlan, resumeColdRestartSessions } from './services/coldRestart';
 import { computerHost } from './services/computerHost';
 import { startDesktopConfigCli, stopDesktopConfigCli } from './services/configCli';
 import { installDesktopHooks } from './services/desktopHooks';
@@ -238,6 +243,8 @@ if (!gotTheLock) {
       },
     });
     await secureStores;
+    // 上次退出 / 安装更新前停在安全点的会话：先读清单（渲染层取中断记录前就要知道哪些会续跑）
+    const coldRestart = coldRestartPlan(agentDataDir());
     registerIpcHandlers();
     registerDesktopIpcHandlers();
     void startDesktopConfigCli();
@@ -284,6 +291,11 @@ if (!gotTheLock) {
     browserHost.setHostWindow(getMainWindow);
     // 两个后台服务都不依赖窗口，同样延后，避免堵住首帧。
     setImmediate(() => {
+      // 冷启动接管断点：第一代 worker 带上断点，再按清单重走 spawn（凭据现取）
+      const startWorker = (): void => {
+        startAgentWorker(coldRestart ? { restartCheckpointFile: coldRestart.checkpointFile } : {});
+        if (coldRestart) void resumeColdRestartSessions(coldRestart, resumeRootFromRestartManifest);
+      };
       // worker 的 env 是 fork 时的快照：等系统代理解析后再 fork，
       // 打包版再等登录 shell 探测出真实 PATH。
       const ready = getProxyConfig().whenReady();
@@ -291,10 +303,10 @@ if (!gotTheLock) {
         void ready.finally(() =>
           hydrateShellPath()
             .then(({ extraCaCerts }) => getCaCertConfig().applyShellValue(extraCaCerts))
-            .finally(() => startAgentWorker())
+            .finally(startWorker)
         );
       } else {
-        void ready.finally(() => startAgentWorker());
+        void ready.finally(startWorker);
       }
       // 手机第二屏：恢复已配对设备的中继连接
       startPairHost();
@@ -344,7 +356,14 @@ if (!gotTheLock) {
     },
     {
       shouldWait: agentWorkerAlive,
-      wait: () => stopAgentWorkerForQuit(3_000),
+      // 先等 worker 到安全点、断点与恢复清单落盘（有超时兜底），再照常收尾
+      wait: async () => {
+        await prepareAgentWorkerForQuit({
+          reason: 'quit',
+          hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+        });
+        await stopAgentWorkerForQuit(3_000);
+      },
     },
   ]);
 }

@@ -192,6 +192,17 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 （格式与判定在 `src/shared/gracefulRestart.ts`，`scripts/graceful-restart-sim.mjs` 直接复用）。
 Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会话设置，新 worker 沿用断点里的 seq，
 `nextStep=model-request` 时用原 turnId 走 `continueSessionActivity` 续跑。不发 `worker-exited`。
+
+应用退出与安装更新复用同一套安全点（`agentHost.prepareAgentWorkerForQuit`）：will-quit 的 agent 收尾步骤
+（`main/index.ts` 的 `attachAppQuitDrain`）和 `AutoUpdater.quitAndInstall()` 都先等 worker 落断点，再照常
+`stopAgentWorkerForQuit` / `autoUpdater.quitAndInstall()`。没有正在跑的根会话直接放行；等待上限
+`QUIT_CHECKPOINT_TIMEOUT_MS`（10s），超时照常退出并写一行到 worker 退出日志；同一次退出只发一次请求，
+收尾期间再次退出由 `appQuitDrain` 吞掉。断点落盘后 Main 把恢复清单写到 `dataDir/restart-manifest.json`
+（`restartManifest.ts`：会话文件、白名单会话设置、turnId、nextStep、lastCompletedToolCallId、seq；
+写后读回扫密钥样式与内存里真实下发过的凭据，命中即删文件）。冷启动 `coldRestart.ts` 只在清单与配套断点
+（writtenAt 对得上）都在时接管：第一代 worker 带断点 fork，`ipc/agent.resumeRootFromRestartManifest`
+按原 generation 重走普通 spawn（cwd / 会话文件只认权威记录，凭据现取），续跑的会话从退出 / 更新中断记录里剔除。
+安装更新失败时 `cancelAgentQuitCheckpoint` 撤掉清单，并按断点换代让会话接着跑。
 子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
 
 **升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult

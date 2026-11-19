@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { agentWorkerPath, app, resourcesPath, utilityProcess, type WorkerProcess } from '@platform';
 import { describeAgentWorkerExit } from '@shared/agentWorkerExit';
@@ -33,7 +33,11 @@ import {
 import { ELEVATE_ASKPASS_ENV } from '@shared/elevation';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
-import { RESTART_CHECKPOINT_ENV, RESTART_CHECKPOINT_FILE } from '@shared/gracefulRestart';
+import {
+  parseRestartCheckpoint,
+  RESTART_CHECKPOINT_ENV,
+  RESTART_CHECKPOINT_FILE,
+} from '@shared/gracefulRestart';
 import { resolveImageGenerationConfig } from '@shared/imageGeneration';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
 import { mcpHeaders } from '@shared/mcpConfig';
@@ -163,6 +167,12 @@ import {
 } from './pluginRuntime';
 import { recordPrivacyMaskLedger } from './privacyMask';
 import { killAndWaitExit } from './processExit';
+import {
+  buildRestartManifest,
+  type RestartExitReason,
+  restartManifestPath,
+  writeRestartManifest,
+} from './restartManifest';
 import { bundledRtkPath } from './rtkBinary';
 import { pickSubagentModelRefs, type SubagentModelRef } from './subagentModels';
 import { readStoredSystemPrompt } from './systemPromptStore';
@@ -434,10 +444,14 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
         return;
       }
       if (event.type === 'graceful-restart-ready') {
-        // 断点已落盘：之后的命令排队交给下一代，旧进程退出后由 exit 分支换代
+        // 断点已落盘：之后的命令排队交给下一代，旧进程退出后由 exit 分支换代；
+        // 退出 / 安装更新时不换代，写好恢复清单后放行退出
         if (worker === child && gracefulRestart.ready(child, event.checkpoint)) {
           workerReady = false;
-          void killAndWaitExit(child, 5_000);
+          if (gracefulRestart.quitting && quitCheckpoint) {
+            writeQuitManifest(quitCheckpoint.reason, event.checkpoint);
+            quitCheckpoint.settle('checkpointed');
+          } else void killAndWaitExit(child, 5_000);
         }
         return;
       }
@@ -458,6 +472,8 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
   });
   child.on('exit', (code: unknown) => {
     const swap = worker === child ? gracefulRestart.exited(child) : { swap: false as const };
+    // 等安全点时 worker 先没了：不必再等超时
+    if (worker === child) quitCheckpoint?.settle('skipped');
     if (worker === child) {
       worker = null;
       workerReady = false;
@@ -594,6 +610,89 @@ export function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
   // 退出应用时不再换代
   gracefulRestart.reset();
   return killAndWaitExit(child, timeoutMs);
+}
+
+/** 退出 / 安装更新前等 worker 到安全点的上限：超时照常退出，不让应用卡住 */
+export const QUIT_CHECKPOINT_TIMEOUT_MS = 10_000;
+export type QuitCheckpointResult = 'skipped' | 'checkpointed' | 'timeout';
+
+let quitCheckpoint: {
+  reason: RestartExitReason;
+  promise: Promise<QuitCheckpointResult>;
+  settle(result: QuitCheckpointResult): void;
+} | null = null;
+
+/**
+ * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
+ * 冷启动据此续跑。没有正在跑的会话直接放行；同一次退出只发一次请求，再调用拿同一个结果。
+ */
+export function prepareAgentWorkerForQuit(options: {
+  reason: RestartExitReason;
+  hasRunningSessions: () => boolean;
+  timeoutMs?: number;
+}): Promise<QuitCheckpointResult> {
+  if (quitCheckpoint) return quitCheckpoint.promise;
+  const current = worker && workerReady ? worker : null;
+  if (!current || !options.hasRunningSessions()) return Promise.resolve('skipped');
+  const outcome = gracefulRestart.requestQuit(current);
+  if (outcome === 'no-session' || outcome === 'busy') return Promise.resolve('skipped');
+  if (outcome === 'requested')
+    current.postMessage({ type: 'graceful-restart' } satisfies AgentCommand);
+  const timeoutMs = options.timeoutMs ?? QUIT_CHECKPOINT_TIMEOUT_MS;
+  const { promise, resolve } = Promise.withResolvers<QuitCheckpointResult>();
+  const timer = setTimeout(() => {
+    const message = `[graceful-restart] ${options.reason}: worker 等安全点超过 ${timeoutMs}ms，照常退出`;
+    console.warn(message);
+    appendAgentWorkerExitLog(agentDataDir(), message);
+    resolve('timeout');
+  }, timeoutMs);
+  timer.unref?.();
+  quitCheckpoint = {
+    reason: options.reason,
+    promise,
+    settle(result) {
+      clearTimeout(timer);
+      resolve(result);
+    },
+  };
+  return promise;
+}
+
+/**
+ * 退出没有发生（安装更新失败）：撤掉恢复清单；worker 若已落断点就让它退出，按断点换代接着跑，
+ * 否则把还在等的请求改回普通换代。
+ */
+export function cancelAgentQuitCheckpoint(): void {
+  const pending = quitCheckpoint;
+  quitCheckpoint = null;
+  if (!pending) return;
+  pending.settle('skipped');
+  rmSync(restartManifestPath(agentDataDir()), { force: true });
+  if (gracefulRestart.cancelQuit() && worker) void killAndWaitExit(worker, 5_000);
+}
+
+function writeQuitManifest(reason: RestartExitReason, raw: unknown): void {
+  const checkpoint = parseRestartCheckpoint(raw);
+  if (!checkpoint) return;
+  try {
+    const manifest = buildRestartManifest({
+      reason,
+      checkpoint,
+      settingsOf: (sessionId, generation) =>
+        gracefulRestart.restartSettingsOf(sessionId, generation),
+    });
+    writeRestartManifest(agentDataDir(), manifest, gracefulRestart.knownSecrets());
+  } catch (error) {
+    console.error('[graceful-restart] 写恢复清单失败，冷启动不续跑:', error);
+  }
+}
+
+/** 普通根会话 spawn 成功后记下原始请求（不含凭据），退出时写进恢复清单 */
+export function rememberRestorableSpawn(
+  identity: SessionIdentity,
+  request: AgentSpawnRequest
+): void {
+  gracefulRestart.rememberRequest(identity, request);
 }
 
 /**
@@ -1548,7 +1647,9 @@ export function setSessionModel(
     allowVirtual: true,
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
-  return sendAgentCommand({ type: 'set-model', identity, model: resolved.selection.config });
+  const sent = sendAgentCommand({ type: 'set-model', identity, model: resolved.selection.config });
+  if (sent.ok) gracefulRestart.recordModel(identity, providerId, modelId);
+  return sent;
 }
 
 export function spawnChildSession(

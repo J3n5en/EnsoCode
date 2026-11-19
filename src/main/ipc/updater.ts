@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types';
 import type { UpdaterState } from '@shared/types/updater';
 import { app, ipcMain } from 'electron';
+import { coldResumedSessionIds } from '../services/coldRestart';
 import { takeInterruptedSessions } from '../services/updater/interruptedSessions';
 
 /** Linux deb/rpm 上不加载 electron-updater(某些系统会触发 GTK 崩溃);AppImage 正常 */
@@ -14,9 +15,11 @@ export function registerUpdaterHandlers(): void {
     (): UpdaterState => ({ host: 'desktop', status: null })
   );
 
-  ipcMain.handle(IPC_CHANNELS.UPDATER_TAKE_INTERRUPTED_SESSIONS, (): string[] =>
-    takeInterruptedSessions(app.getPath('userData'))
-  );
+  // 冷启动已从断点续跑的会话不再交给渲染层重试，否则同一轮会跑两遍
+  ipcMain.handle(IPC_CHANNELS.UPDATER_TAKE_INTERRUPTED_SESSIONS, (): string[] => {
+    const resumed = coldResumedSessionIds();
+    return takeInterruptedSessions(app.getPath('userData')).filter((id) => !resumed.has(id));
+  });
 
   ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, async () => {
     if (!isUpdaterEnabled()) return;

@@ -65,7 +65,7 @@ vi.mock('./desktop/localImageScheme', () => ({
 }));
 vi.mock('./services/remoteRenderer', () => ({ setupRemoteRenderer: vi.fn() }));
 vi.mock('./services/nodeRemote', () => ({ registerNodeSettingsProtocolHandler: vi.fn() }));
-vi.mock('./services/appMenu', () => ({ installAppMenu: vi.fn() }));
+vi.mock('./services/appMenu', () => ({ installAppMenu: vi.fn(), setAppMenuActions: vi.fn() }));
 vi.mock('./services/computerHost', () => ({ computerHost: { closeAll: vi.fn() } }));
 vi.mock('./services/pairHost', () => ({
   startPairHost: vi.fn(() => mocks.order.push('pair')),
@@ -80,6 +80,16 @@ vi.mock('./services/agentHost', () => ({
   startAgentWorker: mocks.startAgentWorker,
   agentWorkerAlive: () => false,
   stopAgentWorkerForQuit: vi.fn(async () => undefined),
+  prepareAgentWorkerForQuit: vi.fn(async () => 'skipped'),
+  requestGracefulWorkerRestart: vi.fn(),
+  recordAgentWorkerGone: vi.fn(),
+  agentDataDir: () => '/tmp/enso-index-test/agent',
+}));
+vi.mock('./ipc/agent', () => ({ resumeRootFromRestartManifest: vi.fn() }));
+vi.mock('./ipc/sessionIndex', () => ({ agentSessionIndex: { runningRootSessionIds: () => [] } }));
+vi.mock('./services/coldRestart', () => ({
+  coldRestartPlan: () => null,
+  resumeColdRestartSessions: vi.fn(),
 }));
 vi.mock('./services/proxyConfig', () => ({
   getProxyConfig: () => ({
