@@ -56,7 +56,8 @@ vi.mock('./processExit', () => ({
 import {
   cancelAgentQuitCheckpoint,
   prepareAgentWorkerForQuit,
-  QUIT_CHECKPOINT_TIMEOUT_MS,
+  QUIT_NO_TOOL_WAIT_MS,
+  QUIT_TOOL_WAIT_LIMIT_MS,
   rememberRestorableSpawn,
   sendAgentCommand,
   startAgentWorker,
@@ -64,6 +65,7 @@ import {
   stopAgentWorkerForQuit,
 } from './agentHost';
 import { loadColdRestartPlan, resumeColdRestartSessions } from './coldRestart';
+import { killAndWaitExit } from './processExit';
 import { findSecretLikeStrings, RESTART_MANIFEST_FILE } from './restartManifest';
 
 const API_KEY = 'sk-live-0123456789abcdefghijklmnop';
@@ -108,6 +110,10 @@ const graceful = (worker: number) =>
       entry.worker === worker && (entry.message as { type: string }).type === 'graceful-restart'
   );
 const dataDir = () => path.join(fork.userData, 'agent');
+const deferred = (toolsInFlight: string[], reason = 'tool-in-flight') => ({
+  type: 'graceful-restart-deferred',
+  sessions: [{ identity, reason, toolsInFlight }],
+});
 const manifestFile = () => path.join(dataDir(), RESTART_MANIFEST_FILE);
 
 /** 起一代 worker，登记一个普通根会话（spawn 请求 + 之后的设置） */
@@ -233,7 +239,7 @@ describe('应用退出走优雅重启', () => {
     expect(loadColdRestartPlan(dataDir())).toBeNull();
   });
 
-  it('等太久：超时照常放行，并记一条日志', async () => {
+  it('没有工具在跑却等不到安全点：不多等，超时照常放行，并记一条日志', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const index = bootWithSession();
@@ -242,11 +248,11 @@ describe('应用退出走优雅重启', () => {
     void pending.then(() => {
       done = true;
     });
-    await vi.advanceTimersByTimeAsync(QUIT_CHECKPOINT_TIMEOUT_MS - 1);
+    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS - 1);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await expect(pending).resolves.toBe('timeout');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${QUIT_CHECKPOINT_TIMEOUT_MS}ms`));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${QUIT_NO_TOOL_WAIT_MS}ms`));
     expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain('照常退出');
     expect(graceful(index)).toHaveLength(1);
     // 超时后再触发退出：拿同一个结果，不再发第二次请求
@@ -254,6 +260,151 @@ describe('应用退出走优雅重启', () => {
       prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: () => true })
     ).resolves.toBe('timeout');
     expect(graceful(index)).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('有工具在跑：提示在等、不会 10 秒就退，工具结束落断点后才放行并写清单', async () => {
+    vi.useFakeTimers();
+    const index = bootWithSession();
+    const waiting = vi.fn();
+    let done = false;
+    const pending = prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: () => true,
+      onWaitingForTools: waiting,
+    });
+    void pending.then(() => {
+      done = true;
+    });
+    fork.children[index].emit('message', deferred(['call-1']));
+    expect(waiting).toHaveBeenCalledTimes(1);
+    // 后加入的等待者（will-quit 收尾）拿同一个结果；已在等工具就立即告诉它
+    const joined = vi.fn();
+    expect(
+      prepareAgentWorkerForQuit({
+        reason: 'quit',
+        hasRunningSessions: () => true,
+        onWaitingForTools: joined,
+      })
+    ).toBe(pending);
+    expect(joined).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS * 3);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS - QUIT_NO_TOOL_WAIT_MS * 3 - 1_000);
+    expect(done).toBe(false);
+    expect(graceful(index)).toHaveLength(1);
+
+    // 命令跑完、停在下一次模型请求前落了断点
+    writeFileSync(path.join(dataDir(), RESTART_CHECKPOINT_FILE), JSON.stringify(checkpoint));
+    fork.children[index].emit('message', { type: 'graceful-restart-ready', checkpoint });
+    await expect(pending).resolves.toBe('checkpointed');
+    expect(waiting).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(manifestFile(), 'utf8')).sessions).toHaveLength(1);
+  });
+
+  it('工具结束后没工具在跑：只再等一小段，不等满上限', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const pending = prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: () => true });
+    fork.children[index].emit('message', deferred(['call-1']));
+    await vi.advanceTimersByTimeAsync(60_000);
+    fork.children[index].emit('message', deferred([], 'turn-in-progress'));
+    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS);
+    await expect(pending).resolves.toBe('timeout');
+    warn.mockRestore();
+  });
+
+  /** 等工具超过上限超时；stopAgentWorkerForQuit 终止 worker 时由 onKill 模拟它收尾落的断点 */
+  async function timeOutOnLongTool(onKill?: () => void) {
+    const index = bootWithSession();
+    const pending = prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: () => true });
+    fork.children[index].emit('message', deferred(['call-1']));
+    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS - 1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toBe('timeout');
+    expect(() => readFileSync(manifestFile())).toThrow();
+    vi.mocked(killAndWaitExit).mockImplementationOnce(async (child) => {
+      child.kill();
+      onKill?.();
+    });
+    await stopAgentWorkerForQuit(100);
+    fork.children[index].emit('exit', 0);
+    expect(fork.children).toHaveLength(index + 1);
+    return readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+  }
+  const writeCheckpoint = (value: RestartCheckpoint) =>
+    writeFileSync(path.join(dataDir(), RESTART_CHECKPOINT_FILE), JSON.stringify(value));
+
+  it('工具跑超过上限：超时退出，worker 收尾时落的断点照样写成清单，冷启动据此续跑', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // 真机：中止命令后 worker 停在下一次模型请求前，nextStep=model-request、toolsInFlight 为空
+    const log = await timeOutOnLongTool(() =>
+      writeCheckpoint({ ...checkpoint, writtenAt: Date.now() })
+    );
+    expect(log).toContain(`工具跑了超过上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`);
+    expect(log).toContain('写了恢复清单（1 个会话）');
+
+    const raw = readFileSync(manifestFile(), 'utf8');
+    expect(findSecretLikeStrings(raw, [API_KEY, OAUTH_TOKEN])).toEqual([]);
+    expect(JSON.parse(raw)).toMatchObject({
+      reason: 'quit',
+      sessions: [
+        {
+          sessionId: identity.sessionId,
+          nextStep: 'model-request',
+          settings: { providerId: 'p', modelId: 'm', thinkingLevel: 'high', planMode: true },
+        },
+      ],
+    });
+    const plan = loadColdRestartPlan(dataDir());
+    expect(plan?.resume.map((entry) => entry.sessionId)).toEqual([identity.sessionId]);
+    stopAgentWorker();
+    startAgentWorker({ restartCheckpointFile: plan?.checkpointFile });
+    expect(fork.envs.at(-1)?.[RESTART_CHECKPOINT_ENV]).toBe(
+      path.join(dataDir(), RESTART_CHECKPOINT_FILE)
+    );
+    const resumed: string[] = [];
+    await resumeColdRestartSessions(plan!, async (entry) => {
+      resumed.push(entry.sessionId);
+      return { ok: true };
+    });
+    expect(resumed).toEqual([identity.sessionId]);
+    warn.mockRestore();
+  });
+
+  it('超时且 worker 到退出都没落断点：不写清单，日志写明原因', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = await timeOutOnLongTool();
+    expect(() => readFileSync(manifestFile())).toThrow();
+    expect(log).toContain('不写恢复清单：worker 退出前没落断点（没到安全点）');
+    warn.mockRestore();
+  });
+
+  it('超时且断点里还有工具在跑：不写清单，日志写明原因', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const busy = {
+      ...checkpoint,
+      writtenAt: Date.now(),
+      sessions: [{ ...checkpoint.sessions[0], toolsInFlight: ['call-2'] }],
+    };
+    const log = await timeOutOnLongTool(() => writeCheckpoint(busy));
+    expect(() => readFileSync(manifestFile())).toThrow();
+    expect(log).toContain('不写恢复清单：断点里还有工具在跑');
+    warn.mockRestore();
+  });
+
+  it('超时且磁盘上只有这次退出之前的旧断点：不写清单', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeCheckpoint(checkpoint);
+    const log = await timeOutOnLongTool();
+    expect(() => readFileSync(manifestFile())).toThrow();
+    expect(log).toContain('不写恢复清单：断点是这次退出之前留下的');
     warn.mockRestore();
   });
 

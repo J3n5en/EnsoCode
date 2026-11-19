@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { APP_DISPLAY_NAME, type AppMenuActions, macAppMenuTemplate } from './appMenu';
+import type { AppRestartState } from './appRestart';
 
 describe('macAppMenuTemplate', () => {
   it('labels app menu items with the product name instead of the package name', () => {
@@ -43,12 +44,12 @@ describe('macAppMenuTemplate', () => {
 
   describe('重启', () => {
     const status = { ensoCommand: false, finderQuickAction: false };
-    const setup = (options: { restarting?: boolean; fail?: boolean } = {}) => {
+    const setup = (options: { state?: AppRestartState; fail?: boolean } = {}) => {
       const actions: AppMenuActions = {
         restartApp: vi.fn(() => {
           if (options.fail) throw new Error('relaunch unavailable');
         }),
-        isRestarting: () => options.restarting ?? false,
+        restartState: () => options.state ?? 'idle',
         reportError: vi.fn(),
       };
       const items = macAppMenuTemplate('zh', false, status, actions)[0].submenu as {
@@ -57,7 +58,9 @@ describe('macAppMenuTemplate', () => {
         enabled?: boolean;
         click?: () => void;
       }[];
-      const restart = items.find((item) => item.label === '重启' || item.label === '正在重启…');
+      const restart = items.find((item) =>
+        ['重启', '正在重启…', '等命令跑完再重启…'].includes(item.label ?? '')
+      );
       return { actions, items, restart };
     };
 
@@ -79,9 +82,16 @@ describe('macAppMenuTemplate', () => {
     });
 
     it('重启进行中：菜单项显示「正在重启…」且不可再点', () => {
-      const { restart } = setup({ restarting: true });
+      const { restart } = setup({ state: 'restarting' });
       expect(restart?.label).toBe('正在重启…');
       expect(restart?.enabled).toBe(false);
+    });
+
+    it('等命令跑完：菜单项显示等待状态且不可再点', () => {
+      const { restart } = setup({ state: 'waiting-for-tools' });
+      expect(restart?.label).toBe('等命令跑完再重启…');
+      expect(restart?.enabled).toBe(false);
+      expect(restart?.click).toBeUndefined();
     });
 
     it('点击处理抛错：不吞掉，给用户一句失败原因', () => {

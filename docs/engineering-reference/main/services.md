@@ -195,17 +195,22 @@ Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会
 
 应用退出与安装更新复用同一套安全点（`agentHost.prepareAgentWorkerForQuit`）：will-quit 的 agent 收尾步骤
 （`main/index.ts` 的 `attachAppQuitDrain`）和 `AutoUpdater.quitAndInstall()` 都先等 worker 落断点，再照常
-`stopAgentWorkerForQuit` / `autoUpdater.quitAndInstall()`。没有正在跑的根会话直接放行；等待上限
-`QUIT_CHECKPOINT_TIMEOUT_MS`（10s），超时照常退出并写一行到 worker 退出日志；同一次退出只发一次请求，
+`stopAgentWorkerForQuit` / `autoUpdater.quitAndInstall()`。没有正在跑的根会话直接放行；worker 推迟时报告
+有工具在跑就等它结束，上限 `QUIT_TOOL_WAIT_LIMIT_MS`（5 分钟），没有工具在跑时最多等
+`QUIT_NO_TOOL_WAIT_MS`（10s）；超时照常退出（收尾中止命令）并写一行到 worker 退出日志。超时后
+`stopAgentWorkerForQuit` 在 worker 退出后读它收尾时落的断点（本次请求之后写的、没有在跑的工具），照样
+写恢复清单；断点没落盘 / 是旧的 / 还有工具在跑就不写，原因记进 worker 退出日志。同一次退出只发一次请求，
 收尾期间再次退出由 `appQuitDrain` 吞掉。断点落盘后 Main 把恢复清单写到 `dataDir/restart-manifest.json`
 （`restartManifest.ts`：会话文件、白名单会话设置、turnId、nextStep、lastCompletedToolCallId、seq；
 写后读回扫密钥样式与内存里真实下发过的凭据，命中即删文件）。冷启动 `coldRestart.ts` 只在清单与配套断点
 （writtenAt 对得上）都在时接管：第一代 worker 带断点 fork，`ipc/agent.resumeRootFromRestartManifest`
 按原 generation 重走普通 spawn（cwd / 会话文件只认权威记录，凭据现取），续跑的会话从退出 / 更新中断记录里剔除。
 安装更新失败时 `cancelAgentQuitCheckpoint` 撤掉清单，并按断点换代让会话接着跑。
-菜单「重启」（`appMenu` → `services/appRestart.ts`）是整个应用重启：`app.relaunch()` 后放行关窗确认、
-`app.quit()`，退出就走上面的 will-quit 收尾；同一进程只登记一次 relaunch（多次会起多个实例），
-进行中菜单项变为不可点的「正在重启…」。它不调用只换 worker 的 `requestGracefulWorkerRestart`。
+菜单「重启」（`appMenu` → `services/appRestart.ts`）是整个应用重启：`app.relaunch()` 后窗口不关，先
+`prepareAgentWorkerForQuit` 等安全点；worker 报告有工具在跑时立刻弹「有命令在跑，会等它结束再重启」，
+菜单项变为不可点的「等命令跑完再重启…」。等到结果（含超时）再放行关窗确认、`app.quit()`，will-quit
+收尾拿同一个结果。同一进程只登记一次 relaunch（多次会起多个实例），进行中菜单项不可点。
+它不调用只换 worker 的 `requestGracefulWorkerRestart`。
 子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
 
 **升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult

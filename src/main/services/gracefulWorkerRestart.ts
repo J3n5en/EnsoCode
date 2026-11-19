@@ -10,6 +10,10 @@ import { type RestartSessionSettings, secretValuesOf } from './restartManifest';
 export type GracefulRestartRequest = 'requested' | 'already-restarting' | 'no-session';
 /** joined：菜单重启正在等安全点，改为退出用；busy：旧进程已在换代，没有可等的 */
 export type GracefulQuitRequest = 'requested' | 'joined' | 'no-session' | 'busy';
+export interface RestartSettingsSnapshot {
+  settingsOf(sessionId: string, generation: string): RestartSessionSettings | undefined;
+  secrets: string[];
+}
 
 type SpawnParent = Extract<AgentCommand, { type: 'spawn-parent' }>;
 interface RestartSession {
@@ -93,6 +97,23 @@ export class GracefulWorkerRestart<W> {
 
   restartSettingsOf(sessionId: string, generation: string): RestartSessionSettings | undefined {
     return this.current({ sessionId, generation })?.request;
+  }
+
+  /** 停 worker 前留一份会话设置与凭据：worker 收尾时才落的断点仍能配上设置写清单 */
+  snapshot(): RestartSettingsSnapshot {
+    const requests = new Map(
+      [...this.sessions].map(([id, session]) => [
+        id,
+        { generation: session.spawn.identity.generation, request: session.request },
+      ])
+    );
+    return {
+      settingsOf: (sessionId, generation) => {
+        const entry = requests.get(sessionId);
+        return entry?.generation === generation ? entry.request : undefined;
+      },
+      secrets: this.knownSecrets(),
+    };
   }
 
   /** Main 内存里各会话真实下发过的凭据：写清单后据此核对一个都没有落盘 */

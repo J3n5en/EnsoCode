@@ -260,6 +260,8 @@ export const zhTranslations: Record<string, string> = {
   'No release notes provided.': '此版本未提供更新日志。',
   Restart: '重启',
   'Restarting…': '正在重启…',
+  'Waiting for running commands to restart…': '等命令跑完再重启…',
+  'A command is running. EnsoCode will restart after it finishes.': '有命令在跑，会等它结束再重启',
   'Restart failed: {{error}}': '重启失败：{{error}}',
   'Restart server': '重启服务端',
   'Restart server?': '重启服务端？',

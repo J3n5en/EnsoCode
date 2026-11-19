@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { agentWorkerPath, app, resourcesPath, utilityProcess, type WorkerProcess } from '@platform';
 import { describeAgentWorkerExit } from '@shared/agentWorkerExit';
@@ -37,6 +37,7 @@ import {
   parseRestartCheckpoint,
   RESTART_CHECKPOINT_ENV,
   RESTART_CHECKPOINT_FILE,
+  type RestartCheckpoint,
 } from '@shared/gracefulRestart';
 import { resolveImageGenerationConfig } from '@shared/imageGeneration';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
@@ -146,7 +147,11 @@ import {
 } from './extensionPlugins';
 import { PluginAgentRuns } from './extensionPlugins/agentRuns';
 import { PluginMcpRequests } from './extensionPlugins/mcpRequests';
-import { type GracefulRestartRequest, GracefulWorkerRestart } from './gracefulWorkerRestart';
+import {
+  type GracefulRestartRequest,
+  GracefulWorkerRestart,
+  type RestartSettingsSnapshot,
+} from './gracefulWorkerRestart';
 import { resolveGlobalInstruction } from './instructionStore';
 import { refreshMcpOAuthAccess } from './mcpOAuthRefresh';
 import { getMcpOAuthStore } from './mcpOAuthStore';
@@ -436,6 +441,7 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
         return;
       }
       if (event.type === 'graceful-restart-deferred') {
+        if (worker === child) quitCheckpoint?.observe(event.sessions);
         console.log(
           `[agent] graceful restart deferred: ${event.sessions
             .map((s) => `${s.identity.sessionId.slice(0, 8)}=${s.reason}`)
@@ -449,7 +455,9 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
         if (worker === child && gracefulRestart.ready(child, event.checkpoint)) {
           workerReady = false;
           if (gracefulRestart.quitting && quitCheckpoint) {
-            writeQuitManifest(quitCheckpoint.reason, event.checkpoint);
+            const checkpoint = parseRestartCheckpoint(event.checkpoint);
+            if (checkpoint)
+              writeQuitManifest(quitCheckpoint, checkpoint, gracefulRestart.snapshot());
             quitCheckpoint.settle('checkpointed');
           } else void killAndWaitExit(child, 5_000);
         }
@@ -603,58 +611,120 @@ export async function restartAgentWorker(timeoutMs = 5_000): Promise<boolean> {
 /**
  * 应用退出时 Electron 不给 utility 进程发 SIGTERM，worker 的收尾（中止会话→pi 杀 detached
  * bash 进程组、断开 MCP）跑不到，命令会成孤儿进程。退出前主动发信号并等它自行退出。
+ * 等安全点超时的话，worker 收尾（中止命令）时可能才落断点：退出后据此补写恢复清单。
  */
-export function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
+export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
   const child = worker;
-  if (!child) return Promise.resolve();
+  const pending = quitCheckpoint;
+  // 清会话前留一份设置：补写清单时要配上
+  const late = pending?.timedOut && !pending.manifestWritten ? gracefulRestart.snapshot() : null;
   // 退出应用时不再换代
   gracefulRestart.reset();
-  return killAndWaitExit(child, timeoutMs);
+  if (child) await killAndWaitExit(child, timeoutMs);
+  if (pending && late) writeLateQuitManifest(pending, late);
 }
 
-/** 退出 / 安装更新前等 worker 到安全点的上限：超时照常退出，不让应用卡住 */
-export const QUIT_CHECKPOINT_TIMEOUT_MS = 10_000;
+/** 退出 / 安装更新前有工具在跑：等它结束，最多等这么久；超时中止命令照常退出 */
+export const QUIT_TOOL_WAIT_LIMIT_MS = 5 * 60_000;
+/** 没有工具在跑（回复还在流式输出、等收口）时等安全点的上限 */
+export const QUIT_NO_TOOL_WAIT_MS = 10_000;
 export type QuitCheckpointResult = 'skipped' | 'checkpointed' | 'timeout';
 
-let quitCheckpoint: {
+type DeferredSessions = Extract<
+  AgentWorkerEvent,
+  { type: 'graceful-restart-deferred' }
+>['sessions'];
+
+interface QuitCheckpoint {
   reason: RestartExitReason;
+  requestedAt: number;
   promise: Promise<QuitCheckpointResult>;
+  timedOut: boolean;
+  manifestWritten: boolean;
+  /** worker 最近一次推迟时报告有工具在跑 */
+  toolsRunning: boolean;
+  waitingForTools: Array<() => void>;
+  observe(sessions: DeferredSessions): void;
   settle(result: QuitCheckpointResult): void;
-} | null = null;
+}
+
+let quitCheckpoint: QuitCheckpoint | null = null;
 
 /**
  * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
  * 冷启动据此续跑。没有正在跑的会话直接放行；同一次退出只发一次请求，再调用拿同一个结果。
+ * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时最多等 QUIT_NO_TOOL_WAIT_MS；
+ * onWaitingForTools 在 worker 报告有工具在跑时回调（已在跑则立即回调）。
  */
 export function prepareAgentWorkerForQuit(options: {
   reason: RestartExitReason;
   hasRunningSessions: () => boolean;
-  timeoutMs?: number;
+  onWaitingForTools?: () => void;
 }): Promise<QuitCheckpointResult> {
-  if (quitCheckpoint) return quitCheckpoint.promise;
+  if (quitCheckpoint) {
+    if (options.onWaitingForTools) {
+      quitCheckpoint.waitingForTools.push(options.onWaitingForTools);
+      if (quitCheckpoint.toolsRunning) options.onWaitingForTools();
+    }
+    return quitCheckpoint.promise;
+  }
   const current = worker && workerReady ? worker : null;
   if (!current || !options.hasRunningSessions()) return Promise.resolve('skipped');
   const outcome = gracefulRestart.requestQuit(current);
   if (outcome === 'no-session' || outcome === 'busy') return Promise.resolve('skipped');
   if (outcome === 'requested')
     current.postMessage({ type: 'graceful-restart' } satisfies AgentCommand);
-  const timeoutMs = options.timeoutMs ?? QUIT_CHECKPOINT_TIMEOUT_MS;
+  const requestedAt = Date.now();
   const { promise, resolve } = Promise.withResolvers<QuitCheckpointResult>();
-  const timer = setTimeout(() => {
-    const message = `[graceful-restart] ${options.reason}: worker 等安全点超过 ${timeoutMs}ms，照常退出`;
-    console.warn(message);
-    appendAgentWorkerExitLog(agentDataDir(), message);
-    resolve('timeout');
-  }, timeoutMs);
-  timer.unref?.();
-  quitCheckpoint = {
-    reason: options.reason,
-    promise,
-    settle(result) {
-      clearTimeout(timer);
-      resolve(result);
-    },
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  let quietSince = requestedAt;
+  const finish = (result: QuitCheckpointResult) => {
+    clearTimeout(timer);
+    settled = true;
+    resolve(result);
   };
+  const arm = () => {
+    clearTimeout(timer);
+    const limit = requestedAt + QUIT_TOOL_WAIT_LIMIT_MS;
+    const deadline = state.toolsRunning
+      ? limit
+      : Math.min(limit, quietSince + QUIT_NO_TOOL_WAIT_MS);
+    timer = setTimeout(
+      () => {
+        state.timedOut = true;
+        const why = state.toolsRunning
+          ? `工具跑了超过上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`
+          : `没有工具在跑，${QUIT_NO_TOOL_WAIT_MS}ms 内没到安全点`;
+        const message = `[graceful-restart] ${options.reason}: worker 等安全点 ${Date.now() - requestedAt}ms 超时（${why}），中止在跑的命令照常退出`;
+        console.warn(message);
+        appendAgentWorkerExitLog(agentDataDir(), message);
+        finish('timeout');
+      },
+      Math.max(0, deadline - Date.now())
+    );
+    timer.unref?.();
+  };
+  const state: QuitCheckpoint = {
+    reason: options.reason,
+    requestedAt,
+    promise,
+    timedOut: false,
+    manifestWritten: false,
+    toolsRunning: false,
+    waitingForTools: options.onWaitingForTools ? [options.onWaitingForTools] : [],
+    observe(sessions) {
+      const running = sessions.some((session) => session.toolsInFlight.length > 0);
+      if (settled || running === state.toolsRunning) return;
+      state.toolsRunning = running;
+      if (running) for (const notify of state.waitingForTools) notify();
+      else quietSince = Date.now();
+      arm();
+    },
+    settle: finish,
+  };
+  quitCheckpoint = state;
+  arm();
   return promise;
 }
 
@@ -671,20 +741,61 @@ export function cancelAgentQuitCheckpoint(): void {
   if (gracefulRestart.cancelQuit() && worker) void killAndWaitExit(worker, 5_000);
 }
 
-function writeQuitManifest(reason: RestartExitReason, raw: unknown): void {
-  const checkpoint = parseRestartCheckpoint(raw);
-  if (!checkpoint) return;
+function writeQuitManifest(
+  pending: QuitCheckpoint,
+  checkpoint: RestartCheckpoint,
+  settings: RestartSettingsSnapshot
+): 'written' | 'empty' | 'failed' {
   try {
     const manifest = buildRestartManifest({
-      reason,
+      reason: pending.reason,
       checkpoint,
-      settingsOf: (sessionId, generation) =>
-        gracefulRestart.restartSettingsOf(sessionId, generation),
+      settingsOf: settings.settingsOf,
     });
-    writeRestartManifest(agentDataDir(), manifest, gracefulRestart.knownSecrets());
+    pending.manifestWritten = writeRestartManifest(agentDataDir(), manifest, settings.secrets);
+    return pending.manifestWritten ? 'written' : 'empty';
   } catch (error) {
     console.error('[graceful-restart] 写恢复清单失败，冷启动不续跑:', error);
+    return 'failed';
   }
+}
+
+/** 超时退出后 worker 收尾时落的断点：能用就返回断点，不能用返回原因 */
+function lateQuitCheckpoint(pending: QuitCheckpoint): RestartCheckpoint | string {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path.join(agentDataDir(), RESTART_CHECKPOINT_FILE), 'utf8'));
+  } catch {
+    return 'worker 退出前没落断点（没到安全点）';
+  }
+  const checkpoint = parseRestartCheckpoint(raw);
+  if (!checkpoint) return '断点格式不对';
+  if (checkpoint.writtenAt < pending.requestedAt) return '断点是这次退出之前留下的';
+  const busy = checkpoint.sessions.filter((entry) => entry.toolsInFlight.length > 0);
+  if (busy.length > 0)
+    return `断点里还有工具在跑（${busy.map((entry) => `${entry.sessionId.slice(0, 8)}=${entry.toolsInFlight.join(',')}`).join(' ')}）`;
+  if (checkpoint.sessions.length === 0) return '断点里没有会话';
+  return checkpoint;
+}
+
+/** 超时退出：worker 收尾时落的断点能用就照样写清单，冷启动据此续跑；不能用就记下原因 */
+function writeLateQuitManifest(pending: QuitCheckpoint, settings: RestartSettingsSnapshot): void {
+  const checkpoint = lateQuitCheckpoint(pending);
+  const result =
+    typeof checkpoint === 'string' ? checkpoint : writeQuitManifest(pending, checkpoint, settings);
+  const message =
+    result === 'written' && typeof checkpoint !== 'string'
+      ? `按 worker 收尾时落的断点写了恢复清单（${checkpoint.sessions.length} 个会话）`
+      : `不写恢复清单：${
+          result === 'empty'
+            ? '断点里的会话都不是可续跑的普通根会话'
+            : result === 'failed'
+              ? '写清单出错'
+              : result
+        }`;
+  const line = `[graceful-restart] ${pending.reason}: 超时退出，${message}`;
+  console.warn(line);
+  appendAgentWorkerExitLog(agentDataDir(), line);
 }
 
 /** 普通根会话 spawn 成功后记下原始请求（不含凭据），退出时写进恢复清单 */

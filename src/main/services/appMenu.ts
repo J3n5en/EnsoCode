@@ -6,6 +6,7 @@ import {
 } from '@shared/shellIntegration';
 import { app, Menu, type MenuItemConstructorOptions } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
+import type { AppRestartState } from './appRestart';
 
 export const APP_DISPLAY_NAME = 'EnsoCode';
 
@@ -13,7 +14,7 @@ export const APP_DISPLAY_NAME = 'EnsoCode';
 export interface AppMenuActions {
   /** 整个应用优雅退出后重新打开；进行中重复调用无副作用 */
   restartApp(): void;
-  isRestarting(): boolean;
+  restartState(): AppRestartState;
   reportError(message: string): void;
 }
 
@@ -30,6 +31,23 @@ function restartAppFromMenu(locale: Locale, actions: AppMenuActions): void {
     console.error('[app-menu] 重启失败:', error);
     const reason = error instanceof Error ? error.message : String(error);
     actions.reportError(translate(locale, 'Restart failed: {{error}}', { error: reason }));
+  }
+}
+
+function restartMenuItem(locale: Locale, actions: AppMenuActions): MenuItemConstructorOptions {
+  switch (actions.restartState()) {
+    case 'waiting-for-tools':
+      return {
+        label: translate(locale, 'Waiting for running commands to restart…'),
+        enabled: false,
+      };
+    case 'restarting':
+      return { label: translate(locale, 'Restarting…'), enabled: false };
+    default:
+      return {
+        label: translate(locale, 'Restart'),
+        click: () => restartAppFromMenu(locale, actions),
+      };
   }
 }
 
@@ -55,16 +73,7 @@ export function macAppMenuTemplate(
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
-        ...(actions
-          ? [
-              actions.isRestarting()
-                ? { label: translate(locale, 'Restarting…'), enabled: false }
-                : {
-                    label: translate(locale, 'Restart'),
-                    click: () => restartAppFromMenu(locale, actions),
-                  },
-            ]
-          : []),
+        ...(actions ? [restartMenuItem(locale, actions)] : []),
         { role: 'quit', label: `Quit ${APP_DISPLAY_NAME}` },
       ],
     },

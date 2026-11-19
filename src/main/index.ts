@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
+import { translate } from '@shared/i18n';
 import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { syncDropShelf } from './desktop/dropShelf';
 import {
@@ -130,11 +131,34 @@ if (app.isPackaged && process.platform !== 'win32') {
 const gotTheLock = app.requestSingleInstanceLock();
 const pluginInstallInbox = createPluginInstallInbox(process.platform);
 const secretaryLinkInbox = createSecretaryLinkInbox(process.platform);
-// 菜单「重启」：退出走下面 will-quit 的 agent 收尾（安全点 + 恢复清单），新实例冷启动按清单续跑
+function showMenuMessage(type: 'info' | 'error', message: string): void {
+  const parent = BrowserWindow.getFocusedWindow() ?? getMainWindow();
+  const options = { type, message };
+  void (
+    parent && !parent.isDestroyed()
+      ? dialog.showMessageBox(parent, options)
+      : dialog.showMessageBox(options)
+  ).catch((error: unknown) => console.error('[app-menu] 提示框失败:', error));
+}
+
+// 菜单「重启」：先等 agent 安全点（有命令在跑就等它结束并提示），再退出；will-quit 收尾拿同一个结果，
+// 新实例冷启动按清单续跑
 const appRestart = createAppRestart({
   relaunch: () => app.relaunch(),
   allowQuit: allowAppQuit,
   quit: () => app.quit(),
+  prepareQuit: (onWaitingForTools) =>
+    prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+      onWaitingForTools,
+    }),
+  stateChanged: () => installAppMenu(readLocale()),
+  notifyWaitingForTools: () =>
+    showMenuMessage(
+      'info',
+      translate(readLocale(), 'A command is running. EnsoCode will restart after it finishes.')
+    ),
 });
 
 function registerEnsoProtocol(): void {
@@ -201,19 +225,9 @@ if (!gotTheLock) {
       app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     }
     setAppMenuActions({
-      restartApp: () => {
-        if (appRestart.restart() === 'restarting') installAppMenu(readLocale());
-      },
-      isRestarting: () => appRestart.restarting,
-      reportError: (message) => {
-        const parent = BrowserWindow.getFocusedWindow() ?? getMainWindow();
-        const options = { type: 'error' as const, message };
-        void (
-          parent && !parent.isDestroyed()
-            ? dialog.showMessageBox(parent, options)
-            : dialog.showMessageBox(options)
-        ).catch((error: unknown) => console.error('[app-menu] 提示框失败:', error));
-      },
+      restartApp: () => void appRestart.restart(),
+      restartState: () => appRestart.state,
+      reportError: (message) => showMenuMessage('error', message),
     });
     installAppMenu(readLocale());
 
