@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
+import { isRemoteClient } from '@/lib/remoteClient';
 import { useSettingsStore } from '@/stores/settings';
 import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
 import {
@@ -138,6 +139,8 @@ function ShellIntegrationRow({
   React.useEffect(() => {
     let active = true;
     const refresh = () => {
+      // shell integration 是宿主桌面能力，远程查不到
+      if (isRemoteClient()) return;
       void window.electronAPI.window.shellIntegrationStatus().then((status) => {
         if (active) setInstalled(status[kind]);
       });

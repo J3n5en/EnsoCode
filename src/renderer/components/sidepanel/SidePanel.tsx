@@ -47,6 +47,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { holesClipPath } from '@/lib/backgroundClip';
+import { isRemoteClient } from '@/lib/remoteClient';
 import {
   addSidePanelBrowser,
   addSidePanelWorkflow,
@@ -1007,7 +1008,8 @@ function ConversationDock({
       )
         return;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) {
-        void window.electronAPI.browser.closeTab(panel.id);
+        // 远程渲染的是宿主浏览器的只读提示，没有可关闭的宿主标签
+        if (!isRemoteClient()) void window.electronAPI.browser.closeTab(panel.id);
         return;
       }
       if (panel.id.startsWith('btw:')) {

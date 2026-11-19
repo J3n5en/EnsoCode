@@ -9,6 +9,7 @@ import { useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
 import type { SettingsState } from '@/stores/settings/types';
 import { useSidePanelStore } from '@/stores/sidePanel';
+import { isRemoteClient } from './remoteClient';
 import { resolveSidePanelDockConversationId } from './sidePanelDockId';
 
 const docks = new Map<string, DockviewApi>();
@@ -472,7 +473,8 @@ export function disposeConversationResources(conversationId: string): void {
       void window.electronAPI?.terminal?.dispose(panel.id);
     }
   }
-  void window.electronAPI?.browser?.closeSession?.(conversationId);
+  // browser:* 不对远端开放：远程没有宿主浏览器会话可回收
+  if (!isRemoteClient()) void window.electronAPI?.browser?.closeSession?.(conversationId);
   useSidePanelStore.getState().forgetConversation(conversationId);
 }
 
