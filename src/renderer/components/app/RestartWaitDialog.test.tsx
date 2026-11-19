@@ -32,7 +32,7 @@ vi.mock('@/components/ui/spinner', () => ({
 
 let root: Root;
 let container: HTMLElement;
-let push: ((waiting: boolean) => void) | undefined;
+let push: ((waiting: boolean, reason?: string) => void) | undefined;
 const forceRestart = vi.fn();
 const dialog = () => container.querySelector('[role="alertdialog"]');
 
@@ -46,7 +46,7 @@ beforeEach(async () => {
   Object.assign(window, {
     electronAPI: {
       app: {
-        onRestartWaiting: (callback: (waiting: boolean) => void) => {
+        onRestartWaiting: (callback: (waiting: boolean, reason?: string) => void) => {
           push = callback;
           return () => {
             push = undefined;
@@ -84,5 +84,16 @@ describe('RestartWaitDialog', () => {
     await act(async () => button?.click());
     expect(forceRestart).toHaveBeenCalledTimes(1);
     expect(dialog()?.querySelector('button')?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('在等的是脱离不了的转后台命令：多一句说明；普通命令不说', async () => {
+    const note = 'cannot keep running without EnsoCode';
+    await act(async () => push?.(true, 'tool'));
+    expect(dialog()?.textContent).not.toContain(note);
+    await act(async () => push?.(true, 'background-not-detachable'));
+    expect(dialog()?.textContent).toContain(note);
+    expect(dialog()?.textContent).toContain(
+      'EnsoCode will restart once the current command finishes.'
+    );
   });
 });

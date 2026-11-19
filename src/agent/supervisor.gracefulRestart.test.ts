@@ -1,10 +1,14 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackgroundTaskManager } from './backgroundTasks';
+import { DETACHED_TASKS_FILE, writeDetachedTasksManifest } from './detachedTasksManifest';
+import { runFiles } from './shell/detachedRun';
 
 const mocks = vi.hoisted(() => ({
   sessions: [] as Array<ReturnType<typeof fakeSessionShape>>,
@@ -501,6 +505,198 @@ describe('SessionSupervisor graceful restart', () => {
     expect(ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
       expect.objectContaining({ sessionId: 'parent', toolsInFlight: [] }),
     ]);
+    await supervisor.shutdown();
+  });
+});
+
+describe('SessionSupervisor 重启保留转后台命令', () => {
+  const logDir = path.join('/tmp/agent', 'task-logs');
+  beforeEach(() => {
+    mocks.sessions.length = 0;
+    mocks.prefill.length = 0;
+    mocks.createAgentSession.mockReset();
+    mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
+      session: fakeSession(options),
+    }));
+  });
+
+  /** 文件直写进程的句柄替身：release 返回已读偏移，不碰真实进程 */
+  function fakeRun() {
+    const runId = randomUUID();
+    const files = runFiles(logDir, runId);
+    return {
+      runId,
+      pid: 424242,
+      startedAt: Date.now() - 50_000,
+      cwd: '/workspace',
+      outputFile: files.outputFile,
+      exitFile: files.exitFile,
+      sink: vi.fn(),
+      flush: vi.fn(),
+      done: new Promise<never>(() => {}),
+      kill: vi.fn(),
+      release: vi.fn(() => 42),
+    };
+  }
+
+  it('能脱离的转后台命令不挡安全点；脱离不了的照等并单独列出；交出后写清单、收尾不再停它', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-keep-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const session = mocks.sessions[0];
+    session.messages.push(user, assistantCall);
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'bash' });
+    const bgTasks = (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+    const run = fakeRun();
+    const detachedKill = vi.fn();
+    const devServer = bgTasks.adopt(
+      'parent',
+      {
+        output: () => 'ready on :5173\n',
+        pipe: () => {},
+        done: new Promise(() => {}),
+        kill: detachedKill,
+        detachable: () => run,
+      },
+      {
+        command: 'API_TOKEN=tok-0123456789abcdef pnpm dev',
+        startedAt: run.startedAt,
+        cwd: '/workspace',
+      }
+    );
+    const exit = Promise.withResolvers<number | null>();
+    const remote = bgTasks.adopt(
+      'parent',
+      { output: () => '', pipe: () => {}, done: exit.promise, kill: () => exit.resolve(null) },
+      { command: 'ssh box make', startedAt: Date.now() }
+    );
+    session.messages.push(toolResult);
+    session.emit({ type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'bash' });
+    session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
+
+    supervisor.handleCommand({ type: 'graceful-restart', keepBackgroundTasks: true });
+    void session.agent.prepareNextTurnWithContext({}, undefined);
+    await settle();
+    expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
+      {
+        identity: parent,
+        reason: 'tool-in-flight',
+        toolsInFlight: [remote],
+        undetachableTasks: [remote],
+      },
+    ]);
+    exit.resolve(0);
+    await waitFor(events, 'graceful-restart-ready');
+
+    supervisor.handleCommand({ type: 'detach-background-tasks' });
+    expect(ofType(events, 'background-tasks-detached')).toEqual([
+      { type: 'background-tasks-detached', detached: 1 },
+    ]);
+    expect(run.release).toHaveBeenCalledTimes(1);
+    const raw = readFileSync(path.join(dataDir, DETACHED_TASKS_FILE), 'utf8');
+    expect(raw).not.toContain('tok-0123456789abcdef');
+    expect(JSON.parse(raw).tasks).toEqual([
+      expect.objectContaining({
+        taskId: devServer,
+        sessionId: 'parent',
+        pid: 424242,
+        runId: run.runId,
+        outputOffset: 42,
+        cwd: '/workspace',
+      }),
+    ]);
+    await supervisor.shutdown();
+    expect(detachedKill).not.toHaveBeenCalled();
+    expect(run.kill).not.toHaveBeenCalled();
+  });
+
+  it('不要求保留时（普通退出）：转后台命令照旧要等', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-nokeep-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const bgTasks = (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+    const taskId = bgTasks.adopt(
+      'parent',
+      {
+        output: () => '',
+        pipe: () => {},
+        done: new Promise(() => {}),
+        kill: () => {},
+        detachable: () => fakeRun(),
+      },
+      { command: 'pnpm dev', startedAt: Date.now() }
+    );
+    supervisor.handleCommand({ type: 'graceful-restart' });
+    await settle();
+    expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
+      { identity: parent, reason: 'tool-in-flight', toolsInFlight: [taskId] },
+    ]);
+    (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks.detachForRestart();
+    await supervisor.shutdown();
+  });
+
+  it('冷启动：已结束的任务按文件收尾，通知落盘等会话打开；会话打开时快照带上任务', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-recover-'));
+    mkdirSync(logDir, { recursive: true });
+    const runId = randomUUID();
+    const files = runFiles(logDir, runId);
+    writeFileSync(files.outputFile, 'seen\nafter restart\n');
+    writeFileSync(files.exitFile, '0');
+    const taskId = `task-9-${Date.now().toString(36)}`;
+    writeDetachedTasksManifest(path.join(dataDir, DETACHED_TASKS_FILE), {
+      version: 1,
+      writtenAt: Date.now(),
+      workerPid: 1,
+      tasks: [
+        {
+          taskId,
+          sessionId: 'parent',
+          command: 'pnpm build',
+          commandKey: null,
+          cwd: '/workspace',
+          pid: spawnSync('true').pid as number,
+          runId,
+          startedAt: Date.now() - 60_000,
+          yieldedAt: Date.now() - 50_000,
+          deadlineAt: null,
+          outputFile: files.outputFile,
+          outputOffset: 5,
+          exitCodeFile: files.exitFile,
+          logPath: path.join(logDir, `${taskId}.log`),
+        },
+      ],
+    });
+    const { events, supervisor } = await startSupervisor(dataDir);
+    expect(existsSync(path.join(dataDir, DETACHED_TASKS_FILE))).toBe(false);
+    const pending = readFileSync(
+      path.join(dataDir, 'sessions', 'pending-notifications', 'parent.json'),
+      'utf8'
+    );
+    expect(pending).toContain(`Background task ${taskId} finished (exit 0`);
+    expect(pending).toContain('after restart');
+    expect(pending).not.toContain('seen');
+
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      resumeFile: SESSION_FILE,
+    });
+    await waitFor(events, 'parent-ready');
+    const snapshot = ofType(events, 'snapshot').find((event) =>
+      event.sessions.some((entry) => entry.identity.sessionId === 'parent')
+    );
+    expect(snapshot?.sessions[0]?.backgroundTasks).toEqual([
+      expect.objectContaining({ taskId, status: 'done', exitCode: 0 }),
+    ]);
+    const managed = (
+      supervisor as unknown as { sessions: Map<string, { pendingTaskReminders: string[] }> }
+    ).sessions.get('parent');
+    expect(managed?.pendingTaskReminders.join('\n')).toContain(taskId);
     await supervisor.shutdown();
   });
 });

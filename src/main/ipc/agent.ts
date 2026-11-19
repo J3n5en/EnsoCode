@@ -1923,7 +1923,8 @@ export function registerAgentHandlers(): void {
       workerEvent.type === 'plugin-agent-event' ||
       workerEvent.type === 'workspace-unlock-result' ||
       workerEvent.type === 'graceful-restart-deferred' ||
-      workerEvent.type === 'graceful-restart-ready'
+      workerEvent.type === 'graceful-restart-ready' ||
+      workerEvent.type === 'background-tasks-detached'
     )
       return;
     dispatchService?.observe(workerEvent);

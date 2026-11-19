@@ -124,7 +124,10 @@ export const IPC_CHANNELS = {
   APP_CLOSE_RESPONSE: 'app:close-response',
   APP_FLUSH_PERSIST_REQUEST: 'app:flush-persist-request',
   APP_FLUSH_PERSIST_RESPONSE: 'app:flush-persist-response',
-  /** main → 主窗口：菜单「重启」在等命令结束（true 开等待弹层，false 关） */
+  /**
+   * main → 主窗口：菜单「重启」在等命令结束（true 开等待弹层，false 关）；
+   * 第二个参数 RestartWaitReason 说明在等哪种命令
+   */
   APP_RESTART_WAITING: 'app:restart-waiting',
   /** 主窗口 → main：等待弹层上点「强制退出」 */
   APP_RESTART_FORCE: 'app:restart-force',
@@ -725,3 +728,6 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+
+/** 重启在等哪种命令：在跑的工具，或没法脱离应用、只能等它结束的转后台命令 */
+export type RestartWaitReason = 'tool' | 'background-not-detachable';

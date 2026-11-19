@@ -38,6 +38,25 @@ describe('app restart IPC', () => {
     expect(mocks.send).not.toHaveBeenCalled();
     mocks.window = { isDestroyed: () => false };
     notifyRestartWaiting(true);
-    expect(mocks.send).toHaveBeenCalledWith(mocks.window, IPC_CHANNELS.APP_RESTART_WAITING, true);
+    expect(mocks.send).toHaveBeenCalledWith(
+      mocks.window,
+      IPC_CHANNELS.APP_RESTART_WAITING,
+      true,
+      'tool'
+    );
+    notifyRestartWaiting(true, 'background-not-detachable');
+    expect(mocks.send).toHaveBeenLastCalledWith(
+      mocks.window,
+      IPC_CHANNELS.APP_RESTART_WAITING,
+      true,
+      'background-not-detachable'
+    );
+    notifyRestartWaiting(false, 'tool');
+    expect(mocks.send).toHaveBeenLastCalledWith(
+      mocks.window,
+      IPC_CHANNELS.APP_RESTART_WAITING,
+      false,
+      undefined
+    );
   });
 });

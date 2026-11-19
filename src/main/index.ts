@@ -153,10 +153,12 @@ const appRestart = createAppRestart({
       reason: 'quit',
       hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
       onWaitingForTools,
+      // 应用马上重新打开：能脱离的转后台命令（dev server 等）交给新实例认回，不等也不停
+      keepBackgroundTasks: true,
     }),
-  stateChanged: (state) => {
+  stateChanged: (state, waitReason) => {
     installAppMenu(readLocale());
-    notifyRestartWaiting(state === 'waiting-for-tools');
+    notifyRestartWaiting(state === 'waiting-for-tools', waitReason);
   },
   abandonPrepare: () => void forceAgentWorkerQuit(),
 });

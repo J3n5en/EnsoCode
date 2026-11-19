@@ -1,3 +1,5 @@
+import type { RestartWaitReason } from '@shared/types/ipc';
+
 export type AppRestartState = 'idle' | 'restarting' | 'waiting-for-tools';
 
 export interface AppRestartHost {
@@ -7,9 +9,9 @@ export interface AppRestartHost {
   allowQuit(): void;
   quit(): void;
   /** 退出前先等 worker 到安全点、落恢复清单；worker 报告有工具在跑时回调 onWaitingForTools */
-  prepareQuit(onWaitingForTools: () => void): Promise<unknown>;
-  /** 状态变了：刷新菜单项、开关等待弹层 */
-  stateChanged(state: AppRestartState): void;
+  prepareQuit(onWaitingForTools: (reason?: RestartWaitReason) => void): Promise<unknown>;
+  /** 状态变了：刷新菜单项、开关等待弹层（等待中带上在等哪种命令） */
+  stateChanged(state: AppRestartState, waitReason?: RestartWaitReason): void;
   /** 用户强制退出：不再等安全点（按超时收尾，退出时尽量落断点与清单） */
   abandonPrepare(): void;
 }
@@ -26,12 +28,14 @@ export function createAppRestart(host: AppRestartHost): {
   forceQuit(): boolean;
 } {
   let state: AppRestartState = 'idle';
+  let waitReason: RestartWaitReason = 'tool';
   /** 本次重启还没退出时可调：放行并退出，只生效一次 */
   let proceed: (() => boolean) | undefined;
   const setState = (next: AppRestartState) => {
     if (state === next) return;
     state = next;
-    host.stateChanged(next);
+    if (next === 'waiting-for-tools') host.stateChanged(next, waitReason);
+    else host.stateChanged(next);
   };
   return {
     get state() {
@@ -51,8 +55,13 @@ export function createAppRestart(host: AppRestartHost): {
         host.quit();
         return true;
       };
-      const waiting = () => {
-        if (!quitting) setState('waiting-for-tools');
+      const waiting = (reason: RestartWaitReason = 'tool') => {
+        if (quitting) return;
+        const changed = reason !== waitReason;
+        waitReason = reason;
+        if (state === 'waiting-for-tools') {
+          if (changed) host.stateChanged(state, reason);
+        } else setState('waiting-for-tools');
       };
       let prepared: Promise<unknown>;
       try {

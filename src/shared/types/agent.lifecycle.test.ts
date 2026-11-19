@@ -647,3 +647,40 @@ describe('generation lifecycle/events', () => {
     ).toBeNull();
   });
 });
+
+describe('重启保留后台命令的协议', () => {
+  it('graceful-restart 只多认 keepBackgroundTasks: true；交出命令不带参数', () => {
+    expect(parseAgentCommand({ type: 'graceful-restart' })).toEqual({ type: 'graceful-restart' });
+    expect(parseAgentCommand({ type: 'graceful-restart', keepBackgroundTasks: true })).toEqual({
+      type: 'graceful-restart',
+      keepBackgroundTasks: true,
+    });
+    expect(parseAgentCommand({ type: 'graceful-restart', keepBackgroundTasks: false })).toBeNull();
+    expect(parseAgentCommand({ type: 'graceful-restart', extra: 1 })).toBeNull();
+    expect(parseAgentCommand({ type: 'detach-background-tasks' })).toEqual({
+      type: 'detach-background-tasks',
+    });
+    expect(parseAgentCommand({ type: 'detach-background-tasks', pid: 1 })).toBeNull();
+  });
+
+  it('推迟事件可带 undetachableTasks；交出回执只认非负整数', () => {
+    const entry = { identity: parent, reason: 'tool-in-flight', toolsInFlight: ['task-1'] };
+    expect(
+      parseAgentWorkerEvent({
+        type: 'graceful-restart-deferred',
+        sessions: [{ ...entry, undetachableTasks: ['task-1'] }],
+      })
+    ).not.toBeNull();
+    expect(
+      parseAgentWorkerEvent({
+        type: 'graceful-restart-deferred',
+        sessions: [{ ...entry, undetachableTasks: [1] }],
+      })
+    ).toBeNull();
+    expect(parseAgentWorkerEvent({ type: 'background-tasks-detached', detached: 2 })).toEqual({
+      type: 'background-tasks-detached',
+      detached: 2,
+    });
+    expect(parseAgentWorkerEvent({ type: 'background-tasks-detached', detached: -1 })).toBeNull();
+  });
+});

@@ -179,6 +179,8 @@ class AutoUpdaterService {
     await prepareAgentWorkerForQuit({
       reason: 'update',
       hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+      // 装完会重新打开：能脱离的转后台命令交给新实例认回
+      keepBackgroundTasks: true,
     });
     try {
       recordInterruptedSessions(app.getPath('userData'), agentSessionIndex.runningRootSessionIds());

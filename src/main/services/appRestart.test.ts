@@ -6,25 +6,30 @@ function setup(overrides: { relaunch?: () => void } = {}) {
   const order: string[] = [];
   const states: AppRestartState[] = [];
   const prepared = Promise.withResolvers<unknown>();
-  let onWaitingForTools: (() => void) | undefined;
+  let onWaitingForTools: ((reason?: 'tool' | 'background-not-detachable') => void) | undefined;
+  const reasons: Array<string | undefined> = [];
   const host = {
     allowQuit: vi.fn(() => order.push('allowQuit')),
     relaunch: vi.fn(overrides.relaunch ?? (() => order.push('relaunch'))),
     quit: vi.fn(() => order.push('quit')),
-    prepareQuit: vi.fn((waiting: () => void) => {
+    prepareQuit: vi.fn((waiting: (reason?: 'tool' | 'background-not-detachable') => void) => {
       order.push('prepareQuit');
       onWaitingForTools = waiting;
       return prepared.promise;
     }),
-    stateChanged: vi.fn((state: AppRestartState) => states.push(state)),
+    stateChanged: vi.fn((state: AppRestartState, reason?: string) => {
+      states.push(state);
+      reasons.push(reason);
+    }),
     abandonPrepare: vi.fn(() => order.push('abandonPrepare')),
   };
   return {
     host,
     order,
     states,
+    reasons,
     prepared,
-    waitingForTools: () => onWaitingForTools?.(),
+    waitingForTools: (reason?: 'tool' | 'background-not-detachable') => onWaitingForTools?.(reason),
     restart: createAppRestart(host),
   };
 }
@@ -124,5 +129,15 @@ describe('createAppRestart', () => {
     expect(host.allowQuit).not.toHaveBeenCalled();
     expect(host.quit).not.toHaveBeenCalled();
     expect(restart.state).toBe('idle');
+  });
+
+  it('等待原因变了（改等脱离不了的转后台命令）：再通知一次弹层，带上原因', () => {
+    const { states, reasons, restart, waitingForTools } = setup();
+    restart.restart();
+    waitingForTools('tool');
+    waitingForTools('background-not-detachable');
+    waitingForTools('background-not-detachable');
+    expect(states).toEqual(['restarting', 'waiting-for-tools', 'waiting-for-tools']);
+    expect(reasons).toEqual([undefined, 'tool', 'background-not-detachable']);
   });
 });

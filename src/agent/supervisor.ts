@@ -229,6 +229,11 @@ import {
   registerCustomProviderModels,
 } from './customProviderRegistry';
 import { createDcgGuard } from './dcg';
+import {
+  DETACHED_TASKS_FILE,
+  takeDetachedTasksManifest,
+  writeDetachedTasksManifest,
+} from './detachedTasksManifest';
 import { omitNamedTools } from './disallowedTools';
 import { createNormalizedEditTool } from './editTool';
 import { type CompactCancel, formatCompactCancel, takeCompactCancel } from './ensoCompact/cancel';
@@ -310,6 +315,7 @@ import {
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
+import { killRunGroup, sweepOrphanRuns } from './shell/detachedRun';
 import { prepareElevation, withElevation } from './shell/elevation';
 import { type SilentTurnKind, silentTurnKind } from './silentTurn';
 import { skillChainExtension } from './skillChainExtension';
@@ -964,7 +970,13 @@ export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<Mo
 export class SessionSupervisor {
   private readonly sessions = new Map<string, ManagedSession>();
   /** 优雅重启：请求后每次状态变化复查；committed 后不再推进任何会话，等 Main 换进程 */
-  private restart?: { committed: boolean; deferredKey?: string; checkScheduled?: boolean };
+  private restart?: {
+    committed: boolean;
+    deferredKey?: string;
+    checkScheduled?: boolean;
+    /** 重启会把能脱离的转后台命令交给下一代：安全点不等它们 */
+    keepBackground?: boolean;
+  };
   /** 上一代 worker 的断点，按 sessionId 等对应的 spawn-parent 认领 */
   private readonly restartResume = new Map<string, RestartCheckpointEntry>();
   private readonly gate = new OperationGate();
@@ -1140,6 +1152,11 @@ export class SessionSupervisor {
     if (!managed) return;
     if (this.workspaceSwitch.defer(sessionId, () => this.deliverNotification(sessionId, text)))
       return;
+    // 断点已落盘：不再唤起新回合，进持久化队列由下一代补投
+    if (this.restart?.committed) {
+      this.queueReminder(managed, text);
+      return;
+    }
     // 失败（含前台中止后按错误收口）同空闲：能接新回合就立即唤起，不攒到用户下一条消息
     if (managed.status !== 'running') {
       managed.roundPending = true;
@@ -1174,6 +1191,17 @@ export class SessionSupervisor {
 
   private persistPendingReminders(managed: ManagedSession): void {
     this.pendingNotifications.save(managed.identity.sessionId, managed.pendingTaskReminders);
+  }
+
+  /** 会话还没打开（重启后认回的任务先结束）：直接落盘，会话打开时随 pendingTaskReminders 恢复 */
+  private persistUnopenedNotification(sessionId: string, text: string): void {
+    const texts = this.pendingNotifications.load(sessionId);
+    enqueueReminder(texts, text);
+    this.pendingNotifications.save(sessionId, texts);
+  }
+
+  private restartDataDir(): string {
+    return this.options.dataDir ?? path.dirname(this.options.sessionDir);
   }
 
   private workflowJournalDir(): string {
@@ -1255,12 +1283,24 @@ export class SessionSupervisor {
           }
         },
         // 完成通知走合并投递:多任务同时完成合并成一条,失败在 manager 文本里自带标注
-        onCompletionNotify: (sessionId, text) => {
+        onCompletionNotify: (sessionId, text, notifyOptions) => {
+          if (notifyOptions?.durable && !this.sessions.has(sessionId)) {
+            this.persistUnopenedNotification(sessionId, text);
+            return;
+          }
           this.notifier.notify(sessionId, text);
         },
       },
       path.join(options.agentDir, 'task-logs')
     );
+    // 上一代重启前交出的后台命令：认回在跑的、收尾已结束的；再清掉异常退出留下的孤儿
+    const handled = this.bgTasks.recover(
+      takeDetachedTasksManifest(
+        path.join(this.restartDataDir(), DETACHED_TASKS_FILE),
+        this.bgTasks.outputDir
+      )
+    );
+    sweepOrphanRuns(this.bgTasks.outputDir, handled);
     // 点开过的会话否则常驻到 app 退出（每个 AgentSession 持有全量 jsonl 上下文）
     this.evictionTimer = setInterval(() => this.evictIdleSessions(), EVICTION_SWEEP_INTERVAL_MS);
     this.evictionTimer.unref?.();
@@ -1373,7 +1413,12 @@ export class SessionSupervisor {
   handleCommand(command: AgentCommand): void {
     if (command.type === 'graceful-restart') {
       this.restart ??= { committed: false };
+      if (command.keepBackgroundTasks) this.restart.keepBackground = true;
       this.checkRestart();
+      return;
+    }
+    if (command.type === 'detach-background-tasks') {
+      this.detachBackgroundTasks();
       return;
     }
     if (command.type === 'oauth-pool-result') {
@@ -3730,6 +3775,8 @@ export class SessionSupervisor {
     if (opts.resumeFile) {
       const raw = this.transcript(managed);
       const { immediate, deferFull } = projectResumeTail(raw);
+      // 重启后认回的后台任务：会话打开即带上，TaskBar 不必等下一次输出
+      const backgroundTasks = this.bgTasks.snapshot(identity.sessionId);
       const emitResumeSnapshot = (
         payload: { messages: ProjectedMessage[]; baseIndex: number },
         resumeFull = false
@@ -3747,6 +3794,7 @@ export class SessionSupervisor {
               commands: managed.commands,
               ...(managed.childMetadata ? { child: managed.childMetadata } : {}),
               ...(managed.customEntries.length > 0 ? { customEntries: managed.customEntries } : {}),
+              ...(backgroundTasks.length > 0 ? { backgroundTasks } : {}),
             },
           ],
         });
@@ -5722,11 +5770,13 @@ export class SessionSupervisor {
     // 去抖中的完成通知先投递：闲会话被唤起（回合在跑），停在边界的会话进持久化待投递队列
     for (const sessionId of this.sessions.keys()) this.notifier.flush(sessionId);
     for (const managed of this.sessions.values()) {
-      // 前台命令转后台只是工具先回执，进程还在跑：和在跑的工具一样等它结束
-      const toolsInFlight = [
-        ...managed.toolStartAt.keys(),
-        ...this.bgTasks.runningYielded(managed.identity.sessionId),
-      ];
+      // 前台命令转后台只是工具先回执，进程还在跑：和在跑的工具一样等它结束。
+      // 重启要求保留后台命令时，能脱离 worker 的交给下一代认回，只等脱离不了的
+      const keep = restart.keepBackground === true;
+      const blockingTasks = this.bgTasks.runningYielded(managed.identity.sessionId, {
+        exceptDetachable: keep,
+      });
+      const toolsInFlight = [...managed.toolStartAt.keys(), ...blockingTasks];
       const gate = restartGate({
         toolsInFlight,
         atModelRequestBoundary: managed.restartHold !== undefined,
@@ -5740,7 +5790,12 @@ export class SessionSupervisor {
           !!managed.pendingCompact,
       });
       if (!gate.ready) {
-        deferred.push({ identity: managed.identity, reason: gate.reason, toolsInFlight });
+        deferred.push({
+          identity: managed.identity,
+          reason: gate.reason,
+          toolsInFlight,
+          ...(keep && blockingTasks.length > 0 ? { undetachableTasks: blockingTasks } : {}),
+        });
         continue;
       }
       const sessionFile = managed.session.sessionFile;
@@ -5773,15 +5828,31 @@ export class SessionSupervisor {
       writtenAt: Date.now(),
       sessions: entries,
     };
-    writeRestartCheckpoint(
-      path.join(
-        this.options.dataDir ?? path.dirname(this.options.sessionDir),
-        RESTART_CHECKPOINT_FILE
-      ),
-      checkpoint
-    );
+    writeRestartCheckpoint(path.join(this.restartDataDir(), RESTART_CHECKPOINT_FILE), checkpoint);
     restart.committed = true;
     this.options.emit({ type: 'graceful-restart-ready', checkpoint });
+  }
+
+  /**
+   * 退出重启前（Main 在终止 worker 之前发）：把能脱离的后台命令交出去、写恢复清单，回执后 Main 才终止 worker，
+   * shutdown 只会停掉留在本代的任务。
+   */
+  private detachBackgroundTasks(): void {
+    const tasks = this.bgTasks.detachForRestart();
+    const file = path.join(this.restartDataDir(), DETACHED_TASKS_FILE);
+    try {
+      writeDetachedTasksManifest(file, {
+        version: 1,
+        writtenAt: Date.now(),
+        workerPid: process.pid,
+        tasks,
+      });
+    } catch (error) {
+      // 清单写不下：进程已交出，下一代认不回，至少别让它们留成孤儿
+      console.warn('[graceful-restart] failed to write detached task manifest:', error);
+      for (const task of tasks) killRunGroup(task.pid, 'SIGKILL');
+    }
+    this.options.emit({ type: 'background-tasks-detached', detached: tasks.length });
   }
 
   private scheduleRestartCheck(): void {

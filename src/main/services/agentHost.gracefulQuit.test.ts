@@ -55,6 +55,7 @@ vi.mock('./processExit', () => ({
 
 import {
   cancelAgentQuitCheckpoint,
+  DETACH_ACK_TIMEOUT_MS,
   forceAgentWorkerQuit,
   prepareAgentWorkerForQuit,
   QUIT_NO_TOOL_WAIT_MS,
@@ -464,5 +465,83 @@ describe('应用退出走优雅重启', () => {
     expect(fork.envs.at(-1)?.[RESTART_CHECKPOINT_ENV]).toBe(
       path.join(dataDir(), RESTART_CHECKPOINT_FILE)
     );
+  });
+});
+
+describe('退出重启保留转后台命令', () => {
+  const posted = (worker: number, type: string) =>
+    fork.posted.filter(
+      (entry) => entry.worker === worker && (entry.message as { type: string }).type === type
+    );
+
+  it('会话都空闲（不等安全点）：终止 worker 前先让它交出后台命令，收到回执才终止', async () => {
+    const index = bootWithSession();
+    await expect(
+      prepareAgentWorkerForQuit({
+        reason: 'quit',
+        hasRunningSessions: () => false,
+        keepBackgroundTasks: true,
+      })
+    ).resolves.toBe('skipped');
+    const stopping = stopAgentWorkerForQuit(100);
+    await Promise.resolve();
+    expect(posted(index, 'detach-background-tasks')).toHaveLength(1);
+    expect(fork.children[index].killed).toBe(0);
+    fork.children[index].emit('message', { type: 'background-tasks-detached', detached: 1 });
+    await stopping;
+    expect(fork.children[index].killed).toBe(1);
+  });
+
+  it('等安全点的请求带上保留标记；在等的是脱离不了的转后台命令时告诉弹层', async () => {
+    const index = bootWithSession();
+    const waiting = vi.fn();
+    const pending = prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: () => true,
+      onWaitingForTools: waiting,
+      keepBackgroundTasks: true,
+    });
+    expect(graceful(index).map((entry) => entry.message)).toEqual([
+      { type: 'graceful-restart', keepBackgroundTasks: true },
+    ]);
+    fork.children[index].emit('message', deferred(['call-1']));
+    expect(waiting).toHaveBeenLastCalledWith('tool');
+    fork.children[index].emit('message', {
+      type: 'graceful-restart-deferred',
+      sessions: [
+        {
+          identity,
+          reason: 'tool-in-flight',
+          toolsInFlight: ['task-1-abc'],
+          undetachableTasks: ['task-1-abc'],
+        },
+      ],
+    });
+    expect(waiting).toHaveBeenLastCalledWith('background-not-detachable');
+    expect(waiting).toHaveBeenCalledTimes(2);
+    fork.children[index].emit('message', { type: 'graceful-restart-ready', checkpoint });
+    await expect(pending).resolves.toBe('checkpointed');
+  });
+
+  it('worker 不回执：最多等一小段照常终止；普通退出不发交出请求', async () => {
+    vi.useFakeTimers();
+    const index = bootWithSession();
+    await prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: () => false,
+      keepBackgroundTasks: true,
+    });
+    const stopping = stopAgentWorkerForQuit(100);
+    await vi.advanceTimersByTimeAsync(DETACH_ACK_TIMEOUT_MS);
+    await stopping;
+    expect(fork.children[index].killed).toBe(1);
+    expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain('没在');
+
+    stopAgentWorker();
+    const next = bootWithSession();
+    await prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: () => false });
+    await stopAgentWorkerForQuit(100);
+    expect(posted(next, 'detach-background-tasks')).toHaveLength(0);
+    expect(fork.children[next].killed).toBe(1);
   });
 });

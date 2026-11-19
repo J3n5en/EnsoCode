@@ -18,11 +18,13 @@ import { useI18n } from '@/i18n';
 export function RestartWaitDialog() {
   const { t } = useI18n();
   const [waiting, setWaiting] = useState(false);
+  const [undetachable, setUndetachable] = useState(false);
   const [forcing, setForcing] = useState(false);
   useEffect(
     () =>
-      window.electronAPI.app.onRestartWaiting((next) => {
+      window.electronAPI.app.onRestartWaiting((next, reason) => {
         setWaiting(next);
+        setUndetachable(reason === 'background-not-detachable');
         setForcing(false);
       }),
     []
@@ -41,6 +43,14 @@ export function RestartWaitDialog() {
           </AlertDialogTitle>
           <AlertDialogDescription>
             {t('EnsoCode will restart once the current command finishes.')}
+            {undetachable && (
+              <>
+                {' '}
+                {t(
+                  'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so the restart waits for it.'
+                )}
+              </>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter variant="bare">

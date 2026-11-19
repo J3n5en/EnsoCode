@@ -219,6 +219,28 @@ Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会
 等到结果（含超时）先关弹层再放行关窗确认、`app.quit()`，will-quit 收尾拿同一个结果。同一进程只登记一次
 relaunch（多次会起多个实例），进行中菜单项不可点。
 它不调用只换 worker 的 `requestGracefulWorkerRestart`。
+
+重启跨过转后台的命令（菜单「重启」与安装更新带 `keepBackgroundTasks`，普通退出不带，照旧停掉）：
+本地 POSIX bash 的前台命令（`sessionShell` → `shell/detachedRun.withFileBackedExec`，仅
+`ForegroundCommand` 登记过的调用）和本地 `background:true` 命令（`/bin/sh -c`）改为 detached
+（setsid）+ stdin 关闭 + stdout/stderr 直写 `task-logs/run-<runId>.out`（O_APPEND），worker 轮询跟读；
+同一行前置 `trap 'printf %s "$?" > run-<runId>.exit' EXIT` 记退出码，runId 因此出现在进程命令行里。
+Windows、PowerShell、远程 ssh、pi 的 stdin 传命令方式照旧走管道，没有文件句柄，重启只能等它结束。
+`graceful-restart{keepBackgroundTasks}` 时 `runningYielded(..., {exceptDetachable})` 只把脱离不了的算在途，
+推迟事件带 `undetachableTasks`，Main 据此让等待弹层多一句说明（`RestartWaitReason`）。
+`stopAgentWorkerForQuit` 在终止 worker 前发 `detach-background-tasks`，等 `background-tasks-detached`
+回执（上限 `DETACH_ACK_TIMEOUT_MS`）：worker 读完已有输出、停止跟读、把任务移出本代，写
+`dataDir/restart-background-tasks.json`（taskId、sessionId、脱敏截断的命令摘要、命令+cwd 指纹、cwd、pid、
+runId、startedAt、yieldedAt、deadlineAt、输出文件与已读偏移、退出码文件、日志路径；不含 env）。
+新 worker 构造时读后即删（路径只认 logDir 下按 runId / taskId 推出的文件），`BackgroundTaskManager.recover`
+用同一 taskId 重新登记：pid 在且命令行含 runId → running，按偏移接着读、日志追加；pid 不在 → 读完输出、
+按退出码文件标 done / failed；pid 在但命令行不含 runId（被复用）→ 不认、不发信号，标 failed 并说明。
+认回任务的完成通知在会话没打开时直接落 `pending-notifications`；会话打开时 resume 快照带上任务；
+同一会话树再起同一命令（同 cwd）由 `withBackground` 直接回「已在跑」，不重复启动。worker 没走交接就退出
+（崩溃、被强杀）时文件直写的进程不会随 SIGPIPE 退出：下一代启动时 `sweepOrphanRuns` 按 `run-*.json`
+登记，只杀「登记它的 worker 已不在、命令行仍含 runId」的进程组，不扫进程表。
+已知限制：shell 进程本身被直接信号杀掉时 EXIT trap 记的是最后一条命令的 `$?`；用户命令自设 EXIT trap 或
+`exec` 换掉 shell 时取不到退出码 / 认不回（不杀，按找不到原进程说明）。
 子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
 
 **升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult

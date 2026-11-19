@@ -100,6 +100,7 @@ import {
   type SkillEntry,
 } from '@shared/types/assets';
 import { persistedSettingsState } from '@shared/types/builtinTools';
+import type { RestartWaitReason } from '@shared/types/ipc';
 import {
   MODEL_REASONING_OVERRIDES,
   MODEL_THINKING_LEVEL_OVERRIDES,
@@ -463,6 +464,13 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
         }
         return;
       }
+      if (event.type === 'background-tasks-detached') {
+        if (worker === child) {
+          console.log(`[agent] ${event.detached} background task(s) detached for restart`);
+          detachAck?.();
+        }
+        return;
+      }
       gracefulRestart.observe(event);
       resolveReleaseWaiters(event);
       // 手动重读结果只回给发起 invoke 的等待者，不进普通事件流（renderer 的通用
@@ -482,6 +490,7 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
     const swap = worker === child ? gracefulRestart.exited(child) : { swap: false as const };
     // 等安全点时 worker 先没了：不必再等超时
     if (worker === child) quitCheckpoint?.settle('skipped');
+    if (worker === child) detachAck?.();
     if (worker === child) {
       worker = null;
       workerReady = false;
@@ -568,6 +577,7 @@ export function recordAgentWorkerGone(details: {
 
 export function stopAgentWorker(): void {
   gracefulRestart.reset();
+  keepBackgroundOnQuit = false;
   workspaceLocks.failAll('agent worker stopped');
   pluginMcp.failAll('agent worker stopped');
   pluginAgents.failAll('agent worker stopped');
@@ -620,8 +630,37 @@ export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
   const late = pending?.timedOut && !pending.manifestWritten ? gracefulRestart.snapshot() : null;
   // 退出应用时不再换代
   gracefulRestart.reset();
-  if (child) await killAndWaitExit(child, timeoutMs);
+  if (child) {
+    // 应用会重新打开：先让 worker 把能脱离的后台命令交出去、写好恢复清单，再终止它
+    if (keepBackgroundOnQuit) await detachBackgroundTasks(child, DETACH_ACK_TIMEOUT_MS);
+    await killAndWaitExit(child, timeoutMs);
+  }
   if (pending && late) writeLateQuitManifest(pending, late);
+}
+
+/** 等 worker 交出后台命令的上限；超时照常终止（没交出去的随 worker 收尾停掉） */
+export const DETACH_ACK_TIMEOUT_MS = 2_000;
+let keepBackgroundOnQuit = false;
+let detachAck: (() => void) | null = null;
+
+function detachBackgroundTasks(child: WorkerProcess, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      detachAck = null;
+      appendAgentWorkerExitLog(
+        agentDataDir(),
+        `[graceful-restart] worker 没在 ${timeoutMs}ms 内交出后台命令，照常终止`
+      );
+      resolve();
+    }, timeoutMs);
+    timer.unref?.();
+    detachAck = () => {
+      clearTimeout(timer);
+      detachAck = null;
+      resolve();
+    };
+    child.postMessage({ type: 'detach-background-tasks' } satisfies AgentCommand);
+  });
 }
 
 /** 退出 / 安装更新前有工具在跑：等它结束，最多等这么久；超时中止命令照常退出 */
@@ -643,7 +682,9 @@ interface QuitCheckpoint {
   manifestWritten: boolean;
   /** worker 最近一次推迟时报告有工具在跑 */
   toolsRunning: boolean;
-  waitingForTools: Array<() => void>;
+  /** 在等的命令里有没法脱离应用的转后台命令 */
+  waitReason: RestartWaitReason;
+  waitingForTools: Array<(reason: RestartWaitReason) => void>;
   observe(sessions: DeferredSessions): void;
   settle(result: QuitCheckpointResult): void;
   /** 用户不等了：按超时收尾；已经有结果返回 false */
@@ -661,12 +702,15 @@ let quitCheckpoint: QuitCheckpoint | null = null;
 export function prepareAgentWorkerForQuit(options: {
   reason: RestartExitReason;
   hasRunningSessions: () => boolean;
-  onWaitingForTools?: () => void;
+  onWaitingForTools?: (reason: RestartWaitReason) => void;
+  /** 应用会重新打开：能脱离的转后台命令留给下一代认回，不等它们结束 */
+  keepBackgroundTasks?: boolean;
 }): Promise<QuitCheckpointResult> {
+  if (options.keepBackgroundTasks) keepBackgroundOnQuit = true;
   if (quitCheckpoint) {
     if (options.onWaitingForTools) {
       quitCheckpoint.waitingForTools.push(options.onWaitingForTools);
-      if (quitCheckpoint.toolsRunning) options.onWaitingForTools();
+      if (quitCheckpoint.toolsRunning) options.onWaitingForTools(quitCheckpoint.waitReason);
     }
     return quitCheckpoint.promise;
   }
@@ -675,7 +719,11 @@ export function prepareAgentWorkerForQuit(options: {
   const outcome = gracefulRestart.requestQuit(current);
   if (outcome === 'no-session' || outcome === 'busy') return Promise.resolve('skipped');
   if (outcome === 'requested')
-    current.postMessage({ type: 'graceful-restart' } satisfies AgentCommand);
+    current.postMessage(
+      (options.keepBackgroundTasks
+        ? { type: 'graceful-restart', keepBackgroundTasks: true }
+        : { type: 'graceful-restart' }) satisfies AgentCommand
+    );
   const requestedAt = Date.now();
   const { promise, resolve } = Promise.withResolvers<QuitCheckpointResult>();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -714,12 +762,26 @@ export function prepareAgentWorkerForQuit(options: {
     timedOut: false,
     manifestWritten: false,
     toolsRunning: false,
+    waitReason: 'tool',
     waitingForTools: options.onWaitingForTools ? [options.onWaitingForTools] : [],
     observe(sessions) {
       const running = sessions.some((session) => session.toolsInFlight.length > 0);
-      if (settled || running === state.toolsRunning) return;
+      const waitReason: RestartWaitReason = sessions.some(
+        (session) => (session.undetachableTasks?.length ?? 0) > 0
+      )
+        ? 'background-not-detachable'
+        : 'tool';
+      if (settled) return;
+      if (running === state.toolsRunning) {
+        if (running && waitReason !== state.waitReason) {
+          state.waitReason = waitReason;
+          for (const notify of state.waitingForTools) notify(waitReason);
+        }
+        return;
+      }
       state.toolsRunning = running;
-      if (running) for (const notify of state.waitingForTools) notify();
+      state.waitReason = waitReason;
+      if (running) for (const notify of state.waitingForTools) notify(waitReason);
       else quietSince = Date.now();
       arm();
     },
@@ -754,6 +816,7 @@ export function forceAgentWorkerQuit(): boolean {
 export function cancelAgentQuitCheckpoint(): void {
   const pending = quitCheckpoint;
   quitCheckpoint = null;
+  keepBackgroundOnQuit = false;
   if (!pending) return;
   pending.settle('skipped');
   rmSync(restartManifestPath(agentDataDir()), { force: true });

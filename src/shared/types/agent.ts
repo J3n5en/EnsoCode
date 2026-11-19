@@ -1676,8 +1676,13 @@ export type AgentCommand =
   | { type: 'plugin-agent-cancel'; requestId: string }
   /** 运行中同步代理 env；null 表示删除该键 */
   | { type: 'set-proxy-env'; env: Record<string, string | null> }
-  /** 优雅重启：等所有会话到安全点后落断点，回 graceful-restart-ready，由 Main 换新进程 */
-  | { type: 'graceful-restart' };
+  /**
+   * 优雅重启：等所有会话到安全点后落断点，回 graceful-restart-ready，由 Main 换新进程。
+   * keepBackgroundTasks：应用会重新打开，能脱离 worker 的转后台命令交给下一代，安全点不等它们
+   */
+  | { type: 'graceful-restart'; keepBackgroundTasks?: true }
+  /** 终止 worker 前：把能脱离的后台命令交出去、写恢复清单，回 background-tasks-detached */
+  | { type: 'detach-background-tasks' };
 
 /** 随消息附带的图片（base64）。id 只活在编辑器，发给 agent 前剥掉。 */
 export interface AttachedImage {
@@ -1954,6 +1959,7 @@ export type RendererAgentEvent =
       | { type: 'tool-batch-completed' }
       | { type: 'graceful-restart-deferred' }
       | { type: 'graceful-restart-ready' }
+      | { type: 'background-tasks-detached' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2312,12 +2318,19 @@ export type AgentWorkerEvent =
         identity: SessionIdentity;
         reason: RestartDeferReason;
         toolsInFlight: string[];
+        /** 要求保留后台命令时仍要等的转后台命令（没法脱离 worker，如走管道的远程命令） */
+        undetachableTasks?: string[];
       }[];
     }
   | {
       /** 断点已落盘，worker 不再推进任何会话，等 Main 换新进程。Main 旁路消费 */
       type: 'graceful-restart-ready';
       checkpoint: RestartCheckpoint;
+    }
+  | {
+      /** 能脱离的后台命令已交出（恢复清单已写）：Main 收到后才终止 worker。旁路消费 */
+      type: 'background-tasks-detached';
+      detached: number;
     }
   | {
       /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
@@ -4365,7 +4378,13 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? { type: 'pin-sessions', sessionIds: value.sessionIds }
         : null;
     case 'graceful-restart':
-      return hasExactKeys(value, ['type']) ? { type: 'graceful-restart' } : null;
+      if (hasExactKeys(value, ['type'])) return { type: 'graceful-restart' };
+      return hasExactKeys(value, ['type', 'keepBackgroundTasks']) &&
+        value.keepBackgroundTasks === true
+        ? { type: 'graceful-restart', keepBackgroundTasks: true }
+        : null;
+    case 'detach-background-tasks':
+      return hasExactKeys(value, ['type']) ? { type: 'detach-background-tasks' } : null;
     case 'warm-mcp':
       return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)
         ? (value as unknown as AgentCommand)
@@ -4630,7 +4649,10 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       value.sessions.every(
         (entry) =>
           isRecord(entry) &&
-          hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight']) &&
+          (hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight']) ||
+            (hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight', 'undetachableTasks']) &&
+              Array.isArray(entry.undetachableTasks) &&
+              entry.undetachableTasks.every(isNonEmptyString))) &&
           parseSessionIdentity(entry.identity) &&
           (entry.reason === 'tool-in-flight' || entry.reason === 'turn-in-progress') &&
           Array.isArray(entry.toolsInFlight) &&
@@ -4644,6 +4666,14 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     return hasExactKeys(value, ['type', 'checkpoint']) &&
       isRecord(value.checkpoint) &&
       Array.isArray(value.checkpoint.sessions)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'background-tasks-detached') {
+    return hasExactKeys(value, ['type', 'detached']) &&
+      typeof value.detached === 'number' &&
+      Number.isInteger(value.detached) &&
+      value.detached >= 0
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }
