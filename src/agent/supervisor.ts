@@ -1240,6 +1240,8 @@ export class SessionSupervisor {
               ...(exitCode !== undefined ? { exitCode } : {}),
             });
           }
+          // 转后台的命令结束：可能刚好到了安全点（完成通知在同一同步段里入队，检查时一并投递）
+          this.scheduleRestartCheck();
         },
         onLevel: (sessionId, tasks) => {
           const managed = this.sessions.get(sessionId);
@@ -5717,8 +5719,14 @@ export class SessionSupervisor {
     const entries: RestartCheckpointEntry[] = [];
     const deferred: Extract<AgentWorkerEvent, { type: 'graceful-restart-deferred' }>['sessions'] =
       [];
+    // 去抖中的完成通知先投递：闲会话被唤起（回合在跑），停在边界的会话进持久化待投递队列
+    for (const sessionId of this.sessions.keys()) this.notifier.flush(sessionId);
     for (const managed of this.sessions.values()) {
-      const toolsInFlight = [...managed.toolStartAt.keys()];
+      // 前台命令转后台只是工具先回执，进程还在跑：和在跑的工具一样等它结束
+      const toolsInFlight = [
+        ...managed.toolStartAt.keys(),
+        ...this.bgTasks.runningYielded(managed.identity.sessionId),
+      ];
       const gate = restartGate({
         toolsInFlight,
         atModelRequestBoundary: managed.restartHold !== undefined,
@@ -5859,10 +5867,13 @@ export class SessionSupervisor {
     return entry;
   }
 
-  shutdown(): Promise<void> {
+  async shutdown(): Promise<void> {
     clearInterval(this.evictionTimer);
     this.workspaceSwitch.clear();
     this.bgTasks.stopAll();
+    // 还在等安全点（等转后台的命令时被强制退出 / 超时）：给刚停掉的命令一点时间收口，
+    // 完成通知进持久化队列、停在边界的会话落下断点，Main 据此补写恢复清单
+    if (this.restart && !this.restart.committed) await this.settleYieldedTasks(1_000);
     for (const managed of this.sessions.values()) {
       cancelContinuousMemory(managed.session.sessionManager);
       managed.browser?.cancelAll('Enso worker shutdown');
@@ -5880,6 +5891,16 @@ export class SessionSupervisor {
       if (!this.restart?.committed) void managed.session.abort().catch(() => {});
     }
     return this.mcp.closeAll();
+  }
+
+  private async settleYieldedTasks(limitMs: number): Promise<void> {
+    const deadline = Date.now() + limitMs;
+    const running = () =>
+      [...this.sessions.keys()].some((id) => this.bgTasks.runningYielded(id).length > 0);
+    while (running() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    this.checkRestart();
   }
 
   private getRuntime(): Promise<ModelRuntime> {

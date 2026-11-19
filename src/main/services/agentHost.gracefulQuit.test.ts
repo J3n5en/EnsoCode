@@ -55,6 +55,7 @@ vi.mock('./processExit', () => ({
 
 import {
   cancelAgentQuitCheckpoint,
+  forceAgentWorkerQuit,
   prepareAgentWorkerForQuit,
   QUIT_NO_TOOL_WAIT_MS,
   QUIT_TOOL_WAIT_LIMIT_MS,
@@ -381,6 +382,47 @@ describe('应用退出走优雅重启', () => {
     const log = await timeOutOnLongTool();
     expect(() => readFileSync(manifestFile())).toThrow();
     expect(log).toContain('不写恢复清单：worker 退出前没落断点（没到安全点）');
+    warn.mockRestore();
+  });
+
+  it('强制退出：不等命令立刻放行，worker 收尾时落的断点照样写成清单', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    expect(forceAgentWorkerQuit()).toBe(false);
+    const pending = prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: () => true });
+    // 转后台的命令还在跑：worker 报告它在途
+    fork.children[index].emit('message', deferred(['task-1-abc']));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(forceAgentWorkerQuit()).toBe(true);
+    await expect(pending).resolves.toBe('timeout');
+    expect(forceAgentWorkerQuit()).toBe(false);
+
+    vi.mocked(killAndWaitExit).mockImplementationOnce(async (child) => {
+      child.kill();
+      writeCheckpoint({ ...checkpoint, writtenAt: Date.now() });
+    });
+    await stopAgentWorkerForQuit(100);
+    const log = readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8');
+    expect(log).toContain('用户强制退出');
+    expect(log).toContain('写了恢复清单（1 个会话）');
+    expect(JSON.parse(readFileSync(manifestFile(), 'utf8')).sessions).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('强制退出且断点落不了：记日志照常退，不卡住', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const pending = prepareAgentWorkerForQuit({ reason: 'quit', hasRunningSessions: () => true });
+    fork.children[index].emit('message', deferred(['task-1-abc']));
+    expect(forceAgentWorkerQuit()).toBe(true);
+    await expect(pending).resolves.toBe('timeout');
+    await stopAgentWorkerForQuit(100);
+    expect(() => readFileSync(manifestFile())).toThrow();
+    expect(readFileSync(path.join(dataDir(), AGENT_WORKER_EXIT_LOG), 'utf8')).toContain(
+      '不写恢复清单：worker 退出前没落断点'
+    );
     warn.mockRestore();
   });
 

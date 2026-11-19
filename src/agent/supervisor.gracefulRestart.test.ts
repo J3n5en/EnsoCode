@@ -4,6 +4,7 @@ import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BackgroundTaskManager } from './backgroundTasks';
 
 const mocks = vi.hoisted(() => ({
   sessions: [] as Array<ReturnType<typeof fakeSessionShape>>,
@@ -389,6 +390,117 @@ describe('SessionSupervisor graceful restart', () => {
     await first.agent.prepareNextTurnWithContext({}, undefined);
     expect(first.nextTurnPrepared).toHaveBeenCalledTimes(1);
     expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
+    await supervisor.shutdown();
+  });
+
+  it('前台命令转后台后进程还在：不算安全点；进程结束、完成通知落下后才落断点', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-yield-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const session = mocks.sessions[0];
+    session.messages.push(user);
+    session.emit({ type: 'agent_start' });
+    session.messages.push(assistantCall);
+    session.emit({ type: 'message_end', message: assistantCall });
+    session.emit({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'bash' });
+    // 让位到点：ForegroundCommand 把在跑进程交给 BackgroundTaskManager.adopt，工具立即回执
+    const exit = Promise.withResolvers<number | null>();
+    const bgTasks = (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+    const taskId = bgTasks.adopt(
+      'parent',
+      { output: () => 'LONG-START\n', pipe: () => {}, done: exit.promise, kill: () => {} },
+      { command: 'sleep 120', startedAt: Date.now() - 45_000 }
+    );
+    session.messages.push(toolResult);
+    session.emit({ type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'bash' });
+    session.emit({ type: 'message_end', message: toolResult });
+    session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
+
+    supervisor.handleCommand({ type: 'graceful-restart' });
+    void session.agent.prepareNextTurnWithContext({}, undefined);
+    await settle();
+    expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
+      { identity: parent, reason: 'tool-in-flight', toolsInFlight: [taskId] },
+    ]);
+    expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
+    expect(existsSync(path.join(dataDir, RESTART_CHECKPOINT_FILE))).toBe(false);
+
+    exit.resolve(0);
+    await waitFor(events, 'graceful-restart-ready');
+    const ended = events.findIndex((event) => event.type === 'task-ended');
+    const ready = events.findIndex((event) => event.type === 'graceful-restart-ready');
+    expect(ended).toBeGreaterThan(-1);
+    expect(ready).toBeGreaterThan(ended);
+    expect(ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
+      expect.objectContaining({ nextStep: 'model-request', toolsInFlight: [] }),
+    ]);
+    // 完成通知不随旧进程丢掉：会话停在边界（running），通知进了持久化的待投递队列
+    const reminders = (
+      supervisor as unknown as {
+        sessions: Map<string, { pendingTaskReminders: string[] }>;
+      }
+    ).sessions.get('parent')?.pendingTaskReminders;
+    expect(reminders?.join('\n')).toContain(taskId);
+    await supervisor.shutdown();
+  });
+
+  it('等转后台命令时 worker 被终止（强制退出）：停掉命令、等它收口后照样落断点', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-yield-force-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const session = mocks.sessions[0];
+    session.messages.push(user, assistantCall);
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'bash' });
+    const exit = Promise.withResolvers<number | null>();
+    const bgTasks = (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+    const taskId = bgTasks.adopt(
+      'parent',
+      { output: () => '', pipe: () => {}, done: exit.promise, kill: () => exit.resolve(null) },
+      { command: 'sleep 120', startedAt: Date.now() - 45_000 }
+    );
+    session.messages.push(toolResult);
+    session.emit({ type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'bash' });
+    session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
+    supervisor.handleCommand({ type: 'graceful-restart' });
+    void session.agent.prepareNextTurnWithContext({}, undefined);
+    await settle();
+    expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
+
+    await supervisor.shutdown();
+    const checkpoint = JSON.parse(
+      readFileSync(path.join(dataDir, RESTART_CHECKPOINT_FILE), 'utf8')
+    ) as RestartCheckpoint;
+    expect(checkpoint.sessions).toEqual([
+      expect.objectContaining({ nextStep: 'model-request', toolsInFlight: [] }),
+    ]);
+    // 落了断点就不再中断会话：被挂起的 loop 不会写进会话文件
+    expect(session.abort).not.toHaveBeenCalled();
+    expect(ofType(events, 'task-ended').map((event) => event.taskId)).toEqual([taskId]);
+  });
+
+  it('已经结束的后台任务不挡安全点', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-yield-done-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const bgTasks = (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+    bgTasks.adopt(
+      'parent',
+      { output: () => '', pipe: () => {}, done: Promise.resolve(0), kill: () => {} },
+      { command: 'sleep 1', startedAt: Date.now() - 45_000 }
+    );
+    await waitFor(events, 'task-ended');
+    // 完成通知去抖后投递完（空闲会话被唤起又收口）
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    supervisor.handleCommand({ type: 'graceful-restart' });
+    await settle();
+    expect(ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions).toEqual([
+      expect.objectContaining({ sessionId: 'parent', toolsInFlight: [] }),
+    ]);
     await supervisor.shutdown();
   });
 });

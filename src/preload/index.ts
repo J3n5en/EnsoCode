@@ -312,6 +312,14 @@ const electronAPI = {
     respondFlushPersist: (requestId: string): void => {
       ipcRenderer.send(IPC_CHANNELS.APP_FLUSH_PERSIST_RESPONSE, requestId);
     },
+    onRestartWaiting: (callback: (waiting: boolean) => void): (() => void) => {
+      const listener = (_: unknown, waiting: unknown) => callback(waiting === true);
+      ipcRenderer.on(IPC_CHANNELS.APP_RESTART_WAITING, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_RESTART_WAITING, listener);
+    },
+    forceRestart: (): void => {
+      ipcRenderer.send(IPC_CHANNELS.APP_RESTART_FORCE);
+    },
     setBadgeCount: (count: number): void => {
       ipcRenderer.send(IPC_CHANNELS.APP_SET_BADGE_COUNT, count);
     },

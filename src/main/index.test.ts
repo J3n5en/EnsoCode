@@ -81,10 +81,15 @@ vi.mock('./services/agentHost', () => ({
   agentWorkerAlive: () => false,
   stopAgentWorkerForQuit: vi.fn(async () => undefined),
   prepareAgentWorkerForQuit: vi.fn(async () => 'skipped'),
+  forceAgentWorkerQuit: vi.fn(() => false),
   recordAgentWorkerGone: vi.fn(),
   agentDataDir: () => '/tmp/enso-index-test/agent',
 }));
 vi.mock('./ipc/agent', () => ({ resumeRootFromRestartManifest: vi.fn() }));
+vi.mock('./ipc/appRestart', () => ({
+  notifyRestartWaiting: vi.fn(),
+  registerAppRestartHandlers: vi.fn(),
+}));
 vi.mock('./ipc/sessionIndex', () => ({ agentSessionIndex: { runningRootSessionIds: () => [] } }));
 vi.mock('./services/coldRestart', () => ({
   coldRestartPlan: () => null,

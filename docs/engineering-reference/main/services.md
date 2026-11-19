@@ -190,6 +190,11 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 也挂在这里，调用时现读属性，所以构造后再包仍生效）。有重启请求、全局没有工具在跑、没有排队插话时
 父会话停在这里，`checkRestart()` 把断点写到 `dataDir/restart-checkpoint.json`
 （格式与判定在 `src/shared/gracefulRestart.ts`，`scripts/graceful-restart-sim.mjs` 直接复用）。
+前台命令到让位时刻转后台（`ForegroundCommand` → `BackgroundTaskManager.adopt`，任务带 `yieldedAt`）时
+工具已回执、`toolStartAt` 已清，但进程还在跑：`bgTasks.runningYielded()` 把这些 status=running 的任务 id
+并进 `toolsInFlight`，和在跑的工具一样推迟（Main 据此按 5 分钟上限等）；直接 `background:true` 启动的、
+已结束的任务不算。任务结束时 `onEnded` 触发检查，检查前先 flush 去抖中的完成通知，停在边界的会话把它
+收进持久化的待投递队列，不随旧进程丢。worker 收尾时还在等安全点就给停掉的转后台命令最多 1s 收口再落断点。
 Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会话设置，新 worker 沿用断点里的 seq，
 `nextStep=model-request` 时用原 turnId 走 `continueSessionActivity` 续跑。不发 `worker-exited`。
 
@@ -207,9 +212,12 @@ Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会
 按原 generation 重走普通 spawn（cwd / 会话文件只认权威记录，凭据现取），续跑的会话从退出 / 更新中断记录里剔除。
 安装更新失败时 `cancelAgentQuitCheckpoint` 撤掉清单，并按断点换代让会话接着跑。
 菜单「重启」（`appMenu` → `services/appRestart.ts`）是整个应用重启：`app.relaunch()` 后窗口不关，先
-`prepareAgentWorkerForQuit` 等安全点；worker 报告有工具在跑时立刻弹「有命令在跑，会等它结束再重启」，
-菜单项变为不可点的「等命令跑完再重启…」。等到结果（含超时）再放行关窗确认、`app.quit()`，will-quit
-收尾拿同一个结果。同一进程只登记一次 relaunch（多次会起多个实例），进行中菜单项不可点。
+`prepareAgentWorkerForQuit` 等安全点；worker 报告有工具在跑时进入 waiting-for-tools：主窗口弹自绘等待层
+（`renderer/components/app/RestartWaitDialog.tsx`，`APP_RESTART_WAITING` 推送），菜单项变为不可点的
+「等命令跑完再重启…」。弹层「强制退出」走 `APP_RESTART_FORCE` → `appRestart.forceQuit()` →
+`forceAgentWorkerQuit()`（按超时收尾并记日志）后立即放行退出，`stopAgentWorkerForQuit` 照常尽量补写清单。
+等到结果（含超时）先关弹层再放行关窗确认、`app.quit()`，will-quit 收尾拿同一个结果。同一进程只登记一次
+relaunch（多次会起多个实例），进行中菜单项不可点。
 它不调用只换 worker 的 `requestGracefulWorkerRestart`。
 子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
 

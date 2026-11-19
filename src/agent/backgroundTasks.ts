@@ -723,6 +723,18 @@ export class BackgroundTaskManager {
       .map((task) => ({ ...task.info, tail: task.output.slice(-TAIL_LIMIT) }));
   }
 
+  /** 前台命令转后台（adopt，有 yieldedAt）后还没结束的任务：优雅重启把它们当作在跑的工具 */
+  runningYielded(sessionId: string): string[] {
+    return [...this.tasks.values()]
+      .filter(
+        (task) =>
+          task.sessionId === sessionId &&
+          task.yieldedAt !== undefined &&
+          task.info.status === 'running'
+      )
+      .map((task) => task.info.taskId);
+  }
+
   stopAll(): void {
     for (const task of this.tasks.values()) {
       if (task.info.status === 'running') this.stop(task.info.taskId, true);

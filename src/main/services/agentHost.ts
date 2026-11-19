@@ -646,6 +646,8 @@ interface QuitCheckpoint {
   waitingForTools: Array<() => void>;
   observe(sessions: DeferredSessions): void;
   settle(result: QuitCheckpointResult): void;
+  /** 用户不等了：按超时收尾；已经有结果返回 false */
+  force(): boolean;
 }
 
 let quitCheckpoint: QuitCheckpoint | null = null;
@@ -722,10 +724,27 @@ export function prepareAgentWorkerForQuit(options: {
       arm();
     },
     settle: finish,
+    force() {
+      if (settled) return false;
+      state.timedOut = true;
+      const message = `[graceful-restart] ${options.reason}: 用户强制退出，等安全点 ${Date.now() - requestedAt}ms 后不再等，中止在跑的命令照常退出`;
+      console.warn(message);
+      appendAgentWorkerExitLog(agentDataDir(), message);
+      finish('timeout');
+      return true;
+    },
   };
   quitCheckpoint = state;
   arm();
   return promise;
+}
+
+/**
+ * 等待弹层上点「强制退出」：不再等安全点，立刻结束等待、走超时收尾——stopAgentWorkerForQuit
+ * 终止 worker 时它落的断点照样写成恢复清单，落不了只记日志。没有在等的退出返回 false。
+ */
+export function forceAgentWorkerQuit(): boolean {
+  return quitCheckpoint?.force() ?? false;
 }
 
 /**

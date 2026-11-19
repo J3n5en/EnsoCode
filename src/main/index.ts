@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
-import { translate } from '@shared/i18n';
 import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { syncDropShelf } from './desktop/dropShelf';
 import {
@@ -12,6 +11,7 @@ import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
 import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
 import { resumeRootFromRestartManifest } from './ipc/agent';
+import { notifyRestartWaiting, registerAppRestartHandlers } from './ipc/appRestart';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
 import { agentSessionIndex } from './ipc/sessionIndex';
 import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
@@ -27,6 +27,7 @@ import { createSecretaryLinkInbox } from './protocol/secretaryLink';
 import {
   agentDataDir,
   agentWorkerAlive,
+  forceAgentWorkerQuit,
   prepareAgentWorkerForQuit,
   recordAgentWorkerGone,
   startAgentWorker,
@@ -131,9 +132,9 @@ if (app.isPackaged && process.platform !== 'win32') {
 const gotTheLock = app.requestSingleInstanceLock();
 const pluginInstallInbox = createPluginInstallInbox(process.platform);
 const secretaryLinkInbox = createSecretaryLinkInbox(process.platform);
-function showMenuMessage(type: 'info' | 'error', message: string): void {
+function showMenuError(message: string): void {
   const parent = BrowserWindow.getFocusedWindow() ?? getMainWindow();
-  const options = { type, message };
+  const options = { type: 'error' as const, message };
   void (
     parent && !parent.isDestroyed()
       ? dialog.showMessageBox(parent, options)
@@ -141,8 +142,8 @@ function showMenuMessage(type: 'info' | 'error', message: string): void {
   ).catch((error: unknown) => console.error('[app-menu] 提示框失败:', error));
 }
 
-// 菜单「重启」：先等 agent 安全点（有命令在跑就等它结束并提示），再退出；will-quit 收尾拿同一个结果，
-// 新实例冷启动按清单续跑
+// 菜单「重启」：先等 agent 安全点（有命令在跑就等它结束，主窗口弹等待层、可强制退出），再退出；
+// will-quit 收尾拿同一个结果，新实例冷启动按清单续跑
 const appRestart = createAppRestart({
   relaunch: () => app.relaunch(),
   allowQuit: allowAppQuit,
@@ -153,12 +154,11 @@ const appRestart = createAppRestart({
       hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
       onWaitingForTools,
     }),
-  stateChanged: () => installAppMenu(readLocale()),
-  notifyWaitingForTools: () =>
-    showMenuMessage(
-      'info',
-      translate(readLocale(), 'A command is running. EnsoCode will restart after it finishes.')
-    ),
+  stateChanged: (state) => {
+    installAppMenu(readLocale());
+    notifyRestartWaiting(state === 'waiting-for-tools');
+  },
+  abandonPrepare: () => void forceAgentWorkerQuit(),
 });
 
 function registerEnsoProtocol(): void {
@@ -227,8 +227,9 @@ if (!gotTheLock) {
     setAppMenuActions({
       restartApp: () => void appRestart.restart(),
       restartState: () => appRestart.state,
-      reportError: (message) => showMenuMessage('error', message),
+      reportError: showMenuError,
     });
+    registerAppRestartHandlers(() => void appRestart.forceQuit());
     installAppMenu(readLocale());
 
     // 开发环境下默认用 F12 打开/关闭 DevTools

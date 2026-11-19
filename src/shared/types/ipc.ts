@@ -124,6 +124,10 @@ export const IPC_CHANNELS = {
   APP_CLOSE_RESPONSE: 'app:close-response',
   APP_FLUSH_PERSIST_REQUEST: 'app:flush-persist-request',
   APP_FLUSH_PERSIST_RESPONSE: 'app:flush-persist-response',
+  /** main → 主窗口：菜单「重启」在等命令结束（true 开等待弹层，false 关） */
+  APP_RESTART_WAITING: 'app:restart-waiting',
+  /** 主窗口 → main：等待弹层上点「强制退出」 */
+  APP_RESTART_FORCE: 'app:restart-force',
   APP_SET_BADGE_COUNT: 'app:set-badge-count',
 
   // 拖放浮窗（实验，macOS）：浮窗 ⇄ Main ⇄ 主窗口

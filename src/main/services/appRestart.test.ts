@@ -17,7 +17,7 @@ function setup(overrides: { relaunch?: () => void } = {}) {
       return prepared.promise;
     }),
     stateChanged: vi.fn((state: AppRestartState) => states.push(state)),
-    notifyWaitingForTools: vi.fn(() => order.push('notify')),
+    abandonPrepare: vi.fn(() => order.push('abandonPrepare')),
   };
   return {
     host,
@@ -30,8 +30,8 @@ function setup(overrides: { relaunch?: () => void } = {}) {
 }
 
 describe('createAppRestart', () => {
-  it('先等安全点再放行关窗确认并退出整个应用；没有工具在跑不提示', async () => {
-    const { order, prepared, restart, host } = setup();
+  it('先等安全点再放行关窗确认并退出整个应用；没有工具在跑不进等待态', async () => {
+    const { order, states, prepared, restart, host } = setup();
     expect(restart.state).toBe('idle');
     expect(restart.restart()).toBe('restarting');
     expect(restart.state).toBe('restarting');
@@ -39,26 +39,56 @@ describe('createAppRestart', () => {
     prepared.resolve('checkpointed');
     await vi.waitFor(() => expect(host.quit).toHaveBeenCalledTimes(1));
     expect(order).toEqual(['relaunch', 'prepareQuit', 'allowQuit', 'quit']);
-    expect(host.notifyWaitingForTools).not.toHaveBeenCalled();
+    expect(states).toEqual(['restarting']);
   });
 
-  it('有命令在跑：立刻提示会等它结束，菜单进入等待状态，命令结束后才退出', async () => {
+  it('有命令在跑：进入等待态（弹层），命令结束后先退出等待态再退出', async () => {
     const { order, states, prepared, restart, host, waitingForTools } = setup();
     restart.restart();
     waitingForTools();
     expect(restart.state).toBe('waiting-for-tools');
     expect(states).toEqual(['restarting', 'waiting-for-tools']);
-    expect(host.notifyWaitingForTools).toHaveBeenCalledTimes(1);
-    // 再报一次也只提示一次
+    // 再报一次不重复通知
     waitingForTools();
-    expect(host.notifyWaitingForTools).toHaveBeenCalledTimes(1);
+    expect(states).toEqual(['restarting', 'waiting-for-tools']);
     await Promise.resolve();
     expect(host.quit).not.toHaveBeenCalled();
 
     prepared.resolve('checkpointed');
     await vi.waitFor(() => expect(host.quit).toHaveBeenCalledTimes(1));
-    expect(order).toEqual(['relaunch', 'prepareQuit', 'notify', 'allowQuit', 'quit']);
+    expect(order).toEqual(['relaunch', 'prepareQuit', 'allowQuit', 'quit']);
+    expect(states).toEqual(['restarting', 'waiting-for-tools', 'restarting']);
     expect(restart.state).toBe('restarting');
+  });
+
+  it('等待中强制退出：不等命令，立刻结束等待并退出；命令随后结束也不再退第二次', async () => {
+    const { order, states, prepared, restart, host, waitingForTools } = setup();
+    expect(restart.forceQuit()).toBe(false);
+    restart.restart();
+    waitingForTools();
+    expect(restart.forceQuit()).toBe(true);
+    expect(order).toEqual(['relaunch', 'prepareQuit', 'abandonPrepare', 'allowQuit', 'quit']);
+    expect(states).toEqual(['restarting', 'waiting-for-tools', 'restarting']);
+    expect(restart.forceQuit()).toBe(false);
+    prepared.resolve('timeout');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(host.quit).toHaveBeenCalledTimes(1);
+    expect(host.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it('强制退出时结束等待出错：记日志照常退出，不卡住', () => {
+    const { restart, host, waitingForTools } = setup();
+    host.abandonPrepare.mockImplementation(() => {
+      throw new Error('boom');
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    restart.restart();
+    waitingForTools();
+    expect(restart.forceQuit()).toBe(true);
+    expect(host.quit).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it('等安全点出错：记日志后照常重启', async () => {
