@@ -62,3 +62,31 @@ export function applyFetchedModels(
     if (outcome.status === 'ok' && outcome.models) updateProvider(id, { models: outcome.models });
   }
 }
+
+export interface FetchOutcomeSummary {
+  okCount: number;
+  failedCount: number;
+  modelCount: number;
+  firstError: string | null;
+}
+
+export function summarizeFetchOutcomes(
+  outcomes: Record<string, ProviderFetchOutcome>
+): FetchOutcomeSummary {
+  const summary: FetchOutcomeSummary = {
+    okCount: 0,
+    failedCount: 0,
+    modelCount: 0,
+    firstError: null,
+  };
+  for (const outcome of Object.values(outcomes)) {
+    if (outcome.status === 'ok') {
+      summary.okCount += 1;
+      summary.modelCount += outcome.count;
+    } else {
+      summary.failedCount += 1;
+      summary.firstError ??= outcome.message;
+    }
+  }
+  return summary;
+}
