@@ -316,6 +316,11 @@ export function observedBackgroundTasks(sessionId: string): ObservedTask[] {
   return backgroundTaskStates.tasks(sessionId);
 }
 
+/** 主会话名下还有没结束的子代理 Run：结束时 AgentService 会通知并叫醒主会话 */
+export function observedSubagentsRunning(sessionId: string): boolean {
+  return (agentService?.progress(sessionId).length ?? 0) > 0;
+}
+
 /** Bot 会话宿主订阅 worker 事件（turn 结果、运行态） */
 export function setBotWorkerEventObserver(
   observer: ((event: AgentWorkerEvent | { type: 'worker-exited' }) => void) | null
