@@ -528,9 +528,13 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
-    // 终态马上投；手机关注的任务结果会马上推给发起渠道，桌面秘书会话同一时刻也要收到
-    const followed = kind !== 'turn-ended' && ports.contact?.follows?.(record.conversationId);
-    if (!isUrgentUpdate(update) && !skipsUpdateWindow(kind) && !followed) {
+    // 终态马上投；一轮停下也马上投（还在等后台命令、子代理的那种上游已拦下，不会走到这里）；
+    // 手机关注的任务结果会马上推给发起渠道，桌面秘书会话同一时刻也要收到
+    const immediate =
+      skipsUpdateWindow(kind) ||
+      kind === 'turn-ended' ||
+      ports.contact?.follows?.(record.conversationId);
+    if (!isUrgentUpdate(update) && !immediate) {
       const held = previous?.deliverAt;
       update.deliverAt =
         held !== undefined && held > now

@@ -431,15 +431,15 @@ describe('派出会话的结果记录', () => {
     expect(progress.state.file.outbox[0]?.lastText).toHaveLength(501);
   });
 
-  it('普通会话的 turn-ended 先攒着，needs-user 和 failed 不推迟', () => {
+  it('普通会话的 turn-ended 和 needs-user、failed 一样不推迟', () => {
     const held = harness({});
     held.state.statuses.c1 = idle;
     held.host.onAgentEvent(
       event('turn-completed', { digest: { assistantText: '先这样' } }),
       change('idle', 'running')
     );
-    expect(held.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended', deliverAt: 45_000 });
-    expect(held.state.prompts).toEqual([]);
+    expect(held.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended' });
+    expect(held.state.file.outbox[0]?.deliverAt).toBeUndefined();
 
     const urgent = harness({});
     urgent.host.onAgentEvent(event('ask-request'), change('waiting', 'running'));
@@ -483,7 +483,18 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox[0]?.deliverAt).toBeUndefined();
   });
 
-  it('中间进度仍按窗口合并；别的会话终态立即投时不把它带走', async () => {
+  it('秘书空闲、没在等后台命令或子代理：一轮结束马上注入，不等 45 秒', async () => {
+    const h = withSecretary(harness({}));
+    h.state.now = 5_000;
+    h.host.onAgentEvent(event('turn-completed', { digest: { assistantText: '这轮停下了' } }), []);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0]).toContain('[turn-ended session:c1]');
+    expect(h.state.prompts[0]).toContain('这轮停下了');
+    expect(h.state.file.outbox.every((entry) => entry.deliverAt !== 50_000)).toBe(true);
+  });
+
+  it('停滞等中间进度仍按窗口合并；别的会话终态立即投时不把它带走', async () => {
     const h = withSecretary(harness({}));
     h.state.file.dispatched.c2 = {
       ...h.state.file.dispatched.c1,
@@ -491,26 +502,21 @@ describe('派出会话的结果记录', () => {
     } as DispatchRecord;
     h.state.rows.c2 = { id: 'c2', title: '另一个会话', projectId: 'p1' };
     h.state.statuses.c2 = idle;
-    const c2 = { identity: { sessionId: 'c2', generation: 'g2' } };
-    h.host.onAgentEvent(
-      event('turn-completed', { ...c2, digest: { assistantText: '第一轮' } }),
-      []
-    );
-    h.state.now = 10_000;
-    h.host.onAgentEvent(
-      event('turn-completed', { ...c2, digest: { assistantText: '第二轮' } }),
-      []
-    );
+    h.ports.backgroundStalls = () => [
+      { conversationId: 'c2', taskId: 't1', reason: 'undelivered' },
+    ];
+    h.host.tick(0);
+    h.ports.backgroundStalls = () => [];
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.state.prompts).toEqual([]);
     expect(h.state.file.outbox).toHaveLength(1);
     expect(h.state.file.outbox[0]).toMatchObject({
-      kind: 'turn-ended',
+      kind: 'stalled',
       conversationId: 'c2',
-      lastText: '第二轮',
       deliverAt: 45_000,
     });
 
+    h.state.now = 10_000;
     h.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: '缺密钥' }), []);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.state.prompts).toHaveLength(1);
@@ -519,6 +525,25 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.outbox.find((entry) => entry.key.startsWith('c2|'))?.deliverAt).toBe(
       45_000
     );
+  });
+
+  it('停滞不马上叫醒秘书，满 45 秒才投', async () => {
+    const h = withSecretary(harness({}));
+    h.ports.backgroundStalls = () => [
+      { conversationId: 'c1', taskId: 't1', reason: 'undelivered' },
+    ];
+    h.host.tick(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.state.prompts).toEqual([]);
+    h.state.now = 44_999;
+    h.host.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.state.prompts).toEqual([]);
+    h.state.now = 45_000;
+    h.host.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0]).toContain('[stalled session:c1]');
   });
 
   describe('一轮停下来是在等后台命令或子代理', () => {
@@ -571,9 +596,11 @@ describe('派出会话的结果记录', () => {
     });
 
     it('等待前排着的上一轮「结束」撤掉，不再按窗口补送', async () => {
-      const h = withSecretary(harness({}));
+      // 没有秘书会话可投：上一轮「结束」还排在队里
+      const h = harness({});
+      h.state.statuses.c1 = idle;
       h.host.onAgentEvent(event('turn-completed'), []);
-      expect(h.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended', deliverAt: 45_000 });
+      expect(h.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended' });
       h.state.tasks.c1 = [build()];
       h.state.now = 10_000;
       h.host.onAgentEvent(event('turn-completed'), []);
@@ -597,18 +624,13 @@ describe('派出会话的结果记录', () => {
       expect(h.state.prompts[0]).toContain('还有 1 个后台任务在跑');
     });
 
-    it('没有后台命令也没有子代理（常驻服务不算）：仍等 45 秒合并', async () => {
+    it('没有后台命令也没有子代理（常驻服务不算）：马上送，不等 45 秒', async () => {
       const h = withSecretary(harness({}));
       h.state.tasks.c1 = [
         build({ status: 'done' }),
         build({ taskId: 'srv', command: 'python3 -m http.server 8931' }),
       ];
       h.host.onAgentEvent(event('turn-completed'), []);
-      await settle();
-      expect(h.state.prompts).toEqual([]);
-      expect(h.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended', deliverAt: 45_000 });
-      h.state.now = 45_000;
-      h.host.tick();
       await settle();
       expect(h.state.prompts).toHaveLength(1);
       expect(h.state.prompts[0]).toContain('[turn-ended session:c1]');
