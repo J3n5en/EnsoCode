@@ -125,7 +125,8 @@ export const IPC_CHANNELS = {
   APP_FLUSH_PERSIST_REQUEST: 'app:flush-persist-request',
   APP_FLUSH_PERSIST_RESPONSE: 'app:flush-persist-response',
   /**
-   * main → 主窗口：重启弹层状态 RestartOverlayState（等命令结束 / 正在重启 / 新实例恢复会话），null 关
+   * main → 主窗口：弹层状态 RestartOverlayState（重启 / 安装更新 / 退出在等命令结束、正在重启、
+   * 新实例恢复会话），null 关
    */
   APP_RESTART_WAITING: 'app:restart-waiting',
   /** 主窗口挂载时取当前重启弹层状态（启动时推送可能早于订阅）；只回本机主窗口 */
@@ -733,8 +734,14 @@ export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 /** 重启在等哪种命令：在跑的工具，或没法脱离应用、只能等它结束的转后台命令 */
 export type RestartWaitReason = 'tool' | 'background-not-detachable';
 
-/** 重启弹层：等命令结束（可强制退出）→ 正在重启；新实例在恢复会话 */
+/** 等待弹层等完命令要做什么：菜单重启、安装更新、退出（Cmd+Q / 关窗 / 菜单退出） */
+export type AppExitReason = 'restart' | 'update' | 'quit';
+
+/**
+ * 主窗口弹层：等命令结束（reason 在等哪种命令，exit 等完要做什么；可强制退出）；菜单重启的「正在重启」；
+ * 新实例在恢复会话
+ */
 export type RestartOverlayState =
-  | { phase: 'waiting'; reason: RestartWaitReason }
+  | { phase: 'waiting'; reason: RestartWaitReason; exit: AppExitReason }
   | { phase: 'restarting' }
   | { phase: 'resuming' };

@@ -1,4 +1,4 @@
-import type { RestartOverlayState } from '@shared/types/ipc';
+import type { AppExitReason, RestartOverlayState } from '@shared/types/ipc';
 import { useEffect, useState } from 'react';
 import {
   AlertDialog,
@@ -12,9 +12,16 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useI18n } from '@/i18n';
 
+const EXIT_NOTES: Record<AppExitReason, string> = {
+  restart: 'EnsoCode will restart once the current command finishes.',
+  update: 'EnsoCode will install the update once the current command finishes.',
+  quit: 'EnsoCode will quit once the current command finishes.',
+};
+
 /**
- * 重启弹层，Main 推送状态：点「重启」立刻是「正在重启」；有命令在跑改成等命令（可强制退出，
- * 不等命令立刻退出并重开，Main 照常尽量落断点与恢复清单），等到了切回「正在重启」。
+ * 重启 / 安装更新 / 退出的弹层，Main 推送状态：点「重启」立刻是「正在重启」；有命令在跑改成等命令，
+ * 按等完要做什么（exit）换说明，命令自然结束时 Main 先关弹层（重启切回「正在重启」）再往下走。
+ * 「强制退出」不等命令，立刻照原路径退出（重开 / 安装 / 退出；Main 照常尽量落断点与恢复清单）。
  * 新实例有会话要续跑时显示「正在恢复会话」，恢复完成或到上限由 Main 关掉。只在本机主窗口显示。
  */
 export function RestartWaitDialog() {
@@ -60,12 +67,12 @@ export function RestartWaitDialog() {
           </AlertDialogTitle>
           {waiting && (
             <AlertDialogDescription>
-              {t('EnsoCode will restart once the current command finishes.')}
+              {t(EXIT_NOTES[shown.exit])}
               {shown.reason === 'background-not-detachable' && (
                 <>
                   {' '}
                   {t(
-                    'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so the restart waits for it.'
+                    'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so EnsoCode waits for it.'
                   )}
                 </>
               )}

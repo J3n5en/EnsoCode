@@ -38,6 +38,18 @@ vi.mock('../agentHost', () => ({
   prepareAgentWorkerForQuit: m.prepare,
   cancelAgentQuitCheckpoint: m.cancel,
 }));
+vi.mock('../../ipc/appRestart', () => ({
+  waitWithExitDialog: async (
+    exit: string,
+    prepare: (onWaiting: (reason: string) => void) => Promise<unknown>
+  ) => {
+    try {
+      return await prepare((reason) => m.order.push(`dialog-open:${exit}:${reason}`));
+    } finally {
+      m.order.push(`dialog-close:${exit}`);
+    }
+  },
+}));
 vi.mock('../appServerMode', () => ({
   flushRendererPersist: async () => {},
   isServerMode: () => false,
@@ -69,10 +81,39 @@ describe('安装更新走优雅重启的安全点', () => {
     expect(m.quitAndInstall).not.toHaveBeenCalled();
     release('checkpointed');
     await vi.waitFor(() => expect(m.quitAndInstall).toHaveBeenCalledOnce());
-    expect(m.order).toEqual(['prepare:update', 'record', 'quitAndInstall']);
+    expect(m.order).toEqual(['prepare:update', 'dialog-close:update', 'record', 'quitAndInstall']);
     // 已在退出流程里：再点重启不叠加
     autoUpdaterService.requestRestart(true);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(m.prepare).toHaveBeenCalledOnce();
+  });
+});
+
+describe('安装更新的等待弹层', () => {
+  it('有命令在跑：开「等完安装更新」弹层；命令结束先关弹层再安装；强制退出（等待按超时结束）同样接着安装', async () => {
+    vi.resetModules();
+    const { autoUpdaterService: service } = await import('./AutoUpdater');
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, false);
+    m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
+    let release!: (value: string) => void;
+    m.prepare.mockReset().mockImplementation(
+      (options: { onWaitingForTools: (reason: string) => void }) =>
+        new Promise((resolve) => {
+          release = resolve;
+          options.onWaitingForTools('tool');
+        })
+    );
+    service.requestRestart(true);
+    await vi.waitFor(() => expect(m.order).toEqual(['dialog-open:update:tool']));
+    expect(m.quitAndInstall).not.toHaveBeenCalled();
+    // 弹层上点「强制退出」→ forceAgentWorkerQuit 让等待以超时结束
+    release('timeout');
+    await vi.waitFor(() => expect(m.quitAndInstall).toHaveBeenCalledOnce());
+    expect(m.order).toEqual([
+      'dialog-open:update:tool',
+      'dialog-close:update',
+      'record',
+      'quitAndInstall',
+    ]);
   });
 });

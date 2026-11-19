@@ -225,7 +225,10 @@ relaunch（多次会起多个实例），进行中菜单项不可点。
 每个续跑会话收到 worker `parent-ready`、非 STALE 的 `parent-rejected`，或派发就失败即算结算，全部结算关掉；
 `COLD_RESUME_OVERLAY_TIMEOUT_MS`（30s）到点没结算完也关并记日志。没有要续跑的会话不显示。启动时推送可能
 早于渲染层订阅，主窗口挂载时经 `APP_RESTART_WAITING_GET` 补取；状态只推本机主窗口、只回本机主窗口的取值，
-节点页面 / 远程浏览器（`electronAPI.remote`）不订阅。按阶段关（`clearRestartOverlay`），恢复结束不会关掉随后点的重启弹层。
+节点页面 / 远程浏览器（`electronAPI.remote`）不订阅。按归属关（`clearRestartOverlay`），恢复结束不会关掉随后点的重启弹层。
+安装更新（`AutoUpdater`）与确认退出（`appCloseConfirm.setBeforeConfirmedQuit`）等安全点时经
+`waitWithExitDialog` 用同一个弹层，waiting 态带 `exit`（restart / update / quit）换说明；「强制退出」交给
+开弹层的路径，更新与退出按超时结束等待后照常安装 / 退出。
 
 重启跨过转后台的命令（菜单「重启」与安装更新带 `keepBackgroundTasks`，普通退出不带，照旧停掉）：
 本地 POSIX bash 的前台命令（`sessionShell` → `shell/detachedRun.withFileBackedExec`，仅

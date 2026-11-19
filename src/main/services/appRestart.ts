@@ -8,7 +8,8 @@ export function restartOverlayFor(
   waitReason?: RestartWaitReason
 ): RestartOverlayState | null {
   if (state === 'restarting') return { phase: 'restarting' };
-  if (state === 'waiting-for-tools') return { phase: 'waiting', reason: waitReason ?? 'tool' };
+  if (state === 'waiting-for-tools')
+    return { phase: 'waiting', reason: waitReason ?? 'tool', exit: 'restart' };
   return null;
 }
 

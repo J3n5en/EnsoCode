@@ -15,6 +15,11 @@ const mocks = vi.hoisted(() => ({
   }),
   consumeTrayReenter: vi.fn(() => false),
   scheduleReenter: vi.fn(),
+  prepareQuit: vi.fn(async (_options: unknown) => 'skipped'),
+  forceAgentWorkerQuit: vi.fn(() => true),
+  registerForce: vi.fn(),
+  beforeConfirmedQuit: null as null | (() => Promise<void>),
+  dialog: [] as string[],
 }));
 
 vi.mock('electron', () => ({
@@ -80,16 +85,32 @@ vi.mock('./services/agentHost', () => ({
   startAgentWorker: mocks.startAgentWorker,
   agentWorkerAlive: () => false,
   stopAgentWorkerForQuit: vi.fn(async () => undefined),
-  prepareAgentWorkerForQuit: vi.fn(async () => 'skipped'),
-  forceAgentWorkerQuit: vi.fn(() => false),
+  prepareAgentWorkerForQuit: mocks.prepareQuit,
+  forceAgentWorkerQuit: mocks.forceAgentWorkerQuit,
   recordAgentWorkerGone: vi.fn(),
   agentDataDir: () => '/tmp/enso-index-test/agent',
 }));
 vi.mock('./ipc/agent', () => ({ resumeRootFromRestartManifest: vi.fn() }));
 vi.mock('./ipc/appRestart', () => ({
   clearRestartOverlay: vi.fn(),
-  registerAppRestartHandlers: vi.fn(),
+  registerAppRestartHandlers: mocks.registerForce,
   setRestartOverlay: vi.fn(),
+  waitWithExitDialog: async (
+    exit: string,
+    prepare: (onWaiting: (reason: string) => void) => Promise<unknown>
+  ) => {
+    try {
+      return await prepare((reason) => mocks.dialog.push(`open:${exit}:${reason}`));
+    } finally {
+      mocks.dialog.push(`close:${exit}`);
+    }
+  },
+}));
+vi.mock('./services/appCloseConfirm', () => ({
+  allowAppQuit: vi.fn(),
+  setBeforeConfirmedQuit: (hook: () => Promise<void>) => {
+    mocks.beforeConfirmedQuit = hook;
+  },
 }));
 vi.mock('./ipc/sessionIndex', () => ({ agentSessionIndex: { runningRootSessionIds: () => [] } }));
 vi.mock('./services/coldRestart', () => ({
@@ -198,6 +219,30 @@ describe('Main process diagnostics', () => {
     // mock 的 getPath('userData') 固定返回 /tmp
     expect(mocks.setPath).toHaveBeenCalledWith('crashDumps', path.join('/tmp', 'Crashpad'));
     expect(mocks.crashReporterStart).toHaveBeenCalledWith({ uploadToServer: false });
+  });
+});
+
+describe('退出与安装更新的等待弹层接线', () => {
+  it('确认退出后先等安全点：有命令在跑开「等完退出」弹层，等完关掉', async () => {
+    mocks.dialog.length = 0;
+    mocks.prepareQuit.mockImplementationOnce(async (options) => {
+      (options as { onWaitingForTools: (reason: string) => void }).onWaitingForTools('tool');
+      return 'checkpointed';
+    });
+    await import('./index');
+    await mocks.beforeConfirmedQuit?.();
+    expect(mocks.prepareQuit).toHaveBeenLastCalledWith(expect.objectContaining({ reason: 'quit' }));
+    expect(mocks.dialog).toEqual(['open:quit:tool', 'close:quit']);
+  });
+
+  it.each(['update', 'quit'] as const)('%s 弹层上的「强制退出」结束等安全点', async (exit) => {
+    mocks.forceAgentWorkerQuit.mockClear();
+    mocks.registerForce.mockClear();
+    await import('./index');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const force = mocks.registerForce.mock.calls[0]?.[0] as (exit: string) => void;
+    force(exit);
+    expect(mocks.forceAgentWorkerQuit).toHaveBeenCalledOnce();
   });
 });
 

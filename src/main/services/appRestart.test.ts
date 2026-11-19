@@ -158,10 +158,14 @@ describe('createAppRestart', () => {
     await vi.waitFor(() => expect(host.quit).toHaveBeenCalledTimes(1));
     expect(host.stateChanged.mock.calls.map(([s, r]) => restartOverlayFor(s, r))).toEqual([
       { phase: 'restarting' },
-      { phase: 'waiting', reason: 'tool' },
+      { phase: 'waiting', reason: 'tool', exit: 'restart' },
       { phase: 'restarting' },
     ]);
     expect(restartOverlayFor('idle')).toBeNull();
-    expect(restartOverlayFor('waiting-for-tools')).toEqual({ phase: 'waiting', reason: 'tool' });
+    expect(restartOverlayFor('waiting-for-tools')).toEqual({
+      phase: 'waiting',
+      reason: 'tool',
+      exit: 'restart',
+    });
   });
 });

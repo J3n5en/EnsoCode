@@ -80,7 +80,7 @@ describe('RestartWaitDialog', () => {
   it('等命令时出现（带 loading），命令结束后关掉', async () => {
     await mount();
     expect(dialog()).toBeNull();
-    await act(async () => push?.({ phase: 'waiting', reason: 'tool' }));
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
     expect(dialog()?.textContent).toContain('Waiting for the current command to finish');
     expect(dialog()?.querySelector('[role="status"]')).not.toBeNull();
     await act(async () => push?.(null));
@@ -90,7 +90,7 @@ describe('RestartWaitDialog', () => {
 
   it('强制退出：立刻通知 Main，不等命令；按钮防重复点', async () => {
     await mount();
-    await act(async () => push?.({ phase: 'waiting', reason: 'tool' }));
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
     const button = dialog()?.querySelector('button');
     expect(button?.textContent).toBe('Force quit');
     await act(async () => button?.click());
@@ -101,9 +101,11 @@ describe('RestartWaitDialog', () => {
   it('在等的是脱离不了的转后台命令：多一句说明；普通命令不说', async () => {
     await mount();
     const note = 'cannot keep running without EnsoCode';
-    await act(async () => push?.({ phase: 'waiting', reason: 'tool' }));
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
     expect(dialog()?.textContent).not.toContain(note);
-    await act(async () => push?.({ phase: 'waiting', reason: 'background-not-detachable' }));
+    await act(async () =>
+      push?.({ phase: 'waiting', reason: 'background-not-detachable', exit: 'restart' })
+    );
     expect(dialog()?.textContent).toContain(note);
     expect(dialog()?.textContent).toContain(
       'EnsoCode will restart once the current command finishes.'
@@ -121,7 +123,7 @@ describe('RestartWaitDialog', () => {
 
   it('有命令在跑：先等命令，等到了同一个弹层切成「正在重启」', async () => {
     await mount();
-    await act(async () => push?.({ phase: 'waiting', reason: 'tool' }));
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
     expect(dialog()?.textContent).toContain('Waiting for the current command to finish');
     await act(async () => push?.({ phase: 'restarting' }));
     expect(dialog()?.textContent).toContain('Restarting EnsoCode…');
@@ -151,4 +153,30 @@ describe('RestartWaitDialog', () => {
     expect(push).toBeUndefined();
     expect(dialog()).toBeNull();
   });
+
+  it.each([
+    ['restart', 'EnsoCode will restart once the current command finishes.'],
+    ['update', 'EnsoCode will install the update once the current command finishes.'],
+    ['quit', 'EnsoCode will quit once the current command finishes.'],
+  ] as const)(
+    '同一个弹层按等完要做什么（%s）换说明，都带 loading 和「强制退出」',
+    async (exit, text) => {
+      await mount();
+      await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit }));
+      const content = dialog()?.textContent ?? '';
+      expect(content).toContain('Waiting for the current command to finish');
+      expect(content).toContain(text);
+      for (const other of [
+        'EnsoCode will restart once',
+        'EnsoCode will install the update once',
+        'EnsoCode will quit once',
+      ].filter((line) => !text.startsWith(line)))
+        expect(content).not.toContain(other);
+      expect(dialog()?.querySelector('[role="status"]')).not.toBeNull();
+      await act(async () => dialog()?.querySelector('button')?.click());
+      expect(forceRestart).toHaveBeenCalledTimes(1);
+      await act(async () => push?.(null));
+      expect(dialog()).toBeNull();
+    }
+  );
 });

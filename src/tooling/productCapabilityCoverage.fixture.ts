@@ -583,7 +583,7 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   APP_FLUSH_PERSIST_RESPONSE: excluded('Renderer-to-main persist flush ack.'),
   APP_RESTART_WAITING: excluded(
-    'Main-to-renderer restart overlay: waiting for commands, restarting, or resuming sessions.'
+    'Main-to-renderer overlay: restart, update install or quit waiting for commands, restarting, or resuming sessions.'
   ),
   APP_RESTART_WAITING_GET: excluded(
     'Local main window reads the current restart overlay on mount.'

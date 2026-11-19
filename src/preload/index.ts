@@ -290,12 +290,13 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
 
 function parseRestartOverlay(value: unknown): RestartOverlayState | null {
   if (!value || typeof value !== 'object') return null;
-  const { phase, reason } = value as { phase?: unknown; reason?: unknown };
+  const { phase, reason, exit } = value as { phase?: unknown; reason?: unknown; exit?: unknown };
   if (phase === 'restarting' || phase === 'resuming') return { phase };
   if (phase !== 'waiting') return null;
   return {
     phase,
     reason: reason === 'background-not-detachable' ? reason : 'tool',
+    exit: exit === 'update' || exit === 'quit' ? exit : 'restart',
   };
 }
 
