@@ -225,7 +225,7 @@ import type {
 } from '@shared/types/browser';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
-import type { RestartWaitReason } from '@shared/types/ipc';
+import type { AppExitReason, RestartWaitReason } from '@shared/types/ipc';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -314,12 +314,13 @@ const electronAPI = {
       ipcRenderer.send(IPC_CHANNELS.APP_FLUSH_PERSIST_RESPONSE, requestId);
     },
     onRestartWaiting: (
-      callback: (waiting: boolean, reason?: RestartWaitReason) => void
+      callback: (waiting: boolean, reason?: RestartWaitReason, exit?: AppExitReason) => void
     ): (() => void) => {
-      const listener = (_: unknown, waiting: unknown, reason: unknown) =>
+      const listener = (_: unknown, waiting: unknown, reason: unknown, exit: unknown) =>
         callback(
           waiting === true,
-          reason === 'tool' || reason === 'background-not-detachable' ? reason : undefined
+          reason === 'tool' || reason === 'background-not-detachable' ? reason : undefined,
+          exit === 'restart' || exit === 'update' || exit === 'quit' ? exit : undefined
         );
       ipcRenderer.on(IPC_CHANNELS.APP_RESTART_WAITING, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_RESTART_WAITING, listener);

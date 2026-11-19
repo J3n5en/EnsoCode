@@ -32,7 +32,7 @@ vi.mock('@/components/ui/spinner', () => ({
 
 let root: Root;
 let container: HTMLElement;
-let push: ((waiting: boolean, reason?: string) => void) | undefined;
+let push: ((waiting: boolean, reason?: string, exit?: string) => void) | undefined;
 const forceRestart = vi.fn();
 const dialog = () => container.querySelector('[role="alertdialog"]');
 
@@ -46,7 +46,9 @@ beforeEach(async () => {
   Object.assign(window, {
     electronAPI: {
       app: {
-        onRestartWaiting: (callback: (waiting: boolean, reason?: string) => void) => {
+        onRestartWaiting: (
+          callback: (waiting: boolean, reason?: string, exit?: string) => void
+        ) => {
           push = callback;
           return () => {
             push = undefined;
@@ -95,5 +97,27 @@ describe('RestartWaitDialog', () => {
     expect(dialog()?.textContent).toContain(
       'EnsoCode will restart once the current command finishes.'
     );
+  });
+
+  it.each([
+    ['restart', 'EnsoCode will restart once the current command finishes.'],
+    ['update', 'EnsoCode will install the update once the current command finishes.'],
+    ['quit', 'EnsoCode will quit once the current command finishes.'],
+  ])('同一个弹层按等完要做什么（%s）换说明，都带 loading 和「强制退出」', async (exit, text) => {
+    await act(async () => push?.(true, 'tool', exit));
+    const content = dialog()?.textContent ?? '';
+    expect(content).toContain('Waiting for the current command to finish');
+    expect(content).toContain(text);
+    for (const other of [
+      'EnsoCode will restart once',
+      'EnsoCode will install the update once',
+      'EnsoCode will quit once',
+    ].filter((line) => !text.startsWith(line)))
+      expect(content).not.toContain(other);
+    expect(dialog()?.querySelector('[role="status"]')).not.toBeNull();
+    await act(async () => dialog()?.querySelector('button')?.click());
+    expect(forceRestart).toHaveBeenCalledTimes(1);
+    await act(async () => push?.(false));
+    expect(dialog()).toBeNull();
   });
 });

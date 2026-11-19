@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
+import type { AppExitReason } from '@shared/types/ipc';
 import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { syncDropShelf } from './desktop/dropShelf';
 import {
@@ -11,7 +12,11 @@ import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
 import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
 import { resumeRootFromRestartManifest } from './ipc/agent';
-import { notifyRestartWaiting, registerAppRestartHandlers } from './ipc/appRestart';
+import {
+  notifyRestartWaiting,
+  registerAppRestartHandlers,
+  waitWithExitDialog,
+} from './ipc/appRestart';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
 import { agentSessionIndex } from './ipc/sessionIndex';
 import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
@@ -33,7 +38,7 @@ import {
   startAgentWorker,
   stopAgentWorkerForQuit,
 } from './services/agentHost';
-import { allowAppQuit } from './services/appCloseConfirm';
+import { allowAppQuit, setBeforeConfirmedQuit } from './services/appCloseConfirm';
 import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
 import { createAppRestart } from './services/appRestart';
@@ -158,10 +163,32 @@ const appRestart = createAppRestart({
     }),
   stateChanged: (state, waitReason) => {
     installAppMenu(readLocale());
-    notifyRestartWaiting(state === 'waiting-for-tools', waitReason);
+    notifyRestartWaiting(state === 'waiting-for-tools', waitReason, 'restart');
   },
   abandonPrepare: () => void forceAgentWorkerQuit(),
 });
+
+// Cmd+Q / 关窗 / 菜单退出：确认退出后、窗口还在时先等安全点，有命令在跑主窗口弹等待层；
+// will-quit 收尾拿同一个结果
+setBeforeConfirmedQuit(async () => {
+  await waitWithExitDialog('quit', (onWaitingForTools) =>
+    prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+      onWaitingForTools,
+    })
+  );
+});
+
+/** 等待弹层上点「强制退出」：重启走重启自己的强制路径；安装更新与退出结束等待，各自照常往下走 */
+function forceExitWait(exit: AppExitReason): void {
+  if (exit === 'restart' && appRestart.forceQuit()) return;
+  try {
+    forceAgentWorkerQuit();
+  } catch (error) {
+    console.error(`[app-exit] ${exit} 强制退出时结束等待失败:`, error);
+  }
+}
 
 function registerEnsoProtocol(): void {
   if (process.defaultApp && process.argv.length >= 2) {
@@ -231,7 +258,7 @@ if (!gotTheLock) {
       restartState: () => appRestart.state,
       reportError: showMenuError,
     });
-    registerAppRestartHandlers(() => void appRestart.forceQuit());
+    registerAppRestartHandlers(forceExitWait);
     installAppMenu(readLocale());
 
     // 开发环境下默认用 F12 打开/关闭 DevTools

@@ -19,9 +19,18 @@ export interface AppCloseConfirmHost {
 
 let allowQuit = false;
 let bypassDestroy = false;
+let beforeConfirmedQuit: (() => Promise<void>) | null = null;
 
 export function allowAppQuit(): void {
   allowQuit = true;
+}
+
+/**
+ * 关窗确认里选了「退出」、窗口还在时先跑：等 agent 到安全点（有命令在跑主窗口弹等待层）。
+ * 放在这里而不是 will-quit：那时窗口已关，弹层没处显示。
+ */
+export function setBeforeConfirmedQuit(hook: (() => Promise<void>) | null): void {
+  beforeConfirmedQuit = hook;
 }
 
 /**
@@ -94,10 +103,16 @@ export function attachAppCloseConfirm(
       win.focus();
       const action = await askRenderer();
       if (action === 'cancel') return;
-      flowInProgress = false;
       if (action === 'tray') {
+        flowInProgress = false;
         await options.onTray();
         return;
+      }
+      // 等命令期间保持 flowInProgress：再按 Cmd+Q / 关窗不重复弹确认
+      try {
+        await beforeConfirmedQuit?.();
+      } catch (error) {
+        console.error('[app-close] 退出前等命令失败，照常退出:', error);
       }
       allowQuit = true;
       app.quit();

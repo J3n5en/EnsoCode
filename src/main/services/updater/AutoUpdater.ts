@@ -5,6 +5,7 @@ import { AUTO_RESTART_IDLE_MS, isTurnRestartBlocked } from '@shared/updater/idle
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
+import { waitWithExitDialog } from '../../ipc/appRestart';
 import { agentSessionIndex } from '../../ipc/sessionIndex';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
@@ -175,13 +176,16 @@ class AutoUpdaterService {
     // 退出记录要写明是安装更新：会话里的系统提示据此说清原因
     markExitForUpdate();
     // 与应用退出同一套：先等 agent worker 到安全点、断点与恢复清单落盘，再交给 electron-updater。
-    // 没有正在跑的会话立即返回；等太久（超时）照常安装
-    await prepareAgentWorkerForQuit({
-      reason: 'update',
-      hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
-      // 装完会重新打开：能脱离的转后台命令交给新实例认回
-      keepBackgroundTasks: true,
-    });
+    // 没有正在跑的会话立即返回；有命令在跑主窗口弹等待层（等完先关再装），强制退出或等太久（超时）照常安装
+    await waitWithExitDialog('update', (onWaitingForTools) =>
+      prepareAgentWorkerForQuit({
+        reason: 'update',
+        hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+        onWaitingForTools,
+        // 装完会重新打开：能脱离的转后台命令交给新实例认回
+        keepBackgroundTasks: true,
+      })
+    );
     try {
       recordInterruptedSessions(app.getPath('userData'), agentSessionIndex.runningRootSessionIds());
     } catch (error) {
