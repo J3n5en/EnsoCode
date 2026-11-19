@@ -138,6 +138,7 @@ import {
 import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
+import { wakeColdRestartSession } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
@@ -1911,6 +1912,16 @@ export function registerAgentHandlers(): void {
     // 绝不进普通事件流（renderer 的 snapshot 分支有 started / 审批副作用）
     if (workerEvent.type === 'tool-batch-completed') {
       void labelToolBatch(workerEvent.identity, workerEvent.digest);
+      return;
+    }
+    // 重启认回的后台命令在空闲会话里结束：按恢复清单打开它，worker 打开后开一轮交付结果
+    if (workerEvent.type === 'session-wake-requested') {
+      void wakeColdRestartSession(workerEvent.sessionId, resumeRootFromRestartManifest).then(
+        (result) =>
+          console.log(
+            `[graceful-restart] wake ${workerEvent.sessionId.slice(0, 8)} ${result.ok ? 'ok' : `skipped: ${result.error}`}`
+          )
+      );
       return;
     }
     if (

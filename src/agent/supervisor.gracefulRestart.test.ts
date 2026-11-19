@@ -7,7 +7,11 @@ import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefu
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BackgroundTaskManager } from './backgroundTasks';
-import { DETACHED_TASKS_FILE, writeDetachedTasksManifest } from './detachedTasksManifest';
+import {
+  DETACHED_TASKS_FILE,
+  type DetachedTaskRecord,
+  writeDetachedTasksManifest,
+} from './detachedTasksManifest';
 import { runFiles } from './shell/detachedRun';
 
 const mocks = vi.hoisted(() => ({
@@ -697,6 +701,146 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       supervisor as unknown as { sessions: Map<string, { pendingTaskReminders: string[] }> }
     ).sessions.get('parent');
     expect(managed?.pendingTaskReminders.join('\n')).toContain(taskId);
+    // 会话本来空闲：已请 Main 打开，打开后立即开一轮把完成通知交给模型
+    expect(ofType(events, 'session-wake-requested')).toEqual([
+      { type: 'session-wake-requested', sessionId: 'parent' },
+    ]);
+    await sleep(400);
+    expect(mocks.sessions[0].prompt).toHaveBeenCalledTimes(1);
+    expect(String(mocks.sessions[0].prompt.mock.calls[0]?.[0])).toContain(taskId);
+    expect(managed?.pendingTaskReminders).toEqual([]);
+    await supervisor.shutdown();
+  });
+
+  /** pid 已不在、按文件收尾的认回记录：recover 时立即结束 */
+  function goneRecord(sessionId: string): DetachedTaskRecord {
+    mkdirSync(logDir, { recursive: true });
+    const runId = randomUUID();
+    const files = runFiles(logDir, runId);
+    writeFileSync(files.outputFile, 'built\n');
+    writeFileSync(files.exitFile, '0');
+    const taskId = `task-9-${randomUUID().slice(0, 8)}`;
+    return {
+      taskId,
+      sessionId,
+      command: 'pnpm build',
+      commandKey: null,
+      cwd: '/workspace',
+      pid: spawnSync('true').pid as number,
+      runId,
+      startedAt: Date.now() - 60_000,
+      yieldedAt: Date.now() - 50_000,
+      deadlineAt: null,
+      outputFile: files.outputFile,
+      outputOffset: 0,
+      exitCodeFile: files.exitFile,
+      logPath: path.join(logDir, `${taskId}.log`),
+    };
+  }
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const reminders = (supervisor: SessionSupervisor) =>
+    (
+      supervisor as unknown as { sessions: Map<string, { pendingTaskReminders: string[] }> }
+    ).sessions.get('parent')?.pendingTaskReminders ?? [];
+  const bgTasksOf = (supervisor: SessionSupervisor) =>
+    (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+
+  it('认回的任务在会话空闲时结束：开一轮把完成通知交给模型', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-wake-idle-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const record = goneRecord('parent');
+    bgTasksOf(supervisor).recover([record]);
+    await sleep(400);
+    const session = mocks.sessions[0];
+    expect(session.prompt).toHaveBeenCalledTimes(1);
+    expect(String(session.prompt.mock.calls[0]?.[0])).toContain(
+      `Background task ${record.taskId} finished`
+    );
+    expect(ofType(events, 'session-wake-requested')).toEqual([]);
+    await supervisor.shutdown();
+  });
+
+  it('认回的任务在会话正忙时结束：不开第二轮，排队等轮末', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-wake-busy-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const session = mocks.sessions[0];
+    session.emit({ type: 'agent_start' });
+    const record = goneRecord('parent');
+    bgTasksOf(supervisor).recover([record]);
+    await sleep(400);
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(reminders(supervisor).join('\n')).toContain(record.taskId);
+    expect(ofType(events, 'session-wake-requested')).toEqual([]);
+    await supervisor.shutdown();
+  });
+
+  it('重启收尾期间认回的任务结束：只存盘，不开一轮也不请求叫醒', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-wake-closing-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    supervisor.handleCommand({ type: 'graceful-restart', keepBackgroundTasks: true });
+    await waitFor(events, 'graceful-restart-ready');
+    const own = goneRecord('parent');
+    const unopened = goneRecord('other');
+    bgTasksOf(supervisor).recover([own, unopened]);
+    await sleep(400);
+    expect(mocks.sessions[0].prompt).not.toHaveBeenCalled();
+    expect(ofType(events, 'session-wake-requested')).toEqual([]);
+    const pendingDir = path.join(dataDir, 'sessions', 'pending-notifications');
+    expect(readFileSync(path.join(pendingDir, 'parent.json'), 'utf8')).toContain(own.taskId);
+    expect(readFileSync(path.join(pendingDir, 'other.json'), 'utf8')).toContain(unopened.taskId);
+    await supervisor.shutdown();
+  });
+
+  it('新一代：断点里空闲的会话带着收尾期间存下的通知，请求叫醒并在打开后开一轮', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-wake-next-'));
+    const entry = {
+      generation: parent.generation,
+      sessionFile: SESSION_FILE,
+      seq: 7,
+      turnId: null,
+      lastCompletedToolCallId: null,
+      messageCount: 0,
+      toolsInFlight: [],
+    };
+    const checkpointFile = path.join(dataDir, RESTART_CHECKPOINT_FILE);
+    writeFileSync(
+      checkpointFile,
+      JSON.stringify({
+        version: 1,
+        pid: 1,
+        writtenAt: Date.now(),
+        sessions: [
+          { ...entry, sessionId: 'parent', nextStep: 'await-user' },
+          { ...entry, sessionId: 'busy', nextStep: 'model-request', turnId: 'turn-1' },
+        ],
+      } satisfies RestartCheckpoint)
+    );
+    const pendingDir = path.join(dataDir, 'sessions', 'pending-notifications');
+    mkdirSync(pendingDir, { recursive: true });
+    writeFileSync(path.join(pendingDir, 'parent.json'), JSON.stringify(['task-9-x finished']));
+    writeFileSync(path.join(pendingDir, 'busy.json'), JSON.stringify(['task-9-y finished']));
+    const { events, supervisor } = await startSupervisor(dataDir, checkpointFile);
+    expect(ofType(events, 'session-wake-requested')).toEqual([
+      { type: 'session-wake-requested', sessionId: 'parent' },
+    ]);
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      resumeFile: SESSION_FILE,
+    });
+    await waitFor(events, 'parent-ready');
+    await sleep(400);
+    expect(mocks.sessions[0].prompt).toHaveBeenCalledTimes(1);
+    expect(String(mocks.sessions[0].prompt.mock.calls[0]?.[0])).toContain('task-9-x finished');
     await supervisor.shutdown();
   });
 });

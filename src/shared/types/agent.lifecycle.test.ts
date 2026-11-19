@@ -682,5 +682,13 @@ describe('重启保留后台命令的协议', () => {
       detached: 2,
     });
     expect(parseAgentWorkerEvent({ type: 'background-tasks-detached', detached: -1 })).toBeNull();
+    expect(parseAgentWorkerEvent({ type: 'session-wake-requested', sessionId: 'conv-1' })).toEqual({
+      type: 'session-wake-requested',
+      sessionId: 'conv-1',
+    });
+    expect(parseAgentWorkerEvent({ type: 'session-wake-requested', sessionId: '' })).toBeNull();
+    expect(
+      parseAgentWorkerEvent({ type: 'session-wake-requested', sessionId: 'a', extra: 1 })
+    ).toBeNull();
   });
 });

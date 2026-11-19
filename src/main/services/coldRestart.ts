@@ -55,6 +55,28 @@ export function coldResumedSessionIds(): ReadonlySet<string> {
   return new Set(plan?.resume.map((entry) => entry.sessionId) ?? []);
 }
 
+const woken = new Set<string>();
+
+/**
+ * worker 请求叫醒（认回的后台命令在空闲会话里结束）：按清单重走 spawn，不续跑；
+ * 清单里没有的、冷启动本就在续跑的、已叫过的都不重复打开
+ */
+export async function wakeColdRestartSession(
+  sessionId: string,
+  resume: (entry: RestartManifestEntry) => Promise<{ ok: boolean; error?: string }>,
+  current: ColdRestartPlan | null = plan ?? null
+): Promise<{ ok: boolean; error?: string }> {
+  const entry = current?.manifest.sessions.find((item) => item.sessionId === sessionId);
+  if (!entry) return { ok: false, error: 'not in restart manifest' };
+  if (entry.nextStep === 'model-request') return { ok: false, error: 'resumed by cold restart' };
+  if (woken.has(sessionId)) return { ok: false, error: 'already woken' };
+  woken.add(sessionId);
+  return resume(entry).catch((error: unknown) => ({
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+}
+
 /** 逐个重走 spawn；单个失败只记日志，不影响其他会话 */
 export async function resumeColdRestartSessions(
   current: ColdRestartPlan,

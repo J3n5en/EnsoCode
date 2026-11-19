@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
 import { describe, expect, it, vi } from 'vitest';
-import { loadColdRestartPlan, resumeColdRestartSessions } from './coldRestart';
+import {
+  loadColdRestartPlan,
+  resumeColdRestartSessions,
+  wakeColdRestartSession,
+} from './coldRestart';
 import { buildRestartManifest, writeRestartManifest } from './restartManifest';
 
 const entry = (sessionId: string, nextStep: 'model-request' | 'await-user') => ({
@@ -66,5 +70,17 @@ describe('coldRestart', () => {
     });
     expect(seen).toEqual(['run', 'second']);
     log.mockRestore();
+  });
+
+  it('叫醒空闲会话：按清单重走 spawn 一次；续跑中的、清单外的不打开', async () => {
+    const plan = loadColdRestartPlan(seed(500))!;
+    const resume = vi.fn(async () => ({ ok: true }));
+    expect(await wakeColdRestartSession('idle', resume, plan)).toEqual({ ok: true });
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'idle' }));
+    expect((await wakeColdRestartSession('idle', resume, plan)).ok).toBe(false);
+    expect((await wakeColdRestartSession('run', resume, plan)).ok).toBe(false);
+    expect((await wakeColdRestartSession('ghost', resume, plan)).ok).toBe(false);
+    expect((await wakeColdRestartSession('idle', resume, null)).ok).toBe(false);
+    expect(resume).toHaveBeenCalledTimes(1);
   });
 });

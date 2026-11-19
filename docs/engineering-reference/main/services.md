@@ -235,7 +235,11 @@ runId、startedAt、yieldedAt、deadlineAt、输出文件与已读偏移、退�
 新 worker 构造时读后即删（路径只认 logDir 下按 runId / taskId 推出的文件），`BackgroundTaskManager.recover`
 用同一 taskId 重新登记：pid 在且命令行含 runId → running，按偏移接着读、日志追加；pid 不在 → 读完输出、
 按退出码文件标 done / failed；pid 在但命令行不含 runId（被复用）→ 不认、不发信号，标 failed 并说明。
-认回任务的完成通知在会话没打开时直接落 `pending-notifications`；会话打开时 resume 快照带上任务；
+认回任务的完成通知在会话没打开时直接落 `pending-notifications`，并发 `session-wake-requested` 请 Main
+按冷启动恢复清单（`coldRestart.wakeColdRestartSession`，只认 await-user 条目、每个会话一次）重走 spawn；
+新 worker 启动时断点里 await-user 的会话若带着待投递通知（收尾期间结束的命令只存了盘）同样请求叫醒。
+会话打开且没在续跑上一轮时立即把攒下的通知交给新一轮；会话已打开的走普通投递（闲则开一轮、忙则排到轮末）；
+本代在重启中（`restart` 已请求）只存盘不请求。会话打开时 resume 快照带上任务；
 同一会话树再起同一命令（同 cwd）由 `withBackground` 直接回「已在跑」，不重复启动。worker 没走交接就退出
 （崩溃、被强杀）时文件直写的进程不会随 SIGPIPE 退出：下一代启动时 `sweepOrphanRuns` 按 `run-*.json`
 登记，只杀「登记它的 worker 已不在、命令行仍含 runId」的进程组，不扫进程表。

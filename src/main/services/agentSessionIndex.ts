@@ -132,7 +132,13 @@ function identityOf(
     | { type: 'text-delta' }
     | { type: 'oauth-pool-select' }
     | { type: 'privacy-mask-ledger' }
-    | { type: 'graceful-restart-deferred' | 'graceful-restart-ready' | 'background-tasks-detached' }
+    | {
+        type:
+          | 'graceful-restart-deferred'
+          | 'graceful-restart-ready'
+          | 'background-tasks-detached'
+          | 'session-wake-requested';
+      }
     | McpWorkerEvent
     | WorkspaceLockEvent
     | PluginMcpResultEvent
@@ -543,7 +549,8 @@ export class AgentSessionIndex {
       event.type === 'tool-batch-completed' ||
       event.type === 'graceful-restart-deferred' ||
       event.type === 'graceful-restart-ready' ||
-      event.type === 'background-tasks-detached'
+      event.type === 'background-tasks-detached' ||
+      event.type === 'session-wake-requested'
     )
       return false;
     if (

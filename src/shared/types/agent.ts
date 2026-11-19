@@ -1960,6 +1960,7 @@ export type RendererAgentEvent =
       | { type: 'graceful-restart-deferred' }
       | { type: 'graceful-restart-ready' }
       | { type: 'background-tasks-detached' }
+      | { type: 'session-wake-requested' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2331,6 +2332,14 @@ export type AgentWorkerEvent =
       /** 能脱离的后台命令已交出（恢复清单已写）：Main 收到后才终止 worker。旁路消费 */
       type: 'background-tasks-detached';
       detached: number;
+    }
+  | {
+      /**
+       * 重启认回的后台命令在没打开的空闲根会话里结束（或重启收尾期间结束、只存了盘）：
+       * 请 Main 按恢复清单打开它，worker 打开后把完成通知交给新一轮。旁路消费
+       */
+      type: 'session-wake-requested';
+      sessionId: string;
     }
   | {
       /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
@@ -4674,6 +4683,11 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
       typeof value.detached === 'number' &&
       Number.isInteger(value.detached) &&
       value.detached >= 0
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'session-wake-requested') {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

@@ -1109,6 +1109,8 @@ export class SessionSupervisor {
     this.deliverNotification(sessionId, text);
   });
   private readonly pendingNotifications: PendingNotificationStore;
+  /** 已请 Main 打开、打开后要把待投递通知交给新一轮的会话 */
+  private readonly wakeOnOpen = new Set<string>();
   /** spawn 尚未注册完就到达的内置工具开关，注册后补用 */
   private readonly pendingBuiltinTools = new Map<
     string,
@@ -1200,6 +1202,29 @@ export class SessionSupervisor {
     this.pendingNotifications.save(sessionId, texts);
   }
 
+  /**
+   * 通知只落了盘、没人叫醒的空闲根会话：请 Main 按恢复清单打开，打开后交给新一轮。
+   * 本代也在重启时只存盘（下一代再叫）；子会话不随换代恢复，照旧等打开时补投
+   */
+  private requestWake(sessionId: string): void {
+    if (
+      this.restart ||
+      sessionId.includes('::') ||
+      this.sessions.has(sessionId) ||
+      this.wakeOnOpen.has(sessionId)
+    )
+      return;
+    this.wakeOnOpen.add(sessionId);
+    this.options.emit({ type: 'session-wake-requested', sessionId });
+  }
+
+  /** 打开的会话没在续跑上一轮：攒下的完成通知立即开一轮；在续跑的由轮末补投 */
+  private wakeAfterOpen(managed: ManagedSession): void {
+    if (!this.wakeOnOpen.delete(managed.identity.sessionId) || managed.currentTurnId !== undefined)
+      return;
+    this.flushPendingReminders(managed);
+  }
+
   private restartDataDir(): string {
     return this.options.dataDir ?? path.dirname(this.options.sessionDir);
   }
@@ -1286,6 +1311,7 @@ export class SessionSupervisor {
         onCompletionNotify: (sessionId, text, notifyOptions) => {
           if (notifyOptions?.durable && !this.sessions.has(sessionId)) {
             this.persistUnopenedNotification(sessionId, text);
+            this.requestWake(sessionId);
             return;
           }
           this.notifier.notify(sessionId, text);
@@ -1301,6 +1327,14 @@ export class SessionSupervisor {
       )
     );
     sweepOrphanRuns(this.bgTasks.outputDir, handled);
+    // 断点里空闲的会话带着待投递通知：重启收尾期间结束的命令只存了盘，这一代叫醒它
+    for (const entry of this.restartResume.values()) {
+      if (
+        entry.nextStep === 'await-user' &&
+        this.pendingNotifications.load(entry.sessionId).length > 0
+      )
+        this.requestWake(entry.sessionId);
+    }
     // 点开过的会话否则常驻到 app 退出（每个 AgentSession 持有全量 jsonl 上下文）
     this.evictionTimer = setInterval(() => this.evictIdleSessions(), EVICTION_SWEEP_INTERVAL_MS);
     this.evictionTimer.unref?.();
@@ -3580,6 +3614,7 @@ export class SessionSupervisor {
       model: settingsModelRef(model),
     });
     this.continueAfterRestart(managedRef);
+    this.wakeAfterOpen(managedRef);
     checkpoints?.cleanupOldSessions();
   }
 
