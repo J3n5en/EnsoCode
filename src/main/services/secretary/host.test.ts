@@ -68,6 +68,8 @@ interface Harness {
     audit: SecretaryAuditEntry[];
     /** 会话的后台任务投影 */
     tasks: Record<string, ObservedTask[]>;
+    /** 主会话名下还没回来的子代理 Run */
+    subagents: Record<string, boolean>;
     /** 上次应用退出打断这一轮的原因（启动恢复用） */
     interruptDetails: Record<string, string>;
     contact: {
@@ -113,6 +115,7 @@ function harness(
     prompts: [],
     audit: [],
     tasks: options.tasks ?? {},
+    subagents: {},
     interruptDetails: {},
     contact: {
       milestones: [],
@@ -173,6 +176,7 @@ function harness(
     },
     now: () => state.now,
     tasks: (conversationId) => state.tasks[conversationId] ?? [],
+    subagentsRunning: (conversationId) => state.subagents[conversationId] === true,
     interruptDetail: (conversationId) => state.interruptDetails[conversationId],
     newId: () => `id-${++seq}`,
     audit: (entry) => {
@@ -412,6 +416,191 @@ describe('派出会话的结果记录', () => {
     urgent.host.onAgentEvent(event('ask-request'), change('waiting', 'running'));
     expect(urgent.state.file.outbox[0]).toMatchObject({ kind: 'needs-user' });
     expect(urgent.state.file.outbox[0]?.deliverAt).toBeUndefined();
+  });
+
+  /** 秘书会话 sec1 在线、派出会话 c1 已空闲：结果一入队就能投 */
+  function withSecretary(h: Harness): Harness {
+    h.ports.projects = () => [
+      { projectId: 'sp', canonicalPath: '/s', kind: 'secretary', state: 'active', version: 1 },
+    ];
+    h.ports.conversations = () => [
+      { conversationId: 'sec1', projectId: 'sp', kind: 'root', lifecycle: 'ready', version: 1 },
+    ];
+    h.state.rows.sec1 = { id: 'sec1', title: '秘书' };
+    h.state.statuses.c1 = idle;
+    return h;
+  }
+
+  it.each([
+    [
+      'goal-complete',
+      [
+        event('goal-signal', { kind: 'complete', note: 'ok' }),
+        event('turn-completed', { digest: { assistantText: '修好了' } }),
+      ],
+    ],
+    ['goal-blocked', [event('goal-signal', { kind: 'blocked', note: '缺密钥' })]],
+    ['interrupted', [event('turn-failed', { interrupted: { at: 1, kind: 'quit' } })]],
+    ['failed', [event('turn-failed', { error: 'boom' })]],
+    ['needs-user', [event('approval-request')]],
+  ])('终态 %s 产生即投进秘书会话，不等合并窗口', async (kind, events) => {
+    const h = withSecretary(harness({}));
+    for (const item of events) {
+      h.host.onAgentEvent(item, []);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0]).toContain(`[${kind} session:c1]`);
+    expect(h.state.file.outbox[0]?.deliverAt).toBeUndefined();
+  });
+
+  it('中间进度仍按窗口合并；别的会话终态立即投时不把它带走', async () => {
+    const h = withSecretary(harness({}));
+    h.state.file.dispatched.c2 = {
+      ...h.state.file.dispatched.c1,
+      conversationId: 'c2',
+    } as DispatchRecord;
+    h.state.rows.c2 = { id: 'c2', title: '另一个会话', projectId: 'p1' };
+    h.state.statuses.c2 = idle;
+    const c2 = { identity: { sessionId: 'c2', generation: 'g2' } };
+    h.host.onAgentEvent(
+      event('turn-completed', { ...c2, digest: { assistantText: '第一轮' } }),
+      []
+    );
+    h.state.now = 10_000;
+    h.host.onAgentEvent(
+      event('turn-completed', { ...c2, digest: { assistantText: '第二轮' } }),
+      []
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.state.prompts).toEqual([]);
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0]).toMatchObject({
+      kind: 'turn-ended',
+      conversationId: 'c2',
+      lastText: '第二轮',
+      deliverAt: 45_000,
+    });
+
+    h.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: '缺密钥' }), []);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0]).toContain('[goal-blocked session:c1]');
+    expect(h.state.prompts[0]).not.toContain('session:c2');
+    expect(h.state.file.outbox.find((entry) => entry.key.startsWith('c2|'))?.deliverAt).toBe(
+      45_000
+    );
+  });
+
+  describe('一轮停下来是在等后台命令或子代理', () => {
+    const build = (extra: Partial<ObservedTask> = {}): ObservedTask => ({
+      taskId: 'b1',
+      command: 'pnpm build',
+      status: 'running',
+      startedAt: 0,
+      ...extra,
+    });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it.each([
+      ['后台命令', (h: Harness) => (h.state.tasks.c1 = [build()])],
+      ['子代理', (h: Harness) => (h.state.subagents.c1 = true)],
+    ])('还有%s没回来：这一轮结束不送给秘书，过了合并窗口也不补', async (_, arm) => {
+      const h = withSecretary(harness({}));
+      arm(h);
+      h.host.onAgentEvent(event('turn-completed', { digest: { assistantText: '等它跑完' } }), []);
+      await settle();
+      h.state.now = 60_000;
+      h.host.tick();
+      await settle();
+      expect(h.state.prompts).toEqual([]);
+      expect(h.state.file.outbox).toEqual([]);
+      expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    });
+
+    it('后台命令回来后又只等子代理：继续不送；子代理回来后目标完成马上送到', async () => {
+      const h = withSecretary(harness({}));
+      h.state.tasks.c1 = [build()];
+      h.host.onAgentEvent(event('turn-completed'), []);
+      // 命令跑完叫醒会话，这一轮又派了子代理
+      h.state.tasks.c1 = [build({ status: 'done' })];
+      h.state.subagents.c1 = true;
+      h.state.now = 10_000;
+      h.host.onAgentEvent(event('turn-completed'), []);
+      await settle();
+      expect(h.state.prompts).toEqual([]);
+      expect(h.state.file.outbox).toEqual([]);
+
+      h.state.subagents.c1 = false;
+      h.state.now = 20_000;
+      h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+      await settle();
+      h.host.onAgentEvent(event('turn-completed', { digest: { assistantText: '修好了' } }), []);
+      await settle();
+      expect(h.state.prompts).toHaveLength(1);
+      expect(h.state.prompts[0]).toContain('[goal-complete session:c1]');
+    });
+
+    it('等待前排着的上一轮「结束」撤掉，不再按窗口补送', async () => {
+      const h = withSecretary(harness({}));
+      h.host.onAgentEvent(event('turn-completed'), []);
+      expect(h.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended', deliverAt: 45_000 });
+      h.state.tasks.c1 = [build()];
+      h.state.now = 10_000;
+      h.host.onAgentEvent(event('turn-completed'), []);
+      h.state.now = 60_000;
+      h.host.tick();
+      await settle();
+      expect(h.state.prompts).toEqual([]);
+      expect(h.state.file.outbox).toEqual([]);
+    });
+
+    it('终态不因还有后台命令被吞：goal-complete 照样马上送，带上还在跑的任务', async () => {
+      const h = withSecretary(harness({}));
+      h.state.tasks.c1 = [build({ command: 'pnpm test' })];
+      h.state.subagents.c1 = true;
+      h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+      await settle();
+      h.host.onAgentEvent(event('turn-completed'), []);
+      await settle();
+      expect(h.state.prompts).toHaveLength(1);
+      expect(h.state.prompts[0]).toContain('[goal-complete session:c1]');
+      expect(h.state.prompts[0]).toContain('还有 1 个后台任务在跑');
+    });
+
+    it('没有后台命令也没有子代理（常驻服务不算）：仍等 45 秒合并', async () => {
+      const h = withSecretary(harness({}));
+      h.state.tasks.c1 = [
+        build({ status: 'done' }),
+        build({ taskId: 'srv', command: 'python3 -m http.server 8931' }),
+      ];
+      h.host.onAgentEvent(event('turn-completed'), []);
+      await settle();
+      expect(h.state.prompts).toEqual([]);
+      expect(h.state.file.outbox[0]).toMatchObject({ kind: 'turn-ended', deliverAt: 45_000 });
+      h.state.now = 45_000;
+      h.host.tick();
+      await settle();
+      expect(h.state.prompts).toHaveLength(1);
+      expect(h.state.prompts[0]).toContain('[turn-ended session:c1]');
+    });
+
+    it('子代理自己的回合结束不算主会话结束', async () => {
+      const h = withSecretary(harness({}));
+      h.state.subagents.c1 = true;
+      const child = {
+        sessionId: 'c1::child',
+        generation: 'gc',
+        parent: { sessionId: 'c1', generation: 'g1' },
+      };
+      h.host.onAgentEvent(event('turn-completed', { identity: child }), []);
+      h.state.now = 60_000;
+      h.host.tick();
+      await settle();
+      expect(h.state.prompts).toEqual([]);
+      expect(h.state.file.outbox).toEqual([]);
+      expect(h.state.file.dispatched.c1.turn).toBe(0);
+    });
   });
 
   it('同一会话短时间内的更新合并成最新一条，并记下被合并的那条', () => {
@@ -1440,10 +1629,11 @@ describe('联系方式转发', () => {
     followed.host.onAgentEvent(event('status', { status: 'idle' }), []);
     expect(followed.state.prompts).toHaveLength(1);
 
-    // 没人在手机上等的结果照旧攒一个窗口再给秘书
+    // 没人在手机上等的完成结果也是终态，同样马上给秘书，只是不推手机
     const quiet = await desktop(false);
-    expect(quiet.state.prompts).toEqual([]);
-    expect(quiet.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete', deliverAt: 45_000 });
+    expect(quiet.state.contact.milestones).toEqual([]);
+    expect(quiet.state.prompts).toHaveLength(1);
+    expect(quiet.state.prompts[0]).toContain('[goal-complete session:c1]');
   });
 
   it('系统回传注入的回合带上 delivery 与 turnId，应用里自己聊的不带', () => {

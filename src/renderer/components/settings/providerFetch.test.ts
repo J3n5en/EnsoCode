@@ -1,6 +1,11 @@
 import type { ModelProvider } from '@shared/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyFetchedModels, fetchAllProviderModels, fetchProviderModels } from './providerFetch';
+import {
+  applyFetchedModels,
+  fetchAllProviderModels,
+  fetchProviderModels,
+  summarizeFetchOutcomes,
+} from './providerFetch';
 
 const listModels = vi.fn();
 const modelMeta = vi.fn();
@@ -148,5 +153,33 @@ describe('applyFetchedModels', () => {
 
     expect(updateProvider).toHaveBeenCalledTimes(1);
     expect(updateProvider).toHaveBeenCalledWith('api', { models: [{ id: 'gpt' }] });
+  });
+});
+
+describe('summarizeFetchOutcomes', () => {
+  it('统计成功条目数、模型总数、失败数，并只取第一个失败原因', () => {
+    expect(
+      summarizeFetchOutcomes({
+        api: { status: 'ok', count: 2, models: [{ id: 'a' }, { id: 'b' }] },
+        down: { status: 'failed', message: 'unauthorized' },
+        subscription: { status: 'ok', count: 3 },
+        timeout: { status: 'failed', message: 'timeout' },
+      })
+    ).toEqual({ okCount: 2, failedCount: 2, modelCount: 5, firstError: 'unauthorized' });
+  });
+
+  it('全部成功或没有条目时 firstError 为 null', () => {
+    expect(summarizeFetchOutcomes({ api: { status: 'ok', count: 1 } })).toEqual({
+      okCount: 1,
+      failedCount: 0,
+      modelCount: 1,
+      firstError: null,
+    });
+    expect(summarizeFetchOutcomes({})).toEqual({
+      okCount: 0,
+      failedCount: 0,
+      modelCount: 0,
+      firstError: null,
+    });
   });
 });
