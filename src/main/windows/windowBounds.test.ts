@@ -71,4 +71,42 @@ describe('fitWindowBounds', () => {
       height: 600,
     });
   });
+
+  describe('多显示器', () => {
+    const main = { x: 0, y: 25, width: 1920, height: 1055 };
+
+    it('大部分在顶边更高的右侧副屏上：与屏幕顺序无关，位置不变', () => {
+      const tall = { x: 1920, y: -375, width: 2560, height: 1415 };
+      const state = { x: 1700, y: -200, width: 1800, height: 1000 };
+      expect(fitWindowBounds(state, [main, tall], main)).toEqual(state);
+      expect(fitWindowBounds(state, [tall, main], main)).toEqual(state);
+    });
+
+    it('横跨两块并排屏的宽窗口不收窄、不挪到 x=0', () => {
+      const side = { x: 1920, y: 25, width: 1920, height: 1055 };
+      for (const state of [
+        { x: 1000, y: 100, width: 2000, height: 800 },
+        { x: 100, y: 100, width: 2000, height: 800 },
+      ]) {
+        expect(fitWindowBounds(state, [main, side], main)).toEqual(state);
+        expect(fitWindowBounds(state, [side, main], main)).toEqual(state);
+      }
+    });
+
+    it('只收回伸进无屏区域的边，留在归属屏上', () => {
+      const short = { x: 1920, y: 25, width: 1280, height: 700 };
+      const state = { x: 2000, y: 300, width: 1000, height: 700 };
+      expect(fitWindowBounds(state, [main, short], main)).toEqual({ ...state, y: 25 });
+    });
+
+    it('拔掉副屏后窗口完全在外：拉回主屏', () => {
+      const state = { x: 2200, y: 100, width: 1400, height: 800 };
+      expect(fitWindowBounds(state, [main], main)).toEqual({
+        x: 60,
+        y: 85,
+        width: 1400,
+        height: 800,
+      });
+    });
+  });
 });
