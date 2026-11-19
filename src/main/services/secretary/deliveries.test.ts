@@ -9,6 +9,7 @@ import {
   resolveTarget,
   settleDelivery,
 } from './deliveries';
+import { closeRelayAsk, openRelayAsk } from './relay';
 
 const idle = { state: 'idle' as const, pendingAsks: 0, pendingApprovals: 0 };
 const running = { state: 'running' as const, pendingAsks: 0, pendingApprovals: 0 };
@@ -195,6 +196,78 @@ describe('注入', () => {
     await flushDeliveries(h.ports, 1000);
     expect(h.state.prompts).toHaveLength(0);
     expect(h.state.file.outbox).toHaveLength(1);
+  });
+});
+
+describe('转交提问回到发起的秘书会话', () => {
+  const record = {
+    conversationId: 'c1',
+    projectId: 'p1',
+    secretaryConversationId: 'sec1',
+    createdAt: 0,
+    turn: 0,
+    lastState: 'running' as const,
+    lastEventAt: 0,
+  };
+  const ask = { conversationId: 'c1', askId: 'ask-1', question: '用哪个？', label: 'p1 · 任务' };
+
+  /** sec2 的 lastActiveAt 比 sec1 新：没有发起者时按最近活跃会落到 sec2 */
+  function relayHarness(
+    options: { tracked?: boolean; statuses?: Harness['state']['statuses'] } & Pick<
+      Parameters<typeof harness>[0],
+      'rows'
+    > = {}
+  ): Harness {
+    const file = emptyFile(options.tracked === false ? {} : { dispatched: { c1: record } });
+    const opened = openRelayAsk(file, ask, 0);
+    const closed = closeRelayAsk(file, { ...ask, by: 'user', answer: 'B' }, 1, ask.label);
+    if (!opened || !closed.update) throw new Error('relay updates');
+    file.outbox = [opened, closed.update];
+    return harness({
+      file,
+      ...(options.rows ? { rows: options.rows } : {}),
+      ...(options.statuses ? { statuses: options.statuses } : {}),
+    });
+  }
+
+  it('有派发记录时提问与关闭通知都投给发起者，即使别的秘书会话更近活跃', async () => {
+    const h = relayHarness();
+    expect(h.state.file.outbox.map((update) => update.secretaryConversationId)).toEqual([
+      'sec1',
+      'sec1',
+    ]);
+    await flushDeliveries(h.ports, 1000);
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0].conversationId).toBe('sec1');
+    expect(h.state.file.inflight?.keys).toHaveLength(2);
+  });
+
+  it('发起者正忙时等它，不转投别的秘书会话', async () => {
+    const h = relayHarness({ statuses: { sec1: running, sec2: idle } });
+    await flushDeliveries(h.ports, 1000);
+    expect(h.state.prompts).toHaveLength(0);
+    expect(h.state.file.outbox).toHaveLength(2);
+    h.state.statuses.sec1 = idle;
+    await flushDeliveries(h.ports, 2000);
+    expect(h.state.prompts.map((prompt) => prompt.conversationId)).toEqual(['sec1']);
+  });
+
+  it('没有派发记录时照旧投给最近活跃的秘书会话', async () => {
+    const h = relayHarness({ tracked: false });
+    expect(h.state.file.outbox.every((update) => !update.secretaryConversationId)).toBe(true);
+    await flushDeliveries(h.ports, 1000);
+    expect(h.state.prompts.map((prompt) => prompt.conversationId)).toEqual(['sec2']);
+  });
+
+  it('发起者已归档时走现有兜底：改投最近活跃的未归档秘书会话', async () => {
+    const h = relayHarness({
+      rows: {
+        sec1: { id: 'sec1', projectId: 'sec', archived: true, lastActiveAt: 99 },
+        sec2: { id: 'sec2', projectId: 'sec', lastActiveAt: 20 },
+      },
+    });
+    await flushDeliveries(h.ports, 1000);
+    expect(h.state.prompts.map((prompt) => prompt.conversationId)).toEqual(['sec2']);
   });
 });
 

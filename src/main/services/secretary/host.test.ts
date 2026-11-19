@@ -325,6 +325,26 @@ describe('转交给秘书的提问', () => {
     expect(h.state.file.outbox[0]?.text).toContain('已按默认值「A」处理');
   });
 
+  it('提问、用户直接答与超时收尾都带上派发记录里的发起秘书会话', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request', relayAsk()), change('waiting', 'running'));
+    h.host.onAgentEvent(
+      event('ask-request', relayAsk({ requestId: 'ask-2' })),
+      change('waiting', 'waiting')
+    );
+    h.host.onAgentEvent(event('ask-resolved', { requestId: 'ask-1', by: 'user', answer: 'B' }), []);
+    h.state.now = 30 * MINUTE;
+    h.host.tick();
+    const relays = h.state.file.outbox.filter((update) => update.kind === 'ask-relay');
+    expect(relays.map((update) => [update.key, update.secretaryConversationId])).toEqual([
+      ['relay:c1:ask-1:pending', 'sec1'],
+      ['relay:c1:ask-2:pending', 'sec1'],
+      ['relay:c1:ask-1:user-answered', 'sec1'],
+      ['relay:c1:ask-2:timed-out', 'sec1'],
+    ]);
+  });
+
   it('普通会话的 ask_user 不受影响：照旧记 needs-user，不建转交记录', () => {
     const h = harness({});
     h.state.statuses.c1 = waiting;
