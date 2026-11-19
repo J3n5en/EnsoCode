@@ -632,6 +632,8 @@ export function Sidebar({
   };
   // 项目已额外露出的条数(会话级状态,重启回到折叠上限)
   const [revealedExtras, setRevealedExtras] = useState<Record<string, number>>({});
+  // 临时会话分组同理,与整组折叠(scratchCollapsed)互不影响
+  const [scratchRevealedExtra, setScratchRevealedExtra] = useState(0);
   const [listQuery, setListQuery] = useState('');
   const modHeld = useSessionSwitchState((state) => state.modHeld);
   const setModHeld = useCallback((value: boolean) => {
@@ -677,6 +679,11 @@ export function Sidebar({
     : [];
   // 搜索时强制展开，避免命中的临时会话被收起状态挡住
   const scratchFolded = searching ? false : scratchCollapsed;
+  // 搜索时全量列出命中项,不受条数折叠限制,与项目分组一致
+  const scratchShownCount = searching
+    ? scratchVisibleIds.length
+    : shownConversationCount(scratchVisibleIds.length, scratchRevealedExtra);
+  const scratchHiddenIds = scratchVisibleIds.slice(scratchShownCount);
   const inActiveGroup = (id: string) => {
     const projectId = conversations[id]?.projectId;
     return !projectId || slicedIdSet.has(projectId);
@@ -1213,7 +1220,7 @@ export function Sidebar({
                     className="overflow-hidden"
                   >
                     <div className="flex flex-col">
-                      {scratchVisibleIds.map((id) => (
+                      {scratchVisibleIds.slice(0, scratchShownCount).map((id) => (
                         <ConversationRow
                           key={id}
                           id={id}
@@ -1236,6 +1243,50 @@ export function Sidebar({
                           onRemove={(conversationId) => void openRemoveConversation(conversationId)}
                         />
                       ))}
+                      {!searching && scratchVisibleIds.length > COLLAPSED_SESSION_LIMIT && (
+                        <div className="flex items-center gap-1 pl-2">
+                          {scratchHiddenIds.length > 0 && (
+                            <ContextMenu>
+                              <ContextMenuTrigger
+                                render={
+                                  (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setScratchRevealedExtra((prev) =>
+                                          nextRevealedExtra(scratchVisibleIds.length, prev)
+                                        )
+                                      }
+                                      className={SHOW_MORE_CLASS}
+                                    >
+                                      {t('Show {{n}} more', { n: scratchHiddenIds.length })}
+                                    </button>
+                                  ) as React.ReactElement<Record<string, unknown>>
+                                }
+                              />
+                              <ContextMenuPopup className="min-w-36">
+                                <ContextMenuItem
+                                  onClick={() => void handleArchiveMany(scratchHiddenIds)}
+                                >
+                                  <Archive />
+                                  {t('Archive {{n}} conversations', {
+                                    n: scratchHiddenIds.length,
+                                  })}
+                                </ContextMenuItem>
+                              </ContextMenuPopup>
+                            </ContextMenu>
+                          )}
+                          {scratchRevealedExtra > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setScratchRevealedExtra(prevRevealedExtra)}
+                              className={SHOW_MORE_CLASS}
+                            >
+                              {t('Collapse')}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
