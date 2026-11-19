@@ -1,10 +1,15 @@
-import type { ProjectedMessage, SpawnModelConfig } from '@shared/types/agent';
+import {
+  type ProjectedMessage,
+  type SpawnModelConfig,
+  TURN_REPORT_MAX_CHARS,
+} from '@shared/types/agent';
 import { describe, expect, it } from 'vitest';
 import {
   buildInitialTitleUserText,
   buildRollingTitleUserText,
   buildTitleUserText,
   buildTurnDigest,
+  buildTurnReport,
   describeTitleModel,
   extractTitle,
   ROLLING_TITLE_SYSTEM_PROMPT,
@@ -298,6 +303,25 @@ describe('buildTurnDigest：本轮消息 → 压缩摘要', () => {
     const messages: ProjectedMessage[] = [user('问'), assistant(long)];
     // 结论在末尾，截尾即保留最后 1500
     expect(buildTurnDigest(messages, 0)?.assistantText).toBe('y'.repeat(1500));
+  });
+
+  it('本轮汇报：最后一条结论原样带出，不受 1500 摘要上限影响', () => {
+    const body = `${'a'.repeat(5000)}\n提交 1a2b3c4`;
+    const messages: ProjectedMessage[] = [user('问'), assistant(body)];
+    expect(buildTurnReport(messages, 0)).toEqual({ text: body });
+  });
+
+  it('本轮汇报超过 TURN_REPORT_MAX_CHARS 只留结尾并记下省略字数', () => {
+    const body = `${'h'.repeat(100)}${'t'.repeat(TURN_REPORT_MAX_CHARS)}`;
+    const messages: ProjectedMessage[] = [user('问'), assistant(body)];
+    expect(buildTurnReport(messages, 0)).toEqual({
+      text: 't'.repeat(TURN_REPORT_MAX_CHARS),
+      omitted: 100,
+    });
+  });
+
+  it('本轮没有 assistant 结论就没有汇报', () => {
+    expect(buildTurnReport([user('问')], 0)).toBeUndefined();
   });
 
   it('user 文本经 buildTitleUserText 清洗（含 chat 引用块被剥离）', () => {

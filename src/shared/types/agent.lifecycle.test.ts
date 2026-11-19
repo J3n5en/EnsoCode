@@ -4,6 +4,7 @@ import {
   parseAgentWorkerEvent,
   parseResolvedChildProfileProof,
   parseTitleSummaryInput,
+  TURN_REPORT_MAX_CHARS,
 } from './agent';
 import { child, model, parent, proof, RECEIPT_ID } from './agent.testUtils';
 
@@ -385,6 +386,24 @@ describe('标题总结命令与事件', () => {
       turnId: 'turn-1',
     };
     expect(parseAgentWorkerEvent(event)).toEqual(event);
+  });
+
+  it('turn-completed 的 report 校验：正文非空且不超过硬上限，省略字数为正整数', () => {
+    const base = { type: 'turn-completed', identity: parent, seq: 1, turnId: 'turn-1' };
+    const ok = { ...base, report: { text: '提交 1a2b3c4', omitted: 3 } };
+    expect(parseAgentWorkerEvent(ok)).toEqual(ok);
+    const full = { ...base, report: { text: 'x'.repeat(TURN_REPORT_MAX_CHARS) } };
+    expect(parseAgentWorkerEvent(full)).toEqual(full);
+    for (const report of [
+      { text: '' },
+      { text: 'x'.repeat(TURN_REPORT_MAX_CHARS + 1) },
+      { text: 'a', omitted: 0 },
+      { text: 'a', omitted: 1.5 },
+      { text: 'a', extra: 1 },
+      'a',
+    ]) {
+      expect(parseAgentWorkerEvent({ ...base, report })).toBeNull();
+    }
   });
 
   it('turn-completed 预算停止标记只接受 true，补报告错误必须随标记出现', () => {

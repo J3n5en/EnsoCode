@@ -2,11 +2,13 @@
 
 import { userTextWithoutSkills } from '@shared/skillCommands';
 import { isContinuationTurn } from '@shared/titleContinuation';
-import type {
-  ProjectedMessage,
-  SpawnModelConfig,
-  TitleSummaryInput,
-  TurnDigest,
+import {
+  type ProjectedMessage,
+  type SpawnModelConfig,
+  type TitleSummaryInput,
+  TURN_REPORT_MAX_CHARS,
+  type TurnDigest,
+  type TurnReport,
 } from '@shared/types/agent';
 
 /** 送给模型的用户消息上限：标题只需要开头，长指令全文只会烧 token */
@@ -212,7 +214,15 @@ export function buildTurnDigest(
   }
   const userText = userParts.join('\n').slice(0, TURN_DIGEST_USER_MAX);
 
-  const conclusion = [...turn]
+  const conclusion = turnConclusion(turn);
+  const assistantText = conclusion ? textOf(conclusion).slice(-TURN_DIGEST_ASSISTANT_MAX) : '';
+
+  if (!userText && !assistantText) return null;
+  return { firstUserText, userText, assistantText };
+}
+
+function turnConclusion(turn: ProjectedMessage[]): ProjectedMessage | undefined {
+  return [...turn]
     .reverse()
     .find(
       (message) =>
@@ -221,10 +231,18 @@ export function buildTurnDigest(
         message.stopReason !== 'aborted' &&
         textOf(message).length > 0
     );
-  const assistantText = conclusion ? textOf(conclusion).slice(-TURN_DIGEST_ASSISTANT_MAX) : '';
+}
 
-  if (!userText && !assistantText) return null;
-  return { firstUserText, userText, assistantText };
+/** 本轮结论原文：与摘要同一条 assistant，超过 TURN_REPORT_MAX_CHARS 截尾并记下省略字数 */
+export function buildTurnReport(
+  messages: ProjectedMessage[],
+  fromIndex: number
+): TurnReport | undefined {
+  const conclusion = turnConclusion(messages.slice(Math.max(0, fromIndex)));
+  if (!conclusion) return undefined;
+  const text = textOf(conclusion);
+  const omitted = text.length - TURN_REPORT_MAX_CHARS;
+  return omitted > 0 ? { text: text.slice(-TURN_REPORT_MAX_CHARS), omitted } : { text };
 }
 
 /**
