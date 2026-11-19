@@ -77,6 +77,7 @@ import { type PluginViewRef, usePluginViews } from '../../plugins/viewBridge';
 import { SecretaryPanel } from '../secretary/SecretaryPanel';
 import { BrowserView } from './BrowserView';
 import { BtwView } from './BtwView';
+import { restoreHostBrowserTabs } from './browserTabs';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
@@ -1068,7 +1069,7 @@ export function SidePanel({
     const stopClosed = window.electronAPI.browser.onTabClosed((event) => {
       closeSidePanelBrowser(event.conversationId, event.tabId);
     });
-    void window.electronAPI.browser.restoreTabs();
+    restoreHostBrowserTabs();
     return () => {
       stopReveal();
       stopClosed();
