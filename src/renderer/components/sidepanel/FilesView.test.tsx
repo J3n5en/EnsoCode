@@ -16,6 +16,7 @@ const harness = vi.hoisted(() => ({
     rename: vi.fn(),
   },
   toast: vi.fn(),
+  project: { id: 'project', path: '/workspace' } as { id: string; path: string; kind?: string },
   sessions: {
     activeId: 'a' as string | null,
     workspaceRevisionByConversation: {},
@@ -38,7 +39,7 @@ vi.mock('@/stores/sidePanel', () => ({
 }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: unknown) => unknown) =>
-    select({ projects: [{ id: 'project', path: '/workspace' }] }),
+    select({ projects: [harness.project] }),
 }));
 vi.mock('@/stores/sessions/timeline', () => ({
   buildTimeline: () => [],
@@ -119,18 +120,25 @@ vi.mock('./fileTreeMenu', () => ({
   FileTreeMenu: ({
     children,
     target,
+    local,
     onNewFile,
     onRename,
   }: {
     children?: ReactNode;
     target: { kind: 'blank' } | { kind: 'file' | 'dir'; rel: string; name: string };
+    local: boolean;
     onNewFile: (parent: string) => void;
     onRename?: (rel: string, name: string) => void;
   }) => (
     <>
       {children}
       {target.kind === 'blank' && (
-        <button type="button" data-menu="new-file" onClick={() => onNewFile('')} />
+        <button
+          type="button"
+          data-menu="new-file"
+          data-local={String(local)}
+          onClick={() => onNewFile('')}
+        />
       )}
       {target.kind === 'file' && onRename && (
         <button
@@ -264,6 +272,7 @@ beforeEach(() => {
     .mockResolvedValue({ ok: true, entries: [{ name: 'README.md', kind: 'file' }] });
   harness.files.createFile.mockReset();
   harness.files.rename.mockReset();
+  harness.project = { id: 'project', path: '/workspace' };
   harness.sessions.activeId = 'a';
   harness.sidePanel.uiByConversation = {
     a: { open: true, width: 400 },
@@ -356,5 +365,28 @@ describe('FilesView 名称输入框', () => {
     expect(nameInput()).not.toBeNull();
     await press(nameInput(), 'Escape');
     expect(nameInput()).toBeNull();
+  });
+});
+
+describe('FilesView 宿主桌面操作', () => {
+  const menuLocal = () =>
+    container.querySelector('[data-menu="new-file"]')?.getAttribute('data-local');
+
+  it('本机桌面打开本地项目：提供宿主桌面操作', async () => {
+    await mountDocks(['a']);
+    expect(menuLocal()).toBe('true');
+  });
+
+  // 真实场景：网页版连本机项目，点「在访达中显示」「复制」只得到「无法完成该文件操作。」
+  it('远程客户端打开本地项目：不提供宿主桌面操作', async () => {
+    Object.assign(window.electronAPI, { remote: {} });
+    await mountDocks(['a']);
+    expect(menuLocal()).toBe('false');
+  });
+
+  it('SSH 项目在本机桌面上仍不提供宿主桌面操作', async () => {
+    harness.project = { id: 'project', path: '/workspace', kind: 'ssh' };
+    await mountDocks(['a']);
+    expect(menuLocal()).toBe('false');
   });
 });
