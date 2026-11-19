@@ -346,6 +346,7 @@ import {
   buildInitialTitleUserText,
   buildRollingTitleUserText,
   buildTurnDigest,
+  buildTurnReport,
   describeTitleModel,
   extractTitle,
   ROLLING_TITLE_SYSTEM_PROMPT,
@@ -4974,6 +4975,7 @@ export class SessionSupervisor {
     this.emitSessionMeta(managed);
     // 本轮摘要随 turn-completed 下发：renderer 冷会话没有正文，只能由 worker 切
     const digest = buildTurnDigest(managed.messages, managed.turnStartIndex);
+    const report = buildTurnReport(managed.messages, managed.turnStartIndex);
     const silent = turnRequestedSilence(managed.messages, managed.turnStartIndex);
     managed.turnStartIndex = managed.messages.length;
     this.workspaceClaims.release(managed.identity.sessionId);
@@ -4983,6 +4985,7 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       ...(digest ? { digest } : {}),
+      ...(report ? { report } : {}),
       ...(silent ? { silent: true as const } : {}),
       ...(aborted ? { aborted: true as const } : {}),
       ...(budget ? { requestBudgetStop: true } : {}),

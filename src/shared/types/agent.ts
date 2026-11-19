@@ -164,6 +164,16 @@ export interface TurnDigest {
   assistantText: string;
 }
 
+/** 本轮汇报的硬上限：装得下一份正常汇报，又挡住异常长输出 */
+export const TURN_REPORT_MAX_CHARS = 8000;
+
+/** 本轮最后一条 assistant 结论原文，worker 侧截尾到 TURN_REPORT_MAX_CHARS；秘书终态回传用 */
+export interface TurnReport {
+  text: string;
+  /** 截尾时丢掉的开头字数 */
+  omitted?: number;
+}
+
 /** 标题总结输入：initial = 首条消息即时总结；rolling = 每轮结束后的滚动刷新 */
 export type TitleSummaryInput =
   | { kind: 'initial'; text: string }
@@ -2060,6 +2070,8 @@ export type AgentWorkerEvent =
       turnId: string;
       /** worker 切出的本轮压缩摘要，供 renderer 决定是否滚动刷新标题；纯工具轮可缺省 */
       digest?: TurnDigest;
+      /** 本轮结论原文（截尾）：提交号、测试数字通常在末尾，摘要的 1500 字装不下 */
+      report?: TurnReport;
       /** 本轮被 abort 命令中断：不自动泵队列、不续跑目标（发起中断的未必是本窗口） */
       aborted?: true;
       /** 子代理因请求预算被强制停止：已有部分输出随本次收口交回，不当作失败 */
@@ -2839,6 +2851,17 @@ export function parseTurnDigest(value: unknown): TurnDigest | null {
     return null;
   }
   return value as unknown as TurnDigest;
+}
+
+export function parseTurnReport(value: unknown): TurnReport | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'omitted'])) return null;
+  if (!isNonEmptyString(value.text) || value.text.length > TURN_REPORT_MAX_CHARS) return null;
+  if (
+    value.omitted !== undefined &&
+    !(typeof value.omitted === 'number' && Number.isSafeInteger(value.omitted) && value.omitted > 0)
+  )
+    return null;
+  return value as unknown as TurnReport;
 }
 
 /** 标题总结输入校验：initial 要求 text 非空；rolling 要求 currentTitle 非空、firstUserText 为字符串（可空）且本轮两段至少一段非空 */
@@ -4868,6 +4891,7 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     case 'turn-completed':
       return isNonEmptyString(value.turnId) &&
         (value.digest === undefined || parseTurnDigest(value.digest)) &&
+        (value.report === undefined || parseTurnReport(value.report)) &&
         (value.aborted === undefined || value.aborted === true) &&
         (value.silent === undefined || value.silent === true) &&
         (value.requestBudgetStop === undefined || value.requestBudgetStop === true) &&

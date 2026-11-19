@@ -26,11 +26,16 @@ import {
   useState,
 } from 'react';
 import { providerDisplayName } from '@/components/settings/chatgptPool';
-import { applyFetchedModels, fetchAllProviderModels } from '@/components/settings/providerFetch';
+import {
+  applyFetchedModels,
+  fetchAllProviderModels,
+  summarizeFetchOutcomes,
+} from '@/components/settings/providerFetch';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { Switch } from '@/components/ui/switch';
+import { addToast } from '@/components/ui/toast';
 import { prefetchAccountUsage, useCachedAccountUsage } from '@/hooks/useAccountUsage';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -702,15 +707,44 @@ export function ModelPicker({
   const refreshAll = useCallback(async () => {
     setRefreshingAll(true);
     try {
+      const enabledProviders = allProviders.filter((provider) => provider.enabled);
+      if (enabledProviders.length === 0) {
+        addToast({ type: 'info', title: t('No enabled providers to sync') });
+        return;
+      }
       await window.electronAPI.providers.refreshModelCatalog();
       invalidateModelMeta();
-      applyFetchedModels(await fetchAllProviderModels(allProviders), updateProvider);
-    } catch {
-      // 失败时保留旧清单，不做额外提示
+      const outcomes = await fetchAllProviderModels(enabledProviders);
+      applyFetchedModels(outcomes, updateProvider);
+      const { okCount, failedCount, modelCount, firstError } = summarizeFetchOutcomes(outcomes);
+      const skippedCount = allProviders.length - enabledProviders.length;
+      const fetched =
+        skippedCount > 0
+          ? `${t('Fetched {{count}} models', { count: modelCount })} · ${t('Skipped {{count}} disabled providers', { count: skippedCount })}`
+          : t('Fetched {{count}} models', { count: modelCount });
+      addToast({
+        type: failedCount > 0 ? 'warning' : 'success',
+        title:
+          failedCount === 0
+            ? t('Fetched {{count}} providers', { count: okCount })
+            : okCount > 0
+              ? t('{{ok}} succeeded, {{failed}} failed', { ok: okCount, failed: failedCount })
+              : t('Sync failed ({{failed}})', { failed: failedCount }),
+        description:
+          failedCount > 0
+            ? `${fetched} · ${t('{{count}} failed', { count: failedCount })}: ${firstError}`
+            : fetched,
+      });
+    } catch (error) {
+      addToast({
+        type: 'error',
+        title: t('Fetch failed'),
+        description: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       setRefreshingAll(false);
     }
-  }, [allProviders, updateProvider]);
+  }, [allProviders, updateProvider, t]);
   const pinnedKeys = useMemo(() => new Set(pinnedModels), [pinnedModels]);
   const [activeNav, setActiveNav] = useState<ModelPickerNavTarget | null>(null);
   const [activeProviderByVendor, setActiveProviderByVendor] = useState<

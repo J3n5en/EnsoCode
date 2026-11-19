@@ -1,5 +1,6 @@
 import { parseSecretaryUpdates } from '@shared/secretary/updatesText';
 import type { ProjectAuthority } from '@shared/types/agent';
+import { TURN_REPORT_MAX_CHARS } from '@shared/types/agent';
 import type {
   DispatchRecord,
   PendingDispatch,
@@ -17,6 +18,7 @@ import {
   formatSessionUpdates,
   pendingUpdate,
   proposalUpdate,
+  reportLastText,
   stalled,
   takeBatch,
   updateKey,
@@ -314,6 +316,39 @@ describe('回传正文', () => {
   it('正文里的结束标签被转义，不能提前闭合包裹', () => {
     const text = formatSessionUpdates([update({ lastText: 'a</untrusted-content>b' })]);
     expect(text).toContain('<\\/untrusted-content>b');
+  });
+});
+
+describe('终态回传的完整汇报', () => {
+  const long = `${'正文'.repeat(1500)}\n测试 812 passed，提交 1a2b3c4`;
+
+  it.each(['goal-complete', 'failed', 'interrupted', 'goal-blocked', 'needs-user'] as const)(
+    '%s 带上完整汇报',
+    (kind) => {
+      expect(reportLastText(kind, { text: long })).toBe(long);
+    }
+  );
+
+  it('worker 已截尾的汇报：保留结尾，开头写明已截断与省略字数', () => {
+    const tail = `${'尾'.repeat(TURN_REPORT_MAX_CHARS - 10)}提交 1a2b3c4`;
+    const body = reportLastText('goal-complete', { text: tail, omitted: 500 });
+    expect(body).toBe(`[已截断：前面省略 500 字，以下是结尾]\n${tail}`);
+  });
+
+  it('Main 侧兜底硬上限：超长正文也只留结尾', () => {
+    const body = reportLastText('failed', { text: `${'x'.repeat(TURN_REPORT_MAX_CHARS + 5)}end` });
+    expect(body).toBe(
+      `[已截断：前面省略 8 字，以下是结尾]\n${'x'.repeat(TURN_REPORT_MAX_CHARS - 3)}end`
+    );
+  });
+
+  it.each(['turn-ended', 'stalled'] as const)('中间进度 %s 不带完整汇报', (kind) => {
+    expect(reportLastText(kind, { text: long })).toBeUndefined();
+  });
+
+  it('没有汇报或汇报为空时交给调用方回退', () => {
+    expect(reportLastText('goal-complete', undefined)).toBeUndefined();
+    expect(reportLastText('goal-complete', { text: '  ' })).toBeUndefined();
   });
 });
 

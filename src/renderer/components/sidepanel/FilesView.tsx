@@ -160,7 +160,8 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   }>(null);
   const [confirmDelete, setConfirmDelete] = useState<null | { rel: string; name: string }>(null);
   const project = useSettingsStore((s) => s.projects.find((p) => p.id === projectId));
-  const local = project?.kind !== 'ssh';
+  // 宿主桌面操作（定位、复制文件、内置浏览器）：SSH 项目与远程客户端都不可用
+  const local = project?.kind !== 'ssh' && !window.electronAPI.remote;
   const openDocsRef = useRef(openDocs);
   openDocsRef.current = openDocs;
   const activeRelRef = useRef(activeRel);

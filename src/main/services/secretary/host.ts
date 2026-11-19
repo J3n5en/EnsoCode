@@ -18,7 +18,7 @@ import {
   sessionIdsInUpdates,
   shouldSilenceTurn,
 } from '@shared/secretary/silence';
-import type { RendererAgentEvent } from '@shared/types/agent';
+import type { RendererAgentEvent, TurnReport } from '@shared/types/agent';
 import type {
   DispatchRecord,
   SecretaryActivity,
@@ -60,9 +60,11 @@ import {
   linkedTodoSession,
   proposalUpdate,
   type ResultEvent,
+  reportLastText,
   SETTLED_RESULTS,
   sessionStateOf,
   shouldNotify,
+  skipsUpdateWindow,
   stalled,
   UPDATE_WINDOW_MS,
   updateKey,
@@ -112,6 +114,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   backgroundStalls?(now: number): readonly BackgroundStall[];
   /** 会话最近一次已知的后台任务；缺省表示没有投影 */
   tasks?(conversationId: string): readonly ObservedTask[];
+  /** 主会话名下还有没回来的子代理 Run；缺省表示没有 */
+  subagentsRunning?(conversationId: string): boolean;
   /** 上次应用退出打断这一轮的原因（启动恢复时说明）；缺省表示没有记录 */
   interruptDetail?(conversationId: string): string | undefined;
   /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
@@ -212,6 +216,17 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     else delete record.backgroundRunning;
     if (persistent.length > 0) record.backgroundPersistent = true;
     else delete record.backgroundPersistent;
+  }
+
+  /**
+   * 这一轮停下来是在等后台命令或子代理：它们回来会把会话叫醒，此时报「结束」只会误导秘书。
+   * 常驻服务与进程已不在的任务不会叫醒它，不算。
+   */
+  function awaitsWake(conversationId: string, now: number): boolean {
+    if (ports.subagentsRunning?.(conversationId)) return true;
+    return (ports.tasks?.(conversationId) ?? []).some(
+      (task) => task.status === 'running' && task.alive !== false && !taskIsPersistent(task, now)
+    );
   }
 
   /**
@@ -433,7 +448,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     record: DispatchRecord,
     kind: SecretaryResultKind,
     now: number,
-    detail?: string
+    detail?: string,
+    body = record.lastText
   ): { update: SecretaryUpdate; title: string; projectName: string } {
     const row = ports.rows()[record.conversationId];
     const project = ports.projects().find((candidate) => candidate.projectId === record.projectId);
@@ -446,7 +462,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       conversationId: record.conversationId,
       secretaryConversationId: record.secretaryConversationId,
       text: [projectName, title, RESULT_LABELS[kind].zh, detail].filter(Boolean).join(' · '),
-      ...(record.lastText ? { lastText: record.lastText } : {}),
+      ...(body ? { lastText: body } : {}),
     };
     return { update, title, projectName };
   }
@@ -484,7 +500,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     now: number,
     detail?: string,
     /** 这一轮的完整正文：分支与提交号只在原文里认，落盘仍按 lastText 截断 */
-    report?: string
+    report?: string,
+    /** 这一轮的结论原文：只有终态回传带上，手机与工作台仍用短正文 */
+    turnReport?: TurnReport
   ): void {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
     record.lastResult = { kind, turn: record.turn, at: now };
@@ -504,14 +522,15 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       record,
       kind,
       now,
-      [detail, leftover].filter(Boolean).join('；') || undefined
+      [detail, leftover].filter(Boolean).join('；') || undefined,
+      reportLastText(kind, turnReport) ?? record.lastText
     );
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
-    // 手机关注的任务结果会马上推给发起渠道：桌面秘书会话同一时刻也要收到，不等合并窗口
+    // 终态马上投；手机关注的任务结果会马上推给发起渠道，桌面秘书会话同一时刻也要收到
     const followed = kind !== 'turn-ended' && ports.contact?.follows?.(record.conversationId);
-    if (!isUrgentUpdate(update) && !followed) {
+    if (!isUrgentUpdate(update) && !skipsUpdateWindow(kind) && !followed) {
       const held = previous?.deliverAt;
       update.deliverAt =
         held !== undefined && held > now
@@ -832,6 +851,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         // 完整正文只用来认分支与提交号，记录与落盘都按 lastText 截断
         const report = own ? assistantTextOf(event) : undefined;
+        const turnReport = own && event.type === 'turn-completed' ? event.report : undefined;
         const lastText = capLastText(report);
         if (lastText) record.lastText = lastText;
 
@@ -880,17 +900,29 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           )
             kind = 'needs-user';
         }
+        const awaiting = kind === 'turn-ended' && awaitsWake(conversationId, now);
         if (kind === 'turn-ended' && reopened && previous && SETTLED_RESULTS.has(previous.kind))
           // session_send 唤起的一轮结束了、没有再给结果：回到原来的终态，不重复推送
           restoreSettled(record, previous, now);
-        else if (kind) recordResult(file, record, kind, now, detail, report);
+        else if (kind && !awaiting)
+          recordResult(file, record, kind, now, detail, report, turnReport);
         else if (
           own &&
           event.type === 'turn-completed' &&
           !event.aborted &&
-          goalStatusOf(rows[conversationId])
+          (awaiting || goalStatusOf(rows[conversationId]))
         ) {
-          // 带目标的一轮结束本身不推给秘书，动态里仍按时间留一句
+          // 带目标或还在等后台命令、子代理的一轮结束不推给秘书，动态里仍按时间留一句；
+          // 还没投出去的上一轮「结束」也已过时，一并撤掉
+          if (awaiting)
+            file.outbox = file.outbox.filter(
+              (entry) =>
+                !(
+                  entry.kind === 'turn-ended' &&
+                  'conversationId' in entry &&
+                  entry.conversationId === conversationId
+                )
+            );
           remember(file, {
             at: now,
             conversationId,
