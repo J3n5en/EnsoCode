@@ -48,18 +48,22 @@ function firstLine(text: string): string {
   );
 }
 
+/** 回报目标跟普通结果一样取派发记录里的发起者；没有记录时由投递按最近活跃兜底 */
 function relayUpdate(
+  file: SecretaryDispatchFile,
   relay: SecretaryRelayAsk,
   status: SecretaryRelayAsk['status'],
   text: string,
   now: number,
   lastText?: string
 ): SecretaryUpdate {
+  const secretaryConversationId = file.dispatched[relay.conversationId]?.secretaryConversationId;
   return {
     key: `relay:${relay.conversationId}:${relay.askId}:${status}`,
     at: now,
     text,
     ...(lastText ? { lastText } : {}),
+    ...(secretaryConversationId ? { secretaryConversationId } : {}),
     kind: 'ask-relay',
     conversationId: relay.conversationId,
     askId: relay.askId,
@@ -115,6 +119,7 @@ export function openRelayAsk(
   };
   file.relays = { ...(file.relays ?? {}), [key]: relay };
   return relayUpdate(
+    file,
     relay,
     'pending',
     `${input.label} · 提问：${firstLine(input.question)}（askId: ${input.askId}）`,
@@ -155,7 +160,7 @@ export function closeRelayAsk(
         : `${label} · 提问超时未处理：${
             relay.defaultOption ? `已按默认值「${relay.defaultOption}」处理` : '已按无人值守拒绝'
           }`;
-  return { relay: next, update: relayUpdate(next, status, text, now) };
+  return { relay: next, update: relayUpdate(file, next, status, text, now) };
 }
 
 /** 会话不再由秘书跟踪：挂起的转交一并作废，免得 session_answer 答到没人等的提问上 */
