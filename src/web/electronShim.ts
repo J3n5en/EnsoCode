@@ -67,9 +67,14 @@ async function rawInvoke(channel: string, encodedArgs: unknown[]): Promise<unkno
 async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown> {
   const encoded = encodeRemoteValue(args) as unknown[];
   if (channel === IPC_CHANNELS.SETTINGS_WRITE_KEY && typeof args[0] === 'string') {
+    // 第三个参数是会话写回的确认号，丢了宿主会当它什么补丁都没应用
     return writes.write(args[0], args[1] === undefined ? undefined : encoded[1], async (arg) =>
       decodeRemoteValue(
-        await rawInvoke(channel, [encoded[0], arg === undefined ? encoded[1] : arg])
+        await rawInvoke(channel, [
+          encoded[0],
+          arg === undefined ? encoded[1] : arg,
+          ...encoded.slice(2),
+        ])
       )
     );
   }
