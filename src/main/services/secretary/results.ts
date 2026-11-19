@@ -125,6 +125,19 @@ export function isUrgentUpdate(update: { kind: string }): boolean {
   return update.kind === 'needs-user' || update.kind === 'failed' || update.kind === 'ask-relay';
 }
 
+/** 会话收口或要人处理的结果：产生即投，不等合并窗口。只放行自己，不像 urgent 那样带走整批 */
+const IMMEDIATE_RESULTS: ReadonlySet<string> = new Set<SecretaryResultKind>([
+  'goal-complete',
+  'goal-blocked',
+  'interrupted',
+  'failed',
+  'needs-user',
+]);
+
+export function skipsUpdateWindow(kind: SecretaryResultKind): boolean {
+  return IMMEDIATE_RESULTS.has(kind);
+}
+
 /** 有需要你处理或失败时整批立刻走；否则只投已经到点的 */
 export function dueUpdates(updates: readonly SecretaryUpdate[], now: number): SecretaryUpdate[] {
   if (updates.some((update) => isUrgentUpdate(update))) return [...updates];

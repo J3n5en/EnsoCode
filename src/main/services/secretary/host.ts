@@ -63,6 +63,7 @@ import {
   SETTLED_RESULTS,
   sessionStateOf,
   shouldNotify,
+  skipsUpdateWindow,
   stalled,
   UPDATE_WINDOW_MS,
   updateKey,
@@ -509,9 +510,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
     );
-    // 手机关注的任务结果会马上推给发起渠道：桌面秘书会话同一时刻也要收到，不等合并窗口
+    // 终态马上投；手机关注的任务结果会马上推给发起渠道，桌面秘书会话同一时刻也要收到
     const followed = kind !== 'turn-ended' && ports.contact?.follows?.(record.conversationId);
-    if (!isUrgentUpdate(update) && !followed) {
+    if (!isUrgentUpdate(update) && !skipsUpdateWindow(kind) && !followed) {
       const held = previous?.deliverAt;
       update.deliverAt =
         held !== undefined && held > now
