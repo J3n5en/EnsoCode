@@ -707,12 +707,21 @@ export function ModelPicker({
   const refreshAll = useCallback(async () => {
     setRefreshingAll(true);
     try {
+      const enabledProviders = allProviders.filter((provider) => provider.enabled);
+      if (enabledProviders.length === 0) {
+        addToast({ type: 'info', title: t('No enabled providers to sync') });
+        return;
+      }
       await window.electronAPI.providers.refreshModelCatalog();
       invalidateModelMeta();
-      const outcomes = await fetchAllProviderModels(allProviders);
+      const outcomes = await fetchAllProviderModels(enabledProviders);
       applyFetchedModels(outcomes, updateProvider);
       const { okCount, failedCount, modelCount, firstError } = summarizeFetchOutcomes(outcomes);
-      const fetched = t('Fetched {{count}} models', { count: modelCount });
+      const skippedCount = allProviders.length - enabledProviders.length;
+      const fetched =
+        skippedCount > 0
+          ? `${t('Fetched {{count}} models', { count: modelCount })} · ${t('Skipped {{count}} disabled providers', { count: skippedCount })}`
+          : t('Fetched {{count}} models', { count: modelCount });
       addToast({
         type: failedCount > 0 ? 'warning' : 'success',
         title: t('Fetched {{count}} providers', { count: okCount }),
