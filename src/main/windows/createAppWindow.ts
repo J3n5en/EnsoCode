@@ -16,6 +16,7 @@ import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
 import { attachAppNavigationGuard, openExternalWebUrl } from './appNavigation';
 import { shouldReloadRenderer } from './rendererGone';
 import { attachPinnedWorkbenchBoundsSync, attachWindowsRestoreWake } from './win32Restore';
+import { fitWindowBounds } from './windowBounds';
 import { windowChromeOptions } from './windowChrome';
 import {
   resolveWindowsAppUserModelId,
@@ -245,7 +246,13 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
   const isWindows = process.platform === 'win32';
 
   const defaults: WindowState = { width: options.width, height: options.height };
-  const state = options.stateFile ? loadWindowState(options.stateFile, defaults) : defaults;
+  const state = options.stateFile
+    ? fitWindowBounds(
+        loadWindowState(options.stateFile, defaults),
+        screen.getAllDisplays().map((display) => display.workArea),
+        screen.getPrimaryDisplay().workArea
+      )
+    : defaults;
 
   const icon = resolveWindowIcon();
   const win = new BrowserWindow({
