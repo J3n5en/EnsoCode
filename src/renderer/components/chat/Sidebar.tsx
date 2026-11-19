@@ -1186,8 +1186,10 @@ export function Sidebar({
                     data-enso="tree-chevron"
                     data-expanded={!scratchFolded || undefined}
                     className={cn(
-                      'size-3 shrink-0 transition-[opacity,transform] duration-150',
-                      !scratchFolded && 'rotate-90 opacity-0 group-hover:opacity-100'
+                      'size-3 shrink-0 text-subtle-foreground transition-[opacity,transform] duration-150',
+                      !scratchFolded
+                        ? 'rotate-90 opacity-70 group-hover:opacity-100'
+                        : 'opacity-100'
                     )}
                   />
                   <span className="ml-auto shrink-0 font-normal text-[0.7857rem] tabular-nums">
