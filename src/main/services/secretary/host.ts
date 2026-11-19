@@ -501,7 +501,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     detail?: string,
     /** 这一轮的完整正文：分支与提交号只在原文里认，落盘仍按 lastText 截断 */
     report?: string,
-    /** 这一轮的结论原文：只有终态回传带上，手机与工作台仍用短正文 */
+    /** 这一轮的结论原文：终态与一轮结束回传带上，手机与工作台仍用短正文 */
     turnReport?: TurnReport
   ): void {
     if (record.lastResult?.kind === kind && record.lastResult.turn === record.turn) return;
@@ -523,7 +523,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       kind,
       now,
       [detail, leftover].filter(Boolean).join('；') || undefined,
-      reportLastText(kind, turnReport) ?? record.lastText
+      reportLastText(kind, turnReport, report) ?? record.lastText
     );
     const previous = file.outbox.find(
       (entry) => 'conversationId' in entry && entry.conversationId === record.conversationId
