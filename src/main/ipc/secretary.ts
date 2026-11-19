@@ -85,6 +85,7 @@ import {
   isRootSessionAlive,
   observedBackgroundTasks,
   observedSessionStatus,
+  observedSubagentsRunning,
   promptRootFromMain,
   releaseRootFromMain,
   resumeRootFromMain,
@@ -263,6 +264,7 @@ const hostPorts: SecretaryHostPorts = {
   now: () => Date.now(),
   backgroundStalls: (now) => driver?.watch(now) ?? [],
   tasks: (conversationId) => observedBackgroundTasks(conversationId),
+  subagentsRunning: (conversationId) => observedSubagentsRunning(conversationId),
   // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
   interruptDetail: (conversationId) =>
     interruptedTurnReason(path.join(app.getPath('userData'), 'agent'), conversationId),
