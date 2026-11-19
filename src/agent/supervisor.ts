@@ -5808,6 +5808,10 @@ export class SessionSupervisor {
     // 去抖中的完成通知先投递：闲会话被唤起（回合在跑），停在边界的会话进持久化待投递队列
     for (const sessionId of this.sessions.keys()) this.notifier.flush(sessionId);
     for (const managed of this.sessions.values()) {
+      // 停在边界后用户又插话 / 排了 follow-up：pi 要等 prepareNextTurn 返回后才把它写进会话文件，
+      // 这时落断点新进程就丢了这句话。放开挂起让 loop 先写入，回合接着跑，到下一个边界或空闲再判
+      const queued = managed.session.pendingMessageCount > 0;
+      if (queued) managed.restartHold?.();
       // 前台命令转后台只是工具先回执，进程还在跑：和在跑的工具一样等它结束。
       // 重启要求保留后台命令时，能脱离 worker 的交给下一代认回，只等脱离不了的
       const keep = restart.keepBackground === true;
@@ -5819,6 +5823,7 @@ export class SessionSupervisor {
         toolsInFlight,
         atModelRequestBoundary: managed.restartHold !== undefined,
         turnActive:
+          queued ||
           managed.status === 'running' ||
           managed.currentTurnId !== undefined ||
           managed.session.isStreaming ||

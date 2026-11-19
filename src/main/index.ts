@@ -19,7 +19,7 @@ import {
   waitWithExitDialog,
 } from './ipc/appRestart';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
-import { agentSessionIndex } from './ipc/sessionIndex';
+import { needsQuitCheckpoint } from './ipc/sessionIndex';
 import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
 import {
   noteOpenFolder,
@@ -161,7 +161,7 @@ const appRestart = createAppRestart({
   prepareQuit: (onWaitingForTools) =>
     prepareAgentWorkerForQuit({
       reason: 'quit',
-      hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+      hasRunningSessions: needsQuitCheckpoint,
       onWaitingForTools,
       // 应用马上重新打开：能脱离的转后台命令（dev server 等）交给新实例认回，不等也不停
       keepBackgroundTasks: true,
@@ -181,7 +181,7 @@ setBeforeConfirmedQuit(async () => {
   await waitWithExitDialog('quit', (onWaitingForTools) =>
     prepareAgentWorkerForQuit({
       reason: 'quit',
-      hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+      hasRunningSessions: needsQuitCheckpoint,
       onWaitingForTools,
     })
   );
@@ -433,7 +433,7 @@ if (!gotTheLock) {
       wait: async () => {
         await prepareAgentWorkerForQuit({
           reason: 'quit',
-          hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+          hasRunningSessions: needsQuitCheckpoint,
         });
         await stopAgentWorkerForQuit(3_000);
       },

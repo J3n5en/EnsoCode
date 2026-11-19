@@ -6,7 +6,10 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   attachFileBacked,
+  defaultRunProbe,
+  parseElapsed,
   processAlive,
+  processCommandLine,
   requestFileBackedRun,
   runFiles,
   spawnFileBacked,
@@ -163,9 +166,30 @@ describe.runIf(posix)('交出与认回', () => {
     expect(processAlive(other.pid as number)).toBe(true);
     attached.release();
   });
+
+  it('命令 exec 换掉 shell 后命令行里没有 runId：仍认得出是同一进程；启动时间对不上的不认', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-run-'));
+    const run = spawnFileBacked({ ...shellConfig(), command: 'exec sleep 30', cwd: dir, dir });
+    pids.push(run.pid);
+    await until(() => !(processCommandLine(run.pid) ?? run.runId).includes(run.runId));
+    expect(defaultRunProbe.matches(run.pid, run)).toBe(true);
+    // pid 被复用的进程：没有这次的 runId，启动时间也晚得多
+    expect(
+      defaultRunProbe.matches(run.pid, { runId: randomUUID(), startedAt: run.startedAt - 60_000 })
+    ).toBe(false);
+    run.release();
+  });
 });
 
 describe.runIf(posix)('孤儿清理', () => {
+  it('ps 的 etime 换算成毫秒；格式不对返回 null', () => {
+    expect(parseElapsed('  00:07\n')).toBe(7_000);
+    expect(parseElapsed('01:02:03')).toBe(3_723_000);
+    expect(parseElapsed('2-00:00:01')).toBe(172_801_000);
+    expect(parseElapsed('')).toBeNull();
+    expect(parseElapsed('7')).toBeNull();
+  });
+
   it('登记它的 worker 已不在、命令行带着 runId：杀进程组；worker 还在：不碰', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'enso-run-'));
     const orphan = spawnFileBacked({ ...shellConfig(), command: 'sleep 30', cwd: dir, dir });

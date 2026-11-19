@@ -126,6 +126,25 @@ describe.runIf(posix)('重启时转后台命令脱离 worker、下一代认回',
     await until(() => second.ended.includes(taskId));
   });
 
+  it('命令 exec 换掉了 shell（命令行里已没有 trap 和 runId）：照样认回为 running，停止时停得掉', async () => {
+    const logDir = mkdtempSync(path.join(tmpdir(), 'enso-bg-restart-'));
+    const first = makeManager(logDir);
+    const taskId = await yieldCommand(first.manager, 'exec sleep 30');
+    const [record] = first.manager.detachForRestart();
+    cleanup.push(record.pid);
+    first.manager.stopAll();
+    expect(processAlive(record.pid)).toBe(true);
+
+    const second = makeManager(logDir);
+    second.manager.recover([record]);
+    expect(second.manager.snapshot('s1')).toEqual([
+      expect.objectContaining({ taskId, status: 'running' }),
+    ]);
+    expect(second.manager.stop(taskId)).toBe(true);
+    await until(() => !processAlive(record.pid));
+    await until(() => second.ended.includes(taskId));
+  });
+
   it('pid 已不在：读完输出文件收尾，按 trap 写的退出码标记并照常（落盘）通知', async () => {
     const logDir = mkdtempSync(path.join(tmpdir(), 'enso-bg-restart-'));
     const first = makeManager(logDir);
@@ -229,6 +248,7 @@ describe.runIf(posix)('重启时转后台命令脱离 worker、下一代认回',
           'pid',
           'runId',
           'startedAt',
+          'runStartedAt',
           'yieldedAt',
           'deadlineAt',
           'outputFile',

@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   prepare: vi.fn(),
   cancel: vi.fn(),
   record: vi.fn(),
+  needsCheckpoint: true,
 }));
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }));
 vi.mock('electron', () => ({
@@ -25,6 +26,7 @@ vi.mock('electron-updater', () => ({
 }));
 vi.mock('../../ipc/sessionIndex', () => ({
   agentSessionIndex: { runningRootSessionIds: () => ['running-1'] },
+  needsQuitCheckpoint: () => m.needsCheckpoint,
 }));
 vi.mock('../../ipc/settings', () => ({
   flushSettings: vi.fn(),
@@ -77,6 +79,10 @@ describe('安装更新走优雅重启的安全点', () => {
     autoUpdaterService.requestRestart(true);
     await vi.waitFor(() => expect(m.prepare).toHaveBeenCalledOnce());
     expect(m.prepare.mock.calls[0][0].hasRunningSessions()).toBe(true);
+    // 要不要等安全点看的是「有回合在跑或有后台命令在跑」，不是只看在跑的回合
+    m.needsCheckpoint = false;
+    expect(m.prepare.mock.calls[0][0].hasRunningSessions()).toBe(false);
+    m.needsCheckpoint = true;
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(m.quitAndInstall).not.toHaveBeenCalled();
     release('checkpointed');

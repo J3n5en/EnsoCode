@@ -843,6 +843,7 @@ export class BackgroundTaskManager {
         pid: run.pid,
         runId: run.runId,
         startedAt: task.info.startedAt,
+        runStartedAt: run.startedAt,
         yieldedAt: task.yieldedAt ?? null,
         deadlineAt: task.info.deadlineAt ?? null,
         outputFile: run.outputFile,
@@ -856,9 +857,9 @@ export class BackgroundTaskManager {
 
   /**
    * 冷启动认回上一代交出的任务，同一个 taskId 重新登记：
-   * - pid 在、命令行带着 runId：running，按偏移接着读输出文件；
+   * - pid 在、认得出是原进程（命令行 / 环境变量带着 runId，或启动时间对得上）：running，按偏移接着读输出文件；
    * - pid 不在：读完剩余输出，按退出码文件标 done / failed，照常发完成通知；
-   * - pid 在但命令行对不上（被复用）：不认、不发任何信号，标 failed 并说明找不到原进程。
+   * - pid 在但对不上（被复用）：不认、不发任何信号，标 failed 并说明找不到原进程。
    * 返回处理过的 runId（孤儿清理跳过它们）。
    */
   recover(records: readonly DetachedTaskRecord[], probe: RunProbe = defaultRunProbe): Set<string> {
@@ -867,9 +868,10 @@ export class BackgroundTaskManager {
       if (this.tasks.has(record.taskId)) continue;
       handled.add(record.runId);
       const files = runFiles(this.logDir, record.runId);
+      const identity = { runId: record.runId, startedAt: record.runStartedAt ?? record.startedAt };
       const state = !probe.alive(record.pid)
         ? 'gone'
-        : probe.matches(record.pid, record.runId)
+        : probe.matches(record.pid, identity)
           ? 'alive'
           : 'reused';
       const task = this.register(record.sessionId, record.taskId, record.command, {
@@ -887,7 +889,7 @@ export class BackgroundTaskManager {
           {
             runId: record.runId,
             pid: record.pid,
-            startedAt: record.startedAt,
+            startedAt: identity.startedAt,
             cwd: record.cwd,
             outputFile: files.outputFile,
             exitFile: files.exitFile,

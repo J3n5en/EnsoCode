@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   registerForce: vi.fn(),
   beforeConfirmedQuit: null as null | (() => Promise<void>),
   dialog: [] as string[],
+  needsCheckpoint: false,
 }));
 
 vi.mock('electron', () => ({
@@ -112,7 +113,10 @@ vi.mock('./services/appCloseConfirm', () => ({
     mocks.beforeConfirmedQuit = hook;
   },
 }));
-vi.mock('./ipc/sessionIndex', () => ({ agentSessionIndex: { runningRootSessionIds: () => [] } }));
+vi.mock('./ipc/sessionIndex', () => ({
+  agentSessionIndex: { runningRootSessionIds: () => [] },
+  needsQuitCheckpoint: () => mocks.needsCheckpoint,
+}));
 vi.mock('./services/coldRestart', () => ({
   coldRestartPlan: () => null,
   resumeColdRestartSessions: vi.fn(),
@@ -233,6 +237,19 @@ describe('退出与安装更新的等待弹层接线', () => {
     await mocks.beforeConfirmedQuit?.();
     expect(mocks.prepareQuit).toHaveBeenLastCalledWith(expect.objectContaining({ reason: 'quit' }));
     expect(mocks.dialog).toEqual(['open:quit:tool', 'close:quit']);
+  });
+
+  it('回合都已结束、只剩转后台命令在跑：退出同样先等安全点（由后台命令决定，不只看在跑的回合）', async () => {
+    await import('./index');
+    await mocks.beforeConfirmedQuit?.();
+    const options = mocks.prepareQuit.mock.calls.at(-1)?.[0] as {
+      hasRunningSessions: () => boolean;
+    };
+    mocks.needsCheckpoint = false;
+    expect(options.hasRunningSessions()).toBe(false);
+    mocks.needsCheckpoint = true;
+    expect(options.hasRunningSessions()).toBe(true);
+    mocks.needsCheckpoint = false;
   });
 
   it.each(['update', 'quit'] as const)('%s 弹层上的「强制退出」结束等安全点', async (exit) => {

@@ -6,6 +6,8 @@ import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
 import type { AgentWorkerEvent } from '@shared/types/agent';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { wakeColdRestartSession } from '../main/services/coldRestart';
+import { buildRestartManifest } from '../main/services/restartManifest';
 import type { BackgroundTaskManager } from './backgroundTasks';
 import {
   DETACHED_TASKS_FILE,
@@ -401,6 +403,64 @@ describe('SessionSupervisor graceful restart', () => {
     await supervisor.shutdown();
   });
 
+  it('停在边界后用户又插话：放开挂起让插话先写进会话文件，不按挂起时的边界落断点', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-steer-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    const other = { sessionId: 'other', generation: '22222222-2222-4222-8222-222222222222' };
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: other, cwd: '/workspace', model });
+    for (let i = 0; i < 40 && ofType(events, 'parent-ready').length < 2; i++) await settle();
+    const [session, busy] = mocks.sessions;
+    // 另一个会话的回合还没结束：父会话停在边界也提交不了
+    busy.emit({ type: 'agent_start' });
+    session.messages.push(user, assistantCall, toolResult);
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
+    supervisor.handleCommand({ type: 'graceful-restart' });
+    let proceeded = false;
+    void session.agent.prepareNextTurnWithContext({}, undefined).then(() => {
+      proceeded = true;
+    });
+    await settle();
+    expect(proceeded).toBe(false);
+    expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
+
+    // 用户插话：pi 只放进内存队列，prepareNextTurn 返回后才写进 jsonl
+    (session as unknown as { pendingMessageCount: number }).pendingMessageCount = 1;
+    session.emit({ type: 'queue_update', steering: ['wait, also check X'], followUp: [] });
+    // 阻塞消失，且没有新的 tool_execution_start
+    busy.emit({ type: 'agent_end', messages: [] });
+    busy.emit({ type: 'agent_settled' });
+    await settle();
+    expect(proceeded).toBe(true);
+    expect(session.nextTurnPrepared).toHaveBeenCalledTimes(1);
+    expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
+    expect(existsSync(path.join(dataDir, RESTART_CHECKPOINT_FILE))).toBe(false);
+
+    // pi 写入插话、跑完这一轮；之后空闲才落断点，会话文件里有这句话
+    const steer = { role: 'user', content: [{ type: 'text', text: 'wait, also check X' }] };
+    (session as unknown as { pendingMessageCount: number }).pendingMessageCount = 0;
+    session.messages.push(steer);
+    session.emit({ type: 'message_start', message: steer });
+    session.emit({ type: 'message_end', message: steer });
+    const reply = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'ok' }],
+      stopReason: 'stop',
+    };
+    session.messages.push(reply);
+    session.emit({ type: 'message_end', message: reply });
+    session.emit({ type: 'turn_end', message: reply, toolResults: [] });
+    session.emit({ type: 'agent_end', messages: [steer, reply] });
+    session.emit({ type: 'agent_settled' });
+    await waitFor(events, 'graceful-restart-ready');
+    const parentEntry = ofType(events, 'graceful-restart-ready')[0]?.checkpoint.sessions.find(
+      (entry) => entry.sessionId === 'parent'
+    );
+    expect(parentEntry).toMatchObject({ nextStep: 'await-user', messageCount: 5 });
+    await supervisor.shutdown();
+  });
+
   it('前台命令转后台后进程还在：不算安全点；进程结束、完成通知落下后才落断点', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-yield-'));
     const { events, supervisor } = await startSupervisor(dataDir);
@@ -614,6 +674,106 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     await supervisor.shutdown();
     expect(detachedKill).not.toHaveBeenCalled();
     expect(run.kill).not.toHaveBeenCalled();
+  });
+
+  it('两处组合：停在边界被脱离不了的命令挡住时插话，命令结束后先写插话；只剩后台命令的空闲会话记成 await-user，唤醒能打开', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-combo-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    const other = { sessionId: 'other', generation: '22222222-2222-4222-8222-222222222222' };
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    supervisor.handleCommand({ type: 'spawn-parent', identity: other, cwd: '/workspace', model });
+    for (let i = 0; i < 40 && ofType(events, 'parent-ready').length < 2; i++) await settle();
+    const [session] = mocks.sessions;
+    const bgTasks = (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+    // other：回合早已结束，只剩一个能脱离的转后台命令（dev server）
+    const run = fakeRun();
+    const devServer = bgTasks.adopt(
+      'other',
+      {
+        output: () => 'ready\n',
+        pipe: () => {},
+        done: new Promise(() => {}),
+        kill: vi.fn(),
+        detachable: () => run,
+      },
+      { command: 'pnpm dev', startedAt: run.startedAt, cwd: '/workspace' }
+    );
+    // parent：工具批结束停在边界，但还有一个脱离不了的转后台命令在跑
+    session.messages.push(user, assistantCall);
+    session.emit({ type: 'agent_start' });
+    session.emit({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'bash' });
+    const exit = Promise.withResolvers<number | null>();
+    const remote = bgTasks.adopt(
+      'parent',
+      { output: () => '', pipe: () => {}, done: exit.promise, kill: () => exit.resolve(null) },
+      { command: 'ssh box make', startedAt: Date.now() }
+    );
+    session.messages.push(toolResult);
+    session.emit({ type: 'tool_execution_end', toolCallId: 'call-1', toolName: 'bash' });
+    session.emit({ type: 'turn_end', message: assistantCall, toolResults: [toolResult] });
+
+    supervisor.handleCommand({ type: 'graceful-restart', keepBackgroundTasks: true });
+    let proceeded = false;
+    void session.agent.prepareNextTurnWithContext({}, undefined).then(() => {
+      proceeded = true;
+    });
+    await settle();
+    expect(ofType(events, 'graceful-restart-deferred').at(-1)?.sessions).toEqual([
+      {
+        identity: parent,
+        reason: 'tool-in-flight',
+        toolsInFlight: [remote],
+        undetachableTasks: [remote],
+      },
+    ]);
+
+    // 用户插话，然后挡着的命令结束，期间没有新的 tool_execution_start
+    (session as unknown as { pendingMessageCount: number }).pendingMessageCount = 1;
+    session.emit({ type: 'queue_update', steering: ['also run lint'], followUp: [] });
+    exit.resolve(0);
+    await waitFor(events, 'task-ended');
+    await settle();
+    expect(proceeded).toBe(true);
+    expect(ofType(events, 'graceful-restart-ready')).toEqual([]);
+
+    const steer = { role: 'user', content: [{ type: 'text', text: 'also run lint' }] };
+    (session as unknown as { pendingMessageCount: number }).pendingMessageCount = 0;
+    session.messages.push(steer);
+    session.emit({ type: 'message_end', message: steer });
+    const reply = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'ok' }],
+      stopReason: 'stop',
+    };
+    session.messages.push(reply);
+    session.emit({ type: 'message_end', message: reply });
+    session.emit({ type: 'turn_end', message: reply, toolResults: [] });
+    session.emit({ type: 'agent_end', messages: [steer, reply] });
+    session.emit({ type: 'agent_settled' });
+    await waitFor(events, 'graceful-restart-ready');
+    const checkpoint = ofType(events, 'graceful-restart-ready')[0]?.checkpoint;
+    expect(checkpoint?.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: 'parent', nextStep: 'await-user', messageCount: 5 }),
+        expect.objectContaining({ sessionId: 'other', nextStep: 'await-user', toolsInFlight: [] }),
+      ])
+    );
+
+    // Main 据此写清单：只剩后台命令的空闲会话在清单里，命令结束时的唤醒能把它打开
+    supervisor.handleCommand({ type: 'detach-background-tasks' });
+    expect(JSON.parse(readFileSync(path.join(dataDir, DETACHED_TASKS_FILE), 'utf8')).tasks).toEqual(
+      [expect.objectContaining({ taskId: devServer, sessionId: 'other' })]
+    );
+    const manifest = buildRestartManifest({
+      reason: 'update',
+      checkpoint: checkpoint as RestartCheckpoint,
+      settingsOf: () => ({ providerId: 'p', modelId: 'm', cwd: '/workspace' }),
+    });
+    const resume = vi.fn(async () => ({ ok: true }));
+    const plan = { checkpointFile: '', manifest, resume: [] };
+    expect(await wakeColdRestartSession('other', resume, plan)).toEqual({ ok: true });
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'other' }));
+    await supervisor.shutdown();
   });
 
   it('不要求保留时（普通退出）：转后台命令照旧要等', async () => {

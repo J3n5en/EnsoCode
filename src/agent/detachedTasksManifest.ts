@@ -16,9 +16,11 @@ export interface DetachedTaskRecord {
   commandKey: string | null;
   cwd: string;
   pid: number;
-  /** 写在进程命令行里的标记，认回时据此核对 pid 没被复用 */
+  /** 写在进程命令行与环境变量里的标记，认回时据此核对 pid 没被复用 */
   runId: string;
   startedAt: number;
+  /** 进程实际启动的时刻：命令 exec 换掉 shell 后命令行里没有 runId，靠它与 pid 的启动时间核对 */
+  runStartedAt?: number;
   yieldedAt: number | null;
   deadlineAt: number | null;
   /** 进程 stdout/stderr 直写的文件与已读字节数 */
@@ -111,6 +113,7 @@ export function takeDetachedTasksManifest(file: string, logDir: string): Detache
       t.pid > 0 &&
       isRunId(t.runId) &&
       isNum(t.startedAt) &&
+      (t.runStartedAt === undefined || isNum(t.runStartedAt)) &&
       numOrNull(t.yieldedAt) &&
       numOrNull(t.deadlineAt) &&
       isNum(t.outputOffset) &&

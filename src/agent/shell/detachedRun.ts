@@ -22,7 +22,8 @@ import { type BashOperations, getShellConfig } from '@earendil-works/pi-coding-a
  * 能活过 worker 的命令进程（本地 POSIX）：detached 独立会话，stdin 关闭，stdout/stderr 直写
  * task-logs 下的输出文件（不经管道，worker 退出不会让它 SIGPIPE），退出码由 shell 的 EXIT trap
  * 写进同目录的退出码文件。worker 在世时轮询跟读输出文件；重启前停止跟读、记下读到的偏移，
- * 新 worker 按偏移接着读。runId 写在 shell 命令行里（退出码文件路径），用来认出 pid 是不是还是它。
+ * 新 worker 按偏移接着读。runId 写在 shell 命令行里（退出码文件路径）和进程环境变量里，连同进程启动时间
+ * 用来认出 pid 是不是还是它（命令 exec 换掉 shell 后命令行里就没有 runId 了）。
  */
 export interface DetachedRunFiles {
   runId: string;
@@ -47,10 +48,20 @@ export interface FileBackedRun extends DetachedRunFiles {
 
 export interface RunProbe {
   alive(pid: number): boolean;
-  /** pid 当前的命令行里有没有这个 runId：防 pid 被别的进程复用 */
-  matches(pid: number, runId: string): boolean;
+  /** pid 现在还是不是这次起的那个进程：防 pid 被别的进程复用 */
+  matches(pid: number, run: RunIdentity): boolean;
 }
 
+/** 认 pid 用的标记：runId，和进程实际启动的时刻（ms） */
+export interface RunIdentity {
+  runId: string;
+  startedAt: number;
+}
+
+/** 起进程时放进环境变量的 runId：exec 换掉 shell 后仍在（Linux 从 /proc/<pid>/environ 读回）。不是密钥 */
+export const RUN_ID_ENV = 'ENSO_RUN_ID';
+/** 进程启动时间与登记时刻的容差：ps 的 etime 只到秒，登记时刻在 spawn 返回之后 */
+const START_TOLERANCE_MS = 3_000;
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** 跟读间隔：有新输出时最快，空闲时逐步放慢到上限（退出由 exit 事件即时感知，不靠轮询） */
 const LIVE_POLL_MIN_MS = 15;
@@ -135,9 +146,57 @@ export function processCommandLine(pid: number): string | null {
   }
 }
 
+/** ps 的 etime（[[dd-]hh:]mm:ss）换成毫秒；格式不对返回 null */
+export function parseElapsed(text: string): number | null {
+  const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(text.trim());
+  if (!match) return null;
+  const [, days, hours, minutes, seconds] = match;
+  return (
+    (((Number(days ?? 0) * 24 + Number(hours ?? 0)) * 60 + Number(minutes)) * 60 +
+      Number(seconds)) *
+    1000
+  );
+}
+
+/** pid 的启动时刻（ms）；exec 不改变它，pid 被复用的进程一定更晚启动。读不到返回 null */
+export function processStartedAt(pid: number): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const elapsed = parseElapsed(
+      execFileSync(existsSync('/bin/ps') ? '/bin/ps' : 'ps', ['-o', 'etime=', '-p', String(pid)], {
+        encoding: 'utf8',
+        timeout: 2_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+    );
+    return elapsed === null ? null : Date.now() - elapsed;
+  } catch {
+    return null;
+  }
+}
+
+function environHas(pid: number, entry: string): boolean {
+  try {
+    return readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(entry);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 命令行带着 runId（shell 还在）；或 Linux 上进程环境里带着它；或进程启动时间对得上登记时刻
+ * （macOS 读不到别的进程的环境变量）。三者都对不上就当 pid 已被复用
+ */
+export function runIdentityMatches(pid: number, run: RunIdentity): boolean {
+  if (processCommandLine(pid)?.includes(run.runId)) return true;
+  if (process.platform === 'linux' && environHas(pid, `${RUN_ID_ENV}=${run.runId}`)) return true;
+  const startedAt = processStartedAt(pid);
+  return startedAt !== null && Math.abs(startedAt - run.startedAt) <= START_TOLERANCE_MS;
+}
+
 export const defaultRunProbe: RunProbe = {
   alive: processAlive,
-  matches: (pid, runId) => processCommandLine(pid)?.includes(runId) ?? false,
+  matches: runIdentityMatches,
 };
 
 /** 杀整个进程组；macOS 先 SIGSTOP 再 SIGKILL，与 pi 前台中止一致（防 `a; b` 在取消时起 b） */
@@ -242,7 +301,7 @@ export function spawnFileBacked(input: {
     child = spawn(input.shell, [...input.args, withExitTrap(input.command, exitFile)], {
       cwd: input.cwd,
       detached: true,
-      env: input.env ?? process.env,
+      env: { ...(input.env ?? process.env), [RUN_ID_ENV]: runId },
       stdio: ['ignore', out, out],
     });
   } finally {
@@ -338,7 +397,7 @@ export function attachFileBacked(
       ended =
         readExitCode(run.exitFile) !== null ||
         !probe.alive(run.pid) ||
-        (ticks % IDENTITY_EVERY === 0 && !probe.matches(run.pid, run.runId));
+        (ticks % IDENTITY_EVERY === 0 && !probe.matches(run.pid, run));
       if (!ended) return;
       clearInterval(timer);
       tail.drain();
@@ -360,7 +419,7 @@ export function attachFileBacked(
     },
     done,
     kill: (signal) => {
-      if (probe.matches(run.pid, run.runId)) killRunGroup(run.pid, signal);
+      if (probe.matches(run.pid, run)) killRunGroup(run.pid, signal);
     },
     release: () => {
       if (!released) {
@@ -386,7 +445,7 @@ export function readRunOutput(file: string, offset: number): Buffer {
 
 /**
  * worker 异常退出（崩溃、被强杀）没走交接时，它起的文件直写进程不会像管道进程那样随 SIGPIPE 退出。
- * 冷启动时按 task-logs 里的登记逐个检查：登记它的 worker 已不在、进程还在且命令行带着本次 runId，
+ * 冷启动时按 task-logs 里的登记逐个检查：登记它的 worker 已不在、进程还在且认得出是本次起的进程，
  * 才杀它的进程组；其余一律不碰，只清掉已结束的登记文件。不扫系统进程表。
  */
 export function sweepOrphanRuns(
@@ -405,7 +464,7 @@ export function sweepOrphanRuns(
     const match = /^run-(.+)\.json$/.exec(name);
     const runId = match?.[1];
     if (!runId || !isRunId(runId) || keep.has(runId)) continue;
-    let meta: { ownerPid?: unknown; pid?: unknown };
+    let meta: { ownerPid?: unknown; pid?: unknown; startedAt?: unknown };
     try {
       meta = JSON.parse(readFileSync(path.join(dir, name), 'utf8')) as typeof meta;
     } catch {
@@ -413,9 +472,10 @@ export function sweepOrphanRuns(
     }
     const ownerPid = typeof meta.ownerPid === 'number' ? meta.ownerPid : -1;
     const pid = typeof meta.pid === 'number' ? meta.pid : -1;
+    const startedAt = typeof meta.startedAt === 'number' ? meta.startedAt : Number.NaN;
     if (ownerPid === process.pid || probe.alive(ownerPid)) continue;
     if (probe.alive(pid)) {
-      if (!probe.matches(pid, runId)) {
+      if (!probe.matches(pid, { runId, startedAt })) {
         removeRunFiles(dir, runId);
         continue;
       }

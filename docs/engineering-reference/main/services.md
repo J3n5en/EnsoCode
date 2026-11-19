@@ -195,19 +195,24 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 并进 `toolsInFlight`，和在跑的工具一样推迟（Main 据此按 5 分钟上限等）；直接 `background:true` 启动的、
 已结束的任务不算。任务结束时 `onEnded` 触发检查，检查前先 flush 去抖中的完成通知，停在边界的会话把它
 收进持久化的待投递队列，不随旧进程丢。worker 收尾时还在等安全点就给停掉的转后台命令最多 1s 收口再落断点。
+停在边界后用户又插话 / 排了 follow-up（`session.pendingMessageCount > 0`）：pi 要等 prepareNextTurn 返回后才把
+它写进 jsonl，`checkRestart()` 每次检查都先看它，有就放开该会话的挂起、按回合进行中推迟，写入后到下一个边界或空闲再判。
 Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会话设置，新 worker 沿用断点里的 seq，
 `nextStep=model-request` 时用原 turnId 走 `continueSessionActivity` 续跑。不发 `worker-exited`。
 
 应用退出与安装更新复用同一套安全点（`agentHost.prepareAgentWorkerForQuit`）：will-quit 的 agent 收尾步骤
 （`main/index.ts` 的 `attachAppQuitDrain`）和 `AutoUpdater.quitAndInstall()` 都先等 worker 落断点，再照常
-`stopAgentWorkerForQuit` / `autoUpdater.quitAndInstall()`。没有正在跑的根会话直接放行；worker 推迟时报告
+`stopAgentWorkerForQuit` / `autoUpdater.quitAndInstall()`。要不要等由 `ipc/sessionIndex.needsQuitCheckpoint`
+决定：有根回合在跑，或回合已结束但 `BackgroundTaskTracker` 里还有在跑的后台命令（重启 / 更新据此把空闲会话按
+await-user 写进清单，命令结束时能被唤醒；普通退出让转后台命令挡住退出、弹等待层），都没有才直接放行；worker 推迟时报告
 有工具在跑就等它结束，上限 `QUIT_TOOL_WAIT_LIMIT_MS`（5 分钟），没有工具在跑时最多等
 `QUIT_NO_TOOL_WAIT_MS`（10s）；超时照常退出（收尾中止命令）并写一行到 worker 退出日志。超时后
 `stopAgentWorkerForQuit` 在 worker 退出后读它收尾时落的断点（本次请求之后写的、没有在跑的工具），照样
 写恢复清单；断点没落盘 / 是旧的 / 还有工具在跑就不写，原因记进 worker 退出日志。同一次退出只发一次请求，
 收尾期间再次退出由 `appQuitDrain` 吞掉。断点落盘后 Main 把恢复清单写到 `dataDir/restart-manifest.json`
 （`restartManifest.ts`：会话文件、白名单会话设置、turnId、nextStep、lastCompletedToolCallId、seq；
-写后读回扫密钥样式与内存里真实下发过的凭据，命中即删文件）。冷启动 `coldRestart.ts` 只在清单与配套断点
+写后读回扫密钥样式与内存里真实下发过的凭据，命中即删文件；会话设置跟着之后的 set-* 命令更新，含
+`set-builtin-tools` 的 disabledTools）。冷启动 `coldRestart.ts` 只在清单与配套断点
 （writtenAt 对得上）都在时接管：第一代 worker 带断点 fork，`ipc/agent.resumeRootFromRestartManifest`
 按原 generation 重走普通 spawn（cwd / 会话文件只认权威记录，凭据现取），续跑的会话从退出 / 更新中断记录里剔除。
 安装更新失败时 `cancelAgentQuitCheckpoint` 撤掉清单，并按断点换代让会话接着跑。
@@ -234,17 +239,20 @@ relaunch（多次会起多个实例），进行中菜单项不可点。
 本地 POSIX bash 的前台命令（`sessionShell` → `shell/detachedRun.withFileBackedExec`，仅
 `ForegroundCommand` 登记过的调用）和本地 `background:true` 命令（`/bin/sh -c`）改为 detached
 （setsid）+ stdin 关闭 + stdout/stderr 直写 `task-logs/run-<runId>.out`（O_APPEND），worker 轮询跟读；
-同一行前置 `trap 'printf %s "$?" > run-<runId>.exit' EXIT` 记退出码，runId 因此出现在进程命令行里。
+同一行前置 `trap 'printf %s "$?" > run-<runId>.exit' EXIT` 记退出码，runId 因此出现在进程命令行里；
+同时放进进程环境变量 `ENSO_RUN_ID`（exec 换掉 shell 后仍在）。
 Windows、PowerShell、远程 ssh、pi 的 stdin 传命令方式照旧走管道，没有文件句柄，重启只能等它结束。
 `graceful-restart{keepBackgroundTasks}` 时 `runningYielded(..., {exceptDetachable})` 只把脱离不了的算在途，
 推迟事件带 `undetachableTasks`，Main 据此让等待弹层多一句说明（`RestartWaitReason`）。
 `stopAgentWorkerForQuit` 在终止 worker 前发 `detach-background-tasks`，等 `background-tasks-detached`
 回执（上限 `DETACH_ACK_TIMEOUT_MS`）：worker 读完已有输出、停止跟读、把任务移出本代，写
 `dataDir/restart-background-tasks.json`（taskId、sessionId、脱敏截断的命令摘要、命令+cwd 指纹、cwd、pid、
-runId、startedAt、yieldedAt、deadlineAt、输出文件与已读偏移、退出码文件、日志路径；不含 env）。
+runId、startedAt、进程启动时刻 runStartedAt、yieldedAt、deadlineAt、输出文件与已读偏移、退出码文件、日志路径；不含 env）。
 新 worker 构造时读后即删（路径只认 logDir 下按 runId / taskId 推出的文件），`BackgroundTaskManager.recover`
-用同一 taskId 重新登记：pid 在且命令行含 runId → running，按偏移接着读、日志追加；pid 不在 → 读完输出、
-按退出码文件标 done / failed；pid 在但命令行不含 runId（被复用）→ 不认、不发信号，标 failed 并说明。
+用同一 taskId 重新登记：pid 在且认得出（`detachedRun.runIdentityMatches`：命令行含 runId，或 Linux 上
+`/proc/<pid>/environ` 含 `ENSO_RUN_ID`，或 `ps -o etime` 推出的启动时刻与 runStartedAt 相差 3s 内）→ running，
+按偏移接着读、日志追加；pid 不在 → 读完输出、按退出码文件标 done / failed；pid 在但都对不上（被复用）→ 不认、
+不发信号，标 failed 并说明。macOS 读不到别的进程的环境变量，exec 之后靠启动时刻。
 认回任务的完成通知在会话没打开时直接落 `pending-notifications`，并发 `session-wake-requested` 请 Main
 按冷启动恢复清单（`coldRestart.wakeColdRestartSession`，只认 await-user 条目、每个会话一次）重走 spawn；
 新 worker 启动时断点里 await-user 的会话若带着待投递通知（收尾期间结束的命令只存了盘）同样请求叫醒。
@@ -252,9 +260,9 @@ runId、startedAt、yieldedAt、deadlineAt、输出文件与已读偏移、退�
 本代在重启中（`restart` 已请求）只存盘不请求。会话打开时 resume 快照带上任务；
 同一会话树再起同一命令（同 cwd）由 `withBackground` 直接回「已在跑」，不重复启动。worker 没走交接就退出
 （崩溃、被强杀）时文件直写的进程不会随 SIGPIPE 退出：下一代启动时 `sweepOrphanRuns` 按 `run-*.json`
-登记，只杀「登记它的 worker 已不在、命令行仍含 runId」的进程组，不扫进程表。
+登记，只杀「登记它的 worker 已不在、仍认得出是本次进程」的进程组，不扫进程表。
 已知限制：shell 进程本身被直接信号杀掉时 EXIT trap 记的是最后一条命令的 `$?`；用户命令自设 EXIT trap 或
-`exec` 换掉 shell 时取不到退出码 / 认不回（不杀，按找不到原进程说明）。
+`exec` 换掉 shell 时取不到退出码（进程仍能认回、可停止，结束时按退出码不可得说明）。
 子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
 
 **升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult

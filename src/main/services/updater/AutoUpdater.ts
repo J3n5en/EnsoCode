@@ -6,7 +6,7 @@ import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
 import { waitWithExitDialog } from '../../ipc/appRestart';
-import { agentSessionIndex } from '../../ipc/sessionIndex';
+import { agentSessionIndex, needsQuitCheckpoint } from '../../ipc/sessionIndex';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
 import { cancelAgentQuitCheckpoint, prepareAgentWorkerForQuit } from '../agentHost';
@@ -180,7 +180,7 @@ class AutoUpdaterService {
     await waitWithExitDialog('update', (onWaitingForTools) =>
       prepareAgentWorkerForQuit({
         reason: 'update',
-        hasRunningSessions: () => agentSessionIndex.runningRootSessionIds().length > 0,
+        hasRunningSessions: needsQuitCheckpoint,
         onWaitingForTools,
         // 装完会重新打开：能脱离的转后台命令交给新实例认回
         keepBackgroundTasks: true,

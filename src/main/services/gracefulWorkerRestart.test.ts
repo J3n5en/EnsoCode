@@ -158,4 +158,20 @@ describe('GracefulWorkerRestart', () => {
     restart.record({ ...spawn, model: { ...model, apiKey: 'sk-memory-only-0123456789' } });
     expect(restart.knownSecrets()).toEqual(['sk-memory-only-0123456789']);
   });
+
+  it('会话中途改过的内置工具开关进恢复清单：冷启动按当前开关 spawn，不回到 spawn 时的原始值', () => {
+    const restart = new GracefulWorkerRestart<object>();
+    restart.record(spawn);
+    restart.rememberRequest(identity, {
+      sessionId: 's1',
+      providerId: 'p',
+      modelId: 'm',
+      cwd: '/w',
+      disabledTools: ['web'],
+    });
+    restart.record({ type: 'set-builtin-tools', identity, disabledTools: ['browser', 'computer'] });
+    expect(restart.restartSettingsOf('s1', 'g1')?.disabledTools).toEqual(['browser', 'computer']);
+    restart.record({ type: 'set-builtin-tools', identity, disabledTools: [] });
+    expect(restart.restartSettingsOf('s1', 'g1')?.disabledTools).toEqual([]);
+  });
 });

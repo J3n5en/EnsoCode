@@ -127,7 +127,7 @@ import {
 } from '../services/agentHost';
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
-import { BackgroundTaskTracker, type ObservedTask } from '../services/backgroundTaskTracker';
+import { backgroundTaskStates, type ObservedTask } from '../services/backgroundTaskTracker';
 import { HumanRequestTimeouts } from '../services/bots/humanRequestTimeouts';
 import { readBotSessionMessages } from '../services/bots/sessionMessages';
 import {
@@ -279,7 +279,6 @@ let secretaryDriverObserver:
   | ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void)
   | null = null;
 const pluginSessionStates = new SessionStateTracker();
-const backgroundTaskStates = new BackgroundTaskTracker();
 const selectionClockOwners = new WeakSet<RendererContents>();
 
 function watchSelectionClock(sender: RendererContents): void {

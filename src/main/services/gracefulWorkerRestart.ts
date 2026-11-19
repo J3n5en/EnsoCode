@@ -235,6 +235,8 @@ function patchRequest(
     }
     case 'set-plan-mode':
       return { ...request, planMode: command.active };
+    case 'set-builtin-tools':
+      return { ...request, disabledTools: [...command.disabledTools] };
     default:
       return request;
   }

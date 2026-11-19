@@ -695,12 +695,13 @@ let quitCheckpoint: QuitCheckpoint | null = null;
 
 /**
  * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
- * 冷启动据此续跑。没有正在跑的会话直接放行；同一次退出只发一次请求，再调用拿同一个结果。
+ * 冷启动据此续跑。没有正在跑的会话、也没有在跑的后台命令时直接放行；同一次退出只发一次请求，再调用拿同一个结果。
  * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时最多等 QUIT_NO_TOOL_WAIT_MS；
  * onWaitingForTools 在 worker 报告有工具在跑时回调（已在跑则立即回调）。
  */
 export function prepareAgentWorkerForQuit(options: {
   reason: RestartExitReason;
+  /** 有根回合在跑，或回合已结束但还有后台命令在跑（ipc/sessionIndex.needsQuitCheckpoint） */
   hasRunningSessions: () => boolean;
   onWaitingForTools?: (reason: RestartWaitReason) => void;
   /** 应用会重新打开：能脱离的转后台命令留给下一代认回，不等它们结束 */
