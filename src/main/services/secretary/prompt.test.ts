@@ -118,4 +118,14 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toMatch(/one update saying it is running/);
     expect(prompt).toMatch(/saying it was cancelled/);
   });
+
+  it('追加修复发回原会话：同一件事用 session_send，只在换分支、换基线或新任务时新建', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    expect(prompt).toMatch(
+      /same task goes to the session that did it with session_send, not session_create/
+    );
+    expect(prompt).toMatch(/needs another branch or another base, or is a different task/);
+    expect(prompt).toMatch(/already reported goal-complete, say .*continues the earlier work/);
+    expect(prompt).toMatch(/another worktree and another branch/);
+  });
 });
