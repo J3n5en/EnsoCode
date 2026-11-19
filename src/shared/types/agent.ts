@@ -35,7 +35,6 @@ import type {
   PluginEventName,
   PluginInterceptEvent,
 } from '../extensionPlugins/events';
-
 import {
   AGENT_END_TEXT_MAX,
   BEFORE_AGENT_START_PROMPT_MAX,
@@ -66,6 +65,7 @@ import {
 } from '../extensionPlugins/protocol';
 import { parsePluginToolName } from '../extensionPlugins/toolName';
 import type { PluginEventPlan, PluginToolDescriptor } from '../extensionPlugins/types';
+import type { RestartCheckpoint, RestartDeferReason } from '../gracefulRestart';
 import { type ImageGenerationConfig, parseImageGenerationConfig } from '../imageGeneration';
 import { parseGeneratedImagePaths } from '../imageGenerationResults';
 import { parseMaxActiveCoworkers } from '../maxActiveCoworkers';
@@ -1675,7 +1675,9 @@ export type AgentCommand =
     }
   | { type: 'plugin-agent-cancel'; requestId: string }
   /** 运行中同步代理 env；null 表示删除该键 */
-  | { type: 'set-proxy-env'; env: Record<string, string | null> };
+  | { type: 'set-proxy-env'; env: Record<string, string | null> }
+  /** 优雅重启：等所有会话到安全点后落断点，回 graceful-restart-ready，由 Main 换新进程 */
+  | { type: 'graceful-restart' };
 
 /** 随消息附带的图片（base64）。id 只活在编辑器，发给 agent 前剥掉。 */
 export interface AttachedImage {
@@ -1950,6 +1952,8 @@ export type RendererAgentEvent =
       | { type: 'oauth-pool-select' }
       | { type: 'privacy-mask-ledger' }
       | { type: 'tool-batch-completed' }
+      | { type: 'graceful-restart-deferred' }
+      | { type: 'graceful-restart-ready' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2300,6 +2304,20 @@ export type AgentWorkerEvent =
       type: 'tool-batch-completed';
       identity: SessionIdentity;
       digest: ToolBatchDigest;
+    }
+  | {
+      /** 优雅重启被推迟：列出还没到安全点的会话。Main 旁路消费，不进渲染层 */
+      type: 'graceful-restart-deferred';
+      sessions: {
+        identity: SessionIdentity;
+        reason: RestartDeferReason;
+        toolsInFlight: string[];
+      }[];
+    }
+  | {
+      /** 断点已落盘，worker 不再推进任何会话，等 Main 换新进程。Main 旁路消费 */
+      type: 'graceful-restart-ready';
+      checkpoint: RestartCheckpoint;
     }
   | {
       /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
@@ -4346,6 +4364,8 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         value.sessionIds.every((id) => typeof id === 'string')
         ? { type: 'pin-sessions', sessionIds: value.sessionIds }
         : null;
+    case 'graceful-restart':
+      return hasExactKeys(value, ['type']) ? { type: 'graceful-restart' } : null;
     case 'warm-mcp':
       return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)
         ? (value as unknown as AgentCommand)
@@ -4601,6 +4621,29 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     return hasExactKeys(value, ['type', 'identity', 'digest']) &&
       parseSessionIdentity(value.identity) &&
       parseToolBatchDigest(value.digest)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'graceful-restart-deferred') {
+    return hasExactKeys(value, ['type', 'sessions']) &&
+      Array.isArray(value.sessions) &&
+      value.sessions.every(
+        (entry) =>
+          isRecord(entry) &&
+          hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight']) &&
+          parseSessionIdentity(entry.identity) &&
+          (entry.reason === 'tool-in-flight' || entry.reason === 'turn-in-progress') &&
+          Array.isArray(entry.toolsInFlight) &&
+          entry.toolsInFlight.every(isNonEmptyString)
+      )
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  // 断点内容由 Main 用 parseRestartCheckpoint 细验（该函数带 node:fs，渲染层不能引）
+  if (value.type === 'graceful-restart-ready') {
+    return hasExactKeys(value, ['type', 'checkpoint']) &&
+      isRecord(value.checkpoint) &&
+      Array.isArray(value.checkpoint.sessions)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

@@ -184,6 +184,21 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 异步 hook 跨结束、边界成功消费一次、abort 后仅移除目标且保留普通/扩展插话；
 `supervisor.agentDispatch.test.ts` 和 Bot 宿主/群联测验证消费回执与重新准入。
 
+第四处：优雅重启（菜单「重启」）在 `supervisor.installRestartBoundary()` 包住
+`session.agent.prepareNextTurnWithContext`。pi 1.5.1 的 loop 在工具批全部返回、toolResult 已写进
+会话 jsonl、`turn_end` 之后，下一次 `turn_start` 之前调它（AgentSession 构造时装的压缩/提示词刷新
+也挂在这里，调用时现读属性，所以构造后再包仍生效）。有重启请求、全局没有工具在跑、没有排队插话时
+父会话停在这里，`checkRestart()` 把断点写到 `dataDir/restart-checkpoint.json`
+（格式与判定在 `src/shared/gracefulRestart.ts`，`scripts/graceful-restart-sim.mjs` 直接复用）。
+Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会话设置，新 worker 沿用断点里的 seq，
+`nextStep=model-request` 时用原 turnId 走 `continueSessionActivity` 续跑。不发 `worker-exited`。
+子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
+
+**升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult
+已落盘。`gracefulRestart.pi.test.ts` 用真实 SDK 验证时机与「新会话从文件续跑不重跑工具」；
+`supervisor.gracefulRestart.test.ts` 验证推迟、落盘与续跑；`node scripts/verify-graceful-restart.mjs`
+跑进程级四条契约。
+
 新增此类依赖前先找公开 API；确实没有时，三件事缺一不可：
 
 1. 封成带注释的适配函数（说清为什么需要、上游行为是什么）

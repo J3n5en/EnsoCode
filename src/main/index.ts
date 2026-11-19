@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
-import { app, type BrowserWindow, crashReporter } from 'electron';
+import { app, type BrowserWindow, crashReporter, dialog } from 'electron';
 import { syncDropShelf } from './desktop/dropShelf';
 import {
   registerLocalImageProtocolHandler,
@@ -24,10 +24,11 @@ import { createSecretaryLinkInbox } from './protocol/secretaryLink';
 import {
   agentWorkerAlive,
   recordAgentWorkerGone,
+  requestGracefulWorkerRestart,
   startAgentWorker,
   stopAgentWorkerForQuit,
 } from './services/agentHost';
-import { installAppMenu } from './services/appMenu';
+import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
 import {
   ensureTray,
@@ -187,6 +188,10 @@ if (!gotTheLock) {
     if (!app.isPackaged && process.platform === 'darwin') {
       app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     }
+    setAppMenuActions({
+      restartAgent: requestGracefulWorkerRestart,
+      notify: (message) => void dialog.showMessageBox({ type: 'info', message }),
+    });
     installAppMenu(readLocale());
 
     // 开发环境下默认用 F12 打开/关闭 DevTools

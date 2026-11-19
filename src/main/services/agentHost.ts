@@ -33,6 +33,7 @@ import {
 import { ELEVATE_ASKPASS_ENV } from '@shared/elevation';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
+import { RESTART_CHECKPOINT_ENV, RESTART_CHECKPOINT_FILE } from '@shared/gracefulRestart';
 import { resolveImageGenerationConfig } from '@shared/imageGeneration';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
 import { mcpHeaders } from '@shared/mcpConfig';
@@ -141,6 +142,7 @@ import {
 } from './extensionPlugins';
 import { PluginAgentRuns } from './extensionPlugins/agentRuns';
 import { PluginMcpRequests } from './extensionPlugins/mcpRequests';
+import { type GracefulRestartRequest, GracefulWorkerRestart } from './gracefulWorkerRestart';
 import { resolveGlobalInstruction } from './instructionStore';
 import { refreshMcpOAuthAccess } from './mcpOAuthRefresh';
 import { getMcpOAuthStore } from './mcpOAuthStore';
@@ -291,6 +293,7 @@ let snapshotPending: false | true | string = false;
 let commandsPending: AgentCommand[] = [];
 /** worker 曾启动后退出：spawn 时可按需重建（首次启动前不行，要等 env/PATH 探测） */
 let workerExited = false;
+const gracefulRestart = new GracefulWorkerRestart<WorkerProcess>();
 /** 不可闲置回收的会话，按来源（桌面查看 / 手机订阅）分桶；worker 重启后需重发并集 */
 const pinnedBySource = new Map<string, readonly string[]>();
 let lastPinnedKey = '';
@@ -325,7 +328,7 @@ export function customWorkflowPresetDir(): string {
   return path.join(agentDataDir(), 'workflows');
 }
 
-export function startAgentWorker(): void {
+export function startAgentWorker(options: { restartCheckpointFile?: string } = {}): void {
   if (worker) return;
   const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
@@ -334,6 +337,9 @@ export function startAgentWorker(): void {
     env: {
       ...process.env,
       ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
+      ...(options.restartCheckpointFile
+        ? { [RESTART_CHECKPOINT_ENV]: options.restartCheckpointFile }
+        : {}),
       ENSO_AGENT_DATA_DIR: agentDataDir(),
       // 编码会话的 image_view 白名单：应用存放用户图片的目录（bot-chats/<chatId>/media）
       ENSO_USER_IMAGE_DIRS: appUserImageDirs(app.getPath('userData')).join(path.delimiter),
@@ -419,6 +425,23 @@ export function startAgentWorker(): void {
           });
         return;
       }
+      if (event.type === 'graceful-restart-deferred') {
+        console.log(
+          `[agent] graceful restart deferred: ${event.sessions
+            .map((s) => `${s.identity.sessionId.slice(0, 8)}=${s.reason}`)
+            .join(', ')}`
+        );
+        return;
+      }
+      if (event.type === 'graceful-restart-ready') {
+        // 断点已落盘：之后的命令排队交给下一代，旧进程退出后由 exit 分支换代
+        if (worker === child && gracefulRestart.ready(child, event.checkpoint)) {
+          workerReady = false;
+          void killAndWaitExit(child, 5_000);
+        }
+        return;
+      }
+      gracefulRestart.observe(event);
       resolveReleaseWaiters(event);
       // 手动重读结果只回给发起 invoke 的等待者，不进普通事件流（renderer 的通用
       // snapshot 分支会顺手改 started / 清 asks，手动刷新不能有这些副作用）
@@ -434,15 +457,16 @@ export function startAgentWorker(): void {
     }
   });
   child.on('exit', (code: unknown) => {
+    const swap = worker === child ? gracefulRestart.exited(child) : { swap: false as const };
     if (worker === child) {
       worker = null;
       workerReady = false;
       workerExited = true;
-      parentInstanceIds.clear();
+      if (!swap.swap) parentInstanceIds.clear();
     }
     const dataDir = agentDataDir();
     const crash = takeAgentWorkerCrash(dataDir, childPid);
-    const detail = describeAgentWorkerExit(code, crash);
+    const detail = `${describeAgentWorkerExit(code, crash)}${swap.swap ? ' (graceful restart)' : ''}`;
     console.error(`[agent] worker exited pid=${childPid ?? '?'} ${detail}`);
     appendAgentWorkerExitLog(
       dataDir,
@@ -465,6 +489,12 @@ export function startAgentWorker(): void {
     }
     // 会话树随 worker 进程一起销毁，release 已达成；不唤醒就只能等到 8 秒超时报失败
     resolveAllReleaseWaiters();
+    if (swap.swap) {
+      // 优雅重启：会话不算失败，下一代按断点重建并接着跑；先重发 spawn，再发换代期间排队的命令
+      commandsPending = [...swap.replay, ...commandsPending];
+      startAgentWorker({ restartCheckpointFile: path.join(dataDir, RESTART_CHECKPOINT_FILE) });
+      return;
+    }
     onEvent?.({ type: 'worker-exited', detail });
   });
 }
@@ -513,6 +543,7 @@ export function recordAgentWorkerGone(details: {
 }
 
 export function stopAgentWorker(): void {
+  gracefulRestart.reset();
   workspaceLocks.failAll('agent worker stopped');
   pluginMcp.failAll('agent worker stopped');
   pluginAgents.failAll('agent worker stopped');
@@ -526,6 +557,18 @@ export function stopAgentWorker(): void {
 
 export function agentWorkerAlive(): boolean {
   return worker !== null;
+}
+
+/**
+ * 菜单「重启」：请当前 worker 在安全点落断点后换一个新进程，会话从断点接着跑。
+ * 窗口不动；重启进行中再请求不会叠第二个进程。
+ */
+export function requestGracefulWorkerRestart(): GracefulRestartRequest {
+  const current = worker && workerReady ? worker : null;
+  const result = gracefulRestart.request(current);
+  if (result === 'requested')
+    current?.postMessage({ type: 'graceful-restart' } satisfies AgentCommand);
+  return result;
 }
 
 /**
@@ -548,6 +591,8 @@ export async function restartAgentWorker(timeoutMs = 5_000): Promise<boolean> {
 export function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
   const child = worker;
   if (!child) return Promise.resolve();
+  // 退出应用时不再换代
+  gracefulRestart.reset();
   return killAndWaitExit(child, timeoutMs);
 }
 
@@ -649,6 +694,7 @@ export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: 
     return { ok: false, error: `invalid ${command.type} command: rejected by worker contract` };
   if (workspaceCommandBlocked(command, workspaceBusy))
     return { ok: false, error: 'Workspace operation in progress.' };
+  gracefulRestart.record(command);
   const action = agentCommandDispatch({
     hasWorker: worker !== null,
     workerReady,

@@ -2,17 +2,21 @@
 // 优雅重启验证：工具调用结束后再重启进程，新进程接着原来的 agent loop 往下走，不从头跑。
 //   node scripts/verify-graceful-restart.mjs [--keep] [--self-test]
 //
-// 产品里还没有优雅重启，这里驱动的是旁边的独立模拟器 scripts/graceful-restart-sim.mjs
-// （应用启动路径不引用它）。模拟器沿用真实边界的名字：
+// 驱动的是旁边的独立模拟器 scripts/graceful-restart-sim.mjs（应用启动路径不引用它）。
+// 模拟器直接 import 产品的 src/shared/gracefulRestart.ts（安全点判定 restartGate、断点读写），
+// 协议与真实 worker 一致，沿用真实边界的名字：
 //   - agent worker：Main 用 utilityProcess.fork 起的进程（src/main/services/agentHost.ts）；
 //   - pi 事件：turn_start / tool_execution_start / tool_execution_end / turn_end / agent_end /
 //     agent_settled（src/agent/supervisor.ts onSessionEvent），进行中的工具记在 toolStartAt；
 //   - 回合收口：worker 发给 Main 的 turn-completed（同一个 turnId 贯穿一次 agent loop）；
+//   - 重启：Main 发 graceful-restart 命令，worker 回 graceful-restart-deferred（未到安全点的会话列表）
+//     或 graceful-restart-ready（checkpoint = 写进 restart-checkpoint.json 的整份断点）；
 //   - 对话正文：session.jsonl（pi SessionManager 会话文件），新进程靠它恢复上下文。
 // 两个进程怎么来：本脚本开一个 127.0.0.1 控制端口（扮演 Main），起第 1 代模拟 worker。
-// 收到 restart-request 后，模拟器在安全点写 restart-checkpoint.json，用 spawn 拉起下一代
+// 收到 graceful-restart 后，模拟器在安全点写 restart-checkpoint.json，用 spawn 拉起下一代
 // （detached，新 pid），然后自己 process.exit；下一代先等上一代 pid 消失，再读 session.jsonl
 // 和断点、重新连上控制端口接着跑。本脚本按 pid 核对：旧进程确实退出，新进程是另一个 pid。
+// （产品里换进程由 Main 做：杀掉旧 utilityProcess 后带断点路径 fork 新的，再重发 spawn-parent。）
 //
 // 要证明的 4 条（任一条失败都非 0 退出，并写明是第几条）：
 //   1. 没有进行中的工具调用时收到重启请求，就在当前回合边界重启。
@@ -23,7 +27,7 @@
 // --keep：保留 /tmp 下的现场目录（session.jsonl、tool-ledger.jsonl、断点、sim.log）。
 //
 // 不做的事（留给以后的升级功能）：不换二进制、不拉更新包、不重启整个 Electron 窗口、
-// 不处理重启过程中用户又发来的新消息（模拟器直接拒收）、不接自动升级、不改正式的 agent loop。
+// 不处理重启过程中用户又发来的新消息（模拟器直接拒收）、不接自动升级。
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
@@ -100,6 +104,23 @@ const transcriptOf = (dir) =>
 
 const nonce = (prefix) => `${prefix}-${randomBytes(3).toString('hex')}`;
 
+// 模拟器 import 了 .ts：老一些的 Node 22 需要显式打开类型剥离
+const SIM_ARGS = process.features?.typescript ? [SIM] : ['--experimental-strip-types', SIM];
+
+const isRestartReaction = (generation) => (e) =>
+  e.generation === generation &&
+  (e.type === 'graceful-restart-deferred' || e.type === 'graceful-restart-ready');
+
+/** 断点里只有这一个会话时取出它的条目，否则 undefined（多出或缺少会话都算错） */
+const entryOf = (event) =>
+  event?.checkpoint?.sessions?.length === 1 ? event.checkpoint.sessions[0] : undefined;
+
+/** 推迟回执里只有这一个会话时取出它，否则 undefined */
+const deferredOf = (event) =>
+  event?.type === 'graceful-restart-deferred' && event.sessions?.length === 1
+    ? event.sessions[0]
+    : undefined;
+
 const is =
   (type, generation, more = () => true) =>
   (event) =>
@@ -161,7 +182,7 @@ async function scenario(name, claims, body) {
       Object.entries(process.env).filter(([key]) => !key.startsWith('SIM_'))
     );
     const log = openSync(path.join(dir, 'sim.log'), 'a');
-    const child = spawn(process.execPath, [SIM], {
+    const child = spawn(process.execPath, SIM_ARGS, {
       env: {
         ...env,
         SIM_DIR: dir,
@@ -224,22 +245,21 @@ async function idleBoundaryScenario({ hub, start }) {
     '第 1 代开始流式回复',
     is('message_start', 1, (e) => e.role === 'assistant')
   );
-  hub.send(1, { type: 'restart-request' });
-  const reaction = await hub.wait(
-    1,
-    '第 1 代回应重启请求',
-    (e) => e.generation === 1 && (e.type === 'restart-deferred' || e.type === 'restarting')
-  );
+  hub.send(1, { type: 'graceful-restart' });
+  const reaction = await hub.wait(1, '第 1 代回应重启请求', isRestartReaction(1));
   check(
     1,
-    reaction.type === 'restart-deferred' &&
-      reaction.reason === 'turn-in-progress' &&
-      reaction.toolsInFlight.length === 0,
+    deferredOf(reaction)?.reason === 'turn-in-progress' &&
+      deferredOf(reaction).toolsInFlight.length === 0,
     '回复流式输出中途收到请求（toolStartAt 为空）：不打断，等到回合边界',
     reaction
   );
   const completed = await hub.wait(1, '第 1 代 turn-completed', is('turn-completed', 1));
-  const restarting1 = await hub.wait(1, '第 1 代在回合边界发出 restarting', is('restarting', 1));
+  const restarting1 = await hub.wait(
+    1,
+    '第 1 代在回合边界发出 graceful-restart-ready',
+    is('graceful-restart-ready', 1)
+  );
   const reply1 = hub.events.find(is('message_end', 1, (e) => e.role === 'assistant'));
   check(
     1,
@@ -256,7 +276,7 @@ async function idleBoundaryScenario({ hub, start }) {
   check(1, !hub.events.some(is('tool_execution_start', 1)), '这一回合没有工具调用');
   check(
     1,
-    restarting1.checkpoint?.nextStep === 'await-user',
+    entryOf(restarting1)?.nextStep === 'await-user' && entryOf(restarting1).turnId === null,
     '断点记为 await-user（回合已收口，等用户下一条）',
     restarting1.checkpoint
   );
@@ -280,15 +300,13 @@ async function idleBoundaryScenario({ hub, start }) {
     '第 2 代起来后保持空闲，没有自己开跑'
   );
   const requestedAt = Date.now();
-  hub.send(2, { type: 'restart-request' });
-  const reaction2 = await hub.wait(
-    1,
-    '第 2 代回应空闲时的重启请求',
-    (e) => e.generation === 2 && (e.type === 'restart-deferred' || e.type === 'restarting')
-  );
+  hub.send(2, { type: 'graceful-restart' });
+  const reaction2 = await hub.wait(1, '第 2 代回应空闲时的重启请求', isRestartReaction(2));
   check(
     1,
-    reaction2.type === 'restarting' && reaction2.at - requestedAt < 1000,
+    reaction2.type === 'graceful-restart-ready' &&
+      entryOf(reaction2)?.nextStep === 'await-user' &&
+      reaction2.at - requestedAt < 1000,
     '会话空闲（两个回合之间）收到请求：立即重启，不等待',
     { type: reaction2.type, waitedMs: reaction2.at - requestedAt }
   );
@@ -317,26 +335,21 @@ async function toolBoundaryScenario({ dir, hub, start }) {
     is('tool_execution_start', 1, (e) => e.toolName === 'slow_probe')
   );
   const callId = toolStart.toolCallId;
-  hub.send(1, { type: 'restart-request' });
+  hub.send(1, { type: 'graceful-restart' });
 
   // 第 2 条
-  const reaction = await hub.wait(
-    2,
-    '第 1 代回应重启请求',
-    (e) => e.generation === 1 && (e.type === 'restart-deferred' || e.type === 'restarting')
-  );
+  const reaction = await hub.wait(2, '第 1 代回应重启请求', isRestartReaction(1));
   check(
     2,
-    reaction.type === 'restart-deferred' &&
-      reaction.reason === 'tool-in-flight' &&
-      reaction.toolsInFlight.includes(callId),
+    deferredOf(reaction)?.reason === 'tool-in-flight' &&
+      deferredOf(reaction).toolsInFlight.includes(callId),
     `工具 ${callId} 还在跑：请求挂起，不立即重启`,
     reaction
   );
   await delay(300);
   check(
     2,
-    alive(hello1.pid) && !hub.events.some(is('restarting', 1)),
+    alive(hello1.pid) && !hub.events.some(is('graceful-restart-ready', 1)),
     `请求发出 300ms 后第 1 代进程 ${hello1.pid} 仍在，没有开始重启`
   );
   const toolEnd = await hub.wait(
@@ -350,11 +363,15 @@ async function toolBoundaryScenario({ dir, hub, start }) {
     '这次工具调用由第 1 代正常返回（不是错误、不是中断）',
     toolEnd
   );
-  const early = hub.events.find(is('restarting', 1));
+  const early = hub.events.find(is('graceful-restart-ready', 1));
   check(2, !early || early.seen > toolEnd.seen, '工具返回之前没有发生重启');
 
   // 第 3 条
-  const restarting1 = await hub.wait(3, '工具结束后第 1 代发出 restarting', is('restarting', 1));
+  const restarting1 = await hub.wait(
+    3,
+    '工具结束后第 1 代发出 graceful-restart-ready',
+    is('graceful-restart-ready', 1)
+  );
   check(
     3,
     restarting1.at - toolEnd.at < 1000,
@@ -366,7 +383,7 @@ async function toolBoundaryScenario({ dir, hub, start }) {
     !hub.events.some(is('turn_start', 1, (e) => e.seen > toolEnd.seen)),
     '第 1 代在工具结束后没有再发下一次模型请求（turn_start）'
   );
-  const checkpoint = restarting1.checkpoint;
+  const checkpoint = entryOf(restarting1);
   check(
     3,
     checkpoint?.nextStep === 'model-request' &&
@@ -374,7 +391,7 @@ async function toolBoundaryScenario({ dir, hub, start }) {
       checkpoint.turnId === agentStart.turnId &&
       checkpoint.toolsInFlight.length === 0,
     `断点写明：下一步是模型请求，刚完成 ${callId}，同一个 turnId，没有在跑的工具`,
-    checkpoint
+    restarting1.checkpoint
   );
   check(3, await waitExit(hello1.pid, 3000), `第 1 代进程 ${hello1.pid} 已退出`);
   const hello2 = await hub.wait(3, '第 2 代 worker 连上', is('hello', 2));
@@ -382,9 +399,10 @@ async function toolBoundaryScenario({ dir, hub, start }) {
   const archived = readJsonl(path.join(dir, 'restart-checkpoint.gen2.json'))[0];
   check(
     3,
-    isDeepStrictEqual(archived, checkpoint) && isDeepStrictEqual(resumed.checkpoint, checkpoint),
+    isDeepStrictEqual(archived, restarting1.checkpoint) &&
+      isDeepStrictEqual(resumed.checkpoint, checkpoint),
     '断点落在磁盘 restart-checkpoint.json，第 2 代读到的就是第 1 代写下的',
-    { archived, resumed: resumed.checkpoint, written: checkpoint }
+    { archived, resumed: resumed.checkpoint, written: restarting1.checkpoint }
   );
   check(
     3,
@@ -460,7 +478,11 @@ async function toolBoundaryScenario({ dir, hub, start }) {
 }
 
 async function verify() {
-  console.log(BREAK ? `故障注入：SIM_BREAK=${BREAK}` : '优雅重启验证（模拟器，不接产品）');
+  console.log(
+    BREAK
+      ? `故障注入：SIM_BREAK=${BREAK}`
+      : '优雅重启验证（模拟器，与产品共用安全点判定与断点代码）'
+  );
   await scenario('没有工具在跑时的重启（第 1 条）', [1], idleBoundaryScenario);
   await scenario('工具调用中途的重启（第 2-4 条）', [2, 3, 4], toolBoundaryScenario);
   console.log('\n汇总：');

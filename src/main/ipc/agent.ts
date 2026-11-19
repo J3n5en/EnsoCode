@@ -1874,7 +1874,9 @@ export function registerAgentHandlers(): void {
       workerEvent.type === 'mcp-oauth-refresh' ||
       workerEvent.type === 'plugin-mcp-result' ||
       workerEvent.type === 'plugin-agent-event' ||
-      workerEvent.type === 'workspace-unlock-result'
+      workerEvent.type === 'workspace-unlock-result' ||
+      workerEvent.type === 'graceful-restart-deferred' ||
+      workerEvent.type === 'graceful-restart-ready'
     )
       return;
     dispatchService?.observe(workerEvent);
