@@ -23,8 +23,10 @@ import { todoSessionView, todoStatus } from './todoLifecycle';
 export const STALL_MS = 10 * 60 * 1000;
 export const BATCH_MAX_ITEMS = 20;
 export const BATCH_MAX_CHARS = 12_000;
-/** 单条"最后说了什么"的上限：工作台、手机与中间进度回传只需要一句；终态回传见 reportLastText */
+/** 单条"最后说了什么"的上限：工作台、手机与停滞回传只需要一句；终态与一轮结束回传见 reportLastText */
 export const LAST_TEXT_MAX_CHARS = 500;
+/** 一轮结束回传给秘书的正文上限：比工作台那一句长，比终态汇报短 */
+export const TURN_ENDED_TEXT_MAX_CHARS = 2000;
 /** 同一会话的普通回传先攒着，到点只投最新一条。档案里的 updateWindowMs 可改成 1–60 秒 */
 export const UPDATE_WINDOW_MS = 45_000;
 export { ACTIVITY_LIMIT } from '@shared/secretary/feed';
@@ -276,17 +278,29 @@ export function capLastText(text: string | undefined): string | undefined {
 
 /**
  * 终态回传带上这一轮的完整汇报，秘书不用再读一遍会话就能报出提交号与测试数字。
- * 超过 TURN_REPORT_MAX_CHARS 只留结尾：结论通常在末尾。中间进度返回 undefined，仍走 capLastText。
+ * 一轮结束带 TURN_ENDED_TEXT_MAX_CHARS，没有汇报时用摘要正文。超过上限只留结尾：结论通常在末尾。
+ * 停滞返回 undefined，仍走 capLastText。
  */
 export function reportLastText(
   kind: SecretaryResultKind,
-  report: TurnReport | undefined
+  report: TurnReport | undefined,
+  digestText?: string
 ): string | undefined {
+  if (kind === 'turn-ended') {
+    const full = report?.text.trim();
+    const text = full || digestText?.trim();
+    if (!text) return undefined;
+    return keepTail(text, TURN_ENDED_TEXT_MAX_CHARS, full ? (report?.omitted ?? 0) : 0);
+  }
   if (!IMMEDIATE_RESULTS.has(kind)) return undefined;
   const text = report?.text.trim();
   if (!text) return undefined;
-  const kept = text.slice(-TURN_REPORT_MAX_CHARS);
-  const omitted = (report?.omitted ?? 0) + text.length - kept.length;
+  return keepTail(text, TURN_REPORT_MAX_CHARS, report?.omitted ?? 0);
+}
+
+function keepTail(text: string, max: number, omittedBefore: number): string {
+  const kept = text.slice(-max);
+  const omitted = omittedBefore + text.length - kept.length;
   return omitted > 0 ? `[已截断：前面省略 ${omitted} 字，以下是结尾]\n${kept}` : kept;
 }
 
