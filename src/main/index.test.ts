@@ -81,7 +81,6 @@ vi.mock('./services/agentHost', () => ({
   agentWorkerAlive: () => false,
   stopAgentWorkerForQuit: vi.fn(async () => undefined),
   prepareAgentWorkerForQuit: vi.fn(async () => 'skipped'),
-  requestGracefulWorkerRestart: vi.fn(),
   recordAgentWorkerGone: vi.fn(),
   agentDataDir: () => '/tmp/enso-index-test/agent',
 }));

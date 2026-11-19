@@ -184,7 +184,7 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 异步 hook 跨结束、边界成功消费一次、abort 后仅移除目标且保留普通/扩展插话；
 `supervisor.agentDispatch.test.ts` 和 Bot 宿主/群联测验证消费回执与重新准入。
 
-第四处：优雅重启（菜单「重启」）在 `supervisor.installRestartBoundary()` 包住
+第四处：优雅重启在 `supervisor.installRestartBoundary()` 包住
 `session.agent.prepareNextTurnWithContext`。pi 1.5.1 的 loop 在工具批全部返回、toolResult 已写进
 会话 jsonl、`turn_end` 之后，下一次 `turn_start` 之前调它（AgentSession 构造时装的压缩/提示词刷新
 也挂在这里，调用时现读属性，所以构造后再包仍生效）。有重启请求、全局没有工具在跑、没有排队插话时
@@ -203,6 +203,9 @@ Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会
 （writtenAt 对得上）都在时接管：第一代 worker 带断点 fork，`ipc/agent.resumeRootFromRestartManifest`
 按原 generation 重走普通 spawn（cwd / 会话文件只认权威记录，凭据现取），续跑的会话从退出 / 更新中断记录里剔除。
 安装更新失败时 `cancelAgentQuitCheckpoint` 撤掉清单，并按断点换代让会话接着跑。
+菜单「重启」（`appMenu` → `services/appRestart.ts`）是整个应用重启：`app.relaunch()` 后放行关窗确认、
+`app.quit()`，退出就走上面的 will-quit 收尾；同一进程只登记一次 relaunch（多次会起多个实例），
+进行中菜单项变为不可点的「正在重启…」。它不调用只换 worker 的 `requestGracefulWorkerRestart`。
 子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
 
 **升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult

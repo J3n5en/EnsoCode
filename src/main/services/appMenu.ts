@@ -6,15 +6,15 @@ import {
 } from '@shared/shellIntegration';
 import { app, Menu, type MenuItemConstructorOptions } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
-import type { GracefulRestartRequest } from './gracefulWorkerRestart';
 
 export const APP_DISPLAY_NAME = 'EnsoCode';
 
-/** 菜单动作由 Main 入口注入：appMenu 不直接依赖 agent worker 宿主 */
+/** 菜单动作由 Main 入口注入：appMenu 不直接依赖退出 / 重启流程 */
 export interface AppMenuActions {
-  /** 请当前 agent worker 在安全点换新进程（不重启窗口） */
-  restartAgent(): GracefulRestartRequest;
-  notify(message: string): void;
+  /** 整个应用优雅退出后重新打开；进行中重复调用无副作用 */
+  restartApp(): void;
+  isRestarting(): boolean;
+  reportError(message: string): void;
 }
 
 let appMenuActions: AppMenuActions | undefined;
@@ -23,17 +23,13 @@ export function setAppMenuActions(actions: AppMenuActions): void {
   appMenuActions = actions;
 }
 
-function restartAgentFromMenu(locale: Locale, actions: AppMenuActions): void {
-  const result = actions.restartAgent();
-  if (result === 'no-session') {
-    actions.notify(translate(locale, 'No session to restart right now.'));
-  } else if (result === 'already-restarting') {
-    actions.notify(
-      translate(
-        locale,
-        'A restart is already in progress and will finish once the running tool calls end.'
-      )
-    );
+function restartAppFromMenu(locale: Locale, actions: AppMenuActions): void {
+  try {
+    actions.restartApp();
+  } catch (error) {
+    console.error('[app-menu] 重启失败:', error);
+    const reason = error instanceof Error ? error.message : String(error);
+    actions.reportError(translate(locale, 'Restart failed: {{error}}', { error: reason }));
   }
 }
 
@@ -61,10 +57,12 @@ export function macAppMenuTemplate(
         { type: 'separator' },
         ...(actions
           ? [
-              {
-                label: translate(locale, 'Restart'),
-                click: () => restartAgentFromMenu(locale, actions),
-              },
+              actions.isRestarting()
+                ? { label: translate(locale, 'Restarting…'), enabled: false }
+                : {
+                    label: translate(locale, 'Restart'),
+                    click: () => restartAppFromMenu(locale, actions),
+                  },
             ]
           : []),
         { role: 'quit', label: `Quit ${APP_DISPLAY_NAME}` },

@@ -259,9 +259,8 @@ export const zhTranslations: Record<string, string> = {
   "What's new in {{version}}": '{{version}} 更新内容',
   'No release notes provided.': '此版本未提供更新日志。',
   Restart: '重启',
-  'No session to restart right now.': '现在没有可重启的会话。',
-  'A restart is already in progress and will finish once the running tool calls end.':
-    '重启已在进行中，正在跑的工具调用结束后就会完成。',
+  'Restarting…': '正在重启…',
+  'Restart failed: {{error}}': '重启失败：{{error}}',
   'Restart server': '重启服务端',
   'Restart server?': '重启服务端？',
   'Running tasks are interrupted; this page reconnects after the server is back.':

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
-import { app, type BrowserWindow, crashReporter, dialog } from 'electron';
+import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { syncDropShelf } from './desktop/dropShelf';
 import {
   registerLocalImageProtocolHandler,
@@ -28,12 +28,13 @@ import {
   agentWorkerAlive,
   prepareAgentWorkerForQuit,
   recordAgentWorkerGone,
-  requestGracefulWorkerRestart,
   startAgentWorker,
   stopAgentWorkerForQuit,
 } from './services/agentHost';
+import { allowAppQuit } from './services/appCloseConfirm';
 import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
+import { createAppRestart } from './services/appRestart';
 import {
   ensureTray,
   enterServerMode,
@@ -129,6 +130,12 @@ if (app.isPackaged && process.platform !== 'win32') {
 const gotTheLock = app.requestSingleInstanceLock();
 const pluginInstallInbox = createPluginInstallInbox(process.platform);
 const secretaryLinkInbox = createSecretaryLinkInbox(process.platform);
+// 菜单「重启」：退出走下面 will-quit 的 agent 收尾（安全点 + 恢复清单），新实例冷启动按清单续跑
+const appRestart = createAppRestart({
+  relaunch: () => app.relaunch(),
+  allowQuit: allowAppQuit,
+  quit: () => app.quit(),
+});
 
 function registerEnsoProtocol(): void {
   if (process.defaultApp && process.argv.length >= 2) {
@@ -194,8 +201,19 @@ if (!gotTheLock) {
       app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     }
     setAppMenuActions({
-      restartAgent: requestGracefulWorkerRestart,
-      notify: (message) => void dialog.showMessageBox({ type: 'info', message }),
+      restartApp: () => {
+        if (appRestart.restart() === 'restarting') installAppMenu(readLocale());
+      },
+      isRestarting: () => appRestart.restarting,
+      reportError: (message) => {
+        const parent = BrowserWindow.getFocusedWindow() ?? getMainWindow();
+        const options = { type: 'error' as const, message };
+        void (
+          parent && !parent.isDestroyed()
+            ? dialog.showMessageBox(parent, options)
+            : dialog.showMessageBox(options)
+        ).catch((error: unknown) => console.error('[app-menu] 提示框失败:', error));
+      },
     });
     installAppMenu(readLocale());
 

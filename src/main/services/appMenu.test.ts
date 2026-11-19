@@ -43,18 +43,26 @@ describe('macAppMenuTemplate', () => {
 
   describe('重启', () => {
     const status = { ensoCommand: false, finderQuickAction: false };
-    const setup = (result: ReturnType<AppMenuActions['restartAgent']>) => {
-      const actions = { restartAgent: vi.fn(() => result), notify: vi.fn() };
+    const setup = (options: { restarting?: boolean; fail?: boolean } = {}) => {
+      const actions: AppMenuActions = {
+        restartApp: vi.fn(() => {
+          if (options.fail) throw new Error('relaunch unavailable');
+        }),
+        isRestarting: () => options.restarting ?? false,
+        reportError: vi.fn(),
+      };
       const items = macAppMenuTemplate('zh', false, status, actions)[0].submenu as {
         role?: string;
         label?: string;
+        enabled?: boolean;
         click?: () => void;
       }[];
-      return { actions, items, restart: items.find((item) => item.label === '重启') };
+      const restart = items.find((item) => item.label === '重启' || item.label === '正在重启…');
+      return { actions, items, restart };
     };
 
     it('放在应用菜单里、紧挨着退出', () => {
-      const { items, restart } = setup('requested');
+      const { items, restart } = setup();
       expect(restart).toBeDefined();
       expect(items.indexOf(restart ?? {}) + 1).toBe(
         items.findIndex((item) => item.role === 'quit')
@@ -62,25 +70,27 @@ describe('macAppMenuTemplate', () => {
       expect(restart).not.toHaveProperty('role');
     });
 
-    it('点击发出优雅重启请求；请求已受理时不弹窗', () => {
-      const { actions, restart } = setup('requested');
+    it('点击重启整个应用', () => {
+      const { actions, restart } = setup();
+      expect(restart?.label).toBe('重启');
       restart?.click?.();
-      expect(actions.restartAgent).toHaveBeenCalledTimes(1);
-      expect(actions.notify).not.toHaveBeenCalled();
+      expect(actions.restartApp).toHaveBeenCalledTimes(1);
+      expect(actions.reportError).not.toHaveBeenCalled();
     });
 
-    it('没有可重启的会话：明确提示', () => {
-      const { actions, restart } = setup('no-session');
-      restart?.click?.();
-      expect(actions.notify).toHaveBeenCalledWith('现在没有可重启的会话。');
+    it('重启进行中：菜单项显示「正在重启…」且不可再点', () => {
+      const { restart } = setup({ restarting: true });
+      expect(restart?.label).toBe('正在重启…');
+      expect(restart?.enabled).toBe(false);
     });
 
-    it('重启进行中再点：不再发请求以外的动作，只提示', () => {
-      const { actions, restart } = setup('already-restarting');
-      restart?.click?.();
-      expect(actions.notify).toHaveBeenCalledWith(
-        '重启已在进行中，正在跑的工具调用结束后就会完成。'
-      );
+    it('点击处理抛错：不吞掉，给用户一句失败原因', () => {
+      const { actions, restart } = setup({ fail: true });
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      expect(() => restart?.click?.()).not.toThrow();
+      expect(actions.reportError).toHaveBeenCalledWith('重启失败：relaunch unavailable');
+      expect(log).toHaveBeenCalled();
+      log.mockRestore();
     });
   });
 });
