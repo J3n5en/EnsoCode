@@ -39,7 +39,7 @@ import {
   readConversationsFor,
 } from '../services/remoteRenderer/conversationSync';
 import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
-import { broadcastToRenderers } from '../services/renderers';
+import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import { deleteSystemPrompt } from '../services/systemPromptStore';
 import { localUi } from '../services/uiHost';
 
@@ -875,7 +875,8 @@ export function patchConversationsState(
     conversations: Record<string, Record<string, unknown>>;
     order: string[];
     activeId: unknown;
-  }) => void
+  }) => void,
+  exceptSenderId?: number
 ): boolean {
   const current = readSettings() ?? {};
   const store = objectRecord(current['enso-conversations']) ?? {};
@@ -896,7 +897,11 @@ export function patchConversationsState(
   });
   return scheduleWrite({
     ...current,
-    [CONVERSATIONS_KEY]: applyMainConversationsPatch(current[CONVERSATIONS_KEY], patch),
+    [CONVERSATIONS_KEY]: applyMainConversationsPatch(
+      current[CONVERSATIONS_KEY],
+      patch,
+      exceptSenderId
+    ),
   });
 }
 
@@ -1020,6 +1025,38 @@ export function registerSettingsHandlers(): void {
       for (const id of targets) delete state.conversations[id];
       state.order = state.order.filter((id) => !targets.has(id));
     });
+  });
+
+  // 远端主界面的整表写回经中继，丢一帧就整条写回链卡住；新建的根会话在这里直接落盘并推给其它主界面
+  ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_REGISTER, async (event, row: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return false;
+    const record = objectRecord(row);
+    const id = record?.id;
+    if (
+      !record ||
+      typeof id !== 'string' ||
+      typeof record.projectId !== 'string' ||
+      record.parentId !== undefined ||
+      record.btwParentId !== undefined
+    ) {
+      return false;
+    }
+    const { getSourceAuthorityRegistry } = await import('./agent');
+    const authority = getSourceAuthorityRegistry()?.conversation(id);
+    if (
+      authority?.kind !== 'root' ||
+      authority.projectId !== record.projectId ||
+      authority.lifecycle === 'ended' ||
+      authority.bot
+    ) {
+      return false;
+    }
+    if (readPersistedConversation(id)) return true;
+    return patchConversationsState((state) => {
+      if (state.conversations[id]) return;
+      state.conversations[id] = record;
+      state.order = [id, ...state.order.filter((item) => item !== id)];
+    }, event.sender.id);
   });
 
   ipcMain.handle(IPC_CHANNELS.CONVERSATIONS_MOVE, async (_event, input: unknown) => {

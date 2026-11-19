@@ -11,6 +11,7 @@ import {
   onAgentEvent,
   onConversationsResync,
   readConversations,
+  registerConversation,
   removeConversations,
   resetSessionHarness,
   secretaryGoalAction,
@@ -132,6 +133,44 @@ describe('typed Agent child projection', () => {
     expect(agentAbort).not.toHaveBeenCalled();
     expect(removeConversations).toHaveBeenCalledWith(['parent']);
     expect(sessionsModule.useSessionsStore.getState().conversations.parent).toBeUndefined();
+  });
+
+  it('新建会话立即请 Main 登记落盘形状的这一行；复用空白会话也重新登记', async () => {
+    registerConversation.mockClear();
+    const id = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    expect(id).toBeTruthy();
+    expect(registerConversation).toHaveBeenCalledTimes(1);
+    const [row] = registerConversation.mock.calls[0] as [Record<string, unknown>];
+    expect(row).toMatchObject({ id, projectId: 'project', title: '', started: false });
+    expect(row.messages).toEqual([]);
+
+    const again = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    expect(again).toBe(id);
+    expect(registerConversation).toHaveBeenCalledTimes(2);
+    expect(registerConversation.mock.calls[1]?.[0]).toMatchObject({ id });
+  });
+
+  it('登记失败不影响新建', async () => {
+    registerConversation.mockRejectedValueOnce(new Error('remote-session-lost'));
+    const id = await sessionsModule.useSessionsStore.getState().newConversation('project');
+    expect(id).toBeTruthy();
+    expect(sessionsModule.useSessionsStore.getState().conversations[id!]).toBeDefined();
+  });
+
+  it('adoptPairSession 补登记权威后也请 Main 登记这一行', async () => {
+    registerConversation.mockClear();
+    sessionsModule.useSessionsStore.getState().adoptPairSession({
+      sessionId: 'phone-lite',
+      projectId: 'project',
+      providerId: 'p',
+      modelId: 'm',
+      reasoningEnabled: false,
+    });
+    await vi.waitFor(() =>
+      expect(registerConversation).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'phone-lite', projectId: 'project', started: false })
+      )
+    );
   });
 
   it('写回被拒后重读磁盘，补回磁盘行且保留本地新行', async () => {

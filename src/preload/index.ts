@@ -331,6 +331,9 @@ const electronAPI = {
     /** 用户明确删除会话：Main 先删行，空表写回不会被整表删除守卫拦下 */
     removeConversations: (ids: string[]): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_REMOVE, ids),
+    /** 新建的根会话：Main 立即登记这一行（已有则不动），不依赖整表写回送达 */
+    registerConversation: (row: unknown): Promise<boolean> =>
+      ipcRenderer.invoke(IPC_CHANNELS.CONVERSATIONS_REGISTER, row),
     moveConversation: (input: {
       conversationId: string;
       targetProjectId: string;

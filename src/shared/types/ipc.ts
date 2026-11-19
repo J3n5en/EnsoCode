@@ -10,6 +10,8 @@ export const IPC_CHANNELS = {
   CONVERSATIONS_READ: 'conversations:read',
   /** 用户明确删除这些会话：Main 按 id 删行并推补丁，不经写回的整表删除守卫 */
   CONVERSATIONS_REMOVE: 'conversations:remove',
+  /** 主界面新建根会话：Main 按权威登记这一行并立即推给其它主界面，不等整表写回 */
+  CONVERSATIONS_REGISTER: 'conversations:register',
   /** 把会话改挂到另一个项目：改权威 projectId，并补丁 persist 行 */
   CONVERSATIONS_MOVE: 'conversations:move',
   /** main → 主界面 renderer：它的会话写回被拒收，需重新读会话 */
