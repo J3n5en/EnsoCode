@@ -724,7 +724,12 @@ export function ModelPicker({
           : t('Fetched {{count}} models', { count: modelCount });
       addToast({
         type: failedCount > 0 ? 'warning' : 'success',
-        title: t('Fetched {{count}} providers', { count: okCount }),
+        title:
+          failedCount === 0
+            ? t('Fetched {{count}} providers', { count: okCount })
+            : okCount > 0
+              ? t('{{ok}} succeeded, {{failed}} failed', { ok: okCount, failed: failedCount })
+              : t('Sync failed ({{failed}})', { failed: failedCount }),
         description:
           failedCount > 0
             ? `${fetched} · ${t('{{count}} failed', { count: failedCount })}: ${firstError}`
