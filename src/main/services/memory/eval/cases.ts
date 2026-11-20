@@ -2183,7 +2183,8 @@ export const EVAL_CASES: EvalCase[] = [
         key: 'old',
         space: 'project',
         unitType: 'decision',
-        content: 'pnpm 构建：pnpm -r build 逐包构建，全量约 6 分钟，pnpm 构建脚本在根 package.json。',
+        content:
+          'pnpm 构建：pnpm -r build 逐包构建，全量约 6 分钟，pnpm 构建脚本在根 package.json。',
         createdAt: '2025-11-10T09:00:00.000Z',
       },
       {
