@@ -278,15 +278,6 @@ const local: Record<string, (...args: unknown[]) => unknown> = {
   [IPC_CHANNELS.RESOURCES_STORAGE_REVEAL]: unsupported,
   [IPC_CHANNELS.BOT_OPEN_WORKSPACE]: unsupported,
   [IPC_CHANNELS.BOT_ARTIFACT_OPEN]: unsupported,
-  [IPC_CHANNELS.SPEECH_MIC_ACCESS]: async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      for (const track of stream.getTracks()) track.stop();
-      return true;
-    } catch {
-      return false;
-    }
-  },
   [IPC_CHANNELS.APP_SET_BADGE_COUNT]: (count) => {
     const nav = navigator as Navigator & {
       setAppBadge?: (n?: number) => Promise<void>;
@@ -297,6 +288,8 @@ const local: Record<string, (...args: unknown[]) => unknown> = {
   },
   [IPC_CHANNELS.APP_CLOSE_RESPONSE]: () => undefined,
   [IPC_CHANNELS.APP_FLUSH_PERSIST_RESPONSE]: () => undefined,
+  [IPC_CHANNELS.APP_RESTART_FORCE]: () => undefined,
+  [IPC_CHANNELS.APP_RESTART_WAITING_GET]: () => null,
   [IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION]: () => undefined,
   [IPC_CHANNELS.NOTIFICATION_FOCUS_SESSION]: () => undefined,
 };

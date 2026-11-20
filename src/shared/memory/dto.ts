@@ -269,8 +269,6 @@ export interface ChatModelDto {
   downloadedBytes: number;
   state: EmbeddingModelState;
   downloadable: boolean;
-  /** 专用模型（如语音纠错），记忆设置不列出 */
-  purpose?: 'voice-correction';
 }
 
 export interface EmbeddingDownloadProgressDto {

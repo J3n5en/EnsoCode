@@ -360,13 +360,6 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
       'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.',
   },
   {
-    id: 'voice.root',
-    category: 'voice',
-    title: 'Voice input',
-    description:
-      'Adds a microphone to the composer on this computer and on paired phones. Local models transcribe speech on this computer.',
-  },
-  {
     id: 'tools.editMode',
     category: 'tools',
     title: 'File edit mode',

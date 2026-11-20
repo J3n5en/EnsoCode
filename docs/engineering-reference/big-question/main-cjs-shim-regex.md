@@ -43,5 +43,5 @@ const mod = load(dir);
 
 ## 相关代码
 
-- `src/main/services/speech/service.ts` 的 `createSherpaRecognizer`
+- 曾由 `src/main/services/speech/service.ts` 的 `createSherpaRecognizer` 触发（该文件已随语音输入移除）
 - `node_modules/electron-vite/dist/chunks/lib-*.js` 的 `CJSyntaxRe` / `ESMStaticImportRe`

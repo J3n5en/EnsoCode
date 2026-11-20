@@ -942,6 +942,7 @@ if (process.argv[2] === 'gain') process.stdout.write(JSON.stringify({ summary: {
       | undefined;
     const manager = {
       limits: SHELL_LIMITS,
+      recoveredDuplicate: () => undefined,
       start(_sessionId: string, command: string, _cwd: string, options?: typeof launch) {
         launch = { command, ...options };
         return 'task-1';
@@ -994,6 +995,7 @@ if (process.argv[2] === 'gain') process.stdout.write(JSON.stringify({ summary: {
       | undefined;
     const manager = {
       limits: SHELL_LIMITS,
+      recoveredDuplicate: () => undefined,
       start(_sessionId: string, command: string, _cwd: string, options?: typeof launch) {
         launch = { command, ...options };
         return 'task-1';

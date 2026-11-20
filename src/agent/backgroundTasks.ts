@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
+import { createWriteStream, mkdirSync, statSync, type WriteStream } from 'node:fs';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { stripVTControlCharacters } from 'node:util';
@@ -7,6 +7,7 @@ import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-cod
 import { SHELL_READ_HINT, SHELL_SLEEP_HINT, SHELL_TIMEOUT_HINT } from '@shared/shellHints';
 import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
 import type { BackgroundTaskInfo } from '@shared/types/agent';
+import { commandKey, commandSummary, type DetachedTaskRecord } from './detachedTasksManifest';
 import {
   bindForegroundCommand,
   type DetachableProcess,
@@ -16,6 +17,18 @@ import {
   ForegroundYieldError,
 } from './foregroundCommand';
 import { killProcessTree } from './killTree';
+import {
+  attachFileBacked,
+  defaultRunProbe,
+  type FileBackedRun,
+  processAlive,
+  type RunProbe,
+  readExitCode,
+  readRunOutput,
+  removeRunFiles,
+  runFiles,
+  spawnFileBacked,
+} from './shell/detachedRun';
 import { hardenedEnv } from './shell/hardenedEnv';
 import { type CommandClass, classifyCommand } from './shell/policy';
 import {
@@ -84,6 +97,13 @@ interface Task {
   deadlineTimer?: NodeJS.Timeout;
   /** 直接子进程；没有 pid 的（前台移交）不做存活探针 */
   pid?: number;
+  /** 输出直写文件、能脱离 worker 活过重启的进程；没有的（管道 / 远程 / Windows）重启只能等它结束 */
+  run?: FileBackedRun;
+  /** 原命令 + cwd 的指纹：认回的任务据此拦同一命令的重复启动 */
+  commandKey?: string;
+  cwd?: string;
+  /** 上一代 worker 交出、本代认回的任务 */
+  recovered?: boolean;
   waiters: Array<() => void>;
   details?: unknown;
   finalize?: () => Promise<unknown>;
@@ -140,7 +160,7 @@ export interface TaskEvents {
   /** 存活任务集合或状态变化时的全量快照（REPLACE 语义）：漏了 edge 事件或静默清理也能收敛 */
   onLevel?(sessionId: string, tasks: BackgroundTaskInfo[]): void;
   /** 未被模型知情的任务结束时触发：supervisor 决定注入唤醒或挂 pending 搭车 */
-  onCompletionNotify(sessionId: string, text: string): void;
+  onCompletionNotify(sessionId: string, text: string, options?: { durable?: boolean }): void;
 }
 
 /** 毫秒转秒（保留一位小数），用于工具描述与回执里的时长 */
@@ -200,6 +220,11 @@ export class BackgroundTaskManager {
     private currentLimits: ShellLimits = SHELL_LIMITS
   ) {}
 
+  /** 任务日志与文件直写输出所在目录 */
+  get outputDir(): string {
+    return this.logDir;
+  }
+
   /** 当前生效的命令时限；全局 settings.shell 变更时由 setLimits 整体替换，执行路径每次现读 */
   get limits(): ShellLimits {
     return this.currentLimits;
@@ -221,9 +246,44 @@ export class BackgroundTaskManager {
       finalize?: () => Promise<unknown>;
       /** 子进程环境；缺省继承 process.env（远程 ssh 包装命令需要原样的本地环境） */
       env?: NodeJS.ProcessEnv;
+      /** 本地 POSIX 命令：输出直写文件，重启时可脱离 worker 活下来 */
+      detachable?: boolean;
+      commandKey?: string;
     }
   ): string {
     const taskId = this.reserveId(sessionId);
+    const run =
+      spawnOpts?.detachable && !spawnOpts.file && process.platform !== 'win32'
+        ? spawnFileBacked({
+            // 与 spawn(command, { shell: true }) 同一个 shell
+            shell: '/bin/sh',
+            args: ['-c'],
+            command,
+            cwd,
+            env: spawnOpts.env,
+            dir: this.logDir,
+          })
+        : undefined;
+    if (run) {
+      const task = this.register(sessionId, taskId, spawnOpts?.displayCommand ?? command, {
+        details: spawnOpts?.details,
+        finalize: spawnOpts?.finalize,
+        kill: (signal) => run.kill(signal),
+      });
+      task.run = run;
+      task.cwd = cwd;
+      task.commandKey = spawnOpts?.commandKey;
+      run.sink((chunk) => this.append(task, chunk));
+      run.done.then(
+        ({ code, signal }) => this.exited(task, code, signal),
+        (error: unknown) => {
+          task.output += `\n[spawn error] ${error instanceof Error ? error.message : String(error)}`;
+          if (task.info.status === 'running' && !task.settling) void this.settle(task, 'failed');
+        }
+      );
+      this.announce(task);
+      return taskId;
+    }
     // POSIX 下 detached 独立进程组；kill 时整棵树一起清（Windows 不 detached，走 taskkill /T）
     const child = spawnBackground(command, cwd, spawnOpts);
     const task = this.register(sessionId, taskId, spawnOpts?.displayCommand ?? command, {
@@ -248,7 +308,7 @@ export class BackgroundTaskManager {
   adopt(
     sessionId: string,
     proc: DetachableProcess,
-    opts: { command: string; startedAt: number; deadlineSec?: number }
+    opts: { command: string; startedAt: number; deadlineSec?: number; cwd?: string }
   ): string {
     const taskId = this.reserveId(sessionId);
     const task = this.register(sessionId, taskId, opts.command, {
@@ -256,6 +316,11 @@ export class BackgroundTaskManager {
       kill: () => proc.kill(),
     });
     task.yieldedAt = Date.now();
+    task.run = proc.detachable?.();
+    if (opts.cwd !== undefined) {
+      task.cwd = opts.cwd;
+      task.commandKey = commandKey(opts.command, opts.cwd);
+    }
     this.append(task, Buffer.from(proc.output()));
     // 让位回执会带上这部分输出：视为已读。pipe() 之后 proc.output() 冻结（不再捕获），
     // ForegroundCommand.detach 在同一同步段里取到的 error.output 与这里是同一快照，不存在时差
@@ -367,13 +432,21 @@ export class BackgroundTaskManager {
       details?: unknown;
       finalize?: () => Promise<unknown>;
       startedAt?: number;
+      /** 认回的任务接着写同一份日志 */
+      appendLog?: boolean;
     }
   ): Task {
     const logPath = path.join(this.logDir, `${taskId}.log`);
     let logStream: WriteStream | null = null;
+    let logBytes = 0;
     try {
       mkdirSync(this.logDir, { recursive: true });
-      logStream = createWriteStream(logPath);
+      if (opts.appendLog) {
+        try {
+          logBytes = statSync(logPath).size;
+        } catch {}
+      }
+      logStream = createWriteStream(logPath, { flags: opts.appendLog ? 'a' : 'w' });
     } catch {
       // 磁盘日志失败不阻塞任务，仅失去全量回看
     }
@@ -389,7 +462,7 @@ export class BackgroundTaskManager {
       dirty: false,
       logPath,
       logStream,
-      logBytes: 0,
+      logBytes,
       logDroppedBytes: 0,
       decoder: new StringDecoder('utf8'),
       consumed: false,
@@ -533,7 +606,10 @@ export class BackgroundTaskManager {
     this.emitLevel(task.sessionId);
     // 幂等抑制：模型已知情（阻塞等到 / 自己停的且收到回执）就不再打扰
     if (!task.consumed) {
-      this.events.onCompletionNotify(task.sessionId, this.completionText(task));
+      const text = this.completionText(task);
+      // 认回的任务所属会话可能还没打开：通知要落盘等它打开，不能丢
+      if (task.recovered) this.events.onCompletionNotify(task.sessionId, text, { durable: true });
+      else this.events.onCompletionNotify(task.sessionId, text);
     }
   }
 
@@ -723,10 +799,145 @@ export class BackgroundTaskManager {
       .map((task) => ({ ...task.info, tail: task.output.slice(-TAIL_LIMIT) }));
   }
 
+  /**
+   * 前台命令转后台（adopt，有 yieldedAt）后还没结束的任务：优雅重启把它们当作在跑的工具。
+   * exceptDetachable：重启会把能脱离的交给下一代，只剩脱离不了的需要等
+   */
+  runningYielded(sessionId: string, opts?: { exceptDetachable?: boolean }): string[] {
+    return [...this.tasks.values()]
+      .filter(
+        (task) =>
+          task.sessionId === sessionId &&
+          task.yieldedAt !== undefined &&
+          task.info.status === 'running' &&
+          !(opts?.exceptDetachable && task.run)
+      )
+      .map((task) => task.info.taskId);
+  }
+
   stopAll(): void {
     for (const task of this.tasks.values()) {
       if (task.info.status === 'running') this.stop(task.info.taskId, true);
     }
+  }
+
+  /**
+   * 重启前把能脱离的在跑任务交出去：读完已有输出、停止跟读，进程不动，从本代移除，返回恢复清单条目。
+   * 脱离不了的（管道进程）留在原处，worker 收尾时照常停掉。
+   */
+  detachForRestart(): DetachedTaskRecord[] {
+    const records: DetachedTaskRecord[] = [];
+    for (const task of [...this.tasks.values()]) {
+      const run = task.run;
+      if (!run || task.info.status !== 'running' || task.settling) continue;
+      const outputOffset = run.release();
+      if (task.deadlineTimer) clearTimeout(task.deadlineTimer);
+      task.logStream?.end();
+      this.tasks.delete(task.info.taskId);
+      records.push({
+        taskId: task.info.taskId,
+        sessionId: task.sessionId,
+        command: commandSummary(task.info.command),
+        commandKey: task.commandKey ?? null,
+        cwd: task.cwd ?? run.cwd,
+        pid: run.pid,
+        runId: run.runId,
+        startedAt: task.info.startedAt,
+        runStartedAt: run.startedAt,
+        yieldedAt: task.yieldedAt ?? null,
+        deadlineAt: task.info.deadlineAt ?? null,
+        outputFile: run.outputFile,
+        outputOffset,
+        exitCodeFile: run.exitFile,
+        logPath: task.logPath,
+      });
+    }
+    return records;
+  }
+
+  /**
+   * 冷启动认回上一代交出的任务，同一个 taskId 重新登记：
+   * - pid 在、认得出是原进程（命令行 / 环境变量带着 runId，或启动时间对得上）：running，按偏移接着读输出文件；
+   * - pid 不在：读完剩余输出，按退出码文件标 done / failed，照常发完成通知；
+   * - pid 在但对不上（被复用）：不认、不发任何信号，标 failed 并说明找不到原进程。
+   * 返回处理过的 runId（孤儿清理跳过它们）。
+   */
+  recover(records: readonly DetachedTaskRecord[], probe: RunProbe = defaultRunProbe): Set<string> {
+    const handled = new Set<string>();
+    for (const record of records) {
+      if (this.tasks.has(record.taskId)) continue;
+      handled.add(record.runId);
+      const files = runFiles(this.logDir, record.runId);
+      const identity = { runId: record.runId, startedAt: record.runStartedAt ?? record.startedAt };
+      const state = !probe.alive(record.pid)
+        ? 'gone'
+        : probe.matches(record.pid, identity)
+          ? 'alive'
+          : 'reused';
+      const task = this.register(record.sessionId, record.taskId, record.command, {
+        startedAt: record.startedAt,
+        kill: () => {},
+        appendLog: true,
+      });
+      task.recovered = true;
+      task.cwd = record.cwd;
+      if (record.commandKey) task.commandKey = record.commandKey;
+      if (record.yieldedAt !== null) task.yieldedAt = record.yieldedAt;
+      if (state === 'alive') {
+        const run = attachFileBacked(
+          this.logDir,
+          {
+            runId: record.runId,
+            pid: record.pid,
+            startedAt: identity.startedAt,
+            cwd: record.cwd,
+            outputFile: files.outputFile,
+            exitFile: files.exitFile,
+          },
+          record.outputOffset,
+          probe
+        );
+        task.run = run;
+        task.kill = (signal) => run.kill(signal);
+        run.sink((chunk) => this.append(task, chunk));
+        void run.done.then(({ code }) => {
+          if (code === null) task.output += '\n[process ended; exit code unavailable]';
+          this.exited(task, code, null);
+        });
+        this.announce(task);
+        if (record.deadlineAt !== null)
+          this.armDeadline(task, (record.deadlineAt - Date.now()) / 1000);
+        continue;
+      }
+      this.append(task, readRunOutput(files.outputFile, record.outputOffset));
+      const code = state === 'gone' ? readExitCode(files.exitFile) : null;
+      removeRunFiles(this.logDir, record.runId);
+      task.output +=
+        state === 'gone'
+          ? code === null
+            ? '\n[process ended while the app was restarting; exit code unavailable]'
+            : ''
+          : `\n[original process not found after restart: pid ${record.pid} now belongs to another process; the task was not reattached and nothing was killed]`;
+      this.announce(task);
+      this.exited(task, code, null);
+    }
+    return handled;
+  }
+
+  /** 认回的、同一会话树里还在跑的同一命令（同 cwd）；没有返回 undefined */
+  recoveredDuplicate(sessionId: string, key: string): string | undefined {
+    const root = sessionId.split('::')[0] ?? sessionId;
+    for (const task of this.tasks.values()) {
+      if (
+        task.recovered &&
+        task.info.status === 'running' &&
+        !task.settling &&
+        task.commandKey === key &&
+        inSessionTree(task.sessionId, root)
+      )
+        return task.info.taskId;
+    }
+    return undefined;
   }
 }
 
@@ -836,16 +1047,7 @@ function spawnBackground(
   return spawn(command, { shell: true, cwd, env, ...mode, stdio });
 }
 
-/** 信号 0 只探测存活。pid 0 会打到进程组，不当成活着 */
-export function processAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-}
+export { processAlive };
 
 export type BackgroundLaunch = {
   command: string;
@@ -1058,6 +1260,26 @@ export function withBackground(
     ],
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const record = params as { command?: string; background?: boolean };
+      // 重启后认回的同一命令还在跑：不再起第二个（dev server 之类会撞端口）
+      const duplicate =
+        typeof record.command === 'string' && !transform
+          ? manager.recoveredDuplicate(sessionId, commandKey(record.command, cwd))
+          : undefined;
+      if (duplicate) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                `Not started: this command is already running as background task ${duplicate}. ` +
+                'It kept running through the app restart and was reattached, so starting it again would ' +
+                `collide with it (ports, files). task_output("${duplicate}") shows its output; ` +
+                `task_stop("${duplicate}") stops it if a fresh run is really needed.`,
+            },
+          ],
+          details: { backgroundTaskId: duplicate },
+        };
+      }
       if (record.background && typeof record.command === 'string') {
         const hooks = (definition as BackgroundAwareToolDefinition)[BACKGROUND_COMMAND_HOOKS];
         const prepared = hooks
@@ -1080,6 +1302,8 @@ export function withBackground(
                   env: hardenedEnv(process.env, {
                     shell: definition.name === 'powershell' ? 'powershell' : 'bash',
                   }),
+                  detachable: definition.name === 'bash',
+                  commandKey: commandKey(record.command, cwd),
                 }),
           });
         } catch (error) {
@@ -1127,6 +1351,7 @@ export function withBackground(
             manager.adopt(sessionId, proc, {
               command,
               startedAt,
+              cwd,
               ...(deadlineSec === undefined
                 ? {}
                 : { deadlineSec: Math.max(0, deadlineSec - (Date.now() - startedAt) / 1000) }),
@@ -1134,7 +1359,8 @@ export function withBackground(
           attachFinalize: (taskId, details, finalize) =>
             manager.attachFinalize(taskId, details, finalize),
         },
-        policy.yieldMs
+        policy.yieldMs,
+        transform ? undefined : manager.outputDir
       );
       bindForegroundCommand(callSignal, foreground);
       const untrack = manager.trackForeground(foregroundSessionId, toolCallId, foreground);

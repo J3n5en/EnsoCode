@@ -187,9 +187,11 @@ describe('config sync portable preference contract', () => {
     expect(() => validateBundle(bundle({ smartCompactMode: 'aggressive' as never }))).toThrow();
   });
 
-  it('接受按住说话快捷键的覆盖', () => {
-    const input = bundle({ keybindings: { 'voice-hold': 'mod+shift+v' } });
-    expect(validateBundle(input).state).toMatchObject(input.state);
+  it('接受旧配置包里已移除的按住说话快捷键，但不写回', () => {
+    const input = bundle({
+      keybindings: { 'voice-hold': 'mod+shift+v', 'open-settings': 'mod+o' },
+    });
+    expect(validateBundle(input).state.keybindings).toEqual({ 'open-settings': 'mod+o' });
   });
 
   it('接受运行时可持久化的正数字号和空快捷键覆盖', () => {

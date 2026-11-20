@@ -9,7 +9,7 @@ vi.mock('./updater/AutoUpdater', () => ({
 }));
 
 import { app, ipcMain } from 'electron';
-import { attachAppCloseConfirm } from './appCloseConfirm';
+import { attachAppCloseConfirm, setBeforeConfirmedQuit } from './appCloseConfirm';
 
 describe('app close confirmation visibility', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -18,6 +18,7 @@ describe('app close confirmation visibility', () => {
     vi.useRealTimers();
     app.removeAllListeners();
     ipcMain.removeAllListeners();
+    setBeforeConfirmedQuit(null);
   });
 
   it.each(['close', 'before-quit'] as const)(
@@ -84,6 +85,76 @@ describe('app close confirmation visibility', () => {
       focused: true,
     });
     expect(send).toHaveBeenCalledOnce();
+    win.emit('closed');
+  });
+
+  it('确认退出后先等命令（期间主窗口弹等待层），等完才真正退出；等待中再按 Cmd+Q 不重复问', async () => {
+    const win = Object.assign(new EventEmitter(), {
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+    });
+    const contents = Object.assign(new EventEmitter(), { isDestroyed: () => false });
+    const send = vi.fn();
+    attachAppCloseConfirm(win, send, () => contents as unknown as WebContents, {
+      interceptBeforeQuit: true,
+      onTray: vi.fn(),
+    });
+    const waited = Promise.withResolvers<void>();
+    const beforeQuit = vi.fn(() => waited.promise);
+    setBeforeConfirmedQuit(beforeQuit);
+    const quit = vi.fn();
+    Object.assign(app, { quit });
+
+    app.emit('before-quit', { preventDefault: vi.fn() });
+    const requestId = send.mock.calls[0][1];
+    ipcMain.emit(IPC_CHANNELS.APP_CLOSE_RESPONSE, { sender: contents }, requestId, {
+      action: 'quit',
+    });
+    await vi.waitFor(() => expect(beforeQuit).toHaveBeenCalledOnce());
+    expect(quit).not.toHaveBeenCalled();
+
+    const again = vi.fn();
+    app.emit('before-quit', { preventDefault: again });
+    expect(again).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledOnce();
+
+    waited.resolve();
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
+    win.emit('closed');
+  });
+
+  it('等命令出错：记日志照常退出，不卡住', async () => {
+    // 上一条已放行退出（模块级 allowQuit），换一份干净的模块
+    vi.resetModules();
+    const fresh = await import('./appCloseConfirm');
+    const win = Object.assign(new EventEmitter(), {
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+    });
+    const contents = Object.assign(new EventEmitter(), { isDestroyed: () => false });
+    const send = vi.fn();
+    fresh.attachAppCloseConfirm(win, send, () => contents as unknown as WebContents, {
+      interceptBeforeQuit: true,
+      onTray: vi.fn(),
+    });
+    fresh.setBeforeConfirmedQuit(() => Promise.reject(new Error('boom')));
+    const quit = vi.fn();
+    Object.assign(app, { quit });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    win.emit('close', { preventDefault: vi.fn() });
+    ipcMain.emit(IPC_CHANNELS.APP_CLOSE_RESPONSE, { sender: contents }, send.mock.calls[0][1], {
+      action: 'quit',
+    });
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
     win.emit('closed');
   });
 });

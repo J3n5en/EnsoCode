@@ -55,6 +55,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { IS_MAC } from '@/lib/keybindings';
+import { isRemoteClient } from '@/lib/remoteClient';
 import { useMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { useSettingsStore } from '@/stores/settings';
 import { builtinToolsInSection, TOOL_SECTIONS, type ToolSectionId } from './builtinToolSections';
@@ -279,7 +280,8 @@ export function BuiltinToolsSettings() {
   const [capabilities, setCapabilities] = useState<ComputerCapabilities | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   useEffect(() => {
-    if (!computerEnabled) {
+    // computer:capabilities 只对宿主开放，远程拿不到探测结果
+    if (!computerEnabled || isRemoteClient()) {
       setCapabilities(null);
       return;
     }
@@ -292,7 +294,7 @@ export function BuiltinToolsSettings() {
     };
   }, [computerEnabled]);
   useEffect(() => {
-    if (!guideOpen) return;
+    if (!guideOpen || isRemoteClient()) return;
     let cancelled = false;
     const load = () => {
       void window.electronAPI.computer.capabilities().then((result) => {

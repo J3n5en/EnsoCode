@@ -184,6 +184,92 @@ steer 的扩展命令拒绝与模板展开语义。不使用 `prompt(..., stream
 异步 hook 跨结束、边界成功消费一次、abort 后仅移除目标且保留普通/扩展插话；
 `supervisor.agentDispatch.test.ts` 和 Bot 宿主/群联测验证消费回执与重新准入。
 
+第四处：优雅重启在 `supervisor.installRestartBoundary()` 包住
+`session.agent.prepareNextTurnWithContext`。pi 1.5.1 的 loop 在工具批全部返回、toolResult 已写进
+会话 jsonl、`turn_end` 之后，下一次 `turn_start` 之前调它（AgentSession 构造时装的压缩/提示词刷新
+也挂在这里，调用时现读属性，所以构造后再包仍生效）。有重启请求、全局没有工具在跑、没有排队插话时
+父会话停在这里，`checkRestart()` 把断点写到 `dataDir/restart-checkpoint.json`
+（格式与判定在 `src/shared/gracefulRestart.ts`，`scripts/graceful-restart-sim.mjs` 直接复用）。
+前台命令到让位时刻转后台（`ForegroundCommand` → `BackgroundTaskManager.adopt`，任务带 `yieldedAt`）时
+工具已回执、`toolStartAt` 已清，但进程还在跑：`bgTasks.runningYielded()` 把这些 status=running 的任务 id
+并进 `toolsInFlight`，和在跑的工具一样推迟（Main 据此按 5 分钟上限等）；直接 `background:true` 启动的、
+已结束的任务不算。任务结束时 `onEnded` 触发检查，检查前先 flush 去抖中的完成通知，停在边界的会话把它
+收进持久化的待投递队列，不随旧进程丢。worker 收尾时还在等安全点就给停掉的转后台命令最多 1s 收口再落断点。
+停在边界后用户又插话 / 排了 follow-up（`session.pendingMessageCount > 0`）：pi 要等 prepareNextTurn 返回后才把
+它写进 jsonl，`checkRestart()` 每次检查都先看它，有就放开该会话的挂起、按回合进行中推迟，写入后到下一个边界或空闲再判。
+Main 换进程后重发缓存的 spawn-parent（带 resumeFile）与之后的会话设置，新 worker 沿用断点里的 seq，
+`nextStep=model-request` 时用原 turnId 走 `continueSessionActivity` 续跑。不发 `worker-exited`。
+
+应用退出与安装更新复用同一套安全点（`agentHost.prepareAgentWorkerForQuit`）：will-quit 的 agent 收尾步骤
+（`main/index.ts` 的 `attachAppQuitDrain`）和 `AutoUpdater.quitAndInstall()` 都先等 worker 落断点，再照常
+`stopAgentWorkerForQuit` / `autoUpdater.quitAndInstall()`。要不要等由 `ipc/sessionIndex.needsQuitCheckpoint`
+决定：有根回合在跑，或回合已结束但 `BackgroundTaskTracker` 里还有在跑的后台命令（重启 / 更新据此把空闲会话按
+await-user 写进清单，命令结束时能被唤醒；普通退出让转后台命令挡住退出、弹等待层），都没有才直接放行；worker 推迟时报告
+有工具在跑就等它结束，上限 `QUIT_TOOL_WAIT_LIMIT_MS`（5 分钟），没有工具在跑时最多等
+`QUIT_NO_TOOL_WAIT_MS`（10s）；超时照常退出（收尾中止命令）并写一行到 worker 退出日志。超时后
+`stopAgentWorkerForQuit` 在 worker 退出后读它收尾时落的断点（本次请求之后写的、没有在跑的工具），照样
+写恢复清单；断点没落盘 / 是旧的 / 还有工具在跑就不写，原因记进 worker 退出日志。同一次退出只发一次请求，
+收尾期间再次退出由 `appQuitDrain` 吞掉。断点落盘后 Main 把恢复清单写到 `dataDir/restart-manifest.json`
+（`restartManifest.ts`：会话文件、白名单会话设置、turnId、nextStep、lastCompletedToolCallId、seq；
+写后读回扫密钥样式与内存里真实下发过的凭据，命中即删文件；会话设置跟着之后的 set-* 命令更新，含
+`set-builtin-tools` 的 disabledTools）。冷启动 `coldRestart.ts` 只在清单与配套断点
+（writtenAt 对得上）都在时接管：第一代 worker 带断点 fork，`ipc/agent.resumeRootFromRestartManifest`
+按原 generation 重走普通 spawn（cwd / 会话文件只认权威记录，凭据现取），续跑的会话从退出 / 更新中断记录里剔除。
+安装更新失败时 `cancelAgentQuitCheckpoint` 撤掉清单，并按断点换代让会话接着跑。
+菜单「重启」（`appMenu` → `services/appRestart.ts`）是整个应用重启：`app.relaunch()` 后窗口不关，先
+`prepareAgentWorkerForQuit` 等安全点。主窗口重启弹层（`renderer/components/app/RestartWaitDialog.tsx`，
+`ipc/appRestart.setRestartOverlay` 经 `APP_RESTART_WAITING` 推 `RestartOverlayState`，`restartOverlayFor` 由
+重启状态推出）点下去立刻是「正在重启」；worker 报告有工具在跑时进入 waiting-for-tools，弹层改成等命令，
+等到了切回「正在重启」。菜单项变为不可点的
+「等命令跑完再重启…」。弹层「强制退出」走 `APP_RESTART_FORCE` → `appRestart.forceQuit()` →
+`forceAgentWorkerQuit()`（按超时收尾并记日志）后立即放行退出，`stopAgentWorkerForQuit` 照常尽量补写清单。
+等到结果（含超时）放行关窗确认、`app.quit()`，will-quit 收尾拿同一个结果。同一进程只登记一次
+relaunch（多次会起多个实例），进行中菜单项不可点。
+它不调用只换 worker 的 `requestGracefulWorkerRestart`。
+新实例冷启动清单里有要续跑的会话时，同一个弹层显示「正在恢复会话」（`coldRestart.trackColdResume`）：
+每个续跑会话收到 worker `parent-ready`、非 STALE 的 `parent-rejected`，或派发就失败即算结算，全部结算关掉；
+`COLD_RESUME_OVERLAY_TIMEOUT_MS`（30s）到点没结算完也关并记日志。没有要续跑的会话不显示。启动时推送可能
+早于渲染层订阅，主窗口挂载时经 `APP_RESTART_WAITING_GET` 补取；状态只推本机主窗口、只回本机主窗口的取值，
+节点页面 / 远程浏览器（`electronAPI.remote`）不订阅。按归属关（`clearRestartOverlay`），恢复结束不会关掉随后点的重启弹层。
+安装更新（`AutoUpdater`）与确认退出（`appCloseConfirm.setBeforeConfirmedQuit`）等安全点时经
+`waitWithExitDialog` 用同一个弹层，waiting 态带 `exit`（restart / update / quit）换说明；「强制退出」交给
+开弹层的路径，更新与退出按超时结束等待后照常安装 / 退出。
+
+重启跨过转后台的命令（菜单「重启」与安装更新带 `keepBackgroundTasks`，普通退出不带，照旧停掉）：
+本地 POSIX bash 的前台命令（`sessionShell` → `shell/detachedRun.withFileBackedExec`，仅
+`ForegroundCommand` 登记过的调用）和本地 `background:true` 命令（`/bin/sh -c`）改为 detached
+（setsid）+ stdin 关闭 + stdout/stderr 直写 `task-logs/run-<runId>.out`（O_APPEND），worker 轮询跟读；
+同一行前置 `trap 'printf %s "$?" > run-<runId>.exit' EXIT` 记退出码，runId 因此出现在进程命令行里；
+同时放进进程环境变量 `ENSO_RUN_ID`（exec 换掉 shell 后仍在）。
+Windows、PowerShell、远程 ssh、pi 的 stdin 传命令方式照旧走管道，没有文件句柄，重启只能等它结束。
+`graceful-restart{keepBackgroundTasks}` 时 `runningYielded(..., {exceptDetachable})` 只把脱离不了的算在途，
+推迟事件带 `undetachableTasks`，Main 据此让等待弹层多一句说明（`RestartWaitReason`）。
+`stopAgentWorkerForQuit` 在终止 worker 前发 `detach-background-tasks`，等 `background-tasks-detached`
+回执（上限 `DETACH_ACK_TIMEOUT_MS`）：worker 读完已有输出、停止跟读、把任务移出本代，写
+`dataDir/restart-background-tasks.json`（taskId、sessionId、脱敏截断的命令摘要、命令+cwd 指纹、cwd、pid、
+runId、startedAt、进程启动时刻 runStartedAt、yieldedAt、deadlineAt、输出文件与已读偏移、退出码文件、日志路径；不含 env）。
+新 worker 构造时读后即删（路径只认 logDir 下按 runId / taskId 推出的文件），`BackgroundTaskManager.recover`
+用同一 taskId 重新登记：pid 在且认得出（`detachedRun.runIdentityMatches`：命令行含 runId，或 Linux 上
+`/proc/<pid>/environ` 含 `ENSO_RUN_ID`，或 `ps -o etime` 推出的启动时刻与 runStartedAt 相差 3s 内）→ running，
+按偏移接着读、日志追加；pid 不在 → 读完输出、按退出码文件标 done / failed；pid 在但都对不上（被复用）→ 不认、
+不发信号，标 failed 并说明。macOS 读不到别的进程的环境变量，exec 之后靠启动时刻。
+认回任务的完成通知在会话没打开时直接落 `pending-notifications`，并发 `session-wake-requested` 请 Main
+按冷启动恢复清单（`coldRestart.wakeColdRestartSession`，只认 await-user 条目、每个会话一次）重走 spawn；
+新 worker 启动时断点里 await-user 的会话若带着待投递通知（收尾期间结束的命令只存了盘）同样请求叫醒。
+会话打开且没在续跑上一轮时立即把攒下的通知交给新一轮；会话已打开的走普通投递（闲则开一轮、忙则排到轮末）；
+本代在重启中（`restart` 已请求）只存盘不请求。会话打开时 resume 快照带上任务；
+同一会话树再起同一命令（同 cwd）由 `withBackground` 直接回「已在跑」，不重复启动。worker 没走交接就退出
+（崩溃、被强杀）时文件直写的进程不会随 SIGPIPE 退出：下一代启动时 `sweepOrphanRuns` 按 `run-*.json`
+登记，只杀「登记它的 worker 已不在、仍认得出是本次进程」的进程组，不扫进程表。
+已知限制：shell 进程本身被直接信号杀掉时 EXIT trap 记的是最后一条命令的 `$?`；用户命令自设 EXIT trap 或
+`exec` 换掉 shell 时取不到退出码（进程仍能认回、可停止，结束时按退出码不可得说明）。
+子会话/coworker 不在边界停（父会话的工具正在等它），也不随换代恢复。
+
+**升级 pi 必须复检第四处**：确认调用时机仍在 `turn_end` 之后、`turn_start` 之前，且 toolResult
+已落盘。`gracefulRestart.pi.test.ts` 用真实 SDK 验证时机与「新会话从文件续跑不重跑工具」；
+`supervisor.gracefulRestart.test.ts` 验证推迟、落盘与续跑；`node scripts/verify-graceful-restart.mjs`
+跑进程级四条契约。
+
 新增此类依赖前先找公开 API；确实没有时，三件事缺一不可：
 
 1. 封成带注释的适配函数（说清为什么需要、上游行为是什么）
@@ -261,23 +347,6 @@ let lastScan: { scanId: string; byId: Map<string, Cached> } | null = null;
 重复项**标记而不丢弃**：候选带 `duplicated` 和 `duplicateReason`
 （`registered` / `same-content` / `same-name`），界面上置灰且默认不勾选，
 用户仍可手动选。三层都要拦：扫描标记、collect 批内去重、store 落库前再判一次。
-
-## Claude Code 插件
-
-插件不拆成技能 / MCP 条目入库。设置里只存 `PluginEntry`（`name@marketplace` key + 开关），
-Main 在每次 spawn 时按 key 从 `~/.claude/plugins/installed_plugins.json` 找当前安装目录并现读组件
-（`claudePlugins.ts`），所以 Claude Code 升级插件后路径变化无需同步。插件跟随自己的开关，不受预设影响。
-
-| 组件 | 去向 |
-|------|------|
-| skills | 追加进 `skillPaths` |
-| commands | `pluginCommands` → worker `promptsOverride`，命名 `/插件:命令` |
-| agents | `withPluginAgentTypes()` 以名字派生的 UUID 并入自定义子代理类型（registry、dispatch、spawn 同一口径） |
-| `.mcp.json` | 并入 `mcpServers`，与已启用的同名 MCP 冲突时让位；需要 OAuth 的暂不支持 |
-| hooks | `pluginHooks` → `claudeHooks.ts` 内联扩展；远程会话不下发 |
-
-Enso 不调 pi 的 `bindExtensions`，pi 不发 `session_start`/`session_shutdown`：SessionStart 在首轮
-`before_agent_start` 补跑，SessionEnd 由 supervisor 释放父会话时自行 emit。插件在配置同步中排除。
 
 ## 异步资源替换与取消
 

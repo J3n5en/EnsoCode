@@ -178,15 +178,14 @@ describe('pluginSkillPathsForMenu', () => {
     skillPathsForSpawn: (active?: string) => (active ? ['/p/always', '/p/scoped'] : ['/p/always']),
   });
 
-  it('选中插件预设（直接或经自建预设叠加）时含它圈定的 skill，Claude 插件在前', () => {
+  it('选中插件预设（直接或经自建预设叠加）时含它圈定的 skill', () => {
     for (const presetId of ['plugin:enso.pstack:poteto', 'u']) {
       expect(
         pluginSkillPathsForMenu(presetId, {
           resolve: () => user,
-          claude: ['/c'],
           extension: extension(true),
         })
-      ).toEqual(['/c', '/p/always', '/p/scoped']);
+      ).toEqual(['/p/always', '/p/scoped']);
     }
   });
 
@@ -194,15 +193,12 @@ describe('pluginSkillPathsForMenu', () => {
     expect(
       pluginSkillPathsForMenu(undefined, {
         resolve: () => undefined,
-        claude: [],
         extension: extension(true),
       })
     ).toEqual(['/p/always']);
     expect(
-      pluginSkillPathsForMenu('u', { resolve: () => user, claude: [], extension: extension(false) })
+      pluginSkillPathsForMenu('u', { resolve: () => user, extension: extension(false) })
     ).toEqual(['/p/always']);
-    expect(
-      pluginSkillPathsForMenu('u', { resolve: () => user, claude: ['/c'], extension: null })
-    ).toEqual(['/c']);
+    expect(pluginSkillPathsForMenu('u', { resolve: () => user, extension: null })).toEqual([]);
   });
 });

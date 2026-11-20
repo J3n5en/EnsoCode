@@ -23,6 +23,7 @@ import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { ChatAreaFrame } from '@/components/app/ChatAreaFrame';
 import { HeaderSessionTabs } from '@/components/app/HeaderSessionTabs';
 import { ProjectDropOverlay } from '@/components/app/ProjectDropOverlay';
+import { RestartWaitDialog } from '@/components/app/RestartWaitDialog';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import {
@@ -734,6 +735,7 @@ export default function App() {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
+      <RestartWaitDialog />
     </div>
   );
 }

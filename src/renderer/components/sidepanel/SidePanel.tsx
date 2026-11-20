@@ -47,6 +47,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/components/ui/menu';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { holesClipPath } from '@/lib/backgroundClip';
+import { isRemoteClient } from '@/lib/remoteClient';
 import {
   addSidePanelBrowser,
   addSidePanelWorkflow,
@@ -77,6 +78,7 @@ import { type PluginViewRef, usePluginViews } from '../../plugins/viewBridge';
 import { SecretaryPanel } from '../secretary/SecretaryPanel';
 import { BrowserView } from './BrowserView';
 import { BtwView } from './BtwView';
+import { restoreHostBrowserTabs } from './browserTabs';
 import { ChangesView } from './ChangesView';
 import { FilesView } from './FilesView';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
@@ -1006,7 +1008,8 @@ function ConversationDock({
       )
         return;
       if (panel.id === 'browser' || panel.id.startsWith('browser:')) {
-        void window.electronAPI.browser.closeTab(panel.id);
+        // 远程渲染的是宿主浏览器的只读提示，没有可关闭的宿主标签
+        if (!isRemoteClient()) void window.electronAPI.browser.closeTab(panel.id);
         return;
       }
       if (panel.id.startsWith('btw:')) {
@@ -1068,7 +1071,7 @@ export function SidePanel({
     const stopClosed = window.electronAPI.browser.onTabClosed((event) => {
       closeSidePanelBrowser(event.conversationId, event.tabId);
     });
-    void window.electronAPI.browser.restoreTabs();
+    restoreHostBrowserTabs();
     return () => {
       stopReveal();
       stopClosed();

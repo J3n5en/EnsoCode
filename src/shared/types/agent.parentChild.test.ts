@@ -126,37 +126,6 @@ describe('parent/child commands', () => {
       expect(parseAgentCommand({ type, identity: parent, instanceId })).toBeNull();
   });
 
-  it('spawn-parent 携插件命令与 hooks:合法通过,脏值拒绝', () => {
-    const base = { type: 'spawn-parent', identity: parent, cwd: '/repo', model };
-    const hook = {
-      plugin: 'demo',
-      root: '/p',
-      dataDir: '/d',
-      event: 'PreToolUse',
-      matcher: 'Bash',
-      command: 'echo hi',
-      timeoutSec: 5,
-    };
-    const command = {
-      name: 'demo:review',
-      description: 'Review',
-      argumentHint: '[focus]',
-      content: 'Review $ARGUMENTS',
-      filePath: '/p/commands/review.md',
-    };
-    const full = { ...base, pluginHooks: [hook], pluginCommands: [command] };
-    expect(parseAgentCommand(full)).toEqual(full);
-    expect(
-      parseAgentCommand({ ...base, pluginHooks: [{ ...hook, event: 'Notification' }] })
-    ).toBeNull();
-    expect(parseAgentCommand({ ...base, pluginHooks: [{ ...hook, timeoutSec: 0 }] })).toBeNull();
-    expect(parseAgentCommand({ ...base, pluginHooks: [{ ...hook, extra: 1 }] })).toBeNull();
-    expect(
-      parseAgentCommand({ ...base, pluginCommands: [{ ...command, content: '' }] })
-    ).toBeNull();
-    expect(parseAgentCommand({ ...base, pluginCommands: 'x' })).toBeNull();
-  });
-
   it('tool-background 必须 exact identity + 合法 toolCallId', () => {
     const command = { type: 'tool-background', identity: parent, toolCallId: 'call_1|fc_2' };
     expect(parseAgentCommand(command)).toEqual(command);

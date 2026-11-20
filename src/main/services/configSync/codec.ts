@@ -251,8 +251,9 @@ const KEYBINDING_ACTIONS = [
   'new-btw-tab',
   'close-side-tab',
   'toggle-minimize-to-tray',
-  'voice-hold',
 ] as const;
+/** 已移除功能的快捷键：旧配置包仍可能带着，接受但不写回 */
+const REMOVED_KEYBINDING_ACTIONS = ['voice-hold'] as const;
 const PRICING_KEYS = ['input', 'output', 'cacheRead', 'cacheWrite'] as const;
 
 type RecordValue = Record<string, unknown>;
@@ -1091,7 +1092,11 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
       'state.subagentAllowedModes'
     );
   if (state.keybindings !== undefined)
-    validateStringMap(state.keybindings, KEYBINDING_ACTIONS, 'state.keybindings');
+    validateStringMap(
+      state.keybindings,
+      [...KEYBINDING_ACTIONS, ...REMOVED_KEYBINDING_ACTIONS],
+      'state.keybindings'
+    );
   if (state.usageModelPricing !== undefined) validatePricingTable(state.usageModelPricing);
   const disabledBuiltinAgentTypes = optionalStringArray(
     state.disabledBuiltinAgentTypes,
@@ -1143,6 +1148,11 @@ export function validateBundle(value: unknown): ConfigSyncBundle {
     delete canonicalState.hashlineEditEnabled;
   }
   delete canonicalState.bashInterceptEnabled;
+  if (isRecord(state.keybindings)) {
+    const keybindings = { ...state.keybindings };
+    for (const action of REMOVED_KEYBINDING_ACTIONS) delete keybindings[action];
+    canonicalState.keybindings = keybindings;
+  }
   return {
     format: ENVELOPE_FORMAT,
     version: VERSION,

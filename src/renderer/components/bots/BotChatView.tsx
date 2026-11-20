@@ -10,11 +10,9 @@ import { CHAT_COL } from '@/components/chat/MessageTimeline';
 import { ResizeHandle } from '@/components/chat/ResizeHandle';
 import { sidePanelWidthTransition } from '@/components/sidepanel/sidePanelWidthAnim';
 import { addToast } from '@/components/ui/toast';
-import { useSpeechStatus } from '@/hooks/useSpeechStatus';
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { startDesktopVoiceSession } from '@/lib/voiceSession';
 import { useBotsStore } from '@/stores/bots';
 import { activeDelegations, delegationLiveTarget, pendingOwners } from '@/stores/bots/delegations';
 import { chatSummary, type PendingItem, pendingItems } from '@/stores/bots/selectors';
@@ -78,13 +76,6 @@ export function BotChatView({ chat, group = chat }: { chat: BotChat; group?: Bot
   const browserTabCount = useBotsStore((s) => s.browserTabs[group.id]?.tabs.length ?? 0);
   const panelWidth = useBotsStore((s) => s.panelWidth);
   const skillCatalog = useSettingsStore((s) => s.skills);
-  const voiceInputEnabled = useSettingsStore((s) => s.voiceInputEnabled);
-  const voiceModel = useSettingsStore((s) => s.voiceModel);
-  const { status: speechStatus } = useSpeechStatus(voiceInputEnabled);
-  const voiceReady =
-    voiceInputEnabled &&
-    speechStatus?.state !== 'unsupported' &&
-    speechStatus?.models.find((model) => model.id === voiceModel)?.state === 'ready';
   const [resizing, setResizing] = useState(false);
   const [workspaceW, setWorkspaceW] = useState(0);
   // 窄屏没有并排空间：打开即全屏盖住聊天区
@@ -386,8 +377,6 @@ export function BotChatView({ chat, group = chat }: { chat: BotChat; group?: Bot
               members={chat.kind === 'group' ? members : undefined}
               chatOptions={chatOptions}
               skills={skillOptions}
-              voice={voiceReady ? startDesktopVoiceSession : undefined}
-              requestMicAccess={window.electronAPI.speech.requestMicAccess}
               running={summary.running || Boolean(runtime?.current || runtime?.routing)}
               disabled={archived}
               hint={hint}

@@ -131,14 +131,6 @@ export type PhoneToHost =
   | { type: 'direct-close'; gen: number }
   /** 经中继的端到端测速；必须走中继，不能走直连 */
   | { type: 'probe'; nonce: number }
-  /**
-   * 语音转写上传：data 为 16kHz 单声道小端 Int16 PCM 的 base64url。
-   * 直连/中继回退可能乱序，host 按 index 拼，last 标出末块。
-   * 录音中约 200ms 发一块，host 边收边识别并回推 voice-partial。
-   */
-  | { type: 'voice-chunk'; requestId: string; index: number; data: string; last?: true }
-  /** 放弃录音：host 丢弃该 requestId 的识别会话，不再回 voice-result */
-  | { type: 'voice-cancel'; requestId: string }
   /** Bot 模式：仅桌面开启 Bot 模式时响应；旧桌面在白名单处拒绝，不影响其它帧 */
   | { type: 'bot-catalog-request' }
   | { type: 'bot-send'; chatId: string; text: string; images?: AttachedImage[]; deliveryId: string }
@@ -207,8 +199,6 @@ export const PHONE_COMMAND_TYPES = [
   'direct-ice',
   'direct-close',
   'probe',
-  'voice-chunk',
-  'voice-cancel',
   'bot-catalog-request',
   'bot-send',
   'bot-chat-open',
@@ -591,8 +581,6 @@ export type HostToPhone =
       capabilities?: DirectCapability[];
       /** STUN 列表由 host 下发，guest 不硬编码，换地址只改桌面 */
       iceServers?: IceServerEntry[];
-      /** 桌面语音识别可用（设置开启且模型就绪） */
-      voiceInput?: true;
       /** 本设备被桌面设为只读：手机隐藏发送/审批等写操作（host 侧另有强制拦截） */
       readOnly?: true;
       /** 可用桌面模式（浏览器复用桌面界面）；缺省即旧桌面或只读设备，PWA 隐藏入口 */
@@ -601,10 +589,6 @@ export type HostToPhone =
   | { type: 'direct-answer'; gen: number; sdp: string }
   | ({ type: 'direct-ice'; gen: number } & DirectCandidate)
   | { type: 'probe-ack'; nonce: number }
-  /** 识别中间结果（整句覆盖，不是增量）；correcting = 已定稿、正在纠错 */
-  | { type: 'voice-partial'; requestId: string; text: string; correcting?: true }
-  /** voice-chunk 的应答；error 为 SpeechErrorCode，未知值按 failed 处理 */
-  | { type: 'voice-result'; requestId: string; text?: string; error?: string }
   /**
    * Bot 模式目录。enabled=false 表示桌面已关闭 Bot 模式（手机隐藏 Bot 分段）。
    * 旧手机 switch 无 default 分支，以下 bot 帧一律忽略。

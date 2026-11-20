@@ -4,12 +4,10 @@ import { isPluginId } from './extensionPlugins/manifest';
 export const SETTINGS_CATEGORIES = [
   'general',
   'shortcuts',
-  'voice',
   'appearance',
   'providers',
   'skills',
   'plugins',
-  'claudePlugins',
   'mcp',
   'instructions',
   'presets',

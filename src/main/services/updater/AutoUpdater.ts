@@ -5,9 +5,11 @@ import { AUTO_RESTART_IDLE_MS, isTurnRestartBlocked } from '@shared/updater/idle
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
-import { agentSessionIndex } from '../../ipc/sessionIndex';
+import { waitWithExitDialog } from '../../ipc/appRestart';
+import { agentSessionIndex, needsQuitCheckpoint } from '../../ipc/sessionIndex';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
+import { cancelAgentQuitCheckpoint, prepareAgentWorkerForQuit } from '../agentHost';
 import { markExitForUpdate } from '../exitInterruptHost';
 import { IdleRestartGate } from './idleRestartGate';
 import { currentIdleRestartObservation } from './idleRestartSnapshot';
@@ -168,17 +170,34 @@ class AutoUpdaterService {
     });
   }
 
-  private quitAndInstall(): void {
+  private async quitAndInstall(): Promise<void> {
     if (!this.updateDownloaded) return;
     this.quittingForUpdate = true;
     // 退出记录要写明是安装更新：会话里的系统提示据此说清原因
     markExitForUpdate();
+    // 与应用退出同一套：先等 agent worker 到安全点、断点与恢复清单落盘，再交给 electron-updater。
+    // 没有正在跑的会话立即返回；有命令在跑主窗口弹等待层（等完先关再装），强制退出或等太久（超时）照常安装
+    await waitWithExitDialog('update', (onWaitingForTools) =>
+      prepareAgentWorkerForQuit({
+        reason: 'update',
+        hasRunningSessions: needsQuitCheckpoint,
+        onWaitingForTools,
+        // 装完会重新打开：能脱离的转后台命令交给新实例认回
+        keepBackgroundTasks: true,
+      })
+    );
     try {
       recordInterruptedSessions(app.getPath('userData'), agentSessionIndex.runningRootSessionIds());
     } catch (error) {
       console.error('Failed to record sessions interrupted by update:', error);
     }
-    autoUpdater.quitAndInstall();
+    try {
+      autoUpdater.quitAndInstall();
+    } catch (error) {
+      // 没退成：worker 已停在安全点，撤掉清单并按断点换代接着跑
+      cancelAgentQuitCheckpoint();
+      throw error;
+    }
   }
 
   setAutoUpdateEnabled(enabled: boolean): void {
@@ -270,7 +289,7 @@ class AutoUpdaterService {
       flushSettings();
       if (!recheck()) return;
       if (isServerMode()) writeTrayReenterAfterUpdate(true);
-      this.quitAndInstall();
+      await this.quitAndInstall();
     } catch (error) {
       console.error('Restart to update failed:', error);
       this.idleGate.markFailed();

@@ -9,6 +9,7 @@ import {
 } from '@shared/exitInterrupt';
 import type { ProjectedMessage } from '@shared/types/agent';
 import { agentSessionIndex } from '../ipc/sessionIndex';
+import { coldResumedSessionIds } from './coldRestart';
 import { setExitInterruption } from './exitWindow';
 import { recoverInterruptedTurns } from './interruptedTurns';
 import { startRunningAtExitHeartbeat, writeRunningAtExit } from './runningAtExit';
@@ -107,5 +108,7 @@ export async function takeInterruptedTurns(): Promise<InterruptedTurn[]> {
   if (taken) return [];
   const turns = await recover();
   taken = true;
-  return turns;
+  // 停在安全点、冷启动由 Main 续跑的会话不算被打断
+  const resumed = coldResumedSessionIds();
+  return turns.filter((turn) => !resumed.has(turn.conversationId));
 }
