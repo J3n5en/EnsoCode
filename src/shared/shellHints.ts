@@ -11,7 +11,7 @@ export const SHELL_SLEEP_HINT =
   'command that exits when the condition holds (e.g. `until <check>; do sleep 10; done; <report>`) ' +
   'and run it with background: true — you are notified when it finishes, then end your turn.';
 
-/** 前台显式 timeout 达到让位时长时的提醒 */
+/** 前台显式 timeout 达到让位时长、且命令跑得久或已转后台时的提醒 */
 export const SHELL_TIMEOUT_HINT =
   'timeout only kills the process; it does not keep this call in the foreground. ' +
   'If the command may outlast the yield, set background: true and end your turn — completion wakes you. ' +
