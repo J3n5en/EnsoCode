@@ -203,6 +203,8 @@ function forceExitWait(exit: AppExitReason): void {
 }
 
 function registerEnsoProtocol(): void {
+  // 验收实例不改系统的 URL 处理程序，免得把用户正式版的 enso:// 深链抢走
+  if (isVerifyLaunch()) return;
   if (process.defaultApp && process.argv.length >= 2) {
     app.setAsDefaultProtocolClient('enso', process.execPath, [path.resolve(process.argv[1])]);
     return;

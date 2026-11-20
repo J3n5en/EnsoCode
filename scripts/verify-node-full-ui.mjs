@@ -238,30 +238,15 @@ class Instance {
     return layers.filter((l) => l.visible !== false).at(-1) ?? null;
   }
 
-  /** 拦截系统通知（dev 下 mac 走 osascript；打包走 Notification），只记录不真弹 */
-  spyNotifications() {
-    return this.main.eval(`(() => {
-      globalThis.__nodeuiNotes = [];
-      const cp = process.getBuiltinModule('child_process');
-      const original = cp.execFile;
-      cp.execFile = function (file, args, ...rest) {
-        if (file === 'osascript' && String(args?.[1] ?? '').includes('display notification')) {
-          globalThis.__nodeuiNotes.push(String(args[1]));
-          return undefined;
-        }
-        return original.call(this, file, args, ...rest);
-      };
-      process.getBuiltinModule('module').syncBuiltinESMExports();
-      const { Notification } = globalThis.__nodeuiE;
-      Notification.prototype.show = function () {
-        globalThis.__nodeuiNotes.push(JSON.stringify({ title: this.title, body: this.body }));
-      };
-      return true;
-    })()`);
+  /** ENSO_VERIFY 下系统通知不真弹，只记进 __ensoVerifyNotifications；从这里起重新计 */
+  clearNotes() {
+    return this.main.eval('(globalThis.__ensoVerifyNotifications = [], true)');
   }
 
   notes() {
-    return this.main.eval('globalThis.__nodeuiNotes ?? []');
+    return this.main.eval(
+      '(globalThis.__ensoVerifyNotifications ?? []).map((n) => JSON.stringify(n))'
+    );
   }
 }
 
@@ -390,8 +375,8 @@ async function main() {
   writeSettings(A.userData, providerPort);
   writeSettings(B.userData, providerPort);
   await Promise.all([A.launch(), B.launch()]);
-  await A.spyNotifications();
-  await B.spyNotifications();
+  await A.clearNotes();
+  await B.clearNotes();
   log(`A cdp=${A.cdpPort} inspect=${A.inspectPort}  B cdp=${B.cdpPort} inspect=${B.inspectPort}`);
 
   const created = await B.local.eval(`window.electronAPI.sourceAuthority.createProject({

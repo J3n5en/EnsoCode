@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   beforeConfirmedQuit: null as null | (() => Promise<void>),
   dialog: [] as string[],
   needsCheckpoint: false,
+  setAsDefaultProtocolClient: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -34,7 +35,8 @@ vi.mock('electron', () => ({
     getPath: (name: string) => (name === 'appData' ? '/system-app-data' : '/tmp'),
     setPath: mocks.setPath,
     requestSingleInstanceLock: () => true,
-    setAsDefaultProtocolClient: vi.fn(),
+    setAsDefaultProtocolClient: mocks.setAsDefaultProtocolClient,
+    setActivationPolicy: vi.fn(),
     quit: vi.fn(),
     whenReady: () => Promise.resolve(),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
@@ -159,6 +161,7 @@ vi.mock('./services/trayToggleShortcut', () => ({
 }));
 
 const originalUserDataOverride = process.env.ENSO_USER_DATA_DIR;
+const originalVerify = process.env.ENSO_VERIFY;
 
 beforeEach(() => {
   vi.resetModules();
@@ -172,12 +175,16 @@ beforeEach(() => {
   mocks.consumeTrayReenter.mockReset();
   mocks.consumeTrayReenter.mockReturnValue(false);
   mocks.scheduleReenter.mockClear();
+  mocks.setAsDefaultProtocolClient.mockClear();
   delete process.env.ENSO_USER_DATA_DIR;
+  delete process.env.ENSO_VERIFY;
 });
 
 afterAll(() => {
   if (originalUserDataOverride === undefined) delete process.env.ENSO_USER_DATA_DIR;
   else process.env.ENSO_USER_DATA_DIR = originalUserDataOverride;
+  if (originalVerify === undefined) delete process.env.ENSO_VERIFY;
+  else process.env.ENSO_VERIFY = originalVerify;
 });
 
 describe('Main startup order', () => {
@@ -296,5 +303,26 @@ describe('Main userData isolation', () => {
       path.join('/system-app-data', 'enso-code')
     );
     expect(mocks.setPath).not.toHaveBeenCalledWith('userData', '/tmp/must-not-be-used');
+  });
+});
+
+describe('enso:// 协议注册', () => {
+  it('平时（含普通 dev）照常注册', async () => {
+    await import('./index');
+    expect(mocks.setAsDefaultProtocolClient).toHaveBeenCalledOnce();
+    expect(mocks.setAsDefaultProtocolClient.mock.calls[0][0]).toBe('enso');
+  });
+
+  it('验收实例不改系统的 URL 处理程序', async () => {
+    process.env.ENSO_VERIFY = '1';
+    await import('./index');
+    expect(mocks.setAsDefaultProtocolClient).not.toHaveBeenCalled();
+  });
+
+  it('打包版忽略 ENSO_VERIFY，照常注册', async () => {
+    mocks.isPackaged = true;
+    process.env.ENSO_VERIFY = '1';
+    await import('./index');
+    expect(mocks.setAsDefaultProtocolClient).toHaveBeenCalledOnce();
   });
 });
