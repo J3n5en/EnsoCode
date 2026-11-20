@@ -87,6 +87,8 @@ export type BotSendResultFrame = Extract<HostToPhone, { type: 'bot-send-result' 
 
 /** 与 pairHost / pairGuest 同口径的单帧预检，留出中继 1MB 上限的余量（直连拼帧同限） */
 const RELAY_FRAME_LIMIT = 1_000_000;
+/** host 处理 peer-joined 最多落后中继这么久 */
+const RESET_RELAY_ONLY_MS = 3_000;
 
 export interface ClientEvents {
   onState(state: ConnState): void;
@@ -145,6 +147,12 @@ export class PairClient {
   private contentKey: Uint8Array;
   /** 直连和中继共用这一份：帧只封一次，再选路 */
   private replay: FrameReplay = createFrameReplay(sealFrame, openFrame);
+  /**
+   * 防重放刚因 host-online 重置：此时发的帧不带锁定前缀。经直连会先于中继的 peer-joined
+   * 到达 host，被它仍锁定的旧前缀静默丢弃；这几秒改走中继，保证排在 peer-joined 之后。
+   * 收到的 host 帧可能是重置前就在路上的，不能据此提前结束。
+   */
+  private relayOnlyUntil = 0;
   private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -268,7 +276,8 @@ export class PairClient {
         });
       return;
     }
-    this.events.onState('connecting');
+    // 直连还通（回前台换中继 socket）不算断：报连接中会让上层把请求全部挂起，等新中继进房
+    if (this.direct.transport() !== 'direct') this.events.onState('connecting');
     const base = toWebSocketUrl(this.device.relayUrl);
     const url = `${base}/v1/pair/${encodeURIComponent(this.device.pairId)}?role=guest&token=${encodeURIComponent(this.device.token)}`;
     let ws: WebSocket;
@@ -351,6 +360,7 @@ export class PairClient {
             // 防重放只在这里重置：host 进房时同样收到 peer-joined 一起重置。中继重连尝试不能重置，
             // 否则直连上的帧退回随机 nonce，被仍锁定旧前缀的 host 静默丢弃
             this.replay.peerReset();
+            this.relayOnlyUntil = Date.now() + RESET_RELAY_ONLY_MS;
             this.events.onState('online');
             this.direct.peerOnline(true);
             this.flushDirectRestart();
@@ -394,7 +404,8 @@ export class PairClient {
     const replace =
       stale || shouldReplaceOnNudge(reason, this.ws !== null, this.ws?.readyState ?? null);
     // 直连信令必须走活着的中继。先拆 socket 再发 offer 会把这一轮丢进 15s 超时。
-    if (reason === 'online' || reason === 'network-change' || stale) {
+    // 只是回前台且直连还在：先探活，通就留着（重协商会丢掉在途帧），不通由探活超时切回中继
+    if (reason === 'online' || reason === 'network-change' || (stale && !this.direct.probe())) {
       if (replace) this.pendingDirectRestart = true;
       else this.direct.networkChange();
     }
@@ -809,7 +820,7 @@ export class PairClient {
   /** bulk：大分片优先走中继，避免塞满 DataChannel 触发直连重建而丢帧 */
   send(command: PhoneToHost, opts?: { bulk?: boolean }): void {
     if (!this.canSend()) return;
-    if (opts?.bulk && this.ws?.readyState === 1) {
+    if ((opts?.bulk || Date.now() < this.relayOnlyUntil) && this.ws?.readyState === 1) {
       this.sendViaRelay(command);
       return;
     }

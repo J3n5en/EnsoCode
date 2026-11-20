@@ -79,6 +79,7 @@ import {
   withGlobalSkillEnabled,
   withOwnSkillEnabled,
 } from '../services/secretary/skills';
+import { createStatePublisher } from '../services/secretary/statePublisher';
 import { SecretaryStore } from '../services/secretary/store';
 import {
   getSourceAuthorityRegistry,
@@ -335,14 +336,14 @@ function syncWaitingCards(state: SecretaryState): void {
 }
 
 /** 聊天卡片与工作台读同一份 Main 状态 */
-function broadcastState(): void {
-  void secretaryState()
-    .then((state) => {
-      broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state);
-      syncWaitingCards(state);
-    })
-    .catch(() => undefined);
-}
+const broadcastState = createStatePublisher({
+  build: secretaryState,
+  emit: (state) => {
+    broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state);
+    syncWaitingCards(state);
+  },
+  intervalMs: 300,
+});
 
 /** 设置里的全局 skill：坏条目跳过，路径只认这里给出的 */
 function globalSkillEntries(): { id: string; name: string; description: string; path: string }[] {

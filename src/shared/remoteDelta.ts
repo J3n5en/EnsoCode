@@ -5,6 +5,7 @@
  * - 流式消息：同一条 message-upsert 只发与上一帧的差异；接收端缺基线时请求 reset 并重拉快照。
  */
 import { applyJsonDelta, diffJson, type JsonOp } from './jsonDelta';
+import { IPC_CHANNELS } from './types/ipc';
 
 export const REMOTE_DELTA_STALE = 'remote-delta-stale';
 const WRITE = '__ensoWrite';
@@ -40,6 +41,28 @@ const staleError = () => new Error(REMOTE_DELTA_STALE);
 const isStale = (error: unknown) =>
   String((error as Error | undefined)?.message ?? error).includes(REMOTE_DELTA_STALE);
 
+/**
+ * 读回结果同时是某个写入键的当前值：两端都拿它当写入基线，读完后的首次写回也只发差异。
+ * 基线版本取内容 hash（负数，与写入递增的版本错开）：并发读写换序导致两端基线不同时宿主报 stale，客户端改发整份。
+ */
+export function writeSeedOf(
+  channel: string,
+  encodedResult: unknown
+): { name: string; value: unknown } | null {
+  if (channel !== IPC_CHANNELS.CONVERSATIONS_READ) return null;
+  if (!encodedResult || typeof encodedResult !== 'object' || !('value' in encodedResult))
+    return null;
+  const value = (encodedResult as { value: unknown }).value;
+  return value === undefined ? null : { name: 'enso-conversations', value };
+}
+
+function seedRevision(value: unknown): number {
+  const json = JSON.stringify(value) ?? '';
+  let h = 0x811c9dc5;
+  for (let i = 0; i < json.length; i++) h = Math.imul(h ^ json.charCodeAt(i), 0x01000193);
+  return -1 - (h >>> 0) * 1024;
+}
+
 interface WriteMark {
   r: number;
   b?: number;
@@ -51,6 +74,12 @@ interface WriteMark {
 export class RemoteWriteClient {
   private bases = new Map<string, { r: number; v: unknown }>();
   private chains = new Map<string, Promise<unknown>>();
+
+  /** 有写入在途时不动：在途写入完成后的基线才与宿主一致 */
+  seed(name: string, value: unknown): void {
+    if (this.chains.has(name)) return;
+    this.bases.set(name, { r: seedRevision(value), v: value });
+  }
 
   write(name: string, value: unknown, send: (arg: unknown) => Promise<unknown>): Promise<unknown> {
     const run = () => this.run(name, value, send);
@@ -92,6 +121,10 @@ export class RemoteWriteClient {
 /** 宿主侧（每个远端 renderer 一份）：还原写入值；handler 成功后 commit 才推进基线 */
 export class RemoteWriteBases {
   private bases = new Map<string, { r: number; v: unknown }>();
+
+  seed(name: string, value: unknown): void {
+    this.bases.set(name, { r: seedRevision(value), v: structuredClone(value) });
+  }
 
   resolve(name: string, arg: unknown): { value: unknown; commit: () => void } {
     const mark = markOf<WriteMark>(arg, WRITE);

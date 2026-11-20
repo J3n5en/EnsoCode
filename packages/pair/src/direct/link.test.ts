@@ -394,6 +394,40 @@ describe('DirectLink guest', () => {
     expect(h.link.transport()).toBe('direct');
   });
 
+  it('回前台探活：通道还通就保留，不拆不重新协商', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.fire.open();
+    p.fire.message(new Uint8Array([0x03]));
+    const sent = p.sent.length;
+    h.link.probe();
+    expect(p.sent.at(-1)).toEqual(new Uint8Array([0x02]));
+    expect(p.sent.length).toBe(sent + 1);
+    await vi.advanceTimersByTimeAsync(500);
+    p.fire.message(new Uint8Array([0x03]));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(h.link.transport()).toBe('direct');
+    expect(h.peers).toHaveLength(1);
+    expect(h.signals.some((s) => s.type === 'direct-close')).toBe(false);
+  });
+
+  it('回前台探活：短时间没有回音就判死，切回中继', async () => {
+    const h = harness('guest');
+    h.link.peerOnline(true);
+    h.link.hostInfo({ capabilities: ['direct-v1'] });
+    await flush();
+    const p = h.peers[0];
+    p.fire.open();
+    p.fire.message(new Uint8Array([0x03]));
+    h.link.probe();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(h.link.transport()).toBe('relay');
+    expect(p.isClosed()).toBe(true);
+  });
+
   it('已连接对端离线 → 静默回中继，恢复能力与在线后发起新一代协商', async () => {
     const h = harness('guest');
     h.link.peerOnline(true);

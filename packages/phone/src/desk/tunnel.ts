@@ -15,7 +15,7 @@ import {
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { type ConnState, PairClient } from '../client';
 import type { PhoneCacheStore } from '../sessionCache';
-import { needsRehello, stallDelay } from './stall';
+import { gapResyncDelay, needsRehello, stallDelay } from './stall';
 
 export interface DeskLinkHooks {
   onTransport?(transport: 'relay' | 'direct'): void;
@@ -74,8 +74,6 @@ const encodedArgs = (args: unknown[]) => JSON.stringify(args);
  * 中继下行可能只有几 Mbps，大资源正在传时补发只会让同一份数据再排一遍队。
  */
 const ASSET_RETRY_MS = 10_000;
-/** 大帧走中继、小帧走直连会乱序；缺口期间这么久没收到任何数据视为丢帧 */
-const GAP_RESYNC_MS = 8_000;
 const MAX_RECENT_SENDS = 200;
 const WATCH_MS = 2_000;
 /** 每收这么多分片字节回报一次，宿主据此放行下一段（窗口 512KB） */
@@ -110,7 +108,10 @@ export class DeskTunnel {
   private parts = createRemotePartAssembler();
   /** 同一路径在途只请求一次（modulepreload 与 import 会同时向 SW 取同一个大文件） */
   private assetPaths = new Map<string, Promise<DeskAsset>>();
-  private lastInbound = 0;
+  /** 最近一次收到大帧（分片、资源）：小帧刷屏不代表缺失的那一帧还在路上 */
+  private lastBulk = 0;
+  /** 最近一次链路切换：前后几秒的缺口与挂起请求从快补发 */
+  private linkAt = Number.NEGATIVE_INFINITY;
   /** 已收到的分片字符数（流控 ack 用） */
   receivedBytes = 0;
   /** 线上收到的大帧字符数（分片、整帧资源、整帧压缩）：启动画面据此显示首次下载进度 */
@@ -137,7 +138,11 @@ export class DeskTunnel {
         onProviders() {},
         onSession() {},
         onRemoteFrame: (frame) => this.receive(frame),
-        onTransport: (transport) => this.link.onTransport?.(transport),
+        onTransport: (transport) => {
+          this.link.onTransport?.(transport);
+          // 切通道瞬间旧通道上的帧可能丢：立即按 seq 补，不等缺口或未决请求超时
+          if (this.online) this.resync();
+        },
         onRtt: (rttMs) => this.link.onRtt?.(rttMs),
         onPushConfig: (key) => this.link.onPushConfig?.(key),
         // host-info 先报 readOnly 再报 remoteDesktop：不支持时区分只读与旧桌面
@@ -192,15 +197,13 @@ export class DeskTunnel {
     this.online = state === 'online';
     if (this.online && was) {
       // 已在线又收到 host-online：桌面到中继的连接重建过，之前发过去的请求、发过来的帧可能都丢在旧连接上。
-      // 按 seq 重新 hello 让宿主补发，在途资源重新请求；宿主换链时清了 gzip/流控，先重新声明
-      this.ack();
-      for (const slot of this.slots.values()) if (slot.ready) this.hello(slot);
-      for (const { message } of this.assets.values()) this.post(message);
+      this.resync();
       return;
     }
     if (this.online !== was) {
       for (const slot of this.slots.values()) slot.ready = false;
       if (this.online) {
+        this.linkAt = Date.now();
         // 先声明会回报进度，宿主随即对大帧限流
         this.ack();
         for (const slot of this.slots.values()) this.hello(slot);
@@ -208,6 +211,14 @@ export class DeskTunnel {
       }
     }
     this.reportResuming();
+  }
+
+  /** 按 seq 重新 hello 让宿主补发，在途资源重新请求；宿主换链时清了 gzip/流控，先重新声明 */
+  private resync(): void {
+    this.linkAt = Date.now();
+    this.ack();
+    for (const slot of this.slots.values()) if (slot.ready) this.hello(slot);
+    for (const { message } of this.assets.values()) this.post(message);
   }
 
   private watch(): void {
@@ -222,7 +233,8 @@ export class DeskTunnel {
           !needsRehello(
             now,
             { ready: slot.ready, helloAt: slot.helloAt, pendingAt },
-            this.lastInbound
+            this.lastBulk,
+            this.linkAt
           )
         )
           continue;
@@ -291,13 +303,13 @@ export class DeskTunnel {
     }
   }
 
-  /** 缺口持续且这段时间没收到任何数据才判丢帧、重新 hello；大帧还在传时继续等 */
+  /** 缺口持续且这段时间没收到大帧才判丢帧、重新 hello；大帧还在传时继续等，但有上限 */
   private watchGap(slot: Slot, since: number): void {
-    const delay = stallDelay(Date.now(), GAP_RESYNC_MS, since, this.lastInbound);
+    const delay = gapResyncDelay(Date.now(), since, this.lastBulk, this.linkAt);
     slot.gapTimer = setTimeout(() => {
       slot.gapTimer = null;
       if (!slot.stream.gap || !this.slots.has(slot.cid)) return;
-      if (stallDelay(Date.now(), GAP_RESYNC_MS, since, this.lastInbound) > 0) {
+      if (gapResyncDelay(Date.now(), since, this.lastBulk, this.linkAt) > 0) {
         this.watchGap(slot, since);
         return;
       }
@@ -340,7 +352,7 @@ export class DeskTunnel {
   }
 
   private receive(frame: HostToRemote, nested = false): void {
-    this.lastInbound = Date.now();
+    if (isRemotePart(frame) || frame.type === 'asset') this.lastBulk = Date.now();
     if (!nested && (isRemotePart(frame) || frame.type === 'asset' || frame.type === 'gzip'))
       this.downloadedBytes += frame.data.length;
     if (isRemotePart(frame)) {
@@ -492,7 +504,7 @@ export class DeskTunnel {
       const message: RemoteToHost = { type: 'asset-get', id, path };
       let sentAt = Date.now();
       const retry = setInterval(() => {
-        if (!this.online || stallDelay(Date.now(), ASSET_RETRY_MS, this.lastInbound, sentAt) > 0)
+        if (!this.online || stallDelay(Date.now(), ASSET_RETRY_MS, this.lastBulk, sentAt) > 0)
           return;
         sentAt = Date.now();
         this.post(message);

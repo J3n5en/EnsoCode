@@ -9,7 +9,7 @@ import {
   type RemoteToHost,
 } from '@enso/pair';
 import { app, type IpcEvent, type IpcInvokeEvent, ipcMain } from '@platform';
-import { RemoteReadCache, takeRemoteMarks } from '@shared/remoteDelta';
+import { RemoteReadCache, takeRemoteMarks, writeSeedOf } from '@shared/remoteDelta';
 import { IPC_CHANNELS } from '@shared/types';
 import { readSettings } from '../../ipc/settings';
 import { handleLocalImageRequest } from '../localImageProtocol';
@@ -257,6 +257,8 @@ async function invoke(link: RemoteLink, command: Extract<RemoteToHost, { type: '
     const result = prepareResult(command.ch, await handler(fakeEvent(sender), ...args));
     commit?.();
     const data = encodeRemoteValue(result);
+    const seed = writeSeedOf(command.ch, data);
+    if (seed) sender.writes.seed(seed.name, seed.value);
     sender.post({
       type: 'rpc-result',
       cid: command.cid,
