@@ -226,6 +226,7 @@ export function deleteMemoryPermanently(db: Database.Database, id: string): bool
       db.prepare('DELETE FROM mentions WHERE memory_id = ?').run(id);
       db.prepare('DELETE FROM crystallized_from WHERE crystal_id = ? OR source_id = ?').run(id, id);
       db.prepare('DELETE FROM evolves WHERE older_id = ? OR newer_id = ?').run(id, id);
+      db.prepare('DELETE FROM reconcile_checks WHERE older_id = ? OR newer_id = ?').run(id, id);
       db.prepare("DELETE FROM memory_jobs WHERE kind = 'kg' AND target LIKE ? ESCAPE '\\'").run(
         `${id.replace(/[\\%_]/g, (char) => `\\${char}`)}#%`
       );
@@ -345,6 +346,9 @@ function toDistillDto(job: DistillJob): DistillJobDto {
   return {
     id: job.id,
     sessionId: job.payload.sessionId,
+    ...(job.payload.sessions?.length
+      ? { sessionIds: job.payload.sessions.map((s) => s.sessionId) }
+      : {}),
     projectId: job.payload.projectId,
     status: job.status,
     attempts: job.attempts,

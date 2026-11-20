@@ -3,6 +3,7 @@ import {
   FORGETTING_MAX_IMPORTANCE_OPTIONS,
   FORGETTING_STALE_DAYS_OPTIONS,
 } from '@shared/memory/constants';
+import { MEMORY_DISTILL_WINDOW_MINUTES } from '@shared/memory/distillWindow';
 import type {
   ChatModelDto,
   DistillableSessionDto,
@@ -10,6 +11,7 @@ import type {
   EmbeddingModelDto,
   MemoryArchiveCandidatesResult,
   MemoryJobsSnapshot,
+  MemoryReconcileRunDto,
   MemoryStats,
 } from '@shared/memory/dto';
 import { MEMORY_MODEL_IDLE_MINUTES } from '@shared/memory/modelIdle';
@@ -275,8 +277,12 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const settingsProviders = useSettingsStore((state) => state.providers);
   const distillEnabled = useSettingsStore((state) => state.memoryDistillEnabled);
   const setDistillEnabled = useSettingsStore((state) => state.setMemoryDistillEnabled);
+  const distillWindowMinutes = useSettingsStore((state) => state.memoryDistillWindowMinutes);
+  const setDistillWindowMinutes = useSettingsStore((state) => state.setMemoryDistillWindowMinutes);
   const kgEnabled = useSettingsStore((state) => state.memoryKgEnabled);
   const setKgEnabled = useSettingsStore((state) => state.setMemoryKgEnabled);
+  const reconcileEnabled = useSettingsStore((state) => state.memoryReconcileEnabled);
+  const setReconcileEnabled = useSettingsStore((state) => state.setMemoryReconcileEnabled);
   const decayEnabled = useSettingsStore((state) => state.memoryDecayEnabled);
   const setDecayEnabled = useSettingsStore((state) => state.setMemoryDecayEnabled);
   const decayCandidates = useSettingsStore((state) => state.memoryDecayArchiveCandidates);
@@ -357,6 +363,11 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     new Set()
   );
   const [forgettingBusy, setForgettingBusy] = React.useState<'run' | 'archive' | null>(null);
+  const [reconcileBusy, setReconcileBusy] = React.useState(false);
+  // undefined = 本次打开还没手动跑过；null = 跑了但没有可用模型
+  const [reconcileRun, setReconcileRun] = React.useState<MemoryReconcileRunDto | null | undefined>(
+    undefined
+  );
   const forgetting = stats?.forgetting ?? null;
   const lastRun = forgetting?.lastRun ?? null;
   const lastRunText = lastRun
@@ -451,6 +462,15 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     });
   };
 
+  const runReconcile = () => {
+    setReconcileBusy(true);
+    void window.electronAPI.memory.runReconcile().then((result) => {
+      setReconcileBusy(false);
+      setReconcileRun(result);
+      loadRef.current?.();
+    });
+  };
+
   const openCandidates = () => {
     void window.electronAPI.memory.archiveCandidates({ limit: 200, offset: 0 }).then((result) => {
       setCandidates(result);
@@ -520,6 +540,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const modelIdleItems = MEMORY_MODEL_IDLE_MINUTES.map((minutes) => ({
     value: String(minutes),
     label: minutes === 0 ? t('Never') : t('{{count}} min', { count: minutes }),
+  }));
+  const distillWindowItems = MEMORY_DISTILL_WINDOW_MINUTES.map((minutes) => ({
+    value: String(minutes),
+    label: minutes === 0 ? t('Immediately') : t('{{count}} min', { count: minutes }),
   }));
   const languageItems = [
     { value: 'en', label: t('English') },
@@ -950,6 +974,43 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
             )}
           </p>
         )}
+        {distillEnabled && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+            data-settings-row="memory.distillWindow"
+          >
+            <div className="min-w-0">
+              <p className="text-sm">{t('Merge sessions in the same project')}</p>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Wait this long after a session ends, then distill every session of the same project that ended meanwhile in one run. Immediately distills each session on its own.'
+                )}
+              </p>
+            </div>
+            <Select
+              value={String(distillWindowMinutes)}
+              items={distillWindowItems}
+              onValueChange={(value) => {
+                if (value !== null) setDistillWindowMinutes(Number(value));
+              }}
+              disabled={!memoryEnabled}
+            >
+              <SelectTrigger
+                className="w-56 shrink-0"
+                aria-label={t('Merge sessions in the same project')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {distillWindowItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
+        )}
         <SwitchRow
           rowId="memory.kg"
           title={t('Extract entities')}
@@ -960,6 +1021,36 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           onChange={setKgEnabled}
           disabled={!memoryEnabled}
         />
+        <SwitchRow
+          rowId="memory.reconcile"
+          title={t('Review conflicting memories')}
+          description={t(
+            'After new memories are written, ask the model whether they contradict older ones. Conflicts are only flagged for your review; nothing is hidden or deleted. Up to 20 model calls per run.'
+          )}
+          checked={reconcileEnabled}
+          onChange={setReconcileEnabled}
+          disabled={!memoryEnabled}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
+          <p className="min-w-0 text-xs text-muted-foreground">
+            {reconcileRun === undefined
+              ? t('Review now runs even when the switch above is off.')
+              : reconcileRun === null
+                ? t('No model is available for memory tasks.')
+                : t('Checked {{pairs}} pairs, flagged {{count}} conflicts.', {
+                    pairs: String(reconcileRun.judged),
+                    count: String(reconcileRun.challenges),
+                  })}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={reconcileBusy || !memoryEnabled}
+            onClick={runReconcile}
+          >
+            {reconcileBusy ? t('Running…') : t('Review now')}
+          </Button>
+        </div>
       </section>
 
       <section className="space-y-2" data-settings-row="memory.forgetting">

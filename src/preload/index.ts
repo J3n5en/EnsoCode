@@ -26,6 +26,7 @@ import type {
   MemoryListQuery,
   MemoryListResult,
   MemoryMutationResult,
+  MemoryReconcileRunDto,
   MemoryStats,
   PendingEvolvesReviewDto,
   PendingMemoryWriteDecision,
@@ -634,6 +635,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RESTORE, id),
     runForgetting: (): Promise<MemoryDecayRunDto | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FORGETTING_RUN),
+    runReconcile: (): Promise<MemoryReconcileRunDto | null> =>
+      ipcRenderer.invoke(IPC_CHANNELS.MEMORY_RECONCILE_RUN),
     archiveCandidates: (query?: {
       limit?: number;
       offset?: number;

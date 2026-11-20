@@ -4,6 +4,7 @@ import { app } from '@platform';
 import type { ChildSessionIdentity, SessionIdentity } from '@shared/builtinAgents';
 import { normalizeLocale, translate } from '@shared/i18n';
 import type { UnitType } from '@shared/memory/constants';
+import { normalizeMemoryDistillWindowMinutes } from '@shared/memory/distillWindow';
 import {
   DEFAULT_FORGETTING_SETTINGS,
   type ForgettingSettings,
@@ -22,6 +23,7 @@ import { openMemoryDb } from './memory/db';
 import {
   buildTranscript,
   type Complete,
+  type DistillBatchMember,
   type DistillJob,
   type DistillPayload,
   distillFingerprint,
@@ -33,6 +35,16 @@ import {
   sliceTranscript,
   type TranscriptMessage,
 } from './memory/distill';
+import {
+  buildBatchTranscript,
+  claimDistillQueue,
+  type DistillUnit,
+  distillUnits,
+  dueDistillGroups,
+  enqueueDistill,
+  nextDistillDueAt,
+  planDistillBatches,
+} from './memory/distillQueue';
 import { type DownloadProgress, downloadModel, isModelReady } from './memory/embedding/downloader';
 import { createEmbeddingProvider, toEmbedder } from './memory/embedding/provider';
 import {
@@ -60,6 +72,7 @@ import {
 import { runVecCompaction } from './memory/maintenance';
 import { applyManualEdit, type ManualEditResult } from './memory/manual';
 import { approvePendingWrite } from './memory/pending';
+import { type ReconcileSummary, runReconcile } from './memory/reconcile';
 import { getReembedJob, type ReembedJob, runReembedJob } from './memory/reembed';
 import { sanitizeMemoryWrite } from './memory/safety';
 import { distillSpaces, type MemorySpaceContext } from './memory/space';
@@ -304,6 +317,10 @@ export interface MemoryDistillConfig {
   readTranscript: (sessionFile: string) => Promise<TranscriptMessage[]>;
   /** 记忆输出语言（settings.memoryLanguage）；缺省英文 */
   language: string;
+  /** 聚合窗口（settings.memoryDistillWindowMinutes）；0 = 会话结束立即提炼 */
+  windowMinutes: number;
+  /** 时钟；测试注入 */
+  now: () => number;
 }
 
 let distillConfig: MemoryDistillConfig = {
@@ -311,6 +328,8 @@ let distillConfig: MemoryDistillConfig = {
   complete: null,
   readTranscript: readSessionTranscript,
   language: 'en',
+  windowMinutes: normalizeMemoryDistillWindowMinutes(undefined),
+  now: Date.now,
 };
 
 export function configureMemoryDistill(next: Partial<MemoryDistillConfig>): void {
@@ -324,7 +343,10 @@ export function syncMemoryDistillFromSettings(state: Record<string, unknown>): v
       state.memoryDistillEnabled === true &&
       !effectiveDisabledBuiltinTools(state.disabledBuiltinTools).includes('memory'),
     language: typeof state.memoryLanguage === 'string' ? state.memoryLanguage : 'en',
+    windowMinutes: normalizeMemoryDistillWindowMinutes(state.memoryDistillWindowMinutes),
   });
+  // 开关重新打开时把库里的待办接上；关着时 armDistillQueue 会撤掉定时器
+  armDistillQueue();
 }
 
 /** 缺省读取器：与 readParentHistoryTail 同源（SessionManager 当前分支），只取 user/assistant 的文本片段 */
@@ -364,16 +386,16 @@ export async function scheduleMemoryDistill(
 ): Promise<string | undefined> {
   if (!distillConfig.enabled) return payload.fromEntryId;
   let watermark = payload.fromEntryId;
-  await runDistill(
-    payload,
-    undefined,
-    undefined,
-    false,
-    (next) => {
-      watermark = next;
-    },
-    opts.continueFromLastJob === true
-  );
+  const onWatermark = (next: string | undefined) => {
+    watermark = next;
+  };
+  const continueFromLastJob = opts.continueFromLastJob === true;
+  // Bot 会话不聚合：它的水位与 onDistilled（整理 bot 笔记）依赖本次提炼真正跑完
+  if (distillConfig.windowMinutes > 0 && !payload.botId) {
+    await queueDistill(payload, onWatermark, continueFromLastJob);
+  } else {
+    await runDistill(payload, undefined, undefined, false, onWatermark, continueFromLastJob);
+  }
   return watermark;
 }
 
@@ -419,39 +441,153 @@ function runDistill(
         sessionId: payload.sessionId,
         durationMs: Math.round(performance.now() - queuedAt),
       });
-    // 在串行队列里读水位：压缩触发与会话结束触发先后到达时，后者能看到前者盖的终点
-    if (continueFromLastJob && payload.fromEntryId === undefined) {
-      const fromEntryId = lastDistillWatermark(memoryDb(), payload.sessionId);
-      if (fromEntryId) payload = { ...payload, fromEntryId };
-    }
-    const { messages, watermark } = sliceTranscript(
-      await distillConfig.readTranscript(payload.sessionFile),
-      payload.fromEntryId
+    const { stamped, transcript, watermark, fingerprint } = await sliceForDistill(
+      payload,
+      continueFromLastJob
     );
-    const transcript = buildTranscript(messages);
     if (!transcript) {
       onWatermark?.(watermark);
       return;
     }
-    // 语言写进 payload 并进指纹：改完语言再提炼不会被当成「已提炼」跳过，
-    // 续跑旧任务时也用它自己的语言复算，不受之后的设置变更影响
-    const stamped: DistillPayload = {
-      ...payload,
-      language: distillConfig.language,
-      ...(watermark !== undefined ? { toEntryId: watermark } : {}),
-    };
-    const job = ensureDistillJob(
-      memoryDb(),
-      stamped,
-      distillFingerprint(stamped.sessionId, transcript, stamped.language),
-      { force }
-    );
+    const job = ensureDistillJob(memoryDb(), stamped, fingerprint, { force });
     // 任务已落 memory_jobs（或同内容已提炼过）才推进水位：之后失败可续跑，不丢增量
     onWatermark?.(watermark);
     if (!job) return;
     onStarted?.();
     await runOneDistill(job, transcript);
   });
+}
+
+/** 读权威 jsonl 切出本次增量并盖章；必须在串行队列里调用（见续作水位） */
+async function sliceForDistill(payload: DistillPayload, continueFromLastJob: boolean) {
+  // 在串行队列里读水位：压缩触发与会话结束触发先后到达时，后者能看到前者盖的终点
+  if (continueFromLastJob && payload.fromEntryId === undefined) {
+    const fromEntryId = lastDistillWatermark(memoryDb(), payload.sessionId);
+    if (fromEntryId) payload = { ...payload, fromEntryId };
+  }
+  const { messages, watermark } = sliceTranscript(
+    await distillConfig.readTranscript(payload.sessionFile),
+    payload.fromEntryId
+  );
+  const transcript = buildTranscript(messages);
+  // 语言写进 payload 并进指纹：改完语言再提炼不会被当成「已提炼」跳过，
+  // 续跑旧任务时也用它自己的语言复算，不受之后的设置变更影响
+  const stamped: DistillPayload = {
+    ...payload,
+    language: distillConfig.language,
+    ...(watermark !== undefined ? { toEntryId: watermark } : {}),
+  };
+  const fingerprint = distillFingerprint(stamped.sessionId, transcript, stamped.language);
+  return { stamped, transcript, watermark, fingerprint };
+}
+
+// ---------------------------------------------------------------------------
+// 会话聚合：窗口内同项目的会话合并成一次提炼。待办落 memory_jobs(kind='distill-queue')，
+// 区间在排队时就盖章，水位立即推进；到期后（或下次开库时已过期）由串行队列出队建任务。
+// ---------------------------------------------------------------------------
+
+const MINUTE_MS = 60_000;
+let distillQueueTimer: NodeJS.Timeout | null = null;
+
+function queueDistill(
+  payload: DistillPayload,
+  onWatermark: (watermark: string | undefined) => void,
+  continueFromLastJob: boolean
+): Promise<void> {
+  return enqueueLlmJob(async () => {
+    const { stamped, transcript, watermark, fingerprint } = await sliceForDistill(
+      payload,
+      continueFromLastJob
+    );
+    if (transcript) {
+      const now = distillConfig.now();
+      enqueueDistill(
+        memoryDb(),
+        stamped,
+        fingerprint,
+        new Date(now + distillConfig.windowMinutes * MINUTE_MS),
+        new Date(now)
+      );
+      armDistillQueue();
+    }
+    // 待办已落库才推进水位：进程随后退出，下次开库按盖章的区间补跑
+    onWatermark(watermark);
+  });
+}
+
+/** 按库里最早的到期时间排一个定时器；已过期的直接进串行队列 */
+function armDistillQueue(): void {
+  if (distillQueueTimer) clearTimeout(distillQueueTimer);
+  distillQueueTimer = null;
+  if (!db || !distillConfig.enabled) return;
+  const next = nextDistillDueAt(db);
+  if (!next) return;
+  const delay = Date.parse(next) - distillConfig.now();
+  if (!(delay > 0)) {
+    void flushMemoryDistillQueue();
+    return;
+  }
+  distillQueueTimer = setTimeout(() => {
+    distillQueueTimer = null;
+    void flushMemoryDistillQueue();
+  }, delay);
+  distillQueueTimer.unref?.();
+}
+
+/** 把已到期的待办出队提炼（定时器 / 开库时调用；测试直接调）。重复调用是安全的：认领是原子的 */
+export function flushMemoryDistillQueue(): Promise<void> {
+  return enqueueLlmJob(async () => {
+    await flushDueDistill();
+    armDistillQueue();
+  });
+}
+
+async function flushDueDistill(): Promise<void> {
+  if (!distillConfig.enabled || !db) return;
+  const conn = db;
+  for (const items of dueDistillGroups(conn, new Date(distillConfig.now()))) {
+    const units: (DistillUnit & { ids: number[] })[] = [];
+    const gone: number[] = [];
+    for (const unit of distillUnits(items)) {
+      const transcript = await readMemberTranscript(unit.member).catch(() => '');
+      if (transcript) units.push({ ...unit, transcript });
+      else gone.push(...unit.ids);
+    }
+    // 读不到 / 内容已没了：作废，避免它永远到期、定时器空转
+    claimDistillQueue(conn, gone, 'cancelled');
+    const { projectId, language } = items[0].payload;
+    for (const plan of planDistillBatches(units, { projectId, language })) {
+      let job: DistillJob | null = null;
+      try {
+        const claim = claimDistillQueue(conn, plan.ids, 'done', () =>
+          ensureDistillJob(conn, plan.payload, plan.fingerprint)
+        );
+        job = claim.claimed ? (claim.value ?? null) : null;
+      } catch {
+        claimDistillQueue(conn, plan.ids, 'cancelled');
+      }
+      if (job) await runOneDistill(job, plan.transcript);
+    }
+  }
+}
+
+async function readMemberTranscript(member: DistillBatchMember): Promise<string> {
+  const { messages } = sliceTranscript(
+    await distillConfig.readTranscript(member.sessionFile),
+    member.fromEntryId,
+    member.toEntryId
+  );
+  return buildTranscript(messages);
+}
+
+/** 聚合任务续跑：按成员盖章的区间重读，拼接规则与建任务时相同，原文没变则指纹一致 */
+async function readBatchTranscript(members: readonly DistillBatchMember[]): Promise<string> {
+  const units: DistillUnit[] = [];
+  for (const member of members) {
+    const transcript = await readMemberTranscript(member);
+    if (transcript) units.push({ member, transcript });
+  }
+  return buildBatchTranscript(units);
 }
 
 async function runOneDistill(job: DistillJob, transcript: string): Promise<void> {
@@ -480,22 +616,23 @@ async function runOneDistill(job: DistillJob, transcript: string): Promise<void>
 function resumeMemoryDistill(): void {
   if (!distillConfig.enabled || !db) return;
   const jobs = listResumableDistillJobs(db);
-  if (jobs.length === 0) return;
-  void enqueueLlmJob(async () => {
-    for (const job of jobs) {
-      try {
-        const { messages } = sliceTranscript(
-          await distillConfig.readTranscript(job.payload.sessionFile),
-          job.payload.fromEntryId,
-          job.payload.toEntryId
-        );
-        const transcript = buildTranscript(messages);
-        await runOneDistill(job, transcript);
-      } catch {
-        /* 单个任务失败不影响其余 */
+  if (jobs.length > 0) {
+    void enqueueLlmJob(async () => {
+      for (const job of jobs) {
+        try {
+          const { sessions } = job.payload;
+          const transcript = sessions?.length
+            ? await readBatchTranscript(sessions)
+            : await readMemberTranscript({ ...job.payload, endedAt: job.createdAt });
+          await runOneDistill(job, transcript);
+        } catch {
+          /* 单个任务失败不影响其余 */
+        }
       }
-    }
-  });
+    });
+  }
+  // 聚合待办：已过期的排在续跑之后补跑，没到期的按库里的到期时间重新排期
+  armDistillQueue();
 }
 
 /** 设置页出口：最近蒸馏任务及逐条丢弃原因；库未打开不为此建库 */
@@ -575,9 +712,58 @@ export function notifyMemoryChanged(): void {
 /** createMemory 的 onCreated hook：只排队，不在这里调 LLM；开关关闭时连任务都不建。rerunKg 见 ensureKgJob */
 function onMemoryCreated(memory: Memory, rerunKg = false): void {
   notifyMemoryChanged();
+  scheduleAutoReconcile();
   if (!kgConfig.enabled || !db) return;
   const job = ensureKgJob(db, memory.id, { rerun: rerunKg });
   if (job) void enqueueLlmJob(() => runOneKg(job));
+}
+
+// ---------------------------------------------------------------------------
+// 矛盾复核：找「新记忆推翻旧结论」的配对，只写 challenges（待审）。与蒸馏 / KG 共用 LLM 串行链。
+// ---------------------------------------------------------------------------
+
+/** 设置 memoryReconcileEnabled，缺省关（每轮最多 RECONCILE_MAX_PAIRS 次模型调用）；只管自动触发 */
+let reconcileEnabled = false;
+/** 已排进队列、尚未开跑的自动复核：一批写入只排一轮 */
+let reconcileQueued = false;
+
+export function syncMemoryReconcileFromSettings(state: Record<string, unknown>): void {
+  reconcileEnabled =
+    state.memoryReconcileEnabled === true &&
+    !effectiveDisabledBuiltinTools(state.disabledBuiltinTools).includes('memory');
+}
+
+function scheduleAutoReconcile(): void {
+  if (!reconcileEnabled || reconcileQueued || !db) return;
+  reconcileQueued = true;
+  void enqueueLlmJob(async () => {
+    reconcileQueued = false;
+    await reconcileOnce();
+  });
+}
+
+async function reconcileOnce(): Promise<ReconcileSummary | null> {
+  const complete = await getMemoryCompletion();
+  if (!complete || !db) return null;
+  const summary = await runReconcile(db, { complete });
+  if (summary.challenges > 0) notifyMemoryChanged();
+  console.info('[memory-reconcile] run', summary);
+  return summary;
+}
+
+/** 设置页「立即复核」：绕过开关（显式点击即意图），排进同一条串行链；没有可用模型返回 null */
+export async function runMemoryReconcileNow(): Promise<ReconcileSummary | null> {
+  memoryDb();
+  let summary: ReconcileSummary | null = null;
+  await enqueueLlmJob(async () => {
+    summary = await reconcileOnce();
+  });
+  return summary;
+}
+
+/** 等后台复核收尾（测试 / 退出前用）；与蒸馏 / KG 共链 */
+export async function awaitMemoryReconcile(): Promise<void> {
+  await awaitLlmJobs();
 }
 
 /**
@@ -829,6 +1015,8 @@ function remoteOptions(spec: EmbeddingModelSpec): RemoteEmbeddingOptions | undef
 }
 
 export function closeMemoryDb(): void {
+  if (distillQueueTimer) clearTimeout(distillQueueTimer);
+  distillQueueTimer = null;
   invalidateMemoryEmbedding();
   reembedAbort = null;
   db?.close();

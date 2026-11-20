@@ -38,6 +38,10 @@ export const rerankPoolSize = (limit: number) =>
 // model / space_id 已是 vec 表 partition key，KNN 只剩 lifecycle_state 要靠 JOIN 主表滤；
 // 超采样只为兜 archived 行，倍数不用大
 const KNN_OVERSAMPLE = 2;
+// challenges = 两条不能同时为真、待用户复核，不是「旧的错了」：不隐藏，只降权并标注。
+// 0.5 让被挑战方从池顶（≈1.0）落到池中段，仍可见；与发起方同在池里时另有硬上限压在它之下
+const CHALLENGED_PENALTY = 0.5;
+const CHALLENGE_GAP = 1e-6;
 
 interface Scope {
   sql: string;
@@ -285,6 +289,45 @@ function hitOrder(a: MemorySearchHit, b: MemorySearchHit): number {
   );
 }
 
+/** 被挑战方 → 发起方 id；拒绝的挑战与已删除的发起方不算 */
+function loadChallengers(db: Database.Database, ids: string[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  if (ids.length === 0) return out;
+  try {
+    const rows = db
+      .prepare(
+        `SELECT e.older_id AS olderId, e.newer_id AS newerId FROM evolves e
+         JOIN memories n ON n.id = e.newer_id AND n.lifecycle_state != 'deleted'
+         WHERE e.content_relation = 'challenges' AND e.review_state != 'rejected'
+           AND e.older_id IN (${ids.map(() => '?').join(',')})
+         ORDER BY e.created_at ASC, e.id ASC`
+      )
+      .all(...ids) as { olderId: string; newerId: string }[];
+    for (const r of rows) out.set(r.olderId, [...(out.get(r.olderId) ?? []), r.newerId]);
+  } catch {}
+  return out;
+}
+
+// 降权后再压到池内每个发起方之下；链式挑战逐轮传递，轮数以命中数为界防环
+function applyChallengePenalty(hits: MemorySearchHit[]): void {
+  const challenged = hits.filter((h) => h.challengedBy);
+  if (challenged.length === 0) return;
+  for (const h of challenged) h.score *= CHALLENGED_PENALTY;
+  const byId = new Map(hits.map((h) => [h.memory.id, h]));
+  for (let round = 0, changed = true; changed && round < hits.length; round++) {
+    changed = false;
+    for (const h of challenged) {
+      for (const id of h.challengedBy ?? []) {
+        const by = byId.get(id);
+        if (by && h.score >= by.score) {
+          h.score = by.score - CHALLENGE_GAP;
+          changed = true;
+        }
+      }
+    }
+  }
+}
+
 async function applyLlmRerank(
   q: string,
   hits: MemorySearchHit[],
@@ -307,6 +350,7 @@ ${hit.memory.content}`
     );
     hit.score = blendRerankScore(scores[i] ?? 0, orig[i] ?? 0, coverage);
   }
+  applyChallengePenalty(window);
   window.sort(hitOrder);
   hits.splice(0, window.length, ...window);
 }
@@ -368,6 +412,7 @@ export async function searchMemories(
   const temporalIntent =
     opts.mode === 'deep' && analysis?.temporal ? analysis.temporal : detectTemporalIntent(q);
   const semantic = minMaxNormalize(fused.map(([, s]) => s));
+  const challengers = loadChallengers(db, [...byId.keys()]);
   const hits: MemorySearchHit[] = [];
   fused.forEach(([id, rrfScore], i) => {
     const memory = byId.get(id);
@@ -387,8 +432,17 @@ export async function searchMemories(
     const boost = temporalIntent ? computeTemporalBoost(memory.eventStart, temporalIntent) : 0;
     // crystal 是多源合成的结论，同分时应压过任一单源记忆：乘法 boost
     const score = finalScore(semantic[i], decay, boost) * (memory.isCrystal ? CRYSTAL_BOOST : 1);
-    hits.push({ memory, rrf: rrfScore, decay, score, relevance: relevance.get(id) ?? null });
+    const challengedBy = challengers.get(id);
+    hits.push({
+      memory,
+      rrf: rrfScore,
+      decay,
+      score,
+      relevance: relevance.get(id) ?? null,
+      ...(challengedBy ? { challengedBy } : {}),
+    });
   });
+  applyChallengePenalty(hits);
   hits.sort(hitOrder);
   if (opts.mode === 'deep' && opts.assist && hits.length > 1) {
     await applyLlmRerank(q, hits, opts.assist);

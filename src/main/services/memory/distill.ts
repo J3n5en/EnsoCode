@@ -10,6 +10,7 @@ import {
   isUnitType,
 } from '@shared/memory/constants';
 import {
+  DISTILL_BATCH_RULES,
   DISTILL_GROUP_SCOPE_RULES,
   DISTILL_THREAD_PROMPT,
   distillChunkPrompt,
@@ -148,6 +149,10 @@ export function buildTranscript(messages: readonly TranscriptMessage[]): string 
   return parts.join(MESSAGE_SEP);
 }
 
+/** 多会话拼接的分隔头前缀（distillQueue 生成）；分块必须能在它前面断开 */
+export const BATCH_SESSION_HEADER = '## Session ';
+const MESSAGE_START = /\n\n(?=(?:User|Assistant): |## Session \d+\/\d+ · )/;
+
 /**
  * 增量蒸馏切片：取 (fromEntryId, toEntryId]。起点不在当前分支（切过分支）时退回全量，宁可重复也不丢；
  * 水位 = 切片里最后一个 entryId，切片为空或无 entryId 时保持起点。
@@ -171,7 +176,7 @@ export function chunkTranscript(
   max: number = DISTILL_MAX_CHUNK_CHARS
 ): string[] {
   if (transcript.length <= max) return [transcript];
-  const messages = transcript.split(/\n\n(?=(?:User|Assistant): )/);
+  const messages = transcript.split(MESSAGE_START);
   const chunks: string[] = [];
   let current = '';
   const flush = () => {
@@ -404,12 +409,16 @@ export async function distillTranscript(
     extractMaxTokens?: number;
     /** 群聊成员会话：要求每条带 scope（chat / self） */
     groupScope?: boolean;
+    /** 多会话聚合：提示模型按 `## Session` 分隔理解上下文 */
+    batch?: boolean;
   } = {}
 ): Promise<DistilledMemory[]> {
   const chunks = chunkTranscript(transcript, opts.maxChunkChars);
   const extractMaxTokens = opts.extractMaxTokens ?? DISTILL_SINGLE_EXTRACT_MAX_TOKENS;
   const scoped = (prompt: string) =>
-    opts.groupScope ? `${prompt}\n\n${DISTILL_GROUP_SCOPE_RULES}` : prompt;
+    [prompt, opts.groupScope && DISTILL_GROUP_SCOPE_RULES, opts.batch && DISTILL_BATCH_RULES]
+      .filter(Boolean)
+      .join('\n\n');
   const systemPrompt = scoped(withMemoryLanguage(DISTILL_THREAD_PROMPT, opts.language));
   const infer = async (
     system: string,
@@ -521,7 +530,19 @@ export async function distillTranscript(
 // ---------------------------------------------------------------------------
 
 const KIND = 'distill';
+/** 聚合窗口里的待办（distillQueue.ts）；续作水位要把它们也算上 */
+const QUEUE_KIND = 'distill-queue';
 export type DistillStatus = 'pending' | 'running' | 'done' | 'cancelled';
+
+/** 聚合任务里的一个会话：区间 (fromEntryId, toEntryId] 在排队时已盖章，续跑按它复原 */
+export interface DistillBatchMember {
+  sessionId: string;
+  sessionFile: string;
+  fromEntryId?: string;
+  toEntryId?: string;
+  /** 该会话最后一次进队列的时间（ISO）；决定拼接顺序与分隔头里的时间 */
+  endedAt: string;
+}
 
 export interface DistillPayload {
   sessionId: string;
@@ -541,6 +562,8 @@ export interface DistillPayload {
   fromEntryId?: string;
   /** 增量终点（含）：建任务时盖章，续跑时据此复原同一段，不吞之后新增的内容 */
   toEntryId?: string;
+  /** 多会话聚合任务的成员；有值时 sessionId 是 `batch:<hash>`，sessionFile 不用 */
+  sessions?: DistillBatchMember[];
 }
 
 /** 每条被丢弃 / 未写入的蒸馏结果的结构化原因；设置页可直接展示 */
@@ -670,14 +693,17 @@ export function ensureDistillJob(
     .immediate();
 }
 
-/** 该会话最近一次蒸馏任务盖章的终点水位；没有任务或旧任务未盖章时返回 undefined（调用方按全量处理） */
+/**
+ * 该会话最近一次蒸馏任务 / 聚合待办盖章的终点水位；没有任务或旧任务未盖章时返回 undefined（调用方按全量处理）。
+ * 待办也算：否则窗口内先压缩、后结束的两次触发会各自从头切，同一段内容排两遍。
+ */
 export function lastDistillWatermark(db: Database.Database, sessionId: string): string | undefined {
   const prefix = `${sessionId}#`;
   const row = db
     .prepare(
-      'SELECT * FROM memory_jobs WHERE kind = ? AND substr(target, 1, ?) = ? ORDER BY id DESC LIMIT 1'
+      'SELECT * FROM memory_jobs WHERE kind IN (?, ?) AND substr(target, 1, ?) = ? ORDER BY id DESC LIMIT 1'
     )
-    .get(KIND, prefix.length, prefix) as JobRow | undefined;
+    .get(KIND, QUEUE_KIND, prefix.length, prefix) as JobRow | undefined;
   return row ? toJob(row).payload.toEntryId : undefined;
 }
 
@@ -774,6 +800,7 @@ export async function runDistillJob(
       language: jobLanguage ?? 'en',
       extractMaxTokens: attempts >= 2 ? DISTILL_MAX_OUTPUT_TOKENS : undefined,
       groupScope: Boolean(opts.chatSpaceId),
+      batch: Boolean(job.payload.sessions?.length),
     });
   } catch (error) {
     const message = `distill failed: ${error instanceof Error ? error.message : String(error)}`;

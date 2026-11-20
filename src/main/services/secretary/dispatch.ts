@@ -2867,18 +2867,39 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
    * 模型行启用；虚拟模型按目录解析。这里只判定，不改任何配置。
    */
   resolveModel: async (ref) => {
-    const { modelRefForSpawnConfig, resolveModelSelection } = await import('../agentHost');
+    const { modelRefForSpawnConfig, providersFromSettings, resolveModelSelection } = await import(
+      '../agentHost'
+    );
     const { readStoredOauthCredentialKeys } = await import('../oauthProviders');
+    const { modelUsability } = await import('@shared/defaultModel');
+    const { dispatchModelChoices, dispatchProviderId } = await import('./dispatchModel');
     let keys: ReadonlySet<string>;
     try {
       keys = await readStoredOauthCredentialKeys();
     } catch {
       return { ok: false, error: 'model credentials unavailable' };
     }
-    const resolved = resolveModelSelection(ref.providerId, ref.modelId, keys, {
+    const providers = providersFromSettings();
+    const providerId = dispatchProviderId(ref.providerId, providers);
+    const resolved = resolveModelSelection(providerId, ref.modelId, keys, {
       allowVirtual: true,
     });
-    if (!resolved.ok) return { ok: false, error: resolved.error };
+    if (!resolved.ok) {
+      const credentials = {
+        oauthCredentials: { status: 'ready' as const, authenticatedAccountKeys: keys },
+      };
+      const choices = dispatchModelChoices(
+        providers,
+        (id, modelId) =>
+          modelUsability({ providerId: id, modelId }, providers, credentials) === 'usable'
+      );
+      return {
+        ok: false,
+        error: choices
+          ? `${resolved.error}. providerId must be an exact id below (not a name), or omit model to use the dispatch default:\n${choices}`
+          : resolved.error,
+      };
+    }
     const model = modelRefForSpawnConfig(resolved.selection.config);
     return {
       ok: true,
