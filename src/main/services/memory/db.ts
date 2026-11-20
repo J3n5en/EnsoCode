@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { getLoadablePath } from 'sqlite-vec';
 import { contentHash } from './contentHash';
 
-export const MEMORY_SCHEMA_VERSION = 11;
+export const MEMORY_SCHEMA_VERSION = 12;
 
 /**
  * vec0 的 chunk 是定长预分配：一个 chunk 恒定占 chunk_size × dim × 4 字节，与里面实际有几行无关。
@@ -368,6 +368,19 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
         ON memories (archive_candidate_at) WHERE archive_candidate_at IS NOT NULL;
     `);
   },
+  // v12：矛盾复核的已判配对。不放 memory_jobs：「清空已完成任务」会把它们一起清掉，
+  // 下一轮就要为全部旧配对重新付费调模型。fingerprint = 两端 content_hash，任一端改正文后重判。
+  `
+  CREATE TABLE IF NOT EXISTS reconcile_checks (
+    older_id    TEXT NOT NULL,
+    newer_id    TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    verdict     TEXT NOT NULL,
+    confidence  REAL,
+    checked_at  TEXT NOT NULL,
+    PRIMARY KEY (older_id, newer_id)
+  );
+  `,
 ];
 
 /**

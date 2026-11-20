@@ -97,6 +97,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   memoryKgEnabled: { mode: 'portable' },
   // 记忆库是每台机器一份（userData/memory/memory.db），遗忘策略作用于本机库：
   // 同步到另一台机器等于在那边按同一阈值归档，属于不该跨机复制的数据决策
+  memoryReconcileEnabled: { mode: 'excluded', reason: 'device-local memory library policy' },
   memoryDecayEnabled: { mode: 'excluded', reason: 'device-local memory library policy' },
   memoryDecayArchiveCandidates: { mode: 'excluded', reason: 'device-local memory library policy' },
   memoryDecayAutoArchive: { mode: 'excluded', reason: 'device-local memory library policy' },

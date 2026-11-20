@@ -10,6 +10,7 @@ import type {
   EmbeddingModelDto,
   MemoryArchiveCandidatesResult,
   MemoryJobsSnapshot,
+  MemoryReconcileRunDto,
   MemoryStats,
 } from '@shared/memory/dto';
 import { MEMORY_MODEL_IDLE_MINUTES } from '@shared/memory/modelIdle';
@@ -277,6 +278,8 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const setDistillEnabled = useSettingsStore((state) => state.setMemoryDistillEnabled);
   const kgEnabled = useSettingsStore((state) => state.memoryKgEnabled);
   const setKgEnabled = useSettingsStore((state) => state.setMemoryKgEnabled);
+  const reconcileEnabled = useSettingsStore((state) => state.memoryReconcileEnabled);
+  const setReconcileEnabled = useSettingsStore((state) => state.setMemoryReconcileEnabled);
   const decayEnabled = useSettingsStore((state) => state.memoryDecayEnabled);
   const setDecayEnabled = useSettingsStore((state) => state.setMemoryDecayEnabled);
   const decayCandidates = useSettingsStore((state) => state.memoryDecayArchiveCandidates);
@@ -357,6 +360,11 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     new Set()
   );
   const [forgettingBusy, setForgettingBusy] = React.useState<'run' | 'archive' | null>(null);
+  const [reconcileBusy, setReconcileBusy] = React.useState(false);
+  // undefined = 本次打开还没手动跑过；null = 跑了但没有可用模型
+  const [reconcileRun, setReconcileRun] = React.useState<MemoryReconcileRunDto | null | undefined>(
+    undefined
+  );
   const forgetting = stats?.forgetting ?? null;
   const lastRun = forgetting?.lastRun ?? null;
   const lastRunText = lastRun
@@ -447,6 +455,15 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
     setForgettingBusy('run');
     void window.electronAPI.memory.runForgetting().then(() => {
       setForgettingBusy(null);
+      loadRef.current?.();
+    });
+  };
+
+  const runReconcile = () => {
+    setReconcileBusy(true);
+    void window.electronAPI.memory.runReconcile().then((result) => {
+      setReconcileBusy(false);
+      setReconcileRun(result);
       loadRef.current?.();
     });
   };
@@ -960,6 +977,36 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
           onChange={setKgEnabled}
           disabled={!memoryEnabled}
         />
+        <SwitchRow
+          rowId="memory.reconcile"
+          title={t('Review conflicting memories')}
+          description={t(
+            'After new memories are written, ask the model whether they contradict older ones. Conflicts are only flagged for your review; nothing is hidden or deleted. Up to 20 model calls per run.'
+          )}
+          checked={reconcileEnabled}
+          onChange={setReconcileEnabled}
+          disabled={!memoryEnabled}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5">
+          <p className="min-w-0 text-xs text-muted-foreground">
+            {reconcileRun === undefined
+              ? t('Review now runs even when the switch above is off.')
+              : reconcileRun === null
+                ? t('No model is available for memory tasks.')
+                : t('Checked {{pairs}} pairs, flagged {{count}} conflicts.', {
+                    pairs: String(reconcileRun.judged),
+                    count: String(reconcileRun.challenges),
+                  })}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={reconcileBusy || !memoryEnabled}
+            onClick={runReconcile}
+          >
+            {reconcileBusy ? t('Running…') : t('Review now')}
+          </Button>
+        </div>
       </section>
 
       <section className="space-y-2" data-settings-row="memory.forgetting">

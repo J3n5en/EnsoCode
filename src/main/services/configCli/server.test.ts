@@ -266,6 +266,25 @@ describe('config CLI socket', () => {
     expect((await state()).secretaryEnabled).toBe(true);
   });
 
+  it('矛盾复核开关热生效：可写、不需要重启、不是密钥', async () => {
+    const schema = await config({ action: 'schema' });
+    const keys = new Map(
+      (schema.keys as { path: string; writable: boolean; requiresRestart: boolean }[]).map((k) => [
+        k.path,
+        k,
+      ])
+    );
+    expect(keys.get('memoryReconcileEnabled')).toMatchObject({
+      writable: true,
+      requiresRestart: false,
+      secret: false,
+    });
+    expect(await config({ action: 'set', key: 'memoryReconcileEnabled', value: true })).toEqual({
+      ok: true,
+    });
+    expect((await state()).memoryReconcileEnabled).toBe(true);
+  });
+
   it('reload 以磁盘为准重读', async () => {
     const settings = await import('../../ipc/settings');
     settings.flushSettings();

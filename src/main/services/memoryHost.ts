@@ -60,6 +60,7 @@ import {
 import { runVecCompaction } from './memory/maintenance';
 import { applyManualEdit, type ManualEditResult } from './memory/manual';
 import { approvePendingWrite } from './memory/pending';
+import { type ReconcileSummary, runReconcile } from './memory/reconcile';
 import { getReembedJob, type ReembedJob, runReembedJob } from './memory/reembed';
 import { sanitizeMemoryWrite } from './memory/safety';
 import { distillSpaces, type MemorySpaceContext } from './memory/space';
@@ -575,9 +576,58 @@ export function notifyMemoryChanged(): void {
 /** createMemory 的 onCreated hook：只排队，不在这里调 LLM；开关关闭时连任务都不建。rerunKg 见 ensureKgJob */
 function onMemoryCreated(memory: Memory, rerunKg = false): void {
   notifyMemoryChanged();
+  scheduleAutoReconcile();
   if (!kgConfig.enabled || !db) return;
   const job = ensureKgJob(db, memory.id, { rerun: rerunKg });
   if (job) void enqueueLlmJob(() => runOneKg(job));
+}
+
+// ---------------------------------------------------------------------------
+// 矛盾复核：找「新记忆推翻旧结论」的配对，只写 challenges（待审）。与蒸馏 / KG 共用 LLM 串行链。
+// ---------------------------------------------------------------------------
+
+/** 设置 memoryReconcileEnabled，缺省关（每轮最多 RECONCILE_MAX_PAIRS 次模型调用）；只管自动触发 */
+let reconcileEnabled = false;
+/** 已排进队列、尚未开跑的自动复核：一批写入只排一轮 */
+let reconcileQueued = false;
+
+export function syncMemoryReconcileFromSettings(state: Record<string, unknown>): void {
+  reconcileEnabled =
+    state.memoryReconcileEnabled === true &&
+    !effectiveDisabledBuiltinTools(state.disabledBuiltinTools).includes('memory');
+}
+
+function scheduleAutoReconcile(): void {
+  if (!reconcileEnabled || reconcileQueued || !db) return;
+  reconcileQueued = true;
+  void enqueueLlmJob(async () => {
+    reconcileQueued = false;
+    await reconcileOnce();
+  });
+}
+
+async function reconcileOnce(): Promise<ReconcileSummary | null> {
+  const complete = await getMemoryCompletion();
+  if (!complete || !db) return null;
+  const summary = await runReconcile(db, { complete });
+  if (summary.challenges > 0) notifyMemoryChanged();
+  console.info('[memory-reconcile] run', summary);
+  return summary;
+}
+
+/** 设置页「立即复核」：绕过开关（显式点击即意图），排进同一条串行链；没有可用模型返回 null */
+export async function runMemoryReconcileNow(): Promise<ReconcileSummary | null> {
+  memoryDb();
+  let summary: ReconcileSummary | null = null;
+  await enqueueLlmJob(async () => {
+    summary = await reconcileOnce();
+  });
+  return summary;
+}
+
+/** 等后台复核收尾（测试 / 退出前用）；与蒸馏 / KG 共链 */
+export async function awaitMemoryReconcile(): Promise<void> {
+  await awaitLlmJobs();
 }
 
 /**

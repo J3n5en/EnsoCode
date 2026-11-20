@@ -214,6 +214,7 @@ const initialState = {
   memoryEmbeddingRemoteProviderId: null as string | null,
   memoryDistillEnabled: false,
   memoryKgEnabled: false,
+  memoryReconcileEnabled: false,
   // 遗忘：默认只开「降权」。标记候选与自动归档都要用户显式打开，升级后不会突然归档任何东西。
   memoryDecayEnabled: DEFAULT_FORGETTING_SETTINGS.enabled,
   memoryDecayArchiveCandidates: DEFAULT_FORGETTING_SETTINGS.archiveCandidates,
@@ -427,6 +428,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ memoryEmbeddingRemoteProviderId }),
       setMemoryDistillEnabled: (memoryDistillEnabled) => set({ memoryDistillEnabled }),
       setMemoryKgEnabled: (memoryKgEnabled) => set({ memoryKgEnabled }),
+      setMemoryReconcileEnabled: (memoryReconcileEnabled) => set({ memoryReconcileEnabled }),
       setMemoryDecayEnabled: (memoryDecayEnabled) => set({ memoryDecayEnabled }),
       setMemoryDecayArchiveCandidates: (memoryDecayArchiveCandidates) =>
         set({ memoryDecayArchiveCandidates }),

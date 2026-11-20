@@ -15,6 +15,7 @@ import {
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
+  type MemoryReconcileRunDto,
   type MemorySpaceKind,
   type MemoryStats,
   type PendingMemoryWriteDto,
@@ -90,6 +91,7 @@ import {
   refreshMemoryEmbedding,
   retryFailedMemoryKg,
   runMemoryForgettingNow,
+  runMemoryReconcileNow,
   setMemoryChangeListener,
 } from '../services/memoryHost';
 import {
@@ -248,6 +250,17 @@ export function registerMemoryHandlers(): void {
     memoryChanged();
     return summary;
   });
+
+  // 立即复核：绕过 memoryReconcileEnabled，排进与蒸馏 / KG 同一条 LLM 串行链；没有可用模型返回 null
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_RECONCILE_RUN,
+    async (event): Promise<MemoryReconcileRunDto | null> => {
+      if (!isTrustedWindow(event.sender.id)) return null;
+      const summary = await runMemoryReconcileNow();
+      if (summary) memoryChanged();
+      return summary;
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES,
