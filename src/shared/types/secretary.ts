@@ -627,6 +627,8 @@ export interface SecretaryState {
   board: SecretaryBoard;
   proposals: Record<string, SecretaryProposal>;
   takeovers: SecretaryTakeoverView[];
+  /** 定时清单的指纹：定时增删、触发都会变，状态推送按内容去重时面板才收得到 */
+  schedulesRev?: string;
 }
 
 /**

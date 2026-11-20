@@ -1,4 +1,9 @@
-import type { SecretaryProfile, SecretaryProposal, SecretaryState } from '@shared/types/secretary';
+import type {
+  SecretaryProfile,
+  SecretaryProposal,
+  SecretaryState,
+  SecretarySummary,
+} from '@shared/types/secretary';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const proposal: SecretaryProposal = {
@@ -24,6 +29,7 @@ const stateWith = (status: SecretaryProposal['status']): SecretaryState => ({
 
 let initialState: Promise<SecretaryState>;
 let listener: ((state: SecretaryState) => void) | null = null;
+let listListener: ((secretaries: SecretarySummary[]) => void) | null = null;
 let openListener: ((target: { conversationId: string; proposalId?: string }) => void) | null = null;
 const off = vi.fn();
 const offOpen = vi.fn();
@@ -82,7 +88,10 @@ vi.stubGlobal('window', {
         Promise.resolve([
           { id: 'default', projectId: 'sec-project', name: null, avatar: null, order: 0 },
         ]),
-      onListChanged: () => () => {},
+      onListChanged: (callback: (secretaries: SecretarySummary[]) => void) => {
+        listListener = callback;
+        return () => {};
+      },
       onStateChanged: (callback: (state: SecretaryState) => void) => {
         listener = callback;
         return off;
@@ -126,6 +135,12 @@ describe('useSecretaryStore', () => {
     expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('pending');
 
     listener?.(stateWith('succeeded'));
+    expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('succeeded');
+
+    // 清单推送晚到、且这份状态还没进 states：不能把已有的档案清回空状态
+    listListener?.([
+      { id: 'default', projectId: 'sec-project', name: null, avatar: null, order: 0 },
+    ]);
     expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('succeeded');
 
     unbind();

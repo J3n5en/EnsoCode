@@ -190,7 +190,11 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
           secretaries,
           states,
           focusedId,
-          secretary: (focusedId && states[focusedId]) || EMPTY_SECRETARY_STATE,
+          // 清单推送常比各秘书的状态快：states 里还没有时保留手上那份，不把侧栏闪空。
+          // 清单可能先到并把 focusedId 设好，所以按「聚焦没变」判断，而不是只看 states
+          secretary:
+            (focusedId && states[focusedId]) ||
+            (focusedId === state.focusedId ? state.secretary : EMPTY_SECRETARY_STATE),
         };
       });
     });

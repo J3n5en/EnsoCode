@@ -1435,7 +1435,8 @@ async function run(cdp, pluginZipUrl) {
     `);
 
   const firstMinute = 60_000 - (Date.now() % 60_000);
-  const feedA = await dispatchSlow('动态时间 A', firstMinute + 45_000);
+  // 两条都要跑过 Main 每 30 秒一次的 lastEventAt 补存，磁盘上才看得到运行期间的活动
+  const feedA = await dispatchSlow('动态时间 A', firstMinute + 60_000);
   // 等到墙钟进入下一分钟再派第二个，两条的开始时间落在不同的分钟里
   await waitFor(
     () => Math.floor(Date.now() / 60_000) > Math.floor(feedA.createdAt / 60_000) || null,
@@ -1444,7 +1445,7 @@ async function run(cdp, pluginZipUrl) {
     250
   );
   await sleep(1000);
-  const feedB = await dispatchSlow('动态时间 B', 25_000);
+  const feedB = await dispatchSlow('动态时间 B', 45_000);
   const feedIds = [feedB.conversationId, feedA.conversationId];
   const feedSamples = [];
   for (let index = 0; index < 6; index += 1) {
@@ -1489,7 +1490,20 @@ async function run(cdp, pluginZipUrl) {
     '动态：运行期间顺序不变，后开始的在前',
     orders
   );
-  const busy = readJson(dispatchFile).dispatched;
+  // lastEventAt 单独变化不立即落盘（#298），等到两条都还在跑时的那次补存
+  const busy = await waitFor(
+    () => {
+      const file = readJson(dispatchFile).dispatched;
+      return feedIds.every(
+        (id) => file[id]?.lastState === 'running' && file[id].lastEventAt > since[id] + 5000
+      )
+        ? file
+        : null;
+    },
+    'running activity persisted',
+    40_000,
+    500
+  ).catch(() => readJson(dispatchFile).dispatched);
   assert(
     feedIds.every(
       (id) => busy[id].lastEventAt > since[id] + 5000 && busy[id].stateSince === since[id]
@@ -5853,8 +5867,9 @@ async function verifyImageViewAndCleanup(cdp, setup) {
       15000
     );
     card?.querySelector('[data-enso=tool-card-expand]')?.click();
+    // #300 起缩略图在 tool-card-image 里的 <img>：结果带图片字节时直接用 data URL
     const image = await until(
-      () => document.querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-image]'),
+      () => document.querySelector('[data-enso=tool-card][data-tool=image_view] [data-enso=tool-card-image] img'),
       15000
     );
     return JSON.stringify({
@@ -5864,7 +5879,8 @@ async function verifyImageViewAndCleanup(cdp, setup) {
     });
   `);
   assert(
-    typeof thumb.src === 'string' && thumb.src.startsWith('local-image://'),
+    typeof thumb.src === 'string' &&
+      (thumb.src.startsWith('data:image/png') || thumb.src.startsWith('local-image://')),
     'image: 工具卡片用缩略图显示图片',
     thumb
   );
@@ -6805,10 +6821,24 @@ async function verifyMultiSecretary(cdp, setup) {
 
   log('== 多秘书：转交');
   const transferred = await page(`
-    const result = await window.electronAPI.secretary.transfer(
-      ${JSON.stringify(routed.first)},
-      ${JSON.stringify(second)}
+    // 走会话顶栏的转交入口：打开会话 → 点转交 → 选接收的秘书
+    const press = (el) => {
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+        el.dispatchEvent(new (type.startsWith('pointer') ? PointerEvent : MouseEvent)(type, { bubbles: true, button: 0, pointerType: 'mouse' }));
+      }
+      el.click();
+    };
+    S().selectConversation(${JSON.stringify(routed.first)});
+    const trigger = await until(() => document.querySelector('[data-enso=secretary-transfer]'), 15000);
+    if (!trigger) return JSON.stringify({ ok: false, error: 'no transfer control' });
+    press(trigger);
+    const item = await until(
+      () => document.querySelector('[data-enso=secretary-transfer-target][data-secretary=${JSON.stringify(second).slice(1, -1)}]'),
+      8000
     );
+    if (!item) return JSON.stringify({ ok: false, error: 'no transfer target' });
+    const targets = [...document.querySelectorAll('[data-enso=secretary-transfer-target]')].map((n) => n.dataset.secretary);
+    press(item);
     const secretary = await SEC();
     const seen = await until(() => {
       const board = secretary.getState().states[${JSON.stringify(second)}]?.board;
@@ -6818,9 +6848,14 @@ async function verifyMultiSecretary(cdp, setup) {
         ? true
         : null;
     }, 15000);
-    return JSON.stringify({ ok: result.ok && seen === true, error: result.ok ? null : result.error });
+    return JSON.stringify({ ok: seen === true, targets });
   `);
-  assert(transferred.ok, '多秘书: 会话从小安转交给阿财，阿财的看板上出现它', transferred);
+  assert(transferred.ok, '多秘书: 从会话顶栏把会话转交给阿财，阿财的看板上出现它', transferred);
+  assert(
+    !transferred.targets?.includes('default'),
+    '多秘书: 转交入口只列出别的秘书，不列当前管理它的',
+    transferred
+  );
   const after = readJson(path.join(memberDir(second), 'dispatch.json'));
   const before = readJson(path.join(root, 'dispatch.json'));
   assert(

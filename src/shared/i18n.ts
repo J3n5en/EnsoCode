@@ -3539,6 +3539,12 @@ export const zhTranslations: Record<string, string> = {
   'Next: confirm again': '下一步：再确认一次',
   'Transfer to…': '转交给…',
   'Transferred to {{name}}': '已转交给 {{name}}',
+  'Transfer to {{name}}': '转交给 {{name}}',
+  'Transfer failed': '转交失败',
+  'The other secretary cannot see this project.': '对方秘书看不到这个项目。',
+  'The other secretary has no conversation yet: open it once first.':
+    '对方秘书还没有会话，先打开它一次。',
+  'No secretary manages this session.': '这个会话没有秘书在管。',
   'This secretary': '本秘书',
   'All secretaries': '全部秘书',
   'Filter by secretary': '按秘书筛选',

@@ -2021,4 +2021,22 @@ describe('派出会话的流式事件', () => {
     expect(saves).toBe(first.saves + 1);
     expect(h.state.file.dispatched.c1?.lastEventAt).toBe(h.state.now);
   });
+
+  it('补存由别的会话触发时，间隔里其他会话的事件时刻也一起落盘', () => {
+    const c2 = { ...emptyFile().dispatched.c1, conversationId: 'c2' } as DispatchRecord;
+    const h = harness({ file: { dispatched: { ...emptyFile().dispatched, c2 } } });
+    h.state.rows.c2 = { id: 'c2', title: '另一个', projectId: 'p1', sessionFile: '/tmp/c2.jsonl' };
+    h.state.statuses.c2 = running;
+    const c2Event = (type: string) =>
+      ({ type, identity: { sessionId: 'c2', generation: 'g2' }, seq: 1, turnId: 't2' }) as never;
+    h.state.now = 1_000;
+    h.host.onAgentEvent(event('message-update'), []);
+    h.host.onAgentEvent(c2Event('message-update'), []);
+    h.state.now = 20_000;
+    h.host.onAgentEvent(c2Event('message-update'), []);
+    h.state.now = 1_000 + MINUTE;
+    h.host.onAgentEvent(event('message-update'), []);
+    expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000 + MINUTE);
+    expect(h.state.file.dispatched.c2?.lastEventAt).toBe(20_000);
+  });
 });

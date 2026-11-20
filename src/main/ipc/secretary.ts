@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { checkAvatarImage } from '@shared/bots/cardPng';
@@ -342,7 +342,11 @@ async function secretaryState(ctx: SecretaryContext): Promise<SecretaryState> {
     enabled,
     projectId: enabled ? ctx.projectId : null,
   });
-  return { ...state, secretaryId: ctx.id };
+  const schedulesRev = createHash('sha1')
+    .update(JSON.stringify(new SecretaryStore(ctx.dir).schedules()))
+    .digest('hex')
+    .slice(0, 12);
+  return { ...state, secretaryId: ctx.id, schedulesRev };
 }
 
 function secretarySummaries(): SecretarySummary[] {

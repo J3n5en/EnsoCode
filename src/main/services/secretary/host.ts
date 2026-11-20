@@ -807,6 +807,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
    */
   let savedSignature: string | null = null;
   let savedAt = Number.NEGATIVE_INFINITY;
+  /** 还没落盘的事件时刻：每次读盘后补回，补存由别的会话触发时也不丢，巡检读到的是最新活动 */
+  const eventStamps = new Map<string, number>();
+  function withEventStamps(file: SecretaryDispatchFile): SecretaryDispatchFile {
+    for (const [conversationId, at] of eventStamps) {
+      const record = file.dispatched[conversationId];
+      if (!record) eventStamps.delete(conversationId);
+      else if (at > record.lastEventAt) record.lastEventAt = at;
+    }
+    return file;
+  }
   function saveEventFile(file: SecretaryDispatchFile, now: number): boolean {
     const signature = JSON.stringify(file, (key, value) =>
       key === 'lastEventAt' ? undefined : value
@@ -838,7 +848,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (outcome) settleDelivery(ports, inflightTarget, outcome, now);
       }
 
-      const file = ports.file();
+      const file = withEventStamps(ports.file());
       const rows = ports.rows();
       if (sessionId) touched.add(rootIdOf(event, sessionId));
       let changed = applyRelayEvent(file, event, sessionId, now);
@@ -860,6 +870,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           pendingComplete.delete(conversationId);
         }
         record.lastEventAt = now;
+        eventStamps.set(conversationId, now);
         if (record.lastState !== status.state) record.stateSince = now;
         record.lastState = status.state;
         // 报错的会话不会再被后台任务唤醒，残留的记录会让它一直被算在跑
@@ -995,7 +1006,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
     tick(now = ports.now()) {
       if (!ports.enabled()) return;
-      const file = ports.file();
+      const file = withEventStamps(ports.file());
       const records = Object.values(file.dispatched);
       const statuses: Record<string, SecretarySessionStatus> = {};
       for (const record of records)

@@ -325,7 +325,7 @@ export function Sidebar({
     if (!multiSecretary) return [];
     return secretaryList.flatMap((entry) => {
       const state = secretaryStates[entry.id];
-      const view = state ? secretarySectionView(state, t) : null;
+      const view = state ? secretarySectionView(state, t, entry.id) : null;
       return view ? [{ id: entry.id, projectId: entry.projectId, view }] : [];
     });
   }, [multiSecretary, secretaryList, secretaryStates, t]);

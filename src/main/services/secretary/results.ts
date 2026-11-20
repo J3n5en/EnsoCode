@@ -354,7 +354,11 @@ export function sessionStateOf(
   const live = sessionLiveState(row, status);
   // 秘书停止过的不算：停止写了 idle，残留的 running 是停止之前的旧记录
   if (record.stoppedAt !== undefined) return live;
-  return live === 'idle' && record.lastState === 'running' ? 'running' : live;
+  // 会话文件还没出现时实时状态是 not-started：记录已经标回运行中，照样算在跑，
+  // 否则状态推送被节流时，刚派出的会话会在看板上停在「未开始」
+  return (live === 'idle' || live === 'not-started') && record.lastState === 'running'
+    ? 'running'
+    : live;
 }
 
 /**

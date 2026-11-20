@@ -735,6 +735,15 @@ describe('在跑计数', () => {
     expect(ids(result.done)).toEqual(['stopped']);
   });
 
+  it('刚派出、会话文件还没出现时实时状态是未开始，记录已标回运行中仍算在跑', () => {
+    const fresh = record({ conversationId: 'fresh', lastState: 'running' });
+    const rows = { fresh: { title: '刚派出' } };
+    expect(countsAsRunning(fresh, rows.fresh, idle)).toBe(true);
+    expect(ids(board(emptyFile({ dispatched: { fresh } }), rows, { fresh: idle }).running)).toEqual(
+      ['fresh']
+    );
+  });
+
   it('从看板上移出的会话既不在进行中也不在完成', () => {
     const dismissed = record({
       conversationId: 'dismissed',
