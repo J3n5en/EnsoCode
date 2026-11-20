@@ -6,22 +6,8 @@ export const PATROL_IDLE_MS = 20 * 60 * 1000;
 export const PATROL_RUNNING_MS = 30 * 60 * 1000;
 /** goal 会话空闲、没有后台任务、最后一条不是完成汇报，超过这么久没活动就算停住 */
 export const PATROL_IDLE_GOAL_MS = 3 * 60 * 1000;
-export const MIN_PATROL_IDLE_GOAL_MINUTES = 1;
-export const MAX_PATROL_IDLE_GOAL_MINUTES = 30;
-export const DEFAULT_PATROL_IDLE_GOAL_MINUTES = 3;
-
-/** 档案里的分钟数换算成毫秒：越界按边界算，缺省 3 分钟 */
-export function patrolIdleGoalMs(minutes: number | undefined): number {
-  const value =
-    typeof minutes === 'number' && Number.isFinite(minutes)
-      ? minutes
-      : DEFAULT_PATROL_IDLE_GOAL_MINUTES;
-  const clamped = Math.min(
-    MAX_PATROL_IDLE_GOAL_MINUTES,
-    Math.max(MIN_PATROL_IDLE_GOAL_MINUTES, Math.round(value))
-  );
-  return clamped * 60 * 1000;
-}
+/** 巡检间隔：停住阈值更短时按阈值走 */
+export const PATROL_INTERVAL_MS = 15 * 60 * 1000;
 
 export interface PatrolFacts {
   conversationId: string;
@@ -92,22 +78,12 @@ export function looksLikeCompletionReport(text: string | undefined): boolean {
   return COMPLETION_ZH_RE.test(line) || COMPLETION_EN_RE.test(line);
 }
 
-export interface PatrolOptions {
-  /** goal 会话空闲多久算停住，毫秒；缺省 3 分钟 */
-  idleGoalMs?: number;
-}
-
 /**
  * 自动巡检的异常判定。只报两种：空闲卡住与运行卡住。
- * goal 会话空闲且没有后台任务时按停住阈值（默认 3 分钟）就报，其余空闲情况按 20 分钟兜底。
+ * goal 会话空闲且没有后台任务时按停住阈值（3 分钟）就报，其余空闲情况按 20 分钟兜底。
  * 同一会话同一次停住只报一次；现有停滞检测已经报过的轮次不再报，避免两条推送说同一件事。
  */
-export function patrolAnomalies(
-  facts: readonly PatrolFacts[],
-  now: number,
-  options: PatrolOptions = {}
-): PatrolAnomaly[] {
-  const idleGoalMs = options.idleGoalMs ?? PATROL_IDLE_GOAL_MS;
+export function patrolAnomalies(facts: readonly PatrolFacts[], now: number): PatrolAnomaly[] {
   const out: PatrolAnomaly[] = [];
   for (const entry of facts) {
     if (entry.state === 'running') {
@@ -124,7 +100,7 @@ export function patrolAnomalies(
     // goal 会话空闲只有两种正常情况：在等后台任务，或者已经收口。
     // 既没有后台任务、最后一条又不是完成汇报，就是停住了——不必等 20 分钟。
     if (entry.backgroundRunning !== true && !looksLikeCompletionReport(entry.lastText)) {
-      if (now - entry.lastEventAt >= idleGoalMs) {
+      if (now - entry.lastEventAt >= PATROL_IDLE_GOAL_MS) {
         if (!reported(entry, IDLE_REASONS))
           out.push({ conversationId: entry.conversationId, reason: 'goal-idle-stalled' });
         continue;
@@ -175,10 +151,4 @@ export function patrolStallDetail(input: {
     excerpt(input.lastText) ? `最后一条：${excerpt(input.lastText)}` : undefined,
   ].filter(Boolean);
   return [head, ...tail].join(' · ');
-}
-
-/** 巡检间隔：档案里的分钟数，缺省 15 分钟 */
-export function patrolIntervalMs(minutes: number | undefined): number {
-  const value = typeof minutes === 'number' && Number.isFinite(minutes) ? minutes : 15;
-  return Math.min(120, Math.max(5, Math.round(value))) * 60 * 1000;
 }

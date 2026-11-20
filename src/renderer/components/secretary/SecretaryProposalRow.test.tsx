@@ -179,10 +179,8 @@ const profileProposal: SecretaryProposal = {
   kind: 'profile',
   draft: {
     name: '小安',
-    autonomy: 'full',
-    dispatchWorktree: 'always',
     maxRunningDispatches: 5,
-    model: { providerId: 'p', modelId: 'm' },
+    patrolEnabled: false,
   },
 };
 
@@ -205,18 +203,22 @@ describe('SecretaryProposalRow profile proposals', () => {
     const html = renderProfile();
     expect(html).toContain('[Profile]');
     expect(html).toContain('小安');
-    expect(html).toContain('m');
-    expect(html).toContain('[Fully autonomous]');
-    expect(html).toContain('[Always an isolated worktree]');
     expect(html).toContain('[Up to {{n}} at a time]');
+    expect(html).toContain('[Patrol off]');
+    // 已删除的设置项不再出现在卡片上
+    expect(html).not.toContain('[Follows the default model]');
     expect(html).toContain('[Waiting for your confirmation]');
     expect(buttons(html)).toEqual(['[Confirm]', '[Reject]', '[Edit here]']);
   });
 
-  it('没指定模型时标出跟随全局默认', () => {
-    expect(renderProfile({ draft: { name: '小安' } } as Partial<SecretaryProposal>)).toContain(
-      '[Follows the default model]'
-    );
+  it('旧卡片草案里带着已删除的字段也照常渲染，巡检缺省按开', () => {
+    const legacy = {
+      draft: { name: '小安', autonomy: 'full', model: { providerId: 'p', modelId: 'm' } },
+    };
+    const html = renderProfile(legacy as unknown as Partial<SecretaryProposal>);
+    expect(html).toContain('小安');
+    expect(html).toContain('[Patrol on]');
+    expect(html).not.toContain('[Fully autonomous]');
   });
 
   it('终态只显示状态，不再给按钮', () => {
@@ -224,8 +226,8 @@ describe('SecretaryProposalRow profile proposals', () => {
     expect(buttons(renderProfile({ status: 'succeeded' }))).toEqual([]);
     expect(renderProfile({ status: 'rejected' })).toContain('[Rejected]');
     expect(renderProfile({ status: 'expired' })).toContain('[Expired]');
-    const failed = renderProfile({ status: 'failed', error: 'invalid autonomy' });
-    expect(failed).toContain('invalid autonomy');
+    const failed = renderProfile({ status: 'failed', error: 'invalid notify' });
+    expect(failed).toContain('invalid notify');
     expect(buttons(failed)).toEqual([]);
   });
 
@@ -250,7 +252,7 @@ describe('SecretaryProposalRow profile proposals', () => {
       'pr2',
       'confirm',
       undefined,
-      expect.objectContaining({ name: '改过的名字', autonomy: 'full', maxRunningDispatches: 5 })
+      expect.objectContaining({ name: '改过的名字', patrolEnabled: false, maxRunningDispatches: 5 })
     );
     await act(async () => root.unmount());
     vi.unstubAllGlobals();

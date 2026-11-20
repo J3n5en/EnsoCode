@@ -74,17 +74,10 @@ const profile: NonNullable<SecretaryState['profile']> = {
   version: 1,
   name: '小安',
   avatar: { color: '#8b7bff' },
-  autonomy: 'ask-first',
-  autoApproveProjectIds: [],
   takeoverScope: { mode: 'projects', projectIds: [] },
   visibleProjectIds: 'all',
-  dispatchModel: { mode: 'project' },
-  dispatchWorktree: 'auto',
   maxRunningDispatches: 3,
   patrolEnabled: true,
-  patrolIntervalMinutes: 15,
-  dispatchMuted: true,
-  dispatchUnattended: true,
   replyLanguage: 'ui',
   style: 'concise',
   notify: 'needs-user',
@@ -337,7 +330,7 @@ describe('SecretaryCollapsedButton', () => {
       <SecretaryCollapsedButton view={{ ...view(), name: '小安', needsYou: 2 }} onClick={onClick} />
     );
     const button = container.querySelector('[data-enso="secretary-collapsed"]');
-    expect(button?.textContent).toContain('小');
+    expect(button?.querySelector('[data-generated="true"] svg')).not.toBeNull();
     expect(container.querySelector('[data-enso="secretary-pip"]')?.getAttribute('data-tone')).toBe(
       'warn'
     );

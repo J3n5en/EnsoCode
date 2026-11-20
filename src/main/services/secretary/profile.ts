@@ -20,8 +20,6 @@ import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from '
 
 type MaybePromise<T> = T | Promise<T>;
 
-type ModelPatch = NonNullable<SecretaryProfile['model']>;
-
 /** Main 侧的档案写入数据源；测试注入假实现，生产走文件末尾的 secretaryProfilePorts */
 export interface SecretaryProfilePorts {
   /** null = 还没完成初次设置 */
@@ -37,15 +35,13 @@ export interface SecretaryProfilePorts {
   schedules(): SecretarySchedule[];
   saveSchedules(schedules: SecretarySchedule[]): void;
   publish(): void;
-  /** 秘书项目里的根会话：档案改了模型或身份后要逐个处理 */
+  /** 秘书项目里的根会话：档案改了身份或技能后要逐个处理 */
   conversations(): MaybePromise<{ conversationId: string }[]>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
   alive(conversationId: string): MaybePromise<boolean>;
-  setModel(conversationId: string, model: ModelPatch): Promise<{ ok: boolean; error?: string }>;
   release(conversationId: string): Promise<{ ok: boolean; error?: string }>;
   /** 活着的会话就地换成按盘上档案现拼的系统提示词，下一条消息生效 */
   refreshPrompt(conversationId: string): MaybePromise<unknown>;
-  patchRow(conversationId: string, patch: Record<string, unknown>): MaybePromise<void>;
   dispatchFile(): SecretaryDispatchFile;
   saveDispatch(file: SecretaryDispatchFile): void;
   audit(entry: SecretaryAuditEntry): void;
@@ -83,7 +79,7 @@ function mergeProfile(
   draft: SecretaryProfileDraft,
   now: number
 ): SecretaryProfile {
-  const { persona: _persona, avatar, model, addressAs, dailyBriefAt, ...rest } = draft;
+  const { persona: _persona, avatar, addressAs, dailyBriefAt, ...rest } = draft;
   const base = current ?? defaultProfile();
   const merged: SecretaryProfile = {
     ...base,
@@ -92,21 +88,11 @@ function mergeProfile(
     version: 1,
     updatedAt: now,
   };
-  if (model === null) delete merged.model;
-  else if (model) merged.model = model;
   if (addressAs === null) delete merged.addressAs;
   else if (addressAs) merged.addressAs = addressAs;
   if (dailyBriefAt === null) delete merged.dailyBriefAt;
   else if (dailyBriefAt) merged.dailyBriefAt = dailyBriefAt;
   return merged;
-}
-
-function sameModel(a: SecretaryProfile['model'], b: SecretaryProfile['model']): boolean {
-  return (
-    a?.providerId === b?.providerId &&
-    a?.modelId === b?.modelId &&
-    a?.thinkingLevel === b?.thinkingLevel
-  );
 }
 
 function sameIds(a: readonly string[] = [], b: readonly string[] = []): boolean {
@@ -128,16 +114,7 @@ function mergeAvatar(
     : { color };
 }
 
-/** 模型换了就改会话行；活着的会话当场换，下次 spawn 也读新行 */
-function modelRowPatch(model: ModelPatch): Record<string, unknown> {
-  return {
-    lastProviderId: model.providerId,
-    lastModelId: model.modelId,
-    ...(model.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}),
-  };
-}
-
-/** 提案参数是扁平的（avatarColor / model / persona），这里转成档案草案 */
+/** 提案参数是扁平的（avatarColor / persona），这里转成档案草案 */
 function draftFromParams(params: Record<string, unknown>): SecretaryProfileDraft {
   const dropped = new Set(['avatar', 'image', 'imageVersion', 'avatarPath', 'path', 'avatarColor']);
   const draft: Record<string, unknown> = {};
@@ -168,7 +145,6 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     identityChanged: boolean
   ): Promise<void> {
     syncSystemSchedules(ports, profile, await ports.todos());
-    const modelChanged = !sameModel(before?.model, profile.model);
     // 插件与技能在 spawn 时定死：勾选变了，活着的会话还挂着旧工具集与旧 skill 表
     const kitChanged =
       identityChanged ||
@@ -180,15 +156,8 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     for (const { conversationId } of conversations) {
       if (await ports.alive(conversationId)) await ports.refreshPrompt(conversationId);
     }
-    if (!modelChanged && !kitChanged) return;
-    const model = profile.model;
-    for (const { conversationId } of conversations) {
-      if (modelChanged && model) {
-        await ports.patchRow(conversationId, modelRowPatch(model));
-        if (await ports.alive(conversationId)) await ports.setModel(conversationId, model);
-      }
-      if (kitChanged) await releaseIfIdle(conversationId);
-    }
+    if (!kitChanged) return;
+    for (const { conversationId } of conversations) await releaseIfIdle(conversationId);
   }
 
   return {
@@ -320,44 +289,13 @@ function profileChanges(
   };
   if (draft.name !== undefined) put('name', before?.name ?? null, draft.name);
   if (draft.avatar?.color) put('avatarColor', before?.avatar.color ?? null, draft.avatar.color);
-  if ('model' in draft) put('model', before?.model ?? null, draft.model ?? null);
-  if (draft.autonomy) put('autonomy', before?.autonomy ?? null, draft.autonomy);
-  if (draft.autoApproveProjectIds) {
-    put('autoApproveProjectIds', before?.autoApproveProjectIds ?? [], draft.autoApproveProjectIds);
-  }
   if (draft.visibleProjectIds)
     put('visibleProjectIds', before?.visibleProjectIds ?? null, draft.visibleProjectIds);
-  if (draft.dispatchModel) put('dispatchModel', before?.dispatchModel ?? null, draft.dispatchModel);
-  if (draft.dispatchWorktree)
-    put('dispatchWorktree', before?.dispatchWorktree ?? null, draft.dispatchWorktree);
   if (draft.maxRunningDispatches !== undefined) {
     put('maxRunningDispatches', before?.maxRunningDispatches ?? null, draft.maxRunningDispatches);
   }
   if (draft.patrolEnabled !== undefined) {
     put('patrolEnabled', before?.patrolEnabled ?? null, draft.patrolEnabled);
-  }
-  if (draft.patrolIntervalMinutes !== undefined) {
-    put(
-      'patrolIntervalMinutes',
-      before?.patrolIntervalMinutes ?? null,
-      draft.patrolIntervalMinutes
-    );
-  }
-  if (draft.patrolIdleGoalMinutes !== undefined) {
-    put(
-      'patrolIdleGoalMinutes',
-      before?.patrolIdleGoalMinutes ?? null,
-      draft.patrolIdleGoalMinutes
-    );
-  }
-  if (draft.orphanTaskPatrol !== undefined) {
-    put('orphanTaskPatrol', before?.orphanTaskPatrol ?? null, draft.orphanTaskPatrol);
-  }
-  if (draft.dispatchMuted !== undefined) {
-    put('dispatchMuted', before?.dispatchMuted ?? null, draft.dispatchMuted);
-  }
-  if (draft.dispatchUnattended !== undefined) {
-    put('dispatchUnattended', before?.dispatchUnattended ?? null, draft.dispatchUnattended);
   }
   if ('addressAs' in draft) put('addressAs', before?.addressAs ?? null, draft.addressAs ?? null);
   if (draft.replyLanguage) put('replyLanguage', before?.replyLanguage ?? null, draft.replyLanguage);
@@ -417,19 +355,10 @@ export const secretaryProfilePorts: SecretaryProfilePorts = {
     (await import('../../ipc/agent')).observedSessionStatus(conversationId),
   alive: async (conversationId) =>
     (await import('../../ipc/agent')).isRootSessionAlive(conversationId),
-  setModel: async (conversationId, model) =>
-    (await import('../../ipc/agent')).setRootSessionModelFromMain(conversationId, model),
   release: async (conversationId) =>
     (await import('../../ipc/agent')).releaseRootFromMain(conversationId),
   refreshPrompt: async (conversationId) =>
     (await import('../../ipc/agent')).refreshSecretaryPromptFromMain(conversationId),
-  patchRow: async (conversationId, patch) => {
-    const { patchConversationsState } = await import('../../ipc/settings');
-    patchConversationsState((state) => {
-      const row = state.conversations[conversationId];
-      if (row) state.conversations[conversationId] = { ...row, ...patch };
-    });
-  },
   dispatchFile: () => store().dispatch(),
   saveDispatch: (file) => {
     store().saveDispatch(file);

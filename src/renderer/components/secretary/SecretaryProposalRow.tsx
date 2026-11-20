@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSettingsStore } from '@/stores/settings';
 import { draftFromProfile } from './profileFormState';
-import { AUTONOMY_LABELS, WORKTREE_LABELS } from './profileLabels';
 import { SecretaryProfileForm } from './SecretaryProfileForm';
 
 /** 会产出待确认提案的工具：派活两个，加上秘书提交的配置草案 */
@@ -209,16 +208,11 @@ function ProfileProposalCard({
           {t('Profile')}
         </span>
         <span className="min-w-0 flex-1 truncate">{draft.name ?? t('Secretary')}</span>
-        <span className="shrink-0 rounded bg-muted px-1.5 text-[10px] text-muted-foreground">
-          {draft.model ? draft.model.modelId : t('Follows the default model')}
-        </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-        <span>{t(AUTONOMY_LABELS[draft.autonomy ?? 'ask-first'])}</span>
-        <span aria-hidden>·</span>
-        <span>{t(WORKTREE_LABELS[draft.dispatchWorktree ?? 'auto'])}</span>
-        <span aria-hidden>·</span>
         <span>{t('Up to {{n}} at a time', { n: draft.maxRunningDispatches ?? 3 })}</span>
+        <span aria-hidden>·</span>
+        <span>{t(draft.patrolEnabled === false ? 'Patrol off' : 'Patrol on')}</span>
       </div>
       {editing ? (
         <div className="mt-2 border-t border-border/60 pt-2">

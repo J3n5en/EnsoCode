@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectAuthority } from '../types/agent';
-import type {
-  DispatchDraft,
-  SecretaryDispatchFile,
-  SecretaryProfile,
-  SecretaryProposal,
-} from '../types/secretary';
+import type { DispatchDraft, SecretaryDispatchFile, SecretaryProposal } from '../types/secretary';
 import {
   canOperate,
-  dispatchDecision,
   inTakeoverScope,
   operateSource,
   PROPOSAL_TTL_MS,
@@ -20,30 +14,6 @@ import {
   validateDispatch,
   validateDispatchBase,
 } from './policy';
-
-function profile(overrides: Partial<SecretaryProfile> = {}): SecretaryProfile {
-  return {
-    version: 1,
-    name: '秘书',
-    avatar: { color: '#7c5cff' },
-    autonomy: 'ask-first',
-    autoApproveProjectIds: [],
-    takeoverScope: { mode: 'projects', projectIds: [] },
-    visibleProjectIds: 'all',
-    dispatchModel: { mode: 'project' },
-    dispatchWorktree: 'auto',
-    maxRunningDispatches: 3,
-    patrolEnabled: true,
-    patrolIntervalMinutes: 15,
-    dispatchMuted: true,
-    dispatchUnattended: true,
-    replyLanguage: 'ui',
-    style: 'concise',
-    notify: 'needs-user',
-    updatedAt: 0,
-    ...overrides,
-  };
-}
 
 function project(overrides: Partial<ProjectAuthority> = {}): ProjectAuthority {
   return { projectId: 'p1', canonicalPath: '/p1', state: 'active', version: 1, ...overrides };
@@ -85,26 +55,6 @@ function dispatchFile(): SecretaryDispatchFile {
     outbox: [],
   };
 }
-
-describe('dispatchDecision', () => {
-  it('asks before creating under ask-first even for approved projects', () => {
-    const p = profile({ autonomy: 'ask-first', autoApproveProjectIds: ['p1'] });
-    expect(dispatchDecision(p, 'p1')).toBe('confirm');
-    expect(dispatchDecision(p, 'p2')).toBe('confirm');
-  });
-
-  it('creates directly and tells afterwards only for approved projects under tell-after', () => {
-    const p = profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] });
-    expect(dispatchDecision(p, 'p1')).toBe('direct-tell');
-    expect(dispatchDecision(p, 'p2')).toBe('confirm');
-  });
-
-  it('creates directly for approved projects under full autonomy', () => {
-    const p = profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] });
-    expect(dispatchDecision(p, 'p1')).toBe('direct');
-    expect(dispatchDecision(p, 'p2')).toBe('confirm');
-  });
-});
 
 describe('canOperate', () => {
   it('allows dispatched and named conversations only', () => {
@@ -318,7 +268,6 @@ describe('validateDispatch', () => {
     visible: true,
     running: 0,
     max: 3,
-    worktreeMode: 'auto' as const,
   };
 
   it('accepts a visible local project under the limit', () => {
@@ -356,15 +305,11 @@ describe('validateDispatch', () => {
     });
   });
 
-  it('forces the worktree flag from the profile mode', () => {
-    const never = validateDispatch(draft({ worktree: true }), { ...ctx, worktreeMode: 'never' });
-    expect(never.ok && never.draft.worktree).toBe(false);
-
-    const always = validateDispatch(draft({ worktree: false }), { ...ctx, worktreeMode: 'always' });
-    expect(always.ok && always.draft.worktree).toBe(true);
-
-    const auto = validateDispatch(draft({ worktree: true }), ctx);
-    expect(auto.ok && auto.draft.worktree).toBe(true);
+  it('worktree 完全按秘书这次派发传的值走，没有全局设置覆盖', () => {
+    const on = validateDispatch(draft({ worktree: true }), ctx);
+    expect(on.ok && on.draft.worktree).toBe(true);
+    const off = validateDispatch(draft({ worktree: false }), ctx);
+    expect(off.ok && off.draft.worktree).toBe(false);
   });
 
   it('带 after 的派发不占运行名额，真正开始时才查上限', () => {
@@ -380,12 +325,10 @@ describe('validateDispatch', () => {
   });
 
   it('基线只在真的建 worktree 时才有意义', () => {
-    expect(
-      validateDispatch(draft({ worktree: false, baseRef: 'main' }), {
-        ...ctx,
-        worktreeMode: 'never',
-      })
-    ).toEqual({ ok: false, error: 'base-requires-worktree' });
+    expect(validateDispatch(draft({ worktree: false, baseRef: 'main' }), ctx)).toEqual({
+      ok: false,
+      error: 'base-requires-worktree',
+    });
   });
 });
 

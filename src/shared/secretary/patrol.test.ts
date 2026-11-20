@@ -5,7 +5,6 @@ import {
   PATROL_RUNNING_MS,
   type PatrolFacts,
   patrolAnomalies,
-  patrolIdleGoalMs,
   patrolStallDetail,
 } from './patrol';
 
@@ -131,20 +130,6 @@ describe('goal 会话空闲停住', () => {
     const resumed = { ...reported, lastEventAt: PATROL_IDLE_GOAL_MS + 1 };
     expect(patrolAnomalies([resumed], PATROL_IDLE_GOAL_MS + 2)).toEqual([]);
     expect(patrolAnomalies([resumed], PATROL_IDLE_GOAL_MS * 2 + 2)).toEqual([
-      { conversationId: 'c1', reason: 'goal-idle-stalled' },
-    ]);
-  });
-
-  it('阈值可配：1–30 分钟，越界按边界算', () => {
-    expect(patrolIdleGoalMs(undefined)).toBe(PATROL_IDLE_GOAL_MS);
-    expect(patrolIdleGoalMs(1)).toBe(60_000);
-    expect(patrolIdleGoalMs(0)).toBe(60_000);
-    expect(patrolIdleGoalMs(30)).toBe(30 * 60_000);
-    expect(patrolIdleGoalMs(120)).toBe(30 * 60_000);
-    expect(patrolIdleGoalMs(Number.NaN)).toBe(PATROL_IDLE_GOAL_MS);
-    const five = { idleGoalMs: patrolIdleGoalMs(5) };
-    expect(patrolAnomalies([facts()], PATROL_IDLE_GOAL_MS + 1, five)).toEqual([]);
-    expect(patrolAnomalies([facts()], 5 * 60_000 + 1, five)).toEqual([
       { conversationId: 'c1', reason: 'goal-idle-stalled' },
     ]);
   });

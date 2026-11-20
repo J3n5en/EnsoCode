@@ -24,7 +24,7 @@ export interface ContactFile {
   chat?: SecretaryContactChat;
   boundAt?: number;
   /**
-   * 默认打开：手机上一按就能确认派发、设置、技能、工具与接管卡片。
+   * 默认打开：手机上一按就能确认设置、技能、工具、接管与清理卡片（以及旧版本留下的派发卡）。
    * 显式关掉后按钮还在，但点了只提醒回应用处理；审批永远不在手机上确认。
    */
   allowCardConfirm: boolean;

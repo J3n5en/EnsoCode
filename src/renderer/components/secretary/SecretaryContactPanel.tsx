@@ -231,7 +231,7 @@ function ChannelCard({
             hint={
               telegram
                 ? t(
-                    'On by default. A tap on your phone can confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.'
+                    'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals are never handled from Telegram.'
                   )
                 : caps.buttons
                   ? t('Off by default. Approvals are never handled from the phone.')

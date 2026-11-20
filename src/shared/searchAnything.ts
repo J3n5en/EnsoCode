@@ -288,7 +288,7 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     id: 'secretary.profile',
     category: 'secretary',
     title: 'Secretary profile',
-    description: 'Name, avatar, model and how much the secretary may do on its own.',
+    description: 'Name, avatar, visible projects and patrol.',
   },
   {
     id: 'secretary.dispatchLimit',

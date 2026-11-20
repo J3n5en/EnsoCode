@@ -96,8 +96,6 @@ function harness(
     tasks?: Record<string, ObservedTask[]>;
     /** 这些会话 id 算秘书自己的会话：它们的提问与回复要发到手机 */
     secretaryIds?: string[];
-    /** goal 会话空闲多久算停住，分钟 */
-    patrolIdleGoalMinutes?: number;
   } = {}
 ): Harness {
   const state: Harness['state'] = {
@@ -154,9 +152,6 @@ function harness(
         ...base,
         patrolEnabled: state.patrolEnabled,
         notify: state.notify,
-        ...(options.patrolIdleGoalMinutes !== undefined
-          ? { patrolIdleGoalMinutes: options.patrolIdleGoalMinutes }
-          : {}),
         ...(state.briefAt ? { dailyBriefAt: state.briefAt } : {}),
       };
     },
@@ -1134,13 +1129,12 @@ describe('自动巡检', () => {
     expect(h.state.file.outbox.map((update) => update.key)).toEqual(['c1|stalled|1']);
   });
 
-  it('停住阈值可配：调到 5 分钟就按 5 分钟报', () => {
-    const h = harness({ patrolIdleGoalMinutes: 5 });
+  it('旧档案里的停住阈值不再生效：固定按 3 分钟报', () => {
+    const h = harness({});
+    const legacy = h.ports.profile;
+    h.ports.profile = () => ({ ...legacy(), patrolIdleGoalMinutes: 10 }) as never;
     idleWithGoal(h);
     h.host.tick(3 * MINUTE + 1);
-    expect(h.state.file.outbox).toEqual([]);
-    // 巡检节奏跟着阈值走：下一次在 5 分钟后的检查点
-    h.host.tick(8 * MINUTE + 1);
     expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
   });
 
@@ -1963,6 +1957,24 @@ describe('遗留后台任务', () => {
     h.state.now = 70 * MINUTE;
     h.host.tick();
     expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['leftover', 'leftover']);
+  });
+
+  it('遗留任务巡检跟着巡检开关走：关掉巡检后不再推', () => {
+    const h = harness({ file: settledFile(), tasks: { c1: [task()] }, patrolEnabled: false });
+    h.state.statuses.c1 = idle;
+    h.state.now = 11 * MINUTE;
+    h.host.tick();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('旧档案里单独关掉的遗留任务巡检不再生效，巡检开着就推', () => {
+    const h = harness({ file: settledFile(), tasks: { c1: [task()] } });
+    const legacy = h.ports.profile;
+    h.ports.profile = () => ({ ...legacy(), orphanTaskPatrol: false }) as never;
+    h.state.statuses.c1 = idle;
+    h.state.now = 11 * MINUTE;
+    h.host.tick();
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['leftover']);
   });
 
   it('会话还在跑时不标遗留，后台任务照常算在跑', () => {

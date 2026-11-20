@@ -2,20 +2,11 @@ import type { ConversationAuthority, ProjectAuthority } from '../types/agent';
 import type {
   DispatchDraft,
   SecretaryDispatchFile,
-  SecretaryProfile,
   SecretaryProposal,
   SecretaryTakeoverScope,
 } from '../types/secretary';
 
 export const PROPOSAL_TTL_MS = 24 * 60 * 60 * 1000;
-
-export type DispatchDecision = 'direct' | 'direct-tell' | 'confirm';
-
-export function dispatchDecision(profile: SecretaryProfile, projectId: string): DispatchDecision {
-  if (profile.autonomy === 'ask-first') return 'confirm';
-  if (!profile.autoApproveProjectIds.includes(projectId)) return 'confirm';
-  return profile.autonomy === 'full' ? 'direct' : 'direct-tell';
-}
 
 export function canOperate(file: SecretaryDispatchFile, conversationId: string): boolean {
   return Object.hasOwn(file.dispatched, conversationId) || file.named.includes(conversationId);
@@ -230,7 +221,6 @@ export interface DispatchContext {
   visible: boolean;
   running: number;
   max: number;
-  worktreeMode: SecretaryProfile['dispatchWorktree'];
   /** 带 after 的派发先等依赖，不占运行名额；真正开始时再查一次上限 */
   deferred?: boolean;
 }
@@ -246,14 +236,12 @@ export function validateDispatch(
   if (!ctx.visible) return { ok: false, error: 'project-not-visible' };
   if (!ctx.deferred && ctx.running >= ctx.max) return { ok: false, error: 'dispatch-limit' };
 
-  const worktree =
-    ctx.worktreeMode === 'never' ? false : ctx.worktreeMode === 'always' ? true : draft.worktree;
   const { checkout, baseRef, branch } = draft;
   // 基线只在真的建独立 worktree 时才有意义：否则秘书会以为隔离生效了
-  if (!worktree && (checkout || baseRef || branch)) {
+  if (!draft.worktree && (checkout || baseRef || branch)) {
     return { ok: false, error: 'base-requires-worktree' };
   }
-  return { ok: true, draft: { ...draft, worktree } };
+  return { ok: true, draft };
 }
 
 /** 派发基线校验用到的既成事实，由 Main 用 git 查出来 */
