@@ -136,6 +136,7 @@ import {
 import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
+import { secretaryConversationIds } from '@/lib/secretaryEntry';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -330,25 +331,13 @@ export function Sidebar({
   };
   const [secretaryRevealed, setSecretaryRevealed] = useState(false);
   const [secretaryResetOpen, setSecretaryResetOpen] = useState(false);
-  const secretaryConversationIds = useMemo(() => {
-    const projectId = secretaryState.projectId;
-    if (!projectId) return [];
-    return order
-      .filter((id) => {
-        const conversation = conversations[id];
-        return (
-          conversation?.projectId === projectId &&
-          conversation.archived !== true &&
-          !conversation.parentId
-        );
-      })
-      .sort(
-        (a, b) => (conversations[b]?.lastActiveAt ?? 0) - (conversations[a]?.lastActiveAt ?? 0)
-      );
-  }, [order, conversations, secretaryState.projectId]);
+  const secretaryIds = useMemo(
+    () => secretaryConversationIds(secretaryState.projectId, order, conversations),
+    [order, conversations, secretaryState.projectId]
+  );
   const shownSecretaryIds = secretaryRevealed
-    ? secretaryConversationIds
-    : secretaryConversationIds.slice(0, SECRETARY_VISIBLE_LIMIT);
+    ? secretaryIds
+    : secretaryIds.slice(0, SECRETARY_VISIBLE_LIMIT);
 
   // 项目归档(项目层标记,存 localStorage):整个项目移到底部 Archived 栏目,
   // 不碰其下会话的 archived/pinned——恢复后会话分布与归档前完全一致,
@@ -1043,7 +1032,7 @@ export function Sidebar({
                   onRemove={(conversationId) => void openRemoveConversation(conversationId)}
                 />
               ))}
-              {!secretaryFolded && secretaryConversationIds.length > SECRETARY_VISIBLE_LIMIT && (
+              {!secretaryFolded && secretaryIds.length > SECRETARY_VISIBLE_LIMIT && (
                 <div className="flex items-center gap-1 px-2">
                   <button
                     type="button"
@@ -1053,7 +1042,7 @@ export function Sidebar({
                     {secretaryRevealed
                       ? t('Collapse')
                       : t('Show {{n}} more', {
-                          n: secretaryConversationIds.length - SECRETARY_VISIBLE_LIMIT,
+                          n: secretaryIds.length - SECRETARY_VISIBLE_LIMIT,
                         })}
                   </button>
                 </div>

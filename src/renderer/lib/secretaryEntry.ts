@@ -1,3 +1,5 @@
+import { projectConversationIds } from '@/stores/sessions/pinned';
+
 interface Directory {
   order: readonly string[];
   conversations: Record<
@@ -24,4 +26,13 @@ export function latestSecretaryConversation(
     }
   }
   return best;
+}
+
+/** 侧栏秘书分区的会话列表：与普通项目组同一排序规则（置顶在前、无消息回落 createdAt） */
+export function secretaryConversationIds(
+  projectId: string | null,
+  order: readonly string[],
+  conversations: Parameters<typeof projectConversationIds>[1]
+): string[] {
+  return projectId ? projectConversationIds(order, conversations, projectId) : [];
 }
