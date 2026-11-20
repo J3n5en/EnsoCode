@@ -28,6 +28,16 @@ describe('snapshot 尾窗', () => {
     });
   });
 
+  it('可按调用方给的条数和字节上限取更小的窗口', () => {
+    const messages = Array.from({ length: 30 }, (_, index) => ({ text: `m${index}` }));
+    expect(takeSnapshotTail(messages, 30, { messages: 4 })).toEqual({
+      messages: messages.slice(26),
+      baseIndex: 26,
+    });
+    const big = Array.from({ length: 5 }, () => ({ text: 'x'.repeat(100) }));
+    expect(takeSnapshotTail(big, 5, { bytes: 250 }).baseIndex).toBe(3);
+  });
+
   it('按 UTF-8 JSON 字节预算裁剪', () => {
     expect(SNAPSHOT_BYTE_BUDGET).toBe(600_000);
     const messages = [

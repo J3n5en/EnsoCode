@@ -2,6 +2,9 @@
 export const SNAPSHOT_TAIL_MESSAGES = 60;
 /** UTF-8 JSON 字节预算（pair 加密封帧还会膨胀） */
 export const SNAPSHOT_BYTE_BUDGET = 600_000;
+/** 远端全量概览快照：只供侧栏状态和预览，正文在打开会话时另要定向快照 */
+export const OVERVIEW_TAIL_MESSAGES = 10;
+export const OVERVIEW_BYTE_BUDGET = 64_000;
 
 /**
  * 从 endIndex 往前取，直到条数或字节预算耗尽。
@@ -9,16 +12,19 @@ export const SNAPSHOT_BYTE_BUDGET = 600_000;
  */
 export function takeSnapshotTail(
   messages: unknown[],
-  endIndex: number
+  endIndex: number,
+  limits: { messages?: number; bytes?: number } = {}
 ): { messages: unknown[]; baseIndex: number } {
+  const maxMessages = limits.messages ?? SNAPSHOT_TAIL_MESSAGES;
+  const budget = limits.bytes ?? SNAPSHOT_BYTE_BUDGET;
   let bytes = 0;
   let start = endIndex;
-  while (start > 0 && endIndex - start < SNAPSHOT_TAIL_MESSAGES) {
+  while (start > 0 && endIndex - start < maxMessages) {
     const size = Buffer.byteLength(JSON.stringify(messages[start - 1]), 'utf8');
-    if (bytes + size > SNAPSHOT_BYTE_BUDGET && start < endIndex) break;
+    if (bytes + size > budget && start < endIndex) break;
     bytes += size;
     start--;
-    if (bytes > SNAPSHOT_BYTE_BUDGET) break;
+    if (bytes > budget) break;
   }
   return { messages: messages.slice(start, endIndex), baseIndex: start };
 }

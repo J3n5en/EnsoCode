@@ -1,7 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { encodeRemoteValue, type HostToRemote, type RemoteKind } from '@enso/pair';
 import { RemoteWriteBases, UPSERT_MARK, UpsertEncoder } from '@shared/remoteDelta';
-import { takeSnapshotTail } from '@shared/snapshotTail';
+import {
+  OVERVIEW_BYTE_BUDGET,
+  OVERVIEW_TAIL_MESSAGES,
+  takeSnapshotTail,
+} from '@shared/snapshotTail';
 
 /** 已发帧保留窗口：浏览器续上时从它确认的 seq 之后补发；超出窗口则续连失败，浏览器重载 renderer */
 const MAX_RETAINED_FRAMES = 4000;
@@ -284,12 +288,17 @@ function isSnapshotEvent(event: unknown): event is SnapshotEvent {
 /**
  * 远端只要尾窗：worker 的全量/resume 快照带整段历史（长会话可达数十 MB），经中继要几十秒，
  * 且按 seq 顺序应用会把后面的消息全部堵住。更早的历史由远端上滑分页按需拉取（与手机版一致）。
+ * 全量概览（非 partial，启动时要一次）含 worker 持有的所有会话，只给最近几条：
+ * 打开会话时另要定向快照取完整尾窗，reducer 按 baseIndex 保留本地已有的前缀。
  */
 function trimSnapshot(event: SnapshotEvent): SnapshotEvent {
+  const limits = event.partial
+    ? {}
+    : { messages: OVERVIEW_TAIL_MESSAGES, bytes: OVERVIEW_BYTE_BUDGET };
   return {
     ...event,
     sessions: event.sessions.map((session) => {
-      const tail = takeSnapshotTail(session.messages, session.messages.length);
+      const tail = takeSnapshotTail(session.messages, session.messages.length, limits);
       if (tail.baseIndex === 0) return session;
       return {
         ...session,
