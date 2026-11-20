@@ -2,28 +2,41 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { EvalDimension } from './cases';
 import { type EvalReport, formatReport, type Metrics, runEvalWith } from './run';
 
-// stub 首次实跑的真实值（见 README）。stub 完全确定，余量只吸收四位小数的舍入，
-// 小于任何一条用例名次 / 噪声变化带来的最小波动（如 MRR 4→5 名 ≈ 0.003）：退一点就会红。
+// stub 实跑的真实值（见 README，51 条用例）。stub 完全确定，余量只吸收四位小数的舍入，
+// 小于任何一条用例名次 / 噪声变化带来的最小波动（overall 上 MRR 9→10 名 ≈ 0.0002）：退一点就会红。
 // 指标变好时请同步上调，别让基线停在旧值。
-const MARGIN = 0.001;
-type Baseline = Pick<Metrics, 'recall5' | 'recall10' | 'mrr' | 'noise'>;
-const OVERALL: Baseline = { recall5: 0.6875, recall10: 0.6875, mrr: 0.625, noise: 0.0286 };
-// semantic / crossLingual 不进断言：stub 只编码字面重合，这两维在 stub 下恒为 0，断言 ≥0 没有意义
+const MARGIN = 0.0001;
+type Baseline = Pick<Metrics, 'recall5' | 'recall10' | 'mrr' | 'noise' | 'stale'>;
+const OVERALL: Baseline = {
+  recall5: 0.7941,
+  recall10: 0.8235,
+  mrr: 0.6755,
+  noise: 0.0488,
+  stale: 0.1,
+};
+// semantic / crossLingual 不进断言：stub 只编码字面重合，这两维的非零值只来自字面重合的用例
+// （保留原文的术语、恰好同词），不代表语义能力
 const BY_DIMENSION: Partial<Record<EvalDimension, Baseline>> = {
-  exact: { recall5: 1, recall10: 1, mrr: 1, noise: null },
-  temporal: { recall5: 1, recall10: 1, mrr: 1, noise: 0.05 },
-  entity: { recall5: 1, recall10: 1, mrr: 1, noise: 0 },
-  typeFilter: { recall5: 0.5, recall10: 0.5, mrr: 0.25, noise: 0 },
-  spaceIsolation: { recall5: 1, recall10: 1, mrr: 1, noise: 0 },
-  distractor: { recall5: 1, recall10: 1, mrr: 0.75, noise: 0.1 },
+  exact: { recall5: 1, recall10: 1, mrr: 1, noise: 0, stale: null },
+  temporal: { recall5: 1, recall10: 1, mrr: 0.8056, noise: 0.05, stale: null },
+  entity: { recall5: 1, recall10: 1, mrr: 1, noise: 0.04, stale: null },
+  typeFilter: { recall5: 0.75, recall10: 0.8333, mrr: 0.75, noise: 0, stale: null },
+  spaceIsolation: { recall5: 1, recall10: 1, mrr: 0.9, noise: 0, stale: null },
+  distractor: { recall5: 1, recall10: 1, mrr: 0.7833, noise: 0.2167, stale: null },
+  stale: { recall5: 0.8333, recall10: 1, mrr: 0.5278, noise: null, stale: 0.1 },
 };
 
+function expectAtMost(actual: number | null, base: number | null, name: string) {
+  if (base === null) expect(actual, name).toBeNull();
+  else expect(actual, name).toBeLessThanOrEqual(base + MARGIN);
+}
+
 function expectAtLeast(actual: Metrics, base: Baseline) {
-  expect(actual.recall5).toBeGreaterThanOrEqual(base.recall5 - MARGIN);
-  expect(actual.recall10).toBeGreaterThanOrEqual(base.recall10 - MARGIN);
-  expect(actual.mrr).toBeGreaterThanOrEqual(base.mrr - MARGIN);
-  if (base.noise === null) expect(actual.noise).toBeNull();
-  else expect(actual.noise).toBeLessThanOrEqual(base.noise + MARGIN);
+  expect(actual.recall5, 'recall5').toBeGreaterThanOrEqual(base.recall5 - MARGIN);
+  expect(actual.recall10, 'recall10').toBeGreaterThanOrEqual(base.recall10 - MARGIN);
+  expect(actual.mrr, 'mrr').toBeGreaterThanOrEqual(base.mrr - MARGIN);
+  expectAtMost(actual.noise, base.noise, 'noise');
+  expectAtMost(actual.stale, base.stale, 'stale');
 }
 
 describe('memory retrieval eval — stub baseline', () => {
@@ -51,6 +64,11 @@ describe('memory retrieval eval — stub baseline', () => {
     for (const r of report.cases.filter((c) => c.dimension === 'spaceIsolation')) {
       expect(r.excludedHits, r.id).toEqual([]);
     }
+  });
+
+  it('replaces 是硬约束：被替换的旧版本一条都不能出现', () => {
+    const r = report.cases.find((c) => c.id === 'stale-replaces');
+    expect(r?.staleHits).toEqual([]);
   });
 });
 

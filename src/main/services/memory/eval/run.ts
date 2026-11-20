@@ -136,6 +136,8 @@ export interface Metrics {
   mrr: number;
   /** 只在有 excluded 的用例上平均；没有这类用例时为 null */
   noise: number | null;
+  /** 返回结果里已过期记忆的占比；只在有 stale 的用例上平均，没有这类用例时为 null */
+  stale: number | null;
 }
 
 export interface CaseResult {
@@ -146,11 +148,14 @@ export interface CaseResult {
   expectedRanks: (number | null)[];
   /** 被返回的 excluded key 及名次 */
   excludedHits: { key: string; rank: number }[];
+  /** 被返回的 stale key 及名次 */
+  staleHits: { key: string; rank: number }[];
   returned: number;
   recall5: number;
   recall10: number;
   mrr: number;
   noise: number | null;
+  stale: number | null;
 }
 
 export interface EvalReport {
@@ -168,13 +173,36 @@ function recallAt(ranks: (number | null)[], k: number): number {
 
 function aggregate(results: CaseResult[]): Metrics {
   const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-  const noisy = results.flatMap((r) => (r.noise === null ? [] : [r.noise]));
+  const defined = (xs: (number | null)[]) => xs.filter((x): x is number => x !== null);
+  const noisy = defined(results.map((r) => r.noise));
+  const stale = defined(results.map((r) => r.stale));
   return {
     cases: results.length,
     recall5: mean(results.map((r) => r.recall5)),
     recall10: mean(results.map((r) => r.recall10)),
     mrr: mean(results.map((r) => r.mrr)),
     noise: noisy.length ? mean(noisy) : null,
+    stale: stale.length ? mean(stale) : null,
+  };
+}
+
+/** 背景库每条用例都要重写一遍；按 (kind, text) 缓存向量，real 模型下省掉重复推理，结果不变 */
+function memoizeEmbedder(e: Embedder): Embedder {
+  const cache = new Map<string, Promise<Float32Array | null>>();
+  return {
+    model: e.model,
+    get dim() {
+      return e.dim;
+    },
+    embed: (text, kind) => {
+      const key = `${kind}\u0000${text}`;
+      let v = cache.get(key);
+      if (!v) {
+        v = e.embed(text, kind);
+        cache.set(key, v);
+      }
+      return v;
+    },
   };
 }
 
@@ -198,6 +226,8 @@ async function runCase(c: EvalCase, embedder: Embedder | null, limit: number): P
           eventStart: m.eventStart ?? null,
           eventEnd: m.eventEnd ?? null,
           force: true,
+          evolvesFromId: m.evolves ? idByKey.get(m.evolves.from) : undefined,
+          evolvesRelation: m.evolves?.relation,
         },
         { embedder, now }
       );
@@ -222,7 +252,8 @@ async function runCase(c: EvalCase, embedder: Embedder | null, limit: number): P
       }
     }
     const keyById = new Map([...idByKey].map(([k, id]) => [id, k]));
-    for (const k of [...c.expected, ...c.excluded]) {
+    const staleKeys = c.stale ?? [];
+    for (const k of [...c.expected, ...c.excluded, ...staleKeys]) {
       if (!c.memories.some((m) => m.key === k)) throw new Error(`eval case ${c.id}: unknown ${k}`);
     }
 
@@ -247,10 +278,15 @@ async function runCase(c: EvalCase, embedder: Embedder | null, limit: number): P
       return i < 0 ? null : i + 1;
     };
     const expectedRanks = c.expected.map(rankOf);
-    const excludedHits = c.excluded.flatMap((key) => {
-      const rank = rankOf(key);
-      return rank === null ? [] : [{ key, rank }];
-    });
+    const hitsOf = (keys: string[]) =>
+      keys.flatMap((key) => {
+        const rank = rankOf(key);
+        return rank === null ? [] : [{ key, rank }];
+      });
+    const excludedHits = hitsOf(c.excluded);
+    const staleHits = hitsOf(staleKeys);
+    const share = (keys: string[], n: number) =>
+      keys.length === 0 ? null : returned.length === 0 ? 0 : n / returned.length;
     const found = expectedRanks.filter((r): r is number => r !== null);
     return {
       id: c.id,
@@ -258,16 +294,13 @@ async function runCase(c: EvalCase, embedder: Embedder | null, limit: number): P
       query: c.query,
       expectedRanks,
       excludedHits,
+      staleHits,
       returned: returned.length,
       recall5: recallAt(expectedRanks, 5),
       recall10: recallAt(expectedRanks, 10),
       mrr: found.length ? 1 / Math.min(...found) : 0,
-      noise:
-        c.excluded.length === 0
-          ? null
-          : returned.length === 0
-            ? 0
-            : excludedHits.length / returned.length,
+      noise: share(c.excluded, excludedHits.length),
+      stale: share(staleKeys, staleHits.length),
     };
   } finally {
     db.close();
@@ -282,8 +315,9 @@ export async function runEval(opts: {
   limit?: number;
 }): Promise<EvalReport> {
   const limit = opts.limit ?? MEMORY_SEARCH_DEFAULT_LIMIT;
+  const embedder = opts.embedder && memoizeEmbedder(opts.embedder);
   const results: CaseResult[] = [];
-  for (const c of opts.cases ?? EVAL_CASES) results.push(await runCase(c, opts.embedder, limit));
+  for (const c of opts.cases ?? EVAL_CASES) results.push(await runCase(c, embedder, limit));
   const byDimension = Object.fromEntries(
     EVAL_DIMENSIONS.map((d) => [d, aggregate(results.filter((r) => r.dimension === d))])
   ) as Record<EvalDimension, Metrics>;
@@ -308,16 +342,18 @@ export async function runEvalWith(kind: EvalEmbedderKind): Promise<EvalReport> {
 const fmt = (x: number | null) => (x === null ? '—' : x.toFixed(3));
 
 function metricsRow(name: string, m: Metrics): string {
-  return `| ${name} | ${m.cases} | ${fmt(m.recall5)} | ${fmt(m.recall10)} | ${fmt(m.mrr)} | ${fmt(m.noise)} |`;
+  return `| ${name} | ${m.cases} | ${fmt(m.recall5)} | ${fmt(m.recall10)} | ${fmt(m.mrr)} | ${fmt(m.noise)} | ${fmt(m.stale)} |`;
 }
 
 export function formatReport(report: EvalReport): string {
-  const head = '| 范围 | 用例数 | Recall@5 | Recall@10 | MRR | 噪声率 |\n|---|---|---|---|---|---|';
+  const head =
+    '| 范围 | 用例数 | Recall@5 | Recall@10 | MRR | 噪声率 | staleRate |\n|---|---|---|---|---|---|---|';
   const dims = EVAL_DIMENSIONS.map((d) => metricsRow(d, report.byDimension[d]));
+  const hitList = (hits: { key: string; rank: number }[]) =>
+    hits.map((h) => `${h.key}@${h.rank}`).join(', ') || '—';
   const rows = report.cases.map((r) => {
     const ranks = r.expectedRanks.map((x) => (x === null ? '×' : String(x))).join(', ');
-    const noise = r.excludedHits.map((h) => `${h.key}@${h.rank}`).join(', ') || '—';
-    return `| ${r.id} | ${r.dimension} | ${ranks} | ${noise} | ${r.returned} | ${fmt(r.mrr)} |`;
+    return `| ${r.id} | ${r.dimension} | ${ranks} | ${hitList(r.excludedHits)} | ${hitList(r.staleHits)} | ${r.returned} | ${fmt(r.mrr)} |`;
   });
   return [
     `### embedder: ${report.embedder}（limit=${report.limit}，mode=fast，mmr=on）`,
@@ -326,7 +362,7 @@ export function formatReport(report: EvalReport): string {
     metricsRow('**overall**', report.overall),
     ...dims,
     '',
-    '| 用例 | 维度 | 期望项名次 | 混入的排除项@名次 | 返回条数 | MRR |\n|---|---|---|---|---|---|',
+    '| 用例 | 维度 | 期望项名次 | 混入的排除项@名次 | 混入的过期项@名次 | 返回条数 | MRR |\n|---|---|---|---|---|---|---|',
     ...rows,
   ].join('\n');
 }
