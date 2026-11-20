@@ -191,9 +191,7 @@ function KeybindingsSection() {
       setConflictWith(null);
       return;
     }
-    const binding = eventToBinding(e, {
-      allowBare: capturing === 'send-message' || capturing === 'voice-hold',
-    });
+    const binding = eventToBinding(e, { allowBare: capturing === 'send-message' });
     if (!binding) return;
     const taken = KEYBINDING_ACTIONS.find(
       (action) => action !== capturing && bindings[action] === binding

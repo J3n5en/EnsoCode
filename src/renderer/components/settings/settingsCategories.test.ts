@@ -76,7 +76,6 @@ describe('isCategoryVisible', () => {
 const EVERY_SETTINGS_CATEGORY = {
   general: true,
   shortcuts: true,
-  voice: true,
   appearance: true,
   providers: true,
   skills: true,
@@ -115,7 +114,6 @@ describe('groupCategories', () => {
       { id: 'ssh' as const, label: 'ssh' },
       { id: 'privacy' as const, label: 'privacy' },
       { id: 'general' as const, label: 'general' },
-      { id: 'voice' as const, label: 'voice' },
       { id: 'phone' as const, label: 'phone' },
     ];
     expect(groupCategories(shuffled)).toEqual([
@@ -124,7 +122,6 @@ describe('groupCategories', () => {
         label: 'Application',
         items: [
           { id: 'general', label: 'general' },
-          { id: 'voice', label: 'voice' },
           { id: 'privacy', label: 'privacy' },
         ],
       },

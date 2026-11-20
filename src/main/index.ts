@@ -93,7 +93,6 @@ import { setupRemoteRenderer } from './services/remoteRenderer';
 import { setSecretaryOpenTarget } from './services/secretary/links';
 import { readySecureStores } from './services/secureStores';
 import { hydrateShellPath, seedProcessPath } from './services/shellPath';
-import { syncSpeechFromSettings } from './services/speech/service';
 import { disposeAllTerminals, hasPendingPtys, waitPtyQuitIdle } from './services/terminalService';
 import {
   setTrayToggleHandler,
@@ -358,7 +357,6 @@ if (!gotTheLock) {
     syncMemoryKgFromSettings(persistedState);
     syncMemoryReconcileFromSettings(persistedState);
     syncMemoryForgettingFromSettings(persistedState);
-    syncSpeechFromSettings(persistedState);
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。
     const mainWindow = createMainWindow();
     ensureTray();

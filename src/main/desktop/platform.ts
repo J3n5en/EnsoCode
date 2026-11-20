@@ -15,7 +15,6 @@ import {
   safeStorage,
   session,
   shell,
-  systemPreferences,
   utilityProcess,
 } from 'electron';
 import agentWorkerPath from '../../agent/index?modulePath';
@@ -63,14 +62,6 @@ export const images = {
   fromBuffer(data: Buffer): DecodedImage | null {
     const image = nativeImage.createFromBuffer(data);
     return image.isEmpty() ? null : image;
-  },
-};
-
-export const mediaAccess = {
-  async microphone(): Promise<boolean> {
-    if (process.platform !== 'darwin') return true;
-    if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true;
-    return systemPreferences.askForMediaAccess('microphone');
   },
 };
 

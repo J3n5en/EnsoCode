@@ -4,7 +4,6 @@ import type { FontWeight } from '@/stores/settings';
 export type SettingsCategory =
   | 'general'
   | 'shortcuts'
-  | 'voice'
   | 'appearance'
   | 'providers'
   | 'skills'

@@ -13,7 +13,6 @@ import {
   Layers,
   LayoutTemplate,
   MessagesSquare,
-  Mic,
   Palette,
   Plug,
   Puzzle,
@@ -64,7 +63,6 @@ import {
   visibleCategories,
 } from './settingsCategories';
 import { UsageSettings } from './UsageSettings';
-import { VoiceInputSettings } from './VoiceInputSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
 function flashSettingsRow(rowId: string): void {
@@ -157,7 +155,6 @@ export function SettingsContent() {
   }> = [
     { id: 'general', icon: Settings, label: 'General' },
     { id: 'shortcuts', icon: Keyboard, label: 'Shortcuts' },
-    { id: 'voice', icon: Mic, label: 'Voice input' },
     { id: 'appearance', icon: Palette, label: 'Appearance' },
     { id: 'providers', icon: Server, label: 'Model Providers' },
     { id: 'presets', icon: Layers, label: 'Presets' },
@@ -353,7 +350,6 @@ export function SettingsContent() {
             {activeCategory === 'usage' && <UsageSettings />}
             {activeCategory === 'privacy' && <PrivacySettings />}
             {activeCategory === 'resources' && <ResourcesSettings />}
-            {activeCategory === 'voice' && <VoiceInputSettings />}
             {activeCategory === 'experimental' && (
               <ExperimentalSettings onOpenBots={() => setActiveCategory('bots')} />
             )}

@@ -11,7 +11,6 @@ import {
   REMOTE_CHAT_MODEL_ID,
   resolveChatModelFile,
   resolveChatModelSpec,
-  voiceCorrectionModelIdFromSettings,
 } from './chatModels';
 
 describe('chat model registry', () => {
@@ -99,24 +98,9 @@ describe('chatModelIdFromSettings', () => {
     );
   });
 
-  it('does not let memory pick a model tuned only for voice correction', () => {
+  it('falls back when a removed model id is still persisted', () => {
     expect(chatModelIdFromSettings({ memoryChatModel: 'local:myvoicetyping-1.5b' })).toBe(
       REMOTE_CHAT_MODEL_ID
-    );
-  });
-});
-
-describe('voiceCorrectionModelIdFromSettings', () => {
-  it('accepts general and voice-tuned local models and falls back to remote', () => {
-    expect(voiceCorrectionModelIdFromSettings({})).toBe(REMOTE_CHAT_MODEL_ID);
-    expect(voiceCorrectionModelIdFromSettings({ voiceCorrectionModel: 'local:nope' })).toBe(
-      REMOTE_CHAT_MODEL_ID
-    );
-    expect(
-      voiceCorrectionModelIdFromSettings({ voiceCorrectionModel: 'local:myvoicetyping-1.5b' })
-    ).toBe('local:myvoicetyping-1.5b');
-    expect(voiceCorrectionModelIdFromSettings({ voiceCorrectionModel: 'local:qwen3-1.7b' })).toBe(
-      'local:qwen3-1.7b'
     );
   });
 });

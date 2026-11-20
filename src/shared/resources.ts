@@ -308,8 +308,8 @@ const CACHE_DIRS = [
   'agent/usage-cache',
 ];
 const LOG_DIRS = ['agent/pi-agent/task-logs'];
-const MODEL_DIRS = ['memory/models', 'memory/chat-models', 'speech/models'];
-const RUNTIME_DIRS = ['speech', 'llama-gpu-backends', 'agent/pi-agent/bin', 'agent/pi-agent/rtk'];
+const MODEL_DIRS = ['memory/models', 'memory/chat-models'];
+const RUNTIME_DIRS = ['llama-gpu-backends', 'agent/pi-agent/bin', 'agent/pi-agent/rtk'];
 const MEMORY_DIRS = ['memory', 'agent/pi-agent/memories'];
 const SESSION_DIRS = ['agent/sessions', 'agent/usage-ledger', 'agent/source-registry.json'];
 const CONFIG_DIRS = ['instructions', 'system-prompts', 'agent/workflows', 'agent/pi-agent/ssh'];

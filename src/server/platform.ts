@@ -279,8 +279,6 @@ export const clipboard = { writeText: async () => {}, writeBuffer: async () => {
 
 export const images = { fromBuffer: () => null };
 
-export const mediaAccess = { microphone: async () => true };
-
 export const notification = {
   isSupported: () => false,
   show: () => null,

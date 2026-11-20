@@ -26,7 +26,7 @@ export const SETTINGS_GROUPS: readonly {
   {
     id: 'app',
     label: 'Application',
-    categories: ['general', 'appearance', 'shortcuts', 'voice', 'privacy'],
+    categories: ['general', 'appearance', 'shortcuts', 'privacy'],
   },
   {
     id: 'agent',

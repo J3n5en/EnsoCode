@@ -5,8 +5,6 @@ import {
   DIRECT_SIGNAL_MAX_CHARS,
   isPairSyncCursor,
   type PhoneToHost,
-  VOICE_CHUNK_MAX_CHARS,
-  VOICE_CHUNK_MAX_INDEX,
 } from '@enso/pair';
 import { isMediaId } from '@shared/bots/sendImage';
 import { takeSnapshotTail } from '@shared/snapshotTail';
@@ -392,23 +390,6 @@ export function parsePhoneCommand(value: unknown): CommandCheck {
       return { ok: true, command: value as PhoneToHost };
     case 'probe':
       if (!isGen(v.nonce)) return { ok: false, error: 'invalid nonce' };
-      return { ok: true, command: value as PhoneToHost };
-    case 'voice-chunk':
-      if (!isStr(v.requestId) || v.requestId.length > 64) {
-        return { ok: false, error: 'invalid requestId' };
-      }
-      if (!isGen(v.index) || v.index > VOICE_CHUNK_MAX_INDEX) {
-        return { ok: false, error: 'invalid index' };
-      }
-      if (!isStr(v.data) || v.data.length > VOICE_CHUNK_MAX_CHARS) {
-        return { ok: false, error: 'invalid data' };
-      }
-      if (v.last !== undefined && v.last !== true) return { ok: false, error: 'invalid last' };
-      return { ok: true, command: value as PhoneToHost };
-    case 'voice-cancel':
-      if (!isStr(v.requestId) || v.requestId.length > 64) {
-        return { ok: false, error: 'invalid requestId' };
-      }
       return { ok: true, command: value as PhoneToHost };
     case 'host-dirs': {
       if (!isRequestId(v.requestId)) return { ok: false, error: 'invalid requestId' };

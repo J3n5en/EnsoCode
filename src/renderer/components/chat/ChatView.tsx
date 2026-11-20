@@ -14,9 +14,7 @@ import { SecretaryTakeoverControl } from '@/components/secretary/SecretaryTakeov
 import { addToast } from '@/components/ui/toast';
 import { useMemberName } from '@/hooks/useMemberName';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
-import { useSpeechStatus } from '@/hooks/useSpeechStatus';
 import { useI18n } from '@/i18n';
-import { startDesktopVoiceSession } from '@/lib/voiceSession';
 import { useMaterializedProviders, useUsableProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSessionsStore } from '@/stores/sessions';
@@ -82,15 +80,7 @@ export function ChatView() {
   const defaultModel = useSettingsStore((state) => state.defaultModel);
   const projects = useSettingsStore((state) => state.projects);
   const projectGroups = useSettingsStore((state) => state.projectGroups);
-  const voiceInputEnabled = useSettingsStore((state) => state.voiceInputEnabled);
-  const voiceModel = useSettingsStore((state) => state.voiceModel);
   const presets = useSettingsStore((state) => state.presets);
-  const { status: speechStatus } = useSpeechStatus(voiceInputEnabled);
-  // 按本窗口的选择判断：换模型后 Main 同步设置有延迟，status.selected 可能还是旧的
-  const voiceReady =
-    voiceInputEnabled &&
-    speechStatus?.state !== 'unsupported' &&
-    speechStatus?.models.find((model) => model.id === voiceModel)?.state === 'ready';
   const sessionsHydrated = useSyncExternalStore(
     (onChange) => useSessionsStore.persist?.onFinishHydration?.(onChange) ?? (() => {}),
     () => useSessionsStore.persist?.hasHydrated?.() ?? true
@@ -488,8 +478,6 @@ export function ChatView() {
                 : (text) =>
                     window.electronAPI.files.savePastedText({ conversationId: chrome.id, text })
             }
-            voice={voiceReady ? startDesktopVoiceSession : undefined}
-            requestMicAccess={window.electronAPI.speech.requestMicAccess}
             placeholder={planning ? t('Describe the task — a plan comes first') : undefined}
             injectedDraft={chrome.draftText}
             injectedImages={chrome.draftImages}

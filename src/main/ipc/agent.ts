@@ -154,13 +154,7 @@ import { listAllSessions, listProjectSessions } from '../services/extensionPlugi
 import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/externalFileReveal';
 import { searchFiles } from '../services/fileSearch';
 import { resolveLocalUnderCwd } from '../services/filesWorkspace';
-import { createLocalComplete, memoryCompleteFromSettings } from '../services/llama/chat';
-import {
-  localChatModelPathIfReady,
-  REMOTE_CHAT_MODEL_ID,
-  resolveChatModelSpec,
-  voiceCorrectionModelIdFromSettings,
-} from '../services/llama/chatModels';
+import { memoryCompleteFromSettings } from '../services/llama/chat';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import { type Complete, redactSecrets } from '../services/memory/distill';
 import { memorySpaceContext, secretaryReadProjectIds } from '../services/memory/space';
@@ -209,8 +203,6 @@ import {
 } from '../services/sessionImport';
 import { setSessionMuteOverride } from '../services/sessionMuteGate';
 import { SourceAuthorityRegistry } from '../services/sourceAuthorityRegistry';
-import { setSpeechCorrector } from '../services/speech/service';
-import { buildCorrectionRequest } from '../services/speech/text';
 import { getSshConnectionStore } from '../services/sshConnectionStore';
 import { SubagentProgressPush } from '../services/subagentProgressPush';
 import { titleModelCandidates } from '../services/titleSummary';
@@ -1200,29 +1192,6 @@ async function remoteDistillCompletion(
     });
 }
 
-const VOICE_CORRECTION_TIMEOUT_MS = 15_000;
-
-/** 语音纠错：本地 GGUF 走 llama.cpp；远程用单独选的模型，未选跟随标题模型。不可用返 null，保留原文 */
-async function voiceCorrection(text: string): Promise<string | null> {
-  const state = readSettingsState();
-  if (!state) return null;
-  const modelId = voiceCorrectionModelIdFromSettings(state);
-  const request = buildCorrectionRequest(modelId, text);
-  if (modelId === REMOTE_CHAT_MODEL_ID) {
-    if (!isAgentWorkerReady()) return null;
-    const candidates = await remoteCandidates(state, state.voiceCorrectionRemoteModel);
-    if (candidates.length === 0) return null;
-    return completeText({ ...request, candidates, timeoutMs: VOICE_CORRECTION_TIMEOUT_MS });
-  }
-  const gguf = localChatModelPathIfReady(chatModelsRoot(), modelId);
-  if (!gguf) return null;
-  const complete = createLocalComplete(gguf, {
-    contextSize: resolveChatModelSpec(modelId)?.contextSize,
-    timeoutMs: VOICE_CORRECTION_TIMEOUT_MS,
-  });
-  return complete(request.systemPrompt, request.userText, { maxTokens: request.maxTokens });
-}
-
 async function readParentHistoryTail(
   conversationId: string,
   beforeIndex?: number
@@ -1719,7 +1688,6 @@ export function registerAgentHandlers(): void {
   wirePairAgentBridge();
   wirePairSessionHost();
   configureMemoryDistill({ complete: distillCompletion });
-  setSpeechCorrector(voiceCorrection);
   const agentDataDir = path.join(app.getPath('userData'), 'agent');
   sourceAuthority = new SourceAuthorityRegistry({
     registryFile: path.join(agentDataDir, 'source-registry.json'),

@@ -14,7 +14,6 @@ import type {
   MentionCandidate,
   UiElementMentionCandidate,
 } from '@shared/types/mentions';
-import type { StartVoiceSession } from '@shared/types/speech';
 import { ArrowUp, CircleStop, ImagePlus, Shield, ShieldX, SlashSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -56,7 +55,6 @@ import {
   registerComposerSubmitPayload,
 } from './composerMentionBridge';
 import { COMPOSER_DROP_ID } from './dragDrop';
-import { HoldToTalk, HoldToTalkToggle } from './HoldToTalk';
 import { applyInjectedDraft } from './injectedDraft';
 import { MentionChip } from './MentionChip';
 import { MentionEditor, type MentionEditorHandle, type MentionEditorState } from './MentionEditor';
@@ -67,7 +65,6 @@ import { createEditorPayload, mentionPopupLayout, resolvePopupKeyAction } from '
 import { SlashChip } from './SlashChip';
 import { filterComposerCommands } from './skillCompletion';
 import { pushSlash } from './slashChain';
-import { VoiceInputButton } from './VoiceInputButton';
 
 /** 缩略图只列无 id 的附件，下标对不上完整列表；按对象身份删，带 id 的元素截图不受影响 */
 export function removeComposerImage(
@@ -118,12 +115,6 @@ interface ComposerProps {
   placeholder?: string;
   /** Plan 模式：边框提示当前只读规划 */
   planMode?: boolean;
-  /** 语音输入：给出即显示麦克风，边录边推 16kHz PCM；桌面走 IPC，手机走配对信道 */
-  voice?: StartVoiceSession;
-  /** 录音前向系统申请麦克风（macOS 需主进程发起） */
-  requestMicAccess?: () => Promise<boolean>;
-  /** hold = 手机微信式：麦克风切出输入框下方的「按住 说话」 */
-  voiceMode?: 'click' | 'hold';
   /** 超长纯文本粘贴落盘为 txt；不传（如 ssh 项目）则保持插入正文 */
   savePastedText?: (text: string) => Promise<PastedTextFileResult>;
 }
@@ -164,20 +155,13 @@ export function Composer({
   isolated = false,
   placeholder: placeholderText,
   planMode = false,
-  voice,
-  requestMicAccess,
-  voiceMode = 'click',
   savePastedText,
 }: ComposerProps) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
-  const [holdToTalk, setHoldToTalk] = useState(false);
-  // 断线重连时语音会短暂不可用：不清掉按住说话，恢复后原样回来
-  const holdVoice = voiceMode === 'hold' ? voice : undefined;
   const keybindings = useSettingsStore((s) => s.keybindings);
   const privacyMasking = useSettingsStore((s) => s.privacyMasking);
   const sendBinding = effectiveKeybindings(keybindings)['send-message'];
-  const voiceHoldBinding = effectiveKeybindings(keybindings)['voice-hold'];
   const mentionPickerId = useId();
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [slashes, setSlashes] = useState<string[]>([]);
@@ -1001,30 +985,6 @@ export function Composer({
               <ImagePlus className="h-3.5 w-3.5" />
             </button>
             <PluginComposerSlots side="left" {...pluginSlotProps} />
-            {holdVoice ? (
-              <HoldToTalkToggle
-                active={holdToTalk}
-                disabled={locked}
-                onChange={(active) => {
-                  setHoldToTalk(active);
-                  // 按住说话时收起软键盘；切回键盘直接聚焦
-                  if (active) (document.activeElement as HTMLElement | null)?.blur();
-                  else editorRef.current?.focus();
-                }}
-              />
-            ) : voice ? (
-              <VoiceInputButton
-                startSession={voice}
-                requestMicAccess={requestMicAccess}
-                disabled={locked}
-                holdBinding={voiceHoldBinding || undefined}
-                holdScope={composerRef}
-                onText={(text) => {
-                  editorRef.current?.insertText(text);
-                  editorRef.current?.focus();
-                }}
-              />
-            ) : null}
             {toolbar}
             {!isolated && <PluginStatusItems sessionId={pluginSlotProps.sessionId} />}
             <PluginComposerSlots side="right" {...pluginSlotProps} />
@@ -1082,17 +1042,6 @@ export function Composer({
           )}
         </div>
       </div>
-      {holdVoice && holdToTalk ? (
-        <HoldToTalk
-          startSession={holdVoice}
-          disabled={locked}
-          onText={(text) => {
-            editorRef.current?.insertText(text);
-            // 插入会聚焦编辑器，按住说话模式下不弹键盘
-            (document.activeElement as HTMLElement | null)?.blur();
-          }}
-        />
-      ) : null}
       <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>

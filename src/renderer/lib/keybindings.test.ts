@@ -6,7 +6,6 @@ import {
   eventToBinding,
   formatBinding,
   IS_MAC,
-  isHoldReleased,
   isSendMessageKey,
   KEYBINDING_ACTIONS,
 } from './keybindings';
@@ -113,41 +112,17 @@ describe('send-message binding', () => {
   });
 });
 
-describe('voice hold-to-talk binding', () => {
+describe('Space binding', () => {
   const held = { metaKey: IS_MAC, ctrlKey: !IS_MAC, shiftKey: true };
 
-  it('defaults to a bare Space without clashing with any other default', () => {
-    expect(KEYBINDING_ACTIONS).toContain('voice-hold');
-    expect(DEFAULT_KEYBINDINGS['voice-hold']).toBe('space');
-    const values = Object.values(DEFAULT_KEYBINDINGS).filter(Boolean);
-    expect(new Set(values).size).toBe(values.length);
-  });
-
-  it('only yields a bare Space binding when bare keys are allowed', () => {
+  it('never yields a bare Space binding', () => {
     expect(eventToBinding(keyEvent({ key: ' ' }))).toBeNull();
-    expect(eventToBinding(keyEvent({ key: ' ' }), { allowBare: true })).toBe('space');
-    expect(formatBinding('space')).toBe('Space');
-    expect(isHoldReleased('space', keyEvent({ key: ' ' }))).toBe(true);
-    expect(isHoldReleased('space', keyEvent({ key: 'a' }))).toBe(false);
+    expect(eventToBinding(keyEvent({ key: ' ' }), { allowBare: true })).toBeNull();
   });
 
   it('encodes Space by name, including the non-breaking space of mac Option+Space', () => {
     expect(eventToBinding(keyEvent({ key: ' ', ...held }))).toBe('mod+shift+space');
     expect(eventToBinding(keyEvent({ key: '\u00a0', altKey: true }))).toBe('alt+space');
     expect(formatBinding('mod+shift+space')).toMatch(/Space$/);
-  });
-
-  it('counts releasing the key or any required modifier as letting go', () => {
-    expect(isHoldReleased('mod+shift+space', keyEvent({ key: ' ', ...held }))).toBe(true);
-    expect(
-      isHoldReleased('mod+shift+space', keyEvent({ ...held, key: 'Shift', shiftKey: false }))
-    ).toBe(true);
-    expect(
-      isHoldReleased(
-        'mod+shift+space',
-        keyEvent({ ...held, key: IS_MAC ? 'Meta' : 'Control', metaKey: false, ctrlKey: false })
-      )
-    ).toBe(true);
-    expect(isHoldReleased('mod+shift+space', keyEvent({ key: 'a', ...held }))).toBe(false);
   });
 });

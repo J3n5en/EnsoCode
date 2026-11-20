@@ -7,13 +7,6 @@ import { GroupChatScreen } from './GroupChatScreen';
 vi.mock('@/components/chat/ApprovalBar', () => ({ ApprovalBar: () => null }));
 vi.mock('@/components/chat/AskBar', () => ({ AskBar: () => null }));
 vi.mock('@/components/chat/Markdown', () => ({ Markdown: ({ text }: { text: string }) => text }));
-vi.mock('@/components/chat/VoiceInputButton', () => ({
-  VoiceInputButton: () =>
-    createElement('button', {
-      type: 'button',
-      'aria-label': '语音输入',
-    }),
-}));
 
 const chat: PairBotChatSummary = {
   id: 'chat',
@@ -178,10 +171,6 @@ describe('phone group recovery and folding UI', () => {
     expect(html).toContain('RESULT_6');
   });
 
-  it('shows the mic button only when voice is provided', () => {
-    expect(render()).not.toContain('aria-label="语音输入"');
-    expect(render({ voice: noop as never })).toContain('aria-label="语音输入"');
-  });
   it('shows the topic switcher only when the desktop supports threads', () => {
     expect(render({ onNewSession: noop, canCreate: true })).not.toContain('aria-label="切换话题"');
     const threads = {

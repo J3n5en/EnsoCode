@@ -69,7 +69,6 @@ import type {
   PairSessionConfig,
   PairStatus,
 } from '@shared/types/pair';
-import type { SpeechTranscribeResult } from '@shared/types/speech';
 import { readTrayPreventDisplaySleep, readTraySleepPolicy } from '../ipc/settings';
 // 会话命令一律走 agentBridge（身份解析留在 ipc/agent.ts），这里只留无需身份的 snapshot。
 import { requestSnapshot, setPinnedSessions } from './agentHost';
@@ -112,7 +111,6 @@ import {
   saveRelayUrl,
   upsertDevice,
 } from './pairStore';
-import { VoiceUploads } from './pairVoiceUpload';
 import {
   buildPushPayload,
   clearPushSubscription,
@@ -129,7 +127,6 @@ import {
   remoteLinkRevoked,
 } from './remoteRenderer/hostHooks';
 import { isSessionMuted } from './sessionMuteGate';
-import { onSpeechAvailabilityChange, openSpeechSession, speechAvailable } from './speech/service';
 
 /**
  * 手机第二屏 host：跑在 main，不依赖窗口焦点。
@@ -202,7 +199,6 @@ interface Connection {
   remoteGzip: boolean;
   /** 对端是完整模式（进房 snapshot 声明）：不推手机版目录/事件，跨重连保留，下次 snapshot 改写 */
   deskGuest: boolean;
-  voiceUploads: VoiceUploads;
   /** 直连和中继共用：一帧只封一次 */
   replay: FrameReplay;
 }
@@ -424,7 +420,6 @@ function syncPinnedSessions(): void {
 
 let resumeHooked = false;
 let stopNetworkWatch: (() => void) | null = null;
-let stopSpeechWatch: (() => void) | null = null;
 let cacheSeeded = false;
 
 function ensureRelayCacheSeeded(): void {
@@ -442,12 +437,6 @@ export function startPairHost(): void {
     powerMonitor.on('resume', () => reviveAll('resume'));
     stopNetworkWatch = startPairNetworkWatch({ onChange: () => reviveAll('network-change') });
   }
-  // host-info 的 voiceInput 随识别可用性变化，指纹变了才重发
-  stopSpeechWatch ??= onSpeechAvailabilityChange(() => {
-    for (const conn of connections.values()) {
-      if (conn.phoneOnline) requestMeta(conn);
-    }
-  });
   // 先装好 WebRTC 原生模块再进房：host-info 的能力声明在首次 meta 推送就要确定
   void preloadDirectPeer().finally(() => {
     for (const device of loadDevices()) {
@@ -474,14 +463,11 @@ function reviveAll(reason: 'resume' | 'network-change'): void {
 export function stopPairHost(): void {
   stopNetworkWatch?.();
   stopNetworkWatch = null;
-  stopSpeechWatch?.();
-  stopSpeechWatch = null;
   cancelPairing();
   for (const conn of connections.values()) {
     conn.closed = true;
     conn.ioEpoch++;
     conn.syncRevision++;
-    conn.voiceUploads.clear();
     if (conn.timer) clearTimeout(conn.timer);
     if (conn.providersRetry) clearTimeout(conn.providersRetry);
     conn.heartbeat?.stop();
@@ -655,7 +641,6 @@ function openConnection(device: PairedDevice): void {
     existing.closed = true;
     existing.ioEpoch++;
     existing.syncRevision++;
-    existing.voiceUploads.clear();
     if (existing.timer) clearTimeout(existing.timer);
     if (existing.providersRetry) clearTimeout(existing.providersRetry);
     existing.heartbeat?.stop();
@@ -690,17 +675,6 @@ function openConnection(device: PairedDevice): void {
     remoteWindow: new BulkWindow((frame) => sendRemoteFrame(conn, frame)),
     remoteGzip: false,
     deskGuest: false,
-    voiceUploads: new VoiceUploads({
-      open: openSpeechSession,
-      // 每处 ioEpoch++ 都伴随 voiceUploads.clear()，旧连接的会话已取消，中间结果不会再出来
-      onPartial: (requestId, text, correcting) =>
-        void send(conn, {
-          type: 'voice-partial',
-          requestId,
-          text,
-          ...(correcting ? { correcting: true as const } : {}),
-        }),
-    }),
     replay: createFrameReplay(),
   };
   conn.direct = new DirectLink({
@@ -746,7 +720,6 @@ function connect(conn: Connection): void {
 function clearConnectionSubscription(conn: Connection): void {
   conn.ioEpoch++;
   conn.syncRevision++;
-  conn.voiceUploads.clear();
   conn.remoteParts.clear();
   conn.remoteWindow.reset();
   conn.remoteGzip = false;
@@ -873,7 +846,6 @@ function forgetDevice(pairId: string): void {
     conn.closed = true;
     conn.ioEpoch++;
     conn.syncRevision++;
-    conn.voiceUploads.clear();
     if (conn.timer) clearTimeout(conn.timer);
     if (conn.providersRetry) clearTimeout(conn.providersRetry);
     conn.heartbeat?.stop();
@@ -1137,19 +1109,6 @@ async function handleFrame(
       // 测速必须走中继，走直连会测到 DC 而不是中继路径
       void enqueueSend(conn, { type: 'probe-ack', nonce: command.nonce }, true);
       break;
-    case 'voice-chunk': {
-      const result = conn.voiceUploads.accept(command);
-      if (result?.kind === 'error') {
-        void send(conn, { type: 'voice-result', requestId: result.requestId, error: result.error });
-      } else if (result?.kind === 'finish') {
-        // 定稿可能耗时数秒，不能卡住本连接的收帧队列
-        void replyVoiceResult(conn, result.requestId, result.result, generation, ioEpoch);
-      }
-      break;
-    }
-    case 'voice-cancel':
-      conn.voiceUploads.cancel(command.requestId);
-      break;
     case 'host-dirs':
     case 'project-add':
       void pairProjectReply(command, projectDeps)
@@ -1216,25 +1175,6 @@ async function handleFrame(
     }
   }
   syncPinnedSessions();
-}
-
-async function replyVoiceResult(
-  conn: Connection,
-  requestId: string,
-  pending: Promise<SpeechTranscribeResult>,
-  generation: number,
-  ioEpoch: number
-): Promise<void> {
-  const result = await pending.catch(
-    (): SpeechTranscribeResult => ({ ok: false, error: 'failed' })
-  );
-  if (!connectionCurrent(conn, generation, ioEpoch)) return;
-  await send(
-    conn,
-    result.ok
-      ? { type: 'voice-result', requestId, text: result.text }
-      : { type: 'voice-result', requestId, error: result.error }
-  );
 }
 
 // ── 发：加密下行 ──────────────────────────────────────────────────────
@@ -1414,7 +1354,6 @@ async function sendMeta(conn: Connection): Promise<void> {
     hostname: os.hostname(),
     appVersion: app.getVersion(),
     ...(directReady ? { capabilities: ['direct-v1' as const], iceServers: PAIR_STUN_SERVERS } : {}),
-    ...(speechAvailable() ? { voiceInput: true as const } : {}),
     ...(deviceScope(conn.device) === 'read'
       ? { readOnly: true as const }
       : { remoteDesktop: true as const }),

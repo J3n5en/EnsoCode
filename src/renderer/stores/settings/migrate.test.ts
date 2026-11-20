@@ -174,7 +174,6 @@ describe('设置持久化迁移', () => {
       'reviewer',
       'compact',
       'memory',
-      'voice',
       'bot',
       'subagent',
       'classifier',
@@ -195,7 +194,6 @@ describe('设置持久化迁移', () => {
       approvalReviewer: ref('reviewer'),
       smartCompactModel: ref('compact'),
       memoryDistillModel: ref('memory'),
-      voiceCorrectionRemoteModel: ref('voice'),
       botAssistantModel: ref('bot'),
       subagentModels: [ref('subagent')],
       providers: ['oauth', 'other'].map((id) => ({
@@ -532,14 +530,19 @@ describe('设置持久化迁移', () => {
     });
   });
 
-  it('hydrate 时已下架的识别模型落回当前值，合法模型照常恢复', () => {
-    const current = {
-      editMode: 'apply_patch' as const,
-      accentColor: 'violet' as const,
-      voiceModel: 'qwen3-asr',
-    };
-    expect(mergeSettingsState({ voiceModel: 'enso-asr' }, current).voiceModel).toBe('qwen3-asr');
-    expect(mergeSettingsState({ voiceModel: 'x-asr' }, current).voiceModel).toBe('x-asr');
+  it('hydrate 时忽略已移除的语音输入字段', () => {
+    const current = { editMode: 'apply_patch' as const, accentColor: 'violet' as const };
+    const merged = mergeSettingsState(
+      {
+        voiceInputEnabled: true,
+        voiceModel: 'qwen3-asr',
+        voiceCorrectionRemoteModel: { providerId: 'p', modelId: 'm' },
+        voiceGeminiApiKey: 'g-key',
+        theme: 'light',
+      },
+      current
+    );
+    expect(merged).toEqual({ ...current, theme: 'light' });
   });
 
   it('已是当前版本时原样返回，不重复搬运', () => {

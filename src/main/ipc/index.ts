@@ -28,7 +28,6 @@ import { registerProxyHandlers } from './proxy';
 import { registerResourceHandlers } from './resources';
 import { registerSecretaryHandlers } from './secretary';
 import { registerSettingsHandlers } from './settings';
-import { registerSpeechHandlers } from './speech';
 import { registerSshConnectionHandlers } from './sshConnections';
 import { registerTerminalHandlers } from './terminal';
 import { registerUsageHandlers } from './usage';
@@ -69,7 +68,6 @@ export function registerIpcHandlers(): void {
   registerMemberAgentTypes();
   registerPairBotHandlers();
   registerAppBadgeHandlers();
-  registerSpeechHandlers();
   registerDcgHandlers();
   registerElevationHandlers();
 }

@@ -3,11 +3,9 @@ import { mentionCandidates, parseMentions } from '@shared/bots/mentions';
 import { pastedTextFileContent } from '@shared/pastedText';
 import type { AttachedImage } from '@shared/types/agent';
 import { BOT_MENTION_ALL, type BotProfile } from '@shared/types/bot';
-import type { StartVoiceSession } from '@shared/types/speech';
 import { ArrowUp, FileText, ImagePlus, MessagesSquare, Sparkles, Square, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { extractSkillQuery } from '@/components/chat/skillCompletion';
-import { VoiceInputButton } from '@/components/chat/VoiceInputButton';
 import { useMentionSearch } from '@/hooks/useMentionSearch';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, isSendMessageKey } from '@/lib/keybindings';
@@ -67,8 +65,6 @@ interface BotComposerProps {
   disabled?: boolean;
   toolbar?: ReactNode;
   hint?: ReactNode;
-  voice?: StartVoiceSession;
-  requestMicAccess?: () => Promise<boolean>;
   /** 返回 false = 发送失败，输入回滚 */
   onSend: (payload: BotComposerPayload) => Promise<boolean>;
   onStop?: () => void;
@@ -107,13 +103,10 @@ export function BotComposer({
   disabled = false,
   toolbar,
   hint,
-  voice,
-  requestMicAccess,
   onSend,
   onStop,
 }: BotComposerProps) {
   const { t } = useI18n();
-  const rootRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
@@ -123,8 +116,7 @@ export function BotComposer({
   const [activeIndex, setActiveIndex] = useState(0);
   const [sending, setSending] = useState(false);
   const keybindings = useSettingsStore((s) => s.keybindings);
-  const { 'voice-hold': voiceHoldBinding, 'send-message': sendBinding } =
-    effectiveKeybindings(keybindings);
+  const { 'send-message': sendBinding } = effectiveKeybindings(keybindings);
   const { text } = draft;
   const patchDraft = (patch: Partial<BotComposerDraft>) =>
     setDraft((current) => ({ ...current, ...patch }));
@@ -230,17 +222,6 @@ export function BotComposer({
     requestAnimationFrame(() => {
       el?.focus();
       el?.setSelectionRange(position, position);
-    });
-  };
-
-  const insertText = (value: string) => {
-    const el = textareaRef.current;
-    const start = el?.selectionStart ?? text.length;
-    const end = el?.selectionEnd ?? text.length;
-    patchDraft({ text: text.slice(0, start) + value + text.slice(end) });
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(start + value.length, start + value.length);
     });
   };
 
@@ -362,7 +343,6 @@ export function BotComposer({
 
   return (
     <div
-      ref={rootRef}
       data-slot="composer"
       className="relative rounded-2xl border bg-background shadow-float"
       onDragOver={(event) => event.preventDefault()}
@@ -514,16 +494,6 @@ export function BotComposer({
             event.target.value = '';
           }}
         />
-        {voice && (
-          <VoiceInputButton
-            startSession={voice}
-            requestMicAccess={requestMicAccess}
-            disabled={disabled}
-            holdBinding={voiceHoldBinding || undefined}
-            holdScope={rootRef}
-            onText={insertText}
-          />
-        )}
         {toolbar}
         <div className="min-w-0 flex-1 truncate text-muted-foreground text-xs">{hint}</div>
         {running && onStop && !canSend ? (

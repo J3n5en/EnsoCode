@@ -61,7 +61,6 @@ import { DEFAULT_THEME_KEY } from '@shared/theme/builtinThemes';
 import type { ThemeKey } from '@shared/theme/types';
 import { DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types';
 import type { AgentMode, SourceAuthorityProjection } from '@shared/types/agent';
-import { DEFAULT_SPEECH_MODEL_ID, SYSTEM_MICROPHONE } from '@shared/types/speech';
 import { parseUsageModelPricing } from '@shared/usage/pricing';
 import {
   findVirtualModel,
@@ -227,7 +226,6 @@ const initialState = {
   memoryDecayStaleDays: DEFAULT_FORGETTING_SETTINGS.staleDays,
   memoryDecayMaxImportance: DEFAULT_FORGETTING_SETTINGS.maxImportance,
   memoryDecayIntervalDays: DEFAULT_FORGETTING_SETTINGS.intervalDays,
-  voiceInputEnabled: false,
   botModeEnabled: false,
   scratchSessionsEnabled: false,
   dropShelfEnabled: false,
@@ -236,13 +234,6 @@ const initialState = {
   botAssistantModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   botMaxRunningTurns: DEFAULT_BOT_MAX_RUNNING_TURNS,
   botDiscussModeEnabled: false,
-  voiceInputDevice: SYSTEM_MICROPHONE,
-  voiceModel: DEFAULT_SPEECH_MODEL_ID,
-  voiceCorrectionEnabled: false,
-  voiceCorrectionModel: 'remote',
-  voiceCorrectionRemoteModel: null as import('@shared/defaultModel').DefaultModelRef | null,
-  voiceVocabulary: '',
-  voiceGeminiApiKey: '',
   autoUpdate: true,
   autoRestartWhenIdle: false,
   pluginAutoUpdate: true,
@@ -442,7 +433,6 @@ export const useSettingsStore = create<SettingsState>()(
       setMemoryDecayStaleDays: (memoryDecayStaleDays) => set({ memoryDecayStaleDays }),
       setMemoryDecayMaxImportance: (memoryDecayMaxImportance) => set({ memoryDecayMaxImportance }),
       setMemoryDecayIntervalDays: (memoryDecayIntervalDays) => set({ memoryDecayIntervalDays }),
-      setVoiceInputEnabled: (voiceInputEnabled) => set({ voiceInputEnabled }),
       setBotModeEnabled: (botModeEnabled) => set({ botModeEnabled }),
       setScratchSessionsEnabled: (scratchSessionsEnabled) => set({ scratchSessionsEnabled }),
       setDropShelfEnabled: (dropShelfEnabled) => set({ dropShelfEnabled }),
@@ -453,14 +443,6 @@ export const useSettingsStore = create<SettingsState>()(
         set({ botMaxRunningTurns: normalizeBotMaxRunningTurns(value) }),
       setBotDiscussModeEnabled: (botDiscussModeEnabled) =>
         set({ botDiscussModeEnabled: botDiscussModeEnabled === true }),
-      setVoiceInputDevice: (voiceInputDevice) => set({ voiceInputDevice }),
-      setVoiceModel: (voiceModel) => set({ voiceModel }),
-      setVoiceCorrectionEnabled: (voiceCorrectionEnabled) => set({ voiceCorrectionEnabled }),
-      setVoiceCorrectionModel: (voiceCorrectionModel) => set({ voiceCorrectionModel }),
-      setVoiceCorrectionRemoteModel: (voiceCorrectionRemoteModel) =>
-        set({ voiceCorrectionRemoteModel }),
-      setVoiceVocabulary: (voiceVocabulary) => set({ voiceVocabulary }),
-      setVoiceGeminiApiKey: (voiceGeminiApiKey) => set({ voiceGeminiApiKey }),
       setEditMode: (editMode) => set({ editMode }),
       setCompactStrategy: (compactStrategy) =>
         set({ compactStrategy, smartCompactEnabled: compactStrategy === 'smart' }),

@@ -25,7 +25,6 @@ import type {
   SubagentModelEntry,
 } from '@shared/types';
 import type { AgentMode, ApprovalMode, ThinkingLevel } from '@shared/types/agent';
-import type { SpeechModelId } from '@shared/types/speech';
 import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
 import type { VirtualClassifierConfig, VirtualModelEntry } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
@@ -190,8 +189,6 @@ export interface SettingsState {
   memoryDecayMaxImportance: number;
   /** 巡检间隔（天）；缺省 7 */
   memoryDecayIntervalDays: number;
-  /** 语音输入：开启后才提示下载本地识别模型；缺省关 */
-  voiceInputEnabled: boolean;
   /** 实验功能：Bot 模式；缺省关，关闭时 Main 不启动 Bot 后台逻辑 */
   botModeEnabled: boolean;
   /** 实验功能：临时会话；缺省关，关闭只藏入口，不删已有会话 */
@@ -208,20 +205,6 @@ export interface SettingsState {
   botMaxRunningTurns: number;
   /** 实验功能：Bot 群聊讨论模式；缺省关，关闭时群聊路由与 main 一致；只在本机，不参与同步 */
   botDiscussModeEnabled: boolean;
-  /** 桌面录音用的麦克风设备 id；SYSTEM_MICROPHONE 跟随系统 */
-  voiceInputDevice: string;
-  /** 本机语音识别模型 */
-  voiceModel: SpeechModelId;
-  /** 识别后用 LLM 纠错；缺省关 */
-  voiceCorrectionEnabled: boolean;
-  /** 纠错后端：'remote' 或本地 chat 模型 id */
-  voiceCorrectionModel: string;
-  /** 纠错走远程时的模型；null 跟随标题模型 */
-  voiceCorrectionRemoteModel: DefaultModelRef | null;
-  /** 云端识别的自定义词表，逐行或逗号分隔 */
-  voiceVocabulary: string;
-  /** 云端识别（Gemini Live）的 API Key */
-  voiceGeminiApiKey: string;
 
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
@@ -435,7 +418,6 @@ export interface SettingsState {
   setMemoryDecayStaleDays: (value: number) => void;
   setMemoryDecayMaxImportance: (value: number) => void;
   setMemoryDecayIntervalDays: (value: number) => void;
-  setVoiceInputEnabled: (value: boolean) => void;
   setBotModeEnabled: (value: boolean) => void;
   setScratchSessionsEnabled: (value: boolean) => void;
   setDropShelfEnabled: (value: boolean) => void;
@@ -444,13 +426,6 @@ export interface SettingsState {
   setBotAssistantModel: (value: DefaultModelRef | null) => void;
   setBotMaxRunningTurns: (value: number) => void;
   setBotDiscussModeEnabled: (value: boolean) => void;
-  setVoiceInputDevice: (deviceId: string) => void;
-  setVoiceModel: (model: SpeechModelId) => void;
-  setVoiceCorrectionEnabled: (value: boolean) => void;
-  setVoiceCorrectionModel: (model: string) => void;
-  setVoiceCorrectionRemoteModel: (model: DefaultModelRef | null) => void;
-  setVoiceVocabulary: (value: string) => void;
-  setVoiceGeminiApiKey: (value: string) => void;
   setEditMode: (value: EditMode) => void;
   setCompactStrategy: (value: CompactStrategy) => void;
   setSmartCompactEnabled: (value: boolean) => void;

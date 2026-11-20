@@ -4,14 +4,6 @@ import { BUILTIN_TOOLS } from './types/builtinTools';
 
 /** 间接映射表里的 t() key。删孤儿时漏看这些会把正在用的词条删掉。 */
 const MAPPED_I18N_KEYS = [
-  // VoiceInputSettings.MODEL_TEXT
-  'X-ASR Streaming',
-  'Text appears while you speak. Chinese and English.',
-  'Most accurate on everyday speech. Chinese and English.',
-  'Best with mixed Chinese-English and code terms. Slower and uses more memory.',
-  'Chinese, English, Japanese, Korean and Cantonese.',
-  'Hanbao',
-  'Runs fully offline. Chinese and English.',
   // ModelPicker.LEVEL_LABEL_KEYS + StatsLine.THINKING_LEVEL_SHORT_KEYS
   'Min',
   'Low',

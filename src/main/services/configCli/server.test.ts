@@ -144,7 +144,6 @@ describe('config CLI socket', () => {
     for (const key of [
       'providers.p1.apiKey',
       'providers.p1.headers.Authorization',
-      'voiceGeminiApiKey',
       'mcpServers.mcp1.env',
     ]) {
       expect(await config({ action: 'get', key })).toMatchObject({ ok: false, hidden: true });
@@ -166,7 +165,6 @@ describe('config CLI socket', () => {
       'providers.p1.password',
       'providers.p1.credential',
       'providers.p1.headers.Authorization',
-      'voiceGeminiApiKey',
     ]) {
       const reply = await config({ action: 'set', key, value: 'leaked' });
       expect(reply.ok).toBe(false);
@@ -204,7 +202,7 @@ describe('config CLI socket', () => {
     for (const secret of [SECRET, 'gemini-secret', 'hdr-secret', 'ghp-secret'])
       expect(text).not.toContain(secret);
     const entries = reply.entries as { key: string; value: unknown }[];
-    expect(entries.find((e) => e.key === 'voiceGeminiApiKey')?.value).toBe('***');
+    expect(entries.some((e) => e.key === 'voiceGeminiApiKey')).toBe(false);
     expect(entries.find((e) => e.key === 'terminalFontSize')).toBeDefined();
     expect(entries.some((e) => e.key === 'projects')).toBe(false);
   });
@@ -328,7 +326,7 @@ describe('config CLI socket', () => {
     });
     expect(keys.get('theme')).toMatchObject({ type: 'string', writable: true });
     expect(keys.get('mcpServers.<id>.callTimeoutSec')).toMatchObject({ writable: true });
-    for (const path of ['voiceGeminiApiKey', 'providers.<id>.apiKey', 'mcpServers.<id>.env']) {
+    for (const path of ['providers.<id>.apiKey', 'mcpServers.<id>.env']) {
       expect(keys.get(path)).toMatchObject({ secret: true, writable: false });
       const key = path.replace('<id>', path.startsWith('providers') ? 'p1' : 'mcp1');
       expect(await config({ action: 'get', key })).toMatchObject({ ok: false, hidden: true });

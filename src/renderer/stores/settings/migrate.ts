@@ -12,7 +12,6 @@ import {
   COMPUTER_DEFAULT_OFF_SETTINGS_VERSION,
   effectiveSubagentAllowedModes,
 } from '@shared/types/builtinTools';
-import { isSpeechModelId } from '@shared/types/speech';
 import { parseWebSearchChain } from '@shared/webSearchChain';
 
 /**
@@ -29,6 +28,18 @@ import { parseWebSearchChain } from '@shared/webSearchChain';
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
 export const SETTINGS_VERSION = 17;
 
+/** 已移除的语音输入字段：旧 settings.json 里还有就忽略，不进 store */
+const REMOVED_VOICE_FIELDS = [
+  'voiceInputEnabled',
+  'voiceInputDevice',
+  'voiceModel',
+  'voiceCorrectionEnabled',
+  'voiceCorrectionModel',
+  'voiceCorrectionRemoteModel',
+  'voiceVocabulary',
+  'voiceGeminiApiKey',
+];
+
 export function mergeSettingsState<T extends { editMode: EditMode; accentColor: AccentColor }>(
   persisted: unknown,
   current: T
@@ -36,7 +47,8 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
   if (!persisted || typeof persisted !== 'object' || Array.isArray(persisted)) return current;
   const source = persisted as Record<string, unknown>;
   // plugins：已移除的 Claude Code 插件条目，旧设置残留时丢弃
-  const { hashlineEditEnabled, bashInterceptEnabled, voiceModel, plugins, ...rest } = source;
+  const { hashlineEditEnabled, bashInterceptEnabled, plugins, ...rest } = source;
+  for (const key of REMOVED_VOICE_FIELDS) delete rest[key];
   const editMode =
     'editMode' in source || 'hashlineEditEnabled' in source
       ? resolveEditMode(source.editMode, hashlineEditEnabled)
@@ -46,8 +58,6 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
     'accentColor' in source ? resolveAccentColor(source.accentColor) : current.accentColor;
   const theme =
     'themeId' in source ? { themeId: parseThemeKey(source.themeId) ?? DEFAULT_THEME_KEY } : {};
-  // 已下架的识别模型（如 enso-asr）保留当前值，与 Main 的回落一致
-  const voice = isSpeechModelId(voiceModel) ? { voiceModel } : {};
   const search =
     'webSearchChain' in source
       ? { webSearchChain: parseWebSearchChain(source.webSearchChain) }
@@ -69,7 +79,6 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
   return {
     ...current,
     ...rest,
-    ...voice,
     ...search,
     ...fileOpening,
     ...contextMenuOpening,
