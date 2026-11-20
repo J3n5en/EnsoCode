@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useI18n } from '@/i18n';
+import { ManualInstallActions } from './ManualInstallActions';
 
 const REMARK_PLUGINS = [remarkGfm];
 // GitHub release 的 releaseNotes 是 HTML，先 raw 解析再按默认白名单清洗
@@ -41,6 +42,8 @@ export function ReleaseNotesDialog({
       <Button size="sm" onClick={() => void window.electronAPI.updater.quitAndInstall()}>
         {t('Restart to update')}
       </Button>
+    ) : status?.status === 'available' && status.manualInstall ? (
+      <ManualInstallActions manualInstall={status.manualInstall} />
     ) : status?.status === 'available' && canDownload ? (
       <Button
         size="sm"

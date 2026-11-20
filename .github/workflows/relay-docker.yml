@@ -1,9 +1,11 @@
 name: Relay Docker
 
+# 预发布 tag（v*-*，如内测 v0.3.13-beta.12）不推镜像
 on:
   push:
     tags:
       - 'v*'
+      - '!v*-*'
   workflow_dispatch:
     inputs:
       latest:

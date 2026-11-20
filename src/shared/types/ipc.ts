@@ -494,6 +494,7 @@ export const IPC_CHANNELS = {
   UPDATER_QUIT_AND_INSTALL: 'updater:quitAndInstall',
   UPDATER_SET_AUTO_UPDATE_ENABLED: 'updater:setAutoUpdateEnabled',
   UPDATER_SET_AUTO_RESTART_WHEN_IDLE: 'updater:setAutoRestartWhenIdle',
+  UPDATER_SET_CHANNEL: 'updater:setChannel',
   UPDATER_STATUS: 'updater:status',
   UPDATER_GET_STATE: 'updater:getState',
   UPDATER_RESTART: 'updater:restart',

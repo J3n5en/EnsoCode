@@ -341,6 +341,7 @@ describe('config CLI socket', () => {
       type: 'unknown',
       requiresRestart: true,
     });
+    expect(keys.get('updateChannel')).toMatchObject({ requiresRestart: true, writable: false });
     expect(reply).toMatchObject({
       blacklist: { readDeniedFields: ['projects', 'projectGroups'] },
       notes: { requiresRestart: { autoUpdate: expect.any(String) } },

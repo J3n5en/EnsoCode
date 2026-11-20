@@ -255,6 +255,12 @@ export const zhTranslations: Record<string, string> = {
     '{{count}} 个会话因应用退出被中断，已在会话里说明原因',
   'Update failed: {{error}}': '更新失败：{{error}}',
   'Download update': '下载更新',
+  "New version {{version}} found. This local build can't install it automatically.":
+    '发现新版本 {{version}}，本地构建无法自动安装，请手动下载。',
+  "This local build is signed differently from the release and can't install updates automatically. Download it manually.":
+    '本地构建与正式版签名不一致，无法自动安装更新，请手动下载。',
+  'Open release page': '打开 Release 页面',
+  'Download DMG': '下载 DMG',
   'Release notes': '更新日志',
   "What's new in {{version}}": '{{version}} 更新内容',
   'No release notes provided.': '此版本未提供更新日志。',
@@ -283,6 +289,14 @@ export const zhTranslations: Record<string, string> = {
   'Automatic updates': '自动更新',
   'Download and install updates automatically': '自动下载并安装更新',
   'Restart and apply when idle': '空闲时重启并应用更新',
+  'Update channel': '更新渠道',
+  Stable: '稳定版',
+  Beta: '内测版',
+  'Only stable releases.': '只接收正式发布的稳定版。',
+  'Beta builds come from the latest main branch and may be unstable. You get whichever of beta and stable is newer.':
+    '内测版由 main 分支最新代码自动构建，可能不稳定；内测版和稳定版里哪个更新就更新到哪个。',
+  "You're on a beta build. Switching to stable doesn't downgrade; you'll move to the next stable release once it's out.":
+    '当前装的是内测版。切回稳定版不会降级，等下一个稳定版发布后自动更新过去。',
   'After the update is downloaded, restart automatically if no agent is running, nothing is queued, and there are no pending questions or approvals. The idle state must last 5 minutes, and a focused window also blocks it.':
     '更新下载完成后，没有 agent 在跑、没有排队消息、也没有待回答/待审批时自动重启。该状态需连续保持 5 分钟；窗口在前台时也会拦住。',
   'Network proxy': '网络代理',

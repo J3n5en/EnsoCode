@@ -61,6 +61,7 @@ import { DEFAULT_THEME_KEY } from '@shared/theme/builtinThemes';
 import type { ThemeKey } from '@shared/theme/types';
 import { DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types';
 import type { AgentMode, SourceAuthorityProjection } from '@shared/types/agent';
+import { DEFAULT_UPDATE_CHANNEL } from '@shared/updater/channel';
 import { parseUsageModelPricing } from '@shared/usage/pricing';
 import {
   findVirtualModel,
@@ -236,6 +237,7 @@ const initialState = {
   botDiscussModeEnabled: false,
   autoUpdate: true,
   autoRestartWhenIdle: false,
+  updateChannel: DEFAULT_UPDATE_CHANNEL,
   pluginAutoUpdate: true,
   proxyMode: 'system' as ProxyMode,
   customProxyUrl: '',
@@ -455,6 +457,7 @@ export const useSettingsStore = create<SettingsState>()(
         }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
       setAutoRestartWhenIdle: (autoRestartWhenIdle) => set({ autoRestartWhenIdle }),
+      setUpdateChannel: (updateChannel) => set({ updateChannel }),
       setPluginAutoUpdate: (pluginAutoUpdate) =>
         set({ pluginAutoUpdate: pluginAutoUpdate !== false }),
       setProxyMode: (proxyMode) => set({ proxyMode: normalizeProxyMode(proxyMode) }),
