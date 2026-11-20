@@ -249,6 +249,26 @@ describe('maybeNotify', () => {
     expect(execFileCalls).toHaveLength(0);
   });
 
+  it('验收实例（ENSO_VERIFY=1、未打包）既不走 osascript 也不弹原生通知', () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    const verify = process.env.ENSO_VERIFY;
+    appState.isPackaged = false;
+    process.env.ENSO_VERIFY = '1';
+    try {
+      for (const value of ['darwin', 'linux']) {
+        Object.defineProperty(process, 'platform', { value });
+        maybeNotify(askEvent(`在吗 ${value}`));
+      }
+    } finally {
+      if (platform) Object.defineProperty(process, 'platform', platform);
+      if (verify === undefined) delete process.env.ENSO_VERIFY;
+      else process.env.ENSO_VERIFY = verify;
+      globalThis.__ensoVerifyNotifications = undefined;
+    }
+    expect(execFileCalls).toHaveLength(0);
+    expect(notifications).toHaveLength(0);
+  });
+
   it('无关事件不弹', () => {
     maybeNotify({
       type: 'status',

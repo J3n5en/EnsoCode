@@ -1,10 +1,10 @@
-import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { shouldMuteCoworkerCompletionNotification } from '@shared/coworkerNotification';
 import { shouldSilenceTurn } from '@shared/secretary/silence';
 import { IPC_CHANNELS } from '@shared/types';
 import type { RendererAgentEvent } from '@shared/types/agent';
-import { app, BrowserWindow, Notification } from 'electron';
+import { app, BrowserWindow, type Notification } from 'electron';
+import { showSystemNotification } from '../desktop/systemNotification';
 import { readSettings } from '../ipc/settings';
 import { getWindowWebContents, sendToWindow } from '../windows/createAppWindow';
 import { ApprovalNotificationGate } from './approvalNotificationGate';
@@ -110,22 +110,9 @@ function notify(
   onClick: () => void = () => void focusSession(sessionId),
   icon?: string
 ): void {
-  // macOS 未打包（未签名）app 的原生通知会被 UNUserNotificationCenter 静默丢弃，
-  // 且 Electron 的 'failed' 事件是 Windows-only 兜不住——直接走 osascript
-  // （无点击跳转，但至少可见；打包签名后走原生路径）
-  if (process.platform === 'darwin' && !app.isPackaged) {
-    const safeBody = body.replace(/[\\"]/g, ' ');
-    const safeTitle = title.replace(/[\\"]/g, ' ');
-    execFile('osascript', ['-e', `display notification "${safeBody}" with title "${safeTitle}"`]);
-    return;
-  }
-  if (!Notification.isSupported()) return;
-  const notification = new Notification({
-    title,
-    body,
-    silent: false,
-    ...(icon ? { icon } : {}),
-  });
+  // 未打包的 mac 走 osascript：无点击跳转，但至少可见（Electron 的 'failed' 事件只在 Windows 上有）
+  const notification = showSystemNotification({ title, body, icon, osascriptWhenUnsigned: true });
+  if (!notification) return;
   const release = () => liveNotifications.delete(notification);
   notification.on('click', () => {
     release();
@@ -136,7 +123,6 @@ function notify(
   if (liveNotifications.size > MAX_LIVE_NOTIFICATIONS) {
     liveNotifications.delete(liveNotifications.values().next().value as Notification);
   }
-  notification.show();
 }
 
 interface NotificationContent {

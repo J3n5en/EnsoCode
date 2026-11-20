@@ -18,6 +18,7 @@ import {
   TRAFFIC_LIGHT_POSITION,
 } from '../../windows/createAppWindow';
 import { focusMainWindow, getMainWindow } from '../../windows/MainWindow';
+import { presentWindow, showWindow } from '../../windows/verifyLaunch';
 import { attachPinnedWorkbenchBoundsSync, pinnedWorkbenchBounds } from '../../windows/win32Restore';
 import { loadNodes } from '../nodeStore';
 import { notifyFromNode, setLocalLayerVisible } from '../notifications';
@@ -171,8 +172,7 @@ export function openNodeSettingsWindow(
   if (!node) return false;
   const existing = windows.get(nodeId);
   if (existing && !existing.isDestroyed()) {
-    if (existing.isMinimized()) existing.restore();
-    existing.focus();
+    presentWindow(existing);
     if (link) sendSettingsLink(nodeId, link);
     return true;
   }
@@ -190,7 +190,7 @@ export function openNodeSettingsWindow(
   windows.set(nodeId, win);
   attachSurface(win.webContents, nodeId, 'settings');
   win.on('page-title-updated', (event) => event.preventDefault());
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => showWindow(win));
   win.on('closed', () => windows.delete(nodeId));
   void win.loadURL(nodeShellUrl(nodeId, 'settings'));
   return true;

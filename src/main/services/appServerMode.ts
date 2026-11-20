@@ -25,6 +25,7 @@ import {
 } from '../windows/createAppWindow';
 import { createMainWindow, getMainWindow, isMainWindowAlive } from '../windows/MainWindow';
 import { getSettingsWindow } from '../windows/SettingsWindow';
+import { isVerifyLaunch, presentWindow } from '../windows/verifyLaunch';
 import { allowAppQuit, destroyWithoutCloseConfirm } from './appCloseConfirm';
 import { browserHost } from './browserHost';
 import { closeNodeSettingsWindows } from './nodeRemote';
@@ -213,14 +214,10 @@ export function leaveServerMode(): void {
   active = false;
   setPairHeadless(false);
   flushSettings();
-  app.dock?.show();
+  if (!isVerifyLaunch()) app.dock?.show();
   if (!isMainWindowAlive()) createMainWindow();
   const win = getMainWindow();
-  if (win && !win.isDestroyed()) {
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-  }
+  if (win && !win.isDestroyed()) presentWindow(win);
   ensureTray();
 }
 

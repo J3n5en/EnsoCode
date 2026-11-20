@@ -335,9 +335,18 @@ describe('newSecretaryConversation', () => {
     expect(conversationId).toBe('conv-1');
   });
 
-  it('没有可用模型时不建会话，也不发消息', async () => {
+  it('没有默认模型时照常新建会话（和普通新对话一样到输入框里选模型），不发消息', async () => {
     useSecretaryStore.setState({ secretary: withProfile() });
-    await expect(useSecretaryStore.getState().newSecretaryConversation()).resolves.toBeNull();
+    await expect(useSecretaryStore.getState().newSecretaryConversation()).resolves.toBe('conv-1');
+    expect(sessions.newConversation).toHaveBeenCalledWith('sec-project');
+    expect(sessions.send).not.toHaveBeenCalled();
+  });
+
+  it('要引导语但没有可用模型时不建会话，也不发消息', async () => {
+    useSecretaryStore.setState({ secretary: withProfile() });
+    await expect(
+      useSecretaryStore.getState().newSecretaryConversation({ greeting: true })
+    ).resolves.toBeNull();
     expect(sessions.newConversation).not.toHaveBeenCalled();
     expect(sessions.send).not.toHaveBeenCalled();
   });

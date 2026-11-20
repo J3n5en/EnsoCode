@@ -1,14 +1,14 @@
 import type { BrowserWindow } from 'electron';
 import { isRemoteSettingsSender } from '../services/remoteRenderer/senders';
 import { createAppWindow } from './createAppWindow';
+import { presentWindow } from './verifyLaunch';
 
 let settingsWindow: BrowserWindow | null = null;
 
 /** 设置窗口单例：已打开则聚焦，否则创建独立窗口 */
 export function openSettingsWindow(): BrowserWindow {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
-    if (settingsWindow.isMinimized()) settingsWindow.restore();
-    settingsWindow.focus();
+    presentWindow(settingsWindow);
     return settingsWindow;
   }
 

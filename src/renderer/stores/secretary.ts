@@ -256,12 +256,13 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
     const settings = useSettingsStore.getState();
     const project = settings.projects.find((entry) => entry.id === projectId);
     if (!project) return null;
-    const model = resolveDefaultModel(projectId);
-    if (!model) return null;
+    // 只有引导语要用模型发出去；普通新建和普通新对话一样，没有默认模型就到输入框里选
+    const model = options?.greeting ? resolveDefaultModel(projectId) : null;
+    if (options?.greeting && !model) return null;
     const sessions = useSessionsStore.getState();
     const id = await sessions.newConversation(projectId);
     if (!id) return null;
-    if (options?.greeting) {
+    if (model) {
       const locale = normalizeLocale(useSettingsStore.getState().language);
       await sessions.send(
         translate(locale, SETUP_GREETING),

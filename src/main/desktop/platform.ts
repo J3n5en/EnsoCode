@@ -20,6 +20,7 @@ import {
 import agentWorkerPath from '../../agent/index?modulePath';
 import pluginHostPath from '../../pluginHost/index?modulePath';
 import type { DecodedImage, ProcessMetric } from '../platform/types';
+import { showSystemNotification } from './systemNotification';
 
 export const hostKind = 'desktop' as const;
 export const resourcesPath = process.resourcesPath;
@@ -50,12 +51,8 @@ export const clipboard = {
 
 export const notification = {
   isSupported: () => Notification.isSupported(),
-  show: (options: { title: string; body: string }) => {
-    if (!Notification.isSupported()) return null;
-    const created = new Notification({ title: options.title, body: options.body, silent: false });
-    created.show();
-    return created;
-  },
+  show: (options: { title: string; body: string }) =>
+    showSystemNotification({ title: options.title, body: options.body }),
 };
 
 export const images = {
