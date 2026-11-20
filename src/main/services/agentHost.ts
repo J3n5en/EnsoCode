@@ -130,7 +130,6 @@ import {
 } from './agentWorkerExit';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools, withoutKeepEnabled } from './builtinToolScopes';
-import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { dcgRoot, installedDcgPath } from './dcgBinary';
 import { ensureElevationServer } from './elevation';
@@ -154,7 +153,6 @@ import {
 } from './oauthProviders';
 import { PendingReloadRegistry } from './pendingReloads';
 import {
-  enabledPlugins,
   type NativePluginAgentDef,
   type RuntimeAgentType,
   withPluginAgentTypes,
@@ -676,8 +674,7 @@ export function agentTypeRegistrySnapshot(): AgentTypeRegistrySnapshot {
     ? state.disabledBuiltinAgentTypes.filter((name): name is string => typeof name === 'string')
     : [];
   const customAgentTypes = withPluginAgentTypes(
-    Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
-    state
+    Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : []
   );
   return buildAgentTypeRegistrySnapshot({
     revision: settingsRevision(state),
@@ -908,8 +905,7 @@ export function resolveAgentTypeSpawnConfig(
   } else {
     const id = typeKey.slice('custom:'.length);
     definition = withPluginAgentTypes(
-      Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
-      state
+      Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : []
     ).find((entry) => entry.id === id);
   }
   if (!definition || isReservedAgentTypeName(definition.name)) {
@@ -1095,15 +1091,10 @@ export function spawnSession(
           resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined)
         );
   const state = readSettingsState();
-  // Claude 插件：按各自开关现读安装目录，不受预设影响
-  const plugins = secretary
-    ? { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] }
-    : enabledPlugins(state);
-  // Enso 插件：顺序在预设、Claude 插件之后；Bot 会话不合并
+  // Enso 插件：顺序在预设之后；Bot 会话不合并
   const activePluginPreset = pluginPreset ? overlay?.pluginPresetId : undefined;
   const skillPaths = [
     ...enabledSkillPaths(preset),
-    ...(bot || secretary ? [] : plugins.skillPaths),
     ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset, secretaryPluginIds) ?? []),
     ...secretarySkillPaths(secretary),
   ];
@@ -1113,16 +1104,13 @@ export function spawnSession(
     : (extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? []);
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
-  for (const server of [
-    ...(bot || secretary ? [] : plugins.mcpServers),
-    ...(secretary ? [] : (extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? [])),
-  ]) {
+  for (const server of secretary
+    ? []
+    : (extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? [])) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);
   }
   const pluginTools = extensionPlugins?.toolsForSpawn(secretaryPluginIds) ?? [];
-  // hooks 在本机起进程，远程会话的 cwd 不在本机
-  const pluginHooks = remote || secretary ? [] : plugins.hooks;
   const subagentModels =
     options?.omitDispatchTools || secretary
       ? []
@@ -1133,7 +1121,6 @@ export function spawnSession(
       : configuredAgentTypes(
           authenticatedAccountKeys,
           subagentModels.length > 0,
-          plugins,
           // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
           bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
         );
@@ -1219,8 +1206,6 @@ export function spawnSession(
     memoryLanguage,
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
-    ...(plugins.commands.length > 0 ? { pluginCommands: plugins.commands } : {}),
-    ...(pluginHooks.length > 0 ? { pluginHooks } : {}),
     ...(pluginTools.length > 0 ? { pluginTools } : {}),
     ...(secretary?.tools?.length ? { secretaryTools: [...secretary.tools] } : {}),
     ...(workflowPresetFiles.length > 0 ? { workflowPresetFiles } : {}),
@@ -1299,12 +1284,11 @@ export function pluginPresetInstruction<T>(
   return own ?? global();
 }
 
-/** spawn 前斜杠菜单要预览的插件 skill 路径，与 spawn 同口径：Claude 插件在前，Enso 插件按生效的插件预设圈定 */
+/** spawn 前斜杠菜单要预览的插件 skill 路径，与 spawn 同口径：Enso 插件按生效的插件预设圈定 */
 export function pluginSkillPathsForMenu(
   presetId: string | undefined,
   deps: {
     resolve: (id?: string) => Preset | undefined;
-    claude: readonly string[];
     extension: {
       presetForSpawn(id?: string): { ok: boolean } | undefined;
       skillPathsForSpawn(activePresetId?: string): string[];
@@ -1312,7 +1296,7 @@ export function pluginSkillPathsForMenu(
   }
 ): string[] {
   const active = activePluginPresetForMenu(presetId, deps.resolve, deps.extension);
-  return [...deps.claude, ...(deps.extension?.skillPathsForSpawn(active) ?? [])];
+  return deps.extension?.skillPathsForSpawn(active) ?? [];
 }
 
 function activePluginPresetForMenu(
@@ -1327,7 +1311,6 @@ function activePluginPresetForMenu(
 export function menuPluginSkillPaths(presetId: string | undefined): string[] {
   return pluginSkillPathsForMenu(presetId, {
     resolve: resolvePreset,
-    claude: enabledPlugins(readSettingsState()).skillPaths,
     extension: getExtensionPlugins(),
   });
 }
@@ -2202,7 +2185,6 @@ export function requestSnapshot(sessionId?: string): { ok: boolean; error?: stri
 export function configuredAgentTypes(
   authenticatedAccountKeys: ReadonlySet<string>,
   hasSubagentModels = false,
-  plugins?: ResolvedPlugins,
   nativePluginAgents?: readonly NativePluginAgentDef[]
 ): AgentTypeSpawnConfig[] {
   const state = readSettingsState();
@@ -2213,8 +2195,6 @@ export function configuredAgentTypes(
   );
   const custom = withPluginAgentTypes(
     Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
-    state,
-    plugins,
     nativePluginAgents
   );
   // 与 registry 同口径（trim + 小写）：同名 custom 覆盖 builtin

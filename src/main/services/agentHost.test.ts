@@ -691,7 +691,6 @@ describe('agentHost 成员 agent type', () => {
 
   it('原生插件的子代理类型进入 registry 与 worker 列表；显式传空（Bot 会话）时不下发', () => {
     setSettings();
-    const noClaude = { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] };
     setNativeAgentTypeSource({
       list: () => [
         {
@@ -708,7 +707,7 @@ describe('agentHost 成员 agent type', () => {
       expect(
         agentTypeRegistrySnapshot().candidates.some((c) => c.displayName === 'demo:reviewer')
       ).toBe(true);
-      const native = configuredAgentTypes(new Set(), false, noClaude).find(
+      const native = configuredAgentTypes(new Set(), false).find(
         (entry) => entry.name === 'demo:reviewer'
       );
       expect(native).toMatchObject({
@@ -719,9 +718,7 @@ describe('agentHost 成员 agent type', () => {
         skillPaths: ['/plugins/example.demo/skills/review'],
       });
       expect(
-        configuredAgentTypes(new Set(), false, noClaude, []).some(
-          (entry) => entry.name === 'demo:reviewer'
-        )
+        configuredAgentTypes(new Set(), false, []).some((entry) => entry.name === 'demo:reviewer')
       ).toBe(false);
     } finally {
       setNativeAgentTypeSource(null);
@@ -730,7 +727,6 @@ describe('agentHost 成员 agent type', () => {
 
   it('原生插件类型声明 agent_pick：配置了子代理模型才允许选模型，否则跟随会话', () => {
     setSettings();
-    const noClaude = { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] };
     const picker = [
       {
         pluginId: 'example.demo',
@@ -743,7 +739,7 @@ describe('agentHost 成员 agent type', () => {
       },
     ];
     const find = (hasModels: boolean) =>
-      configuredAgentTypes(new Set(), hasModels, noClaude, picker).find(
+      configuredAgentTypes(new Set(), hasModels, picker).find(
         (entry) => entry.name === 'demo:picker'
       );
     expect(find(true)?.allowModelOverride).toBe(true);

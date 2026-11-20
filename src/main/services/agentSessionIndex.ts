@@ -718,8 +718,7 @@ export class AgentSessionIndex {
       ? state.disabledBuiltinAgentTypes.filter((name): name is string => typeof name === 'string')
       : [];
     const customAgentTypes = withPluginAgentTypes(
-      Array.isArray(state.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
-      state
+      Array.isArray(state.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : []
     );
     const snapshot = buildAgentTypeRegistrySnapshot({
       revision: 0,

@@ -36,7 +36,7 @@ export const SETTINGS_GROUPS: readonly {
   {
     id: 'extensions',
     label: 'Tools & extensions',
-    categories: ['tools', 'workflows', 'skills', 'mcp', 'plugins', 'claudePlugins'],
+    categories: ['tools', 'workflows', 'skills', 'mcp', 'plugins'],
   },
   {
     id: 'connections',

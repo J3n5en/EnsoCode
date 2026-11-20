@@ -1214,11 +1214,9 @@ export class ExtensionPluginService {
           const by =
             drop.shadowedBy === 'custom'
               ? '用户自定义类型'
-              : drop.shadowedBy === 'claude'
-                ? 'Claude 插件'
-                : drop.shadowedBy === 'native'
-                  ? '排序更前的 Enso 插件'
-                  : '内置类型或保留名';
+              : drop.shadowedBy === 'native'
+                ? '排序更前的 Enso 插件'
+                : '内置类型或保留名';
           this.warnAgentTypeOnce(drop.pluginId, `子代理类型 ${drop.name} 与${by}同名，已被忽略`);
         }
       },

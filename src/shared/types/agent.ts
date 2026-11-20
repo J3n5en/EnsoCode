@@ -125,12 +125,6 @@ import {
   type ModelThinkingLevelOverride,
 } from './llm';
 import { type AgentDispatchTask, parseAgentDispatchTask } from './mentions';
-import {
-  type PluginCommandSpawn,
-  type PluginHookSpawn,
-  parsePluginCommands,
-  parsePluginHooks,
-} from './plugins';
 import type { SecretaryToolDescriptor } from './secretary';
 import { isWorkflowPresetId, parseWorkflowRunSnapshot, type WorkflowRunSnapshot } from './workflow';
 
@@ -910,7 +904,7 @@ export interface McpServerSpawnConfig {
   args?: string[];
   env?: Record<string, string>;
   url?: string;
-  /** http/sse 请求头（Claude 插件 .mcp.json 用它传 key） */
+  /** http/sse 请求头 */
   headers?: Record<string, string>;
   /** 已授权的 OAuth 凭据（http/sse 远程 server） */
   oauth?: McpOAuthAccess;
@@ -1288,10 +1282,6 @@ export type AgentCommand =
       memoryLanguage?: string;
       skillPaths?: string[];
       mcpServers?: McpServerSpawnConfig[];
-      /** 已启用 Claude 插件的命令（作为 `/plugin:command` 提示词模板） */
-      pluginCommands?: PluginCommandSpawn[];
-      /** 已启用 Claude 插件的 command hooks；远程会话不下发 */
-      pluginHooks?: PluginHookSpawn[];
       /** 已启用 Enso 插件的 agent 工具；执行经 plugin-tool-invoke 回到 Main */
       pluginTools?: PluginToolDescriptor[];
       /** 秘书自造工具；名字、描述与参数结构由 Main 下发，执行经 secretary-invoke 回到 Main */
@@ -3741,12 +3731,10 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
           'memoryLanguage',
           'skillPaths',
           'mcpServers',
-          'pluginCommands',
           'pluginTools',
           'secretaryTools',
           'workflowPresetFiles',
           'pluginEvents',
-          'pluginHooks',
           'instruction',
           'approvalMode',
           'autoRejectApprovals',
@@ -3791,8 +3779,6 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
               (entry) => typeof entry === 'string' && entry.length > 0 && entry.length <= 1024
             )
           )) ||
-        (value.pluginCommands !== undefined &&
-          parsePluginCommands(value.pluginCommands) === null) ||
         (value.pluginTools !== undefined && !isPluginToolList(value.pluginTools)) ||
         (value.secretaryTools !== undefined &&
           parseSecretaryToolDescriptors(value.secretaryTools) === null) ||
@@ -3805,7 +3791,6 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
             )
           )) ||
         (value.pluginEvents !== undefined && !isPluginEventPlan(value.pluginEvents)) ||
-        (value.pluginHooks !== undefined && parsePluginHooks(value.pluginHooks) === null) ||
         (value.rtkEnabled !== undefined && typeof value.rtkEnabled !== 'boolean') ||
         (value.dcgPath !== undefined && !isNonEmptyString(value.dcgPath)) ||
         (value.planMode !== undefined && typeof value.planMode !== 'boolean') ||

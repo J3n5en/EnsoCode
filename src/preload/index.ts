@@ -108,7 +108,6 @@ import type {
   GitRequest,
   GitStatusResult,
   HostDirListing,
-  InstalledPluginInfo,
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
@@ -806,8 +805,6 @@ const electronAPI = {
   assets: {
     scanLocal: (): Promise<LocalAssetScanResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_SCAN_LOCAL),
-    listInstalledPlugins: (): Promise<InstalledPluginInfo[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.PLUGINS_LIST_INSTALLED),
     collectImport: (scanId: string, candidateIds: string[]): Promise<CollectedAsset[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_COLLECT_IMPORT, scanId, candidateIds),
     /** cwd 为空只列插件 skill；presetId 决定哪些插件预设圈定的 skill 计入 */

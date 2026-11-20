@@ -1,7 +1,6 @@
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import {
   BarChart3,
-  Blocks,
   Bot,
   BotMessageSquare,
   Brain,
@@ -50,7 +49,7 @@ import { McpSettings } from './McpSettings';
 import { MemoryKnowledge } from './MemoryKnowledge';
 import { MemoryLibrary } from './MemoryLibrary';
 import { MemorySettings } from './MemorySettings';
-import { ClaudePluginsSettings, EnsoPluginsSettings } from './PluginsSettings';
+import { EnsoPluginsSettings } from './PluginsSettings';
 import { PresetsSettings } from './PresetsSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { ProvidersSettings } from './ProvidersSettings';
@@ -169,7 +168,6 @@ export function SettingsContent() {
     { id: 'privacy', icon: Shield, label: 'Privacy' },
     { id: 'skills', icon: Sparkles, label: 'Skills' },
     { id: 'plugins', icon: Puzzle, label: 'Enso plugins' },
-    { id: 'claudePlugins', icon: Blocks, label: 'Claude Code plugins' },
     { id: 'mcp', icon: Plug, label: 'MCP Servers' },
     { id: 'instructions', icon: FileText, label: 'Instruction Files' },
     { id: 'phone', icon: Smartphone, label: 'Devices' },
@@ -337,7 +335,6 @@ export function SettingsContent() {
                 onRequestedMarketQueryConsumed={() => setMarketQuery(null)}
               />
             )}
-            {activeCategory === 'claudePlugins' && <ClaudePluginsSettings />}
             {activeCategory === 'mcp' && <McpSettings />}
             {activeCategory === 'instructions' && <InstructionsSettings />}
             {activeCategory === 'presets' && <PresetsSettings />}

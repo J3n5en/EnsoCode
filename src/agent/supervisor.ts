@@ -25,14 +25,11 @@ import {
   createGrepToolDefinition,
   createLsToolDefinition,
   createReadToolDefinition,
-  createSyntheticSourceInfo,
   createWriteToolDefinition,
   DefaultResourceLoader,
   type InlineExtension,
   ModelRuntime,
   type PromptOptions,
-  type PromptTemplate,
-  type ResourceDiagnostic,
   SessionManager,
   type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
@@ -127,7 +124,6 @@ import { parseAgentSessionCustomEntry, STALE_SESSION_ERROR } from '@shared/types
 import { type EditMode, resolveEditMode } from '@shared/types/editMode';
 import type { ModelEntry } from '@shared/types/llm';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
-import type { PluginCommandSpawn, PluginHookSpawn } from '@shared/types/plugins';
 import type { SecretaryToolDescriptor } from '@shared/types/secretary';
 import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
@@ -182,7 +178,6 @@ import {
   pickChildReasoningOverride,
   resolveChildReasoning,
 } from './childReasoning';
-import { createClaudeHooksExtension } from './claudeHooks';
 import {
   CODEMODE_FORBIDDEN_TOOLS,
   CODEMODE_TOOL_NAME,
@@ -648,14 +643,6 @@ function createSessionResourceLoader(options: {
   loadHarnessAssets?: boolean;
   /** 用户已信任的项目代码来源；未全部信任时不加载项目扩展与包 */
   trustedProjectCode?: readonly string[];
-  /** Claude 插件命令：作为 `/plugin:command` 提示词模板加入 */
-  pluginCommands?: readonly PluginCommandSpawn[];
-  /** Claude 插件 hooks 及其运行角色 */
-  pluginHooks?: {
-    hooks: readonly PluginHookSpawn[];
-    role: Parameters<typeof createClaudeHooksExtension>[0]['role'];
-    resumed?: boolean;
-  };
   pluginEvents?: { invoker: PluginEventInvoker };
   exploreFold?: ReturnType<typeof createExploreFoldState>;
   /** 主会话：允许丢弃插件自动投递触发的无关轮次 */
@@ -685,8 +672,6 @@ function createSessionResourceLoader(options: {
     ? [...options.skillPaths, ...resolveHarnessSkillRoots(options.cwd)]
     : options.skillPaths;
   const persona = options.persona;
-  const pluginCommands = options.pluginCommands ?? [];
-  const pluginHooks = options.pluginHooks;
   const loader: DefaultResourceLoader = new DefaultResourceLoader({
     cwd: options.cwd,
     agentDir: options.agentDir,
@@ -698,9 +683,6 @@ function createSessionResourceLoader(options: {
     noSkills: options.noSkills,
     ...(options.noExtensions ? { noExtensions: true } : {}),
     ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
-    ...(pluginCommands.length > 0
-      ? { promptsOverride: (base) => withPluginPrompts(base, pluginCommands) }
-      : {}),
     // noExtensions 只挡磁盘上的项目/全局扩展；inline factory 不受影响，图片修剪对所有会话生效
     extensionFactories: [
       ...(options.codemode ? [options.codemode] : []),
@@ -765,17 +747,6 @@ function createSessionResourceLoader(options: {
               ),
             ]
           : []),
-      ...(pluginHooks && pluginHooks.hooks.length > 0
-        ? [
-            createClaudeHooksExtension({
-              hooks: pluginHooks.hooks,
-              cwd: options.cwd,
-              role: pluginHooks.role,
-              resumed: pluginHooks.resumed,
-              onNotice: (text) => console.warn(`[claude-hooks] ${text}`),
-            }),
-          ]
-        : []),
       ...(options.pluginEvents ? [createPluginEventsExtension(options.pluginEvents.invoker)] : []),
       skillChainExtension(() => loader.getSkills().skills),
       options.silentTurnRecovery,
@@ -808,7 +779,7 @@ function createSessionResourceLoader(options: {
   return loader;
 }
 
-/** Enso 不走 pi 的会话切换流程，session_shutdown 要自己发（Claude 插件的 SessionEnd hook 靠它） */
+/** Enso 不走 pi 的会话切换流程，session_shutdown 要自己发 */
 async function emitSessionShutdown(session: AgentSession): Promise<void> {
   try {
     const runner = session.extensionRunner;
@@ -828,27 +799,6 @@ async function emitPluginSessionStart(
       await runner.emit({ type: 'session_start', reason });
     }
   } catch {}
-}
-
-/** 插件命令追加为提示词模板；与已有模板同名时让位 */
-function withPluginPrompts(
-  base: { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] },
-  commands: readonly PluginCommandSpawn[]
-): { prompts: PromptTemplate[]; diagnostics: ResourceDiagnostic[] } {
-  const names = new Set(base.prompts.map((prompt) => prompt.name));
-  const extra = commands
-    .filter((command) => !names.has(command.name))
-    .map(
-      (command): PromptTemplate => ({
-        name: command.name,
-        description: command.description,
-        ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
-        content: command.content,
-        filePath: command.filePath,
-        sourceInfo: createSyntheticSourceInfo(command.filePath, { source: 'claude-plugin' }),
-      })
-    );
-  return { prompts: [...base.prompts, ...extra], diagnostics: base.diagnostics };
 }
 
 /**
@@ -1779,8 +1729,6 @@ export class SessionSupervisor {
           command.rtkEnabled,
           command.planMode,
           command.trustedProjectCode,
-          command.pluginCommands,
-          command.pluginHooks,
           command.botMode,
           command.botGroupTasks,
           command.protectedActions,
@@ -2429,8 +2377,6 @@ export class SessionSupervisor {
     rtkEnabled = true,
     planMode?: boolean,
     trustedProjectCode: readonly string[] = [],
-    pluginCommands: readonly PluginCommandSpawn[] = [],
-    pluginHooks: readonly PluginHookSpawn[] = [],
     botMode = false,
     botGroupTasks = false,
     protectedActions = false,
@@ -2557,8 +2503,6 @@ export class SessionSupervisor {
       ...(remote ? { remoteSsh: { host: remote.host } } : {}),
       loadHarnessAssets,
       trustedProjectCode,
-      pluginCommands,
-      pluginHooks: { hooks: pluginHooks, role: { kind: 'parent' }, resumed: Boolean(resumeFile) },
       ...(pluginEventInvoker ? { pluginEvents: { invoker: pluginEventInvoker } } : {}),
       exploreFold,
       turnDiscard,
@@ -2938,14 +2882,6 @@ export class SessionSupervisor {
           // 类型化子代理与项目资源隔离（同 noSkills/noExtensions），不追加 harness 资源
           loadHarnessAssets: resolved || agentType ? false : loadHarnessAssets,
           trustedProjectCode,
-          pluginHooks: {
-            hooks: pluginHooks,
-            role: {
-              kind: 'subagent',
-              agentType: resolved?.displayName ?? agentType?.name ?? 'general',
-            },
-            resumed: Boolean(childResume),
-          },
           ...(childPlugins?.events ? { pluginEvents: { invoker: childPlugins.events } } : {}),
           ...(childExploreFold ? { exploreFold: childExploreFold } : {}),
           reminders: childReminders,

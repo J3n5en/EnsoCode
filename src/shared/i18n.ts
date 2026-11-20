@@ -1977,10 +1977,8 @@ export const zhTranslations: Record<string, string> = {
   'This project ships pi extension code that runs with your permissions. It was not loaded. Trust it only if you trust this repository.':
     '此项目带有 pi 扩展代码，会以你的权限运行，已阻止加载。只有信任这个仓库时才加载。',
   'Trust and load': '信任并加载',
-  Plugins: '插件',
   Plugin: '插件',
   'Enso plugins': 'Enso 插件',
-  'Claude Code plugins': 'Claude Code 插件',
   'No Enso plugins installed': '还没有安装 Enso 插件',
   'Browse the marketplace or install from a GitHub URL, folder or zip.':
     '可以从插件市场浏览，或通过 GitHub 地址、文件夹、zip 安装。',
@@ -2029,17 +2027,6 @@ export const zhTranslations: Record<string, string> = {
   Update: '更新',
   'Update check failed: {{reason}}': '检查更新失败：{{reason}}',
   Commands: '命令',
-  '{{count}} enabled': '已启用 {{count}} 个',
-  'No supported components': '没有可用组件',
-  'MCP servers (run when a session starts)': 'MCP 服务器（会话启动时运行）',
-  'Hooks (run automatically on local sessions)': 'Hooks（本地会话中自动运行）',
-  'Not supported': '暂不支持',
-  'Plugins installed in Claude Code. Each one is switched on or off as a whole here; changes apply to new sessions.':
-    'Claude Code 里已安装的插件，在这里按整包开关，新会话生效。',
-  'No Claude Code plugins found': '没有找到 Claude Code 插件',
-  'Install plugins with /plugin in Claude Code, then rescan.':
-    '在 Claude Code 里用 /plugin 安装插件后重新扫描。',
-  'No longer installed in Claude Code': 'Claude Code 中已卸载',
   'Project extensions trusted. They load in new sessions and after this one restarts.':
     '已信任项目扩展，新会话和本会话重新启动后加载。',
   'Trusted project extensions': '已信任的项目扩展',

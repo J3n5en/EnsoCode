@@ -78,8 +78,6 @@ it('秘书 spawn-parent 不带插件、技能、MCP、hooks、命令与子代理
   expect(command.instruction).toBeUndefined();
   expect(command.pluginTools).toBeUndefined();
   expect(command.pluginEvents).toBeUndefined();
-  expect(command.pluginCommands).toBeUndefined();
-  expect(command.pluginHooks).toBeUndefined();
   expect(command.skillPaths).toBeUndefined();
   expect(command.mcpServers).toBeUndefined();
   expect(command.agentTypes).toBeUndefined();
