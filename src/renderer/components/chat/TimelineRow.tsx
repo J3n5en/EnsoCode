@@ -151,6 +151,7 @@ import { parseSubagentReceipt } from './subagentReceipt';
 import { TerminalOutput } from './TerminalOutput';
 import { TodoList, TodoProgress } from './TodoBar';
 import { ToolCallCards } from './ToolCallCard';
+import { ImageViewResult } from './ToolImagePreview';
 import { TurnWaterfallPanel, useTurnHasTiming } from './TurnWaterfallPanel';
 import { useToolHold } from './toolHold';
 import { ZoomableImage } from './ZoomableImage';
@@ -163,6 +164,28 @@ const perfEqual = (a?: TurnPerf, b?: TurnPerf): boolean =>
     a.turnMs === b.turnMs &&
     a.ttftMs === b.ttftMs &&
     a.tps === b.tps);
+
+type CardPeers = Extract<TimelineItem, { kind: 'tool' }>['cardPeers'];
+
+/** 卡片后续调用逐条比较；图片按 base64 判等，不进 JSON.stringify */
+function cardPeersEqual(a: CardPeers, b: CardPeers): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  return (
+    left.length === right.length &&
+    left.every((peer, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        peer.key === other.key &&
+        peer.state === other.state &&
+        peer.output === other.output &&
+        peer.image?.data === other.image?.data &&
+        JSON.stringify(peer.args ?? null) === JSON.stringify(other.args ?? null)
+      );
+    })
+  );
+}
 
 interface TimelineRowProps {
   item: TimelineItem;
@@ -227,6 +250,8 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.writeContent === b.writeContent &&
         a.fileChanges === b.fileChanges &&
         a.imagePath === b.imagePath &&
+        a.image?.data === b.image?.data &&
+        a.image?.mimeType === b.image?.mimeType &&
         a.generatedImages === b.generatedImages &&
         a.todos === b.todos &&
         a.durationMs === b.durationMs &&
@@ -251,7 +276,7 @@ function itemEqual(prev: TimelineRowProps, next: TimelineRowProps): boolean {
         a.pluginArtifacts === b.pluginArtifacts &&
         a.shellFailure === b.shellFailure &&
         JSON.stringify(a.args ?? null) === JSON.stringify(b.args ?? null) &&
-        JSON.stringify(a.cardPeers ?? null) === JSON.stringify(b.cardPeers ?? null)
+        cardPeersEqual(a.cardPeers, b.cardPeers)
       );
     case 'tool-group':
       return (
@@ -2816,6 +2841,8 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
                   path={item.imagePath}
                   fallback={<ReadFileView path={item.summary} contents={item.output ?? ''} />}
                 />
+              ) : item.name === 'image_view' && item.state === 'ok' ? (
+                <ImageViewResult image={item.image} output={item.output} />
               ) : item.name === 'read' ? (
                 <ReadFileView path={item.summary} contents={item.output ?? ''} />
               ) : item.name === 'subagent' &&

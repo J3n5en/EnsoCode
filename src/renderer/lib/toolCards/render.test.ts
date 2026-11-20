@@ -814,20 +814,47 @@ describe('只读核实卡片', () => {
 describe('看图与清理卡片', () => {
   it('image_view 显示文件名、缩略图与尺寸', () => {
     // 带 path 参数的工具结果会被追加一行 <source_reference>，卡片只解析第一行 JSON
+    const image = { data: 'iVBORw0KGgo=', mimeType: 'image/png' };
     const card = renderToolCall(
-      call(
-        'image_view',
-        { path: '/tmp/shot.png' },
-        `${JSON.stringify({ path: '/tmp/shot.png', size: 2048, width: 1280, height: 720, mimeType: 'image/png' })}\n<source_reference type="file" path="/tmp/shot.png" />`
-      ),
+      {
+        ...call(
+          'image_view',
+          { path: '/tmp/shot.png' },
+          `${JSON.stringify({ path: '/tmp/shot.png', size: 2048, width: 1280, height: 720, mimeType: 'image/png' })}\n<source_reference type="file" path="/tmp/shot.png" />`
+        ),
+        image,
+      },
       ctx('zh')
     );
     expect(card.title).toBe('查看 shot.png');
-    const image = card.blocks.find((block) => block.kind === 'image');
-    expect(image).toMatchObject({ src: 'local-image://posix/tmp/shot.png', alt: 'shot.png' });
+    const block = card.blocks.find((entry) => entry.kind === 'image');
+    expect(block).toMatchObject({ path: '/tmp/shot.png', alt: 'shot.png' });
+    // 图片字节按引用交给缩略图，不在这里拼 data URL
+    expect(block && block.kind === 'image' ? block.image : null).toBe(image);
     const text = cardPlainText(card);
+    expect(text).toContain('/tmp/shot.png');
     expect(text).toContain('1280 × 720');
     expect(text).toContain('2 KB');
+  });
+
+  it('image_view 结果里没有图片字节时，只留工具回报的路径，不认参数里的路径', () => {
+    const card = renderToolCall(
+      call(
+        'image_view',
+        { path: '/tmp/../tmp/shot.png' },
+        JSON.stringify({ path: '/private/tmp/shot.png', size: 10, width: 1, height: 1 })
+      ),
+      ctx('zh')
+    );
+    const block = card.blocks.find((entry) => entry.kind === 'image');
+    expect(block).toMatchObject({ path: '/private/tmp/shot.png' });
+    expect(block && block.kind === 'image' ? block.image : 'x').toBeUndefined();
+
+    const unparsed = renderToolCall(
+      call('image_view', { path: '/tmp/shot.png' }, 'opened'),
+      ctx('zh')
+    );
+    expect(unparsed.blocks.some((entry) => entry.kind === 'image')).toBe(false);
   });
 
   it('image_view 被拒时只显示原因，不显示缩略图', () => {

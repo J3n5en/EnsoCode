@@ -99,6 +99,16 @@ describe('packReads / unpackReads', () => {
     expect(restored.get('c')).toEqual(entry(20));
   });
 
+  it('放不下的大条目跳过，继续保留更早的小条目（会话列表不该被几个大资源挤掉）', () => {
+    const reads = new Map([
+      ['conversations', entry(30)],
+      ['theme', entry(80)],
+      ['settings', entry(20)],
+    ]);
+    const restored = unpackReads(packReads(reads, 80));
+    expect([...restored.keys()]).toEqual(['conversations', 'settings']);
+  });
+
   it('ignores malformed input', () => {
     expect(unpackReads('nope').size).toBe(0);
     expect(

@@ -704,6 +704,67 @@ describe('PairClient 缓存与续传', () => {
     expect(next.sent.filter((item) => item.type === 'direct-offer')).not.toHaveLength(0);
   });
 
+  it('直连还通时换中继 socket 不报连接中：上层请求照常经直连发出', async () => {
+    client.close();
+    const live = liveDirectPeer();
+    client = new PairClient(device, events, () => live.peer, cache);
+    const socket = await start();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+    socket.receive({ type: 'host-info', capabilities: ['direct-v1'], iceServers: [] });
+    await settle();
+    live.fireOpen();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(client.transport()).toBe('direct');
+    vi.mocked(events.onState).mockClear();
+
+    client.conceal();
+    await vi.advanceTimersByTimeAsync(2_000);
+    client.nudge('visibility');
+    await settle();
+    expect(Socket.all).toHaveLength(2);
+    expect(events.onState).not.toHaveBeenCalledWith('connecting');
+
+    // 新中继进房后也不拆还活着的直连重协商
+    const next = Socket.all[1];
+    next.open();
+    next.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+    await settle();
+    live.fireMessage(new Uint8Array([0x03]));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(next.sent.some((item) => item.type === 'direct-close')).toBe(false);
+    expect(next.sent.some((item) => item.type === 'direct-offer')).toBe(false);
+    expect(client.transport()).toBe('direct');
+  });
+
+  it('host 重新进房后、收到它新一轮帧之前的命令走中继：直连上的会先于进房通知到达而被锁定的 host 丢掉', async () => {
+    client.close();
+    const directSent: Uint8Array[] = [];
+    const live = liveDirectPeer((bytes) => directSent.push(bytes));
+    client = new PairClient(device, events, () => live.peer, cache);
+    const socket = await start();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+    socket.receive({ type: 'host-info', capabilities: ['direct-v1'], iceServers: [] });
+    await settle();
+    live.fireOpen();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(client.transport()).toBe('direct');
+
+    socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
+    await settle();
+    const before = directSent.length;
+    client.send({ type: 'prompt', sessionId: 's', text: 'early' });
+    await settle();
+    expect(directSent.length).toBe(before);
+    expect(socket.sent.some((item) => item.type === 'prompt')).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    client.send({ type: 'prompt', sessionId: 's', text: 'later' });
+    await settle();
+    expect(directSent.length).toBeGreaterThan(before);
+  });
+
   it('直连 RTT 明显差于中继时发 probe 并钉在中继', async () => {
     client.close();
     const live = liveDirectPeer();

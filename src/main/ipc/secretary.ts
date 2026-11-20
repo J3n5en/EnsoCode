@@ -92,6 +92,7 @@ import {
   withGlobalSkillEnabled,
   withOwnSkillEnabled,
 } from '../services/secretary/skills';
+import { createStatePublisher } from '../services/secretary/statePublisher';
 import { SecretaryStore } from '../services/secretary/store';
 import {
   getSourceAuthorityRegistry,
@@ -384,17 +385,35 @@ function syncWaitingCards(secretaryId: string, state: SecretaryState): void {
   );
 }
 
-/** 聊天卡片与工作台读同一份 Main 状态：每个秘书各推一份，清单单独推 */
-function broadcastState(): void {
-  broadcastToRenderers(IPC_CHANNELS.SECRETARY_LIST_CHANGED, secretarySummaries());
-  for (const ctx of secretaryContexts()) {
-    void secretaryState(ctx)
-      .then((state) => {
+const publishList = createStatePublisher({
+  build: async () => secretarySummaries(),
+  emit: (list) => broadcastToRenderers(IPC_CHANNELS.SECRETARY_LIST_CHANGED, list),
+  intervalMs: 300,
+});
+const statePublishers = new Map<string, () => void>();
+
+function statePublisherFor(ctx: SecretaryContext): () => void {
+  let publish = statePublishers.get(ctx.id);
+  if (!publish) {
+    publish = createStatePublisher({
+      // 删除后可能还有一次尾随发布：秘书不在了就不发
+      build: () =>
+        secretaryContext(ctx.id) ? secretaryState(ctx) : Promise.reject(new Error('gone')),
+      emit: (state) => {
         broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state);
         syncWaitingCards(ctx.id, state);
-      })
-      .catch(() => undefined);
+      },
+      intervalMs: 300,
+    });
+    statePublishers.set(ctx.id, publish);
   }
+  return publish;
+}
+
+/** 聊天卡片与工作台读同一份 Main 状态：每个秘书各自节流推一份，清单单独推 */
+function broadcastState(): void {
+  publishList();
+  for (const ctx of secretaryContexts()) statePublisherFor(ctx)();
 }
 
 /** 设置里的全局 skill：坏条目跳过，路径只认这里给出的 */
@@ -584,6 +603,7 @@ export function registerSecretaryHandlers(): void {
     const host = hosts.get(ctx.id);
     host?.stop();
     hosts.delete(ctx.id);
+    statePublishers.delete(ctx.id);
     await contacts?.remove(ctx.id, true);
     const result = await deleteSecretary(ctx, {
       forget: (conversationId) => driver?.forget(conversationId),

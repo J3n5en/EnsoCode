@@ -274,6 +274,7 @@ import type {
   WorkspaceBranchSwitchResult,
   WorktreeStatus,
 } from '@shared/types/worktree';
+import type { UpdateChannel } from '@shared/updater/channel';
 import type { BotUsageOverviewResult, BotUsageSummaryResult } from '@shared/usage/botUsage';
 import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
 import type { TitleBarAppearance } from '@shared/windowControls';
@@ -1539,6 +1540,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, enabled),
     setAutoRestartWhenIdle: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_WHEN_IDLE, enabled),
+    setChannel: (channel: UpdateChannel): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_CHANNEL, channel),
     getState: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_GET_STATE),
     restart: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_RESTART),
     /** 取走上次更新重启时被打断的会话 id（取一次即清空） */

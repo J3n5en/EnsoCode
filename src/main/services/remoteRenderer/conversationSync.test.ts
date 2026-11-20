@@ -59,6 +59,14 @@ beforeEach(async () => {
 });
 
 describe('会话账本', () => {
+  it('远端读设置时去掉会话表：远端单独用 conversations:read 取，整份设置不必重复带上', () => {
+    const key = sync.CONVERSATIONS_KEY;
+    const settings = { 'enso-settings': { state: { a: 1 } }, [key]: { state: {} } };
+    expect(sync.withoutConversations(settings)).toEqual({ 'enso-settings': { state: { a: 1 } } });
+    expect(settings[key]).toBeDefined();
+    expect(sync.withoutConversations(null)).toBeNull();
+  });
+
   it('单主界面写回时 activeId 与 version 随写回落盘', () => {
     const desktop = peer();
     peers.local = desktop;

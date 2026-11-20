@@ -52,6 +52,8 @@ const PING = 0x02;
 const PONG = 0x03;
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
+/** 回前台探活：对端在局域网/直连上，正常几十毫秒内回 pong */
+const PROBE_TIMEOUT_MS = 2_000;
 
 /**
  * 状态机 + peer 生命周期 + 定时器 + 分片 + 心跳的胶水，三端共用。
@@ -116,6 +118,24 @@ export class DirectLink {
 
   networkChange(): void {
     this.dispatch({ type: 'network-change' });
+  }
+
+  /**
+   * 回前台只探活：通道还通就继续用，免得拆掉重协商时在途帧全丢；短时间无回音才判死切回中继。
+   * 未连通时返回 false，由调用方按网络变化重建。
+   */
+  probe(timeoutMs = PROBE_TIMEOUT_MS): boolean {
+    const peer = this.peer;
+    const gen = this.peerGen;
+    if (this.transport() !== 'direct' || !peer) return false;
+    this.pingSentAt = Date.now();
+    peer.send(new Uint8Array([PING]));
+    if (this.heartbeatDeadline) clearTimeout(this.heartbeatDeadline);
+    this.heartbeatDeadline = setTimeout(() => {
+      this.heartbeatDeadline = null;
+      if (this.peerGen === gen) this.dispatch({ type: 'dc-close', gen });
+    }, timeoutMs);
+    return true;
   }
 
   /** 中继业务 probe 往返（ms）；仅 guest 比速窗口消费 */

@@ -1,4 +1,5 @@
 import type { AgentTypeKey } from '@shared/builtinAgents';
+import { coalesceRuns, mapLimited } from '@shared/coalesceRuns';
 import { parseCompactCommand } from '@shared/compactCommand';
 import { conversationCwd } from '@shared/conversationCwd';
 import { diffConversations } from '@shared/conversationsPatch';
@@ -166,6 +167,7 @@ function planToolEnabled(projectId: string): boolean {
 
 /** 离开时盖章；正在看的会话由 viewedId 保热，TTL 从离开起算 */
 const lastViewedAt: Record<string, number> = {};
+const WORKTREE_STATUS_CONCURRENCY = 6;
 const parentTailInFlight = new Set<string>();
 const olderHistoryInFlight = new Set<string>();
 /** 冷缓存清掉的 child 再被看到时补历史。实现在 store 创建后赋值。 */
@@ -2587,16 +2589,17 @@ export const useSessionsStore = create<SessionsState>()(
           );
         },
 
-        async refreshWorktreeStatuses() {
+        // 启动、侧栏挂载、回焦会同时触发：合并成一次尾随刷新；每个状态要跑几次 git，限并发免得压垮宿主
+        refreshWorktreeStatuses: coalesceRuns(async () => {
           const targets = get().conversations;
           const records = await window.electronAPI.worktree.list();
-          const entries = await Promise.all(
-            records
-              .filter((record) => targets[record.conversationId])
-              .map(async (record) => {
-                const result = await window.electronAPI.worktree.status(record.conversationId);
-                return { record, status: result.ok ? result.value : undefined };
-              })
+          const entries = await mapLimited(
+            records.filter((record) => targets[record.conversationId]),
+            WORKTREE_STATUS_CONCURRENCY,
+            async (record) => {
+              const result = await window.electronAPI.worktree.status(record.conversationId);
+              return { record, status: result.ok ? result.value : undefined };
+            }
           );
           set((state) => {
             const conversations = { ...state.conversations };
@@ -2624,7 +2627,7 @@ export const useSessionsStore = create<SessionsState>()(
             }
             return { conversations, worktreeStatuses };
           });
-        },
+        }),
 
         async newConversation(projectId, options) {
           const sourceId = options?.worktreeFromConversationId;

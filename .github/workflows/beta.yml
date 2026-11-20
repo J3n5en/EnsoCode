@@ -1,0 +1,196 @@
+name: Beta
+
+# 内测渠道：main 每次推送自动构建桌面端，发成 GitHub 预发布（永不标 Latest），只保留最近 5 个。
+# 版本号 <package.json 的下一个 patch>-beta.<run_number> 只在 CI 里算，不提交回仓库。
+# 正式版仍由手动推 vX.Y.Z tag 走 Build；预发布 tag 不触发 Build / Publish Server / Relay Docker。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同组最多一个在跑、一个排队；新推送替换排队中的那个，连续提交只构建一两次
+concurrency:
+  group: beta-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    # 发版提交本身就是正式版内容，不再出 beta
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release)')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      skip: ${{ steps.version.outputs.skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Compute version
+        id: version
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          VERSION=$(node scripts/beta-release.mjs version "$RUN_NUMBER")
+          STABLE="v${VERSION%%-*}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # 对应正式版已打 tag（排队中的旧提交）：这个 beta 比正式版旧，
+          # 而内测客户端取 releases.atom 的第一条，会被它挡住看不到正式版，跳过
+          if git ls-remote --exit-code --tags origin "refs/tags/$STABLE" >/dev/null; then
+            echo "::notice::$STABLE 已发布，跳过 $VERSION"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # 仓库没有在 main 上跑测试的工作流：构建前先过 typecheck 与 lint
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Get pnpm store directory
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+  desktop:
+    needs: [prepare, verify]
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      publish: never
+      release-artifacts: true
+    secrets: inherit
+
+  release:
+    needs: [prepare, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: v${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download release files
+        uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: assets
+
+      - name: Download latest-mac.yml artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: latest-mac-*
+          path: mac-yml-artifacts
+
+      # electron-builder 的 GitHub provider 不管版本号带不带 beta 都写 latest*.yml；
+      # electron-updater 在预发布 tag 上按 tag 里的渠道读 beta*.yml，所以这里合并 mac 双架构并改名。
+      # 内测 Release 不带 latest*.yml：稳定版客户端只读标了 Latest 的正式版，本来也不会来这里。
+      - name: Assemble update files
+        run: |
+          set -euo pipefail
+          yq -o=json mac-yml-artifacts/latest-mac-arm64/latest-mac.yml > arm64.json
+          yq -o=json mac-yml-artifacts/latest-mac-x64/latest-mac.yml > x64.json
+          jq --slurpfile x64 x64.json '.files += $x64[0].files' arm64.json | yq -P > assets/beta-mac.yml
+          mv assets/latest.yml assets/beta.yml
+          mv assets/latest-linux.yml assets/beta-linux.yml
+          cat assets/beta-mac.yml
+          for yml in beta-mac.yml beta.yml beta-linux.yml; do
+            actual=$(yq '.version' "assets/$yml")
+            [ "$actual" = "$VERSION" ] || { echo "::error::$yml version=$actual, expected $VERSION"; exit 1; }
+          done
+          need() {
+            n=$(find assets -maxdepth 1 -name "$1" | wc -l)
+            [ "$n" -eq "$2" ] || { echo "::error::$1 有 $n 个，应为 $2"; exit 1; }
+          }
+          need '*.dmg' 2
+          need '*.dmg.blockmap' 2
+          need '*-mac.zip' 2
+          need '*-mac.zip.blockmap' 2
+          need '*.exe' 1
+          need '*.exe.blockmap' 1
+          need '*.AppImage' 1
+          need '*.deb' 1
+          need 'latest*.yml' 0
+          ls -la assets
+
+      - name: Release notes
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)
+          {
+            echo "内测版本（预发布），由 main 上的 ${GITHUB_SHA::7} 自动构建，只推送给在设置里把「更新渠道」选为「内测版」的用户。"
+            if [ -n "$PREV" ]; then
+              echo
+              echo "## 自 $PREV 以来的提交"
+              echo
+              git log --no-merges --pretty='- %s' "$PREV..HEAD" | head -50
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Publish prerelease
+        run: |
+          gh release create "$TAG" assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
+            --notes-file notes.md \
+            --prerelease \
+            --latest=false
+          state=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '"\(.prerelease) \(.draft)"')
+          [ "$state" = "true false" ] || { echo "::error::$TAG prerelease/draft=$state"; exit 1; }
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          case "$latest" in *-*) echo "::error::Latest 变成了预发布 $latest"; exit 1 ;; esac
+          echo "已发布 $TAG（预发布），Latest 仍为 $latest" >> "$GITHUB_STEP_SUMMARY"
+
+      # 只删已发布的 vX.Y.Z-beta.N 预发布（连 tag），正式版与草稿不动
+      - name: Prune old betas
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | {tag_name, prerelease, draft}' > releases.jsonl
+          node scripts/beta-release.mjs prune 5 < releases.jsonl > prune.txt
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            echo "已清理 $tag" >> "$GITHUB_STEP_SUMMARY"
+          done < prune.txt

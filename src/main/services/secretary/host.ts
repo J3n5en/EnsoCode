@@ -73,6 +73,8 @@ import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 import { advanceTodos } from './todoLifecycle';
 
 const TICK_MS = 60_000;
+/** 只刷新了事件时刻的派出记录，最多隔这么久落盘一次 */
+const EVENT_STAMP_SAVE_MS = 30_000;
 /** 遗留任务巡检间隔：每小时扫一遍已完成会话 */
 const LEFTOVER_PATROL_MS = 60 * 60 * 1000;
 
@@ -799,6 +801,23 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     return inflight.keys.length;
   }
 
+  /**
+   * 派出会话每个流式事件都会刷新 lastEventAt：只有它变了就不逐条落盘（整份几百 KB）和广播，
+   * 隔一段时间补存一次供巡检判空闲。其余字段变化立即落盘。
+   */
+  let savedSignature: string | null = null;
+  let savedAt = Number.NEGATIVE_INFINITY;
+  function saveEventFile(file: SecretaryDispatchFile, now: number): boolean {
+    const signature = JSON.stringify(file, (key, value) =>
+      key === 'lastEventAt' ? undefined : value
+    );
+    if (signature === savedSignature && now - savedAt < EVENT_STAMP_SAVE_MS) return false;
+    ports.save(file);
+    savedSignature = signature;
+    savedAt = now;
+    return true;
+  }
+
   const host: SecretaryHost = {
     onAgentEvent(event, changes) {
       if (!ports.enabled()) return;
@@ -967,7 +986,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const aborted = new Set<string>();
       if (sessionId && event.type === 'turn-completed' && event.aborted)
         aborted.add(rootIdOf(event, sessionId));
-      if (changed) ports.save(file);
+      if (changed) changed = saveEventFile(file, now);
       const todosChanged = syncLinkedTodos(ports, file, rows, aborted);
       const reported = ports.reportPeerTodos?.() ?? false;
       if (changed || todosChanged || reported) ports.publish();

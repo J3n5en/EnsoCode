@@ -1,6 +1,6 @@
 import { decodeRemoteValue, type HostToRemote } from '@enso/pair';
 import { UPSERT_MARK, UpsertDecoder } from '@shared/remoteDelta';
-import { SNAPSHOT_TAIL_MESSAGES } from '@shared/snapshotTail';
+import { OVERVIEW_TAIL_MESSAGES, SNAPSHOT_TAIL_MESSAGES } from '@shared/snapshotTail';
 import { describe, expect, it, vi } from 'vitest';
 import {
   addRemoteSender,
@@ -289,6 +289,20 @@ describe('RemoteSender snapshot trimming', () => {
     sender.send('agent:event', snapshot(11));
     sender.send('agent:event', snapshot(11));
     expect(first).toHaveLength(4);
+  });
+
+  it('全量概览快照每个会话只带最近几条：打开会话时另要定向快照补齐', () => {
+    const { sender, first } = setup();
+    const overview = snapshot(SNAPSHOT_TAIL_MESSAGES + 40);
+    delete (overview as { partial?: boolean }).partial;
+    delete (overview as { sessionId?: string }).sessionId;
+    sender.send('agent:event', overview);
+    const session = delivered(first)[0]?.sessions[0];
+    expect(session?.messages).toHaveLength(OVERVIEW_TAIL_MESSAGES);
+    expect(session?.baseIndex).toBe(SNAPSHOT_TAIL_MESSAGES + 40 - OVERVIEW_TAIL_MESSAGES);
+    expect(session?.messages.at(-1)?.content.startsWith(`m${SNAPSHOT_TAIL_MESSAGES + 39} `)).toBe(
+      true
+    );
   });
 });
 

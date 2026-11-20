@@ -25,6 +25,7 @@ import type {
   SubagentModelEntry,
 } from '@shared/types';
 import type { AgentMode, ApprovalMode, ThinkingLevel } from '@shared/types/agent';
+import type { UpdateChannel } from '@shared/updater/channel';
 import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
 import type { VirtualClassifierConfig, VirtualModelEntry } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
@@ -210,6 +211,8 @@ export interface SettingsState {
   autoUpdate: boolean;
   /** 包已下好且空闲连续 5 分钟后自动重启安装；缺省关 */
   autoRestartWhenIdle: boolean;
+  /** 更新渠道：稳定版 / 内测版；缺省稳定版，只在本机 */
+  updateChannel: UpdateChannel;
   /** 权限不变的插件市场更新自动安装；缺省开，只在本机 */
   pluginAutoUpdate: boolean;
 
@@ -433,6 +436,7 @@ export interface SettingsState {
   setSmartCompactMode: (value: import('@shared/smartCompactMode').SmartCompactMode) => void;
   setAutoUpdate: (value: boolean) => void;
   setAutoRestartWhenIdle: (value: boolean) => void;
+  setUpdateChannel: (value: UpdateChannel) => void;
   setPluginAutoUpdate: (value: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;
   setCustomProxyUrl: (url: string) => void;

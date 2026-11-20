@@ -13,6 +13,14 @@ import { remoteSenders } from './senders';
 
 export const CONVERSATIONS_KEY = 'enso-conversations';
 
+/** 远端整份设置不带会话表：它单独经 conversations:read 取（有缓存和增量），这里重复带要多下载近 1MB */
+export function withoutConversations<T>(settings: T): T {
+  if (!settings || typeof settings !== 'object' || !(CONVERSATIONS_KEY in settings))
+    return settings;
+  const { [CONVERSATIONS_KEY]: _omit, ...rest } = settings as Record<string, unknown>;
+  return rest as T;
+}
+
 /**
  * 每个主界面一本账：它最近一次写回的值（或 conversations:read 时的磁盘值），
  * 以及已推给它、它还没确认应用的补丁。写回时先回放已确认的补丁再求差量，

@@ -17,6 +17,9 @@ interface ZoomableImageProps {
   /** 点击区域；需要把图片限制在父级宽度内时传 `block w-full` */
   frameClassName?: string;
   onError?: () => void;
+  alt?: string;
+  /** 缩略图懒加载 */
+  lazy?: boolean;
 }
 
 /** CSP connect-src 不放行 data:，data URL 本地解码；local-image: 走 fetch（协议已开 CORS） */
@@ -44,7 +47,14 @@ async function copyImageToClipboard(src: string): Promise<void> {
 }
 
 /** 消息里的图片：点击全屏预览，点遮罩或 Esc 关闭；右键复制图片 */
-export function ZoomableImage({ src, className, frameClassName, onError }: ZoomableImageProps) {
+export function ZoomableImage({
+  src,
+  className,
+  frameClassName,
+  onError,
+  alt = '',
+  lazy = false,
+}: ZoomableImageProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   useOverlayGuard(open);
@@ -80,7 +90,13 @@ export function ZoomableImage({ src, className, frameClassName, onError }: Zooma
               onClick={() => setOpen(true)}
               className={cn('cursor-zoom-in', frameClassName)}
             >
-              <img src={src} alt="" className={className} onError={onError} />
+              <img
+                src={src}
+                alt={alt}
+                className={className}
+                onError={onError}
+                {...(lazy ? { loading: 'lazy' as const, decoding: 'async' as const } : {})}
+              />
             </button>
           }
           onContextMenu={(event) => event.stopPropagation()}
