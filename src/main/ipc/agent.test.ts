@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   dispatchHost: { resolveSubagentModel: undefined as unknown },
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
-  spawnSession: vi.fn(),
+  spawnSession: vi.fn().mockReturnValue({ ok: true }),
   summarizeConversationTitle: vi.fn(() => ({ ok: true })),
   resolveModelSelection: vi.fn(),
   readSettings: vi.fn((): unknown => null),
@@ -113,6 +113,7 @@ vi.mock('../services/agentHost', () => ({
   setSessionThinking: vi.fn(),
   spawnChildSession: vi.fn(),
   spawnSession: mocks.spawnSession,
+  rememberRestorableSpawn: vi.fn(),
   steerSession: mocks.steerSession,
   withdrawSteerSession: mocks.withdrawSteerSession,
   stopBackgroundTask: vi.fn(),
@@ -227,7 +228,7 @@ describe('agent IPC Main identity boundary', () => {
   beforeEach(() => {
     mocks.dispatchHost.resolveSubagentModel = undefined;
     mocks.handlers.clear();
-    mocks.spawnSession.mockReset();
+    mocks.spawnSession.mockReset().mockReturnValue({ ok: true });
     mocks.restoreJournal.mockClear();
     mocks.existsSync.mockReturnValue(true);
     mocks.persistedConversation.mockReset();

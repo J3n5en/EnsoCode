@@ -1,4 +1,5 @@
 import type { BashOperations } from '@earendil-works/pi-coding-agent';
+import { type FileBackedRun, requestFileBackedRun } from './shell/detachedRun';
 
 /** 转后台的原因：用户点「转后台」、插话、到让位时刻 */
 export type DetachReason = 'user' | 'yield' | 'steer';
@@ -9,6 +10,8 @@ export interface DetachableProcess {
   pipe(onData: (chunk: Buffer) => void): void;
   done: Promise<number | null>;
   kill(): void;
+  /** 输出直写文件、能脱离 worker 的进程句柄；走管道的（远程、Windows 等）没有 */
+  detachable?(): FileBackedRun | undefined;
 }
 
 export interface ForegroundOwner {
@@ -74,7 +77,9 @@ export class ForegroundCommand {
 
   constructor(
     private readonly owner: ForegroundOwner,
-    readonly yieldMs?: number
+    readonly yieldMs?: number,
+    /** 本地 bash 用文件直写方式起进程时的输出目录（后台任务日志目录） */
+    private readonly spawnDir?: string
   ) {}
 
   detach(reason: DetachReason): string | null {
@@ -102,6 +107,15 @@ export class ForegroundCommand {
     const { onData, signal, env, timeout } = options;
     // 截止由这里计时：转后台后底层不能再按前台截止杀进程（后台任务另行计时）
     const controller = new AbortController();
+    let detachable: FileBackedRun | undefined;
+    if (this.spawnDir) {
+      requestFileBackedRun(controller.signal, {
+        dir: this.spawnDir,
+        onSpawn: (run) => {
+          detachable = run;
+        },
+      });
+    }
     let sink = onData;
     let capture = true;
     let output = '';
@@ -116,13 +130,18 @@ export class ForegroundCommand {
       })
       .then((result) => result.exitCode);
     const proc: DetachableProcess = {
-      output: () => output,
+      // 文件直写的进程按间隔跟读：取输出前先把已落盘的读进来
+      output: () => {
+        if (capture) detachable?.flush();
+        return output;
+      },
       pipe: (next) => {
         capture = false;
         sink = next;
       },
       done,
       kill: () => controller.abort(),
+      detachable: () => detachable,
     };
     return new Promise((resolve, reject) => {
       let timedOut = false;

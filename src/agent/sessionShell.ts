@@ -8,6 +8,7 @@ import {
 import { childProfileShell } from '@shared/childProfileTools';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { withDetachableExec } from './foregroundCommand';
+import { withFileBackedExec } from './shell/detachedRun';
 import { withHardenedEnv } from './shell/hardenedEnv';
 
 export type SessionShellKind = 'bash' | 'powershell';
@@ -32,7 +33,13 @@ export function createSessionCommandTool(input: {
     remote: input.remote,
     preference: input.preference,
   });
-  const local = kind === 'powershell' ? createLocalPowerShellOperations : createLocalBashOperations;
+  // 本地 POSIX bash：前台命令输出直写文件，转后台后重启时能脱离 worker 活下来（Windows 没有进程组 / setsid，照旧走管道）
+  const local =
+    kind === 'powershell'
+      ? createLocalPowerShellOperations
+      : (input.platform ?? process.platform) === 'win32'
+        ? createLocalBashOperations
+        : () => withFileBackedExec(createLocalBashOperations());
   // 远程 operations 由 ssh 执行器负责环境，不套本地硬化
   const operations = input.operations ?? withHardenedEnv(local(), kind);
   const options = { operations: withDetachableExec(operations) };

@@ -584,6 +584,13 @@ export const IPC_PRODUCT_COVERAGE = {
     'Main-to-renderer persist flush before destroying the window.'
   ),
   APP_FLUSH_PERSIST_RESPONSE: excluded('Renderer-to-main persist flush ack.'),
+  APP_RESTART_WAITING: excluded(
+    'Main-to-renderer overlay: restart, update install or quit waiting for commands, restarting, or resuming sessions.'
+  ),
+  APP_RESTART_WAITING_GET: excluded(
+    'Local main window reads the current restart overlay on mount.'
+  ),
+  APP_RESTART_FORCE: excluded('Renderer-to-main force quit from the restart wait overlay.'),
   APP_SET_BADGE_COUNT: excluded('Renderer-to-main Dock badge count for waiting conversations.'),
   DROP_SHELF_STATE: excluded('Main-to-shelf window visual state for the macOS drop shelf.'),
   DROP_SHELF_DROP: excluded('Drop shelf window hands dropped Finder paths to main.'),

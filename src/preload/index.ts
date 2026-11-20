@@ -225,6 +225,7 @@ import type {
 } from '@shared/types/browser';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
+import type { RestartOverlayState } from '@shared/types/ipc';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -287,6 +288,18 @@ import type {
 import { zoomPercent } from '@shared/zoomBanner';
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
 
+function parseRestartOverlay(value: unknown): RestartOverlayState | null {
+  if (!value || typeof value !== 'object') return null;
+  const { phase, reason, exit } = value as { phase?: unknown; reason?: unknown; exit?: unknown };
+  if (phase === 'restarting' || phase === 'resuming') return { phase };
+  if (phase !== 'waiting') return null;
+  return {
+    phase,
+    reason: reason === 'background-not-detachable' ? reason : 'tool',
+    exit: exit === 'update' || exit === 'quit' ? exit : 'restart',
+  };
+}
+
 const electronAPI = {
   env: {
     platform: process.platform,
@@ -311,6 +324,16 @@ const electronAPI = {
     },
     respondFlushPersist: (requestId: string): void => {
       ipcRenderer.send(IPC_CHANNELS.APP_FLUSH_PERSIST_RESPONSE, requestId);
+    },
+    onRestartWaiting: (callback: (state: RestartOverlayState | null) => void): (() => void) => {
+      const listener = (_: unknown, state: unknown) => callback(parseRestartOverlay(state));
+      ipcRenderer.on(IPC_CHANNELS.APP_RESTART_WAITING, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_RESTART_WAITING, listener);
+    },
+    getRestartWaiting: async (): Promise<RestartOverlayState | null> =>
+      parseRestartOverlay(await ipcRenderer.invoke(IPC_CHANNELS.APP_RESTART_WAITING_GET)),
+    forceRestart: (): void => {
+      ipcRenderer.send(IPC_CHANNELS.APP_RESTART_FORCE);
     },
     setBadgeCount: (count: number): void => {
       ipcRenderer.send(IPC_CHANNELS.APP_SET_BADGE_COUNT, count);

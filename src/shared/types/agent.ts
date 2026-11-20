@@ -35,7 +35,6 @@ import type {
   PluginEventName,
   PluginInterceptEvent,
 } from '../extensionPlugins/events';
-
 import {
   AGENT_END_TEXT_MAX,
   BEFORE_AGENT_START_PROMPT_MAX,
@@ -114,6 +113,7 @@ import {
   type ProjectedApplyPatchOutcome,
   type ProjectedFileChange,
 } from './fileChanges';
+import type { RestartCheckpoint, RestartDeferReason } from './gracefulRestart';
 import {
   MODEL_API_KINDS,
   MODEL_REASONING_OVERRIDES,
@@ -1675,7 +1675,14 @@ export type AgentCommand =
     }
   | { type: 'plugin-agent-cancel'; requestId: string }
   /** 运行中同步代理 env；null 表示删除该键 */
-  | { type: 'set-proxy-env'; env: Record<string, string | null> };
+  | { type: 'set-proxy-env'; env: Record<string, string | null> }
+  /**
+   * 优雅重启：等所有会话到安全点后落断点，回 graceful-restart-ready，由 Main 换新进程。
+   * keepBackgroundTasks：应用会重新打开，能脱离 worker 的转后台命令交给下一代，安全点不等它们
+   */
+  | { type: 'graceful-restart'; keepBackgroundTasks?: true }
+  /** 终止 worker 前：把能脱离的后台命令交出去、写恢复清单，回 background-tasks-detached */
+  | { type: 'detach-background-tasks' };
 
 /** 随消息附带的图片（base64）。id 只活在编辑器，发给 agent 前剥掉。 */
 export interface AttachedImage {
@@ -1950,6 +1957,10 @@ export type RendererAgentEvent =
       | { type: 'oauth-pool-select' }
       | { type: 'privacy-mask-ledger' }
       | { type: 'tool-batch-completed' }
+      | { type: 'graceful-restart-deferred' }
+      | { type: 'graceful-restart-ready' }
+      | { type: 'background-tasks-detached' }
+      | { type: 'session-wake-requested' }
       | Extract<
           AgentWorkerEvent,
           {
@@ -2302,6 +2313,35 @@ export type AgentWorkerEvent =
       type: 'tool-batch-completed';
       identity: SessionIdentity;
       digest: ToolBatchDigest;
+    }
+  | {
+      /** 优雅重启被推迟：列出还没到安全点的会话。Main 旁路消费，不进渲染层 */
+      type: 'graceful-restart-deferred';
+      sessions: {
+        identity: SessionIdentity;
+        reason: RestartDeferReason;
+        toolsInFlight: string[];
+        /** 要求保留后台命令时仍要等的转后台命令（没法脱离 worker，如走管道的远程命令） */
+        undetachableTasks?: string[];
+      }[];
+    }
+  | {
+      /** 断点已落盘，worker 不再推进任何会话，等 Main 换新进程。Main 旁路消费 */
+      type: 'graceful-restart-ready';
+      checkpoint: RestartCheckpoint;
+    }
+  | {
+      /** 能脱离的后台命令已交出（恢复清单已写）：Main 收到后才终止 worker。旁路消费 */
+      type: 'background-tasks-detached';
+      detached: number;
+    }
+  | {
+      /**
+       * 重启认回的后台命令在没打开的空闲根会话里结束（或重启收尾期间结束、只存了盘）：
+       * 请 Main 按恢复清单打开它，worker 打开后把完成通知交给新一轮。旁路消费
+       */
+      type: 'session-wake-requested';
+      sessionId: string;
     }
   | {
       /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
@@ -4354,6 +4394,14 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         value.sessionIds.every((id) => typeof id === 'string')
         ? { type: 'pin-sessions', sessionIds: value.sessionIds }
         : null;
+    case 'graceful-restart':
+      if (hasExactKeys(value, ['type'])) return { type: 'graceful-restart' };
+      return hasExactKeys(value, ['type', 'keepBackgroundTasks']) &&
+        value.keepBackgroundTasks === true
+        ? { type: 'graceful-restart', keepBackgroundTasks: true }
+        : null;
+    case 'detach-background-tasks':
+      return hasExactKeys(value, ['type']) ? { type: 'detach-background-tasks' } : null;
     case 'warm-mcp':
       return hasExactKeys(value, ['type', 'servers']) && Array.isArray(value.servers)
         ? (value as unknown as AgentCommand)
@@ -4609,6 +4657,45 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
     return hasExactKeys(value, ['type', 'identity', 'digest']) &&
       parseSessionIdentity(value.identity) &&
       parseToolBatchDigest(value.digest)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'graceful-restart-deferred') {
+    return hasExactKeys(value, ['type', 'sessions']) &&
+      Array.isArray(value.sessions) &&
+      value.sessions.every(
+        (entry) =>
+          isRecord(entry) &&
+          (hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight']) ||
+            (hasExactKeys(entry, ['identity', 'reason', 'toolsInFlight', 'undetachableTasks']) &&
+              Array.isArray(entry.undetachableTasks) &&
+              entry.undetachableTasks.every(isNonEmptyString))) &&
+          parseSessionIdentity(entry.identity) &&
+          (entry.reason === 'tool-in-flight' || entry.reason === 'turn-in-progress') &&
+          Array.isArray(entry.toolsInFlight) &&
+          entry.toolsInFlight.every(isNonEmptyString)
+      )
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  // 断点内容由 Main 用 parseRestartCheckpoint 细验（该函数带 node:fs，渲染层不能引）
+  if (value.type === 'graceful-restart-ready') {
+    return hasExactKeys(value, ['type', 'checkpoint']) &&
+      isRecord(value.checkpoint) &&
+      Array.isArray(value.checkpoint.sessions)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'background-tasks-detached') {
+    return hasExactKeys(value, ['type', 'detached']) &&
+      typeof value.detached === 'number' &&
+      Number.isInteger(value.detached) &&
+      value.detached >= 0
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'session-wake-requested') {
+    return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }
