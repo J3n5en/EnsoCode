@@ -10,7 +10,7 @@
     "name": "EnsoAI Team",
     "email": "i@j3.do"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "packageManager": "pnpm@10.26.2",
   "scripts": {

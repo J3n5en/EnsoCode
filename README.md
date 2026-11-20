@@ -25,7 +25,7 @@
   <a href="https://github.com/J3n5en/EnsoCode/releases"><img src="https://img.shields.io/github/downloads/J3n5en/EnsoCode/total?label=downloads" alt="Downloads" /></a>
   <a href="https://github.com/J3n5en/EnsoCode/stargazers"><img src="https://img.shields.io/github/stars/J3n5en/EnsoCode?style=flat&label=stars" alt="Stars" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555?style=flat-square" alt="macOS, Windows, Linux" />
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/J3n5en/EnsoCode" alt="MIT" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="AGPL-3.0-only" /></a>
 </p>
 
 <p align="center">
@@ -252,4 +252,4 @@ Point **Settings → Devices → Relay URL** at your instance.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+GNU AGPL-3.0-only, with an additional permission for separately distributed plugins, extensions and skills. See [LICENSE](LICENSE).

@@ -49,7 +49,7 @@ COPY --from=build /enso-relay /enso-relay
 LABEL org.opencontainers.image.source="https://github.com/J3n5en/EnsoCode" \
       org.opencontainers.image.title="enso-relay" \
       org.opencontainers.image.description="EnsoCode phone relay: single static Go binary, forwards ciphertext only" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 USER relay
 VOLUME /data
 ENV RELAY_DB=/data/relay.sqlite \
