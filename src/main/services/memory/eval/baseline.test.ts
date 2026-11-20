@@ -8,9 +8,9 @@ import { type EvalReport, formatReport, type Metrics, runEvalWith } from './run'
 const MARGIN = 0.0001;
 type Baseline = Pick<Metrics, 'recall5' | 'recall10' | 'mrr' | 'noise' | 'stale'>;
 const OVERALL: Baseline = {
-  recall5: 0.7941,
-  recall10: 0.8235,
-  mrr: 0.6755,
+  recall5: 0.798,
+  recall10: 0.827,
+  mrr: 0.672,
   noise: 0.0488,
   stale: 0.1,
 };
@@ -23,7 +23,7 @@ const BY_DIMENSION: Partial<Record<EvalDimension, Baseline>> = {
   typeFilter: { recall5: 0.75, recall10: 0.8333, mrr: 0.75, noise: 0, stale: null },
   spaceIsolation: { recall5: 1, recall10: 1, mrr: 0.9, noise: 0, stale: null },
   distractor: { recall5: 1, recall10: 1, mrr: 0.7833, noise: 0.2167, stale: null },
-  stale: { recall5: 0.8333, recall10: 1, mrr: 0.5278, noise: null, stale: 0.1 },
+  stale: { recall5: 0.857, recall10: 1, mrr: 0.5238, noise: null, stale: 0.1 },
 };
 
 function expectAtMost(actual: number | null, base: number | null, name: string) {

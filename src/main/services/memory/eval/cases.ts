@@ -2173,4 +2173,32 @@ export const EVAL_CASES: EvalCase[] = [
     excluded: [],
     stale: ['old'],
   },
+  {
+    id: 'stale-challenges-priority',
+    dimension: 'stale',
+    description:
+      '推翻关系 challenges：旧记忆关键词密度更高，不降权时会压过新结论（区分 challenges 是否生效）',
+    memories: [
+      {
+        key: 'old',
+        space: 'project',
+        unitType: 'decision',
+        content: 'pnpm 构建：pnpm -r build 逐包构建，全量约 6 分钟，pnpm 构建脚本在根 package.json。',
+        createdAt: '2025-11-10T09:00:00.000Z',
+      },
+      {
+        key: 'new',
+        space: 'project',
+        unitType: 'decision',
+        content: '构建改用 turbo，pnpm -r build 已废弃，构建时间降到 40 秒。',
+        createdAt: '2025-11-14T09:00:00.000Z',
+        evolves: { from: 'old', relation: 'challenges' },
+      },
+    ],
+    query: 'pnpm 构建',
+    spaces: ['global', 'project'],
+    expected: ['new'],
+    excluded: [],
+    stale: ['old'],
+  },
 ];
