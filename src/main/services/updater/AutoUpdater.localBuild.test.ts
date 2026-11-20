@@ -65,13 +65,13 @@ function tempDir(): string {
   return dir;
 }
 
-async function initService(withAppUpdateYml: boolean) {
+async function initService(withAppUpdateYml: boolean, channel: 'stable' | 'beta' = 'stable') {
   const resources = tempDir();
   if (withAppUpdateYml) writeFileSync(path.join(resources, 'app-update.yml'), 'provider: github\n');
   Object.defineProperty(process, 'resourcesPath', { value: resources, configurable: true });
   vi.resetModules();
   const { autoUpdaterService } = await import('./AutoUpdater');
-  autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, true, false);
+  autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, true, false, channel);
   await autoUpdaterService.checkForUpdates();
   return autoUpdaterService;
 }
@@ -79,7 +79,13 @@ async function initService(withAppUpdateYml: boolean) {
 beforeEach(() => {
   Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
   Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
-  for (const key of ['updateConfigPath', 'autoDownload', 'autoInstallOnAppQuit']) {
+  for (const key of [
+    'updateConfigPath',
+    'autoDownload',
+    'autoInstallOnAppQuit',
+    'allowPrerelease',
+    'allowDowngrade',
+  ]) {
     delete m.updater[key];
   }
   m.handlers.clear();
@@ -157,5 +163,23 @@ describe('本地 --dir 构建的自动更新', () => {
     m.handlers.get('error')?.(new Error(SIGNATURE_ERROR));
     // 下载完成后不再发别的状态（原行为）
     expect(m.sent.at(-1)?.status).toBe('downloaded');
+  });
+
+  it('本地构建同样遵守所选渠道，运行中可切换且不允许降级', async () => {
+    m.signature = 'developer-id';
+    const service = await initService(false, 'beta');
+    expect(m.updater.updateConfigPath).toBe(path.join(m.userData, 'updater', 'app-update.yml'));
+    expect(m.updater).toMatchObject({ allowPrerelease: true, allowDowngrade: false });
+    const check = m.updater.checkForUpdates as ReturnType<typeof vi.fn>;
+    check.mockClear();
+    service.setChannel('stable');
+    expect(m.updater).toMatchObject({ allowPrerelease: false, allowDowngrade: false });
+    await vi.waitFor(() => expect(check).toHaveBeenCalledOnce());
+  });
+
+  it('默认稳定版：即便当前是预发布版本也关掉 allowPrerelease', async () => {
+    m.updater.allowPrerelease = true;
+    await initService(true);
+    expect(m.updater).toMatchObject({ allowPrerelease: false, allowDowngrade: false });
   });
 });

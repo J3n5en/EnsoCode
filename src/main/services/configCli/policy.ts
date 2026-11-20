@@ -34,6 +34,7 @@ const RESTART_REQUIRED: Record<string, string> = {
   autoUpdate: 'The updater reads this at startup; toggle it in Settings or restart the app.',
   autoRestartWhenIdle:
     'The updater reads this at startup; toggle it in Settings or restart the app.',
+  updateChannel: 'The updater reads this at startup; switch it in Settings or restart the app.',
 };
 
 export type GetResult =

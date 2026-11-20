@@ -2,6 +2,7 @@ import path from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types';
 import type { ManualInstall, UpdateStatus } from '@shared/types/updater';
+import { applyUpdateChannel, type UpdateChannel } from '@shared/updater/channel';
 import { AUTO_RESTART_IDLE_MS, isTurnRestartBlocked } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
@@ -58,9 +59,15 @@ class AutoUpdaterService {
   private localBuildReady: Promise<void> | null = null;
   private availableInfo: electronUpdater.UpdateInfo | undefined;
 
-  init(window: BrowserWindow, autoUpdateEnabled = true, autoRestartWhenIdle = false): void {
+  init(
+    window: BrowserWindow,
+    autoUpdateEnabled = true,
+    autoRestartWhenIdle = false,
+    channel: UpdateChannel = 'stable'
+  ): void {
     this.mainWindow = window;
     this.autoRestartWhenIdle = autoRestartWhenIdle;
+    applyUpdateChannel(autoUpdater, channel);
 
     if (is.dev) {
       autoUpdater.logger = console;
@@ -308,6 +315,12 @@ class AutoUpdaterService {
       }
     }
     this.notifyIdleStateChanged();
+  }
+
+  /** 切渠道只影响之后的检查；切回稳定版不降级，等下一个正式版 */
+  setChannel(channel: UpdateChannel): void {
+    applyUpdateChannel(autoUpdater, channel);
+    if (this.autoUpdateEnabled) void this.checkForUpdates();
   }
 
   setAutoRestartWhenIdle(enabled: boolean): void {
