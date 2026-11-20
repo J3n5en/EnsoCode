@@ -1,14 +1,15 @@
 import type { EmbeddingModelSpec } from './types';
 
-export const DEFAULT_EMBEDDING_MODEL_ID = 'local:potion-multilingual-128M';
+// 默认用上下文模型：model2vec 是词袋平均，同义改写召回等同于字面匹配（实测 semantic 与 stub 同分）
+export const DEFAULT_EMBEDDING_MODEL_ID = 'local:qwen3-0.6b-gguf';
 const REMOTE_PREFIX = 'remote:';
 const NO_PREFIX = { passage: '', query: '' };
 
 // 模型间差异（前缀、维度、文件、来源）全部是数据，运行时按 runtime 分派，不按模型 id 写分支。
 // 前缀依据：Qwen3-Embedding 只给 query 加 instruction；BGE-M3 不需要前缀。
 const REGISTRY: Record<string, EmbeddingModelSpec> = {
-  [DEFAULT_EMBEDDING_MODEL_ID]: {
-    id: DEFAULT_EMBEDDING_MODEL_ID,
+  'local:potion-multilingual-128M': {
+    id: 'local:potion-multilingual-128M',
     runtime: 'model2vec',
     dim: 256,
     prefix: NO_PREFIX,
