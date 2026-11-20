@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { RESTART_CHECKPOINT_ENV } from '@shared/gracefulRestart';
 import { parseAgentCommand } from '@shared/types/agent';
 import { rejectUnparsableCommand } from './commandRejection';
 import { installCrashRecord } from './crashRecord';
@@ -20,6 +21,10 @@ if (!dataDir) {
 }
 installCrashRecord(dataDir);
 
+// 只给这一代 worker 用：工具里起的子进程不该继承
+const restartCheckpointFile = process.env[RESTART_CHECKPOINT_ENV] || undefined;
+delete process.env[RESTART_CHECKPOINT_ENV];
+
 const supervisor = new SessionSupervisor({
   emit: (event) => port.postMessage(event),
   agentDir: path.join(dataDir, 'pi-agent'),
@@ -27,6 +32,7 @@ const supervisor = new SessionSupervisor({
   workflowDir: path.join(dataDir, 'workflows'),
   dataDir,
   userImageDirs: userImageDirsFromEnv(),
+  ...(restartCheckpointFile ? { restartCheckpointFile } : {}),
 });
 
 /** Main 下发的应用用户图片目录（冒号分隔）：编码会话的 image_view 白名单里带上它 */

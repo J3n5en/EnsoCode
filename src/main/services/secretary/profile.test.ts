@@ -37,7 +37,6 @@ interface Harness {
   schedules: SecretarySchedule[];
   audits: SecretaryAuditEntry[];
   file: SecretaryDispatchFile;
-  setModel: { conversationId: string; model: unknown }[];
   released: string[];
   /** 活着的会话当前用的系统提示词：spawn 与就地刷新都按盘上档案现拼 */
   prompts: Record<string, string>;
@@ -65,7 +64,6 @@ function harness(
     schedules: options.schedules ?? [],
     audits: [],
     file: emptyFile(),
-    setModel: [],
     released: [],
     prompts: {},
     clearedMemory: 0,
@@ -105,10 +103,6 @@ function harness(
       })),
     status: options.status ?? (() => idle),
     alive: options.alive ?? (() => true),
-    setModel: async (conversationId, model) => {
-      h.setModel.push({ conversationId, model });
-      return { ok: true };
-    },
     release: async (conversationId) => {
       h.released.push(conversationId);
       delete h.prompts[conversationId];
@@ -116,9 +110,6 @@ function harness(
     },
     refreshPrompt: (conversationId) => {
       h.prompts[conversationId] = promptFrom(h);
-    },
-    patchRow: (conversationId, patch) => {
-      h.rows[conversationId] = { ...h.rows[conversationId], ...patch };
     },
     dispatchFile: () => h.file,
     saveDispatch: (file) => {
@@ -147,23 +138,19 @@ function promptFrom(h: Harness): string {
 }
 
 describe('保存档案', () => {
-  it('拒绝非法自主度且不写盘、不审计', async () => {
+  it('拒绝非法枚举且不写盘、不审计', async () => {
     const h = harness();
-    expect(await h.service.save({ autonomy: 'god' }, null)).toEqual({
+    expect(await h.service.save({ notify: 'always' }, null)).toEqual({
       ok: false,
-      error: 'invalid autonomy',
+      error: 'invalid notify',
     });
     expect(h.saved).toBeNull();
     expect(h.audits).toEqual([]);
     expect(h.notified).toBe(0);
   });
 
-  it('拒绝非法模型与非法并发上限', async () => {
+  it('拒绝非法并发上限', async () => {
     const h = harness();
-    expect(await h.service.save({ model: { providerId: 'p' } }, null)).toEqual({
-      ok: false,
-      error: 'invalid model',
-    });
     expect(await h.service.save({ maxRunningDispatches: 99 }, null)).toEqual({
       ok: false,
       error: 'invalid maxRunningDispatches',
@@ -176,7 +163,7 @@ describe('保存档案', () => {
     expect(result.ok).toBe(true);
     expect(h.saved?.name).toBe('小秘');
     expect(h.saved?.avatar).toEqual({ color: '#0ea5e9' });
-    expect(h.saved?.autonomy).toBe('ask-first');
+    expect(h.saved?.patrolEnabled).toBe(true);
     expect(h.saved?.updatedAt).toBe(NOW);
     expect(h.audits.map((entry) => entry.op)).toEqual(['profile_save']);
     expect(h.notified).toBe(1);
@@ -225,32 +212,15 @@ describe('保存档案', () => {
 });
 
 describe('保存后的副作用', () => {
-  it('模型变化时改会话行并对活着的会话设模型', async () => {
+  it('档案不再管秘书的模型：草案带 model 也不写档案、不动会话', async () => {
     const h = harness({ profile: baseProfile(), conversations: ['sec-1', 'sec-2'] });
     await h.service.save(
       { model: { providerId: 'anthropic', modelId: 'opus', thinkingLevel: 'high' } },
       null
     );
-    expect(h.rows['sec-1']).toEqual({
-      lastProviderId: 'anthropic',
-      lastModelId: 'opus',
-      thinkingLevel: 'high',
-    });
-    expect(h.rows['sec-2']).toEqual({
-      lastProviderId: 'anthropic',
-      lastModelId: 'opus',
-      thinkingLevel: 'high',
-    });
-    expect(h.setModel.map((call) => call.conversationId)).toEqual(['sec-1', 'sec-2']);
-    expect(h.released).toEqual([]);
-  });
-
-  it('模型没变时不动会话行，也不设模型', async () => {
-    const model = { providerId: 'anthropic', modelId: 'opus' };
-    const h = harness({ profile: { ...baseProfile(), model } });
-    await h.service.save({ name: '换个名字' }, null);
+    expect(h.saved).not.toHaveProperty('model');
     expect(h.rows).toEqual({});
-    expect(h.setModel).toEqual([]);
+    expect(h.released).toEqual([]);
   });
 
   it('名字变化时释放空闲会话，运行中的等本轮结束', async () => {
@@ -270,9 +240,9 @@ describe('保存后的副作用', () => {
     expect(h.released).toEqual(['sec-1', 'sec-2']);
   });
 
-  it('人设变化也算身份变化，只改模型时不释放', async () => {
+  it('人设变化也算身份变化，只改并发上限时不释放', async () => {
     const h = harness({ profile: baseProfile(), persona: '旧人设' });
-    await h.service.save({ model: { providerId: 'a', modelId: 'b' } }, null);
+    await h.service.save({ maxRunningDispatches: 5 }, null);
     expect(h.released).toEqual([]);
     await h.service.save({ persona: '新人设' }, null);
     expect(h.released).toEqual(['sec-1']);
@@ -403,7 +373,7 @@ describe('配置提案', () => {
   it('提交草案返回 awaiting_confirmation，不写档案', async () => {
     const h = harness();
     const result = await h.service.propose(
-      { name: '小秘', avatarColor: '#0ea5e9', autonomy: 'tell-after', persona: '简短' },
+      { name: '小秘', avatarColor: '#0ea5e9', patrolEnabled: false, persona: '简短' },
       { secretaryConversationId: 'sec-1' }
     );
     expect(result).toEqual({
@@ -414,7 +384,7 @@ describe('配置提案', () => {
         changes: [
           { field: 'name', before: null, after: '小秘' },
           { field: 'avatarColor', before: null, after: '#0ea5e9' },
-          { field: 'autonomy', before: null, after: 'tell-after' },
+          { field: 'patrolEnabled', before: null, after: false },
           { field: 'persona', before: null, after: '简短' },
         ],
       },
@@ -426,28 +396,20 @@ describe('配置提案', () => {
     expect(proposal?.kind === 'profile' ? proposal.draft : null).toEqual({
       name: '小秘',
       avatar: { color: '#0ea5e9' },
-      autonomy: 'tell-after',
+      patrolEnabled: false,
       persona: '简短',
     });
   });
 
-  it('提案能改派出的两个默认开关，卡片列出前后值', async () => {
+  it('提案里带已删除的设置项一律忽略，只剩它们时按参数无效拒绝', async () => {
     const h = harness({ profile: baseProfile() });
-    const result = await h.service.propose(
-      { dispatchMuted: false, dispatchUnattended: false },
-      { secretaryConversationId: 'sec-1' }
-    );
-    expect(result).toEqual({
-      ok: true,
-      result: {
-        status: 'awaiting_confirmation',
-        proposalId: 'proposal-1',
-        changes: [
-          { field: 'dispatchMuted', before: true, after: false },
-          { field: 'dispatchUnattended', before: true, after: false },
-        ],
-      },
-    });
+    expect(
+      await h.service.propose(
+        { autonomy: 'full', dispatchMuted: false, dispatchWorktree: 'never' },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'invalid arguments' });
+    expect(h.file.proposals).toEqual({});
   });
 
   it('非秘书会话提交被拒，非法字段也拒', async () => {
@@ -457,8 +419,8 @@ describe('配置提案', () => {
       error: 'invalid arguments',
     });
     expect(
-      await h.service.propose({ autonomy: 'god' }, { secretaryConversationId: 'sec-1' })
-    ).toEqual({ ok: false, error: 'invalid autonomy' });
+      await h.service.propose({ notify: 'always' }, { secretaryConversationId: 'sec-1' })
+    ).toEqual({ ok: false, error: 'invalid notify' });
     expect(h.file.proposals).toEqual({});
   });
 

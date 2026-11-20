@@ -7,7 +7,6 @@ import {
   DirectLink,
   type DirectPeerFactory,
   type DirectTransport,
-  encodeVoiceChunks,
   type FrameReplay,
   fromBase64Url,
   type Heartbeat,
@@ -56,13 +55,6 @@ import {
   type SyncTracking,
 } from '@shared/pair/syncProjection';
 import { normalizeTimelinePrefs } from '@shared/pair/timelinePrefs';
-import {
-  SPEECH_MAX_SECONDS,
-  SPEECH_SAMPLE_RATE,
-  type SpeechErrorCode,
-  type SpeechTranscribeResult,
-  type VoiceSession,
-} from '@shared/types/speech';
 import { type PhoneCacheData, type PhoneCacheStore, phoneCache } from './sessionCache';
 import {
   setCompactReadOnlyTools,
@@ -93,17 +85,8 @@ export type GroupTimelineFrame = Extract<HostToPhone, { type: 'group-timeline' }
 export type BotChatStateFrame = Extract<HostToPhone, { type: 'bot-chat-state' }>;
 export type BotSendResultFrame = Extract<HostToPhone, { type: 'bot-send-result' }>;
 
-const VOICE_TIMEOUT_MS = 60_000;
 /** 与 pairHost / pairGuest 同口径的单帧预检，留出中继 1MB 上限的余量（直连拼帧同限） */
 const RELAY_FRAME_LIMIT = 1_000_000;
-/** 约 200ms 一块：桌面边收边识别 */
-const VOICE_CHUNK_SAMPLES = SPEECH_SAMPLE_RATE / 5;
-const SPEECH_ERRORS: readonly string[] = [
-  'disabled',
-  'not-ready',
-  'invalid-audio',
-  'failed',
-] satisfies SpeechErrorCode[];
 
 export interface ClientEvents {
   onState(state: ConnState): void;
@@ -123,8 +106,6 @@ export interface ClientEvents {
   onTransport?(transport: DirectTransport): void;
   /** 当前业务通道 ping→pong 往返（ms） */
   onRtt?(ms: number): void;
-  /** 桌面语音识别是否可用；断线/换主机视为不可用 */
-  onVoiceInput?(available: boolean): void;
   /** 桌面把本设备设为只读（host-info.readOnly）；host 侧另有强制拦截 */
   onReadOnly?(readOnly: boolean): void;
   /** 桌面支持桌面模式（host-info.remoteDesktop）；旧桌面缺省 */
@@ -205,15 +186,6 @@ export class PairClient {
   private pendingDirectRestart = false;
   private probeNonce = 0;
   private probeSentAt: number | null = null;
-  private voiceInput = false;
-  /** 未结束的录音会话：partial 路由与结果/断线结算 */
-  private voices = new Map<
-    string,
-    {
-      onPartial: (text: string, correcting: boolean) => void;
-      settle: (result: SpeechTranscribeResult) => void;
-    }
-  >();
   private metadata: Omit<PhoneCacheData, 'sessions'> = {
     catalog: [],
     pinnedOrder: [],
@@ -239,7 +211,6 @@ export class PairClient {
       onTransportChange: (t) => {
         if (t === 'relay' && this.ws?.readyState !== 1 && !this.revoked && !this.closed) {
           this.events.onState('offline');
-          this.dropVoice();
         }
         this.events.onTransport?.(t);
       },
@@ -338,7 +309,6 @@ export class PairClient {
       // 直连还活着就不算掉线：中继默默重连，直连再掉时由 onTransportChange 补置 offline
       if (this.direct.transport() !== 'direct') {
         this.events.onState('offline');
-        this.dropVoice();
       }
       this.scheduleReconnect();
     };
@@ -390,7 +360,6 @@ export class PairClient {
             this.events.onState('host-offline');
             this.direct.peerOnline(false);
             this.roomPrimed = false;
-            this.dropVoice();
           } else if (control.type === 'revoked') {
             // 桌面端解除了配对：立即停手，别再重连
             this.revoke();
@@ -461,7 +430,6 @@ export class PairClient {
     try {
       this.ws?.close();
     } catch {}
-    this.dropVoice();
   }
 
   private scheduleReconnect(): void {
@@ -571,24 +539,8 @@ export class PairClient {
         break;
       case 'host-info':
         this.direct.hostInfo(payload);
-        this.setVoiceInput(payload.voiceInput === true);
         this.events.onReadOnly?.(payload.readOnly === true);
         this.events.onRemoteDesktop?.(payload.remoteDesktop === true);
-        break;
-      case 'voice-result': {
-        const { error } = payload;
-        this.voices.get(payload.requestId)?.settle(
-          error === undefined
-            ? { ok: true, text: typeof payload.text === 'string' ? payload.text : '' }
-            : {
-                ok: false,
-                error: SPEECH_ERRORS.includes(error) ? (error as SpeechErrorCode) : 'failed',
-              }
-        );
-        break;
-      }
-      case 'voice-partial':
-        this.voices.get(payload.requestId)?.onPartial(payload.text, payload.correcting === true);
         break;
       case 'direct-answer':
       case 'direct-ice':
@@ -846,106 +798,6 @@ export class PairClient {
     return this.sessions.get(sessionId);
   }
 
-  /**
-   * 边录边传 16kHz 单声道 PCM，满一块立即发，首字不多等。
-   * finish 时恰好没有余量就补 10ms 静音作 last 块（空块会被判为坏音频）。
-   */
-  startVoice(onPartial: (text: string, correcting: boolean) => void): VoiceSession {
-    const requestId = crypto.randomUUID();
-    const maxSamples = SPEECH_SAMPLE_RATE * SPEECH_MAX_SECONDS;
-    let buffer = new Float32Array(VOICE_CHUNK_SAMPLES);
-    let filled = 0;
-    let index = 0;
-    let total = 0;
-    let overflow = false;
-    let finishing: Promise<SpeechTranscribeResult> | null = null;
-    let outcome: SpeechTranscribeResult | null = null;
-    let resolveFinish: ((result: SpeechTranscribeResult) => void) | null = null;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const settle = (result: SpeechTranscribeResult): void => {
-      if (outcome) return;
-      outcome = result;
-      clearTimeout(timer);
-      this.voices.delete(requestId);
-      resolveFinish?.(result);
-    };
-    const emit = (samples: Float32Array, last: boolean): void => {
-      // 漏发一块桌面就永远凑不齐：发不出去立即判失败
-      if (!this.canSend()) {
-        settle({ ok: false, error: 'failed' });
-        return;
-      }
-      const [data] = encodeVoiceChunks(samples, samples.length);
-      this.send({
-        type: 'voice-chunk',
-        requestId,
-        index: index++,
-        data,
-        ...(last ? { last: true as const } : {}),
-      });
-    };
-    const abandon = (result: SpeechTranscribeResult): void => {
-      if (index > 0 && !outcome) this.send({ type: 'voice-cancel', requestId });
-      settle(result);
-    };
-    this.voices.set(requestId, { onPartial, settle });
-    return {
-      push: (samples) => {
-        if (outcome || finishing || overflow) return;
-        if (total + samples.length > maxSamples) {
-          overflow = true;
-          return;
-        }
-        total += samples.length;
-        let offset = 0;
-        while (offset < samples.length && !outcome) {
-          const n = Math.min(samples.length - offset, VOICE_CHUNK_SAMPLES - filled);
-          buffer.set(samples.subarray(offset, offset + n), filled);
-          filled += n;
-          offset += n;
-          if (filled < VOICE_CHUNK_SAMPLES) continue;
-          emit(buffer, false);
-          buffer = new Float32Array(VOICE_CHUNK_SAMPLES);
-          filled = 0;
-        }
-      },
-      finish: () => {
-        if (finishing) return finishing;
-        finishing = outcome
-          ? Promise.resolve(outcome)
-          : new Promise<SpeechTranscribeResult>((resolve) => {
-              resolveFinish = resolve;
-            });
-        if (outcome) return finishing;
-        if (overflow) abandon({ ok: false, error: 'invalid-audio' });
-        else if (total === 0) settle({ ok: false, error: 'invalid-audio' });
-        else {
-          emit(
-            filled > 0 ? buffer.subarray(0, filled) : new Float32Array(SPEECH_SAMPLE_RATE / 100),
-            true
-          );
-          if (!outcome) {
-            timer = setTimeout(() => settle({ ok: false, error: 'failed' }), VOICE_TIMEOUT_MS);
-          }
-        }
-        return finishing;
-      },
-      cancel: () => abandon({ ok: false, error: 'failed' }),
-    };
-  }
-
-  private setVoiceInput(available: boolean): void {
-    if (this.voiceInput === available) return;
-    this.voiceInput = available;
-    this.events.onVoiceInput?.(available);
-  }
-
-  /** 断线后 host 侧缓冲随连接清掉，结果不会再来：在途请求立即失败 */
-  private dropVoice(): void {
-    this.setVoiceInput(false);
-    for (const voice of [...this.voices.values()]) voice.settle({ ok: false, error: 'failed' });
-  }
-
   private canSend(): boolean {
     return (
       !this.closed &&
@@ -1119,7 +971,6 @@ export class PairClient {
     this.direct.close();
     this.heartbeat?.stop();
     this.heartbeat = null;
-    this.dropVoice();
     this.flushCache();
     this.events.onState('replaced');
   }
@@ -1137,7 +988,6 @@ export class PairClient {
     this.cursors.clear();
     this.baselines.clear();
     void this.cache.clear(this.device.pairId).catch(() => {});
-    this.dropVoice();
     this.events.onState('unauthorized');
   }
 

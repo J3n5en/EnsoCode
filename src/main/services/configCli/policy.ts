@@ -28,7 +28,7 @@ const WRITE_DENIED = new Set([
   'contextMenuOpen',
 ]);
 /** 整体替换或增删条目等同安装/卸载；条目内字段（如 enabled）仍可写 */
-const ENTRY_LEVEL_DENIED = new Set(['plugins', 'skills', 'instructions']);
+const ENTRY_LEVEL_DENIED = new Set(['skills', 'instructions']);
 /** 启动时读入、UI 另走专用 IPC 的项：只改设置不会生效 */
 const RESTART_REQUIRED: Record<string, string> = {
   autoUpdate: 'The updater reads this at startup; toggle it in Settings or restart the app.',
@@ -196,7 +196,7 @@ export function describeConfig(state: Record<string, unknown>, fields: readonly 
       entryLevelDeniedFields: [...ENTRY_LEVEL_DENIED],
       readDeniedFields: [...READ_DENIED],
       deniedOperations: [
-        'install/uninstall plugins, skills or instructions (replace or add/remove entries)',
+        'install/uninstall skills or instructions (replace or add/remove entries)',
         'read or write project/session data (projects, projectGroups)',
         'change file paths, shells or executable commands',
         'read or write secrets (use the Settings page)',

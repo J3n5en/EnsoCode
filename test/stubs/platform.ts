@@ -21,7 +21,6 @@ export const pluginHostPath = '/tmp/plugin-host.js';
 export const resourcesPath = '/tmp/resources';
 
 export const images = { fromBuffer: () => null };
-export const mediaAccess = { microphone: async () => true };
 
 export const notification = {
   isSupported: () => false,

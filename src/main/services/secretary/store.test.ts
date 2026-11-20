@@ -22,21 +22,12 @@ const profile: SecretaryProfile = {
   version: 1,
   name: '小秘',
   avatar: { color: '#0ea5e9' },
-  autonomy: 'tell-after',
-  autoApproveProjectIds: ['p1'],
   takeoverScope: { mode: 'projects', projectIds: [] },
   pluginIds: [],
   skillIds: [],
   visibleProjectIds: 'all',
-  dispatchModel: { mode: 'project' },
-  dispatchWorktree: 'auto',
   maxRunningDispatches: 3,
   patrolEnabled: true,
-  patrolIntervalMinutes: 15,
-  patrolIdleGoalMinutes: 3,
-  orphanTaskPatrol: true,
-  dispatchMuted: true,
-  dispatchUnattended: true,
   replyLanguage: 'ui',
   style: 'concise',
   notify: 'needs-user',
@@ -69,7 +60,7 @@ describe('SecretaryStore', () => {
       autonomy: 'nope',
     } as never);
     expect(saved.maxRunningDispatches).toBe(10);
-    expect(saved.autonomy).toBe('ask-first');
+    expect(saved).not.toHaveProperty('autonomy');
     expect(new SecretaryStore(dir, now).profile()).toEqual(saved);
   });
 

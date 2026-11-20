@@ -1,7 +1,6 @@
 import type { SettingsDeepLink } from '@shared/settingsDeepLink';
 import {
   BarChart3,
-  Blocks,
   Bot,
   BotMessageSquare,
   Brain,
@@ -14,7 +13,6 @@ import {
   Layers,
   LayoutTemplate,
   MessagesSquare,
-  Mic,
   Palette,
   Plug,
   Puzzle,
@@ -50,7 +48,7 @@ import { McpSettings } from './McpSettings';
 import { MemoryKnowledge } from './MemoryKnowledge';
 import { MemoryLibrary } from './MemoryLibrary';
 import { MemorySettings } from './MemorySettings';
-import { ClaudePluginsSettings, EnsoPluginsSettings } from './PluginsSettings';
+import { EnsoPluginsSettings } from './PluginsSettings';
 import { PresetsSettings } from './PresetsSettings';
 import { PrivacySettings } from './PrivacySettings';
 import { ProvidersSettings } from './ProvidersSettings';
@@ -65,7 +63,6 @@ import {
   visibleCategories,
 } from './settingsCategories';
 import { UsageSettings } from './UsageSettings';
-import { VoiceInputSettings } from './VoiceInputSettings';
 import { WorkflowsSettings } from './WorkflowsSettings';
 
 function flashSettingsRow(rowId: string): void {
@@ -158,7 +155,6 @@ export function SettingsContent() {
   }> = [
     { id: 'general', icon: Settings, label: 'General' },
     { id: 'shortcuts', icon: Keyboard, label: 'Shortcuts' },
-    { id: 'voice', icon: Mic, label: 'Voice input' },
     { id: 'appearance', icon: Palette, label: 'Appearance' },
     { id: 'providers', icon: Server, label: 'Model Providers' },
     { id: 'presets', icon: Layers, label: 'Presets' },
@@ -169,7 +165,6 @@ export function SettingsContent() {
     { id: 'privacy', icon: Shield, label: 'Privacy' },
     { id: 'skills', icon: Sparkles, label: 'Skills' },
     { id: 'plugins', icon: Puzzle, label: 'Enso plugins' },
-    { id: 'claudePlugins', icon: Blocks, label: 'Claude Code plugins' },
     { id: 'mcp', icon: Plug, label: 'MCP Servers' },
     { id: 'instructions', icon: FileText, label: 'Instruction Files' },
     { id: 'phone', icon: Smartphone, label: 'Devices' },
@@ -337,7 +332,6 @@ export function SettingsContent() {
                 onRequestedMarketQueryConsumed={() => setMarketQuery(null)}
               />
             )}
-            {activeCategory === 'claudePlugins' && <ClaudePluginsSettings />}
             {activeCategory === 'mcp' && <McpSettings />}
             {activeCategory === 'instructions' && <InstructionsSettings />}
             {activeCategory === 'presets' && <PresetsSettings />}
@@ -356,7 +350,6 @@ export function SettingsContent() {
             {activeCategory === 'usage' && <UsageSettings />}
             {activeCategory === 'privacy' && <PrivacySettings />}
             {activeCategory === 'resources' && <ResourcesSettings />}
-            {activeCategory === 'voice' && <VoiceInputSettings />}
             {activeCategory === 'experimental' && (
               <ExperimentalSettings onOpenBots={() => setActiveCategory('bots')} />
             )}

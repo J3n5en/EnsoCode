@@ -5,6 +5,7 @@ import type {
   CleanupItem,
   CleanupItemKind,
   DispatchDraft,
+  DispatchModelRef,
   DispatchRecord,
   PatrolReason,
   PendingDispatch,
@@ -31,11 +32,6 @@ import {
 } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
-import {
-  DEFAULT_PATROL_IDLE_GOAL_MINUTES,
-  MAX_PATROL_IDLE_GOAL_MINUTES,
-  MIN_PATROL_IDLE_GOAL_MINUTES,
-} from './patrol';
 import { parseSecretarySkillDraft } from './skills';
 
 const DEFAULT_AVATAR_COLOR = '#7c5cff';
@@ -46,14 +42,9 @@ const COLOR_RE = /^#[0-9a-f]{6}$/iu;
 const IMAGE_HASH_RE = /^[0-9a-f]{8}$/u;
 const CLOCK_RE = /^([01]\d|2[0-3]):[0-5]\d$/u;
 
-const AUTONOMIES = ['ask-first', 'tell-after', 'full'] as const;
-const WORKTREE_MODES = ['never', 'auto', 'always'] as const;
 const REPLY_LANGUAGES = ['ui', 'zh', 'en'] as const;
 const STYLES = ['concise', 'detailed'] as const;
 const NOTIFY_MODES = ['needs-user', 'with-done', 'off'] as const;
-export const MIN_PATROL_INTERVAL_MINUTES = 5;
-export const MAX_PATROL_INTERVAL_MINUTES = 120;
-export const DEFAULT_PATROL_INTERVAL_MINUTES = 15;
 const PATROL_REASONS: readonly PatrolReason[] = PATROL_REASON_KINDS;
 const PENDING_PROBLEMS: readonly PendingProblem[] = [
   'dependency-failed',
@@ -130,27 +121,12 @@ function parseModel(value: unknown): ModelRef | undefined {
   return providerId && modelId ? { providerId, modelId } : undefined;
 }
 
-function parseProfileModel(value: unknown): SecretaryProfile['model'] {
+function parseDispatchModelRef(value: unknown): DispatchModelRef | undefined {
   const model = parseModel(value);
   if (!model || !isObject(value)) return undefined;
   return THINKING_LEVELS.includes(value.thinkingLevel as ThinkingLevel)
     ? { ...model, thinkingLevel: value.thinkingLevel as ThinkingLevel }
     : model;
-}
-
-function parseDispatchModel(value: unknown): SecretaryProfile['dispatchModel'] {
-  if (!isObject(value)) return { mode: 'project' };
-  if (value.mode === 'fixed') {
-    const model = parseModel(value.model);
-    if (model) return { mode: 'fixed', model };
-  }
-  if (value.mode === 'choose' && Array.isArray(value.candidates)) {
-    const candidates = value.candidates
-      .map(parseModel)
-      .filter((model): model is ModelRef => model !== undefined);
-    if (candidates.length > 0) return { mode: 'choose', candidates };
-  }
-  return { mode: 'project' };
 }
 
 /** 缺省与脏值都回「勾选的项目」且一个都不勾：等价于逐个授权，不会悄悄放大权限 */
@@ -164,7 +140,11 @@ function parseTakeoverScope(value: unknown): SecretaryTakeoverScope {
   return DEFAULT_TAKEOVER_SCOPE;
 }
 
-/** 缺省字段按设计稿默认值补齐，未知键丢弃；非对象视为未完成初次设置 */
+/**
+ * 缺省字段按设计稿默认值补齐，未知键丢弃；非对象视为未完成初次设置。
+ * 旧档案里已删除的设置项（秘书模型、自主度、派发模型与 worktree、巡检间隔、派出默认开关）
+ * 也按未知键丢掉：派发固定直接执行、跟随项目模型、静音且无人值守。
+ */
 export function parseProfile(value: unknown): SecretaryProfile | null {
   if (!isObject(value)) return null;
   const avatar = isObject(value.avatar) ? value.avatar : {};
@@ -185,34 +165,15 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
         ? { imageVersion, ...(imageHash ? { imageHash } : {}) }
         : {}),
     },
-    autonomy: oneOf(value.autonomy, AUTONOMIES, 'ask-first'),
-    autoApproveProjectIds: texts(value.autoApproveProjectIds),
     takeoverScope: parseTakeoverScope(value.takeoverScope),
     pluginIds: texts(value.pluginIds),
     skillIds: texts(value.skillIds),
     visibleProjectIds: Array.isArray(value.visibleProjectIds)
       ? texts(value.visibleProjectIds)
       : 'all',
-    dispatchModel: parseDispatchModel(value.dispatchModel),
-    dispatchWorktree: oneOf(value.dispatchWorktree, WORKTREE_MODES, 'auto'),
     maxRunningDispatches:
       clampInt(value.maxRunningDispatches, MIN_RUNNING_DISPATCHES, MAX_RUNNING_DISPATCHES) ?? 3,
     patrolEnabled: flag(value.patrolEnabled, true),
-    patrolIntervalMinutes:
-      clampInt(
-        value.patrolIntervalMinutes,
-        MIN_PATROL_INTERVAL_MINUTES,
-        MAX_PATROL_INTERVAL_MINUTES
-      ) ?? DEFAULT_PATROL_INTERVAL_MINUTES,
-    patrolIdleGoalMinutes:
-      clampInt(
-        value.patrolIdleGoalMinutes,
-        MIN_PATROL_IDLE_GOAL_MINUTES,
-        MAX_PATROL_IDLE_GOAL_MINUTES
-      ) ?? DEFAULT_PATROL_IDLE_GOAL_MINUTES,
-    orphanTaskPatrol: flag(value.orphanTaskPatrol, true),
-    dispatchMuted: flag(value.dispatchMuted, true),
-    dispatchUnattended: flag(value.dispatchUnattended, true),
     replyLanguage: oneOf(value.replyLanguage, REPLY_LANGUAGES, 'ui'),
     style: oneOf(value.style, STYLES, 'concise'),
     notify: oneOf(value.notify, NOTIFY_MODES, 'needs-user'),
@@ -223,8 +184,6 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
   // 停用名单缺省不落盘：大多数档案一个停用都没有
   const disabledSkillNames = texts(value.disabledSkillNames);
   if (disabledSkillNames.length > 0) profile.disabledSkillNames = disabledSkillNames;
-  const model = parseProfileModel(value.model);
-  if (model) profile.model = model;
   const addressAs = text(value.addressAs);
   if (addressAs) profile.addressAs = addressAs;
   if (typeof value.dailyBriefAt === 'string' && CLOCK_RE.test(value.dailyBriefAt))
@@ -237,36 +196,12 @@ export type ProfileDraftResult =
   | { ok: false; error: string };
 
 const DRAFT_ENUMS: Record<string, readonly string[]> = {
-  autonomy: AUTONOMIES,
-  dispatchWorktree: WORKTREE_MODES,
   replyLanguage: REPLY_LANGUAGES,
   style: STYLES,
   notify: NOTIFY_MODES,
 };
 
 const PERSONA_MAX_CHARS = 4000;
-
-function validModel(value: unknown): boolean {
-  if (!isObject(value) || !text(value.providerId) || !text(value.modelId)) return false;
-  return (
-    value.thinkingLevel === undefined ||
-    THINKING_LEVELS.includes(value.thinkingLevel as ThinkingLevel)
-  );
-}
-
-function validDispatchModel(value: unknown): boolean {
-  if (!isObject(value)) return false;
-  if (value.mode === 'project') return true;
-  if (value.mode === 'fixed') return validModel(value.model);
-  if (value.mode === 'choose') {
-    return (
-      Array.isArray(value.candidates) &&
-      value.candidates.length > 0 &&
-      value.candidates.every(validModel)
-    );
-  }
-  return false;
-}
 
 function validIdList(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => text(item) !== undefined);
@@ -284,7 +219,7 @@ function parseTakeoverScopeDraft(value: unknown): SecretaryTakeoverScope | null 
 
 /**
  * 表单与配置提案的写入收窄：越界的枚举当场拒绝，而不是像读盘那样静默回默认值，
- * 否则用户勾了"完全自主"却悄悄退回"先问我"。
+ * 否则用户选了"详细"却悄悄退回"简洁"。
  */
 export function parseProfileDraft(value: unknown): ProfileDraftResult {
   if (!isObject(value)) return { ok: false, error: 'invalid profile' };
@@ -307,23 +242,6 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     }
     // 图片只由设置页上传写入 imageVersion / imageHash。草案里的路径、版本号、指纹一律丢掉。
     if (typeof color === 'string') draft.avatar = { color };
-  }
-  if (value.model !== undefined) {
-    if (value.model === null) draft.model = null;
-    else if (validModel(value.model)) draft.model = parseProfileModel(value.model);
-    else return { ok: false, error: 'invalid model' };
-  }
-  if (value.dispatchModel !== undefined) {
-    if (!validDispatchModel(value.dispatchModel)) {
-      return { ok: false, error: 'invalid dispatchModel' };
-    }
-    draft.dispatchModel = parseDispatchModel(value.dispatchModel);
-  }
-  if (value.autoApproveProjectIds !== undefined) {
-    if (!validIdList(value.autoApproveProjectIds)) {
-      return { ok: false, error: 'invalid autoApproveProjectIds' };
-    }
-    draft.autoApproveProjectIds = texts(value.autoApproveProjectIds);
   }
   if (value.takeoverScope !== undefined) {
     const scope = parseTakeoverScopeDraft(value.takeoverScope);
@@ -363,40 +281,10 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     }
     draft.maxRunningDispatches = max;
   }
-  if (value.patrolIntervalMinutes !== undefined) {
-    const minutes = value.patrolIntervalMinutes;
-    if (
-      typeof minutes !== 'number' ||
-      !Number.isInteger(minutes) ||
-      minutes < MIN_PATROL_INTERVAL_MINUTES ||
-      minutes > MAX_PATROL_INTERVAL_MINUTES
-    ) {
-      return { ok: false, error: 'invalid patrolIntervalMinutes' };
-    }
-    draft.patrolIntervalMinutes = minutes;
-  }
-  if (value.patrolIdleGoalMinutes !== undefined) {
-    const minutes = value.patrolIdleGoalMinutes;
-    if (
-      typeof minutes !== 'number' ||
-      !Number.isInteger(minutes) ||
-      minutes < MIN_PATROL_IDLE_GOAL_MINUTES ||
-      minutes > MAX_PATROL_IDLE_GOAL_MINUTES
-    ) {
-      return { ok: false, error: 'invalid patrolIdleGoalMinutes' };
-    }
-    draft.patrolIdleGoalMinutes = minutes;
-  }
-  for (const key of [
-    'dispatchMuted',
-    'dispatchUnattended',
-    'patrolEnabled',
-    'orphanTaskPatrol',
-  ] as const) {
-    const raw = value[key];
-    if (raw === undefined) continue;
-    if (typeof raw !== 'boolean') return { ok: false, error: `invalid ${key}` };
-    draft[key] = raw;
+  if (value.patrolEnabled !== undefined) {
+    if (typeof value.patrolEnabled !== 'boolean')
+      return { ok: false, error: 'invalid patrolEnabled' };
+    draft.patrolEnabled = value.patrolEnabled;
   }
   if (value.addressAs !== undefined) {
     if (value.addressAs === null) draft.addressAs = null;
@@ -408,10 +296,6 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     else if (typeof value.dailyBriefAt === 'string' && CLOCK_RE.test(value.dailyBriefAt)) {
       draft.dailyBriefAt = value.dailyBriefAt;
     } else return { ok: false, error: 'invalid dailyBriefAt' };
-  }
-  if (value.autonomy !== undefined) draft.autonomy = value.autonomy as SecretaryProfile['autonomy'];
-  if (value.dispatchWorktree !== undefined) {
-    draft.dispatchWorktree = value.dispatchWorktree as SecretaryProfile['dispatchWorktree'];
   }
   if (value.replyLanguage !== undefined) {
     draft.replyLanguage = value.replyLanguage as SecretaryProfile['replyLanguage'];
@@ -437,7 +321,7 @@ function parseDraft(value: unknown): DispatchDraft | undefined {
   if (title) draft.title = title;
   const goal = text(value.goal);
   if (goal) draft.goal = goal;
-  const model = parseProfileModel(value.model);
+  const model = parseDispatchModelRef(value.model);
   if (model) draft.model = model;
   const todoId = text(value.todoId);
   if (todoId) draft.todoId = todoId;
@@ -652,7 +536,7 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (baseRef) record.baseRef = baseRef;
   const branch = text(value.branch);
   if (branch) record.branch = branch;
-  const model = parseProfileModel(value.model);
+  const model = parseDispatchModelRef(value.model);
   if (model) record.model = model;
   const stoppedAt = time(value.stoppedAt);
   if (stoppedAt !== undefined) record.stoppedAt = stoppedAt;

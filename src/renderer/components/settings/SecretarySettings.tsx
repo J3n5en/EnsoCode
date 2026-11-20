@@ -641,7 +641,7 @@ export function SecretarySettings() {
 
       <Section
         title="Secretary profile"
-        description="Name, avatar, model and how much the secretary may do on its own."
+        description="Name, avatar, visible projects and patrol."
         rowId="secretary.profile"
       >
         {profile ? (

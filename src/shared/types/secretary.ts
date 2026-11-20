@@ -1,7 +1,5 @@
 import type { ModelRef, ThinkingLevel } from './agent';
 
-export type SecretaryAutonomy = 'ask-first' | 'tell-after' | 'full';
-
 /**
  * 秘书可以接管的会话范围：逐个授权（确认卡）、勾选的项目、所有可见项目。
  * 缺省是「勾选的项目」且一个都不勾，等价于逐个授权，升级后权限不会突然变大。
@@ -16,9 +14,6 @@ export interface SecretaryProfile {
   name: string;
   /** imageHash 是当前图片字节的短指纹：URL 带上它，换图后一定换地址 */
   avatar: { color: string; imageVersion?: number; imageHash?: string };
-  model?: ModelRef & { thinkingLevel?: ThinkingLevel };
-  autonomy: SecretaryAutonomy;
-  autoApproveProjectIds: string[];
   /** 不用逐个授权就能发消息、停止会话的项目范围 */
   takeoverScope: SecretaryTakeoverScope;
   /** 勾选给秘书用的 Enso 插件 id；插件停用或卸载后自动失效，不改写档案 */
@@ -28,24 +23,9 @@ export interface SecretaryProfile {
   /** 秘书自有 skill 里被停用的目录名：文件还在，只是不进会话 */
   disabledSkillNames?: string[];
   visibleProjectIds: 'all' | string[];
-  dispatchModel:
-    | { mode: 'project' }
-    | { mode: 'fixed'; model: ModelRef }
-    | { mode: 'choose'; candidates: ModelRef[] };
-  dispatchWorktree: 'never' | 'auto' | 'always';
   maxRunningDispatches: number;
-  /** 自动巡检：有进行中的会话时定期检查，只在发现异常时推一条 */
+  /** 自动巡检：有进行中的会话时按默认间隔检查、每小时扫一次遗留后台任务，只在发现异常时推一条 */
   patrolEnabled: boolean;
-  /** 巡检间隔，分钟 */
-  patrolIntervalMinutes: number;
-  /** goal 会话空闲多久算停住，分钟。缺省 3，可配 1–30 */
-  patrolIdleGoalMinutes?: number;
-  /** 遗留任务巡检：已完成会话里还在跑的后台任务，每小时扫一次，只推不杀。缺省开启 */
-  orphanTaskPatrol?: boolean;
-  /** 新派出的会话默认静音：不弹系统通知、不推送、不计角标 */
-  dispatchMuted: boolean;
-  /** 新派出的会话默认无人值守：需要人确认的动作直接按「没人可批准」拒绝 */
-  dispatchUnattended: boolean;
   addressAs?: string;
   replyLanguage: 'ui' | 'zh' | 'en';
   style: 'concise' | 'detailed';
@@ -61,13 +41,9 @@ export interface SecretaryProfile {
  * 人设文字不落 profile.json，随草案一起传，由 Main 写 persona.md。
  */
 export type SecretaryProfileDraft = Partial<
-  Omit<
-    SecretaryProfile,
-    'version' | 'updatedAt' | 'model' | 'addressAs' | 'dailyBriefAt' | 'avatar'
-  >
+  Omit<SecretaryProfile, 'version' | 'updatedAt' | 'addressAs' | 'dailyBriefAt' | 'avatar'>
 > & {
   avatar?: Partial<SecretaryProfile['avatar']>;
-  model?: SecretaryProfile['model'] | null;
   addressAs?: string | null;
   dailyBriefAt?: string | null;
   persona?: string;
@@ -82,7 +58,7 @@ export type ProposalStatus =
   | 'expired';
 
 /**
- * 派发时用的模型：与秘书档案的 model 同一形状（provider + model + 可选思考档位），
+ * 派发时用的模型：provider + model + 可选思考档位，
  * Main 在派发前按同一套可用性判定解析，解析后的值落进派发记录，卡片据此显示。
  */
 export type DispatchModelRef = ModelRef & { thinkingLevel?: ThinkingLevel };
@@ -489,7 +465,7 @@ export interface SecretaryBoardTodo extends SecretaryTodo {
   sessionState?: 'running' | 'idle' | 'waiting' | 'error' | 'not-started' | 'gone';
 }
 
-/** 界面对待办的操作；dispatch 是用户亲手点出，不再走自主度确认 */
+/** 界面对待办的操作；dispatch 是用户亲手点出，直接派发 */
 export type SecretaryTodoMutate =
   | { action: 'add'; text: string; dueAt?: number; projectId?: string }
   | { action: 'update'; todoId: string; text?: string; dueAt?: number | null; done?: boolean }

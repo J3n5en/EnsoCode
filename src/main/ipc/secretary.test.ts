@@ -206,12 +206,12 @@ describe('IPC 入参收窄', () => {
       parseResolveProposalRequest({
         proposalId: 'p1',
         action: 'confirm',
-        profileDraft: { name: '小秘', autonomy: 'full' },
+        profileDraft: { name: '小秘', patrolEnabled: false },
       })
     ).toEqual({
       proposalId: 'p1',
       action: 'confirm',
-      profileDraft: { name: '小秘', autonomy: 'full' },
+      profileDraft: { name: '小秘', patrolEnabled: false },
     });
     expect(
       parseResolveProposalRequest({ proposalId: 'p1', action: 'confirm', profileDraft: 'x' })

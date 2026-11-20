@@ -108,7 +108,6 @@ import type {
   GitRequest,
   GitStatusResult,
   HostDirListing,
-  InstalledPluginInfo,
   ListModelsResult,
   LocalAssetScanResult,
   LocalProviderScanResult,
@@ -226,6 +225,7 @@ import type {
 } from '@shared/types/browser';
 import type { DcgActionResult, DcgStatus } from '@shared/types/dcg';
 import type { SessionChangeSnapshots } from '@shared/types/fileChanges';
+import type { RestartOverlayState } from '@shared/types/ipc';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -258,13 +258,6 @@ import type {
   TerminalDataEvent,
   TerminalExitEvent,
 } from '@shared/types/sidePanel';
-import type {
-  SpeechDownloadProgressDto,
-  SpeechModelId,
-  SpeechPartialDto,
-  SpeechStatusDto,
-  SpeechTranscribeResult,
-} from '@shared/types/speech';
 import type { UpdaterState, UpdateStatus } from '@shared/types/updater';
 import type {
   WorkflowPresetDraft,
@@ -287,6 +280,18 @@ import type {
 } from '@shared/workspaceSearchQuery';
 import { zoomPercent } from '@shared/zoomBanner';
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron';
+
+function parseRestartOverlay(value: unknown): RestartOverlayState | null {
+  if (!value || typeof value !== 'object') return null;
+  const { phase, reason, exit } = value as { phase?: unknown; reason?: unknown; exit?: unknown };
+  if (phase === 'restarting' || phase === 'resuming') return { phase };
+  if (phase !== 'waiting') return null;
+  return {
+    phase,
+    reason: reason === 'background-not-detachable' ? reason : 'tool',
+    exit: exit === 'update' || exit === 'quit' ? exit : 'restart',
+  };
+}
 
 const electronAPI = {
   env: {
@@ -312,6 +317,16 @@ const electronAPI = {
     },
     respondFlushPersist: (requestId: string): void => {
       ipcRenderer.send(IPC_CHANNELS.APP_FLUSH_PERSIST_RESPONSE, requestId);
+    },
+    onRestartWaiting: (callback: (state: RestartOverlayState | null) => void): (() => void) => {
+      const listener = (_: unknown, state: unknown) => callback(parseRestartOverlay(state));
+      ipcRenderer.on(IPC_CHANNELS.APP_RESTART_WAITING, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_RESTART_WAITING, listener);
+    },
+    getRestartWaiting: async (): Promise<RestartOverlayState | null> =>
+      parseRestartOverlay(await ipcRenderer.invoke(IPC_CHANNELS.APP_RESTART_WAITING_GET)),
+    forceRestart: (): void => {
+      ipcRenderer.send(IPC_CHANNELS.APP_RESTART_FORCE);
     },
     setBadgeCount: (count: number): void => {
       ipcRenderer.send(IPC_CHANNELS.APP_SET_BADGE_COUNT, count);
@@ -723,39 +738,6 @@ const electronAPI = {
     uninstall: (): Promise<DcgActionResult> => ipcRenderer.invoke(IPC_CHANNELS.DCG_UNINSTALL),
   },
 
-  speech: {
-    status: (): Promise<SpeechStatusDto> => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_STATUS),
-    download: (modelId: SpeechModelId): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SPEECH_DOWNLOAD, modelId),
-    cancelDownload: (modelId: SpeechModelId): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SPEECH_CANCEL, modelId),
-    remove: (modelId: SpeechModelId): Promise<boolean> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SPEECH_DELETE, modelId),
-    /** 16kHz 单声道 PCM；首块到达即开会话 */
-    pushAudio: (sessionId: string, audio: Float32Array): void =>
-      ipcRenderer.send(IPC_CHANNELS.SPEECH_SESSION_PUSH, sessionId, audio),
-    finishSession: (sessionId: string): Promise<SpeechTranscribeResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SPEECH_SESSION_FINISH, sessionId),
-    cancelSession: (sessionId: string): void =>
-      ipcRenderer.send(IPC_CHANNELS.SPEECH_SESSION_CANCEL, sessionId),
-    onPartial: (listener: (partial: SpeechPartialDto) => void): (() => void) => {
-      const handler = (_event: unknown, partial: SpeechPartialDto) => listener(partial);
-      ipcRenderer.on(IPC_CHANNELS.SPEECH_PARTIAL, handler);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.SPEECH_PARTIAL, handler);
-    },
-    requestMicAccess: (): Promise<boolean> => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_MIC_ACCESS),
-    onProgress: (listener: (progress: SpeechDownloadProgressDto) => void): (() => void) => {
-      const handler = (_event: unknown, progress: SpeechDownloadProgressDto) => listener(progress);
-      ipcRenderer.on(IPC_CHANNELS.SPEECH_PROGRESS, handler);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.SPEECH_PROGRESS, handler);
-    },
-    onStatusChanged: (listener: () => void): (() => void) => {
-      const handler = () => listener();
-      ipcRenderer.on(IPC_CHANNELS.SPEECH_STATUS_CHANGED, handler);
-      return () => ipcRenderer.removeListener(IPC_CHANNELS.SPEECH_STATUS_CHANGED, handler);
-    },
-  },
-
   providers: {
     scanLocal: (): Promise<LocalProviderScanResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.PROVIDERS_SCAN_LOCAL),
@@ -806,8 +788,6 @@ const electronAPI = {
   assets: {
     scanLocal: (): Promise<LocalAssetScanResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_SCAN_LOCAL),
-    listInstalledPlugins: (): Promise<InstalledPluginInfo[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.PLUGINS_LIST_INSTALLED),
     collectImport: (scanId: string, candidateIds: string[]): Promise<CollectedAsset[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.ASSETS_COLLECT_IMPORT, scanId, candidateIds),
     /** cwd 为空只列插件 skill；presetId 决定哪些插件预设圈定的 skill 计入 */

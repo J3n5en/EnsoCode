@@ -148,11 +148,6 @@ export interface PlatformImages {
   fromBuffer(data: Buffer): DecodedImage | null;
 }
 
-export interface PlatformMediaAccess {
-  /** 服务器没有本机麦克风，直接视为已授权（采集发生在浏览器端） */
-  microphone(): Promise<boolean>;
-}
-
 export interface PlatformNotification {
   isSupported(): boolean;
   show(options: { title: string; body: string }): { close(): void } | null;

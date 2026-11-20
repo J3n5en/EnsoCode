@@ -14,7 +14,6 @@ import { type DependencyFacts, pendingOutcome } from '@shared/secretary/pending'
 import {
   canOperate,
   type DispatchBaseFacts,
-  dispatchDecision,
   inTakeoverScope,
   isUntracked,
   type OperateSource,
@@ -610,7 +609,6 @@ async function dispatchContext(
     ),
     running: await runningCount(ports, file),
     max: profile.maxRunningDispatches,
-    worktreeMode: profile.dispatchWorktree,
     deferred,
   };
 }
@@ -672,7 +670,6 @@ function afterParam(params: Record<string, unknown>): string[] | undefined {
 }
 
 type DispatchOutcome =
-  | ({ kind: 'proposal' } & SavedProposal)
   | { kind: 'created'; conversationId: string }
   | { kind: 'pending'; pendingId: string }
   | { kind: 'failed'; error: string };
@@ -694,29 +691,6 @@ async function checkBase(
     ...(draft.branch ? { branch: draft.branch } : {}),
   });
   return validateDispatchBase(draft, facts);
-}
-
-async function saveProposal(
-  ports: SecretaryDispatchPorts,
-  secretaryConversationId: string,
-  draft: DispatchDraft
-): Promise<SavedProposal> {
-  const now = ports.now();
-  const proposal: SecretaryProposal = {
-    id: ports.newId(),
-    secretaryConversationId,
-    createdAt: now,
-    updatedAt: now,
-    status: 'pending',
-    kind: 'dispatch',
-    draft,
-  };
-  const file = ports.dispatchFile();
-  const { saved, changed } = saveProposalRecord(file, proposal);
-  if (!changed) return saved;
-  ports.saveDispatch(file);
-  notifySecretaryChanged();
-  return saved;
 }
 
 /**
@@ -767,9 +741,9 @@ async function executeDispatch(
     ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
     ...(draft.branch ? { branch: draft.branch } : {}),
     secretaryOrigin: { secretaryConversationId },
-    // 只有新派出的会话套用这两个默认值；接管的是用户已有会话，一概不碰
-    ...(profile.dispatchMuted ? { muted: true } : {}),
-    ...(profile.dispatchUnattended ? { unattended: true } : {}),
+    // 只有新派出的会话固定静音且无人值守；接管的是用户已有会话，一概不碰
+    muted: true,
+    unattended: true,
     // 派出的会话一律把 ask_user 先转给秘书：无人值守时不再直接拒绝，也不会卡住
     ...(profile.name ? { askRelay: { name: profile.name } } : {}),
   });
@@ -854,16 +828,14 @@ async function startDispatch(
 }
 
 /**
- * 派发模型：显式指定优先，没指定才用档案里的固定模型（choose 模式仍按项目默认）。
- * 指定了就一定校验：provider 或 model 不可用就当场失败，绝不静默回退到默认模型。
+ * 派发模型：没指定就跟随项目默认；指定了就一定校验：
+ * provider 或 model 不可用就当场失败，绝不静默回退到默认模型。
  */
 async function resolveDraftModel(
   ports: SecretaryDispatchPorts,
-  draft: DispatchDraft,
-  profile: SecretaryProfile
+  draft: DispatchDraft
 ): Promise<{ ok: true; draft: DispatchDraft } | { ok: false; error: string }> {
-  const wanted =
-    draft.model ?? (profile.dispatchModel.mode === 'fixed' ? profile.dispatchModel.model : null);
+  const wanted = draft.model;
   if (!wanted) return { ok: true, draft };
   const resolved = await ports.resolveModel(wanted);
   if (!resolved.ok) return { ok: false, error: resolved.error };
@@ -876,8 +848,7 @@ async function dispatchDraft(
   draft: DispatchDraft
 ): Promise<DispatchOutcome> {
   const profile = await profileOf(ports);
-  // 显式指定的模型优先；没指定才走档案里的派发模型设置
-  const withModel = await resolveDraftModel(ports, draft, profile);
+  const withModel = await resolveDraftModel(ports, draft);
   if (!withModel.ok) return { kind: 'failed', error: withModel.error };
   const wanted = withModel.draft;
   const validated = validateDispatch(
@@ -887,12 +858,7 @@ async function dispatchDraft(
   if (!validated.ok) return { kind: 'failed', error: validated.error };
   const base = await checkBase(ports, validated.draft);
   if (!base.ok) return { kind: 'failed', error: base.error };
-  if (dispatchDecision(profile, wanted.projectId) === 'confirm') {
-    const saved = await saveProposal(ports, secretaryConversationId, validated.draft);
-    const confirmOutcome: DispatchOutcome = { kind: 'proposal', ...saved };
-    noteFollow(ports, secretaryConversationId, validated.draft, confirmOutcome);
-    return confirmOutcome;
-  }
+  // 派发固定直接执行，不出确认卡；派出的会话无人值守，审批照样自动拒绝
   const outcome = await startDispatch(ports, validated.draft, secretaryConversationId, profile);
   noteFollow(ports, secretaryConversationId, validated.draft, outcome);
   return outcome;
@@ -916,12 +882,7 @@ function noteFollow(
   outcome: DispatchOutcome
 ): void {
   if (!ports.follow || outcome.kind === 'failed') return;
-  const targetId =
-    outcome.kind === 'created'
-      ? outcome.conversationId
-      : outcome.kind === 'pending'
-        ? outcome.pendingId
-        : outcome.proposalId;
+  const targetId = outcome.kind === 'created' ? outcome.conversationId : outcome.pendingId;
   ports.follow({
     targetId,
     summary: draftSummary(draft),
@@ -973,32 +934,10 @@ function outcomeResult(
 ): SecretaryOpResult {
   if (outcome.kind === 'failed') return auditFailure(ports, ctx, op, outcome.error, targetId);
   const at = ports.now();
-  // 审计记的是真正落盘的那个模型：档案固定模型与显式指定都算
+  // 审计记的是真正落盘的那个模型
   const file = ports.dispatchFile();
   if (outcome.kind === 'pending')
     return pendingResult(ports, ctx, op, outcome.pendingId, file.pending?.[outcome.pendingId]);
-  if (outcome.kind === 'proposal') {
-    const proposal = file.proposals[outcome.proposalId];
-    const model = proposal?.kind === 'dispatch' ? proposal.draft.model : undefined;
-    ports.audit({
-      at,
-      secretaryConversationId: ctx.secretaryConversationId,
-      op,
-      targetId: outcome.proposalId,
-      ok: true,
-      detail: `awaiting_confirmation${outcome.reused ? ' (existing)' : ''}${modelDetail(model)}`,
-    });
-    return {
-      ok: true,
-      result: {
-        status: 'awaiting_confirmation',
-        proposalId: outcome.proposalId,
-        ...(outcome.reused ? { reused: true } : {}),
-        ...(outcome.otherPendingId ? { otherPendingId: outcome.otherPendingId } : {}),
-        ...(outcome.note ? { note: outcome.note } : {}),
-      },
-    };
-  }
   const model = file.dispatched[outcome.conversationId]?.model;
   ports.audit({
     at,
@@ -2222,17 +2161,11 @@ export function createSecretaryDispatchHandlers(
         return auditFailure(ports, ctx, 'todo_item_dispatch', 'project-required', todoId);
       }
       const title = stringParam(params, 'title') ?? todoTitle(todo.text);
-      const profile = await profileOf(ports);
       const project = (await ports.projects()).find(
         (candidate) => candidate.projectId === projectId
       );
-      const requested = typeof params.worktree === 'boolean' ? params.worktree : true;
-      const worktree =
-        profile.dispatchWorktree === 'never'
-          ? false
-          : profile.dispatchWorktree === 'always'
-            ? true
-            : requested;
+      // 待办多半是改代码的活：秘书没说就开 worktree，只读调查时它会显式传 false
+      const worktree = typeof params.worktree === 'boolean' ? params.worktree : true;
       const branch = project ? await ports.branch(project.canonicalPath) : null;
       const base = baseFromParams(params);
       const draft: DispatchDraft = {
@@ -2896,7 +2829,7 @@ export const secretaryDispatchPorts: SecretaryDispatchPorts = {
       return {
         ok: false,
         error: choices
-          ? `${resolved.error}. providerId must be an exact id below (not a name), or omit model to use the dispatch default:\n${choices}`
+          ? `${resolved.error}. providerId must be an exact id below (not a name), or omit model to follow the project's default model:\n${choices}`
           : resolved.error,
       };
     }

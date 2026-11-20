@@ -2,6 +2,18 @@ import { STATUS_LINE_PRESETS, STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine
 import { describe, expect, it } from 'vitest';
 import { mergeSettingsState, migrateSettings, SETTINGS_VERSION } from './migrate';
 
+describe('已移除字段水合', () => {
+  it('旧设置残留的 Claude Code 插件条目被丢弃，不报错', () => {
+    const current = { editMode: 'apply_patch' as const, accentColor: 'indigo' as const };
+    const merged = mergeSettingsState(
+      { plugins: [{ id: 'p', key: 'demo@market', enabled: true }], skills: [] },
+      current
+    );
+    expect(merged).not.toHaveProperty('plugins');
+    expect(merged).toMatchObject({ skills: [] });
+  });
+});
+
 describe('文件链接右键打开设置水合', () => {
   const current = {
     editMode: 'apply_patch' as const,
@@ -162,7 +174,6 @@ describe('设置持久化迁移', () => {
       'reviewer',
       'compact',
       'memory',
-      'voice',
       'bot',
       'subagent',
       'classifier',
@@ -183,7 +194,6 @@ describe('设置持久化迁移', () => {
       approvalReviewer: ref('reviewer'),
       smartCompactModel: ref('compact'),
       memoryDistillModel: ref('memory'),
-      voiceCorrectionRemoteModel: ref('voice'),
       botAssistantModel: ref('bot'),
       subagentModels: [ref('subagent')],
       providers: ['oauth', 'other'].map((id) => ({
@@ -520,14 +530,19 @@ describe('设置持久化迁移', () => {
     });
   });
 
-  it('hydrate 时已下架的识别模型落回当前值，合法模型照常恢复', () => {
-    const current = {
-      editMode: 'apply_patch' as const,
-      accentColor: 'violet' as const,
-      voiceModel: 'qwen3-asr',
-    };
-    expect(mergeSettingsState({ voiceModel: 'enso-asr' }, current).voiceModel).toBe('qwen3-asr');
-    expect(mergeSettingsState({ voiceModel: 'x-asr' }, current).voiceModel).toBe('x-asr');
+  it('hydrate 时忽略已移除的语音输入字段', () => {
+    const current = { editMode: 'apply_patch' as const, accentColor: 'violet' as const };
+    const merged = mergeSettingsState(
+      {
+        voiceInputEnabled: true,
+        voiceModel: 'qwen3-asr',
+        voiceCorrectionRemoteModel: { providerId: 'p', modelId: 'm' },
+        voiceGeminiApiKey: 'g-key',
+        theme: 'light',
+      },
+      current
+    );
+    expect(merged).toEqual({ ...current, theme: 'light' });
   });
 
   it('已是当前版本时原样返回，不重复搬运', () => {

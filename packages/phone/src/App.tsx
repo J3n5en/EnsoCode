@@ -169,7 +169,6 @@ export function App() {
   );
   /** 已收到桌面下发的 push-config；旧版桌面不会发，开关据此提示升级 */
   const [pushConfigReady, setPushConfigReady] = useState(false);
-  const [voiceInput, setVoiceInput] = useState(false);
   /** 桌面把本设备设为只读（host-info.readOnly） */
   const [deviceReadOnly, setDeviceReadOnly] = useState(false);
   /** 桌面支持桌面模式（host-info.remoteDesktop）；旧桌面缺省，入口隐藏 */
@@ -342,7 +341,6 @@ export function App() {
     setPushConfigReady(false);
     setHistoryPending(new Set());
     setTransport('relay');
-    setVoiceInput(false);
     setDeviceReadOnly(false);
     setRemoteDesktop(false);
     setReadOnlyRejected(false);
@@ -383,7 +381,6 @@ export function App() {
         setRttMs(null);
       },
       onRtt: setRttMs,
-      onVoiceInput: setVoiceInput,
       onRemoteDesktop: setRemoteDesktop,
       onReadOnly: (readOnly) => {
         setDeviceReadOnly(readOnly);
@@ -1014,7 +1011,6 @@ export function App() {
                 }
               : undefined
           }
-          voice={voice}
           onLoadOlder={() => {
             const beforeSeq = timelines[chat.id]?.entries[0]?.seq;
             const key = `${chat.id}:${beforeSeq}`;
@@ -1084,7 +1080,6 @@ export function App() {
         )}
         historyLoading={Boolean(subscribedId && historyPending.has(subscribedId))}
         onLoadOlder={() => subscribedId && clientRef.current?.requestHistory(subscribedId)}
-        voice={voice}
         bot={
           process
             ? { readOnly: true, onBack: () => setProcessId(null) }
@@ -1107,15 +1102,6 @@ export function App() {
       />
     );
   };
-
-  const voice = voiceInput
-    ? (onPartial: Parameters<PairClient['startVoice']>[0]) =>
-        clientRef.current?.startVoice(onPartial) ?? {
-          push: () => {},
-          finish: () => Promise.resolve({ ok: false as const, error: 'failed' as const }),
-          cancel: () => {},
-        }
-    : undefined;
 
   const togglePush = async (next: boolean) => {
     setPushError(null);
@@ -1274,7 +1260,6 @@ export function App() {
             )}
             historyLoading={Boolean(activeId && historyPending.has(activeId))}
             onLoadOlder={() => activeId && clientRef.current?.requestHistory(activeId)}
-            voice={voice}
             queued={withoutQueuedIds(entry?.queued, queueEchoes, activeId ?? '')}
             echoes={queueEchoes}
             goal={entry?.goal}

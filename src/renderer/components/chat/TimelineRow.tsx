@@ -75,6 +75,7 @@ import {
 } from 'react';
 import { InjectedMessageCard } from '@/components/bots/InjectedMessageCard';
 import { conversationIdBySessionFile } from '@/components/chat/sessionRefJump';
+import { SecretaryFace } from '@/components/secretary/SecretaryFace';
 import {
   SecretaryProposalRow,
   secretaryProposalId,
@@ -1155,9 +1156,15 @@ export function ReplyHeader({
             className="size-[22px] shrink-0 rounded-full object-cover"
             style={{ backgroundColor: speaker.color }}
           />
+        ) : secretaryMark ? (
+          <SecretaryFace
+            name={speaker.name}
+            color={speaker.color}
+            enso="secretary-chat-avatar"
+            className="size-[22px] rounded-full"
+          />
         ) : (
           <span
-            data-enso={secretaryMark ? 'secretary-chat-avatar' : undefined}
             className="flex size-[22px] shrink-0 items-center justify-center rounded-full font-semibold text-[11px] text-white"
             style={{ backgroundColor: speaker.color }}
           >

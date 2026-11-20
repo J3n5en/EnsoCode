@@ -288,7 +288,7 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     id: 'secretary.profile',
     category: 'secretary',
     title: 'Secretary profile',
-    description: 'Name, avatar, model and how much the secretary may do on its own.',
+    description: 'Name, avatar, visible projects and patrol.',
   },
   {
     id: 'secretary.dispatchLimit',
@@ -358,13 +358,6 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     title: 'Destructive command guard (dcg)',
     description:
       'Check bash and PowerShell commands with dcg before running. Matches such as git reset --hard or recursive deletes always require your confirmation, even in full-access mode. Takes effect on new conversations.',
-  },
-  {
-    id: 'voice.root',
-    category: 'voice',
-    title: 'Voice input',
-    description:
-      'Adds a microphone to the composer on this computer and on paired phones. Local models transcribe speech on this computer.',
   },
   {
     id: 'tools.editMode',

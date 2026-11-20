@@ -156,7 +156,6 @@ export const SETTINGS_STATE_FIELDS = [
   'subagentModels',
   'virtualModels',
   'skills',
-  'plugins',
   'mcpServers',
   'instructions',
   'presets',
@@ -173,7 +172,6 @@ export const SETTINGS_STATE_FIELDS = [
   'memoryEmbeddingRemoteProviderId',
   'memoryDistillEnabled',
   'memoryDistillWindowMinutes',
-  'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
   'dropShelfEnabled',
@@ -184,13 +182,6 @@ export const SETTINGS_STATE_FIELDS = [
   'botAssistantModel',
   'protectedActionsInCode',
   'dcgEnabled',
-  'voiceInputDevice',
-  'voiceModel',
-  'voiceCorrectionEnabled',
-  'voiceCorrectionModel',
-  'voiceCorrectionRemoteModel',
-  'voiceVocabulary',
-  'voiceGeminiApiKey',
   'memoryKgEnabled',
   'memoryReconcileEnabled',
   'memoryDecayEnabled',
@@ -255,7 +246,6 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'memoryDecayIntervalDays',
   // 聚合待办排在本机库的队列里，窗口只影响本机的提炼时机
   'memoryDistillWindowMinutes',
-  'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
   'dropShelfEnabled',
@@ -266,17 +256,9 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'botAssistantModel',
   'protectedActionsInCode',
   'dcgEnabled',
-  'voiceInputDevice',
-  'voiceModel',
-  'voiceCorrectionEnabled',
-  'voiceCorrectionModel',
-  'voiceCorrectionRemoteModel',
-  'voiceVocabulary',
-  'voiceGeminiApiKey',
   'onboarded',
   'headerSessionTabs',
   'headerRecentMinutes',
-  'plugins',
   'projects',
   'projectGroups',
   'disabledWorkflowPresets',
@@ -326,13 +308,6 @@ function notifyAppLanguage(
   if (settingsStateOf(previous).language !== settingsStateOf(next).language) {
     appDesktop().syncAppLanguage();
   }
-}
-
-function notifySpeechSettings(settings: Record<string, unknown>): void {
-  const state = settingsStateOf(settings);
-  void import('../services/speech/service')
-    .then(({ syncSpeechFromSettings }) => syncSpeechFromSettings(state))
-    .catch(() => {});
 }
 
 function settingsStateOf(settings: Record<string, unknown> | null): Record<string, unknown> {
@@ -514,7 +489,6 @@ function scheduleWrite(
     notifyMemoryEmbeddingSettings(data);
     notifyTrayToggleShortcut(data);
     notifyDropShelf(data);
-    notifySpeechSettings(data);
     notifyAppLanguage(previous, data);
     if (
       settingsStateOf(previous).botModeEnabled !== settingsStateOf(data).botModeEnabled ||
@@ -698,7 +672,6 @@ export function commitSettingsTransaction(
   notifyMemoryEmbeddingSettings(next);
   notifyTrayToggleShortcut(next);
   notifyDropShelf(next);
-  notifySpeechSettings(next);
   notifyAppLanguage(latest, next);
   try {
     broadcastToRenderers(IPC_CHANNELS.SETTINGS_CHANGED);

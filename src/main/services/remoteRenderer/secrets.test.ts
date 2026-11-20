@@ -5,7 +5,7 @@ const disk = {
   'enso-settings': {
     state: {
       language: 'zh',
-      voiceGeminiApiKey: 'g-key',
+      searchApiKey: 'g-key',
       providers: [
         { id: 'a', apiKey: 'key-a', baseUrl: 'https://a' },
         { id: 'b', apiKey: 'key-b', baseUrl: 'https://b' },
@@ -23,7 +23,7 @@ describe('remote settings secrets', () => {
     expect(redacted.language).toBe('zh');
     expect(redacted.maxTokens).toBe(10);
     expect(redacted.emptyToken).toBe('');
-    expect(redacted.voiceGeminiApiKey).toBe(REMOTE_SECRET_SENTINEL);
+    expect(redacted.searchApiKey).toBe(REMOTE_SECRET_SENTINEL);
     expect(redacted.providers[0]).toEqual({
       id: 'a',
       apiKey: REMOTE_SECRET_SENTINEL,
@@ -41,7 +41,7 @@ describe('remote settings secrets', () => {
     state.providers.push({ id: 'c', apiKey: 'typed', baseUrl: 'https://c' });
     const restored = restoreSecrets(edited, disk)['enso-settings'].state;
     expect(restored.providers.map((p) => p.apiKey)).toEqual(['key-b', 'key-a', 'typed']);
-    expect(restored.voiceGeminiApiKey).toBe('g-key');
+    expect(restored.searchApiKey).toBe('g-key');
     expect(restored.mcpServers[0].env.GITHUB_PAT).toBe('pat');
     expect(containsSentinel(restored)).toBe(false);
   });

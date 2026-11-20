@@ -52,6 +52,15 @@ vi.mock('@/stores/sidePanel', () => ({
 }));
 vi.mock('@/stores/settings', () => ({ useSettingsStore: { getState: () => settings } }));
 vi.mock('@/stores/modelDirectory/useProviders', () => ({ readMaterializedProviders: () => [] }));
+/** 全局默认模型解析的结果：测试按需改，null 表示没有可用模型 */
+const defaultModel = vi.hoisted(() => ({
+  value: null as { providerId: string; modelId: string } | null,
+}));
+vi.mock('@shared/defaultModel', () => ({
+  scopedDefaultModels: () => ({}),
+  resolveChatModel: () =>
+    defaultModel.value ? { ...defaultModel.value, source: 'default' } : { source: 'none' },
+}));
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/stores/oauthCredentials', () => ({
   useOauthCredentialStore: { getState: () => ({ snapshot: {} }) },
@@ -230,30 +239,25 @@ describe('秘书开关关闭', () => {
 });
 
 describe('newSecretaryConversation', () => {
-  const profileWith = (model?: { providerId: string; modelId: string }): SecretaryProfile => ({
-    version: 1,
-    name: '秘书',
-    avatar: { color: '#7c5cff' },
-    autonomy: 'ask-first',
-    autoApproveProjectIds: [],
-    takeoverScope: { mode: 'projects', projectIds: [] },
-    visibleProjectIds: 'all',
-    dispatchModel: { mode: 'project' },
-    dispatchWorktree: 'auto',
-    maxRunningDispatches: 3,
-    patrolEnabled: true,
-    patrolIntervalMinutes: 15,
-    dispatchMuted: true,
-    dispatchUnattended: true,
-    replyLanguage: 'ui',
-    style: 'concise',
-    notify: 'needs-user',
-    updatedAt: 1,
-    ...(model ? { model } : {}),
-  });
-  const withProfile = (model?: { providerId: string; modelId: string }): SecretaryState => ({
+  const legacyProfile = (): SecretaryProfile =>
+    ({
+      version: 1,
+      name: '秘书',
+      avatar: { color: '#7c5cff' },
+      takeoverScope: { mode: 'projects', projectIds: [] },
+      visibleProjectIds: 'all',
+      maxRunningDispatches: 3,
+      patrolEnabled: true,
+      replyLanguage: 'ui',
+      style: 'concise',
+      notify: 'needs-user',
+      updatedAt: 1,
+      // 旧档案里留下的秘书模型，provider 可能早就删了
+      model: { providerId: 'gone', modelId: 'old' },
+    }) as SecretaryProfile;
+  const withProfile = (): SecretaryState => ({
     ...stateWith('pending'),
-    profile: profileWith(model),
+    profile: legacyProfile(),
   });
 
   beforeEach(() => {
@@ -261,19 +265,23 @@ describe('newSecretaryConversation', () => {
     sessions.setModel.mockClear();
     sessions.setThinking.mockClear();
     sessions.send.mockClear();
+    defaultModel.value = null;
     useSecretaryStore.setState({ secretary: EMPTY_SECRETARY_STATE, resolving: {} });
   });
 
-  it('按档案设模型；没有引导语时不发消息', async () => {
-    useSecretaryStore.setState({ secretary: withProfile({ providerId: 'p', modelId: 'm' }) });
+  it('新建秘书会话用全局默认模型，不读档案里的旧模型；没有引导语时不发消息', async () => {
+    defaultModel.value = { providerId: 'p', modelId: 'm' };
+    useSecretaryStore.setState({ secretary: withProfile() });
     await expect(useSecretaryStore.getState().newSecretaryConversation()).resolves.toBe('conv-1');
     expect(sessions.newConversation).toHaveBeenCalledWith('sec-project');
-    expect(sessions.setModel).toHaveBeenCalledWith('conv-1', 'p', 'm');
+    expect(sessions.setModel).not.toHaveBeenCalled();
+    expect(sessions.setThinking).not.toHaveBeenCalled();
     expect(sessions.send).not.toHaveBeenCalled();
   });
 
-  it('要引导语时用普通 send 发一条固定的开场白', async () => {
-    useSecretaryStore.setState({ secretary: withProfile({ providerId: 'p', modelId: 'm' }) });
+  it('要引导语时用普通 send 按默认模型发一条固定的开场白', async () => {
+    defaultModel.value = { providerId: 'p', modelId: 'm' };
+    useSecretaryStore.setState({ secretary: withProfile() });
     await useSecretaryStore.getState().newSecretaryConversation({ greeting: true });
     expect(sessions.send).toHaveBeenCalledTimes(1);
     const [text, target, images, conversationId] = sessions.send.mock.calls[0] as unknown as [
@@ -286,14 +294,6 @@ describe('newSecretaryConversation', () => {
     expect(target).toEqual({ providerId: 'p', modelId: 'm', cwd: '/tmp/secretary' });
     expect(images).toBeUndefined();
     expect(conversationId).toBe('conv-1');
-  });
-
-  it('刚写完档案、推送还没到时按传入的档案选模型', async () => {
-    useSecretaryStore.setState({ secretary: withProfile() });
-    await useSecretaryStore.getState().newSecretaryConversation({
-      profile: profileWith({ providerId: 'q', modelId: 'n' }),
-    });
-    expect(sessions.setModel).toHaveBeenCalledWith('conv-1', 'q', 'n');
   });
 
   it('没有可用模型时不建会话，也不发消息', async () => {

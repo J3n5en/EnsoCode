@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { agentWorkerPath, app, resourcesPath, utilityProcess, type WorkerProcess } from '@platform';
 import { describeAgentWorkerExit } from '@shared/agentWorkerExit';
@@ -33,6 +33,12 @@ import {
 import { ELEVATE_ASKPASS_ENV } from '@shared/elevation';
 import { presetOverlay } from '@shared/extensionPlugins/preset';
 import { PLUGIN_INJECT_MAX_CHARS } from '@shared/extensionPlugins/protocol';
+import {
+  parseRestartCheckpoint,
+  RESTART_CHECKPOINT_ENV,
+  RESTART_CHECKPOINT_FILE,
+  type RestartCheckpoint,
+} from '@shared/gracefulRestart';
 import { resolveImageGenerationConfig } from '@shared/imageGeneration';
 import { normalizeMaxActiveCoworkers } from '@shared/maxActiveCoworkers';
 import { mcpHeaders } from '@shared/mcpConfig';
@@ -94,6 +100,7 @@ import {
   type SkillEntry,
 } from '@shared/types/assets';
 import { persistedSettingsState } from '@shared/types/builtinTools';
+import type { RestartWaitReason } from '@shared/types/ipc';
 import {
   MODEL_REASONING_OVERRIDES,
   MODEL_THINKING_LEVEL_OVERRIDES,
@@ -130,7 +137,6 @@ import {
 } from './agentWorkerExit';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools, withoutKeepEnabled } from './builtinToolScopes';
-import type { ResolvedPlugins } from './claudePlugins';
 import { isComputerPlatformSupported } from './computer/support';
 import { dcgRoot, installedDcgPath } from './dcgBinary';
 import { ensureElevationServer } from './elevation';
@@ -141,6 +147,11 @@ import {
 } from './extensionPlugins';
 import { PluginAgentRuns } from './extensionPlugins/agentRuns';
 import { PluginMcpRequests } from './extensionPlugins/mcpRequests';
+import {
+  type GracefulRestartRequest,
+  GracefulWorkerRestart,
+  type RestartSettingsSnapshot,
+} from './gracefulWorkerRestart';
 import { resolveGlobalInstruction } from './instructionStore';
 import { refreshMcpOAuthAccess } from './mcpOAuthRefresh';
 import { getMcpOAuthStore } from './mcpOAuthStore';
@@ -154,13 +165,18 @@ import {
 } from './oauthProviders';
 import { PendingReloadRegistry } from './pendingReloads';
 import {
-  enabledPlugins,
   type NativePluginAgentDef,
   type RuntimeAgentType,
   withPluginAgentTypes,
 } from './pluginRuntime';
 import { recordPrivacyMaskLedger } from './privacyMask';
 import { killAndWaitExit } from './processExit';
+import {
+  buildRestartManifest,
+  type RestartExitReason,
+  restartManifestPath,
+  writeRestartManifest,
+} from './restartManifest';
 import { bundledRtkPath } from './rtkBinary';
 import { pickSubagentModelRefs, type SubagentModelRef } from './subagentModels';
 import { readStoredSystemPrompt } from './systemPromptStore';
@@ -291,6 +307,7 @@ let snapshotPending: false | true | string = false;
 let commandsPending: AgentCommand[] = [];
 /** worker 曾启动后退出：spawn 时可按需重建（首次启动前不行，要等 env/PATH 探测） */
 let workerExited = false;
+const gracefulRestart = new GracefulWorkerRestart<WorkerProcess>();
 /** 不可闲置回收的会话，按来源（桌面查看 / 手机订阅）分桶；worker 重启后需重发并集 */
 const pinnedBySource = new Map<string, readonly string[]>();
 let lastPinnedKey = '';
@@ -325,7 +342,7 @@ export function customWorkflowPresetDir(): string {
   return path.join(agentDataDir(), 'workflows');
 }
 
-export function startAgentWorker(): void {
+export function startAgentWorker(options: { restartCheckpointFile?: string } = {}): void {
   if (worker) return;
   const askpass = ensureElevationServer();
   const child = utilityProcess.fork(agentWorkerPath, [], {
@@ -334,6 +351,9 @@ export function startAgentWorker(): void {
     env: {
       ...process.env,
       ...(askpass ? { [ELEVATE_ASKPASS_ENV]: askpass } : {}),
+      ...(options.restartCheckpointFile
+        ? { [RESTART_CHECKPOINT_ENV]: options.restartCheckpointFile }
+        : {}),
       ENSO_AGENT_DATA_DIR: agentDataDir(),
       // 编码会话的 image_view 白名单：应用存放用户图片的目录（bot-chats/<chatId>/media）
       ENSO_USER_IMAGE_DIRS: appUserImageDirs(app.getPath('userData')).join(path.delimiter),
@@ -419,6 +439,37 @@ export function startAgentWorker(): void {
           });
         return;
       }
+      if (event.type === 'graceful-restart-deferred') {
+        if (worker === child) quitCheckpoint?.observe(event.sessions);
+        console.log(
+          `[agent] graceful restart deferred: ${event.sessions
+            .map((s) => `${s.identity.sessionId.slice(0, 8)}=${s.reason}`)
+            .join(', ')}`
+        );
+        return;
+      }
+      if (event.type === 'graceful-restart-ready') {
+        // 断点已落盘：之后的命令排队交给下一代，旧进程退出后由 exit 分支换代；
+        // 退出 / 安装更新时不换代，写好恢复清单后放行退出
+        if (worker === child && gracefulRestart.ready(child, event.checkpoint)) {
+          workerReady = false;
+          if (gracefulRestart.quitting && quitCheckpoint) {
+            const checkpoint = parseRestartCheckpoint(event.checkpoint);
+            if (checkpoint)
+              writeQuitManifest(quitCheckpoint, checkpoint, gracefulRestart.snapshot());
+            quitCheckpoint.settle('checkpointed');
+          } else void killAndWaitExit(child, 5_000);
+        }
+        return;
+      }
+      if (event.type === 'background-tasks-detached') {
+        if (worker === child) {
+          console.log(`[agent] ${event.detached} background task(s) detached for restart`);
+          detachAck?.();
+        }
+        return;
+      }
+      gracefulRestart.observe(event);
       resolveReleaseWaiters(event);
       // 手动重读结果只回给发起 invoke 的等待者，不进普通事件流（renderer 的通用
       // snapshot 分支会顺手改 started / 清 asks，手动刷新不能有这些副作用）
@@ -434,15 +485,19 @@ export function startAgentWorker(): void {
     }
   });
   child.on('exit', (code: unknown) => {
+    const swap = worker === child ? gracefulRestart.exited(child) : { swap: false as const };
+    // 等安全点时 worker 先没了：不必再等超时
+    if (worker === child) quitCheckpoint?.settle('skipped');
+    if (worker === child) detachAck?.();
     if (worker === child) {
       worker = null;
       workerReady = false;
       workerExited = true;
-      parentInstanceIds.clear();
+      if (!swap.swap) parentInstanceIds.clear();
     }
     const dataDir = agentDataDir();
     const crash = takeAgentWorkerCrash(dataDir, childPid);
-    const detail = describeAgentWorkerExit(code, crash);
+    const detail = `${describeAgentWorkerExit(code, crash)}${swap.swap ? ' (graceful restart)' : ''}`;
     console.error(`[agent] worker exited pid=${childPid ?? '?'} ${detail}`);
     appendAgentWorkerExitLog(
       dataDir,
@@ -465,6 +520,12 @@ export function startAgentWorker(): void {
     }
     // 会话树随 worker 进程一起销毁，release 已达成；不唤醒就只能等到 8 秒超时报失败
     resolveAllReleaseWaiters();
+    if (swap.swap) {
+      // 优雅重启：会话不算失败，下一代按断点重建并接着跑；先重发 spawn，再发换代期间排队的命令
+      commandsPending = [...swap.replay, ...commandsPending];
+      startAgentWorker({ restartCheckpointFile: path.join(dataDir, RESTART_CHECKPOINT_FILE) });
+      return;
+    }
     onEvent?.({ type: 'worker-exited', detail });
   });
 }
@@ -513,6 +574,8 @@ export function recordAgentWorkerGone(details: {
 }
 
 export function stopAgentWorker(): void {
+  gracefulRestart.reset();
+  keepBackgroundOnQuit = false;
   workspaceLocks.failAll('agent worker stopped');
   pluginMcp.failAll('agent worker stopped');
   pluginAgents.failAll('agent worker stopped');
@@ -526,6 +589,18 @@ export function stopAgentWorker(): void {
 
 export function agentWorkerAlive(): boolean {
   return worker !== null;
+}
+
+/**
+ * 菜单「重启」：请当前 worker 在安全点落断点后换一个新进程，会话从断点接着跑。
+ * 窗口不动；重启进行中再请求不会叠第二个进程。
+ */
+export function requestGracefulWorkerRestart(): GracefulRestartRequest {
+  const current = worker && workerReady ? worker : null;
+  const result = gracefulRestart.request(current);
+  if (result === 'requested')
+    current?.postMessage({ type: 'graceful-restart' } satisfies AgentCommand);
+  return result;
 }
 
 /**
@@ -544,11 +619,272 @@ export async function restartAgentWorker(timeoutMs = 5_000): Promise<boolean> {
 /**
  * 应用退出时 Electron 不给 utility 进程发 SIGTERM，worker 的收尾（中止会话→pi 杀 detached
  * bash 进程组、断开 MCP）跑不到，命令会成孤儿进程。退出前主动发信号并等它自行退出。
+ * 等安全点超时的话，worker 收尾（中止命令）时可能才落断点：退出后据此补写恢复清单。
  */
-export function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
+export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
   const child = worker;
-  if (!child) return Promise.resolve();
-  return killAndWaitExit(child, timeoutMs);
+  const pending = quitCheckpoint;
+  // 清会话前留一份设置：补写清单时要配上
+  const late = pending?.timedOut && !pending.manifestWritten ? gracefulRestart.snapshot() : null;
+  // 退出应用时不再换代
+  gracefulRestart.reset();
+  if (child) {
+    // 应用会重新打开：先让 worker 把能脱离的后台命令交出去、写好恢复清单，再终止它
+    if (keepBackgroundOnQuit) await detachBackgroundTasks(child, DETACH_ACK_TIMEOUT_MS);
+    await killAndWaitExit(child, timeoutMs);
+  }
+  if (pending && late) writeLateQuitManifest(pending, late);
+}
+
+/** 等 worker 交出后台命令的上限；超时照常终止（没交出去的随 worker 收尾停掉） */
+export const DETACH_ACK_TIMEOUT_MS = 2_000;
+let keepBackgroundOnQuit = false;
+let detachAck: (() => void) | null = null;
+
+function detachBackgroundTasks(child: WorkerProcess, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      detachAck = null;
+      appendAgentWorkerExitLog(
+        agentDataDir(),
+        `[graceful-restart] worker 没在 ${timeoutMs}ms 内交出后台命令，照常终止`
+      );
+      resolve();
+    }, timeoutMs);
+    timer.unref?.();
+    detachAck = () => {
+      clearTimeout(timer);
+      detachAck = null;
+      resolve();
+    };
+    child.postMessage({ type: 'detach-background-tasks' } satisfies AgentCommand);
+  });
+}
+
+/** 退出 / 安装更新前有工具在跑：等它结束，最多等这么久；超时中止命令照常退出 */
+export const QUIT_TOOL_WAIT_LIMIT_MS = 5 * 60_000;
+/** 没有工具在跑（回复还在流式输出、等收口）时等安全点的上限 */
+export const QUIT_NO_TOOL_WAIT_MS = 10_000;
+export type QuitCheckpointResult = 'skipped' | 'checkpointed' | 'timeout';
+
+type DeferredSessions = Extract<
+  AgentWorkerEvent,
+  { type: 'graceful-restart-deferred' }
+>['sessions'];
+
+interface QuitCheckpoint {
+  reason: RestartExitReason;
+  requestedAt: number;
+  promise: Promise<QuitCheckpointResult>;
+  timedOut: boolean;
+  manifestWritten: boolean;
+  /** worker 最近一次推迟时报告有工具在跑 */
+  toolsRunning: boolean;
+  /** 在等的命令里有没法脱离应用的转后台命令 */
+  waitReason: RestartWaitReason;
+  waitingForTools: Array<(reason: RestartWaitReason) => void>;
+  observe(sessions: DeferredSessions): void;
+  settle(result: QuitCheckpointResult): void;
+  /** 用户不等了：按超时收尾；已经有结果返回 false */
+  force(): boolean;
+}
+
+let quitCheckpoint: QuitCheckpoint | null = null;
+
+/**
+ * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
+ * 冷启动据此续跑。没有正在跑的会话、也没有在跑的后台命令时直接放行；同一次退出只发一次请求，再调用拿同一个结果。
+ * 有工具在跑就等它结束（上限 QUIT_TOOL_WAIT_LIMIT_MS），没有时最多等 QUIT_NO_TOOL_WAIT_MS；
+ * onWaitingForTools 在 worker 报告有工具在跑时回调（已在跑则立即回调）。
+ */
+export function prepareAgentWorkerForQuit(options: {
+  reason: RestartExitReason;
+  /** 有根回合在跑，或回合已结束但还有后台命令在跑（ipc/sessionIndex.needsQuitCheckpoint） */
+  hasRunningSessions: () => boolean;
+  onWaitingForTools?: (reason: RestartWaitReason) => void;
+  /** 应用会重新打开：能脱离的转后台命令留给下一代认回，不等它们结束 */
+  keepBackgroundTasks?: boolean;
+}): Promise<QuitCheckpointResult> {
+  if (options.keepBackgroundTasks) keepBackgroundOnQuit = true;
+  if (quitCheckpoint) {
+    if (options.onWaitingForTools) {
+      quitCheckpoint.waitingForTools.push(options.onWaitingForTools);
+      if (quitCheckpoint.toolsRunning) options.onWaitingForTools(quitCheckpoint.waitReason);
+    }
+    return quitCheckpoint.promise;
+  }
+  const current = worker && workerReady ? worker : null;
+  if (!current || !options.hasRunningSessions()) return Promise.resolve('skipped');
+  const outcome = gracefulRestart.requestQuit(current);
+  if (outcome === 'no-session' || outcome === 'busy') return Promise.resolve('skipped');
+  if (outcome === 'requested')
+    current.postMessage(
+      (options.keepBackgroundTasks
+        ? { type: 'graceful-restart', keepBackgroundTasks: true }
+        : { type: 'graceful-restart' }) satisfies AgentCommand
+    );
+  const requestedAt = Date.now();
+  const { promise, resolve } = Promise.withResolvers<QuitCheckpointResult>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  let quietSince = requestedAt;
+  const finish = (result: QuitCheckpointResult) => {
+    clearTimeout(timer);
+    settled = true;
+    resolve(result);
+  };
+  const arm = () => {
+    clearTimeout(timer);
+    const limit = requestedAt + QUIT_TOOL_WAIT_LIMIT_MS;
+    const deadline = state.toolsRunning
+      ? limit
+      : Math.min(limit, quietSince + QUIT_NO_TOOL_WAIT_MS);
+    timer = setTimeout(
+      () => {
+        state.timedOut = true;
+        const why = state.toolsRunning
+          ? `工具跑了超过上限 ${QUIT_TOOL_WAIT_LIMIT_MS}ms`
+          : `没有工具在跑，${QUIT_NO_TOOL_WAIT_MS}ms 内没到安全点`;
+        const message = `[graceful-restart] ${options.reason}: worker 等安全点 ${Date.now() - requestedAt}ms 超时（${why}），中止在跑的命令照常退出`;
+        console.warn(message);
+        appendAgentWorkerExitLog(agentDataDir(), message);
+        finish('timeout');
+      },
+      Math.max(0, deadline - Date.now())
+    );
+    timer.unref?.();
+  };
+  const state: QuitCheckpoint = {
+    reason: options.reason,
+    requestedAt,
+    promise,
+    timedOut: false,
+    manifestWritten: false,
+    toolsRunning: false,
+    waitReason: 'tool',
+    waitingForTools: options.onWaitingForTools ? [options.onWaitingForTools] : [],
+    observe(sessions) {
+      const running = sessions.some((session) => session.toolsInFlight.length > 0);
+      const waitReason: RestartWaitReason = sessions.some(
+        (session) => (session.undetachableTasks?.length ?? 0) > 0
+      )
+        ? 'background-not-detachable'
+        : 'tool';
+      if (settled) return;
+      if (running === state.toolsRunning) {
+        if (running && waitReason !== state.waitReason) {
+          state.waitReason = waitReason;
+          for (const notify of state.waitingForTools) notify(waitReason);
+        }
+        return;
+      }
+      state.toolsRunning = running;
+      state.waitReason = waitReason;
+      if (running) for (const notify of state.waitingForTools) notify(waitReason);
+      else quietSince = Date.now();
+      arm();
+    },
+    settle: finish,
+    force() {
+      if (settled) return false;
+      state.timedOut = true;
+      const message = `[graceful-restart] ${options.reason}: 用户强制退出，等安全点 ${Date.now() - requestedAt}ms 后不再等，中止在跑的命令照常退出`;
+      console.warn(message);
+      appendAgentWorkerExitLog(agentDataDir(), message);
+      finish('timeout');
+      return true;
+    },
+  };
+  quitCheckpoint = state;
+  arm();
+  return promise;
+}
+
+/**
+ * 等待弹层上点「强制退出」：不再等安全点，立刻结束等待、走超时收尾——stopAgentWorkerForQuit
+ * 终止 worker 时它落的断点照样写成恢复清单，落不了只记日志。没有在等的退出返回 false。
+ */
+export function forceAgentWorkerQuit(): boolean {
+  return quitCheckpoint?.force() ?? false;
+}
+
+/**
+ * 退出没有发生（安装更新失败）：撤掉恢复清单；worker 若已落断点就让它退出，按断点换代接着跑，
+ * 否则把还在等的请求改回普通换代。
+ */
+export function cancelAgentQuitCheckpoint(): void {
+  const pending = quitCheckpoint;
+  quitCheckpoint = null;
+  keepBackgroundOnQuit = false;
+  if (!pending) return;
+  pending.settle('skipped');
+  rmSync(restartManifestPath(agentDataDir()), { force: true });
+  if (gracefulRestart.cancelQuit() && worker) void killAndWaitExit(worker, 5_000);
+}
+
+function writeQuitManifest(
+  pending: QuitCheckpoint,
+  checkpoint: RestartCheckpoint,
+  settings: RestartSettingsSnapshot
+): 'written' | 'empty' | 'failed' {
+  try {
+    const manifest = buildRestartManifest({
+      reason: pending.reason,
+      checkpoint,
+      settingsOf: settings.settingsOf,
+    });
+    pending.manifestWritten = writeRestartManifest(agentDataDir(), manifest, settings.secrets);
+    return pending.manifestWritten ? 'written' : 'empty';
+  } catch (error) {
+    console.error('[graceful-restart] 写恢复清单失败，冷启动不续跑:', error);
+    return 'failed';
+  }
+}
+
+/** 超时退出后 worker 收尾时落的断点：能用就返回断点，不能用返回原因 */
+function lateQuitCheckpoint(pending: QuitCheckpoint): RestartCheckpoint | string {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path.join(agentDataDir(), RESTART_CHECKPOINT_FILE), 'utf8'));
+  } catch {
+    return 'worker 退出前没落断点（没到安全点）';
+  }
+  const checkpoint = parseRestartCheckpoint(raw);
+  if (!checkpoint) return '断点格式不对';
+  if (checkpoint.writtenAt < pending.requestedAt) return '断点是这次退出之前留下的';
+  const busy = checkpoint.sessions.filter((entry) => entry.toolsInFlight.length > 0);
+  if (busy.length > 0)
+    return `断点里还有工具在跑（${busy.map((entry) => `${entry.sessionId.slice(0, 8)}=${entry.toolsInFlight.join(',')}`).join(' ')}）`;
+  if (checkpoint.sessions.length === 0) return '断点里没有会话';
+  return checkpoint;
+}
+
+/** 超时退出：worker 收尾时落的断点能用就照样写清单，冷启动据此续跑；不能用就记下原因 */
+function writeLateQuitManifest(pending: QuitCheckpoint, settings: RestartSettingsSnapshot): void {
+  const checkpoint = lateQuitCheckpoint(pending);
+  const result =
+    typeof checkpoint === 'string' ? checkpoint : writeQuitManifest(pending, checkpoint, settings);
+  const message =
+    result === 'written' && typeof checkpoint !== 'string'
+      ? `按 worker 收尾时落的断点写了恢复清单（${checkpoint.sessions.length} 个会话）`
+      : `不写恢复清单：${
+          result === 'empty'
+            ? '断点里的会话都不是可续跑的普通根会话'
+            : result === 'failed'
+              ? '写清单出错'
+              : result
+        }`;
+  const line = `[graceful-restart] ${pending.reason}: 超时退出，${message}`;
+  console.warn(line);
+  appendAgentWorkerExitLog(agentDataDir(), line);
+}
+
+/** 普通根会话 spawn 成功后记下原始请求（不含凭据），退出时写进恢复清单 */
+export function rememberRestorableSpawn(
+  identity: SessionIdentity,
+  request: AgentSpawnRequest
+): void {
+  gracefulRestart.rememberRequest(identity, request);
 }
 
 /**
@@ -649,6 +985,7 @@ export function sendAgentCommand(command: AgentCommand): { ok: boolean; error?: 
     return { ok: false, error: `invalid ${command.type} command: rejected by worker contract` };
   if (workspaceCommandBlocked(command, workspaceBusy))
     return { ok: false, error: 'Workspace operation in progress.' };
+  gracefulRestart.record(command);
   const action = agentCommandDispatch({
     hasWorker: worker !== null,
     workerReady,
@@ -676,8 +1013,7 @@ export function agentTypeRegistrySnapshot(): AgentTypeRegistrySnapshot {
     ? state.disabledBuiltinAgentTypes.filter((name): name is string => typeof name === 'string')
     : [];
   const customAgentTypes = withPluginAgentTypes(
-    Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
-    state
+    Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : []
   );
   return buildAgentTypeRegistrySnapshot({
     revision: settingsRevision(state),
@@ -908,8 +1244,7 @@ export function resolveAgentTypeSpawnConfig(
   } else {
     const id = typeKey.slice('custom:'.length);
     definition = withPluginAgentTypes(
-      Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
-      state
+      Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : []
     ).find((entry) => entry.id === id);
   }
   if (!definition || isReservedAgentTypeName(definition.name)) {
@@ -1095,15 +1430,10 @@ export function spawnSession(
           resolveGlobalInstruction(preset ? { instructionId: preset.instructionId } : undefined)
         );
   const state = readSettingsState();
-  // Claude 插件：按各自开关现读安装目录，不受预设影响
-  const plugins = secretary
-    ? { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] }
-    : enabledPlugins(state);
-  // Enso 插件：顺序在预设、Claude 插件之后；Bot 会话不合并
+  // Enso 插件：顺序在预设之后；Bot 会话不合并
   const activePluginPreset = pluginPreset ? overlay?.pluginPresetId : undefined;
   const skillPaths = [
     ...enabledSkillPaths(preset),
-    ...(bot || secretary ? [] : plugins.skillPaths),
     ...(extensionPlugins?.skillPathsForSpawn(activePluginPreset, secretaryPluginIds) ?? []),
     ...secretarySkillPaths(secretary),
   ];
@@ -1113,16 +1443,13 @@ export function spawnSession(
     : (extensionPlugins?.workflowPathsForSpawn(activePluginPreset) ?? []);
   const mcpServers = enabledMcpServers(preset);
   const mcpNames = new Set(mcpServers.map((server) => server.name));
-  for (const server of [
-    ...(bot || secretary ? [] : plugins.mcpServers),
-    ...(secretary ? [] : (extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? [])),
-  ]) {
+  for (const server of secretary
+    ? []
+    : (extensionPlugins?.mcpServersForSpawn(activePluginPreset) ?? [])) {
     if (!mcpNames.has(server.name)) mcpServers.push(server);
     mcpNames.add(server.name);
   }
   const pluginTools = extensionPlugins?.toolsForSpawn(secretaryPluginIds) ?? [];
-  // hooks 在本机起进程，远程会话的 cwd 不在本机
-  const pluginHooks = remote || secretary ? [] : plugins.hooks;
   const subagentModels =
     options?.omitDispatchTools || secretary
       ? []
@@ -1133,7 +1460,6 @@ export function spawnSession(
       : configuredAgentTypes(
           authenticatedAccountKeys,
           subagentModels.length > 0,
-          plugins,
           // Enso 插件的子代理类型与其 skill / MCP 同口径：Bot 会话不合并
           bot ? [] : extensionPlugins?.agentTypesForSpawn({ activePresetId: activePluginPreset })
         );
@@ -1219,8 +1545,6 @@ export function spawnSession(
     memoryLanguage,
     ...(skillPaths.length > 0 ? { skillPaths } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
-    ...(plugins.commands.length > 0 ? { pluginCommands: plugins.commands } : {}),
-    ...(pluginHooks.length > 0 ? { pluginHooks } : {}),
     ...(pluginTools.length > 0 ? { pluginTools } : {}),
     ...(secretary?.tools?.length ? { secretaryTools: [...secretary.tools] } : {}),
     ...(workflowPresetFiles.length > 0 ? { workflowPresetFiles } : {}),
@@ -1299,12 +1623,11 @@ export function pluginPresetInstruction<T>(
   return own ?? global();
 }
 
-/** spawn 前斜杠菜单要预览的插件 skill 路径，与 spawn 同口径：Claude 插件在前，Enso 插件按生效的插件预设圈定 */
+/** spawn 前斜杠菜单要预览的插件 skill 路径，与 spawn 同口径：Enso 插件按生效的插件预设圈定 */
 export function pluginSkillPathsForMenu(
   presetId: string | undefined,
   deps: {
     resolve: (id?: string) => Preset | undefined;
-    claude: readonly string[];
     extension: {
       presetForSpawn(id?: string): { ok: boolean } | undefined;
       skillPathsForSpawn(activePresetId?: string): string[];
@@ -1312,7 +1635,7 @@ export function pluginSkillPathsForMenu(
   }
 ): string[] {
   const active = activePluginPresetForMenu(presetId, deps.resolve, deps.extension);
-  return [...deps.claude, ...(deps.extension?.skillPathsForSpawn(active) ?? [])];
+  return deps.extension?.skillPathsForSpawn(active) ?? [];
 }
 
 function activePluginPresetForMenu(
@@ -1327,7 +1650,6 @@ function activePluginPresetForMenu(
 export function menuPluginSkillPaths(presetId: string | undefined): string[] {
   return pluginSkillPathsForMenu(presetId, {
     resolve: resolvePreset,
-    claude: enabledPlugins(readSettingsState()).skillPaths,
     extension: getExtensionPlugins(),
   });
 }
@@ -1502,7 +1824,9 @@ export function setSessionModel(
     allowVirtual: true,
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
-  return sendAgentCommand({ type: 'set-model', identity, model: resolved.selection.config });
+  const sent = sendAgentCommand({ type: 'set-model', identity, model: resolved.selection.config });
+  if (sent.ok) gracefulRestart.recordModel(identity, providerId, modelId);
+  return sent;
 }
 
 export function spawnChildSession(
@@ -2202,7 +2526,6 @@ export function requestSnapshot(sessionId?: string): { ok: boolean; error?: stri
 export function configuredAgentTypes(
   authenticatedAccountKeys: ReadonlySet<string>,
   hasSubagentModels = false,
-  plugins?: ResolvedPlugins,
   nativePluginAgents?: readonly NativePluginAgentDef[]
 ): AgentTypeSpawnConfig[] {
   const state = readSettingsState();
@@ -2213,8 +2536,6 @@ export function configuredAgentTypes(
   );
   const custom = withPluginAgentTypes(
     Array.isArray(state?.agentTypes) ? state.agentTypes.filter(isAgentTypeEntry) : [],
-    state,
-    plugins,
     nativePluginAgents
   );
   // 与 registry 同口径（trim + 小写）：同名 custom 覆盖 builtin

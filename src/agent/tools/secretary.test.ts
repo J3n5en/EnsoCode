@@ -74,6 +74,39 @@ describe('secretary tools', () => {
     }
   });
 
+  it('secretary_profile_propose 只暴露保留的设置项，派发工具不再提确认卡', () => {
+    const tools = createSecretaryTools(invoker().port);
+    const tool = (name: string) => tools.find((item) => item.name === name);
+    const profile = tool('secretary_profile_propose');
+    if (!profile) throw new Error('secretary_profile_propose missing');
+    const keys = Object.keys(
+      (profile.parameters as unknown as { properties: Record<string, unknown> }).properties
+    );
+    for (const removed of [
+      'model',
+      'autonomy',
+      'autoApproveProjectIds',
+      'dispatchModel',
+      'dispatchWorktree',
+      'patrolIntervalMinutes',
+      'patrolIdleGoalMinutes',
+      'orphanTaskPatrol',
+      'dispatchMuted',
+      'dispatchUnattended',
+    ])
+      expect(keys, removed).not.toContain(removed);
+    for (const kept of ['name', 'avatarColor', 'visibleProjectIds', 'maxRunningDispatches'])
+      expect(keys).toContain(kept);
+    expect(keys).toContain('patrolEnabled');
+    expect(profile.description).not.toMatch(/model|autonomy/);
+    for (const name of ['session_create', 'todo_item_dispatch'] as const) {
+      expect(tool(name)?.description).not.toMatch(/confirm/i);
+      expect(JSON.stringify(tool(name)?.parameters)).not.toMatch(
+        /dispatch model from your settings/
+      );
+    }
+  });
+
   it('别名与类型在 schema 校验前归一化', () => {
     expect(
       normalizeSecretaryParams('session_create', {

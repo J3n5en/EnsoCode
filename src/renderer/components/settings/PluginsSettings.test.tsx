@@ -16,10 +16,8 @@ vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (select: (state: unknown) => unknown) =>
     select({
-      plugins: [],
-      addPlugins: vi.fn(),
-      setPluginEnabled: vi.fn(),
-      removePlugin: vi.fn(),
+      pluginAutoUpdate: true,
+      setPluginAutoUpdate: vi.fn(),
     }),
 }));
 vi.mock('@/components/ui/button', () => ({
@@ -142,7 +140,6 @@ beforeEach(async () => {
         configGet: harness.configGet,
         setDevWatch: harness.setDevWatch,
       },
-      assets: { listInstalledPlugins: async () => [] },
     },
   });
   harness.list.mockResolvedValue([plugin]);

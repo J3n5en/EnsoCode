@@ -6,7 +6,6 @@ import type {
   ProjectedMessage,
   SlashCommand,
 } from '@shared/types/agent';
-import type { StartVoiceSession } from '@shared/types/speech';
 import {
   Bot,
   ChevronDown,
@@ -79,8 +78,6 @@ interface Props {
   /** 上滑翻页在途 */
   historyLoading?: boolean;
   onLoadOlder?(): void;
-  /** 桌面语音识别可用时才给：Composer 据此显示麦克风 */
-  voice?: StartVoiceSession;
   /** coworker tab 组（仅当父会话雇有 coworker 时有值）：主会话 + 子会话 */
   tabGroup?: { parent: CatalogEntry; children: CatalogEntry[] };
   onSelectTab?(sessionId: string): void;
@@ -513,8 +510,6 @@ export function ChatScreen(props: Props) {
                     return undefined;
                   }}
                   onAbort={props.onAbort}
-                  voice={props.voice}
-                  voiceMode="hold"
                 />
               )}
               {!readOnly && (

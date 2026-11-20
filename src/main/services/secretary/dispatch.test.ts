@@ -6,6 +6,7 @@ import type { DispatchBaseFacts } from '@shared/secretary/policy';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type {
   CleanupItem,
+  DispatchDraft,
   DispatchModelRef,
   DispatchRecord,
   SecretaryAuditEntry,
@@ -341,6 +342,24 @@ function harness(
   return h;
 }
 
+/** 旧版本留在盘上的待确认派发卡：派发不再出卡，但已有的卡照样能确认或拒绝 */
+function legacyDispatchCard(
+  h: Harness,
+  draft: Partial<DispatchDraft> & { projectId: string; prompt: string }
+): { proposalId: string } {
+  const proposalId = `legacy-${Object.keys(h.file.proposals).length + 1}`;
+  h.file.proposals[proposalId] = {
+    id: proposalId,
+    secretaryConversationId: 'sec-1',
+    createdAt: NOW,
+    updatedAt: NOW,
+    status: 'pending',
+    kind: 'dispatch',
+    draft: { worktree: false, ...draft },
+  };
+  return { proposalId };
+}
+
 const call = (handler: SecretaryOpHandler, params: Record<string, unknown> = {}) =>
   handler(params, ctx);
 
@@ -354,44 +373,46 @@ async function run(
 }
 
 describe('session_create', () => {
-  it('ask-first 时只出提案，不建会话', async () => {
+  it('派发不出确认卡：默认档案直接建会话', async () => {
     const h = harness();
-    const payload = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { status: string; proposalId: string };
-    expect(payload.status).toBe('awaiting_confirmation');
-    expect(h.created).toEqual([]);
-    const proposal = h.file.proposals[payload.proposalId];
-    expect(proposal.status).toBe('pending');
-    expect(proposal.kind).toBe('dispatch');
-    expect(proposal.secretaryConversationId).toBe('sec-1');
+    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(result).toEqual({ ok: true, result: { status: 'created', conversationId: 'new-1' } });
+    expect(Object.keys(h.file.proposals)).toEqual([]);
     expect(h.audits).toEqual([
       {
         at: NOW,
         secretaryConversationId: 'sec-1',
         op: 'session_create',
-        targetId: payload.proposalId,
+        targetId: 'new-1',
         ok: true,
-        detail: 'awaiting_confirmation',
+        detail: 'created',
       },
     ]);
   });
 
-  it('未设置档案时按默认档案出提案', async () => {
+  it('未设置档案时同样直接建会话', async () => {
     const h = harness({ profile: null });
-    const payload = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { status: string };
-    expect(payload.status).toBe('awaiting_confirmation');
-    expect(h.created).toEqual([]);
+    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(h.created).toHaveLength(1);
   });
 
-  it('免确认项目在 tell-after 下直接建会话并记派出', async () => {
-    const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+  it('旧档案写着 ask-first、关了静音和无人值守：照样直接派，派出的会话仍静音且无人值守', async () => {
+    const old = parseProfile({
+      autonomy: 'ask-first',
+      autoApproveProjectIds: [],
+      dispatchWorktree: 'always',
+      dispatchMuted: false,
+      dispatchUnattended: false,
     });
+    const h = harness({ profile: old });
+    const result = await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
+    expect(result).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(h.created[0]).toMatchObject({ worktree: false, muted: true, unattended: true });
+  });
+
+  it('直接建会话并记派出', async () => {
+    const h = harness();
     const result = await call(h.handlers.session_create, {
       projectId: 'p1',
       prompt: '修构建',
@@ -439,7 +460,7 @@ describe('session_create', () => {
     }
     const h = harness({
       file,
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       rows: {
         a: { title: 'a', sessionFile: '/a' },
         b: { title: 'b', sessionFile: '/b' },
@@ -477,8 +498,6 @@ describe('session_create', () => {
     const blocked = harness({
       file: waiting,
       profile: profile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: ['p1'],
         maxRunningDispatches: 1,
       }),
       rows: {
@@ -502,8 +521,6 @@ describe('session_create', () => {
     const open = harness({
       file: finished,
       profile: profile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: ['p1'],
         maxRunningDispatches: 1,
       }),
       rows: {
@@ -530,8 +547,6 @@ describe('session_create', () => {
     const h = harness({
       file: stale,
       profile: profile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: ['p1'],
         maxRunningDispatches: 1,
       }),
       rows: {
@@ -1194,7 +1209,7 @@ describe('session_answer', () => {
 
   it('派出的会话一律把 ask_user 转给秘书', async () => {
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
     });
     await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
     expect(h.created[0]).toMatchObject({ askRelay: { name: h.profileValue?.name } });
@@ -1377,8 +1392,6 @@ describe('接管', () => {
   it('接管的会话不占派出并发上限', async () => {
     const h = takeoverHarness({
       profile: profile({
-        autonomy: 'full',
-        autoApproveProjectIds: ['p1'],
         maxRunningDispatches: 1,
       }),
       statuses: { c1: { state: 'running', pendingAsks: 0, pendingApprovals: 0 } },
@@ -1701,31 +1714,23 @@ describe('待办', () => {
     });
   });
 
-  it('派出待办时按自主度出提案并带上待办 id', async () => {
+  it('派出待办直接建会话：不传 worktree 时默认开，带上待办 id', async () => {
     const h = harness({
       todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
     });
-    const payload = (await run(h.handlers.todo_item_dispatch, { todoId: 't1' })) as {
-      status: string;
-      proposalId: string;
-    };
-    expect(payload.status).toBe('awaiting_confirmation');
-    const proposal = h.file.proposals[payload.proposalId];
-    expect(proposal.kind === 'dispatch' && proposal.draft).toMatchObject({
-      projectId: 'p1',
-      todoId: 't1',
-      title: '看构建',
-      worktree: true,
-    });
-    const draft = proposal.kind === 'dispatch' ? proposal.draft : null;
-    expect(draft?.prompt).toContain('项目：/repo/alpha');
-    expect(draft?.prompt).toContain('基于 feat/secretary-agent 新建分支');
-    expect(draft?.prompt).toContain('看构建');
+    const result = await call(h.handlers.todo_item_dispatch, { todoId: 't1' });
+    expect(result).toEqual({ ok: true, result: { status: 'created', conversationId: 'new-1' } });
+    expect(Object.keys(h.file.proposals)).toEqual([]);
+    expect(h.created[0]).toMatchObject({ projectId: 'p1', title: '看构建', worktree: true });
+    expect(h.created[0].prompt).toContain('项目：/repo/alpha');
+    expect(h.created[0].prompt).toContain('基于 feat/secretary-agent 新建分支');
+    expect(h.created[0].prompt).toContain('看构建');
+    expect(h.todos[0].conversationId).toBe('new-1');
   });
 
   it('派出待办的会话标题用待办文本而不是 prompt 开头，可用 title 覆盖', async () => {
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       todos: [
         {
           id: 't1',
@@ -1748,7 +1753,7 @@ describe('待办', () => {
 
   it('免确认时直接派出并把待办关联到会话', async () => {
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
     });
     const result = await call(h.handlers.todo_item_dispatch, { todoId: 't1' });
@@ -1766,7 +1771,7 @@ describe('待办', () => {
 
   it('免确认派出落关联时重读，不盖掉同时改的文字和完成', async () => {
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
     });
     let release!: () => void;
@@ -1794,13 +1799,16 @@ describe('待办', () => {
     });
   });
 
-  it('确认提案后关联待办，不覆盖确认前的修改', async () => {
+  it('旧的待确认卡确认后关联待办，不覆盖确认前的修改', async () => {
     const h = harness({
       todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
     });
-    const payload = (await run(h.handlers.todo_item_dispatch, { todoId: 't1' })) as {
-      proposalId: string;
-    };
+    const payload = legacyDispatchCard(h, {
+      projectId: 'p1',
+      prompt: '看构建',
+      todoId: 't1',
+      worktree: true,
+    });
     expect(h.todos[0].conversationId).toBeUndefined();
     await call(h.handlers.todo_item_update, { todoId: 't1', text: '看发布', done: true });
     await resolveProposal(h.ports, payload.proposalId, 'confirm');
@@ -1942,42 +1950,6 @@ describe('确认卡去重', () => {
       [first.proposalId, second.proposalId].sort()
     );
   });
-
-  it('派发：同一请求再提一次复用同一张卡', async () => {
-    const h = harness();
-    const params = { projectId: 'p1', prompt: '修构建' };
-    const first = (await run(h.handlers.session_create, params)) as {
-      proposalId: string;
-      reused?: boolean;
-    };
-    const second = (await run(h.handlers.session_create, params)) as {
-      proposalId: string;
-      reused?: boolean;
-      note?: string;
-    };
-
-    expect(second.proposalId).toBe(first.proposalId);
-    expect(second.reused).toBe(true);
-    expect(second.note).toContain(`proposalId=${first.proposalId}`);
-    expect(Object.keys(h.file.proposals)).toEqual([first.proposalId]);
-  });
-
-  it('派发：参数不同另开一张，并提示上一张还没处理', async () => {
-    const h = harness();
-    const first = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
-    const second = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修发布',
-    })) as { proposalId: string; otherPendingId?: string; note?: string };
-
-    expect(second.proposalId).not.toBe(first.proposalId);
-    expect(second.otherPendingId).toBe(first.proposalId);
-    expect(second.note).toContain(`proposalId=${first.proposalId}`);
-    expect(Object.keys(h.file.proposals)).toHaveLength(2);
-  });
 });
 
 describe('确认卡的两段式回传', () => {
@@ -2031,10 +2003,7 @@ describe('确认卡的两段式回传', () => {
 describe('resolveProposal', () => {
   it('同一提案确认两次只执行一次', async () => {
     const h = harness();
-    const { proposalId } = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const { proposalId } = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
 
     const first = await resolveProposal(h.ports, proposalId, 'confirm');
     const second = await resolveProposal(h.ports, proposalId, 'confirm');
@@ -2061,14 +2030,9 @@ describe('resolveProposal', () => {
       rows: { a: { title: 'a', sessionFile: '/a' } },
       statuses: { a: running },
     });
-    const propose = async () =>
-      (
-        (await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' })) as {
-          proposalId: string;
-        }
-      ).proposalId;
+    const propose = () => legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' }).proposalId;
 
-    const blocked = await propose();
+    const blocked = propose();
     h.profileValue = profile({ maxRunningDispatches: 1 });
     const refused = await resolveProposal(h.ports, blocked, 'confirm');
     expect(refused.ok && refused.proposal.status).toBe('failed');
@@ -2076,7 +2040,7 @@ describe('resolveProposal', () => {
     expect(h.created).toEqual([]);
 
     h.profileValue = profile({ maxRunningDispatches: 2 });
-    const allowed = await propose();
+    const allowed = propose();
     const confirmed = await resolveProposal(h.ports, allowed, 'confirm');
     expect(confirmed.ok && confirmed.proposal.status).toBe('succeeded');
     expect(h.created).toHaveLength(1);
@@ -2084,10 +2048,7 @@ describe('resolveProposal', () => {
 
   it('两端同时确认也只执行一次', async () => {
     const h = harness();
-    const { proposalId } = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const { proposalId } = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
 
     const results = await Promise.all([
       resolveProposal(h.ports, proposalId, 'confirm'),
@@ -2101,10 +2062,7 @@ describe('resolveProposal', () => {
 
   it('并发确认只留一条执行记录，与落盘的接受记录分开', async () => {
     const h = harness();
-    const { proposalId } = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const { proposalId } = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
 
     await Promise.all([
       resolveProposal(h.ports, proposalId, 'confirm'),
@@ -2120,10 +2078,7 @@ describe('resolveProposal', () => {
 
   it('重新校验失败时记失败并给原因', async () => {
     const h = harness();
-    const { proposalId } = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const { proposalId } = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
     h.projects = [];
 
     const result = await resolveProposal(h.ports, proposalId, 'confirm');
@@ -2139,10 +2094,7 @@ describe('resolveProposal', () => {
 
   it('拒绝提案不执行', async () => {
     const h = harness();
-    const { proposalId } = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const { proposalId } = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
 
     const result = await resolveProposal(h.ports, proposalId, 'reject');
 
@@ -2153,10 +2105,7 @@ describe('resolveProposal', () => {
 
   it('确认时用编辑后的草案', async () => {
     const h = harness();
-    const { proposalId } = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const { proposalId } = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
 
     await resolveProposal(h.ports, proposalId, 'confirm', { prompt: '修发布', title: '发布' });
 
@@ -2173,7 +2122,7 @@ describe('resolveProposal', () => {
 
   it('确认 profile 提案时走同一套保存逻辑', async () => {
     const h = harness();
-    const draft: SecretaryProfileDraft = { name: '小秘', autonomy: 'tell-after' };
+    const draft: SecretaryProfileDraft = { name: '小秘', patrolEnabled: false };
     h.file.proposals.p1 = {
       id: 'p1',
       secretaryConversationId: 'sec-1',
@@ -2206,10 +2155,10 @@ describe('resolveProposal', () => {
 
     await resolveProposal(h.ports, 'p1', 'confirm', undefined, {
       name: '小秘',
-      autonomy: 'full',
+      maxRunningDispatches: 5,
     });
 
-    expect(h.appliedProfiles).toEqual([{ name: '小秘', autonomy: 'full' }]);
+    expect(h.appliedProfiles).toEqual([{ name: '小秘', maxRunningDispatches: 5 }]);
   });
 
   it('拒绝 profile 提案不写档案', async () => {
@@ -2232,7 +2181,7 @@ describe('resolveProposal', () => {
 
   it('保存失败时提案记失败并带原因', async () => {
     const h = harness();
-    h.ports.applyProfile = async () => ({ ok: false, error: 'invalid autonomy' });
+    h.ports.applyProfile = async () => ({ ok: false, error: 'invalid notify' });
     h.file.proposals.p1 = {
       id: 'p1',
       secretaryConversationId: 'sec-1',
@@ -2246,7 +2195,7 @@ describe('resolveProposal', () => {
     const result = await resolveProposal(h.ports, 'p1', 'confirm');
 
     expect(result.ok && result.proposal.status).toBe('failed');
-    expect(result.ok && result.proposal.error).toBe('invalid autonomy');
+    expect(result.ok && result.proposal.error).toBe('invalid notify');
   });
 
   it('确认 skill 提案时交给 skill 服务写盘', async () => {
@@ -2350,7 +2299,7 @@ describe('mutateTodo', () => {
 
   it('界面派出待办时用最近的秘书会话作为发起方', async () => {
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       projects: [localProject(), localProject('sec-proj', { kind: 'secretary' })],
       conversations: [rootConversation('sec-chat', 'sec-proj')],
       rows: { 'sec-chat': { projectId: 'sec-proj', lastActiveAt: 10 } },
@@ -2369,11 +2318,6 @@ describe('mutateTodo', () => {
   it('秘书传入的完整说明原样派出，显式不要 worktree 时也不建', async () => {
     const brief = '在独立 worktree 里工作，不推送不合并。\n修通知';
     const h = harness({
-      profile: profile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: ['p1'],
-        dispatchWorktree: 'auto',
-      }),
       todos: [{ id: 't1', text: '修通知', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
     });
     await call(h.handlers.todo_item_dispatch, { todoId: 't1', prompt: brief, worktree: false });
@@ -2555,11 +2499,7 @@ describe('buildSecretaryState', () => {
 });
 
 describe('派出会话的默认静音与无人值守', () => {
-  const createNow = (options: Parameters<typeof harness>[0] = {}) =>
-    harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
-      ...options,
-    });
+  const createNow = (options: Parameters<typeof harness>[0] = {}) => harness(options);
 
   it('默认档案派出的会话默认静音并且无人值守', async () => {
     const h = createNow();
@@ -2575,28 +2515,19 @@ describe('派出会话的默认静音与无人值守', () => {
     expect(h.created[0]).toMatchObject({ muted: true, unattended: true });
   });
 
-  it('确认提案派出时也套用默认值', async () => {
+  it('旧的待确认卡确认派出时也套用默认值', async () => {
     const h = harness();
-    const payload = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const payload = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
     await resolveProposal(h.ports, payload.proposalId, 'confirm');
     expect(h.created[0]).toMatchObject({ muted: true, unattended: true });
   });
 
-  it('关掉两个开关后不再套用默认值', async () => {
+  it('旧档案里关掉的两个开关不再生效，派出的会话照样静音且无人值守', async () => {
     const h = createNow({
-      profile: profile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: ['p1'],
-        dispatchMuted: false,
-        dispatchUnattended: false,
-      }),
+      profile: parseProfile({ dispatchMuted: false, dispatchUnattended: false }),
     });
     await call(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
-    expect(h.created[0]).not.toHaveProperty('muted');
-    expect(h.created[0]).not.toHaveProperty('unattended');
+    expect(h.created[0]).toMatchObject({ muted: true, unattended: true });
   });
 
   it('接管的会话不建新会话，也不改它原来的静音与无人值守', async () => {
@@ -2622,8 +2553,7 @@ describe('派出会话的默认静音与无人值守', () => {
 });
 
 describe('派发基线', () => {
-  const direct = () =>
-    harness({ profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }) });
+  const direct = () => harness();
 
   it('checkout/baseRef/branch 原样带给建会话，并记在派出记录上', async () => {
     const h = direct();
@@ -2667,7 +2597,7 @@ describe('派发基线', () => {
     ];
     for (const [facts, error] of cases) {
       const h = harness({
-        profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+        profile: profile(),
         baseFacts: facts,
       });
       const result = await call(h.handlers.session_create, {
@@ -2698,7 +2628,7 @@ describe('派发基线', () => {
 
   it('待办派发的说明写明实际用到的基线与分支', async () => {
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       todos: [{ id: 't1', text: '看构建', projectId: 'p1', createdAt: 1, updatedAt: 1 }],
     });
     await run(h.handlers.todo_item_dispatch, {
@@ -2720,7 +2650,7 @@ describe('派发基线', () => {
 describe('派发先后依赖', () => {
   const direct = (options: Parameters<typeof harness>[0] = {}) =>
     harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       ...options,
     });
 
@@ -2740,8 +2670,6 @@ describe('派发先后依赖', () => {
   it('带 after 的派发先等依赖：不建会话、不占运行名额', async () => {
     const h = direct({
       profile: profile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: ['p1'],
         maxRunningDispatches: 1,
       }),
       file: dispatchedFile('busy', 'running'),
@@ -2917,14 +2845,9 @@ describe('停止后不再被续跑或唤醒', () => {
 });
 
 describe('等依赖的派发与确认卡', () => {
-  it('ask-first 时先出卡，确认后才进等待表', async () => {
+  it('旧的待确认卡带 after：确认后才进等待表', async () => {
     const h = harness({ rows: { c1: { projectId: 'p1', sessionFile: '/s/c1.jsonl' } } });
-    const payload = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '接着改',
-      after: ['c1'],
-    })) as { status: string; proposalId: string };
-    expect(payload.status).toBe('awaiting_confirmation');
+    const payload = legacyDispatchCard(h, { projectId: 'p1', prompt: '接着改', after: ['c1'] });
     expect(h.file.pending).toBeUndefined();
     expect(await resolveProposal(h.ports, payload.proposalId, 'confirm')).toMatchObject({
       ok: true,
@@ -2940,8 +2863,6 @@ describe('等依赖的派发与确认卡', () => {
   it('依赖全结束后名额已满：标成出问题并推一条，不建会话', async () => {
     const h = harness({
       profile: profile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: ['p1'],
         maxRunningDispatches: 1,
       }),
       rows: {
@@ -3224,7 +3145,7 @@ describe('派发时指定模型', () => {
   it('指定可用模型：建会话时用它，记录与审计都记下', async () => {
     const h = harness({
       models: ['anthropic/opus'],
-      profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
     });
     const result = await run(h.handlers.session_create, {
       projectId: 'p1',
@@ -3246,7 +3167,7 @@ describe('派发时指定模型', () => {
   it('不可用的模型直接报错，不静默回退也不建会话', async () => {
     const h = harness({
       models: ['anthropic/opus'],
-      profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
     });
     const result = await call(h.handlers.session_create, {
       projectId: 'p1',
@@ -3259,40 +3180,20 @@ describe('派发时指定模型', () => {
     expect(h.audits.at(-1)).toMatchObject({ op: 'session_create', ok: false });
   });
 
-  it('不传模型时走档案里的固定派发模型', async () => {
+  it('旧档案里的固定派发模型不再生效：不传模型就跟随项目', async () => {
     const h = harness({
       models: ['anthropic/opus'],
-      profile: profile({
-        autonomy: 'full',
-        autoApproveProjectIds: ['p1'],
+      profile: parseProfile({
         dispatchModel: { mode: 'fixed', model: { providerId: 'anthropic', modelId: 'opus' } },
       }),
     });
     await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
-    expect(h.resolvedModels).toEqual([{ providerId: 'anthropic', modelId: 'opus' }]);
-    expect(h.created[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'opus' });
-    expect(h.audits.at(-1)).toMatchObject({ detail: 'created · model anthropic/opus' });
+    expect(h.resolvedModels).toEqual([]);
+    expect(h.created[0]?.model).toBeUndefined();
   });
 
-  it('显式指定的模型优先于档案里的固定模型', async () => {
-    const h = harness({
-      models: ['anthropic/opus', 'anthropic/sonnet'],
-      profile: profile({
-        autonomy: 'full',
-        autoApproveProjectIds: ['p1'],
-        dispatchModel: { mode: 'fixed', model: { providerId: 'anthropic', modelId: 'sonnet' } },
-      }),
-    });
-    await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-      model: { providerId: 'anthropic', modelId: 'opus' },
-    });
-    expect(h.created[0]?.model).toEqual({ providerId: 'anthropic', modelId: 'opus' });
-  });
-
-  it('不传模型且档案按项目默认时不解析模型，行为与以前一致', async () => {
-    const h = harness({ profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }) });
+  it('不传模型时不解析模型，跟随项目默认', async () => {
+    const h = harness();
     await run(h.handlers.session_create, { projectId: 'p1', prompt: '修构建' });
     expect(h.resolvedModels).toEqual([]);
     expect(h.created[0]?.model).toBeUndefined();
@@ -3302,7 +3203,7 @@ describe('派发时指定模型', () => {
   it('todo_item_dispatch 也能指定模型', async () => {
     const h = harness({
       models: ['anthropic/opus'],
-      profile: profile({ autonomy: 'full', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       todos: [
         {
           id: 't1',
@@ -3481,7 +3382,7 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
     const phone = new Set(['sec-1']);
     const deps = followDeps(dir, phone);
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
     });
     wireFollow(h, deps);
     await run(h.handlers.session_create, {
@@ -3508,7 +3409,7 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
     const dir = tempDir();
     const deps = followDeps(dir, new Set(['sec-1']));
     const h = harness({
-      profile: profile({ autonomy: 'tell-after', autoApproveProjectIds: ['p1'] }),
+      profile: profile(),
       todos: [
         { id: 't1', text: '看构建\n顺带补单测', projectId: 'p1', createdAt: 1, updatedAt: 1 },
       ],
@@ -3520,33 +3421,37 @@ describe('手机关注：派发把派生出来的会话交出去', () => {
     ]);
   });
 
-  it('待确认的卡先记提案 id，确认后改挂到会话上', async () => {
+  it('旧的待确认卡记着提案 id，确认后改挂到会话上', async () => {
     const dir = tempDir();
     const deps = followDeps(dir, new Set(['sec-1']));
     const h = harness();
     wireFollow(h, deps);
     h.ports.refollow = (from, to) => renameFollowedTarget(from, to, deps);
     h.ports.unfollow = (targetId) => unfollowTarget(targetId, deps);
-    const payload = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const payload = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
+    h.ports.follow?.({
+      targetId: payload.proposalId,
+      summary: '修构建',
+      secretaryConversationId: 'sec-1',
+    });
     expect(new FollowingStore(dir).list()).toMatchObject([{ targetId: payload.proposalId }]);
     await resolveProposal(h.ports, payload.proposalId, 'confirm');
     expect(new FollowingStore(dir).list()).toMatchObject([{ targetId: 'new-1' }]);
   });
 
-  it('卡被拒时关注项一并移除', async () => {
+  it('旧卡被拒时关注项一并移除', async () => {
     const dir = tempDir();
     const deps = followDeps(dir, new Set(['sec-1']));
     const h = harness();
     wireFollow(h, deps);
     h.ports.refollow = (from, to) => renameFollowedTarget(from, to, deps);
     h.ports.unfollow = (targetId) => unfollowTarget(targetId, deps);
-    const payload = (await run(h.handlers.session_create, {
-      projectId: 'p1',
-      prompt: '修构建',
-    })) as { proposalId: string };
+    const payload = legacyDispatchCard(h, { projectId: 'p1', prompt: '修构建' });
+    h.ports.follow?.({
+      targetId: payload.proposalId,
+      summary: '修构建',
+      secretaryConversationId: 'sec-1',
+    });
     await resolveProposal(h.ports, payload.proposalId, 'reject');
     expect(new FollowingStore(dir).list()).toEqual([]);
   });

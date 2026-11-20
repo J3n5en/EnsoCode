@@ -4,14 +4,6 @@ import { BUILTIN_TOOLS } from './types/builtinTools';
 
 /** 间接映射表里的 t() key。删孤儿时漏看这些会把正在用的词条删掉。 */
 const MAPPED_I18N_KEYS = [
-  // VoiceInputSettings.MODEL_TEXT
-  'X-ASR Streaming',
-  'Text appears while you speak. Chinese and English.',
-  'Most accurate on everyday speech. Chinese and English.',
-  'Best with mixed Chinese-English and code terms. Slower and uses more memory.',
-  'Chinese, English, Japanese, Korean and Cantonese.',
-  'Hanbao',
-  'Runs fully offline. Chinese and English.',
   // ModelPicker.LEVEL_LABEL_KEYS + StatsLine.THINKING_LEVEL_SHORT_KEYS
   'Min',
   'Low',
@@ -331,39 +323,24 @@ describe('秘书派活卡片文案', () => {
 });
 
 describe('秘书初次设置与设置页文案', () => {
-  it('欢迎页、三步表单、配置卡片与设置页的每个词条都有中文译文', () => {
+  it('欢迎页、档案表单、配置卡片与设置页的每个词条都有中文译文', () => {
     for (const key of [
       'The secretary is not part of any project. It watches your projects, dispatches sessions and reports results back. It never reads or writes code itself.',
       'Set up with a form',
-      'Three steps: name and avatar, model, how it works. Every step has a default.',
+      'One page: name, avatar, visible projects and patrol. Every field has a default.',
       'Set up by chatting',
       'The secretary asks a few questions and hands you a profile card to confirm.',
       'Use all defaults and start',
       'Could not start the secretary. Try again.',
-      'Name and avatar',
-      'How it works',
       'Avatar color',
-      'Secretary model',
-      'Used for the secretary itself. Dispatched sessions use their own project defaults.',
-      'Use default model',
-      'Autonomy',
-      'Ask before dispatching',
-      'Tell me after dispatching',
-      'Fully autonomous',
-      'Projects without confirmation',
-      'Only applies when autonomy is not "ask first". Other projects always show a confirmation card.',
       'Visible projects',
       'All projects',
       'Selected projects',
-      'Dispatch model',
-      'Follow the project',
-      'Fixed model',
-      'The secretary picks from candidates',
-      'Dispatch worktree',
-      'Never an isolated worktree',
-      'Secretary decides',
-      'Always an isolated worktree',
       'Running dispatches at most',
+      'Watch running sessions automatically',
+      'While anything is running the secretary checks it and only reports an anomaly: a goal session idle for 3 minutes with an unfinished goal and no live background task, idle for 20 minutes with a background task that never woke it, or running for 30 minutes without any event. Every hour it also reports background tasks left running in finished sessions; nothing is killed. Nothing is sent when all is well.',
+      'Patrol on',
+      'Patrol off',
       'Up to {{n}} at a time',
       'Concurrent dispatch limit',
       'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.',
@@ -372,7 +349,7 @@ describe('秘书初次设置与设置页文案', () => {
       'Profile saved',
       'Saving the profile…',
       'Secretary profile',
-      'Name, avatar, model and how much the secretary may do on its own.',
+      'Name, avatar, visible projects and patrol.',
       'Upload image',
       'Remove image',
       'The secretary has not been set up yet.',

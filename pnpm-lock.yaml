@@ -67,9 +67,6 @@ importers:
       level:
         specifier: ^10.0.0
         version: 10.0.0
-      libopus-wasm:
-        specifier: ^0.4.1
-        version: 0.4.1
       linkedom:
         specifier: ^0.18.13
         version: 0.18.13
@@ -4135,10 +4132,6 @@ packages:
   level@10.0.0:
     resolution: {integrity: sha512-aZJvdfRr/f0VBbSRF5C81FHON47ZsC2TkGxbBezXpGGXAUEL/s6+GP73nnhAYRSCIqUNsmJjfeOF4lzRDKbUig==}
     engines: {node: '>=18'}
-
-  libopus-wasm@0.4.1:
-    resolution: {integrity: sha512-dt2u6KyBe1IONzZA2Q9TXQbmLsZ6l1vLqgt4n9XC/sE70BegLgwC/hcbZp41aJgURAqalYdnPg0wGSI2IwHyvA==}
-    engines: {node: '>=22'}
 
   lifecycle-utils@2.1.0:
     resolution: {integrity: sha512-AnrXnE2/OF9PHCyFg0RSqsnQTzV991XaZA/buhFDoc58xU7rhSCDgCz/09Lqpsn4MpoPHt7TRAXV1kWZypFVsA==}
@@ -9665,8 +9658,6 @@ snapshots:
       abstract-level: 3.1.1
       browser-level: 3.0.0
       classic-level: 3.0.0
-
-  libopus-wasm@0.4.1: {}
 
   lifecycle-utils@2.1.0:
     optional: true

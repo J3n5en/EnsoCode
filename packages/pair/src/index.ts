@@ -156,10 +156,3 @@ export {
   TAILSCALE_MAGIC_DNS,
 } from './revive';
 export { isPairSyncCursor, parsePairSessionSync } from './sessionSync';
-export {
-  decodeVoiceChunk,
-  encodeVoiceChunks,
-  VOICE_CHUNK_MAX_CHARS,
-  VOICE_CHUNK_MAX_INDEX,
-  VOICE_CHUNK_MAX_SAMPLES,
-} from './voice';

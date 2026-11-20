@@ -41,8 +41,8 @@ export const zhTranslations: Record<string, string> = {
   Unbind: '解绑',
   'Change bot': '更换 bot',
   'Allow confirming cards from Telegram': '允许从 Telegram 确认卡片',
-  'On by default. A tap on your phone can confirm dispatch, settings, skill, tool and takeover cards. Those cards change how much the secretary may do on its own, which projects it sees, what it may take over, and which skills and tools it installs. Approvals are never handled from Telegram.':
-    '默认打开：手机上的一个按钮就能确认派发、设置、技能、工具与接管卡片——这些卡片能改秘书的自主程度、可见项目、接管范围，也能装 skill 和工具。审批无论如何都不能从 Telegram 处理。',
+  'On by default. A tap on your phone can confirm settings, skill, tool, takeover and cleanup cards. Those cards change which projects the secretary sees, what it may take over, which skills and tools it installs and what it cleans up. Approvals are never handled from Telegram.':
+    '默认打开：手机上的一个按钮就能确认设置、技能、工具、接管与清理卡片——这些卡片能改秘书的可见项目、接管范围，装 skill 和工具，也能清理分支与会话。审批无论如何都不能从 Telegram 处理。',
   'No system keychain available: the bot token is stored unencrypted on this machine.':
     '系统钥匙串不可用：bot token 会以明文存在这台机器上。',
   'Bot verified': 'bot 已校验',
@@ -259,6 +259,19 @@ export const zhTranslations: Record<string, string> = {
   "What's new in {{version}}": '{{version}} 更新内容',
   'No release notes provided.': '此版本未提供更新日志。',
   Restart: '重启',
+  'Restarting…': '正在重启…',
+  'Waiting for running commands to restart…': '等命令跑完再重启…',
+  'Waiting for the current command to finish': '正在等当前命令结束',
+  'Restarting EnsoCode…': '正在重启 EnsoCode…',
+  'Restoring sessions…': '正在恢复会话…',
+  'EnsoCode will restart once the current command finishes.': '当前命令结束后再重启 EnsoCode。',
+  'EnsoCode will install the update once the current command finishes.':
+    '当前命令结束后再安装更新。',
+  'EnsoCode will quit once the current command finishes.': '当前命令结束后再退出 EnsoCode。',
+  'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so EnsoCode waits for it.':
+    '有转到后台的命令没法脱离 EnsoCode 继续跑（如远程会话或 Windows 上的命令），所以要等它结束。',
+  'Force quit': '强制退出',
+  'Restart failed: {{error}}': '重启失败：{{error}}',
   'Restart server': '重启服务端',
   'Restart server?': '重启服务端？',
   'Running tasks are interrupted; this page reconnects after the server is back.':
@@ -1536,81 +1549,12 @@ export const zhTranslations: Record<string, string> = {
   'Model not downloaded': '模型未下载',
   'Downloading…': '下载中…',
   'Semantic search stays off until the model is on disk.': '模型落盘前语义检索不会生效。',
-  'Voice input': '语音输入',
-  'Adds a microphone to the composer on this computer and on paired phones. Local models transcribe speech on this computer.':
-    '在本机和已配对手机的输入框中显示麦克风按钮，本地模型在这台电脑上识别语音。',
-  'Speech model': '识别模型',
-  Microphone: '麦克风',
-  'Microphone {{n}}': '麦克风 {{n}}',
-  'Disconnected, using the system default': '已断开，暂用系统默认',
-  Streaming: '流式',
-  'Sentence by sentence': '逐句',
-  Downloaded: '已下载',
-  'Download {{size}} · Memory about {{memory}}': '下载 {{size}} · 内存约 {{memory}}',
-  'Download the selected model to start using voice input.': '下载所选模型后即可使用语音输入。',
-  'X-ASR Streaming': 'X-ASR 流式',
-  'Text appears while you speak. Chinese and English.': '边说边出字，支持中文和英文。',
-  'Most accurate on everyday speech. Chinese and English.': '日常说话识别最准，支持中文和英文。',
-  'Best with mixed Chinese-English and code terms. Slower and uses more memory.':
-    '中英混说和代码术语识别最好，但较慢且更占内存。',
-  'Chinese, English, Japanese, Korean and Cantonese.': '支持中文、英文、日语、韩语和粤语。',
-  Hanbao: '憨包',
-  'Runs fully offline. Chinese and English.': '完全离线运行，支持中文和英文。',
-  'Google cloud recognition, most accurate with mixed Chinese-English and code terms. Needs a Gemini API key.':
-    'Google 云端识别，中英混说和代码术语最准；需要 Gemini API Key。',
-  'Audio is uploaded to Google. On the free tier Google may use it to improve its products.':
-    '音频会上传到 Google；免费层级下 Google 可能用它改进产品。',
-  'Enter a Gemini API key below first.': '需先在下方填写 Gemini API Key。',
-  WeType: '微信输入法',
-  'WeChat Keyboard cloud recognition. Chinese and English, no setup needed.':
-    '微信输入法云端识别，支持中文和英文，无需配置。',
-  'Audio is uploaded to Tencent WeChat Keyboard servers.': '音频会上传到腾讯微信输入法服务器。',
-  'Gemini API key': 'Gemini API Key',
-  'Create one for free in Google AI Studio.': '可在 Google AI Studio 免费创建。',
-  Cloud: '云端',
-  'Custom vocabulary': '自定义词表',
-  'One term per line, up to 100. Helps with names and code terms such as useEffect or pnpm.':
-    '每行一个，最多 100 个。可提升人名和 useEffect、pnpm 这类代码术语的识别率。',
-  'Correct with a language model': '用大模型纠错',
-  'Fixes homophones, code terms and number formats after recognition. Adds about 1-3 seconds; the raw text is kept if it fails.':
-    '识别后纠正同音错字、代码术语和数字写法，约多 1–3 秒；纠错失败时保留原文。',
-  'Correction model': '纠错模型',
-  'tuned for voice': '语音纠错专用',
-  'Not downloaded yet. Correction is skipped until it is.': '尚未下载，下载完成前不做纠错。',
-  'A fast, inexpensive model is enough.': '选一个快且便宜的模型即可。',
   'Remote (API model)': '远程（API 模型）',
-  'Voice input is not available on this platform.': '当前平台不支持语音输入。',
-  'Download failed': '下载失败',
-  'Stop recording': '停止录音',
-  'Cancel recording': '取消录音',
-  'Transcribing…': '识别中…',
-  'Correcting…': '纠错中…',
-  'Switch to keyboard': '切换到键盘',
-  'Hold to talk': '按住 说话',
-  'Release to finish': '松开 结束',
-  'Slide up to cancel': '上滑 取消',
-  'Release to cancel': '松开 取消',
-  'Speech was too short.': '说话时间太短',
-  'Getting the microphone ready…': '麦克风准备中…',
-  'Speak now': '请说话',
-  'Voice input (hold to talk)': '语音输入（按住说话）',
-  'Hold while the chat input is focused, release to put the text in it':
-    '输入框聚焦时按住录音，松开后识别并填入输入框',
-  'Hold {{key}} to talk': '按住 {{key}} 说话',
-  'Microphone access denied. Allow it in system settings.':
-    '无法使用麦克风，请在系统设置中允许访问。',
-  'No microphone found.': '没有找到麦克风。',
-  'No speech detected.': '没有识别到语音。',
-  'Voice input failed.': '语音识别失败。',
-  'Voice input is turned off.': '语音输入已关闭。',
   Experimental: '实验功能',
   'Bot mode': 'Bot 模式',
   'Chat with AI members that have personas, form groups and delegate work. Off by default.':
     '与有人设的 AI 成员私聊、拉群并互相委派工作。默认关闭。',
   'Bot mode is turned off.': 'Bot 模式已关闭。',
-  'The speech model is not downloaded yet.': '语音模型尚未下载。',
-  'The recording was empty or too long.': '录音为空或过长。',
-  'Voice input needs a secure (HTTPS) connection.': '语音输入需要 HTTPS 安全连接。',
   Download: '下载',
   'Remote model': '远程模型',
   'Credentials stay in the main process and are never sent to the renderer.':
@@ -1977,10 +1921,8 @@ export const zhTranslations: Record<string, string> = {
   'This project ships pi extension code that runs with your permissions. It was not loaded. Trust it only if you trust this repository.':
     '此项目带有 pi 扩展代码，会以你的权限运行，已阻止加载。只有信任这个仓库时才加载。',
   'Trust and load': '信任并加载',
-  Plugins: '插件',
   Plugin: '插件',
   'Enso plugins': 'Enso 插件',
-  'Claude Code plugins': 'Claude Code 插件',
   'No Enso plugins installed': '还没有安装 Enso 插件',
   'Browse the marketplace or install from a GitHub URL, folder or zip.':
     '可以从插件市场浏览，或通过 GitHub 地址、文件夹、zip 安装。',
@@ -2029,17 +1971,6 @@ export const zhTranslations: Record<string, string> = {
   Update: '更新',
   'Update check failed: {{reason}}': '检查更新失败：{{reason}}',
   Commands: '命令',
-  '{{count}} enabled': '已启用 {{count}} 个',
-  'No supported components': '没有可用组件',
-  'MCP servers (run when a session starts)': 'MCP 服务器（会话启动时运行）',
-  'Hooks (run automatically on local sessions)': 'Hooks（本地会话中自动运行）',
-  'Not supported': '暂不支持',
-  'Plugins installed in Claude Code. Each one is switched on or off as a whole here; changes apply to new sessions.':
-    'Claude Code 里已安装的插件，在这里按整包开关，新会话生效。',
-  'No Claude Code plugins found': '没有找到 Claude Code 插件',
-  'Install plugins with /plugin in Claude Code, then rescan.':
-    '在 Claude Code 里用 /plugin 安装插件后重新扫描。',
-  'No longer installed in Claude Code': 'Claude Code 中已卸载',
   'Project extensions trusted. They load in new sessions and after this one restarts.':
     '已信任项目扩展，新会话和本会话重新启动后加载。',
   'Trusted project extensions': '已信任的项目扩展',
@@ -2826,9 +2757,9 @@ export const zhTranslations: Record<string, string> = {
     '落盘的超长工具输出；只清理已删除会话留下的。',
   'Memory database and working memory.': '记忆数据库与工作记忆。',
   'Local models': '本地模型',
-  'Downloaded embedding, chat and speech models.': '已下载的嵌入、对话与语音模型。',
+  'Downloaded embedding and chat models.': '已下载的嵌入与对话模型。',
   Runtimes: '运行时',
-  'Bundled tools, speech runtime and GPU backends.': '内置工具、语音运行时与 GPU 后端。',
+  'Bundled tools and GPU backends.': '内置工具与 GPU 后端。',
   Worktrees: 'Worktree',
   'Isolated worktrees created for conversations.': '为会话创建的隔离 worktree。',
   'Change snapshots': '变更快照',
@@ -3112,9 +3043,6 @@ export const zhTranslations: Record<string, string> = {
     'Telegram 消息不是端到端加密的，会存在 Telegram 的服务器上。/status、/board、/feed 只显示标题与简短摘要；/last 与 /sync 会发会话正文。记忆正文与工具输出不会离开应用。',
   'Waiting on a background task': '等后台任务',
   'Service running': '有常驻服务',
-  'Scan finished sessions for leftover background tasks': '巡检已完成会话的遗留后台任务',
-  'Every hour the secretary looks at finished sessions: a task whose process is gone, one that has run for over 2 hours, or a service (dev server, http.server) still running 10 minutes after the session ended. It only reports them; nothing is killed.':
-    '每小时看一遍已完成的会话：进程已经不在了、跑了超过 2 小时、或者会话结束后常驻服务（dev server、http.server）还跑了 10 分钟以上。只汇报，不杀进程。',
   'Done ({{count}} leftover tasks)': '已完成（{{count}} 个遗留任务）',
   'Stop leftover tasks': '停止遗留任务',
   'Stop background task {{task}}': '停止后台任务 {{task}}',
@@ -3676,50 +3604,29 @@ export const zhTranslations: Record<string, string> = {
   'Open secretary': '打开秘书',
   'Only when the secretary agent is enabled in Experimental settings':
     '仅在实验设置里开启秘书后生效',
-  // 秘书初次设置、三步表单与设置页
+  // 秘书初次设置、档案表单与设置页
   'The secretary is not part of any project. It watches your projects, dispatches sessions and reports results back. It never reads or writes code itself.':
     '秘书不属于任何项目。它替你看各项目进展、派活给新会话、把结果转告你。它自己不读写代码。',
   'Set up with a form': '用表单设置',
-  'Three steps: name and avatar, model, how it works. Every step has a default.':
-    '三步：名字与头像、模型、工作方式。每一步都有默认值。',
   'Set up by chatting': '和秘书聊着设置',
   'The secretary asks a few questions and hands you a profile card to confirm.':
     '秘书会问你几个问题，最后给你一张配置卡片确认。',
   'Use all defaults and start': '全部用默认，直接开始',
   'Could not start the secretary. Try again.': '没能启动秘书，请再试一次。',
-  'Name and avatar': '名字与头像',
-  'How it works': '工作方式',
-  'Secretary model': '秘书的模型',
-  'Used for the secretary itself. Dispatched sessions use their own project defaults.':
-    '秘书自己用它。派出的会话按目标项目的默认值。',
-  'Use default model': '使用默认模型',
   Autonomy: '自主度',
-  'Ask before dispatching': '派活前先问我',
-  'Tell me after dispatching': '派完告诉我',
-  'Fully autonomous': '完全自主',
-  'Projects without confirmation': '免确认项目',
-  'Only applies when autonomy is not "ask first". Other projects always show a confirmation card.':
-    '自主度不是「先问我」时才生效。没勾的项目一律先出确认卡片。',
   'Visible projects': '可见项目',
   'Selected projects': '勾选的项目',
   'Dispatch model': '派出会话模型',
-  'Follow the project': '跟随项目',
-  'The secretary picks from candidates': '秘书从候选里自选',
   'Dispatch worktree': '派出会话 worktree',
-  'Never an isolated worktree': '不开 worktree',
-  'Secretary decides': '秘书判断',
-  'Always an isolated worktree': '总是开 worktree',
   'Running dispatches at most': '进行中派出会话上限',
-  'Dispatched sessions start muted': '派出的会话默认静音',
-  'Muted sessions send no system notification, no push and no badge. Their results still reach the secretary.':
-    '静音的会话不弹系统通知、不推送、不计角标；结果仍然照常推给秘书。',
-  'Dispatched sessions start unattended': '派出的会话默认无人值守',
-  'Unattended sessions never wait for a person: actions that need your approval are refused instead, so the model decides and keeps working.':
-    '无人值守的会话不会等人：需要你确认的动作改为直接拒绝，模型自己决定后继续。',
   'Watch running sessions automatically': '自动巡检进行中的会话',
-  'While anything is running the secretary checks it on a schedule and only reports an anomaly: idle for 20 minutes with an unfinished goal, or running for 30 minutes without any event. Nothing is sent when all is well.':
-    '只要有会话在跑，秘书就按间隔检查一遍，只在发现异常时推一条：空闲超过 20 分钟而目标还没完成，或运行超过 30 分钟没有任何事件。一切正常时什么都不推。',
-  'Check every': '检查间隔',
+  'While anything is running the secretary checks it and only reports an anomaly: a goal session idle for 3 minutes with an unfinished goal and no live background task, idle for 20 minutes with a background task that never woke it, or running for 30 minutes without any event. Every hour it also reports background tasks left running in finished sessions; nothing is killed. Nothing is sent when all is well.':
+    '只要有会话在跑，秘书就定期检查，只在发现异常时推一条：goal 会话空闲 3 分钟、目标没完成且没有在跑的后台任务；空闲 20 分钟、后台任务一直没叫醒它；或运行 30 分钟没有任何事件。每小时还会汇报已完成会话里遗留的后台任务，不杀进程。一切正常时什么都不推。',
+  'Patrol on': '巡检开',
+  'Patrol off': '巡检关',
+  'One page: name, avatar, visible projects and patrol. Every field has a default.':
+    '一页填完：名字、头像、可见项目与巡检。每一项都有默认值。',
+  'Name, avatar, visible projects and patrol.': '名字、头像、可见项目与巡检。',
   'Up to {{n}} at a time': '最多同时 {{n}} 个',
   'Concurrent dispatch limit': '同时运行的派发会话上限',
   'The most dispatched sessions the secretary may run at the same time. Once the limit is reached, new dispatches are refused.':
@@ -3750,8 +3657,6 @@ export const zhTranslations: Record<string, string> = {
   'Saving the skill…': '正在保存技能…',
   New: '新建',
   'Secretary profile': '秘书档案',
-  'Name, avatar, model and how much the secretary may do on its own.':
-    '名字、头像、模型，以及它能自己做到什么程度。',
   'Upload image': '上传图片',
   'Remove image': '移除图片',
   'Avatar images must be PNG, JPEG, WebP or GIF, and at most 2 MB.':

@@ -775,7 +775,6 @@ describe('ExtensionPluginService', () => {
   });
 
   describe('子代理类型', () => {
-    const noClaude = { skillPaths: [], commands: [], agents: [], mcpServers: [], hooks: [] };
     const files = () => ({
       'enso-plugin.json': manifest({
         contributes: {
@@ -803,7 +802,7 @@ describe('ExtensionPluginService', () => {
     it('启用后读出正文与技能目录，停用或卸载后立刻从 agentTypes 消失', async () => {
       await install(files());
       setNativeAgentTypeSource(service.agentTypeSource());
-      const names = () => withPluginAgentTypes([], undefined, noClaude).map((t) => t.name);
+      const names = () => withPluginAgentTypes([]).map((t) => t.name);
       expect(service.agentTypesForSpawn()).toEqual([]);
       expect(names()).toEqual([]);
 
@@ -819,7 +818,7 @@ describe('ExtensionPluginService', () => {
       expect(reviewer?.skillPaths).toHaveLength(1);
       expect(reviewer?.skillPaths[0]).toMatch(/packages\/example\.demo\/[^/]+\/skills\/review$/);
       expect(worker).toMatchObject({ name: 'worker-x', tools: 'all', skillPaths: [] });
-      const merged = withPluginAgentTypes([], undefined, noClaude);
+      const merged = withPluginAgentTypes([]);
       expect(merged.map((t) => t.name)).toEqual(['demo:reviewer', 'worker-x']);
       expect(merged[0]?.pluginSkillPaths).toEqual(reviewer?.skillPaths);
 
@@ -854,8 +853,8 @@ describe('ExtensionPluginService', () => {
         systemPrompt: 'mine',
         tools: 'all' as const,
       };
-      withPluginAgentTypes([user], undefined, noClaude);
-      withPluginAgentTypes([user], undefined, noClaude);
+      withPluginAgentTypes([user]);
+      withPluginAgentTypes([user]);
       const hits = (await service.logs('example.demo'))
         .split('\n')
         .filter((l) => l.includes('同名'));

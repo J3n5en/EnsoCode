@@ -112,7 +112,6 @@ export function referencedModelIds(settings: unknown, providerId: unknown): Set<
     'approvalReviewer',
     'smartCompactModel',
     'memoryDistillModel',
-    'voiceCorrectionRemoteModel',
     'botAssistantModel',
   ])
     add(state[key]);

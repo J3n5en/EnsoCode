@@ -58,7 +58,6 @@ describe('配对作用域', () => {
       'goal-set',
       'task-stop',
       'subagent-stop',
-      'voice-chunk',
       'bot-send',
       'bot-stop',
       'bot-retry',
