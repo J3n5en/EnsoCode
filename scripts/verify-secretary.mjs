@@ -101,6 +101,45 @@ function assert(ok, label, detail) {
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
+/**
+ * fake provider 的 `[[tool:name {json}]]` 指令不支持嵌套：参数里还要带一条给派出会话用的指令时，
+ * 把里面的 `]]` 写成 JSON 转义，外层解析时不会提前收尾，JSON.parse 后又还原成原文。
+ */
+function toolDirective(name, args) {
+  return `[[tool:${name} ${JSON.stringify(args).replaceAll(']]', '\\u005d\\u005d')}]]`;
+}
+
+/** 派发直接执行：新开一个秘书会话发指令，从工具结果里拿到建出的会话 id */
+function directDispatcher(page, setup) {
+  return (toolName, args) =>
+    page(`
+    const secretary = await SEC();
+    const fresh = await secretary.getState().newSecretaryConversation();
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
+    await S().send(
+      ${JSON.stringify(`派活 ${toolDirective(toolName, args)}`)},
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      fresh
+    );
+    const message = await until(
+      () => (S().conversations[fresh]?.messages ?? []).find((m) => m.toolName === ${JSON.stringify(toolName)}) ?? null,
+      30000
+    );
+    const text = (Array.isArray(message?.content) ? message.content : [])
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('');
+    const conversationId = /"conversationId":"([^"]+)"/.exec(text)?.[1] ?? null;
+    return JSON.stringify({
+      ok: Boolean(message) && message.isError !== true && /"status":"created"/.test(text) && Boolean(conversationId),
+      secretaryId: fresh,
+      conversationId,
+      error: message ? (message.isError ? text : null) : 'no tool result',
+    });
+  `);
+}
+
 async function fakeRequests() {
   const reply = await fetch(`http://127.0.0.1:${FAKE_PORT}/__requests`);
   return (await reply.json()).requests;
@@ -637,13 +676,9 @@ async function run(cdp, pluginZipUrl) {
     const saved = await window.electronAPI.secretary.saveProfile({
       name: '秘书',
       avatar: { color: '#6366f1' },
-      model: null,
-      autonomy: 'ask-first',
-      autoApproveProjectIds: [],
       visibleProjectIds: 'all',
-      dispatchModel: { mode: 'project' },
-      dispatchWorktree: 'never',
       maxRunningDispatches: 3,
+      patrolEnabled: true,
       replyLanguage: 'ui',
       style: 'concise',
       notify: 'off',
@@ -652,7 +687,7 @@ async function run(cdp, pluginZipUrl) {
     });
     if (!saved.ok) return JSON.stringify({ ok: false, error: saved.error });
     const secretary = await SEC();
-    const secretaryId = await secretary.getState().newSecretaryConversation({ profile: saved.profile });
+    const secretaryId = await secretary.getState().newSecretaryConversation();
     return JSON.stringify({
       ok: Boolean(secretaryId),
       marker: window.__secVerifyMarker,
@@ -684,6 +719,7 @@ async function run(cdp, pluginZipUrl) {
     return;
   }
   await verifyAvatar(cdp, setup);
+  const dispatchDirect = directDispatcher(page, setup);
 
   log('== step3 派活');
   const draft = {
@@ -701,47 +737,41 @@ async function run(cdp, pluginZipUrl) {
       undefined,
       ${JSON.stringify(setup.secretaryId)}
     );
-    const card = await until(() => document.querySelector('[data-enso=secretary-proposal]'), 30000);
-    if (!card) return JSON.stringify({ ok: false, error: 'no proposal card' });
-    const pair = card.closest('[data-enso=tool-card-pair]');
-    pair?.scrollIntoView({ block: 'center' });
-    const tool = pair?.querySelector('[data-enso=tool-card]');
-    const toolBox = tool?.getBoundingClientRect();
-    const proposalBox = card.getBoundingClientRect();
-    const aligned = Boolean(
-      toolBox &&
-        Math.abs(toolBox.left - proposalBox.left) < 1 &&
-        Math.abs(toolBox.right - proposalBox.right) < 1
-    );
+    // 派发不再出确认卡：工具一返回会话就已经建好，看板上直接出现这条派出会话
     const secretary = await SEC();
-    const proposal = Object.values(secretary.getState().secretary.proposals).at(-1);
+    const card = await until(() => {
+      const board = secretary.getState().secretary.board;
+      return [...board.needsYou, ...board.running, ...board.done].find(
+        (c) => c.kind === 'session' && c.title === ${JSON.stringify(draft.title)}
+      ) ?? null;
+    }, 30000);
+    const tool = await until(() => {
+      const node = [...document.querySelectorAll('[data-enso=tool-card]')].find((el) =>
+        el.innerText.includes(${JSON.stringify(draft.title)})
+      );
+      node?.scrollIntoView({ block: 'center' });
+      return node ?? null;
+    }, 15000);
+    const pending = Object.values(secretary.getState().secretary.proposals).filter(
+      (p) => p.kind === 'dispatch' && p.status === 'pending'
+    );
     return JSON.stringify({
-      ok: proposal.status === 'pending',
-      aligned,
-      proposalId: proposal.id,
-      cardText: card.innerText,
-      buttons: [...card.querySelectorAll('button')].map((b) => b.innerText),
+      ok: Boolean(card),
+      conversationId: card?.conversationId ?? null,
+      toolCard: Boolean(tool),
+      pendingDispatchCards: pending.length,
+      proposalCard: Boolean(document.querySelector('[data-enso=secretary-proposal]')),
     });
   `);
-  assert(proposed.ok, 'step3: 聊天里出现待确认的派活卡片', proposed);
-  assert(proposed.aligned, 'step3: 工具卡片和派活结果卡片左右对齐', proposed);
-  await cdp.shot(path.join(ART, '02-proposal-card.png'));
-
-  const confirmed = await page(`
-    document.querySelector('[data-enso=secretary-proposal] button').click();
-    const secretary = await SEC();
-    const done = await until(() => {
-      const p = secretary.getState().secretary.proposals[${JSON.stringify(proposed.proposalId)}];
-      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
-    }, 30000);
-    return JSON.stringify({ status: done?.status, conversationId: done?.conversationId });
-  `);
+  assert(proposed.ok, 'step3: 派活直接建出会话，看板上出现派出会话', proposed);
   assert(
-    confirmed.status === 'succeeded' && Boolean(confirmed.conversationId),
-    'step3: 确认后提案执行成功',
-    confirmed
+    proposed.pendingDispatchCards === 0 && !proposed.proposalCard,
+    'step3: 派活不再出待确认卡片',
+    proposed
   );
-  const dispatchedId = confirmed.conversationId;
+  assert(proposed.toolCard, 'step3: 聊天里有派活的工具卡片', proposed);
+  await cdp.shot(path.join(ART, '02-dispatch-card.png'));
+  const dispatchedId = proposed.conversationId;
 
   log('== step2 单代单 jsonl');
   const second = await page(`
@@ -913,42 +943,13 @@ async function run(cdp, pluginZipUrl) {
 
   // 派出时就带目标的会话：记录里留着初始目标文本，目标完成后行里的目标撤下，记录里的文本不动
   log('== step6b 带初始目标的派出会话');
-  const goalDispatch = await page(`
-    const secretary = await SEC();
-    const fresh = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const draft = ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '创建 goal.txt',
-      title: '写 goal.txt',
-    })};
-    await S().send(
-      '派一个带目标的活 [[tool:session_create ' + JSON.stringify(draft) + ']]',
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      fresh
-    );
-    const proposal = await until(() => {
-      const pending = Object.values(secretary.getState().secretary.proposals).filter(
-        (p) => p.status === 'pending'
-      );
-      return pending.at(-1) ?? null;
-    }, 30000);
-    if (!proposal) return JSON.stringify({ ok: false });
-    // 目标经确认时的编辑注入，不塞进 prompt 里的 session_create 指令（fake provider 的指令解析不支持嵌套）
-    const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
-      goal: '收尾 [[tool:goal_complete {"summary":"goal.txt 已写好"}]]',
-    });
-    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
-    const done = await until(() => {
-      const p = secretary.getState().secretary.proposals[proposal.id];
-      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
-    }, 30000);
-    return JSON.stringify({
-      ok: done?.status === 'succeeded',
-      conversationId: done?.conversationId,
-    });
-  `);
+  // 目标随派发一起带上：派发不再出卡，没有确认时的编辑可用
+  const goalDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '创建 goal.txt',
+    title: '写 goal.txt',
+    goal: '收尾 [[tool:goal_complete {"summary":"goal.txt 已写好"}]]',
+  });
   assert(
     goalDispatch.ok && Boolean(goalDispatch.conversationId),
     'step6b: 带初始目标的派出会话建成',
@@ -1092,53 +1093,28 @@ async function run(cdp, pluginZipUrl) {
     readJson(dispatchFile).dispatched[goalSession]
   );
 
-  log('== step5 并发确认');
-  const secondProposal = await page(`
-    const secretary = await SEC();
-    const fresh = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const draft = ${JSON.stringify({
-      ...draft,
-      prompt: '创建 notes.md，写一行说明',
-      title: '写 notes.md',
-    })};
-    await S().send(
-      '再派一个活 [[tool:session_create ' + JSON.stringify(draft) + ']]',
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      fresh
-    );
-    const proposal = await until(() => {
-      const pending = Object.values(secretary.getState().secretary.proposals).filter(
-        (p) => p.status === 'pending'
-      );
-      return pending.at(-1) ?? null;
-    }, 30000);
-    return JSON.stringify({ secretaryId: fresh, proposalId: proposal?.id });
-  `);
-  assert(Boolean(secondProposal.proposalId), 'step5: 第二个提案已建立', secondProposal);
+  log('== step5 再派一个活：直接建出，只多一个会话');
   const beforeCount = readJson(registryFile).conversations.filter(
     (entry) => entry.projectId === setup.projectId
   ).length;
-  const concurrent = await page(`
-    const id = ${JSON.stringify(secondProposal.proposalId)};
-    return JSON.stringify(await Promise.all([
-      window.electronAPI.secretary.resolveProposal(id, 'confirm'),
-      window.electronAPI.secretary.resolveProposal(id, 'confirm'),
-    ]));
-  `);
-  assert(
-    concurrent.filter((entry) => entry.ok).length === 1,
-    'step5: 并发确认只有一次成功',
-    concurrent
-  );
-  assert(
-    concurrent.some((entry) => !entry.ok && entry.error === 'not-pending'),
-    'step5: 另一次被状态机挡下',
-    concurrent
-  );
-  const projectConversations = readJson(registryFile).conversations.filter(
-    (entry) => entry.projectId === setup.projectId
+  const secondDispatch = await dispatchDirect('session_create', {
+    ...draft,
+    prompt: '创建 notes.md，写一行说明',
+    title: '写 notes.md',
+  });
+  assert(secondDispatch.ok, 'step5: 第二个派活直接建出会话', secondDispatch);
+  const projectConversations = await waitFor(
+    () => {
+      const rows = readJson(registryFile).conversations.filter(
+        (entry) => entry.projectId === setup.projectId
+      );
+      return rows.length > beforeCount ? rows : null;
+    },
+    'second dispatch persisted',
+    15_000,
+    250
+  ).catch(() =>
+    readJson(registryFile).conversations.filter((entry) => entry.projectId === setup.projectId)
   );
   assert(projectConversations.length === beforeCount + 1, 'step5: 目标项目只多出一个会话', {
     before: beforeCount,
@@ -1149,29 +1125,27 @@ async function run(cdp, pluginZipUrl) {
     (record) => record.projectId === setup.projectId
   );
   assert(records.length === 3, 'step5: 三个派出会话各一条记录', records.length);
-  const audit = readFileSync(auditFile, 'utf8')
+  const createAudit = readFileSync(auditFile, 'utf8')
     .trim()
     .split('\n')
-    .map((line) => JSON.parse(line));
-  // 落盘时记 accepted，执行收尾记 succeeded：并发确认只应各有一条
-  const confirmLines = audit.filter(
-    (entry) => entry.op === 'proposal_confirm' && entry.targetId === secondProposal.proposalId
+    .map((line) => JSON.parse(line))
+    .filter(
+      (entry) => entry.op === 'session_create' && entry.targetId === secondDispatch.conversationId
+    );
+  assert(
+    createAudit.length === 1 && createAudit[0].ok && createAudit[0].detail === 'created',
+    'step5: audit 里这次派发只有一条 created',
+    createAudit
   );
   assert(
-    confirmLines.length === 2 &&
-      confirmLines.filter((entry) => entry.detail === 'accepted').length === 1 &&
-      confirmLines.filter((entry) => entry.detail === 'succeeded').length === 1,
-    'step5: audit 里该提案只有一条执行记录',
-    confirmLines
-  );
-  const proposal = dispatchFinal.proposals[secondProposal.proposalId];
-  assert(
-    proposal.status === 'succeeded' && Boolean(dispatchFinal.dispatched[proposal.conversationId]),
-    'step5: 提案指向唯一会话',
-    proposal
+    !Object.values(dispatchFinal.proposals).some(
+      (proposal) => proposal.kind === 'dispatch' && proposal.status === 'pending'
+    ),
+    'step5: 派发没有留下待确认卡',
+    dispatchFinal.proposals
   );
 
-  // 造一条进行中的派出记录：上限 3 时提案能建，设置面板改成 1 后确认就该被拒
+  // 造一条进行中的派出记录：设置面板改成 1 后，新派发当场被拒
   log('== step5b 设置面板改派发上限');
   const profileFile = path.join(ENV, 'secretary', 'profile.json');
   await waitFor(
@@ -1183,30 +1157,7 @@ async function run(cdp, pluginZipUrl) {
     60_000,
     500
   );
-  const limitSeed = readJson(dispatchFile);
-  const seededState = limitSeed.dispatched[dispatchedId].lastState;
-  limitSeed.dispatched[dispatchedId].lastState = 'running';
-  writeFileSync(dispatchFile, JSON.stringify(limitSeed));
-  const limitProposal = await page(`
-    const secretary = await SEC();
-    const fresh = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const draft = ${JSON.stringify({ ...draft, prompt: '创建 limit.txt', title: '写 limit.txt' })};
-    await S().send(
-      '超限前先提个派活 [[tool:session_create ' + JSON.stringify(draft) + ']]',
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      fresh
-    );
-    const proposal = await until(() => {
-      const pending = Object.values(secretary.getState().secretary.proposals).filter(
-        (p) => p.status === 'pending' && p.secretaryConversationId === fresh
-      );
-      return pending.at(-1) ?? null;
-    }, 30000);
-    return JSON.stringify({ proposalId: proposal?.id });
-  `);
-  assert(Boolean(limitProposal.proposalId), 'step5b: 上限 3、进行中 1 时提案能建', limitProposal);
+  const seededState = readJson(dispatchFile).dispatched[dispatchedId].lastState;
 
   await page(`
     await window.electronAPI.window.openSettings({
@@ -1282,16 +1233,14 @@ async function run(cdp, pluginZipUrl) {
   const limitSeedNow = readJson(dispatchFile);
   limitSeedNow.dispatched[dispatchedId].lastState = 'running';
   writeFileSync(dispatchFile, JSON.stringify(limitSeedNow));
-  const refused = await page(`
-    return JSON.stringify(
-      await window.electronAPI.secretary.resolveProposal(${JSON.stringify(limitProposal.proposalId)}, 'confirm')
-    );
-  `);
+  const refused = await dispatchDirect('session_create', {
+    ...draft,
+    prompt: '创建 limit.txt',
+    title: '写 limit.txt',
+  });
   assert(
-    refused.ok &&
-      refused.proposal?.status === 'failed' &&
-      refused.proposal?.error === 'dispatch-limit',
-    'step5b: 不重启秘书，确认时按新上限 1 拒绝',
+    !refused.ok && /dispatch-limit/.test(refused.error ?? ''),
+    'step5b: 不重启秘书，派发时按新上限 1 拒绝',
     refused
   );
   assert(
@@ -1444,16 +1393,6 @@ async function run(cdp, pluginZipUrl) {
         action: 'dispatch', todoId: todo.todoId, prompt: ${JSON.stringify(`慢慢回复 [[slow:${slowMs}]]`)},
       });
       if (!sent.ok) return JSON.stringify({ ok: false, error: sent.error });
-      const secretary = await SEC();
-      const proposal = await until(() => Object.values(secretary.getState().secretary.proposals).find(
-        (p) => p.status === 'pending' && p.kind === 'dispatch' && p.draft.todoId === todo.todoId
-      ), 5000);
-      if (proposal) {
-        const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
-          title: ${JSON.stringify(title)},
-        });
-        if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
-      }
       return JSON.stringify({ ok: true, todoId: todo.todoId });
     `);
     assert(started.ok, `动态：派出「${title}」`, started);
@@ -1660,40 +1599,6 @@ async function run(cdp, pluginZipUrl) {
     .filter((entry) => entry.op === 'result_dismiss' && entry.targetId === dispatchedId);
   assert(dismissAudit.length === 1, 'step8: audit 里记了一条 result_dismiss', dismissAudit);
 
-  // 新开一个秘书会话出提案再带编辑确认；指令放在编辑里，fake provider 的指令解析不支持嵌套
-  const dispatchConfirmed = (directive, edits) =>
-    page(`
-    const secretary = await SEC();
-    const fresh = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    await S().send(
-      '派活 ' + ${JSON.stringify(directive)},
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      fresh
-    );
-    const proposal = await until(() => {
-      const pending = Object.values(secretary.getState().secretary.proposals).filter(
-        (p) => p.status === 'pending' && p.secretaryConversationId === fresh
-      );
-      return pending.at(-1) ?? null;
-    }, 30000);
-    if (!proposal) return JSON.stringify({ ok: false, error: 'no proposal' });
-    const resolved = await window.electronAPI.secretary.resolveProposal(
-      proposal.id, 'confirm', ${JSON.stringify(edits ?? {})}
-    );
-    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
-    const done = await until(() => {
-      const p = secretary.getState().secretary.proposals[proposal.id];
-      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
-    }, 30000);
-    return JSON.stringify({
-      ok: done?.status === 'succeeded',
-      secretaryId: fresh,
-      conversationId: done?.conversationId,
-      error: done?.error,
-    });
-  `);
   const secretarySaw = (secretaryId, conversationId, kind) =>
     page(`
     return JSON.stringify(texts(${JSON.stringify(secretaryId)}).some((text) =>
@@ -1706,14 +1611,12 @@ async function run(cdp, pluginZipUrl) {
   `);
 
   log('== step9 等后台任务不报 needs-user，真提问才报');
-  const waitDispatch = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '跑全量测试',
-      title: '等后台任务',
-    })}]]`,
-    { goal: '跑完测试 [[tool:goal_wait {"reason":"真机验收已在后台运行，完成后会通知我"}]]' }
-  );
+  const waitDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '跑全量测试',
+    title: '等后台任务',
+    goal: '跑完测试 [[tool:goal_wait {"reason":"真机验收已在后台运行，完成后会通知我"}]]',
+  });
   assert(waitDispatch.ok, 'step9: 带目标的派出会话建成', waitDispatch);
   const waitId = waitDispatch.conversationId;
   const waitGoal = await page(`
@@ -1749,14 +1652,11 @@ async function run(cdp, pluginZipUrl) {
   // 派出的会话默认无人值守，但 ask_user 不再被直接拒绝：提问先转给秘书，秘书用 session_answer
   // 代答，原会话拿到答案继续跑。这一步不需要临时关掉无人值守。
   log('== step9b 派出会话的 ask_user 先转给秘书');
-  const askDispatch = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '占位',
-      title: '真提问',
-    })}]]`,
-    { prompt: '选方案 [[tool:ask_user {"question":"用哪个方案？","options":["A","B"]}]]' }
-  );
+  const askDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '选方案 [[tool:ask_user {"question":"用哪个方案？","options":["A","B"]}]]',
+    title: '真提问',
+  });
   assert(askDispatch.ok, 'step9: 会提问的派出会话建成', askDispatch);
   const askId = askDispatch.conversationId;
   const relayRecord = await waitFor(
@@ -1843,12 +1743,10 @@ async function run(cdp, pluginZipUrl) {
     }));
   `);
   assert(todoAdded.ok, 'step10: 建出带项目的待办', todoAdded);
-  const todoDispatch = await dispatchConfirmed(
-    `[[tool:todo_item_dispatch ${JSON.stringify({
-      todoId: todoAdded.todoId,
-      prompt: '背景：秘书功能在 feat/secretary-agent 分支上开发，这个分支检出在别处',
-    })}]]`
-  );
+  const todoDispatch = await dispatchDirect('todo_item_dispatch', {
+    todoId: todoAdded.todoId,
+    prompt: '背景：秘书功能在 feat/secretary-agent 分支上开发，这个分支检出在别处',
+  });
   assert(todoDispatch.ok, 'step10: 待办派出会话建成', todoDispatch);
   const todoRow = await page(`
     const row = await until(() => S().conversations[${JSON.stringify(todoDispatch.conversationId)}], 15000);
@@ -1868,16 +1766,12 @@ async function run(cdp, pluginZipUrl) {
   const profile = readJson(profilePath);
   profile.updateWindowMs = 1000;
   writeFileSync(profilePath, JSON.stringify(profile));
-  const bgDispatch = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '把检查放到后台',
-      title: '等后台续跑',
-    })}]]`,
-    {
-      goal: '先把检查丢到后台再等通知 [[tool:bash {"command":"sleep 12","background":true}]]',
-    }
-  );
+  const bgDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '把检查放到后台',
+    title: '等后台续跑',
+    goal: '先把检查丢到后台再等通知 [[tool:bash {"command":"sleep 12","background":true}]]',
+  });
   assert(bgDispatch.ok, 'step11: 等后台任务的派出会话建成', bgDispatch);
   const bgId = bgDispatch.conversationId;
   const bgSettled = await waitFor(
@@ -1914,14 +1808,12 @@ async function run(cdp, pluginZipUrl) {
     bgId
   );
 
-  const blockedDispatch = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '停下来',
-      title: '真受阻',
-    })}]]`,
-    { goal: '缺决定 [[tool:goal_blocked {"reason":"缺一个只有用户知道的决定"}]]' }
-  );
+  const blockedDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '停下来',
+    title: '真受阻',
+    goal: '缺决定 [[tool:goal_blocked {"reason":"缺一个只有用户知道的决定"}]]',
+  });
   assert(blockedDispatch.ok, 'step11: 会调用 goal_blocked 的会话建成', blockedDispatch);
   const blockedId = blockedDispatch.conversationId;
   const blockedSeen = await waitFor(
@@ -1938,14 +1830,12 @@ async function run(cdp, pluginZipUrl) {
     await secretaryCount(blockedDispatch.secretaryId, blockedId, 'goal-blocked')
   );
 
-  const completeDispatch = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '写完就停',
-      title: '真完成',
-    })}]]`,
-    { goal: '收尾 [[tool:goal_complete {"summary":"step11 文件已写好"}]]' }
-  );
+  const completeDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '写完就停',
+    title: '真完成',
+    goal: '收尾 [[tool:goal_complete {"summary":"step11 文件已写好"}]]',
+  });
   assert(completeDispatch.ok, 'step11: 会调用 goal_complete 的会话建成', completeDispatch);
   const completeId = completeDispatch.conversationId;
   let completeWhileRunning = false;
@@ -1987,14 +1877,12 @@ async function run(cdp, pluginZipUrl) {
   );
 
   log('== step12 目标会话的中间轮不打扰，完成时才开口');
-  const quietDispatch = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '连续检查几轮',
-      title: '连续验收',
-    })}]]`,
-    { goal: '把检查做完。先不要调用 goal_complete 或 goal_blocked' }
-  );
+  const quietDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '连续检查几轮',
+    title: '连续验收',
+    goal: '把检查做完。先不要调用 goal_complete 或 goal_blocked',
+  });
   assert(quietDispatch.ok, 'step12: 连续跑的目标会话建成', quietDispatch);
   const quietId = quietDispatch.conversationId;
   const quietTurns = await waitFor(
@@ -2039,14 +1927,12 @@ async function run(cdp, pluginZipUrl) {
   `);
   assert(quietFeed.activity >= 1 && quietFeed.cards === 1, 'step12: 动态里能看到这几轮', quietFeed);
 
-  const bgQuiet = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '把检查放到后台',
-      title: '后台别打扰',
-    })}]]`,
-    { goal: '先放后台再等 [[tool:bash {"command":"sleep 8","background":true}]]' }
-  );
+  const bgQuiet = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '把检查放到后台',
+    title: '后台别打扰',
+    goal: '先放后台再等 [[tool:bash {"command":"sleep 8","background":true}]]',
+  });
   assert(bgQuiet.ok, 'step12: 等后台任务的目标会话建成', bgQuiet);
   const bgQuietId = bgQuiet.conversationId;
   const bgQuietSettled = await waitFor(
@@ -2072,14 +1958,12 @@ async function run(cdp, pluginZipUrl) {
     bgQuietId
   );
 
-  const doneDispatch = await dispatchConfirmed(
-    `[[tool:session_create ${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '收尾',
-      title: '合并后开口',
-    })}]]`,
-    { goal: '收尾 [[tool:goal_complete {"summary":"step12 做完了"}]]' }
-  );
+  const doneDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '收尾',
+    title: '合并后开口',
+    goal: '收尾 [[tool:goal_complete {"summary":"step12 做完了"}]]',
+  });
   assert(doneDispatch.ok, 'step12: 会完成的目标会话建成', doneDispatch);
   const doneId = doneDispatch.conversationId;
   const doneSeen = await waitFor(
@@ -2151,13 +2035,11 @@ async function run(cdp, pluginZipUrl) {
     openRow ?? listedOpen.text
   );
 
-  const activeDispatch = await dispatchConfirmed(
-    `[[tool:todo_item_dispatch ${JSON.stringify({
-      todoId: boardAdded.todoId,
-      prompt: '先把这件事做起来',
-      title: '看板验收会话',
-    })}]]`
-  );
+  const activeDispatch = await dispatchDirect('todo_item_dispatch', {
+    todoId: boardAdded.todoId,
+    prompt: '先把这件事做起来',
+    title: '看板验收会话',
+  });
   assert(activeDispatch.ok, 'step11: 待办派出发了', activeDispatch);
   const shownActive = await page(`
     document.querySelector('[data-enso=secretary-panel-tab][data-tab=workbench]')?.click();
@@ -2345,34 +2227,11 @@ async function run(cdp, pluginZipUrl) {
 
   log('== step13 看板发送带上项目和 worktree');
   const boardSendTitle = '看板发送验收';
-  const secretaryProfile = (over) => ({
-    name: '秘书',
-    avatar: { color: '#6366f1' },
-    model: null,
-    autonomy: 'ask-first',
-    autoApproveProjectIds: [],
-    visibleProjectIds: 'all',
-    dispatchModel: { mode: 'project' },
-    dispatchWorktree: 'never',
-    maxRunningDispatches: 3,
-    replyLanguage: 'ui',
-    style: 'concise',
-    notify: 'off',
-    addressAs: null,
-    dailyBriefAt: null,
-    ...over,
-  });
+  // 派发本来就直接执行、待办默认开 worktree：这里只把并发上限临时放宽
   const allowBoardSend = await page(`
-    return JSON.stringify(await window.electronAPI.secretary.saveProfile(${JSON.stringify(
-      secretaryProfile({
-        autonomy: 'tell-after',
-        autoApproveProjectIds: [setup.projectId],
-        dispatchWorktree: 'always',
-        maxRunningDispatches: 10,
-      })
-    )}));
+    return JSON.stringify(await window.electronAPI.secretary.saveProfile({ maxRunningDispatches: 10 }));
   `);
-  assert(allowBoardSend.ok, 'step13: 临时允许看板直接派出并建 worktree', allowBoardSend);
+  assert(allowBoardSend.ok, 'step13: 临时放宽并发上限', allowBoardSend);
   const boardSendAdded = await page(`
     return JSON.stringify(await window.electronAPI.secretary.mutateTodo({
       action: 'add',
@@ -2411,7 +2270,7 @@ async function run(cdp, pluginZipUrl) {
     return { text, worktree: row?.worktree?.path ?? null };
   }, 'step13 prompt').catch((error) => ({ text: '', worktree: null, error: String(error) }));
   await page(`
-    return JSON.stringify(await window.electronAPI.secretary.saveProfile(${JSON.stringify(secretaryProfile())}));
+    return JSON.stringify(await window.electronAPI.secretary.saveProfile({ maxRunningDispatches: 3 }));
   `);
   assert(
     boardPrompt.text?.includes(boardSendTitle) &&
@@ -3402,35 +3261,14 @@ async function verifyTelegramContact(cdp, setup) {
   assert(!chatNames.includes('memory'), '联系方式: 记忆关着时菜单里没有 /memory', chatNames);
 
   log('== 联系方式：里程碑出站遵循 notify');
+  const dispatchDirect = directDispatcher(page, setup);
   const runDispatch = () =>
-    page(`
-    const secretary = await SEC();
-    const fresh = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const draft = ${JSON.stringify({ projectId: setup.projectId, prompt: '创建 tg.txt', title: '写 tg.txt' })};
-    await S().send(
-      '派一个活 [[tool:session_create ' + JSON.stringify(draft) + ']]',
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      fresh
-    );
-    const proposal = await until(
-      () => Object.values(secretary.getState().secretary.proposals)
-        .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
-        .at(-1) ?? null,
-      30000
-    );
-    if (!proposal) return JSON.stringify({ ok: false, error: 'no proposal' });
-    const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
+    dispatchDirect('session_create', {
+      projectId: setup.projectId,
+      prompt: '创建 tg.txt',
+      title: '写 tg.txt',
       goal: '收尾 [[tool:goal_complete {"summary":"tg.txt 已写好"}]]',
     });
-    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
-    const done = await until(() => {
-      const p = secretary.getState().secretary.proposals[proposal.id];
-      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
-    }, 30000);
-    return JSON.stringify({ ok: done?.status === 'succeeded', conversationId: done?.conversationId });
-  `);
   const waitGoal = (conversationId) =>
     waitFor(
       () => {
@@ -3610,6 +3448,8 @@ async function verifyTelegramContact(cdp, setup) {
   // 界面上是卡片：发送者 + 时间 + 正文，包裹层不外露
   // 刚切过去的会话要等一帧才渲染完，这里等节点出现，别抢在渲染前查
   const card = await page(`
+    // 上面的等待只在自己那次 page 调用里切过会话，这里再切一次，避免中间被别的回合换走
+    S().selectConversation(${JSON.stringify(inboundTarget)});
     const node = await until(() => document.querySelector('[data-telegram-inbound]'), 15000);
     return JSON.stringify({
       found: Boolean(node),
@@ -3688,35 +3528,11 @@ async function verifyTelegramContact(cdp, setup) {
 
   log('== 联系方式：只读命令与面板一致');
   // 造一个「需要你处理」的派出会话：面板与 /status 都该看到它
-  const cmdDispatch = await page(`
-    const secretary = await SEC();
-    const fresh = await secretary.getState().newSecretaryConversation();
-    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const directive = '[[tool:session_create ' + JSON.stringify(${JSON.stringify({
-      projectId: setup.projectId,
-      prompt: '占位',
-      title: '命令验证',
-    })}) + ']]';
-    await S().send(
-      '派活 ' + directive,
-      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
-      undefined,
-      fresh
-    );
-    const proposal = await until(() => Object.values(secretary.getState().secretary.proposals)
-      .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
-      .at(-1) ?? null, 30000);
-    if (!proposal) return JSON.stringify({ ok: false, error: 'no proposal' });
-    const resolved = await window.electronAPI.secretary.resolveProposal(proposal.id, 'confirm', {
-      prompt: '选方案 [[tool:ask_user {"question":"用哪个方案？","options":["A","B"]}]]',
-    });
-    if (!resolved.ok) return JSON.stringify({ ok: false, error: resolved.error });
-    const done = await until(() => {
-      const p = secretary.getState().secretary.proposals[proposal.id];
-      return p && p.status !== 'pending' && p.status !== 'executing' ? p : null;
-    }, 30000);
-    return JSON.stringify({ ok: done?.status === 'succeeded', conversationId: done?.conversationId });
-  `);
+  const cmdDispatch = await dispatchDirect('session_create', {
+    projectId: setup.projectId,
+    prompt: '选方案 [[tool:ask_user {"question":"用哪个方案？","options":["A","B"]}]]',
+    title: '命令验证',
+  });
   assert(cmdDispatch.ok, '联系方式: 造一个等待中的派出会话', cmdDispatch);
   const cmdId = cmdDispatch.conversationId;
   const panelBoard = await waitFor(
@@ -4122,21 +3938,20 @@ async function verifyTelegramContact(cdp, setup) {
   );
 
   log('== 联系方式：确认卡带按钮，开关决定能不能在手机上确认');
-  const makeCard = (title) =>
+  // 派发不再出卡：用技能卡验证手机确认，名字就是卡片标题里能认出的那一段
+  const makeCard = (name) =>
     page(`
     const secretary = await SEC();
     const fresh = await secretary.getState().newSecretaryConversation();
     const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
-    const draft = { projectId: ${JSON.stringify(setup.projectId)}, prompt: '占位', title: ${JSON.stringify(title)} };
-    const directive = '[[tool:session_create ' + JSON.stringify(draft) + ']]';
     await S().send(
-      '派活 ' + directive,
+      ${JSON.stringify(`沉淀成 skill [[tool:skill_propose ${JSON.stringify({ name, description: '手机确认验收', body: '# 步骤' })}]]`)},
       { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
       undefined,
       fresh
     );
     const proposal = await until(() => Object.values(secretary.getState().secretary.proposals)
-      .filter((p) => p.status === 'pending' && p.secretaryConversationId === fresh)
+      .filter((p) => p.status === 'pending' && p.kind === 'skill' && p.secretaryConversationId === fresh)
       .at(-1) ?? null, 30000);
     return JSON.stringify({ ok: Boolean(proposal), proposalId: proposal?.id ?? null });
   `);
@@ -4151,17 +3966,20 @@ async function verifyTelegramContact(cdp, setup) {
     return JSON.stringify(await window.electronAPI.secretary.contactSettings({ allowCardConfirm: false }));
   `);
   assert(cardSwitchOff.ok, '联系方式: 关掉确认卡开关', cardSwitchOff);
-  const cardOff = await makeCard('卡片验证一');
-  assert(cardOff.ok, '联系方式: 造一张待确认的派发卡', cardOff);
+  const cardOff = await makeCard('tg-card-one');
+  assert(cardOff.ok, '联系方式: 造一张待确认的技能卡', cardOff);
   const noticeOff = await waitFor(
-    () => tg.sent.find((message) => message.text?.includes('卡片验证一')) ?? null,
+    () => tg.sent.find((message) => message.text?.includes('tg-card-one')) ?? null,
     'card notice with switch off',
     30_000,
     300
   );
   const offButtons = noticeOff.reply_markup?.inline_keyboard?.flat() ?? [];
   assert(
-    offButtons.map((button) => button.text).join(',') === '确认派发：卡片验证一,在应用里打开',
+    offButtons.length === 2 &&
+      offButtons[0].text.startsWith('确认技能') &&
+      offButtons[0].text.includes('tg-card-one') &&
+      offButtons[1].text === '在应用里打开',
     '联系方式: 开关关着时按钮照样在（确认 + 在应用里打开）',
     offButtons
   );
@@ -4220,21 +4038,22 @@ async function verifyTelegramContact(cdp, setup) {
     return JSON.stringify(await window.electronAPI.secretary.contactSettings({ allowCardConfirm: true }));
   `);
   assert(cardSwitch.ok, '联系方式: 打开确认卡开关', cardSwitch);
-  const cardOn = await makeCard('卡片验证二');
-  assert(cardOn.ok, '联系方式: 开关打开后再造一张派发卡', cardOn);
+  const cardOn = await makeCard('tg-card-two');
+  assert(cardOn.ok, '联系方式: 开关打开后再造一张技能卡', cardOn);
   const noticeOn = await waitFor(
-    () => tg.sent.find((message) => message.text?.includes('卡片验证二')) ?? null,
+    () => tg.sent.find((message) => message.text?.includes('tg-card-two')) ?? null,
     'card notice with switch on',
     30_000,
     300
   );
   const onRows = noticeOn.reply_markup?.inline_keyboard ?? [];
+  const onButtons = onRows.flat().map((button) => button.text);
   assert(
-    onRows
-      .flat()
-      .map((button) => button.text)
-      .join(',') === '确认派发：卡片验证二,在应用里打开',
-    '联系方式: 开关打开后是「确认派发：标题」+「在应用里打开」',
+    onButtons.length === 2 &&
+      onButtons[0].startsWith('确认技能') &&
+      onButtons[0].includes('tg-card-two') &&
+      onButtons[1] === '在应用里打开',
+    '联系方式: 开关打开后是「确认技能：标题」+「在应用里打开」',
     onRows.map((row) => row.map((button) => button.text))
   );
   assert(
@@ -4278,13 +4097,13 @@ async function verifyTelegramContact(cdp, setup) {
     500
   );
   assert(
-    confirmed.status === 'succeeded' && Boolean(confirmed.conversationId),
-    '联系方式: 手机点按钮真的把卡确认了（派出会话建成）',
+    confirmed.status === 'succeeded',
+    '联系方式: 手机点按钮真的把卡确认了（技能写盘）',
     confirmed
   );
   assert(
-    tg.callbacks.some((callback) => callback.text?.includes('已确认：派发')),
-    '联系方式: 手机收到「已确认：派发 …」',
+    tg.callbacks.some((callback) => callback.text?.includes('已确认：技能')),
+    '联系方式: 手机收到「已确认：技能 …」',
     tg.callbacks.slice(-2)
   );
   const settledOn = await waitFor(
@@ -4294,7 +4113,7 @@ async function verifyTelegramContact(cdp, setup) {
     300
   );
   assert(
-    settledOn.text === '✅ 已确认：派发 卡片验证二',
+    settledOn.text?.startsWith('✅ 已确认：技能') && settledOn.text.includes('tg-card-two'),
     '联系方式: 原消息整条换成「✅ 已确认：…」',
     settledOn.text
   );
@@ -4309,7 +4128,7 @@ async function verifyTelegramContact(cdp, setup) {
     settledOn.text
   );
   assert(
-    tg.sent.some((message) => message.text === '✅ 已确认：派发 卡片验证二'),
+    tg.sent.some((message) => message.text === settledOn.text),
     '联系方式: 确认后另回一条结果',
     tg.sent.slice(-3)
   );
@@ -4327,7 +4146,7 @@ async function verifyTelegramContact(cdp, setup) {
     300
   );
   assert(
-    settledOff.text === '✅ 已处理：派发 卡片验证一',
+    settledOff.text?.startsWith('✅ 已处理：技能') && settledOff.text.includes('tg-card-one'),
     '联系方式: 在应用里处理掉之后正文换成「✅ 已处理：…」',
     settledOff.text
   );
@@ -4342,7 +4161,7 @@ async function verifyTelegramContact(cdp, setup) {
     .map((line) => JSON.parse(line))
     .filter((entry) => entry.op === 'contact_card_confirm');
   assert(
-    cardAudit.some((entry) => entry.ok && entry.detail?.startsWith('派发')),
+    cardAudit.some((entry) => entry.ok && entry.detail?.startsWith('技能')),
     '联系方式: 从手机确认记审计（哪张卡、什么类型）',
     cardAudit
   );
@@ -4801,6 +4620,26 @@ async function verifyAvatar(cdp, setup) {
   const fixture = path.join(ART, 'avatar-source.png');
   writeAvatarFixture(fixture);
 
+  log('== 头像：没上传图片时按名字生成');
+  const generatedFace = () =>
+    page(`
+    const face = await until(
+      () => document.querySelector('[data-enso=secretary-avatar-face][data-generated=true]') ?? null,
+      15000
+    );
+    return JSON.stringify({
+      // React useId 给 mask 的 id 每次挂载都不同，比较前抹掉
+      svg: face?.querySelector('svg')?.outerHTML.replace(/_r_\\w+?_/g, '') ?? null,
+      image: document.querySelector('[data-enso=secretary-avatar]')?.getAttribute('data-image'),
+    });
+  `);
+  const defaultFace = await generatedFace();
+  assert(
+    typeof defaultFace.svg === 'string' && defaultFace.image === null,
+    '头像: 没设头像时侧栏用 boring-avatars 生成',
+    defaultFace
+  );
+
   log('== 头像：自定义颜色');
   await page(`
     await window.electronAPI.window.openSettings({
@@ -4821,6 +4660,30 @@ async function verifyAvatar(cdp, setup) {
     30_000,
     500
   );
+
+  const flat = await settingsPage.json(`
+    await until(
+      () => document.querySelector('[data-enso=secretary-form-avatar-hex]')?.value === '#6366f1',
+      30000
+    );
+    const form = document.querySelector('[data-enso=secretary-profile-form]');
+    form?.scrollIntoView({ block: 'start' });
+    return JSON.stringify({
+      steps: document.querySelectorAll('[data-enso=secretary-form-step]').length,
+      fields: ['name', 'visible-mode', 'max-running', 'patrol'].filter((key) =>
+        form?.querySelector('[data-enso=secretary-form-' + key + ']')
+      ),
+      removed: ['autonomy', 'worktree', 'dispatch-model', 'muted', 'unattended', 'patrol-interval', 'orphan'].filter((key) =>
+        document.querySelector('[data-enso=secretary-form-' + key + ']')
+      ),
+    });
+  `);
+  assert(
+    flat.steps === 0 && flat.fields.length === 3 && flat.removed.length === 0,
+    '设置页: 档案表单一页平铺，只剩保留的设置项',
+    flat
+  );
+  await settingsPage.shot(path.join(ART, '01a-secretary-settings.png'));
 
   const custom = await settingsPage.json(`
     // 档案还在加载时表单是空草案；加载完会按 updatedAt 重挂，把这时填的颜色丢掉。
@@ -4848,7 +4711,8 @@ async function verifyAvatar(cdp, setup) {
   await settingsPage.shot(path.join(ART, '01b-avatar-custom-color.png'));
 
   const savedColor = await settingsPage.json(`
-    document.querySelector('[data-enso=secretary-form-step][data-step=workflow]').click();
+    // 表单一页平铺：没有分步，保存按钮就在同一页
+    if (document.querySelector('[data-enso=secretary-form-step]')) return JSON.stringify({ ok: false, steps: true });
     const save = await until(
       () =>
         [...document.querySelectorAll('[data-enso=secretary-profile-form] button')].find((b) =>
@@ -4869,20 +4733,20 @@ async function verifyAvatar(cdp, setup) {
   ).catch(() => readJson(profileFile));
   assert(colored.avatar?.color === '#ff00aa', '头像: 自定义色落进 profile.json', colored.avatar);
 
-  const sidebarColor = await page(`
-    const face = await until(
-      () => document.querySelector('[data-enso=secretary-avatar-face]') ?? null,
-      15000
-    );
-    return JSON.stringify({
-      background: face?.style.backgroundColor,
-      image: document.querySelector('[data-enso=secretary-avatar]')?.getAttribute('data-image'),
-      text: face?.textContent?.trim(),
-    });
-  `);
+  const sidebarColor = await waitFor(
+    async () => {
+      const face = await generatedFace();
+      return face.svg && face.svg !== defaultFace.svg ? face : null;
+    },
+    'sidebar generated avatar recolored',
+    15_000,
+    300
+  ).catch(() => generatedFace());
   assert(
-    sidebarColor.background === 'rgb(255, 0, 170)' && sidebarColor.image === null,
-    '头像: 侧栏用自定义色加首字',
+    typeof sidebarColor.svg === 'string' &&
+      sidebarColor.svg !== defaultFace.svg &&
+      sidebarColor.image === null,
+    '头像: 侧栏按自定义色重新生成 boring-avatars',
     sidebarColor
   );
 
@@ -5061,16 +4925,16 @@ async function verifyAvatar(cdp, setup) {
       const avatar = document.querySelector('[data-enso=secretary-avatar]');
       return avatar && avatar.getAttribute('data-image') !== 'true' ? avatar : null;
     }, 20000);
-    const face = node?.querySelector('[data-enso=secretary-avatar-face]');
+    const face = node?.querySelector('[data-enso=secretary-avatar-face][data-generated=true]');
     return JSON.stringify({
-      background: face?.style.backgroundColor,
-      text: face?.textContent?.trim(),
+      // React useId 给 mask 的 id 每次挂载都不同，比较前抹掉
+      svg: face?.querySelector('svg')?.outerHTML.replace(/_r_\\w+?_/g, '') ?? null,
       image: node?.getAttribute('data-image'),
     });
   `);
   assert(
-    restored.background === 'rgb(255, 0, 170)' && restored.image === null,
-    '头像: 移除后回到颜色加首字',
+    restored.svg === sidebarColor.svg && restored.image === null,
+    '头像: 移除后回到按名字和颜色生成的头像',
     restored
   );
   await cdp.shot(path.join(ART, '01e-avatar-removed.png'));
@@ -6716,13 +6580,11 @@ async function verifyTakeover(cdp, setup) {
   const plainRows = await page(`
     const id = ${JSON.stringify(plainTurn.id)};
     S().selectConversation(id);
+    // 缓存的其它会话也留着 tool-row，只认当前看得见的
     const rows = () =>
-      [...document.querySelectorAll('[data-enso=tool-row]')].map((node) => node.innerText);
+      visible('[data-enso=tool-row]').map((node) => node.innerText);
     const group = await until(
-      () =>
-        [...document.querySelectorAll('[data-enso=tool-row]')].find((node) =>
-          /已工作|Worked for/.test(node.innerText)
-        ) ?? null,
+      () => visible('[data-enso=tool-row]').find((node) => /已工作|Worked for/.test(node.innerText)) ?? null,
       20000
     );
     if (!group) return JSON.stringify({ ok: false, error: 'no tool group' });

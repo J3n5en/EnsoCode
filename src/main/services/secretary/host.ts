@@ -5,10 +5,10 @@ import { projectNameFromPath } from '@shared/projectName';
 import { shouldForwardMilestone } from '@shared/secretary/contact';
 import { extractReportRefs } from '@shared/secretary/daily';
 import {
+  PATROL_IDLE_GOAL_MS,
+  PATROL_INTERVAL_MS,
   type PatrolFacts,
   patrolAnomalies,
-  patrolIdleGoalMs,
-  patrolIntervalMs,
   patrolStallDetail,
 } from '@shared/secretary/patrol';
 import { transitionProposal } from '@shared/secretary/policy';
@@ -283,7 +283,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     records: readonly DispatchRecord[],
     now: number
   ): boolean {
-    if (ports.profile()?.orphanTaskPatrol === false) return false;
+    if (ports.profile()?.patrolEnabled === false) return false;
     if (leftoverAt !== undefined && now < leftoverAt) return false;
     leftoverAt = now + LEFTOVER_PATROL_MS;
     let changed = false;
@@ -649,7 +649,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const profile = ports.profile();
     if (!profile?.patrolEnabled) return false;
     const rows = ports.rows();
-    const idleGoalMs = patrolIdleGoalMs(profile.patrolIdleGoalMinutes);
     let changed = false;
     for (const record of records) {
       if (!record.patrol) continue;
@@ -667,7 +666,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     }
     if (patrolAt !== undefined && now < patrolAt) return changed;
     // 停住阈值比巡检间隔小时按阈值走：3 分钟的判定不该被 15 分钟的间隔拖住
-    patrolAt = now + Math.min(patrolIntervalMs(profile.patrolIntervalMinutes), idleGoalMs);
+    patrolAt = now + Math.min(PATROL_INTERVAL_MS, PATROL_IDLE_GOAL_MS);
     const facts: PatrolFacts[] = live.map((record) => {
       const status = statuses[record.conversationId];
       const row = rows[record.conversationId];
@@ -687,7 +686,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         ...(record.lastText ? { lastText: record.lastText } : {}),
       };
     });
-    for (const anomaly of patrolAnomalies(facts, now, { idleGoalMs })) {
+    for (const anomaly of patrolAnomalies(facts, now)) {
       const record = file.dispatched[anomaly.conversationId];
       if (!record) continue;
       record.patrol = { reason: anomaly.reason, turn: record.turn, at: now };

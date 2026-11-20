@@ -6,17 +6,10 @@ const profile: SecretaryProfile = {
   version: 1,
   name: '阿秘',
   avatar: { color: '#7c5cff' },
-  autonomy: 'ask-first',
-  autoApproveProjectIds: [],
   takeoverScope: { mode: 'projects', projectIds: [] },
   visibleProjectIds: 'all',
-  dispatchModel: { mode: 'project' },
-  dispatchWorktree: 'auto',
   maxRunningDispatches: 3,
   patrolEnabled: true,
-  patrolIntervalMinutes: 15,
-  dispatchMuted: true,
-  dispatchUnattended: true,
   replyLanguage: 'zh',
   style: 'concise',
   notify: 'needs-user',
@@ -127,5 +120,28 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toMatch(/needs another branch or another base, or is a different task/);
     expect(prompt).toMatch(/already reported goal-complete, say .*continues the earlier work/);
     expect(prompt).toMatch(/another worktree and another branch/);
+  });
+
+  it('派发直接执行不出卡，worktree 由秘书每次按任务决定，模型默认跟随项目', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    // 确认卡只剩会删东西、改设置、写技能工具和接管这几类
+    const confirmations = prompt.split('\n\n').find((part) => part.startsWith('Confirmations:'));
+    expect(confirmations).toBeDefined();
+    expect(confirmations).not.toMatch(/session_create|todo_item_dispatch/);
+    expect(prompt).toMatch(/session_create and todo_item_dispatch run right away/);
+    // worktree 规则：改代码开，只读调查不开
+    expect(prompt).toMatch(/worktree true when the session will change code/);
+    expect(prompt).toMatch(/worktree false for read-only/);
+    // 不再提已经删掉的设置
+    expect(prompt).not.toMatch(/autonomy|dispatch model from your settings|dispatch default/);
+    expect(prompt).not.toMatch(/the interval and the threshold are in your settings/);
+    expect(prompt).toMatch(/follows the project's default model/);
+  });
+
+  it('初次设置不再问模型和自主度', () => {
+    const prompt = buildSecretarySystemPrompt({ profile: null, persona: '', uiLanguage: 'zh' });
+    const setup = prompt.split('\n\n').find((part) => part.startsWith('First setup'));
+    expect(setup).toBeDefined();
+    expect(setup).not.toMatch(/model|autonomy/);
   });
 });

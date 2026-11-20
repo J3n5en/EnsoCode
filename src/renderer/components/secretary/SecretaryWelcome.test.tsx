@@ -30,11 +30,6 @@ vi.mock('@/stores/settings', () => ({
     selector: (state: { projects: { id: string; name: string; path: string }[] }) => unknown
   ) => selector({ projects: [{ id: 'p1', name: 'enso', path: '/p/enso' }] }),
 }));
-vi.mock('@/components/chat/ModelPicker', () => ({
-  MODEL_PICKER_FORM_TRIGGER_CLASS: '',
-  ModelPicker: () => createElement('div', { 'data-enso': 'mock-model-picker' }),
-}));
-vi.mock('@/stores/modelDirectory/useProviders', () => ({ useUsableProviders: () => [] }));
 
 const { SecretaryWelcome } = await import('./SecretaryWelcome');
 
@@ -101,35 +96,37 @@ describe('SecretaryWelcome', () => {
     expect(h.saveProfile).toHaveBeenCalledTimes(1);
     expect(h.saveProfile.mock.calls[0]?.[0]).toMatchObject({
       name: 'Secretary',
-      model: null,
-      autonomy: 'ask-first',
       visibleProjectIds: 'all',
-      dispatchWorktree: 'auto',
       maxRunningDispatches: 3,
     });
     expect(h.newSecretaryConversation).toHaveBeenCalledTimes(1);
     expect(h.closeWelcome).toHaveBeenCalledTimes(1);
   });
 
-  it('表单三步走完才写档案，写的是完整草案', async () => {
+  it('表单一页平铺：名字、头像、可见项目、并发上限与巡检都在，点开始写完整草案', async () => {
     await click('Set up with a form');
-    expect(container.querySelector('[data-enso="secretary-form-name"]')).not.toBeNull();
-
-    await click('Next');
-    expect(container.querySelector('[data-enso="mock-model-picker"]')).not.toBeNull();
-
-    await click('Next');
-    expect(container.querySelector('[data-enso="secretary-form-autonomy"]')).not.toBeNull();
+    for (const enso of [
+      'secretary-form-name',
+      'secretary-form-visible-mode',
+      'secretary-form-max-running',
+      'secretary-form-patrol',
+    ])
+      expect(container.querySelector(`[data-enso="${enso}"]`), enso).not.toBeNull();
+    expect(container.querySelector('[data-enso="secretary-form-step"]')).toBeNull();
+    expect(container.textContent).not.toContain('Next');
     expect(h.saveProfile).not.toHaveBeenCalled();
 
     await click('Start');
     expect(h.saveProfile).toHaveBeenCalledTimes(1);
-    expect(h.saveProfile.mock.calls[0]?.[0]).toMatchObject({
+    const draft = h.saveProfile.mock.calls[0]?.[0];
+    expect(draft).toMatchObject({
       name: 'Secretary',
-      autonomy: 'ask-first',
       maxRunningDispatches: 3,
+      patrolEnabled: true,
     });
-    expect(h.newSecretaryConversation).toHaveBeenCalledTimes(1);
+    expect(draft).not.toHaveProperty('autonomy');
+    expect(draft).not.toHaveProperty('model');
+    expect(h.newSecretaryConversation).toHaveBeenCalledWith();
     expect(h.closeWelcome).toHaveBeenCalledTimes(1);
   });
 

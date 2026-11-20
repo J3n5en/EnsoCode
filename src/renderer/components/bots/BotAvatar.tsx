@@ -1,9 +1,8 @@
-import { avatarPalette } from '@shared/bots/avatarPalette';
-import Avatar from 'boring-avatars';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { Presence } from '@/stores/bots/presence';
 import { type AvatarBot, botAvatarSrc } from './avatarImage';
+import { GeneratedAvatar } from './GeneratedAvatar';
 import { PresenceMark } from './PresenceMark';
 
 const SIZES = {
@@ -62,18 +61,6 @@ export function BotAvatar({
         />
       )}
     </span>
-  );
-}
-
-export function GeneratedAvatar({ name, color }: { name: string; color: string }) {
-  return (
-    <Avatar
-      name={name}
-      variant="beam"
-      colors={avatarPalette(color)}
-      size="100%"
-      className="absolute inset-0 h-full w-full"
-    />
   );
 }
 

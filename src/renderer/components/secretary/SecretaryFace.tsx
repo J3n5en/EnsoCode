@@ -1,6 +1,12 @@
+import { GeneratedAvatar } from '@/components/bots/GeneratedAvatar';
 import { cn } from '@/lib/utils';
 
-/** 秘书的脸：有图用图，否则颜色加首字。调用方传入受控 URL，不传磁盘路径。 */
+const DEFAULT_COLOR = '#7c5cff';
+
+/**
+ * 秘书的脸：有图用图，否则和 bot 一样按名字与头像色用 boring-avatars 生成。
+ * 调用方传入受控 URL，不传磁盘路径。
+ */
 export function SecretaryFace({
   name,
   color,
@@ -14,7 +20,6 @@ export function SecretaryFace({
   className?: string;
   enso?: string;
 }) {
-  const initial = [...name.trim()][0] ?? '·';
   if (image) {
     return (
       <img
@@ -31,14 +36,10 @@ export function SecretaryFace({
   return (
     <span
       data-enso={enso}
-      className={cn(
-        'flex items-center justify-center font-semibold text-white',
-        !color && 'bg-brand',
-        className
-      )}
-      style={color ? { backgroundColor: color } : undefined}
+      data-generated="true"
+      className={cn('relative block shrink-0 overflow-hidden', className)}
     >
-      {initial}
+      <GeneratedAvatar name={name.trim() || 'secretary'} color={color ?? DEFAULT_COLOR} />
     </span>
   );
 }

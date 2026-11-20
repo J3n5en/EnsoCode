@@ -17,7 +17,7 @@ type JsonSchema = Record<string, unknown>;
 const MODEL_SCHEMA: JsonSchema = {
   type: 'object',
   description:
-    'Optional: an exact provider and model, checked before anything is created. An unknown, disabled or credential-less provider or model is refused with an error and is never silently replaced by the default. Omit it to use the dispatch model from your settings.',
+    "Optional: an exact provider and model, checked before anything is created. An unknown, disabled or credential-less provider or model is refused with an error and is never silently replaced by the default. Omit it to follow the project's default model.",
   properties: {
     providerId: { type: 'string', minLength: 1, maxLength: 200 },
     modelId: { type: 'string', minLength: 1, maxLength: 200 },
@@ -209,18 +209,10 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     keys: [
       'name',
       'avatarColor',
-      'model',
-      'autonomy',
-      'autoApproveProjectIds',
       'takeoverScope',
       'visibleProjectIds',
-      'dispatchModel',
-      'dispatchWorktree',
       'maxRunningDispatches',
       'patrolEnabled',
-      'patrolIntervalMinutes',
-      'patrolIdleGoalMinutes',
-      'orphanTaskPatrol',
       'addressAs',
       'replyLanguage',
       'style',
@@ -228,7 +220,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'dailyBriefAt',
       'persona',
     ],
-    numbers: ['maxRunningDispatches', 'patrolIntervalMinutes', 'patrolIdleGoalMinutes'],
+    numbers: ['maxRunningDispatches'],
     aliases: { displayName: 'name', language: 'replyLanguage', about: 'persona' },
   },
   skill_propose: {
@@ -456,7 +448,7 @@ const SCHEMAS: Record<
   },
   session_create: {
     description:
-      'Create a normal visible session in a local project and send the first prompt. It may need the user to confirm on a card; when it does, the call returns a proposalId instead of a conversationId. With worktree true you can pin the base: checkout picks an existing checkout of the project, baseRef the branch or commit to start from, branch the new branch name. With after the session is not created yet: it waits for the listed sessions and returns status "waiting" with a pendingId.',
+      'Create a normal visible session in a local project and send the first prompt. It runs right away and returns the conversationId. The session runs muted and unattended: approvals in it are refused automatically and its ask_user questions come to you. With worktree true you can pin the base: checkout picks an existing checkout of the project, baseRef the branch or commit to start from, branch the new branch name. With after the session is not created yet: it waits for the listed sessions and returns status "waiting" with a pendingId.',
     parameters: object(
       {
         projectId: id('Target project id'),
@@ -476,7 +468,8 @@ const SCHEMAS: Record<
         model: MODEL_SCHEMA,
         worktree: {
           type: 'boolean',
-          description: 'Run in an isolated worktree instead of the project checkout',
+          description:
+            'true when the session will change code (an isolated worktree and branch); false for read-only investigation in the project checkout. Default false.',
         },
         ...BASE_PARAMS,
         after: AFTER_PARAM,
@@ -735,7 +728,7 @@ const SCHEMAS: Record<
   },
   todo_item_dispatch: {
     description:
-      'Turn a todo item into a dispatched session. Same confirmation rules as session_create, and the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions, plus the same optional model.',
+      'Turn a todo item into a dispatched session. It runs right away like session_create, with the same optional checkout / baseRef / branch to pin the base and after to wait for other sessions, plus the same optional model.',
     parameters: object(
       {
         todoId: id('Todo id'),
@@ -748,7 +741,11 @@ const SCHEMAS: Record<
           description: 'Optional title; defaults to the todo text',
         },
         model: MODEL_SCHEMA,
-        worktree: { type: 'boolean' },
+        worktree: {
+          type: 'boolean',
+          description:
+            'true when the session will change code; false for read-only investigation. Default true.',
+        },
         ...BASE_PARAMS,
         after: AFTER_PARAM,
       },
@@ -783,13 +780,10 @@ const SCHEMAS: Record<
   },
   secretary_profile_propose: {
     description:
-      'Propose a change to your own settings (name, avatar color, model, autonomy, visible projects, takeover scope, style, language, notifications). It is a draft: the user confirms on a card and only then is it saved. Use it for the first setup too.',
+      'Propose a change to your own settings (name, avatar color, visible projects, takeover scope, running dispatch limit, patrol, style, language, notifications). It is a draft: the user confirms on a card and only then is it saved. Use it for the first setup too.',
     parameters: object({
       name: { type: 'string', minLength: 1, maxLength: 64 },
       avatarColor: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' },
-      model: MODEL_SCHEMA,
-      autonomy: { type: 'string', enum: ['ask-first', 'tell-after', 'full'] },
-      autoApproveProjectIds: { type: 'array', items: { type: 'string' }, maxItems: 200 },
       takeoverScope: {
         description:
           'Which sessions you may message and stop without asking each time: explicit (only the ones the user hands over on a card), projects (the listed project ids), or all (every project you can see).',
@@ -823,50 +817,11 @@ const SCHEMAS: Record<
           { type: 'array', items: { type: 'string' }, maxItems: 200 },
         ],
       },
-      dispatchModel: {
-        anyOf: [
-          {
-            type: 'object',
-            properties: { mode: { type: 'string', enum: ['project'] } },
-            required: ['mode'],
-            additionalProperties: false,
-          },
-          {
-            type: 'object',
-            properties: { mode: { type: 'string', enum: ['fixed'] }, model: MODEL_SCHEMA },
-            required: ['mode', 'model'],
-            additionalProperties: false,
-          },
-          {
-            type: 'object',
-            properties: {
-              mode: { type: 'string', enum: ['choose'] },
-              candidates: { type: 'array', items: MODEL_SCHEMA, minItems: 1, maxItems: 20 },
-            },
-            required: ['mode', 'candidates'],
-            additionalProperties: false,
-          },
-        ],
-      },
-      dispatchWorktree: { type: 'string', enum: ['never', 'auto', 'always'] },
       maxRunningDispatches: { type: 'integer', minimum: 1, maximum: 10 },
       patrolEnabled: {
         type: 'boolean',
         description:
-          'Watch running sessions automatically and report only anomalies. On by default.',
-      },
-      patrolIntervalMinutes: { type: 'integer', minimum: 5, maximum: 120 },
-      patrolIdleGoalMinutes: {
-        type: 'integer',
-        minimum: 1,
-        maximum: 30,
-        description:
-          'Minutes a goal session may sit idle with no background task and an unfinished goal before the patrol reports it as stalled. Default 3.',
-      },
-      orphanTaskPatrol: {
-        type: 'boolean',
-        description:
-          'Scan finished sessions hourly for background tasks still running (dead process, over 2 hours, or a service left after the session ended) and report them. Never kills anything. On by default.',
+          'Watch running sessions automatically and report only anomalies, including background tasks left running in finished sessions. On by default.',
       },
       addressAs: { type: 'string', minLength: 1, maxLength: 64 },
       replyLanguage: { type: 'string', enum: ['ui', 'zh', 'en'] },

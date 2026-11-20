@@ -3,6 +3,7 @@ import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { useSecretaryStore } from '@/stores/secretary';
 import { defaultDraft } from './profileFormState';
+import { SecretaryFace } from './SecretaryFace';
 import { SecretaryProfileForm } from './SecretaryProfileForm';
 
 /**
@@ -42,9 +43,7 @@ export function SecretaryWelcome() {
         setError(saved.error);
         return;
       }
-      const id = await useSecretaryStore
-        .getState()
-        .newSecretaryConversation({ profile: saved.profile });
+      const id = await useSecretaryStore.getState().newSecretaryConversation();
       if (!id) {
         setError(t('Could not start the secretary. Try again.'));
         return;
@@ -67,12 +66,11 @@ export function SecretaryWelcome() {
     >
       <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center gap-6 px-6 py-10">
         <div className="space-y-2">
-          <span
-            aria-hidden
-            className="flex size-10 items-center justify-center rounded-full bg-brand text-sm font-semibold text-white"
-          >
-            {[...t('Secretary')][0] ?? '·'}
-          </span>
+          <SecretaryFace
+            name={t('Secretary')}
+            color={initialDraft.avatar?.color}
+            className="size-10"
+          />
           <h2 className="text-lg font-medium">{t('Set up your secretary')}</h2>
           <p className="max-w-lg text-sm text-muted-foreground">
             {t(
@@ -92,7 +90,9 @@ export function SecretaryWelcome() {
             >
               <span className="text-sm font-medium">{t('Set up with a form')}</span>
               <span className="mt-1 block text-xs text-muted-foreground">
-                {t('Three steps: name and avatar, model, how it works. Every step has a default.')}
+                {t(
+                  'One page: name, avatar, visible projects and patrol. Every field has a default.'
+                )}
               </span>
             </button>
             <button

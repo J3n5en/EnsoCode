@@ -1,11 +1,6 @@
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { normalizeLocale, translate } from '@shared/i18n';
-import type {
-  DispatchDraft,
-  SecretaryProfile,
-  SecretaryProfileDraft,
-  SecretaryState,
-} from '@shared/types/secretary';
+import type { DispatchDraft, SecretaryProfileDraft, SecretaryState } from '@shared/types/secretary';
 import { create } from 'zustand';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -45,13 +40,10 @@ interface SecretaryStoreState {
   focusProposalCard: (proposalId: string) => void;
   clearFocusProposal: () => void;
   /**
-   * 新建一个秘书会话。greeting 只在初次设置走「聊着设置」时发；
-   * profile 覆盖刚写完、推送还没到的档案，免得按旧档案选模型。
+   * 新建一个秘书会话，模型与思考档位和普通会话一样按默认走，之后在输入框里切。
+   * greeting 只在初次设置走「聊着设置」时发。
    */
-  newSecretaryConversation: (options?: {
-    greeting?: boolean;
-    profile?: SecretaryProfile | null;
-  }) => Promise<string | null>;
+  newSecretaryConversation: (options?: { greeting?: boolean }) => Promise<string | null>;
   resolveProposal: (
     proposalId: string,
     action: 'confirm' | 'reject',
@@ -120,18 +112,11 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
     const settings = useSettingsStore.getState();
     const project = settings.projects.find((entry) => entry.id === projectId);
     if (!project) return null;
-    const profileModel = (options?.profile ?? secretary.profile)?.model;
-    const model = profileModel
-      ? { providerId: profileModel.providerId, modelId: profileModel.modelId }
-      : resolveDefaultModel(projectId);
+    const model = resolveDefaultModel(projectId);
     if (!model) return null;
     const sessions = useSessionsStore.getState();
     const id = await sessions.newConversation(projectId);
     if (!id) return null;
-    if (profileModel) {
-      sessions.setModel(id, profileModel.providerId, profileModel.modelId);
-      if (profileModel.thinkingLevel) sessions.setThinking(id, profileModel.thinkingLevel);
-    }
     if (options?.greeting) {
       const locale = normalizeLocale(useSettingsStore.getState().language);
       await sessions.send(
@@ -159,7 +144,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
   },
 }));
 
-/** 档案没指定模型时按「项目默认 → 分组默认 → 全局默认」解析，与普通会话同口径 */
+/** 按「项目默认 → 分组默认 → 全局默认」只挑可用的模型，与普通会话同口径 */
 function resolveDefaultModel(projectId: string): { providerId: string; modelId: string } | null {
   const settings = useSettingsStore.getState();
   const project = settings.projects.find((entry) => entry.id === projectId);

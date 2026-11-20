@@ -249,7 +249,7 @@ describe('HeaderSessionTabs 秘书头像', () => {
     expect(run?.querySelector('[data-enso="secretary-tab-avatar"]')).toBeNull();
   });
 
-  it('秘书头像有图时用图片，无图时用首字', async () => {
+  it('秘书头像有图时用图片，无图时按名字生成 boring-avatars', async () => {
     harness.secretary.profile = { name: '小秘', avatar: { color: '#123456', imageVersion: 3 } };
     harness.state.conversations = { sec: conversation('sec', { projectId: 'p-secretary' }) };
     harness.state.activeIds = ['sec'];
@@ -265,7 +265,8 @@ describe('HeaderSessionTabs 秘书头像', () => {
     await render();
     const initial = tab('sec')?.querySelector('[data-enso="secretary-tab-avatar"]');
     expect(initial?.tagName).toBe('SPAN');
-    expect(initial?.textContent).toBe('小');
+    expect(initial?.getAttribute('data-generated')).toBe('true');
+    expect(initial?.querySelector('svg')).not.toBeNull();
   });
 
   it('秘书标签和普通标签共存，秘书标签移出后再出现头像仍在', async () => {

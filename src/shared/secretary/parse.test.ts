@@ -14,10 +14,6 @@ describe('parseProfileDraft', () => {
   });
 
   it('rejects out-of-range enum values instead of falling back to defaults', () => {
-    expect(parseProfileDraft({ autonomy: 'god' })).toEqual({
-      ok: false,
-      error: 'invalid autonomy',
-    });
     expect(parseProfileDraft({ notify: 'always' })).toEqual({
       ok: false,
       error: 'invalid notify',
@@ -29,14 +25,6 @@ describe('parseProfileDraft', () => {
   });
 
   it('rejects malformed nested values', () => {
-    expect(parseProfileDraft({ model: { providerId: 'p' } })).toEqual({
-      ok: false,
-      error: 'invalid model',
-    });
-    expect(parseProfileDraft({ dispatchModel: { mode: 'fixed' } })).toEqual({
-      ok: false,
-      error: 'invalid dispatchModel',
-    });
     expect(parseProfileDraft({ avatar: { color: 'red' } })).toEqual({
       ok: false,
       error: 'invalid avatar',
@@ -49,13 +37,9 @@ describe('parseProfileDraft', () => {
       ok: false,
       error: 'invalid maxRunningDispatches',
     });
-    expect(parseProfileDraft({ dispatchMuted: 'yes' })).toEqual({
+    expect(parseProfileDraft({ patrolEnabled: 'yes' })).toEqual({
       ok: false,
-      error: 'invalid dispatchMuted',
-    });
-    expect(parseProfileDraft({ dispatchUnattended: 1 })).toEqual({
-      ok: false,
-      error: 'invalid dispatchUnattended',
+      error: 'invalid patrolEnabled',
     });
     expect(parseProfileDraft({ visibleProjectIds: 'some' })).toEqual({
       ok: false,
@@ -100,36 +84,36 @@ describe('parseProfileDraft', () => {
     });
   });
 
-  it('派出的会话默认静音且无人值守，只有明确的 false 才关掉', () => {
-    expect(parseProfile({})).toMatchObject({ dispatchMuted: true, dispatchUnattended: true });
-    expect(parseProfile({ dispatchMuted: false, dispatchUnattended: false })).toMatchObject({
-      dispatchMuted: false,
-      dispatchUnattended: false,
-    });
-    // 脏值回默认，不让坏配置把派出的会话变成有人值守
-    expect(parseProfile({ dispatchMuted: 'nope', dispatchUnattended: null })).toMatchObject({
-      dispatchMuted: true,
-      dispatchUnattended: true,
-    });
-    expect(parseProfileDraft({ dispatchMuted: false, dispatchUnattended: false })).toEqual({
-      ok: true,
-      draft: { dispatchMuted: false, dispatchUnattended: false },
-    });
+  it('已删除的设置项出现在草案里一律忽略，不报错也不写进档案', () => {
+    expect(
+      parseProfileDraft({
+        name: '小秘',
+        model: { providerId: 'gone', modelId: 'm' },
+        autonomy: 'god',
+        autoApproveProjectIds: [7],
+        dispatchModel: { mode: 'fixed' },
+        dispatchWorktree: 'sometimes',
+        patrolIntervalMinutes: 999,
+        patrolIdleGoalMinutes: 0,
+        orphanTaskPatrol: 'no',
+        dispatchMuted: false,
+        dispatchUnattended: false,
+      })
+    ).toEqual({ ok: true, draft: { name: '小秘' } });
   });
 
   it('keeps only known keys and allows null to clear optional ones', () => {
     expect(
       parseProfileDraft({
         name: ' 小秘 ',
-        autonomy: 'full',
+        patrolEnabled: false,
         dailyBriefAt: null,
         addressAs: null,
-        model: null,
         junk: 1,
       })
     ).toEqual({
       ok: true,
-      draft: { name: '小秘', autonomy: 'full', dailyBriefAt: null, addressAs: null, model: null },
+      draft: { name: '小秘', patrolEnabled: false, dailyBriefAt: null, addressAs: null },
     });
   });
 
@@ -180,21 +164,12 @@ describe('parseProfile', () => {
       version: 1,
       name: '秘书',
       avatar: { color: '#7c5cff' },
-      autonomy: 'ask-first',
-      autoApproveProjectIds: [],
       takeoverScope: { mode: 'projects', projectIds: [] },
       pluginIds: [],
       skillIds: [],
       visibleProjectIds: 'all',
-      dispatchModel: { mode: 'project' },
-      dispatchWorktree: 'auto',
       maxRunningDispatches: 3,
       patrolEnabled: true,
-      patrolIntervalMinutes: 15,
-      patrolIdleGoalMinutes: 3,
-      orphanTaskPatrol: true,
-      dispatchMuted: true,
-      dispatchUnattended: true,
       replyLanguage: 'ui',
       style: 'concise',
       notify: 'needs-user',
@@ -206,19 +181,9 @@ describe('parseProfile', () => {
     const profile = parseProfile({
       name: '小秘',
       avatar: { color: '#0EA5E9', imageVersion: 2 },
-      model: { providerId: 'openai', modelId: 'gpt', thinkingLevel: 'max' },
-      autonomy: 'full',
-      autoApproveProjectIds: ['p1', 'p1', 7],
       visibleProjectIds: ['p1'],
-      dispatchModel: {
-        mode: 'fixed',
-        model: { providerId: 'anthropic', modelId: 'claude', thinkingLevel: 'high' },
-      },
-      dispatchWorktree: 'always',
       maxRunningDispatches: 5,
-      patrolEnabled: true,
-      patrolIntervalMinutes: 15,
-      patrolIdleGoalMinutes: 3,
+      patrolEnabled: false,
       addressAs: '老板',
       replyLanguage: 'zh',
       style: 'detailed',
@@ -231,25 +196,12 @@ describe('parseProfile', () => {
       version: 1,
       name: '小秘',
       avatar: { color: '#0EA5E9', imageVersion: 2 },
-      model: { providerId: 'openai', modelId: 'gpt', thinkingLevel: 'max' },
-      autonomy: 'full',
-      autoApproveProjectIds: ['p1'],
       takeoverScope: { mode: 'projects', projectIds: [] },
       pluginIds: [],
       skillIds: [],
       visibleProjectIds: ['p1'],
-      dispatchModel: {
-        mode: 'fixed',
-        model: { providerId: 'anthropic', modelId: 'claude' },
-      },
-      dispatchWorktree: 'always',
       maxRunningDispatches: 5,
-      patrolEnabled: true,
-      patrolIntervalMinutes: 15,
-      patrolIdleGoalMinutes: 3,
-      orphanTaskPatrol: true,
-      dispatchMuted: true,
-      dispatchUnattended: true,
+      patrolEnabled: false,
       addressAs: '老板',
       replyLanguage: 'zh',
       style: 'detailed',
@@ -259,16 +211,46 @@ describe('parseProfile', () => {
     });
   });
 
+  it('旧档案里已删除的设置项读进来不报错，直接丢掉', () => {
+    const old = {
+      name: '小秘',
+      model: { providerId: 'removed-provider', modelId: 'gpt', thinkingLevel: 'max' },
+      autonomy: 'ask-first',
+      autoApproveProjectIds: ['p1'],
+      dispatchModel: { mode: 'fixed', model: { providerId: 'a', modelId: 'b' } },
+      dispatchWorktree: 'never',
+      patrolEnabled: true,
+      patrolIntervalMinutes: 60,
+      patrolIdleGoalMinutes: 10,
+      orphanTaskPatrol: false,
+      dispatchMuted: false,
+      dispatchUnattended: false,
+    };
+    const profile = parseProfile(old);
+    expect(profile).toMatchObject({ name: '小秘', patrolEnabled: true });
+    for (const key of [
+      'model',
+      'autonomy',
+      'autoApproveProjectIds',
+      'dispatchModel',
+      'dispatchWorktree',
+      'patrolIntervalMinutes',
+      'patrolIdleGoalMinutes',
+      'orphanTaskPatrol',
+      'dispatchMuted',
+      'dispatchUnattended',
+    ]) {
+      expect(profile).not.toHaveProperty(key);
+    }
+  });
+
   it('normalizes out-of-range and mistyped values', () => {
     const profile = parseProfile({
       name: '   ',
       avatar: { color: 'red', imageVersion: 0 },
-      model: { providerId: '', modelId: 'claude' },
-      autonomy: 'boss',
       visibleProjectIds: 'none',
-      dispatchModel: { mode: 'fixed' },
-      dispatchWorktree: 'sometimes',
       maxRunningDispatches: 99,
+      patrolEnabled: 'nope',
       replyLanguage: 'fr',
       style: 'verbose',
       notify: 'always',
@@ -278,17 +260,14 @@ describe('parseProfile', () => {
     expect(profile).toMatchObject({
       name: '秘书',
       avatar: { color: '#7c5cff' },
-      autonomy: 'ask-first',
       visibleProjectIds: 'all',
-      dispatchModel: { mode: 'project' },
-      dispatchWorktree: 'auto',
       maxRunningDispatches: 10,
+      patrolEnabled: true,
       replyLanguage: 'ui',
       style: 'concise',
       notify: 'needs-user',
       updatedAt: 0,
     });
-    expect(profile).not.toHaveProperty('model');
     expect(profile).not.toHaveProperty('dailyBriefAt');
     expect(profile?.avatar).not.toHaveProperty('imageVersion');
   });
@@ -312,20 +291,6 @@ describe('parseProfile', () => {
     expect(parseProfile({ maxRunningDispatches: -3 })?.maxRunningDispatches).toBe(1);
     expect(parseProfile({ maxRunningDispatches: 2.6 })?.maxRunningDispatches).toBe(3);
     expect(parseProfile({ maxRunningDispatches: Number.NaN })?.maxRunningDispatches).toBe(3);
-  });
-
-  it('falls back to project mode for unusable dispatch model choices', () => {
-    expect(
-      parseProfile({ dispatchModel: { mode: 'choose', candidates: [] } })?.dispatchModel
-    ).toEqual({ mode: 'project' });
-    expect(
-      parseProfile({
-        dispatchModel: {
-          mode: 'choose',
-          candidates: [{ providerId: 'a', modelId: 'b' }, { providerId: 'a' }],
-        },
-      })?.dispatchModel
-    ).toEqual({ mode: 'choose', candidates: [{ providerId: 'a', modelId: 'b' }] });
   });
 
   it('keeps the checked plugin ids, dropping junk and repeats', () => {
