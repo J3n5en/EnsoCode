@@ -202,6 +202,17 @@ export interface MemoryDecayRunDto {
   durationMs: number;
 }
 
+/** 一轮矛盾复核的摘要；没有可用模型时 IPC 返回 null */
+export interface MemoryReconcileRunDto {
+  sources: number;
+  pairs: number;
+  judged: number;
+  challenges: number;
+  failed: number;
+  capped: boolean;
+  durationMs: number;
+}
+
 export interface MemoryForgettingStateDto {
   lastRunAt: string | null;
   lastRun: MemoryDecayRunDto | null;

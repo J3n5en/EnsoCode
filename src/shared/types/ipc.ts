@@ -173,6 +173,7 @@ export const IPC_CHANNELS = {
   MEMORY_ARCHIVE: 'memory:archive',
   MEMORY_RESTORE: 'memory:restore',
   MEMORY_FORGETTING_RUN: 'memory:forgetting-run',
+  MEMORY_RECONCILE_RUN: 'memory:reconcile-run',
   MEMORY_ARCHIVE_CANDIDATES: 'memory:archive-candidates',
   MEMORY_ARCHIVE_CANDIDATES_CONFIRM: 'memory:archive-candidates-confirm',
   MEMORY_DELETE: 'memory:delete',

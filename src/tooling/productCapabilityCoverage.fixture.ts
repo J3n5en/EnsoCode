@@ -62,6 +62,7 @@ export const SETTINGS_DATA_COVERAGE = {
   memoryDecayMaxImportance: excluded('Memory forgetting preference; not an Enso capability.'),
   memoryDecayIntervalDays: excluded('Memory forgetting preference; not an Enso capability.'),
   memoryKgEnabled: excluded('Memory entity-graph extraction preference; not an Enso capability.'),
+  memoryReconcileEnabled: excluded('Memory conflict review preference; not an Enso capability.'),
   voiceInputEnabled: excluded('Voice input is a device-local composer preference.'),
   protectedActionsInCode: excluded(
     'Protected-action confirmation floor for Code sessions; desktop safety preference.'
@@ -257,6 +258,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   setMemoryKgEnabled: excluded(
     'Memory entity-graph extraction preference; not an Enso capability.'
   ),
+  setMemoryReconcileEnabled: excluded('Memory conflict review preference; not an Enso capability.'),
   setVoiceInputEnabled: excluded('Voice input is a device-local composer preference.'),
   setBotModeEnabled: excluded(
     'Experimental Bot mode toggle; device-local, not an Enso capability.'
@@ -998,6 +1000,7 @@ export const IPC_PRODUCT_COVERAGE = {
   MEMORY_ARCHIVE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_RESTORE: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_FORGETTING_RUN: excluded('Memory desktop UI; not an Enso capability.'),
+  MEMORY_RECONCILE_RUN: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_ARCHIVE_CANDIDATES: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_ARCHIVE_CANDIDATES_CONFIRM: excluded('Memory desktop UI; not an Enso capability.'),
   MEMORY_DELETE: excluded('Memory desktop UI; not an Enso capability.'),

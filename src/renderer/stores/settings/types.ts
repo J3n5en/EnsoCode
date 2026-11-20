@@ -175,6 +175,8 @@ export interface SettingsState {
   memoryDistillEnabled: boolean;
   /** 记忆创建后是否用 LLM 异步抽取实体图谱；缺省关 */
   memoryKgEnabled: boolean;
+  /** 记忆写入后是否用 LLM 复核新旧记忆的矛盾（只标 challenges 待审）；缺省关 */
+  memoryReconcileEnabled: boolean;
   /** 自动遗忘第一档：衰减进检索排序（只降权，不改状态）。缺省开 */
   memoryDecayEnabled: boolean;
   /** 自动遗忘第二档：把「冷且不重要」的记忆标成归档候选（只标记）。缺省关 */
@@ -426,6 +428,7 @@ export interface SettingsState {
   setMemoryEmbeddingRemoteProviderId: (value: string | null) => void;
   setMemoryDistillEnabled: (value: boolean) => void;
   setMemoryKgEnabled: (value: boolean) => void;
+  setMemoryReconcileEnabled: (value: boolean) => void;
   setMemoryDecayEnabled: (value: boolean) => void;
   setMemoryDecayArchiveCandidates: (value: boolean) => void;
   setMemoryDecayAutoArchive: (value: boolean) => void;

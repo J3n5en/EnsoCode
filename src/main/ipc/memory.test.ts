@@ -42,6 +42,9 @@ const mocks = vi.hoisted(() => ({
     autoArchive: false,
     durationMs: 1,
   })),
+  runMemoryReconcileNow: vi.fn(
+    async (): Promise<{ challenges: number } | null> => ({ challenges: 1 })
+  ),
   getForgettingState: vi.fn(() => ({
     lastRunAt: '2026-06-01T00:00:00.000Z',
     lastRun: null,
@@ -138,6 +141,7 @@ vi.mock('../services/memoryHost', () => ({
     intervalDays: 7,
   }),
   runMemoryForgettingNow: mocks.runMemoryForgettingNow,
+  runMemoryReconcileNow: mocks.runMemoryReconcileNow,
 }));
 vi.mock('../services/memory/pending', () => ({
   listPendingWrites: mocks.listPendingWrites,
@@ -575,6 +579,21 @@ describe('memory IPC', () => {
     const summary = run(event) as { scored: number };
     expect(summary.scored).toBe(1);
     expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+  });
+
+  it('reconcile: 立即复核只认可信窗口，跑完广播；没有模型返回 null 且不广播', async () => {
+    const run = handler(IPC_CHANNELS.MEMORY_RECONCILE_RUN);
+    expect(await run({ sender: { id: 99 } })).toBeNull();
+    expect(mocks.runMemoryReconcileNow).not.toHaveBeenCalled();
+
+    mocks.send.mockClear();
+    expect(await run(event)).toEqual({ challenges: 1 });
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+
+    mocks.send.mockClear();
+    mocks.runMemoryReconcileNow.mockResolvedValueOnce(null);
+    expect(await run(event)).toBeNull();
+    expect(mocks.send).not.toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
   });
 
   it('forgetting: 候选列表与确认归档都收窄入参', async () => {

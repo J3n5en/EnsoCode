@@ -47,9 +47,11 @@ vi.mock('./chatModels', () => ({
 }));
 vi.mock('./llama/runtime', () => ({ acquireModel: vi.fn(), releaseModel: vi.fn(async () => {}) }));
 
+import { createMemory, listEvolves } from './memory/store';
 import {
   awaitMemoryDistill,
   awaitMemoryKg,
+  awaitMemoryReconcile,
   awaitMemoryReembed,
   closeMemoryDb,
   configureMemoryDistill,
@@ -66,11 +68,13 @@ import {
   memoryDatabase,
   refreshMemoryEmbedding,
   rootSessionId,
+  runMemoryReconcileNow,
   scheduleMemoryDistill,
   setMemoryChangeListener,
   syncMemoryDistillFromSettings,
   syncMemoryEmbeddingFromSettings,
   syncMemoryKgFromSettings,
+  syncMemoryReconcileFromSettings,
 } from './memoryHost';
 
 import {
@@ -1672,5 +1676,109 @@ describe('editMemory（成员记忆手动编辑）', () => {
     expect(complete.mock.calls[1]?.[1]).toContain('Sidekiq 重试');
     expect(linkedEntities(memory.id)).toEqual(['Sidekiq']);
     configureMemoryKg({ enabled: false, complete: null });
+  });
+});
+
+describe('memoryHost 矛盾复核接线', () => {
+  const embedder = {
+    model: 'reconcile-marker',
+    dim: 3,
+    embed: async (text: string) =>
+      Float32Array.from(
+        text.includes('Jenkins') ? [1, text.includes('下线') ? 0.2 : 0, 0] : [0, 0, 1]
+      ),
+  };
+  const seedPair = async (tag: string) => {
+    const db = memoryDatabase();
+    const add = async (content: string, at: string) => {
+      const r = await createMemory(
+        db,
+        { content, importance: 0.8, spaceId: 'global' },
+        { embedder, now: new Date(at) }
+      );
+      if (r.status !== 'inserted') throw new Error(r.status);
+      return r.memory;
+    };
+    const older = await add(`${tag} 部署流水线使用 Jenkins`, '2025-01-01T00:00:00Z');
+    const newer = await add(
+      `${tag} 部署迁到 GitHub Actions，Jenkins 已下线`,
+      '2025-02-01T00:00:00Z'
+    );
+    return { older, newer };
+  };
+  const judge = () =>
+    vi.fn(async (_system: string, user: string) =>
+      JSON.stringify(
+        user.includes('Jenkins')
+          ? { relation: 'challenges', confidence: 0.9, reason: 'jenkins retired' }
+          : { relation: 'none', confidence: 0.9, reason: 'ok' }
+      )
+    );
+  const captureOther = (content: string) =>
+    invokeMemory('capture', { content, importance: 0.6, spaceId: 'global' }, null);
+
+  beforeEach(() => {
+    closeMemoryDb();
+    configureMemoryEmbedding({ modelId: 'none' });
+    configureMemoryKg({ enabled: false, complete: null });
+    // 前面用例留下的带向量记忆会占满单轮配对上限，这里只看本组种下的配对
+    memoryDatabase().prepare("UPDATE memories SET lifecycle_state = 'archived'").run();
+  });
+  afterEach(() => {
+    syncMemoryReconcileFromSettings({});
+    configureMemoryDistill({ enabled: false, complete: null });
+  });
+
+  it('开关关闭：新记忆写入不自动复核；手动「立即复核」仍会跑并写 challenges 边', async () => {
+    const complete = judge();
+    configureMemoryDistill({ enabled: false, complete: () => complete });
+    syncMemoryReconcileFromSettings({ memoryReconcileEnabled: false });
+    const { older, newer } = await seedPair('off');
+    await captureOther('reconcile off: unrelated note');
+    await awaitMemoryReconcile();
+    expect(complete).not.toHaveBeenCalled();
+
+    const summary = await runMemoryReconcileNow();
+    expect(summary).toMatchObject({ challenges: 1, failed: 0 });
+    expect(listEvolves(memoryDatabase(), older.id)).toEqual([
+      expect.objectContaining({
+        olderId: older.id,
+        newerId: newer.id,
+        relation: 'challenges',
+        reviewState: 'pending',
+      }),
+    ]);
+  });
+
+  it('开关打开：新记忆写入后在 LLM 串行队列里自动复核', async () => {
+    const complete = judge();
+    configureMemoryDistill({ enabled: false, complete: () => complete });
+    syncMemoryReconcileFromSettings({ memoryReconcileEnabled: true, disabledBuiltinTools: [] });
+    const { older } = await seedPair('on');
+    await captureOther('reconcile on: unrelated note');
+    await awaitMemoryReconcile();
+    expect(complete).toHaveBeenCalled();
+    expect(listEvolves(memoryDatabase(), older.id).map((e) => e.relation)).toEqual(['challenges']);
+  });
+
+  it('按 unknown 收窄：非布尔 true 视为关；记忆内置工具关闭时也不自动跑', async () => {
+    const complete = judge();
+    configureMemoryDistill({ enabled: false, complete: () => complete });
+    syncMemoryReconcileFromSettings({ memoryReconcileEnabled: 'true' });
+    await seedPair('narrow');
+    await captureOther('reconcile narrow: unrelated note');
+    syncMemoryReconcileFromSettings({
+      memoryReconcileEnabled: true,
+      disabledBuiltinTools: ['memory'],
+    });
+    await captureOther('reconcile narrow: another unrelated note');
+    await awaitMemoryReconcile();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it('没有可用模型时手动复核返回 null，不写任何东西', async () => {
+    configureMemoryDistill({ enabled: false, complete: () => null });
+    await seedPair('nomodel');
+    expect(await runMemoryReconcileNow()).toBeNull();
   });
 });
