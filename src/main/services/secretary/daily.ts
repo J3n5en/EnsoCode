@@ -1,5 +1,3 @@
-import path from 'node:path';
-import { app } from '@platform';
 import { projectNameFromPath } from '@shared/projectName';
 import {
   buildSecretaryDaily,
@@ -11,6 +9,7 @@ import type { ProjectAuthority } from '@shared/types/agent';
 import type { SecretaryDaily, SecretaryDispatchFile, SecretaryTodo } from '@shared/types/secretary';
 import { readAudit } from './audit';
 import { readDailyRecords } from './dailyLog';
+import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 
 type MaybePromise<T> = T | Promise<T>;
@@ -100,21 +99,16 @@ function earliestOf(
   return earliest === undefined ? undefined : dayKey(earliest);
 }
 
-function secretaryDir(): string {
-  return path.join(app.getPath('userData'), 'secretary');
-}
-
-function store(): SecretaryStore {
-  return new SecretaryStore(secretaryDir());
-}
-
 /** 与秘书其余入口同源：会话行与项目都取 Main 的权威投影，动态 import 避免与 ipc 成环 */
-export const secretaryDailyPorts: SecretaryDailyPorts = {
-  dir: secretaryDir,
-  dispatchFile: () => store().dispatch(),
-  todos: () => store().todos(),
-  rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
-  projects: async () =>
-    (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
-  now: () => Date.now(),
-};
+export function dailyPortsFor(ctx: SecretaryContext): SecretaryDailyPorts {
+  const store = () => new SecretaryStore(ctx.dir);
+  return {
+    dir: () => ctx.dir,
+    dispatchFile: () => store().dispatch(),
+    todos: () => store().todos(),
+    rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
+    projects: async () =>
+      (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
+    now: () => Date.now(),
+  };
+}

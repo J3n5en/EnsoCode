@@ -406,6 +406,15 @@ export type SecretaryUpdate = {
       status: PendingDispatch['status'];
       problem?: PendingProblem;
     }
+  /** 另一个秘书发来的话：chain/hop 由 Main 判定，origins 是链上全部发起方（降权回合取交集用） */
+  | {
+      kind: 'peer-message';
+      fromSecretaryId: string;
+      fromName: string;
+      chain: string;
+      hop: number;
+      origins: string[];
+    }
 );
 
 /** 右侧动态的一条历史：压掉、合并和静默处理的更新都留在这里 */
@@ -457,6 +466,10 @@ export interface SecretaryTodo {
   doneAt?: number;
   /** 关联会话失败、被停止或已删除；用户放回待办或重新派发后清掉 */
   problem?: TodoProblemCode;
+  /** 另一个秘书经 secretary_message 托付的：完成或出问题时自动回告它 */
+  from?: { secretaryId: string; name: string };
+  /** 已经回告过发起秘书的终态：同一个终态只回告一次 */
+  reportedAs?: 'done' | TodoProblemCode;
 }
 
 export const TODO_PROBLEM_CODES = ['failed', 'stopped', 'deleted'] as const;
@@ -503,6 +516,26 @@ export interface SecretaryScheduleView {
   nextRunAt?: number;
   lastFiredAt?: number;
   system?: 'daily-brief' | { todoId: string };
+}
+
+/** 侧栏、设置页与新建流程用的秘书清单：只带认人的字段，完整状态另取 */
+export interface SecretarySummary {
+  id: string;
+  projectId: string | null;
+  name: string | null;
+  avatar: SecretaryProfile['avatar'] | null;
+  order: number;
+}
+
+/** 删除秘书前的提醒：列出它正在管的东西，二次确认后才删 */
+export interface SecretaryDeletePreview {
+  secretaryId: string;
+  name: string | null;
+  sessions: { conversationId: string; title: string; projectName: string; takeover: boolean }[];
+  todos: { id: string; text: string }[];
+  schedules: { id: string; name: string }[];
+  contacts: string[];
+  memories: number;
 }
 
 export interface SecretaryAuditEntry {
@@ -584,6 +617,8 @@ export interface SecretaryUntrackedView {
 }
 
 export interface SecretaryState {
+  /** 这份状态属于哪个秘书；关闭开关时的空状态与旧数据缺省 */
+  secretaryId?: string | null;
   enabled: boolean;
   projectId: string | null;
   /** null = 未完成初次设置 */
@@ -721,6 +756,10 @@ export interface SecretaryContactBind {
   code: string;
   /** 手机上点一下就完成的深链 */
   link: string;
+  /** 把 bot 拉进群并绑整个群的深链（?startgroup=） */
+  groupLink?: string;
+  /** 在 forum 话题里发的绑定命令（/bind@bot <code>） */
+  topicCommand?: string;
   expiresAt: number;
 }
 
@@ -747,6 +786,8 @@ export interface SecretaryContactTelegram {
   syncMirror: boolean;
   /** 群白名单：空名单不收任何群；名单里的群只认绑定的那个人。见过的群带标题 */
   groups: { id: string; title?: string }[];
+  /** 用绑定码绑的群与话题：这个秘书从这里收，也往这里推 */
+  routes?: { chatId: string; topicId?: string; title?: string }[];
   /**
    * 手机关注的任务：手机发起的回合里派生的会话与定时，结果会一直推到手机上，
    * 与 /sync 无关。完成或失败推过一次就从列表里移除。
@@ -758,6 +799,8 @@ export interface SecretaryContactTelegram {
 }
 
 export interface SecretaryContactState {
+  /** 这份联系方式属于哪个秘书：每个秘书只用自己绑定的渠道 */
+  secretaryId?: string;
   /** 总开关：关掉后不收不发，界面也不画渠道列表 */
   enabled: boolean;
   /** 渠道卡片：Telegram 内置固定第一位，插件渠道跟在后面 */

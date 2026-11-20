@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { app } from '@platform';
 import {
   isSecretarySkillName,
   parseSecretarySkillDraft,
@@ -18,6 +17,7 @@ import { writeAtomic } from '../bots/files';
 import { appendAudit } from './audit';
 import { notifySecretaryChanged } from './dispatch';
 import { saveProposalRecord } from './proposals';
+import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -285,34 +285,37 @@ export function createSecretarySkills(ports: SecretarySkillPorts): SecretarySkil
 }
 
 /** 秘书工作区就是秘书项目的 cwd：自有 skill 放在它下面的 skills/ */
-export function secretarySkillsDir(): string {
-  return path.join(app.getPath('userData'), 'secretary', 'workspace', 'skills');
+export function secretarySkillsDir(ctx: Pick<SecretaryContext, 'dir'>): string {
+  return path.join(ctx.dir, 'workspace', 'skills');
 }
 
-export const secretarySkillPorts: SecretarySkillPorts = {
-  dir: () => secretarySkillsDir(),
-  dispatchFile: () => store().dispatch(),
-  saveDispatch: (file) => {
-    store().saveDispatch(file);
-  },
-  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
-  notify: () => {
-    notifySecretaryChanged();
-  },
-  releaseSessions: async () => {
-    const { secretaryProfile } = await import('./profile');
-    await secretaryProfile.releaseSessions();
-  },
-  now: () => Date.now(),
-  newId: () => randomUUID(),
-};
-
-function store(): SecretaryStore {
-  return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+export function skillPortsFor(ctx: SecretaryContext): SecretarySkillPorts {
+  const store = () => new SecretaryStore(ctx.dir);
+  return {
+    dir: () => secretarySkillsDir(ctx),
+    dispatchFile: () => store().dispatch(),
+    saveDispatch: (file) => {
+      store().saveDispatch(file);
+    },
+    audit: (entry) => appendAudit(ctx.dir, entry),
+    notify: () => {
+      notifySecretaryChanged();
+    },
+    releaseSessions: async () => {
+      const { secretaryProfileFor } = await import('./profile');
+      await secretaryProfileFor(ctx).releaseSessions();
+    },
+    now: () => Date.now(),
+    newId: () => randomUUID(),
+  };
 }
 
-export const secretarySkill = createSecretarySkills(secretarySkillPorts);
+export function secretarySkillFor(ctx: SecretaryContext): SecretarySkillService {
+  return createSecretarySkills(skillPortsFor(ctx));
+}
 
-export const secretarySkillHandlers: { skill_propose: SecretaryOpHandler } = {
-  skill_propose: (params, ctx) => secretarySkill.propose(params, ctx),
-};
+export function skillHandlersFor(ctx: SecretaryContext): { skill_propose: SecretaryOpHandler } {
+  return {
+    skill_propose: (params, op) => secretarySkillFor(ctx).propose(params, op),
+  };
+}

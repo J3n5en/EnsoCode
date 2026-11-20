@@ -1,6 +1,6 @@
 /** 聊天里系统注入的整块标签。不是通用 XML 解析器。 */
 const TAG =
-  'agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule';
+  'agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule|secretary-message';
 const BLOCK = new RegExp(`<(${TAG})>\\n?([\\s\\S]*?)\\n?</\\1>`, 'g');
 const INSTRUCTIONS = /\n(?=Work toward this goal autonomously\.|Continue working toward it\.)/;
 
@@ -54,7 +54,7 @@ export function splitInjectedBlocks(text: string): InjectedSegment[] | null {
 }
 
 const WRAPPER_LINE =
-  /^<\/?(?:agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule)>$/;
+  /^<\/?(?:agent-notification|goal-continuation|coworker-hired|coworker-dismissed|background-task-update|session-updates|secretary-schedule|secretary-message)>$/;
 
 export interface FoldedInjected {
   summary: string;

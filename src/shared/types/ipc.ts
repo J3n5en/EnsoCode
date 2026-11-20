@@ -88,6 +88,20 @@ export const IPC_CHANNELS = {
   SECRETARY_CONTACT_SETTINGS: 'secretary:contact-settings',
   /** 秘书联系方式：手机关注的任务，取消一项或全清 */
   SECRETARY_CONTACT_FOLLOWING: 'secretary:contact-following',
+  /** 秘书清单：侧栏、设置页与新建流程用 */
+  SECRETARY_LIST: 'secretary:list',
+  /** main → renderer：秘书清单变化（新建、删除、改名、换头像） */
+  SECRETARY_LIST_CHANGED: 'secretary:list-changed',
+  /** 新建一个秘书：只建目录与隐藏项目，档案走欢迎页 */
+  SECRETARY_CREATE: 'secretary:create',
+  /** 删除秘书前的提醒：列出它在管的会话、待办、定时、联系方式与记忆 */
+  SECRETARY_DELETE_PREVIEW: 'secretary:delete-preview',
+  /** 删除秘书：必须带二次确认标记 */
+  SECRETARY_DELETE: 'secretary:delete',
+  /** 把一个会话从管理它的秘书转交给另一个秘书 */
+  SECRETARY_TRANSFER: 'secretary:transfer',
+  /** 总看板：每个秘书一份看板，renderer 合并与筛选 */
+  SECRETARY_OVERVIEW: 'secretary:overview',
   /** main → 主界面 renderer：深链 enso://secretary 要求选中某个会话，可再定位到某张确认卡 */
   SECRETARY_OPEN_CONVERSATION: 'secretary:open-conversation',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */

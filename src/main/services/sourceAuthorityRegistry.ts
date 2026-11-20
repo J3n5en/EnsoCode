@@ -242,6 +242,15 @@ export class SourceAuthorityRegistry {
     }
   }
 
+  /** 删除秘书时撤掉它的隐藏项目：只认 secretary 类，不碰用户项目 */
+  removeSecretaryProject(projectId: string): boolean {
+    const project = this.projects.get(projectId);
+    if (project?.kind !== 'secretary' || project.state !== 'active') return false;
+    this.markProjectRemoved(project);
+    this.commit();
+    return true;
+  }
+
   removeBotHomeProject(projectId: string): boolean {
     const project = this.projects.get(projectId);
     if (project?.kind !== 'bot-home' || project.state !== 'active') return false;

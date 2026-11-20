@@ -6,7 +6,7 @@ import { proposalCardTitle } from '@shared/secretary/contact';
 import { parseFeedQuery } from '@shared/secretary/feed';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
-import type { SecretarySkillView, SecretaryState } from '@shared/types/secretary';
+import type { SecretarySkillView, SecretaryState, SecretarySummary } from '@shared/types/secretary';
 import { notifyDesktop } from '../services/desktopHooks';
 import { interruptedTurnReason } from '../services/interruptedTurns';
 import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
@@ -14,13 +14,15 @@ import { readStoredOauthCredentialKeys } from '../services/oauthProviders';
 import { onConversationsMerged } from '../services/remoteRenderer/conversationSync';
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
-import { secretaryTool } from '../services/secretary/customTools';
-import { buildDaily, parseDailyRequest, secretaryDailyPorts } from '../services/secretary/daily';
+import { managerOfSync } from '../services/secretary/crossSecretary';
+import { secretaryToolFor } from '../services/secretary/customTools';
+import { buildDaily, dailyPortsFor, parseDailyRequest } from '../services/secretary/daily';
 import { appendDailyRecord } from '../services/secretary/dailyLog';
 import { mainSessionDefaultsFor } from '../services/secretary/defaults';
 import {
   buildSecretaryState,
   dismissResult,
+  dispatchPortsFor,
   listTakeovers,
   listUntracked,
   markResult,
@@ -28,7 +30,6 @@ import {
   pageSecretaryFeed,
   resolveProposal,
   revokeTakeover,
-  secretaryDispatchPorts,
   setProposalAcceptedListener,
   setSecretaryForgetListener,
   setSecretaryStateListener,
@@ -48,9 +49,15 @@ import {
   type SecretaryHost,
   type SecretaryHostPorts,
 } from '../services/secretary/host';
-import { isSecretaryConversation, secretaryProjectId } from '../services/secretary/identity';
+import { isSecretaryConversation } from '../services/secretary/identity';
+import {
+  deletePreview,
+  deleteSecretary,
+  transferConversation,
+} from '../services/secretary/lifecycle';
 import { openSecretaryTarget } from '../services/secretary/links';
-import { secretaryProfile } from '../services/secretary/profile';
+import { reportPeerTodos, setPeerDeliveryListener } from '../services/secretary/peers';
+import { secretaryProfileFor } from '../services/secretary/profile';
 import {
   parseDismissRequest,
   parseMarkResultRequest,
@@ -59,11 +66,17 @@ import {
   parseTodoMutateRequest,
   referenceConversations,
 } from '../services/secretary/requests';
+import { listSchedules, removeSchedule, schedulePortsFor } from '../services/secretary/schedules';
 import {
-  listSchedules,
-  removeSchedule,
-  secretarySchedulePorts,
-} from '../services/secretary/schedules';
+  notifySecretariesChanged,
+  resolveSecretaryRequest,
+  type SecretaryContext,
+  secretaryContext,
+  secretaryContexts,
+  secretaryIdOfConversation,
+  secretaryRegistry,
+  secretaryRoot,
+} from '../services/secretary/secretaries';
 import {
   createSessionFromMain,
   type MainSessionRequest,
@@ -73,7 +86,7 @@ import {
 import {
   readGlobalSkillBody,
   readSecretarySkill,
-  secretarySkill,
+  secretarySkillFor,
   secretarySkillsDir,
   secretarySkillViews,
   withGlobalSkillEnabled,
@@ -92,7 +105,7 @@ import {
   setSecretaryDriverObserver,
   spawnRootFromMain,
 } from './agent';
-import { createSecretaryContact, type SecretaryContact } from './secretaryContact';
+import { createSecretaryContacts, type SecretaryContacts } from './secretaryContact';
 import {
   patchConversationsState,
   readPersistedConversation,
@@ -168,6 +181,7 @@ export async function createSessionViaMain(
 
 function disabledState(): SecretaryState {
   return {
+    secretaryId: null,
     enabled: false,
     projectId: null,
     profile: null,
@@ -176,6 +190,16 @@ function disabledState(): SecretaryState {
     proposals: {},
     takeovers: [],
   };
+}
+
+/** 派出会话的审计记在管着它的那个秘书目录里；谁都不管时记在根目录 */
+function auditDirFor(conversationId: string | null): string {
+  if (conversationId) {
+    const owner = managerOfSync(conversationId, readPersistedConversations());
+    const ctx = owner ? secretaryContext(owner) : null;
+    if (ctx) return ctx.dir;
+  }
+  return secretaryRoot();
 }
 
 const driverPorts: DispatchDriverPorts = {
@@ -201,21 +225,19 @@ const driverPorts: DispatchDriverPorts = {
       delivery.images as AttachedImage[] | undefined
     ),
   newId: () => randomUUID(),
-  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
+  audit: (entry) => appendAudit(auditDirFor(entry.targetId ?? null), entry),
   now: () => Date.now(),
   requestWatch: () => {
     const now = Date.now();
-    host?.recordBackgroundStalls(driver?.watch(now) ?? [], now);
+    const stalls = driver?.watch(now) ?? [];
+    for (const instance of hosts.values()) instance.recordBackgroundStalls(stalls, now);
   },
 };
 
 let driver: DispatchDriver | null = null;
-let host: SecretaryHost | null = null;
-let contact: SecretaryContact | null = null;
-
-function secretaryStore(): SecretaryStore {
-  return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
-}
+let contacts: SecretaryContacts | null = null;
+/** 每个秘书一个回传宿主：各自的定时器、巡检、投递槽位与定时任务 */
+const hosts = new Map<string, SecretaryHost>();
 
 /** 档案与定时在设置窗口里编辑，聊天侧的操作仍只认主界面 */
 function isProfileEditor(webContentsId: number): boolean {
@@ -230,56 +252,64 @@ function parseAvatarRequest(value: unknown): { image: Uint8Array | null } | null
   return null;
 }
 
-/** 回传宿主的 Main 侧能力：读写全部同步，读改写之间不留 await */
-const hostPorts: SecretaryHostPorts = {
-  enabled: () => secretaryEnabled(),
-  file: () => secretaryStore().dispatch(),
-  save: (file) => {
-    secretaryStore().saveDispatch(file);
-  },
-  rows: () => readPersistedConversations(),
-  conversations: () => getSourceAuthorityRegistry()?.projection().conversations ?? [],
-  projects: () => getSourceAuthorityRegistry()?.projection().projects ?? [],
-  status: (conversationId) => observedSessionStatus(conversationId),
-  alive: (conversationId) => isRootSessionAlive(conversationId),
-  prompt: (conversationId, text, deliveryId) =>
-    promptRootFromMain(conversationId, text, deliveryId),
-  resume: (conversationId) => resumeRootFromMain(conversationId),
-  profile: () => secretaryStore().profile(),
-  todos: () => secretaryStore().todos(),
-  saveTodos: (todos) => {
-    secretaryStore().saveTodos(todos);
-  },
-  schedules: () => secretaryStore().schedules(),
-  saveSchedules: (schedules) => {
-    secretaryStore().saveSchedules(schedules);
-  },
-  notify: (build) => void notifyDesktop().notifySecretary(build),
-  // 联系方式在 registerSecretaryHandlers 里建：这里用 getter 拿到当前实例
-  get contact() {
-    return contact?.service;
-  },
-  isSecretaryConversation: (conversationId) => isSecretaryConversation(conversationId),
-  publish: () => broadcastState(),
-  now: () => Date.now(),
-  backgroundStalls: (now) => driver?.watch(now) ?? [],
-  tasks: (conversationId) => observedBackgroundTasks(conversationId),
-  subagentsRunning: (conversationId) => observedSubagentsRunning(conversationId),
-  // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
-  interruptDetail: (conversationId) =>
-    interruptedTurnReason(path.join(app.getPath('userData'), 'agent'), conversationId),
-  startPending: (pendingIds, now) => {
-    void startPendingDispatches(secretaryDispatchPorts, pendingIds, now).catch((error: unknown) => {
-      console.warn(
-        '[secretary] pending dispatch failed:',
-        error instanceof Error ? error.message : String(error)
-      );
-    });
-  },
-  newId: () => randomUUID(),
-  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
-  recordDaily: (entry) => appendDailyRecord(path.join(app.getPath('userData'), 'secretary'), entry),
-};
+/** 一个秘书的回传宿主端口：读写全部同步，读改写之间不留 await */
+function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
+  const store = () => new SecretaryStore(ctx.dir);
+  const dispatchPorts = dispatchPortsFor(ctx);
+  return {
+    enabled: () => secretaryEnabled(),
+    file: () => store().dispatch(),
+    save: (file) => {
+      store().saveDispatch(file);
+    },
+    rows: () => readPersistedConversations(),
+    conversations: () => getSourceAuthorityRegistry()?.projection().conversations ?? [],
+    projects: () => getSourceAuthorityRegistry()?.projection().projects ?? [],
+    status: (conversationId) => observedSessionStatus(conversationId),
+    alive: (conversationId) => isRootSessionAlive(conversationId),
+    prompt: (conversationId, text, deliveryId) =>
+      promptRootFromMain(conversationId, text, deliveryId),
+    resume: (conversationId) => resumeRootFromMain(conversationId),
+    // 回落只在这个秘书自己的会话里找，结果不会投到别的秘书那里
+    secretaryProjectId: () => ctx.projectId,
+    profile: () => store().profile(),
+    todos: () => store().todos(),
+    saveTodos: (todos) => {
+      store().saveTodos(todos);
+    },
+    schedules: () => store().schedules(),
+    saveSchedules: (schedules) => {
+      store().saveSchedules(schedules);
+    },
+    notify: (build) => void notifyDesktop().notifySecretary(build, ctx.dir),
+    // 联系方式按秘书各一份：这里用 getter 拿到当前实例
+    get contact() {
+      return contacts?.service(ctx.id);
+    },
+    isSecretaryConversation: (conversationId) =>
+      secretaryIdOfConversation(conversationId) === ctx.id,
+    publish: () => broadcastState(),
+    now: () => Date.now(),
+    backgroundStalls: (now) => driver?.watch(now) ?? [],
+    tasks: (conversationId) => observedBackgroundTasks(conversationId),
+    subagentsRunning: (conversationId) => observedSubagentsRunning(conversationId),
+    // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
+    interruptDetail: (conversationId) =>
+      interruptedTurnReason(path.join(app.getPath('userData'), 'agent'), conversationId),
+    startPending: (pendingIds, now) => {
+      void startPendingDispatches(dispatchPorts, pendingIds, now).catch((error: unknown) => {
+        console.warn(
+          '[secretary] pending dispatch failed:',
+          error instanceof Error ? error.message : String(error)
+        );
+      });
+    },
+    reportPeerTodos: () => reportPeerTodos(ctx),
+    newId: () => randomUUID(),
+    audit: (entry) => appendAudit(ctx.dir, entry),
+    recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
+  };
+}
 
 function parseGoalAction(
   value: unknown
@@ -305,23 +335,43 @@ function parseScheduleIdRequest(value: unknown): string | null {
   return isNonEmptyString(request.scheduleId) ? request.scheduleId : null;
 }
 
-function secretaryState(): Promise<SecretaryState> {
+async function secretaryState(ctx: SecretaryContext): Promise<SecretaryState> {
   const enabled = secretaryEnabled();
-  return buildSecretaryState(secretaryDispatchPorts, {
+  const state = await buildSecretaryState(dispatchPortsFor(ctx), {
     enabled,
-    projectId: enabled ? secretaryProjectId() : null,
+    projectId: enabled ? ctx.projectId : null,
   });
+  return { ...state, secretaryId: ctx.id };
+}
+
+function secretarySummaries(): SecretarySummary[] {
+  return secretaryRegistry()
+    .list()
+    .flatMap((entry) => {
+      const ctx = secretaryContext(entry.id);
+      if (!ctx) return [];
+      const profile = new SecretaryStore(ctx.dir).profile();
+      return [
+        {
+          id: ctx.id,
+          projectId: ctx.projectId,
+          name: profile?.name ?? null,
+          avatar: profile?.avatar ?? null,
+          order: entry.order,
+        },
+      ];
+    });
 }
 
 /**
  * 待确认的卡与手机同步：新卡推一条带按钮的提示，处理掉的卡把按钮清掉。
- * 同一张卡只推一次由联系方式服务自己记着。
+ * 同一张卡只推一次由联系方式服务自己记着；每个秘书只推自己的卡。
  */
-function syncWaitingCards(state: SecretaryState): void {
+function syncWaitingCards(secretaryId: string, state: SecretaryState): void {
   const pending = Object.values(state.proposals).filter(
     (proposal) => proposal.status === 'pending'
   );
-  contact?.service.syncPendingCards(
+  contacts?.service(secretaryId)?.syncPendingCards(
     pending.map((proposal) => {
       const title = proposalCardTitle(proposal);
       return {
@@ -334,14 +384,17 @@ function syncWaitingCards(state: SecretaryState): void {
   );
 }
 
-/** 聊天卡片与工作台读同一份 Main 状态 */
+/** 聊天卡片与工作台读同一份 Main 状态：每个秘书各推一份，清单单独推 */
 function broadcastState(): void {
-  void secretaryState()
-    .then((state) => {
-      broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state);
-      syncWaitingCards(state);
-    })
-    .catch(() => undefined);
+  broadcastToRenderers(IPC_CHANNELS.SECRETARY_LIST_CHANGED, secretarySummaries());
+  for (const ctx of secretaryContexts()) {
+    void secretaryState(ctx)
+      .then((state) => {
+        broadcastToRenderers(IPC_CHANNELS.SECRETARY_STATE_CHANGED, state);
+        syncWaitingCards(ctx.id, state);
+      })
+      .catch(() => undefined);
+  }
 }
 
 /** 设置里的全局 skill：坏条目跳过，路径只认这里给出的 */
@@ -367,10 +420,10 @@ function globalSkillEntries(): { id: string; name: string; description: string; 
 }
 
 /** 设置页与右侧面板共用的一份 skill 视图 */
-function skillViews(): SecretarySkillView[] {
-  const profile = secretaryStore().profile();
+function skillViews(ctx: SecretaryContext): SecretarySkillView[] {
+  const profile = new SecretaryStore(ctx.dir).profile();
   return secretarySkillViews({
-    own: secretarySkill.list(),
+    own: secretarySkillFor(ctx).list(),
     disabledOwn: profile?.disabledSkillNames ?? [],
     global: globalSkillEntries(),
     enabledGlobalIds: profile?.skillIds ?? [],
@@ -390,121 +443,285 @@ function parseSkillRequest(
 }
 
 /** skill 删掉后不再记在停用名单里：名单只留真实存在的目录 */
-async function forgetDisabledSkill(name: string): Promise<void> {
-  const profile = secretaryStore().profile();
+async function forgetDisabledSkill(ctx: SecretaryContext, name: string): Promise<void> {
+  const profile = new SecretaryStore(ctx.dir).profile();
   if (!profile?.disabledSkillNames?.includes(name)) return;
-  await secretaryProfile.save(
+  await secretaryProfileFor(ctx).save(
     { disabledSkillNames: profile.disabledSkillNames.filter((entry) => entry !== name) },
     null
   );
 }
 
+/** 提案 id 全局随机：在各秘书的文件里找它属于谁 */
+function secretaryOfProposal(proposalId: string): SecretaryContext | null {
+  for (const ctx of secretaryContexts()) {
+    if (Object.hasOwn(new SecretaryStore(ctx.dir).dispatch().proposals, proposalId)) return ctx;
+  }
+  return null;
+}
+
+/** 管着这个会话的秘书：按派发 / 接管记录找；都没有时按请求里的秘书 */
+function secretaryOfRecord(conversationId: string, requested: unknown): SecretaryContext | null {
+  for (const ctx of secretaryContexts()) {
+    if (Object.hasOwn(new SecretaryStore(ctx.dir).dispatch().dispatched, conversationId))
+      return ctx;
+  }
+  return resolveSecretaryRequest(requested);
+}
+
+function resolveProposalAnywhere(
+  proposalId: string,
+  action: 'confirm' | 'reject',
+  edits?: Parameters<typeof resolveProposal>[3],
+  profileDraft?: Parameters<typeof resolveProposal>[4]
+): ReturnType<typeof resolveProposal> {
+  const ctx = secretaryOfProposal(proposalId);
+  if (!ctx) return Promise.resolve({ ok: false, error: 'not-found' });
+  return resolveProposal(dispatchPortsFor(ctx), proposalId, action, edits, profileDraft);
+}
+
+/** 起一个秘书：回传宿主与联系方式 */
+async function startSecretary(ctx: SecretaryContext): Promise<void> {
+  if (!hosts.has(ctx.id)) {
+    const created = createSecretaryHost(hostPortsFor(ctx));
+    hosts.set(ctx.id, created);
+    created.start();
+  }
+  await contacts?.add(ctx);
+}
+
+const NO_SECRETARY = { ok: false as const, error: 'secretary-required' };
+
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
   // 停止会话后撤掉续跑与看门狗：驱动者与派发模块互相不认识，只在这里接上
   setSecretaryForgetListener((conversationId) => driver?.forget(conversationId));
-  setSecretaryAvatarResolver(() => (secretaryEnabled() ? secretaryStore().avatarPath() : null));
+  setSecretaryAvatarResolver((secretaryId) => {
+    if (!secretaryEnabled()) return null;
+    const ctx = resolveSecretaryRequest(secretaryId ?? undefined);
+    return ctx ? new SecretaryStore(ctx.dir).avatarPath() : null;
+  });
+  // 同事发来的消息：让收件秘书的宿主立刻试投
+  setPeerDeliveryListener((secretaryId) => hosts.get(secretaryId)?.flushNow());
   driver = createDispatchDriver(driverPorts);
-  host = createSecretaryHost(hostPorts);
   // 用户点确认后立刻把「已确认，正在执行」投给秘书，不等下一分钟的 tick
-  setProposalAcceptedListener(() => host?.flushNow());
-  contact = createSecretaryContact({
-    dir: () => path.join(app.getPath('userData'), 'secretary'),
-    delivery: hostPorts,
-    profile: () => secretaryStore().profile(),
+  setProposalAcceptedListener(() => {
+    for (const instance of hosts.values()) instance.flushNow();
+  });
+  contacts = createSecretaryContacts({
+    delivery: (ctx) => hostPortsFor(ctx),
     publish: broadcastState,
     // 确认卡在手机上确认时走与界面同一条路径；审批不在这个入口
-    resolveProposal: (proposalId, action) =>
-      resolveProposal(secretaryDispatchPorts, proposalId, action),
+    resolveProposal: (proposalId, action) => resolveProposalAnywhere(proposalId, action),
     // 「在应用里打开」：与深链同一条路，聚焦窗口并把工作台滚到那张卡
     openInApp: (target) => openSecretaryTarget(target),
   });
-  contact.register();
-  // 上次已经绑过就接着轮询；没绑过什么也不做
-  void contact.start();
-  // 同一次 observe 的结果既给驱动也给回传宿主，事件入口只调一次
+  contacts.register();
+  // 同一次 observe 的结果既给驱动也给每个秘书的回传宿主，事件入口只调一次
   setSecretaryDriverObserver((event, changes) => {
     driver?.observe(event);
-    host?.onAgentEvent(event, changes);
+    for (const instance of hosts.values()) instance.onAgentEvent(event, changes);
     // 改了名字或人设的会话等本轮跑完再释放，免得打断正在跑的一轮
     if (event.type === 'turn-completed' || event.type === 'turn-failed') {
       const sessionId = 'identity' in event && event.identity ? event.identity.sessionId : null;
-      if (sessionId) void secretaryProfile.onTurnEnded(sessionId);
+      const ctx = sessionId ? secretaryContext(secretaryIdOfConversation(sessionId) ?? '') : null;
+      if (sessionId && ctx) void secretaryProfileFor(ctx).onTurnEnded(sessionId);
     }
   });
   onConversationsMerged((patch) => driver?.onConversationsMerged(patch));
-  host.start();
-
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_STATE, async (event) => {
-    if (!isMainRenderer(event.sender.id)) return disabledState();
-    return secretaryState();
+  // 上次已经绑过就接着轮询；没绑过什么也不做
+  void contacts.start().then(async () => {
+    for (const ctx of secretaryContexts()) await startSecretary(ctx);
   });
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_FEED, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const query = parseFeedQuery(request);
-    if (!query) return { ok: false, error: 'invalid request' };
-    const page = await pageSecretaryFeed(secretaryDispatchPorts, query);
-    return { ok: true, events: page.events, hasMore: page.hasMore };
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_LIST, async (event) => {
+    if (!isProfileEditor(event.sender.id)) return [];
+    return secretaryEnabled() ? secretarySummaries() : [];
   });
 
-  // 按天回看：日期由 renderer 传本地日历日，Main 只认 YYYY-MM-DD
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_DAILY, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const day = parseDailyRequest(request, Date.now());
-    if (!day) return { ok: false, error: 'invalid request' };
-    return { ok: true, daily: await buildDaily(secretaryDailyPorts, day) };
-  });
-
-  // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_PROFILE, async (event) => {
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_CREATE, async (event) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const store = secretaryStore();
+    let entry: { id: string };
+    try {
+      entry = secretaryRegistry().create();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: message.includes('limit') ? 'limit' : message };
+    }
+    const ctx = secretaryContext(entry.id);
+    if (!ctx) return { ok: false, error: 'not-found' };
+    appendAudit(ctx.dir, {
+      at: Date.now(),
+      secretaryConversationId: null,
+      op: 'secretary_create',
+      ok: true,
+    });
+    await startSecretary(ctx);
+    notifySecretariesChanged();
+    broadcastState();
+    return { ok: true, secretaryId: ctx.id, projectId: ctx.projectId };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_DELETE_PREVIEW, async (event, secretaryId: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    const ctx = typeof secretaryId === 'string' ? secretaryContext(secretaryId) : null;
+    if (!ctx) return { ok: false, error: 'not-found' };
+    return { ok: true, preview: await deletePreview(ctx, contacts?.service(ctx.id)) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_DELETE, async (event, request: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    const parsed =
+      request && typeof request === 'object' && !Array.isArray(request)
+        ? (request as Record<string, unknown>)
+        : {};
+    const ctx =
+      typeof parsed.secretaryId === 'string' ? secretaryContext(parsed.secretaryId) : null;
+    if (!ctx) return { ok: false, error: 'not-found' };
+    // 二次确认：界面先拿预览、用户再点一次确认，才会带上这个标记
+    if (parsed.confirmed !== true) return { ok: false, error: 'confirmation-required' };
+    const host = hosts.get(ctx.id);
+    host?.stop();
+    hosts.delete(ctx.id);
+    await contacts?.remove(ctx.id, true);
+    const result = await deleteSecretary(ctx, {
+      forget: (conversationId) => driver?.forget(conversationId),
+    });
+    notifySecretariesChanged();
+    broadcastState();
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TRANSFER, async (event, request: unknown) => {
+    if (!isMainRenderer(event.sender.id) && !isSettingsRenderer(event.sender.id))
+      return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const parsed =
+      request && typeof request === 'object' && !Array.isArray(request)
+        ? (request as Record<string, unknown>)
+        : {};
+    if (!isNonEmptyString(parsed.conversationId) || !isNonEmptyString(parsed.toSecretaryId))
+      return { ok: false, error: 'invalid request' };
+    const result = await transferConversation(parsed.conversationId, parsed.toSecretaryId);
+    if (result.ok) {
+      hosts.get(parsed.toSecretaryId)?.flushNow();
+      broadcastState();
+    }
+    return result;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_OVERVIEW, async (event) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const boards = [];
+    for (const ctx of secretaryContexts()) {
+      const state = await secretaryState(ctx);
+      boards.push({ secretaryId: ctx.id, name: state.profile?.name ?? null, board: state.board });
+    }
+    return { ok: true, boards };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_STATE, async (event, secretaryId: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return disabledState();
+    const ctx = resolveSecretaryRequest(secretaryId);
+    if (!ctx) return disabledState();
+    return secretaryState(ctx);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_FEED,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const query = parseFeedQuery(request);
+      if (!query) return { ok: false, error: 'invalid request' };
+      const page = await pageSecretaryFeed(dispatchPortsFor(ctx), query);
+      return { ok: true, events: page.events, hasMore: page.hasMore };
+    }
+  );
+
+  // 按天回看：日期由 renderer 传本地日历日，Main 只认 YYYY-MM-DD
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_DAILY,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const day = parseDailyRequest(request, Date.now());
+      if (!day) return { ok: false, error: 'invalid request' };
+      return { ok: true, daily: await buildDaily(dailyPortsFor(ctx), day) };
+    }
+  );
+
+  // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_PROFILE, async (event, secretaryId: unknown) => {
+    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const ctx = resolveSecretaryRequest(secretaryId);
+    if (!ctx) return NO_SECRETARY;
+    const store = new SecretaryStore(ctx.dir);
     return { ok: true, profile: store.profile(), persona: store.readPersona() };
   });
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SAVE_PROFILE, async (event, request: unknown) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return secretaryProfile.save(request, null);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_SAVE_PROFILE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const saved = await secretaryProfileFor(ctx).save(request, null);
+      if (saved.ok) broadcastState();
+      return saved;
+    }
+  );
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_RESET_PROFILE, async (event, request: unknown) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return secretaryProfile.reset(request, null);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_RESET_PROFILE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      return secretaryProfileFor(ctx).reset(request, null);
+    }
+  );
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SET_AVATAR, async (event, request: unknown) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseAvatarRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    const store = secretaryStore();
-    const hadImage = Boolean(store.profile()?.avatar.imageVersion);
-    const profile = store.setAvatar(parsed.image);
-    if (!profile) return { ok: false, error: 'not-configured' };
-    appendAudit(path.join(app.getPath('userData'), 'secretary'), {
-      at: Date.now(),
-      secretaryConversationId: null,
-      op: 'profile_avatar',
-      ok: true,
-      detail: parsed.image ? (hadImage ? 'replaced' : 'uploaded') : 'removed',
-    });
-    broadcastState();
-    return { ok: true, profile };
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_SET_AVATAR,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const parsed = parseAvatarRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      const store = new SecretaryStore(ctx.dir);
+      const hadImage = Boolean(store.profile()?.avatar.imageVersion);
+      const profile = store.setAvatar(parsed.image);
+      if (!profile) return { ok: false, error: 'not-configured' };
+      appendAudit(ctx.dir, {
+        at: Date.now(),
+        secretaryConversationId: null,
+        op: 'profile_avatar',
+        ok: true,
+        detail: parsed.image ? (hadImage ? 'replaced' : 'uploaded') : 'removed',
+      });
+      broadcastState();
+      return { ok: true, profile };
+    }
+  );
 
   ipcMain.handle(IPC_CHANNELS.SECRETARY_RESOLVE_PROPOSAL, async (event, request: unknown) => {
     if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
     const parsed = parseResolveProposalRequest(request);
     if (!parsed) return { ok: false, error: 'invalid request' };
-    return resolveProposal(
-      secretaryDispatchPorts,
+    return resolveProposalAnywhere(
       parsed.proposalId,
       parsed.action,
       parsed.edits,
@@ -519,147 +736,222 @@ export function registerSecretaryHandlers(): void {
       if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
       const parsed = parseReferenceRequest(request);
       if (!parsed) return { ok: false, error: 'invalid request' };
-      return referenceConversations(secretaryDispatchPorts, parsed, isSecretaryConversation);
+      // 点名授权归这个秘书会话所属的秘书
+      const ctx = secretaryContext(secretaryIdOfConversation(parsed.secretaryConversationId) ?? '');
+      if (!ctx) return { ok: false, error: 'not-secretary' };
+      return referenceConversations(dispatchPortsFor(ctx), parsed, isSecretaryConversation);
     }
   );
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_TODO_MUTATE, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseTodoMutateRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    return mutateTodo(secretaryDispatchPorts, parsed);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_TODO_MUTATE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const parsed = parseTodoMutateRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      return mutateTodo(dispatchPortsFor(ctx), parsed);
+    }
+  );
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_DISMISS_RESULT, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseDismissRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    return dismissResult(secretaryDispatchPorts, parsed.conversationId);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_DISMISS_RESULT,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const parsed = parseDismissRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      const ctx = secretaryOfRecord(parsed.conversationId, secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      return dismissResult(dispatchPortsFor(ctx), parsed.conversationId);
+    }
+  );
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_MARK_RESULT, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseMarkResultRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    return markResult(secretaryDispatchPorts, parsed.conversationId, parsed.action);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_MARK_RESULT,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const parsed = parseMarkResultRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      const ctx = secretaryOfRecord(parsed.conversationId, secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      return markResult(dispatchPortsFor(ctx), parsed.conversationId, parsed.action);
+    }
+  );
 
   // 看板上的「停止遗留任务」：只停这条派发记录里还在跑的后台任务
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_STOP_TASKS, async (event, request: unknown) => {
-    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseDismissRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    return stopLeftoverTasks(secretaryDispatchPorts, parsed.conversationId);
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_STOP_TASKS,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const parsed = parseDismissRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      const ctx = secretaryOfRecord(parsed.conversationId, secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      return stopLeftoverTasks(dispatchPortsFor(ctx), parsed.conversationId);
+    }
+  );
 
   // 撤销是收回权限，开关关着也允许
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_TAKEOVER_REVOKE, async (event, request: unknown) => {
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_TAKEOVER_REVOKE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      const parsed = parseDismissRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      const ctx = secretaryOfRecord(parsed.conversationId, secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      return revokeTakeover(
+        dispatchPortsFor(ctx),
+        parsed.conversationId,
+        isSettingsRenderer(event.sender.id) ? 'settings' : 'session'
+      );
+    }
+  );
+
+  /** 接管清单：会话界面与侧栏要看全部秘书的；设置页传秘书 id 只看它的 */
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST, async (event, secretaryId: unknown) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    const parsed = parseDismissRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    return revokeTakeover(
-      secretaryDispatchPorts,
-      parsed.conversationId,
-      isSettingsRenderer(event.sender.id) ? 'settings' : 'session'
-    );
+    const contexts =
+      typeof secretaryId === 'string'
+        ? [secretaryContext(secretaryId)].filter((ctx): ctx is SecretaryContext => ctx !== null)
+        : secretaryContexts();
+    const takeovers = [];
+    for (const ctx of contexts) takeovers.push(...(await listTakeovers(dispatchPortsFor(ctx))));
+    return { ok: true, takeovers };
   });
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST, async (event) => {
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_UNTRACKED_LIST, async (event, secretaryId: unknown) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    return { ok: true, takeovers: await listTakeovers(secretaryDispatchPorts) };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_UNTRACKED_LIST, async (event) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    return { ok: true, untracked: await listUntracked(secretaryDispatchPorts) };
+    const ctx = resolveSecretaryRequest(secretaryId);
+    if (!ctx) return NO_SECRETARY;
+    return { ok: true, untracked: await listUntracked(dispatchPortsFor(ctx)) };
   });
 
   // 移除只是恢复范围权限，不建立接管记录，开关关着也允许
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE, async (event, request: unknown) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    const parsed = parseDismissRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    return untrack(secretaryDispatchPorts, parsed.conversationId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, async (event) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return { ok: true, schedules: listSchedules(secretarySchedulePorts) };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILLS_LIST, async (event) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return { ok: true, skills: skillViews() };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILL_DELETE, async (event, request: unknown) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const removed = await secretarySkill.remove(request, null);
-    if (removed.ok) await forgetDisabledSkill(removed.name);
-    return removed;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILL_SET_ENABLED, async (event, request: unknown) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseSkillRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    const profile = secretaryStore().profile();
-    if (!profile) return { ok: false, error: 'not-configured' };
-    const draft =
-      parsed.source === 'own'
-        ? {
-            disabledSkillNames: withOwnSkillEnabled(
-              profile.disabledSkillNames ?? [],
-              parsed.id,
-              parsed.enabled
-            ),
-          }
-        : { skillIds: withGlobalSkillEnabled(profile.skillIds ?? [], parsed.id, parsed.enabled) };
-    return secretaryProfile.save(draft, null);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILL_READ, async (event, request: unknown) => {
-    if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const parsed = parseSkillRequest(request);
-    if (!parsed) return { ok: false, error: 'invalid request' };
-    if (parsed.source === 'own') {
-      const skill = readSecretarySkill(secretarySkillsDir(), parsed.id);
-      return skill ? { ok: true, body: skill.body } : { ok: false, error: 'not-found' };
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const parsed = parseDismissRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      return untrack(dispatchPortsFor(ctx), parsed.conversationId);
     }
-    // 路径只从设置里的权威条目取，renderer 传的 id 不是路径
-    const entry = globalSkillEntries().find((skill) => skill.id === parsed.id);
-    const body = entry ? readGlobalSkillBody(entry.path) : null;
-    return body === null ? { ok: false, error: 'not-found' } : { ok: true, body };
-  });
+  );
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_TOOLS_LIST, async (event) => {
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, async (event, secretaryId: unknown) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return { ok: true, tools: secretaryTool.list() };
+    const ctx = resolveSecretaryRequest(secretaryId);
+    if (!ctx) return NO_SECRETARY;
+    return { ok: true, schedules: listSchedules(schedulePortsFor(ctx)) };
   });
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_TOOL_DELETE, async (event, request: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_SKILLS_LIST, async (event, secretaryId: unknown) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    return secretaryTool.remove(request, null);
+    const ctx = resolveSecretaryRequest(secretaryId);
+    if (!ctx) return NO_SECRETARY;
+    return { ok: true, skills: skillViews(ctx) };
   });
 
-  ipcMain.handle(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, async (event, request: unknown) => {
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_SKILL_DELETE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const removed = await secretarySkillFor(ctx).remove(request, null);
+      if (removed.ok) await forgetDisabledSkill(ctx, removed.name);
+      return removed;
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_SKILL_SET_ENABLED,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const parsed = parseSkillRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      const profile = new SecretaryStore(ctx.dir).profile();
+      if (!profile) return { ok: false, error: 'not-configured' };
+      const draft =
+        parsed.source === 'own'
+          ? {
+              disabledSkillNames: withOwnSkillEnabled(
+                profile.disabledSkillNames ?? [],
+                parsed.id,
+                parsed.enabled
+              ),
+            }
+          : {
+              skillIds: withGlobalSkillEnabled(profile.skillIds ?? [], parsed.id, parsed.enabled),
+            };
+      return secretaryProfileFor(ctx).save(draft, null);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_SKILL_READ,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const parsed = parseSkillRequest(request);
+      if (!parsed) return { ok: false, error: 'invalid request' };
+      if (parsed.source === 'own') {
+        const skill = readSecretarySkill(secretarySkillsDir(ctx), parsed.id);
+        return skill ? { ok: true, body: skill.body } : { ok: false, error: 'not-found' };
+      }
+      // 路径只从设置里的权威条目取，renderer 传的 id 不是路径
+      const entry = globalSkillEntries().find((skill) => skill.id === parsed.id);
+      const body = entry ? readGlobalSkillBody(entry.path) : null;
+      return body === null ? { ok: false, error: 'not-found' } : { ok: true, body };
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_TOOLS_LIST, async (event, secretaryId: unknown) => {
     if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
-    const scheduleId = parseScheduleIdRequest(request);
-    if (!scheduleId) return { ok: false, error: 'invalid request' };
-    return removeSchedule(secretarySchedulePorts, scheduleId, { secretaryConversationId: null });
+    const ctx = resolveSecretaryRequest(secretaryId);
+    if (!ctx) return NO_SECRETARY;
+    return { ok: true, tools: secretaryToolFor(ctx).list() };
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_TOOL_DELETE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      return secretaryToolFor(ctx).remove(request, null);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE,
+    async (event, request: unknown, secretaryId: unknown) => {
+      if (!isProfileEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+      if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+      const ctx = resolveSecretaryRequest(secretaryId);
+      if (!ctx) return NO_SECRETARY;
+      const scheduleId = parseScheduleIdRequest(request);
+      if (!scheduleId) return { ok: false, error: 'invalid request' };
+      return removeSchedule(schedulePortsFor(ctx), scheduleId, { secretaryConversationId: null });
+    }
+  );
 
   // 派出会话已经存在时开关关闭也不能让它失去驱动者，所以这里只查发起方与行的归属
   ipcMain.handle(IPC_CHANNELS.SECRETARY_GOAL_ACTION, async (event, request: unknown) => {

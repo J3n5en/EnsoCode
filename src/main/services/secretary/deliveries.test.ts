@@ -127,6 +127,28 @@ describe('目标秘书会话解析', () => {
     const h = harness({ rows: {}, conversations: [] });
     expect(resolveTarget(h.ports, 'sec1')).toBeNull();
   });
+
+  it('多秘书：回落只在本秘书的会话里找，不投给别的秘书', () => {
+    const projectsWithTwo = [
+      ...projects,
+      { projectId: 'sec-b', canonicalPath: '/tmp/sec-b', state: 'active', kind: 'secretary' },
+    ] as ProjectAuthority[];
+    const h = harness({
+      rows: {
+        sec1: { id: 'sec1', projectId: 'sec', archived: true, lastActiveAt: 5 },
+        other: { id: 'other', projectId: 'sec-b', lastActiveAt: 99 },
+      },
+      conversations: [
+        ...conversations('sec1'),
+        { conversationId: 'other', projectId: 'sec-b', kind: 'root', version: 1 },
+      ] as unknown as ConversationAuthority[],
+    });
+    const own = { ...h.ports, projects: () => projectsWithTwo, secretaryProjectId: () => 'sec' };
+    // 发起会话已归档、本秘书没有别的会话：只更新工作台，不改投给 B 的会话
+    expect(resolveTarget(own, 'sec1')).toBeNull();
+    const other = { ...own, secretaryProjectId: () => 'sec-b' };
+    expect(resolveTarget(other, 'sec1')).toBe('other');
+  });
 });
 
 describe('注入', () => {

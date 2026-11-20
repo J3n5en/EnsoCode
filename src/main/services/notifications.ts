@@ -198,18 +198,29 @@ export async function notifyBotChat(
 
 /** 秘书的派出结果通知：主窗口聚焦时不弹，点击只把主窗口拉回前台 */
 export async function notifySecretary(
-  build: (lang: 'zh' | 'en') => { title: string; body: string }
+  build: (lang: 'zh' | 'en') => { title: string; body: string },
+  /** 发通知的秘书目录：图标用它的头像；缺省是迁移出的 default 秘书 */
+  dir?: string
 ): Promise<void> {
   const { focusMainWindow } = await import('../windows/MainWindow');
   if (await localUiInFront()) return;
   const { title, body } = build(texts() === TEXTS.zh ? 'zh' : 'en');
-  notify('secretary', title, body, () => void focusMainWindow(), await secretaryNotificationIcon());
+  notify(
+    'secretary',
+    title,
+    body,
+    () => void focusMainWindow(),
+    await secretaryNotificationIcon(dir)
+  );
 }
 
-async function secretaryNotificationIcon(): Promise<string | undefined> {
+async function secretaryNotificationIcon(dir: string | undefined): Promise<string | undefined> {
   try {
     const { SecretaryStore } = await import('./secretary/store');
-    return new SecretaryStore(join(app.getPath('userData'), 'secretary')).avatarPath() ?? undefined;
+    return (
+      new SecretaryStore(dir ?? join(app.getPath('userData'), 'secretary')).avatarPath() ??
+      undefined
+    );
   } catch {
     return undefined;
   }

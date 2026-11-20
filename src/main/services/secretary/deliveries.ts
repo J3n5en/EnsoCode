@@ -26,6 +26,8 @@ export interface DeliveryPorts {
   prompt(conversationId: string, text: string, deliveryId: string): { ok: boolean; error?: string };
   resume(conversationId: string): Promise<{ ok: boolean; error?: string }>;
   newId(): string;
+  /** 本秘书的隐藏项目：回落只在它的会话里找，不跨秘书；缺省按全部秘书项目 */
+  secretaryProjectId?(): string | null;
 }
 
 function retryDelay(attempt: number): number {
@@ -33,6 +35,10 @@ function retryDelay(attempt: number): number {
 }
 
 function secretaryProjectIds(ports: DeliveryPorts): Set<string> {
+  if (ports.secretaryProjectId) {
+    const own = ports.secretaryProjectId();
+    return new Set(own ? [own] : []);
+  }
   return new Set(
     ports
       .projects()
@@ -54,7 +60,7 @@ function liveSecretaryConversation(
   return Boolean(row) && row.archived !== true;
 }
 
-/** 发起者 → 已归档或删除时取最近活跃的秘书会话 → 都没有时返回 null（只更新工作台） */
+/** 发起者 → 已归档或删除时取本秘书最近活跃的会话 → 都没有时返回 null（只更新工作台） */
 export function resolveTarget(ports: DeliveryPorts, preferred?: string): string | null {
   const projectIds = secretaryProjectIds(ports);
   if (projectIds.size === 0) return null;

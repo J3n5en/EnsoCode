@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import { app } from '@platform';
 import type {
   SecretaryAuditEntry,
   SecretaryFollowingView,
@@ -248,15 +247,7 @@ export function phoneTurnChatOf(conversationId: string | null): Peer | null {
   }
 }
 
-function secretaryDir(): string {
-  return join(app.getPath('userData'), 'secretary');
-}
-
-function store(): FollowingStore {
-  return new FollowingStore(secretaryDir());
-}
-
-/** 写关注要的三件事：存储、探针与审计；测试整份换掉，生产走磁盘 */
+/** 写关注要的三件事：存储、探针与审计；测试整份换掉，生产走该秘书的目录 */
 export interface FollowDeps {
   store: FollowingStore;
   probe(conversationId: string | null): Peer | null;
@@ -264,11 +255,11 @@ export interface FollowDeps {
   now(): number;
 }
 
-function productionDeps(): FollowDeps {
+export function followDepsFor(dir: string): FollowDeps {
   return {
-    store: store(),
+    store: new FollowingStore(dir),
     probe: phoneTurnChatOf,
-    audit: (entry) => appendAudit(secretaryDir(), entry),
+    audit: (entry) => appendAudit(dir, entry),
     now: () => Date.now(),
   };
 }
@@ -292,7 +283,7 @@ export function recordPhoneFollow(
     summary: string;
     secretaryConversationId: string | null;
   },
-  deps: FollowDeps = productionDeps()
+  deps: FollowDeps
 ): boolean {
   const origin = deps.probe(input.secretaryConversationId);
   if (origin === null) return false;
@@ -311,18 +302,20 @@ export function recordPhoneFollow(
 }
 
 /** 等待中的派发/待确认的卡变成真实会话：关注项改挂过去，推送才认得出会话 id */
-export function renameFollowedTarget(
-  from: string,
-  to: string,
-  deps: FollowDeps = productionDeps()
-): void {
+export function renameFollowedTarget(from: string, to: string, deps: FollowDeps): void {
   if (deps.store.renameTarget(from, to)) audit(deps, 'contact_follow', `relink ${from}`, to);
 }
 
 /** 会话被归档、删除或收回接管：关注项一并移除 */
-export function unfollowTarget(targetId: string, deps: FollowDeps = productionDeps()): void {
+export function unfollowTarget(targetId: string, deps: FollowDeps): void {
   const item = deps.store.list().find((entry) => entry.targetId === targetId);
   if (!item) return;
   deps.store.remove(item.id);
   audit(deps, 'contact_follow_remove', `${item.kind} ${item.summary}`, targetId);
+}
+
+/** 会话被归档或删除：不知道它归哪个秘书，各秘书的关注列表都清一遍 */
+export async function unfollowTargetEverywhere(targetId: string): Promise<void> {
+  const { secretaryContexts } = await import('./secretaries');
+  for (const ctx of secretaryContexts()) unfollowTarget(targetId, followDepsFor(ctx.dir));
 }

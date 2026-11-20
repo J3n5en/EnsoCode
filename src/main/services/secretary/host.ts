@@ -123,6 +123,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   audit?(entry: SecretaryAuditEntry): void;
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
+  /** 同事托付的待办办完或出了问题：回告发起的秘书；返回是否改了待办 */
+  reportPeerTodos?(): boolean;
 }
 
 export interface SecretaryHost {
@@ -967,7 +969,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         aborted.add(rootIdOf(event, sessionId));
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, rows, aborted);
-      if (changed || todosChanged) ports.publish();
+      const reported = ports.reportPeerTodos?.() ?? false;
+      if (changed || todosChanged || reported) ports.publish();
       flush(now);
     },
 
@@ -1030,7 +1033,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (fireSchedules(file, now)) changed = true;
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
-      if (changed || todosChanged) ports.publish();
+      const reported = ports.reportPeerTodos?.() ?? false;
+      if (changed || todosChanged || reported) ports.publish();
       // 系统定时是档案与待办的派生状态，每分钟重算一次；放在触发之后，否则刚到期的待办提醒先被重算删掉
       syncSystemSchedules(ports, ports.profile(), ports.todos());
       flush(now);
