@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { uiElementElectron } from './verify-electron.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -144,7 +145,7 @@ class Instance {
   async launch(env) {
     this.cdpPort = await freePort();
     this.inspectPort = await freePort();
-    const electron = createRequire(path.join(ROOT, 'package.json'))('electron');
+    const electron = uiElementElectron(createRequire(path.join(ROOT, 'package.json'))('electron'));
     const clean = Object.fromEntries(
       Object.entries(process.env).filter(([key]) => !/^(ENSO_|ELECTRON_)/.test(key))
     );
@@ -156,6 +157,8 @@ class Instance {
         ...env,
         ENSO_USER_DATA_DIR: this.userData,
         ENSO_CDP_PORT: String(this.cdpPort),
+        // 验收实例：不进 Dock、不抢前台、窗口不弹出，CDP 照常读写截图
+        ENSO_VERIFY: '1',
       },
       stdio: ['ignore', logFd, logFd],
     });
@@ -191,6 +194,8 @@ class Instance {
     if (!cdp) {
       cdp = await Cdp.open(target.webSocketDebuggerUrl);
       cdp.targetId = target.id;
+      // 验收窗口始终隐藏：让页面按可见且聚焦运行，rAF 与指针事件照常
+      await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true });
       this.pages.set(target.id, cdp);
     }
     return cdp;
@@ -468,23 +473,30 @@ async function main() {
     await overlay.eval('window.__nodeuiMarker = "overlay"; true');
 
     await step('焦点在可见层，Cmd+N 在 B 新建会话', async () => {
-      await A.main.eval(`(() => {
-        const { app, BrowserWindow } = globalThis.__nodeuiE;
-        app.focus({ steal: true });
-        BrowserWindow.getAllWindows().find((w) => w.isVisible())?.focus();
-        return true;
-      })()`);
-      await sleep(500);
-      const focused = await A.main.eval(
-        'globalThis.__nodeuiE.webContents.getFocusedWebContents()?.getURL() ?? null'
-      );
-      check(focused && nodeUrl.test(focused), `获得焦点的是 ${focused}`);
+      // 不把窗口拉到前台：窗口不是 key window 时，页面焦点仍跟着 first responder 走。
+      // 暂停两页的焦点模拟量真实的 document.hasFocus()，量完再开回去。
+      const pages = [A.local, overlay];
+      for (const page of pages) {
+        await page.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+      }
+      let focused;
+      try {
+        focused = {
+          local: await A.local.eval('document.hasFocus()'),
+          node: await overlay.eval('document.hasFocus()'),
+        };
+      } finally {
+        for (const page of pages) {
+          await page.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+        }
+      }
+      check(focused.node && !focused.local, `页面焦点 ${JSON.stringify(focused)}`);
       await overlay.key('n', { meta: true });
       await waitFor(() => overlay.eval('!!document.querySelector("[data-enso=\\"composer\\"]")'), {
         timeout: 15_000,
         label: 'B 出现输入区',
       });
-      return `focused=${focused}`;
+      return `focused=${JSON.stringify(focused)}`;
     });
 
     await step('B 输入框有斜杠命令', async () => {

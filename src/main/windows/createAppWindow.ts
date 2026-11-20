@@ -15,6 +15,7 @@ import {
 import { sendToRemoteRenderers } from '../services/remoteRenderer/senders';
 import { attachAppNavigationGuard, openExternalWebUrl } from './appNavigation';
 import { shouldReloadRenderer } from './rendererGone';
+import { showWindow } from './verifyLaunch';
 import { attachPinnedWorkbenchBoundsSync, attachWindowsRestoreWake } from './win32Restore';
 import { fitWindowBounds } from './windowBounds';
 import { windowChromeOptions } from './windowChrome';
@@ -197,7 +198,7 @@ function createPinnedWorkbench(win: BrowserWindow, entry: string): WebContentsVi
   workbenchViews.set(win, view);
   attachWebContentsHandlers(win, view.webContents, entry);
   view.webContents.once('did-finish-load', () => {
-    if (!win.isDestroyed()) win.show();
+    if (!win.isDestroyed()) showWindow(win);
   });
   loadRenderer(view.webContents, entry);
   return view;
@@ -312,7 +313,7 @@ export function createAppWindow(options: CreateWindowOptions): BrowserWindow {
     createPinnedWorkbench(win, options.entry);
   } else {
     win.once('ready-to-show', () => {
-      win.show();
+      showWindow(win);
     });
     attachWebContentsHandlers(win, win.webContents, options.entry);
     loadRenderer(win.webContents, options.entry);

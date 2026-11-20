@@ -101,6 +101,7 @@ import {
   syncTrayToggleShortcut,
 } from './services/trayToggleShortcut';
 import { createMainWindow, getMainWindow } from './windows/MainWindow';
+import { isVerifyLaunch } from './windows/verifyLaunch';
 import { applyWindowsChromiumSwitches } from './windows/win32Restore';
 import { resolveWindowsAppUserModelId } from './windows/windowIcon';
 
@@ -114,6 +115,9 @@ if (!app.isPackaged) {
   );
 }
 applyWindowsChromiumSwitches(app.commandLine);
+
+// 验收实例 app ready 前就降为 accessory：不进 Dock、不会被激活成前台应用
+if (isVerifyLaunch() && process.platform === 'darwin') app.setActivationPolicy('accessory');
 
 // 自动化可在开发环境显式指定 userData；打包版永不接受环境覆盖。
 // dev 缺省隔离到 appData/enso-code-dev：与打包版彻底分离，避免单实例锁 /
@@ -258,7 +262,7 @@ if (!gotTheLock) {
     );
 
     // dev 下 dock 显示 Electron 默认图标；手动设为 app 图标（打包由 electron-builder 处理）
-    if (!app.isPackaged && process.platform === 'darwin') {
+    if (!app.isPackaged && process.platform === 'darwin' && !isVerifyLaunch()) {
       app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     }
     setAppMenuActions({
