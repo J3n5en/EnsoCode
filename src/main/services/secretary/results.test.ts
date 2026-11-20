@@ -20,6 +20,7 @@ import {
   proposalUpdate,
   reportLastText,
   stalled,
+  TURN_ENDED_TEXT_MAX_CHARS,
   takeBatch,
   updateKey,
 } from './results';
@@ -336,14 +337,36 @@ describe('终态回传的完整汇报', () => {
   });
 
   it('Main 侧兜底硬上限：超长正文也只留结尾', () => {
+    expect(TURN_REPORT_MAX_CHARS).toBe(8000);
     const body = reportLastText('failed', { text: `${'x'.repeat(TURN_REPORT_MAX_CHARS + 5)}end` });
     expect(body).toBe(
       `[已截断：前面省略 8 字，以下是结尾]\n${'x'.repeat(TURN_REPORT_MAX_CHARS - 3)}end`
     );
   });
 
-  it.each(['turn-ended', 'stalled'] as const)('中间进度 %s 不带完整汇报', (kind) => {
-    expect(reportLastText(kind, { text: long })).toBeUndefined();
+  it('停滞不带完整汇报', () => {
+    expect(reportLastText('stalled', { text: long })).toBeUndefined();
+  });
+
+  it('一轮结束 1500 字的正文完整带上', () => {
+    const text = `${'过程'.repeat(745)}提交 1a2b3c4`;
+    expect(text).toHaveLength(1500);
+    expect(reportLastText('turn-ended', { text })).toBe(text);
+  });
+
+  it('一轮结束超过 2000 字：只留结尾 2000 字，开头写明已截断', () => {
+    expect(TURN_ENDED_TEXT_MAX_CHARS).toBe(2000);
+    const body = reportLastText('turn-ended', { text: `${'x'.repeat(2005)}end` });
+    expect(body).toBe(`[已截断：前面省略 8 字，以下是结尾]\n${'x'.repeat(1997)}end`);
+  });
+
+  it('一轮结束没有汇报时用摘要正文，同样按 2000 截断', () => {
+    expect(reportLastText('turn-ended', undefined, ' 摘要 ')).toBe('摘要');
+    expect(reportLastText('turn-ended', undefined, 'y'.repeat(2001))).toBe(
+      `[已截断：前面省略 1 字，以下是结尾]\n${'y'.repeat(2000)}`
+    );
+    // 终态不拿摘要兜底，仍交给调用方
+    expect(reportLastText('goal-complete', undefined, '摘要')).toBeUndefined();
   });
 
   it('没有汇报或汇报为空时交给调用方回退', () => {

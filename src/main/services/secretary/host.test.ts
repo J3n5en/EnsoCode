@@ -325,6 +325,26 @@ describe('转交给秘书的提问', () => {
     expect(h.state.file.outbox[0]?.text).toContain('已按默认值「A」处理');
   });
 
+  it('提问、用户直接答与超时收尾都带上派发记录里的发起秘书会话', () => {
+    const h = harness({});
+    h.state.statuses.c1 = waiting;
+    h.host.onAgentEvent(event('ask-request', relayAsk()), change('waiting', 'running'));
+    h.host.onAgentEvent(
+      event('ask-request', relayAsk({ requestId: 'ask-2' })),
+      change('waiting', 'waiting')
+    );
+    h.host.onAgentEvent(event('ask-resolved', { requestId: 'ask-1', by: 'user', answer: 'B' }), []);
+    h.state.now = 30 * MINUTE;
+    h.host.tick();
+    const relays = h.state.file.outbox.filter((update) => update.kind === 'ask-relay');
+    expect(relays.map((update) => [update.key, update.secretaryConversationId])).toEqual([
+      ['relay:c1:ask-1:pending', 'sec1'],
+      ['relay:c1:ask-2:pending', 'sec1'],
+      ['relay:c1:ask-1:user-answered', 'sec1'],
+      ['relay:c1:ask-2:timed-out', 'sec1'],
+    ]);
+  });
+
   it('普通会话的 ask_user 不受影响：照旧记 needs-user，不建转交记录', () => {
     const h = harness({});
     h.state.statuses.c1 = waiting;
@@ -402,9 +422,9 @@ describe('派出会话的结果记录', () => {
     ]);
   });
 
-  it('终态回传带完整汇报，中间进度仍按短上限截断', () => {
+  it('终态回传带 8000 字以内的完整汇报，一轮结束带 2000 字，工作台与手机仍用短正文', () => {
     const report = `${'过程'.repeat(1500)}\n测试 812 passed，提交 1a2b3c4`;
-    const done = harness({});
+    const done = harness({ notify: 'with-done' });
     done.state.statuses.c1 = idle;
     done.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
     done.host.onAgentEvent(
@@ -417,6 +437,8 @@ describe('派出会话的结果记录', () => {
     expect(done.state.file.outbox[0]).toMatchObject({ kind: 'goal-complete', lastText: report });
     // 工作台卡片与手机里程碑仍用短正文
     expect(done.state.file.dispatched.c1.lastText?.length).toBeLessThanOrEqual(501);
+    expect(done.state.contact.milestones).toHaveLength(1);
+    expect(done.state.contact.milestones[0]?.lastText?.length).toBeLessThanOrEqual(501);
 
     const progress = harness({});
     progress.state.statuses.c1 = idle;
@@ -428,7 +450,24 @@ describe('派出会话的结果记录', () => {
       change('idle', 'running')
     );
     expect(progress.state.file.outbox[0]?.kind).toBe('turn-ended');
-    expect(progress.state.file.outbox[0]?.lastText).toHaveLength(501);
+    expect(progress.state.file.outbox[0]?.lastText).toBe(
+      `[已截断：前面省略 ${report.length - 2000} 字，以下是结尾]\n${report.slice(-2000)}`
+    );
+    expect(progress.state.file.dispatched.c1.lastText?.length).toBeLessThanOrEqual(501);
+    expect(progress.state.contact.milestones).toEqual([]);
+  });
+
+  it('一轮结束 1500 字的正文完整送到秘书', async () => {
+    const h = withSecretary(harness({}));
+    const text = `${'过程'.repeat(745)}提交 1a2b3c4`;
+    h.host.onAgentEvent(
+      event('turn-completed', { digest: { assistantText: text }, report: { text } }),
+      []
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.state.prompts).toHaveLength(1);
+    expect(h.state.prompts[0]).toContain(text);
+    expect(h.state.prompts[0]).not.toContain('已截断');
   });
 
   it('普通会话的 turn-ended 和 needs-user、failed 一样不推迟', () => {

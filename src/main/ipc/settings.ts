@@ -172,6 +172,7 @@ export const SETTINGS_STATE_FIELDS = [
   'memoryModelIdleMinutes',
   'memoryEmbeddingRemoteProviderId',
   'memoryDistillEnabled',
+  'memoryDistillWindowMinutes',
   'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
@@ -191,6 +192,7 @@ export const SETTINGS_STATE_FIELDS = [
   'voiceVocabulary',
   'voiceGeminiApiKey',
   'memoryKgEnabled',
+  'memoryReconcileEnabled',
   'memoryDecayEnabled',
   'memoryDecayArchiveCandidates',
   'memoryDecayAutoArchive',
@@ -243,13 +245,16 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'memoryEmbeddingAutoDownload',
   'memoryModelIdleMinutes',
   'memoryEmbeddingRemoteProviderId',
-  // 记忆库每台机器一份（userData/memory/memory.db），遗忘策略作用于本机库，不跨机同步
+  // 记忆库每台机器一份（userData/memory/memory.db），遗忘 / 矛盾复核策略作用于本机库，不跨机同步
+  'memoryReconcileEnabled',
   'memoryDecayEnabled',
   'memoryDecayArchiveCandidates',
   'memoryDecayAutoArchive',
   'memoryDecayStaleDays',
   'memoryDecayMaxImportance',
   'memoryDecayIntervalDays',
+  // 聚合待办排在本机库的队列里，窗口只影响本机的提炼时机
+  'memoryDistillWindowMinutes',
   'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
@@ -292,11 +297,13 @@ function notifyMemoryEmbeddingSettings(settings: Record<string, unknown>): void 
         syncMemoryDistillFromSettings,
         syncMemoryForgettingFromSettings,
         syncMemoryKgFromSettings,
+        syncMemoryReconcileFromSettings,
       }) => {
         const state = settingsStateOf(settings);
         syncMemoryEmbeddingFromSettings(state);
         syncMemoryDistillFromSettings(state);
         syncMemoryKgFromSettings(state);
+        syncMemoryReconcileFromSettings(state);
         syncMemoryForgettingFromSettings(state);
       }
     )

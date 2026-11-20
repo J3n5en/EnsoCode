@@ -1647,11 +1647,23 @@ export const zhTranslations: Record<string, string> = {
   'Distill sessions automatically': '自动提炼会话',
   'When a session ends, or goes idle for 30 minutes and is reclaimed, extract 1-3 durable memories from it in the background.':
     '会话结束、或空闲 30 分钟被回收时,在后台从中提炼 1-3 条值得长期保留的记忆。',
+  'Merge sessions in the same project': '合并同项目会话',
+  'Wait this long after a session ends, then distill every session of the same project that ended meanwhile in one run. Immediately distills each session on its own.':
+    '会话结束后等待这段时间，再把期间结束的同项目会话合并成一次提炼。选「立即」则每个会话单独提炼。',
+  Immediately: '立即',
   '{{done}}/{{total}} done': '已完成 {{done}}/{{total}}',
   'about {{time}} left': '约剩 {{time}}',
   'Extract entities': '抽取实体',
   'Build an entity graph so a memory can be recalled by a name it does not literally contain.':
     '建立实体图谱,让正文里没出现该词的记忆也能被这个名字召回。',
+  'Review conflicting memories': '复核矛盾记忆',
+  'After new memories are written, ask the model whether they contradict older ones. Conflicts are only flagged for your review; nothing is hidden or deleted. Up to 20 model calls per run.':
+    '写入新记忆后，让模型判断它是否推翻了已有记忆。发现的矛盾只标记待你审阅，不隐藏也不删除任何记忆。每轮最多调用模型 20 次。',
+  'Review now runs even when the switch above is off.': '「立即复核」在上面的开关关闭时也能运行。',
+  'No model is available for memory tasks.': '没有可用于记忆任务的模型。',
+  'Checked {{pairs}} pairs, flagged {{count}} conflicts.':
+    '已复核 {{pairs}} 对，标出 {{count}} 处矛盾。',
+  'Review now': '立即复核',
   Forgetting: '遗忘',
   'Decay only changes how search ranks a memory. Archiving keeps it and can be undone; nothing on this page ever deletes a memory.':
     '衰减只影响检索排序。归档会保留记忆、可随时还原；这一页的任何操作都不会删除记忆。',

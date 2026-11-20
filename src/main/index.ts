@@ -76,6 +76,7 @@ import {
   syncMemoryEmbeddingFromSettings,
   syncMemoryForgettingFromSettings,
   syncMemoryKgFromSettings,
+  syncMemoryReconcileFromSettings,
 } from './services/memoryHost';
 import { registerNodeSettingsProtocolHandler } from './services/nodeRemote';
 import {
@@ -355,6 +356,7 @@ if (!gotTheLock) {
     syncMemoryEmbeddingFromSettings(persistedState);
     syncMemoryDistillFromSettings(persistedState);
     syncMemoryKgFromSettings(persistedState);
+    syncMemoryReconcileFromSettings(persistedState);
     syncMemoryForgettingFromSettings(persistedState);
     syncSpeechFromSettings(persistedState);
     // UI shell 必须先创建并发起加载；Agent worker 初始化变重时不得阻塞 renderer spawn。

@@ -46,10 +46,14 @@ enso config set defaultModel '{"providerId":"<id>","modelId":"gpt-5"}'
 enso config set mcpServers.<id>.callTimeoutSec 120
 enso config set subagentModelsEnabled true
 enso config set memoryDistillEnabled true
+enso config set memoryReconcileEnabled true   # 写入新记忆后自动复核矛盾；每轮最多 20 次模型调用
+enso config set memoryDistillWindowMinutes 0   # 0/2/5/10/30；0 = 会话结束立即提炼，不聚合
 enso config get providers.<id>            # apiKey、Authorization 等显示为 ***
 ```
 
-写入时会检查类型：键已有值时，新值的 JSON 类型必须一致（对象类型的键可以写 `null`）。`proxyMode`、`customProxyUrl`、`language` 另有取值校验。数组只能改已有元素，不能通过子键追加。
+写入时会检查类型：键已有值时，新值的 JSON 类型必须一致（对象类型的键可以写 `null`）。`proxyMode`、`customProxyUrl`、`language`、`memoryDistillWindowMinutes` 另有取值校验。数组只能改已有元素，不能通过子键追加。
+
+`memoryDistillWindowMinutes`（缺省 5）热生效：会话结束后等这么多分钟，窗口内同项目的会话合并成一次提炼；已在排队的待办仍按排队时的到期时间出队。它只影响本机记忆库的队列，不参与配置同步。
 
 ## 黑名单
 
@@ -78,6 +82,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 2. 向所有窗口广播 `SETTINGS_CHANGED`，renderer 重读后生效；
 3. 把模型目录、web 搜索、审批、压缩、重试、工具开关等配置推给 agent worker，同时同步记忆、语音、托盘快捷键和界面语言；
 4. 写 `proxyMode` 或 `customProxyUrl` 后，再调用设置页使用的代理应用逻辑（会话代理、进程环境、worker 环境）。
+
+`memoryReconcileEnabled` 只控制写入新记忆后是否自动复核，写入后立即生效；设置页的「立即复核」不受它限制。它是普通布尔开关，不是密钥、路径或执行入口，也不在启动时一次性读取，所以 `policy.ts` 不需要为它加规则。
 
 部分设置本来就只对新会话生效，例如 `subagentModels`、`subagentAllowedModes`、`editMode`、`rtkEnabled`。CLI 写入后，它们的行为与在设置页修改一致。
 

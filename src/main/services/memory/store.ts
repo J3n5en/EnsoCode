@@ -569,6 +569,41 @@ function insertEvolves(
   return rowToEvolves(db.prepare('SELECT * FROM evolves WHERE id = ?').get(edgeId) as EvolvesRow);
 }
 
+/** 两条记忆之间是否已有任意方向、任意关系的边 */
+export function hasEvolvesBetween(db: Database.Database, a: string, b: string): boolean {
+  return Boolean(
+    db
+      .prepare(
+        'SELECT 1 FROM evolves WHERE (older_id = ? AND newer_id = ?) OR (older_id = ? AND newer_id = ?) LIMIT 1'
+      )
+      .get(a, b, b, a)
+  );
+}
+
+/**
+ * 后台复核发现的矛盾：只写 challenges（pending 待审），不动任何 is_latest。
+ * 任一端已删除 / 不同 space / 两端已有关系时返回 null。
+ */
+export function recordChallenge(
+  db: Database.Database,
+  olderId: string,
+  newerId: string,
+  e: { confidence: number; reason: string | null },
+  opts: { now?: Date } = {}
+): Evolves | null {
+  return db
+    .transaction((): Evolves | null => {
+      const older = getMemory(db, olderId);
+      const newer = getMemory(db, newerId);
+      if (!older || !newer || olderId === newerId) return null;
+      if (older.lifecycleState === 'deleted' || newer.lifecycleState === 'deleted') return null;
+      if (older.spaceId !== newer.spaceId || hasEvolvesBetween(db, olderId, newerId)) return null;
+      const now = (opts.now ?? new Date()).toISOString();
+      return insertEvolves(db, older, newerId, { relation: 'challenges', ...e }, now);
+    })
+    .immediate();
+}
+
 /** 与指定记忆相连的全部关系（作为旧方或新方），按创建时间排序 */
 export function listEvolves(db: Database.Database, memoryId: string): Evolves[] {
   const rows = db

@@ -42,6 +42,9 @@ const mocks = vi.hoisted(() => ({
     autoArchive: false,
     durationMs: 1,
   })),
+  runMemoryReconcileNow: vi.fn(
+    async (): Promise<{ challenges: number } | null> => ({ challenges: 1 })
+  ),
   getForgettingState: vi.fn(() => ({
     lastRunAt: '2026-06-01T00:00:00.000Z',
     lastRun: null,
@@ -138,6 +141,7 @@ vi.mock('../services/memoryHost', () => ({
     intervalDays: 7,
   }),
   runMemoryForgettingNow: mocks.runMemoryForgettingNow,
+  runMemoryReconcileNow: mocks.runMemoryReconcileNow,
 }));
 vi.mock('../services/memory/pending', () => ({
   listPendingWrites: mocks.listPendingWrites,
@@ -253,6 +257,55 @@ describe('memory IPC', () => {
     expect(sessions.find((s) => s.sessionId === 'c1')?.projectName).toBe('enso-code');
     // 没有存标题的회话回退到短 id，不编造
     expect(sessions.find((s) => s.sessionId === 'c2')?.title).toBe('c2');
+  });
+
+  it('聚合任务：标题列出各成员会话，成员会话都算已提炼', async () => {
+    mocks.registry = {
+      projection: () => ({
+        projects: [{ projectId: 'p1', canonicalPath: '/Users/me/work/enso-code' }],
+        conversations: [
+          { conversationId: 'c1', projectId: 'p1', sessionFile: 'a.jsonl' },
+          { conversationId: 'c2', projectId: 'p1', sessionFile: 'b.jsonl' },
+        ],
+      }),
+    };
+    mocks.settings = {
+      'enso-conversations': {
+        state: { conversations: { c1: { id: 'c1', title: 'Fix retry loop' } } },
+      },
+    };
+    const batch = {
+      id: 7,
+      sessionId: 'batch:0123456789abcdef',
+      sessionIds: ['c1', 'c2'],
+      projectId: 'p1',
+    };
+    mocks.toMemoryJobsSnapshot.mockReturnValueOnce({
+      distill: [batch],
+      kg: [],
+      reembed: null,
+    } as never);
+    mocks.getMemoryDistillJobs.mockReturnValueOnce([
+      {
+        payload: {
+          sessionId: batch.sessionId,
+          sessions: [{ sessionId: 'c1' }, { sessionId: 'c2' }],
+        },
+      },
+    ] as never);
+    const jobs = (await handler(IPC_CHANNELS.MEMORY_JOBS)(event)) as {
+      distill: { sessionTitle: string | null }[];
+    };
+    expect(jobs.distill[0].sessionTitle).toBe('Fix retry loop + c2');
+    mocks.getMemoryDistillJobs.mockReturnValueOnce([
+      { payload: { sessionId: batch.sessionId, sessions: [{ sessionId: 'c2' }] } },
+    ] as never);
+    const sessions = (await handler(IPC_CHANNELS.MEMORY_DISTILLABLE_SESSIONS)(event)) as {
+      sessionId: string;
+      distilled: boolean;
+    }[];
+    expect(sessions.find((s) => s.sessionId === 'c2')?.distilled).toBe(true);
+    expect(sessions.find((s) => s.sessionId === 'c1')?.distilled).toBe(false);
   });
 
   it('knowledge handlers reject malformed input and never touch the db', async () => {
@@ -575,6 +628,21 @@ describe('memory IPC', () => {
     const summary = run(event) as { scored: number };
     expect(summary.scored).toBe(1);
     expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+  });
+
+  it('reconcile: 立即复核只认可信窗口，跑完广播；没有模型返回 null 且不广播', async () => {
+    const run = handler(IPC_CHANNELS.MEMORY_RECONCILE_RUN);
+    expect(await run({ sender: { id: 99 } })).toBeNull();
+    expect(mocks.runMemoryReconcileNow).not.toHaveBeenCalled();
+
+    mocks.send.mockClear();
+    expect(await run(event)).toEqual({ challenges: 1 });
+    expect(mocks.send).toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
+
+    mocks.send.mockClear();
+    mocks.runMemoryReconcileNow.mockResolvedValueOnce(null);
+    expect(await run(event)).toBeNull();
+    expect(mocks.send).not.toHaveBeenCalledWith(IPC_CHANNELS.MEMORY_CHANGED, undefined);
   });
 
   it('forgetting: 候选列表与确认归档都收窄入参', async () => {

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openMemoryDb } from './db';
 import { applyExtraction } from './kg';
 import { buildFtsMatchQuery, searchMemories } from './search';
-import { createMemory, updateMemory } from './store';
+import { createMemory, listEvolves, reviewEvolves, updateMemory } from './store';
 import { type Embedder, projectSpaceId } from './types';
 
 let dir: string;
@@ -808,5 +808,81 @@ describe('searchMemories — decay 在候选池上生效', () => {
     expect(count(rank3)).toBe(1);
     expect(count(rank2)).toBe(0);
     expect(count(tail)).toBe(0);
+  });
+});
+
+describe('searchMemories — challenges 降权并标注争议', () => {
+  // 旧记忆两个查询词都命中、余弦最高，不处理 challenges 时稳居第一；挑战它的新记忆只命中一个词
+  const emb = keywordEmbedder(['pnpm', 'workspace', 'bun', 'monorepo']);
+  const q = 'pnpm workspace';
+
+  async function seed(relation: 'challenges' | 'replaces' = 'challenges') {
+    const old = await add('构建用 pnpm workspace 管理 monorepo', 'global', emb);
+    const clean = await add('pnpm 镜像源统一用 npmmirror', 'global', emb);
+    const fresh = await add('改用 bun 管理 monorepo，pnpm 已弃用', 'global', emb, {
+      evolvesFromId: old.id,
+      evolvesRelation: relation,
+      force: true,
+    });
+    return { old, clean, fresh };
+  }
+  const resetHits = () =>
+    db.prepare('UPDATE memories SET hit_count = 0, last_hit_at = NULL, appearances = 0').run();
+  const NOW = new Date('2025-06-01T00:00:00Z');
+  const search = (extra = {}) =>
+    searchMemories(db, { q, spaceIds: ['global'], embedder: emb, now: NOW, ...extra });
+
+  it('被挑战的旧记忆排在挑战它的新记忆之后，但仍返回', async () => {
+    const { old, fresh } = await seed();
+    const order = ids(await search());
+    expect(order).toContain(old.id);
+    expect(order.indexOf(old.id)).toBeGreaterThan(order.indexOf(fresh.id));
+  });
+
+  it('被挑战的命中带 challengedBy，干净记忆与发起方不带', async () => {
+    const { old, clean, fresh } = await seed();
+    const byId = new Map((await search()).map((h) => [h.memory.id, h]));
+    expect(byId.get(old.id)?.challengedBy).toEqual([fresh.id]);
+    expect(byId.get(clean.id)?.challengedBy).toBeUndefined();
+    expect(byId.get(fresh.id)?.challengedBy).toBeUndefined();
+  });
+
+  it('只降被挑战方；拒绝挑战后恢复原排名，其余记忆分数一致', async () => {
+    const { old, clean, fresh } = await seed();
+    resetHits();
+    const pending = new Map((await search()).map((h) => [h.memory.id, h]));
+    const [edge] = listEvolves(db, old.id);
+    reviewEvolves(db, edge.id, 'rejected');
+    resetHits();
+    const rejectedHits = await search();
+    const rejected = new Map(rejectedHits.map((h) => [h.memory.id, h]));
+    expect(ids(rejectedHits)[0]).toBe(old.id);
+    expect(rejected.get(old.id)?.challengedBy).toBeUndefined();
+    expect(pending.get(old.id)!.score).toBeLessThan(rejected.get(old.id)!.score);
+    expect(pending.get(clean.id)!.score).toBe(rejected.get(clean.id)!.score);
+    expect(pending.get(fresh.id)!.score).toBe(rejected.get(fresh.id)!.score);
+  });
+
+  it('deep 模式 LLM 重排后仍不让被挑战方压过发起方', async () => {
+    const { old, fresh } = await seed();
+    const order = ids(
+      await search({
+        mode: 'deep',
+        assist: {
+          analyze: async () => null,
+          rerank: async (_q: string, items: unknown[]) => items.map(() => 10),
+        },
+      })
+    );
+    expect(order).toContain(old.id);
+    expect(order.indexOf(old.id)).toBeGreaterThan(order.indexOf(fresh.id));
+  });
+
+  it('replaces 行为不变：旧行不返回，新行不带争议标记', async () => {
+    const { old, fresh } = await seed('replaces');
+    const hits = await search();
+    expect(ids(hits)).not.toContain(old.id);
+    expect(ids(hits)).toContain(fresh.id);
+    expect(hits.every((h) => h.challengedBy === undefined)).toBe(true);
   });
 });

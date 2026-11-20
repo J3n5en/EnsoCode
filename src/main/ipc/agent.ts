@@ -580,13 +580,24 @@ function spawnBoundSessionOnce(
       { secretary: secretarySpawnOptions() }
     );
   }
+  // 派发/跟踪记录是权威：任何入口恢复 worker 都按它补上提问转交，不看渲染层传参
+  const askRelay = request.askRelay ?? secretaryAskRelay(request.sessionId);
   return spawnSession(
     identity,
-    request,
+    askRelay ? { ...request, askRelay } : request,
     credentialKeys,
     remoteConfigFor(request.sessionId),
     projectIdFor(request.sessionId)
   );
+}
+
+/** 秘书派出/跟踪中的会话：ask_user 先转给秘书；秘书关闭或记录已撤销时不转 */
+function secretaryAskRelay(sessionId: string): { name: string } | undefined {
+  if (!secretaryEnabled()) return undefined;
+  const store = secretaryStore();
+  if (!store.dispatch().dispatched[sessionId]) return undefined;
+  const name = store.profile()?.name.trim();
+  return name ? { name } : undefined;
 }
 
 /** 秘书档案、人设与派发状态只在 Main 读盘 */
@@ -813,17 +824,7 @@ export async function resumeRootFromMain(sessionId: string): Promise<AgentAction
   });
   if (plan.type === 'snapshot') return { ok: true };
   if (plan.type === 'skip') return { ok: false, error: plan.reason };
-  // 秘书跟踪中的会话恢复后仍要把 ask_user 转给秘书，否则悄悄变回直接问用户
-  const relay = await secretaryRelayFor(sessionId);
-  return spawnRootFromMain({ ...plan.request, ...(relay ? { askRelay: relay } : {}) });
-}
-
-/** 秘书派出/跟踪的会话：恢复 worker 时一起带上转交开关 */
-async function secretaryRelayFor(sessionId: string): Promise<{ name: string } | undefined> {
-  const { secretaryDispatchPorts } = await import('../services/secretary/dispatch');
-  if (!secretaryDispatchPorts.dispatchFile().dispatched[sessionId]) return undefined;
-  const name = (await secretaryDispatchPorts.profile())?.name.trim();
-  return name ? { name } : undefined;
+  return spawnRootFromMain(plan.request);
 }
 
 function persistedConversationForResume(

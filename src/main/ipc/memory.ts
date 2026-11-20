@@ -15,6 +15,7 @@ import {
   type MemoryJobsSnapshot,
   type MemoryListResult,
   type MemoryMutationResult,
+  type MemoryReconcileRunDto,
   type MemorySpaceKind,
   type MemoryStats,
   type PendingMemoryWriteDto,
@@ -90,6 +91,7 @@ import {
   refreshMemoryEmbedding,
   retryFailedMemoryKg,
   runMemoryForgettingNow,
+  runMemoryReconcileNow,
   setMemoryChangeListener,
 } from '../services/memoryHost';
 import {
@@ -249,6 +251,17 @@ export function registerMemoryHandlers(): void {
     return summary;
   });
 
+  // 立即复核：绕过 memoryReconcileEnabled，排进与蒸馏 / KG 同一条 LLM 串行链；没有可用模型返回 null
+  ipcMain.handle(
+    IPC_CHANNELS.MEMORY_RECONCILE_RUN,
+    async (event): Promise<MemoryReconcileRunDto | null> => {
+      if (!isTrustedWindow(event.sender.id)) return null;
+      const summary = await runMemoryReconcileNow();
+      if (summary) memoryChanged();
+      return summary;
+    }
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.MEMORY_ARCHIVE_CANDIDATES,
     async (event, request: unknown): Promise<MemoryArchiveCandidatesResult> => {
@@ -398,7 +411,10 @@ export function registerMemoryHandlers(): void {
       ...snapshot,
       distill: snapshot.distill.map((job) => ({
         ...job,
-        sessionTitle: titles.get(job.sessionId) ?? null,
+        // 聚合任务没有自己的会话，列出成员会话的标题
+        sessionTitle: job.sessionIds?.length
+          ? job.sessionIds.map((id) => titles.get(id) ?? id.slice(0, 8)).join(' + ')
+          : (titles.get(job.sessionId) ?? null),
         projectName: job.projectId ? (projects.get(job.projectId) ?? null) : null,
       })),
       kg: snapshot.kg.map((job) => ({
@@ -848,7 +864,13 @@ async function listDistillableSessionRecords(): Promise<DistillableRecord[]> {
   if (!registry) return [];
   const snapshot = registry.projection();
   const projects = new Map(snapshot.projects.map((p) => [p.projectId, p]));
-  const distilled = new Set(getMemoryDistillJobs(200).map((job) => job.payload.sessionId));
+  const distilled = new Set(
+    getMemoryDistillJobs(200).flatMap((job) =>
+      job.payload.sessions?.length
+        ? job.payload.sessions.map((s) => s.sessionId)
+        : [job.payload.sessionId]
+    )
+  );
   const titles = readConversationTitles();
   const sessionRoot = path.join(app.getPath('userData'), 'agent', 'sessions');
   const records: DistillableRecord[] = [];

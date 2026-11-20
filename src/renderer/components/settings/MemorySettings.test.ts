@@ -81,8 +81,12 @@ function setState(overrides: Record<string, unknown> = {}) {
     setMemoryChatModel: vi.fn(),
     memoryDistillEnabled: false,
     setMemoryDistillEnabled: vi.fn(),
+    memoryDistillWindowMinutes: 5,
+    setMemoryDistillWindowMinutes: vi.fn(),
     memoryKgEnabled: false,
     setMemoryKgEnabled: vi.fn(),
+    memoryReconcileEnabled: false,
+    setMemoryReconcileEnabled: vi.fn(),
     memoryDecayEnabled: true,
     setMemoryDecayEnabled: vi.fn(),
     memoryDecayArchiveCandidates: false,
@@ -266,6 +270,25 @@ describe('MemorySettings', () => {
     expect(html).toContain('空闲达到此时长后释放本地模型内存，下次需要时会自动加载。');
   });
 
+  it('自动提炼关闭时不显示聚合窗口', () => {
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).not.toContain('data-settings-row="memory.distillWindow"');
+  });
+
+  it.each([
+    [5, '5 min', '5 分钟'],
+    [0, 'Immediately', '立即'],
+  ])('自动提炼打开后显示聚合窗口 %i，选中值有中英文标签', (minutes, en, zh) => {
+    setState({ memoryDistillEnabled: true, memoryDistillWindowMinutes: minutes });
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).toContain('data-settings-row="memory.distillWindow"');
+    expect(html).toContain(`>${en}</span>`);
+    setState({ memoryDistillEnabled: true, memoryDistillWindowMinutes: minutes, language: 'zh' });
+    const zhHtml = renderToStaticMarkup(createElement(MemorySettings));
+    expect(zhHtml).toContain(`>${zh}</span>`);
+    expect(zhHtml).toContain('合并同项目会话');
+  });
+
   it('遗忘分区：三档开关常驻，阈值只在降权打开时出现', () => {
     const html = renderToStaticMarkup(createElement(MemorySettings));
     for (const row of [
@@ -315,6 +338,8 @@ describe('MemorySettings', () => {
     const html = renderToStaticMarkup(createElement(MemorySettings));
     expect(html).toContain('Distill sessions automatically');
     expect(html).toContain('Extract entities');
+    expect(html).toContain('Review conflicting memories');
+    expect(html).toContain('Review now');
     // 体积由模型清单那行动态显示；描述里不再硬编码某个数字（换模型就会对不上）
     expect(html).not.toContain('512MB');
     expect(html).toContain('only fetched when you press Download');

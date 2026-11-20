@@ -212,8 +212,10 @@ vi.mock('./worktree', () => ({
 }));
 
 import { SessionManager } from '@earendil-works/pi-coding-agent';
+import { parseProfile } from '@shared/secretary/parse';
 import { app } from 'electron';
 import { resolveSubagentModelSelection, rewindSession } from '../services/agentHost';
+import { SecretaryStore } from '../services/secretary/store';
 import { getSourceAuthorityRegistry, registerAgentHandlers, spawnRootFromMain } from './agent';
 
 const sender = {
@@ -343,6 +345,80 @@ describe('agent IPC Main identity boundary', () => {
       error: 'invalid spawn request',
     });
     expect(mocks.spawnSession).not.toHaveBeenCalled();
+  });
+
+  it('秘书派出/跟踪的会话被渲染层恢复：按 Main 派发记录带上提问转交，审批仍自动拒绝', async () => {
+    const userData = mkdtempSync(path.join(os.tmpdir(), 'enso-relay-spawn-'));
+    const store = new SecretaryStore(path.join(userData, 'secretary'));
+    const profile = parseProfile({});
+    if (!profile) throw new Error('default profile');
+    store.saveProfile({ ...profile, name: '小秘' });
+    const record = {
+      conversationId: 'tracked',
+      projectId: 'p',
+      secretaryConversationId: 'sec-a',
+      createdAt: 0,
+      turn: 0,
+      lastState: 'idle' as const,
+      lastEventAt: 0,
+    };
+    store.saveDispatch({
+      version: 1,
+      dispatched: { tracked: record },
+      named: [],
+      proposals: {},
+      outbox: [],
+    });
+    const authority = getSourceAuthorityRegistry()!;
+    vi.spyOn(authority, 'conversation').mockImplementation((conversationId) => ({
+      conversationId,
+      projectId: 'p',
+      kind: 'root',
+      lifecycle: 'ready',
+      version: 1,
+    }));
+    vi.spyOn(authority, 'project').mockReturnValue({
+      projectId: 'p',
+      canonicalPath: '/repo',
+      state: 'active',
+      version: 1,
+    });
+    const handler = mocks.handlers.get(IPC_CHANNELS.AGENT_SPAWN)!;
+    const restore = async (sessionId: string) => {
+      mocks.spawnSession.mockClear();
+      await handler(event, {
+        sessionId,
+        providerId: 'provider',
+        modelId: 'model',
+        cwd: '/repo',
+        autoRejectApprovals: true,
+      });
+      expect(mocks.spawnSession).toHaveBeenCalledTimes(1);
+      return mocks.spawnSession.mock.calls[0][1] as Record<string, unknown>;
+    };
+    vi.mocked(app.getPath).mockReturnValue(userData);
+    mocks.readSettingsState.mockReturnValue({ secretaryEnabled: true });
+    try {
+      expect(await restore('tracked')).toMatchObject({
+        autoRejectApprovals: true,
+        askRelay: { name: '小秘' },
+      });
+      // 不在派发记录里的会话照旧
+      const plain = await restore('plain');
+      expect(plain.askRelay).toBeUndefined();
+      expect(plain.autoRejectApprovals).toBe(true);
+      // 撤销接管后记录没了，不再带转交
+      store.saveDispatch({ ...store.dispatch(), dispatched: {} });
+      expect((await restore('tracked')).askRelay).toBeUndefined();
+      // 秘书关闭时不转交
+      store.saveDispatch({ ...store.dispatch(), dispatched: { tracked: record } });
+      mocks.readSettingsState.mockReturnValue({});
+      expect((await restore('tracked')).askRelay).toBeUndefined();
+    } finally {
+      mocks.readSettingsState.mockReturnValue(undefined);
+      vi.mocked(app.getPath).mockReturnValue('/tmp');
+      rmSync(userData, { recursive: true, force: true });
+    }
   });
 
   it('通用 AGENT_SPAWN 拒绝 bot 会话（人设与工作区只能由 BotSessionHost 组装）', async () => {

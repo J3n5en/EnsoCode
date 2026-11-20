@@ -32,9 +32,10 @@ const tinySpec = (over: Partial<EmbeddingModelSpec> = {}): EmbeddingModelSpec =>
 });
 
 describe('registry', () => {
-  it('default model is a known local model2vec spec with sources on both mirrors', () => {
+  it('default model is a known local gguf spec with sources on both mirrors', () => {
     const spec = resolveEmbeddingModelSpec(DEFAULT_EMBEDDING_MODEL_ID);
-    expect(spec?.runtime).toBe('model2vec');
+    // 默认值必须是能理解同义改写的上下文模型；model2vec 是词袋平均，semantic 召回等同于字面匹配
+    expect(spec?.runtime).toBe('gguf');
     expect(spec?.sources?.huggingface).toBeTruthy();
     expect(spec?.sources?.modelscope).toBeTruthy();
     expect(listEmbeddingModelSpecs().map((s) => s.id)).toContain(DEFAULT_EMBEDDING_MODEL_ID);
