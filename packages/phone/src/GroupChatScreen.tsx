@@ -10,7 +10,6 @@ import type {
 import { retryableGroupFailures } from '@shared/bots/groupRetry';
 import { splitTaskRef } from '@shared/bots/progress';
 import type { ApprovalDecision } from '@shared/types/agent';
-import type { StartVoiceSession } from '@shared/types/speech';
 import {
   ArrowUp,
   ChevronRight,
@@ -28,7 +27,6 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 're
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { Markdown } from '@/components/chat/Markdown';
-import { VoiceInputButton } from '@/components/chat/VoiceInputButton';
 import { cn } from '@/lib/utils';
 import { BotActivityRow } from './BotActivityRow';
 import { BotArtifacts } from './BotArtifacts';
@@ -86,8 +84,6 @@ interface Props {
   onStop(): void;
   onRetry?(entryId: string): void;
   onOpenProcess(conversationId: string): void;
-  /** 桌面语音识别可用时由 App 下发：输入框左侧显示麦克风 */
-  voice?: StartVoiceSession;
   onApproval(sessionId: string, requestId: string, decision: ApprovalDecision): void;
   onAsk(sessionId: string, requestId: string, answer: string): void;
 }
@@ -204,7 +200,6 @@ export function GroupChatScreen(props: Props) {
   const anchorRef = useRef<{ height: number; top: number } | null>(null);
   const stickRef = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
-  const composerRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState('');
   const [caret, setCaret] = useState(0);
   const [picked, setPicked] = useState<{ file: File; url: string }[]>([]);
@@ -314,20 +309,6 @@ export function GroupChatScreen(props: Props) {
     setText('');
     setCaret(0);
     stickRef.current = true;
-  };
-
-  /** 识别结果插到光标处；焦点不在输入框时追加到末尾 */
-  const insertVoiceText = (value: string) => {
-    const el = inputRef.current;
-    const start = el?.selectionStart ?? text.length;
-    const end = el?.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + value + text.slice(end);
-    setText(next);
-    setCaret(start + value.length);
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(start + value.length, start + value.length);
-    });
   };
 
   const renderEntry = (entry: PairGroupEntry) => {
@@ -645,10 +626,7 @@ export function GroupChatScreen(props: Props) {
               ))}
             </div>
           )}
-          <div
-            ref={composerRef}
-            className="flex items-end gap-2 rounded-2xl border bg-background px-3 py-2"
-          >
+          <div className="flex items-end gap-2 rounded-2xl border bg-background px-3 py-2">
             <input
               ref={fileRef}
               type="file"
@@ -669,17 +647,6 @@ export function GroupChatScreen(props: Props) {
             >
               <ImagePlus className="h-4.5 w-4.5" />
             </button>
-            {props.voice && (
-              // 录音中按钮展开成电平条＋停止＋取消，宽度自适应，不固定 8 宽以免压住输入框
-              <span className="flex h-8 shrink-0 items-center justify-center [&>div>button]:h-8 [&>div>button]:min-w-8 [&>div>button]:rounded-full">
-                <VoiceInputButton
-                  startSession={props.voice}
-                  disabled={sending}
-                  holdScope={composerRef}
-                  onText={insertVoiceText}
-                />
-              </span>
-            )}
             <textarea
               ref={inputRef}
               rows={1}

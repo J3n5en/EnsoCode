@@ -278,15 +278,6 @@ const local: Record<string, (...args: unknown[]) => unknown> = {
   [IPC_CHANNELS.RESOURCES_STORAGE_REVEAL]: unsupported,
   [IPC_CHANNELS.BOT_OPEN_WORKSPACE]: unsupported,
   [IPC_CHANNELS.BOT_ARTIFACT_OPEN]: unsupported,
-  [IPC_CHANNELS.SPEECH_MIC_ACCESS]: async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      for (const track of stream.getTracks()) track.stop();
-      return true;
-    } catch {
-      return false;
-    }
-  },
   [IPC_CHANNELS.APP_SET_BADGE_COUNT]: (count) => {
     const nav = navigator as Navigator & {
       setAppBadge?: (n?: number) => Promise<void>;

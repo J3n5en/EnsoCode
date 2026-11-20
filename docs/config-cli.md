@@ -61,7 +61,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 | 类别 | 规则 | get / list | set |
 | --- | --- | --- | --- |
-| 密钥和凭据 | 任一段键名匹配 `apiKey`、`api_key`、`secret`、`password`、`credential`、`authorization`、`cookie`、`*token`，或键名就是 `env`（MCP 环境变量）。例如 `providers.<id>.apiKey`、`providers.<id>.headers.Authorization`、`voiceGeminiApiKey`、`mcpServers.<id>.env`。名字含 `secret` 字样但不是密钥的字段（`secretaryEnabled`）在 `policy.ts` 的 `NOT_SECRET_FIELDS` 里豁免 | `get` 返回 `{ ok: false, hidden: true }`；`list` 和父对象中显示为 `***` | 拒绝 |
+| 密钥和凭据 | 任一段键名匹配 `apiKey`、`api_key`、`secret`、`password`、`credential`、`authorization`、`cookie`、`*token`，或键名就是 `env`（MCP 环境变量）。例如 `providers.<id>.apiKey`、`providers.<id>.headers.Authorization`、`mcpServers.<id>.env`。名字含 `secret` 字样但不是密钥的字段（`secretaryEnabled`）在 `policy.ts` 的 `NOT_SECRET_FIELDS` 里豁免 | `get` 返回 `{ ok: false, hidden: true }`；`list` 和父对象中显示为 `***` | 拒绝 |
 | 文件路径 | `worktreeRoot`、`backgroundImagePath`、`backgroundFolderPath`，以及任一段是 `path`、`dir`、`root`、`cwd` 或以 `Path`、`Dir`、`Root` 结尾的键 | 可读 | 拒绝 |
 | 执行命令 | `terminalShell`、`windowsLocalShell`、`fileOpenRules`、`contextMenuOpen`，以及任一段是 `command` 或 `args` 的键（例如 MCP 的启动命令） | 可读 | 拒绝 |
 | 插件 / 技能装卸 | 整体替换或增删 `plugins`、`skills`、`instructions` 的条目 | 可读 | 拒绝；条目内的字段（如 `plugins.<id>.enabled`）可以写 |
@@ -80,7 +80,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 1. 更新 Main 内存里的权威副本，并防抖原子落盘；
 2. 向所有窗口广播 `SETTINGS_CHANGED`，renderer 重读后生效；
-3. 把模型目录、web 搜索、审批、压缩、重试、工具开关等配置推给 agent worker，同时同步记忆、语音、托盘快捷键和界面语言；
+3. 把模型目录、web 搜索、审批、压缩、重试、工具开关等配置推给 agent worker，同时同步记忆、托盘快捷键和界面语言；
 4. 写 `proxyMode` 或 `customProxyUrl` 后，再调用设置页使用的代理应用逻辑（会话代理、进程环境、worker 环境）。
 
 `memoryReconcileEnabled` 只控制写入新记忆后是否自动复核，写入后立即生效；设置页的「立即复核」不受它限制。它是普通布尔开关，不是密钥、路径或执行入口，也不在启动时一次性读取，所以 `policy.ts` 不需要为它加规则。

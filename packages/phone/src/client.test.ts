@@ -1,6 +1,5 @@
 import {
   type DirectPeer,
-  decodeVoiceChunk,
   openFrame,
   type PairedDevice,
   type PhoneToHost,
@@ -795,23 +794,6 @@ describe('PairClient 缓存与续传', () => {
     });
   });
 
-  it('host-info 声明 voiceInput 才可用，主机离线即不可用', async () => {
-    const onVoiceInput = vi.fn();
-    events.onVoiceInput = onVoiceInput;
-    const socket = await start();
-    socket.onmessage?.({ data: JSON.stringify({ type: 'host-online' }) });
-    socket.receive({ type: 'host-info', hostname: 'h', appVersion: '1', voiceInput: true });
-    await settle();
-    expect(onVoiceInput).toHaveBeenLastCalledWith(true);
-    socket.receive({ type: 'host-info', hostname: 'h', appVersion: '1' });
-    await settle();
-    expect(onVoiceInput).toHaveBeenLastCalledWith(false);
-    socket.receive({ type: 'host-info', hostname: 'h', appVersion: '1', voiceInput: true });
-    await settle();
-    socket.onmessage?.({ data: JSON.stringify({ type: 'host-offline' }) });
-    expect(onVoiceInput).toHaveBeenLastCalledWith(false);
-  });
-
   it('host-info 声明 readOnly 即只读，缺省（旧桌面或已切回可操作）不是只读', async () => {
     const onReadOnly = vi.fn();
     events.onReadOnly = onReadOnly;
@@ -858,168 +840,6 @@ describe('PairClient 缓存与续传', () => {
     socket.receive({ type: 'command-rejected', command: 'task-stop', error: 'read-only' });
     await settle();
     expect(onCommandRejected).toHaveBeenCalledWith('task-stop', 'read-only');
-  });
-
-  function voiceChunks(socket: Socket) {
-    return socket.sent.flatMap((item) => (item.type === 'voice-chunk' ? [item] : []));
-  }
-  const samples = (count: number) => new Float32Array(count).fill(0.1);
-  const lengthOf = (data: string) => decodeVoiceChunk(data)?.length;
-
-  it('startVoice 满 200ms 立即发一块；finish 时恰好没有余量就补一小段静音作为 last', async () => {
-    const socket = await start();
-    const voice = client.startVoice(() => {});
-    voice.push(samples(3000));
-    await settle();
-    expect(voiceChunks(socket)).toHaveLength(0);
-    voice.push(samples(400));
-    await settle();
-    expect(voiceChunks(socket).map((c) => [c.index, lengthOf(c.data), c.last])).toEqual([
-      [0, 3200, undefined],
-    ]);
-    voice.push(samples(3000));
-    await settle();
-    expect(voiceChunks(socket)).toHaveLength(2);
-    const pending = voice.finish();
-    await settle();
-    const sent = voiceChunks(socket);
-    expect(sent.map((c) => [c.index, lengthOf(c.data), c.last])).toEqual([
-      [0, 3200, undefined],
-      [1, 3200, undefined],
-      [2, 160, true],
-    ]);
-    expect(new Set(sent.map((c) => c.requestId)).size).toBe(1);
-    socket.receive({ type: 'voice-result', requestId: 'other', text: 'x' });
-    socket.receive({ type: 'voice-result', requestId: sent[0].requestId, text: '你好' });
-    await settle();
-    await expect(pending).resolves.toEqual({ ok: true, text: '你好' });
-  });
-
-  it('不足一块也发出带 last 的非空块；无采样直接 invalid-audio', async () => {
-    const socket = await start();
-    const short = client.startVoice(() => {});
-    short.push(samples(10));
-    void short.finish();
-    await settle();
-    expect(voiceChunks(socket).map((c) => [c.index, lengthOf(c.data), c.last])).toEqual([
-      [0, 10, true],
-    ]);
-    const empty = client.startVoice(() => {});
-    await expect(empty.finish()).resolves.toEqual({ ok: false, error: 'invalid-audio' });
-    expect(voiceChunks(socket)).toHaveLength(1);
-  });
-
-  it('超过时长上限的采样被丢弃，finish 报 invalid-audio 并通知桌面取消', async () => {
-    const socket = await start();
-    const voice = client.startVoice(() => {});
-    voice.push(samples(16_000 * 300));
-    voice.push(samples(1));
-    await expect(voice.finish()).resolves.toEqual({ ok: false, error: 'invalid-audio' });
-    // 1500 块排在发送队列里，多轮冲刷
-    for (let i = 0; i < 200; i++) await settle();
-    expect(voiceChunks(socket)).toHaveLength(1500);
-    expect(voiceChunks(socket).some((c) => c.last)).toBe(false);
-    const cancel = socket.sent.find((item) => item.type === 'voice-cancel');
-    expect(cancel).toEqual({ type: 'voice-cancel', requestId: voiceChunks(socket)[0].requestId });
-  });
-
-  it('voice-partial 回调到对应会话，结果到达后不再回调', async () => {
-    const socket = await start();
-    const a = vi.fn();
-    const b = vi.fn();
-    const va = client.startVoice(a);
-    client.startVoice(b).push(samples(10));
-    va.push(samples(6400));
-    await settle();
-    const id = voiceChunks(socket)[0].requestId;
-    socket.receive({ type: 'voice-partial', requestId: id, text: '你' });
-    socket.receive({ type: 'voice-partial', requestId: 'other', text: 'x' });
-    await settle();
-    expect(a.mock.calls).toEqual([['你', false]]);
-    const pending = va.finish();
-    socket.receive({ type: 'voice-partial', requestId: id, text: '你好', correcting: true });
-    socket.receive({ type: 'voice-result', requestId: id, text: '你好。' });
-    socket.receive({ type: 'voice-partial', requestId: id, text: '迟到' });
-    await settle();
-    await expect(pending).resolves.toEqual({ ok: true, text: '你好。' });
-    expect(a.mock.calls).toEqual([
-      ['你', false],
-      ['你好', true],
-    ]);
-    expect(b).not.toHaveBeenCalled();
-  });
-
-  it('cancel 发 voice-cancel 并停止上传，未发过块则不打扰桌面', async () => {
-    const socket = await start();
-    const idle = client.startVoice(() => {});
-    idle.push(samples(10));
-    idle.cancel();
-    await settle();
-    expect(socket.sent.some((item) => item.type === 'voice-cancel')).toBe(false);
-    const voice = client.startVoice(() => {});
-    voice.push(samples(6400));
-    await settle();
-    const id = voiceChunks(socket)[0].requestId;
-    voice.cancel();
-    voice.push(samples(6400));
-    await settle();
-    expect(socket.sent.filter((item) => item.type === 'voice-cancel')).toEqual([
-      { type: 'voice-cancel', requestId: id },
-    ]);
-    expect(voiceChunks(socket)).toHaveLength(2);
-  });
-
-  it('host 错误码透传，未知码归为 failed；录音中收到错误则 finish 直接返回它', async () => {
-    const socket = await start();
-    const a = client.startVoice(() => {});
-    const b = client.startVoice(() => {});
-    a.push(samples(10));
-    b.push(samples(6400));
-    const pa = a.finish();
-    await settle();
-    const ca = voiceChunks(socket).find((c) => c.last);
-    const cb = voiceChunks(socket).find((c) => !c.last);
-    if (!ca || !cb) throw new Error('missing chunks');
-    socket.receive({ type: 'voice-result', requestId: ca.requestId, error: 'not-ready' });
-    socket.receive({ type: 'voice-result', requestId: cb.requestId, error: 'weird' });
-    await settle();
-    await expect(pa).resolves.toEqual({ ok: false, error: 'not-ready' });
-    b.push(samples(6400));
-    await settle();
-    expect(voiceChunks(socket)).toHaveLength(3);
-    await expect(b.finish()).resolves.toEqual({ ok: false, error: 'failed' });
-  });
-
-  it('未连接直接失败；60 秒超时从 finish 起算', async () => {
-    const offline = client.startVoice(() => {});
-    offline.push(samples(10));
-    await expect(offline.finish()).resolves.toEqual({ ok: false, error: 'failed' });
-    await start();
-    const voice = client.startVoice(() => {});
-    voice.push(samples(10));
-    await vi.advanceTimersByTimeAsync(90_000);
-    let done = false;
-    const pending = voice.finish().then((result) => {
-      done = true;
-      return result;
-    });
-    await vi.advanceTimersByTimeAsync(59_000);
-    expect(done).toBe(false);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await expect(pending).resolves.toEqual({ ok: false, error: 'failed' });
-  });
-
-  it('断线时录音中与等待结果的会话都以 failed 结束', async () => {
-    const socket = await start();
-    const waiting = client.startVoice(() => {});
-    waiting.push(samples(10));
-    const pending = waiting.finish();
-    const recording = client.startVoice(() => {});
-    recording.push(samples(10));
-    await settle();
-    socket.close();
-    await expect(pending).resolves.toEqual({ ok: false, error: 'failed' });
-    await expect(recording.finish()).resolves.toEqual({ ok: false, error: 'failed' });
   });
 });
 

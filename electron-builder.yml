@@ -35,8 +35,6 @@ files:
     to: node_modules/@bufbuild/protobuf
   - from: node_modules/quickjs-wasi
     to: node_modules/quickjs-wasi
-  - from: node_modules/libopus-wasm
-    to: node_modules/libopus-wasm
   # node-datachannel 平台包是 optional 兄弟目录，收集器只打 JS；不显式拷贝则
   # require('@node-datachannel/<platform>') 在安装包里找不到（Windows 直连会降级中继）
   - from: node_modules/.pnpm/node-datachannel@0.33.2/node_modules/@node-datachannel
@@ -109,11 +107,10 @@ mac:
   gatekeeperAssess: false
   # 公证与 staple 由 scripts/after-sign.mjs 负责，staple 断网可重试
   notarize: false
-  # electron-builder 默认三项 + 麦克风
+  # electron-builder 默认三项 + Apple Events
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
-    NSMicrophoneUsageDescription: EnsoCode uses the microphone for voice input. Speech is transcribed locally on this Mac.
     NSAppleEventsUsageDescription: EnsoCode uses Apple Events to activate app windows for the computer tool.
     CFBundleDocumentTypes:
       - CFBundleTypeName: Folder

@@ -8,9 +8,6 @@
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
-    <!-- 语音输入：hardened runtime 下缺这项，麦克风只会录到静音 -->
-    <key>com.apple.security.device.audio-input</key>
-    <true/>
     <!-- computer 工具经 osascript 让 System Events 激活窗口 -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>

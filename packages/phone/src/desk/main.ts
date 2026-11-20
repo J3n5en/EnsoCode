@@ -251,7 +251,7 @@ async function main(): Promise<void> {
   const mount = (kind: RemoteFrameKind): HTMLIFrameElement => {
     const iframe = document.createElement('iframe');
     iframe.className = kind;
-    iframe.allow = 'clipboard-read; clipboard-write; microphone';
+    iframe.allow = 'clipboard-read; clipboard-write';
     iframe.src = `${base}/${kind === 'main' ? 'index' : 'settings'}.html`;
     if (kind === 'settings') {
       const backdrop = document.createElement('div');

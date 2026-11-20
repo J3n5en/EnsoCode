@@ -405,9 +405,7 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   }, [refreshModels]);
 
   const refreshChatModels = React.useCallback(() => {
-    void window.electronAPI.memory
-      .chatModels()
-      .then((models) => setChatModels(models.filter((model) => !model.purpose)));
+    void window.electronAPI.memory.chatModels().then(setChatModels);
   }, []);
 
   React.useEffect(() => {

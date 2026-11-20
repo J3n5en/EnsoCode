@@ -365,49 +365,12 @@ describe('直连信令帧校验', () => {
   });
 });
 
-describe('voice-chunk 校验', () => {
-  const base = { type: 'voice-chunk', requestId: 'r1', index: 0, data: 'AAAA' };
-
-  it('放行合法分块', () => {
-    const ok = [
-      base,
-      { ...base, last: true },
-      { ...base, index: 4000 },
-      { ...base, requestId: 'x'.repeat(64) },
-      { ...base, data: 'A'.repeat(600_000) },
-    ];
-    for (const cmd of ok)
-      expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd).slice(0, 80)).toBe(true);
-  });
-
-  it('requestId/index/data/last 越界或类型错误一律拒绝', () => {
-    const bad = [
-      { ...base, requestId: '' },
-      { ...base, requestId: 'x'.repeat(65) },
-      { ...base, requestId: 1 },
-      { ...base, index: -1 },
-      { ...base, index: 4001 },
-      { ...base, index: 1.5 },
-      { ...base, index: '0' },
-      { ...base, data: '' },
-      { ...base, data: 1 },
-      { ...base, data: 'A'.repeat(600_001) },
-      { ...base, last: false },
-      { ...base, last: 1 },
-      { type: 'voice-chunk', index: 0, data: 'AAAA' },
-    ];
-    for (const cmd of bad)
-      expect(parsePhoneCommand(cmd).ok, JSON.stringify(cmd).slice(0, 80)).toBe(false);
-  });
-});
-
-describe('voice-cancel 校验', () => {
-  it('requestId 合法才放行', () => {
-    expect(parsePhoneCommand({ type: 'voice-cancel', requestId: 'r1' }).ok).toBe(true);
-    expect(parsePhoneCommand({ type: 'voice-cancel', requestId: 'x'.repeat(64) }).ok).toBe(true);
-    for (const requestId of ['', 'x'.repeat(65), 1, undefined]) {
-      expect(parsePhoneCommand({ type: 'voice-cancel', requestId }).ok).toBe(false);
-    }
+describe('已移除的语音帧', () => {
+  it('旧手机发来的 voice-chunk / voice-cancel 一律拒绝', () => {
+    expect(
+      parsePhoneCommand({ type: 'voice-chunk', requestId: 'r1', index: 0, data: 'AAAA' }).ok
+    ).toBe(false);
+    expect(parsePhoneCommand({ type: 'voice-cancel', requestId: 'r1' }).ok).toBe(false);
   });
 });
 

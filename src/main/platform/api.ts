@@ -8,7 +8,6 @@ import type {
   PlatformClipboard,
   PlatformImages,
   PlatformIpcMain,
-  PlatformMediaAccess,
   PlatformNet,
   PlatformNotification,
   PlatformPowerMonitor,
@@ -34,7 +33,6 @@ export declare const session: PlatformSessions;
 export declare const utilityProcess: PlatformUtilityProcess;
 export declare const clipboard: PlatformClipboard;
 export declare const images: PlatformImages;
-export declare const mediaAccess: PlatformMediaAccess;
 export declare const notification: PlatformNotification;
 /** agent worker 入口脚本的绝对路径 */
 export declare const agentWorkerPath: string;

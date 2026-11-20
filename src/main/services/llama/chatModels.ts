@@ -22,8 +22,6 @@ export interface ChatModelSpec {
   approxBytes: number;
   files: { name: string; sha256?: string }[];
   sources: { huggingface: string | null; modelscope: string | null } | null;
-  /** 专用模型只给对应功能选，不出现在记忆的模型列表里 */
-  purpose?: 'voice-correction';
 }
 
 const REGISTRY: Record<string, ChatModelSpec> = {
@@ -131,22 +129,6 @@ const REGISTRY: Record<string, ChatModelSpec> = {
       modelscope: 'unsloth/gemma-4-E2B-it-GGUF',
     },
   },
-  // botaruibo/MyVoiceTyping：Qwen2.5-1.5B 针对语音识别纠错微调（Apache-2.0），仅 ModelScope 发布
-  'local:myvoicetyping-1.5b': {
-    id: 'local:myvoicetyping-1.5b',
-    label: 'MyVoiceTyping 1.5B',
-    params: '1.5B',
-    contextSize: 2048,
-    approxBytes: 986_048_544,
-    files: [
-      {
-        name: 'MyVoiceTyping-1.5B-Q4_K_M.gguf',
-        sha256: '84ade41901b3106f4e0ab3af9eec61c35e4d8ff22add8aa5c19f98aa7bc3bfc2',
-      },
-    ],
-    sources: { huggingface: null, modelscope: 'botaruibo/MyVoiceTyping-1.5b-q4' },
-    purpose: 'voice-correction',
-  },
 };
 
 export function listChatModelSpecs(): ChatModelSpec[] {
@@ -165,16 +147,7 @@ export function chatModelDirName(spec: ChatModelSpec): string {
 export function chatModelIdFromSettings(state: Record<string, unknown> | undefined): string {
   const raw = state?.memoryChatModel;
   if (typeof raw !== 'string' || !raw) return DEFAULT_CHAT_MODEL_ID;
-  const spec = resolveChatModelSpec(raw);
-  return spec && !spec.purpose ? raw : DEFAULT_CHAT_MODEL_ID;
-}
-
-/** 语音纠错可用通用 chat 模型或专用纠错模型；未设/未知走远程 */
-export function voiceCorrectionModelIdFromSettings(
-  state: Record<string, unknown> | undefined
-): string {
-  const raw = state?.voiceCorrectionModel;
-  return typeof raw === 'string' && resolveChatModelSpec(raw) ? raw : REMOTE_CHAT_MODEL_ID;
+  return resolveChatModelSpec(raw) ? raw : DEFAULT_CHAT_MODEL_ID;
 }
 
 function safeJoin(dir: string, name: string): string {

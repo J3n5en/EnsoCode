@@ -111,7 +111,7 @@ export function extractNpmPackageBins(tgz: Buffer, dest: string): void {
   fs.rmSync(tmp, { recursive: true, force: true });
   fs.mkdirSync(tmp, { recursive: true });
   try {
-    unpackNpmTarball(tgz, tmp);
+    unpackPackageTar(gunzipSync(tgz), tmp);
     if (!hasLlamaAddon(tmp)) throw new Error('gpu backend tarball missing llama-addon.node');
     fs.writeFileSync(path.join(tmp, READY_MARKER), new Date().toISOString());
     fs.rmSync(dest, { recursive: true, force: true });
@@ -120,11 +120,6 @@ export function extractNpmPackageBins(tgz: Buffer, dest: string): void {
     fs.rmSync(tmp, { recursive: true, force: true });
     throw error;
   }
-}
-
-/** npm tgz 的 package/ 下普通文件解到 dest；不写完成标记，由调用方决定就绪条件 */
-export function unpackNpmTarball(tgz: Buffer, dest: string): void {
-  unpackPackageTar(gunzipSync(tgz), dest);
 }
 
 function assertSegment(value: string, label: string): void {
