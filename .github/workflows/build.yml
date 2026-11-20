@@ -5,6 +5,15 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: 只构建 Windows（跳过 macOS / Linux / relay）
+        type: boolean
+        default: false
+      sign_windows:
+        description: 用 SignPath test-signing 签 Windows 安装包
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -55,6 +64,7 @@ jobs:
 
   build-mac:
     needs: build-app
+    if: ${{ !inputs.windows_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +154,13 @@ jobs:
     needs: build-app
     # windows-latest now ships VS 2026, which node-gyp <12.1 cannot detect
     runs-on: windows-2022
+    # SignPath 用 GITHUB_TOKEN 读取 job 信息并下载待签产物
+    permissions:
+      contents: write
+      actions: read
+    # 正式证书下来前 tag 构建不签：test-signing 证书不受系统信任，不能进 Release
+    env:
+      SIGN_WINDOWS: ${{ github.event_name == 'workflow_dispatch' && inputs.sign_windows }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -177,6 +194,72 @@ jobs:
         shell: bash
         run: ELECTRON_RUN_AS_NODE=1 dist/win-unpacked/EnsoCode.exe scripts/smoke-packaged-natives.cjs dist/win-unpacked/resources
 
+      - name: Locate installer
+        id: installer
+        if: env.SIGN_WINDOWS == 'true'
+        shell: bash
+        run: |
+          NAME="EnsoCode-Setup-$(node -p 'require("./package.json").version').exe"
+          test -f "dist/$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      # SignPath 产物配置根节点是 <pe-file>，只能收单个 exe，所以不打 zip
+      - name: Upload unsigned installer
+        id: upload-unsigned
+        if: env.SIGN_WINDOWS == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/${{ steps.installer.outputs.name }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign installer (SignPath)
+        id: signpath
+        if: env.SIGN_WINDOWS == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: c03054cb-29a4-4ddc-bb83-086114b81240
+          project-slug: EnsoCode
+          signing-policy-slug: test-signing
+          artifact-configuration-slug: initial
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist-signed
+          skip-decompress: true
+
+      - name: Verify signature
+        if: env.SIGN_WINDOWS == 'true'
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature "dist-signed/${{ steps.installer.outputs.name }}"
+          $sig | Format-List Status, StatusMessage
+          if (-not $sig.SignerCertificate) { throw '签名后的安装包没有 Authenticode 签名' }
+          $sig.SignerCertificate | Format-List Subject, Issuer, Thumbprint, NotAfter
+
+      # 签名改变了文件哈希，latest.yml 里的 sha512 / size 必须按签名后的文件重写
+      - name: Replace installer and update latest.yml
+        if: env.SIGN_WINDOWS == 'true'
+        shell: bash
+        run: |
+          NAME="${{ steps.installer.outputs.name }}"
+          node -e '
+            const fs = require("fs"), crypto = require("crypto");
+            const [unsigned, signed, yml] = process.argv.slice(1);
+            const hash = (f) => crypto.createHash("sha512").update(fs.readFileSync(f)).digest("base64");
+            const [oldHash, newHash] = [hash(unsigned), hash(signed)];
+            const [oldSize, newSize] = [unsigned, signed].map((f) => fs.statSync(f).size);
+            let text = fs.readFileSync(yml, "utf8");
+            if (!text.includes(oldHash)) throw new Error("latest.yml 不含未签名安装包的 sha512");
+            const sizeLine = new RegExp(`^(\\s*size: )${oldSize}(?=\\r?$)`, "gm");
+            if (!sizeLine.test(text)) throw new Error("latest.yml 不含未签名安装包的 size");
+            text = text.split(oldHash).join(newHash).replace(sizeLine, `$1${newSize}`);
+            fs.writeFileSync(yml, text);
+          ' "dist/$NAME" "dist-signed/$NAME" dist/latest.yml
+          cp "dist-signed/$NAME" "dist/$NAME"
+          cat dist/latest.yml
+
       # 非 tag 触发时 electron-builder 不发布，产物只留在 runner 上；
       # 传上来才能直接下载试装，不必为了拿个安装包去发版
       - name: Upload installer
@@ -190,6 +273,7 @@ jobs:
 
   build-linux:
     needs: build-app
+    if: ${{ !inputs.windows_only }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -235,6 +319,7 @@ jobs:
 
   build-relay:
     needs: build-app
+    if: ${{ !inputs.windows_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
