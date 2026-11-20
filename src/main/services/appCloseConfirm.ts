@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { parseAppCloseResponse, shouldBypassCloseConfirm } from '@shared/appClose';
 import { IPC_CHANNELS } from '@shared/types';
 import { app, ipcMain, type WebContents } from 'electron';
+import { presentWindow } from '../windows/verifyLaunch';
 import { autoUpdaterService } from './updater/AutoUpdater';
 
 const CLOSE_RESPONSE_TIMEOUT_MS = 30_000;
@@ -98,9 +99,7 @@ export function attachAppCloseConfirm(
     flowInProgress = true;
     try {
       if (win.isDestroyed() || contentsOf().isDestroyed()) return;
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
+      presentWindow(win);
       const action = await askRenderer();
       if (action === 'cancel') return;
       if (action === 'tray') {

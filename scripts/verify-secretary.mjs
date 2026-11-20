@@ -46,10 +46,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deflateSync } from 'node:zlib';
+import { uiElementElectron } from './verify-electron.mjs';
 import {
   explicitPort,
   keepRequested,
@@ -391,6 +393,8 @@ async function connect(entry = 'index.html') {
       socket.send(JSON.stringify({ id: next, method, params }));
     });
   await send('Runtime.enable');
+  // 验收窗口始终隐藏：连着的这段时间让页面按可见且聚焦运行，rAF、:hover、指针事件照常
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true });
 
   const evaluate = async (expression) => {
     const reply = await send('Runtime.evaluate', {
@@ -572,6 +576,9 @@ async function main() {
     ENSO_USER_DATA_DIR: ENV,
     ENSO_CDP_PORT: String(CDP_PORT),
     ENSO_RENDERER_PORT: String(RENDERER_PORT),
+    // 验收实例：不进 Dock、不抢前台、窗口不弹出，CDP 照常读写截图
+    ENSO_VERIFY: '1',
+    ELECTRON_EXEC_PATH: uiElementElectron(createRequire(import.meta.url)('electron')),
     // 联系方式只打这个假服务，不碰真实的 api.telegram.org
     ENSO_TELEGRAM_API_BASE: `http://127.0.0.1:${TG_PORT}`,
   });

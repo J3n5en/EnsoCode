@@ -39,6 +39,19 @@ osascript -e 'tell application "System Events" to set frontmost of (first proces
 
 `cdp.mjs drag` 已内置可见性检查 + 自动激活;手写鼠标序列前先查 `visibilityState`。
 
+## 验收脚本不要靠激活窗口
+
+上面的激活法会抢用户前台,只适合手动排查。自动验收(`verify-secretary.mjs`、
+`verify-node-full-ui.mjs`)给实例设 `ENSO_VERIFY=1`(仅未打包生效):切 accessory、
+窗口从不 show / focus。ESM 主入口加载要 ~1.4s,`setActivationPolicy` 赶不上,进程会先当
+前台应用、Dock 冒图标;所以脚本再用 `scripts/verify-electron.mjs` 换成 Info.plist 带
+`LSUIElement` 的 Electron 克隆(dev 走 `ELECTRON_EXEC_PATH`)。
+**从未显示过**的窗口不会丢 CDP 按键事件,截图正常;
+但 WebContentsView 是 hidden、rAF 停摆,所以脚本连上页面后开
+`Emulation.setFocusEmulationEnabled`,页面按可见且聚焦运行。要验"焦点落在哪个
+webContents",关掉焦点模拟量 `document.hasFocus()`:窗口不是 key window 时它仍跟着
+`webContents.focus()` 走;`webContents.getFocusedWebContents()` 此时恒为 null。
+
 ## 判别方法(下次遇到"输入类验证时好时坏")
 
 1. 先查 `document.visibilityState`,hidden 就激活窗口重试——**不要先怀疑产品代码**;
