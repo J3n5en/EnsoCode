@@ -6659,7 +6659,18 @@ async function verifyTakeover(cdp, setup) {
       () => visible('[data-enso=tool-row]').find((node) => /已工作|Worked for/.test(node.innerText)) ?? null,
       20000
     );
-    if (!group) return JSON.stringify({ ok: false, error: 'no tool group' });
+    if (!group)
+      return JSON.stringify({
+        ok: false,
+        error: 'no tool group',
+        // 失败时留下现场：当前会话、看得见的工具行和时间线末尾
+        seen: {
+          active: S().activeConversationId ?? S().selectedConversationId ?? null,
+          visibleRows: rows(),
+          allRows: document.querySelectorAll('[data-enso=tool-row]').length,
+          visibleText: (visible('[data-virtuoso-scroller]')[0]?.innerText ?? '').slice(-1500),
+        },
+      });
     const groupText = group.innerText;
     // 完成后的过程组默认收起，点开才看得到组内原始行
     if (!rows().some((text) => text.includes('mcp-echo-hi'))) group.click();
