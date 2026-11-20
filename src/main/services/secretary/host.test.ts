@@ -1997,3 +1997,28 @@ describe('遗留后台任务', () => {
     expect(h.state.file.outbox[0]?.text).toContain('pnpm test');
   });
 });
+
+describe('派出会话的流式事件', () => {
+  it('只刷新事件时刻时不逐条落盘和广播，过一段时间才补存一次', () => {
+    const h = harness();
+    let saves = 0;
+    const save = h.ports.save;
+    h.ports.save = (file) => {
+      saves += 1;
+      save(file);
+    };
+    h.state.now = 1_000;
+    h.host.onAgentEvent(event('message-update'), []);
+    const first = { saves, published: h.state.published };
+    for (let i = 0; i < 20; i++) {
+      h.state.now += 100;
+      h.host.onAgentEvent(event('message-update'), []);
+    }
+    expect(saves).toBe(first.saves);
+    expect(h.state.published).toBe(first.published);
+    h.state.now += MINUTE;
+    h.host.onAgentEvent(event('message-update'), []);
+    expect(saves).toBe(first.saves + 1);
+    expect(h.state.file.dispatched.c1?.lastEventAt).toBe(h.state.now);
+  });
+});
