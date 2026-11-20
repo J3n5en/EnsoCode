@@ -986,7 +986,10 @@ export function Sidebar({
                 multiSecretary && secretaryEntries[0]
                   ? {
                       ...secretaryEntries[0].view,
-                      needsYou: secretaryEntries.reduce((sum, entry) => sum + entry.view.needsYou, 0),
+                      needsYou: secretaryEntries.reduce(
+                        (sum, entry) => sum + entry.view.needsYou,
+                        0
+                      ),
                       running: secretaryEntries.reduce((sum, entry) => sum + entry.view.running, 0),
                     }
                   : (secretaryView as NonNullable<typeof secretaryView>)
@@ -1140,56 +1143,58 @@ export function Sidebar({
             </div>
           ) : (
             secretaryView && (
-            <SecretarySidebarSection
-              view={secretaryView}
-              folded={secretaryFolded}
-              onToggleFold={toggleSecretaryFolded}
-              onOpen={openSecretary}
-              onNewConversation={() => {
-                void useSecretaryStore.getState().newSecretaryConversation();
-              }}
-              onOpenSettings={() =>
-                void window.electronAPI.window.openSettings({
-                  category: 'secretary',
-                  rowId: 'secretary.root',
-                })
-              }
-              onReset={() => setSecretaryResetId('default')}
-            >
-              {shownSecretaryIds.map((id) => (
-                <ConversationRow
-                  key={id}
-                  id={id}
-                  conversation={conversations[id]}
-                  active={activeId === id}
-                  switchHint={switchHintFor(id, 'project')}
-                  locale={locale}
-                  nowTick={nowTick}
-                  hoverTitle={secretaryView.name}
-                  onSelect={selectConversation}
-                  onTogglePin={togglePinConversation}
-                  onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                  onCleanupWorktree={(conversationId) => void handleCleanupWorktree(conversationId)}
-                  onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
-                  onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                />
-              ))}
-              {!secretaryFolded && secretaryIds.length > SECRETARY_VISIBLE_LIMIT && (
-                <div className="flex items-center gap-1 px-2">
-                  <button
-                    type="button"
-                    onClick={() => setSecretaryRevealed((prev) => !prev)}
-                    className={SHOW_MORE_CLASS}
-                  >
-                    {secretaryRevealed
-                      ? t('Collapse')
-                      : t('Show {{n}} more', {
-                          n: secretaryIds.length - SECRETARY_VISIBLE_LIMIT,
-                        })}
-                  </button>
-                </div>
-              )}
-            </SecretarySidebarSection>
+              <SecretarySidebarSection
+                view={secretaryView}
+                folded={secretaryFolded}
+                onToggleFold={toggleSecretaryFolded}
+                onOpen={openSecretary}
+                onNewConversation={() => {
+                  void useSecretaryStore.getState().newSecretaryConversation();
+                }}
+                onOpenSettings={() =>
+                  void window.electronAPI.window.openSettings({
+                    category: 'secretary',
+                    rowId: 'secretary.root',
+                  })
+                }
+                onReset={() => setSecretaryResetId('default')}
+              >
+                {shownSecretaryIds.map((id) => (
+                  <ConversationRow
+                    key={id}
+                    id={id}
+                    conversation={conversations[id]}
+                    active={activeId === id}
+                    switchHint={switchHintFor(id, 'project')}
+                    locale={locale}
+                    nowTick={nowTick}
+                    hoverTitle={secretaryView.name}
+                    onSelect={selectConversation}
+                    onTogglePin={togglePinConversation}
+                    onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                    onCleanupWorktree={(conversationId) =>
+                      void handleCleanupWorktree(conversationId)
+                    }
+                    onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
+                    onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                  />
+                ))}
+                {!secretaryFolded && secretaryIds.length > SECRETARY_VISIBLE_LIMIT && (
+                  <div className="flex items-center gap-1 px-2">
+                    <button
+                      type="button"
+                      onClick={() => setSecretaryRevealed((prev) => !prev)}
+                      className={SHOW_MORE_CLASS}
+                    >
+                      {secretaryRevealed
+                        ? t('Collapse')
+                        : t('Show {{n}} more', {
+                            n: secretaryIds.length - SECRETARY_VISIBLE_LIMIT,
+                          })}
+                    </button>
+                  </div>
+                )}
+              </SecretarySidebarSection>
             )
           )}
           {orderedProjects.length === 0 && (

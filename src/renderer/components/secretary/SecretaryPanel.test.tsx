@@ -33,6 +33,7 @@ vi.mock('@/stores/sessions', () => ({
 }));
 vi.mock('@/stores/secretary', () => ({
   focusedSecretaryId: () => undefined,
+  secretaryIdOfProject: () => null,
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
     selector({
       secretary: h.secretary,

@@ -311,21 +311,24 @@ function DailyColumn({
 }
 
 /** 看板：按天回看秘书一天做了什么，数据由 Main 的 secretary:daily 提供 */
-export function SecretaryDailyBoard() {
+export function SecretaryDailyBoard({ secretaryId }: { secretaryId?: string } = {}) {
   const { t } = useI18n();
   const [day, setDay] = useState(() => dayKey(Date.now()));
   const [daily, setDaily] = useState<SecretaryDaily | null>(null);
   const [folded, setFolded] = useState<ReadonlySet<SecretaryDailyGroupKey>>(() => new Set());
   const today = dayKey(Date.now());
 
-  const load = useCallback((target: string) => {
-    void window.electronAPI.secretary
-      .daily(target)
-      .then((result) => {
-        if (result.ok) setDaily(result.daily);
-      })
-      .catch(() => undefined);
-  }, []);
+  const load = useCallback(
+    (target: string) => {
+      void window.electronAPI.secretary
+        .daily(target, secretaryId)
+        .then((result) => {
+          if (result.ok) setDaily(result.daily);
+        })
+        .catch(() => undefined);
+    },
+    [secretaryId]
+  );
 
   // 换日期就重读；只有今天跟着状态推送刷新，历史日期定住不动
   useEffect(() => {

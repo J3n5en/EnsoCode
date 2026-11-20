@@ -204,7 +204,9 @@ export function SecretarySidebarSection({
         </ContextMenuPopup>
       </ContextMenu>
       {!folded && <div className="flex flex-col">{children}</div>}
-      {divider && <div data-enso="secretary-divider" className="mx-2 mt-1 border-t border-border" />}
+      {divider && (
+        <div data-enso="secretary-divider" className="mx-2 mt-1 border-t border-border" />
+      )}
     </div>
   );
 }

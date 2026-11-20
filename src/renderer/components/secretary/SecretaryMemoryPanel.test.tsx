@@ -19,6 +19,7 @@ vi.mock('@/i18n', () => ({
 }));
 vi.mock('@/stores/secretary', () => ({
   focusedSecretaryId: () => undefined,
+  secretaryIdOfProject: () => null,
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
     selector({ secretary: { projectId: 'sec', profile: { name: '小安' } } }),
 }));

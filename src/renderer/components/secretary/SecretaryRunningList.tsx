@@ -181,9 +181,13 @@ function PendingRow({ pending }: { pending: PendingDispatch }) {
 }
 
 /** 「进行中 N」展开后的明细：和摘要里的数字共用 board.running，条数天然一致 */
-export function SecretaryRunningList() {
+export function SecretaryRunningList({ secretaryId }: { secretaryId?: string } = {}) {
   const { t } = useI18n();
-  const running = useSecretaryStore((state) => state.secretary.board.running);
+  const running = useSecretaryStore(
+    (state) =>
+      (secretaryId ? state.states[secretaryId] : undefined)?.board.running ??
+      state.secretary.board.running
+  );
   return (
     <section data-enso="secretary-running" className="flex flex-col px-3 pt-2">
       <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">

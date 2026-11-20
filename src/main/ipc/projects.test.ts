@@ -46,6 +46,8 @@ vi.mock('./agent', () => ({
     projection: mocks.projection,
     project: mocks.project,
     conversation: mocks.conversation,
+    // 删除会话会清掉所有秘书的关注；秘书上下文登记隐藏项目时调用它
+    ensureSecretaryProject: () => undefined,
   }),
 }));
 vi.mock('./worktree', () => ({ sessionWorktree: mocks.sessionWorktree }));

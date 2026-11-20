@@ -10,7 +10,7 @@ import { useSettingsStore } from '@/stores/settings';
 const ROW_CLASS = 'w-full border-b border-border/60 px-3 py-2 text-left last:border-b-0';
 
 /** 秘书可用的 skill：专属与全局两组，正文只给用户看 */
-export function SecretarySkillsPanel() {
+export function SecretarySkillsPanel({ secretaryId }: { secretaryId?: string } = {}) {
   const { t } = useI18n();
   const [skills, setSkills] = useState<SecretarySkillView[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -21,20 +21,22 @@ export function SecretarySkillsPanel() {
 
   // 与设置页同一份数据：设置里的 skill 列表、档案里的勾选与停用名单变了就重读
   const settingsSkills = useSettingsStore((state) => state.skills);
-  const profile = useSecretaryStore((state) => state.secretary.profile);
+  const profile = useSecretaryStore((state) =>
+    secretaryId ? state.states[secretaryId]?.profile : state.secretary.profile
+  );
   const signature = `${(profile?.skillIds ?? []).join(',')}|${(
     profile?.disabledSkillNames ?? []
   ).join(',')}`;
 
   const load = useCallback(async () => {
-    const result = await window.electronAPI.secretary.listSkills();
+    const result = await window.electronAPI.secretary.listSkills(secretaryId);
     if (result.ok) {
       setSkills(result.skills);
       setError(null);
     } else {
       setError(result.error);
     }
-  }, []);
+  }, [secretaryId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 设置页的 skill 列表与档案勾选变了就重读
   useEffect(() => {
@@ -50,20 +52,26 @@ export function SecretarySkillsPanel() {
     setOpenId(skill.id);
     setBody(skill.body ?? null);
     if (skill.body !== undefined) return;
-    const result = await window.electronAPI.secretary.readSkill({
-      id: skill.id,
-      source: skill.source,
-    });
+    const result = await window.electronAPI.secretary.readSkill(
+      {
+        id: skill.id,
+        source: skill.source,
+      },
+      secretaryId
+    );
     setBody(result.ok ? result.body : null);
   };
 
   const toggle = async (skill: SecretarySkillView) => {
     setBusy(true);
-    const result = await window.electronAPI.secretary.setSkillEnabled({
-      id: skill.id,
-      source: skill.source,
-      enabled: !skill.enabled,
-    });
+    const result = await window.electronAPI.secretary.setSkillEnabled(
+      {
+        id: skill.id,
+        source: skill.source,
+        enabled: !skill.enabled,
+      },
+      secretaryId
+    );
     setBusy(false);
     if (!result.ok) {
       setError(result.error);
@@ -74,7 +82,7 @@ export function SecretarySkillsPanel() {
 
   const remove = async (skill: SecretarySkillView) => {
     setBusy(true);
-    const result = await window.electronAPI.secretary.removeSkill(skill.id);
+    const result = await window.electronAPI.secretary.removeSkill(skill.id, secretaryId);
     setBusy(false);
     setConfirming(null);
     if (!result.ok) {

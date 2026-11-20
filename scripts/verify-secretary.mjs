@@ -1469,7 +1469,10 @@ async function run(cdp, pluginZipUrl) {
       const issues = [];
       if (entry.card?.state !== 'running' || entry.row?.tone !== 'run') issues.push('not running');
       if (entry.card?.stateSince !== since[id]) issues.push('stateSince moved');
-      if (!sameClock(entry.row?.text, since[id])) issues.push('clock is not the start time');
+      if (!sameClock(entry.row?.text, since[id]))
+        issues.push(
+          `clock is not the start time: row=${JSON.stringify(entry.row?.text)} want=${clockOf(since[id]).join(':')}`
+        );
       return issues.length > 0 ? [{ sample: index, id, issues, entry }] : [];
     })
   );
@@ -2865,6 +2868,8 @@ async function run(cdp, pluginZipUrl) {
   await verifyImageViewAndCleanup(cdp, setup);
   await verifyForwardImages(cdp, setup);
   await verifyToolCards(cdp, setup);
+  // 多秘书段会新建秘书、绑话题、换 token，放在全部单秘书回归之后，不污染它们的前提
+  await verifyMultiSecretary(cdp, setup);
 }
 
 /**
@@ -2935,7 +2940,11 @@ async function startFakeTelegram(port) {
       state.waiters = state.waiters.filter((entry) => entry !== waiter);
       waiter.fn([update]);
     } else if (token === state.token) state.queue.push(update);
-    else (state.queues[token] ??= []).push(update);
+    else {
+      const queue = state.queues[token] ?? [];
+      state.queues[token] = queue;
+      queue.push(update);
+    }
   };
   const server = createHttpServer((request, response) => {
     const chunks = [];
@@ -2979,7 +2988,11 @@ async function startFakeTelegram(port) {
           state.polling[token] -= 1;
         };
         response.on('close', release);
-        const queue = token === state.token ? state.queue : (state.queues[token] ??= []);
+        let queue = state.queue;
+        if (token !== state.token) {
+          queue = state.queues[token] ?? [];
+          state.queues[token] = queue;
+        }
         if (queue.length > 0) {
           reply({ ok: true, result: queue.splice(0) });
           return;
@@ -3139,7 +3152,7 @@ async function verifyTelegramContact(cdp, setup) {
   const push = telegram.push;
   const PANEL = `[...document.querySelectorAll('[data-enso=secretary-panel]')].find((node) => {
     const rect = node.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    return rect.width > 300 && rect.height > 0;
   })`;
 
   log('== 联系方式：绑定向导第 1 步');
@@ -3163,14 +3176,26 @@ async function verifyTelegramContact(cdp, setup) {
     const panel = panelOf();
     if (!panel) return JSON.stringify({ ok: false, error: 'no panel' });
     panel.querySelector('[data-enso=secretary-panel-tab][data-tab=contact]')?.click();
-    await sleep(400);
-    const step1 = panel.querySelector('[data-enso=secretary-contact-step1]');
+    const step1 = await until(
+      () => panel.querySelector('[data-enso=secretary-contact-step1]'),
+      8000
+    );
     const botfather = panel.querySelector('[data-enso=secretary-contact-botfather]');
     const input = panel.querySelector('[data-enso=secretary-contact-token]');
     return JSON.stringify({
       ok: Boolean(step1 && botfather && input),
       href: botfather?.getAttribute('href') ?? null,
       tabs: [...panel.querySelectorAll('[data-enso=secretary-panel-tab]')].map((n) => n.dataset.tab),
+      body: (panel.textContent ?? '').replace(/s+/g, ' ').slice(0, 240),
+      active: panel.querySelector('[data-enso=secretary-panel-tab][data-active]')?.dataset.tab ?? null,
+      state: await window.electronAPI.secretary.contactState('default').then((s) => ({
+        enabled: s.enabled,
+        status: s.telegram?.status,
+        channels: (s.channels ?? []).map((c) => c.status),
+        id: s.secretaryId,
+        chat: s.telegram?.chat ?? null,
+        routes: (s.telegram?.routes ?? []).length,
+      })),
     });
   `);
   assert(opened.ok, '联系方式: 侧边栏有入口，第 1 步引导去 BotFather', opened);
@@ -6650,8 +6675,6 @@ async function verifyTakeover(cdp, setup) {
     plainRows
   );
   await cdp.shot(path.join(ART, '09-plain-tool-rows.png'));
-
-  await verifyMultiSecretary(cdp, setup);
 }
 
 /**
@@ -6916,7 +6939,7 @@ async function verifyMultiSecretary(cdp, setup) {
         from: { id: 777001, username: 'j3n5en', first_name: 'J' },
         message_thread_id: topicId,
         is_topic_message: true,
-        text: '/bind@enso_verify_bot ' + code,
+        text: `/bind@enso_verify_bot ${code}`,
       },
     });
     return page(`
@@ -6960,7 +6983,7 @@ async function verifyMultiSecretary(cdp, setup) {
       from: { id: 777001, username: 'j3n5en', first_name: 'J' },
       message_thread_id: 7,
       is_topic_message: true,
-      text: '/bind@enso_verify_bot ' + conflicted.code,
+      text: `/bind@enso_verify_bot ${conflicted.code}`,
     },
   });
   await sleep(1500);
@@ -7010,7 +7033,7 @@ async function verifyMultiSecretary(cdp, setup) {
         message_id: 10,
         chat: { id: 555001, type: 'private' },
         from: { id: 555001, username: 'j3n5en', first_name: 'J' },
-        text: '/start ' + secondBot.code,
+        text: `/start ${secondBot.code}`,
       },
     },
     otherToken
@@ -7142,7 +7165,7 @@ async function verifyMultiSecretary(cdp, setup) {
   `);
   mkdirSync(`${PROJ}-extra`, { recursive: true });
   const extra = await page(`
-    const project = await SET().addProject(${JSON.stringify(PROJ + '-extra')});
+    const project = await SET().addProject(${JSON.stringify(`${PROJ}-extra`)});
     return JSON.stringify({ id: project.id });
   `);
   const narrowed = await page(`
@@ -7197,10 +7220,23 @@ async function verifyMultiSecretary(cdp, setup) {
     return JSON.stringify({ text: result ?? '' });
   `);
   assert(
-    narrowedResult.text.includes(setup.projectId) &&
-      !narrowedResult.text.includes(extra.id),
+    narrowedResult.text.includes(setup.projectId) && !narrowedResult.text.includes(extra.id),
     '多秘书: 降权回合按可见范围取交集，发起方看不见的项目不出现',
     { extra: extra.id, text: narrowedResult.text.slice(0, 300) }
+  );
+
+  // 还原成单秘书：后面的段落按升级前的方式调用，不带秘书 id
+  const restored = await page(`
+    const api = window.electronAPI.secretary;
+    const saved = await api.saveProfile({ visibleProjectIds: 'all' }, 'default');
+    const result = await api.deleteSecretary(${JSON.stringify(third.secretaryId)}, true);
+    const list = await api.list();
+    return JSON.stringify({ ok: saved.ok && result.ok, left: list.map((entry) => entry.id) });
+  `);
+  assert(
+    restored.ok && restored.left.length === 1 && restored.left[0] === 'default',
+    '多秘书: 收尾删掉第三个秘书，回到单秘书',
+    restored
   );
 }
 
