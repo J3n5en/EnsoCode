@@ -995,21 +995,32 @@ export function shellSleepHint(command: string): string {
 }
 
 const TIMEOUT_HINT_MIN_SEC = SHELL_LIMITS.yieldDefaultMs / 1000;
+/** 实际耗时达到默认让位的三分之二才算「跑得久」 */
+export const TIMEOUT_HINT_SLOW_MS = (SHELL_LIMITS.yieldDefaultMs * 2) / 3;
 
 /**
  * 前台显式 timeout 的提示：模型常把 timeout 当成「等这么久」，其实它只杀进程、不延长让位。
- * 达到默认让位时长才提示，短 timeout 是在提前杀，不误伤。
+ * 达到默认让位时长才提示，短 timeout 是在提前杀，不误伤；
+ * 且命令真的跑得久或已转后台才提示，快速结束的命令不带，免得每次都刷屏。
  */
-export function shellTimeoutHint(timeoutSec: number | undefined): string {
+export function shellTimeoutHint(
+  timeoutSec: number | undefined,
+  run: { elapsedMs: number; detached?: boolean }
+): string {
   if (timeoutSec === undefined || timeoutSec < TIMEOUT_HINT_MIN_SEC) return '';
+  if (!run.detached && run.elapsedMs < TIMEOUT_HINT_SLOW_MS) return '';
   return SHELL_TIMEOUT_HINT;
 }
 
 /** 把提示附在工具结果前面：规则写进结果里才不会在长会话中被冲淡 */
-function withCommandHints<T>(result: T, command: string, timeoutSec?: number): T {
-  const hint = [shellReadHint(command), shellSleepHint(command), shellTimeoutHint(timeoutSec)]
+function withCommandHints<T>(result: T, command: string, timeoutHint: string): T {
+  const hint = [shellReadHint(command), shellSleepHint(command), timeoutHint]
     .filter(Boolean)
     .join('\n');
+  return prependHint(result, hint);
+}
+
+function prependHint<T>(result: T, hint: string): T {
   if (!hint) return result;
   const content = (result as { content?: Array<{ type?: string; text?: string }> }).content;
   if (!Array.isArray(content)) return result;
@@ -1367,15 +1378,19 @@ export function withBackground(
       try {
         // timeout 原样下传：只作截止（到点杀），让位由 ForegroundCommand 按分类计时
         const result = await definition.execute(toolCallId, params, callSignal, onUpdate, ctx);
-        return withCommandHints(withFailureNote(result), command, deadlineSec);
+        const timeoutHint = shellTimeoutHint(deadlineSec, { elapsedMs: Date.now() - startedAt });
+        return withCommandHints(withFailureNote(result), command, timeoutHint);
       } catch (error) {
         if (error instanceof ForegroundDetachedError) {
-          return detachedResult(error, {
-            commandClass: policy.class,
-            startedAt,
-            logPath: manager.logPathOf(error.taskId) ?? '',
-            waitCapSec: yieldSec(manager.limits.taskWaitMaxMs),
-          });
+          return prependHint(
+            detachedResult(error, {
+              commandClass: policy.class,
+              startedAt,
+              logPath: manager.logPathOf(error.taskId) ?? '',
+              waitCapSec: yieldSec(manager.limits.taskWaitMaxMs),
+            }),
+            shellTimeoutHint(deadlineSec, { elapsedMs: Date.now() - startedAt, detached: true })
+          );
         }
         if (error instanceof ForegroundYieldError) {
           return {
