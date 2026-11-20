@@ -76,7 +76,6 @@ const SETTINGS_CATEGORY_LABELS: Record<SettingsCategory, string> = {
   providers: 'Model Providers',
   skills: 'Skills',
   plugins: 'Enso plugins',
-  claudePlugins: 'Claude Code plugins',
   mcp: 'MCP Servers',
   instructions: 'Instruction Files',
   presets: 'Presets',

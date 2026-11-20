@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentTypeEntry } from '../../shared/types/assets';
-import type { PluginAgentDef, ResolvedPlugins } from './claudePlugins';
 import {
   mergePluginAgentTypes,
   type NativePluginAgentDef,
@@ -16,13 +15,6 @@ const custom = (name: string): AgentTypeEntry => ({
   systemPrompt: 'user prompt',
   tools: 'all',
 });
-const claude = (name: string): PluginAgentDef => ({
-  name,
-  description: 'claude',
-  systemPrompt: 'claude prompt',
-  tools: 'all',
-  skillPaths: [],
-});
 const native = (
   pluginId: string,
   name: string,
@@ -36,20 +28,12 @@ const native = (
   skillPaths: [],
   ...patch,
 });
-const resolved = (agents: PluginAgentDef[]): ResolvedPlugins => ({
-  skillPaths: [],
-  commands: [],
-  agents,
-  mcpServers: [],
-  hooks: [],
-});
 
 afterEach(() => setNativeAgentTypeSource(null));
 
 describe('mergePluginAgentTypes', () => {
   it('原生插件类型转成 RuntimeAgentType：tools 原样采用、skills 进 pluginSkillPaths', () => {
     const { types, dropped } = mergePluginAgentTypes(
-      [],
       [],
       [
         native('example.a', 'a:reader', {
@@ -75,32 +59,27 @@ describe('mergePluginAgentTypes', () => {
   it('原生插件类型声明 agent_pick 时保留，供主 agent 选模型', () => {
     const { types } = mergePluginAgentTypes(
       [],
-      [],
       [native('example.a', 'a:picker', { modelMode: 'agent_pick' })]
     );
     expect(types[0]?.modelMode).toBe('agent_pick');
   });
 
-  it('同名优先级：用户自定义 > Claude 插件 > 原生插件，被丢弃的重名在返回值里', () => {
+  it('同名优先级：用户自定义 > 原生插件，被丢弃的重名在返回值里', () => {
     const { types, dropped } = mergePluginAgentTypes(
       [custom('Shared')],
-      [claude('shared'), claude('cp:agent')],
-      [native('example.a', 'shared'), native('example.a', 'cp:agent')]
+      [native('example.a', 'shared'), native('example.a', 'other')]
     );
     expect(types.map((t) => [t.name, t.description])).toEqual([
       ['Shared', 'user'],
-      ['cp:agent', 'claude'],
+      ['other', 'native example.a'],
     ]);
     expect(dropped).toEqual([
-      { name: 'shared', source: 'claude', shadowedBy: 'custom' },
       { name: 'shared', source: 'native', pluginId: 'example.a', shadowedBy: 'custom' },
-      { name: 'cp:agent', source: 'native', pluginId: 'example.a', shadowedBy: 'claude' },
     ]);
   });
 
   it('原生插件之间按插件 id 排序先到先得，与输入顺序无关', () => {
     const { types, dropped } = mergePluginAgentTypes(
-      [],
       [],
       [native('example.b', 'same'), native('example.a', 'same'), native('example.b', 'only-b')]
     );
@@ -116,7 +95,6 @@ describe('mergePluginAgentTypes', () => {
   it('原生插件不能占用内置类型名或保留名', () => {
     const { types, dropped } = mergePluginAgentTypes(
       [],
-      [],
       [native('example.a', 'worker'), native('example.a', 'custom:x')]
     );
     expect(types).toEqual([]);
@@ -127,20 +105,20 @@ describe('mergePluginAgentTypes', () => {
 describe('withPluginAgentTypes 接原生插件来源', () => {
   it('现取已注册来源，并把丢弃的重名报回来源', () => {
     const reportDropped = vi.fn();
-    let list = [native('example.a', 'helper'), native('example.a', 'cp:agent')];
+    let list = [native('example.a', 'helper'), native('example.a', 'Mine')];
     setNativeAgentTypeSource({ list: () => list, reportDropped });
-    const merged = withPluginAgentTypes([], undefined, resolved([claude('cp:agent')]));
-    expect(merged.map((t) => t.name)).toEqual(['cp:agent', 'helper']);
+    const merged = withPluginAgentTypes([custom('mine')]);
+    expect(merged.map((t) => t.name)).toEqual(['mine', 'helper']);
     expect(reportDropped).toHaveBeenCalledWith([
-      { name: 'cp:agent', source: 'native', pluginId: 'example.a', shadowedBy: 'claude' },
+      { name: 'Mine', source: 'native', pluginId: 'example.a', shadowedBy: 'custom' },
     ]);
 
     list = [];
-    expect(withPluginAgentTypes([], undefined, resolved([])).map((t) => t.name)).toEqual([]);
+    expect(withPluginAgentTypes([]).map((t) => t.name)).toEqual([]);
   });
 
   it('显式传入的原生列表优先于已注册来源（Bot 会话传空）', () => {
     setNativeAgentTypeSource({ list: () => [native('example.a', 'helper')] });
-    expect(withPluginAgentTypes([], undefined, resolved([]), [])).toEqual([]);
+    expect(withPluginAgentTypes([], [])).toEqual([]);
   });
 });

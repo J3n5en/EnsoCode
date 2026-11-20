@@ -253,7 +253,6 @@ export const IPC_CHANNELS = {
   ASSETS_MCP_OCCUPANCY: 'assets:mcp-occupancy',
   ASSETS_BUILTIN_TOOL_OCCUPANCY: 'assets:builtin-tool-occupancy',
   /** Claude Code 已装插件及其组件摘要 */
-  PLUGINS_LIST_INSTALLED: 'plugins:list-installed',
 
   // MCP OAuth 授权与连接状态
   MCP_AUTHORIZE: 'mcp:authorize',

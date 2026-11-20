@@ -348,23 +348,6 @@ let lastScan: { scanId: string; byId: Map<string, Cached> } | null = null;
 （`registered` / `same-content` / `same-name`），界面上置灰且默认不勾选，
 用户仍可手动选。三层都要拦：扫描标记、collect 批内去重、store 落库前再判一次。
 
-## Claude Code 插件
-
-插件不拆成技能 / MCP 条目入库。设置里只存 `PluginEntry`（`name@marketplace` key + 开关），
-Main 在每次 spawn 时按 key 从 `~/.claude/plugins/installed_plugins.json` 找当前安装目录并现读组件
-（`claudePlugins.ts`），所以 Claude Code 升级插件后路径变化无需同步。插件跟随自己的开关，不受预设影响。
-
-| 组件 | 去向 |
-|------|------|
-| skills | 追加进 `skillPaths` |
-| commands | `pluginCommands` → worker `promptsOverride`，命名 `/插件:命令` |
-| agents | `withPluginAgentTypes()` 以名字派生的 UUID 并入自定义子代理类型（registry、dispatch、spawn 同一口径） |
-| `.mcp.json` | 并入 `mcpServers`，与已启用的同名 MCP 冲突时让位；需要 OAuth 的暂不支持 |
-| hooks | `pluginHooks` → `claudeHooks.ts` 内联扩展；远程会话不下发 |
-
-Enso 不调 pi 的 `bindExtensions`，pi 不发 `session_start`/`session_shutdown`：SessionStart 在首轮
-`before_agent_start` 补跑，SessionEnd 由 supervisor 释放父会话时自行 emit。插件在配置同步中排除。
-
 ## 异步资源替换与取消
 
 - 缓存失效比较实际有效配置；Provider 的 ID 不变，不代表端点或凭证未变，删除记录也必须失效。
