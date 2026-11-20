@@ -171,6 +171,8 @@ export interface MemorySearchHit {
   relevance: number | null;
   rrf: number;
   decay: number;
+  /** 以 challenges 指向本条、且未被拒绝的新记忆 id；有值即「存在矛盾证据」，排序已降权 */
+  challengedBy?: string[];
 }
 
 export interface SearchAssist {
