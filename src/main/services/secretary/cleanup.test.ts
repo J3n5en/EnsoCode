@@ -19,6 +19,9 @@ import {
   cleanupReportText,
   collectCleanupItems,
   createSecretaryCleanupHandlers,
+  type MergedPull,
+  memoizeAsync,
+  parseMergedPulls,
   readCleanupRepo,
   selectCleanupItems,
   sessionItemId,
@@ -43,10 +46,14 @@ interface FakeRepo {
   worktrees: FakeWorktree[];
   /** 每个分支的最后提交时间（秒） */
   commits?: Record<string, number>;
+  /** 分支 tip 的提交号，缺省为 oid-<分支名> */
+  tips?: Record<string, string>;
 }
 
 const ok = (stdout = ''): GitResult => ({ code: 0, stdout, stderr: '' });
 const fail = (code = 1): GitResult => ({ code, stdout: '', stderr: 'fatal' });
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const tipOf = (repo: FakeRepo, name: string) => repo.tips?.[name] ?? `oid-${name}`;
 
 function makePorts(options: {
   repos?: FakeRepo[];
@@ -55,9 +62,18 @@ function makePorts(options: {
   sizes?: Record<string, number>;
   now?: number;
   roots?: string[];
+  /** 每次 git 调用的延迟，模拟大仓库 */
+  gitDelayMs?: number;
+  /** 每次 du 的延迟，模拟带 node_modules 的 worktree */
+  sizeDelayMs?: number;
+  /** 这些仓库的 git 永远不返回 */
+  hangRepos?: string[];
+  /** GitHub 上已合并的 PR；null 表示 gh 不可用 */
+  pulls?: Record<string, MergedPull[] | null>;
 }) {
   const repos = options.repos ?? [];
   const calls: string[] = [];
+  const sizeCalls: string[] = [];
   const archived: { conversationId: string; at: number }[] = [];
   const audits: SecretaryAuditEntry[] = [];
   const repoOf = (cwd: string): FakeRepo | undefined =>
@@ -69,24 +85,27 @@ function makePorts(options: {
       calls.push(`${cwd} ${args.join(' ')}`);
       const repo = repoOf(cwd);
       if (!repo) return fail(128);
+      if (options.hangRepos?.includes(repo.root)) return new Promise<GitResult>(() => {});
+      if (options.gitDelayMs) await sleep(options.gitDelayMs);
       const [command, ...rest] = args;
       if (command === 'rev-parse' && rest[0] === '--show-toplevel') return ok(repo.root);
       if (command === 'rev-parse' && rest[0] === '--abbrev-ref') return ok(repo.current);
-      if (command === 'rev-parse' && rest[0] === '--verify') {
-        const ref = rest.at(-1) ?? '';
-        const name = ref.replace(/^refs\/heads\//u, '');
-        return name in repo.branches ? ok(name) : fail();
-      }
-      if (command === 'branch' && rest[0] === '--format=%(refname:short)')
-        return ok(Object.keys(repo.branches).join('\n'));
-      if (command === 'merge-base' && rest[0] === '--is-ancestor') {
-        const [branch, base] = [rest[1] ?? '', rest[2] ?? ''];
-        return (repo.branches[branch] ?? []).includes(base) ? ok() : fail();
-      }
-      if (command === 'log') {
-        const ref = rest.at(-1) ?? '';
-        const at = repo.commits?.[ref];
-        return at ? ok(String(at)) : fail();
+      if (command === 'for-each-ref') {
+        const mergedFlag = rest.find((arg) => arg.startsWith('--merged='));
+        const names = Object.keys(repo.branches);
+        if (mergedFlag) {
+          const base = mergedFlag.slice('--merged='.length).replace(/^refs\/heads\//u, '');
+          if (!(base in repo.branches)) return fail(129);
+          const merged = names.filter(
+            (name) => name === base || (repo.branches[name] ?? []).includes(base)
+          );
+          return ok(merged.map((name) => `refs/heads/${name}`).join('\n'));
+        }
+        return ok(
+          names
+            .map((name) => `refs/heads/${name} ${tipOf(repo, name)} ${repo.commits?.[name] ?? ''}`)
+            .join('\n')
+        );
       }
       if (command === 'worktree' && rest[0] === 'list') {
         const blocks = [
@@ -123,7 +142,12 @@ function makePorts(options: {
     },
     worktreeRoots: () => options.roots ?? [WT_ROOT],
     async size(target) {
+      sizeCalls.push(target);
+      if (options.sizeDelayMs) await sleep(options.sizeDelayMs);
       return options.sizes?.[target] ?? null;
+    },
+    async mergedPulls(root) {
+      return options.pulls && root in options.pulls ? (options.pulls[root] ?? null) : [];
     },
     projects: () => [project()],
     rows: () => options.rows ?? {},
@@ -134,7 +158,7 @@ function makePorts(options: {
     audit: (entry) => audits.push(entry),
     now: () => options.now ?? 10 * CLEANUP_IDLE_MS,
   };
-  return { ports, calls, archived, audits };
+  return { ports, calls, sizeCalls, archived, audits };
 }
 
 function project(): ProjectAuthority {
@@ -720,5 +744,257 @@ describe('cleanup_apply 的 id 与 all', () => {
     const applied = await handlers.cleanup_apply({}, { secretaryConversationId: 'sec-1' });
     expect(applied.ok).toBe(false);
     if (!applied.ok) expect(applied.error).toContain('all: true');
+  });
+});
+
+/** 现场规模：上百条前缀分支、45 个 worktree，git 与 du 都慢 */
+function bigRepo(branches: number, worktrees: number): FakeRepo {
+  const map: Record<string, string[]> = { 'feat/secretary-agent': [], main: [] };
+  for (let i = 0; i < branches; i += 1) map[`feat/b-${i}`] = i % 2 === 0 ? ['main'] : [];
+  return baseRepo({
+    branches: map,
+    worktrees: Array.from({ length: worktrees }, (_, i) => ({
+      path: `${WT_ROOT}/wt-${i}`,
+      branch: `feat/b-${i}`,
+    })),
+  });
+}
+
+function race<T>(promise: T | Promise<T>, ms: number): Promise<T | 'timeout'> {
+  return Promise.race([promise, sleep(ms).then(() => 'timeout' as const)]);
+}
+
+describe('cleanup_list 在大仓库上不超时', () => {
+  it('100 条分支、45 个 worktree，git 调用次数不随条目数增长', async () => {
+    const { ports, calls } = makePorts({ repos: [bigRepo(100, 45)] });
+    const items = await collectCleanupItems(ports);
+    expect(items.filter((item) => item.kind === 'branch')).toHaveLength(100);
+    expect(items.filter((item) => item.kind === 'worktree')).toHaveLength(45);
+    expect(calls.length).toBeLessThanOrEqual(10);
+  });
+
+  it('du 很慢时先返回清单，占用标成待算，不等 du', async () => {
+    const { ports } = makePorts({
+      repos: [bigRepo(100, 45)],
+      gitDelayMs: 20,
+      sizeDelayMs: 1500,
+    });
+    const handlers = createSecretaryCleanupHandlers(
+      { ...ports, saveProposal: async () => ({ proposalId: 'p', reused: false }) },
+      { sizeBudgetMs: 100 }
+    );
+    const result = await race(
+      handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' }),
+      1000
+    );
+    expect(result).not.toBe('timeout');
+    if (result === 'timeout' || !result.ok) return;
+    const summary = result.result as CleanupListSummary;
+    expect(summary.counts.worktree).toBe(45);
+    expect(summary.sizesPending).toBeGreaterThan(0);
+  });
+
+  it('某个仓库的 git 卡住时，到期限返回其余仓库的结果并标 incomplete', async () => {
+    const stuck = baseRepo({ root: '/repo/stuck' });
+    const made = makePorts({ repos: [baseRepo(), stuck], hangRepos: ['/repo/stuck'] });
+    const handlers = createSecretaryCleanupHandlers(
+      {
+        ...made.ports,
+        projects: () => [
+          project(),
+          { ...project(), projectId: 'p2', canonicalPath: '/repo/stuck' } as ProjectAuthority,
+        ],
+        saveProposal: async () => ({ proposalId: 'p', reused: false }),
+      },
+      { scanDeadlineMs: 200 }
+    );
+    const result = await race(
+      handlers.cleanup_list({ detail: true }, { secretaryConversationId: 'sec-1' }),
+      1500
+    );
+    expect(result).not.toBe('timeout');
+    if (result === 'timeout' || !result.ok) return;
+    const detail = result.result as CleanupListDetail;
+    expect(detail.incomplete).toEqual(['/repo/stuck']);
+    expect(detail.items.some((item) => item.name === 'feat/done')).toBe(true);
+  });
+});
+
+describe('squash 合并的分支', () => {
+  it('GitHub 已合并 PR 的 head 与分支 tip 一致才算合入', async () => {
+    const repo = baseRepo({
+      branches: {
+        'feat/secretary-agent': [],
+        main: [],
+        'feat/squashed': [],
+        'feat/moved-on': [],
+      },
+      tips: { 'feat/squashed': 'aaa', 'feat/moved-on': 'ccc' },
+    });
+    const { ports } = makePorts({
+      repos: [repo],
+      pulls: {
+        [ROOT]: [
+          { headRefOid: 'aaa', baseRefName: 'main' },
+          // 合并后又提交过：tip 对不上，不算合入
+          { headRefOid: 'bbb', baseRefName: 'main' },
+        ],
+      },
+    });
+    const items = await collectCleanupItems(ports);
+    expect(items.find((item) => item.name === 'feat/squashed')).toMatchObject({
+      mergedInto: ['main'],
+    });
+    expect(items.find((item) => item.name === 'feat/squashed')?.blocked).toBeUndefined();
+    expect(items.find((item) => item.name === 'feat/moved-on')?.blocked).toBe('not-merged');
+  });
+
+  it('合进别的分支的 PR 不算', async () => {
+    const repo = baseRepo({
+      branches: { main: [], 'feat/stacked': [] },
+      tips: { 'feat/stacked': 'aaa' },
+    });
+    const { ports } = makePorts({
+      repos: [repo],
+      pulls: { [ROOT]: [{ headRefOid: 'aaa', baseRefName: 'feat/other' }] },
+    });
+    const items = await collectCleanupItems(ports);
+    expect(items.find((item) => item.name === 'feat/stacked')?.blocked).toBe('not-merged');
+  });
+
+  it('执行时同样认 squash 合并，删掉分支', async () => {
+    const repo = baseRepo({
+      branches: { main: [], 'feat/squashed': [] },
+      tips: { 'feat/squashed': 'aaa' },
+    });
+    const { ports, calls } = makePorts({
+      repos: [repo],
+      pulls: { [ROOT]: [{ headRefOid: 'aaa', baseRefName: 'main' }] },
+    });
+    const result = await applyCleanup(ports, {
+      items: [
+        {
+          id: branchItemId(ROOT, 'feat/squashed'),
+          kind: 'branch',
+          name: 'feat/squashed',
+          repoPath: ROOT,
+        },
+      ],
+    });
+    expect(result.deleted).toBe(1);
+    expect(calls.some((call) => call.endsWith('branch -D feat/squashed'))).toBe(true);
+  });
+
+  it('gh 不可用时给出提示，squash 的分支保持 not-merged', async () => {
+    const repo = baseRepo({ branches: { main: [], 'feat/squashed': [] } });
+    const { ports } = makePorts({ repos: [repo], pulls: { [ROOT]: null } });
+    const handlers = createSecretaryCleanupHandlers({
+      ...ports,
+      saveProposal: async () => ({ proposalId: 'p', reused: false }),
+    });
+    const result = await handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const summary = result.result as CleanupListSummary;
+    expect(summary.warnings?.join(' ')).toContain('GitHub');
+    expect(summary.items.find((item) => item.name === 'feat/squashed')?.blocked).toBe('not-merged');
+  });
+});
+
+describe('cleanup_apply 复用 cleanup_list 的扫描', () => {
+  it('刚列过清单时 all: true 不再重新扫描', async () => {
+    const { handlers, calls, proposals } = bulkPorts(6, 0);
+    await handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' });
+    const before = calls.length;
+    const applied = await handlers.cleanup_apply(
+      { all: true },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(applied.ok).toBe(true);
+    expect(calls.length).toBe(before);
+    expect(proposals[0]?.length).toBe(6 + 6);
+  });
+
+  it('按 id 申请也复用，不重新扫描', async () => {
+    const { handlers, calls } = bulkPorts(6, 0);
+    await handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' });
+    const before = calls.length;
+    const applied = await handlers.cleanup_apply(
+      { ids: [branchItemId(ROOT, 'feat/b-0')] },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(applied.ok).toBe(true);
+    expect(calls.length).toBe(before);
+  });
+
+  it('执行过清理后缓存作废，下一次重新扫描', async () => {
+    const { handlers, calls, ports } = bulkPorts(6, 0);
+    await handlers.cleanup_list({}, { secretaryConversationId: 'sec-1' });
+    await applyCleanup(ports, {
+      items: [
+        { id: branchItemId(ROOT, 'feat/b-0'), kind: 'branch', name: 'feat/b-0', repoPath: ROOT },
+      ],
+    });
+    const before = calls.length;
+    const applied = await handlers.cleanup_apply(
+      { ids: [branchItemId(ROOT, 'feat/b-0')] },
+      { secretaryConversationId: 'sec-1' }
+    );
+    expect(calls.length).toBeGreaterThan(before);
+    expect(applied.ok).toBe(false);
+    if (!applied.ok) expect(applied.error).toContain('unknown cleanup id');
+  });
+});
+
+describe('memoizeAsync', () => {
+  it('同一个 key 在算时共用一次调用，算完按 ttl 留着，过期再算', async () => {
+    let clock = 0;
+    let runs = 0;
+    const cached = memoizeAsync(
+      async (key: string) => {
+        runs += 1;
+        await sleep(5);
+        return `${key}-${runs}`;
+      },
+      () => 100,
+      () => clock
+    );
+    const [a, b] = await Promise.all([cached('x'), cached('x')]);
+    expect([a, b]).toEqual(['x-1', 'x-1']);
+    expect(await cached('x')).toBe('x-1');
+    clock = 101;
+    expect(await cached('x')).toBe('x-2');
+    expect(runs).toBe(2);
+  });
+
+  it('失败不缓存', async () => {
+    let runs = 0;
+    const cached = memoizeAsync(
+      async () => {
+        runs += 1;
+        if (runs === 1) throw new Error('boom');
+        return 1;
+      },
+      () => 1000
+    );
+    await expect(cached('x')).rejects.toThrow('boom');
+    expect(await cached('x')).toBe(1);
+  });
+});
+
+describe('parseMergedPulls', () => {
+  it('只收字段齐全的条目，坏输出给 null', () => {
+    expect(
+      parseMergedPulls(
+        JSON.stringify([
+          { headRefOid: 'aaa', baseRefName: 'main' },
+          { headRefOid: '', baseRefName: 'main' },
+          { baseRefName: 'main' },
+          null,
+        ])
+      )
+    ).toEqual([{ headRefOid: 'aaa', baseRefName: 'main' }]);
+    expect(parseMergedPulls('not json')).toBeNull();
+    expect(parseMergedPulls('{}')).toBeNull();
   });
 });
