@@ -255,6 +255,12 @@ export const zhTranslations: Record<string, string> = {
     '{{count}} 个会话因应用退出被中断，已在会话里说明原因',
   'Update failed: {{error}}': '更新失败：{{error}}',
   'Download update': '下载更新',
+  "New version {{version}} found. This local build can't install it automatically.":
+    '发现新版本 {{version}}，本地构建无法自动安装，请手动下载。',
+  "This local build is signed differently from the release and can't install updates automatically. Download it manually.":
+    '本地构建与正式版签名不一致，无法自动安装更新，请手动下载。',
+  'Open release page': '打开 Release 页面',
+  'Download DMG': '下载 DMG',
   'Release notes': '更新日志',
   "What's new in {{version}}": '{{version}} 更新内容',
   'No release notes provided.': '此版本未提供更新日志。',

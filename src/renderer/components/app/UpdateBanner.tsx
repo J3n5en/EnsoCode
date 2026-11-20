@@ -2,6 +2,7 @@ import type { UpdateStatus } from '@shared/types/updater';
 import { Download, RotateCw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { ManualInstallActions } from './ManualInstallActions';
 import { ReleaseNotesDialog } from './ReleaseNotesDialog';
 
 /** 主窗口顶部更新横幅:发现新版(桌面)可看日志再下载,下载完成后提示重启(可关闭) */
@@ -38,6 +39,7 @@ export function UpdateBanner() {
   const version = status.info?.version;
   const isDownloaded = status.status === 'downloaded';
   const isPending = isDownloaded && status.restartPending === true;
+  const manualInstall = isAvailable ? status.manualInstall : undefined;
 
   return (
     <div className="border-b border-blue-500/20 bg-background">
@@ -56,11 +58,18 @@ export function UpdateBanner() {
               ? t('New version {{version}} is ready — restart to update.', {
                   version: version ?? '',
                 })
-              : isAvailable
-                ? t('New version {{version}} found', { version: version ?? '' })
-                : t('Downloading update… {{percent}}%', {
-                    percent: Math.round(status.progress?.percent ?? 0),
-                  })}
+              : manualInstall
+                ? t(
+                    "New version {{version}} found. This local build can't install it automatically.",
+                    {
+                      version: version ?? '',
+                    }
+                  )
+                : isAvailable
+                  ? t('New version {{version}} found', { version: version ?? '' })
+                  : t('Downloading update… {{percent}}%', {
+                      percent: Math.round(status.progress?.percent ?? 0),
+                    })}
         </span>
         {(isDownloaded || isAvailable) && (
           <button
@@ -71,7 +80,8 @@ export function UpdateBanner() {
             {t('Release notes')}
           </button>
         )}
-        {isAvailable && (
+        {manualInstall && <ManualInstallActions manualInstall={manualInstall} size="xs" />}
+        {isAvailable && !manualInstall && (
           <button
             type="button"
             onClick={() => void window.electronAPI.updater.downloadUpdate()}

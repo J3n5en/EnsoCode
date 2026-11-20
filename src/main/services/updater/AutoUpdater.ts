@@ -1,6 +1,7 @@
+import path from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types';
-import type { UpdateStatus } from '@shared/types/updater';
+import type { ManualInstall, UpdateStatus } from '@shared/types/updater';
 import { AUTO_RESTART_IDLE_MS, isTurnRestartBlocked } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
@@ -14,6 +15,13 @@ import { markExitForUpdate } from '../exitInterruptHost';
 import { IdleRestartGate } from './idleRestartGate';
 import { currentIdleRestartObservation } from './idleRestartSnapshot';
 import { recordInterruptedSessions } from './interruptedSessions';
+import {
+  canAutoInstall,
+  inspectAppSignature,
+  isCodeSignatureError,
+  manualInstallFor,
+} from './localBuildInstall';
+import { ensureFallbackUpdateConfig } from './updateFeed';
 
 const { autoUpdater } = electronUpdater;
 
@@ -42,6 +50,13 @@ class AutoUpdaterService {
   private installingIdleRestart = false;
   private restartPending = false;
   private downloadedInfo: UpdateStatus['info'];
+  private autoUpdateEnabled = true;
+  /** 无 app-update.yml 的本地构建（electron-builder --dir） */
+  private localBuild = false;
+  /** 本地构建签名装不上正式包：只检查，不下载 */
+  private manualInstallOnly = false;
+  private localBuildReady: Promise<void> | null = null;
+  private availableInfo: electronUpdater.UpdateInfo | undefined;
 
   init(window: BrowserWindow, autoUpdateEnabled = true, autoRestartWhenIdle = false): void {
     this.mainWindow = window;
@@ -50,11 +65,17 @@ class AutoUpdaterService {
     if (is.dev) {
       autoUpdater.logger = console;
     }
+    this.setupLocalBuild();
 
     autoUpdater.on('checking-for-update', () => this.sendStatus({ status: 'checking' }));
-    autoUpdater.on('update-available', (info) =>
-      this.sendStatus({ status: 'available', info: projectInfo(info) })
-    );
+    autoUpdater.on('update-available', (info) => {
+      this.availableInfo = info;
+      this.sendStatus({
+        status: 'available',
+        info: projectInfo(info),
+        ...(this.manualInstallOnly ? { manualInstall: manualInstallFor(info, process.arch) } : {}),
+      });
+    });
     autoUpdater.on('update-not-available', (info) =>
       this.sendStatus({ status: 'not-available', info: projectInfo(info) })
     );
@@ -81,14 +102,24 @@ class AutoUpdaterService {
       this.sendStatus({ status: 'downloaded', info: this.downloadedInfo });
       this.notifyIdleStateChanged();
     });
-    autoUpdater.on('error', (error) => this.sendStatus({ status: 'error', error: error.message }));
+    autoUpdater.on('error', (error) => {
+      const manualInstall =
+        this.localBuild && isCodeSignatureError(error.message)
+          ? this.fallBackToManualInstall()
+          : undefined;
+      this.sendStatus({
+        status: 'error',
+        error: error.message,
+        ...(manualInstall ? { manualInstall } : {}),
+      });
+    });
 
     autoUpdater.autoDownload = autoUpdateEnabled;
 
     // focus 触发检查(30 分钟去抖)
     this.onFocusHandler = () => {
       if (
-        autoUpdater.autoDownload &&
+        this.autoUpdateEnabled &&
         Date.now() - this.lastCheckTime >= MIN_FOCUS_CHECK_INTERVAL_MS
       ) {
         void this.checkForUpdates();
@@ -107,6 +138,58 @@ class AutoUpdaterService {
     app.on('browser-window-blur', () => this.notifyIdleStateChanged());
   }
 
+  /** --dir 构建缺 app-update.yml：改用内置 feed；macOS 上再看签名能否通过 Squirrel.Mac 校验 */
+  private setupLocalBuild(): void {
+    if (!process.resourcesPath) return;
+    let configPath: string | null;
+    try {
+      configPath = ensureFallbackUpdateConfig(
+        process.resourcesPath,
+        path.join(app.getPath('userData'), 'updater')
+      );
+    } catch (error) {
+      console.error('Failed to write fallback update config:', error);
+      return;
+    }
+    if (!configPath) return;
+    this.localBuild = true;
+    autoUpdater.updateConfigPath = configPath;
+    if (process.platform !== 'darwin') return;
+    this.localBuildReady = inspectAppSignature(
+      path.resolve(process.resourcesPath, '..', '..')
+    ).then((kind) => {
+      if (canAutoInstall(kind)) return;
+      console.warn(`[updater] local build signature=${kind}: updates require manual install`);
+      this.manualInstallOnly = true;
+      this.applyAutoDownload();
+    });
+  }
+
+  /** Squirrel.Mac 拒装本地构建：撤掉已下载/待重启状态，之后只给手动下载入口 */
+  private fallBackToManualInstall(): ManualInstall {
+    this.manualInstallOnly = true;
+    this.applyAutoDownload();
+    this.updateDownloaded = false;
+    this.downloadedInfo = undefined;
+    this.restartPending = false;
+    this.idleGate.reset();
+    this.clearIdleTimer();
+    if (this.quittingForUpdate) {
+      this.quittingForUpdate = false;
+      cancelAgentQuitCheckpoint();
+    }
+    if (this.autoUpdateEnabled && !this.checkIntervalId) {
+      this.checkIntervalId = setInterval(() => void this.checkForUpdates(), CHECK_INTERVAL_MS);
+    }
+    return manualInstallFor(this.availableInfo, process.arch);
+  }
+
+  private applyAutoDownload(): void {
+    const auto = this.autoUpdateEnabled && !this.manualInstallOnly;
+    autoUpdater.autoDownload = auto;
+    autoUpdater.autoInstallOnAppQuit = auto;
+  }
+
   private sendStatus(status: UpdateStatus): void {
     // 下载完成后不再发别的状态,避免更新提示被后续检查冲掉
     if (this.updateDownloaded && status.status !== 'downloaded') return;
@@ -119,6 +202,7 @@ class AutoUpdaterService {
     if (this.updateDownloaded) return;
     try {
       this.lastCheckTime = Date.now();
+      if (this.localBuildReady) await this.localBuildReady;
       await autoUpdater.checkForUpdates();
     } catch (error) {
       console.error('Failed to check for updates:', error);
@@ -126,6 +210,7 @@ class AutoUpdaterService {
   }
 
   async downloadUpdate(): Promise<void> {
+    if (this.manualInstallOnly) return;
     try {
       await autoUpdater.downloadUpdate();
     } catch (error) {
@@ -201,8 +286,8 @@ class AutoUpdaterService {
   }
 
   setAutoUpdateEnabled(enabled: boolean): void {
-    autoUpdater.autoDownload = enabled;
-    autoUpdater.autoInstallOnAppQuit = enabled;
+    this.autoUpdateEnabled = enabled;
+    this.applyAutoDownload();
     if (enabled) {
       if (!this.checkIntervalId) {
         this.checkIntervalId = setInterval(() => void this.checkForUpdates(), CHECK_INTERVAL_MS);

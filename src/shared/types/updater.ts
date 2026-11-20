@@ -17,6 +17,14 @@ export interface UpdateStatus {
   error?: string;
   /** downloaded 时：用户已要求重启，正等当前回合结束 */
   restartPending?: boolean;
+  /** 本地构建签名与正式包不一致、无法自动安装时，改给手动下载入口 */
+  manualInstall?: ManualInstall;
+}
+
+export interface ManualInstall {
+  version?: string;
+  releaseUrl: string;
+  downloadUrl?: string;
 }
 
 /** 无界面服务端的更新途径：npm 为全局安装可自更新；manual（npx、不可写前缀）只报告新版本 */

@@ -8,6 +8,7 @@ import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { isAbsolutePathLike } from '@shared/worktreeRoot';
 import * as React from 'react';
+import { ManualInstallActions } from '@/components/app/ManualInstallActions';
 import { ReleaseNotesDialog } from '@/components/app/ReleaseNotesDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useI18n } from '@/i18n';
 import { isRemoteClient } from '@/lib/remoteClient';
+import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { ACTIVE_RETENTION_MINUTES } from '@/stores/settings/activeRetention';
 import {
@@ -833,7 +835,11 @@ function UpdateSection() {
       case 'checking':
         return t('Checking for updates…');
       case 'available':
-        return t('New version {{version}} found', { version: status.info?.version ?? '' });
+        return status.manualInstall
+          ? t("New version {{version}} found. This local build can't install it automatically.", {
+              version: status.info?.version ?? '',
+            })
+          : t('New version {{version}} found', { version: status.info?.version ?? '' });
       case 'not-available':
         return t('You are on the latest version');
       case 'downloading':
@@ -845,6 +851,11 @@ function UpdateSection() {
           version: status.info?.version ?? '',
         });
       case 'error':
+        if (status.manualInstall) {
+          return t(
+            "This local build is signed differently from the release and can't install updates automatically. Download it manually."
+          );
+        }
         return server && status.error
           ? t('Update failed: {{error}}', { error: status.error })
           : t('Update check failed');
@@ -868,7 +879,16 @@ function UpdateSection() {
           <p className="text-sm">
             {t('Current version')} · {APP_VERSION}
           </p>
-          {text && <p className="mt-0.5 truncate text-xs text-muted-foreground">{text}</p>}
+          {text && (
+            <p
+              className={cn(
+                'mt-0.5 text-xs text-muted-foreground',
+                !status?.manualInstall && 'truncate'
+              )}
+            >
+              {text}
+            </p>
+          )}
         </div>
         {hasNotes && (
           <Button
@@ -880,7 +900,9 @@ function UpdateSection() {
             {t('Release notes')}
           </Button>
         )}
-        {status?.status === 'downloaded' ? (
+        {status?.manualInstall ? (
+          <ManualInstallActions manualInstall={status.manualInstall} />
+        ) : status?.status === 'downloaded' ? (
           <Button
             size="sm"
             onClick={() => void window.electronAPI.updater.quitAndInstall()}
