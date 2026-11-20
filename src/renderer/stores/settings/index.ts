@@ -208,7 +208,7 @@ const initialState = {
   smartCompactEnabled: false,
   smartCompactModel: null as import('@shared/defaultModel').DefaultModelRef | null,
   smartCompactMode: 'auto' as import('@shared/smartCompactMode').SmartCompactMode,
-  memoryEmbeddingModel: 'local:potion-multilingual-128M',
+  memoryEmbeddingModel: 'local:qwen3-0.6b-gguf',
   memoryEmbeddingAutoDownload: false,
   memoryModelIdleMinutes: DEFAULT_MEMORY_MODEL_IDLE_MINUTES,
   memoryEmbeddingRemoteProviderId: null as string | null,
