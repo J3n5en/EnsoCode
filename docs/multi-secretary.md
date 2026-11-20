@@ -1,7 +1,7 @@
 # 多秘书设计
 
-> 状态：第一阶段（调研 + 设计），未实现。分支 `feat/multi-secretary`，基于 `origin/main`（含 #297）。
-> 行号以 `75964ccc7` 为准。
+> 状态：已定稿并实现。分支 `feat/multi-secretary`，基于 `origin/main`（含 #297）。
+> 第一节的行号以 `75964ccc7` 为准，是改造前的现状。
 
 ## 目标
 
@@ -11,8 +11,8 @@
 
 ## 非目标
 
-- 每个秘书各用一个 Telegram bot（数据模型留扩展位，本期不做，见「待确认」）。
 - 秘书之间共享可编辑的看板、共享记忆。
+- 主秘书：没有「主秘书」概念，所有秘书地位相同。
 - 改变单秘书用户的任何可见行为：只有一个秘书时，界面、数据、联系方式全部保持现状。
 
 ---
@@ -135,67 +135,62 @@
 
 ## 二、数据模型
 
-### 秘书实体
+### 秘书实体与注册表
 
 ```ts
 /** userData/secretary/secretaries.json，Main 独占读写，原子写 */
 interface SecretaryRegistryFile {
   version: 1;
-  /** 主秘书：私聊路由、折叠侧栏按钮、无归属操作的默认归属 */
-  primaryId: string;
   secretaries: { id: string; createdAt: number; order: number }[];
-  /** 全部秘书合计的进行中派发上限（见待确认 2） */
+  /** 全部秘书合计的进行中派发上限，缺省 10 */
   maxRunningTotal?: number;
 }
 ```
 
 - `secretaryId`：`^[a-z0-9][a-z0-9-]{0,31}$`。旧数据迁移出的秘书固定为 `default`，新建的用 `s-<8 位随机>`。
-- 目录**不落盘**，由 Main 从 id 推导，杜绝路径注入：
+- 目录**不落盘**，由 Main 从 id 推导（`registry.ts` 的 `secretaryDirOf`），杜绝路径注入：
   - `default` → `userData/secretary/`（原地不动）
   - 其他 → `userData/secretary/members/<id>/`
-- 每个秘书目录结构与现在完全一致：`profile.json`、`persona.md`、`avatar.png`、`dispatch.json`、`todos.json`、`schedules.json`、`audit.jsonl`、`daily.jsonl`、`following.json`、`workspace/{skills,tools}`。
-- 全局文件（不属于任何秘书）：`secretaries.json`、`contact.json`、`contact-token.bin`，放在 `userData/secretary/` 根下。`default` 的目录与根目录重合，文件名不冲突，这是有意保留旧路径的代价。
-- 隐藏项目：启动时对每个秘书 `ensureSecretaryProject(<dir>/workspace)`，得到 `secretaryId ↔ projectId` 映射，只存在内存（`SecretaryRegistry`）。项目身份按路径，重启后 projectId 稳定。
-- 私有记忆空间仍是 `proj:<projectId>`，每个秘书天然独立。
-- 名字：同一台机器上秘书名字唯一（大小写不敏感），因为手机命令和秘书间消息要靠名字认人。
+- 每个秘书目录结构与改造前完全一致：`profile.json`、`persona.md`、`avatar.png`、`dispatch.json`、`todos.json`、`schedules.json`、`audit.jsonl`、`daily.jsonl`、`following.json`、`contact.json`、`contact-token.bin`、`workspace/{skills,tools}`。**联系方式也按秘书存**，每个秘书只用自己的 bot 与绑定。
+- 全局文件：`secretaries.json`、`telegram-offsets.json`（每个 bot 的 `getUpdates` 游标），放在 `userData/secretary/` 根下。`default` 的目录与根目录重合，文件名不冲突。
+- 隐藏项目：启动时对每个秘书 `ensureSecretaryProject(<dir>/workspace)`，得到 `secretaryId ↔ projectId` 映射，只存在内存。项目身份按路径，重启后 projectId 稳定。
+- 私有记忆空间仍是 `proj:<projectId>`，每个秘书天然独立；记忆空间名显示秘书名字。
+- 名字：同一台机器上秘书名字唯一（大小写不敏感），新建与改名时由 Main 校验。
+- 没有主秘书。需要「一个秘书」的入口（折叠侧栏按钮、快捷键）一律打开**最近用过的秘书**：所有秘书会话里 `lastActiveAt` 最新的那条。
 
 ### `SecretaryContext`
 
-Main 内所有秘书服务改为显式接收：
+Main 内所有秘书服务改为显式接收 `{ id, dir, projectId }`：
 
-```ts
-interface SecretaryContext { id: string; dir: string; projectId: string }
-```
-
-- `secretaryDir()` 的 6 份拷贝和 4 处直接拼路径，全部换成 `registry.context(id).dir`。
+- 各模块原来的单例端口（`secretaryDispatchPorts`、`secretaryProfilePorts`、`secretarySchedulePorts`、`secretaryDailyPorts`、skills、tools、cleanup、readers、following）改成 `xxxPortsFor(ctx)` 工厂，服务实例按秘书缓存。
 - `secretaryProjectId()` 删除，换成 `registry.byProject(projectId)` / `registry.byConversation(conversationId)`；`isSecretaryProject` 保留（仍只看 kind）。
-- 工具调用：`invokeSecretaryOp(op, params, { secretaryConversationId })` 由 Main 用会话权威反推 `secretaryId`，不信任 renderer。
-- `DispatchRecord`、`PendingDispatch`、`SecretaryProposal`、`SecretarySchedule` 不加 `secretaryId`：它们已经按秘书分文件存放，所在文件就是归属。
+- 工具调用：`invokeSecretaryOp(op, params, ctx)` 的 `ctx` 带 `secretaryId`，由 Main 用会话权威反推，不信任 renderer 与模型参数。
+- `DispatchRecord`、`PendingDispatch`、`SecretaryProposal`、`SecretarySchedule` 不加 `secretaryId`：它们按秘书分文件存放，所在文件就是归属。
 - 派出会话行的 `secretaryOrigin` 增加 `secretaryId`（新写入必带；旧数据缺省视为 `default`）。
+- 每个秘书一个回传宿主（`createSecretaryHost`）：各自的定时器、巡检、投递槽位、定时任务，agent 事件广播给全部宿主，各自只处理自己记录里的会话。
 
 ### 迁移
 
 原则：**不搬文件、不改旧文件格式**，只新增。
 
-1. 启动时读 `secretaries.json`；不存在则在内存中合成 `{ primaryId: 'default', secretaries: [{ id: 'default' }] }`，**只有在用户新建第二个秘书时才落盘**，单秘书用户的磁盘完全不变。
-2. `default` 继续用 `userData/secretary/` 和 `workspace/`：隐藏项目身份、会话 cwd、私有记忆空间 id、skills/tools 路径都不变。
-3. `secretaries.json` 损坏：备份成 `secretaries.json.bad-<时间>`，按「`default` + 扫描 `members/*/profile.json`」重建，不丢秘书。
-4. `contact.json` v1 → v2 见「四、联系方式」，读时迁移、写时升级，迁移前备份 `contact.v1.json`。
-5. 侧栏 localStorage：`enso-collapsed-secretary` 的值迁到新键 `enso-collapsed-secretaries['default']`。
-6. 降级风险：旧版本的 `secretaryProjectId()` 取第一个 active secretary 项目，如果 `members/*` 的项目先登记，旧版本可能认错秘书。缓解：新秘书的隐藏项目在登记表里排在 `default` 之后（登记顺序天然如此），并在发布说明里写明「多秘书后降级只保证主秘书」。
+1. 启动时读 `secretaries.json`；不存在则在内存中合成 `{ secretaries: [{ id: 'default' }] }`，**只有在用户新建第二个秘书时才落盘**，单秘书用户的磁盘完全不变。
+2. `default` 继续用 `userData/secretary/` 和 `workspace/`：隐藏项目身份、会话 cwd、私有记忆空间 id、skills/tools 路径、`contact.json` 都不变。
+3. `secretaries.json` 损坏：备份成 `secretaries.json.bad-<时间>`，按「`default`（根目录有 `profile.json` 或 `dispatch.json` 时）+ 扫描 `members/*/`」重建，不丢秘书。
+4. Telegram 游标：`telegram-offsets.json` 不存在时取各秘书 `contact.json` 里的 `pollOffset` 最大值，之后游标只写全局文件。
+5. 侧栏 localStorage：旧键 `enso-collapsed-secretary` 的值作为 `default` 的单秘书折叠状态继续生效。
+6. 降级：旧版本取第一个 active secretary 项目，`default` 的项目最先登记，降级后主数据仍是它；多秘书数据被旧版本忽略。
 
 ### 删除秘书
 
-- `default` 以外都可删；主秘书要先转给别的秘书才能删。
-- 删除前要求用户选：把派出 / 接管的会话、待办、定时**移交**给另一个秘书，或**解除管理**（会话留作普通会话）。
-- 释放它的全部联系方式路由；记忆默认保留，可勾选一并删除（复用 `removeMemorySpace`）。
-- 隐藏项目标记删除；目录移到 `members/.trash/<id>-<时间>/`，30 天后清理。
+- 任何秘书都能删，没有不可删的秘书。
+- 删除前 Main 生成预览：它正在管的会话（派出与接管）、待办、定时、联系方式绑定（bot、私聊、群、话题、插件渠道）、私有记忆条数。界面列出后要**二次确认**才删。
+- 删除时：停掉它的回传宿主与联系方式（释放全部路由，同一 bot 没人用了就停轮询）；它管理的会话变为无人管理——派发记录随秘书文件删除，会话行上的 `secretaryOrigin` 清掉，会话本身不删；它自己的秘书会话与隐藏项目一起移除；私有记忆空间删除；目录删除（`default` 只删属于它的文件，根目录的全局文件保留）。
 
 ---
 
 ## 三、侧边栏
 
-- 只有一个秘书：与现在完全一致，不出现分区标题。
+- 只有一个秘书：与改造前完全一致，不出现分区标题。
 - 多于一个：
 
 ```
@@ -204,119 +199,76 @@ interface SecretaryContext { id: string; dir: string; projectId: string }
         今日安排
         重构登录那件事
    ▸ ● 阿财                     ← 单个秘书折叠
-   ▸ ● 运维
  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-▾ 临时会话
 ```
 
-- 整块折叠：新键 `enso-collapsed-secretary-group`，`'1'/'0'`，写法与 `SCRATCH_COLLAPSED_KEY` 相同（`Sidebar.tsx:276-302`）。折叠后标题行显示合计角标。
-- 单个秘书折叠：新键 `enso-collapsed-secretaries`，`Record<secretaryId, boolean>`，写法与 `enso-collapsed-projects` 相同。迁移旧键见上。
-- 顺序按 `secretaries.json` 的 `order`，主秘书默认第一；支持拖动排序（写回 `order`，经 IPC）。
-- 折叠侧栏的图标列：显示主秘书头像 + 全部秘书合计角标，点开「所有秘书里最近活跃的会话」。
-- 「新建秘书」进入该秘书的欢迎页（复用 `SecretaryWelcome`），可选「复制某个秘书的工作方式」作为默认值。
-- 派出会话的「由秘书派出」徽标显示秘书名字和头像（`SecretaryOriginBadge`），`isSecretaryOwned` 返回归属秘书 id。
-- `HeaderSessionTabs`、`openSecretary`、`latestSecretaryConversation` 改为接受秘书 id / 秘书项目集合。
+- 整块折叠：新键 `enso-collapsed-secretary-group`，`'1'/'0'`，写法与 `SCRATCH_COLLAPSED_KEY` 相同。折叠后标题行显示合计角标。
+- 单个秘书折叠：新键 `enso-collapsed-secretaries`，`Record<secretaryId, boolean>`；`default` 缺省时读旧键 `enso-collapsed-secretary`。
+- 顺序按 `secretaries.json` 的 `order`，新建的排最后。
+- 折叠侧栏的图标列与快捷键：打开最近用过的秘书的最近会话，角标是全部秘书合计。
+- 「新建秘书」进入该秘书的欢迎页（复用 `SecretaryWelcome`）。
+- 派出会话的「由秘书派出」徽标显示归属秘书的名字。
 
 ---
 
-## 四、联系方式：一个 bot 连接，多条路由
+## 四、联系方式
 
 ### 原则
 
-- 一个渠道一条连接：Telegram 只有一个 bot token、一个 `ContactPoller`、一个 `pollOffset`。Telegram 同一 token 只能有一个 `getUpdates` 消费者，所以连接永远是全局的，不按秘书复制。
-- 秘书只拥有**路由**：`(渠道, peer, 话题) → secretaryId`。
-- 「绑定的人」（owner）仍是一个：私聊 chat id 即用户 id。所有群、话题只放行 owner 本人发的消息，规则不变。
+- **每个秘书只用自己绑定的联系方式收发**。哪个 bot、chat、话题、插件渠道绑了哪个秘书，就由哪个秘书收、从哪里发；秘书之间不共用，没有兜底秘书。
+- 每个秘书在自己的 `contact.json` 里配自己的 Telegram bot token（safeStorage 加密，不进日志与审计）。不同秘书可以填同一个 token。
+- **一个 token 一个轮询**：`TelegramHub` 按 token 维持唯一的 `getUpdates` 长轮询，按 chat + 话题把更新路由给订阅它的秘书渠道。不同 token 各一个轮询。
+- 冲突键：`bot id + chat id + 话题`。同一个键只能属于一个秘书。
 
-### `contact.json` v2
+### 每个秘书的路由
+
+`contact.json` 在原有字段上增加：
 
 ```ts
-interface ContactFileV2 {
-  version: 2;
-  enabled: boolean;
-  channels: Record<string, Partial<SecretaryContactChannelPrefs>>; // 渠道级：enabled / cardConfirm / memory
-  bot?: SecretaryContactBot;
-  pollOffset: number;
-  owner?: { userId: number; name?: string; boundAt: number };
-  routes: ContactRoute[];
-  /** 插件渠道里没有显式路由的 peer 交给谁；缺省主秘书 */
-  channelDefaults: Record<string, string>;
-  bind?: { code: string; expiresAt: number; failures: number; secretaryId: string; target: 'dm' | 'group' };
-  telegramGroupTitles: Record<string, string>;
-  allowCardConfirm: boolean;
-  allowMemory: boolean;
-}
-
-interface ContactRoute {
-  channelId: string;        // 'telegram' 或 '<pluginId>:<id>'
-  peerId: string;           // chat id，字符串
-  topicId?: string;         // forum topic；缺省表示整个 chat
-  secretaryId: string;
-  push: boolean;            // 里程碑、提问、确认卡往这里推
-  syncMirror: boolean;      // 从全局开关下沉到路由
-  title?: string;
-  boundAt: number;
+interface ContactFile {
+  // 原有：bot、chat（私聊）、bind、telegramGroups（群白名单，只收不推）、开关……
+  /** 只绑了群或话题、没绑私聊时的主人（Telegram 用户 id）；私聊绑定时就是 chat.id */
+  ownerId?: number;
+  /** 用绑定码绑到群或话题的路由：收发都走这里 */
+  telegramRoutes: { chatId: string; topicId?: string; title?: string; boundAt: number }[];
 }
 ```
 
-- 路由键 `routeKey = channelId \0 peerId \0 (topicId ?? '*')`，**全表唯一**。
-- v1 迁移：`chat` → `owner` + 一条 DM 路由 `{ telegram, chat.id, secretaryId: 'default', push: channels.telegram.push, syncMirror }`；`telegramGroups[]` → 每个群一条整群路由（`push: false`，保持现在群只收不推的行为）。
+一个秘书在一个 bot 上的路由 = 私聊 `chat` + 群白名单 `telegramGroups`（整群）+ `telegramRoutes`（整群或话题）。旧文件没有新字段，读出来等于空，行为不变。
 
-### 入站路由
+### 入站
 
 ```
-update → admitChat（owner 校验，不变）→ topicOf(message)
-       → 精确 (chat, topic) → 整 chat (chat, '*') → 插件渠道走 channelDefaults
-       → 命中：secretaryId → 该秘书的目标会话（resolveTarget 限定在这个秘书的项目内）
-       → 未命中：见「未绑定的 chat」
+getUpdates（每个 token 一个）
+  → 绑定码消息（/start <码>、/bind <码>，可带 @bot）：交给码匹配的那个秘书；都不匹配时给所有等码的秘书记一次失败
+  → 其他：(chat, 话题) 精确路由 → (chat, 整群) 路由 → 命中的秘书走原有逻辑（只认主人）
+  → 没有任何路由：不响应、不提示，只在共用这个 bot 的秘书审计里各记一条 contact_inbound_rejected
 ```
 
-- 纯函数 `resolveRoute(routes, peer)` 放 `src/shared/secretary/contactRoutes.ts`，单测覆盖优先级。
-- `ContactServicePorts.secretaryConversationId()` 改为 `secretaryConversationId(secretaryId)`；`ipc/secretaryContact.ts:160` 换成按路由解析。
-- `commandPeer` 改为带 `secretaryId`；`/last`、`/sync`、`/status`、`/following` 都按发命令所在路由的秘书回答。
-- `awaitingReply`、`phoneChain` 本来按会话记，会话属于哪个秘书已确定，不改语义。
-- 同一 chat 的整群路由和其中某个话题路由可以属于不同秘书，话题优先（见待确认 6）。
+- 话题路由优先于整群路由：同一个群的整群和某个话题可以分给不同秘书。
+- 按钮回调按它所在消息的 chat + 话题路由。
+- 进到秘书后的处理（提问、确认卡、关注、只读命令、`/last`、`/sync`）都是这个秘书自己的。
 
-### 冲突检测
+### 绑定码
 
-- 写路由统一走 `assignRoute(file, route)`：`routeKey` 已被另一个秘书占用 → 返回 `route-conflict`，带占用者名字，界面提示「先在 X 那里解绑或改绑」。同一秘书重复绑定视为幂等更新。
-- 「改绑」是显式操作：`reassignRoute(key, toSecretaryId)`，需要用户在界面点。
-- 冲突检查与写入在 Main 同一同步段内完成，没有 await 间隙。
-- 插件 peer 同样按 `routeKey` 去重（无 topic）。
+码仍是一次性、10 分钟、5 次失败作废，属于生成它的那个秘书：
 
-### 绑定码流程
+1. 私聊：私聊 bot `/start <码>` 或点 `t.me/<bot>?start=<码>`。写 `chat`。
+2. 整个群：点 `t.me/<bot>?startgroup=<码>` 把 bot 拉进群（Telegram 在群里发 `/start <码>`），或在群里发 `/bind@<bot> <码>`。
+3. forum 话题：在目标话题里发 `/bind@<bot> <码>`。
 
-码仍是一次性、10 分钟、5 次失败作废，但多带「给哪个秘书」：
-
-1. **私聊**（首次或改绑 DM）：在秘书 X 的联系方式页生成码 → 私聊 bot `/start <code>` 或点 `t.me/<bot>?start=<code>`。首次绑定同时写 `owner`。DM 已属于别的秘书时，界面先要求确认改绑，不在 Telegram 侧静默抢占。
-2. **整个群**：点 `t.me/<bot>?startgroup=<code>` 把 bot 拉进群，Telegram 会在群里发 `/start <code>`；或在群里发 `/bind <code>`。
-3. **forum 话题**：在目标话题里发 `/bind@<bot> <code>`。隐私模式下 bot 一定能收到点名给它的命令，所以界面给出的文本总是带 `@<bot>`，不要求用户关隐私模式。
-
-Main 校验：码有效、发送者是 owner、群类型正确、`routeKey` 无冲突 → 写路由 → 在**原话题**回一句「已绑定到秘书 X」并注册命令菜单。任何一步不过只回一句原因（发送者不是 owner 时静默，与现在一致）。
+在群里绑定时：已有主人就只认主人，没有主人就把发码的人记为 `ownerId`。写入前做冲突检查（同一 bot 下所有秘书的私聊、群白名单、路由），冲突时拒绝并只记审计，不在群里回话；成功后在原话题回一句「已绑定到秘书 X」。群白名单（界面里手填群 id）加群时同样做冲突检查。
 
 ### 出站
 
-- 推送目标从「渠道的唯一 peer」改为**按秘书**：`pushTargets(secretaryId) = routes.filter(r => r.secretaryId === id && r.push)`，再按渠道 enabled / connected 过滤。
-- 回复、正在输入、结果只回消息来源 peer（带 `topicId`，即 `message_thread_id`）。
-- 文字出站已经支持 `topicId`，不用改。`ContactChannel.sendImage/sendFile` 补 `topicId` 参数，`telegram.ts` 的 `threads`（chat → 最近话题）删除，避免把 A 话题的图发进 B 话题。
-- `pushTargets` 产出的 peer 带上路由的 `topicId`（现在 DM peer 没有话题，所以从未需要）。
-- 没有自己推送路由的秘书：不往别的秘书的路由里推（见待确认 4）。
-- 每条推送前缀秘书名字只在「同一个 chat 里有多个秘书的路由」时加，单秘书保持原样。
-
-### 未绑定的 chat
-
-- 非 owner：静默丢弃 + 审计（不变）。
-- owner 在未绑定的群 / 话题：24 小时内每个 `(chat, topic)` 只回一次提示「这里还没绑定秘书，在秘书的联系方式页生成绑定码后发 `/bind <码>`」，其余静默 + 审计（见待确认 5）。
-- owner 的 DM 没有路由（例如 DM 被解绑）：同上，提示一次。
+- 推送目标按秘书：私聊（如果绑了）+ `telegramRoutes` 里的群和话题（带 `message_thread_id`）+ 这个秘书拥有的插件渠道的联系人。群白名单只收不推，保持旧行为。
+- 回复、正在输入、图片、文件只回消息来源的 chat + 话题；图片和文件上传不再猜「最近话题」，用 peer 自带的话题。
+- 一个推送路由都没有的秘书：不借任何别人的渠道，只发桌面通知。
 
 ### 插件渠道（微信 Clawbot 等）
 
-- 插件协议不变：插件仍只放行绑定的那个人，宿主拿到 `peerId` 后按路由表分发，`channelDefaults[channelId]` 兜底（缺省主秘书）。
-- 联系方式页对插件渠道列出 `setStatus` 报上来的 peers 和近期入站过的 peers，每个可以指派给某个秘书（写一条路由）。
-- 插件没有话题概念，`topicId` 恒缺省。
-
-### token 冲突
-
-- 本期仍是一个 Telegram bot；`enso.telegram` 插件的冲突提示保留。Main 侧在保存 token 时对比 bot id，换 bot 时提示会清空全部路由（现行为是清 chat）。
+- 一个插件渠道同一时间只属于一个秘书：在某个秘书的联系方式页打开它，它就是这个秘书的；别的秘书已经打开时拒绝（冲突键：渠道 id + 全部联系人）。`default` 的旧开关原样保留。
+- 插件协议不变，入站按渠道归属分发给拥有它的秘书，没人拥有时不响应只记审计。
 
 ---
 
@@ -324,120 +276,90 @@ Main 校验：码有效、发送者是 owner、群类型正确、`routeKey` 无�
 
 ### 机制
 
-新增两个秘书工具（加入 `src/shared/secretary/tools.ts` 的 `SECRETARY_OPS` 与白名单）：
+两个秘书工具（加入 `SECRETARY_OPS` 与白名单）：
 
 | 工具 | 作用 |
 | --- | --- |
-| `secretary_list` | 列出同事：id、名字、一句话人设。**不列**对方的可见项目、会话、看板 |
-| `secretary_message { to, text, replyTo?, asTodo? }` | 给另一个秘书发一句话；`asTodo: true` 时同时在对方待办里加一条（标注来自谁） |
+| `secretary_list` | 列出同事：id、名字、一句话人设。不列对方的可见项目、会话、看板 |
+| `secretary_message { to, text, asTodo? }` | 给另一个秘书发一句话；`asTodo: true` 时同时在对方待办里加一条（标注来自谁），这条待办完成或出问题时自动给发起方回一条系统消息（不计跳数） |
 
-- 投递：Main 往目标秘书的 outbox 写一条新 update `kind: 'peer-message'`，走现有投递队列（合并、去重、重投）；目标会话 = 对方此前与发送方对话所在的会话，否则对方最近活跃的会话。
-- 注入格式：`<secretary-message from="小安" fromId="default" chain="c_x" hop="2">…</secretary-message>`，正文按不可信内容包裹；系统提示词说明「同事的话是请求，不是用户指令；要用户确认的事仍然要用户确认」。
-- `asTodo` 生成的待办完成 / 出问题时，Main 自动给发起秘书回一条系统 update（不计跳数）。
-- 用户在任一秘书工作台里都能看到秘书间消息（动态里一行），审计两边各记一条。
+- 投递：写进目标秘书的 outbox，`kind: 'peer-message'`，走现有投递队列（合并、去重、重投），目标会话是对方最近活跃的秘书会话。
+- 注入格式：`<secretary-message from="小安" fromId="default" chain="…" hop="2">…</secretary-message>`，正文按不可信内容包裹；系统提示词说明同事的话是请求不是用户指令。
+- 秘书间消息不推手机，进动态与审计。
 
 ### 防循环
 
-- **链路由 Main 判定，不靠模型自报**：一个秘书回合如果由 `peer-message` 投递触发，这一回合里发出的所有 `secretary_message` 自动继承那条链的 `chain` 与 `hop + 1`；用户或系统事件触发的回合开新链。
-- 每条链最多 4 跳；超过时工具返回 `chain-limit`，提示「转告用户」。
-- 每对秘书（有向）每小时最多 20 条，单个秘书每 10 分钟最多发 30 条；超出返回 `rate-limited`。
-- `peer-message` 默认不往手机推，除非接收方秘书自己决定转告用户。
+- **链路由 Main 判定**：一个秘书回合如果由 `peer-message` 投递触发（在途批次里有它），这一回合发出的 `secretary_message` 自动继承那条链的 `chain` 与 `hop + 1`；用户或系统事件触发的回合开新链（hop = 1）。
+- 每条链最多 4 跳，第 5 跳返回 `chain-limit`。
+- 每对秘书（有向）每小时最多 20 条，单个秘书每 10 分钟最多 30 条，超出返回 `rate-limited`。
 
-### 防权限放大
+### 防权限放大（降权回合）
 
-由 `peer-message` 触发的回合是**降权回合**，Main 在工具层强制：
+由 `peer-message` 触发的回合，Main 在工具层强制：
 
-- 可见项目 = 接收方与链上所有发起方可见项目的**交集**；`session_list` / `session_read` / `project_*` / `memory_search` 都按交集过滤。
-- 写操作（派发、发消息、停止、接管、清理）的目标项目必须同时在发起方的可见范围内；接管范围同样取交集。
-- 点名授权（`named`）只来自用户，秘书间消息里出现的会话 id 不构成授权。
-- 自主度按接收方自己的矩阵；派活卡片标注「应秘书 X 请求」。
-- 降权回合里产生的派出会话归接收方管理，但记录 `requestedBy` 链；结果回到接收方，由它决定是否 `secretary_message` 回去。
+- 可见项目取接收方与链上所有发起方的**交集**：`project_*`、`session_list`、`session_read`、`repo_status`、`memory_search`（项目空间）都按交集过滤。
+- 接管范围同样取交集；写操作（派发、发消息、停止、接管、清理）的目标项目必须在交集内。
+- 点名授权只来自用户；秘书间消息里出现的会话 id 不构成授权。
+- 自主度按接收方自己的设置。
 
 ---
 
 ## 六、工作台与看板
 
-- **单秘书看板**：`buildBoard`（`results.ts:435`）输入从「唯一 dispatch 文件」改为「该秘书的 dispatch + todos」，逻辑不变。
-- **总看板**：Main 合并全部秘书的看板，每张卡片 / 待办 / 动态加 `secretaryId`（只在投影里加，不进存储）；分组规则不变，同组内按时间排序。
-- **日看板**：每个秘书读自己的 `daily.jsonl`；总看板合并各秘书当天记录。
-- **入口**：秘书会话的右侧面板顶部加「本秘书 / 全部」切换，默认本秘书；多秘书时分区标题行加「工作台」按钮，打开主秘书最近会话并切到「全部」。总看板里的操作（停止、标记完成、确认卡片）按卡片的 `secretaryId` 落到对应秘书。
-- **IPC**：`secretary:get-state` 加 `secretaryId`；新增 `secretary:list`、`secretary:create`、`secretary:delete`、`secretary:reorder`、`secretary:get-overview`；`state-changed` 广播带 `secretaryId`。提案确认 / 拒绝仍只传 `proposalId`，Main 按 id 在各秘书文件里定位（id 全局随机唯一），renderer 不需要知道归属。
+- **单秘书看板**：`buildBoard` 输入换成该秘书的 dispatch + todos，逻辑不变。
+- **总看板**：Main 合并全部秘书的看板，每张卡片 / 待办带 `secretaryId`（只在投影里加），分组规则不变。
+- **入口**：多秘书时秘书面板顶部出现「本秘书 / 全部」切换，「全部」下可按秘书筛选；只有一个秘书时不出现。
+- **IPC**：所有按秘书的 `secretary:*` 通道最后一个参数是 `secretaryId`；只有一个秘书时可省略。新增 `secretary:list`、`secretary:create`、`secretary:delete-preview`、`secretary:delete`、`secretary:transfer`、`secretary:overview`，`secretary:state-changed` 每个秘书各推一份并带 `secretaryId`。提案确认 / 拒绝只传 `proposalId`，Main 在各秘书文件里定位。
 - **归属规则**：
   - 派发记录、待办、定时、结果：存在发起秘书的目录里。
-  - 界面上无归属的操作（`dispatch.ts:2533,2589` 的「从看板派发待办」等）：归属看板当前所在的秘书；总看板里按卡片归属；都没有时归主秘书。
-  - 结果回传：先投记录里的 `secretaryConversationId`；它已归档 / 删除时，回落到**同一秘书**最近活跃的会话，不再跨秘书；该秘书没有会话时只更新工作台。
-  - ask-relay：同上，按会话所在记录的秘书。
-  - 投递 `inflight` 单槽改为按秘书一槽（每个秘书一份 dispatch.json，自然成立）。
-  - 巡检、遗留任务、停滞检测：每个秘书按自己的 `patrolEnabled` 扫自己的记录。
-  - 清理列表：只扫该秘书可见项目；`session` 项只列自己的记录；分支 / worktree 被任何秘书的进行中派发占用时标 `blocked`。
-  - 进行中上限：每个秘书各自 `maxRunningDispatches`，另有全部秘书合计上限（见待确认 2）。
+  - 界面上无归属的操作（从看板派发待办等）：归看板所在的秘书。
+  - 结果回传：先投记录里的发起会话；它已归档或删除时，回落到**同一秘书**最近活跃的会话，不跨秘书；该秘书没有会话时只更新工作台。ask-relay 同理。
+  - 巡检、遗留任务、停滞检测、定时：每个秘书按自己的设置扫自己的记录。
+  - 清理列表：只扫该秘书可见项目；会话项只列自己的记录；分支 / worktree 被任何秘书的进行中派发占用时标 `blocked`。
+  - 进行中上限：每个秘书各自 `maxRunningDispatches`，另有全部合计上限 `maxRunningTotal`（默认 10）。
 
 ---
 
-## 七、接管冲突：一个会话只归一个秘书
+## 七、接管与转交
 
-- Main 维护 `managedBy(conversationId) → secretaryId` 索引：由各秘书 `dispatched` 记录与会话行 `secretaryOrigin.secretaryId` 构建，文件写入后增量更新，启动时全量重建。
-- `takeoverRefusal` 增加 `managed-by-other`（附带对方名字），本秘书已管理仍是 `already-managed`。
-- `operateSource`：会话被别的秘书管理时直接返回无权限，**优先级高于** `named` 与 `takeoverScope`；两个秘书的接管范围覆盖同一项目时，谁先真正用上（`trackScopeSession` 建记录）归谁。
-- 用户点名（`referenceConversations`）一个被别的秘书管理的会话：不加入 `named`，秘书收到 `managed-by-other`。
-- 认领（检查 + 写记录）在 Main 一个同步段里完成，跨秘书不会同时认领成功。
-- 用户在会话界面「交给秘书」时选择哪个秘书；已被管理的会话显示「由 X 管理」，提供「转交给…」：把记录（含 relays、未完成的 pending 依赖引用）从 A 的文件移到 B 的文件，两边审计。
-
----
-
-## 八、分期计划
-
-每期单独合并、单独验收；每期提交前 `pnpm typecheck && pnpm lint && pnpm test`，并跑 `node scripts/verify-secretary.mjs` 全量。
-
-### 第 1 期：秘书实体与迁移（单秘书行为不变）
-
-- 改：新增 `services/secretary/registry.ts`（`secretaries.json` 解析、目录推导、id 校验、projectId 映射）；6 份 `secretaryDir()` 与 4 处直接拼路径换成 `SecretaryContext`；`identity.ts` 去掉 `secretaryProjectId()`；`agent.ts:1686` 按注册表逐个 `ensureSecretaryProject`；`invokeSecretaryOp` 从会话反推秘书；`sessionFactory` 的 `secretaryOrigin` 加 `secretaryId`；`ipc/memory.ts` 空间名取秘书名字。
-- 单测：注册表缺失时合成 `default` 且不落盘；损坏时备份并扫描重建；非法 id（`..`、`/`、大写）拒绝；目录推导不越界；`byConversation` 只认 Main 权威；旧 `secretaryOrigin` 缺 id 时归 `default`。
-- 验收脚本：新段「升级：旧数据原样可用」——在 isolate 目录预置一份旧版 `userData/secretary`（profile、dispatch、todos、schedules、contact、私有记忆），启动后断言 `secretaries.json` 不存在、看板 / 待办 / 记忆 / 联系方式状态与预置一致；现有全部段落通过。
-
-### 第 2 期：Main 侧多实例与接管唯一
-
-- 改：`secretary:list/create/delete/reorder` IPC（常量 + handler + preload）；所有 `secretary:*` 加 `secretaryId`（`unknown` 收窄、存在性校验）；`resolveTarget` 限定秘书；`latestSecretaryConversation` 四处改为显式归属；巡检 / 定时 / 投递 tick 遍历注册表；`runningCount` 按秘书 + 合计上限；`cleanup` 限定可见项目；`managedBy` 索引、`managed-by-other`、转交；通知按秘书名字和头像；系统提示词按秘书。
-- 单测：A 的结果在 A 会话归档后不投给 B；relay 无记录时不跨秘书；`takeoverRefusal` / `operateSource` 跨秘书拒绝且优先于 named 和 scope；两秘书范围重叠时先认领者胜；`runningCount` 分秘书计数与合计上限；转交后两份文件一致；删除秘书的移交 / 解除管理。
-- 验收脚本：新段「两个秘书」——经 IPC 建第二个秘书，两边各派一个活，回传各回各的会话；B 接管 A 派出的会话被拒且卡片原因含 A 的名字；转交后 B 能发消息、A 不能；重启后归属不变。
-
-### 第 3 期：侧栏、设置与工作台界面
-
-- 改：renderer `stores/secretary.ts` 改为按 id 的多份状态；`Sidebar.tsx` 秘书分区（分组折叠 + 单秘书折叠 + 排序 + 新建）；`SecretarySidebarSection`、`openSecretary`、`secretaryEntry`、`HeaderSessionTabs`、`SecretaryOriginBadge`、`SecretaryTakeover`（选秘书）；设置页按秘书切换；工作台「本秘书 / 全部」与总看板、日看板合并。
-- 单测：`secretaryConversationIds` 多秘书；折叠键读写与旧键迁移；只有一个秘书时不渲染分区标题；总看板合并排序。
-- 验收脚本：新段「侧栏多秘书」——一个秘书时 DOM 与现在一致（无 `secretary-group` 标题）；建第二个后出现标题，点击整块折叠，reload 后保持；单个秘书折叠互不影响；「全部」看板含两个秘书的卡片且可按秘书筛选。
-
-### 第 4 期：联系方式路由
-
-- 改：`contact/store.ts` v2 与迁移；`shared/secretary/contactRoutes.ts`（`routeKey`、`resolveRoute`、`assignRoute`）；`telegram.ts` 的 `admitChat` 拆成「owner 校验 + 路由」、`/bind` 与 `startgroup`、去掉 `threads`、出站带 topic；`service.ts` 的 `pushTargets(secretaryId)`、`commandPeer`、命令按路由；`ipc/secretaryContact.ts` 路由列表 / 指派 / 解绑 / 改绑；联系方式面板按秘书显示自己的路由。
-- 单测：v1→v2 迁移（DM、群白名单、syncMirror、push）；路由优先级（话题 > 整群 > 渠道默认）；同键冲突拒绝、同秘书幂等；绑定码带秘书、过期、5 次失败；非 owner 在已绑定话题被拒；未绑定话题提示限频；出站 topic 不串。
-- 验收脚本：扩展假 Telegram 支持 forum supergroup（`is_forum`、`message_thread_id`）。新段：话题 1 绑秘书 A、话题 2 绑秘书 B，各发一句只进对应秘书会话且回复回原话题；把话题 1 再绑给 B 被拒；未绑定话题 owner 发话收到一次提示、第二次静默；A 的里程碑只推到 A 的路由；单 bot 只有一个 `getUpdates` 消费者（假服务端统计并发轮询数为 1）；旧版 contact.json 升级后原有 DM 绑定照常收发。
-
-### 第 5 期：秘书间沟通
-
-- 改：`secretary_list` / `secretary_message` 工具与白名单；`SecretaryUpdate` 新增 `peer-message`；回合触发来源记录与链继承；降权回合在 `checkOperate` / 读工具 / 记忆检索处取交集；`asTodo` 与完成回执；系统提示词同事列表；审计与动态。
-- 单测：链继承与跳数上限；有向限速；降权回合下读写都按交集；named 不随消息传递；`asTodo` 完成回执不计跳。
-- 验收脚本：新段「秘书间消息」——fake provider 脚本让 A 给 B 发消息、B 回复，两边会话各收到一次；脚本让 A、B 互相无限回复，第 5 跳被 `chain-limit` 拦住；A 只可见项目 P1、B 可见 P1+P2，A 请 B 读 P2 的会话被拒。两家厂商模型真机各走一遍「A 托 B 派活 → B 回报 A → A 转告用户」。
-
-第 4、5 期只依赖第 2 期，可以并行或调换顺序。
+- 一个会话同一时间只归一个秘书管理。Main 按全部秘书的派发记录与会话行 `secretaryOrigin.secretaryId` 判定归属。
+- `takeoverRefusal` 新增 `managed-by-other`（带对方名字）；本秘书已管理仍是 `already-managed`。
+- `operateSource`：会话被别的秘书管理时直接无权限，优先级高于点名与接管范围；两个秘书的接管范围覆盖同一项目时，谁先真正用上归谁。
+- 用户点名一个被别的秘书管理的会话：不加入点名名单。
+- 认领（检查 + 写记录）在 Main 一个同步段里完成，不会两个秘书同时认领成功。
+- **转交**：会话界面与工作台卡片提供「转交给…」。Main 把派发记录、挂起的转交提问从 A 的文件移到 B 的文件，清掉 A 对它的点名与待投更新，改写会话行的 `secretaryOrigin.secretaryId`，两边各记审计，B 收到一条「X 把这个会话转交给你」的回传。
 
 ---
 
-## 待确认
+## 八、实现顺序
 
-| # | 问题 | 推荐 | 理由 |
-| --- | --- | --- | --- |
-| 1 | 秘书数量上限 | 8 个 | 每个秘书有自己的巡检、定时、投递 tick；8 个足够分工，界面也放得下 |
-| 2 | 进行中派发上限 | 每秘书各自上限 + 合计上限（默认 10，存 `secretaries.json`） | 只有各自上限时 5 个秘书能同时跑 50 个会话，机器扛不住；合计上限不进 `settings.json`，不用改配置 CLI 策略 |
-| 3 | 主秘书 | 有主秘书：DM 默认路由给它、折叠侧栏按钮指向它；可在设置里换；主秘书不能直接删除 | 手机私聊只有一个，需要一个确定的接收者；迁移出的 `default` 自然就是主秘书 |
-| 4 | 没有自己推送路由的秘书，里程碑要不要借 DM 推（带名字前缀） | 不推，只发桌面通知，并在该秘书联系方式页提示绑定一个话题 | 借 DM 推会让 DM 里的回复归属不清（回给主秘书还是它），要额外做 reply 映射 |
-| 5 | owner 在未绑定的群 / 话题里说话 | 每个 (chat, topic) 24 小时提示一次，其余静默 + 审计 | 完全静默用户会以为 bot 坏了；每次都回会刷屏 |
-| 6 | 同一个群的整群路由与其中某个话题路由分给不同秘书 | 允许，话题优先 | forum 群常见用法是「General 给主秘书，各话题给专职秘书」；规则简单可预测 |
-| 7 | 秘书之间能不能读彼此的私有记忆 | 不能，只靠 `secretary_message` | 私有记忆可能含对方可见范围内的信息，互读等于绕过可见范围 |
-| 8 | 秘书间请求触发的动作怎么管 | 降权回合（可见 / 接管范围取交集）+ 接收方自己的自主度矩阵；卡片标来源 | 满足「不能借别的秘书越权」，又不至于每个请求都要用户点确认 |
-| 9 | 删除秘书时它管理的会话、待办、定时怎么办 | 删除前必须选「移交给某秘书」或「解除管理」；记忆默认保留可勾选删除 | 不让会话悄悄变成无人管；记忆删除不可逆，默认保留 |
-| 10 | 是否支持每个秘书用不同的 Telegram bot | 本期不支持，路由表已按 `channelId` 建键，以后可扩成多连接 | 需求是「同一 bot 多秘书」；多 bot 需要多 poller、多 token 加密存储，独立成一期更稳 |
-| 11 | 总工作台入口 | 秘书面板「本秘书 / 全部」切换 + 多秘书时分区标题的「工作台」按钮 | 复用现有右侧面板，不新增主区域页面，PWA 也直接可用 |
-| 12 | 会话从 A 转交给 B 是否本期做 | 做，放第 2 期 | 接管唯一后，没有转交用户只能先收回再重新授权，体验断档 |
-| 13 | 「派给另一个秘书」是否做成共享看板 | 不做共享看板；`secretary_message` + `asTodo` 在对方待办里落一条 | 一件事只有一条记录，延续「卡片即会话」的原则，避免两份数据 |
-| 14 | 秘书名字是否必须唯一 | 必须（大小写不敏感） | 手机命令、秘书间消息、推送前缀都靠名字认人 |
+一次在本分支完成，按依赖顺序分几个提交，每个提交都过 `pnpm typecheck && pnpm lint` 与相关单测，最后跑全量 `pnpm test` 与 `node scripts/verify-secretary.mjs`。
+
+1. **实体与迁移**：`registry.ts`、`SecretaryContext`、各模块端口工厂、`secretaryOrigin.secretaryId`、按秘书的宿主。单秘书行为不变。
+2. **多实例与归属**：IPC 带 `secretaryId`、新建 / 删除（预览 + 二次确认）、回传不跨秘书、合计上限、清理范围、接管唯一、转交。
+3. **联系方式**：每个秘书自己的 bot、`TelegramHub`、路由、群和话题绑定码、冲突检查、未绑定不响应、插件渠道归属。
+4. **秘书间沟通**：`secretary_list` / `secretary_message`、链与跳数、限速、降权回合。
+5. **界面**：多秘书 store、侧栏分区与折叠、新建 / 删除、设置页按秘书、总看板筛选、转交。
+
+验收（`scripts/verify-secretary.mjs` 新增段落，原有段落全部保留）：旧数据原样可用、两个秘书结果各回各的、接管对方会话被拒、转交、侧栏整块折叠刷新后保持、总看板筛选、假 Telegram 下两个话题各进各的秘书、同一 bot + chat + 话题重复绑定被拒、未绑定的完全不响应、一个 token 只有一个轮询、两个 token 各一个轮询、删除秘书的提醒与二次确认、秘书间消息第 5 跳被拦、范围取交集。
+
+---
+
+## 已定决策
+
+| # | 问题 | 决定 |
+| --- | --- | --- |
+| 1 | 秘书数量上限 | 8 个 |
+| 2 | 进行中派发上限 | 每秘书各自上限 + 全部合计上限（默认 10，存 `secretaries.json`，不进 `settings.json`） |
+| 3 | 主秘书 | 没有主秘书。每个秘书只用自己绑定的联系方式收发，私聊也是绑了谁归谁、没绑不归任何人；折叠侧栏按钮与快捷键打开最近用过的秘书 |
+| 4 | 没有推送路由的秘书 | 不借别人的渠道，只发桌面通知 |
+| 5 | 在未绑定的群、话题、私聊里说话 | 完全不响应、不提示，只记审计 |
+| 6 | 同一群的整群与话题分给不同秘书 | 允许，话题优先 |
+| 7 | 秘书互读私有记忆 | 不能，只靠 `secretary_message` |
+| 8 | 同事请求触发的动作 | 降权回合（可见 / 接管范围取交集）+ 接收方自己的自主度 |
+| 9 | 删除秘书 | 不要求移交；删除前列出它管的会话、待办、定时、联系方式绑定与记忆，二次确认后删除；它管的会话变为无人管理（会话不删），路由一起释放 |
+| 10 | 每个秘书各自的 Telegram bot | 支持。同一 token 全局一个轮询，按 chat + 话题路由；不同 token 各一个轮询；冲突键 bot + chat + 话题；token 存 safeStorage，不进日志与审计 |
+| 11 | 总工作台入口 | 秘书面板「本秘书 / 全部」切换，多秘书时才出现 |
+| 12 | 会话在秘书之间转交 | 支持 |
+| 13 | 「派给另一个秘书」 | `secretary_message` + `asTodo` 在对方待办里落一条，不做共享看板 |
+| 14 | 秘书名字唯一 | 唯一，大小写不敏感 |
