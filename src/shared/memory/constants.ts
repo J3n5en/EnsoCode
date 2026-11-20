@@ -100,6 +100,9 @@ export const DISTILL_MAX_OUTPUT_TOKENS = 3072;
 export const DISTILL_MIN_IMPORTANCE = 0.5;
 // 暂时性失败（provider 超时 / 输出不可解析）保留 pending 重试的上限；超过则标 done 记 error，避免坏会话无限烧调用
 export const DISTILL_MAX_ATTEMPTS = 3;
+// 多会话聚合的单批上限：≤3 个提取块 + 1 次合并，与 3 个短会话各跑一次的调用量相当。
+// 超出的会话进下一批而不是截断：水位在排队时已推进，截掉的尾巴就再也不会被提炼。
+export const DISTILL_BATCH_MAX_CHARS = DISTILL_MAX_CHUNK_CHARS * 3;
 
 // 实体图谱 Level 1：“Up to 10 entities and 20 relationships”
 export const KG_MAX_ENTITIES = 10;

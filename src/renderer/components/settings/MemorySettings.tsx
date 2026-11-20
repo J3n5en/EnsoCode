@@ -3,6 +3,7 @@ import {
   FORGETTING_MAX_IMPORTANCE_OPTIONS,
   FORGETTING_STALE_DAYS_OPTIONS,
 } from '@shared/memory/constants';
+import { MEMORY_DISTILL_WINDOW_MINUTES } from '@shared/memory/distillWindow';
 import type {
   ChatModelDto,
   DistillableSessionDto,
@@ -276,6 +277,8 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const settingsProviders = useSettingsStore((state) => state.providers);
   const distillEnabled = useSettingsStore((state) => state.memoryDistillEnabled);
   const setDistillEnabled = useSettingsStore((state) => state.setMemoryDistillEnabled);
+  const distillWindowMinutes = useSettingsStore((state) => state.memoryDistillWindowMinutes);
+  const setDistillWindowMinutes = useSettingsStore((state) => state.setMemoryDistillWindowMinutes);
   const kgEnabled = useSettingsStore((state) => state.memoryKgEnabled);
   const setKgEnabled = useSettingsStore((state) => state.setMemoryKgEnabled);
   const reconcileEnabled = useSettingsStore((state) => state.memoryReconcileEnabled);
@@ -537,6 +540,10 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
   const modelIdleItems = MEMORY_MODEL_IDLE_MINUTES.map((minutes) => ({
     value: String(minutes),
     label: minutes === 0 ? t('Never') : t('{{count}} min', { count: minutes }),
+  }));
+  const distillWindowItems = MEMORY_DISTILL_WINDOW_MINUTES.map((minutes) => ({
+    value: String(minutes),
+    label: minutes === 0 ? t('Immediately') : t('{{count}} min', { count: minutes }),
   }));
   const languageItems = [
     { value: 'en', label: t('English') },
@@ -966,6 +973,43 @@ export function MemorySettings({ onLibraryChanged }: { onLibraryChanged?: () => 
               'Automatic distillation is on, but the local model is not ready. Sessions will queue until you download it.'
             )}
           </p>
+        )}
+        {distillEnabled && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+            data-settings-row="memory.distillWindow"
+          >
+            <div className="min-w-0">
+              <p className="text-sm">{t('Merge sessions in the same project')}</p>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Wait this long after a session ends, then distill every session of the same project that ended meanwhile in one run. Immediately distills each session on its own.'
+                )}
+              </p>
+            </div>
+            <Select
+              value={String(distillWindowMinutes)}
+              items={distillWindowItems}
+              onValueChange={(value) => {
+                if (value !== null) setDistillWindowMinutes(Number(value));
+              }}
+              disabled={!memoryEnabled}
+            >
+              <SelectTrigger
+                className="w-56 shrink-0"
+                aria-label={t('Merge sessions in the same project')}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup>
+                {distillWindowItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          </div>
         )}
         <SwitchRow
           rowId="memory.kg"

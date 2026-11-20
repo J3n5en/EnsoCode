@@ -55,6 +55,9 @@ export const SETTINGS_DATA_COVERAGE = {
     'Memory remote embedding provider is a device-local reference.'
   ),
   memoryDistillEnabled: excluded('Memory auto-distillation preference; not an Enso capability.'),
+  memoryDistillWindowMinutes: excluded(
+    'Memory distillation batching window; not an Enso capability.'
+  ),
   memoryDecayEnabled: excluded('Memory forgetting preference; not an Enso capability.'),
   memoryDecayArchiveCandidates: excluded('Memory forgetting preference; not an Enso capability.'),
   memoryDecayAutoArchive: excluded('Memory forgetting preference; not an Enso capability.'),
@@ -247,6 +250,9 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Memory remote embedding provider is a device-local reference.'
   ),
   setMemoryDistillEnabled: excluded('Memory auto-distillation preference; not an Enso capability.'),
+  setMemoryDistillWindowMinutes: excluded(
+    'Memory distillation batching window; not an Enso capability.'
+  ),
   setMemoryDecayEnabled: excluded('Memory forgetting preference; not an Enso capability.'),
   setMemoryDecayArchiveCandidates: excluded(
     'Memory forgetting preference; not an Enso capability.'

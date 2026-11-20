@@ -81,6 +81,8 @@ function setState(overrides: Record<string, unknown> = {}) {
     setMemoryChatModel: vi.fn(),
     memoryDistillEnabled: false,
     setMemoryDistillEnabled: vi.fn(),
+    memoryDistillWindowMinutes: 5,
+    setMemoryDistillWindowMinutes: vi.fn(),
     memoryKgEnabled: false,
     setMemoryKgEnabled: vi.fn(),
     memoryReconcileEnabled: false,
@@ -266,6 +268,25 @@ describe('MemorySettings', () => {
     expect(html).toContain(`>${zh}</span>`);
     expect(html).toContain('空闲自动卸载');
     expect(html).toContain('空闲达到此时长后释放本地模型内存，下次需要时会自动加载。');
+  });
+
+  it('自动提炼关闭时不显示聚合窗口', () => {
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).not.toContain('data-settings-row="memory.distillWindow"');
+  });
+
+  it.each([
+    [5, '5 min', '5 分钟'],
+    [0, 'Immediately', '立即'],
+  ])('自动提炼打开后显示聚合窗口 %i，选中值有中英文标签', (minutes, en, zh) => {
+    setState({ memoryDistillEnabled: true, memoryDistillWindowMinutes: minutes });
+    const html = renderToStaticMarkup(createElement(MemorySettings));
+    expect(html).toContain('data-settings-row="memory.distillWindow"');
+    expect(html).toContain(`>${en}</span>`);
+    setState({ memoryDistillEnabled: true, memoryDistillWindowMinutes: minutes, language: 'zh' });
+    const zhHtml = renderToStaticMarkup(createElement(MemorySettings));
+    expect(zhHtml).toContain(`>${zh}</span>`);
+    expect(zhHtml).toContain('合并同项目会话');
   });
 
   it('遗忘分区：三档开关常驻，阈值只在降权打开时出现', () => {

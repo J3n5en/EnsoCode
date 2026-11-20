@@ -47,10 +47,13 @@ enso config set mcpServers.<id>.callTimeoutSec 120
 enso config set subagentModelsEnabled true
 enso config set memoryDistillEnabled true
 enso config set memoryReconcileEnabled true   # 写入新记忆后自动复核矛盾；每轮最多 20 次模型调用
+enso config set memoryDistillWindowMinutes 0   # 0/2/5/10/30；0 = 会话结束立即提炼，不聚合
 enso config get providers.<id>            # apiKey、Authorization 等显示为 ***
 ```
 
-写入时会检查类型：键已有值时，新值的 JSON 类型必须一致（对象类型的键可以写 `null`）。`proxyMode`、`customProxyUrl`、`language` 另有取值校验。数组只能改已有元素，不能通过子键追加。
+写入时会检查类型：键已有值时，新值的 JSON 类型必须一致（对象类型的键可以写 `null`）。`proxyMode`、`customProxyUrl`、`language`、`memoryDistillWindowMinutes` 另有取值校验。数组只能改已有元素，不能通过子键追加。
+
+`memoryDistillWindowMinutes`（缺省 5）热生效：会话结束后等这么多分钟，窗口内同项目的会话合并成一次提炼；已在排队的待办仍按排队时的到期时间出队。它只影响本机记忆库的队列，不参与配置同步。
 
 ## 黑名单
 

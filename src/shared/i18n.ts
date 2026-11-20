@@ -1634,6 +1634,10 @@ export const zhTranslations: Record<string, string> = {
   'Distill sessions automatically': '自动提炼会话',
   'When a session ends, or goes idle for 30 minutes and is reclaimed, extract 1-3 durable memories from it in the background.':
     '会话结束、或空闲 30 分钟被回收时,在后台从中提炼 1-3 条值得长期保留的记忆。',
+  'Merge sessions in the same project': '合并同项目会话',
+  'Wait this long after a session ends, then distill every session of the same project that ended meanwhile in one run. Immediately distills each session on its own.':
+    '会话结束后等待这段时间，再把期间结束的同项目会话合并成一次提炼。选「立即」则每个会话单独提炼。',
+  Immediately: '立即',
   '{{done}}/{{total}} done': '已完成 {{done}}/{{total}}',
   'about {{time}} left': '约剩 {{time}}',
   'Extract entities': '抽取实体',

@@ -5,7 +5,7 @@ import Database from 'better-sqlite3';
 import { getLoadablePath } from 'sqlite-vec';
 import { contentHash } from './contentHash';
 
-export const MEMORY_SCHEMA_VERSION = 12;
+export const MEMORY_SCHEMA_VERSION = 13;
 
 /**
  * vec0 的 chunk 是定长预分配：一个 chunk 恒定占 chunk_size × dim × 4 字节，与里面实际有几行无关。
@@ -381,6 +381,13 @@ const MIGRATIONS: (string | ((db: Database.Database) => void))[] = [
     PRIMARY KEY (older_id, newer_id)
   );
   `,
+  // v13：会话聚合提炼的待办（kind='distill-queue'）复用 memory_jobs，到期时间单独成列便于按时出队
+  (db) => {
+    const cols = db.prepare('PRAGMA table_info(memory_jobs)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'due_at')) {
+      db.exec('ALTER TABLE memory_jobs ADD COLUMN due_at TEXT');
+    }
+  },
 ];
 
 /**
