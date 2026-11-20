@@ -259,6 +259,19 @@ export const zhTranslations: Record<string, string> = {
   "What's new in {{version}}": '{{version}} 更新内容',
   'No release notes provided.': '此版本未提供更新日志。',
   Restart: '重启',
+  'Restarting…': '正在重启…',
+  'Waiting for running commands to restart…': '等命令跑完再重启…',
+  'Waiting for the current command to finish': '正在等当前命令结束',
+  'Restarting EnsoCode…': '正在重启 EnsoCode…',
+  'Restoring sessions…': '正在恢复会话…',
+  'EnsoCode will restart once the current command finishes.': '当前命令结束后再重启 EnsoCode。',
+  'EnsoCode will install the update once the current command finishes.':
+    '当前命令结束后再安装更新。',
+  'EnsoCode will quit once the current command finishes.': '当前命令结束后再退出 EnsoCode。',
+  'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so EnsoCode waits for it.':
+    '有转到后台的命令没法脱离 EnsoCode 继续跑（如远程会话或 Windows 上的命令），所以要等它结束。',
+  'Force quit': '强制退出',
+  'Restart failed: {{error}}': '重启失败：{{error}}',
   'Restart server': '重启服务端',
   'Restart server?': '重启服务端？',
   'Running tasks are interrupted; this page reconnects after the server is back.':

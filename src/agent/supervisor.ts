@@ -56,6 +56,14 @@ import {
   type PluginAgentSource,
 } from '@shared/extensionPlugins/protocol';
 import type { PluginEventPlan, PluginToolDescriptor } from '@shared/extensionPlugins/types';
+import {
+  RESTART_CHECKPOINT_ARCHIVE,
+  RESTART_CHECKPOINT_FILE,
+  type RestartCheckpointEntry,
+  restartGate,
+  takeRestartCheckpoint,
+  writeRestartCheckpoint,
+} from '@shared/gracefulRestart';
 import { isHeadlessRun } from '@shared/headlessRun';
 import { HUMAN_REQUEST_TIMEOUT_MS } from '@shared/humanRequestTimeout';
 import type { ImageGenerationState } from '@shared/imageGeneration';
@@ -221,6 +229,11 @@ import {
   registerCustomProviderModels,
 } from './customProviderRegistry';
 import { createDcgGuard } from './dcg';
+import {
+  DETACHED_TASKS_FILE,
+  takeDetachedTasksManifest,
+  writeDetachedTasksManifest,
+} from './detachedTasksManifest';
 import { omitNamedTools } from './disallowedTools';
 import { createNormalizedEditTool } from './editTool';
 import { type CompactCancel, formatCompactCancel, takeCompactCancel } from './ensoCompact/cancel';
@@ -302,6 +315,7 @@ import {
 } from './sessionEviction';
 import { branchSessionFromPersistedFile, resolveForkLeafId } from './sessionFork';
 import { createSessionCommandTool } from './sessionShell';
+import { killRunGroup, sweepOrphanRuns } from './shell/detachedRun';
 import { prepareElevation, withElevation } from './shell/elevation';
 import { type SilentTurnKind, silentTurnKind } from './silentTurn';
 import { skillChainExtension } from './skillChainExtension';
@@ -495,6 +509,11 @@ interface ManagedSession {
   requestStartMs?: number;
   toolStartAt: Map<string, number>;
   toolDurations: Map<string, number>;
+  /** 优雅重启：loop 停在工具批结束、下一次模型请求之前；调用即放行 */
+  restartHold?: () => void;
+  lastCompletedToolCallId?: string;
+  /** 上一代 worker 的断点，parent-ready 之后据此续跑 */
+  restartResume?: RestartCheckpointEntry;
   /** 流式增量合并窗口：窗口内只记下待发下标，窗口结束或遇到其他事件时发最新正文 */
   upsertTimer?: ReturnType<typeof setTimeout>;
   upsertPending?: number;
@@ -609,6 +628,8 @@ export interface SupervisorOptions {
   dataDir?: string;
   /** 应用存放用户图片的目录（ENSO_USER_IMAGE_DIRS）：编码会话的 image_view 白名单里带上它 */
   userImageDirs?: readonly string[];
+  /** 优雅重启拉起的新 worker：接管上一代留下的断点文件 */
+  restartCheckpointFile?: string;
 }
 
 /** 指令走 loader 覆盖：去掉 agentDir 里的共享 AGENTS.md，再按会话前置一份；开关打开时追加项目内其它 harness 的规则文件。 */
@@ -949,6 +970,16 @@ export async function initializeWorkerRuntime(runtime: ModelRuntime): Promise<Mo
 /** 故障域 A：本进程持有全部活会话。同一会话的命令串行，不同会话并行。 */
 export class SessionSupervisor {
   private readonly sessions = new Map<string, ManagedSession>();
+  /** 优雅重启：请求后每次状态变化复查；committed 后不再推进任何会话，等 Main 换进程 */
+  private restart?: {
+    committed: boolean;
+    deferredKey?: string;
+    checkScheduled?: boolean;
+    /** 重启会把能脱离的转后台命令交给下一代：安全点不等它们 */
+    keepBackground?: boolean;
+  };
+  /** 上一代 worker 的断点，按 sessionId 等对应的 spawn-parent 认领 */
+  private readonly restartResume = new Map<string, RestartCheckpointEntry>();
   private readonly gate = new OperationGate();
   private readonly workspaceSwitch = new WorkspaceSwitchGate(this.sessions);
   private readonly pendingCommands = new Map<string, number>();
@@ -1079,6 +1110,8 @@ export class SessionSupervisor {
     this.deliverNotification(sessionId, text);
   });
   private readonly pendingNotifications: PendingNotificationStore;
+  /** 已请 Main 打开、打开后要把待投递通知交给新一轮的会话 */
+  private readonly wakeOnOpen = new Set<string>();
   /** spawn 尚未注册完就到达的内置工具开关，注册后补用 */
   private readonly pendingBuiltinTools = new Map<
     string,
@@ -1122,6 +1155,11 @@ export class SessionSupervisor {
     if (!managed) return;
     if (this.workspaceSwitch.defer(sessionId, () => this.deliverNotification(sessionId, text)))
       return;
+    // 断点已落盘：不再唤起新回合，进持久化队列由下一代补投
+    if (this.restart?.committed) {
+      this.queueReminder(managed, text);
+      return;
+    }
     // 失败（含前台中止后按错误收口）同空闲：能接新回合就立即唤起，不攒到用户下一条消息
     if (managed.status !== 'running') {
       managed.roundPending = true;
@@ -1158,6 +1196,40 @@ export class SessionSupervisor {
     this.pendingNotifications.save(managed.identity.sessionId, managed.pendingTaskReminders);
   }
 
+  /** 会话还没打开（重启后认回的任务先结束）：直接落盘，会话打开时随 pendingTaskReminders 恢复 */
+  private persistUnopenedNotification(sessionId: string, text: string): void {
+    const texts = this.pendingNotifications.load(sessionId);
+    enqueueReminder(texts, text);
+    this.pendingNotifications.save(sessionId, texts);
+  }
+
+  /**
+   * 通知只落了盘、没人叫醒的空闲根会话：请 Main 按恢复清单打开，打开后交给新一轮。
+   * 本代也在重启时只存盘（下一代再叫）；子会话不随换代恢复，照旧等打开时补投
+   */
+  private requestWake(sessionId: string): void {
+    if (
+      this.restart ||
+      sessionId.includes('::') ||
+      this.sessions.has(sessionId) ||
+      this.wakeOnOpen.has(sessionId)
+    )
+      return;
+    this.wakeOnOpen.add(sessionId);
+    this.options.emit({ type: 'session-wake-requested', sessionId });
+  }
+
+  /** 打开的会话没在续跑上一轮：攒下的完成通知立即开一轮；在续跑的由轮末补投 */
+  private wakeAfterOpen(managed: ManagedSession): void {
+    if (!this.wakeOnOpen.delete(managed.identity.sessionId) || managed.currentTurnId !== undefined)
+      return;
+    this.flushPendingReminders(managed);
+  }
+
+  private restartDataDir(): string {
+    return this.options.dataDir ?? path.dirname(this.options.sessionDir);
+  }
+
   private workflowJournalDir(): string {
     return path.join(this.options.sessionDir, 'workflows');
   }
@@ -1174,6 +1246,13 @@ export class SessionSupervisor {
   }
 
   constructor(private readonly options: SupervisorOptions) {
+    const restartFile = options.restartCheckpointFile;
+    if (restartFile) {
+      const archive = path.join(path.dirname(restartFile), RESTART_CHECKPOINT_ARCHIVE);
+      for (const entry of takeRestartCheckpoint(restartFile, archive)?.sessions ?? []) {
+        this.restartResume.set(entry.sessionId, entry);
+      }
+    }
     this.pendingNotifications = new PendingNotificationStore(
       path.join(options.sessionDir, 'pending-notifications')
     );
@@ -1215,6 +1294,8 @@ export class SessionSupervisor {
               ...(exitCode !== undefined ? { exitCode } : {}),
             });
           }
+          // 转后台的命令结束：可能刚好到了安全点（完成通知在同一同步段里入队，检查时一并投递）
+          this.scheduleRestartCheck();
         },
         onLevel: (sessionId, tasks) => {
           const managed = this.sessions.get(sessionId);
@@ -1228,12 +1309,33 @@ export class SessionSupervisor {
           }
         },
         // 完成通知走合并投递:多任务同时完成合并成一条,失败在 manager 文本里自带标注
-        onCompletionNotify: (sessionId, text) => {
+        onCompletionNotify: (sessionId, text, notifyOptions) => {
+          if (notifyOptions?.durable && !this.sessions.has(sessionId)) {
+            this.persistUnopenedNotification(sessionId, text);
+            this.requestWake(sessionId);
+            return;
+          }
           this.notifier.notify(sessionId, text);
         },
       },
       path.join(options.agentDir, 'task-logs')
     );
+    // 上一代重启前交出的后台命令：认回在跑的、收尾已结束的；再清掉异常退出留下的孤儿
+    const handled = this.bgTasks.recover(
+      takeDetachedTasksManifest(
+        path.join(this.restartDataDir(), DETACHED_TASKS_FILE),
+        this.bgTasks.outputDir
+      )
+    );
+    sweepOrphanRuns(this.bgTasks.outputDir, handled);
+    // 断点里空闲的会话带着待投递通知：重启收尾期间结束的命令只存了盘，这一代叫醒它
+    for (const entry of this.restartResume.values()) {
+      if (
+        entry.nextStep === 'await-user' &&
+        this.pendingNotifications.load(entry.sessionId).length > 0
+      )
+        this.requestWake(entry.sessionId);
+    }
     // 点开过的会话否则常驻到 app 退出（每个 AgentSession 持有全量 jsonl 上下文）
     this.evictionTimer = setInterval(() => this.evictIdleSessions(), EVICTION_SWEEP_INTERVAL_MS);
     this.evictionTimer.unref?.();
@@ -1321,6 +1423,7 @@ export class SessionSupervisor {
     managed.computer?.cancelAll('Session released');
     managed.pluginTools?.cancelAll('Session released');
     managed.pluginEvents?.cancelAll();
+    if (!this.restart?.committed) managed.restartHold?.();
     try {
       await managed.session.abort();
     } catch {}
@@ -1339,9 +1442,20 @@ export class SessionSupervisor {
       reason,
       ...(managed.instanceId ? { instanceId: managed.instanceId } : {}),
     });
+    this.scheduleRestartCheck();
   }
 
   handleCommand(command: AgentCommand): void {
+    if (command.type === 'graceful-restart') {
+      this.restart ??= { committed: false };
+      if (command.keepBackgroundTasks) this.restart.keepBackground = true;
+      this.checkRestart();
+      return;
+    }
+    if (command.type === 'detach-background-tasks') {
+      this.detachBackgroundTasks();
+      return;
+    }
     if (command.type === 'oauth-pool-result') {
       this.oauthPoolPending.get(command.requestId)?.(command);
       return;
@@ -1668,6 +1782,7 @@ export class SessionSupervisor {
         const count = (this.pendingCommands.get(scopeId) ?? 1) - 1;
         if (count) this.pendingCommands.set(scopeId, count);
         else this.pendingCommands.delete(scopeId);
+        this.scheduleRestartCheck();
       })
       .catch((error) => {
         const message = toErrorMessage(error);
@@ -2362,6 +2477,7 @@ export class SessionSupervisor {
         managed.computer?.cancelAll('Computer action aborted');
         managed.pluginTools?.cancelAll('Plugin tool aborted');
         managed.pluginEvents?.cancelAll();
+        if (!this.restart?.committed) managed.restartHold?.();
         // 立即收口投影：不 await session.abort()（内部 waitForIdle 会一直等到工具/流
         // 真正结束，工具不响应 signal 时永远等不到，UI 就卡在 running 上）。
         // 中断信号发出即视为本轮终止，后续 agent_end 回流由 status 守卫幂等吸收。
@@ -3498,6 +3614,8 @@ export class SessionSupervisor {
       sessionFile: requiredSessionFile(session),
       model: settingsModelRef(model),
     });
+    this.continueAfterRestart(managedRef);
+    this.wakeAfterOpen(managedRef);
     checkpoints?.cleanupOldSessions();
   }
 
@@ -3562,6 +3680,9 @@ export class SessionSupervisor {
     } = {}
   ): ManagedSession {
     batchSteering(session);
+    const restartResume = opts.resumeFile
+      ? this.claimRestartResume(identity, opts.resumeFile)
+      : undefined;
     const customEntries = session.sessionManager.getBranch().flatMap((entry) => {
       if (entry.type !== 'custom' || entry.customType !== 'enso-agent-session') return [];
       const parsed = parseAgentSessionCustomEntry(entry.data);
@@ -3573,7 +3694,9 @@ export class SessionSupervisor {
       ...(opts.childMetadata ? { childMetadata: opts.childMetadata } : {}),
       session,
       status: 'idle',
-      seq: 0,
+      // 优雅重启接管：沿用上一代的序号，Main 与各窗口的单调守卫照常放行
+      seq: restartResume?.seq ?? 0,
+      ...(restartResume ? { restartResume } : {}),
       messages: [],
       turnStartIndex: 0,
       customEntries,
@@ -3606,7 +3729,9 @@ export class SessionSupervisor {
     };
     managed.unsubscribe = session.subscribe((event) => {
       this.onSessionEvent(managed, event);
+      this.scheduleRestartCheck();
     });
+    this.installRestartBoundary(managed);
     this.sessions.set(identity.sessionId, managed);
     const parentId = opts.childIdentity?.parent.sessionId ?? opts.parentId;
     if (parentId) {
@@ -3686,6 +3811,8 @@ export class SessionSupervisor {
     if (opts.resumeFile) {
       const raw = this.transcript(managed);
       const { immediate, deferFull } = projectResumeTail(raw);
+      // 重启后认回的后台任务：会话打开即带上，TaskBar 不必等下一次输出
+      const backgroundTasks = this.bgTasks.snapshot(identity.sessionId);
       const emitResumeSnapshot = (
         payload: { messages: ProjectedMessage[]; baseIndex: number },
         resumeFull = false
@@ -3703,6 +3830,7 @@ export class SessionSupervisor {
               commands: managed.commands,
               ...(managed.childMetadata ? { child: managed.childMetadata } : {}),
               ...(managed.customEntries.length > 0 ? { customEntries: managed.customEntries } : {}),
+              ...(backgroundTasks.length > 0 ? { backgroundTasks } : {}),
             },
           ],
         });
@@ -4636,6 +4764,8 @@ export class SessionSupervisor {
       case 'tool_execution_start': {
         // codemode 嵌套调用只进脚本，不上时间线
         if (event.parentToolCallId) return;
+        // 有工具开跑就不能停在边界上等：被挂起的会话可能正是这个工具在等的对象
+        if (this.restart && !this.restart.committed) this.releaseRestartHolds();
         // 耗时只从真正开始执行算：同轮后发工具不能把前面 bash 的排队算进去
         if (!managed.toolStartAt.has(event.toolCallId)) {
           const startedAt = Date.now();
@@ -4686,6 +4816,7 @@ export class SessionSupervisor {
         if (event.parentToolCallId) return;
         const start = managed.toolStartAt.get(event.toolCallId);
         managed.toolStartAt.delete(event.toolCallId);
+        managed.lastCompletedToolCallId = event.toolCallId;
         if (start !== undefined) {
           managed.toolDurations.set(event.toolCallId, Date.now() - start);
         }
@@ -5377,6 +5508,7 @@ export class SessionSupervisor {
         : {}),
     });
     if (managed.status !== 'running') this.settleRound(managed);
+    this.scheduleRestartCheck();
   }
 
   /**
@@ -5663,10 +5795,199 @@ export class SessionSupervisor {
   }
 
   /** worker 退出前 fail-closed 清理挂起 capability，并断开 MCP 子进程。 */
-  shutdown(): Promise<void> {
+  /**
+   * 优雅重启的唯一提交点：每个会话都在安全点（空闲，或父会话停在工具批之后、下一次模型请求之前），
+   * 才把断点写到 dataDir/restart-checkpoint.json 并回 graceful-restart-ready；否则回一次推迟原因。
+   */
+  private checkRestart(): void {
+    const restart = this.restart;
+    if (!restart || restart.committed) return;
+    const entries: RestartCheckpointEntry[] = [];
+    const deferred: Extract<AgentWorkerEvent, { type: 'graceful-restart-deferred' }>['sessions'] =
+      [];
+    // 去抖中的完成通知先投递：闲会话被唤起（回合在跑），停在边界的会话进持久化待投递队列
+    for (const sessionId of this.sessions.keys()) this.notifier.flush(sessionId);
+    for (const managed of this.sessions.values()) {
+      // 停在边界后用户又插话 / 排了 follow-up：pi 要等 prepareNextTurn 返回后才把它写进会话文件，
+      // 这时落断点新进程就丢了这句话。放开挂起让 loop 先写入，回合接着跑，到下一个边界或空闲再判
+      const queued = managed.session.pendingMessageCount > 0;
+      if (queued) managed.restartHold?.();
+      // 前台命令转后台只是工具先回执，进程还在跑：和在跑的工具一样等它结束。
+      // 重启要求保留后台命令时，能脱离 worker 的交给下一代认回，只等脱离不了的
+      const keep = restart.keepBackground === true;
+      const blockingTasks = this.bgTasks.runningYielded(managed.identity.sessionId, {
+        exceptDetachable: keep,
+      });
+      const toolsInFlight = [...managed.toolStartAt.keys(), ...blockingTasks];
+      const gate = restartGate({
+        toolsInFlight,
+        atModelRequestBoundary: managed.restartHold !== undefined,
+        turnActive:
+          queued ||
+          managed.status === 'running' ||
+          managed.currentTurnId !== undefined ||
+          managed.session.isStreaming ||
+          managed.session.isRetrying ||
+          !!managed.roundPending ||
+          !!managed.compaction ||
+          !!managed.pendingCompact,
+      });
+      if (!gate.ready) {
+        deferred.push({
+          identity: managed.identity,
+          reason: gate.reason,
+          toolsInFlight,
+          ...(keep && blockingTasks.length > 0 ? { undetachableTasks: blockingTasks } : {}),
+        });
+        continue;
+      }
+      const sessionFile = managed.session.sessionFile;
+      if (!sessionFile) continue;
+      entries.push({
+        sessionId: managed.identity.sessionId,
+        generation: managed.identity.generation,
+        sessionFile,
+        seq: managed.seq,
+        nextStep: gate.nextStep,
+        turnId: gate.nextStep === 'model-request' ? (managed.currentTurnId ?? null) : null,
+        lastCompletedToolCallId: managed.lastCompletedToolCallId ?? null,
+        messageCount: managed.session.messages.length,
+        toolsInFlight,
+      });
+    }
+    if (deferred.length > 0) {
+      const key = JSON.stringify(deferred);
+      if (key !== restart.deferredKey) {
+        restart.deferredKey = key;
+        this.options.emit({ type: 'graceful-restart-deferred', sessions: deferred });
+      }
+      return;
+    }
+    // 还没注册的会话正在 spawn：等它落定，否则新进程里没有它
+    if ([...this.pendingCommands.keys()].some((id) => !this.sessions.has(id))) return;
+    const checkpoint = {
+      version: 1 as const,
+      pid: process.pid,
+      writtenAt: Date.now(),
+      sessions: entries,
+    };
+    writeRestartCheckpoint(path.join(this.restartDataDir(), RESTART_CHECKPOINT_FILE), checkpoint);
+    restart.committed = true;
+    this.options.emit({ type: 'graceful-restart-ready', checkpoint });
+  }
+
+  /**
+   * 退出重启前（Main 在终止 worker 之前发）：把能脱离的后台命令交出去、写恢复清单，回执后 Main 才终止 worker，
+   * shutdown 只会停掉留在本代的任务。
+   */
+  private detachBackgroundTasks(): void {
+    const tasks = this.bgTasks.detachForRestart();
+    const file = path.join(this.restartDataDir(), DETACHED_TASKS_FILE);
+    try {
+      writeDetachedTasksManifest(file, {
+        version: 1,
+        writtenAt: Date.now(),
+        workerPid: process.pid,
+        tasks,
+      });
+    } catch (error) {
+      // 清单写不下：进程已交出，下一代认不回，至少别让它们留成孤儿
+      console.warn('[graceful-restart] failed to write detached task manifest:', error);
+      for (const task of tasks) killRunGroup(task.pid, 'SIGKILL');
+    }
+    this.options.emit({ type: 'background-tasks-detached', detached: tasks.length });
+  }
+
+  private scheduleRestartCheck(): void {
+    const restart = this.restart;
+    if (!restart || restart.committed || restart.checkScheduled) return;
+    restart.checkScheduled = true;
+    queueMicrotask(() => {
+      restart.checkScheduled = false;
+      this.checkRestart();
+    });
+  }
+
+  private releaseRestartHolds(): void {
+    for (const managed of this.sessions.values()) managed.restartHold?.();
+  }
+
+  /**
+   * pi 在工具批全部返回、turn_end 之后，下一次模型请求（turn_start）之前调 prepareNextTurnWithContext。
+   * 有重启请求时父会话停在这里；只在全局没有工具在跑时才停，避免停住的会话正被别的工具等着。
+   */
+  private installRestartBoundary(managed: ManagedSession): void {
+    const agent = managed.session.agent as AgentSession['agent'] | undefined;
+    const next = agent?.prepareNextTurnWithContext;
+    if (!agent || typeof next !== 'function') return;
+    agent.prepareNextTurnWithContext = async (turn, signal) => {
+      await this.holdForRestart(managed);
+      return next.call(agent, turn, signal);
+    };
+  }
+
+  private holdForRestart(managed: ManagedSession): Promise<void> {
+    const restart = this.restart;
+    if (
+      !restart ||
+      restart.committed ||
+      managed.childIdentity ||
+      managed.parentId ||
+      managed.session.pendingMessageCount > 0 ||
+      this.sessions.get(managed.identity.sessionId) !== managed ||
+      [...this.sessions.values()].some((session) => session.toolStartAt.size > 0)
+    )
+      return Promise.resolve();
+    const { promise, resolve } = Promise.withResolvers<void>();
+    managed.restartHold = () => {
+      managed.restartHold = undefined;
+      resolve();
+    };
+    this.checkRestart();
+    return promise;
+  }
+
+  /** 断点说下一步是模型请求：接着同一轮（同一个 turnId）续跑，不重放刚完成的工具 */
+  private continueAfterRestart(managed: ManagedSession): void {
+    const entry = managed.restartResume;
+    managed.restartResume = undefined;
+    if (entry?.nextStep !== 'model-request') return;
+    if (managed.session.agent.state.messages.at(-1)?.role !== 'toolResult') {
+      console.warn(
+        `[graceful-restart] ${entry.sessionId.slice(0, 8)} 会话文件不在工具结果上，不续跑，等用户下一条`
+      );
+      return;
+    }
+    managed.currentTurnId = entry.turnId ?? randomUUID();
+    if (entry.lastCompletedToolCallId)
+      managed.lastCompletedToolCallId = entry.lastCompletedToolCallId;
+    void continueSessionActivity(managed.session).catch((error) =>
+      this.failTurn(managed, toErrorMessage(error))
+    );
+  }
+
+  private claimRestartResume(
+    identity: SessionIdentity,
+    sessionFile: string
+  ): RestartCheckpointEntry | undefined {
+    const entry = this.restartResume.get(identity.sessionId);
+    if (
+      !entry ||
+      entry.generation !== identity.generation ||
+      path.resolve(entry.sessionFile) !== path.resolve(sessionFile)
+    )
+      return undefined;
+    this.restartResume.delete(identity.sessionId);
+    return entry;
+  }
+
+  async shutdown(): Promise<void> {
     clearInterval(this.evictionTimer);
     this.workspaceSwitch.clear();
     this.bgTasks.stopAll();
+    // 还在等安全点（等转后台的命令时被强制退出 / 超时）：给刚停掉的命令一点时间收口，
+    // 完成通知进持久化队列、停在边界的会话落下断点，Main 据此补写恢复清单
+    if (this.restart && !this.restart.committed) await this.settleYieldedTasks(1_000);
     for (const managed of this.sessions.values()) {
       cancelContinuousMemory(managed.session.sessionManager);
       managed.browser?.cancelAll('Enso worker shutdown');
@@ -5679,10 +6000,21 @@ export class SessionSupervisor {
       managed.pluginTools?.cancelAll('Enso worker shutdown');
       managed.pluginEvents?.cancelAll();
       // pi 的 bash 是 detached 进程组，只在中断信号上 killProcessTree；SDK 未导出退出清理，
-      // 这里同步触发中断（不等 waitForIdle），否则 worker 退出后命令成孤儿进程
-      void managed.session.abort().catch(() => {});
+      // 这里同步触发中断（不等 waitForIdle），否则 worker 退出后命令成孤儿进程。
+      // 优雅重启已落断点时没有工具在跑，也不能再中断：被挂起的 loop 一放行就会写进会话文件
+      if (!this.restart?.committed) void managed.session.abort().catch(() => {});
     }
     return this.mcp.closeAll();
+  }
+
+  private async settleYieldedTasks(limitMs: number): Promise<void> {
+    const deadline = Date.now() + limitMs;
+    const running = () =>
+      [...this.sessions.keys()].some((id) => this.bgTasks.runningYielded(id).length > 0);
+    while (running() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    this.checkRestart();
   }
 
   private getRuntime(): Promise<ModelRuntime> {

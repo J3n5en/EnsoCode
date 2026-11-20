@@ -62,4 +62,23 @@ describe('createAppQuitDrain', () => {
     drain.onWillQuit({ preventDefault: vi.fn() }, quit);
     await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
   });
+
+  it('收尾期间再次退出不叠加：继续拦住、不重跑各步，收完只放行一次', async () => {
+    let release!: () => void;
+    const begin = vi.fn();
+    const wait = vi.fn(() => new Promise<void>((resolve) => (release = resolve)));
+    const drain = createAppQuitDrain([{ begin, shouldWait: () => true, wait }]);
+    const quit = vi.fn();
+    drain.onWillQuit({ preventDefault: vi.fn() }, quit);
+    const again = vi.fn();
+    drain.onWillQuit({ preventDefault: again }, quit);
+    expect(again).toHaveBeenCalledOnce();
+    expect(begin).toHaveBeenCalledOnce();
+    expect(wait).toHaveBeenCalledOnce();
+    release();
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledOnce());
+    const final = vi.fn();
+    drain.onWillQuit({ preventDefault: final }, quit);
+    expect(final).not.toHaveBeenCalled();
+  });
 });

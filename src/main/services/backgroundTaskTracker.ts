@@ -39,6 +39,13 @@ export class BackgroundTaskTracker {
     );
   }
 
+  /** 任一会话还有没结束的后台命令（回合结束了也可能还在跑） */
+  hasRunning(): boolean {
+    for (const tasks of this.bySession.values())
+      for (const task of tasks.values()) if (task.status === 'running') return true;
+    return false;
+  }
+
   observe(event: RendererAgentEvent): void {
     if (event.type === 'snapshot') {
       for (const snapshot of event.sessions)
@@ -91,3 +98,6 @@ export class BackgroundTaskTracker {
     else this.bySession.set(sessionId, next);
   }
 }
+
+/** worker 后台任务在 Main 的投影（ipc/agent 喂事件，秘书与退出前的安全点判断读它） */
+export const backgroundTaskStates = new BackgroundTaskTracker();
