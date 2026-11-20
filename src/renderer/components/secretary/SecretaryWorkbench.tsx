@@ -1,6 +1,7 @@
 import {
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
+  type SecretaryBoard,
   type SecretaryBoardTodo,
   type SecretaryTodoMutate,
   type TodoProblemCode,
@@ -16,7 +17,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
@@ -510,7 +511,37 @@ function EmptyState({ name, onAdd }: { name: string; onAdd: () => void }) {
 /** 工作台：问候与今日战报、三个计数、需要你处理、待办、动态时间线 */
 export function SecretaryWorkbench({ name }: { name: string }) {
   const { t } = useI18n();
-  const board = useSecretaryStore((s) => s.secretary.board);
+  const ownBoard = useSecretaryStore((s) => s.secretary.board);
+  const secretaries = useSecretaryStore((s) => s.secretaries);
+  /** 多个秘书时可以看总看板：全部，或筛到某一个 */
+  const [scope, setScope] = useState<'own' | 'all'>('own');
+  const [filterId, setFilterId] = useState<string>('all');
+  const [overviewBoards, setOverviewBoards] = useState<
+    { secretaryId: string; name: string | null; board: SecretaryBoard }[] | null
+  >(null);
+  useEffect(() => {
+    if (scope !== 'all') return;
+    let alive = true;
+    void window.electronAPI.secretary.overview().then((result) => {
+      if (alive && result.ok) setOverviewBoards(result.boards);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [scope]);
+  const board = useMemo(() => {
+    if (scope !== 'all' || !overviewBoards) return ownBoard;
+    const picked =
+      filterId === 'all'
+        ? overviewBoards
+        : overviewBoards.filter((entry) => entry.secretaryId === filterId);
+    return {
+      needsYou: picked.flatMap((entry) => entry.board.needsYou),
+      running: picked.flatMap((entry) => entry.board.running),
+      todos: picked.flatMap((entry) => entry.board.todos),
+      done: picked.flatMap((entry) => entry.board.done),
+    };
+  }, [scope, overviewBoards, filterId, ownBoard]);
   const focusProposal = useSecretaryStore((s) => s.focusProposal);
   const [adding, setAdding] = useState(false);
   /** 深链定位过来的那张卡：滚到它并闪一下，2 秒后恢复 */
@@ -561,6 +592,43 @@ export function SecretaryWorkbench({ name }: { name: string }) {
 
   return (
     <div data-enso="secretary-workbench" className="flex flex-col gap-3 px-3 py-3">
+      {secretaries.length > 1 && (
+        <div className="flex items-center gap-1.5">
+          {(['own', 'all'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              data-enso="secretary-board-scope-option"
+              data-scope={option}
+              aria-pressed={scope === option}
+              onClick={() => setScope(option)}
+              className={cn(
+                'rounded-md px-2 py-0.5 text-[12px] transition-colors',
+                scope === option
+                  ? 'bg-foreground/10 font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-foreground/5'
+              )}
+            >
+              {option === 'own' ? name : t('All secretaries')}
+            </button>
+          ))}
+          {scope === 'all' && (
+            <select
+              data-enso="secretary-board-filter"
+              value={filterId}
+              onChange={(event) => setFilterId(event.target.value)}
+              className="ml-auto rounded-md bg-transparent text-[12px] text-muted-foreground"
+            >
+              <option value="all">{t('All secretaries')}</option>
+              {secretaries.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name ?? t('Secretary')}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
       <div>
         <p className="text-[15px] font-semibold">{t(digest.greeting)}</p>
         <p className="mt-0.5 text-[12.5px] text-muted-foreground">{todayLine}</p>

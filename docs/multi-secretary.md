@@ -152,7 +152,7 @@ interface SecretaryRegistryFile {
   - `default` → `userData/secretary/`（原地不动）
   - 其他 → `userData/secretary/members/<id>/`
 - 每个秘书目录结构与改造前完全一致：`profile.json`、`persona.md`、`avatar.png`、`dispatch.json`、`todos.json`、`schedules.json`、`audit.jsonl`、`daily.jsonl`、`following.json`、`contact.json`、`contact-token.bin`、`workspace/{skills,tools}`。**联系方式也按秘书存**，每个秘书只用自己的 bot 与绑定。
-- 全局文件：`secretaries.json`、`telegram-offsets.json`（每个 bot 的 `getUpdates` 游标），放在 `userData/secretary/` 根下。`default` 的目录与根目录重合，文件名不冲突。
+- 全局文件只有 `secretaries.json`，放在 `userData/secretary/` 根下。`getUpdates` 游标存在各秘书自己的 `contact.json`（`pollOffset`）：同一个 bot 的几个秘书取最大的那个继续轮询，推进时每个都写回自己的文件，不另建全局游标文件。`default` 的目录与根目录重合，文件名不冲突。
 - 隐藏项目：启动时对每个秘书 `ensureSecretaryProject(<dir>/workspace)`，得到 `secretaryId ↔ projectId` 映射，只存在内存。项目身份按路径，重启后 projectId 稳定。
 - 私有记忆空间仍是 `proj:<projectId>`，每个秘书天然独立；记忆空间名显示秘书名字。
 - 名字：同一台机器上秘书名字唯一（大小写不敏感），新建与改名时由 Main 校验。
@@ -176,7 +176,6 @@ Main 内所有秘书服务改为显式接收 `{ id, dir, projectId }`：
 1. 启动时读 `secretaries.json`；不存在则在内存中合成 `{ secretaries: [{ id: 'default' }] }`，**只有在用户新建第二个秘书时才落盘**，单秘书用户的磁盘完全不变。
 2. `default` 继续用 `userData/secretary/` 和 `workspace/`：隐藏项目身份、会话 cwd、私有记忆空间 id、skills/tools 路径、`contact.json` 都不变。
 3. `secretaries.json` 损坏：备份成 `secretaries.json.bad-<时间>`，按「`default`（根目录有 `profile.json` 或 `dispatch.json` 时）+ 扫描 `members/*/`」重建，不丢秘书。
-4. Telegram 游标：`telegram-offsets.json` 不存在时取各秘书 `contact.json` 里的 `pollOffset` 最大值，之后游标只写全局文件。
 5. 侧栏 localStorage：旧键 `enso-collapsed-secretary` 的值作为 `default` 的单秘书折叠状态继续生效。
 6. 降级：旧版本取第一个 active secretary 项目，`default` 的项目最先登记，降级后主数据仍是它；多秘书数据被旧版本忽略。
 

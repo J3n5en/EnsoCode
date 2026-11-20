@@ -14,6 +14,64 @@ import { type SecretarySectionView, SecretarySummary } from './secretaryView';
 const ACTION_CLASS =
   'flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
 
+/**
+ * 多个秘书时的整块标题：「秘书 (n)」+ 折叠箭头 + 新建。
+ * 折叠后只留标题行与合计的「等你」徽标，单个秘书时不渲染（保持原来的一行）。
+ */
+export function SecretaryGroupHeader({
+  count,
+  folded,
+  needsYou,
+  onToggleFold,
+  onCreate,
+}: {
+  count: number;
+  folded: boolean;
+  needsYou: number;
+  onToggleFold: () => void;
+  onCreate: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      data-enso="secretary-group"
+      data-expanded={!folded || undefined}
+      className="group flex w-full items-center gap-1 px-2 py-1"
+    >
+      <button
+        type="button"
+        data-enso="secretary-group-fold"
+        onClick={onToggleFold}
+        aria-expanded={!folded}
+        className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11.5px] font-medium text-muted-foreground"
+      >
+        <ChevronDown className={cn('size-3 shrink-0', folded && '-rotate-90')} />
+        <span className="truncate">
+          {t('Secretary')} ({count})
+        </span>
+      </button>
+      {folded && needsYou > 0 && (
+        <span data-enso="secretary-badge" className="shrink-0 text-[11px] font-medium text-warning">
+          {t('{{n}} waiting', { n: needsYou })}
+        </span>
+      )}
+      <button
+        type="button"
+        data-enso="secretary-group-create"
+        onClick={onCreate}
+        title={t('New secretary')}
+        aria-label={t('New secretary')}
+        className={SECTION_ACTION_CLASS}
+      >
+        <Plus className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+const SECTION_ACTION_CLASS =
+  '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100';
+
 /** 秘书是置顶伪项目：不投进普通项目列表，否则会受分组筛选与拖拽排序影响 */
 export function sidebarProjects<T extends { kind?: string }>(projects: readonly T[]): T[] {
   return projects.filter((project) => project.kind !== 'scratch' && project.kind !== 'secretary');
@@ -39,10 +97,13 @@ export function SecretarySidebarSection({
   onNewConversation,
   onOpenSettings,
   onReset,
+  divider = true,
   children,
 }: SecretarySectionActions & {
   view: SecretarySectionView;
   folded: boolean;
+  /** 多个秘书时只有最后一个分区画分隔线 */
+  divider?: boolean;
   children: React.ReactNode;
 }) {
   const { t } = useI18n();
@@ -143,7 +204,7 @@ export function SecretarySidebarSection({
         </ContextMenuPopup>
       </ContextMenu>
       {!folded && <div className="flex flex-col">{children}</div>}
-      <div data-enso="secretary-divider" className="mx-2 mt-1 border-t border-border" />
+      {divider && <div data-enso="secretary-divider" className="mx-2 mt-1 border-t border-border" />}
     </div>
   );
 }

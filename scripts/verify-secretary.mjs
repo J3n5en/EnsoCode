@@ -154,7 +154,7 @@ async function waitFor(check, label, timeoutMs = 30_000, intervalMs = 250) {
   while (Date.now() < deadline) {
     last = await check();
     if (last) return last;
-    await delay(intervalMs);
+    await sleep(intervalMs);
   }
   throw new Error(`timeout waiting for ${label} (last: ${JSON.stringify(last)})`);
 }
@@ -271,9 +271,9 @@ async function stopAll() {
     log(`  stopped ${name} (${child.pid ?? 'not-started'})`);
   }
   signalOwned('SIGTERM');
-  await delay(1500);
+  await sleep(1500);
   signalOwned('SIGKILL');
-  await delay(200);
+  await sleep(200);
 }
 
 function removeIsolateDirs() {
@@ -705,12 +705,12 @@ async function run(cdp, pluginZipUrl) {
         throw error;
       }
       log(`  renderer reloaded during setup, retry ${attempt}`);
-      await delay(500);
+      await sleep(500);
       continue;
     }
     if (setup?.error !== 'renderer stores not ready' || attempt >= 3) break;
     log(`  renderer not ready, retry ${attempt}`);
-    await delay(500);
+    await sleep(500);
   }
   assert(setup.ok, 'setup: 隔离实例里建出项目与秘书会话', setup);
   await cdp.shot(path.join(ART, '01-sidebar.png'));
@@ -926,7 +926,7 @@ async function run(cdp, pluginZipUrl) {
     500
   ).catch(() => null);
   assert(Boolean(goalDone), 'step6: 派出会话报了目标完成', readJson(dispatchFile).dispatched);
-  await delay(1500);
+  await sleep(1500);
   const goalRow = await page(`
     return JSON.stringify({ goal: S().conversations[${JSON.stringify(dispatchedId)}]?.goal ?? null });
   `);
@@ -1443,12 +1443,12 @@ async function run(cdp, pluginZipUrl) {
     70_000,
     250
   );
-  await delay(1000);
+  await sleep(1000);
   const feedB = await dispatchSlow('动态时间 B', 25_000);
   const feedIds = [feedB.conversationId, feedA.conversationId];
   const feedSamples = [];
   for (let index = 0; index < 6; index += 1) {
-    await delay(index === 0 ? 1500 : 2000);
+    await sleep(index === 0 ? 1500 : 2000);
     feedSamples.push(await sampleFeed(feedIds));
   }
   // 刚派出时 worker 状态可能再切一次，以第一次采样为基准，之后不许再动
@@ -1636,7 +1636,7 @@ async function run(cdp, pluginZipUrl) {
     60_000,
     500
   );
-  await delay(2000);
+  await sleep(2000);
   const waitRecord = readJson(dispatchFile).dispatched[waitId];
   assert(
     waitRecord.lastResult?.kind !== 'needs-user',
@@ -1798,7 +1798,7 @@ async function run(cdp, pluginZipUrl) {
     'step11: 等还在跑的后台任务时不报停住',
     bgSettled.lastResult
   );
-  await delay(2500);
+  await sleep(2500);
   const bgAfter = readJson(dispatchFile).dispatched[bgId];
   assert(bgAfter.lastState !== 'error', 'step11: 等过收口窗口会话仍不是 error', bgAfter);
   assert(
@@ -1823,7 +1823,7 @@ async function run(cdp, pluginZipUrl) {
     400
   ).catch(() => false);
   assert(blockedSeen, 'step11: 真正调用 goal_blocked 时秘书能收到', blockedId);
-  await delay(2500);
+  await sleep(2500);
   assert(
     (await secretaryCount(blockedDispatch.secretaryId, blockedId, 'goal-blocked')) === 1,
     'step11: goal-blocked 只推一次',
@@ -1869,7 +1869,7 @@ async function run(cdp, pluginZipUrl) {
     300
   ).catch(() => false);
   assert(completeSeen, 'step11: 完成后秘书收到更新', completeId);
-  await delay(1500);
+  await sleep(1500);
   assert(
     (await secretaryCount(completeDispatch.secretaryId, completeId, 'goal-complete')) === 1,
     'step11: goal-complete 只推一次',
@@ -2893,6 +2893,24 @@ function keyboardError(markup) {
 async function startFakeTelegram(port) {
   const state = {
     token: '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw',
+    /** 第二个 bot：多秘书验收用，各开各的轮询 */
+    tokens: {
+      '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw': {
+        id: 424242,
+        is_bot: true,
+        username: 'enso_verify_bot',
+        first_name: 'Enso Verify',
+      },
+      '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw': {
+        id: 424243,
+        is_bot: true,
+        username: 'enso_verify_bot_2',
+        first_name: 'Enso Verify 2',
+      },
+    },
+    /** 每个 token 正在挂着的 getUpdates 数：同一时刻最多一个才算「一个轮询」 */
+    polling: {},
+    maxPolling: {},
     me: { id: 424242, is_bot: true, username: 'enso_verify_bot', first_name: 'Enso Verify' },
     sent: [],
     edited: [],
@@ -2907,12 +2925,17 @@ async function startFakeTelegram(port) {
     markupEdits: [],
     polls: 0,
     queue: [],
+    queues: {},
     waiters: [],
   };
-  const push = (update) => {
-    const waiter = state.waiters.shift();
-    if (waiter) waiter([update]);
-    else state.queue.push(update);
+  /** 按 token 分开排队：两个 bot 各收各的更新 */
+  const push = (update, token = state.token) => {
+    const waiter = state.waiters.find((entry) => entry.token === token);
+    if (waiter) {
+      state.waiters = state.waiters.filter((entry) => entry !== waiter);
+      waiter.fn([update]);
+    } else if (token === state.token) state.queue.push(update);
+    else (state.queues[token] ??= []).push(update);
   };
   const server = createHttpServer((request, response) => {
     const chunks = [];
@@ -2938,22 +2961,30 @@ async function startFakeTelegram(port) {
       } catch {
         body = {};
       }
-      if (token !== state.token) {
+      const me = state.tokens[token];
+      if (!me) {
         reply({ ok: false, error_code: 401, description: 'Unauthorized' });
         return;
       }
       if (state.polls <= 2 || method !== 'getUpdates') log(`  tg: ${method}`);
       if (method === 'getMe') {
-        reply({ ok: true, result: state.me });
+        reply({ ok: true, result: me });
         return;
       }
       if (method === 'getUpdates') {
         state.polls += 1;
-        if (state.queue.length > 0) {
-          reply({ ok: true, result: state.queue.splice(0) });
+        state.polling[token] = (state.polling[token] ?? 0) + 1;
+        state.maxPolling[token] = Math.max(state.maxPolling[token] ?? 0, state.polling[token]);
+        const release = () => {
+          state.polling[token] -= 1;
+        };
+        response.on('close', release);
+        const queue = token === state.token ? state.queue : (state.queues[token] ??= []);
+        if (queue.length > 0) {
+          reply({ ok: true, result: queue.splice(0) });
           return;
         }
-        const waiter = (updates) => reply({ ok: true, result: updates });
+        const waiter = { token, fn: (updates) => reply({ ok: true, result: updates }) };
         state.waiters.push(waiter);
         // 长轮询挂 2 秒回空：客户端自己再来，验收结束时不会留下挂死的请求
         const timer = setTimeout(() => {
@@ -3290,7 +3321,7 @@ async function verifyTelegramContact(cdp, setup) {
     quietRun
   );
   await waitGoal(quietRun.conversationId);
-  await delay(1500);
+  await sleep(1500);
   assert(
     !tg.sent.some((message) => message.text?.includes('✅ 完成')),
     '联系方式: notify=off 时里程碑一条都不发',
@@ -3700,7 +3731,7 @@ async function verifyTelegramContact(cdp, setup) {
       text: '/status',
     },
   });
-  await delay(1500);
+  await sleep(1500);
   assert(
     !tg.sent.slice(mark).some((message) => message.text?.includes('需要你处理')),
     '联系方式: 别的 chat 发命令一律不执行',
@@ -3857,7 +3888,7 @@ async function verifyTelegramContact(cdp, setup) {
       60_000,
       500
     );
-    await delay(800);
+    await sleep(800);
   };
 
   let turnBefore = await assistantCount();
@@ -3914,7 +3945,7 @@ async function verifyTelegramContact(cdp, setup) {
   await secretaryTurn('[[reply:关掉后不该发]]');
   await waitTurnSettled(turnBefore, 'turn settled after sync off');
   const offReply = await lastAssistantText();
-  await delay(1500);
+  await sleep(1500);
   assert(
     !tg.sent
       .slice(mark)
@@ -4205,7 +4236,7 @@ async function verifyTelegramContact(cdp, setup) {
       text: '解绑后还能说话吗',
     },
   });
-  await delay(2500);
+  await sleep(2500);
   assert(tg.polls === pollsAfterUnbind, '联系方式: 解绑后不再轮询', {
     before: pollsAfterUnbind,
     after: tg.polls,
@@ -5688,7 +5719,7 @@ async function secretaryTool(cdp, setup, toolName, args, ask) {
   const prompt = `${ask} [[tool:${toolName} ${JSON.stringify(args)}]]`;
   return cdp.json(`
     const secretary = await SEC();
-    const id = await secretary.getState().newSecretaryConversation();
+    const id = await secretary.getState().newSecretaryConversation({ secretaryId: 'default' });
     S().selectConversation(id);
     const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.secretaryProjectId)});
     const textOf = (message) =>
@@ -6235,7 +6266,7 @@ async function verifyToolCards(cdp, setup) {
       card?.scrollIntoView({ block: 'center' });
       return JSON.stringify({ ok: Boolean(card) });
     `);
-    await delay(300);
+    await sleep(300);
     await cdp.shot(path.join(ART, file));
   };
 
@@ -6619,6 +6650,558 @@ async function verifyTakeover(cdp, setup) {
     plainRows
   );
   await cdp.shot(path.join(ART, '09-plain-tool-rows.png'));
+
+  await verifyMultiSecretary(cdp, setup);
+}
+
+/**
+ * 多秘书：两个秘书结果各回各的、接管对方会话被拒、转交、侧栏整块折叠刷新后保持、
+ * 总看板筛选、假 Telegram 下两个话题各进各的秘书、同一 bot + chat + 话题重复绑定被拒、
+ * 未绑定的完全不响应、一个 token 只有一个轮询、两个 token 各一个轮询、
+ * 删除秘书的提醒与二次确认、秘书间消息第 5 跳被拦、范围取交集。
+ * 全部走界面与 IPC，不直接改磁盘。
+ */
+async function verifyMultiSecretary(cdp, setup) {
+  let page = cdp.json.bind(cdp);
+  const root = path.join(ENV, 'secretary');
+  const memberDir = (id) => path.join(root, 'members', id);
+
+  log('== 多秘书：新建第二个秘书');
+  const created = await page(`
+    const result = await window.electronAPI.secretary.create();
+    if (!result.ok) return JSON.stringify(result);
+    const saved = await window.electronAPI.secretary.saveProfile(
+      {
+        name: '阿财',
+        avatar: { color: '#22c55e' },
+        visibleProjectIds: 'all',
+        maxRunningDispatches: 3,
+        patrolEnabled: true,
+        replyLanguage: 'ui',
+        style: 'concise',
+        notify: 'off',
+        addressAs: null,
+        dailyBriefAt: null,
+      },
+      result.secretaryId
+    );
+    const secretary = await SEC();
+    const conversationId = await secretary
+      .getState()
+      .newSecretaryConversation({ secretaryId: result.secretaryId });
+    return JSON.stringify({
+      ok: saved.ok && Boolean(conversationId),
+      secretaryId: result.secretaryId,
+      conversationId,
+      error: saved.ok ? null : saved.error,
+    });
+  `);
+  assert(created.ok, '多秘书: 第二个秘书建出来并有自己的会话', created);
+  const second = created.secretaryId;
+
+  log('== 多秘书：结果各回各的');
+  const routed = await page(`
+    const api = window.electronAPI.secretary;
+    const secretary = await SEC();
+    const directive = (title) =>
+      '派个活 [[tool:session_create ' +
+      JSON.stringify({ projectId: ${JSON.stringify(setup.projectId)}, prompt: '写一行', title }) +
+      ']]';
+    const make = async (secretaryId, title) => {
+      const conversationId = await secretary.getState().newSecretaryConversation({ secretaryId });
+      const project = SET().projects.find(
+        (entry) => entry.id === secretary.getState().states[secretaryId].projectId
+      );
+      await S().send(
+        directive(title),
+        { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+        undefined,
+        conversationId
+      );
+      const card = await until(() => {
+        const board = secretary.getState().states[secretaryId]?.board;
+        return [...(board?.needsYou ?? []), ...(board?.running ?? []), ...(board?.done ?? [])].find(
+          (entry) => entry.kind === 'session' && entry.title === title
+        ) ?? null;
+      }, 30000);
+      return card?.conversationId ?? null;
+    };
+    const first = await make('default', '小安的活');
+    const other = await make(${JSON.stringify(second)}, '阿财的活');
+    const boards = () => secretary.getState().states;
+    const titles = (id) => {
+      const board = boards()[id]?.board ?? { needsYou: [], running: [], done: [] };
+      return [...board.needsYou, ...board.running, ...board.done]
+        .filter((card) => card.kind === 'session')
+        .map((card) => card.title);
+    };
+    return JSON.stringify({
+      ok: Boolean(first) && Boolean(other),
+      first,
+      other,
+      defaultTitles: titles('default'),
+      secondTitles: titles(${JSON.stringify(second)}),
+    });
+  `);
+  assert(routed.ok, '多秘书: 两个秘书各派一个活', routed);
+  assert(
+    routed.defaultTitles.includes('小安的活') && !routed.defaultTitles.includes('阿财的活'),
+    '多秘书: 小安的看板只有小安的活',
+    routed
+  );
+  assert(
+    routed.secondTitles.includes('阿财的活') && !routed.secondTitles.includes('小安的活'),
+    '多秘书: 阿财的看板只有阿财的活',
+    routed
+  );
+  // 重启后归属不变：两份派发文件各记各的
+  const defaultDispatch = readJson(path.join(root, 'dispatch.json'));
+  const secondDispatch = readJson(path.join(memberDir(second), 'dispatch.json'));
+  assert(
+    Object.hasOwn(defaultDispatch.dispatched, routed.first) &&
+      !Object.hasOwn(defaultDispatch.dispatched, routed.other) &&
+      Object.hasOwn(secondDispatch.dispatched, routed.other) &&
+      !Object.hasOwn(secondDispatch.dispatched, routed.first),
+    '多秘书: 派发记录按秘书分文件，重启后归属不变',
+    { first: routed.first, other: routed.other }
+  );
+
+  log('== 多秘书：接管对方的会话被拒');
+  const refused = await secretaryTool(
+    cdp,
+    setup,
+    'session_takeover_propose',
+    { conversationId: routed.other },
+    '把阿财派出的那个会话接管过来'
+  );
+  assert(
+    refused.text?.includes('managed-by-other'),
+    '多秘书: 接管另一个秘书派出的会话被拒，原因是 managed-by-other',
+    refused
+  );
+
+  log('== 多秘书：转交');
+  const transferred = await page(`
+    const result = await window.electronAPI.secretary.transfer(
+      ${JSON.stringify(routed.first)},
+      ${JSON.stringify(second)}
+    );
+    const secretary = await SEC();
+    const seen = await until(() => {
+      const board = secretary.getState().states[${JSON.stringify(second)}]?.board;
+      return [...(board?.needsYou ?? []), ...(board?.running ?? []), ...(board?.done ?? [])].some(
+        (card) => card.conversationId === ${JSON.stringify(routed.first)}
+      )
+        ? true
+        : null;
+    }, 15000);
+    return JSON.stringify({ ok: result.ok && seen === true, error: result.ok ? null : result.error });
+  `);
+  assert(transferred.ok, '多秘书: 会话从小安转交给阿财，阿财的看板上出现它', transferred);
+  const after = readJson(path.join(memberDir(second), 'dispatch.json'));
+  const before = readJson(path.join(root, 'dispatch.json'));
+  assert(
+    Object.hasOwn(after.dispatched, routed.first) &&
+      !Object.hasOwn(before.dispatched, routed.first),
+    '多秘书: 转交后记录只在接收方的文件里'
+  );
+
+  log('== 多秘书：侧栏整块折叠，刷新后保持');
+  const folded = await page(`
+    const header = document.querySelector('[data-enso=secretary-group]');
+    if (!header) return JSON.stringify({ ok: false, error: 'no group header' });
+    header.querySelector('[data-enso=secretary-group-fold]').click();
+    await sleep(300);
+    return JSON.stringify({
+      ok: header.getAttribute('data-expanded') === null &&
+        localStorage.getItem('enso-collapsed-secretary-group') === '1',
+    });
+  `);
+  assert(folded.ok, '多秘书: 侧栏整块折叠写入 localStorage', folded);
+  // 刷新后折叠保持：reload 会毁掉当前执行上下文，所以重新连一次
+  await cdp.evaluate('location.reload()');
+  await sleep(1500);
+  const reloaded = await waitForStableRenderer();
+  const kept = await reloaded.json(`
+    const header = await until(() => document.querySelector('[data-enso=secretary-group]'), 30000);
+    return JSON.stringify({
+      ok: Boolean(header) &&
+        header.getAttribute('data-expanded') === null &&
+        document.querySelectorAll('[data-enso=secretary-section]').length === 0,
+    });
+  `);
+  assert(kept.ok, '多秘书: 刷新后整块折叠保持，秘书行都不渲染', kept);
+  await reloaded.json(`
+    document.querySelector('[data-enso=secretary-group-fold]')?.click();
+    await sleep(300);
+    return JSON.stringify({ ok: true });
+  `);
+  page = reloaded.json.bind(reloaded);
+
+  log('== 多秘书：总看板筛选');
+  const overview = await page(`
+    const secretary = await SEC();
+    secretary.getState().focus(${JSON.stringify(second)});
+    S().selectConversation(${JSON.stringify(created.conversationId)});
+    await sleep(400);
+    // 这个会话还没开过秘书面板：从「新建标签页」里打开
+    const toggles = [...document.querySelectorAll('button')].filter(
+      (button) => button.getAttribute('aria-label') === '新建标签页' && button.offsetParent !== null
+    );
+    toggles.at(-1)?.click();
+    const item = await until(() => document.querySelector('[data-enso=secretary-panel-open]'), 5000);
+    item?.click();
+    await sleep(800);
+    const panel = visiblePanel();
+    const option = (scope) =>
+      panel?.querySelector('[data-enso=secretary-board-scope-option][data-scope="' + scope + '"]');
+    if (!option('all')) return JSON.stringify({ ok: false, error: 'no scope switch' });
+    const titles = (boards) =>
+      boards.flatMap((entry) =>
+        [...entry.board.needsYou, ...entry.board.running, ...entry.board.done]
+          .filter((card) => card.kind === 'session')
+          .map((card) => card.title)
+      );
+    const all = await window.electronAPI.secretary.overview();
+    const of = (id) =>
+      all.ok ? titles(all.boards.filter((entry) => entry.secretaryId === id)) : [];
+    option('all').click();
+    await sleep(400);
+    const select = panel.querySelector('[data-enso=secretary-board-filter]');
+    const textAll = panel.innerText;
+    if (select) {
+      select.value = ${JSON.stringify(second)};
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    await sleep(400);
+    const textFiltered = panel.innerText;
+    option('own').click();
+    return JSON.stringify({
+      ok:
+        all.ok &&
+        all.boards.length === 2 &&
+        of('default').includes('小安的活') === false &&
+        of(${JSON.stringify(second)}).includes('阿财的活') &&
+        of('default').length > 0 &&
+        textFiltered !== textAll &&
+        panel.querySelector('[data-enso=secretary-board-filter]')?.value === ${JSON.stringify(second)},
+      hasFilter: Boolean(select),
+      perSecretary: all.ok ? all.boards.map((entry) => ({ id: entry.secretaryId, n: titles([entry]).length })) : all.error,
+    });
+  `);
+  assert(overview.ok, '多秘书: 总看板含两个秘书的卡片，按秘书筛选后只剩一个', overview);
+
+  log('== 多秘书：同一个 bot，两个话题各进各的秘书');
+  const token = telegram.state.token;
+  const bound = await page(`
+    const api = window.electronAPI.secretary;
+    const bind = async (secretaryId) => {
+      const result = await api.contactBind(${JSON.stringify(token)}, secretaryId);
+      if (!result.ok) return null;
+      const state = await api.contactState(secretaryId);
+      return state.telegram.bind?.code ?? null;
+    };
+    const first = await bind('default');
+    const other = await bind(${JSON.stringify(second)});
+    return JSON.stringify({ ok: Boolean(first) && Boolean(other), first, other });
+  `);
+  assert(bound.ok, '多秘书: 两个秘书都生成了绑定码', bound);
+  // 一条一条绑并等它落盘：两条挤在同一次 getUpdates 里时，轮询重启可能把后一条的确认冲掉
+  const bindTopic = async (updateId, topicId, code, secretaryId) => {
+    telegram.push({
+      update_id: updateId,
+      message: {
+        message_id: updateId,
+        chat: { id: -100, type: 'supergroup', title: '工作群', is_forum: true },
+        from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+        message_thread_id: topicId,
+        is_topic_message: true,
+        text: '/bind@enso_verify_bot ' + code,
+      },
+    });
+    return page(`
+      const ready = await until(async () => {
+        const state = await window.electronAPI.secretary.contactState(${JSON.stringify(secretaryId)});
+        return (state.telegram.routes ?? []).some((route) => route.topicId === '${topicId}')
+          ? state.telegram.routes
+          : null;
+      }, 20000);
+      return JSON.stringify(ready ?? []);
+    `);
+  };
+  const routes = {
+    a: await bindTopic(9001, 7, bound.first, 'default'),
+    b: await bindTopic(9002, 9, bound.other, second),
+  };
+  assert(
+    routes.a?.some((route) => route.topicId === '7') &&
+      routes.b?.some((route) => route.topicId === '9'),
+    '多秘书: 话题 7 绑小安，话题 9 绑阿财',
+    routes
+  );
+
+  log('== 多秘书：同一 bot + chat + 话题重复绑定被拒');
+  const conflicted = await page(`
+    const result = await window.electronAPI.secretary.contactBind(
+      undefined,
+      ${JSON.stringify(second)}
+    );
+    if (!result.ok) return JSON.stringify(result);
+    const state = await window.electronAPI.secretary.contactState(${JSON.stringify(second)});
+    return JSON.stringify({ ok: true, code: state.telegram.bind?.code ?? null });
+  `);
+  assert(conflicted.ok && conflicted.code, '多秘书: 阿财拿到新的绑定码', conflicted);
+  const sentBefore = telegram.state.sent.length;
+  telegram.push({
+    update_id: 9003,
+    message: {
+      message_id: 3,
+      chat: { id: -100, type: 'supergroup', title: '工作群', is_forum: true },
+      from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      message_thread_id: 7,
+      is_topic_message: true,
+      text: '/bind@enso_verify_bot ' + conflicted.code,
+    },
+  });
+  await sleep(1500);
+  const secondRoutes = readJson(path.join(memberDir(second), 'contact.json')).telegramRoutes ?? [];
+  assert(
+    !secondRoutes.some((route) => route.topicId === '7'),
+    '多秘书: 话题 7 再绑给阿财被拒，路由没写进去',
+    secondRoutes
+  );
+  assert(telegram.state.sent.length === sentBefore, '多秘书: 冲突时不在群里回话', {
+    sent: telegram.state.sent.length - sentBefore,
+  });
+
+  log('== 多秘书：未绑定的话题完全不响应');
+  telegram.push({
+    update_id: 9004,
+    message: {
+      message_id: 4,
+      chat: { id: -100, type: 'supergroup', title: '工作群', is_forum: true },
+      from: { id: 777001, username: 'j3n5en', first_name: 'J' },
+      message_thread_id: 11,
+      is_topic_message: true,
+      text: '有人吗',
+    },
+  });
+  await sleep(1500);
+  assert(telegram.state.sent.length === sentBefore, '多秘书: 未绑定的话题不响应、不提示');
+
+  log('== 多秘书：两个 token 各一个轮询');
+  const otherToken = '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
+  const secondBot = await page(`
+    const api = window.electronAPI.secretary;
+    const forgotten = await api.contactForgetBot(${JSON.stringify(second)});
+    if (!forgotten.ok) return JSON.stringify(forgotten);
+    const bound2 = await api.contactBind(${JSON.stringify(otherToken)}, ${JSON.stringify(second)});
+    if (!bound2.ok) return JSON.stringify(bound2);
+    const state = await api.contactState(${JSON.stringify(second)});
+    return JSON.stringify({ ok: true, code: state.telegram.bind?.code ?? null });
+  `);
+  assert(secondBot.ok && secondBot.code, '多秘书: 阿财换了自己的 bot 并拿到绑定码', secondBot);
+  // 只看这一段窗口里同时挂着的 getUpdates 数
+  telegram.state.maxPolling = { ...telegram.state.polling };
+  telegram.push(
+    {
+      update_id: 9010,
+      message: {
+        message_id: 10,
+        chat: { id: 555001, type: 'private' },
+        from: { id: 555001, username: 'j3n5en', first_name: 'J' },
+        text: '/start ' + secondBot.code,
+      },
+    },
+    otherToken
+  );
+  await sleep(2500);
+  const concurrent = telegram.state.maxPolling;
+  assert(
+    (concurrent[token] ?? 0) === 1 && (concurrent[otherToken] ?? 0) === 1,
+    '多秘书: 一个 token 同一时刻只有一个 getUpdates，两个 token 各一个',
+    concurrent
+  );
+
+  log('== 多秘书：删除秘书的提醒与二次确认');
+  const deletion = await page(`
+    const api = window.electronAPI.secretary;
+    const preview = await api.deletePreview(${JSON.stringify(second)});
+    const refused = await api.deleteSecretary(${JSON.stringify(second)}, false);
+    return JSON.stringify({
+      ok: preview.ok,
+      sessions: preview.ok ? preview.preview.sessions.length : 0,
+      contacts: preview.ok ? preview.preview.contacts : [],
+      refused: refused.ok ? null : refused.error,
+    });
+  `);
+  assert(
+    deletion.ok && deletion.sessions > 0 && deletion.refused === 'confirmation-required',
+    '多秘书: 删除前列出它在管的会话，不带二次确认就拒绝',
+    deletion
+  );
+  const removed = await page(`
+    const result = await window.electronAPI.secretary.deleteSecretary(${JSON.stringify(second)}, true);
+    const list = await window.electronAPI.secretary.list();
+    return JSON.stringify({ ok: result.ok, left: list.map((entry) => entry.id), error: result.error ?? null });
+  `);
+  assert(
+    removed.ok && removed.left.length === 1 && removed.left[0] === 'default',
+    '多秘书: 二次确认后删除，只剩原来的秘书',
+    removed
+  );
+  assert(!existsSync(memberDir(second)), '多秘书: 删除后它的目录与绑定路由一起释放');
+
+  log('== 多秘书：秘书间消息第 5 跳被拦，范围取交集');
+  const third = await page(`
+    const api = window.electronAPI.secretary;
+    const created3 = await api.create();
+    if (!created3.ok) return JSON.stringify(created3);
+    await api.saveProfile(
+      {
+        name: '阿财',
+        avatar: { color: '#22c55e' },
+        visibleProjectIds: 'all',
+        maxRunningDispatches: 3,
+        patrolEnabled: false,
+        replyLanguage: 'ui',
+        style: 'concise',
+        notify: 'off',
+      },
+      created3.secretaryId
+    );
+    const secretary = await SEC();
+    const conversationId = await secretary
+      .getState()
+      .newSecretaryConversation({ secretaryId: created3.secretaryId });
+    return JSON.stringify({ ok: Boolean(conversationId), secretaryId: created3.secretaryId, conversationId });
+  `);
+  assert(third.ok, '多秘书: 第三个秘书只看得见一个项目', third);
+  // 链路由 Main 判定：往阿财的在途批次里放一条第 4 跳的同事消息，紧接着让阿财回一句。
+  // 这一回合由同事消息触发，回过去就是第 5 跳，应被 chain-limit 拦住。
+  const fourth = {
+    key: 'peer:verify-chain:4:default:1',
+    at: Date.now(),
+    text: '请回我一句',
+    kind: 'peer-message',
+    fromSecretaryId: 'default',
+    fromName: '秘书',
+    chain: 'verify-chain',
+    hop: 4,
+    origins: ['default'],
+    secretaryConversationId: third.conversationId,
+  };
+  const memberDispatch = path.join(memberDir(third.secretaryId), 'dispatch.json');
+  const current = existsSync(memberDispatch)
+    ? readJson(memberDispatch)
+    : { version: 1, dispatched: {}, proposals: {}, outbox: [] };
+  current.outbox = [...(current.outbox ?? []).filter((entry) => entry.key !== fourth.key), fourth];
+  current.inflight = {
+    deliveryId: 'verify-inflight',
+    secretaryConversationId: third.conversationId,
+    keys: [fourth.key],
+    attempt: 1,
+    nextAttemptAt: Date.now() + 600000,
+  };
+  writeFileSync(memberDispatch, JSON.stringify(current));
+  const bounced = await page(`
+    const secretary = await SEC();
+    const project = SET().projects.find(
+      (entry) => entry.id === secretary.getState().states[${JSON.stringify(third.secretaryId)}].projectId
+    );
+    const id = ${JSON.stringify(third.conversationId)};
+    await S().send(
+      '回小安一句 [[tool:secretary_message {"to":"秘书","text":"收到"}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+      undefined,
+      id
+    );
+    const result = await until(
+      () => (S().conversations[id]?.messages ?? []).find(
+        (message) => message.toolName === 'secretary_message'
+      ) ?? null,
+      40000
+    );
+    const text = result
+      ? (Array.isArray(result.content) ? result.content : [])
+          .filter((part) => part.type === 'text')
+          .map((part) => part.text)
+          .join('')
+      : '';
+    return JSON.stringify({ ok: text.includes('chain-limit'), text });
+  `);
+  assert(bounced.ok, '多秘书: 第 5 跳被 chain-limit 拦住', bounced);
+
+  // 小安只看得见这一个项目：阿财本来看得见全部，降权回合里取交集后只能看到这一个
+  await page(`
+    const saved = await window.electronAPI.secretary.saveProfile(
+      { visibleProjectIds: [${JSON.stringify(setup.projectId)}] },
+      'default'
+    );
+    return JSON.stringify({ ok: saved.ok });
+  `);
+  mkdirSync(`${PROJ}-extra`, { recursive: true });
+  const extra = await page(`
+    const project = await SET().addProject(${JSON.stringify(PROJ + '-extra')});
+    return JSON.stringify({ id: project.id });
+  `);
+  const narrowed = await page(`
+    const secretary = await SEC();
+    const id = await secretary.getState().newSecretaryConversation({ secretaryId: ${JSON.stringify(third.secretaryId)} });
+    const project = SET().projects.find(
+      (entry) => entry.id === secretary.getState().states[${JSON.stringify(third.secretaryId)}].projectId
+    );
+    return JSON.stringify({ id, cwd: project.path });
+  `);
+  // 这一回合由小安发来的消息触发：小安只看得见一个项目，阿财看得见全部，取交集后只剩那一个
+  const trigger = {
+    key: 'peer:verify-scope:1:default:1',
+    at: Date.now(),
+    text: '看看你有哪些项目',
+    kind: 'peer-message',
+    fromSecretaryId: 'default',
+    fromName: '秘书',
+    chain: 'verify-scope',
+    hop: 1,
+    origins: ['default'],
+    secretaryConversationId: narrowed.id,
+  };
+  const scopeDispatch = readJson(memberDispatch);
+  scopeDispatch.outbox = [...(scopeDispatch.outbox ?? []), trigger];
+  scopeDispatch.inflight = {
+    deliveryId: 'verify-scope',
+    secretaryConversationId: narrowed.id,
+    keys: [trigger.key],
+    attempt: 1,
+    nextAttemptAt: Date.now() + 600000,
+  };
+  writeFileSync(memberDispatch, JSON.stringify(scopeDispatch));
+  const narrowedResult = await page(`
+    await S().send(
+      '看看全部项目 [[tool:project_list {}]]',
+      { providerId: 'pv-A', modelId: 'fake-model-1', cwd: ${JSON.stringify(narrowed.cwd)} },
+      undefined,
+      ${JSON.stringify(narrowed.id)}
+    );
+    const result = await until(() => {
+      const messages = S().conversations[${JSON.stringify(narrowed.id)}]?.messages ?? [];
+      const message = messages.filter((entry) => entry.toolName === 'project_list').at(-1);
+      const text = message
+        ? (Array.isArray(message.content) ? message.content : [])
+            .filter((part) => part.type === 'text')
+            .map((part) => part.text)
+            .join('')
+        : '';
+      return text ? text : null;
+    }, 40000);
+    return JSON.stringify({ text: result ?? '' });
+  `);
+  assert(
+    narrowedResult.text.includes(setup.projectId) &&
+      !narrowedResult.text.includes(extra.id),
+    '多秘书: 降权回合按可见范围取交集，发起方看不见的项目不出现',
+    { extra: extra.id, text: narrowedResult.text.slice(0, 300) }
+  );
 }
 
 process.on('SIGINT', () => {

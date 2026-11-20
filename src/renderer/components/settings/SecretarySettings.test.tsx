@@ -95,6 +95,8 @@ beforeEach(() => {
   Object.assign(dom.window, {
     electronAPI: {
       secretary: {
+        list: async () => [],
+        onListChanged: () => () => {},
         ...api,
         listSchedules: async () => ({ ok: true, schedules: [] }),
         listSkills: async () => ({ ok: true, skills: [] }),
@@ -151,7 +153,7 @@ describe('设置 → 秘书：同时运行的派发会话上限', () => {
     await mount();
     await act(async () => options()[8]?.click());
     expect(api.saveProfile).toHaveBeenCalledTimes(1);
-    expect(api.saveProfile).toHaveBeenCalledWith({ maxRunningDispatches: 9 });
+    expect(api.saveProfile).toHaveBeenCalledWith({ maxRunningDispatches: 9 }, undefined);
     expect(selected()).toEqual(['9']);
   });
 
@@ -185,7 +187,7 @@ describe('设置 → 秘书：同时运行的派发会话上限', () => {
     expect(formProps.current?.hideMaxRunning).toBe(true);
     const submit = formProps.current?.onSubmit as (draft: object) => void;
     await act(async () => submit({ name: '小秘', maxRunningDispatches: 3 }));
-    expect(api.saveProfile).toHaveBeenCalledWith({ name: '小秘' });
+    expect(api.saveProfile).toHaveBeenCalledWith({ name: '小秘' }, undefined);
   });
 
   it('标题与说明有中文', () => {
@@ -239,9 +241,10 @@ describe('设置 → 秘书：可接管的会话', () => {
     ) as HTMLButtonElement;
     expect(project.textContent).toBe('enso');
     await act(async () => project.click());
-    expect(api.saveProfile).toHaveBeenCalledWith({
-      takeoverScope: { mode: 'projects', projectIds: ['p1'] },
-    });
+    expect(api.saveProfile).toHaveBeenCalledWith(
+      { takeoverScope: { mode: 'projects', projectIds: ['p1'] } },
+      undefined
+    );
     expect(scopeButtons().some((button) => button.textContent === '秘书')).toBe(false);
   });
 
@@ -250,9 +253,12 @@ describe('设置 → 秘书：可接管的会话', () => {
     api.saveProfile.mockResolvedValue({ ok: true, profile: profile(3, 2) });
     await mount();
     await act(async () => scopeButtons()[2]?.click());
-    expect(api.saveProfile).toHaveBeenLastCalledWith({ takeoverScope: { mode: 'all' } });
+    expect(api.saveProfile).toHaveBeenLastCalledWith({ takeoverScope: { mode: 'all' } }, undefined);
     await act(async () => scopeButtons()[0]?.click());
-    expect(api.saveProfile).toHaveBeenLastCalledWith({ takeoverScope: { mode: 'explicit' } });
+    expect(api.saveProfile).toHaveBeenLastCalledWith(
+      { takeoverScope: { mode: 'explicit' } },
+      undefined
+    );
   });
 
   it('标题与说明有中文', () => {

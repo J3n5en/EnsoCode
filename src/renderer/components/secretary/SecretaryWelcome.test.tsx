@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 'en' }) }));
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
   useSecretaryStore: {
     getState: () => ({
       newSecretaryConversation: h.newSecretaryConversation,

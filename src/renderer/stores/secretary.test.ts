@@ -12,6 +12,7 @@ const proposal: SecretaryProposal = {
 };
 
 const stateWith = (status: SecretaryProposal['status']): SecretaryState => ({
+  secretaryId: 'default',
   enabled: true,
   projectId: 'sec-project',
   profile: null,
@@ -46,7 +47,13 @@ const settings = {
   projects: [{ id: 'sec-project', path: '/tmp/secretary', name: '秘书' }],
 };
 
-vi.mock('@/stores/sessions', () => ({ useSessionsStore: { getState: () => sessions } }));
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: Object.assign(() => undefined, {
+    getState: () => sessions,
+    // bind 里订阅当前会话以切换秘书：测试里不触发
+    subscribe: () => () => {},
+  }),
+}));
 vi.mock('@/stores/sidePanel', () => ({
   useSidePanelStore: { getState: () => ({ ensureOpen }) },
 }));
@@ -71,6 +78,11 @@ vi.stubGlobal('window', {
   electronAPI: {
     secretary: {
       getState: () => initialState,
+      list: () =>
+        Promise.resolve([
+          { id: 'default', projectId: 'sec-project', name: null, avatar: null, order: 0 },
+        ]),
+      onListChanged: () => () => {},
       onStateChanged: (callback: (state: SecretaryState) => void) => {
         listener = callback;
         return off;
@@ -98,7 +110,13 @@ describe('useSecretaryStore', () => {
     off.mockClear();
     offOpen.mockClear();
     resolveProposal.mockClear();
-    useSecretaryStore.setState({ secretary: EMPTY_SECRETARY_STATE, resolving: {} });
+    useSecretaryStore.setState({
+      secretary: EMPTY_SECRETARY_STATE,
+      resolving: {},
+      secretaries: [],
+      states: {},
+      focusedId: null,
+    });
   });
 
   it('bind 拉一次状态并订阅推送，推送覆盖初始快照', async () => {
@@ -266,7 +284,13 @@ describe('newSecretaryConversation', () => {
     sessions.setThinking.mockClear();
     sessions.send.mockClear();
     defaultModel.value = null;
-    useSecretaryStore.setState({ secretary: EMPTY_SECRETARY_STATE, resolving: {} });
+    useSecretaryStore.setState({
+      secretary: EMPTY_SECRETARY_STATE,
+      resolving: {},
+      secretaries: [],
+      states: {},
+      focusedId: null,
+    });
   });
 
   it('新建秘书会话用全局默认模型，不读档案里的旧模型；没有引导语时不发消息', async () => {

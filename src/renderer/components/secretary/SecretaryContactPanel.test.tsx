@@ -101,6 +101,8 @@ beforeEach(() => {
   pushState = () => {};
   (dom.window as unknown as Record<string, unknown>).electronAPI = {
     secretary: {
+      list: async () => [],
+      onListChanged: () => () => {},
       contactState: vi.fn(async () => state),
       onContactChanged: vi.fn((callback: (next: SecretaryContactState) => void) => {
         pushState = callback;
