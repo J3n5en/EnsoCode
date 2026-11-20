@@ -1,36 +1,19 @@
 // 优雅重启的安全点判定与断点文件。agent worker 与 scripts/graceful-restart-sim.mjs 共用本文件
 // （模拟器由 Node 直接剥类型执行），所以只依赖 node:fs、只用可擦除的 TS 语法。
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import type {
+  RestartCheckpoint,
+  RestartCheckpointEntry,
+  RestartDeferReason,
+  RestartNextStep,
+} from './types/gracefulRestart';
+
+export type { RestartCheckpoint, RestartCheckpointEntry, RestartDeferReason, RestartNextStep };
 
 export const RESTART_CHECKPOINT_FILE = 'restart-checkpoint.json';
 export const RESTART_CHECKPOINT_ARCHIVE = 'restart-checkpoint.consumed.json';
 /** Main 只在优雅重启拉起新 worker 时设置：新 worker 据此接管断点 */
 export const RESTART_CHECKPOINT_ENV = 'ENSO_AGENT_RESTART_CHECKPOINT';
-
-export type RestartNextStep = 'model-request' | 'await-user';
-export type RestartDeferReason = 'tool-in-flight' | 'turn-in-progress';
-
-export interface RestartCheckpointEntry {
-  sessionId: string;
-  generation: string;
-  sessionFile: string;
-  /** 旧进程最后一个事件序号：新进程从这里接着编号 */
-  seq: number;
-  nextStep: RestartNextStep;
-  /** nextStep=model-request 时是被挂起的那一轮；await-user 为 null */
-  turnId: string | null;
-  lastCompletedToolCallId: string | null;
-  /** 落盘时上下文里的消息条数 */
-  messageCount: number;
-  toolsInFlight: string[];
-}
-
-export interface RestartCheckpoint {
-  version: 1;
-  pid: number;
-  writtenAt: number;
-  sessions: RestartCheckpointEntry[];
-}
 
 export interface RestartGateInput {
   toolsInFlight: readonly string[];

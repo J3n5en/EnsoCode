@@ -65,7 +65,6 @@ import {
 } from '../extensionPlugins/protocol';
 import { parsePluginToolName } from '../extensionPlugins/toolName';
 import type { PluginEventPlan, PluginToolDescriptor } from '../extensionPlugins/types';
-import type { RestartCheckpoint, RestartDeferReason } from '../gracefulRestart';
 import { type ImageGenerationConfig, parseImageGenerationConfig } from '../imageGeneration';
 import { parseGeneratedImagePaths } from '../imageGenerationResults';
 import { parseMaxActiveCoworkers } from '../maxActiveCoworkers';
@@ -114,6 +113,7 @@ import {
   type ProjectedApplyPatchOutcome,
   type ProjectedFileChange,
 } from './fileChanges';
+import type { RestartCheckpoint, RestartDeferReason } from './gracefulRestart';
 import {
   MODEL_API_KINDS,
   MODEL_REASONING_OVERRIDES,
