@@ -1,7 +1,7 @@
-import { toLocalImageUrl } from '@shared/localImage';
 import { SECRETARY_OPS } from '@shared/secretary/tools';
 import { parseMemoryCapture, parseMemorySearchHits } from '@/components/chat/memorySearchHits';
 import { parseMcpToolName } from '@/lib/mcpToolName';
+import { parseImageViewFacts } from '@/lib/toolImage';
 import { TOOL_LABEL_KEYS } from '@/lib/toolLabels';
 import { cronPhrase, displayLabel, formatStamp, shortId } from './phrase';
 import type {
@@ -1082,7 +1082,7 @@ register('session_takeover_propose', (call, ctx) => {
   );
 });
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
@@ -1130,23 +1130,23 @@ function cleanupRow(item: Record<string, unknown>, ctx: ToolCardContext) {
 
 register('image_view', (call, ctx) => {
   const args = rec(call.args);
-  const output = rec(parseJsonLine(call.output));
-  const target = str(output?.path) ?? str(args?.path) ?? '';
-  const width = typeof output?.width === 'number' ? output.width : null;
-  const height = typeof output?.height === 'number' ? output.height : null;
-  const size = typeof output?.size === 'number' ? output.size : null;
   const error = errorText(call, ctx);
+  const facts = error ? null : parseImageViewFacts(call.output);
+  // 标题可以用参数里的路径；取图只认工具校验后回报的路径
+  const target = facts?.path ?? str(args?.path) ?? '';
+  const { width, height, size } = facts ?? { width: null, height: null, size: null };
   const name = target ? fileName(target) : ctx.t('Not set');
   const blocks: ToolCardBlock[] = [];
   if (error) blocks.push({ kind: 'error', text: error });
-  else if (target)
+  else if (call.image || facts?.path)
     blocks.push({
       kind: 'image',
-      src: toLocalImageUrl(target),
+      ...(call.image ? { image: call.image } : {}),
+      ...(facts?.path ? { path: facts.path } : {}),
       alt: name,
-      ...(width && height ? { width, height } : {}),
     });
   const rows: { label: string; value: string }[] = [];
+  if (facts?.path) rows.push({ label: ctx.t('Path'), value: facts.path });
   if (width && height) rows.push({ label: ctx.t('Dimensions'), value: `${width} × ${height}` });
   if (size !== null) rows.push({ label: ctx.t('File size'), value: formatBytes(size) });
   if (rows.length > 0) blocks.push({ kind: 'kv', rows });
