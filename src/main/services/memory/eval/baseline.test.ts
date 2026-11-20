@@ -41,10 +41,11 @@ function expectAtLeast(actual: Metrics, base: Baseline) {
 
 describe('memory retrieval eval — stub baseline', () => {
   let report: EvalReport;
+  // 52 条用例 + 85 条背景记忆，单文件跑约 9s；全量并发时机器负载高会超过默认 10s 钩子超时
   beforeAll(async () => {
     report = await runEvalWith('stub');
     if (process.env.ENSO_MEMORY_EVAL === 'stub') console.log(formatReport(report));
-  });
+  }, 60_000);
 
   it('每个维度至少一条用例', () => {
     for (const [dim, m] of Object.entries(report.byDimension)) {
