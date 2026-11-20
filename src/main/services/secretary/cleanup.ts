@@ -2,10 +2,14 @@
  * 秘书的收尾清理：cleanup_list 只读列清单，cleanup_apply 走确认卡后才动手。
  *
  * 边界：
- * - 分支：只碰 feat/ fix/ chore/ 前缀、且已经合进 feat/secretary-agent 或 main 的；
+ * - 分支：只碰 feat/ fix/ chore/ 前缀、且已经合进 feat/secretary-agent 或 main 的
+ *   （祖先关系，或 GitHub 上已合并 PR 的 head 正是分支 tip，即 squash 合并）；
  *   基线分支、当前检出的分支、任何 worktree 正在用的分支都不列也不删。
  * - worktree：只碰会话 worktree 根下的，删之前先确认没有未提交改动。
  * - 会话：只归档，不删除。
+ *
+ * 性能：一个仓库只跑固定几条 git（for-each-ref 批量判合入），du 放后台带缓存，
+ * 整体有期限，到点先返回已读完的部分；秘书工具调用的通用超时是 15 秒。
  */
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -55,12 +59,28 @@ export const CLEANUP_DETAIL_MAX_CHARS = 4000;
 /** 名字上限：一条超长标题不能吃掉整页预算 */
 export const CLEANUP_NAME_MAX = 60;
 
+/** 扫描整体期限：要明显短于秘书工具调用的 15 秒通用超时 */
+export const CLEANUP_SCAN_DEADLINE_MS = 10_000;
+/** cleanup_list 最多等 du 这么久，没算完的在后台继续、下次再列 */
+export const CLEANUP_SIZE_BUDGET_MS = 1_500;
+/** 同时跑的仓库读取与 du 数 */
+export const CLEANUP_CONCURRENCY = 4;
+/** 扫描结果复用多久：cleanup_apply 紧跟 cleanup_list 时不再重扫 */
+export const CLEANUP_SCAN_TTL_MS = 60_000;
+
 const SEP = '|';
+const HEADS = 'refs/heads/';
 
 export const branchItemId = (repoPath: string, branch: string): string =>
   `branch${SEP}${repoPath}${SEP}${branch}`;
 export const worktreeItemId = (target: string): string => `worktree${SEP}${target}`;
 export const sessionItemId = (conversationId: string): string => `session${SEP}${conversationId}`;
+
+/** GitHub 上已合并的一条 PR：head 提交号与合入的基线 */
+export interface MergedPull {
+  headRefOid: string;
+  baseRefName: string;
+}
 
 export interface CleanupPorts {
   git: GitRunner;
@@ -69,6 +89,8 @@ export interface CleanupPorts {
   worktreeRoots(): string[];
   /** du 估算的目录占用；失败返回 null */
   size(target: string): Promise<number | null>;
+  /** 仓库在 GitHub 上已合并的 PR，squash 合并靠它认；gh 不可用返回 null */
+  mergedPulls(repoRoot: string): Promise<readonly MergedPull[] | null>;
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   dispatchFile(): MaybePromise<SecretaryDispatchFile>;
@@ -84,6 +106,11 @@ export interface CleanupRepo {
   branches: Array<{ name: string; mergedInto: string[]; lastActivityAt?: number }>;
   /** 该仓库的 worktree（不含检出目录本身） */
   worktrees: Array<{ path: string; branch: string | null }>;
+  /** 所有本地分支（不限前缀）的合入基线与最后提交时间，worktree 的分支也从这里查 */
+  merged: Map<string, string[]>;
+  lastActivity: Map<string, number>;
+  /** gh 不可用：squash 合并的分支这次认不出来 */
+  pullsUnknown: boolean;
 }
 
 async function gitOut(
@@ -95,77 +122,93 @@ async function gitOut(
   return result.code === 0 ? result.stdout.trim() : null;
 }
 
-async function branchExists(ports: CleanupPorts, root: string, branch: string): Promise<boolean> {
-  const result = await ports.git(root, [
-    'rev-parse',
-    '--verify',
-    '--quiet',
-    `refs/heads/${branch}`,
-  ]);
-  return result.code === 0;
-}
+const headName = (ref: string): string | null =>
+  ref.startsWith(HEADS) ? ref.slice(HEADS.length) : null;
 
-/** 仓库里真实存在的基线分支；每个仓库只查一次，别按分支重复问 git */
-async function existingBases(ports: CleanupPorts, root: string): Promise<string[]> {
-  const bases: string[] = [];
-  for (const base of CLEANUP_BASE_BRANCHES)
-    if (await branchExists(ports, root, base)) bases.push(base);
-  return bases;
-}
-
-/** 分支是不是已经合进某个基线：merge-base --is-ancestor 的退出码就是答案 */
-async function mergedInto(
-  ports: CleanupPorts,
-  root: string,
-  branch: string,
-  bases?: readonly string[]
-): Promise<string[]> {
-  const candidates = bases ?? (await existingBases(ports, root));
-  const merged: string[] = [];
-  for (const base of candidates) {
-    if (base === branch) continue;
-    const result = await ports.git(root, ['merge-base', '--is-ancestor', branch, base]);
-    if (result.code === 0) merged.push(base);
-  }
-  return merged;
-}
-
-async function lastCommitAt(
-  ports: CleanupPorts,
-  cwd: string,
-  ref: string
-): Promise<number | undefined> {
-  const raw = await gitOut(ports, cwd, ['log', '-1', '--format=%at', ref]);
-  const seconds = Number(raw);
-  return raw && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
-}
-
-/** 一个仓库的只读事实：当前分支、符合前缀的本地分支、worktree 清单 */
+/**
+ * 一个仓库的只读事实：当前分支、符合前缀的本地分支、worktree 清单。
+ * 条数固定：一次 for-each-ref 拿全部分支 tip 与时间，每个基线一次 --merged，
+ * 不按分支逐条问 git。
+ */
 export async function readCleanupRepo(
   ports: CleanupPorts,
   root: string
 ): Promise<CleanupRepo | null> {
   const top = await gitOut(ports, root, ['rev-parse', '--show-toplevel']);
   if (!top) return null;
-  const currentRaw = await gitOut(ports, top, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const [currentRaw, refsRaw, worktreeRaw, pulls, ...mergedRaw] = await Promise.all([
+    gitOut(ports, top, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    gitOut(ports, top, [
+      'for-each-ref',
+      '--format=%(refname) %(objectname) %(committerdate:unix)',
+      HEADS,
+    ]),
+    gitOut(ports, top, ['worktree', 'list', '--porcelain']),
+    ports.mergedPulls(top).catch(() => null),
+    // 基线不存在时 git 报错，gitOut 给 null，等于没有这个基线
+    ...CLEANUP_BASE_BRANCHES.map((base) =>
+      gitOut(ports, top, ['for-each-ref', '--format=%(refname)', `--merged=${HEADS}${base}`, HEADS])
+    ),
+  ]);
   const currentBranch = currentRaw && currentRaw !== 'HEAD' ? currentRaw : null;
-  const listed = await gitOut(ports, top, ['branch', '--format=%(refname:short)']);
-  const bases = await existingBases(ports, top);
+  const tips = new Map<string, string>();
+  const lastActivity = new Map<string, number>();
+  // refname 不能含空格，按空格切是安全的
+  for (const line of (refsRaw ?? '').split('\n')) {
+    const [ref = '', oid = '', at = ''] = line.trim().split(' ');
+    const name = headName(ref);
+    if (!name || !oid) continue;
+    tips.set(name, oid);
+    const seconds = Number(at);
+    if (Number.isFinite(seconds) && seconds > 0) lastActivity.set(name, seconds * 1000);
+  }
+  const ancestry = new Map<string, Set<string>>();
+  CLEANUP_BASE_BRANCHES.forEach((base, index) => {
+    const raw = mergedRaw[index];
+    if (!tips.has(base) || raw === null || raw === undefined) return;
+    ancestry.set(base, new Set(raw.split('\n').map((line) => headName(line.trim()) ?? '')));
+  });
+  // squash 合并：PR 合进基线时的 head 就是分支现在的 tip，分支内容已经全在基线里；
+  // 合并后又提交过的 tip 对不上，照旧算没合入
+  const squashed = new Map<string, Set<string>>();
+  for (const pull of pulls ?? []) {
+    if (!ancestry.has(pull.baseRefName)) continue;
+    const bases = squashed.get(pull.headRefOid) ?? new Set<string>();
+    bases.add(pull.baseRefName);
+    squashed.set(pull.headRefOid, bases);
+  }
+  const merged = new Map<string, string[]>();
+  for (const [name, oid] of tips)
+    merged.set(
+      name,
+      [...ancestry.keys()].filter(
+        (base) => base !== name && (ancestry.get(base)?.has(name) || squashed.get(oid)?.has(base))
+      )
+    );
   const branches: CleanupRepo['branches'] = [];
-  for (const name of (listed ?? '').split('\n').map((line) => line.trim())) {
-    if (!name) continue;
+  for (const name of tips.keys()) {
     if (!CLEANUP_BRANCH_PREFIXES.some((prefix) => name.startsWith(prefix))) continue;
     // 基线自己带 feat/ 前缀，永远不进清单
     if ((CLEANUP_BASE_BRANCHES as readonly string[]).includes(name)) continue;
-    const merged = await mergedInto(ports, top, name, bases);
-    const lastActivityAt = await lastCommitAt(ports, top, name);
-    branches.push({ name, mergedInto: merged, ...(lastActivityAt ? { lastActivityAt } : {}) });
+    const lastActivityAt = lastActivity.get(name);
+    branches.push({
+      name,
+      mergedInto: merged.get(name) ?? [],
+      ...(lastActivityAt ? { lastActivityAt } : {}),
+    });
   }
-  const worktreeRaw = await gitOut(ports, top, ['worktree', 'list', '--porcelain']);
   const worktrees = (worktreeRaw ? parseWorktrees(worktreeRaw) : [])
     .filter((worktree) => worktree.path !== top)
     .map((worktree) => ({ path: worktree.path, branch: worktree.branch }));
-  return { root: top, currentBranch, branches, worktrees };
+  return {
+    root: top,
+    currentBranch,
+    branches,
+    worktrees,
+    merged,
+    lastActivity,
+    pullsUnknown: pulls === null,
+  };
 }
 
 function isUnderRoot(target: string, root: string): boolean {
@@ -173,82 +216,192 @@ function isUnderRoot(target: string, root: string): boolean {
   return target === root || target.startsWith(normalized);
 }
 
+/** 限并发地跑一批任务；stop() 为真后不再启动新任务，没启动的留 undefined */
+async function mapLimit<T, R>(
+  inputs: readonly T[],
+  limit: number,
+  run: (input: T) => Promise<R>,
+  stop: () => boolean = () => false
+): Promise<Array<R | undefined>> {
+  const out: Array<R | undefined> = new Array(inputs.length).fill(undefined);
+  let next = 0;
+  const lane = async () => {
+    while (next < inputs.length && !stop()) {
+      const index = next;
+      next += 1;
+      out[index] = await run(inputs[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, inputs.length) }, lane));
+  return out;
+}
+
+interface Timer {
+  promise: Promise<void>;
+  fired(): boolean;
+  clear(): void;
+}
+
+function timer(ms: number): Timer {
+  let done = false;
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const promise = new Promise<void>((resolve) => {
+    handle = setTimeout(() => {
+      done = true;
+      resolve();
+    }, ms);
+  });
+  return { promise, fired: () => done, clear: () => clearTimeout(handle) };
+}
+
+export interface CleanupScanOptions {
+  /** 整体期限：到点还没读完的仓库记进 incomplete，先返回已有的 */
+  deadlineMs?: number;
+  /** 最多等 du 这么久；false 表示这次不算占用 */
+  sizeBudgetMs?: number | false;
+}
+
+export interface CleanupScan {
+  items: CleanupItem[];
+  /** 到期限没读完的仓库 */
+  incomplete: string[];
+  /** 这次没拿到占用的可清理 worktree 数 */
+  sizesPending: number;
+  warnings: string[];
+}
+
+function repoItems(
+  project: ProjectAuthority,
+  repo: CleanupRepo,
+  resolvedPaths: readonly (string | null)[],
+  roots: readonly string[]
+): CleanupItem[] {
+  const items: CleanupItem[] = [];
+  const inUse = new Set(
+    repo.worktrees.map((worktree) => worktree.branch).filter((branch): branch is string => !!branch)
+  );
+  for (const branch of repo.branches) {
+    const blocked =
+      branch.mergedInto.length === 0
+        ? 'not-merged'
+        : branch.name === repo.currentBranch
+          ? 'current-branch'
+          : inUse.has(branch.name)
+            ? 'used-by-worktree'
+            : undefined;
+    items.push({
+      id: branchItemId(repo.root, branch.name),
+      kind: 'branch',
+      name: branch.name,
+      projectId: project.projectId,
+      repoPath: repo.root,
+      mergedInto: branch.mergedInto,
+      ...(branch.lastActivityAt ? { lastActivityAt: branch.lastActivityAt } : {}),
+      ...(blocked ? { blocked } : {}),
+    });
+  }
+  repo.worktrees.forEach((worktree, index) => {
+    const resolved = resolvedPaths[index] ?? worktree.path;
+    // 只碰会话 worktree 根下的目录，别的地方是用户自己的检出
+    if (!roots.some((root) => isUnderRoot(resolved, root))) return;
+    const merged = worktree.branch ? (repo.merged.get(worktree.branch) ?? []) : [];
+    const blocked = !worktree.branch
+      ? 'detached-head'
+      : merged.length === 0
+        ? 'not-merged'
+        : undefined;
+    const lastActivityAt = worktree.branch ? repo.lastActivity.get(worktree.branch) : undefined;
+    items.push({
+      id: worktreeItemId(resolved),
+      kind: 'worktree',
+      name: worktree.branch ?? resolved,
+      projectId: project.projectId,
+      repoPath: repo.root,
+      path: resolved,
+      ...(merged.length > 0 ? { mergedInto: merged } : {}),
+      ...(lastActivityAt ? { lastActivityAt } : {}),
+      ...(blocked ? { blocked } : {}),
+    });
+  });
+  return items;
+}
+
 /**
- * 收集清单。每一项都自带判定结果：没合入的、当前分支、被 worktree 占用的都带
+ * 扫描清单。每一项都自带判定结果：没合入的、当前分支、被 worktree 占用的都带
  * blocked 原因，cleanup_apply 见到 blocked 直接拒绝，不会走到删除。
+ * 仓库并行读、到期限就收；du 只给可清理的 worktree 算，等不完的留在后台。
  */
-export async function collectCleanupItems(ports: CleanupPorts): Promise<CleanupItem[]> {
+export async function scanCleanup(
+  ports: CleanupPorts,
+  options: CleanupScanOptions = {}
+): Promise<CleanupScan> {
   const now = ports.now();
   const projects = (await ports.projects()).filter(
     (project) => project.state === 'active' && (project.kind ?? 'local') === 'local'
   );
   const roots = ports.worktreeRoots();
+  const deadline = timer(options.deadlineMs ?? CLEANUP_SCAN_DEADLINE_MS);
   const items: CleanupItem[] = [];
-  for (const project of projects) {
-    const repo = await readCleanupRepo(ports, project.canonicalPath);
-    if (!repo) continue;
-    const inUse = new Set(
-      repo.worktrees
-        .map((worktree) => worktree.branch)
-        .filter((branch): branch is string => !!branch)
+  const incomplete: string[] = [];
+  const warnings: string[] = [];
+  try {
+    const readProject = async (project: ProjectAuthority) => {
+      const repo = await readCleanupRepo(ports, project.canonicalPath);
+      if (!repo) return null;
+      const resolved = await Promise.all(
+        repo.worktrees.map((worktree) => ports.realpath(worktree.path))
+      );
+      return { repo, items: repoItems(project, repo, resolved, roots) };
+    };
+    const read = await mapLimit(
+      projects,
+      CLEANUP_CONCURRENCY,
+      (project) => Promise.race([readProject(project), deadline.promise.then(() => undefined)]),
+      deadline.fired
     );
-    for (const branch of repo.branches) {
-      const blocked =
-        branch.mergedInto.length === 0
-          ? 'not-merged'
-          : branch.name === repo.currentBranch
-            ? 'current-branch'
-            : inUse.has(branch.name)
-              ? 'used-by-worktree'
-              : undefined;
-      items.push({
-        id: branchItemId(repo.root, branch.name),
-        kind: 'branch',
-        name: branch.name,
-        projectId: project.projectId,
-        repoPath: repo.root,
-        mergedInto: branch.mergedInto,
-        ...(branch.lastActivityAt ? { lastActivityAt: branch.lastActivityAt } : {}),
-        ...(blocked ? { blocked } : {}),
-      });
-    }
-    const mergedByBranch = new Map(
-      repo.branches.map((branch) => [branch.name, branch.mergedInto] as const)
-    );
-    for (const worktree of repo.worktrees) {
-      const resolved = (await ports.realpath(worktree.path)) ?? worktree.path;
-      // 只碰会话 worktree 根下的目录，别的地方是用户自己的检出
-      if (!roots.some((root) => isUnderRoot(resolved, root))) continue;
-      // 分支表里已经算过就直接用，省掉每个 worktree 再问一遍 git
-      const merged = worktree.branch
-        ? (mergedByBranch.get(worktree.branch) ??
-          (await mergedInto(ports, repo.root, worktree.branch)))
-        : [];
-      const blocked = !worktree.branch
-        ? 'detached-head'
-        : merged.length === 0
-          ? 'not-merged'
-          : undefined;
-      const size = await ports.size(resolved);
-      const lastActivityAt = worktree.branch
-        ? await lastCommitAt(ports, repo.root, worktree.branch)
-        : undefined;
-      items.push({
-        id: worktreeItemId(resolved),
-        kind: 'worktree',
-        name: worktree.branch ?? resolved,
-        projectId: project.projectId,
-        repoPath: repo.root,
-        path: resolved,
-        ...(merged.length > 0 ? { mergedInto: merged } : {}),
-        ...(lastActivityAt ? { lastActivityAt } : {}),
-        ...(size !== null ? { sizeBytes: size } : {}),
-        ...(blocked ? { blocked } : {}),
-      });
-    }
+    read.forEach((entry, index) => {
+      if (entry === undefined) {
+        incomplete.push(projects[index]?.canonicalPath ?? '');
+        return;
+      }
+      if (!entry) return;
+      items.push(...entry.items);
+      if (entry.repo.pullsUnknown)
+        warnings.push(
+          `GitHub merged PRs unavailable for ${entry.repo.root}: squash-merged branches show as not-merged`
+        );
+    });
+  } finally {
+    deadline.clear();
   }
+  if (incomplete.length > 0)
+    warnings.push(
+      'Scan hit its time limit: repos in incomplete were skipped this time. Call cleanup_list again in a moment.'
+    );
+  const sizeTargets = items.filter((item) => item.kind === 'worktree' && !item.blocked);
+  let measured = 0;
+  if (options.sizeBudgetMs !== false && sizeTargets.length > 0) {
+    const budget = timer(options.sizeBudgetMs ?? CLEANUP_SIZE_BUDGET_MS);
+    // 不等的 du 继续在后台跑，生产端口按路径缓存，下次列清单就有
+    const sized = mapLimit(sizeTargets, CLEANUP_CONCURRENCY, async (item) => {
+      const size = await ports.size(item.path ?? '');
+      if (budget.fired()) return;
+      measured += 1;
+      if (size !== null) item.sizeBytes = size;
+    });
+    await Promise.race([sized, budget.promise]);
+    budget.clear();
+  }
+  const sizesPending = sizeTargets.length - measured;
   items.push(...(await collectCleanupSessions(ports, projects, now)));
-  return items;
+  return { items, incomplete, sizesPending, warnings };
+}
+
+export async function collectCleanupItems(
+  ports: CleanupPorts,
+  options?: CleanupScanOptions
+): Promise<CleanupItem[]> {
+  return (await scanCleanup(ports, options)).items;
 }
 
 /** 派发出去的会话：目标已完成、已经空闲超过一天，才进清单 */
@@ -290,11 +443,29 @@ function clipName(name: string): string {
   return name.length > CLEANUP_NAME_MAX ? `${name.slice(0, CLEANUP_NAME_MAX - 1)}…` : name;
 }
 
+/** 扫描不完整、占用没算完、gh 不可用这些事实要原样告诉秘书 */
+export interface CleanupScanNotes {
+  incomplete?: string[];
+  sizesPending?: number;
+  warnings?: string[];
+}
+
+export function cleanupScanNotes(scan: CleanupScan): CleanupScanNotes {
+  return {
+    ...(scan.incomplete.length > 0 ? { incomplete: scan.incomplete } : {}),
+    ...(scan.sizesPending > 0 ? { sizesPending: scan.sizesPending } : {}),
+    ...(scan.warnings.length > 0 ? { warnings: scan.warnings } : {}),
+  };
+}
+
 /**
  * 精简模式：数量摘要 + 每类前几条（只有 id、名字、大小）。
  * 可清理的排在前面，否则前几条全是 blocked，秘书看到的清单一条也用不上。
  */
-export function summarizeCleanupItems(items: readonly CleanupItem[]): CleanupListSummary {
+export function summarizeCleanupItems(
+  items: readonly CleanupItem[],
+  notes: CleanupScanNotes = {}
+): CleanupListSummary {
   const counts: Record<CleanupItemKind, number> = { branch: 0, worktree: 0, session: 0 };
   let cleanable = 0;
   let estimatedBytes = 0;
@@ -329,6 +500,7 @@ export function summarizeCleanupItems(items: readonly CleanupItem[]): CleanupLis
     estimatedBytes,
     items: picked,
     hint: `Compact view: counts plus the first ${CLEANUP_SUMMARY_PER_KIND} per kind, names only. Pass these ids straight to cleanup_apply; ids with a blocked code are refused. For the full list pass detail: true (${CLEANUP_DETAIL_PAGE_SIZE} per page, add page to turn pages) and kind to filter by branch, worktree or session.`,
+    ...notes,
   };
   // 名字已经截断；还超预算就从尾部丢条目：宁可少列几条，也不能让秘书只拿到一份回执
   while (JSON.stringify(summary).length > CLEANUP_SUMMARY_MAX_CHARS && summary.items.length > 0)
@@ -339,7 +511,8 @@ export function summarizeCleanupItems(items: readonly CleanupItem[]): CleanupLis
 function detailPage(
   items: readonly CleanupItem[],
   page: number,
-  pageSize: number
+  pageSize: number,
+  notes: CleanupScanNotes
 ): CleanupListDetail {
   const start = (page - 1) * pageSize;
   const slice = items.slice(start, start + pageSize);
@@ -350,6 +523,7 @@ function detailPage(
     pageSize,
     hasMore: start + slice.length < items.length,
     items: slice.map((item) => ({ ...item, name: clipName(item.name) })),
+    ...notes,
   };
 }
 
@@ -357,17 +531,21 @@ function detailPage(
  * detail 模式的一页。每页条数按整份清单的最坏一页定：按页临时缩会
  * 让第 2 页比第 1 页多，翻页就会漏条目。
  */
-export function cleanupDetailPage(items: readonly CleanupItem[], page: number): CleanupListDetail {
+export function cleanupDetailPage(
+  items: readonly CleanupItem[],
+  page: number,
+  notes: CleanupScanNotes = {}
+): CleanupListDetail {
   const pages = (size: number) => Math.max(1, Math.ceil(items.length / size));
   const fits = (size: number): boolean => {
     for (let index = 1; index <= pages(size); index += 1)
-      if (JSON.stringify(detailPage(items, index, size)).length > CLEANUP_DETAIL_MAX_CHARS)
+      if (JSON.stringify(detailPage(items, index, size, notes)).length > CLEANUP_DETAIL_MAX_CHARS)
         return false;
     return true;
   };
   let pageSize = Math.min(CLEANUP_DETAIL_PAGE_SIZE, Math.max(1, items.length));
   while (pageSize > 1 && !fits(pageSize)) pageSize -= 1;
-  return detailPage(items, page, pageSize);
+  return detailPage(items, page, pageSize, notes);
 }
 
 function positiveInt(value: unknown): number | undefined {
@@ -378,10 +556,12 @@ function positiveInt(value: unknown): number | undefined {
 /**
  * 把 id 列表收窄回真实条目：未知 id、带 blocked 的、基线分支一律拒绝并说明。
  * 确认卡与执行都用同一份判定，卡片上看到的就是会发生的。
+ * scan 是刚列过的清单快照；执行时 applyCleanup 还会按事实重新校验。
  */
 export async function selectCleanupItems(
   ports: CleanupPorts,
-  ids: readonly string[]
+  ids: readonly string[],
+  scan?: CleanupScan
 ): Promise<CleanupSelectionResult> {
   if (ids.length === 0)
     return {
@@ -391,8 +571,8 @@ export async function selectCleanupItems(
     };
   if (ids.length > CLEANUP_MAX_ITEMS)
     return { ok: false, error: `too many ids: ${ids.length}, the limit is ${CLEANUP_MAX_ITEMS}` };
-  const all = await collectCleanupItems(ports);
-  const byId = new Map(all.map((item) => [item.id, item]));
+  const current = scan ?? (await scanCleanup(ports, { sizeBudgetMs: false }));
+  const byId = new Map(current.items.map((item) => [item.id, item]));
   const selected: CleanupItem[] = [];
   const unknown: string[] = [];
   const refused: string[] = [];
@@ -409,7 +589,15 @@ export async function selectCleanupItems(
     if (selected.some((entry) => entry.id === item.id)) continue;
     selected.push(item);
   }
-  if (unknown.length > 0) return { ok: false, error: `unknown cleanup id: ${unknown.join(', ')}` };
+  if (unknown.length > 0)
+    return {
+      ok: false,
+      error: `unknown cleanup id: ${unknown.join(', ')}${
+        current.incomplete.length > 0
+          ? `. The scan did not finish for ${current.incomplete.join(', ')}; try again in a moment.`
+          : ''
+      }`,
+    };
   if (refused.length > 0)
     return {
       ok: false,
@@ -422,9 +610,11 @@ export async function selectCleanupItems(
 /** all: true 的选择：当前所有可清理项，仍然受 CLEANUP_MAX_ITEMS 约束 */
 export async function selectAllCleanupItems(
   ports: CleanupPorts,
-  projectId = ''
+  projectId = '',
+  scan?: CleanupScan
 ): Promise<CleanupSelectionResult> {
-  const items = (await collectCleanupItems(ports)).filter(
+  const current = scan ?? (await scanCleanup(ports, { sizeBudgetMs: false }));
+  const items = current.items.filter(
     (item) => !item.blocked && (!projectId || item.projectId === projectId)
   );
   if (items.length === 0) return { ok: false, error: 'nothing to clean up' };
@@ -458,6 +648,9 @@ async function worktreeIsClean(ports: CleanupPorts, target: string): Promise<boo
   return result.stdout.trim() === '';
 }
 
+/** 每次执行清理都加一，handler 缓存的扫描按它判断是否作废 */
+let cleanupEpoch = 0;
+
 /**
  * 真正执行清理。顺序固定：先删 worktree（释放分支），再删分支，最后归档会话。
  * 每一步都重新判定一次：清单是快照，执行时的事实才算数。
@@ -467,6 +660,19 @@ export async function applyCleanup(
   draft: CleanupDraft,
   /** 谁点的确认：审计要能追到那条秘书会话 */
   secretaryConversationId: string | null = null
+): Promise<CleanupApplyResult> {
+  try {
+    return await applyCleanupItems(ports, draft, secretaryConversationId);
+  } finally {
+    // 删过东西，之前缓存的扫描结果都作废
+    cleanupEpoch += 1;
+  }
+}
+
+async function applyCleanupItems(
+  ports: CleanupPorts,
+  draft: CleanupDraft,
+  secretaryConversationId: string | null
 ): Promise<CleanupApplyResult> {
   const report: CleanupActionReport[] = [];
   const now = ports.now();
@@ -523,7 +729,8 @@ export async function applyCleanup(
     record({ id: item.id, kind: 'worktree', name: item.name, action: 'deleted' });
   }
 
-  // 同一个仓库只读一次：删完一条分支后 worktree 占用与当前分支都可能变，所以每条都重读
+  // worktree 已经删完，这时再读一次仓库就是执行时的事实；删一条分支不影响别的分支的判定，
+  // 所以同一个仓库只读一次
   const repoCache = new Map<string, CleanupRepo | null>();
   const repoOf = async (repoPath: string): Promise<CleanupRepo | null> => {
     const cached = repoCache.get(repoPath);
@@ -560,7 +767,7 @@ export async function applyCleanup(
         .map((worktree) => worktree.branch)
         .filter((branch): branch is string => !!branch)
     );
-    const merged = await mergedInto(ports, repo.root, item.name);
+    const merged = repo.merged.get(item.name) ?? [];
     const reason = (CLEANUP_BASE_BRANCHES as readonly string[]).includes(item.name)
       ? 'base-branch'
       : item.name === repo.currentBranch
@@ -575,8 +782,6 @@ export async function applyCleanup(
       continue;
     }
     const deleted = await ports.git(repo.root, ['branch', '-D', item.name]);
-    // 删掉一条分支后缓存失效，下一条重新读
-    repoCache.delete(repoPath);
     record({
       id: item.id,
       kind: 'branch',
@@ -651,10 +856,39 @@ function parseIds(value: unknown): string[] {
   return ids;
 }
 
-export function createSecretaryCleanupHandlers(ports: CleanupHandlerPorts): {
+export interface CleanupHandlerOptions {
+  scanDeadlineMs?: number;
+  sizeBudgetMs?: number;
+}
+
+export function createSecretaryCleanupHandlers(
+  ports: CleanupHandlerPorts,
+  options: CleanupHandlerOptions = {}
+): {
   cleanup_list: SecretaryOpHandler;
   cleanup_apply: SecretaryOpHandler;
 } {
+  // 最近一次完整扫描：cleanup_apply 紧跟 cleanup_list 时直接用它，不重扫。
+  // 复用只影响确认卡上的清单，真正删除前 applyCleanup 仍按事实重新校验
+  let cached: { at: number; epoch: number; scan: CleanupScan } | null = null;
+  const fresh = (needSizes: boolean): CleanupScan | null => {
+    if (!cached || cached.epoch !== cleanupEpoch) return null;
+    if (ports.now() - cached.at > CLEANUP_SCAN_TTL_MS) return null;
+    if (cached.scan.incomplete.length > 0) return null;
+    if (needSizes && cached.scan.sizesPending > 0) return null;
+    return cached.scan;
+  };
+  const scan = async (needSizes: boolean): Promise<CleanupScan> => {
+    const reused = fresh(needSizes);
+    if (reused) return reused;
+    const epoch = cleanupEpoch;
+    const result = await scanCleanup(ports, {
+      ...(options.scanDeadlineMs !== undefined ? { deadlineMs: options.scanDeadlineMs } : {}),
+      sizeBudgetMs: needSizes ? (options.sizeBudgetMs ?? CLEANUP_SIZE_BUDGET_MS) : false,
+    });
+    cached = { at: ports.now(), epoch, scan: result };
+    return result;
+  };
   return {
     async cleanup_list(params, ctx): Promise<SecretaryOpResult> {
       const projectId = typeof params.projectId === 'string' ? params.projectId.trim() : '';
@@ -666,7 +900,8 @@ export function createSecretaryCleanupHandlers(ports: CleanupHandlerPorts): {
         };
       const detail = params.detail === true;
       const page = positiveInt(params.page) ?? 1;
-      const items = (await collectCleanupItems(ports)).filter(
+      const scanned = await scan(true);
+      const items = scanned.items.filter(
         (item) =>
           (!projectId || item.projectId === projectId) &&
           (!kind || item.kind === (kind as CleanupItemKind))
@@ -680,7 +915,9 @@ export function createSecretaryCleanupHandlers(ports: CleanupHandlerPorts): {
       });
       return {
         ok: true,
-        result: detail ? cleanupDetailPage(items, page) : summarizeCleanupItems(items),
+        result: detail
+          ? cleanupDetailPage(items, page, cleanupScanNotes(scanned))
+          : summarizeCleanupItems(items, cleanupScanNotes(scanned)),
       };
     },
 
@@ -689,9 +926,13 @@ export function createSecretaryCleanupHandlers(ports: CleanupHandlerPorts): {
       // 秘书不用翻页拼几十个长 id，确认卡照旧拦一道
       const all = params.all === true;
       const projectId = typeof params.projectId === 'string' ? params.projectId.trim() : '';
+      const ids = parseIds(params.ids);
+      // 空列表与超量不用扫就能拒
+      const scanned =
+        all || (ids.length > 0 && ids.length <= CLEANUP_MAX_ITEMS) ? await scan(false) : undefined;
       const selection: CleanupSelectionResult = all
-        ? await selectAllCleanupItems(ports, projectId)
-        : await selectCleanupItems(ports, parseIds(params.ids));
+        ? await selectAllCleanupItems(ports, projectId, scanned)
+        : await selectCleanupItems(ports, ids, scanned);
       if (!selection.ok) {
         ports.audit({
           at: ports.now(),
@@ -744,6 +985,79 @@ export const runDu = (target: string): Promise<number | null> =>
     );
   });
 
+/**
+ * 按 key 缓存异步结果：同一个 key 正在算就共用，算完的按 ttl 留着。
+ * du 与 gh 都慢，列清单时等不完的在后台继续，下一次直接取。
+ */
+export function memoizeAsync<T>(
+  run: (key: string) => Promise<T>,
+  ttlMs: (value: T) => number,
+  now: () => number = Date.now
+): (key: string) => Promise<T> {
+  const done = new Map<string, { until: number; value: T }>();
+  const pending = new Map<string, Promise<T>>();
+  return (key) => {
+    const hit = done.get(key);
+    if (hit && now() < hit.until) return Promise.resolve(hit.value);
+    const inflight = pending.get(key);
+    if (inflight) return inflight;
+    const promise = run(key).finally(() => pending.delete(key));
+    pending.set(key, promise);
+    void promise.then(
+      (value) => done.set(key, { until: now() + ttlMs(value), value }),
+      () => undefined
+    );
+    return promise;
+  };
+}
+
+/** `gh pr list --json headRefOid,baseRefName` 的输出；格式不对返回 null */
+export function parseMergedPulls(stdout: string): MergedPull[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const pulls: MergedPull[] = [];
+  for (const entry of parsed as unknown[]) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { headRefOid, baseRefName } = entry as Record<string, unknown>;
+    if (typeof headRefOid === 'string' && headRefOid && typeof baseRefName === 'string')
+      pulls.push({ headRefOid, baseRefName });
+  }
+  return pulls;
+}
+
+const GH_TIMEOUT_MS = 6_000;
+const GH_PULL_LIMIT = 1000;
+
+export const runMergedPulls = (repoRoot: string): Promise<MergedPull[] | null> =>
+  new Promise((resolve) => {
+    execFile(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--state',
+        'merged',
+        '--limit',
+        String(GH_PULL_LIMIT),
+        '--json',
+        'headRefOid,baseRefName',
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        timeout: GH_TIMEOUT_MS,
+        maxBuffer: 8 * 1024 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout) => resolve(error ? null : parseMergedPulls(stdout))
+    );
+  });
+
 /** 会话 worktree 根：与 image_view 同一处，加上应用自己托管的 worktree 目录 */
 export function defaultCleanupWorktreeRoots(managedRoot?: string, home = homedir()): string[] {
   return [path.join(home, 'project', 'worktree'), ...(managedRoot ? [managedRoot] : [])];
@@ -776,7 +1090,8 @@ export function realCleanupPorts(): CleanupPorts {
           return root;
         }
       }),
-    size: runDu,
+    size: cachedDu,
+    mergedPulls: cachedMergedPulls,
     projects: async () =>
       (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
     rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
@@ -793,6 +1108,12 @@ export function realCleanupPorts(): CleanupPorts {
     now: () => Date.now(),
   };
 }
+
+// 进程级缓存：清单与执行用的端口各建一份，du 与 gh 的结果要共用
+const cachedDu = memoizeAsync(runDu, (size) => (size === null ? 60_000 : 10 * 60_000));
+const cachedMergedPulls = memoizeAsync(runMergedPulls, (pulls) =>
+  pulls === null ? 60_000 : 5 * 60_000
+);
 
 export const secretaryCleanupHandlers = createSecretaryCleanupHandlers({
   ...realCleanupPorts(),

@@ -296,6 +296,7 @@ function harness(
       realpath: async (target) => target,
       worktreeRoots: () => [],
       size: async () => null,
+      mergedPulls: async () => [],
       projects: () => h.projects,
       rows: () => h.rows,
       dispatchFile: () => structuredClone(h.file),

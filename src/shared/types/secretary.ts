@@ -186,6 +186,11 @@ export interface CleanupListSummary {
   estimatedBytes: number;
   items: CleanupSummaryItem[];
   hint: string;
+  /** 到期限还没读完、这次没列进来的仓库 */
+  incomplete?: string[];
+  /** 占用还在后台计算的 worktree 数，稍后再列就有 */
+  sizesPending?: number;
+  warnings?: string[];
 }
 
 /** cleanup_list 传 detail: true 时返回的一页完整清单，正文控制在四千字以内 */
@@ -196,6 +201,9 @@ export interface CleanupListDetail {
   pageSize: number;
   hasMore: boolean;
   items: CleanupItem[];
+  incomplete?: string[];
+  sizesPending?: number;
+  warnings?: string[];
 }
 
 /** 接管授权的来源：确认卡、用户在会话界面上亲手点的，或项目在接管范围内被秘书实际用上 */
