@@ -177,18 +177,19 @@ export function mountSnapshot(container: HTMLElement, html: string): HTMLIFrameE
 }
 
 const READS_FILE = '__reads.json';
-/** 持久化的只读结果上限（字符）：设置 + 当前会话历史尾窗足够 */
-const READS_BUDGET = 4_000_000;
+/** 持久化的只读结果上限（字符），与 shim 内存缓存上限一致 */
+const READS_BUDGET = 8_000_000;
 
 type ReadEntry = { h: string; json: string };
 
-/** 只读缓存（按 hash 的设置/历史等）序列化：从最近写入的往前保留，超预算丢最旧的 */
+/** 只读缓存（按 hash 的设置/历史等）序列化：从最近写入的往前保留，放不下的跳过、继续试更早的 */
 export function packReads(reads: Map<string, ReadEntry>, budget = READS_BUDGET): string {
   const kept: [string, ReadEntry][] = [];
   let chars = 0;
   for (const item of [...reads].reverse()) {
-    chars += item[0].length + item[1].json.length;
-    if (chars > budget) break;
+    const size = item[0].length + item[1].json.length;
+    if (chars + size > budget) continue;
+    chars += size;
     kept.unshift(item);
   }
   return JSON.stringify(kept);

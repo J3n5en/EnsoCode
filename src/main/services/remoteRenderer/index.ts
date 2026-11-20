@@ -18,6 +18,7 @@ import { localMainContents } from '../renderers';
 import { localUi } from '../uiHost';
 import { bundleManifest, downloadEstimate, readRendererAsset, rendererBuildId } from './assets';
 import { isRemoteChannelAllowed } from './channels';
+import { withoutConversations } from './conversationSync';
 import { type RemoteLink, setRemoteHostHooks } from './hostHooks';
 import { installIpcRegistry, registeredHandler, registeredListeners } from './ipcRegistry';
 import { REMOTE_SECRET_SENTINEL, redactSecrets, restoreSecrets } from './secrets';
@@ -160,7 +161,9 @@ function prepareArgs(channel: string, args: unknown[]): unknown[] {
 }
 
 function prepareResult(channel: string, result: unknown): unknown {
-  return channel === IPC_CHANNELS.SETTINGS_READ ? redactSecrets(result) : result;
+  return channel === IPC_CHANNELS.SETTINGS_READ
+    ? redactSecrets(withoutConversations(result))
+    : result;
 }
 
 const deliverer = (link: RemoteLink) => (frame: HostToRemote) => link.send(frame);
