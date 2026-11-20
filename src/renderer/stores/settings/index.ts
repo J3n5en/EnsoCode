@@ -29,6 +29,10 @@ import {
   normalizeMaxActiveCoworkers,
 } from '@shared/maxActiveCoworkers';
 import {
+  DEFAULT_MEMORY_DISTILL_WINDOW_MINUTES,
+  normalizeMemoryDistillWindowMinutes,
+} from '@shared/memory/distillWindow';
+import {
   DEFAULT_FORGETTING_SETTINGS,
   normalizeForgettingSettings,
 } from '@shared/memory/forgetting';
@@ -213,6 +217,7 @@ const initialState = {
   memoryModelIdleMinutes: DEFAULT_MEMORY_MODEL_IDLE_MINUTES,
   memoryEmbeddingRemoteProviderId: null as string | null,
   memoryDistillEnabled: false,
+  memoryDistillWindowMinutes: DEFAULT_MEMORY_DISTILL_WINDOW_MINUTES,
   memoryKgEnabled: false,
   memoryReconcileEnabled: false,
   // 遗忘：默认只开「降权」。标记候选与自动归档都要用户显式打开，升级后不会突然归档任何东西。
@@ -427,6 +432,8 @@ export const useSettingsStore = create<SettingsState>()(
       setMemoryEmbeddingRemoteProviderId: (memoryEmbeddingRemoteProviderId) =>
         set({ memoryEmbeddingRemoteProviderId }),
       setMemoryDistillEnabled: (memoryDistillEnabled) => set({ memoryDistillEnabled }),
+      setMemoryDistillWindowMinutes: (value) =>
+        set({ memoryDistillWindowMinutes: normalizeMemoryDistillWindowMinutes(value) }),
       setMemoryKgEnabled: (memoryKgEnabled) => set({ memoryKgEnabled }),
       setMemoryReconcileEnabled: (memoryReconcileEnabled) => set({ memoryReconcileEnabled }),
       setMemoryDecayEnabled: (memoryDecayEnabled) => set({ memoryDecayEnabled }),
@@ -1269,6 +1276,12 @@ export const useSettingsStore = create<SettingsState>()(
         const memoryModelIdleMinutes = normalizeMemoryModelIdleMinutes(s.memoryModelIdleMinutes);
         if (memoryModelIdleMinutes !== s.memoryModelIdleMinutes) {
           useSettingsStore.setState({ memoryModelIdleMinutes });
+        }
+        const memoryDistillWindowMinutes = normalizeMemoryDistillWindowMinutes(
+          s.memoryDistillWindowMinutes
+        );
+        if (memoryDistillWindowMinutes !== s.memoryDistillWindowMinutes) {
+          useSettingsStore.setState({ memoryDistillWindowMinutes });
         }
         // 遗忘阈值来自 settings.json，手改坏了要夹回范围，否则巡检按脏值跑
         const forgetting = normalizeForgettingSettings(s);

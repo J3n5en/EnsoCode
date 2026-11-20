@@ -104,6 +104,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   memoryDecayStaleDays: { mode: 'excluded', reason: 'device-local memory library policy' },
   memoryDecayMaxImportance: { mode: 'excluded', reason: 'device-local memory library policy' },
   memoryDecayIntervalDays: { mode: 'excluded', reason: 'device-local memory library policy' },
+  memoryDistillWindowMinutes: { mode: 'excluded', reason: 'device-local memory library policy' },
   voiceInputEnabled: { mode: 'excluded', reason: 'speech model lives on this device' },
   botModeEnabled: { mode: 'excluded', reason: 'bot members and chats live on this device' },
   scratchSessionsEnabled: {

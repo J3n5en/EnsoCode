@@ -13,6 +13,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { acquireModel, type LlamaModelLike } from './llama/runtime';
+import type { Complete } from './memory/distill';
 import * as embeddingDownloads from './memory/embedding/downloader';
 import { writeTinyModel2Vec } from './memory/embedding/model2vec.fixture';
 import { embeddingModelDirName, resolveEmbeddingModelSpec } from './memory/embedding/registry';
@@ -59,6 +60,7 @@ import {
   configureMemoryKg,
   distillSessionNow,
   editMemory,
+  flushMemoryDistillQueue,
   getMemoryDistillJobs,
   getMemoryEmbedder,
   getMemoryEmbeddingError,
@@ -89,6 +91,9 @@ afterAll(() => {
   closeMemoryDb();
   rmSync(userData, { recursive: true, force: true });
 });
+
+// 既有用例覆盖的是「窗口为 0 = 立即提炼」的旧行为；聚合窗口另有专门用例
+beforeEach(() => configureMemoryDistill({ windowMinutes: 0, now: Date.now }));
 
 describe('memoryHost 懒建', () => {
   it('未调用任何记忆操作（含退出关库）时不产生 memory/ 目录与 db/WAL 文件', () => {
@@ -283,6 +288,7 @@ describe('memoryHost 会话结束蒸馏接线', () => {
         memoryDistillEnabled: true,
         memoryLanguage: language,
         disabledBuiltinTools: [],
+        memoryDistillWindowMinutes: 0,
       });
       configureMemoryDistill({
         readTranscript: async () => [{ role: 'user' as const, text: 'we picked redis for cache' }],
@@ -1406,6 +1412,224 @@ describe('memoryHost embedding 配置与生命周期', () => {
   });
 });
 
+describe('memoryHost 会话聚合提炼（memoryDistillWindowMinutes）', () => {
+  const BOT = '33333333-3333-4333-8333-333333333333';
+  const T0 = Date.parse('2025-03-01T08:00:00.000Z');
+  const MIN = 60_000;
+  let clock = T0;
+  let sessions: Record<string, { role: 'user' | 'assistant'; text: string; entryId: string }[]>;
+  let seen: string[];
+  let complete: ReturnType<typeof vi.fn>;
+  const read = async (file: string) => sessions[path.basename(file, '.jsonl')] ?? [];
+  const talk = (id: string, from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      text: `${id} says line ${from + i}`,
+      entryId: `${id}-e${from + i}`,
+    }));
+  const code = (sessionId: string, projectId: string | null) => ({
+    sessionId,
+    sessionFile: `/fake/${sessionId}.jsonl`,
+    projectId,
+  });
+  const resume = { continueFromLastJob: true };
+  const setup = (windowMinutes: number, available = true) => {
+    closeMemoryDb();
+    configureMemoryEmbedding({ modelId: 'none' });
+    clock = T0;
+    sessions = {};
+    seen = [];
+    complete = vi.fn(async (_system: string, user: string) => {
+      seen.push(user);
+      return JSON.stringify({
+        memories: [
+          { title: 't', content: `window memory ${seen.length} ${user.length}`, importance: 0.8 },
+        ],
+      });
+    });
+    syncMemoryDistillFromSettings({
+      memoryDistillEnabled: true,
+      memoryDistillWindowMinutes: windowMinutes,
+      disabledBuiltinTools: [],
+    });
+    configureMemoryDistill({
+      readTranscript: read,
+      complete: () => (available ? (complete as unknown as Complete) : null),
+      now: () => clock,
+    });
+  };
+  const jobsOf = (sessionId: string) =>
+    getMemoryDistillJobs().filter(
+      (j) =>
+        j.payload.sessionId === sessionId ||
+        j.payload.sessions?.some((s) => s.sessionId === sessionId)
+    );
+  afterEach(() => configureMemoryDistill({ enabled: false }));
+
+  it('窗口内同项目两个会话合并成一次模型调用，拼接里两个会话都在且有分隔', async () => {
+    setup(5);
+    sessions['win-a'] = talk('win-a', 1, 2);
+    sessions['win-b'] = talk('win-b', 1, 2);
+    expect(await scheduleMemoryDistill(code('win-a', 'proj-win'), resume)).toBe('win-a-e2');
+    clock += MIN;
+    expect(await scheduleMemoryDistill(code('win-b', 'proj-win'), resume)).toBe('win-b-e2');
+    await awaitMemoryDistill();
+    expect(complete).not.toHaveBeenCalled();
+
+    clock = T0 + 6 * MIN;
+    await flushMemoryDistillQueue();
+    await awaitMemoryDistill();
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(seen[0]).toContain('## Session 1/2 · win-a');
+    expect(seen[0]).toContain('## Session 2/2 · win-b');
+    expect(seen[0]).toContain('win-a says line 2');
+    expect(seen[0]).toContain('win-b says line 1');
+    const [job] = jobsOf('win-a');
+    expect(job.status).toBe('done');
+    expect(job.payload.sessions?.map((s) => s.sessionId)).toEqual(['win-a', 'win-b']);
+    expect(jobsOf('win-b')).toEqual([job]);
+  });
+
+  it('窗口为 0：会话结束立即提炼，两个会话两次调用（与改动前一致）', async () => {
+    setup(0);
+    sessions['zero-a'] = talk('zero-a', 1, 2);
+    sessions['zero-b'] = talk('zero-b', 1, 2);
+    await scheduleMemoryDistill(code('zero-a', 'proj-zero'), resume);
+    expect(complete).toHaveBeenCalledTimes(1);
+    await scheduleMemoryDistill(code('zero-b', 'proj-zero'), resume);
+    expect(complete).toHaveBeenCalledTimes(2);
+    for (const text of seen) expect(text).not.toContain('## Session');
+    expect(jobsOf('zero-a')[0].payload.sessions).toBeUndefined();
+  });
+
+  it('重复调度同一批待办不重复提炼（并发 / 再次到期 / 重启）', async () => {
+    setup(5);
+    sessions['dup-a'] = talk('dup-a', 1, 2);
+    sessions['dup-b'] = talk('dup-b', 1, 2);
+    await scheduleMemoryDistill(code('dup-a', 'proj-dup'), resume);
+    await scheduleMemoryDistill(code('dup-a', 'proj-dup'), resume);
+    await scheduleMemoryDistill(code('dup-b', 'proj-dup'));
+    await scheduleMemoryDistill(code('dup-b', 'proj-dup'));
+    clock = T0 + 6 * MIN;
+    await Promise.all([flushMemoryDistillQueue(), flushMemoryDistillQueue()]);
+    await flushMemoryDistillQueue();
+    await awaitMemoryDistill();
+    closeMemoryDb();
+    await invokeMemory('search', { query: 'x', limit: 1, spaceId: 'global' }, null);
+    await awaitMemoryDistill();
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(jobsOf('dup-a')).toHaveLength(1);
+  });
+
+  it('不同 projectId 不合并；各自只有一个会话时退化成普通提炼', async () => {
+    setup(5);
+    sessions['sep-a'] = talk('sep-a', 1, 2);
+    sessions['sep-b'] = talk('sep-b', 1, 2);
+    await scheduleMemoryDistill(code('sep-a', 'proj-sep-1'), resume);
+    await scheduleMemoryDistill(code('sep-b', 'proj-sep-2'), resume);
+    clock = T0 + 6 * MIN;
+    await flushMemoryDistillQueue();
+    await awaitMemoryDistill();
+    expect(complete).toHaveBeenCalledTimes(2);
+    for (const text of seen) expect(text).not.toContain('## Session');
+    expect(seen.find((t) => t.includes('sep-a'))).not.toContain('sep-b');
+    expect(jobsOf('sep-a')[0].payload).toMatchObject({
+      sessionId: 'sep-a',
+      projectId: 'proj-sep-1',
+      toEntryId: 'sep-a-e2',
+    });
+    expect(jobsOf('sep-a')[0].payload.sessions).toBeUndefined();
+  });
+
+  it('Bot 会话不进聚合队列：仍按原路径立即提炼', async () => {
+    setup(5);
+    sessions['bot-a'] = talk('bot-a', 1, 2);
+    await scheduleMemoryDistill({ ...code('bot-a', null), botId: BOT });
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('退出重启：窗口未到时重新排期不提前跑，到期后开库即补跑', async () => {
+    setup(5);
+    sessions['boot-a'] = talk('boot-a', 1, 2);
+    sessions['boot-b'] = talk('boot-b', 1, 2);
+    await scheduleMemoryDistill(code('boot-a', 'proj-boot'), resume);
+    await scheduleMemoryDistill(code('boot-b', 'proj-boot'), resume);
+    closeMemoryDb();
+
+    clock = T0 + MIN;
+    await invokeMemory('search', { query: 'x', limit: 1, spaceId: 'global' }, null);
+    await awaitMemoryDistill();
+    expect(complete).not.toHaveBeenCalled();
+    closeMemoryDb();
+
+    clock = T0 + 6 * MIN;
+    await invokeMemory('search', { query: 'x', limit: 1, spaceId: 'global' }, null);
+    await awaitMemoryDistill();
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(seen[0]).toContain('boot-a says line 1');
+    expect(seen[0]).toContain('boot-b says line 1');
+  });
+
+  it('退出重启：已建好但没跑成的聚合任务（模型不在线）重启后按原拼接续跑', async () => {
+    setup(5, false);
+    sessions['resume-a'] = talk('resume-a', 1, 2);
+    sessions['resume-b'] = talk('resume-b', 1, 2);
+    await scheduleMemoryDistill(code('resume-a', 'proj-resume'), resume);
+    await scheduleMemoryDistill(code('resume-b', 'proj-resume'), resume);
+    clock = T0 + 6 * MIN;
+    await flushMemoryDistillQueue();
+    await awaitMemoryDistill();
+    expect(jobsOf('resume-a')[0]?.status).toBe('pending');
+
+    closeMemoryDb();
+    configureMemoryDistill({ complete: () => complete as unknown as Complete });
+    await invokeMemory('search', { query: 'x', limit: 1, spaceId: 'global' }, null);
+    await awaitMemoryDistill();
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(seen[0]).toContain('## Session 2/2 · resume-b');
+    expect(jobsOf('resume-a')[0]).toMatchObject({ status: 'done', error: null });
+  });
+
+  it('水位：合并后每个会话各自推进，增量不丢也不重复', async () => {
+    setup(5);
+    sessions['mark-a'] = talk('mark-a', 1, 2);
+    sessions['mark-b'] = talk('mark-b', 1, 2);
+    expect(await scheduleMemoryDistill(code('mark-a', 'proj-mark'), resume)).toBe('mark-a-e2');
+    expect(await scheduleMemoryDistill(code('mark-b', 'proj-mark'), resume)).toBe('mark-b-e2');
+    // 同一会话压缩后又结束：续作水位看得到未提炼的待办，只排新增部分
+    sessions['mark-a'] = talk('mark-a', 1, 4);
+    clock += MIN;
+    expect(await scheduleMemoryDistill(code('mark-a', 'proj-mark'), resume)).toBe('mark-a-e4');
+    expect(await scheduleMemoryDistill(code('mark-a', 'proj-mark'), resume)).toBe('mark-a-e4');
+
+    clock = T0 + 6 * MIN;
+    await flushMemoryDistillQueue();
+    await awaitMemoryDistill();
+    expect(complete).toHaveBeenCalledTimes(1);
+    for (const line of [1, 2, 3, 4]) {
+      expect(seen[0].split(`mark-a says line ${line}`)).toHaveLength(2);
+    }
+    expect(seen[0]).toContain('mark-b says line 2');
+    const batch = jobsOf('mark-b')[0];
+    expect(batch.payload.sessions?.map((s) => [s.sessionId, s.fromEntryId, s.toEntryId])).toEqual([
+      ['mark-b', undefined, 'mark-b-e2'],
+      ['mark-a', undefined, 'mark-a-e4'],
+    ]);
+
+    // 合并之后的新增：从各自水位接着来
+    sessions['mark-a'] = talk('mark-a', 1, 6);
+    expect(await scheduleMemoryDistill(code('mark-a', 'proj-mark'), resume)).toBe('mark-a-e6');
+    expect(await scheduleMemoryDistill(code('mark-b', 'proj-mark'), resume)).toBe('mark-b-e2');
+    clock = T0 + 20 * MIN;
+    await flushMemoryDistillQueue();
+    await awaitMemoryDistill();
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(seen[1]).toContain('mark-a says line 5');
+    expect(seen[1]).not.toContain('mark-a says line 4');
+    expect(seen[1]).not.toContain('mark-b');
+  });
+});
+
 describe('rootSessionId', () => {
   const gen = '11111111-1111-4111-8111-111111111111';
   it('父会话原样；coworker `p::cw-x` 与 enso child 都归到父', () => {
@@ -1461,7 +1685,11 @@ describe('memoryHost 增量蒸馏（Bot 模式空闲 / 新对话）', () => {
         ],
       });
     });
-    syncMemoryDistillFromSettings({ memoryDistillEnabled: true, disabledBuiltinTools: [] });
+    syncMemoryDistillFromSettings({
+      memoryDistillEnabled: true,
+      disabledBuiltinTools: [],
+      memoryDistillWindowMinutes: 0,
+    });
     configureMemoryDistill({ readTranscript: async () => visible, complete: () => complete });
     const base = {
       sessionId: 'inc-s1',
@@ -1518,7 +1746,11 @@ describe('memoryHost 增量蒸馏（Bot 模式空闲 / 新对话）', () => {
         ],
       });
     });
-    syncMemoryDistillFromSettings({ memoryDistillEnabled: true, disabledBuiltinTools: [] });
+    syncMemoryDistillFromSettings({
+      memoryDistillEnabled: true,
+      disabledBuiltinTools: [],
+      memoryDistillWindowMinutes: 0,
+    });
     configureMemoryDistill({ readTranscript: async () => visible, complete: () => complete });
     const code = { sessionId: 'code-c1', sessionFile: '/fake/code.jsonl', projectId: null };
     const resume = { continueFromLastJob: true };

@@ -346,6 +346,9 @@ function toDistillDto(job: DistillJob): DistillJobDto {
   return {
     id: job.id,
     sessionId: job.payload.sessionId,
+    ...(job.payload.sessions?.length
+      ? { sessionIds: job.payload.sessions.map((s) => s.sessionId) }
+      : {}),
     projectId: job.payload.projectId,
     status: job.status,
     attempts: job.attempts,

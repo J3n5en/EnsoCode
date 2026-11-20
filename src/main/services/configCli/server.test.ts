@@ -251,6 +251,20 @@ describe('config CLI socket', () => {
     expect((await state()).autoUpdate).toBe(true);
   });
 
+  it('提炼聚合窗口热生效可写，只接受预设分钟数', async () => {
+    expect(await config({ action: 'set', key: 'memoryDistillWindowMinutes', value: 0 })).toEqual({
+      ok: true,
+    });
+    expect((await state()).memoryDistillWindowMinutes).toBe(0);
+    expect(
+      await config({ action: 'set', key: 'memoryDistillWindowMinutes', value: 7 })
+    ).toMatchObject({ ok: false });
+    expect(
+      await config({ action: 'set', key: 'memoryDistillWindowMinutes', value: '5' })
+    ).toMatchObject({ ok: false });
+    expect((await state()).memoryDistillWindowMinutes).toBe(0);
+  });
+
   it('秘书开关可写且不需要重启', async () => {
     const schema = await config({ action: 'schema' });
     const keys = new Map(

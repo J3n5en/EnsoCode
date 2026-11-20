@@ -111,6 +111,8 @@ export interface MemoryListResult {
 export interface DistillJobDto {
   id: number;
   sessionId: string;
+  /** 多会话聚合任务的成员会话；普通任务没有 */
+  sessionIds?: string[];
   /** 会话标题；取不到时为 null，UI 回退到短 id */
   sessionTitle?: string | null;
   projectId: string | null;

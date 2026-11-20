@@ -172,6 +172,7 @@ export const SETTINGS_STATE_FIELDS = [
   'memoryModelIdleMinutes',
   'memoryEmbeddingRemoteProviderId',
   'memoryDistillEnabled',
+  'memoryDistillWindowMinutes',
   'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',
@@ -252,6 +253,8 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'memoryDecayStaleDays',
   'memoryDecayMaxImportance',
   'memoryDecayIntervalDays',
+  // 聚合待办排在本机库的队列里，窗口只影响本机的提炼时机
+  'memoryDistillWindowMinutes',
   'voiceInputEnabled',
   'botModeEnabled',
   'scratchSessionsEnabled',

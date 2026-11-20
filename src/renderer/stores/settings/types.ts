@@ -173,6 +173,8 @@ export interface SettingsState {
   memoryEmbeddingRemoteProviderId: string | null;
   /** 会话结束后是否用 LLM 自动蒸馏长期记忆；缺省关（只想手动记忆的用户保持关闭） */
   memoryDistillEnabled: boolean;
+  /** 会话结束后等多少分钟再提炼，窗口内同项目会话合并成一次；0 = 立即，缺省 5 */
+  memoryDistillWindowMinutes: number;
   /** 记忆创建后是否用 LLM 异步抽取实体图谱；缺省关 */
   memoryKgEnabled: boolean;
   /** 记忆写入后是否用 LLM 复核新旧记忆的矛盾（只标 challenges 待审）；缺省关 */
@@ -427,6 +429,7 @@ export interface SettingsState {
   setMemoryModelIdleMinutes: (value: number) => void;
   setMemoryEmbeddingRemoteProviderId: (value: string | null) => void;
   setMemoryDistillEnabled: (value: boolean) => void;
+  setMemoryDistillWindowMinutes: (value: number) => void;
   setMemoryKgEnabled: (value: boolean) => void;
   setMemoryReconcileEnabled: (value: boolean) => void;
   setMemoryDecayEnabled: (value: boolean) => void;

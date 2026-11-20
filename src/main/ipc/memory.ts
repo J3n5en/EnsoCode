@@ -411,7 +411,10 @@ export function registerMemoryHandlers(): void {
       ...snapshot,
       distill: snapshot.distill.map((job) => ({
         ...job,
-        sessionTitle: titles.get(job.sessionId) ?? null,
+        // 聚合任务没有自己的会话，列出成员会话的标题
+        sessionTitle: job.sessionIds?.length
+          ? job.sessionIds.map((id) => titles.get(id) ?? id.slice(0, 8)).join(' + ')
+          : (titles.get(job.sessionId) ?? null),
         projectName: job.projectId ? (projects.get(job.projectId) ?? null) : null,
       })),
       kg: snapshot.kg.map((job) => ({
@@ -861,7 +864,13 @@ async function listDistillableSessionRecords(): Promise<DistillableRecord[]> {
   if (!registry) return [];
   const snapshot = registry.projection();
   const projects = new Map(snapshot.projects.map((p) => [p.projectId, p]));
-  const distilled = new Set(getMemoryDistillJobs(200).map((job) => job.payload.sessionId));
+  const distilled = new Set(
+    getMemoryDistillJobs(200).flatMap((job) =>
+      job.payload.sessions?.length
+        ? job.payload.sessions.map((s) => s.sessionId)
+        : [job.payload.sessionId]
+    )
+  );
   const titles = readConversationTitles();
   const sessionRoot = path.join(app.getPath('userData'), 'agent', 'sessions');
   const records: DistillableRecord[] = [];

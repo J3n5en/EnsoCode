@@ -259,6 +259,55 @@ describe('memory IPC', () => {
     expect(sessions.find((s) => s.sessionId === 'c2')?.title).toBe('c2');
   });
 
+  it('聚合任务：标题列出各成员会话，成员会话都算已提炼', async () => {
+    mocks.registry = {
+      projection: () => ({
+        projects: [{ projectId: 'p1', canonicalPath: '/Users/me/work/enso-code' }],
+        conversations: [
+          { conversationId: 'c1', projectId: 'p1', sessionFile: 'a.jsonl' },
+          { conversationId: 'c2', projectId: 'p1', sessionFile: 'b.jsonl' },
+        ],
+      }),
+    };
+    mocks.settings = {
+      'enso-conversations': {
+        state: { conversations: { c1: { id: 'c1', title: 'Fix retry loop' } } },
+      },
+    };
+    const batch = {
+      id: 7,
+      sessionId: 'batch:0123456789abcdef',
+      sessionIds: ['c1', 'c2'],
+      projectId: 'p1',
+    };
+    mocks.toMemoryJobsSnapshot.mockReturnValueOnce({
+      distill: [batch],
+      kg: [],
+      reembed: null,
+    } as never);
+    mocks.getMemoryDistillJobs.mockReturnValueOnce([
+      {
+        payload: {
+          sessionId: batch.sessionId,
+          sessions: [{ sessionId: 'c1' }, { sessionId: 'c2' }],
+        },
+      },
+    ] as never);
+    const jobs = (await handler(IPC_CHANNELS.MEMORY_JOBS)(event)) as {
+      distill: { sessionTitle: string | null }[];
+    };
+    expect(jobs.distill[0].sessionTitle).toBe('Fix retry loop + c2');
+    mocks.getMemoryDistillJobs.mockReturnValueOnce([
+      { payload: { sessionId: batch.sessionId, sessions: [{ sessionId: 'c2' }] } },
+    ] as never);
+    const sessions = (await handler(IPC_CHANNELS.MEMORY_DISTILLABLE_SESSIONS)(event)) as {
+      sessionId: string;
+      distilled: boolean;
+    }[];
+    expect(sessions.find((s) => s.sessionId === 'c2')?.distilled).toBe(true);
+    expect(sessions.find((s) => s.sessionId === 'c1')?.distilled).toBe(false);
+  });
+
   it('knowledge handlers reject malformed input and never touch the db', async () => {
     // 图谱 / 树 / 解读 / 结晶都按 unknown 收窄；非法载荷不能落到查询层
     expect(await handler(IPC_CHANNELS.MEMORY_GRAPH)(event, { limit: 0 })).toEqual({
