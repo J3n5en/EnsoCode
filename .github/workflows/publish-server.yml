@@ -1,11 +1,13 @@
 name: Publish Server
 
-# 无界面服务端 npm 包 @ensocode/server：推 v* tag 时随桌面端一起发布，也可手动触发补发。
+# 无界面服务端 npm 包 @ensocode/server：推正式版 v* tag 时随桌面端一起发布，也可手动触发补发。
+# 预发布 tag（v*-*，如内测 v0.3.13-beta.12）只发桌面端，不发 npm。
 # 经 npm Trusted Publishing（OIDC）发布，无需 token；npm 上登记的 workflow 文件名就是本文件。
 on:
   push:
     tags:
       - 'v*'
+      - '!v*-*'
   workflow_dispatch:
     inputs:
       version:

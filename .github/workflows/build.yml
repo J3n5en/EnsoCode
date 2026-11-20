@@ -1,322 +1,27 @@
 name: Build
 
+# 正式版：手动推 vX.Y.Z tag。预发布 tag（v*-*，如内测 v0.3.13-beta.12）由 Beta 工作流发布，这里排除。
 on:
   push:
     tags:
       - 'v*'
+      - '!v*-*'
   workflow_dispatch:
 
 permissions:
   contents: write
 
-# 缓存按 ref 隔离：tag 触发时只能读 main 上的缓存，tag 上存下的下一个 tag 读不到。
-# 所以这里只读不存，main 上的 pnpm-store-* 由 relay-go / deploy-relay 负责写入。
 jobs:
-  # 先构建 Vite 产物，共享给所有平台
-  build-app:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-
-      - name: Get pnpm store directory
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build app
-        run: pnpm build
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-
-      - name: Upload build output
-        uses: actions/upload-artifact@v6
-        with:
-          name: app-build
-          path: out/
-          retention-days: 1
-
-  build-mac:
-    needs: build-app
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [arm64, x64]
-    # x64 也在 Apple 芯片上交叉打包：Intel runner 各阶段慢 2–4 倍。
-    # 原生依赖全是 N-API 预编译，按目标架构装包即可；after-pack 校验包内 Mach-O 架构。
-    runs-on: macos-15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Download build output
-        uses: actions/download-artifact@v7
-        with:
-          name: app-build
-          path: out/
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-
-      - name: Install dependencies
-        # 关掉构建结果缓存：否则 ripgrep 等 postinstall 会复用本机架构的产物
-        run: pnpm install --frozen-lockfile --cpu=${{ matrix.arch }} --config.side-effects-cache=false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          npm_config_arch: ${{ matrix.arch }}
-
-      - name: Import Apple Certificate
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          if [ -z "$APPLE_CERTIFICATE" ]; then
-            echo "No certificate configured, skipping..."
-            exit 0
-          fi
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          echo "$APPLE_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-          rm $RUNNER_TEMP/certificate.p12
-
-      - name: Build macOS (${{ matrix.arch }})
-        run: npx electron-builder --mac --${{ matrix.arch }} --publish onTag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Smoke test packaged natives
-        run: |
-          if [ "${{ matrix.arch }}" = x64 ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
-            sudo softwareupdate --install-rosetta --agree-to-license
-          fi
-          APP=$(ls -d dist/mac*/EnsoCode.app | head -1)
-          ELECTRON_RUN_AS_NODE=1 "$APP/Contents/MacOS/EnsoCode" scripts/smoke-packaged-natives.cjs "$APP/Contents/Resources"
-
-      - name: Upload latest-mac.yml
-        uses: actions/upload-artifact@v6
-        with:
-          name: latest-mac-${{ matrix.arch }}
-          path: dist/latest-mac.yml
-          retention-days: 1
-
-      # 同 Windows：非 tag 构建不发布，传上来才能下载试装（x64 交叉包可拿到 Intel Mac 上验）
-      - name: Upload installer
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: mac-installer-${{ matrix.arch }}
-          path: dist/*.dmg
-          retention-days: 7
-
-  build-windows:
-    needs: build-app
-    # windows-latest now ships VS 2026, which node-gyp <12.1 cannot detect
-    runs-on: windows-2022
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Download build output
-        uses: actions/download-artifact@v7
-        with:
-          name: app-build
-          path: out/
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Windows
-        run: npx electron-builder --win --x64 --publish onTag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Smoke test packaged natives
-        shell: bash
-        run: ELECTRON_RUN_AS_NODE=1 dist/win-unpacked/EnsoCode.exe scripts/smoke-packaged-natives.cjs dist/win-unpacked/resources
-
-      # 非 tag 触发时 electron-builder 不发布，产物只留在 runner 上；
-      # 传上来才能直接下载试装，不必为了拿个安装包去发版
-      - name: Upload installer
-        uses: actions/upload-artifact@v6
-        with:
-          name: windows-installer
-          path: |
-            dist/*.exe
-            dist/latest.yml
-          retention-days: 7
-
-  build-linux:
-    needs: build-app
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Download build output
-        uses: actions/download-artifact@v7
-        with:
-          name: app-build
-          path: out/
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-
-      - name: Get pnpm store directory
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Linux
-        run: npx electron-builder --linux --x64 --publish onTag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Smoke test packaged natives
-        run: ELECTRON_RUN_AS_NODE=1 dist/linux-unpacked/enso-code scripts/smoke-packaged-natives.cjs dist/linux-unpacked/resources
-
-  build-relay:
-    needs: build-app
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      # 与各平台安装包同一份 renderer：清单 id 才能和电脑端对上
-      - name: Download build output
-        uses: actions/download-artifact@v7
-        with:
-          name: app-build
-          path: out/
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v5
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.27'
-          cache-dependency-path: packages/relay-go/go.sum
-
-      - name: Get pnpm store directory
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Restore pnpm cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Test relay
-        working-directory: packages/relay-go
-        run: go test -count=1 ./...
-
-      - name: Embed phone PWA
-        run: ./packages/relay-go/sync-frontend.sh
-
-      - name: Install UPX
-        run: |
-          curl -fsSL https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz \
-            | sudo tar -xJ -C /usr/local/bin --strip-components=1 --wildcards '*/upx'
-          upx --version
-
-      - name: Build linux amd64 and arm64
-        working-directory: packages/relay-go
-        env:
-          CGO_ENABLED: '0'
-        run: |
-          VERSION="${{ github.ref_name }}"
-          mkdir -p dist
-          GOOS=linux GOARCH=amd64 go build -trimpath -buildmode=exe -ldflags="-s -w -X main.version=${VERSION}" -o dist/enso-relay-linux-amd64 .
-          GOOS=linux GOARCH=arm64 go build -trimpath -buildmode=exe -ldflags="-s -w -X main.version=${VERSION}" -o dist/enso-relay-linux-arm64 .
-          ls -lh dist/enso-relay-linux-*
-          upx --best --lzma dist/enso-relay-linux-amd64 dist/enso-relay-linux-arm64
-          ls -lh dist/enso-relay-linux-*
-          chmod +x dist/enso-relay-linux-*
-          cd dist
-          sha256sum enso-relay-linux-amd64 enso-relay-linux-arm64 > enso-relay-checksums.txt
-
-      - name: Upload relay binaries
-        uses: actions/upload-artifact@v6
-        with:
-          name: enso-relay
-          path: packages/relay-go/dist/enso-relay-*
-          retention-days: 7
-
+  desktop:
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      relay: true
+    secrets: inherit
 
   generate-release-notes:
-    needs: [build-mac, build-windows, build-linux, build-relay]
+    needs: desktop
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -384,7 +89,8 @@ jobs:
         id: prev_tag
         run: |
           CURRENT_TAG="${{ steps.tag.outputs.name }}"
-          PREV_TAG=$(git tag --sort=-version:refname | grep -A1 "^${CURRENT_TAG}$" | tail -1)
+          # 只和上一个正式版比：跳过内测等预发布 tag（含 -）
+          PREV_TAG=$(git tag -l 'v*' --sort=-version:refname | grep -v -- '-' | grep -A1 "^${CURRENT_TAG}$" | tail -1)
           if [ "$PREV_TAG" = "$CURRENT_TAG" ] || [ -z "$PREV_TAG" ]; then
             PREV_TAG=$(git rev-list --max-parents=0 HEAD)
           fi

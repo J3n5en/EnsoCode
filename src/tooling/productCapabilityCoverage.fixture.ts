@@ -97,6 +97,7 @@ export const SETTINGS_DATA_COVERAGE = {
   ),
   autoUpdate: surfaces('general.automatic-updates'),
   autoRestartWhenIdle: excluded('Device idle-restart update policy; not an Enso capability.'),
+  updateChannel: excluded('Device update channel policy; not an Enso capability.'),
   pluginAutoUpdate: excluded(
     'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
   ),
@@ -287,6 +288,7 @@ export const SETTINGS_ACTION_COVERAGE = {
   ),
   setAutoUpdate: surfaces('general.automatic-updates'),
   setAutoRestartWhenIdle: excluded('Device idle-restart update policy; not an Enso capability.'),
+  setUpdateChannel: excluded('Device update channel policy; not an Enso capability.'),
   setPluginAutoUpdate: excluded(
     'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
   ),
@@ -791,6 +793,7 @@ export const IPC_PRODUCT_COVERAGE = {
   UPDATER_SET_AUTO_RESTART_WHEN_IDLE: excluded(
     'Device idle-restart update policy; not an Enso capability.'
   ),
+  UPDATER_SET_CHANNEL: excluded('Device update channel policy; not an Enso capability.'),
   UPDATER_CANCEL_RESTART: surfaces('updates.install'),
   UPDATER_TAKE_INTERRUPTED_SESSIONS: excluded(
     'Startup handoff that resumes turns interrupted by an update restart.'
