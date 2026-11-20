@@ -194,6 +194,28 @@ describe('executeMemoryOp', () => {
     expect(global.results.map((h) => h.spaceId)).toEqual(['global']);
   });
 
+  it('search 给被 challenges 的记忆带 challengedBy，干净记忆不带', async () => {
+    const old = await createMemory(db, { content: '构建用 pnpm 管理多包', spaceId: 'global' });
+    if (old.status !== 'inserted') throw new Error();
+    const fresh = await createMemory(db, {
+      content: '已改用 bun，pnpm 弃用',
+      spaceId: 'global',
+      evolvesFromId: old.memory.id,
+      evolvesRelation: 'challenges',
+      force: true,
+    });
+    if (fresh.status !== 'inserted') throw new Error();
+    const r = (await executeMemoryOp(
+      db,
+      'search',
+      { query: 'pnpm', limit: 10, spaceId: 'global' },
+      { projectId: PROJECT }
+    )) as { results: Record<string, unknown>[] };
+    const byId = new Map(r.results.map((h) => [h.id, h]));
+    expect(byId.get(old.memory.id)?.challengedBy).toEqual([fresh.memory.id]);
+    expect(byId.get(fresh.memory.id)).not.toHaveProperty('challengedBy');
+  });
+
   it('search 在生产路径上启用 MMR：3 近似 + 1 异题，limit=2 结果包含异题（3d Major）', async () => {
     const emb: Embedder = {
       model: 'kw',

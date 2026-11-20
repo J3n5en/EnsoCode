@@ -128,6 +128,8 @@ export async function executeMemoryOp(
         rank: index + 1,
         ...(hit.relevance === null ? {} : { relevance: Number(hit.relevance.toFixed(4)) }),
         isLatest: hit.memory.isLatest,
+        // 有矛盾证据（challenges 未被拒绝）：列出发起方 id，干净记忆不带此字段
+        ...(hit.challengedBy ? { challengedBy: hit.challengedBy } : {}),
       })),
       ...searchAssistReport(request.mode, assist),
     };
