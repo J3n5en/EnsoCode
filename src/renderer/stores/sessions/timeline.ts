@@ -20,6 +20,7 @@ import type {
 import type { ProjectedApplyPatchOutcome, ProjectedFileChange } from '@shared/types/fileChanges';
 import { unwrapMcpProxyCall } from '@/lib/mcpToolName';
 import { mergeRuns, usesToolCard } from '@/lib/toolCards';
+import { type ToolImage, toolImageOf } from '@/lib/toolImage';
 import type { TimelineMessage } from './reducer';
 
 /** edit 工具的单个替换块（pi edit 工具参数 edits[] 的元素） */
@@ -76,6 +77,8 @@ export type TimelineItem =
       state: 'running' | 'reviewing' | 'ok' | 'error';
       /** read 到图片时的绝对路径，展开后按原文件渲染（含 svg / 动图）；其它缺省 */
       imagePath?: string;
+      /** image_view 结果里的图片块（原对象引用，展开时才解码）；其它缺省 */
+      image?: ToolImage;
       /** 生成图片是回复产物，独立于折叠的工具详情展示。 */
       generatedImages?: string[];
       /** edit 工具的替换块，用于渲染 diff；非 edit 为 null */
@@ -134,6 +137,7 @@ export type TimelineItem =
         args: unknown;
         output: string | null;
         state: 'running' | 'reviewing' | 'ok' | 'error';
+        image?: ToolImage;
       }[];
     }
   | {
@@ -925,6 +929,7 @@ function buildMessageTimeline(
       applyPatchOutcome: ProjectedApplyPatchOutcome | null;
       codemodeCalls: ProjectedCodemodeCall[] | null;
       generatedImages?: string[];
+      image?: ToolImage;
       rtk?: RtkToolStats;
       approvalReview?: ApprovalReviewRecord;
       backgroundTaskId?: string;
@@ -950,6 +955,7 @@ function buildMessageTimeline(
         shellFailure: message.shellFailure,
         pluginArtifacts: message.pluginArtifacts,
         generatedImages: message.generatedImages,
+        image: toolImageOf(message.content),
       });
     }
   }
@@ -1270,6 +1276,9 @@ function buildMessageTimeline(
             output: sent ? stripDeliveryReceipt(output) : asked ? asked.output : output,
             nestedPending: nestedPendingCount(part.id, pendingApprovals) || undefined,
             ...(imagePath ? { imagePath } : {}),
+            ...(part.name === 'image_view' && result?.image && !result.isError
+              ? { image: result.image }
+              : {}),
             ...(result?.generatedImages?.length ? { generatedImages: result.generatedImages } : {}),
             ...(sandboxTool ? { sandbox: sandboxView } : {}),
             state: result
@@ -2422,7 +2431,15 @@ export function foldTimeline(
         ...head,
         cardPeers: rest.flatMap((item) =>
           item.kind === 'tool'
-            ? [{ key: item.key, args: item.args ?? null, output: item.output, state: item.state }]
+            ? [
+                {
+                  key: item.key,
+                  args: item.args ?? null,
+                  output: item.output,
+                  state: item.state,
+                  ...(item.image ? { image: item.image } : {}),
+                },
+              ]
             : []
         ),
       };

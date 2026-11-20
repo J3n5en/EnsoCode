@@ -1,3 +1,5 @@
+import type { ToolImage } from '@/lib/toolImage';
+
 export type ToolCardState = 'running' | 'reviewing' | 'ok' | 'error';
 
 export interface ToolCallInput {
@@ -5,6 +7,8 @@ export interface ToolCallInput {
   args: unknown;
   output: string | null;
   state: ToolCardState;
+  /** 结果里的图片块（image_view）；其它缺省 */
+  image?: ToolImage;
 }
 
 export interface ToolCardLookup {
@@ -40,8 +44,8 @@ export type ToolCardBlock =
       }[];
     }
   | { kind: 'session'; id: string; label: string }
-  /** 缩略图：src 是 local-image:// URL，宽高只用于占位，实际按 CSS 收边 */
-  | { kind: 'image'; src: string; alt?: string; width?: number; height?: number };
+  /** 缩略图：优先用结果里的图片字节，没有时才用工具回报的路径；展开时才解码 */
+  | { kind: 'image'; image?: ToolImage; path?: string; alt?: string };
 
 export interface ToolCardView {
   name: string;

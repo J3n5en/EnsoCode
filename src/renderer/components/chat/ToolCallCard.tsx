@@ -17,6 +17,7 @@ import type { TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
 import { Markdown } from './Markdown';
 import { StepDot } from './StepNode';
+import { ToolImagePreview } from './ToolImagePreview';
 
 type ToolItem = Extract<TimelineItem, { kind: 'tool' }>;
 
@@ -48,12 +49,19 @@ function useToolCardLookup(): ToolCardLookup {
 function callsOf(item: ToolItem): ToolCallInput[] {
   const peers = item.cardPeers ?? [];
   return [
-    { name: item.name, args: item.args ?? null, output: item.output, state: item.state },
+    {
+      name: item.name,
+      args: item.args ?? null,
+      output: item.output,
+      state: item.state,
+      ...(item.image ? { image: item.image } : {}),
+    },
     ...peers.map((peer) => ({
       name: item.name,
       args: peer.args ?? null,
       output: peer.output,
       state: peer.state,
+      ...(peer.image ? { image: peer.image } : {}),
     })),
   ];
 }
@@ -267,13 +275,9 @@ function Block({
   }
   if (block.kind === 'image') {
     return (
-      <img
-        data-enso="tool-card-image"
-        src={block.src}
-        alt={block.alt ?? ''}
-        loading="lazy"
-        className="max-h-64 max-w-full rounded border border-border/60 object-contain"
-      />
+      <div data-enso="tool-card-image">
+        <ToolImagePreview image={block.image} path={block.path} alt={block.alt} />
+      </div>
     );
   }
   if (block.kind === 'session') {

@@ -3690,6 +3690,7 @@ export const zhTranslations: Record<string, string> = {
   'Look at {{name}}': '查看 {{name}}',
   Dimensions: '尺寸',
   'File size': '文件大小',
+  'Image unavailable': '图片无法显示',
   'Cleanup candidates · {{count}}': '可清理项 · {{count}}',
   'Clean up {{count}} items': '清理 {{count}} 项',
   '{{count}} items': '{{count}} 项',
