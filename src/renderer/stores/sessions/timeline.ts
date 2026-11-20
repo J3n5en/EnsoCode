@@ -801,6 +801,15 @@ function singleBlock(key: object, oldText: string, newText: string): EditBlock[]
 const partText = (message: ProjectedMessage): string =>
   message.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
 
+/** agent 的 withSourceReference 在工具结果文字末尾追加的引用标记：只给模型看，详情里不显示 */
+const SOURCE_REFERENCE_TAIL =
+  /(?:^|\n)<source_reference type="(?:file|web)" (?:path|url)="[^"\n]*" \/>(?:\n<source_reference type="(?:file|web)" (?:path|url)="[^"\n]*" \/>)*$/;
+
+const toolResultText = (message: ProjectedMessage): string =>
+  message.content
+    .map((part) => (part.type === 'text' ? part.text.replace(SOURCE_REFERENCE_TAIL, '') : ''))
+    .join('');
+
 /** content 中最后一个「有内容」的 part（空白 text / unknown 不算）；全空返回 -1 */
 function findLastActivePartIndex(content: ProjectedMessage['content']): number {
   for (let i = content.length - 1; i >= 0; i--) {
@@ -940,7 +949,7 @@ function buildMessageTimeline(
   for (const message of messages) {
     if (message.role === 'toolResult' && message.toolCallId) {
       results.set(message.toolCallId, {
-        output: partText(message),
+        output: toolResultText(message),
         isError: message.isError === true,
         todos: message.todos ?? null,
         durationMs: message.toolDurationMs ?? null,
