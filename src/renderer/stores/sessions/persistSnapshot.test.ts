@@ -21,6 +21,25 @@ const conv = (id: string, extra: { title?: string; text?: string } = {}) => ({
 });
 
 describe('cachedPartializeSessions', () => {
+  it('上下文占用只存合计，不存逐项条目', () => {
+    const occupancy = {
+      buckets: { system: 1, tools: 2 },
+      used: 3,
+      percent: 1,
+      parts: [{ kind: 'tools', tokens: 2, items: [{ name: 'bash', tag: '', tokens: 2 }] }],
+    };
+    const persisted = cachedPartializeSessions({
+      conversations: { o: { ...conv('o'), occupancy } },
+      order: ['o'],
+      activeId: 'o',
+    });
+    expect(persisted.conversations.o.occupancy).toEqual({
+      buckets: { system: 1, tools: 2 },
+      used: 3,
+      percent: 1,
+    });
+  });
+
   it('preserves empty worktree drafts and their names across serialization', () => {
     const worktree = {
       conversationId: 'a',

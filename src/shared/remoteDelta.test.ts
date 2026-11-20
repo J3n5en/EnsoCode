@@ -7,6 +7,7 @@ import {
   RemoteWriteClient,
   UpsertDecoder,
   UpsertEncoder,
+  writeSeedOf,
 } from './remoteDelta';
 
 const hash = (s: string) => {
@@ -75,6 +76,43 @@ describe('远端写入增量', () => {
     await client.write('k', undefined, send);
     await client.write('k', { a: 1 }, send);
     expect(written).toEqual([{ a: 1 }, undefined, { a: 1 }]);
+  });
+
+  it('两端用同一次读取结果做基线：首写也只发变化', async () => {
+    const { host, client, written, sent, send } = writePair();
+    const read = { state: { rows: 'r'.repeat(5000) }, version: 1 };
+    host.seed('k', structuredClone(read));
+    client.seed('k', structuredClone(read));
+    const next = { state: { rows: 'r'.repeat(5000), activeId: 'a' }, version: 1 };
+    await client.write('k', next, send);
+    expect(written).toEqual([next]);
+    expect(JSON.stringify(sent[0]).length).toBeLessThan(200);
+  });
+
+  it('只有宿主没有基线时报 stale，客户端改发整份', async () => {
+    const { client, written, send } = writePair();
+    const read = { a: 'q'.repeat(500) };
+    client.seed('k', read);
+    await client.write('k', { ...read, n: 1 }, send);
+    expect(written).toEqual([{ ...read, n: 1 }]);
+  });
+
+  it('两端基线来自不同的读取（并发读写换序）：报 stale 改发整份，不会套错基线', async () => {
+    const { host, client, written, send } = writePair();
+    host.seed('k', { a: 'h'.repeat(500), from: 'second' });
+    const first = { a: 'h'.repeat(500), from: 'first' };
+    client.seed('k', first);
+    await client.write('k', { ...first, n: 1 }, send);
+    expect(written).toEqual([{ ...first, n: 1 }]);
+  });
+
+  it('会话读取结果映射到会话记录的写入键', () => {
+    expect(writeSeedOf('conversations:read', { value: { state: {} }, seq: 3 })).toEqual({
+      name: 'enso-conversations',
+      value: { state: {} },
+    });
+    expect(writeSeedOf('conversations:read', { seq: 3 })).toBeNull();
+    expect(writeSeedOf('settings:read', { value: 1 })).toBeNull();
   });
 });
 

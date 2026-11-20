@@ -61,6 +61,12 @@ export const RUNTIME_CONVERSATION_KEYS = [
 function persistOne(conversation: PersistableConversation): PersistableConversation {
   const kept: PersistableConversation = { ...conversation };
   for (const key of RUNTIME_CONVERSATION_KEYS) Reflect.deleteProperty(kept, key);
+  // 逐项条目占整份会话记录的大半（每条都列一遍工具清单），远程界面启动要整份下载；会话再跑起来 worker 会重发
+  const occupancy = conversation.occupancy as { parts?: unknown } | undefined;
+  if (occupancy && typeof occupancy === 'object' && 'parts' in occupancy) {
+    const { parts: _parts, ...totals } = occupancy;
+    kept.occupancy = totals;
+  }
   return {
     ...kept,
     lastActiveAt:

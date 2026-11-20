@@ -15,6 +15,7 @@ import {
   UpsertDecoder,
   withIfNone,
   withUpsertReset,
+  writeSeedOf,
 } from '@shared/remoteDelta';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import { decodeRemoteValue, encodeRemoteValue } from '../../packages/pair/src/remote';
@@ -39,6 +40,10 @@ const CACHED_READS: ReadonlySet<string> = new Set([
   IPC_CHANNELS.ASSETS_LIST_PROJECT_SKILLS,
   IPC_CHANNELS.PROVIDERS_MODEL_META,
   IPC_CHANNELS.AGENT_PARENT_HISTORY_TAIL,
+  // 会话记录占启动下载的大头：重开页面没变就回 same，变了回增量
+  IPC_CHANNELS.CONVERSATIONS_READ,
+  // 插件脚本与样式每次启动都要取，单个可达数百 KB
+  IPC_CHANNELS.EXTENSION_PLUGINS_ASSET,
 ]);
 /** 只合并同时发出的相同请求（结果随会话变化或依赖发起方，不跨次缓存） */
 const SHARED_READS: ReadonlySet<string> = new Set([
@@ -46,6 +51,7 @@ const SHARED_READS: ReadonlySet<string> = new Set([
   IPC_CHANNELS.WORKTREE_LIST,
   IPC_CHANNELS.WORKTREE_BRANCHES,
   IPC_CHANNELS.PROJECTS_CODE_SOURCES,
+  IPC_CHANNELS.EXTENSION_PLUGINS_LIST,
 ]);
 
 // 缓存放父页面（父 realm 的 Map，只存字符串）：iframe 重载、设置页 iframe 都能复用
@@ -80,9 +86,10 @@ async function invokeEncoded(channel: string, args: unknown[]): Promise<unknown>
   }
   const key = `${channel}\0${JSON.stringify(encoded)}`;
   if (CACHED_READS.has(channel)) {
-    return decodeRemoteValue(
-      await reads.read(key, (hash) => rawInvoke(channel, withIfNone(encoded, hash)))
-    );
+    const result = await reads.read(key, (hash) => rawInvoke(channel, withIfNone(encoded, hash)));
+    const seed = writeSeedOf(channel, result);
+    if (seed) writes.seed(seed.name, structuredClone(seed.value));
+    return decodeRemoteValue(result);
   }
   if (SHARED_READS.has(channel)) {
     let pending = shared.get(key);
