@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
-import { app, type BrowserWindow, crashReporter } from 'electron';
+import type { AppExitReason } from '@shared/types/ipc';
+import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { syncDropShelf } from './desktop/dropShelf';
 import {
   registerLocalImageProtocolHandler,
@@ -10,7 +11,15 @@ import { installDesktopLocalUi } from './desktop/localUi';
 import { openBotPdfWindow, openDesktopPdfWindow } from './desktop/pdfWindow';
 import { confirmRevealExternal } from './desktop/revealExternalConfirm';
 import { registerIpcHandlers } from './ipc';
+import { resumeRootFromRestartManifest } from './ipc/agent';
+import {
+  clearRestartOverlay,
+  registerAppRestartHandlers,
+  setRestartOverlay,
+  waitWithExitDialog,
+} from './ipc/appRestart';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
+import { needsQuitCheckpoint } from './ipc/sessionIndex';
 import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
 import {
   noteOpenFolder,
@@ -22,13 +31,18 @@ import {
 import { createPluginInstallInbox } from './protocol/pluginInstall';
 import { createSecretaryLinkInbox } from './protocol/secretaryLink';
 import {
+  agentDataDir,
   agentWorkerAlive,
+  forceAgentWorkerQuit,
+  prepareAgentWorkerForQuit,
   recordAgentWorkerGone,
   startAgentWorker,
   stopAgentWorkerForQuit,
 } from './services/agentHost';
-import { installAppMenu } from './services/appMenu';
+import { allowAppQuit, setBeforeConfirmedQuit } from './services/appCloseConfirm';
+import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
+import { createAppRestart, restartOverlayFor } from './services/appRestart';
 import {
   ensureTray,
   enterServerMode,
@@ -40,6 +54,11 @@ import {
 } from './services/appServerMode';
 import { browserHost } from './services/browserHost';
 import { getCaCertConfig } from './services/caCert';
+import {
+  coldRestartPlan,
+  resumeColdRestartSessions,
+  trackColdResume,
+} from './services/coldRestart';
 import { computerHost } from './services/computerHost';
 import { startDesktopConfigCli, stopDesktopConfigCli } from './services/configCli';
 import { installDesktopHooks } from './services/desktopHooks';
@@ -123,6 +142,60 @@ if (app.isPackaged && process.platform !== 'win32') {
 const gotTheLock = app.requestSingleInstanceLock();
 const pluginInstallInbox = createPluginInstallInbox(process.platform);
 const secretaryLinkInbox = createSecretaryLinkInbox(process.platform);
+function showMenuError(message: string): void {
+  const parent = BrowserWindow.getFocusedWindow() ?? getMainWindow();
+  const options = { type: 'error' as const, message };
+  void (
+    parent && !parent.isDestroyed()
+      ? dialog.showMessageBox(parent, options)
+      : dialog.showMessageBox(options)
+  ).catch((error: unknown) => console.error('[app-menu] 提示框失败:', error));
+}
+
+// 菜单「重启」：点下去主窗口立刻弹「正在重启」；先等 agent 安全点（有命令在跑弹层改成等命令、可强制退出），
+// 再退出；will-quit 收尾拿同一个结果，新实例冷启动按清单续跑
+const appRestart = createAppRestart({
+  relaunch: () => app.relaunch(),
+  allowQuit: allowAppQuit,
+  quit: () => app.quit(),
+  prepareQuit: (onWaitingForTools) =>
+    prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: needsQuitCheckpoint,
+      onWaitingForTools,
+      // 应用马上重新打开：能脱离的转后台命令（dev server 等）交给新实例认回，不等也不停
+      keepBackgroundTasks: true,
+    }),
+  stateChanged: (state, waitReason) => {
+    installAppMenu(readLocale());
+    const overlay = restartOverlayFor(state, waitReason);
+    if (overlay) setRestartOverlay(overlay);
+    else clearRestartOverlay('restart');
+  },
+  abandonPrepare: () => void forceAgentWorkerQuit(),
+});
+
+// Cmd+Q / 关窗 / 菜单退出：确认退出后、窗口还在时先等安全点，有命令在跑主窗口弹等待层；
+// will-quit 收尾拿同一个结果
+setBeforeConfirmedQuit(async () => {
+  await waitWithExitDialog('quit', (onWaitingForTools) =>
+    prepareAgentWorkerForQuit({
+      reason: 'quit',
+      hasRunningSessions: needsQuitCheckpoint,
+      onWaitingForTools,
+    })
+  );
+});
+
+/** 等待弹层上点「强制退出」：重启走重启自己的强制路径；安装更新与退出结束等待，各自照常往下走 */
+function forceExitWait(exit: AppExitReason): void {
+  if (exit === 'restart' && appRestart.forceQuit()) return;
+  try {
+    forceAgentWorkerQuit();
+  } catch (error) {
+    console.error(`[app-exit] ${exit} 强制退出时结束等待失败:`, error);
+  }
+}
 
 function registerEnsoProtocol(): void {
   if (process.defaultApp && process.argv.length >= 2) {
@@ -187,6 +260,12 @@ if (!gotTheLock) {
     if (!app.isPackaged && process.platform === 'darwin') {
       app.dock?.setIcon(path.join(app.getAppPath(), 'build', 'icon.png'));
     }
+    setAppMenuActions({
+      restartApp: () => void appRestart.restart(),
+      restartState: () => appRestart.state,
+      reportError: showMenuError,
+    });
+    registerAppRestartHandlers(forceExitWait);
     installAppMenu(readLocale());
 
     // 开发环境下默认用 F12 打开/关闭 DevTools
@@ -233,6 +312,12 @@ if (!gotTheLock) {
       },
     });
     await secureStores;
+    // 上次退出 / 安装更新前停在安全点的会话：先读清单（渲染层取中断记录前就要知道哪些会续跑）
+    const coldRestart = coldRestartPlan(agentDataDir());
+    // 有会话要续跑：主窗口在恢复完成前显示「正在恢复会话」（有上限）
+    trackColdResume(coldRestart, (resuming) =>
+      resuming ? setRestartOverlay({ phase: 'resuming' }) : clearRestartOverlay('resuming')
+    );
     registerIpcHandlers();
     registerDesktopIpcHandlers();
     void startDesktopConfigCli();
@@ -279,6 +364,11 @@ if (!gotTheLock) {
     browserHost.setHostWindow(getMainWindow);
     // 两个后台服务都不依赖窗口，同样延后，避免堵住首帧。
     setImmediate(() => {
+      // 冷启动接管断点：第一代 worker 带上断点，再按清单重走 spawn（凭据现取）
+      const startWorker = (): void => {
+        startAgentWorker(coldRestart ? { restartCheckpointFile: coldRestart.checkpointFile } : {});
+        if (coldRestart) void resumeColdRestartSessions(coldRestart, resumeRootFromRestartManifest);
+      };
       // worker 的 env 是 fork 时的快照：等系统代理解析后再 fork，
       // 打包版再等登录 shell 探测出真实 PATH。
       const ready = getProxyConfig().whenReady();
@@ -286,10 +376,10 @@ if (!gotTheLock) {
         void ready.finally(() =>
           hydrateShellPath()
             .then(({ extraCaCerts }) => getCaCertConfig().applyShellValue(extraCaCerts))
-            .finally(() => startAgentWorker())
+            .finally(startWorker)
         );
       } else {
-        void ready.finally(() => startAgentWorker());
+        void ready.finally(startWorker);
       }
       // 手机第二屏：恢复已配对设备的中继连接
       startPairHost();
@@ -339,7 +429,14 @@ if (!gotTheLock) {
     },
     {
       shouldWait: agentWorkerAlive,
-      wait: () => stopAgentWorkerForQuit(3_000),
+      // 先等 worker 到安全点、断点与恢复清单落盘（有超时兜底），再照常收尾
+      wait: async () => {
+        await prepareAgentWorkerForQuit({
+          reason: 'quit',
+          hasRunningSessions: needsQuitCheckpoint,
+        });
+        await stopAgentWorkerForQuit(3_000);
+      },
     },
   ]);
 }

@@ -89,6 +89,7 @@ import {
   registerPluginSessionBridge,
   releaseParentSession,
   reloadSession,
+  rememberRestorableSpawn,
   requestSnapshot,
   resolveAgentTypeSpawnConfig,
   resolveModelSelection,
@@ -126,7 +127,7 @@ import {
 } from '../services/agentHost';
 import { validateAgentRun } from '../services/agentRunValidation';
 import { AgentService } from '../services/agentService';
-import { BackgroundTaskTracker, type ObservedTask } from '../services/backgroundTaskTracker';
+import { backgroundTaskStates, type ObservedTask } from '../services/backgroundTaskTracker';
 import { HumanRequestTimeouts } from '../services/bots/humanRequestTimeouts';
 import { readBotSessionMessages } from '../services/bots/sessionMessages';
 import {
@@ -137,6 +138,7 @@ import {
 import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
+import { settleColdResume, wakeColdRestartSession } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
@@ -171,6 +173,7 @@ import {
 import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
+import type { RestartManifestEntry } from '../services/restartManifest';
 import { ContactStore } from '../services/secretary/contact/store';
 import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
 import { secretaryEnabled } from '../services/secretary/enabled';
@@ -268,7 +271,6 @@ let secretaryDriverObserver:
   | ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void)
   | null = null;
 const pluginSessionStates = new SessionStateTracker();
-const backgroundTaskStates = new BackgroundTaskTracker();
 const selectionClockOwners = new WeakSet<RendererContents>();
 
 function watchSelectionClock(sender: RendererContents): void {
@@ -543,6 +545,16 @@ function spawnBoundSession(
   request: AgentSpawnRequest,
   credentialKeys: ReadonlySet<string>
 ) {
+  const result = spawnBoundSessionOnce(identity, request, credentialKeys);
+  if (result.ok) rememberRestorableSpawn(identity, request);
+  return result;
+}
+
+function spawnBoundSessionOnce(
+  identity: SessionIdentity,
+  request: AgentSpawnRequest,
+  credentialKeys: ReadonlySet<string>
+) {
   const conversation = sourceAuthority?.conversation(request.sessionId);
   // bot 会话的人设 / 工作区只能由 Main 的 BotSessionHost 组装，通用 spawn 路径一律拒绝
   if (conversation?.bot) {
@@ -651,6 +663,41 @@ export async function spawnRootFromMain(
     return { ok: false, error: 'model credentials unavailable' };
   }
   return spawnBoundSession(identity, request, credentialKeys);
+}
+
+/**
+ * 冷启动：按恢复清单把上次退出前停在安全点的根会话重新 spawn。沿用清单里的 generation，
+ * worker 才认得出断点；cwd / 会话文件只认权威记录，模型凭据此刻从现有来源重新取。
+ */
+export async function resumeRootFromRestartManifest(
+  entry: RestartManifestEntry
+): Promise<AgentActionResult> {
+  const conversation = sourceAuthority?.conversation(entry.sessionId);
+  if (!conversation || conversation.bot || conversation.lifecycle === 'ended')
+    return { ok: false, error: 'conversation unavailable' };
+  if (exactIdentity(entry.sessionId)) return { ok: false, error: 'session already spawned' };
+  const cwd = authoritativeSpawnCwd(entry.sessionId);
+  const parsed =
+    cwd === null
+      ? null
+      : parseSpawnRequest({
+          ...entry.settings,
+          sessionId: entry.sessionId,
+          cwd,
+          resumeFile: entry.sessionFile,
+        });
+  const resume = parsed ? authoritativeResumeFile(entry.sessionId, entry.sessionFile) : null;
+  if (!parsed || !resume?.file) return { ok: false, error: 'invalid restart manifest entry' };
+  const identity = { sessionId: entry.sessionId, generation: entry.generation };
+  agentSessionIndex.prepareParent(identity);
+  let credentialKeys: ReadonlySet<string>;
+  try {
+    credentialKeys = await readStoredOauthCredentialKeys();
+    await preparePluginsForSpawn();
+  } catch {
+    return { ok: false, error: 'model credentials unavailable' };
+  }
+  return spawnBoundSession(identity, { ...parsed, resumeFile: resume.file }, credentialKeys);
 }
 
 /** Main 侧给根会话发消息：deliveryId 由 Main 生成，供回执去重 */
@@ -1840,6 +1887,16 @@ export function registerAgentHandlers(): void {
       void labelToolBatch(workerEvent.identity, workerEvent.digest);
       return;
     }
+    // 重启认回的后台命令在空闲会话里结束：按恢复清单打开它，worker 打开后开一轮交付结果
+    if (workerEvent.type === 'session-wake-requested') {
+      void wakeColdRestartSession(workerEvent.sessionId, resumeRootFromRestartManifest).then(
+        (result) =>
+          console.log(
+            `[graceful-restart] wake ${workerEvent.sessionId.slice(0, 8)} ${result.ok ? 'ok' : `skipped: ${result.error}`}`
+          )
+      );
+      return;
+    }
     if (
       workerEvent.type === 'session-reloaded' ||
       workerEvent.type === 'workspace-lock-result' ||
@@ -1848,7 +1905,10 @@ export function registerAgentHandlers(): void {
       workerEvent.type === 'mcp-oauth-refresh' ||
       workerEvent.type === 'plugin-mcp-result' ||
       workerEvent.type === 'plugin-agent-event' ||
-      workerEvent.type === 'workspace-unlock-result'
+      workerEvent.type === 'workspace-unlock-result' ||
+      workerEvent.type === 'graceful-restart-deferred' ||
+      workerEvent.type === 'graceful-restart-ready' ||
+      workerEvent.type === 'background-tasks-detached'
     )
       return;
     dispatchService?.observe(workerEvent);
@@ -1865,6 +1925,7 @@ export function registerAgentHandlers(): void {
       }
     }
     if (workerEvent.type === 'parent-ready') {
+      settleColdResume(workerEvent.identity.sessionId);
       sourceAuthority?.markReady(
         workerEvent.identity.sessionId,
         workerEvent.sessionFile,
@@ -1877,6 +1938,7 @@ export function registerAgentHandlers(): void {
       workerEvent.type === 'parent-rejected' &&
       !workerEvent.reason.startsWith(STALE_SESSION_ERROR)
     ) {
+      settleColdResume(workerEvent.identity.sessionId);
       const selection = sourceAuthority?.conversation(workerEvent.identity.sessionId)?.selection;
       console.warn('[agent] spawn rejected', {
         sessionId: workerEvent.identity.sessionId,

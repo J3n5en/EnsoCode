@@ -288,6 +288,8 @@ const local: Record<string, (...args: unknown[]) => unknown> = {
   },
   [IPC_CHANNELS.APP_CLOSE_RESPONSE]: () => undefined,
   [IPC_CHANNELS.APP_FLUSH_PERSIST_RESPONSE]: () => undefined,
+  [IPC_CHANNELS.APP_RESTART_FORCE]: () => undefined,
+  [IPC_CHANNELS.APP_RESTART_WAITING_GET]: () => null,
   [IPC_CHANNELS.NOTIFICATION_ACTIVE_SESSION]: () => undefined,
   [IPC_CHANNELS.NOTIFICATION_FOCUS_SESSION]: () => undefined,
 };

@@ -15,6 +15,12 @@ const mocks = vi.hoisted(() => ({
   }),
   consumeTrayReenter: vi.fn(() => false),
   scheduleReenter: vi.fn(),
+  prepareQuit: vi.fn(async (_options: unknown) => 'skipped'),
+  forceAgentWorkerQuit: vi.fn(() => true),
+  registerForce: vi.fn(),
+  beforeConfirmedQuit: null as null | (() => Promise<void>),
+  dialog: [] as string[],
+  needsCheckpoint: false,
 }));
 
 vi.mock('electron', () => ({
@@ -65,7 +71,7 @@ vi.mock('./desktop/localImageScheme', () => ({
 }));
 vi.mock('./services/remoteRenderer', () => ({ setupRemoteRenderer: vi.fn() }));
 vi.mock('./services/nodeRemote', () => ({ registerNodeSettingsProtocolHandler: vi.fn() }));
-vi.mock('./services/appMenu', () => ({ installAppMenu: vi.fn() }));
+vi.mock('./services/appMenu', () => ({ installAppMenu: vi.fn(), setAppMenuActions: vi.fn() }));
 vi.mock('./services/computerHost', () => ({ computerHost: { closeAll: vi.fn() } }));
 vi.mock('./services/pairHost', () => ({
   startPairHost: vi.fn(() => mocks.order.push('pair')),
@@ -80,6 +86,41 @@ vi.mock('./services/agentHost', () => ({
   startAgentWorker: mocks.startAgentWorker,
   agentWorkerAlive: () => false,
   stopAgentWorkerForQuit: vi.fn(async () => undefined),
+  prepareAgentWorkerForQuit: mocks.prepareQuit,
+  forceAgentWorkerQuit: mocks.forceAgentWorkerQuit,
+  recordAgentWorkerGone: vi.fn(),
+  agentDataDir: () => '/tmp/enso-index-test/agent',
+}));
+vi.mock('./ipc/agent', () => ({ resumeRootFromRestartManifest: vi.fn() }));
+vi.mock('./ipc/appRestart', () => ({
+  clearRestartOverlay: vi.fn(),
+  registerAppRestartHandlers: mocks.registerForce,
+  setRestartOverlay: vi.fn(),
+  waitWithExitDialog: async (
+    exit: string,
+    prepare: (onWaiting: (reason: string) => void) => Promise<unknown>
+  ) => {
+    try {
+      return await prepare((reason) => mocks.dialog.push(`open:${exit}:${reason}`));
+    } finally {
+      mocks.dialog.push(`close:${exit}`);
+    }
+  },
+}));
+vi.mock('./services/appCloseConfirm', () => ({
+  allowAppQuit: vi.fn(),
+  setBeforeConfirmedQuit: (hook: () => Promise<void>) => {
+    mocks.beforeConfirmedQuit = hook;
+  },
+}));
+vi.mock('./ipc/sessionIndex', () => ({
+  agentSessionIndex: { runningRootSessionIds: () => [] },
+  needsQuitCheckpoint: () => mocks.needsCheckpoint,
+}));
+vi.mock('./services/coldRestart', () => ({
+  coldRestartPlan: () => null,
+  resumeColdRestartSessions: vi.fn(),
+  trackColdResume: vi.fn(),
 }));
 vi.mock('./services/proxyConfig', () => ({
   getProxyConfig: () => ({
@@ -182,6 +223,43 @@ describe('Main process diagnostics', () => {
     // mock 的 getPath('userData') 固定返回 /tmp
     expect(mocks.setPath).toHaveBeenCalledWith('crashDumps', path.join('/tmp', 'Crashpad'));
     expect(mocks.crashReporterStart).toHaveBeenCalledWith({ uploadToServer: false });
+  });
+});
+
+describe('退出与安装更新的等待弹层接线', () => {
+  it('确认退出后先等安全点：有命令在跑开「等完退出」弹层，等完关掉', async () => {
+    mocks.dialog.length = 0;
+    mocks.prepareQuit.mockImplementationOnce(async (options) => {
+      (options as { onWaitingForTools: (reason: string) => void }).onWaitingForTools('tool');
+      return 'checkpointed';
+    });
+    await import('./index');
+    await mocks.beforeConfirmedQuit?.();
+    expect(mocks.prepareQuit).toHaveBeenLastCalledWith(expect.objectContaining({ reason: 'quit' }));
+    expect(mocks.dialog).toEqual(['open:quit:tool', 'close:quit']);
+  });
+
+  it('回合都已结束、只剩转后台命令在跑：退出同样先等安全点（由后台命令决定，不只看在跑的回合）', async () => {
+    await import('./index');
+    await mocks.beforeConfirmedQuit?.();
+    const options = mocks.prepareQuit.mock.calls.at(-1)?.[0] as {
+      hasRunningSessions: () => boolean;
+    };
+    mocks.needsCheckpoint = false;
+    expect(options.hasRunningSessions()).toBe(false);
+    mocks.needsCheckpoint = true;
+    expect(options.hasRunningSessions()).toBe(true);
+    mocks.needsCheckpoint = false;
+  });
+
+  it.each(['update', 'quit'] as const)('%s 弹层上的「强制退出」结束等安全点', async (exit) => {
+    mocks.forceAgentWorkerQuit.mockClear();
+    mocks.registerForce.mockClear();
+    await import('./index');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const force = mocks.registerForce.mock.calls[0]?.[0] as (exit: string) => void;
+    force(exit);
+    expect(mocks.forceAgentWorkerQuit).toHaveBeenCalledOnce();
   });
 });
 

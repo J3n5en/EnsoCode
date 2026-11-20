@@ -19,6 +19,7 @@ import { PairNodeDialog } from '@/components/nodes/PairNodeDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/i18n';
+import { isRemoteClient } from '@/lib/remoteClient';
 import { cn } from '@/lib/utils';
 import { useRemoteNodesStore } from '@/stores/remoteNodes';
 
@@ -68,6 +69,8 @@ function AllowConnectionsSection() {
   };
 
   React.useEffect(() => {
+    // pair:status 只在宿主侧有意义，远程拿不到配对状态
+    if (isRemoteClient()) return;
     void window.electronAPI.pair.status().then(setStatus);
     return window.electronAPI.pair.onStatusChanged((next) => {
       setStatus(next);

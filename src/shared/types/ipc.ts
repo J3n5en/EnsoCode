@@ -124,6 +124,15 @@ export const IPC_CHANNELS = {
   APP_CLOSE_RESPONSE: 'app:close-response',
   APP_FLUSH_PERSIST_REQUEST: 'app:flush-persist-request',
   APP_FLUSH_PERSIST_RESPONSE: 'app:flush-persist-response',
+  /**
+   * main → 主窗口：弹层状态 RestartOverlayState（重启 / 安装更新 / 退出在等命令结束、正在重启、
+   * 新实例恢复会话），null 关
+   */
+  APP_RESTART_WAITING: 'app:restart-waiting',
+  /** 主窗口挂载时取当前重启弹层状态（启动时推送可能早于订阅）；只回本机主窗口 */
+  APP_RESTART_WAITING_GET: 'app:restart-waiting-get',
+  /** 主窗口 → main：等待弹层上点「强制退出」 */
+  APP_RESTART_FORCE: 'app:restart-force',
   APP_SET_BADGE_COUNT: 'app:set-badge-count',
 
   // 拖放浮窗（实验，macOS）：浮窗 ⇄ Main ⇄ 主窗口
@@ -233,7 +242,6 @@ export const IPC_CHANNELS = {
   ASSETS_MCP_OCCUPANCY: 'assets:mcp-occupancy',
   ASSETS_BUILTIN_TOOL_OCCUPANCY: 'assets:builtin-tool-occupancy',
   /** Claude Code 已装插件及其组件摘要 */
-  PLUGINS_LIST_INSTALLED: 'plugins:list-installed',
 
   // MCP OAuth 授权与连接状态
   MCP_AUTHORIZE: 'mcp:authorize',
@@ -711,3 +719,18 @@ export const IPC_CHANNELS = {
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
+
+/** 重启在等哪种命令：在跑的工具，或没法脱离应用、只能等它结束的转后台命令 */
+export type RestartWaitReason = 'tool' | 'background-not-detachable';
+
+/** 等待弹层等完命令要做什么：菜单重启、安装更新、退出（Cmd+Q / 关窗 / 菜单退出） */
+export type AppExitReason = 'restart' | 'update' | 'quit';
+
+/**
+ * 主窗口弹层：等命令结束（reason 在等哪种命令，exit 等完要做什么；可强制退出）；菜单重启的「正在重启」；
+ * 新实例在恢复会话
+ */
+export type RestartOverlayState =
+  | { phase: 'waiting'; reason: RestartWaitReason; exit: AppExitReason }
+  | { phase: 'restarting' }
+  | { phase: 'resuming' };

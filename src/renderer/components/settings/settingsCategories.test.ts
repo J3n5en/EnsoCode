@@ -80,7 +80,6 @@ const EVERY_SETTINGS_CATEGORY = {
   providers: true,
   skills: true,
   plugins: true,
-  claudePlugins: true,
   mcp: true,
   instructions: true,
   presets: true,

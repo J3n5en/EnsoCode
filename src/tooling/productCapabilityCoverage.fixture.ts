@@ -163,7 +163,6 @@ export const SETTINGS_DATA_COVERAGE = {
   approvalAllowThreshold: excluded('Assistant approval allow threshold; desktop settings only.'),
   lastApprovalMode: excluded('Last used approval mode is a desktop session preference.'),
   skills: surfaces('skills.list'),
-  plugins: excluded('Desktop-only Claude Code plugin import; plugin code runs on this device.'),
   mcpServers: surfaces('mcp.list'),
   instructions: surfaces('instructions.list'),
   presets: surfaces('presets.list'),
@@ -385,11 +384,6 @@ export const SETTINGS_ACTION_COVERAGE = {
   updateSkill: surfaces('skills.toggle'),
   setSkillsEnabled: surfaces('skills.toggle'),
   removeSkill: surfaces('skills.remove'),
-  addPlugins: excluded('Desktop-only Claude Code plugin import; plugin code runs on this device.'),
-  setPluginEnabled: excluded(
-    'Desktop-only Claude Code plugin toggle; plugin hooks and MCP servers run on this device.'
-  ),
-  removePlugin: excluded('Desktop-only Claude Code plugin removal.'),
   addMcpServers: surfaces('mcp.import-local'),
   updateMcpServer: surfaces('mcp.edit', 'mcp.toggle'),
   setMcpServersEnabled: surfaces('mcp.toggle'),
@@ -574,6 +568,13 @@ export const IPC_PRODUCT_COVERAGE = {
     'Main-to-renderer persist flush before destroying the window.'
   ),
   APP_FLUSH_PERSIST_RESPONSE: excluded('Renderer-to-main persist flush ack.'),
+  APP_RESTART_WAITING: excluded(
+    'Main-to-renderer overlay: restart, update install or quit waiting for commands, restarting, or resuming sessions.'
+  ),
+  APP_RESTART_WAITING_GET: excluded(
+    'Local main window reads the current restart overlay on mount.'
+  ),
+  APP_RESTART_FORCE: excluded('Renderer-to-main force quit from the restart wait overlay.'),
   APP_SET_BADGE_COUNT: excluded('Renderer-to-main Dock badge count for waiting conversations.'),
   DROP_SHELF_STATE: excluded('Main-to-shelf window visual state for the macOS drop shelf.'),
   DROP_SHELF_DROP: excluded('Drop shelf window hands dropped Finder paths to main.'),
@@ -614,9 +615,6 @@ export const IPC_PRODUCT_COVERAGE = {
   ),
   OAUTH_CREDENTIALS_CHANGED: excluded(
     'Cross-window OAuth credential invalidation transport; refresh resolves the product state.'
-  ),
-  PLUGINS_LIST_INSTALLED: excluded(
-    'Desktop-only review of Claude Code plugins before importing them.'
   ),
   ASSETS_SCAN_LOCAL: surfaces(
     'skills.import-local',

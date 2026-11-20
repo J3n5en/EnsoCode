@@ -41,7 +41,7 @@ writeFileSync(
         voiceGeminiApiKey: 'gemini-secret',
         worktreeRoot: '',
         projects: [{ id: 'proj', path: '/tmp/x' }],
-        plugins: [{ id: 'pl', key: 'k', name: 'p', enabled: true }],
+        skills: [{ id: 'sk', name: 's', enabled: true }],
         providers: [
           {
             id: 'p1',
@@ -183,7 +183,7 @@ describe('config CLI socket', () => {
       ['mcpServers.mcp1.command', 'rm'],
       ['mcpServers.mcp1.args', ['-rf']],
       ['worktreeRoot', '/etc'],
-      ['plugins', []],
+      ['skills', []],
       ['projects', []],
     ] as const) {
       expect(await config({ action: 'set', key, value })).toMatchObject({ ok: false });
@@ -332,9 +332,9 @@ describe('config CLI socket', () => {
       expect(await config({ action: 'get', key })).toMatchObject({ ok: false, hidden: true });
     }
     expect(keys.get('autoUpdate')).toMatchObject({ requiresRestart: true, writable: false });
-    for (const path of ['worktreeRoot', 'mcpServers.<id>.command', 'plugins', 'providers.<id>'])
+    for (const path of ['worktreeRoot', 'mcpServers.<id>.command', 'skills', 'providers.<id>'])
       expect(keys.get(path)).toMatchObject({ writable: false });
-    expect(keys.get('plugins.<id>.enabled')).toMatchObject({ writable: true });
+    expect(keys.get('skills.<id>.enabled')).toMatchObject({ writable: true });
     expect(keys.has('projects')).toBe(false);
     // 未写入 state 的已登记字段同样出现
     expect(keys.get('autoRestartWhenIdle')).toMatchObject({

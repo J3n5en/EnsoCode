@@ -33,7 +33,6 @@ import {
 import { collectAssetImport, scanLocalAssets } from '../services/assetScan';
 import { listProjectSkills, listSkillsAt } from '../services/assetScan/skills';
 import { resolveLocalCwdForBrowser } from '../services/browserFileRoot';
-import { listInstalledPluginInfo } from '../services/claudePlugins';
 import {
   deleteInstruction,
   readInstruction,
@@ -89,8 +88,6 @@ function asInstructions(value: unknown): InstructionEntry[] {
 
 export function registerAssetHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.ASSETS_SCAN_LOCAL, () => scanLocalAssets());
-
-  ipcMain.handle(IPC_CHANNELS.PLUGINS_LIST_INSTALLED, () => listInstalledPluginInfo());
 
   ipcMain.handle(
     IPC_CHANNELS.ASSETS_COLLECT_IMPORT,

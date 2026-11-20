@@ -212,7 +212,6 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   subagentModelsEnabled: { mode: 'portable' },
   subagentModels: { mode: 'portable' },
   skills: { mode: 'portable' },
-  plugins: { mode: 'excluded', reason: 'refers to Claude Code plugins installed on this device' },
   mcpServers: { mode: 'portable' },
   instructions: { mode: 'portable' },
   presets: { mode: 'portable' },

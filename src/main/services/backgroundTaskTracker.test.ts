@@ -71,4 +71,27 @@ describe('BackgroundTaskTracker', () => {
   it('未知会话返回空数组', () => {
     expect(new BackgroundTaskTracker().tasks('nope')).toEqual([]);
   });
+
+  it('hasRunning：任一会话还有在跑的后台命令（回合已结束也算），全部结束后为 false', () => {
+    const tracker = new BackgroundTaskTracker();
+    expect(tracker.hasRunning()).toBe(false);
+    tracker.observe(started(task()));
+    expect(tracker.hasRunning()).toBe(true);
+    tracker.observe({
+      type: 'task-ended',
+      identity,
+      seq: 2,
+      taskId: 't1',
+      status: 'done',
+      exitCode: 0,
+    } as RendererAgentEvent);
+    expect(tracker.hasRunning()).toBe(false);
+    tracker.observe({
+      type: 'background-tasks-level',
+      identity: { sessionId: 's2', generation: 'g2' },
+      seq: 1,
+      tasks: [task({ taskId: 't2' })],
+    } as RendererAgentEvent);
+    expect(tracker.hasRunning()).toBe(true);
+  });
 });

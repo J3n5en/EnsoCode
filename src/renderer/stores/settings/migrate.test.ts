@@ -2,6 +2,18 @@ import { STATUS_LINE_PRESETS, STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine
 import { describe, expect, it } from 'vitest';
 import { mergeSettingsState, migrateSettings, SETTINGS_VERSION } from './migrate';
 
+describe('已移除字段水合', () => {
+  it('旧设置残留的 Claude Code 插件条目被丢弃，不报错', () => {
+    const current = { editMode: 'apply_patch' as const, accentColor: 'indigo' as const };
+    const merged = mergeSettingsState(
+      { plugins: [{ id: 'p', key: 'demo@market', enabled: true }], skills: [] },
+      current
+    );
+    expect(merged).not.toHaveProperty('plugins');
+    expect(merged).toMatchObject({ skills: [] });
+  });
+});
+
 describe('文件链接右键打开设置水合', () => {
   const current = {
     editMode: 'apply_patch' as const,

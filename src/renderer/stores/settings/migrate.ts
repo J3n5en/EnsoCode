@@ -46,7 +46,8 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
 ): T {
   if (!persisted || typeof persisted !== 'object' || Array.isArray(persisted)) return current;
   const source = persisted as Record<string, unknown>;
-  const { hashlineEditEnabled, bashInterceptEnabled, ...rest } = source;
+  // plugins：已移除的 Claude Code 插件条目，旧设置残留时丢弃
+  const { hashlineEditEnabled, bashInterceptEnabled, plugins, ...rest } = source;
   for (const key of REMOVED_VOICE_FIELDS) delete rest[key];
   const editMode =
     'editMode' in source || 'hashlineEditEnabled' in source
@@ -62,6 +63,7 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
       ? { webSearchChain: parseWebSearchChain(source.webSearchChain) }
       : {};
   void bashInterceptEnabled;
+  void plugins;
   const fileOpening =
     'fileOpenRules' in source || 'fileOpenRules' in current
       ? { fileOpenRules: normalizeFileOpenRules(source.fileOpenRules) }

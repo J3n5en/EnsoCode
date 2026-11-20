@@ -8,7 +8,6 @@ export const SETTINGS_CATEGORIES = [
   'providers',
   'skills',
   'plugins',
-  'claudePlugins',
   'mcp',
   'instructions',
   'presets',
