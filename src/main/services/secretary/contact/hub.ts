@@ -29,6 +29,8 @@ export interface TelegramSubscriber {
   handleUpdate(update: TelegramUpdate): Promise<void>;
   /** 绑定码对不上：给正在等码的秘书各记一次失败 */
   bindFailure(code: string): void;
+  /** 私聊里发了不带码的 /start：正在等码的秘书据此提示用户，而不是一直等 */
+  bindNotice?(reason: 'missing-code'): void;
   /** 哪个秘书都没认领：不响应，只记审计 */
   rejectUnrouted(update: TelegramUpdate): void;
   /** 路由之前每个订阅者都看一眼：记下见过的论坛话题名，不管最后归谁 */
@@ -160,6 +162,16 @@ export class TelegramHub {
     const list = [...subscribers];
     const text = update.message?.text?.trim();
     const code = text ? bindCommandCode(text) : null;
+    if (
+      !code &&
+      text &&
+      update.message?.chat.type === 'private' &&
+      /^\/start(?:@\w+)?$/u.test(text)
+    ) {
+      for (const subscriber of list) {
+        if (subscriber.bindCode() !== null) subscriber.bindNotice?.('missing-code');
+      }
+    }
     if (code) {
       const owner = list.find((subscriber) => subscriber.bindCode() === code);
       if (owner) {
@@ -174,11 +186,15 @@ export class TelegramHub {
     }
     const message = messageOf(update);
     if (!message) {
-      // 太旧的按钮回调不带原消息：按点按钮的人认秘书，认不出就交给唯一的订阅者
+      // 太旧的按钮回调不带原消息：先认绑了这个人私聊的秘书，再按主人认，认不出就交给唯一的订阅者
       const fromId = update.callback_query?.from?.id;
       const owner =
         (fromId !== undefined
-          ? list.find((candidate) => candidate.ownerId() === fromId)
+          ? (list.find((candidate) =>
+              candidate
+                .claims()
+                .some((claim) => claim.chatId === String(fromId) && claim.topicId === undefined)
+            ) ?? list.find((candidate) => candidate.ownerId() === fromId))
           : undefined) ?? (list.length === 1 ? list[0] : undefined);
       if (owner && update.callback_query) await owner.handleUpdate(update);
       return;

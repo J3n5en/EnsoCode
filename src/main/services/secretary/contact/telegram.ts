@@ -26,8 +26,12 @@ import {
 } from '@shared/secretary/telegramHtml';
 import type {
   SecretaryAuditEntry,
+  SecretaryContactBindRejection,
+  SecretaryContactBotUser,
   SecretaryContactChannelStatus,
+  SecretaryContactGroupBinding,
   SecretaryContactTelegram,
+  SecretaryContactTopic,
   SecretaryContactTopicsResult,
 } from '@shared/types/secretary';
 import type {
@@ -85,6 +89,15 @@ export const TELEGRAM_CAPS: ChannelCaps = {
 /** sendPhoto / sendDocument 的 caption 上限（按字符计） */
 const TELEGRAM_CAPTION_MAX = 1024;
 
+/** 别的秘书的联系方式：共用 bot 时看它认领了什么、主人是谁 */
+export interface TelegramSibling {
+  secretaryId: string;
+  name: string;
+  /** 总开关与 Telegram 渠道都开着 */
+  enabled: boolean;
+  file: ContactFile;
+}
+
 export interface TelegramChannelPorts {
   audit(entry: SecretaryAuditEntry): void;
   publish(): void;
@@ -111,6 +124,8 @@ export interface TelegramChannelPorts {
   routeConflict?(claim: ContactRouteClaim): string | null;
   /** 绑定成功时在群或话题里回一句「已绑定到秘书 X」 */
   secretaryName?(): string;
+  /** 别的秘书的联系方式（不限 bot）；缺省表示只有这一个秘书 */
+  siblings?(): TelegramSibling[];
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -324,6 +339,91 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     this.audit('contact_bind_rejected', false, 'code-mismatch');
   }
 
+  /** 等码时收到的提示（例如私聊里只发了不带码的 /start）：记下来给界面看 */
+  bindNotice(reason: SecretaryContactBindRejection['reason']): void {
+    if (!this.store.file().bind) return;
+    this.rejectBind({ reason }, reason);
+  }
+
+  /** 码没绑上：留在绑定中间态里，界面给出原因与下一步；码本身不作废 */
+  private rejectBind(rejected: SecretaryContactBindRejection, detail: string): void {
+    const file = this.store.file();
+    if (!file.bind) return;
+    this.store.save({ ...file, bind: { ...file.bind, rejected } });
+    this.audit('contact_bind_rejected', false, detail);
+    this.ports.publish();
+  }
+
+  /** 同一个 bot 上的别的秘书 */
+  private botSiblings(): TelegramSibling[] {
+    const botId = this.store.file().bot?.id;
+    if (botId === undefined) return [];
+    return (this.ports.siblings?.() ?? []).filter((sibling) => sibling.file.bot?.id === botId);
+  }
+
+  /**
+   * 这个 bot 的主人：私聊只能归一个秘书，后来的秘书只能认领群和话题，
+   * 主人沿用同一个 bot 上别的秘书已经验证过的那个人；不唯一时不猜。
+   */
+  withSharedOwner(file: ContactFile): ContactFile {
+    if (contactOwnerId(file) !== undefined) return file;
+    const owners = new Set(
+      this.botSiblings()
+        .map((sibling) => contactOwnerId(sibling.file))
+        .filter((owner): owner is number => owner !== undefined)
+    );
+    if (owners.size !== 1) return file;
+    const [ownerId] = owners;
+    return { ...file, ownerId };
+  }
+
+  /** 共用这个 bot 的秘书（自己排第一）；只有自己时为 undefined */
+  private sharedView(): SecretaryContactBotUser[] | undefined {
+    const siblings = this.botSiblings();
+    if (siblings.length === 0) return undefined;
+    // 话题名是 bot 见过的，谁记下的都算：一个秘书没见过的名字用别的秘书记下的补上
+    const titles: Record<string, string> = {};
+    for (const file of [...siblings.map((sibling) => sibling.file), this.store.file()]) {
+      for (const [key, title] of Object.entries(file.telegramTopicTitles)) {
+        if (title) titles[key] = title;
+      }
+    }
+    const named = (groups: SecretaryContactGroupBinding[]) =>
+      groups.map((group) => ({
+        ...group,
+        topics: group.topics.map((topic) => {
+          const title = topic.title ?? titles[`${group.id}:${topic.id}`];
+          return title ? { ...topic, title } : topic;
+        }),
+      }));
+    const userOf = (
+      secretaryId: string,
+      name: string,
+      self: boolean,
+      enabled: boolean,
+      file: ContactFile
+    ): SecretaryContactBotUser => ({
+      secretaryId,
+      name,
+      self,
+      enabled,
+      ...(file.chat ? { privateChat: file.chat } : {}),
+      groups: contactOwnerId(file) !== undefined ? named(telegramGroupBindings(file)) : [],
+    });
+    return [
+      userOf(
+        this.secretaryId,
+        this.ports.secretaryName?.() ?? this.secretaryId,
+        true,
+        this.attached,
+        this.store.file()
+      ),
+      ...siblings.map((sibling) =>
+        userOf(sibling.secretaryId, sibling.name, false, sibling.enabled, sibling.file)
+      ),
+    ];
+  }
+
   /** 哪个秘书都没绑这里：不响应，只记审计；主人在群里说话时记下群名，界面认群用 */
   rejectUnrouted(update: TelegramUpdate): void {
     const file = this.store.file();
@@ -402,15 +502,47 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     this.audit('contact_topics', true, `chat=${chatId}`);
     const title = chat.title ? { title: chat.title } : {};
     if (!chat.is_forum) return { ok: true, forum: false, ...title, topics: [] };
+    // 同一个 bot 见过的话题是共用的：别的秘书记下的也列出来，并标出已经单独归了谁
+    const topics = new Map<string, SecretaryContactTopic>();
+    for (const topic of telegramTopicCatalog(file, chatId)) topics.set(topic.id, topic);
+    for (const sibling of this.botSiblings()) {
+      const claimed = new Set(
+        contactClaims(sibling.secretaryId, sibling.file).flatMap((claim) =>
+          claim.chatId === chatId && claim.topicId ? [claim.topicId] : []
+        )
+      );
+      for (const topic of telegramTopicCatalog(sibling.file, chatId)) {
+        const known = topics.get(topic.id);
+        const name = known?.title ?? topic.title;
+        topics.set(topic.id, {
+          id: topic.id,
+          ...(name ? { title: name } : {}),
+          ...(known?.owner ? { owner: known.owner } : {}),
+          ...(claimed.has(topic.id) ? { owner: sibling.name } : {}),
+        });
+      }
+    }
+    const general = topics.get(TELEGRAM_GENERAL_TOPIC_ID);
+    topics.delete(TELEGRAM_GENERAL_TOPIC_ID);
+    // 别的秘书记下的话题名也记到自己这里：勾完之后自己的群列表同样认得出
+    let own = file;
+    let learned = false;
+    for (const topic of topics.values()) {
+      if (!topic.title || own.telegramTopicTitles[`${chatId}:${topic.id}`]) continue;
+      const next = withTelegramTopicTitle(own, chatId, topic.id, topic.title);
+      if (next) {
+        own = next;
+        learned = true;
+      }
+    }
+    if (learned) this.store.save(own);
     return {
       ok: true,
       forum: true,
       ...title,
       topics: [
-        { id: TELEGRAM_GENERAL_TOPIC_ID },
-        ...telegramTopicCatalog(file, chatId).filter(
-          (topic) => topic.id !== TELEGRAM_GENERAL_TOPIC_ID
-        ),
+        general?.owner ? general : { id: TELEGRAM_GENERAL_TOPIC_ID },
+        ...[...topics.values()].sort((a, b) => Number(a.id) - Number(b.id)),
       ],
     };
   }
@@ -436,6 +568,7 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     const token = this.store.token();
     const bind = file.bind;
     const status = hasContactRoutes(file) ? 'bound' : bind ? 'awaiting-start' : 'unbound';
+    const shared = this.sharedView();
     return {
       status,
       ...(file.bot ? { bot: file.bot } : {}),
@@ -449,6 +582,7 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
               link: bindDeepLink(file.bot.username, bind.code),
               groupLink: bindGroupLink(file.bot.username, bind.code),
               topicCommand: bindTopicCommand(file.bot.username, bind.code),
+              ...(bind.rejected ? { rejected: bind.rejected } : {}),
             },
           }
         : {}),
@@ -462,6 +596,7 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
         ...(route.topicId ? { topicId: route.topicId } : {}),
         ...(route.title ? { title: route.title } : {}),
       })),
+      ...(shared ? { shared } : {}),
       poll: this.hub.status(this.store.token()),
       secure: this.store.isSecure(),
     };
@@ -752,6 +887,8 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     const token = this.store.token();
     if (!token) return;
     const api = this.apiFor(token);
+    // 命令菜单的默认与中文两份是整个 bot 的：同一个 bot 上别的秘书还在用就留着
+    const shared = this.botSiblings().some((sibling) => hasContactRoutes(sibling.file));
     await this.runMenuCalls([
       ...(chatId
         ? [
@@ -761,9 +898,13 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
             },
           ]
         : []),
-      { detail: 'delete:zh', run: () => api.deleteMyCommands({ languageCode: 'zh' }) },
-      { detail: 'delete:default', run: () => api.deleteMyCommands() },
-      { detail: 'menu:default', run: () => api.setChatMenuButton({ type: 'default' }) },
+      ...(shared
+        ? []
+        : [
+            { detail: 'delete:zh', run: () => api.deleteMyCommands({ languageCode: 'zh' }) },
+            { detail: 'delete:default', run: () => api.deleteMyCommands() },
+            { detail: 'menu:default', run: () => api.setChatMenuButton({ type: 'default' }) },
+          ]),
     ]);
   }
 
@@ -899,6 +1040,11 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
         return;
       }
       if (!bindCodeUsable(file.bind, code, this.ports.now())) {
+        if (code === file.bind.code) {
+          // 码是对的、只是过期了：不算猜错，界面提示重新生成
+          this.rejectBind({ reason: 'expired' }, 'expired');
+          return;
+        }
         const failures = file.bind.failures + 1;
         if (failures >= CONTACT_BIND_MAX_FAILURES) {
           // 猜太多次：这个码作废，要求重新生成
@@ -1010,7 +1156,18 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
       chatId: String(message.chat.id),
     });
     if (conflict) {
-      this.audit('contact_bind_rejected', false, 'route-conflict');
+      // 同一个人和同一个 bot 只有一个私聊：码留着，告诉他改去群或话题里发
+      this.rejectBind({ reason: 'private-owned', owner: conflict }, 'route-conflict');
+      const code = file.bind?.code ?? '';
+      const me = escapeHtml(this.ports.secretaryName?.() ?? bot.name);
+      const owner = escapeHtml(conflict);
+      const command = escapeHtml(bindTopicCommand(bot.username, code));
+      const text =
+        this.ports.lang() === 'zh'
+          ? `这个私聊已经归秘书「${owner}」，不能再绑给「${me}」。\n要让「${me}」也用这个 bot，请在群里或论坛话题里发送：\n<code>${command}</code>\n或者给「${me}」换一个 bot。`
+          : `This private chat already belongs to secretary "${owner}", so it cannot be bound to "${me}" too.\nTo use this bot with "${me}", send this in a group or forum topic:\n<code>${command}</code>\nor give "${me}" a different bot.`;
+      const sent = await this.send(String(message.chat.id), { text, format: 'html' });
+      if (sent.ok) this.audit('contact_outbound', true, 'bind-hint');
       return;
     }
     const rest = { ...file };
@@ -1065,7 +1222,8 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
       ...(topicId ? { topicId } : {}),
     });
     if (conflict) {
-      this.audit('contact_bind_rejected', false, 'route-conflict');
+      // 群里不回话（别人也看得到），原因留给界面
+      this.rejectBind({ reason: 'route-conflict', owner: conflict }, 'route-conflict');
       return;
     }
     const rest = { ...file };

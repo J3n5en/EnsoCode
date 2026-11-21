@@ -276,8 +276,15 @@ export function SecretaryContactGroupRow({
                           role="checkbox"
                           enso="secretary-contact-topic"
                           checked={picked.includes(topic.id)}
-                          disabled={disabled}
-                          label={topicLabel(topic)}
+                          // 已经单独归了同一个 bot 上的别的秘书：勾了也会整次保存被拒
+                          disabled={
+                            disabled || (Boolean(topic.owner) && !picked.includes(topic.id))
+                          }
+                          label={
+                            topic.owner
+                              ? `${topicLabel(topic)} · ${t('taken by {{owner}}', { owner: topic.owner })}`
+                              : topicLabel(topic)
+                          }
                           onClick={() =>
                             setPicked((prev) =>
                               prev.includes(topic.id)

@@ -763,6 +763,30 @@ export interface SecretaryContactBind {
   /** 在 forum 话题里发的绑定命令（/bind@bot <code>） */
   topicCommand?: string;
   expiresAt: number;
+  /** 最近一次发码没绑上的原因：界面据此给出下一步，而不是一直等 */
+  rejected?: SecretaryContactBindRejection;
+}
+
+export interface SecretaryContactBindRejection {
+  /**
+   * private-owned：这个私聊已归同一个 bot 上的别的秘书；route-conflict：群或话题已归别的秘书；
+   * expired：码过期；missing-code：私聊里只发了不带码的 /start
+   */
+  reason: 'private-owned' | 'route-conflict' | 'expired' | 'missing-code';
+  /** 占着这条路由的秘书名 */
+  owner?: string;
+}
+
+/** 共用同一个 bot 的一个秘书，以及它认领的私聊、群和话题 */
+export interface SecretaryContactBotUser {
+  secretaryId: string;
+  name: string;
+  /** 就是当前这个秘书 */
+  self: boolean;
+  /** Telegram 渠道开着；关着时认领的路由仍然占着，但不收发 */
+  enabled: boolean;
+  privateChat?: SecretaryContactChat;
+  groups: SecretaryContactGroupBinding[];
 }
 
 export interface SecretaryContactTelegram {
@@ -793,6 +817,8 @@ export interface SecretaryContactTelegram {
   groups: SecretaryContactGroupBinding[];
   /** 用绑定码绑的群与话题：这个秘书从这里收，也往这里推 */
   routes?: { chatId: string; topicId?: string; title?: string }[];
+  /** 同一个 bot 还被别的秘书用着时才有：每个秘书（含自己）认领了什么 */
+  shared?: SecretaryContactBotUser[];
   /**
    * 手机关注的任务：手机发起的回合里派生的会话与定时，结果会一直推到手机上，
    * 与 /sync 无关。完成或失败推过一次就从列表里移除。
@@ -808,6 +834,8 @@ export interface SecretaryContactTopic {
   id: string;
   /** bot 见过的话题名；没见过建话题或改名消息就没有 */
   title?: string;
+  /** 同一个 bot 上已经单独认领这个话题的别的秘书 */
+  owner?: string;
 }
 
 export interface SecretaryContactGroupBinding {

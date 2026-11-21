@@ -100,7 +100,7 @@ import {
   withTelegramGroupRemoved,
   withTelegramGroupScope,
 } from './store';
-import { TELEGRAM_CAPS, TelegramChannel } from './telegram';
+import { TELEGRAM_CAPS, TelegramChannel, type TelegramSibling } from './telegram';
 
 /** 界面按码翻译成自己的文案；这里只回稳定的错误码 */
 export type ContactError =
@@ -261,6 +261,8 @@ export interface ContactServicePorts {
   secretaryId?: string;
   /** 同一 bot + chat + 话题已经属于别的秘书时返回它的名字 */
   routeConflict?(claim: ContactRouteClaim): string | null;
+  /** 别的秘书的联系方式：共用 bot 时沿用主人、合并话题、在设置页列出各自认领了什么 */
+  siblings?(): TelegramSibling[];
   /** 插件渠道已经在别的秘书那里打开时返回它的名字：一个插件渠道只归一个秘书 */
   channelOwnedElsewhere?(channelId: string): string | null;
 }
@@ -397,6 +399,7 @@ export class ContactService implements SecretaryContactPort {
       ...(ports.hub ? { hub: ports.hub } : {}),
       ...(ports.secretaryId ? { secretaryId: ports.secretaryId } : {}),
       ...(ports.routeConflict ? { routeConflict: ports.routeConflict } : {}),
+      ...(ports.siblings ? { siblings: ports.siblings } : {}),
       secretaryName: () => ports.secretaryName(),
       audit: ports.audit,
       publish: () => this.ports.publish(),
@@ -649,7 +652,7 @@ export class ContactService implements SecretaryContactPort {
         this.audit('contact_settings', false, 'route-conflict');
         return { ok: false, error: 'route-conflict' };
       }
-      next = added.file;
+      next = this.telegram.withSharedOwner(added.file);
     } else {
       next = withTelegramGroupRemoved(file, chatId);
     }
@@ -675,7 +678,8 @@ export class ContactService implements SecretaryContactPort {
     const file = this.store.file();
     const result = withTelegramGroupScope(file, chatId, scope, this.ports.now());
     if (!result.ok) return { ok: false, error: result.error };
-    const next = result.file;
+    // 私聊归了同一个 bot 上的别的秘书时，这里勾的群和话题沿用那位主人
+    const next = this.telegram.withSharedOwner(result.file);
     const keyOf = (topicId: string | undefined) => topicId ?? '';
     const before = new Set([
       ...file.telegramGroups.map((group) => `${group}:`),
