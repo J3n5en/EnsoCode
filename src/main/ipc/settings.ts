@@ -82,6 +82,7 @@ export const SETTINGS_STATE_FIELDS = [
   'windowsLocalShell',
   'exploreFoldEnabled',
   'rtkEnabled',
+  'longCacheRetention',
   'computerPreview',
   'computerAllowAllApps',
   'editMode',
@@ -225,6 +226,7 @@ const CONFIG_SYNC_EXCLUDED_STATE_FIELDS = new Set<SettingsStateField>([
   'autoUpdate',
   'autoRestartForUpdate',
   'updateChannel',
+  'longCacheRetention',
   'pluginAutoUpdate',
   'proxyMode',
   'customProxyUrl',
@@ -561,6 +563,7 @@ function scheduleWrite(
           pushCompactRoute,
           pushMaxActiveCoworkers,
           pushAutoRetryLimit,
+          pushLongCacheRetention,
           pushPrivacyMasking,
           pushShellLimits,
           pushDisabledWorkflowPresets,
@@ -573,6 +576,7 @@ function scheduleWrite(
           pushCompactRoute(await readStoredOauthCredentialKeys());
           pushMaxActiveCoworkers();
           pushAutoRetryLimit();
+          pushLongCacheRetention();
           pushPrivacyMasking();
           pushShellLimits();
           pushDisabledWorkflowPresets();
@@ -694,6 +698,7 @@ export function commitSettingsTransaction(
         pushCompactRoute,
         pushMaxActiveCoworkers,
         pushAutoRetryLimit,
+        pushLongCacheRetention,
         pushPrivacyMasking,
         pushShellLimits,
         pushDisabledWorkflowPresets,
@@ -706,6 +711,7 @@ export function commitSettingsTransaction(
         pushCompactRoute(await readStoredOauthCredentialKeys());
         pushMaxActiveCoworkers();
         pushAutoRetryLimit();
+        pushLongCacheRetention();
         pushPrivacyMasking();
         pushShellLimits();
         pushDisabledWorkflowPresets();

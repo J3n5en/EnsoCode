@@ -43,6 +43,7 @@ export const SETTINGS_DATA_COVERAGE = {
     'Explore-fold is a desktop session preference, not an Enso capability.'
   ),
   rtkEnabled: excluded('RTK command compression is a desktop session preference.'),
+  longCacheRetention: excluded('Prompt cache TTL is a device-local request cost preference.'),
   computerPreview: excluded('Computer picture-in-picture is a desktop display preference.'),
   computerAllowAllApps: excluded('Computer app trust is a device-local security preference.'),
   openLinksInBuiltinBrowser: excluded(
@@ -226,6 +227,7 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Explore-fold is a desktop session preference, not an Enso capability.'
   ),
   setRtkEnabled: excluded('RTK command compression is a desktop session preference.'),
+  setLongCacheRetention: excluded('Prompt cache TTL is a device-local request cost preference.'),
   setComputerPreview: excluded('Computer picture-in-picture is a desktop display preference.'),
   setComputerAllowAllApps: excluded('Computer app trust is a device-local security preference.'),
   setOpenLinksInBuiltinBrowser: excluded(

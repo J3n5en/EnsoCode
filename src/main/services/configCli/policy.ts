@@ -266,6 +266,8 @@ function validateField(field: string, value: unknown): string | null {
   )
     return 'customProxyUrl must be an http(s)/socks proxy URL or empty';
   if (field === 'language' && value !== 'en' && value !== 'zh') return 'language must be en or zh';
+  if (field === 'longCacheRetention' && typeof value !== 'boolean')
+    return 'longCacheRetention must be a boolean';
   if (
     field === 'memoryDistillWindowMinutes' &&
     !(MEMORY_DISTILL_WINDOW_MINUTES as readonly unknown[]).includes(value)

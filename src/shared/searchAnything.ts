@@ -231,6 +231,13 @@ const STATIC_CATALOG: SettingsSearchEntry[] = [
     description: 'Retry count after 429, 5xx or network errors; off, fixed count or unlimited',
   },
   {
+    id: 'general.longCacheRetention',
+    category: 'general',
+    title: 'Long prompt cache (1 hour)',
+    description:
+      'Keep the prompt cache for 1 hour instead of 5 minutes. Saves a lot when turns are more than 5 minutes apart, since the cache no longer expires and gets rewritten every turn, but cache writes cost 2× instead of 1.25×, so rapid follow-ups tens of seconds apart cost more. Anthropic models only. Applies from the next request.',
+  },
+  {
     id: 'general.proxy',
     category: 'general',
     title: 'Network proxy',

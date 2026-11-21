@@ -401,6 +401,7 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
     pushApprovalReviewer();
     pushMaxActiveCoworkers();
     pushAutoRetryLimit();
+    pushLongCacheRetention();
     pushPrivacyMasking();
     pushDisabledWorkflowPresets();
     pushModelDirectory();
@@ -2970,6 +2971,14 @@ export function pushAutoRetryLimit(): void {
   worker.postMessage({
     type: 'set-auto-retry-limit',
     limit: normalizeAutoRetryLimit(readSettingsState()?.autoRetryLimit),
+  } satisfies AgentCommand);
+}
+
+export function pushLongCacheRetention(): void {
+  if (!worker || !workerReady) return;
+  worker.postMessage({
+    type: 'set-long-cache-retention',
+    enabled: readSettingsState()?.longCacheRetention === true,
   } satisfies AgentCommand);
 }
 

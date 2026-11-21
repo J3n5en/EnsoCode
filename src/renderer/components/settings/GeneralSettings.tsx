@@ -87,6 +87,7 @@ export function GeneralSettings() {
         <h4 className="border-b pb-2 text-base font-semibold">{t('Agent runtime')}</h4>
         <GenerationStallTimeoutRow />
         <AutoRetryLimitRow />
+        <LongCacheRetentionRow />
         <SmartCompactPicker />
         <CompactReserveTokensSection />
       </section>
@@ -298,6 +299,23 @@ function AutoRetryLimitRow() {
         </SelectPopup>
       </Select>
     </div>
+  );
+}
+
+function LongCacheRetentionRow() {
+  const { t } = useI18n();
+  const longCacheRetention = useSettingsStore((s) => s.longCacheRetention);
+  const setLongCacheRetention = useSettingsStore((s) => s.setLongCacheRetention);
+  return (
+    <SwitchRow
+      rowId="general.longCacheRetention"
+      title={t('Long prompt cache (1 hour)')}
+      description={t(
+        'Keep the prompt cache for 1 hour instead of 5 minutes. Saves a lot when turns are more than 5 minutes apart, since the cache no longer expires and gets rewritten every turn, but cache writes cost 2× instead of 1.25×, so rapid follow-ups tens of seconds apart cost more. Anthropic models only. Applies from the next request.'
+      )}
+      checked={longCacheRetention}
+      onChange={setLongCacheRetention}
+    />
   );
 }
 

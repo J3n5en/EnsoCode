@@ -138,6 +138,8 @@ export interface SettingsState {
 
   /** RTK 命令压缩；缺省开，新建或冷恢复会话生效。 */
   rtkEnabled: boolean;
+  /** 会话请求对 Anthropic Messages 模型用 1h prompt cache；缺省关，下一次请求生效。 */
+  longCacheRetention: boolean;
   /** 后台操作电脑时显示被操作窗口的画中画（macOS） */
   computerPreview: boolean;
   /** computer 操作任何 app 都不再询问（macOS），缺省关 */
@@ -403,6 +405,7 @@ export interface SettingsState {
   setWindowsLocalShell: (value: WindowsLocalShell) => void;
   setExploreFoldEnabled: (value: boolean) => void;
   setRtkEnabled: (value: boolean) => void;
+  setLongCacheRetention: (value: boolean) => void;
   setComputerPreview: (value: boolean) => void;
   setComputerAllowAllApps: (value: boolean) => void;
   setOpenLinksInBuiltinBrowser: (value: boolean) => void;

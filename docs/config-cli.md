@@ -92,6 +92,8 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 `providers.<id>.modelRefreshIntervalHours` 设置这条 API Key 供应商在本机自动拉取模型的间隔，接受 1–168 的整数，单位为小时，默认 1。关闭自动拉取时也可以修改。修改已开启条目的间隔时，该条目从保存时重新计时，在途请求继续。每条供应商的开关和间隔均无需重启。
 
+`longCacheRetention`（布尔，默认 `false`）打开后，会话请求（主会话、子代理、coworker、秘书、插件 agent.run）对 Anthropic Messages 接口的模型使用 1 小时 prompt cache，其余接口和标题等一次性辅助请求仍用默认 5 分钟；从下一次请求起生效，无需重启。
+
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 
 - `autoUpdate`、`autoRestartForUpdate`（`off` / `idle` / `immediate`）、`updateChannel`

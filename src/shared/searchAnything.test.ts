@@ -212,6 +212,7 @@ describe('buildSettingsCatalog', () => {
     'general.compactReserveTokens',
     'general.generationStallTimeout',
     'general.autoRetryLimit',
+    'general.longCacheRetention',
     'general.proxy',
     'general.caCert',
     'general.updates',

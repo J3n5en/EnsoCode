@@ -633,6 +633,41 @@ describe('SessionSupervisor terminal turn handling', () => {
     await supervisor.shutdown();
   });
 
+  it('长缓存开关实时作用于会话请求：只补 Anthropic Messages，下一次请求生效', async () => {
+    const seen: Array<{ api: string; cacheRetention?: string }> = [];
+    mocks.createAgentSession.mockImplementationOnce(async (options: Record<string, unknown>) => {
+      const value = session(options);
+      Object.assign(value.agent, {
+        streamFunction: (m: { api: string }, _c: unknown, o?: { cacheRetention?: string }) => {
+          seen.push({ api: m.api, cacheRetention: o?.cacheRetention });
+          return undefined;
+        },
+      });
+      return { session: value };
+    });
+    const { supervisor, parentSession } = await spawn();
+    const stream = (
+      parentSession.agent as unknown as {
+        streamFunction: (m: unknown, c: unknown, o: unknown) => unknown;
+      }
+    ).streamFunction;
+    const request = (api: string) =>
+      stream({ api, id: 'm', provider: 'p' }, { messages: [] }, { sessionId: 'parent' });
+    request('anthropic-messages');
+    supervisor.handleCommand({ type: 'set-long-cache-retention', enabled: true });
+    request('anthropic-messages');
+    request('openai-completions');
+    supervisor.handleCommand({ type: 'set-long-cache-retention', enabled: false });
+    request('anthropic-messages');
+    expect(seen).toEqual([
+      { api: 'anthropic-messages', cacheRetention: undefined },
+      { api: 'anthropic-messages', cacheRetention: 'long' },
+      { api: 'openai-completions', cacheRetention: undefined },
+      { api: 'anthropic-messages', cacheRetention: undefined },
+    ]);
+    await supervisor.shutdown();
+  });
+
   it('自动重试上限实时覆盖会话的 pi 重试设置；无限重试的 turn-retry 以 0 下发', async () => {
     const { events, supervisor, parentSession } = await spawn();
     const retry = parentSession.settingsManager;

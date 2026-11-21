@@ -243,6 +243,7 @@ import {
 } from './goalVerifier';
 import { readHarnessRuleFiles, resolveHarnessSkillRoots } from './harnessAssets';
 import { type ContextMessage, sanitizeContextMessages } from './imageContext';
+import { installLongCacheRetention } from './longCacheRetention';
 import { McpManager } from './mcp';
 import { partitionMcpNamespaces } from './mcpNames';
 import { createMessageCoworkerTool } from './messageCoworker';
@@ -1044,6 +1045,8 @@ export class SessionSupervisor {
   private readonly compactRoute: EnsoCompactOptions = {};
   private maxActiveCoworkers = DEFAULT_MAX_ACTIVE_COWORKERS;
   private autoRetryLimit = DEFAULT_AUTO_RETRY_LIMIT;
+  private longCacheRetention = false;
+  private readonly isLongCacheRetention = () => this.longCacheRetention;
   private disabledWorkflowPresets: string[] = [];
   /** undefined 跟随会话；空数组表示已配置但全部不可用，直接走 Exa。 */
   private webSearchChain: readonly WebSearchChainEntry[] | undefined;
@@ -1611,6 +1614,10 @@ export class SessionSupervisor {
     }
     if (command.type === 'set-auto-retry-limit') {
       this.autoRetryLimit = command.limit;
+      return;
+    }
+    if (command.type === 'set-long-cache-retention') {
+      this.longCacheRetention = command.enabled;
       return;
     }
     if (command.type === 'set-privacy-masking') {
@@ -3107,6 +3114,7 @@ export class SessionSupervisor {
           resourceLoader: subLoader,
           sessionManager,
         });
+        installLongCacheRetention(session.agent, this.isLongCacheRetention);
         const childExtraTools = childCodemode.activeToolNames();
         const childCursor = isCursorModel(subModel)
           ? attachCursorBridgeToSession(
@@ -3478,6 +3486,7 @@ export class SessionSupervisor {
         ? SessionManager.open(resumeFile, this.options.sessionDir, cwd)
         : SessionManager.create(cwd, this.options.sessionDir),
     });
+    installLongCacheRetention(session.agent, this.isLongCacheRetention);
     const codemodeTools = codemodeHost.activeToolNames();
     const cursorBridge = isCursorModel(piModel)
       ? attachCursorBridgeToSession(
@@ -6054,6 +6063,7 @@ export class SessionSupervisor {
       installOauthPoolSelector(runtime, this.selectOauthPool);
       installStreamGuard(runtime);
       installStableToolOrder(runtime);
+      installLongCacheRetention(runtime, this.isLongCacheRetention);
       return runtime;
     })();
     return this.runtimePromise;
