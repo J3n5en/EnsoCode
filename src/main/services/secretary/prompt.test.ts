@@ -122,6 +122,14 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toMatch(/another worktree and another branch/);
   });
 
+  it('给已完成的会话追加任务时带上 goal，巡检才会盯着它', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    expect(prompt).toMatch(
+      /already reported goal-complete, or one that never had a goal, pass goal/
+    );
+    expect(prompt).toMatch(/patrol only watches a session that still has a goal/);
+  });
+
   it('派发直接执行不出卡，worktree 由秘书每次按任务决定，模型默认跟随项目', () => {
     const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
     // 确认卡只剩会删东西、改设置、写技能工具和接管这几类

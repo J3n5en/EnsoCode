@@ -1063,6 +1063,27 @@ describe('自动巡检', () => {
     expect(h.state.file.dispatched.c1.patrol).toMatchObject({ reason: 'idle-stalled' });
   });
 
+  it('追加的目标与派出时同一种：空闲且没完成就按 3 分钟报停住', () => {
+    const h = harness({});
+    // session_send 带 goal 之后：行上挂着 active 目标，记录记着同一段文本
+    h.state.rows.c1 = {
+      ...h.state.rows.c1,
+      goal: {
+        text: '查清安装脚本有没有真的执行',
+        status: 'active',
+        autoTurns: 0,
+        noProgressRuns: 0,
+      },
+    };
+    h.state.file.dispatched.c1.goal = '查清安装脚本有没有真的执行';
+    h.state.file.dispatched.c1.lastState = 'idle';
+    h.state.statuses.c1 = idle;
+    h.host.tick(3 * MINUTE + 1);
+    const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].text).toContain('目标 active');
+  });
+
   it('刚 goal_complete 的会话不报停住', () => {
     const h = harness({});
     idleWithGoal(h);
@@ -1233,6 +1254,147 @@ describe('被 session_send 重新唤起后的收口', () => {
     h.state.statuses.c1 = idle;
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'turn-ended', turn: 3 });
+  });
+});
+
+describe('静默收工', () => {
+  const toolTurn = (extra: Record<string, unknown> = {}) =>
+    event('turn-completed', {
+      digest: {
+        firstUserText: '查安装脚本',
+        userText: '查安装脚本',
+        assistantText: '',
+        lastTool: { name: 'read', ok: true },
+      },
+      ...extra,
+    });
+
+  it('一轮结束没有任何文字回复：推 stalled，带上最后一个工具名和成败', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(toolTurn(), change('idle', 'running'));
+    const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].text).toContain('read');
+    expect(stalled[0].text).toContain('成功');
+    expect(h.state.file.outbox.some((update) => update.kind === 'turn-ended')).toBe(false);
+  });
+
+  it('最后一个工具失败时推送里标明失败', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      event('turn-completed', {
+        digest: {
+          firstUserText: '查安装脚本',
+          userText: '查安装脚本',
+          assistantText: '',
+          lastTool: { name: 'bash', ok: false },
+        },
+      }),
+      change('idle', 'running')
+    );
+    const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].text).toContain('bash');
+    expect(stalled[0].text).toContain('失败');
+  });
+
+  it('正常写了文字再结束：照旧推 turn-ended，不报 stalled', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      event('turn-completed', { digest: { assistantText: '安装脚本确实执行了' } }),
+      change('idle', 'running')
+    );
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
+  });
+
+  it('带目标的会话静默收工同样推 stalled', () => {
+    const h = harness({});
+    h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'active' } };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(toolTurn(), change('idle', 'running'));
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['stalled']);
+  });
+
+  it('被中断的一轮不报静默收工', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(toolTurn({ aborted: true }), change('idle', 'running'));
+    expect(h.state.file.outbox).toEqual([]);
+  });
+});
+
+describe('发了消息后没有可见回复', () => {
+  const quiet = (h: ReturnType<typeof harness>, over: Partial<DispatchRecord> = {}) => {
+    h.state.file.dispatched.c1 = {
+      ...h.state.file.dispatched.c1,
+      lastEventAt: 0,
+      lastText: '我去查一下',
+      sentAt: 0,
+      // 秘书刚发过消息：记录标回运行中，实时状态还是空闲
+      lastState: 'running' as const,
+      ...over,
+    };
+    h.state.statuses.c1 = idle;
+  };
+
+  it('秘书发过消息的会话静了 3 分钟：推 stalled', () => {
+    const h = harness({});
+    quiet(h);
+    h.state.now = 3 * MINUTE + 1;
+    h.host.tick(3 * MINUTE + 1);
+    const stalled = h.state.file.outbox.filter((update) => update.kind === 'stalled');
+    expect(stalled).toHaveLength(1);
+    expect(stalled[0].text).toContain('没有任何回复');
+    // 同一轮只推一次
+    h.host.tick(20 * MINUTE);
+    expect(h.state.file.outbox.filter((update) => update.kind === 'stalled')).toHaveLength(1);
+  });
+
+  it('秘书没发过消息的会话不走这条兜底', () => {
+    const h = harness({});
+    quiet(h, { sentAt: undefined });
+    h.host.tick(60 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('3 分钟内有过回复就不报', () => {
+    const h = harness({});
+    quiet(h, { lastEventAt: 1 * MINUTE });
+    h.host.tick(3 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('等用户回答、等审批、有后台任务时不报', () => {
+    const asking = harness({});
+    quiet(asking);
+    asking.state.statuses.c1 = { state: 'waiting', pendingAsks: 1, pendingApprovals: 0 };
+    asking.host.tick(20 * MINUTE);
+    expect(asking.state.file.outbox).toEqual([]);
+
+    const approving = harness({});
+    quiet(approving);
+    approving.state.statuses.c1 = { state: 'idle', pendingAsks: 0, pendingApprovals: 1 };
+    approving.host.tick(20 * MINUTE);
+    expect(approving.state.file.outbox).toEqual([]);
+
+    const busy = harness({});
+    quiet(busy);
+    busy.state.tasks.c1 = [{ taskId: 't1', command: 'pnpm test', status: 'running', startedAt: 0 }];
+    busy.host.tick(20 * MINUTE);
+    expect(busy.state.file.outbox).toEqual([]);
+  });
+
+  it('有了新的助手文字或工具调用就不报', () => {
+    const h = harness({});
+    quiet(h);
+    h.state.now = 2 * MINUTE;
+    h.host.onAgentEvent(event('message-update'), []);
+    h.state.statuses.c1 = idle;
+    h.host.tick(4 * MINUTE);
+    expect(h.state.file.outbox).toEqual([]);
   });
 });
 

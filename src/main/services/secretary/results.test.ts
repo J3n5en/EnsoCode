@@ -118,6 +118,21 @@ describe('结果分类', () => {
     );
   });
 
+  it('静默收工：最后一步是工具调用、没有任何文字回复，算 stalled', () => {
+    expect(
+      classify(record(), { type: 'turn-completed', silentFinish: { name: 'read', ok: true } }, idle)
+    ).toBe('stalled');
+    expect(
+      classify(
+        record({ goal: 'g' }),
+        { type: 'turn-completed', goalStatus: 'active', silentFinish: { name: 'bash', ok: false } },
+        idle
+      )
+    ).toBe('stalled');
+    // 写了文字的照旧
+    expect(classify(record(), { type: 'turn-completed' }, idle)).toBe('turn-ended');
+  });
+
   it('无目标的会话轮次结束只能说它停下了', () => {
     expect(classify(record(), { type: 'turn-completed' }, idle)).toBe('turn-ended');
   });

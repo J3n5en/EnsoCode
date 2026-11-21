@@ -333,6 +333,43 @@ describe('buildTurnDigest：本轮消息 → 压缩摘要', () => {
     expect(buildTurnDigest(messages, 0)?.userText).toBe('真正的本轮提问');
   });
 
+  it('整轮只有工具调用：摘要带上最后一个工具名和成败，正文为空', () => {
+    const messages: ProjectedMessage[] = [
+      user('问'),
+      assistantMixed([{ type: 'toolCall', id: 'c1', name: 'read' }]),
+      {
+        role: 'toolResult',
+        content: [{ type: 'text', text: 'ok' }],
+        toolName: 'read',
+        isError: false,
+      },
+      assistantMixed([{ type: 'toolCall', id: 'c2', name: 'bash' }]),
+      {
+        role: 'toolResult',
+        content: [{ type: 'text', text: 'fail' }],
+        toolName: 'bash',
+        isError: true,
+      },
+    ];
+    expect(buildTurnDigest(messages, 0)).toEqual({
+      firstUserText: '问',
+      userText: '问',
+      assistantText: '',
+      lastTool: { name: 'bash', ok: false },
+    });
+  });
+
+  it('有文字结论时不带工具标记', () => {
+    const messages: ProjectedMessage[] = [
+      user('问'),
+      assistantMixed([{ type: 'toolCall', id: 'c1', name: 'read' }]),
+      { role: 'toolResult', content: [{ type: 'text', text: 'ok' }], toolName: 'read' },
+      assistant('查完了'),
+    ];
+    expect(buildTurnDigest(messages, 0)?.lastTool).toBeUndefined();
+    expect(buildTurnDigest(messages, 0)?.assistantText).toBe('查完了');
+  });
+
   it('两段皆空 → null', () => {
     const messages: ProjectedMessage[] = [
       user('   '),
