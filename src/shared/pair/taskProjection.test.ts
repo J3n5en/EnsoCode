@@ -50,6 +50,15 @@ describe('applyTaskEvent', () => {
       status: 'running',
     });
     expect(next?.tasks[0]?.tail).toBe('hello');
+    expect(next?.tasks[0]?.outputBytes).toBeUndefined();
+    const sized = applyTaskEvent(base, {
+      type: 'task-output',
+      taskId: 't1',
+      tail: 'hello',
+      status: 'running',
+      outputBytes: 9000,
+    });
+    expect(sized?.tasks[0]?.outputBytes).toBe(9000);
     const miss = applyTaskEvent(base, {
       type: 'task-output',
       taskId: 'nope',

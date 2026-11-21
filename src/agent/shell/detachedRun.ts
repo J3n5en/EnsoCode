@@ -39,6 +39,8 @@ export interface FileBackedRun extends DetachedRunFiles {
   sink(onData: (chunk: Buffer) => void): void;
   /** 立即把文件里已有的新输出读给接收者（让位回执取输出前调用） */
   flush(): void;
+  /** 读输出文件失败的原因；读得到时为 null */
+  readError(): string | null;
   /** worker 看到进程结束、输出读完；release 之后永不落定 */
   readonly done: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   kill(signal: NodeJS.Signals): void;
@@ -219,6 +221,7 @@ export function killRunGroup(pid: number, signal: NodeJS.Signals): void {
 class FileTail {
   private fd: number | null = null;
   private onData: (chunk: Buffer) => void = () => {};
+  error: string | null = null;
 
   constructor(
     private readonly file: string,
@@ -227,8 +230,9 @@ class FileTail {
     try {
       this.fd = openSync(file, 'r');
       if (statSync(file).size < offset) this.offset = 0;
-    } catch {
+    } catch (error) {
       this.fd = null;
+      this.error = errorMessage(error);
     }
   }
 
@@ -245,9 +249,11 @@ class FileTail {
       let read: number;
       try {
         read = readSync(this.fd, buffer, 0, READ_CHUNK, this.offset);
-      } catch {
+      } catch (error) {
+        this.error = errorMessage(error);
         return any;
       }
+      this.error = null;
       if (read <= 0) break;
       any = true;
       this.offset += read;
@@ -267,6 +273,8 @@ class FileTail {
     this.fd = null;
   }
 }
+
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 function writeRunMeta(dir: string, run: DetachedRunFiles): void {
   try {
@@ -355,6 +363,7 @@ export function spawnFileBacked(input: {
     flush: () => {
       if (!stopped) tail.drain();
     },
+    readError: () => tail.error,
     done,
     kill: (signal) => {
       if (child.pid !== undefined) killRunGroup(child.pid, signal);
@@ -417,6 +426,7 @@ export function attachFileBacked(
     flush: () => {
       if (!released && !ended) tail.drain();
     },
+    readError: () => tail.error,
     done,
     kill: (signal) => {
       if (probe.matches(run.pid, run)) killRunGroup(run.pid, signal);
@@ -441,6 +451,29 @@ export function readRunOutput(file: string, offset: number): Buffer {
   tail.drain();
   tail.close();
   return Buffer.concat(chunks);
+}
+
+/** 只读文件最后 max 字节：截断时丢掉被劈开的首行；整段没有换行就只跳过劈开的多字节字符。读不到返回空 */
+export function readFileTail(file: string, max: number): Buffer {
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, 'r');
+    const size = statSync(file).size;
+    const length = Math.min(size, max);
+    const buffer = Buffer.alloc(length);
+    const read = readSync(fd, buffer, 0, length, size - length);
+    const tail = buffer.subarray(0, read);
+    if (length === size) return tail;
+    const newline = tail.indexOf(0x0a);
+    if (newline !== -1) return tail.subarray(newline + 1);
+    let start = 0;
+    while (start < tail.length && (tail[start] & 0xc0) === 0x80) start += 1;
+    return tail.subarray(start);
+  } catch {
+    return Buffer.alloc(0);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 /**

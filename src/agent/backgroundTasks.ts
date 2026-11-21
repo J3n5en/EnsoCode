@@ -24,6 +24,7 @@ import {
   processAlive,
   type RunProbe,
   readExitCode,
+  readFileTail,
   readRunOutput,
   removeRunFiles,
   runFiles,
@@ -56,6 +57,8 @@ const FAILURE_TAIL = 4_000;
 const TASK_OUTPUT_LIMIT = 30_000;
 /** 输出事件节流 */
 const EMIT_INTERVAL_MS = 500;
+/** 认回任务时从上一代日志读回内存的尾部上限：够面板 tail 用，不把大日志整个读进来 */
+const RECOVER_TAIL_BYTES = 64 * 1024;
 
 interface Task {
   info: BackgroundTaskInfo;
@@ -78,6 +81,8 @@ interface Task {
   logBytes: number;
   /** 日志超限后未写入的字节数 */
   logDroppedBytes: number;
+  /** 任务累计写出的输出字节数（认回的任务含上一代写进日志的） */
+  outputBytes: number;
   /** 跨 chunk 的多字节字符留到下个 chunk 再解码，避免产生替换字符 */
   decoder: StringDecoder;
   /** 模型已经由工具返回值知情（阻塞等到结束 / kill 已回执），不再通知 */
@@ -99,6 +104,8 @@ interface Task {
   pid?: number;
   /** 输出直写文件、能脱离 worker 活过重启的进程；没有的（管道 / 远程 / Windows）重启只能等它结束 */
   run?: FileBackedRun;
+  /** 已写进输出的读文件失败原因：同一原因只提示一次 */
+  readError?: string;
   /** 原命令 + cwd 的指纹：认回的任务据此拦同一命令的重复启动 */
   commandKey?: string;
   cwd?: string;
@@ -149,7 +156,8 @@ export interface TaskEvents {
     sessionId: string,
     taskId: string,
     tail: string,
-    status: BackgroundTaskInfo['status']
+    status: BackgroundTaskInfo['status'],
+    outputBytes?: number
   ): void;
   onEnded(
     sessionId: string,
@@ -432,19 +440,21 @@ export class BackgroundTaskManager {
       details?: unknown;
       finalize?: () => Promise<unknown>;
       startedAt?: number;
-      /** 认回的任务接着写同一份日志 */
+      /** 认回的任务接着写同一份日志，并把日志尾部读回内存给面板 */
       appendLog?: boolean;
     }
   ): Task {
     const logPath = path.join(this.logDir, `${taskId}.log`);
     let logStream: WriteStream | null = null;
     let logBytes = 0;
+    let seed = '';
     try {
       mkdirSync(this.logDir, { recursive: true });
       if (opts.appendLog) {
         try {
           logBytes = statSync(logPath).size;
         } catch {}
+        seed = new StringDecoder('utf8').end(readFileTail(logPath, RECOVER_TAIL_BYTES));
       }
       logStream = createWriteStream(logPath, { flags: opts.appendLog ? 'a' : 'w' });
     } catch {
@@ -453,17 +463,19 @@ export class BackgroundTaskManager {
     const task: Task = {
       sessionId,
       kill: opts.kill,
-      output: '',
+      output: seed,
       droppedChars: 0,
-      droppedMemBytes: 0,
-      readChars: 0,
-      readBytes: 0,
+      droppedMemBytes: Math.max(0, logBytes - Buffer.byteLength(seed)),
+      // 上一代的输出模型已按它自己的游标读过/通知过，不再当作新输出重放
+      readChars: seed.length,
+      readBytes: Math.max(logBytes, Buffer.byteLength(seed)),
       head: '',
       dirty: false,
       logPath,
       logStream,
       logBytes,
       logDroppedBytes: 0,
+      outputBytes: logBytes,
       decoder: new StringDecoder('utf8'),
       consumed: false,
       killedByUser: false,
@@ -476,7 +488,7 @@ export class BackgroundTaskManager {
         taskId,
         command,
         status: 'running',
-        tail: '',
+        tail: seed.slice(-TAIL_LIMIT),
         startedAt: opts.startedAt ?? Date.now(),
       },
     };
@@ -486,6 +498,7 @@ export class BackgroundTaskManager {
 
   private append(task: Task, chunk: Buffer): void {
     if (chunk.length === 0) return;
+    task.outputBytes += chunk.length;
     this.writeLog(task, chunk);
     const text = task.decoder.write(chunk);
     if (!text) return;
@@ -556,9 +569,22 @@ export class BackgroundTaskManager {
   }
 
   private announce(task: Task): void {
-    this.events.onStarted(task.sessionId, { ...task.info });
+    this.events.onStarted(task.sessionId, this.infoOf(task));
     this.emitLevel(task.sessionId);
     this.ensureTimer();
+  }
+
+  private infoOf(task: Task): BackgroundTaskInfo {
+    return { ...task.info, tail: task.output.slice(-TAIL_LIMIT), outputBytes: task.outputBytes };
+  }
+
+  /** 输出文件读不到时把原因写进输出：面板和 task_output 看到的是失败原因，不是「暂无输出」 */
+  private noteReadError(task: Task): void {
+    const error = task.run?.readError() ?? undefined;
+    if (!error || error === task.readError) return;
+    task.readError = error;
+    task.output += `\n[cannot read command output: ${error}]\n`;
+    task.dirty = true;
   }
 
   private pruneFinished(): void {
@@ -601,7 +627,13 @@ export class BackgroundTaskManager {
     const hadWaiters = task.waiters.length > 0;
     if (hadWaiters) task.consumed = true;
     for (const wake of task.waiters.splice(0)) wake();
-    this.events.onOutput(task.sessionId, task.info.taskId, task.info.tail, status);
+    this.events.onOutput(
+      task.sessionId,
+      task.info.taskId,
+      task.info.tail,
+      status,
+      task.outputBytes
+    );
     this.events.onEnded(task.sessionId, task.info.taskId, status, exitCode);
     this.emitLevel(task.sessionId);
     // 幂等抑制：模型已知情（阻塞等到 / 自己停的且收到回执）就不再打扰
@@ -652,10 +684,17 @@ export class BackgroundTaskManager {
       let anyRunning = false;
       for (const task of this.tasks.values()) {
         if (task.info.status === 'running') anyRunning = true;
+        this.noteReadError(task);
         if (!task.dirty) continue;
         task.dirty = false;
         task.info.tail = task.output.slice(-TAIL_LIMIT);
-        this.events.onOutput(task.sessionId, task.info.taskId, task.info.tail, task.info.status);
+        this.events.onOutput(
+          task.sessionId,
+          task.info.taskId,
+          task.info.tail,
+          task.info.status,
+          task.outputBytes
+        );
       }
       if (!anyRunning && this.timer) {
         clearInterval(this.timer);
@@ -796,7 +835,12 @@ export class BackgroundTaskManager {
   snapshot(sessionId: string): BackgroundTaskInfo[] {
     return [...this.tasks.values()]
       .filter((task) => task.sessionId === sessionId)
-      .map((task) => ({ ...task.info, tail: task.output.slice(-TAIL_LIMIT) }));
+      .map((task) => this.infoOf(task));
+  }
+
+  /** 名下还有任务（含已结束、尚未清理的）的会话 */
+  sessionIds(): string[] {
+    return [...new Set([...this.tasks.values()].map((task) => task.sessionId))];
   }
 
   /**
@@ -995,21 +1039,32 @@ export function shellSleepHint(command: string): string {
 }
 
 const TIMEOUT_HINT_MIN_SEC = SHELL_LIMITS.yieldDefaultMs / 1000;
+/** 实际耗时达到默认让位的三分之二才算「跑得久」 */
+export const TIMEOUT_HINT_SLOW_MS = (SHELL_LIMITS.yieldDefaultMs * 2) / 3;
 
 /**
  * 前台显式 timeout 的提示：模型常把 timeout 当成「等这么久」，其实它只杀进程、不延长让位。
- * 达到默认让位时长才提示，短 timeout 是在提前杀，不误伤。
+ * 达到默认让位时长才提示，短 timeout 是在提前杀，不误伤；
+ * 且命令真的跑得久或已转后台才提示，快速结束的命令不带，免得每次都刷屏。
  */
-export function shellTimeoutHint(timeoutSec: number | undefined): string {
+export function shellTimeoutHint(
+  timeoutSec: number | undefined,
+  run: { elapsedMs: number; detached?: boolean }
+): string {
   if (timeoutSec === undefined || timeoutSec < TIMEOUT_HINT_MIN_SEC) return '';
+  if (!run.detached && run.elapsedMs < TIMEOUT_HINT_SLOW_MS) return '';
   return SHELL_TIMEOUT_HINT;
 }
 
 /** 把提示附在工具结果前面：规则写进结果里才不会在长会话中被冲淡 */
-function withCommandHints<T>(result: T, command: string, timeoutSec?: number): T {
-  const hint = [shellReadHint(command), shellSleepHint(command), shellTimeoutHint(timeoutSec)]
+function withCommandHints<T>(result: T, command: string, timeoutHint: string): T {
+  const hint = [shellReadHint(command), shellSleepHint(command), timeoutHint]
     .filter(Boolean)
     .join('\n');
+  return prependHint(result, hint);
+}
+
+function prependHint<T>(result: T, hint: string): T {
   if (!hint) return result;
   const content = (result as { content?: Array<{ type?: string; text?: string }> }).content;
   if (!Array.isArray(content)) return result;
@@ -1367,15 +1422,19 @@ export function withBackground(
       try {
         // timeout 原样下传：只作截止（到点杀），让位由 ForegroundCommand 按分类计时
         const result = await definition.execute(toolCallId, params, callSignal, onUpdate, ctx);
-        return withCommandHints(withFailureNote(result), command, deadlineSec);
+        const timeoutHint = shellTimeoutHint(deadlineSec, { elapsedMs: Date.now() - startedAt });
+        return withCommandHints(withFailureNote(result), command, timeoutHint);
       } catch (error) {
         if (error instanceof ForegroundDetachedError) {
-          return detachedResult(error, {
-            commandClass: policy.class,
-            startedAt,
-            logPath: manager.logPathOf(error.taskId) ?? '',
-            waitCapSec: yieldSec(manager.limits.taskWaitMaxMs),
-          });
+          return prependHint(
+            detachedResult(error, {
+              commandClass: policy.class,
+              startedAt,
+              logPath: manager.logPathOf(error.taskId) ?? '',
+              waitCapSec: yieldSec(manager.limits.taskWaitMaxMs),
+            }),
+            shellTimeoutHint(deadlineSec, { elapsedMs: Date.now() - startedAt, detached: true })
+          );
         }
         if (error instanceof ForegroundYieldError) {
           return {

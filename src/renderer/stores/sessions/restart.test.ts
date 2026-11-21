@@ -194,4 +194,22 @@ describe('restartConversation', () => {
     expect(release).not.toHaveBeenCalled();
     expect(spawn).toHaveBeenCalled();
   });
+
+  it('重启认回的后台任务：冷会话直接显示，不 spawn、不当会话已打开', async () => {
+    const id = await seed({ started: false });
+    const onEvent = window.electronAPI.agent.onEvent as unknown as ReturnType<typeof vi.fn>;
+    const listener = onEvent.mock.calls.at(-1)?.[0] as (event: unknown) => void;
+    const task = {
+      taskId: 't1',
+      command: 'sleep 300',
+      status: 'running',
+      tail: 'tick',
+      startedAt: 1,
+    };
+    listener({ type: 'unopened-background-tasks', sessionId: id, tasks: [task] });
+    expect(state(id).backgroundTasks).toEqual([task]);
+    expect(state(id).started).toBe(false);
+    expect(state(id).generation).toBeUndefined();
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });

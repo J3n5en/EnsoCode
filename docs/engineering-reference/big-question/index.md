@@ -44,6 +44,8 @@
 | [macos-background-input.md](macos-background-input.md) | 后台 cmd+a 后输入丢字/app 被隐藏；Electron 收不到后台按键；后台拖拽不动；目标偶发抢走前台 |
 | [model-directory-single-source.md](model-directory-single-source.md) | 新版本静态表里的模型进不了老账号的 picker（清单冻结在登录时刻）；vitest 里莫名 `unknown oauth provider` |
 | [mcp-oauth-worker-refresh.md](mcp-oauth-worker-refresh.md) | 远程 MCP 授权过一阵就变「需要授权」，token 正常、有效期长的 MCP 不受影响 |
+| [restart-recovered-task-unopened-session.md](restart-recovered-task-unopened-session.md) | 优雅重启后后台命令还在跑，点开会话看不到任务条，发一句话才出现 |
+| [bg-task-output-empty.md](bg-task-output-empty.md) | 后台任务展开「输出」总是「(暂无输出)」，进程在跑、日志里有内容 |
 
 ## 共同教训
 

@@ -18,6 +18,7 @@ import {
   shellSleepHint,
   shellTimeoutHint,
   type TaskEvents,
+  TIMEOUT_HINT_SLOW_MS,
   withBackground,
 } from './backgroundTasks';
 import { ForegroundDetachedError } from './foregroundCommand';
@@ -342,6 +343,31 @@ describe('BackgroundTaskManager', () => {
     expect(processAlive(-1)).toBe(false);
     expect(processAlive(process.pid)).toBe(true);
   });
+
+  it.skipIf(process.platform === 'win32').each([
+    ['输出直写文件', { detachable: true }],
+    ['管道', undefined],
+  ])(
+    '只写 stderr 的命令（%s）：运行中面板 tail 就有内容，outputBytes 计数',
+    async (_kind, opts) => {
+      const { manager, started } = makeManager();
+      const taskId = manager.start(
+        's1',
+        'echo only-stderr-1 >&2; sleep 0.2; echo only-stderr-2 >&2; sleep 30',
+        tmpdir(),
+        opts
+      );
+      try {
+        expect(started[0]).toMatchObject({ taskId, tail: '', outputBytes: 0 });
+        await until(() => (manager.snapshot('s1')[0]?.tail ?? '').includes('only-stderr-2'), 3000);
+        const [info] = manager.snapshot('s1');
+        expect(info).toMatchObject({ status: 'running' });
+        expect(info?.outputBytes).toBe(Buffer.byteLength('only-stderr-1\nonly-stderr-2\n'));
+      } finally {
+        manager.stop(taskId);
+      }
+    }
+  );
 
   it('进程退出后等待 finalize，再由 task_output 返回最终 details', async () => {
     const { manager, ended } = makeManager();
@@ -1092,6 +1118,35 @@ describe('前台让位 / 截止 / 失败回执（真实进程）', () => {
     expect(notified[0]).toContain('[deadline]');
   });
 
+  it('带大 timeout 的命令超过让位转后台：回执前带 timeout 提示', async () => {
+    const { manager, ended } = makeManager({ yieldDefaultMs: 50 });
+    const result = await shell(manager).execute(
+      't1',
+      { command: 'sleep 0.3', timeout: 60 },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    const taskId = (result.details as { backgroundTaskId: string }).backgroundTaskId;
+    expect(taskId).toMatch(/^task-/);
+    expect(textOf(result)).toMatch(/^timeout only kills[\s\S]*task-/i);
+    await until(() => ended.includes(taskId));
+  });
+
+  it('不带 timeout 转后台：回执不带 timeout 提示', async () => {
+    const { manager, ended } = makeManager({ yieldDefaultMs: 50 });
+    const result = await shell(manager).execute(
+      't1',
+      { command: 'sleep 0.3' },
+      undefined,
+      undefined,
+      undefined as never
+    );
+    const taskId = (result.details as { backgroundTaskId: string }).backgroundTaskId;
+    expect(textOf(result)).not.toMatch(/timeout only kills/i);
+    await until(() => ended.includes(taskId));
+  });
+
   it('非零退出：结果带 exit_nonzero 分类与退出码', async () => {
     const { manager } = makeManager();
     const result = await shell(manager).execute(
@@ -1219,15 +1274,27 @@ describe('shellSleepHint', () => {
 });
 
 describe('shellTimeoutHint', () => {
-  it('前台显式 timeout ≥ 让位默认值时提示 timeout 不能延长等待', () => {
-    expect(shellTimeoutHint(45)).toMatch(/timeout only kills/i);
-    expect(shellTimeoutHint(60)).toMatch(/background: true/);
-    expect(shellTimeoutHint(300)).toMatch(/sleep, ps, pgrep/);
+  const slow = { elapsedMs: TIMEOUT_HINT_SLOW_MS };
+
+  it('阈值按默认让位的三分之二推导', () => {
+    expect(TIMEOUT_HINT_SLOW_MS).toBe(30_000);
+  });
+
+  it('显式 timeout ≥ 让位默认值且实际跑得久或已转后台时提示', () => {
+    expect(shellTimeoutHint(45, slow)).toMatch(/timeout only kills/i);
+    expect(shellTimeoutHint(60, slow)).toMatch(/background: true/);
+    expect(shellTimeoutHint(300, { elapsedMs: 100, detached: true })).toMatch(/sleep, ps, pgrep/);
+  });
+
+  it('快速结束的命令无论 timeout 多大都不提示', () => {
+    expect(shellTimeoutHint(120, { elapsedMs: 1_000 })).toBe('');
+    expect(shellTimeoutHint(3600, { elapsedMs: TIMEOUT_HINT_SLOW_MS - 1 })).toBe('');
   });
 
   it('未设 timeout 或短于让位默认值不提示', () => {
-    expect(shellTimeoutHint(undefined)).toBe('');
-    expect(shellTimeoutHint(30)).toBe('');
+    expect(shellTimeoutHint(undefined, slow)).toBe('');
+    expect(shellTimeoutHint(undefined, { elapsedMs: 0, detached: true })).toBe('');
+    expect(shellTimeoutHint(30, slow)).toBe('');
   });
 });
 
@@ -1247,7 +1314,7 @@ describe('withBackground 前台预算与回执', () => {
     return { base, seen };
   };
 
-  it('显式 timeout 原样下传（只作截止），不按让位改写', async () => {
+  it('显式 timeout 原样下传（只作截止），快速结束不带 timeout 提示', async () => {
     const { manager } = makeManager();
     const { base, seen } = makeTool();
     const wrapped = withBackground(base, manager, 's1', '/tmp');
@@ -1260,8 +1327,35 @@ describe('withBackground 前台预算与回执', () => {
     );
     expect(seen[0]).toEqual({ command: 'npm run build', timeout: 300 });
     const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
-    expect(text).toMatch(/timeout only kills/i);
-    expect(text).toMatch(/^timeout only kills[\s\S]*\nok$/);
+    expect(text).toBe('ok');
+  });
+
+  it('显式大 timeout 且实际耗时达到阈值：结果前带 timeout 提示', async () => {
+    const { manager } = makeManager();
+    const { base } = makeTool();
+    const execute = base.execute;
+    const slowBase = {
+      ...base,
+      execute: async (...args: Parameters<typeof execute>) => {
+        const now = Date.now();
+        vi.spyOn(Date, 'now').mockReturnValue(now + TIMEOUT_HINT_SLOW_MS);
+        return execute(...args);
+      },
+    } as ToolDefinition;
+    const wrapped = withBackground(slowBase, manager, 's1', '/tmp');
+    try {
+      const result = await wrapped.execute(
+        't1',
+        { command: 'npm run build', timeout: 300 },
+        undefined,
+        undefined,
+        undefined as never
+      );
+      const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+      expect(text).toMatch(/^timeout only kills[\s\S]*\nok$/);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('后台启动回执说明：没有独立工作就结束本轮，完成会唤醒', async () => {

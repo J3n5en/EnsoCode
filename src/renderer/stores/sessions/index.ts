@@ -1470,6 +1470,15 @@ export const useSessionsStore = create<SessionsState>()(
           failTitleSummary(event.conversationId, event.error);
           return;
         }
+        if (event.type === 'unopened-background-tasks') {
+          set((state) => {
+            const current = state.conversations[event.sessionId];
+            if (!current) return state;
+            const next = applyAgentEvent(current, event.sessionId, event);
+            return next === current ? state : patch(state, event.sessionId, next as Conversation);
+          });
+          return;
+        }
         // 一次性补全完成/失败在 Main 结算；text-delta 给 btw 面板，都不进会话投影
         if (
           event.type === 'text-completed' ||

@@ -10,6 +10,7 @@ import {
   parseElapsed,
   processAlive,
   processCommandLine,
+  readFileTail,
   requestFileBackedRun,
   runFiles,
   spawnFileBacked,
@@ -167,6 +168,30 @@ describe.runIf(posix)('交出与认回', () => {
     attached.release();
   });
 
+  it('输出文件读不到：readError 报原因，读得到时为 null', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-run-'));
+    const runId = randomUUID();
+    const files = runFiles(dir, runId);
+    const missing = attachFileBacked(
+      dir,
+      { runId, pid: process.pid, startedAt: 0, cwd: dir, ...files },
+      0,
+      { alive: () => true, matches: () => false }
+    );
+    expect(missing.readError()).toMatch(/ENOENT/);
+    missing.release();
+    writeFileSync(files.outputFile, 'ok\n');
+    const present = attachFileBacked(
+      dir,
+      { runId, pid: process.pid, startedAt: 0, cwd: dir, ...files },
+      0,
+      { alive: () => true, matches: () => false }
+    );
+    present.flush();
+    expect(present.readError()).toBeNull();
+    present.release();
+  });
+
   it('命令 exec 换掉 shell 后命令行里没有 runId：仍认得出是同一进程；启动时间对不上的不认', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'enso-run-'));
     const run = spawnFileBacked({ ...shellConfig(), command: 'exec sleep 30', cwd: dir, dir });
@@ -230,5 +255,23 @@ describe.runIf(posix)('孤儿清理', () => {
     expect(processAlive(other.pid as number)).toBe(true);
     expect(existsSync(runFiles(dir, reused).metaFile)).toBe(false);
     expect(existsSync(runFiles(dir, kept).metaFile)).toBe(true);
+  });
+});
+
+describe('readFileTail', () => {
+  it('只读最后 max 字节，不劈开多字节字符、丢掉被截断的首行；文件不在返回空', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'enso-tail-'));
+    const file = path.join(dir, 'a.log');
+    writeFileSync(file, `${'x'.repeat(10_000)}\n中文第一行\n最后一行\n`);
+    const tail = readFileTail(file, 20).toString('utf8');
+    expect(tail).toBe('最后一行\n');
+    expect(
+      readFileTail(file, 1 << 20)
+        .toString('utf8')
+        .endsWith('中文第一行\n最后一行\n')
+    ).toBe(true);
+    writeFileSync(file, 'short\n');
+    expect(readFileTail(file, 1024).toString('utf8')).toBe('short\n');
+    expect(readFileTail(path.join(dir, 'missing.log'), 1024).length).toBe(0);
   });
 });
