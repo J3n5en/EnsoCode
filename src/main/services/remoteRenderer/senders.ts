@@ -183,6 +183,15 @@ export class RemoteSender extends EventEmitter {
     return !this.destroyed && !this.suspended;
   }
 
+  /** 断链后积压的帧字节数：溢出后旧帧会被丢，续连就只能重载 */
+  get bufferedBytes(): number {
+    return this.retainedBytes;
+  }
+
+  get bufferLimit(): number {
+    return this.maxBytes;
+  }
+
   suspend(): void {
     if (this.destroyed || this.suspended) return;
     this.suspended = true;
@@ -383,7 +392,8 @@ export function remoteLeaderId(desktopMainAlive: boolean): number | null {
   if (desktopMainAlive) return null;
   let leader: RemoteSender | null = null;
   for (const sender of byId.values()) {
-    if (sender.kind !== 'main') continue;
+    // 挂起的页面收不到事件，不能继续当 leader
+    if (sender.kind !== 'main' || !sender.online) continue;
     if (!leader || sender.id < leader.id) leader = sender;
   }
   return leader?.id ?? null;
