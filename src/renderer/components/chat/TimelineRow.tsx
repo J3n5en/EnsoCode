@@ -105,6 +105,7 @@ import { stripAnsi } from '@/lib/terminalText';
 import { usesToolCard } from '@/lib/toolCards';
 import { SUBAGENT_OP_LABEL_KEYS, TOOL_LABEL_KEYS, toolLabel } from '@/lib/toolLabels';
 import { cn } from '@/lib/utils';
+import { openSessionFromSecretary } from '@/stores/secretaryReturn';
 import { useSessionsStore } from '@/stores/sessions';
 import {
   canShowConversationFork,
@@ -642,12 +643,11 @@ const UPDATE_ICON: Record<SecretaryUpdateLine['kind'], typeof Bot> = {
 
 /** 秘书收到的派出会话回传与定时提醒：每条一行，点整行展开详情，右侧图标打开会话 */
 function SecretaryUpdatesNotice({ lines }: { lines: SecretaryUpdateLine[] }) {
-  const selectConversation = useSessionsStore((state) => state.selectConversation);
   return (
     <div data-enso="secretary-updates" className={cn(NOTICE_BOX, 'divide-y divide-border/60')}>
       {lines.map((line, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: 回传内容不可变，顺序即身份
-        <SecretaryUpdateRow key={i} line={line} onOpen={selectConversation} />
+        <SecretaryUpdateRow key={i} line={line} onOpen={openSessionFromSecretary} />
       ))}
     </div>
   );
@@ -864,14 +864,13 @@ function InlineMentionCard({
 /** chat 引用卡片：会话还在本机就点得开，找不到时保持不可点 */
 function ChatRefCard({ label, sessionFile }: { label: string; sessionFile: string }) {
   const conversations = useSessionsStore((state) => state.conversations);
-  const selectConversation = useSessionsStore((state) => state.selectConversation);
   const conversationId = conversationIdBySessionFile(conversations, sessionFile);
   if (!conversationId) return <InlineMentionCard kind="chat" label={label} title={sessionFile} />;
   return (
     <button
       type="button"
       data-enso="chat-ref"
-      onClick={() => selectConversation(conversationId)}
+      onClick={() => openSessionFromSecretary(conversationId)}
       title={sessionFile}
       className={cn(
         mentionChipClass('chat'),

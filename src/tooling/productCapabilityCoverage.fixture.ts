@@ -522,6 +522,7 @@ export const IPC_PRODUCT_COVERAGE = {
   SECRETARY_UNTRACKED_REMOVE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_FEED: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_DAILY: excluded('Experimental secretary agent; not an Enso capability.'),
+  SECRETARY_DONE_REPORT: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_CONTACT_STATE: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_CONTACT_CHANGED: excluded('Experimental secretary agent; not an Enso capability.'),
   SECRETARY_CONTACT_BIND: excluded('Experimental secretary agent; not an Enso capability.'),

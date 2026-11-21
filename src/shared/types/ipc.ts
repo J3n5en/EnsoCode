@@ -70,6 +70,7 @@ export const IPC_CHANNELS = {
   SECRETARY_FEED: 'secretary:feed',
   /** 秘书：按天汇总的看板（日报），入参是日期，缺省今天 */
   SECRETARY_DAILY: 'secretary:daily',
+  SECRETARY_DONE_REPORT: 'secretary:done-report',
   /** 秘书联系方式：读绑定状态（不含 token） */
   SECRETARY_CONTACT_STATE: 'secretary:contact-state',
   /** main → 主界面 renderer：联系方式状态变化 */

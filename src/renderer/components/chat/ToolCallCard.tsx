@@ -12,6 +12,7 @@ import {
 } from '@/lib/toolCards';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
+import { openSessionFromSecretary } from '@/stores/secretaryReturn';
 import { useSessionsStore } from '@/stores/sessions';
 import type { TimelineItem } from '@/stores/sessions/timeline';
 import { useSettingsStore } from '@/stores/settings';
@@ -69,7 +70,6 @@ function callsOf(item: ToolItem): ToolCallInput[] {
 export function ToolCallCards({ item }: { item: ToolItem }) {
   const { t, locale } = useI18n();
   const lookup = useToolCardLookup();
-  const selectConversation = useSessionsStore((state) => state.selectConversation);
   const knownSessions = useSessionsStore((state) => state.conversations);
   const present = presentToolCalls(callsOf(item), {
     t,
@@ -115,12 +115,12 @@ export function ToolCallCards({ item }: { item: ToolItem }) {
               key={`${card.title}-${index}`}
               card={card}
               known={knownSessions}
-              onOpen={selectConversation}
+              onOpen={openSessionFromSecretary}
             />
           ))
         : null}
       {open && single ? (
-        <CardDetails card={single} known={knownSessions} onOpen={selectConversation} />
+        <CardDetails card={single} known={knownSessions} onOpen={openSessionFromSecretary} />
       ) : null}
     </div>
   );

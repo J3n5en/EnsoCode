@@ -24,13 +24,16 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: (selector: (state: { projects: unknown[] }) => unknown) =>
     selector({ projects: [] }),
 }));
-vi.mock('@/stores/sessions', () => ({
-  useSessionsStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      conversations: {},
-      selectConversation: (id: string) => h.calls.push({ name: 'selectConversation', args: id }),
-    }),
-}));
+vi.mock('@/stores/sessions', () => {
+  const state = {
+    conversations: { c1: { projectId: 'p1' } },
+    selectConversation: (id: string) => h.calls.push({ name: 'selectConversation', args: id }),
+  };
+  const useSessionsStore = (selector: (s: Record<string, unknown>) => unknown) => selector(state);
+  useSessionsStore.getState = () => state;
+  useSessionsStore.subscribe = () => () => undefined;
+  return { useSessionsStore };
+});
 vi.mock('@/stores/secretary', () => ({
   focusedSecretaryId: () => undefined,
   secretaryIdOfProject: () => null,
@@ -125,7 +128,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   h.calls = [];
   h.stateListeners = [];
-  useSessionPeek.setState({ conversationId: null, back: null });
+  useSessionPeek.setState({ conversationId: null, from: null });
   h.schedules = [
     {
       id: 's1',

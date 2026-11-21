@@ -9,6 +9,7 @@ import {
   LOCAL_IMAGE_SCHEME,
   PLUGIN_ASSET_HOST,
   SECRETARY_AVATAR_HOST,
+  SECRETARY_REPORT_HOST,
 } from './localImage';
 
 /** 不能以 enso-desk- 开头：desk 壳会清掉该前缀下不认识的缓存 */
@@ -40,7 +41,7 @@ function parse(url: string): { pair: string; identity: string } | null {
   const id =
     host === SECRETARY_AVATAR_HOST
       ? `${host}?s=${inner.searchParams.get('s') ?? ''}`
-      : host === BOT_AVATAR_HOST || host === PLUGIN_ASSET_HOST
+      : host === BOT_AVATAR_HOST || host === PLUGIN_ASSET_HOST || host === SECRETARY_REPORT_HOST
         ? `${host}${inner.pathname}`
         : null;
   return id ? { pair: match[1], identity: `${match[1]}\n${id}` } : null;

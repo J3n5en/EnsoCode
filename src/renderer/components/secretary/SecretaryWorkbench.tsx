@@ -25,6 +25,7 @@ import { useI18n } from '@/i18n';
 import { formatClock, formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
+import { openSessionFromSecretary } from '@/stores/secretaryReturn';
 import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSessionsStore } from '@/stores/sessions';
 import { SecretaryFace } from './SecretaryFace';
@@ -129,7 +130,6 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   const face = useSecretaryFace();
   const approvals = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingApprovals);
   const asks = useSessionsStore((s) => s.conversations[card.conversationId]?.pendingAsks);
-  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [stopping, setStopping] = useState(false);
   const stop = () => {
     setStopping(true);
@@ -195,7 +195,8 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
       <div className="mt-2 flex items-center gap-1.5">
         <button
           type="button"
-          onClick={() => selectConversation(card.conversationId)}
+          data-enso="secretary-card-open"
+          onClick={() => openSessionFromSecretary(card.conversationId)}
           className="rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
         >
           {t('Open session')}
@@ -388,11 +389,10 @@ function AddTodoRow({ onAdd }: { onAdd: () => void }) {
 function FeedEntry({ event }: { event: FeedEvent }) {
   const { t, locale } = useI18n();
   const face = useSecretaryFace();
-  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [stopping, setStopping] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const conversationId = event.conversationId;
-  const open = conversationId ? () => selectConversation(conversationId) : undefined;
+  const open = conversationId ? () => openSessionFromSecretary(conversationId) : undefined;
   const stop = conversationId
     ? () => {
         setStopping(true);

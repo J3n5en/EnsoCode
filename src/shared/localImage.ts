@@ -44,6 +44,20 @@ export const secretaryAvatarUrl = (version: number, hash?: string, secretaryId?:
     }${secretaryId ? `&s=${encodeURIComponent(secretaryId)}` : ''}`
   );
 
+/**
+ * 已完成报告截图副本的保留 host：只按会话 id 与内容哈希文件名寻址，磁盘路径由 Main 推导，
+ * 不把 host 的绝对路径交给 renderer。文件名即内容哈希，v 是报告完成时间。
+ */
+export const SECRETARY_REPORT_HOST = 'secretary-report';
+export const secretaryReportImageUrl = (
+  conversationId: string,
+  name: string,
+  version: number
+): string =>
+  routed(
+    `${LOCAL_IMAGE_SCHEME}://${SECRETARY_REPORT_HOST}/${encodeURIComponent(conversationId)}/${encodeURIComponent(name)}?v=${version}`
+  );
+
 /** 插件目录内图片和字体的保留 host。v 是安装代号，换包后缓存失效 */
 export const PLUGIN_ASSET_HOST = 'plugin-asset';
 
@@ -120,6 +134,7 @@ export function localImageUrlToPath(url: URL): string | null {
     host === REMOTE_FETCH_HOST ||
     host === BOT_AVATAR_HOST ||
     host === SECRETARY_AVATAR_HOST ||
+    host === SECRETARY_REPORT_HOST ||
     host === PLUGIN_ASSET_HOST
   )
     return null;
