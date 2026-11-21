@@ -25,7 +25,7 @@ enso config help --json            # 机器可读 schema（别名 enso config sc
 `enso config help --json` 向运行中的 Main 发送只读请求 `{ action: "schema" }`，CLI 只负责拼上命令清单并格式化输出：
 
 - `commands`：每个命令的 `name`、`usage`、`args`、`description`、`examples`；`options` 为全局选项。
-- `keys`：由 Main 遍历 `SETTINGS_STATE_FIELDS` 与当前 settings state 生成（不含任何值），每项 `{ path, type, writable, requiresRestart, secret }`。数组元素以 `<id>`（或 `<index>`）占位，如 `providers.<id>.baseUrl`；最深 4 段；未写入 state 的字段 `type` 为 `unknown`。`writable` 与 `set` 的拒绝规则一致。
+- `keys`：由 Main 遍历 `SETTINGS_STATE_FIELDS` 与当前 settings state 生成（不含任何值），每项 `{ path, type, writable, requiresRestart, secret }`。数组元素以 `<id>`（或 `<index>`）占位，如 `providers.<id>.name`；最深 4 段；未写入 state 的字段 `type` 为 `unknown`。`writable` 与 `set` 的拒绝规则一致。
 - `blacklist`：密钥键名正则与说明、路径/命令规则、`writeDeniedFields`、`entryLevelDeniedFields`、`readDeniedFields` 和被拒的非设置操作清单。
 - `notes`：热生效说明、需重启键及原因、socket/token 机制、键格式。
 
@@ -41,7 +41,7 @@ enso config set terminalFontSize 15
 enso config set chatTypography.body.size 15
 enso config set proxyMode custom
 enso config set customProxyUrl http://127.0.0.1:7890
-enso config set providers.<id>.baseUrl https://api.example.com/v1
+enso config set providers.<id>.autoFetchModels true
 enso config set defaultModel '{"providerId":"<id>","modelId":"gpt-5"}'
 enso config set mcpServers.<id>.callTimeoutSec 120
 enso config set subagentModelsEnabled true
@@ -65,6 +65,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 | 文件路径 | `worktreeRoot`、`backgroundImagePath`、`backgroundFolderPath`，以及任一段是 `path`、`dir`、`root`、`cwd` 或以 `Path`、`Dir`、`Root` 结尾的键 | 可读 | 拒绝 |
 | 执行命令 | `terminalShell`、`windowsLocalShell`、`fileOpenRules`、`contextMenuOpen`，以及任一段是 `command` 或 `args` 的键（例如 MCP 的启动命令） | 可读 | 拒绝 |
 | 技能 / 指令装卸 | 整体替换或增删 `skills`、`instructions` 的条目 | 可读 | 拒绝；条目内的字段（如 `skills.<id>.enabled`）可以写 |
+| 供应商端点 | `providers.<id>.api`、`providers.<id>.baseUrl`、`providers.<id>.headers` 及其子键：它们决定 API Key 发往哪里，改了端点会让自动拉取立刻带着 key 请求新地址 | 可读（密钥仍显示为 `***`） | 拒绝，只能在设置页改 |
 | 项目数据 | `projects`、`projectGroups`，由 Main 权威投影维护 | 拒绝 | 拒绝 |
 | 未登记字段 | 第一段不是设置字段 | 拒绝 | 拒绝 |
 

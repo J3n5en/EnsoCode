@@ -36,6 +36,13 @@ const WRITE_DENIED = new Set([
 ]);
 /** 整体替换或增删条目等同安装/卸载；条目内字段（如 enabled）仍可写 */
 const ENTRY_LEVEL_DENIED = new Set(['skills', 'instructions']);
+/**
+ * 决定 API Key 发往哪里的 provider 字段只能在设置页改：CLI 可被任意本机进程或代理调用，
+ * 改了端点会让自动拉取立刻带着 key 请求新地址。
+ */
+const PROVIDER_ENDPOINT_FIELDS = new Set(['api', 'baseUrl', 'headers']);
+const isProviderEndpointPath = (segs: readonly string[]): boolean =>
+  segs[0] === 'providers' && segs.length >= 3 && PROVIDER_ENDPOINT_FIELDS.has(segs[2]);
 /** 启动时读入、UI 另走专用 IPC 的项：只改设置不会生效 */
 const RESTART_REQUIRED: Record<string, string> = {
   autoUpdate: 'The updater reads this at startup; toggle it in Settings or restart the app.',
@@ -178,6 +185,7 @@ function keySchema(segs: string[], value: unknown, present: boolean): KeySchema 
     !segs.some(isPathOrExecName) &&
     !WRITE_DENIED.has(field) &&
     !(ENTRY_LEVEL_DENIED.has(field) && segs.length <= 2) &&
+    !isProviderEndpointPath(segs) &&
     !deniedKeyIn(value);
   const type = !present || value === null ? 'unknown' : jsonType(value);
   return { path: segs.join('.'), type, writable, requiresRestart, secret };
@@ -232,6 +240,7 @@ export function describeConfig(state: Record<string, unknown>, fields: readonly 
         'install/uninstall skills or instructions (replace or add/remove entries)',
         'read or write project/session data (projects, projectGroups)',
         'change file paths, shells or executable commands',
+        'change a provider endpoint (providers.<id>.api, baseUrl, headers; use the Settings page)',
         'read or write secrets (use the Settings page)',
         'overwrite a parent object whose old or new value contains secret/path/command keys',
       ],
@@ -339,6 +348,11 @@ export function planSet(
     };
   if (RESTART_REQUIRED[field])
     return { ok: false, requiresRestart: true, reason: RESTART_REQUIRED[field] };
+  if (isProviderEndpointPath(segs))
+    return {
+      ok: false,
+      error: `"${segs.join('.')}" decides where the API key is sent; change it in Settings`,
+    };
 
   const refreshField = providerRefreshField(segs);
   if (refreshField) {
