@@ -201,6 +201,11 @@ import {
   writeSidebarOrder,
 } from '@/stores/settings/sidebarOrderStorage';
 import { SessionTabCounts } from './SessionTabCounts';
+import {
+  GROUP_EDIT_BUTTON_CLASS,
+  PROJECT_ROW_ACTION_CLASS,
+  PROJECT_ROW_MENU_CLASS,
+} from './sidebarRowActions';
 import { WorktreeBadge } from './WorktreeBadge';
 import { WorktreeRenameDialog } from './WorktreeRenameDialog';
 
@@ -1723,7 +1728,7 @@ export function Sidebar({
                                   <button
                                     type="button"
                                     onClick={() => void newConversation(project.id)}
-                                    className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100"
+                                    className={PROJECT_ROW_ACTION_CLASS}
                                     title={t('New conversation')}
                                   >
                                     <MessageSquarePlus className="h-3.5 w-3.5" />
@@ -2460,7 +2465,7 @@ function ProjectGroupHeader({
           {count}
         </span>
       </button>
-      {/* 编辑按钮绝对定位盖在计数上,不占流:否则未分组(无 onEdit)的计数会比其他分组右移 */}
+      {/* 编辑按钮桌面绝对定位盖在计数上,不占流:否则未分组(无 onEdit)的计数会比其他分组右移;触屏无悬停,改为排在计数右侧 */}
       {onEdit && (
         <button
           type="button"
@@ -2469,7 +2474,7 @@ function ProjectGroupHeader({
             onEdit();
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          className="absolute right-1.5 bottom-0.5 flex size-5 items-center justify-center rounded-[5px] opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+          className={GROUP_EDIT_BUTTON_CLASS}
         >
           <Pencil className="size-3.25" />
         </button>
@@ -3313,7 +3318,7 @@ function ProjectOverflowMenu({ actions }: { actions: ProjectAction[] }) {
       <MenuTrigger
         data-enso="row-menu"
         aria-label={t('More actions')}
-        className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100 data-popup-open:bg-muted data-popup-open:text-foreground data-popup-open:opacity-100"
+        className={PROJECT_ROW_MENU_CLASS}
         title={t('More actions')}
         onPointerDown={(event) => event.stopPropagation()}
       >
