@@ -227,16 +227,17 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                       normalizeProviderModelRefreshIntervalHours(
                         provider.modelRefreshIntervalHours
                       );
-                  updateProvider(
-                    provider.id,
-                    {
-                      ...draft,
-                      models,
-                      ...(autoFetchChanged ? { autoFetchModels } : {}),
-                      ...(intervalChanged ? { modelRefreshIntervalHours } : {}),
-                    },
-                    seenModelIds
-                  );
+                  // 草稿里见过的模型记为已见：拉取后删掉的不会被自动拉取加回
+                  const knownModelIds = [
+                    ...new Set([...(latest?.knownModelIds ?? []), ...seenModelIds]),
+                  ];
+                  updateProvider(provider.id, {
+                    ...draft,
+                    models,
+                    knownModelIds,
+                    ...(autoFetchChanged ? { autoFetchModels } : {}),
+                    ...(intervalChanged ? { modelRefreshIntervalHours } : {}),
+                  });
                 }
                 onClose();
               }}

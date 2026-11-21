@@ -1,93 +1,7 @@
 /**
  * Zustand persist 存储适配器：通过 IPC 持久化到主进程的 settings.json
  */
-import { migrateProviderModelRefreshSettings } from '@shared/providers/modelRefreshInterval';
 import type { PersistStorage, StorageValue } from 'zustand/middleware';
-
-type SettingsRow = Record<string, unknown> & { id: string };
-
-function rowsById(value: unknown): Map<string, SettingsRow> {
-  const rows = new Map<string, SettingsRow>();
-  if (Array.isArray(value)) {
-    for (const row of value) {
-      if (row && typeof row === 'object' && typeof row.id === 'string') rows.set(row.id, row);
-    }
-  }
-  return rows;
-}
-
-let providerSettingsBaseline: ReturnType<typeof providerSettingsSnapshot> | undefined;
-let draftModelsSeen: { providerId: string; ids: ReadonlySet<string> } | undefined;
-
-function providerSettingsSnapshot(value: unknown) {
-  const state =
-    value && typeof value === 'object'
-      ? migrateProviderModelRefreshSettings(value as Record<string, unknown>)
-      : {};
-  return rowsById(state.providers);
-}
-
-/**
- * 水合真正应用快照时才更新基线，避免用尚未应用的异步读回覆盖本地编辑意图。
- *
- * Update the baseline only when hydration applies the snapshot, so a pending read cannot mask local edits.
- */
-export function noteProviderSettingsHydrated(value: unknown): void {
-  providerSettingsBaseline = providerSettingsSnapshot(value);
-}
-
-/**
- * 将草稿显示过的模型与本次同步 Zustand 写入绑定，避免把用户删除的模型误判为后台新增。
- *
- * Bind models seen in the draft to this synchronous Zustand write, so deliberate deletions are not mistaken for background additions.
- */
-export function withProviderModelsSeen<T>(
-  providerId: string,
-  ids: ReadonlySet<string>,
-  write: () => T
-): T {
-  const previous = draftModelsSeen;
-  draftModelsSeen = { providerId, ids };
-  try {
-    return write();
-  } finally {
-    draftModelsSeen = previous;
-  }
-}
-
-function withProviderSettingsWrite(value: StorageValue<unknown>) {
-  const previous = providerSettingsBaseline;
-  if (!previous) return value;
-  const next = providerSettingsSnapshot(value.state);
-  providerSettingsBaseline = next;
-  const ids = new Set([...previous.keys(), ...next.keys()]);
-  const providerEdits = [];
-  for (const id of ids) {
-    const before = previous.get(id);
-    const after = next.get(id);
-    const fields = new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
-    const changed = [...fields].filter(
-      (field) => JSON.stringify(before?.[field]) !== JSON.stringify(after?.[field])
-    );
-    const seen = draftModelsSeen?.providerId === id ? draftModelsSeen.ids : undefined;
-    if (seen && !changed.includes('models')) {
-      const proposedModels = rowsById(after?.models);
-      if ([...seen].some((modelId) => !proposedModels.has(modelId))) changed.push('models');
-    }
-    if (!changed.length) continue;
-    providerEdits.push({
-      id,
-      fields: changed,
-      previousModelIds: before
-        ? [...new Set([...rowsById(before.models).keys(), ...(seen ?? [])])]
-        : null,
-    });
-  }
-  return {
-    ...value,
-    providerSettingsWrite: { providerEdits },
-  };
-}
 
 /**
  * 已完成首次水合（persist 已 merge 磁盘状态）的 store 名。
@@ -134,9 +48,9 @@ export const electronStorage = {
   setItem: async (name: string, value: string): Promise<void> => {
     if (!hydratedNames.has(name)) return;
     writeGeneration++;
-    const parsed = JSON.parse(value) as StorageValue<unknown>;
-    const write = name === 'enso-settings' ? withProviderSettingsWrite(parsed) : parsed;
-    await trackWrite(window.electronAPI.settings.writeKey(name, write).then(() => undefined));
+    await trackWrite(
+      window.electronAPI.settings.writeKey(name, JSON.parse(value)).then(() => undefined)
+    );
   },
 
   removeItem: async (name: string): Promise<void> => {

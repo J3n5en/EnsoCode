@@ -64,6 +64,10 @@ export interface ModelProvider {
    * Device-local model refresh interval for this API key entry (1–168 whole hours, default 1).
    */
   modelRefreshIntervalHours?: number;
+  /** 自动拉取见过的模型 id（本机）；只追加不在其中的模型，用户删掉的不再加回 */
+  knownModelIds?: string[];
+  /** 最近一次自动拉取的结果（本机，Main 写入）；不含错误详情 */
+  modelRefreshStatus?: { ok: boolean; at: number };
   /** 从哪个本地应用导入（手动创建时为空） */
   importedFrom?: string;
   /**

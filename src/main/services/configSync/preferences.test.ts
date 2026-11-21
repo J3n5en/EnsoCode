@@ -1,6 +1,5 @@
 import { SMART_COMPACT_MODES } from '@shared/smartCompactMode';
 import { describe, expect, it } from 'vitest';
-import { CONFIG_SYNC_COMMIT_FIELDS } from '../../ipc/settings';
 import { validateBundle } from './codec';
 import { CONFIG_SYNC_FIELD_POLICY, SYNC_FIELDS } from './index';
 import { planImport } from './merge';
@@ -27,17 +26,6 @@ const bundle = (state: Partial<ConfigSyncBundle['state']>): ConfigSyncBundle => 
 
 describe('config sync portable preference contract', () => {
   it('keeps auto-fetch settings outside the portable configuration schema', () => {
-    for (const [field, value] of [
-      ['providerModelRefreshIntervalHours', 1],
-      ['autoFetchProviderModels', true],
-    ] as const) {
-      expect(CONFIG_SYNC_FIELD_POLICY).not.toHaveProperty(field);
-      expect(SYNC_FIELDS).not.toContain(field);
-      expect(CONFIG_SYNC_COMMIT_FIELDS).not.toContain(field);
-      expect(() =>
-        validateBundle({ ...bundle({}), state: { ...baseState(), [field]: value } })
-      ).toThrow();
-    }
     const provider = {
       id: 'provider',
       name: 'Provider',
@@ -46,8 +34,15 @@ describe('config sync portable preference contract', () => {
       enabled: false,
       models: [],
     };
-    const localProvider = { ...provider, autoFetchModels: true, modelRefreshIntervalHours: 48 };
-    for (const deviceSettings of [{ autoFetchModels: true }, { modelRefreshIntervalHours: 48 }]) {
+    const device = {
+      autoFetchModels: true,
+      modelRefreshIntervalHours: 48,
+      knownModelIds: ['deleted'],
+      modelRefreshStatus: { ok: true, at: 1 },
+    };
+    const localProvider = { ...provider, ...device };
+    for (const [field, value] of Object.entries(device)) {
+      const deviceSettings = { [field]: value };
       expect(() =>
         validateBundle(bundle({ providers: [{ ...provider, ...deviceSettings }] }))
       ).toThrow();

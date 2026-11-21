@@ -1,6 +1,6 @@
 import type { ListModelsResult, ModelProvider, ProviderApiConfig } from '@shared/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProviderModelRefresh } from './providerModelRefresh';
+import { createProviderModelRefresh, keepRefreshedProviderModels } from './providerModelRefresh';
 
 const hour = 60 * 60 * 1000;
 
@@ -16,6 +16,13 @@ function provider(id: string, fields: Partial<ModelProvider> = {}): ModelProvide
     models: [],
     ...fields,
   };
+}
+
+/** 去掉 Main 记账字段，只比较模型列表与用户字段 */
+function visible(providers: unknown) {
+  return (providers as ModelProvider[]).map(
+    ({ knownModelIds: _known, modelRefreshStatus: _status, ...rest }) => rest
+  );
 }
 
 function setup(providers: ModelProvider[]) {
@@ -36,7 +43,10 @@ function setup(providers: ModelProvider[]) {
     fetchModels,
     writeProviders,
     get providers() {
-      return state.providers;
+      return visible(state.providers);
+    },
+    get rows() {
+      return state.providers as ModelProvider[];
     },
     setProviders(next: ModelProvider[]) {
       state = { ...state, providers: next };
@@ -95,7 +105,7 @@ describe('scheduled API-key provider model refresh', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(app.providers).toEqual([
       closedFirst,
-      { ...enabledSecond, models: [{ id: 'current', enabled: true }] },
+      { ...enabledSecond, models: [{ id: 'current', enabled: false }] },
     ]);
   });
 
@@ -154,7 +164,7 @@ describe('scheduled API-key provider model refresh', () => {
     result.resolve({ ok: true, models: [{ id: 'found' }] });
     await vi.advanceTimersByTimeAsync(0);
     expect(app.providers).toEqual([
-      provider('chat', { modelRefreshIntervalHours: 2, models: [{ id: 'found', enabled: true }] }),
+      provider('chat', { modelRefreshIntervalHours: 2, models: [{ id: 'found', enabled: false }] }),
       other,
     ]);
     await vi.advanceTimersByTimeAsync(hour - 1);
@@ -196,7 +206,7 @@ describe('scheduled API-key provider model refresh', () => {
     }
   );
 
-  it('appends new IDs with their metadata and writes only when the list grows', async () => {
+  it('appends never-seen IDs disabled with their metadata and records each attempt', async () => {
     const original = provider('chat', {
       models: [
         { id: 'manual', label: 'My model' },
@@ -209,17 +219,62 @@ describe('scheduled API-key provider model refresh', () => {
       models: [
         { id: 'disabled', contextWindow: 999 },
         { id: 'new', maxTokens: 4096 },
+        { id: 'new' },
       ],
     });
     app.refresh.sync();
     await vi.advanceTimersByTimeAsync(0);
     expect(app.providers).toEqual([
-      { ...original, models: [...original.models, { id: 'new', enabled: true, maxTokens: 4096 }] },
+      { ...original, models: [...original.models, { id: 'new', enabled: false, maxTokens: 4096 }] },
     ]);
+    expect(app.rows[0]?.knownModelIds).toEqual(['manual', 'disabled', 'new']);
+    expect(app.rows[0]?.modelRefreshStatus).toEqual({ ok: true, at: Date.now() });
+
+    app.fetchModels.mockResolvedValue({ ok: false, models: [], error: 'HTTP 500' });
     await vi.advanceTimersByTimeAsync(hour);
-    app.fetchModels.mockResolvedValue({ ok: true, models: [] });
+    expect(app.rows[0]?.modelRefreshStatus).toEqual({ ok: false, at: Date.now() });
+    expect(app.rows[0]?.models).toHaveLength(3);
+    expect(app.writeProviders).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not add back a model the user deleted after it was fetched', async () => {
+    const app = setup([provider('chat', { models: [{ id: 'kept' }] })]);
+    app.fetchModels.mockResolvedValue({ ok: true, models: [{ id: 'kept' }, { id: 'unwanted' }] });
+    app.refresh.sync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.rows[0]?.models.map((model) => model.id)).toEqual(['kept', 'unwanted']);
+
+    // 用户删除：渲染端写回的行带着 Main 记过的 knownModelIds
+    app.setProviders([{ ...app.rows[0], models: [{ id: 'kept' }] }]);
+    app.fetchModels.mockResolvedValue({
+      ok: true,
+      models: [{ id: 'kept' }, { id: 'unwanted' }, { id: 'brand-new' }],
+    });
     await vi.advanceTimersByTimeAsync(hour);
-    expect(app.writeProviders).toHaveBeenCalledTimes(1);
+    expect(app.rows[0]?.models).toEqual([{ id: 'kept' }, { id: 'brand-new', enabled: false }]);
+    await vi.advanceTimersByTimeAsync(hour);
+    expect(app.rows[0]?.models.map((model) => model.id)).toEqual(['kept', 'brand-new']);
+  });
+
+  it('never logs or stores the API key or Authorization header when a fetch fails', async () => {
+    using warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const secret = 'sk-live-should-not-leak';
+    const app = setup([
+      provider('thrown', { apiKey: secret, headers: { Authorization: `Bearer ${secret}` } }),
+      provider('rejected', { apiKey: secret }),
+    ]);
+    app.fetchModels
+      .mockRejectedValueOnce(new Error(`401 for Authorization: Bearer ${secret}`))
+      .mockResolvedValueOnce({ ok: false, models: [], error: `invalid x-api-key ${secret}` });
+    app.refresh.sync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(warning).toHaveBeenCalledTimes(2);
+    const logged = JSON.stringify(warning.mock.calls);
+    expect(logged).not.toContain(secret);
+    expect(logged).not.toMatch(/authorization|api-key/i);
+    for (const row of app.rows) {
+      expect(row.modelRefreshStatus).toEqual({ ok: false, at: Date.now() });
+    }
   });
 
   it('skips ineligible entries and keeps refreshing other providers after a failure', async () => {
@@ -254,7 +309,10 @@ describe('scheduled API-key provider model refresh', () => {
     expect(app.providers).toEqual([
       ...(app.providers as ModelProvider[]).slice(0, -2),
       provider('failed'),
-      provider('chat', { headers: { 'X-Tenant': 'test' }, models: [{ id: 'new', enabled: true }] }),
+      provider('chat', {
+        headers: { 'X-Tenant': 'test' },
+        models: [{ id: 'new', enabled: false }],
+      }),
     ]);
   });
 
@@ -298,8 +356,8 @@ describe('scheduled API-key provider model refresh', () => {
     replacement.resolve({ ok: true, models: [{ id: 'replacement-found' }] });
     await vi.advanceTimersByTimeAsync(0);
     expect(app.providers).toEqual([
-      { ...changed, models: [{ id: 'replacement-found', enabled: true }] },
-      provider('other', { models: [{ id: 'other-found', enabled: true }] }),
+      { ...changed, models: [{ id: 'replacement-found', enabled: false }] },
+      provider('other', { models: [{ id: 'other-found', enabled: false }] }),
     ]);
   });
 
@@ -334,7 +392,53 @@ describe('scheduled API-key provider model refresh', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(app.providers).toEqual([
       added,
-      { ...renamed, models: [{ id: 'manual' }, { id: 'new', enabled: true }] },
+      { ...renamed, models: [{ id: 'manual' }, { id: 'new', enabled: false }] },
+    ]);
+  });
+});
+
+describe('keeping background additions across stale renderer writes', () => {
+  const base = provider('chat', { models: [{ id: 'manual' }] });
+  const refreshed: ModelProvider = {
+    ...base,
+    models: [{ id: 'manual' }, { id: 'added', enabled: false }],
+    knownModelIds: ['manual', 'added'],
+    modelRefreshStatus: { ok: true, at: 1 },
+  };
+
+  it('restores models Main added after the snapshot and keeps its bookkeeping', () => {
+    const stale = { ...base, name: 'Renamed' };
+    expect(keepRefreshedProviderModels([refreshed], [stale])).toEqual([
+      { ...refreshed, name: 'Renamed' },
+    ]);
+  });
+
+  it('honors deletions of models the snapshot had already seen', () => {
+    const deleted = { ...refreshed, models: [{ id: 'manual' }] };
+    expect(keepRefreshedProviderModels([refreshed], [deleted])).toBeUndefined();
+  });
+
+  it('does not restore models fetched from an endpoint the write replaced', () => {
+    const moved = { ...base, baseUrl: 'https://moved.example/v1' };
+    expect(keepRefreshedProviderModels([refreshed], [moved])).toEqual([
+      { ...moved, knownModelIds: refreshed.knownModelIds, modelRefreshStatus: { ok: true, at: 1 } },
+    ]);
+  });
+
+  it('leaves added, removed and never-refreshed providers to the renderer write', () => {
+    const fresh = provider('fresh', { models: [{ id: 'x' }] });
+    expect(keepRefreshedProviderModels([refreshed], [fresh])).toBeUndefined();
+    expect(keepRefreshedProviderModels([refreshed], [])).toBeUndefined();
+    expect(keepRefreshedProviderModels([base], [{ ...base, models: [] }])).toBeUndefined();
+    expect(keepRefreshedProviderModels(undefined, [base])).toBeUndefined();
+  });
+
+  it('merges concurrent edits of different providers without losing either', () => {
+    const other = provider('other', { models: [{ id: 'o' }] });
+    const otherEdited = { ...other, name: 'Edited elsewhere' };
+    expect(keepRefreshedProviderModels([refreshed, other], [base, otherEdited])).toEqual([
+      refreshed,
+      otherEdited,
     ]);
   });
 });

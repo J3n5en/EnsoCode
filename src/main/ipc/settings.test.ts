@@ -286,167 +286,50 @@ describe('settings广播策略', () => {
     expect(mocks.sends[1]).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
   });
 
-  it('keeps newly refreshed provider models and switch values when a renderer writes a stale snapshot', async () => {
-    const settings = await import('./settings');
-    settings.registerSettingsHandlers();
-    const write = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE_KEY);
-    const [owner] = mocks.windows;
-    const provider = { id: 'custom', models: [{ id: 'manual' }] };
-    const refreshed = {
-      ...provider,
-      autoFetchModels: true,
-      models: [...provider.models, { id: 'new' }],
-    };
-    settings.patchSettingsState('providers', [refreshed]);
-    expect(settings.patchSettingsState('autoFetchProviderModels', true).ok).toBe(false);
-
-    await write?.({ sender: owner.webContents }, 'enso-settings', {
-      state: { theme: 'light', providers: [provider] },
-      providerSettingsWrite: { providerEdits: [] },
-    });
-    expect(settings.readSettingsState()).toMatchObject({
-      theme: 'light',
-      providers: [refreshed],
-    });
-
-    await write?.({ sender: owner.webContents }, 'enso-settings', {
-      state: {
-        providers: [{ ...provider, name: 'edited', models: [], autoFetchModels: false }],
-      },
-      providerSettingsWrite: {
-        providerEdits: [{ id: 'custom', fields: ['name', 'models'], previousModelIds: ['manual'] }],
-      },
-    });
-    expect(settings.readSettingsState()).toMatchObject({
-      providers: [{ id: 'custom', name: 'edited', autoFetchModels: true, models: [{ id: 'new' }] }],
-    });
-  });
-
-  it.each([18, 19])(
-    'migrates v%s refresh settings on disk read without advancing the renderer version',
-    async (version) => {
-      const settings = await import('./settings');
-      const provider = { id: 'migrated', apiKey: 'test', enabled: false };
-      writeFileSync(
-        path.join(userData, 'settings.json'),
-        JSON.stringify({
-          'enso-settings': {
-            version,
-            state: {
-              providers: [provider],
-              providerModelRefreshIntervalHours: 24,
-              autoFetchProviderModels: true,
-              autoRestartWhenIdle: true,
-            },
-          },
-        })
-      );
-      expect(settings.reloadSettingsFromDisk()).toBe(true);
-      expect(settings.readSettings()?.['enso-settings']).toEqual({
-        version,
-        state: {
-          providers: [{ ...provider, autoFetchModels: true, modelRefreshIntervalHours: 24 }],
-          autoRestartWhenIdle: true,
-        },
-      });
-      expect(settings.flushSettings()).toBe(true);
-      expect(
-        JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'))['enso-settings']
-      ).toEqual(settings.readSettings()?.['enso-settings']);
-    }
-  );
-
-  it('preserves refresh settings across stale renderer writes and rejects invalid explicit edits', async () => {
+  it('restores background-added models over a stale renderer snapshot and re-syncs the sender', async () => {
     const settings = await import('./settings');
     settings.registerSettingsHandlers();
     const write = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE_KEY);
     const writeAll = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE);
     const event = { sender: mocks.windows[0].webContents };
-    const legacyKey = 'providerModelRefreshIntervalHours';
-    const key = 'modelRefreshIntervalHours';
-    const switchKey = 'autoFetchModels';
     const provider = { id: 'custom', apiKey: 'test', models: [{ id: 'manual' }] };
-    const latest = {
+    const refreshed = {
       ...provider,
-      [key]: 24,
-      [switchKey]: true,
-      models: [...provider.models, { id: 'discovered' }],
+      models: [...provider.models, { id: 'new', enabled: false }],
+      knownModelIds: ['manual', 'new'],
+      modelRefreshStatus: { ok: true, at: 1 },
     };
-    expect(settings.patchSettingsState('providers', [latest])).toMatchObject({ ok: true });
-    expect(settings.patchSettingsState(legacyKey, 24)).toMatchObject({ ok: false });
+    try {
+      settings.patchSettingsState('providers', [refreshed]);
 
-    const payloads = [
-      { state: { theme: 'light' } },
-      {
-        version: 18,
-        state: {
-          providers: [{ ...provider, models: latest.models }],
-          [legacyKey]: 2,
-          autoFetchProviderModels: false,
-        },
-        providerSettingsWrite: { providerEdits: [], intervalChanged: true, autoFetchChanged: true },
-      },
-      {
-        state: { providers: [{ ...latest, [key]: 1, [switchKey]: false }] },
-        providerSettingsWrite: { providerEdits: [] },
-      },
-    ];
-    for (const payload of payloads) {
       mocks.sends[0].mockClear();
-      expect(await write?.(event, 'enso-settings', payload)).toBe(true);
-      expect(settings.readSettingsState().providers).toEqual([latest]);
+      expect(
+        await write?.(event, 'enso-settings', {
+          state: { theme: 'light', providers: [{ ...provider, name: 'edited' }] },
+        })
+      ).toBe(true);
+      expect(settings.readSettingsState()).toMatchObject({
+        theme: 'light',
+        providers: [{ ...refreshed, name: 'edited' }],
+      });
       expect(mocks.sends[0]).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
-    }
-    expect(
-      await writeAll?.(event, {
-        'enso-settings': { state: { providers: [{ ...provider, models: latest.models }] } },
-      })
-    ).toBe(true);
-    expect(settings.readSettingsState().providers).toEqual([latest]);
 
-    const editSwitch = (update: Record<string, unknown>) => ({
-      version: 20,
-      state: { providers: [{ ...provider, ...update }] },
-      providerSettingsWrite: {
-        providerEdits: [{ id: 'custom', fields: [switchKey], previousModelIds: ['manual'] }],
-      },
-    });
-    for (const update of [
-      {},
-      { [switchKey]: 'false' },
-      { [switchKey]: 0 },
-      { [switchKey]: null },
-    ]) {
-      expect(await write?.(event, 'enso-settings', editSwitch(update))).toBe(false);
-      expect(settings.readSettingsState().providers).toEqual([latest]);
-    }
-    expect(settings.patchSettingsState('providers', [{ ...latest, [switchKey]: 'false' }]).ok).toBe(
-      false
-    );
-    expect(await write?.(event, 'enso-settings', editSwitch({ [switchKey]: false }))).toBe(true);
-    expect(settings.readSettingsState().providers).toEqual([{ ...latest, [switchKey]: false }]);
-    expect(await write?.(event, 'enso-settings', editSwitch({ [switchKey]: true }))).toBe(true);
+      // 已同步过的快照里删掉 new：照删，且不再打扰 sender
+      mocks.sends[0].mockClear();
+      const deleted = { ...refreshed, name: 'edited', models: provider.models };
+      expect(await write?.(event, 'enso-settings', { state: { providers: [deleted] } })).toBe(true);
+      expect(settings.readSettingsState().providers).toEqual([deleted]);
+      expect(mocks.sends[0]).not.toHaveBeenCalled();
 
-    const explicit = (update: Record<string, unknown>) => ({
-      version: 19,
-      state: { providers: [{ ...provider, ...update }] },
-      providerSettingsWrite: {
-        providerEdits: [{ id: 'custom', fields: [key, 'models'], previousModelIds: ['manual'] }],
-      },
-    });
-    for (const update of [{}, { [key]: '6' }, { [key]: 169 }, { [key]: 1.5 }, { [key]: null }]) {
-      expect(await write?.(event, 'enso-settings', explicit(update))).toBe(false);
-      expect(settings.readSettingsState().providers).toEqual([latest]);
+      settings.patchSettingsState('providers', [refreshed]);
+      expect(
+        await writeAll?.(event, { 'enso-settings': { state: { providers: [provider] } } })
+      ).toBe(true);
+      expect(settings.readSettingsState().providers).toEqual([refreshed]);
+    } finally {
+      settings.patchSettingsState('providers', []);
+      settings.patchSettingsState('theme', 'dark');
     }
-    expect(await write?.(event, 'enso-settings', explicit({ [key]: 168, models: [] }))).toBe(true);
-    settings.flushSettings();
-    const persisted = JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'));
-    expect(persisted['enso-settings'].state.providers).toEqual([
-      { ...latest, [key]: 168, models: [{ id: 'discovered' }] },
-    ]);
-    expect(persisted['enso-settings'].state).not.toHaveProperty(legacyKey);
-    expect(persisted['enso-settings'].state).not.toHaveProperty('autoFetchProviderModels');
-    expect(persisted['enso-settings']).not.toHaveProperty('providerSettingsWrite');
   });
 
   it('updates active schedules for ordinary writes, sync commits and disk reloads', async () => {
@@ -474,9 +357,7 @@ describe('settings广播策略', () => {
           'enso-settings': {
             version: 18,
             state: {
-              autoFetchProviderModels: true,
-              providerModelRefreshIntervalHours: 2,
-              providers: [first],
+              providers: [{ ...first, autoFetchModels: true, modelRefreshIntervalHours: 2 }],
             },
           },
         })
@@ -579,7 +460,7 @@ describe('settings广播策略', () => {
       writeFileSync(
         path.join(userData, 'settings.json'),
         JSON.stringify({
-          'enso-settings': { version: 20, state: { providers: [malformed, active] } },
+          'enso-settings': { version: 18, state: { providers: [malformed, active] } },
         })
       );
       expect(settings.reloadSettingsFromDisk()).toBe(true);
@@ -589,16 +470,15 @@ describe('settings广播策略', () => {
       expect(mocks.listModels.mock.calls.map(([config]) => config.baseUrl)).toEqual([
         active.baseUrl,
       ]);
-      const refreshed = { ...active, models: [{ id: 'discovered', enabled: true }] };
+      const refreshed = {
+        ...active,
+        models: [{ id: 'discovered', enabled: false }],
+        knownModelIds: ['discovered'],
+        modelRefreshStatus: { ok: true, at: Date.now() },
+      };
       expect(settings.readSettingsState().providers).toEqual([malformed, refreshed]);
       const edited = { ...refreshed, modelRefreshIntervalHours: 2 };
       expect(settings.patchSettingsState('providers', [malformed, edited]).ok).toBe(true);
-      expect(
-        settings.patchSettingsState('providers', [
-          { ...malformed, autoFetchModels: 'false' },
-          edited,
-        ]).ok
-      ).toBe(false);
       expect(settings.readSettingsState().providers).toEqual([malformed, edited]);
       expect(settings.flushSettings()).toBe(true);
       const persisted = JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'));

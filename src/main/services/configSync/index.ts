@@ -47,7 +47,7 @@ import {
   validateBundle,
 } from './codec';
 import { planImport } from './merge';
-import type { ConfigSyncBundle } from './types';
+import { type ConfigSyncBundle, PROVIDER_DEVICE_FIELDS } from './types';
 
 type SenderKey = number;
 const MAX_PACKAGE_BYTES = 64 * 1024 * 1024;
@@ -318,8 +318,7 @@ function portableState(state: Record<string, unknown>): Record<string, unknown> 
   for (const provider of Array.isArray(result.providers) ? result.providers : []) {
     if (provider && typeof provider === 'object') {
       const entry = provider as Record<string, unknown>;
-      delete entry.autoFetchModels;
-      delete entry.modelRefreshIntervalHours;
+      for (const field of PROVIDER_DEVICE_FIELDS) delete entry[field];
       if (entry.oauthAccountKey !== undefined) {
         delete entry.oauthAccountKey;
         const omitted = Array.isArray(entry.omittedFields)

@@ -176,7 +176,11 @@ describe('API key provider drafts', () => {
 
       const added = { id: 'new-in-background', enabled: true };
       harness.providers = [
-        { ...provider, models: [...provider.models, { id: 'seen-and-deleted' }, added] },
+        {
+          ...provider,
+          models: [...provider.models, { id: 'seen-and-deleted' }, added],
+          knownModelIds: ['manual', 'removed-by-fetch', 'seen-and-deleted', 'new-in-background'],
+        },
       ];
       const draft = {
         ...provider,
@@ -189,10 +193,15 @@ describe('API key provider drafts', () => {
         draft,
         seenModelIds
       );
-      expect(harness.updateProvider.mock.calls.at(-1)?.[1]).toMatchObject({
-        name: 'Renamed',
-        models: changeEndpoint ? draft.models : [...draft.models, added],
-      });
+      expect(harness.updateProvider.mock.calls.at(-1)).toEqual([
+        provider.id,
+        expect.objectContaining({
+          name: 'Renamed',
+          models: changeEndpoint ? draft.models : [...draft.models, added],
+          // 草稿里删掉的模型记为已见，自动拉取不会加回
+          knownModelIds: ['manual', 'removed-by-fetch', 'seen-and-deleted', 'new-in-background'],
+        }),
+      ]);
     }
   );
 });

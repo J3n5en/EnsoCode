@@ -18,6 +18,14 @@ import type {
 } from '@shared/types';
 import type { PricingTable } from '@shared/usage/pricing';
 
+/** 只属于本机的 provider 字段：不导出，导入时保留本机已有值 */
+export const PROVIDER_DEVICE_FIELDS = [
+  'autoFetchModels',
+  'modelRefreshIntervalHours',
+  'knownModelIds',
+  'modelRefreshStatus',
+] as const;
+
 export const CONFIG_SYNC_PROVIDER_OMISSIONS = [
   'apiKey',
   'oauthAccountKey',
@@ -43,11 +51,7 @@ export type ConfigSyncMcpOmission = (typeof CONFIG_SYNC_MCP_OMISSIONS)[number];
 export interface ConfigSyncProvider
   extends Omit<
     ModelProvider,
-    | 'apiKey'
-    | 'oauthAccountKey'
-    | 'oauthAccountPool'
-    | 'autoFetchModels'
-    | 'modelRefreshIntervalHours'
+    'apiKey' | 'oauthAccountKey' | 'oauthAccountPool' | (typeof PROVIDER_DEVICE_FIELDS)[number]
   > {
   apiKey?: string;
   oauthAccountKey?: string;

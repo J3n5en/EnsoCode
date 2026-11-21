@@ -3,7 +3,6 @@ import { normalizeChatTypography } from '@shared/chatTypography';
 import { resolveCompactStrategy } from '@shared/compactStrategy';
 import { normalizeContextMenuOpen, normalizeFileOpenRules } from '@shared/fileOpening';
 import { extractModelOverrides, referencedModelIds } from '@shared/modelDirectory';
-import { migrateProviderModelRefreshSettings } from '@shared/providers/modelRefreshInterval';
 import { STATUS_LINE_PRESETS, STATUS_LINE_SEGMENT_IDS } from '@shared/statusLine';
 import { DEFAULT_THEME_KEY } from '@shared/theme/builtinThemes';
 import { parseThemeKey } from '@shared/theme/themeKey';
@@ -28,7 +27,7 @@ import { parseWebSearchChain } from '@shared/webSearchChain';
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 20;
+export const SETTINGS_VERSION = 18;
 
 /** 已移除的语音输入字段：旧 settings.json 里还有就忽略，不进 store */
 const REMOVED_VOICE_FIELDS = [
@@ -47,7 +46,7 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
   current: T
 ): T {
   if (!persisted || typeof persisted !== 'object' || Array.isArray(persisted)) return current;
-  const source = migrateProviderModelRefreshSettings(persisted as Record<string, unknown>);
+  const source = persisted as Record<string, unknown>;
   // plugins：已移除的 Claude Code 插件条目，旧设置残留时丢弃
   const { hashlineEditEnabled, bashInterceptEnabled, plugins, ...rest } = source;
   for (const key of REMOVED_VOICE_FIELDS) delete rest[key];
@@ -119,10 +118,6 @@ export function mergeSettingsState<T extends { editMode: EditMode; accentColor: 
  * 幂等：对已是稀疏表的条目重跑 extractModelOverrides 结果不变。
  * v16 → v17：强调色新增「跟随主题」并成为默认；旧版把默认 violet 也落了盘，
  * 无法区分是否主动选择，统一迁为 theme（Enso 主题的强调色同为紫，视觉不变）。
- * v18 → v19：本机全局模型拉取间隔迁到既有 API Key 条目。
- * v19 → v20：模型自动拉取开关迁到既有 API Key 条目，保留每条已设置的布尔值。
- *
- * v19 → v20: Move the automatic model refresh switch to existing API key entries and preserve explicit per-entry booleans.
  */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version >= SETTINGS_VERSION) return persisted;
@@ -246,7 +241,7 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
     state = { ...rest, autoRestartForUpdate: resolveAutoRestartMode(state) };
     void autoRestartWhenIdle;
   }
-  return migrateProviderModelRefreshSettings(state);
+  return state;
 }
 
 function migrateAgentToolModes(state: Record<string, unknown>): Record<string, unknown> {

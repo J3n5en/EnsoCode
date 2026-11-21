@@ -12,99 +12,13 @@ vi.stubGlobal('window', {
   },
 });
 
-const {
-  createElectronPersistStorage,
-  electronStorage,
-  noteProviderSettingsHydrated,
-  openPersistWriteGate,
-  withProviderModelsSeen,
-} = await import('./storage');
+const { createElectronPersistStorage, electronStorage, openPersistWriteGate } = await import(
+  './storage'
+);
 
 const payload = (state: Record<string, unknown>) => JSON.stringify({ state, version: 2 });
 
 describe('electronStorage hydration write gate', () => {
-  it('sends provider edit intent only for changes since the applied settings snapshot', async () => {
-    const provider = { id: 'p', name: 'Provider', models: [{ id: 'manual' }] };
-    noteProviderSettingsHydrated({ providers: [provider] });
-    openPersistWriteGate('enso-settings');
-
-    await electronStorage.setItem(
-      'enso-settings',
-      payload({ theme: 'dark', providers: [provider] })
-    );
-    expect(writeKey).toHaveBeenLastCalledWith(
-      'enso-settings',
-      expect.objectContaining({
-        providerSettingsWrite: {
-          providerEdits: [],
-        },
-      })
-    );
-
-    await electronStorage.setItem(
-      'enso-settings',
-      payload({ providers: [{ ...provider, models: [], autoFetchModels: true }] })
-    );
-    expect(writeKey).toHaveBeenLastCalledWith(
-      'enso-settings',
-      expect.objectContaining({
-        providerSettingsWrite: {
-          providerEdits: [
-            { id: 'p', fields: ['models', 'autoFetchModels'], previousModelIds: ['manual'] },
-          ],
-        },
-      })
-    );
-  });
-
-  it('sends interval intent only for the provider edited after the migrated snapshot', async () => {
-    const provider = { id: 'p', apiKey: 'test', models: [{ id: 'manual' }] };
-    const other = { id: 'q', apiKey: 'test', modelRefreshIntervalHours: 48 };
-    const expectEdits = (providerEdits: unknown[]) =>
-      expect(writeKey).toHaveBeenLastCalledWith(
-        'enso-settings',
-        expect.objectContaining({
-          providerSettingsWrite: { providerEdits },
-        })
-      );
-    noteProviderSettingsHydrated({
-      providerModelRefreshIntervalHours: 12,
-      providers: [provider, other],
-    });
-    openPersistWriteGate('enso-settings');
-    await electronStorage.setItem(
-      'enso-settings',
-      payload({ providers: [{ ...provider, modelRefreshIntervalHours: 12 }, other], theme: 'dark' })
-    );
-    expectEdits([]);
-    const providers = [{ ...provider, modelRefreshIntervalHours: 24 }, other];
-    await electronStorage.setItem('enso-settings', payload({ providers }));
-    expectEdits([{ id: 'p', fields: ['modelRefreshIntervalHours'], previousModelIds: ['manual'] }]);
-
-    noteProviderSettingsHydrated({ providers });
-    await electronStorage.setItem('enso-settings', payload({ providers, theme: 'light' }));
-    expectEdits([]);
-  });
-
-  it('includes a model removed in the draft even if the settings snapshot never showed it', async () => {
-    const provider = { id: 'p', models: [{ id: 'manual' }] };
-    noteProviderSettingsHydrated({ providers: [provider] });
-    openPersistWriteGate('enso-settings');
-    await withProviderModelsSeen('p', new Set(['manual', 'seen-in-draft']), () =>
-      electronStorage.setItem('enso-settings', payload({ providers: [provider] }))
-    );
-    expect(writeKey).toHaveBeenLastCalledWith(
-      'enso-settings',
-      expect.objectContaining({
-        providerSettingsWrite: {
-          providerEdits: [
-            { id: 'p', fields: ['models'], previousModelIds: ['manual', 'seen-in-draft'] },
-          ],
-        },
-      })
-    );
-  });
-
   beforeEach(() => {
     writeKey.mockClear();
     readSettings = vi.fn<(...args: unknown[]) => Promise<unknown>>();

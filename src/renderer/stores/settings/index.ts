@@ -101,13 +101,7 @@ import {
   normalizeAutoDeleteArchivedDays,
 } from './autoArchiveIdleDays';
 import { mergeSettingsState, migrateSettings, SETTINGS_VERSION } from './migrate';
-import {
-  electronStorage,
-  getWriteGeneration,
-  noteProviderSettingsHydrated,
-  openPersistWriteGate,
-  withProviderModelsSeen,
-} from './storage';
+import { electronStorage, getWriteGeneration, openPersistWriteGate } from './storage';
 import type {
   BackgroundSizeMode,
   BackgroundSourceType,
@@ -338,8 +332,6 @@ export const useDefaultModelRevalidationStore = create<DefaultModelRevalidationS
 function publishDefaultModelRevalidation(result: DefaultModelRevalidation): void {
   useDefaultModelRevalidationStore.setState({ latest: result });
 }
-
-const unmigratedSettings = new WeakMap<object, unknown>();
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -572,18 +564,15 @@ export const useSettingsStore = create<SettingsState>()(
         return added;
       },
 
-      updateProvider: (id, updates, seenModelIds) => {
-        const write = () =>
-          set((state) => ({
-            providers: state.providers.map((p) => {
-              if (p.id !== id) return p;
-              const next = { ...p, ...updates };
-              if ('headers' in updates && updates.headers === undefined) delete next.headers;
-              return next;
-            }),
-          }));
-        if (seenModelIds) withProviderModelsSeen(id, seenModelIds, write);
-        else write();
+      updateProvider: (id, updates) => {
+        set((state) => ({
+          providers: state.providers.map((p) => {
+            if (p.id !== id) return p;
+            const next = { ...p, ...updates };
+            if ('headers' in updates && updates.headers === undefined) delete next.headers;
+            return next;
+          }),
+        }));
         get().revalidateDefaultModel(useOauthCredentialStore.getState().snapshot);
       },
 
@@ -1199,19 +1188,8 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'enso-settings',
       storage: createJSONStorage(() => electronStorage),
       version: SETTINGS_VERSION,
-      migrate: (persisted, version) => {
-        const migrated = migrateSettings(persisted, version) as SettingsState;
-        if (migrated && typeof migrated === 'object') unmigratedSettings.set(migrated, persisted);
-        return migrated;
-      },
-      merge: (persisted, current) => {
-        const original =
-          persisted && typeof persisted === 'object'
-            ? unmigratedSettings.get(persisted)
-            : undefined;
-        noteProviderSettingsHydrated(original ?? persisted);
-        return mergeSettingsState(persisted, current);
-      },
+      migrate: (persisted, version) => migrateSettings(persisted, version) as SettingsState,
+      merge: (persisted, current) => mergeSettingsState(persisted, current),
       partialize: (state) => ({
         ...state,
         fileOpenRules: normalizeFileOpenRules(state.fileOpenRules),
