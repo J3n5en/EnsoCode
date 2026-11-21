@@ -23,9 +23,11 @@ export function setBotAvatarResolver(resolve: (botId: string) => string | null):
   botAvatarResolver = resolve;
 }
 
-let secretaryAvatarResolver: () => string | null = () => null;
+let secretaryAvatarResolver: (secretaryId: string | null) => string | null = () => null;
 
-export function setSecretaryAvatarResolver(resolve: () => string | null): void {
+export function setSecretaryAvatarResolver(
+  resolve: (secretaryId: string | null) => string | null
+): void {
   secretaryAvatarResolver = resolve;
 }
 
@@ -163,7 +165,8 @@ function secretaryAvatarRequestName(url: URL): boolean {
 
 async function serveSecretaryAvatar(url: URL): Promise<Response> {
   if (!secretaryAvatarRequestName(url)) return new Response('Forbidden', { status: 403 });
-  const file = secretaryAvatarResolver();
+  // 多秘书时 URL 带 s=<秘书 id>；只有一个秘书时可以不带
+  const file = secretaryAvatarResolver(url.searchParams.get('s'));
   if (!file) return new Response('Not found', { status: 404 });
   return serveAvatarFile(file);
 }

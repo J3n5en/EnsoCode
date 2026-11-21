@@ -1,6 +1,7 @@
 import { IPC_CHANNELS } from '@shared/types';
 import type { UpdaterState } from '@shared/types/updater';
 import { isUpdateChannel } from '@shared/updater/channel';
+import { isAutoRestartMode } from '@shared/updater/idleRestart';
 import { app, ipcMain } from 'electron';
 import { discardLegacyInterruptedSessions } from '../services/updater/interruptedSessions';
 
@@ -45,14 +46,11 @@ export function registerUpdaterHandlers(): void {
     autoUpdaterService.setAutoUpdateEnabled(enabled);
   });
 
-  ipcMain.handle(
-    IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_WHEN_IDLE,
-    async (_event, enabled: unknown) => {
-      if (!isUpdaterEnabled() || typeof enabled !== 'boolean') return;
-      const { autoUpdaterService } = await import('../services/updater/AutoUpdater');
-      autoUpdaterService.setAutoRestartWhenIdle(enabled);
-    }
-  );
+  ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_MODE, async (_event, mode: unknown) => {
+    if (!isUpdaterEnabled() || !isAutoRestartMode(mode)) return;
+    const { autoUpdaterService } = await import('../services/updater/AutoUpdater');
+    autoUpdaterService.setAutoRestartMode(mode);
+  });
 
   ipcMain.handle(IPC_CHANNELS.UPDATER_SET_CHANNEL, async (_event, channel: unknown) => {
     if (!isUpdaterEnabled() || !isUpdateChannel(channel)) return;

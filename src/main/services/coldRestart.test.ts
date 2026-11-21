@@ -5,7 +5,10 @@ import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefu
 import { describe, expect, it, vi } from 'vitest';
 import {
   COLD_RESUME_OVERLAY_TIMEOUT_MS,
+  coldResumeReady,
+  failColdResume,
   loadColdRestartPlan,
+  onColdResumeFailed,
   resumeColdRestartSessions,
   settleColdResume,
   trackColdResume,
@@ -85,6 +88,36 @@ describe('coldRestart', () => {
     expect((await wakeColdRestartSession('ghost', resume, plan)).ok).toBe(false);
     expect((await wakeColdRestartSession('idle', resume, null)).ok).toBe(false);
     expect(resume).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('冷启动续跑失败', () => {
+  it('派发失败、spawn 被拒的续跑会话报给订阅者（晚订阅也补到）；已就绪的、清单外的、重复的不报', async () => {
+    const plan = loadColdRestartPlan(seed(500))!;
+    plan.resume.push({ ...plan.resume[0], sessionId: 'rejected' });
+    plan.resume.push({ ...plan.resume[0], sessionId: 'ready' });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const resuming = resumeColdRestartSessions(plan, async (item) =>
+      item.sessionId === 'run' ? { ok: false, error: 'no model' } : { ok: true }
+    );
+    const early: Array<[string, string]> = [];
+    const offEarly = onColdResumeFailed((id, error) => early.push([id, error]));
+    await resuming;
+    coldResumeReady('ready');
+    failColdResume('ready', 'later spawn');
+    failColdResume('rejected', 'spawn rejected');
+    failColdResume('rejected', 'again');
+    failColdResume('ghost', 'not in plan');
+    expect(early).toEqual([
+      ['run', 'no model'],
+      ['rejected', 'spawn rejected'],
+    ]);
+    const late: string[] = [];
+    const offLate = onColdResumeFailed((id) => late.push(id));
+    expect(late).toEqual(['run', 'rejected']);
+    offEarly();
+    offLate();
+    log.mockRestore();
   });
 });
 

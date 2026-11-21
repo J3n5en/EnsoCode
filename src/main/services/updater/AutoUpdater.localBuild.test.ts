@@ -69,7 +69,7 @@ async function initService(withAppUpdateYml: boolean, channel: 'stable' | 'beta'
   Object.defineProperty(process, 'resourcesPath', { value: resources, configurable: true });
   vi.resetModules();
   const { autoUpdaterService } = await import('./AutoUpdater');
-  autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, true, false, channel);
+  autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, true, 'off', channel);
   await autoUpdaterService.checkForUpdates();
   return autoUpdaterService;
 }

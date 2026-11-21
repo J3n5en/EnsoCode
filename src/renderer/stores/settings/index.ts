@@ -62,6 +62,7 @@ import type { ThemeKey } from '@shared/theme/types';
 import { DEFAULT_DISABLED_BUILTIN_TOOLS } from '@shared/types';
 import type { AgentMode, SourceAuthorityProjection } from '@shared/types/agent';
 import { DEFAULT_UPDATE_CHANNEL } from '@shared/updater/channel';
+import type { AutoRestartMode } from '@shared/updater/idleRestart';
 import { parseUsageModelPricing } from '@shared/usage/pricing';
 import {
   findVirtualModel,
@@ -236,7 +237,7 @@ const initialState = {
   botMaxRunningTurns: DEFAULT_BOT_MAX_RUNNING_TURNS,
   botDiscussModeEnabled: false,
   autoUpdate: true,
-  autoRestartWhenIdle: false,
+  autoRestartForUpdate: 'off' as AutoRestartMode,
   updateChannel: DEFAULT_UPDATE_CHANNEL,
   pluginAutoUpdate: true,
   proxyMode: 'system' as ProxyMode,
@@ -456,7 +457,7 @@ export const useSettingsStore = create<SettingsState>()(
           smartCompactMode: parseSmartCompactMode(smartCompactMode) ?? 'auto',
         }),
       setAutoUpdate: (autoUpdate) => set({ autoUpdate }),
-      setAutoRestartWhenIdle: (autoRestartWhenIdle) => set({ autoRestartWhenIdle }),
+      setAutoRestartForUpdate: (autoRestartForUpdate) => set({ autoRestartForUpdate }),
       setUpdateChannel: (updateChannel) => set({ updateChannel }),
       setPluginAutoUpdate: (pluginAutoUpdate) =>
         set({ pluginAutoUpdate: pluginAutoUpdate !== false }),

@@ -4,11 +4,19 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
-  newSecretaryConversation: vi.fn(async (_options?: { greeting?: boolean }) => 'conv-1'),
+  newSecretaryConversation: vi.fn(
+    async (_options?: { greeting?: boolean; secretaryId?: string }) => 'conv-1'
+  ),
   closeWelcome: vi.fn(),
+  /** 欢迎页对着的秘书：单秘书时 Main 也接受省略，多秘书时必须带上 */
+  store: {
+    focusedId: null as string | null,
+    secretaries: [] as { id: string; projectId: string; name: string | null }[],
+  },
   saveProfile: vi.fn(
     async (
-      _draft: Record<string, unknown>
+      _draft: Record<string, unknown>,
+      _secretaryId?: string
     ): Promise<{ ok: true; profile: { name: string } } | { ok: false; error: string }> => ({
       ok: true,
       profile: { name: 'Secretary' },
@@ -18,12 +26,17 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 'en' }) }));
 vi.mock('@/stores/secretary', () => ({
-  useSecretaryStore: {
-    getState: () => ({
-      newSecretaryConversation: h.newSecretaryConversation,
-      closeWelcome: h.closeWelcome,
-    }),
-  },
+  focusedSecretaryId: () => undefined,
+  useSecretaryStore: Object.assign(
+    (selector: (state: typeof h.store) => unknown) => selector(h.store),
+    {
+      getState: () => ({
+        ...h.store,
+        newSecretaryConversation: h.newSecretaryConversation,
+        closeWelcome: h.closeWelcome,
+      }),
+    }
+  ),
 }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (
@@ -48,6 +61,10 @@ const click = async (text: string) => {
   await act(async () => button(text).click());
 };
 
+const render = async () => {
+  await act(async () => root.render(createElement(SecretaryWelcome)));
+};
+
 describe('SecretaryWelcome', () => {
   beforeEach(async () => {
     const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
@@ -58,9 +75,11 @@ describe('SecretaryWelcome', () => {
     h.newSecretaryConversation.mockClear();
     h.closeWelcome.mockClear();
     h.saveProfile.mockClear();
+    h.store.focusedId = null;
+    h.store.secretaries = [];
     container = window.document.getElementById('root') as unknown as HTMLElement;
     root = createRoot(container);
-    await act(async () => root.render(createElement(SecretaryWelcome)));
+    await render();
   });
 
   afterEach(async () => {
@@ -136,5 +155,50 @@ describe('SecretaryWelcome', () => {
     expect(container.textContent).toContain('invalid name');
     expect(h.newSecretaryConversation).not.toHaveBeenCalled();
     expect(h.closeWelcome).not.toHaveBeenCalled();
+  });
+
+  describe('第二个秘书', () => {
+    beforeEach(async () => {
+      h.store.focusedId = 's-2';
+      h.store.secretaries = [
+        { id: 'default', projectId: 'p-sec', name: 'Secretary' },
+        { id: 's-2', projectId: 'p-sec-2', name: null },
+      ];
+      await render();
+    });
+
+    it('全部用默认：档案写给这个秘书、会话建在它名下，默认名避开第一个秘书', async () => {
+      await click('Use all defaults and start');
+      expect(h.saveProfile).toHaveBeenCalledTimes(1);
+      const [draft, secretaryId] = h.saveProfile.mock.calls[0] ?? [];
+      expect(secretaryId).toBe('s-2');
+      expect(draft).toMatchObject({ name: 'Secretary 2' });
+      expect(h.newSecretaryConversation).toHaveBeenCalledWith({ secretaryId: 's-2' });
+      expect(h.closeWelcome).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('.text-destructive')).toBeNull();
+    });
+
+    it('逐项设置：表单提交也写给这个秘书', async () => {
+      await click('Set up with a form');
+      await click('Start');
+      expect(h.saveProfile.mock.calls[0]?.[1]).toBe('s-2');
+      expect(h.newSecretaryConversation).toHaveBeenCalledWith({ secretaryId: 's-2' });
+      expect(h.closeWelcome).toHaveBeenCalledTimes(1);
+    });
+
+    it('聊着设置：引导会话建在这个秘书名下', async () => {
+      await click('Set up by chatting');
+      expect(h.newSecretaryConversation).toHaveBeenCalledWith({
+        greeting: true,
+        secretaryId: 's-2',
+      });
+    });
+
+    it('名字撞上别的秘书时说人话，不露错误码', async () => {
+      h.saveProfile.mockResolvedValueOnce({ ok: false, error: 'name-taken' });
+      await click('Use all defaults and start');
+      expect(container.textContent).toContain('Another secretary already uses this name.');
+      expect(container.textContent).not.toContain('name-taken');
+    });
   });
 });

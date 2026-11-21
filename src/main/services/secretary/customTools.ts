@@ -2,7 +2,6 @@ import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { app } from '@platform';
 import {
   parseSecretaryToolDraft,
   parseSecretaryToolFile,
@@ -27,6 +26,7 @@ import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { notifySecretaryChanged } from './dispatch';
 import { saveProposalRecord } from './proposals';
+import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -399,39 +399,42 @@ export function createSecretaryTools(ports: SecretaryToolPorts): SecretaryToolSe
 }
 
 /** 秘书工作区就是秘书项目的 cwd：自有工具放在它下面的 tools/ */
-export function secretaryToolsDir(): string {
-  return path.join(app.getPath('userData'), 'secretary', 'workspace', 'tools');
+export function secretaryToolsDir(ctx: Pick<SecretaryContext, 'dir'>): string {
+  return path.join(ctx.dir, 'workspace', 'tools');
 }
 
-export const secretaryToolPorts: SecretaryToolPorts = {
-  dir: () => secretaryToolsDir(),
-  dispatchFile: () => store().dispatch(),
-  saveDispatch: (file) => {
-    store().saveDispatch(file);
-  },
-  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
-  notify: () => {
-    notifySecretaryChanged();
-  },
-  releaseSessions: async () => {
-    const { secretaryProfile } = await import('./profile');
-    await secretaryProfile.releaseSessions();
-  },
-  runTool: (draft, args) => runSecretaryTool(secretaryToolsDir(), draft, args),
-  now: () => Date.now(),
-  newId: () => randomUUID(),
-};
-
-function store(): SecretaryStore {
-  return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+export function toolPortsFor(ctx: SecretaryContext): SecretaryToolPorts {
+  const store = () => new SecretaryStore(ctx.dir);
+  return {
+    dir: () => secretaryToolsDir(ctx),
+    dispatchFile: () => store().dispatch(),
+    saveDispatch: (file) => {
+      store().saveDispatch(file);
+    },
+    audit: (entry) => appendAudit(ctx.dir, entry),
+    notify: () => {
+      notifySecretaryChanged();
+    },
+    releaseSessions: async () => {
+      const { secretaryProfileFor } = await import('./profile');
+      await secretaryProfileFor(ctx).releaseSessions();
+    },
+    runTool: (draft, args) => runSecretaryTool(secretaryToolsDir(ctx), draft, args),
+    now: () => Date.now(),
+    newId: () => randomUUID(),
+  };
 }
 
-export const secretaryTool = createSecretaryTools(secretaryToolPorts);
+export function secretaryToolFor(ctx: SecretaryContext): SecretaryToolService {
+  return createSecretaryTools(toolPortsFor(ctx));
+}
 
-export const secretaryToolHandlers: {
+export function toolHandlersFor(ctx: SecretaryContext): {
   tool_propose: SecretaryOpHandler;
   tool_run: SecretaryOpHandler;
-} = {
-  tool_propose: (params, ctx) => secretaryTool.propose(params, ctx),
-  tool_run: (params, ctx) => secretaryTool.run(params, ctx),
-};
+} {
+  return {
+    tool_propose: (params, op) => secretaryToolFor(ctx).propose(params, op),
+    tool_run: (params, op) => secretaryToolFor(ctx).run(params, op),
+  };
+}

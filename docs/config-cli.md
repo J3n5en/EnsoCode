@@ -89,7 +89,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 
-- `autoUpdate`、`autoRestartWhenIdle`、`updateChannel`
+- `autoUpdate`、`autoRestartForUpdate`（`off` / `idle` / `immediate`）、`updateChannel`
 
 对这些键执行 `set` 会返回 `{ "ok": false, "requiresRestart": true, "reason": "..." }`，并且不会写入。请在设置页切换，或重启应用。
 

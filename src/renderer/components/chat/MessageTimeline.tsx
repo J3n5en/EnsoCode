@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { type ListProps, Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
+import type { SecretaryFaceModel } from '@/components/secretary/useSecretaryFace';
 import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
@@ -148,6 +149,8 @@ interface MessageTimelineProps {
    * 读全局「当前打开的会话」会在切标签的一瞬间与 buildTimeline 的判断不一致。
    */
   secretarySession?: boolean;
+  /** 这条时间线所属秘书的脸；不传就用当前聚焦的秘书 */
+  secretaryFace?: SecretaryFaceModel;
 }
 
 /**
@@ -176,11 +179,12 @@ export function MessageTimeline({
   searchQuery = '',
   activeHit = null,
   secretarySession = false,
+  secretaryFace,
 }: MessageTimelineProps) {
   const { t } = useI18n();
   const host = useChatHost();
   const face = useSecretaryFace();
-  const secretarySpeaker = secretarySession ? face : null;
+  const secretarySpeaker = secretarySession ? (secretaryFace ?? face) : null;
   const secretaryMark = !host && secretarySpeaker ? secretarySpeaker : null;
   const secretaryChat = secretarySession;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -589,6 +593,7 @@ export function MessageTimeline({
             at={replyHead.replyAt}
             privacyMask={replyHead.replyPrivacyMask}
             secretarySession={secretaryChat}
+            face={secretarySpeaker}
           />
         )}
         <RowErrorBoundary itemKey={item.key}>

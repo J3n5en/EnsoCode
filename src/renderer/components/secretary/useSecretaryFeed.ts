@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const TOP_SLACK = 8;
 
-export function useSecretaryFeed(): {
+export function useSecretaryFeed(secretaryId?: string): {
   events: FeedEvent[];
   freshCount: number;
   loading: boolean;
@@ -57,10 +57,13 @@ export function useSecretaryFeed(): {
     let before: FeedCursor | undefined;
     let hasMore = false;
     for (let guard = 0; guard < 20; guard += 1) {
-      const result = await window.electronAPI.secretary.feed({
-        ...(before ? { before } : {}),
-        limit: FEED_PAGE_SIZE,
-      });
+      const result = await window.electronAPI.secretary.feed(
+        {
+          ...(before ? { before } : {}),
+          limit: FEED_PAGE_SIZE,
+        },
+        secretaryId
+      );
       if (seq !== headSeq.current) return;
       if (!result.ok) {
         if (!readyRef.current) setLoading(false);
@@ -93,7 +96,7 @@ export function useSecretaryFeed(): {
       setReady(true);
       setLoading(false);
     }
-  }, [atTop]);
+  }, [atTop, secretaryId]);
 
   const pullOlder = useCallback(async () => {
     const before = cursorRef.current;
@@ -101,10 +104,13 @@ export function useSecretaryFeed(): {
     loadingRef.current = true;
     setLoading(true);
     try {
-      const result = await window.electronAPI.secretary.feed({
-        before,
-        limit: FEED_PAGE_SIZE,
-      });
+      const result = await window.electronAPI.secretary.feed(
+        {
+          before,
+          limit: FEED_PAGE_SIZE,
+        },
+        secretaryId
+      );
       if (!result.ok) return;
       setEvents((loaded) => appendFeedPage(loaded, result.events));
       const oldest = result.events.at(-1);
@@ -115,7 +121,7 @@ export function useSecretaryFeed(): {
       loadingRef.current = false;
       setLoading(false);
     }
-  }, []);
+  }, [secretaryId]);
 
   useEffect(() => {
     let alive = true;

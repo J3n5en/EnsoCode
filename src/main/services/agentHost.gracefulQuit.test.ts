@@ -61,7 +61,10 @@ import {
   QUIT_NO_TOOL_WAIT_MS,
   QUIT_TOOL_WAIT_LIMIT_MS,
   rememberRestorableSpawn,
+  requestGracefulWorkerRestart,
+  resumesAfterQuit,
   sendAgentCommand,
+  setAgentEventListener,
   startAgentWorker,
   stopAgentWorker,
   stopAgentWorkerForQuit,
@@ -303,6 +306,26 @@ describe('应用退出走优雅重启', () => {
     await expect(pending).resolves.toBe('checkpointed');
     expect(waiting).toHaveBeenCalledTimes(1);
     expect(JSON.parse(readFileSync(manifestFile(), 'utf8')).sessions).toHaveLength(1);
+    expect(resumesAfterQuit(identity.sessionId)).toBe(true);
+  });
+
+  it('换代重启已在等工具时再退出 / 安装更新：照样开等待层、按等工具的上限等，不当成没工具超时', async () => {
+    vi.useFakeTimers();
+    const index = bootWithSession();
+    expect(requestGracefulWorkerRestart()).toBe('requested');
+    fork.children[index].emit('message', deferred(['call-1']));
+    const waiting = vi.fn();
+    let done = false;
+    void prepareAgentWorkerForQuit({
+      reason: 'update',
+      hasRunningSessions: () => true,
+      onWaitingForTools: waiting,
+    }).then(() => {
+      done = true;
+    });
+    expect(waiting).toHaveBeenCalledExactlyOnceWith('tool');
+    await vi.advanceTimersByTimeAsync(QUIT_NO_TOOL_WAIT_MS * 3);
+    expect(done).toBe(false);
   });
 
   it('工具结束后没工具在跑：只再等一小段，不等满上限', async () => {
@@ -374,6 +397,34 @@ describe('应用退出走优雅重启', () => {
       return { ok: true };
     });
     expect(resumed).toEqual([identity.sessionId]);
+    warn.mockRestore();
+  });
+
+  it('写进恢复清单的会话算「重启后接着跑」：worker 退出事件发出时就已知道，清单外的不算', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const index = bootWithSession();
+    const pending = prepareAgentWorkerForQuit({ reason: 'update', hasRunningSessions: () => true });
+    fork.children[index].emit('message', deferred(['call-1']));
+    await vi.advanceTimersByTimeAsync(QUIT_TOOL_WAIT_LIMIT_MS);
+    await expect(pending).resolves.toBe('timeout');
+    const atExit: Array<[boolean, boolean]> = [];
+    setAgentEventListener((event) => {
+      if (event.type === 'worker-exited')
+        atExit.push([resumesAfterQuit(identity.sessionId), resumesAfterQuit('other')]);
+    });
+    // 真机顺序：worker 收尾落断点后退出，exit 先于 killAndWaitExit 返回
+    vi.mocked(killAndWaitExit).mockImplementationOnce(async (child) => {
+      child.kill();
+      writeCheckpoint({ ...checkpoint, writtenAt: Date.now() });
+      fork.children[index].emit('exit', 0);
+    });
+    await stopAgentWorkerForQuit(100);
+    setAgentEventListener(() => {});
+    expect(atExit).toEqual([[true, false]]);
+    expect(JSON.parse(readFileSync(manifestFile(), 'utf8')).sessions).toHaveLength(1);
+    cancelAgentQuitCheckpoint();
+    expect(resumesAfterQuit(identity.sessionId)).toBe(false);
     warn.mockRestore();
   });
 

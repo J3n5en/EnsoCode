@@ -312,10 +312,10 @@ function addSecretaryPanel(
   });
 }
 
-function Secretary(props: IDockviewPanelProps<{ conversationId?: string }>) {
+function Secretary(props: IDockviewPanelProps<{ conversationId?: string; projectId?: string }>) {
   return (
     <VisiblePanel api={props.api}>
-      <SecretaryPanel />
+      <SecretaryPanel projectId={props.params.projectId} />
     </VisiblePanel>
   );
 }

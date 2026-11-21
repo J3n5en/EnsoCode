@@ -7,16 +7,20 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   switchNode: vi.fn(),
   window: null as null | { isDestroyed(): boolean },
+  present: vi.fn(),
+  focused: true,
 }));
 
 vi.mock('electron', () => ({ ipcMain: { on: mocks.on, handle: mocks.handle } }));
 vi.mock('../services/renderers', () => ({
   isMainRenderer: (id: number) => id === 2 || id === 7,
   localMainContents: () => ({ id: 2 }),
+  anyRendererFocused: () => mocks.focused,
 }));
 vi.mock('../services/nodeRemote', () => ({ switchNode: mocks.switchNode }));
 vi.mock('../windows/createAppWindow', () => ({ sendToWindow: mocks.send }));
 vi.mock('../windows/MainWindow', () => ({ getMainWindow: () => mocks.window }));
+vi.mock('../windows/verifyLaunch', () => ({ presentWindow: mocks.present }));
 
 import {
   clearRestartOverlay,
@@ -36,6 +40,7 @@ describe('app restart IPC', () => {
     mocks.handle.mockClear();
     mocks.send.mockClear();
     mocks.switchNode.mockClear();
+    mocks.present.mockClear();
     mocks.window = { isDestroyed: () => false };
   });
 
@@ -151,5 +156,21 @@ describe('app restart IPC', () => {
     });
     await expect(waited).rejects.toThrow('boom');
     expect(pushed()).toEqual([{ phase: 'waiting', reason: 'tool', exit: 'quit' }, null]);
+  });
+
+  it('开始等命令时把主窗口唤到前台：设置窗口里点的重启更新也看得见等待层', () => {
+    setRestartOverlay({ phase: 'restarting' });
+    expect(mocks.present).not.toHaveBeenCalled();
+    setRestartOverlay({ phase: 'waiting', reason: 'tool', exit: 'update' });
+    setRestartOverlay({ phase: 'waiting', reason: 'background-not-detachable', exit: 'update' });
+    expect(mocks.present).toHaveBeenCalledExactlyOnceWith(mocks.window);
+  });
+
+  it('后台自动重启（用户在用别的应用）开等待层不抢焦点', () => {
+    mocks.focused = false;
+    setRestartOverlay({ phase: 'waiting', reason: 'tool', exit: 'update' });
+    expect(mocks.present).not.toHaveBeenCalled();
+    expect(pushed()).toContainEqual({ phase: 'waiting', reason: 'tool', exit: 'update' });
+    mocks.focused = true;
   });
 });

@@ -32,8 +32,8 @@ const ENTRY_LEVEL_DENIED = new Set(['skills', 'instructions']);
 /** 启动时读入、UI 另走专用 IPC 的项：只改设置不会生效 */
 const RESTART_REQUIRED: Record<string, string> = {
   autoUpdate: 'The updater reads this at startup; toggle it in Settings or restart the app.',
-  autoRestartWhenIdle:
-    'The updater reads this at startup; toggle it in Settings or restart the app.',
+  autoRestartForUpdate:
+    'The updater reads this at startup; change it in Settings or restart the app.',
   updateChannel: 'The updater reads this at startup; switch it in Settings or restart the app.',
 };
 

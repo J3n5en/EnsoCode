@@ -286,7 +286,7 @@ function ChannelCard({
  * 联系方式：顶部总开关，下面是渠道卡片（Telegram 内置固定第一位，插件渠道跟在后面），
  * 可以同时启用多个。Telegram 的绑定向导尽量少步骤，不让用户手抄 chat_id。
  */
-export function SecretaryContactPanel() {
+export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } = {}) {
   const { t } = useI18n();
   const [state, setState] = useState<SecretaryContactState | null>(null);
   const [token, setToken] = useState('');
@@ -321,13 +321,17 @@ export function SecretaryContactPanel() {
   };
 
   const load = useCallback(() => {
-    void window.electronAPI.secretary.contactState().then(setState);
-  }, []);
+    void window.electronAPI.secretary.contactState(secretaryId).then(setState);
+  }, [secretaryId]);
 
   useEffect(() => {
     load();
-    return window.electronAPI.secretary.onContactChanged(setState);
-  }, [load]);
+    // 推送是全部秘书共用的：只收自己这份
+    return window.electronAPI.secretary.onContactChanged((next) => {
+      if (secretaryId && next.secretaryId && next.secretaryId !== secretaryId) return;
+      setState(next);
+    });
+  }, [load, secretaryId]);
 
   const link = state?.telegram.bind?.link;
   useEffect(() => {
@@ -367,7 +371,7 @@ export function SecretaryContactPanel() {
     (plugin) => plugin.id === TELEGRAM_REMOTE_PLUGIN && plugin.state === 'enabled'
   );
   const setPrefs = (channelId: string, prefs: Partial<SecretaryContactChannelPrefs>) =>
-    run(() => window.electronAPI.secretary.contactSettings({ channelId, prefs }));
+    run(() => window.electronAPI.secretary.contactSettings({ channelId, prefs }, secretaryId));
   const pollFailed = telegram.poll.state === 'error' || telegram.poll.state === 'backoff';
   // 轮询在跑时连不上与否以它为准：动作留下的 network 结果不单独挂着，否则恢复后没人撤
   const pollAlive = telegram.poll.state !== 'stopped' && telegram.poll.state !== 'error';
@@ -377,7 +381,7 @@ export function SecretaryContactPanel() {
   const setGroup = (action: 'add' | 'remove', chatId: string) =>
     run(() =>
       window.electronAPI.secretary
-        .contactSettings({ telegramGroup: { action, chatId } })
+        .contactSettings({ telegramGroup: { action, chatId } }, secretaryId)
         .then((result) => {
           if (result.ok && action === 'add') setGroupInput('');
           return result;
@@ -423,7 +427,7 @@ export function SecretaryContactPanel() {
                 className={BUTTON_CLASS}
                 onClick={() =>
                   run(() =>
-                    window.electronAPI.secretary.contactTest().then((result) => {
+                    window.electronAPI.secretary.contactTest(secretaryId).then((result) => {
                       if (result.ok) setNotice(t('Test message sent'));
                       return result;
                     })
@@ -438,7 +442,7 @@ export function SecretaryContactPanel() {
                 data-enso="secretary-contact-unbind"
                 disabled={busy}
                 className={BUTTON_CLASS}
-                onClick={() => run(() => window.electronAPI.secretary.contactUnbind())}
+                onClick={() => run(() => window.electronAPI.secretary.contactUnbind(secretaryId))}
               >
                 <Unlink className="size-3.5" />
                 {t('Unbind')}
@@ -448,7 +452,9 @@ export function SecretaryContactPanel() {
                 data-enso="secretary-contact-replace"
                 disabled={busy}
                 className={BUTTON_CLASS}
-                onClick={() => run(() => window.electronAPI.secretary.contactForgetBot())}
+                onClick={() =>
+                  run(() => window.electronAPI.secretary.contactForgetBot(secretaryId))
+                }
               >
                 <RefreshCw className="size-3.5" />
                 {t('Change bot')}
@@ -474,6 +480,7 @@ export function SecretaryContactPanel() {
                   <SecretaryContactGroupRow
                     key={group.id}
                     group={group}
+                    secretaryId={secretaryId}
                     busy={busy}
                     onRemove={() => setGroup('remove', group.id)}
                     onSaved={load}
@@ -632,7 +639,7 @@ export function SecretaryContactPanel() {
                 data-enso="secretary-contact-regenerate"
                 disabled={busy}
                 className={BUTTON_CLASS}
-                onClick={() => run(() => window.electronAPI.secretary.contactBind())}
+                onClick={() => run(() => window.electronAPI.secretary.contactBind(secretaryId))}
               >
                 <RefreshCw className="size-3.5" />
                 {t('New code')}
@@ -642,7 +649,7 @@ export function SecretaryContactPanel() {
                 data-enso="secretary-contact-cancel"
                 disabled={busy}
                 className={BUTTON_CLASS}
-                onClick={() => run(() => window.electronAPI.secretary.contactCancel())}
+                onClick={() => run(() => window.electronAPI.secretary.contactCancel(secretaryId))}
               >
                 {t('Cancel')}
               </button>
@@ -685,7 +692,9 @@ export function SecretaryContactPanel() {
               data-enso="secretary-contact-verify"
               disabled={busy || token.trim().length === 0}
               className={cn(PRIMARY_CLASS, 'mt-2')}
-              onClick={() => run(() => window.electronAPI.secretary.contactBind(token.trim()))}
+              onClick={() =>
+                run(() => window.electronAPI.secretary.contactBind(token.trim(), secretaryId))
+              }
             >
               {busy ? (
                 <Loader2 className="size-3.5 animate-spin" />
@@ -700,7 +709,7 @@ export function SecretaryContactPanel() {
                 data-enso="secretary-contact-reconnect"
                 disabled={busy}
                 className={cn(BUTTON_CLASS, 'mt-1.5')}
-                onClick={() => run(() => window.electronAPI.secretary.contactBind())}
+                onClick={() => run(() => window.electronAPI.secretary.contactBind(secretaryId))}
               >
                 <RefreshCw className="size-3.5" />
                 {t('Bind again with @{{bot}}', { bot: telegram.bot.username })}
@@ -732,7 +741,9 @@ export function SecretaryContactPanel() {
           disabled={busy}
           aria-label={t('Enable contacts')}
           onCheckedChange={(checked) =>
-            run(() => window.electronAPI.secretary.contactSettings({ enabled: checked }))
+            run(() =>
+              window.electronAPI.secretary.contactSettings({ enabled: checked }, secretaryId)
+            )
           }
         />
       </div>
@@ -802,7 +813,12 @@ export function SecretaryContactPanel() {
                   disabled={busy}
                   className={BUTTON_CLASS}
                   onClick={() =>
-                    run(() => window.electronAPI.secretary.contactFollowing({ action: 'clear' }))
+                    run(() =>
+                      window.electronAPI.secretary.contactFollowing(
+                        { action: 'clear' },
+                        secretaryId
+                      )
+                    )
                   }
                 >
                   {t('Clear all')}
@@ -831,10 +847,13 @@ export function SecretaryContactPanel() {
                       className={BUTTON_CLASS}
                       onClick={() =>
                         run(() =>
-                          window.electronAPI.secretary.contactFollowing({
-                            action: 'cancel',
-                            id: item.id,
-                          })
+                          window.electronAPI.secretary.contactFollowing(
+                            {
+                              action: 'cancel',
+                              id: item.id,
+                            },
+                            secretaryId
+                          )
                         )
                       }
                     >

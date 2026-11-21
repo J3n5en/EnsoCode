@@ -32,8 +32,9 @@ vi.mock('@/stores/sessions', () => ({
     }),
 }));
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
-    selector({ secretary: { board: h.board } }),
+    selector({ secretary: { board: h.board }, secretaries: [], states: {}, focusedId: null }),
 }));
 
 const { SecretaryWorkbench } = await import('./SecretaryWorkbench');
@@ -97,6 +98,8 @@ beforeEach(() => {
   h.feed = [];
   (dom.window as unknown as Record<string, unknown>).electronAPI = {
     secretary: {
+      list: async () => [],
+      onListChanged: () => () => {},
       dismissResult: async (conversationId: string) => {
         h.calls.push({ name: 'dismissResult', args: conversationId });
         return { ok: true };

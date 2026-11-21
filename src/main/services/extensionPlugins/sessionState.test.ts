@@ -120,4 +120,18 @@ describe('SessionStateTracker', () => {
       { sessionId: 'o', state: 'running', previous: 'idle', pendingAsks: 0, pendingApprovals: 0 },
     ]);
   });
+
+  it('worker 退出：重启后接着跑的主会话不改判失败，其余照旧记失败', () => {
+    const t = new SessionStateTracker((sessionId) => sessionId === 'kept');
+    for (const sessionId of ['kept', 'killed']) {
+      t.observe(
+        ev({ type: 'status', status: 'running', identity: { sessionId, generation: 'g' } })
+      );
+    }
+    const changes = t.observe({ type: 'worker-exited' } as RendererAgentEvent);
+    expect(changes.map((change) => [change.sessionId, change.state])).toEqual([
+      ['killed', 'error'],
+    ]);
+    expect(t.status('kept').state).toBe('running');
+  });
 });

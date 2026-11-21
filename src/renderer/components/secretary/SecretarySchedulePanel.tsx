@@ -80,16 +80,18 @@ export function SecretarySchedulePanel({
   schedules,
   name,
   onReload,
+  secretaryId,
 }: {
   schedules: SecretaryScheduleView[];
   name: string;
   onReload: () => void;
+  secretaryId?: string;
 }) {
   const { t } = useI18n();
   const system = schedules.filter((schedule) => schedule.system !== undefined);
   const mine = schedules.filter((schedule) => schedule.system === undefined);
   const remove = (id: string) => {
-    void window.electronAPI.secretary.removeSchedule(id).then(onReload);
+    void window.electronAPI.secretary.removeSchedule(id, secretaryId).then(onReload);
   };
   return (
     <div data-enso="secretary-schedules" className="flex flex-col gap-1 px-3 py-3">

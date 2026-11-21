@@ -1,4 +1,9 @@
-import type { SecretaryProfile, SecretaryProposal, SecretaryState } from '@shared/types/secretary';
+import type {
+  SecretaryProfile,
+  SecretaryProposal,
+  SecretaryState,
+  SecretarySummary,
+} from '@shared/types/secretary';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const proposal: SecretaryProposal = {
@@ -12,6 +17,7 @@ const proposal: SecretaryProposal = {
 };
 
 const stateWith = (status: SecretaryProposal['status']): SecretaryState => ({
+  secretaryId: 'default',
   enabled: true,
   projectId: 'sec-project',
   profile: null,
@@ -23,6 +29,7 @@ const stateWith = (status: SecretaryProposal['status']): SecretaryState => ({
 
 let initialState: Promise<SecretaryState>;
 let listener: ((state: SecretaryState) => void) | null = null;
+let listListener: ((secretaries: SecretarySummary[]) => void) | null = null;
 let openListener: ((target: { conversationId: string; proposalId?: string }) => void) | null = null;
 const off = vi.fn();
 const offOpen = vi.fn();
@@ -43,10 +50,20 @@ const settings = {
   defaultModel: null,
   projectGroups: [],
   virtualModels: [],
-  projects: [{ id: 'sec-project', path: '/tmp/secretary', name: '秘书' }],
+  // 第二项是第二个秘书的隐藏项目
+  projects: [
+    { id: 'sec-project', path: '/tmp/secretary', name: '秘书' },
+    { id: 'sec-project-2', path: '/tmp/secretary/members/s-2', name: '秘书' },
+  ],
 };
 
-vi.mock('@/stores/sessions', () => ({ useSessionsStore: { getState: () => sessions } }));
+vi.mock('@/stores/sessions', () => ({
+  useSessionsStore: Object.assign(() => undefined, {
+    getState: () => sessions,
+    // bind 里订阅当前会话以切换秘书：测试里不触发
+    subscribe: () => () => {},
+  }),
+}));
 vi.mock('@/stores/sidePanel', () => ({
   useSidePanelStore: { getState: () => ({ ensureOpen }) },
 }));
@@ -71,6 +88,14 @@ vi.stubGlobal('window', {
   electronAPI: {
     secretary: {
       getState: () => initialState,
+      list: () =>
+        Promise.resolve([
+          { id: 'default', projectId: 'sec-project', name: null, avatar: null, order: 0 },
+        ]),
+      onListChanged: (callback: (secretaries: SecretarySummary[]) => void) => {
+        listListener = callback;
+        return () => {};
+      },
       onStateChanged: (callback: (state: SecretaryState) => void) => {
         listener = callback;
         return off;
@@ -98,7 +123,13 @@ describe('useSecretaryStore', () => {
     off.mockClear();
     offOpen.mockClear();
     resolveProposal.mockClear();
-    useSecretaryStore.setState({ secretary: EMPTY_SECRETARY_STATE, resolving: {} });
+    useSecretaryStore.setState({
+      secretary: EMPTY_SECRETARY_STATE,
+      resolving: {},
+      secretaries: [],
+      states: {},
+      focusedId: null,
+    });
   });
 
   it('bind 拉一次状态并订阅推送，推送覆盖初始快照', async () => {
@@ -108,6 +139,12 @@ describe('useSecretaryStore', () => {
     expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('pending');
 
     listener?.(stateWith('succeeded'));
+    expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('succeeded');
+
+    // 清单推送晚到、且这份状态还没进 states：不能把已有的档案清回空状态
+    listListener?.([
+      { id: 'default', projectId: 'sec-project', name: null, avatar: null, order: 0 },
+    ]);
     expect(useSecretaryStore.getState().secretary.proposals.pr1?.status).toBe('succeeded');
 
     unbind();
@@ -266,7 +303,13 @@ describe('newSecretaryConversation', () => {
     sessions.setThinking.mockClear();
     sessions.send.mockClear();
     defaultModel.value = null;
-    useSecretaryStore.setState({ secretary: EMPTY_SECRETARY_STATE, resolving: {} });
+    useSecretaryStore.setState({
+      secretary: EMPTY_SECRETARY_STATE,
+      resolving: {},
+      secretaries: [],
+      states: {},
+      focusedId: null,
+    });
   });
 
   it('新建秘书会话用全局默认模型，不读档案里的旧模型；没有引导语时不发消息', async () => {
@@ -316,5 +359,21 @@ describe('newSecretaryConversation', () => {
     useSecretaryStore.setState({ secretary: { ...withProfile(), projectId: null } });
     await expect(useSecretaryStore.getState().newSecretaryConversation()).resolves.toBeNull();
     expect(sessions.newConversation).not.toHaveBeenCalled();
+  });
+
+  it('指定的秘书刚建好、它的状态还没到时，按清单里的隐藏项目建会话', async () => {
+    useSecretaryStore.setState({
+      secretary: withProfile(),
+      focusedId: 'default',
+      states: { default: withProfile() },
+      secretaries: [
+        { id: 'default', projectId: 'sec-project', name: '秘书', avatar: null, order: 0 },
+        { id: 's-2', projectId: 'sec-project-2', name: null, avatar: null, order: 1 },
+      ],
+    });
+    await expect(
+      useSecretaryStore.getState().newSecretaryConversation({ secretaryId: 's-2' })
+    ).resolves.toBe('conv-1');
+    expect(sessions.newConversation).toHaveBeenCalledWith('sec-project-2');
   });
 });

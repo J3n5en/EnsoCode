@@ -337,7 +337,7 @@ describe('config CLI socket', () => {
     expect(keys.get('skills.<id>.enabled')).toMatchObject({ writable: true });
     expect(keys.has('projects')).toBe(false);
     // 未写入 state 的已登记字段同样出现
-    expect(keys.get('autoRestartWhenIdle')).toMatchObject({
+    expect(keys.get('autoRestartForUpdate')).toMatchObject({
       type: 'unknown',
       requiresRestart: true,
     });

@@ -5,7 +5,6 @@
  * 这里只补秘书自己的白名单（会话 worktree 根、系统临时目录、应用存放用户图片的目录）与审计。
  */
 import { open, readFile, realpath, stat } from 'node:fs/promises';
-import path from 'node:path';
 import { app } from '@platform';
 import {
   appUserImageDirs,
@@ -111,8 +110,10 @@ export function createSecretaryImageViewHandler(ports: ImageViewHandlerPorts): S
   };
 }
 
-export const secretaryImageViewHandler = createSecretaryImageViewHandler({
-  deps: realImageViewDeps,
-  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
-  now: () => Date.now(),
-});
+export function imageViewHandlerFor(dir: string): SecretaryOpHandler {
+  return createSecretaryImageViewHandler({
+    deps: realImageViewDeps,
+    audit: (entry) => appendAudit(dir, entry),
+    now: () => Date.now(),
+  });
+}

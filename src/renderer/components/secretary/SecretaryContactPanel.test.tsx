@@ -68,9 +68,9 @@ const groupsBox = () => container.querySelector('[data-enso="secretary-contact-g
 const addButton = () =>
   container.querySelector('[data-enso="secretary-contact-group-add"]') as HTMLButtonElement;
 
-async function render(): Promise<void> {
+async function render(secretaryId?: string): Promise<void> {
   await act(async () => {
-    root.render(<SecretaryContactPanel />);
+    root.render(<SecretaryContactPanel secretaryId={secretaryId} />);
   });
 }
 
@@ -103,6 +103,8 @@ beforeEach(() => {
   pushState = () => {};
   (dom.window as unknown as Record<string, unknown>).electronAPI = {
     secretary: {
+      list: async () => [],
+      onListChanged: () => () => {},
       contactState: vi.fn(async () => state),
       onContactChanged: vi.fn((callback: (next: SecretaryContactState) => void) => {
         pushState = callback;
@@ -212,18 +214,24 @@ describe('Telegram 群白名单', () => {
     await typeAndAdd(' -1001 ');
     expect(contactSettings).not.toHaveBeenCalled();
     await typeAndAdd('  -1002  ');
-    expect(contactSettings).toHaveBeenCalledWith({
-      telegramGroup: { action: 'add', chatId: '-1002' },
-    });
+    expect(contactSettings).toHaveBeenCalledWith(
+      {
+        telegramGroup: { action: 'add', chatId: '-1002' },
+      },
+      undefined
+    );
     const remove = container.querySelector(
       '[data-enso="secretary-contact-group-remove"]'
     ) as HTMLButtonElement;
     await act(async () => {
       remove.click();
     });
-    expect(contactSettings).toHaveBeenLastCalledWith({
-      telegramGroup: { action: 'remove', chatId: '-1001' },
-    });
+    expect(contactSettings).toHaveBeenLastCalledWith(
+      {
+        telegramGroup: { action: 'remove', chatId: '-1001' },
+      },
+      undefined
+    );
   });
 });
 
@@ -249,7 +257,7 @@ describe('Telegram 群的论坛话题', () => {
         topics: [{ id: '3', title: '插件开发' }, { id: '1' }, { id: '9' }],
       },
     ]);
-    await render();
+    await render('sec-b');
     expect(scopeText()).toEqual(['· Topics: 插件开发, General (default topic), Topic #9']);
   });
 
@@ -260,9 +268,9 @@ describe('Telegram 群的论坛话题', () => {
       error: 'api',
       detail: 'Bad Request: chat not found',
     });
-    await render();
+    await render('sec-b');
     await click('[data-enso="secretary-contact-group-topics"]');
-    expect(contactTelegramTopics).toHaveBeenCalledWith('-1001');
+    expect(contactTelegramTopics).toHaveBeenCalledWith('-1001', 'sec-b');
     const error = container.querySelector('[data-enso="secretary-contact-topics-error"]');
     expect(error?.textContent).toContain('Bad Request: chat not found');
     expect(error?.textContent).toContain('Make sure the bot is in this group.');
@@ -287,9 +295,10 @@ describe('Telegram 群的论坛话题', () => {
     await click('[data-enso="secretary-contact-topic"]', 1);
     await click('[data-enso="secretary-contact-topic"]', 2);
     await click('[data-enso="secretary-contact-scope-save"]');
-    expect(contactSettings).toHaveBeenLastCalledWith({
-      telegramGroupScope: { chatId: '-1001', scope: ['3', '7'] },
-    });
+    expect(contactSettings).toHaveBeenLastCalledWith(
+      { telegramGroupScope: { chatId: '-1001', scope: ['3', '7'] } },
+      'sec-b'
+    );
     expect(container.querySelector('[data-enso="secretary-contact-group-picker"]')).toBeNull();
   });
 
@@ -300,7 +309,7 @@ describe('Telegram 群的论坛话题', () => {
       forum: true,
       topics: [{ id: '1' }, { id: '3', title: '插件开发' }],
     });
-    await render();
+    await render('sec-b');
     await click('[data-enso="secretary-contact-group-topics"]');
     const checked = [...container.querySelectorAll('[data-enso="secretary-contact-topic"]')].map(
       (node) => node.getAttribute('aria-checked')
@@ -308,14 +317,15 @@ describe('Telegram 群的论坛话题', () => {
     expect(checked).toEqual(['false', 'true']);
     await click('[data-enso="secretary-contact-scope-all"]');
     await click('[data-enso="secretary-contact-scope-save"]');
-    expect(contactSettings).toHaveBeenLastCalledWith({
-      telegramGroupScope: { chatId: '-1001', scope: 'all' },
-    });
+    expect(contactSettings).toHaveBeenLastCalledWith(
+      { telegramGroupScope: { chatId: '-1001', scope: 'all' } },
+      'sec-b'
+    );
   });
 
   it('没开话题的群：说明只能整群，不给话题勾选', async () => {
     state = contactState([{ id: '-1001', all: true, topics: [] }]);
-    await render();
+    await render('sec-b');
     await click('[data-enso="secretary-contact-group-topics"]');
     const picker = container.querySelector('[data-enso="secretary-contact-group-picker"]');
     expect(picker?.textContent).toContain(

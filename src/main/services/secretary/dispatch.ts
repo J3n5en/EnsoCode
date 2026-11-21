@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { app } from '@platform';
 import { projectNameFromPath } from '@shared/projectName';
 import {
   describeForwardedImages,
@@ -66,7 +64,12 @@ import { redactSecrets } from '../memory/distill';
 import { appendAudit } from './audit';
 import { applyCleanup, type CleanupPorts, cleanupReportText, realCleanupPorts } from './cleanup';
 import { todoDispatchPrompt } from './dispatchBrief';
-import { recordPhoneFollow, renameFollowedTarget, unfollowTarget } from './following';
+import {
+  followDepsFor,
+  recordPhoneFollow,
+  renameFollowedTarget,
+  unfollowTarget,
+} from './following';
 import { realImageViewDeps } from './imageView';
 import { type SavedProposal, saveProposalRecord } from './proposals';
 import { type SecretarySessionStatus, visibleProjects } from './readers';
@@ -82,6 +85,7 @@ import {
   takeoverViews,
   untrackedViews,
 } from './results';
+import type { SecretaryContext } from './secretaries';
 import type { MainSessionRequest, MainSessionResult } from './sessionFactory';
 import { SecretaryStore } from './store';
 import {
@@ -251,6 +255,14 @@ export interface SecretaryDispatchPorts {
   refollow?(from: string, to: string): void;
   /** 会话被归档、删除或收回接管：关注项一并移除 */
   unfollow?(targetId: string): void;
+  /** 本秘书 id：派出会话的 secretaryOrigin 带上它；缺省是单测里的匿名秘书 */
+  secretaryId?: string;
+  /** 本秘书的隐藏项目：找「最近的秘书会话」只在它里面找；缺省按全部秘书项目 */
+  secretaryProjectId?(): string | null;
+  /** 另一个秘书正在管这个会话时返回它的名字；缺省表示只有这一个秘书 */
+  managedElsewhere?(conversationId: string): MaybePromise<string | null>;
+  /** 全部秘书合计在跑的派发数（含本秘书）与合计上限；缺省不查合计 */
+  runningTotal?(): MaybePromise<{ running: number; max: number }>;
 }
 
 const DISPATCH_OPS = [
@@ -286,6 +298,8 @@ const DENIALS = {
     "permission denied (not-visible): the session's project is not in the secretary's visible projects",
   'needs-user':
     'refused (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+  'managed-by-other':
+    'permission denied (managed-by-other): another secretary manages this session. Only the user can transfer it to you; do not retry.',
   'not-yours':
     'refused (not-yours): only messages you queued yourself can be withdrawn; this one was queued by the user or by another secretary',
 } as const;
@@ -602,6 +616,7 @@ async function dispatchContext(
 ): Promise<Parameters<typeof validateDispatch>[1]> {
   const projects = await ports.projects();
   const file = ports.dispatchFile();
+  const total = await ports.runningTotal?.();
   return {
     project: projects.find((candidate) => candidate.projectId === projectId),
     visible: visibleProjects(projects, profile).some(
@@ -609,6 +624,7 @@ async function dispatchContext(
     ),
     running: await runningCount(ports, file),
     max: profile.maxRunningDispatches,
+    ...(total ? { runningTotal: total.running, maxTotal: total.max } : {}),
     deferred,
   };
 }
@@ -700,7 +716,7 @@ async function checkBase(
 export function saveCleanupProposal(
   items: CleanupItem[],
   secretaryConversationId: string | null,
-  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'saveDispatch'> = secretaryDispatchPorts
+  ports: Pick<SecretaryDispatchPorts, 'dispatchFile' | 'saveDispatch'>
 ): SavedProposal {
   if (!secretaryConversationId) throw new Error('cleanup needs a secretary conversation');
   const now = Date.now();
@@ -740,7 +756,10 @@ async function executeDispatch(
     ...(draft.checkout ? { checkout: draft.checkout } : {}),
     ...(draft.baseRef ? { baseRef: draft.baseRef } : {}),
     ...(draft.branch ? { branch: draft.branch } : {}),
-    secretaryOrigin: { secretaryConversationId },
+    secretaryOrigin: {
+      secretaryConversationId,
+      ...(ports.secretaryId ? { secretaryId: ports.secretaryId } : {}),
+    },
     // 只有新派出的会话固定静音且无人值守；接管的是用户已有会话，一概不碰
     muted: true,
     unattended: true,
@@ -1154,8 +1173,14 @@ async function targetConversation(
 
 async function latestSecretaryConversation(ports: SecretaryDispatchPorts): Promise<string | null> {
   const projects = await ports.projects();
+  const own = ports.secretaryProjectId?.();
+  // 多秘书时只在本秘书的会话里找：结果与授权不能落到别的秘书头上
   const secretaryProjects = new Set(
-    projects.filter((project) => project.kind === 'secretary').map((project) => project.projectId)
+    projects
+      .filter((project) =>
+        own !== undefined ? project.projectId === own : project.kind === 'secretary'
+      )
+      .map((project) => project.projectId)
   );
   if (secretaryProjects.size === 0) return null;
   const rows = await ports.rows();
@@ -1197,6 +1222,7 @@ async function checkTakeover(
     project,
     row,
     visible,
+    managedElsewhere: Boolean(await ports.managedElsewhere?.(conversationId)),
   });
   if (refusal || !conversation || !row) return { ok: false, error: refusal ?? 'not-found' };
   return { ok: true, conversation, row };
@@ -1227,6 +1253,9 @@ async function checkOperate(
       (candidate) => candidate.projectId === project.projectId
     );
   if (!visible) return { ok: false, code: 'not-visible' };
+  // 一个会话只归一个秘书：别的秘书在管时，点名与接管范围都不算数
+  if (await ports.managedElsewhere?.(conversationId))
+    return { ok: false, code: 'managed-by-other' };
   const file = ports.dispatchFile();
   const source = operateSource(file, conversationId, profile.takeoverScope, conversation.projectId);
   if (!source) {
@@ -2662,197 +2691,203 @@ async function loadSecretaryBoard(ports: SecretaryStatePorts): Promise<{
   };
 }
 
-function secretaryDir(): string {
-  return path.join(app.getPath('userData'), 'secretary');
-}
-
-/** 生产端口全部经动态 import 取 Main 的既有函数：本模块被 tools.ts 静态依赖，静态反向依赖会成环 */
-export const secretaryDispatchPorts: SecretaryDispatchPorts = {
-  profile: () => store().profile(),
-  persona: () => store().readPersona(),
-  dispatchFile: () => store().dispatch(),
-  saveDispatch: (file) => {
-    store().saveDispatch(file);
-  },
-  todos: () => store().todos(),
-  saveTodos: (todos) => {
-    store().saveTodos(todos);
-  },
-  audit: (entry) => appendAudit(secretaryDir(), entry),
-  cleanup: realCleanupPorts(),
-  projects: async () =>
-    (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
-  conversations: async () =>
-    (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().conversations ??
-    [],
-  rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
-  status: async (conversationId) =>
-    (await import('../../ipc/agent')).observedSessionStatus(conversationId),
-  createSession: async (request) =>
-    (await import('../../ipc/secretary')).createSessionViaMain(request),
-  prompt: async (conversationId, text, deliveryId) =>
-    (await import('../../ipc/agent')).promptRootFromMain(conversationId, text, deliveryId),
-  resume: async (conversationId) =>
-    (await import('../../ipc/agent')).resumeRootFromMain(conversationId),
-  alive: async (conversationId) =>
-    (await import('../../ipc/agent')).isRootSessionAlive(conversationId),
-  abort: async (conversationId) =>
-    (await import('../../ipc/agent')).abortRootFromMain(conversationId),
-  steer: async (conversationId, text, deliveryId) =>
-    (await import('../../ipc/agent')).steerRootFromMain(conversationId, text, deliveryId),
-  appendQueued: async (conversationId, message) => {
-    const { patchConversationsState } = await import('../../ipc/settings');
-    let found = false;
-    patchConversationsState((state) => {
-      const row = state.conversations[conversationId];
-      if (!row) return;
-      found = true;
-      const queued = Array.isArray(row.queuedMessages) ? row.queuedMessages : [];
-      state.conversations[conversationId] = { ...row, queuedMessages: [...queued, message] };
-    });
-    return found;
-  },
-  dropQueued: async (conversationId, messageIds) => {
-    const { patchConversationsState } = await import('../../ipc/settings');
-    const drop = new Set(messageIds);
-    let removed = 0;
-    patchConversationsState((state) => {
-      const row = state.conversations[conversationId];
-      if (!row || !Array.isArray(row.queuedMessages)) return;
-      const kept = row.queuedMessages.filter((value) => {
-        const id = value && typeof value === 'object' ? (value as { id?: unknown }).id : undefined;
-        const hit = typeof id === 'string' && drop.has(id);
-        if (hit) removed += 1;
-        return !hit;
+/**
+ * 一个秘书的生产端口：存储、审计、关注都落在它自己的目录里。
+ * Main 的既有函数全部经动态 import 取：本模块被 tools.ts 静态依赖，静态反向依赖会成环。
+ */
+export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts {
+  const store = () => new SecretaryStore(ctx.dir);
+  const follow = () => followDepsFor(ctx.dir);
+  return {
+    secretaryId: ctx.id,
+    secretaryProjectId: () => ctx.projectId,
+    managedElsewhere: async (conversationId) =>
+      (await import('./crossSecretary')).managedElsewhere(ctx.id, conversationId),
+    runningTotal: async () => (await import('./crossSecretary')).runningTotal(),
+    profile: () => store().profile(),
+    persona: () => store().readPersona(),
+    dispatchFile: () => store().dispatch(),
+    saveDispatch: (file) => {
+      store().saveDispatch(file);
+    },
+    todos: () => store().todos(),
+    saveTodos: (todos) => {
+      store().saveTodos(todos);
+    },
+    audit: (entry) => appendAudit(ctx.dir, entry),
+    cleanup: realCleanupPorts(ctx),
+    projects: async () =>
+      (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
+    conversations: async () =>
+      (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().conversations ??
+      [],
+    rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
+    status: async (conversationId) =>
+      (await import('../../ipc/agent')).observedSessionStatus(conversationId),
+    createSession: async (request) =>
+      (await import('../../ipc/secretary')).createSessionViaMain(request),
+    prompt: async (conversationId, text, deliveryId) =>
+      (await import('../../ipc/agent')).promptRootFromMain(conversationId, text, deliveryId),
+    resume: async (conversationId) =>
+      (await import('../../ipc/agent')).resumeRootFromMain(conversationId),
+    alive: async (conversationId) =>
+      (await import('../../ipc/agent')).isRootSessionAlive(conversationId),
+    abort: async (conversationId) =>
+      (await import('../../ipc/agent')).abortRootFromMain(conversationId),
+    steer: async (conversationId, text, deliveryId) =>
+      (await import('../../ipc/agent')).steerRootFromMain(conversationId, text, deliveryId),
+    appendQueued: async (conversationId, message) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      let found = false;
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row) return;
+        found = true;
+        const queued = Array.isArray(row.queuedMessages) ? row.queuedMessages : [];
+        state.conversations[conversationId] = { ...row, queuedMessages: [...queued, message] };
       });
-      if (removed === 0) return;
-      state.conversations[conversationId] = { ...row, queuedMessages: kept };
-    });
-    return removed;
-  },
-  pauseGoal: async (conversationId) => {
-    const { patchConversationsState } = await import('../../ipc/settings');
-    patchConversationsState((state) => {
-      const row = state.conversations[conversationId];
-      if (!row) return;
-      const goal = row.goal;
-      if (!goal || typeof goal !== 'object') return;
-      state.conversations[conversationId] = {
-        ...row,
-        goal: { ...(goal as Record<string, unknown>), status: 'paused' },
-      };
-    });
-  },
-  applyProfile: async (draft, secretaryConversationId) => {
-    const { secretaryProfile } = await import('./profile');
-    const result = await secretaryProfile.save(draft, secretaryConversationId);
-    return result.ok ? { ok: true } : result;
-  },
-  applySkill: async (draft, secretaryConversationId) => {
-    const { secretarySkill } = await import('./skills');
-    const result = await secretarySkill.save(draft, secretaryConversationId);
-    return result.ok ? { ok: true } : result;
-  },
-  applyTool: async (draft, secretaryConversationId) => {
-    const { secretaryTool } = await import('./customTools');
-    const result = await secretaryTool.save(draft, secretaryConversationId);
-    return result.ok ? { ok: true } : result;
-  },
-  newId: () => randomUUID(),
-  now: () => Date.now(),
-  branch: async (repoPath) => {
-    try {
-      const { currentBranch } = await import('../worktree/service');
-      return await currentBranch(repoPath);
-    } catch {
-      return null;
-    }
-  },
-  baseFacts: async (input) => {
-    const { probeDispatchBase } = await import('../worktree/service');
-    return probeDispatchBase(input);
-  },
-  waitStopped: async (conversationId, timeoutMs) => {
-    const { observedSessionStatus } = await import('../../ipc/agent');
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      const state = observedSessionStatus(conversationId).state;
-      if (state !== 'running' || Date.now() >= deadline) return state;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  },
-  forget: (conversationId) => {
-    forgetListener?.(conversationId);
-  },
-  answer: async (conversationId, askId, answer, name) =>
-    (await import('../../ipc/agent')).answerAskFromMain(conversationId, askId, answer, name),
-  relayAsk: (conversationId, relay) => {
-    void import('../../ipc/agent')
-      .then((agent) => agent.setAskRelayFromMain(conversationId, relay ?? undefined))
-      .catch(() => undefined);
-  },
-  tasks: async (conversationId) =>
-    (await import('../../ipc/agent')).observedBackgroundTasks(conversationId),
-  stopTask: async (conversationId, taskId) =>
-    (await import('../../ipc/agent')).stopTaskFromMain(conversationId, taskId),
-  /**
-   * 与子代理可选模型同一套可用性判定：provider 存在且启用、有凭证、非分类器专用、
-   * 模型行启用；虚拟模型按目录解析。这里只判定，不改任何配置。
-   */
-  resolveModel: async (ref) => {
-    const { modelRefForSpawnConfig, providersFromSettings, resolveModelSelection } = await import(
-      '../agentHost'
-    );
-    const { readStoredOauthCredentialKeys } = await import('../oauthProviders');
-    const { modelUsability } = await import('@shared/defaultModel');
-    const { dispatchModelChoices, dispatchProviderId } = await import('./dispatchModel');
-    let keys: ReadonlySet<string>;
-    try {
-      keys = await readStoredOauthCredentialKeys();
-    } catch {
-      return { ok: false, error: 'model credentials unavailable' };
-    }
-    const providers = providersFromSettings();
-    const providerId = dispatchProviderId(ref.providerId, providers);
-    const resolved = resolveModelSelection(providerId, ref.modelId, keys, {
-      allowVirtual: true,
-    });
-    if (!resolved.ok) {
-      const credentials = {
-        oauthCredentials: { status: 'ready' as const, authenticatedAccountKeys: keys },
-      };
-      const choices = dispatchModelChoices(
-        providers,
-        (id, modelId) =>
-          modelUsability({ providerId: id, modelId }, providers, credentials) === 'usable'
+      return found;
+    },
+    dropQueued: async (conversationId, messageIds) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      const drop = new Set(messageIds);
+      let removed = 0;
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row || !Array.isArray(row.queuedMessages)) return;
+        const kept = row.queuedMessages.filter((value) => {
+          const id =
+            value && typeof value === 'object' ? (value as { id?: unknown }).id : undefined;
+          const hit = typeof id === 'string' && drop.has(id);
+          if (hit) removed += 1;
+          return !hit;
+        });
+        if (removed === 0) return;
+        state.conversations[conversationId] = { ...row, queuedMessages: kept };
+      });
+      return removed;
+    },
+    pauseGoal: async (conversationId) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row) return;
+        const goal = row.goal;
+        if (!goal || typeof goal !== 'object') return;
+        state.conversations[conversationId] = {
+          ...row,
+          goal: { ...(goal as Record<string, unknown>), status: 'paused' },
+        };
+      });
+    },
+    applyProfile: async (draft, secretaryConversationId) => {
+      const { secretaryProfileFor } = await import('./profile');
+      const result = await secretaryProfileFor(ctx).save(draft, secretaryConversationId);
+      return result.ok ? { ok: true } : result;
+    },
+    applySkill: async (draft, secretaryConversationId) => {
+      const { secretarySkillFor } = await import('./skills');
+      const result = await secretarySkillFor(ctx).save(draft, secretaryConversationId);
+      return result.ok ? { ok: true } : result;
+    },
+    applyTool: async (draft, secretaryConversationId) => {
+      const { secretaryToolFor } = await import('./customTools');
+      const result = await secretaryToolFor(ctx).save(draft, secretaryConversationId);
+      return result.ok ? { ok: true } : result;
+    },
+    newId: () => randomUUID(),
+    now: () => Date.now(),
+    branch: async (repoPath) => {
+      try {
+        const { currentBranch } = await import('../worktree/service');
+        return await currentBranch(repoPath);
+      } catch {
+        return null;
+      }
+    },
+    baseFacts: async (input) => {
+      const { probeDispatchBase } = await import('../worktree/service');
+      return probeDispatchBase(input);
+    },
+    waitStopped: async (conversationId, timeoutMs) => {
+      const { observedSessionStatus } = await import('../../ipc/agent');
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const state = observedSessionStatus(conversationId).state;
+        if (state !== 'running' || Date.now() >= deadline) return state;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    },
+    forget: (conversationId) => {
+      forgetListener?.(conversationId);
+    },
+    answer: async (conversationId, askId, answer, name) =>
+      (await import('../../ipc/agent')).answerAskFromMain(conversationId, askId, answer, name),
+    relayAsk: (conversationId, relay) => {
+      void import('../../ipc/agent')
+        .then((agent) => agent.setAskRelayFromMain(conversationId, relay ?? undefined))
+        .catch(() => undefined);
+    },
+    tasks: async (conversationId) =>
+      (await import('../../ipc/agent')).observedBackgroundTasks(conversationId),
+    stopTask: async (conversationId, taskId) =>
+      (await import('../../ipc/agent')).stopTaskFromMain(conversationId, taskId),
+    /**
+     * 与子代理可选模型同一套可用性判定：provider 存在且启用、有凭证、非分类器专用、
+     * 模型行启用；虚拟模型按目录解析。这里只判定，不改任何配置。
+     */
+    resolveModel: async (ref) => {
+      const { modelRefForSpawnConfig, providersFromSettings, resolveModelSelection } = await import(
+        '../agentHost'
       );
+      const { readStoredOauthCredentialKeys } = await import('../oauthProviders');
+      const { modelUsability } = await import('@shared/defaultModel');
+      const { dispatchModelChoices, dispatchProviderId } = await import('./dispatchModel');
+      let keys: ReadonlySet<string>;
+      try {
+        keys = await readStoredOauthCredentialKeys();
+      } catch {
+        return { ok: false, error: 'model credentials unavailable' };
+      }
+      const providers = providersFromSettings();
+      const providerId = dispatchProviderId(ref.providerId, providers);
+      const resolved = resolveModelSelection(providerId, ref.modelId, keys, {
+        allowVirtual: true,
+      });
+      if (!resolved.ok) {
+        const credentials = {
+          oauthCredentials: { status: 'ready' as const, authenticatedAccountKeys: keys },
+        };
+        const choices = dispatchModelChoices(
+          providers,
+          (id, modelId) =>
+            modelUsability({ providerId: id, modelId }, providers, credentials) === 'usable'
+        );
+        return {
+          ok: false,
+          error: choices
+            ? `${resolved.error}. providerId must be an exact id below (not a name), or omit model to follow the project's default model:\n${choices}`
+            : resolved.error,
+        };
+      }
+      const model = modelRefForSpawnConfig(resolved.selection.config);
       return {
-        ok: false,
-        error: choices
-          ? `${resolved.error}. providerId must be an exact id below (not a name), or omit model to follow the project's default model:\n${choices}`
-          : resolved.error,
+        ok: true,
+        model: { ...model, ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}) },
       };
-    }
-    const model = modelRefForSpawnConfig(resolved.selection.config);
-    return {
-      ok: true,
-      model: { ...model, ...(ref.thinkingLevel ? { thinkingLevel: ref.thinkingLevel } : {}) },
-    };
-  },
-  follow: (input) => {
-    recordPhoneFollow({
-      kind: 'session',
-      targetId: input.targetId,
-      summary: input.summary,
-      secretaryConversationId: input.secretaryConversationId,
-    });
-  },
-  refollow: (from, to) => renameFollowedTarget(from, to),
-  unfollow: (targetId) => unfollowTarget(targetId),
-};
-
-function store(): SecretaryStore {
-  return new SecretaryStore(secretaryDir());
+    },
+    follow: (input) => {
+      recordPhoneFollow(
+        {
+          kind: 'session',
+          targetId: input.targetId,
+          summary: input.summary,
+          secretaryConversationId: input.secretaryConversationId,
+        },
+        follow()
+      );
+    },
+    refollow: (from, to) => renameFollowedTarget(from, to, follow()),
+    unfollow: (targetId) => unfollowTarget(targetId, follow()),
+  };
 }
-
-export const secretaryDispatchHandlers = createSecretaryDispatchHandlers(secretaryDispatchPorts);

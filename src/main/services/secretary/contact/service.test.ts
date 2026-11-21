@@ -1,7 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { telegramUrlButtonSupported } from '@shared/secretary/contact';
+import {
+  type ContactRouteClaim,
+  findRouteConflict,
+  telegramUrlButtonSupported,
+} from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
 import { parseInboundMessage } from '@shared/secretary/inbound';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
@@ -25,8 +29,9 @@ import type {
   TelegramUser,
 } from './client';
 import { TelegramApiError } from './client';
+import { TelegramHub } from './hub';
 import { ContactService, type ContactServicePorts } from './service';
-import { ContactStore } from './store';
+import { ContactStore, contactClaims } from './store';
 import { deliverToSecretary } from './wake';
 
 const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
@@ -462,7 +467,7 @@ describe('绑定码', () => {
     expect(telegram.bot?.username).toBe('enso_secretary_bot');
   });
 
-  it('群里的 /start 不算，只认私聊', async () => {
+  it('群里的绑定码认不出发送者就不绑', async () => {
     const h = harness();
     await h.service.bind(TOKEN);
     h.api.push({
@@ -471,7 +476,7 @@ describe('绑定码', () => {
     });
     await waitFor(() => h.audits.some((entry) => entry.op === 'contact_bind_rejected'), 'rejected');
     expect(h.audits.find((entry) => entry.op === 'contact_bind_rejected')?.detail).toBe(
-      'not-private'
+      'no-sender'
     );
     expect(h.service.state().telegram.status).toBe('awaiting-start');
   });
@@ -871,7 +876,7 @@ describe('Telegram 论坛话题绑定', () => {
     h.store.save({
       ...h.store.file(),
       telegramGroups: [CHAT],
-      telegramTopics: [{ chatId: CHAT, topicId: '3' }],
+      telegramRoutes: [{ chatId: CHAT, topicId: '3', boundAt: 1 }],
     });
     h.api.push(topicMessage('话题三', 3, '插件开发'));
     h.api.push(topicMessage('话题九', 9, '闲聊灌水'));
@@ -3061,5 +3066,243 @@ describe('出站图片与文件', () => {
   it('没有已连接的渠道：返回 not-bound', async () => {
     const h = harness();
     expect(await h.service.sendMedia('sec-1', image())).toEqual({ ok: false, error: 'not-bound' });
+  });
+});
+
+describe('多秘书：一个 bot 连接，多条路由', () => {
+  const OTHER_TOKEN = '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
+
+  function multi() {
+    const apis = new Map<string, FakeApi>([
+      [TOKEN, new FakeApi()],
+      [OTHER_TOKEN, new FakeApi()],
+    ]);
+    const hub = new TelegramHub({
+      api: (token) => apis.get(token),
+      sleep: async () => {},
+    });
+    const members: {
+      id: string;
+      store: ContactStore;
+      service: ContactService;
+      audits: SecretaryAuditEntry[];
+      delivered: string[];
+    }[] = [];
+    const conflict = (claim: ContactRouteClaim): string | null => {
+      const claims = members
+        .filter((member) => member.id !== claim.secretaryId)
+        .flatMap((member) => contactClaims(member.id, member.store.file()));
+      return findRouteConflict(claims, claim)?.secretaryId ?? null;
+    };
+    const add = (id: string, random: number) => {
+      const dir = mkdtempSync(join(tmpdir(), `secretary-contact-${id}-`));
+      dirs.push(dir);
+      const store = new ContactStore(dir);
+      const audits: SecretaryAuditEntry[] = [];
+      const delivered: string[] = [];
+      const service = new ContactService(store, {
+        audit: (entry) => audits.push(entry),
+        publish: () => {},
+        now: () => 1_000_000,
+        random: () => random,
+        lang: () => 'zh',
+        notifyMode: () => 'with-done',
+        secretaryName: () => id,
+        secretaryConversationId: () => `${id}-chat`,
+        deliver: async (_conversationId, text) => {
+          delivered.push(text);
+          return { ok: true };
+        },
+        answerAsk: () => ({ ok: true }),
+        resolveProposal: async () => ({ ok: true }),
+        openInApp: () => {},
+        following: new FollowingStore(dir),
+        hub,
+        secretaryId: id,
+        routeConflict: conflict,
+      });
+      const member = { id, store, service, audits, delivered };
+      members.push(member);
+      return member;
+    };
+    return { apis, hub, add };
+  }
+
+  function topicMessage(text: string, topicId: number, from = 777): TelegramUpdate {
+    return {
+      update_id: 1,
+      message: {
+        message_id: 1,
+        chat: { id: -100, type: 'supergroup', title: '工作群', is_forum: true },
+        from: { id: from, username: 'j3n5en', first_name: 'J' },
+        message_thread_id: topicId,
+        is_topic_message: true,
+        text,
+      },
+    };
+  }
+
+  async function bindTopic(
+    h: ReturnType<typeof multi>,
+    member: ReturnType<ReturnType<typeof multi>['add']>,
+    topicId: number,
+    token = TOKEN
+  ): Promise<void> {
+    expect(await member.service.bind(token)).toEqual({ ok: true });
+    const code = member.service.state().telegram.bind?.code ?? '';
+    expect(member.service.state().telegram.bind?.topicCommand).toBe(
+      `/bind@enso_secretary_bot ${code}`
+    );
+    h.apis.get(token)?.push(topicMessage(`/bind@enso_secretary_bot ${code}`, topicId));
+    await waitFor(
+      () => member.store.file().telegramRoutes.some((route) => route.topicId === String(topicId)),
+      `bound ${member.id}`
+    );
+  }
+
+  it('同一个 token 只有一个轮询；两个话题各进各的秘书，回复回原话题', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9);
+    expect(h.hub.pollingTokens()).toBe(1);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    api.push(topicMessage('A 你好', 7));
+    await waitFor(() => a.delivered.length === 1, 'a delivered');
+    api.push(topicMessage('B 你好', 9));
+    await waitFor(() => b.delivered.length === 1, 'b delivered');
+    expect(a.delivered[0]).toContain('A 你好');
+    expect(b.delivered[0]).toContain('B 你好');
+    expect(a.delivered.join('')).not.toContain('B 你好');
+    // 绑定成功的回执发回各自的话题
+    expect(api.sent.filter((sent) => sent.messageThreadId === 7)).toHaveLength(1);
+    expect(api.sent.filter((sent) => sent.messageThreadId === 9)).toHaveLength(1);
+    // 推送只发到自己的路由
+    a.service.onMilestone({ kind: 'goal-complete', title: 'p · 修登录', conversationId: 'c1' });
+    await waitFor(() => api.sent.filter((sent) => sent.messageThreadId === 7).length === 2, 'push');
+    expect(api.sent.filter((sent) => sent.messageThreadId === 9)).toHaveLength(1);
+    await a.service.stop();
+    await b.service.stop();
+  });
+
+  it('同一 bot + chat + 话题重复绑定被拒，不在群里回话', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    const sentBefore = api.sent.length;
+    expect(await b.service.bind(TOKEN)).toEqual({ ok: true });
+    const code = b.service.state().telegram.bind?.code ?? '';
+    api.push(topicMessage(`/bind@enso_secretary_bot ${code}`, 7));
+    await waitFor(
+      () => b.audits.some((entry) => entry.detail === 'route-conflict'),
+      'conflict rejected'
+    );
+    expect(b.store.file().telegramRoutes).toEqual([]);
+    expect(api.sent.length).toBe(sentBefore);
+    await a.service.stop();
+    await b.service.stop();
+  });
+
+  it('没绑任何秘书的话题：完全不响应，只记审计', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    await bindTopic(h, a, 7);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    const sentBefore = api.sent.length;
+    api.push(topicMessage('有人吗', 11));
+    await waitFor(
+      () => a.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
+      'rejected'
+    );
+    expect(a.delivered).toEqual([]);
+    expect(api.sent.length).toBe(sentBefore);
+    await a.service.stop();
+  });
+
+  it('不同 token 各一个轮询；秘书停掉后不再轮询', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9, OTHER_TOKEN);
+    expect(h.hub.pollingTokens()).toBe(2);
+    await b.service.stop();
+    await waitFor(() => h.hub.pollingTokens() === 1, 'one left');
+    await a.service.stop();
+    await waitFor(() => h.hub.pollingTokens() === 0, 'none left');
+  });
+
+  it('设置页按秘书勾话题：话题只路由给勾了它的秘书，话题优先于别的秘书的整群，冲突整体拒绝', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    expect(a.service.setTelegramGroupScope('-100', ['7', '3'])).toEqual({ ok: true });
+    expect(b.service.setTelegramGroupScope('-100', ['9', '5'])).toEqual({ ok: true });
+    expect(a.service.state().telegram.groups).toEqual([
+      { id: '-100', title: '工作群', all: false, topics: [{ id: '7' }, { id: '3' }] },
+    ]);
+    // 话题 3 有人说话、回复的是建话题那条：归 a，但 b 也记下话题名供勾选
+    const inThree = topicMessage('插件怎么装', 3);
+    if (inThree.message) {
+      inThree.message.reply_to_message = {
+        message_id: 3,
+        chat: inThree.message.chat,
+        forum_topic_created: { name: '插件开发' },
+      };
+    }
+    api.push(inThree);
+    await waitFor(() => a.delivered.length === 1, 'a got topic 3');
+    api.push(topicMessage('B 的话题五', 5));
+    await waitFor(() => b.delivered.length === 1, 'b got topic 5');
+    expect(a.delivered[0]).toContain('插件怎么装');
+    expect(b.delivered[0]).toContain('B 的话题五');
+    const before = api.sent.length;
+    a.service.onTurnReply('a-chat', '先打开插件页');
+    await waitFor(() => api.sent.length > before, 'a reply');
+    expect(api.sent.slice(before)).toEqual([
+      expect.objectContaining({ chatId: -100, messageThreadId: 3, text: '先打开插件页' }),
+    ]);
+
+    // 谁都没勾的话题：不响应，只记审计
+    const sentBefore = api.sent.length;
+    api.push(topicMessage('有人吗', 11));
+    await waitFor(
+      () => b.audits.some((entry) => entry.detail === 'topic-not-allowed chat=-100 topic=11'),
+      'unpicked topic dropped'
+    );
+    expect(a.delivered).toHaveLength(1);
+    expect(b.delivered).toHaveLength(1);
+    expect(api.sent.length).toBe(sentBefore);
+
+    // b 想要 a 的话题 3：整体拒绝，b 的路由不动
+    expect(b.service.setTelegramGroupScope('-100', ['9', '3'])).toEqual({
+      ok: false,
+      error: 'route-conflict',
+    });
+    expect(b.store.file().telegramRoutes.map((route) => route.topicId)).toEqual(['9', '5']);
+
+    // b 改成整群：没人单独绑的话题归 b，a 勾的话题仍归 a
+    expect(b.service.setTelegramGroupScope('-100', 'all')).toEqual({ ok: true });
+    api.push(topicMessage('现在归谁', 11));
+    await waitFor(() => b.delivered.length === 2, 'b got topic 11 as whole group');
+    api.push(topicMessage('还是 a 的', 3));
+    await waitFor(() => a.delivered.length === 2, 'topic 3 still a');
+    expect(b.delivered.join('')).not.toContain('还是 a 的');
+
+    api.chats.set(-100, { id: -100, type: 'supergroup', title: '工作群', is_forum: true });
+    expect(await b.service.telegramTopics('-100')).toEqual({
+      ok: true,
+      forum: true,
+      title: '工作群',
+      topics: [{ id: '1' }, { id: '3', title: '插件开发' }, { id: '5' }, { id: '11' }],
+    });
+    await a.service.stop();
+    await b.service.stop();
   });
 });

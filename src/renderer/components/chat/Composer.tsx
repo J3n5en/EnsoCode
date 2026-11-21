@@ -33,6 +33,7 @@ import {
 import { useIsMobile } from '@/hooks/useViewport';
 import { useI18n } from '@/i18n';
 import { effectiveKeybindings, eventToBinding, formatBinding } from '@/lib/keybindings';
+import { setUnsentDraft } from '@/lib/unsentDraft';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { pluginCommandFor, runPluginCommand } from '../../plugins/commands';
@@ -127,6 +128,10 @@ interface ComposerDraft {
 }
 
 const drafts = new Map<string, ComposerDraft>();
+
+const draftHasContent = (draft: ComposerDraft): boolean =>
+  draft.images.length > 0 ||
+  draft.segments.some((segment) => segment.type !== 'text' || segment.text.trim() !== '');
 
 const isTouchRemote = (): boolean =>
   Boolean(window.electronAPI?.remote) && window.matchMedia?.('(pointer: coarse)').matches === true;
@@ -249,6 +254,10 @@ export function Composer({
   // 编辑器的纯文本投影与卡片存在性（DOM 是事实源，这里只存渲染需要的派生态）
   const [editorPlain, setEditorPlain] = useState('');
   const [editorHasMentions, setEditorHasMentions] = useState(false);
+  const draftHolder = useRef(Symbol('composer'));
+  const hasDraft = editorPlain.trim() !== '' || editorHasMentions || images.length > 0;
+  useEffect(() => setUnsentDraft(draftHolder.current, hasDraft), [hasDraft]);
+  useEffect(() => () => setUnsentDraft(draftHolder.current, false), []);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const mentionGroups = useMentionSearch(cwd, mentionQuery, chatCandidates);
   const mentionItems = useMemo(
@@ -301,14 +310,18 @@ export function Composer({
     const previous = prevFocusKeyRef.current;
     if (previous !== focusKey) {
       if (previous) {
-        drafts.set(previous, {
+        const saved = {
           segments: editorRef.current?.getSegments() ?? [],
           images,
           slashes,
           recipient,
-        });
+        };
+        drafts.set(previous, saved);
+        setUnsentDraft(`draft:${previous}`, draftHasContent(saved));
       }
       const draft = focusKey ? drafts.get(focusKey) : undefined;
+      // 存着的草稿回到编辑器，由下面按编辑器内容报
+      if (focusKey) setUnsentDraft(`draft:${focusKey}`, false);
       const prefill = focusKey ? takePendingDraft(focusKey) : undefined;
       editorRef.current?.setSegments(
         prefill ? [{ type: 'text', text: prefill }] : (draft?.segments ?? [])

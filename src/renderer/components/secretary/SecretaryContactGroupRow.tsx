@@ -21,6 +21,7 @@ const TOPICS_ERROR: Record<string, string> = {
   'not-group': 'This chat is not a group',
   'invalid-chat-id': 'Group chat IDs are numbers, e.g. -1001234567890',
   'invalid-topic': 'Pick at least one topic',
+  'route-conflict': 'Another secretary already has this group or one of these topics',
 };
 
 type TopicsLoad =
@@ -82,11 +83,13 @@ function Choice({
  */
 export function SecretaryContactGroupRow({
   group,
+  secretaryId,
   busy,
   onRemove,
   onSaved,
 }: {
   group: SecretaryContactGroupBinding;
+  secretaryId?: string;
   busy: boolean;
   onRemove: () => void;
   onSaved: () => void;
@@ -111,7 +114,7 @@ export function SecretaryContactGroupRow({
 
   const fetchTopics = () => {
     setLoad({ state: 'loading' });
-    void window.electronAPI.secretary.contactTelegramTopics(group.id).then(
+    void window.electronAPI.secretary.contactTelegramTopics(group.id, secretaryId).then(
       (result: SecretaryContactTopicsResult) =>
         setLoad(
           result.ok
@@ -142,7 +145,10 @@ export function SecretaryContactGroupRow({
     setSaving(true);
     setSaveError(null);
     void window.electronAPI.secretary
-      .contactSettings({ telegramGroupScope: { chatId: group.id, scope: all ? 'all' : picked } })
+      .contactSettings(
+        { telegramGroupScope: { chatId: group.id, scope: all ? 'all' : picked } },
+        secretaryId
+      )
       .then(
         (result) => {
           if (result.ok) {

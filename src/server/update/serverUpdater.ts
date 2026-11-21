@@ -1,5 +1,5 @@
 import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
-import { AUTO_RESTART_IDLE_MS } from '@shared/updater/idleRestart';
+import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
 import {
   IdleRestartGate,
   type IdleRestartObservation,
@@ -42,7 +42,7 @@ export class ServerUpdater {
   private downloadedVersion: string | null = null;
   private running: Promise<void> | null = null;
   private autoUpdate = false;
-  private autoRestartWhenIdle = false;
+  private autoRestartMode: AutoRestartMode = 'off';
   private applying = false;
   private readonly idleGate = new IdleRestartGate();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
@@ -72,8 +72,8 @@ export class ServerUpdater {
     };
   }
 
-  start(autoUpdate: boolean, autoRestartWhenIdle: boolean): void {
-    this.autoRestartWhenIdle = autoRestartWhenIdle;
+  start(autoUpdate: boolean, autoRestartMode: AutoRestartMode): void {
+    this.autoRestartMode = autoRestartMode;
     this.setAutoUpdateEnabled(autoUpdate);
   }
 
@@ -210,9 +210,9 @@ export class ServerUpdater {
     this.notifyIdleStateChanged();
   }
 
-  setAutoRestartWhenIdle(enabled: boolean): void {
-    this.autoRestartWhenIdle = enabled;
-    if (!enabled) this.idleGate.reset();
+  setAutoRestartMode(mode: AutoRestartMode): void {
+    this.autoRestartMode = mode;
+    if (mode === 'off') this.idleGate.reset();
     this.notifyIdleStateChanged();
   }
 
@@ -223,13 +223,13 @@ export class ServerUpdater {
       this.idleGate.isFailed() ||
       !this.downloadedVersion ||
       !this.autoUpdate ||
-      !this.autoRestartWhenIdle ||
+      this.autoRestartMode === 'off' ||
       !this.canRestart()
     ) {
       return;
     }
     const now = this.now();
-    if (this.idleGate.evaluate(this.deps.idle(), now)) {
+    if (this.idleGate.evaluate(this.deps.idle(), this.autoRestartMode, now)) {
       void this.quitAndInstall();
       return;
     }

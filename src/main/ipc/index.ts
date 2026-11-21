@@ -30,6 +30,7 @@ import { registerSecretaryHandlers } from './secretary';
 import { registerSettingsHandlers } from './settings';
 import { registerSshConnectionHandlers } from './sshConnections';
 import { registerTerminalHandlers } from './terminal';
+import { registerUnsentDraftHandlers } from './unsentDrafts';
 import { registerUsageHandlers } from './usage';
 import { registerWorkspaceSearchHandlers } from './workspaceSearch';
 import { registerWorktreeHandlers } from './worktree';
@@ -59,6 +60,7 @@ export function registerIpcHandlers(): void {
   registerTerminalHandlers();
   registerWorkspaceSearchHandlers();
   registerUsageHandlers();
+  registerUnsentDraftHandlers();
   registerPrivacyMaskHandlers();
   registerResourceHandlers();
   registerMemoryHandlers();

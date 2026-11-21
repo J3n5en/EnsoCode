@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   emptyContactFile,
-  matchTelegramRoute,
   parseContactFile,
   telegramGroupBindings,
   telegramTopicCatalog,
@@ -61,86 +60,94 @@ describe('Telegram 群白名单', () => {
   });
 });
 
-describe('Telegram 论坛话题绑定', () => {
+describe('Telegram 论坛话题绑定（落在路由表上）', () => {
   const GROUP = '-1001234567890';
+  const NOW = 1_000;
 
-  it('坏配置：话题绑定与话题名里不合法的项丢掉，重复的去重', () => {
+  it('坏配置：话题名里不合法的项丢掉；旧的 telegramTopics 字段不再读', () => {
     const file = parseContactFile({
-      telegramTopics: [
-        { chatId: GROUP, topicId: '3' },
-        { chatId: GROUP, topicId: '3' },
-        { chatId: 'abc', topicId: '4' },
-        { chatId: GROUP, topicId: 'x' },
-        { chatId: GROUP },
-        'bad',
-      ],
+      telegramTopics: [{ chatId: GROUP, topicId: '3' }],
       telegramTopicTitles: { [`${GROUP}:3`]: '插件开发', bad: '坏的', [`${GROUP}:5`]: 9 },
     });
-    expect(file.telegramTopics).toEqual([{ chatId: GROUP, topicId: '3' }]);
     expect(file.telegramTopicTitles).toEqual({ [`${GROUP}:3`]: '插件开发' });
-    expect(emptyContactFile().telegramTopics).toEqual([]);
+    expect(file.telegramRoutes).toEqual([]);
+    expect('telegramTopics' in file).toBe(false);
+    expect(emptyContactFile().telegramTopicTitles).toEqual({});
   });
 
-  it('选几个话题：群从整群名单里拿掉，只留这几个话题；再选整群就清掉话题', () => {
-    const whole = { ...emptyContactFile(), telegramGroups: [GROUP, '-5'] };
-    const picked = withTelegramGroupScope(whole, GROUP, ['3', ' 7 ', '3']);
+  it('选几个话题：拿掉白名单与整群路由，只留这几个话题路由；已有的话题路由原样保留', () => {
+    const whole = {
+      ...emptyContactFile(),
+      telegramGroups: [GROUP, '-5'],
+      telegramGroupTitles: { [GROUP]: 'EnsoCode 交流群' },
+      telegramRoutes: [
+        { chatId: GROUP, boundAt: 1 },
+        { chatId: GROUP, topicId: '3', title: '旧标题', boundAt: 2 },
+        { chatId: '-5', topicId: '2', boundAt: 3 },
+      ],
+    };
+    const picked = withTelegramGroupScope(whole, GROUP, ['3', ' 7 ', '3'], NOW);
     expect(picked.ok).toBe(true);
     if (!picked.ok) return;
     expect(picked.file.telegramGroups).toEqual(['-5']);
-    expect(picked.file.telegramTopics).toEqual([
-      { chatId: GROUP, topicId: '3' },
-      { chatId: GROUP, topicId: '7' },
+    expect(picked.file.telegramRoutes).toEqual([
+      { chatId: '-5', topicId: '2', boundAt: 3 },
+      { chatId: GROUP, topicId: '3', title: '旧标题', boundAt: 2 },
+      { chatId: GROUP, topicId: '7', title: 'EnsoCode 交流群', boundAt: NOW },
     ]);
-    const all = withTelegramGroupScope(picked.file, GROUP, 'all');
-    expect(all.ok && all.file.telegramGroups).toEqual(['-5', GROUP]);
-    expect(all.ok && all.file.telegramTopics).toEqual([]);
+  });
+
+  it('选回整群：清掉这个群的话题路由；没有整群绑定时加进白名单，已有整群路由就沿用', () => {
+    const topics = {
+      ...emptyContactFile(),
+      telegramRoutes: [
+        { chatId: GROUP, topicId: '3', boundAt: 2 },
+        { chatId: '-5', topicId: '2', boundAt: 3 },
+      ],
+    };
+    const all = withTelegramGroupScope(topics, GROUP, 'all', NOW);
+    expect(all.ok && all.file.telegramGroups).toEqual([GROUP]);
+    expect(all.ok && all.file.telegramRoutes).toEqual([{ chatId: '-5', topicId: '2', boundAt: 3 }]);
+
+    const routed = {
+      ...topics,
+      telegramRoutes: [...topics.telegramRoutes, { chatId: GROUP, boundAt: 4 }],
+    };
+    const kept = withTelegramGroupScope(routed, GROUP, 'all', NOW);
+    expect(kept.ok && kept.file.telegramGroups).toEqual([]);
+    expect(kept.ok && kept.file.telegramRoutes).toEqual([
+      { chatId: '-5', topicId: '2', boundAt: 3 },
+      { chatId: GROUP, boundAt: 4 },
+    ]);
   });
 
   it('坏输入：群 id 不对、话题为空或不是数字一律拒绝', () => {
     const file = emptyContactFile();
-    expect(withTelegramGroupScope(file, '@dev', 'all')).toEqual({
+    expect(withTelegramGroupScope(file, '@dev', 'all', NOW)).toEqual({
       ok: false,
       error: 'invalid-chat-id',
     });
-    expect(withTelegramGroupScope(file, GROUP, [])).toEqual({ ok: false, error: 'invalid-topic' });
-    expect(withTelegramGroupScope(file, GROUP, ['abc'])).toEqual({
-      ok: false,
-      error: 'invalid-topic',
-    });
-    expect(withTelegramGroupScope(file, GROUP, 'some')).toEqual({
-      ok: false,
-      error: 'invalid-topic',
-    });
+    for (const scope of [[], ['abc'], 'some']) {
+      expect(withTelegramGroupScope(file, GROUP, scope, NOW)).toEqual({
+        ok: false,
+        error: 'invalid-topic',
+      });
+    }
   });
 
-  it('解绑一个群：整群和它的话题一起清，别的群不动', () => {
+  it('解绑一个群：白名单和这个群的整群、话题路由一起清，别的群不动', () => {
     const file = {
       ...emptyContactFile(),
-      telegramGroups: ['-5'],
-      telegramTopics: [
-        { chatId: GROUP, topicId: '3' },
-        { chatId: '-5', topicId: '2' },
+      telegramGroups: [GROUP, '-5'],
+      telegramRoutes: [
+        { chatId: GROUP, topicId: '3', boundAt: 1 },
+        { chatId: GROUP, boundAt: 1 },
+        { chatId: '-5', topicId: '2', boundAt: 1 },
       ],
     };
     const next = withTelegramGroupRemoved(file, GROUP);
     expect(next.telegramGroups).toEqual(['-5']);
-    expect(next.telegramTopics).toEqual([{ chatId: '-5', topicId: '2' }]);
-  });
-
-  it('路由键：话题绑定优先于整群；整群兜住没有单独绑的话题；都没有就不收', () => {
-    const file = {
-      ...emptyContactFile(),
-      telegramGroups: [GROUP],
-      telegramTopics: [{ chatId: GROUP, topicId: '3' }],
-    };
-    expect(matchTelegramRoute(file, Number(GROUP), '3')).toEqual({ chatId: GROUP, topicId: '3' });
-    expect(matchTelegramRoute(file, GROUP, '9')).toEqual({ chatId: GROUP });
-    expect(matchTelegramRoute(file, GROUP, undefined)).toEqual({ chatId: GROUP });
-    const topicsOnly = { ...file, telegramGroups: [] };
-    expect(matchTelegramRoute(topicsOnly, GROUP, '3')).toEqual({ chatId: GROUP, topicId: '3' });
-    expect(matchTelegramRoute(topicsOnly, GROUP, '9')).toBeNull();
-    expect(matchTelegramRoute(topicsOnly, GROUP, undefined)).toBeNull();
-    expect(matchTelegramRoute(topicsOnly, '-5', '3')).toBeNull();
+    expect(next.telegramRoutes).toEqual([{ chatId: '-5', topicId: '2', boundAt: 1 }]);
   });
 
   it('话题名：见过没名字的先占位，后来知道名字再补上；有名字不被空名覆盖', () => {
@@ -154,12 +161,15 @@ describe('Telegram 论坛话题绑定', () => {
     expect(parseContactFile(file).telegramTopicTitles).toEqual({ [`${GROUP}:3`]: '插件开发' });
   });
 
-  it('话题目录与设置页视图：按 id 排序，已绑但没见过的话题也列出；整群与话题分开标', () => {
+  it('话题目录与设置页视图：白名单与路由表按群合并，整群与话题分开标', () => {
     const file = {
       ...emptyContactFile(),
       telegramGroups: ['-5'],
       telegramGroupTitles: { [GROUP]: 'EnsoCode 交流群' },
-      telegramTopics: [{ chatId: GROUP, topicId: '12' }],
+      telegramRoutes: [
+        { chatId: GROUP, topicId: '12', boundAt: 1 },
+        { chatId: '-7', title: '绑定码绑的群', boundAt: 1 },
+      ],
       telegramTopicTitles: { [`${GROUP}:3`]: '插件开发', [`${GROUP}:7`]: '', '-5:2': '别的群' },
     };
     expect(telegramTopicCatalog(file, GROUP)).toEqual([
@@ -170,6 +180,7 @@ describe('Telegram 论坛话题绑定', () => {
     expect(telegramGroupBindings(file)).toEqual([
       { id: '-5', all: true, topics: [] },
       { id: GROUP, title: 'EnsoCode 交流群', all: false, topics: [{ id: '12' }] },
+      { id: '-7', title: '绑定码绑的群', all: true, topics: [] },
     ]);
   });
 });

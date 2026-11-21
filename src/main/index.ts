@@ -2,6 +2,7 @@ import path from 'node:path';
 import { electronApp, optimizer } from '@electron-toolkit/utils';
 import type { AppExitReason } from '@shared/types/ipc';
 import { DEFAULT_UPDATE_CHANNEL, isUpdateChannel } from '@shared/updater/channel';
+import { resolveAutoRestartMode } from '@shared/updater/idleRestart';
 import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { syncDropShelf } from './desktop/dropShelf';
 import {
@@ -454,7 +455,7 @@ async function initAutoUpdater(window: BrowserWindow): Promise<void> {
   if (process.platform === 'linux' && !process.env.APPIMAGE) return;
   // 读持久化设置里的 autoUpdate(zustand persist 形状:{ state: {...} });缺省 true
   const persisted = readSettings()?.['enso-settings'] as
-    | { state?: { autoUpdate?: boolean; autoRestartWhenIdle?: boolean; updateChannel?: unknown } }
+    | { state?: { autoUpdate?: boolean; updateChannel?: unknown } }
     | undefined;
   const autoUpdate = persisted?.state?.autoUpdate ?? true;
   const channel = isUpdateChannel(persisted?.state?.updateChannel)
@@ -464,7 +465,8 @@ async function initAutoUpdater(window: BrowserWindow): Promise<void> {
   autoUpdaterService.init(
     window,
     autoUpdate,
-    persisted?.state?.autoRestartWhenIdle === true,
+    // 旧版布尔开关：开着按「空闲时」，关着按「关」
+    resolveAutoRestartMode(persisted?.state),
     channel
   );
 }
