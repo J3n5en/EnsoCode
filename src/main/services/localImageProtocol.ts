@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { net } from '@platform';
-import { sniffImage } from '@shared/bots/cardPng';
+import { sniffAvatar } from '@shared/bots/cardPng';
 import {
   BOT_AVATAR_HOST,
   IMAGE_EXTENSIONS,
@@ -150,7 +150,7 @@ async function servePluginAsset(url: URL): Promise<Response> {
 async function serveBotAvatar(botId: string): Promise<Response> {
   const file = botAvatarFile(botId);
   if (!file) return new Response('Not found', { status: 404 });
-  return serveAvatarFile(file);
+  return serveAvatarFile(file, false);
 }
 
 function secretaryAvatarRequestName(url: URL): boolean {
@@ -168,13 +168,14 @@ async function serveSecretaryAvatar(url: URL): Promise<Response> {
   // 多秘书时 URL 带 s=<秘书 id>；只有一个秘书时可以不带
   const file = secretaryAvatarResolver(url.searchParams.get('s'));
   if (!file) return new Response('Not found', { status: 404 });
-  return serveAvatarFile(file);
+  // 秘书头像可以是原样保存的 GIF；文件名仍是 avatar.png，类型按内容给
+  return serveAvatarFile(file, true);
 }
 
-async function serveAvatarFile(file: string): Promise<Response> {
+async function serveAvatarFile(file: string, allowGif: boolean): Promise<Response> {
   try {
     const data = new Uint8Array(await readFile(file));
-    const format = sniffImage(data);
+    const format = sniffAvatar(data, allowGif);
     if (!format) return new Response('Forbidden', { status: 403 });
     // URL 带版本号，同一 URL 内容不变；CORS 供导出人物卡等 fetch 读字节
     return new Response(data, {

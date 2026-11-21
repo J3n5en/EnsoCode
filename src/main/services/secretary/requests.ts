@@ -1,3 +1,4 @@
+import { checkAvatarImage } from '@shared/bots/cardPng';
 import { parseProfile } from '@shared/secretary/parse';
 import type { ConversationAuthority, ProjectAuthority } from '@shared/types/agent';
 import type {
@@ -25,6 +26,15 @@ function nonEmpty(value: unknown): string | undefined {
 
 function time(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** 秘书头像：null 是移除；GIF 原字节放行以保住动画（只在这条路径上放行） */
+export function parseAvatarRequest(value: unknown): { image: Uint8Array | null } | null {
+  if (!isRecord(value)) return null;
+  const image = value.image;
+  if (image === null) return { image: null };
+  if (image instanceof Uint8Array && checkAvatarImage(image, { allowGif: true })) return { image };
+  return null;
 }
 
 export interface ResolveProposalRequest {

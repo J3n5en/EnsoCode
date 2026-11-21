@@ -27,7 +27,7 @@ export function avatarColorSelection(color: string | undefined): {
 const AVATAR_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const AVATAR_EXT = /\.(png|jpe?g|webp|gif)$/iu;
 
-/** 上传前的类型与大小。gif 允许作为来源，裁切后存成 png。 */
+/** 上传前的类型与大小。gif 不裁切，原字节保存以保住动画。 */
 export function secretaryAvatarUploadError(
   file: { type: string; name: string; size: number },
   maxBytes: number
@@ -36,3 +36,7 @@ export function secretaryAvatarUploadError(
   if (AVATAR_MIME.has(file.type) || AVATAR_EXT.test(file.name)) return null;
   return 'type';
 }
+
+/** 声明为 GIF 的文件：读字节核对魔数后跳过裁切 */
+export const declaresGif = (file: { type: string; name: string }): boolean =>
+  file.type === 'image/gif' || /\.gif$/iu.test(file.name);
