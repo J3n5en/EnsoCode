@@ -1213,6 +1213,13 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_PLAN_RESPOND, sessionId, response),
     stopTask: (sessionId: string, taskId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_TASK_STOP, sessionId, taskId),
+    /** 手动保留后台任务（可附理由）；reason 为 null 取消保留 */
+    keepTask: (
+      sessionId: string,
+      taskId: string,
+      reason: string | null
+    ): Promise<AgentActionResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_TASK_KEEP, sessionId, taskId, reason),
     backgroundTool: (sessionId: string, toolCallId: string): Promise<AgentActionResult> =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_TOOL_BACKGROUND, sessionId, toolCallId),
     subagentProgress: (sessionId: string): Promise<AgentRunProgress[]> =>

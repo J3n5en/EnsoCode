@@ -54,14 +54,21 @@ const send = (method, params = {}) =>
 
 try {
   await send('Page.enable');
-  await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1400,
+    height: 900,
+    deviceScaleFactor: 2,
+    mobile: false,
+  });
   const ids = readdirSync(site)
     .filter((f) => /^[A-Z]\.html$/.test(f))
     .map((f) => f[0]);
   for (const id of ids) {
     for (const theme of ['light', 'dark']) {
       const url = pathToFileURL(join(site, `${id}.html`)).href + (theme === 'dark' ? '#dark' : '');
-      await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+      await send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-color-scheme', value: theme }],
+      });
       await send('Page.navigate', { url: 'about:blank' });
       await send('Page.navigate', { url });
       await sleep(700);

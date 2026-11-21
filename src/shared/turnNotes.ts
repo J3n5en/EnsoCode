@@ -1,7 +1,13 @@
 import { type PlanNoteKind, splitPlanPrefix } from './planMode';
 import { splitUnattendedPrefix, type UnattendedNoteKind } from './unattendedNote';
 
-/** Plan / 无人值守的一次性提示可按任意顺序叠在正文前 */
+/** 回合收尾时没表态的后台任务清单：搭在下一条进模型的消息前，展示层剥掉 */
+export const TASK_WRAP_UP_TAG = 'background-tasks-wrap-up';
+const TASK_WRAP_UP_PREFIX = new RegExp(
+  `^<${TASK_WRAP_UP_TAG}>\\n[\\s\\S]*?\\n</${TASK_WRAP_UP_TAG}>(?:\\n\\n|$)`
+);
+
+/** Plan / 无人值守 / 收尾清单的一次性提示可按任意顺序叠在正文前 */
 export function splitTurnNotes(text: string): {
   plan?: PlanNoteKind;
   unattended?: UnattendedNoteKind;
@@ -15,6 +21,11 @@ export function splitTurnNotes(text: string): {
     if (p.note) {
       plan = p.note;
       rest = p.rest;
+      continue;
+    }
+    const wrapUp = TASK_WRAP_UP_PREFIX.exec(rest);
+    if (wrapUp) {
+      rest = rest.slice(wrapUp[0].length);
       continue;
     }
     const u = unattended ? { rest } : splitUnattendedPrefix(rest);

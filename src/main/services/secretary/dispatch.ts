@@ -2484,8 +2484,8 @@ export function dismissResult(
 }
 
 /**
- * 看板「停止遗留任务」：停掉这条派发记录里所有还在跑的后台任务。
- * 只认派发或接管的记录；停完把遗留标记清掉，不等下一次 tick。
+ * 看板「停止遗留任务」：只停这条派发记录里疑似闲置的后台任务，已保留的和仍有活动的不动。
+ * 只认派发或接管的记录；全部停完才把遗留标记清掉，不等下一次 tick。
  */
 export async function stopLeftoverTasks(
   ports: SecretaryDispatchPorts,
@@ -2497,11 +2497,11 @@ export async function stopLeftoverTasks(
     (task: ObservedTask) => task.status === 'running'
   );
   const stopped: string[] = [];
-  for (const task of running) {
+  for (const task of running.filter((task) => task.suspectedIdle)) {
     const result = await ports.stopTask(conversationId, task.taskId);
     if (result.ok) stopped.push(task.taskId);
   }
-  if (stopped.length > 0) {
+  if (stopped.length > 0 && stopped.length === running.length) {
     const file = ports.dispatchFile();
     const current = file.dispatched[conversationId];
     if (current) {

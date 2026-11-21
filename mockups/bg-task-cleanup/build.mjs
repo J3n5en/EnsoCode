@@ -42,14 +42,23 @@ try {
 </html>
 `;
   for (const s of screens) {
-    writeFileSync(resolve(site, `${s.id}.html`), page(`${s.id} · ${s.title}`, renderToStaticMarkup(s.element)));
+    writeFileSync(
+      resolve(site, `${s.id}.html`),
+      page(`${s.id} · ${s.title}`, renderToStaticMarkup(s.element))
+    );
   }
   const links = screens
-    .map((s) => `<li><b>${s.id}</b> ${s.title}：<a href="${s.id}.html">浅色</a> · <a href="${s.id}.html#dark">深色</a></li>`)
+    .map(
+      (s) =>
+        `<li><b>${s.id}</b> ${s.title}：<a href="${s.id}.html">浅色</a> · <a href="${s.id}.html#dark">深色</a></li>`
+    )
     .join('\n');
   writeFileSync(
     resolve(site, 'index.html'),
-    page('后台任务收尾 mockup', `<main style="padding:32px;line-height:2"><h1>后台任务收尾与闲置提醒 · mockup</h1><ul>${links}</ul></main>`)
+    page(
+      '后台任务收尾 mockup',
+      `<main style="padding:32px;line-height:2"><h1>后台任务收尾与闲置提醒 · mockup</h1><ul>${links}</ul></main>`
+    )
   );
   console.log(`built ${screens.length} screens → ${site}`);
 } finally {

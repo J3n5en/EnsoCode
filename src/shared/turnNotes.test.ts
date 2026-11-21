@@ -20,4 +20,11 @@ describe('turnNotes', () => {
     expect(prependTurnNote(U, '/skill:a /skill:b 做事')).toBe(`/skill:a /skill:b ${U}\n\n做事`);
     expect(prependTurnNote(U, '/skill:a')).toBe(`/skill:a ${U}`);
   });
+
+  it('剥掉回合收尾的后台任务清单', () => {
+    const W =
+      '<background-tasks-wrap-up>\nThese background tasks are still running:\n- t1: pnpm dev\n</background-tasks-wrap-up>';
+    expect(splitTurnNotes(`${P}\n\n${W}\n\n做事`)).toEqual({ plan: 'on', rest: '做事' });
+    expect(splitTurnNotes(`${W}\n\n${U}\n\n做事`)).toEqual({ unattended: 'on', rest: '做事' });
+  });
 });

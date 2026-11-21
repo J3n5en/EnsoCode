@@ -695,6 +695,9 @@ export const IPC_PRODUCT_COVERAGE = {
     'Renderer reports a conversation mute toggle so Main stops system notifications and paired-device pushes immediately; no execution rights.'
   ),
   AGENT_TASK_STOP: surfaces('conversations.background-task.stop'),
+  AGENT_TASK_KEEP: excluded(
+    'Desktop task-bar control that marks a running background task as kept (or unkept) so idle hints are suppressed for an hour; no execution rights.'
+  ),
   AGENT_TOOL_BACKGROUND: excluded(
     'Desktop tool-row control that moves a running foreground shell command into a background task; renderer-only, not an Enso capability.'
   ),

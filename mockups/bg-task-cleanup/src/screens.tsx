@@ -36,6 +36,7 @@ import {
   cn,
   Frame,
   IdleActions,
+  OutputPanel,
   Page,
   ReasonLine,
   StatusBadge,
@@ -46,7 +47,6 @@ import {
   ToolCard,
   ToolListItem,
   UserBubble,
-  OutputPanel,
 } from './ui';
 
 /* ───────────── A 会话内任务条 ───────────── */
@@ -115,9 +115,7 @@ function ScreenA() {
                 <Evidence icon={Unplug} label="端口 5173" value="无连接" />
                 <Evidence icon={Cpu} label="CPU" value="0%" />
               </div>
-              <MetaLine>
-                agent 启动 · 已跑 1h 05m · 疑似闲置不会自动停止，只提醒一次
-              </MetaLine>
+              <MetaLine>agent 启动 · 已跑 1h 05m · 疑似闲置不会自动停止，只提醒一次</MetaLine>
             </OutputPanel>
           </div>
           <div className="mb-1.5">
@@ -254,7 +252,10 @@ function TaskMarker({ running = 0, idle = 0 }: { running?: number; idle?: number
         </span>
       )}
       {idle > 0 && (
-        <span className="inline-flex items-center gap-0.5 text-warning" title={`${idle} 个疑似闲置`}>
+        <span
+          className="inline-flex items-center gap-0.5 text-warning"
+          title={`${idle} 个疑似闲置`}
+        >
           <Moon className="h-3 w-3" />
           {idle}
         </span>
@@ -378,7 +379,14 @@ function SidebarBody({ entryActive, hoverCi }: { entryActive?: boolean; hoverCi?
       <TasksEntry active={entryActive} />
       <div className="mx-2 mt-1 border-t border-border" />
       <SectionLabel>活跃中</SectionLabel>
-      <ConvRow title="重构登录页" time="刚刚" tone="running" active={!entryActive} running={2} idle={1} />
+      <ConvRow
+        title="重构登录页"
+        time="刚刚"
+        tone="running"
+        active={!entryActive}
+        running={2}
+        idle={1}
+      />
       <ConvRow title="接入支付回调" time="12 分钟" tone="unread" running={1} idle={1} />
       <ConvRow title="升级依赖版本" time="40 分钟" running={1} />
       <ConvRow title="整理周报" time="1 小时" />
@@ -412,8 +420,9 @@ function ScreenC() {
         label="C 侧栏会话行"
         note={
           <>
-            标题右侧的计数沿用浏览器/终端计数的样式：<Activity className="inline size-3" /> N =
-            N 个任务在跑（灰），<Moon className="inline size-3 text-warning" /> N = N
+            标题右侧的计数沿用浏览器/终端计数的样式：
+            <Activity className="inline size-3" /> N = N 个任务在跑（灰），
+            <Moon className="inline size-3 text-warning" /> N = N
             个疑似闲置（琥珀色）。悬停标记弹出任务卡，没打开的会话也能直接停。
           </>
         }
@@ -530,7 +539,15 @@ function GroupCard({
   );
 }
 
-function Toolbar({ idleOnly, count, names }: { idleOnly?: boolean; count: number; names?: boolean }) {
+function Toolbar({
+  idleOnly,
+  count,
+  names,
+}: {
+  idleOnly?: boolean;
+  count: number;
+  names?: boolean;
+}) {
   return (
     <div className="flex items-center gap-2">
       <Segmented idleOnly={idleOnly} />
@@ -541,7 +558,11 @@ function Toolbar({ idleOnly, count, names }: { idleOnly?: boolean; count: number
           <Button size="xs" variant="ghost" className="text-muted-foreground">
             取消选择
           </Button>
-          <Button size="xs" variant="destructive" className={cn(names && 'ring-2 ring-destructive/25')}>
+          <Button
+            size="xs"
+            variant="destructive"
+            className={cn(names && 'ring-2 ring-destructive/25')}
+          >
             <Square className="size-3" />
             停止所选
           </Button>
@@ -620,7 +641,10 @@ function ScreenD() {
           <TasksPage selected={[DEV.command, NGROK.command, HTTP.command]} />
         </AppShell>
       </Frame>
-      <Frame label="D2 只看疑似闲置" note="筛选后只剩 3 个疑似闲置任务；组头复选框一键全选，再「停止所选」。">
+      <Frame
+        label="D2 只看疑似闲置"
+        note="筛选后只剩 3 个疑似闲置任务；组头复选框一键全选，再「停止所选」。"
+      >
         <AppShell>
           <TasksPage idleOnly selected={[]} />
         </AppShell>
@@ -677,7 +701,8 @@ function ScreenE() {
 
 /* ───────────── G 秘书看板「已完成（有遗留任务）」 ───────────── */
 
-const CHIP = 'inline-flex h-[18px] items-center gap-1 rounded-full bg-foreground/[0.06] px-1.5 font-medium';
+const CHIP =
+  'inline-flex h-[18px] items-center gap-1 rounded-full bg-foreground/[0.06] px-1.5 font-medium';
 
 function LeftoverRow({ task }: { task: Task }) {
   return (
@@ -739,7 +764,9 @@ function BoardCard({
         </span>
         {leftovers && (
           <span className={cn(CHIP, idle > 0 && 'text-warning')}>
-            {idle > 0 ? `已完成（${leftovers.length} 个遗留任务）` : `已完成（保留 ${leftovers.length} 个任务）`}
+            {idle > 0
+              ? `已完成（${leftovers.length} 个遗留任务）`
+              : `已完成（保留 ${leftovers.length} 个任务）`}
           </span>
         )}
         <span className="tabular-nums">{time}</span>

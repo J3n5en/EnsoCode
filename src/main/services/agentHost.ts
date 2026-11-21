@@ -2459,11 +2459,21 @@ export function forkSession(
   });
 }
 
+/** 按会话 id 停：会话不必已打开，worker 校验任务归属 */
 export function stopBackgroundTask(
-  identity: SessionIdentity,
+  sessionId: string,
   taskId: string
 ): { ok: boolean; error?: string } {
-  return sendAgentCommand({ type: 'task-stop', identity, taskId });
+  return sendAgentCommand({ type: 'task-stop', sessionId, taskId });
+}
+
+/** 手动保留（reason 为 null 取消保留） */
+export function keepBackgroundTask(
+  sessionId: string,
+  taskId: string,
+  reason: string | null
+): { ok: boolean; error?: string } {
+  return sendAgentCommand({ type: 'task-keep', sessionId, taskId, reason });
 }
 
 export function backgroundForegroundTool(

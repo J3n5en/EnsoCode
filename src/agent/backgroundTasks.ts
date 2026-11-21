@@ -6,7 +6,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { SHELL_READ_HINT, SHELL_SLEEP_HINT, SHELL_TIMEOUT_HINT } from '@shared/shellHints';
 import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
-import type { BackgroundTaskInfo } from '@shared/types/agent';
+import type { BackgroundTaskInfo, BackgroundTaskKeep } from '@shared/types/agent';
 import { commandKey, commandSummary, type DetachedTaskRecord } from './detachedTasksManifest';
 import {
   bindForegroundCommand,
@@ -42,6 +42,13 @@ import {
   yieldReceiptText,
 } from './shell/receipts';
 import { classifyFailure, type FailureVerdict } from './shell/taxonomy';
+import {
+  ActivitySampler,
+  IDLE_QUIET_MS,
+  IDLE_SAMPLE_INTERVAL_MS,
+  judgeIdle,
+  keepSuppressesIdle,
+} from './taskHygiene';
 
 /** 内存缓冲上限（超出截头保尾；磁盘 log 全量写到 limits.logMaxBytes 为止） */
 const MAX_BUFFER = 200_000;
@@ -83,6 +90,8 @@ interface Task {
   logDroppedBytes: number;
   /** 任务累计写出的输出字节数（认回的任务含上一代写进日志的） */
   outputBytes: number;
+  /** 最近一次有输出（或登记）的时刻：闲置判定只看它，不读日志 */
+  lastOutputAt: number;
   /** 跨 chunk 的多字节字符留到下个 chunk 再解码，避免产生替换字符 */
   decoder: StringDecoder;
   /** 模型已经由工具返回值知情（阻塞等到结束 / kill 已回执），不再通知 */
@@ -221,11 +230,14 @@ export class BackgroundTaskManager {
   private foreground = new Map<string, Map<string, DetachableCall>>();
   private counter = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private idleTimer: ReturnType<typeof setInterval> | null = null;
+  private sampling = false;
 
   constructor(
     private readonly events: TaskEvents,
     private readonly logDir: string,
-    private currentLimits: ShellLimits = SHELL_LIMITS
+    private currentLimits: ShellLimits = SHELL_LIMITS,
+    private readonly sampler: ActivitySampler = new ActivitySampler()
   ) {}
 
   /** 任务日志与文件直写输出所在目录 */
@@ -476,6 +488,7 @@ export class BackgroundTaskManager {
       logBytes,
       logDroppedBytes: 0,
       outputBytes: logBytes,
+      lastOutputAt: Date.now(),
       decoder: new StringDecoder('utf8'),
       consumed: false,
       killedByUser: false,
@@ -499,6 +512,11 @@ export class BackgroundTaskManager {
   private append(task: Task, chunk: Buffer): void {
     if (chunk.length === 0) return;
     task.outputBytes += chunk.length;
+    task.lastOutputAt = Date.now();
+    if (task.info.idle) {
+      delete task.info.idle;
+      this.emitLevel(task.sessionId);
+    }
     this.writeLog(task, chunk);
     const text = task.decoder.write(chunk);
     if (!text) return;
@@ -572,6 +590,105 @@ export class BackgroundTaskManager {
     this.events.onStarted(task.sessionId, this.infoOf(task));
     this.emitLevel(task.sessionId);
     this.ensureTimer();
+    if (process.platform !== 'win32') {
+      this.idleTimer ??= setInterval(() => void this.sampleIdle(), IDLE_SAMPLE_INTERVAL_MS);
+      this.idleTimer.unref?.();
+    }
+  }
+
+  /**
+   * 闲置采样：只看已安静接近阈值的任务（提前一个周期取 CPU 基线），一轮一次 ps + 一次 lsof。
+   * 状态变了才发全量快照；保留未满 1 小时的不判，到点后仍闲置就撤掉保留、重新标闲置。
+   */
+  async sampleIdle(now = Date.now()): Promise<void> {
+    if (this.sampling) return;
+    const running = [...this.tasks.values()].filter(
+      (task) => task.info.status === 'running' && !task.settling
+    );
+    if (running.length === 0) {
+      if (this.idleTimer) clearInterval(this.idleTimer);
+      this.idleTimer = null;
+      return;
+    }
+    const candidates = running.flatMap((task) => {
+      const pid = task.pid ?? task.run?.pid;
+      return pid !== undefined &&
+        !keepSuppressesIdle(task.info.keep, now + IDLE_SAMPLE_INTERVAL_MS) &&
+        now - task.lastOutputAt >= IDLE_QUIET_MS - IDLE_SAMPLE_INTERVAL_MS
+        ? [{ key: task.info.taskId, pid }]
+        : [];
+    });
+    this.sampling = true;
+    let samples: Awaited<ReturnType<ActivitySampler['sample']>>;
+    try {
+      samples = await this.sampler.sample(candidates, now);
+    } catch {
+      samples = new Map();
+    } finally {
+      this.sampling = false;
+    }
+    const touched = new Set<string>();
+    for (const task of running) {
+      if (task.info.status !== 'running') continue;
+      const idle =
+        !keepSuppressesIdle(task.info.keep, now) &&
+        judgeIdle({ now, lastOutputAt: task.lastOutputAt, sample: samples.get(task.info.taskId) });
+      if (idle) {
+        const ports = samples.get(task.info.taskId)?.sockets?.listening ?? [];
+        const changed =
+          !task.info.idle ||
+          task.info.idle.since !== task.lastOutputAt ||
+          task.info.idle.ports.join() !== ports.join() ||
+          task.info.keep !== undefined;
+        task.info.idle = { since: task.lastOutputAt, ports };
+        delete task.info.keep;
+        if (changed) touched.add(task.sessionId);
+      } else if (task.info.idle && samples.has(task.info.taskId)) {
+        // 拿不到数据的一轮维持原判，不来回闪；拿到了且不再闲置才撤
+        delete task.info.idle;
+        touched.add(task.sessionId);
+      }
+    }
+    for (const sessionId of touched) this.emitLevel(sessionId);
+  }
+
+  /** 留下运行（agent 表态或用户手动保留）：清掉闲置标记，1 小时后重新检查 */
+  keep(taskId: string, keep: Omit<BackgroundTaskKeep, 'at'>, now = Date.now()): boolean {
+    const task = this.tasks.get(taskId);
+    if (task?.info.status !== 'running') return false;
+    const reason = keep.reason?.trim().slice(0, 200);
+    task.info.keep = { by: keep.by, ...(reason ? { reason } : {}), at: now };
+    delete task.info.idle;
+    this.emitLevel(task.sessionId);
+    return true;
+  }
+
+  /** 取消保留：下一轮采样重新判定 */
+  unkeep(taskId: string): boolean {
+    const task = this.tasks.get(taskId);
+    if (!task?.info.keep) return false;
+    delete task.info.keep;
+    this.emitLevel(task.sessionId);
+    return true;
+  }
+
+  /** 会话树里还在跑、没表态（没保留、也没在停）的任务 */
+  undeclared(rootId: string): BackgroundTaskInfo[] {
+    return [...this.tasks.values()]
+      .filter(
+        (task) =>
+          task.info.status === 'running' &&
+          !task.info.keep &&
+          !task.killedByUser &&
+          !task.stoppedByModel &&
+          inSessionTree(task.sessionId, rootId)
+      )
+      .map((task) => this.infoOf(task));
+  }
+
+  taskInfo(taskId: string): BackgroundTaskInfo | undefined {
+    const task = this.tasks.get(taskId);
+    return task ? this.infoOf(task) : undefined;
   }
 
   private infoOf(task: Task): BackgroundTaskInfo {
@@ -1585,7 +1702,100 @@ export function createTaskTools(
         };
       },
     },
+    {
+      name: 'task_settle',
+      label: 'Task settle',
+      description:
+        'Declare what happens to background tasks that are still running when you wrap up, all in one call: ' +
+        'stop the ones you no longer need, keep the rest with a one-line reason the user will see. ' +
+        'Kept tasks are not flagged as idle for an hour.',
+      promptSnippet:
+        'task_settle: when wrapping up, stop or keep (with a reason) each still-running background task',
+      parameters: {
+        type: 'object',
+        properties: {
+          tasks: {
+            type: 'array',
+            description: 'One entry per running background task',
+            items: {
+              type: 'object',
+              properties: {
+                taskId: { type: 'string', description: 'Background task id' },
+                action: { type: 'string', enum: ['stop', 'keep'], description: 'stop or keep' },
+                reason: {
+                  type: 'string',
+                  description:
+                    'One short sentence: why it is no longer needed, or why it must keep running',
+                },
+              },
+              required: ['taskId', 'action', 'reason'],
+            },
+          },
+        },
+        required: ['tasks'],
+      } as unknown as ToolDefinition['parameters'],
+      prepareArguments: (args: unknown) => normalizeSettleArgs(args),
+      async execute(_id, params) {
+        const entries = settleEntries((params as { tasks?: unknown }).tasks);
+        if (entries.length === 0)
+          throw new Error('tasks must list at least one { taskId, action, reason }');
+        const settled = entries.map((entry) => {
+          const command = owned(entry.taskId) ? manager.taskInfo(entry.taskId)?.command : undefined;
+          const ok =
+            owned(entry.taskId) &&
+            (entry.action === 'stop'
+              ? manager.stop(entry.taskId)
+              : manager.keep(entry.taskId, { by: 'agent', reason: entry.reason }));
+          return { ...entry, ...(command ? { command } : {}), ok };
+        });
+        const stillOpen = sessionId ? manager.undeclared(sessionId).map((task) => task.taskId) : [];
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                settled,
+                ...(stillOpen.length > 0 ? { stillUndeclared: stillOpen } : {}),
+              }),
+            },
+          ],
+          details: undefined,
+        };
+      },
+    } as ToolDefinition,
   ];
+}
+
+interface SettleEntry {
+  taskId: string;
+  action: 'stop' | 'keep';
+  reason: string;
+}
+
+/** 模型常把数组写成 JSON 字符串、或只给单个对象：在 schema 校验前归一 */
+function normalizeSettleArgs(args: unknown): unknown {
+  if (!args || typeof args !== 'object') return args;
+  let tasks = (args as { tasks?: unknown }).tasks;
+  if (typeof tasks === 'string') {
+    try {
+      tasks = JSON.parse(tasks);
+    } catch {}
+  }
+  if (tasks && typeof tasks === 'object' && !Array.isArray(tasks)) tasks = [tasks];
+  return { ...args, tasks };
+}
+
+function settleEntries(value: unknown): SettleEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const { taskId, action, reason } = item as Record<string, unknown>;
+    if (typeof taskId !== 'string' || !taskId || (action !== 'stop' && action !== 'keep'))
+      return [];
+    return [
+      { taskId, action, reason: typeof reason === 'string' ? reason.trim().slice(0, 200) : '' },
+    ];
+  });
 }
 
 /** 完成提醒搭车：任意工具结果顶部前置未投递的后台任务完成通知 */
