@@ -3176,6 +3176,10 @@ export function registerAgentHandlers(): void {
     notifyDesktop().setViewedSession(isNonEmptyString(sessionId) ? sessionId : null);
     // 正在查看的会话不参与 worker 侧闲置回收，否则 release 后 ChatView 会立刻 resume 形成拉锯
     setPinnedSessions('viewed', isNonEmptyString(sessionId) ? [sessionId] : []);
+    // 正开着而先没收走的已完成派出会话：切走后归档
+    void import('./secretary').then((secretary) =>
+      secretary.onViewedConversationChanged(isNonEmptyString(sessionId) ? sessionId : null)
+    );
   });
 
   ipcMain.on(IPC_CHANNELS.AGENT_SESSION_MUTED, (_event, sessionId: unknown, muted: unknown) => {

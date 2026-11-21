@@ -113,6 +113,7 @@ import {
   patchConversationsState,
   readPersistedConversation,
   readPersistedConversations,
+  readSettings,
   readSettingsState,
 } from './settings';
 import { createConversationWorktree, removeRegisteredWorktree } from './worktree';
@@ -244,6 +245,23 @@ const hosts = new Map<string, SecretaryHost>();
 /** 各秘书宿主对冷启动续跑失败的订阅 */
 const resumeFailureSubscriptions = new Map<string, () => void>();
 
+/** 界面上报的当前打开的会话；undefined 表示还没上报（刚启动），这时按上次落盘的 activeId 算 */
+let viewedSession: string | null | undefined;
+
+function viewedConversation(): string | null {
+  if (viewedSession !== undefined) return viewedSession;
+  const store = readSettings()?.['enso-conversations'] as
+    | { state?: { activeId?: unknown } }
+    | undefined;
+  return typeof store?.state?.activeId === 'string' ? store.state.activeId : null;
+}
+
+/** 当前打开的会话变了：之前因为正开着而没收走的已完成派出会话，这时归档 */
+export function onViewedConversationChanged(sessionId: string | null): void {
+  viewedSession = sessionId;
+  for (const instance of hosts.values()) instance.sweepAutoArchive();
+}
+
 /** 档案与定时在设置窗口里编辑，聊天侧的操作仍只认主界面 */
 function isProfileEditor(webContentsId: number): boolean {
   return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
@@ -305,6 +323,22 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
       });
     },
     reportPeerTodos: () => reportPeerTodos(ctx),
+    archive: (conversationId, at) => {
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row || row.archived === true) return;
+        state.conversations[conversationId] = { ...row, archived: true, archivedAt: at };
+      });
+    },
+    unarchive: (conversationId) => {
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row) return;
+        const { archived: _archived, archivedAt: _archivedAt, ...rest } = row;
+        state.conversations[conversationId] = rest;
+      });
+    },
+    viewed: (conversationId) => viewedConversation() === conversationId,
     newId: () => randomUUID(),
     audit: (entry) => appendAudit(ctx.dir, entry),
     recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
