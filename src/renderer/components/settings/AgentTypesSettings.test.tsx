@@ -49,7 +49,29 @@ vi.mock('@/components/ui/dialog', () => {
 vi.mock('@/components/ui/select', () => {
   const Wrap = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   return {
-    Select: Wrap,
+    // 带 items 数组的 Select 渲染可点选项，便于驱动 onValueChange
+    Select: ({
+      children,
+      items,
+      onValueChange,
+    }: {
+      children?: ReactNode;
+      items?: unknown;
+      onValueChange?: (value: string) => void;
+    }) => (
+      <div>
+        {children}
+        {Array.isArray(items) &&
+          items.map((item: { value: string }) => (
+            <button
+              key={item.value}
+              type="button"
+              data-select-option={item.value}
+              onClick={() => onValueChange?.(item.value)}
+            />
+          ))}
+      </div>
+    ),
     SelectTrigger: Wrap,
     SelectValue: () => null,
     SelectPopup: Wrap,
@@ -181,5 +203,114 @@ describe('AgentTypeList 展示', () => {
     const markup = renderToStaticMarkup(<AgentTypeList hasSubagentModels />);
     expect(markup).toContain('Auto');
     expect(markup).not.toContain('enso-virtual / auto');
+  });
+
+  it('跟随会话模型的行显示类型级思考档位', () => {
+    harness.state.agentTypes = [{ ...FOLLOW_TYPE, reasoning: 'on', thinkingLevel: 'low' }];
+    const markup = renderToStaticMarkup(<AgentTypeList hasSubagentModels />);
+    expect(markup).toContain('Thinking level: low');
+  });
+
+  it('主代理挑选的行不显示思考档位', () => {
+    harness.state.agentTypes = [
+      { ...FOLLOW_TYPE, modelMode: 'agent_pick', reasoning: 'on', thinkingLevel: 'low' },
+    ];
+    const markup = renderToStaticMarkup(<AgentTypeList hasSubagentModels />);
+    expect(markup).not.toContain('Thinking level');
+  });
+});
+
+const FOLLOW_TYPE = {
+  id: '22222222-2222-4222-8222-222222222222',
+  name: 'cheap-scout',
+  description: 'Cheap scout',
+  systemPrompt: 'Be quick.',
+  tools: 'readonly' as const,
+  modelMode: 'follow' as const,
+};
+
+async function mountDialog(entry: Parameters<typeof AgentTypeEditDialog>[0]['entry']) {
+  const dom = parseHTML('<html><body><div id="root"></div></body></html>');
+  vi.stubGlobal('window', dom.window);
+  vi.stubGlobal('document', dom.document);
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const container = dom.document.getElementById('root');
+  if (!container) throw new Error('Missing test root');
+  root = createRoot(container);
+  await act(async () => root?.render(<AgentTypeEditDialog entry={entry} onClose={() => {}} />));
+  const option = (value: string) =>
+    container.querySelector(
+      `[data-select-option="${value}"]`
+    ) as unknown as HTMLButtonElement | null;
+  const save = async () => {
+    const button = [...container.querySelectorAll('button')].find(
+      (item) => item.textContent === 'Save'
+    );
+    expect(button).toBeDefined();
+    await act(async () => button?.click());
+    return harness.updateAgentType.mock.calls[0]?.[1] as Record<string, unknown>;
+  };
+  return { option, save };
+}
+
+describe('AgentTypeEditDialog 思考档位与模型选型模式', () => {
+  it('跟随会话模型选 low，保存写入 thinkingLevel', async () => {
+    const { option, save } = await mountDialog(FOLLOW_TYPE);
+    expect(option('low')).not.toBeNull();
+    await act(async () => option('low')?.click());
+    const payload = await save();
+    expect(payload).toMatchObject({ modelMode: 'follow', reasoning: 'on', thinkingLevel: 'low' });
+    expect(payload).not.toHaveProperty('providerId');
+  });
+
+  it('跟随会话模型改回「跟随」，清掉旧推理覆盖', async () => {
+    const { option, save } = await mountDialog({
+      ...FOLLOW_TYPE,
+      reasoning: 'on',
+      thinkingLevel: 'low',
+    });
+    await act(async () => option('inherit')?.click());
+    const payload = await save();
+    expect(payload.reasoning).toBeUndefined();
+    expect(payload.thinkingLevel).toBeUndefined();
+  });
+
+  it('跟随会话模型选关闭，保存 reasoning off', async () => {
+    const { option, save } = await mountDialog(FOLLOW_TYPE);
+    await act(async () => option('off')?.click());
+    const payload = await save();
+    expect(payload).toMatchObject({ reasoning: 'off' });
+    expect(payload.thinkingLevel).toBeUndefined();
+  });
+
+  it('主代理挑选不出现档位选择，也不保存旧档位', async () => {
+    const { option, save } = await mountDialog({
+      ...FOLLOW_TYPE,
+      modelMode: 'agent_pick',
+      reasoning: 'on',
+      thinkingLevel: 'high',
+    });
+    expect(option('low')).toBeNull();
+    expect(option('inherit')).toBeNull();
+    const payload = await save();
+    expect(payload.reasoning).toBeUndefined();
+    expect(payload.thinkingLevel).toBeUndefined();
+  });
+
+  it('固定模型档位仍走 ModelPicker，不额外出现独立选择器并照常保存', async () => {
+    const { option, save } = await mountDialog({
+      ...FIXED_VIRTUAL_TYPE,
+      reasoning: 'on',
+      thinkingLevel: 'high',
+    });
+    expect(option('low')).toBeNull();
+    const payload = await save();
+    expect(payload).toMatchObject({
+      modelMode: 'fixed',
+      providerId: 'enso-virtual',
+      modelId: 'auto',
+      reasoning: 'on',
+      thinkingLevel: 'high',
+    });
   });
 });
