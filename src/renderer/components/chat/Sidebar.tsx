@@ -7,6 +7,13 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import {
+  type ArchiveScope,
+  archivedTotal,
+  archiveScopeForTab,
+  archiveSecretaryIds,
+  filterArchivedByScope,
+} from '@shared/archiveScope';
 import { conversationDotTone } from '@shared/conversationDotTone';
 import {
   ALL_GROUP_ID,
@@ -60,6 +67,7 @@ import {
   BackgroundTasksEntry,
 } from '@/components/backgroundTasks/BackgroundTaskMarker';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
+import { ArchiveEntryButton, ArchiveScopeChip } from '@/components/chat/ArchiveEntryButton';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
 import { ConversationTitleEdit } from '@/components/chat/ConversationTitleEdit';
@@ -828,6 +836,11 @@ export function Sidebar({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveQuery, setArchiveQuery] = useState('');
   const [archiveCleanupOpen, setArchiveCleanupOpen] = useState<string | null>(null);
+  // 入口按当前 tab 的范围计数；弹窗里可临时切到全部归档或某个秘书派出的
+  const tabArchiveScope = archiveScopeForTab(resolvedGroupId, projectGroups);
+  const [archiveScopeOverride, setArchiveScopeOverride] = useState<ArchiveScope | null>(null);
+  const archiveScope = archiveScopeOverride ?? tabArchiveScope;
+  const archiveScopeContext = { projects, projectGroups, conversations };
   // 搜索时:归档项目名命中则整组保留(与活动项目一致),否则只留命中的会话
   const visibleArchivedGroups = archiveQuery.trim()
     ? archivedGroups
@@ -850,21 +863,43 @@ export function Sidebar({
         })
         .filter((group) => group.ids.length > 0)
     : archivedGroups;
-  const archivedInSlice = (group: (typeof archivedGroups)[number]) => {
-    if (resolvedGroupId === ALL_GROUP_ID) return true;
-    const project = projects.find((item) => item.id === group.projectId);
-    if (!project) return resolvedGroupId === UNGROUPED_GROUP_ID;
-    if (resolvedGroupId === UNGROUPED_GROUP_ID) {
-      return !project.groupId || !projectGroups.some((item) => item.id === project.groupId);
-    }
-    return project.groupId === resolvedGroupId;
-  };
-  const slicedArchivedGroups = visibleArchivedGroups.filter(archivedInSlice);
-  const archivedCount = archivedGroups
-    .filter(archivedInSlice)
-    .reduce((count, group) => count + group.ids.length, 0);
+  const slicedArchivedGroups = filterArchivedByScope(
+    visibleArchivedGroups,
+    archiveScope,
+    archiveScopeContext
+  );
+  const archivedCount = archivedTotal(
+    filterArchivedByScope(archivedGroups, tabArchiveScope, archiveScopeContext)
+  );
+  const scopedArchivedCount = archivedTotal(
+    filterArchivedByScope(archivedGroups, archiveScope, archiveScopeContext)
+  );
+  const archiveSecretaries = archiveSecretaryIds(archivedGroups, conversations);
+  const secretaryName = (id: string) =>
+    (multiSecretary
+      ? secretaryEntries.find((entry) => entry.id === id)?.view.name
+      : secretaryView?.name) ?? t('Secretary');
+  const tabScopeLabel =
+    tabArchiveScope.kind === 'group'
+      ? (projectGroups.find((group) => group.id === tabArchiveScope.groupId)?.name ?? '')
+      : tabArchiveScope.kind === 'ungrouped'
+        ? t('Ungrouped')
+        : t('All archived');
+  const archiveScopeHint =
+    archiveScope.kind === 'group'
+      ? t('Archived in group “{{name}}”', { name: tabScopeLabel })
+      : archiveScope.kind === 'ungrouped'
+        ? t('Archived in ungrouped projects')
+        : archiveScope.kind === 'secretary'
+          ? t('Archived sessions dispatched by {{name}}', {
+              name: secretaryName(archiveScope.secretaryId),
+            })
+          : archiveScope.fallbackFrom === 'recent'
+            ? t('“Recent” has no archive scope; showing all archived')
+            : t('Showing all archived');
   const openArchive = () => {
     setArchiveQuery('');
+    setArchiveScopeOverride(null);
     setArchiveOpen(true);
   };
 
@@ -1034,16 +1069,11 @@ export function Sidebar({
           </button>
           <div className="flex-1" />
           {window.electronAPI.remote?.linkStatus && <PhoneLinkStatus />}
-          {archivedCount > 0 && (
-            <button
-              type="button"
-              onClick={openArchive}
-              className={ICON_BUTTON_CLASS}
-              title={`${t('Archived')} (${archivedCount})`}
-            >
-              <Archive className="h-4 w-4" />
-            </button>
-          )}
+          <ArchiveEntryButton
+            count={archivedCount}
+            onClick={openArchive}
+            className={ICON_BUTTON_CLASS}
+          />
           {window.electronAPI.remote?.exitDesk && (
             <button
               type="button"
@@ -1942,17 +1972,11 @@ export function Sidebar({
           ) : (
             <NodeSwitcher />
           )}
-          {archivedCount > 0 && (
-            <button
-              type="button"
-              data-slot="archived-button"
-              onClick={openArchive}
-              className={ICON_BUTTON_CLASS}
-              title={`${t('Archived')} (${archivedCount})`}
-            >
-              <Archive className="h-4 w-4" />
-            </button>
-          )}
+          <ArchiveEntryButton
+            count={archivedCount}
+            onClick={openArchive}
+            className={ICON_BUTTON_CLASS}
+          />
           {window.electronAPI.remote?.exitDesk && (
             <button
               type="button"
@@ -2009,9 +2033,40 @@ export function Sidebar({
             <DialogTitle className="flex items-baseline gap-2">
               {t('Archived')}
               <span className="font-sans text-sm text-muted-foreground tabular-nums">
-                {archivedCount}
+                {scopedArchivedCount}
               </span>
             </DialogTitle>
+            <p data-slot="archive-scope" className="text-xs text-muted-foreground">
+              {archiveScopeHint}
+            </p>
+            {(tabArchiveScope.kind !== 'all' || archiveSecretaries.length > 0) && (
+              <div className="flex flex-wrap gap-1.5">
+                {tabArchiveScope.kind !== 'all' && (
+                  <ArchiveScopeChip
+                    label={tabScopeLabel}
+                    selected={archiveScopeOverride === null}
+                    onClick={() => setArchiveScopeOverride(null)}
+                  />
+                )}
+                <ArchiveScopeChip
+                  label={t('All archived')}
+                  selected={archiveScope.kind === 'all'}
+                  onClick={() =>
+                    setArchiveScopeOverride(tabArchiveScope.kind === 'all' ? null : { kind: 'all' })
+                  }
+                />
+                {archiveSecretaries.map((secretaryId) => (
+                  <ArchiveScopeChip
+                    key={secretaryId}
+                    label={t('Dispatched by {{name}}', { name: secretaryName(secretaryId) })}
+                    selected={
+                      archiveScope.kind === 'secretary' && archiveScope.secretaryId === secretaryId
+                    }
+                    onClick={() => setArchiveScopeOverride({ kind: 'secretary', secretaryId })}
+                  />
+                ))}
+              </div>
+            )}
             <div className="mt-1 flex items-center gap-2">
               <InputGroup data-size="sm">
                 <InputGroupAddon>
