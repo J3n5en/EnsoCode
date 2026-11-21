@@ -21,12 +21,15 @@ export function useSecretaryFace(): SecretaryFaceModel | null {
   const profile = useSecretaryStore((state) =>
     state.secretary.enabled ? state.secretary.profile : null
   );
+  const secretaryId = useSecretaryStore((state) => state.secretary.secretaryId ?? undefined);
   if (!profile) return null;
   const imageVersion = profile.avatar.imageVersion;
   return {
     name: profile.name.trim() || '·',
     color: profile.avatar.color,
-    ...(imageVersion ? { image: secretaryAvatarUrl(imageVersion, profile.avatar.imageHash) } : {}),
+    ...(imageVersion
+      ? { image: secretaryAvatarUrl(imageVersion, profile.avatar.imageHash, secretaryId) }
+      : {}),
   };
 }
 

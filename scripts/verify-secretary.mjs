@@ -6886,6 +6886,99 @@ async function verifyMultiSecretary(cdp, setup) {
   assert(created.ok, '多秘书: 第二个秘书建出来并有自己的会话', created);
   const second = created.secretaryId;
 
+  log('== 多秘书：顶栏与侧栏各用自己秘书的头像');
+  const tabPng = path.join(ART, 'tab-avatar-default.png');
+  const tabGif = path.join(ART, 'tab-avatar-second.gif');
+  writeAvatarFixture(tabPng, [255, 200, 0]);
+  writeGifFixture(tabGif);
+  const tabs = await page(`
+    const api = window.electronAPI.secretary;
+    const bytes = (base64) => Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const ids = { default: 'default', second: ${JSON.stringify(second)} };
+    const set = [
+      await api.setAvatar(bytes(${JSON.stringify(readFileSync(tabPng).toString('base64'))}), ids.default),
+      await api.setAvatar(bytes(${JSON.stringify(readFileSync(tabGif).toString('base64'))}), ids.second),
+    ];
+    if (!set.every((result) => result.ok)) return JSON.stringify({ ok: false, set });
+    SET().setHeaderSessionTabs(true);
+    const secretary = await SEC();
+    // 秘书项目不进侧栏分组，顶栏只强制留下当前会话，所以两个 tab 要分别选中才出现
+    const mine = await secretary.getState().newSecretaryConversation({ secretaryId: ids.default });
+    const otherId = ${JSON.stringify(created.conversationId)};
+    const tabLoaded = (conversationId, secretaryId) => {
+      const img = document.querySelector(
+        '[data-session-tab="' + conversationId + '"] img[data-enso=secretary-tab-avatar]'
+      );
+      return img?.src.includes('s=' + secretaryId) && img.complete && img.naturalWidth > 0 ? img : null;
+    };
+    const sideLoaded = (secretaryId) => {
+      const img = document.querySelector(
+        '[data-secretary-id="' + secretaryId + '"] img[data-enso=secretary-avatar-face]'
+      );
+      return img?.src.includes('s=' + secretaryId) && img.complete && img.naturalWidth > 0 ? img : null;
+    };
+    const probe = async (img) => {
+      if (!img) return null;
+      const response = await fetch(img.src);
+      return { src: img.getAttribute('src'), status: response.status, type: response.headers.get('content-type') };
+    };
+    S().selectConversation(mine);
+    const first = await until(() => tabLoaded(mine, ids.default), 20000);
+    const sideDefault = await until(() => sideLoaded(ids.default), 20000);
+    const sideSecond = await until(() => sideLoaded(ids.second), 20000);
+    S().selectConversation(otherId);
+    const other = await until(() => tabLoaded(otherId, ids.second), 20000);
+    return JSON.stringify({
+      ok: true,
+      mine,
+      focused: secretary.getState().focusedId,
+      first: await probe(first),
+      other: await probe(other),
+      sideDefault: await probe(sideDefault),
+      sideSecond: await probe(sideSecond),
+    });
+  `);
+  assert(
+    tabs.ok &&
+      tabs.first?.status === 200 &&
+      tabs.first.type === 'image/png' &&
+      tabs.sideDefault?.type === 'image/png' &&
+      tabs.sideSecond?.type === 'image/gif',
+    '多秘书: 选中小安时 tab 用小安的 PNG；侧栏两行同时各带自己的 s=',
+    tabs
+  );
+  assert(
+    tabs.other?.status === 200 && tabs.other.type === 'image/gif' && tabs.focused === second,
+    '多秘书: 选中阿财时 tab 用阿财的 GIF 头像',
+    tabs
+  );
+  await cdp.shot(path.join(ART, '13a-multi-secretary-tabs.png'));
+  const cleared = await page(`
+    const api = window.electronAPI.secretary;
+    await api.setAvatar(null, 'default');
+    await api.setAvatar(null, ${JSON.stringify(second)});
+    const mine = ${JSON.stringify(tabs.mine ?? '')};
+    const otherId = ${JSON.stringify(created.conversationId)};
+    const generated = (conversationId) =>
+      document.querySelector(
+        '[data-session-tab="' + conversationId + '"] [data-enso=secretary-tab-avatar][data-generated=true]'
+      );
+    S().selectConversation(mine);
+    const first = await until(() => generated(mine), 20000);
+    S().selectConversation(otherId);
+    const other = await until(() => generated(otherId), 20000);
+    const sides = await until(
+      () =>
+        document.querySelector('[data-secretary-id="default"] [data-enso=secretary-avatar-face][data-generated=true]') &&
+        document.querySelector('[data-secretary-id="${second}"] [data-enso=secretary-avatar-face][data-generated=true]')
+          ? true
+          : null,
+      20000
+    );
+    return JSON.stringify({ ok: Boolean(first && other && sides) });
+  `);
+  assert(cleared.ok, '多秘书: 移除图片后两个 tab 都回到生成头像', cleared);
+
   log('== 多秘书：结果各回各的');
   const routed = await page(`
     const api = window.electronAPI.secretary;
