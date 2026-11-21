@@ -321,6 +321,15 @@ export const NEEDS_YOU_RESULTS: ReadonlySet<SecretaryResultKind> = new Set([
   'needs-user',
 ]);
 
+/** 可以被手动收掉、也可以被追加任务替换的目标状态：不会再自己续跑 */
+export const REPLACEABLE_GOAL_STATUSES = ['blocked', 'paused'] as const;
+
+export interface ClosedGoal {
+  text: string;
+  status: (typeof REPLACEABLE_GOAL_STATUSES)[number];
+  note?: string;
+}
+
 export interface DispatchRecord {
   conversationId: string;
   projectId: string;
@@ -360,12 +369,14 @@ export interface DispatchRecord {
     manual?: true;
   };
   /**
-   * 已有终态结果后被 session_send 重新唤起的时间：这一轮还没结束，仍算在跑。
-   * 轮次一结束就清掉，会话真正空闲时回到原来的终态。
+   * 秘书 session_send 追加任务的时间：旧终态已撤下、重新跟踪，这一轮还没结束。
+   * 轮次一结束就清掉；这一轮的结果照常推给秘书。
    */
   reopenedAt?: number;
   /** 用户撤销手动标记的时间：放回进行中，直到这一轮出现新结果 */
   manualUndoneAt?: number;
+  /** 手动标记完成时一起收掉的受阻/暂停目标：撤销标记时恢复，重新跟踪后作废 */
+  closedGoal?: ClosedGoal;
   /**
    * 接管来的会话：权限与推送同派出会话，可撤销；不计入派出上限。
    * via=scope 表示项目在接管范围内、秘书实际用过它之后才建的跟踪记录。

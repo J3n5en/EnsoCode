@@ -486,7 +486,7 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it. Pass goal when the session already reported goal-complete or never had a goal: the new goal is attached and the session keeps running until it is done or blocked, so the patrol watches it. Refused while its current goal is still unfinished — a live goal is never replaced.',
+      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it. Pass goal when the session already reported goal-complete, was marked done by hand, never had a goal, or its goal is blocked or paused: the new goal is attached (a blocked or paused goal is replaced and audited) and the session keeps running until it is done or blocked, so the patrol watches it. Refused while its current goal is still active or waiting — a live goal is never replaced. Every send starts tracking the session again, even after it was marked done, completed, failed, was interrupted or stalled: the results of the follow-up reach you as usual.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -502,7 +502,7 @@ const SCHEMAS: Record<
           minLength: 1,
           maxLength: 4000,
           description:
-            'Optional: a new goal, only when the session already reported goal-complete or has no goal. The session then keeps running until the goal is done or blocked, and the patrol watches it. Refused while its current goal is still unfinished.',
+            'Optional: a new goal, when the session already reported goal-complete, was marked done by hand, has no goal, or its goal is blocked or paused (that goal is replaced). The session then keeps running until the goal is done or blocked, and the patrol watches it. Refused while its current goal is still active or waiting.',
         },
         attachments: {
           type: 'array',
@@ -577,7 +577,7 @@ const SCHEMAS: Record<
   },
   result_mark_done: {
     description:
-      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. Only sessions you dispatched or track are accepted; the session itself is not touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone.',
+      'Close out a dispatch you know is finished but that still shows as in progress on the board. It is the same action as the "mark done" button on the board card: the dispatch record gets a manual goal-complete result and the session stops counting as running. A blocked or paused goal on the session is closed with it, so a later session_send with goal is not refused; result_mark_undo puts that goal back. Only sessions you dispatched or track are accepted; nothing else in the session is touched and nothing is stopped. The call is audited as a manual mark by the secretary. Use it when the session clearly finished its work but its result never arrived; if it is really still working, leave it alone.',
     parameters: object({ conversationId: id('Session id from session_list or the board') }, [
       'conversationId',
     ]),

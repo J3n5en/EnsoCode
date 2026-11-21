@@ -39,11 +39,13 @@ import {
 } from '@shared/types/agent';
 import {
   type CleanupItem,
+  type ClosedGoal,
   type DispatchDraft,
   type DispatchModelRef,
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
   type PendingProblem,
+  REPLACEABLE_GOAL_STATUSES,
   type SecretaryAuditEntry,
   type SecretaryBoard,
   type SecretaryDispatchFile,
@@ -189,9 +191,18 @@ export interface SecretaryDispatchPorts {
   pauseGoal(conversationId: string): MaybePromise<void>;
   /**
    * 给已完成或没有目标的会话挂上新目标（与 session_create 同一种）。
-   * 原来的目标还没完成时返回 ok:false，目标原样保留。缺省表示不支持挂目标。
+   * 原来的目标状态在 replaceable 里时替换并交回旧目标；否则返回 ok:false，目标原样保留。
+   * 缺省表示不支持挂目标。
    */
-  attachGoal?(conversationId: string, goal: string): MaybePromise<{ ok: boolean; error?: string }>;
+  attachGoal?(
+    conversationId: string,
+    goal: string,
+    replaceable: readonly string[]
+  ): MaybePromise<{ ok: boolean; error?: string; replaced?: { text: string; status: string } }>;
+  /** 目标状态在 statuses 里时把它从会话行上撤下并交回；否则不动、返回 null */
+  closeGoal?(conversationId: string, statuses: readonly string[]): MaybePromise<ClosedGoal | null>;
+  /** 会话行上没有目标时放回收掉的目标；已有目标就不动、返回 false */
+  restoreGoal?(conversationId: string, goal: ClosedGoal): MaybePromise<boolean>;
   /** 收尾清理要的 git / 目录 / 归档能力；清理提案确认时用 */
   cleanup: CleanupPorts;
   /** 确认 profile 提案：交给档案服务走同一套保存与副作用 */
@@ -304,7 +315,7 @@ const DENIALS = {
   'needs-user':
     'refused (needs-user): the session is waiting for the user to answer a question or approve a tool call',
   'goal-active':
-    "refused (goal-active): the session's current goal is not finished yet. A goal is only attached when the session already reported goal-complete or has no goal; do not replace a live one.",
+    "refused (goal-active): the session's current goal is still running or waiting on something external. A goal is only attached when the session has no goal, already reported goal-complete, or its goal is blocked or paused; do not replace a live one.",
   'managed-by-other':
     'permission denied (managed-by-other): another secretary manages this session. Only the user can transfer it to you; do not retry.',
   'not-yours':
@@ -635,8 +646,14 @@ async function noteDispatchResumed(
   // 重新派活就是重新开始：上一次的停止与移出都不再生效
   delete record.stoppedAt;
   delete record.dismissedFromBoard;
-  // 已经有终态结果的会话被重新唤起：这一轮结束前仍算在跑，结束后回到原来的终态
-  if (record.lastResult && SETTLED_RESULTS.has(record.lastResult.kind)) record.reopenedAt = now;
+  // 追加任务就重新跟踪：撤下旧结果（含手动标完成），这一轮的结束、完成、受阻、失败、停滞照常推，
+  // 不会被旧终态或旧的停滞标记去重掉。收掉的旧目标也随手动标记一起作废
+  record.reopenedAt = now;
+  delete record.lastResult;
+  delete record.manualUndoneAt;
+  delete record.closedGoal;
+  delete record.stalledTurn;
+  delete record.patrol;
   ports.saveDispatch(file);
   const resumed = resumeLinkedTodo(await ports.todos(), conversationId, now);
   if (resumed.changed) ports.saveTodos(resumed.todos);
@@ -1531,16 +1548,16 @@ export function untrack(ports: SecretaryDispatchPorts, conversationId: string): 
 }
 
 /** 秘书侧的手动收口：与看板按钮同一条逻辑，审计里标明是秘书点的 */
-function markResultOp(
+async function markResultOp(
   ports: SecretaryDispatchPorts,
   ctx: SecretaryOpContext,
   params: Record<string, unknown>,
   action: MarkResultAction
-): SecretaryOpResult {
+): Promise<SecretaryOpResult> {
   const fields = sessionFields(params, ['conversationId']);
   if (!fields.ok) return fields;
   const { conversationId } = fields.value;
-  const result = markResult(ports, conversationId, action, 'secretary');
+  const result = await markResult(ports, conversationId, action, 'secretary');
   if (!result.ok) {
     const op =
       action === 'done'
@@ -1604,10 +1621,21 @@ export function createSecretaryDispatchHandlers(
       if (status.pendingAsks + status.pendingApprovals > 0) {
         return deny(ports, ctx, 'session_send', 'needs-user', conversationId);
       }
-      // 带目标时先挂上再发：原来的目标还没完成就拒绝，不能把进行中的目标盖掉
+      // 带目标时先挂上再发：受阻、暂停的旧目标不会再续跑，可以替换；
+      // 正在跑或在等外部条件的目标拒绝，不能把进行中的目标盖掉
       if (goal) {
-        const attached = await ports.attachGoal?.(conversationId, goal);
+        const attached = await ports.attachGoal?.(conversationId, goal, REPLACEABLE_GOAL_STATUSES);
         if (!attached?.ok) return deny(ports, ctx, 'session_send', 'goal-active', conversationId);
+        if (attached.replaced) {
+          ports.audit({
+            at: ports.now(),
+            secretaryConversationId: ctx.secretaryConversationId,
+            op: 'session_goal_replace',
+            targetId: conversationId,
+            ok: true,
+            detail: `${attached.replaced.status}: ${redactSecrets(attached.replaced.text).slice(0, 500)}`,
+          });
+        }
         const file = ports.dispatchFile();
         const record = file.dispatched[conversationId];
         if (record) {
@@ -2481,13 +2509,28 @@ export type MarkResultSource = 'ui' | 'secretary';
 /**
  * 用户手动收口一条派发记录：done 记成完成并标 manual（卡片给撤销），
  * undo 把这条手动结果撤掉、放回进行中。只认派发或接管的记录，普通会话不动。
+ * done 时受阻、暂停的目标不会再续跑，一并收掉，免得之后追加任务被它挡住；undo 放回去。
  */
-export function markResult(
+export async function markResult(
   ports: SecretaryDispatchPorts,
   conversationId: string,
   action: MarkResultAction,
   source: MarkResultSource = 'ui'
-): MarkResultResult {
+): Promise<MarkResultResult> {
+  const before = ports.dispatchFile().dispatched[conversationId];
+  if (!before) return { ok: false, error: 'not-found' };
+  if (action === 'undo' && before.lastResult?.manual !== true)
+    return { ok: false, error: 'not-manual' };
+  // 改会话行要等异步写回：先动目标，再读最新的派发记录改，免得用旧快照覆盖
+  let goalNote: string | undefined;
+  let closedGoal: ClosedGoal | null = null;
+  if (action === 'done') {
+    closedGoal = (await ports.closeGoal?.(conversationId, REPLACEABLE_GOAL_STATUSES)) ?? null;
+    if (closedGoal) goalNote = `goal closed (${closedGoal.status})`;
+  } else if (action === 'undo' && before.closedGoal) {
+    if (await ports.restoreGoal?.(conversationId, before.closedGoal))
+      goalNote = `goal restored (${before.closedGoal.status})`;
+  }
   const file = ports.dispatchFile();
   const record = file.dispatched[conversationId];
   if (!record) return { ok: false, error: 'not-found' };
@@ -2508,6 +2551,8 @@ export function markResult(
     delete record.reopenedAt;
     delete record.manualUndoneAt;
     delete record.dismissedFromBoard;
+    if (closedGoal) record.closedGoal = closedGoal;
+    else delete record.closedGoal;
   } else if (action === 'dismiss') {
     // 移出只动看板记录：不标完成，不碰会话与历史
     if (record.lastState !== 'idle') record.stateSince = now;
@@ -2525,6 +2570,7 @@ export function markResult(
     record.lastState = 'running';
     record.manualUndoneAt = now;
     delete record.dismissedFromBoard;
+    delete record.closedGoal;
   }
   ports.saveDispatch(file);
   ports.audit({
@@ -2533,7 +2579,7 @@ export function markResult(
     op,
     targetId: conversationId,
     ok: true,
-    detail: source === 'secretary' ? 'secretary' : 'manual',
+    detail: [source === 'secretary' ? 'secretary' : 'manual', goalNote].filter(Boolean).join('; '),
   });
   notifySecretaryChanged();
   return { ok: true };
@@ -2818,11 +2864,42 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
       });
       return removed;
     },
-    attachGoal: async (conversationId, goal) => {
+    attachGoal: async (conversationId, goal, replaceable) => {
       const { getDispatchDriver } = await import('../../ipc/secretary');
       const driver = getDispatchDriver();
       if (!driver) return { ok: false, error: 'driver unavailable' };
-      return driver.attachGoal(conversationId, goal);
+      return driver.attachGoal(conversationId, goal, replaceable);
+    },
+    closeGoal: async (conversationId, statuses) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      let closed: ClosedGoal | null = null;
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        const goal = row?.goal as Record<string, unknown> | undefined;
+        if (!row || !goal || typeof goal !== 'object' || typeof goal.text !== 'string') return;
+        if (!statuses.includes(goal.status as string)) return;
+        closed = {
+          text: goal.text,
+          status: goal.status as ClosedGoal['status'],
+          ...(typeof goal.note === 'string' && goal.note ? { note: goal.note } : {}),
+        };
+        state.conversations[conversationId] = { ...row, goal: undefined };
+      });
+      return closed;
+    },
+    restoreGoal: async (conversationId, goal) => {
+      const { patchConversationsState } = await import('../../ipc/settings');
+      let restored = false;
+      patchConversationsState((state) => {
+        const row = state.conversations[conversationId];
+        if (!row || (row.goal && typeof row.goal === 'object')) return;
+        restored = true;
+        state.conversations[conversationId] = {
+          ...row,
+          goal: { ...goal, autoTurns: 0, noProgressRuns: 0 },
+        };
+      });
+      return restored;
     },
     pauseGoal: async (conversationId) => {
       const { patchConversationsState } = await import('../../ipc/settings');
