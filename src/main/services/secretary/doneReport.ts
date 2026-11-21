@@ -108,9 +108,9 @@ export async function doneReportFor(conversationId: string): Promise<SecretaryDo
   const reportAt = store?.read(conversationId)?.at ?? null;
   const hit = cache.get(conversationId);
   if (hit && hit.reportAt === reportAt && Date.now() - hit.at < CACHE_MS)
-    return { ...hit.value, report: store?.read(conversationId) ?? null };
+    return { ...hit.value, report: store?.view(conversationId) ?? null };
   const value = await buildDoneReport(conversationId, {
-    report: (id) => store?.read(id) ?? null,
+    report: (id) => store?.view(id) ?? null,
     workspace: (id) => {
       const worktree = sessionWorktree(agentSessionIndex.workspaceRoot(id));
       if (worktree && existsSync(worktree.path))

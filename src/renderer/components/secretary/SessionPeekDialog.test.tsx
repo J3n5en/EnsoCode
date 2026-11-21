@@ -3,7 +3,8 @@ import { act, type ReactNode, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const translate = (key: string) => `[${key}]`;
+const translate = (key: string, params?: Record<string, unknown>) =>
+  `[${key.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(params?.[name]))}]`;
 
 const h = vi.hoisted(() => ({
   calls: [] as { name: string; args: unknown }[],
@@ -49,8 +50,8 @@ vi.mock('@/components/chat/Markdown', () => ({
   Markdown: ({ text }: { text: string }) => <div data-enso="peek-markdown">{text}</div>,
 }));
 vi.mock('@/components/chat/ZoomableImage', () => ({
-  ZoomableImage: ({ src, alt }: { src: string; alt?: string }) => (
-    <img data-enso="peek-zoomable" src={src} alt={alt} />
+  ZoomableImage: ({ src, alt, onError }: { src: string; alt?: string; onError?: () => void }) => (
+    <img data-enso="peek-zoomable" src={src} alt={alt} onError={onError} />
   ),
 }));
 vi.mock('@/components/chat/AskBar', () => ({
@@ -353,21 +354,91 @@ describe('SessionPeekDialog 结果视图', () => {
     expect(useSecretaryReturn.getState().back).toEqual({ from: 'secretary-chat', to: 'old' });
   });
 
-  it('截图过期写明保留期，报告文字照常显示', async () => {
+  const DONE_AT = new Date(2025, 10, 21, 18, 5).getTime();
+  const GONE_AT = new Date(2025, 10, 28, 3, 0).getTime();
+  const hash = (c: string) => `${c.repeat(64)}.png`;
+
+  it('全部过期：缩略图位置换成占位卡，写明张数、完成时间、保留期与清理日期，正文照常', async () => {
     h.doneReport = {
       report: {
-        at: 1,
-        text: '做完了',
-        images: [{ label: 'a.png', name: `${'b'.repeat(64)}.png` }],
+        at: DONE_AT,
+        text: '做完了 /tmp/a.png /tmp/b.png',
+        images: [
+          { label: 'a.png', name: hash('a'), gone: 'expired' },
+          { label: 'b.png', name: hash('b'), gone: 'expired' },
+        ],
         imagesGone: 'expired',
+        imagesGoneAt: GONE_AT,
+        retentionDays: 7,
       },
     };
     await openResult();
-    expect(q('[data-enso="peek-markdown"]')?.textContent).toBe('做完了');
-    expect(q('[data-enso="done-report-images-gone"]')?.textContent).toBe(
-      '[Screenshots expired (kept for 7 days)]'
+    expect(q('[data-enso="peek-markdown"]')?.textContent).toBe('做完了 /tmp/a.png /tmp/b.png');
+    const card = q('[data-enso="done-report-images-gone"]');
+    expect(card?.querySelector('svg')).not.toBeNull();
+    expect(card?.textContent).toContain('[2 screenshots expired]');
+    expect(card?.textContent).toContain(
+      '[Completed 11-21 18:05, kept for 7 days, cleaned up on 11-28]'
     );
     expect(q('[data-enso="peek-zoomable"]')).toBeNull();
+    expect(q('[data-enso="done-report-expired"]')).toBeNull();
+  });
+
+  it('资源页清理掉的写清理，不写保留期', async () => {
+    h.doneReport = {
+      report: {
+        at: DONE_AT,
+        text: '做完了',
+        images: [{ label: 'a.png', name: hash('a'), gone: 'cleared' }],
+        imagesGone: 'cleared',
+        imagesGoneAt: GONE_AT,
+        retentionDays: 7,
+      },
+    };
+    await openResult();
+    const card = q('[data-enso="done-report-images-gone"]');
+    expect(card?.textContent).toContain('[1 screenshots were cleaned up]');
+    expect(card?.textContent).toContain('[Completed 11-21 18:05, cleaned up on 11-28]');
+  });
+
+  it('部分过期：还在的照常显示，过期的每张一个同尺寸「已过期」占位，和「无法显示」分开', async () => {
+    h.doneReport = {
+      report: {
+        at: DONE_AT,
+        text: '做完了',
+        images: [
+          { label: 'live.png', name: hash('a') },
+          { label: 'old.png', name: hash('b'), gone: 'expired' },
+          { label: 'bad.png', missing: true },
+        ],
+        imagesGoneAt: GONE_AT,
+        retentionDays: 7,
+      },
+    };
+    await openResult();
+    expect(q('[data-enso="done-report-images-gone"]')).toBeNull();
+    expect(container.querySelectorAll('[data-enso="peek-zoomable"]')).toHaveLength(1);
+    const expired = q('[data-enso="done-report-expired"]');
+    expect(expired?.textContent).toBe('[Expired]');
+    expect(expired?.getAttribute('title')).toBe(
+      '[Completed 11-21 18:05, kept for 7 days, cleaned up on 11-28]'
+    );
+    const missing = q('[data-enso="done-report-missing"]');
+    expect(missing?.textContent).toBe('[Image unavailable]');
+    expect(expired?.className).toBe(missing?.className);
+  });
+
+  it('副本读不出来（格式不对）时换成「无法显示」，不算过期', async () => {
+    h.doneReport = {
+      report: { at: DONE_AT, text: '做完了', images: [{ label: 'x.png', name: hash('c') }] },
+    };
+    await openResult();
+    act(() => {
+      q('[data-enso="peek-zoomable"]')?.dispatchEvent(new window.Event('error'));
+    });
+    expect(q('[data-enso="peek-zoomable"]')).toBeNull();
+    expect(q('[data-enso="done-report-missing"]')?.textContent).toBe('[Image unavailable]');
+    expect(q('[data-enso="done-report-expired"]')).toBeNull();
   });
 
   it('没存下报告时用看板正文；会话删了也照样显示结果与标题快照', async () => {

@@ -146,12 +146,75 @@ describe('SecretaryReportStore 清理', () => {
     expect(store.read(OTHER)?.imagesGone).toBeUndefined();
   });
 
+  it('扫掉时记下清理时刻', async () => {
+    const { store, shot, tick } = setup();
+    await store.archive(CONV, T0, shot('a.png'));
+    tick(REPORT_IMAGE_RETENTION_MS + DAY);
+    await store.sweep();
+    expect(store.read(CONV)?.imagesGoneAt).toBe(T0 + REPORT_IMAGE_RETENTION_MS + DAY);
+  });
+
   it('删除会话时整个目录一起删', async () => {
     const { store, dir, shot } = setup();
     await store.archive(CONV, T0, shot('a.png'));
     store.remove(CONV);
     expect(existsSync(dir)).toBe(false);
     expect(store.read(CONV)).toBeNull();
+  });
+});
+
+describe('SecretaryReportStore 结果视图', () => {
+  const gone = (store: SecretaryReportStore) =>
+    store
+      .view(CONV)
+      ?.images.map((image) => ('missing' in image ? 'missing' : (image.gone ?? 'live')));
+
+  it('全部过期：每张标成已过期，带保留天数与清理时刻', async () => {
+    const { store, shot, tick } = setup();
+    await store.archive(CONV, T0, `${shot('a.png', png(1))}\n${shot('b.png', png(2))}`);
+    tick(REPORT_IMAGE_RETENTION_MS + DAY);
+    await store.sweep();
+    expect(gone(store)).toEqual(['expired', 'expired']);
+    expect(store.view(CONV)).toMatchObject({
+      at: T0,
+      retentionDays: REPORT_IMAGE_RETENTION_MS / DAY,
+      imagesGoneAt: T0 + REPORT_IMAGE_RETENTION_MS + DAY,
+    });
+  });
+
+  it('部分过期：文件还在的照常，过了保留期没了的标已过期', async () => {
+    const { store, dir, shot, tick } = setup();
+    const saved = await store.archive(
+      CONV,
+      T0,
+      `${shot('a.png', png(1))}\n${shot('b.png', png(2))}`
+    );
+    tick(REPORT_IMAGE_RETENTION_MS + DAY);
+    const [first] = saved?.images ?? [];
+    rmSync(join(dir, first && 'name' in first ? first.name : ''));
+    expect(gone(store)).toEqual(['expired', 'live']);
+    expect(store.view(CONV)?.imagesGoneAt).toBe(T0 + REPORT_IMAGE_RETENTION_MS);
+  });
+
+  it('保留期内文件没了算无法显示，不算过期；复制时就没成的照旧无法显示', async () => {
+    const { store, dir, shot } = setup();
+    const saved = await store.archive(
+      CONV,
+      T0,
+      `${shot('a.png', png(1))}\n${shot('b.png', png(2))}\n/tmp/definitely-missing-report.png`
+    );
+    const [first] = saved?.images ?? [];
+    rmSync(join(dir, first && 'name' in first ? first.name : ''));
+    expect(gone(store)).toEqual(['missing', 'live', 'missing']);
+    expect(store.view(CONV)?.imagesGoneAt).toBeUndefined();
+  });
+
+  it('资源页清理的标成已清理', async () => {
+    const { store, shot } = setup();
+    await store.archive(CONV, T0, shot('a.png'));
+    await store.clear();
+    expect(gone(store)).toEqual(['cleared']);
+    expect(store.view(CONV)?.imagesGoneAt).toBe(T0);
   });
 });
 

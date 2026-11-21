@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -34,6 +35,7 @@ export const REPORT_IMAGE_TOTAL_BYTES = 100 * 1024 * 1024;
 const REPORT_IMAGE_MAX_ENTRIES = 40;
 const REPORT_TEXT_MAX_CHARS = 50_000;
 const REPORT_FILE = 'report.json';
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -87,7 +89,14 @@ function parseReport(raw: string): SecretaryStoredReport | null {
     .filter((image): image is SecretaryReportImage => image !== null);
   const gone =
     data.imagesGone === 'expired' || data.imagesGone === 'cleared' ? data.imagesGone : null;
-  return { at: data.at, text: data.text, images, ...(gone ? { imagesGone: gone } : {}) };
+  const goneAt = gone && typeof data.imagesGoneAt === 'number' ? data.imagesGoneAt : null;
+  return {
+    at: data.at,
+    text: data.text,
+    images,
+    ...(gone ? { imagesGone: gone } : {}),
+    ...(goneAt !== null ? { imagesGoneAt: goneAt } : {}),
+  };
 }
 
 function mediaFiles(dir: string): { name: string; file: string; size: number; mtimeMs: number }[] {
@@ -203,9 +212,35 @@ export class SecretaryReportStore {
     return dir && isMediaId(name) ? path.join(dir, name) : null;
   }
 
+  /**
+   * 给结果视图：逐张看副本还在不在。已删的按报告标记或过没过保留期算过期 / 清理；
+   * 保留期内无故没了的算无法显示
+   */
+  view(conversationId: string): SecretaryStoredReport | null {
+    const report = this.read(conversationId);
+    const dir = this.dir(conversationId);
+    if (!report || !dir) return report;
+    const retention = this.retention();
+    const expiresAt = report.at + retention;
+    const reason = report.imagesGone ?? (this.now() > expiresAt ? 'expired' : null);
+    const images = report.images.map((image): SecretaryReportImage => {
+      if (!('name' in image) || existsSync(path.join(dir, image.name))) return image;
+      return reason ? { ...image, gone: reason } : { label: image.label, missing: true };
+    });
+    const goneAt = images.some((image) => 'gone' in image)
+      ? (report.imagesGoneAt ?? (reason === 'expired' ? expiresAt : undefined))
+      : undefined;
+    return {
+      ...report,
+      images,
+      retentionDays: Math.round(retention / DAY_MS),
+      ...(goneAt !== undefined ? { imagesGoneAt: goneAt } : {}),
+    };
+  }
+
   /** 过了保留期的截图删掉，报告标成过期；没有报告的孤儿截图按修改时间算 */
   sweep(): Promise<ReportSweepStats> {
-    const retention = this.deps.retentionMs ?? REPORT_IMAGE_RETENTION_MS;
+    const retention = this.retention();
     const now = this.now();
     return this.eachDir((report) => {
       if (!report) return { drop: (file) => now - file.mtimeMs > retention, mark: false };
@@ -259,7 +294,7 @@ export class SecretaryReportStore {
       const had = report?.images.some((image) => 'name' in image);
       if (report && had && mark && !report.imagesGone && mediaFiles(dir).length === 0) {
         try {
-          this.write(dir, { ...report, imagesGone: gone });
+          this.write(dir, { ...report, imagesGone: gone, imagesGoneAt: this.now() });
         } catch (error) {
           this.log(`mark ${id} failed: ${String(error)}`);
         }
@@ -288,6 +323,10 @@ export class SecretaryReportStore {
 
   private now(): number {
     return this.deps.now?.() ?? Date.now();
+  }
+
+  private retention(): number {
+    return this.deps.retentionMs ?? REPORT_IMAGE_RETENTION_MS;
   }
 
   private log(message: string): void {
