@@ -40,7 +40,15 @@ vi.mock('@/components/ui/context-menu', async () => {
     ContextMenuSeparator: () => null,
   };
 });
+vi.mock('@/components/ui/preview-card', () => ({
+  PreviewCard: ({ children }: { children: ReactNode }) => <>{children}</>,
+  PreviewCardTrigger: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  PreviewCardPopup: ({ children }: { children: ReactNode }) => (
+    <div data-enso="popup">{children}</div>
+  ),
+}));
 
+import { runningBySecretary, SecretaryDispatchBadge } from './SecretaryRunningOrigins';
 import {
   SecretaryCollapsedButton,
   SecretaryGroupHeader,
@@ -365,6 +373,66 @@ describe('SecretarySidebarSection', () => {
     ]);
     act(() => menuItem('[Re-run setup]')?.click());
     expect(handlers.onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('两个秘书各派一件：计数与悬停列表只落在各自的分区和会话行', async () => {
+    const secretaries = [
+      {
+        id: 'a',
+        conversations: ['sa', 'sa2'],
+        board: [{ ...sessionCard('ca'), secretaryConversationId: 'sa' }],
+      },
+      {
+        id: 'b',
+        conversations: ['sb'],
+        board: [{ ...sessionCard('cb'), secretaryConversationId: 'sb' }],
+      },
+    ];
+    const states = Object.fromEntries(
+      secretaries.map((entry) => [
+        entry.id,
+        state({ profile, board: { needsYou: [], running: entry.board, done: [], todos: [] } }),
+      ])
+    );
+    const running = runningBySecretary(secretaries, states, () => true);
+    await render(
+      <div>
+        {secretaries.map((entry) => {
+          const origins = running[entry.id];
+          return (
+            <SecretarySidebarSection
+              key={entry.id}
+              view={view({ profile, board: states[entry.id]?.board })}
+              folded={false}
+              secretaryId={entry.id}
+              runningOrigins={
+                origins && { groups: origins.groups, titleOf: (id) => id, onSelect: vi.fn() }
+              }
+              {...actions()}
+            >
+              {entry.conversations.map((id) => (
+                <div key={id} data-row={id}>
+                  <SecretaryDispatchBadge count={origins?.counts[id]} />
+                </div>
+              ))}
+            </SecretarySidebarSection>
+          );
+        })}
+      </div>
+    );
+    const section = (id: string) =>
+      container.querySelector(`[data-enso="secretary-section"][data-secretary-id="${id}"]`);
+    const badge = (id: string) =>
+      container.querySelector(`[data-row="${id}"] [data-enso="secretary-dispatch-running"]`)
+        ?.textContent ?? null;
+    const origins = (id: string) =>
+      [...(section(id)?.querySelectorAll('[data-enso="secretary-running-origin"]') ?? [])].map(
+        (node) => node.textContent
+      );
+    expect([badge('sa'), badge('sa2'), badge('sb')]).toEqual(['1', null, '1']);
+    expect(section('a')?.querySelector('[data-row="sb"]')).toBeNull();
+    expect(origins('a')).toEqual(['sa1跑测试']);
+    expect(origins('b')).toEqual(['sb1跑测试']);
   });
 });
 

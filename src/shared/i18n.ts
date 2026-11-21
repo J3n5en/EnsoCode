@@ -2768,6 +2768,9 @@ export const zhTranslations: Record<string, string> = {
   'Conversation history': '对话记录',
   'Conversation transcripts and usage ledger.': '对话记录文件与用量账本。',
   'Coworker transcripts': 'Coworker 记录',
+  'Secretary images': '秘书图片',
+  'Images sent to the secretary. Cleaning removes only images no message references any more and older than 7 days; referenced images are kept.':
+    '发给秘书的图片。清理只删已不被任何消息引用、且超过 7 天的图片，仍被引用的保留。',
   'Coworker journals; only those of deleted conversations are cleaned.':
     'Coworker 的对话记录；只清理已删除会话留下的。',
   'Tool outputs': '工具输出',
@@ -3598,6 +3601,8 @@ export const zhTranslations: Record<string, string> = {
   'The session was deleted': '会话已删除',
   '{{n}} waiting': '{{n}} 件等你',
   '{{n}} running': '{{n}} 件在跑',
+  '{{n}} dispatched tasks running': '派出的 {{n}} 件活在跑',
+  'Unknown source': '未知来源',
   'Nothing running': '没有在跑的活',
   'Waiting for dependencies': '等依赖',
   'After {{ids}}': '等这些会话结束：{{ids}}',

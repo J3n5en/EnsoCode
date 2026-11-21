@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { describeForwardedImages, type ForwardedImage } from '@shared/secretary/attachments';
 import {
   botCommands,
   type ContactReadCommandName,
@@ -48,6 +49,7 @@ import {
 } from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
 import { TELEGRAM_INBOUND, wrapInboundMessage } from '@shared/secretary/inbound';
+import { type InboundImageLine, inboundImageNotice } from '@shared/secretary/inboundImages';
 import {
   buildRecapTurns,
   formatRecapMessage,
@@ -69,6 +71,7 @@ import type {
   SecretaryResultKind,
 } from '@shared/types/secretary';
 import { type FollowedTask, type FollowingPort, followingViews } from '../following';
+import type { SavedInboundImage } from '../inboundImages';
 import {
   type ChannelButton,
   type ChannelCaps,
@@ -230,6 +233,8 @@ export interface ContactServicePorts {
   /** /last：秘书会话最近的消息，Main 读 jsonl 后交回来；缺省表示读不到 */
   recentTurns?(rounds: number): Promise<readonly RecapMessage[]>;
   deliver(conversationId: string, text: string): Promise<{ ok: boolean; error?: string }>;
+  /** 手机发来的图片落盘到该秘书会话的图片目录；缺省表示不收图片 */
+  saveInboundImages?(conversationId: string, images: readonly Buffer[]): SavedInboundImage[];
   answerAsk(
     conversationId: string,
     requestId: string,
@@ -1528,6 +1533,11 @@ export class ContactService implements SecretaryContactPort {
 
   private async handleText(message: Extract<ChannelInbound, { kind: 'text' }>): Promise<void> {
     const { peer, text } = message;
+    // 带图的消息直接交给秘书：命令、编号确认与提问回答都只认纯文字
+    if (message.images?.length) {
+      await this.deliverText(message);
+      return;
+    }
     // 只读命令：Main 直接查面板数据回一条，不进秘书会话、不唤醒模型
     const command = parseContactCommand(text);
     if (command) {
@@ -1571,10 +1581,44 @@ export class ContactService implements SecretaryContactPort {
       return;
     }
 
+    await this.deliverText(message);
+  }
+
+  /** 落盘图片：渠道已判定收不下的、落盘失败的都留一行原因，并回手机一句 */
+  private async storeImages(
+    conversationId: string,
+    message: Extract<ChannelInbound, { kind: 'text' }>
+  ): Promise<{ lines: InboundImageLine[]; saved: ForwardedImage[] }> {
+    const images = message.images ?? [];
+    if (images.length === 0) return { lines: [], saved: [] };
+    const bytes = images.flatMap((image) => ('data' in image ? [image.data] : []));
+    const stored = this.ports.saveInboundImages?.(conversationId, bytes) ?? [];
+    let next = 0;
+    const lines = images.map((image): InboundImageLine => {
+      if (!('data' in image)) return { rejected: image.rejected };
+      const item = stored[next++];
+      return item?.ok ? { path: item.path } : { rejected: item?.reason ?? 'unavailable' };
+    });
+    const saved = stored.flatMap((item) => (item.ok ? [{ path: item.path, size: item.size }] : []));
+    const rejected = lines.flatMap((line) => ('rejected' in line ? [line.rejected] : []));
+    if (rejected.length)
+      await this.post(message.peer, 'sendText', {
+        text: inboundImageNotice(rejected, this.ports.lang()),
+      });
+    return { lines, saved };
+  }
+
+  private async deliverText(message: Extract<ChannelInbound, { kind: 'text' }>): Promise<void> {
+    const { peer, text } = message;
     const conversationId = this.ports.secretaryConversationId();
     if (!conversationId) {
       this.audit('contact_inbound', false, 'no-secretary');
       await this.notifyUndelivered(peer);
+      return;
+    }
+    const images = await this.storeImages(conversationId, message);
+    if (!text && images.saved.length === 0) {
+      this.audit('contact_inbound_rejected', false, 'images-rejected', conversationId);
       return;
     }
     // 入站只在这里包一次：所有渠道都走 wrapInboundMessage
@@ -1593,6 +1637,7 @@ export class ContactService implements SecretaryContactPort {
         ...(message.name ? { senderName: message.name } : {}),
         ...(message.at ? { at: message.at } : {}),
         text,
+        ...(images.lines.length ? { images: images.lines } : {}),
       }
     );
     this.remember(this.awaitingReply, conversationId, peer);
@@ -1602,7 +1647,12 @@ export class ContactService implements SecretaryContactPort {
     this.audit(
       'contact_inbound',
       delivered.ok,
-      delivered.ok ? describe(text) : (delivered.error ?? 'deliver-failed'),
+      delivered.ok
+        ? [
+            describe(text),
+            ...(images.saved.length ? [describeForwardedImages(images.saved)] : []),
+          ].join(' ')
+        : (delivered.error ?? 'deliver-failed'),
       conversationId
     );
     if (!delivered.ok) {

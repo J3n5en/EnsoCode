@@ -95,6 +95,12 @@ import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
 import { SecretaryOriginBadge } from '@/components/secretary/SecretaryOriginBadge';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import {
+  type RunningOrigins,
+  runningByOrigin,
+  runningBySecretary,
+  SecretaryDispatchBadge,
+} from '@/components/secretary/SecretaryRunningOrigins';
+import {
   SecretaryCollapsedButton,
   SecretaryGroupHeader,
   SecretarySidebarSection,
@@ -336,6 +342,20 @@ export function Sidebar({
       return view ? [{ id: entry.id, projectId: entry.projectId, view }] : [];
     });
   }, [multiSecretary, secretaryList, secretaryStates, t]);
+  // 每个秘书只按自己的看板分组，计数和悬停列表都不跨分区
+  const secretaryRunning = useMemo(() => {
+    const known = (id: string) => conversations[id] !== undefined;
+    return {
+      single: runningByOrigin(secretaryState.board, known),
+      byId: multiSecretary ? runningBySecretary(secretaryList, secretaryStates, known) : {},
+    };
+  }, [multiSecretary, secretaryList, secretaryStates, secretaryState.board, conversations]);
+  const runningLink = (origins: RunningOrigins | undefined) =>
+    origins && {
+      groups: origins.groups,
+      titleOf: (id: string) => conversations[id]?.title,
+      onSelect: selectConversation,
+    };
   const [secretaryGroupFolded, setSecretaryGroupFolded] = useState(() => {
     try {
       return localStorage.getItem(SECRETARY_GROUP_COLLAPSED_KEY) === '1';
@@ -1116,6 +1136,7 @@ export function Sidebar({
                       onReset={() => setSecretaryResetId(entry.id)}
                       secretaryId={entry.id}
                       keepAvatar
+                      runningOrigins={runningLink(secretaryRunning.byId[entry.id])}
                     >
                       {shown.map((id) => (
                         <ConversationRow
@@ -1123,6 +1144,7 @@ export function Sidebar({
                           id={id}
                           conversation={conversations[id]}
                           active={activeId === id}
+                          dispatchRunning={secretaryRunning.byId[entry.id]?.counts[id]}
                           switchHint={switchHintFor(id, 'project')}
                           locale={locale}
                           nowTick={nowTick}
@@ -1162,6 +1184,7 @@ export function Sidebar({
                   })
                 }
                 onReset={() => setSecretaryResetId('default')}
+                runningOrigins={runningLink(secretaryRunning.single)}
               >
                 {shownSecretaryIds.map((id) => (
                   <ConversationRow
@@ -1169,6 +1192,7 @@ export function Sidebar({
                     id={id}
                     conversation={conversations[id]}
                     active={activeId === id}
+                    dispatchRunning={secretaryRunning.single.counts[id]}
                     switchHint={switchHintFor(id, 'project')}
                     locale={locale}
                     nowTick={nowTick}
@@ -2686,6 +2710,8 @@ interface ConversationRowProps {
   hoverTitle?: string;
   /** 已归档栏目里内联展示的项目名 */
   subtitle?: string;
+  /** 秘书会话派出、仍在跑的件数 */
+  dispatchRunning?: number;
   /** 隔离会话（有 worktree 绑定） */
   isolated?: boolean;
   /** 隔离会话的 worktree 状态（徽标：未提交/未合并） */
@@ -2714,6 +2740,7 @@ function ConversationRow({
   nowTick,
   hoverTitle,
   subtitle,
+  dispatchRunning,
   isolated,
   worktreeStatus,
   switchHint,
@@ -2855,6 +2882,7 @@ function ConversationRow({
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
         <BackgroundTaskMarker conversationId={id} />
+        <SecretaryDispatchBadge count={dispatchRunning} />
         {!renaming && (
           <TitleSummaryBadge
             pending={conversation.titleSummaryPending}
