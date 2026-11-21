@@ -1,4 +1,5 @@
 import { dayKey, shiftDay } from '@shared/secretary/daily';
+import type { BackgroundTaskInfo } from '@shared/types/agent';
 import type {
   SecretaryDaily,
   SecretaryDailyGroupKey,
@@ -11,11 +12,20 @@ import {
   ChevronRight,
   Inbox,
   Link2,
-  Square,
   Undo2,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { isIdleTask } from '@/components/backgroundTasks/overview';
+import {
+  idleLabel,
+  KeepLine,
+  keepBackgroundTask,
+  shortSpan,
+  stopBackgroundTask,
+  taskView,
+  useNow,
+} from '@/components/chat/backgroundTaskUi';
 import { HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock } from '@/lib/time';
@@ -69,6 +79,57 @@ function stampOf(at: number, day: string, locale: string): string {
   return `${date.getMonth() + 1}/${date.getDate()} ${clock}`;
 }
 
+/** 遗留任务一行：疑似闲置给时长与「保留」，保留的给理由；停止不确认 */
+function LeftoverRow({
+  conversationId,
+  task,
+}: {
+  conversationId: string;
+  task: BackgroundTaskInfo;
+}) {
+  const { t } = useI18n();
+  const now = useNow();
+  const view = taskView(task);
+  return (
+    <div
+      data-enso="secretary-daily-leftover-task"
+      className="flex min-w-0 items-center gap-1.5 py-0.5"
+    >
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-mono text-[11px] text-foreground/80" title={task.command}>
+          {task.command}
+        </div>
+        {view === 'idle' ? (
+          <div className="text-[10.5px] text-warning">{idleLabel(task, now, t)}</div>
+        ) : view === 'kept' ? (
+          <KeepLine task={task} className="text-[10.5px]" />
+        ) : (
+          <div className="text-[10.5px] text-muted-foreground tabular-nums">
+            {t('Running for {{duration}}', { duration: shortSpan(now - task.startedAt) })}
+          </div>
+        )}
+      </div>
+      {view === 'idle' && (
+        <button
+          type="button"
+          onClick={() => keepBackgroundTask(conversationId, task.taskId, '')}
+          className="shrink-0 rounded-[5px] px-1 text-[11px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+        >
+          {t('Keep')}
+        </button>
+      )}
+      <button
+        type="button"
+        data-enso="secretary-daily-stop-task"
+        onClick={() => stopBackgroundTask(conversationId, task.taskId)}
+        className="shrink-0 rounded-[5px] px-1 text-[11px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+      >
+        {t('Stop')}
+      </button>
+    </div>
+  );
+}
+
 function DailyCard({
   item,
   column,
@@ -98,8 +159,24 @@ function DailyCard({
   // 已停止的会话同时给「标记完成」和「移出」：一个收口成完成，一个只从看板上拿掉。
   const mark = !item.tracked ? null : item.manual && column.key === 'done' ? 'undo' : null;
   const settle = item.tracked && (column.key === 'running' || column.key === 'stopped');
-  // 已完成但还有遗留任务：行内停掉，不自动杀，用户点了才动
-  const stopLeftover = item.leftover && item.conversationId ? item.conversationId : null;
+  // 已完成但还有遗留任务：卡片内逐个保留/停止；悬停的停止只停疑似闲置的，已保留的不动
+  const liveTasks = useSessionsStore((state) =>
+    item.conversationId ? state.conversations[item.conversationId]?.backgroundTasks : undefined
+  );
+  const leftovers = item.leftover
+    ? (liveTasks ?? []).filter((task) => task.status === 'running')
+    : [];
+  const idleLeftovers = leftovers.filter(isIdleTask).length;
+  // 会话投影里已经没有在跑的任务：遗留标记只是还没刷新，按普通「已完成」显示
+  const leftoverGone =
+    item.leftover !== undefined && liveTasks !== undefined && leftovers.length === 0;
+  const stopLeftover =
+    item.leftover &&
+    item.conversationId &&
+    !leftoverGone &&
+    (leftovers.length === 0 || idleLeftovers > 0)
+      ? item.conversationId
+      : null;
   return (
     <div
       data-enso="secretary-daily-card"
@@ -112,8 +189,8 @@ function DailyCard({
           <button
             type="button"
             data-enso="secretary-daily-stop-leftover"
-            title={t('Stop leftover tasks')}
-            aria-label={t('Stop leftover tasks')}
+            title={t('Stop suspected idle leftover tasks')}
+            aria-label={t('Stop suspected idle leftover tasks')}
             disabled={stopping}
             onClick={() => {
               setStopping(true);
@@ -121,9 +198,12 @@ function DailyCard({
                 .stopTasks(stopLeftover)
                 .finally(() => setStopping(false));
             }}
-            className={cn(ACTION_CLASS, 'hover:bg-destructive/10 hover:text-destructive')}
+            className={cn(
+              ACTION_CLASS,
+              'w-auto px-1 text-[11px] hover:bg-destructive/10 hover:text-destructive'
+            )}
           >
-            <Square className="h-3.5 w-3.5" />
+            {t('Stop')}
           </button>
         </HoverActions>
       )}
@@ -195,12 +275,36 @@ function DailyCard({
           </span>
         )}
       </button>
+      {leftovers.length > 0 && item.conversationId && (
+        <div
+          data-enso="secretary-daily-leftover-tasks"
+          className="mt-[7px] rounded-[5px] bg-foreground/[0.04] px-1.5 py-1"
+        >
+          {leftovers.map((task) => (
+            <LeftoverRow
+              key={task.taskId}
+              conversationId={item.conversationId as string}
+              task={task}
+            />
+          ))}
+        </div>
+      )}
       <div className="mt-[7px] flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
         {item.projectName && <span className={CHIP_CLASS}>{item.projectName}</span>}
         {item.label && <span className={CHIP_CLASS}>{t(item.label)}</span>}
-        {item.leftover && (
-          <span data-enso="secretary-daily-leftover" className={cn(CHIP_CLASS, 'text-warning')}>
-            {t('Done ({{count}} leftover tasks)', { count: item.leftover.count })}
+        {item.leftover && !leftoverGone && (
+          <span
+            data-enso="secretary-daily-leftover"
+            className={cn(
+              CHIP_CLASS,
+              (leftovers.length === 0 || idleLeftovers > 0) && 'text-warning'
+            )}
+          >
+            {leftovers.length > 0 && idleLeftovers === 0
+              ? t('Done ({{count}} kept tasks)', { count: leftovers.length })
+              : t('Done ({{count}} leftover tasks)', {
+                  count: leftovers.length || item.leftover.count,
+                })}
           </span>
         )}
         {item.persistent && (

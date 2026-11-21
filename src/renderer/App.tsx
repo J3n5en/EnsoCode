@@ -32,6 +32,7 @@ import {
   useWindowChromeKind,
 } from '@/components/app/WindowChrome';
 import { ZoomBanner } from '@/components/app/ZoomBanner';
+import { BackgroundTasksPage } from '@/components/backgroundTasks/BackgroundTasksPage';
 import { BotView } from '@/components/bots/BotView';
 import { ModeSwitch } from '@/components/bots/ModeSwitch';
 import { requestOpenChatFind } from '@/components/chat/ChatFindBar';
@@ -60,10 +61,7 @@ import { useAutoArchiveScan } from '@/hooks/useAutoArchiveScan';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useDockBadge } from '@/hooks/useDockBadge';
 import { useGenerationStallTimeout } from '@/hooks/useGenerationStallTimeout';
-import {
-  useRecoverInterruptedTurns,
-  useResumeInterruptedByUpdate,
-} from '@/hooks/useInterruptedSessionRecovery';
+import { useRecoverInterruptedTurns } from '@/hooks/useInterruptedSessionRecovery';
 import { useOpenFolderRequests } from '@/hooks/useOpenFolderRequests';
 import { isMobileWidth, useIsMobile, useViewportWidth } from '@/hooks/useViewport';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
@@ -82,6 +80,7 @@ import { pluginCommands, runPluginCommand } from '@/plugins/commands';
 import { resolvePluginKeybindings } from '@/plugins/keybindings';
 import { PluginNotices } from '@/plugins/PluginNotices';
 import { PluginUiHost } from '@/plugins/PluginUiHost';
+import { useBackgroundTasksView } from '@/stores/backgroundTasksView';
 import { useBotsStore } from '@/stores/bots';
 import {
   isBotModeActive,
@@ -131,7 +130,6 @@ export default function App() {
   useBackgroundImage();
   useGenerationStallTimeout();
   useAutoArchiveScan();
-  useResumeInterruptedByUpdate();
   useRecoverInterruptedTurns();
   useOpenFolderRequests();
   useDockBadge();
@@ -256,6 +254,7 @@ export default function App() {
   // 秘书开关打开即常驻订阅：聊天里的确认卡片与工作台读同一份 Main 状态
   const secretaryEnabled = useSettingsStore((s) => s.secretaryEnabled);
   const secretaryWelcomeOpen = useSecretaryStore((s) => s.welcomeOpen);
+  const backgroundTasksOpen = useBackgroundTasksView((s) => s.open);
   useEffect(
     () => (secretaryEnabled ? useSecretaryStore.getState().bind() : undefined),
     [secretaryEnabled]
@@ -674,7 +673,9 @@ export default function App() {
               >
                 <PluginUiHost />
                 {/* 秘书引导是独占页：透明背景下面板色 alpha 为 0，背后的空会话必须停止绘制 */}
-                <ChatAreaFrame hidden={secretaryEnabled && secretaryWelcomeOpen}>
+                <ChatAreaFrame
+                  hidden={(secretaryEnabled && secretaryWelcomeOpen) || backgroundTasksOpen}
+                >
                   <ShellChromeContext.Provider value={shellChrome}>
                     <ChatView />
                   </ShellChromeContext.Provider>
@@ -683,6 +684,7 @@ export default function App() {
                 {desktopShell && <ZoomBanner />}
                 {/* 初次设置只盖聊天区；远端浏览器（PWA 完整模式）同样走这条路径 */}
                 {secretaryEnabled && secretaryWelcomeOpen && <SecretaryWelcome />}
+                {backgroundTasksOpen && <BackgroundTasksPage />}
               </div>
               {sideOpen && !sideFullscreen && !isMobile && (
                 <ResizeHandle

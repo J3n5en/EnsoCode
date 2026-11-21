@@ -2,7 +2,7 @@ import type { BackgroundTaskInfo, SubagentActivity, SubagentInfo } from '@shared
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { AgentActivityView, TaskBar } from './TaskBar';
+import { AgentActivityView, TailView, TaskBar } from './TaskBar';
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -67,6 +67,27 @@ describe('TaskBar', () => {
     expect(html).toContain('scan repo');
     expect(html).not.toContain('Stop task');
     expect(html).not.toContain('Stop subagent');
+  });
+});
+
+describe('TailView', () => {
+  const render = (tail: string, outputBytes?: number, running = true) =>
+    renderToStaticMarkup(createElement(TailView, { tail, outputBytes, running }));
+
+  it('有尾部就显示尾部', () => {
+    expect(render('\u001b[32mready\u001b[0m\n', 6)).toContain('ready');
+  });
+
+  it('进程确实没写出内容、写过输出但面板还没拿到、还没拿到 worker 数据，三种文案不同', () => {
+    const none = render('', 0);
+    expect(none).toContain('(no output yet)');
+    expect(none).toContain('buffer output');
+    expect(render('', 0, false)).not.toContain('buffer output');
+    expect(render('')).toContain('Loading…');
+    expect(render('')).not.toContain('(no output yet)');
+    const pending = render('', 2048);
+    expect(pending).not.toContain('(no output yet)');
+    expect(pending).toContain('Output written ({{size}}), not loaded yet');
   });
 });
 

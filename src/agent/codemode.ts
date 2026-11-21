@@ -47,6 +47,7 @@ export const CODEMODE_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
   'todo',
   'task_output',
   'task_stop',
+  'task_settle',
   'computer',
   'send_image',
   'report_blocked',

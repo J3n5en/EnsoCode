@@ -702,6 +702,9 @@ export const IPC_PRODUCT_COVERAGE = {
     'Renderer reports a conversation mute toggle so Main stops system notifications and paired-device pushes immediately; no execution rights.'
   ),
   AGENT_TASK_STOP: surfaces('conversations.background-task.stop'),
+  AGENT_TASK_KEEP: excluded(
+    'Desktop task-bar control that marks a running background task as kept (or unkept) so idle hints are suppressed for an hour; no execution rights.'
+  ),
   AGENT_TOOL_BACKGROUND: excluded(
     'Desktop tool-row control that moves a running foreground shell command into a background task; renderer-only, not an Enso capability.'
   ),
@@ -801,10 +804,6 @@ export const IPC_PRODUCT_COVERAGE = {
     'Device idle-restart update policy; not an Enso capability.'
   ),
   UPDATER_SET_CHANNEL: excluded('Device update channel policy; not an Enso capability.'),
-  UPDATER_CANCEL_RESTART: surfaces('updates.install'),
-  UPDATER_TAKE_INTERRUPTED_SESSIONS: excluded(
-    'Startup handoff that resumes turns interrupted by an update restart.'
-  ),
   PROXY_APPLY: surfaces('general.proxy-mode', 'general.custom-proxy-url'),
   CA_CERT_STATUS: excluded('Device-local CA certificate status for TLS trust.'),
   CA_CERT_APPLY: excluded('Device-local CA certificate file path for TLS trust.'),

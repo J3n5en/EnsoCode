@@ -351,12 +351,27 @@ export interface BackgroundTaskInfo {
   status: 'running' | 'done' | 'failed';
   /** 输出尾部快照（覆盖式,≤8KB） */
   tail: string;
+  /** 任务累计写出的输出字节数（含重启前、已滚出 tail 的）；0 = 确实还没输出。缺省表示未知 */
+  outputBytes?: number;
   startedAt: number;
   exitCode?: number;
   /** 模型显式 timeout 的绝对截止（ms）。没有则不会因超时被看门狗收口 */
   deadlineAt?: number;
   /** false：直接子进程已不在。缺省表示还没探测 */
   alive?: boolean;
+  /** 疑似闲置（只提示，不自动停）：since = 最后一次输出的时刻，ports = 进程树监听的端口 */
+  idle?: { since: number; ports: number[] };
+  /** 留下运行：agent 收尾表态或用户手动保留；at 起 1 小时内不参与闲置判定，之后重新检查 */
+  keep?: BackgroundTaskKeep;
+}
+
+/** 手动保留理由上限 */
+export const TASK_KEEP_REASON_MAX = 200;
+
+export interface BackgroundTaskKeep {
+  by: 'agent' | 'user';
+  reason?: string;
+  at: number;
 }
 
 export { SHELL_QUIET_MS } from '../shellLimits';
@@ -1148,7 +1163,9 @@ export type AgentSessionCustomEntry =
     }
   | { kind: 'capability-receipt'; receipt: CapabilityReceipt }
   /** 工具批次一句话标签：callId 为批次首个工具调用 id，时间线工具组头据此显示 */
-  | { kind: 'tool-batch-label'; callId: string; label: string; at: number };
+  | { kind: 'tool-batch-label'; callId: string; label: string; at: number }
+  /** 回合收尾时还有 count 个后台任务没表态：时间线一行灰色提醒 */
+  | { kind: 'task-wrap-up-nudge'; count: number; at: number };
 
 export type SafeJournalRecord =
   | { type: 'safe-user-text'; text: string; at: number }
@@ -1525,7 +1542,10 @@ export type AgentCommand =
       result?: unknown;
       error?: string;
     }
-  | { type: 'task-stop'; identity: SessionIdentity; taskId: string }
+  /** 按会话 id 寻址：会话不必已打开；worker 校验任务归属 */
+  | { type: 'task-stop'; sessionId: string; taskId: string }
+  /** 用户手动保留（可附理由）；reason 为 null 取消保留 */
+  | { type: 'task-keep'; sessionId: string; taskId: string; reason: string | null }
   | { type: 'tool-background'; identity: SessionIdentity; toolCallId: string }
   | { type: 'workflow-stop'; identity: SessionIdentity; runId: string }
   | { type: 'subagent-stop'; identity: SessionIdentity; agentId: string }
@@ -2344,6 +2364,15 @@ export type AgentWorkerEvent =
       sessionId: string;
     }
   | {
+      /**
+       * 没打开的会话（重启认回的命令所在会话不会自动打开）的后台任务全量（REPLACE 语义）。
+       * 不带 identity / seq：渲染层只据此画任务条，不当会话已打开
+       */
+      type: 'unopened-background-tasks';
+      sessionId: string;
+      tasks: BackgroundTaskInfo[];
+    }
+  | {
       /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
       type: 'title-failed';
       conversationId: string;
@@ -2361,6 +2390,7 @@ export type AgentWorkerEvent =
       taskId: string;
       tail: string;
       status: BackgroundTaskInfo['status'];
+      outputBytes?: number;
     }
   | {
       type: 'task-ended';
@@ -3430,6 +3460,15 @@ export function parseAgentSessionCustomEntry(value: unknown): AgentSessionCustom
     const receipt = parseCapabilityReceipt(value.receipt);
     return receipt ? { kind: 'capability-receipt', receipt } : null;
   }
+  if (value.kind === 'task-wrap-up-nudge') {
+    return hasExactKeys(value, ['kind', 'count', 'at']) &&
+      Number.isInteger(value.count) &&
+      (value.count as number) > 0 &&
+      typeof value.at === 'number' &&
+      Number.isFinite(value.at)
+      ? (value as unknown as AgentSessionCustomEntry)
+      : null;
+  }
   if (value.kind === 'tool-batch-label') {
     return hasExactKeys(value, ['kind', 'callId', 'label', 'at']) &&
       isNonEmptyString(value.callId) &&
@@ -4292,9 +4331,17 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         ? (value as unknown as AgentCommand)
         : null;
     case 'task-stop':
-      return hasExactKeys(value, ['type', 'identity', 'taskId']) &&
-        parseAnySessionIdentity(value.identity) &&
+      return hasExactKeys(value, ['type', 'sessionId', 'taskId']) &&
+        isNonEmptyString(value.sessionId) &&
         isNonEmptyString(value.taskId)
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'task-keep':
+      return hasExactKeys(value, ['type', 'sessionId', 'taskId', 'reason']) &&
+        isNonEmptyString(value.sessionId) &&
+        isNonEmptyString(value.taskId) &&
+        (value.reason === null ||
+          (typeof value.reason === 'string' && value.reason.length <= TASK_KEEP_REASON_MAX))
         ? (value as unknown as AgentCommand)
         : null;
     case 'tool-background':
@@ -4696,6 +4743,14 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
   }
   if (value.type === 'session-wake-requested') {
     return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'unopened-background-tasks') {
+    return hasExactKeys(value, ['type', 'sessionId', 'tasks']) &&
+      isNonEmptyString(value.sessionId) &&
+      Array.isArray(value.tasks) &&
+      value.tasks.every((task) => isRecord(task) && isNonEmptyString(task.taskId))
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

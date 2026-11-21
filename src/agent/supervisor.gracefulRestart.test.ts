@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { RESTART_CHECKPOINT_FILE, type RestartCheckpoint } from '@shared/gracefulRestart';
@@ -597,6 +597,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       exitFile: files.exitFile,
       sink: vi.fn(),
       flush: vi.fn(),
+      readError: () => null,
       done: new Promise<never>(() => {}),
       kill: vi.fn(),
       release: vi.fn(() => 42),
@@ -905,6 +906,140 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
     ).sessions.get('parent')?.pendingTaskReminders ?? [];
   const bgTasksOf = (supervisor: SessionSupervisor) =>
     (supervisor as unknown as { bgTasks: BackgroundTaskManager }).bgTasks;
+
+  it('冷启动：认回任务所在会话没打开也下发给渲染层，快照请求可补拉；不开会话、不发模型请求', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-unopened-'));
+    const ended = goneRecord('other');
+    writeDetachedTasksManifest(path.join(dataDir, DETACHED_TASKS_FILE), {
+      version: 1,
+      writtenAt: Date.now(),
+      workerPid: 1,
+      tasks: [ended],
+    });
+    const { events, supervisor } = await startSupervisor(dataDir);
+    const unopened = () => ofType(events, 'unopened-background-tasks');
+    const endedTask = expect.objectContaining({
+      taskId: ended.taskId,
+      status: 'done',
+      exitCode: 0,
+    });
+    expect(unopened().at(-1)).toEqual({
+      type: 'unopened-background-tasks',
+      sessionId: 'other',
+      tasks: [endedTask],
+    });
+
+    let alive = true;
+    const running = goneRecord('parent');
+    rmSync(runFiles(logDir, running.runId).exitFile);
+    bgTasksOf(supervisor).recover([running], { alive: () => alive, matches: () => alive });
+    const runningTask = expect.objectContaining({ taskId: running.taskId, status: 'running' });
+    expect(unopened().at(-1)).toEqual({
+      type: 'unopened-background-tasks',
+      sessionId: 'parent',
+      tasks: [runningTask],
+    });
+
+    events.length = 0;
+    supervisor.handleCommand({ type: 'snapshot' });
+    await settle();
+    expect(unopened()).toEqual(
+      expect.arrayContaining([
+        { type: 'unopened-background-tasks', sessionId: 'parent', tasks: [runningTask] },
+        { type: 'unopened-background-tasks', sessionId: 'other', tasks: [endedTask] },
+      ])
+    );
+    events.length = 0;
+    supervisor.handleCommand({ type: 'snapshot', sessionId: 'parent' });
+    await settle();
+    expect(unopened()).toEqual([
+      { type: 'unopened-background-tasks', sessionId: 'parent', tasks: [runningTask] },
+    ]);
+    expect(mocks.createAgentSession).not.toHaveBeenCalled();
+
+    // 进程退出：状态照常更新，完成通知照旧请 Main 叫醒会话
+    writeFileSync(runFiles(logDir, running.runId).exitFile, '0');
+    alive = false;
+    for (let i = 0; i < 40 && !unopened().some((e) => e.tasks[0]?.status === 'done'); i++)
+      await sleep(50);
+    expect(unopened().at(-1)?.tasks).toEqual([
+      expect.objectContaining({ taskId: running.taskId, status: 'done' }),
+    ]);
+    expect(ofType(events, 'session-wake-requested')).toEqual([
+      { type: 'session-wake-requested', sessionId: 'parent' },
+    ]);
+    expect(mocks.createAgentSession).not.toHaveBeenCalled();
+    await supervisor.shutdown();
+  });
+
+  it('未打开会话里的任务也能停：按会话 id 寻址，别的会话停不了，不开会话', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-task-stop-unopened-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    const taskId = bgTasksOf(supervisor).start('other', 'sleep 30', dataDir, { detachable: true });
+    const status = () =>
+      ofType(events, 'unopened-background-tasks')
+        .filter((event) => event.sessionId === 'other')
+        .at(-1)
+        ?.tasks.find((task) => task.taskId === taskId)?.status;
+    expect(status()).toBe('running');
+    supervisor.handleCommand({ type: 'task-stop', sessionId: 'parent', taskId });
+    await settle();
+    expect(status()).toBe('running');
+    supervisor.handleCommand({ type: 'task-keep', sessionId: 'other', taskId, reason: 'ssh 在用' });
+    expect(ofType(events, 'unopened-background-tasks').at(-1)?.tasks[0]?.keep).toMatchObject({
+      by: 'user',
+      reason: 'ssh 在用',
+    });
+    supervisor.handleCommand({ type: 'task-stop', sessionId: 'other', taskId });
+    for (let i = 0; i < 60 && status() === 'running'; i++) await sleep(50);
+    expect(status()).toBe('failed');
+    expect(mocks.createAgentSession).not.toHaveBeenCalled();
+    await supervisor.shutdown();
+  });
+
+  it('回合收尾还有没表态的任务：时间线记一次提醒，清单搭下一条消息，不另起一轮', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-task-wrap-up-'));
+    const { events, supervisor } = await startSupervisor(dataDir);
+    supervisor.handleCommand({ type: 'spawn-parent', identity: parent, cwd: '/workspace', model });
+    await waitFor(events, 'parent-ready');
+    const session = mocks.sessions[0];
+    const taskId = bgTasksOf(supervisor).start('parent', 'sleep 30', dataDir);
+    const runTurn = async () => {
+      const reply = {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'done' }],
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      };
+      session.emit({ type: 'agent_start' });
+      session.emit({ type: 'turn_start' });
+      session.messages.push(user, reply);
+      session.emit({ type: 'message_end', message: reply });
+      session.emit({ type: 'turn_end', message: reply, toolResults: [] });
+      session.emit({ type: 'agent_end', messages: [reply] });
+      session.emit({ type: 'agent_settled' });
+      await settle();
+    };
+    const nudges = () =>
+      ofType(events, 'session-custom-entry').filter(
+        (event) => event.entry.kind === 'task-wrap-up-nudge'
+      );
+    await runTurn();
+    expect(nudges().map((event) => event.entry)).toEqual([
+      { kind: 'task-wrap-up-nudge', count: 1, at: expect.any(Number) },
+    ]);
+    expect(session.prompt).not.toHaveBeenCalled();
+    supervisor.handleCommand({ type: 'prompt', identity: parent, text: '继续' });
+    for (let i = 0; i < 20 && session.prompt.mock.calls.length === 0; i++) await settle();
+    const sent = String(session.prompt.mock.calls[0]?.[0]);
+    expect(sent.startsWith('<background-tasks-wrap-up>')).toBe(true);
+    expect(sent).toContain(`${taskId}: sleep 30`);
+    expect(sent.endsWith('继续')).toBe(true);
+    await runTurn();
+    expect(nudges()).toHaveLength(1);
+    bgTasksOf(supervisor).stop(taskId, true);
+    await supervisor.shutdown();
+  });
 
   it('认回的任务在会话空闲时结束：开一轮把完成通知交给模型', async () => {
     const dataDir = mkdtempSync(path.join(tmpdir(), 'enso-graceful-wake-idle-'));

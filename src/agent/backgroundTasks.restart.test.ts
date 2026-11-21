@@ -82,7 +82,7 @@ async function yieldCommand(manager: BackgroundTaskManager, command: string): Pr
 const LOOP = 'i=0; while true; do echo line-$i; i=$((i+1)); sleep 0.03; done';
 
 describe.runIf(posix)('重启时转后台命令脱离 worker、下一代认回', () => {
-  it('pid 还在：同一个任务 id 认回为 running，接着读到新输出、中间不丢行；同一命令不再重复启动', async () => {
+  it('pid 还在：同一个任务 id 认回为 running，面板尾部接上重启前的输出、不丢不重；同一命令不再重复启动', async () => {
     const logDir = mkdtempSync(path.join(tmpdir(), 'enso-bg-restart-'));
     const first = makeManager(logDir);
     const taskId = await yieldCommand(first.manager, LOOP);
@@ -107,7 +107,9 @@ describe.runIf(posix)('重启时转后台命令脱离 worker、下一代认回',
       (second.manager.snapshot('s1')[0]?.tail ?? '').includes(`line-${lastSeen + 10}\n`)
     );
     const resumed = second.manager.snapshot('s1')[0]?.tail ?? '';
-    expect(resumed.startsWith(`line-${lastSeen + 1}\n`)).toBe(true);
+    expect(resumed).toContain(`line-${lastSeen}\nline-${lastSeen + 1}\n`);
+    expect(resumed.match(new RegExp(`(^|\\n)line-${lastSeen}\\n`, 'g'))).toHaveLength(1);
+    expect(second.manager.snapshot('s1')[0]?.outputBytes).toBeGreaterThan(record.outputOffset);
     // 日志接着写在同一份文件里
     expect(readFileSync(record.logPath, 'utf8')).toContain(`line-${lastSeen}\n`);
 
@@ -124,6 +126,93 @@ describe.runIf(posix)('重启时转后台命令脱离 worker、下一代认回',
     expect(second.manager.stop(taskId)).toBe(true);
     await until(() => !processAlive(record.pid));
     await until(() => second.ended.includes(taskId));
+  });
+
+  it('认回后输出文件读不到：面板看到读取失败的原因，而不是「暂无输出」', async () => {
+    const logDir = mkdtempSync(path.join(tmpdir(), 'enso-bg-restart-'));
+    const sleeper = spawn('sleep', ['30'], { detached: true });
+    children.push(sleeper);
+    const runId = randomUUID();
+    const files = runFiles(logDir, runId);
+    const { manager } = makeManager(logDir);
+    manager.recover(
+      [
+        {
+          taskId: 'task-3-gone-file',
+          sessionId: 's1',
+          command: 'server',
+          commandKey: null,
+          cwd: logDir,
+          pid: sleeper.pid as number,
+          runId,
+          startedAt: Date.now(),
+          yieldedAt: null,
+          deadlineAt: null,
+          outputFile: files.outputFile,
+          outputOffset: 0,
+          exitCodeFile: files.exitFile,
+          logPath: path.join(logDir, 'task-3-gone-file.log'),
+        },
+      ],
+      { alive: () => true, matches: () => true }
+    );
+    try {
+      await until(() =>
+        (manager.snapshot('s1')[0]?.tail ?? '').includes('cannot read command output')
+      );
+      expect(manager.snapshot('s1')[0]?.tail).toMatch(/ENOENT/);
+    } finally {
+      manager.stop('task-3-gone-file');
+    }
+  });
+
+  it('认回时只把日志尾部读进内存；重启前的输出不当作新输出重放给模型', () => {
+    const logDir = mkdtempSync(path.join(tmpdir(), 'enso-bg-restart-'));
+    const taskId = 'task-7-old';
+    const runId = randomUUID();
+    const files = runFiles(logDir, runId);
+    const before = `${Array.from({ length: 200_000 }, (_, i) => `pre-${i}`).join('\n')}\npre-last\n`;
+    writeFileSync(path.join(logDir, `${taskId}.log`), before);
+    writeFileSync(files.outputFile, 'pre-last\npost-1\n');
+    writeFileSync(files.exitFile, '0');
+    const record: DetachedTaskRecord = {
+      taskId,
+      sessionId: 's1',
+      command: 'loop',
+      commandKey: null,
+      cwd: logDir,
+      pid: 999_999,
+      runId,
+      startedAt: Date.now() - 60_000,
+      yieldedAt: null,
+      deadlineAt: null,
+      outputFile: files.outputFile,
+      outputOffset: 'pre-last\n'.length,
+      exitCodeFile: files.exitFile,
+      logPath: path.join(logDir, `${taskId}.log`),
+    };
+    const started: Array<{ tail: string; outputBytes?: number }> = [];
+    const notified: string[] = [];
+    const manager = new BackgroundTaskManager(
+      {
+        onStarted: (_s, task) => started.push(task),
+        onOutput: () => {},
+        onEnded: () => {},
+        onCompletionNotify: (_s, text) => notified.push(text),
+      },
+      logDir,
+      limits
+    );
+    manager.recover([record], { alive: () => false, matches: () => false });
+
+    expect(started[0]?.tail).toContain('pre-199999\npre-last\npost-1\n');
+    const [info] = manager.snapshot('s1');
+    expect(info?.tail).toContain('pre-last\npost-1\n');
+    expect(info?.tail.length).toBeLessThanOrEqual(8_000);
+    expect(info?.outputBytes).toBe(Buffer.byteLength(before) + 'post-1\n'.length);
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain('post-1');
+    expect(notified[0]).not.toContain('pre-last');
   });
 
   it('命令 exec 换掉了 shell（命令行里已没有 trap 和 runId）：照样认回为 running，停止时停得掉', async () => {

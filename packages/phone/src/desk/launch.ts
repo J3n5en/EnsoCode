@@ -28,6 +28,17 @@ export function saveDeskMeta(storage: KeyValue, pairId: string, meta: DeskMeta):
   } catch {}
 }
 
+/** 页面常驻时桌面升级重启：重连握手报的构建与在用的不同，就该整页换到新构建 */
+export function upgradedBuild(
+  inUse: string,
+  reported: string | undefined,
+  platform: string
+): DeskMeta | null {
+  if (!inUse || !reported || reported === inUse) return null;
+  if (!BUILD.test(reported) || reported.includes('..')) return null;
+  return { version: reported, platform };
+}
+
 export const deskBase = (pairId: string, version: string): string =>
   `/desk/r/${encodeURIComponent(pairId)}/${encodeURIComponent(version)}`;
 

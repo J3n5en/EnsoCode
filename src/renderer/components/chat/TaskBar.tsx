@@ -7,24 +7,44 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Clock,
+  Cpu,
   FileText,
   LoaderCircle,
   type LucideIcon,
+  Pin,
   Search,
-  Square,
   Terminal,
-  TerminalSquare,
+  Unplug,
   Wrench,
   X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { useI18n } from '@/i18n';
 import { parseMcpToolName, unwrapMcpProxyCall } from '@/lib/mcpToolName';
 import { stripAnsi } from '@/lib/terminalText';
+import { formatBytes } from '@/lib/toolCards/render';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
 import { useSettingsStore } from '@/stores/settings';
+import {
+  clockText,
+  IdleActions,
+  idleLabel,
+  KeepLine,
+  keepBackgroundTask,
+  StopTaskButton,
+  shortSpan,
+  spanText,
+  stopBackgroundTask,
+  TaskBadge,
+  TaskNode,
+  TaskStatusBadge,
+  taskView,
+  useNow,
+} from './backgroundTaskUi';
 import { Markdown } from './Markdown';
 import { StepNode } from './StepNode';
 import { summarizeSubagentToolArgs } from './subagentToolSummary';
@@ -123,6 +143,9 @@ export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps)
               {openTask ? openTask.command : openAgent?.description}
               {openAgent?.modelId ? ` · ${modelDisplayName(virtualModels, openAgent.modelId)}` : ''}
             </span>
+            {openTask && (
+              <TaskPanelActions sessionId={sessionId} task={openTask} readOnly={readOnly} />
+            )}
             <button
               type="button"
               onClick={() => setOpenTaskId(null)}
@@ -131,34 +154,21 @@ export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps)
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          {openTask && <TailView tail={openTask.tail} />}
+          {openTask && <TaskDetails sessionId={sessionId} task={openTask} readOnly={readOnly} />}
           {openAgent && <AgentDetails key={openAgent.id} agent={openAgent} />}
         </div>
       )}
       <div className="flex flex-col gap-0.5 rounded-xl border bg-card p-1 shadow-xs">
         {visible.map((task) => (
-          <DockRow
+          <TaskRow
             key={task.taskId}
-            icon={TerminalSquare}
-            status={task.status}
-            meta={<TaskMeta task={task} />}
+            sessionId={sessionId}
+            task={task}
+            readOnly={readOnly}
             open={openTaskId === task.taskId}
             onToggle={() => setOpenTaskId(openTaskId === task.taskId ? null : task.taskId)}
-            stopTitle={t('Stop task')}
-            onStop={
-              readOnly
-                ? undefined
-                : () => void window.electronAPI.agent.stopTask(sessionId, task.taskId)
-            }
             onDismiss={() => dismiss(task.taskId)}
-          >
-            <span
-              className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground"
-              title={task.command}
-            >
-              {task.command}
-            </span>
-          </DockRow>
+          />
         ))}
         {visibleAgents.map((agent) => (
           <DockRow
@@ -242,9 +252,9 @@ function DockRow({
             type="button"
             onClick={onStop}
             title={stopTitle}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            className="flex h-6 shrink-0 items-center rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           >
-            <Square className="h-3 w-3" />
+            {t('Stop')}
           </button>
         )
       ) : (
@@ -257,6 +267,227 @@ function DockRow({
         </button>
       )}
     </div>
+  );
+}
+
+/** 后台任务一行：疑似闲置琥珀底 + 行内「保留」「停止」，保留的任务下方一行理由 */
+function TaskRow({
+  sessionId,
+  task,
+  readOnly,
+  open,
+  onToggle,
+  onDismiss,
+}: {
+  sessionId: string;
+  task: BackgroundTaskInfo;
+  readOnly?: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useI18n();
+  const now = useNow();
+  const view = taskView(task);
+  return (
+    <div
+      data-enso="background-task-row"
+      data-view={view}
+      className={cn(
+        'flex min-h-[30px] min-w-0 items-center gap-2 rounded-lg px-1 text-[13px]',
+        view === 'kept' && 'py-1',
+        view === 'idle' && 'bg-warning/[0.06]',
+        open && 'bg-muted'
+      )}
+    >
+      <TaskNode task={task} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+            title={task.command}
+          >
+            {task.command}
+          </span>
+          {view === 'idle' && <TaskBadge tone="pending">{idleLabel(task, now, t)}</TaskBadge>}
+        </div>
+        <KeepLine task={task} className="mt-0.5" />
+      </div>
+      <TaskMeta task={task} />
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={cn(
+          'flex h-6 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+          open && 'bg-foreground/[0.06] text-foreground'
+        )}
+      >
+        {t('Output')}
+        <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
+      </button>
+      {task.status === 'running' ? (
+        readOnly ? null : view === 'idle' ? (
+          <IdleActions sessionId={sessionId} taskId={task.taskId} />
+        ) : (
+          <StopTaskButton onStop={() => stopBackgroundTask(sessionId, task.taskId)} />
+        )
+      ) : (
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TaskPanelActions({
+  sessionId,
+  task,
+  readOnly,
+}: {
+  sessionId: string;
+  task: BackgroundTaskInfo;
+  readOnly?: boolean;
+}) {
+  const { t } = useI18n();
+  const now = useNow();
+  const view = taskView(task);
+  return (
+    <>
+      <TaskStatusBadge task={task} now={now} />
+      {!readOnly && view === 'idle' && <IdleActions sessionId={sessionId} taskId={task.taskId} />}
+      {!readOnly && view === 'kept' && (
+        <Button
+          size="xs"
+          variant="ghost"
+          className="text-muted-foreground"
+          onClick={() => keepBackgroundTask(sessionId, task.taskId, null)}
+        >
+          {t('Unkeep')}
+        </Button>
+      )}
+    </>
+  );
+}
+
+function Evidence({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted px-2 py-1.5">
+      <Icon className="size-3.5 shrink-0 text-warning" />
+      <span className="truncate text-muted-foreground">{label}</span>
+      <span className="ml-auto shrink-0 font-medium tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function MetaLine({ children }: { children: ReactNode }) {
+  return <div className="text-[11px] text-subtle-foreground tabular-nums">{children}</div>;
+}
+
+/** 展开的任务：疑似闲置给三条依据，保留的给理由（手动保留可补一句），下面是最近输出 */
+function TaskDetails({
+  sessionId,
+  task,
+  readOnly,
+}: {
+  sessionId: string;
+  task: BackgroundTaskInfo;
+  readOnly?: boolean;
+}) {
+  const { t } = useI18n();
+  const now = useNow();
+  const view = taskView(task);
+  const ran = shortSpan(now - task.startedAt);
+  const ports = task.idle?.ports ?? [];
+  const extra = view === 'idle' || view === 'kept';
+  return (
+    <>
+      {view === 'idle' && (
+        <div className="space-y-2.5 px-3 py-2.5 text-xs">
+          <div className="grid grid-cols-3 gap-1.5">
+            <Evidence
+              icon={Clock}
+              label={t('No new output')}
+              value={spanText(now - (task.idle?.since ?? now), t)}
+            />
+            <Evidence
+              icon={Unplug}
+              label={
+                ports.length > 0 ? t('Port {{ports}}', { ports: ports.join(', ') }) : t('Ports')
+              }
+              value={ports.length > 0 ? t('No connections') : t('Not listening')}
+            />
+            <Evidence icon={Cpu} label="CPU" value="0%" />
+          </div>
+          <MetaLine>
+            {t('Running for {{duration}} · Suspected idle tasks are never stopped automatically', {
+              duration: ran,
+            })}
+          </MetaLine>
+        </div>
+      )}
+      {view === 'kept' && task.keep && (
+        <div className="space-y-2.5 px-3 py-2.5 text-xs">
+          <div className="flex items-start gap-2 rounded-md bg-muted px-2.5 py-2">
+            <Pin className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              {task.keep.by === 'user' && !readOnly ? (
+                <input
+                  key={task.keep.at}
+                  data-enso="background-task-keep-reason"
+                  defaultValue={task.keep.reason ?? ''}
+                  maxLength={200}
+                  placeholder={t('Add a reason (optional)')}
+                  className="w-full bg-transparent text-[13px] outline-none placeholder:text-subtle-foreground"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                  onBlur={(event) => {
+                    const reason = event.currentTarget.value.trim();
+                    if (reason !== (task.keep?.reason ?? ''))
+                      keepBackgroundTask(sessionId, task.taskId, reason);
+                  }}
+                />
+              ) : (
+                <div className="text-[13px]">{task.keep.reason ?? '—'}</div>
+              )}
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                {task.keep.by === 'agent'
+                  ? t('Kept by the agent at {{time}} when wrapping up', {
+                      time: clockText(task.keep.at),
+                    })
+                  : t('Kept by you at {{time}}', { time: clockText(task.keep.at) })}
+              </div>
+            </div>
+          </div>
+          <MetaLine>{t('Running for {{duration}}', { duration: ran })}</MetaLine>
+        </div>
+      )}
+      {extra && (
+        <div className="flex items-center gap-2 border-t border-border/60 px-3 pt-2 text-[11px] text-subtle-foreground">
+          <span>{t('Recent output')}</span>
+        </div>
+      )}
+      <TailView
+        tail={task.tail}
+        outputBytes={task.outputBytes}
+        running={task.status === 'running'}
+        framed={!extra}
+      />
+    </>
   );
 }
 
@@ -505,8 +736,19 @@ function TaskMeta({ task }: { task: BackgroundTaskInfo }) {
   );
 }
 
-/** 输出尾部：等宽流式,新内容自动贴底 */
-function TailView({ tail }: { tail: string }) {
+/** 输出尾部：等宽流式,新内容自动贴底。没内容时区分：还没拿到 worker 数据 / 有输出没拿到 / 进程确实没写 */
+export function TailView({
+  tail,
+  outputBytes,
+  running,
+  framed = true,
+}: {
+  tail: string;
+  outputBytes?: number;
+  running?: boolean;
+  /** false：上方已有分隔标题，不再画顶边 */
+  framed?: boolean;
+}) {
   const { t } = useI18n();
   const ref = useRef<HTMLPreElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: tail 变化时贴底
@@ -517,9 +759,19 @@ function TailView({ tail }: { tail: string }) {
   return (
     <pre
       ref={ref}
-      className="max-h-56 overflow-auto border-t border-border/60 px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground"
+      className={cn(
+        'max-h-56 overflow-auto font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground',
+        framed ? 'border-t border-border/60 px-2.5 py-2' : 'px-3 pt-1 pb-2.5'
+      )}
     >
-      {stripAnsi(tail) || t('(no output yet)')}
+      {stripAnsi(tail) ||
+        (outputBytes === undefined
+          ? t('Loading…')
+          : outputBytes > 0
+            ? t('Output written ({{size}}), not loaded yet', { size: formatBytes(outputBytes) })
+            : running
+              ? `${t('(no output yet)')}\n${t('The process has not written anything. Without a terminal, some programs buffer output and only write it in blocks or on exit.')}`
+              : t('(no output yet)'))}
     </pre>
   );
 }

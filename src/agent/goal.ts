@@ -9,7 +9,9 @@ export type GoalSignalKind = 'complete' | 'blocked' | 'wait';
  */
 export function createGoalTools(
   emit: (kind: GoalSignalKind, note: string) => void,
-  verify?: (summary: string, signal: AbortSignal | undefined) => Promise<string | undefined>
+  verify?: (summary: string, signal: AbortSignal | undefined) => Promise<string | undefined>,
+  /** goal_complete 成功后附在结果后的收尾提示（如还在跑、没表态的后台任务清单） */
+  completionNote?: () => string | undefined
 ): ToolDefinition[] {
   const make = (
     name: string,
@@ -47,8 +49,14 @@ export function createGoalTools(
           };
       }
       emit(kind, note);
+      const extra = kind === 'complete' ? completionNote?.() : undefined;
       return {
-        content: [{ type: 'text' as const, text: `Goal marked ${kind}.` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: extra ? `Goal marked ${kind}.\n\n${extra}` : `Goal marked ${kind}.`,
+          },
+        ],
         details: undefined,
       };
     },

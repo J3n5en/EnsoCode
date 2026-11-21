@@ -1905,6 +1905,23 @@ describe('background-tasks-level', () => {
     expect(state.backgroundTasks).toEqual([task('t1', 'done')]);
   });
 
+  it('task-output 带上累计输出字节数，面板据此区分「没输出」和「有输出没加载」', () => {
+    const state = applyAgentEvent(
+      { ...base, lastSeq: 1, backgroundTasks: [task('t1', 'running')] },
+      's1',
+      {
+        type: 'task-output',
+        identity: identity(),
+        seq: 2,
+        taskId: 't1',
+        tail: 'x\n',
+        status: 'running',
+        outputBytes: 4096,
+      }
+    );
+    expect(state.backgroundTasks[0]).toMatchObject({ tail: 'x\n', outputBytes: 4096 });
+  });
+
   it('过期 seq 的 level 被丢弃', () => {
     const state = applyAgentEvent(
       { ...base, lastSeq: 5, backgroundTasks: [task('t1', 'running')] },
@@ -1912,6 +1929,31 @@ describe('background-tasks-level', () => {
       { type: 'background-tasks-level', identity: identity(), seq: 3, tasks: [] }
     );
     expect(state.backgroundTasks).toEqual([task('t1', 'running')]);
+  });
+
+  it('冷会话（worker 没打开）收到认回的任务：直接上任务条，不领养 generation、不动 seq', () => {
+    const cold = { ...base, generation: undefined, lastSeq: 0 };
+    const state = applyAgentEvent(cold, 's1', {
+      type: 'unopened-background-tasks',
+      sessionId: 's1',
+      tasks: [task('t1', 'running')],
+    });
+    expect(state.backgroundTasks).toEqual([task('t1', 'running')]);
+    expect(state.generation).toBeUndefined();
+    expect(state.lastSeq).toBe(0);
+    const done = applyAgentEvent(state, 's1', {
+      type: 'unopened-background-tasks',
+      sessionId: 's1',
+      tasks: [task('t1', 'done')],
+    });
+    expect(done.backgroundTasks).toEqual([task('t1', 'done')]);
+    expect(
+      applyAgentEvent(cold, 's2', {
+        type: 'unopened-background-tasks',
+        sessionId: 's1',
+        tasks: [task('t1', 'running')],
+      })
+    ).toBe(cold);
   });
 });
 

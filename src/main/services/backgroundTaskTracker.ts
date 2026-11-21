@@ -15,6 +15,10 @@ export interface ObservedTask {
   exitCode?: number;
   deadlineAt?: number;
   alive?: boolean;
+  /** worker 标的疑似闲置 */
+  suspectedIdle?: true;
+  /** agent 或用户留下运行 */
+  kept?: true;
 }
 
 const toObserved = (task: BackgroundTaskInfo): ObservedTask => ({
@@ -25,6 +29,8 @@ const toObserved = (task: BackgroundTaskInfo): ObservedTask => ({
   ...(task.exitCode === undefined ? {} : { exitCode: task.exitCode }),
   ...(task.deadlineAt === undefined ? {} : { deadlineAt: task.deadlineAt }),
   ...(task.alive === undefined ? {} : { alive: task.alive }),
+  ...(task.idle ? { suspectedIdle: true as const } : {}),
+  ...(task.keep ? { kept: true as const } : {}),
 });
 
 export class BackgroundTaskTracker {
@@ -50,6 +56,10 @@ export class BackgroundTaskTracker {
     if (event.type === 'snapshot') {
       for (const snapshot of event.sessions)
         this.replace(snapshot.identity.sessionId, snapshot.backgroundTasks ?? []);
+      return;
+    }
+    if (event.type === 'unopened-background-tasks') {
+      this.replace(event.sessionId, event.tasks);
       return;
     }
     if (!('identity' in event) || !event.identity) return;

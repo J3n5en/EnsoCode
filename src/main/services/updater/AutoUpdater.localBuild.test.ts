@@ -33,7 +33,6 @@ vi.mock('./localBuildInstall', async (importActual) => ({
   inspectAppSignature: m.inspect,
 }));
 vi.mock('../../ipc/sessionIndex', () => ({
-  agentSessionIndex: { runningRootSessionIds: () => [] },
   needsQuitCheckpoint: () => false,
 }));
 vi.mock('../../ipc/settings', () => ({
@@ -45,7 +44,6 @@ vi.mock('../../windows/createAppWindow', () => ({
 }));
 vi.mock('../exitInterruptHost', () => ({ markExitForUpdate: vi.fn() }));
 vi.mock('./idleRestartSnapshot', () => ({ currentIdleRestartObservation: () => ({}) }));
-vi.mock('./interruptedSessions', () => ({ recordInterruptedSessions: vi.fn() }));
 vi.mock('../agentHost', () => ({
   prepareAgentWorkerForQuit: vi.fn(),
   cancelAgentQuitCheckpoint: vi.fn(),

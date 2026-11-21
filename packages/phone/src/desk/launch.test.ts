@@ -6,6 +6,7 @@ import {
   loadDeskMeta,
   markBuildReady,
   saveDeskMeta,
+  upgradedBuild,
 } from './launch';
 
 class MemoryStorage {
@@ -38,6 +39,17 @@ describe('desk launch meta', () => {
 
   it('builds the service-worker path for a build', () => {
     expect(deskBase('a/b', '0.2.9-x')).toBe('/desk/r/a%2Fb/0.2.9-x');
+  });
+
+  it('重连时宿主报的构建与在用的不同才算升级；没在用构建或报得不合法都不算', () => {
+    expect(upgradedBuild('0.3.12-a', '0.3.12-b', 'darwin')).toEqual({
+      version: '0.3.12-b',
+      platform: 'darwin',
+    });
+    expect(upgradedBuild('0.3.12-a', '0.3.12-a', 'darwin')).toBeNull();
+    expect(upgradedBuild('', '0.3.12-b', 'darwin')).toBeNull();
+    expect(upgradedBuild('0.3.12-a', '../x', 'darwin')).toBeNull();
+    expect(upgradedBuild('0.3.12-a', undefined, 'darwin')).toBeNull();
   });
 });
 

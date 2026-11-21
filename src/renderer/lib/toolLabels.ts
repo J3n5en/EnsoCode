@@ -16,6 +16,7 @@ export const TOOL_LABEL_KEYS: Partial<Record<string, string>> = {
   ask_user: 'Ask user',
   task_output: 'Task output',
   task_stop: 'Task stop',
+  task_settle: 'Background task wrap-up',
   message_coworker: 'Message coworker',
   message_main_agent: 'Message main agent',
   recall: 'Recall memory',

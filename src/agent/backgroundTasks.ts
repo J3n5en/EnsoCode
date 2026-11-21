@@ -6,7 +6,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { getPowerShellConfig, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { SHELL_READ_HINT, SHELL_SLEEP_HINT, SHELL_TIMEOUT_HINT } from '@shared/shellHints';
 import { SHELL_LIMITS, type ShellLimits } from '@shared/shellLimits';
-import type { BackgroundTaskInfo } from '@shared/types/agent';
+import type { BackgroundTaskInfo, BackgroundTaskKeep } from '@shared/types/agent';
 import { commandKey, commandSummary, type DetachedTaskRecord } from './detachedTasksManifest';
 import {
   bindForegroundCommand,
@@ -24,6 +24,7 @@ import {
   processAlive,
   type RunProbe,
   readExitCode,
+  readFileTail,
   readRunOutput,
   removeRunFiles,
   runFiles,
@@ -41,6 +42,13 @@ import {
   yieldReceiptText,
 } from './shell/receipts';
 import { classifyFailure, type FailureVerdict } from './shell/taxonomy';
+import {
+  ActivitySampler,
+  IDLE_QUIET_MS,
+  IDLE_SAMPLE_INTERVAL_MS,
+  judgeIdle,
+  keepSuppressesIdle,
+} from './taskHygiene';
 
 /** 内存缓冲上限（超出截头保尾；磁盘 log 全量写到 limits.logMaxBytes 为止） */
 const MAX_BUFFER = 200_000;
@@ -56,6 +64,8 @@ const FAILURE_TAIL = 4_000;
 const TASK_OUTPUT_LIMIT = 30_000;
 /** 输出事件节流 */
 const EMIT_INTERVAL_MS = 500;
+/** 认回任务时从上一代日志读回内存的尾部上限：够面板 tail 用，不把大日志整个读进来 */
+const RECOVER_TAIL_BYTES = 64 * 1024;
 
 interface Task {
   info: BackgroundTaskInfo;
@@ -78,6 +88,10 @@ interface Task {
   logBytes: number;
   /** 日志超限后未写入的字节数 */
   logDroppedBytes: number;
+  /** 任务累计写出的输出字节数（认回的任务含上一代写进日志的） */
+  outputBytes: number;
+  /** 最近一次有输出（或登记）的时刻：闲置判定只看它，不读日志 */
+  lastOutputAt: number;
   /** 跨 chunk 的多字节字符留到下个 chunk 再解码，避免产生替换字符 */
   decoder: StringDecoder;
   /** 模型已经由工具返回值知情（阻塞等到结束 / kill 已回执），不再通知 */
@@ -99,6 +113,8 @@ interface Task {
   pid?: number;
   /** 输出直写文件、能脱离 worker 活过重启的进程；没有的（管道 / 远程 / Windows）重启只能等它结束 */
   run?: FileBackedRun;
+  /** 已写进输出的读文件失败原因：同一原因只提示一次 */
+  readError?: string;
   /** 原命令 + cwd 的指纹：认回的任务据此拦同一命令的重复启动 */
   commandKey?: string;
   cwd?: string;
@@ -149,7 +165,8 @@ export interface TaskEvents {
     sessionId: string,
     taskId: string,
     tail: string,
-    status: BackgroundTaskInfo['status']
+    status: BackgroundTaskInfo['status'],
+    outputBytes?: number
   ): void;
   onEnded(
     sessionId: string,
@@ -213,11 +230,14 @@ export class BackgroundTaskManager {
   private foreground = new Map<string, Map<string, DetachableCall>>();
   private counter = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private idleTimer: ReturnType<typeof setInterval> | null = null;
+  private sampling = false;
 
   constructor(
     private readonly events: TaskEvents,
     private readonly logDir: string,
-    private currentLimits: ShellLimits = SHELL_LIMITS
+    private currentLimits: ShellLimits = SHELL_LIMITS,
+    private readonly sampler: ActivitySampler = new ActivitySampler()
   ) {}
 
   /** 任务日志与文件直写输出所在目录 */
@@ -432,19 +452,21 @@ export class BackgroundTaskManager {
       details?: unknown;
       finalize?: () => Promise<unknown>;
       startedAt?: number;
-      /** 认回的任务接着写同一份日志 */
+      /** 认回的任务接着写同一份日志，并把日志尾部读回内存给面板 */
       appendLog?: boolean;
     }
   ): Task {
     const logPath = path.join(this.logDir, `${taskId}.log`);
     let logStream: WriteStream | null = null;
     let logBytes = 0;
+    let seed = '';
     try {
       mkdirSync(this.logDir, { recursive: true });
       if (opts.appendLog) {
         try {
           logBytes = statSync(logPath).size;
         } catch {}
+        seed = new StringDecoder('utf8').end(readFileTail(logPath, RECOVER_TAIL_BYTES));
       }
       logStream = createWriteStream(logPath, { flags: opts.appendLog ? 'a' : 'w' });
     } catch {
@@ -453,17 +475,20 @@ export class BackgroundTaskManager {
     const task: Task = {
       sessionId,
       kill: opts.kill,
-      output: '',
+      output: seed,
       droppedChars: 0,
-      droppedMemBytes: 0,
-      readChars: 0,
-      readBytes: 0,
+      droppedMemBytes: Math.max(0, logBytes - Buffer.byteLength(seed)),
+      // 上一代的输出模型已按它自己的游标读过/通知过，不再当作新输出重放
+      readChars: seed.length,
+      readBytes: Math.max(logBytes, Buffer.byteLength(seed)),
       head: '',
       dirty: false,
       logPath,
       logStream,
       logBytes,
       logDroppedBytes: 0,
+      outputBytes: logBytes,
+      lastOutputAt: Date.now(),
       decoder: new StringDecoder('utf8'),
       consumed: false,
       killedByUser: false,
@@ -476,7 +501,7 @@ export class BackgroundTaskManager {
         taskId,
         command,
         status: 'running',
-        tail: '',
+        tail: seed.slice(-TAIL_LIMIT),
         startedAt: opts.startedAt ?? Date.now(),
       },
     };
@@ -486,6 +511,12 @@ export class BackgroundTaskManager {
 
   private append(task: Task, chunk: Buffer): void {
     if (chunk.length === 0) return;
+    task.outputBytes += chunk.length;
+    task.lastOutputAt = Date.now();
+    if (task.info.idle) {
+      delete task.info.idle;
+      this.emitLevel(task.sessionId);
+    }
     this.writeLog(task, chunk);
     const text = task.decoder.write(chunk);
     if (!text) return;
@@ -556,9 +587,121 @@ export class BackgroundTaskManager {
   }
 
   private announce(task: Task): void {
-    this.events.onStarted(task.sessionId, { ...task.info });
+    this.events.onStarted(task.sessionId, this.infoOf(task));
     this.emitLevel(task.sessionId);
     this.ensureTimer();
+    if (process.platform !== 'win32') {
+      this.idleTimer ??= setInterval(() => void this.sampleIdle(), IDLE_SAMPLE_INTERVAL_MS);
+      this.idleTimer.unref?.();
+    }
+  }
+
+  /**
+   * 闲置采样：只看已安静接近阈值的任务（提前一个周期取 CPU 基线），一轮一次 ps + 一次 lsof。
+   * 状态变了才发全量快照；保留未满 1 小时的不判，到点后仍闲置就撤掉保留、重新标闲置。
+   */
+  async sampleIdle(now = Date.now()): Promise<void> {
+    if (this.sampling) return;
+    const running = [...this.tasks.values()].filter(
+      (task) => task.info.status === 'running' && !task.settling
+    );
+    if (running.length === 0) {
+      if (this.idleTimer) clearInterval(this.idleTimer);
+      this.idleTimer = null;
+      return;
+    }
+    const candidates = running.flatMap((task) => {
+      const pid = task.pid ?? task.run?.pid;
+      return pid !== undefined &&
+        !keepSuppressesIdle(task.info.keep, now + IDLE_SAMPLE_INTERVAL_MS) &&
+        now - task.lastOutputAt >= IDLE_QUIET_MS - IDLE_SAMPLE_INTERVAL_MS
+        ? [{ key: task.info.taskId, pid }]
+        : [];
+    });
+    this.sampling = true;
+    let samples: Awaited<ReturnType<ActivitySampler['sample']>>;
+    try {
+      samples = await this.sampler.sample(candidates, now);
+    } catch {
+      samples = new Map();
+    } finally {
+      this.sampling = false;
+    }
+    const touched = new Set<string>();
+    for (const task of running) {
+      if (task.info.status !== 'running') continue;
+      const idle =
+        !keepSuppressesIdle(task.info.keep, now) &&
+        judgeIdle({ now, lastOutputAt: task.lastOutputAt, sample: samples.get(task.info.taskId) });
+      if (idle) {
+        const ports = samples.get(task.info.taskId)?.sockets?.listening ?? [];
+        const changed =
+          !task.info.idle ||
+          task.info.idle.since !== task.lastOutputAt ||
+          task.info.idle.ports.join() !== ports.join() ||
+          task.info.keep !== undefined;
+        task.info.idle = { since: task.lastOutputAt, ports };
+        delete task.info.keep;
+        if (changed) touched.add(task.sessionId);
+      } else if (task.info.idle && samples.has(task.info.taskId)) {
+        // 拿不到数据的一轮维持原判，不来回闪；拿到了且不再闲置才撤
+        delete task.info.idle;
+        touched.add(task.sessionId);
+      }
+    }
+    for (const sessionId of touched) this.emitLevel(sessionId);
+  }
+
+  /** 留下运行（agent 表态或用户手动保留）：清掉闲置标记，1 小时后重新检查 */
+  keep(taskId: string, keep: Omit<BackgroundTaskKeep, 'at'>, now = Date.now()): boolean {
+    const task = this.tasks.get(taskId);
+    if (task?.info.status !== 'running') return false;
+    const reason = keep.reason?.trim().slice(0, 200);
+    task.info.keep = { by: keep.by, ...(reason ? { reason } : {}), at: now };
+    delete task.info.idle;
+    this.emitLevel(task.sessionId);
+    return true;
+  }
+
+  /** 取消保留：下一轮采样重新判定 */
+  unkeep(taskId: string): boolean {
+    const task = this.tasks.get(taskId);
+    if (!task?.info.keep) return false;
+    delete task.info.keep;
+    this.emitLevel(task.sessionId);
+    return true;
+  }
+
+  /** 会话树里还在跑、没表态（没保留、也没在停）的任务 */
+  undeclared(rootId: string): BackgroundTaskInfo[] {
+    return [...this.tasks.values()]
+      .filter(
+        (task) =>
+          task.info.status === 'running' &&
+          !task.info.keep &&
+          !task.killedByUser &&
+          !task.stoppedByModel &&
+          inSessionTree(task.sessionId, rootId)
+      )
+      .map((task) => this.infoOf(task));
+  }
+
+  taskInfo(taskId: string): BackgroundTaskInfo | undefined {
+    const task = this.tasks.get(taskId);
+    return task ? this.infoOf(task) : undefined;
+  }
+
+  private infoOf(task: Task): BackgroundTaskInfo {
+    return { ...task.info, tail: task.output.slice(-TAIL_LIMIT), outputBytes: task.outputBytes };
+  }
+
+  /** 输出文件读不到时把原因写进输出：面板和 task_output 看到的是失败原因，不是「暂无输出」 */
+  private noteReadError(task: Task): void {
+    const error = task.run?.readError() ?? undefined;
+    if (!error || error === task.readError) return;
+    task.readError = error;
+    task.output += `\n[cannot read command output: ${error}]\n`;
+    task.dirty = true;
   }
 
   private pruneFinished(): void {
@@ -601,7 +744,13 @@ export class BackgroundTaskManager {
     const hadWaiters = task.waiters.length > 0;
     if (hadWaiters) task.consumed = true;
     for (const wake of task.waiters.splice(0)) wake();
-    this.events.onOutput(task.sessionId, task.info.taskId, task.info.tail, status);
+    this.events.onOutput(
+      task.sessionId,
+      task.info.taskId,
+      task.info.tail,
+      status,
+      task.outputBytes
+    );
     this.events.onEnded(task.sessionId, task.info.taskId, status, exitCode);
     this.emitLevel(task.sessionId);
     // 幂等抑制：模型已知情（阻塞等到 / 自己停的且收到回执）就不再打扰
@@ -652,10 +801,17 @@ export class BackgroundTaskManager {
       let anyRunning = false;
       for (const task of this.tasks.values()) {
         if (task.info.status === 'running') anyRunning = true;
+        this.noteReadError(task);
         if (!task.dirty) continue;
         task.dirty = false;
         task.info.tail = task.output.slice(-TAIL_LIMIT);
-        this.events.onOutput(task.sessionId, task.info.taskId, task.info.tail, task.info.status);
+        this.events.onOutput(
+          task.sessionId,
+          task.info.taskId,
+          task.info.tail,
+          task.info.status,
+          task.outputBytes
+        );
       }
       if (!anyRunning && this.timer) {
         clearInterval(this.timer);
@@ -796,7 +952,12 @@ export class BackgroundTaskManager {
   snapshot(sessionId: string): BackgroundTaskInfo[] {
     return [...this.tasks.values()]
       .filter((task) => task.sessionId === sessionId)
-      .map((task) => ({ ...task.info, tail: task.output.slice(-TAIL_LIMIT) }));
+      .map((task) => this.infoOf(task));
+  }
+
+  /** 名下还有任务（含已结束、尚未清理的）的会话 */
+  sessionIds(): string[] {
+    return [...new Set([...this.tasks.values()].map((task) => task.sessionId))];
   }
 
   /**
@@ -995,21 +1156,32 @@ export function shellSleepHint(command: string): string {
 }
 
 const TIMEOUT_HINT_MIN_SEC = SHELL_LIMITS.yieldDefaultMs / 1000;
+/** 实际耗时达到默认让位的三分之二才算「跑得久」 */
+export const TIMEOUT_HINT_SLOW_MS = (SHELL_LIMITS.yieldDefaultMs * 2) / 3;
 
 /**
  * 前台显式 timeout 的提示：模型常把 timeout 当成「等这么久」，其实它只杀进程、不延长让位。
- * 达到默认让位时长才提示，短 timeout 是在提前杀，不误伤。
+ * 达到默认让位时长才提示，短 timeout 是在提前杀，不误伤；
+ * 且命令真的跑得久或已转后台才提示，快速结束的命令不带，免得每次都刷屏。
  */
-export function shellTimeoutHint(timeoutSec: number | undefined): string {
+export function shellTimeoutHint(
+  timeoutSec: number | undefined,
+  run: { elapsedMs: number; detached?: boolean }
+): string {
   if (timeoutSec === undefined || timeoutSec < TIMEOUT_HINT_MIN_SEC) return '';
+  if (!run.detached && run.elapsedMs < TIMEOUT_HINT_SLOW_MS) return '';
   return SHELL_TIMEOUT_HINT;
 }
 
 /** 把提示附在工具结果前面：规则写进结果里才不会在长会话中被冲淡 */
-function withCommandHints<T>(result: T, command: string, timeoutSec?: number): T {
-  const hint = [shellReadHint(command), shellSleepHint(command), shellTimeoutHint(timeoutSec)]
+function withCommandHints<T>(result: T, command: string, timeoutHint: string): T {
+  const hint = [shellReadHint(command), shellSleepHint(command), timeoutHint]
     .filter(Boolean)
     .join('\n');
+  return prependHint(result, hint);
+}
+
+function prependHint<T>(result: T, hint: string): T {
   if (!hint) return result;
   const content = (result as { content?: Array<{ type?: string; text?: string }> }).content;
   if (!Array.isArray(content)) return result;
@@ -1367,15 +1539,19 @@ export function withBackground(
       try {
         // timeout 原样下传：只作截止（到点杀），让位由 ForegroundCommand 按分类计时
         const result = await definition.execute(toolCallId, params, callSignal, onUpdate, ctx);
-        return withCommandHints(withFailureNote(result), command, deadlineSec);
+        const timeoutHint = shellTimeoutHint(deadlineSec, { elapsedMs: Date.now() - startedAt });
+        return withCommandHints(withFailureNote(result), command, timeoutHint);
       } catch (error) {
         if (error instanceof ForegroundDetachedError) {
-          return detachedResult(error, {
-            commandClass: policy.class,
-            startedAt,
-            logPath: manager.logPathOf(error.taskId) ?? '',
-            waitCapSec: yieldSec(manager.limits.taskWaitMaxMs),
-          });
+          return prependHint(
+            detachedResult(error, {
+              commandClass: policy.class,
+              startedAt,
+              logPath: manager.logPathOf(error.taskId) ?? '',
+              waitCapSec: yieldSec(manager.limits.taskWaitMaxMs),
+            }),
+            shellTimeoutHint(deadlineSec, { elapsedMs: Date.now() - startedAt, detached: true })
+          );
         }
         if (error instanceof ForegroundYieldError) {
           return {
@@ -1526,7 +1702,100 @@ export function createTaskTools(
         };
       },
     },
+    {
+      name: 'task_settle',
+      label: 'Task settle',
+      description:
+        'Declare what happens to background tasks that are still running when you wrap up, all in one call: ' +
+        'stop the ones you no longer need, keep the rest with a one-line reason the user will see. ' +
+        'Kept tasks are not flagged as idle for an hour.',
+      promptSnippet:
+        'task_settle: when wrapping up, stop or keep (with a reason) each still-running background task',
+      parameters: {
+        type: 'object',
+        properties: {
+          tasks: {
+            type: 'array',
+            description: 'One entry per running background task',
+            items: {
+              type: 'object',
+              properties: {
+                taskId: { type: 'string', description: 'Background task id' },
+                action: { type: 'string', enum: ['stop', 'keep'], description: 'stop or keep' },
+                reason: {
+                  type: 'string',
+                  description:
+                    'One short sentence: why it is no longer needed, or why it must keep running',
+                },
+              },
+              required: ['taskId', 'action', 'reason'],
+            },
+          },
+        },
+        required: ['tasks'],
+      } as unknown as ToolDefinition['parameters'],
+      prepareArguments: (args: unknown) => normalizeSettleArgs(args),
+      async execute(_id, params) {
+        const entries = settleEntries((params as { tasks?: unknown }).tasks);
+        if (entries.length === 0)
+          throw new Error('tasks must list at least one { taskId, action, reason }');
+        const settled = entries.map((entry) => {
+          const command = owned(entry.taskId) ? manager.taskInfo(entry.taskId)?.command : undefined;
+          const ok =
+            owned(entry.taskId) &&
+            (entry.action === 'stop'
+              ? manager.stop(entry.taskId)
+              : manager.keep(entry.taskId, { by: 'agent', reason: entry.reason }));
+          return { ...entry, ...(command ? { command } : {}), ok };
+        });
+        const stillOpen = sessionId ? manager.undeclared(sessionId).map((task) => task.taskId) : [];
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                settled,
+                ...(stillOpen.length > 0 ? { stillUndeclared: stillOpen } : {}),
+              }),
+            },
+          ],
+          details: undefined,
+        };
+      },
+    } as ToolDefinition,
   ];
+}
+
+interface SettleEntry {
+  taskId: string;
+  action: 'stop' | 'keep';
+  reason: string;
+}
+
+/** 模型常把数组写成 JSON 字符串、或只给单个对象：在 schema 校验前归一 */
+function normalizeSettleArgs(args: unknown): unknown {
+  if (!args || typeof args !== 'object') return args;
+  let tasks = (args as { tasks?: unknown }).tasks;
+  if (typeof tasks === 'string') {
+    try {
+      tasks = JSON.parse(tasks);
+    } catch {}
+  }
+  if (tasks && typeof tasks === 'object' && !Array.isArray(tasks)) tasks = [tasks];
+  return { ...args, tasks };
+}
+
+function settleEntries(value: unknown): SettleEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const { taskId, action, reason } = item as Record<string, unknown>;
+    if (typeof taskId !== 'string' || !taskId || (action !== 'stop' && action !== 'keep'))
+      return [];
+    return [
+      { taskId, action, reason: typeof reason === 'string' ? reason.trim().slice(0, 200) : '' },
+    ];
+  });
 }
 
 /** 完成提醒搭车：任意工具结果顶部前置未投递的后台任务完成通知 */

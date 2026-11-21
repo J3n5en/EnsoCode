@@ -1605,7 +1605,9 @@ export function buildTimeline(
                   ? `custom:receipt:${entry.receipt.receiptId}`
                   : entry.kind === 'oauth-account-selected'
                     ? `custom:${entry.kind}:${entry.accountKey}:${entry.at}:${index}`
-                    : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
+                    : entry.kind === 'task-wrap-up-nudge'
+                      ? `custom:${entry.kind}:${entry.at}:${index}`
+                      : `custom:${entry.kind}:${entry.child.generation}:${entry.at}:${index}`,
               entry,
             },
             at: customEntryTime(entry),

@@ -242,15 +242,10 @@ export const zhTranslations: Record<string, string> = {
   'New version {{version}} found': '发现新版本 {{version}}',
   'You are on the latest version': '已是最新版本',
   'Downloading update… {{percent}}%': '正在下载更新… {{percent}}%',
-  'New version {{version}} is ready — restart to update.':
-    '新版本 {{version}} 已就绪 —— 重启以更新。',
+  'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.':
+    '新版本 {{version}} 已下载。重启会在当前工具结束后进行，转到后台的命令会接着跑。',
   'Update check failed': '检查更新失败',
   'Restart to update': '重启更新',
-  'Restart now': '立即重启',
-  'Will restart to update {{version}} when the running turns finish.':
-    '当前回合结束后将自动重启并更新到 {{version}}。',
-  'Continued {{count}} conversation(s) interrupted by the update':
-    '已从断点继续 {{count}} 个因更新中断的会话',
   '{{count}} conversation(s) interrupted by app exit':
     '{{count}} 个会话因应用退出被中断，已在会话里说明原因',
   'Update failed: {{error}}': '更新失败：{{error}}',
@@ -2219,6 +2214,9 @@ export const zhTranslations: Record<string, string> = {
   'Earlier activity details were cleared; the final report is still available.':
     '较早的过程详情已清理，最终报告仍然保留。',
   '(no output yet)': '(暂无输出)',
+  'Output written ({{size}}), not loaded yet': '已输出 {{size}}，面板尚未加载',
+  'The process has not written anything. Without a terminal, some programs buffer output and only write it in blocks or on exit.':
+    '进程还没有写出任何内容。不在终端里运行时，有些程序会把输出攒成一块或等退出时才写出。',
   Deny: '拒绝',
   Allow: '允许',
   'Run as administrator': '以管理员权限运行',
@@ -3899,6 +3897,54 @@ export const zhTranslations: Record<string, string> = {
   Answered: '已回答',
   'Answering…': '回答中…',
   'Answered {{count}} questions': '回答了 {{count}} 个提问',
+  'Background task wrap-up': '后台任务收尾',
+  'Stop {{stopped}} · Keep {{kept}}': '停 {{stopped}} · 留 {{kept}}',
+  'Settling…': '收尾中…',
+  'Not running': '未在运行',
+  Kept: '已保留',
+  Keep: '保留',
+  Unkeep: '取消保留',
+  'Idle {{duration}}': '疑似闲置 {{duration}}',
+  '{{n}} h': '{{n}} 小时',
+  '{{h}} h {{m}} min': '{{h}} 小时 {{m}} 分钟',
+  'Kept by you · {{detail}}': '你手动保留 · {{detail}}',
+  'Kept: {{reason}}': '保留：{{reason}}',
+  'No new output': '无新输出',
+  'Port {{ports}}': '端口 {{ports}}',
+  Ports: '端口',
+  'No connections': '无连接',
+  'Not listening': '未监听',
+  'Running for {{duration}} · Suspected idle tasks are never stopped automatically':
+    '已跑 {{duration}} · 疑似闲置不会自动停止',
+  'Running for {{duration}}': '已跑 {{duration}}',
+  'Add a reason (optional)': '补一句保留理由（可选）',
+  'Kept by the agent at {{time}} when wrapping up': 'agent 在 {{time}} 回合收尾时保留',
+  'Kept by you at {{time}}': '你在 {{time}} 手动保留',
+  'Recent output': '最近输出',
+  '{{count}} background tasks are still undeclared; the next message asks the agent to stop each one or state why it keeps running':
+    '还有 {{count}} 个后台任务没表态，下一条消息会要求 agent 逐个停止或写明保留理由',
+  '{{count}} suspected idle': '{{count}} 个疑似闲置',
+  'from {{count}} sessions': '来自 {{count}} 个会话',
+  'Stop selected': '停止所选',
+  'No background tasks are running': '没有在跑的后台任务',
+  'Running for': '已运行',
+  'Rule: no new output for 30 minutes, no active connections on listening ports, CPU near 0, all at once. Kept tasks are excluded for an hour.':
+    '判定：30 分钟无新输出、监听端口无活跃连接、CPU 近 0，三条同时满足。已保留的任务 1 小时内不计入。',
+  'Suspected idle only': '只看疑似闲置',
+  'Select all tasks of this session': '选中这个会话的全部任务',
+  'Session not open': '会话未打开',
+  'Select task': '选中任务',
+  'Stop {{count}} background tasks?': '停止 {{count}} 个后台任务？',
+  '{{title}} (not open)': '{{title}}（未打开）',
+  'Stop {{count}}': '停止 {{count}} 个',
+  '{{n}} background tasks running': '{{n}} 个后台任务在跑',
+  '{{n}} suspected idle': '{{n}} 个疑似闲置',
+  'Background tasks of {{title}}': '{{title}} 的后台任务',
+  'Port {{ports}} has no connections · CPU 0%': '端口 {{ports}} 无连接 · CPU 0%',
+  'All tasks': '全部任务',
+  'Stop suspected idle leftover tasks': '停止疑似闲置的遗留任务',
+  Status: '状态',
+  'Done ({{count}} kept tasks)': '已完成（保留 {{count}} 个任务）',
 };
 
 export function normalizeLocale(input?: string): Locale {

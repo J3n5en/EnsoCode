@@ -94,4 +94,22 @@ describe('BackgroundTaskTracker', () => {
     } as RendererAgentEvent);
     expect(tracker.hasRunning()).toBe(true);
   });
+
+  it('没打开的会话（重启认回）的任务全量：整体替换，清空后不再算在跑', () => {
+    const tracker = new BackgroundTaskTracker();
+    tracker.observe({
+      type: 'unopened-background-tasks',
+      sessionId: 's3',
+      tasks: [task({ taskId: 't3' })],
+    } as RendererAgentEvent);
+    expect(tracker.tasks('s3').map((item) => item.taskId)).toEqual(['t3']);
+    expect(tracker.hasRunning()).toBe(true);
+    tracker.observe({
+      type: 'unopened-background-tasks',
+      sessionId: 's3',
+      tasks: [],
+    } as RendererAgentEvent);
+    expect(tracker.tasks('s3')).toEqual([]);
+    expect(tracker.hasRunning()).toBe(false);
+  });
 });
