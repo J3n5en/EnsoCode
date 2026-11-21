@@ -396,27 +396,29 @@ describe('SecretarySidebarSection', () => {
     );
     const running = runningBySecretary(secretaries, states, () => true);
     await render(
-      secretaries.map((entry) => {
-        const origins = running[entry.id];
-        return (
-          <SecretarySidebarSection
-            key={entry.id}
-            view={view({ profile, board: states[entry.id]?.board })}
-            folded={false}
-            secretaryId={entry.id}
-            runningOrigins={
-              origins && { groups: origins.groups, titleOf: (id) => id, onSelect: vi.fn() }
-            }
-            {...actions()}
-          >
-            {entry.conversations.map((id) => (
-              <div key={id} data-row={id}>
-                <SecretaryDispatchBadge count={origins?.counts[id]} />
-              </div>
-            ))}
-          </SecretarySidebarSection>
-        );
-      })
+      <div>
+        {secretaries.map((entry) => {
+          const origins = running[entry.id];
+          return (
+            <SecretarySidebarSection
+              key={entry.id}
+              view={view({ profile, board: states[entry.id]?.board })}
+              folded={false}
+              secretaryId={entry.id}
+              runningOrigins={
+                origins && { groups: origins.groups, titleOf: (id) => id, onSelect: vi.fn() }
+              }
+              {...actions()}
+            >
+              {entry.conversations.map((id) => (
+                <div key={id} data-row={id}>
+                  <SecretaryDispatchBadge count={origins?.counts[id]} />
+                </div>
+              ))}
+            </SecretarySidebarSection>
+          );
+        })}
+      </div>
     );
     const section = (id: string) =>
       container.querySelector(`[data-enso="secretary-section"][data-secretary-id="${id}"]`);
