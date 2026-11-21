@@ -175,7 +175,7 @@ export function SecretarySidebarSection({
       <button
         type="button"
         data-enso="secretary-open"
-        onClick={onOpen}
+        onClick={() => onOpen()}
         title={view.name}
         className="flex min-w-0 flex-1 flex-col items-start text-left"
       >

@@ -378,6 +378,34 @@ describe('标题总结命令与事件', () => {
     ).toBeNull();
   });
 
+  it('turn-completed digest 允许空正文加最后一个工具', () => {
+    const event = {
+      type: 'turn-completed',
+      identity: parent,
+      seq: 1,
+      turnId: 'turn-1',
+      digest: {
+        firstUserText: '问',
+        userText: '问',
+        assistantText: '',
+        lastTool: { name: 'read', ok: true },
+      },
+    };
+    expect(parseAgentWorkerEvent(event)).toEqual(event);
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        digest: { ...event.digest, lastTool: { name: '', ok: true } },
+      })
+    ).toBeNull();
+    expect(
+      parseAgentWorkerEvent({
+        ...event,
+        digest: { ...event.digest, lastTool: { name: 'read' } },
+      })
+    ).toBeNull();
+  });
+
   it('turn-completed 无 digest 仍合法', () => {
     const event = {
       type: 'turn-completed',

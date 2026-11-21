@@ -65,6 +65,12 @@ export interface DispatchDriver {
     action: GoalAction,
     text?: string
   ): { ok: boolean; error?: string };
+  /**
+   * 给已完成或没有目标的会话挂上新目标：落成与 session_create 同一种 active 目标，
+   * 不另发续跑（消息本身会把会话跑起来，轮次结束后续跑接上）。
+   * 原来的目标还没完成时拒绝，目标原样保留。
+   */
+  attachGoal(conversationId: string, text: string): { ok: boolean; error?: string };
   /** 看一眼后台等待：该醒的醒，并返回还没交给秘书的停滞 */
   watch(now: number): BackgroundStall[];
   /** 会话被停止：撤掉续跑与看门狗，之后不许再唤醒它 */
@@ -586,6 +592,21 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
           if (runtime && runtime.queued.length > 0) settle(conversationId, runtime);
         }
       });
+    },
+
+    attachGoal(conversationId, text) {
+      const runtime = runtimeOf(conversationId);
+      if (!runtime) return { ok: false, error: 'not-main-driven' };
+      const goal = runtime.goal;
+      // completed 不会留在行上（完成即撤下），这里只挡还活着的目标
+      if (goal && goal.status !== 'completed') return { ok: false, error: 'goal-active' };
+      const trimmed = text.trim();
+      if (!trimmed) return { ok: false, error: 'empty goal' };
+      save(conversationId, {
+        ...runtime,
+        goal: { text: trimmed, status: 'active', autoTurns: 0, noProgressRuns: 0 },
+      });
+      return { ok: true };
     },
 
     goalAction(conversationId, action, text) {

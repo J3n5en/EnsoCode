@@ -136,6 +136,9 @@ interface Harness {
   queued: { conversationId: string; message: SecretaryQueuedMessage }[];
   steers: { conversationId: string; text: string; deliveryId: string }[];
   pausedGoals: string[];
+  /** attachGoal 的调用记录；缺省都成功 */
+  attachedGoals: { conversationId: string; goal: string }[];
+  attachGoalOk: boolean;
   profileValue: SecretaryProfile | null;
   appliedProfiles: SecretaryProfileDraft[];
   appliedSkills: SecretarySkillDraft[];
@@ -190,6 +193,8 @@ function harness(
     queued: [],
     steers: [],
     pausedGoals: [],
+    attachedGoals: [],
+    attachGoalOk: true,
     profileValue: options.profile === undefined ? profile() : options.profile,
     appliedProfiles: [],
     appliedSkills: [],
@@ -290,6 +295,19 @@ function harness(
     },
     pauseGoal: (conversationId) => {
       h.pausedGoals.push(conversationId);
+    },
+    attachGoal: (conversationId, goal) => {
+      h.attachedGoals.push({ conversationId, goal });
+      const current = h.rows[conversationId]?.goal as { status?: unknown } | undefined;
+      const live =
+        current && typeof current === 'object' && current.status && current.status !== 'completed';
+      if (!h.attachGoalOk || live) return { ok: false, error: 'goal-active' };
+      const row = h.rows[conversationId] ?? {};
+      h.rows[conversationId] = {
+        ...row,
+        goal: { text: goal, status: 'active', autoTurns: 0, noProgressRuns: 0 },
+      };
+      return { ok: true };
     },
     cleanup: {
       git: async () => ({ code: 1, stdout: '', stderr: '' }),
@@ -809,6 +827,75 @@ describe('session_send', () => {
     expect(result.error).toMatch(/^refused \(needs-user\): /u);
     expect(h.steers).toEqual([]);
     expect(h.queued).toEqual([]);
+  });
+
+  it('带 goal 且目标已完成：把新目标挂回会话行，会话按这个目标继续跑', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      rows: { c1: { id: 'c1', driver: 'main', goal: undefined } },
+    });
+    h.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 2, at: 900 };
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '再查一遍安装脚本',
+      goal: '查清安装脚本有没有真的执行',
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.rows.c1.goal).toEqual({
+      text: '查清安装脚本有没有真的执行',
+      status: 'active',
+      autoTurns: 0,
+      noProgressRuns: 0,
+    });
+    expect(h.file.dispatched.c1.goal).toBe('查清安装脚本有没有真的执行');
+  });
+
+  it('没有目标的会话带 goal 同样挂上', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      rows: { c1: { id: 'c1', driver: 'main' } },
+    });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '接着做',
+      goal: '把构建修好',
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.rows.c1.goal).toMatchObject({ text: '把构建修好', status: 'active' });
+  });
+
+  it('原来的目标还没完成时带 goal 被拒绝，目标原样保留', async () => {
+    const live = { text: '把构建修好', status: 'active', autoTurns: 3, noProgressRuns: 0 };
+    const h = harness({
+      file: dispatchedFile(),
+      rows: { c1: { id: 'c1', driver: 'main', goal: live } },
+    });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '换个目标',
+      goal: '另一个目标',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^refused \(goal-active\): /u);
+    expect(h.rows.c1.goal).toEqual(live);
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('goal 为空或超长时指出字段，不改目标', async () => {
+    for (const goal of ['   ', 'x'.repeat(4001)]) {
+      const h = harness({ file: dispatchedFile(), rows: { c1: { id: 'c1', driver: 'main' } } });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '继续',
+        goal,
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toMatch(/^invalid arguments: /u);
+      expect(result.error).toContain('goal');
+      expect(h.prompts).toEqual([]);
+    }
   });
 
   it('mode 只认 queue 与 steer', async () => {

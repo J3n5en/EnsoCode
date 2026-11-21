@@ -1,9 +1,9 @@
 import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import { MAX_MAX_ACTIVE_COWORKERS, MIN_MAX_ACTIVE_COWORKERS } from '@shared/maxActiveCoworkers';
 import { pickModelCapabilityOverrides } from '@shared/modelCatalog';
-import type {
-  AgentTypeEntry,
-  AgentTypeModelMode,
+import {
+  type AgentTypeEntry,
+  type AgentTypeModelMode,
   MODEL_THINKING_LEVEL_OVERRIDES,
 } from '@shared/types';
 import { BUILTIN_AGENT_TYPES } from '@shared/types/assets';
@@ -190,7 +190,7 @@ export function AgentTypeList({ hasSubagentModels = true }: { hasSubagentModels?
                 ? virtual.name
                 : `${provider?.name ?? '?'} / ${entry.modelId}`
               : t('Follows the conversation model');
-        const thinkingChoice = mode === 'fixed' ? thinkingChoiceOf(entry) : '';
+        const thinkingChoice = mode !== 'agent_pick' ? thinkingChoiceOf(entry) : '';
 
         return (
           <div key={entry.id} className="flex items-center gap-3 rounded-md border px-3 py-2.5">
@@ -247,6 +247,9 @@ type ThinkingChoice = '' | 'off' | (typeof MODEL_THINKING_LEVEL_OVERRIDES)[numbe
 
 const thinkingChoiceOf = (seed?: Pick<AgentTypeEntry, 'reasoning' | 'thinkingLevel'>) =>
   seed?.reasoning === 'off' ? 'off' : (seed?.thinkingLevel ?? '');
+
+// 「跟随」在 Select 中的选项值（状态里仍是 ''）
+const THINKING_INHERIT = 'inherit';
 
 // 显式写 undefined：updateAgentType 是浅合并，否则改回「跟随」时旧值残留
 const thinkingChoiceToFields = (
@@ -313,6 +316,12 @@ export function AgentTypeEditDialog({
     reasoning: thinking === 'off' ? 'off' : thinking === '' ? undefined : 'on',
     thinkingLevel: thinking === '' || thinking === 'off' ? undefined : thinking,
   });
+  // 跟随会话模型时没有 ModelPicker，单独给档位选择
+  const thinkingSelectItems = [
+    { value: THINKING_INHERIT, label: t('Follow parent') },
+    { value: 'off', label: t('Off') },
+    ...MODEL_THINKING_LEVEL_OVERRIDES.map((level) => ({ value: level, label: level })),
+  ];
 
   const save = () => {
     const slug = slugify(name);
@@ -326,8 +335,8 @@ export function AgentTypeEditDialog({
       skillIds,
       mcpServerIds,
       ...(modelMode === 'fixed' && providerId && modelId ? { providerId, modelId } : {}),
-      // 非固定模型不存推理覆盖（跟随模型条目 / 会话）
-      ...thinkingChoiceToFields(modelMode === 'fixed' ? thinking : ''),
+      // 主代理挑模型时思考也由它挑，不存类型级推理覆盖
+      ...thinkingChoiceToFields(modelMode !== 'agent_pick' ? thinking : ''),
     };
     if (entry) updateAgentType(entry.id, payload);
     else addAgentType(payload);
@@ -423,6 +432,29 @@ export function AgentTypeEditDialog({
                 triggerClassName={MODEL_PICKER_FORM_TRIGGER_CLASS}
                 zIndex={Z_INDEX.DROPDOWN_IN_MODAL}
               />
+            </Field>
+          )}
+          {modelMode === 'follow' && (
+            <Field>
+              <FieldLabel>{t('Thinking level')}</FieldLabel>
+              <Select
+                items={thinkingSelectItems}
+                value={thinking === '' ? THINKING_INHERIT : thinking}
+                onValueChange={(value) =>
+                  setThinking(value === THINKING_INHERIT ? '' : (value as ThinkingChoice))
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectPopup zIndex={Z_INDEX.DROPDOWN_IN_MODAL}>
+                  {thinkingSelectItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
             </Field>
           )}
           <Field>

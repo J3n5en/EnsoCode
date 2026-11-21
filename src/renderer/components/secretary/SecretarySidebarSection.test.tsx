@@ -5,6 +5,21 @@ import { act, type ReactElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const getSessions = vi.hoisted(() => vi.fn());
+
+vi.mock('@/stores/sessions', () => ({ useSessionsStore: { getState: getSessions } }));
+vi.mock('@/stores/settings', () => ({
+  useSettingsStore: {
+    getState: () => ({ projects: [{ id: 'sec', path: '/tmp/secretary' }] }),
+  },
+}));
+vi.mock('@/stores/modelDirectory/useProviders', () => ({ readMaterializedProviders: () => [] }));
+vi.mock('@/stores/oauthCredentials', () => ({
+  useOauthCredentialStore: { getState: () => ({ snapshot: {} }) },
+  oauthCredentialContext: () => ({}),
+}));
+vi.mock('@/stores/sidePanel', () => ({ useSidePanelStore: { getState: () => ({}) } }));
+
 const translate = (key: string, params?: Record<string, string | number>) =>
   params
     ? key.replace(/\{\{(\w+)\}\}/g, (_, token: string) => String(params[token] ?? ''))
@@ -48,6 +63,8 @@ vi.mock('@/components/ui/preview-card', () => ({
   ),
 }));
 
+import { openSecretary } from '@/lib/openSecretary';
+import { EMPTY_SECRETARY_STATE, useSecretaryStore } from '@/stores/secretary';
 import { runningBySecretary, SecretaryDispatchBadge } from './SecretaryRunningOrigins';
 import {
   SecretaryCollapsedButton,
@@ -136,6 +153,8 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  useSecretaryStore.setState(useSecretaryStore.getInitialState(), true);
+  getSessions.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -229,6 +248,63 @@ describe('SecretarySidebarSection', () => {
     onReset: vi.fn(),
   });
 
+  it.each([
+    { scenario: '未设置', configured: false, hasConversation: false },
+    { scenario: '已设置但没有会话', configured: true, hasConversation: false },
+    { scenario: '已有秘书会话', configured: true, hasConversation: true },
+  ])(
+    '$scenario 时，点人物卡会保留入口并打开正确的页面',
+    async ({ configured, hasConversation }) => {
+      const secretary = state({ secretaryId: 'default', profile: configured ? profile : null });
+      useSecretaryStore.setState({
+        secretary,
+        secretaries: [
+          {
+            id: 'default',
+            projectId: 'sec',
+            name: secretary.profile?.name ?? null,
+            avatar: null,
+            order: 0,
+          },
+        ],
+        states: { default: secretary },
+        focusedId: 'default',
+        welcomeOpen: false,
+      });
+      const selectConversation = vi.fn();
+      const newConversation = vi.fn(async (_projectId: string) => 'new-secretary-conversation');
+      getSessions.mockReturnValue({
+        order: hasConversation ? ['existing'] : [],
+        conversations: hasConversation ? { existing: { projectId: 'sec', lastActiveAt: 1 } } : {},
+        selectConversation,
+        newConversation,
+      });
+      vi.stubGlobal('electronAPI', {
+        secretary: { getState: vi.fn().mockResolvedValue(EMPTY_SECRETARY_STATE) },
+      });
+
+      const handlers = actions();
+      function SingleSecretaryEntry() {
+        const current = useSecretaryStore((store) => store.secretary);
+        const entry = secretarySectionView(current, t);
+        return entry ? (
+          <SecretarySidebarSection view={entry} folded={false} {...handlers} onOpen={openSecretary}>
+            {null}
+          </SecretarySidebarSection>
+        ) : null;
+      }
+
+      await render(<SingleSecretaryEntry />);
+      await act(async () => click('[data-enso="secretary-open"]'));
+
+      expect(container.querySelector('[data-enso="secretary-open"]')).not.toBeNull();
+      expect(useSecretaryStore.getState().focusedId).toBe('default');
+      expect(useSecretaryStore.getState().welcomeOpen).toBe(!configured);
+      expect(selectConversation.mock.calls).toEqual(hasConversation ? [['existing']] : []);
+      expect(newConversation.mock.calls).toEqual(configured && !hasConversation ? [['sec']] : []);
+    }
+  );
+
   it('未设置时显示默认名与设置提示，点击整行进欢迎页，行内只有 ＋ 与 ⚙', async () => {
     const handlers = actions();
     await render(
@@ -245,6 +321,7 @@ describe('SecretarySidebarSection', () => {
     expect(container.querySelector('[data-slot="conversation-row"]')).not.toBeNull();
     click('[data-enso="secretary-open"]');
     expect(handlers.onOpen).toHaveBeenCalledTimes(1);
+    expect(handlers.onOpen.mock.calls[0]).toHaveLength(0);
     click('[data-enso="secretary-action"][data-action="new"]');
     expect(handlers.onNewConversation).toHaveBeenCalledTimes(1);
     click('[data-enso="secretary-action"][data-action="settings"]');

@@ -388,6 +388,12 @@ export interface DispatchRecord {
   autoArchiveResultAt?: number;
   /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
   patrol?: { reason: PatrolReason; turn: number; at: number };
+  /**
+   * 秘书最近一次发消息（session_send）的时间：发过之后这一轮一直没有可见回复
+   * （没有新的助手文字、也没有新的工具调用）时，巡检按空闲阈值兜底报停住。
+   * 有了可见回复就清掉。
+   */
+  sentAt?: number;
 }
 
 export type SecretaryUpdate = {

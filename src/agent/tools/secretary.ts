@@ -87,7 +87,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     },
   },
   session_send: {
-    keys: ['conversationId', 'message', 'mode', 'attachments'],
+    keys: ['conversationId', 'message', 'mode', 'attachments', 'goal'],
     arrays: ['attachments'],
     aliases: {
       sessionId: 'conversationId',
@@ -485,7 +485,7 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it.',
+      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it. Pass goal when the session already reported goal-complete or never had a goal: the new goal is attached and the session keeps running until it is done or blocked, so the patrol watches it. Refused while its current goal is still unfinished — a live goal is never replaced.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -495,6 +495,13 @@ const SCHEMAS: Record<
           enum: [...SECRETARY_SEND_MODES],
           description:
             'queue (default): wait behind the current turn. steer: cut in at the next tool boundary to change priority or correct direction.',
+        },
+        goal: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4000,
+          description:
+            'Optional: a new goal, only when the session already reported goal-complete or has no goal. The session then keeps running until the goal is done or blocked, and the patrol watches it. Refused while its current goal is still unfinished.',
         },
         attachments: {
           type: 'array',

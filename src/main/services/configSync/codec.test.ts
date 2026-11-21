@@ -281,4 +281,27 @@ describe('config sync codec', () => {
     expect(() => validateBundle(withAgent('enso'))).toThrow(/reserved/i);
     expect(() => validateBundle(withAgent('builtin:worker'))).toThrow(/reserved/i);
   });
+
+  it('follow 类型的思考档能进出配置包，非法档拒绝，旧包没有这两项也能过', () => {
+    const agentType = {
+      id: '14478e0b-5089-4801-967e-0adeadfb4813',
+      name: 'cheap-scout',
+      description: '',
+      systemPrompt: 'x',
+      tools: 'readonly',
+      modelMode: 'follow',
+      reasoning: 'on',
+      thinkingLevel: 'low',
+    };
+    const withType = (entry: Record<string, unknown>) => ({
+      ...bundle(),
+      state: { ...bundle().state, agentTypes: [entry] },
+    });
+    expect(() => validateBundle(withType(agentType))).not.toThrow();
+    expect(() => validateBundle(withType({ ...agentType, thinkingLevel: 'extreme' }))).toThrow(
+      /thinking level/i
+    );
+    const { reasoning: _reasoning, thinkingLevel: _level, ...legacy } = agentType;
+    expect(() => validateBundle(withType(legacy))).not.toThrow();
+  });
 });
