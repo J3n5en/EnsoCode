@@ -138,3 +138,16 @@ it('刚建好的秘书状态还没到时，按清单判断：没档案就进欢�
   expect(h.openWelcome).toHaveBeenCalledTimes(1);
   expect(h.newSecretaryConversation).not.toHaveBeenCalled();
 });
+
+it('点击事件误传进来时不当成秘书 id，仍打开当前秘书', () => {
+  h.secretary = { profile: { name: '秘书' }, projectId: 'sec' };
+  h.states = { default: h.secretary };
+  h.focusedId = 'default';
+  h.sessions = {
+    order: ['a'],
+    conversations: { a: { projectId: 'sec', lastActiveAt: 3 } },
+  };
+  openSecretary({ type: 'click' } as unknown as string);
+  expect(h.focusedId).toBe('default');
+  expect(h.selectConversation).toHaveBeenCalledWith('a');
+});
