@@ -594,11 +594,18 @@ async function main(): Promise<void> {
   };
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') void keepSnapshot();
+    else clearBadge();
   });
   window.addEventListener('pagehide', () => void keepSnapshot());
+  clearBadge();
   setInterval(() => {
     if (document.visibilityState === 'visible') void keepSnapshot();
   }, 60_000);
+
+  /** 回到前台即清角标：待处理项在界面里看得到 */
+  function clearBadge(): void {
+    navigator.serviceWorker?.controller?.postMessage({ type: 'badge-clear' });
+  }
 
   /** 首次（或桌面升级后）要经隧道下载整套界面：盖着启动画面并报进度，iframe 加载完再露出 */
   const mountFresh = (total: number | undefined, cacheLost: boolean): void => {

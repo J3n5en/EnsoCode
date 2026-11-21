@@ -18,7 +18,15 @@ import {
   SquarePen,
   UnfoldHorizontal,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { ChatAreaFrame } from '@/components/app/ChatAreaFrame';
 import { HeaderSessionTabs } from '@/components/app/HeaderSessionTabs';
@@ -46,7 +54,6 @@ import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
 import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
 import { SessionPeekDialog } from '@/components/secretary/SessionPeekDialog';
-import { SidePanel } from '@/components/sidepanel/SidePanel';
 import {
   AlertDialog,
   AlertDialogClose,
@@ -104,6 +111,12 @@ import { runSessionClean } from '@/stores/sessions/storageClean';
 import { useSettingsStore } from '@/stores/settings';
 import { flushElectronPersist } from '@/stores/settings/storage';
 import { bindSidePanelFullscreen, useSidePanelStore } from '@/stores/sidePanel';
+
+// 右面板含 dockview / xterm / diffs，手机首屏用不到，打开时再加载
+const SidePanel = lazy(() =>
+  import('@/components/sidepanel/SidePanel').then((m) => ({ default: m.SidePanel }))
+);
+
 import { SIDE_PANEL_GAP_WIDTH, SIDE_PANEL_HANDLE_WIDTH } from '@/stores/sidePanel/width';
 
 /** 碰撞策略:光标所在的落点优先(否则会话行的大矩形会把置顶条/输入框让给重叠面积更大的项目块) */
@@ -719,12 +732,14 @@ export default function App() {
                   onResizingChange={setSideResizing}
                 />
               )}
-              <SidePanel
-                width={sideWidth}
-                resizing={sideResizing}
-                card={desktopShell}
-                titleRow={titleRowPanel}
-              />
+              <Suspense fallback={null}>
+                <SidePanel
+                  width={sideWidth}
+                  resizing={sideResizing}
+                  card={desktopShell}
+                  titleRow={titleRowPanel}
+                />
+              </Suspense>
             </div>
           </DndContext>
         )}

@@ -339,6 +339,13 @@ describe('remoteLeaderId', () => {
       expect(remoteLeaderId(false)).toBe(earlier.id);
       earlier.destroy();
       expect(remoteLeaderId(false)).toBe(later.id);
+      // 挂起的页面收不到事件，leader 让给还在线的
+      later.suspend();
+      const online = new RemoteSender('p1', 'c-online', 'main', () => {});
+      addRemoteSender(online);
+      expect(remoteLeaderId(false)).toBe(online.id);
+      online.destroy();
+      expect(remoteLeaderId(false)).toBeNull();
       later.destroy();
       expect(remoteLeaderId(false)).toBeNull();
     } finally {

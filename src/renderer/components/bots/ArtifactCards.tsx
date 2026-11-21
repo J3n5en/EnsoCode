@@ -6,14 +6,17 @@ import type {
   BotArtifactTarget,
 } from '@shared/types/botIpc';
 import { ExternalLink, FolderOpen, ImageOff, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Markdown } from '@/components/chat/Markdown';
-import { ReadFileView } from '@/components/chat/ReadFileView';
 import { fileTypeIcon, fileTypeIconClass } from '@/components/sidepanel/fileIcons';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
+
+const ReadFileView = lazy(() =>
+  import('@/components/chat/ReadFileView').then((m) => ({ default: m.ReadFileView }))
+);
 
 interface TurnArtifacts {
   artifacts: BotArtifact[];
@@ -431,7 +434,9 @@ function PreviewBody({ name, content }: { name: string; content: BotArtifactRead
       )}
       {content?.ok && content.kind === 'text' && (
         <div className="p-2 text-xs">
-          <ReadFileView path={name} contents={content.text} />
+          <Suspense fallback={null}>
+            <ReadFileView path={name} contents={content.text} />
+          </Suspense>
         </div>
       )}
     </div>

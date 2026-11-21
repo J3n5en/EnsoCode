@@ -67,8 +67,10 @@ import {
 } from 'lucide-react';
 import {
   Fragment,
+  lazy,
   memo,
   type ReactNode,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -135,7 +137,6 @@ import { CodeBlock } from './CodeBlock';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useChatHost } from './chatHost';
 import { compactionFreedPercent } from './contextBreakdown';
-import { EditDiff } from './EditDiff';
 import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
 import { InboundImageList } from './InboundImageList';
 import { GOAL_FRAME, GoalIcon, NOTICE_BOX, NOTICE_FRAME, NOTICE_ICON } from './injectedVisual';
@@ -145,13 +146,19 @@ import { mentionChipClass } from './MentionChip';
 import { parseMemoryCapture, parseMemorySearchHits } from './memorySearchHits';
 import { fileMentionBasename, splitInlineMentions, splitMentionRefs } from './mentionComposer';
 import { PrivacyMaskBadge } from './PrivacyMaskBadge';
-import { ReadFileView } from './ReadFileView';
 import { RtkToolStatsBar } from './RtkToolStatsBar';
 import { ShellFailureBadge, ShellRunStatus } from './ShellStatus';
 import { SlashChip, slashChipClass, splitSlashCommand } from './SlashChip';
 import { StepDot } from './StepNode';
 import { SubagentResult } from './SubagentResult';
 import { parseSubagentReceipt } from './subagentReceipt';
+
+// 只有出现 diff / 读文件行时才需要，按需加载以把 @pierre/diffs 移出首屏
+const EditDiff = lazy(() => import('./EditDiff').then((m) => ({ default: m.EditDiff })));
+const ReadFileView = lazy(() =>
+  import('./ReadFileView').then((m) => ({ default: m.ReadFileView }))
+);
+
 import { TerminalOutput } from './TerminalOutput';
 import { TodoList, TodoProgress } from './TodoBar';
 import { ToolCallCards } from './ToolCallCard';
@@ -2800,7 +2807,9 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
           )}
           {hasDiff && item.edits && (
             <ToolContentScroller follow={item.state === 'running'}>
-              <EditDiff path={item.summary} blocks={item.edits} />
+              <Suspense fallback={null}>
+                <EditDiff path={item.summary} blocks={item.edits} />
+              </Suspense>
             </ToolContentScroller>
           )}
           {hasFileChanges && item.fileChanges && (
@@ -2821,7 +2830,9 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
                     </span>
                     {change.truncated && <span>{t('Truncated preview')}</span>}
                   </div>
-                  <EditDiff path={change.path} blocks={[change]} snapshot={change} />
+                  <Suspense fallback={null}>
+                    <EditDiff path={change.path} blocks={[change]} snapshot={change} />
+                  </Suspense>
                 </div>
               ))}
             </ToolContentScroller>
@@ -2838,7 +2849,9 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
               follow={item.state === 'running'}
               className={cn((hasDiff || hasFileChanges) && 'border-t border-border/60')}
             >
-              <ReadFileView path={item.summary} contents={item.writeContent} />
+              <Suspense fallback={null}>
+                <ReadFileView path={item.summary} contents={item.writeContent} />
+              </Suspense>
             </ToolContentScroller>
           )}
           {!hasDiff && !hasWrite && !hasFileChanges && (hasBody || hasImage) && (
@@ -2855,12 +2868,18 @@ function ToolRow({ item }: { item: Extract<TimelineItem, { kind: 'tool' }> }) {
                 <ReadImagePreview
                   key={item.imagePath}
                   path={item.imagePath}
-                  fallback={<ReadFileView path={item.summary} contents={item.output ?? ''} />}
+                  fallback={
+                    <Suspense fallback={null}>
+                      <ReadFileView path={item.summary} contents={item.output ?? ''} />
+                    </Suspense>
+                  }
                 />
               ) : item.name === 'image_view' && item.state === 'ok' ? (
                 <ImageViewResult image={item.image} output={item.output} />
               ) : item.name === 'read' ? (
-                <ReadFileView path={item.summary} contents={item.output ?? ''} />
+                <Suspense fallback={null}>
+                  <ReadFileView path={item.summary} contents={item.output ?? ''} />
+                </Suspense>
               ) : item.name === 'subagent' &&
                 item.state !== 'error' &&
                 !sentMessage &&

@@ -58,7 +58,6 @@ import {
   selectWorkflowAvailable,
   watchSidePanelAutoCollapse,
 } from '@/lib/sidePanelDock';
-import { releaseTerminal } from '@/lib/terminalRegistry';
 import { cn } from '@/lib/utils';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
@@ -1016,7 +1015,7 @@ function ConversationDock({
         void useSessionsStore.getState().disposeBtwConversation(panel.id.slice(4));
         return;
       }
-      releaseTerminal(panel.id);
+      void import('@/lib/terminalRegistry').then((m) => m.releaseTerminal(panel.id));
       void window.electronAPI.terminal.dispose(panel.id);
     });
     setDockApi(event.api);

@@ -374,7 +374,7 @@ describe('pairHost session-sync 接线', () => {
     forwardAgentEvent({ type: 'approval-request', identity, seq: 2, request });
     expect(hostMocks.sendPush).toHaveBeenCalledExactlyOnceWith('pair-1', {
       title: '需要审批',
-      body: '会话',
+      body: 'ls',
       sessionId: 's1',
     });
   });
