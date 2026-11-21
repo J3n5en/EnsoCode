@@ -1,4 +1,5 @@
 import { app, BrowserWindow, globalShortcut, screen } from 'electron';
+import { showOnAllSpaces } from './floatingWindow';
 import type { OccupancyDeps } from './occupancy';
 import { hidSecondsSinceLastEvent } from './occupancyHid';
 
@@ -25,11 +26,6 @@ function layout(win: BrowserWindow): void {
   win.setBounds({ x: area.x, y: area.y, width: area.width, height: BAR_HEIGHT });
 }
 
-function restoreDock(): void {
-  // 已可见时再 show 会抢焦点
-  if (process.platform === 'darwin' && app.dock && !app.dock.isVisible()) void app.dock.show();
-}
-
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     show: false,
@@ -49,7 +45,7 @@ function createWindow(): BrowserWindow {
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  showOnAllSpaces(win);
   win.setIgnoreMouseEvents(true);
   win.setContentProtection(true);
   void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(bannerHtml())}`);
@@ -63,11 +59,9 @@ export function createElectronOccupancyDeps(): OccupancyDeps {
       if (!win || win.isDestroyed()) win = createWindow();
       layout(win);
       win.showInactive();
-      restoreDock();
     },
     hide: () => {
       if (win && !win.isDestroyed()) win.hide();
-      restoreDock();
     },
     registerEsc: (handler) => {
       if (!globalShortcut.register('Escape', handler)) {
