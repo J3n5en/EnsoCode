@@ -136,6 +136,7 @@ import {
   isAgentWorkerGone,
   takeAgentWorkerCrash,
 } from './agentWorkerExit';
+import { backgroundTaskStates } from './backgroundTaskTracker';
 import { type MemberAgentType, memberSpawnDescription } from './bots/botAgentType';
 import { BuiltinToolScopes, sessionDisabledTools, withoutKeepEnabled } from './builtinToolScopes';
 import { isComputerPlatformSupported } from './computer/support';
@@ -408,6 +409,11 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
     pushWebSearchConfig();
   });
   child.on('message', (raw) => {
+    // worker 构造完（认回的后台任务都已报过）才发 ready：Main 的任务表从这里起算全量
+    if ((raw as { type?: unknown } | null)?.type === 'ready') {
+      if (worker === child) backgroundTaskStates.markReported();
+      return;
+    }
     const event = parseAgentWorkerEvent(raw);
     if (event) {
       if (event.type === 'privacy-mask-ledger') {
