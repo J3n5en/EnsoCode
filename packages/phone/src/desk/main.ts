@@ -10,12 +10,12 @@ import { PHONE_URL, saveUiMode } from '../uiMode';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
 import {
-  bootRetry,
   buildReady,
   clearBootRetry,
   type DeskMeta,
   deskBase,
   downloadProgress,
+  handleBootStuck,
   loadDeskMeta,
   markBuildReady,
   saveDeskMeta,
@@ -134,13 +134,15 @@ function showState(state: ConnState): void {
 }
 
 /** SW 需要能代理 /desk/* ：旧版 SW 没有 fetch 处理，先确保新版接管本页 */
-async function ensureDeskWorker(): Promise<void> {
+async function ensureDeskWorker(onStage: (stage: string) => void): Promise<void> {
+  onStage('注册 Service Worker');
   const registration = await withTimeout(
     navigator.serviceWorker.register('/sw.js'),
     STORAGE_TIMEOUT_MS * 4,
     null
   );
   if (!registration) throw new Error('service worker unavailable');
+  onStage('等待 Service Worker 响应');
   const ping = () =>
     new Promise<boolean>((resolve) => {
       const controller = navigator.serviceWorker.controller;
@@ -158,7 +160,7 @@ async function ensureDeskWorker(): Promise<void> {
     });
   for (let attempt = 0; attempt < 4; attempt++) {
     if (await ping()) return;
-    await registration.update().catch(() => {});
+    await withTimeout(registration.update(), STORAGE_TIMEOUT_MS * 2, undefined);
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 3000);
       navigator.serviceWorker.addEventListener(
@@ -204,19 +206,23 @@ async function main(): Promise<void> {
   if (`?${params}` !== location.search) {
     history.replaceState(null, '', `${location.pathname}?${params}`);
   }
+  let bootStage = '读取启动会话';
   const bootWatchdog = setTimeout(() => {
-    if (!bootRetry(sessionStorage)) {
-      splash('启动卡住了：浏览器存储没有响应（iOS 偶发）。请从后台划掉 EnsoCode 再打开。');
-      return;
-    }
-    leaveGuard?.release();
-    location.reload();
+    handleBootStuck(bootStage, {
+      storage: sessionStorage,
+      show: splash,
+      reload: () => location.reload(),
+      later: (fn, ms) => setTimeout(fn, ms),
+    });
   }, BOOT_STUCK_MS);
   // iOS 冷启动常丢掉 openWindow 的 query，会话 id 在 SW 写入的 Cache 里
   const launchSessionId =
     urlSession ?? (await withTimeout(takeStashedSessionId(), STORAGE_TIMEOUT_MS, null));
 
-  await ensureDeskWorker();
+  await ensureDeskWorker((stage) => {
+    bootStage = stage;
+  });
+  bootStage = '启动隧道';
 
   const frames = $('frames');
   const iframes: Partial<Record<RemoteFrameKind, HTMLIFrameElement>> = {};

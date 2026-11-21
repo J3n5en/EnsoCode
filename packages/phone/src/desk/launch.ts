@@ -78,6 +78,29 @@ export function clearBootRetry(storage: Pick<Storage, 'removeItem'>): void {
   } catch {}
 }
 
+/** 发起重载后旧页面还在：说明重载本身也卡住了（重载请求同样挂起） */
+const RELOAD_HUNG_MS = 8000;
+const KILL_HINT = '请从后台划掉 EnsoCode 再打开。';
+
+/** 启动卡住：写明卡在哪一步再重载一次；重载也卡住或再次卡住时提示划掉重开 */
+export function handleBootStuck(
+  stage: string,
+  deps: {
+    storage: KeyValue;
+    show(text: string): void;
+    reload(): void;
+    later(fn: () => void, ms: number): void;
+  }
+): void {
+  if (!bootRetry(deps.storage)) {
+    deps.show(`启动卡住了（${stage}）。${KILL_HINT}`);
+    return;
+  }
+  deps.show(`启动卡住（${stage}），正在重新加载…`);
+  deps.later(() => deps.show(`重新加载也卡住了（${stage}）。${KILL_HINT}`), RELOAD_HUNG_MS);
+  deps.reload();
+}
+
 /** 入口页最先进缓存，下载中途打断也会留下它；renderer 真正跑起来后才记完成标记 */
 const readyUrl = (origin: string, base: string) => `${origin}${base}/.ready`;
 

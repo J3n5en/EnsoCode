@@ -288,6 +288,7 @@ func TestStaticDeskShellNotCached(t *testing.T) {
 	static := fstest.MapFS{
 		"index.html":      {Data: []byte("phone")},
 		"desk.html":       {Data: []byte("desk")},
+		"sw.js":           {Data: []byte("sw")},
 		"assets/app-1.js": {Data: []byte("js")},
 	}
 	hs := httptest.NewServer(newServer(st, static, nil))
@@ -308,6 +309,10 @@ func TestStaticDeskShellNotCached(t *testing.T) {
 	}
 	if _, cc := get("/assets/app-1.js"); !strings.Contains(cc, "immutable") {
 		t.Fatalf("asset cache %q", cc)
+	}
+	// sw.js 等无哈希文件被标 immutable 时，iOS 可能一直用旧 SW
+	if body, cc := get("/sw.js"); body != "sw" || cc != "no-cache" {
+		t.Fatalf("sw.js => %q %q", body, cc)
 	}
 }
 

@@ -304,10 +304,11 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if path.Ext(rel) == ".html" {
-		w.Header().Set("Cache-Control", "no-cache")
-	} else {
+	// 只有 assets/ 下带内容哈希；sw.js、manifest 等固定文件名必须每次校验
+	if strings.HasPrefix(rel, "assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-cache")
 	}
 	ctype := mime.TypeByExtension(path.Ext(rel))
 	if ctype != "" {
