@@ -7,6 +7,7 @@ import type {
   SecretarySummary,
 } from '@shared/types/secretary';
 import { create } from 'zustand';
+import { pruneRemoteSecretaryAvatars } from '@/lib/remoteImage';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
 import { useSessionsStore } from '@/stores/sessions';
@@ -179,6 +180,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       apply(secretary);
     });
     const offList = window.electronAPI.secretary.onListChanged((secretaries) => {
+      pruneRemoteSecretaryAvatars(secretaries.map((entry) => entry.id));
       set((state) => {
         const ids = new Set(secretaries.map((entry) => entry.id));
         const states = Object.fromEntries(
@@ -202,6 +204,7 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       .list()
       .then(async (secretaries) => {
         if (!bound) return;
+        pruneRemoteSecretaryAvatars(secretaries.map((entry) => entry.id));
         set((state) => ({
           secretaries,
           focusedId: pickFocused(secretaries, state.focusedId),

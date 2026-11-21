@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { GeneratedAvatar } from '@/components/bots/GeneratedAvatar';
+import { probeImage, remoteImagePrefix, retryRemoteImage } from '@/lib/remoteImage';
 import { cn } from '@/lib/utils';
 
 const DEFAULT_COLOR = '#7c5cff';
@@ -7,6 +8,7 @@ const DEFAULT_COLOR = '#7c5cff';
 /**
  * 秘书的脸：有图用图，否则和 bot 一样按名字与头像色用 boring-avatars 生成。
  * 调用方传入受控 URL，不传磁盘路径。图片加载失败时回退到生成头像，换了地址再试。
+ * 远程桌面里失败多是桌面还没连上：先显示生成头像，后台重试，取到了换回图片。
  */
 export function SecretaryFace({
   name,
@@ -22,6 +24,10 @@ export function SecretaryFace({
   enso?: string;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!image || failed !== image || !remoteImagePrefix()) return;
+    return retryRemoteImage(image, probeImage, () => setFailed(null));
+  }, [failed, image]);
   if (image && failed !== image) {
     return (
       <img
