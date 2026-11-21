@@ -324,6 +324,24 @@ describe('parseDispatchFile', () => {
     });
   });
 
+  it('自动归档标记读回来还在：重启后仍分得清自动归档与手动归档', () => {
+    const file = parseDispatchFile({
+      dispatched: {
+        c1: {
+          conversationId: 'c1',
+          projectId: 'p1',
+          secretaryConversationId: 's1',
+          createdAt: 10,
+          lastEventAt: 10,
+          lastState: 'idle',
+          autoArchivedAt: 30,
+          autoArchiveResultAt: 20,
+        },
+      },
+    });
+    expect(file.dispatched.c1).toMatchObject({ autoArchivedAt: 30, autoArchiveResultAt: 20 });
+  });
+
   it('派发记录与提案草案里的模型（含思考档位）读回来还在', () => {
     const file = parseDispatchFile({
       dispatched: {

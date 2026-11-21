@@ -2087,3 +2087,178 @@ describe('优雅重启续跑的会话', () => {
     expect(h.state.file.outbox[0].text).toContain('spawn rejected: no model');
   });
 });
+
+describe('派出会话完成后自动归档', () => {
+  /** 接上归档端口：写进和用户手动归档同一份会话行 */
+  function archiving(options: Parameters<typeof harness>[0] = {}) {
+    const h = harness(options);
+    h.state.rows.c1 = { ...h.state.rows.c1, secretaryOrigin: { secretaryConversationId: 'sec1' } };
+    let viewing: string | null = null;
+    h.ports.archive = (conversationId, at) => {
+      h.state.rows[conversationId] = {
+        ...h.state.rows[conversationId],
+        archived: true,
+        archivedAt: at,
+      };
+    };
+    h.ports.unarchive = (conversationId) => {
+      const { archived: _a, archivedAt: _b, ...rest } = h.state.rows[conversationId] ?? {};
+      h.state.rows[conversationId] = rest;
+    };
+    h.ports.viewed = (conversationId) => viewing === conversationId;
+    return {
+      ...h,
+      view: (conversationId: string | null) => {
+        viewing = conversationId;
+      },
+    };
+  }
+
+  function complete(h: Harness, now: number): void {
+    h.state.now = now;
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    h.host.onAgentEvent(
+      event('turn-completed', { digest: { assistantText: '做完了' } }),
+      change('idle', 'running')
+    );
+  }
+
+  function wake(h: Harness, now: number): void {
+    h.state.now = now;
+    h.state.statuses.c1 = running;
+    h.host.onAgentEvent(event('status', { status: 'running' }), change('running', 'idle'));
+  }
+
+  it('goal-complete 且空闲：马上归档，记下是自动归档', () => {
+    const h = archiving();
+    complete(h, 1000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 1000 });
+    expect(h.state.file.dispatched.c1).toMatchObject({
+      autoArchivedAt: 1000,
+      autoArchiveResultAt: 1000,
+    });
+    expect(h.state.audit.some((entry) => entry.op === 'auto_archive')).toBe(true);
+  });
+
+  it.each([
+    ['失败', [event('turn-failed', { error: 'boom' })]],
+    ['被中断', [event('turn-failed', { interrupted: { at: 1, kind: 'quit' } })]],
+    [
+      '被用户停止',
+      [event('goal-signal', { kind: 'complete' }), event('turn-completed', { aborted: true })],
+    ],
+    ['只是一轮结束', [event('turn-completed', { digest: { assistantText: '停一下' } })]],
+  ])('%s的不归档，留在列表里', (_label, events) => {
+    const h = archiving();
+    h.state.statuses.c1 = idle;
+    for (const item of events) h.host.onAgentEvent(item, change('idle', 'running'));
+    h.host.tick(5 * MINUTE);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+  });
+
+  it('还有后台任务在跑：先不归档，任务结束后补上', () => {
+    const h = archiving({
+      tasks: {
+        c1: [
+          { taskId: 't1', status: 'running', command: 'pnpm test', startedAt: 0 } as ObservedTask,
+        ],
+      },
+    });
+    complete(h, 1000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    h.state.tasks.c1 = [];
+    h.host.tick(2000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2000 });
+  });
+
+  it('只管秘书派出的：接管来的会话完成后不归档', () => {
+    const h = archiving();
+    h.state.rows.c1 = { ...h.state.rows.c1, secretaryOrigin: undefined };
+    h.state.file.dispatched.c1.takeover = { grantedAt: 0, via: 'user' };
+    complete(h, 1000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+  });
+
+  it('被唤醒（跑起来）就从归档里回到活跃中', () => {
+    const h = archiving();
+    complete(h, 1000);
+    wake(h, 2000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    expect(h.state.rows.c1.archivedAt).toBeUndefined();
+    expect(h.state.file.dispatched.c1.autoArchivedAt).toBeUndefined();
+    expect(h.state.audit.some((entry) => entry.op === 'auto_unarchive')).toBe(true);
+    // 这一轮又报完成：再归档一次
+    complete(h, 3000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 3000 });
+  });
+
+  it('用户手动归档的：被唤醒也不自动恢复', () => {
+    const h = archiving();
+    h.state.rows.c1 = { ...h.state.rows.c1, archived: true, archivedAt: 500 };
+    complete(h, 1000);
+    expect(h.state.rows.c1.archivedAt).toBe(500);
+    wake(h, 2000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 500 });
+  });
+
+  it('自动归档后用户又手动归档过：时间对不上，不算自动归档，唤醒不恢复', () => {
+    const h = archiving();
+    complete(h, 1000);
+    h.state.rows.c1 = { ...h.state.rows.c1, archived: true, archivedAt: 1500 };
+    wake(h, 2000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 1500 });
+  });
+
+  it('用户手动取消归档：同一次完成不再收走', () => {
+    const h = archiving();
+    complete(h, 1000);
+    h.ports.unarchive?.('c1');
+    h.host.tick(2000);
+    h.host.recover();
+    expect(h.state.rows.c1.archived).toBeUndefined();
+  });
+
+  it('当前正开着的会话不立刻收走，切走后再归档', () => {
+    const h = archiving();
+    h.view('c1');
+    complete(h, 1000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    h.view('other');
+    h.host.sweepAutoArchive(1500);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 1500 });
+  });
+
+  it('启动时补归档已经完成的旧会话；没完成的、失败的、普通会话不动', () => {
+    const record = (conversationId: string, kind?: 'goal-complete' | 'failed') => ({
+      conversationId,
+      projectId: 'p1',
+      secretaryConversationId: 'sec1',
+      createdAt: 0,
+      turn: 1,
+      lastState: 'idle' as const,
+      lastEventAt: 0,
+      ...(kind ? { lastResult: { kind, turn: 1, at: 10 } } : {}),
+    });
+    const h = archiving({
+      file: {
+        dispatched: {
+          c1: record('c1', 'goal-complete'),
+          c2: record('c2', 'failed'),
+          c3: record('c3'),
+        },
+      },
+    });
+    h.state.statuses = { c1: idle, c2: idle, c3: idle };
+    const origin = { secretaryConversationId: 'sec1' };
+    h.state.rows.c2 = { id: 'c2', projectId: 'p1', secretaryOrigin: origin };
+    h.state.rows.c3 = { id: 'c3', projectId: 'p1', secretaryOrigin: origin };
+    h.state.rows.mine = { id: 'mine', projectId: 'p1' };
+    h.state.now = 9000;
+    h.host.recover();
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 9000 });
+    expect(h.state.rows.c2.archived).toBeUndefined();
+    expect(h.state.rows.c3.archived).toBeUndefined();
+    expect(h.state.rows.mine.archived).toBeUndefined();
+  });
+});
