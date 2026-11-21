@@ -342,6 +342,11 @@ describe('config CLI socket', () => {
     expect(reply).toMatchObject({ ok: false, requiresRestart: true });
     expect(typeof reply.reason).toBe('string');
     expect((await state()).autoUpdate).toBe(true);
+    expect(await config({ action: 'set', key: 'longCacheRetention', value: true })).toMatchObject({
+      ok: false,
+      requiresRestart: true,
+    });
+    expect((await state()).longCacheRetention).toBeUndefined();
   });
 
   it('提炼聚合窗口热生效可写，只接受预设分钟数', async () => {
@@ -437,6 +442,10 @@ describe('config CLI socket', () => {
       requiresRestart: true,
     });
     expect(keys.get('updateChannel')).toMatchObject({ requiresRestart: true, writable: false });
+    expect(keys.get('longCacheRetention')).toMatchObject({
+      requiresRestart: true,
+      writable: false,
+    });
     expect(reply).toMatchObject({
       blacklist: { readDeniedFields: ['projects', 'projectGroups'] },
       notes: { requiresRestart: { autoUpdate: expect.any(String) } },

@@ -49,6 +49,8 @@ const RESTART_REQUIRED: Record<string, string> = {
   autoRestartForUpdate:
     'The updater reads this at startup; change it in Settings or restart the app.',
   updateChannel: 'The updater reads this at startup; switch it in Settings or restart the app.',
+  longCacheRetention:
+    'The agent worker reads this into PI_CACHE_RETENTION at startup; toggle it in Settings and restart the app.',
 };
 
 export type GetResult =

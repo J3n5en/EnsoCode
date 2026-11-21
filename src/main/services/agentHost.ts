@@ -367,6 +367,8 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
         platform: process.platform,
         arch: process.arch,
       }),
+      // Anthropic prompt cache 1h TTL；pi 按模型 supportsLongCacheRetention 门控，其余厂商自动回落
+      ...(readSettingsState()?.longCacheRetention === true ? { PI_CACHE_RETENTION: 'long' } : {}),
     },
   });
   worker = child;

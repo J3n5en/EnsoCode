@@ -203,6 +203,7 @@ const initialState = {
   windowsLocalShell: 'auto' as const,
   exploreFoldEnabled: false,
   rtkEnabled: true,
+  longCacheRetention: false,
   computerPreview: true,
   computerAllowAllApps: false,
   openLinksInBuiltinBrowser: true,
@@ -411,6 +412,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ windowsLocalShell: parseWindowsLocalShell(windowsLocalShell) }),
       setExploreFoldEnabled: (exploreFoldEnabled) => set({ exploreFoldEnabled }),
       setRtkEnabled: (rtkEnabled) => set({ rtkEnabled }),
+      setLongCacheRetention: (longCacheRetention) => set({ longCacheRetention }),
       setComputerPreview: (computerPreview) => set({ computerPreview }),
       setComputerAllowAllApps: (computerAllowAllApps) => set({ computerAllowAllApps }),
       setOpenLinksInBuiltinBrowser: (openLinksInBuiltinBrowser) =>

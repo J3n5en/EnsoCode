@@ -74,6 +74,10 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   windowsLocalShell: { mode: 'excluded', reason: 'platform-specific shell selection' },
   exploreFoldEnabled: { mode: 'portable' },
   rtkEnabled: { mode: 'portable' },
+  longCacheRetention: {
+    mode: 'excluded',
+    reason: 'read into the agent worker env at startup; device-local cost policy',
+  },
   computerPreview: { mode: 'excluded', reason: 'macOS-only desktop display preference' },
   computerAllowAllApps: { mode: 'excluded', reason: 'device-local computer control trust' },
   openLinksInBuiltinBrowser: { mode: 'excluded', reason: 'desktop link-opening preference' },

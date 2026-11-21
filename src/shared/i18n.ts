@@ -691,6 +691,9 @@ export const zhTranslations: Record<string, string> = {
     '遇到 429、5xx 或网络错误时退避重试（间隔最长 60 秒）。额度与计费错误不重试。选「无限」会一直重试，直到手动取消。',
   'Retry count after 429, 5xx or network errors; off, fixed count or unlimited':
     '429、5xx 或网络错误后的重试次数：关闭、固定次数或无限',
+  'Long prompt cache (1 hour)': '长缓存（1 小时）',
+  'Keep the prompt cache for 1 hour instead of 5 minutes. Saves a lot when turns are more than 5 minutes apart, since the cache no longer expires and gets rewritten every turn, but cache writes cost 2× instead of 1.25×, so rapid follow-ups tens of seconds apart cost more. Anthropic models only. Restart EnsoCode to apply.':
+    '把 prompt 缓存有效期从 5 分钟延长到 1 小时。轮次间隔超过 5 分钟时能省很多（缓存不再每轮过期重写），但缓存写入单价从 1.25× 涨到 2×，间隔几十秒的快速连续追问反而更贵。仅对 Anthropic 系模型生效，重启 EnsoCode 后生效。',
   Unlimited: '无限',
   '{{count}} times': '{{count}} 次',
   '{{count}} day': '{{count}} 天',
