@@ -47,6 +47,7 @@ import {
   saveSnapshot,
 } from './snapshot';
 import { type DeskAsset, type DeskFrame, DeskTunnel } from './tunnel';
+import { ensureDeskWorker } from './worker';
 
 const DESK_CACHE_PREFIX = 'enso-desk-';
 const META_TIMEOUT_MS = 25_000;
@@ -140,49 +141,6 @@ function showState(state: ConnState): void {
     splash(`已在其他页面打开，关掉那个页面或回到<a href="${PHONE_URL}">精简版</a>重连。`);
 }
 
-/** SW 需要能代理 /desk/* ：旧版 SW 没有 fetch 处理，先确保新版接管本页 */
-async function ensureDeskWorker(onStage: (stage: string) => void): Promise<void> {
-  onStage('注册 Service Worker');
-  const registration = await withTimeout(
-    navigator.serviceWorker.register('/sw.js'),
-    STORAGE_TIMEOUT_MS * 4,
-    null
-  );
-  if (!registration) throw new Error('service worker unavailable');
-  onStage('等待 Service Worker 响应');
-  const ping = () =>
-    new Promise<boolean>((resolve) => {
-      const controller = navigator.serviceWorker.controller;
-      if (!controller) {
-        resolve(false);
-        return;
-      }
-      const channel = new MessageChannel();
-      const timer = setTimeout(() => resolve(false), 1500);
-      channel.port1.onmessage = (event) => {
-        clearTimeout(timer);
-        resolve(event.data?.desk === 1);
-      };
-      controller.postMessage({ type: 'desk-ping' }, [channel.port2]);
-    });
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (await ping()) return;
-    await withTimeout(registration.update(), STORAGE_TIMEOUT_MS * 2, undefined);
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 3000);
-      navigator.serviceWorker.addEventListener(
-        'controllerchange',
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true }
-      );
-    });
-  }
-  throw new Error('service worker unavailable');
-}
-
 async function main(): Promise<void> {
   (window as { __deskBoot?: boolean }).__deskBoot = true;
   if (!('serviceWorker' in navigator)) {
@@ -226,7 +184,7 @@ async function main(): Promise<void> {
   const launchSessionId =
     urlSession ?? (await withTimeout(takeStashedSessionId(), STORAGE_TIMEOUT_MS, null));
 
-  await ensureDeskWorker((stage) => {
+  await ensureDeskWorker(navigator.serviceWorker, (stage) => {
     bootStage = stage;
   });
   bootStage = '启动隧道';
