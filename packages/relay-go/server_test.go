@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -313,6 +314,97 @@ func TestStaticDeskShellNotCached(t *testing.T) {
 	// sw.js 等无哈希文件被标 immutable 时，iOS 可能一直用旧 SW
 	if body, cc := get("/sw.js"); body != "sw" || cc != "no-cache" {
 		t.Fatalf("sw.js => %q %q", body, cc)
+	}
+}
+
+func TestStaticShellGzip(t *testing.T) {
+	st, err := openStore(filepath.Join(t.TempDir(), "relay.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.close() })
+	js := strings.Repeat("console.log('enso');\n", 200)
+	static := fstest.MapFS{
+		"index.html":           {Data: []byte(strings.Repeat("<p>phone</p>", 100))},
+		"assets/app-1.js":      {Data: []byte(js)},
+		"icons/icon.png":       {Data: []byte("png-bytes")},
+		"manifest.webmanifest": {Data: []byte(`{"name":"EnsoCode"}`)},
+	}
+	hs := httptest.NewServer(newServer(st, static, nil))
+	t.Cleanup(hs.Close)
+	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
+	get := func(p, accept, inm string) (*http.Response, []byte) {
+		req, _ := http.NewRequest(http.MethodGet, hs.URL+p, nil)
+		if accept != "" {
+			req.Header.Set("Accept-Encoding", accept)
+		}
+		if inm != "" {
+			req.Header.Set("If-None-Match", inm)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res, b
+	}
+	gunzip := func(b []byte) string {
+		zr, err := gzip.NewReader(bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, _ := io.ReadAll(zr)
+		return string(out)
+	}
+
+	res, body := get("/assets/app-1.js", "gzip, deflate, br", "")
+	if res.Header.Get("Content-Encoding") != "gzip" || gunzip(body) != js || len(body) >= len(js) {
+		t.Fatalf("js gzip: %q len=%d", res.Header.Get("Content-Encoding"), len(body))
+	}
+	if !strings.Contains(res.Header.Get("Vary"), "Accept-Encoding") || !strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
+		t.Fatalf("js headers: vary=%q cc=%q", res.Header.Get("Vary"), res.Header.Get("Cache-Control"))
+	}
+	gzTag := res.Header.Get("ETag")
+
+	res, body = get("/assets/app-1.js", "", "")
+	if res.Header.Get("Content-Encoding") != "" || string(body) != js {
+		t.Fatalf("identity: %q", res.Header.Get("Content-Encoding"))
+	}
+	plainTag := res.Header.Get("ETag")
+	if gzTag == "" || plainTag == "" || gzTag == plainTag {
+		t.Fatalf("etags gz=%q plain=%q", gzTag, plainTag)
+	}
+	// q=0 是明确拒绝
+	if res, _ = get("/assets/app-1.js", "gzip;q=0, br", ""); res.Header.Get("Content-Encoding") != "" {
+		t.Fatal("gzip;q=0 must not be gzipped")
+	}
+	if res, _ = get("/assets/app-1.js", "*", ""); res.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatal("* should accept gzip")
+	}
+	if res, _ = get("/assets/app-1.js", "gzip;q=0, *", ""); res.Header.Get("Content-Encoding") != "" {
+		t.Fatal("explicit gzip;q=0 wins over *")
+	}
+
+	// 页面壳 no-cache：带 ETag 再验证回 304
+	res, body = get("/", "gzip", "")
+	if res.Header.Get("Content-Encoding") != "gzip" || res.Header.Get("Cache-Control") != "no-cache" || !strings.Contains(gunzip(body), "phone") {
+		t.Fatalf("index: %q %q", res.Header.Get("Content-Encoding"), res.Header.Get("Cache-Control"))
+	}
+	tag := res.Header.Get("ETag")
+	if res, _ = get("/", "gzip", tag); res.StatusCode != http.StatusNotModified {
+		t.Fatalf("revalidate => %d", res.StatusCode)
+	}
+	if res, _ = get("/", "", tag); res.StatusCode != http.StatusOK {
+		t.Fatalf("gzip etag must not match identity => %d", res.StatusCode)
+	}
+
+	if res, _ = get("/manifest.webmanifest", "gzip", ""); res.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatal("manifest should be gzipped")
+	}
+	res, body = get("/icons/icon.png", "gzip", "")
+	if res.Header.Get("Content-Encoding") != "" || string(body) != "png-bytes" {
+		t.Fatalf("png must stay identity: %q", res.Header.Get("Content-Encoding"))
 	}
 }
 

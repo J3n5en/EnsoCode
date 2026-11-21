@@ -70,6 +70,7 @@ import {
   saveDevices,
   saveLastView,
 } from './storage';
+import { hadPairing, storageLossNotice } from './storageGuard';
 import { setPhoneAgentActions } from './stubs/electron-api';
 import { setQueueActions } from './stubs/sessions-store';
 import { shouldHoldWakeLock, syncWakeLock } from './wakeLock';
@@ -127,6 +128,20 @@ export function App() {
   const [urlInvite] = useState(takeInviteFromUrl);
   /** 已配对状态下的「配对新电脑」流程（覆盖 PairScreen） */
   const [adding, setAdding] = useState(false);
+  /** 没有配对时：本地存储疑似被系统清理就说明原因 */
+  const [lossNotice, setLossNotice] = useState<string | null>(null);
+  const hasDevice = device !== null;
+  useEffect(() => {
+    if (hasDevice) return;
+    let cancelled = false;
+    void hadPairing().then((marked) => {
+      if (!cancelled)
+        setLossNotice(storageLossNotice({ paired: false, marked, standalone: isStandalone() }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasDevice]);
   const [state, setState] = useState<ConnState>('connecting');
   const [transport, setTransport] = useState<'relay' | 'direct'>('relay');
   const [rttMs, setRttMs] = useState<number | null>(null);
@@ -812,6 +827,7 @@ export function App() {
         autoInvite={urlInvite}
         onPaired={addDevice}
         onCancel={device ? () => setAdding(false) : undefined}
+        notice={device ? null : lossNotice}
       />
     );
   }

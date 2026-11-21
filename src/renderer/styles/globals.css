@@ -926,3 +926,56 @@ html.bg-image-enabled [data-slot='bot-timeline'] [data-slot='bot-card'] {
     font-size: 16px;
   }
 }
+
+/*
+ * 触屏（远程浏览器的手机/平板；桌面主窗口是精确指针，不命中）：
+ * 不回弹、不双击缩放、不出灰色点击高亮和长按系统菜单；消息正文、代码块仍可选中。
+ */
+@layer base {
+  @media (pointer: coarse) {
+    html,
+    body {
+      overscroll-behavior: none;
+      touch-action: manipulation;
+    }
+
+    * {
+      overscroll-behavior: contain;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+    }
+
+    input,
+    textarea,
+    [contenteditable="true"] {
+      -webkit-touch-callout: default;
+    }
+
+    /* 正文里的操作按钮（复制、回退、分支）不跟着正文被选中 */
+    .select-text :is(button, [role="button"]),
+    .select-text :is(button, [role="button"]) * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /*
+     * 小按钮点击区至少 32×32：透明伪元素向外扩，视觉尺寸不变。
+     * ui/Button 等已自带 after: 热区的跳过；放在 base 层，absolute/fixed 等工具类照常覆盖 position。
+     */
+    :is(button, [role="button"]):not([class*="after:"]) {
+      position: relative;
+    }
+
+    :is(button, [role="button"]):not([class*="after:"])::after {
+      content: "";
+      position: absolute;
+      inset: min(0px, calc((100% - 32px) / 2));
+    }
+
+    /* 横向滚动的标签条会把热区上下裁掉：裁剪框上下各放出 6px，布局不变 */
+    .overflow-x-auto[class*="scrollbar-width:none"] {
+      padding-block: 6px;
+      margin-block: -6px;
+    }
+  }
+}
