@@ -9,6 +9,7 @@ import {
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { SecretaryAvatar } from './SecretaryAvatar';
+import type { RunningOriginsLink } from './SecretaryRunningOrigins';
 import { type SecretarySectionView, SecretarySummary } from './secretaryView';
 
 const ACTION_CLASS =
@@ -39,10 +40,12 @@ export function SecretarySidebarSection({
   onNewConversation,
   onOpenSettings,
   onReset,
+  runningOrigins,
   children,
 }: SecretarySectionActions & {
   view: SecretarySectionView;
   folded: boolean;
+  runningOrigins?: RunningOriginsLink;
   children: React.ReactNode;
 }) {
   const { t } = useI18n();
@@ -94,7 +97,7 @@ export function SecretarySidebarSection({
           data-enso="secretary-summary"
           className="mt-0.5 flex max-w-full min-w-0 items-center truncate text-[11.5px] text-muted-foreground"
         >
-          <SecretarySummary view={view} />
+          <SecretarySummary view={view} origins={runningOrigins} />
         </span>
       </button>
       <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">

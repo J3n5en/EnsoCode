@@ -1,6 +1,7 @@
 import { secretaryAvatarUrl } from '@shared/localImage';
 import type { SecretaryState } from '@shared/types/secretary';
 import { useI18n } from '@/i18n';
+import { type RunningOriginsLink, SecretaryRunningOriginsCard } from './SecretaryRunningOrigins';
 
 export interface SecretarySectionView {
   name: string;
@@ -40,10 +41,13 @@ export function SecretarySummary({
   view,
   runningExpanded,
   onToggleRunning,
+  origins,
 }: {
   view: SecretarySectionView;
   runningExpanded?: boolean;
   onToggleRunning?: () => void;
+  /** 侧栏传入：悬停「N 件在跑」看每件属于哪条会话 */
+  origins?: RunningOriginsLink;
 }) {
   const { t } = useI18n();
   if (!view.configured) return <>{t('Click to finish setup')}</>;
@@ -67,6 +71,11 @@ export function SecretarySummary({
           >
             {t('{{n}} running', { n: view.running })}
           </button>
+        ) : origins ? (
+          <SecretaryRunningOriginsCard
+            label={t('{{n}} running', { n: view.running })}
+            {...origins}
+          />
         ) : (
           <span className="shrink-0">{t('{{n}} running', { n: view.running })}</span>
         ))}

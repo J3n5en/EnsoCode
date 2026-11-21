@@ -95,6 +95,10 @@ import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
 import { SecretaryOriginBadge } from '@/components/secretary/SecretaryOriginBadge';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import {
+  runningByOrigin,
+  SecretaryDispatchBadge,
+} from '@/components/secretary/SecretaryRunningOrigins';
+import {
   SecretaryCollapsedButton,
   SecretarySidebarSection,
   sidebarProjects,
@@ -318,6 +322,10 @@ export function Sidebar({
   // 秘书是置顶伪项目：单独渲染，不参与分组筛选、拖拽排序与项目设置
   const secretaryState = useSecretaryStore((state) => state.secretary);
   const secretaryView = useMemo(() => secretarySectionView(secretaryState, t), [secretaryState, t]);
+  const secretaryRunning = useMemo(
+    () => runningByOrigin(secretaryState.board, (id) => conversations[id] !== undefined),
+    [secretaryState.board, conversations]
+  );
   const [secretaryFolded, setSecretaryFolded] = useState(() => {
     try {
       return localStorage.getItem(SECRETARY_COLLAPSED_KEY) === '1';
@@ -1019,6 +1027,11 @@ export function Sidebar({
                 })
               }
               onReset={() => setSecretaryResetOpen(true)}
+              runningOrigins={{
+                groups: secretaryRunning.groups,
+                titleOf: (id) => conversations[id]?.title,
+                onSelect: selectConversation,
+              }}
             >
               {shownSecretaryIds.map((id) => (
                 <ConversationRow
@@ -1026,6 +1039,7 @@ export function Sidebar({
                   id={id}
                   conversation={conversations[id]}
                   active={activeId === id}
+                  dispatchRunning={secretaryRunning.counts[id]}
                   switchHint={switchHintFor(id, 'project')}
                   locale={locale}
                   nowTick={nowTick}
@@ -2534,6 +2548,8 @@ interface ConversationRowProps {
   hoverTitle?: string;
   /** 已归档栏目里内联展示的项目名 */
   subtitle?: string;
+  /** 秘书会话派出、仍在跑的件数 */
+  dispatchRunning?: number;
   /** 隔离会话（有 worktree 绑定） */
   isolated?: boolean;
   /** 隔离会话的 worktree 状态（徽标：未提交/未合并） */
@@ -2562,6 +2578,7 @@ function ConversationRow({
   nowTick,
   hoverTitle,
   subtitle,
+  dispatchRunning,
   isolated,
   worktreeStatus,
   switchHint,
@@ -2703,6 +2720,7 @@ function ConversationRow({
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
         <BackgroundTaskMarker conversationId={id} />
+        <SecretaryDispatchBadge count={dispatchRunning} />
         {!renaming && (
           <TitleSummaryBadge
             pending={conversation.titleSummaryPending}
