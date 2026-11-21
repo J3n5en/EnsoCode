@@ -29,7 +29,7 @@ export interface SidebarDirectoryEntry {
   sessionFile?: string;
   worktree?: { path?: string };
   /** 由秘书派出；只用于显示标记 */
-  secretaryOrigin?: { secretaryConversationId: string };
+  secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
 }
 
 type Source = {
@@ -60,7 +60,7 @@ type Source = {
   worktree?: { path?: string };
   reloading?: boolean;
   btwParentId?: string;
-  secretaryOrigin?: { secretaryConversationId: string };
+  secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
 };
 
 function lastActiveAt(conversation: Source): number | undefined {

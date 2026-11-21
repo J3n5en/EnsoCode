@@ -15,10 +15,13 @@ import { useI18n } from '@/i18n';
 /** 重来确认：清空档案后回到欢迎页；会话与私有记忆默认保留 */
 export function SecretaryResetDialog({
   open,
+  secretaryId,
   onOpenChange,
   onReset,
 }: {
   open: boolean;
+  /** 重来哪个秘书；省略时按当前看着的那个 */
+  secretaryId?: string;
   onOpenChange: (open: boolean) => void;
   onReset?: () => void;
 }) {
@@ -37,7 +40,7 @@ export function SecretaryResetDialog({
     setBusy(true);
     setError(null);
     try {
-      const result = await window.electronAPI.secretary.resetProfile(clearMemory);
+      const result = await window.electronAPI.secretary.resetProfile(clearMemory, secretaryId);
       if (!result.ok) {
         setError(result.error);
         return;

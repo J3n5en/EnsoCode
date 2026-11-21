@@ -37,11 +37,11 @@ export const botAvatarUrl = (botId: string, version: number): string =>
  * v 是版本号，h 是图片字节的短指纹：两者都在 URL 上，换图后地址一定变，不吃旧缓存。
  */
 export const SECRETARY_AVATAR_HOST = 'secretary-avatar';
-export const secretaryAvatarUrl = (version: number, hash?: string): string =>
+export const secretaryAvatarUrl = (version: number, hash?: string, secretaryId?: string): string =>
   routed(
     `${LOCAL_IMAGE_SCHEME}://${SECRETARY_AVATAR_HOST}/avatar.png?v=${version}${
       hash ? `&h=${encodeURIComponent(hash)}` : ''
-    }`
+    }${secretaryId ? `&s=${encodeURIComponent(secretaryId)}` : ''}`
   );
 
 /** 插件目录内图片和字体的保留 host。v 是安装代号，换包后缓存失效 */

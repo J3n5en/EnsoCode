@@ -653,6 +653,26 @@ function parseUpdate(value: unknown): SecretaryUpdate | undefined {
     if (!scheduleId) return undefined;
     return { ...base, ...scope, kind: 'schedule', scheduleId };
   }
+  if (value.kind === 'peer-message') {
+    const fromSecretaryId = text(value.fromSecretaryId);
+    const chain = text(value.chain);
+    const hop = value.hop;
+    if (!fromSecretaryId || !chain || typeof hop !== 'number' || !Number.isInteger(hop) || hop < 0)
+      return undefined;
+    const origins = Array.isArray(value.origins)
+      ? value.origins.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    return {
+      ...base,
+      ...scope,
+      kind: 'peer-message',
+      fromSecretaryId,
+      fromName: typeof value.fromName === 'string' ? value.fromName : fromSecretaryId,
+      chain,
+      hop,
+      origins: origins.length > 0 ? origins : [fromSecretaryId],
+    };
+  }
   if (value.kind === 'pending') {
     const pendingId = text(value.pendingId);
     if (!pendingId) return undefined;
@@ -810,6 +830,23 @@ export function parseTodos(value: unknown): SecretaryTodo[] {
     if (doneAt !== undefined) todo.doneAt = doneAt;
     if (item.problem === 'failed' || item.problem === 'stopped' || item.problem === 'deleted') {
       todo.problem = item.problem;
+    }
+    if (isObject(item.from)) {
+      const secretaryId = text(item.from.secretaryId);
+      if (secretaryId) {
+        todo.from = {
+          secretaryId,
+          name: typeof item.from.name === 'string' ? item.from.name : secretaryId,
+        };
+      }
+    }
+    if (
+      item.reportedAs === 'done' ||
+      item.reportedAs === 'failed' ||
+      item.reportedAs === 'stopped' ||
+      item.reportedAs === 'deleted'
+    ) {
+      todo.reportedAs = item.reportedAs;
     }
     todos.push(todo);
   }

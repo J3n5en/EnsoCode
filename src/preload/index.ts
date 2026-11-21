@@ -237,15 +237,18 @@ import type {
 import type { NodeActionResult, NodePairResult, NodesStatus } from '@shared/types/nodes';
 import type {
   DispatchDraft,
+  SecretaryBoard,
   SecretaryContactChannelPrefs,
   SecretaryContactState,
   SecretaryDaily,
+  SecretaryDeletePreview,
   SecretaryProfile,
   SecretaryProfileDraft,
   SecretaryProposal,
   SecretaryScheduleView,
   SecretarySkillView,
   SecretaryState,
+  SecretarySummary,
   SecretaryTakeoverView,
   SecretaryTodoMutate,
   SecretaryToolDraft,
@@ -379,19 +382,60 @@ const electronAPI = {
 
   secretary: {
     /** 工作台与聊天卡片读同一份 Main 状态；开关关闭时 enabled 为 false */
-    getState: (): Promise<SecretaryState> => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_STATE),
+    getState: (secretaryId?: string): Promise<SecretaryState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_STATE, secretaryId),
+    /** 秘书清单：侧栏、设置页与新建流程用 */
+    list: (): Promise<SecretarySummary[]> => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_LIST),
+    onListChanged: (callback: (list: SecretarySummary[]) => void): (() => void) => {
+      const listener = (_event: unknown, list: SecretarySummary[]) => callback(list);
+      ipcRenderer.on(IPC_CHANNELS.SECRETARY_LIST_CHANGED, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_LIST_CHANGED, listener);
+    },
+    /** 新建秘书：只建目录与隐藏项目，档案走它自己的欢迎页 */
+    create: (): Promise<
+      { ok: true; secretaryId: string; projectId: string | null } | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CREATE),
+    /** 删除前的提醒：它在管的会话、待办、定时、联系方式与记忆 */
+    deletePreview: (
+      secretaryId: string
+    ): Promise<{ ok: true; preview: SecretaryDeletePreview } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DELETE_PREVIEW, secretaryId),
+    /** 删除秘书：只有用户在提醒上再点一次确认时才带 confirmed */
+    deleteSecretary: (
+      secretaryId: string,
+      confirmed: boolean
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DELETE, { secretaryId, confirmed }),
+    /** 把会话从管理它的秘书转交给另一个秘书 */
+    transfer: (
+      conversationId: string,
+      toSecretaryId: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TRANSFER, { conversationId, toSecretaryId }),
+    /** 总看板：每个秘书一份 */
+    overview: (): Promise<
+      | {
+          ok: true;
+          boards: { secretaryId: string; name: string | null; board: SecretaryBoard }[];
+        }
+      | { ok: false; error: string }
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_OVERVIEW),
     /** 动态的一页。before 是上一页最旧一条的时间与 id，缺省取最新一页 */
-    feed: (query?: {
-      before?: { at: number; id: string };
-      limit?: number;
-    }): Promise<
+    feed: (
+      query?: {
+        before?: { at: number; id: string };
+        limit?: number;
+      },
+      secretaryId?: string
+    ): Promise<
       { ok: true; events: FeedEvent[]; hasMore: boolean } | { ok: false; error: string }
-    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_FEED, query ?? {}),
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_FEED, query ?? {}, secretaryId),
     /** 按天汇总的看板：day 是本地日历日 YYYY-MM-DD，缺省今天 */
     daily: (
-      day?: string
+      day?: string,
+      secretaryId?: string
     ): Promise<{ ok: true; daily: SecretaryDaily } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DAILY, day ? { day } : {}),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DAILY, day ? { day } : {}, secretaryId),
     onStateChanged: (callback: (state: SecretaryState) => void): (() => void) => {
       const listener = (_event: unknown, state: SecretaryState) => callback(state);
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);
@@ -421,9 +465,10 @@ const electronAPI = {
         conversationIds,
       }),
     mutateTodo: (
-      request: SecretaryTodoMutate
+      request: SecretaryTodoMutate,
+      secretaryId?: string
     ): Promise<{ ok: true; todoId: string } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TODO_MUTATE, request),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TODO_MUTATE, request, secretaryId),
     /** 结果卡「知道了」：这条结果不再占工作台的「需要你处理」 */
     dismissResult: (conversationId: string): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DISMISS_RESULT, { conversationId }),
@@ -446,109 +491,140 @@ const electronAPI = {
     }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GOAL_ACTION, request),
     /** 全部定时（含系统生成的每日简报与待办提醒），下一次触发时间由 Main 算 */
-    listSchedules: (): Promise<
-      { ok: true; schedules: SecretaryScheduleView[] } | { ok: false; error: string }
-    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST),
+    listSchedules: (
+      secretaryId?: string
+    ): Promise<{ ok: true; schedules: SecretaryScheduleView[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULES_LIST, secretaryId),
     /** 系统生成的条目由档案与待办派生，删除会被拒绝 */
     removeSchedule: (
-      scheduleId: string
+      scheduleId: string,
+      secretaryId?: string
     ): Promise<{ ok: true; scheduleId: string } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, { scheduleId }),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SCHEDULE_REMOVE, { scheduleId }, secretaryId),
     /** profile 为 null 表示还没完成初次设置 */
-    getProfile: (): Promise<
+    getProfile: (
+      secretaryId?: string
+    ): Promise<
       { ok: true; profile: SecretaryProfile | null; persona: string } | { ok: false; error: string }
-    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_PROFILE),
+    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_GET_PROFILE, secretaryId),
     /** 只带要改的字段；null 清掉该可选字段。越界取值由 Main 拒绝 */
     saveProfile: (
-      draft: SecretaryProfileDraft
+      draft: SecretaryProfileDraft,
+      secretaryId?: string
     ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SAVE_PROFILE, draft),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SAVE_PROFILE, draft, secretaryId),
     /** 重新设置：默认保留会话与私有记忆 */
-    resetProfile: (clearMemory: boolean): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_RESET_PROFILE, { clearMemory }),
+    resetProfile: (
+      clearMemory: boolean,
+      secretaryId?: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_RESET_PROFILE, { clearMemory }, secretaryId),
     /** image=null 移除图片头像，恢复颜色头像 */
     setAvatar: (
-      image: Uint8Array | null
+      image: Uint8Array | null,
+      secretaryId?: string
     ): Promise<{ ok: true; profile: SecretaryProfile } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SET_AVATAR, { image }),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SET_AVATAR, { image }, secretaryId),
     /** 秘书可用的 skill：自有 + 勾选的全局，设置页与右侧面板共用 */
-    listSkills: (): Promise<
-      { ok: true; skills: SecretarySkillView[] } | { ok: false; error: string }
-    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILLS_LIST),
+    listSkills: (
+      secretaryId?: string
+    ): Promise<{ ok: true; skills: SecretarySkillView[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILLS_LIST, secretaryId),
     removeSkill: (
-      name: string
+      name: string,
+      secretaryId?: string
     ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_DELETE, { name }),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_DELETE, { name }, secretaryId),
     /** 启用或停用：自有写档案的停用名单，全局改勾选；都走档案同一条写入路径 */
-    setSkillEnabled: (request: {
-      id: string;
-      source: 'own' | 'global';
-      enabled: boolean;
-    }): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_SET_ENABLED, request),
+    setSkillEnabled: (
+      request: {
+        id: string;
+        source: 'own' | 'global';
+        enabled: boolean;
+      },
+      secretaryId?: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_SET_ENABLED, request, secretaryId),
     /** 读 SKILL.md 正文：只给用户看，不喂给秘书 */
-    readSkill: (request: {
-      id: string;
-      source: 'own' | 'global';
-    }): Promise<{ ok: true; body: string } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_READ, request),
+    readSkill: (
+      request: {
+        id: string;
+        source: 'own' | 'global';
+      },
+      secretaryId?: string
+    ): Promise<{ ok: true; body: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_SKILL_READ, request, secretaryId),
     /** 秘书自造的工具：名字即目录名，代码供设置页展开查看 */
-    listTools: (): Promise<
-      { ok: true; tools: SecretaryToolDraft[] } | { ok: false; error: string }
-    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOLS_LIST),
+    listTools: (
+      secretaryId?: string
+    ): Promise<{ ok: true; tools: SecretaryToolDraft[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOLS_LIST, secretaryId),
     removeTool: (
-      name: string
+      name: string,
+      secretaryId?: string
     ): Promise<{ ok: true; name: string } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOL_DELETE, { name }),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TOOL_DELETE, { name }, secretaryId),
     revokeTakeover: (
       conversationId: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TAKEOVER_REVOKE, { conversationId }),
-    listTakeovers: (): Promise<
-      { ok: true; takeovers: SecretaryTakeoverView[] } | { ok: false; error: string }
-    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST),
+    /** 不带秘书 id 时列出全部秘书的接管；设置页带上只看这一个 */
+    listTakeovers: (
+      secretaryId?: string
+    ): Promise<{ ok: true; takeovers: SecretaryTakeoverView[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_TAKEOVERS_LIST, secretaryId),
     /** 用户收回跟踪后不再由范围权限覆盖的会话；移除只恢复范围权限 */
-    listUntracked: (): Promise<
-      { ok: true; untracked: SecretaryUntrackedView[] } | { ok: false; error: string }
-    > => ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_LIST),
+    listUntracked: (
+      secretaryId?: string
+    ): Promise<{ ok: true; untracked: SecretaryUntrackedView[] } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_LIST, secretaryId),
     removeUntracked: (
-      conversationId: string
+      conversationId: string,
+      secretaryId?: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE, { conversationId }),
-    /** 联系方式：绑定状态里不含 token，只有前几位提示 */
-    contactState: (): Promise<SecretaryContactState> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_STATE),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_UNTRACKED_REMOVE, { conversationId }, secretaryId),
+    /** 联系方式：每个秘书一份；绑定状态里不含 token，只有前几位提示 */
+    contactState: (secretaryId?: string): Promise<SecretaryContactState> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_STATE, secretaryId),
     onContactChanged: (callback: (state: SecretaryContactState) => void): (() => void) => {
       const listener = (_event: unknown, state: SecretaryContactState) => callback(state);
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, listener);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, listener);
     },
     /** 第 2 步：校验 token 并生成绑定码；不带 token 表示用已存的 bot 重新生成 */
-    contactBind: (token?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_BIND, token ? { token } : {}),
-    contactCancel: (): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_CANCEL),
-    /** 解绑：清 chat、停轮询，保留 bot 与 token */
-    contactUnbind: (): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_UNBIND),
+    contactBind: (
+      token?: string,
+      secretaryId?: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_BIND, token ? { token } : {}, secretaryId),
+    contactCancel: (secretaryId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_CANCEL, secretaryId),
+    /** 解绑：清 chat 与群/话题路由、停轮询，保留 bot 与 token */
+    contactUnbind: (secretaryId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_UNBIND, secretaryId),
     /** 更换 bot：token 一起清，向导回到第 1 步 */
-    contactForgetBot: (): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT),
-    contactTest: (): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST),
+    contactForgetBot: (
+      secretaryId?: string
+    ): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT, secretaryId),
+    contactTest: (secretaryId?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TEST, secretaryId),
     /** 总开关 enabled、Telegram 老开关，或某个渠道卡片上的通用开关 */
     contactSettings: (
       patch:
         | { enabled?: boolean; allowCardConfirm?: boolean; allowMemory?: boolean }
         | { channelId: string; prefs: Partial<SecretaryContactChannelPrefs> }
         | { telegramGroup: { action: 'add' | 'remove'; chatId: string } }
+        | { telegramRoute: { action: 'remove'; chatId: string; topicId?: string } },
+      secretaryId?: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch, secretaryId),
     /** 手机关注的任务：取消一项或全清 */
     contactFollowing: (
-      request: { action: 'cancel'; id: string } | { action: 'clear' }
+      request: { action: 'cancel'; id: string } | { action: 'clear' },
+      secretaryId?: string
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FOLLOWING, request),
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_FOLLOWING, request, secretaryId),
     /** 深链 enso://secretary?conversation=<id>[&proposal=<id>]：选中会话，带卡就定位那张卡 */
     onOpenConversation: (
       callback: (target: { conversationId: string; proposalId?: string }) => void

@@ -2,8 +2,9 @@ import type { SecretaryScheduleView } from '@shared/types/secretary';
 import { Settings } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
-import { useSecretaryStore } from '@/stores/secretary';
+import { secretaryIdOfProject, useSecretaryStore } from '@/stores/secretary';
 import { SecretaryAvatar } from './SecretaryAvatar';
 import { SecretaryContactPanel } from './SecretaryContactPanel';
 import { SecretaryDailyBoard } from './SecretaryDailyBoard';
@@ -26,18 +27,22 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 /** 秘书面板：身份行 + 工作台 / 记忆 / 定时三个标签，替代原来的两块独立面板 */
-export function SecretaryPanel() {
+export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
   const { t } = useI18n();
-  const secretary = useSecretaryStore((state) => state.secretary);
+  // 面板属于打开它的那个秘书会话，不跟着侧栏当前聚焦的秘书走
+  const secretaryId = secretaryIdOfProject(projectId) ?? undefined;
+  const secretary = useSecretaryStore((state) =>
+    secretaryId ? (state.states[secretaryId] ?? state.secretary) : state.secretary
+  );
   const focusProposal = useSecretaryStore((state) => state.focusProposal);
   const [tab, setTab] = useState<Tab>('workbench');
   const [runningOpen, setRunningOpen] = useState(false);
   const [schedules, setSchedules] = useState<SecretaryScheduleView[]>([]);
   const loadSchedules = useCallback(() => {
-    void window.electronAPI.secretary.listSchedules().then((result) => {
+    void window.electronAPI.secretary.listSchedules(secretaryId).then((result) => {
       if (result.ok) setSchedules(result.schedules);
     });
-  }, []);
+  }, [secretaryId]);
   // 定时由 Main 派生：打开时读一次，之后每次状态推送都重读
   useEffect(() => {
     loadSchedules();
@@ -87,12 +92,7 @@ export function SecretaryPanel() {
         <button
           type="button"
           data-enso="secretary-panel-settings"
-          onClick={() =>
-            void window.electronAPI.window.openSettings({
-              category: 'secretary',
-              rowId: 'secretary.root',
-            })
-          }
+          onClick={() => openSecretarySettings(secretaryId)}
           title={t('Secretary settings')}
           aria-label={t('Secretary settings')}
           className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -137,14 +137,19 @@ export function SecretaryPanel() {
         data-enso="secretary-panel-scroll"
         className="relative flex min-h-0 flex-1 flex-col overflow-y-auto"
       >
-        {runningOpen && <SecretaryRunningList />}
-        {tab === 'workbench' && <SecretaryWorkbench name={view.name} />}
-        {tab === 'daily' && <SecretaryDailyBoard />}
-        {tab === 'memory' && <SecretaryMemoryPanel />}
-        {tab === 'contact' && <SecretaryContactPanel />}
-        {tab === 'skills' && <SecretarySkillsPanel />}
+        {runningOpen && <SecretaryRunningList secretaryId={secretaryId} />}
+        {tab === 'workbench' && <SecretaryWorkbench name={view.name} secretaryId={secretaryId} />}
+        {tab === 'daily' && <SecretaryDailyBoard secretaryId={secretaryId} />}
+        {tab === 'memory' && <SecretaryMemoryPanel secretaryId={secretaryId} />}
+        {tab === 'contact' && <SecretaryContactPanel secretaryId={secretaryId} />}
+        {tab === 'skills' && <SecretarySkillsPanel secretaryId={secretaryId} />}
         {tab === 'schedules' && (
-          <SecretarySchedulePanel schedules={schedules} name={view.name} onReload={loadSchedules} />
+          <SecretarySchedulePanel
+            schedules={schedules}
+            name={view.name}
+            onReload={loadSchedules}
+            secretaryId={secretaryId}
+          />
         )}
       </div>
     </div>

@@ -26,6 +26,7 @@ vi.mock('@/stores/sessions', () => ({
     }),
 }));
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
   useSecretaryStore: (select: (state: object) => unknown) =>
     select({ secretary: { board: { todos: [] }, proposals: {} }, resolving: {} }),
 }));

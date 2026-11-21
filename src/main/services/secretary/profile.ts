@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import { app } from '@platform';
 import { parseProfile, parseProfileDraft } from '@shared/secretary/parse';
 import type {
@@ -15,6 +14,7 @@ import { notifySecretaryChanged } from './dispatch';
 import { saveProposalRecord } from './proposals';
 import type { SecretarySessionStatus } from './readers';
 import { syncSystemSchedules } from './schedules';
+import { type SecretaryContext, secretaryContexts } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -48,6 +48,8 @@ export interface SecretaryProfilePorts {
   notify(): void;
   now(): number;
   newId(): string;
+  /** 别的秘书已经用了这个名字（大小写不敏感）；缺省表示只有这一个秘书 */
+  nameTaken?(name: string): boolean;
 }
 
 export type ProfileSaveResult =
@@ -164,6 +166,10 @@ export function createSecretaryProfile(ports: SecretaryProfilePorts): SecretaryP
     async save(draft, secretaryConversationId) {
       const parsed = parseProfileDraft(draft);
       if (!parsed.ok) return parsed;
+      // 手机命令、秘书间消息都靠名字认人：同一台机器上不许重名
+      if (parsed.draft.name !== undefined && ports.nameTaken?.(parsed.draft.name)) {
+        return { ok: false, error: 'name-taken' };
+      }
       const before = ports.profile();
       const personaBefore = ports.persona();
       const profile = ports.saveProfile(mergeProfile(before, parsed.draft, ports.now()));
@@ -307,72 +313,95 @@ function profileChanges(
   return rows;
 }
 
-function secretaryDir(): string {
-  return path.join(app.getPath('userData'), 'secretary');
-}
-
-function store(): SecretaryStore {
-  return new SecretaryStore(secretaryDir());
-}
-
 /**
- * 生产端口全部经动态 import 取 Main 的既有函数：本模块被 tools.ts 静态依赖，
- * 静态反向依赖 ipc/agent 会成环。
+ * 一个秘书的生产端口：档案、人设、审计都在它自己的目录里。
+ * Main 的既有函数全部经动态 import 取：本模块被 tools.ts 静态依赖，静态反向依赖 ipc/agent 会成环。
  */
-export const secretaryProfilePorts: SecretaryProfilePorts = {
-  profile: () => store().profile(),
-  saveProfile: (profile) => store().saveProfile(profile),
-  persona: () => store().readPersona(),
-  writePersona: (persona) => store().writePersona(persona),
-  clearFiles: () => store().clearProfile(),
-  clearPrivateMemory: async () => {
-    const { secretaryProjectId } = await import('./identity');
-    const projectId = secretaryProjectId();
-    if (!projectId) return;
-    const { projectSpaceId } = await import('../memory/types');
-    const { removeMemorySpace } = await import('../memoryCleanup');
-    await removeMemorySpace(app.getPath('userData'), projectSpaceId(projectId));
-  },
-  todos: () => store().todos(),
-  schedules: () => store().schedules(),
-  saveSchedules: (schedules) => {
-    store().saveSchedules(schedules);
-  },
-  publish: () => notifySecretaryChanged(),
-  conversations: async () => {
-    const { secretaryProjectId } = await import('./identity');
-    const projectId = secretaryProjectId();
-    if (!projectId) return [];
-    const { getSourceAuthorityRegistry } = await import('../../ipc/agent');
-    return (getSourceAuthorityRegistry()?.projection().conversations ?? [])
-      .filter(
-        (conversation) =>
-          conversation.projectId === projectId && conversation.kind === 'root' && !conversation.bot
-      )
-      .map((conversation) => ({ conversationId: conversation.conversationId }));
-  },
-  status: async (conversationId) =>
-    (await import('../../ipc/agent')).observedSessionStatus(conversationId),
-  alive: async (conversationId) =>
-    (await import('../../ipc/agent')).isRootSessionAlive(conversationId),
-  release: async (conversationId) =>
-    (await import('../../ipc/agent')).releaseRootFromMain(conversationId),
-  refreshPrompt: async (conversationId) =>
-    (await import('../../ipc/agent')).refreshSecretaryPromptFromMain(conversationId),
-  dispatchFile: () => store().dispatch(),
-  saveDispatch: (file) => {
-    store().saveDispatch(file);
-  },
-  audit: (entry) => appendAudit(secretaryDir(), entry),
-  notify: () => {
-    notifySecretaryChanged();
-  },
-  now: () => Date.now(),
-  newId: () => randomUUID(),
-};
+export function profilePortsFor(ctx: SecretaryContext): SecretaryProfilePorts {
+  const store = () => new SecretaryStore(ctx.dir);
+  return {
+    profile: () => store().profile(),
+    saveProfile: (profile) => store().saveProfile(profile),
+    persona: () => store().readPersona(),
+    writePersona: (persona) => store().writePersona(persona),
+    clearFiles: () => store().clearProfile(),
+    clearPrivateMemory: async () => {
+      if (!ctx.projectId) return;
+      const { projectSpaceId } = await import('../memory/types');
+      const { removeMemorySpace } = await import('../memoryCleanup');
+      await removeMemorySpace(app.getPath('userData'), projectSpaceId(ctx.projectId));
+    },
+    todos: () => store().todos(),
+    schedules: () => store().schedules(),
+    saveSchedules: (schedules) => {
+      store().saveSchedules(schedules);
+    },
+    publish: () => notifySecretaryChanged(),
+    conversations: async () => {
+      if (!ctx.projectId) return [];
+      const { getSourceAuthorityRegistry } = await import('../../ipc/agent');
+      return (getSourceAuthorityRegistry()?.projection().conversations ?? [])
+        .filter(
+          (conversation) =>
+            conversation.projectId === ctx.projectId &&
+            conversation.kind === 'root' &&
+            !conversation.bot
+        )
+        .map((conversation) => ({ conversationId: conversation.conversationId }));
+    },
+    status: async (conversationId) =>
+      (await import('../../ipc/agent')).observedSessionStatus(conversationId),
+    alive: async (conversationId) =>
+      (await import('../../ipc/agent')).isRootSessionAlive(conversationId),
+    release: async (conversationId) =>
+      (await import('../../ipc/agent')).releaseRootFromMain(conversationId),
+    refreshPrompt: async (conversationId) =>
+      (await import('../../ipc/agent')).refreshSecretaryPromptFromMain(conversationId),
+    dispatchFile: () => store().dispatch(),
+    saveDispatch: (file) => {
+      store().saveDispatch(file);
+    },
+    audit: (entry) => appendAudit(ctx.dir, entry),
+    notify: () => {
+      notifySecretaryChanged();
+    },
+    now: () => Date.now(),
+    newId: () => randomUUID(),
+    nameTaken: (name) => secretaryNameTaken(ctx.id, name),
+  };
+}
 
-export const secretaryProfile = createSecretaryProfile(secretaryProfilePorts);
+/** 档案服务带着「改名等本轮结束再释放」的状态：每个秘书一份，按 id 复用 */
+const profileServices = new Map<string, SecretaryProfileService>();
 
-export const secretaryProfileHandlers: { secretary_profile_propose: SecretaryOpHandler } = {
-  secretary_profile_propose: (params, ctx) => secretaryProfile.propose(params, ctx),
-};
+export function secretaryProfileFor(ctx: SecretaryContext): SecretaryProfileService {
+  let service = profileServices.get(ctx.id);
+  if (!service) {
+    service = createSecretaryProfile(profilePortsFor(ctx));
+    profileServices.set(ctx.id, service);
+  }
+  return service;
+}
+
+export function forgetSecretaryProfile(id: string): void {
+  profileServices.delete(id);
+}
+
+/** 名字唯一：别的秘书档案里有同名（大小写不敏感、去首尾空白）就算占用 */
+export function secretaryNameTaken(selfId: string, name: string): boolean {
+  const wanted = name.trim().toLocaleLowerCase();
+  if (!wanted) return false;
+  return secretaryContexts().some(
+    (other) =>
+      other.id !== selfId &&
+      new SecretaryStore(other.dir).profile()?.name.trim().toLocaleLowerCase() === wanted
+  );
+}
+
+export function profileHandlersFor(ctx: SecretaryContext): {
+  secretary_profile_propose: SecretaryOpHandler;
+} {
+  return {
+    secretary_profile_propose: (params, op) => secretaryProfileFor(ctx).propose(params, op),
+  };
+}

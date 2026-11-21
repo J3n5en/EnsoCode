@@ -118,6 +118,8 @@ beforeEach(() => {
   h.daily = { [TODAY]: daily(), [YESTERDAY]: daily({ day: YESTERDAY, today: false }) };
   const api = {
     secretary: {
+      list: async () => [],
+      onListChanged: () => () => {},
       daily: async (day?: string) => {
         h.calls.push({ name: 'daily', args: day });
         return { ok: true, daily: h.daily[day ?? TODAY] ?? daily({ groups: [] }) };

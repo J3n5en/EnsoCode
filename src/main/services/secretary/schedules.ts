@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { app } from '@platform';
 import { nextRun, parseCron } from '@shared/bots/cron';
 import { parseScheduleText } from '@shared/bots/routineSchedule';
 import type {
@@ -13,7 +11,8 @@ import type {
 } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import { notifySecretaryChanged } from './dispatch';
-import { recordPhoneFollow } from './following';
+import { followDepsFor, recordPhoneFollow } from './following';
+import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpContext, SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -317,31 +316,31 @@ export function createSecretaryScheduleHandlers(ports: SchedulePorts): Secretary
   };
 }
 
-function secretaryDir(): string {
-  return path.join(app.getPath('userData'), 'secretary');
+export function schedulePortsFor(ctx: SecretaryContext): SchedulePorts {
+  const store = () => new SecretaryStore(ctx.dir);
+  return {
+    schedules: () => store().schedules(),
+    saveSchedules: (schedules) => {
+      store().saveSchedules(schedules);
+    },
+    audit: (entry) => appendAudit(ctx.dir, entry),
+    newId: () => randomUUID(),
+    now: () => Date.now(),
+    publish: () => notifySecretaryChanged(),
+    follow: (input) => {
+      recordPhoneFollow(
+        {
+          kind: 'schedule',
+          targetId: input.targetId,
+          summary: input.summary,
+          secretaryConversationId: input.secretaryConversationId,
+        },
+        followDepsFor(ctx.dir)
+      );
+    },
+  };
 }
 
-function store(): SecretaryStore {
-  return new SecretaryStore(secretaryDir());
+export function scheduleHandlersFor(ctx: SecretaryContext): SecretaryScheduleHandlers {
+  return createSecretaryScheduleHandlers(schedulePortsFor(ctx));
 }
-
-export const secretarySchedulePorts: SchedulePorts = {
-  schedules: () => store().schedules(),
-  saveSchedules: (schedules) => {
-    store().saveSchedules(schedules);
-  },
-  audit: (entry) => appendAudit(secretaryDir(), entry),
-  newId: () => randomUUID(),
-  now: () => Date.now(),
-  publish: () => notifySecretaryChanged(),
-  follow: (input) => {
-    recordPhoneFollow({
-      kind: 'schedule',
-      targetId: input.targetId,
-      summary: input.summary,
-      secretaryConversationId: input.secretaryConversationId,
-    });
-  },
-};
-
-export const secretaryScheduleHandlers = createSecretaryScheduleHandlers(secretarySchedulePorts);

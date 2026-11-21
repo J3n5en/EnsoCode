@@ -85,9 +85,9 @@ export interface ContactChannel {
   /** 「正在输入…」；只在 caps.typing 时调用 */
   typing(peerId: string, topicId?: string): Promise<ChannelResult>;
   /** 发图片；只在 caps.images 时调用 */
-  sendImage?(peerId: string, image: ChannelImage): Promise<ChannelSend>;
+  sendImage?(peerId: string, image: ChannelImage, topicId?: string): Promise<ChannelSend>;
   /** 发文件；只在 caps.files 时调用 */
-  sendFile?(peerId: string, file: ChannelFile): Promise<ChannelSend>;
+  sendFile?(peerId: string, file: ChannelFile, topicId?: string): Promise<ChannelSend>;
   /** 命令菜单；null 表示清掉 */
   setCommands?(
     peerId: string,

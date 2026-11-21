@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
 import { normalizeLocale } from '@shared/i18n';
-import type { ContactLang } from '@shared/secretary/contact';
+import {
+  type ContactLang,
+  type ContactRouteClaim,
+  findRouteConflict,
+} from '@shared/secretary/contact';
 import { projectReadableMessages } from '@shared/secretary/transcript';
 import { IPC_CHANNELS } from '@shared/types';
 import type {
@@ -16,21 +20,31 @@ import { listMemoriesForAdmin, openExistingMemoryDb } from '../services/memoryAd
 import { broadcastToRenderers, isMainRenderer, isSettingsRenderer } from '../services/renderers';
 import { appendAudit } from '../services/secretary/audit';
 import { createContactCommands } from '../services/secretary/contact/commands';
-import { connectPluginChannels } from '../services/secretary/contact/plugins';
+import { TelegramHub } from '../services/secretary/contact/hub';
+import {
+  connectPluginChannels,
+  type PluginContactBridgeHandlers,
+} from '../services/secretary/contact/plugins';
 import { ContactService, type ContactServicePorts } from '../services/secretary/contact/service';
-import { ContactStore } from '../services/secretary/contact/store';
+import { ContactStore, channelPrefs, contactClaims } from '../services/secretary/contact/store';
 import { deliverToSecretary } from '../services/secretary/contact/wake';
 import { setContactMediaSender } from '../services/secretary/contactSend';
-import { buildDaily, secretaryDailyPorts } from '../services/secretary/daily';
+import { buildDaily, dailyPortsFor } from '../services/secretary/daily';
 import { type DeliveryPorts, resolveTarget } from '../services/secretary/deliveries';
 import {
+  dispatchPortsFor,
   pageSecretaryFeed,
   secretaryBoard,
-  secretaryDispatchPorts,
 } from '../services/secretary/dispatch';
 import { FollowingStore, setPhoneTurnChatProbe } from '../services/secretary/following';
-import { secretaryProjectId } from '../services/secretary/identity';
-import { listSchedules, secretarySchedulePorts } from '../services/secretary/schedules';
+import { listSchedules, schedulePortsFor } from '../services/secretary/schedules';
+import {
+  resolveSecretaryRequest,
+  type SecretaryContext,
+  secretaryContexts,
+  secretaryIdOfConversation,
+} from '../services/secretary/secretaries';
+import { SecretaryStore } from '../services/secretary/store';
 import {
   answerAskAsUserFromMain,
   isRootSessionAlive,
@@ -41,15 +55,12 @@ import {
 import { readSettingsState } from './settings';
 
 /**
- * 联系方式（Telegram）的 Main 侧装配：存储、投递、审计都复用秘书现有那套。
- * 单独成文件是为了让 secretary.ts 只多一行调用。
+ * 联系方式的 Main 侧装配：每个秘书一份联系方式服务（自己的 contact.json、token、路由、关注），
+ * Telegram 连接由全局 hub 按 token 共享，同一个 token 只轮询一次。
  */
 export interface SecretaryContactDeps {
-  /** 秘书目录：contact.json 与 contact-token.bin 都放这里 */
-  dir(): string;
-  /** 回传宿主的端口：目标会话解析与投递复用同一口径 */
-  delivery: DeliveryPorts;
-  profile(): SecretaryProfile | null;
+  /** 这个秘书的回传端口：目标会话解析与投递复用同一口径，且不跨秘书 */
+  delivery(ctx: SecretaryContext): DeliveryPorts;
   /** 秘书状态推送：联系方式状态变化时一起刷新界面 */
   publish(): void;
   /** 确认卡在手机上确认时用；审批没有这条路径 */
@@ -61,10 +72,13 @@ export interface SecretaryContactDeps {
   openInApp(target: { conversationId?: string; proposalId?: string }): void;
 }
 
-export interface SecretaryContact {
-  service: ContactService;
-  /** 读一次状态，供深链与启动时使用 */
-  state(): SecretaryContactState;
+export interface SecretaryContacts {
+  /** 某个秘书的联系方式服务；没启动时为 undefined */
+  service(secretaryId: string): ContactService | undefined;
+  /** 新建或启动时接上一个秘书 */
+  add(ctx: SecretaryContext): Promise<void>;
+  /** 删除秘书：停掉收发；release 时清掉 token 与全部路由 */
+  remove(secretaryId: string, release: boolean): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
   register(): void;
@@ -128,6 +142,31 @@ function readTelegramGroup(request: unknown): { action: 'add' | 'remove'; chatId
   return { action, chatId };
 }
 
+/** 解绑一条群或话题路由：{ telegramRoute: { action: 'remove', chatId, topicId? } } */
+function readTelegramRoute(request: unknown): { chatId: string; topicId?: string } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const raw = (request as Record<string, unknown>).telegramRoute;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const { action, chatId, topicId } = raw as Record<string, unknown>;
+  if (action !== 'remove' || typeof chatId !== 'string' || !chatId) return null;
+  if (topicId !== undefined && typeof topicId !== 'string') return null;
+  return { chatId, ...(typeof topicId === 'string' && topicId ? { topicId } : {}) };
+}
+
+/** 没有服务时给界面的空视图：不含 token */
+function emptyTelegramView(): SecretaryContactState['telegram'] {
+  return {
+    status: 'unbound',
+    allowCardConfirm: true,
+    allowMemory: false,
+    syncMirror: false,
+    groups: [],
+    following: [],
+    poll: { state: 'stopped' },
+    secure: true,
+  };
+}
+
 /** 关注列表的操作：取消一项要带 id，全清不带 */
 function readFollowingRequest(
   request: unknown
@@ -140,206 +179,326 @@ function readFollowingRequest(
   return id ? { action: 'cancel', id } : null;
 }
 
-export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryContact {
-  const store = new ContactStore(deps.dir());
-  let service: ContactService | null = null;
+function profileOf(ctx: SecretaryContext): SecretaryProfile | null {
+  return new SecretaryStore(ctx.dir).profile();
+}
 
-  const broadcast = (): void => {
-    if (!service) return;
-    broadcastToRenderers(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, service.state());
-  };
+/** 同一 bot + chat + 话题已经属于别的秘书时，返回它的名字 */
+function routeConflictFor(claim: ContactRouteClaim): string | null {
+  const claims = secretaryContexts()
+    .filter((ctx) => ctx.id !== claim.secretaryId)
+    .flatMap((ctx) => contactClaims(ctx.id, new ContactStore(ctx.dir).file()));
+  const hit = findRouteConflict(claims, claim);
+  if (!hit) return null;
+  const owner = secretaryContexts().find((ctx) => ctx.id === hit.secretaryId);
+  return (owner && profileOf(owner)?.name) || hit.secretaryId;
+}
 
-  const ports: ContactServicePorts = {
-    audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
-    publish: broadcast,
-    now: () => Date.now(),
-    random: () => Math.random(),
-    lang: () => replyLang(deps.profile()),
-    notifyMode: () => deps.profile()?.notify ?? null,
-    secretaryName: () => deps.profile()?.name ?? 'Secretary',
-    secretaryConversationId: () => resolveTarget(deps.delivery),
-    // /last：读秘书会话的 jsonl 尾窗，按轮切好交回去；只读，不进会话
-    recentTurns: async (rounds) => {
-      const conversationId = resolveTarget(deps.delivery);
-      if (!conversationId) return [];
-      const conversation = deps.delivery
-        .conversations()
-        .find((candidate) => candidate.conversationId === conversationId);
-      const page = await readSessionHistoryFile(conversation?.sessionFile);
-      if (!page.ok) return [];
-      // 一轮两条消息，留出系统回传与工具轮被跳过的余量
-      const readable = projectReadableMessages(page.messages, {
-        limit: rounds * 4 + 8,
-        baseIndex: page.baseIndex,
-      });
-      return readable.messages.map((message) => ({
-        role: message.role,
-        text: redactSecrets(message.text),
-      }));
-    },
-    // 手机发来的话进秘书会话：worker 已被回收就先恢复，再投
-    deliver: (conversationId, text) =>
-      deliverToSecretary(
-        {
-          alive: isRootSessionAlive,
-          resume: resumeRootFromMain,
-          prompt: (id, body) => promptRootFromMain(id, body, randomUUID()),
-        },
-        conversationId,
-        text
-      ),
-    // 与在应用里亲手答同一条路径：谁先答算谁的
-    answerAsk: (conversationId, requestId, answer) =>
-      answerAskAsUserFromMain(conversationId, requestId, answer),
-    resolveProposal: (proposalId, action) => deps.resolveProposal(proposalId, action),
-    openInApp: (target) => deps.openInApp(target),
-    // 手机关注的任务：派发与定时写、这里读与取消，重启后还在
-    following: new FollowingStore(deps.dir()),
-    onError: (code, detail) => {
-      console.warn(`[secretary-contact] ${code}${detail ? `: ${detail}` : ''}`);
-    },
-  };
+/** 插件渠道已经在别的秘书那里打开了：一个渠道只归一个秘书 */
+function channelOwnedElsewhere(selfId: string, channelId: string): string | null {
+  for (const ctx of secretaryContexts()) {
+    if (ctx.id === selfId) continue;
+    if (channelPrefs(new ContactStore(ctx.dir).file(), channelId).enabled) {
+      return profileOf(ctx)?.name ?? ctx.id;
+    }
+  }
+  return null;
+}
 
-  // 手机命令的数据源与侧栏面板完全同一份：看板、动态、待办都走秘书现有的投影
-  const commands = createContactCommands({
-    lang: () => replyLang(deps.profile()),
-    now: () => Date.now(),
-    // 发命令那个人的渠道开着记忆才给看
-    allowMemory: () => service?.memoryAllowed() ?? store.file().allowMemory,
-    board: () => secretaryBoard(secretaryDispatchPorts),
-    daily: (day) => buildDaily(secretaryDailyPorts, day),
-    feed: async (query) => {
-      const page = await pageSecretaryFeed(secretaryDispatchPorts, query);
-      return {
-        events: page.events.map((event) => ({
-          id: event.id,
-          at: event.at,
-          title: event.title,
-          projectName: event.projectName,
-          label: event.label,
-          ...(event.detail ? { detail: event.detail } : {}),
-          ...(event.conversationId ? { conversationId: event.conversationId } : {}),
-        })),
-        hasMore: page.hasMore,
-      };
-    },
-    schedules: async () => listSchedules(secretarySchedulePorts),
-    memories: async () => {
-      const projectId = secretaryProjectId();
-      const db = openExistingMemoryDb(path.join(app.getPath('userData'), 'memory', 'memory.db'));
-      if (!db || !projectId) return { titles: [], total: 0 };
-      try {
-        const result = listMemoriesForAdmin(db, {
-          spaceId: `proj:${projectId}`,
-          limit: 20,
-          offset: 0,
-        });
-        return { titles: result.items.map((item) => item.title), total: result.total };
-      } finally {
-        db.close();
-      }
+export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryContacts {
+  const hub = new TelegramHub({
+    sleep: (ms, signal) =>
+      new Promise((resolve) => {
+        if (signal.aborted) return resolve();
+        const timer = setTimeout(done, ms);
+        function done() {
+          clearTimeout(timer);
+          signal.removeEventListener('abort', done);
+          resolve();
+        }
+        signal.addEventListener('abort', done, { once: true });
+      }),
+    onError: (error) => {
+      console.warn(`[secretary-contact] ${error instanceof Error ? error.message : String(error)}`);
     },
   });
+  const services = new Map<string, ContactService>();
+  let plugins: { handlers: PluginContactBridgeHandlers; dispose(): void; resync(): void } | null =
+    null;
 
-  ports.commands = commands;
-  service = new ContactService(store, ports);
-  // 派发与定时不认识联系方式：只通过这个探针问一句「这一轮是手机发起的吗」
-  setPhoneTurnChatProbe((conversationId) => service?.phoneTurnChat(conversationId) ?? null);
-  // 秘书的 contact_send_file 只认这个出口，不认识具体渠道
-  setContactMediaSender((conversationId, media) => service.sendMedia(conversationId, media));
+  const broadcast = (secretaryId: string): void => {
+    const service = services.get(secretaryId);
+    if (!service) return;
+    broadcastToRenderers(IPC_CHANNELS.SECRETARY_CONTACT_CHANGED, {
+      ...service.state(),
+      secretaryId,
+    });
+  };
 
-  let unplug: (() => void) | null = null;
-
-  return {
-    service,
-    state: () => service.state(),
-    start: async () => {
-      // 插件渠道：清单声明的先出卡片，插件 register 后再收发；停用卸载时一起清掉
-      if (!unplug) {
-        const plugins = getExtensionPlugins();
-        const wired = connectPluginChannels(service, {
-          contactChannels: () => plugins.contactChannels(),
-          callContact: (pluginId, channelId, request) =>
-            plugins.callContact(pluginId, channelId, request),
-          onChange: (listener) => plugins.onChange(listener),
+  function build(ctx: SecretaryContext): ContactService {
+    const store = new ContactStore(ctx.dir);
+    const delivery = deps.delivery(ctx);
+    let service: ContactService | null = null;
+    const ports: ContactServicePorts = {
+      audit: (entry) => appendAudit(ctx.dir, entry),
+      publish: () => {
+        broadcast(ctx.id);
+        deps.publish();
+      },
+      now: () => Date.now(),
+      random: () => Math.random(),
+      lang: () => replyLang(profileOf(ctx)),
+      notifyMode: () => profileOf(ctx)?.notify ?? null,
+      secretaryName: () => profileOf(ctx)?.name ?? 'Secretary',
+      secretaryConversationId: () => resolveTarget(delivery),
+      // /last：读秘书会话的 jsonl 尾窗，按轮切好交回去；只读，不进会话
+      recentTurns: async (rounds) => {
+        const conversationId = resolveTarget(delivery);
+        if (!conversationId) return [];
+        const conversation = delivery
+          .conversations()
+          .find((candidate) => candidate.conversationId === conversationId);
+        const page = await readSessionHistoryFile(conversation?.sessionFile);
+        if (!page.ok) return [];
+        // 一轮两条消息，留出系统回传与工具轮被跳过的余量
+        const readable = projectReadableMessages(page.messages, {
+          limit: rounds * 4 + 8,
+          baseIndex: page.baseIndex,
         });
-        setPluginContactBridge(wired.handlers);
-        unplug = () => {
-          setPluginContactBridge(null);
-          wired.dispose();
+        return readable.messages.map((message) => ({
+          role: message.role,
+          text: redactSecrets(message.text),
+        }));
+      },
+      // 手机发来的话进秘书会话：worker 已被回收就先恢复，再投
+      deliver: (conversationId, text) =>
+        deliverToSecretary(
+          {
+            alive: isRootSessionAlive,
+            resume: resumeRootFromMain,
+            prompt: (id, body) => promptRootFromMain(id, body, randomUUID()),
+          },
+          conversationId,
+          text
+        ),
+      // 与在应用里亲手答同一条路径：谁先答算谁的
+      answerAsk: (conversationId, requestId, answer) =>
+        answerAskAsUserFromMain(conversationId, requestId, answer),
+      resolveProposal: (proposalId, action) => deps.resolveProposal(proposalId, action),
+      openInApp: (target) => deps.openInApp(target),
+      // 手机关注的任务：派发与定时写、这里读与取消，重启后还在
+      following: new FollowingStore(ctx.dir),
+      onError: (code, detail) => {
+        console.warn(`[secretary-contact] ${code}${detail ? `: ${detail}` : ''}`);
+      },
+      hub,
+      secretaryId: ctx.id,
+      routeConflict: routeConflictFor,
+      channelOwnedElsewhere: (channelId) => channelOwnedElsewhere(ctx.id, channelId),
+    };
+
+    // 手机命令的数据源与侧栏面板完全同一份：看板、动态、待办都走这个秘书自己的投影
+    ports.commands = createContactCommands({
+      lang: () => replyLang(profileOf(ctx)),
+      now: () => Date.now(),
+      // 发命令那个人的渠道开着记忆才给看
+      allowMemory: () => service?.memoryAllowed() ?? store.file().allowMemory,
+      board: () => secretaryBoard(dispatchPortsFor(ctx)),
+      daily: (day) => buildDaily(dailyPortsFor(ctx), day),
+      feed: async (query) => {
+        const page = await pageSecretaryFeed(dispatchPortsFor(ctx), query);
+        return {
+          events: page.events.map((event) => ({
+            id: event.id,
+            at: event.at,
+            title: event.title,
+            projectName: event.projectName,
+            label: event.label,
+            ...(event.detail ? { detail: event.detail } : {}),
+            ...(event.conversationId ? { conversationId: event.conversationId } : {}),
+          })),
+          hasMore: page.hasMore,
         };
-      }
+      },
+      schedules: async () => listSchedules(schedulePortsFor(ctx)),
+      memories: async () => {
+        const projectId = ctx.projectId;
+        const db = openExistingMemoryDb(path.join(app.getPath('userData'), 'memory', 'memory.db'));
+        if (!db || !projectId) return { titles: [], total: 0 };
+        try {
+          const result = listMemoriesForAdmin(db, {
+            spaceId: `proj:${projectId}`,
+            limit: 20,
+            offset: 0,
+          });
+          return { titles: result.items.map((item) => item.title), total: result.total };
+        } finally {
+          db.close();
+        }
+      },
+    });
+    service = new ContactService(store, ports);
+    return service;
+  }
+
+  /** 秘书会话 → 它所属秘书的联系方式：探针与发文件都按会话认秘书，不猜 */
+  const serviceOfConversation = (conversationId: string): ContactService | undefined => {
+    const id = secretaryIdOfConversation(conversationId);
+    return id ? services.get(id) : undefined;
+  };
+  // 派发与定时不认识联系方式：只通过这个探针问一句「这一轮是手机发起的吗」
+  setPhoneTurnChatProbe(
+    (conversationId) => serviceOfConversation(conversationId)?.phoneTurnChat(conversationId) ?? null
+  );
+  // 秘书的 contact_send_file 只认这个出口，不认识具体渠道
+  setContactMediaSender(async (conversationId, media) => {
+    const service = conversationId ? serviceOfConversation(conversationId) : undefined;
+    if (!service) return { ok: false, error: 'not-bound' };
+    return service.sendMedia(conversationId, media);
+  });
+
+  /** IPC 入参里的秘书：只有一个秘书时可省略 */
+  const target = (raw: unknown): ContactService | null => {
+    const ctx = resolveSecretaryRequest(raw);
+    return ctx ? (services.get(ctx.id) ?? null) : null;
+  };
+
+  const contacts: SecretaryContacts = {
+    service: (secretaryId) => services.get(secretaryId),
+
+    async add(ctx) {
+      if (services.has(ctx.id)) return;
+      const service = build(ctx);
+      services.set(ctx.id, service);
+      plugins?.resync();
       await service.start();
     },
-    stop: async () => {
-      unplug?.();
-      unplug = null;
+
+    async remove(secretaryId, release) {
+      const service = services.get(secretaryId);
+      if (!service) return;
+      services.delete(secretaryId);
+      if (release) await service.release();
       await service.stop();
     },
+
+    async start() {
+      // 插件渠道：清单声明的先出卡片，插件 register 后再收发；停用卸载时一起清掉
+      if (!plugins) {
+        const source = getExtensionPlugins();
+        plugins = connectPluginChannels(() => [...services.values()], {
+          contactChannels: () => source.contactChannels(),
+          callContact: (pluginId, channelId, request) =>
+            source.callContact(pluginId, channelId, request),
+          onChange: (listener) => source.onChange(listener),
+        });
+        setPluginContactBridge(plugins.handlers);
+      }
+      for (const ctx of secretaryContexts()) await contacts.add(ctx);
+    },
+
+    async stop() {
+      setPluginContactBridge(null);
+      plugins?.dispose();
+      plugins = null;
+      for (const service of services.values()) await service.stop();
+      await hub.stopAll();
+    },
+
     register() {
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_STATE, async (event) => {
-        if (!isEditor(event.sender.id)) {
-          const state = service.state();
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_STATE, async (event, secretaryId: unknown) => {
+        const service = target(secretaryId);
+        if (!isEditor(event.sender.id) || !service) {
+          const state = service?.state();
           return {
             enabled: false,
             channels: [],
-            telegram: { ...state.telegram, status: 'unbound' },
+            telegram: { ...(state?.telegram ?? emptyTelegramView()), status: 'unbound' },
           };
         }
-        return service.state();
+        return { ...service.state(), secretaryId: resolveSecretaryRequest(secretaryId)?.id };
       });
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_BIND, async (event, request: unknown) => {
-        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        return service.bind(readToken(request));
-      });
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_BIND,
+        async (event, request: unknown, secretaryId: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const service = target(secretaryId);
+          if (!service) return { ok: false, error: 'secretary-required' };
+          return service.bind(readToken(request));
+        }
+      );
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_CANCEL, async (event) => {
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_CANCEL, async (event, secretaryId: unknown) => {
         if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        const service = target(secretaryId);
+        if (!service) return { ok: false, error: 'secretary-required' };
         await service.cancelBind();
         return { ok: true };
       });
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_UNBIND, async (event) => {
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_UNBIND, async (event, secretaryId: unknown) => {
         if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        const service = target(secretaryId);
+        if (!service) return { ok: false, error: 'secretary-required' };
         return service.unbind();
       });
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT, async (event) => {
-        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        return service.forgetBot();
-      });
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_FORGET_BOT,
+        async (event, secretaryId: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const service = target(secretaryId);
+          if (!service) return { ok: false, error: 'secretary-required' };
+          return service.forgetBot();
+        }
+      );
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_TEST, async (event) => {
+      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_TEST, async (event, secretaryId: unknown) => {
         if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+        const service = target(secretaryId);
+        if (!service) return { ok: false, error: 'secretary-required' };
         return service.sendTest();
       });
 
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, async (event, request: unknown) => {
-        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        const channel = readChannelPrefs(request);
-        if (channel) return service.setChannelPrefs(channel.channelId, channel.prefs);
-        const group = readTelegramGroup(request);
-        if (group) return service.setTelegramGroup(group.action, group.chatId);
-        const enabled = readFlag(request, 'enabled');
-        const cards = readFlag(request, 'allowCardConfirm');
-        const memory = readFlag(request, 'allowMemory');
-        if (enabled === null && cards === null && memory === null)
-          return { ok: false, error: 'invalid request' };
-        if (enabled !== null) await service.setEnabled(enabled);
-        if (cards !== null) service.setAllowCardConfirm(cards);
-        if (memory !== null) service.setAllowMemory(memory);
-        return { ok: true };
-      });
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS,
+        async (event, request: unknown, secretaryId: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const service = target(secretaryId);
+          if (!service) return { ok: false, error: 'secretary-required' };
+          const channel = readChannelPrefs(request);
+          if (channel) return service.setChannelPrefs(channel.channelId, channel.prefs);
+          const group = readTelegramGroup(request);
+          if (group) return service.setTelegramGroup(group.action, group.chatId);
+          const route = readTelegramRoute(request);
+          if (route) return service.removeTelegramRoute(route.chatId, route.topicId);
+          const enabled = readFlag(request, 'enabled');
+          const cards = readFlag(request, 'allowCardConfirm');
+          const memory = readFlag(request, 'allowMemory');
+          if (enabled === null && cards === null && memory === null)
+            return { ok: false, error: 'invalid request' };
+          if (enabled !== null) await service.setEnabled(enabled);
+          if (cards !== null) service.setAllowCardConfirm(cards);
+          if (memory !== null) service.setAllowMemory(memory);
+          return { ok: true };
+        }
+      );
 
       // 手机关注的任务：取消一项或全清；列表跟着联系方式状态一起推
-      ipcMain.handle(IPC_CHANNELS.SECRETARY_CONTACT_FOLLOWING, async (event, request: unknown) => {
-        if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
-        const parsed = readFollowingRequest(request);
-        if (!parsed) return { ok: false, error: 'invalid request' };
-        if (parsed.action === 'clear') return service.clearFollowed();
-        return service.unfollow(parsed.id);
-      });
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_FOLLOWING,
+        async (event, request: unknown, secretaryId: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const service = target(secretaryId);
+          if (!service) return { ok: false, error: 'secretary-required' };
+          const parsed = readFollowingRequest(request);
+          if (!parsed) return { ok: false, error: 'invalid request' };
+          if (parsed.action === 'clear') return service.clearFollowed();
+          return service.unfollow(parsed.id);
+        }
+      );
     },
   };
+  return contacts;
 }

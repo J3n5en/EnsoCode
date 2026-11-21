@@ -9,6 +9,7 @@ import {
   pendingProposalMatch,
   pendingProposalNote,
   proposalSignature,
+  restrictProfileToProjects,
   takeoverRefusal,
   transitionProposal,
   validateDispatch,
@@ -163,6 +164,38 @@ describe('takeoverRefusal', () => {
       )
     ).toBe('already-managed');
   });
+
+  it('另一个秘书在管：拒绝原因与「本秘书已管」区分开', () => {
+    const file = dispatchFile();
+    expect(takeoverRefusal(file, target({ managedElsewhere: true }))).toBe('managed-by-other');
+    // 自己的记录优先：同一个会话不会同时报两种
+    expect(takeoverRefusal(file, target({ conversationId: 'conv1', managedElsewhere: true }))).toBe(
+      'already-managed'
+    );
+  });
+});
+
+describe('restrictProfileToProjects', () => {
+  it('可见项目与接管范围都收窄到交集', () => {
+    const base = {
+      visibleProjectIds: 'all' as const,
+      takeoverScope: { mode: 'all' as const },
+    };
+    const narrowed = restrictProfileToProjects(base, ['p1', 'p2']);
+    expect(narrowed.visibleProjectIds).toEqual(['p1', 'p2']);
+    expect(narrowed.takeoverScope).toEqual({ mode: 'projects', projectIds: ['p1', 'p2'] });
+    const listed = restrictProfileToProjects(
+      { visibleProjectIds: ['p1', 'p3'], takeoverScope: { mode: 'projects', projectIds: ['p3'] } },
+      ['p1', 'p2']
+    );
+    expect(listed.visibleProjectIds).toEqual(['p1']);
+    expect(listed.takeoverScope).toEqual({ mode: 'projects', projectIds: [] });
+    const explicit = restrictProfileToProjects(
+      { visibleProjectIds: 'all', takeoverScope: { mode: 'explicit' } },
+      ['p1']
+    );
+    expect(explicit.takeoverScope).toEqual({ mode: 'explicit' });
+  });
 });
 
 describe('transitionProposal', () => {
@@ -299,6 +332,17 @@ describe('validateDispatch', () => {
       ok: false,
       error: 'project-not-visible',
     });
+    expect(validateDispatch(draft(), { ...ctx, running: 3 })).toEqual({
+      ok: false,
+      error: 'dispatch-limit',
+    });
+    expect(validateDispatch(draft(), { ...ctx, runningTotal: 10, maxTotal: 10 })).toEqual({
+      ok: false,
+      error: 'dispatch-limit-total',
+    });
+    expect(
+      validateDispatch(draft(), { ...ctx, runningTotal: 10, maxTotal: 10, deferred: true }).ok
+    ).toBe(true);
     expect(validateDispatch(draft(), { ...ctx, running: 3 })).toEqual({
       ok: false,
       error: 'dispatch-limit',

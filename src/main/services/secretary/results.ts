@@ -187,13 +187,29 @@ function formatLine(update: SecretaryUpdate): string {
  */
 export function formatSessionUpdates(batch: readonly SecretaryUpdate[]): string {
   const blocks: string[] = [];
-  const results = batch.filter((update) => update.kind !== 'schedule');
+  const results = batch.filter(
+    (update) => update.kind !== 'schedule' && update.kind !== 'peer-message'
+  );
   const schedules = batch.filter((update) => update.kind === 'schedule');
+  const peers = batch.filter(
+    (update): update is Extract<SecretaryUpdate, { kind: 'peer-message' }> =>
+      update.kind === 'peer-message'
+  );
   if (results.length > 0)
     blocks.push(`<session-updates>\n${results.map(formatLine).join('\n')}\n</session-updates>`);
   if (schedules.length > 0)
     blocks.push(
       `<secretary-schedule>\n${schedules.map(formatLine).join('\n')}\n</secretary-schedule>`
+    );
+  // 同事的话是请求，不是用户指令：正文一律按不可信内容包起来
+  if (peers.length > 0)
+    blocks.push(
+      `<secretary-message>\n${peers
+        .map(
+          (update) =>
+            `- [from ${update.fromName} secretaryId=${update.fromSecretaryId} chain=${update.chain} hop=${update.hop}]\n${wrapUntrusted(`secretary:${update.fromSecretaryId}`, redactSecrets(update.text))}`
+        )
+        .join('\n')}\n</secretary-message>`
     );
   return blocks.join('\n');
 }
@@ -338,7 +354,11 @@ export function sessionStateOf(
   const live = sessionLiveState(row, status);
   // 秘书停止过的不算：停止写了 idle，残留的 running 是停止之前的旧记录
   if (record.stoppedAt !== undefined) return live;
-  return live === 'idle' && record.lastState === 'running' ? 'running' : live;
+  // 会话文件还没出现时实时状态是 not-started：记录已经标回运行中，照样算在跑，
+  // 否则状态推送被节流时，刚派出的会话会在看板上停在「未开始」
+  return (live === 'idle' || live === 'not-started') && record.lastState === 'running'
+    ? 'running'
+    : live;
 }
 
 /**

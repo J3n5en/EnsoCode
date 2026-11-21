@@ -19,6 +19,7 @@ import {
   askCallbackToast,
   askSettledLine,
   type ContactLang,
+  type ContactRouteClaim,
   cardCallbackData,
   cardCallbackToast,
   cardConfirmButtonText,
@@ -85,6 +86,7 @@ import {
 } from './channel';
 import type { TelegramApi } from './client';
 import type { ContactCommands } from './commands';
+import type { TelegramHub } from './hub';
 import {
   type ContactStore,
   channelPrefs,
@@ -106,7 +108,9 @@ export type ContactError =
   | 'not-found'
   | 'no-secretary'
   | 'deliver-failed'
-  | 'invalid-chat-id';
+  | 'invalid-chat-id'
+  | 'route-conflict'
+  | 'channel-owned';
 
 export type ContactResult = { ok: true } | { ok: false; error: ContactError };
 
@@ -243,6 +247,14 @@ export interface ContactServicePorts {
   following?: FollowingPort;
   /** 测试注入假 Telegram API；生产按 token 现建 */
   api?(token: string): TelegramApi;
+  /** 全局 Telegram 连接中心：同一个 token 只轮询一次；缺省时自建 */
+  hub?: TelegramHub;
+  /** 这个联系方式属于哪个秘书；缺省为 default */
+  secretaryId?: string;
+  /** 同一 bot + chat + 话题已经属于别的秘书时返回它的名字 */
+  routeConflict?(claim: ContactRouteClaim): string | null;
+  /** 插件渠道已经在别的秘书那里打开时返回它的名字：一个插件渠道只归一个秘书 */
+  channelOwnedElsewhere?(channelId: string): string | null;
 }
 
 /** 插件渠道上报的状态 */
@@ -374,6 +386,10 @@ export class ContactService implements SecretaryContactPort {
     private readonly ports: ContactServicePorts
   ) {
     this.telegram = new TelegramChannel(store, {
+      ...(ports.hub ? { hub: ports.hub } : {}),
+      ...(ports.secretaryId ? { secretaryId: ports.secretaryId } : {}),
+      ...(ports.routeConflict ? { routeConflict: ports.routeConflict } : {}),
+      secretaryName: () => ports.secretaryName(),
       audit: ports.audit,
       publish: () => this.ports.publish(),
       now: ports.now,
@@ -450,8 +466,7 @@ export class ContactService implements SecretaryContactPort {
   /** 已连接的联系人：Telegram 是绑定的 chat，插件渠道是它上报的 peers */
   private connectedPeers(entry: ChannelEntry): Peer[] {
     if (entry.meta.id === TELEGRAM_CHANNEL_ID) {
-      const peerId = this.telegram.peerId();
-      return peerId ? [{ channelId: TELEGRAM_CHANNEL_ID, peerId }] : [];
+      return this.telegram.pushPeers().map((peer) => ({ channelId: TELEGRAM_CHANNEL_ID, ...peer }));
     }
     if (entry.status !== 'connected') return [];
     return entry.peers.map((peerId) => ({ channelId: entry.meta.id, peerId }));
@@ -584,10 +599,10 @@ export class ContactService implements SecretaryContactPort {
   }
 
   async sendTest(): Promise<ContactResult> {
-    const peerId = this.telegram.peerId();
-    if (!peerId) return { ok: false, error: 'not-bound' };
+    const target = this.telegram.pushPeers()[0];
+    if (!target) return { ok: false, error: 'not-bound' };
     const sent = await this.post(
-      { channelId: TELEGRAM_CHANNEL_ID, peerId },
+      { channelId: TELEGRAM_CHANNEL_ID, ...target },
       'sendText',
       { text: this.telegram.testText() },
       { force: true }
@@ -612,14 +627,75 @@ export class ContactService implements SecretaryContactPort {
     if (action === 'add') {
       const added = withTelegramGroupAdded(file, chatId);
       if (!added.ok) return { ok: false, error: 'invalid-chat-id' };
+      // 群白名单也是路由：同一 bot 的这个群已经整群绑给别的秘书就不行
+      const botId = file.bot?.id;
+      if (
+        botId !== undefined &&
+        typeof chatId === 'string' &&
+        this.ports.routeConflict?.({
+          secretaryId: this.ports.secretaryId ?? 'default',
+          botId,
+          chatId: chatId.trim(),
+        })
+      ) {
+        this.audit('contact_settings', false, 'route-conflict');
+        return { ok: false, error: 'route-conflict' };
+      }
       next = added.file;
     } else {
       next = withTelegramGroupRemoved(file, chatId);
     }
     this.store.save(next);
     this.audit('contact_settings', true, `telegramGroups=${next.telegramGroups.length}`);
+    void this.syncTelegramRunning();
     this.ports.publish();
     return { ok: true };
+  }
+
+  /** 解绑一条用绑定码绑的群或话题路由 */
+  removeTelegramRoute(chatId: string, topicId: string | undefined): ContactResult {
+    if (!this.telegram.removeRoute(chatId, topicId)) return { ok: false, error: 'not-found' };
+    this.ports.publish();
+    return { ok: true };
+  }
+
+  /** 插件渠道的消息没有秘书认领：不响应，只记审计 */
+  rejectUnrouted(channelId: string): void {
+    this.audit('contact_inbound_rejected', false, `unrouted ${channelId}`);
+  }
+
+  /** 这个秘书拥有哪些插件渠道：在它这里打开了的 */
+  ownsChannel(channelId: string): boolean {
+    return channelId !== TELEGRAM_CHANNEL_ID && this.prefsOf(channelId).enabled;
+  }
+
+  /** 删除秘书前的提醒：列出它的联系方式绑定（不含 token） */
+  bindings(): string[] {
+    const file = this.store.file();
+    const out: string[] = [];
+    if (file.bot) {
+      const bot = `@${file.bot.username}`;
+      if (file.chat) out.push(`Telegram ${bot} · private chat`);
+      for (const group of file.telegramGroups) {
+        out.push(`Telegram ${bot} · group ${file.telegramGroupTitles[group] ?? group}`);
+      }
+      for (const route of file.telegramRoutes) {
+        out.push(
+          `Telegram ${bot} · ${route.title ?? route.chatId}${route.topicId ? ` · topic ${route.topicId}` : ''}`
+        );
+      }
+    }
+    for (const entry of this.registry.list()) {
+      if (this.ownsChannel(entry.meta.id)) out.push(entry.meta.title);
+    }
+    return out;
+  }
+
+  /** 删除秘书：停掉收发，释放全部路由；token 一并清掉 */
+  async release(): Promise<void> {
+    this.stopTyping();
+    await this.telegram.forgetBot();
+    this.audit('contact_release', true);
   }
 
   /** 总开关：关掉后 Telegram 停止轮询，插件渠道不再路由 */
@@ -639,6 +715,15 @@ export class ContactService implements SecretaryContactPort {
     const clean: Partial<SecretaryContactChannelPrefs> = {};
     for (const key of ['enabled', 'push', 'cardConfirm', 'syncMirror', 'memory'] as const) {
       if (typeof patch[key] === 'boolean') clean[key] = patch[key];
+    }
+    // 一个插件渠道同一时间只归一个秘书：别的秘书已经打开了就不能再开
+    if (
+      clean.enabled === true &&
+      channelId !== TELEGRAM_CHANNEL_ID &&
+      this.ports.channelOwnedElsewhere?.(channelId)
+    ) {
+      this.audit('contact_settings', false, `channel-owned ${channelId}`);
+      return { ok: false, error: 'channel-owned' };
     }
     // 没按钮的渠道也能靠「确认 N」确认卡片；没有渠道实现时不改能力相关的开关
     if (!caps) {
@@ -880,7 +965,7 @@ export class ContactService implements SecretaryContactPort {
     if (supported && method) {
       let sent: ChannelSend;
       try {
-        sent = await method(peer.peerId, payload);
+        sent = await method(peer.peerId, payload, peer.topicId);
       } catch {
         sent = { ok: false, error: 'api' };
       }

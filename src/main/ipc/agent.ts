@@ -64,7 +64,7 @@ import {
   parseParentModelSelectionRequest,
   parseParentSourceBindingRequest,
 } from '@shared/types/mentions';
-import type { SecretaryToolDescriptor } from '@shared/types/secretary';
+import type { SecretaryProfile, SecretaryToolDescriptor } from '@shared/types/secretary';
 import { EnsoSafeJournal } from '../../agent/ensoSafeJournal';
 import { isSecretFilePath, isUnderSecretDirectory } from '../../agent/protectedActions';
 import { titleSummaryTimeoutMs } from '../../agent/titleSummary';
@@ -175,12 +175,21 @@ import { remoteCandidates } from '../services/remoteModels';
 import { webContentsOrRemote } from '../services/remoteRenderer/lookup';
 import { broadcastToRenderers, isMainRenderer } from '../services/renderers';
 import type { RestartManifestEntry } from '../services/restartManifest';
-import { ContactStore } from '../services/secretary/contact/store';
+import { ContactStore, hasContactRoutes } from '../services/secretary/contact/store';
 import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secretary/customTools';
 import { secretaryEnabled } from '../services/secretary/enabled';
-import { unfollowTarget } from '../services/secretary/following';
+import { unfollowTargetEverywhere } from '../services/secretary/following';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
+import { turnRestriction } from '../services/secretary/peers';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
+import {
+  ensureSecretaryProjects,
+  type SecretaryContext,
+  secretaryContext,
+  secretaryContexts,
+  secretaryIdOfConversation,
+  secretaryIdOfProject,
+} from '../services/secretary/secretaries';
 import { secretarySkillDirs, secretarySkillsDir } from '../services/secretary/skills';
 import { SecretaryStore } from '../services/secretary/store';
 import { invokeSecretaryOp } from '../services/secretary/tools';
@@ -564,13 +573,15 @@ function spawnBoundSessionOnce(
   const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
   if (isSecretaryProject(project)) {
     if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    const secretary = secretaryContext(secretaryIdOfProject(project?.projectId) ?? '');
+    if (!secretary) return { ok: false, error: 'secretary not found' };
     return spawnSession(
       identity,
       request,
       credentialKeys,
       remoteConfigFor(request.sessionId),
       projectIdFor(request.sessionId),
-      { secretary: secretarySpawnOptions() }
+      { secretary: secretarySpawnOptions(secretary) }
     );
   }
   // 派发/跟踪记录是权威：任何入口恢复 worker 都按它补上提问转交，不看渲染层传参
@@ -587,28 +598,43 @@ function spawnBoundSessionOnce(
 /** 秘书派出/跟踪中的会话：ask_user 先转给秘书；秘书关闭或记录已撤销时不转 */
 function secretaryAskRelay(sessionId: string): { name: string } | undefined {
   if (!secretaryEnabled()) return undefined;
-  const store = secretaryStore();
-  if (!store.dispatch().dispatched[sessionId]) return undefined;
-  const name = store.profile()?.name.trim();
-  return name ? { name } : undefined;
+  // 一个会话只归一个秘书：转交提问交给管着它的那一个
+  for (const ctx of secretaryContexts()) {
+    const store = new SecretaryStore(ctx.dir);
+    if (!store.dispatch().dispatched[sessionId]) continue;
+    const name = store.profile()?.name.trim();
+    return name ? { name } : undefined;
+  }
+  return undefined;
 }
 
-/** 秘书档案、人设与派发状态只在 Main 读盘 */
-function secretaryStore(): SecretaryStore {
-  return new SecretaryStore(path.join(app.getPath('userData'), 'secretary'));
+/** 联系方式绑过没有：只读 contact.json 的路由，不碰 token */
+function contactBoundFor(ctx: SecretaryContext): boolean {
+  return hasContactRoutes(new ContactStore(ctx.dir).file());
 }
 
-/** 联系方式绑过没有：只读 contact.json 的 chat，不碰 token */
-function contactBoundFor(): boolean {
-  return (
-    new ContactStore(path.join(app.getPath('userData'), 'secretary')).file().chat !== undefined
-  );
+/**
+ * 秘书这一回合的档案：同事消息触发的回合（降权回合）可见项目收窄到交集，
+ * 记忆检索与工具调用看到的是同一份。
+ */
+function secretaryProfileForTurn(sessionId: string): SecretaryProfile | null {
+  const ctx = secretaryOfSession(sessionId);
+  if (!ctx) return null;
+  const profile = new SecretaryStore(ctx.dir).profile();
+  const narrow = turnRestriction(ctx.id, sessionId);
+  return profile && narrow ? narrow(profile) : profile;
+}
+
+/** 秘书会话所属的秘书：只认 Main 的会话权威 */
+function secretaryOfSession(sessionId: string): SecretaryContext | null {
+  const id = secretaryIdOfConversation(sessionId);
+  return id ? secretaryContext(id) : null;
 }
 
 /**
  * 模型每轮看到的都是最新配置；插件与技能勾选在 spawn 时定死，改了要释放会话。
  */
-function secretarySpawnOptions(): {
+function secretarySpawnOptions(ctx: SecretaryContext): {
   systemPrompt: string;
   pluginIds: string[];
   skillIds: string[];
@@ -616,28 +642,36 @@ function secretarySpawnOptions(): {
   skillDirs: string[];
   tools: SecretaryToolDescriptor[];
 } {
-  const store = secretaryStore();
+  const store = new SecretaryStore(ctx.dir);
   const profile = store.profile();
   return {
-    systemPrompt: secretarySystemPrompt(store, profile),
+    systemPrompt: secretarySystemPrompt(ctx, store, profile),
     pluginIds: profile?.pluginIds ?? [],
     skillIds: profile?.skillIds ?? [],
-    skillDirs: secretarySkillDirs(secretarySkillsDir(), profile?.disabledSkillNames ?? []),
-    tools: secretaryToolDescriptors(secretaryToolsDir()),
+    skillDirs: secretarySkillDirs(secretarySkillsDir(ctx), profile?.disabledSkillNames ?? []),
+    tools: secretaryToolDescriptors(secretaryToolsDir(ctx)),
   };
 }
 
 /** 每次现读档案与人设：spawn 与档案保存后的就地刷新共用 */
 function secretarySystemPrompt(
-  store: SecretaryStore = secretaryStore(),
+  ctx: SecretaryContext,
+  store: SecretaryStore = new SecretaryStore(ctx.dir),
   profile = store.profile()
 ): string {
   const language = readSettingsState()?.language;
+  const colleagues = secretaryContexts()
+    .filter((other) => other.id !== ctx.id)
+    .map((other) => ({
+      id: other.id,
+      name: new SecretaryStore(other.dir).profile()?.name ?? other.id,
+    }));
   return buildSecretarySystemPrompt({
     profile,
     persona: store.readPersona(),
     uiLanguage: normalizeLocale(typeof language === 'string' ? language : undefined),
-    contactBound: contactBoundFor(),
+    contactBound: contactBoundFor(ctx),
+    ...(colleagues.length > 0 ? { colleagues } : {}),
   });
 }
 
@@ -645,7 +679,9 @@ function secretarySystemPrompt(
 export function refreshSecretaryPromptFromMain(sessionId: string): AgentActionResult {
   const identity = exactIdentity(sessionId);
   if (!identity) return { ok: false, error: STALE_SESSION_ERROR };
-  return setSessionSystemPrompt(identity, secretarySystemPrompt());
+  const ctx = secretaryOfSession(sessionId);
+  if (!ctx) return { ok: false, error: 'secretary not found' };
+  return setSessionSystemPrompt(identity, secretarySystemPrompt(ctx));
 }
 
 /** Main 侧根会话 spawn：pair 与秘书共用，renderer 走 AGENT_SPAWN 自己的校验 */
@@ -1682,9 +1718,8 @@ export function registerAgentHandlers(): void {
     },
   });
   sourceAuthority.ensureScratchProject(path.join(app.getPath('userData'), 'scratch'));
-  sourceAuthority.ensureSecretaryProject(
-    path.join(app.getPath('userData'), 'secretary', 'workspace')
-  );
+  // 每个秘书一个隐藏项目：按路径幂等，default 仍是 userData/secretary/workspace
+  ensureSecretaryProjects();
   setBrowserFileRootResolver((conversationId) => {
     const conversation = sourceAuthority?.conversation(conversationId);
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
@@ -2055,7 +2090,7 @@ export function registerAgentHandlers(): void {
                   ...memorySpaceContext({ projectId }),
                   secretary: {
                     readProjectIds: secretaryReadProjectIds(
-                      secretaryStore().profile(),
+                      secretaryProfileForTurn(rootSessionId(identity)),
                       sourceAuthority?.projection().projects ?? []
                     ),
                   },
@@ -2197,7 +2232,15 @@ export function registerAgentHandlers(): void {
         sendSecretaryResultToSession(identity, requestId, { ok: false, error: 'disabled' });
         return;
       }
-      void invokeSecretaryOp(op, params, { secretaryConversationId: identity.sessionId }).then(
+      const secretaryId = secretaryIdOfConversation(identity.sessionId);
+      if (!secretaryId) {
+        sendSecretaryResultToSession(identity, requestId, { ok: false, error: 'disabled' });
+        return;
+      }
+      void invokeSecretaryOp(op, params, {
+        secretaryConversationId: identity.sessionId,
+        secretaryId,
+      }).then(
         (result) =>
           sendSecretaryResultToSession(
             identity,
@@ -2446,7 +2489,7 @@ export function registerAgentHandlers(): void {
       sourceBindings!.invalidateConversation(parsed.conversationId);
       removeConversationFiles(result.value);
       // 会话删了就不会再有结果：手机关注里的这一条一并移除
-      unfollowTarget(parsed.conversationId);
+      void unfollowTargetEverywhere(parsed.conversationId);
     }
     return result;
   });

@@ -101,6 +101,8 @@ beforeEach(() => {
   pushState = () => {};
   (dom.window as unknown as Record<string, unknown>).electronAPI = {
     secretary: {
+      list: async () => [],
+      onListChanged: () => () => {},
       contactState: vi.fn(async () => state),
       onContactChanged: vi.fn((callback: (next: SecretaryContactState) => void) => {
         pushState = callback;
@@ -203,17 +205,23 @@ describe('Telegram 群白名单', () => {
     await typeAndAdd(' -1001 ');
     expect(contactSettings).not.toHaveBeenCalled();
     await typeAndAdd('  -1002  ');
-    expect(contactSettings).toHaveBeenCalledWith({
-      telegramGroup: { action: 'add', chatId: '-1002' },
-    });
+    expect(contactSettings).toHaveBeenCalledWith(
+      {
+        telegramGroup: { action: 'add', chatId: '-1002' },
+      },
+      undefined
+    );
     const remove = container.querySelector(
       '[data-enso="secretary-contact-group-remove"]'
     ) as HTMLButtonElement;
     await act(async () => {
       remove.click();
     });
-    expect(contactSettings).toHaveBeenLastCalledWith({
-      telegramGroup: { action: 'remove', chatId: '-1001' },
-    });
+    expect(contactSettings).toHaveBeenLastCalledWith(
+      {
+        telegramGroup: { action: 'remove', chatId: '-1001' },
+      },
+      undefined
+    );
   });
 });

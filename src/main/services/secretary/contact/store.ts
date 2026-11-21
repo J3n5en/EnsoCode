@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import type { ContactRouteClaim } from '@shared/secretary/contact';
 import type {
   SecretaryContactBot,
   SecretaryContactChannelPrefs,
@@ -43,6 +44,48 @@ export interface ContactFile {
   telegramGroups: string[];
   /** 见过的群名，只给界面认群用；只记绑定的人或名单里的群发来的 */
   telegramGroupTitles: Record<string, string>;
+  /** 只绑了群或话题、没绑私聊时的主人（Telegram 用户 id）；绑了私聊时以 chat.id 为准 */
+  ownerId?: number;
+  /** 用绑定码绑到群或话题的路由：收发都走这里。topicId 缺省表示整个群 */
+  telegramRoutes: TelegramRoute[];
+}
+
+export interface TelegramRoute {
+  chatId: string;
+  topicId?: string;
+  title?: string;
+  boundAt: number;
+}
+
+/** 这个秘书在 bot 上有没有任何能收消息的路由：私聊、或有主人的群白名单与群/话题路由 */
+export function hasContactRoutes(file: ContactFile): boolean {
+  if (file.chat) return true;
+  return file.ownerId !== undefined && file.telegramRoutes.length > 0;
+}
+
+/** 这个秘书在它的 bot 上认领的全部路由：私聊、群白名单（整群）与绑定码绑的群和话题 */
+export function contactClaims(secretaryId: string, file: ContactFile): ContactRouteClaim[] {
+  // 还没取到 bot 身份的旧配置按 0 算：同一个 token 上的订阅者本来就是同一个 bot
+  const botId = file.bot?.id ?? 0;
+  const claims: ContactRouteClaim[] = [];
+  if (file.chat) claims.push({ secretaryId, botId, chatId: String(file.chat.id) });
+  if (contactOwnerId(file) !== undefined) {
+    for (const group of file.telegramGroups) claims.push({ secretaryId, botId, chatId: group });
+    for (const route of file.telegramRoutes) {
+      claims.push({
+        secretaryId,
+        botId,
+        chatId: route.chatId,
+        ...(route.topicId ? { topicId: route.topicId } : {}),
+      });
+    }
+  }
+  return claims;
+}
+
+/** 认主人：私聊绑定的 chat id 就是用户 id；只绑了群的秘书用绑定时记下的发码人 */
+export function contactOwnerId(file: ContactFile): number | undefined {
+  return file.chat?.id ?? file.ownerId;
 }
 
 export function emptyContactFile(): ContactFile {
@@ -56,6 +99,7 @@ export function emptyContactFile(): ContactFile {
     pollOffset: 0,
     telegramGroups: [],
     telegramGroupTitles: {},
+    telegramRoutes: [],
   };
 }
 
@@ -113,6 +157,34 @@ function parseGroupTitles(raw: unknown): Record<string, string> {
   return Object.fromEntries(
     entries.slice(-GROUP_TITLES_MAX).map(([id, title]) => [id, title.slice(0, GROUP_TITLE_MAX)])
   );
+}
+
+const TOPIC_ID = /^\d{1,12}$/u;
+const ROUTES_MAX = 50;
+
+function parseRoutes(raw: unknown): TelegramRoute[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const routes: TelegramRoute[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const chatId = groupId(item.chatId);
+    if (!chatId) continue;
+    const topicId =
+      typeof item.topicId === 'string' && TOPIC_ID.test(item.topicId) ? item.topicId : undefined;
+    const key = `${chatId}:${topicId ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    routes.push({
+      chatId,
+      ...(topicId ? { topicId } : {}),
+      ...(typeof item.title === 'string' && item.title
+        ? { title: item.title.slice(0, GROUP_TITLE_MAX) }
+        : {}),
+      boundAt: typeof item.boundAt === 'number' ? item.boundAt : 0,
+    });
+  }
+  return routes.slice(-ROUTES_MAX);
 }
 
 export function telegramGroupAllowed(file: ContactFile, chatId: number): boolean {
@@ -239,6 +311,8 @@ export function parseContactFile(raw: unknown): ContactFile {
     ...(bind ? { bind } : {}),
     telegramGroups: parseGroups(raw.telegramGroups),
     telegramGroupTitles: parseGroupTitles(raw.telegramGroupTitles),
+    ...(positiveInt(raw.ownerId) !== undefined ? { ownerId: positiveInt(raw.ownerId) } : {}),
+    telegramRoutes: parseRoutes(raw.telegramRoutes),
   };
 }
 
@@ -295,6 +369,8 @@ export class ContactStore {
       pollOffset: 0,
       telegramGroups: current.telegramGroups,
       telegramGroupTitles: current.telegramGroupTitles,
+      // 解绑是整体解绑：群和话题的路由一起释放，别的秘书才能绑过去
+      telegramRoutes: [],
     });
   }
 
@@ -312,6 +388,7 @@ export class ContactStore {
       pollOffset: 0,
       telegramGroups: current.telegramGroups,
       telegramGroupTitles: current.telegramGroupTitles,
+      telegramRoutes: [],
     });
   }
 }

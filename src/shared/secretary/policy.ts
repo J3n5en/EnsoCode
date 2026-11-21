@@ -57,7 +57,8 @@ export type TakeoverRefusal =
   | 'child-session'
   | 'archived'
   | 'not-visible'
-  | 'already-managed';
+  | 'already-managed'
+  | 'managed-by-other';
 
 export interface TakeoverTarget {
   conversationId: string;
@@ -66,9 +67,14 @@ export interface TakeoverTarget {
   row?: Record<string, unknown>;
   /** 会话所属项目在秘书可见范围内 */
   visible: boolean;
+  /** 另一个秘书正在管这个会话（派出、接管或会话行上的归属） */
+  managedElsewhere?: boolean;
 }
 
-/** 能否交给秘书接管；null 表示可以。秘书自己的会话、子会话、已归档与已有秘书管着的都不行 */
+/**
+ * 能否交给秘书接管；null 表示可以。秘书自己的会话、子会话、已归档与已有秘书管着的都不行。
+ * 一个会话同一时间只归一个秘书：本秘书已管报 already-managed，别的秘书在管报 managed-by-other。
+ */
 export function takeoverRefusal(
   file: SecretaryDispatchFile,
   target: TakeoverTarget
@@ -80,9 +86,34 @@ export function takeoverRefusal(
   if (row.parentId !== undefined || row.btwParentId !== undefined) return 'child-session';
   if (row.archived === true) return 'archived';
   if (!target.visible) return 'not-visible';
-  if (Object.hasOwn(file.dispatched, target.conversationId) || row.secretaryOrigin !== undefined)
-    return 'already-managed';
+  if (Object.hasOwn(file.dispatched, target.conversationId)) return 'already-managed';
+  if (target.managedElsewhere) return 'managed-by-other';
+  if (row.secretaryOrigin !== undefined) return 'already-managed';
   return null;
+}
+
+/**
+ * 降权回合：可见项目与接管范围都收窄到给定项目集合的交集。
+ * 逐个授权（explicit）本来就不靠范围，保持原样。
+ */
+export function restrictProfileToProjects<
+  T extends { visibleProjectIds: 'all' | string[]; takeoverScope: SecretaryTakeoverScope },
+>(profile: T, allowed: readonly string[]): T {
+  const allow = new Set(allowed);
+  const visibleProjectIds =
+    profile.visibleProjectIds === 'all'
+      ? [...allow]
+      : profile.visibleProjectIds.filter((id) => allow.has(id));
+  const scope = profile.takeoverScope;
+  const takeoverScope: SecretaryTakeoverScope =
+    scope.mode === 'explicit'
+      ? scope
+      : {
+          mode: 'projects',
+          projectIds:
+            scope.mode === 'all' ? [...allow] : scope.projectIds.filter((id) => allow.has(id)),
+        };
+  return { ...profile, visibleProjectIds, takeoverScope };
 }
 
 export type ProposalAction =
@@ -221,6 +252,9 @@ export interface DispatchContext {
   visible: boolean;
   running: number;
   max: number;
+  /** 全部秘书合计在跑的派发数与合计上限；缺省表示不查合计 */
+  runningTotal?: number;
+  maxTotal?: number;
   /** 带 after 的派发先等依赖，不占运行名额；真正开始时再查一次上限 */
   deferred?: boolean;
 }
@@ -235,6 +269,13 @@ export function validateDispatch(
   if ((project.kind ?? 'local') !== 'local') return { ok: false, error: 'project-not-local' };
   if (!ctx.visible) return { ok: false, error: 'project-not-visible' };
   if (!ctx.deferred && ctx.running >= ctx.max) return { ok: false, error: 'dispatch-limit' };
+  if (
+    !ctx.deferred &&
+    ctx.runningTotal !== undefined &&
+    ctx.maxTotal !== undefined &&
+    ctx.runningTotal >= ctx.maxTotal
+  )
+    return { ok: false, error: 'dispatch-limit-total' };
 
   const { checkout, baseRef, branch } = draft;
   // 基线只在真的建独立 worktree 时才有意义：否则秘书会以为隔离生效了

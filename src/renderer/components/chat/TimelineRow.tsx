@@ -82,6 +82,7 @@ import {
   secretaryProposalId,
 } from '@/components/secretary/SecretaryProposalRow';
 import { TelegramInboundCard } from '@/components/secretary/TelegramInboundCard';
+import type { SecretaryFaceModel } from '@/components/secretary/useSecretaryFace';
 import { useSecretaryFace } from '@/components/secretary/useSecretaryFace';
 import {
   Dialog,
@@ -1155,16 +1156,19 @@ export function ReplyHeader({
   at,
   privacyMask,
   secretarySession = false,
+  face: faceOverride,
 }: {
   model?: string;
   at?: number;
   privacyMask?: MaskReport;
   /** 这条时间线自己的会话属于秘书项目，与全局当前会话无关 */
   secretarySession?: boolean;
+  /** 上层按会话所属秘书算好的脸；不传就用当前聚焦的秘书 */
+  face?: SecretaryFaceModel | null;
 }) {
   const host = useChatHost();
   const face = useSecretaryFace();
-  const secretarySpeaker = secretarySession ? face : null;
+  const secretarySpeaker = secretarySession ? (faceOverride ?? face) : null;
   const speaker = host?.speaker ?? (host ? null : secretarySpeaker);
   const secretaryMark = !host && secretarySpeaker ? true : undefined;
   const meta = [model, typeof at === 'number' ? formatClock(at) : null].filter(Boolean).join(' · ');

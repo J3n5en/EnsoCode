@@ -32,8 +32,17 @@ vi.mock('@/stores/sessions', () => ({
     }),
 }));
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
+  secretaryIdOfProject: () => null,
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
-    selector({ secretary: h.secretary, resolving: {}, resolveProposal: () => undefined }),
+    selector({
+      secretary: h.secretary,
+      secretaries: [],
+      states: {},
+      focusedId: null,
+      resolving: {},
+      resolveProposal: () => undefined,
+    }),
 }));
 
 const { SecretaryPanel } = await import('./SecretaryPanel');
@@ -153,6 +162,8 @@ beforeEach(() => {
   };
   const api = {
     secretary: {
+      list: async () => [],
+      onListChanged: () => () => {},
       listSchedules: async () => ({ ok: true, schedules: structuredClone(h.schedules) }),
       onStateChanged: (listener: () => void) => {
         h.stateListeners.push(listener);
