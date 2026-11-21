@@ -55,6 +55,10 @@ import type * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWindowChromeKind } from '@/components/app/WindowChrome';
+import {
+  BackgroundTaskMarker,
+  BackgroundTasksEntry,
+} from '@/components/backgroundTasks/BackgroundTaskMarker';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
 import { ConversationStatusIndicator } from '@/components/chat/ConversationStatusIndicator';
@@ -140,6 +144,7 @@ import { secretaryConversationIds } from '@/lib/secretaryEntry';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
+import { closeBackgroundTasks } from '@/stores/backgroundTasksView';
 import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import {
@@ -246,6 +251,7 @@ export function Sidebar({
   const selectConversation = useCallback(
     (id: string) => {
       onNavigateRef.current?.();
+      closeBackgroundTasks();
       selectConversationInStore(id);
     },
     [selectConversationInStore]
@@ -1049,6 +1055,7 @@ export function Sidebar({
               )}
             </SecretarySidebarSection>
           )}
+          <BackgroundTasksEntry />
           {orderedProjects.length === 0 && (
             <button
               type="button"
@@ -2695,6 +2702,7 @@ function ConversationRow({
         {!conversation.secretaryOrigin && takenOver && <SecretaryTakeoverBadge />}
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
+        <BackgroundTaskMarker conversationId={id} />
         {!renaming && (
           <TitleSummaryBadge
             pending={conversation.titleSummaryPending}

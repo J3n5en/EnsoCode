@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseAgentCommand,
   parseAgentControlToolRequest,
+  parseAgentSessionCustomEntry,
   parseAgentWorkerEvent,
   parseConversationAuthority,
   parseConversationAuthorityRequest,
@@ -649,6 +650,45 @@ describe('Main-owned source authority contracts', () => {
         selection: { providerId: 'p', modelId: 'm' },
         available: true,
       })
+    ).toBeNull();
+  });
+});
+
+describe('后台任务控制命令', () => {
+  it('停止与保留按会话 id 寻址，不需要会话身份', () => {
+    expect(parseAgentCommand({ type: 'task-stop', sessionId: 's1', taskId: 't1' })).not.toBeNull();
+    expect(
+      parseAgentCommand({
+        type: 'task-stop',
+        identity: { sessionId: 's1', generation: 'g' },
+        taskId: 't1',
+      })
+    ).toBeNull();
+    expect(
+      parseAgentCommand({ type: 'task-keep', sessionId: 's1', taskId: 't1', reason: 'ssh 在用' })
+    ).not.toBeNull();
+    expect(
+      parseAgentCommand({ type: 'task-keep', sessionId: 's1', taskId: 't1', reason: null })
+    ).not.toBeNull();
+    expect(
+      parseAgentCommand({
+        type: 'task-keep',
+        sessionId: 's1',
+        taskId: 't1',
+        reason: 'x'.repeat(201),
+      })
+    ).toBeNull();
+    expect(parseAgentCommand({ type: 'task-keep', sessionId: 's1', taskId: 't1' })).toBeNull();
+  });
+
+  it('收尾提醒条目校验计数', () => {
+    expect(parseAgentSessionCustomEntry({ kind: 'task-wrap-up-nudge', count: 2, at: 1 })).toEqual({
+      kind: 'task-wrap-up-nudge',
+      count: 2,
+      at: 1,
+    });
+    expect(
+      parseAgentSessionCustomEntry({ kind: 'task-wrap-up-nudge', count: 0, at: 1 })
     ).toBeNull();
   });
 });

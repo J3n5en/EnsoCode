@@ -306,6 +306,7 @@ export const IPC_CHANNELS = {
   /** renderer → main：会话静音立即生效（落盘前也不推送）。走 agent: 前缀，远端界面可以同步 */
   AGENT_SESSION_MUTED: 'agent:session-muted',
   AGENT_TASK_STOP: 'agent:task-stop',
+  AGENT_TASK_KEEP: 'agent:task-keep',
   /** 把运行中的前台命令移交为后台任务 */
   AGENT_TOOL_BACKGROUND: 'agent:tool-background',
   /** 会话名下在跑子代理的进度（等待行展开） */

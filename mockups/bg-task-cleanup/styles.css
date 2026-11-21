@@ -1,0 +1,14 @@
+/* mockup 专用入口：直接复用产品的 globals.css 和由主题派生的 token，保证视觉一致 */
+@import "./tokens.css";
+@import "../../src/renderer/styles/globals.css";
+@source "./src";
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 截图需要稳定画面：关掉循环动画，转圈停在固定角度 */
+.animate-spin { animation: none !important; transform: rotate(45deg); }
+.animate-pulse { animation: none !important; }

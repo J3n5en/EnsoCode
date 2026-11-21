@@ -54,6 +54,7 @@ import {
   parseTitleSummaryInput,
   parseUpdateConversationSelectionRequest,
   STALE_SESSION_ERROR,
+  TASK_KEEP_REASON_MAX,
   THINKING_LEVELS,
 } from '@shared/types/agent';
 import { DELEGATION_NOTE_MAX, parseTaskCheck } from '@shared/types/bot';
@@ -82,6 +83,7 @@ import {
   forgetParentToolProfile,
   forkSession,
   isAgentWorkerReady,
+  keepBackgroundTask,
   promptChildSession,
   promptSession,
   readSettingsState,
@@ -776,9 +778,7 @@ export function stopTaskFromMain(
   sessionId: string,
   taskId: string
 ): { ok: boolean; error?: string } {
-  const identity = exactIdentity(sessionId);
-  if (!identity) return { ok: false, error: 'stale generation' };
-  return stopBackgroundTask(identity, taskId);
+  return stopBackgroundTask(sessionId, taskId);
 }
 
 /** 秘书给已释放的派出会话续发消息：按持久化元数据恢复 worker，之后走普通 prompt 路径 */
@@ -1499,8 +1499,7 @@ function wirePairSessionHost(): void {
       if (identity) retrySession(identity);
     },
     stopTask: (sessionId, taskId) => {
-      const identity = exactIdentity(sessionId);
-      if (identity) stopBackgroundTask(identity, taskId);
+      stopBackgroundTask(sessionId, taskId);
     },
     stopSubagent: (sessionId, agentId) => {
       const identity = exactIdentity(sessionId);
@@ -3099,11 +3098,25 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     IPC_CHANNELS.AGENT_TASK_STOP,
     (_event, sessionId: unknown, taskId: unknown): AgentActionResult => {
-      const identity = exactIdentity(sessionId);
-      if (!identity || !isNonEmptyString(taskId)) {
-        return { ok: false, error: 'invalid task stop or stale generation' };
+      // 不要求会话已打开：未打开会话里的任务（重启认回）也要停得掉
+      if (!isNonEmptyString(sessionId) || !isNonEmptyString(taskId)) {
+        return { ok: false, error: 'invalid task stop' };
       }
-      return stopBackgroundTask(identity, taskId);
+      return stopBackgroundTask(sessionId, taskId);
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.AGENT_TASK_KEEP,
+    (_event, sessionId: unknown, taskId: unknown, reason: unknown): AgentActionResult => {
+      if (
+        !isNonEmptyString(sessionId) ||
+        !isNonEmptyString(taskId) ||
+        !(reason === null || (typeof reason === 'string' && reason.length <= TASK_KEEP_REASON_MAX))
+      ) {
+        return { ok: false, error: 'invalid task keep' };
+      }
+      return keepBackgroundTask(sessionId, taskId, reason);
     }
   );
 

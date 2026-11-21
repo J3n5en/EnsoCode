@@ -49,6 +49,7 @@ import {
   GitCompare,
   History,
   Hourglass,
+  Info,
   ListTodo,
   LoaderCircle,
   MessageCircleQuestion,
@@ -1483,6 +1484,20 @@ function SessionCustomRow({ entry }: { entry: AgentSessionCustomEntry }) {
   }
 
   if (entry.kind === 'tool-batch-label') return null;
+  if (entry.kind === 'task-wrap-up-nudge') {
+    return (
+      <div
+        data-enso="task-wrap-up-nudge"
+        className="my-1 flex items-center gap-1.5 text-[12px] text-subtle-foreground"
+      >
+        <Info className="size-3.5 shrink-0" />
+        {t(
+          '{{count}} background tasks are still undeclared; the next message asks the agent to stop each one or state why it keeps running',
+          { count: entry.count }
+        )}
+      </div>
+    );
+  }
   const receipt = entry.receipt;
   const succeeded = receipt.outcome === 'succeeded';
   return (

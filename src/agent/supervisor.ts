@@ -71,12 +71,7 @@ import { cloneModelsDevOauthModel, findModelsDevModel } from '@shared/modelsDevC
 import { isOauthAccountPool } from '@shared/oauthAccountPool';
 import { resolveOauthCatalogModel } from '@shared/oauthCatalog';
 import { ensureAccountProvider } from '@shared/piAccounts';
-import {
-  EMPTY_PLAN_STATE,
-  PLAN_ENTRY_TYPE,
-  parsePlanMessage,
-  splitPlanPrefix,
-} from '@shared/planMode';
+import { EMPTY_PLAN_STATE, PLAN_ENTRY_TYPE, parsePlanMessage } from '@shared/planMode';
 import {
   type MaskReport,
   mergeMaskReports,
@@ -101,7 +96,7 @@ import type { SmartCompactMode } from '@shared/smartCompactMode';
 import { buildSshShellCommand, shellQuote } from '@shared/ssh';
 import { DEFAULT_SSH_TIMEOUT_SECONDS } from '@shared/sshTimeout';
 import { toolBatchDigest } from '@shared/toolBatchLabel';
-import { prependTurnNote } from '@shared/turnNotes';
+import { prependTurnNote, splitTurnNotes } from '@shared/turnNotes';
 import type {
   AgentCommand,
   AgentRemoteConfig,
@@ -134,7 +129,6 @@ import { type EditMode, resolveEditMode } from '@shared/types/editMode';
 import type { ModelEntry } from '@shared/types/llm';
 import { providerIdOfAccountKey } from '@shared/types/oauthProviders';
 import type { SecretaryToolDescriptor } from '@shared/types/secretary';
-import { splitUnattendedPrefix } from '@shared/unattendedNote';
 import { VIRTUAL_PROVIDER_ID } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
@@ -338,6 +332,7 @@ import {
   systemReminderExtension,
   withSystemReminders,
 } from './systemReminder';
+import { settleChecklist } from './taskHygiene';
 import {
   buildInitialTitleUserText,
   buildRollingTitleUserText,
@@ -483,6 +478,10 @@ interface ManagedSession {
   lastRetryError?: string;
   /** 无人值守开关翻转后待告知模型的一条提示（只追加，不重开会话） */
   unattendedNote?: string;
+  /** 回合收尾时还有没表态的后台任务：清单搭下一条工具结果或进模型的消息，不另起一轮 */
+  taskWrapUpPending?: boolean;
+  /** 已在时间线提醒过的任务：同一批不重复提醒 */
+  taskWrapUpNudged?: Set<string>;
   /** 本轮 pi 已做过回合内自动重试；轮次收口时清掉 */
   turnRetried?: boolean;
   /** 本轮被 abort 命令中断：收口时随 turn-completed 下发，各窗口据此不泵队列；新轮起点清掉 */
@@ -1705,6 +1704,19 @@ export class SessionSupervisor {
         });
       return;
     }
+    // 按会话 id 寻址，不要求会话已打开（重启认回的任务所在会话可能还没 spawn）；worker 校验归属
+    if (command.type === 'task-stop') {
+      // 卡片上的停止按钮：用户主动停的，完成通知要告诉模型别重启
+      if (this.bgTasks.owns(command.taskId, command.sessionId))
+        this.bgTasks.stop(command.taskId, true);
+      return;
+    }
+    if (command.type === 'task-keep') {
+      if (!this.bgTasks.owns(command.taskId, command.sessionId)) return;
+      if (command.reason === null) this.bgTasks.unkeep(command.taskId);
+      else this.bgTasks.keep(command.taskId, { by: 'user', reason: command.reason });
+      return;
+    }
     const identity =
       command.type === 'browser-result' ||
       command.type === 'memory-result' ||
@@ -2274,11 +2286,6 @@ export class SessionSupervisor {
           .workflowRuns?.get(command.runId)
           ?.abort(WORKFLOW_STOPPED_BY_USER);
         return;
-      case 'task-stop':
-        this.must(command.identity);
-        // 卡片上的停止按钮：用户主动停的，完成通知要告诉模型别重启
-        this.bgTasks.stop(command.taskId, true);
-        return;
       case 'tool-background':
         this.must(command.identity);
         this.bgTasks.backgroundForeground(command.identity.sessionId, command.toolCallId, 'user');
@@ -2730,6 +2737,13 @@ export class SessionSupervisor {
     reminders.register('background-task', () => {
       const pending = takePendingReminders();
       return pending.map((text) => `<background-task-update>\n${text}\n</background-task-update>`);
+    });
+    reminders.register('task-wrap-up', () => {
+      const managed = managedRef ?? this.sessions.get(sessionId);
+      if (!managed?.taskWrapUpPending) return [];
+      managed.taskWrapUpPending = false;
+      const note = this.taskWrapUp(sessionId);
+      return note ? [note] : [];
     });
     const todoReminder = new TodoStaleReminder();
     reminders.register('todo-stale', () => todoReminder.take(), -1);
@@ -3411,7 +3425,8 @@ export class SessionSupervisor {
             async (summary, signal) => {
               const managed = managedRef ?? this.sessions.get(sessionId);
               return managed ? this.verifyGoalCompletion(managed, summary, signal) : undefined;
-            }
+            },
+            () => this.taskWrapUp(sessionId)
           )
         : []),
     ];
@@ -4934,6 +4949,7 @@ export class SessionSupervisor {
     const silent = turnRequestedSilence(managed.messages, managed.turnStartIndex);
     managed.turnStartIndex = managed.messages.length;
     this.workspaceClaims.release(managed.identity.sessionId);
+    if (!aborted && !budget) this.nudgeTaskWrapUp(managed);
     this.options.emit({
       type: 'turn-completed',
       identity: managed.identity,
@@ -4952,6 +4968,48 @@ export class SessionSupervisor {
       void this.runCompaction(managed, queued.instructions);
     }
     this.flushPendingReminders(managed);
+  }
+
+  /** 收尾清单：根会话还有在跑、没表态的后台任务时返回（子代理的任务登记在父会话名下） */
+  private taskWrapUp(sessionId: string): string | undefined {
+    if (sessionId.includes('::')) return undefined;
+    return settleChecklist(this.bgTasks.undeclared(sessionId), Date.now());
+  }
+
+  /**
+   * 回合收尾还有没表态的任务：时间线记一行灰色提醒，清单挂到下一条工具结果 / 进模型的消息上。
+   * 不为此另起一轮；同一批任务只提醒一次。
+   */
+  private nudgeTaskWrapUp(managed: ManagedSession): void {
+    const sessionId = managed.identity.sessionId;
+    if (sessionId.includes('::')) return;
+    const open = this.bgTasks.undeclared(sessionId);
+    managed.taskWrapUpNudged ??= new Set();
+    const nudged = managed.taskWrapUpNudged;
+    if (!open.some((task) => !nudged.has(task.taskId))) return;
+    for (const task of open) nudged.add(task.taskId);
+    managed.taskWrapUpPending = true;
+    const entry: AgentSessionCustomEntry = {
+      kind: 'task-wrap-up-nudge',
+      count: open.length,
+      at: Date.now(),
+    };
+    managed.session.sessionManager.appendCustomEntry('enso-agent-session', entry);
+    managed.customEntries.push(entry);
+    this.options.emit({
+      type: 'session-custom-entry',
+      identity: managed.identity,
+      seq: ++managed.seq,
+      entry,
+    });
+  }
+
+  /** 收尾清单搭在进模型的消息前（展示层按 splitTurnNotes 剥掉） */
+  private withTaskWrapUp(managed: ManagedSession, text: string): string {
+    if (!managed.taskWrapUpPending) return text;
+    managed.taskWrapUpPending = false;
+    const note = this.taskWrapUp(managed.identity.sessionId);
+    return note ? prependTurnNote(note, text) : text;
   }
 
   private withTiming(
@@ -5293,7 +5351,7 @@ export class SessionSupervisor {
         }
       : options;
     return managed.session
-      .prompt(withPendingPlanNote(managed, text), trackedOptions)
+      .prompt(withPendingPlanNote(managed, this.withTaskWrapUp(managed, text)), trackedOptions)
       .finally(() => {
         if (managed.promptDelivery === slot) managed.promptDelivery = undefined;
       });
@@ -5334,7 +5392,7 @@ export class SessionSupervisor {
         (detach) => {
           slot.detach = detach;
         },
-        (input) => withPendingPlanNote(managed, input)
+        (input) => withPendingPlanNote(managed, this.withTaskWrapUp(managed, input))
       );
       if (disposition === 'queued') {
         this.bgTasks.backgroundAllForeground(managed.identity.sessionId, 'steer');
@@ -5359,7 +5417,7 @@ export class SessionSupervisor {
     managed.steerDeliveries.push(slot);
     return steerDetachable(
       managed.session,
-      withPendingPlanNote(managed, text),
+      withPendingPlanNote(managed, this.withTaskWrapUp(managed, text)),
       images,
       (detach) => {
         slot.withdraw = detach;
@@ -6522,7 +6580,7 @@ export function runGateCommand(cwd: string, gate: string, executor?: SshExecutor
 
 /** 回退回填输入框：去掉 Plan 提示前缀；批准消息不回填，修改意见只回填意见原文 */
 function planFreeEditorText(text: string): string {
-  const rest = splitPlanPrefix(splitUnattendedPrefix(text).rest).rest;
+  const rest = splitTurnNotes(text).rest;
   const message = parsePlanMessage(rest);
   return message ? (message.kind === 'feedback' ? message.feedback : '') : rest;
 }

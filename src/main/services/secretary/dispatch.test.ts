@@ -3307,7 +3307,41 @@ describe('result_mark_done / result_mark_undo', () => {
 });
 
 describe('看板停止遗留任务', () => {
-  it('停掉记录里所有还在跑的任务并清掉遗留标记', async () => {
+  it('只停疑似闲置的任务，已保留的不动，遗留标记留着', async () => {
+    const h = harness({
+      file: {
+        ...dispatchedFile('c1'),
+        dispatched: {
+          c1: {
+            ...dispatchedFile('c1').dispatched.c1,
+            leftoverTasks: {
+              count: 2,
+              commands: ['pnpm dev', 'iproxy'],
+              taskIds: ['t1', 't2'],
+              at: 1,
+            },
+          },
+        },
+      },
+      tasks: {
+        c1: [
+          {
+            taskId: 't1',
+            command: 'pnpm dev',
+            status: 'running',
+            startedAt: 0,
+            suspectedIdle: true,
+          },
+          { taskId: 't2', command: 'iproxy', status: 'running', startedAt: 0, kept: true },
+        ],
+      },
+    });
+    expect(await stopLeftoverTasks(h.ports, 'c1')).toEqual({ ok: true, stopped: ['t1'] });
+    expect(h.stoppedTasks.map((entry) => entry.taskId)).toEqual(['t1']);
+    expect(h.file.dispatched.c1.leftoverTasks?.count).toBe(2);
+  });
+
+  it('疑似闲置的全部停完后清掉遗留标记', async () => {
     const h = harness({
       file: {
         ...dispatchedFile('c1'),
@@ -3326,8 +3360,20 @@ describe('看板停止遗留任务', () => {
       },
       tasks: {
         c1: [
-          { taskId: 't1', command: 'pnpm dev', status: 'running', startedAt: 0 },
-          { taskId: 't2', command: 'pnpm test', status: 'running', startedAt: 0 },
+          {
+            taskId: 't1',
+            command: 'pnpm dev',
+            status: 'running',
+            startedAt: 0,
+            suspectedIdle: true,
+          },
+          {
+            taskId: 't2',
+            command: 'pnpm test',
+            status: 'running',
+            startedAt: 0,
+            suspectedIdle: true,
+          },
           { taskId: 't3', command: 'git status', status: 'done', startedAt: 0 },
         ],
       },

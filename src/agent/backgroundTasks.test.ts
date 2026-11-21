@@ -1451,3 +1451,128 @@ describe('后台截止时间', () => {
     expect(notified.join('\n')).toMatch(/timeout/i);
   });
 });
+
+describe('疑似闲置与保留', () => {
+  const NOW = Date.now();
+  const quietSample = { cpuRatio: 0, sockets: { listening: [5173], established: 0 } };
+
+  const setup = () => {
+    let samples = new Map<
+      string,
+      { cpuRatio?: number; sockets?: { listening: number[]; established: number } }
+    >();
+    const sampled: string[][] = [];
+    const levels: BackgroundTaskInfo[][] = [];
+    const events: TaskEvents = {
+      onStarted: () => {},
+      onOutput: () => {},
+      onEnded: () => {},
+      onLevel: (_s, tasks) => levels.push(tasks),
+      onCompletionNotify: () => {},
+    };
+    const sampler = {
+      sample: async (tasks: readonly { key: string; pid: number }[]) => {
+        sampled.push(tasks.map((task) => task.key));
+        return samples;
+      },
+    } as unknown as ConstructorParameters<typeof BackgroundTaskManager>[3];
+    const manager = new BackgroundTaskManager(
+      events,
+      mkdtempSync(path.join(tmpdir(), 'enso-bg-idle-')),
+      SHELL_LIMITS,
+      sampler
+    );
+    const taskId = manager.start('s1', 'sleep 30', tmpdir());
+    const internal = (manager as unknown as { tasks: Map<string, { lastOutputAt: number }> }).tasks;
+    const quietSince = (at: number) => {
+      const task = internal.get(taskId);
+      if (task) task.lastOutputAt = at;
+    };
+    const info = () => manager.taskInfo(taskId);
+    return {
+      manager,
+      taskId,
+      quietSince,
+      info,
+      sampled,
+      levels,
+      setSamples: (next: typeof samples) => {
+        samples = next;
+      },
+    };
+  };
+
+  it('安静够久才进候选采样；三条满足时标疑似闲置并发全量快照', async () => {
+    const t = setup();
+    await t.manager.sampleIdle(NOW);
+    expect(t.sampled.at(-1)).toEqual([]);
+    t.quietSince(NOW - 30 * 60_000);
+    t.setSamples(new Map([[t.taskId, quietSample]]));
+    await t.manager.sampleIdle(NOW);
+    expect(t.info()?.idle).toEqual({ since: NOW - 30 * 60_000, ports: [5173] });
+    expect(t.levels.at(-1)?.[0]?.idle).toBeDefined();
+    t.manager.stop(t.taskId, true);
+  });
+
+  it('拿不到数据不标；已标的这一轮拿不到也不撤；有新输出立刻撤', async () => {
+    const t = setup();
+    t.quietSince(NOW - 31 * 60_000);
+    await t.manager.sampleIdle(NOW);
+    expect(t.info()?.idle).toBeUndefined();
+    t.setSamples(new Map([[t.taskId, quietSample]]));
+    await t.manager.sampleIdle(NOW);
+    t.setSamples(new Map());
+    await t.manager.sampleIdle(NOW + 60_000);
+    expect(t.info()?.idle).toBeDefined();
+    (t.manager as unknown as { append(task: unknown, chunk: Buffer): void }).append(
+      (t.manager as unknown as { tasks: Map<string, unknown> }).tasks.get(t.taskId),
+      Buffer.from('hmr update\n')
+    );
+    expect(t.info()?.idle).toBeUndefined();
+    t.manager.stop(t.taskId, true);
+  });
+
+  it('保留后 1 小时内不判闲置，到点仍闲置就撤掉保留、重新标闲置', async () => {
+    const t = setup();
+    t.quietSince(NOW - 40 * 60_000);
+    t.setSamples(new Map([[t.taskId, quietSample]]));
+    await t.manager.sampleIdle(NOW);
+    expect(t.info()?.idle).toBeDefined();
+    expect(t.manager.keep(t.taskId, { by: 'user', reason: '  ssh 还在用  ' }, NOW)).toBe(true);
+    expect(t.info()?.idle).toBeUndefined();
+    expect(t.info()?.keep).toEqual({ by: 'user', reason: 'ssh 还在用', at: NOW });
+    await t.manager.sampleIdle(NOW + 59 * 60_000);
+    expect(t.info()?.idle).toBeUndefined();
+    expect(t.info()?.keep).toBeDefined();
+    await t.manager.sampleIdle(NOW + 60 * 60_000);
+    expect(t.info()?.idle).toBeDefined();
+    expect(t.info()?.keep).toBeUndefined();
+    t.manager.stop(t.taskId, true);
+  });
+
+  it('task_settle 一次表态：停的停、留的记理由，返回仍没表态的', async () => {
+    const { manager } = makeManager();
+    const a = manager.start('s1', 'sleep 30', tmpdir());
+    const b = manager.start('s1', 'sleep 31', tmpdir());
+    const c = manager.start('s1', 'sleep 32', tmpdir());
+    const settle = createTaskTools(manager, 's1').find((tool) => tool.name === 'task_settle');
+    const args = settle?.prepareArguments?.({
+      tasks: JSON.stringify([
+        { taskId: a, action: 'stop', reason: '测试跑完了' },
+        { taskId: b, action: 'keep', reason: 'dev server 用户在看' },
+        { taskId: 'task-x', action: 'stop', reason: '' },
+      ]),
+    });
+    const result = await settle?.execute('call', args as never, undefined, undefined, {} as never);
+    const output = JSON.parse((result?.content[0] as { text?: string } | undefined)?.text ?? '{}');
+    expect(output.settled).toEqual([
+      { taskId: a, action: 'stop', reason: '测试跑完了', command: 'sleep 30', ok: true },
+      { taskId: b, action: 'keep', reason: 'dev server 用户在看', command: 'sleep 31', ok: true },
+      { taskId: 'task-x', action: 'stop', reason: '', ok: false },
+    ]);
+    expect(output.stillUndeclared).toEqual([c]);
+    expect(manager.taskInfo(b)?.keep).toMatchObject({ by: 'agent', reason: 'dev server 用户在看' });
+    manager.stop(b, true);
+    manager.stop(c, true);
+  });
+});

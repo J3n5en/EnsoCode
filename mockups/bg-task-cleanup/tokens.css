@@ -1,0 +1,70 @@
+/* 由 src/shared/theme/tokensCss.ts 生成：内置主题 enso，强调色 theme */
+:where(:root) {
+  --canvas: oklch(0.962 0.004 286);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.22 0.012 286);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.012 286);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.012 286);
+  --primary: oklch(0.22 0.012 286);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: color-mix(in oklch, oklch(0.22 0.012 286) 6%, oklch(1 0 0));
+  --secondary-foreground: oklch(0.22 0.012 286);
+  --muted: color-mix(in oklch, oklch(0.22 0.012 286) 4.5%, oklch(1 0 0));
+  --muted-foreground: oklch(0.45 0.012 286);
+  --subtle-foreground: oklch(0.6 0.01 286);
+  --sunken: oklch(0.982 0.002 286);
+  --accent: color-mix(in oklch, oklch(0.22 0.012 286) 6%, transparent);
+  --accent-foreground: oklch(0.22 0.012 286);
+  --border: oklch(0.925 0.004 286);
+  --input: oklch(0.87 0.006 286);
+  --ring: color-mix(in oklch, oklch(0.55 0.2 285) 50%, transparent);
+  --brand: oklch(0.55 0.2 285);
+  --brand-foreground: oklch(0.985 0 0);
+  --elevation-surface: 0 0 0 1px color-mix(in oklch, oklch(0.22 0.012 286) calc(7% * var(--ui-border-opacity, 1)), transparent), 0 1px 3px rgb(0 0 0 / 0.04);
+  --destructive: oklch(0.577 0.245 27.33);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.527 0.154 150.07);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.769 0.189 70.08);
+  --warning-foreground: oklch(0.205 0.014 285.82);
+  --info: oklch(0.623 0.214 259.81);
+  --info-foreground: oklch(0.985 0 0);
+  --elevation-float: 0 1px 2px oklch(0.2 0.01 285 / 0.05), 0 12px 32px -12px oklch(0.2 0.02 285 / 0.18);
+}
+:where(:root.dark) {
+  --canvas: oklch(0.165 0.006 286);
+  --background: oklch(0.205 0.007 286);
+  --foreground: oklch(0.94 0.004 286);
+  --card: color-mix(in oklch, oklch(0.94 0.004 286) 3%, oklch(0.205 0.007 286));
+  --card-foreground: oklch(0.94 0.004 286);
+  --popover: color-mix(in oklch, oklch(0.94 0.004 286) 5%, oklch(0.205 0.007 286));
+  --popover-foreground: oklch(0.94 0.004 286);
+  --primary: oklch(0.94 0.004 286);
+  --primary-foreground: oklch(0.205 0.007 286);
+  --secondary: color-mix(in oklch, oklch(0.94 0.004 286) 6%, oklch(0.205 0.007 286));
+  --secondary-foreground: oklch(0.94 0.004 286);
+  --muted: color-mix(in oklch, oklch(0.94 0.004 286) 7%, oklch(0.205 0.007 286));
+  --muted-foreground: oklch(0.74 0.008 286);
+  --subtle-foreground: oklch(0.56 0.01 286);
+  --sunken: oklch(0.235 0.008 286);
+  --accent: color-mix(in oklch, oklch(0.94 0.004 286) 6%, transparent);
+  --accent-foreground: oklch(0.94 0.004 286);
+  --border: oklch(1 0 0 / 0.07);
+  --input: oklch(1 0 0 / 0.13);
+  --ring: color-mix(in oklch, oklch(0.7 0.16 285) 50%, transparent);
+  --brand: oklch(0.7 0.16 285);
+  --brand-foreground: oklch(0.165 0.006 286);
+  --elevation-surface: 0 0 0 1px color-mix(in oklch, oklch(0.94 0.004 286) calc(6% * var(--ui-border-opacity, 1)), transparent), 0 2px 8px rgb(0 0 0 / 0.3);
+  --destructive: oklch(0.396 0.141 25.72);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.527 0.154 150.07);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.769 0.189 70.08);
+  --warning-foreground: oklch(0.205 0.014 285.82);
+  --info: oklch(0.623 0.214 259.81);
+  --info-foreground: oklch(0.985 0 0);
+  --elevation-float: 0 1px 2px oklch(0 0 0 / 0.3), 0 16px 40px -12px oklch(0 0 0 / 0.55);
+}
+
