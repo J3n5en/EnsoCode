@@ -1,5 +1,5 @@
 import { projectDisplayName } from '@shared/projectName';
-import { ArrowLeft, ArrowUpRight, GitBranch, ShieldAlert } from 'lucide-react';
+import { ArrowUpRight, GitBranch, ShieldAlert } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { LiveSessionDialog } from '@/components/bots/LiveSessionTimeline';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
@@ -9,9 +9,11 @@ import { ChatHostContext } from '@/components/chat/chatHost';
 import type { MessageTimelineHandle } from '@/components/chat/MessageTimeline';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
-import { useSessionPeek } from '@/stores/sessionPeek';
+import { openSessionFromSecretary } from '@/stores/secretaryReturn';
+import { type SessionPeekTab, useSessionPeek } from '@/stores/sessionPeek';
 import { type Conversation, peekConversation, useSessionsStore } from '@/stores/sessions';
 import { useSettingsStore } from '@/stores/settings';
+import { SecretaryDoneReport } from './SecretaryDoneReport';
 
 type PeekStatus = 'waiting' | 'running' | 'failed' | 'done';
 
@@ -32,6 +34,11 @@ const GOAL_LABEL = {
 
 const CHIP_CLASS = 'shrink-0 rounded px-1.5 py-px text-[11px]';
 
+const TABS: { key: SessionPeekTab; label: string }[] = [
+  { key: 'result', label: 'Result' },
+  { key: 'session', label: 'Session' },
+];
+
 export function peekStatus(
   conversation: Pick<Conversation, 'status' | 'spawning'> &
     Partial<Pick<Conversation, 'pendingApprovals' | 'pendingAsks'>>
@@ -51,6 +58,9 @@ export function SessionPeekDialog() {
   const { t } = useI18n();
   const conversationId = useSessionPeek((state) => state.conversationId);
   const close = useSessionPeek((state) => state.close);
+  const result = useSessionPeek((state) => state.result);
+  const tab = useSessionPeek((state) => (state.result ? state.tab : 'session'));
+  const setTab = useSessionPeek((state) => state.setTab);
   const conversation = useSessionsStore((state) =>
     conversationId ? state.conversations[conversationId] : undefined
   );
@@ -68,21 +78,9 @@ export function SessionPeekDialog() {
     [conversationId]
   );
 
+  const from = useSessionPeek((state) => state.from);
   const openSession = () => {
-    if (!conversationId) return;
-    const { activeId, conversations, selectConversation } = useSessionsStore.getState();
-    const from = activeId ? conversations[activeId] : undefined;
-    const fromSecretary =
-      from &&
-      from.id !== conversationId &&
-      useSettingsStore
-        .getState()
-        .projects.some((entry) => entry.id === from.projectId && entry.kind === 'secretary');
-    close();
-    selectConversation(conversationId);
-    useSessionPeek
-      .getState()
-      .setBack(fromSecretary && from ? { from: from.id, to: conversationId } : null);
+    if (conversationId) openSessionFromSecretary(conversationId, from ?? undefined);
   };
 
   const unavailable = !conversation
@@ -97,40 +95,59 @@ export function SessionPeekDialog() {
   const asks = conversation?.pendingAsks ?? [];
   const pending = viewable && conversationId && (approvals.length > 0 || asks.length > 0);
 
-  const meta = conversation && (
+  const tabs = result && (
+    <div
+      role="tablist"
+      data-enso="session-peek-tabs"
+      className="inline-flex w-fit rounded-md bg-muted p-0.5 text-[12px]"
+    >
+      {TABS.map((entry) => (
+        <button
+          key={entry.key}
+          type="button"
+          role="tab"
+          aria-selected={tab === entry.key}
+          data-enso={`session-peek-tab-${entry.key}`}
+          onClick={() => setTab(entry.key)}
+          className={cn(
+            'rounded-[5px] px-2.5 py-0.5 transition-colors',
+            tab === entry.key
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          {t(entry.label)}
+        </button>
+      ))}
+    </div>
+  );
+
+  const meta = (conversation || tabs) && (
     <div data-enso="session-peek-meta" className="flex flex-col gap-1.5">
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-muted-foreground">
-        {status && (
-          <span data-enso="session-peek-status" className={cn(CHIP_CLASS, status.className)}>
-            {t(status.label)}
-          </span>
-        )}
-        {project && (
-          <span data-enso="session-peek-project" className={cn(CHIP_CLASS, 'bg-muted')}>
-            {projectDisplayName(project)}
-          </span>
-        )}
-        {branch && (
-          <span
-            data-enso="session-peek-branch"
-            className={cn(CHIP_CLASS, 'inline-flex items-center gap-1 bg-muted font-mono')}
-          >
-            <GitBranch className="size-3" />
-            {branch}
-          </span>
-        )}
-        {viewable && (
-          <button
-            type="button"
-            data-enso="session-peek-open"
-            onClick={openSession}
-            className="ml-auto inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            <ArrowUpRight className="size-3.5" />
-            {t('Open session')}
-          </button>
-        )}
-      </div>
+      {tabs}
+      {conversation && (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-muted-foreground">
+          {status && (
+            <span data-enso="session-peek-status" className={cn(CHIP_CLASS, status.className)}>
+              {t(status.label)}
+            </span>
+          )}
+          {project && (
+            <span data-enso="session-peek-project" className={cn(CHIP_CLASS, 'bg-muted')}>
+              {projectDisplayName(project)}
+            </span>
+          )}
+          {branch && (
+            <span
+              data-enso="session-peek-branch"
+              className={cn(CHIP_CLASS, 'inline-flex items-center gap-1 bg-muted font-mono')}
+            >
+              <GitBranch className="size-3" />
+              {branch}
+            </span>
+          )}
+        </div>
+      )}
       {goal && (
         <p data-enso="session-peek-goal" className="truncate text-[12px] text-muted-foreground">
           {t('Goal')} · {goal.text} · {t(GOAL_LABEL[goal.status])}
@@ -140,12 +157,28 @@ export function SessionPeekDialog() {
     </div>
   );
 
+  // 已完成的会话多半已被自动归档：归档的照样能打开，只有会话不在时不给
+  const actions = conversation && (
+    <div data-enso="session-peek-actions" className="flex shrink-0 items-center">
+      <button
+        type="button"
+        data-enso="session-peek-open"
+        onClick={openSession}
+        className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+      >
+        <ArrowUpRight className="size-3.5" />
+        {t('Open session')}
+      </button>
+    </div>
+  );
+
   return (
     <LiveSessionDialog
       dataEnso="session-peek"
       conversationId={conversationId}
-      title={conversation?.title || t('Unnamed')}
+      title={conversation?.title || result?.title || t('Unnamed')}
       meta={meta}
+      actions={actions}
       footer={
         pending ? (
           <div data-enso="session-peek-pending" className="pb-3">
@@ -172,7 +205,9 @@ export function SessionPeekDialog() {
       }
       onClose={close}
     >
-      {unavailable ? (
+      {tab === 'result' && conversationId ? (
+        <SecretaryDoneReport conversationId={conversationId} fallback={result?.fallback} />
+      ) : unavailable ? (
         <p
           data-enso="session-peek-unavailable"
           className="flex flex-1 items-center justify-center border-t px-6 text-center text-[13px] text-muted-foreground"
@@ -193,29 +228,5 @@ export function SessionPeekDialog() {
         </ChatHostContext.Provider>
       ) : null}
     </LiveSessionDialog>
-  );
-}
-
-/** 从弹窗跳进的会话：标题栏给一键回到发起时的秘书会话（回去或再从弹窗跳别处时换掉） */
-export function SecretaryReturnButton({ conversationId }: { conversationId: string }) {
-  const { t } = useI18n();
-  const back = useSessionPeek((state) => state.back);
-  const fromAlive = useSessionsStore((state) =>
-    back ? Boolean(state.conversations[back.from]) : false
-  );
-  if (!back || back.to !== conversationId || !fromAlive) return null;
-  return (
-    <button
-      type="button"
-      data-enso="secretary-return"
-      onClick={() => {
-        useSessionPeek.getState().setBack(null);
-        useSessionsStore.getState().selectConversation(back.from);
-      }}
-      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-    >
-      <ArrowLeft className="size-3.5" />
-      {t('Back to secretary')}
-    </button>
   );
 }

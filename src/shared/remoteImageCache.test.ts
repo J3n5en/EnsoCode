@@ -64,6 +64,9 @@ describe('remoteImageIdentity', () => {
     );
     expect(remoteImageIdentity(li('p1', 'local-image://bot-avatar/b1?v=2'))).toBeTruthy();
     expect(remoteImageIdentity(li('p1', 'local-image://plugin-asset/x/icon.png?v=7'))).toBeTruthy();
+    const shot = (name: string) => li('p1', `local-image://secretary-report/c1/${name}?v=1`);
+    expect(remoteImageIdentity(shot('aa.png'))).toBeTruthy();
+    expect(remoteImageIdentity(shot('aa.png'))).not.toBe(remoteImageIdentity(shot('bb.png')));
   });
 
   it('does not persist path-addressed or proxied images (no host paths on the phone)', () => {

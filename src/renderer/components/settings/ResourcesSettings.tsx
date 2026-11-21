@@ -73,6 +73,10 @@ const CATEGORY_LABELS: Record<StorageCategoryId, [string, string]> = {
     'Secretary images',
     'Images sent to the secretary. Cleaning removes only images no message references any more and older than 7 days; referenced images are kept.',
   ],
+  secretaryReports: [
+    'Report screenshots',
+    'Copies of screenshots in finished reports, kept for 7 days after completion. Cleaning removes all of them; report text is kept.',
+  ],
   memory: ['Memory', 'Memory database and working memory.'],
   models: ['Local models', 'Downloaded embedding and chat models.'],
   runtimes: ['Runtimes', 'Bundled tools and GPU backends.'],
@@ -546,7 +550,9 @@ function StorageRow({
             <p
               className={cn(
                 'text-xs text-muted-foreground',
-                category.id !== 'secretaryImages' && 'truncate'
+                category.id !== 'secretaryImages' &&
+                  category.id !== 'secretaryReports' &&
+                  'truncate'
               )}
             >
               {t(description)}

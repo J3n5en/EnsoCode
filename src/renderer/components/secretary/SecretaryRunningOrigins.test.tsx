@@ -191,9 +191,9 @@ describe('SecretaryRunningOriginsCard', () => {
     expect(onOuter).not.toHaveBeenCalled();
   });
 
-  it('点在跑的某件弹窗看它，不跳转', async () => {
+  it('点在跑的某件弹窗看它，不跳转，并记下所属秘书会话', async () => {
     const { useSessionPeek } = await import('@/stores/sessionPeek');
-    useSessionPeek.setState({ conversationId: null, back: null });
+    useSessionPeek.setState({ conversationId: null, from: null });
     const onSelect = vi.fn();
     const { groups } = runningByOrigin(board({ running: [session('c1', 's1')] }), knownIds('s1'));
     await act(async () =>
@@ -212,6 +212,8 @@ describe('SecretaryRunningOriginsCard', () => {
     expect(card.textContent).toBe('活 c1');
     act(() => card.click());
     expect(useSessionPeek.getState().conversationId).toBe('c1');
+    // 侧栏不在秘书会话里：弹窗记下这件属于哪条秘书会话，「打开会话」后返回到它
+    expect(useSessionPeek.getState().from).toBe('s1');
     expect(onSelect).not.toHaveBeenCalled();
   });
 });

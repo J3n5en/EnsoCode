@@ -243,6 +243,7 @@ import type {
   SecretaryContactTopicsResult,
   SecretaryDaily,
   SecretaryDeletePreview,
+  SecretaryDoneReport,
   SecretaryProfile,
   SecretaryProfileDraft,
   SecretaryProposal,
@@ -438,6 +439,11 @@ const electronAPI = {
       secretaryId?: string
     ): Promise<{ ok: true; daily: SecretaryDaily } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DAILY, day ? { day } : {}, secretaryId),
+    /** 已完成条目的结果：汇报、截图标识、PR 与改动文件 */
+    doneReport: (
+      conversationId: string
+    ): Promise<{ ok: true; result: SecretaryDoneReport } | { ok: false; error: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_DONE_REPORT, conversationId),
     onStateChanged: (callback: (state: SecretaryState) => void): (() => void) => {
       const listener = (_event: unknown, state: SecretaryState) => callback(state);
       ipcRenderer.on(IPC_CHANNELS.SECRETARY_STATE_CHANGED, listener);

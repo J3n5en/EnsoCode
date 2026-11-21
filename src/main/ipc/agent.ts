@@ -158,6 +158,7 @@ import { resolveExternalRevealTarget, sessionWrittenPaths } from '../services/ex
 import { searchFiles } from '../services/fileSearch';
 import { resolveLocalUnderCwd } from '../services/filesWorkspace';
 import { memoryCompleteFromSettings } from '../services/llama/chat';
+import { setSecretaryReportResolver } from '../services/localImageProtocol';
 import { clearMcpStatuses, recordMcpStatus } from '../services/mcpStatusCache';
 import { type Complete, redactSecrets } from '../services/memory/distill';
 import { memorySpaceContext, secretaryReadProjectIds } from '../services/memory/space';
@@ -191,6 +192,13 @@ import {
 } from '../services/secretary/inboundImages';
 import { turnRestriction } from '../services/secretary/peers';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
+import {
+  getSecretaryReportStore,
+  reportImageRoots,
+  SecretaryReportStore,
+  secretaryReportsRoot,
+  setSecretaryReportStore,
+} from '../services/secretary/reportImages';
 import {
   ensureSecretaryProjects,
   type SecretaryContext,
@@ -502,6 +510,7 @@ function removeConversationFiles(conversation: {
   const project = sourceAuthority?.project(conversation.projectId);
   peekExtensionPlugins()?.forgetSession(conversation.conversationId);
   getSecretaryImageStore()?.remove(conversation.conversationId);
+  getSecretaryReportStore()?.remove(conversation.conversationId);
   removeConversationSessionFiles({
     sessionDir: path.join(app.getPath('userData'), 'agent', 'sessions'),
     conversationId: conversation.conversationId,
@@ -1763,6 +1772,20 @@ export function registerAgentHandlers(): void {
   setSecretaryImageStore(secretaryImages);
   // 启动后扫一次，不和启动抢 IO
   setTimeout(() => void secretaryImages.sweep(), 15_000).unref();
+  const secretaryReports = new SecretaryReportStore({
+    root: secretaryReportsRoot(app.getPath('userData')),
+    roots: (conversationId) =>
+      reportImageRoots(sessionWorktree(agentSessionIndex.workspaceRoot(conversationId))?.path),
+  });
+  setSecretaryReportStore(secretaryReports);
+  setSecretaryReportResolver((conversationId, name) =>
+    secretaryReports.imageFile(conversationId, name)
+  );
+  // 报告截图留 7 天：启动后扫一次，之后每天一次
+  setTimeout(() => {
+    void secretaryReports.sweep();
+    setInterval(() => void secretaryReports.sweep(), 24 * 60 * 60 * 1000).unref();
+  }, 20_000).unref();
   setBrowserFileRootResolver((conversationId) => {
     const conversation = sourceAuthority?.conversation(conversationId);
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;

@@ -149,7 +149,7 @@ export function SecretaryRunningOriginsCard({
                     key={cardKey(card)}
                     type="button"
                     data-enso="secretary-running-origin-card"
-                    onClick={() => openSessionPeek(card.conversationId)}
+                    onClick={() => openSessionPeek(card.conversationId, undefined, id ?? undefined)}
                     className="block w-full truncate rounded-md pr-1.5 pl-4 text-left text-[11.5px] text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
                   >
                     {cardTitle(card) || t('Unnamed')}

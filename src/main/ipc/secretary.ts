@@ -39,6 +39,7 @@ import {
   stopLeftoverTasks,
   untrack,
 } from '../services/secretary/dispatch';
+import { doneReportFor } from '../services/secretary/doneReport';
 import {
   createDispatchDriver,
   type DispatchDriver,
@@ -60,6 +61,7 @@ import {
 import { openSecretaryTarget } from '../services/secretary/links';
 import { reportPeerTodos, setPeerDeliveryListener } from '../services/secretary/peers';
 import { secretaryProfileFor } from '../services/secretary/profile';
+import { getSecretaryReportStore } from '../services/secretary/reportImages';
 import {
   parseAvatarRequest,
   parseDismissRequest,
@@ -349,6 +351,8 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
     newId: () => randomUUID(),
     audit: (entry) => appendAudit(ctx.dir, entry),
     recordDaily: (entry) => appendDailyRecord(ctx.dir, entry),
+    archiveReport: (conversationId, at, text) =>
+      void getSecretaryReportStore()?.archive(conversationId, at, text),
   };
 }
 
@@ -733,6 +737,13 @@ export function registerSecretaryHandlers(): void {
       return { ok: true, daily: await buildDaily(dailyPortsFor(ctx), day) };
     }
   );
+
+  ipcMain.handle(IPC_CHANNELS.SECRETARY_DONE_REPORT, async (event, conversationId: unknown) => {
+    if (!isMainRenderer(event.sender.id)) return { ok: false, error: 'invalid sender' };
+    if (!secretaryEnabled()) return { ok: false, error: 'disabled' };
+    if (!isNonEmptyString(conversationId)) return { ok: false, error: 'invalid request' };
+    return { ok: true, result: await doneReportFor(conversationId) };
+  });
 
   // profile 为 null 就是还没完成初次设置：界面据此显示欢迎页
   ipcMain.handle(IPC_CHANNELS.SECRETARY_GET_PROFILE, async (event, secretaryId: unknown) => {

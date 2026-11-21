@@ -4046,6 +4046,24 @@ export const zhTranslations: Record<string, string> = {
     '这条会话已归档，从归档里恢复后才能查看',
   'Needs your approval or answer': '等你审批或回答',
   'Back to secretary': '返回秘书',
+  'PR open': '未合并',
+  'PR merged': '已合并',
+  'PR closed': '已关闭',
+  'No report was saved': '没有存下完成报告',
+  Screenshots: '截图',
+  '{{count}} screenshots expired': '{{count}} 张截图已过期',
+  '{{count}} screenshots were cleaned up': '{{count}} 张截图已在资源页清理',
+  'Completed {{done}}': '完成于 {{done}}',
+  'Completed {{done}}, kept for {{days}} days, cleaned up on {{gone}}':
+    '完成于 {{done}}，保留 {{days}} 天，已于 {{gone}} 清理',
+  'Completed {{done}}, cleaned up on {{gone}}': '完成于 {{done}}，已于 {{gone}} 清理',
+  'Cleaned up': '已清理',
+  'Changed files ({{count}})': '改动文件（{{count}}）',
+  Binary: '二进制',
+  '{{count}} more files': '还有 {{count}} 个文件',
+  'Report screenshots': '报告截图',
+  'Copies of screenshots in finished reports, kept for 7 days after completion. Cleaning removes all of them; report text is kept.':
+    '已完成报告里截图的副本，完成后保留 7 天。清理会删掉全部截图，报告文字保留。',
 };
 
 export function normalizeLocale(input?: string): Locale {

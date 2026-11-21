@@ -31,6 +31,7 @@ import { resolveWorktreeRoot } from '@shared/worktreeRoot';
 import { readSettings } from '../ipc/settings';
 import { partitionName } from './browserPartition';
 import { getSecretaryImageStore } from './secretary/inboundImages';
+import { getSecretaryReportStore } from './secretary/reportImages';
 import type { ScanRootSpec, StorageWorkerData, StorageWorkerMessage } from './storageScanWorker';
 import { localUi } from './uiHost';
 
@@ -502,6 +503,13 @@ export async function cleanStorage(category: StorageCategoryId): Promise<Storage
       const store = getSecretaryImageStore();
       if (!store) throw new Error('Secretary image store is not ready');
       stats = await store.sweep();
+      break;
+    }
+    case 'secretaryReports': {
+      // 只删截图副本，报告文字留着
+      const store = getSecretaryReportStore();
+      if (!store) throw new Error('Secretary report store is not ready');
+      stats = await store.clear();
       break;
     }
     default:

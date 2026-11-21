@@ -739,6 +739,52 @@ export interface SecretaryDaily {
   retentionDays: number;
 }
 
+/** 完成结果里的 PR：号与链接来自汇报，状态与 squash 后的 sha 来自 gh */
+export interface SecretaryReportPull {
+  number: number;
+  url: string;
+  state?: 'OPEN' | 'MERGED' | 'CLOSED';
+  /** 合并后的提交（squash 即 squash 提交）；没合并不给 */
+  mergeSha?: string;
+}
+
+/** 改动文件一行：只有路径与增删行数；二进制文件 git 给不出行数，记 null */
+export interface SecretaryReportFile {
+  path: string;
+  additions: number | null;
+  deletions: number | null;
+}
+
+/**
+ * 报告截图：name 是 Main 存下的内容哈希文件名，renderer 只拿它拼图片地址；
+ * gone 只出现在给 renderer 的视图里：副本已因过期或资源页清理删掉。missing 是复制时就没成或副本无故丢了
+ */
+export type SecretaryReportImage =
+  | { label: string; name: string; gone?: 'expired' | 'cleared' }
+  | { label: string; missing: true };
+
+/** 会话报完成时存下的汇报与截图副本 */
+export interface SecretaryStoredReport {
+  at: number;
+  text: string;
+  images: SecretaryReportImage[];
+  /** 截图已删：expired 过了保留期，cleared 在资源页清理掉了；报告文字照常保留 */
+  imagesGone?: 'expired' | 'cleared';
+  /** 截图被删的时刻 */
+  imagesGoneAt?: number;
+  /** 只在视图里：截图保留天数 */
+  retentionDays?: number;
+}
+
+/** 已完成条目的「结果」视图；没存下报告（旧数据、手动标记完成）时 report 为 null */
+export interface SecretaryDoneReport {
+  report: SecretaryStoredReport | null;
+  pr?: SecretaryReportPull;
+  files?: SecretaryReportFile[];
+  /** 文件列表超过上限时截掉的条数 */
+  moreFiles?: number;
+}
+
 /**
  * 联系方式：秘书不在电脑前时，把里程碑与提问推到手机上，也能从手机回话。
  * 第一个渠道是 Telegram Bot；state 里不含 token，只留前几位提示。

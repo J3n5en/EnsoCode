@@ -24,11 +24,12 @@ vi.mock('@/stores/settings', () => {
 vi.mock('@/stores/sessions', () => {
   const state = {
     activeId: null,
-    conversations: {},
+    conversations: { cc52649d: { projectId: 'p1', messages: [] } },
     selectConversation: (id: string) => h.opened.push(id),
   };
   const useSessionsStore = (select: (value: object) => unknown) => select(state);
   useSessionsStore.getState = () => state;
+  useSessionsStore.subscribe = () => () => undefined;
   return { useSessionsStore };
 });
 vi.mock('@/stores/secretary', () => {

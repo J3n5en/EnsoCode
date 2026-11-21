@@ -133,6 +133,8 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   audit?(entry: SecretaryAuditEntry): void;
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
+  /** 会话报完成：存下完整汇报并复制里面点名的截图，供看板「结果」视图 */
+  archiveReport?(conversationId: string, at: number, text: string): void;
   /** 同事托付的待办办完或出了问题：回告发起的秘书；返回是否改了待办 */
   reportPeerTodos?(): boolean;
   /** 派出会话收口后自动归档：和用户手动归档写同一份会话行；缺省表示不自动归档 */
@@ -695,6 +697,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       text: record.lastText || update.text,
     });
     rememberDaily(record, kind, now, title, report);
+    const finalReport = kind === 'goal-complete' ? turnReport?.text.trim() || report?.trim() : '';
+    if (finalReport) ports.archiveReport?.(record.conversationId, now, redactSecrets(finalReport));
     notifyResult(update, kind, {
       title,
       projectName,
