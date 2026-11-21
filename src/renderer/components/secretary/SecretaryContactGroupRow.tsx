@@ -31,54 +31,74 @@ type TopicsLoad =
   | { state: 'ready'; forum: boolean; topics: SecretaryContactTopic[] };
 
 function Choice({
-  role,
   checked,
   disabled,
   label,
   onClick,
   enso,
 }: {
-  role: 'radio' | 'checkbox';
   checked: boolean;
   disabled?: boolean;
   label: string;
   onClick: () => void;
   enso: string;
 }) {
-  const props = {
-    type: 'button' as const,
-    'data-enso': enso,
-    disabled,
-    onClick,
-    className: 'flex items-center gap-1.5 text-left text-[12px] disabled:opacity-50',
-  };
-  const body = (
-    <>
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      data-enso={enso}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex items-center gap-1.5 text-left text-[12px] disabled:opacity-50"
+    >
       <span
         className={cn(
-          'flex size-3.5 shrink-0 items-center justify-center border border-border',
-          role === 'radio' ? 'rounded-full' : 'rounded',
+          'flex size-3.5 shrink-0 items-center justify-center rounded border border-border',
           checked && 'border-foreground bg-foreground text-background'
         )}
       >
         {checked && <Check className="size-2.5" />}
       </span>
       {label}
-    </>
-  );
-  return role === 'radio' ? (
-    <button role="radio" aria-checked={checked} {...props}>
-      {body}
     </button>
-  ) : (
-    <button role="checkbox" aria-checked={checked} {...props}>
-      {body}
+  );
+}
+
+function Segment({
+  checked,
+  disabled,
+  label,
+  onClick,
+  enso,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+  enso: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      data-enso={enso}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'rounded-md px-2 py-0.5 text-[11.5px] transition-colors disabled:opacity-50',
+        checked ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'
+      )}
+    >
+      {label}
     </button>
   );
 }
 
 /**
- * 允许的群里的一行：显示交给秘书的是整群还是某几个论坛话题，可展开勾选话题或解绑。
+ * 允许的群里的一行：「整群 / 选话题」直接切换，选话题时展开勾选，也可解绑。
  * 话题列表来自 Main（bot 见过的话题），拉取失败给出原因与重试。
  */
 export function SecretaryContactGroupRow({
@@ -97,7 +117,6 @@ export function SecretaryContactGroupRow({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [load, setLoad] = useState<TopicsLoad>({ state: 'idle' });
-  const [all, setAll] = useState(group.all);
   const [picked, setPicked] = useState<string[]>(group.topics.map((topic) => topic.id));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -129,26 +148,18 @@ export function SecretaryContactGroupRow({
     );
   };
 
-  const toggleOpen = () => {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    setAll(group.all);
+  const openPicker = () => {
     setPicked(group.topics.map((topic) => topic.id));
     setSaveError(null);
     setOpen(true);
     fetchTopics();
   };
 
-  const save = () => {
+  const save = (scope: 'all' | string[]) => {
     setSaving(true);
     setSaveError(null);
     void window.electronAPI.secretary
-      .contactSettings(
-        { telegramGroupScope: { chatId: group.id, scope: all ? 'all' : picked } },
-        secretaryId
-      )
+      .contactSettings({ telegramGroupScope: { chatId: group.id, scope } }, secretaryId)
       .then(
         (result) => {
           if (result.ok) {
@@ -161,10 +172,12 @@ export function SecretaryContactGroupRow({
       .finally(() => setSaving(false));
   };
 
+  const chooseAll = () => {
+    if (open) setOpen(false);
+    if (!group.all) save('all');
+  };
+
   const name = group.title ?? group.id;
-  const scope = group.all
-    ? t('Whole group')
-    : t('Topics: {{names}}', { names: group.topics.map(topicLabel).join(', ') });
   // 已绑但这次没拉到的话题也列出来，免得保存时被悄悄去掉
   const listed =
     load.state === 'ready'
@@ -174,11 +187,15 @@ export function SecretaryContactGroupRow({
         ]
       : [];
   const disabled = busy || saving;
+  const topicsMode = open || !group.all;
 
   return (
     <li data-enso="secretary-contact-group" className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate text-[12px]">
+        <span
+          data-enso="secretary-contact-group-name"
+          className="min-w-0 flex-1 truncate text-[12px]"
+        >
           {group.title ? (
             <>
               {group.title}{' '}
@@ -187,24 +204,29 @@ export function SecretaryContactGroupRow({
           ) : (
             <span className="font-mono text-[11.5px]">{group.id}</span>
           )}
-          <span
-            data-enso="secretary-contact-group-scope"
-            className="ml-1.5 text-[11px] text-muted-foreground"
-          >
-            · {scope}
-          </span>
         </span>
-        <button
-          type="button"
-          data-enso="secretary-contact-group-topics"
-          disabled={busy}
-          aria-expanded={open}
-          aria-label={t('Choose topics for {{name}}', { name })}
-          className={BUTTON_CLASS}
-          onClick={toggleOpen}
+        <div
+          role="radiogroup"
+          aria-label={t('What {{name}} hands to this secretary', { name })}
+          className="inline-flex shrink-0 rounded-lg border border-border p-0.5"
         >
-          <ListChecks className="size-3.5" />
-        </button>
+          <Segment
+            enso="secretary-contact-scope-all"
+            checked={!topicsMode}
+            disabled={disabled}
+            label={t('Whole group')}
+            onClick={chooseAll}
+          />
+          <Segment
+            enso="secretary-contact-scope-topics"
+            checked={topicsMode}
+            disabled={disabled}
+            label={t('Pick topics')}
+            onClick={() => {
+              if (!open) openPicker();
+            }}
+          />
+        </div>
         <button
           type="button"
           data-enso="secretary-contact-group-remove"
@@ -216,6 +238,29 @@ export function SecretaryContactGroupRow({
           <X className="size-3.5" />
         </button>
       </div>
+      {!group.all && !open && (
+        <div className="flex items-center gap-1.5">
+          <span
+            data-enso="secretary-contact-group-scope"
+            className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground"
+          >
+            {t('Topics: {{names}}', { names: group.topics.map(topicLabel).join(', ') })}
+          </span>
+          <button
+            type="button"
+            data-enso="secretary-contact-group-topics"
+            disabled={busy}
+            className={BUTTON_CLASS}
+            onClick={openPicker}
+          >
+            <ListChecks className="size-3.5" />
+            {t('Change topics')}
+          </button>
+        </div>
+      )}
+      {saveError && !open && (
+        <p className="text-[11.5px] text-destructive">{errorText(saveError)}</p>
+      )}
       {open && (
         <div
           data-enso="secretary-contact-group-picker"
@@ -248,75 +293,51 @@ export function SecretaryContactGroupRow({
               </button>
             </div>
           )}
-          {load.state === 'ready' && (
-            <>
-              <Choice
-                role="radio"
-                enso="secretary-contact-scope-all"
-                checked={all}
-                disabled={disabled}
-                label={t('Whole group (General and every topic)')}
-                onClick={() => setAll(true)}
-              />
-              {load.forum ? (
-                <>
+          {load.state === 'ready' &&
+            (load.forum ? (
+              <>
+                {listed.map((topic) => (
                   <Choice
-                    role="radio"
-                    enso="secretary-contact-scope-topics"
-                    checked={!all}
-                    disabled={disabled}
-                    label={t('Only the topics I pick')}
-                    onClick={() => setAll(false)}
+                    key={topic.id}
+                    enso="secretary-contact-topic"
+                    checked={picked.includes(topic.id)}
+                    // 已经单独归了同一个 bot 上的别的秘书：勾了也会整次保存被拒
+                    disabled={disabled || (Boolean(topic.owner) && !picked.includes(topic.id))}
+                    label={
+                      topic.owner
+                        ? `${topicLabel(topic)} · ${t('taken by {{owner}}', { owner: topic.owner })}`
+                        : topicLabel(topic)
+                    }
+                    onClick={() =>
+                      setPicked((prev) =>
+                        prev.includes(topic.id)
+                          ? prev.filter((id) => id !== topic.id)
+                          : [...prev, topic.id]
+                      )
+                    }
                   />
-                  {!all && (
-                    <div className="ml-5 flex flex-col gap-1">
-                      {listed.map((topic) => (
-                        <Choice
-                          key={topic.id}
-                          role="checkbox"
-                          enso="secretary-contact-topic"
-                          checked={picked.includes(topic.id)}
-                          // 已经单独归了同一个 bot 上的别的秘书：勾了也会整次保存被拒
-                          disabled={
-                            disabled || (Boolean(topic.owner) && !picked.includes(topic.id))
-                          }
-                          label={
-                            topic.owner
-                              ? `${topicLabel(topic)} · ${t('taken by {{owner}}', { owner: topic.owner })}`
-                              : topicLabel(topic)
-                          }
-                          onClick={() =>
-                            setPicked((prev) =>
-                              prev.includes(topic.id)
-                                ? prev.filter((id) => id !== topic.id)
-                                : [...prev, topic.id]
-                            )
-                          }
-                        />
-                      ))}
-                      <p className="text-[11px] text-subtle-foreground">
-                        {t(
-                          'Only topics the bot has seen are listed. If one is missing, send a message in that topic, then refresh. Topics you leave unchecked are ignored.'
-                        )}
-                      </p>
-                    </div>
+                ))}
+                <p className="text-[11px] text-subtle-foreground">
+                  {t(
+                    'Only topics the bot has seen are listed. If one is missing, send a message in that topic, then refresh. Topics you leave unchecked are ignored.'
                   )}
-                </>
-              ) : (
-                <p className="text-[11.5px] text-muted-foreground">
-                  {t('This group has no topics, so it can only be bound as a whole.')}
                 </p>
-              )}
-              {saveError && (
-                <p className="text-[11.5px] text-destructive">{errorText(saveError)}</p>
-              )}
-              <div className="flex gap-1.5">
+              </>
+            ) : (
+              <p className="text-[11.5px] text-muted-foreground">
+                {t('This group has no topics, so it can only be bound as a whole.')}
+              </p>
+            ))}
+          {saveError && <p className="text-[11.5px] text-destructive">{errorText(saveError)}</p>}
+          <div className="flex gap-1.5">
+            {load.state === 'ready' && load.forum && (
+              <>
                 <button
                   type="button"
                   data-enso="secretary-contact-scope-save"
-                  disabled={disabled || (!all && picked.length === 0)}
+                  disabled={disabled || picked.length === 0}
                   className={BUTTON_CLASS}
-                  onClick={save}
+                  onClick={() => save(picked)}
                 >
                   <Check className="size-3.5" />
                   {t('Save')}
@@ -331,9 +352,18 @@ export function SecretaryContactGroupRow({
                   <RefreshCw className="size-3.5" />
                   {t('Refresh')}
                 </button>
-              </div>
-            </>
-          )}
+              </>
+            )}
+            <button
+              type="button"
+              data-enso="secretary-contact-topics-cancel"
+              disabled={saving}
+              className={BUTTON_CLASS}
+              onClick={() => setOpen(false)}
+            >
+              {t('Cancel')}
+            </button>
+          </div>
         </div>
       )}
     </li>

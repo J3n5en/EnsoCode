@@ -3053,7 +3053,6 @@ export const zhTranslations: Record<string, string> = {
   'Mirror every reply here; /sync off stops it': '把所有回复同步到手机；/sync off 关掉',
   'List every command': '列出所有命令',
   'Commands you can send': '可以发的命令',
-  'Allowed groups': '允许的群',
   'Only groups on this list reach the secretary, and only messages from the bound account count. Messages from anyone else in the group are not received.':
     '只有名单里的群会进秘书，而且只认绑定的那个账号。群里其他人的话不会收。',
   'No groups yet: group messages are not received.': '名单为空：群消息一律不收。',
@@ -3061,8 +3060,6 @@ export const zhTranslations: Record<string, string> = {
   'Add group': '添加',
   'Remove {{name}}': '删除 {{name}}',
   'Group chat IDs are numbers, e.g. -1001234567890': '群 chatId 是数字，例如 -1001234567890',
-  'New groups are bound as a whole. For a forum group, use the list button to hand over only some topics.':
-    '新加的群默认整群交给秘书。开了话题的群可以点列表按钮，只交其中几个话题。',
   'General (default topic)': 'General（默认话题）',
   'Topic #{{id}}': '话题 #{{id}}',
   'Make sure the bot is in this group.': '确认 bot 已经在这个群里。',
@@ -3071,12 +3068,29 @@ export const zhTranslations: Record<string, string> = {
   'Another secretary already has this group or one of these topics':
     '这个群或其中某个话题已经交给别的秘书了',
   'Whole group': '整群',
+  'Groups and topics': '群和话题',
+  'Pick topics': '选话题',
+  'Bind another group or topic': '再绑一个群或话题',
+  'Change topics': '改话题',
+  'What {{name}} hands to this secretary': '{{name}} 交给这个秘书的范围',
+  'Add the bot to the group: tap the button, or add @{{bot}} as a member in Telegram. For a forum group, turn on Topics first.':
+    '把 bot 拉进群：点下面的按钮，或在 Telegram 里把 @{{bot}} 加为群成员。论坛群要先开启话题。',
+  'Send this in the group to hand the whole group to this secretary, or inside a forum topic to hand over only that topic:':
+    '在群里发下面这条，整个群归这个秘书；在论坛话题里发，只把这个话题交给它：',
+  '<code>': '<绑定码>',
+  'Verify a bot above first; the binding code shows up here.':
+    '先在上面验证 bot，绑定码会显示在这里。',
+  'Binding code of this secretary: {{code}}': '这个秘书的绑定码：{{code}}',
+  'Get a binding code': '生成绑定码',
+  'Bound groups show up in the list of this section, where you can switch between the whole group and picked topics.':
+    '绑好的群会出现在这一块的群列表里，可以切换「整群」或「选话题」。',
+  'Claimed by other secretaries on this bot (read only):': '同一个 bot 上其他秘书认领的（只读）：',
+  'belongs to {{owner}}': '归「{{owner}}」',
+  'Groups and topics: {{count}}': '群和话题：{{count}} 个',
+  'Or add a group by its chat ID:': '也可以直接填群的 chat ID 添加：',
   'Topics: {{names}}': '话题：{{names}}',
-  'Choose topics for {{name}}': '选择 {{name}} 交给秘书的话题',
   'Loading topics…': '正在拉取话题…',
   'Could not load topics: {{reason}}': '拉取话题失败：{{reason}}',
-  'Whole group (General and every topic)': '整群（General 和所有话题）',
-  'Only the topics I pick': '只交勾选的话题',
   'Only topics the bot has seen are listed. If one is missing, send a message in that topic, then refresh. Topics you leave unchecked are ignored.':
     '列表里只有 bot 见过的话题。缺哪个，就在那个话题里发一句话再点刷新。没勾的话题一律忽略。',
   'This group has no topics, so it can only be bound as a whole.':
@@ -3595,9 +3609,7 @@ export const zhTranslations: Record<string, string> = {
   'Messages there go to this secretary only, and its updates are posted there. One bot can serve several secretaries: each chat or forum topic belongs to one of them.':
     '那里的消息只交给这个秘书，它的提醒也发到那里。一个 bot 可以给多个秘书用：每个 chat 或 forum 话题只归其中一个。',
   'Topic {{id}}': '话题 {{id}}',
-  'In the forum topic, send:': '在 forum 话题里发送：',
   'Add the bot to a group': '把 bot 拉进群',
-  'Bind a group or topic': '绑定群或话题',
   'The code works once. Press Start in a private chat with the bot, or send it in a group or forum topic to bind that place to this secretary instead.':
     '绑定码只能用一次。在与 bot 的私聊里点 Start，或在群、forum 话题里发送它，把那里绑定到这个秘书。',
   'Your private chat with this bot already belongs to secretary "{{owner}}". One person has only one private chat with a bot, so bind this secretary to a group or forum topic below, or give it a different bot.':

@@ -62,6 +62,7 @@ let state: SecretaryContactState;
 let contactSettings: ReturnType<typeof vi.fn>;
 let contactTest: ReturnType<typeof vi.fn>;
 let contactTelegramTopics: ReturnType<typeof vi.fn>;
+let contactBind: ReturnType<typeof vi.fn>;
 let pushState: (next: SecretaryContactState) => void;
 
 const groupsBox = () => container.querySelector('[data-enso="secretary-contact-groups"]');
@@ -100,6 +101,7 @@ beforeEach(() => {
   contactSettings = vi.fn(async () => ({ ok: true }));
   contactTest = vi.fn(async () => ({ ok: true }));
   contactTelegramTopics = vi.fn(async () => ({ ok: true, forum: false, topics: [] }));
+  contactBind = vi.fn(async () => ({ ok: true }));
   pushState = () => {};
   (dom.window as unknown as Record<string, unknown>).electronAPI = {
     secretary: {
@@ -113,6 +115,7 @@ beforeEach(() => {
       contactSettings,
       contactTest,
       contactTelegramTopics,
+      contactBind,
     },
     extensionPlugins: { list: vi.fn(async () => []), onChanged: vi.fn(() => () => {}) },
   };
@@ -201,10 +204,11 @@ describe('Telegram 群白名单', () => {
     ]);
     await render();
     const rows = [...container.querySelectorAll('[data-enso="secretary-contact-group"]')];
-    expect(rows.map((row) => row.textContent?.trim())).toEqual([
-      'Dev 群 -1001· Whole group',
-      '-1002· Whole group',
-    ]);
+    expect(
+      rows.map(
+        (row) => row.querySelector('[data-enso="secretary-contact-group-name"]')?.textContent
+      )
+    ).toEqual(['Dev 群 -1001', '-1002']);
   });
 
   it('添加做 trim，空白与重复的不发；删除带原 id', async () => {
@@ -258,7 +262,7 @@ describe('Telegram 群的论坛话题', () => {
       },
     ]);
     await render('sec-b');
-    expect(scopeText()).toEqual(['· Topics: 插件开发, General (default topic), Topic #9']);
+    expect(scopeText()).toEqual(['Topics: 插件开发, General (default topic), Topic #9']);
   });
 
   it('拉话题失败给出原因与重试；重试成功后勾选话题保存', async () => {
@@ -269,7 +273,7 @@ describe('Telegram 群的论坛话题', () => {
       detail: 'Bad Request: chat not found',
     });
     await render('sec-b');
-    await click('[data-enso="secretary-contact-group-topics"]');
+    await click('[data-enso="secretary-contact-scope-topics"]');
     expect(contactTelegramTopics).toHaveBeenCalledWith('-1001', 'sec-b');
     const error = container.querySelector('[data-enso="secretary-contact-topics-error"]');
     expect(error?.textContent).toContain('Bad Request: chat not found');
@@ -284,7 +288,6 @@ describe('Telegram 群的论坛话题', () => {
     expect(contactTelegramTopics).toHaveBeenCalledTimes(2);
     expect(container.querySelector('[data-enso="secretary-contact-topics-error"]')).toBeNull();
 
-    await click('[data-enso="secretary-contact-scope-topics"]');
     const save = () =>
       container.querySelector('[data-enso="secretary-contact-scope-save"]') as HTMLButtonElement;
     expect(save().disabled).toBe(true);
@@ -302,7 +305,7 @@ describe('Telegram 群的论坛话题', () => {
     expect(container.querySelector('[data-enso="secretary-contact-group-picker"]')).toBeNull();
   });
 
-  it('改回整群：保存 scope=all', async () => {
+  it('整群 / 选话题直接显示在群这一行，不用展开；改话题沿用已勾的，点整群直接保存', async () => {
     state = contactState([{ id: '-1001', all: false, topics: [{ id: '3', title: '插件开发' }] }]);
     contactTelegramTopics.mockResolvedValueOnce({
       ok: true,
@@ -310,13 +313,18 @@ describe('Telegram 群的论坛话题', () => {
       topics: [{ id: '1' }, { id: '3', title: '插件开发' }],
     });
     await render('sec-b');
+    const segment = (enso: string) =>
+      container.querySelector(`[data-enso="${enso}"]`)?.getAttribute('aria-checked');
+    expect(segment('secretary-contact-scope-all')).toBe('false');
+    expect(segment('secretary-contact-scope-topics')).toBe('true');
+    expect(contactTelegramTopics).not.toHaveBeenCalled();
+
     await click('[data-enso="secretary-contact-group-topics"]');
     const checked = [...container.querySelectorAll('[data-enso="secretary-contact-topic"]')].map(
       (node) => node.getAttribute('aria-checked')
     );
     expect(checked).toEqual(['false', 'true']);
     await click('[data-enso="secretary-contact-scope-all"]');
-    await click('[data-enso="secretary-contact-scope-save"]');
     expect(contactSettings).toHaveBeenLastCalledWith(
       { telegramGroupScope: { chatId: '-1001', scope: 'all' } },
       'sec-b'
@@ -326,12 +334,13 @@ describe('Telegram 群的论坛话题', () => {
   it('没开话题的群：说明只能整群，不给话题勾选', async () => {
     state = contactState([{ id: '-1001', all: true, topics: [] }]);
     await render('sec-b');
-    await click('[data-enso="secretary-contact-group-topics"]');
+    await click('[data-enso="secretary-contact-scope-topics"]');
     const picker = container.querySelector('[data-enso="secretary-contact-group-picker"]');
     expect(picker?.textContent).toContain(
       'This group has no topics, so it can only be bound as a whole.'
     );
-    expect(container.querySelector('[data-enso="secretary-contact-scope-topics"]')).toBeNull();
+    expect(container.querySelector('[data-enso="secretary-contact-topic"]')).toBeNull();
+    expect(contactSettings).not.toHaveBeenCalled();
   });
 });
 
@@ -396,7 +405,12 @@ describe('多个秘书共用一个 bot', () => {
       expect.stringContaining('小 B'),
       expect.stringContaining('Private chat with @j3n5en'),
     ]);
-    expect(users[1]?.textContent).toContain('工作群 · Whole group');
+    const others = [...container.querySelectorAll('[data-enso="secretary-contact-group-other"]')];
+    expect(others.map((node) => node.textContent)).toEqual([
+      expect.stringContaining('工作群 · Whole group'),
+    ]);
+    expect(others[0]?.textContent).toContain('爱酱');
+    expect(others[0]?.querySelector('button')).toBeNull();
   });
 
   it('发码被拒：写明原因（私聊归谁）而不是一直等', async () => {
@@ -418,6 +432,9 @@ describe('多个秘书共用一个 bot', () => {
     expect(
       container.querySelector('[data-enso="secretary-contact-regenerate"]')?.getAttribute('class')
     ).toContain('bg-foreground');
+    // 不带 token 重新生成：秘书 id 走第二个参数，不能被当成 token
+    await click('[data-enso="secretary-contact-regenerate"]');
+    expect(contactBind).toHaveBeenCalledWith(undefined, 'sec-b');
   });
 
   it('勾话题：已单独归别的秘书的话题标出归属且不能勾', async () => {
@@ -444,5 +461,89 @@ describe('多个秘书共用一个 bot', () => {
     await render('sec-b');
     expect(text('secretary-contact-bound')).toContain('Bound to groups and topics');
     expect(container.querySelector('[data-enso="secretary-contact-shared"]')).not.toBeNull();
+  });
+});
+
+describe('群和话题入口', () => {
+  const box = () => groupsBox()?.textContent ?? '';
+  const click = async (selector: string) => {
+    const target = container.querySelector(selector) as HTMLButtonElement | null;
+    if (!target) throw new Error(`missing ${selector}`);
+    await act(async () => {
+      target.click();
+    });
+  };
+
+  it('还没填 bot：也显示群和话题这一块，说明先验证 bot', async () => {
+    const base = contactState([]);
+    state = {
+      ...base,
+      telegram: { ...base.telegram, status: 'unbound', chat: undefined, bot: undefined },
+    };
+    await render('sec-b');
+    expect(groupsBox()).not.toBeNull();
+    expect(box()).toContain('Add the bot to the group');
+    expect(box()).toContain('Verify a bot above first');
+    expect(container.querySelector('[data-enso="secretary-contact-groups-new-code"]')).toBeNull();
+  });
+
+  it('已绑私聊、还没绑群：写明怎么绑，一键拿到这个秘书的绑定码', async () => {
+    await render('sec-b');
+    expect(box()).toContain('Add the bot to the group');
+    expect(box()).toContain('/bind@enso_bot');
+    await click('[data-enso="secretary-contact-groups-new-code"]');
+    expect(contactBind).toHaveBeenCalledWith(undefined, 'sec-b');
+  });
+
+  it('有码时直接显示码、拉群链接和要发的命令', async () => {
+    const base = contactState([]);
+    state = {
+      ...base,
+      telegram: {
+        ...base.telegram,
+        bind: {
+          code: '654321',
+          link: 'https://t.me/enso_bot?start=654321',
+          groupLink: 'https://t.me/enso_bot?startgroup=654321',
+          topicCommand: '/bind@enso_bot 654321',
+          expiresAt: Date.now() + 5 * 60_000,
+        },
+      },
+    };
+    await render('sec-b');
+    const group = groupsBox();
+    expect(
+      group?.querySelector('[data-enso="secretary-contact-groups-code"]')?.textContent
+    ).toContain('654321');
+    expect(
+      group?.querySelector('[data-enso="secretary-contact-group-link"]')?.getAttribute('href')
+    ).toBe('https://t.me/enso_bot?startgroup=654321');
+    expect(group?.querySelector('[data-enso="secretary-contact-topic-command"]')?.textContent).toBe(
+      '/bind@enso_bot 654321'
+    );
+  });
+
+  it('等私聊 Start 时（私聊没被占）也显示群和话题', async () => {
+    const base = contactState([]);
+    state = {
+      ...base,
+      telegram: {
+        ...base.telegram,
+        status: 'awaiting-start',
+        chat: undefined,
+        bind: {
+          code: '123456',
+          link: 'https://t.me/enso_bot?start=123456',
+          groupLink: 'https://t.me/enso_bot?startgroup=123456',
+          topicCommand: '/bind@enso_bot 123456',
+          expiresAt: Date.now() + 5 * 60_000,
+        },
+      },
+    };
+    await render('sec-b');
+    expect(groupsBox()).not.toBeNull();
+    expect(
+      container.querySelectorAll('[data-enso="secretary-contact-topic-command"]')
+    ).toHaveLength(1);
   });
 });
