@@ -11,8 +11,15 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
-import { PHONE_PUSH_ENABLED_KEY, pushAvailability, subscribePush, unsubscribePush } from '../push';
+import {
+  isStandalone,
+  PHONE_PUSH_ENABLED_KEY,
+  pushAvailability,
+  subscribePush,
+  unsubscribePush,
+} from '../push';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
+import { hadPairing, requestPersistence, storageLossNotice, syncPairedMark } from '../storageGuard';
 import { PHONE_URL, saveUiMode } from '../uiMode';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
@@ -88,9 +95,9 @@ function revealFrames(): void {
 }
 
 /** 回退手机版：记住的模式改回 phone，下次启动不再跳进来 */
-function fallback(html: string): void {
+function fallback(html: string, link = '返回精简版'): void {
   saveUiMode('phone');
-  splash(`${html}<a href="${PHONE_URL}">返回精简版</a>`);
+  splash(`${html}<a href="${PHONE_URL}">${link}</a>`);
   stopped = true;
 }
 
@@ -158,7 +165,13 @@ async function main(): Promise<void> {
     devices.find((d) => d.pairId === params.get('device')) ??
     pickActive(devices, loadActiveDeviceId());
   if (!device) {
-    fallback('还没有配对的电脑，请先在精简版完成配对。');
+    const lost = storageLossNotice({
+      paired: false,
+      marked: await withTimeout(hadPairing(), STORAGE_TIMEOUT_MS, false),
+      standalone: isStandalone(),
+    });
+    if (lost) fallback(lost, '重新配对');
+    else fallback('还没有配对的电脑，请先在精简版完成配对。');
     return;
   }
   if (device.scope === 'read') {
@@ -168,6 +181,8 @@ async function main(): Promise<void> {
   // 记住桌面模式与所用设备：下次从主屏打开直接回到这里
   saveUiMode('desk');
   saveActiveDeviceId(device.pairId);
+  void requestPersistence();
+  void syncPairedMark(true);
   const urlSession = parseSessionFromSearch(location.search);
   if (params.has('session')) params.delete('session');
   if (params.get('device') !== device.pairId) {
@@ -586,16 +601,17 @@ async function main(): Promise<void> {
   }, 60_000);
 
   /** 首次（或桌面升级后）要经隧道下载整套界面：盖着启动画面并报进度，iframe 加载完再露出 */
-  const mountFresh = (total?: number): void => {
+  const mountFresh = (total: number | undefined, cacheLost: boolean): void => {
     const iframe = mount('main');
     const started = tunnel.downloadedBytes;
+    const reason = cacheLost
+      ? '本地缓存不在了（可能被系统清理），正在重新下载界面…'
+      : '正在下载完整版界面（首次或桌面端升级后需要）…';
     const timer = setInterval(() => {
       // 中继给的是原始字节，与按隧道帧估的总量不同口径：走了中继就只显示已下载
       const fromRelay = relay?.bytes ?? 0;
       const done = tunnel.downloadedBytes - started + fromRelay;
-      progress(
-        `正在下载完整版界面（首次或桌面端升级后需要）… ${downloadProgress(done, fromRelay ? undefined : total)}`
-      );
+      progress(`${reason} ${downloadProgress(done, fromRelay ? undefined : total)}`);
     }, 500);
     iframe.addEventListener(
       'load',
@@ -690,7 +706,7 @@ async function main(): Promise<void> {
   loading = true;
   $('splash').style.display = 'flex';
   $('frames').style.visibility = 'hidden';
-  mountFresh(download);
+  mountFresh(download, cached?.version === current.version);
 }
 
 void main().catch((error) => splash(`启动失败：${error instanceof Error ? error.message : error}`));
