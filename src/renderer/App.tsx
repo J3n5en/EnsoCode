@@ -45,6 +45,7 @@ import { OauthCredentialBootstrap } from '@/components/oauth/OauthCredentialBoot
 import { Onboarding } from '@/components/onboarding/Onboarding';
 import { WorkspaceSearchDialog } from '@/components/search/WorkspaceSearchDialog';
 import { SecretaryWelcome } from '@/components/secretary/SecretaryWelcome';
+import { SessionPeekDialog } from '@/components/secretary/SessionPeekDialog';
 import { SidePanel } from '@/components/sidepanel/SidePanel';
 import {
   AlertDialog,
@@ -707,6 +708,7 @@ export default function App() {
       </div>
       {settingsHydrated && !onboarded && !window.electronAPI.remote && <Onboarding />}
       <WorkspaceSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <SessionPeekDialog />
       <PairNodeDialog
         open={pairDialogOpen}
         onOpenChange={useRemoteNodesStore.getState().setPairDialogOpen}

@@ -184,10 +184,34 @@ describe('SecretaryRunningOriginsCard', () => {
       '多秘书功能1活 c1',
       '[Unknown source]1活 c2',
     ]);
-    expect(rows[1]?.querySelector('button')).toBeNull();
-    const jump = rows[0]?.querySelector('button') as unknown as HTMLElement;
+    expect(rows[1]?.firstElementChild?.tagName).toBe('DIV');
+    const jump = rows[0]?.firstElementChild as unknown as HTMLElement;
     act(() => jump.click());
     expect(onSelect).toHaveBeenCalledWith('s1');
     expect(onOuter).not.toHaveBeenCalled();
+  });
+
+  it('点在跑的某件弹窗看它，不跳转', async () => {
+    const { useSessionPeek } = await import('@/stores/sessionPeek');
+    useSessionPeek.setState({ conversationId: null, back: null });
+    const onSelect = vi.fn();
+    const { groups } = runningByOrigin(board({ running: [session('c1', 's1')] }), knownIds('s1'));
+    await act(async () =>
+      root.render(
+        <SecretaryRunningOriginsCard
+          label="1 running"
+          groups={groups}
+          titleOf={() => '多秘书功能'}
+          onSelect={onSelect}
+        />
+      )
+    );
+    const card = container.querySelector(
+      '[data-enso="secretary-running-origin-card"]'
+    ) as unknown as HTMLElement;
+    expect(card.textContent).toBe('活 c1');
+    act(() => card.click());
+    expect(useSessionPeek.getState().conversationId).toBe('c1');
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });
