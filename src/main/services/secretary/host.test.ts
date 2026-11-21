@@ -2423,4 +2423,146 @@ describe('派出会话完成后自动归档', () => {
     expect(h.state.rows.c3.archived).toBeUndefined();
     expect(h.state.rows.mine.archived).toBeUndefined();
   });
+
+  const runningTask = (overrides: Partial<ObservedTask> = {}): ObservedTask => ({
+    taskId: 't1',
+    status: 'running',
+    command: 'node host.mjs',
+    startedAt: 0,
+    ...overrides,
+  });
+  const held = (h: Harness) => h.state.audit.filter((entry) => entry.op === 'auto_archive_held');
+
+  it('goal-complete 时有任务在跑：不归档，记一条审计，同一批任务不重复记', () => {
+    const h = archiving({ tasks: { c1: [runningTask()] } });
+    complete(h, 1000);
+    h.host.tick(2000);
+    h.host.sweepAutoArchive(3000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    expect(held(h)).toHaveLength(1);
+    expect(held(h)[0]).toMatchObject({ targetId: 'c1', secretaryConversationId: 'sec1' });
+    expect(held(h)[0].detail).toContain('t1');
+  });
+
+  it.each([
+    ['常驻（跑了一个多小时）', { startedAt: -2 * 60 * MINUTE }],
+    ['标了保留', { kept: true as const }],
+    ['疑似闲置', { suspectedIdle: true as const }],
+    ['看门狗报进程不在、还没收尾', { alive: false }],
+  ])('只剩%s的任务也不归档', (_label, overrides) => {
+    const h = archiving({ tasks: { c1: [runningTask(overrides)] } });
+    complete(h, 1000);
+    h.host.tick(2000);
+    h.host.recover();
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    expect(held(h)).toHaveLength(1);
+  });
+
+  it('任务全部结束后再判断一次，那时才归档', () => {
+    const h = archiving({
+      tasks: { c1: [runningTask(), runningTask({ taskId: 't2', kept: true })] },
+    });
+    complete(h, 1000);
+    h.state.tasks.c1 = [runningTask({ status: 'done' }), runningTask({ taskId: 't2', kept: true })];
+    h.host.tick(2000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    h.state.tasks.c1 = [
+      runningTask({ status: 'done' }),
+      runningTask({ taskId: 't2', status: 'failed' }),
+    ];
+    h.host.tick(3000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 3000 });
+  });
+
+  it('worker 还没报上来任务表：启动补归档与切走都先不归档，报上来后再判断', () => {
+    const h = archiving();
+    let reported = false;
+    h.ports.tasksReported = () => reported;
+    complete(h, 1000);
+    h.host.recover();
+    h.host.sweepAutoArchive(1500);
+    h.host.tick(2000);
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    reported = true;
+    h.host.sweepAutoArchive(2500);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 2500 });
+  });
+
+  /** 已经被自动归档、但还有任务在跑的派出会话（升级前误收走的） */
+  function misarchived(tasks: ObservedTask[]) {
+    const h = archiving({ tasks: { c1: tasks } });
+    h.state.statuses.c1 = idle;
+    h.state.rows.c1 = { ...h.state.rows.c1, archived: true, archivedAt: 1000 };
+    h.state.file.dispatched.c1 = {
+      ...h.state.file.dispatched.c1,
+      lastState: 'idle',
+      lastResult: { kind: 'goal-complete', turn: 1, at: 900 },
+      autoArchivedAt: 1000,
+      autoArchiveResultAt: 900,
+    };
+    return h;
+  }
+
+  it('被误归档、仍有任务在跑：启动时恢复到活跃中并记审计，任务结束后再归档', () => {
+    const h = misarchived([runningTask({ kept: true })]);
+    h.state.now = 5000;
+    h.host.recover();
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    expect(h.state.file.dispatched.c1.autoArchivedAt).toBeUndefined();
+    const restored = h.state.audit.filter((entry) => entry.op === 'auto_unarchive');
+    expect(restored).toHaveLength(1);
+    expect(restored[0].detail).toContain('t1');
+    h.state.tasks.c1 = [runningTask({ status: 'done' })];
+    h.host.tick(6000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 6000 });
+  });
+
+  it('被误归档的会话：后台任务状态一变（没打开的会话也算）就恢复', () => {
+    const h = misarchived([]);
+    h.host.tick(2000);
+    expect(h.state.rows.c1.archived).toBe(true);
+    h.state.tasks.c1 = [runningTask()];
+    h.state.now = 3000;
+    h.host.onAgentEvent(
+      {
+        type: 'unopened-background-tasks',
+        sessionId: 'c1',
+        tasks: [],
+      } as unknown as RendererAgentEvent,
+      []
+    );
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    expect(h.state.audit.some((entry) => entry.op === 'auto_unarchive')).toBe(true);
+  });
+
+  it('worker 还没报上来任务表：不按空任务表恢复或收走', () => {
+    const h = misarchived([runningTask()]);
+    h.ports.tasksReported = () => false;
+    h.host.recover();
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 1000 });
+  });
+
+  it('用户手动归档的：有任务在跑也不自动恢复', () => {
+    const h = misarchived([runningTask()]);
+    delete h.state.file.dispatched.c1.autoArchivedAt;
+    h.state.rows.c1 = { ...h.state.rows.c1, archived: true, archivedAt: 700 };
+    h.host.recover();
+    h.host.tick(2000);
+    expect(h.state.rows.c1).toMatchObject({ archived: true, archivedAt: 700 });
+    expect(h.state.audit.some((entry) => entry.op === 'auto_unarchive')).toBe(false);
+  });
+
+  it('启动补归档跳过有任务在跑的会话', () => {
+    const h = archiving({ tasks: { c1: [runningTask({ kept: true })] } });
+    h.state.statuses.c1 = idle;
+    h.state.file.dispatched.c1 = {
+      ...h.state.file.dispatched.c1,
+      lastState: 'idle',
+      lastResult: { kind: 'goal-complete', turn: 1, at: 10 },
+    };
+    h.state.now = 9000;
+    h.host.recover();
+    expect(h.state.rows.c1.archived).toBeUndefined();
+    expect(held(h)).toHaveLength(1);
+  });
 });

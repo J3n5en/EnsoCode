@@ -450,34 +450,42 @@ function ModelRowContent({
     view.source.contextWindow === 'catalog' &&
     meta?.source === 'catalog-fallback';
   const name = model.label ?? model.id;
+  // 收缩优先级：来源小字（basis 0）先让出空间、从账号一端截断；模型名按自身宽度排，
+  // 小字收到 0 仍放不下才截断；上下文长度与 ✓ 不收缩。无小字时模型名占满剩余宽度。
+  const nameFlex = entryTag ? 'flex-initial' : 'flex-1';
   return (
     <>
       {pin && <ModelPinButton pin={pin} />}
       {showId ? (
-        <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
-          <span className="shrink-0 truncate" title={name}>
+        <span className={cn('flex min-w-0 items-baseline gap-1.5 overflow-hidden', nameFlex)}>
+          <span data-model-row-name className="min-w-0 truncate" title={name}>
             {name}
           </span>
           <span
             data-model-row-id={model.id}
             title={model.id}
-            className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground/70"
+            className="min-w-0 shrink-[999] truncate font-mono text-[10px] text-muted-foreground/70"
           >
             {model.id}
           </span>
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate" title={name}>
+        <span data-model-row-name className={cn('min-w-0 truncate', nameFlex)} title={name}>
           {name}
         </span>
       )}
       {entryTag && (
-        <span className="shrink-0 truncate text-[10px] text-muted-foreground/60" title={entryTag}>
+        <span
+          data-model-row-source
+          className="min-w-0 flex-1 truncate text-right text-[10px] text-muted-foreground/60"
+          title={entryTag}
+        >
           {entryTag}
         </span>
       )}
       {windowTokens !== undefined && (
         <span
+          data-model-row-context
           className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70"
           title={estimated ? t('Estimated context window (catalog fallback)') : t('Context window')}
         >
@@ -1325,7 +1333,7 @@ export function ModelPicker({
                 <div
                   ref={setNavList}
                   data-model-picker="nav-list"
-                  className="relative w-48 shrink-0 space-y-0.5 overflow-y-auto border-r bg-muted/15 p-1.5"
+                  className="relative w-36 shrink-0 space-y-0.5 overflow-y-auto border-r bg-muted/15 p-1.5 sm:w-48"
                 >
                   {view.showFavoritesNav && (
                     <button

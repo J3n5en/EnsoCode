@@ -112,4 +112,17 @@ describe('BackgroundTaskTracker', () => {
     expect(tracker.tasks('s3')).toEqual([]);
     expect(tracker.hasRunning()).toBe(false);
   });
+
+  it('worker 报完启动时的全量之前不算知道：标记后通知订阅者，每次换代都通知', () => {
+    const tracker = new BackgroundTaskTracker();
+    let notified = 0;
+    tracker.onReported(() => {
+      notified += 1;
+    });
+    expect(tracker.reported()).toBe(false);
+    tracker.markReported();
+    expect(tracker.reported()).toBe(true);
+    tracker.markReported();
+    expect(notified).toBe(2);
+  });
 });
