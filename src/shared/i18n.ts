@@ -3592,6 +3592,24 @@ export const zhTranslations: Record<string, string> = {
   'Bind a group or topic': '绑定群或话题',
   'The code works once. Press Start in a private chat with the bot, or send it in a group or forum topic to bind that place to this secretary instead.':
     '绑定码只能用一次。在与 bot 的私聊里点 Start，或在群、forum 话题里发送它，把那里绑定到这个秘书。',
+  'Your private chat with this bot already belongs to secretary "{{owner}}". One person has only one private chat with a bot, so bind this secretary to a group or forum topic below, or give it a different bot.':
+    '你和这个 bot 的私聊已经归秘书「{{owner}}」。同一个人和同一个 bot 只有一个私聊，所以请把这个秘书绑到下面的群或论坛话题，或者给它换一个 bot。',
+  'That group or topic already belongs to secretary "{{owner}}". Send the code in another group or topic.':
+    '那个群或话题已经归秘书「{{owner}}」。换一个群或话题发送绑定码。',
+  'The code expired. Generate a new one.': '绑定码已过期，请重新生成。',
+  'The bot got /start without the code. Open the bot with the button or QR code (the link carries the code), or send /start {{code}} yourself.':
+    'bot 收到了不带绑定码的 /start。请用按钮或二维码打开 bot（链接里带着码），或者手动发送 /start {{code}}。',
+  'Your private chat with this bot already belongs to secretary "{{owner}}". Bind this secretary to a group or forum topic instead.':
+    '你和这个 bot 的私聊已经归秘书「{{owner}}」：这个秘书请绑到群或论坛话题。',
+  'This code has expired': '绑定码已过期',
+  '@{{bot}} is shared by {{count}} secretaries': '@{{bot}} 由 {{count}} 个秘书共用',
+  'Each private chat, group or forum topic belongs to one secretary. A topic bound on its own wins over the whole group. Places nobody bound get no reply.':
+    '每个私聊、群或论坛话题只归一个秘书；单独绑定的话题优先于整群；没人绑定的地方不回话。',
+  'Private chat with @{{name}}': '与 @{{name}} 的私聊',
+  'this secretary': '本秘书',
+  'Telegram off': 'Telegram 已关',
+  'Nothing bound yet': '还没有绑定任何地方',
+  'taken by {{owner}}': '已归 {{owner}}',
   'Waiting for you': '等你回答',
   'Waiting on you': '需要你处理',
   'Open session': '打开会话',

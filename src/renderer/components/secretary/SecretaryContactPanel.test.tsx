@@ -334,3 +334,115 @@ describe('Telegram 群的论坛话题', () => {
     expect(container.querySelector('[data-enso="secretary-contact-scope-topics"]')).toBeNull();
   });
 });
+
+describe('多个秘书共用一个 bot', () => {
+  const shared: NonNullable<SecretaryContactState['telegram']['shared']> = [
+    { secretaryId: 'sec-b', name: '小 B', self: true, enabled: true, groups: [] },
+    {
+      secretaryId: 'default',
+      name: '爱酱',
+      self: false,
+      enabled: true,
+      privateChat: { id: 777, username: 'j3n5en' },
+      groups: [{ id: '-1001', title: '工作群', all: true, topics: [] }],
+    },
+  ];
+
+  function awaiting(
+    rejected?: NonNullable<SecretaryContactState['telegram']['bind']>['rejected'],
+    expiresAt = Date.now() + 5 * 60_000
+  ): SecretaryContactState {
+    const base = contactState([]);
+    return {
+      ...base,
+      telegram: {
+        ...base.telegram,
+        status: 'awaiting-start',
+        chat: undefined,
+        shared,
+        bind: {
+          code: '123456',
+          link: 'https://t.me/enso_bot?start=123456',
+          groupLink: 'https://t.me/enso_bot?startgroup=123456',
+          topicCommand: '/bind@enso_bot 123456',
+          expiresAt,
+          ...(rejected ? { rejected } : {}),
+        },
+      },
+    };
+  }
+
+  const text = (enso: string) =>
+    container.querySelector(`[data-enso="${enso}"]`)?.textContent ?? null;
+  const click = async (selector: string) => {
+    const target = container.querySelector(selector) as HTMLButtonElement | null;
+    if (!target) throw new Error(`missing ${selector}`);
+    await act(async () => {
+      target.click();
+    });
+  };
+
+  it('私聊已归别的秘书：等码时就提示改绑群或话题，给出群链接、话题命令和群列表，并列出共用情况', async () => {
+    state = awaiting();
+    await render('sec-b');
+    expect(text('secretary-contact-private-owned')).toContain('爱酱');
+    expect(
+      container.querySelector('[data-enso="secretary-contact-group-link"]')?.getAttribute('href')
+    ).toBe('https://t.me/enso_bot?startgroup=123456');
+    expect(text('secretary-contact-topic-command')).toBe('/bind@enso_bot 123456');
+    expect(groupsBox()).not.toBeNull();
+    const users = [...container.querySelectorAll('[data-enso="secretary-contact-shared-user"]')];
+    expect(users.map((user) => user.textContent)).toEqual([
+      expect.stringContaining('小 B'),
+      expect.stringContaining('Private chat with @j3n5en'),
+    ]);
+    expect(users[1]?.textContent).toContain('工作群 · Whole group');
+  });
+
+  it('发码被拒：写明原因（私聊归谁）而不是一直等', async () => {
+    state = awaiting({ reason: 'private-owned', owner: '爱酱' });
+    await render('sec-b');
+    expect(
+      container
+        .querySelector('[data-enso="secretary-contact-bind-rejected"]')
+        ?.getAttribute('data-reason')
+    ).toBe('private-owned');
+    expect(text('secretary-contact-bind-rejected')).toContain('爱酱');
+    expect(container.querySelector('[data-enso="secretary-contact-private-owned"]')).toBeNull();
+  });
+
+  it('码过期：显示已过期，「重新生成」成为主按钮', async () => {
+    state = awaiting(undefined, Date.now() - 1000);
+    await render('sec-b');
+    expect(container.querySelector('[data-enso="secretary-contact-code-expired"]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-enso="secretary-contact-regenerate"]')?.getAttribute('class')
+    ).toContain('bg-foreground');
+  });
+
+  it('勾话题：已单独归别的秘书的话题标出归属且不能勾', async () => {
+    state = contactState([{ id: '-1001', all: false, topics: [{ id: '9' }] }]);
+    contactTelegramTopics.mockResolvedValue({
+      ok: true,
+      forum: true,
+      topics: [{ id: '1' }, { id: '3', title: '插件开发', owner: '爱酱' }, { id: '9' }],
+    });
+    await render('sec-b');
+    await click('[data-enso="secretary-contact-group-topics"]');
+    const topics = [...container.querySelectorAll('[data-enso="secretary-contact-topic"]')];
+    expect(topics.map((topic) => topic.textContent)).toEqual([
+      'General (default topic)',
+      '插件开发 · taken by 爱酱',
+      'Topic #9',
+    ]);
+    expect(topics.map((topic) => topic.hasAttribute('disabled'))).toEqual([false, true, false]);
+  });
+
+  it('只绑了群和话题：头部不再显示空的 @', async () => {
+    const base = contactState([{ id: '-1002', all: true, topics: [] }]);
+    state = { ...base, telegram: { ...base.telegram, chat: undefined, shared } };
+    await render('sec-b');
+    expect(text('secretary-contact-bound')).toContain('Bound to groups and topics');
+    expect(container.querySelector('[data-enso="secretary-contact-shared"]')).not.toBeNull();
+  });
+});

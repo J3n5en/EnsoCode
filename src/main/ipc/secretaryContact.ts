@@ -26,7 +26,13 @@ import {
   type PluginContactBridgeHandlers,
 } from '../services/secretary/contact/plugins';
 import { ContactService, type ContactServicePorts } from '../services/secretary/contact/service';
-import { ContactStore, channelPrefs, contactClaims } from '../services/secretary/contact/store';
+import {
+  ContactStore,
+  channelPrefs,
+  contactClaims,
+  TELEGRAM_CHANNEL_ID,
+} from '../services/secretary/contact/store';
+import type { TelegramSibling } from '../services/secretary/contact/telegram';
 import { deliverToSecretary } from '../services/secretary/contact/wake';
 import { setContactMediaSender } from '../services/secretary/contactSend';
 import { buildDaily, dailyPortsFor } from '../services/secretary/daily';
@@ -193,6 +199,11 @@ function profileOf(ctx: SecretaryContext): SecretaryProfile | null {
   return new SecretaryStore(ctx.dir).profile();
 }
 
+/** 联系方式里称呼一个秘书：与界面一致，没起名的叫 Secretary */
+function nameOf(ctx: SecretaryContext): string {
+  return profileOf(ctx)?.name?.trim() || 'Secretary';
+}
+
 /** 同一 bot + chat + 话题已经属于别的秘书时，返回它的名字 */
 function routeConflictFor(claim: ContactRouteClaim): string | null {
   const claims = secretaryContexts()
@@ -201,7 +212,7 @@ function routeConflictFor(claim: ContactRouteClaim): string | null {
   const hit = findRouteConflict(claims, claim);
   if (!hit) return null;
   const owner = secretaryContexts().find((ctx) => ctx.id === hit.secretaryId);
-  return (owner && profileOf(owner)?.name) || hit.secretaryId;
+  return owner ? nameOf(owner) : hit.secretaryId;
 }
 
 /** 插件渠道已经在别的秘书那里打开了：一个渠道只归一个秘书 */
@@ -213,6 +224,21 @@ function channelOwnedElsewhere(selfId: string, channelId: string): string | null
     }
   }
   return null;
+}
+
+/** 别的秘书的联系方式：共用 bot 时沿用主人、合并见过的话题、在设置页列出各自认领了什么 */
+function contactSiblings(selfId: string): TelegramSibling[] {
+  return secretaryContexts()
+    .filter((ctx) => ctx.id !== selfId)
+    .map((ctx) => {
+      const file = new ContactStore(ctx.dir).file();
+      return {
+        secretaryId: ctx.id,
+        name: nameOf(ctx),
+        enabled: file.enabled && channelPrefs(file, TELEGRAM_CHANNEL_ID).enabled,
+        file,
+      };
+    });
 }
 
 export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryContacts {
@@ -259,7 +285,7 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       random: () => Math.random(),
       lang: () => replyLang(profileOf(ctx)),
       notifyMode: () => profileOf(ctx)?.notify ?? null,
-      secretaryName: () => profileOf(ctx)?.name ?? 'Secretary',
+      secretaryName: () => nameOf(ctx),
       secretaryConversationId: () => resolveTarget(delivery),
       // /last：读秘书会话的 jsonl 尾窗，按轮切好交回去；只读，不进会话
       recentTurns: async (rounds) => {
@@ -307,6 +333,7 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
       hub,
       secretaryId: ctx.id,
       routeConflict: routeConflictFor,
+      siblings: () => contactSiblings(ctx.id),
       channelOwnedElsewhere: (channelId) => channelOwnedElsewhere(ctx.id, channelId),
     };
 

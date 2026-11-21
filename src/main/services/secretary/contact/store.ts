@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { ContactRouteClaim } from '@shared/secretary/contact';
 import type {
+  SecretaryContactBindRejection,
   SecretaryContactBot,
   SecretaryContactChannelPrefs,
   SecretaryContactChat,
@@ -41,7 +42,12 @@ export interface ContactFile {
   /** getUpdates 的游标：先落盘再处理，重启不重放已经产生过副作用的更新 */
   pollOffset: number;
   /** 绑定向导中间态：码、过期时间与已经对不上的次数，绑完即清 */
-  bind?: { code: string; expiresAt: number; failures: number };
+  bind?: {
+    code: string;
+    expiresAt: number;
+    failures: number;
+    rejected?: SecretaryContactBindRejection;
+  };
   /** Telegram 群白名单（群 chatId）：空名单不收任何群；名单里的群也只认绑定的那个人 */
   telegramGroups: string[];
   /** 见过的群名，只给界面认群用；只记绑定的人或名单里的群发来的 */
@@ -116,6 +122,21 @@ export function emptyContactFile(): ContactFile {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const BIND_REJECTIONS: readonly SecretaryContactBindRejection['reason'][] = [
+  'private-owned',
+  'route-conflict',
+  'expired',
+  'missing-code',
+];
+
+function parseBindRejection(raw: unknown): SecretaryContactBindRejection | undefined {
+  if (!isRecord(raw)) return undefined;
+  const reason = BIND_REJECTIONS.find((item) => item === raw.reason);
+  if (!reason) return undefined;
+  const owner = typeof raw.owner === 'string' ? raw.owner.slice(0, 80) : '';
+  return { reason, ...(owner ? { owner } : {}) };
 }
 
 function positiveInt(value: unknown): number | undefined {
@@ -453,6 +474,9 @@ export function parseContactFile(raw: unknown): ContactFile {
           code: raw.bind.code,
           expiresAt: raw.bind.expiresAt,
           failures: typeof raw.bind.failures === 'number' ? raw.bind.failures : 0,
+          ...(parseBindRejection(raw.bind.rejected)
+            ? { rejected: parseBindRejection(raw.bind.rejected) }
+            : {}),
         }
       : undefined
     : undefined;
