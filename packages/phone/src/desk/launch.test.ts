@@ -5,6 +5,7 @@ import {
   clearBootRetry,
   deskBase,
   downloadProgress,
+  handleBootStuck,
   loadDeskMeta,
   markBuildReady,
   saveDeskMeta,
@@ -81,6 +82,37 @@ describe('desk launch meta', () => {
     expect(bootRetry(storage)).toBe(false);
     clearBootRetry(storage);
     expect(bootRetry(storage)).toBe(true);
+  });
+
+  it('启动卡住：先说明卡在哪并重载；重载本身也卡住时改提示划掉重开；第二次卡住不再重载', () => {
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    const shown: string[] = [];
+    const timers: Array<() => void> = [];
+    let reloads = 0;
+    const deps = {
+      storage,
+      show: (text: string) => void shown.push(text),
+      reload: () => void reloads++,
+      later: (fn: () => void) => void timers.push(fn),
+    };
+
+    handleBootStuck('注册 Service Worker', deps);
+    expect(reloads).toBe(1);
+    expect(shown.at(-1)).toContain('注册 Service Worker');
+    expect(shown.at(-1)).not.toContain('划掉');
+    timers[0]?.();
+    expect(shown.at(-1)).toContain('注册 Service Worker');
+    expect(shown.at(-1)).toContain('划掉');
+
+    handleBootStuck('启动隧道', deps);
+    expect(reloads).toBe(1);
+    expect(shown.at(-1)).toContain('启动隧道');
+    expect(shown.at(-1)).toContain('划掉');
   });
 });
 

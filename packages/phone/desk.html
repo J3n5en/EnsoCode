@@ -35,20 +35,42 @@
         } catch {}
       })();
     </script>
-    <!-- iOS 后台久了 SW 偶发卡死，连入口脚本都加载不出来：脚本没起跑就整页重载一次（标记与 launch.ts bootRetry 共用） -->
+    <!-- 入口脚本 10s 没起跑：写明原因（SW 是否响应）再重载一次；重载也挂住时改提示划掉重开。逻辑同 launch.ts handleBootStuck -->
     <script>
-      setTimeout(() => {
+      setTimeout(async () => {
         if (window.__deskBoot) return;
+        const show = (t) => {
+          const el = document.getElementById('splash-text');
+          if (el) el.textContent = t;
+        };
+        const sw = navigator.serviceWorker?.controller;
+        const swState = !sw
+          ? '无 Service Worker'
+          : await new Promise((resolve) => {
+              const channel = new MessageChannel();
+              const timer = setTimeout(() => resolve('Service Worker 无响应'), 2000);
+              channel.port1.onmessage = () => {
+                clearTimeout(timer);
+                resolve('Service Worker 正常');
+              };
+              sw.postMessage({ type: 'desk-ping' }, [channel.port2]);
+            });
+        if (window.__deskBoot) return;
+        const stage = `入口脚本没加载出来，${swState}`;
+        const hint = '请从后台划掉 EnsoCode 再打开。';
+        let retry = false;
         try {
-          if (!sessionStorage.getItem('enso-desk-boot-retry')) {
-            sessionStorage.setItem('enso-desk-boot-retry', '1');
-            location.reload();
-            return;
-          }
+          retry = !sessionStorage.getItem('enso-desk-boot-retry');
+          if (retry) sessionStorage.setItem('enso-desk-boot-retry', '1');
         } catch {}
-        const el = document.getElementById('splash-text');
-        if (el) el.textContent = '启动卡住了：浏览器没有响应（iOS 偶发）。请从后台划掉 EnsoCode 再打开。';
-      }, 12000);
+        if (!retry) {
+          show(`启动卡住了（${stage}）。${hint}`);
+          return;
+        }
+        show(`启动卡住（${stage}），正在重新加载…`);
+        setTimeout(() => show(`重新加载也卡住了（${stage}）。${hint}`), 8000);
+        location.reload();
+      }, 10000);
     </script>
     <style>
       html,
