@@ -321,6 +321,29 @@ describe('session_list', () => {
     ]);
   });
 
+  it('会话行上的目标随列表带出：状态与文本', async () => {
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({
+          withGoal: row({
+            lastActiveAt: 300,
+            goal: { text: '把构建修好', status: 'active', autoTurns: 2, noProgressRuns: 0 },
+          }),
+          plain: row({ lastActiveAt: 200 }),
+        }),
+        conversations: () => [conversation('withGoal', 'p1'), conversation('plain', 'p1')],
+      })
+    );
+    const result = await run(handlers.session_list);
+    const sessions = result.sessions as { conversationId: string; goal?: unknown }[];
+    expect(sessions.find((entry) => entry.conversationId === 'withGoal')?.goal).toEqual({
+      text: '把构建修好',
+      status: 'active',
+    });
+    expect(sessions.find((entry) => entry.conversationId === 'plain')).not.toHaveProperty('goal');
+  });
+
   it('limit 截断，projectId 过滤', async () => {
     const handlers = createSecretaryReadHandlers(
       makePorts({

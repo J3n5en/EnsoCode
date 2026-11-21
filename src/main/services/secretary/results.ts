@@ -33,7 +33,14 @@ export { ACTIVITY_LIMIT } from '@shared/secretary/feed';
 
 /** worker 事件里与结果分类有关的部分；其余事件只刷新活动时间 */
 export type ResultEvent =
-  | { type: 'turn-completed'; aborted?: boolean; goalStatus?: string; goalCompleted?: boolean }
+  | {
+      type: 'turn-completed';
+      aborted?: boolean;
+      goalStatus?: string;
+      goalCompleted?: boolean;
+      /** 整轮没有任何文字回复、最后一步是工具调用：静默收工，按停滞报 */
+      silentFinish?: { name: string; ok: boolean };
+    }
   | { type: 'turn-failed'; error?: string }
   /** 应用退出（含安装更新）打断的一轮：不是失败，也不是用户主动中止 */
   | { type: 'turn-interrupted'; at: number; kind: 'quit' | 'update' }
@@ -69,6 +76,8 @@ export function classify(
       // 用户亲手中断的轮次不是结果
       if (event.aborted) return null;
       if (status.pendingAsks + status.pendingApprovals > 0) return 'needs-user';
+      // 静默收工：最后一步是工具调用、助手一个字都没写。先于目标判定，带目标的也要报
+      if (event.silentFinish) return 'stalled';
       if (event.goalCompleted) return 'goal-complete';
       // 目标是否还在只看会话行：派出记录里的 goal 是派出时的初始目标文本，目标完成后仍留着
       if (event.goalStatus === undefined) return 'turn-ended';
@@ -138,6 +147,11 @@ const IMMEDIATE_RESULTS: ReadonlySet<string> = new Set<SecretaryResultKind>([
 
 export function skipsUpdateWindow(kind: SecretaryResultKind): boolean {
   return IMMEDIATE_RESULTS.has(kind);
+}
+
+/** 静默收工的回传正文：点名最后一个工具和它是不是成功 */
+export function silentFinishDetail(tool: { name: string; ok: boolean }): string {
+  return `一轮结束时没有任何文字回复，最后一步是工具 ${tool.name}（${tool.ok ? '成功' : '失败'}）`;
 }
 
 /** 有需要你处理或失败时整批立刻走；否则只投已经到点的 */

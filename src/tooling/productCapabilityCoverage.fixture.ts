@@ -560,7 +560,13 @@ export const IPC_PRODUCT_COVERAGE = {
   WINDOW_MAXIMIZED_CHANGED: excluded('Renderer window-state event transport.'),
   WINDOW_FULLSCREEN_CHANGED: excluded('Renderer fullscreen-state event transport.'),
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: excluded('macOS title-bar implementation detail.'),
+  WINDOW_REFRESH_DRAG_REGIONS: excluded(
+    'macOS window-shape refresh after a layout change; not a user product action.'
+  ),
   WINDOW_OPEN_SETTINGS: surfaces('window.open-settings'),
+  WINDOW_TOGGLE_SIDEBAR: excluded(
+    'Main-to-renderer transport for the macOS View menu; the toggle itself stays in the renderer.'
+  ),
   SETTINGS_DEEP_LINK: excluded('Settings window deep-link transport.'),
   SETTINGS_DEEP_LINK_CONSUME: excluded('Settings window deep-link handshake.'),
   WINDOW_POPUP_MENU: excluded('Native application menu popup; renderer chrome only.'),

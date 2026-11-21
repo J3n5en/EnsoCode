@@ -174,6 +174,8 @@ export function parseProfile(value: unknown): SecretaryProfile | null {
     maxRunningDispatches:
       clampInt(value.maxRunningDispatches, MIN_RUNNING_DISPATCHES, MAX_RUNNING_DISPATCHES) ?? 3,
     patrolEnabled: flag(value.patrolEnabled, true),
+    // 缺省关且不落盘：直接删除是用户显式打开的行为，旧档案不能因为缺字段就跳过确认
+    ...(value.cleanupSkipConfirm === true ? { cleanupSkipConfirm: true } : {}),
     replyLanguage: oneOf(value.replyLanguage, REPLY_LANGUAGES, 'ui'),
     style: oneOf(value.style, STYLES, 'concise'),
     notify: oneOf(value.notify, NOTIFY_MODES, 'needs-user'),
@@ -285,6 +287,11 @@ export function parseProfileDraft(value: unknown): ProfileDraftResult {
     if (typeof value.patrolEnabled !== 'boolean')
       return { ok: false, error: 'invalid patrolEnabled' };
     draft.patrolEnabled = value.patrolEnabled;
+  }
+  if (value.cleanupSkipConfirm !== undefined) {
+    if (typeof value.cleanupSkipConfirm !== 'boolean')
+      return { ok: false, error: 'invalid cleanupSkipConfirm' };
+    draft.cleanupSkipConfirm = value.cleanupSkipConfirm;
   }
   if (value.addressAs !== undefined) {
     if (value.addressAs === null) draft.addressAs = null;
@@ -545,6 +552,8 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (autoArchivedAt !== undefined) record.autoArchivedAt = autoArchivedAt;
   const autoArchiveResultAt = time(value.autoArchiveResultAt);
   if (autoArchiveResultAt !== undefined) record.autoArchiveResultAt = autoArchiveResultAt;
+  const sentAt = time(value.sentAt);
+  if (sentAt !== undefined) record.sentAt = sentAt;
   if (
     isObject(value.patrol) &&
     PATROL_REASONS.includes(value.patrol.reason as PatrolReason) &&

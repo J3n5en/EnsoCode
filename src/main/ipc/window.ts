@@ -12,6 +12,7 @@ import {
   sendToWindow,
   TRAFFIC_LIGHT_POSITION,
 } from '../windows/createAppWindow';
+import { shouldRefreshDragRegions } from '../windows/dragRegionRefresh';
 import { focusMainWindow } from '../windows/MainWindow';
 import { openSettingsWindow } from '../windows/SettingsWindow';
 import { parseOpenSettingsRequest } from './searchAnything';
@@ -146,6 +147,19 @@ export function registerWindowHandlers(): void {
     if (visible) {
       win.setWindowButtonPosition(TRAFFIC_LIGHT_POSITION);
     }
+  });
+
+  // macOS 透明窗口的点击形状按已绘制内容缓存。侧栏折叠动画把顶栏按钮移进
+  // 红绿灯右侧后，命中区可能停在旧位置，按钮点上去没有任何反应。
+  ipcMain.handle(IPC_CHANNELS.WINDOW_REFRESH_DRAG_REGIONS, (event) => {
+    const win = senderWindow(event);
+    if (
+      !win ||
+      !shouldRefreshDragRegions(process.platform, event.sender.id, getWindowWebContents(win).id)
+    ) {
+      return;
+    }
+    win.invalidateShadow();
   });
 
   ipcMain.handle(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, (_event, raw: unknown) => {

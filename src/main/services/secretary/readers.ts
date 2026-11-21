@@ -89,6 +89,8 @@ interface ListedSession {
   title: string;
   lastActiveAt: number;
   sessionFile?: string;
+  /** 会话行上的目标：与 session_create 挂的是同一种，巡检按它判定 */
+  goal?: { text: string; status: string };
 }
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
@@ -173,12 +175,14 @@ async function collect(ports: SecretaryReadPorts): Promise<{
     if (authority?.kind !== 'root' || authority.bot) continue;
     if (authority.projectId !== projectId) continue;
     const sessionFile = typeof row.sessionFile === 'string' ? row.sessionFile : undefined;
+    const goal = listedGoal(row.goal);
     sessions.push({
       conversationId,
       projectId,
       title: redactSecrets(typeof row.title === 'string' ? row.title : ''),
       lastActiveAt: timestamp(row.lastActiveAt) ?? timestamp(row.createdAt) ?? 0,
       ...(sessionFile ? { sessionFile } : {}),
+      ...(goal ? { goal } : {}),
     });
   }
   sessions.sort(
@@ -187,6 +191,15 @@ async function collect(ports: SecretaryReadPorts): Promise<{
       left.conversationId.localeCompare(right.conversationId)
   );
   return { projects, sessions };
+}
+
+/** 会话行上的目标：只取文本与状态，计数与指纹不外泄 */
+function listedGoal(value: unknown): { text: string; status: string } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const goal = value as Record<string, unknown>;
+  if (typeof goal.text !== 'string' || !goal.text.trim()) return undefined;
+  if (typeof goal.status !== 'string') return undefined;
+  return { text: goal.text, status: goal.status };
 }
 
 function projectKind(project: ProjectAuthority): 'local' | 'ssh' {
@@ -316,6 +329,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
           state: sessionState(session, status),
           pending: { approvals: status.pendingApprovals, asks: status.pendingAsks },
           lastActiveAt: session.lastActiveAt,
+          ...(session.goal ? { goal: session.goal } : {}),
         });
       }
       return { ok: true, result: { sessions: rows } };

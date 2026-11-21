@@ -213,6 +213,9 @@ function ProfileProposalCard({
         <span>{t('Up to {{n}} at a time', { n: draft.maxRunningDispatches ?? 3 })}</span>
         <span aria-hidden>·</span>
         <span>{t(draft.patrolEnabled === false ? 'Patrol off' : 'Patrol on')}</span>
+        <span>
+          {t(draft.cleanupSkipConfirm ? 'Cleanup without confirmation' : 'Cleanup asks first')}
+        </span>
       </div>
       {editing ? (
         <div className="mt-2 border-t border-border/60 pt-2">

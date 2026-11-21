@@ -26,6 +26,11 @@ export interface SecretaryProfile {
   maxRunningDispatches: number;
   /** 自动巡检：有进行中的会话时按默认间隔检查、每小时扫一次遗留后台任务，只在发现异常时推一条 */
   patrolEnabled: boolean;
+  /**
+   * 清理不用确认：cleanup_apply 直接删除，不再弹确认卡。
+   * 缺省（字段不存在）视为关；能删什么不变，只省掉确认这一步。
+   */
+  cleanupSkipConfirm?: boolean;
   addressAs?: string;
   replyLanguage: 'ui' | 'zh' | 'en';
   style: 'concise' | 'detailed';
@@ -388,6 +393,12 @@ export interface DispatchRecord {
   autoArchiveResultAt?: number;
   /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
   patrol?: { reason: PatrolReason; turn: number; at: number };
+  /**
+   * 秘书最近一次发消息（session_send）的时间：发过之后这一轮一直没有可见回复
+   * （没有新的助手文字、也没有新的工具调用）时，巡检按空闲阈值兜底报停住。
+   * 有了可见回复就清掉。
+   */
+  sentAt?: number;
 }
 
 export type SecretaryUpdate = {

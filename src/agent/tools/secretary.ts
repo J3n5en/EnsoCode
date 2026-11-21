@@ -87,7 +87,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
     },
   },
   session_send: {
-    keys: ['conversationId', 'message', 'mode', 'attachments'],
+    keys: ['conversationId', 'message', 'mode', 'attachments', 'goal'],
     arrays: ['attachments'],
     aliases: {
       sessionId: 'conversationId',
@@ -219,6 +219,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'visibleProjectIds',
       'maxRunningDispatches',
       'patrolEnabled',
+      'cleanupSkipConfirm',
       'addressAs',
       'replyLanguage',
       'style',
@@ -485,7 +486,7 @@ const SCHEMAS: Record<
   },
   session_send: {
     description:
-      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it.',
+      'Send a message to a session you dispatched, one the user handed over to you, or one whose project is in your takeover scope. mode "queue" (default) queues behind the current turn; mode "steer" is injected as soon as the current tool call ends, without waiting for the turn to finish, and starts a new turn when the session is idle. Refused while the session waits for the user, in both modes. A session reached through the scope starts reporting results to you only after this call. attachments forwards images by path instead of describing them: the target session opens them itself with image_view, so pass the screenshot the user sent rather than your own words about it. Pass goal when the session already reported goal-complete or never had a goal: the new goal is attached and the session keeps running until it is done or blocked, so the patrol watches it. Refused while its current goal is still unfinished — a live goal is never replaced.',
     parameters: object(
       {
         conversationId: id('Target session id'),
@@ -495,6 +496,13 @@ const SCHEMAS: Record<
           enum: [...SECRETARY_SEND_MODES],
           description:
             'queue (default): wait behind the current turn. steer: cut in at the next tool boundary to change priority or correct direction.',
+        },
+        goal: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4000,
+          description:
+            'Optional: a new goal, only when the session already reported goal-complete or has no goal. The session then keeps running until the goal is done or blocked, and the patrol watches it. Refused while its current goal is still unfinished.',
         },
         attachments: {
           type: 'array',
@@ -679,7 +687,7 @@ const SCHEMAS: Record<
   },
   cleanup_apply: {
     description:
-      'Ask the user to confirm deleting the given cleanup_list ids. Nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. Pass ids from cleanup_list (the compact summary ids work as they are), or all: true to clean every item that is cleanable right now without collecting ids yourself. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted. Tell the user which card is waiting and do not retry the same call.',
+      'Delete the given cleanup_list ids. When this secretary\'s "Clean up without asking" setting is off (the default), nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. When that setting is on, the same deletions happen immediately with no card: the result is { status: "applied", total, deleted, archived, skipped, items }, where each item has id, kind, name and result (deleted, archived or skipped) plus reason when it was skipped, and your reply must list what was deleted, archived and skipped. Pass ids from cleanup_list (the compact summary ids work as they are), or all: true to clean every item that is cleanable right now without collecting ids yourself. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason and nothing is deleted. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted.',
     parameters: object({
       ids: {
         type: 'array',
@@ -691,7 +699,7 @@ const SCHEMAS: Record<
       all: {
         type: 'boolean',
         description:
-          'Optional: clean every item that is cleanable right now instead of passing ids. Still opens the confirmation card. Refused when more than 100 items are cleanable.',
+          'Optional: clean every item that is cleanable right now instead of passing ids. With the setting off it still opens the confirmation card; with it on it deletes them immediately. Refused when more than 100 items are cleanable.',
       },
       projectId: id('Optional with all: only this project'),
     }),
@@ -845,6 +853,11 @@ const SCHEMAS: Record<
         type: 'boolean',
         description:
           'Watch running sessions automatically and report only anomalies, including background tasks left running in finished sessions. On by default.',
+      },
+      cleanupSkipConfirm: {
+        type: 'boolean',
+        description:
+          'Clean up without asking: cleanup_apply deletes immediately instead of opening a confirmation card. Off by default. It only skips the confirmation; unmerged branches, branches in use, feat/secretary-agent, main, the current branch and worktrees with uncommitted changes are still refused or skipped. Sessions are archived, never deleted.',
       },
       addressAs: { type: 'string', minLength: 1, maxLength: 64 },
       replyLanguage: { type: 'string', enum: ['ui', 'zh', 'en'] },

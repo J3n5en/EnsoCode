@@ -11,8 +11,15 @@ import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
-import { PHONE_PUSH_ENABLED_KEY, pushAvailability, subscribePush, unsubscribePush } from '../push';
+import {
+  isStandalone,
+  PHONE_PUSH_ENABLED_KEY,
+  pushAvailability,
+  subscribePush,
+  unsubscribePush,
+} from '../push';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
+import { hadPairing, requestPersistence, storageLossNotice, syncPairedMark } from '../storageGuard';
 import { PHONE_URL, saveUiMode } from '../uiMode';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
@@ -42,11 +49,13 @@ import {
   loadReads,
   loadSnapshot,
   mountSnapshot,
+  offlineSnapshotNote,
   pruneSnapshots,
   saveReads,
   saveSnapshot,
 } from './snapshot';
 import { type DeskAsset, type DeskFrame, DeskTunnel } from './tunnel';
+import { ensureDeskWorker } from './worker';
 
 const DESK_CACHE_PREFIX = 'enso-desk-';
 const META_TIMEOUT_MS = 25_000;
@@ -86,9 +95,9 @@ function revealFrames(): void {
 }
 
 /** 回退手机版：记住的模式改回 phone，下次启动不再跳进来 */
-function fallback(html: string): void {
+function fallback(html: string, link = '返回精简版'): void {
   saveUiMode('phone');
-  splash(`${html}<a href="${PHONE_URL}">返回精简版</a>`);
+  splash(`${html}<a href="${PHONE_URL}">${link}</a>`);
   stopped = true;
 }
 
@@ -110,6 +119,8 @@ const LOADING_TEXT: Partial<Record<ConnState, string>> = {
 
 /** 正盖着上次的界面快照：在线时提示还在同步、暂不能操作 */
 let syncing = false;
+/** 盖着的快照是什么时候存的（旧快照没有记录） */
+let coverSavedAt: number | null = null;
 /** 已在线但 renderer 还没续上（回前台换链后）：别让界面看着像卡死 */
 let resuming = false;
 let lastState: ConnState = 'connecting';
@@ -124,9 +135,11 @@ function renderStatus(): void {
           ? '正在恢复连接…'
           : ''
       : STATE_TEXT[lastState];
-  el.textContent = text;
+  const shown =
+    lastState === 'host-offline' && syncing ? offlineSnapshotNote(coverSavedAt, new Date()) : text;
+  el.textContent = shown;
   // 启动画面已在说明进度时不再叠一个状态胶囊
-  el.style.display = text && !loading ? 'block' : 'none';
+  el.style.display = shown && !loading ? 'block' : 'none';
 }
 
 function showState(state: ConnState): void {
@@ -138,49 +151,6 @@ function showState(state: ConnState): void {
     splash(`配对已失效，请回到<a href="${PHONE_URL}">精简版</a>重新配对。`);
   if (state === 'replaced')
     splash(`已在其他页面打开，关掉那个页面或回到<a href="${PHONE_URL}">精简版</a>重连。`);
-}
-
-/** SW 需要能代理 /desk/* ：旧版 SW 没有 fetch 处理，先确保新版接管本页 */
-async function ensureDeskWorker(onStage: (stage: string) => void): Promise<void> {
-  onStage('注册 Service Worker');
-  const registration = await withTimeout(
-    navigator.serviceWorker.register('/sw.js'),
-    STORAGE_TIMEOUT_MS * 4,
-    null
-  );
-  if (!registration) throw new Error('service worker unavailable');
-  onStage('等待 Service Worker 响应');
-  const ping = () =>
-    new Promise<boolean>((resolve) => {
-      const controller = navigator.serviceWorker.controller;
-      if (!controller) {
-        resolve(false);
-        return;
-      }
-      const channel = new MessageChannel();
-      const timer = setTimeout(() => resolve(false), 1500);
-      channel.port1.onmessage = (event) => {
-        clearTimeout(timer);
-        resolve(event.data?.desk === 1);
-      };
-      controller.postMessage({ type: 'desk-ping' }, [channel.port2]);
-    });
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (await ping()) return;
-    await withTimeout(registration.update(), STORAGE_TIMEOUT_MS * 2, undefined);
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, 3000);
-      navigator.serviceWorker.addEventListener(
-        'controllerchange',
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true }
-      );
-    });
-  }
-  throw new Error('service worker unavailable');
 }
 
 async function main(): Promise<void> {
@@ -195,7 +165,13 @@ async function main(): Promise<void> {
     devices.find((d) => d.pairId === params.get('device')) ??
     pickActive(devices, loadActiveDeviceId());
   if (!device) {
-    fallback('还没有配对的电脑，请先在精简版完成配对。');
+    const lost = storageLossNotice({
+      paired: false,
+      marked: await withTimeout(hadPairing(), STORAGE_TIMEOUT_MS, false),
+      standalone: isStandalone(),
+    });
+    if (lost) fallback(lost, '重新配对');
+    else fallback('还没有配对的电脑，请先在精简版完成配对。');
     return;
   }
   if (device.scope === 'read') {
@@ -205,6 +181,8 @@ async function main(): Promise<void> {
   // 记住桌面模式与所用设备：下次从主屏打开直接回到这里
   saveUiMode('desk');
   saveActiveDeviceId(device.pairId);
+  void requestPersistence();
+  void syncPairedMark(true);
   const urlSession = parseSessionFromSearch(location.search);
   if (params.has('session')) params.delete('session');
   if (params.get('device') !== device.pairId) {
@@ -226,7 +204,7 @@ async function main(): Promise<void> {
   const launchSessionId =
     urlSession ?? (await withTimeout(takeStashedSessionId(), STORAGE_TIMEOUT_MS, null));
 
-  await ensureDeskWorker((stage) => {
+  await ensureDeskWorker(navigator.serviceWorker, (stage) => {
     bootStage = stage;
   });
   bootStage = '启动隧道';
@@ -579,6 +557,7 @@ async function main(): Promise<void> {
       });
     }
     syncing = true;
+    coverSavedAt = saved.savedAt;
     renderStatus();
     const step = createSnapshotTracker(Date.now(), saved.chars);
     snapshotTimer = setInterval(() => {
@@ -594,6 +573,7 @@ async function main(): Promise<void> {
         liveLoading: Boolean(
           iframes.main?.contentDocument?.querySelector('[data-timeline-loading]')
         ),
+        hostOnline: lastState === 'online',
       });
       if (!ready) return;
       dropSnapshot();
@@ -621,16 +601,17 @@ async function main(): Promise<void> {
   }, 60_000);
 
   /** 首次（或桌面升级后）要经隧道下载整套界面：盖着启动画面并报进度，iframe 加载完再露出 */
-  const mountFresh = (total?: number): void => {
+  const mountFresh = (total: number | undefined, cacheLost: boolean): void => {
     const iframe = mount('main');
     const started = tunnel.downloadedBytes;
+    const reason = cacheLost
+      ? '本地缓存不在了（可能被系统清理），正在重新下载界面…'
+      : '正在下载完整版界面（首次或桌面端升级后需要）…';
     const timer = setInterval(() => {
       // 中继给的是原始字节，与按隧道帧估的总量不同口径：走了中继就只显示已下载
       const fromRelay = relay?.bytes ?? 0;
       const done = tunnel.downloadedBytes - started + fromRelay;
-      progress(
-        `正在下载完整版界面（首次或桌面端升级后需要）… ${downloadProgress(done, fromRelay ? undefined : total)}`
-      );
+      progress(`${reason} ${downloadProgress(done, fromRelay ? undefined : total)}`);
     }, 500);
     iframe.addEventListener(
       'load',
@@ -725,7 +706,7 @@ async function main(): Promise<void> {
   loading = true;
   $('splash').style.display = 'flex';
   $('frames').style.visibility = 'hidden';
-  mountFresh(download);
+  mountFresh(download, cached?.version === current.version);
 }
 
 void main().catch((error) => splash(`启动失败：${error instanceof Error ? error.message : error}`));

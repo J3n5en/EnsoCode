@@ -239,6 +239,11 @@ const driverPorts: DispatchDriverPorts = {
 };
 
 let driver: DispatchDriver | null = null;
+
+/** 派发模块挂目标用：驱动者在注册 handler 时才建好，不能静态依赖 */
+export function getDispatchDriver(): DispatchDriver | null {
+  return driver;
+}
 let contacts: SecretaryContacts | null = null;
 /** 每个秘书一个回传宿主：各自的定时器、巡检、投递槽位与定时任务 */
 const hosts = new Map<string, SecretaryHost>();

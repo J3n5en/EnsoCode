@@ -241,6 +241,13 @@ export function SecretaryProfileForm({
         checked={draft.patrolEnabled ?? true}
         onChange={(patrolEnabled) => patch({ patrolEnabled })}
       />
+      <SwitchField
+        enso="secretary-form-cleanup-skip-confirm"
+        label="Clean up without asking"
+        hint="Off by default. When on, this secretary's cleanup deletes immediately, with no confirmation card: merged local branches and their worktrees. Sessions are only archived, never deleted. Unmerged branches, branches in use, feat/secretary-agent, main, the current branch and worktrees with uncommitted changes are still refused or skipped."
+        checked={draft.cleanupSkipConfirm ?? false}
+        onChange={(cleanupSkipConfirm) => patch({ cleanupSkipConfirm })}
+      />
 
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
 

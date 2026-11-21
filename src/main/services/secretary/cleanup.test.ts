@@ -550,6 +550,150 @@ describe('cleanup_apply 走确认卡', () => {
   });
 });
 
+describe('cleanup_apply 不用确认', () => {
+  function direct(
+    skip: boolean | undefined,
+    repo: FakeRepo = baseRepo(),
+    busy: ReadonlySet<string> = new Set()
+  ) {
+    const made = makePorts({ repos: [repo] });
+    const proposals: CleanupItem[][] = [];
+    const handlers = createSecretaryCleanupHandlers({
+      ...made.ports,
+      busyWorktrees: () => busy,
+      ...(skip === undefined ? {} : { skipConfirm: () => skip }),
+      saveProposal: async (items) => {
+        proposals.push(items);
+        return { proposalId: 'proposal-1', reused: false };
+      },
+    });
+    return { ...made, handlers, proposals };
+  }
+  const ctx = { secretaryConversationId: 'sec-1' };
+  const deletes = (calls: string[]) => calls.filter((call) => call.includes('branch -D'));
+
+  it('开关缺省或关着时照旧落确认卡', async () => {
+    for (const skip of [undefined, false]) {
+      const h = direct(skip);
+      const result = await h.handlers.cleanup_apply(
+        { ids: [branchItemId(ROOT, 'feat/done')] },
+        ctx
+      );
+      expect(result.ok && result.result).toMatchObject({ status: 'awaiting_confirmation' });
+      expect(h.proposals.length).toBe(1);
+      expect(deletes(h.calls)).toEqual([]);
+    }
+  });
+
+  it('开着时不落卡，直接删并回报每一项的结果', async () => {
+    const h = direct(true);
+    const result = await h.handlers.cleanup_apply(
+      { ids: [branchItemId(ROOT, 'feat/done'), branchItemId(ROOT, 'chore/merged')] },
+      ctx
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toMatchObject({
+      status: 'applied',
+      total: 2,
+      deleted: 2,
+      skipped: 0,
+      items: [
+        { kind: 'branch', name: 'feat/done', result: 'deleted' },
+        { kind: 'branch', name: 'chore/merged', result: 'deleted' },
+      ],
+    });
+    expect(h.proposals).toEqual([]);
+    expect(deletes(h.calls).length).toBe(2);
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'cleanup_apply',
+      secretaryConversationId: 'sec-1',
+      ok: true,
+    });
+    expect(h.audits.at(-1)?.detail).toContain('without confirmation');
+    expect(h.audits.at(-1)?.detail).toContain('deleted 2');
+    expect(
+      h.audits.filter((entry) => entry.op === 'cleanup_branch').map((entry) => entry.targetId)
+    ).toEqual([branchItemId(ROOT, 'feat/done'), branchItemId(ROOT, 'chore/merged')]);
+  });
+
+  it('开着时未合入、当前分支与基线分支照样拒绝，什么都不删', async () => {
+    for (const name of ['feat/open', 'feat/secretary-agent', 'main']) {
+      const h = direct(true);
+      const result = await h.handlers.cleanup_apply({ ids: [branchItemId(ROOT, name)] }, ctx);
+      expect(result.ok).toBe(false);
+      expect(deletes(h.calls)).toEqual([]);
+      expect(h.audits.at(-1)).toMatchObject({ op: 'cleanup_apply', ok: false });
+    }
+    const current = direct(true, baseRepo({ current: 'feat/done' }));
+    const refused = await current.handlers.cleanup_apply(
+      { ids: [branchItemId(ROOT, 'feat/done')] },
+      ctx
+    );
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error).toContain('current-branch');
+    expect(deletes(current.calls)).toEqual([]);
+  });
+
+  it('开着时正在使用的 worktree 拒绝，刚列过清单也按现在的事实判', async () => {
+    const target = `${WT_ROOT}/wt-1`;
+    const busy = new Set<string>();
+    const h = direct(true, baseRepo({ worktrees: [{ path: target, branch: 'feat/done' }] }), busy);
+    await h.handlers.cleanup_list({}, ctx);
+    busy.add(target);
+    const result = await h.handlers.cleanup_apply({ ids: [worktreeItemId(target)] }, ctx);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('in-use');
+    expect(h.calls.some((call) => call.includes('worktree remove'))).toBe(false);
+  });
+
+  it('开着时有未提交改动的 worktree 跳过并带原因', async () => {
+    const target = `${WT_ROOT}/wt-1`;
+    const h = direct(
+      true,
+      baseRepo({ worktrees: [{ path: target, branch: 'feat/done', dirty: true }] })
+    );
+    const result = await h.handlers.cleanup_apply({ ids: [worktreeItemId(target)] }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result).toMatchObject({
+      status: 'applied',
+      deleted: 0,
+      skipped: 1,
+      items: [{ kind: 'worktree', result: 'skipped', reason: 'uncommitted-changes' }],
+    });
+    expect(h.calls.some((call) => call.includes('worktree remove'))).toBe(false);
+  });
+
+  it('两个秘书各看各的开关', async () => {
+    const repo = baseRepo();
+    const { ports } = makePorts({ repos: [repo] });
+    const proposals: string[] = [];
+    const handlersOf = (skip: boolean, who: string) =>
+      createSecretaryCleanupHandlers({
+        ...ports,
+        skipConfirm: () => skip,
+        saveProposal: async () => {
+          proposals.push(who);
+          return { proposalId: `proposal-${who}`, reused: false };
+        },
+      });
+    const careful = await handlersOf(false, 'a').cleanup_apply(
+      { ids: [branchItemId(ROOT, 'chore/merged')] },
+      { secretaryConversationId: 'sec-a' }
+    );
+    const quick = await handlersOf(true, 'b').cleanup_apply(
+      { ids: [branchItemId(ROOT, 'feat/done')] },
+      { secretaryConversationId: 'sec-b' }
+    );
+    expect(careful.ok && careful.result).toMatchObject({ status: 'awaiting_confirmation' });
+    expect(quick.ok && quick.result).toMatchObject({ status: 'applied', deleted: 1 });
+    expect(proposals).toEqual(['a']);
+    expect(Object.keys(repo.branches)).toContain('chore/merged');
+    expect(Object.keys(repo.branches)).not.toContain('feat/done');
+  });
+});
+
 /** 造一批条目：分支、worktree、会话都够多，用来量精简与分页的字数 */
 function bulkPorts(branches: number, worktrees: number, options: { longName?: boolean } = {}) {
   const map: Record<string, string[]> = { 'feat/secretary-agent': [], main: [] };

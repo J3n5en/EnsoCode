@@ -303,6 +303,9 @@ function profileChanges(
   if (draft.patrolEnabled !== undefined) {
     put('patrolEnabled', before?.patrolEnabled ?? null, draft.patrolEnabled);
   }
+  if (draft.cleanupSkipConfirm !== undefined) {
+    put('cleanupSkipConfirm', before?.cleanupSkipConfirm ?? null, draft.cleanupSkipConfirm);
+  }
   if ('addressAs' in draft) put('addressAs', before?.addressAs ?? null, draft.addressAs ?? null);
   if (draft.replyLanguage) put('replyLanguage', before?.replyLanguage ?? null, draft.replyLanguage);
   if (draft.style) put('style', before?.style ?? null, draft.style);

@@ -187,6 +187,11 @@ export interface SecretaryDispatchPorts {
   dropQueued(conversationId: string, messageIds: readonly string[]): MaybePromise<number>;
   /** 有目标的会话被停止时置为暂停 */
   pauseGoal(conversationId: string): MaybePromise<void>;
+  /**
+   * 给已完成或没有目标的会话挂上新目标（与 session_create 同一种）。
+   * 原来的目标还没完成时返回 ok:false，目标原样保留。缺省表示不支持挂目标。
+   */
+  attachGoal?(conversationId: string, goal: string): MaybePromise<{ ok: boolean; error?: string }>;
   /** 收尾清理要的 git / 目录 / 归档能力；清理提案确认时用 */
   cleanup: CleanupPorts;
   /** 确认 profile 提案：交给档案服务走同一套保存与副作用 */
@@ -298,6 +303,8 @@ const DENIALS = {
     "permission denied (not-visible): the session's project is not in the secretary's visible projects",
   'needs-user':
     'refused (needs-user): the session is waiting for the user to answer a question or approve a tool call',
+  'goal-active':
+    "refused (goal-active): the session's current goal is not finished yet. A goal is only attached when the session already reported goal-complete or has no goal; do not replace a live one.",
   'managed-by-other':
     'permission denied (managed-by-other): another secretary manages this session. Only the user can transfer it to you; do not retry.',
   'not-yours':
@@ -319,6 +326,8 @@ interface SessionFields {
   taskId: string;
   /** 要转发的图片路径（未做文件校验）；不转发时为空数组 */
   attachments: string[];
+  /** 追加任务时挂上的新目标；不带时为空串 */
+  goal: string;
 }
 
 /** 逐字段校验，失败时写明哪个字段、哪里不合法 */
@@ -368,6 +377,10 @@ function sessionFields(
     ? attachmentPaths(params.attachments)
     : ({ ok: true, value: [] as string[] } as const);
   if (!attachments.ok) return attachments;
+  const goal = allowed.includes('goal')
+    ? optionalText(params.goal, 'goal', 4000)
+    : ({ ok: true, value: '' } as const);
+  if (!goal.ok) return goal;
   return {
     ok: true,
     value: {
@@ -377,8 +390,27 @@ function sessionFields(
       clearQueue: clearQueue === true,
       taskId: taskId.value,
       attachments: attachments.value,
+      goal: goal.value,
     },
   };
+}
+
+/** 可选文本：缺省是空串；给了就必须是非空字符串且不超过上限 */
+function optionalText(value: unknown, key: string, max: number): FieldsResult<string> {
+  if (value === undefined) return { ok: true, value: '' };
+  if (typeof value !== 'string')
+    return {
+      ok: false,
+      error: `invalid arguments: "${key}" must be a string, got ${typeof value}`,
+    };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: false, error: `invalid arguments: "${key}" must not be empty` };
+  if (trimmed.length > max)
+    return {
+      ok: false,
+      error: `invalid arguments: "${key}" is ${trimmed.length} characters, max ${max}`,
+    };
+  return { ok: true, value: trimmed };
 }
 
 /** attachments 只收字符串数组：单张路径越界、格式不对在文件校验里逐张报 */
@@ -598,6 +630,8 @@ async function noteDispatchResumed(
   if (record.lastState !== 'running') record.stateSince = now;
   record.lastState = 'running';
   record.lastEventAt = now;
+  // 发过消息：这一轮没有可见回复时巡检按空闲阈值兜底
+  record.sentAt = now;
   // 重新派活就是重新开始：上一次的停止与移出都不再生效
   delete record.stoppedAt;
   delete record.dismissedFromBoard;
@@ -1538,9 +1572,15 @@ export function createSecretaryDispatchHandlers(
     },
 
     async session_send(params, ctx) {
-      const fields = sessionFields(params, ['conversationId', 'message', 'mode', 'attachments']);
+      const fields = sessionFields(params, [
+        'conversationId',
+        'message',
+        'mode',
+        'attachments',
+        'goal',
+      ]);
       if (!fields.ok) return fields;
-      const { conversationId, message: text, mode, attachments } = fields.value;
+      const { conversationId, message: text, mode, attachments, goal } = fields.value;
       const profile = await profileOf(ports);
       const check = await checkOperate(ports, conversationId, profile);
       if (!check.ok) return deny(ports, ctx, 'session_send', check.code, conversationId);
@@ -1563,6 +1603,17 @@ export function createSecretaryDispatchHandlers(
       // 秘书不能替用户回答提问或审批工具调用：两种模式都拒绝
       if (status.pendingAsks + status.pendingApprovals > 0) {
         return deny(ports, ctx, 'session_send', 'needs-user', conversationId);
+      }
+      // 带目标时先挂上再发：原来的目标还没完成就拒绝，不能把进行中的目标盖掉
+      if (goal) {
+        const attached = await ports.attachGoal?.(conversationId, goal);
+        if (!attached?.ok) return deny(ports, ctx, 'session_send', 'goal-active', conversationId);
+        const file = ports.dispatchFile();
+        const record = file.dispatched[conversationId];
+        if (record) {
+          record.goal = goal;
+          ports.saveDispatch(file);
+        }
       }
       if (status.state === 'running') {
         // 插话复用用户自己的 steer 通道：pi 在当前工具调用结束后读到它，不等整轮结束
@@ -2766,6 +2817,12 @@ export function dispatchPortsFor(ctx: SecretaryContext): SecretaryDispatchPorts 
         state.conversations[conversationId] = { ...row, queuedMessages: kept };
       });
       return removed;
+    },
+    attachGoal: async (conversationId, goal) => {
+      const { getDispatchDriver } = await import('../../ipc/secretary');
+      const driver = getDispatchDriver();
+      if (!driver) return { ok: false, error: 'driver unavailable' };
+      return driver.attachGoal(conversationId, goal);
     },
     pauseGoal: async (conversationId) => {
       const { patchConversationsState } = await import('../../ipc/settings');
