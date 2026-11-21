@@ -29,9 +29,12 @@ export function openSecretary(secretaryId?: string): void {
   const id = secretaryId ?? store.focusedId ?? store.secretaries[0]?.id;
   if (!id) return;
   store.focus(id);
-  const state = useSecretaryStore.getState().states[id];
-  if (!state?.projectId) return;
-  if (!state.profile) {
+  // 刚建好的秘书状态是异步拉的：没到时按清单（没档案时名字为空）判断，不能点了没反应
+  const current = useSecretaryStore.getState();
+  const state = current.states[id];
+  const summary = current.secretaries.find((entry) => entry.id === id);
+  if (!(state?.projectId ?? summary?.projectId)) return;
+  if (state ? !state.profile : summary?.name == null) {
     useSecretaryStore.getState().openWelcome();
     return;
   }

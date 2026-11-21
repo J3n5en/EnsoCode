@@ -98,12 +98,15 @@ export function SecretarySidebarSection({
   onOpenSettings,
   onReset,
   divider = true,
+  secretaryId,
   children,
 }: SecretarySectionActions & {
   view: SecretarySectionView;
   folded: boolean;
   /** 多个秘书时只有最后一个分区画分隔线 */
   divider?: boolean;
+  /** 多个秘书时标出是哪一个 */
+  secretaryId?: string;
   children: React.ReactNode;
 }) {
   const { t } = useI18n();
@@ -185,7 +188,11 @@ export function SecretarySidebarSection({
     </div>
   );
   return (
-    <div data-slot="secretary-section" data-enso="secretary-section">
+    <div
+      data-slot="secretary-section"
+      data-enso="secretary-section"
+      data-secretary-id={secretaryId}
+    >
       <ContextMenu>
         <ContextMenuTrigger render={row as React.ReactElement<Record<string, unknown>>} />
         <ContextMenuPopup className="min-w-40">

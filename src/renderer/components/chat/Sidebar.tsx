@@ -138,6 +138,7 @@ import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
 import { secretaryConversationIds } from '@/lib/secretaryEntry';
+import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -1105,13 +1106,9 @@ export function Sidebar({
                           .getState()
                           .newSecretaryConversation({ secretaryId: entry.id });
                       }}
-                      onOpenSettings={() =>
-                        void window.electronAPI.window.openSettings({
-                          category: 'secretary',
-                          rowId: 'secretary.root',
-                        })
-                      }
+                      onOpenSettings={() => openSecretarySettings(entry.id)}
                       onReset={() => setSecretaryResetId(entry.id)}
+                      secretaryId={entry.id}
                     >
                       {shown.map((id) => (
                         <ConversationRow

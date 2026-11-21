@@ -1,6 +1,6 @@
 import type { SecretaryProfile } from '@shared/types/secretary';
 import { describe, expect, it } from 'vitest';
-import { defaultDraft, draftFromProfile, formReducer } from './profileFormState';
+import { defaultDraft, draftFromProfile, formReducer, freeSecretaryName } from './profileFormState';
 
 const profile: SecretaryProfile = {
   version: 1,
@@ -93,5 +93,16 @@ describe('formReducer', () => {
   it('reset 换掉草案', () => {
     const next = formReducer(start, { type: 'reset', draft: draftFromProfile(profile, 'S') });
     expect(next.name).toBe('小安');
+  });
+});
+
+describe('freeSecretaryName', () => {
+  it('没人用时就是原名', () => {
+    expect(freeSecretaryName('秘书', ['小爱', null])).toBe('秘书');
+  });
+
+  it('名字被别的秘书占了就往后编号，比较忽略大小写与首尾空格', () => {
+    expect(freeSecretaryName('秘书', [' 秘书 ', '秘书 2'])).toBe('秘书 3');
+    expect(freeSecretaryName('Secretary', ['secretary'])).toBe('Secretary 2');
   });
 });

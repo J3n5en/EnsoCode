@@ -7128,6 +7128,88 @@ async function verifyMultiSecretary(cdp, setup) {
   );
   assert(!existsSync(memberDir(second)), '多秘书: 删除后它的目录与绑定路由一起释放');
 
+  // 前面的段落直接用 IPC 写档案（带秘书 id），绕过了欢迎页；这里按用户的路子走一遍：
+  // 新建 → 侧栏点它 → 欢迎页「全部用默认，直接开始」→ 发第一条消息
+  log('== 多秘书：新建的秘书走欢迎页「全部用默认」');
+  const welcomed = await page(`
+    const api = window.electronAPI.secretary;
+    const created = await api.create();
+    if (!created.ok) return JSON.stringify(created);
+    const id = created.secretaryId;
+    const open = await until(
+      () =>
+        document.querySelector(
+          '[data-enso=secretary-section][data-secretary-id="' + id + '"] [data-enso=secretary-open]'
+        ),
+      15000
+    );
+    if (!open) return JSON.stringify({ ok: false, error: 'no sidebar row', id });
+    open.click();
+    const defaults = await until(
+      () => document.querySelector('[data-enso=secretary-welcome] [data-enso=secretary-welcome-defaults]'),
+      15000
+    );
+    if (!defaults) return JSON.stringify({ ok: false, error: 'no welcome', id });
+    defaults.click();
+    const settled = await until(() => {
+      const welcome = document.querySelector('[data-enso=secretary-welcome]');
+      if (!welcome) return { closed: true, error: null };
+      const error = welcome.querySelector('.text-destructive')?.textContent ?? null;
+      return error ? { closed: false, error } : null;
+    }, 20000);
+    const profile = await api.getProfile(id);
+    const secretary = await SEC();
+    const projectId = secretary.getState().secretaries.find((entry) => entry.id === id)?.projectId;
+    const conversationId = S().activeId;
+    const conversation = S().conversations[conversationId];
+    let replied = false;
+    if (conversation?.projectId === projectId) {
+      const project = SET().projects.find((entry) => entry.id === projectId);
+      await S().send(
+        '你好',
+        { providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path },
+        undefined,
+        conversationId
+      );
+      replied = Boolean(
+        await until(
+          () => (S().conversations[conversationId]?.messages ?? []).some((m) => m.role === 'assistant'),
+          40000
+        )
+      );
+    }
+    return JSON.stringify({
+      ok: true,
+      id,
+      closed: settled?.closed ?? false,
+      error: settled?.error ?? null,
+      configured: Boolean(profile.ok && profile.profile),
+      name: profile.ok ? (profile.profile?.name ?? null) : null,
+      inOwnProject: conversation?.projectId === projectId,
+      replied,
+    });
+  `);
+  assert(
+    welcomed.ok && welcomed.closed && welcomed.error === null && welcomed.configured,
+    '多秘书: 新秘书点「全部用默认」不报错，设置完成、欢迎页让位',
+    welcomed
+  );
+  assert(
+    welcomed.inOwnProject && welcomed.replied,
+    '多秘书: 新秘书的第一条消息发在它自己的会话里并收到回复',
+    welcomed
+  );
+  const welcomedGone = await page(`
+    const result = await window.electronAPI.secretary.deleteSecretary(${JSON.stringify(welcomed.id)}, true);
+    const list = await window.electronAPI.secretary.list();
+    return JSON.stringify({ ok: result.ok, left: list.map((entry) => entry.id) });
+  `);
+  assert(
+    welcomedGone.ok && welcomedGone.left.length === 1,
+    '多秘书: 删掉欢迎页建的秘书，回到单秘书',
+    welcomedGone
+  );
+
   log('== 多秘书：秘书间消息第 5 跳被拦，范围取交集');
   const third = await page(`
     const api = window.electronAPI.secretary;

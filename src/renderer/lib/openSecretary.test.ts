@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   secretary: { profile: null as unknown, projectId: 'sec' as string | null },
-  secretaries: [] as { id: string; projectId: string | null }[],
+  secretaries: [] as { id: string; projectId: string | null; name?: string | null }[],
   states: {} as Record<string, { profile: unknown; projectId: string | null }>,
   focusedId: null as string | null,
   openWelcome: vi.fn(),
@@ -123,4 +123,18 @@ it('多个秘书时打开最近用过的那个秘书的最近会话', () => {
   openSecretary();
   expect(h.focusedId).toBe('s-two');
   expect(h.selectConversation).toHaveBeenCalledWith('b');
+});
+
+it('刚建好的秘书状态还没到时，按清单判断：没档案就进欢迎页，不是什么都不做', () => {
+  h.secretaries = [
+    { id: 'default', projectId: 'sec', name: '小安' },
+    { id: 's-new', projectId: 'sec-new', name: null },
+  ];
+  h.states = { default: { profile: { name: '小安' }, projectId: 'sec' } };
+  h.sessions = { order: [], conversations: {} };
+  h.openWelcome.mockClear();
+  openSecretary('s-new');
+  expect(h.focusedId).toBe('s-new');
+  expect(h.openWelcome).toHaveBeenCalledTimes(1);
+  expect(h.newSecretaryConversation).not.toHaveBeenCalled();
 });

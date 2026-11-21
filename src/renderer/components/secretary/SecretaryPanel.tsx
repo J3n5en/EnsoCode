@@ -2,6 +2,7 @@ import type { SecretaryScheduleView } from '@shared/types/secretary';
 import { Settings } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
 import { secretaryIdOfProject, useSecretaryStore } from '@/stores/secretary';
 import { SecretaryAvatar } from './SecretaryAvatar';
@@ -91,12 +92,7 @@ export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
         <button
           type="button"
           data-enso="secretary-panel-settings"
-          onClick={() =>
-            void window.electronAPI.window.openSettings({
-              category: 'secretary',
-              rowId: 'secretary.root',
-            })
-          }
+          onClick={() => openSecretarySettings(secretaryId)}
           title={t('Secretary settings')}
           aria-label={t('Secretary settings')}
           className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

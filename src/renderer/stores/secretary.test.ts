@@ -50,7 +50,11 @@ const settings = {
   defaultModel: null,
   projectGroups: [],
   virtualModels: [],
-  projects: [{ id: 'sec-project', path: '/tmp/secretary', name: '秘书' }],
+  // 第二项是第二个秘书的隐藏项目
+  projects: [
+    { id: 'sec-project', path: '/tmp/secretary', name: '秘书' },
+    { id: 'sec-project-2', path: '/tmp/secretary/members/s-2', name: '秘书' },
+  ],
 };
 
 vi.mock('@/stores/sessions', () => ({
@@ -355,5 +359,21 @@ describe('newSecretaryConversation', () => {
     useSecretaryStore.setState({ secretary: { ...withProfile(), projectId: null } });
     await expect(useSecretaryStore.getState().newSecretaryConversation()).resolves.toBeNull();
     expect(sessions.newConversation).not.toHaveBeenCalled();
+  });
+
+  it('指定的秘书刚建好、它的状态还没到时，按清单里的隐藏项目建会话', async () => {
+    useSecretaryStore.setState({
+      secretary: withProfile(),
+      focusedId: 'default',
+      states: { default: withProfile() },
+      secretaries: [
+        { id: 'default', projectId: 'sec-project', name: '秘书', avatar: null, order: 0 },
+        { id: 's-2', projectId: 'sec-project-2', name: null, avatar: null, order: 1 },
+      ],
+    });
+    await expect(
+      useSecretaryStore.getState().newSecretaryConversation({ secretaryId: 's-2' })
+    ).resolves.toBe('conv-1');
+    expect(sessions.newConversation).toHaveBeenCalledWith('sec-project-2');
   });
 });

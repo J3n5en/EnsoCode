@@ -248,10 +248,15 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
   },
 
   newSecretaryConversation: async (options) => {
-    const { states, secretary } = get();
+    const { states, secretary, secretaries } = get();
     const target = options?.secretaryId ? states[options.secretaryId] : secretary;
     if (options?.secretaryId) get().focus(options.secretaryId);
-    const projectId = target?.projectId;
+    // 刚建好的秘书状态是异步拉的：没到时按清单里登记的隐藏项目建，不让首次设置落空
+    const projectId =
+      target?.projectId ??
+      (options?.secretaryId
+        ? secretaries.find((entry) => entry.id === options.secretaryId)?.projectId
+        : null);
     if (!projectId) return null;
     const settings = useSettingsStore.getState();
     const project = settings.projects.find((entry) => entry.id === projectId);

@@ -37,6 +37,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
+import { SETTINGS_SECRETARY_KEY } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { PickList } from './PresetsSettings';
@@ -182,9 +183,6 @@ function PluginPicker({
 
 /** 设置页当前编辑的秘书：只有一个秘书时为 undefined，Main 接受省略 */
 const SecretaryIdContext = React.createContext<string | undefined>(undefined);
-
-/** 侧栏 ⚙ 打开设置前写下要编辑的秘书：设置窗口与主窗口同源，共用 localStorage */
-export const SETTINGS_SECRETARY_KEY = 'enso-settings-secretary';
 
 /** 秘书自有的 skill：与右侧面板同一份列表，正文可展开，删除后 Main 释放会话 */
 function OwnSkills({ busy }: { busy: boolean }) {
@@ -568,6 +566,15 @@ export function SecretarySettings() {
     void loadList();
     return window.electronAPI.secretary.onListChanged(setSecretaries);
   }, [loadList]);
+
+  // 设置窗口已开着时，主窗口点另一个秘书的「设置」：跟着切过去
+  React.useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.key === SETTINGS_SECRETARY_KEY && event.newValue) setSelected(event.newValue);
+    };
+    window.addEventListener('storage', follow);
+    return () => window.removeEventListener('storage', follow);
+  }, []);
 
   const current =
     secretaries.find((entry) => entry.id === selected)?.id ?? secretaries[0]?.id ?? undefined;

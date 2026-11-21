@@ -3156,6 +3156,7 @@ export const zhTranslations: Record<string, string> = {
     '名字最多 24 个字符，只能包含文字、数字、_ 或 -，不能有空格。',
   'This name is reserved. Choose another one.': '这个名字是保留名，请换一个。',
   'Another member already uses this name.': '已有成员使用这个名字。',
+  'Another secretary already uses this name.': '已有别的秘书叫这个名字。',
   'This member was changed elsewhere. Refresh and try again.':
     '该成员已在别处被修改，请刷新后重试。',
   'This member no longer exists.': '该成员已不存在。',
