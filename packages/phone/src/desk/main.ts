@@ -42,6 +42,7 @@ import {
   loadReads,
   loadSnapshot,
   mountSnapshot,
+  offlineSnapshotNote,
   pruneSnapshots,
   saveReads,
   saveSnapshot,
@@ -111,6 +112,8 @@ const LOADING_TEXT: Partial<Record<ConnState, string>> = {
 
 /** 正盖着上次的界面快照：在线时提示还在同步、暂不能操作 */
 let syncing = false;
+/** 盖着的快照是什么时候存的（旧快照没有记录） */
+let coverSavedAt: number | null = null;
 /** 已在线但 renderer 还没续上（回前台换链后）：别让界面看着像卡死 */
 let resuming = false;
 let lastState: ConnState = 'connecting';
@@ -125,9 +128,11 @@ function renderStatus(): void {
           ? '正在恢复连接…'
           : ''
       : STATE_TEXT[lastState];
-  el.textContent = text;
+  const shown =
+    lastState === 'host-offline' && syncing ? offlineSnapshotNote(coverSavedAt, new Date()) : text;
+  el.textContent = shown;
   // 启动画面已在说明进度时不再叠一个状态胶囊
-  el.style.display = text && !loading ? 'block' : 'none';
+  el.style.display = shown && !loading ? 'block' : 'none';
 }
 
 function showState(state: ConnState): void {
@@ -537,6 +542,7 @@ async function main(): Promise<void> {
       });
     }
     syncing = true;
+    coverSavedAt = saved.savedAt;
     renderStatus();
     const step = createSnapshotTracker(Date.now(), saved.chars);
     snapshotTimer = setInterval(() => {
@@ -552,6 +558,7 @@ async function main(): Promise<void> {
         liveLoading: Boolean(
           iframes.main?.contentDocument?.querySelector('[data-timeline-loading]')
         ),
+        hostOnline: lastState === 'online',
       });
       if (!ready) return;
       dropSnapshot();
