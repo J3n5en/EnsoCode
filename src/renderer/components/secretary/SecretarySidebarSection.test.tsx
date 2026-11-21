@@ -368,6 +368,72 @@ describe('SecretarySidebarSection', () => {
     expect(container.querySelector('[data-enso="secretary-avatar"]')).not.toBeNull();
   });
 
+  it('触屏上箭头不叠在头像上：头像始终露出，行尾另给折叠按钮', async () => {
+    for (const keepAvatar of [true, false]) {
+      for (const folded of [true, false]) {
+        const handlers = actions();
+        await render(
+          <SecretarySidebarSection
+            view={view()}
+            folded={folded}
+            keepAvatar={keepAvatar}
+            {...handlers}
+          >
+            {null}
+          </SecretarySidebarSection>
+        );
+        const icon = container.querySelector('[data-enso="secretary-fold-icon"]');
+        expect(icon?.className).toContain('[@media(hover:none)]:hidden!');
+        expect(icon?.className).not.toContain('[@media(hover:none)]:flex');
+        const avatarBox = container.querySelector('[data-enso="secretary-avatar"]')?.parentElement;
+        if (avatarBox?.className.split(' ').includes('hidden')) {
+          expect(avatarBox.className).toContain('[@media(hover:none)]:block');
+        }
+        const trailing = container.querySelector<HTMLElement>(
+          '[data-enso="secretary-fold-trailing"]'
+        );
+        expect(trailing?.className.split(' ')).toContain('hidden');
+        expect(trailing?.className).toContain('[@media(hover:none)]:flex');
+        expect(trailing?.getAttribute('aria-expanded')).toBe(String(!folded));
+        expect(trailing?.querySelector('svg')?.getAttribute('class')?.includes('-rotate-90')).toBe(
+          folded
+        );
+        act(() => trailing?.click());
+        expect(handlers.onToggleFold).toHaveBeenCalledTimes(1);
+      }
+    }
+  });
+
+  it('配对页面里头像走隧道地址，不带本机路径；加载失败退回生成头像', async () => {
+    (globalThis as Record<string, unknown>)[REMOTE_LOCAL_IMAGE_PREFIX_KEY] = '/desk/li/pair/';
+    try {
+      const remote = view({
+        secretaryId: 's-ken',
+        profile: { ...profile, avatar: { color: '#ff00aa', imageVersion: 3, imageHash: 'abcd' } },
+      });
+      await render(
+        <SecretarySidebarSection view={remote} folded keepAvatar {...actions()}>
+          {null}
+        </SecretarySidebarSection>
+      );
+      const img = container.querySelector('img[data-enso="secretary-avatar-face"]');
+      const src = img?.getAttribute('src') ?? '';
+      expect(src.startsWith('/desk/li/pair/')).toBe(true);
+      expect(decodeURIComponent(src)).toBe(
+        '/desk/li/pair/local-image://secretary-avatar/avatar.png?v=3&h=abcd&s=s-ken'
+      );
+      await act(async () => {
+        img?.dispatchEvent(new window.Event('error'));
+      });
+      const face = container.querySelector('[data-enso="secretary-avatar-face"]');
+      expect(face?.tagName).toBe('SPAN');
+      expect(face?.getAttribute('data-generated')).toBe('true');
+      expect(face?.querySelector('svg')).not.toBeNull();
+    } finally {
+      delete (globalThis as Record<string, unknown>)[REMOTE_LOCAL_IMAGE_PREFIX_KEY];
+    }
+  });
+
   it('右键只有新会话、设置、重新设置秘书', async () => {
     const handlers = actions();
     await render(

@@ -96,6 +96,7 @@ export interface SecretarySectionActions {
 /**
  * 置顶伪项目的人物卡：外观与项目行不同，只有头像、名字与一行摘要。
  * 折叠箭头与 ⚙/＋ 只在 hover 时出现；会话行由侧栏传入，与卡片左对齐。
+ * 触屏没有悬停：头像始终露出，折叠箭头改放行尾。
  */
 export function SecretarySidebarSection({
   view,
@@ -126,6 +127,7 @@ export function SecretarySidebarSection({
   children: React.ReactNode;
 }) {
   const { t } = useI18n();
+  const foldLabel = folded ? t('Expand') : t('Collapse');
   const row = (
     <div
       data-enso="secretary-row"
@@ -138,11 +140,16 @@ export function SecretarySidebarSection({
         data-enso="secretary-fold"
         onClick={onToggleFold}
         aria-expanded={!folded}
-        aria-label={folded ? t('Expand') : t('Collapse')}
-        title={folded ? t('Expand') : t('Collapse')}
+        aria-label={foldLabel}
+        title={foldLabel}
         className={cn('shrink-0 rounded-[9px]', keepAvatar && 'relative')}
       >
-        <span className={cn('block', !keepAvatar && (folded ? 'hidden' : 'group-hover:hidden'))}>
+        <span
+          className={cn(
+            'block',
+            !keepAvatar && (folded ? 'hidden [@media(hover:none)]:block' : 'group-hover:hidden')
+          )}
+        >
           <SecretaryAvatar
             name={view.name}
             color={view.color}
@@ -154,9 +161,9 @@ export function SecretarySidebarSection({
         <span
           data-enso="secretary-fold-icon"
           className={cn(
-            'size-7 items-center justify-center rounded-[9px] bg-muted text-muted-foreground',
+            'size-7 items-center justify-center rounded-[9px] bg-muted text-muted-foreground [@media(hover:none)]:hidden!',
             keepAvatar
-              ? 'absolute inset-0 hidden group-hover:flex group-has-[:focus-visible]:flex [@media(hover:none)]:flex'
+              ? 'absolute inset-0 hidden group-hover:flex group-has-[:focus-visible]:flex'
               : folded
                 ? 'flex'
                 : 'hidden group-hover:flex'
@@ -206,6 +213,17 @@ export function SecretarySidebarSection({
           <Plus className="h-3.5 w-3.5" />
         </button>
       </span>
+      <button
+        type="button"
+        data-enso="secretary-fold-trailing"
+        onClick={onToggleFold}
+        aria-expanded={!folded}
+        aria-label={foldLabel}
+        title={foldLabel}
+        className={cn(ACTION_CLASS, 'hidden [@media(hover:none)]:flex')}
+      >
+        <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', folded && '-rotate-90')} />
+      </button>
     </div>
   );
   return (
