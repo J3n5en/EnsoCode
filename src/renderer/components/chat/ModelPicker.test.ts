@@ -865,6 +865,91 @@ describe('duplicateModelLabels', () => {
   });
 });
 
+describe('模型行收缩优先级', () => {
+  const xaiSource = 'xAI (Grok/X subscription) · grok@j3.do';
+  const rowProviders: ModelProvider[] = [
+    {
+      ...providers[0],
+      id: 'xai',
+      name: xaiSource,
+      models: [
+        { id: 'grok-4.7-build-fast', contextWindow: 500_000 },
+        { id: 'claude-opus-5-5', contextWindow: 1_000_000 },
+      ],
+    },
+  ];
+  const rowOf = (html: string, modelId: string) => {
+    const start = html.indexOf(`data-model-pin="${pinnedModelKey('xai', modelId)}"`);
+    const next = html.indexOf('data-model-pin=', start + 1);
+    return html.slice(start, next === -1 ? undefined : next);
+  };
+  const classOf = (row: string, attr: string) =>
+    row.match(new RegExp(`<span ${attr}="[^"]*"[^>]*class="([^"]*)"`))?.[1]?.split(' ') ?? [];
+
+  it('星标行：长来源小字先收缩，模型名不让位，上下文长度不收缩，名字悬停显示全名', () => {
+    harness.pinnedModels = [
+      pinnedModelKey('xai', 'grok-4.7-build-fast'),
+      pinnedModelKey('xai', 'claude-opus-5-5'),
+    ];
+    try {
+      // 当前选中不在任何分组里时右栏落在「星标与虚拟」
+      const html = renderToStaticMarkup(
+        createElement(ModelPicker, {
+          ...commonProps,
+          providers: rowProviders,
+          providerId: 'gone',
+          modelId: 'gone',
+          virtualModels: [],
+        })
+      );
+      for (const [modelId, context] of [
+        ['grok-4.7-build-fast', '500K'],
+        ['claude-opus-5-5', '1M'],
+      ]) {
+        const row = rowOf(html, modelId);
+        expect(row).toContain(`title="${modelId}"`);
+        expect(row).toContain(`title="Custom · ${xaiSource}"`);
+        expect(row).toContain(`>${context}<`);
+        const name = classOf(row, 'data-model-row-name');
+        const source = classOf(row, 'data-model-row-source');
+        // 名字按自身宽度排、最后才截断；小字 basis 0 先让空间、从账号一端截断
+        expect(name).toEqual(expect.arrayContaining(['min-w-0', 'truncate', 'flex-initial']));
+        expect(name).not.toContain('flex-1');
+        expect(source).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'truncate']));
+        expect(source).not.toContain('shrink-0');
+        expect(classOf(row, 'data-model-row-context')).toContain('shrink-0');
+        expect(row.indexOf('data-model-row-name')).toBeLessThan(
+          row.indexOf('data-model-row-source')
+        );
+        expect(row.indexOf('data-model-row-source')).toBeLessThan(
+          row.indexOf('data-model-row-context')
+        );
+      }
+    } finally {
+      harness.pinnedModels = [];
+    }
+  });
+
+  it('分组行无来源小字时模型名占满剩余宽度，✓ 不收缩', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providers: rowProviders,
+        providerId: 'xai',
+        modelId: 'claude-opus-5-5',
+        virtualModels: [],
+      })
+    );
+    const row = rowOf(html, 'grok-4.7-build-fast');
+    expect(classOf(row, 'data-model-row-name')).toContain('flex-1');
+    expect(row).not.toContain('data-model-row-source');
+    const selected = rowOf(html, 'claude-opus-5-5');
+    expect(selected).toContain('title="claude-opus-5-5"');
+    expect(classOf(selected, 'data-model-row-context')).toContain('shrink-0');
+    expect(selected).toMatch(/<svg[^>]*class="[^"]*lucide-check[^"]*shrink-0/);
+  });
+});
+
 function pickerProvider(id: string, name: string): ModelProvider {
   return {
     ...providers[0],
