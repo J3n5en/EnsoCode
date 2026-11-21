@@ -128,6 +128,7 @@ import { parseWebSearchChain, type WebSearchChainEntry } from '@shared/webSearch
 import { parseWindowsLocalShell } from '@shared/windowsLocalShell';
 import { readSettings } from '../ipc/settings';
 import { agentCommandDispatch } from './agentCommandDispatch';
+import { QUIT_TOOL_WAIT_LIMIT_MS } from './agentQuitLimits';
 import {
   AGENT_WORKER_SERVICE_NAME,
   appendAgentWorkerExitLog,
@@ -680,8 +681,7 @@ function detachBackgroundTasks(child: WorkerProcess, timeoutMs: number): Promise
   });
 }
 
-/** 退出 / 安装更新前有工具在跑：等它结束，最多等这么久；超时中止命令照常退出 */
-export const QUIT_TOOL_WAIT_LIMIT_MS = 5 * 60_000;
+export { QUIT_TOOL_WAIT_LIMIT_MS };
 /** 没有工具在跑（回复还在流式输出、等收口）时等安全点的上限 */
 export const QUIT_NO_TOOL_WAIT_MS = 10_000;
 export type QuitCheckpointResult = 'skipped' | 'checkpointed' | 'timeout';

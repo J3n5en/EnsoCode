@@ -10,6 +10,10 @@ const m = vi.hoisted(() => ({
   prepare: vi.fn(),
   cancel: vi.fn(),
   needsCheckpoint: true,
+  nativeHandlers: new Map<string, () => void>(),
+  watchdog: { begin: vi.fn(), step: vi.fn(), cancel: vi.fn() },
+  leaveServerMode: vi.fn(),
+  showMessageBox: vi.fn(async () => ({ response: 0 })),
 }));
 vi.mock('node:fs', async (importActual) => {
   const fs = await importActual<typeof import('node:fs')>();
@@ -19,7 +23,11 @@ vi.mock('node:fs', async (importActual) => {
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }));
 vi.mock('electron', () => ({
   app: { getPath: () => m.userData, on: vi.fn() },
-  BrowserWindow: { getAllWindows: () => [{}] },
+  BrowserWindow: { getAllWindows: () => [{}], getFocusedWindow: () => null },
+  autoUpdater: {
+    on: (event: string, handler: () => void) => m.nativeHandlers.set(event, handler),
+  },
+  dialog: { showMessageBox: m.showMessageBox },
 }));
 vi.mock('electron-updater', () => ({
   default: {
@@ -36,6 +44,7 @@ vi.mock('../../ipc/sessionIndex', () => ({
 }));
 vi.mock('../../ipc/settings', () => ({
   flushSettings: vi.fn(),
+  readLocale: () => 'zh',
   writeTrayReenterAfterUpdate: vi.fn(),
 }));
 vi.mock('../../windows/createAppWindow', () => ({
@@ -43,6 +52,7 @@ vi.mock('../../windows/createAppWindow', () => ({
     m.sent.push(status),
 }));
 vi.mock('../exitInterruptHost', () => ({ markExitForUpdate: vi.fn() }));
+vi.mock('../appQuitWatchdog', () => ({ quitWatchdog: m.watchdog }));
 vi.mock('./idleRestartSnapshot', () => ({ currentIdleRestartObservation: () => m.observation }));
 vi.mock('../agentHost', () => ({
   prepareAgentWorkerForQuit: m.prepare,
@@ -63,6 +73,7 @@ vi.mock('../../ipc/appRestart', () => ({
 vi.mock('../appServerMode', () => ({
   flushRendererPersist: async () => {},
   isServerMode: () => false,
+  leaveServerMode: m.leaveServerMode,
 }));
 
 import { existsSync } from 'node:fs';
@@ -229,5 +240,47 @@ describe('下载完成后的自动重启模式', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('安装更新途中失败', () => {
+  it('看门狗跟住整个安装；Squirrel 报错（窗口可能已被关掉）时撤掉退出、恢复主窗口并说明原因', async () => {
+    vi.resetModules();
+    const { autoUpdaterService: service } = await import('./AutoUpdater');
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
+    m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
+    m.prepare.mockReset().mockResolvedValue('checkpointed');
+    m.watchdog.begin.mockClear();
+    m.watchdog.step.mockClear();
+    m.watchdog.cancel.mockClear();
+    service.requestRestart();
+    await vi.waitFor(() => expect(m.quitAndInstall).toHaveBeenCalledOnce());
+    expect(m.watchdog.begin).toHaveBeenCalledWith('update', expect.any(String));
+    expect(m.watchdog.step).toHaveBeenCalledWith('等 Squirrel 接手安装');
+    m.nativeHandlers.get('before-quit-for-update')?.();
+    expect(m.watchdog.step).toHaveBeenLastCalledWith(expect.any(String), { finishing: true });
+
+    m.handlers.get('error')?.(new Error('ShipIt failed'));
+    expect(m.order).toContain('cancel');
+    expect(m.watchdog.cancel).toHaveBeenCalledOnce();
+    expect(service.isQuittingForUpdate()).toBe(false);
+    await vi.waitFor(() => expect(m.leaveServerMode).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(m.showMessageBox).toHaveBeenCalledWith(
+        expect.objectContaining({ message: '重启失败：ShipIt failed' })
+      )
+    );
+  });
+
+  it('平时的检查 / 下载错误不动窗口', async () => {
+    vi.resetModules();
+    const { autoUpdaterService: service } = await import('./AutoUpdater');
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
+    m.leaveServerMode.mockClear();
+    m.watchdog.cancel.mockClear();
+    m.handlers.get('error')?.(new Error('net::ERR_INTERNET_DISCONNECTED'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(m.leaveServerMode).not.toHaveBeenCalled();
+    expect(m.watchdog.cancel).not.toHaveBeenCalled();
   });
 });

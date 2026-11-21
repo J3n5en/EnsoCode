@@ -41,9 +41,11 @@ import {
   startAgentWorker,
   stopAgentWorkerForQuit,
 } from './services/agentHost';
+import { appendAgentWorkerExitLog } from './services/agentWorkerExit';
 import { allowAppQuit, setBeforeConfirmedQuit } from './services/appCloseConfirm';
 import { installAppMenu, setAppMenuActions } from './services/appMenu';
 import { attachAppQuitDrain } from './services/appQuitDrain';
+import { configureQuitWatchdog, quitWatchdog } from './services/appQuitWatchdog';
 import { createAppRestart, restartOverlayFor } from './services/appRestart';
 import {
   ensureTray,
@@ -160,9 +162,15 @@ function showMenuError(message: string): void {
 // 菜单「重启」：点下去主窗口立刻弹「正在重启」；先等 agent 安全点（有命令在跑弹层改成等命令、可强制退出），
 // 再退出；will-quit 收尾拿同一个结果，新实例冷启动按清单续跑
 const appRestart = createAppRestart({
-  relaunch: () => app.relaunch(),
+  relaunch: () => {
+    app.relaunch();
+    quitWatchdog.begin('restart', '等 agent 安全点', { relaunched: true });
+  },
   allowQuit: allowAppQuit,
-  quit: () => app.quit(),
+  quit: () => {
+    quitWatchdog.step('关窗退出', { finishing: true });
+    app.quit();
+  },
   prepareQuit: (onWaitingForTools) =>
     prepareAgentWorkerForQuit({
       reason: 'quit',
@@ -183,13 +191,18 @@ const appRestart = createAppRestart({
 // Cmd+Q / 关窗 / 菜单退出：确认退出后、窗口还在时先等安全点，有命令在跑主窗口弹等待层；
 // will-quit 收尾拿同一个结果
 setBeforeConfirmedQuit(async () => {
-  await waitWithExitDialog('quit', (onWaitingForTools) =>
-    prepareAgentWorkerForQuit({
-      reason: 'quit',
-      hasRunningSessions: needsQuitCheckpoint,
-      onWaitingForTools,
-    })
-  );
+  quitWatchdog.begin('quit', '等 agent 安全点');
+  try {
+    await waitWithExitDialog('quit', (onWaitingForTools) =>
+      prepareAgentWorkerForQuit({
+        reason: 'quit',
+        hasRunningSessions: needsQuitCheckpoint,
+        onWaitingForTools,
+      })
+    );
+  } finally {
+    quitWatchdog.step('关窗退出', { finishing: true });
+  }
 });
 
 /** 等待弹层上点「强制退出」：重启走重启自己的强制路径；安装更新与退出结束等待，各自照常往下走 */
@@ -225,6 +238,11 @@ if (!gotTheLock) {
     });
   }
   startRunningSessionsHeartbeat();
+  configureQuitWatchdog({
+    relaunch: () => app.relaunch(),
+    exit: () => app.exit(0),
+    log: (message) => appendAgentWorkerExitLog(agentDataDir(), message),
+  });
   startExitInterruptRecovery();
   pluginInstallInbox.noteArgv(process.argv);
   secretaryLinkInbox.noteArgv(process.argv);
@@ -417,32 +435,43 @@ if (!gotTheLock) {
   });
   // node-pty TSFN / llama AsyncWorker 在 FreeEnvironment 期间回调会 SIGABRT；
   // 两步必须共用一次 preventDefault，谁先 app.quit 都会拆掉另一边的环境。
-  attachAppQuitDrain(app, [
-    {
-      begin: disposeAllTerminals,
-      shouldWait: hasPendingPtys,
-      wait: waitPtyQuitIdle,
-    },
-    {
-      shouldWait: llamaRuntimeActive,
-      wait: async () => {
-        await awaitMemoryEmbeddingClose();
-        await releaseLocalChatSlot();
-        await disposeLlamaRuntime();
+  attachAppQuitDrain(
+    app,
+    [
+      {
+        name: '终端',
+        begin: disposeAllTerminals,
+        shouldWait: hasPendingPtys,
+        wait: waitPtyQuitIdle,
       },
-    },
-    {
-      shouldWait: agentWorkerAlive,
-      // 先等 worker 到安全点、断点与恢复清单落盘（有超时兜底），再照常收尾
-      wait: async () => {
-        await prepareAgentWorkerForQuit({
-          reason: 'quit',
-          hasRunningSessions: needsQuitCheckpoint,
-        });
-        await stopAgentWorkerForQuit(3_000);
+      {
+        name: 'llama',
+        shouldWait: llamaRuntimeActive,
+        wait: async () => {
+          await awaitMemoryEmbeddingClose();
+          await releaseLocalChatSlot();
+          await disposeLlamaRuntime();
+        },
       },
-    },
-  ]);
+      {
+        name: 'agent worker',
+        shouldWait: agentWorkerAlive,
+        // 先等 worker 到安全点、断点与恢复清单落盘（有超时兜底），再照常收尾
+        wait: async () => {
+          await prepareAgentWorkerForQuit({
+            reason: 'quit',
+            hasRunningSessions: needsQuitCheckpoint,
+          });
+          await stopAgentWorkerForQuit(3_000);
+        },
+      },
+    ],
+    // 窗口已关、退出不可撤回：之后卡住由看门狗限时强退
+    (pending) =>
+      quitWatchdog.step(pending.length ? `will-quit 收尾：${pending.join('、')}` : 'will-quit', {
+        finishing: true,
+      })
+  );
 }
 
 /** 打包环境下启动自动更新(dev 无 app-update.yml,electron-updater 会报错;Linux deb 由 IPC 层守卫) */

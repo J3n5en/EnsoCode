@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }));
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/enso-overlay-entries', on: vi.fn() },
+  autoUpdater: { on: vi.fn() },
   BrowserWindow: { getAllWindows: () => [] },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>

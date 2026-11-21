@@ -30,4 +30,26 @@ describe('killAndWaitExit', () => {
     await expect(pending).resolves.toBeUndefined();
     vi.useRealTimers();
   });
+
+  it('到时限还不退出就 SIGKILL；按时退出的不补刀', async () => {
+    vi.useFakeTimers();
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const stuck = Object.assign(child(), { pid: 424242 });
+    const pending = killAndWaitExit(stuck, 1_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(kill).toHaveBeenCalledWith(424242, 'SIGKILL');
+
+    kill.mockClear();
+    const polite = Object.assign(child(), { pid: 515151 });
+    const done = killAndWaitExit(polite, 1_000);
+    polite.emit('exit', 0);
+    await done;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(kill).not.toHaveBeenCalled();
+    kill.mockRestore();
+    vi.useRealTimers();
+  });
 });

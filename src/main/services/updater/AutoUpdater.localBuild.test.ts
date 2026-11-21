@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }));
 vi.mock('electron', () => ({
   app: { getPath: () => m.userData, on: vi.fn() },
+  autoUpdater: { on: vi.fn() },
   BrowserWindow: { getAllWindows: () => [{}] },
 }));
 vi.mock('electron-updater', () => ({
