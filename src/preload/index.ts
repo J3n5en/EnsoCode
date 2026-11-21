@@ -275,6 +275,7 @@ import type {
   WorktreeStatus,
 } from '@shared/types/worktree';
 import type { UpdateChannel } from '@shared/updater/channel';
+import type { AutoRestartMode } from '@shared/updater/idleRestart';
 import type { BotUsageOverviewResult, BotUsageSummaryResult } from '@shared/usage/botUsage';
 import type { UsageRangeDays, UsageSummaryResult } from '@shared/usage/types';
 import type { TitleBarAppearance } from '@shared/windowControls';
@@ -1543,8 +1544,11 @@ const electronAPI = {
     quitAndInstall: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL),
     setAutoUpdateEnabled: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, enabled),
-    setAutoRestartWhenIdle: (enabled: boolean): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_WHEN_IDLE, enabled),
+    setAutoRestartMode: (mode: AutoRestartMode): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_MODE, mode),
+    /** 输入框里有没有重启后会丢的未发送草稿：只在有无变化时报 */
+    reportUnsentDraft: (has: boolean): void =>
+      ipcRenderer.send(IPC_CHANNELS.COMPOSER_UNSENT_DRAFT, has),
     setChannel: (channel: UpdateChannel): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_CHANNEL, channel),
     getState: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_GET_STATE),

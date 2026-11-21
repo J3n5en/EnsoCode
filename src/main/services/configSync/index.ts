@@ -122,7 +122,7 @@ export const CONFIG_SYNC_FIELD_POLICY = {
   protectedActionsInCode: { mode: 'excluded', reason: 'device-local safety preference' },
   dcgEnabled: { mode: 'excluded', reason: 'dcg binary is installed on this device' },
   autoUpdate: { mode: 'excluded', reason: 'device update policy' },
-  autoRestartWhenIdle: { mode: 'excluded', reason: 'device update policy' },
+  autoRestartForUpdate: { mode: 'excluded', reason: 'device update policy' },
   updateChannel: { mode: 'excluded', reason: 'device update policy' },
   pluginAutoUpdate: { mode: 'excluded', reason: 'device update policy' },
   proxyMode: { mode: 'excluded', reason: 'device network configuration' },

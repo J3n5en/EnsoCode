@@ -12,13 +12,15 @@ import {
   nextIdleSince,
   persistedConversations,
   remainingIdleMs,
+  resolveAutoRestartMode,
   shouldAutoRestartForUpdate,
 } from './idleRestart';
 
 const ready = {
-  enabled: true,
-  downloaded: true,
+  mode: 'idle' as const,
   agentBusy: false,
+  userActive: false,
+  unsentDraft: false,
   queuedCount: 0,
   pendingAskCount: 0,
   pendingApprovalCount: 0,
@@ -47,9 +49,47 @@ describe('shouldAutoRestartForUpdate', () => {
     );
   });
 
-  it('开关关或包没下好不装', () => {
-    expect(shouldAutoRestartForUpdate({ ...ready, enabled: false })).toBe(false);
-    expect(shouldAutoRestartForUpdate({ ...ready, downloaded: false })).toBe(false);
+  it('关：不自动重启', () => {
+    expect(shouldAutoRestartForUpdate({ ...ready, mode: 'off' })).toBe(false);
+  });
+
+  it('不等空闲：有 agent 在跑、排队、窗口在前台也不等满 5 分钟，直接重启', () => {
+    const immediate = { ...ready, mode: 'immediate' as const, idleForMs: 0 };
+    expect(shouldAutoRestartForUpdate(immediate)).toBe(true);
+    expect(
+      shouldAutoRestartForUpdate({
+        ...immediate,
+        agentBusy: true,
+        queuedCount: 2,
+        windowFocused: true,
+      })
+    ).toBe(true);
+  });
+
+  it('不等空闲：前台最近有输入、输入框有会丢的草稿、待答待审批（安全点保不住）时先等', () => {
+    const immediate = { ...ready, mode: 'immediate' as const, idleForMs: 0 };
+    for (const blocked of [
+      { userActive: true },
+      { unsentDraft: true },
+      { pendingAskCount: 1 },
+      { pendingApprovalCount: 1 },
+    ]) {
+      expect(isAutoRestartBlocked({ ...immediate, ...blocked })).toBe(true);
+      expect(shouldAutoRestartForUpdate({ ...immediate, ...blocked })).toBe(false);
+    }
+  });
+
+  it('旧版布尔开关迁移：开着的成「空闲时」，关着或没设的成「关」；新值原样保留', () => {
+    expect(resolveAutoRestartMode({ autoRestartWhenIdle: true })).toBe('idle');
+    expect(resolveAutoRestartMode({ autoRestartWhenIdle: false })).toBe('off');
+    expect(resolveAutoRestartMode({})).toBe('off');
+    expect(resolveAutoRestartMode(undefined)).toBe('off');
+    expect(
+      resolveAutoRestartMode({ autoRestartForUpdate: 'immediate', autoRestartWhenIdle: false })
+    ).toBe('immediate');
+    expect(
+      resolveAutoRestartMode({ autoRestartForUpdate: 'bogus', autoRestartWhenIdle: true })
+    ).toBe('idle');
   });
 
   it('running、队列、ask、审批、窗口焦点都挡', () => {

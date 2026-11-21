@@ -1,5 +1,6 @@
 import { app, ipcMain } from '@platform';
 import { IPC_CHANNELS } from '@shared/types';
+import { isAutoRestartMode, resolveAutoRestartMode } from '@shared/updater/idleRestart';
 import { readSettings } from '../../main/ipc/settings';
 import { allowRemoteHostControl } from '../../main/services/remoteRenderer';
 import { broadcastToRenderers } from '../../main/services/renderers';
@@ -18,7 +19,7 @@ export function registerServerUpdater(): ServerUpdater {
     npm: globalNpmInstaller(app.getAppPath()),
     broadcast: (status) => broadcastToRenderers(IPC_CHANNELS.UPDATER_STATUS, status),
     quit: () => app.quit(),
-    idle: () => currentIdleRestartObservation(true, true),
+    idle: () => currentIdleRestartObservation(),
   });
   ipcMain.handle(IPC_CHANNELS.UPDATER_GET_STATE, () => updater.state());
   ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, () => updater.checkForUpdates());
@@ -28,15 +29,15 @@ export function registerServerUpdater(): ServerUpdater {
   ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, (_event, enabled: unknown) => {
     if (typeof enabled === 'boolean') updater.setAutoUpdateEnabled(enabled);
   });
-  ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_WHEN_IDLE, (_event, enabled: unknown) => {
-    if (typeof enabled === 'boolean') updater.setAutoRestartWhenIdle(enabled);
+  ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_RESTART_MODE, (_event, mode: unknown) => {
+    if (isAutoRestartMode(mode)) updater.setAutoRestartMode(mode);
   });
   allowRemoteHostControl();
 
   const state = (
     readSettings()?.['enso-settings'] as { state?: Record<string, unknown> } | undefined
   )?.state;
-  updater.start(state?.autoUpdate !== false, state?.autoRestartWhenIdle === true);
+  updater.start(state?.autoUpdate !== false, resolveAutoRestartMode(state));
   app.on('before-quit', () => updater.stop());
   return updater;
 }

@@ -7,6 +7,8 @@ import { parseFeedQuery } from '@shared/secretary/feed';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretarySkillView, SecretaryState, SecretarySummary } from '@shared/types/secretary';
+import { resumesAfterQuit } from '../services/agentHost';
+import { coldResumedSessionIds, onColdResumeFailed } from '../services/coldRestart';
 import { notifyDesktop } from '../services/desktopHooks';
 import { interruptedTurnReason } from '../services/interruptedTurns';
 import { setSecretaryAvatarResolver } from '../services/localImageProtocol';
@@ -239,6 +241,8 @@ let driver: DispatchDriver | null = null;
 let contacts: SecretaryContacts | null = null;
 /** 每个秘书一个回传宿主：各自的定时器、巡检、投递槽位与定时任务 */
 const hosts = new Map<string, SecretaryHost>();
+/** 各秘书宿主对冷启动续跑失败的订阅 */
+const resumeFailureSubscriptions = new Map<string, () => void>();
 
 /** 档案与定时在设置窗口里编辑，聊天侧的操作仍只认主界面 */
 function isProfileEditor(webContentsId: number): boolean {
@@ -297,6 +301,9 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
     // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
     interruptDetail: (conversationId) =>
       interruptedTurnReason(path.join(app.getPath('userData'), 'agent'), conversationId),
+    // 写进恢复清单的会话新实例接着跑：退出与冷启动恢复都不报失败、中断
+    continuesAfterExit: (conversationId) => resumesAfterQuit(conversationId),
+    coldResumed: (conversationId) => coldResumedSessionIds().has(conversationId),
     startPending: (pendingIds, now) => {
       void startPendingDispatches(dispatchPorts, pendingIds, now).catch((error: unknown) => {
         console.warn(
@@ -509,6 +516,13 @@ async function startSecretary(ctx: SecretaryContext): Promise<void> {
     const created = createSecretaryHost(hostPortsFor(ctx));
     hosts.set(ctx.id, created);
     created.start();
+    // 续跑没接上的照常报失败；宿主晚于冷启动续跑起来，订阅时补报已失败的
+    resumeFailureSubscriptions.set(
+      ctx.id,
+      onColdResumeFailed((conversationId, error) =>
+        created.onRestartResumeFailed(conversationId, error)
+      )
+    );
   }
   await contacts?.add(ctx);
 }
@@ -607,6 +621,8 @@ export function registerSecretaryHandlers(): void {
     const host = hosts.get(ctx.id);
     host?.stop();
     hosts.delete(ctx.id);
+    resumeFailureSubscriptions.get(ctx.id)?.();
+    resumeFailureSubscriptions.delete(ctx.id);
     statePublishers.delete(ctx.id);
     await contacts?.remove(ctx.id, true);
     const result = await deleteSecretary(ctx, {

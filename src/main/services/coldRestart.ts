@@ -119,11 +119,42 @@ export function settleColdResume(sessionId: string): void {
   if (resumePending.size === 0) endResume?.();
 }
 
-/** 逐个重走 spawn；单个失败只记日志，不影响其他会话；派发失败的直接算结算，不等 worker */
+/** 还没就绪也没失败的续跑会话；续跑失败的会话与原因 */
+const resumeOutstanding = new Set<string>();
+const resumeFailures = new Map<string, string>();
+const resumeFailureListeners = new Set<(sessionId: string, error: string) => void>();
+
+/** 续跑会话就绪（worker 报 parent-ready） */
+export function coldResumeReady(sessionId: string): void {
+  resumeOutstanding.delete(sessionId);
+  settleColdResume(sessionId);
+}
+
+/** 续跑会话没接上（派发失败或 spawn 被拒）：每个会话报一次；已就绪的、清单外的不算 */
+export function failColdResume(sessionId: string, error: string): void {
+  settleColdResume(sessionId);
+  if (!resumeOutstanding.delete(sessionId)) return;
+  resumeFailures.set(sessionId, error);
+  for (const listener of resumeFailureListeners) listener(sessionId, error);
+}
+
+/** 订阅续跑失败：已经失败的立即补报（秘书宿主晚于续跑启动）；返回退订 */
+export function onColdResumeFailed(
+  listener: (sessionId: string, error: string) => void
+): () => void {
+  resumeFailureListeners.add(listener);
+  for (const [sessionId, error] of resumeFailures) listener(sessionId, error);
+  return () => resumeFailureListeners.delete(listener);
+}
+
+/** 逐个重走 spawn；单个失败只记日志并报续跑失败，不影响其他会话；派发失败的直接算结算，不等 worker */
 export async function resumeColdRestartSessions(
   current: ColdRestartPlan,
   resume: (entry: RestartManifestEntry) => Promise<{ ok: boolean; error?: string }>
 ): Promise<void> {
+  resumeOutstanding.clear();
+  resumeFailures.clear();
+  for (const entry of current.resume) resumeOutstanding.add(entry.sessionId);
   for (const entry of current.resume) {
     const result = await resume(entry).catch((error: unknown) => ({
       ok: false,
@@ -132,6 +163,6 @@ export async function resumeColdRestartSessions(
     console.log(
       `[graceful-restart] cold resume ${entry.sessionId.slice(0, 8)} ${result.ok ? 'ok' : `failed: ${result.error}`}`
     );
-    if (!result.ok) settleColdResume(entry.sessionId);
+    if (!result.ok) failColdResume(entry.sessionId, result.error ?? 'resume failed');
   }
 }
