@@ -29,6 +29,7 @@ vi.mock('@/stores/sessions', () => ({
   useSessionsStore: (select: (state: typeof harness.state) => unknown) => select(harness.state),
 }));
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
   useSecretaryStore: (select: (state: { secretary: typeof harness.secretary }) => unknown) =>
     select({ secretary: harness.secretary }),
 }));

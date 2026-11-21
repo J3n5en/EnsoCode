@@ -56,6 +56,15 @@ describe('边框不透明度', () => {
 describe('主题与强调色设置', () => {
   const current = { editMode: 'apply_patch' as const, accentColor: 'theme' as const };
 
+  it('v17 → v18 自动重启开关改成三选一：开着的成「空闲时」，关着的成「关」，旧键删掉', () => {
+    const on = migrateSettings({ autoRestartWhenIdle: true }, 17) as Record<string, unknown>;
+    expect(on).toEqual({ autoRestartForUpdate: 'idle' });
+    expect(migrateSettings({ autoRestartWhenIdle: false }, 17)).toEqual({
+      autoRestartForUpdate: 'off',
+    });
+    expect(migrateSettings({ accentColor: 'blue' }, 17)).toEqual({ accentColor: 'blue' });
+  });
+
   it('v16 → v17 把无法区分是否主动选择的 violet 迁为跟随主题，其他强调色不动', () => {
     expect(migrateSettings({ accentColor: 'violet' }, 16)).toEqual({ accentColor: 'theme' });
     expect(migrateSettings({ accentColor: 'teal' }, 16)).toEqual({ accentColor: 'teal' });

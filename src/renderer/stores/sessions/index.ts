@@ -361,7 +361,7 @@ export interface Conversation extends SessionProjection {
   /** Main 驱动的派出会话：续跑与队列泵由 Main 负责，本窗口只显示与转发指令 */
   driver?: 'main';
   /** 由秘书派出；只用于显示，任何权限判断都不读它 */
-  secretaryOrigin?: { secretaryConversationId: string };
+  secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
   /** 回退后待预填输入框的内容(rewind-done 回流,Composer 消费一次) */
   draftText?: string;
   draftImages?: AttachedImage[];

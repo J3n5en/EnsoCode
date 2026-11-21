@@ -1,3 +1,4 @@
+import { secretaryAvatarUrl } from '@shared/localImage';
 import type { AgentSessionCustomEntry, ProjectedMessage } from '@shared/types/agent';
 import {
   type RefObject,
@@ -10,6 +11,7 @@ import {
 } from 'react';
 import { useOpenChangesOnEdit } from '@/hooks/useOpenChangesOnEdit';
 import { eventToBinding } from '@/lib/keybindings';
+import { useSecretaryStore } from '@/stores/secretary';
 import { useSessionsStore } from '@/stores/sessions';
 import { chatTimelineActivity } from '@/stores/sessions/messageCache';
 import {
@@ -50,6 +52,31 @@ export function ChatSessionTimeline({
   const secretarySession = useSettingsStore((state) =>
     state.projects.some((project) => project.id === projectId && project.kind === 'secretary')
   );
+  const secretaryId = useSecretaryStore((state) =>
+    secretarySession
+      ? (state.secretaries.find((entry) => entry.projectId === projectId)?.id ?? null)
+      : null
+  );
+  // selector 只取 store 里的原引用：每次返回新对象会让 useSyncExternalStore 无限重渲染
+  const secretaryProfile = useSecretaryStore((state) =>
+    secretaryId
+      ? ((state.states[secretaryId] ?? (state.focusedId === secretaryId ? state.secretary : null))
+          ?.profile ?? null)
+      : null
+  );
+  const secretaryFace = useMemo(() => {
+    if (!secretaryId || !secretaryProfile) return null;
+    const imageVersion = secretaryProfile.avatar.imageVersion;
+    return {
+      name: secretaryProfile.name.trim() || '·',
+      color: secretaryProfile.avatar.color,
+      ...(imageVersion
+        ? {
+            image: secretaryAvatarUrl(imageVersion, secretaryProfile.avatar.imageHash, secretaryId),
+          }
+        : {}),
+    };
+  }, [secretaryId, secretaryProfile]);
   const messages = useSessionsStore(
     (state) => state.conversations[conversationId]?.messages ?? EMPTY_MESSAGES
   );
@@ -309,6 +336,7 @@ export function ChatSessionTimeline({
         searchQuery={findOpen ? findQuery : ''}
         activeHit={findOpen ? (findHits[findIndex] ?? null) : null}
         secretarySession={secretarySession}
+        {...(secretaryFace ? { secretaryFace } : {})}
       />
     </MarkdownLinkContext.Provider>
   );

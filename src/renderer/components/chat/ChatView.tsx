@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useShallow } from 'zustand/react/shallow';
 import { ChromeRow, useShellChrome } from '@/components/app/WindowChrome';
 import { SecretaryTakeoverControl } from '@/components/secretary/SecretaryTakeover';
+import { SecretaryTransferControl } from '@/components/secretary/SecretaryTransfer';
 import { addToast } from '@/components/ui/toast';
 import { useMemberName } from '@/hooks/useMemberName';
 import { toChatMentionCandidates } from '@/hooks/useMentionSearch';
@@ -354,6 +355,7 @@ export function ChatView() {
         trailing={
           <div className="flex min-w-0 shrink-0 items-center gap-1">
             <SecretaryTakeoverControl conversationId={chrome.parentId} />
+            <SecretaryTransferControl conversationId={chrome.parentId} />
             <ChildRunsButton parentId={chrome.parentId} coworkerIds={coworkerIds ?? []} />
             {project ? (
               <WorkspaceBadge

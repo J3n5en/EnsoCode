@@ -440,7 +440,10 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
         return;
       }
       if (event.type === 'graceful-restart-deferred') {
-        if (worker === child) quitCheckpoint?.observe(event.sessions);
+        if (worker === child) {
+          lastRestartDeferred = event.sessions;
+          quitCheckpoint?.observe(event.sessions);
+        }
         console.log(
           `[agent] graceful restart deferred: ${event.sessions
             .map((s) => `${s.identity.sessionId.slice(0, 8)}=${s.reason}`)
@@ -485,7 +488,9 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
     }
   });
   child.on('exit', (code: unknown) => {
-    const swap = worker === child ? gracefulRestart.exited(child) : { swap: false as const };
+    const current = worker === child;
+    const swap = current ? gracefulRestart.exited(child) : { swap: false as const };
+    if (current) lastRestartDeferred = null;
     // 等安全点时 worker 先没了：不必再等超时
     if (worker === child) quitCheckpoint?.settle('skipped');
     if (worker === child) detachAck?.();
@@ -526,6 +531,8 @@ export function startAgentWorker(options: { restartCheckpointFile?: string } = {
       startAgentWorker({ restartCheckpointFile: path.join(dataDir, RESTART_CHECKPOINT_FILE) });
       return;
     }
+    // 超时退出时 worker 收尾落的断点先写成清单：订阅者收到退出事件时就知道哪些会话重启后接着跑
+    if (current && quitCheckpoint) writePendingLateManifest(quitCheckpoint);
     onEvent?.({ type: 'worker-exited', detail });
   });
 }
@@ -624,8 +631,8 @@ export async function restartAgentWorker(timeoutMs = 5_000): Promise<boolean> {
 export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
   const child = worker;
   const pending = quitCheckpoint;
-  // 清会话前留一份设置：补写清单时要配上
-  const late = pending?.timedOut && !pending.manifestWritten ? gracefulRestart.snapshot() : null;
+  // 清会话前留一份设置：补写清单时要配上（worker 退出时写，没等到退出就在这里补写）
+  if (pending?.timedOut && !pending.manifestWritten) pending.late = gracefulRestart.snapshot();
   // 退出应用时不再换代
   gracefulRestart.reset();
   if (child) {
@@ -633,7 +640,19 @@ export async function stopAgentWorkerForQuit(timeoutMs: number): Promise<void> {
     if (keepBackgroundOnQuit) await detachBackgroundTasks(child, DETACH_ACK_TIMEOUT_MS);
     await killAndWaitExit(child, timeoutMs);
   }
-  if (pending && late) writeLateQuitManifest(pending, late);
+  if (pending) writePendingLateManifest(pending);
+}
+
+function writePendingLateManifest(pending: QuitCheckpoint): void {
+  const late = pending.late;
+  if (!late) return;
+  pending.late = undefined;
+  writeLateQuitManifest(pending, late);
+}
+
+/** 这个会话写进了本次退出的恢复清单：新实例按清单恢复，worker 退出不算它失败 */
+export function resumesAfterQuit(sessionId: string): boolean {
+  return quitCheckpoint?.resumable.has(sessionId) ?? false;
 }
 
 /** 等 worker 交出后台命令的上限；超时照常终止（没交出去的随 worker 收尾停掉） */
@@ -678,6 +697,10 @@ interface QuitCheckpoint {
   promise: Promise<QuitCheckpointResult>;
   timedOut: boolean;
   manifestWritten: boolean;
+  /** 写进恢复清单的会话 */
+  resumable: ReadonlySet<string>;
+  /** 超时退出、还没补写清单时留的会话设置 */
+  late?: RestartSettingsSnapshot;
   /** worker 最近一次推迟时报告有工具在跑 */
   toolsRunning: boolean;
   /** 在等的命令里有没法脱离应用的转后台命令 */
@@ -690,6 +713,8 @@ interface QuitCheckpoint {
 }
 
 let quitCheckpoint: QuitCheckpoint | null = null;
+/** 本代 worker 最近一次报告的推迟：换代重启已在等时加入的退出没有新事件，据此知道有没有工具在跑 */
+let lastRestartDeferred: DeferredSessions | null = null;
 
 /**
  * 应用退出 / 安装更新：先请 worker 停到安全点、写好断点，Main 再把恢复清单落到 dataDir，
@@ -760,6 +785,7 @@ export function prepareAgentWorkerForQuit(options: {
     promise,
     timedOut: false,
     manifestWritten: false,
+    resumable: new Set(),
     toolsRunning: false,
     waitReason: 'tool',
     waitingForTools: options.onWaitingForTools ? [options.onWaitingForTools] : [],
@@ -797,6 +823,7 @@ export function prepareAgentWorkerForQuit(options: {
   };
   quitCheckpoint = state;
   arm();
+  if (outcome === 'joined' && lastRestartDeferred) state.observe(lastRestartDeferred);
   return promise;
 }
 
@@ -834,6 +861,8 @@ function writeQuitManifest(
       settingsOf: settings.settingsOf,
     });
     pending.manifestWritten = writeRestartManifest(agentDataDir(), manifest, settings.secrets);
+    if (pending.manifestWritten)
+      pending.resumable = new Set(manifest.sessions.map((entry) => entry.sessionId));
     return pending.manifestWritten ? 'written' : 'empty';
   } catch (error) {
     console.error('[graceful-restart] 写恢复清单失败，冷启动不续跑:', error);

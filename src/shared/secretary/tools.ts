@@ -35,6 +35,8 @@ export const SECRETARY_OPS = [
   'secretary_profile_propose',
   'skill_propose',
   'tool_propose',
+  'secretary_list',
+  'secretary_message',
 ] as const;
 
 export type SecretaryOp = (typeof SECRETARY_OPS)[number];

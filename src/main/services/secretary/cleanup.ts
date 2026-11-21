@@ -27,11 +27,13 @@ import type {
   CleanupSummaryItem,
   SecretaryAuditEntry,
   SecretaryDispatchFile,
+  SecretaryProfile,
 } from '@shared/types/secretary';
 import { CLEANUP_ITEM_KINDS } from '@shared/types/secretary';
 import { appendAudit } from './audit';
 import type { SavedProposal } from './proposals';
 import { type GitRunner, parseWorktrees, runGit } from './repoStatus';
+import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -94,6 +96,8 @@ export interface CleanupPorts {
   projects(): MaybePromise<readonly ProjectAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   dispatchFile(): MaybePromise<SecretaryDispatchFile>;
+  /** 任何秘书正在跑的派发会话占着的 worktree（真实路径）；缺省表示没有 */
+  busyWorktrees?(): MaybePromise<ReadonlySet<string>>;
   archive(conversationId: string, at: number): MaybePromise<void>;
   audit(entry: SecretaryAuditEntry): void;
   now(): number;
@@ -378,6 +382,12 @@ export async function scanCleanup(
     warnings.push(
       'Scan hit its time limit: repos in incomplete were skipped this time. Call cleanup_list again in a moment.'
     );
+  // 任何秘书正在跑的派发会话还用着的 worktree：不管归谁，都不能清
+  const busy = (await ports.busyWorktrees?.()) ?? new Set<string>();
+  for (const item of items) {
+    if (item.kind === 'worktree' && !item.blocked && item.path && busy.has(item.path))
+      item.blocked = 'in-use';
+  }
   const sizeTargets = items.filter((item) => item.kind === 'worktree' && !item.blocked);
   let measured = 0;
   if (options.sizeBudgetMs !== false && sizeTargets.length > 0) {
@@ -1063,15 +1073,15 @@ export function defaultCleanupWorktreeRoots(managedRoot?: string, home = homedir
   return [path.join(home, 'project', 'worktree'), ...(managedRoot ? [managedRoot] : [])];
 }
 
-function secretaryDir(): string {
-  return path.join(app.getPath('userData'), 'secretary');
-}
-
 /**
  * 生产端口：与派发模块一样用动态 import 取 Main 的既有函数，
  * 避免 cleanup → dispatch → cleanup 的静态环。
  */
-export function realCleanupPorts(): CleanupPorts {
+export function realCleanupPorts(
+  ctx: SecretaryContext,
+  /** 降权回合传收窄后的档案；缺省读这个秘书自己的档案 */
+  profile: () => MaybePromise<SecretaryProfile | null> = () => new SecretaryStore(ctx.dir).profile()
+): CleanupPorts {
   return {
     git: runGit,
     realpath: async (target) => {
@@ -1092,10 +1102,17 @@ export function realCleanupPorts(): CleanupPorts {
       }),
     size: cachedDu,
     mergedPulls: cachedMergedPulls,
-    projects: async () =>
-      (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [],
+    // 只扫这个秘书看得见的项目：别的秘书的项目与分支不出现在它的清单里
+    projects: async () => {
+      const all =
+        (await import('../../ipc/agent')).getSourceAuthorityRegistry()?.projection().projects ?? [];
+      const { visibleProjects } = await import('./readers');
+      const current = await profile();
+      return current ? visibleProjects(all, current) : all;
+    },
     rows: async () => (await import('../../ipc/settings')).readPersistedConversations(),
-    dispatchFile: () => new SecretaryStore(secretaryDir()).dispatch(),
+    dispatchFile: () => new SecretaryStore(ctx.dir).dispatch(),
+    busyWorktrees: async () => (await import('./crossSecretary')).runningWorktreePaths(),
     archive: async (conversationId, at) => {
       const { patchConversationsState } = await import('../../ipc/settings');
       patchConversationsState((state) => {
@@ -1104,7 +1121,7 @@ export function realCleanupPorts(): CleanupPorts {
         state.conversations[conversationId] = { ...row, archived: true, archivedAt: at };
       });
     },
-    audit: (entry) => appendAudit(secretaryDir(), entry),
+    audit: (entry) => appendAudit(ctx.dir, entry),
     now: () => Date.now(),
   };
 }
@@ -1115,11 +1132,16 @@ const cachedMergedPulls = memoizeAsync(runMergedPulls, (pulls) =>
   pulls === null ? 60_000 : 5 * 60_000
 );
 
-export const secretaryCleanupHandlers = createSecretaryCleanupHandlers({
-  ...realCleanupPorts(),
-  // 提案落盘在派发模块里：这里动态取，避免 cleanup ↔ dispatch 的静态环
-  saveProposal: async (items, secretaryConversationId) => {
-    const { saveCleanupProposal } = await import('./dispatch');
-    return saveCleanupProposal(items, secretaryConversationId);
-  },
-});
+export function cleanupHandlersFor(
+  ctx: SecretaryContext,
+  profile?: () => MaybePromise<SecretaryProfile | null>
+): ReturnType<typeof createSecretaryCleanupHandlers> {
+  return createSecretaryCleanupHandlers({
+    ...realCleanupPorts(ctx, profile),
+    // 提案落盘在派发模块里：这里动态取，避免 cleanup ↔ dispatch 的静态环
+    saveProposal: async (items, secretaryConversationId) => {
+      const { saveCleanupProposal, dispatchPortsFor } = await import('./dispatch');
+      return saveCleanupProposal(items, secretaryConversationId, dispatchPortsFor(ctx));
+    },
+  });
+}

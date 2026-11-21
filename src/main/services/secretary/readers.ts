@@ -1,5 +1,3 @@
-import path from 'node:path';
-import { app } from '@platform';
 import { projectNameFromPath } from '@shared/projectName';
 import { parseProfile } from '@shared/secretary/parse';
 import {
@@ -34,6 +32,7 @@ import {
   realRepoDeps,
   resolveRepoScope,
 } from './repoStatus';
+import type { SecretaryContext } from './secretaries';
 import { SecretaryStore } from './store';
 import type { SecretaryOpHandler, SecretaryOpResult } from './tools';
 
@@ -482,45 +481,49 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
   };
 }
 
-const defaultPorts: SecretaryReadPorts = {
-  async projects() {
-    const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();
-    return registry?.projection().projects ?? [];
-  },
-  async conversations() {
-    const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();
-    return registry?.projection().conversations ?? [];
-  },
-  async rows() {
-    return (await import('../../ipc/settings')).readPersistedConversations();
-  },
-  async status(conversationId) {
-    return (await import('../../ipc/agent')).observedSessionStatus(conversationId);
-  },
-  async history(sessionFile, before) {
-    return (await import('../../ipc/agent')).readSessionHistoryFile(sessionFile, before);
-  },
-  async git(repoPath) {
-    try {
-      const [branch, clean] = await Promise.all([currentBranch(repoPath), repoIsClean(repoPath)]);
-      return { branch, dirty: !clean };
-    } catch {
-      return null;
-    }
-  },
-  async profile() {
-    return new SecretaryStore(path.join(app.getPath('userData'), 'secretary')).profile();
-  },
-  async message(sessionFile, index) {
-    return (await import('../../ipc/agent')).readSessionMessage(sessionFile, index);
-  },
-  async activity(sessionFile, limit) {
-    return (await import('../../ipc/agent')).readSessionActivity(sessionFile, limit);
-  },
-  async tasks(conversationId) {
-    return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);
-  },
-  repo: realRepoDeps,
-};
-
-export const secretaryReadHandlers = createSecretaryReadHandlers(defaultPorts);
+/** 一个秘书的只读端口：档案（可见项目）按秘书读，降权回合传收窄后的档案 */
+export function readPortsFor(
+  ctx: SecretaryContext,
+  profile: () => MaybePromise<SecretaryProfile | null> = () => new SecretaryStore(ctx.dir).profile()
+): SecretaryReadPorts {
+  return {
+    async projects() {
+      const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();
+      return registry?.projection().projects ?? [];
+    },
+    async conversations() {
+      const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();
+      return registry?.projection().conversations ?? [];
+    },
+    async rows() {
+      return (await import('../../ipc/settings')).readPersistedConversations();
+    },
+    async status(conversationId) {
+      return (await import('../../ipc/agent')).observedSessionStatus(conversationId);
+    },
+    async history(sessionFile, before) {
+      return (await import('../../ipc/agent')).readSessionHistoryFile(sessionFile, before);
+    },
+    async git(repoPath) {
+      try {
+        const [branch, clean] = await Promise.all([currentBranch(repoPath), repoIsClean(repoPath)]);
+        return { branch, dirty: !clean };
+      } catch {
+        return null;
+      }
+    },
+    async profile() {
+      return profile();
+    },
+    async message(sessionFile, index) {
+      return (await import('../../ipc/agent')).readSessionMessage(sessionFile, index);
+    },
+    async activity(sessionFile, limit) {
+      return (await import('../../ipc/agent')).readSessionActivity(sessionFile, limit);
+    },
+    async tasks(conversationId) {
+      return (await import('../../ipc/agent')).observedBackgroundTasks(conversationId);
+    },
+    repo: realRepoDeps,
+  };
+}

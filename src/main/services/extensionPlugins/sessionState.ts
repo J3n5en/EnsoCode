@@ -30,6 +30,9 @@ export class SessionStateTracker {
   private readonly nodes = new Map<string, Node>();
   private readonly reported = new Map<string, PluginSessionStatus>();
 
+  /** continuesAfterExit：应用退出时写进恢复清单、新实例接着跑的主会话，worker 退出不改判失败 */
+  constructor(private readonly continuesAfterExit: (rootId: string) => boolean = () => false) {}
+
   status(sessionId: string): PluginSessionStatus {
     const root = rootOf(sessionId);
     let pendingAsks = 0;
@@ -90,13 +93,16 @@ export class SessionStateTracker {
 
   private apply(event: RendererAgentEvent): Set<string> {
     if (event.type === 'worker-exited') {
+      const touched = new Set<string>();
       for (const node of this.nodes.values()) {
+        if (this.continuesAfterExit(node.root)) continue;
+        touched.add(node.root);
         node.status = 'failed';
         node.asks.clear();
         node.approvals.clear();
         node.subagents.clear();
       }
-      return new Set([...this.nodes.values()].map((node) => node.root));
+      return touched;
     }
     if (event.type === 'snapshot') {
       const touched = new Set<string>();

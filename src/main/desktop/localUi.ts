@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, type WebContents, webContents } from 'electron';
+import { app, BrowserWindow, powerMonitor, session, type WebContents, webContents } from 'electron';
 import { isServerMode } from '../services/appServerMode';
 import { partitionName } from '../services/browserPartition';
 import { isMainRenderer, isSettingsRenderer } from '../services/renderers';
@@ -64,6 +64,9 @@ const desktopUi: LocalUi = {
   },
   anyFocused() {
     return BrowserWindow.getAllWindows().some((win) => !win.isDestroyed() && win.isFocused());
+  },
+  inputIdleMs() {
+    return powerMonitor.getSystemIdleTime() * 1000;
   },
   focusMain() {
     focusMainWindow();

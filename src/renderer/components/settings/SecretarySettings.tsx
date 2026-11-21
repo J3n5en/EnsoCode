@@ -7,6 +7,7 @@ import type {
   SecretaryProfileDraft,
   SecretaryScheduleView,
   SecretarySkillView,
+  SecretarySummary,
   SecretaryTakeoverScope,
   SecretaryTakeoverView,
   SecretaryToolDraft,
@@ -28,6 +29,7 @@ import {
   STYLE_LABELS,
 } from '@/components/secretary/profileLabels';
 import { SecretaryAvatar } from '@/components/secretary/SecretaryAvatar';
+import { SecretaryDeleteDialog } from '@/components/secretary/SecretaryDeleteDialog';
 import { SecretaryProfileForm } from '@/components/secretary/SecretaryProfileForm';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import { Button } from '@/components/ui/button';
@@ -35,6 +37,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
+import { SETTINGS_SECRETARY_KEY } from '@/lib/secretarySettingsLink';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
 import { PickList } from './PresetsSettings';
@@ -178,17 +181,21 @@ function PluginPicker({
   );
 }
 
+/** 设置页当前编辑的秘书：只有一个秘书时为 undefined，Main 接受省略 */
+const SecretaryIdContext = React.createContext<string | undefined>(undefined);
+
 /** 秘书自有的 skill：与右侧面板同一份列表，正文可展开，删除后 Main 释放会话 */
 function OwnSkills({ busy }: { busy: boolean }) {
   const { t } = useI18n();
+  const secretaryId = React.useContext(SecretaryIdContext);
   const [skills, setSkills] = React.useState<SecretarySkillView[]>([]);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
-    const result = await window.electronAPI.secretary.listSkills();
+    const result = await window.electronAPI.secretary.listSkills(secretaryId);
     if (result.ok) setSkills(result.skills.filter((skill) => skill.source === 'own'));
     else setError(result.error);
-  }, []);
+  }, [secretaryId]);
 
   React.useEffect(() => {
     void load();
@@ -196,7 +203,7 @@ function OwnSkills({ busy }: { busy: boolean }) {
 
   const remove = async (name: string) => {
     setError(null);
-    const result = await window.electronAPI.secretary.removeSkill(name);
+    const result = await window.electronAPI.secretary.removeSkill(name, secretaryId);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -245,14 +252,15 @@ function OwnSkills({ busy }: { busy: boolean }) {
 /** 秘书自造的工具：代码可展开，删除后 Main 释放会话，下次 spawn 生效 */
 function OwnTools({ busy }: { busy: boolean }) {
   const { t } = useI18n();
+  const secretaryId = React.useContext(SecretaryIdContext);
   const [tools, setTools] = React.useState<SecretaryToolDraft[]>([]);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
-    const result = await window.electronAPI.secretary.listTools();
+    const result = await window.electronAPI.secretary.listTools(secretaryId);
     if (result.ok) setTools(result.tools);
     else setError(result.error);
-  }, []);
+  }, [secretaryId]);
 
   React.useEffect(() => {
     void load();
@@ -260,7 +268,7 @@ function OwnTools({ busy }: { busy: boolean }) {
 
   const remove = async (name: string) => {
     setError(null);
-    const result = await window.electronAPI.secretary.removeTool(name);
+    const result = await window.electronAPI.secretary.removeTool(name, secretaryId);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -391,14 +399,15 @@ function TakeoverScopePicker({
 /** 交给秘书接管的会话：随秘书状态推送刷新，取消后秘书立即失去对它的发消息与停止权限 */
 function Takeovers({ locale }: { locale: string }) {
   const { t } = useI18n();
+  const secretaryId = React.useContext(SecretaryIdContext);
   const [takeovers, setTakeovers] = React.useState<SecretaryTakeoverView[]>([]);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
-    const result = await window.electronAPI.secretary.listTakeovers();
+    const result = await window.electronAPI.secretary.listTakeovers(secretaryId);
     if (result.ok) setTakeovers(result.takeovers);
     else setError(result.error);
-  }, []);
+  }, [secretaryId]);
 
   React.useEffect(() => {
     void load();
@@ -451,14 +460,15 @@ function Takeovers({ locale }: { locale: string }) {
  */
 function Untracked() {
   const { t } = useI18n();
+  const secretaryId = React.useContext(SecretaryIdContext);
   const [entries, setEntries] = React.useState<SecretaryUntrackedView[]>([]);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
-    const result = await window.electronAPI.secretary.listUntracked();
+    const result = await window.electronAPI.secretary.listUntracked(secretaryId);
     if (result.ok) setEntries(result.untracked);
     else setError(result.error);
-  }, []);
+  }, [secretaryId]);
 
   React.useEffect(() => {
     void load();
@@ -467,7 +477,7 @@ function Untracked() {
 
   const remove = async (conversationId: string) => {
     setError(null);
-    const result = await window.electronAPI.secretary.removeUntracked(conversationId);
+    const result = await window.electronAPI.secretary.removeUntracked(conversationId, secretaryId);
     if (!result.ok) setError(result.error);
     await load();
   };
@@ -534,9 +544,116 @@ function GlobalSkillPicker({
   );
 }
 
-/** 设置 → 秘书：档案、风格与打扰、定时、重来 */
+/** 设置 → 秘书：多秘书时先选秘书，再编辑它的档案、风格、定时；也能新建与删除 */
 export function SecretarySettings() {
+  const { t } = useI18n();
+  const [secretaries, setSecretaries] = React.useState<SecretarySummary[]>([]);
+  const [selected, setSelected] = React.useState<string | undefined>(() => {
+    try {
+      return localStorage.getItem(SETTINGS_SECRETARY_KEY) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+
+  const loadList = React.useCallback(async () => {
+    const list = await window.electronAPI.secretary.list();
+    setSecretaries(list);
+  }, []);
+
+  React.useEffect(() => {
+    void loadList();
+    return window.electronAPI.secretary.onListChanged(setSecretaries);
+  }, [loadList]);
+
+  // 设置窗口已开着时，主窗口点另一个秘书的「设置」：跟着切过去
+  React.useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.key === SETTINGS_SECRETARY_KEY && event.newValue) setSelected(event.newValue);
+    };
+    window.addEventListener('storage', follow);
+    return () => window.removeEventListener('storage', follow);
+  }, []);
+
+  const current =
+    secretaries.find((entry) => entry.id === selected)?.id ?? secretaries[0]?.id ?? undefined;
+  const multiple = secretaries.length > 1;
+
+  const create = async () => {
+    const result = await window.electronAPI.secretary.create();
+    if (!result.ok) return;
+    await loadList();
+    setSelected(result.secretaryId);
+  };
+
+  return (
+    <SecretaryIdContext.Provider value={multiple ? current : undefined}>
+      <div className="space-y-4">
+        {secretaries.length > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            data-enso="secretary-settings-picker"
+          >
+            {multiple &&
+              secretaries.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  data-enso="secretary-settings-pick"
+                  data-secretary-id={entry.id}
+                  data-selected={entry.id === current || undefined}
+                  onClick={() => setSelected(entry.id)}
+                  className={cn(
+                    'rounded-full border px-2.5 py-1 text-xs transition-colors',
+                    entry.id === current
+                      ? 'border-foreground/40 bg-foreground/5 text-foreground'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {entry.name ?? t('Secretary')}
+                </button>
+              ))}
+            <Button
+              variant="outline"
+              size="sm"
+              data-enso="secretary-settings-create"
+              onClick={() => void create()}
+            >
+              {t('New secretary')}
+            </Button>
+            {current && (
+              <Button
+                variant="ghost"
+                size="sm"
+                data-enso="secretary-settings-delete"
+                onClick={() => setDeleteOpen(true)}
+              >
+                {t('Delete secretary')}
+              </Button>
+            )}
+          </div>
+        )}
+        <SecretaryProfileSettings key={current ?? 'single'} />
+        {current && (
+          <SecretaryDeleteDialog
+            open={deleteOpen}
+            secretaryId={current}
+            onOpenChange={setDeleteOpen}
+            onDeleted={() => {
+              setSelected(undefined);
+              void loadList();
+            }}
+          />
+        )}
+      </div>
+    </SecretaryIdContext.Provider>
+  );
+}
+
+function SecretaryProfileSettings() {
   const { t, locale } = useI18n();
+  const secretaryId = React.useContext(SecretaryIdContext);
   const [profile, setProfile] = React.useState<SecretaryProfile | null>(null);
   const [persona, setPersona] = React.useState('');
   const [styleDraft, setStyleDraft] = React.useState<SecretaryProfileDraft | null>(null);
@@ -550,12 +667,12 @@ export function SecretarySettings() {
   const defaultName = t('Secretary');
 
   const loadSchedules = React.useCallback(async () => {
-    const result = await window.electronAPI.secretary.listSchedules();
+    const result = await window.electronAPI.secretary.listSchedules(secretaryId);
     if (result.ok) setSchedules(result.schedules);
-  }, []);
+  }, [secretaryId]);
 
   const reload = React.useCallback(async () => {
-    const result = await window.electronAPI.secretary.getProfile();
+    const result = await window.electronAPI.secretary.getProfile(secretaryId);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -564,7 +681,7 @@ export function SecretarySettings() {
     setPersona(result.persona);
     setStyleDraft(result.profile ? draftFromProfile(result.profile, defaultName) : null);
     await loadSchedules();
-  }, [defaultName, loadSchedules]);
+  }, [defaultName, loadSchedules, secretaryId]);
 
   React.useEffect(() => {
     void reload();
@@ -575,7 +692,7 @@ export function SecretarySettings() {
     setError(null);
     setNotice(null);
     try {
-      const result = await window.electronAPI.secretary.saveProfile(draft);
+      const result = await window.electronAPI.secretary.saveProfile(draft, secretaryId);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -595,7 +712,7 @@ export function SecretarySettings() {
     dispatchAvatar({ type: 'saving' });
     setError(null);
     try {
-      const result = await window.electronAPI.secretary.setAvatar(image);
+      const result = await window.electronAPI.secretary.setAvatar(image, secretaryId);
       if (!result.ok) {
         dispatchAvatar({ type: 'save-failed' });
         setError(result.error);
@@ -612,7 +729,7 @@ export function SecretarySettings() {
 
   const removeSchedule = async (scheduleId: string) => {
     setError(null);
-    const result = await window.electronAPI.secretary.removeSchedule(scheduleId);
+    const result = await window.electronAPI.secretary.removeSchedule(scheduleId, secretaryId);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -671,7 +788,11 @@ export function SecretarySettings() {
               color={profile.avatar.color}
               image={
                 profile.avatar.imageVersion
-                  ? secretaryAvatarUrl(profile.avatar.imageVersion, profile.avatar.imageHash)
+                  ? secretaryAvatarUrl(
+                      profile.avatar.imageVersion,
+                      profile.avatar.imageHash,
+                      secretaryId
+                    )
                   : undefined
               }
               needsYou={0}
@@ -970,6 +1091,7 @@ export function SecretarySettings() {
         </Button>
         <SecretaryResetDialog
           open={resetOpen}
+          secretaryId={secretaryId}
           onOpenChange={setResetOpen}
           onReset={() => {
             setProfile(null);

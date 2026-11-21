@@ -1,7 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { telegramUrlButtonSupported } from '@shared/secretary/contact';
+import {
+  type ContactRouteClaim,
+  findRouteConflict,
+  telegramUrlButtonSupported,
+} from '@shared/secretary/contact';
 import type { FeedCursor } from '@shared/secretary/feed';
 import { parseInboundMessage } from '@shared/secretary/inbound';
 import type { SecretaryAuditEntry, SecretaryProfile } from '@shared/types/secretary';
@@ -24,8 +28,9 @@ import type {
   TelegramUser,
 } from './client';
 import { TelegramApiError } from './client';
+import { TelegramHub } from './hub';
 import { ContactService, type ContactServicePorts } from './service';
-import { ContactStore } from './store';
+import { ContactStore, contactClaims } from './store';
 import { deliverToSecretary } from './wake';
 
 const TOKEN = '123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
@@ -470,7 +475,7 @@ describe('绑定码', () => {
     expect(telegram.bot?.username).toBe('enso_secretary_bot');
   });
 
-  it('群里的 /start 不算，只认私聊', async () => {
+  it('群里的绑定码认不出发送者就不绑', async () => {
     const h = harness();
     await h.service.bind(TOKEN);
     h.api.push({
@@ -479,7 +484,7 @@ describe('绑定码', () => {
     });
     await waitFor(() => h.audits.some((entry) => entry.op === 'contact_bind_rejected'), 'rejected');
     expect(h.audits.find((entry) => entry.op === 'contact_bind_rejected')?.detail).toBe(
-      'not-private'
+      'no-sender'
     );
     expect(h.service.state().telegram.status).toBe('awaiting-start');
   });
@@ -2943,5 +2948,230 @@ describe('出站图片与文件', () => {
   it('没有已连接的渠道：返回 not-bound', async () => {
     const h = harness();
     expect(await h.service.sendMedia('sec-1', image())).toEqual({ ok: false, error: 'not-bound' });
+  });
+});
+
+describe('多秘书：一个 bot 连接，多条路由', () => {
+  const OTHER_TOKEN = '987654321:BBHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
+
+  function multi() {
+    const apis = new Map<string, FakeApi>([
+      [TOKEN, new FakeApi()],
+      [OTHER_TOKEN, new FakeApi()],
+    ]);
+    const hub = new TelegramHub({
+      api: (token) => apis.get(token),
+      sleep: async () => {},
+    });
+    const members: {
+      id: string;
+      store: ContactStore;
+      service: ContactService;
+      audits: SecretaryAuditEntry[];
+      delivered: string[];
+      saved: string[];
+    }[] = [];
+    const conflict = (claim: ContactRouteClaim): string | null => {
+      const claims = members
+        .filter((member) => member.id !== claim.secretaryId)
+        .flatMap((member) => contactClaims(member.id, member.store.file()));
+      return findRouteConflict(claims, claim)?.secretaryId ?? null;
+    };
+    const add = (id: string, random: number) => {
+      const dir = mkdtempSync(join(tmpdir(), `secretary-contact-${id}-`));
+      dirs.push(dir);
+      const store = new ContactStore(dir);
+      const audits: SecretaryAuditEntry[] = [];
+      const delivered: string[] = [];
+      const saved: string[] = [];
+      const service = new ContactService(store, {
+        audit: (entry) => audits.push(entry),
+        publish: () => {},
+        now: () => 1_000_000,
+        random: () => random,
+        lang: () => 'zh',
+        notifyMode: () => 'with-done',
+        secretaryName: () => id,
+        secretaryConversationId: () => `${id}-chat`,
+        deliver: async (_conversationId, text) => {
+          delivered.push(text);
+          return { ok: true };
+        },
+        saveInboundImages: (conversationId, images) =>
+          images.map((data) => {
+            saved.push(conversationId);
+            return {
+              ok: true,
+              path: `/img/${conversationId}/${saved.length}.png`,
+              size: data.length,
+            };
+          }),
+        answerAsk: () => ({ ok: true }),
+        resolveProposal: async () => ({ ok: true }),
+        openInApp: () => {},
+        following: new FollowingStore(dir),
+        hub,
+        secretaryId: id,
+        routeConflict: conflict,
+      });
+      const member = { id, store, service, audits, delivered, saved };
+      members.push(member);
+      return member;
+    };
+    return { apis, hub, add };
+  }
+
+  function topicMessage(text: string, topicId: number, from = 777): TelegramUpdate {
+    return {
+      update_id: 1,
+      message: {
+        message_id: 1,
+        chat: { id: -100, type: 'supergroup', title: '工作群', is_forum: true },
+        from: { id: from, username: 'j3n5en', first_name: 'J' },
+        message_thread_id: topicId,
+        is_topic_message: true,
+        text,
+      },
+    };
+  }
+
+  async function bindTopic(
+    h: ReturnType<typeof multi>,
+    member: ReturnType<ReturnType<typeof multi>['add']>,
+    topicId: number,
+    token = TOKEN
+  ): Promise<void> {
+    expect(await member.service.bind(token)).toEqual({ ok: true });
+    const code = member.service.state().telegram.bind?.code ?? '';
+    expect(member.service.state().telegram.bind?.topicCommand).toBe(
+      `/bind@enso_secretary_bot ${code}`
+    );
+    h.apis.get(token)?.push(topicMessage(`/bind@enso_secretary_bot ${code}`, topicId));
+    await waitFor(
+      () => member.store.file().telegramRoutes.some((route) => route.topicId === String(topicId)),
+      `bound ${member.id}`
+    );
+  }
+
+  it('同一个 token 只有一个轮询；两个话题各进各的秘书，回复回原话题', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9);
+    expect(h.hub.pollingTokens()).toBe(1);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    api.push(topicMessage('A 你好', 7));
+    await waitFor(() => a.delivered.length === 1, 'a delivered');
+    api.push(topicMessage('B 你好', 9));
+    await waitFor(() => b.delivered.length === 1, 'b delivered');
+    expect(a.delivered[0]).toContain('A 你好');
+    expect(b.delivered[0]).toContain('B 你好');
+    expect(a.delivered.join('')).not.toContain('B 你好');
+    // 绑定成功的回执发回各自的话题
+    expect(api.sent.filter((sent) => sent.messageThreadId === 7)).toHaveLength(1);
+    expect(api.sent.filter((sent) => sent.messageThreadId === 9)).toHaveLength(1);
+    // 推送只发到自己的路由
+    a.service.onMilestone({ kind: 'goal-complete', title: 'p · 修登录', conversationId: 'c1' });
+    await waitFor(() => api.sent.filter((sent) => sent.messageThreadId === 7).length === 2, 'push');
+    expect(api.sent.filter((sent) => sent.messageThreadId === 9)).toHaveLength(1);
+    await a.service.stop();
+    await b.service.stop();
+  });
+
+  it('同一 bot + chat + 话题重复绑定被拒，不在群里回话', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    const sentBefore = api.sent.length;
+    expect(await b.service.bind(TOKEN)).toEqual({ ok: true });
+    const code = b.service.state().telegram.bind?.code ?? '';
+    api.push(topicMessage(`/bind@enso_secretary_bot ${code}`, 7));
+    await waitFor(
+      () => b.audits.some((entry) => entry.detail === 'route-conflict'),
+      'conflict rejected'
+    );
+    expect(b.store.file().telegramRoutes).toEqual([]);
+    expect(api.sent.length).toBe(sentBefore);
+    await a.service.stop();
+    await b.service.stop();
+  });
+
+  it('没绑任何秘书的话题：完全不响应，只记审计', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    await bindTopic(h, a, 7);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    const sentBefore = api.sent.length;
+    api.push(topicMessage('有人吗', 11));
+    await waitFor(
+      () => a.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
+      'rejected'
+    );
+    expect(a.delivered).toEqual([]);
+    expect(api.sent.length).toBe(sentBefore);
+    await a.service.stop();
+  });
+
+  function topicPhoto(topicId: number, fileId: string): TelegramUpdate {
+    const update = topicMessage('', topicId);
+    const message = update.message as NonNullable<TelegramUpdate['message']>;
+    delete message.text;
+    message.photo = [{ file_id: fileId, file_size: 11 }];
+    message.caption = '看图';
+    return update;
+  }
+
+  it('话题里发来的图只落到认领它的秘书会话，路径只附进那位秘书的消息', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    api.files.set('p9', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]));
+    api.push(topicPhoto(9, 'p9'));
+    await waitFor(() => b.delivered.length === 1, 'b delivered');
+    expect(b.saved).toEqual(['b-chat']);
+    expect(b.delivered[0]).toMatch(/<\/untrusted-content>\n\[图片 1\] \/img\/b-chat\/1\.png$/);
+    expect(a.saved).toEqual([]);
+    expect(a.delivered).toEqual([]);
+    expect(api.downloads).toEqual(['p9']);
+    await a.service.stop();
+    await b.service.stop();
+  });
+
+  it('没绑任何秘书的话题发图：不下载、不落盘、不回话', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    await bindTopic(h, a, 7);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    api.files.set('p11', Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const sentBefore = api.sent.length;
+    api.push(topicPhoto(11, 'p11'));
+    await waitFor(
+      () => a.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
+      'rejected'
+    );
+    expect(api.downloads).toEqual([]);
+    expect(a.saved).toEqual([]);
+    expect(a.delivered).toEqual([]);
+    expect(api.sent.length).toBe(sentBefore);
+    await a.service.stop();
+  });
+
+  it('不同 token 各一个轮询；秘书停掉后不再轮询', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9, OTHER_TOKEN);
+    expect(h.hub.pollingTokens()).toBe(2);
+    await b.service.stop();
+    await waitFor(() => h.hub.pollingTokens() === 1, 'one left');
+    await a.service.stop();
+    await waitFor(() => h.hub.pollingTokens() === 0, 'none left');
   });
 });

@@ -47,6 +47,63 @@ export function startCommandCode(text: string): string | null {
   return match[1] ?? null;
 }
 
+/** 绑定码命令：/start <码> 或 /bind <码>，都可以带 @botname 后缀；群里用 /bind */
+export function bindCommandCode(text: string): string | null {
+  const match = /^\/(?:start|bind)(?:@\w+)?\s+(\S+)\s*$/u.exec(text.trim());
+  return match ? (match[1] ?? null) : null;
+}
+
+/** 在群里绑整个群：把 bot 拉进群时 Telegram 在群里发 /start <码> */
+export function bindGroupLink(username: string, code: string): string {
+  return `https://t.me/${username.replace(/^@/, '')}?startgroup=${code}`;
+}
+
+/** 在话题里发的绑定命令：带 @botname，隐私模式下也一定能收到 */
+export function bindTopicCommand(username: string, code: string): string {
+  return `/bind@${username.replace(/^@/, '')} ${code}`;
+}
+
+/** 一个秘书在某个 bot 上认领的一条路由：私聊、整群或话题 */
+export interface ContactRouteClaim {
+  secretaryId: string;
+  botId: number;
+  chatId: string;
+  /** 缺省表示整个 chat（私聊或整群） */
+  topicId?: string;
+}
+
+/**
+ * 冲突键是 bot + chat + 话题：同一个键只能属于一个秘书。
+ * 整群与其中某个话题不算冲突（话题优先），同一个秘书重复认领也不算。
+ */
+export function findRouteConflict(
+  claims: readonly ContactRouteClaim[],
+  wanted: ContactRouteClaim
+): ContactRouteClaim | null {
+  return (
+    claims.find(
+      (claim) =>
+        claim.secretaryId !== wanted.secretaryId &&
+        claim.botId === wanted.botId &&
+        claim.chatId === wanted.chatId &&
+        (claim.topicId ?? '') === (wanted.topicId ?? '')
+    ) ?? null
+  );
+}
+
+/** 一条入站消息该归哪个秘书：话题精确匹配优先，其次整个 chat；都没有返回 null */
+export function routeTarget(
+  claims: readonly ContactRouteClaim[],
+  botId: number,
+  chatId: string,
+  topicId: string | undefined
+): string | null {
+  const same = claims.filter((claim) => claim.botId === botId && claim.chatId === chatId);
+  const exact = topicId ? same.find((claim) => claim.topicId === topicId) : undefined;
+  if (exact) return exact.secretaryId;
+  return same.find((claim) => claim.topicId === undefined)?.secretaryId ?? null;
+}
+
 /** 码要对得上、没过期、且还没被用掉 */
 export function bindCodeUsable(
   bind: { code: string; expiresAt: number } | undefined,

@@ -1,13 +1,34 @@
 export const AUTO_RESTART_IDLE_MS = 5 * 60 * 1000;
+/** 不等空闲：窗口在前台、最近这么久内有键盘或鼠标输入时算用户正在操作，先等 */
+export const RECENT_INPUT_MS = 2 * 60 * 1000;
+
+/** 更新下载完成后的自动重启：关（只提示）/ 空闲时 / 不等空闲（直接走优雅重启安全点） */
+export type AutoRestartMode = 'off' | 'idle' | 'immediate';
+export const AUTO_RESTART_MODES: readonly AutoRestartMode[] = ['off', 'idle', 'immediate'];
+
+export function isAutoRestartMode(value: unknown): value is AutoRestartMode {
+  return AUTO_RESTART_MODES.includes(value as AutoRestartMode);
+}
+
+/** 持久化设置里的模式；旧版布尔开关 autoRestartWhenIdle 开着按「空闲时」，其余按「关」 */
+export function resolveAutoRestartMode(state: unknown): AutoRestartMode {
+  if (!state || typeof state !== 'object') return 'off';
+  const source = state as Record<string, unknown>;
+  if (isAutoRestartMode(source.autoRestartForUpdate)) return source.autoRestartForUpdate;
+  return source.autoRestartWhenIdle === true ? 'idle' : 'off';
+}
 
 export interface AutoRestartIdleSnapshot {
-  enabled: boolean;
-  downloaded: boolean;
+  mode: AutoRestartMode;
   agentBusy: boolean;
   queuedCount: number;
   pendingAskCount: number;
   pendingApprovalCount: number;
   windowFocused: boolean;
+  /** 窗口在前台且最近 RECENT_INPUT_MS 内有输入 */
+  userActive: boolean;
+  /** 输入框里有重启后会丢的未发送草稿 */
+  unsentDraft: boolean;
   idleForMs: number;
 }
 
@@ -26,20 +47,29 @@ export function isTurnRestartBlocked(snapshot: TurnBlocks): boolean {
   );
 }
 
+/**
+ * 空闲时：回合、排队、提问、审批、窗口在前台都挡。
+ * 不等空闲：在跑的会话按恢复清单续跑、排队消息落盘，都不挡；用户正在操作、草稿会丢时先等；
+ * 待答与待审批是在跑的工具，安全点等它到上限就中止，提问与审批会丢，也先等
+ */
 export function isAutoRestartBlocked(
-  snapshot: TurnBlocks & Pick<AutoRestartIdleSnapshot, 'windowFocused'>
+  snapshot: TurnBlocks &
+    Pick<AutoRestartIdleSnapshot, 'mode' | 'windowFocused' | 'userActive' | 'unsentDraft'>
 ): boolean {
+  if (snapshot.mode === 'immediate')
+    return (
+      snapshot.userActive ||
+      snapshot.unsentDraft ||
+      snapshot.pendingAskCount > 0 ||
+      snapshot.pendingApprovalCount > 0
+    );
   return isTurnRestartBlocked(snapshot) || snapshot.windowFocused;
 }
 
-/** 开关开、包已下好、无忙态，且该状态连续保持满 5 分钟才重启安装。 */
+/** 空闲时：无忙态连续保持满 5 分钟才重启安装；不等空闲：不挡就装 */
 export function shouldAutoRestartForUpdate(snapshot: AutoRestartIdleSnapshot): boolean {
-  return (
-    snapshot.enabled &&
-    snapshot.downloaded &&
-    !isAutoRestartBlocked(snapshot) &&
-    snapshot.idleForMs >= AUTO_RESTART_IDLE_MS
-  );
+  if (snapshot.mode === 'off' || isAutoRestartBlocked(snapshot)) return false;
+  return snapshot.mode === 'immediate' || snapshot.idleForMs >= AUTO_RESTART_IDLE_MS;
 }
 
 export function countQueuedMessages(value: unknown): number {

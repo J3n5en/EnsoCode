@@ -69,7 +69,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { autoUpdaterService } from './AutoUpdater';
 
-autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, false, false);
+autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
 m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
 
 beforeEach(() => {
@@ -110,7 +110,7 @@ describe('安装更新的等待弹层', () => {
   it('有命令在跑：开「等完安装更新」弹层；命令结束先关弹层再安装；强制退出（等待按超时结束）同样接着安装', async () => {
     vi.resetModules();
     const { autoUpdaterService: service } = await import('./AutoUpdater');
-    service.init({ on: vi.fn(), once: vi.fn() } as never, false, false);
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
     m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
     let release!: (value: string) => void;
     m.prepare.mockReset().mockImplementation(
@@ -134,7 +134,7 @@ describe('重启更新不等整个回合', () => {
   it('有回合在跑、排队、待答与审批时也直接进安全点，不挂起等回合，不写 interrupted-by-update.json', async () => {
     vi.resetModules();
     const { autoUpdaterService: service } = await import('./AutoUpdater');
-    service.init({ on: vi.fn(), once: vi.fn() } as never, false, false);
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, 'off');
     m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
     m.sent.length = 0;
     m.observation = {
@@ -150,5 +150,84 @@ describe('重启更新不等整个回合', () => {
     expect(m.prepare).toHaveBeenCalledOnce();
     expect(m.sent.some((status) => 'restartPending' in status)).toBe(false);
     expect(existsSync(path.join(m.userData, 'interrupted-by-update.json'))).toBe(false);
+  });
+});
+
+describe('下载完成后的自动重启模式', () => {
+  const calm = {
+    agentBusy: false,
+    queuedCount: 0,
+    pendingAskCount: 0,
+    pendingApprovalCount: 0,
+    windowFocused: false,
+    userActive: false,
+    unsentDraft: false,
+  };
+
+  async function downloadedWith(mode: 'off' | 'idle' | 'immediate') {
+    vi.resetModules();
+    const { autoUpdaterService: service } = await import('./AutoUpdater');
+    m.prepare.mockReset().mockResolvedValue('checkpointed');
+    service.init({ on: vi.fn(), once: vi.fn() } as never, true, mode);
+    m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
+    return service;
+  }
+
+  it('不等空闲：有 agent 在跑、排队、窗口在前台也装；前台最近有输入先等，输入停了再装', async () => {
+    vi.useFakeTimers();
+    try {
+      m.observation = {
+        ...calm,
+        agentBusy: true,
+        queuedCount: 1,
+        windowFocused: true,
+        userActive: true,
+      };
+      await downloadedWith('immediate');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(m.prepare).not.toHaveBeenCalled();
+      m.observation = { ...m.observation, userActive: false };
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(m.prepare).toHaveBeenCalledOnce();
+      expect(m.quitAndInstall).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('不等空闲：输入框有会丢的草稿时先等', async () => {
+    vi.useFakeTimers();
+    try {
+      m.observation = { ...calm, unsentDraft: true };
+      await downloadedWith('immediate');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(m.prepare).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('空闲时：有 agent 在跑不装', async () => {
+    vi.useFakeTimers();
+    try {
+      m.observation = { ...calm, agentBusy: true };
+      await downloadedWith('idle');
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(m.prepare).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('关：一直空闲也不装', async () => {
+    vi.useFakeTimers();
+    try {
+      m.observation = calm;
+      await downloadedWith('off');
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(m.prepare).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
