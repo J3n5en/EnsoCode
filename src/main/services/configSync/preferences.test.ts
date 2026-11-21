@@ -25,6 +25,36 @@ const bundle = (state: Partial<ConfigSyncBundle['state']>): ConfigSyncBundle => 
 });
 
 describe('config sync portable preference contract', () => {
+  it('keeps auto-fetch settings outside the portable configuration schema', () => {
+    const provider = {
+      id: 'provider',
+      name: 'Provider',
+      api: 'openai-completions' as const,
+      baseUrl: 'https://example.test',
+      enabled: false,
+      models: [],
+    };
+    const device = {
+      autoFetchModels: true,
+      modelRefreshIntervalHours: 48,
+      knownModelIds: ['deleted'],
+      modelRefreshStatus: { ok: true, at: 1 },
+    };
+    const localProvider = { ...provider, ...device };
+    for (const [field, value] of Object.entries(device)) {
+      const deviceSettings = { [field]: value };
+      expect(() =>
+        validateBundle(bundle({ providers: [{ ...provider, ...deviceSettings }] }))
+      ).toThrow();
+    }
+    const incoming = validateBundle(bundle({ providers: [provider] }));
+    expect(planImport({ ...baseState() }, incoming, 'replace').state.providers).toEqual([provider]);
+    expect(
+      planImport({ ...baseState(), providers: [localProvider] }, incoming, 'replace').state
+        .providers
+    ).toEqual([localProvider]);
+  });
+
   it('本机文件打开规则及应用路径不进入配置同步字段', () => {
     expect(CONFIG_SYNC_FIELD_POLICY.fileOpenRules).toEqual({
       mode: 'excluded',

@@ -19,7 +19,7 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: Object.assign(
     (selector: (state: unknown) => unknown) =>
       selector({ providers: harness.providers, updateProvider: harness.updateProvider }),
-    { getState: () => ({ defaultModel: harness.defaultModel }) }
+    { getState: () => ({ defaultModel: harness.defaultModel, providers: harness.providers }) }
   ),
 }));
 vi.mock('@/stores/oauthCredentials', () => ({
@@ -84,6 +84,127 @@ function metadata(accounts: OauthAccount[]): OauthProviderInfo[] {
     },
   ];
 }
+
+describe('API key provider drafts', () => {
+  it.each([
+    {
+      initialEnabled: undefined,
+      draftEnabled: false,
+      concurrentEnabled: true,
+      expected: undefined,
+    },
+    { initialEnabled: true, draftEnabled: true, concurrentEnabled: false, expected: undefined },
+    { initialEnabled: undefined, draftEnabled: true, concurrentEnabled: false, expected: true },
+    { initialEnabled: true, draftEnabled: false, concurrentEnabled: true, expected: false },
+  ])(
+    'only patches changed auto-fetch settings ($initialEnabled → $draftEnabled)',
+    ({ initialEnabled, draftEnabled, concurrentEnabled, expected }) => {
+      const provider = { ...fixed, oauthAccountKey: undefined, autoFetchModels: initialEnabled };
+      const onClose = vi.fn();
+      harness.providers = [provider];
+      renderToStaticMarkup(createElement(ProviderEditDialog, { provider, onClose }));
+      const initial = harness.formProps.initialValue as Record<string, unknown>;
+      expect(initial.autoFetchModels).toBe(initialEnabled);
+
+      harness.providers = [{ ...provider, autoFetchModels: concurrentEnabled }];
+      (harness.formProps.onSave as (value: unknown, seenModelIds: ReadonlySet<string>) => void)(
+        { ...initial, autoFetchModels: draftEnabled },
+        new Set(provider.models.map((model) => model.id))
+      );
+
+      const [id, patch] = harness.updateProvider.mock.calls.at(-1) ?? [];
+      expect(id).toBe(provider.id);
+      if (expected === undefined) {
+        expect(patch).not.toHaveProperty('autoFetchModels');
+      } else {
+        expect(patch.autoFetchModels).toBe(expected);
+      }
+      expect(onClose).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([
+    { initialHours: undefined, draftHours: 1, expectedHours: undefined },
+    { initialHours: 4, draftHours: 4, expectedHours: undefined },
+    { initialHours: 4, draftHours: 1, expectedHours: 1 },
+  ])(
+    'only patches a changed interval ($initialHours → $draftHours)',
+    ({ initialHours, draftHours, expectedHours }) => {
+      const provider = {
+        ...fixed,
+        oauthAccountKey: undefined,
+        modelRefreshIntervalHours: initialHours,
+      };
+      harness.providers = [provider];
+      renderToStaticMarkup(createElement(ProviderEditDialog, { provider, onClose: vi.fn() }));
+      const initial = harness.formProps.initialValue as Record<string, unknown>;
+      expect(initial.modelRefreshIntervalHours).toBe(initialHours);
+
+      const added = { id: 'new-in-background', enabled: true };
+      harness.providers = [
+        { ...provider, modelRefreshIntervalHours: 8, models: [...provider.models, added] },
+      ];
+      (harness.formProps.onSave as (value: unknown, seenModelIds: ReadonlySet<string>) => void)(
+        { ...initial, name: 'Renamed', models: [], modelRefreshIntervalHours: draftHours },
+        new Set(provider.models.map((model) => model.id))
+      );
+
+      const patch = harness.updateProvider.mock.calls.at(-1)?.[1];
+      expect(patch).toMatchObject({ name: 'Renamed', models: [added] });
+      if (expectedHours === undefined) {
+        expect(patch).not.toHaveProperty('modelRefreshIntervalHours');
+      } else {
+        expect(patch.modelRefreshIntervalHours).toBe(expectedHours);
+      }
+    }
+  );
+
+  it.each([false, true])(
+    'preserves unseen additions on save only when the endpoint is unchanged (%s)',
+    (changeEndpoint) => {
+      const provider: ModelProvider = {
+        id: 'custom',
+        name: 'Custom',
+        api: 'openai-completions',
+        apiKey: 'test-key',
+        baseUrl: 'https://chat.example/v1',
+        enabled: true,
+        models: [{ id: 'manual' }, { id: 'removed-by-fetch' }],
+      };
+      harness.providers = [provider];
+      renderToStaticMarkup(createElement(ProviderEditDialog, { provider, onClose: vi.fn() }));
+
+      const added = { id: 'new-in-background', enabled: true };
+      harness.providers = [
+        {
+          ...provider,
+          models: [...provider.models, { id: 'seen-and-deleted' }, added],
+          knownModelIds: ['manual', 'removed-by-fetch', 'seen-and-deleted', 'new-in-background'],
+        },
+      ];
+      const draft = {
+        ...provider,
+        name: 'Renamed',
+        baseUrl: changeEndpoint ? 'https://other.example/v1' : provider.baseUrl,
+        models: [{ id: 'manual' }],
+      };
+      const seenModelIds = new Set(['manual', 'removed-by-fetch', 'seen-and-deleted']);
+      (harness.formProps.onSave as (value: unknown, seenModelIds: ReadonlySet<string>) => void)(
+        draft,
+        seenModelIds
+      );
+      expect(harness.updateProvider.mock.calls.at(-1)).toEqual([
+        provider.id,
+        expect.objectContaining({
+          name: 'Renamed',
+          models: changeEndpoint ? draft.models : [...draft.models, added],
+          // 草稿里删掉的模型记为已见，自动拉取不会加回
+          knownModelIds: ['manual', 'removed-by-fetch', 'seen-and-deleted', 'new-in-background'],
+        }),
+      ]);
+    }
+  );
+});
 
 async function mountPool(listOauth: () => Promise<OauthProviderInfo[]>, accountKeys: string[]) {
   const dom = parseHTML('<html><body><div id="root"></div></body></html>');

@@ -25,7 +25,7 @@ enso config help --json            # 机器可读 schema（别名 enso config sc
 `enso config help --json` 向运行中的 Main 发送只读请求 `{ action: "schema" }`，CLI 只负责拼上命令清单并格式化输出：
 
 - `commands`：每个命令的 `name`、`usage`、`args`、`description`、`examples`；`options` 为全局选项。
-- `keys`：由 Main 遍历 `SETTINGS_STATE_FIELDS` 与当前 settings state 生成（不含任何值），每项 `{ path, type, writable, requiresRestart, secret }`。数组元素以 `<id>`（或 `<index>`）占位，如 `providers.<id>.baseUrl`；最深 4 段；未写入 state 的字段 `type` 为 `unknown`。`writable` 与 `set` 的拒绝规则一致。
+- `keys`：由 Main 遍历 `SETTINGS_STATE_FIELDS` 与当前 settings state 生成（不含任何值），每项 `{ path, type, writable, requiresRestart, secret }`。数组元素以 `<id>`（或 `<index>`）占位，如 `providers.<id>.name`；最深 4 段；未写入 state 的字段 `type` 为 `unknown`。`writable` 与 `set` 的拒绝规则一致。
 - `blacklist`：密钥键名正则与说明、路径/命令规则、`writeDeniedFields`、`entryLevelDeniedFields`、`readDeniedFields` 和被拒的非设置操作清单。
 - `notes`：热生效说明、需重启键及原因、socket/token 机制、键格式。
 
@@ -41,7 +41,7 @@ enso config set terminalFontSize 15
 enso config set chatTypography.body.size 15
 enso config set proxyMode custom
 enso config set customProxyUrl http://127.0.0.1:7890
-enso config set providers.<id>.baseUrl https://api.example.com/v1
+enso config set providers.<id>.autoFetchModels true
 enso config set defaultModel '{"providerId":"<id>","modelId":"gpt-5"}'
 enso config set mcpServers.<id>.callTimeoutSec 120
 enso config set subagentModelsEnabled true
@@ -65,6 +65,7 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 | 文件路径 | `worktreeRoot`、`backgroundImagePath`、`backgroundFolderPath`，以及任一段是 `path`、`dir`、`root`、`cwd` 或以 `Path`、`Dir`、`Root` 结尾的键 | 可读 | 拒绝 |
 | 执行命令 | `terminalShell`、`windowsLocalShell`、`fileOpenRules`、`contextMenuOpen`，以及任一段是 `command` 或 `args` 的键（例如 MCP 的启动命令） | 可读 | 拒绝 |
 | 技能 / 指令装卸 | 整体替换或增删 `skills`、`instructions` 的条目 | 可读 | 拒绝；条目内的字段（如 `skills.<id>.enabled`）可以写 |
+| 供应商端点 | `providers.<id>.api`、`providers.<id>.baseUrl`、`providers.<id>.headers` 及其子键：它们决定 API Key 发往哪里，改了端点会让自动拉取立刻带着 key 请求新地址 | 可读（密钥仍显示为 `***`） | 拒绝，只能在设置页改 |
 | 项目数据 | `projects`、`projectGroups`，由 Main 权威投影维护 | 拒绝 | 拒绝 |
 | 未登记字段 | 第一段不是设置字段 | 拒绝 | 拒绝 |
 
@@ -86,6 +87,10 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 `memoryReconcileEnabled` 只控制写入新记忆后是否自动复核，写入后立即生效；设置页的「立即复核」不受它限制。它是普通布尔开关，不是密钥、路径或执行入口，也不在启动时一次性读取，所以 `policy.ts` 不需要为它加规则。
 
 部分设置本来就只对新会话生效，例如 `subagentModels`、`subagentAllowedModes`、`editMode`、`rtkEnabled`。CLI 写入后，它们的行为与在设置页修改一致。
+
+`providers.<id>.autoFetchModels` 接受布尔值，默认关闭，仅在当前设备生效。开启这条已启用的 API Key 供应商时，或在保留此设置的情况下启动应用时，会立即拉取该供应商的模型。关闭开关会停止这条供应商的定时拉取，并取消该条正在进行的自动拉取。自动拉取只追加从未见过的模型，新模型默认禁用；用户删掉的模型不会再被加回。
+
+`providers.<id>.modelRefreshIntervalHours` 设置这条 API Key 供应商在本机自动拉取模型的间隔，接受 1–168 的整数，单位为小时，默认 1。关闭自动拉取时也可以修改。修改已开启条目的间隔时，该条目从保存时重新计时，在途请求继续。每条供应商的开关和间隔均无需重启。
 
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 

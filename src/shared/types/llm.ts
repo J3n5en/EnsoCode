@@ -52,6 +52,22 @@ export interface ModelProvider {
   baseUrl: string;
   enabled: boolean;
   models: ModelEntry[];
+  /**
+   * 此 API Key 条目在本机是否自动拉取模型，只有显式设为 true 才开启。
+   *
+   * Whether to refresh models on this device for this API key entry. Only an explicit true enables it.
+   */
+  autoFetchModels?: boolean;
+  /**
+   * 此 API Key 条目在本机自动拉取模型的间隔（整小时 1–168，缺省 1）。
+   *
+   * Device-local model refresh interval for this API key entry (1–168 whole hours, default 1).
+   */
+  modelRefreshIntervalHours?: number;
+  /** 自动拉取见过的模型 id（本机）；只追加不在其中的模型，用户删掉的不再加回 */
+  knownModelIds?: string[];
+  /** 最近一次自动拉取的结果（本机，Main 写入）；不含错误详情 */
+  modelRefreshStatus?: { ok: boolean; at: number };
   /** 从哪个本地应用导入（手动创建时为空） */
   importedFrom?: string;
   /**

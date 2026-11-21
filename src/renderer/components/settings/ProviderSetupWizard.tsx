@@ -356,13 +356,15 @@ export function ProviderSetupWizard({ open, onOpenChange }: ProviderSetupWizardP
                 <ProviderApiForm
                   key={selected.id}
                   bare
+                  catalogId={selected.id}
                   initialValue={initialProviderApiValue(selected)}
                   oauth={false}
                   onCancel={back}
-                  onSave={(value) => {
+                  onSave={(value, seenModelIds) => {
                     addProviders([
                       {
                         ...value,
+                        knownModelIds: [...seenModelIds],
                         id: crypto.randomUUID(),
                         enabled: true,
                         catalogId: selected.id,

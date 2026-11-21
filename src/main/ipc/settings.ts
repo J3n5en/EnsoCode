@@ -32,6 +32,10 @@ import {
   type TraySleepPolicy,
 } from '../services/pairPowerKeepAlive';
 import {
+  createProviderModelRefresh,
+  keepRefreshedProviderModels,
+} from '../services/providerModelRefresh';
+import {
   applyMainConversationsPatch,
   CONVERSATIONS_KEY,
   mergeConversationsWrite,
@@ -52,6 +56,7 @@ let cachedSettings: Record<string, unknown> | null = null;
 let pendingWrite: NodeJS.Timeout | null = null;
 let maxWaitTimer: NodeJS.Timeout | null = null;
 let isDirty = false;
+let providerModelRefresh: ReturnType<typeof createProviderModelRefresh> | undefined;
 const pendingSystemPromptDeletes = new Set<string>();
 
 const DEBOUNCE_MS = 500;
@@ -488,6 +493,7 @@ function scheduleWrite(
     }
     cachedSettings = data;
     isDirty = true;
+    providerModelRefresh?.sync();
     notifyMemoryEmbeddingSettings(data);
     notifyTrayToggleShortcut(data);
     notifyDropShelf(data);
@@ -671,6 +677,7 @@ export function commitSettingsTransaction(
 
   cachedSettings = next;
   isDirty = false;
+  providerModelRefresh?.sync();
   notifyMemoryEmbeddingSettings(next);
   notifyTrayToggleShortcut(next);
   notifyDropShelf(next);
@@ -777,6 +784,42 @@ export function readSettingsState(): Record<string, unknown> {
   return settingsStateOf(readSettings());
 }
 
+/**
+ * 桌面与无头宿主在代理初始化后各调用一次，所有窗口共用同一调度服务。
+ *
+ * Desktop and headless hosts call this once after proxy initialization. All windows share the scheduling service.
+ */
+export function startProviderModelRefresh(): void {
+  providerModelRefresh ??= createProviderModelRefresh({
+    readSettingsState,
+    writeProviders: (providers) => {
+      if (!patchSettingsState('providers', providers).ok) {
+        console.warn('[provider-model-refresh] could not save models');
+      }
+    },
+    async fetchModels(config, signal) {
+      const { listModels } = await import('../services/providerApi');
+      return listModels(config, signal);
+    },
+  });
+  providerModelRefresh.sync();
+}
+
+/** 渲染端写 enso-settings 时补回其快照之后 Main 后台追加的模型；无需修正返回 undefined */
+function withRefreshedProviderModels(
+  current: Record<string, unknown> | null,
+  value: unknown
+): Record<string, unknown> | undefined {
+  const store = objectRecord(value);
+  const state = objectRecord(store?.state);
+  if (!store || !state) return;
+  const providers = keepRefreshedProviderModels(
+    settingsStateOf(current).providers,
+    state.providers
+  );
+  return providers && { ...store, state: { ...state, providers } };
+}
+
 /** 丢弃内存副本并以磁盘为准重读，再走与普通写入相同的通知与广播（本机配置 CLI 的 reload） */
 export function reloadSettingsFromDisk(): boolean {
   if (pendingWrite) clearTimeout(pendingWrite);
@@ -786,7 +829,9 @@ export function reloadSettingsFromDisk(): boolean {
   isDirty = false;
   cachedSettings = null;
   const data = readSettings();
-  return data !== null && scheduleWrite(data, undefined, 'all-renderers');
+  if (data !== null) return scheduleWrite(data, undefined, 'all-renderers');
+  providerModelRefresh?.sync();
+  return false;
 }
 
 const TRAY_SETTINGS_KEY = 'enso-tray';
@@ -1098,16 +1143,19 @@ export function registerSettingsHandlers(): void {
       if (typeof name !== 'string') return false;
       const current = readSettings() ?? {};
       const next = { ...current };
+      const kept =
+        name === 'enso-settings' ? withRefreshedProviderModels(current, value) : undefined;
       const merged =
         name === CONVERSATIONS_KEY
           ? mergeConversationsWrite(event.sender, current[name], value, normalizeAckSeq(ackSeq))
-          : value;
+          : (kept ?? value);
       if (merged === undefined) delete next[name];
       else next[name] = merged;
+      // 补回了后台模型时 sender 也要重读，否则它的旧快照下次又会写回
       return scheduleWrite(
         next,
         event.sender,
-        'exclude-sender',
+        kept ? 'all-renderers' : 'exclude-sender',
         name === CONVERSATIONS_KEY && value !== undefined
       );
     }
@@ -1115,10 +1163,19 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE, async (event, data: unknown) => {
     const record = objectRecord(data);
-    return record ? scheduleWrite(record, event.sender) : false;
+    if (!record) return false;
+    const kept = withRefreshedProviderModels(readSettings(), record['enso-settings']);
+    return kept
+      ? scheduleWrite({ ...record, 'enso-settings': kept }, event.sender, 'all-renderers')
+      : scheduleWrite(record, event.sender);
   });
 
   app.on('before-quit', () => {
+    flushSettings();
+  });
+  app.on('will-quit', () => {
+    providerModelRefresh?.stop();
+    providerModelRefresh = undefined;
     flushSettings();
   });
 }

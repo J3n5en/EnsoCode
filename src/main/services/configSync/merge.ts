@@ -4,7 +4,7 @@ import { isReservedAgentTypeName } from '@shared/builtinAgents';
 import type { ConfigSyncSummary } from '@shared/types';
 import { DEFAULT_PRESET_ID, resolveEditMode } from '@shared/types';
 
-import type { ConfigSyncBundle } from './types';
+import { type ConfigSyncBundle, PROVIDER_DEVICE_FIELDS } from './types';
 
 type JsonRecord = Record<string, unknown>;
 type MergeMode = 'merge' | 'replace';
@@ -313,6 +313,10 @@ function providerEntry(plan: PlannedEntry, mode: MergeMode): JsonRecord {
   // OAuth 登录态仅限本机：丢弃导入的 key，保留匹配到的本地 key。
   delete next.oauthAccountKey;
   delete next.oauthAccountPool;
+  for (const field of PROVIDER_DEVICE_FIELDS) {
+    delete next[field];
+    if (plan.existing && Object.hasOwn(plan.existing, field)) next[field] = plan.existing[field];
+  }
   if (plan.existing && plan.existing.oauthAccountKey !== undefined) {
     next.oauthAccountKey = clone(plan.existing.oauthAccountKey);
   }

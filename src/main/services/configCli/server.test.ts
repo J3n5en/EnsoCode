@@ -11,6 +11,7 @@ const userData = mkdtempSync(path.join(tmpdir(), 'enso-cli-'));
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   applyProxy: vi.fn(async () => ({ ok: true })),
+  listModels: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -18,6 +19,7 @@ vi.mock('electron', () => ({
   ipcMain: { handle: vi.fn() },
 }));
 vi.mock('../modelDirectory', () => ({ notifyModelDirectorySettingsChanged: () => {} }));
+vi.mock('../providerApi', () => ({ listModels: mocks.listModels }));
 vi.mock('../uiHost', async () =>
   (await import('../../../../test/helpers/localUi')).mockUiHost(() => [
     {
@@ -50,6 +52,7 @@ writeFileSync(
             headers: { Authorization: 'Bearer hdr-secret', 'X-Trace': '1' },
             models: [{ id: 'm1' }],
           },
+          { id: 'p-invalid', apiKey: SECRET, modelRefreshIntervalHours: '24' },
         ],
         mcpServers: [
           {
@@ -122,6 +125,98 @@ afterAll(async () => {
 });
 
 describe('config CLI socket', () => {
+  it('accepts only boolean values for the hot-applied provider model refresh switch', async () => {
+    const key = ['providers', 'p1', 'autoFetchModels'].join('.');
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: false });
+    expect(await config({ action: 'set', key, value: 'true' })).toMatchObject({ ok: false });
+    expect(await config({ action: 'set', key, value: true })).toEqual({ ok: true });
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: true });
+    const schema = await config({ action: 'schema' });
+    expect(schema.keys).toContainEqual({
+      path: 'providers.<id>.autoFetchModels',
+      type: 'boolean',
+      writable: true,
+      requiresRestart: false,
+      secret: false,
+    });
+    expect(await config({ action: 'set', key, value: false })).toEqual({ ok: true });
+  });
+
+  it('reads the default and hot-applies only whole-hour refresh intervals from 1 to 168', async () => {
+    const key = ['providers', 'p1', 'modelRefreshIntervalHours'].join('.');
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: 1 });
+    expect((await config({ action: 'schema' })).keys).toContainEqual({
+      path: 'providers.<id>.modelRefreshIntervalHours',
+      type: 'number',
+      writable: true,
+      requiresRestart: false,
+      secret: false,
+    });
+    expect(await config({ action: 'set', key, value: 168 })).toEqual({ ok: true });
+    for (const value of [0, -1, 1.5, 169, '12', null]) {
+      expect(await config({ action: 'set', key, value })).toMatchObject({ ok: false });
+    }
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: 168 });
+    expect(
+      await config({ action: 'get', key: ['providers', 'p1', 'autoFetchModels'].join('.') })
+    ).toMatchObject({
+      ok: true,
+      value: false,
+    });
+    expect(await config({ action: 'set', key, value: 1 })).toEqual({ ok: true });
+    const invalid = ['providers', 'p-invalid', 'modelRefreshIntervalHours'].join('.');
+    expect(await config({ action: 'get', key: invalid })).toMatchObject({ ok: true, value: 1 });
+    expect(await config({ action: 'set', key: invalid, value: 24 })).toEqual({ ok: true });
+    expect(await config({ action: 'get', key: invalid })).toMatchObject({ ok: true, value: 24 });
+  });
+
+  it('refuses provider endpoint writes so auto-fetch never sends the key to a CLI-chosen URL', async () => {
+    const settings = await import('../../ipc/settings');
+    const before = (await state()).providers as unknown[];
+    const trusted = 'https://trusted.example/v1';
+    const fetching = {
+      id: 'p-fetch',
+      name: 'Fetch',
+      api: 'openai-completions',
+      apiKey: SECRET,
+      baseUrl: trusted,
+      enabled: true,
+      autoFetchModels: true,
+      models: [],
+    };
+    mocks.listModels.mockClear().mockResolvedValue({ ok: true, models: [] });
+    settings.patchSettingsState('providers', [...before, fetching]);
+    settings.startProviderModelRefresh();
+    await vi.waitFor(() => expect(mocks.listModels).toHaveBeenCalledTimes(1));
+    try {
+      for (const [key, value] of [
+        ['providers.p-fetch.baseUrl', 'https://attacker.example/v1'],
+        ['providers.p-fetch.headers', { 'X-Upstream': 'https://attacker.example' }],
+        ['providers.p-fetch.headers.X-Upstream', 'https://attacker.example'],
+        ['providers.p-fetch.api', 'anthropic-messages'],
+      ] as const) {
+        expect(await config({ action: 'set', key, value })).toMatchObject({ ok: false });
+      }
+      expect(await config({ action: 'set', key: 'providers.p-fetch.name', value: 'x' })).toEqual({
+        ok: true,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(mocks.listModels.mock.calls.map(([config]) => config.baseUrl)).toEqual([trusted]);
+      expect((await state()).providers).toContainEqual(
+        expect.objectContaining({ id: 'p-fetch', baseUrl: trusted, api: 'openai-completions' })
+      );
+      const schema = await config({ action: 'schema' });
+      expect(schema.keys).toContainEqual(
+        expect.objectContaining({ path: 'providers.<id>.baseUrl', writable: false })
+      );
+    } finally {
+      expect(
+        await config({ action: 'set', key: 'providers.p-fetch.autoFetchModels', value: false })
+      ).toEqual({ ok: true });
+      settings.patchSettingsState('providers', before);
+    }
+  });
+
   it.skipIf(process.platform === 'win32')('socket 与 token 文件只给本人读写', () => {
     expect(statSync(handle.endpoint).mode & 0o777).toBe(0o600);
     expect(statSync(handle.tokenPath).mode & 0o777).toBe(0o600);

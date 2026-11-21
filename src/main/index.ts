@@ -22,7 +22,12 @@ import {
 } from './ipc/appRestart';
 import { registerDesktopIpcHandlers } from './ipc/desktop';
 import { needsQuitCheckpoint } from './ipc/sessionIndex';
-import { consumeTrayReenterAfterUpdate, readLocale, readSettings } from './ipc/settings';
+import {
+  consumeTrayReenterAfterUpdate,
+  readLocale,
+  readSettings,
+  startProviderModelRefresh,
+} from './ipc/settings';
 import {
   noteOpenFolder,
   noteOpenFolderArgv,
@@ -369,6 +374,7 @@ if (!gotTheLock) {
       | undefined;
     getProxyConfig().initFromConfig(persisted?.state?.proxyMode, persisted?.state?.customProxyUrl);
     getCaCertConfig().initFromConfig(persisted?.state?.customCaCertPath);
+    startProviderModelRefresh();
     const persistedState = (
       persisted?.state && typeof persisted.state === 'object' ? persisted.state : {}
     ) as Record<string, unknown>;
