@@ -129,6 +129,13 @@ function replyOverride(messages) {
   return match ? match[1] : null;
 }
 
+/** 工具跑完后的收尾正文：整轮里写过 `[[final:正文]]` 就用它（验完成汇报里的截图与 PR） */
+function finalOverride(messages) {
+  if (!hasToolResult(messages)) return null;
+  const match = /\[\[final:([\s\S]*?)\]\]/u.exec((messages ?? []).map(messageText).join('\n'));
+  return match ? match[1] : null;
+}
+
 function textReply(text, parts = 1) {
   return [
     {
@@ -222,7 +229,8 @@ const server = createServer((req, res) => {
     if (calls.length > 0) return void sse(res, toolUseReply(calls));
     const slow = slowMs(messages);
     const parts = slow > 0 ? Math.max(2, Math.round(slow / 500)) : 1;
-    void sse(res, textReply(replyOverride(messages) ?? 'fake-ok', parts), slow / parts);
+    const reply = replyOverride(messages) ?? finalOverride(messages) ?? 'fake-ok';
+    void sse(res, textReply(reply, parts), slow / parts);
   });
 });
 
