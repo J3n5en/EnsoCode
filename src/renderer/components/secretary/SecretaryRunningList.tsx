@@ -184,8 +184,11 @@ export function SecretaryRunningList({ secretaryId }: { secretaryId?: string } =
   const { t } = useI18n();
   const running = useSecretaryStore(
     (state) =>
-      (secretaryId ? state.states[secretaryId] : undefined)?.board.running ??
-      state.secretary.board.running
+      (secretaryId
+        ? (state.states[secretaryId] ??
+          (state.focusedId === secretaryId ? state.secretary : undefined))
+        : state.secretary
+      )?.board.running ?? []
   );
   return (
     <section data-enso="secretary-running" className="flex flex-col px-3 pt-2">

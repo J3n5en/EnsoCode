@@ -9,6 +9,16 @@ const h = vi.hoisted(() => ({
   name: '',
   locale: 'zh' as Locale,
   takeovers: [] as { conversationId: string }[],
+  states: {} as Record<
+    string,
+    {
+      secretaryId: string;
+      profile: { name: string; avatar: { color: string } } | null;
+      board: { running: unknown[]; needsYou: unknown[]; done: unknown[]; todos: unknown[] };
+      takeovers: { conversationId: string }[];
+    }
+  >,
+  focusedId: null as string | null,
   secretaries: [] as {
     id: string;
     projectId: string | null;
@@ -31,8 +41,10 @@ vi.mock('@/stores/secretary', () => ({
       secretary: {
         profile: { name: h.name, avatar: { color: '#ff6b9d' } },
         takeovers: h.takeovers,
+        board: { running: [], needsYou: [], done: [], todos: [] },
       },
-      states: {},
+      states: h.states,
+      focusedId: h.focusedId,
       secretaries: h.secretaries,
     }),
 }));
@@ -41,6 +53,13 @@ vi.mock('@/stores/settings', () => ({ useSettingsStore: () => undefined }));
 
 const render = (component: typeof SecretaryTakeoverBadge) =>
   renderToStaticMarkup(createElement(component)).replace(/<[^>]*>/g, '');
+const takeoverBadge = (conversationId?: string) =>
+  renderToStaticMarkup(
+    createElement(
+      SecretaryTakeoverBadge as (props: { conversationId?: string }) => React.ReactNode,
+      { conversationId }
+    )
+  ).replace(/<[^>]*>/g, '');
 const origin = (props: Parameters<typeof SecretaryOriginBadge>[0] = {}) =>
   renderToStaticMarkup(createElement(SecretaryOriginBadge, props));
 const labelOf = (html: string) => /aria-label="([^"]*)"/.exec(html)?.[1];
@@ -48,6 +67,8 @@ const labelOf = (html: string) => /aria-label="([^"]*)"/.exec(html)?.[1];
 beforeEach(() => {
   h.secretaries = [];
   h.takeovers = [];
+  h.states = {};
+  h.focusedId = null;
 });
 
 describe('秘书会话标识用昵称', () => {
@@ -116,6 +137,38 @@ describe('派出来源：秘书小头像', () => {
     expect(second).toContain('data-generated="true"');
   });
 
+  it('清单还没到时按当前秘书认；聚焦秘书换了也不影响已经能对上号的会话', () => {
+    h.locale = 'zh';
+    h.name = '爱酱';
+    // 清单为空：还没有 secretaryId 的旧会话按当前秘书
+    expect(labelOf(origin())).toBe('由 爱酱 派出');
+    h.secretaries = [
+      summary('default', '爱酱', { color: '#ff6b9d' }),
+      summary('s-ken', 'Ken', { color: '#3fa7ff' }),
+    ];
+    // 旧会话没有 id：回退到看板记录，Ken 的看板里有它就显示 Ken
+    h.states = {
+      's-ken': {
+        secretaryId: 's-ken',
+        profile: { name: 'Ken', avatar: { color: '#3fa7ff' } },
+        board: {
+          running: [
+            { kind: 'session', conversationId: 'c-ken', secretaryConversationId: 'sec-ken' },
+          ],
+          needsYou: [],
+          done: [],
+          todos: [],
+        },
+        takeovers: [],
+      },
+    };
+    expect(labelOf(origin({ conversationId: 'c-ken' }))).toBe('由 Ken 派出');
+    // 聚焦切到爱酱：这一行仍然是 Ken
+    h.focusedId = 'default';
+    h.name = '爱酱';
+    expect(labelOf(origin({ conversationId: 'c-ken' }))).toBe('由 Ken 派出');
+  });
+
   it('秘书已删除：通用秘书小图标，提示写「由已删除的秘书派出」', () => {
     h.locale = 'zh';
     h.secretaries = [summary('default', '爱酱', { color: '#ff6b9d' })];
@@ -159,5 +212,20 @@ describe('会话顶栏不再给「交给…接管」按钮', () => {
     expect(html).toContain('爱酱接管中');
     // 别的会话不受影响
     expect(control('c2')).toBe('');
+  });
+
+  it('接管标识按管着这个会话的那个秘书，不随当前聚焦的秘书变', () => {
+    h.locale = 'zh';
+    h.name = '爱酱';
+    h.focusedId = 'default';
+    h.states = {
+      's-ken': {
+        secretaryId: 's-ken',
+        profile: { name: 'Ken', avatar: { color: '#3fa7ff' } },
+        board: { running: [], needsYou: [], done: [], todos: [] },
+        takeovers: [{ conversationId: 'c1' }],
+      },
+    };
+    expect(takeoverBadge('c1')).toBe('Ken接管中');
   });
 });

@@ -32,7 +32,11 @@ export function SecretaryPanel({ projectId }: { projectId?: string } = {}) {
   // 面板属于打开它的那个秘书会话，不跟着侧栏当前聚焦的秘书走
   const secretaryId = secretaryIdOfProject(projectId) ?? undefined;
   const secretary = useSecretaryStore((state) =>
-    secretaryId ? (state.states[secretaryId] ?? state.secretary) : state.secretary
+    secretaryId
+      ? (state.states[secretaryId] ??
+        (state.focusedId === secretaryId ? state.secretary : undefined) ??
+        state.secretary)
+      : state.secretary
   );
   const focusProposal = useSecretaryStore((state) => state.focusProposal);
   const [tab, setTab] = useState<Tab>('workbench');

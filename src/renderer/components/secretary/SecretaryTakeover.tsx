@@ -1,21 +1,38 @@
+import { takeoverOf } from '@shared/secretary/origin';
 import type { SecretaryTakeoverView } from '@shared/types/secretary';
 import { UserRoundCheck, X } from 'lucide-react';
 import { useState } from 'react';
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { useSecretaryStore } from '@/stores/secretary';
-import { useSecretaryName } from './useSecretaryFace';
 
 export function useTakeover(conversationId: string): SecretaryTakeoverView | undefined {
-  return useSecretaryStore((state) =>
-    state.secretary.takeovers.find((entry) => entry.conversationId === conversationId)
+  return useSecretaryStore(
+    (state) =>
+      takeoverOf(state.states, conversationId)?.takeover ??
+      state.secretary.takeovers.find((entry) => entry.conversationId === conversationId)
   );
 }
 
-/** 侧栏标识：与「由秘书派出」同款，用户一眼知道秘书在管它 */
-export function SecretaryTakeoverBadge() {
+function useTakeoverName(conversationId: string | undefined): string {
   const { t } = useI18n();
-  const name = useSecretaryName();
+  const name = useSecretaryStore((state) => {
+    const owner = conversationId ? takeoverOf(state.states, conversationId)?.secretaryId : null;
+    const id = owner ?? state.focusedId;
+    const owned = id ? state.states[id] : undefined;
+    return (
+      (id && state.focusedId === id ? state.secretary.profile?.name : owned?.profile?.name) ??
+      state.secretaries.find((entry) => entry.id === id)?.name ??
+      state.secretary.profile?.name
+    );
+  });
+  return name?.trim() || t('Secretary');
+}
+
+/** 侧栏标识：与「由秘书派出」同款，用户一眼知道秘书在管它 */
+export function SecretaryTakeoverBadge({ conversationId }: { conversationId?: string } = {}) {
+  const { t } = useI18n();
+  const name = useTakeoverName(conversationId);
   return (
     <span
       data-enso="secretary-takeover"
@@ -34,7 +51,7 @@ export function SecretaryTakeoverControl({ conversationId }: { conversationId: s
   const { t } = useI18n();
   const takeover = useTakeover(conversationId);
   const [busy, setBusy] = useState(false);
-  const name = useSecretaryName();
+  const name = useTakeoverName(conversationId);
 
   const run = async (action: () => Promise<{ ok: true } | { ok: false; error: string }>) => {
     setBusy(true);

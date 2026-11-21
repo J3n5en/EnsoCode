@@ -2880,10 +2880,13 @@ function ConversationRow({
         {conversation.secretaryOrigin && (
           <SecretaryOriginBadge
             secretaryId={conversation.secretaryOrigin.secretaryId}
+            conversationId={id}
             muted={muted}
           />
         )}
-        {!conversation.secretaryOrigin && takenOver && <SecretaryTakeoverBadge />}
+        {!conversation.secretaryOrigin && takenOver && (
+          <SecretaryTakeoverBadge conversationId={id} />
+        )}
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
         <BackgroundTaskMarker conversationId={id} />

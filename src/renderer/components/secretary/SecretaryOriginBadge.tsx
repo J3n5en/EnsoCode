@@ -1,4 +1,5 @@
 import { secretaryAvatarUrl } from '@shared/localImage';
+import { secretaryOwner } from '@shared/secretary/origin';
 import type { SecretaryProfile, SecretarySummary } from '@shared/types/secretary';
 import { UserRound } from 'lucide-react';
 import { Tooltip, TooltipPopup, TooltipTrigger } from '@/components/ui/tooltip';
@@ -17,16 +18,26 @@ type OriginFace = Pick<SecretaryProfile, 'name' | 'avatar'> | SecretarySummary;
 
 /**
  * 派出这个会话的秘书：会话行上记的 id，旧数据没有 id 就是 default。
- * 清单还没到时按当前秘书认；清单里已经没有它就是被删了，返回 null。
+ * 旧数据没有 id 时，按各秘书看板里的派发卡片认；清单还没到时按当前秘书认。
+ * 清单里已经没有它就是被删了，返回 null。
  * selector 只取 store 里的原引用，避免每次新对象导致无限重渲染。
  */
-function useOriginFace(secretaryId: string): OriginFace | null | undefined {
+function useOriginFace(
+  secretaryId: string | undefined,
+  conversationId: string | undefined
+): OriginFace | null | undefined {
   return useSecretaryStore((state) => {
+    const owner =
+      secretaryId ??
+      secretaryOwner(state.states, conversationId ?? '')?.secretaryId ??
+      (state.secretaries.length === 0 || !conversationId
+        ? (state.focusedId ?? DEFAULT_SECRETARY_ID)
+        : null);
+    if (!owner) return null;
     if (state.secretaries.length === 0) return state.secretary.profile ?? undefined;
-    const summary = state.secretaries.find((entry) => entry.id === secretaryId);
+    const summary = state.secretaries.find((entry) => entry.id === owner);
     if (!summary) return null;
-    const owned =
-      state.states[secretaryId] ?? (state.focusedId === secretaryId ? state.secretary : null);
+    const owned = state.states[owner] ?? (state.focusedId === owner ? state.secretary : null);
     return owned?.profile ?? summary;
   });
 }
@@ -34,13 +45,18 @@ function useOriginFace(secretaryId: string): OriginFace | null | undefined {
 /** 侧栏会话行：派出它的秘书的小头像，悬停写明谁派的、是否静音；任何权限判断都不读它 */
 export function SecretaryOriginBadge({
   secretaryId = DEFAULT_SECRETARY_ID,
+  conversationId,
   muted = false,
 }: {
   secretaryId?: string;
+  conversationId?: string;
   muted?: boolean;
 }) {
   const { t } = useI18n();
-  const face = useOriginFace(secretaryId);
+  const face = useOriginFace(
+    secretaryId === DEFAULT_SECRETARY_ID ? undefined : secretaryId,
+    conversationId
+  );
   const name = face?.name?.trim() || t('Secretary');
   const origin =
     face === null ? t('Dispatched by a deleted secretary') : t('Dispatched by {{name}}', { name });
