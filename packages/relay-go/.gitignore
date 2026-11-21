@@ -7,6 +7,7 @@
 # sync-frontend.sh 产物；只保留占位 index.html 入库
 /frontend/assets/
 /frontend/icons/
+/frontend/splash/
 /frontend/manifest.webmanifest
 /frontend/sw.js
 /frontend/desk.html

@@ -86,13 +86,17 @@ export function createSnapshotTracker(
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** 桌面不在线时盖着快照的提示：写明是什么时候的内容 */
-export function offlineSnapshotNote(savedAt: number | null, now: Date): string {
-  if (savedAt === null || !Number.isFinite(savedAt) || savedAt > now.getTime()) return '桌面不在线';
+/** 桌面不在线（或手机没网、壳从缓存起来）时盖着快照的提示：写明是什么时候的内容 */
+export function offlineSnapshotNote(
+  savedAt: number | null,
+  now: Date,
+  reason = '桌面不在线'
+): string {
+  if (savedAt === null || !Number.isFinite(savedAt) || savedAt > now.getTime()) return reason;
   const at = new Date(savedAt);
   const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
   const sameDay = at.toDateString() === now.toDateString();
-  return `桌面不在线 · 显示 ${sameDay ? '' : `${at.getMonth() + 1}月${at.getDate()}日 `}${time} 的内容`;
+  return `${reason} · 显示 ${sameDay ? '' : `${at.getMonth() + 1}月${at.getDate()}日 `}${time} 的内容`;
 }
 
 export function canSaveSnapshot(chars: number, liveLoading: boolean): boolean {
