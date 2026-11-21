@@ -43,6 +43,7 @@ vi.mock('@/components/ui/context-menu', async () => {
 
 import {
   SecretaryCollapsedButton,
+  SecretaryGroupHeader,
   SecretarySidebarSection,
   sidebarProjects,
 } from './SecretarySidebarSection';
@@ -302,6 +303,50 @@ describe('SecretarySidebarSection', () => {
     expect(handlers.onToggleFold).toHaveBeenCalledTimes(1);
   });
 
+  it('只有一个秘书时，折叠后箭头顶掉头像', async () => {
+    await render(
+      <SecretarySidebarSection view={view()} folded {...actions()}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    const avatar = container.querySelector('[data-enso="secretary-avatar"]');
+    expect(avatar?.parentElement?.className).toContain('hidden');
+    const icon = container.querySelector('[data-enso="secretary-fold-icon"]');
+    expect(icon?.className).toContain('flex');
+    expect(icon?.className).not.toContain('absolute');
+  });
+
+  it('多个秘书折叠后头像仍在，箭头叠在头像上、平时不显示', async () => {
+    await render(
+      <SecretarySidebarSection view={view()} folded keepAvatar {...actions()}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    const avatar = container.querySelector('[data-enso="secretary-avatar"]');
+    expect(avatar).not.toBeNull();
+    expect(avatar?.parentElement?.className ?? '').not.toContain('hidden');
+    const icon = container.querySelector('[data-enso="secretary-fold-icon"]');
+    expect(icon?.className).toContain('absolute');
+    expect(icon?.className).toContain('inset-0');
+    expect(icon?.className).toContain('hidden');
+    expect(icon?.className).toContain('group-hover:flex');
+    expect(icon?.className).toContain('group-has-[:focus-visible]:flex');
+    expect(icon?.querySelector('svg')?.getAttribute('class')).toContain('-rotate-90');
+  });
+
+  it('多个秘书展开时箭头同样只在悬停或键盘聚焦时出现', async () => {
+    await render(
+      <SecretarySidebarSection view={view()} folded={false} keepAvatar {...actions()}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    const icon = container.querySelector('[data-enso="secretary-fold-icon"]');
+    expect(icon?.className).toContain('hidden');
+    expect(icon?.className).toContain('group-hover:flex');
+    expect(icon?.className).not.toContain('group-hover:hidden');
+    expect(container.querySelector('[data-enso="secretary-avatar"]')).not.toBeNull();
+  });
+
   it('右键只有新会话、设置、重新设置秘书', async () => {
     const handlers = actions();
     await render(
@@ -320,6 +365,31 @@ describe('SecretarySidebarSection', () => {
     ]);
     act(() => menuItem('[Re-run setup]')?.click());
     expect(handlers.onReset).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SecretaryGroupHeader', () => {
+  it('整块标题的箭头平时隐去，悬停或键盘聚焦才出现，折叠只旋转不挪字', async () => {
+    const onToggleFold = vi.fn();
+    await render(
+      <SecretaryGroupHeader
+        count={2}
+        folded
+        needsYou={0}
+        onToggleFold={onToggleFold}
+        onCreate={vi.fn()}
+      />
+    );
+    const chevron = container.querySelector('[data-enso="secretary-group-chevron"]');
+    expect(chevron?.getAttribute('class')).toContain('opacity-0');
+    expect(chevron?.getAttribute('class')).toContain('group-hover:opacity-100');
+    expect(chevron?.getAttribute('class')).toContain('group-has-[:focus-visible]:opacity-100');
+    expect(chevron?.getAttribute('class')).toContain('-rotate-90');
+    expect(chevron?.getAttribute('class')).toContain('shrink-0');
+    act(() =>
+      (container.querySelector('[data-enso="secretary-group-fold"]') as HTMLElement).click()
+    );
+    expect(onToggleFold).toHaveBeenCalledTimes(1);
   });
 });
 

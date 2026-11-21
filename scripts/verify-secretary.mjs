@@ -6912,6 +6912,80 @@ async function verifyMultiSecretary(cdp, setup) {
     await sleep(300);
     return JSON.stringify({ ok: true });
   `);
+  log('== 多秘书：折叠后头像还在，箭头只在悬停时出现');
+  const foldedRow = await reloaded.json(`
+    const row = document.querySelector('[data-enso=secretary-section] [data-enso=secretary-row]');
+    if (!row) return JSON.stringify({ ok: false, error: 'no row' });
+    if (row.getAttribute('data-expanded') !== null) {
+      row.querySelector('[data-enso=secretary-fold]')?.click();
+    }
+    document.activeElement?.blur?.();
+    await sleep(200);
+    row.scrollIntoView({ block: 'center' });
+    const painted = (el) => {
+      if (!el) return false;
+      const style = getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      return style.display !== 'none' && Number(style.opacity) > 0.5 && box.width > 0 && box.height > 0;
+    };
+    const box = row.getBoundingClientRect();
+    const chevron = document.querySelector('[data-enso=secretary-group-chevron]');
+    return JSON.stringify({
+      avatar: painted(row.querySelector('[data-enso=secretary-avatar]')),
+      icon: painted(row.querySelector('[data-enso=secretary-fold-icon]')),
+      headerIcon: painted(chevron),
+      x: box.x,
+      y: box.y,
+      width: box.width,
+      height: box.height,
+    });
+  `);
+  assert(
+    foldedRow.avatar && !foldedRow.icon && !foldedRow.headerIcon,
+    '多秘书: 折叠后头像仍在，行内箭头和整块标题箭头默认都不可见',
+    foldedRow
+  );
+  let hovered = { icon: false };
+  for (let i = 0; i < 5 && !hovered.icon; i += 1) {
+    await reloaded.mouse(
+      'mouseMoved',
+      foldedRow.x + 24 + i * 6,
+      foldedRow.y + foldedRow.height / 2
+    );
+    await sleep(200);
+    hovered = await reloaded.json(`
+      const row = document.querySelector('[data-enso=secretary-section] [data-enso=secretary-row]');
+      const icon = row?.querySelector('[data-enso=secretary-fold-icon]');
+      const avatar = row?.querySelector('[data-enso=secretary-avatar]');
+      const painted = (el) => {
+        if (!el) return false;
+        const style = getComputedStyle(el);
+        const box = el.getBoundingClientRect();
+        return style.display !== 'none' && Number(style.opacity) > 0.5 && box.width > 0;
+      };
+      const iconBox = icon?.getBoundingClientRect();
+      const avatarBox = avatar?.getBoundingClientRect();
+      return JSON.stringify({
+        hovered: Boolean(row?.matches(':hover')),
+        icon: painted(icon),
+        avatar: painted(avatar),
+        overlay: Boolean(iconBox && avatarBox && Math.abs(iconBox.x - avatarBox.x) < 2),
+      });
+    `);
+  }
+  assert(
+    hovered.hovered && hovered.icon && hovered.avatar && hovered.overlay,
+    '多秘书: 悬停后箭头叠在头像上，头像仍在',
+    hovered
+  );
+  await reloaded.mouse('mouseMoved', 2, 2);
+  await reloaded.json(`
+    const row = document.querySelector('[data-enso=secretary-section] [data-enso=secretary-row]');
+    if (row && row.getAttribute('data-expanded') === null) {
+      row.querySelector('[data-enso=secretary-fold]')?.click();
+    }
+    return JSON.stringify({ ok: true });
+  `);
   page = reloaded.json.bind(reloaded);
 
   log('== 多秘书：总看板筛选');

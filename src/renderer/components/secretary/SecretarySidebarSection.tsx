@@ -45,7 +45,14 @@ export function SecretaryGroupHeader({
         aria-expanded={!folded}
         className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11.5px] font-medium text-muted-foreground"
       >
-        <ChevronDown className={cn('size-3 shrink-0', folded && '-rotate-90')} />
+        {/* 箭头占着固定位置，平时隐去：悬停或键盘聚焦才出现，文字不跟着挪 */}
+        <ChevronDown
+          data-enso="secretary-group-chevron"
+          className={cn(
+            'size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 [@media(hover:none)]:opacity-100',
+            folded && '-rotate-90'
+          )}
+        />
         <span className="truncate">
           {t('Secretary')} ({count})
         </span>
@@ -99,6 +106,7 @@ export function SecretarySidebarSection({
   onReset,
   divider = true,
   secretaryId,
+  keepAvatar = false,
   children,
 }: SecretarySectionActions & {
   view: SecretarySectionView;
@@ -107,6 +115,11 @@ export function SecretarySidebarSection({
   divider?: boolean;
   /** 多个秘书时标出是哪一个 */
   secretaryId?: string;
+  /**
+   * 多个秘书时：折叠后头像留着，箭头平时不显示，悬停或键盘聚焦才叠在头像上。
+   * 只有一个秘书时不传，维持箭头在悬停时顶掉头像的样子。
+   */
+  keepAvatar?: boolean;
   children: React.ReactNode;
 }) {
   const { t } = useI18n();
@@ -116,7 +129,7 @@ export function SecretarySidebarSection({
       data-expanded={!folded || undefined}
       className="group flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 transition-colors hover:bg-foreground/5"
     >
-      {/* 折叠箭头在 hover 时顶掉头像：不占布局宽度，人物卡才和下面的会话行左对齐 */}
+      {/* 箭头不占布局宽度，人物卡才和下面的会话行左对齐 */}
       <button
         type="button"
         data-enso="secretary-fold"
@@ -124,9 +137,9 @@ export function SecretarySidebarSection({
         aria-expanded={!folded}
         aria-label={folded ? t('Expand') : t('Collapse')}
         title={folded ? t('Expand') : t('Collapse')}
-        className="shrink-0 rounded-[9px]"
+        className={cn('shrink-0 rounded-[9px]', keepAvatar && 'relative')}
       >
-        <span className={cn('block', folded ? 'hidden' : 'group-hover:hidden')}>
+        <span className={cn('block', !keepAvatar && (folded ? 'hidden' : 'group-hover:hidden'))}>
           <SecretaryAvatar
             name={view.name}
             color={view.color}
@@ -136,9 +149,14 @@ export function SecretarySidebarSection({
           />
         </span>
         <span
+          data-enso="secretary-fold-icon"
           className={cn(
             'size-7 items-center justify-center rounded-[9px] bg-muted text-muted-foreground',
-            folded ? 'flex' : 'hidden group-hover:flex'
+            keepAvatar
+              ? 'absolute inset-0 hidden group-hover:flex group-has-[:focus-visible]:flex [@media(hover:none)]:flex'
+              : folded
+                ? 'flex'
+                : 'hidden group-hover:flex'
           )}
         >
           <ChevronDown className={cn('size-3.5', folded && '-rotate-90')} />

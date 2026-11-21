@@ -1109,6 +1109,7 @@ export function Sidebar({
                       onOpenSettings={() => openSecretarySettings(entry.id)}
                       onReset={() => setSecretaryResetId(entry.id)}
                       secretaryId={entry.id}
+                      keepAvatar
                     >
                       {shown.map((id) => (
                         <ConversationRow
