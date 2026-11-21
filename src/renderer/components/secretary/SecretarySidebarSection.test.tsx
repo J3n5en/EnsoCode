@@ -437,7 +437,7 @@ describe('SecretarySidebarSection', () => {
 });
 
 describe('SecretaryGroupHeader', () => {
-  it('整块标题的箭头平时隐去，悬停或键盘聚焦才出现，折叠只旋转不挪字', async () => {
+  it('整块标题的箭头常显，样式与临时会话分组一致，折叠只旋转不挪字', async () => {
     const onToggleFold = vi.fn();
     await render(
       <SecretaryGroupHeader
@@ -449,15 +449,34 @@ describe('SecretaryGroupHeader', () => {
       />
     );
     const chevron = container.querySelector('[data-enso="secretary-group-chevron"]');
-    expect(chevron?.getAttribute('class')).toContain('opacity-0');
-    expect(chevron?.getAttribute('class')).toContain('group-hover:opacity-100');
-    expect(chevron?.getAttribute('class')).toContain('group-has-[:focus-visible]:opacity-100');
-    expect(chevron?.getAttribute('class')).toContain('-rotate-90');
-    expect(chevron?.getAttribute('class')).toContain('shrink-0');
+    const cls = chevron?.getAttribute('class') ?? '';
+    expect(cls).not.toContain('opacity-0');
+    expect(cls).toContain('opacity-100');
+    expect(cls).toContain('text-subtle-foreground');
+    expect(cls).toContain('-rotate-90');
+    expect(cls).toContain('shrink-0');
     act(() =>
       (container.querySelector('[data-enso="secretary-group-fold"]') as HTMLElement).click()
     );
     expect(onToggleFold).toHaveBeenCalledTimes(1);
+  });
+
+  it('展开时箭头仍可见，悬停加深', async () => {
+    await render(
+      <SecretaryGroupHeader
+        count={2}
+        folded={false}
+        needsYou={0}
+        onToggleFold={vi.fn()}
+        onCreate={vi.fn()}
+      />
+    );
+    const cls =
+      container.querySelector('[data-enso="secretary-group-chevron"]')?.getAttribute('class') ?? '';
+    expect(cls).not.toContain('opacity-0');
+    expect(cls).toContain('opacity-70');
+    expect(cls).toContain('group-hover:opacity-100');
+    expect(cls).not.toContain('-rotate-90');
   });
 });
 

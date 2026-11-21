@@ -6912,7 +6912,7 @@ async function verifyMultiSecretary(cdp, setup) {
     await sleep(300);
     return JSON.stringify({ ok: true });
   `);
-  log('== 多秘书：折叠后头像还在，箭头只在悬停时出现');
+  log('== 多秘书：折叠后头像还在，行内箭头只在悬停时出现，整块标题箭头常显');
   const foldedRow = await reloaded.json(`
     const row = document.querySelector('[data-enso=secretary-section] [data-enso=secretary-row]');
     if (!row) return JSON.stringify({ ok: false, error: 'no row' });
@@ -6941,8 +6941,8 @@ async function verifyMultiSecretary(cdp, setup) {
     });
   `);
   assert(
-    foldedRow.avatar && !foldedRow.icon && !foldedRow.headerIcon,
-    '多秘书: 折叠后头像仍在，行内箭头和整块标题箭头默认都不可见',
+    foldedRow.avatar && !foldedRow.icon && foldedRow.headerIcon,
+    '多秘书: 折叠后头像仍在，行内箭头默认不可见，整块标题箭头常显',
     foldedRow
   );
   let hovered = { icon: false };

@@ -46,12 +46,12 @@ export function SecretaryGroupHeader({
         aria-expanded={!folded}
         className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11.5px] font-medium text-muted-foreground"
       >
-        {/* 箭头占着固定位置，平时隐去：悬停或键盘聚焦才出现，文字不跟着挪 */}
+        {/* 箭头常显，与「临时会话」分组一致；折叠只旋转，文字不跟着挪 */}
         <ChevronDown
           data-enso="secretary-group-chevron"
           className={cn(
-            'size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 [@media(hover:none)]:opacity-100',
-            folded && '-rotate-90'
+            'size-3 shrink-0 text-subtle-foreground transition-[opacity,transform] duration-150',
+            folded ? '-rotate-90 opacity-100' : 'opacity-70 group-hover:opacity-100'
           )}
         />
         <span className="truncate">
