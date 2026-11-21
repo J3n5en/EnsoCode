@@ -68,9 +68,13 @@ export interface DispatchDriver {
   /**
    * 给已完成或没有目标的会话挂上新目标：落成与 session_create 同一种 active 目标，
    * 不另发续跑（消息本身会把会话跑起来，轮次结束后续跑接上）。
-   * 原来的目标还没完成时拒绝，目标原样保留。
+   * 原来的目标还没完成时拒绝，目标原样保留；状态在 replaceable 里的才替换，并交回旧目标。
    */
-  attachGoal(conversationId: string, text: string): { ok: boolean; error?: string };
+  attachGoal(
+    conversationId: string,
+    text: string,
+    replaceable?: readonly string[]
+  ): { ok: boolean; error?: string; replaced?: { text: string; status: string } };
   /** 看一眼后台等待：该醒的醒，并返回还没交给秘书的停滞 */
   watch(now: number): BackgroundStall[];
   /** 会话被停止：撤掉续跑与看门狗，之后不许再唤醒它 */
@@ -594,19 +598,19 @@ export function createDispatchDriver(ports: DispatchDriverPorts): DispatchDriver
       });
     },
 
-    attachGoal(conversationId, text) {
+    attachGoal(conversationId, text, replaceable = []) {
       const runtime = runtimeOf(conversationId);
       if (!runtime) return { ok: false, error: 'not-main-driven' };
-      const goal = runtime.goal;
       // completed 不会留在行上（完成即撤下），这里只挡还活着的目标
-      if (goal && goal.status !== 'completed') return { ok: false, error: 'goal-active' };
+      const live = runtime.goal?.status === 'completed' ? undefined : runtime.goal;
+      if (live && !replaceable.includes(live.status)) return { ok: false, error: 'goal-active' };
       const trimmed = text.trim();
       if (!trimmed) return { ok: false, error: 'empty goal' };
       save(conversationId, {
         ...runtime,
         goal: { text: trimmed, status: 'active', autoTurns: 0, noProgressRuns: 0 },
       });
-      return { ok: true };
+      return { ok: true, ...(live ? { replaced: { text: live.text, status: live.status } } : {}) };
     },
 
     goalAction(conversationId, action, text) {

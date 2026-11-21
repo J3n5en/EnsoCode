@@ -4,6 +4,7 @@ import type {
   CleanupDraft,
   CleanupItem,
   CleanupItemKind,
+  ClosedGoal,
   DispatchDraft,
   DispatchModelRef,
   DispatchRecord,
@@ -29,6 +30,7 @@ import {
   CLEANUP_ITEM_KINDS,
   PATROL_REASONS as PATROL_REASON_KINDS,
   RELAY_ASK_STATUSES,
+  REPLACEABLE_GOAL_STATUSES,
 } from '../types/secretary';
 import { parseSecretaryToolDraft } from './customTools';
 import { ACTIVITY_LIMIT } from './feed';
@@ -554,6 +556,22 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (autoArchiveResultAt !== undefined) record.autoArchiveResultAt = autoArchiveResultAt;
   const sentAt = time(value.sentAt);
   if (sentAt !== undefined) record.sentAt = sentAt;
+  const reopenedAt = time(value.reopenedAt);
+  if (reopenedAt !== undefined) record.reopenedAt = reopenedAt;
+  const manualUndoneAt = time(value.manualUndoneAt);
+  if (manualUndoneAt !== undefined) record.manualUndoneAt = manualUndoneAt;
+  if (
+    isObject(value.closedGoal) &&
+    text(value.closedGoal.text) &&
+    (REPLACEABLE_GOAL_STATUSES as readonly unknown[]).includes(value.closedGoal.status)
+  ) {
+    const note = text(value.closedGoal.note);
+    record.closedGoal = {
+      text: text(value.closedGoal.text) as string,
+      status: value.closedGoal.status as ClosedGoal['status'],
+      ...(note ? { note } : {}),
+    };
+  }
   if (
     isObject(value.patrol) &&
     PATROL_REASONS.includes(value.patrol.reason as PatrolReason) &&
@@ -598,6 +616,7 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
         turn,
         at,
         ...(value.lastResult.dismissed === true ? { dismissed: true as const } : {}),
+        ...(value.lastResult.manual === true ? { manual: true as const } : {}),
       };
   }
   if (value.takeover !== undefined) {

@@ -1199,33 +1199,76 @@ describe('自动巡检', () => {
 });
 
 describe('被 session_send 重新唤起后的收口', () => {
-  /** 已经 goal-complete 的会话又被唤起：reopenedAt 已记，lastState 标回运行中 */
+  /** 秘书追加任务后的记录：旧终态已撤下，reopenedAt 已记，lastState 标回运行中 */
   const reopened = (over: Partial<DispatchRecord> = {}) => ({
     dispatched: {
       c1: {
         ...emptyFile().dispatched.c1,
         turn: 2,
         lastState: 'running' as const,
-        lastResult: { kind: 'goal-complete' as const, turn: 2, at: 10 },
         reopenedAt: 20,
         ...over,
       },
     },
   });
 
-  it('这一轮以 turn-ended 收尾、会话空闲：回到原来的完成，不重复推送', () => {
+  it('这一轮以 turn-ended 收尾：照常推给秘书', () => {
     const h = harness({ file: reopened() });
     h.state.statuses.c1 = idle;
     h.state.now = 30;
     h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
-    expect(h.state.file.dispatched.c1.lastResult).toEqual({
-      kind: 'goal-complete',
-      turn: 3,
-      at: 30,
-    });
-    expect(h.state.file.dispatched.c1.lastState).toBe('idle');
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'turn-ended', turn: 3 });
     expect(h.state.file.dispatched.c1.reopenedAt).toBeUndefined();
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
+  });
+
+  it('旧终态还留在记录上（goal-complete 后再发消息）：这一轮结束照样推，不回到旧终态', () => {
+    const h = harness({
+      file: reopened({ lastResult: { kind: 'goal-complete', turn: 2, at: 10 } }),
+    });
+    h.state.statuses.c1 = idle;
+    h.state.now = 30;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'turn-ended', turn: 3 });
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
+  });
+
+  it('目标停在受阻或暂停：不会续跑，这一轮结束报 turn-ended', () => {
+    for (const status of ['blocked', 'paused']) {
+      const h = harness({ file: reopened() });
+      h.state.rows.c1.goal = { text: '旧目标', status, autoTurns: 0 };
+      h.state.statuses.c1 = idle;
+      h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+      expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'turn-ended', turn: 3 });
+      expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['turn-ended']);
+    }
+  });
+
+  it('这一轮又调了 goal_blocked：报受阻，不被随后的轮次结束盖掉', () => {
+    const h = harness({ file: reopened() });
+    h.state.rows.c1.goal = { text: '新目标', status: 'active', autoTurns: 0 };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('goal-signal', { kind: 'blocked', note: '缺 token' }), []);
+    h.state.rows.c1.goal = { text: '新目标', status: 'blocked', autoTurns: 0 };
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-blocked' });
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['goal-blocked']);
+  });
+
+  it('挂上的新目标还在跑：这一轮结束不推，目标完成时推完成', () => {
+    const h = harness({ file: reopened() });
+    h.state.rows.c1.goal = { text: '新目标', status: 'active', autoTurns: 0 };
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
     expect(h.state.file.outbox).toEqual([]);
+    h.host.onAgentEvent(event('goal-signal', { kind: 'complete', note: 'ok' }), []);
+    delete h.state.rows.c1.goal;
+    h.host.onAgentEvent(event('turn-completed'), change('idle', 'running'));
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({
+      kind: 'goal-complete',
+      turn: 4,
+    });
+    expect(h.state.file.outbox.map((update) => update.kind)).toEqual(['goal-complete']);
   });
 
   it('这一轮失败：更新成失败', () => {

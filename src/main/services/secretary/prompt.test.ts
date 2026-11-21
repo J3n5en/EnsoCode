@@ -144,6 +144,13 @@ describe('buildSecretarySystemPrompt', () => {
     expect(prompt).toMatch(/patrol only watches a session that still has a goal/);
   });
 
+  it('手动标完成或目标受阻、暂停的会话追加任务时也能带 goal，正在跑或在等的不行', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    expect(prompt).toMatch(/marked done by hand, or whose goal is blocked or paused/);
+    expect(prompt).toMatch(/refused while the current goal is still active or waiting/);
+    expect(prompt).toMatch(/every follow-up you send starts tracking it again/);
+  });
+
   it('派发直接执行不出卡，worktree 由秘书每次按任务决定，模型默认跟随项目', () => {
     const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
     // 确认卡只剩会删东西、改设置、写技能工具和接管这几类

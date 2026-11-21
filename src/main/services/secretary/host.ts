@@ -730,29 +730,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     });
   }
 
-  /**
-   * 已有终态结果的会话被重新唤起，这一轮以 turn-ended 收尾：回到原来的终态。
-   * 只把时间挪到这一轮，不再推一条重复的完成回传；记录也回到空闲，
-   * 否则残留的 running 会让它一直被算在跑。
-   */
-  function restoreSettled(
-    record: DispatchRecord,
-    previous: NonNullable<DispatchRecord['lastResult']>,
-    now: number
-  ): void {
-    if (record.lastState !== 'idle') record.stateSince = now;
-    record.lastState = 'idle';
-    record.lastResult = {
-      kind: previous.kind,
-      turn: record.turn,
-      at: now,
-      ...(previous.dismissed ? { dismissed: true as const } : {}),
-    };
-    // 收口了就不会再有后台任务唤醒它；留着这条记录会让空闲会话一直被算在跑
-    delete record.backgroundRunning;
-    delete record.backgroundPersistent;
-  }
-
   /** 同一轮只报一次。返回是否写进了回传队列 */
   function applyBackgroundStall(
     file: SecretaryDispatchFile,
@@ -1058,7 +1035,6 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
         // 这一轮结束就不再是「被唤起、还没收尾」：之后按空闲状态判定
-        const previous = record.lastResult;
         const reopened = record.reopenedAt !== undefined;
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed'))
           delete record.reopenedAt;
@@ -1076,6 +1052,17 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             resultEvent.goalCompleted = true;
           }
           if (resultEvent) kind = classify(record, resultEvent, status);
+          // 秘书追加任务唤起的这一轮：目标停在受阻或暂停不会续跑，这一轮结束就是停下了，照常报。
+          // 这一轮已经有了结果（如又报了受阻）就不再盖掉
+          if (
+            !kind &&
+            reopened &&
+            record.lastResult === undefined &&
+            resultEvent?.type === 'turn-completed' &&
+            !resultEvent.aborted &&
+            (resultEvent.goalStatus === 'blocked' || resultEvent.goalStatus === 'paused')
+          )
+            kind = 'turn-ended';
           if (resultEvent?.type === 'turn-completed' && resultEvent.silentFinish)
             detail = silentFinishDetail(resultEvent.silentFinish);
           if (resultEvent?.type === 'turn-interrupted')
@@ -1112,11 +1099,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           detail = undefined;
         }
         const awaiting = kind === 'turn-ended' && awaitsWake(conversationId, now);
-        if (kind === 'turn-ended' && reopened && previous && SETTLED_RESULTS.has(previous.kind))
-          // session_send 唤起的一轮结束了、没有再给结果：回到原来的终态，不重复推送
-          restoreSettled(record, previous, now);
-        else if (kind && !awaiting)
-          recordResult(file, record, kind, now, detail, report, turnReport);
+        if (kind && !awaiting) recordResult(file, record, kind, now, detail, report, turnReport);
         else if (
           own &&
           event.type === 'turn-completed' &&

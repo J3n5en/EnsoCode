@@ -296,18 +296,46 @@ function harness(
     pauseGoal: (conversationId) => {
       h.pausedGoals.push(conversationId);
     },
-    attachGoal: (conversationId, goal) => {
+    attachGoal: (conversationId, goal, replaceable = []) => {
       h.attachedGoals.push({ conversationId, goal });
-      const current = h.rows[conversationId]?.goal as { status?: unknown } | undefined;
+      const current = h.rows[conversationId]?.goal as
+        | { text?: string; status?: string }
+        | undefined;
       const live =
-        current && typeof current === 'object' && current.status && current.status !== 'completed';
-      if (!h.attachGoalOk || live) return { ok: false, error: 'goal-active' };
+        current && typeof current === 'object' && current.status && current.status !== 'completed'
+          ? current
+          : undefined;
+      const blocked = live && !(replaceable as readonly string[]).includes(live.status as string);
+      if (!h.attachGoalOk || blocked) return { ok: false, error: 'goal-active' };
       const row = h.rows[conversationId] ?? {};
       h.rows[conversationId] = {
         ...row,
         goal: { text: goal, status: 'active', autoTurns: 0, noProgressRuns: 0 },
       };
-      return { ok: true };
+      return {
+        ok: true,
+        ...(live ? { replaced: { text: live.text ?? '', status: live.status as string } } : {}),
+      };
+    },
+    closeGoal: (conversationId, statuses) => {
+      const row = h.rows[conversationId];
+      const goal = row?.goal as { text: string; status: string; note?: string } | undefined;
+      if (!row || !goal || !(statuses as readonly string[]).includes(goal.status)) return null;
+      h.rows[conversationId] = { ...row, goal: undefined };
+      return {
+        text: goal.text,
+        status: goal.status as 'blocked' | 'paused',
+        ...(goal.note ? { note: goal.note } : {}),
+      };
+    },
+    restoreGoal: (conversationId, goal) => {
+      const row = h.rows[conversationId];
+      if (!row || row.goal) return false;
+      h.rows[conversationId] = {
+        ...row,
+        goal: { ...goal, autoTurns: 0, noProgressRuns: 0 },
+      };
+      return true;
     },
     cleanup: {
       git: async () => ({ code: 1, stdout: '', stderr: '' }),
@@ -880,6 +908,158 @@ describe('session_send', () => {
     expect(result.error).toMatch(/^refused \(goal-active\): /u);
     expect(h.rows.c1.goal).toEqual(live);
     expect(h.prompts).toEqual([]);
+  });
+
+  it('目标在等外部条件（waiting）时带 goal 同样被拒绝', async () => {
+    const parked = { text: '等 CI', status: 'waiting', autoTurns: 1, noProgressRuns: 0 };
+    const h = harness({
+      file: dispatchedFile(),
+      rows: { c1: { id: 'c1', driver: 'main', goal: parked } },
+    });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '换个目标',
+      goal: '另一个目标',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/^refused \(goal-active\): /u);
+    expect(h.rows.c1.goal).toEqual(parked);
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('受阻或暂停的目标可以被带 goal 的追加替换，审计记下被替换的旧目标', async () => {
+    for (const status of ['blocked', 'paused']) {
+      const h = harness({
+        file: dispatchedFile(),
+        rows: { c1: { id: 'c1', driver: 'main', goal: { text: '旧目标', status } } },
+      });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '改一下文案',
+        goal: '把文案改好并推送',
+      });
+      expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+      expect(h.rows.c1.goal).toMatchObject({ text: '把文案改好并推送', status: 'active' });
+      expect(h.file.dispatched.c1.goal).toBe('把文案改好并推送');
+      expect(h.audits).toContainEqual({
+        at: NOW,
+        secretaryConversationId: 'sec-1',
+        op: 'session_goal_replace',
+        targetId: 'c1',
+        ok: true,
+        detail: `${status}: 旧目标`,
+      });
+    }
+  });
+
+  /** 追加任务重新打开跟踪：带旧终态与旧停滞标记的记录 */
+  const closed = (lastResult: NonNullable<DispatchRecord['lastResult']>) => {
+    const file = dispatchedFile();
+    file.dispatched.c1 = {
+      ...file.dispatched.c1,
+      turn: 2,
+      lastResult,
+      stalledTurn: 2,
+      patrol: { reason: 'goal-idle-stalled', turn: 2, at: 950 },
+    };
+    return file;
+  };
+
+  it('手动标完成、goal-complete、failed、interrupted、stalled 之后再发消息：撤下旧终态重新跟踪', async () => {
+    const results: NonNullable<DispatchRecord['lastResult']>[] = [
+      { kind: 'goal-complete', turn: 2, at: 950, manual: true },
+      { kind: 'goal-complete', turn: 2, at: 950 },
+      { kind: 'failed', turn: 2, at: 950 },
+      { kind: 'interrupted', turn: 2, at: 950 },
+      { kind: 'stalled', turn: 2, at: 950 },
+    ];
+    for (const lastResult of results) {
+      const h = harness({ file: closed(lastResult), rows: { c1: { id: 'c1', driver: 'main' } } });
+      const result = await call(h.handlers.session_send, {
+        conversationId: 'c1',
+        message: '再改一处',
+      });
+      expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+      const record = h.file.dispatched.c1;
+      expect(record.lastResult).toBeUndefined();
+      expect(record).toMatchObject({ lastState: 'running', reopenedAt: NOW });
+      // 旧的停滞标记不能把这一轮的停滞去重掉
+      expect(record.stalledTurn).toBeUndefined();
+      expect(record.patrol).toBeUndefined();
+    }
+  });
+
+  it('重新打开的标记落盘再读回仍在', async () => {
+    const h = harness({
+      file: closed({ kind: 'goal-complete', turn: 2, at: 950, manual: true }),
+      rows: { c1: { id: 'c1', driver: 'main' } },
+    });
+    await call(h.handlers.session_send, { conversationId: 'c1', message: '再改一处' });
+    const restored = parseDispatchFile(JSON.parse(JSON.stringify(h.file)));
+    expect(restored.dispatched.c1.reopenedAt).toBe(NOW);
+  });
+
+  it('mark_done 收掉受阻目标，之后带 goal 的追加能挂上', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      rows: {
+        c1: {
+          id: 'c1',
+          driver: 'main',
+          goal: { text: '旧目标', status: 'blocked', note: '等审批' },
+        },
+      },
+    });
+    expect(await markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
+    expect(h.rows.c1.goal).toBeUndefined();
+    expect(h.file.dispatched.c1.closedGoal).toEqual({
+      text: '旧目标',
+      status: 'blocked',
+      note: '等审批',
+    });
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_done',
+      detail: 'manual; goal closed (blocked)',
+    });
+    const result = await call(h.handlers.session_send, {
+      conversationId: 'c1',
+      message: '追加一个修改',
+      goal: '改完并推送',
+    });
+    expect(result).toEqual({ ok: true, result: { status: 'sent' } });
+    expect(h.rows.c1.goal).toMatchObject({ text: '改完并推送', status: 'active' });
+    // 重新跟踪后手动标记已经不在，收掉的旧目标也不再能恢复
+    expect(h.file.dispatched.c1.closedGoal).toBeUndefined();
+  });
+
+  it('mark_undo 恢复被收掉的目标', async () => {
+    const h = harness({
+      file: dispatchedFile(),
+      rows: { c1: { id: 'c1', driver: 'main', goal: { text: '旧目标', status: 'paused' } } },
+    });
+    await markResult(h.ports, 'c1', 'done');
+    expect(await markResult(h.ports, 'c1', 'undo')).toEqual({ ok: true });
+    expect(h.rows.c1.goal).toMatchObject({ text: '旧目标', status: 'paused' });
+    expect(h.file.dispatched.c1.closedGoal).toBeUndefined();
+    expect(h.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.audits.at(-1)).toMatchObject({
+      op: 'result_mark_undo',
+      detail: 'manual; goal restored (paused)',
+    });
+  });
+
+  it('mark_done 不动正在跑或在等的目标', async () => {
+    for (const status of ['active', 'waiting']) {
+      const goal = { text: '目标', status };
+      const h = harness({
+        file: dispatchedFile(),
+        rows: { c1: { id: 'c1', driver: 'main', goal } },
+      });
+      expect(await markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
+      expect(h.rows.c1.goal).toEqual(goal);
+      expect(h.file.dispatched.c1.closedGoal).toBeUndefined();
+    }
   });
 
   it('goal 为空或超长时指出字段，不改目标', async () => {
@@ -2525,9 +2705,9 @@ describe('markResult', () => {
     },
   });
 
-  it('手动标记完成：收口成完成并标 manual，审计写明是手动', () => {
+  it('手动标记完成：收口成完成并标 manual，审计写明是手动', async () => {
     const h = harness({ file: file({ backgroundRunning: true }) });
-    expect(markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
+    expect(await markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
     expect(h.file.dispatched.c1).toMatchObject({
       lastState: 'idle',
       lastResult: { kind: 'goal-complete', turn: 2, at: NOW, manual: true },
@@ -2545,11 +2725,11 @@ describe('markResult', () => {
     ]);
   });
 
-  it('撤销标记：放回进行中，只对用户手动标的结果生效', () => {
+  it('撤销标记：放回进行中，只对用户手动标的结果生效', async () => {
     const manual = harness({
       file: file({ lastResult: { kind: 'goal-complete', turn: 2, at: 950, manual: true } }),
     });
-    expect(markResult(manual.ports, 'c1', 'undo')).toEqual({ ok: true });
+    expect(await markResult(manual.ports, 'c1', 'undo')).toEqual({ ok: true });
     expect(manual.file.dispatched.c1.lastResult).toBeUndefined();
     expect(manual.file.dispatched.c1).toMatchObject({ lastState: 'running', manualUndoneAt: NOW });
     expect(manual.audits[0]).toMatchObject({ op: 'result_mark_undo', detail: 'manual' });
@@ -2558,31 +2738,31 @@ describe('markResult', () => {
     const real = harness({
       file: file({ lastResult: { kind: 'goal-complete', turn: 2, at: 950 } }),
     });
-    expect(markResult(real.ports, 'c1', 'undo')).toEqual({ ok: false, error: 'not-manual' });
+    expect(await markResult(real.ports, 'c1', 'undo')).toEqual({ ok: false, error: 'not-manual' });
     expect(real.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
     expect(real.audits).toEqual([]);
   });
 
-  it('普通会话没有派发记录：不动也不写审计', () => {
+  it('普通会话没有派发记录：不动也不写审计', async () => {
     const h = harness({});
-    expect(markResult(h.ports, 'other', 'done')).toEqual({ ok: false, error: 'not-found' });
+    expect(await markResult(h.ports, 'other', 'done')).toEqual({ ok: false, error: 'not-found' });
     expect(h.audits).toEqual([]);
   });
 
-  it('移出：只从看板上拿掉，不标完成，会话记录还在', () => {
+  it('移出：只从看板上拿掉，不标完成，会话记录还在', async () => {
     const h = harness({
       file: file({ lastState: 'idle', stoppedAt: 950, backgroundRunning: true }),
     });
-    expect(markResult(h.ports, 'c1', 'dismiss')).toEqual({ ok: true });
+    expect(await markResult(h.ports, 'c1', 'dismiss')).toEqual({ ok: true });
     expect(h.file.dispatched.c1.lastResult).toBeUndefined();
     expect(h.file.dispatched.c1).toMatchObject({ lastState: 'idle', dismissedFromBoard: true });
     expect(h.file.dispatched.c1.backgroundRunning).toBeUndefined();
     expect(h.audits[0]).toMatchObject({ op: 'result_dismiss_board', detail: 'manual' });
   });
 
-  it('移出后再标记完成：按完成收口，移出标记清掉', () => {
+  it('移出后再标记完成：按完成收口，移出标记清掉', async () => {
     const h = harness({ file: file({ dismissedFromBoard: true, stoppedAt: 950 }) });
-    expect(markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
+    expect(await markResult(h.ports, 'c1', 'done')).toEqual({ ok: true });
     expect(h.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete', manual: true });
     expect(h.file.dispatched.c1.dismissedFromBoard).toBeUndefined();
   });
