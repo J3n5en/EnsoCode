@@ -521,16 +521,22 @@ export function App() {
       if (document.visibilityState === 'visible') {
         client.nudge('visibility');
         client.send({ type: 'presence', visible: true });
+        clearBadge();
       } else {
         client.conceal();
         client.send({ type: 'presence', visible: false });
         client.flushCache();
       }
     };
+    // 回到前台即清角标：待处理项在列表里看得到
+    const clearBadge = () =>
+      navigator.serviceWorker?.controller?.postMessage({ type: 'badge-clear' });
+    clearBadge();
     const onOnline = () => {
       if (document.visibilityState === 'visible') {
         client.nudge('online');
         client.send({ type: 'presence', visible: true });
+        clearBadge();
       }
     };
     const onPageShow = (event: PageTransitionEvent) => {
@@ -538,6 +544,7 @@ export function App() {
       // bfcache 回来的 socket 几乎一定是半开，当网络恢复拆掉
       client.nudge(event.persisted ? 'online' : 'visibility');
       client.send({ type: 'presence', visible: true });
+      clearBadge();
     };
     const onFocus = () => {
       if (document.visibilityState === 'visible') client.nudge('visibility');

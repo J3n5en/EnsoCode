@@ -8,8 +8,8 @@ import { SecureJsonFile } from './secureFile';
 
 /**
  * Web Push 直发（不经中继）：VAPID 密钥对首次生成后落盘，
- * 每台已配对设备最多一份 PushSubscription。推送载荷只含通用文案 + sessionId
- * ——推送途经 Apple/Google 服务器，消息内容不出加密信道。
+ * 每台已配对设备最多一份 PushSubscription。载荷走 Web Push 加密（RFC 8291），
+ * 正文可以带审批命令、提问原文这类短摘要。
  */
 
 export interface PushPayload {
@@ -27,7 +27,7 @@ const PUSH_TITLES: Record<string, string> = {
 
 /**
  * 事件 → 推送载荷的纯映射。返回 null 表示该事件不值得推送。
- * body 用会话标题（不含消息正文），缺标题时退化为「会话」。
+ * 正文优先带要处理的内容（审批命令、提问原文），没有时退回会话标题。
  */
 export function buildPushPayload(
   event: {
@@ -35,6 +35,7 @@ export function buildPushPayload(
     sessionId?: string;
     identity?: { sessionId?: string };
     request?: Partial<ApprovalRequestInfo>;
+    ask?: { question?: string };
   },
   sessionTitle: string | undefined,
   notifyMainAgentOnly = true,
@@ -49,7 +50,23 @@ export function buildPushPayload(
   const sessionId = event.identity?.sessionId ?? event.sessionId;
   if (!sessionId) return null;
   if (muted) return null;
-  return { title, body: sessionTitle || '会话', sessionId };
+  return { title, body: pushBody(event, sessionTitle), sessionId };
+}
+
+const PUSH_BODY_MAX = 100;
+
+function pushBody(
+  event: { type: string; request?: Partial<ApprovalRequestInfo>; ask?: { question?: string } },
+  sessionTitle: string | undefined
+): string {
+  const detail =
+    event.type === 'approval-request'
+      ? event.request?.summary
+      : event.type === 'ask-request'
+        ? event.ask?.question
+        : undefined;
+  const text = (detail || sessionTitle || '会话').trim();
+  return text.length > PUSH_BODY_MAX ? text.slice(0, PUSH_BODY_MAX) : text;
 }
 
 // ── 持久化（与 pairStore 同一套加密姿态）─────────────────────────

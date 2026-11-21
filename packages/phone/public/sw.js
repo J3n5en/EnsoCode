@@ -128,12 +128,26 @@ self.addEventListener('push', (event) => {
     tag: payload.sessionId || 'enso',
     data: { sessionId: payload.sessionId },
   });
-  const badge =
-    (payload.title === '需要审批' || payload.title === '等待你的回答') &&
-    typeof self.registration.setAppBadge === 'function'
-      ? self.registration.setAppBadge(1).catch(() => {})
-      : null;
-  event.waitUntil(badge ? Promise.all([notify, badge]) : notify);
+  // 角标数未处理的审批和提问（同 tag 的通知会合并，按现存通知计）
+  const badge = notify.then(() => syncBadge());
+  event.waitUntil(badge);
+});
+
+const PENDING_TITLES = ['需要审批', '等待你的回答'];
+
+function syncBadge() {
+  if (typeof self.registration.setAppBadge !== 'function') return Promise.resolve();
+  return self.registration.getNotifications().then((items) => {
+    const n = items.filter((item) => PENDING_TITLES.includes(item.title)).length;
+    return n > 0 ? self.registration.setAppBadge(n) : self.registration.clearAppBadge?.();
+  });
+}
+
+// 页面回到前台：用户已经看到待处理项，角标清零
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'badge-clear') return;
+  if (typeof self.registration.clearAppBadge === 'function')
+    event.waitUntil(self.registration.clearAppBadge().catch(() => {}));
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -142,6 +156,7 @@ self.addEventListener('notificationclick', (event) => {
   const target = sessionId ? `/?session=${encodeURIComponent(sessionId)}` : '/';
   event.waitUntil(
     (async () => {
+      await syncBadge();
       if (sessionId) {
         try {
           const cache = await caches.open(LAUNCH_SESSION_CACHE);
