@@ -8,6 +8,7 @@ import {
   IS_MAC,
   isSendMessageKey,
   KEYBINDING_ACTIONS,
+  menuAlreadyHandled,
 } from './keybindings';
 
 function keyEvent(partial: {
@@ -17,6 +18,7 @@ function keyEvent(partial: {
   ctrlKey?: boolean;
   altKey?: boolean;
   shiftKey?: boolean;
+  defaultPrevented?: boolean;
 }): KeyboardEvent {
   return {
     key: partial.key,
@@ -25,6 +27,7 @@ function keyEvent(partial: {
     ctrlKey: partial.ctrlKey ?? false,
     altKey: partial.altKey ?? false,
     shiftKey: partial.shiftKey ?? false,
+    defaultPrevented: partial.defaultPrevented ?? false,
   } as KeyboardEvent;
 }
 
@@ -124,5 +127,19 @@ describe('Space binding', () => {
     expect(eventToBinding(keyEvent({ key: ' ', ...held }))).toBe('mod+shift+space');
     expect(eventToBinding(keyEvent({ key: '\u00a0', altKey: true }))).toBe('alt+space');
     expect(formatBinding('mod+shift+space')).toMatch(/Space$/);
+  });
+});
+
+describe('menuAlreadyHandled', () => {
+  const mod = IS_MAC ? { metaKey: true } : { ctrlKey: true };
+
+  it('菜单加速键已经执行过菜单项时，同一次按键不再由页面处理', () => {
+    const event = keyEvent({ key: 'b', ...mod, defaultPrevented: true });
+    expect(menuAlreadyHandled(event, eventToBinding(event) ?? '')).toBe(true);
+  });
+
+  it('普通按键页面照常处理', () => {
+    const event = keyEvent({ key: 'b', ...mod });
+    expect(menuAlreadyHandled(event, 'mod+b')).toBe(false);
   });
 });

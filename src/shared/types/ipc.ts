@@ -127,7 +127,11 @@ export const IPC_CHANNELS = {
   WINDOW_MAXIMIZED_CHANGED: 'window:maximized-changed',
   WINDOW_FULLSCREEN_CHANGED: 'window:fullscreen-changed',
   WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE: 'window:set-traffic-lights-visible',
+  /** renderer → main：macOS 布局变化后重算窗口形状与拖拽命中区 */
+  WINDOW_REFRESH_DRAG_REGIONS: 'window:refresh-drag-regions',
   WINDOW_OPEN_SETTINGS: 'window:open-settings',
+  /** main → 主界面 renderer：macOS View 菜单要求切换侧栏（与渲染层快捷键同一条逻辑） */
+  WINDOW_TOGGLE_SIDEBAR: 'window:toggle-sidebar',
   /** main → settings renderer：打开后切分类并闪行 */
   SETTINGS_DEEP_LINK: 'settings:deep-link',
   SETTINGS_DEEP_LINK_CONSUME: 'settings:deep-link-consume',

@@ -1516,6 +1516,7 @@ export const zhTranslations: Record<string, string> = {
   Collapse: '收起',
   Expand: '展开',
   'Expand sidebar': '展开侧边栏',
+  'Show or hide sidebar': '显示/隐藏侧边栏',
   'Approval required': '需要审批',
   'Timed out · denied': '已超时拒绝',
   'Timed out · no answer': '已超时未回答',
