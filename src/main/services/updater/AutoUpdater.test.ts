@@ -1,18 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const m = vi.hoisted(() => ({
+  userData: '',
+  sent: [] as Array<{ restartPending?: boolean }>,
+  observation: {} as Record<string, unknown>,
   handlers: new Map<string, (...args: unknown[]) => void>(),
   order: [] as string[],
   quitAndInstall: vi.fn(),
   prepare: vi.fn(),
   cancel: vi.fn(),
-  record: vi.fn(),
   needsCheckpoint: true,
 }));
+vi.mock('node:fs', async (importActual) => {
+  const fs = await importActual<typeof import('node:fs')>();
+  m.userData = fs.mkdtempSync(`${(await import('node:os')).tmpdir()}/enso-updater-`);
+  return fs;
+});
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }));
 vi.mock('electron', () => ({
-  app: { getPath: () => '/tmp/enso-updater-test', on: vi.fn() },
-  BrowserWindow: { getAllWindows: () => [] },
+  app: { getPath: () => m.userData, on: vi.fn() },
+  BrowserWindow: { getAllWindows: () => [{}] },
 }));
 vi.mock('electron-updater', () => ({
   default: {
@@ -25,17 +32,18 @@ vi.mock('electron-updater', () => ({
   },
 }));
 vi.mock('../../ipc/sessionIndex', () => ({
-  agentSessionIndex: { runningRootSessionIds: () => ['running-1'] },
   needsQuitCheckpoint: () => m.needsCheckpoint,
 }));
 vi.mock('../../ipc/settings', () => ({
   flushSettings: vi.fn(),
   writeTrayReenterAfterUpdate: vi.fn(),
 }));
-vi.mock('../../windows/createAppWindow', () => ({ sendToWindow: vi.fn() }));
+vi.mock('../../windows/createAppWindow', () => ({
+  sendToWindow: (_win: unknown, _channel: string, status: { restartPending?: boolean }) =>
+    m.sent.push(status),
+}));
 vi.mock('../exitInterruptHost', () => ({ markExitForUpdate: vi.fn() }));
-vi.mock('./idleRestartSnapshot', () => ({ currentIdleRestartObservation: () => ({}) }));
-vi.mock('./interruptedSessions', () => ({ recordInterruptedSessions: m.record }));
+vi.mock('./idleRestartSnapshot', () => ({ currentIdleRestartObservation: () => m.observation }));
 vi.mock('../agentHost', () => ({
   prepareAgentWorkerForQuit: m.prepare,
   cancelAgentQuitCheckpoint: m.cancel,
@@ -57,6 +65,8 @@ vi.mock('../appServerMode', () => ({
   isServerMode: () => false,
 }));
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { autoUpdaterService } from './AutoUpdater';
 
 autoUpdaterService.init({ on: vi.fn(), once: vi.fn() } as never, false, false);
@@ -65,7 +75,8 @@ m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
 beforeEach(() => {
   m.order.length = 0;
   m.quitAndInstall.mockReset().mockImplementation(() => m.order.push('quitAndInstall'));
-  m.record.mockReset().mockImplementation(() => m.order.push('record'));
+  m.sent.length = 0;
+  m.observation = {};
   m.cancel.mockReset().mockImplementation(() => m.order.push('cancel'));
 });
 
@@ -76,7 +87,7 @@ describe('安装更新走优雅重启的安全点', () => {
       m.order.push(`prepare:${options.reason}`);
       return new Promise((resolve) => (release = resolve));
     });
-    autoUpdaterService.requestRestart(true);
+    autoUpdaterService.requestRestart();
     await vi.waitFor(() => expect(m.prepare).toHaveBeenCalledOnce());
     expect(m.prepare.mock.calls[0][0].hasRunningSessions()).toBe(true);
     // 要不要等安全点看的是「有回合在跑或有后台命令在跑」，不是只看在跑的回合
@@ -87,9 +98,9 @@ describe('安装更新走优雅重启的安全点', () => {
     expect(m.quitAndInstall).not.toHaveBeenCalled();
     release('checkpointed');
     await vi.waitFor(() => expect(m.quitAndInstall).toHaveBeenCalledOnce());
-    expect(m.order).toEqual(['prepare:update', 'dialog-close:update', 'record', 'quitAndInstall']);
+    expect(m.order).toEqual(['prepare:update', 'dialog-close:update', 'quitAndInstall']);
     // 已在退出流程里：再点重启不叠加
-    autoUpdaterService.requestRestart(true);
+    autoUpdaterService.requestRestart();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(m.prepare).toHaveBeenCalledOnce();
   });
@@ -109,17 +120,35 @@ describe('安装更新的等待弹层', () => {
           options.onWaitingForTools('tool');
         })
     );
-    service.requestRestart(true);
+    service.requestRestart();
     await vi.waitFor(() => expect(m.order).toEqual(['dialog-open:update:tool']));
     expect(m.quitAndInstall).not.toHaveBeenCalled();
     // 弹层上点「强制退出」→ forceAgentWorkerQuit 让等待以超时结束
     release('timeout');
     await vi.waitFor(() => expect(m.quitAndInstall).toHaveBeenCalledOnce());
-    expect(m.order).toEqual([
-      'dialog-open:update:tool',
-      'dialog-close:update',
-      'record',
-      'quitAndInstall',
-    ]);
+    expect(m.order).toEqual(['dialog-open:update:tool', 'dialog-close:update', 'quitAndInstall']);
+  });
+});
+
+describe('重启更新不等整个回合', () => {
+  it('有回合在跑、排队、待答与审批时也直接进安全点，不挂起等回合，不写 interrupted-by-update.json', async () => {
+    vi.resetModules();
+    const { autoUpdaterService: service } = await import('./AutoUpdater');
+    service.init({ on: vi.fn(), once: vi.fn() } as never, false, false);
+    m.handlers.get('update-downloaded')?.({ version: '9.9.9' });
+    m.sent.length = 0;
+    m.observation = {
+      agentBusy: true,
+      queuedCount: 2,
+      pendingAskCount: 1,
+      pendingApprovalCount: 1,
+      windowFocused: true,
+    };
+    m.prepare.mockReset().mockResolvedValue('checkpointed');
+    service.requestRestart();
+    await vi.waitFor(() => expect(m.quitAndInstall).toHaveBeenCalledOnce());
+    expect(m.prepare).toHaveBeenCalledOnce();
+    expect(m.sent.some((status) => 'restartPending' in status)).toBe(false);
+    expect(existsSync(path.join(m.userData, 'interrupted-by-update.json'))).toBe(false);
   });
 });

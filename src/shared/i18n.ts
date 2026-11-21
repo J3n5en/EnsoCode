@@ -242,15 +242,10 @@ export const zhTranslations: Record<string, string> = {
   'New version {{version}} found': '发现新版本 {{version}}',
   'You are on the latest version': '已是最新版本',
   'Downloading update… {{percent}}%': '正在下载更新… {{percent}}%',
-  'New version {{version}} is ready — restart to update.':
-    '新版本 {{version}} 已就绪 —— 重启以更新。',
+  'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.':
+    '新版本 {{version}} 已下载。重启会在当前工具结束后进行，转到后台的命令会接着跑。',
   'Update check failed': '检查更新失败',
   'Restart to update': '重启更新',
-  'Restart now': '立即重启',
-  'Will restart to update {{version}} when the running turns finish.':
-    '当前回合结束后将自动重启并更新到 {{version}}。',
-  'Continued {{count}} conversation(s) interrupted by the update':
-    '已从断点继续 {{count}} 个因更新中断的会话',
   '{{count}} conversation(s) interrupted by app exit':
     '{{count}} 个会话因应用退出被中断，已在会话里说明原因',
   'Update failed: {{error}}': '更新失败：{{error}}',

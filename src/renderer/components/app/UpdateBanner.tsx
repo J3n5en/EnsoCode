@@ -38,7 +38,6 @@ export function UpdateBanner() {
 
   const version = status.info?.version;
   const isDownloaded = status.status === 'downloaded';
-  const isPending = isDownloaded && status.restartPending === true;
   const manualInstall = isAvailable ? status.manualInstall : undefined;
 
   return (
@@ -50,26 +49,25 @@ export function UpdateBanner() {
           <Download className="h-3.5 w-3.5 shrink-0 animate-pulse text-blue-500" />
         )}
         <span className="min-w-0 flex-1">
-          {isPending
-            ? t('Will restart to update {{version}} when the running turns finish.', {
-                version: version ?? '',
-              })
-            : isDownloaded
-              ? t('New version {{version}} is ready — restart to update.', {
+          {isDownloaded
+            ? t(
+                'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.',
+                {
                   version: version ?? '',
-                })
-              : manualInstall
-                ? t(
-                    "New version {{version}} found. This local build can't install it automatically.",
-                    {
-                      version: version ?? '',
-                    }
-                  )
-                : isAvailable
-                  ? t('New version {{version}} found', { version: version ?? '' })
-                  : t('Downloading update… {{percent}}%', {
-                      percent: Math.round(status.progress?.percent ?? 0),
-                    })}
+                }
+              )
+            : manualInstall
+              ? t(
+                  "New version {{version}} found. This local build can't install it automatically.",
+                  {
+                    version: version ?? '',
+                  }
+                )
+              : isAvailable
+                ? t('New version {{version}} found', { version: version ?? '' })
+                : t('Downloading update… {{percent}}%', {
+                    percent: Math.round(status.progress?.percent ?? 0),
+                  })}
         </span>
         {(isDownloaded || isAvailable) && (
           <button
@@ -90,22 +88,13 @@ export function UpdateBanner() {
             {t('Download update')}
           </button>
         )}
-        {isPending && (
-          <button
-            type="button"
-            onClick={() => void window.electronAPI.updater.cancelRestart()}
-            className="shrink-0 rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-          >
-            {t('Cancel')}
-          </button>
-        )}
         {isDownloaded && (
           <button
             type="button"
-            onClick={() => void window.electronAPI.updater.quitAndInstall({ now: isPending })}
+            onClick={() => void window.electronAPI.updater.quitAndInstall()}
             className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            {isPending ? t('Restart now') : t('Restart to update')}
+            {t('Restart to update')}
           </button>
         )}
         <button

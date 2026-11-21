@@ -852,9 +852,12 @@ function UpdateSection() {
           percent: Math.round(status.progress?.percent ?? 0),
         });
       case 'downloaded':
-        return t('New version {{version}} is ready — restart to update.', {
-          version: status.info?.version ?? '',
-        });
+        return t(
+          'New version {{version}} is downloaded. Restarting waits for the current tool to finish; background commands keep running.',
+          {
+            version: status.info?.version ?? '',
+          }
+        );
       case 'error':
         if (status.manualInstall) {
           return t(

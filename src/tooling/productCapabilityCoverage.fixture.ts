@@ -794,10 +794,6 @@ export const IPC_PRODUCT_COVERAGE = {
     'Device idle-restart update policy; not an Enso capability.'
   ),
   UPDATER_SET_CHANNEL: excluded('Device update channel policy; not an Enso capability.'),
-  UPDATER_CANCEL_RESTART: surfaces('updates.install'),
-  UPDATER_TAKE_INTERRUPTED_SESSIONS: excluded(
-    'Startup handoff that resumes turns interrupted by an update restart.'
-  ),
   PROXY_APPLY: surfaces('general.proxy-mode', 'general.custom-proxy-url'),
   CA_CERT_STATUS: excluded('Device-local CA certificate status for TLS trust.'),
   CA_CERT_APPLY: excluded('Device-local CA certificate file path for TLS trust.'),

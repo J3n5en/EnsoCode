@@ -3,19 +3,18 @@ import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types';
 import type { ManualInstall, UpdateStatus } from '@shared/types/updater';
 import { applyUpdateChannel, type UpdateChannel } from '@shared/updater/channel';
-import { AUTO_RESTART_IDLE_MS, isTurnRestartBlocked } from '@shared/updater/idleRestart';
+import { AUTO_RESTART_IDLE_MS } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
 import { waitWithExitDialog } from '../../ipc/appRestart';
-import { agentSessionIndex, needsQuitCheckpoint } from '../../ipc/sessionIndex';
+import { needsQuitCheckpoint } from '../../ipc/sessionIndex';
 import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
 import { cancelAgentQuitCheckpoint, prepareAgentWorkerForQuit } from '../agentHost';
 import { markExitForUpdate } from '../exitInterruptHost';
 import { IdleRestartGate } from './idleRestartGate';
 import { currentIdleRestartObservation } from './idleRestartSnapshot';
-import { recordInterruptedSessions } from './interruptedSessions';
 import {
   canAutoInstall,
   inspectAppSignature,
@@ -49,7 +48,6 @@ class AutoUpdaterService {
   private idleGate = new IdleRestartGate();
   private idleTimer: NodeJS.Timeout | null = null;
   private installingIdleRestart = false;
-  private restartPending = false;
   private downloadedInfo: UpdateStatus['info'];
   private autoUpdateEnabled = true;
   /** 无 app-update.yml 的本地构建（electron-builder --dir） */
@@ -178,7 +176,6 @@ class AutoUpdaterService {
     this.applyAutoDownload();
     this.updateDownloaded = false;
     this.downloadedInfo = undefined;
-    this.restartPending = false;
     this.idleGate.reset();
     this.clearIdleTimer();
     if (this.quittingForUpdate) {
@@ -230,36 +227,10 @@ class AutoUpdaterService {
     return this.quittingForUpdate;
   }
 
-  /** 用户点重启：有回合在跑时等它们结束再装，now 跳过等待 */
-  requestRestart(now = false): void {
+  /** 用户点重启更新：不等回合结束，直接走优雅重启的安全点 */
+  requestRestart(): void {
     if (!this.updateDownloaded || this.quittingForUpdate) return;
-    if (now || !this.turnsBlockRestart()) {
-      this.setRestartPending(false);
-      void this.install(() => true);
-      return;
-    }
-    this.setRestartPending(true);
-    this.notifyIdleStateChanged();
-  }
-
-  cancelRestart(): void {
-    if (!this.restartPending) return;
-    this.setRestartPending(false);
-    this.notifyIdleStateChanged();
-  }
-
-  private turnsBlockRestart(): boolean {
-    return isTurnRestartBlocked(currentIdleRestartObservation(true, true));
-  }
-
-  private setRestartPending(pending: boolean): void {
-    if (this.restartPending === pending) return;
-    this.restartPending = pending;
-    this.sendStatus({
-      status: 'downloaded',
-      info: this.downloadedInfo,
-      ...(pending ? { restartPending: true } : {}),
-    });
+    void this.install(() => true);
   }
 
   private async quitAndInstall(): Promise<void> {
@@ -278,11 +249,6 @@ class AutoUpdaterService {
         keepBackgroundTasks: true,
       })
     );
-    try {
-      recordInterruptedSessions(app.getPath('userData'), agentSessionIndex.runningRootSessionIds());
-    } catch (error) {
-      console.error('Failed to record sessions interrupted by update:', error);
-    }
     try {
       autoUpdater.quitAndInstall();
     } catch (error) {
@@ -334,15 +300,6 @@ class AutoUpdaterService {
       this.clearIdleTimer();
       return;
     }
-    if (this.restartPending) {
-      if (this.turnsBlockRestart()) {
-        this.scheduleIdleCheck(BUSY_POLL_MS);
-        return;
-      }
-      this.clearIdleTimer();
-      void this.install(() => !this.turnsBlockRestart());
-      return;
-    }
     if (this.idleGate.isFailed() || !this.autoRestartWhenIdle || !autoUpdater.autoDownload) {
       this.clearIdleTimer();
       return;
@@ -391,7 +348,6 @@ class AutoUpdaterService {
     } catch (error) {
       console.error('Restart to update failed:', error);
       this.idleGate.markFailed();
-      this.setRestartPending(false);
       writeTrayReenterAfterUpdate(false);
       this.clearIdleTimer();
     } finally {

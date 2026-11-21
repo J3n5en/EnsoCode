@@ -1456,10 +1456,8 @@ const electronAPI = {
   updater: {
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CHECK),
     downloadUpdate: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_DOWNLOAD_UPDATE),
-    /** 有回合在跑时等它们结束再重启；now 立即重启 */
-    quitAndInstall: (options?: { now?: boolean }): Promise<void> =>
-      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL, options),
-    cancelRestart: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_CANCEL_RESTART),
+    /** 走优雅重启的安全点：当前工具结束后重启安装，后台命令交给新实例 */
+    quitAndInstall: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL),
     setAutoUpdateEnabled: (enabled: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, enabled),
     setAutoRestartWhenIdle: (enabled: boolean): Promise<void> =>
@@ -1468,9 +1466,6 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.UPDATER_SET_CHANNEL, channel),
     getState: (): Promise<UpdaterState> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_GET_STATE),
     restart: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.UPDATER_RESTART),
-    /** 取走上次更新重启时被打断的会话 id（取一次即清空） */
-    takeInterruptedSessions: (): Promise<string[]> =>
-      ipcRenderer.invoke(IPC_CHANNELS.UPDATER_TAKE_INTERRUPTED_SESSIONS),
     onStatus: (callback: (status: UpdateStatus) => void): (() => void) => {
       const listener = (_: unknown, status: UpdateStatus) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.UPDATER_STATUS, listener);

@@ -60,10 +60,7 @@ import { useAutoArchiveScan } from '@/hooks/useAutoArchiveScan';
 import { useBackgroundImage } from '@/hooks/useBackgroundImage';
 import { useDockBadge } from '@/hooks/useDockBadge';
 import { useGenerationStallTimeout } from '@/hooks/useGenerationStallTimeout';
-import {
-  useRecoverInterruptedTurns,
-  useResumeInterruptedByUpdate,
-} from '@/hooks/useInterruptedSessionRecovery';
+import { useRecoverInterruptedTurns } from '@/hooks/useInterruptedSessionRecovery';
 import { useOpenFolderRequests } from '@/hooks/useOpenFolderRequests';
 import { isMobileWidth, useIsMobile, useViewportWidth } from '@/hooks/useViewport';
 import { useWindowsWindowChrome } from '@/hooks/useWindowsWindowChrome';
@@ -131,7 +128,6 @@ export default function App() {
   useBackgroundImage();
   useGenerationStallTimeout();
   useAutoArchiveScan();
-  useResumeInterruptedByUpdate();
   useRecoverInterruptedTurns();
   useOpenFolderRequests();
   useDockBadge();
