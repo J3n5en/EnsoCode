@@ -23,7 +23,7 @@ import { BackgroundLayer } from '@/components/app/BackgroundLayer';
 import { ChatAreaFrame } from '@/components/app/ChatAreaFrame';
 import { HeaderSessionTabs } from '@/components/app/HeaderSessionTabs';
 import { ProjectDropOverlay } from '@/components/app/ProjectDropOverlay';
-import { RestartWaitDialog } from '@/components/app/RestartWaitDialog';
+import { RestartWaitDialog, RestartWaitStrip } from '@/components/app/RestartWaitDialog';
 import { TitleBar } from '@/components/app/TitleBar';
 import { UpdateBanner } from '@/components/app/UpdateBanner';
 import {
@@ -587,6 +587,7 @@ export default function App() {
           actions={panelActions}
         />
       )}
+      {!desktopShell && <RestartWaitStrip />}
       {!desktopShell && <UpdateBanner />}
       {!desktopShell && <ZoomBanner />}
       <div className="flex min-h-0 flex-1">
@@ -680,6 +681,7 @@ export default function App() {
                     <ChatView />
                   </ShellChromeContext.Provider>
                 </ChatAreaFrame>
+                {desktopShell && <RestartWaitStrip />}
                 {desktopShell && <UpdateBanner />}
                 {desktopShell && <ZoomBanner />}
                 {/* 初次设置只盖聊天区；远端浏览器（PWA 完整模式）同样走这条路径 */}

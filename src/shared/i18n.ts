@@ -272,6 +272,9 @@ export const zhTranslations: Record<string, string> = {
   'A command moved to the background cannot keep running without EnsoCode (for example a remote or Windows command), so EnsoCode waits for it.':
     '有转到后台的命令没法脱离 EnsoCode 继续跑（如远程会话或 Windows 上的命令），所以要等它结束。',
   'Force quit': '强制退出',
+  'Restarting once the current command finishes': '等当前命令结束后重启',
+  'Installing the update once the current command finishes': '等当前命令结束后安装更新',
+  'Quitting once the current command finishes': '等当前命令结束后退出',
   'Restart failed: {{error}}': '重启失败：{{error}}',
   'Restart server': '重启服务端',
   'Restart server?': '重启服务端？',
