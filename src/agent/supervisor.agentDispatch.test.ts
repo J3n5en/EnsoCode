@@ -1310,6 +1310,203 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     expect(childOptions.thinkingLevel).toBe('off');
   });
 
+  it('follow 类型档覆盖父会话思考档（spawn-child / 子代理）', async () => {
+    const supervisor = new SessionSupervisor({
+      emit: vi.fn(),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      reasoningEnabled: true,
+      thinkingLevel: 'high',
+      editMode: 'apply_patch',
+    });
+    await settleUntil(() => mocks.sessions.length > 0);
+    const scout = {
+      sessionId: 'parent::cw-follow',
+      generation: '44444444-4444-4444-8444-444444444444',
+      parent,
+      instanceId: '55555555-5555-4555-8555-555555555555',
+      instanceName: 'Scout-55555555',
+      typeKey: 'custom:22222222-2222-4222-8222-222222222222' as const,
+    };
+    supervisor.handleCommand({
+      type: 'spawn-child',
+      identity: scout,
+      cwd: '/workspace',
+      config: {
+        typeKey: scout.typeKey,
+        displayName: 'cheap-scout',
+        description: 'follow parent model',
+        spawnSpecId: '66666666-6666-4666-8666-666666666666',
+        systemPrompt: 'be quick',
+        model,
+        tools: 'readonly',
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'follow-hash',
+        reasoning: 'on' as const,
+        thinkingLevel: 'low' as const,
+      },
+    });
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 1);
+    const childOptions = mocks.createAgentSession.mock.calls[1][0] as {
+      thinkingLevel?: string;
+      model: { reasoning?: boolean; id?: string };
+    };
+    expect(childOptions.thinkingLevel).toBe('low');
+    expect(childOptions.model.reasoning).toBe(true);
+    expect(childOptions.model.id).toBe('model');
+  });
+
+  it('父模型不支持思考或档位越界时回落，不让 spawn 失败', async () => {
+    const supervisor = new SessionSupervisor({
+      emit: vi.fn(),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
+    });
+    const dumb = { ...model, modelId: 'dumb', reasoning: 'off' as const };
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model: dumb,
+      reasoningEnabled: true,
+      thinkingLevel: 'high',
+    });
+    await settleUntil(() => mocks.sessions.length > 0);
+    supervisor.handleCommand({
+      type: 'spawn-child',
+      identity: {
+        sessionId: 'parent::cw-dumb',
+        generation: '44444444-4444-4444-8444-444444444444',
+        parent,
+        instanceId: '55555555-5555-4555-8555-555555555555',
+        instanceName: 'Scout-dumb',
+        typeKey: 'custom:22222222-2222-4222-8222-222222222222' as const,
+      },
+      cwd: '/workspace',
+      config: {
+        typeKey: 'custom:22222222-2222-4222-8222-222222222222' as const,
+        displayName: 'cheap-scout',
+        description: 'follow',
+        spawnSpecId: '66666666-6666-4666-8666-666666666666',
+        systemPrompt: 'be quick',
+        model: dumb,
+        tools: 'readonly' as const,
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'dumb-hash',
+        reasoning: 'on' as const,
+        thinkingLevel: 'low' as const,
+      },
+    });
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 1);
+    const off = mocks.createAgentSession.mock.calls[1][0] as {
+      thinkingLevel?: string;
+      model: { reasoning?: boolean };
+    };
+    expect(off.thinkingLevel).toBe('off');
+    expect(off.model.reasoning).toBe(false);
+
+    const capped = { ...model, modelId: 'capped', thinkingLevel: 'low' as const };
+    supervisor.handleCommand({
+      type: 'spawn-child',
+      identity: {
+        sessionId: 'parent::cw-capped',
+        generation: '77777777-7777-4777-8777-777777777777',
+        parent,
+        instanceId: '88888888-8888-4888-8888-888888888888',
+        instanceName: 'Scout-capped',
+        typeKey: 'custom:22222222-2222-4222-8222-222222222222' as const,
+      },
+      cwd: '/workspace',
+      config: {
+        typeKey: 'custom:22222222-2222-4222-8222-222222222222' as const,
+        displayName: 'cheap-scout',
+        description: 'follow',
+        spawnSpecId: '99999999-9999-4999-8999-999999999999',
+        systemPrompt: 'be quick',
+        model: capped,
+        tools: 'readonly' as const,
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'cap-hash',
+        reasoning: 'on' as const,
+        thinkingLevel: 'high' as const,
+      },
+    });
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 2);
+    const clamped = mocks.createAgentSession.mock.calls[2][0] as { thinkingLevel?: string };
+    expect(clamped.thinkingLevel).toBe('low');
+  });
+
+  it('coworker 直雇读类型档；插件类型没有档位时跟随父会话', async () => {
+    const supervisor = new SessionSupervisor({
+      emit: vi.fn(),
+      agentDir: '/tmp/agent',
+      sessionDir: mkdtempSync(path.join(tmpdir(), 'enso-dispatch-')),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd: '/workspace',
+      model,
+      reasoningEnabled: true,
+      thinkingLevel: 'high',
+      agentTypes: [
+        {
+          name: 'cheap-scout',
+          description: 'follow',
+          systemPrompt: 'be quick',
+          tools: 'readonly',
+          allowModelOverride: false,
+          reasoning: 'on',
+          thinkingLevel: 'low',
+        },
+        {
+          name: 'plugin-reviewer',
+          description: 'plugin follow',
+          systemPrompt: 'review',
+          tools: 'readonly',
+          allowModelOverride: false,
+        },
+      ],
+    });
+    await settleUntil(() => mocks.sessions.length > 0);
+    supervisor.handleCommand({
+      type: 'resume-coworker',
+      parent,
+      coworkerId: 'parent::cw-cheap',
+      name: 'cheap',
+      agentType: 'cheap-scout',
+      resumeFile: '/tmp/cheap.jsonl',
+    });
+    supervisor.handleCommand({
+      type: 'resume-coworker',
+      parent,
+      coworkerId: 'parent::cw-plugin',
+      name: 'plugin',
+      agentType: 'plugin-reviewer',
+      resumeFile: '/tmp/plugin.jsonl',
+    });
+    await settleUntil(() => mocks.createAgentSession.mock.calls.length > 2);
+    const cheap = mocks.createAgentSession.mock.calls[1][0] as { thinkingLevel?: string };
+    const plugin = mocks.createAgentSession.mock.calls[2][0] as { thinkingLevel?: string };
+    expect(cheap.thinkingLevel).toBe('low');
+    expect(plugin.thinkingLevel).toBe('high');
+  });
+
   it.each(
     [
       {

@@ -191,6 +191,8 @@ const AGENT_TYPE_KEYS = [
   'modelMode',
   'providerId',
   'modelId',
+  'reasoning',
+  'thinkingLevel',
   'tools',
   'writeScope',
   'skillIds',
@@ -711,6 +713,15 @@ function validateAgentType(raw: unknown): RecordValue {
   }
   if ((entry.providerId === undefined) !== (entry.modelId === undefined)) {
     throw new Error('Incomplete agent model reference');
+  }
+  if (entry.reasoning !== undefined && !['on', 'off'].includes(String(entry.reasoning))) {
+    throw new Error('Invalid agent type reasoning');
+  }
+  if (
+    entry.thinkingLevel !== undefined &&
+    !THINKING_LEVELS.includes(entry.thinkingLevel as (typeof THINKING_LEVELS)[number])
+  ) {
+    throw new Error('Invalid agent type thinking level');
   }
   optionalStringArray(entry.writeScope, 'agent type.writeScope');
   if (entry.skillIds !== undefined) idList(entry.skillIds, 'agent type.skillIds');

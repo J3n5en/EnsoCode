@@ -178,6 +178,7 @@ import {
 } from './childContract';
 import {
   type ChildThinkingLevel,
+  fitChildReasoningToModel,
   pickChildReasoningOverride,
   resolveChildReasoning,
 } from './childReasoning';
@@ -3000,9 +3001,10 @@ export class SessionSupervisor {
           reasoningEnabled,
           thinkingLevel
         );
+        const fittedReasoning = fitChildReasoningToModel(childReasoning, base);
         const subModel = applyReasoningToModel(
           { ...base, compat: base.compat ? { ...base.compat } : undefined },
-          childReasoning.enabled,
+          fittedReasoning.enabled,
           selectedModel.modelId
         );
         const childExploreFold = exploreFoldEnabled ? createExploreFoldState() : undefined;
@@ -3108,7 +3110,7 @@ export class SessionSupervisor {
           agentDir: this.options.agentDir,
           modelRuntime: runtime,
           model: subModel,
-          thinkingLevel: childReasoning.level,
+          thinkingLevel: fittedReasoning.level,
           noTools: 'builtin',
           customTools: subTools,
           resourceLoader: subLoader,
