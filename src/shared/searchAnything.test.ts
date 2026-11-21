@@ -355,5 +355,10 @@ describe('buildSettingsCatalog', () => {
     expect(ids('主题')).toContain('appearance.theme');
     expect(ids('代理')).toContain('general.proxy');
     expect(ids('proxy')).toContain('general.proxy');
+    expect(ids('自动拉取模型')).toEqual([]);
+    expect(ids('Automatically fetch models')).toEqual([]);
+    expect(catalog.some(({ id }) => id === 'providers.autoFetchModels')).toBe(false);
+    expect(ids('拉取间隔')).not.toContain('providers.modelFetchInterval');
+    expect(ids('Model fetch interval')).not.toContain('providers.modelFetchInterval');
   });
 });

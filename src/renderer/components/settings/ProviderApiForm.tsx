@@ -1,6 +1,12 @@
 import { commitPendingModel, mergeFetchedModels } from '@shared/modelEntry';
 import { baseUrlAfterApiChange, isClassifierOnlyProvider } from '@shared/providerCatalog';
 import {
+  isProviderModelRefreshIntervalHours,
+  MAX_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
+  MIN_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
+  normalizeProviderModelRefreshIntervalHours,
+} from '@shared/providers/modelRefreshInterval';
+import {
   HEADER_NAME_RE,
   isSendableHeaderValue,
   normalizeProviderHeaders,
@@ -39,8 +45,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { useScrollChain } from '@/hooks/useScrollChain';
 import { useI18n } from '@/i18n';
+import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { API_KIND_LABELS } from './constants';
@@ -54,10 +62,16 @@ export interface ProviderApiFormValue {
   baseUrl: string;
   models: ModelEntry[];
   headers?: Record<string, string>;
+  autoFetchModels?: boolean;
+  modelRefreshIntervalHours?: number;
 }
 
 interface ProviderApiFormProps {
   initialValue: ProviderApiFormValue;
+  catalogId?: ModelProvider['catalogId'];
+  /** 供应商已停用时不显示自动拉取：停用条目不会被拉取 */
+  providerEnabled?: boolean;
+  modelRefreshStatus?: ModelProvider['modelRefreshStatus'];
   oauth: boolean;
   oauthAccountKey?: string;
   extraFields?: React.ReactNode;
@@ -66,10 +80,16 @@ interface ProviderApiFormProps {
   bare?: boolean;
   saveDisabled?: boolean;
   onCancel: () => void;
-  onSave: (value: ProviderApiFormValue) => void;
+  onSave: (value: ProviderApiFormValue, seenModelIds: ReadonlySet<string>) => void;
 }
 
 const isEnabled = (model: ModelEntry) => model.enabled !== false;
+const autoFetchField = 'provider-auto-fetch-models';
+const refreshIntervalSlot = 'provider-model-refresh-interval-hours';
+const refreshIntervalRange = {
+  min: MIN_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
+  max: MAX_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
+};
 
 type HeaderDraft = { key: string; name: string; value: string };
 
@@ -84,6 +104,9 @@ function headerDrafts(headers: Record<string, string> | undefined): HeaderDraft[
 /** 编辑与统一向导共用的 API/模型表单，Fetch/Test 只有这一份实现。 */
 export function ProviderApiForm({
   initialValue,
+  catalogId,
+  providerEnabled = true,
+  modelRefreshStatus,
   oauth,
   oauthAccountKey,
   extraFields,
@@ -93,12 +116,24 @@ export function ProviderApiForm({
   onCancel,
   onSave,
 }: ProviderApiFormProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [name, setName] = React.useState(initialValue.name);
   const [api, setApi] = React.useState(initialValue.api);
   const [apiKey, setApiKey] = React.useState(initialValue.apiKey);
   const [baseUrl, setBaseUrl] = React.useState(initialValue.baseUrl);
+  const [autoFetchModels, setAutoFetchModels] = React.useState(
+    initialValue.autoFetchModels === true
+  );
+  const autoFetchLabelId = React.useId();
+  const refreshIntervalId = React.useId();
+  const refreshIntervalDescriptionId = React.useId();
+  const [refreshInterval, setRefreshInterval] = React.useState(() =>
+    String(normalizeProviderModelRefreshIntervalHours(initialValue.modelRefreshIntervalHours))
+  );
   const [models, setModels] = React.useState<ModelEntry[]>(initialValue.models);
+  const [seenModelIds] = React.useState(
+    () => new Set(initialValue.models.map((model) => model.id))
+  );
   const [headerRows, setHeaderRows] = React.useState(() => headerDrafts(initialValue.headers));
   const [advancedOpen, setAdvancedOpen] = React.useState(
     () => Object.keys(initialValue.headers ?? {}).length > 0
@@ -168,6 +203,12 @@ export function ProviderApiForm({
     return value !== '' && !isSendableHeaderValue(value);
   });
   const headersInvalid = headerNameInvalid || headerValueInvalid;
+  const classifierOnly = isClassifierOnlyProvider({ api, baseUrl: baseUrl.trim(), catalogId });
+  const showModelRefresh = !oauth && !classifierOnly && providerEnabled;
+  const refreshIntervalHours = Number(refreshInterval);
+  const refreshIntervalValid =
+    /^\d+$/.test(refreshInterval) && isProviderModelRefreshIntervalHours(refreshIntervalHours);
+  const refreshIntervalInvalid = showModelRefresh && !refreshIntervalValid;
 
   const setSelectedEnabled = (enabled: boolean) => {
     const ids = new Set(selection.selectedIds);
@@ -230,6 +271,7 @@ export function ProviderApiForm({
       setErrorDetail(text);
       return;
     }
+    for (const model of result.models) seenModelIds.add(model.id);
     setModels((current) => mergeFetchedModels(current, result.models));
     setStatus({ ok: true, text: t('Fetched {{count}} models', { count: result.models.length }) });
   };
@@ -248,6 +290,7 @@ export function ProviderApiForm({
   const addModel = (id: string) => {
     const value = id.trim();
     if (!value) return;
+    seenModelIds.add(value);
     setModels((current) =>
       current.some((model) => model.id === value)
         ? current
@@ -261,7 +304,7 @@ export function ProviderApiForm({
     <>
       <DialogPanel bare={bare} className="space-y-4">
         {extraFields}
-        {isClassifierOnlyProvider({ api, baseUrl }) && (
+        {classifierOnly && (
           <p className="text-xs text-muted-foreground">{t('Classification only, not for chat')}</p>
         )}
         {!hideName && (
@@ -324,6 +367,78 @@ export function ProviderApiForm({
                 </button>
               </div>
             </Field>
+
+            {showModelRefresh && (
+              <div className="space-y-2">
+                <Field
+                  data-field={autoFetchField}
+                  className="flex-row items-center justify-between"
+                >
+                  <FieldLabel id={autoFetchLabelId}>{t('Automatically fetch models')}</FieldLabel>
+                  <Switch
+                    data-slot={autoFetchField}
+                    aria-labelledby={autoFetchLabelId}
+                    checked={autoFetchModels}
+                    onCheckedChange={setAutoFetchModels}
+                  />
+                </Field>
+                {autoFetchModels && modelRefreshStatus && (
+                  <p
+                    data-slot="provider-model-refresh-status"
+                    className={cn(
+                      'text-xs',
+                      modelRefreshStatus.ok ? 'text-muted-foreground' : 'text-destructive'
+                    )}
+                  >
+                    {t(
+                      modelRefreshStatus.ok
+                        ? 'Last fetched {{time}}'
+                        : 'Last fetch failed {{time}}',
+                      {
+                        time: formatRelativeTime(modelRefreshStatus.at, locale),
+                      }
+                    )}
+                  </p>
+                )}
+                <Field>
+                  <FieldLabel htmlFor={refreshIntervalId}>{t('Model fetch interval')}</FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id={refreshIntervalId}
+                      render={<input id={refreshIntervalId} />}
+                      data-slot={refreshIntervalSlot}
+                      type="number"
+                      min={refreshIntervalRange.min}
+                      max={refreshIntervalRange.max}
+                      step={1}
+                      value={refreshInterval}
+                      className="w-24"
+                      aria-describedby={refreshIntervalDescriptionId}
+                      aria-invalid={refreshIntervalInvalid || undefined}
+                      onInput={(event) => setRefreshInterval(event.currentTarget.value)}
+                    />
+                    <span className="text-xs text-muted-foreground">{t('hours')}</span>
+                  </div>
+                  <p
+                    id={refreshIntervalDescriptionId}
+                    className={cn(
+                      'text-xs',
+                      refreshIntervalInvalid ? 'text-destructive' : 'text-muted-foreground'
+                    )}
+                    role={refreshIntervalInvalid ? 'alert' : undefined}
+                  >
+                    {refreshIntervalInvalid
+                      ? t(
+                          'Enter a whole number from {{min}} to {{max}} hours.',
+                          refreshIntervalRange
+                        )
+                      : t(
+                          'This interval applies when automatic fetching is enabled for this provider.'
+                        )}
+                  </p>
+                </Field>
+              </div>
+            )}
 
             <Collapsible
               open={advancedOpen}
@@ -607,16 +722,22 @@ export function ProviderApiForm({
           </Button>
           <Button
             size="sm"
-            disabled={saveDisabled || !name.trim() || headersInvalid}
+            disabled={saveDisabled || !name.trim() || headersInvalid || refreshIntervalInvalid}
             onClick={() =>
-              onSave({
-                name: name.trim(),
-                api,
-                apiKey: apiKey.trim(),
-                baseUrl: baseUrl.trim(),
-                models: commitPendingModel(models, newModel),
-                headers,
-              })
+              onSave(
+                {
+                  name: name.trim(),
+                  api,
+                  apiKey: apiKey.trim(),
+                  baseUrl: baseUrl.trim(),
+                  models: commitPendingModel(models, newModel),
+                  headers,
+                  ...(showModelRefresh && refreshIntervalValid
+                    ? { autoFetchModels, modelRefreshIntervalHours: refreshIntervalHours }
+                    : {}),
+                },
+                seenModelIds
+              )
             }
           >
             {t('Save')}

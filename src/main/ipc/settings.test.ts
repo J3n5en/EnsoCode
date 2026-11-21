@@ -12,8 +12,10 @@ const mocks = vi.hoisted(() => {
   return {
     handlers,
     sends,
+    onAppEvent: vi.fn(),
     syncBotModeServices: vi.fn(),
     syncBotDiscussMode: vi.fn(),
+    listModels: vi.fn(),
     windows: [] as Array<{
       isDestroyed: () => boolean;
       webContents: { id: number; isDestroyed: () => boolean; send: (channel: string) => void };
@@ -31,9 +33,10 @@ vi.mock('./bots', () => ({
 vi.mock('../services/modelDirectory', () => ({
   notifyModelDirectorySettingsChanged: () => {},
 }));
+vi.mock('../services/providerApi', () => ({ listModels: mocks.listModels }));
 
 vi.mock('electron', () => ({
-  app: { getPath: () => userData, on: vi.fn() },
+  app: { getPath: () => userData, on: mocks.onAppEvent },
   BrowserWindow: { getAllWindows: () => mocks.windows },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
@@ -281,6 +284,210 @@ describe('settings广播策略', () => {
 
     expect(mocks.sends[0]).not.toHaveBeenCalled();
     expect(mocks.sends[1]).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
+  });
+
+  it('restores background-added models over a stale renderer snapshot and re-syncs the sender', async () => {
+    const settings = await import('./settings');
+    settings.registerSettingsHandlers();
+    const write = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE_KEY);
+    const writeAll = mocks.handlers.get(IPC_CHANNELS.SETTINGS_WRITE);
+    const event = { sender: mocks.windows[0].webContents };
+    const provider = { id: 'custom', apiKey: 'test', models: [{ id: 'manual' }] };
+    const refreshed = {
+      ...provider,
+      models: [...provider.models, { id: 'new', enabled: false }],
+      knownModelIds: ['manual', 'new'],
+      modelRefreshStatus: { ok: true, at: 1 },
+    };
+    try {
+      settings.patchSettingsState('providers', [refreshed]);
+
+      mocks.sends[0].mockClear();
+      expect(
+        await write?.(event, 'enso-settings', {
+          state: { theme: 'light', providers: [{ ...provider, name: 'edited' }] },
+        })
+      ).toBe(true);
+      expect(settings.readSettingsState()).toMatchObject({
+        theme: 'light',
+        providers: [{ ...refreshed, name: 'edited' }],
+      });
+      expect(mocks.sends[0]).toHaveBeenCalledWith(IPC_CHANNELS.SETTINGS_CHANGED);
+
+      // 已同步过的快照里删掉 new：照删，且不再打扰 sender
+      mocks.sends[0].mockClear();
+      const deleted = { ...refreshed, name: 'edited', models: provider.models };
+      expect(await write?.(event, 'enso-settings', { state: { providers: [deleted] } })).toBe(true);
+      expect(settings.readSettingsState().providers).toEqual([deleted]);
+      expect(mocks.sends[0]).not.toHaveBeenCalled();
+
+      settings.patchSettingsState('providers', [refreshed]);
+      expect(
+        await writeAll?.(event, { 'enso-settings': { state: { providers: [provider] } } })
+      ).toBe(true);
+      expect(settings.readSettingsState().providers).toEqual([refreshed]);
+    } finally {
+      settings.patchSettingsState('providers', []);
+      settings.patchSettingsState('theme', 'dark');
+    }
+  });
+
+  it('updates active schedules for ordinary writes, sync commits and disk reloads', async () => {
+    const settings = await import('./settings');
+    const hour = 60 * 60 * 1000;
+    const first = {
+      id: 'schedule-first',
+      name: 'First',
+      api: 'openai-completions',
+      apiKey: 'test',
+      baseUrl: 'https://first.example/v1',
+      enabled: true,
+      models: [],
+    };
+    const second = { ...first, id: 'schedule-second', baseUrl: 'https://second.example/v1' };
+    const activate = () => vi.advanceTimersByTimeAsync(0);
+    const requested = () => mocks.listModels.mock.calls.map(([config]) => config.baseUrl);
+    settings.flushSettings();
+    vi.useFakeTimers();
+    mocks.listModels.mockResolvedValue({ ok: true, models: [] });
+    try {
+      writeFileSync(
+        path.join(userData, 'settings.json'),
+        JSON.stringify({
+          'enso-settings': {
+            version: 18,
+            state: {
+              providers: [{ ...first, autoFetchModels: true, modelRefreshIntervalHours: 2 }],
+            },
+          },
+        })
+      );
+      expect(settings.reloadSettingsFromDisk()).toBe(true);
+      settings.startProviderModelRefresh();
+      await activate();
+      expect(requested()).toEqual([first.baseUrl]);
+      const saved = { ...first, autoFetchModels: true, modelRefreshIntervalHours: 2 };
+      expect(settings.patchSettingsState('providers', [saved, second]).ok).toBe(true);
+      await activate();
+      expect(requested()).toEqual([first.baseUrl]);
+      const enabledSecond = { ...second, autoFetchModels: true };
+      expect(settings.patchSettingsState('providers', [saved, enabledSecond]).ok).toBe(true);
+      await activate();
+      expect(requested()).toEqual([first.baseUrl, second.baseUrl]);
+
+      await vi.advanceTimersByTimeAsync(hour / 2);
+      expect(
+        settings.commitSettingsTransaction(settings.settingsFingerprint(settings.readSettings()), {
+          providers: [{ ...saved, modelRefreshIntervalHours: 3 }, enabledSecond],
+        }).ok
+      ).toBe(true);
+      await vi.advanceTimersByTimeAsync(1.5 * hour);
+      expect(requested()).toEqual([first.baseUrl, second.baseUrl, second.baseUrl, second.baseUrl]);
+
+      settings.flushSettings();
+      const disk = JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf-8'));
+      const reloaded = { ...enabledSecond, baseUrl: 'https://reloaded.example/v1' };
+      disk['enso-settings'].state.providers = [reloaded];
+      writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(disk));
+      expect(settings.reloadSettingsFromDisk()).toBe(true);
+      await activate();
+      expect(requested().at(-1)).toBe(reloaded.baseUrl);
+      await vi.advanceTimersByTimeAsync(2 * hour);
+      expect(requested().slice(-3)).toEqual([reloaded.baseUrl, reloaded.baseUrl, reloaded.baseUrl]);
+    } finally {
+      settings.patchSettingsState('providers', []);
+      settings.flushSettings();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a model fetch running if the app stays open after before-quit', async () => {
+    const settings = await import('./settings');
+    const provider = {
+      id: 'keep-running',
+      api: 'openai-completions',
+      apiKey: 'test',
+      baseUrl: 'https://keep-running.example/v1',
+      enabled: true,
+      autoFetchModels: true,
+      models: [],
+    };
+    const response = Promise.withResolvers<{ ok: true; models: [] }>();
+    const emit = (name: string) =>
+      mocks.onAppEvent.mock.calls.findLast(([event]) => event === name)?.[1]();
+    mocks.onAppEvent.mockClear();
+    mocks.listModels.mockClear().mockReturnValueOnce(response.promise);
+    try {
+      settings.registerSettingsHandlers();
+      expect(settings.patchSettingsState('providers', [provider]).ok).toBe(true);
+      settings.startProviderModelRefresh();
+      await vi.waitFor(() => expect(mocks.listModels).toHaveBeenCalledTimes(1));
+      const signal = mocks.listModels.mock.calls[0][1];
+
+      emit('before-quit');
+      expect(signal.aborted).toBe(false);
+
+      emit('will-quit');
+      expect(signal.aborted).toBe(true);
+    } finally {
+      response.resolve({ ok: true, models: [] });
+      settings.patchSettingsState('providers', []);
+      settings.flushSettings();
+    }
+  });
+
+  it('ignores a malformed saved switch while another provider updates and saves fetched models', async () => {
+    const settings = await import('./settings');
+    const active = {
+      id: 'valid-switch',
+      api: 'openai-completions',
+      apiKey: 'test',
+      baseUrl: 'https://active.example/v1',
+      enabled: true,
+      autoFetchModels: true,
+      models: [],
+    };
+    const malformed = {
+      ...active,
+      id: 'malformed-switch',
+      baseUrl: 'https://malformed.example/v1',
+      autoFetchModels: 'true',
+    };
+    settings.flushSettings();
+    vi.useFakeTimers();
+    mocks.listModels.mockClear().mockResolvedValue({ ok: true, models: [{ id: 'discovered' }] });
+    try {
+      writeFileSync(
+        path.join(userData, 'settings.json'),
+        JSON.stringify({
+          'enso-settings': { version: 18, state: { providers: [malformed, active] } },
+        })
+      );
+      expect(settings.reloadSettingsFromDisk()).toBe(true);
+      settings.startProviderModelRefresh();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.listModels.mock.calls.map(([config]) => config.baseUrl)).toEqual([
+        active.baseUrl,
+      ]);
+      const refreshed = {
+        ...active,
+        models: [{ id: 'discovered', enabled: false }],
+        knownModelIds: ['discovered'],
+        modelRefreshStatus: { ok: true, at: Date.now() },
+      };
+      expect(settings.readSettingsState().providers).toEqual([malformed, refreshed]);
+      const edited = { ...refreshed, modelRefreshIntervalHours: 2 };
+      expect(settings.patchSettingsState('providers', [malformed, edited]).ok).toBe(true);
+      expect(settings.readSettingsState().providers).toEqual([malformed, edited]);
+      expect(settings.flushSettings()).toBe(true);
+      const persisted = JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8'));
+      expect(persisted['enso-settings'].state.providers).toEqual([malformed, edited]);
+    } finally {
+      settings.patchSettingsState('providers', []);
+      settings.flushSettings();
+      vi.useRealTimers();
+    }
   });
 
   it('会话写入对远端主界面只推补丁，不再触发整份 settings 重读', async () => {

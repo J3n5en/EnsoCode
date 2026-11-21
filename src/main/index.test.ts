@@ -57,6 +57,7 @@ vi.mock('./ipc/settings', () => ({
   readSettings: vi.fn(() => null),
   readLocale: vi.fn(() => 'en'),
   consumeTrayReenterAfterUpdate: () => mocks.consumeTrayReenter(),
+  startProviderModelRefresh: vi.fn(),
 }));
 vi.mock('./ipc/desktop', () => ({ registerDesktopIpcHandlers: vi.fn() }));
 vi.mock('./desktop/dropShelf', () => ({ syncDropShelf: vi.fn() }));

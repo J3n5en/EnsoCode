@@ -137,19 +137,25 @@ describe('TypeSafe settings', () => {
     );
   });
 
-  it.each([classifier, { ...classifier, api: 'openai-completions' as const }])(
-    'marks new and legacy TypeSafe API forms as classification-only ($api)',
+  it.each([
+    { ...chat, api: classifier.api },
+    { ...chat, baseUrl: classifier.baseUrl },
+    { ...chat, catalogId: classifier.catalogId },
+  ])(
+    'marks TypeSafe API forms as classification-only and hides automatic fetching controls ($api, $baseUrl, $catalogId)',
     (provider) => {
-      expect(
-        renderToStaticMarkup(
-          <ProviderApiForm
-            initialValue={provider}
-            oauth={false}
-            onCancel={vi.fn()}
-            onSave={vi.fn()}
-          />
-        )
-      ).toContain(note);
+      const markup = renderToStaticMarkup(
+        <ProviderApiForm
+          initialValue={provider}
+          catalogId={provider.catalogId}
+          oauth={false}
+          onCancel={vi.fn()}
+          onSave={vi.fn()}
+        />
+      );
+      expect(markup).toContain(note);
+      expect(markup).not.toContain('provider-model-refresh-interval-hours');
+      expect(markup).not.toContain('provider-auto-fetch-models');
     }
   );
 
@@ -162,7 +168,11 @@ describe('TypeSafe settings', () => {
   });
 
   it('marks the provider list entry as classification-only', () => {
-    expect(renderToStaticMarkup(<ProvidersSettings />)).toContain(note);
+    const markup = renderToStaticMarkup(<ProvidersSettings />);
+    expect(markup).toContain(note);
+    expect(markup).toContain('aria-label="Edit Provider"');
+    expect(markup).not.toContain('data-settings-row="providers.autoFetchModels"');
+    expect(markup).not.toContain('data-settings-row="providers.modelFetchInterval"');
   });
 
   it.each([{ models: classifier.models }, { models: [] }])(

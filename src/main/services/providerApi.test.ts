@@ -528,6 +528,56 @@ describe('listModels 集成行为与鉴权兼容', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps cancellation active during the Anthropic retry body read', async () => {
+    const controller = new AbortController();
+    const readingBody = Promise.withResolvers<void>();
+    const fetchMock = vi
+      .fn<typeof net.fetch>()
+      .mockResolvedValueOnce(mockResponse(401))
+      .mockImplementationOnce(async (_url, init) => {
+        const response = mockResponse(200);
+        response.json = async () => {
+          readingBody.resolve();
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+              once: true,
+            });
+          });
+        };
+        return response;
+      });
+    net.fetch = fetchMock;
+    const pending = listModels(
+      { api: 'anthropic-messages', apiKey: 'test-key', baseUrl: 'https://chat.example' },
+      controller.signal
+    );
+    await readingBody.promise;
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ ok: false, models: [] });
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal?.aborted)).toBe(true);
+  });
+
+  it('cancels a scheduled list while proxy initialization is still pending', async () => {
+    const proxyReady = Promise.withResolvers<boolean>();
+    const waitingForProxy = Promise.withResolvers<void>();
+    proxyMocks.whenReady.mockImplementationOnce(() => {
+      waitingForProxy.resolve();
+      return proxyReady.promise;
+    });
+    const fetchMock = vi.fn();
+    net.fetch = fetchMock;
+    const controller = new AbortController();
+    const pending = listModels(
+      { api: 'openai-completions', apiKey: 'test-key', baseUrl: 'https://chat.example' },
+      controller.signal
+    );
+    await waitingForProxy.promise;
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ ok: false, models: [] });
+    proxyReady.resolve(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('第三方 Anthropic 首次 401 时以 Bearer 重试一次同一 URL，成功解析模型', async () => {
     const fetchMock = vi
       .fn()

@@ -4,7 +4,9 @@ import {
   materializeProviders,
   referencedModelIds,
 } from '@shared/modelDirectory';
-import type { ModelProvider, OauthProviderInfo } from '@shared/types';
+import { unionProviderModels } from '@shared/providerIdentity';
+import { normalizeProviderModelRefreshIntervalHours } from '@shared/providers/modelRefreshInterval';
+import type { ModelProvider, OauthProviderInfo, ProviderApiConfig } from '@shared/types';
 import { useEffect, useMemo, useState } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -132,10 +134,27 @@ interface ProviderEditDialogProps {
   onClose: () => void;
 }
 
+function sameProviderRequest(left: ProviderApiConfig, right: ProviderApiConfig): boolean {
+  const leftHeaders = Object.entries(left.headers ?? {});
+  const rightHeaders = right.headers ?? {};
+  return (
+    left.api === right.api &&
+    left.apiKey.trim() === right.apiKey.trim() &&
+    left.baseUrl.trim().replace(/\/+$/, '') === right.baseUrl.trim().replace(/\/+$/, '') &&
+    leftHeaders.length === Object.keys(rightHeaders).length &&
+    leftHeaders.every(
+      ([name, value]) => Object.hasOwn(rightHeaders, name) && rightHeaders[name] === value
+    )
+  );
+}
+
 /** 只编辑已存在条目；所有新建路径统一进入 ProviderSetupWizard。 */
 export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProps) {
   const { t } = useI18n();
   const updateProvider = useSettingsStore((state) => state.updateProvider);
+  const refreshStatus = useSettingsStore(
+    (state) => state.providers.find((entry) => entry.id === provider?.id)?.modelRefreshStatus
+  );
   const directory = useModelDirectoryStore((state) => state.snapshot);
   const materializedModels = useMemo(
     () =>
@@ -159,6 +178,7 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
           provider && (
             <ProviderApiForm
               key={provider.id}
+              catalogId={provider.catalogId}
               initialValue={{
                 name: provider.name,
                 api: provider.api,
@@ -166,24 +186,64 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                 baseUrl: provider.baseUrl,
                 models: materializedModels ?? provider.models,
                 headers: provider.headers,
+                autoFetchModels: provider.autoFetchModels,
+                modelRefreshIntervalHours: provider.modelRefreshIntervalHours,
               }}
+              providerEnabled={provider.enabled}
+              modelRefreshStatus={refreshStatus}
               oauth={Boolean(provider.oauthAccountKey)}
               oauthAccountKey={provider.oauthAccountKey}
               onCancel={onClose}
-              onSave={(value) => {
-                updateProvider(
-                  provider.id,
-                  provider.oauthAccountKey
-                    ? {
-                        name: value.name,
-                        models: extractModelOverrides(
+              onSave={(value, seenModelIds) => {
+                const settings = useSettingsStore.getState();
+                if (provider.oauthAccountKey) {
+                  updateProvider(provider.id, {
+                    name: value.name,
+                    models: extractModelOverrides(
+                      value.models,
+                      directorySectionForAccount(directory, provider.oauthAccountKey)?.models,
+                      referencedModelIds(settings, provider.id)
+                    ),
+                  });
+                } else {
+                  const latest = settings.providers.find((entry) => entry.id === provider.id);
+                  // 草稿打开后加入的模型还未显示。保留这些模型，同时尊重用户在草稿中删除的模型。
+                  //
+                  // Models added after the draft opened may be unseen. Preserve them and honor deletions of models the draft displayed.
+                  const models =
+                    latest &&
+                    sameProviderRequest(provider, value) &&
+                    sameProviderRequest(latest, value)
+                      ? unionProviderModels(
                           value.models,
-                          directorySectionForAccount(directory, provider.oauthAccountKey)?.models,
-                          referencedModelIds(useSettingsStore.getState(), provider.id)
-                        ),
-                      }
-                    : value
-                );
+                          latest.models.filter((model) => !seenModelIds.has(model.id))
+                        )
+                      : value.models;
+                  const { autoFetchModels, modelRefreshIntervalHours, ...draft } = value;
+                  // 只保存相对打开时快照的拉取设置改动，保留其他窗口写入的新值。
+                  //
+                  // Only save changes to fetching settings relative to the opening snapshot to preserve updates from other windows.
+                  const autoFetchChanged =
+                    autoFetchModels !== undefined &&
+                    autoFetchModels !== (provider.autoFetchModels === true);
+                  const intervalChanged =
+                    modelRefreshIntervalHours !== undefined &&
+                    modelRefreshIntervalHours !==
+                      normalizeProviderModelRefreshIntervalHours(
+                        provider.modelRefreshIntervalHours
+                      );
+                  // 草稿里见过的模型记为已见：拉取后删掉的不会被自动拉取加回
+                  const knownModelIds = [
+                    ...new Set([...(latest?.knownModelIds ?? []), ...seenModelIds]),
+                  ];
+                  updateProvider(provider.id, {
+                    ...draft,
+                    models,
+                    knownModelIds,
+                    ...(autoFetchChanged ? { autoFetchModels } : {}),
+                    ...(intervalChanged ? { modelRefreshIntervalHours } : {}),
+                  });
+                }
                 onClose();
               }}
             />

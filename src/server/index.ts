@@ -7,7 +7,7 @@ import { createServer, type Socket } from 'node:net';
 import path from 'node:path';
 import { app } from '@platform';
 import { registerIpcHandlers } from '../main/ipc';
-import { readSettings } from '../main/ipc/settings';
+import { readSettings, startProviderModelRefresh } from '../main/ipc/settings';
 import {
   agentWorkerAlive,
   startAgentWorker,
@@ -172,6 +172,7 @@ async function serve(web: WebConfig | null): Promise<void> {
   const state = persisted?.state ?? {};
   getProxyConfig().initFromConfig(state.proxyMode, state.customProxyUrl);
   getCaCertConfig().initFromConfig(state.customCaCertPath);
+  startProviderModelRefresh();
   syncMemoryEmbeddingFromSettings(state);
   syncMemoryDistillFromSettings(state);
   syncMemoryKgFromSettings(state);
