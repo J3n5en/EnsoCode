@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { installStatusBarOverlapGuard } from './statusBarOverlap';
 import { loadActiveDeviceId, loadDevices } from './storage';
+import { requestPersistence, syncPairedMark } from './storageGuard';
 import { installElectronApiShim } from './stubs/electron-api';
 import { initTheme } from './theme';
 import { launchTarget, loadUiMode, saveUiMode } from './uiMode';
@@ -16,8 +17,13 @@ if (params.get('mode') === 'phone') {
   const query = params.toString();
   history.replaceState(null, '', `${location.pathname}${query ? `?${query}` : ''}${location.hash}`);
 }
-const deskTarget = launchTarget(location.search, loadUiMode(), loadDevices(), loadActiveDeviceId());
+const devices = loadDevices();
+const deskTarget = launchTarget(location.search, loadUiMode(), devices, loadActiveDeviceId());
 if (deskTarget) location.replace(deskTarget);
+else if (devices.length > 0) {
+  void requestPersistence();
+  void syncPairedMark(true);
+}
 
 // 复用的桌面组件里有少量 electronAPI 调用，先装降级实现（必须早于组件加载）
 installElectronApiShim();

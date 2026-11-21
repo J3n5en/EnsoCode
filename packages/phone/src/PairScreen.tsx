@@ -22,12 +22,15 @@ export function PairScreen({
   onPaired,
   autoInvite,
   onCancel,
+  notice,
 }: {
   onPaired: (device: PairedDevice) => void;
   /** 扫码直达时从地址栏取到的邀请链接，挂载后自动完成配对 */
   autoInvite?: string | null;
   /** 已配对状态下添加新电脑时提供：显示返回按钮 */
   onCancel?: () => void;
+  /** 本地配对信息疑似被系统清理时的说明 */
+  notice?: string | null;
 }) {
   const [uri, setUri] = useState('');
   const [busy, setBusy] = useState(false);
@@ -155,6 +158,14 @@ export function PairScreen({
         <p className="text-muted-foreground text-sm">
           在桌面端「设置 → 手机」生成配对码，扫码或粘贴。
         </p>
+        {notice ? (
+          <p
+            role="status"
+            className="mt-2 max-w-sm rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-left text-amber-700 text-xs dark:text-amber-300"
+          >
+            {notice}
+          </p>
+        ) : null}
       </div>
 
       {scanning ? (

@@ -25,6 +25,14 @@ const DESK_FETCH_TIMEOUT_MS = 120_000;
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'desk-ping') event.ports[0]?.postMessage({ desk: 1 });
+  // 已激活却没接管发来消息的页面（注销后复活、强制刷新）：activate 不会再来，主动接管
+  if (event.data?.type === 'desk-claim')
+    event.waitUntil(
+      self.clients
+        .claim()
+        .catch(() => {})
+        .then(() => event.ports[0]?.postMessage({ desk: 1 }))
+    );
 });
 
 self.addEventListener('fetch', (event) => {
