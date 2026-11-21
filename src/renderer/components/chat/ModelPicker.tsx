@@ -330,6 +330,8 @@ interface ModelPickerProps {
   /** 覆盖触发器文案；设置页「跟随上次选择」等不显示具体模型名 */
   triggerLabel?: string;
   triggerClassName?: string;
+  /** 手机窄屏工具行：触发器限宽截断，虚拟模型只显示虚拟名（成员名移到弹层当前项） */
+  compact?: boolean;
   side?: 'top' | 'bottom';
 }
 
@@ -689,6 +691,7 @@ export function ModelPicker({
   emptyLabel,
   triggerLabel: triggerLabelProp,
   triggerClassName,
+  compact = false,
   side = 'top',
 }: ModelPickerProps) {
   const { t } = useI18n();
@@ -806,6 +809,11 @@ export function ModelPicker({
         ? `${providerDisplayName(currentProvider, t)} / ${modelName}`
         : modelName
       : emptyLabel || t('Select model'));
+  // 窄屏只露出用户选中的东西：虚拟名或裸模型名；路由成员和渠道前缀留在 title / 弹层
+  const visibleTriggerLabel =
+    compact && !triggerLabelProp && hasSelection
+      ? (currentVirtual?.name ?? modelName)
+      : triggerLabel;
 
   const groups = useMemo(
     () => expandWorkbenchGroups(groupProviders(providers, oauthInfos)),
@@ -993,20 +1001,36 @@ export function ModelPicker({
         : visibleVirtualModels,
     [searching, keyword, visibleVirtualModels]
   );
-  const virtualItems = virtualHits.map((entry) => (
-    <MenuItem
-      key={`virtual/${entry.id}`}
-      className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
-      data-model-picker-virtual={entry.id}
-      onClick={() => handleSelectModel(VIRTUAL_PROVIDER_ID, entry.id)}
-    >
-      <Shuffle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate" title={entry.name}>
-        {entry.name}
-      </span>
-      {currentVirtual?.id === entry.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-    </MenuItem>
-  ));
+  const virtualItems = virtualHits.map((entry) => {
+    // 窄屏触发器只显示虚拟名，当前路由成员挪到这一行
+    const routed = compact && currentVirtual?.id === entry.id ? routedModelLabel : undefined;
+    return (
+      <MenuItem
+        key={`virtual/${entry.id}`}
+        className="min-h-6 gap-1.5 px-1.5 py-0.5 text-xs sm:min-h-6 sm:text-xs"
+        data-model-picker-virtual={entry.id}
+        onClick={() => handleSelectModel(VIRTUAL_PROVIDER_ID, entry.id)}
+      >
+        <Shuffle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span
+          className={cn('min-w-0 truncate', routed ? 'max-w-[50%] shrink-0' : 'flex-1')}
+          title={entry.name}
+        >
+          {entry.name}
+        </span>
+        {routed && (
+          <span
+            className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground"
+            data-model-picker-routed
+            title={routed}
+          >
+            {routed}
+          </span>
+        )}
+        {currentVirtual?.id === entry.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+      </MenuItem>
+    );
+  });
 
   const handleSelectModel = useCallback(
     (targetProviderId: string, targetModelId: string) => {
@@ -1166,18 +1190,33 @@ export function ModelPicker({
     ) : null;
 
   return (
-    <div className={cn(triggerClassName && 'w-full min-w-0')}>
+    <div
+      className={cn(
+        triggerClassName && 'w-full min-w-0',
+        // compact：只有模型芯片随宽度收缩（收缩的是这层 flex 项），下限留够档位与箭头，避免溢出压到邻居
+        compact &&
+          cn(
+            'max-w-[10rem]',
+            hasSelection && showReasoningControls && (reasoningMode || displayedReasoningEnabled)
+              ? 'min-w-[4.5rem]'
+              : 'min-w-[2.75rem]'
+          )
+      )}
+    >
       <Menu open={open} onOpenChange={handleRootOpenChange}>
         <MenuTrigger
           data-model-picker="trigger"
           className={cn(
-            'flex h-7 min-w-14 max-w-64 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+            'flex shrink items-center rounded-lg text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+            compact ? 'h-[32px] w-full gap-0.5 px-1.5' : 'h-7 min-w-14 max-w-64 gap-1 px-2',
             triggerClassName
           )}
           title={triggerLabel}
         >
           <span className="flex min-w-0 items-center gap-1">
-            <span className="min-w-0 truncate">{triggerLabel}</span>
+            <span className="min-w-0 truncate" data-model-picker-label>
+              {visibleTriggerLabel}
+            </span>
             {hasSelection && showReasoningControls && reasoningMode ? (
               <span className="shrink-0 text-[10px]" data-reasoning-summary={reasoningMode}>
                 {t(

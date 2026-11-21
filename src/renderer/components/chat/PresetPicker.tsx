@@ -37,11 +37,11 @@ export function PresetPicker({ presetId, onSelect, onModel, disabled }: PresetPi
   if (disabled) {
     return (
       <span
-        className="flex h-7 min-w-0 max-w-40 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground"
+        className="flex h-7 min-w-0 max-w-40 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground max-md:h-[32px] max-md:@max-[28rem]:min-w-[32px] max-md:@max-[28rem]:shrink-0 max-md:@max-[28rem]:justify-center"
         title={t('Preset is locked after the conversation starts')}
       >
         <Layers className="h-3 w-3 shrink-0" />
-        <span className="truncate">{current.name}</span>
+        <span className="max-md:@max-[28rem]:hidden truncate">{current.name}</span>
       </span>
     );
   }
@@ -49,11 +49,11 @@ export function PresetPicker({ presetId, onSelect, onModel, disabled }: PresetPi
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="flex h-7 min-w-0 max-w-40 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="flex h-7 min-w-0 max-w-40 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:h-[32px] max-md:@max-[28rem]:shrink-0 max-md:@max-[28rem]:gap-0.5 max-md:@max-[28rem]:px-1 max-md:@max-[28rem]:min-w-[32px] max-md:@max-[28rem]:justify-center"
         title={current.name}
       >
         <Layers className="h-3 w-3 shrink-0" />
-        <span className="min-w-0 truncate">{current.name}</span>
+        <span className="max-md:@max-[28rem]:hidden min-w-0 truncate">{current.name}</span>
         <ChevronDown className="h-3 w-3 shrink-0" />
       </PopoverTrigger>
       <PopoverPopup side="top" align="start" className="w-52 [&_[data-slot=popover-viewport]]:p-1">
