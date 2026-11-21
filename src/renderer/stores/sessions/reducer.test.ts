@@ -1913,6 +1913,31 @@ describe('background-tasks-level', () => {
     );
     expect(state.backgroundTasks).toEqual([task('t1', 'running')]);
   });
+
+  it('冷会话（worker 没打开）收到认回的任务：直接上任务条，不领养 generation、不动 seq', () => {
+    const cold = { ...base, generation: undefined, lastSeq: 0 };
+    const state = applyAgentEvent(cold, 's1', {
+      type: 'unopened-background-tasks',
+      sessionId: 's1',
+      tasks: [task('t1', 'running')],
+    });
+    expect(state.backgroundTasks).toEqual([task('t1', 'running')]);
+    expect(state.generation).toBeUndefined();
+    expect(state.lastSeq).toBe(0);
+    const done = applyAgentEvent(state, 's1', {
+      type: 'unopened-background-tasks',
+      sessionId: 's1',
+      tasks: [task('t1', 'done')],
+    });
+    expect(done.backgroundTasks).toEqual([task('t1', 'done')]);
+    expect(
+      applyAgentEvent(cold, 's2', {
+        type: 'unopened-background-tasks',
+        sessionId: 's1',
+        tasks: [task('t1', 'running')],
+      })
+    ).toBe(cold);
+  });
 });
 
 describe('转交提问在原会话里的状态', () => {

@@ -709,5 +709,14 @@ describe('重启保留后台命令的协议', () => {
     expect(
       parseAgentWorkerEvent({ type: 'session-wake-requested', sessionId: 'a', extra: 1 })
     ).toBeNull();
+    const unopened = {
+      type: 'unopened-background-tasks',
+      sessionId: 'conv-1',
+      tasks: [{ taskId: 't1', command: 'sleep 300', status: 'running', tail: '', startedAt: 1 }],
+    };
+    expect(parseAgentWorkerEvent(unopened)).toEqual(unopened);
+    expect(parseAgentWorkerEvent({ ...unopened, sessionId: '' })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...unopened, tasks: [{}] })).toBeNull();
+    expect(parseAgentWorkerEvent({ ...unopened, identity: {} })).toBeNull();
   });
 });

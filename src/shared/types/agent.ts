@@ -2344,6 +2344,15 @@ export type AgentWorkerEvent =
       sessionId: string;
     }
   | {
+      /**
+       * 没打开的会话（重启认回的命令所在会话不会自动打开）的后台任务全量（REPLACE 语义）。
+       * 不带 identity / seq：渲染层只据此画任务条，不当会话已打开
+       */
+      type: 'unopened-background-tasks';
+      sessionId: string;
+      tasks: BackgroundTaskInfo[];
+    }
+  | {
       /** 标题总结全部候选均失败：同为旁路事件；error 为人可读的最后一次失败原因（含模型标识） */
       type: 'title-failed';
       conversationId: string;
@@ -4696,6 +4705,14 @@ export function parseAgentWorkerEvent(value: unknown): AgentWorkerEvent | null {
   }
   if (value.type === 'session-wake-requested') {
     return hasExactKeys(value, ['type', 'sessionId']) && isNonEmptyString(value.sessionId)
+      ? (value as unknown as AgentWorkerEvent)
+      : null;
+  }
+  if (value.type === 'unopened-background-tasks') {
+    return hasExactKeys(value, ['type', 'sessionId', 'tasks']) &&
+      isNonEmptyString(value.sessionId) &&
+      Array.isArray(value.tasks) &&
+      value.tasks.every((task) => isRecord(task) && isNonEmptyString(task.taskId))
       ? (value as unknown as AgentWorkerEvent)
       : null;
   }

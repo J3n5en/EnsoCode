@@ -315,6 +315,7 @@ export const emptyProjection: SessionProjection = {
 
 const eventIdentity = (event: RendererAgentEvent): SessionIdentity | null => {
   if (event.type === 'worker-exited' || event.type === 'snapshot') return null;
+  if (event.type === 'unopened-background-tasks') return null;
   // 标题总结不属于任何 worker 会话（无 identity/seq），在 store 层处理，不进投影
   if (event.type === 'title-generated' || event.type === 'title-failed') return null;
   // 通用补全结果在 Main agentHost 就已结算，不会到达渲染层；这里只为收窄联合类型
@@ -427,6 +428,9 @@ export function applyAgentEvent(
 
   const identity = eventIdentity(event);
   if (event.type === 'title-generated' || event.type === 'title-failed') return state;
+  // worker 没打开该会话（重启认回的命令）：只换任务条，不碰 generation / seq，不当会话已打开
+  if (event.type === 'unopened-background-tasks')
+    return event.sessionId === sessionId ? { ...state, backgroundTasks: event.tasks } : state;
   if (
     event.type === 'text-completed' ||
     event.type === 'text-failed' ||

@@ -137,7 +137,8 @@ function identityOf(
           | 'graceful-restart-deferred'
           | 'graceful-restart-ready'
           | 'background-tasks-detached'
-          | 'session-wake-requested';
+          | 'session-wake-requested'
+          | 'unopened-background-tasks';
       }
     | McpWorkerEvent
     | WorkspaceLockEvent
@@ -550,7 +551,8 @@ export class AgentSessionIndex {
       event.type === 'graceful-restart-deferred' ||
       event.type === 'graceful-restart-ready' ||
       event.type === 'background-tasks-detached' ||
-      event.type === 'session-wake-requested'
+      event.type === 'session-wake-requested' ||
+      event.type === 'unopened-background-tasks'
     )
       return false;
     if (

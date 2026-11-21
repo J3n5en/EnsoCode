@@ -110,6 +110,7 @@ import type {
   AgentWorkerEvent,
   ApprovalMode,
   AttachedImage,
+  BackgroundTaskInfo,
   ChildConversationMetadata,
   ContextPart,
   CoworkerInfo,
@@ -1169,6 +1170,17 @@ export class SessionSupervisor {
     this.options.emit({ type: 'session-wake-requested', sessionId });
   }
 
+  /**
+   * 重启认回的命令所在会话不会自动打开（渲染层点开只读 jsonl 尾窗，不 spawn）：
+   * 任务变化不能只走带 identity 的事件，否则要等用户发消息打开会话才看得到
+   */
+  private emitUnopenedTasks(
+    sessionId: string,
+    tasks: BackgroundTaskInfo[] = this.bgTasks.snapshot(sessionId)
+  ): void {
+    this.options.emit({ type: 'unopened-background-tasks', sessionId, tasks });
+  }
+
   /** 打开的会话没在续跑上一轮：攒下的完成通知立即开一轮；在续跑的由轮末补投 */
   private wakeAfterOpen(managed: ManagedSession): void {
     if (!this.wakeOnOpen.delete(managed.identity.sessionId) || managed.currentTurnId !== undefined)
@@ -1230,7 +1242,7 @@ export class SessionSupervisor {
               tail,
               status,
             });
-          }
+          } else if (status === 'running') this.emitUnopenedTasks(sessionId);
         },
         onEnded: (sessionId, taskId, status, exitCode) => {
           const managed = this.sessions.get(sessionId);
@@ -1256,7 +1268,7 @@ export class SessionSupervisor {
               seq: ++managed.seq,
               tasks,
             });
-          }
+          } else this.emitUnopenedTasks(sessionId, tasks);
         },
         // 完成通知走合并投递:多任务同时完成合并成一条,失败在 manager 文本里自带标注
         onCompletionNotify: (sessionId, text, notifyOptions) => {
@@ -1481,6 +1493,12 @@ export class SessionSupervisor {
         sessions,
         ...(command.sessionId ? { partial: true, sessionId: command.sessionId } : {}),
       });
+      // 渲染层启动 / 点开冷会话时补拉：认回的任务早在 worker 构造时就发过，那时可能没人收
+      for (const sessionId of command.sessionId ? [command.sessionId] : this.bgTasks.sessionIds()) {
+        if (this.sessions.has(sessionId)) continue;
+        const tasks = this.bgTasks.snapshot(sessionId);
+        if (tasks.length > 0) this.emitUnopenedTasks(sessionId, tasks);
+      }
       return;
     }
     if (command.type === 'warm-mcp') {

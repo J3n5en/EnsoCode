@@ -799,6 +799,11 @@ export class BackgroundTaskManager {
       .map((task) => ({ ...task.info, tail: task.output.slice(-TAIL_LIMIT) }));
   }
 
+  /** 名下还有任务（含已结束、尚未清理的）的会话 */
+  sessionIds(): string[] {
+    return [...new Set([...this.tasks.values()].map((task) => task.sessionId))];
+  }
+
   /**
    * 前台命令转后台（adopt，有 yieldedAt）后还没结束的任务：优雅重启把它们当作在跑的工具。
    * exceptDetachable：重启会把能脱离的交给下一代，只剩脱离不了的需要等
