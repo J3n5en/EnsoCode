@@ -7,6 +7,7 @@ import {
   type TelegramUpdate,
 } from './client';
 import { ContactPoller } from './poller';
+import { TELEGRAM_GENERAL_TOPIC_ID } from './store';
 
 /**
  * 一个秘书的 Telegram 渠道在 hub 上的样子：hub 只负责「同一个 token 只轮询一次」
@@ -30,6 +31,8 @@ export interface TelegramSubscriber {
   bindFailure(code: string): void;
   /** 哪个秘书都没认领：不响应，只记审计 */
   rejectUnrouted(update: TelegramUpdate): void;
+  /** 路由之前每个订阅者都看一眼：记下见过的论坛话题名，不管最后归谁 */
+  observe?(message: TelegramMessage): void;
   onPollStatus(): void;
 }
 
@@ -56,6 +59,13 @@ export function telegramTopicOf(message: TelegramMessage): string | undefined {
   const thread = message.message_thread_id;
   if (thread === undefined || !Number.isInteger(thread)) return undefined;
   return message.is_topic_message || message.chat.is_forum ? String(thread) : undefined;
+}
+
+/** 论坛的 General 不带 message_thread_id：路由匹配时记为话题 1，单独绑了 General 也能命中 */
+export function telegramRouteTopicOf(message: TelegramMessage): string | undefined {
+  return (
+    telegramTopicOf(message) ?? (message.chat.is_forum ? TELEGRAM_GENERAL_TOPIC_ID : undefined)
+  );
 }
 
 /**
@@ -173,11 +183,12 @@ export class TelegramHub {
       if (owner && update.callback_query) await owner.handleUpdate(update);
       return;
     }
+    for (const candidate of list) candidate.observe?.(message);
     // 同一个连接上的订阅者用的是同一个 bot：这里只按 chat + 话题分
     const claims = list.flatMap((subscriber) =>
       subscriber.claims().map((claim) => ({ ...claim, botId: 0 }))
     );
-    const target = routeTarget(claims, 0, String(message.chat.id), telegramTopicOf(message));
+    const target = routeTarget(claims, 0, String(message.chat.id), telegramRouteTopicOf(message));
     const subscriber = target ? list.find((candidate) => candidate.secretaryId === target) : null;
     if (subscriber) {
       await subscriber.handleUpdate(update);

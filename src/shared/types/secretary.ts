@@ -786,8 +786,11 @@ export interface SecretaryContactTelegram {
    * 静默回合只发一行摘要；解绑或换 bot 时自动关掉。
    */
   syncMirror: boolean;
-  /** 群白名单：空名单不收任何群；名单里的群只认绑定的那个人。见过的群带标题 */
-  groups: { id: string; title?: string }[];
+  /**
+   * 交给这个秘书的群：白名单与路由表按群合并，只认绑定的那个人。见过的群带标题。
+   * all 是整群（General 与所有话题）；否则只收 topics 里这几个论坛话题。
+   */
+  groups: SecretaryContactGroupBinding[];
   /** 用绑定码绑的群与话题：这个秘书从这里收，也往这里推 */
   routes?: { chatId: string; topicId?: string; title?: string }[];
   /**
@@ -799,6 +802,25 @@ export interface SecretaryContactTelegram {
   /** safeStorage 是否可用：不可用时 token 明文落盘，界面要提示 */
   secure: boolean;
 }
+
+export interface SecretaryContactTopic {
+  /** 论坛话题 id；General 约定为 '1' */
+  id: string;
+  /** bot 见过的话题名；没见过建话题或改名消息就没有 */
+  title?: string;
+}
+
+export interface SecretaryContactGroupBinding {
+  id: string;
+  title?: string;
+  all: boolean;
+  topics: SecretaryContactTopic[];
+}
+
+/** 设置页拉一个群的话题：forum=false 表示没开话题，只能整群绑定 */
+export type SecretaryContactTopicsResult =
+  | { ok: true; forum: boolean; title?: string; topics: SecretaryContactTopic[] }
+  | { ok: false; error: string; detail?: string };
 
 export interface SecretaryContactState {
   /** 这份联系方式属于哪个秘书：每个秘书只用自己绑定的渠道 */

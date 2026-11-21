@@ -4,6 +4,8 @@ import type {
   SecretaryContactBot,
   SecretaryContactChannelPrefs,
   SecretaryContactChat,
+  SecretaryContactGroupBinding,
+  SecretaryContactTopic,
 } from '@shared/types/secretary';
 import { readJson, writeJsonAtomic } from '../../bots/files';
 import { SecureJsonFile } from '../../secureFile';
@@ -48,6 +50,8 @@ export interface ContactFile {
   ownerId?: number;
   /** 用绑定码绑到群或话题的路由：收发都走这里。topicId 缺省表示整个群 */
   telegramRoutes: TelegramRoute[];
+  /** 见过的论坛话题，`chatId:topicId` → 话题名，只给设置页勾选用；空串表示见过但不知道名字 */
+  telegramTopicTitles: Record<string, string>;
 }
 
 export interface TelegramRoute {
@@ -57,10 +61,16 @@ export interface TelegramRoute {
   boundAt: number;
 }
 
+/** 论坛的 General：Bot API 里不带 message_thread_id，路由匹配时约定用 1 */
+export const TELEGRAM_GENERAL_TOPIC_ID = '1';
+
 /** 这个秘书在 bot 上有没有任何能收消息的路由：私聊、或有主人的群白名单与群/话题路由 */
 export function hasContactRoutes(file: ContactFile): boolean {
   if (file.chat) return true;
-  return file.ownerId !== undefined && file.telegramRoutes.length > 0;
+  // 与 contactClaims 一致：只绑了群的主人，白名单里的整群也算路由
+  return (
+    file.ownerId !== undefined && (file.telegramRoutes.length > 0 || file.telegramGroups.length > 0)
+  );
 }
 
 /** 这个秘书在它的 bot 上认领的全部路由：私聊、群白名单（整群）与绑定码绑的群和话题 */
@@ -100,6 +110,7 @@ export function emptyContactFile(): ContactFile {
     telegramGroups: [],
     telegramGroupTitles: {},
     telegramRoutes: [],
+    telegramTopicTitles: {},
   };
 }
 
@@ -161,6 +172,33 @@ function parseGroupTitles(raw: unknown): Record<string, string> {
 
 const TOPIC_ID = /^\d{1,12}$/u;
 const ROUTES_MAX = 50;
+const TOPIC_TITLES_MAX = 200;
+
+function topicId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const id = raw.trim();
+  return TOPIC_ID.test(id) ? id : null;
+}
+
+function topicKey(chatId: string, topic: string): string {
+  return `${chatId}:${topic}`;
+}
+
+function parseTopicTitles(raw: unknown): Record<string, string> {
+  if (!isRecord(raw)) return {};
+  const entries = Object.entries(raw).filter((entry): entry is [string, string] => {
+    const [chat, topic, ...rest] = entry[0].split(':');
+    return (
+      rest.length === 0 &&
+      groupId(chat) === chat &&
+      topicId(topic) === topic &&
+      typeof entry[1] === 'string'
+    );
+  });
+  return Object.fromEntries(
+    entries.slice(-TOPIC_TITLES_MAX).map(([key, title]) => [key, title.slice(0, GROUP_TITLE_MAX)])
+  );
+}
 
 function parseRoutes(raw: unknown): TelegramRoute[] {
   if (!Array.isArray(raw)) return [];
@@ -191,6 +229,19 @@ export function telegramGroupAllowed(file: ContactFile, chatId: number): boolean
   return file.telegramGroups.includes(String(chatId));
 }
 
+export function parseTelegramGroupId(raw: unknown): string | null {
+  return groupId(raw);
+}
+
+/** 这个群在本秘书这里有没有任何绑定或记录：决定陌生话题的名字要不要记 */
+export function telegramGroupKnown(file: ContactFile, chatId: string): boolean {
+  return (
+    file.telegramGroups.includes(chatId) ||
+    file.telegramRoutes.some((route) => route.chatId === chatId) ||
+    file.telegramGroupTitles[chatId] !== undefined
+  );
+}
+
 /** 输入做 trim；空的、不是数字 id 的不加，重复的原样返回 */
 export function withTelegramGroupAdded(
   file: ContactFile,
@@ -204,7 +255,119 @@ export function withTelegramGroupAdded(
 
 export function withTelegramGroupRemoved(file: ContactFile, raw: unknown): ContactFile {
   const id = typeof raw === 'string' ? raw.trim() : '';
-  return { ...file, telegramGroups: file.telegramGroups.filter((group) => group !== id) };
+  // 设置页解绑的是整个群：白名单与这个群的整群、话题路由一起释放
+  return {
+    ...file,
+    telegramGroups: file.telegramGroups.filter((group) => group !== id),
+    telegramRoutes: file.telegramRoutes.filter((route) => route.chatId !== id),
+  };
+}
+
+/**
+ * 一个群交给这个秘书的范围，落在路由表上：'all' 是整群（General 与所有话题），
+ * 已有白名单或整群路由就保留，没有就加进白名单；话题 id 列表就只认这几个话题的路由，
+ * 同时拿掉这个群的白名单与整群路由。两种互斥。
+ */
+export function withTelegramGroupScope(
+  file: ContactFile,
+  rawChatId: unknown,
+  scope: unknown,
+  now: number
+): { ok: true; file: ContactFile } | { ok: false; error: 'invalid-chat-id' | 'invalid-topic' } {
+  const chatId = groupId(rawChatId);
+  if (!chatId) return { ok: false, error: 'invalid-chat-id' };
+  const others = file.telegramRoutes.filter((route) => route.chatId !== chatId);
+  const mine = file.telegramRoutes.filter((route) => route.chatId === chatId);
+  if (scope === 'all') {
+    const whole = mine.filter((route) => route.topicId === undefined);
+    const listed = file.telegramGroups.includes(chatId);
+    return {
+      ok: true,
+      file: {
+        ...file,
+        telegramGroups:
+          listed || whole.length > 0 ? file.telegramGroups : [...file.telegramGroups, chatId],
+        telegramRoutes: [...others, ...whole],
+      },
+    };
+  }
+  if (!Array.isArray(scope) || scope.length === 0) return { ok: false, error: 'invalid-topic' };
+  const topics = scope.map(topicId);
+  if (topics.some((topic) => topic === null)) return { ok: false, error: 'invalid-topic' };
+  const title = file.telegramGroupTitles[chatId];
+  const picked = [...new Set(topics as string[])].map(
+    (topic): TelegramRoute =>
+      mine.find((route) => route.topicId === topic) ?? {
+        chatId,
+        topicId: topic,
+        ...(title ? { title } : {}),
+        boundAt: now,
+      }
+  );
+  return {
+    ok: true,
+    file: {
+      ...file,
+      telegramGroups: file.telegramGroups.filter((group) => group !== chatId),
+      telegramRoutes: [...others, ...picked].slice(-ROUTES_MAX),
+    },
+  };
+}
+
+/** 记下见过的话题；没变、或拿空名盖已知名字时返回 null，省一次写盘 */
+export function withTelegramTopicTitle(
+  file: ContactFile,
+  chatId: string,
+  topic: string,
+  title: string
+): ContactFile | null {
+  if (groupId(chatId) !== chatId || topicId(topic) !== topic) return null;
+  const key = topicKey(chatId, topic);
+  const clean = title.slice(0, GROUP_TITLE_MAX);
+  const known = file.telegramTopicTitles[key];
+  if (known === clean || (known !== undefined && !clean)) return null;
+  const rest = Object.entries(file.telegramTopicTitles).filter(([id]) => id !== key);
+  return {
+    ...file,
+    telegramTopicTitles: Object.fromEntries([...rest, [key, clean]].slice(-TOPIC_TITLES_MAX)),
+  };
+}
+
+function topicView(file: ContactFile, chatId: string, topic: string): SecretaryContactTopic {
+  const title = file.telegramTopicTitles[topicKey(chatId, topic)];
+  return title ? { id: topic, title } : { id: topic };
+}
+
+/** 这个群见过的和已绑定的话题，按 id 排序 */
+export function telegramTopicCatalog(file: ContactFile, chatId: string): SecretaryContactTopic[] {
+  const ids = new Set<string>();
+  for (const key of Object.keys(file.telegramTopicTitles)) {
+    const [chat, topic] = key.split(':');
+    if (chat === chatId && topic) ids.add(topic);
+  }
+  for (const route of file.telegramRoutes) {
+    if (route.chatId === chatId && route.topicId) ids.add(route.topicId);
+  }
+  return [...ids].sort((a, b) => Number(a) - Number(b)).map((id) => topicView(file, chatId, id));
+}
+
+/** 设置页看到的群：白名单与路由表按群合并，整群（all）或某几个话题 */
+export function telegramGroupBindings(file: ContactFile): SecretaryContactGroupBinding[] {
+  const ids = [
+    ...new Set([...file.telegramGroups, ...file.telegramRoutes.map((route) => route.chatId)]),
+  ];
+  return ids.map((id) => {
+    const routes = file.telegramRoutes.filter((route) => route.chatId === id);
+    const title = file.telegramGroupTitles[id] ?? routes.find((route) => route.title)?.title;
+    return {
+      id,
+      ...(title ? { title } : {}),
+      all: file.telegramGroups.includes(id) || routes.some((route) => !route.topicId),
+      topics: routes.flatMap((route) =>
+        route.topicId ? [topicView(file, id, route.topicId)] : []
+      ),
+    };
+  });
 }
 
 /** 记下群名；没变返回 null，省一次写盘。新的排最后，超出上限丢最旧的 */
@@ -313,6 +476,7 @@ export function parseContactFile(raw: unknown): ContactFile {
     telegramGroupTitles: parseGroupTitles(raw.telegramGroupTitles),
     ...(positiveInt(raw.ownerId) !== undefined ? { ownerId: positiveInt(raw.ownerId) } : {}),
     telegramRoutes: parseRoutes(raw.telegramRoutes),
+    telegramTopicTitles: parseTopicTitles(raw.telegramTopicTitles),
   };
 }
 
@@ -371,6 +535,7 @@ export class ContactStore {
       telegramGroupTitles: current.telegramGroupTitles,
       // 解绑是整体解绑：群和话题的路由一起释放，别的秘书才能绑过去
       telegramRoutes: [],
+      telegramTopicTitles: current.telegramTopicTitles,
     });
   }
 
@@ -389,6 +554,7 @@ export class ContactStore {
       telegramGroups: current.telegramGroups,
       telegramGroupTitles: current.telegramGroupTitles,
       telegramRoutes: [],
+      telegramTopicTitles: current.telegramTopicTitles,
     });
   }
 }

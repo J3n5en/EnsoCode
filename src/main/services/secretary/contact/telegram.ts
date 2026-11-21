@@ -16,6 +16,7 @@ import {
   formatWelcomeMessage,
   isBoundChat,
   normalizeBotToken,
+  routeTarget,
   startCommandCode,
 } from '@shared/secretary/contact';
 import {
@@ -27,6 +28,7 @@ import type {
   SecretaryAuditEntry,
   SecretaryContactChannelStatus,
   SecretaryContactTelegram,
+  SecretaryContactTopicsResult,
 } from '@shared/types/secretary';
 import type {
   ChannelCaps,
@@ -50,16 +52,22 @@ import {
   type TelegramUpdate,
   type TelegramUpload,
 } from './client';
-import { TelegramHub, type TelegramSubscriber, telegramTopicOf } from './hub';
+import { TelegramHub, type TelegramSubscriber, telegramRouteTopicOf, telegramTopicOf } from './hub';
 import {
   type ContactFile,
   type ContactStore,
   contactClaims,
   contactOwnerId,
   hasContactRoutes,
+  parseTelegramGroupId,
   TELEGRAM_CHANNEL_ID,
+  TELEGRAM_GENERAL_TOPIC_ID,
   telegramGroupAllowed,
+  telegramGroupBindings,
+  telegramGroupKnown,
+  telegramTopicCatalog,
   withTelegramGroupTitle,
+  withTelegramTopicTitle,
 } from './store';
 
 export const TELEGRAM_CAPS: ChannelCaps = {
@@ -165,24 +173,51 @@ function carriesMedia(message: TelegramMessage): boolean {
   );
 }
 
-function threadOf(topicId: string | undefined): { messageThreadId?: number } {
-  const thread = topicId ? Number(topicId) : Number.NaN;
-  return Number.isInteger(thread) ? { messageThreadId: thread } : {};
+/** 发往话题的 thread id：General 不带 thread id 发，带了 1 反而发不进去 */
+function threadIdOf(topicId: string | undefined): number | undefined {
+  if (!topicId || topicId === TELEGRAM_GENERAL_TOPIC_ID) return undefined;
+  const thread = Number(topicId);
+  return Number.isInteger(thread) ? thread : undefined;
 }
+
+function threadOf(topicId: string | undefined): { messageThreadId?: number } {
+  const thread = threadIdOf(topicId);
+  return thread !== undefined ? { messageThreadId: thread } : {};
+}
+
+type AdmitVerdict =
+  | 'ok'
+  | 'foreign-chat'
+  | 'group-not-allowed'
+  | 'topic-not-allowed'
+  | 'foreign-sender';
 
 /**
  * 只认绑定的那个人：私聊就是绑定的 chat（私聊 chat id 等于用户 id）；
- * 群要在白名单里（空名单不收任何群），且只放行他本人发的。别人的一律静默丢掉。
+ * 群要整群在白名单或路由表里、或这个话题单独绑过（话题优先），且只放行他本人发的。
+ * 别人的一律静默丢掉。topic 是路由用的话题：论坛的 General 记为 1。
  */
 function admitChat(
   file: ContactFile,
   chat: { id: number; type?: string },
-  fromId: number | undefined
-): 'ok' | 'foreign-chat' | 'group-not-allowed' | 'foreign-sender' {
+  fromId: number | undefined,
+  topic: string | undefined
+): AdmitVerdict {
   if (isBoundChat(file.chat?.id, chat.id)) return 'ok';
   if (chatTypeOf(chat.type) !== 'group') return 'foreign-chat';
-  const routed = file.telegramRoutes.some((route) => route.chatId === String(chat.id));
-  if (!telegramGroupAllowed(file, chat.id) && !routed) return 'group-not-allowed';
+  const chatId = String(chat.id);
+  const routes = file.telegramRoutes.filter((route) => route.chatId === chatId);
+  if (!telegramGroupAllowed(file, chat.id) && routes.length === 0) return 'group-not-allowed';
+  const claims: ContactRouteClaim[] = [
+    ...(telegramGroupAllowed(file, chat.id) ? [{ secretaryId: 'self', botId: 0, chatId }] : []),
+    ...routes.map((route) => ({
+      secretaryId: 'self',
+      botId: 0,
+      chatId,
+      ...(route.topicId ? { topicId: route.topicId } : {}),
+    })),
+  ];
+  if (!routeTarget(claims, 0, chatId, topic)) return 'topic-not-allowed';
   return isBoundChat(contactOwnerId(file), fromId ?? Number.NaN) ? 'ok' : 'foreign-sender';
 }
 
@@ -307,11 +342,77 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
       this.audit('contact_inbound_rejected', false, 'awaiting-start');
       return;
     }
-    const verdict = admitChat(file, message.chat, fromId);
+    const topic = telegramRouteTopicOf(message);
+    const verdict = admitChat(file, message.chat, fromId, topic);
     this.reject(
       verdict === 'ok' || verdict === 'foreign-sender' ? 'foreign-chat' : verdict,
-      message.chat.id
+      message.chat.id,
+      topic
     );
+  }
+
+  /**
+   * 记下论坛话题给设置页勾选：建话题、改名的服务消息带名字，话题里的普通消息回复的是建话题那条。
+   * 只记本秘书绑过或认识的群、或主人发的，陌生人拉的群不落盘。
+   */
+  observe(message: TelegramMessage): void {
+    const topic = topicOf(message);
+    if (!topic || chatTypeOf(message.chat.type) !== 'group') return;
+    const file = this.store.file();
+    const chatId = String(message.chat.id);
+    if (
+      !telegramGroupKnown(file, chatId) &&
+      !isBoundChat(contactOwnerId(file), message.from?.id ?? Number.NaN)
+    ) {
+      return;
+    }
+    const name =
+      message.forum_topic_created?.name ??
+      message.forum_topic_edited?.name ??
+      message.reply_to_message?.forum_topic_created?.name ??
+      '';
+    const next = withTelegramTopicTitle(file, chatId, topic, name.trim());
+    if (next) this.store.save(next);
+  }
+
+  /**
+   * 拉一个群的话题给设置页勾选。Bot API 没有列话题的方法：先 getChat 确认 bot 在群里、
+   * 群开了话题，再给出 General 与 bot 见过的话题（建话题、改名或话题里有人说话时记下）。
+   */
+  async topics(rawChatId: unknown): Promise<SecretaryContactTopicsResult> {
+    const chatId = parseTelegramGroupId(rawChatId);
+    if (!chatId) return { ok: false, error: 'invalid-chat-id' };
+    const token = this.store.token();
+    if (!token) return { ok: false, error: 'token-required' };
+    let chat: { type?: string; title?: string; is_forum?: boolean };
+    try {
+      chat = await this.apiFor(token).getChat(Number(chatId));
+    } catch (error) {
+      const code = telegramErrorCode(error);
+      this.audit('contact_topics', false, code);
+      // 只回 Telegram 自己的说明（如 chat not found）；网络错误的原文可能带请求地址
+      const detail = code === 'api' && error instanceof Error ? error.message.slice(0, 200) : '';
+      return { ok: false, error: code, ...(detail ? { detail } : {}) };
+    }
+    if (chatTypeOf(chat.type) !== 'group') return { ok: false, error: 'not-group' };
+    const titled = chat.title
+      ? withTelegramGroupTitle(this.store.file(), chatId, chat.title)
+      : null;
+    const file = titled ? this.store.save(titled) : this.store.file();
+    this.audit('contact_topics', true, `chat=${chatId}`);
+    const title = chat.title ? { title: chat.title } : {};
+    if (!chat.is_forum) return { ok: true, forum: false, ...title, topics: [] };
+    return {
+      ok: true,
+      forum: true,
+      ...title,
+      topics: [
+        { id: TELEGRAM_GENERAL_TOPIC_ID },
+        ...telegramTopicCatalog(file, chatId).filter(
+          (topic) => topic.id !== TELEGRAM_GENERAL_TOPIC_ID
+        ),
+      ],
+    };
   }
 
   onPollStatus(): void {
@@ -355,10 +456,7 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
       allowCardConfirm: file.allowCardConfirm,
       allowMemory: file.allowMemory,
       syncMirror: file.syncMirror,
-      groups: file.telegramGroups.map((id) => {
-        const title = file.telegramGroupTitles[id];
-        return title ? { id, title } : { id };
-      }),
+      groups: telegramGroupBindings(file),
       routes: file.telegramRoutes.map((route) => ({
         chatId: route.chatId,
         ...(route.topicId ? { topicId: route.topicId } : {}),
@@ -589,10 +687,10 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     if (!data) return { ok: false, error: 'api' };
     const caption = media.caption?.trim() ?? '';
     const inline = caption.length <= TELEGRAM_CAPTION_MAX;
-    const threadId = topicId !== undefined ? Number(topicId) : Number.NaN;
+    const threadId = threadIdOf(topicId);
     const params: TelegramUpload = {
       chatId: Number(peerId),
-      ...(Number.isInteger(threadId) ? { threadId } : {}),
+      ...(threadId !== undefined ? { threadId } : {}),
       data,
       fileName: media.fileName || basename(media.path ?? '') || 'file',
       ...(media.mimeType ? { mimeType: media.mimeType } : {}),
@@ -760,11 +858,12 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     if (update.callback_query) {
       const query = update.callback_query;
       const chat = query.message?.chat;
-      // 群里的按钮：群在白名单里，且只认绑定的那个人点
-      if (file.chat && chat) {
-        const verdict = admitChat(file, chat, query.from?.id);
+      // 群里的按钮：群或这个话题绑过，且只认绑定的那个人点
+      if (file.chat && chat && query.message) {
+        const topic = telegramRouteTopicOf(query.message);
+        const verdict = admitChat(file, chat, query.from?.id, topic);
         if (verdict !== 'ok') {
-          this.reject(verdict, chat.id);
+          this.reject(verdict, chat.id, topic);
           return;
         }
       }
@@ -820,7 +919,8 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     }
 
     const chatType = chatTypeOf(message.chat.type);
-    const verdict = admitChat(file, message.chat, message.from?.id);
+    const routeTopic = telegramRouteTopicOf(message);
+    const verdict = admitChat(file, message.chat, message.from?.id, routeTopic);
     // 认群用的标题：只记绑定的人或名单里的群发来的，陌生人拉的群不落盘
     if (
       chatType === 'group' &&
@@ -832,7 +932,11 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
       if (titled) this.store.save(titled);
     }
     if (verdict !== 'ok') {
-      this.reject(verdict === 'foreign-sender' ? 'foreign-chat' : verdict, message.chat.id);
+      this.reject(
+        verdict === 'foreign-sender' ? 'foreign-chat' : verdict,
+        message.chat.id,
+        routeTopic
+      );
       return;
     }
     const topicId = topicOf(message);
@@ -884,16 +988,15 @@ export class TelegramChannel implements ContactChannel, TelegramSubscriber {
     return [{ rejected: 'not-image' }];
   }
 
-  /** 静默丢掉：不回话，只记审计；名单外的群带上 chatId，方便用户查到要加哪个 */
-  private reject(
-    reason: 'foreign-chat' | 'group-not-allowed' | 'foreign-sender',
-    chatId: number
-  ): void {
-    this.audit(
-      'contact_inbound_rejected',
-      false,
-      reason === 'group-not-allowed' ? `${reason} chat=${chatId}` : reason
-    );
+  /** 静默丢掉：不回话，只记审计；名单外的群和话题带上 id，方便用户查到要加哪个 */
+  private reject(reason: Exclude<AdmitVerdict, 'ok'>, chatId: number, topic?: string): void {
+    const detail =
+      reason === 'group-not-allowed'
+        ? `${reason} chat=${chatId}`
+        : reason === 'topic-not-allowed'
+          ? `${reason} chat=${chatId} topic=${topic ?? ''}`
+          : reason;
+    this.audit('contact_inbound_rejected', false, detail);
   }
 
   private async completeBind(message: TelegramMessage): Promise<void> {

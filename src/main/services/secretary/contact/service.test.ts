@@ -20,6 +20,7 @@ import type {
 } from './channel';
 import type {
   TelegramApi,
+  TelegramChat,
   TelegramCommandOptions,
   TelegramInlineKeyboard,
   TelegramMenuButton,
@@ -86,6 +87,9 @@ class FakeApi implements TelegramApi {
   markupError: Error | null = null;
   me: TelegramUser = { id: 42, username: 'enso_secretary_bot', first_name: 'Enso' };
   meError: Error | null = null;
+  /** getChat 的回答：按 chatId 查，没有就报 chat not found */
+  chats = new Map<number, TelegramChat>();
+  chatError: Error | null = null;
   private queue: TelegramUpdate[] = [];
   private waiter: ((updates: TelegramUpdate[]) => void) | null = null;
 
@@ -102,6 +106,13 @@ class FakeApi implements TelegramApi {
   async getMe(): Promise<TelegramUser> {
     if (this.meError) throw this.meError;
     return this.me;
+  }
+
+  async getChat(chatId: number): Promise<TelegramChat> {
+    if (this.chatError) throw this.chatError;
+    const chat = this.chats.get(chatId);
+    if (!chat) throw new TelegramApiError('api', 'Bad Request: chat not found');
+    return chat;
   }
 
   getUpdates(params: { signal?: AbortSignal }): Promise<TelegramUpdate[]> {
@@ -846,10 +857,10 @@ describe('Telegram 群白名单', () => {
       telegramGroups: string[];
     };
     expect(saved.telegramGroups).toEqual(['-1002']);
-    expect(h.restart().state().telegram.groups).toEqual([{ id: '-1002' }]);
+    expect(h.restart().state().telegram.groups).toEqual([{ id: '-1002', all: true, topics: [] }]);
     // 解绑不清名单
     await h.service.unbind();
-    expect(h.restart().state().telegram.groups).toEqual([{ id: '-1002' }]);
+    expect(h.restart().state().telegram.groups).toEqual([{ id: '-1002', all: true, topics: [] }]);
   });
 
   it('见过的群显示标题，没见过只给 id', async () => {
@@ -868,9 +879,225 @@ describe('Telegram 群白名单', () => {
     h.service.setTelegramGroup('add', String(GROUP));
     h.service.setTelegramGroup('add', '-100777');
     expect(h.restart().state().telegram.groups).toEqual([
-      { id: String(GROUP), title: 'Dev 群' },
-      { id: '-100777' },
+      { id: String(GROUP), title: 'Dev 群', all: true, topics: [] },
+      { id: '-100777', all: true, topics: [] },
     ]);
+  });
+});
+
+describe('Telegram 论坛话题绑定', () => {
+  const GROUP = -1001234567890;
+  const CHAT = String(GROUP);
+
+  async function bound() {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    return h;
+  }
+
+  /** 话题里的普通消息：回复的是建话题那条服务消息，Bot API 从这里带出话题名 */
+  function topicMessage(
+    text: string,
+    topic: number,
+    name: string,
+    options: { fromId?: number; chatId?: number } = {}
+  ): TelegramUpdate {
+    const update = groupMessage(text, { topic, ...options });
+    if (update.message) {
+      update.message.reply_to_message = {
+        message_id: topic,
+        chat: update.message.chat,
+        forum_topic_created: { name },
+      };
+    }
+    return update;
+  }
+
+  /** 论坛的 General：带 is_forum，但不带 message_thread_id */
+  function generalMessage(text: string): TelegramUpdate {
+    const update = groupMessage(text);
+    if (update.message) update.message.chat.is_forum = true;
+    return update;
+  }
+
+  const rejected = (h: ReturnType<typeof harness>, detail: string) =>
+    waitFor(() => h.audits.some((entry) => entry.detail === detail), detail);
+
+  it('只绑「插件开发」：别的话题、General 和别的群完全不响应，只写审计', async () => {
+    const h = await bound();
+    expect(h.service.setTelegramGroupScope(CHAT, ['3'])).toEqual({ ok: true });
+    const before = h.api.sent.length;
+    h.api.push(topicMessage('灌水一句', 9, '闲聊灌水'));
+    await rejected(h, `topic-not-allowed chat=${CHAT} topic=9`);
+    h.api.push(generalMessage('General 说一句'));
+    await rejected(h, `topic-not-allowed chat=${CHAT} topic=1`);
+    h.api.push(groupMessage('别的群', { chatId: -100555, topic: 3 }));
+    await rejected(h, 'group-not-allowed chat=-100555');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(h.world.delivered).toHaveLength(0);
+    expect(h.api.sent.length).toBe(before);
+    expect(h.api.chatActions).toHaveLength(0);
+  });
+
+  it('绑定的话题交给秘书，回复回到同一个群、同一个话题', async () => {
+    const h = await bound();
+    h.service.setTelegramGroupScope(CHAT, ['3']);
+    h.api.push(topicMessage('插件怎么装', 3, '插件开发'));
+    await waitFor(() => h.world.delivered.length === 1, 'delivered');
+    expect(parseInboundMessage(h.world.delivered[0] ?? '')).toMatchObject({
+      chatId: CHAT,
+      topicId: '3',
+    });
+    const before = h.api.sent.length;
+    h.service.onTurnReply('sec-1', '先打开插件页');
+    await waitFor(() => h.api.sent.length > before, 'reply');
+    expect(h.api.sent.slice(before)).toEqual([
+      expect.objectContaining({ chatId: GROUP, messageThreadId: 3, text: '先打开插件页' }),
+    ]);
+  });
+
+  it('话题里的按钮：没绑的话题连绑定的人点也丢', async () => {
+    const h = await bound();
+    h.service.setTelegramGroupScope(CHAT, ['3']);
+    h.api.push({
+      update_id: 9,
+      callback_query: {
+        id: 'cb-9',
+        from: { id: 777 },
+        data: 'ask:1:0',
+        message: {
+          message_id: 5,
+          chat: { id: GROUP, type: 'supergroup', is_forum: true },
+          message_thread_id: 9,
+          is_topic_message: true,
+        },
+      },
+    });
+    await rejected(h, `topic-not-allowed chat=${CHAT} topic=9`);
+    expect(h.api.callbacks).toHaveLength(0);
+  });
+
+  it('话题绑定优先于整群；整群仍覆盖没有单独绑的话题与 General', async () => {
+    const h = await bound();
+    // 同一群既绑整群又单独绑了话题 3（多秘书时可能来自不同秘书）
+    h.store.save({
+      ...h.store.file(),
+      telegramGroups: [CHAT],
+      telegramRoutes: [{ chatId: CHAT, topicId: '3', boundAt: 1 }],
+    });
+    h.api.push(topicMessage('话题三', 3, '插件开发'));
+    h.api.push(topicMessage('话题九', 9, '闲聊灌水'));
+    h.api.push(generalMessage('General'));
+    await waitFor(() => h.world.delivered.length === 3, 'all delivered');
+    expect(h.world.delivered.map((body) => parseInboundMessage(body)?.topicId)).toEqual([
+      '3',
+      '9',
+      undefined,
+    ]);
+    expect(h.service.state().telegram.groups).toEqual([
+      {
+        id: CHAT,
+        title: 'Dev 群',
+        all: true,
+        topics: [{ id: '3', title: '插件开发' }],
+      },
+    ]);
+  });
+
+  it('整群改成只要几个话题：之后没勾的话题不再进；改回整群又都进；解绑一起清', async () => {
+    const h = await bound();
+    h.service.setTelegramGroup('add', CHAT);
+    h.api.push(topicMessage('话题九', 9, '闲聊灌水'));
+    await waitFor(() => h.world.delivered.length === 1, 'whole group');
+    h.service.setTelegramGroupScope(CHAT, ['3']);
+    expect(h.service.state().telegram.groups).toEqual([
+      { id: CHAT, title: 'Dev 群', all: false, topics: [{ id: '3' }] },
+    ]);
+    h.api.push(topicMessage('话题九又一句', 9, '闲聊灌水'));
+    await rejected(h, `topic-not-allowed chat=${CHAT} topic=9`);
+    expect(h.world.delivered).toHaveLength(1);
+    h.service.setTelegramGroupScope(CHAT, 'all');
+    h.api.push(topicMessage('话题九第三句', 9, '闲聊灌水'));
+    await waitFor(() => h.world.delivered.length === 2, 'whole again');
+    h.service.setTelegramGroupScope(CHAT, ['3']);
+    h.service.setTelegramGroup('remove', CHAT);
+    expect(h.restart().state().telegram.groups).toEqual([]);
+    expect(h.service.setTelegramGroupScope(CHAT, [])).toEqual({
+      ok: false,
+      error: 'invalid-topic',
+    });
+  });
+
+  it('拉话题：General 加上 bot 见过的话题与名字；陌生人拉的群不记', async () => {
+    const h = await bound();
+    h.api.chats.set(GROUP, {
+      id: GROUP,
+      type: 'supergroup',
+      title: 'EnsoCode 交流群',
+      is_forum: true,
+    });
+    // 绑定的人在没绑的话题里说话：消息丢掉，但话题记下来供勾选
+    h.api.push(topicMessage('看看', 7, '插件开发'));
+    await rejected(h, `group-not-allowed chat=${CHAT}`);
+    // 认识的群里有人新建话题
+    h.api.push({
+      update_id: 3,
+      message: {
+        message_id: 12,
+        chat: { id: GROUP, type: 'supergroup', is_forum: true },
+        from: { id: 31337 },
+        message_thread_id: 12,
+        is_topic_message: true,
+        forum_topic_created: { name: '问题反馈' },
+      },
+    });
+    // 陌生人拉的群：话题名不落盘
+    h.api.push(topicMessage('陌生', 4, '陌生话题', { fromId: 31337, chatId: -100666 }));
+    h.api.push(topicMessage('哨兵', 8, '功能建议'));
+    await waitFor(
+      () => Object.keys(h.store.file().telegramTopicTitles).includes(`${CHAT}:8`),
+      'sentinel learned'
+    );
+    expect(await h.service.telegramTopics(CHAT)).toEqual({
+      ok: true,
+      forum: true,
+      title: 'EnsoCode 交流群',
+      topics: [
+        { id: '1' },
+        { id: '7', title: '插件开发' },
+        { id: '8', title: '功能建议' },
+        { id: '12', title: '问题反馈' },
+      ],
+    });
+    expect(Object.keys(h.store.file().telegramTopicTitles)).not.toContain('-100666:4');
+    expect(h.world.delivered).toHaveLength(0);
+  });
+
+  it('拉话题失败：给出原因，网络错误不带原文；没开话题的群只能整群', async () => {
+    const h = await bound();
+    expect(await h.service.telegramTopics(CHAT)).toEqual({
+      ok: false,
+      error: 'api',
+      detail: 'Bad Request: chat not found',
+    });
+    h.api.chatError = new TelegramApiError('network', `fetch failed bot${TOKEN}`);
+    expect(await h.service.telegramTopics(CHAT)).toEqual({ ok: false, error: 'network' });
+    h.api.chatError = null;
+    h.api.chats.set(GROUP, { id: GROUP, type: 'supergroup', title: '普通群' });
+    expect(await h.service.telegramTopics(CHAT)).toEqual({
+      ok: true,
+      forum: false,
+      title: '普通群',
+      topics: [],
+    });
+    h.api.chats.set(777, { id: 777, type: 'private' });
+    expect(await h.service.telegramTopics('777')).toEqual({ ok: false, error: 'not-group' });
+    expect(await h.service.telegramTopics('@dev')).toEqual({
+      ok: false,
+      error: 'invalid-chat-id',
+    });
   });
 });
 
@@ -3173,5 +3400,76 @@ describe('多秘书：一个 bot 连接，多条路由', () => {
     await waitFor(() => h.hub.pollingTokens() === 1, 'one left');
     await a.service.stop();
     await waitFor(() => h.hub.pollingTokens() === 0, 'none left');
+  });
+
+  it('设置页按秘书勾话题：话题只路由给勾了它的秘书，话题优先于别的秘书的整群，冲突整体拒绝', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    expect(a.service.setTelegramGroupScope('-100', ['7', '3'])).toEqual({ ok: true });
+    expect(b.service.setTelegramGroupScope('-100', ['9', '5'])).toEqual({ ok: true });
+    expect(a.service.state().telegram.groups).toEqual([
+      { id: '-100', title: '工作群', all: false, topics: [{ id: '7' }, { id: '3' }] },
+    ]);
+    // 话题 3 有人说话、回复的是建话题那条：归 a，但 b 也记下话题名供勾选
+    const inThree = topicMessage('插件怎么装', 3);
+    if (inThree.message) {
+      inThree.message.reply_to_message = {
+        message_id: 3,
+        chat: inThree.message.chat,
+        forum_topic_created: { name: '插件开发' },
+      };
+    }
+    api.push(inThree);
+    await waitFor(() => a.delivered.length === 1, 'a got topic 3');
+    api.push(topicMessage('B 的话题五', 5));
+    await waitFor(() => b.delivered.length === 1, 'b got topic 5');
+    expect(a.delivered[0]).toContain('插件怎么装');
+    expect(b.delivered[0]).toContain('B 的话题五');
+    const before = api.sent.length;
+    a.service.onTurnReply('a-chat', '先打开插件页');
+    await waitFor(() => api.sent.length > before, 'a reply');
+    expect(api.sent.slice(before)).toEqual([
+      expect.objectContaining({ chatId: -100, messageThreadId: 3, text: '先打开插件页' }),
+    ]);
+
+    // 谁都没勾的话题：不响应，只记审计
+    const sentBefore = api.sent.length;
+    api.push(topicMessage('有人吗', 11));
+    await waitFor(
+      () => b.audits.some((entry) => entry.detail === 'topic-not-allowed chat=-100 topic=11'),
+      'unpicked topic dropped'
+    );
+    expect(a.delivered).toHaveLength(1);
+    expect(b.delivered).toHaveLength(1);
+    expect(api.sent.length).toBe(sentBefore);
+
+    // b 想要 a 的话题 3：整体拒绝，b 的路由不动
+    expect(b.service.setTelegramGroupScope('-100', ['9', '3'])).toEqual({
+      ok: false,
+      error: 'route-conflict',
+    });
+    expect(b.store.file().telegramRoutes.map((route) => route.topicId)).toEqual(['9', '5']);
+
+    // b 改成整群：没人单独绑的话题归 b，a 勾的话题仍归 a
+    expect(b.service.setTelegramGroupScope('-100', 'all')).toEqual({ ok: true });
+    api.push(topicMessage('现在归谁', 11));
+    await waitFor(() => b.delivered.length === 2, 'b got topic 11 as whole group');
+    api.push(topicMessage('还是 a 的', 3));
+    await waitFor(() => a.delivered.length === 2, 'topic 3 still a');
+    expect(b.delivered.join('')).not.toContain('还是 a 的');
+
+    api.chats.set(-100, { id: -100, type: 'supergroup', title: '工作群', is_forum: true });
+    expect(await b.service.telegramTopics('-100')).toEqual({
+      ok: true,
+      forum: true,
+      title: '工作群',
+      topics: [{ id: '1' }, { id: '3', title: '插件开发' }, { id: '5' }, { id: '11' }],
+    });
+    await a.service.stop();
+    await b.service.stop();
   });
 });

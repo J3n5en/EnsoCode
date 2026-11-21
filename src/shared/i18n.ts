@@ -3047,6 +3047,26 @@ export const zhTranslations: Record<string, string> = {
   'Add group': '添加',
   'Remove {{name}}': '删除 {{name}}',
   'Group chat IDs are numbers, e.g. -1001234567890': '群 chatId 是数字，例如 -1001234567890',
+  'New groups are bound as a whole. For a forum group, use the list button to hand over only some topics.':
+    '新加的群默认整群交给秘书。开了话题的群可以点列表按钮，只交其中几个话题。',
+  'General (default topic)': 'General（默认话题）',
+  'Topic #{{id}}': '话题 #{{id}}',
+  'Make sure the bot is in this group.': '确认 bot 已经在这个群里。',
+  'This chat is not a group': '这不是群聊',
+  'Pick at least one topic': '至少勾选一个话题',
+  'Another secretary already has this group or one of these topics':
+    '这个群或其中某个话题已经交给别的秘书了',
+  'Whole group': '整群',
+  'Topics: {{names}}': '话题：{{names}}',
+  'Choose topics for {{name}}': '选择 {{name}} 交给秘书的话题',
+  'Loading topics…': '正在拉取话题…',
+  'Could not load topics: {{reason}}': '拉取话题失败：{{reason}}',
+  'Whole group (General and every topic)': '整群（General 和所有话题）',
+  'Only the topics I pick': '只交勾选的话题',
+  'Only topics the bot has seen are listed. If one is missing, send a message in that topic, then refresh. Topics you leave unchecked are ignored.':
+    '列表里只有 bot 见过的话题。缺哪个，就在那个话题里发一句话再点刷新。没勾的话题一律忽略。',
+  'This group has no topics, so it can only be bound as a whole.':
+    '这个群没开话题，只能整群交给秘书。',
   'Allow viewing memory titles on Telegram': '允许在 Telegram 查看记忆标题',
   'Off by default. /memory lists titles only, never the memory text.':
     '默认关闭。/memory 只列标题，不显示记忆正文。',

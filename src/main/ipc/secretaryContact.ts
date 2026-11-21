@@ -154,6 +154,15 @@ function readTelegramRoute(request: unknown): { chatId: string; topicId?: string
   return { chatId, ...(typeof topicId === 'string' && topicId ? { topicId } : {}) };
 }
 
+/** 群交给秘书的范围：{ telegramGroupScope: { chatId, scope: 'all' | string[] } }，细校验在 store */
+function readTelegramGroupScope(request: unknown): { chatId: string; scope: unknown } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const raw = (request as Record<string, unknown>).telegramGroupScope;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const { chatId, scope } = raw as Record<string, unknown>;
+  return typeof chatId === 'string' ? { chatId, scope } : null;
+}
+
 /** 没有服务时给界面的空视图：不含 token */
 function emptyTelegramView(): SecretaryContactState['telegram'] {
   return {
@@ -477,6 +486,8 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
           if (group) return service.setTelegramGroup(group.action, group.chatId);
           const route = readTelegramRoute(request);
           if (route) return service.removeTelegramRoute(route.chatId, route.topicId);
+          const scope = readTelegramGroupScope(request);
+          if (scope) return service.setTelegramGroupScope(scope.chatId, scope.scope);
           const enabled = readFlag(request, 'enabled');
           const cards = readFlag(request, 'allowCardConfirm');
           const memory = readFlag(request, 'allowMemory');
@@ -500,6 +511,21 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
           if (!parsed) return { ok: false, error: 'invalid request' };
           if (parsed.action === 'clear') return service.clearFollowed();
           return service.unfollow(parsed.id);
+        }
+      );
+
+      // 设置页勾话题：确认群可达、是否开了话题，并给出 bot 见过的话题
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_TELEGRAM_TOPICS,
+        async (event, request: unknown, secretaryId: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const service = target(secretaryId);
+          if (!service) return { ok: false, error: 'secretary-required' };
+          const chatId =
+            request && typeof request === 'object' && !Array.isArray(request)
+              ? (request as Record<string, unknown>).chatId
+              : undefined;
+          return service.telegramTopics(chatId);
         }
       );
     },

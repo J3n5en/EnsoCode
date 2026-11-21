@@ -66,6 +66,7 @@ import type {
   SecretaryContactChannelStatus,
   SecretaryContactChannelView,
   SecretaryContactState,
+  SecretaryContactTopicsResult,
   SecretaryProfile,
   SecretaryResultKind,
 } from '@shared/types/secretary';
@@ -97,6 +98,7 @@ import {
   withChannelPrefs,
   withTelegramGroupAdded,
   withTelegramGroupRemoved,
+  withTelegramGroupScope,
 } from './store';
 import { TELEGRAM_CAPS, TelegramChannel } from './telegram';
 
@@ -112,6 +114,7 @@ export type ContactError =
   | 'no-secretary'
   | 'deliver-failed'
   | 'invalid-chat-id'
+  | 'invalid-topic'
   | 'route-conflict'
   | 'channel-owned';
 
@@ -662,6 +665,55 @@ export class ContactService implements SecretaryContactPort {
     if (!this.telegram.removeRoute(chatId, topicId)) return { ok: false, error: 'not-found' };
     this.ports.publish();
     return { ok: true };
+  }
+
+  /**
+   * 一个群交给这个秘书的范围：'all' 整群，或只认这几个论坛话题。写进路由表；
+   * 新认领的整群或话题已经属于同一个 bot 上的别的秘书就整体拒绝。
+   */
+  setTelegramGroupScope(chatId: unknown, scope: unknown): ContactResult {
+    const file = this.store.file();
+    const result = withTelegramGroupScope(file, chatId, scope, this.ports.now());
+    if (!result.ok) return { ok: false, error: result.error };
+    const next = result.file;
+    const keyOf = (topicId: string | undefined) => topicId ?? '';
+    const before = new Set([
+      ...file.telegramGroups.map((group) => `${group}:`),
+      ...file.telegramRoutes.map((route) => `${route.chatId}:${keyOf(route.topicId)}`),
+    ]);
+    const wanted = [
+      ...next.telegramGroups.map((group) => ({ chatId: group, topicId: undefined })),
+      ...next.telegramRoutes.map((route) => ({ chatId: route.chatId, topicId: route.topicId })),
+    ].filter((claim) => !before.has(`${claim.chatId}:${keyOf(claim.topicId)}`));
+    const botId = file.bot?.id;
+    if (
+      botId !== undefined &&
+      wanted.some((claim) =>
+        this.ports.routeConflict?.({
+          secretaryId: this.ports.secretaryId ?? 'default',
+          botId,
+          chatId: claim.chatId,
+          ...(claim.topicId ? { topicId: claim.topicId } : {}),
+        })
+      )
+    ) {
+      this.audit('contact_settings', false, 'route-conflict');
+      return { ok: false, error: 'route-conflict' };
+    }
+    this.store.save(next);
+    this.audit(
+      'contact_settings',
+      true,
+      `telegramGroups=${next.telegramGroups.length} telegramRoutes=${next.telegramRoutes.length}`
+    );
+    void this.syncTelegramRunning();
+    this.ports.publish();
+    return { ok: true };
+  }
+
+  /** 设置页勾话题用：确认群可达、是否开了话题，并给出 bot 见过的话题 */
+  telegramTopics(chatId: unknown): Promise<SecretaryContactTopicsResult> {
+    return this.telegram.topics(chatId);
   }
 
   /** 插件渠道的消息没有秘书认领：不响应，只记审计 */
