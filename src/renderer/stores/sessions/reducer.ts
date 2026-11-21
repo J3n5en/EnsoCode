@@ -1,5 +1,6 @@
 import { type PlanState, splitPlanPrefix } from '@shared/planMode';
 import { truncatedProjectionHead } from '@shared/projectedText';
+import { stripInboundImageLines } from '@shared/secretary/inboundImages';
 import { parseSkillCommands, splitSkillBlocks } from '@shared/skillCommands';
 import { splitTurnNotes } from '@shared/turnNotes';
 import {
@@ -82,7 +83,10 @@ const IMAGE_HINTS = /(?:^|\n\n)\[Image[^\n]*\](?:\n\[Image[^\n]*\])*$/;
 function sameUserText(optimistic: string, delivered: string): boolean {
   const plain = stripRolePrefix(delivered);
   if (optimistic === delivered || optimistic === plain) return true;
-  if (optimistic === plain.replace(IMAGE_HINTS, '')) return true;
+  const withoutHints = plain.replace(IMAGE_HINTS, '');
+  if (optimistic === withoutHints) return true;
+  // 秘书会话贴的图由 Main 落盘，路径行追加在正文后
+  if (optimistic === stripInboundImageLines(withoutHints)) return true;
   const head = truncatedProjectionHead(delivered);
   if (head !== null && optimistic.startsWith(stripRolePrefix(head))) return true;
   const slash = parseSkillCommands(optimistic);

@@ -740,6 +740,41 @@ describe('applyAgentEvent', () => {
     expect(delivered.messages[0]).not.toHaveProperty('optimistic', true);
   });
 
+  it.each([
+    ['带文字', '加个按钮', '加个按钮\n\n'],
+    ['纯图片', '', ''],
+  ])('秘书会话由 Main 追加了图片路径行的 user upsert 消费乐观回显（%s）', (_, typed, prefix) => {
+    const image = { type: 'image' as const, data: 'x', mimeType: 'image/png' };
+    const withEcho = {
+      ...base,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [{ type: 'text' as const, text: typed }, image],
+          optimistic: true as const,
+        },
+      ],
+    };
+    const delivered = applyAgentEvent(withEcho, 's1', {
+      type: 'message-upsert',
+      identity: identity(),
+      seq: 1,
+      index: 0,
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `${prefix}[图片 1] /u/bot-chats/secretary-images/c/a.png\n[图片 2 未收下] 超过 10MB，没有保存\n\n[Image converted from image/webp to image/png.]`,
+          },
+          image,
+        ],
+      },
+    });
+    expect(delivered.messages).toHaveLength(1);
+    expect(delivered.messages[0]).not.toHaveProperty('optimistic', true);
+  });
+
   it('超长 user 正文投影被截断后仍消费乐观回显（upsert 与 snapshot）', () => {
     const typed = 'log line\n'.repeat(8000);
     const truncated = `${typed.slice(0, PROJECTED_FILE_TEXT_LIMIT)}\n…`;

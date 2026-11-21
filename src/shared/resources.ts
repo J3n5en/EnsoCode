@@ -32,6 +32,7 @@ export const STORAGE_CATEGORY_IDS = [
   'sessions',
   'coworkers',
   'toolOutputs',
+  'secretaryImages',
   'memory',
   'models',
   'runtimes',
@@ -51,6 +52,7 @@ export const STORAGE_CLEANABILITY: Record<StorageCategoryId, StorageCleanability
   sessions: 'none',
   coworkers: 'safe',
   toolOutputs: 'safe',
+  secretaryImages: 'safe',
   memory: 'none',
   models: 'none',
   runtimes: 'none',
@@ -314,6 +316,7 @@ const MEMORY_DIRS = ['memory', 'agent/pi-agent/memories'];
 const SESSION_DIRS = ['agent/sessions', 'agent/usage-ledger', 'agent/source-registry.json'];
 const CONFIG_DIRS = ['instructions', 'system-prompts', 'agent/workflows', 'agent/pi-agent/ssh'];
 export const TOOL_OUTPUT_REL = 'agent/sessions/tool-output';
+export const SECRETARY_IMAGES_REL = 'bot-chats/secretary-images';
 
 function underAny(rel: string, dirs: readonly string[]): boolean {
   return dirs.some((dir) => rel === dir || rel.startsWith(`${dir}/`));
@@ -325,6 +328,7 @@ export function classifyStoragePath(rel: string, browserDir: string): StorageCat
   if (underAny(rel, [browserDir])) return 'browser';
   if (underAny(rel, [TOOL_OUTPUT_REL])) return 'toolOutputs';
   if (/^agent\/sessions\/enso-[^/]*__cw-[^/]*$/.test(rel)) return 'coworkers';
+  if (underAny(rel, [SECRETARY_IMAGES_REL])) return 'secretaryImages';
   // Chromium 的 leveldb 也用 .log 作 WAL，只认我们自己写的日志
   const ownLog = rel.endsWith('.log') && (!rel.includes('/') || rel.startsWith('agent/'));
   if (underAny(rel, LOG_DIRS) || ownLog) return 'logs';

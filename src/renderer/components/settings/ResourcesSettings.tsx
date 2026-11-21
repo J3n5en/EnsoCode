@@ -69,6 +69,10 @@ const CATEGORY_LABELS: Record<StorageCategoryId, [string, string]> = {
     'Tool outputs',
     'Saved long tool outputs; only those of deleted conversations are cleaned.',
   ],
+  secretaryImages: [
+    'Secretary images',
+    'Images sent to the secretary. Cleaning removes only images no message references any more and older than 7 days; referenced images are kept.',
+  ],
   memory: ['Memory', 'Memory database and working memory.'],
   models: ['Local models', 'Downloaded embedding and chat models.'],
   runtimes: ['Runtimes', 'Bundled tools and GPU backends.'],
@@ -530,9 +534,23 @@ function StorageRow({
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-2 text-sm">
               <span className="font-medium">{t(label)}</span>
-              <span className="font-mono text-xs">{formatBytes(category.bytes)}</span>
+              <span className="font-mono text-xs">
+                {category.id === 'secretaryImages' && (
+                  <span className="mr-2 text-muted-foreground">
+                    {t('{{count}} files', { count: category.files })}
+                  </span>
+                )}
+                {formatBytes(category.bytes)}
+              </span>
             </div>
-            <p className="truncate text-xs text-muted-foreground">{t(description)}</p>
+            <p
+              className={cn(
+                'text-xs text-muted-foreground',
+                category.id !== 'secretaryImages' && 'truncate'
+              )}
+            >
+              {t(description)}
+            </p>
             <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
               <div className="h-full bg-foreground/60" style={{ width: `${share * 100}%` }} />
             </div>

@@ -221,6 +221,17 @@ class FakeApi implements TelegramApi {
     this.uploads.push({ method: 'sendDocument', params });
     return 900 + this.uploads.length;
   }
+
+  /** 对方发来的文件：按 file_id 取 */
+  files = new Map<string, Buffer>();
+  downloads: string[] = [];
+
+  async downloadFile(fileId: string, maxBytes: number): Promise<Buffer | 'too-large'> {
+    this.downloads.push(fileId);
+    const data = this.files.get(fileId);
+    if (!data) throw new TelegramApiError('api', 'file not found');
+    return data.length > maxBytes ? 'too-large' : data;
+  }
 }
 
 const dirs: string[] = [];
@@ -253,6 +264,8 @@ function harness() {
     recap: [] as { role: 'user' | 'assistant'; text: string }[],
     recapCalls: [] as number[],
     name: '爱酱',
+    /** 落盘的图片：只记字节长度，路径按序号假造 */
+    savedImages: [] as number[],
   };
   const ports: ContactServicePorts = {
     audit: (entry) => audits.push(entry),
@@ -271,6 +284,12 @@ function harness() {
       world.delivered.push(text);
       return world.deliverOk ? { ok: true } : { ok: false, error: 'stale-session' };
     },
+    saveInboundImages: (id, images) =>
+      images.map((data) => {
+        if (data[0] !== 0x89) return { ok: false, reason: 'not-image' as const };
+        world.savedImages.push(data.length);
+        return { ok: true, path: `/data/${id}/${world.savedImages.length}.png`, size: data.length };
+      }),
     answerAsk: (_id, requestId, answer) => {
       if (!world.answerOk) return { ok: false, error: 'no-such-ask' };
       world.answers.push({ requestId, answer });
@@ -532,6 +551,96 @@ describe('入站只认绑定的 chat', () => {
     expect(sent.every((entry) => entry.text.length <= 3900)).toBe(true);
     expect(sent.every((entry) => entry.parseMode === 'HTML')).toBe(true);
     expect(sent.map((entry) => entry.text).join('')).toHaveLength(5000);
+  });
+
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+
+  function mediaMessage(patch: Partial<NonNullable<TelegramUpdate['message']>>): TelegramUpdate {
+    const update = privateMessage('');
+    const message = update.message as NonNullable<TelegramUpdate['message']>;
+    delete message.text;
+    Object.assign(message, patch);
+    return update;
+  }
+
+  async function boundHarness() {
+    const h = harness();
+    await h.service.bind(TOKEN);
+    h.api.push(privateMessage('/start 123456'));
+    await waitFor(() => h.service.state().telegram.status === 'bound', 'bound');
+    return h;
+  }
+
+  it('发来的照片取最大尺寸落盘，路径写在不可信内容之外交给秘书，不带图片字节', async () => {
+    const h = await boundHarness();
+    h.api.files.set('big', PNG);
+    h.api.push(
+      mediaMessage({
+        photo: [
+          { file_id: 'small', file_size: 10 },
+          { file_id: 'big', file_size: PNG.length },
+        ],
+        caption: '按这张图改',
+      })
+    );
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(h.api.downloads).toEqual(['big']);
+    const body = h.world.delivered[0] as string;
+    expect(body).toMatch(/>按这张图改<\/untrusted-content>\n\[图片 1\] \/data\/sec-1\/1\.png$/);
+    expect(body).not.toContain(PNG.toString('base64'));
+    expect(parseInboundMessage(body)).toMatchObject({
+      body: '按这张图改',
+      images: ['/data/sec-1/1.png'],
+    });
+    const inbound = h.audits.find((entry) => entry.op === 'contact_inbound');
+    expect(inbound?.detail).toMatch(/^len=\d+ hash=[0-9a-f]{12} \/data\/sec-1\/1\.png \(11 B\)$/);
+  });
+
+  it('超过 10MB 的照片不下载，回对方一句，没有文字就不打扰秘书', async () => {
+    const h = await boundHarness();
+    h.api.push(mediaMessage({ photo: [{ file_id: 'huge', file_size: 11 * 1024 * 1024 }] }));
+    await waitFor(() => h.api.sent.some((entry) => entry.text.includes('没收下')), 'notice');
+    expect(h.api.downloads).toEqual([]);
+    expect(h.world.delivered).toHaveLength(0);
+    expect(h.api.sent.at(-1)?.text).toContain('超过 10MB');
+  });
+
+  it('不是图片的文件：回对方一句，正文照样交给秘书并写明这张没收下', async () => {
+    const h = await boundHarness();
+    h.api.push(
+      mediaMessage({
+        caption: '看看这个',
+        document: { file_id: 'doc', mime_type: 'application/pdf', file_size: 100 },
+      })
+    );
+    await waitFor(() => h.world.delivered.length > 0, 'delivered');
+    expect(h.api.downloads).toEqual([]);
+    expect(h.world.delivered[0]).toContain('[图片 1 未收下] 不是 png / jpeg / webp / gif 图片');
+    expect(h.api.sent.some((entry) => entry.text.includes('不是图片'))).toBe(true);
+  });
+
+  it('文件头不是图片的 image/* 文件：落盘时拒收并告诉对方', async () => {
+    const h = await boundHarness();
+    h.api.files.set('fake', Buffer.from('not really png'));
+    h.api.push(
+      mediaMessage({ document: { file_id: 'fake', mime_type: 'image/png', file_size: 14 } })
+    );
+    await waitFor(() => h.api.sent.some((entry) => entry.text.includes('不是图片')), 'notice');
+    expect(h.world.delivered).toHaveLength(0);
+    expect(h.world.savedImages).toEqual([]);
+  });
+
+  it('插件渠道带来的图片同样落盘并带上路径', async () => {
+    const h = await boundHarness();
+    await h.service.inbound({
+      kind: 'text',
+      peer: { channelId: 'telegram', peerId: '777' },
+      text: '',
+      images: [{ data: PNG }, { rejected: 'too-large' }],
+    });
+    expect(h.world.delivered[0]).toMatch(
+      /<\/untrusted-content>\n\[图片 1\] \/data\/sec-1\/1\.png\n\[图片 2 未收下\] 超过 10MB，没有保存$/
+    );
   });
 
   it('秘书的回复在用户从手机说话后回发手机', async () => {
@@ -2860,6 +2969,7 @@ describe('多秘书：一个 bot 连接，多条路由', () => {
       service: ContactService;
       audits: SecretaryAuditEntry[];
       delivered: string[];
+      saved: string[];
     }[] = [];
     const conflict = (claim: ContactRouteClaim): string | null => {
       const claims = members
@@ -2873,6 +2983,7 @@ describe('多秘书：一个 bot 连接，多条路由', () => {
       const store = new ContactStore(dir);
       const audits: SecretaryAuditEntry[] = [];
       const delivered: string[] = [];
+      const saved: string[] = [];
       const service = new ContactService(store, {
         audit: (entry) => audits.push(entry),
         publish: () => {},
@@ -2886,6 +2997,15 @@ describe('多秘书：一个 bot 连接，多条路由', () => {
           delivered.push(text);
           return { ok: true };
         },
+        saveInboundImages: (conversationId, images) =>
+          images.map((data) => {
+            saved.push(conversationId);
+            return {
+              ok: true,
+              path: `/img/${conversationId}/${saved.length}.png`,
+              size: data.length,
+            };
+          }),
         answerAsk: () => ({ ok: true }),
         resolveProposal: async () => ({ ok: true }),
         openInApp: () => {},
@@ -2894,7 +3014,7 @@ describe('多秘书：一个 bot 连接，多条路由', () => {
         secretaryId: id,
         routeConflict: conflict,
       });
-      const member = { id, store, service, audits, delivered };
+      const member = { id, store, service, audits, delivered, saved };
       members.push(member);
       return member;
     };
@@ -2990,6 +3110,53 @@ describe('多秘书：一个 bot 连接，多条路由', () => {
       () => a.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
       'rejected'
     );
+    expect(a.delivered).toEqual([]);
+    expect(api.sent.length).toBe(sentBefore);
+    await a.service.stop();
+  });
+
+  function topicPhoto(topicId: number, fileId: string): TelegramUpdate {
+    const update = topicMessage('', topicId);
+    const message = update.message as NonNullable<TelegramUpdate['message']>;
+    delete message.text;
+    message.photo = [{ file_id: fileId, file_size: 11 }];
+    message.caption = '看图';
+    return update;
+  }
+
+  it('话题里发来的图只落到认领它的秘书会话，路径只附进那位秘书的消息', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    const b = h.add('b', 0.222222);
+    await bindTopic(h, a, 7);
+    await bindTopic(h, b, 9);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    api.files.set('p9', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]));
+    api.push(topicPhoto(9, 'p9'));
+    await waitFor(() => b.delivered.length === 1, 'b delivered');
+    expect(b.saved).toEqual(['b-chat']);
+    expect(b.delivered[0]).toMatch(/<\/untrusted-content>\n\[图片 1\] \/img\/b-chat\/1\.png$/);
+    expect(a.saved).toEqual([]);
+    expect(a.delivered).toEqual([]);
+    expect(api.downloads).toEqual(['p9']);
+    await a.service.stop();
+    await b.service.stop();
+  });
+
+  it('没绑任何秘书的话题发图：不下载、不落盘、不回话', async () => {
+    const h = multi();
+    const a = h.add('a', 0.111111);
+    await bindTopic(h, a, 7);
+    const api = h.apis.get(TOKEN) as FakeApi;
+    api.files.set('p11', Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const sentBefore = api.sent.length;
+    api.push(topicPhoto(11, 'p11'));
+    await waitFor(
+      () => a.audits.some((entry) => entry.op === 'contact_inbound_rejected'),
+      'rejected'
+    );
+    expect(api.downloads).toEqual([]);
+    expect(a.saved).toEqual([]);
     expect(a.delivered).toEqual([]);
     expect(api.sent.length).toBe(sentBefore);
     await a.service.stop();
