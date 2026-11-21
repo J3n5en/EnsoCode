@@ -9,10 +9,14 @@ import { useSessionsStore } from '@/stores/sessions';
  * 没有会话时：未完成初次设置进欢迎页，否则新建一个。
  */
 export function openSecretary(secretaryId?: string): void {
+  // 只认字符串 id。点击回调如果把事件对象传进来，不能把它当成秘书 id，
+  // 否则 focus 会落到空状态，侧栏入口跟着消失。
+  const requested =
+    typeof secretaryId === 'string' && secretaryId.length > 0 ? secretaryId : undefined;
   const store = useSecretaryStore.getState();
   const sessions = useSessionsStore.getState();
-  const candidates = secretaryId
-    ? store.secretaries.filter((entry) => entry.id === secretaryId)
+  const candidates = requested
+    ? store.secretaries.filter((entry) => entry.id === requested)
     : store.secretaries;
   let best: { id: string; conversationId: string; at: number } | null = null;
   for (const entry of candidates) {
@@ -26,7 +30,7 @@ export function openSecretary(secretaryId?: string): void {
     sessions.selectConversation(best.conversationId);
     return;
   }
-  const id = secretaryId ?? store.focusedId ?? store.secretaries[0]?.id;
+  const id = requested ?? store.focusedId ?? store.secretaries[0]?.id;
   if (!id) return;
   store.focus(id);
   // 刚建好的秘书状态是异步拉的：没到时按清单（没档案时名字为空）判断，不能点了没反应
