@@ -3725,7 +3725,9 @@ export const zhTranslations: Record<string, string> = {
   'Takeover granted': '已授权接管',
   'Takeover revoked': '已撤销接管',
   'The secretary has not saved anything yet.': '秘书还没有保存任何记忆。',
-  'Dispatched by {{name}}': '由{{name}}派出',
+  'Dispatched by {{name}}': '由 {{name}} 派出',
+  'Dispatched by a deleted secretary': '由已删除的秘书派出',
+  '{{label}} · muted': '{{label}} · 已静音',
   'Set up your secretary': '设置你的秘书',
   'Open secretary': '打开秘书',
   'Only when the secretary agent is enabled in Experimental settings':

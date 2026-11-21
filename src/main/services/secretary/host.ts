@@ -33,6 +33,7 @@ import type {
 } from '@shared/types/secretary';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { redactSecrets } from '../memory/distill';
+import { autoArchivable, autoArchived } from './autoArchive';
 import type { SecretaryContactPort } from './contact/service';
 import {
   type DeliveryPorts,
@@ -131,6 +132,12 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   recordDaily?(entry: SecretaryDailyRecord): void;
   /** 同事托付的待办办完或出了问题：回告发起的秘书；返回是否改了待办 */
   reportPeerTodos?(): boolean;
+  /** 派出会话收口后自动归档：和用户手动归档写同一份会话行；缺省表示不自动归档 */
+  archive?(conversationId: string, at: number): void;
+  /** 自动归档的会话被唤醒：收回归档 */
+  unarchive?(conversationId: string): void;
+  /** 用户此刻正开着这个会话：先不收走，切走后再归档 */
+  viewed?(conversationId: string): boolean;
 }
 
 export interface SecretaryHost {
@@ -142,6 +149,8 @@ export interface SecretaryHost {
   recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
   /** 冷启动没能按恢复清单接着跑这个会话：照常报失败 */
   onRestartResumeFailed(conversationId: string, error: string, now?: number): void;
+  /** 当前打开的会话变了：之前因为正开着而没收走的已完成会话，这时归档 */
+  sweepAutoArchive(now?: number): void;
   recover(): void;
   start(): void;
   stop(): void;
@@ -332,6 +341,60 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
   function remember(file: SecretaryDispatchFile, entry: SecretaryActivity): void {
     file.activity = [...(file.activity ?? []), entry].slice(-ACTIVITY_LIMIT);
+  }
+
+  /**
+   * 派出会话 goal-complete 收口就归档；自动归档的会话重新跑起来就收回。
+   * 正开着的会话先不收走；用户手动归档或手动取消归档的不碰。返回是否改了记录。
+   */
+  function syncAutoArchive(
+    file: SecretaryDispatchFile,
+    ids: Iterable<string>,
+    rows: Record<string, Record<string, unknown>>,
+    now: number,
+    woken: ReadonlySet<string> = new Set()
+  ): boolean {
+    if (!ports.archive) return false;
+    let changed = false;
+    for (const conversationId of ids) {
+      const record = file.dispatched[conversationId];
+      if (!record) continue;
+      const row = rows[conversationId];
+      if (autoArchived(record, row)) {
+        if (!woken.has(conversationId)) continue;
+        ports.unarchive?.(conversationId);
+        delete record.autoArchivedAt;
+        ports.audit?.({
+          at: now,
+          secretaryConversationId: record.secretaryConversationId,
+          op: 'auto_unarchive',
+          targetId: conversationId,
+          ok: true,
+        });
+        changed = true;
+        continue;
+      }
+      // 用户取消了归档或又手动归档：这条标记不再代表当前的归档
+      if (record.autoArchivedAt !== undefined) {
+        delete record.autoArchivedAt;
+        changed = true;
+      }
+      if (ports.viewed?.(conversationId)) continue;
+      const status = ports.status(conversationId);
+      if (!autoArchivable(record, row, status, ports.tasks?.(conversationId) ?? [])) continue;
+      ports.archive(conversationId, now);
+      record.autoArchivedAt = now;
+      record.autoArchiveResultAt = record.lastResult?.at;
+      ports.audit?.({
+        at: now,
+        secretaryConversationId: record.secretaryConversationId,
+        op: 'auto_archive',
+        targetId: conversationId,
+        ok: true,
+      });
+      changed = true;
+    }
+    return changed;
   }
 
   /** 会话的一句话标签：项目 · 标题，回传正文与卡片都用它 */
@@ -1011,6 +1074,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       const aborted = new Set<string>();
       if (sessionId && event.type === 'turn-completed' && event.aborted)
         aborted.add(rootIdOf(event, sessionId));
+      // 用户或秘书发来消息都会让会话跑起来：自动归档的就此回到活跃中
+      const woken = new Set(
+        changes.filter((entry) => entry.state === 'running').map((entry) => entry.sessionId)
+      );
+      if (syncAutoArchive(file, touched, rows, now, woken)) changed = true;
       if (changed) changed = saveEventFile(file, now);
       const todosChanged = syncLinkedTodos(ports, file, rows, aborted);
       const reported = ports.reportPeerTodos?.() ?? false;
@@ -1067,6 +1135,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (runPatrol(file, records, statuses, now)) changed = true;
       // 遗留任务巡检：已完成会话里还在跑的后台任务，每小时推一次，不自动杀
       if (runLeftoverPatrol(file, records, now)) changed = true;
+      // 收口时还有后台任务、或当时正开着的会话：任务结束、切走后在这里补归档
+      if (syncAutoArchive(file, Object.keys(file.dispatched), ports.rows(), now)) changed = true;
       for (const proposal of Object.values(file.proposals)) {
         const transitioned = transitionProposal(proposal, { type: 'expire' }, now);
         if (!transitioned.changed) continue;
@@ -1120,6 +1190,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       syncLinkedTodos(ports, file, ports.rows(), new Set());
       ports.publish();
       flush(now);
+    },
+
+    sweepAutoArchive(now = ports.now()) {
+      if (!ports.enabled()) return;
+      const file = withEventStamps(ports.file());
+      if (!syncAutoArchive(file, Object.keys(file.dispatched), ports.rows(), now)) return;
+      ports.save(file);
+      ports.publish();
     },
 
     recover() {
@@ -1191,6 +1269,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       // 一次性任务错过就在启动时补投一次
       if (fireSchedules(file, now)) changed = true;
+      // 升级前已经完成、还堆在活跃中的派出会话：启动时补归档一次
+      if (syncAutoArchive(file, Object.keys(file.dispatched), ports.rows(), now)) changed = true;
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
       if (changed || todosChanged) ports.publish();

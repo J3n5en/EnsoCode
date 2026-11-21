@@ -92,7 +92,7 @@ import {
 } from '@/components/chat/reloadConversationAction';
 import { NodeSwitcher } from '@/components/nodes/NodeSwitcher';
 import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
-import { SecretaryOriginBadge } from '@/components/secretary/SecretaryOriginBadge';
+import { SecretaryOriginBadge, showsMutedBell } from '@/components/secretary/SecretaryOriginBadge';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import {
   type RunningOrigins,
@@ -2701,7 +2701,7 @@ interface ConversationRowProps {
     /** 手动重读在途（菜单项禁用 + 图标转圈） */
     reloading?: boolean;
     /** 由秘书派出；只用于显示标记，权限判断不读它 */
-    secretaryOrigin?: { secretaryConversationId: string };
+    secretaryOrigin?: { secretaryConversationId: string; secretaryId?: string };
   };
   active: boolean;
   locale: Parameters<typeof formatRelativeTime>[1];
@@ -2869,7 +2869,7 @@ function ConversationRow({
               )}
             </span>
           )}
-          {muted && !renaming && (
+          {showsMutedBell(muted, conversation.secretaryOrigin !== undefined) && !renaming && (
             <BellOff
               className="h-3 w-3 shrink-0 text-subtle-foreground"
               aria-label={t('Muted')}
@@ -2877,7 +2877,12 @@ function ConversationRow({
             />
           )}
         </div>
-        {conversation.secretaryOrigin && <SecretaryOriginBadge />}
+        {conversation.secretaryOrigin && (
+          <SecretaryOriginBadge
+            secretaryId={conversation.secretaryOrigin.secretaryId}
+            muted={muted}
+          />
+        )}
         {!conversation.secretaryOrigin && takenOver && <SecretaryTakeoverBadge />}
         {isolated && worktree && <WorktreeBadge worktree={worktree} status={worktreeStatus} />}
         <SessionTabCounts conversationId={id} />
