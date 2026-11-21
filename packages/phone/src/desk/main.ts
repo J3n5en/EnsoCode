@@ -1,5 +1,12 @@
 import { normalizeRelayUrl } from '@enso/pair';
 import type { RemoteBridge, RemoteFrameKind } from '@shared/remoteBridge';
+import {
+  cachedRemoteImage,
+  pruneRemoteImages,
+  rehydrateImages,
+  snapshotImage,
+  storeRemoteImage,
+} from '@shared/remoteImageCache';
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
@@ -235,6 +242,7 @@ async function main(): Promise<void> {
   let settingsLoaded = false;
   let snapshot: HTMLIFrameElement | null = null;
   let snapshotTimer: ReturnType<typeof setInterval> | null = null;
+  let snapshotBlobs: string[] = [];
 
   let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
   const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
@@ -441,6 +449,25 @@ async function main(): Promise<void> {
     return tunnel.fetchAsset(path);
   };
 
+  /** 按版本寻址的图取到过就留本地副本：冷启动不等桌面，桌面那边换了图地址会变 */
+  const deskImageUrl = (path: string) =>
+    `${location.origin}/desk/li/${encodeURIComponent(device.pairId)}/${path.slice(3)}`;
+  const fetchDeskImage = async (path: string): Promise<DeskAsset> => {
+    const url = deskImageUrl(path);
+    const hit = await withTimeout(
+      cachedRemoteImage(caches, url).catch(() => undefined),
+      STORAGE_TIMEOUT_MS,
+      undefined
+    );
+    if (hit) {
+      const mime = hit.headers.get('content-type') ?? 'application/octet-stream';
+      return { status: 200, mime, body: new Uint8Array(await hit.arrayBuffer()) };
+    }
+    const asset = await fetchDeskAsset(path);
+    void storeRemoteImage(caches, url, asset).catch(() => {});
+    return asset;
+  };
+
   navigator.serviceWorker.addEventListener('message', (event) => {
     const data = event.data as { type?: unknown; path?: unknown; sessionId?: unknown } | null;
     if (data?.type === 'open-session') {
@@ -450,7 +477,8 @@ async function main(): Promise<void> {
     }
     const port = event.ports[0];
     if (data?.type !== 'desk-fetch' || typeof data.path !== 'string' || !port) return;
-    void fetchDeskAsset(data.path).then((asset) => {
+    const path = data.path;
+    void (path.startsWith('li/') ? fetchDeskImage(path) : fetchDeskAsset(path)).then((asset) => {
       const body = asset.body.slice().buffer;
       port.postMessage({ status: asset.status, mime: asset.mime, body }, [body]);
     });
@@ -491,11 +519,29 @@ async function main(): Promise<void> {
     }
     const el = snapshot;
     snapshot = null;
+    const blobs = snapshotBlobs;
+    snapshotBlobs = [];
     syncing = false;
     renderStatus();
-    if (!el) return;
+    const release = () => {
+      el?.remove();
+      for (const url of blobs) URL.revokeObjectURL(url);
+    };
+    if (!el) {
+      release();
+      return;
+    }
     el.style.opacity = '0';
-    setTimeout(() => el.remove(), 200);
+    setTimeout(release, 200);
+  };
+
+  /** 快照里的远程图换成本地副本；没有副本的去掉，不显示裂图（快照不跑脚本，也可能不经 SW） */
+  const localSnapshotImage = async (src: string): Promise<string | null> => {
+    const hit = await snapshotImage(caches, new URL(src, location.origin).href);
+    if (!hit) return null;
+    const url = URL.createObjectURL(await hit.blob());
+    snapshotBlobs.push(url);
+    return url;
   };
 
   /** 先盖上次的界面，renderer 拿到设置且内容基本追上（或稳定下来）再揭开 */
@@ -510,8 +556,18 @@ async function main(): Promise<void> {
       clearInterval(snapshotTimer);
       snapshotTimer = null;
     }
+    const html = snapshot
+      ? ''
+      : await rehydrateImages(saved.html, (src) =>
+          withTimeout(
+            localSnapshotImage(src).catch(() => null),
+            STORAGE_TIMEOUT_MS,
+            null
+          )
+        );
+    if (!iframes.main) return;
     if (!snapshot) {
-      const mounted = mountSnapshot(frames, saved.html);
+      const mounted = mountSnapshot(frames, html);
       snapshot = mounted;
       await new Promise<void>((resolve) => {
         const done = () => {
@@ -635,6 +691,10 @@ async function main(): Promise<void> {
     `${DESK_CACHE_PREFIX}${current.version}`,
     devices.map((d) => d.pairId)
   );
+  void pruneRemoteImages(
+    caches,
+    devices.map((d) => d.pairId)
+  ).catch(() => {});
 
   // 上一次启动的构建保留到下次：升级时 SW 从中复用内容未变的带指纹文件
   const keep = new Set([current.version, cached?.version].map((v) => `${DESK_CACHE_PREFIX}${v}`));
