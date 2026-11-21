@@ -2,6 +2,7 @@ import { readdirSync, rmdirSync, rmSync, statSync, unlinkSync, utimesSync } from
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isMediaId } from '@shared/bots/sendImage';
+import { SECRETARY_IMAGES_REL } from '@shared/resources';
 import type { InboundImageRejection } from '@shared/secretary/inboundImages';
 import { storeMedia } from '../bots/media';
 
@@ -19,7 +20,7 @@ const PENDING_GRACE_MS = 10 * 60 * 1000;
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function secretaryImagesRoot(userData: string): string {
-  return path.join(userData, 'bot-chats', 'secretary-images');
+  return path.join(userData, ...SECRETARY_IMAGES_REL.split('/'));
 }
 
 export type SavedInboundImage =
@@ -73,19 +74,31 @@ export interface PruneOptions {
   quota?: number;
 }
 
-/** 一个会话目录的清理；仍被引用的文件永远不删。返回删掉的文件名 */
-export function pruneConversationImages(dir: string, options: PruneOptions): string[] {
+export interface PruneResult {
+  removed: string[];
+  freed: number;
+  /** 留下的文件数（被引用、未过期或删除失败） */
+  kept: number;
+  failed: number;
+}
+
+/** 一个会话目录的清理；仍被引用的文件永远不删 */
+export function pruneConversationImages(dir: string, options: PruneOptions): PruneResult {
   const retention = options.retentionMs ?? INBOUND_IMAGE_RETENTION_MS;
   const quota = options.quota ?? INBOUND_IMAGE_DIR_QUOTA;
   const removable = (image: ImageFile) =>
     options.now - image.mtimeMs > PENDING_GRACE_MS && !options.referenced(image.name);
   const removed: string[] = [];
+  let freed = 0;
+  let failed = 0;
   const drop = (image: ImageFile): boolean => {
     try {
       unlinkSync(image.file);
       removed.push(image.name);
+      freed += image.size;
       return true;
     } catch {
+      failed += 1;
       return false;
     }
   };
@@ -96,17 +109,28 @@ export function pruneConversationImages(dir: string, options: PruneOptions): str
     );
   }
   let total = images.reduce((sum, image) => sum + image.size, 0);
+  let kept = images.length;
   if (total > quota) {
     const oldest = images.filter(removable).sort((a, b) => a.mtimeMs - b.mtimeMs);
     for (const image of oldest) {
       if (total <= quota) break;
-      if (drop(image)) total -= image.size;
+      if (drop(image)) {
+        total -= image.size;
+        kept -= 1;
+      }
     }
   }
   try {
     if (readdirSync(dir).length === 0) rmdirSync(dir);
   } catch {}
-  return removed;
+  return { removed, freed, kept, failed };
+}
+
+export interface SweepStats {
+  freed: number;
+  removed: number;
+  skipped: number;
+  failed: number;
 }
 
 function dirUsage(dir: string): number {
@@ -158,28 +182,39 @@ export class SecretaryImageStore {
     }
   }
 
-  /** 启动时扫一次全部会话目录 */
-  async sweep(): Promise<void> {
+  /** 启动时与设置页「清理」共用：扫全部会话目录 */
+  async sweep(): Promise<SweepStats> {
+    const stats: SweepStats = { freed: 0, removed: 0, skipped: 0, failed: 0 };
     let ids: string[];
     try {
       ids = readdirSync(this.deps.root).filter((name) => CONVERSATION_ID.test(name));
     } catch {
-      return;
+      return stats;
     }
     for (const id of ids) {
+      const dir = path.join(this.deps.root, id);
       try {
         const referenced = await this.deps.references(id);
-        if (!referenced) continue;
-        const removed = pruneConversationImages(path.join(this.deps.root, id), {
+        if (!referenced) {
+          stats.skipped += listImages(dir).length;
+          continue;
+        }
+        const result = pruneConversationImages(dir, {
           now: this.now(),
           referenced,
           ...this.limits(),
         });
-        if (removed.length) this.log(`swept ${removed.length} file(s) from ${id}`);
+        stats.freed += result.freed;
+        stats.removed += result.removed.length;
+        stats.skipped += result.kept;
+        stats.failed += result.failed;
+        if (result.removed.length) this.log(`swept ${result.removed.length} file(s) from ${id}`);
       } catch (error) {
+        stats.failed += 1;
         this.log(`sweep ${id} failed: ${String(error)}`);
       }
     }
+    return stats;
   }
 
   private enforceQuota(conversationId: string, dir: string): void {

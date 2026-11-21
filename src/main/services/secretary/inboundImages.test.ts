@@ -119,7 +119,8 @@ describe('SecretaryImageStore 清理', () => {
     age(referenced as string, 30);
     age(fresh as string, 6);
     refs.add(basename(referenced as string));
-    await store.sweep();
+    // 设置页「清理」与启动扫描共用 sweep：统计供提示用
+    expect(await store.sweep()).toEqual({ freed: 32, removed: 1, skipped: 2, failed: 0 });
     expect(existsSync(old as string)).toBe(false);
     expect(existsSync(referenced as string)).toBe(true);
     expect(existsSync(fresh as string)).toBe(true);
@@ -130,7 +131,7 @@ describe('SecretaryImageStore 清理', () => {
     const [saved] = store.saveAll(CONV, [png(1)]);
     if (!saved?.ok) throw new Error('not saved');
     age(saved.path, 30);
-    await store.sweep();
+    expect(await store.sweep()).toEqual({ freed: 0, removed: 0, skipped: 1, failed: 0 });
     expect(existsSync(saved.path)).toBe(true);
   });
 

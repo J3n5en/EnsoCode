@@ -30,6 +30,7 @@ import {
 import { resolveWorktreeRoot } from '@shared/worktreeRoot';
 import { readSettings } from '../ipc/settings';
 import { partitionName } from './browserPartition';
+import { getSecretaryImageStore } from './secretary/inboundImages';
 import type { ScanRootSpec, StorageWorkerData, StorageWorkerMessage } from './storageScanWorker';
 import { localUi } from './uiHost';
 
@@ -496,6 +497,13 @@ export async function cleanStorage(category: StorageCategoryId): Promise<Storage
       stats = await removeFiles(category);
       await pruneEmptyToolOutputDirs();
       break;
+    case 'secretaryImages': {
+      // 与启动清理同一套规则：仍被消息引用的不删
+      const store = getSecretaryImageStore();
+      if (!store) throw new Error('Secretary image store is not ready');
+      stats = await store.sweep();
+      break;
+    }
     default:
       throw new Error(`Category ${category} is not cleanable`);
   }
