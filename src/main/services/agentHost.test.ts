@@ -923,6 +923,71 @@ describe('resolveAgentTypeSpawnConfig 类型级推理预设', () => {
     expect(resolved.config).not.toHaveProperty('reasoning');
     expect(resolved.config).not.toHaveProperty('thinkingLevel');
   });
+
+  it('follow 不绑模型，类型级思考档仍下发，模型用父会话的', () => {
+    settingsMock.value = {
+      'enso-settings': {
+        version: 99,
+        state: {
+          providers: [
+            {
+              id: 'p1',
+              name: 'p1',
+              api: 'anthropic-messages',
+              apiKey: 'key-p1',
+              baseUrl: 'https://p1.test',
+              enabled: true,
+              models: [{ id: 'strong' }],
+            },
+          ],
+          agentTypes: [
+            {
+              id: TYPE_ID,
+              name: 'cheap-scout',
+              description: 'Cheap scout',
+              systemPrompt: 'Be quick.',
+              tools: 'readonly',
+              modelMode: 'follow',
+              reasoning: 'on',
+              thinkingLevel: 'low',
+            },
+          ],
+        },
+      },
+    };
+    const parent = resolveModelSelection('p1', 'strong', new Set());
+    if (!parent.ok) throw new Error(parent.error);
+    const resolved = resolveAgentTypeSpawnConfig(`custom:${TYPE_ID}`, parent.selection, new Set());
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.expectedModel).toEqual({ providerId: 'p1', modelId: 'strong' });
+    expect(resolved.config).toMatchObject({
+      reasoning: 'on',
+      thinkingLevel: 'low',
+      model: { modelId: 'strong' },
+    });
+    expect(
+      configuredAgentTypes(new Set()).find((entry) => entry.name === 'cheap-scout')
+    ).toMatchObject({
+      reasoning: 'on',
+      thinkingLevel: 'low',
+      allowModelOverride: false,
+    });
+    expect(
+      configuredAgentTypes(new Set()).find((entry) => entry.name === 'cheap-scout')?.model
+    ).toBeUndefined();
+  });
+
+  it('agent_pick 里已经存着的思考档下发时不改写', () => {
+    setTypeSettings({ modelMode: 'agent_pick', reasoning: 'on', thinkingLevel: 'low' });
+    expect(
+      configuredAgentTypes(new Set(), true).find((entry) => entry.name === 'deep-scout')
+    ).toMatchObject({
+      reasoning: 'on',
+      thinkingLevel: 'low',
+      allowModelOverride: true,
+    });
+  });
 });
 
 describe('resolveAgentTypeSpawnConfig 虚拟模型绑定', () => {

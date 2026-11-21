@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  fitChildReasoningToModel,
   parseModelThinkingRef,
   pickChildReasoningOverride,
   resolveChildReasoning,
@@ -42,6 +43,29 @@ describe('resolveChildReasoning', () => {
       enabled: false,
       level: 'off',
     });
+  });
+});
+
+describe('fitChildReasoningToModel', () => {
+  it('模型不支持思考时关掉，不把类型档强行打开', () => {
+    expect(fitChildReasoningToModel({ enabled: true, level: 'low' }, { reasoning: false })).toEqual(
+      { enabled: false, level: 'off' }
+    );
+  });
+
+  it('档位超出模型声明时钳到可用档，不抛错', () => {
+    expect(
+      fitChildReasoningToModel(
+        { enabled: true, level: 'high' },
+        { reasoning: true, thinkingLevelMap: { medium: null, high: null } }
+      )
+    ).toEqual({ enabled: true, level: 'low' });
+  });
+
+  it('没有档位表时保持决定，交给 pi 自己钳', () => {
+    expect(
+      fitChildReasoningToModel({ enabled: true, level: 'xhigh' }, { reasoning: true })
+    ).toEqual({ enabled: true, level: 'xhigh' });
   });
 });
 
