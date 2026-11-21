@@ -5,13 +5,14 @@ import type { ManualInstall, UpdateStatus } from '@shared/types/updater';
 import { applyUpdateChannel, type UpdateChannel } from '@shared/updater/channel';
 import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog, autoUpdater as nativeAutoUpdater } from 'electron';
 import electronUpdater from 'electron-updater';
 import { waitWithExitDialog } from '../../ipc/appRestart';
 import { needsQuitCheckpoint } from '../../ipc/sessionIndex';
-import { flushSettings, writeTrayReenterAfterUpdate } from '../../ipc/settings';
+import { flushSettings, readLocale, writeTrayReenterAfterUpdate } from '../../ipc/settings';
 import { sendToWindow } from '../../windows/createAppWindow';
 import { cancelAgentQuitCheckpoint, prepareAgentWorkerForQuit } from '../agentHost';
+import { quitWatchdog } from '../appQuitWatchdog';
 import { markExitForUpdate } from '../exitInterruptHost';
 import { IdleRestartGate } from './idleRestartGate';
 import { currentIdleRestartObservation } from './idleRestartSnapshot';
@@ -108,6 +109,7 @@ class AutoUpdaterService {
       this.notifyIdleStateChanged();
     });
     autoUpdater.on('error', (error) => {
+      const installing = this.quittingForUpdate;
       const manualInstall =
         this.localBuild && isCodeSignatureError(error.message)
           ? this.fallBackToManualInstall()
@@ -117,7 +119,12 @@ class AutoUpdaterService {
         error: error.message,
         ...(manualInstall ? { manualInstall } : {}),
       });
+      if (installing) this.recoverFailedInstall(error.message);
     });
+    // Squirrel 接手后先关全部窗口、再发 before-quit：安全点已过，收尾期限收紧
+    nativeAutoUpdater.on('before-quit-for-update', () =>
+      quitWatchdog.step('安装更新：关闭所有窗口', { finishing: true })
+    );
 
     autoUpdater.autoDownload = autoUpdateEnabled;
 
@@ -188,6 +195,28 @@ class AutoUpdaterService {
     return manualInstallFor(this.availableInfo, process.arch);
   }
 
+  /** 安装更新途中出错（窗口可能已被 quitAndInstall 关掉）：撤掉退出流程，恢复主窗口并说明原因 */
+  private recoverFailedInstall(message: string): void {
+    if (this.quittingForUpdate) {
+      this.quittingForUpdate = false;
+      cancelAgentQuitCheckpoint();
+    }
+    quitWatchdog.cancel();
+    this.idleGate.markFailed();
+    this.clearIdleTimer();
+    writeTrayReenterAfterUpdate(false);
+    void import('../appServerMode')
+      .then(({ leaveServerMode }) => {
+        leaveServerMode();
+        const text = readLocale() === 'zh' ? `重启失败：${message}` : `Restart failed: ${message}`;
+        const win = BrowserWindow.getFocusedWindow();
+        return win && !win.isDestroyed()
+          ? dialog.showMessageBox(win, { type: 'error', message: text })
+          : dialog.showMessageBox({ type: 'error', message: text });
+      })
+      .catch((error: unknown) => console.error('[updater] 恢复窗口失败:', error));
+  }
+
   private applyAutoDownload(): void {
     const auto = this.autoUpdateEnabled && !this.manualInstallOnly;
     autoUpdater.autoDownload = auto;
@@ -236,6 +265,7 @@ class AutoUpdaterService {
   private async quitAndInstall(): Promise<void> {
     if (!this.updateDownloaded) return;
     this.quittingForUpdate = true;
+    quitWatchdog.begin('update', '等 agent 安全点');
     // 退出记录要写明是安装更新：会话里的系统提示据此说清原因
     markExitForUpdate();
     // 与应用退出同一套：先等 agent worker 到安全点、断点与恢复清单落盘，再交给 electron-updater。
@@ -250,10 +280,12 @@ class AutoUpdaterService {
       })
     );
     try {
+      quitWatchdog.step('等 Squirrel 接手安装');
       autoUpdater.quitAndInstall();
     } catch (error) {
       // 没退成：worker 已停在安全点，撤掉清单并按断点换代接着跑
       cancelAgentQuitCheckpoint();
+      quitWatchdog.cancel();
       throw error;
     }
   }
