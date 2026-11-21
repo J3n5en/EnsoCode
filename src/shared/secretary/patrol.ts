@@ -26,6 +26,11 @@ export interface PatrolFacts {
   result?: SecretaryResultKind;
   /** 最后一条消息：已经是完成汇报就不用再催 */
   lastText?: string;
+  /**
+   * 秘书最近一次发消息后还没有可见回复：超过空闲阈值就算停住。
+   * 只对发过消息的会话有值；等用户、等审批、有后台任务的上游已排除。
+   */
+  awaitingReplySince?: number;
 }
 
 export interface PatrolAnomaly {
@@ -95,6 +100,15 @@ export function patrolAnomalies(facts: readonly PatrolFacts[], now: number): Pat
     }
     if (entry.state !== 'idle') continue;
     if (entry.pending > 0) continue;
+    // 秘书发过消息、之后没有任何可见回复：与 goal 空闲停住共用同一个空闲阈值
+    if (
+      entry.awaitingReplySince !== undefined &&
+      now - entry.awaitingReplySince >= PATROL_IDLE_GOAL_MS &&
+      !reported(entry, IDLE_REASONS)
+    ) {
+      out.push({ conversationId: entry.conversationId, reason: 'goal-idle-stalled' });
+      continue;
+    }
     if (!entry.goalStatus || !LIVE_GOALS.has(entry.goalStatus)) continue;
     if (entry.result !== undefined && SETTLED.has(entry.result)) continue;
     // goal 会话空闲只有两种正常情况：在等后台任务，或者已经收口。
@@ -133,11 +147,15 @@ export function patrolStallDetail(input: {
   goalStatus?: string;
   backgroundRunning?: boolean;
   lastText?: string;
+  /** 发了消息后一直没有可见回复：文案说「没有任何回复」而不是「目标没完成」 */
+  awaitingReply?: boolean;
 }): string {
   const minutes = Math.max(1, Math.round(input.idleMinutes));
   const head =
     input.reason === 'goal-idle-stalled'
-      ? `自动巡检：目标还没完成，会话却已空闲 ${minutes} 分钟`
+      ? input.awaitingReply
+        ? `自动巡检：发了消息后 ${minutes} 分钟没有任何回复`
+        : `自动巡检：目标还没完成，会话却已空闲 ${minutes} 分钟`
       : input.reason === 'idle-stalled'
         ? `自动巡检：空闲超过 ${minutes} 分钟，目标还没完成，也没有待处理项`
         : `自动巡检：运行超过 ${minutes} 分钟没有任何事件`;

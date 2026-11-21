@@ -51,6 +51,7 @@ describe('secretary tools', () => {
       items: { type: 'string' },
     });
     expect(send.required).toEqual(['conversationId', 'message']);
+    expect(send.properties.goal).toMatchObject({ type: 'string', maxLength: 4000 });
     const stop = schemaOf('session_stop');
     expect(stop.properties.clearQueue).toMatchObject({ type: 'boolean' });
     expect(stop.required).toEqual(['conversationId']);

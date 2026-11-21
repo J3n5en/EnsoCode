@@ -63,8 +63,9 @@ import {
   type ResultEvent,
   reportLastText,
   SETTLED_RESULTS,
-  sessionStateOf,
+  sessionLiveState,
   shouldNotify,
+  silentFinishDetail,
   skipsUpdateWindow,
   stalled,
   UPDATE_WINDOW_MS,
@@ -176,6 +177,25 @@ function assistantTextOf(event: RendererAgentEvent): string | undefined {
   return event.digest?.assistantText;
 }
 
+/**
+ * 这一下有没有可见的回复：助手写出了文字，或调用了工具。
+ * 秘书发消息后的无回复兜底只认这两种；状态、心跳之类的事件不算回复。
+ */
+function visibleReply(event: RendererAgentEvent): boolean {
+  if (event.type === 'turn-completed') {
+    return Boolean(event.digest?.assistantText?.trim() || event.digest?.lastTool);
+  }
+  if (event.type !== 'message-upsert') return false;
+  const message = event.message;
+  if (message.role === 'toolResult') return true;
+  if (message.role !== 'assistant') return false;
+  return message.content.some(
+    (part) =>
+      (part.type === 'text' && part.text.trim().length > 0) ||
+      (part.type === 'toolCall' && part.name.trim().length > 0)
+  );
+}
+
 function resultEventOf(
   event: RendererAgentEvent,
   row: Record<string, unknown> | undefined
@@ -183,10 +203,13 @@ function resultEventOf(
   switch (event.type) {
     case 'turn-completed': {
       const goalStatus = goalStatusOf(row);
+      // 整轮没有任何文字回复、最后一步是工具调用：静默收工
+      const lastTool = event.digest?.assistantText?.trim() ? undefined : event.digest?.lastTool;
       return {
         type: 'turn-completed',
         ...(event.aborted ? { aborted: true } : {}),
         ...(goalStatus ? { goalStatus } : {}),
+        ...(lastTool ? { silentFinish: lastTool } : {}),
       };
     }
     case 'turn-failed':
@@ -729,8 +752,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       delete record.patrol;
       changed = true;
     }
-    const live = records.filter((record) =>
-      countsAsRunning(record, rows[record.conversationId], statuses[record.conversationId])
+    const live = records.filter(
+      (record) =>
+        countsAsRunning(record, rows[record.conversationId], statuses[record.conversationId]) ||
+        // 发过消息后没有任何可见回复：记录还标着运行中，但会话其实已空闲，
+        // 不在「在跑」口径里，3 分钟兜底仍要看着它
+        (record.sentAt !== undefined &&
+          statuses[record.conversationId]?.state === 'idle' &&
+          (statuses[record.conversationId]?.pendingAsks ?? 0) +
+            (statuses[record.conversationId]?.pendingApprovals ?? 0) ===
+            0)
     );
     // 没有进行中的会话：巡检自己停下，等下一次有活再重新计时
     if (live.length === 0) {
@@ -743,7 +774,9 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     const facts: PatrolFacts[] = live.map((record) => {
       const status = statuses[record.conversationId];
       const row = rows[record.conversationId];
-      const state = sessionStateOf(record, row, status);
+      // 巡检看真实状态：刚发过消息时记录标着 running，但会话其实已空闲，
+      // 用 sessionStateOf 会把它报成运行中，3 分钟的无回复兜底就永远等不到
+      const state = sessionLiveState(row, status);
       const goalStatus = goalStatusOf(row);
       return {
         conversationId: record.conversationId,
@@ -757,6 +790,11 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         stallReported: record.stalledTurn === record.turn,
         ...(record.lastResult ? { result: record.lastResult.kind } : {}),
         ...(record.lastText ? { lastText: record.lastText } : {}),
+        ...(record.sentAt !== undefined &&
+        record.sentAt >= record.lastEventAt &&
+        record.backgroundRunning !== true
+          ? { awaitingReplySince: record.sentAt }
+          : {}),
       };
     });
     for (const anomaly of patrolAnomalies(facts, now)) {
@@ -775,6 +813,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           ...(goalStatus ? { goalStatus } : {}),
           backgroundRunning: record.backgroundRunning === true,
           ...(record.lastText ? { lastText: record.lastText } : {}),
+          awaitingReply: record.sentAt !== undefined && record.sentAt >= record.lastEventAt,
         })
       );
       changed = true;
@@ -958,6 +997,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         const turnReport = own && event.type === 'turn-completed' ? event.report : undefined;
         const lastText = capLastText(report);
         if (lastText) record.lastText = lastText;
+        // 有了可见回复：助手文字，或任何工具调用。发消息后的无回复兜底到此为止
+        if (own && visibleReply(event)) delete record.sentAt;
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
         // 这一轮结束就不再是「被唤起、还没收尾」：之后按空闲状态判定
@@ -979,6 +1020,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             resultEvent.goalCompleted = true;
           }
           if (resultEvent) kind = classify(record, resultEvent, status);
+          if (resultEvent?.type === 'turn-completed' && resultEvent.silentFinish)
+            detail = silentFinishDetail(resultEvent.silentFinish);
           if (resultEvent?.type === 'turn-interrupted')
             detail = interruptReason({
               at: resultEvent.at,

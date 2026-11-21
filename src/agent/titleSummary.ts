@@ -216,9 +216,22 @@ export function buildTurnDigest(
 
   const conclusion = turnConclusion(turn);
   const assistantText = conclusion ? textOf(conclusion).slice(-TURN_DIGEST_ASSISTANT_MAX) : '';
+  // 整轮没有任何文字回复：记下最后一个工具，秘书据此把静默收工当成异常。
+  // 有文字结论时不带，正常收工不能被误报。
+  const lastTool = conclusion ? undefined : lastToolOf(turn);
 
-  if (!userText && !assistantText) return null;
-  return { firstUserText, userText, assistantText };
+  if (!userText && !assistantText && !lastTool) return null;
+  return { firstUserText, userText, assistantText, ...(lastTool ? { lastTool } : {}) };
+}
+
+/** 本轮最后一个工具调用：名字取工具结果上的 toolName，成败看 isError */
+function lastToolOf(turn: ProjectedMessage[]): { name: string; ok: boolean } | undefined {
+  for (let index = turn.length - 1; index >= 0; index -= 1) {
+    const message = turn[index];
+    if (message.role !== 'toolResult' || !message.toolName) continue;
+    return { name: message.toolName, ok: message.isError !== true };
+  }
+  return undefined;
 }
 
 function turnConclusion(turn: ProjectedMessage[]): ProjectedMessage | undefined {

@@ -545,6 +545,8 @@ function parseRecord(value: unknown): DispatchRecord | undefined {
   if (autoArchivedAt !== undefined) record.autoArchivedAt = autoArchivedAt;
   const autoArchiveResultAt = time(value.autoArchiveResultAt);
   if (autoArchiveResultAt !== undefined) record.autoArchiveResultAt = autoArchiveResultAt;
+  const sentAt = time(value.sentAt);
+  if (sentAt !== undefined) record.sentAt = sentAt;
   if (
     isObject(value.patrol) &&
     PATROL_REASONS.includes(value.patrol.reason as PatrolReason) &&
