@@ -3725,7 +3725,9 @@ export const zhTranslations: Record<string, string> = {
   'Takeover granted': '已授权接管',
   'Takeover revoked': '已撤销接管',
   'The secretary has not saved anything yet.': '秘书还没有保存任何记忆。',
-  'Dispatched by {{name}}': '由{{name}}派出',
+  'Dispatched by {{name}}': '由 {{name}} 派出',
+  'Dispatched by a deleted secretary': '由已删除的秘书派出',
+  '{{label}} · muted': '{{label}} · 已静音',
   'Set up your secretary': '设置你的秘书',
   'Open secretary': '打开秘书',
   'Only when the secretary agent is enabled in Experimental settings':
@@ -4023,6 +4025,12 @@ export const zhTranslations: Record<string, string> = {
   'Stop suspected idle leftover tasks': '停止疑似闲置的遗留任务',
   Status: '状态',
   'Done ({{count}} kept tasks)': '已完成（保留 {{count}} 个任务）',
+  'This session no longer exists, or you do not have access to it':
+    '这条会话已不存在，或你没有权限查看',
+  'This session is archived. Restore it from the archive to view it.':
+    '这条会话已归档，从归档里恢复后才能查看',
+  'Needs your approval or answer': '等你审批或回答',
+  'Back to secretary': '返回秘书',
 };
 
 export function normalizeLocale(input?: string): Locale {

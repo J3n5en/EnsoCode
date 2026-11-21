@@ -379,6 +379,13 @@ export interface DispatchRecord {
    * 新结果、重新派出或手动标记完成都会清掉它。
    */
   dismissedFromBoard?: true;
+  /**
+   * goal-complete 收口后由 Main 自动归档的时刻，等于会话行上的 archivedAt：
+   * 只有对得上时才算自动归档，被唤醒才自动恢复；用户手动归档的对不上，不碰。
+   */
+  autoArchivedAt?: number;
+  /** 已经自动归档过的那次结果（lastResult.at）：用户手动取消归档后，同一次结果不再归档 */
+  autoArchiveResultAt?: number;
   /** 已经报过的巡检异常：同一会话同一原因只推一次，恢复后清除 */
   patrol?: { reason: PatrolReason; turn: number; at: number };
 }

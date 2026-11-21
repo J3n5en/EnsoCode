@@ -105,8 +105,12 @@ vi.mock('@/components/ui/menu', () => {
     if (onClick) harness.menuItemClicks.push(onClick);
     return createElement('div', null, children);
   };
-  const MenuTrigger = ({ children, title }: WrapperProps & { title?: string }) =>
-    createElement('button', { type: 'button', title }, children);
+  const MenuTrigger = ({
+    children,
+    title,
+    className,
+  }: WrapperProps & { title?: string; className?: string }) =>
+    createElement('button', { type: 'button', title, className }, children);
   return {
     Menu,
     MenuGroup: Wrap,
@@ -1296,5 +1300,111 @@ describe('model picker 打开时滚到当前渠道', () => {
     const list = navList() as HTMLElement;
     const target = navItem('__custom:gateway');
     expect(scrollWrites).toEqual([{ el: list, value: centeredScrollTop(list, target) }]);
+  });
+});
+
+describe('ModelPicker 窄屏 compact 触发器', () => {
+  const auto: VirtualModelEntry = {
+    id: 'auto',
+    name: 'Auto',
+    enabled: true,
+    primary: { providerId: 'api', modelId: 'model' },
+    fallbacks: [],
+  };
+  const doc = (html: string) =>
+    parseHTML(`<!doctype html><html><body>${html}</body></html>`).document;
+  const trigger = (html: string) => doc(html).querySelector('button[title]') as HTMLElement;
+  const label = (html: string) =>
+    doc(html).querySelector('[data-model-picker-label]')?.textContent ?? null;
+
+  it('虚拟模型窄屏只显示虚拟名，成员名留在 title 与弹层当前项里', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: 'auto',
+        virtualModels: [auto],
+        routedModelLabel: 'claude-opus-5-5',
+      })
+    );
+    expect(label(html)).toBe('Auto');
+    expect(trigger(html).getAttribute('title')).toBe('Auto · claude-opus-5-5');
+    expect(doc(html).querySelector('[data-model-picker-routed]')?.textContent).toBe(
+      'claude-opus-5-5'
+    );
+  });
+
+  it('桌面（非 compact）仍显示「虚拟名 · 成员名」，弹层不额外列成员', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        providerId: VIRTUAL_PROVIDER_ID,
+        modelId: 'auto',
+        virtualModels: [auto],
+        routedModelLabel: 'claude-opus-5-5',
+      })
+    );
+    expect(label(html)).toBe('Auto · claude-opus-5-5');
+    expect(doc(html).querySelector('[data-model-picker-routed]')).toBeNull();
+    expect(trigger(html).className).toContain('max-w-64');
+    expect(doc(html).body.firstElementChild?.className ?? '').not.toContain('max-w-[10rem]');
+  });
+
+  it('单个长模型名窄屏限宽单行截断，推理档位与箭头不参与截断', () => {
+    const long = 'claude-opus-4-1-20250805-thinking-extended-preview';
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        providers: [{ ...providers[0], models: [{ id: 'model', label: long }] }],
+      })
+    );
+    const button = trigger(html);
+    expect(button.getAttribute('title')).toBe(long);
+    expect(doc(html).body.firstElementChild?.className).toContain('max-w-[10rem]');
+    // 可收缩但有下限：档位与箭头始终留在芯片内
+    expect(doc(html).body.firstElementChild?.className).toContain('min-w-[4.5rem]');
+    expect(button.className).not.toContain('max-w-64');
+    const span = doc(html).querySelector('[data-model-picker-label]') as HTMLElement;
+    expect(span.textContent).toBe(long);
+    expect(span.className).toContain('truncate');
+    expect(span.className).toContain('min-w-0');
+    const thinking = doc(html).querySelector('[data-trigger-thinking]') as HTMLElement;
+    expect(thinking.className).toContain('shrink-0');
+    expect(thinking.textContent).toBe('Med');
+  });
+
+  it('账号池模型窄屏去掉渠道前缀，完整名留在 title', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        providers: [
+          {
+            ...providers[0],
+            name: 'ChatGPT (automatic failover)',
+            oauthAccountKey: 'openai-codex',
+            oauthAccountPool: { accountKeys: ['openai-codex', 'openai-codex#2'] },
+          },
+        ],
+      })
+    );
+    expect(label(html)).toBe('Chosen model');
+    expect(trigger(html).getAttribute('title')).toContain('/ Chosen model');
+  });
+
+  it('短模型名、无推理档位时 compact 正常显示且不渲染档位', () => {
+    const html = renderToStaticMarkup(
+      createElement(ModelPicker, {
+        ...commonProps,
+        compact: true,
+        reasoningEnabled: false,
+        providers: [{ ...providers[0], models: [{ id: 'model', label: 'deepseek-v4.1-flash' }] }],
+      })
+    );
+    expect(label(html)).toBe('deepseek-v4.1-flash');
+    expect(doc(html).querySelector('[data-trigger-thinking]')).toBeNull();
+    expect(doc(html).body.firstElementChild?.className).toContain('min-w-[2.75rem]');
   });
 });

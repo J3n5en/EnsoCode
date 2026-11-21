@@ -1,3 +1,4 @@
+import { clampProjectThinkingLevel, supportedProjectThinkingLevels } from '@shared/modelThinking';
 import type { ThinkingLevel } from '@shared/types/agent';
 import { THINKING_LEVELS } from '@shared/types/agent';
 import type { ModelReasoningOverride, ModelThinkingLevelOverride } from '@shared/types/llm';
@@ -86,4 +87,27 @@ export function resolveChildReasoning(
     enabled,
     level: enabled ? (override?.thinkingLevel ?? parentLevel ?? 'medium') : 'off',
   };
+}
+
+/**
+ * 把子会话推理决策收进模型实际能力：
+ * 模型明确不支持思考时关掉，不把档位强行打开（否则上游会拒请求）；
+ * 声明了档位表时越界档按 pi 的方向钳位。没有档位表则原样交给 pi。
+ */
+export function fitChildReasoningToModel(
+  decision: { enabled: boolean; level: ThinkingLevel | 'off' },
+  model: {
+    reasoning?: boolean;
+    thinkingLevelMap?: Record<string, string | null | undefined>;
+  }
+): { enabled: boolean; level: ThinkingLevel | 'off' } {
+  if (!decision.enabled || decision.level === 'off' || model.reasoning === false) {
+    return { enabled: false, level: 'off' };
+  }
+  if (!model.thinkingLevelMap) return decision;
+  const supported = supportedProjectThinkingLevels({
+    reasoning: true,
+    thinkingLevelMap: model.thinkingLevelMap,
+  });
+  return { enabled: true, level: clampProjectThinkingLevel(decision.level, supported) };
 }
