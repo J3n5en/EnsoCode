@@ -8,6 +8,7 @@ import { toLocalImageUrl } from '@shared/localImage';
 import { type PlanNoteKind, parsePlanMessage, splitPlanPrefix } from '@shared/planMode';
 import type { MaskReport } from '@shared/privacyMask/report';
 import { parseInboundMessage } from '@shared/secretary/inbound';
+import { splitInboundImageBlock } from '@shared/secretary/inboundImages';
 import {
   goalHeadline,
   type InjectedSegment,
@@ -136,6 +137,7 @@ import { useChatHost } from './chatHost';
 import { compactionFreedPercent } from './contextBreakdown';
 import { EditDiff } from './EditDiff';
 import { renderHighlighted, useChatSearchHighlight } from './highlightQuery';
+import { InboundImageList } from './InboundImageList';
 import { GOAL_FRAME, GoalIcon, NOTICE_BOX, NOTICE_FRAME, NOTICE_ICON } from './injectedVisual';
 import { LocalFileTrigger, Markdown } from './Markdown';
 import { MemoryCaptureResult, MemorySearchResults } from './MemorySearchResults';
@@ -963,14 +965,31 @@ function UserText({
   text,
   searchQuery = '',
   activeNth = -1,
+  thumbnails = 0,
+  align = 'end',
 }: {
   text: string;
   searchQuery?: string;
   activeNth?: number;
+  /** 气泡上方已显示的缩略图张数 */
+  thumbnails?: number;
+  align?: 'start' | 'end';
 }) {
   const { t } = useI18n();
   const host = useChatHost();
   const botHost = Boolean(host?.speaker || host?.botSession);
+  // 秘书贴图时 Main 在正文末尾追加的路径行：不露原文，换成标签 / 提示
+  const attached = splitInboundImageBlock(text);
+  if (attached) {
+    return (
+      <>
+        {attached.text && (
+          <UserText text={attached.text} searchQuery={searchQuery} activeNth={activeNth} />
+        )}
+        <InboundImageList entries={attached.entries} thumbnails={thumbnails} align={align} />
+      </>
+    );
+  }
   // 手机发来的话：卡片展示，正文按 markdown 渲染，不露包裹层
   const inbound = parseInboundMessage(text);
   if (inbound) return <TelegramInboundCard message={inbound} />;
@@ -1240,7 +1259,13 @@ export const TimelineRow = memo(function TimelineRow({
             />
           ))}
           {item.text && (
-            <UserText text={item.text} searchQuery={searchQuery} activeNth={activeNth} />
+            <UserText
+              text={item.text}
+              searchQuery={searchQuery}
+              activeNth={activeNth}
+              thumbnails={item.images.length}
+              align={fromMain ? 'start' : 'end'}
+            />
           )}
           {isCollapsed ? (
             <CollapsedTurnBar

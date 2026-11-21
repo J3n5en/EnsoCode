@@ -2,7 +2,9 @@ import type { ContactLang } from './contact';
 import {
   appendInboundImageLines,
   INBOUND_IMAGE_LINE,
+  type InboundImageEntry,
   type InboundImageLine,
+  parseInboundImageEntries,
   parseInboundImagePaths,
 } from './inboundImages';
 import { wrapUntrusted } from './transcript';
@@ -61,6 +63,8 @@ export interface InboundMessage {
   body: string;
   /** 随消息落盘的图片路径 */
   images?: string[];
+  /** 路径行按固定格式解析的结果，界面据此显示图片标签与未收下提示 */
+  imageLines?: InboundImageEntry[];
 }
 
 const MAX_TITLE = 40;
@@ -220,6 +224,7 @@ export function parseInboundMessage(text: string): InboundMessage | null {
     kind === '私聊' || kind === 'private' ? 'private' : kind ? 'group' : undefined;
   const ids = { chat: idValue(chatId), topic: idValue(topicId), sender: idValue(senderId) };
   const images = parseInboundImagePaths(imageLines);
+  const entries = imageLines ? parseInboundImageEntries(imageLines.slice(1)) : null;
   return {
     channel,
     title,
@@ -234,5 +239,6 @@ export function parseInboundMessage(text: string): InboundMessage | null {
     // 包裹时把闭合标签转义过，展示时还原成用户真正打的字
     body: body.split('<\\/untrusted-content').join('</untrusted-content'),
     ...(images.length ? { images } : {}),
+    ...(entries?.length ? { imageLines: entries } : {}),
   };
 }

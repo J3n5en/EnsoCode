@@ -64,4 +64,16 @@ describe('TelegramInboundCard', () => {
     expect(summary).toContain('标题行');
     expect(summary).not.toContain('正文在这里');
   });
+
+  it('随消息落盘的图片显示成标签，收不下的显示成提示', () => {
+    const html = render(
+      wrapInboundMessage(TELEGRAM_INBOUND, 'zh', {
+        text: '看图',
+        images: [{ path: '/u/bot-chats/secretary-images/c/a.png' }, { rejected: 'not-image' }],
+      })
+    );
+    expect(html).toContain('图片 1');
+    expect(html).toContain('图片 2 未收下：不是 png / jpeg / webp / gif 图片，没有保存');
+    expect(html).not.toContain('[图片');
+  });
 });

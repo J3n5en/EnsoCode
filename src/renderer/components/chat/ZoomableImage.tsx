@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuItem,
@@ -20,6 +20,9 @@ interface ZoomableImageProps {
   alt?: string;
   /** 缩略图懒加载 */
   lazy?: boolean;
+  /** 点击区域显示的内容，默认是缩略图本身 */
+  children?: ReactNode;
+  title?: string;
 }
 
 /** CSP connect-src 不放行 data:，data URL 本地解码；local-image: 走 fetch（协议已开 CORS） */
@@ -54,6 +57,8 @@ export function ZoomableImage({
   onError,
   alt = '',
   lazy = false,
+  children,
+  title,
 }: ZoomableImageProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -88,15 +93,18 @@ export function ZoomableImage({
             <button
               type="button"
               onClick={() => setOpen(true)}
+              title={title}
               className={cn('cursor-zoom-in', frameClassName)}
             >
-              <img
-                src={src}
-                alt={alt}
-                className={className}
-                onError={onError}
-                {...(lazy ? { loading: 'lazy' as const, decoding: 'async' as const } : {})}
-              />
+              {children ?? (
+                <img
+                  src={src}
+                  alt={alt}
+                  className={className}
+                  onError={onError}
+                  {...(lazy ? { loading: 'lazy' as const, decoding: 'async' as const } : {})}
+                />
+              )}
             </button>
           }
           onContextMenu={(event) => event.stopPropagation()}
