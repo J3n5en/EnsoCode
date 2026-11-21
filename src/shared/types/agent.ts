@@ -1494,6 +1494,8 @@ export type AgentCommand =
   | { type: 'set-max-active-coworkers'; limit: number }
   /** 自动重试次数：0 关闭，-1 无限 */
   | { type: 'set-auto-retry-limit'; limit: number }
+  /** 长缓存：会话请求对 Anthropic Messages 模型用 1h prompt cache，下一次请求生效 */
+  | { type: 'set-long-cache-retention'; enabled: boolean }
   /** 设置里禁用的内置预设：worker 执行与工具说明都按它过滤 */
   | { type: 'set-disabled-workflow-presets'; ids: string[] }
   /** 设置变更后 Main 按会话推送当前禁用的内置工具；worker 只增删已注册的可热切工具 */
@@ -4195,6 +4197,10 @@ export function parseAgentCommand(value: unknown): AgentCommand | null {
         : null;
     case 'set-auto-retry-limit':
       return hasExactKeys(value, ['type', 'limit']) && parseAutoRetryLimit(value.limit) !== null
+        ? (value as unknown as AgentCommand)
+        : null;
+    case 'set-long-cache-retention':
+      return hasExactKeys(value, ['type', 'enabled']) && typeof value.enabled === 'boolean'
         ? (value as unknown as AgentCommand)
         : null;
     case 'set-shell-limits':

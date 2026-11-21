@@ -49,8 +49,6 @@ const RESTART_REQUIRED: Record<string, string> = {
   autoRestartForUpdate:
     'The updater reads this at startup; change it in Settings or restart the app.',
   updateChannel: 'The updater reads this at startup; switch it in Settings or restart the app.',
-  longCacheRetention:
-    'The agent worker reads this into PI_CACHE_RETENTION at startup; toggle it in Settings and restart the app.',
 };
 
 export type GetResult =
@@ -268,6 +266,8 @@ function validateField(field: string, value: unknown): string | null {
   )
     return 'customProxyUrl must be an http(s)/socks proxy URL or empty';
   if (field === 'language' && value !== 'en' && value !== 'zh') return 'language must be en or zh';
+  if (field === 'longCacheRetention' && typeof value !== 'boolean')
+    return 'longCacheRetention must be a boolean';
   if (
     field === 'memoryDistillWindowMinutes' &&
     !(MEMORY_DISTILL_WINDOW_MINUTES as readonly unknown[]).includes(value)

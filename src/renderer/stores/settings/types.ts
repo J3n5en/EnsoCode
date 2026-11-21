@@ -138,7 +138,7 @@ export interface SettingsState {
 
   /** RTK 命令压缩；缺省开，新建或冷恢复会话生效。 */
   rtkEnabled: boolean;
-  /** Anthropic prompt cache 用 1h TTL（worker env PI_CACHE_RETENTION=long）；缺省关，重启生效。 */
+  /** 会话请求对 Anthropic Messages 模型用 1h prompt cache；缺省关，下一次请求生效。 */
   longCacheRetention: boolean;
   /** 后台操作电脑时显示被操作窗口的画中画（macOS） */
   computerPreview: boolean;

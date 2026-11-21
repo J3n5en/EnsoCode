@@ -563,6 +563,7 @@ function scheduleWrite(
           pushCompactRoute,
           pushMaxActiveCoworkers,
           pushAutoRetryLimit,
+          pushLongCacheRetention,
           pushPrivacyMasking,
           pushShellLimits,
           pushDisabledWorkflowPresets,
@@ -575,6 +576,7 @@ function scheduleWrite(
           pushCompactRoute(await readStoredOauthCredentialKeys());
           pushMaxActiveCoworkers();
           pushAutoRetryLimit();
+          pushLongCacheRetention();
           pushPrivacyMasking();
           pushShellLimits();
           pushDisabledWorkflowPresets();
@@ -696,6 +698,7 @@ export function commitSettingsTransaction(
         pushCompactRoute,
         pushMaxActiveCoworkers,
         pushAutoRetryLimit,
+        pushLongCacheRetention,
         pushPrivacyMasking,
         pushShellLimits,
         pushDisabledWorkflowPresets,
@@ -708,6 +711,7 @@ export function commitSettingsTransaction(
         pushCompactRoute(await readStoredOauthCredentialKeys());
         pushMaxActiveCoworkers();
         pushAutoRetryLimit();
+        pushLongCacheRetention();
         pushPrivacyMasking();
         pushShellLimits();
         pushDisabledWorkflowPresets();

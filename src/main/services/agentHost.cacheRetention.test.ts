@@ -4,6 +4,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 vi.mock('../../agent/index?modulePath', () => ({ default: '/tmp/agent.js' }));
 const fork = vi.hoisted(() => ({
   envs: [] as Array<Record<string, string | undefined>>,
+  posted: [] as unknown[],
+  spawn: undefined as (() => void) | undefined,
   state: {} as Record<string, unknown>,
 }));
 vi.mock('electron', () => ({
@@ -20,7 +22,14 @@ vi.mock('electron', () => ({
   utilityProcess: {
     fork: (_path: string, _args: string[], options: { env: Record<string, string> }) => {
       fork.envs.push(options.env);
-      return { postMessage: () => {}, once: () => {}, on: () => {}, kill: () => {} };
+      return {
+        postMessage: (message: unknown) => fork.posted.push(message),
+        once: (event: string, listener: () => void) => {
+          if (event === 'spawn') fork.spawn = listener;
+        },
+        on: () => {},
+        kill: () => {},
+      };
     },
   },
 }));
@@ -29,28 +38,44 @@ vi.mock('../ipc/settings', async (importOriginal) => ({
   readSettings: () => ({ 'enso-settings': { state: fork.state } }),
 }));
 
-import { startAgentWorker, stopAgentWorker } from './agentHost';
+import { pushLongCacheRetention, startAgentWorker, stopAgentWorker } from './agentHost';
 
 afterEach(() => stopAgentWorker());
 
-const spawnEnv = (state: Record<string, unknown>) => {
+const spawnWorker = (state: Record<string, unknown>) => {
   fork.state = state;
+  fork.posted = [];
   startAgentWorker();
+  fork.spawn?.();
   return fork.envs.at(-1) ?? {};
 };
+const longCacheCommands = () =>
+  fork.posted.filter(
+    (message) => (message as { type?: unknown }).type === 'set-long-cache-retention'
+  );
 
-it('开启长缓存时 worker env 带 PI_CACHE_RETENTION=long', () => {
-  expect(spawnEnv({ longCacheRetention: true }).PI_CACHE_RETENTION).toBe('long');
-});
-
-it('关闭或缺省时不注入 PI_CACHE_RETENTION', () => {
+it('worker 就绪后按设置下发长缓存开关，env 不注入进程级 PI_CACHE_RETENTION', () => {
   const prev = process.env.PI_CACHE_RETENTION;
   delete process.env.PI_CACHE_RETENTION;
   try {
-    expect(spawnEnv({ longCacheRetention: false })).not.toHaveProperty('PI_CACHE_RETENTION');
-    expect(spawnEnv({})).not.toHaveProperty('PI_CACHE_RETENTION');
-    expect(spawnEnv({ longCacheRetention: 'true' })).not.toHaveProperty('PI_CACHE_RETENTION');
+    expect(spawnWorker({ longCacheRetention: true })).not.toHaveProperty('PI_CACHE_RETENTION');
+    expect(longCacheCommands()).toEqual([{ type: 'set-long-cache-retention', enabled: true }]);
+    stopAgentWorker();
+    for (const state of [{ longCacheRetention: false }, {}, { longCacheRetention: 'true' }]) {
+      spawnWorker(state);
+      expect(longCacheCommands()).toEqual([{ type: 'set-long-cache-retention', enabled: false }]);
+      stopAgentWorker();
+    }
   } finally {
     if (prev !== undefined) process.env.PI_CACHE_RETENTION = prev;
   }
+});
+
+it('设置变更后推送新值，无需重启 worker', () => {
+  spawnWorker({});
+  const forks = fork.envs.length;
+  fork.state = { longCacheRetention: true };
+  pushLongCacheRetention();
+  expect(longCacheCommands().at(-1)).toEqual({ type: 'set-long-cache-retention', enabled: true });
+  expect(fork.envs).toHaveLength(forks);
 });

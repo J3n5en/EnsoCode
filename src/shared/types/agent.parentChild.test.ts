@@ -200,6 +200,18 @@ describe('parent/child commands', () => {
     expect(parseAgentCommand({ type: 'set-auto-retry-limit' })).toBeNull();
   });
 
+  it('set-long-cache-retention 只接受布尔 enabled', () => {
+    expect(parseAgentCommand({ type: 'set-long-cache-retention', enabled: true })).toEqual({
+      type: 'set-long-cache-retention',
+      enabled: true,
+    });
+    expect(parseAgentCommand({ type: 'set-long-cache-retention', enabled: 'true' })).toBeNull();
+    expect(parseAgentCommand({ type: 'set-long-cache-retention' })).toBeNull();
+    expect(
+      parseAgentCommand({ type: 'set-long-cache-retention', enabled: true, extra: 1 })
+    ).toBeNull();
+  });
+
   it('set-disabled-workflow-presets 只接受合法 id 数组', () => {
     expect(
       parseAgentCommand({ type: 'set-disabled-workflow-presets', ids: ['parallel-review'] })
