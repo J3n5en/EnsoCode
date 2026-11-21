@@ -13,8 +13,7 @@ import {
 } from '@/components/chat/backgroundTaskUi';
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from '@/components/ui/preview-card';
 import { useI18n } from '@/i18n';
-import { cn } from '@/lib/utils';
-import { openBackgroundTasks, useBackgroundTasksView } from '@/stores/backgroundTasksView';
+import { openBackgroundTasks } from '@/stores/backgroundTasksView';
 import { useSessionsStore } from '@/stores/sessions';
 import { countTasks } from './overview';
 
@@ -142,51 +141,5 @@ function MiniTaskRow({
         <StopTaskButton onStop={() => stopBackgroundTask(conversationId, task.taskId)} />
       )}
     </div>
-  );
-}
-
-/** 侧栏秘书下方的「后台任务」入口：没有在跑的任务时整行隐藏 */
-export function BackgroundTasksEntry() {
-  const { t } = useI18n();
-  const active = useBackgroundTasksView((state) => state.open);
-  const counts = useSessionsStore((state) => {
-    let running = 0;
-    let idle = 0;
-    for (const conversation of Object.values(state.conversations)) {
-      const own = countTasks(conversation?.backgroundTasks);
-      running += own.running;
-      idle += own.idle;
-    }
-    return `${running}:${idle}`;
-  });
-  const [running, idle] = counts.split(':').map(Number) as [number, number];
-  if (running + idle === 0) return null;
-  return (
-    <button
-      type="button"
-      data-enso="background-tasks-entry"
-      data-active={active || undefined}
-      onClick={() => openBackgroundTasks()}
-      className={cn(
-        'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[0.9286rem] transition-colors',
-        active
-          ? 'bg-foreground/[0.075] text-foreground dark:bg-foreground/10'
-          : 'text-foreground/88 hover:bg-foreground/5 hover:text-foreground'
-      )}
-    >
-      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-        <Activity className="size-3.5" />
-      </span>
-      <span className="min-w-0 flex-1 truncate">{t('Background tasks')}</span>
-      {idle > 0 && (
-        <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums text-warning">
-          <Moon className="h-3 w-3" aria-hidden />
-          {idle}
-        </span>
-      )}
-      <span className="shrink-0 text-[0.7857rem] text-subtle-foreground tabular-nums">
-        {running + idle}
-      </span>
-    </button>
   );
 }

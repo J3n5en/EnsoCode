@@ -83,6 +83,7 @@ import { FilesView } from './FilesView';
 import { overflowTabList, removeOverflowRows, snapshotOverflowRows } from './overflowTabClose';
 import { type PanelActivitySource, PanelVisibilityProvider } from './panelVisibility';
 import { pinnableTabForId, planPinnedPanels } from './pinnedTabs';
+import { addSecretaryPanel, createSecretaryConsoleReveal } from './secretaryConsole';
 import { secretaryPluginPanelsToClose, secretaryPluginViews } from './secretaryPluginViews';
 import { shouldSkipSidePanelWidthAnim, sidePanelWidthTransition } from './sidePanelWidthAnim';
 import { TerminalView } from './TerminalView';
@@ -286,26 +287,6 @@ function addWorkflowPanel(
   api.addPanel({
     id: 'workflow',
     component: 'workflow',
-    title: label,
-    params: { conversationId, projectId },
-  });
-}
-
-/** 秘书会话的原生面板：工作台、记忆与定时都在这一块，需要就地审批与跳转会话 */
-function addSecretaryPanel(
-  api: DockviewApi,
-  conversationId: string | undefined,
-  projectId: string | undefined,
-  label: string
-): void {
-  const existing = api.getPanel('secretary');
-  if (existing) {
-    existing.focus();
-    return;
-  }
-  api.addPanel({
-    id: 'secretary',
-    component: 'secretary',
     title: label,
     params: { conversationId, projectId },
   });
@@ -887,6 +868,8 @@ function ConversationDock({
   const secretary = useSecretaryConversation(projectId);
   const secretaryPluginIds = useSecretaryPluginIds();
   const pluginViews = usePluginViews();
+  const secretaryName = useSecretaryName();
+  const [revealSecretaryConsole] = useState(createSecretaryConsoleReveal);
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
   const activeConversationId = useSessionsStore((state) => state.activeId);
   const sidePanelOpen = useSidePanelStore(
@@ -972,6 +955,26 @@ function ConversationDock({
     sidePanelOpen,
     t,
     workflowAvailable,
+  ]);
+
+  // 秘书会话每次打开侧栏都保证有秘书面板并切过去；放在固定标签之后，最后选中的是它
+  useEffect(() => {
+    const reveal = revealSecretaryConsole({
+      secretary,
+      open: sidePanelOpen,
+      active: activeConversationId === conversationId,
+      ready: dockApi !== null,
+    });
+    if (reveal && dockApi) addSecretaryPanel(dockApi, conversationId, projectId, secretaryName);
+  }, [
+    activeConversationId,
+    conversationId,
+    dockApi,
+    projectId,
+    revealSecretaryConsole,
+    secretary,
+    secretaryName,
+    sidePanelOpen,
   ]);
 
   const onReady = (event: DockviewReadyEvent) => {

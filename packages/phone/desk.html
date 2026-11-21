@@ -69,6 +69,8 @@
         }
         show(`启动卡住（${stage}），正在重新加载…`);
         setTimeout(() => show(`重新加载也卡住了（${stage}）。${hint}`), 8000);
+        // 这次先走网络取壳（sw.js shell-fresh），万一是缓存的壳本身有问题
+        sw?.postMessage({ type: 'shell-fresh' });
         location.reload();
       }, 10000);
     </script>
@@ -103,6 +105,12 @@
         right: env(safe-area-inset-right);
         bottom: env(safe-area-inset-bottom);
         left: env(safe-area-inset-left);
+      }
+      /* 触屏键盘弹起（keyboard.ts）：界面贴着可见区，输入框贴键盘；键盘盖住 home 条，底部不再留安全区 */
+      html.kb-open #frames {
+        top: calc(var(--kb-top, 0px) + env(safe-area-inset-top));
+        bottom: auto;
+        height: calc(var(--kb-height, 100%) - env(safe-area-inset-top));
       }
       #frames iframe {
         position: absolute;
@@ -173,6 +181,9 @@
         max-width: calc(100% - 32px);
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      html.kb-open #status {
+        top: calc(var(--kb-top, 0px) + env(safe-area-inset-top) + 8px);
       }
     </style>
   </head>

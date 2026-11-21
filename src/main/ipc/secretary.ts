@@ -7,6 +7,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import type { AttachedImage } from '@shared/types/agent';
 import type { SecretarySkillView, SecretaryState, SecretarySummary } from '@shared/types/secretary';
 import { resumesAfterQuit } from '../services/agentHost';
+import { backgroundTaskStates } from '../services/backgroundTaskTracker';
 import { coldResumedSessionIds, onColdResumeFailed } from '../services/coldRestart';
 import { notifyDesktop } from '../services/desktopHooks';
 import { interruptedTurnReason } from '../services/interruptedTurns';
@@ -314,6 +315,7 @@ function hostPortsFor(ctx: SecretaryContext): SecretaryHostPorts {
     now: () => Date.now(),
     backgroundStalls: (now) => driver?.watch(now) ?? [],
     tasks: (conversationId) => observedBackgroundTasks(conversationId),
+    tasksReported: () => backgroundTaskStates.reported(),
     subagentsRunning: (conversationId) => observedSubagentsRunning(conversationId),
     // 上次应用退出打断这一轮：启动恢复时把原因写进回传，别报成失败
     interruptDetail: (conversationId) =>
@@ -566,6 +568,10 @@ const NO_SECRETARY = { ok: false as const, error: 'secretary-required' };
 
 export function registerSecretaryHandlers(): void {
   setSecretaryStateListener(broadcastState);
+  // worker 报完启动时的任务表：启动时没敢判的自动归档、被误归档的会话在这里补判
+  backgroundTaskStates.onReported(() => {
+    for (const instance of hosts.values()) instance.sweepAutoArchive();
+  });
   // 停止会话后撤掉续跑与看门狗：驱动者与派发模块互相不认识，只在这里接上
   setSecretaryForgetListener((conversationId) => driver?.forget(conversationId));
   setSecretaryAvatarResolver((secretaryId) => {

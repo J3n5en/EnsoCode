@@ -143,8 +143,7 @@
     margin: 0;
     /*
      * 移动端不能用 100%：那是布局视口，比可见区域高，底部会被浏览器工具栏挡住。
-     * dvh 跟随浏览器 UI 收缩；键盘避让交给 iOS 自己（会把聚焦的输入框滚进可视区），
-     * 不再用 JS 覆盖高度 —— 那套机制在 standalone 下反复误判。
+     * dvh 跟随浏览器 UI 收缩。键盘弹起时不改这里的高度，由 keyboard.ts 加 kb-open 把根容器摆到可见区上。
      */
     height: 100dvh;
     overscroll-behavior: none;
@@ -192,6 +191,25 @@
     inset: 0;
     background-color: var(--background);
   }
+}
+
+/* 触屏键盘弹起（keyboard.ts）：根容器贴着可见区，输入框贴键盘、列表变短；页面本身不滚 */
+html.kb-open,
+html.kb-open body {
+  overflow: hidden;
+}
+html.kb-open .phone-app-root {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--kb-top, 0px);
+  bottom: auto;
+  height: var(--kb-height, 100dvh);
+  background-color: var(--background);
+}
+/* 键盘盖住了 home 条，底部安全区不再留白 */
+html.kb-open .phone-dock {
+  padding-bottom: 0.5rem;
 }
 
 /* coworker tab 滑动底：必须脱离文档流，否则会占住当前 tab 的宽度把后面的 tab 挤偏 */

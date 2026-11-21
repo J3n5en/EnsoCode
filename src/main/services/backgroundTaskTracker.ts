@@ -35,6 +35,33 @@ const toObserved = (task: BackgroundTaskInfo): ObservedTask => ({
 
 export class BackgroundTaskTracker {
   private readonly bySession = new Map<string, Map<string, ObservedTask>>();
+  private hasReported = false;
+  private readonly reportedListeners = new Set<() => void>();
+
+  /**
+   * worker 启动时已把认回的任务（含没打开的会话）全部报上来。在此之前空表只是「还不知道」，
+   * 不能当成没有任务（应用刚启动、worker 还没起来时就是这样）。
+   */
+  reported(): boolean {
+    return this.hasReported;
+  }
+
+  /** worker 的 ready 握手：认回任务的事件都排在它前面，到这里任务表才算全量 */
+  markReported(): void {
+    this.hasReported = true;
+    for (const listener of this.reportedListeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.warn('[bg-tasks] reported listener failed:', error);
+      }
+    }
+  }
+
+  onReported(listener: () => void): () => void {
+    this.reportedListeners.add(listener);
+    return () => this.reportedListeners.delete(listener);
+  }
 
   /** 会话最近一次已知的后台任务，按开始时间倒序 */
   tasks(sessionId: string): ObservedTask[] {

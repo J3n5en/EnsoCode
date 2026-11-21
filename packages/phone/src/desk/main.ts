@@ -10,6 +10,7 @@ import {
 import { IPC_CHANNELS } from '@shared/types/ipc';
 import type { ConnState } from '../client';
 import { pickActive } from '../deviceList';
+import { installKeyboardInset } from '../keyboard';
 import { parseSessionFromSearch, parseSessionId, takeStashedSessionId } from '../launchSession';
 import {
   isStandalone,
@@ -18,6 +19,7 @@ import {
   subscribePush,
   unsubscribePush,
 } from '../push';
+import { watchShellUpdate } from '../shellUpdate';
 import { loadActiveDeviceId, loadDevices, saveActiveDeviceId } from '../storage';
 import { hadPairing, requestPersistence, storageLossNotice, syncPairedMark } from '../storageGuard';
 import { PHONE_URL, saveUiMode } from '../uiMode';
@@ -135,8 +137,10 @@ function renderStatus(): void {
           ? '正在恢复连接…'
           : ''
       : STATE_TEXT[lastState];
-  const shown =
-    lastState === 'host-offline' && syncing ? offlineSnapshotNote(coverSavedAt, new Date()) : text;
+  // 盖着快照却连不上（桌面不在线，或手机没网、壳是从缓存起来的）：写明显示的是什么时候的内容
+  const away =
+    lastState === 'host-offline' ? '桌面不在线' : lastState === 'offline' ? '网络未连接' : null;
+  const shown = away && syncing ? offlineSnapshotNote(coverSavedAt, new Date(), away) : text;
   el.textContent = shown;
   // 启动画面已在说明进度时不再叠一个状态胶囊
   el.style.display = shown && !loading ? 'block' : 'none';
@@ -196,7 +200,11 @@ async function main(): Promise<void> {
     handleBootStuck(bootStage, {
       storage: sessionStorage,
       show: splash,
-      reload: () => location.reload(),
+      reload: () => {
+        // 重载这一次先走网络取壳：万一是缓存的壳本身有问题，别再拿到同一份
+        navigator.serviceWorker.controller?.postMessage({ type: 'shell-fresh' });
+        location.reload();
+      },
       later: (fn, ms) => setTimeout(fn, ms),
     });
   }, BOOT_STUCK_MS);
@@ -210,6 +218,8 @@ async function main(): Promise<void> {
   bootStage = '启动隧道';
 
   const frames = $('frames');
+  // iframe 里的焦点事件不冒泡到壳：每次 iframe（重新）加载都挂一遍
+  const keyboard = installKeyboardInset(window);
   const iframes: Partial<Record<RemoteFrameKind, HTMLIFrameElement>> = {};
   const attached: Partial<Record<RemoteFrameKind, DeskFrame>> = {};
   let base = '';
@@ -221,6 +231,18 @@ async function main(): Promise<void> {
   let snapshot: HTMLIFrameElement | null = null;
   let snapshotTimer: ReturnType<typeof setInterval> | null = null;
   let snapshotBlobs: string[] = [];
+
+  // 壳是旧版本缓存出来的：renderer 还没起来就立即换新（旧壳配新桌面起不来时自愈），否则等回前台
+  watchShellUpdate({
+    container: navigator.serviceWorker,
+    doc: document,
+    storage: sessionStorage,
+    canReloadNow: () => !settingsLoaded && !stopped,
+    reload: () => {
+      leaveGuard?.release();
+      location.reload();
+    },
+  });
 
   let link = initialDeskLink(device.label, localStorage.getItem(PHONE_PUSH_ENABLED_KEY) === 'on');
   const linkListeners = new Set<(status: ReturnType<typeof toRemoteLinkStatus>) => void>();
@@ -280,6 +302,10 @@ async function main(): Promise<void> {
     iframe.className = kind;
     iframe.allow = 'clipboard-read; clipboard-write';
     iframe.src = `${base}/${kind === 'main' ? 'index' : 'settings'}.html`;
+    iframe.addEventListener('load', () => {
+      const doc = iframe.contentDocument;
+      if (doc) keyboard?.watchDocument(doc);
+    });
     if (kind === 'settings') {
       const backdrop = document.createElement('div');
       backdrop.className = 'settings-backdrop';
@@ -295,6 +321,8 @@ async function main(): Promise<void> {
     iframes.settings?.remove();
     delete iframes.settings;
     frames.querySelector('.settings-backdrop')?.remove();
+    // 输入框随 iframe 一起移除时不一定有 focusout
+    keyboard?.sync();
   };
 
   const bridge: RemoteBridge = {
