@@ -4,9 +4,11 @@ import {
   type ShellIntegration,
   shellIntegrationMenuLabel,
 } from '@shared/shellIntegration';
+import { IPC_CHANNELS } from '@shared/types';
 import { app, Menu, type MenuItemConstructorOptions } from 'electron';
 import { readShellIntegrationStatusSync, shellIntegrationAction } from '../desktop/shellCommand';
 import type { AppRestartState } from './appRestart';
+import { sendToLocalMain } from './renderers';
 
 export const APP_DISPLAY_NAME = 'EnsoCode';
 
@@ -54,6 +56,10 @@ function restartMenuItem(locale: Locale, actions: AppMenuActions): MenuItemConst
 /**
  * Electron 默认 appMenu 用 app.name（package.json name = enso-code）拼 About/Hide/Quit。
  * 不能改 app.name：macOS safeStorage 钥匙串条目按 app.name 命名，改了会解不开已存凭据。
+ *
+ * 侧栏项加速键固定 ⌘B：菜单点击与加速键都发 WINDOW_TOGGLE_SIDEBAR，
+ * 渲染层按键处理看到菜单已处理就跳过，同一次按键不会切换两次。
+ * 用户把 toggle-sidebar 改绑后菜单仍显示 ⌘B，那是菜单项自己的加速键，不再经过渲染层。
  */
 export function macAppMenuTemplate(
   locale: Locale = 'en',
@@ -79,7 +85,26 @@ export function macAppMenuTemplate(
     },
     { role: 'fileMenu' },
     { role: 'editMenu' },
-    { role: 'viewMenu' },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: translate(locale, 'Show or hide sidebar'),
+          accelerator: 'CmdOrCtrl+B',
+          click: () => sendToLocalMain(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR),
+        },
+        { type: 'separator' },
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
     ...(packaged
       ? [
           {

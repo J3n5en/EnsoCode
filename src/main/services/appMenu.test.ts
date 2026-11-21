@@ -1,9 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { IPC_CHANNELS } from '@shared/types';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const sendToLocalMain = vi.hoisted(() => vi.fn());
+vi.mock('./renderers', () => ({ sendToLocalMain }));
 
 import { APP_DISPLAY_NAME, type AppMenuActions, macAppMenuTemplate } from './appMenu';
 import type { AppRestartState } from './appRestart';
 
 describe('macAppMenuTemplate', () => {
+  beforeEach(() => sendToLocalMain.mockClear());
+
   it('labels app menu items with the product name instead of the package name', () => {
     const [appMenu] = macAppMenuTemplate();
     expect(appMenu.label).toBe(APP_DISPLAY_NAME);
@@ -16,12 +22,42 @@ describe('macAppMenuTemplate', () => {
   });
 
   it('keeps the remaining default top-level menus', () => {
-    expect(macAppMenuTemplate().slice(1)).toEqual([
+    const rest = macAppMenuTemplate().slice(1);
+    expect(rest.map(({ label, role }) => ({ label, role }))).toEqual([
       { role: 'fileMenu' },
       { role: 'editMenu' },
-      { role: 'viewMenu' },
+      { label: 'View' },
       { role: 'windowMenu' },
     ]);
+  });
+
+  it('View 菜单有显示/隐藏侧边栏，加速键 ⌘B，点击通知本机主界面切换', () => {
+    const view = macAppMenuTemplate('zh').find((menu) => menu.label === 'View');
+    const items = view?.submenu as {
+      label?: string;
+      role?: string;
+      accelerator?: string;
+      type?: string;
+      click?: () => void;
+    }[];
+    const sidebar = items.find((item) => item.label === '显示/隐藏侧边栏');
+    expect(sidebar).toBeDefined();
+    expect(sidebar?.accelerator).toBe('CmdOrCtrl+B');
+    expect(items.indexOf(sidebar ?? {})).toBe(0);
+    expect(items[1]).toEqual({ type: 'separator' });
+    // 其余仍是 Electron 默认 viewMenu 的条目，只是展开成显式模板
+    expect(items.filter((item) => item.role).map((item) => item.role)).toEqual([
+      'reload',
+      'forceReload',
+      'toggleDevTools',
+      'resetZoom',
+      'zoomIn',
+      'zoomOut',
+      'togglefullscreen',
+    ]);
+    sidebar?.click?.();
+    expect(sendToLocalMain).toHaveBeenCalledWith(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR);
+    expect(sendToLocalMain).toHaveBeenCalledTimes(1);
   });
 
   it('puts shell integrations in their own translated menu in packaged builds', () => {

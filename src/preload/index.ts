@@ -1666,8 +1666,15 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TITLE_BAR_APPEARANCE, appearance),
     setTrafficLightsVisible: (visible: boolean): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_TRAFFIC_LIGHTS_VISIBLE, visible),
+    refreshDragRegions: (): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.WINDOW_REFRESH_DRAG_REGIONS),
     openSettings: (link?: SettingsDeepLink): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.WINDOW_OPEN_SETTINGS, link),
+    onToggleSidebar: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR, listener);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_TOGGLE_SIDEBAR, listener);
+    },
     onSettingsDeepLink: (callback: (link: SettingsDeepLink) => void): (() => void) => {
       const listener = (_: unknown, link: SettingsDeepLink) => callback(link);
       ipcRenderer.on(IPC_CHANNELS.SETTINGS_DEEP_LINK, listener);
