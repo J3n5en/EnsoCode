@@ -972,8 +972,8 @@ export function Composer({
         <div className="flex items-center justify-between gap-1.5 px-3 pt-0.5 pb-2.5">
           <div
             className={cn(
-              'flex min-w-0 flex-1 items-center gap-1',
-              isMobile ? 'overflow-x-auto [scrollbar-width:none]' : 'overflow-hidden'
+              'flex min-w-0 flex-1 items-center',
+              isMobile ? 'gap-0.5 overflow-x-auto [scrollbar-width:none]' : 'gap-1 overflow-hidden'
             )}
           >
             <input
@@ -993,7 +993,7 @@ export function Composer({
               onClick={() => imageInputRef.current?.click()}
               aria-label={t('Attach image')}
               title={t('Attach image')}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 max-md:size-[32px]"
             >
               <ImagePlus className="h-3.5 w-3.5" />
             </button>

@@ -74,7 +74,8 @@ export function ApprovalModePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="flex h-7 min-w-0 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        // 手机窄行只剩图标+箭头：不收缩、内距收紧，箭头才不会溢出贴到右侧模型芯片上
+        className="flex h-7 min-w-0 shrink items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground max-md:h-[32px] max-md:@max-[28rem]:shrink-0 max-md:@max-[28rem]:gap-0.5 max-md:@max-[28rem]:px-1 max-md:@max-[28rem]:min-w-[32px] max-md:@max-[28rem]:justify-center"
         title={t(APPROVAL_MODE_META[mode].descKey)}
       >
         <CurrentIcon className="h-3 w-3 shrink-0" />
