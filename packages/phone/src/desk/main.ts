@@ -17,6 +17,7 @@ import {
   loadDeskMeta,
   markBuildReady,
   saveDeskMeta,
+  upgradedBuild,
 } from './launch';
 import { installLeaveGuard } from './leaveGuard';
 import {
@@ -235,6 +236,15 @@ async function main(): Promise<void> {
       onResuming: (active) => {
         resuming = active;
         renderStatus();
+      },
+      onBuild: (reported, platform) => {
+        const next = upgradedBuild(version, reported, platform);
+        if (!next) return false;
+        // 旧构建的懒加载资源在新桌面上已不存在，只重载 iframe 会卡住：整页走启动时的升级流程
+        saveDeskMeta(localStorage, device.pairId, next);
+        leaveGuard?.release();
+        location.reload();
+        return true;
       },
       onPushConfig: (key) => {
         publishLink(reduceDeskLink(link, { type: 'push-config', key }));

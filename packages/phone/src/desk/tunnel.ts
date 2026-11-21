@@ -23,6 +23,8 @@ export interface DeskLinkHooks {
   onPushConfig?(key: string): void;
   /** 在线但有 renderer 还没续上 */
   onResuming?(active: boolean): void;
+  /** 握手报的桌面构建；返回 true 表示页面要换构建重载，这次握手不再处理 */
+  onBuild?(version: string, platform: string): boolean;
 }
 
 export interface DeskAsset {
@@ -393,6 +395,7 @@ export class DeskTunnel {
           this.onFatal(frame.error);
           return;
         }
+        if (this.link.onBuild?.(frame.version, frame.platform)) return;
         const lost = slot.everReady && !frame.resumed;
         const resumed = slot.everReady && frame.resumed;
         slot.everReady = true;
