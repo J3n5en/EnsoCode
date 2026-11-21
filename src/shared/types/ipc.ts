@@ -88,6 +88,8 @@ export const IPC_CHANNELS = {
   SECRETARY_CONTACT_SETTINGS: 'secretary:contact-settings',
   /** 秘书联系方式：手机关注的任务，取消一项或全清 */
   SECRETARY_CONTACT_FOLLOWING: 'secretary:contact-following',
+  /** 秘书联系方式：拉一个 Telegram 群的论坛话题给设置页勾选 */
+  SECRETARY_CONTACT_TELEGRAM_TOPICS: 'secretary:contact-telegram-topics',
   /** main → 主界面 renderer：深链 enso://secretary 要求选中某个会话，可再定位到某张确认卡 */
   SECRETARY_OPEN_CONVERSATION: 'secretary:open-conversation',
   /** 远程桌面：leader 变化推送 / 浏览器上传文件落到宿主临时目录 */

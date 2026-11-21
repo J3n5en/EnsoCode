@@ -239,6 +239,7 @@ import type {
   DispatchDraft,
   SecretaryContactChannelPrefs,
   SecretaryContactState,
+  SecretaryContactTopicsResult,
   SecretaryDaily,
   SecretaryProfile,
   SecretaryProfileDraft,
@@ -542,8 +543,12 @@ const electronAPI = {
         | { enabled?: boolean; allowCardConfirm?: boolean; allowMemory?: boolean }
         | { channelId: string; prefs: Partial<SecretaryContactChannelPrefs> }
         | { telegramGroup: { action: 'add' | 'remove'; chatId: string } }
+        | { telegramGroupScope: { chatId: string; scope: 'all' | string[] } }
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_SETTINGS, patch),
+    /** 拉一个 Telegram 群的论坛话题：失败带错误码与 Telegram 的说明 */
+    contactTelegramTopics: (chatId: string): Promise<SecretaryContactTopicsResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SECRETARY_CONTACT_TELEGRAM_TOPICS, { chatId }),
     /** 手机关注的任务：取消一项或全清 */
     contactFollowing: (
       request: { action: 'cancel'; id: string } | { action: 'clear' }

@@ -23,6 +23,7 @@ import type {
   SecretaryAuditEntry,
   SecretaryContactChannelStatus,
   SecretaryContactTelegram,
+  SecretaryContactTopicsResult,
 } from '@shared/types/secretary';
 import type {
   ChannelCaps,
@@ -50,9 +51,15 @@ import { ContactPoller } from './poller';
 import {
   type ContactFile,
   type ContactStore,
+  matchTelegramRoute,
+  parseTelegramGroupId,
   TELEGRAM_CHANNEL_ID,
-  telegramGroupAllowed,
+  TELEGRAM_GENERAL_TOPIC_ID,
+  telegramGroupBindings,
+  telegramGroupKnown,
+  telegramTopicCatalog,
   withTelegramGroupTitle,
+  withTelegramTopicTitle,
 } from './store';
 
 export const TELEGRAM_CAPS: ChannelCaps = {
@@ -151,18 +158,36 @@ function threadOf(topicId: string | undefined): { messageThreadId?: number } {
   return Number.isInteger(thread) ? { messageThreadId: thread } : {};
 }
 
+/** 匹配绑定用的话题：论坛里不带话题的就是 General */
+function routeTopicOf(message: TelegramMessage): string | undefined {
+  return topicOf(message) ?? (message.chat.is_forum ? TELEGRAM_GENERAL_TOPIC_ID : undefined);
+}
+
+type AdmitVerdict =
+  | 'ok'
+  | 'foreign-chat'
+  | 'group-not-allowed'
+  | 'topic-not-allowed'
+  | 'foreign-sender';
+
 /**
  * 只认绑定的那个人：私聊就是绑定的 chat（私聊 chat id 等于用户 id）；
- * 群要在白名单里（空名单不收任何群），且只放行他本人发的。别人的一律静默丢掉。
+ * 群要整群在白名单里或这个话题单独绑过（话题优先），且只放行他本人发的。别人的一律静默丢掉。
  */
 function admitChat(
   file: ContactFile,
   chat: { id: number; type?: string },
-  fromId: number | undefined
-): 'ok' | 'foreign-chat' | 'group-not-allowed' | 'foreign-sender' {
+  fromId: number | undefined,
+  topic: string | undefined
+): AdmitVerdict {
   if (isBoundChat(file.chat?.id, chat.id)) return 'ok';
   if (chatTypeOf(chat.type) !== 'group') return 'foreign-chat';
-  if (!telegramGroupAllowed(file, chat.id)) return 'group-not-allowed';
+  if (!matchTelegramRoute(file, chat.id, topic)) {
+    const chatId = String(chat.id);
+    return file.telegramTopics.some((binding) => binding.chatId === chatId)
+      ? 'topic-not-allowed'
+      : 'group-not-allowed';
+  }
   return isBoundChat(file.chat?.id, fromId ?? Number.NaN) ? 'ok' : 'foreign-sender';
 }
 
@@ -242,12 +267,50 @@ export class TelegramChannel implements ContactChannel {
       allowCardConfirm: file.allowCardConfirm,
       allowMemory: file.allowMemory,
       syncMirror: file.syncMirror,
-      groups: file.telegramGroups.map((id) => {
-        const title = file.telegramGroupTitles[id];
-        return title ? { id, title } : { id };
-      }),
+      groups: telegramGroupBindings(file),
       poll: this.poller.status(),
       secure: this.store.isSecure(),
+    };
+  }
+
+  /**
+   * 拉一个群的话题给设置页勾选。Bot API 没有列话题的方法：先 getChat 确认 bot 在群里、
+   * 群开了话题，再给出 General 与 bot 见过的话题（建话题、改名或话题里有人说话时记下）。
+   */
+  async topics(rawChatId: unknown): Promise<SecretaryContactTopicsResult> {
+    const chatId = parseTelegramGroupId(rawChatId);
+    if (!chatId) return { ok: false, error: 'invalid-chat-id' };
+    const token = this.store.token();
+    if (!token) return { ok: false, error: 'token-required' };
+    let chat: { type?: string; title?: string; is_forum?: boolean };
+    try {
+      chat = await this.apiFor(token).getChat(Number(chatId));
+    } catch (error) {
+      const code = telegramErrorCode(error);
+      this.audit('contact_topics', false, code);
+      // 只回 Telegram 自己的说明（如 chat not found）；网络错误的原文可能带请求地址
+      const detail = code === 'api' && error instanceof Error ? error.message.slice(0, 200) : '';
+      return { ok: false, error: code, ...(detail ? { detail } : {}) };
+    }
+    if (chatTypeOf(chat.type) !== 'group') return { ok: false, error: 'not-group' };
+    const titled = chat.title
+      ? withTelegramGroupTitle(this.store.file(), chatId, chat.title)
+      : null;
+    const file = titled ? this.store.save(titled) : this.store.file();
+    this.audit('contact_topics', true, `chat=${chatId}`);
+    if (!chat.is_forum) {
+      return { ok: true, forum: false, ...(chat.title ? { title: chat.title } : {}), topics: [] };
+    }
+    return {
+      ok: true,
+      forum: true,
+      ...(chat.title ? { title: chat.title } : {}),
+      topics: [
+        { id: TELEGRAM_GENERAL_TOPIC_ID },
+        ...telegramTopicCatalog(file, chatId).filter(
+          (topic) => topic.id !== TELEGRAM_GENERAL_TOPIC_ID
+        ),
+      ],
     };
   }
 
@@ -622,15 +685,15 @@ export class TelegramChannel implements ContactChannel {
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
-    const file = this.store.file();
+    let file = this.store.file();
     if (update.callback_query) {
       const query = update.callback_query;
       const chat = query.message?.chat;
-      // 群里的按钮：群在白名单里，且只认绑定的那个人点
-      if (file.chat && chat) {
-        const verdict = admitChat(file, chat, query.from?.id);
+      // 群里的按钮：群或这个话题绑过，且只认绑定的那个人点
+      if (file.chat && chat && query.message) {
+        const verdict = admitChat(file, chat, query.from?.id, routeTopicOf(query.message));
         if (verdict !== 'ok') {
-          this.reject(verdict, chat.id);
+          this.reject(verdict, chat.id, routeTopicOf(query.message));
           return;
         }
       }
@@ -646,6 +709,7 @@ export class TelegramChannel implements ContactChannel {
       return;
     }
     const message = update.message;
+    if (message) file = this.learnTopic(file, message);
     const text = message?.text?.trim();
     if (!message || !text) return;
 
@@ -680,7 +744,8 @@ export class TelegramChannel implements ContactChannel {
     }
 
     const chatType = chatTypeOf(message.chat.type);
-    const verdict = admitChat(file, message.chat, message.from?.id);
+    const routeTopic = routeTopicOf(message);
+    const verdict = admitChat(file, message.chat, message.from?.id, routeTopic);
     // 认群用的标题：只记绑定的人或名单里的群发来的，陌生人拉的群不落盘
     if (
       chatType === 'group' &&
@@ -692,7 +757,11 @@ export class TelegramChannel implements ContactChannel {
       if (titled) this.store.save(titled);
     }
     if (verdict !== 'ok') {
-      this.reject(verdict === 'foreign-sender' ? 'foreign-chat' : verdict, message.chat.id);
+      this.reject(
+        verdict === 'foreign-sender' ? 'foreign-chat' : verdict,
+        message.chat.id,
+        routeTopic
+      );
       return;
     }
     this.rememberThread(message);
@@ -714,16 +783,38 @@ export class TelegramChannel implements ContactChannel {
     });
   }
 
-  /** 静默丢掉：不回话，只记审计；名单外的群带上 chatId，方便用户查到要加哪个 */
-  private reject(
-    reason: 'foreign-chat' | 'group-not-allowed' | 'foreign-sender',
-    chatId: number
-  ): void {
-    this.audit(
-      'contact_inbound_rejected',
-      false,
-      reason === 'group-not-allowed' ? `${reason} chat=${chatId}` : reason
-    );
+  /** 静默丢掉：不回话，只记审计；名单外的群和话题带上 id，方便用户查到要加哪个 */
+  private reject(reason: Exclude<AdmitVerdict, 'ok'>, chatId: number, topic?: string): void {
+    const detail =
+      reason === 'group-not-allowed'
+        ? `${reason} chat=${chatId}`
+        : reason === 'topic-not-allowed'
+          ? `${reason} chat=${chatId} topic=${topic ?? ''}`
+          : reason;
+    this.audit('contact_inbound_rejected', false, detail);
+  }
+
+  /**
+   * 记下论坛话题给设置页勾选：建话题、改名的服务消息带名字，话题里的普通消息回复的是建话题那条。
+   * 只记绑过或认识的群、或绑定的人发的，陌生人拉的群不落盘。
+   */
+  private learnTopic(file: ContactFile, message: TelegramMessage): ContactFile {
+    const topic = topicOf(message);
+    if (!topic || chatTypeOf(message.chat.type) !== 'group') return file;
+    const chatId = String(message.chat.id);
+    if (
+      !telegramGroupKnown(file, chatId) &&
+      !isBoundChat(file.chat?.id, message.from?.id ?? Number.NaN)
+    ) {
+      return file;
+    }
+    const name =
+      message.forum_topic_created?.name ??
+      message.forum_topic_edited?.name ??
+      message.reply_to_message?.forum_topic_created?.name ??
+      '';
+    const next = withTelegramTopicTitle(file, chatId, topic, name.trim());
+    return next ? this.store.save(next) : file;
   }
 
   private async completeBind(message: TelegramMessage): Promise<void> {

@@ -63,6 +63,7 @@ import type {
   SecretaryContactChannelStatus,
   SecretaryContactChannelView,
   SecretaryContactState,
+  SecretaryContactTopicsResult,
   SecretaryProfile,
   SecretaryResultKind,
 } from '@shared/types/secretary';
@@ -92,6 +93,7 @@ import {
   withChannelPrefs,
   withTelegramGroupAdded,
   withTelegramGroupRemoved,
+  withTelegramGroupScope,
 } from './store';
 import { TELEGRAM_CAPS, TelegramChannel } from './telegram';
 
@@ -106,7 +108,8 @@ export type ContactError =
   | 'not-found'
   | 'no-secretary'
   | 'deliver-failed'
-  | 'invalid-chat-id';
+  | 'invalid-chat-id'
+  | 'invalid-topic';
 
 export type ContactResult = { ok: true } | { ok: false; error: ContactError };
 
@@ -620,6 +623,25 @@ export class ContactService implements SecretaryContactPort {
     this.audit('contact_settings', true, `telegramGroups=${next.telegramGroups.length}`);
     this.ports.publish();
     return { ok: true };
+  }
+
+  /** 一个群交给秘书的范围：'all' 整群，或只收这几个论坛话题 */
+  setTelegramGroupScope(chatId: unknown, scope: unknown): ContactResult {
+    const result = withTelegramGroupScope(this.store.file(), chatId, scope);
+    if (!result.ok) return { ok: false, error: result.error };
+    this.store.save(result.file);
+    this.audit(
+      'contact_settings',
+      true,
+      `telegramGroups=${result.file.telegramGroups.length} telegramTopics=${result.file.telegramTopics.length}`
+    );
+    this.ports.publish();
+    return { ok: true };
+  }
+
+  /** 设置页勾话题用：确认群可达、是否开了话题，并给出 bot 见过的话题 */
+  telegramTopics(chatId: unknown): Promise<SecretaryContactTopicsResult> {
+    return this.telegram.topics(chatId);
   }
 
   /** 总开关：关掉后 Telegram 停止轮询，插件渠道不再路由 */

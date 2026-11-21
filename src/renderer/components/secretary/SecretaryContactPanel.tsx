@@ -20,7 +20,6 @@ import {
   Send,
   ShieldAlert,
   Unlink,
-  X,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
@@ -29,6 +28,7 @@ import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { PluginIcon } from '@/plugins/PluginIcon';
 import { PluginFrame } from '@/plugins/PluginView';
+import { SecretaryContactGroupRow } from './SecretaryContactGroupRow';
 
 const BOTFATHER_URL = 'https://t.me/BotFather';
 
@@ -471,37 +471,21 @@ export function SecretaryContactPanel() {
             ) : (
               <ul className="mt-1.5 flex flex-col gap-1">
                 {groups.map((group) => (
-                  <li
+                  <SecretaryContactGroupRow
                     key={group.id}
-                    data-enso="secretary-contact-group"
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[12px]">
-                      {group.title ? (
-                        <>
-                          {group.title}{' '}
-                          <span className="font-mono text-[11px] text-muted-foreground">
-                            {group.id}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="font-mono text-[11.5px]">{group.id}</span>
-                      )}
-                    </span>
-                    <button
-                      type="button"
-                      data-enso="secretary-contact-group-remove"
-                      disabled={busy}
-                      aria-label={t('Remove {{name}}', { name: group.title ?? group.id })}
-                      className={BUTTON_CLASS}
-                      onClick={() => setGroup('remove', group.id)}
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  </li>
+                    group={group}
+                    busy={busy}
+                    onRemove={() => setGroup('remove', group.id)}
+                    onSaved={load}
+                  />
                 ))}
               </ul>
             )}
+            <p className="mt-1.5 text-[11px] text-subtle-foreground">
+              {t(
+                'New groups are bound as a whole. For a forum group, use the list button to hand over only some topics.'
+              )}
+            </p>
             <form
               className="mt-2 flex gap-1.5"
               onSubmit={(event) => {

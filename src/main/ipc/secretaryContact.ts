@@ -128,6 +128,15 @@ function readTelegramGroup(request: unknown): { action: 'add' | 'remove'; chatId
   return { action, chatId };
 }
 
+/** 群交给秘书的范围：{ telegramGroupScope: { chatId, scope: 'all' | string[] } }，细校验在 store */
+function readTelegramGroupScope(request: unknown): { chatId: string; scope: unknown } | null {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return null;
+  const raw = (request as Record<string, unknown>).telegramGroupScope;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const { chatId, scope } = raw as Record<string, unknown>;
+  return typeof chatId === 'string' ? { chatId, scope } : null;
+}
+
 /** 关注列表的操作：取消一项要带 id，全清不带 */
 function readFollowingRequest(
   request: unknown
@@ -321,6 +330,8 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
         if (channel) return service.setChannelPrefs(channel.channelId, channel.prefs);
         const group = readTelegramGroup(request);
         if (group) return service.setTelegramGroup(group.action, group.chatId);
+        const scope = readTelegramGroupScope(request);
+        if (scope) return service.setTelegramGroupScope(scope.chatId, scope.scope);
         const enabled = readFlag(request, 'enabled');
         const cards = readFlag(request, 'allowCardConfirm');
         const memory = readFlag(request, 'allowMemory');
@@ -340,6 +351,18 @@ export function createSecretaryContact(deps: SecretaryContactDeps): SecretaryCon
         if (parsed.action === 'clear') return service.clearFollowed();
         return service.unfollow(parsed.id);
       });
+
+      ipcMain.handle(
+        IPC_CHANNELS.SECRETARY_CONTACT_TELEGRAM_TOPICS,
+        async (event, request: unknown) => {
+          if (!isEditor(event.sender.id)) return { ok: false, error: 'invalid sender' };
+          const chatId =
+            request && typeof request === 'object' && !Array.isArray(request)
+              ? (request as Record<string, unknown>).chatId
+              : undefined;
+          return service.telegramTopics(chatId);
+        }
+      );
     },
   };
 }

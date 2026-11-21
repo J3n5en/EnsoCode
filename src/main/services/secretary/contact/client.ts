@@ -42,6 +42,10 @@ export interface TelegramMessage {
   /** 论坛话题 id；普通超级群里回复串也会带，要配合 is_topic_message 看 */
   message_thread_id?: number;
   is_topic_message?: boolean;
+  /** 话题里的消息回复的是建话题那条服务消息：从这里读话题名 */
+  reply_to_message?: TelegramMessage;
+  forum_topic_created?: { name?: string };
+  forum_topic_edited?: { name?: string };
 }
 
 export interface TelegramCallbackQuery {
@@ -101,6 +105,8 @@ export interface TelegramUpload {
 
 export interface TelegramApi {
   getMe(): Promise<TelegramUser>;
+  /** 绑群前确认 bot 在群里、群是否开了论坛话题 */
+  getChat(chatId: number): Promise<TelegramChat>;
   getUpdates(params: {
     offset?: number;
     timeout?: number;
@@ -250,6 +256,7 @@ export function createTelegramApi(token: string, base = telegramApiBase()): Tele
   };
   return {
     getMe: () => request<TelegramUser>(base, token, 'getMe', undefined),
+    getChat: (chatId) => request<TelegramChat>(base, token, 'getChat', { chat_id: chatId }),
     getUpdates: ({ offset, timeout, signal }) =>
       request<TelegramUpdate[]>(
         base,
