@@ -67,7 +67,7 @@ function setup() {
     openInApp: () => {},
     following,
   });
-  const wired = connectPluginChannels(service, source);
+  const wired = connectPluginChannels(() => [service], source);
   return {
     service,
     following,

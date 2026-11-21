@@ -16,6 +16,8 @@ export interface LocalUi {
   windowContentIds(): number[];
   onWindowClosed(listener: (webContentsId: number) => void): void;
   anyFocused(): boolean;
+  /** 距系统最近一次键盘或鼠标输入的毫秒数 */
+  inputIdleMs(): number;
   focusMain(): void;
   chromiumRenderers(): ChromiumRendererInfo;
   /** 桌面托盘/服务器态：没有可见主窗口，pair 职责可能落到宿主 */

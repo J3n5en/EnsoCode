@@ -1,5 +1,6 @@
 import {
   type AutoRestartIdleSnapshot,
+  type AutoRestartMode,
   idleDurationMs,
   isAutoRestartBlocked,
   nextIdleSince,
@@ -7,19 +8,19 @@ import {
   shouldAutoRestartForUpdate,
 } from '@shared/updater/idleRestart';
 
-export type IdleRestartObservation = Omit<AutoRestartIdleSnapshot, 'idleForMs'>;
+export type IdleRestartObservation = Omit<AutoRestartIdleSnapshot, 'idleForMs' | 'mode'>;
 
 /** 跟踪连续空闲；quitAndInstall 失败后不再自动重试。 */
 export class IdleRestartGate {
   private idleSince: number | null = null;
   private failed = false;
 
-  evaluate(observation: IdleRestartObservation, now: number): boolean {
+  evaluate(observation: IdleRestartObservation, mode: AutoRestartMode, now: number): boolean {
     if (this.failed) return false;
-    const blocked = isAutoRestartBlocked(observation);
-    this.idleSince = nextIdleSince(this.idleSince, blocked, now);
+    const snapshot = { ...observation, mode };
+    this.idleSince = nextIdleSince(this.idleSince, isAutoRestartBlocked(snapshot), now);
     return shouldAutoRestartForUpdate({
-      ...observation,
+      ...snapshot,
       idleForMs: idleDurationMs(this.idleSince, now),
     });
   }

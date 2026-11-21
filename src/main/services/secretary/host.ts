@@ -120,11 +120,17 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   subagentsRunning?(conversationId: string): boolean;
   /** 上次应用退出打断这一轮的原因（启动恢复时说明）；缺省表示没有记录 */
   interruptDetail?(conversationId: string): string | undefined;
+  /** 应用正在退出，这个会话写进了恢复清单、新实例接着跑：退出打断它不算结果 */
+  continuesAfterExit?(conversationId: string): boolean;
+  /** 冷启动正在按恢复清单续跑这个会话：启动恢复不报中断 */
+  coldResumed?(conversationId: string): boolean;
   /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
   startPending?(pendingIds: readonly string[], now: number): void;
   audit?(entry: SecretaryAuditEntry): void;
   /** 追加一条按天回看用的结果记录；缺省表示不持久化 */
   recordDaily?(entry: SecretaryDailyRecord): void;
+  /** 同事托付的待办办完或出了问题：回告发起的秘书；返回是否改了待办 */
+  reportPeerTodos?(): boolean;
 }
 
 export interface SecretaryHost {
@@ -134,6 +140,8 @@ export interface SecretaryHost {
   /** 立刻投递 outbox：用户刚点了确认，别等下一分钟的 tick */
   flushNow(now?: number): void;
   recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
+  /** 冷启动没能按恢复清单接着跑这个会话：照常报失败 */
+  onRestartResumeFailed(conversationId: string, error: string, now?: number): void;
   recover(): void;
   start(): void;
   stop(): void;
@@ -805,6 +813,16 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
    */
   let savedSignature: string | null = null;
   let savedAt = Number.NEGATIVE_INFINITY;
+  /** 还没落盘的事件时刻：每次读盘后补回，补存由别的会话触发时也不丢，巡检读到的是最新活动 */
+  const eventStamps = new Map<string, number>();
+  function withEventStamps(file: SecretaryDispatchFile): SecretaryDispatchFile {
+    for (const [conversationId, at] of eventStamps) {
+      const record = file.dispatched[conversationId];
+      if (!record) eventStamps.delete(conversationId);
+      else if (at > record.lastEventAt) record.lastEventAt = at;
+    }
+    return file;
+  }
   function saveEventFile(file: SecretaryDispatchFile, now: number): boolean {
     const signature = JSON.stringify(file, (key, value) =>
       key === 'lastEventAt' ? undefined : value
@@ -836,7 +854,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (outcome) settleDelivery(ports, inflightTarget, outcome, now);
       }
 
-      const file = ports.file();
+      const file = withEventStamps(ports.file());
       const rows = ports.rows();
       if (sessionId) touched.add(rootIdOf(event, sessionId));
       let changed = applyRelayEvent(file, event, sessionId, now);
@@ -858,6 +876,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           pendingComplete.delete(conversationId);
         }
         record.lastEventAt = now;
+        eventStamps.set(conversationId, now);
         if (record.lastState !== status.state) record.stateSince = now;
         record.lastState = status.state;
         // 报错的会话不会再被后台任务唤醒，残留的记录会让它一直被算在跑
@@ -921,6 +940,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             !(event.type === 'ask-request' && event.ask?.relay)
           )
             kind = 'needs-user';
+        }
+        // 写进恢复清单、新实例接着跑：退出打断这一轮既不是失败也不是中断
+        if (
+          (kind === 'failed' || kind === 'interrupted') &&
+          ports.continuesAfterExit?.(conversationId)
+        ) {
+          kind = null;
+          detail = undefined;
         }
         const awaiting = kind === 'turn-ended' && awaitsWake(conversationId, now);
         if (kind === 'turn-ended' && reopened && previous && SETTLED_RESULTS.has(previous.kind))
@@ -986,13 +1013,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         aborted.add(rootIdOf(event, sessionId));
       if (changed) changed = saveEventFile(file, now);
       const todosChanged = syncLinkedTodos(ports, file, rows, aborted);
-      if (changed || todosChanged) ports.publish();
+      const reported = ports.reportPeerTodos?.() ?? false;
+      if (changed || todosChanged || reported) ports.publish();
       flush(now);
     },
 
     tick(now = ports.now()) {
       if (!ports.enabled()) return;
-      const file = ports.file();
+      const file = withEventStamps(ports.file());
       const records = Object.values(file.dispatched);
       const statuses: Record<string, SecretarySessionStatus> = {};
       for (const record of records)
@@ -1049,7 +1077,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (fireSchedules(file, now)) changed = true;
       if (changed) ports.save(file);
       const todosChanged = syncLinkedTodos(ports, file, ports.rows(), new Set());
-      if (changed || todosChanged) ports.publish();
+      const reported = ports.reportPeerTodos?.() ?? false;
+      if (changed || todosChanged || reported) ports.publish();
       // 系统定时是档案与待办的派生状态，每分钟重算一次；放在触发之后，否则刚到期的待办提醒先被重算删掉
       syncSystemSchedules(ports, ports.profile(), ports.todos());
       flush(now);
@@ -1075,6 +1104,21 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
 
     flushNow(now = ports.now()) {
       if (!ports.enabled()) return;
+      flush(now);
+    },
+
+    onRestartResumeFailed(conversationId, error, now = ports.now()) {
+      if (!ports.enabled()) return;
+      const file = ports.file();
+      const record = file.dispatched[conversationId];
+      if (!record) return;
+      const state = ports.status(conversationId).state;
+      if (record.lastState !== state) record.stateSince = now;
+      record.lastState = state;
+      recordResult(file, record, 'failed', now, `应用重启后没能接着跑：${error}`);
+      ports.save(file);
+      syncLinkedTodos(ports, file, ports.rows(), new Set());
+      ports.publish();
       flush(now);
     },
 
@@ -1107,6 +1151,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       for (const record of Object.values(file.dispatched)) {
         if (record.lastState !== 'running') continue;
+        // 冷启动正按恢复清单接着跑：不是中断，之后按它的事件照常判定
+        if (ports.coldResumed?.(record.conversationId)) continue;
         // 存量修正：记录还写着进行中，但会话已经空闲、没有后台任务与待处理项，
         // 最后一条结果又是终态——直接收回终态，升级后不用用户一个个点
         const status = ports.status(record.conversationId);

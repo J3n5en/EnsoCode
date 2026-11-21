@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   secretary: { profile: null as unknown, projectId: 'sec' as string | null },
+  secretaries: [] as { id: string; projectId: string | null; name?: string | null }[],
+  states: {} as Record<string, { profile: unknown; projectId: string | null }>,
+  focusedId: null as string | null,
   openWelcome: vi.fn(),
   newSecretaryConversation: vi.fn(),
   selectConversation: vi.fn(),
@@ -15,9 +18,16 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
   useSecretaryStore: {
     getState: () => ({
       secretary: h.secretary,
+      secretaries: h.secretaries,
+      states: h.states,
+      focusedId: h.focusedId,
+      focus: (id: string) => {
+        h.focusedId = id;
+      },
       openWelcome: h.openWelcome,
       newSecretaryConversation: h.newSecretaryConversation,
     }),
@@ -34,6 +44,9 @@ const { openSecretary } = await import('./openSecretary');
 describe('openSecretary', () => {
   beforeEach(() => {
     h.secretary = { profile: null, projectId: 'sec' };
+    h.secretaries = [{ id: 'default', projectId: 'sec' }];
+    h.states = { default: h.secretary };
+    h.focusedId = 'default';
     h.sessions = { order: [], conversations: {} };
     h.openWelcome.mockClear();
     h.newSecretaryConversation.mockClear();
@@ -41,6 +54,7 @@ describe('openSecretary', () => {
   });
 
   it('还没设置过、也没有会话时进欢迎页', () => {
+    h.states = { default: h.secretary };
     openSecretary();
     expect(h.openWelcome).toHaveBeenCalledTimes(1);
     expect(h.newSecretaryConversation).not.toHaveBeenCalled();
@@ -48,6 +62,7 @@ describe('openSecretary', () => {
 
   it('已设置时打开最近活跃的秘书会话', () => {
     h.secretary = { profile: { name: '秘书' }, projectId: 'sec' };
+    h.states = { default: h.secretary };
     h.sessions = {
       order: ['a', 'b'],
       conversations: {
@@ -62,6 +77,7 @@ describe('openSecretary', () => {
 
   it('已设置但一个会话都没有时新建一个', () => {
     h.secretary = { profile: { name: '秘书' }, projectId: 'sec' };
+    h.states = { default: h.secretary };
     openSecretary();
     expect(h.newSecretaryConversation).toHaveBeenCalledTimes(1);
     expect(h.openWelcome).not.toHaveBeenCalled();
@@ -79,8 +95,46 @@ describe('openSecretary', () => {
 
   it('开关没开、Main 还没登记秘书项目时什么都不做', () => {
     h.secretary = { profile: null, projectId: null };
+    h.secretaries = [];
+    h.states = {};
+    h.focusedId = null;
     openSecretary();
     expect(h.openWelcome).not.toHaveBeenCalled();
     expect(h.newSecretaryConversation).not.toHaveBeenCalled();
   });
+});
+
+it('多个秘书时打开最近用过的那个秘书的最近会话', () => {
+  h.secretaries = [
+    { id: 'default', projectId: 'sec' },
+    { id: 's-two', projectId: 'sec-2' },
+  ];
+  h.states = {
+    default: { profile: { name: '小安' }, projectId: 'sec' },
+    's-two': { profile: { name: '阿财' }, projectId: 'sec-2' },
+  };
+  h.sessions = {
+    order: ['a', 'b'],
+    conversations: {
+      a: { projectId: 'sec', lastActiveAt: 1 },
+      b: { projectId: 'sec-2', lastActiveAt: 9 },
+    },
+  };
+  openSecretary();
+  expect(h.focusedId).toBe('s-two');
+  expect(h.selectConversation).toHaveBeenCalledWith('b');
+});
+
+it('刚建好的秘书状态还没到时，按清单判断：没档案就进欢迎页，不是什么都不做', () => {
+  h.secretaries = [
+    { id: 'default', projectId: 'sec', name: '小安' },
+    { id: 's-new', projectId: 'sec-new', name: null },
+  ];
+  h.states = { default: { profile: { name: '小安' }, projectId: 'sec' } };
+  h.sessions = { order: [], conversations: {} };
+  h.openWelcome.mockClear();
+  openSecretary('s-new');
+  expect(h.focusedId).toBe('s-new');
+  expect(h.openWelcome).toHaveBeenCalledTimes(1);
+  expect(h.newSecretaryConversation).not.toHaveBeenCalled();
 });

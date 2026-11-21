@@ -2,11 +2,15 @@ import { basename } from 'node:path';
 import { commandListText, escapeHtml } from '@shared/secretary/commands';
 import {
   bindCodeUsable,
+  bindCommandCode,
   bindDeepLink,
+  bindGroupLink,
+  bindTopicCommand,
   botTokenHint,
   CONTACT_BIND_CODE_TTL_MS,
   CONTACT_BIND_MAX_FAILURES,
   type ContactLang,
+  type ContactRouteClaim,
   createBindCode,
   formatTestMessage,
   formatWelcomeMessage,
@@ -37,7 +41,6 @@ import type {
   ContactChannel,
 } from './channel';
 import {
-  createTelegramApi,
   type TelegramApi,
   TelegramApiError,
   type TelegramInlineButton,
@@ -46,10 +49,13 @@ import {
   type TelegramUpdate,
   type TelegramUpload,
 } from './client';
-import { ContactPoller } from './poller';
+import { TelegramHub, type TelegramSubscriber, telegramTopicOf } from './hub';
 import {
   type ContactFile,
   type ContactStore,
+  contactClaims,
+  contactOwnerId,
+  hasContactRoutes,
   TELEGRAM_CHANNEL_ID,
   telegramGroupAllowed,
   withTelegramGroupTitle,
@@ -85,6 +91,17 @@ export interface TelegramChannelPorts {
   onBound?(): void;
   /** 测试注入假 API；生产按 token 现建 */
   api?(token: string): TelegramApi;
+  /** 全局连接中心：同一个 token 只轮询一次；缺省时自建一个只给自己用的 */
+  hub?: TelegramHub;
+  /** 这个渠道属于哪个秘书；单秘书与单测缺省为 default */
+  secretaryId?: string;
+  /**
+   * 同一个 bot 上别的秘书已经认领了这条路由（bot + chat + 话题）时返回它的名字；
+   * 缺省表示只有这一个秘书。
+   */
+  routeConflict?(claim: ContactRouteClaim): string | null;
+  /** 绑定成功时在群或话题里回一句「已绑定到秘书 X」 */
+  secretaryName?(): string;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -108,17 +125,6 @@ export function telegramErrorCode(error: unknown): ChannelErrorCode {
   return 'api';
 }
 
-/** 轮询以外的请求结果交给轮询器判断连通性；getUpdates 由轮询器自己管 */
-function tracked(api: TelegramApi, poller: ContactPoller): TelegramApi {
-  return new Proxy(api, {
-    get(target, key, receiver) {
-      const value: unknown = Reflect.get(target, key, receiver);
-      if (key === 'getUpdates' || typeof value !== 'function') return value;
-      return (...args: unknown[]) => poller.track(() => value.apply(target, args));
-    },
-  });
-}
-
 function keyboard(rows: ChannelMessage['buttons']): TelegramInlineKeyboard | undefined {
   if (!rows || rows.length === 0) return undefined;
   return {
@@ -139,12 +145,7 @@ function chatTypeOf(type: string | undefined): 'private' | 'group' | undefined {
   return undefined;
 }
 
-/** 只认论坛话题：普通超级群的回复串也带 message_thread_id，但发不进去 */
-function topicOf(message: TelegramMessage): string | undefined {
-  const thread = message.message_thread_id;
-  if (thread === undefined || !Number.isInteger(thread)) return undefined;
-  return message.is_topic_message || message.chat.is_forum ? String(thread) : undefined;
-}
+const topicOf = telegramTopicOf;
 
 function threadOf(topicId: string | undefined): { messageThreadId?: number } {
   const thread = topicId ? Number(topicId) : Number.NaN;
@@ -162,59 +163,151 @@ function admitChat(
 ): 'ok' | 'foreign-chat' | 'group-not-allowed' | 'foreign-sender' {
   if (isBoundChat(file.chat?.id, chat.id)) return 'ok';
   if (chatTypeOf(chat.type) !== 'group') return 'foreign-chat';
-  if (!telegramGroupAllowed(file, chat.id)) return 'group-not-allowed';
-  return isBoundChat(file.chat?.id, fromId ?? Number.NaN) ? 'ok' : 'foreign-sender';
+  const routed = file.telegramRoutes.some((route) => route.chatId === String(chat.id));
+  if (!telegramGroupAllowed(file, chat.id) && !routed) return 'group-not-allowed';
+  return isBoundChat(contactOwnerId(file), fromId ?? Number.NaN) ? 'ok' : 'foreign-sender';
 }
 
 /**
  * 内置 Telegram 渠道：绑定向导、长轮询、HTML 切条与降级、按钮、改消息、命令菜单。
  * 只认绑定的那个人（私聊，或他本人在白名单群里发的）；秘书语义（提问、确认卡、关注）全在核心里。
  */
-export class TelegramChannel implements ContactChannel {
+export class TelegramChannel implements ContactChannel, TelegramSubscriber {
   readonly id = TELEGRAM_CHANNEL_ID;
-  private readonly poller: ContactPoller;
-  private readonly apis = new Map<string, TelegramApi>();
-  /** chat → 最近一条入站消息所在的话题：发图片和文件时回到原话题 */
-  private readonly threads = new Map<string, number>();
+  readonly secretaryId: string;
+  private readonly hub: TelegramHub;
+  /** 已经在 hub 上订阅：start 之后才收更新 */
+  private attached = false;
 
   constructor(
     private readonly store: ContactStore,
     private readonly ports: TelegramChannelPorts
   ) {
-    this.poller = new ContactPoller({
-      api: () => {
-        const token = this.store.token();
-        return token ? this.apiFor(token) : null;
-      },
-      offset: () => this.store.file().pollOffset,
-      setOffset: (offset) => {
-        const file = this.store.file();
-        this.store.save({ ...file, pollOffset: offset });
-      },
-      onUpdate: (update) => this.handleUpdate(update),
-      onStatus: () => this.ports.publish(),
-      onError: (error) => this.reportError(error),
-      sleep,
-    });
+    this.secretaryId = ports.secretaryId ?? 'default';
+    this.hub =
+      ports.hub ??
+      new TelegramHub({
+        ...(ports.api ? { api: ports.api } : {}),
+        sleep,
+        onError: (error) => this.reportError(error),
+      });
   }
 
   caps(): ChannelCaps {
     return TELEGRAM_CAPS;
   }
 
-  /** 绑定的 chat：主动推送就发给它 */
+  /** 绑定的私聊：测试消息发给它 */
   peerId(): string | null {
     const chat = this.store.file().chat;
     return chat ? String(chat.id) : null;
   }
 
+  /** 主动推送的目标：私聊加上用绑定码绑的群与话题；群白名单只收不推 */
+  pushPeers(): { peerId: string; topicId?: string }[] {
+    const file = this.store.file();
+    const peers: { peerId: string; topicId?: string }[] = [];
+    if (file.chat) peers.push({ peerId: String(file.chat.id) });
+    if (file.ownerId !== undefined || file.chat) {
+      for (const route of file.telegramRoutes) {
+        peers.push({ peerId: route.chatId, ...(route.topicId ? { topicId: route.topicId } : {}) });
+      }
+    }
+    return peers;
+  }
+
+  // ---------- hub 订阅 ----------
+
+  token(): string {
+    return this.store.token();
+  }
+
+  claims(): ContactRouteClaim[] {
+    return contactClaims(this.secretaryId, this.store.file());
+  }
+
+  /** 过期的码也交回来：由秘书自己判定过期并记失败，界面才能提示重新生成 */
+  bindCode(): string | null {
+    return this.store.file().bind?.code ?? null;
+  }
+
+  /** 主人：私聊绑定的 chat 或绑群时记下的发码人 */
+  ownerId(): number | undefined {
+    return contactOwnerId(this.store.file());
+  }
+
+  wantsPolling(): boolean {
+    if (!this.attached) return false;
+    const file = this.store.file();
+    return Boolean(this.store.token()) && (hasContactRoutes(file) || file.bind !== undefined);
+  }
+
+  pollOffset(): number {
+    return this.store.file().pollOffset;
+  }
+
+  savePollOffset(offset: number): void {
+    const file = this.store.file();
+    if (file.pollOffset === offset) return;
+    this.store.save({ ...file, pollOffset: offset });
+  }
+
+  bindFailure(code: string): void {
+    const file = this.store.file();
+    if (!file.bind) return;
+    if (code === file.bind.code) return;
+    const failures = file.bind.failures + 1;
+    if (failures >= CONTACT_BIND_MAX_FAILURES) {
+      // 猜太多次：这个码作废，要求重新生成
+      const rest = { ...file };
+      delete rest.bind;
+      this.store.save(rest);
+      this.audit('contact_bind_rejected', false, 'too-many-attempts');
+      this.ports.publish();
+      this.hub.sync(this);
+      return;
+    }
+    this.store.save({ ...file, bind: { ...file.bind, failures } });
+    this.audit('contact_bind_rejected', false, 'code-mismatch');
+  }
+
+  /** 哪个秘书都没绑这里：不响应，只记审计；主人在群里说话时记下群名，界面认群用 */
+  rejectUnrouted(update: TelegramUpdate): void {
+    const file = this.store.file();
+    const message = update.message ?? update.callback_query?.message;
+    if (!message) return;
+    const fromId = update.message?.from?.id ?? update.callback_query?.from?.id;
+    if (
+      chatTypeOf(message.chat.type) === 'group' &&
+      message.chat.title &&
+      isBoundChat(contactOwnerId(file), fromId ?? Number.NaN)
+    ) {
+      const titled = withTelegramGroupTitle(file, String(message.chat.id), message.chat.title);
+      if (titled) this.store.save(titled);
+    }
+    if (file.bind && !hasContactRoutes(file)) {
+      this.audit('contact_inbound_rejected', false, 'awaiting-start');
+      return;
+    }
+    const verdict = admitChat(file, message.chat, fromId);
+    this.reject(
+      verdict === 'ok' || verdict === 'foreign-sender' ? 'foreign-chat' : verdict,
+      message.chat.id
+    );
+  }
+
+  onPollStatus(): void {
+    this.ports.publish();
+  }
+
   status(): { status: SecretaryContactChannelStatus; detail?: string } {
     const file = this.store.file();
-    const poll = this.poller.status();
-    if (file.chat && poll.state === 'error') {
+    const poll = this.hub.status(this.store.token());
+    const bound = hasContactRoutes(file);
+    if (bound && poll.state === 'error') {
       return { status: 'error', ...(poll.lastError ? { detail: poll.lastError } : {}) };
     }
-    if (file.chat) return { status: 'connected' };
+    if (bound) return { status: 'connected' };
     if (file.bind) return { status: 'pending' };
     return { status: 'unconfigured' };
   }
@@ -223,18 +316,20 @@ export class TelegramChannel implements ContactChannel {
     const file = this.store.file();
     const token = this.store.token();
     const bind = file.bind;
-    const status = file.chat ? 'bound' : bind ? 'awaiting-start' : 'unbound';
+    const status = hasContactRoutes(file) ? 'bound' : bind ? 'awaiting-start' : 'unbound';
     return {
       status,
       ...(file.bot ? { bot: file.bot } : {}),
       ...(file.chat ? { chat: file.chat } : {}),
       ...(file.boundAt !== undefined ? { boundAt: file.boundAt } : {}),
-      ...(bind && file.bot && status !== 'bound'
+      ...(bind && file.bot
         ? {
             bind: {
               code: bind.code,
               expiresAt: bind.expiresAt,
               link: bindDeepLink(file.bot.username, bind.code),
+              groupLink: bindGroupLink(file.bot.username, bind.code),
+              topicCommand: bindTopicCommand(file.bot.username, bind.code),
             },
           }
         : {}),
@@ -246,7 +341,12 @@ export class TelegramChannel implements ContactChannel {
         const title = file.telegramGroupTitles[id];
         return title ? { id, title } : { id };
       }),
-      poll: this.poller.status(),
+      routes: file.telegramRoutes.map((route) => ({
+        chatId: route.chatId,
+        ...(route.topicId ? { topicId: route.topicId } : {}),
+        ...(route.title ? { title: route.title } : {}),
+      })),
+      poll: this.hub.status(this.store.token()),
       secure: this.store.isSecure(),
     };
   }
@@ -254,14 +354,16 @@ export class TelegramChannel implements ContactChannel {
   /** 启动或重新打开开关：上次已经绑过、token 还在才轮询 */
   async start(): Promise<void> {
     await this.store.ready();
-    if (this.store.file().chat && this.store.token()) {
-      this.poller.start();
+    this.attached = true;
+    this.hub.sync(this);
+    if (hasContactRoutes(this.store.file()) && this.store.token()) {
       void this.setCommands(this.peerId() ?? '', this.ports.menuCommands());
     }
   }
 
   async stop(): Promise<void> {
-    await this.poller.stop();
+    this.attached = false;
+    await this.hub.detach(this);
   }
 
   /** 第 2、3 步：校验 token（getMe）并生成一次性绑定码；只带码时用已存 token 重新生成 */
@@ -307,7 +409,8 @@ export class TelegramChannel implements ContactChannel {
       bind: { code, expiresAt: this.ports.now() + CONTACT_BIND_CODE_TTL_MS, failures: 0 },
     });
     this.audit('contact_bind_start', true, `bot=${bot.id}`);
-    this.poller.start();
+    this.attached = true;
+    this.hub.sync(this);
     this.ports.publish();
     return { ok: true };
   }
@@ -320,25 +423,41 @@ export class TelegramChannel implements ContactChannel {
       delete rest.bind;
       this.store.save(rest);
     }
-    if (!file.chat) await this.poller.stop();
+    this.hub.sync(this);
     this.ports.publish();
   }
 
   /** 解绑：清 chat 与绑定码，停止轮询；bot 与 token 留着 */
   async unbind(): Promise<void> {
     const chatId = this.store.file().chat?.id;
-    await this.poller.stop();
-    this.threads.clear();
     this.store.saveUnbound();
+    this.hub.sync(this);
     await this.clearCommands(chatId);
+  }
+
+  /** 解绑一条群或话题路由：别的秘书才能绑过去 */
+  removeRoute(chatId: string, topicId: string | undefined): boolean {
+    const file = this.store.file();
+    const routes = file.telegramRoutes.filter(
+      (route) => !(route.chatId === chatId && (route.topicId ?? '') === (topicId ?? ''))
+    );
+    if (routes.length === file.telegramRoutes.length) return false;
+    this.store.save({ ...file, telegramRoutes: routes });
+    this.audit(
+      'contact_route_removed',
+      true,
+      `chat=${chatId}${topicId ? ` topic=${topicId}` : ''}`
+    );
+    this.hub.sync(this);
+    return true;
   }
 
   /** 更换 bot：token、bot 身份、chat 一起清 */
   async forgetBot(): Promise<void> {
     const chatId = this.store.file().chat?.id;
-    await this.poller.stop();
     // token 还在时才能调 API：先清菜单，再忘掉 bot
     await this.clearCommands(chatId);
+    await this.hub.detach(this);
     await this.store.saveForgotten();
   }
 
@@ -411,8 +530,9 @@ export class TelegramChannel implements ContactChannel {
 
   async typing(peerId: string, topicId?: string): Promise<ChannelResult> {
     const token = this.store.token();
-    // 解绑后立刻停：没有 chat 就不再发
-    if (!token || !this.store.file().chat) return { ok: false, error: 'token-required' };
+    // 解绑后立刻停：没有任何路由就不再发
+    if (!token || !hasContactRoutes(this.store.file()))
+      return { ok: false, error: 'token-required' };
     try {
       await this.apiFor(token).sendChatAction({
         chatId: Number(peerId),
@@ -425,12 +545,12 @@ export class TelegramChannel implements ContactChannel {
     }
   }
 
-  sendImage(peerId: string, image: ChannelImage): Promise<ChannelSend> {
-    return this.upload(peerId, 'photo', image);
+  sendImage(peerId: string, image: ChannelImage, topicId?: string): Promise<ChannelSend> {
+    return this.upload(peerId, 'photo', image, topicId);
   }
 
-  sendFile(peerId: string, file: ChannelFile): Promise<ChannelSend> {
-    return this.upload(peerId, 'document', file);
+  sendFile(peerId: string, file: ChannelFile, topicId?: string): Promise<ChannelSend> {
+    return this.upload(peerId, 'document', file, topicId);
   }
 
   /**
@@ -441,18 +561,20 @@ export class TelegramChannel implements ContactChannel {
   private async upload(
     peerId: string,
     kind: 'photo' | 'document',
-    media: ChannelImage
+    media: ChannelImage,
+    topicId?: string
   ): Promise<ChannelSend> {
     const token = this.store.token();
-    if (!token || !this.store.file().chat) return { ok: false, error: 'token-required' };
+    if (!token || !hasContactRoutes(this.store.file()))
+      return { ok: false, error: 'token-required' };
     const data = media.buffer;
     if (!data) return { ok: false, error: 'api' };
     const caption = media.caption?.trim() ?? '';
     const inline = caption.length <= TELEGRAM_CAPTION_MAX;
-    const threadId = this.threads.get(peerId);
+    const threadId = topicId !== undefined ? Number(topicId) : Number.NaN;
     const params: TelegramUpload = {
       chatId: Number(peerId),
-      ...(threadId !== undefined ? { threadId } : {}),
+      ...(Number.isInteger(threadId) ? { threadId } : {}),
       data,
       fileName: media.fileName || basename(media.path ?? '') || 'file',
       ...(media.mimeType ? { mimeType: media.mimeType } : {}),
@@ -476,7 +598,7 @@ export class TelegramChannel implements ContactChannel {
       }
     }
     if (caption && !inline) {
-      const rest = await this.send(peerId, { text: caption });
+      const rest = await this.send(peerId, { text: caption }, topicId);
       if (!rest.ok) return rest;
     }
     return { ok: true, messageId: String(messageId) };
@@ -548,13 +670,7 @@ export class TelegramChannel implements ContactChannel {
   }
 
   private apiFor(token: string): TelegramApi {
-    const injected = this.ports.api?.(token);
-    if (injected) return tracked(injected, this.poller);
-    const cached = this.apis.get(token);
-    if (cached) return cached;
-    const api = tracked(createTelegramApi(token), this.poller);
-    this.apis.set(token, api);
-    return api;
+    return this.hub.apiFor(token);
   }
 
   /**
@@ -621,7 +737,7 @@ export class TelegramChannel implements ContactChannel {
     }
   }
 
-  private async handleUpdate(update: TelegramUpdate): Promise<void> {
+  async handleUpdate(update: TelegramUpdate): Promise<void> {
     const file = this.store.file();
     if (update.callback_query) {
       const query = update.callback_query;
@@ -649,14 +765,17 @@ export class TelegramChannel implements ContactChannel {
     const text = message?.text?.trim();
     if (!message || !text) return;
 
-    // 绑定向导：只认私聊里的 /start <code>，对不上就忽略，绝不绑到陌生人身上
-    if (file.bind) {
-      const code = startCommandCode(text);
+    // 绑定向导：私聊里的 /start <code> 绑私聊，群或话题里的 /bind <code> 绑群或话题；
+    // 对不上就忽略，绝不绑到陌生人身上。已经有路由时，别的话照常收。
+    const bindCode = bindCommandCode(text) ?? startCommandCode(text);
+    if (file.bind && (bindCode || !hasContactRoutes(file))) {
+      const code = bindCode;
       if (!code) {
         this.audit('contact_inbound_rejected', false, 'awaiting-start');
         return;
       }
-      if (message.chat.type && message.chat.type !== 'private') {
+      const chatKind = chatTypeOf(message.chat.type);
+      if (message.chat.type && chatKind === undefined) {
         this.audit('contact_bind_rejected', false, 'not-private');
         return;
       }
@@ -675,7 +794,8 @@ export class TelegramChannel implements ContactChannel {
         this.audit('contact_bind_rejected', false, 'code-mismatch');
         return;
       }
-      await this.completeBind(message);
+      if (chatKind === 'group') await this.completeGroupBind(message);
+      else await this.completeBind(message);
       return;
     }
 
@@ -695,7 +815,6 @@ export class TelegramChannel implements ContactChannel {
       this.reject(verdict === 'foreign-sender' ? 'foreign-chat' : verdict, message.chat.id);
       return;
     }
-    this.rememberThread(message);
     const topicId = topicOf(message);
     const name = message.from?.username ?? message.from?.first_name;
     await this.ports.inbound({
@@ -730,6 +849,16 @@ export class TelegramChannel implements ContactChannel {
     const file = this.store.file();
     const bot = file.bot;
     if (!bot) return;
+    // 私聊也是绑了谁归谁：同一个 bot 的这个私聊已经属于别的秘书就拒绝
+    const conflict = this.ports.routeConflict?.({
+      secretaryId: this.secretaryId,
+      botId: bot.id,
+      chatId: String(message.chat.id),
+    });
+    if (conflict) {
+      this.audit('contact_bind_rejected', false, 'route-conflict');
+      return;
+    }
     const rest = { ...file };
     delete rest.bind;
     const chat = {
@@ -755,14 +884,65 @@ export class TelegramChannel implements ContactChannel {
     if (sent.ok) this.audit('contact_outbound', true, 'welcome');
   }
 
-  /** 话题消息记下话题；在 General 里说话就清掉，之后回到 General */
-  private rememberThread(message: TelegramMessage): void {
-    const chatId = String(message.chat.id);
-    if (message.is_topic_message && message.message_thread_id !== undefined) {
-      this.threads.set(chatId, message.message_thread_id);
-    } else {
-      this.threads.delete(chatId);
+  /**
+   * 在群或话题里完成绑定：已经有主人就只认主人，没有就把发码的人记为主人。
+   * 冲突（同一 bot + chat + 话题已属于别的秘书）时拒绝，只记审计，不在群里回话。
+   */
+  private async completeGroupBind(message: TelegramMessage): Promise<void> {
+    const file = this.store.file();
+    const bot = file.bot;
+    const fromId = message.from?.id;
+    if (!bot) return;
+    if (fromId === undefined) {
+      this.audit('contact_bind_rejected', false, 'no-sender');
+      return;
     }
+    const owner = contactOwnerId(file);
+    if (owner !== undefined && owner !== fromId) {
+      this.audit('contact_bind_rejected', false, 'foreign-sender');
+      return;
+    }
+    const chatId = String(message.chat.id);
+    const topicId = topicOf(message);
+    const conflict = this.ports.routeConflict?.({
+      secretaryId: this.secretaryId,
+      botId: bot.id,
+      chatId,
+      ...(topicId ? { topicId } : {}),
+    });
+    if (conflict) {
+      this.audit('contact_bind_rejected', false, 'route-conflict');
+      return;
+    }
+    const rest = { ...file };
+    delete rest.bind;
+    const routes = file.telegramRoutes.filter(
+      (route) => !(route.chatId === chatId && (route.topicId ?? '') === (topicId ?? ''))
+    );
+    this.store.save({
+      ...rest,
+      ...(owner === undefined ? { ownerId: fromId } : {}),
+      telegramRoutes: [
+        ...routes,
+        {
+          chatId,
+          ...(topicId ? { topicId } : {}),
+          ...(message.chat.title ? { title: message.chat.title } : {}),
+          boundAt: this.ports.now(),
+        },
+      ],
+    });
+    this.audit('contact_bound', true, `chat=${chatId}${topicId ? ` topic=${topicId}` : ''}`);
+    this.hub.sync(this);
+    this.ports.publish();
+    this.ports.onBound?.();
+    const name = escapeHtml(this.ports.secretaryName?.() ?? bot.name);
+    const text =
+      this.ports.lang() === 'zh'
+        ? `已绑定到秘书「${name}」：这里的消息由它接收，它的提醒也会发到这里。`
+        : `Bound to secretary "${name}": it reads messages here and posts its updates here.`;
+    const sent = await this.send(chatId, { text, format: 'html' }, topicId);
+    if (sent.ok) this.audit('contact_outbound', true, 'bound');
   }
 
   private async answerCallback(callbackQueryId: string, text?: string): Promise<void> {

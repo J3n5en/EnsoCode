@@ -6,7 +6,6 @@
  * 渠道怎么发（Telegram 内置、插件渠道）由联系方式核心决定，这里不认识任何渠道。
  */
 import path from 'node:path';
-import { app } from '@platform';
 import { readImageFacts } from '@shared/secretary/imageBytes';
 import {
   IMAGE_VIEW_MAX_BYTES,
@@ -128,9 +127,11 @@ export function createContactSendFileHandler(ports: ContactSendHandlerPorts): Se
   };
 }
 
-export const secretaryContactSendFileHandler = createContactSendFileHandler({
-  deps: realImageViewDeps,
-  sender: () => sender,
-  audit: (entry) => appendAudit(path.join(app.getPath('userData'), 'secretary'), entry),
-  now: () => Date.now(),
-});
+export function contactSendFileHandlerFor(dir: string): SecretaryOpHandler {
+  return createContactSendFileHandler({
+    deps: realImageViewDeps,
+    sender: () => sender,
+    audit: (entry) => appendAudit(dir, entry),
+    now: () => Date.now(),
+  });
+}

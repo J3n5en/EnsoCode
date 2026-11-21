@@ -41,6 +41,16 @@ export function defaultDraft(defaultName: string): SecretaryProfileDraft {
   return draftFromProfile(null, defaultName);
 }
 
+/** Main 不许两个秘书重名（不分大小写、去首尾空格）：默认名被占了就往后编号 */
+export function freeSecretaryName(base: string, taken: readonly (string | null)[]): string {
+  const used = new Set(taken.flatMap((name) => (name ? [name.trim().toLocaleLowerCase()] : [])));
+  if (!used.has(base.trim().toLocaleLowerCase())) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base} ${n}`;
+    if (!used.has(candidate.toLocaleLowerCase())) return candidate;
+  }
+}
+
 export function formReducer(
   draft: SecretaryProfileDraft,
   action: ProfileFormAction

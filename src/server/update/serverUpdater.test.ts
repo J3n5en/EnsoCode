@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ServerUpdater, type ServerUpdaterDeps } from './serverUpdater';
 
 const idle = () => ({
-  enabled: true,
-  downloaded: true,
   agentBusy: false,
+  userActive: false,
+  unsentDraft: false,
   windowFocused: false,
   queuedCount: 0,
   pendingAskCount: 0,

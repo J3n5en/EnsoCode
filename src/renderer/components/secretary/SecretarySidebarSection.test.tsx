@@ -40,9 +40,18 @@ vi.mock('@/components/ui/context-menu', async () => {
     ContextMenuSeparator: () => null,
   };
 });
+vi.mock('@/components/ui/preview-card', () => ({
+  PreviewCard: ({ children }: { children: ReactNode }) => <>{children}</>,
+  PreviewCardTrigger: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  PreviewCardPopup: ({ children }: { children: ReactNode }) => (
+    <div data-enso="popup">{children}</div>
+  ),
+}));
 
+import { runningBySecretary, SecretaryDispatchBadge } from './SecretaryRunningOrigins';
 import {
   SecretaryCollapsedButton,
+  SecretaryGroupHeader,
   SecretarySidebarSection,
   sidebarProjects,
 } from './SecretarySidebarSection';
@@ -302,6 +311,50 @@ describe('SecretarySidebarSection', () => {
     expect(handlers.onToggleFold).toHaveBeenCalledTimes(1);
   });
 
+  it('只有一个秘书时，折叠后箭头顶掉头像', async () => {
+    await render(
+      <SecretarySidebarSection view={view()} folded {...actions()}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    const avatar = container.querySelector('[data-enso="secretary-avatar"]');
+    expect(avatar?.parentElement?.className).toContain('hidden');
+    const icon = container.querySelector('[data-enso="secretary-fold-icon"]');
+    expect(icon?.className).toContain('flex');
+    expect(icon?.className).not.toContain('absolute');
+  });
+
+  it('多个秘书折叠后头像仍在，箭头叠在头像上、平时不显示', async () => {
+    await render(
+      <SecretarySidebarSection view={view()} folded keepAvatar {...actions()}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    const avatar = container.querySelector('[data-enso="secretary-avatar"]');
+    expect(avatar).not.toBeNull();
+    expect(avatar?.parentElement?.className ?? '').not.toContain('hidden');
+    const icon = container.querySelector('[data-enso="secretary-fold-icon"]');
+    expect(icon?.className).toContain('absolute');
+    expect(icon?.className).toContain('inset-0');
+    expect(icon?.className).toContain('hidden');
+    expect(icon?.className).toContain('group-hover:flex');
+    expect(icon?.className).toContain('group-has-[:focus-visible]:flex');
+    expect(icon?.querySelector('svg')?.getAttribute('class')).toContain('-rotate-90');
+  });
+
+  it('多个秘书展开时箭头同样只在悬停或键盘聚焦时出现', async () => {
+    await render(
+      <SecretarySidebarSection view={view()} folded={false} keepAvatar {...actions()}>
+        {null}
+      </SecretarySidebarSection>
+    );
+    const icon = container.querySelector('[data-enso="secretary-fold-icon"]');
+    expect(icon?.className).toContain('hidden');
+    expect(icon?.className).toContain('group-hover:flex');
+    expect(icon?.className).not.toContain('group-hover:hidden');
+    expect(container.querySelector('[data-enso="secretary-avatar"]')).not.toBeNull();
+  });
+
   it('右键只有新会话、设置、重新设置秘书', async () => {
     const handlers = actions();
     await render(
@@ -320,6 +373,89 @@ describe('SecretarySidebarSection', () => {
     ]);
     act(() => menuItem('[Re-run setup]')?.click());
     expect(handlers.onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('两个秘书各派一件：计数与悬停列表只落在各自的分区和会话行', async () => {
+    const secretaries = [
+      {
+        id: 'a',
+        conversations: ['sa', 'sa2'],
+        board: [{ ...sessionCard('ca'), secretaryConversationId: 'sa' }],
+      },
+      {
+        id: 'b',
+        conversations: ['sb'],
+        board: [{ ...sessionCard('cb'), secretaryConversationId: 'sb' }],
+      },
+    ];
+    const states = Object.fromEntries(
+      secretaries.map((entry) => [
+        entry.id,
+        state({ profile, board: { needsYou: [], running: entry.board, done: [], todos: [] } }),
+      ])
+    );
+    const running = runningBySecretary(secretaries, states, () => true);
+    await render(
+      secretaries.map((entry) => {
+        const origins = running[entry.id];
+        return (
+          <SecretarySidebarSection
+            key={entry.id}
+            view={view({ profile, board: states[entry.id]?.board })}
+            folded={false}
+            secretaryId={entry.id}
+            runningOrigins={
+              origins && { groups: origins.groups, titleOf: (id) => id, onSelect: vi.fn() }
+            }
+            {...actions()}
+          >
+            {entry.conversations.map((id) => (
+              <div key={id} data-row={id}>
+                <SecretaryDispatchBadge count={origins?.counts[id]} />
+              </div>
+            ))}
+          </SecretarySidebarSection>
+        );
+      })
+    );
+    const section = (id: string) =>
+      container.querySelector(`[data-enso="secretary-section"][data-secretary-id="${id}"]`);
+    const badge = (id: string) =>
+      container.querySelector(`[data-row="${id}"] [data-enso="secretary-dispatch-running"]`)
+        ?.textContent ?? null;
+    const origins = (id: string) =>
+      [...(section(id)?.querySelectorAll('[data-enso="secretary-running-origin"]') ?? [])].map(
+        (node) => node.textContent
+      );
+    expect([badge('sa'), badge('sa2'), badge('sb')]).toEqual(['1', null, '1']);
+    expect(section('a')?.querySelector('[data-row="sb"]')).toBeNull();
+    expect(origins('a')).toEqual(['sa1跑测试']);
+    expect(origins('b')).toEqual(['sb1跑测试']);
+  });
+});
+
+describe('SecretaryGroupHeader', () => {
+  it('整块标题的箭头平时隐去，悬停或键盘聚焦才出现，折叠只旋转不挪字', async () => {
+    const onToggleFold = vi.fn();
+    await render(
+      <SecretaryGroupHeader
+        count={2}
+        folded
+        needsYou={0}
+        onToggleFold={onToggleFold}
+        onCreate={vi.fn()}
+      />
+    );
+    const chevron = container.querySelector('[data-enso="secretary-group-chevron"]');
+    expect(chevron?.getAttribute('class')).toContain('opacity-0');
+    expect(chevron?.getAttribute('class')).toContain('group-hover:opacity-100');
+    expect(chevron?.getAttribute('class')).toContain('group-has-[:focus-visible]:opacity-100');
+    expect(chevron?.getAttribute('class')).toContain('-rotate-90');
+    expect(chevron?.getAttribute('class')).toContain('shrink-0');
+    act(() =>
+      (container.querySelector('[data-enso="secretary-group-fold"]') as HTMLElement).click()
+    );
+    expect(onToggleFold).toHaveBeenCalledTimes(1);
   });
 });
 

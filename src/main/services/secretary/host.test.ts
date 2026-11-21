@@ -2021,4 +2021,69 @@ describe('派出会话的流式事件', () => {
     expect(saves).toBe(first.saves + 1);
     expect(h.state.file.dispatched.c1?.lastEventAt).toBe(h.state.now);
   });
+
+  it('补存由别的会话触发时，间隔里其他会话的事件时刻也一起落盘', () => {
+    const c2 = { ...emptyFile().dispatched.c1, conversationId: 'c2' } as DispatchRecord;
+    const h = harness({ file: { dispatched: { ...emptyFile().dispatched, c2 } } });
+    h.state.rows.c2 = { id: 'c2', title: '另一个', projectId: 'p1', sessionFile: '/tmp/c2.jsonl' };
+    h.state.statuses.c2 = running;
+    const c2Event = (type: string) =>
+      ({ type, identity: { sessionId: 'c2', generation: 'g2' }, seq: 1, turnId: 't2' }) as never;
+    h.state.now = 1_000;
+    h.host.onAgentEvent(event('message-update'), []);
+    h.host.onAgentEvent(c2Event('message-update'), []);
+    h.state.now = 20_000;
+    h.host.onAgentEvent(c2Event('message-update'), []);
+    h.state.now = 1_000 + MINUTE;
+    h.host.onAgentEvent(event('message-update'), []);
+    expect(h.state.file.dispatched.c1?.lastEventAt).toBe(1_000 + MINUTE);
+    expect(h.state.file.dispatched.c2?.lastEventAt).toBe(20_000);
+  });
+});
+
+describe('优雅重启续跑的会话', () => {
+  it('写进恢复清单、重启后接着跑：退出时的中断不报 interrupted / failed；清单外被杀掉的仍报 failed', () => {
+    const h = harness({});
+    h.ports.continuesAfterExit = (conversationId) => conversationId === 'c1';
+    h.state.statuses.c1 = idle;
+    h.host.onAgentEvent(
+      event('turn-failed', { error: 'aborted', interrupted: { at: 1, kind: 'update' } }),
+      change('idle', 'running')
+    );
+    h.host.onAgentEvent(
+      { type: 'worker-exited' } as RendererAgentEvent,
+      change('error', 'running')
+    );
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+
+    const killed = harness({});
+    killed.ports.continuesAfterExit = (conversationId) => conversationId === 'other';
+    killed.state.statuses.c1 = error;
+    killed.host.onAgentEvent(
+      { type: 'worker-exited' } as RendererAgentEvent,
+      change('error', 'running')
+    );
+    expect(killed.state.file.outbox[0]).toMatchObject({ kind: 'failed' });
+  });
+
+  it('启动恢复：冷启动正在续跑的会话不报中断', () => {
+    const h = harness({});
+    h.ports.coldResumed = (conversationId) => conversationId === 'c1';
+    h.state.statuses.c1 = idle;
+    h.host.recover();
+    expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+    expect(h.state.file.outbox).toEqual([]);
+  });
+
+  it('续跑没接上：报 failed 并说明原因', () => {
+    const h = harness({});
+    h.state.statuses.c1 = idle;
+    h.state.now = 7000;
+    h.host.onRestartResumeFailed('c1', 'spawn rejected: no model');
+    h.host.onRestartResumeFailed('ghost', 'x');
+    expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', at: 7000 });
+    expect(h.state.file.outbox).toHaveLength(1);
+    expect(h.state.file.outbox[0].text).toContain('spawn rejected: no model');
+  });
 });

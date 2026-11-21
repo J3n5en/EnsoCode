@@ -1,6 +1,7 @@
 import {
   NEEDS_YOU_RESULTS,
   type PendingDispatch,
+  type SecretaryBoard,
   type SecretaryBoardTodo,
   type SecretaryTodoMutate,
   type TodoProblemCode,
@@ -16,7 +17,7 @@ import {
   Trash2,
   Undo2,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { ApprovalBar } from '@/components/chat/ApprovalBar';
 import { AskBar } from '@/components/chat/AskBar';
 import { HOVER_ROW_CLASS, HoverActions } from '@/components/ui/hover-actions';
@@ -37,8 +38,8 @@ import {
 import { useSecretaryFace } from './useSecretaryFace';
 import { useSecretaryFeed } from './useSecretaryFeed';
 
-function mutateTodo(request: SecretaryTodoMutate): void {
-  void window.electronAPI.secretary.mutateTodo(request);
+function mutateTodo(request: SecretaryTodoMutate, secretaryId?: string): void {
+  void window.electronAPI.secretary.mutateTodo(request, secretaryId);
 }
 
 /** 今天只给钟点，更早给相对时间：时间线上一眼看出新旧 */
@@ -223,7 +224,7 @@ function AttentionCard({ card }: { card: SecretarySessionCard }) {
   );
 }
 
-function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
+function TodoRow({ todo, secretaryId }: { todo: SecretaryBoardTodo; secretaryId?: string }) {
   const { t, locale } = useI18n();
   const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [draft, setDraft] = useState<string | null>(null);
@@ -241,7 +242,7 @@ function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
             if (event.key === 'Escape') setDraft(null);
             if (event.key !== 'Enter') return;
             const text = draft.trim();
-            if (text) mutateTodo({ action: 'update', todoId: todo.id, text });
+            if (text) mutateTodo({ action: 'update', todoId: todo.id, text }, secretaryId);
             setDraft(null);
           }}
           className="w-full bg-transparent text-[13px] outline-none"
@@ -265,7 +266,7 @@ function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
         type="button"
         data-enso="secretary-todo-done"
         aria-label={t('Mark done')}
-        onClick={() => mutateTodo({ action: 'update', todoId: todo.id, done: true })}
+        onClick={() => mutateTodo({ action: 'update', todoId: todo.id, done: true }, secretaryId)}
         className="mt-[3px] size-3.5 shrink-0 rounded-full border-[1.5px] border-foreground/30 transition-colors hover:border-success hover:bg-success/20"
       />
       <div className="min-w-0 flex-1">
@@ -302,7 +303,7 @@ function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
             data-enso="secretary-todo-dispatch"
             title={t('Dispatch')}
             aria-label={t('Dispatch')}
-            onClick={() => mutateTodo({ action: 'dispatch', todoId: todo.id })}
+            onClick={() => mutateTodo({ action: 'dispatch', todoId: todo.id }, secretaryId)}
             className={ACTION_CLASS}
           >
             <Send className="h-3.5 w-3.5" />
@@ -313,7 +314,7 @@ function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
             data-enso="secretary-todo-reopen"
             title={t('Back to to-do')}
             aria-label={t('Back to to-do')}
-            onClick={() => mutateTodo({ action: 'reopen', todoId: todo.id })}
+            onClick={() => mutateTodo({ action: 'reopen', todoId: todo.id }, secretaryId)}
             className={ACTION_CLASS}
           >
             <Undo2 className="h-3.5 w-3.5" />
@@ -332,7 +333,7 @@ function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
           type="button"
           title={t('Delete')}
           aria-label={t('Delete')}
-          onClick={() => mutateTodo({ action: 'remove', todoId: todo.id })}
+          onClick={() => mutateTodo({ action: 'remove', todoId: todo.id }, secretaryId)}
           className={ACTION_CLASS}
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -342,12 +343,12 @@ function TodoRow({ todo }: { todo: SecretaryBoardTodo }) {
   );
 }
 
-function TodoComposer({ onClose }: { onClose: () => void }) {
+function TodoComposer({ onClose, secretaryId }: { onClose: () => void; secretaryId?: string }) {
   const { t } = useI18n();
   const [text, setText] = useState('');
   const submit = () => {
     const trimmed = text.trim();
-    if (trimmed) mutateTodo({ action: 'add', text: trimmed });
+    if (trimmed) mutateTodo({ action: 'add', text: trimmed }, secretaryId);
     onClose();
   };
   return (
@@ -508,15 +509,47 @@ function EmptyState({ name, onAdd }: { name: string; onAdd: () => void }) {
 }
 
 /** 工作台：问候与今日战报、三个计数、需要你处理、待办、动态时间线 */
-export function SecretaryWorkbench({ name }: { name: string }) {
+export function SecretaryWorkbench({ name, secretaryId }: { name: string; secretaryId?: string }) {
   const { t } = useI18n();
-  const board = useSecretaryStore((s) => s.secretary.board);
+  const ownBoard = useSecretaryStore((s) =>
+    secretaryId ? (s.states[secretaryId]?.board ?? s.secretary.board) : s.secretary.board
+  );
+  const secretaries = useSecretaryStore((s) => s.secretaries);
+  /** 多个秘书时可以看总看板：全部，或筛到某一个 */
+  const [scope, setScope] = useState<'own' | 'all'>('own');
+  const [filterId, setFilterId] = useState<string>('all');
+  const [overviewBoards, setOverviewBoards] = useState<
+    { secretaryId: string; name: string | null; board: SecretaryBoard }[] | null
+  >(null);
+  useEffect(() => {
+    if (scope !== 'all') return;
+    let alive = true;
+    void window.electronAPI.secretary.overview().then((result) => {
+      if (alive && result.ok) setOverviewBoards(result.boards);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [scope]);
+  const board = useMemo(() => {
+    if (scope !== 'all' || !overviewBoards) return ownBoard;
+    const picked =
+      filterId === 'all'
+        ? overviewBoards
+        : overviewBoards.filter((entry) => entry.secretaryId === filterId);
+    return {
+      needsYou: picked.flatMap((entry) => entry.board.needsYou),
+      running: picked.flatMap((entry) => entry.board.running),
+      todos: picked.flatMap((entry) => entry.board.todos),
+      done: picked.flatMap((entry) => entry.board.done),
+    };
+  }, [scope, overviewBoards, filterId, ownBoard]);
   const focusProposal = useSecretaryStore((s) => s.focusProposal);
   const [adding, setAdding] = useState(false);
   /** 深链定位过来的那张卡：滚到它并闪一下，2 秒后恢复 */
   const [highlight, setHighlight] = useState<string | null>(null);
   const digest = secretaryDigest(board, Date.now());
-  const feed = useSecretaryFeed();
+  const feed = useSecretaryFeed(secretaryId);
   const empty =
     board.needsYou.length + board.running.length + board.todos.length + board.done.length === 0;
 
@@ -538,7 +571,7 @@ export function SecretaryWorkbench({ name }: { name: string }) {
   if (empty) {
     return adding ? (
       <div className="px-3 py-3">
-        <TodoComposer onClose={() => setAdding(false)} />
+        <TodoComposer onClose={() => setAdding(false)} secretaryId={secretaryId} />
       </div>
     ) : (
       <EmptyState name={name} onAdd={() => setAdding(true)} />
@@ -561,6 +594,43 @@ export function SecretaryWorkbench({ name }: { name: string }) {
 
   return (
     <div data-enso="secretary-workbench" className="flex flex-col gap-3 px-3 py-3">
+      {secretaries.length > 1 && (
+        <div className="flex items-center gap-1.5">
+          {(['own', 'all'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              data-enso="secretary-board-scope-option"
+              data-scope={option}
+              aria-pressed={scope === option}
+              onClick={() => setScope(option)}
+              className={cn(
+                'rounded-md px-2 py-0.5 text-[12px] transition-colors',
+                scope === option
+                  ? 'bg-foreground/10 font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-foreground/5'
+              )}
+            >
+              {option === 'own' ? name : t('All secretaries')}
+            </button>
+          ))}
+          {scope === 'all' && (
+            <select
+              data-enso="secretary-board-filter"
+              value={filterId}
+              onChange={(event) => setFilterId(event.target.value)}
+              className="ml-auto rounded-md bg-transparent text-[12px] text-muted-foreground"
+            >
+              <option value="all">{t('All secretaries')}</option>
+              {secretaries.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name ?? t('Secretary')}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
       <div>
         <p className="text-[15px] font-semibold">{t(digest.greeting)}</p>
         <p className="mt-0.5 text-[12.5px] text-muted-foreground">{todayLine}</p>
@@ -600,14 +670,14 @@ export function SecretaryWorkbench({ name }: { name: string }) {
       {active.length > 0 && (
         <TodoGroup title={t('In progress')} count={active.length} marker="secretary-active">
           {active.map((todo) => (
-            <TodoRow key={todo.id} todo={todo} />
+            <TodoRow key={todo.id} todo={todo} secretaryId={secretaryId} />
           ))}
         </TodoGroup>
       )}
       {problem.length > 0 && (
         <TodoGroup title={t('Problem')} count={problem.length} marker="secretary-problem">
           {problem.map((todo) => (
-            <TodoRow key={todo.id} todo={todo} />
+            <TodoRow key={todo.id} todo={todo} secretaryId={secretaryId} />
           ))}
         </TodoGroup>
       )}
@@ -620,7 +690,7 @@ export function SecretaryWorkbench({ name }: { name: string }) {
         onDrop={(event) => {
           event.preventDefault();
           const todoId = event.dataTransfer.getData('text/plain');
-          if (reopenIds.has(todoId)) mutateTodo({ action: 'reopen', todoId });
+          if (reopenIds.has(todoId)) mutateTodo({ action: 'reopen', todoId }, secretaryId);
         }}
       >
         <h3 className="px-1.5 pb-1 text-[12px] text-subtle-foreground">
@@ -628,10 +698,10 @@ export function SecretaryWorkbench({ name }: { name: string }) {
           {open.length > 0 && <span className="ml-1 tabular-nums">{open.length}</span>}
         </h3>
         {open.map((todo) => (
-          <TodoRow key={todo.id} todo={todo} />
+          <TodoRow key={todo.id} todo={todo} secretaryId={secretaryId} />
         ))}
         {adding ? (
-          <TodoComposer onClose={() => setAdding(false)} />
+          <TodoComposer onClose={() => setAdding(false)} secretaryId={secretaryId} />
         ) : (
           <AddTodoRow onAdd={() => setAdding(true)} />
         )}

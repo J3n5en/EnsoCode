@@ -95,11 +95,14 @@ import { PhoneLinkStatus } from '@/components/nodes/PhoneLinkStatus';
 import { SecretaryOriginBadge } from '@/components/secretary/SecretaryOriginBadge';
 import { SecretaryResetDialog } from '@/components/secretary/SecretaryResetDialog';
 import {
+  type RunningOrigins,
   runningByOrigin,
+  runningBySecretary,
   SecretaryDispatchBadge,
 } from '@/components/secretary/SecretaryRunningOrigins';
 import {
   SecretaryCollapsedButton,
+  SecretaryGroupHeader,
   SecretarySidebarSection,
   sidebarProjects,
 } from '@/components/secretary/SecretarySidebarSection';
@@ -145,6 +148,7 @@ import { effectiveKeybindings, formatBinding, IS_MAC } from '@/lib/keybindings';
 import { heightVariants, springStandard } from '@/lib/motion';
 import { openSecretary } from '@/lib/openSecretary';
 import { secretaryConversationIds } from '@/lib/secretaryEntry';
+import { openSecretarySettings } from '@/lib/secretarySettingsLink';
 import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
@@ -199,6 +203,10 @@ const SHOW_MORE_CLASS =
   'h-6.5 rounded-lg px-2 text-xs text-subtle-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
 const SCRATCH_COLLAPSED_KEY = 'enso-collapsed-scratch';
 const SECRETARY_COLLAPSED_KEY = 'enso-collapsed-secretary';
+/** 多个秘书时整块折叠的记录；单个秘书沿用上面那条，升级前后行为不变 */
+const SECRETARY_GROUP_COLLAPSED_KEY = 'enso-collapsed-secretary-group';
+/** 每个秘书各自的折叠记录（值是折叠着的秘书 id 列表） */
+const SECRETARY_FOLDS_KEY = 'enso-collapsed-secretaries';
 /** 秘书伪项目默认只列最近几条，其余折叠 */
 const SECRETARY_VISIBLE_LIMIT = 3;
 
@@ -321,11 +329,80 @@ export function Sidebar({
 
   // 秘书是置顶伪项目：单独渲染，不参与分组筛选、拖拽排序与项目设置
   const secretaryState = useSecretaryStore((state) => state.secretary);
+  const secretaryList = useSecretaryStore((state) => state.secretaries);
+  const secretaryStates = useSecretaryStore((state) => state.states);
+  /** 多个秘书时整块渲染；清单还没到时按单秘书画，升级后的第一眼与原来一致 */
+  const multiSecretary = secretaryList.length > 1;
   const secretaryView = useMemo(() => secretarySectionView(secretaryState, t), [secretaryState, t]);
-  const secretaryRunning = useMemo(
-    () => runningByOrigin(secretaryState.board, (id) => conversations[id] !== undefined),
-    [secretaryState.board, conversations]
-  );
+  const secretaryEntries = useMemo(() => {
+    if (!multiSecretary) return [];
+    return secretaryList.flatMap((entry) => {
+      const state = secretaryStates[entry.id];
+      const view = state ? secretarySectionView(state, t, entry.id) : null;
+      return view ? [{ id: entry.id, projectId: entry.projectId, view }] : [];
+    });
+  }, [multiSecretary, secretaryList, secretaryStates, t]);
+  // 每个秘书只按自己的看板分组，计数和悬停列表都不跨分区
+  const secretaryRunning = useMemo(() => {
+    const known = (id: string) => conversations[id] !== undefined;
+    return {
+      single: runningByOrigin(secretaryState.board, known),
+      byId: multiSecretary ? runningBySecretary(secretaryList, secretaryStates, known) : {},
+    };
+  }, [multiSecretary, secretaryList, secretaryStates, secretaryState.board, conversations]);
+  const runningLink = (origins: RunningOrigins | undefined) =>
+    origins && {
+      groups: origins.groups,
+      titleOf: (id: string) => conversations[id]?.title,
+      onSelect: selectConversation,
+    };
+  const [secretaryGroupFolded, setSecretaryGroupFolded] = useState(() => {
+    try {
+      return localStorage.getItem(SECRETARY_GROUP_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSecretaryGroupFolded = () => {
+    setSecretaryGroupFolded((prev) => {
+      try {
+        localStorage.setItem(SECRETARY_GROUP_COLLAPSED_KEY, prev ? '0' : '1');
+      } catch {
+        // 隐私模式或配额满时只保留本次内存状态
+      }
+      return !prev;
+    });
+  };
+  const [secretaryFolds, setSecretaryFolds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(SECRETARY_FOLDS_KEY);
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      // 升级前只有一个秘书，沿用旧的整行折叠记录
+      if (
+        Array.isArray(parsed) &&
+        parsed.length === 0 &&
+        localStorage.getItem(SECRETARY_COLLAPSED_KEY) === '1'
+      ) {
+        return ['default'];
+      }
+      return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const toggleSecretaryFold = (secretaryId: string) => {
+    setSecretaryFolds((prev) => {
+      const next = prev.includes(secretaryId)
+        ? prev.filter((entry) => entry !== secretaryId)
+        : [...prev, secretaryId];
+      try {
+        localStorage.setItem(SECRETARY_FOLDS_KEY, JSON.stringify(next));
+      } catch {
+        // 同上
+      }
+      return next;
+    });
+  };
   const [secretaryFolded, setSecretaryFolded] = useState(() => {
     try {
       return localStorage.getItem(SECRETARY_COLLAPSED_KEY) === '1';
@@ -344,7 +421,8 @@ export function Sidebar({
     });
   };
   const [secretaryRevealed, setSecretaryRevealed] = useState(false);
-  const [secretaryResetOpen, setSecretaryResetOpen] = useState(false);
+  /** 非 null 时弹出重来确认框，值是要重来的秘书 id（单秘书时为 null 语义走默认） */
+  const [secretaryResetId, setSecretaryResetId] = useState<string | null>(null);
   const secretaryIds = useMemo(
     () => secretaryConversationIds(secretaryState.projectId, order, conversations),
     [order, conversations, secretaryState.projectId]
@@ -929,8 +1007,22 @@ export function Sidebar({
       {collapsed && (
         <div className="flex w-full flex-1 flex-col items-center gap-1 py-2">
           {/* 展开/折叠与搜索常驻窗口顶栏（App），折叠栏只留其余入口 */}
-          {secretaryView && (
-            <SecretaryCollapsedButton view={secretaryView} onClick={openSecretary} />
+          {(multiSecretary ? secretaryEntries.length > 0 : secretaryView) && (
+            <SecretaryCollapsedButton
+              view={
+                multiSecretary && secretaryEntries[0]
+                  ? {
+                      ...secretaryEntries[0].view,
+                      needsYou: secretaryEntries.reduce(
+                        (sum, entry) => sum + entry.view.needsYou,
+                        0
+                      ),
+                      running: secretaryEntries.reduce((sum, entry) => sum + entry.view.running, 0),
+                    }
+                  : (secretaryView as NonNullable<typeof secretaryView>)
+              }
+              onClick={() => openSecretary()}
+            />
           )}
           <button
             type="button"
@@ -1011,63 +1103,127 @@ export function Sidebar({
 
         {/* 右侧不留 padding：8px 滚动条槽就是右边距，滚动条不再多占一列、挤到卡片边上 */}
         <div className="min-h-0 flex-1 overflow-y-auto pt-0.5 pb-2 pl-1.5 [scrollbar-gutter:stable]">
-          {secretaryView && (
-            <SecretarySidebarSection
-              view={secretaryView}
-              folded={secretaryFolded}
-              onToggleFold={toggleSecretaryFolded}
-              onOpen={openSecretary}
-              onNewConversation={() => {
-                void useSecretaryStore.getState().newSecretaryConversation();
-              }}
-              onOpenSettings={() =>
-                void window.electronAPI.window.openSettings({
-                  category: 'secretary',
-                  rowId: 'secretary.root',
-                })
-              }
-              onReset={() => setSecretaryResetOpen(true)}
-              runningOrigins={{
-                groups: secretaryRunning.groups,
-                titleOf: (id) => conversations[id]?.title,
-                onSelect: selectConversation,
-              }}
-            >
-              {shownSecretaryIds.map((id) => (
-                <ConversationRow
-                  key={id}
-                  id={id}
-                  conversation={conversations[id]}
-                  active={activeId === id}
-                  dispatchRunning={secretaryRunning.counts[id]}
-                  switchHint={switchHintFor(id, 'project')}
-                  locale={locale}
-                  nowTick={nowTick}
-                  hoverTitle={secretaryView.name}
-                  onSelect={selectConversation}
-                  onTogglePin={togglePinConversation}
-                  onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
-                  onCleanupWorktree={(conversationId) => void handleCleanupWorktree(conversationId)}
-                  onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
-                  onRemove={(conversationId) => void openRemoveConversation(conversationId)}
-                />
-              ))}
-              {!secretaryFolded && secretaryIds.length > SECRETARY_VISIBLE_LIMIT && (
-                <div className="flex items-center gap-1 px-2">
-                  <button
-                    type="button"
-                    onClick={() => setSecretaryRevealed((prev) => !prev)}
-                    className={SHOW_MORE_CLASS}
-                  >
-                    {secretaryRevealed
-                      ? t('Collapse')
-                      : t('Show {{n}} more', {
-                          n: secretaryIds.length - SECRETARY_VISIBLE_LIMIT,
-                        })}
-                  </button>
-                </div>
-              )}
-            </SecretarySidebarSection>
+          {multiSecretary && secretaryEntries.length > 0 ? (
+            <div>
+              <SecretaryGroupHeader
+                count={secretaryEntries.length}
+                folded={secretaryGroupFolded}
+                needsYou={secretaryEntries.reduce((sum, entry) => sum + entry.view.needsYou, 0)}
+                onToggleFold={toggleSecretaryGroupFolded}
+                onCreate={() => {
+                  void useSecretaryStore.getState().createSecretary();
+                }}
+              />
+              {!secretaryGroupFolded &&
+                secretaryEntries.map((entry, index) => {
+                  const folded = secretaryFolds.includes(entry.id);
+                  const ids = secretaryConversationIds(entry.projectId, order, conversations);
+                  const shown = folded ? [] : ids.slice(0, SECRETARY_VISIBLE_LIMIT);
+                  return (
+                    <SecretarySidebarSection
+                      key={entry.id}
+                      view={entry.view}
+                      folded={folded}
+                      divider={index === secretaryEntries.length - 1}
+                      onToggleFold={() => toggleSecretaryFold(entry.id)}
+                      onOpen={() => openSecretary(entry.id)}
+                      onNewConversation={() => {
+                        void useSecretaryStore
+                          .getState()
+                          .newSecretaryConversation({ secretaryId: entry.id });
+                      }}
+                      onOpenSettings={() => openSecretarySettings(entry.id)}
+                      onReset={() => setSecretaryResetId(entry.id)}
+                      secretaryId={entry.id}
+                      keepAvatar
+                      runningOrigins={runningLink(secretaryRunning.byId[entry.id])}
+                    >
+                      {shown.map((id) => (
+                        <ConversationRow
+                          key={id}
+                          id={id}
+                          conversation={conversations[id]}
+                          active={activeId === id}
+                          dispatchRunning={secretaryRunning.byId[entry.id]?.counts[id]}
+                          switchHint={switchHintFor(id, 'project')}
+                          locale={locale}
+                          nowTick={nowTick}
+                          hoverTitle={entry.view.name}
+                          onSelect={selectConversation}
+                          onTogglePin={togglePinConversation}
+                          onToggleArchive={(conversationId) =>
+                            void handleToggleArchive(conversationId)
+                          }
+                          onCleanupWorktree={(conversationId) =>
+                            void handleCleanupWorktree(conversationId)
+                          }
+                          onMoveToWorktree={(conversationId) =>
+                            void handleMoveToWorktree(conversationId)
+                          }
+                          onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                        />
+                      ))}
+                    </SecretarySidebarSection>
+                  );
+                })}
+            </div>
+          ) : (
+            secretaryView && (
+              <SecretarySidebarSection
+                view={secretaryView}
+                folded={secretaryFolded}
+                onToggleFold={toggleSecretaryFolded}
+                onOpen={openSecretary}
+                onNewConversation={() => {
+                  void useSecretaryStore.getState().newSecretaryConversation();
+                }}
+                onOpenSettings={() =>
+                  void window.electronAPI.window.openSettings({
+                    category: 'secretary',
+                    rowId: 'secretary.root',
+                  })
+                }
+                onReset={() => setSecretaryResetId('default')}
+                runningOrigins={runningLink(secretaryRunning.single)}
+              >
+                {shownSecretaryIds.map((id) => (
+                  <ConversationRow
+                    key={id}
+                    id={id}
+                    conversation={conversations[id]}
+                    active={activeId === id}
+                    dispatchRunning={secretaryRunning.single.counts[id]}
+                    switchHint={switchHintFor(id, 'project')}
+                    locale={locale}
+                    nowTick={nowTick}
+                    hoverTitle={secretaryView.name}
+                    onSelect={selectConversation}
+                    onTogglePin={togglePinConversation}
+                    onToggleArchive={(conversationId) => void handleToggleArchive(conversationId)}
+                    onCleanupWorktree={(conversationId) =>
+                      void handleCleanupWorktree(conversationId)
+                    }
+                    onMoveToWorktree={(conversationId) => void handleMoveToWorktree(conversationId)}
+                    onRemove={(conversationId) => void openRemoveConversation(conversationId)}
+                  />
+                ))}
+                {!secretaryFolded && secretaryIds.length > SECRETARY_VISIBLE_LIMIT && (
+                  <div className="flex items-center gap-1 px-2">
+                    <button
+                      type="button"
+                      onClick={() => setSecretaryRevealed((prev) => !prev)}
+                      className={SHOW_MORE_CLASS}
+                    >
+                      {secretaryRevealed
+                        ? t('Collapse')
+                        : t('Show {{n}} more', {
+                            n: secretaryIds.length - SECRETARY_VISIBLE_LIMIT,
+                          })}
+                    </button>
+                  </div>
+                )}
+              </SecretarySidebarSection>
+            )
           )}
           <BackgroundTasksEntry />
           {orderedProjects.length === 0 && (
@@ -2158,7 +2314,13 @@ export function Sidebar({
         </DragOverlay>,
         document.body
       )}
-      <SecretaryResetDialog open={secretaryResetOpen} onOpenChange={setSecretaryResetOpen} />
+      <SecretaryResetDialog
+        open={secretaryResetId !== null}
+        secretaryId={secretaryResetId ?? undefined}
+        onOpenChange={(open) => {
+          if (!open) setSecretaryResetId(null);
+        }}
+      />
     </motion.aside>
   );
 }

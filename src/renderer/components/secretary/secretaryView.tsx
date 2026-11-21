@@ -18,7 +18,8 @@ export interface SecretarySectionView {
 /** 秘书伪项目的展示状态；开关关掉时整块不出现 */
 export function secretarySectionView(
   secretary: Pick<SecretaryState, 'enabled' | 'profile' | 'board'>,
-  t: (key: string) => string
+  t: (key: string) => string,
+  secretaryId?: string
 ): SecretarySectionView | null {
   if (!secretary.enabled) return null;
   const profile = secretary.profile;
@@ -29,7 +30,9 @@ export function secretarySectionView(
     running: secretary.board.running.length,
     configured: profile !== null,
     ...(profile ? { color: profile.avatar.color } : {}),
-    ...(imageVersion ? { image: secretaryAvatarUrl(imageVersion, profile?.avatar.imageHash) } : {}),
+    ...(imageVersion
+      ? { image: secretaryAvatarUrl(imageVersion, profile?.avatar.imageHash, secretaryId) }
+      : {}),
   };
 }
 

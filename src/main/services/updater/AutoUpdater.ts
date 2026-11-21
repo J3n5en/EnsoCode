@@ -3,7 +3,7 @@ import { is } from '@electron-toolkit/utils';
 import { IPC_CHANNELS } from '@shared/types';
 import type { ManualInstall, UpdateStatus } from '@shared/types/updater';
 import { applyUpdateChannel, type UpdateChannel } from '@shared/updater/channel';
-import { AUTO_RESTART_IDLE_MS } from '@shared/updater/idleRestart';
+import { AUTO_RESTART_IDLE_MS, type AutoRestartMode } from '@shared/updater/idleRestart';
 import { normalizeReleaseNotes } from '@shared/updater/releaseNotes';
 import { app, BrowserWindow } from 'electron';
 import electronUpdater from 'electron-updater';
@@ -44,7 +44,7 @@ class AutoUpdaterService {
   private lastCheckTime = 0;
   private onFocusHandler: (() => void) | null = null;
   private quittingForUpdate = false;
-  private autoRestartWhenIdle = false;
+  private autoRestartMode: AutoRestartMode = 'off';
   private idleGate = new IdleRestartGate();
   private idleTimer: NodeJS.Timeout | null = null;
   private installingIdleRestart = false;
@@ -60,11 +60,11 @@ class AutoUpdaterService {
   init(
     window: BrowserWindow,
     autoUpdateEnabled = true,
-    autoRestartWhenIdle = false,
+    autoRestartMode: AutoRestartMode = 'off',
     channel: UpdateChannel = 'stable'
   ): void {
     this.mainWindow = window;
-    this.autoRestartWhenIdle = autoRestartWhenIdle;
+    this.autoRestartMode = autoRestartMode;
     applyUpdateChannel(autoUpdater, channel);
 
     if (is.dev) {
@@ -289,9 +289,9 @@ class AutoUpdaterService {
     if (this.autoUpdateEnabled) void this.checkForUpdates();
   }
 
-  setAutoRestartWhenIdle(enabled: boolean): void {
-    this.autoRestartWhenIdle = enabled;
-    if (!enabled) this.idleGate.reset();
+  setAutoRestartMode(mode: AutoRestartMode): void {
+    this.autoRestartMode = mode;
+    if (mode === 'off') this.idleGate.reset();
     this.notifyIdleStateChanged();
   }
 
@@ -300,16 +300,17 @@ class AutoUpdaterService {
       this.clearIdleTimer();
       return;
     }
-    if (this.idleGate.isFailed() || !this.autoRestartWhenIdle || !autoUpdater.autoDownload) {
+    if (this.idleGate.isFailed() || this.autoRestartMode === 'off' || !autoUpdater.autoDownload) {
       this.clearIdleTimer();
       return;
     }
     const now = Date.now();
-    const observation = currentIdleRestartObservation(true, true);
-    if (this.idleGate.evaluate(observation, now)) {
+    const mode = this.autoRestartMode;
+    if (this.idleGate.evaluate(currentIdleRestartObservation(), mode, now)) {
       this.clearIdleTimer();
+      // 不等空闲也走同一个优雅重启安全点：在跑的会话按恢复清单续跑
       void this.install(() =>
-        this.idleGate.evaluate(currentIdleRestartObservation(true, true), Date.now())
+        this.idleGate.evaluate(currentIdleRestartObservation(), mode, Date.now())
       );
       return;
     }

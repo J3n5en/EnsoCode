@@ -1,4 +1,4 @@
-import type { SecretaryBoard, SecretaryCard } from '@shared/types/secretary';
+import type { SecretaryBoard, SecretaryCard, SecretaryState } from '@shared/types/secretary';
 import { Loader2 } from 'lucide-react';
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from '@/components/ui/preview-card';
 import { useI18n } from '@/i18n';
@@ -45,6 +45,20 @@ export function runningByOrigin(
   }));
   if (unknown.length > 0) groups.push({ secretaryConversationId: null, cards: unknown });
   return { counts, groups };
+}
+
+/** 多个秘书时各按自己的看板分组，计数与悬停列表只落在对应分区 */
+export function runningBySecretary(
+  secretaries: readonly { id: string }[],
+  states: Readonly<Record<string, Pick<SecretaryState, 'board'> | undefined>>,
+  known: (conversationId: string) => boolean
+): Record<string, RunningOrigins> {
+  const result: Record<string, RunningOrigins> = {};
+  for (const { id } of secretaries) {
+    const state = states[id];
+    if (state) result[id] = runningByOrigin(state.board, known);
+  }
+  return result;
 }
 
 function cardKey(card: SecretaryCard): string {

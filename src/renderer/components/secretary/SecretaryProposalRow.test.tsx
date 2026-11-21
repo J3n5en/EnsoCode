@@ -20,6 +20,7 @@ vi.mock('@/stores/settings', () => ({
   ) => selector({ projects: [{ id: 'p1', name: 'enso', path: '/p/enso' }] }),
 }));
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
     selector({
       secretary: { proposals: { ...(h.proposal ? { pr1: h.proposal } : {}), ...h.extra } },

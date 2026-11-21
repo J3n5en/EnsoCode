@@ -12,6 +12,7 @@ import {
   COMPUTER_DEFAULT_OFF_SETTINGS_VERSION,
   effectiveSubagentAllowedModes,
 } from '@shared/types/builtinTools';
+import { resolveAutoRestartMode } from '@shared/updater/idleRestart';
 import { parseWebSearchChain } from '@shared/webSearchChain';
 
 /**
@@ -26,7 +27,7 @@ import { parseWebSearchChain } from '@shared/webSearchChain';
  */
 
 /** 当前持久化数据版本；改数据形状时 +1 并在 `migrateSettings` 里加一段 */
-export const SETTINGS_VERSION = 17;
+export const SETTINGS_VERSION = 18;
 
 /** 已移除的语音输入字段：旧 settings.json 里还有就忽略，不进 store */
 const REMOVED_VOICE_FIELDS = [
@@ -233,6 +234,12 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   }
   if (version < 17 && state.accentColor === 'violet') {
     state = { ...state, accentColor: 'theme' };
+  }
+  if (version < 18 && 'autoRestartWhenIdle' in state) {
+    // 自动重启从开关改成三选一：开着的成「空闲时」，关着的成「关」；没存过的用缺省「关」
+    const { autoRestartWhenIdle, ...rest } = state;
+    state = { ...rest, autoRestartForUpdate: resolveAutoRestartMode(state) };
+    void autoRestartWhenIdle;
   }
   return state;
 }

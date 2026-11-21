@@ -38,11 +38,13 @@ function localId(pluginId: string, channelId: string): string {
 /**
  * 把插件渠道接到联系方式核心：清单声明的渠道先出卡片，插件 register 后才收发；
  * 插件停用或卸载时卡片消失，路由、关注项与待收尾记录一起清掉。
+ * 每个秘书都看得到渠道卡片，但一个渠道只归在自己那里打开了它的秘书：入站只交给它，
+ * 没人打开时不响应、只记审计。
  */
 export function connectPluginChannels(
-  service: ContactService,
+  services: () => readonly ContactService[],
   source: PluginContactSource
-): { handlers: PluginContactBridgeHandlers; dispose(): void } {
+): { handlers: PluginContactBridgeHandlers; dispose(): void; resync(): void } {
   const declared = (): Map<string, ChannelMeta> => {
     const map = new Map<string, ChannelMeta>();
     for (const { pluginId, channels } of source.contactChannels()) {
@@ -61,12 +63,23 @@ export function connectPluginChannels(
     return map;
   };
 
+  /** 插件 register 过的实现：新建的秘书也要接上 */
+  const attached = new Map<string, PluginContactChannel>();
+
   const sync = (): Map<string, ChannelMeta> => {
     const metas = declared();
-    for (const entry of service.registry.list()) {
-      if (!entry.meta.builtin && !metas.has(entry.meta.id)) service.removeChannel(entry.meta.id);
+    for (const service of services()) {
+      for (const entry of service.registry.list()) {
+        if (!entry.meta.builtin && !metas.has(entry.meta.id)) service.removeChannel(entry.meta.id);
+      }
+      for (const meta of metas.values()) {
+        service.declareChannel(meta);
+        const channel = attached.get(meta.id);
+        if (channel && !service.registry.get(meta.id)?.channel)
+          service.attachChannel(meta.id, channel);
+      }
     }
-    for (const meta of metas.values()) service.declareChannel(meta);
+    for (const id of attached.keys()) if (!metas.has(id)) attached.delete(id);
     return metas;
   };
 
@@ -77,15 +90,19 @@ export function connectPluginChannels(
     register(pluginId, channelId, caps) {
       if (!known(pluginId, channelId)) return;
       const local = localId(pluginId, channelId);
-      service.attachChannel(
-        channelId,
-        new PluginContactChannel(channelId, caps, (request) =>
-          source.callContact(pluginId, local, request)
-        )
+      const channel = new PluginContactChannel(channelId, caps, (request) =>
+        source.callContact(pluginId, local, request)
       );
+      attached.set(channelId, channel);
+      for (const service of services()) service.attachChannel(channelId, channel);
     },
     inbound(pluginId, channelId, input) {
-      if (!service.registry.get(channelId)?.channel || !channelId.startsWith(`${pluginId}:`)) {
+      if (!channelId.startsWith(`${pluginId}:`)) return;
+      const all = services().filter((candidate) => candidate.registry.get(channelId)?.channel);
+      const service = all.find((candidate) => candidate.ownsChannel(channelId));
+      if (!service) {
+        // 没有秘书打开这个渠道：不响应，各秘书审计里留一笔
+        for (const candidate of all) candidate.rejectUnrouted(channelId);
         return;
       }
       void service.inbound({
@@ -101,7 +118,7 @@ export function connectPluginChannels(
     },
     setStatus(pluginId, channelId, input) {
       if (!known(pluginId, channelId)) return;
-      service.setChannelStatus(channelId, input);
+      for (const service of services()) service.setChannelStatus(channelId, input);
     },
   };
 
@@ -109,5 +126,5 @@ export function connectPluginChannels(
   const off = source.onChange(() => {
     sync();
   });
-  return { handlers, dispose: off };
+  return { handlers, dispose: off, resync: () => void sync() };
 }

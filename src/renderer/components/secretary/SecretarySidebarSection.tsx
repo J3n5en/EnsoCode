@@ -15,6 +15,71 @@ import { type SecretarySectionView, SecretarySummary } from './secretaryView';
 const ACTION_CLASS =
   'flex size-5 shrink-0 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground';
 
+/**
+ * 多个秘书时的整块标题：「秘书 (n)」+ 折叠箭头 + 新建。
+ * 折叠后只留标题行与合计的「等你」徽标，单个秘书时不渲染（保持原来的一行）。
+ */
+export function SecretaryGroupHeader({
+  count,
+  folded,
+  needsYou,
+  onToggleFold,
+  onCreate,
+}: {
+  count: number;
+  folded: boolean;
+  needsYou: number;
+  onToggleFold: () => void;
+  onCreate: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      data-enso="secretary-group"
+      data-expanded={!folded || undefined}
+      className="group flex w-full items-center gap-1 px-2 py-1"
+    >
+      <button
+        type="button"
+        data-enso="secretary-group-fold"
+        onClick={onToggleFold}
+        aria-expanded={!folded}
+        className="flex min-w-0 flex-1 items-center gap-1 text-left text-[11.5px] font-medium text-muted-foreground"
+      >
+        {/* 箭头占着固定位置，平时隐去：悬停或键盘聚焦才出现，文字不跟着挪 */}
+        <ChevronDown
+          data-enso="secretary-group-chevron"
+          className={cn(
+            'size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 [@media(hover:none)]:opacity-100',
+            folded && '-rotate-90'
+          )}
+        />
+        <span className="truncate">
+          {t('Secretary')} ({count})
+        </span>
+      </button>
+      {folded && needsYou > 0 && (
+        <span data-enso="secretary-badge" className="shrink-0 text-[11px] font-medium text-warning">
+          {t('{{n}} waiting', { n: needsYou })}
+        </span>
+      )}
+      <button
+        type="button"
+        data-enso="secretary-group-create"
+        onClick={onCreate}
+        title={t('New secretary')}
+        aria-label={t('New secretary')}
+        className={SECTION_ACTION_CLASS}
+      >
+        <Plus className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+const SECTION_ACTION_CLASS =
+  '-my-0.5 flex size-5 shrink-0 items-center justify-center rounded-[5px] text-subtle-foreground opacity-0 transition-opacity hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100';
+
 /** 秘书是置顶伪项目：不投进普通项目列表，否则会受分组筛选与拖拽排序影响 */
 export function sidebarProjects<T extends { kind?: string }>(projects: readonly T[]): T[] {
   return projects.filter((project) => project.kind !== 'scratch' && project.kind !== 'secretary');
@@ -41,11 +106,23 @@ export function SecretarySidebarSection({
   onOpenSettings,
   onReset,
   runningOrigins,
+  divider = true,
+  secretaryId,
+  keepAvatar = false,
   children,
 }: SecretarySectionActions & {
   view: SecretarySectionView;
   folded: boolean;
   runningOrigins?: RunningOriginsLink;
+  /** 多个秘书时只有最后一个分区画分隔线 */
+  divider?: boolean;
+  /** 多个秘书时标出是哪一个 */
+  secretaryId?: string;
+  /**
+   * 多个秘书时：折叠后头像留着，箭头平时不显示，悬停或键盘聚焦才叠在头像上。
+   * 只有一个秘书时不传，维持箭头在悬停时顶掉头像的样子。
+   */
+  keepAvatar?: boolean;
   children: React.ReactNode;
 }) {
   const { t } = useI18n();
@@ -55,7 +132,7 @@ export function SecretarySidebarSection({
       data-expanded={!folded || undefined}
       className="group flex w-full items-center gap-2.5 rounded-[10px] px-2 py-1.5 transition-colors hover:bg-foreground/5"
     >
-      {/* 折叠箭头在 hover 时顶掉头像：不占布局宽度，人物卡才和下面的会话行左对齐 */}
+      {/* 箭头不占布局宽度，人物卡才和下面的会话行左对齐 */}
       <button
         type="button"
         data-enso="secretary-fold"
@@ -63,9 +140,9 @@ export function SecretarySidebarSection({
         aria-expanded={!folded}
         aria-label={folded ? t('Expand') : t('Collapse')}
         title={folded ? t('Expand') : t('Collapse')}
-        className="shrink-0 rounded-[9px]"
+        className={cn('shrink-0 rounded-[9px]', keepAvatar && 'relative')}
       >
-        <span className={cn('block', folded ? 'hidden' : 'group-hover:hidden')}>
+        <span className={cn('block', !keepAvatar && (folded ? 'hidden' : 'group-hover:hidden'))}>
           <SecretaryAvatar
             name={view.name}
             color={view.color}
@@ -75,9 +152,14 @@ export function SecretarySidebarSection({
           />
         </span>
         <span
+          data-enso="secretary-fold-icon"
           className={cn(
             'size-7 items-center justify-center rounded-[9px] bg-muted text-muted-foreground',
-            folded ? 'flex' : 'hidden group-hover:flex'
+            keepAvatar
+              ? 'absolute inset-0 hidden group-hover:flex group-has-[:focus-visible]:flex [@media(hover:none)]:flex'
+              : folded
+                ? 'flex'
+                : 'hidden group-hover:flex'
           )}
         >
           <ChevronDown className={cn('size-3.5', folded && '-rotate-90')} />
@@ -127,7 +209,11 @@ export function SecretarySidebarSection({
     </div>
   );
   return (
-    <div data-slot="secretary-section" data-enso="secretary-section">
+    <div
+      data-slot="secretary-section"
+      data-enso="secretary-section"
+      data-secretary-id={secretaryId}
+    >
       <ContextMenu>
         <ContextMenuTrigger render={row as React.ReactElement<Record<string, unknown>>} />
         <ContextMenuPopup className="min-w-40">
@@ -146,7 +232,9 @@ export function SecretarySidebarSection({
         </ContextMenuPopup>
       </ContextMenu>
       {!folded && <div className="flex flex-col">{children}</div>}
-      <div data-enso="secretary-divider" className="mx-2 mt-1 border-t border-border" />
+      {divider && (
+        <div data-enso="secretary-divider" className="mx-2 mt-1 border-t border-border" />
+      )}
     </div>
   );
 }

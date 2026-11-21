@@ -2,7 +2,7 @@ import type { SecretaryProfileDraft } from '@shared/types/secretary';
 import * as React from 'react';
 import { useI18n } from '@/i18n';
 import { useSecretaryStore } from '@/stores/secretary';
-import { defaultDraft } from './profileFormState';
+import { defaultDraft, freeSecretaryName } from './profileFormState';
 import { SecretaryFace } from './SecretaryFace';
 import { SecretaryProfileForm } from './SecretaryProfileForm';
 
@@ -15,13 +15,30 @@ export function SecretaryWelcome() {
   const [mode, setMode] = React.useState<'choose' | 'form'>('choose');
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const initialDraft = React.useMemo(() => defaultDraft(t('Secretary')), [t]);
+  // 欢迎页对着当前看着的秘书（新建秘书时会先切过去）：多秘书时每个 IPC 都要带上它
+  const secretaryId = useSecretaryStore((state) => state.focusedId) ?? undefined;
+  const secretaries = useSecretaryStore((state) => state.secretaries);
+  const target = secretaryId ? { secretaryId } : {};
+  const initialDraft = React.useMemo(
+    () =>
+      defaultDraft(
+        freeSecretaryName(
+          t('Secretary'),
+          secretaries.filter((entry) => entry.id !== secretaryId).map((entry) => entry.name)
+        )
+      ),
+    [t, secretaries, secretaryId]
+  );
+  const describeError = (code: string) =>
+    code === 'name-taken' ? t('Another secretary already uses this name.') : code;
 
   const startChat = async () => {
     setBusy(true);
     setError(null);
     try {
-      const id = await useSecretaryStore.getState().newSecretaryConversation({ greeting: true });
+      const id = await useSecretaryStore
+        .getState()
+        .newSecretaryConversation({ greeting: true, ...target });
       if (!id) {
         setError(t('Could not start the secretary. Try again.'));
         return;
@@ -38,12 +55,15 @@ export function SecretaryWelcome() {
     setBusy(true);
     setError(null);
     try {
-      const saved = await window.electronAPI.secretary.saveProfile(draft);
+      const saved = await window.electronAPI.secretary.saveProfile(draft, secretaryId);
       if (!saved.ok) {
-        setError(saved.error);
+        setError(describeError(saved.error));
         return;
       }
-      const id = await useSecretaryStore.getState().newSecretaryConversation();
+      const store = useSecretaryStore.getState();
+      const id = await (secretaryId
+        ? store.newSecretaryConversation(target)
+        : store.newSecretaryConversation());
       if (!id) {
         setError(t('Could not start the secretary. Try again.'));
         return;

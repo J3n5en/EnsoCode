@@ -18,8 +18,10 @@ vi.mock('@/i18n', () => ({
   }),
 }));
 vi.mock('@/stores/secretary', () => ({
+  focusedSecretaryId: () => undefined,
+  secretaryIdOfProject: () => null,
   useSecretaryStore: (selector: (state: unknown) => unknown) =>
-    selector({ secretary: { profile: h.profile } }),
+    selector({ secretary: { profile: h.profile }, focusedId: null }),
 }));
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: (selector: (state: unknown) => unknown) =>
@@ -121,20 +123,26 @@ describe('SecretarySkillsPanel', () => {
       part('deploy-check', '[data-enso="secretary-skill-toggle"]').click();
     });
     await flush();
-    expect(api.setSkillEnabled).toHaveBeenCalledWith({
-      id: 'deploy-check',
-      source: 'own',
-      enabled: false,
-    });
+    expect(api.setSkillEnabled).toHaveBeenCalledWith(
+      {
+        id: 'deploy-check',
+        source: 'own',
+        enabled: false,
+      },
+      undefined
+    );
     await act(async () => {
       part('s-review', '[data-enso="secretary-skill-toggle"]').click();
     });
     await flush();
-    expect(api.setSkillEnabled).toHaveBeenLastCalledWith({
-      id: 's-review',
-      source: 'global',
-      enabled: false,
-    });
+    expect(api.setSkillEnabled).toHaveBeenLastCalledWith(
+      {
+        id: 's-review',
+        source: 'global',
+        enabled: false,
+      },
+      undefined
+    );
     // 改完重读同一份列表，设置页那边变了这里也跟着变
     expect(api.listSkills).toHaveBeenCalledTimes(3);
   });
@@ -150,7 +158,7 @@ describe('SecretarySkillsPanel', () => {
       part('deploy-check', '[data-enso="secretary-skill-confirm-delete"]').click();
     });
     await flush();
-    expect(api.removeSkill).toHaveBeenCalledWith('deploy-check');
+    expect(api.removeSkill).toHaveBeenCalledWith('deploy-check', undefined);
   });
 
   it('取消二次确认不会删', () => {
@@ -178,7 +186,7 @@ describe('SecretarySkillsPanel', () => {
       part('s-review', '[data-enso="secretary-skill-expand"]').click();
     });
     await flush();
-    expect(api.readSkill).toHaveBeenCalledWith({ id: 's-review', source: 'global' });
+    expect(api.readSkill).toHaveBeenCalledWith({ id: 's-review', source: 'global' }, undefined);
     expect(rowOf('s-review')?.querySelector('[data-enso="markdown"]')?.textContent).toContain(
       '审代码'
     );

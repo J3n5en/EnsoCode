@@ -74,7 +74,7 @@ const HELP = `${USAGE}
   plugins/skills/instructions 增删条目（装卸）被拒，条目内字段可写；projects/projectGroups 不可读写。
 热生效:
   set 与设置页走同一写入路径，立即广播到窗口与 agent worker；部分键只对新会话生效。
-  autoUpdate、autoRestartWhenIdle 启动时读取：set 返回 requiresRestart 且不写入。
+  autoUpdate、autoRestartForUpdate、updateChannel 启动时读取：set 返回 requiresRestart 且不写入。
 连接:
   仅本机 socket <userData>/cli/cli.sock（Windows 命名管道）+ 每次启动生成的 <userData>/cli-token。
 完整键清单（含类型、是否可写/需重启/密钥）：enso config help --json（需应用在运行）

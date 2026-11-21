@@ -63,10 +63,11 @@ function MemoryRow({
  * 记忆面板：每行悬停浮出编辑 / 删除，和设置页记忆库走同一套接口（删除先预览影响再确认）。
  * 「来自你的项目」是秘书只读的项目记忆，用户自己仍可以改删。
  */
-export function SecretaryMemoryPanel() {
+export function SecretaryMemoryPanel({ secretaryId }: { secretaryId?: string } = {}) {
   const { t, locale } = useI18n();
-  const projectId = useSecretaryStore((s) => s.secretary.projectId);
-  const name = useSecretaryStore((s) => s.secretary.profile?.name.trim() || t('Secretary'));
+  const ownState = useSecretaryStore((s) => (secretaryId ? s.states[secretaryId] : s.secretary));
+  const projectId = ownState?.projectId ?? null;
+  const name = ownState?.profile?.name.trim() || t('Secretary');
   const spaceId = projectId ? secretarySpaceId(projectId) : null;
   const [own, setOwn] = useState<MemoryListItem[]>([]);
   const [others, setOthers] = useState<MemoryListItem[]>([]);

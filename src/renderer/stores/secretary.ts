@@ -1,6 +1,11 @@
 import { resolveChatModel, scopedDefaultModels } from '@shared/defaultModel';
 import { normalizeLocale, translate } from '@shared/i18n';
-import type { DispatchDraft, SecretaryProfileDraft, SecretaryState } from '@shared/types/secretary';
+import type {
+  DispatchDraft,
+  SecretaryProfileDraft,
+  SecretaryState,
+  SecretarySummary,
+} from '@shared/types/secretary';
 import { create } from 'zustand';
 import { readMaterializedProviders } from '@/stores/modelDirectory/useProviders';
 import { oauthCredentialContext, useOauthCredentialStore } from '@/stores/oauthCredentials';
@@ -28,7 +33,18 @@ export const EMPTY_SECRETARY_STATE: SecretaryState = {
 };
 
 interface SecretaryStoreState {
+  /** 当前看着的秘书（所在会话、面板、欢迎页都按它）的状态；只有一个秘书时就是它 */
   secretary: SecretaryState;
+  /** 全部秘书：侧栏、新建、删除与总看板用 */
+  secretaries: SecretarySummary[];
+  /** 每个秘书各自的一份 Main 状态 */
+  states: Record<string, SecretaryState>;
+  /** 当前看着的秘书 id */
+  focusedId: string | null;
+  /** 切到某个秘书：面板、欢迎页与 IPC 默认都按它 */
+  focus: (secretaryId: string) => void;
+  /** 新建秘书：建好后切过去并打开它的欢迎页 */
+  createSecretary: () => Promise<string | null>;
   resolving: Record<string, true>;
   /** 未完成初次设置时主区域显示欢迎页（页面本身由设置流程提供） */
   welcomeOpen: boolean;
@@ -43,7 +59,10 @@ interface SecretaryStoreState {
    * 新建一个秘书会话，模型与思考档位和普通会话一样按默认走，之后在输入框里切。
    * greeting 只在初次设置走「聊着设置」时发。
    */
-  newSecretaryConversation: (options?: { greeting?: boolean }) => Promise<string | null>;
+  newSecretaryConversation: (options?: {
+    greeting?: boolean;
+    secretaryId?: string;
+  }) => Promise<string | null>;
   resolveProposal: (
     proposalId: string,
     action: 'confirm' | 'reject',
@@ -52,11 +71,78 @@ interface SecretaryStoreState {
   ) => Promise<void>;
 }
 
+/** 当前看着的那个秘书：没有选中时取清单里的第一个 */
+function pickFocused(
+  secretaries: readonly SecretarySummary[],
+  focusedId: string | null
+): string | null {
+  if (focusedId && secretaries.some((entry) => entry.id === focusedId)) return focusedId;
+  return secretaries[0]?.id ?? null;
+}
+
+/** 全部秘书的接管会话合起来：侧栏徽标只问「有没有秘书在管」 */
+function syncTakenOver(states: Record<string, SecretaryState>): void {
+  setTakenOverSessions(
+    Object.values(states).flatMap((state) => state.takeovers.map((entry) => entry.conversationId))
+  );
+}
+
+/** IPC 调用默认带上当前看着的秘书；只有一个秘书时 Main 也接受省略 */
+export function focusedSecretaryId(): string | undefined {
+  return useSecretaryStore.getState().focusedId ?? undefined;
+}
+
+/** 某个会话属于哪个秘书（按秘书的隐藏项目认） */
+export function secretaryIdOfProject(projectId: string | undefined): string | null {
+  if (!projectId) return null;
+  return (
+    useSecretaryStore.getState().secretaries.find((entry) => entry.projectId === projectId)?.id ??
+    null
+  );
+}
+
 export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
   secretary: EMPTY_SECRETARY_STATE,
+  secretaries: [],
+  states: {},
+  focusedId: null,
   resolving: {},
   welcomeOpen: false,
   focusProposal: null,
+
+  focus: (secretaryId) => {
+    const { states, focusedId } = get();
+    if (focusedId === secretaryId && states[secretaryId]) return;
+    set({
+      focusedId: secretaryId,
+      secretary: states[secretaryId] ?? EMPTY_SECRETARY_STATE,
+      welcomeOpen: false,
+    });
+    if (!states[secretaryId]) {
+      void window.electronAPI.secretary
+        .getState(secretaryId)
+        .then((state) => {
+          set((current) => {
+            const next = { ...current.states, [secretaryId]: state };
+            return {
+              states: next,
+              ...(current.focusedId === secretaryId ? { secretary: state } : {}),
+            };
+          });
+        })
+        .catch(() => undefined);
+    }
+  },
+
+  createSecretary: async () => {
+    const created = await window.electronAPI.secretary.create();
+    if (!created.ok) return null;
+    const list = await window.electronAPI.secretary.list();
+    set({ secretaries: list });
+    get().focus(created.secretaryId);
+    set({ welcomeOpen: true });
+    return created.secretaryId;
+  },
 
   openWelcome: () => set({ welcomeOpen: true }),
   closeWelcome: () => set({ welcomeOpen: false }),
@@ -64,28 +150,68 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
   clearFocusProposal: () => set({ focusProposal: null }),
 
   bind: () => {
-    let pushed = false;
+    const pushed = new Set<string>();
     let bound = true;
+    const apply = (secretary: SecretaryState) => {
+      const id = secretary.secretaryId ?? get().focusedId;
+      if (!id) return;
+      set((state) => {
+        const states = { ...state.states, [id]: secretary };
+        syncTakenOver(states);
+        const focusedId = pickFocused(state.secretaries, state.focusedId) ?? id;
+        if (focusedId !== id) return { states, focusedId };
+        const before = state.states[id] ?? state.secretary;
+        return {
+          states,
+          focusedId,
+          secretary,
+          // 设置完成后欢迎页让位给会话；档案被重来清掉时再回到欢迎页（首次启动没有档案不弹）
+          welcomeOpen: secretary.profile
+            ? false
+            : before.profile !== null && before.enabled
+              ? true
+              : state.welcomeOpen,
+        };
+      });
+    };
     const off = window.electronAPI.secretary.onStateChanged((secretary) => {
-      pushed = true;
-      setTakenOverSessions(secretary.takeovers.map((entry) => entry.conversationId));
-      set((state) => ({
-        secretary,
-        // 设置完成后欢迎页让位给会话；档案被重来清掉时再回到欢迎页（首次启动没有档案不弹）
-        welcomeOpen: secretary.profile
-          ? false
-          : state.secretary.profile !== null
-            ? true
-            : state.welcomeOpen,
-      }));
+      if (secretary.secretaryId) pushed.add(secretary.secretaryId);
+      apply(secretary);
+    });
+    const offList = window.electronAPI.secretary.onListChanged((secretaries) => {
+      set((state) => {
+        const ids = new Set(secretaries.map((entry) => entry.id));
+        const states = Object.fromEntries(
+          Object.entries(state.states).filter(([id]) => ids.has(id))
+        );
+        const focusedId = pickFocused(secretaries, state.focusedId);
+        syncTakenOver(states);
+        return {
+          secretaries,
+          states,
+          focusedId,
+          // 清单推送常比各秘书的状态快：states 里还没有时保留手上那份，不把侧栏闪空。
+          // 清单可能先到并把 focusedId 设好，所以按「聚焦没变」判断，而不是只看 states
+          secretary:
+            (focusedId && states[focusedId]) ||
+            (focusedId === state.focusedId ? state.secretary : EMPTY_SECRETARY_STATE),
+        };
+      });
     });
     void window.electronAPI.secretary
-      .getState()
-      // 推送比首帧快时以推送为准，否则旧快照会盖掉刚确认的提案
-      .then((secretary) => {
-        if (pushed || !bound) return;
-        setTakenOverSessions(secretary.takeovers.map((entry) => entry.conversationId));
-        set({ secretary });
+      .list()
+      .then(async (secretaries) => {
+        if (!bound) return;
+        set((state) => ({
+          secretaries,
+          focusedId: pickFocused(secretaries, state.focusedId),
+        }));
+        for (const entry of secretaries) {
+          // 推送比首帧快时以推送为准，否则旧快照会盖掉刚确认的提案
+          const secretary = await window.electronAPI.secretary.getState(entry.id);
+          if (!bound || pushed.has(entry.id)) continue;
+          apply({ ...secretary, secretaryId: secretary.secretaryId ?? entry.id });
+        }
       })
       .catch(() => undefined);
     // 手机上的消息带 enso://secretary?conversation=<id>[&proposal=<id>]：
@@ -95,19 +221,42 @@ export const useSecretaryStore = create<SecretaryStoreState>()((set, get) => ({
       useSidePanelStore.getState().ensureOpen(target.conversationId);
       if (target.proposalId) get().focusProposalCard(target.proposalId);
     });
+    // 打开某个秘书的会话：面板、欢迎页与 IPC 都切到这个秘书
+    const offActive = useSessionsStore.subscribe((state, previous) => {
+      if (state.activeId === previous.activeId) return;
+      const projectId = state.activeId ? state.conversations[state.activeId]?.projectId : undefined;
+      const id = secretaryIdOfProject(projectId);
+      if (id) get().focus(id);
+    });
     return () => {
       bound = false;
       off();
+      offList();
       offOpen();
+      offActive();
       // 开关关掉后 Main 不再推送：清掉最后一份快照，入口随之消失；会话本身不动
       setTakenOverSessions([]);
-      set({ secretary: EMPTY_SECRETARY_STATE, welcomeOpen: false, focusProposal: null });
+      set({
+        secretary: EMPTY_SECRETARY_STATE,
+        secretaries: [],
+        states: {},
+        focusedId: null,
+        welcomeOpen: false,
+        focusProposal: null,
+      });
     };
   },
 
   newSecretaryConversation: async (options) => {
-    const { secretary } = get();
-    const projectId = secretary.projectId;
+    const { states, secretary, secretaries } = get();
+    const target = options?.secretaryId ? states[options.secretaryId] : secretary;
+    if (options?.secretaryId) get().focus(options.secretaryId);
+    // 刚建好的秘书状态是异步拉的：没到时按清单里登记的隐藏项目建，不让首次设置落空
+    const projectId =
+      target?.projectId ??
+      (options?.secretaryId
+        ? secretaries.find((entry) => entry.id === options.secretaryId)?.projectId
+        : null);
     if (!projectId) return null;
     const settings = useSettingsStore.getState();
     const project = settings.projects.find((entry) => entry.id === projectId);
