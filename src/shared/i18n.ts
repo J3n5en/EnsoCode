@@ -2609,6 +2609,11 @@ export const zhTranslations: Record<string, string> = {
   Copied: '已复制',
   'Copy image': '复制图片',
   'Image copied': '图片已复制',
+  'Image {{n}}': '图片 {{n}}',
+  'Image {{n}} not accepted: {{reason}}': '图片 {{n}} 未收下：{{reason}}',
+  'over 10 MB, not saved': '超过 10MB，没有保存',
+  'not a png / jpeg / webp / gif image, not saved': '不是 png / jpeg / webp / gif 图片，没有保存',
+  'could not be saved': '没能保存',
   'Could not copy image': '复制图片失败',
   'Copy failed': '复制失败',
   'Browse and drive conversations on another EnsoCode desktop. Its agent, keys and history stay there.':
