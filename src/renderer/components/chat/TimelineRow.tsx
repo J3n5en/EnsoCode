@@ -156,7 +156,6 @@ import { TerminalOutput } from './TerminalOutput';
 import { TodoList, TodoProgress } from './TodoBar';
 import { ToolCallCards } from './ToolCallCard';
 import { ImageViewResult } from './ToolImagePreview';
-import { TurnWaterfallPanel, useTurnHasTiming } from './TurnWaterfallPanel';
 import { useToolHold } from './toolHold';
 import { ZoomableImage } from './ZoomableImage';
 
@@ -1995,12 +1994,6 @@ function TextRow({
     messageIndex,
     sessionId: host ? host.sessionId : localSessionId,
   };
-  // 瀑布只看本机会话：远端 / bot 视图的消息不在本地 store
-  const timed = useTurnHasTiming(
-    !host && item.turnEnd && item.turnDurationMs !== undefined ? localSessionId : null,
-    messageIndex
-  );
-  const [waterfallOpen, setWaterfallOpen] = useState(false);
   return (
     <div data-enso="message-assistant" className="group text-(length:--chat-body-size)">
       <Markdown
@@ -2015,41 +2008,20 @@ function TextRow({
       />
       {item.turnEnd && !item.streaming && host?.turnFooter?.(Number(item.key.split('-')[0]))}
       {!item.streaming && (
-        <div
-          className={cn(
-            'mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100',
-            waterfallOpen && 'opacity-100'
-          )}
-        >
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
           <PluginMessageActions position="left" {...pluginActionProps} />
           <CopyButton text={item.text} />
           <PluginMessageActions position="right" {...pluginActionProps} />
           {item.turnEnd && <ForkButton messageIndex={Number(item.key.split('-')[0])} />}
           {item.timestamp && !item.turnEnd && <span>{formatClock(item.timestamp)}</span>}
-          {item.turnDurationMs !== undefined &&
-            (timed ? (
-              <button
-                type="button"
-                aria-expanded={waterfallOpen}
-                onClick={() => setWaterfallOpen((open) => !open)}
-                className="flex items-center gap-0.5 transition-colors hover:text-foreground"
-              >
-                {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
-                <ChevronRight
-                  className={cn('h-3 w-3 transition-transform', waterfallOpen && 'rotate-90')}
-                />
-              </button>
-            ) : (
-              <span>
-                {item.timestamp && !item.turnEnd && '· '}
-                {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
-              </span>
-            ))}
+          {item.turnDurationMs !== undefined && (
+            <span>
+              {item.timestamp && !item.turnEnd && '· '}
+              {t('took {{duration}}', { duration: formatDuration(item.turnDurationMs) })}
+            </span>
+          )}
           {perfStr && <span>· {perfStr}</span>}
         </div>
-      )}
-      {waterfallOpen && timed && localSessionId && (
-        <TurnWaterfallPanel conversationId={localSessionId} messageIndex={messageIndex} />
       )}
     </div>
   );
