@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "EnsoCode Phone",
   "short_name": "EnsoCode",
   "description": "把手机当作 EnsoCode 的第二块屏幕：查看会话、发消息、批审批。",

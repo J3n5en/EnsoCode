@@ -115,6 +115,11 @@ describe('offlineSnapshotNote', () => {
     expect(offlineSnapshotNote(Number.NaN, now)).toBe('桌面不在线');
     expect(offlineSnapshotNote(now.getTime() + 3_600_000, now)).toBe('桌面不在线');
   });
+  it('手机没网时换成对应说法', () => {
+    expect(offlineSnapshotNote(new Date(2026, 10, 21, 9, 5).getTime(), now, '网络未连接')).toBe(
+      '网络未连接 · 显示 09:05 的内容'
+    );
+  });
 });
 
 describe('canSaveSnapshot', () => {
