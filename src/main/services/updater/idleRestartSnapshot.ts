@@ -3,18 +3,17 @@ import {
   countPersistedQueuedMessages,
   mergeIdleRestartBlocks,
   persistedConversations,
+  RECENT_INPUT_MS,
 } from '@shared/updater/idleRestart';
 import { agentSessionIndex } from '../../ipc/sessionIndex';
 import { readSettings } from '../../ipc/settings';
+import { anyUnsentDraft } from '../../ipc/unsentDrafts';
 import { getPairCatalog } from '../pairHost';
 import { headlessIdleBlocks, isPairHeadless } from '../pairSessionHost';
-import { anyRendererFocused } from '../renderers';
+import { anyRendererFocused, userRecentlyActive } from '../renderers';
 import type { IdleRestartObservation } from './idleRestartGate';
 
-export function currentIdleRestartObservation(
-  enabled: boolean,
-  downloaded: boolean
-): IdleRestartObservation {
+export function currentIdleRestartObservation(): IdleRestartObservation {
   const catalog = countCatalogIdleBlocks(getPairCatalog());
   const headless = isPairHeadless()
     ? headlessIdleBlocks()
@@ -26,10 +25,10 @@ export function currentIdleRestartObservation(
     headless
   );
   return {
-    enabled,
-    downloaded,
     agentBusy: agentSessionIndex.anyWorkspaceBusy(),
     windowFocused: anyRendererFocused(),
+    userActive: userRecentlyActive(RECENT_INPUT_MS),
+    unsentDraft: anyUnsentDraft(),
     ...blocks,
   };
 }

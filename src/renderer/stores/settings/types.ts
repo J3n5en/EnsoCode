@@ -26,6 +26,7 @@ import type {
 } from '@shared/types';
 import type { AgentMode, ApprovalMode, ThinkingLevel } from '@shared/types/agent';
 import type { UpdateChannel } from '@shared/updater/channel';
+import type { AutoRestartMode } from '@shared/updater/idleRestart';
 import type { ModelPricing, PricingTable } from '@shared/usage/pricing';
 import type { VirtualClassifierConfig, VirtualModelEntry } from '@shared/virtualModels';
 import type { WebSearchChainEntry } from '@shared/webSearchChain';
@@ -209,8 +210,8 @@ export interface SettingsState {
 
   /** 是否自动检查并下载应用更新；缺省 true */
   autoUpdate: boolean;
-  /** 包已下好且空闲连续 5 分钟后自动重启安装；缺省关 */
-  autoRestartWhenIdle: boolean;
+  /** 更新下载完成后的自动重启：关 / 空闲时 / 不等空闲；缺省关 */
+  autoRestartForUpdate: AutoRestartMode;
   /** 更新渠道：稳定版 / 内测版；缺省稳定版，只在本机 */
   updateChannel: UpdateChannel;
   /** 权限不变的插件市场更新自动安装；缺省开，只在本机 */
@@ -435,7 +436,7 @@ export interface SettingsState {
   setSmartCompactModel: (value: DefaultModelRef | null) => void;
   setSmartCompactMode: (value: import('@shared/smartCompactMode').SmartCompactMode) => void;
   setAutoUpdate: (value: boolean) => void;
-  setAutoRestartWhenIdle: (value: boolean) => void;
+  setAutoRestartForUpdate: (value: AutoRestartMode) => void;
   setUpdateChannel: (value: UpdateChannel) => void;
   setPluginAutoUpdate: (value: boolean) => void;
   setProxyMode: (mode: ProxyMode) => void;

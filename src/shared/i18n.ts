@@ -283,7 +283,13 @@ export const zhTranslations: Record<string, string> = {
     '这台服务端无法远程更新，请在服务器上执行 npm i -g @ensocode/server。',
   'Automatic updates': '自动更新',
   'Download and install updates automatically': '自动下载并安装更新',
-  'Restart and apply when idle': '空闲时重启并应用更新',
+  'Restart automatically to apply updates': '自动重启以应用更新',
+  'When idle': '空闲时',
+  "Don't wait for idle": '不等空闲',
+  'Only notify when an update is ready; never restart automatically.':
+    '更新下载完成后只提示，不自动重启。',
+  "Restart as soon as the update is downloaded, even while agents are running or messages are queued. The restart happens after the current tool finishes, and running sessions keep going afterwards. It still waits while you're using the window (input in the last 2 minutes), while an input box has an unsent draft, or while a question or approval is pending.":
+    '更新下载完成后就重启，有 agent 在跑、有排队消息也不等。重启会在当前工具结束后进行，在跑的会话重启后接着跑。你正在用窗口（2 分钟内有键盘或鼠标输入）、输入框里有未发送的草稿、或者有待回答/待审批时先等。',
   'Update channel': '更新渠道',
   Stable: '稳定版',
   Beta: '内测版',

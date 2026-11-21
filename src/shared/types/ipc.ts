@@ -508,8 +508,10 @@ export const IPC_CHANNELS = {
   UPDATER_DOWNLOAD_UPDATE: 'updater:downloadUpdate',
   UPDATER_QUIT_AND_INSTALL: 'updater:quitAndInstall',
   UPDATER_SET_AUTO_UPDATE_ENABLED: 'updater:setAutoUpdateEnabled',
-  UPDATER_SET_AUTO_RESTART_WHEN_IDLE: 'updater:setAutoRestartWhenIdle',
+  UPDATER_SET_AUTO_RESTART_MODE: 'updater:setAutoRestartMode',
   UPDATER_SET_CHANNEL: 'updater:setChannel',
+  /** renderer → Main：输入框里有没有重启后会丢的未发送草稿（不等空闲的自动重启据此先等） */
+  COMPOSER_UNSENT_DRAFT: 'composer:unsent-draft',
   UPDATER_STATUS: 'updater:status',
   UPDATER_GET_STATE: 'updater:getState',
   UPDATER_RESTART: 'updater:restart',

@@ -96,7 +96,7 @@ export const SETTINGS_DATA_COVERAGE = {
     'Verified smart compaction mode is a desktop session preference, not an Enso capability.'
   ),
   autoUpdate: surfaces('general.automatic-updates'),
-  autoRestartWhenIdle: excluded('Device idle-restart update policy; not an Enso capability.'),
+  autoRestartForUpdate: excluded('Device auto-restart update policy; not an Enso capability.'),
   updateChannel: excluded('Device update channel policy; not an Enso capability.'),
   pluginAutoUpdate: excluded(
     'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
@@ -287,7 +287,7 @@ export const SETTINGS_ACTION_COVERAGE = {
     'Verified smart compaction mode is a desktop session preference, not an Enso capability.'
   ),
   setAutoUpdate: surfaces('general.automatic-updates'),
-  setAutoRestartWhenIdle: excluded('Device idle-restart update policy; not an Enso capability.'),
+  setAutoRestartForUpdate: excluded('Device auto-restart update policy; not an Enso capability.'),
   setUpdateChannel: excluded('Device update channel policy; not an Enso capability.'),
   setPluginAutoUpdate: excluded(
     'Automatic Enso plugin updates are a device-local preference, not an Enso capability.'
@@ -800,8 +800,11 @@ export const IPC_PRODUCT_COVERAGE = {
   UPDATER_DOWNLOAD_UPDATE: surfaces('updates.download'),
   UPDATER_QUIT_AND_INSTALL: surfaces('updates.install'),
   UPDATER_SET_AUTO_UPDATE_ENABLED: surfaces('general.automatic-updates'),
-  UPDATER_SET_AUTO_RESTART_WHEN_IDLE: excluded(
-    'Device idle-restart update policy; not an Enso capability.'
+  UPDATER_SET_AUTO_RESTART_MODE: excluded(
+    'Device auto-restart update policy; not an Enso capability.'
+  ),
+  COMPOSER_UNSENT_DRAFT: excluded(
+    'Renderer reports unsent composer drafts so auto-restart for updates can wait.'
   ),
   UPDATER_SET_CHANNEL: excluded('Device update channel policy; not an Enso capability.'),
   PROXY_APPLY: surfaces('general.proxy-mode', 'general.custom-proxy-url'),

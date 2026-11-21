@@ -23,6 +23,7 @@ export function fakeLocalUi(
     windowContentIds: () => contents().map((wc) => wc.id),
     onWindowClosed() {},
     anyFocused: () => false,
+    inputIdleMs: () => Number.POSITIVE_INFINITY,
     focusMain() {},
     chromiumRenderers: () => ({
       mainPids: new Set(),

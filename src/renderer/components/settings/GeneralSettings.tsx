@@ -6,6 +6,7 @@ import { GENERATION_STALL_TIMEOUT_MINUTES } from '@shared/stallTimeout';
 import { type TerminalShell, terminalShellsForPlatform } from '@shared/terminalShell';
 import type { ServerUpdateMode, UpdaterState, UpdateStatus } from '@shared/types/updater';
 import { isPrereleaseVersion, type UpdateChannel } from '@shared/updater/channel';
+import { isAutoRestartMode } from '@shared/updater/idleRestart';
 import type { WindowsLocalShell } from '@shared/windowsLocalShell';
 import { isAbsolutePathLike } from '@shared/worktreeRoot';
 import * as React from 'react';
@@ -801,8 +802,8 @@ function UpdateSection() {
   const { t } = useI18n();
   const autoUpdate = useSettingsStore((s) => s.autoUpdate);
   const setAutoUpdate = useSettingsStore((s) => s.setAutoUpdate);
-  const autoRestartWhenIdle = useSettingsStore((s) => s.autoRestartWhenIdle);
-  const setAutoRestartWhenIdle = useSettingsStore((s) => s.setAutoRestartWhenIdle);
+  const autoRestartForUpdate = useSettingsStore((s) => s.autoRestartForUpdate);
+  const setAutoRestartForUpdate = useSettingsStore((s) => s.setAutoRestartForUpdate);
   const updateChannel: UpdateChannel = useSettingsStore((s) =>
     s.updateChannel === 'beta' ? 'beta' : 'stable'
   );
@@ -994,21 +995,42 @@ function UpdateSection() {
         className={`flex items-center justify-between gap-3 rounded-md border px-3 py-2.5 ${autoUpdate ? '' : 'opacity-60'}`}
       >
         <div className="min-w-0">
-          <p className="text-sm">{t('Restart and apply when idle')}</p>
+          <p className="text-sm">{t('Restart automatically to apply updates')}</p>
           <p className="text-xs text-muted-foreground">
-            {t(
-              'After the update is downloaded, restart automatically if no agent is running, nothing is queued, and there are no pending questions or approvals. The idle state must last 5 minutes, and a focused window also blocks it.'
-            )}
+            {autoRestartForUpdate === 'immediate'
+              ? t(
+                  "Restart as soon as the update is downloaded, even while agents are running or messages are queued. The restart happens after the current tool finishes, and running sessions keep going afterwards. It still waits while you're using the window (input in the last 2 minutes), while an input box has an unsent draft, or while a question or approval is pending."
+                )
+              : autoRestartForUpdate === 'idle'
+                ? t(
+                    'After the update is downloaded, restart automatically if no agent is running, nothing is queued, and there are no pending questions or approvals. The idle state must last 5 minutes, and a focused window also blocks it.'
+                  )
+                : t('Only notify when an update is ready; never restart automatically.')}
           </p>
         </div>
-        <Switch
-          checked={autoUpdate && autoRestartWhenIdle}
-          disabled={!autoUpdate}
-          onCheckedChange={(checked) => {
-            setAutoRestartWhenIdle(checked);
-            void window.electronAPI.updater.setAutoRestartWhenIdle(checked);
+        <Select
+          items={{
+            off: t('Off'),
+            idle: t('When idle'),
+            immediate: t("Don't wait for idle"),
           }}
-        />
+          value={autoRestartForUpdate}
+          disabled={!autoUpdate}
+          onValueChange={(value) => {
+            if (!isAutoRestartMode(value)) return;
+            setAutoRestartForUpdate(value);
+            void window.electronAPI.updater.setAutoRestartMode(value);
+          }}
+        >
+          <SelectTrigger className="w-32 shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="off">{t('Off')}</SelectItem>
+            <SelectItem value="idle">{t('When idle')}</SelectItem>
+            <SelectItem value="immediate">{t("Don't wait for idle")}</SelectItem>
+          </SelectPopup>
+        </Select>
       </div>
       {host?.host === 'desktop' && (
         <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">

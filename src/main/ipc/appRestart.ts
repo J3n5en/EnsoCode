@@ -2,9 +2,10 @@ import { ipcMain } from '@platform';
 import { IPC_CHANNELS } from '@shared/types';
 import type { AppExitReason, RestartOverlayState, RestartWaitReason } from '@shared/types/ipc';
 import { switchNode } from '../services/nodeRemote';
-import { isMainRenderer, localMainContents } from '../services/renderers';
+import { anyRendererFocused, isMainRenderer, localMainContents } from '../services/renderers';
 import { sendToWindow } from '../windows/createAppWindow';
 import { getMainWindow } from '../windows/MainWindow';
+import { presentWindow } from '../windows/verifyLaunch';
 
 /** 弹层归谁开：哪条退出路径（「正在重启」归 restart），或新实例恢复会话；关弹层只认它 */
 export type RestartOverlayOwner = AppExitReason | 'resuming';
@@ -18,14 +19,17 @@ function ownerOf(state: RestartOverlayState): RestartOverlayOwner {
 
 /**
  * 弹层只推给本机主窗口；主窗口还没加载好时记下，挂载时来取。
- * 开弹层时盖着远程节点就切回本机界面，弹层才看得见
+ * 开弹层时盖着远程节点就切回本机界面；开始等命令时用户正在用本应用（如在设置窗口里点的重启更新），
+ * 把主窗口唤到前台让弹层看得见；后台自动重启不抢别的应用的焦点
  */
 export function setRestartOverlay(next: RestartOverlayState | null): void {
+  const startsWaiting = next?.phase === 'waiting' && current?.phase !== 'waiting';
   current = next;
   const win = getMainWindow();
   if (!win || win.isDestroyed()) return;
   if (next) switchNode('local');
   sendToWindow(win, IPC_CHANNELS.APP_RESTART_WAITING, next);
+  if (startsWaiting && anyRendererFocused()) presentWindow(win);
 }
 
 /** 只关自己开的弹层：恢复结束 / 超时、退出等完不能把别的路径随后开的弹层关掉 */

@@ -120,6 +120,10 @@ export interface SecretaryHostPorts extends DeliveryPorts {
   subagentsRunning?(conversationId: string): boolean;
   /** 上次应用退出打断这一轮的原因（启动恢复时说明）；缺省表示没有记录 */
   interruptDetail?(conversationId: string): string | undefined;
+  /** 应用正在退出，这个会话写进了恢复清单、新实例接着跑：退出打断它不算结果 */
+  continuesAfterExit?(conversationId: string): boolean;
+  /** 冷启动正在按恢复清单续跑这个会话：启动恢复不报中断 */
+  coldResumed?(conversationId: string): boolean;
   /** 依赖已经全部结束的等待派发：交给 dispatch 模块判定并建会话 */
   startPending?(pendingIds: readonly string[], now: number): void;
   audit?(entry: SecretaryAuditEntry): void;
@@ -136,6 +140,8 @@ export interface SecretaryHost {
   /** 立刻投递 outbox：用户刚点了确认，别等下一分钟的 tick */
   flushNow(now?: number): void;
   recordBackgroundStalls(stalls: readonly BackgroundStall[], now?: number): void;
+  /** 冷启动没能按恢复清单接着跑这个会话：照常报失败 */
+  onRestartResumeFailed(conversationId: string, error: string, now?: number): void;
   recover(): void;
   start(): void;
   stop(): void;
@@ -935,6 +941,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           )
             kind = 'needs-user';
         }
+        // 写进恢复清单、新实例接着跑：退出打断这一轮既不是失败也不是中断
+        if (
+          (kind === 'failed' || kind === 'interrupted') &&
+          ports.continuesAfterExit?.(conversationId)
+        ) {
+          kind = null;
+          detail = undefined;
+        }
         const awaiting = kind === 'turn-ended' && awaitsWake(conversationId, now);
         if (kind === 'turn-ended' && reopened && previous && SETTLED_RESULTS.has(previous.kind))
           // session_send 唤起的一轮结束了、没有再给结果：回到原来的终态，不重复推送
@@ -1093,6 +1107,21 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       flush(now);
     },
 
+    onRestartResumeFailed(conversationId, error, now = ports.now()) {
+      if (!ports.enabled()) return;
+      const file = ports.file();
+      const record = file.dispatched[conversationId];
+      if (!record) return;
+      const state = ports.status(conversationId).state;
+      if (record.lastState !== state) record.stateSince = now;
+      record.lastState = state;
+      recordResult(file, record, 'failed', now, `应用重启后没能接着跑：${error}`);
+      ports.save(file);
+      syncLinkedTodos(ports, file, ports.rows(), new Set());
+      ports.publish();
+      flush(now);
+    },
+
     recover() {
       if (!ports.enabled()) return;
       const now = ports.now();
@@ -1122,6 +1151,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       }
       for (const record of Object.values(file.dispatched)) {
         if (record.lastState !== 'running') continue;
+        // 冷启动正按恢复清单接着跑：不是中断，之后按它的事件照常判定
+        if (ports.coldResumed?.(record.conversationId)) continue;
         // 存量修正：记录还写着进行中，但会话已经空闲、没有后台任务与待处理项，
         // 最后一条结果又是终态——直接收回终态，升级后不用用户一个个点
         const status = ports.status(record.conversationId);

@@ -98,6 +98,7 @@ import {
   respondApproval,
   respondAsk,
   resumeCoworkerSession,
+  resumesAfterQuit,
   retrySession,
   rewindSession,
   sendAgentCommand,
@@ -139,7 +140,7 @@ import {
 import type { BrowserActor } from '../services/browserTabClaims';
 import { chatModelsRoot } from '../services/chatModels';
 import { listChildRuns, resolveChildRunFile } from '../services/childRunCatalog';
-import { settleColdResume, wakeColdRestartSession } from '../services/coldRestart';
+import { coldResumeReady, failColdResume, wakeColdRestartSession } from '../services/coldRestart';
 import { reloadConversation } from '../services/conversationReload';
 import { spawnCwdFromAuthority } from '../services/conversationSpawnCwd';
 import { notifyDesktop, sessionDesktop } from '../services/desktopHooks';
@@ -280,7 +281,8 @@ let botWorkerObserver: ((event: AgentWorkerEvent | { type: 'worker-exited' }) =>
 let secretaryDriverObserver:
   | ((event: RendererAgentEvent, changes: readonly SessionStatusPayload[]) => void)
   | null = null;
-const pluginSessionStates = new SessionStateTracker();
+// 写进恢复清单的会话新实例接着跑：退出时 worker 没了也不算失败
+const pluginSessionStates = new SessionStateTracker((rootId) => resumesAfterQuit(rootId));
 const selectionClockOwners = new WeakSet<RendererContents>();
 
 function watchSelectionClock(sender: RendererContents): void {
@@ -1940,7 +1942,7 @@ export function registerAgentHandlers(): void {
       }
     }
     if (workerEvent.type === 'parent-ready') {
-      settleColdResume(workerEvent.identity.sessionId);
+      coldResumeReady(workerEvent.identity.sessionId);
       sourceAuthority?.markReady(
         workerEvent.identity.sessionId,
         workerEvent.sessionFile,
@@ -1953,7 +1955,7 @@ export function registerAgentHandlers(): void {
       workerEvent.type === 'parent-rejected' &&
       !workerEvent.reason.startsWith(STALE_SESSION_ERROR)
     ) {
-      settleColdResume(workerEvent.identity.sessionId);
+      failColdResume(workerEvent.identity.sessionId, workerEvent.reason);
       const selection = sourceAuthority?.conversation(workerEvent.identity.sessionId)?.selection;
       console.warn('[agent] spawn rejected', {
         sessionId: workerEvent.identity.sessionId,
