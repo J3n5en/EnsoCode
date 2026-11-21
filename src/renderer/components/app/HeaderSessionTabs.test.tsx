@@ -18,10 +18,14 @@ const harness = vi.hoisted(() => ({
     selectConversation: (_id: string) => {},
   },
   secretary: {
+    secretaryId: 'default' as string | null,
     enabled: true,
     projectId: 'p-secretary',
     profile: null as Record<string, any> | null,
   },
+  secretaries: [] as Record<string, any>[],
+  states: {} as Record<string, { profile: Record<string, any> | null }>,
+  focusedId: 'default' as string | null,
 }));
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -30,8 +34,13 @@ vi.mock('@/stores/sessions', () => ({
 }));
 vi.mock('@/stores/secretary', () => ({
   focusedSecretaryId: () => undefined,
-  useSecretaryStore: (select: (state: { secretary: typeof harness.secretary }) => unknown) =>
-    select({ secretary: harness.secretary }),
+  useSecretaryStore: (select: (state: unknown) => unknown) =>
+    select({
+      secretary: harness.secretary,
+      secretaries: harness.secretaries,
+      states: harness.states,
+      focusedId: harness.focusedId,
+    }),
 }));
 
 const conversation = (id: string, over: Record<string, unknown> = {}): Conversation => ({
@@ -130,8 +139,14 @@ beforeEach(async () => {
   harness.state.activeIds = [];
   harness.state.selectConversation = vi.fn();
   harness.secretary.enabled = true;
+  harness.secretary.secretaryId = 'default';
   harness.secretary.projectId = 'p-secretary';
   harness.secretary.profile = null;
+  harness.secretaries = [
+    { id: 'default', projectId: 'p-secretary', name: null, avatar: null, order: 0 },
+  ];
+  harness.states = {};
+  harness.focusedId = 'default';
   useSessionSwitchState.setState({
     modHeld: false,
     headerMounted: false,
@@ -297,6 +312,83 @@ describe('HeaderSessionTabs 秘书头像', () => {
     await act(async () => publish());
     expect(tabIds()).toEqual(['sec', 'plain']);
     expect(tab('sec')?.querySelector('[data-enso="secretary-tab-avatar"]')).not.toBeNull();
+  });
+
+  it('单秘书时清单还没到也按当前秘书显示头像', async () => {
+    harness.secretaries = [];
+    harness.secretary.profile = { name: '小秘', avatar: { color: '#123456', imageVersion: 3 } };
+    harness.state.conversations = { sec: conversation('sec', { projectId: 'p-secretary' }) };
+    harness.state.activeIds = ['sec'];
+    harness.state.order = ['sec'];
+    harness.state.activeId = 'sec';
+    await render();
+    await act(async () => publish());
+    const avatar = tab('sec')?.querySelector('[data-enso="secretary-tab-avatar"]');
+    expect(avatar?.getAttribute('src')).toContain('avatar.png?v=3');
+  });
+});
+
+describe('HeaderSessionTabs 多个秘书', () => {
+  const aiProfile = {
+    name: '爱酱',
+    avatar: { color: '#123456', imageVersion: 3, imageHash: 'aaaaaaaa' },
+  };
+  const kenProfile = {
+    name: 'Ken',
+    avatar: { color: '#654321', imageVersion: 5, imageHash: 'bbbbbbbb' },
+  };
+
+  beforeEach(() => {
+    harness.secretary.profile = aiProfile;
+    harness.secretaries = [
+      { id: 'default', projectId: 'p-secretary', name: '爱酱', avatar: aiProfile.avatar, order: 0 },
+      { id: 's-248c5247', projectId: 'p-ken', name: 'Ken', avatar: kenProfile.avatar, order: 1 },
+    ];
+    harness.state.conversations = {
+      ai: conversation('ai', { projectId: 'p-secretary' }),
+      ken: conversation('ken', { projectId: 'p-ken' }),
+      plain: conversation('plain'),
+    };
+    harness.state.activeIds = ['ai', 'ken', 'plain'];
+    harness.state.order = ['ai', 'ken', 'plain'];
+    harness.state.activeId = 'ai';
+  });
+
+  const src = (id: string) =>
+    tab(id)?.querySelector('[data-enso="secretary-tab-avatar"]')?.getAttribute('src') ?? null;
+
+  it('每个秘书会话的 tab 用自己的头像，URL 带上所属秘书的 s=', async () => {
+    harness.states = { default: { profile: aiProfile }, 's-248c5247': { profile: kenProfile } };
+    await render();
+    await act(async () => publish());
+
+    expect(src('ai')).toBe('local-image://secretary-avatar/avatar.png?v=3&h=aaaaaaaa&s=default');
+    expect(src('ken')).toBe(
+      'local-image://secretary-avatar/avatar.png?v=5&h=bbbbbbbb&s=s-248c5247'
+    );
+    expect(tab('plain')?.querySelector('[data-enso="secretary-tab-avatar"]')).toBeNull();
+  });
+
+  it('非当前秘书的状态还没到时，按秘书清单里的头像显示', async () => {
+    harness.states = { default: { profile: aiProfile } };
+    await render();
+    await act(async () => publish());
+
+    expect(src('ken')).toBe(
+      'local-image://secretary-avatar/avatar.png?v=5&h=bbbbbbbb&s=s-248c5247'
+    );
+    expect(tab('ken')?.querySelector('[data-slot="conversation-status"]')).toBeNull();
+  });
+
+  it('非当前秘书没有图片时按它自己的名字生成头像', async () => {
+    const plainKen = { name: 'Ken', avatar: { color: '#654321' } };
+    harness.states = { default: { profile: aiProfile }, 's-248c5247': { profile: plainKen } };
+    await render();
+    await act(async () => publish());
+
+    const face = tab('ken')?.querySelector('[data-enso="secretary-tab-avatar"]');
+    expect(face?.tagName).toBe('SPAN');
+    expect(face?.getAttribute('data-generated')).toBe('true');
   });
 });
 

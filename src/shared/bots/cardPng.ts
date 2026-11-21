@@ -34,8 +34,23 @@ export function sniffImage(bytes: Uint8Array): AvatarFormat | null {
   return null;
 }
 
-export const checkAvatarImage = (bytes: Uint8Array): boolean =>
-  bytes.length > 0 && bytes.length <= AVATAR_MAX_BYTES && sniffImage(bytes) !== null;
+const isGif = (bytes: Uint8Array): boolean => {
+  const head = latin1(bytes.subarray(0, 6));
+  return head === 'GIF87a' || head === 'GIF89a';
+};
+
+/** 头像格式；GIF 只在调用方显式放行时认（秘书头像），Bot 头像不收 */
+export function sniffAvatar(bytes: Uint8Array, allowGif: boolean): AvatarFormat | 'gif' | null {
+  return sniffImage(bytes) ?? (allowGif && isGif(bytes) ? 'gif' : null);
+}
+
+export const checkAvatarImage = (
+  bytes: Uint8Array,
+  options: { allowGif?: boolean } = {}
+): boolean =>
+  bytes.length > 0 &&
+  bytes.length <= AVATAR_MAX_BYTES &&
+  sniffAvatar(bytes, options.allowGif === true) !== null;
 
 interface Chunk {
   type: string;

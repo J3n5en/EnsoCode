@@ -194,6 +194,19 @@ describe('secretarySectionView', () => {
       delete (globalThis as Record<string, unknown>)[REMOTE_LOCAL_IMAGE_PREFIX_KEY];
     }
   });
+
+  it('图片地址带上这份状态所属的秘书 id；显式传入的 id 优先', () => {
+    const owned = state({
+      secretaryId: 's-248c5247',
+      profile: { ...profile, avatar: { color: '#ff00aa', imageVersion: 2 } },
+    });
+    expect(secretarySectionView(owned, t)?.image).toBe(
+      'local-image://secretary-avatar/avatar.png?v=2&s=s-248c5247'
+    );
+    expect(secretarySectionView(owned, t, 'other')?.image).toBe(
+      'local-image://secretary-avatar/avatar.png?v=2&s=other'
+    );
+  });
 });
 
 describe('sidebarProjects', () => {

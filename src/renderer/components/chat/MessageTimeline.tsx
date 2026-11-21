@@ -651,7 +651,10 @@ export function MessageTimeline({
           className="@container relative min-h-0 flex-1"
           onWheel={markUserScroll}
           onKeyDown={markUserScroll}
-          onTouchStart={holdUserScroll}
+          onTouchStart={(e) => {
+            // 只认落在滚动容器内的触摸；点「回到底部」等浮层按钮不算，否则纠正循环首帧即中止
+            if (scrollerRef.current?.contains(e.target as Node)) holdUserScroll();
+          }}
           onTouchEnd={releaseUserScroll}
           onPointerDown={(e) => {
             // 只认滚动条拖拽（落点即滚动容器本身）；点行内按钮不算滚动意图
