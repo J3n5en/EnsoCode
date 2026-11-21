@@ -33,6 +33,7 @@ import {
   privateChatOwner,
   SecretaryContactBindPlaces,
   SecretaryContactBindRejection,
+  SecretaryContactOtherGroups,
   SecretaryContactSharedBot,
 } from './SecretaryContactSharedBot';
 
@@ -409,39 +410,58 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
   // 同一个 bot 的私聊已经归了别的秘书：这个秘书只能认领群和话题
   const privateOwner = telegram.chat ? null : privateChatOwner(telegram.shared);
 
+  const bindPlaces = (
+    <SecretaryContactBindPlaces
+      bind={telegram.bind}
+      bot={telegram.bot?.username}
+      now={now}
+      busy={busy}
+      onNewCode={() => run(() => window.electronAPI.secretary.contactBind(undefined, secretaryId))}
+      onCopied={() => setNotice(t('Copied'))}
+    />
+  );
+
   const groupsStep = (
     <div data-enso="secretary-contact-groups" className={STEP_CLASS}>
-      <div className="text-[12px] font-medium text-muted-foreground">{t('Allowed groups')}</div>
+      <div className="text-[12px] font-medium text-muted-foreground">{t('Groups and topics')}</div>
       <p className="mt-1 text-[11.5px] text-muted-foreground">
         {t(
           'Only groups on this list reach the secretary, and only messages from the bound account count. Messages from anyone else in the group are not received.'
         )}
       </p>
       {groups.length === 0 ? (
-        <p className="mt-1.5 text-[11.5px] text-subtle-foreground">
-          {t('No groups yet: group messages are not received.')}
-        </p>
+        <>
+          {bindPlaces}
+          <p className="mt-1.5 text-[11.5px] text-subtle-foreground">
+            {t('No groups yet: group messages are not received.')}
+          </p>
+        </>
       ) : (
-        <ul className="mt-1.5 flex flex-col gap-1">
-          {groups.map((group) => (
-            <SecretaryContactGroupRow
-              key={group.id}
-              group={group}
-              secretaryId={secretaryId}
-              busy={busy}
-              onRemove={() => setGroup('remove', group.id)}
-              onSaved={load}
-            />
-          ))}
-        </ul>
+        <>
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {groups.map((group) => (
+              <SecretaryContactGroupRow
+                key={group.id}
+                group={group}
+                secretaryId={secretaryId}
+                busy={busy}
+                onRemove={() => setGroup('remove', group.id)}
+                onSaved={load}
+              />
+            ))}
+          </ul>
+          <p className="mt-2.5 text-[11.5px] font-medium text-muted-foreground">
+            {t('Bind another group or topic')}
+          </p>
+          {bindPlaces}
+        </>
       )}
-      <p className="mt-1.5 text-[11px] text-subtle-foreground">
-        {t(
-          'New groups are bound as a whole. For a forum group, use the list button to hand over only some topics.'
-        )}
+      <SecretaryContactOtherGroups shared={telegram.shared} />
+      <p className="mt-2 text-[11px] text-subtle-foreground">
+        {t('Or add a group by its chat ID:')}
       </p>
       <form
-        className="mt-2 flex gap-1.5"
+        className="mt-1 flex gap-1.5"
         onSubmit={(event) => {
           event.preventDefault();
           if (!groupDraft) return;
@@ -670,7 +690,9 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
                 data-enso="secretary-contact-regenerate"
                 disabled={busy}
                 className={expired ? PRIMARY_CLASS : BUTTON_CLASS}
-                onClick={() => run(() => window.electronAPI.secretary.contactBind(secretaryId))}
+                onClick={() =>
+                  run(() => window.electronAPI.secretary.contactBind(undefined, secretaryId))
+                }
               >
                 <RefreshCw className="size-3.5" />
                 {t('New code')}
@@ -697,19 +719,13 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
                 )}
               </p>
             )}
-            {telegram.bind && (
-              <SecretaryContactBindPlaces
-                bind={telegram.bind}
-                onCopied={() => setNotice(t('Copied'))}
-              />
-            )}
             <p className="mt-2 text-[11.5px] text-subtle-foreground">
               {t(
                 'The code works once. Press Start in a private chat with the bot, or send it in a group or forum topic to bind that place to this secretary instead.'
               )}
             </p>
           </div>
-          {privateOwner && groupsStep}
+          {groupsStep}
         </>
       )}
       {telegram.shared && telegram.status !== 'unbound' && (
@@ -764,7 +780,9 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
                 data-enso="secretary-contact-reconnect"
                 disabled={busy}
                 className={cn(BUTTON_CLASS, 'mt-1.5')}
-                onClick={() => run(() => window.electronAPI.secretary.contactBind(secretaryId))}
+                onClick={() =>
+                  run(() => window.electronAPI.secretary.contactBind(undefined, secretaryId))
+                }
               >
                 <RefreshCw className="size-3.5" />
                 {t('Bind again with @{{bot}}', { bot: telegram.bot.username })}
@@ -774,6 +792,7 @@ export function SecretaryContactPanel({ secretaryId }: { secretaryId?: string } 
           <p className="px-1 text-[11.5px] text-subtle-foreground">
             {t('The token is stored with the system keychain and never written to logs.')}
           </p>
+          {groupsStep}
         </>
       )}
     </>
