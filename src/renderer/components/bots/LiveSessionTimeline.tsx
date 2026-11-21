@@ -241,6 +241,8 @@ interface LiveSessionDialogProps {
   emptyDescription?: string;
   /** 标题下的信息行（状态、项目、操作） */
   meta?: ReactNode;
+  /** 标题栏右侧的操作，位于关闭按钮左边 */
+  actions?: ReactNode;
   /** 替换默认的 Bot 投影时间线（普通会话走 sessions store） */
   children?: ReactNode;
   /** 弹窗底部（该会话的审批 / 提问） */
@@ -257,6 +259,7 @@ export function LiveSessionDialog({
   emptyTitle,
   emptyDescription,
   meta,
+  actions,
   children,
   footer,
   dataEnso,
@@ -267,7 +270,14 @@ export function LiveSessionDialog({
     <Dialog open={conversationId !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent data-enso={dataEnso} className="flex h-[80vh] max-w-3xl flex-col">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          {actions ? (
+            <div className="flex items-start gap-2 pe-8">
+              <DialogTitle className="min-w-0 flex-1">{title}</DialogTitle>
+              {actions}
+            </div>
+          ) : (
+            <DialogTitle>{title}</DialogTitle>
+          )}
           {meta}
         </DialogHeader>
         {children ??

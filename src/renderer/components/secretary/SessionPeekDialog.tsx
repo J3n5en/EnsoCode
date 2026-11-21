@@ -146,17 +146,6 @@ export function SessionPeekDialog() {
               {branch}
             </span>
           )}
-          {viewable && (
-            <button
-              type="button"
-              data-enso="session-peek-open"
-              onClick={openSession}
-              className="ml-auto inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              <ArrowUpRight className="size-3.5" />
-              {t('Open session')}
-            </button>
-          )}
         </div>
       )}
       {goal && (
@@ -168,12 +157,28 @@ export function SessionPeekDialog() {
     </div>
   );
 
+  // 已完成的会话多半已被自动归档：归档的照样能打开，只有会话不在时不给
+  const actions = conversation && (
+    <div data-enso="session-peek-actions" className="flex shrink-0 items-center">
+      <button
+        type="button"
+        data-enso="session-peek-open"
+        onClick={openSession}
+        className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[12px] text-primary-foreground transition-colors hover:bg-primary/90"
+      >
+        <ArrowUpRight className="size-3.5" />
+        {t('Open session')}
+      </button>
+    </div>
+  );
+
   return (
     <LiveSessionDialog
       dataEnso="session-peek"
       conversationId={conversationId}
       title={conversation?.title || result?.title || t('Unnamed')}
       meta={meta}
+      actions={actions}
       footer={
         pending ? (
           <div data-enso="session-peek-pending" className="pb-3">

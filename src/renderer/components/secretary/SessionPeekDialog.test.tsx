@@ -284,13 +284,14 @@ describe('SessionPeekDialog', () => {
     expect(h.calls.some((call) => call.name === 'peek')).toBe(false);
   });
 
-  it('已归档的会话写明原因', async () => {
+  it('已归档的会话写明原因，标题栏仍给打开会话', async () => {
     act(() => useSessionPeek.getState().open('old'));
     await rerender();
     expect(q('[data-enso="session-peek-unavailable"]')?.textContent).toBe(
       '[This session is archived. Restore it from the archive to view it.]'
     );
     expect(q('[data-enso="peek-timeline"]')).toBeNull();
+    expect(q('[data-enso="session-peek-actions"] [data-enso="session-peek-open"]')).not.toBeNull();
   });
 });
 
@@ -330,6 +331,26 @@ describe('SessionPeekDialog 结果视图', () => {
     expect(q('[data-enso="session-peek-result"]')).toBeNull();
     act(() => q('[data-enso="session-peek-tab-result"]')?.click());
     expect(q('[data-enso="session-peek-result"]')).not.toBeNull();
+  });
+
+  it('桌面宽度下结果页和会话页的标题栏右上角都有打开会话（含已自动归档的已完成会话）', async () => {
+    vi.stubGlobal('innerWidth', 1440);
+    const headerOpen = () =>
+      q('[data-enso="session-peek-actions"] [data-enso="session-peek-open"]');
+    for (const id of ['c1', 'old']) {
+      await openResult(id);
+      expect(q('[data-enso="session-peek-result"]')).not.toBeNull();
+      expect(headerOpen()?.textContent).toBe('[Open session]');
+      act(() => q('[data-enso="session-peek-tab-session"]')?.click());
+      expect(q('[data-enso="session-peek-result"]')).toBeNull();
+      expect(headerOpen()?.textContent).toBe('[Open session]');
+      act(() => useSessionPeek.getState().close());
+    }
+    await openResult('old');
+    act(() => headerOpen()?.click());
+    expect(useSessionPeek.getState().conversationId).toBeNull();
+    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'old' });
+    expect(useSecretaryReturn.getState().back).toEqual({ from: 'secretary-chat', to: 'old' });
   });
 
   it('截图过期写明保留期，报告文字照常显示', async () => {
