@@ -344,6 +344,31 @@ describe('BackgroundTaskManager', () => {
     expect(processAlive(process.pid)).toBe(true);
   });
 
+  it.skipIf(process.platform === 'win32').each([
+    ['输出直写文件', { detachable: true }],
+    ['管道', undefined],
+  ])(
+    '只写 stderr 的命令（%s）：运行中面板 tail 就有内容，outputBytes 计数',
+    async (_kind, opts) => {
+      const { manager, started } = makeManager();
+      const taskId = manager.start(
+        's1',
+        'echo only-stderr-1 >&2; sleep 0.2; echo only-stderr-2 >&2; sleep 30',
+        tmpdir(),
+        opts
+      );
+      try {
+        expect(started[0]).toMatchObject({ taskId, tail: '', outputBytes: 0 });
+        await until(() => (manager.snapshot('s1')[0]?.tail ?? '').includes('only-stderr-2'), 3000);
+        const [info] = manager.snapshot('s1');
+        expect(info).toMatchObject({ status: 'running' });
+        expect(info?.outputBytes).toBe(Buffer.byteLength('only-stderr-1\nonly-stderr-2\n'));
+      } finally {
+        manager.stop(taskId);
+      }
+    }
+  );
+
   it('进程退出后等待 finalize，再由 task_output 返回最终 details', async () => {
     const { manager, ended } = makeManager();
     let finishFinalize: ((details: unknown) => void) | undefined;

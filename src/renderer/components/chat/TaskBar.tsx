@@ -21,6 +21,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useI18n } from '@/i18n';
 import { parseMcpToolName, unwrapMcpProxyCall } from '@/lib/mcpToolName';
 import { stripAnsi } from '@/lib/terminalText';
+import { formatBytes } from '@/lib/toolCards/render';
 import { cn } from '@/lib/utils';
 import { useSessionsStore } from '@/stores/sessions';
 import { formatDuration } from '@/stores/sessions/stats';
@@ -131,7 +132,13 @@ export function TaskBar({ sessionId, tasks, subagents, readOnly }: TaskBarProps)
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          {openTask && <TailView tail={openTask.tail} />}
+          {openTask && (
+            <TailView
+              tail={openTask.tail}
+              outputBytes={openTask.outputBytes}
+              running={openTask.status === 'running'}
+            />
+          )}
           {openAgent && <AgentDetails key={openAgent.id} agent={openAgent} />}
         </div>
       )}
@@ -505,8 +512,16 @@ function TaskMeta({ task }: { task: BackgroundTaskInfo }) {
   );
 }
 
-/** 输出尾部：等宽流式,新内容自动贴底 */
-function TailView({ tail }: { tail: string }) {
+/** 输出尾部：等宽流式,新内容自动贴底。没内容时区分：还没拿到 worker 数据 / 有输出没拿到 / 进程确实没写 */
+export function TailView({
+  tail,
+  outputBytes,
+  running,
+}: {
+  tail: string;
+  outputBytes?: number;
+  running?: boolean;
+}) {
   const { t } = useI18n();
   const ref = useRef<HTMLPreElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: tail 变化时贴底
@@ -519,7 +534,14 @@ function TailView({ tail }: { tail: string }) {
       ref={ref}
       className="max-h-56 overflow-auto border-t border-border/60 px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground"
     >
-      {stripAnsi(tail) || t('(no output yet)')}
+      {stripAnsi(tail) ||
+        (outputBytes === undefined
+          ? t('Loading…')
+          : outputBytes > 0
+            ? t('Output written ({{size}}), not loaded yet', { size: formatBytes(outputBytes) })
+            : running
+              ? `${t('(no output yet)')}\n${t('The process has not written anything. Without a terminal, some programs buffer output and only write it in blocks or on exit.')}`
+              : t('(no output yet)'))}
     </pre>
   );
 }

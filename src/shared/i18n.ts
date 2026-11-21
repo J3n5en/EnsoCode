@@ -2219,6 +2219,9 @@ export const zhTranslations: Record<string, string> = {
   'Earlier activity details were cleared; the final report is still available.':
     '较早的过程详情已清理，最终报告仍然保留。',
   '(no output yet)': '(暂无输出)',
+  'Output written ({{size}}), not loaded yet': '已输出 {{size}}，面板尚未加载',
+  'The process has not written anything. Without a terminal, some programs buffer output and only write it in blocks or on exit.':
+    '进程还没有写出任何内容。不在终端里运行时，有些程序会把输出攒成一块或等退出时才写出。',
   Deny: '拒绝',
   Allow: '允许',
   'Run as administrator': '以管理员权限运行',

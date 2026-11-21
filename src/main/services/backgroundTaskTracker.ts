@@ -52,6 +52,10 @@ export class BackgroundTaskTracker {
         this.replace(snapshot.identity.sessionId, snapshot.backgroundTasks ?? []);
       return;
     }
+    if (event.type === 'unopened-background-tasks') {
+      this.replace(event.sessionId, event.tasks);
+      return;
+    }
     if (!('identity' in event) || !event.identity) return;
     const sessionId = event.identity.sessionId;
     switch (event.type) {
