@@ -47,12 +47,11 @@ import { attachAppQuitDrain } from './services/appQuitDrain';
 import { createAppRestart, restartOverlayFor } from './services/appRestart';
 import {
   ensureTray,
-  enterServerMode,
-  isServerMode,
   leaveServerMode,
   restoreFromSecondInstance,
   scheduleReenterServerMode,
   shouldQuitOnWindowAllClosed,
+  toggleTrayMode,
 } from './services/appServerMode';
 import { browserHost } from './services/browserHost';
 import { getCaCertConfig } from './services/caCert';
@@ -336,10 +335,7 @@ if (!gotTheLock) {
     // 手机上的「在应用里打开」与深链走同一个入口
     setSecretaryOpenTarget((target) => openSecretaryConversationFromProtocol(target));
     secretaryLinkInbox.start((target) => openSecretaryConversationFromProtocol(target));
-    setTrayToggleHandler(() => {
-      if (isServerMode()) leaveServerMode();
-      else void enterServerMode();
-    });
+    setTrayToggleHandler(toggleTrayMode);
     // 协议处理器要赶在窗口加载内容之前注册（local-image:// 资源依赖它）。
     registerLocalImageProtocolHandler();
     registerNodeSettingsProtocolHandler();

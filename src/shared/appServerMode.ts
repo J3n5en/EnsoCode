@@ -10,9 +10,12 @@ export function shouldStayAliveOnWindowAllClosed(input: {
 
 export type TrayClickAction = 'show' | 'hide';
 
-/** 托盘左键：窗口在前时进托盘，已在托盘时唤回。 */
-export function trayClickAction(serverMode: boolean): TrayClickAction {
-  return serverMode ? 'show' : 'hide';
+/** 托盘左键：窗口实际可见时进托盘；已在托盘或窗口被别处藏起时唤回。 */
+export function trayClickAction(input: {
+  serverMode: boolean;
+  windowShown: boolean;
+}): TrayClickAction {
+  return !input.serverMode && input.windowShown ? 'hide' : 'show';
 }
 
 const TRAY_ICON_RELATIVE = [

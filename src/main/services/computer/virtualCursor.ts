@@ -1,4 +1,5 @@
 import { app, BrowserWindow } from 'electron';
+import { showOnAllSpaces } from './floatingWindow';
 
 const WIDTH = 220;
 const HEIGHT = 44;
@@ -55,7 +56,7 @@ function createWindow(): BrowserWindow {
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  showOnAllSpaces(win);
   win.setIgnoreMouseEvents(true);
   // 不能出现在截图里：模型看到的应是目标 app 本身
   win.setContentProtection(true);

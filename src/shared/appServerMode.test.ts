@@ -23,8 +23,12 @@ describe('shouldStayAliveOnWindowAllClosed', () => {
 
 describe('trayClickAction', () => {
   it('hides to tray when the window is showing, and shows when already in tray', () => {
-    expect(trayClickAction(false)).toBe('hide');
-    expect(trayClickAction(true)).toBe('show');
+    expect(trayClickAction({ serverMode: false, windowShown: true })).toBe('hide');
+    expect(trayClickAction({ serverMode: true, windowShown: false })).toBe('show');
+  });
+
+  it('窗口被别处藏起（非托盘模式）时也唤回，而不是再进托盘', () => {
+    expect(trayClickAction({ serverMode: false, windowShown: false })).toBe('show');
   });
 });
 

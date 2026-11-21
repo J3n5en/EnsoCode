@@ -3,10 +3,11 @@ import type { WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  dock: { hide: vi.fn(), show: vi.fn(async () => undefined) },
+  dock: { hide: vi.fn(), show: vi.fn(async () => undefined), isVisible: vi.fn(() => true) },
   hibernate: { release: () => {} },
   win: null as null | Record<string, ReturnType<typeof vi.fn>>,
   closeNodeSettingsWindows: vi.fn(),
+  trays: [] as Array<{ on: ReturnType<typeof vi.fn> }>,
 }));
 Object.assign(process, { resourcesPath: '/resources' });
 
@@ -18,6 +19,9 @@ vi.mock('electron', async () => {
     setToolTip = vi.fn();
     isDestroyed = () => false;
     destroy = vi.fn();
+    constructor() {
+      mocks.trays.push(this);
+    }
   }
   const image = {
     isEmpty: () => false,
@@ -71,9 +75,16 @@ vi.mock('./pairHost', () => ({ refreshPowerKeepAlive: vi.fn() }));
 vi.mock('./pairSessionHost', () => ({ setPairHeadless: vi.fn() }));
 vi.mock('./nodeRemote', () => ({ closeNodeSettingsWindows: mocks.closeNodeSettingsWindows }));
 
-import { app } from 'electron';
+import { app, Menu } from 'electron';
+import { getWindowWebContents } from '../windows/createAppWindow';
 import { attachAppCloseConfirm } from './appCloseConfirm';
-import { enterServerMode, isServerMode, leaveServerMode } from './appServerMode';
+import {
+  ensureTray,
+  enterServerMode,
+  isServerMode,
+  leaveServerMode,
+  toggleTrayMode,
+} from './appServerMode';
 
 describe('app server mode dock visibility', () => {
   beforeEach(() => {
@@ -89,11 +100,13 @@ describe('app server mode dock visibility', () => {
     // hibernateAll 未完成时用户点 Dock / 托盘 / 快捷键唤回
     mocks.win = {
       isDestroyed: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
       isMinimized: vi.fn(() => false),
       restore: vi.fn(),
       show: vi.fn(),
       focus: vi.fn(),
       destroy: vi.fn(),
+      on: vi.fn(),
     };
     leaveServerMode();
     mocks.hibernate.release();
@@ -132,6 +145,7 @@ function confirmedWindow() {
   const events = new EventEmitter();
   const win = {
     isDestroyed: vi.fn(() => false),
+    isVisible: vi.fn(() => true),
     isMinimized: vi.fn(() => false),
     restore: vi.fn(),
     show: vi.fn(),
@@ -199,5 +213,106 @@ describe('app server mode close confirmation', () => {
     kept.events.emit('close', { preventDefault });
     expect(preventDefault).toHaveBeenCalledOnce();
     kept.events.emit('closed');
+  });
+});
+
+/** 有显隐事件的主窗口桩：isVisible 由用例控制 */
+function eventedWindow() {
+  const events = new EventEmitter();
+  let visible = true;
+  const win = {
+    isDestroyed: vi.fn(() => false),
+    isVisible: vi.fn(() => visible),
+    isMinimized: vi.fn(() => false),
+    restore: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
+    destroy: vi.fn(),
+    on: vi.fn((event: string, listener: () => void) => events.on(event, listener)),
+  };
+  return {
+    win,
+    events,
+    setVisible: (next: boolean) => {
+      visible = next;
+    },
+  };
+}
+
+function toggleItem() {
+  const template = vi.mocked(Menu.buildFromTemplate).mock.lastCall?.[0];
+  return template?.[0] as { label?: string; click?: () => void };
+}
+
+function trayHandler(event: string): () => void {
+  const tray = mocks.trays.at(-1);
+  const call = tray?.on.mock.calls.findLast(([name]) => name === event);
+  return call?.[1] as () => void;
+}
+
+describe('tray toggle follows actual window visibility', () => {
+  beforeEach(() => {
+    mocks.dock.isVisible.mockReturnValue(true);
+    mocks.dock.show.mockClear();
+    vi.mocked(Menu.buildFromTemplate).mockClear();
+  });
+
+  // 真实场景：computer 浮窗把 App 转成 accessory，主窗口被压下去，菜单却仍是「最小化到托盘」，要点两次才回来
+  it('Dock 被藏起时菜单显示「打开」，点一次即唤回且不进托盘', () => {
+    const { win } = eventedWindow();
+    mocks.win = win;
+    mocks.dock.isVisible.mockReturnValue(false);
+    ensureTray();
+    const item = toggleItem();
+    expect(item.label).toBe('Show EnsoCode');
+
+    item.click?.();
+    expect(isServerMode()).toBe(false);
+    expect(mocks.dock.show).toHaveBeenCalledOnce();
+    expect(win.show).toHaveBeenCalled();
+    expect(win.focus).toHaveBeenCalled();
+    expect(win.destroy).not.toHaveBeenCalled();
+  });
+
+  it('主窗口 hide / show 后菜单文案随之更新', () => {
+    const target = eventedWindow();
+    mocks.win = target.win;
+    ensureTray();
+    expect(toggleItem().label).toBe('Minimize to tray');
+
+    target.setVisible(false);
+    target.events.emit('hide');
+    expect(toggleItem().label).toBe('Show EnsoCode');
+
+    target.setVisible(true);
+    target.events.emit('show');
+    expect(toggleItem().label).toBe('Minimize to tray');
+  });
+
+  it('鼠标移到托盘图标上时按当前 Dock 状态重建菜单', () => {
+    mocks.win = eventedWindow().win;
+    ensureTray();
+    expect(toggleItem().label).toBe('Minimize to tray');
+    mocks.dock.isVisible.mockReturnValue(false);
+    trayHandler('mouse-enter')();
+    expect(toggleItem().label).toBe('Show EnsoCode');
+  });
+
+  it('窗口在前台时点击进托盘，托盘中再点图标唤回', async () => {
+    const { win } = eventedWindow();
+    mocks.win = win;
+    // 不走 renderer 落盘握手
+    vi.mocked(getWindowWebContents).mockReturnValueOnce({
+      isDestroyed: () => true,
+    } as unknown as WebContents);
+    toggleTrayMode();
+    await vi.waitFor(() => expect(isServerMode()).toBe(true));
+    mocks.hibernate.release();
+    await vi.waitFor(() => expect(win.destroy).toHaveBeenCalledOnce());
+    expect(toggleItem().label).toBe('Show EnsoCode');
+
+    trayHandler('click')();
+    expect(isServerMode()).toBe(false);
+    expect(win.show).toHaveBeenCalled();
   });
 });

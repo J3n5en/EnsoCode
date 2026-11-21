@@ -153,6 +153,7 @@ vi.mock('./services/appServerMode', () => ({
   restoreFromSecondInstance: vi.fn(),
   shouldQuitOnWindowAllClosed: () => false,
   scheduleReenterServerMode: (...args: unknown[]) => mocks.scheduleReenter(...args),
+  toggleTrayMode: vi.fn(),
 }));
 vi.mock('./services/trayToggleShortcut', () => ({
   setTrayToggleHandler: vi.fn(),
