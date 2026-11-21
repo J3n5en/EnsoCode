@@ -10,6 +10,7 @@ import type { PluginSessionStatus, SessionStatusPayload } from '@shared/extensio
 import { normalizeLocale } from '@shared/i18n';
 import { type PersistedPairConversation, planPairResume } from '@shared/pair/headlessResume';
 import { projectSafeJournal } from '@shared/safeJournalProjection';
+import { appendInboundImageLines } from '@shared/secretary/inboundImages';
 import { wrapUntrusted } from '@shared/secretary/transcript';
 import { resolveSshTarget } from '@shared/ssh';
 import {
@@ -180,6 +181,13 @@ import { secretaryToolDescriptors, secretaryToolsDir } from '../services/secreta
 import { secretaryEnabled } from '../services/secretary/enabled';
 import { unfollowTarget } from '../services/secretary/following';
 import { isSecretaryConversation, isSecretaryProject } from '../services/secretary/identity';
+import {
+  getSecretaryImageStore,
+  SecretaryImageStore,
+  secretaryImagesRoot,
+  sessionFileReferences,
+  setSecretaryImageStore,
+} from '../services/secretary/inboundImages';
 import { buildSecretarySystemPrompt } from '../services/secretary/prompt';
 import { secretarySkillDirs, secretarySkillsDir } from '../services/secretary/skills';
 import { SecretaryStore } from '../services/secretary/store';
@@ -482,12 +490,37 @@ function removeConversationFiles(conversation: {
 }): void {
   const project = sourceAuthority?.project(conversation.projectId);
   peekExtensionPlugins()?.forgetSession(conversation.conversationId);
+  getSecretaryImageStore()?.remove(conversation.conversationId);
   removeConversationSessionFiles({
     sessionDir: path.join(app.getPath('userData'), 'agent', 'sessions'),
     conversationId: conversation.conversationId,
     ...(conversation.sessionFile ? { sessionFile: conversation.sessionFile } : {}),
     ...(project?.kind === 'scratch' ? { scratchRoot: project.canonicalPath } : {}),
   });
+}
+
+/**
+ * 秘书会话里贴的图：图照旧随消息给模型看，另外落盘到白名单目录，
+ * 路径行追加在正文后，秘书才能用 session_send 的 attachments 原图转发。
+ */
+function withSecretaryImagePaths(
+  sessionId: string,
+  text: string,
+  images: readonly { data: string }[] | undefined
+): string {
+  if (!images?.length || !isSecretaryConversation(sessionId)) return text;
+  const store = getSecretaryImageStore();
+  const saved = store?.saveAll(
+    sessionId,
+    images.map((image) => Buffer.from(image.data, 'base64'))
+  );
+  return appendInboundImageLines(
+    text,
+    images.map((_, index) => {
+      const item = saved?.[index];
+      return item?.ok ? { path: item.path } : { rejected: item?.reason ?? 'unavailable' };
+    })
+  );
 }
 
 /** ssh 项目→远程执行配置。只认 main 侧项目权威,渲染层请求里不存在也不采信此字段 */
@@ -1685,6 +1718,14 @@ export function registerAgentHandlers(): void {
   sourceAuthority.ensureSecretaryProject(
     path.join(app.getPath('userData'), 'secretary', 'workspace')
   );
+  const secretaryImages = new SecretaryImageStore({
+    root: secretaryImagesRoot(app.getPath('userData')),
+    references: (conversationId) =>
+      sessionFileReferences(sourceAuthority?.conversation(conversationId)?.sessionFile),
+  });
+  setSecretaryImageStore(secretaryImages);
+  // 启动后扫一次，不和启动抢 IO
+  setTimeout(() => void secretaryImages.sweep(), 15_000).unref();
   setBrowserFileRootResolver((conversationId) => {
     const conversation = sourceAuthority?.conversation(conversationId);
     const project = conversation ? sourceAuthority?.project(conversation.projectId) : undefined;
@@ -2687,10 +2728,11 @@ export function registerAgentHandlers(): void {
       }
       if (agentSessionIndex.isDetached(identity))
         return { ok: false, error: DETACHED_SESSION_ERROR };
+      const typedImages = images as { data: string; mimeType: string }[] | undefined;
       return promptSession(
         identity,
-        text as string,
-        images as { data: string; mimeType: string }[] | undefined,
+        withSecretaryImagePaths(identity.sessionId, text as string, typedImages),
+        typedImages,
         deliveryId
       );
     }
@@ -2717,10 +2759,11 @@ export function registerAgentHandlers(): void {
       }
       if (agentSessionIndex.isDetached(identity))
         return { ok: false, error: DETACHED_SESSION_ERROR };
+      const typedImages = images as { data: string; mimeType: string }[] | undefined;
       return steerSession(
         identity,
-        text as string,
-        images as { data: string; mimeType: string }[] | undefined,
+        withSecretaryImagePaths(identity.sessionId, text as string, typedImages),
+        typedImages,
         deliveryId
       );
     }

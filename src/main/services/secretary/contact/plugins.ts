@@ -1,6 +1,6 @@
 import type { PluginContactChannelContrib } from '@shared/extensionPlugins/manifest';
 import type { PluginContactRequest } from '@shared/extensionPlugins/protocol';
-import type { ChannelCaps, ChannelMeta } from './channel';
+import type { ChannelCaps, ChannelInboundImage, ChannelMeta } from './channel';
 import { PluginContactChannel } from './pluginChannel';
 import type { ChannelStatusInput, ContactService } from './service';
 
@@ -26,6 +26,8 @@ export interface PluginContactBridgeHandlers {
       chatTitle?: string;
       name?: string;
       at?: number;
+      /** 字节由宿主判格式落盘 */
+      images?: readonly ChannelInboundImage[];
     }
   ): void;
   setStatus(pluginId: string, channelId: string, input: ChannelStatusInput): void;
@@ -97,6 +99,7 @@ export function connectPluginChannels(
         ...(input.chatTitle ? { chatTitle: input.chatTitle } : {}),
         ...(input.name ? { name: input.name } : {}),
         ...(input.at ? { at: input.at } : {}),
+        ...(input.images?.length ? { images: input.images } : {}),
       });
     },
     setStatus(pluginId, channelId, input) {

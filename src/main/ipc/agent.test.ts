@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/types';
@@ -212,6 +220,7 @@ vi.mock('./worktree', () => ({
 }));
 
 import { SessionManager } from '@earendil-works/pi-coding-agent';
+import { appUserImageDirs } from '@shared/secretary/imageView';
 import { parseProfile } from '@shared/secretary/parse';
 import { app } from 'electron';
 import { resolveSubagentModelSelection, rewindSession } from '../services/agentHost';
@@ -827,6 +836,83 @@ describe('agent IPC Main identity boundary', () => {
       headless().setModel('conv-1::cw-1', 'pv', 'm');
       await Promise.resolve();
       expect(mocks.setSessionModel).not.toHaveBeenCalled();
+    });
+  });
+
+  describe.each([
+    [IPC_CHANNELS.AGENT_PROMPT, mocks.promptSession],
+    [IPC_CHANNELS.AGENT_STEER, mocks.steerSession],
+  ])('%s 秘书会话贴图落盘', (channel, send) => {
+    const conversationId = '0b3f6c1e-7a52-4c3e-9d1a-2f6e8b4c5d7a';
+    const identity = { sessionId: conversationId, generation: 'gen-1' };
+    const pngData = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
+      4, 0, 0, 0, 4,
+    ]).toString('base64');
+    const images = [
+      { data: pngData, mimeType: 'image/png' },
+      { data: pngData, mimeType: 'image/png' },
+      { data: Buffer.from('<svg/>').toString('base64'), mimeType: 'image/png' },
+    ];
+
+    function secretary(kind: 'secretary' | undefined) {
+      const authority = getSourceAuthorityRegistry()!;
+      vi.spyOn(authority, 'conversation').mockReturnValue({
+        conversationId,
+        projectId: 'sp',
+        kind: 'root',
+        lifecycle: 'ready',
+        version: 1,
+      });
+      vi.spyOn(authority, 'project').mockReturnValue({
+        projectId: 'sp',
+        canonicalPath: '/secretary',
+        state: 'active',
+        version: 1,
+        ...(kind ? { kind } : {}),
+      });
+    }
+
+    it('图照旧随消息走，另外按内容哈希落盘到白名单目录，路径行追加在正文后；同图只存一份', async () => {
+      const userData = mkdtempSync(path.join(os.tmpdir(), 'agent-ipc-images-'));
+      vi.mocked(app.getPath).mockReturnValue(userData);
+      try {
+        registerAgentHandlers();
+        secretary('secretary');
+        mocks.currentIdentity.mockReturnValue(identity);
+        send.mockReturnValue({ ok: true });
+        await mocks.handlers.get(channel)?.(event, conversationId, '照这个改', images, 'd-1');
+        const [, text, sentImages] = send.mock.calls.at(-1) as [unknown, string, unknown];
+        const dir = path.join(userData, 'bot-chats', 'secretary-images', conversationId);
+        const files = readdirSync(dir);
+        expect(files).toHaveLength(1);
+        const file = path.join(dir, files[0] as string);
+        expect(text).toBe(
+          `照这个改\n\n[图片 1] ${file}\n[图片 2] ${file}\n[图片 3 未收下] 不是 png / jpeg / webp / gif 图片，没有保存`
+        );
+        expect(sentImages).toBe(images);
+        expect(appUserImageDirs(userData).some((root) => file.startsWith(`${root}/`))).toBe(true);
+      } finally {
+        vi.mocked(app.getPath).mockReturnValue('/tmp');
+        rmSync(userData, { recursive: true, force: true });
+      }
+    });
+
+    it('不是秘书会话：正文原样，不落盘', async () => {
+      const userData = mkdtempSync(path.join(os.tmpdir(), 'agent-ipc-images-'));
+      vi.mocked(app.getPath).mockReturnValue(userData);
+      try {
+        registerAgentHandlers();
+        secretary(undefined);
+        mocks.currentIdentity.mockReturnValue(identity);
+        send.mockReturnValue({ ok: true });
+        await mocks.handlers.get(channel)?.(event, conversationId, 'hi', images);
+        expect(send).toHaveBeenLastCalledWith(identity, 'hi', images, undefined);
+        expect(readdirSync(userData)).not.toContain('bot-chats');
+      } finally {
+        vi.mocked(app.getPath).mockReturnValue('/tmp');
+        rmSync(userData, { recursive: true, force: true });
+      }
     });
   });
 

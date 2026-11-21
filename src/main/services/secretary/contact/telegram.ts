@@ -30,6 +30,7 @@ import type {
   ChannelFile,
   ChannelImage,
   ChannelInbound,
+  ChannelInboundImage,
   ChannelMessage,
   ChannelResult,
   ChannelSend,
@@ -144,6 +145,23 @@ function topicOf(message: TelegramMessage): string | undefined {
   const thread = message.message_thread_id;
   if (thread === undefined || !Number.isInteger(thread)) return undefined;
   return message.is_topic_message || message.chat.is_forum ? String(thread) : undefined;
+}
+
+/** 与 image_view 同一上限 */
+const INBOUND_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+/** 带了附件的消息：图片要落盘，别的附件也要回一句收不下 */
+function carriesMedia(message: TelegramMessage): boolean {
+  return Boolean(
+    message.photo?.length ||
+      message.document ||
+      message.video ||
+      message.voice ||
+      message.audio ||
+      message.animation ||
+      message.video_note ||
+      message.sticker
+  );
 }
 
 function threadOf(topicId: string | undefined): { messageThreadId?: number } {
@@ -646,8 +664,10 @@ export class TelegramChannel implements ContactChannel {
       return;
     }
     const message = update.message;
-    const text = message?.text?.trim();
-    if (!message || !text) return;
+    if (!message) return;
+    const text = (message.text ?? message.caption ?? '').trim();
+    const hasMedia = carriesMedia(message);
+    if (!text && !hasMedia) return;
 
     // 绑定向导：只认私聊里的 /start <code>，对不上就忽略，绝不绑到陌生人身上
     if (file.bind) {
@@ -698,6 +718,7 @@ export class TelegramChannel implements ContactChannel {
     this.rememberThread(message);
     const topicId = topicOf(message);
     const name = message.from?.username ?? message.from?.first_name;
+    const images = hasMedia ? await this.downloadImages(message) : [];
     await this.ports.inbound({
       kind: 'text',
       peer: {
@@ -711,7 +732,37 @@ export class TelegramChannel implements ContactChannel {
       ...(message.from ? { senderId: String(message.from.id) } : {}),
       ...(name ? { name } : {}),
       ...(message.date ? { at: message.date * 1000 } : {}),
+      ...(images.length ? { images } : {}),
     });
+  }
+
+  /** 只在放行之后下载：照片取不超过 10MB 的最大尺寸，文件只收 image/*，其余附件标明收不下 */
+  private async downloadImages(message: TelegramMessage): Promise<ChannelInboundImage[]> {
+    const token = this.store.token();
+    const fetchImage = async (fileId: string): Promise<ChannelInboundImage> => {
+      if (!token) return { rejected: 'unavailable' };
+      try {
+        const data = await this.apiFor(token).downloadFile(fileId, INBOUND_IMAGE_MAX_BYTES);
+        return data === 'too-large' ? { rejected: 'too-large' } : { data };
+      } catch (error) {
+        this.audit('contact_inbound_media', false, telegramErrorCode(error));
+        return { rejected: 'unavailable' };
+      }
+    };
+    if (message.photo?.length) {
+      const fitting = message.photo.filter(
+        (size) => size.file_size === undefined || size.file_size <= INBOUND_IMAGE_MAX_BYTES
+      );
+      const best = fitting.at(-1);
+      return [best ? await fetchImage(best.file_id) : { rejected: 'too-large' }];
+    }
+    const document = message.document;
+    if (document) {
+      if (!document.mime_type?.startsWith('image/')) return [{ rejected: 'not-image' }];
+      if ((document.file_size ?? 0) > INBOUND_IMAGE_MAX_BYTES) return [{ rejected: 'too-large' }];
+      return [await fetchImage(document.file_id)];
+    }
+    return [{ rejected: 'not-image' }];
   }
 
   /** 静默丢掉：不回话，只记审计；名单外的群带上 chatId，方便用户查到要加哪个 */

@@ -179,11 +179,20 @@ export interface EnsoContactChannel {
 
 export interface EnsoContactInbound {
   peerId: string;
+  /** 只发图片时可以是空串 */
   text: string;
+  senderId?: string;
+  chatType?: 'private' | 'group';
+  chatTitle?: string;
   /** 显示名，进秘书会话头一行 */
   name?: string;
   /** 毫秒时间戳 */
   at?: number;
+  /**
+   * 随消息来的图片，最多 4 项：`data` 是 base64，宿主按文件头判格式（png/jpeg/webp/gif）、单张 ≤10MB 落盘；
+   * 没下载的附件写 `rejected`，宿主统一回对方一句收不下。
+   */
+  images?: ({ data: string } | { rejected: 'too-large' | 'not-image' })[];
 }
 
 export interface EnsoContactStatus {
