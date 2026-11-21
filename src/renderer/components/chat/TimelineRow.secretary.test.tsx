@@ -91,3 +91,29 @@ it('解析不了的回传也不露出标签名', () => {
   expect(out).not.toContain('<session-updates>');
   expect(out).not.toContain('第二行');
 });
+
+const IMG = '/Users/u/Library/Application Support/enso-code/bot-chats/secretary-images/c/ab12.png';
+const image = { type: 'image' as const, data: 'eA==', mimeType: 'image/png' };
+
+it('秘书贴图的路径行：有缩略图就隐藏，没有就变成「图片 N」标签，不露完整路径', () => {
+  const text = `照这个改\n\n[图片 1] ${IMG}\n[图片 2] ${IMG}`;
+  const out = html({ ...user(text), images: [image] } as TimelineItem);
+  expect(out).toContain('照这个改');
+  expect(out).not.toContain('Image 1<');
+  expect(out).toContain('Image 2');
+  expect(out).toContain('title="ab12.png"');
+  expect(out).not.toContain('[图片');
+  expect(out.replace(/src="[^"]*"/g, '')).not.toContain('secretary-images');
+});
+
+it('未收下的图片渲染成一行提示，不露方括号原文', () => {
+  const out = html(user('看\n\n[图片 1 未收下] 超过 10MB，没有保存'));
+  expect(out).toContain('Image 1 not accepted: over 10 MB, not saved');
+  expect(out).not.toContain('[图片');
+});
+
+it('正文中间同样格式的文字原样保留', () => {
+  const out = html(user(`[图片 1] ${IMG}\n\n后面还有话`));
+  expect(out).toContain(`[图片 1] ${IMG}`);
+  expect(out).not.toContain('data-enso="inbound-images"');
+});

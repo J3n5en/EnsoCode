@@ -1,5 +1,6 @@
 import type { InboundMessage } from '@shared/secretary/inbound';
 import { Send } from 'lucide-react';
+import { InboundImageList } from '@/components/chat/InboundImageList';
 import { Markdown } from '@/components/chat/Markdown';
 import { useI18n } from '@/i18n';
 
@@ -39,6 +40,11 @@ export function TelegramInboundCard({ message }: { message: InboundMessage }) {
           <Markdown text={message.body} />
         </div>
       </details>
+      {message.imageLines && (
+        <div className="mt-1.5">
+          <InboundImageList entries={message.imageLines} align="start" />
+        </div>
+      )}
     </div>
   );
 }

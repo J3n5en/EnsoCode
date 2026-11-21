@@ -773,6 +773,10 @@ describe('applyAgentEvent', () => {
     });
     expect(delivered.messages).toHaveLength(1);
     expect(delivered.messages[0]).not.toHaveProperty('optimistic', true);
+    // 存下的正文仍是 worker 原文，路径行只在界面上换形态
+    expect(JSON.stringify(delivered.messages[0]?.content)).toContain(
+      '[图片 1] /u/bot-chats/secretary-images/c/a.png'
+    );
   });
 
   it('超长 user 正文投影被截断后仍消费乐观回显（upsert 与 snapshot）', () => {
