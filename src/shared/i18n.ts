@@ -2038,8 +2038,6 @@ export const zhTranslations: Record<string, string> = {
   'Loading…': '加载中…',
   '(no log available)': '(暂无日志)',
   'Context compacted': '上下文已压缩',
-  'Waiting for first token': '等首字',
-  'Think time': '思考',
   '{{kind}} · {{before}} → {{after}} · freed {{percent}}%':
     '{{kind}} · {{before}} → {{after}} · 释放 {{percent}}%',
   'Context compacted ({{tokens}} tokens before)': '上下文已压缩（压缩前 {{tokens}} tokens）',
