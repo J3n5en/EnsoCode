@@ -42,6 +42,42 @@ export function upgradedBuild(
 export const deskBase = (pairId: string, version: string): string =>
   `/desk/r/${encodeURIComponent(pairId)}/${encodeURIComponent(version)}`;
 
+/** iOS PWA 在后台久了偶发 SW / 浏览器存储卡死（只有划掉重开才恢复）：启动路径上的存储调用不能无限等 */
+export function withTimeout<T>(task: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    task.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+}
+
+const BOOT_RETRY_KEY = 'enso-desk-boot-retry';
+
+/** 启动卡住时是否自动整页重载：同一页面会话只重载一次，避免死循环 */
+export function bootRetry(storage: KeyValue): boolean {
+  try {
+    if (storage.getItem(BOOT_RETRY_KEY)) return false;
+    storage.setItem(BOOT_RETRY_KEY, '1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearBootRetry(storage: Pick<Storage, 'removeItem'>): void {
+  try {
+    storage.removeItem(BOOT_RETRY_KEY);
+  } catch {}
+}
+
 /** 入口页最先进缓存，下载中途打断也会留下它；renderer 真正跑起来后才记完成标记 */
 const readyUrl = (origin: string, base: string) => `${origin}${base}/.ready`;
 

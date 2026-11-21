@@ -1,12 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  bootRetry,
   buildReady,
+  clearBootRetry,
   deskBase,
   downloadProgress,
   loadDeskMeta,
   markBuildReady,
   saveDeskMeta,
   upgradedBuild,
+  withTimeout,
 } from './launch';
 
 class MemoryStorage {
@@ -50,6 +53,34 @@ describe('desk launch meta', () => {
     expect(upgradedBuild('', '0.3.12-b', 'darwin')).toBeNull();
     expect(upgradedBuild('0.3.12-a', '../x', 'darwin')).toBeNull();
     expect(upgradedBuild('0.3.12-a', undefined, 'darwin')).toBeNull();
+  });
+
+  it('存储调用卡住或出错时按超时给回退值，不让启动无限等', async () => {
+    vi.useFakeTimers();
+    try {
+      const hung = withTimeout(new Promise<string>(() => {}), 1000, 'fallback');
+      vi.advanceTimersByTime(1000);
+      await expect(hung).resolves.toBe('fallback');
+      await expect(withTimeout(Promise.resolve('ok'), 1000, 'fallback')).resolves.toBe('ok');
+      await expect(withTimeout(Promise.reject(new Error('x')), 1000, 'fallback')).resolves.toBe(
+        'fallback'
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('启动卡住只自动重载一次；成功启动后清掉标记，下次卡住还能再自动重载', () => {
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    expect(bootRetry(storage)).toBe(true);
+    expect(bootRetry(storage)).toBe(false);
+    clearBootRetry(storage);
+    expect(bootRetry(storage)).toBe(true);
   });
 });
 
