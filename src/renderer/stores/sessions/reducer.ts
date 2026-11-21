@@ -696,7 +696,14 @@ export function applyAgentEvent(
       return {
         ...current,
         backgroundTasks: current.backgroundTasks.map((task) =>
-          task.taskId === event.taskId ? { ...task, tail: event.tail, status: event.status } : task
+          task.taskId === event.taskId
+            ? {
+                ...task,
+                tail: event.tail,
+                status: event.status,
+                ...(event.outputBytes !== undefined ? { outputBytes: event.outputBytes } : {}),
+              }
+            : task
         ),
         lastOutputAt: now,
         lastSeq: event.seq,

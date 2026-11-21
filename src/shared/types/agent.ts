@@ -351,6 +351,8 @@ export interface BackgroundTaskInfo {
   status: 'running' | 'done' | 'failed';
   /** 输出尾部快照（覆盖式,≤8KB） */
   tail: string;
+  /** 任务累计写出的输出字节数（含重启前、已滚出 tail 的）；0 = 确实还没输出。缺省表示未知 */
+  outputBytes?: number;
   startedAt: number;
   exitCode?: number;
   /** 模型显式 timeout 的绝对截止（ms）。没有则不会因超时被看门狗收口 */
@@ -2370,6 +2372,7 @@ export type AgentWorkerEvent =
       taskId: string;
       tail: string;
       status: BackgroundTaskInfo['status'];
+      outputBytes?: number;
     }
   | {
       type: 'task-ended';

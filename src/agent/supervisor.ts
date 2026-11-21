@@ -1231,7 +1231,7 @@ export class SessionSupervisor {
             });
           }
         },
-        onOutput: (sessionId, taskId, tail, status) => {
+        onOutput: (sessionId, taskId, tail, status, outputBytes) => {
           const managed = this.sessions.get(sessionId);
           if (managed) {
             this.options.emit({
@@ -1241,6 +1241,7 @@ export class SessionSupervisor {
               taskId,
               tail,
               status,
+              ...(outputBytes !== undefined ? { outputBytes } : {}),
             });
           } else if (status === 'running') this.emitUnopenedTasks(sessionId);
         },

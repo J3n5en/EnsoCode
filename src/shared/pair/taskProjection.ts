@@ -72,6 +72,9 @@ export function applyTaskEvent(state: TaskState, event: Record<string, unknown>)
                 ...t,
                 tail: event.tail as string,
                 status: event.status as BackgroundTaskInfo['status'],
+                ...(typeof event.outputBytes === 'number'
+                  ? { outputBytes: event.outputBytes }
+                  : {}),
               }
             : t
         ),

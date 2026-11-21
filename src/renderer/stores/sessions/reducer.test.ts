@@ -1905,6 +1905,23 @@ describe('background-tasks-level', () => {
     expect(state.backgroundTasks).toEqual([task('t1', 'done')]);
   });
 
+  it('task-output 带上累计输出字节数，面板据此区分「没输出」和「有输出没加载」', () => {
+    const state = applyAgentEvent(
+      { ...base, lastSeq: 1, backgroundTasks: [task('t1', 'running')] },
+      's1',
+      {
+        type: 'task-output',
+        identity: identity(),
+        seq: 2,
+        taskId: 't1',
+        tail: 'x\n',
+        status: 'running',
+        outputBytes: 4096,
+      }
+    );
+    expect(state.backgroundTasks[0]).toMatchObject({ tail: 'x\n', outputBytes: 4096 });
+  });
+
   it('过期 seq 的 level 被丢弃', () => {
     const state = applyAgentEvent(
       { ...base, lastSeq: 5, backgroundTasks: [task('t1', 'running')] },

@@ -597,6 +597,7 @@ describe('SessionSupervisor 重启保留转后台命令', () => {
       exitFile: files.exitFile,
       sink: vi.fn(),
       flush: vi.fn(),
+      readError: () => null,
       done: new Promise<never>(() => {}),
       kill: vi.fn(),
       release: vi.fn(() => 42),
