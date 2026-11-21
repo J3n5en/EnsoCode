@@ -9,6 +9,7 @@ import {
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { SecretaryAvatar } from './SecretaryAvatar';
+import type { RunningOriginsLink } from './SecretaryRunningOrigins';
 import { type SecretarySectionView, SecretarySummary } from './secretaryView';
 
 const ACTION_CLASS =
@@ -104,6 +105,7 @@ export function SecretarySidebarSection({
   onNewConversation,
   onOpenSettings,
   onReset,
+  runningOrigins,
   divider = true,
   secretaryId,
   keepAvatar = false,
@@ -111,6 +113,7 @@ export function SecretarySidebarSection({
 }: SecretarySectionActions & {
   view: SecretarySectionView;
   folded: boolean;
+  runningOrigins?: RunningOriginsLink;
   /** 多个秘书时只有最后一个分区画分隔线 */
   divider?: boolean;
   /** 多个秘书时标出是哪一个 */
@@ -176,7 +179,7 @@ export function SecretarySidebarSection({
           data-enso="secretary-summary"
           className="mt-0.5 flex max-w-full min-w-0 items-center truncate text-[11.5px] text-muted-foreground"
         >
-          <SecretarySummary view={view} />
+          <SecretarySummary view={view} origins={runningOrigins} />
         </span>
       </button>
       <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
