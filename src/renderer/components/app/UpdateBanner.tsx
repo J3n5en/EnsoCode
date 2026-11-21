@@ -2,6 +2,7 @@ import type { UpdateStatus } from '@shared/types/updater';
 import { Download, RotateCw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '@/i18n';
+import { BannerBar } from './BannerBar';
 import { ManualInstallActions } from './ManualInstallActions';
 import { ReleaseNotesDialog } from './ReleaseNotesDialog';
 
@@ -41,8 +42,8 @@ export function UpdateBanner() {
   const manualInstall = isAvailable ? status.manualInstall : undefined;
 
   return (
-    <div className="border-b border-blue-500/20 bg-background">
-      <div className="flex items-center gap-2 bg-blue-500/8 px-4 py-1.5 text-xs">
+    <>
+      <BannerBar>
         {isDownloaded ? (
           <RotateCw className="h-3.5 w-3.5 shrink-0 text-blue-500" />
         ) : (
@@ -105,8 +106,8 @@ export function UpdateBanner() {
         >
           <X className="h-3.5 w-3.5" />
         </button>
-      </div>
+      </BannerBar>
       <ReleaseNotesDialog open={notesOpen} onOpenChange={setNotesOpen} status={status} />
-    </div>
+    </>
   );
 }

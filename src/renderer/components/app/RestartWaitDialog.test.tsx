@@ -3,7 +3,7 @@ import { parseHTML } from 'linkedom';
 import { act, type ComponentProps, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RestartWaitDialog } from './RestartWaitDialog';
+import { RestartWaitDialog, RestartWaitStrip, useRestartOverlayStore } from './RestartWaitDialog';
 
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/alert-dialog', () => {
@@ -38,6 +38,11 @@ let initial: RestartOverlayState | null = null;
 let remote: object | undefined;
 const forceRestart = vi.fn();
 const dialog = () => container.querySelector('[role="alertdialog"]');
+const strip = () => container.querySelector('#strip')?.firstElementChild ?? null;
+const buttonOf = (el: Element | null | undefined, text: string) =>
+  [...(el?.querySelectorAll('button') ?? [])].find((b) => b.textContent === text) as
+    | HTMLButtonElement
+    | undefined;
 
 async function mount(): Promise<void> {
   const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
@@ -61,7 +66,16 @@ async function mount(): Promise<void> {
   });
   container = window.document.getElementById('root') as unknown as HTMLElement;
   root = createRoot(container);
-  await act(async () => root.render(createElement(RestartWaitDialog)));
+  await act(async () =>
+    root.render(
+      createElement(
+        'div',
+        null,
+        createElement('div', { id: 'strip' }, createElement(RestartWaitStrip)),
+        createElement(RestartWaitDialog)
+      )
+    )
+  );
 }
 
 beforeEach(() => {
@@ -69,6 +83,12 @@ beforeEach(() => {
   push = undefined;
   initial = null;
   remote = undefined;
+  useRestartOverlayStore.setState({
+    state: null,
+    shown: { phase: 'restarting' },
+    forcing: false,
+    minimized: false,
+  });
 });
 
 afterEach(async () => {
@@ -91,11 +111,11 @@ describe('RestartWaitDialog', () => {
   it('强制退出：立刻通知 Main，不等命令；按钮防重复点', async () => {
     await mount();
     await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
-    const button = dialog()?.querySelector('button');
-    expect(button?.textContent).toBe('Force quit');
+    const button = buttonOf(dialog(), 'Force quit');
+    expect(button).toBeDefined();
     await act(async () => button?.click());
     expect(forceRestart).toHaveBeenCalledTimes(1);
-    expect(dialog()?.querySelector('button')?.hasAttribute('disabled')).toBe(true);
+    expect(buttonOf(dialog(), 'Force quit')?.hasAttribute('disabled')).toBe(true);
   });
 
   it('在等的是脱离不了的转后台命令：多一句说明；普通命令不说', async () => {
@@ -152,6 +172,7 @@ describe('RestartWaitDialog', () => {
     await mount();
     expect(push).toBeUndefined();
     expect(dialog()).toBeNull();
+    expect(strip()).toBeNull();
   });
 
   it.each([
@@ -173,10 +194,63 @@ describe('RestartWaitDialog', () => {
       ].filter((line) => !text.startsWith(line)))
         expect(content).not.toContain(other);
       expect(dialog()?.querySelector('[role="status"]')).not.toBeNull();
-      await act(async () => dialog()?.querySelector('button')?.click());
+      await act(async () => buttonOf(dialog(), 'Force quit')?.click());
       expect(forceRestart).toHaveBeenCalledTimes(1);
       await act(async () => push?.(null));
       expect(dialog()).toBeNull();
     }
   );
+
+  it('最小化：弹层收成小条（loading + 状态 + 强制退出），点小条恢复，不通知 Main', async () => {
+    await mount();
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
+    expect(strip()).toBeNull();
+    await act(async () => buttonOf(dialog(), 'Minimize')?.click());
+    expect(dialog()).toBeNull();
+    expect(strip()?.textContent).toContain('Restarting once the current command finishes');
+    expect(strip()?.querySelector('[role="status"]')).not.toBeNull();
+    expect(buttonOf(strip(), 'Force quit')).toBeDefined();
+    await act(async () =>
+      buttonOf(strip(), 'Restarting once the current command finishes')?.click()
+    );
+    expect(strip()).toBeNull();
+    expect(dialog()?.textContent).toContain('Waiting for the current command to finish');
+    expect(forceRestart).not.toHaveBeenCalled();
+  });
+
+  it('最小化后重新推送等待状态：保持小条，不弹回全屏；文案跟着更新', async () => {
+    await mount();
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
+    await act(async () => buttonOf(dialog(), 'Minimize')?.click());
+    await act(async () =>
+      push?.({ phase: 'waiting', reason: 'background-not-detachable', exit: 'update' })
+    );
+    expect(dialog()).toBeNull();
+    expect(strip()?.textContent).toContain(
+      'Installing the update once the current command finishes'
+    );
+  });
+
+  it('最小化状态下命令结束：照常切到「正在重启」并恢复全屏；下次等待从全屏开始', async () => {
+    await mount();
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'restart' }));
+    await act(async () => buttonOf(dialog(), 'Minimize')?.click());
+    await act(async () => push?.({ phase: 'restarting' }));
+    expect(strip()).toBeNull();
+    expect(dialog()?.textContent).toContain('Restarting EnsoCode…');
+    await act(async () => push?.(null));
+    expect(dialog()).toBeNull();
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'quit' }));
+    expect(strip()).toBeNull();
+    expect(dialog()?.textContent).toContain('Waiting for the current command to finish');
+  });
+
+  it('小条上直接强制退出：通知 Main 且防重复点', async () => {
+    await mount();
+    await act(async () => push?.({ phase: 'waiting', reason: 'tool', exit: 'update' }));
+    await act(async () => buttonOf(dialog(), 'Minimize')?.click());
+    await act(async () => buttonOf(strip(), 'Force quit')?.click());
+    expect(forceRestart).toHaveBeenCalledTimes(1);
+    expect(buttonOf(strip(), 'Force quit')?.hasAttribute('disabled')).toBe(true);
+  });
 });
