@@ -48,6 +48,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { useScrollChain } from '@/hooks/useScrollChain';
 import { useI18n } from '@/i18n';
+import { formatRelativeTime } from '@/lib/time';
 import { cn } from '@/lib/utils';
 import { Z_INDEX } from '@/lib/z-index';
 import { API_KIND_LABELS } from './constants';
@@ -68,6 +69,9 @@ export interface ProviderApiFormValue {
 interface ProviderApiFormProps {
   initialValue: ProviderApiFormValue;
   catalogId?: ModelProvider['catalogId'];
+  /** 供应商已停用时不显示自动拉取：停用条目不会被拉取 */
+  providerEnabled?: boolean;
+  modelRefreshStatus?: ModelProvider['modelRefreshStatus'];
   oauth: boolean;
   oauthAccountKey?: string;
   extraFields?: React.ReactNode;
@@ -81,7 +85,7 @@ interface ProviderApiFormProps {
 
 const isEnabled = (model: ModelEntry) => model.enabled !== false;
 const autoFetchField = 'provider-auto-fetch-models';
-const refreshIntervalId = 'provider-model-refresh-interval-hours';
+const refreshIntervalSlot = 'provider-model-refresh-interval-hours';
 const refreshIntervalRange = {
   min: MIN_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
   max: MAX_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
@@ -101,6 +105,8 @@ function headerDrafts(headers: Record<string, string> | undefined): HeaderDraft[
 export function ProviderApiForm({
   initialValue,
   catalogId,
+  providerEnabled = true,
+  modelRefreshStatus,
   oauth,
   oauthAccountKey,
   extraFields,
@@ -110,7 +116,7 @@ export function ProviderApiForm({
   onCancel,
   onSave,
 }: ProviderApiFormProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [name, setName] = React.useState(initialValue.name);
   const [api, setApi] = React.useState(initialValue.api);
   const [apiKey, setApiKey] = React.useState(initialValue.apiKey);
@@ -119,6 +125,8 @@ export function ProviderApiForm({
     initialValue.autoFetchModels === true
   );
   const autoFetchLabelId = React.useId();
+  const refreshIntervalId = React.useId();
+  const refreshIntervalDescriptionId = React.useId();
   const [refreshInterval, setRefreshInterval] = React.useState(() =>
     String(normalizeProviderModelRefreshIntervalHours(initialValue.modelRefreshIntervalHours))
   );
@@ -196,7 +204,7 @@ export function ProviderApiForm({
   });
   const headersInvalid = headerNameInvalid || headerValueInvalid;
   const classifierOnly = isClassifierOnlyProvider({ api, baseUrl: baseUrl.trim(), catalogId });
-  const showModelRefresh = !oauth && !classifierOnly;
+  const showModelRefresh = !oauth && !classifierOnly && providerEnabled;
   const refreshIntervalHours = Number(refreshInterval);
   const refreshIntervalValid =
     /^\d+$/.test(refreshInterval) && isProviderModelRefreshIntervalHours(refreshIntervalHours);
@@ -374,27 +382,45 @@ export function ProviderApiForm({
                     onCheckedChange={setAutoFetchModels}
                   />
                 </Field>
+                {autoFetchModels && modelRefreshStatus && (
+                  <p
+                    data-slot="provider-model-refresh-status"
+                    className={cn(
+                      'text-xs',
+                      modelRefreshStatus.ok ? 'text-muted-foreground' : 'text-destructive'
+                    )}
+                  >
+                    {t(
+                      modelRefreshStatus.ok
+                        ? 'Last fetched {{time}}'
+                        : 'Last fetch failed {{time}}',
+                      {
+                        time: formatRelativeTime(modelRefreshStatus.at, locale),
+                      }
+                    )}
+                  </p>
+                )}
                 <Field>
                   <FieldLabel htmlFor={refreshIntervalId}>{t('Model fetch interval')}</FieldLabel>
                   <div className="flex items-center gap-2">
                     <Input
                       id={refreshIntervalId}
                       render={<input id={refreshIntervalId} />}
-                      data-slot={refreshIntervalId}
+                      data-slot={refreshIntervalSlot}
                       type="number"
                       min={refreshIntervalRange.min}
                       max={refreshIntervalRange.max}
                       step={1}
                       value={refreshInterval}
                       className="w-24"
-                      aria-describedby="provider-model-refresh-interval-description"
+                      aria-describedby={refreshIntervalDescriptionId}
                       aria-invalid={refreshIntervalInvalid || undefined}
                       onInput={(event) => setRefreshInterval(event.currentTarget.value)}
                     />
                     <span className="text-xs text-muted-foreground">{t('hours')}</span>
                   </div>
                   <p
-                    id="provider-model-refresh-interval-description"
+                    id={refreshIntervalDescriptionId}
                     className={cn(
                       'text-xs',
                       refreshIntervalInvalid ? 'text-destructive' : 'text-muted-foreground'

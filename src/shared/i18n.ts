@@ -784,6 +784,8 @@ export const zhTranslations: Record<string, string> = {
     '开启此供应商的自动拉取后，按此间隔拉取模型。',
   'Enter a whole number from {{min}} to {{max}} hours.': '请输入 {{min}}–{{max}} 小时之间的整数。',
   hours: '小时',
+  'Last fetched {{time}}': '上次拉取成功：{{time}}',
+  'Last fetch failed {{time}}': '上次拉取失败：{{time}}',
   'Manage model API providers for this app': '管理应用的模型 API 服务',
   'Import from local apps': '从本地应用导入',
   'Scan providers configured in local AI apps and import them.':

@@ -152,6 +152,9 @@ function sameProviderRequest(left: ProviderApiConfig, right: ProviderApiConfig):
 export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProps) {
   const { t } = useI18n();
   const updateProvider = useSettingsStore((state) => state.updateProvider);
+  const refreshStatus = useSettingsStore(
+    (state) => state.providers.find((entry) => entry.id === provider?.id)?.modelRefreshStatus
+  );
   const directory = useModelDirectoryStore((state) => state.snapshot);
   const materializedModels = useMemo(
     () =>
@@ -186,6 +189,8 @@ export function ProviderEditDialog({ provider, onClose }: ProviderEditDialogProp
                 autoFetchModels: provider.autoFetchModels,
                 modelRefreshIntervalHours: provider.modelRefreshIntervalHours,
               }}
+              providerEnabled={provider.enabled}
+              modelRefreshStatus={refreshStatus}
               oauth={Boolean(provider.oauthAccountKey)}
               oauthAccountKey={provider.oauthAccountKey}
               onCancel={onClose}

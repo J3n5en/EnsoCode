@@ -103,7 +103,8 @@ describe('ProviderApiForm model refresh interval', () => {
     );
     const interval = parseHTML(html).document.querySelector<HTMLInputElement>(selector);
     expect(interval?.value).toBe(expected);
-    expect(html).toContain('for="provider-model-refresh-interval-hours"');
+    expect(interval?.id).toBeTruthy();
+    expect(html).toContain(`for="${interval?.id}"`);
     expect(saveIsDisabled(html)).toBe(false);
   });
 
@@ -135,6 +136,41 @@ describe('ProviderApiForm model refresh interval', () => {
     expect(html).not.toContain('provider-auto-fetch-models');
   });
 
+  it('hides automatic fetching for a disabled provider', () => {
+    const html = renderToStaticMarkup(
+      <ProviderApiForm
+        initialValue={{ ...provider, autoFetchModels: true }}
+        providerEnabled={false}
+        oauth={false}
+        onCancel={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(html).not.toContain('provider-auto-fetch-models');
+    expect(html).not.toContain('provider-model-refresh-interval-hours');
+  });
+
+  it.each([
+    { ok: true, text: 'Last fetched {{time}}' },
+    { ok: false, text: 'Last fetch failed {{time}}' },
+  ])('shows the latest automatic fetch result (ok: $ok)', ({ ok, text }) => {
+    const render = (autoFetchModels: boolean) =>
+      renderToStaticMarkup(
+        <ProviderApiForm
+          initialValue={{ ...provider, autoFetchModels }}
+          modelRefreshStatus={{ ok, at: Date.now() }}
+          oauth={false}
+          onCancel={vi.fn()}
+          onSave={vi.fn()}
+        />
+      );
+    const status = parseHTML(render(true)).document.querySelector(
+      '[data-slot="provider-model-refresh-status"]'
+    );
+    expect(status?.textContent).toBe(text);
+    expect(render(false)).not.toContain('provider-model-refresh-status');
+  });
+
   it('announces invalid input, blocks save, and only submits a valid draft on save', async () => {
     const { dom, container } = mountForm();
     const onSave = vi.fn();
@@ -155,7 +191,7 @@ describe('ProviderApiForm model refresh interval', () => {
     const save = buttons.find((button) => button.textContent === 'Save');
     const cancel = buttons.find((button) => button.textContent === 'Cancel');
     if (!interval || !save || !cancel) throw new Error('Missing refresh interval controls');
-    expect(interval.id).toBe('provider-model-refresh-interval-hours');
+    expect(interval.id).not.toBe('provider-model-refresh-interval-hours');
     expect(container.querySelector(`label[for="${interval.id}"]`)?.textContent).toBe(
       'Model fetch interval'
     );
