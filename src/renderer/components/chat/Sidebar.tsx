@@ -62,10 +62,8 @@ import type * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useWindowChromeKind } from '@/components/app/WindowChrome';
-import {
-  BackgroundTaskMarker,
-  BackgroundTasksEntry,
-} from '@/components/backgroundTasks/BackgroundTaskMarker';
+import { BackgroundTaskMarker } from '@/components/backgroundTasks/BackgroundTaskMarker';
+import { BackgroundTasksButton } from '@/components/backgroundTasks/BackgroundTasksButton';
 import { AddProjectDialog } from '@/components/chat/AddProjectDialog';
 import { ArchiveEntryButton, ArchiveScopeChip } from '@/components/chat/ArchiveEntryButton';
 import { ConfirmDialog } from '@/components/chat/ConfirmDialog';
@@ -1069,6 +1067,7 @@ export function Sidebar({
           </button>
           <div className="flex-1" />
           {window.electronAPI.remote?.linkStatus && <PhoneLinkStatus />}
+          <BackgroundTasksButton className={ICON_BUTTON_CLASS} />
           <ArchiveEntryButton
             count={archivedCount}
             onClick={openArchive}
@@ -1255,7 +1254,6 @@ export function Sidebar({
               </SecretarySidebarSection>
             )
           )}
-          <BackgroundTasksEntry />
           {orderedProjects.length === 0 && (
             <button
               type="button"
@@ -1972,6 +1970,7 @@ export function Sidebar({
           ) : (
             <NodeSwitcher />
           )}
+          <BackgroundTasksButton className={ICON_BUTTON_CLASS} />
           <ArchiveEntryButton
             count={archivedCount}
             onClick={openArchive}
