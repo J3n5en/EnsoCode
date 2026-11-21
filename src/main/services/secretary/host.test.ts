@@ -2175,7 +2175,7 @@ describe('派出会话完成后自动归档', () => {
   it('只管秘书派出的：接管来的会话完成后不归档', () => {
     const h = archiving();
     h.state.rows.c1 = { ...h.state.rows.c1, secretaryOrigin: undefined };
-    h.state.file.dispatched.c1.takeover = { grantedAt: 0, via: 'explicit' };
+    h.state.file.dispatched.c1.takeover = { grantedAt: 0, via: 'user' };
     complete(h, 1000);
     expect(h.state.rows.c1.archived).toBeUndefined();
   });
