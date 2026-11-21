@@ -29,6 +29,7 @@ vi.mock('@/stores/sessions', () => ({
 }));
 
 const { SecretaryDailyBoard } = await import('./SecretaryDailyBoard');
+const { useSessionPeek } = await import('@/stores/sessionPeek');
 
 const NOW = new Date(2024, 4, 15, 15, 0).getTime();
 const TODAY = '2024-05-15';
@@ -115,6 +116,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   h.calls = [];
   h.stateListeners = [];
+  useSessionPeek.setState({ conversationId: null, back: null });
   h.daily = { [TODAY]: daily(), [YESTERDAY]: daily({ day: YESTERDAY, today: false }) };
   const api = {
     secretary: {
@@ -269,7 +271,7 @@ describe('SecretaryDailyBoard', () => {
     ).toBeNull();
   });
 
-  it('点卡片展开全文，点会话徽标才跳转', async () => {
+  it('点卡片展开全文，点会话徽标弹窗看会话', async () => {
     await render(createElement(SecretaryDailyBoard));
     const expand = () => container.querySelector('[data-enso="secretary-daily-expand"]');
     expect(expand()?.getAttribute('aria-expanded')).toBe('false');
@@ -278,7 +280,9 @@ describe('SecretaryDailyBoard', () => {
     expect(text('[data-enso="secretary-daily-card"]')).toContain('branch: feat/login');
     expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
     click('[data-enso="secretary-daily-open"]');
-    expect(h.calls).toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(useSessionPeek.getState().conversationId).toBe('c1');
+    expect(h.calls).not.toContainEqual({ name: 'selectConversation', args: 'c1' });
+    expect(expand()?.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('分支与提交号有就显示成徽标，没有就不留空位', async () => {

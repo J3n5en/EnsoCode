@@ -4025,6 +4025,12 @@ export const zhTranslations: Record<string, string> = {
   'Stop suspected idle leftover tasks': '停止疑似闲置的遗留任务',
   Status: '状态',
   'Done ({{count}} kept tasks)': '已完成（保留 {{count}} 个任务）',
+  'This session no longer exists, or you do not have access to it':
+    '这条会话已不存在，或你没有权限查看',
+  'This session is archived. Restore it from the archive to view it.':
+    '这条会话已归档，从归档里恢复后才能查看',
+  'Needs your approval or answer': '等你审批或回答',
+  'Back to secretary': '返回秘书',
 };
 
 export function normalizeLocale(input?: string): Locale {

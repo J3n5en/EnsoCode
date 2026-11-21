@@ -41,12 +41,15 @@ export function ChatSessionTimeline({
   emptyTitle,
   onSuggestion,
   timelineRef,
+  peek = false,
 }: {
   conversationId: string;
   cwd?: string;
   emptyTitle: string;
   onSuggestion?: (prompt: string) => void;
   timelineRef: RefObject<MessageTimelineHandle | null>;
+  /** 弹窗旁观：不接全局查找、不因新编辑自动开 Changes */
+  peek?: boolean;
 }) {
   const projectId = useSessionsStore((state) => state.conversations[conversationId]?.projectId);
   const secretarySession = useSettingsStore((state) =>
@@ -175,7 +178,7 @@ export function ChatSessionTimeline({
     toolOutputs,
     toolStartedAt,
   ]);
-  useOpenChangesOnEdit(timeline, conversationId);
+  useOpenChangesOnEdit(timeline, peek ? undefined : conversationId);
 
   const timelineActivity = chatTimelineActivity({
     started,
@@ -196,6 +199,7 @@ export function ChatSessionTimeline({
   );
 
   useEffect(() => {
+    if (peek) return;
     const open = () => {
       const pending = consumePendingFindQuery();
       setFindOpen(true);
@@ -206,9 +210,10 @@ export function ChatSessionTimeline({
     };
     window.addEventListener(OPEN_CHAT_FIND_EVENT, open);
     return () => window.removeEventListener(OPEN_CHAT_FIND_EVENT, open);
-  }, []);
+  }, [peek]);
 
   useEffect(() => {
+    if (peek) return;
     const pending = consumePendingFindQuery();
     setFindIndex(0);
     if (pending) {
@@ -219,7 +224,7 @@ export function ChatSessionTimeline({
     if (!conversationId) return;
     setFindQuery('');
     setFindOpen(false);
-  }, [conversationId]);
+  }, [conversationId, peek]);
 
   useEffect(() => {
     if (!findOpen || findHits.length === 0) return;

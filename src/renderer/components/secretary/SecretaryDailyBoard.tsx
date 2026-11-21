@@ -30,6 +30,7 @@ import { HoverActions } from '@/components/ui/hover-actions';
 import { useI18n } from '@/i18n';
 import { formatClock } from '@/lib/time';
 import { cn } from '@/lib/utils';
+import { openSessionPeek } from '@/stores/sessionPeek';
 import { useSessionsStore } from '@/stores/sessions';
 
 /**
@@ -140,7 +141,6 @@ function DailyCard({
   day: string;
 }) {
   const { t, locale } = useI18n();
-  const selectConversation = useSessionsStore((s) => s.selectConversation);
   const [expanded, setExpanded] = useState(false);
   const [stopping, setStopping] = useState(false);
   const body = item.summary ?? item.detail;
@@ -328,7 +328,7 @@ function DailyCard({
             data-enso="secretary-daily-open"
             title={t('Open session')}
             aria-label={t('Open session')}
-            onClick={() => selectConversation(item.conversationId as string)}
+            onClick={() => openSessionPeek(item.conversationId as string)}
             className={cn(
               CHIP_CLASS,
               'cursor-pointer text-foreground transition-colors hover:bg-brand/15 hover:text-brand'
