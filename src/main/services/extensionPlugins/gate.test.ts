@@ -1415,6 +1415,46 @@ describe('秘书联系方式', () => {
   });
 
   it('入站校验 peerId 与正文并限流；状态只接受四种', async () => {
+    const { g: imageGate, contact: imageContact } = contactGate(['net.fetch', 'secretary.contact']);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    await imageGate.handle(
+      'a.b',
+      'contact.inbound',
+      {
+        channelId: 'wechat',
+        peerId: 'wx-1',
+        text: '',
+        images: [
+          { data: png.toString('base64') },
+          { data: 'A'.repeat(14 * 1024 * 1024) },
+          { rejected: 'not-image' },
+        ],
+      },
+      undefined
+    );
+    expect(imageContact.inbound).toHaveBeenCalledWith('a.b', 'a.b:wechat', {
+      peerId: 'wx-1',
+      text: '',
+      images: [{ data: png }, { rejected: 'too-large' }, { rejected: 'not-image' }],
+    });
+    for (const images of [[{ data: '!!' }], [{ rejected: 'huh' }], Array(5).fill({ data: 'AA' })])
+      await expect(
+        imageGate.handle(
+          'a.b',
+          'contact.inbound',
+          { channelId: 'wechat', peerId: 'p', text: 'x', images },
+          undefined
+        )
+      ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+    await expect(
+      imageGate.handle(
+        'a.b',
+        'contact.inbound',
+        { channelId: 'wechat', peerId: 'p', text: '' },
+        undefined
+      )
+    ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
+
     const { g, contact } = contactGate(['net.fetch', 'secretary.contact']);
     await g.handle(
       'a.b',

@@ -37,6 +37,7 @@ import {
   secretaryBoard,
 } from '../services/secretary/dispatch';
 import { FollowingStore, setPhoneTurnChatProbe } from '../services/secretary/following';
+import { getSecretaryImageStore } from '../services/secretary/inboundImages';
 import { listSchedules, schedulePortsFor } from '../services/secretary/schedules';
 import {
   resolveSecretaryRequest,
@@ -281,6 +282,9 @@ export function createSecretaryContacts(deps: SecretaryContactDeps): SecretaryCo
           conversationId,
           text
         ),
+      saveInboundImages: (conversationId, images) =>
+        getSecretaryImageStore()?.saveAll(conversationId, images) ??
+        images.map(() => ({ ok: false, reason: 'unavailable' as const })),
       // 与在应用里亲手答同一条路径：谁先答算谁的
       answerAsk: (conversationId, requestId, answer) =>
         answerAskAsUserFromMain(conversationId, requestId, answer),

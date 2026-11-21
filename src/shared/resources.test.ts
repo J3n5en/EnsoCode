@@ -5,6 +5,7 @@ import {
   commandLabel,
   cpuPercent,
   descendantPids,
+  isCleanableStorageCategory,
   parseCpuTime,
   parsePs,
   parsePsArgs,
@@ -71,6 +72,15 @@ describe('cpuPercent', () => {
   });
 });
 
+describe('isCleanableStorageCategory', () => {
+  it('秘书图片可清理，会话与 other 不可', () => {
+    expect(isCleanableStorageCategory('secretaryImages')).toBe(true);
+    expect(isCleanableStorageCategory('sessions')).toBe(false);
+    expect(isCleanableStorageCategory('other')).toBe(false);
+    expect(isCleanableStorageCategory('bot-chats')).toBe(false);
+  });
+});
+
 describe('classifyStoragePath', () => {
   const browser = 'Partitions/enso-dev-browser';
   it.each([
@@ -100,6 +110,11 @@ describe('classifyStoragePath', () => {
     ['agent/source-registry.json', 'sessions'],
     ['agent/sessions/tool-output/abc/t.txt', 'toolOutputs'],
     ['agent/sessions/enso-abc__cw-def.jsonl', 'coworkers'],
+    ['bot-chats/secretary-images/0b3f6c1e-7a52-4c3e-9d1a-2f6e8b4c5d7a/ab.png', 'secretaryImages'],
+    ['bot-chats/secretary-images/x/a.log', 'secretaryImages'],
+    ['bot-chats/11111111-1111-4111-8111-111111111111/media/ab.png', 'other'],
+    ['bot-chats/a.log', 'other'],
+    ['bot-chats/settings.json.bak', 'other'],
     ['memory/memory.db', 'memory'],
     ['agent/pi-agent/memories/a.md', 'memory'],
     ['worktrees/repo/file', 'worktrees'],

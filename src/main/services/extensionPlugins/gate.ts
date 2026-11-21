@@ -52,6 +52,41 @@ const CONTACT_NAME_MAX = 64;
 const CONTACT_MAX_PEERS = 8;
 const CONTACT_STATUSES = new Set(['unconfigured', 'pending', 'connected', 'error']);
 const CONTACT_FORMATS = new Set(['html', 'markdown', 'plain']);
+/** 入站附图：一条最多 4 张；单张 10MB 的 base64 再长就不解码，按超限回给对方 */
+const CONTACT_INBOUND_MAX_IMAGES = 4;
+const CONTACT_INBOUND_IMAGE_MAX_CHARS = Math.ceil((10 * 1024 * 1024) / 3) * 4;
+const CONTACT_IMAGE_REJECTIONS = new Set(['too-large', 'not-image']);
+
+export type PluginContactInboundImage = { data: Buffer } | { rejected: 'too-large' | 'not-image' };
+
+/**
+ * contact.inbound 的 images：`{ data: base64 }` 交给宿主判格式落盘；
+ * 插件没下载的附件写 `{ rejected: 'too-large' | 'not-image' }`，宿主统一回对方一句。
+ */
+export function parseContactInboundImages(value: unknown): PluginContactInboundImage[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > CONTACT_INBOUND_MAX_IMAGES) return null;
+  const images: PluginContactInboundImage[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) return null;
+    const { data, rejected } = item as Record<string, unknown>;
+    if (
+      data === undefined &&
+      typeof rejected === 'string' &&
+      CONTACT_IMAGE_REJECTIONS.has(rejected)
+    ) {
+      images.push({ rejected: rejected as 'too-large' | 'not-image' });
+      continue;
+    }
+    if (typeof data !== 'string' || !data || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return null;
+    images.push(
+      data.length > CONTACT_INBOUND_IMAGE_MAX_CHARS
+        ? { rejected: 'too-large' }
+        : { data: Buffer.from(data, 'base64') }
+    );
+  }
+  return images;
+}
 
 /** 插件上报的渠道能力：每项必须给全，缺一项就不认；images / files 是后加的，缺省 false */
 export interface PluginContactCaps {
@@ -226,6 +261,7 @@ export interface GateDeps {
         chatTitle?: string;
         name?: string;
         at?: number;
+        images?: PluginContactInboundImage[];
       }
     ): void;
     setStatus(
@@ -865,9 +901,15 @@ export class PluginHostGate {
           const peerId = a.peerId;
           if (typeof peerId !== 'string' || !peerId || peerId.length > CONTACT_PEER_MAX)
             throw pluginError('INVALID_ARGS', 'peerId 不合法');
+          const images = parseContactInboundImages(a.images);
+          if (!images)
+            throw pluginError(
+              'INVALID_ARGS',
+              'images 不合法：最多 4 项，每项 { data: base64 } 或 { rejected: too-large | not-image }'
+            );
           if (
             typeof a.text !== 'string' ||
-            !a.text.trim() ||
+            (!a.text.trim() && images.length === 0) ||
             a.text.length > PLUGIN_INJECT_MAX_CHARS
           )
             throw pluginError('INVALID_ARGS', 'text 不合法或过长');
@@ -901,6 +943,7 @@ export class PluginHostGate {
             ...(typeof a.chatTitle === 'string' && a.chatTitle ? { chatTitle: a.chatTitle } : {}),
             ...(typeof a.name === 'string' && a.name ? { name: a.name } : {}),
             ...(typeof a.at === 'number' ? { at: a.at } : {}),
+            ...(images.length ? { images } : {}),
           });
           return null;
         }
