@@ -17,13 +17,15 @@ export interface SecretarySectionView {
 
 /** 秘书伪项目的展示状态；开关关掉时整块不出现 */
 export function secretarySectionView(
-  secretary: Pick<SecretaryState, 'enabled' | 'profile' | 'board'>,
+  secretary: Pick<SecretaryState, 'enabled' | 'profile' | 'board' | 'secretaryId'>,
   t: (key: string) => string,
   secretaryId?: string
 ): SecretarySectionView | null {
   if (!secretary.enabled) return null;
   const profile = secretary.profile;
   const imageVersion = profile?.avatar.imageVersion;
+  // 多秘书时头像地址要带所属秘书；没显式给就用这份状态自己的 id
+  const owner = secretaryId ?? secretary.secretaryId ?? undefined;
   return {
     name: profile?.name.trim() || t('Secretary'),
     needsYou: secretary.board.needsYou.length,
@@ -31,7 +33,7 @@ export function secretarySectionView(
     configured: profile !== null,
     ...(profile ? { color: profile.avatar.color } : {}),
     ...(imageVersion
-      ? { image: secretaryAvatarUrl(imageVersion, profile?.avatar.imageHash, secretaryId) }
+      ? { image: secretaryAvatarUrl(imageVersion, profile?.avatar.imageHash, owner) }
       : {}),
   };
 }

@@ -1,4 +1,4 @@
-import { AVATAR_MAX_BYTES } from '@shared/bots/cardPng';
+import { AVATAR_MAX_BYTES, sniffAvatar } from '@shared/bots/cardPng';
 import type { ExtensionPluginSummary } from '@shared/extensionPlugins/types';
 import { secretaryAvatarUrl } from '@shared/localImage';
 import { MAX_RUNNING_DISPATCHES, MIN_RUNNING_DISPATCHES } from '@shared/secretary/parse';
@@ -16,7 +16,7 @@ import type {
 import * as React from 'react';
 import { AvatarCropDialog } from '@/components/bots/AvatarCropDialog';
 import { dataUrlBytes, readDataUrl } from '@/components/bots/avatarRaster';
-import { secretaryAvatarUploadError } from '@/components/secretary/avatarColor';
+import { declaresGif, secretaryAvatarUploadError } from '@/components/secretary/avatarColor';
 import {
   type AvatarUploadProblem,
   avatarUpload,
@@ -777,10 +777,17 @@ function SecretaryProfileSettings() {
                 // 每次选图都先回到干净状态：上一次的弹窗、错误、忙碌都不带过来
                 dispatchAvatar({ type: 'pick', problem });
                 if (problem) return;
-                void readDataUrl(file).then(
-                  (source) => dispatchAvatar({ type: 'picked', source }),
-                  () => dispatchAvatar({ type: 'read-failed' })
-                );
+                const crop = () =>
+                  readDataUrl(file).then((source) => dispatchAvatar({ type: 'picked', source }));
+                // canvas 裁切只留第一帧：真 GIF 原字节直接保存，显示时 object-cover 居中裁
+                const picked = declaresGif(file)
+                  ? file.arrayBuffer().then((buffer) => {
+                      const bytes = new Uint8Array(buffer);
+                      if (sniffAvatar(bytes, true) !== 'gif') return crop();
+                      void setAvatar(bytes);
+                    })
+                  : crop();
+                picked.catch(() => dispatchAvatar({ type: 'read-failed' }));
               }}
             />
             <SecretaryAvatar

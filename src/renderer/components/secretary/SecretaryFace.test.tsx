@@ -1,6 +1,8 @@
-import { createElement } from 'react';
+import { parseHTML } from 'linkedom';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SecretaryFace } from './SecretaryFace';
 
 const render = (props: Parameters<typeof SecretaryFace>[0]) =>
@@ -30,5 +32,35 @@ describe('SecretaryFace', () => {
     expect(html).toContain('<img');
     expect(html).toContain('data-image="true"');
     expect(html).not.toContain('<svg');
+  });
+
+  it('图片加载失败时回退到按名字生成的头像，换了地址再试图片', async () => {
+    const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
+    vi.stubGlobal('window', window);
+    vi.stubGlobal('document', window.document);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const container = window.document.getElementById('root') as unknown as HTMLElement;
+    const root = createRoot(container);
+    const face = (image: string) =>
+      createElement(SecretaryFace, { name: '小秘', color: '#7c5cff', image, enso: 'face' });
+    try {
+      await act(async () => root.render(face('local-image://secretary-avatar/avatar.png?v=1')));
+      const img = container.querySelector('img');
+      expect(img?.getAttribute('data-image')).toBe('true');
+
+      await act(async () => {
+        img?.dispatchEvent(new window.Event('error'));
+      });
+      expect(container.querySelector('img')).toBeNull();
+      const fallback = container.querySelector('[data-enso="face"]');
+      expect(fallback?.getAttribute('data-generated')).toBe('true');
+      expect(fallback?.querySelector('svg')).not.toBeNull();
+
+      await act(async () => root.render(face('local-image://secretary-avatar/avatar.png?v=2')));
+      expect(container.querySelector('img')?.getAttribute('src')).toContain('v=2');
+    } finally {
+      await act(async () => root.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 });

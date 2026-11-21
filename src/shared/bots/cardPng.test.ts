@@ -5,6 +5,7 @@ import {
   checkAvatarImage,
   crc32,
   readPngText,
+  sniffAvatar,
   sniffImage,
   utf8ToBase64,
   writePngText,
@@ -87,5 +88,25 @@ describe('avatar image check', () => {
     big.set(PNG);
     expect(checkAvatarImage(big)).toBe(false);
     expect(checkAvatarImage(new TextEncoder().encode('GIF89a'))).toBe(false);
+  });
+
+  it('只有显式放行时才收 GIF87a / GIF89a，默认（Bot 调用方）结果不变', () => {
+    const gif89 = new TextEncoder().encode('GIF89a\x01\x00');
+    const gif87 = new TextEncoder().encode('GIF87a\x01\x00');
+    expect(checkAvatarImage(gif89)).toBe(false);
+    expect(checkAvatarImage(gif87)).toBe(false);
+    expect(sniffImage(gif89)).toBeNull();
+    expect(checkAvatarImage(gif89, { allowGif: true })).toBe(true);
+    expect(checkAvatarImage(gif87, { allowGif: true })).toBe(true);
+    expect(sniffAvatar(gif89, true)).toBe('gif');
+    expect(sniffAvatar(gif89, false)).toBeNull();
+    expect(sniffAvatar(PNG, true)).toBe('png');
+    expect(checkAvatarImage(new TextEncoder().encode('GIF88a\x01'), { allowGif: true })).toBe(
+      false
+    );
+    const big = new Uint8Array(AVATAR_MAX_BYTES + 1);
+    big.set(gif89);
+    expect(checkAvatarImage(big, { allowGif: true })).toBe(false);
+    expect(checkAvatarImage(new Uint8Array(), { allowGif: true })).toBe(false);
   });
 });

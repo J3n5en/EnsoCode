@@ -5,6 +5,7 @@ import { localImageUrlToPath, pluginAssetUrl } from '@shared/localImage';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   handleLocalImageRequest,
+  setBotAvatarResolver,
   setPluginAssetResolver,
   setSecretaryAvatarResolver,
 } from './localImageProtocol';
@@ -93,6 +94,46 @@ describe('secretary-avatar', () => {
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toBe('image/png');
       expect(response.headers.get('access-control-allow-origin')).toBe('*');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('GIF 头像按内容返回 image/gif，旧的 PNG 字节仍按 image/png', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sec-avatar-gif-'));
+    const file = join(dir, 'avatar.png');
+    setSecretaryAvatarResolver(() => file);
+    try {
+      for (const magic of ['GIF89a', 'GIF87a']) {
+        writeFileSync(file, Buffer.from(`${magic}\x01\x00\x01\x00`, 'latin1'));
+        const response = await respond('local-image://secretary-avatar/avatar.png?v=3&h=abcd');
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('image/gif');
+        expect(Buffer.from(await response.arrayBuffer()).toString('latin1')).toContain(magic);
+      }
+      writeFileSync(file, Buffer.from('GIF88a\x01', 'latin1'));
+      expect((await respond('local-image://secretary-avatar/avatar.png?v=4')).status).toBe(403);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('bot-avatar', () => {
+  afterEach(() => setBotAvatarResolver(() => null));
+
+  it('Bot 头像不放行 GIF，PNG 照常', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bot-avatar-gif-'));
+    const file = join(dir, 'avatar.png');
+    setBotAvatarResolver(() => file);
+    const url = 'local-image://bot-avatar/0f8fad5b-d9cb-469f-a165-70867728950e?v=1';
+    try {
+      writeFileSync(file, Buffer.from('GIF89a\x01\x00\x01\x00', 'latin1'));
+      expect((await handleLocalImageRequest(url, null)).status).toBe(403);
+      writeFileSync(file, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]));
+      const response = await handleLocalImageRequest(url, null);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toBe('image/png');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

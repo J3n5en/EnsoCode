@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { GeneratedAvatar } from '@/components/bots/GeneratedAvatar';
 import { cn } from '@/lib/utils';
 
@@ -5,7 +6,7 @@ const DEFAULT_COLOR = '#7c5cff';
 
 /**
  * 秘书的脸：有图用图，否则和 bot 一样按名字与头像色用 boring-avatars 生成。
- * 调用方传入受控 URL，不传磁盘路径。
+ * 调用方传入受控 URL，不传磁盘路径。图片加载失败时回退到生成头像，换了地址再试。
  */
 export function SecretaryFace({
   name,
@@ -20,7 +21,8 @@ export function SecretaryFace({
   className?: string;
   enso?: string;
 }) {
-  if (image) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (image && failed !== image) {
     return (
       <img
         data-enso={enso}
@@ -28,6 +30,7 @@ export function SecretaryFace({
         src={image}
         alt=""
         draggable={false}
+        onError={() => setFailed(image)}
         className={cn('object-cover', className)}
         style={color ? { backgroundColor: color } : undefined}
       />

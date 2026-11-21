@@ -149,11 +149,24 @@ function SessionTab({
           hasRunningChild: conversation.hasRunningChild,
         });
   const title = conversation.title || untitled;
-  const secretaryProjectId = useSecretaryStore((state) => state.secretary.projectId);
-  const profile = useSecretaryStore((state) =>
-    state.secretary.enabled ? state.secretary.profile : null
+  // 会话按隐藏项目认所属秘书；多秘书时头像地址必须带 s=，Main 才不会拒掉
+  const secretaryId = useSecretaryStore(
+    (state) =>
+      state.secretaries.find((entry) => entry.projectId === conversation.projectId)?.id ?? null
   );
-  const secretaryTab = Boolean(profile && secretaryProjectId === conversation.projectId);
+  // selector 只取 store 里的原引用：每次返回新对象会让 useSyncExternalStore 无限重渲染
+  const face = useSecretaryStore((state) => {
+    if (!state.secretary.enabled) return null;
+    // 清单还没到：按当前秘书认，单秘书时与原来一致
+    if (!secretaryId) {
+      return state.secretary.projectId === conversation.projectId ? state.secretary.profile : null;
+    }
+    const owned =
+      state.states[secretaryId] ?? (state.focusedId === secretaryId ? state.secretary : null);
+    // 这个秘书的状态还没推到时用清单里登记的名字和头像
+    return owned?.profile ?? state.secretaries.find((entry) => entry.id === secretaryId) ?? null;
+  });
+  const avatar = face?.avatar;
   return (
     <div
       data-session-tab={id}
@@ -178,13 +191,17 @@ function SessionTab({
         title={title}
       >
         <span className="flex size-3.5 shrink-0 items-center justify-center">
-          {secretaryTab && profile ? (
+          {face && avatar ? (
             <SecretaryFace
-              name={profile.name}
-              color={profile.avatar.color}
+              name={face.name ?? ''}
+              color={avatar.color}
               image={
-                profile.avatar.imageVersion
-                  ? secretaryAvatarUrl(profile.avatar.imageVersion, profile.avatar.imageHash)
+                avatar.imageVersion
+                  ? secretaryAvatarUrl(
+                      avatar.imageVersion,
+                      avatar.imageHash,
+                      secretaryId ?? undefined
+                    )
                   : undefined
               }
               enso="secretary-tab-avatar"

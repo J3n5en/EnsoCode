@@ -752,7 +752,14 @@ describe('bots IPC', () => {
     const alice = await createBot('Alice');
     const png = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0);
     const file = join(mocks.root, 'bots', alice, 'avatar.png');
-    for (const image of ['x', [1, 2], new TextEncoder().encode('<svg/>'), new Uint8Array()]) {
+    for (const image of [
+      'x',
+      [1, 2],
+      new TextEncoder().encode('<svg/>'),
+      new TextEncoder().encode('GIF89a\x01\x00'),
+      new TextEncoder().encode('GIF87a\x01\x00'),
+      new Uint8Array(),
+    ]) {
       expect(await call(IPC_CHANNELS.BOT_SET_AVATAR, { botId: alice, image })).toEqual({
         ok: false,
         error: 'invalid',

@@ -4687,6 +4687,63 @@ function writeAvatarFixture(file, bar = [255, 0, 170]) {
 }
 
 /**
+ * 120×80、两帧循环的 GIF：中间竖条换色。LZW 每两个像素发一次 Clear，码宽恒为 3 位，
+ * 不需要真正的字典压缩也是合法 GIF。
+ */
+function writeGifFixture(file) {
+  const width = 120;
+  const height = 80;
+  const palette = [20, 20, 20, 255, 0, 170, 0, 170, 255, 255, 255, 255];
+  const frame = (bar) => {
+    let acc = 0;
+    let bits = 0;
+    const bytes = [];
+    const put = (code) => {
+      acc |= code << bits;
+      bits += 3;
+      while (bits >= 8) {
+        bytes.push(acc & 0xff);
+        acc >>= 8;
+        bits -= 8;
+      }
+    };
+    for (let i = 0; i < width * height; i += 1) {
+      if (i % 2 === 0) put(4);
+      const x = i % width;
+      put(x >= 50 && x < 70 ? bar : 0);
+    }
+    put(5);
+    if (bits > 0) bytes.push(acc & 0xff);
+    const blocks = [];
+    for (let at = 0; at < bytes.length; at += 255) {
+      const chunk = bytes.slice(at, at + 255);
+      blocks.push(chunk.length, ...chunk);
+    }
+    const size = [width & 0xff, width >> 8, height & 0xff, height >> 8];
+    return [0x21, 0xf9, 4, 0, 20, 0, 0, 0, 0x2c, 0, 0, 0, 0, ...size, 0, 2, ...blocks, 0];
+  };
+  const loop = [0x21, 0xff, 11, ...Buffer.from('NETSCAPE2.0'), 3, 1, 0, 0, 0];
+  writeFileSync(
+    file,
+    Buffer.from([
+      ...Buffer.from('GIF89a'),
+      width & 0xff,
+      width >> 8,
+      height & 0xff,
+      height >> 8,
+      0xf1,
+      0,
+      0,
+      ...palette,
+      ...loop,
+      ...frame(1),
+      ...frame(2),
+      0x3b,
+    ])
+  );
+}
+
+/**
  * 头像：设置页填非预设色 → 选中自定义入口并落盘 → 上传图片、居中裁切 → 侧栏/聊天/顶栏标签都换成图片
  * → 受控接口拒绝穿越 → 移除后回到颜色加首字。全程只碰隔离 userData。
  */
@@ -4953,6 +5010,79 @@ async function verifyAvatar(cdp, setup) {
   );
   await cdp.shot(path.join(ART, '01d-avatar-in-sidebar-and-chat.png'));
 
+  log('== 头像：GIF 跳过裁切、原字节保存');
+  const gifFixture = path.join(ART, 'avatar-source.gif');
+  writeGifFixture(gifFixture);
+  await settingsPage.setFiles('[data-enso=secretary-avatar-file]', [gifFixture]);
+  const gifSaved = await waitFor(
+    () =>
+      (readJson(profileFile).avatar?.imageVersion ?? 0) > replaced.avatar.imageVersion
+        ? readJson(profileFile)
+        : null,
+    'profile.json gif imageVersion',
+    20_000,
+    200
+  ).catch(() => readJson(profileFile));
+  assert(
+    gifSaved.avatar?.imageVersion > replaced.avatar.imageVersion &&
+      gifSaved.avatar?.imageHash !== replaced.avatar.imageHash,
+    '头像: GIF 上传后版本与指纹都变',
+    gifSaved.avatar
+  );
+  assert(
+    readFileSync(avatarFile).equals(readFileSync(gifFixture)),
+    '头像: GIF 原字节落盘，没有被 canvas 转成 PNG',
+    readFileSync(avatarFile).subarray(0, 6).toString('latin1')
+  );
+  const gifCrop = await settingsPage.json(`
+    const img = await until(() => {
+      const node = document.querySelector('[data-enso=secretary-settings-avatar] img');
+      return node?.getAttribute('src')?.includes('v=${gifSaved.avatar.imageVersion}') ? node : null;
+    }, 20000);
+    await until(() => img?.complete && img.naturalWidth > 0, 10000);
+    img?.scrollIntoView({ block: 'center' });
+    const crop = [...document.querySelectorAll('button')].some((b) =>
+      ['使用此头像', 'Use this avatar'].includes(b.innerText.trim())
+    );
+    return JSON.stringify({ src: img?.getAttribute('src') ?? null, crop });
+  `);
+  assert(gifCrop.src && !gifCrop.crop, '头像: GIF 不弹裁切框，设置页换成新地址', gifCrop);
+  const gifFaces = await page(`
+    const want = 'v=${gifSaved.avatar.imageVersion}';
+    const loaded = (img) => (img?.src.includes(want) && img.complete && img.naturalWidth > 0 ? img : null);
+    const sidebar = await until(
+      () => loaded(document.querySelector('[data-enso=secretary-avatar][data-image=true] img')),
+      20000
+    );
+    const chat = await until(() => {
+      const node = document.querySelector('[data-enso=secretary-chat-avatar][data-image=true]');
+      return loaded(node?.matches('img') ? node : node?.querySelector('img'));
+    }, 20000);
+    const response = await fetch(sidebar?.src ?? '');
+    const box = sidebar?.getBoundingClientRect();
+    return JSON.stringify({
+      type: response.headers.get('content-type'),
+      natural: sidebar ? [sidebar.naturalWidth, sidebar.naturalHeight] : null,
+      box: box ? [Math.round(box.width), Math.round(box.height)] : null,
+      fit: sidebar ? getComputedStyle(sidebar).objectFit : null,
+      position: sidebar ? getComputedStyle(sidebar).objectPosition : null,
+      chat: Boolean(chat),
+    });
+  `);
+  assert(gifFaces.type === 'image/gif', '头像: 受控接口按内容返回 image/gif', gifFaces);
+  assert(
+    gifFaces.natural?.[0] === 120 &&
+      gifFaces.natural?.[1] === 80 &&
+      gifFaces.box?.[0] === gifFaces.box?.[1] &&
+      gifFaces.fit === 'cover' &&
+      gifFaces.position === '50% 50%' &&
+      gifFaces.chat,
+    '头像: GIF 在侧栏与聊天里按正方形 cover 居中显示',
+    gifFaces
+  );
+  await cdp.shot(path.join(ART, '01d2-avatar-gif-in-sidebar-and-chat.png'));
+  await settingsPage.shot(path.join(ART, '01d3-avatar-gif-settings.png'));
+
   const guarded = await page(`
     const ok = await fetch('local-image://secretary-avatar/avatar.png?v=1').then((r) => r.status);
     const traversal = await fetch('local-image://secretary-avatar/../profile.json').then((r) => r.status);
@@ -4967,7 +5097,7 @@ async function verifyAvatar(cdp, setup) {
   );
 
   const draftGuard = await page(`
-    const before = ${JSON.stringify(replaced.avatar.imageVersion)};
+    const before = ${JSON.stringify(gifSaved.avatar.imageVersion)};
     const saved = await window.electronAPI.secretary.saveProfile({
       avatar: { color: '#ff00aa', imageVersion: 99 },
     });
@@ -6755,6 +6885,99 @@ async function verifyMultiSecretary(cdp, setup) {
   `);
   assert(created.ok, '多秘书: 第二个秘书建出来并有自己的会话', created);
   const second = created.secretaryId;
+
+  log('== 多秘书：顶栏与侧栏各用自己秘书的头像');
+  const tabPng = path.join(ART, 'tab-avatar-default.png');
+  const tabGif = path.join(ART, 'tab-avatar-second.gif');
+  writeAvatarFixture(tabPng, [255, 200, 0]);
+  writeGifFixture(tabGif);
+  const tabs = await page(`
+    const api = window.electronAPI.secretary;
+    const bytes = (base64) => Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+    const ids = { default: 'default', second: ${JSON.stringify(second)} };
+    const set = [
+      await api.setAvatar(bytes(${JSON.stringify(readFileSync(tabPng).toString('base64'))}), ids.default),
+      await api.setAvatar(bytes(${JSON.stringify(readFileSync(tabGif).toString('base64'))}), ids.second),
+    ];
+    if (!set.every((result) => result.ok)) return JSON.stringify({ ok: false, set });
+    SET().setHeaderSessionTabs(true);
+    const secretary = await SEC();
+    // 秘书项目不进侧栏分组，顶栏只强制留下当前会话，所以两个 tab 要分别选中才出现
+    const mine = await secretary.getState().newSecretaryConversation({ secretaryId: ids.default });
+    const otherId = ${JSON.stringify(created.conversationId)};
+    const tabLoaded = (conversationId, secretaryId) => {
+      const img = document.querySelector(
+        '[data-session-tab="' + conversationId + '"] img[data-enso=secretary-tab-avatar]'
+      );
+      return img?.src.includes('s=' + secretaryId) && img.complete && img.naturalWidth > 0 ? img : null;
+    };
+    const sideLoaded = (secretaryId) => {
+      const img = document.querySelector(
+        '[data-secretary-id="' + secretaryId + '"] img[data-enso=secretary-avatar-face]'
+      );
+      return img?.src.includes('s=' + secretaryId) && img.complete && img.naturalWidth > 0 ? img : null;
+    };
+    const probe = async (img) => {
+      if (!img) return null;
+      const response = await fetch(img.src);
+      return { src: img.getAttribute('src'), status: response.status, type: response.headers.get('content-type') };
+    };
+    S().selectConversation(mine);
+    const first = await until(() => tabLoaded(mine, ids.default), 20000);
+    const sideDefault = await until(() => sideLoaded(ids.default), 20000);
+    const sideSecond = await until(() => sideLoaded(ids.second), 20000);
+    S().selectConversation(otherId);
+    const other = await until(() => tabLoaded(otherId, ids.second), 20000);
+    return JSON.stringify({
+      ok: true,
+      mine,
+      focused: secretary.getState().focusedId,
+      first: await probe(first),
+      other: await probe(other),
+      sideDefault: await probe(sideDefault),
+      sideSecond: await probe(sideSecond),
+    });
+  `);
+  assert(
+    tabs.ok &&
+      tabs.first?.status === 200 &&
+      tabs.first.type === 'image/png' &&
+      tabs.sideDefault?.type === 'image/png' &&
+      tabs.sideSecond?.type === 'image/gif',
+    '多秘书: 选中小安时 tab 用小安的 PNG；侧栏两行同时各带自己的 s=',
+    tabs
+  );
+  assert(
+    tabs.other?.status === 200 && tabs.other.type === 'image/gif' && tabs.focused === second,
+    '多秘书: 选中阿财时 tab 用阿财的 GIF 头像',
+    tabs
+  );
+  await cdp.shot(path.join(ART, '13a-multi-secretary-tabs.png'));
+  const cleared = await page(`
+    const api = window.electronAPI.secretary;
+    await api.setAvatar(null, 'default');
+    await api.setAvatar(null, ${JSON.stringify(second)});
+    const mine = ${JSON.stringify(tabs.mine ?? '')};
+    const otherId = ${JSON.stringify(created.conversationId)};
+    const generated = (conversationId) =>
+      document.querySelector(
+        '[data-session-tab="' + conversationId + '"] [data-enso=secretary-tab-avatar][data-generated=true]'
+      );
+    S().selectConversation(mine);
+    const first = await until(() => generated(mine), 20000);
+    S().selectConversation(otherId);
+    const other = await until(() => generated(otherId), 20000);
+    const sides = await until(
+      () =>
+        document.querySelector('[data-secretary-id="default"] [data-enso=secretary-avatar-face][data-generated=true]') &&
+        document.querySelector('[data-secretary-id="${second}"] [data-enso=secretary-avatar-face][data-generated=true]')
+          ? true
+          : null,
+      20000
+    );
+    return JSON.stringify({ ok: Boolean(first && other && sides) });
+  `);
+  assert(cleared.ok, '多秘书: 移除图片后两个 tab 都回到生成头像', cleared);
 
   log('== 多秘书：结果各回各的');
   const routed = await page(`

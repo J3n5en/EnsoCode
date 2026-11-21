@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, ipcMain } from '@platform';
-import { checkAvatarImage } from '@shared/bots/cardPng';
 import { proposalCardTitle } from '@shared/secretary/contact';
 import { parseFeedQuery } from '@shared/secretary/feed';
 import { IPC_CHANNELS } from '@shared/types';
@@ -61,6 +60,7 @@ import { openSecretaryTarget } from '../services/secretary/links';
 import { reportPeerTodos, setPeerDeliveryListener } from '../services/secretary/peers';
 import { secretaryProfileFor } from '../services/secretary/profile';
 import {
+  parseAvatarRequest,
   parseDismissRequest,
   parseMarkResultRequest,
   parseReferenceRequest,
@@ -247,14 +247,6 @@ const resumeFailureSubscriptions = new Map<string, () => void>();
 /** 档案与定时在设置窗口里编辑，聊天侧的操作仍只认主界面 */
 function isProfileEditor(webContentsId: number): boolean {
   return isMainRenderer(webContentsId) || isSettingsRenderer(webContentsId);
-}
-
-function parseAvatarRequest(value: unknown): { image: Uint8Array | null } | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const image = (value as { image?: unknown }).image;
-  if (image === null) return { image: null };
-  if (image instanceof Uint8Array && checkAvatarImage(image)) return { image };
-  return null;
 }
 
 /** 一个秘书的回传宿主端口：读写全部同步，读改写之间不留 await */
