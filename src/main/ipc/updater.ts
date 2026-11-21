@@ -2,8 +2,7 @@ import { IPC_CHANNELS } from '@shared/types';
 import type { UpdaterState } from '@shared/types/updater';
 import { isUpdateChannel } from '@shared/updater/channel';
 import { app, ipcMain } from 'electron';
-import { coldResumedSessionIds } from '../services/coldRestart';
-import { takeInterruptedSessions } from '../services/updater/interruptedSessions';
+import { discardLegacyInterruptedSessions } from '../services/updater/interruptedSessions';
 
 /** Linux deb/rpm 上不加载 electron-updater(某些系统会触发 GTK 崩溃);AppImage 正常 */
 function isUpdaterEnabled(): boolean {
@@ -16,11 +15,11 @@ export function registerUpdaterHandlers(): void {
     (): UpdaterState => ({ host: 'desktop', status: null })
   );
 
-  // 冷启动已从断点续跑的会话不再交给渲染层重试，否则同一轮会跑两遍
-  ipcMain.handle(IPC_CHANNELS.UPDATER_TAKE_INTERRUPTED_SESSIONS, (): string[] => {
-    const resumed = coldResumedSessionIds();
-    return takeInterruptedSessions(app.getPath('userData')).filter((id) => !resumed.has(id));
-  });
+  try {
+    discardLegacyInterruptedSessions(app.getPath('userData'));
+  } catch (error) {
+    console.error('Failed to discard legacy interrupted-by-update record:', error);
+  }
 
   ipcMain.handle(IPC_CHANNELS.UPDATER_CHECK, async () => {
     if (!isUpdaterEnabled()) return;
@@ -34,20 +33,10 @@ export function registerUpdaterHandlers(): void {
     await autoUpdaterService.downloadUpdate();
   });
 
-  ipcMain.handle(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL, async (_event, options: unknown) => {
-    if (!isUpdaterEnabled()) return;
-    const now =
-      typeof options === 'object' &&
-      options !== null &&
-      (options as { now?: unknown }).now === true;
-    const { autoUpdaterService } = await import('../services/updater/AutoUpdater');
-    autoUpdaterService.requestRestart(now);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.UPDATER_CANCEL_RESTART, async () => {
+  ipcMain.handle(IPC_CHANNELS.UPDATER_QUIT_AND_INSTALL, async () => {
     if (!isUpdaterEnabled()) return;
     const { autoUpdaterService } = await import('../services/updater/AutoUpdater');
-    autoUpdaterService.cancelRestart();
+    autoUpdaterService.requestRestart();
   });
 
   ipcMain.handle(IPC_CHANNELS.UPDATER_SET_AUTO_UPDATE_ENABLED, async (_event, enabled: unknown) => {

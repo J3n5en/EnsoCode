@@ -15,8 +15,6 @@ export interface UpdateStatus {
     transferred: number;
   };
   error?: string;
-  /** downloaded 时：用户已要求重启，正等当前回合结束 */
-  restartPending?: boolean;
   /** 本地构建签名与正式包不一致、无法自动安装时，改给手动下载入口 */
   manualInstall?: ManualInstall;
 }
