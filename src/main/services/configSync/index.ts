@@ -318,6 +318,8 @@ function portableState(state: Record<string, unknown>): Record<string, unknown> 
   for (const provider of Array.isArray(result.providers) ? result.providers : []) {
     if (provider && typeof provider === 'object') {
       const entry = provider as Record<string, unknown>;
+      delete entry.autoFetchModels;
+      delete entry.modelRefreshIntervalHours;
       if (entry.oauthAccountKey !== undefined) {
         delete entry.oauthAccountKey;
         const omitted = Array.isArray(entry.omittedFields)

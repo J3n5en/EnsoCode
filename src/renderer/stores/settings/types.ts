@@ -493,7 +493,11 @@ export interface SettingsState {
   // Provider 操作
   /** 按端点指纹去重（Custom 单独计）；撞车合并模型。返回新增或合并成功的条数 */
   addProviders: (providers: ModelProvider[]) => number;
-  updateProvider: (id: string, updates: Partial<Omit<ModelProvider, 'id'>>) => void;
+  updateProvider: (
+    id: string,
+    updates: Partial<Omit<ModelProvider, 'id'>>,
+    seenModelIds?: ReadonlySet<string>
+  ) => void;
   removeProvider: (id: string) => void;
 
   /** 设置全局默认；只持久化 provider entry id + model id */

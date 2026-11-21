@@ -313,6 +313,10 @@ function providerEntry(plan: PlannedEntry, mode: MergeMode): JsonRecord {
   // OAuth 登录态仅限本机：丢弃导入的 key，保留匹配到的本地 key。
   delete next.oauthAccountKey;
   delete next.oauthAccountPool;
+  for (const field of ['autoFetchModels', 'modelRefreshIntervalHours']) {
+    delete next[field];
+    if (plan.existing && Object.hasOwn(plan.existing, field)) next[field] = plan.existing[field];
+  }
   if (plan.existing && plan.existing.oauthAccountKey !== undefined) {
     next.oauthAccountKey = clone(plan.existing.oauthAccountKey);
   }

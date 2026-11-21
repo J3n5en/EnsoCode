@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { app, ipcMain, type RendererContents } from '@platform';
 import { diffConversations, isEmptyConversationsStore } from '@shared/conversationsPatch';
 import {
@@ -22,6 +23,10 @@ import {
 } from '@shared/fileOpening';
 import { type Locale, normalizeLocale } from '@shared/i18n';
 import { collectPresetPromptIds } from '@shared/presetPrompts';
+import {
+  isProviderModelRefreshIntervalHours,
+  migrateProviderModelRefreshSettings,
+} from '@shared/providers/modelRefreshInterval';
 import { normalizeSshTimeoutSeconds } from '@shared/sshTimeout';
 import { IPC_CHANNELS, isEditMode, resolveEditMode } from '@shared/types';
 import { appDesktop } from '../services/desktopHooks';
@@ -31,6 +36,7 @@ import {
   parseTraySleepPolicy,
   type TraySleepPolicy,
 } from '../services/pairPowerKeepAlive';
+import { createProviderModelRefresh } from '../services/providerModelRefresh';
 import {
   applyMainConversationsPatch,
   CONVERSATIONS_KEY,
@@ -52,6 +58,7 @@ let cachedSettings: Record<string, unknown> | null = null;
 let pendingWrite: NodeJS.Timeout | null = null;
 let maxWaitTimer: NodeJS.Timeout | null = null;
 let isDirty = false;
+let providerModelRefresh: ReturnType<typeof createProviderModelRefresh> | undefined;
 const pendingSystemPromptDeletes = new Set<string>();
 
 const DEBOUNCE_MS = 500;
@@ -343,7 +350,13 @@ export function readSettings(): Record<string, unknown> | null {
   try {
     const settingsPath = getSettingsPath();
     if (existsSync(settingsPath)) {
-      cachedSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      const data: Record<string, unknown> = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      const store = objectRecord(data?.['enso-settings']);
+      const state = objectRecord(store?.state);
+      const migrated = state && migrateProviderModelRefreshSettings(state);
+      cachedSettings =
+        migrated === state ? data : { ...data, 'enso-settings': { ...store, state: migrated } };
+      if (migrated !== state) isDirty = true;
       return cachedSettings;
     }
   } catch {}
@@ -488,6 +501,7 @@ function scheduleWrite(
     }
     cachedSettings = data;
     isDirty = true;
+    providerModelRefresh?.sync();
     notifyMemoryEmbeddingSettings(data);
     notifyTrayToggleShortcut(data);
     notifyDropShelf(data);
@@ -671,6 +685,7 @@ export function commitSettingsTransaction(
 
   cachedSettings = next;
   isDirty = false;
+  providerModelRefresh?.sync();
   notifyMemoryEmbeddingSettings(next);
   notifyTrayToggleShortcut(next);
   notifyDropShelf(next);
@@ -752,6 +767,34 @@ export function patchSettingsState(
       ? (persisted.state as Record<string, unknown>)
       : {};
   const previous = state[targetField];
+  if (targetField === 'providers' && Array.isArray(value)) {
+    const existing = rowsById(previous);
+    for (const row of value) {
+      const provider = objectRecord(row);
+      if (!provider || hasValidProviderAutoFetchModels(provider)) continue;
+      const before = typeof provider.id === 'string' ? existing.get(provider.id) : undefined;
+      if (
+        !before ||
+        !Object.hasOwn(before, 'autoFetchModels') ||
+        !isDeepStrictEqual(provider.autoFetchModels, before.autoFetchModels)
+      ) {
+        return { ok: false, error: 'Invalid automatic provider model refresh switch' };
+      }
+    }
+    for (const [id, provider] of rowsById(value)) {
+      const hours = provider.modelRefreshIntervalHours;
+      const before = existing.get(id);
+      if (
+        Object.hasOwn(provider, 'modelRefreshIntervalHours') &&
+        !isProviderModelRefreshIntervalHours(hours) &&
+        (!before ||
+          !Object.hasOwn(before, 'modelRefreshIntervalHours') ||
+          !isDeepStrictEqual(hours, before.modelRefreshIntervalHours))
+      ) {
+        return { ok: false, error: 'Invalid provider model refresh interval' };
+      }
+    }
+  }
   const nextState = { ...state, [targetField]: targetValue };
   if (targetField === 'editMode') delete nextState.hashlineEditEnabled;
   const next = {
@@ -772,9 +815,38 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function hasValidProviderAutoFetchModels(provider: Record<string, unknown> | null): boolean {
+  return (
+    !provider ||
+    !Object.hasOwn(provider, 'autoFetchModels') ||
+    typeof provider.autoFetchModels === 'boolean'
+  );
+}
+
 /** 当前设置 state 快照（本机配置 CLI 读取用） */
 export function readSettingsState(): Record<string, unknown> {
   return settingsStateOf(readSettings());
+}
+
+/**
+ * 桌面与无头宿主在代理初始化后各调用一次，所有窗口共用同一调度服务。
+ *
+ * Desktop and headless hosts call this once after proxy initialization. All windows share the scheduling service.
+ */
+export function startProviderModelRefresh(): void {
+  providerModelRefresh ??= createProviderModelRefresh({
+    readSettingsState,
+    writeProviders: (providers) => {
+      if (!patchSettingsState('providers', providers).ok) {
+        console.warn('[provider-model-refresh] could not save models');
+      }
+    },
+    async fetchModels(config, signal) {
+      const { listModels } = await import('../services/providerApi');
+      return listModels(config, signal);
+    },
+  });
+  providerModelRefresh.sync();
 }
 
 /** 丢弃内存副本并以磁盘为准重读，再走与普通写入相同的通知与广播（本机配置 CLI 的 reload） */
@@ -786,7 +858,9 @@ export function reloadSettingsFromDisk(): boolean {
   isDirty = false;
   cachedSettings = null;
   const data = readSettings();
-  return data !== null && scheduleWrite(data, undefined, 'all-renderers');
+  if (data !== null) return scheduleWrite(data, undefined, 'all-renderers');
+  providerModelRefresh?.sync();
+  return false;
 }
 
 const TRAY_SETTINGS_KEY = 'enso-tray';
@@ -986,6 +1060,136 @@ function normalizeAckSeq(value: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
+function rowsById(value: unknown): Map<string, Record<string, unknown>> {
+  const rows = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const row = objectRecord(item);
+      if (row && typeof row.id === 'string') rows.set(row.id, row);
+    }
+  }
+  return rows;
+}
+
+/**
+ * 旧渲染快照可能缺少 Main 新增的模型或更新过的逐条拉取设置。只应用明确编辑，保留编辑时未见过的模型。
+ *
+ * A stale renderer snapshot can miss models Main added or newer per-entry refresh settings. Apply explicit edits and preserve models absent from the renderer's baseline.
+ */
+function mergeProviderSettingsWrite(current: Record<string, unknown>, value: unknown) {
+  const store = objectRecord(value);
+  const incoming = objectRecord(store?.state);
+  const edit = objectRecord(store?.providerSettingsWrite);
+  if (!store || !incoming) return { value, corrected: false };
+
+  const {
+    providerModelRefreshIntervalHours: _legacyInterval,
+    autoFetchProviderModels: _legacyAutoFetch,
+    ...state
+  } = incoming;
+  const intervalKey = 'modelRefreshIntervalHours';
+  const autoFetchKey = 'autoFetchModels';
+  const providerEdits = edit?.providerEdits;
+  const persisted = rowsById(current.providers);
+  if (Array.isArray(incoming.providers) && Array.isArray(providerEdits)) {
+    const currentProviders = Array.isArray(current.providers) ? current.providers : [];
+    state.providers = currentProviders;
+    if (providerEdits.length > 0) {
+      const proposed = rowsById(incoming.providers);
+      const changes = new Map<string, Record<string, unknown> | undefined>();
+      const newProviders: unknown[] = [];
+      for (const [id, operation] of rowsById(providerEdits)) {
+        const next = proposed.get(id);
+        const latest = persisted.get(id);
+        const previousIds = operation.previousModelIds;
+        if (previousIds === null && next && !latest) {
+          if (!hasValidProviderAutoFetchModels(next)) return null;
+          if (
+            Object.hasOwn(next, intervalKey) &&
+            !isProviderModelRefreshIntervalHours(next[intervalKey])
+          )
+            return null;
+          newProviders.push(next);
+        } else if (Array.isArray(previousIds) && latest) {
+          if (!next) {
+            changes.set(id, undefined);
+            continue;
+          }
+          if (!Array.isArray(operation.fields)) continue;
+          const edited = new Set<unknown>(operation.fields);
+          if (edited.has(intervalKey) && !isProviderModelRefreshIntervalHours(next[intervalKey]))
+            return null;
+          if (edited.has(autoFetchKey) && typeof next[autoFetchKey] !== 'boolean') return null;
+          const replacement = Object.fromEntries([
+            ...Object.entries(latest).filter(([field]) => !edited.has(field)),
+            ...Object.entries(next).filter(([field]) => field !== 'id' && edited.has(field)),
+          ]);
+          replacement.id = latest.id;
+          const sameEndpoint = ['api', 'baseUrl', 'apiKey', 'headers'].every((field) =>
+            isDeepStrictEqual(latest[field], replacement[field])
+          );
+          if (!sameEndpoint && Array.isArray(next.models)) {
+            replacement.models = next.models;
+          } else if (edited.has('models') && Array.isArray(replacement.models)) {
+            const known = new Set([...previousIds, ...rowsById(replacement.models).keys()]);
+            const additions = [...rowsById(latest.models)].flatMap(([modelId, model]) =>
+              known.has(modelId) ? [] : [model]
+            );
+            replacement.models = [...replacement.models, ...additions];
+          }
+          changes.set(id, replacement);
+        }
+      }
+      state.providers = [
+        ...currentProviders.flatMap((value: unknown) => {
+          const row = objectRecord(value);
+          if (typeof row?.id !== 'string' || !changes.has(row.id)) return [value];
+          const provider = changes.get(row.id);
+          return provider ? [provider] : [];
+        }),
+        ...newProviders,
+      ];
+    }
+  } else if (Array.isArray(incoming.providers)) {
+    const providers: unknown[] = [];
+    for (const value of incoming.providers) {
+      const row = objectRecord(value);
+      const latest = typeof row?.id === 'string' ? persisted.get(row.id) : undefined;
+      if (row && latest) {
+        const {
+          modelRefreshIntervalHours: _interval,
+          autoFetchModels: _autoFetch,
+          ...legacyRow
+        } = row;
+        for (const key of [intervalKey, autoFetchKey]) {
+          if (Object.hasOwn(latest, key)) legacyRow[key] = latest[key];
+        }
+        providers.push(legacyRow);
+      } else {
+        if (!hasValidProviderAutoFetchModels(row)) return null;
+        if (
+          row &&
+          Object.hasOwn(row, intervalKey) &&
+          !isProviderModelRefreshIntervalHours(row[intervalKey])
+        )
+          return null;
+        providers.push(value);
+      }
+    }
+    state.providers = providers;
+  } else if (Array.isArray(current.providers)) {
+    state.providers = current.providers;
+  }
+  const { providerSettingsWrite: _edit, ...envelope } = store;
+  return {
+    value: { ...envelope, state },
+    corrected:
+      Object.hasOwn(incoming, 'providerModelRefreshIntervalHours') ||
+      Object.hasOwn(incoming, 'autoFetchProviderModels') ||
+      !isDeepStrictEqual(state.providers, incoming.providers),
+  };
+}
+
 export function registerSettingsHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.SETTINGS_READ, async (event) => {
     const data = readSettings();
@@ -1098,16 +1302,23 @@ export function registerSettingsHandlers(): void {
       if (typeof name !== 'string') return false;
       const current = readSettings() ?? {};
       const next = { ...current };
+      const providerWrite =
+        name === 'enso-settings'
+          ? mergeProviderSettingsWrite(settingsStateOf(current), value)
+          : undefined;
+      if (providerWrite === null) return false;
       const merged =
         name === CONVERSATIONS_KEY
           ? mergeConversationsWrite(event.sender, current[name], value, normalizeAckSeq(ackSeq))
-          : value;
+          : providerWrite
+            ? providerWrite.value
+            : value;
       if (merged === undefined) delete next[name];
       else next[name] = merged;
       return scheduleWrite(
         next,
         event.sender,
-        'exclude-sender',
+        providerWrite?.corrected ? 'all-renderers' : 'exclude-sender',
         name === CONVERSATIONS_KEY && value !== undefined
       );
     }
@@ -1115,10 +1326,26 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SETTINGS_WRITE, async (event, data: unknown) => {
     const record = objectRecord(data);
-    return record ? scheduleWrite(record, event.sender) : false;
+    if (!record) return false;
+    if (!Object.hasOwn(record, 'enso-settings')) return scheduleWrite(record, event.sender);
+    const providerWrite = mergeProviderSettingsWrite(
+      settingsStateOf(readSettings()),
+      record['enso-settings']
+    );
+    if (providerWrite === null) return false;
+    return scheduleWrite(
+      { ...record, 'enso-settings': providerWrite.value },
+      event.sender,
+      providerWrite.corrected ? 'all-renderers' : 'exclude-sender'
+    );
   });
 
   app.on('before-quit', () => {
+    flushSettings();
+  });
+  app.on('will-quit', () => {
+    providerModelRefresh?.stop();
+    providerModelRefresh = undefined;
     flushSettings();
   });
 }

@@ -371,6 +371,7 @@ export function ProvidersSettings() {
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                              aria-label={t('Edit Provider')}
                               onClick={() => setEditing(provider)}
                             >
                               <Pencil className="h-3.5 w-3.5" />

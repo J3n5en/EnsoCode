@@ -1,4 +1,11 @@
 import { MEMORY_DISTILL_WINDOW_MINUTES } from '@shared/memory/distillWindow';
+import {
+  hasApiKeyProviderCredentials,
+  isProviderModelRefreshIntervalHours,
+  MAX_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
+  MIN_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS,
+  normalizeProviderModelRefreshIntervalHours,
+} from '@shared/providers/modelRefreshInterval';
 import { isValidProxyUrl, PROXY_MODES } from '@shared/proxy';
 
 /**
@@ -74,6 +81,17 @@ function childIndex(container: unknown[], seg: string): number {
   const byId = container.findIndex((item) => isRecord(item) && item.id === seg);
   if (byId >= 0) return byId;
   return /^\d+$/.test(seg) && Number(seg) < container.length ? Number(seg) : -1;
+}
+
+function providerRefreshField(segs: readonly string[]) {
+  if (segs.length !== 3 || segs[0] !== 'providers') return;
+  const field = segs[2];
+  if (field === 'autoFetchModels' || field === 'modelRefreshIntervalHours') return field;
+}
+
+function apiKeyProviderAt(state: Record<string, unknown>, segs: string[]) {
+  const { value } = lookup(state, segs.slice(0, 2));
+  return isRecord(value) && hasApiKeyProviderCredentials(value) ? value : undefined;
 }
 
 function lookup(root: unknown, segs: string[]): { found: boolean; value: unknown } {
@@ -181,7 +199,21 @@ export function describeConfig(state: Record<string, unknown>, fields: readonly 
   const keys: KeySchema[] = [];
   for (const field of fields) {
     if (READ_DENIED.has(field)) continue;
-    if (Object.hasOwn(state, field)) walkSchema([field], state[field], keys);
+    const value = state[field];
+    if (field === 'providers' && Array.isArray(value)) {
+      const providers = value.map((entry: unknown) =>
+        isRecord(entry) && hasApiKeyProviderCredentials(entry)
+          ? {
+              ...entry,
+              autoFetchModels: entry.autoFetchModels === true,
+              modelRefreshIntervalHours: normalizeProviderModelRefreshIntervalHours(
+                entry.modelRefreshIntervalHours
+              ),
+            }
+          : entry
+      );
+      walkSchema([field], providers, keys);
+    } else if (Object.hasOwn(state, field)) walkSchema([field], value, keys);
     else keys.push(keySchema([field], undefined, false));
   }
   return {
@@ -251,6 +283,19 @@ export function getConfig(
   if (!Array.isArray(segs)) return { ok: false, error: segs.error };
   const secret = segs.find(isSecretName);
   if (secret) return { ok: false, hidden: true, error: `Secret field "${secret}" is not readable` };
+  const refreshField = providerRefreshField(segs);
+  if (refreshField) {
+    const provider = apiKeyProviderAt(state, segs);
+    if (!provider) return { ok: false, error: `API key provider not found: ${segs[1]}` };
+    return {
+      ok: true,
+      key: segs.join('.'),
+      value:
+        refreshField === 'autoFetchModels'
+          ? provider.autoFetchModels === true
+          : normalizeProviderModelRefreshIntervalHours(provider.modelRefreshIntervalHours),
+    };
+  }
   const { found, value } = lookup(state, segs);
   if (!found) return { ok: false, error: `Key not found: ${segs.join('.')}` };
   return { ok: true, key: segs.join('.'), value: redact(value) };
@@ -294,6 +339,25 @@ export function planSet(
     };
   if (RESTART_REQUIRED[field])
     return { ok: false, requiresRestart: true, reason: RESTART_REQUIRED[field] };
+
+  const refreshField = providerRefreshField(segs);
+  if (refreshField) {
+    if (!apiKeyProviderAt(state, segs))
+      return { ok: false, error: `API key provider not found: ${segs[1]}` };
+    if (refreshField === 'autoFetchModels' && typeof value !== 'boolean') {
+      return { ok: false, error: 'autoFetchModels must be a boolean' };
+    }
+    if (
+      refreshField === 'modelRefreshIntervalHours' &&
+      !isProviderModelRefreshIntervalHours(value)
+    ) {
+      return {
+        ok: false,
+        error: `modelRefreshIntervalHours must be a whole number from ${MIN_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS} to ${MAX_PROVIDER_MODEL_REFRESH_INTERVAL_HOURS}`,
+      };
+    }
+    return { ok: true, field, value: assignIn(state[field], segs.slice(1), value) };
+  }
 
   const current = lookup(state, segs);
   const touched = deniedKeyIn(value) ?? deniedKeyIn(current.value);

@@ -40,14 +40,17 @@ function warnDroppedHeader(name: string): void {
 }
 
 /** IPC、设置和 worker 推送的边界收窄。非法条目丢弃，结果空则没有请求头。 */
-export function parseProviderHeaders(value: unknown): Record<string, string> | undefined {
+export function parseProviderHeaders(
+  value: unknown,
+  { warn = true }: { warn?: boolean } = {}
+): Record<string, string> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const headers: Record<string, string> = {};
   for (const [name, headerValue] of Object.entries(value)) {
     if (!HEADER_NAME_RE.test(name)) continue;
     if (typeof headerValue !== 'string') continue;
     if (!isSendableHeaderValue(headerValue)) {
-      warnDroppedHeader(name);
+      if (warn) warnDroppedHeader(name);
       continue;
     }
     headers[name] = headerValue;

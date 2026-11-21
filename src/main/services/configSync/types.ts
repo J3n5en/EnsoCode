@@ -41,7 +41,14 @@ export type ConfigSyncMcpOmission = (typeof CONFIG_SYNC_MCP_OMISSIONS)[number];
 
 /** 可移植 provider；明文包可省略凭证，并通过 omittedFields 记录。 */
 export interface ConfigSyncProvider
-  extends Omit<ModelProvider, 'apiKey' | 'oauthAccountKey' | 'oauthAccountPool'> {
+  extends Omit<
+    ModelProvider,
+    | 'apiKey'
+    | 'oauthAccountKey'
+    | 'oauthAccountPool'
+    | 'autoFetchModels'
+    | 'modelRefreshIntervalHours'
+  > {
   apiKey?: string;
   oauthAccountKey?: string;
   oauthAccountPool?: ModelProvider['oauthAccountPool'];

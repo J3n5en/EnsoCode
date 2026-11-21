@@ -50,6 +50,7 @@ writeFileSync(
             headers: { Authorization: 'Bearer hdr-secret', 'X-Trace': '1' },
             models: [{ id: 'm1' }],
           },
+          { id: 'p-invalid', apiKey: SECRET, modelRefreshIntervalHours: '24' },
         ],
         mcpServers: [
           {
@@ -122,6 +123,57 @@ afterAll(async () => {
 });
 
 describe('config CLI socket', () => {
+  it('accepts only boolean values for the hot-applied provider model refresh switch', async () => {
+    const key = ['providers', 'p1', 'autoFetchModels'].join('.');
+    const legacy = 'autoFetchProviderModels';
+    expect(await config({ action: 'get', key: legacy })).toMatchObject({ ok: false });
+    expect(await config({ action: 'set', key: legacy, value: true })).toMatchObject({ ok: false });
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: false });
+    expect(await config({ action: 'set', key, value: 'true' })).toMatchObject({ ok: false });
+    expect(await config({ action: 'set', key, value: true })).toEqual({ ok: true });
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: true });
+    const schema = await config({ action: 'schema' });
+    expect(schema.keys).toContainEqual({
+      path: 'providers.<id>.autoFetchModels',
+      type: 'boolean',
+      writable: true,
+      requiresRestart: false,
+      secret: false,
+    });
+    expect(await config({ action: 'set', key, value: false })).toEqual({ ok: true });
+  });
+
+  it('reads the default and hot-applies only whole-hour refresh intervals from 1 to 168', async () => {
+    const key = ['providers', 'p1', 'modelRefreshIntervalHours'].join('.');
+    const legacy = 'providerModelRefreshIntervalHours';
+    expect(await config({ action: 'get', key: legacy })).toMatchObject({ ok: false });
+    expect(await config({ action: 'set', key: legacy, value: 12 })).toMatchObject({ ok: false });
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: 1 });
+    expect((await config({ action: 'schema' })).keys).toContainEqual({
+      path: 'providers.<id>.modelRefreshIntervalHours',
+      type: 'number',
+      writable: true,
+      requiresRestart: false,
+      secret: false,
+    });
+    expect(await config({ action: 'set', key, value: 168 })).toEqual({ ok: true });
+    for (const value of [0, -1, 1.5, 169, '12', null]) {
+      expect(await config({ action: 'set', key, value })).toMatchObject({ ok: false });
+    }
+    expect(await config({ action: 'get', key })).toMatchObject({ ok: true, value: 168 });
+    expect(
+      await config({ action: 'get', key: ['providers', 'p1', 'autoFetchModels'].join('.') })
+    ).toMatchObject({
+      ok: true,
+      value: false,
+    });
+    expect(await config({ action: 'set', key, value: 1 })).toEqual({ ok: true });
+    const invalid = ['providers', 'p-invalid', 'modelRefreshIntervalHours'].join('.');
+    expect(await config({ action: 'get', key: invalid })).toMatchObject({ ok: true, value: 1 });
+    expect(await config({ action: 'set', key: invalid, value: 24 })).toEqual({ ok: true });
+    expect(await config({ action: 'get', key: invalid })).toMatchObject({ ok: true, value: 24 });
+  });
+
   it.skipIf(process.platform === 'win32')('socket 与 token 文件只给本人读写', () => {
     expect(statSync(handle.endpoint).mode & 0o777).toBe(0o600);
     expect(statSync(handle.tokenPath).mode & 0o777).toBe(0o600);

@@ -87,6 +87,10 @@ enso config get providers.<id>            # apiKey、Authorization 等显示为 
 
 部分设置本来就只对新会话生效，例如 `subagentModels`、`subagentAllowedModes`、`editMode`、`rtkEnabled`。CLI 写入后，它们的行为与在设置页修改一致。
 
+`providers.<id>.autoFetchModels` 接受布尔值，默认关闭，仅在当前设备生效。开启这条已启用的 API Key 供应商时，或在保留此设置的情况下启动应用时，会立即拉取该供应商的模型。关闭开关会停止这条供应商的定时拉取，并取消该条正在进行的自动拉取。
+
+`providers.<id>.modelRefreshIntervalHours` 设置这条 API Key 供应商在本机自动拉取模型的间隔，接受 1–168 的整数，单位为小时，默认 1。关闭自动拉取时也可以修改。修改已开启条目的间隔时，该条目从保存时重新计时，在途请求继续。每条供应商的开关和间隔均无需重启。
+
 以下键由更新器在启动时读取，设置页修改时还会另外调用专用 IPC，只改设置不会生效：
 
 - `autoUpdate`、`autoRestartForUpdate`（`off` / `idle` / `immediate`）、`updateChannel`

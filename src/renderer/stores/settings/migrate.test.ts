@@ -14,6 +14,61 @@ describe('已移除字段水合', () => {
   });
 });
 
+describe('API key model refresh interval hydration', () => {
+  it.each([18, 19])(
+    'moves the v%s switch while preserving explicit provider choices',
+    (version) => {
+      const inherited = { id: 'inherited', apiKey: 'test', enabled: false };
+      const off = { id: 'off', apiKey: 'test', autoFetchModels: false };
+      const on = { id: 'on', apiKey: 'test', autoFetchModels: true };
+      const oauth = { id: 'oauth', apiKey: 'test', oauthAccountKey: 'login' };
+      const providers = [inherited, off, on, oauth];
+      for (const value of [true, false]) {
+        const migrated = migrateSettings({ providers, autoFetchProviderModels: value }, version);
+        expect(migrated).toEqual({
+          providers: [{ ...inherited, autoFetchModels: value }, off, on, oauth],
+        });
+        expect(migrateSettings(migrated, version)).toEqual(migrated);
+      }
+      expect(migrateSettings({ providers }, version)).toEqual({ providers });
+    }
+  );
+
+  it('moves the v18 interval to existing API-key rows and keeps valid overrides', () => {
+    const state = {
+      providerModelRefreshIntervalHours: 24,
+      providers: [
+        { id: 'custom', apiKey: 'test' },
+        { id: 'disabled', enabled: false, apiKey: 'test', modelRefreshIntervalHours: '2' },
+        { id: 'own', apiKey: 'test', modelRefreshIntervalHours: 1 },
+        { id: 'oauth', apiKey: 'test', oauthAccountKey: 'login' },
+        { id: 'legacy-oauth', apiKey: 'test', oauthProviderId: 'login' },
+        { id: 'empty', apiKey: '  ' },
+      ],
+    };
+    const migrated = migrateSettings(state, 18);
+    expect(SETTINGS_VERSION).toBe(20);
+    expect(migrated).toEqual({
+      providers: [
+        { ...state.providers[0], modelRefreshIntervalHours: 24 },
+        { ...state.providers[1], modelRefreshIntervalHours: 24 },
+        ...state.providers.slice(2),
+      ],
+    });
+    expect(migrateSettings(migrated, 18)).toEqual(migrated);
+  });
+
+  it.each([undefined, 0, 169, 0.5, '12', null, Infinity])(
+    'drops the missing or invalid legacy interval %s',
+    (providerModelRefreshIntervalHours) => {
+      const providers = [{ id: 'custom', apiKey: 'test' }];
+      expect(migrateSettings({ providerModelRefreshIntervalHours, providers }, 18)).toEqual({
+        providers,
+      });
+    }
+  );
+});
+
 describe('文件链接右键打开设置水合', () => {
   const current = {
     editMode: 'apply_patch' as const,

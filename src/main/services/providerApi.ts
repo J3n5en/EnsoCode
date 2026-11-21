@@ -1,3 +1,4 @@
+import { addAbortListener } from 'node:events';
 import { classify } from '@earendil-works/pi-ai/api/typesafe-system-one';
 import { typesafeProvider } from '@earendil-works/pi-ai/providers/typesafe';
 import { net } from '@platform';
@@ -37,6 +38,21 @@ export function resolveBase(config: ProviderApiConfig): string {
   return base || DEFAULT_BASE_URLS[config.api];
 }
 
+async function waitForProxy(ready: Promise<boolean>, signal?: AbortSignal | null): Promise<void> {
+  if (!signal) {
+    await ready;
+    return;
+  }
+  const aborted = Promise.withResolvers<never>();
+  const listener = addAbortListener(signal, () => aborted.reject(signal.reason));
+  try {
+    await Promise.race([ready, aborted.promise]);
+    signal.throwIfAborted();
+  } finally {
+    listener[Symbol.dispose]();
+  }
+}
+
 async function request(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -45,7 +61,7 @@ async function request(url: string, init: RequestInit): Promise<Response> {
     // 聊天能通是因为 worker 装了系统代理。主进程拉模型必须走 Chromium net.fetch。
     // 动态 import：避免 providerApi → proxyConfig → agentHost 把 worker 入口拖进无关测试。
     const { getProxyConfig } = await import('./proxyConfig');
-    await getProxyConfig().whenReady();
+    await waitForProxy(getProxyConfig().whenReady(), init.signal);
     return await net.fetch(url, {
       ...init,
       signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
@@ -74,8 +90,12 @@ function withProviderHeaders(
   return extra ? { ...headers, ...extra } : headers;
 }
 
-export async function listModels(config: ProviderApiConfig): Promise<ListModelsResult> {
+export async function listModels(
+  config: ProviderApiConfig,
+  signal?: AbortSignal
+): Promise<ListModelsResult> {
   const base = resolveBase(config);
+  const signalWithTimeout = signal && AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]);
   const key = config.apiKey.trim();
   try {
     if (isClassifierOnlyProvider(config)) {
@@ -106,7 +126,7 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
     }
     headers = withProviderHeaders(headers, config.headers);
 
-    let response = await request(url, { headers, redirect: 'manual' });
+    let response = await request(url, { headers, redirect: 'manual', signal: signalWithTimeout });
     if (
       response.status === 401 &&
       config.api === 'anthropic-messages' &&
@@ -120,6 +140,7 @@ export async function listModels(config: ProviderApiConfig): Promise<ListModelsR
       response = await request(url, {
         headers: withProviderHeaders(retryHeaders, config.headers),
         redirect: 'manual',
+        signal: signalWithTimeout,
       });
     }
 
