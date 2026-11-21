@@ -10,7 +10,9 @@ import { PHONE_URL, saveUiMode } from '../uiMode';
 import { RelayBundle } from './bundle';
 import { watchDeskChrome } from './chrome';
 import {
+  bootRetry,
   buildReady,
+  clearBootRetry,
   type DeskMeta,
   deskBase,
   downloadProgress,
@@ -18,6 +20,7 @@ import {
   markBuildReady,
   saveDeskMeta,
   upgradedBuild,
+  withTimeout,
 } from './launch';
 import { installLeaveGuard } from './leaveGuard';
 import {
@@ -40,6 +43,10 @@ import { type DeskAsset, type DeskFrame, DeskTunnel } from './tunnel';
 
 const DESK_CACHE_PREFIX = 'enso-desk-';
 const META_TIMEOUT_MS = 25_000;
+/** 启动阶段的单次存储调用上限：超时就当没缓存，照常连桌面 */
+const STORAGE_TIMEOUT_MS = 1500;
+/** 迟迟连不上隧道（多为 iOS SW / 存储卡死）就自动整页重载一次 */
+const BOOT_STUCK_MS = 10_000;
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 
@@ -128,7 +135,12 @@ function showState(state: ConnState): void {
 
 /** SW 需要能代理 /desk/* ：旧版 SW 没有 fetch 处理，先确保新版接管本页 */
 async function ensureDeskWorker(): Promise<void> {
-  const registration = await navigator.serviceWorker.register('/sw.js');
+  const registration = await withTimeout(
+    navigator.serviceWorker.register('/sw.js'),
+    STORAGE_TIMEOUT_MS * 4,
+    null
+  );
+  if (!registration) throw new Error('service worker unavailable');
   const ping = () =>
     new Promise<boolean>((resolve) => {
       const controller = navigator.serviceWorker.controller;
@@ -163,6 +175,7 @@ async function ensureDeskWorker(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  (window as { __deskBoot?: boolean }).__deskBoot = true;
   if (!('serviceWorker' in navigator)) {
     splash('当前浏览器不支持 Service Worker，无法使用完整版。');
     return;
@@ -191,8 +204,17 @@ async function main(): Promise<void> {
   if (`?${params}` !== location.search) {
     history.replaceState(null, '', `${location.pathname}?${params}`);
   }
+  const bootWatchdog = setTimeout(() => {
+    if (!bootRetry(sessionStorage)) {
+      splash('启动卡住了：浏览器存储没有响应（iOS 偶发）。请从后台划掉 EnsoCode 再打开。');
+      return;
+    }
+    leaveGuard?.release();
+    location.reload();
+  }, BOOT_STUCK_MS);
   // iOS 冷启动常丢掉 openWindow 的 query，会话 id 在 SW 写入的 Cache 里
-  const launchSessionId = urlSession ?? (await takeStashedSessionId());
+  const launchSessionId =
+    urlSession ?? (await withTimeout(takeStashedSessionId(), STORAGE_TIMEOUT_MS, null));
 
   await ensureDeskWorker();
 
@@ -201,6 +223,8 @@ async function main(): Promise<void> {
   const attached: Partial<Record<RemoteFrameKind, DeskFrame>> = {};
   let base = '';
   let version = '';
+  /** 换构建整页重载中：旧构建的快照和只读缓存不再有用，别在离开时写存储 */
+  let leaving = false;
   let settingsLink: unknown = null;
   let settingsLoaded = false;
   let snapshot: HTMLIFrameElement | null = null;
@@ -242,6 +266,7 @@ async function main(): Promise<void> {
         if (!next) return false;
         // 旧构建的懒加载资源在新桌面上已不存在，只重载 iframe 会卡住：整页走启动时的升级流程
         saveDeskMeta(localStorage, device.pairId, next);
+        leaving = true;
         leaveGuard?.release();
         location.reload();
         return true;
@@ -428,8 +453,10 @@ async function main(): Promise<void> {
   /** 某个构建曾完整起来过（资源都在 SW 缓存里）：可以不等宿主，直接起 renderer */
   const cachedBuild = async (meta: DeskMeta): Promise<boolean> => {
     try {
-      const cache = await caches.open(`${DESK_CACHE_PREFIX}${meta.version}`);
-      return await buildReady(cache, location.origin, deskBase(device.pairId, meta.version));
+      const ready = caches
+        .open(`${DESK_CACHE_PREFIX}${meta.version}`)
+        .then((cache) => buildReady(cache, location.origin, deskBase(device.pairId, meta.version)));
+      return await withTimeout(ready, STORAGE_TIMEOUT_MS, false);
     } catch {
       return false;
     }
@@ -467,7 +494,11 @@ async function main(): Promise<void> {
 
   /** 先盖上次的界面，renderer 拿到设置且内容基本追上（或稳定下来）再揭开 */
   const coverWithSnapshot = async (): Promise<void> => {
-    const saved = await loadSnapshot(`${DESK_CACHE_PREFIX}${version}`, base);
+    const saved = await withTimeout(
+      loadSnapshot(`${DESK_CACHE_PREFIX}${version}`, base),
+      STORAGE_TIMEOUT_MS,
+      null
+    );
     if (!saved || !iframes.main) return;
     if (snapshotTimer) {
       clearInterval(snapshotTimer);
@@ -513,7 +544,7 @@ async function main(): Promise<void> {
 
   /** 切后台/离开时存一份当前界面和只读缓存，下次启动先显示它 */
   const keepSnapshot = async (): Promise<void> => {
-    if (!version) return;
+    if (!version || leaving) return;
     void saveReads(`${DESK_CACHE_PREFIX}${version}`, base, reads).catch(() => {});
     const doc = iframes.main?.contentDocument;
     if (snapshot || !settingsLoaded || !doc) return;
@@ -550,11 +581,13 @@ async function main(): Promise<void> {
   };
 
   tunnel.start();
+  clearTimeout(bootWatchdog);
   const cached = loadDeskMeta(localStorage, device.pairId);
   if (cached) {
-    const saved = await loadReads(
-      `${DESK_CACHE_PREFIX}${cached.version}`,
-      deskBase(device.pairId, cached.version)
+    const saved = await withTimeout(
+      loadReads(`${DESK_CACHE_PREFIX}${cached.version}`, deskBase(device.pairId, cached.version)),
+      STORAGE_TIMEOUT_MS,
+      new Map<string, { h: string; json: string }>()
     );
     for (const [key, entry] of saved) reads.set(key, entry);
   }
@@ -585,6 +618,7 @@ async function main(): Promise<void> {
     splash('桌面端缺少浏览器版资源，请更新或重新构建桌面版。');
     return;
   }
+  clearBootRetry(sessionStorage);
   const current: DeskMeta = { version: info.version, platform: info.platform ?? 'linux' };
   const download =
     typeof info.download === 'number' && info.download > 0 ? info.download : undefined;

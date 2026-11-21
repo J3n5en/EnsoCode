@@ -35,6 +35,21 @@
         } catch {}
       })();
     </script>
+    <!-- iOS 后台久了 SW 偶发卡死，连入口脚本都加载不出来：脚本没起跑就整页重载一次（标记与 launch.ts bootRetry 共用） -->
+    <script>
+      setTimeout(() => {
+        if (window.__deskBoot) return;
+        try {
+          if (!sessionStorage.getItem('enso-desk-boot-retry')) {
+            sessionStorage.setItem('enso-desk-boot-retry', '1');
+            location.reload();
+            return;
+          }
+        } catch {}
+        const el = document.getElementById('splash-text');
+        if (el) el.textContent = '启动卡住了：浏览器没有响应（iOS 偶发）。请从后台划掉 EnsoCode 再打开。';
+      }, 12000);
+    </script>
     <style>
       html,
       body {
