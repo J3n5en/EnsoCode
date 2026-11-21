@@ -26,6 +26,11 @@ export interface SecretaryProfile {
   maxRunningDispatches: number;
   /** 自动巡检：有进行中的会话时按默认间隔检查、每小时扫一次遗留后台任务，只在发现异常时推一条 */
   patrolEnabled: boolean;
+  /**
+   * 清理不用确认：cleanup_apply 直接删除，不再弹确认卡。
+   * 缺省（字段不存在）视为关；能删什么不变，只省掉确认这一步。
+   */
+  cleanupSkipConfirm?: boolean;
   addressAs?: string;
   replyLanguage: 'ui' | 'zh' | 'en';
   style: 'concise' | 'detailed';

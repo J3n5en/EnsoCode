@@ -73,6 +73,16 @@ export const CLEANUP_SCAN_TTL_MS = 60_000;
 const SEP = '|';
 const HEADS = 'refs/heads/';
 
+/** 正在跑的派发会话占着的 worktree 标 in-use：列清单与确认选择都按当下的事实判 */
+async function markBusyWorktrees(ports: CleanupPorts, items: CleanupItem[]): Promise<void> {
+  const busy = (await ports.busyWorktrees?.()) ?? new Set<string>();
+  if (busy.size === 0) return;
+  for (const item of items) {
+    if (item.kind === 'worktree' && !item.blocked && item.path && busy.has(item.path))
+      item.blocked = 'in-use';
+  }
+}
+
 export const branchItemId = (repoPath: string, branch: string): string =>
   `branch${SEP}${repoPath}${SEP}${branch}`;
 export const worktreeItemId = (target: string): string => `worktree${SEP}${target}`;
@@ -383,11 +393,7 @@ export async function scanCleanup(
       'Scan hit its time limit: repos in incomplete were skipped this time. Call cleanup_list again in a moment.'
     );
   // 任何秘书正在跑的派发会话还用着的 worktree：不管归谁，都不能清
-  const busy = (await ports.busyWorktrees?.()) ?? new Set<string>();
-  for (const item of items) {
-    if (item.kind === 'worktree' && !item.blocked && item.path && busy.has(item.path))
-      item.blocked = 'in-use';
-  }
+  await markBusyWorktrees(ports, items);
   const sizeTargets = items.filter((item) => item.kind === 'worktree' && !item.blocked);
   let measured = 0;
   if (options.sizeBudgetMs !== false && sizeTargets.length > 0) {
@@ -582,6 +588,7 @@ export async function selectCleanupItems(
   if (ids.length > CLEANUP_MAX_ITEMS)
     return { ok: false, error: `too many ids: ${ids.length}, the limit is ${CLEANUP_MAX_ITEMS}` };
   const current = scan ?? (await scanCleanup(ports, { sizeBudgetMs: false }));
+  await markBusyWorktrees(ports, current.items);
   const byId = new Map(current.items.map((item) => [item.id, item]));
   const selected: CleanupItem[] = [];
   const unknown: string[] = [];
@@ -624,6 +631,8 @@ export async function selectAllCleanupItems(
   scan?: CleanupScan
 ): Promise<CleanupSelectionResult> {
   const current = scan ?? (await scanCleanup(ports, { sizeBudgetMs: false }));
+  // 复用的扫描快照里没有之后才开始跑的会话：按现在的占用再判一次
+  await markBusyWorktrees(ports, current.items);
   const items = current.items.filter(
     (item) => !item.blocked && (!projectId || item.projectId === projectId)
   );
@@ -846,6 +855,11 @@ export function cleanupReportText(result: CleanupApplyResult): string {
 }
 
 export interface CleanupHandlerPorts extends CleanupPorts {
+  /**
+   * 这个秘书的「清理不用确认」是否开着。缺省关：照旧落确认卡。
+   * 每次调用现读，设置页改完立即生效，不依赖缓存。
+   */
+  skipConfirm?(): MaybePromise<boolean>;
   /** 落一条待确认的清理提案；同类同参的卡已经在等就复用，不再叠一张 */
   saveProposal(
     items: CleanupItem[],
@@ -952,6 +966,38 @@ export function createSecretaryCleanupHandlers(
           detail: selection.error.slice(0, 200),
         });
         return { ok: false, error: selection.error };
+      }
+      if (await ports.skipConfirm?.()) {
+        // 同一条删除路径：applyCleanup 执行前按事实重新校验，安全限制一个不少
+        const applied = await applyCleanup(
+          ports,
+          { items: selection.items },
+          ctx.secretaryConversationId
+        );
+        ports.audit({
+          at: ports.now(),
+          secretaryConversationId: ctx.secretaryConversationId,
+          op: 'cleanup_apply',
+          ok: true,
+          detail: `without confirmation: ${cleanupReportText(applied)}`.slice(0, 200),
+        });
+        return {
+          ok: true,
+          result: {
+            status: 'applied',
+            total: applied.report.length,
+            deleted: applied.deleted,
+            archived: applied.archived,
+            skipped: applied.skipped,
+            items: applied.report.map((entry) => ({
+              id: entry.id,
+              kind: entry.kind,
+              name: entry.name,
+              result: entry.action,
+              ...(entry.reason ? { reason: entry.reason } : {}),
+            })),
+          },
+        };
       }
       const saved = await ports.saveProposal(selection.items, ctx.secretaryConversationId);
       ports.audit({
@@ -1136,6 +1182,7 @@ export function cleanupHandlersFor(
   ctx: SecretaryContext,
   profile?: () => MaybePromise<SecretaryProfile | null>
 ): ReturnType<typeof createSecretaryCleanupHandlers> {
+  const readProfile = profile ?? (() => new SecretaryStore(ctx.dir).profile());
   return createSecretaryCleanupHandlers({
     ...realCleanupPorts(ctx, profile),
     // 提案落盘在派发模块里：这里动态取，避免 cleanup ↔ dispatch 的静态环
@@ -1143,5 +1190,7 @@ export function cleanupHandlersFor(
       const { saveCleanupProposal, dispatchPortsFor } = await import('./dispatch');
       return saveCleanupProposal(items, secretaryConversationId, dispatchPortsFor(ctx));
     },
+    // 读这个秘书自己的档案：设置页改完，下一次清理就按新值走，不用重启
+    skipConfirm: async () => (await readProfile())?.cleanupSkipConfirm === true,
   });
 }
