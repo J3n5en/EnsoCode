@@ -219,6 +219,7 @@ const SPECS: Record<SecretaryOp, OpSpec> = {
       'visibleProjectIds',
       'maxRunningDispatches',
       'patrolEnabled',
+      'cleanupSkipConfirm',
       'addressAs',
       'replyLanguage',
       'style',
@@ -686,7 +687,7 @@ const SCHEMAS: Record<
   },
   cleanup_apply: {
     description:
-      'Ask the user to confirm deleting the given cleanup_list ids. Nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. Pass ids from cleanup_list (the compact summary ids work as they are), or all: true to clean every item that is cleanable right now without collecting ids yourself. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted. Tell the user which card is waiting and do not retry the same call.',
+      'Delete the given cleanup_list ids. When this secretary\'s "Clean up without asking" setting is off (the default), nothing is deleted by this call: it returns { status: "awaiting_confirmation", proposalId } and the user confirms on a card that lists every item. When that setting is on, the same deletions happen immediately with no card: the result is { status: "applied", total, deleted, archived, skipped, items }, where each item has id, kind, name and result (deleted, archived or skipped) plus reason when it was skipped, and your reply must list what was deleted, archived and skipped. Pass ids from cleanup_list (the compact summary ids work as they are), or all: true to clean every item that is cleanable right now without collecting ids yourself. Only merged branches are accepted; an unmerged branch, the current branch, feat/secretary-agent, main and any branch a worktree uses are refused with a reason and nothing is deleted. A worktree with uncommitted changes is skipped and reported. Sessions are archived, never deleted.',
     parameters: object({
       ids: {
         type: 'array',
@@ -698,7 +699,7 @@ const SCHEMAS: Record<
       all: {
         type: 'boolean',
         description:
-          'Optional: clean every item that is cleanable right now instead of passing ids. Still opens the confirmation card. Refused when more than 100 items are cleanable.',
+          'Optional: clean every item that is cleanable right now instead of passing ids. With the setting off it still opens the confirmation card; with it on it deletes them immediately. Refused when more than 100 items are cleanable.',
       },
       projectId: id('Optional with all: only this project'),
     }),
@@ -852,6 +853,11 @@ const SCHEMAS: Record<
         type: 'boolean',
         description:
           'Watch running sessions automatically and report only anomalies, including background tasks left running in finished sessions. On by default.',
+      },
+      cleanupSkipConfirm: {
+        type: 'boolean',
+        description:
+          'Clean up without asking: cleanup_apply deletes immediately instead of opening a confirmation card. Off by default. It only skips the confirmation; unmerged branches, branches in use, feat/secretary-agent, main, the current branch and worktrees with uncommitted changes are still refused or skipped. Sessions are archived, never deleted.',
       },
       addressAs: { type: 'string', minLength: 1, maxLength: 64 },
       replyLanguage: { type: 'string', enum: ['ui', 'zh', 'en'] },

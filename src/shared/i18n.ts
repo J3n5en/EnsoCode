@@ -3752,6 +3752,11 @@ export const zhTranslations: Record<string, string> = {
     '只要有会话在跑，秘书就定期检查，只在发现异常时推一条：goal 会话空闲 3 分钟、目标没完成且没有在跑的后台任务；空闲 20 分钟、后台任务一直没叫醒它；或运行 30 分钟没有任何事件。每小时还会汇报已完成会话里遗留的后台任务，不杀进程。一切正常时什么都不推。',
   'Patrol on': '巡检开',
   'Patrol off': '巡检关',
+  'Clean up without asking': '清理不用确认',
+  "Off by default. When on, this secretary's cleanup deletes immediately, with no confirmation card: merged local branches and their worktrees. Sessions are only archived, never deleted. Unmerged branches, branches in use, feat/secretary-agent, main, the current branch and worktrees with uncommitted changes are still refused or skipped.":
+    '默认关。打开后，这个秘书的清理直接删除，不再弹确认卡：已合并的本地分支，以及对应的 worktree。会话只是归档，不会删除。没合并的分支、正在使用的分支、feat/secretary-agent、main、当前分支，以及有未提交改动的 worktree，照旧拒绝或跳过。',
+  'Cleanup without confirmation': '清理不用确认',
+  'Cleanup asks first': '清理先确认',
   'One page: name, avatar, visible projects and patrol. Every field has a default.':
     '一页填完：名字、头像、可见项目与巡检。每一项都有默认值。',
   'Name, avatar, visible projects and patrol.': '名字、头像、可见项目与巡检。',

@@ -59,6 +59,20 @@ describe('buildSecretarySystemPrompt', () => {
     ).toContain('Chinese');
   });
 
+  it('清理不用确认开着时写明直接删除，关着时不提', () => {
+    const on = buildSecretarySystemPrompt({
+      profile: { ...profile, cleanupSkipConfirm: true },
+      persona: '',
+      uiLanguage: 'en',
+    });
+    expect(on).toContain('cleanup_apply');
+    expect(on).toContain('deletes immediately without a confirmation card');
+    expect(on).toContain('do not say a card is waiting');
+    const off = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'en' });
+    expect(off).not.toContain('deletes immediately without a confirmation card');
+    expect(off).toContain('cleanup_apply only opens a confirmation card');
+  });
+
   it('没有档案时引导用户完成初次设置并走提案工具', () => {
     const prompt = buildSecretarySystemPrompt({ profile: null, persona: '', uiLanguage: 'zh' });
     expect(prompt).toContain('secretary_profile_propose');

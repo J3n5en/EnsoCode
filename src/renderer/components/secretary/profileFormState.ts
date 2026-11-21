@@ -29,6 +29,7 @@ export function draftFromProfile(
     visibleProjectIds: base.visibleProjectIds === 'all' ? 'all' : [...base.visibleProjectIds],
     maxRunningDispatches: base.maxRunningDispatches,
     patrolEnabled: base.patrolEnabled,
+    cleanupSkipConfirm: base.cleanupSkipConfirm === true,
     replyLanguage: base.replyLanguage,
     style: base.style,
     notify: base.notify,

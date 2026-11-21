@@ -421,6 +421,9 @@ describe('配置提案', () => {
     expect(
       await h.service.propose({ notify: 'always' }, { secretaryConversationId: 'sec-1' })
     ).toEqual({ ok: false, error: 'invalid notify' });
+    expect(
+      await h.service.propose({ cleanupSkipConfirm: 'yes' }, { secretaryConversationId: 'sec-1' })
+    ).toEqual({ ok: false, error: 'invalid cleanupSkipConfirm' });
     expect(h.file.proposals).toEqual({});
   });
 
