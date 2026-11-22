@@ -1798,6 +1798,8 @@ export interface ProjectedCodemodeCall {
 export interface ProjectedMessage {
   /** 已持久化的 user entry 标识；未确认的消息没有该字段。 */
   entryId?: string;
+  /** 任意角色的 jsonl entry 标识；仅秘书只读链路按需附带，跨分页定位消息用 */
+  messageId?: string;
   rtk?: RtkToolStats;
   /** 前台命令被移交为后台任务时的任务 id */
   backgroundTaskId?: string;

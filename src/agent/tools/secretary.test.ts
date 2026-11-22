@@ -195,6 +195,9 @@ describe('secretary tools', () => {
       })
     ).toEqual({ conversationId: 'c1', index: 7, offset: 30_000 });
     expect(
+      normalizeSecretaryParams('session_read', { conversation_id: 'c1', message_id: ' e-1 ' })
+    ).toEqual({ conversationId: 'c1', messageId: 'e-1' });
+    expect(
       normalizeSecretaryParams('session_activity', { conversation_id: 'c1', limit: '50' })
     ).toEqual({ conversationId: 'c1', limit: 50 });
     expect(normalizeSecretaryParams('session_tasks', { id: 'c1' })).toEqual({

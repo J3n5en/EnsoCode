@@ -218,6 +218,7 @@ import {
 } from '../services/sessionActivity';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
+  type HistoryProjectionOptions,
   projectParentHistoryAll,
   projectParentHistoryPage,
   projectParentHistoryTail,
@@ -1288,7 +1289,8 @@ async function readParentHistoryTail(
 /** 根会话 pi jsonl 的尾窗 / 分页投影；路径须落在 sessions 目录内 */
 export async function readSessionHistoryFile(
   sessionFile: string | undefined,
-  beforeIndex?: number
+  beforeIndex?: number,
+  options?: HistoryProjectionOptions
 ): Promise<ParentHistoryTailResult> {
   const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
   const resolved = resolveParentHistoryFile(sessionDir, sessionFile);
@@ -1309,8 +1311,8 @@ export async function readSessionHistoryFile(
     return {
       ok: true,
       ...(beforeIndex === undefined
-        ? projectParentHistoryTail(branch)
-        : projectParentHistoryPage(branch, beforeIndex)),
+        ? projectParentHistoryTail(branch, options)
+        : projectParentHistoryPage(branch, beforeIndex, options)),
     };
   } catch (error) {
     return {
@@ -1326,7 +1328,8 @@ export async function readSessionHistoryFile(
  * 路径同样必须落在 sessions 目录内，读不到就返回空，让调用方报 not-found。
  */
 async function readFullSessionHistory(
-  sessionFile: string | undefined
+  sessionFile: string | undefined,
+  options?: HistoryProjectionOptions
 ): Promise<ProjectedMessage[]> {
   const sessionDir = path.join(app.getPath('userData'), 'agent', 'sessions');
   const resolved = resolveParentHistoryFile(sessionDir, sessionFile);
@@ -1334,22 +1337,27 @@ async function readFullSessionHistory(
   try {
     const { SessionManager } = await import('@earendil-works/pi-coding-agent');
     const manager = SessionManager.open(resolved, sessionDir);
-    return projectParentHistoryAll(manager.getBranch());
+    return projectParentHistoryAll(manager.getBranch(), options);
   } catch {
     return [];
   }
 }
 
 /**
- * 秘书 session_read 的 index 模式：按绝对下标取一条消息。
- * 下标口径与列表模式的 index 一致（投影后的绝对位置，baseIndex + 偏移）。
+ * 秘书 session_read 的 index 模式：优先按稳定 messageId 取一条消息，下标只作兼容回退。
+ * 下标口径与列表模式的 index 一致（投影后的绝对位置，baseIndex + 偏移），会话重建后会漂移。
  */
 export async function readSessionMessage(
   sessionFile: string | undefined,
-  index: number
-): Promise<ProjectedMessage | null> {
-  const messages = await readFullSessionHistory(sessionFile);
-  return messages[index] ?? null;
+  target: { messageId: string } | { index: number }
+): Promise<{ index: number; message: ProjectedMessage } | null> {
+  const messages = await readFullSessionHistory(sessionFile, { messageIds: true });
+  const index =
+    'messageId' in target
+      ? messages.findIndex((message) => message.messageId === target.messageId)
+      : target.index;
+  const message = messages[index];
+  return message ? { index, message } : null;
 }
 
 /** 秘书 session_activity：最近工具调用，不含任何工具输出 */

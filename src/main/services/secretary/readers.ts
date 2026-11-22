@@ -63,8 +63,11 @@ export interface SecretaryReadPorts {
   history(sessionFile: string | undefined, before?: number): MaybePromise<ParentHistoryTailResult>;
   git(repoPath: string): MaybePromise<{ branch: string | null; dirty: boolean } | null>;
   profile(): MaybePromise<SecretaryProfile | null>;
-  /** 全量投影后按绝对下标取一条消息；session_read 的 index 模式用 */
-  message(sessionFile: string | undefined, index: number): MaybePromise<ProjectedMessage | null>;
+  /** 全量投影后按稳定 id（优先）或绝对下标取一条消息；session_read 的全文模式用 */
+  message(
+    sessionFile: string | undefined,
+    target: { messageId: string } | { index: number }
+  ): MaybePromise<{ index: number; message: ProjectedMessage } | null>;
   /** 最近工具调用，不含任何工具输出 */
   activity(sessionFile: string | undefined, limit: number): MaybePromise<SessionToolActivity[]>;
   /** 该会话的后台任务（Main 侧对 worker 事件流的投影） */
@@ -95,6 +98,8 @@ interface ListedSession {
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
 const notFound: SecretaryOpResult = { ok: false, error: 'not-found' };
+/** 消息已变化（会话增长、重建或回退），旧 id / 下标取不到原消息：应重新分页 */
+const staleIndex: SecretaryOpResult = { ok: false, error: 'stale-index' };
 
 function stringParam(params: Record<string, unknown>, key: string): string | undefined {
   const value = params[key];
@@ -341,23 +346,32 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const limit = countParam(params.limit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT);
       const before = absoluteIndex(params.before);
       const index = absoluteIndex(params.index);
+      const messageId = stringParam(params, 'messageId');
+      const target =
+        messageId !== undefined ? { messageId } : index !== undefined ? { index } : undefined;
       const { sessions } = await collect(ports);
       const session = sessions.find((candidate) => candidate.conversationId === conversationId);
       if (!session) return notFound;
-      // index 模式：读单条消息全文，按 offset 分页；只放行 user / assistant，工具输出不外泄
-      if (index !== undefined) {
-        const message = await ports.message(session.sessionFile, index);
-        if (!message) return notFound;
-        if (message.role !== 'user' && message.role !== 'assistant')
-          return { ok: false, error: 'not-readable' };
-        const chunk = chunkMessageText(readableText(message), offsetParam(params.offset));
+      // 全文模式：按 messageId（优先）或 index 读单条消息，按 offset 分页；只放行 user / assistant，工具输出不外泄
+      if (target) {
+        const found = await ports.message(session.sessionFile, target);
+        if (!found) return staleIndex;
+        const { message } = found;
+        const foundId = message.messageId ?? messageId;
+        const readable = message.role === 'user' || message.role === 'assistant';
+        // id 是分页给出的稳定标识，点到工具消息就是不可读；分页从不给出工具消息或空正文的下标，撞上只能是下标已漂移
+        if (messageId !== undefined && !readable) return { ok: false, error: 'not-readable' };
+        const body = readable ? readableText(message) : '';
+        if (!body) return staleIndex;
+        const chunk = chunkMessageText(body, offsetParam(params.offset));
         return {
           ok: true,
           result: {
             conversationId,
             projectId: session.projectId,
             title: session.title,
-            index,
+            index: found.index,
+            ...(foundId ? { messageId: foundId } : {}),
             role: message.role,
             totalChars: chunk.totalChars,
             offset: chunk.offset,
@@ -374,6 +388,7 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const source = `session:${conversationId}`;
       const messages = readable.messages.map((message) => ({
         index: message.index,
+        ...(message.messageId ? { messageId: message.messageId } : {}),
         role: message.role,
         text: wrapUntrusted(source, redactSecrets(message.text)),
         ...(message.truncated ? { truncated: true } : {}),
@@ -518,7 +533,9 @@ export function readPortsFor(
       return (await import('../../ipc/agent')).observedSessionStatus(conversationId);
     },
     async history(sessionFile, before) {
-      return (await import('../../ipc/agent')).readSessionHistoryFile(sessionFile, before);
+      return (await import('../../ipc/agent')).readSessionHistoryFile(sessionFile, before, {
+        messageIds: true,
+      });
     },
     async git(repoPath) {
       try {
@@ -531,8 +548,8 @@ export function readPortsFor(
     async profile() {
       return profile();
     },
-    async message(sessionFile, index) {
-      return (await import('../../ipc/agent')).readSessionMessage(sessionFile, index);
+    async message(sessionFile, target) {
+      return (await import('../../ipc/agent')).readSessionMessage(sessionFile, target);
     },
     async activity(sessionFile, limit) {
       return (await import('../../ipc/agent')).readSessionActivity(sessionFile, limit);

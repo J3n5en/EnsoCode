@@ -9,6 +9,8 @@ export const MESSAGE_CHUNK_MAX = 30_000;
 export interface ReadableMessage {
   /** 会话内绝对消息下标，翻页时原样作为 before 传回 */
   index: number;
+  /** 稳定标识：会话增长或重建后下标会漂移，读全文按它取 */
+  messageId?: string;
   role: 'user' | 'assistant';
   text: string;
   truncated?: boolean;
@@ -70,8 +72,10 @@ export function projectReadableMessages(
     const text = readableText(message);
     if (!text) return;
     const truncated = text.length > maxChars;
+    const messageId = message.messageId ?? message.entryId;
     readable.push({
       index: baseIndex + offset,
+      ...(messageId ? { messageId } : {}),
       role: message.role,
       text: truncated ? `${text.slice(0, maxChars)}…` : text,
       ...(truncated ? { truncated: true } : {}),

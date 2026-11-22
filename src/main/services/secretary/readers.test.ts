@@ -501,7 +501,8 @@ describe('session_read 的 index 模式', () => {
         projects: () => [project()],
         rows: () => ({ s1: row() }),
         conversations: () => [conversation('s1', 'p1')],
-        message: async () => message,
+        message: async (_sessionFile, target) =>
+          message ? { index: 'index' in target ? target.index : 5, message } : null,
       })
     );
 
@@ -533,23 +534,132 @@ describe('session_read 的 index 模式', () => {
     );
   });
 
-  it('工具结果与不存在的下标都不返回正文', async () => {
+  it('工具结果不返回正文：按 id 点名是 not-readable，按下标撞上视为下标失效', async () => {
     const toolResult = handlers({
       role: 'toolResult',
       content: [{ type: 'text', text: '命令输出' }],
     });
     expect(
       await toolResult.session_read(
-        { conversationId: 's1', index: 3 },
+        { conversationId: 's1', messageId: 'tool-entry' },
         { secretaryConversationId: 'sec-1' }
       )
     ).toEqual({ ok: false, error: 'not-readable' });
     expect(
-      await handlers(null).session_read(
-        { conversationId: 's1', index: 99 },
+      await toolResult.session_read(
+        { conversationId: 's1', index: 3 },
         { secretaryConversationId: 'sec-1' }
       )
-    ).toEqual({ ok: false, error: 'not-found' });
+    ).toEqual({ ok: false, error: 'stale-index' });
+  });
+
+  it('id 或下标已找不到消息时返回 stale-index', async () => {
+    for (const params of [{ messageId: 'gone' }, { index: 99 }])
+      expect(
+        await handlers(null).session_read(
+          { conversationId: 's1', ...params },
+          { secretaryConversationId: 'sec-1' }
+        )
+      ).toEqual({ ok: false, error: 'stale-index' });
+  });
+
+  it('下标撞上没有正文的工具调用步骤也视为下标失效', async () => {
+    const step = handlers({
+      role: 'assistant',
+      content: [{ type: 'toolCall', id: 'call-1', name: 'bash', arguments: { command: 'ls' } }],
+    });
+    expect(
+      await step.session_read(
+        { conversationId: 's1', index: 4 },
+        { secretaryConversationId: 'sec-1' }
+      )
+    ).toEqual({ ok: false, error: 'stale-index' });
+  });
+
+  it('按 messageId 读全文，回带当前下标与 id', async () => {
+    const result = await run(
+      handlers({ role: 'assistant', content: [{ type: 'text', text: '全文' }] }).session_read,
+      { conversationId: 's1', messageId: 'entry-a' }
+    );
+    expect(result).toMatchObject({ index: 5, messageId: 'entry-a', role: 'assistant' });
+    expect(result.text).toBe('<untrusted-content source="session:s1">全文</untrusted-content>');
+  });
+});
+
+describe('session_read 跨分页的消息定位', () => {
+  const tool = (id: string): ProjectedMessage => ({
+    role: 'toolResult',
+    messageId: id,
+    content: [{ type: 'text', text: '工具输出 SECRET' }],
+  });
+  const said = (role: 'user' | 'assistant', id: string, body: string): ProjectedMessage => ({
+    role,
+    messageId: id,
+    content: [{ type: 'text', text: body }],
+  });
+
+  // 两次调用之间会话被重建：前面多出一条消息，同一个绝对下标漂到工具输出上
+  const growing = () => {
+    let transcript: ProjectedMessage[] = [
+      said('user', 'u1', '开始'),
+      said('assistant', 'a1', 'X'.repeat(3000)),
+      tool('t1'),
+    ];
+    const seenTargets: unknown[] = [];
+    const handlers = createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [project()],
+        rows: () => ({ s1: row() }),
+        conversations: () => [conversation('s1', 'p1')],
+        history: async () => ({ ok: true, messages: transcript, baseIndex: 0 }),
+        message: async (_sessionFile, target) => {
+          seenTargets.push(target);
+          const index =
+            'messageId' in target
+              ? transcript.findIndex((message) => message.messageId === target.messageId)
+              : target.index;
+          const message = transcript[index];
+          return message ? { index, message } : null;
+        },
+      })
+    );
+    const grow = () => {
+      transcript = [said('user', 'u0', '更早'), ...transcript, said('user', 'u2', '继续')];
+    };
+    return { handlers, grow, seenTargets };
+  };
+
+  it('分页消息带稳定 messageId，按 id 在会话增长后仍取到原消息全文', async () => {
+    const { handlers, grow, seenTargets } = growing();
+    const page = await run(handlers.session_read, { conversationId: 's1' });
+    const truncated = (page.messages as { messageId?: string; truncated?: boolean }[]).find(
+      (message) => message.truncated
+    );
+    expect(truncated?.messageId).toBe('a1');
+
+    grow();
+    const full = await run(handlers.session_read, {
+      conversationId: 's1',
+      messageId: truncated?.messageId,
+      index: 1,
+    });
+
+    expect(seenTargets).toEqual([{ messageId: 'a1' }]);
+    expect(full).toMatchObject({ messageId: 'a1', index: 2, role: 'assistant', totalChars: 3000 });
+  });
+
+  it('只给旧下标且已漂到工具输出时返回 stale-index，不是 not-readable，也不泄露工具输出', async () => {
+    const { handlers, grow } = growing();
+    await run(handlers.session_read, { conversationId: 's1' });
+    grow();
+
+    const stale = await handlers.session_read(
+      { conversationId: 's1', index: 3 },
+      { secretaryConversationId: 'sec-1' }
+    );
+
+    expect(stale).toEqual({ ok: false, error: 'stale-index' });
+    expect(JSON.stringify(stale)).not.toContain('工具输出');
   });
 });
 

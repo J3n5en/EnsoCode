@@ -2,6 +2,7 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as projection from '../../agent/projection';
 import {
+  projectParentHistoryAll,
   projectParentHistoryPage,
   projectParentHistoryTail,
   resolveParentHistoryFile,
@@ -148,5 +149,54 @@ describe('privacy mask history', () => {
       role: 'assistant',
       privacyMask: report,
     });
+  });
+});
+
+describe('messageIds 选项', () => {
+  const branch = [
+    {
+      type: 'message',
+      id: 'u1',
+      message: { role: 'user', content: [{ type: 'text', text: 'hi' }], timestamp: 1 },
+    },
+    {
+      type: 'message',
+      id: 'a1',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }], timestamp: 2 },
+    },
+    {
+      type: 'message',
+      id: 't1',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'c1',
+        toolName: 'bash',
+        content: [{ type: 'text', text: 'out' }],
+        timestamp: 3,
+      },
+    },
+  ];
+
+  it('开启后每种角色都带 jsonl entry id，分页与全量口径一致', () => {
+    const ids = (messages: { messageId?: string }[]) => messages.map((m) => m.messageId);
+    expect(ids(projectParentHistoryAll(branch as never, { messageIds: true }))).toEqual([
+      'u1',
+      'a1',
+      't1',
+    ]);
+    expect(ids(projectParentHistoryTail(branch as never, { messageIds: true }).messages)).toEqual([
+      'u1',
+      'a1',
+      't1',
+    ]);
+    expect(
+      ids(projectParentHistoryPage(branch as never, 2, { messageIds: true }).messages)
+    ).toEqual(['u1', 'a1']);
+    expect(projectParentHistoryAll(branch as never, { messageIds: true })[0]?.entryId).toBe('u1');
+  });
+
+  it('默认不带，渲染层的历史投影不变', () => {
+    for (const message of projectParentHistoryAll(branch as never))
+      expect(message).not.toHaveProperty('messageId');
   });
 });
