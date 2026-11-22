@@ -1052,8 +1052,8 @@ function UserText({
   const { t } = useI18n();
   const host = useChatHost();
   const botHost = Boolean(host?.speaker || host?.botSession);
-  // 秘书贴图时 Main 在正文末尾追加的路径行：不露原文，换成标签 / 提示
-  const attached = splitInboundImageBlock(text);
+  // 秘书贴图 / 转图时正文末尾追加的路径行：不露原文，换成缩略图 / 标签 / 提示
+  const attached = splitInboundImageBlock(text, thumbnails);
   if (attached) {
     return (
       <>

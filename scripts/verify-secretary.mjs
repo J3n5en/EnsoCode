@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 秘书真机验收：派活 → 确认 → 回传 → 并发确认。
 // 全程在隔离 userData 与 fake provider 上跑，不碰真实账号与真实数据。
-//   node scripts/verify-secretary.mjs [--keep] [--memory-only]
+//   node scripts/verify-secretary.mjs [--keep] [--memory-only] [--forward-images-only]
 //
 // 不设环境变量时，每次使用 /tmp/sec-verify-<随机> 和四个空闲端口
 // （CDP、fake provider、插件分发、renderer dev server）。显式设置时以环境变量为准：
@@ -75,6 +75,7 @@ let telegram = null;
 const KEEP = keepRequested(process.env, process.argv);
 // 只跑 setup + 记忆人工编辑段，改记忆管理时用来快速复验
 const MEMORY_ONLY = process.argv.includes('--memory-only');
+const FORWARD_IMAGES_ONLY = process.argv.includes('--forward-images-only');
 
 const settingsFile = path.join(ENV, 'settings.json');
 const dispatchFile = path.join(ENV, 'secretary', 'dispatch.json');
@@ -723,6 +724,10 @@ async function run(cdp, pluginZipUrl) {
   await cdp.shot(path.join(ART, '01-sidebar.png'));
   if (MEMORY_ONLY) {
     await verifyMemoryManualEdit(cdp, setup);
+    return;
+  }
+  if (FORWARD_IMAGES_ONLY) {
+    await verifyForwardImages(cdp, setup);
     return;
   }
   await verifyAvatar(cdp, setup);
@@ -6280,44 +6285,142 @@ async function verifyForwardImages(cdp, setup) {
     denied
   );
 
+  // 新开一个没看过图的会话：转过去的图直接作为图片块进模型，这一轮不需要 image_view
+  const target = await page(`
+    const project = SET().projects.find((p) => p.id === ${JSON.stringify(setup.projectId)});
+    const id = await S().newConversation(project.id);
+    S().renameConversation(id, '按图改首页');
+    await S().send('先打个招呼', {
+      providerId: 'pv-A', modelId: 'fake-model-1', cwd: project.path,
+    }, undefined, id);
+    const greeted = await until(
+      () => (S().conversations[id]?.messages ?? []).some((m) => m.role === 'assistant') &&
+        S().conversations[id]?.status === 'idle',
+      30000
+    );
+    return JSON.stringify({ id, greeted: Boolean(greeted) });
+  `);
+  assert(target.greeted, '转发图片: 目标会话先跑完一轮', target);
+  const sentAt = Date.now();
   const forwarded = await secretaryTool(
     cdp,
     setup,
     'session_send',
-    { conversationId: plain.id, message: '按这张图改', attachments: [imageFile] },
+    { conversationId: target.id, message: '按这张图改', attachments: [imageFile] },
     '把这张截图转给会话'
   );
   assert(
     parseToolJson(forwarded.text)?.status === 'sent',
-    '转发图片: 秘书把截图路径发进目标会话',
+    '转发图片: 秘书把截图发进目标会话',
     forwarded.text
   );
   const received = await page(`
-    const id = ${JSON.stringify(plain.id)};
+    const id = ${JSON.stringify(target.id)};
     S().selectConversation(id);
+    const textOf = (message) =>
+      (Array.isArray(message.content) ? message.content : [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('');
     const found = await until(
       () =>
         (S().conversations[id]?.messages ?? []).find(
-          (m) =>
-            m.role === 'user' &&
-            JSON.stringify(m.content ?? '').includes(${JSON.stringify(`[图片 1] ${realImage}`)})
+          (m) => m.role === 'user' && textOf(m).includes(${JSON.stringify(`[图片 1] ${realImage}`)})
         ) ?? null,
       40000
     );
-    const text = found
-      ? (Array.isArray(found.content) ? found.content : [])
-          .filter((part) => part.type === 'text')
-          .map((part) => part.text)
-          .join('')
-      : '';
-    return JSON.stringify({ text });
+    const replied = await until(() => {
+      const messages = S().conversations[id]?.messages ?? [];
+      const index = messages.indexOf(found);
+      return index >= 0 &&
+        messages.slice(index + 1).some((m) => m.role === 'assistant') &&
+        S().conversations[id]?.status === 'idle';
+    }, 40000);
+    const messages = S().conversations[id]?.messages ?? [];
+    const after = messages.slice(messages.indexOf(found) + 1);
+    return JSON.stringify({
+      text: found ? textOf(found) : '',
+      imageParts: found
+        ? (Array.isArray(found.content) ? found.content : []).filter((part) => part.type === 'image').length
+        : 0,
+      replied: Boolean(replied),
+      imageViewCalls: after.filter((m) => m.toolName === 'image_view').length +
+        after.flatMap((m) => (Array.isArray(m.content) ? m.content : []))
+          .filter((part) => part.type === 'toolCall' && part.name === 'image_view').length,
+    });
   `);
   assert(
-    String(received.text).includes(`[图片 1] ${realImage}`) &&
-      String(received.text).includes('用 image_view 查看这些图片。'),
-    '转发图片: 目标会话收到带图片引用的消息',
+    received.imageParts === 1 &&
+      received.text.endsWith(`[图片 1] ${realImage}`) &&
+      !received.text.includes('image_view'),
+    '转发图片: 目标会话收到的用户消息带图片块，正文末尾留路径',
     received
   );
+  assert(
+    received.replied && received.imageViewCalls === 0,
+    '转发图片: 目标会话这一轮没有调用 image_view',
+    received
+  );
+  const providerSaw = (await fakeRequests()).filter(
+    (entry) => entry.at >= sentAt && entry.lastUserImages >= 1
+  );
+  assert(
+    providerSaw.length > 0,
+    '转发图片: 假 provider 收到了图片内容',
+    providerSaw.at(-1) ?? null
+  );
+  const bubble = await page(`
+    S().selectConversation(${JSON.stringify(target.id)});
+    const bubble = await until(() => {
+      const rows = [...document.querySelectorAll('[data-enso=message-user]')].filter((row) =>
+        row.innerText.includes('按这张图改')
+      );
+      const row = rows.at(-1);
+      row?.scrollIntoView({ block: 'center' });
+      return row?.querySelector('img') ? row : null;
+    }, 15000);
+    return JSON.stringify({
+      thumbnail: Boolean(bubble?.querySelector('img')),
+      pathShown: Boolean(bubble?.innerText.includes(${JSON.stringify(realImage)})),
+    });
+  `);
+  assert(
+    bubble.thumbnail && !bubble.pathShown,
+    '转发图片: 时间线里用户气泡显示缩略图，不露路径',
+    bubble
+  );
+  const shot = `/tmp/secretary-inline-images-${Date.now()}.png`;
+  await cdp.shot(shot);
+  copyFileSync(shot, path.join(ART, 'forward-inline-images.png'));
+  log(`  timeline screenshot ${shot}`);
+
+  const createdAt = Date.now();
+  const created = await secretaryTool(
+    cdp,
+    setup,
+    'session_create',
+    {
+      projectId: setup.projectId,
+      prompt: '按图改设置页',
+      title: '按图改设置页',
+      attachments: [imageFile],
+    },
+    '派个带截图的活'
+  );
+  const createdId = parseToolJson(created.text)?.conversationId;
+  assert(typeof createdId === 'string', '派活带图: session_create 建出会话', created.text);
+  const firstPrompt = await waitFor(
+    async () =>
+      (await fakeRequests()).find(
+        (entry) =>
+          entry.at >= createdAt &&
+          entry.lastUserImages >= 1 &&
+          String(entry.lastUserText).includes('按图改设置页')
+      ) ?? null,
+    '派活带图: 第一条 prompt 带着图片发给模型',
+    40_000
+  );
+  assert(Boolean(firstPrompt), '派活带图: 第一条 prompt 带着图片发给模型', firstPrompt);
   const sendAudit = auditLines().filter(
     (line) => line.op === 'session_send' && line.ok === true && line.detail?.includes('images:')
   );

@@ -38,6 +38,8 @@ interface IndexedSession {
   status: NodeStatus;
   lastSeq: number;
   model?: ModelRef;
+  /** worker 报的当前模型能否看图；未就绪或旧 worker 不报时缺省 */
+  imageInput?: boolean;
   proof?: ResolvedChildProfileProof;
   sessionFile?: string;
   coworkers: Map<string, CoworkerInfo>;
@@ -239,6 +241,12 @@ export class AgentSessionIndex {
 
   isAlive(sessionId: string): boolean {
     return this.sessions.get(sessionId)?.alive === true;
+  }
+
+  /** 会话就绪且活着时才算知道；其余一律 undefined，调用方按不能看图处理 */
+  imageInput(sessionId: string): boolean | undefined {
+    const session = this.sessions.get(sessionId);
+    return session?.ready && session.alive && !session.detached ? session.imageInput : undefined;
   }
 
   anyWorkspaceBusy(): boolean {
@@ -583,12 +591,14 @@ export class AgentSessionIndex {
       parent.detached = false;
       parent.sessionFile = event.sessionFile;
       parent.model = event.model;
+      parent.imageInput = event.imageInput;
       return true;
     }
     // 就地换模型：不更新这里，activeConversationRegistry 的 selection 校验会永远拿旧模型比对。
     if (event.type === 'model-changed') {
       if (!current || !isSameGeneration(current.identity, event.identity)) return false;
       current.model = event.model;
+      current.imageInput = event.imageInput;
       current.lastSeq = event.seq;
       return true;
     }
