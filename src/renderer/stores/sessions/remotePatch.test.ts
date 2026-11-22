@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { applyConversationsPatchToState } from './remotePatch';
+import { setPairViewedSession } from './unread';
 
 type Row = Record<string, unknown>;
 const row = (id: string, extra: Row = {}): Row => ({
@@ -115,6 +116,44 @@ describe('applyConversationsPatchToState', () => {
       order: ['b', 'a', 'gone'],
     });
     expect(next.order).toEqual(['btw', 'b', 'a']);
+  });
+
+  it('本端正在看的会话不接收其他主界面标的未读', () => {
+    const before = state(
+      { a: row('a', { status: 'running' }), b: row('b', { status: 'running' }) },
+      ['a', 'b'],
+      'a'
+    );
+    const next = applyConversationsPatchToState(before, {
+      upserts: {
+        a: { set: { unread: true, lastActiveAt: 5 }, unset: [] },
+        b: { set: { unread: true }, unset: [] },
+      },
+      removes: [],
+    });
+    expect(next.conversations.a.unread).toBe(false);
+    expect(next.conversations.a.lastActiveAt).toBe(5);
+    expect(next.conversations.b.unread).toBe(true);
+  });
+
+  it('重同步的整行补丁同样不把正在看的会话标未读', () => {
+    const before = state({ a: row('a') }, ['a'], 'a');
+    const next = applyConversationsPatchToState(before, {
+      upserts: { a: { set: row('a', { unread: true }), unset: [] } },
+      removes: [],
+    });
+    expect(next.conversations.a.unread).toBe(false);
+  });
+
+  it('手机正在订阅的会话同样视为已读', () => {
+    setPairViewedSession('b');
+    const before = state({ a: row('a'), b: row('b') }, ['a', 'b'], 'a');
+    const next = applyConversationsPatchToState(before, {
+      upserts: { b: { set: { unread: true }, unset: [] } },
+      removes: [],
+    });
+    setPairViewedSession(null);
+    expect(next.conversations.b.unread).toBe(false);
   });
 });
 
