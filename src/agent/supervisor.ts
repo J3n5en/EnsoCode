@@ -2037,7 +2037,8 @@ export class SessionSupervisor {
         // 投影已 idle 但 pi 仍忙：压缩中（pi 拒收 prompt）不限时等压完；仍 streaming 要么
         // agent_end 尚未回流，要么是 abort 后工具不响应信号的僵尸轮——steer 进僵尸轮永远
         // 无人投递，故限时等空闲后走新轮。仍在产出或投影已回到 running 的不是僵尸，继续等。
-        // 超时按失败收口，绝不静默。
+        // 超时按 deliveryId 回执这条 prompt，绝不静默。它没开出新轮，不发 turn-*、不动 status：
+        // 消费者按会话把 turn-* 当本轮终态，仍在收束的那一轮由它自己的 agent_settled 收口。
         let activityAt = managed.activityNonce;
         if (
           !(await waitPromptable(managed.session, ZOMBIE_TURN_WAIT_MS, () => {
@@ -2049,17 +2050,7 @@ export class SessionSupervisor {
             return false;
           }))
         ) {
-          const settlePending = managed.settlePending === true;
-          this.failTurn(
-            managed,
-            'The previous turn is still running and could not be interrupted. Please retry, or reopen the conversation to reset the session.',
-            true
-          );
-          // 终态 agent_end 已经记下、轮次却还在流：不能让这次误判吃掉随后的 agent_settled，
-          // 否则失败横幅会一直盖住仍在正常收束的轮次。
-          if (settlePending && (managed.session.isStreaming || managed.session.isCompacting)) {
-            managed.settlePending = true;
-          }
+          this.emitDeliveryRejected(managed, command.deliveryId);
           return;
         }
         this.promptFresh(managed, command.text, images, command.deliveryId, command.resume);
@@ -5013,7 +5004,7 @@ export class SessionSupervisor {
               stopReason: 'error',
               errorMessage: lastAssistant.errorMessage,
             } as AssistantMessage);
-          this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.', false, exhausted);
+          this.failTurn(managed, lastAssistant.errorMessage ?? 'Turn failed.', exhausted);
           return;
         }
         if (this.tryRefusalRetry(managed, lastAssistant)) return;
@@ -5562,12 +5553,7 @@ export class SessionSupervisor {
     });
   }
 
-  private failTurn(
-    managed: ManagedSession,
-    error: string,
-    undelivered = false,
-    retryExhausted = false
-  ): void {
+  private failTurn(managed: ManagedSession, error: string, retryExhausted = false): void {
     const turnId = managed.currentTurnId ?? managed.abortedTurnId ?? randomUUID();
     const aborted = managed.turnAborted === true;
     managed.currentTurnId = undefined;
@@ -5602,7 +5588,6 @@ export class SessionSupervisor {
       seq: ++managed.seq,
       turnId,
       error,
-      ...(undelivered ? { undelivered: true } : {}),
       ...(retryExhausted ? { retryExhausted: true } : {}),
       ...(aborted ? { aborted: true as const } : {}),
     });

@@ -10,7 +10,9 @@ description: >
 
 # worker 轮次相位的形式化验证
 
-属性：pi 的每一次运行（一个用户轮次）恰好收到一个 `turn-completed` 或 `turn-failed`，终态之后 pi 不再为这一轮发出 `agent_start` 或 `auto_retry_start`，用户中断的轮次终态带 `aborted`；每条发给 worker 的 prompt 恰好进入 pi 一次，否则收到一次 `turn-failed undelivered`；全部静止后 worker 不停在 running，也没有 prompt 被 `delivery-rejected`。
+属性：pi 的每一次运行（一个用户轮次）恰好收到一个 `turn-completed` 或 `turn-failed`，终态之后 pi 不再为这一轮发出 `agent_start` 或 `auto_retry_start`，用户中断的轮次终态带 `aborted`；每条发给 worker 的 prompt 恰好进入 pi 一次，否则收到一次带它 deliveryId 的 `delivery-rejected`，且只在它发出后有过叫停（中断、取消重试、新 prompt 打断重试、僵尸时限到点）时才收；全部静止后 worker 不停在 running。
+
+终态按消费者的视角数：bots、headless、Main 和 renderer 都按会话、不按 turnId 把任何 `turn-*` 当作本轮结束，所以观察者把 worker 发出的每个 `turn-*`（含 `undelivered`）都记到 pi 当前这一轮。未送达回执不是终态，不能借用 `turn-*`。
 
 危害：违反时输入框提前解锁、agent 随后自己又跑起来，或者一直卡在 running；用户中断后其他窗口和 headless 照常泵队列、续跑 goal；排队消息被重复发送、静默丢失，或报 `Cannot submit a prompt while compaction is in progress`。
 
@@ -36,7 +38,7 @@ ENSO_FORMAL_FULL=1 npx vitest run src/agent/turnPhase.formal.test.ts
 - `pi ...`：`Pi.actions()` 的一步，对应 `agent-session.js` 里一段之间没有宏任务的代码。`收尾` 表示 `agent_end` 之后 `_handlePostAgentRun` 到 `_emitAgentSettled` 一口气跑完。
 - `计时器到点：僵尸时限 / 让一拍 / 记忆压缩触发 / 150ms`：分别是 `waitIdleBounded` 的 5 秒、`waitPromptable` 的 `setTimeout(0)`、`compaction-trigger.ts` 的 `setTimeout(0)`、`flushPendingReminders`。
 
-违反类别：`第 N 轮收到 2 个终态`、`终态 X 之后 pi 仍为第 N 轮发出 agent_start`、`pN 进入 pi 两次`，以及静止时的 `第 N 轮没有终态`、`第 N 轮被中断，终态却是 turn-completed`、`worker 停在 running`、`N 条 prompt 被 delivery-rejected`、`pN 没进 pi，未送达回执 M 次`。
+违反类别：`第 N 轮收到 2 个终态`、`终态 X 之后 pi 仍为第 N 轮发出 agent_start`、`pN 进入 pi 两次`，以及静止时的 `第 N 轮没有终态`、`第 N 轮被中断，终态却是 turn-completed`、`worker 停在 running`、`pN 没进 pi，未送达回执 M 次`。回执类：`pN 没被叫停却收到 delivery-rejected`、`pN 进了 pi 又收到 delivery-rejected`、`pN 收到 2 次 delivery-rejected`、`未知投递 X 收到 delivery-rejected`。
 
 判断真 bug 还是模型错：
 
@@ -53,7 +55,7 @@ ENSO_FORMAL_FULL=1 npx vitest run src/agent/turnPhase.formal.test.ts
 | --- | --- |
 | 客户端命令 | `src/agent/supervisor.ts` `handleCommand` 的 `case 'prompt'`（`interruptRetryIfAny`、`waitPromptable`、`promptFresh`、`promptTracked`）、`case 'abort'`、`case 'abort-retry'` |
 | 收口 | `onSessionEvent` 的 `agent_end`（`willRetry`、`settlePending`）、`agent_settled`、`auto_retry_start`、`auto_retry_end`；`completeTurn`、`failTurn` |
-| 僵尸时限与让一拍 | `waitPromptable`、`waitIdleBounded`、`ZOMBIE_TURN_WAIT_MS`、`activityNonce` |
+| 僵尸时限与让一拍 | `waitPromptable`、`waitIdleBounded`、`ZOMBIE_TURN_WAIT_MS`、`activityNonce`，超时走 `emitDeliveryRejected` |
 | `Pi` 的 prompt / abort / abortRetry | `agent-session.js` `prompt`、`_preparePrompt`（流式中要求 `streamingBehavior`，排进 followUp）、`_startRun`、`abort`（只在运行活跃时记 `_agentRunAbortRequested`，不清 followUp 队列）、`abortRetry`、`isStreaming` / `isCompacting` / `isRetrying` / `isIdle` |
 | `Pi` 的收尾一步 | `_willRetryAfterAgentEnd`、`_handlePostAgentRun`、`_prepareRetry`、`_finishCancelledRetry`、`_checkCompaction`（溢出压缩续跑）、`_runBeforeSettleBoundary`、`_emitAgentSettled`（延后的 prompt 在公开 `agent_settled` 之后执行） |
 | 回复 error / aborted 不取排队消息 | `@earendil-works/pi-agent-core` `dist/agent-loop.js` |
@@ -80,6 +82,7 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 | `case 'prompt'` 的 `waitPromptable(...)` 换回 `isStreaming && !(await waitIdleBounded(...))`，并让 `promptFresh` 不再接住 `compaction is in progress` | `5e1dcf984` 之前 | 记忆压缩中发 p2，被拒后 `failTurn`：`第 1 轮收到 2 个终态：turn-completed、turn-failed` |
 | `case 'abort'` 里 `const retrying = false` | `9985bae34` 之前 | 重试倒计时中中断：`第 1 轮没有终态` |
 | `case 'prompt'` 在 `let activityAt` 前加 `if (managed.session.isStreaming) { await this.steerTracked(...); return; }` | idle 投影但 pi 仍在跑时插话 | p1 还在准备时发 p2：`p2 没进 pi，未送达回执 0 次` |
+| `case 'prompt'` 僵尸超时分支的 `emitDeliveryRejected(...)` 换成 `this.failTurn(managed, 'zombie')` | 已知发现 3 修复之前（当时还带 `undelivered`） | 中断后工具 5 秒内没停、期间发 p2：`第 1 轮收到 2 个终态：turn-failed(aborted)、turn-completed` |
 
 ## 范围
 
@@ -97,8 +100,7 @@ git diff --stat 10360d2f9..HEAD -- src/agent/supervisor.ts src/agent/continuousM
 
 ## 已知发现
 
-三条测试断言对应配置恰好只有这一类反例。修复后或混进新类别时对应测试会变红，修复的话把触发条件并入 `core` 配置并删掉那条测试。
+两条测试断言对应配置恰好只有这一类反例。修复后或混进新类别时对应测试会变红，修复的话把触发条件并入 `core` 配置并删掉那条测试。
 
 1. 排队进活轮的 prompt 遇上中断，既不送达也没有回执。p1 在跑时到达的 p2 经 `promptFresh` 以 followUp 排进 pi；用户中断后 agent loop 不取排队消息，`abort()` 也不清队列，supervisor 不调 `clearQueue()`。p2 留在 pi 队列里，直到下一次 prompt 才夹在它后面送达。触发需要"随时发送"的来源。
 2. 取消重试后，pi 带着排队 prompt 在同一轮续跑。p2 排进活轮后 p1 遇 503 进入重试倒计时，用户取消重试或新 prompt 经 `interruptRetryIfAny` 打断重试。`auto_retry_end(false)` 让 supervisor `failTurn`，而 `_handlePostAgentRun` 见到排队消息继续 `agent.continue()`。用户看到失败、输入解锁，agent 随后又自己跑起来，该轮最后再收到一个 `turn-completed`。
-3. 中断后 5 秒内再发消息，原轮的终态丢了 `aborted`。中断把投影置 idle 并记 `turnAborted`；工具 5 秒内没停下时，p2 的僵尸等待超时，`failTurn(undelivered)` 清掉了 `turnAborted` 和 `abortedTurnId`。原轮随后经 `agent_settled` 收口成不带 `aborted` 的 `turn-completed`，headless 与其他窗口据此泵队列、续跑 goal。注意这条 `turn-failed(undelivered)` 用的是 `abortedTurnId` 并带 `aborted`，原轮 id 其实先收到了一个终态，之后的 `turn-completed` 用的是随机 id，是多出来的终态。`observeWorker` 不把未送达回执算作终态，所以反例只报了丢 `aborted`；修复时两处都要核对，不要只保住 `turnAborted`。

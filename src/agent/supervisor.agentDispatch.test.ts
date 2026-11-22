@@ -1784,7 +1784,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     expect(parentSession.steer).not.toHaveBeenCalled();
   });
 
-  it('idle 投影但 pi 僵尸轮永不空闲：限时后按失败收口，绝不静默 steer', async () => {
+  it('idle 投影但 pi 僵尸轮永不空闲：限时后按 deliveryId 回执，不发终态、不静默 steer', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const events: AgentWorkerEvent[] = [];
@@ -1805,9 +1805,9 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       parentSession.waitForIdle = vi.fn(() => new Promise<undefined>(() => {}));
       supervisor.handleCommand({
         type: 'prompt',
-        deliveryId: 'd-1687',
         identity: parent,
         text: 'follow up',
+        deliveryId: 'zombie-follow-up',
       });
       await settle();
       expect(parentSession.steer).not.toHaveBeenCalled();
@@ -1815,10 +1815,17 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       await settle();
       expect(parentSession.steer).not.toHaveBeenCalled();
       expect(parentSession.prompt).not.toHaveBeenCalled();
-      expect(events.find((event) => event.type === 'turn-failed')).toBeDefined();
       expect(
-        events.find((event) => event.type === 'status' && event.status === 'failed' && event.error)
-      ).toBeDefined();
+        events.filter(
+          (event) =>
+            event.type === 'delivery-rejected' ||
+            event.type === 'turn-failed' ||
+            event.type === 'turn-completed' ||
+            (event.type === 'status' && event.status === 'failed')
+        )
+      ).toEqual([
+        expect.objectContaining({ type: 'delivery-rejected', deliveryId: 'zombie-follow-up' }),
+      ]);
     } finally {
       vi.useRealTimers();
     }
@@ -1864,7 +1871,7 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
     }
   });
 
-  it('误判僵尸失败后，已见 agent_end 的原轮收束会清掉失败横幅', async () => {
+  it('误判僵尸只回执那条 prompt：已见 agent_end 的原轮照常收束，只有一个终态', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
       const { events, supervisor, piSession } = await spawnParent();
@@ -1873,22 +1880,22 @@ describe('SessionSupervisor deterministic child lifecycle', () => {
       piSession.emit({ type: 'agent_end', willRetry: false });
       supervisor.handleCommand({
         type: 'prompt',
-        deliveryId: 'd-1745',
         identity: parent,
         text: 'queued',
+        deliveryId: 'd2',
       });
       await vi.advanceTimersByTimeAsync(5_000);
       await settle();
-      expect(events.some((event) => event.type === 'turn-failed')).toBe(true);
+      expect(events.some((event) => event.type === 'delivery-rejected')).toBe(true);
 
       piSession.isStreaming = false;
       piSession.emit({ type: 'agent_settled' });
       await settle();
-      const failedAt = events.findIndex((event) => event.type === 'turn-failed');
-      const completedAt = events.findIndex(
-        (event, index) => index > failedAt && event.type === 'turn-completed'
-      );
-      expect(completedAt).toBeGreaterThan(failedAt);
+      expect(
+        events.flatMap((event) =>
+          event.type === 'turn-completed' || event.type === 'turn-failed' ? [event.type] : []
+        )
+      ).toEqual(['turn-completed']);
       const status = events.filter((event) => event.type === 'status').at(-1);
       expect(status).toMatchObject({ status: 'idle' });
       if (status?.type === 'status') expect(status.error).toBeUndefined();
