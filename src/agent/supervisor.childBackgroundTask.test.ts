@@ -1,0 +1,280 @@
+import { mkdtempSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
+import type { AgentCommand, AgentWorkerEvent } from '@shared/types/agent';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  sessions: [] as Array<Record<string, unknown>>,
+  createAgentSession: vi.fn(),
+  loaderOptions: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock('./cursor/loadProvider', () => ({
+  CURSOR_PROVIDER_ID: 'cursor',
+  loadCursorProvider: vi.fn(async () => undefined),
+}));
+
+vi.mock('./mcp', () => ({
+  McpManager: class {
+    toolsFor = vi.fn(async () => []);
+    resolve = vi.fn();
+    refresh = vi.fn();
+    closeAll = vi.fn(async () => undefined);
+  },
+}));
+
+vi.mock('@earendil-works/pi-coding-agent', async (importOriginal) => {
+  const original = await importOriginal<Record<string, unknown>>();
+  class Loader {
+    constructor(options: Record<string, unknown>) {
+      mocks.loaderOptions.push(options);
+    }
+    async reload() {}
+    getSkills() {
+      return { skills: [] };
+    }
+    getPrompts() {
+      return { prompts: [] };
+    }
+  }
+  const manager = () => {
+    const branch: unknown[] = [];
+    return {
+      getBranch: vi.fn(() => branch),
+      appendCustomEntry: vi.fn((customType: string, data: unknown) => {
+        branch.push({ type: 'custom', customType, data });
+        return `entry-${branch.length}`;
+      }),
+      buildSessionContext: vi.fn(() => ({ messages: [] })),
+    };
+  };
+  const runtime = {
+    models: new Map<string, Record<string, unknown>>(),
+    registerProvider(providerId: string, config: { models?: Record<string, unknown>[] }) {
+      for (const model of config.models ?? []) {
+        this.models.set(`${providerId}/${model.id}`, { ...model, provider: providerId });
+      }
+    },
+    getModel(providerId: string, modelId: string) {
+      return this.models.get(`${providerId}/${modelId}`);
+    },
+    getModels() {
+      return [...this.models.values()];
+    },
+    resolveModel: vi.fn<ModelRuntime['resolveModel']>(),
+    getAuth: vi.fn<ModelRuntime['getAuth']>().mockResolvedValue(undefined),
+    getProvider(providerId: string) {
+      if (![...this.models.keys()].some((key) => key.startsWith(`${providerId}/`)))
+        return undefined;
+      return { id: providerId, models: [], stream: vi.fn(), streamSimple: vi.fn() };
+    },
+    registerNativeProvider: vi.fn(),
+    refresh: vi.fn(async () => ({ aborted: false, errors: new Map() })),
+    completeSimple: vi.fn(async () => ({ content: [] })),
+  };
+  return {
+    ...original,
+    DefaultResourceLoader: Loader,
+    ModelRuntime: { create: vi.fn(async () => runtime) },
+    SessionManager: { create: vi.fn(manager), open: vi.fn(manager), inMemory: vi.fn(manager) },
+    createAgentSession: mocks.createAgentSession,
+  };
+});
+
+import { SessionSupervisor } from './supervisor';
+
+const parent = { sessionId: 'parent', generation: '11111111-1111-4111-8111-111111111111' };
+const child = {
+  sessionId: 'parent::cw-worker',
+  generation: '22222222-2222-4222-8222-222222222222',
+  parent,
+  instanceId: '33333333-3333-4333-8333-333333333333',
+  instanceName: 'worker-1',
+  typeKey: 'builtin:worker' as const,
+};
+const model = {
+  api: 'openai-completions' as const,
+  baseUrl: 'https://example.test/v1',
+  apiKey: 'secret',
+  modelId: 'model',
+  settingsProviderId: 'settings-provider',
+};
+
+type Tool = {
+  name: string;
+  execute(id: string, params: unknown, signal?: AbortSignal): Promise<unknown>;
+};
+type FakeSession = { prompt: ReturnType<typeof vi.fn> };
+
+function session(options: Record<string, unknown>) {
+  const listeners = new Set<(event: { type: string; [key: string]: unknown }) => void>();
+  const value = {
+    model: options.model,
+    resourceLoader: options.resourceLoader,
+    sessionManager: options.sessionManager,
+    messages: [],
+    sessionFile: `/tmp/session-${mocks.sessions.length}.jsonl`,
+    subscribe: vi.fn((listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }),
+    prompt: vi.fn(async () => undefined),
+    steer: vi.fn(async () => 'queued'),
+    abort: vi.fn(async () => undefined),
+    waitForIdle: vi.fn(async () => undefined),
+    dispose: vi.fn(),
+    setThinkingLevel: vi.fn(),
+    activeTools: ((options.customTools as Array<{ name: string }> | undefined) ?? []).map(
+      (tool) => tool.name
+    ),
+    getActiveToolNames(this: { activeTools: string[] }) {
+      return [...this.activeTools];
+    },
+    setActiveToolsByName: vi.fn(function (this: { activeTools: string[] }, names: string[]) {
+      this.activeTools = [...names];
+    }),
+    navigateTree: vi.fn(async () => ({ cancelled: false })),
+    isStreaming: false,
+    isRetrying: false,
+    isCompacting: false,
+  };
+  mocks.sessions.push(value);
+  return value;
+}
+
+async function settle(): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setImmediate(resolve);
+  await promise;
+}
+
+async function until(check: () => boolean, ms = 5000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error('timed out');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+const promptTexts = (target: FakeSession) =>
+  target.prompt.mock.calls.map((call) => String(call[0] ?? ''));
+
+describe('子代理起的后台任务归属子代理', () => {
+  beforeEach(() => {
+    mocks.sessions.length = 0;
+    mocks.loaderOptions.length = 0;
+    mocks.createAgentSession.mockReset();
+    mocks.createAgentSession.mockImplementation(async (options: Record<string, unknown>) => ({
+      session: session(options),
+    }));
+  });
+
+  async function setup() {
+    const cwd = realpathSync(mkdtempSync(path.join(tmpdir(), 'enso-child-bg-')));
+    const events: AgentWorkerEvent[] = [];
+    const supervisor = new SessionSupervisor({
+      emit: (event) => events.push(event),
+      agentDir: path.join(cwd, 'agent'),
+      sessionDir: path.join(cwd, 'sessions'),
+    });
+    supervisor.handleCommand({
+      type: 'spawn-parent',
+      identity: parent,
+      cwd,
+      model,
+      approvalMode: 'full',
+    });
+    await until(() => events.some((event) => event.type === 'parent-ready'));
+    const parentLoaders = mocks.loaderOptions.length;
+    const command: AgentCommand = {
+      type: 'spawn-child',
+      identity: child,
+      cwd,
+      config: {
+        typeKey: child.typeKey,
+        displayName: 'Worker',
+        description: 'worker',
+        spawnSpecId: 'spawn-worker',
+        systemPrompt: 'worker role',
+        model,
+        tools: 'all',
+        skillPaths: [],
+        skillBindingIds: [],
+        mcpServers: [],
+        mcpBindingIds: [],
+        systemPromptHash: 'worker-hash',
+      },
+    };
+    supervisor.handleCommand(command);
+    await until(() => events.some((event) => event.type === 'child-ready'));
+    const [parentSession, childSession] = mocks.sessions as unknown as FakeSession[];
+    const childOptions = mocks.createAgentSession.mock.calls[1]?.[0] as { customTools: Tool[] };
+    // 模拟一次工具结果：返回 system-reminders 扩展搭上去的文本
+    const nextToolResult = (from: number, to?: number) => {
+      const extension = mocks.loaderOptions
+        .slice(from, to)
+        .flatMap(
+          (options) =>
+            (options.extensionFactories as
+              | Array<{ name?: string; factory(pi: unknown): void }>
+              | undefined) ?? []
+        )
+        .find((factory) => factory.name === 'system-reminders');
+      let handler: ((event: unknown) => { content: Array<{ text?: string }> } | undefined) | null =
+        null;
+      extension?.factory({ on: (_event: string, fn: typeof handler) => (handler = fn) });
+      return () =>
+        (handler?.({ content: [{ type: 'text', text: 'ok' }] })?.content ?? [])
+          .map((part) => part.text ?? '')
+          .join('\n');
+    };
+    return {
+      events,
+      supervisor,
+      parentSession,
+      childSession,
+      childBash: childOptions.customTools.find((tool) => tool.name === 'bash') as Tool,
+      parentToolResult: nextToolResult(0, parentLoaders),
+      childToolResult: nextToolResult(parentLoaders),
+    };
+  }
+
+  it('任务记在子会话名下；完成通知交给子代理，不唤醒父会话也不唤醒子代理', async () => {
+    const ctx = await setup();
+    await ctx.childBash.execute('call-1', {
+      command: 'echo child-bg-out',
+      background: true,
+    });
+    await until(() => ctx.events.some((event) => event.type === 'task-ended'));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await settle();
+
+    const started = ctx.events.find((event) => event.type === 'task-started');
+    expect(started && 'identity' in started && started.identity.sessionId).toBe(child.sessionId);
+    expect(promptTexts(ctx.parentSession).some((text) => text.includes('Background task'))).toBe(
+      false
+    );
+    expect(promptTexts(ctx.childSession).some((text) => text.includes('Background task'))).toBe(
+      false
+    );
+    expect(ctx.parentToolResult()).not.toContain('Background task');
+    const childNotice = ctx.childToolResult();
+    expect(childNotice).toContain('<background-task-update>');
+    expect(childNotice).toContain('child-bg-out');
+    expect(ctx.childToolResult()).not.toContain('<background-task-update>');
+    await ctx.supervisor.shutdown();
+  });
+
+  it('子代理还在跑的后台任务不算进父会话的收尾清单', async () => {
+    const ctx = await setup();
+    await ctx.childBash.execute('call-1', { command: 'sleep 30', background: true });
+    await until(() => ctx.events.some((event) => event.type === 'task-started'));
+    const internals = ctx.supervisor as unknown as {
+      taskWrapUp(sessionId: string): string | undefined;
+    };
+    expect(internals.taskWrapUp(parent.sessionId)).toBeUndefined();
+    await ctx.supervisor.shutdown();
+  });
+});

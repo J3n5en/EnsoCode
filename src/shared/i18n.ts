@@ -1725,6 +1725,8 @@ export const zhTranslations: Record<string, string> = {
   'Distill again': '重新提炼',
   'Distilling…': '提炼中…',
   'Background tasks': '后台任务',
+  'Background tasks started by this subagent':
+    '这个子代理起的后台任务（归它所有，结束时不通知主会话）',
   'Clear finished tasks': '清空历史任务',
   'Retry failed extractions ({{count}})': '重试失败项（{{count}}）',
   'Removes completed and cancelled jobs. Running tasks are kept. Sessions will show as not distilled again, since that flag is derived from job history — re-distilling is deduplicated, so it will not create duplicate memories.':

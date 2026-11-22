@@ -19,6 +19,8 @@ export interface ObservedTask {
   suspectedIdle?: true;
   /** agent 或用户留下运行 */
   kept?: true;
+  /** 子代理起的任务：所属子会话 id（只在 tasksInTree 里给出） */
+  ownerSessionId?: string;
 }
 
 const toObserved = (task: BackgroundTaskInfo): ObservedTask => ({
@@ -67,9 +69,18 @@ export class BackgroundTaskTracker {
   tasks(sessionId: string): ObservedTask[] {
     const tasks = this.bySession.get(sessionId);
     if (!tasks) return [];
-    return [...tasks.values()].sort(
-      (left, right) => right.startedAt - left.startedAt || left.taskId.localeCompare(right.taskId)
-    );
+    return [...tasks.values()].sort(byNewest);
+  }
+
+  /** 会话自己的加上它子代理（`${sessionId}::…`）起的后台任务，子代理的带 ownerSessionId */
+  tasksInTree(sessionId: string): ObservedTask[] {
+    const all: ObservedTask[] = [];
+    for (const [owner, tasks] of this.bySession) {
+      if (owner === sessionId) all.push(...tasks.values());
+      else if (owner.startsWith(`${sessionId}::`))
+        for (const task of tasks.values()) all.push({ ...task, ownerSessionId: owner });
+    }
+    return all.sort(byNewest);
   }
 
   /** 任一会话还有没结束的后台命令（回合结束了也可能还在跑） */
@@ -134,6 +145,10 @@ export class BackgroundTaskTracker {
     if (next.size === 0) this.bySession.delete(sessionId);
     else this.bySession.set(sessionId, next);
   }
+}
+
+function byNewest(left: ObservedTask, right: ObservedTask): number {
+  return right.startedAt - left.startedAt || left.taskId.localeCompare(right.taskId);
 }
 
 /** worker 后台任务在 Main 的投影（ipc/agent 喂事件，秘书与退出前的安全点判断读它） */
