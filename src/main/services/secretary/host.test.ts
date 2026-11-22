@@ -893,6 +893,96 @@ describe('派出会话的结果记录', () => {
     expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 1 });
   });
 
+  describe('会话第一轮就失败', () => {
+    const kinds = (h: Harness) => (h.state.file.activity ?? []).map((entry) => entry.kind);
+
+    it('空闲直接跳 error 带 turn-failed：记失败并带上错误原因', () => {
+      const h = harness({});
+      h.state.file.dispatched.c1.lastState = 'idle';
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), change('error', 'idle'));
+      expect(h.state.file.outbox).toEqual([
+        expect.objectContaining({ kind: 'failed', text: expect.stringContaining('boom') }),
+      ]);
+      expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 1 });
+    });
+
+    it('只有 status=failed、没有 turn-failed（命令直接抛错）：过了配对窗口照样记失败', () => {
+      const h = harness({});
+      h.state.file.dispatched.c1.lastState = 'idle';
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(
+        event('status', { status: 'failed', error: 'model not found' }),
+        change('error', 'idle')
+      );
+      expect(kinds(h)).toEqual([]);
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(kinds(h)).toEqual(['failed']);
+      expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 1 });
+      expect(h.state.file.outbox).toEqual([
+        expect.objectContaining({
+          kind: 'failed',
+          text: expect.stringContaining('model not found'),
+        }),
+      ]);
+      expect(h.state.contact.milestones).toEqual([expect.objectContaining({ kind: 'failed' })]);
+      h.state.now = 120_000;
+      h.host.tick();
+      expect(kinds(h)).toEqual(['failed']);
+      expect(h.state.contact.milestones).toHaveLength(1);
+    });
+
+    it('status=failed 紧跟 turn-failed：同一次失败只记一条', () => {
+      const h = harness({});
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(
+        event('status', { status: 'failed', error: 'boom' }),
+        change('error', 'idle')
+      );
+      h.host.onAgentEvent(event('turn-failed', { error: 'boom' }), []);
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(kinds(h)).toEqual(['failed']);
+      expect(h.state.contact.milestones).toHaveLength(1);
+      expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 1 });
+    });
+
+    it('退出窗口里的 status=failed 随后改判成中断：不补记失败', () => {
+      const h = harness({});
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(event('status', { status: 'failed' }), change('error', 'running'));
+      h.host.onAgentEvent(
+        event('turn-failed', { error: 'terminated', interrupted: { at: 1, kind: 'quit' } }),
+        []
+      );
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(kinds(h)).toEqual(['interrupted']);
+    });
+
+    it('配对窗口内会话已恢复：不再补记失败', () => {
+      const h = harness({});
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(event('status', { status: 'failed' }), change('error', 'idle'));
+      h.state.statuses.c1 = running;
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(kinds(h)).toEqual([]);
+    });
+
+    it('worker 退出把空闲会话打成 error（没有 turn-failed）：巡检后也不记失败', () => {
+      const h = harness({});
+      h.state.file.dispatched.c1.lastState = 'idle';
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent({ type: 'worker-exited' } as RendererAgentEvent, change('error', 'idle'));
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(kinds(h)).toEqual([]);
+      expect(h.state.contact.milestones).toEqual([]);
+    });
+  });
+
   it('goal_wait 等后台任务、goal 续跑都不记需要用户；真有提问时才记', () => {
     const h = harness({});
     h.state.rows.c1 = { ...h.state.rows.c1, goal: { text: 'g', status: 'waiting' } };

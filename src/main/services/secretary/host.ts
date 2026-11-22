@@ -75,6 +75,10 @@ import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 import { advanceTodos } from './todoLifecycle';
 
 const TICK_MS = 60_000;
+/** 单独的 status=failed 等这么久还没等到 turn-failed，才由巡检补记失败 */
+const FAILURE_PAIR_MS = 5_000;
+/** 失败原因带进回传与通知的上限 */
+const FAILURE_DETAIL_MAX_CHARS = 200;
 /** 只刷新了事件时刻的派出记录，最多隔这么久落盘一次 */
 const EVENT_STAMP_SAVE_MS = 30_000;
 /** 遗留任务巡检间隔：每小时扫一遍已完成会话 */
@@ -248,12 +252,18 @@ function deliveryOutcome(event: RendererAgentEvent): 'done' | 'failed' | null {
   return null;
 }
 
+function failureDetail(error: string | undefined): string | undefined {
+  return redactSecrets(error?.trim() ?? '').slice(0, FAILURE_DETAIL_MAX_CHARS) || undefined;
+}
+
 export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let timer: ReturnType<typeof setInterval> | null = null;
   let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
   let coalesceAt: number | undefined;
   /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
   const pendingComplete = new Set<string>();
+  /** 只来了 status=failed、还没等到 turn-failed 的会话：命令直接抛错时不会再有 turn-failed */
+  const statusFailures = new Map<string, { at: number; error?: string }>();
   /** 因后台任务暂不归档时最近记过的审计：同一批任务只记一次 */
   const archiveHolds = new Map<string, string>();
   /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
@@ -1000,6 +1010,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         const own = sessionId === conversationId;
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed')) {
           record.turn += 1;
+          statusFailures.delete(conversationId);
         }
         if (own && event.type === 'goal-signal' && event.kind === 'complete') {
           pendingComplete.add(conversationId);
@@ -1034,6 +1045,14 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (own && visibleReply(event)) delete record.sentAt;
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
+        if (
+          own &&
+          event.type === 'status' &&
+          event.status === 'failed' &&
+          change?.state === 'error' &&
+          change.previous !== 'error'
+        )
+          statusFailures.set(conversationId, { at: now, error: event.error });
         // 这一轮结束就不再是「被唤起、还没收尾」：之后按空闲状态判定
         const reopened = record.reopenedAt !== undefined;
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed'))
@@ -1065,6 +1084,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             kind = 'turn-ended';
           if (resultEvent?.type === 'turn-completed' && resultEvent.silentFinish)
             detail = silentFinishDetail(resultEvent.silentFinish);
+          if (resultEvent?.type === 'turn-failed') detail = failureDetail(resultEvent.error);
           if (resultEvent?.type === 'turn-interrupted')
             detail = interruptReason({
               at: resultEvent.at,
@@ -1073,8 +1093,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
               lang: 'zh',
             });
         }
-        // status=failed 总是和随后的 turn-failed 成对出现；这里再记一次会把同一次失败推两遍。
-        // worker 退出没有 turn-failed，仍靠状态变化记失败。
+        // status=failed 通常和随后的 turn-failed 成对出现，这里不记，避免同一次失败推两遍；
+        // 等不到 turn-failed 的由巡检补记（statusFailures）。worker 退出没有 turn-failed，仍靠状态变化记失败。
         if (!kind && change && event.type !== 'status') {
           // worker 是所有会话共用的，它退出时空闲会话也会跳到 error；没在干活就不算失败
           if (
@@ -1186,6 +1206,17 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
           delete record.backgroundRunning;
           delete record.backgroundPersistent;
         }
+        changed = true;
+      }
+      // 命令直接抛错（多见于第一轮）只有 status=failed：过了配对窗口仍在报错就补记失败
+      for (const [conversationId, failure] of statusFailures) {
+        if (now - failure.at < FAILURE_PAIR_MS) continue;
+        statusFailures.delete(conversationId);
+        const record = file.dispatched[conversationId];
+        if (!record || statuses[conversationId]?.state !== 'error') continue;
+        if (ports.continuesAfterExit?.(conversationId)) continue;
+        record.turn += 1;
+        recordResult(file, record, 'failed', now, failureDetail(failure.error));
         changed = true;
       }
       // 任务表是权威：常驻服务与遗留标记每分钟按它重算一次，跑过阈值也能及时升级
