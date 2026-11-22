@@ -4015,6 +4015,11 @@ export const zhTranslations: Record<string, string> = {
   'Recent output': '最近输出',
   '{{count}} background tasks are still undeclared; the next message asks the agent to stop each one or state why it keeps running':
     '还有 {{count}} 个后台任务没表态，下一条消息会要求 agent 逐个停止或写明保留理由',
+  '{{count}} background tasks to wrap up: stop them or say why they keep running':
+    '有 {{count}} 个后台任务待收尾：停掉或说明保留原因',
+  'Show in task bar': '在任务条中查看',
+  'Workspace switched to branch {{branch}}': '工作区已切换到分支 {{branch}}',
+  'Workspace switched branch': '工作区已切换分支',
   '{{count}} suspected idle': '{{count}} 个疑似闲置',
   'from {{count}} sessions': '来自 {{count}} 个会话',
   'Stop selected': '停止所选',
