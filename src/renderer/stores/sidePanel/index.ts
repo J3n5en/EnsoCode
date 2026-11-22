@@ -76,6 +76,7 @@ interface SidePanelState {
   nudgeWidth: (delta: number, workspaceWidth: number, handleWidth: number) => void;
   /** paneWidth 为 Files 面板当前宽度，0 表示未量到 */
   nudgeFilesTreeWidth: (delta: number, paneWidth?: number) => void;
+  resetFilesTreeWidth: () => void;
   toggleFullscreen: () => void;
   setFullscreen: (fullscreen: boolean) => void;
   togglePinnedTab: (tab: PinnableSidePanelTab) => void;
@@ -177,6 +178,8 @@ export const useSidePanelStore = create<SidePanelState>()(
         const filesTreeWidth = resizeFilesTreeWidth(get().filesTreeWidth, delta, paneWidth);
         if (filesTreeWidth !== get().filesTreeWidth) set({ filesTreeWidth });
       },
+
+      resetFilesTreeWidth: () => set({ filesTreeWidth: FILES_TREE_DEFAULT_WIDTH }),
 
       toggleFullscreen: () => {
         const id = activeConversationId();

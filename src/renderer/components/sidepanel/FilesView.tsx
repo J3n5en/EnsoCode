@@ -159,6 +159,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
   }, []);
   const treeWidth = useSidePanelStore((s) => resolveFilesTreeWidth(s.filesTreeWidth, paneWidth));
   const nudgeFilesTreeWidth = useSidePanelStore((s) => s.nudgeFilesTreeWidth);
+  const resetFilesTreeWidth = useSidePanelStore((s) => s.resetFilesTreeWidth);
   const nudgeTreeWidth = useCallback(
     (delta: number) => nudgeFilesTreeWidth(delta, paneWidth),
     [nudgeFilesTreeWidth, paneWidth]
@@ -962,7 +963,7 @@ export function FilesView({ conversationId, projectId }: FilesViewProps) {
             </div>
           )}
         </div>
-        {!isMobile && <ResizeHandle onResize={nudgeTreeWidth} />}
+        {!isMobile && <ResizeHandle onResize={nudgeTreeWidth} onReset={resetFilesTreeWidth} />}
         <div className={cn('flex min-w-0 flex-1 flex-col', isMobile && mobileTree && 'hidden')}>
           {openDocs.length > 0 && (
             <div

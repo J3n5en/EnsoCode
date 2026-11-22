@@ -465,6 +465,17 @@ describe('FilesView 文件树宽度', () => {
     expect(treeWidth()).toBe('300px');
   });
 
+  it('双击手柄复位到默认 224px', async () => {
+    await mountDocks(['a']);
+    await drag(176);
+    expect(treeWidth()).toBe('400px');
+    await act(async () => {
+      handle()?.dispatchEvent(new window.Event('dblclick', { bubbles: true, cancelable: true }));
+    });
+    expect(treeWidth()).toBe('224px');
+    expect(useSidePanelStore.getState().filesTreeWidth).toBe(224);
+  });
+
   it('移动端不渲染手柄，文件树仍铺满', async () => {
     Object.assign(window, { innerWidth: 375 });
     await mountDocks(['a']);

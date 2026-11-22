@@ -5,6 +5,8 @@ interface ResizeHandleProps {
   onResize: (deltaX: number) => void;
   /** 拖拽开始/结束通知(消费方可借此暂停宽度动画,避免 spring 追赶抖动) */
   onResizingChange?: (resizing: boolean) => void;
+  /** 双击复位到默认宽度 */
+  onReset?: () => void;
   /** 卡片间 8px 画布缝本身就是手柄，平时不画分隔线 */
   gap?: boolean;
   /** 零宽、不画线，命中区只落在右侧卡片边缘：左侧贴边的是侧栏滚动条，不能被手柄盖住 */
@@ -15,6 +17,7 @@ interface ResizeHandleProps {
 export function ResizeHandle({
   onResize,
   onResizingChange,
+  onReset,
   gap = false,
   edge = false,
 }: ResizeHandleProps) {
@@ -53,6 +56,7 @@ export function ResizeHandle({
     >
       <div
         onMouseDown={handleMouseDown}
+        onDoubleClick={onReset}
         className={cn(
           'absolute inset-y-0 z-10 cursor-col-resize',
           'after:absolute after:inset-y-0 after:w-px after:transition-colors hover:after:bg-ring',
