@@ -29,6 +29,7 @@ import {
 import { addToast } from '@/components/ui/toast';
 import { useI18n } from '@/i18n';
 import { IS_MAC } from '@/lib/keybindings';
+import { isRemoteClient } from '@/lib/remoteClient';
 import { openSidePanelBrowserUrl, openSidePanelFile } from '@/lib/sidePanelDock';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settings';
@@ -105,9 +106,14 @@ function remarkGithubAlerts() {
   };
 }
 
-/** 仓库内文件路径判定（行内 code 渲染成 chip，聊天里点开 Files 面板，无链接上下文时复制）：需含目录分隔或 file.ext:line 形式 */
+/**
+ * 仓库内路径判定（行内 code 渲染成 chip，无链接上下文时复制）：文件需含目录分隔或 file.ext:line 形式，
+ * 点开 Files 面板；目录只认末尾带 `/` 的相对路径（避免 and/or、TCP/IP 误判；纯 `./`、`../` 不算），
+ * 点开系统文件管理器，远程客户端调不了宿主文件管理器，不渲染成 chip。
+ */
 const FILE_PATH_RE =
   /^(?:[\w.@-]+\/)+[\w.@-]+\.\w{1,8}(?::\d+(?:-\d+)?)?$|^[\w.-]+\.\w{1,8}:\d+(?:-\d+)?$/;
+const DIR_PATH_RE = /^(?!(?:\.+\/)+$)(?:[\w.@-]+\/)+$/;
 
 const REMARK_PLUGINS = [remarkGfm, remarkGithubAlerts];
 
@@ -789,7 +795,8 @@ export const markdownComponents: Components = {
     const { t } = useI18n();
     const linkContext = useContext(MarkdownLinkContext);
     const value = typeof children === 'string' ? children : '';
-    if (value && FILE_PATH_RE.test(value)) {
+    const dir = DIR_PATH_RE.test(value) && !isRemoteClient();
+    if (dir || FILE_PATH_RE.test(value)) {
       const { path, line } = splitFileLineRef(value);
       const onClick = () => {
         if (!linkContext) {
@@ -805,7 +812,26 @@ export const markdownComponents: Components = {
           });
           return;
         }
-        openSidePanelFile(linkContext.conversationId, rel, line);
+        if (!dir) {
+          openSidePanelFile(linkContext.conversationId, rel, line);
+          return;
+        }
+        const fail = (error: string) =>
+          addToast({
+            type: 'error',
+            title: t('Could not open local file link'),
+            description: revealErrorDescription(error, t),
+          });
+        window.electronAPI.workspaceFiles
+          .reveal({
+            conversationId: linkContext.conversationId,
+            projectId: linkContext.projectId,
+            rel,
+          })
+          .then(
+            (result) => !result.ok && fail(result.error),
+            (error: unknown) => fail(error instanceof Error ? error.message : String(error))
+          );
       };
       const chip = (
         <button
