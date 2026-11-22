@@ -22,7 +22,9 @@ import {
   continueSessionActivity,
   editLatestAssistantForRetry,
   editUnfinishedAssistantForResume,
+  INTERRUPTED_TOOL_RESULT,
   markRestartResumedReply,
+  settleInterruptedToolCalls,
   silentTurnRecoveryExtension,
   steerActiveSession,
   steerDetachable,
@@ -707,6 +709,87 @@ describe('Pi session adapter integration', () => {
           ? ['user', 'assistant:toolUse:saved-call', 'toolResult:saved-call', 'user']
           : ['user', 'user']
       );
+    }
+  );
+
+  it('子代理续跑：中断时在跑的工具补一条结果未知的错误结果，不原样重放；已有结果的照旧', async () => {
+    const counted = countedTool('finish');
+    const h = await harness([{ content: [{ type: 'text', text: 'Checked state, done.' }] }], {
+      tools: [counted.tool],
+    });
+    h.manager.appendMessage({ role: 'user', content: 'Run both.', timestamp: Date.now() });
+    h.manager.appendMessage(
+      assistant(model, {
+        content: [
+          { type: 'toolCall', id: 'done-call', name: 'adapter_test_tool', arguments: {} },
+          { type: 'toolCall', id: 'inflight-call', name: 'adapter_test_tool', arguments: {} },
+        ],
+        stopReason: 'toolUse',
+      })
+    );
+    h.manager.appendMessage({
+      role: 'toolResult',
+      toolCallId: 'done-call',
+      toolName: 'adapter_test_tool',
+      content: [{ type: 'text', text: 'saved result' }],
+      isError: false,
+      timestamp: Date.now(),
+    });
+    h.session.refreshContext();
+    expect(settleInterruptedToolCalls(h.session)).toBe(1);
+    await continueSessionActivity(h.session);
+    expect(counted.state.runs).toBe(0);
+    const request = h.requests[0]!;
+    expect(shape(request)).toEqual([
+      'user',
+      'assistant:toolUse:done-call,inflight-call',
+      'toolResult:done-call',
+      'toolResult:inflight-call',
+    ]);
+    const [saved, synthetic] = request.messages.filter((message) => message.role === 'toolResult');
+    expect(textOf(saved)).toBe('saved result');
+    expect(synthetic).toMatchObject({ isError: true });
+    expect(textOf(synthetic)).toBe(INTERRUPTED_TOOL_RESULT);
+    // 合成结果落盘：之后再重开会话也不会被当成没跑过
+    expect(
+      h.manager
+        .getBranch()
+        .some(
+          (entry) =>
+            entry.type === 'message' &&
+            entry.message.role === 'toolResult' &&
+            entry.message.toolCallId === 'inflight-call'
+        )
+    ).toBe(true);
+  });
+
+  it.each(['stop', 'aborted', 'answered'] as const)(
+    '子代理续跑：没有在跑的工具（%s）时不补结果',
+    async (tail) => {
+      const h = await harness([]);
+      h.manager.appendMessage({ role: 'user', content: 'Go.', timestamp: Date.now() });
+      h.manager.appendMessage(
+        assistant(
+          model,
+          tail === 'stop'
+            ? { content: [{ type: 'text', text: 'Finished.' }] }
+            : { ...toolCall('call-1'), ...(tail === 'aborted' ? { stopReason: 'aborted' } : {}) }
+        )
+      );
+      if (tail === 'answered') {
+        h.manager.appendMessage({
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          toolName: 'adapter_test_tool',
+          content: [{ type: 'text', text: 'ok' }],
+          isError: false,
+          timestamp: Date.now(),
+        });
+      }
+      h.session.refreshContext();
+      const before = h.session.agent.state.messages.length;
+      expect(settleInterruptedToolCalls(h.session)).toBe(0);
+      expect(h.session.agent.state.messages).toHaveLength(before);
     }
   );
 

@@ -199,7 +199,12 @@ const restricting = (state: PlanState) => {
  */
 export function withPlanGate(
   definition: ToolDefinition,
-  deps: { host: PlanHost; readonlyAgentTypes: ReadonlySet<string> }
+  deps: {
+    host: PlanHost;
+    readonlyAgentTypes: ReadonlySet<string>;
+    /** 本会话派出的子代理 agentId → agent_type；查不到按非只读处理 */
+    agentTypeOf?: (agentId: string) => string | undefined;
+  }
 ): ToolDefinition {
   const { host, readonlyAgentTypes } = deps;
   return {
@@ -221,6 +226,11 @@ export function withPlanGate(
             throw denied(
               `spawn requires a read-only agent_type (${[...readonlyAgentTypes].join(', ') || 'none available'})`
             );
+        } else if (operation === 'resume') {
+          const type =
+            typeof record.agentId === 'string' ? deps.agentTypeOf?.(record.agentId) : undefined;
+          if (type === undefined || !readonlyAgentTypes.has(type))
+            throw denied('resume only continues read-only agent_type subagents while planning');
         } else if (!SUBAGENT_PASSIVE_OPS.has(String(operation))) {
           throw denied(`subagent ${String(operation)} is disabled while planning`);
         }

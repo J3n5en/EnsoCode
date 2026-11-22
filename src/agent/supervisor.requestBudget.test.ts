@@ -444,4 +444,71 @@ describe('SessionSupervisor 子代理请求预算', () => {
     expect(completed(events).map((event) => event.turnId)).toEqual(['run-1']);
     await supervisor.shutdown();
   });
+
+  /** 续跑用的 retry：给假会话补上续跑要用到的 pi 私有入口与会话管理器方法 */
+  function prepareResume(worker: FakeSession, messages: unknown[]) {
+    const appended: Array<Record<string, unknown>> = [];
+    const state = worker.agent.state as { messages: unknown[] };
+    state.messages = messages;
+    Object.assign(worker.sessionManager as object, {
+      buildSessionProjection: vi.fn(() => ({
+        entries: state.messages.map((message, index) => ({
+          sourceEntry: { type: 'message', id: `m${index}`, message },
+          messages: [message],
+        })),
+      })),
+      appendMessage: vi.fn((message: Record<string, unknown>) => {
+        appended.push(message);
+        state.messages.push(message);
+        return `m${state.messages.length}`;
+      }),
+      appendContextEdit: vi.fn(() => {
+        state.messages.pop();
+        return 'edit';
+      }),
+    });
+    const startRun = vi.fn(async () => undefined);
+    Object.assign(worker, { refreshContext: vi.fn(), _prepareRun: vi.fn(), _startRun: startRun });
+    return { appended, startRun };
+  }
+
+  function resumeRun(supervisor: SessionSupervisor, requestsUsed?: number): void {
+    supervisor.handleCommand({
+      type: 'retry',
+      identity: child,
+      unfinishedOnly: true,
+      turnId: 'run-2',
+      requestBudget: true,
+      ...(requestsUsed !== undefined ? { requestsUsed } : {}),
+    });
+  }
+
+  it('续跑接着原 Run 已用的请求数计预算，不清零', async () => {
+    const { supervisor, worker } = await spawnChild();
+    const { startRun } = prepareResume(worker, [{ role: 'user', content: 'inspect files' }]);
+    resumeRun(supervisor, 2);
+    await settle();
+    expect(startRun).toHaveBeenCalledTimes(1);
+    request(worker, toolCall(3));
+    expect(worker.abort).toHaveBeenCalledTimes(1);
+    await supervisor.shutdown();
+  });
+
+  it('子会话续跑：中断时在跑的工具补一条错误结果后再续，不把那次调用移出上下文重放', async () => {
+    const { supervisor, worker } = await spawnChild();
+    const { appended, startRun } = prepareResume(worker, [
+      { role: 'user', content: 'inspect files' },
+      { role: 'assistant', ...toolCall(1) },
+    ]);
+    resumeRun(supervisor);
+    await settle();
+    expect(appended).toEqual([
+      expect.objectContaining({ role: 'toolResult', toolCallId: 'call-1', isError: true }),
+    ]);
+    expect(
+      (worker.sessionManager as { appendContextEdit: ReturnType<typeof vi.fn> }).appendContextEdit
+    ).not.toHaveBeenCalled();
+    expect(startRun).toHaveBeenCalledTimes(1);
+    await supervisor.shutdown();
+  });
 });

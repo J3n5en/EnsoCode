@@ -12,6 +12,36 @@ const model: SpawnModelConfig = {
 };
 
 describe('subagent unified control', () => {
+  it('resume 校验 agentId 后交给 Main，回执带后台 note；工具描述引导用 resume 而不是重新 spawn', async () => {
+    const invoke = vi.fn(async () => ({
+      ok: true as const,
+      value: { agentId: 'a1', runId: 'r2', mode: 'task', status: 'running' },
+    }));
+    const tool = createUnifiedSubagentTool({ agentTypes: [], models: [], invoke });
+    const run = (params: Record<string, unknown>) =>
+      tool.execute('call', params as never, undefined, undefined, {} as never);
+    await expect(run({ operation: 'resume' })).rejects.toThrow(/resume requires non-empty agentId/);
+    await expect(run({ operation: 'resume', agentId: '  ' })).rejects.toThrow(
+      /resume requires non-empty agentId/
+    );
+    await expect(run({ operation: 'resume', agentId: 42 })).rejects.toThrow(
+      /resume requires non-empty agentId/
+    );
+    expect(invoke).not.toHaveBeenCalled();
+    const resumed = await run({ operation: 'resume', agentId: 'a1' });
+    expect(invoke).toHaveBeenCalledWith({ operation: 'resume', agentId: 'a1' }, undefined);
+    expect(resumed.details).toMatchObject({
+      runId: 'r2',
+      note: expect.stringContaining('You know nothing about its results'),
+    });
+    const guidance = [tool.description, ...(tool.promptGuidelines ?? [])].join('\n');
+    expect(guidance).toMatch(/interrupted[^\n]*resume[^\n]*do not spawn/i);
+    // 父会话自己重试不会让子代理停放；触发场景只写真会停放的那几种
+    expect(guidance).not.toMatch(/turn was retried/);
+    expect(guidance).toMatch(/worker crash/);
+    expect(guidance).toMatch(/at most 3 times/);
+  });
+
   it('normalizes model thinking before the typed Main invocation', async () => {
     const invoke = vi.fn(async (request) => ({ ok: true as const, value: request }));
     const tool = createUnifiedSubagentTool({

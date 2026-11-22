@@ -1732,6 +1732,8 @@ async function runAgentControl(
       return agentService.stop({ ...base, runId: request.runId });
     case 'dismiss':
       return agentService.dismiss({ ...base, agentId: request.agentId });
+    case 'resume':
+      return agentService.resume({ ...base, agentId: request.agentId });
   }
 }
 
@@ -1940,6 +1942,14 @@ export function registerAgentHandlers(): void {
       steer: async (input) => steerSession(input.identity, input.prompt),
       stop: async (input) => abortSession(input.identity),
       dismiss: async (input) => dismissChildSession(input.identity.parent, input.identity, false),
+      resume: (input) =>
+        dispatchService!.resumeControlledAgent(input.context.owner.ownerId, input.identity),
+      retry: async (input) =>
+        retrySession(input.identity, true, {
+          turnId: input.runId,
+          requestBudget: true,
+          requestsUsed: input.requestsUsed,
+        }),
       validate: async (input) => {
         const source = sourceBindings?.resolveParentSource(input.context.owner.ownerId);
         if (!source) return { ok: false, error: 'Agent parent workspace is unavailable.' };

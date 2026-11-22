@@ -7,6 +7,7 @@ import type {
   SubagentModelOption,
 } from '@shared/types/agent';
 import {
+  AGENT_TASK_MAX_RESUMES,
   AGENT_WAIT_DEFAULT_MS,
   AGENT_WAIT_MAX_MS,
   parseAgentControlToolRequest,
@@ -90,6 +91,7 @@ const SUBAGENT_OPERATIONS = [
   'message',
   'stop',
   'dismiss',
+  'resume',
 ] as const;
 
 const REQUIRED_FIELDS: Partial<Record<string, string[]>> = {
@@ -97,6 +99,7 @@ const REQUIRED_FIELDS: Partial<Record<string, string[]>> = {
   report: ['runId'],
   stop: ['runId'],
   dismiss: ['agentId'],
+  resume: ['agentId'],
   message: ['to', 'text'],
 };
 
@@ -226,7 +229,7 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
     if (operation === 'report' || operation === 'stop') {
       return parseAgentControlToolRequest({ operation, runId: params.runId });
     }
-    if (operation === 'dismiss') {
+    if (operation === 'dismiss' || operation === 'resume') {
       return parseAgentControlToolRequest({ operation, agentId: params.agentId });
     }
     if (operation === 'list') {
@@ -249,14 +252,16 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       'Every call must pass operation, including operation:"spawn". Spawn requires non-empty description and prompt parameters; omit both for every other operation. ' +
       'Create and control delegated agents. mode=task is one-shot; mode=coworker preserves context for multiple Runs. ' +
       'All operations are Main-authorized. Spawning and sending are asynchronous unless wait:true; ' +
-      'you are notified automatically when a Run finishes.',
+      'you are notified automatically when a Run finishes. ' +
+      'A task interrupted before it finished keeps its progress: continue it with operation:"resume" and its agentId — do not spawn it again.',
     promptSnippet:
       'subagent: always pass operation (operation:"spawn" to spawn). spawn requires non-empty description and prompt. Other operations omit both. ' +
-      'Spawn task/coworker agents, list owned agents, send Runs or bound messages, wait/report/stop a Run, or dismiss an Agent. Default spawn mode=task and wait=false; finished Runs notify you automatically.',
+      'Spawn task/coworker agents, list owned agents, send Runs or bound messages, wait/report/stop a Run, dismiss an Agent, or resume an interrupted task. Default spawn mode=task and wait=false; finished Runs notify you automatically.',
     promptGuidelines: [
       'Every subagent call must pass operation; to spawn, pass operation:"spawn". spawn requires non-empty description and prompt. Omit both for every other operation.',
       'On spawn, description is the title the user sees in subagent history. Write a short human-readable label of the work, not an id or slug. name is an optional internal handle and is not the title.',
-      'Agent and Run are different identities: use runId for wait/report/stop and agentId for send/dismiss.',
+      'Agent and Run are different identities: use runId for wait/report/stop and agentId for send/dismiss/resume.',
+      `When a task Run is interrupted by something recoverable — a network or provider error that persisted through automatic retries, or an agent worker crash — its Agent is parked with its progress saved and the completion notice says so. Call resume with that agentId to continue from where it stopped (at most ${AGENT_TASK_MAX_RESUMES} times per task) — do not spawn the same task again, which starts over from scratch. If you lost the agentId, list with status:"parked" finds it. Failures that retrying cannot fix (bad request, auth, request budget) close the task instead.`,
       "Delegate when the work matches an available agent type, when two independent investigations can run in parallel, when answering needs broad exploration across several files, or when a long-running job can proceed in the background. For a known file, symbol, or single fact, use the direct tool (read for a known path, grep for a specific symbol) instead, and do not repeat work you delegated. Once you've delegated a search, don't also run it yourself.",
       'Treat the delivered report as your source of record: do not re-read files it covered unless you are about to edit them or the report is incomplete.',
       'Default to doing the work yourself in this thread: a few reads, one search, a short edit, or a single check is faster inline than delegating. Do not fan out several subagents for one small task, do not spawn a subagent to review or re-check work you can verify yourself, and keep the count low — one well-briefed subagent beats several thin ones. When independent subagents should run in parallel, spawn them all in the same message.',
@@ -385,7 +390,9 @@ export function createUnifiedSubagentTool(deps: UnifiedSubagentDeps): ToolDefini
       const detachedBy = blocking?.reason();
       const background =
         !waits &&
-        (request.operation === 'spawn' || request.operation === 'send') &&
+        (request.operation === 'spawn' ||
+          request.operation === 'send' ||
+          request.operation === 'resume') &&
         (response.value as { status?: unknown } | undefined)?.status !== undefined;
       const note =
         receipt?.interrupted && detachedBy

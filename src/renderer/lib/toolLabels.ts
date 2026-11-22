@@ -57,4 +57,5 @@ export const SUBAGENT_OP_LABEL_KEYS: Record<SubagentOp, string> = {
   stop: 'Stop',
   dismiss: 'Dismiss agent',
   list: 'List agents',
+  resume: 'Resume agent',
 };
