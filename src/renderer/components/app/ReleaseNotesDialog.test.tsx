@@ -57,6 +57,7 @@ vi.mock('@/components/ui/dialog', async () => {
 let root: Root;
 let container: HTMLElement;
 const downloadUpdate = vi.fn();
+const quitAndInstall = vi.fn();
 const dialog = () => container.querySelector('[role="dialog"]');
 const buttonOf = (text: string) =>
   [...(dialog()?.querySelectorAll('button') ?? [])].find((b) => b.textContent === text) as
@@ -88,6 +89,7 @@ async function render(element: ReturnType<typeof createElement>): Promise<void> 
     electronAPI: {
       updater: {
         downloadUpdate,
+        quitAndInstall,
         getState: async () => ({ host: 'desktop', status: null }),
         onStatus: (listener: (status: UpdateStatus) => void) => {
           push = listener;
@@ -112,6 +114,7 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   vi.unstubAllGlobals();
   downloadUpdate.mockReset();
+  quitAndInstall.mockReset();
 });
 
 describe('ReleaseNotesDialog', () => {
@@ -142,6 +145,14 @@ describe('ReleaseNotesDialog', () => {
     await act(async () => push({ status: 'error', error: 'net::ERR_INTERNET_DISCONNECTED' }));
     expect(dialog()?.textContent).toContain('Release notes body');
     expect(dialog()?.textContent).toContain('Update failed: net::ERR_INTERNET_DISCONNECTED');
+  });
+
+  it('下载完成后点「重启以更新」先关掉对话框再重启，不和重启等待蒙版叠在一起', async () => {
+    await mount(available);
+    await act(async () => push({ ...available, status: 'downloaded' } as UpdateStatus));
+    await act(async () => buttonOf('Restart to update')?.click());
+    expect(quitAndInstall).toHaveBeenCalledTimes(1);
+    expect(dialog()).toBeNull();
   });
 });
 

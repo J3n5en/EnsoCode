@@ -53,7 +53,14 @@ export function ReleaseNotesDialog({
         : null;
   const action =
     status?.status === 'downloaded' ? (
-      <Button size="sm" onClick={() => void window.electronAPI.updater.quitAndInstall()}>
+      <Button
+        size="sm"
+        onClick={() => {
+          // 先关对话框，避免和重启等待蒙版叠在一起
+          onOpenChange(false);
+          void window.electronAPI.updater.quitAndInstall();
+        }}
+      >
         {t('Restart to update')}
       </Button>
     ) : status?.status === 'available' && status.manualInstall ? (
