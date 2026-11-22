@@ -10,7 +10,7 @@ import type {
   SecretarySchedule,
   SecretaryTodo,
 } from '@shared/types/secretary';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ObservedTask } from '../backgroundTaskTracker';
 import { createSecretaryHost, type SecretaryHost, type SecretaryHostPorts } from './host';
 
@@ -980,6 +980,182 @@ describe('派出会话的结果记录', () => {
       h.host.tick();
       expect(kinds(h)).toEqual([]);
       expect(h.state.contact.milestones).toEqual([]);
+    });
+
+    it('配对窗口到点就补记，不等每分钟的巡检', () => {
+      vi.useFakeTimers();
+      try {
+        const h = harness({});
+        h.state.statuses.c1 = error;
+        h.host.onAgentEvent(
+          event('status', { status: 'failed', error: 'model not found' }),
+          change('error', 'idle')
+        );
+        h.state.now = 4_000;
+        vi.advanceTimersByTime(4_000);
+        expect(kinds(h)).toEqual([]);
+        h.state.now = 5_000;
+        vi.advanceTimersByTime(1_000);
+        expect(kinds(h)).toEqual(['failed']);
+        expect(h.state.file.outbox).toEqual([
+          expect.objectContaining({
+            kind: 'failed',
+            text: expect.stringContaining('model not found'),
+          }),
+        ]);
+        expect(h.state.file.dispatched.c1.failurePending).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('正在跑时的 status=failed 不终止这一轮：不挂起、不补记', () => {
+      const h = harness({});
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(
+        event('status', { status: 'failed', error: 'x' }),
+        change('error', 'running')
+      );
+      expect(h.state.file.dispatched.c1.failurePending).toBeUndefined();
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(kinds(h)).toEqual([]);
+    });
+
+    it('已经收口、秘书没再追加任务的会话：之后的命令出错不报失败', () => {
+      const h = harness({});
+      h.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 1, at: 0 };
+      h.state.file.dispatched.c1.turn = 1;
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(
+        event('status', { status: 'failed', error: 'x' }),
+        change('error', 'idle')
+      );
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'goal-complete' });
+      expect(h.state.file.outbox).toEqual([]);
+    });
+
+    it('秘书追加任务后空闲时直接失败：补记失败并结束重新跟踪', () => {
+      const h = harness({});
+      h.state.file.dispatched.c1.lastResult = { kind: 'goal-complete', turn: 1, at: 0 };
+      h.state.file.dispatched.c1.turn = 1;
+      h.state.file.dispatched.c1.reopenedAt = 0;
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(
+        event('status', { status: 'failed', error: 'x' }),
+        change('error', 'idle')
+      );
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 2 });
+      expect(h.state.file.dispatched.c1.reopenedAt).toBeUndefined();
+    });
+
+    it('错误原因先脱敏再截断', () => {
+      const h = harness({});
+      h.state.statuses.c1 = error;
+      const token = `sk-${'a'.repeat(40)}`;
+      h.host.onAgentEvent(
+        event('status', { status: 'failed', error: `401 api_key=${token} ${'x'.repeat(500)}` }),
+        change('error', 'idle')
+      );
+      const pending = h.state.file.dispatched.c1.failurePending;
+      expect(pending?.detail).not.toContain(token);
+      expect(pending?.detail?.length).toBeLessThanOrEqual(200);
+      h.state.now = 60_000;
+      h.host.tick();
+      expect(JSON.stringify(h.state.file)).not.toContain(token);
+    });
+
+    it('配对窗口里重启：失败落了盘，启动时补报一次', () => {
+      const h = harness({});
+      h.state.statuses.c1 = error;
+      h.host.onAgentEvent(
+        event('status', { status: 'failed', error: 'boom' }),
+        change('error', 'idle')
+      );
+      expect(h.state.file.dispatched.c1.failurePending).toMatchObject({ detail: 'boom' });
+      const restarted = harness({ file: structuredClone(h.state.file) });
+      restarted.state.statuses.c1 = idle;
+      restarted.host.recover();
+      expect(restarted.state.file.dispatched.c1.lastResult).toMatchObject({
+        kind: 'failed',
+        turn: 1,
+      });
+      expect(restarted.state.file.outbox).toEqual([
+        expect.objectContaining({ kind: 'failed', text: expect.stringContaining('boom') }),
+      ]);
+      expect(restarted.state.file.dispatched.c1.failurePending).toBeUndefined();
+      restarted.state.now = 60_000;
+      restarted.host.tick();
+      expect(restarted.state.file.outbox).toHaveLength(1);
+    });
+
+    it('配对窗口里重启但冷启动接着跑：不补报', () => {
+      const h = harness({});
+      h.state.file.dispatched.c1.lastState = 'error';
+      h.state.file.dispatched.c1.failurePending = { at: 0, detail: 'boom' };
+      h.ports.coldResumed = () => true;
+      h.host.recover();
+      expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+      expect(h.state.file.dispatched.c1.failurePending).toBeUndefined();
+    });
+  });
+
+  describe('会话没能启动（spawn 被拒）', () => {
+    const rejected = (reason: string) =>
+      ({ type: 'parent-rejected', identity, seq: 0, reason }) as RendererAgentEvent;
+
+    it('非 STALE 的拒绝：记一次失败并带上脱敏后的原因', () => {
+      const h = harness({});
+      h.state.statuses.c1 = idle;
+      const token = `ghp_${'b'.repeat(30)}`;
+      h.host.onAgentEvent(rejected(`model unavailable token=${token}`), []);
+      expect(h.state.file.dispatched.c1.lastResult).toMatchObject({ kind: 'failed', turn: 0 });
+      expect(h.state.file.outbox).toEqual([
+        expect.objectContaining({
+          kind: 'failed',
+          text: expect.stringContaining('会话没能启动：model unavailable'),
+        }),
+      ]);
+      expect(JSON.stringify(h.state.file)).not.toContain(token);
+      expect(h.state.contact.milestones).toEqual([expect.objectContaining({ kind: 'failed' })]);
+      // 紧跟着首条消息因会话不在被拒（STALE）：不再记第二次
+      h.host.onAgentEvent(rejected('unknown or stale session generation: c1'), []);
+      expect(h.state.file.outbox).toHaveLength(1);
+      expect(h.state.contact.milestones).toHaveLength(1);
+    });
+
+    it('只有 STALE 拒绝：不是会话本身出错，不记', () => {
+      const h = harness({});
+      h.host.onAgentEvent(rejected('unknown or stale session generation: c1'), []);
+      expect(h.state.file.dispatched.c1.lastResult).toBeUndefined();
+      expect(h.state.file.outbox).toEqual([]);
+    });
+
+    it('不是秘书派出或跟踪的会话：不记也不推', () => {
+      const h = harness({});
+      h.host.onAgentEvent(
+        {
+          type: 'parent-rejected',
+          identity: { sessionId: 'other', generation: 'g' },
+          seq: 0,
+          reason: 'boom',
+        } as RendererAgentEvent,
+        []
+      );
+      expect(h.state.file.outbox).toEqual([]);
+      expect(h.state.contact.milestones).toEqual([]);
+    });
+
+    it('和冷启动续跑失败的补报只算一次', () => {
+      const h = harness({});
+      h.host.onAgentEvent(rejected('model unavailable'), []);
+      h.host.onRestartResumeFailed('c1', 'model unavailable');
+      expect(h.state.file.outbox).toHaveLength(1);
+      expect(h.state.contact.milestones).toHaveLength(1);
     });
   });
 

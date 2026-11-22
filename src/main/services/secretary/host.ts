@@ -17,7 +17,7 @@ import {
   sessionIdsInUpdates,
   shouldSilenceTurn,
 } from '@shared/secretary/silence';
-import type { RendererAgentEvent, TurnReport } from '@shared/types/agent';
+import { type RendererAgentEvent, STALE_SESSION_ERROR, type TurnReport } from '@shared/types/agent';
 import type {
   DispatchRecord,
   SecretaryActivity,
@@ -75,7 +75,7 @@ import { fireDue, skipMissedCron, syncSystemSchedules } from './schedules';
 import { advanceTodos } from './todoLifecycle';
 
 const TICK_MS = 60_000;
-/** 单独的 status=failed 等这么久还没等到 turn-failed，才由巡检补记失败 */
+/** 单独的 status=failed 等这么久还没等到 turn-failed，就补记失败 */
 const FAILURE_PAIR_MS = 5_000;
 /** 失败原因带进回传与通知的上限 */
 const FAILURE_DETAIL_MAX_CHARS = 200;
@@ -256,14 +256,23 @@ function failureDetail(error: string | undefined): string | undefined {
   return redactSecrets(error?.trim() ?? '').slice(0, FAILURE_DETAIL_MAX_CHARS) || undefined;
 }
 
+/** 秘书还在等这个会话的结果：还没收口，或收口后又被秘书追加了任务 */
+function awaitsOutcome(record: DispatchRecord): boolean {
+  return (
+    !record.lastResult ||
+    !SETTLED_RESULTS.has(record.lastResult.kind) ||
+    record.reopenedAt !== undefined
+  );
+}
+
 export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
   let timer: ReturnType<typeof setInterval> | null = null;
   let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
   let coalesceAt: number | undefined;
+  /** 配对窗口到点就补记失败，不等每分钟一次的巡检；巡检仍兜底 */
+  let failureTimer: ReturnType<typeof setTimeout> | null = null;
   /** goal_complete 先到、轮次还没结束：等 turn-completed 再报，避免会话还在跑就通知完成 */
   const pendingComplete = new Set<string>();
-  /** 只来了 status=failed、还没等到 turn-failed 的会话：命令直接抛错时不会再有 turn-failed */
-  const statusFailures = new Map<string, { at: number; error?: string }>();
   /** 因后台任务暂不归档时最近记过的审计：同一批任务只记一次 */
   const archiveHolds = new Map<string, string>();
   /** 下一次自动巡检的时间；没有进行中的会话时清空，等于停掉巡检 */
@@ -974,6 +983,42 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
     ports.publish();
   }
 
+  /** 配对窗口过了还没等到 turn-failed：会话仍在报错就补记失败（命令直接抛错时只有 status=failed） */
+  function settleFailures(file: SecretaryDispatchFile, now: number): boolean {
+    let changed = false;
+    for (const record of Object.values(file.dispatched)) {
+      const pending = record.failurePending;
+      if (!pending || now - pending.at < FAILURE_PAIR_MS) continue;
+      delete record.failurePending;
+      changed = true;
+      if (ports.status(record.conversationId).state !== 'error') continue;
+      if (ports.continuesAfterExit?.(record.conversationId)) continue;
+      record.turn += 1;
+      delete record.reopenedAt;
+      recordResult(file, record, 'failed', now, pending.detail);
+    }
+    return changed;
+  }
+
+  function armFailureTimer(): void {
+    if (failureTimer) return;
+    failureTimer = setTimeout(() => {
+      failureTimer = null;
+      if (!ports.enabled()) return;
+      const now = ports.now();
+      const file = withEventStamps(ports.file());
+      if (settleFailures(file, now)) {
+        ports.save(file);
+        syncLinkedTodos(ports, file, ports.rows(), new Set());
+        ports.publish();
+        flush(now);
+      }
+      // 窗口里又进来的失败还没到点：再等一个窗口
+      if (Object.values(file.dispatched).some((record) => record.failurePending)) armFailureTimer();
+    }, FAILURE_PAIR_MS);
+    failureTimer.unref?.();
+  }
+
   const host: SecretaryHost = {
     onAgentEvent(event, changes) {
       if (!ports.enabled()) return;
@@ -1010,7 +1055,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         const own = sessionId === conversationId;
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed')) {
           record.turn += 1;
-          statusFailures.delete(conversationId);
+          delete record.failurePending;
         }
         if (own && event.type === 'goal-signal' && event.kind === 'complete') {
           pendingComplete.add(conversationId);
@@ -1045,14 +1090,21 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         if (own && visibleReply(event)) delete record.sentAt;
 
         const change = changes.find((entry) => entry.sessionId === conversationId);
+        if (change && change.state !== 'error') delete record.failurePending;
+        // 空闲时命令直接抛错只有 status=failed、不会再有 turn-failed：先挂起等配对，到点补记。
+        // 正在跑或等人时的 status=failed 不终止这一轮，之后照常有终态，不挂。
         if (
           own &&
           event.type === 'status' &&
           event.status === 'failed' &&
           change?.state === 'error' &&
-          change.previous !== 'error'
-        )
-          statusFailures.set(conversationId, { at: now, error: event.error });
+          change.previous === 'idle' &&
+          awaitsOutcome(record)
+        ) {
+          const failure = failureDetail(event.error);
+          record.failurePending = { at: now, ...(failure ? { detail: failure } : {}) };
+          armFailureTimer();
+        }
         // 这一轮结束就不再是「被唤起、还没收尾」：之后按空闲状态判定
         const reopened = record.reopenedAt !== undefined;
         if (own && (event.type === 'turn-completed' || event.type === 'turn-failed'))
@@ -1071,6 +1123,18 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             resultEvent.goalCompleted = true;
           }
           if (resultEvent) kind = classify(record, resultEvent, status);
+          // 会话没能启动（spawn 被拒）：没有任何轮次事件，在这里记一次失败。
+          // STALE 是发给已不在 worker 的会话的命令被拒，不是会话本身出错
+          if (
+            !kind &&
+            event.type === 'parent-rejected' &&
+            !event.reason.startsWith(STALE_SESSION_ERROR) &&
+            awaitsOutcome(record)
+          ) {
+            kind = 'failed';
+            detail = `会话没能启动：${failureDetail(event.reason) ?? '原因未知'}`;
+            delete record.reopenedAt;
+          }
           // 秘书追加任务唤起的这一轮：目标停在受阻或暂停不会续跑，这一轮结束就是停下了，照常报。
           // 这一轮已经有了结果（如又报了受阻）就不再盖掉
           if (
@@ -1094,7 +1158,7 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
             });
         }
         // status=failed 通常和随后的 turn-failed 成对出现，这里不记，避免同一次失败推两遍；
-        // 等不到 turn-failed 的由巡检补记（statusFailures）。worker 退出没有 turn-failed，仍靠状态变化记失败。
+        // 等不到 turn-failed 的到点补记（failurePending）。worker 退出没有 turn-failed，仍靠状态变化记失败。
         if (!kind && change && event.type !== 'status') {
           // worker 是所有会话共用的，它退出时空闲会话也会跳到 error；没在干活就不算失败
           if (
@@ -1208,17 +1272,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
         changed = true;
       }
-      // 命令直接抛错（多见于第一轮）只有 status=failed：过了配对窗口仍在报错就补记失败
-      for (const [conversationId, failure] of statusFailures) {
-        if (now - failure.at < FAILURE_PAIR_MS) continue;
-        statusFailures.delete(conversationId);
-        const record = file.dispatched[conversationId];
-        if (!record || statuses[conversationId]?.state !== 'error') continue;
-        if (ports.continuesAfterExit?.(conversationId)) continue;
-        record.turn += 1;
-        recordResult(file, record, 'failed', now, failureDetail(failure.error));
-        changed = true;
-      }
+      // 配对窗口的定时器没赶上（如刚好停掉）时兜底
+      if (settleFailures(file, now)) changed = true;
       // 任务表是权威：常驻服务与遗留标记每分钟按它重算一次，跑过阈值也能及时升级
       if (refreshLeftovers(records, statuses, now)) changed = true;
       for (const { conversationId, turn } of stalled(records, statuses, now)) {
@@ -1338,6 +1393,17 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
         }
       }
       for (const record of Object.values(file.dispatched)) {
+        const failure = record.failurePending;
+        if (!failure) continue;
+        // 配对窗口里应用退出：这次失败还没报，启动时补报；冷启动接着跑的不算失败
+        delete record.failurePending;
+        changed = true;
+        if (ports.coldResumed?.(record.conversationId)) continue;
+        record.turn += 1;
+        delete record.reopenedAt;
+        recordResult(file, record, 'failed', now, failure.detail);
+      }
+      for (const record of Object.values(file.dispatched)) {
         if (record.lastState !== 'running') continue;
         // 冷启动正按恢复清单接着跑：不是中断，之后按它的事件照常判定
         if (ports.coldResumed?.(record.conversationId)) continue;
@@ -1403,6 +1469,8 @@ export function createSecretaryHost(ports: SecretaryHostPorts): SecretaryHost {
       if (coalesceTimer) clearTimeout(coalesceTimer);
       coalesceTimer = null;
       coalesceAt = undefined;
+      if (failureTimer) clearTimeout(failureTimer);
+      failureTimer = null;
     },
   };
   return host;
