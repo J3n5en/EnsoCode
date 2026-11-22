@@ -9,7 +9,7 @@ export const MESSAGE_CHUNK_MAX = 30_000;
 export interface ReadableMessage {
   /** 会话内绝对消息下标，翻页时原样作为 before 传回 */
   index: number;
-  /** 稳定标识：会话增长或重建后下标会漂移，读全文按它取 */
+  /** 稳定标识（jsonl entry id）：回退后下标可能指向别的消息，读全文按它取 */
   messageId?: string;
   role: 'user' | 'assistant';
   text: string;

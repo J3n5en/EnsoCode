@@ -98,7 +98,7 @@ interface ListedSession {
 
 const invalidArguments: SecretaryOpResult = { ok: false, error: 'invalid arguments' };
 const notFound: SecretaryOpResult = { ok: false, error: 'not-found' };
-/** 消息已变化（会话增长、重建或回退），旧 id / 下标取不到原消息：应重新分页 */
+/** 消息已不在当前分支（回退、换了会话文件）或下标不是分页给的：应重新分页 */
 const staleIndex: SecretaryOpResult = { ok: false, error: 'stale-index' };
 
 function stringParam(params: Record<string, unknown>, key: string): string | undefined {

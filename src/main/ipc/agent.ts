@@ -218,6 +218,7 @@ import {
 } from '../services/sessionActivity';
 import { removeConversationSessionFiles } from '../services/sessionFileCleanup';
 import {
+  findHistoryMessage,
   type HistoryProjectionOptions,
   projectParentHistoryAll,
   projectParentHistoryPage,
@@ -1351,13 +1352,10 @@ export async function readSessionMessage(
   sessionFile: string | undefined,
   target: { messageId: string } | { index: number }
 ): Promise<{ index: number; message: ProjectedMessage } | null> {
-  const messages = await readFullSessionHistory(sessionFile, { messageIds: true });
-  const index =
-    'messageId' in target
-      ? messages.findIndex((message) => message.messageId === target.messageId)
-      : target.index;
-  const message = messages[index];
-  return message ? { index, message } : null;
+  return findHistoryMessage(
+    await readFullSessionHistory(sessionFile, { messageIds: true }),
+    target
+  );
 }
 
 /** 秘书 session_activity：最近工具调用，不含任何工具输出 */
