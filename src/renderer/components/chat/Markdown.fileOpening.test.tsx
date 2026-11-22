@@ -422,15 +422,57 @@ describe('行内 code 路径 chip', () => {
     '`src/foo.ts:12-20`',
     '`src/`',
     '`src/renderer/components/`',
+    '`./src/`',
+    '`.agents/skills/`',
+    '`../shared/`',
   ])('识别为可点 chip：%s', async (text) => {
     await render(text);
     expect(container.querySelector('button')?.textContent).toBe(text.slice(1, -1));
   });
 
-  it.each(['`and/or`', '`TCP/IP`', '`他/她`'])('普通斜杠文本不是链接：%s', async (text) => {
+  it.each([
+    '`and/or`',
+    '`TCP/IP`',
+    '`他/她`',
+    '`文档/`',
+    '`/`',
+    '`./`',
+    '`../`',
+    '`../../`',
+    '`~/`',
+    '`https://a.com/b/`',
+    '`/Users/me/worktree/abc/`',
+    '`C:\\foo\\`',
+  ])('普通斜杠文本和非仓库相对目录不是链接：%s', async (text) => {
     await render(text);
     expect(container.querySelector('button')).toBeNull();
     expect(container.querySelector('code')?.textContent).toBe(text.slice(1, -1));
+  });
+
+  it.each([
+    'see src/ and/or 他/她',
+    '```\nsrc/renderer/\n```',
+  ])('正文和代码块里的目录不渲染 chip：%s', async (text) => {
+    await render(text);
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('工作区外的相对目录点击提示越界，不调 Main', async () => {
+    await render('`../shared/`');
+    await click('button');
+    expect(harness.reveal).not.toHaveBeenCalled();
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: 'The link is outside the current workspace.' })
+    );
+  });
+
+  it('远程客户端调不了宿主文件管理器：目录渲染成普通代码，文件 chip 照常', async () => {
+    Object.assign(window.electronAPI, { remote: {} });
+    await render('`src/renderer/` `src/foo.ts`');
+    const buttons = container.querySelectorAll('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toBe('src/foo.ts');
+    expect(container.querySelector('code')?.textContent).toBe('src/renderer/');
   });
 
   it('末尾带斜杠的目录点击交给系统文件管理器，不打开 Files 面板', async () => {
