@@ -47,7 +47,11 @@ import { contextBarSegments } from './contextBreakdown';
 import { buildRequestBodySegment } from './requestBodySegment';
 import { StatusLineSettings } from './StatusLineSettings';
 import { resolveSessionUsageAccount } from './sessionUsageAccount';
-import { fitStatusLine, STATUS_LINE_GEAR_RESERVE_PX } from './statusLineFit';
+import {
+  fitStatusLine,
+  STATUS_LINE_GEAR_RESERVE_PX,
+  statusLineLayoutSegments,
+} from './statusLineFit';
 import {
   buildUsageSegmentValues,
   CRITICAL_PERCENT,
@@ -63,11 +67,18 @@ type SegmentWidths = Partial<Record<StatusLineSegmentId, number>>;
 interface StatusLineMetrics {
   available: number;
   triggerWidth: number;
+  moreWidth: number;
   widths: SegmentWidths;
 }
 
 function sameMetrics(a: StatusLineMetrics | undefined, b: StatusLineMetrics): boolean {
-  if (!a || a.available !== b.available || a.triggerWidth !== b.triggerWidth) return false;
+  if (
+    !a ||
+    a.available !== b.available ||
+    a.triggerWidth !== b.triggerWidth ||
+    a.moreWidth !== b.moreWidth
+  )
+    return false;
   const keys = Object.keys(b.widths) as StatusLineSegmentId[];
   return (
     keys.length === Object.keys(a.widths).length &&
@@ -430,7 +441,7 @@ function buildSegmentValues(
  *  段位顺序 = `statusLineSegments` 数组自身顺序（用户可在设置弹层拖拽），预设不进存储，
  *  见 `statusLinePresetOf`。外层恒占一行高度（h-7）：避免统计从无到有时输入框跳动；
  *  全部段位关掉时仍渲染空容器 + hover 齿轮，否则用户关完就再也打不开设置。
- *  段位从不压缩：放不下的整段收进行尾详情弹层（见 fitStatusLine），手机只留详情按钮。 */
+ *  段位从不压缩：放不下的整段收进行尾详情弹层（见 fitStatusLine），手机同样逐项放置、上下文保底。 */
 export function StatsLine({ conversationId, cwd }: StatsLineProps) {
   const { t } = useI18n();
   const conversation = useSessionsStore((state) => state.conversations[conversationId]);
@@ -498,25 +509,29 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
         : null,
     [t, conversation, messages, labelProviders, projects, now, usageData]
   );
-  const visibleKey = values ? enabledSegments.filter((id) => values[id]).join(',') : '';
+  const layoutSegments = statusLineLayoutSegments(enabledSegments, isMobile);
+  const visibleKey = values ? layoutSegments.filter((id) => values[id]).join(',') : '';
 
   // 隐藏测量层给出每段自然宽度；容器或文字宽度变化时重算，绘制前生效不闪
   useLayoutEffect(() => {
     const container = containerRef.current;
     const layer = measureRef.current;
-    if (isMobile || !visibleKey || !container || !layer) return;
+    if (!visibleKey || !container || !layer) return;
     const read = () => {
       const widths: SegmentWidths = {};
       let triggerWidth = 0;
+      let moreWidth = 0;
       for (const child of Array.from(layer.children)) {
         const key = (child as HTMLElement).dataset.measure;
         const width = Math.ceil(child.getBoundingClientRect().width);
         if (key === 'trigger') triggerWidth = width;
+        else if (key === 'more') moreWidth = width;
         else if (key) widths[key as StatusLineSegmentId] = width;
       }
       const next = {
         available: container.clientWidth - 2 * STATUS_LINE_GEAR_RESERVE_PX,
         triggerWidth,
+        moreWidth,
         widths,
       };
       setMetrics((prev) => (sameMetrics(prev, next) ? prev : next));
@@ -527,20 +542,21 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
     observer.observe(container);
     observer.observe(layer);
     return () => observer.disconnect();
-  }, [isMobile, visibleKey]);
+  }, [visibleKey]);
 
   if (!conversation || !icons || !values) return null;
 
   // 渲染顺序恒按 statusLineSegments 数组自身顺序（用户拖拽排序的落点），⛔ 不要改回按
   // STATUS_LINE_SEGMENT_IDS 声明序 filter —— 那是旧契约，已被拖拽排序需求反转。
   const contextSegments = conversation.occupancy ? contextBarSegments(conversation.occupancy) : [];
-  const visibleSegments = enabledSegments.filter((id) => values[id]);
+  const visibleSegments = layoutSegments.filter((id) => values[id]);
   const fit = fitStatusLine({
     segments: visibleSegments,
     widths: metrics?.widths,
     available: metrics?.available,
     triggerWidth: metrics?.triggerWidth,
-    summaryOnly: isMobile,
+    moreWidth: metrics?.moreWidth,
+    mobile: isMobile,
   });
   const rowSegments = visibleSegments.filter(
     (id) => fit.inline.includes(id) || fit.hoverable.includes(id)
@@ -590,7 +606,7 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
       data-enso="status-line"
       className="group relative flex h-7 items-center justify-center px-1"
     >
-      {!isMobile && visibleSegments.length > 0 && (
+      {visibleSegments.length > 0 && (
         <div aria-hidden className="pointer-events-none invisible absolute inset-0 overflow-hidden">
           <div ref={measureRef} className="absolute top-0 left-0 flex w-max">
             {visibleSegments.map((id) => {
@@ -603,6 +619,9 @@ export function StatsLine({ conversationId, cwd }: StatsLineProps) {
             })}
             <span data-measure="trigger" className={triggerClass(values.context)}>
               {triggerBody(values.context)}
+            </span>
+            <span data-measure="more" className={triggerClass(undefined)}>
+              {triggerBody(undefined)}
             </span>
           </div>
         </div>

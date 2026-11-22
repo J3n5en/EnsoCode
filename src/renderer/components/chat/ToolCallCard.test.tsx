@@ -124,8 +124,11 @@ describe('秘书派活卡片：指令收进卡片框内', () => {
     const body = q('tool-card-body');
     expect(body?.getAttribute('data-framed')).toBe('true');
     expect(body?.getAttribute('class')).toMatch(/\bborder\b/);
+    // 和普通工具行的展开详情同一种框：不加阴影，指令段不再套第二层框
+    expect(body?.getAttribute('class')).not.toMatch(/shadow/);
     const prompt = q('tool-card-prompt');
     expect(prompt && body?.contains(prompt)).toBe(true);
+    expect(prompt?.getAttribute('class')).not.toMatch(/\bborder\b|rounded|bg-/);
     expect(prompt?.textContent).toContain('Dispatch instructions');
     expect(prompt?.getAttribute('data-open')).toBe('false');
     expect(q('tool-card-prompt-body')).toBeNull();

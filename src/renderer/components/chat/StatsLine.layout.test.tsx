@@ -1,10 +1,14 @@
+import { STATUS_LINE_PRESETS } from '@shared/statusLine';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyProjection } from '@/stores/sessions/reducer';
 import { StatsLine } from './StatsLine';
 
-const harness = vi.hoisted(() => ({ mobile: false }));
+const harness = vi.hoisted(() => ({
+  mobile: false,
+  segments: ['model', 'tokens', 'cache', 'context'] as string[],
+}));
 vi.mock('@/hooks/useViewport', () => ({ useIsMobile: () => harness.mobile }));
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/stores/sessions', () => ({
@@ -56,7 +60,7 @@ vi.mock('@/stores/settings', () => ({
       providers: [],
       virtualModels: [],
       projects: [],
-      statusLineSegments: ['model', 'tokens', 'cache', 'context'],
+      statusLineSegments: harness.segments,
     }),
 }));
 vi.mock('@/components/ui/popover', () => {
@@ -67,29 +71,49 @@ vi.mock('@/components/ui/popover', () => {
 vi.mock('./ContextInspector', () => ({ ContextInspector: () => null }));
 vi.mock('./StatusLineSettings', () => ({ StatusLineSettings: () => null }));
 
-const render = () => renderToStaticMarkup(createElement(StatsLine, { conversationId: 'fixture' }));
+const MEASURE_LAYER =
+  /<div aria-hidden="true"[\s\S]*?data-measure="more"[\s\S]*?<\/span><\/div><\/div>/;
+/** 去掉隐藏测量层，只看真正显示的那一行 */
+const render = () => {
+  const html = renderToStaticMarkup(createElement(StatsLine, { conversationId: 'fixture' }));
+  expect(html).toMatch(MEASURE_LAYER);
+  return html.replace(MEASURE_LAYER, '');
+};
 
 describe('StatsLine 窄屏布局', () => {
   beforeEach(() => {
     harness.mobile = false;
+    harness.segments = ['model', 'tokens', 'cache', 'context'];
   });
 
-  it('手机只留上下文百分比摘要，其余段不进状态栏', () => {
+  it('手机逐段放置：首帧按全部放得下排布，不出多余的详情按钮', () => {
     harness.mobile = true;
     const html = render();
-    expect(html).toContain('data-slot="status-line-details"');
+    expect(html).not.toContain('data-slot="status-line-details"');
+    expect(html).toContain('↑22M ↓20K');
+    expect(html).toContain('98%');
     expect(html).toContain('62%');
+    // 用户自定义过段位且含模型段：按设置显示
+    expect(html).toContain('auto/deepseek-v4.1-flash-1017');
+  });
+
+  it('手机默认段位不重复显示输入框工具栏里已有的模型名', () => {
+    harness.mobile = true;
+    harness.segments = [...STATUS_LINE_PRESETS.default];
+    const html = render();
     expect(html).not.toContain('deepseek');
-    expect(html).not.toContain('↑22M');
-    expect(html).not.toContain('98%');
-    expect(html).not.toContain('data-measure');
+    expect(html).toContain('↑22M ↓20K');
+    expect(html).toContain('62%');
   });
 
   it('桌面照旧逐段显示，没有详情按钮', () => {
-    const html = render();
-    expect(html).not.toContain('data-slot="status-line-details"');
-    expect(html).toContain('auto/deepseek-v4.1-flash-1017');
-    expect(html).toContain('↑22M ↓20K');
-    expect(html).toContain('98%');
+    for (const segments of [harness.segments, [...STATUS_LINE_PRESETS.default]]) {
+      harness.segments = segments;
+      const html = render();
+      expect(html).not.toContain('data-slot="status-line-details"');
+      expect(html).toContain('auto/deepseek-v4.1-flash-1017');
+      expect(html).toContain('↑22M ↓20K');
+      expect(html).toContain('98%');
+    }
   });
 });
