@@ -45,13 +45,7 @@ export function ReleaseNotesDialog({
     ) : status?.status === 'available' && status.manualInstall ? (
       <ManualInstallActions manualInstall={status.manualInstall} />
     ) : status?.status === 'available' && canDownload ? (
-      <Button
-        size="sm"
-        onClick={() => {
-          onOpenChange(false);
-          void window.electronAPI.updater.downloadUpdate();
-        }}
-      >
+      <Button size="sm" onClick={() => void window.electronAPI.updater.downloadUpdate()}>
         {t('Download update')}
       </Button>
     ) : null;
