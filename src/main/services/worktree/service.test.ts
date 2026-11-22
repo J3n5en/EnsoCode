@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +11,7 @@ import {
   repoIsClean,
   worktreeStatus,
 } from './service';
+import { worktreeTrash } from './trash';
 
 const runGit = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -282,6 +283,21 @@ describe('removeSessionWorktree', () => {
     expect(runGit(repo, 'branch', '--list', record.branch)).toContain(record.branch);
     // git 元数据已清（可重复创建同名不报错）
     expect(runGit(repo, 'worktree', 'list')).not.toContain(record.path);
+  });
+
+  it('给了托管根时改名进 .trash 立即返回，登记已清、分支保留', async () => {
+    const record = await createSessionWorktree({
+      repoPath: repo,
+      conversationId: 'c-rm3',
+      projectId: 'p1',
+      root,
+    });
+    await removeSessionWorktree(record, root);
+    expect(existsSync(record.path)).toBe(false);
+    expect(runGit(repo, 'worktree', 'list')).not.toContain(record.path);
+    expect(runGit(repo, 'branch', '--list', record.branch)).toContain(record.branch);
+    await worktreeTrash.idle();
+    expect(readdirSync(join(root, '.trash'))).toEqual([]);
   });
 
   it('目录已被手动删除时也能清理元数据不报错', async () => {
