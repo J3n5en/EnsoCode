@@ -330,6 +330,45 @@ describe('Devin streamSimple（假 fetch）', () => {
       { source: ChatMessageSource.USER, prompt: '继续', toolCalls: 0 },
     ]);
   });
+
+  // Gemini 后端遇到 type 数组（如 ["number","null"]）整次请求回 invalid_argument
+  it('Gemini 模型的工具 schema 按 Google 规则清洗，其他模型原样', async () => {
+    const jwt = toBinary(
+      GetUserJwtResponseSchema,
+      create(GetUserJwtResponseSchema, { userJwt: 'user-jwt' })
+    );
+    const parameters = {
+      type: 'object',
+      properties: { path: { type: 'string' }, limit: { type: ['number', 'null'] } },
+      required: ['path'],
+    };
+    const sentSchema = async (id: string) => {
+      let sent: GetChatMessageRequest | undefined;
+      const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).includes('GetUserJwt')) return new Response(Buffer.from(jwt));
+        const frame = Buffer.from(init?.body as Uint8Array);
+        sent = fromBinary(GetChatMessageRequestSchema, gunzipSync(frame.subarray(5)));
+        return new Response('只取请求体', { status: 500 });
+      }) as unknown as typeof fetch;
+      const stream = devinProviderConfig().streamSimple?.(
+        { ...model, id },
+        normalizeContext({
+          messages: [{ role: 'user', content: 'hi', timestamp: 0 }],
+          tools: [{ name: 'read', description: '读文件', parameters: parameters as never }],
+        }),
+        { apiKey: 'session-token', fetch: fetchImpl }
+      );
+      if (!stream) throw new Error('streamSimple 未注册');
+      await stream.result();
+      return JSON.parse(sent?.tools[0]?.jsonSchemaString ?? 'null');
+    };
+
+    expect((await sentSchema('gemini-3-5-flash-low')).properties.limit).toEqual({
+      type: 'number',
+      nullable: true,
+    });
+    expect(await sentSchema('claude-think')).toEqual(parameters);
+  });
 });
 
 describe('Devin 额度窗口', () => {

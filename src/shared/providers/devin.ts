@@ -7,6 +7,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { OauthUsageWindow } from '@shared/types';
+import { expandSchemaRefs, normalizeToolSchema } from './antigravity';
 import { startOauthCallbackServer } from './callbackServer';
 import {
   CacheControlType,
@@ -599,6 +600,8 @@ function buildDevinChatRequest(
 ) {
   const cascadeId = randomUUID();
   const stopPatterns = DEVIN_DEFAULT_STOP_PATTERNS;
+  // Gemini 后端不认 type 数组等 JSON Schema 写法，整次请求回不透明的 invalid_argument
+  const isGemini = model.id.toLowerCase().startsWith('gemini');
   return create(GetChatMessageRequestSchema, {
     metadata: cascadeMetadata(apiKey, userJwt),
     prompt: currentSystemPrompt(context).trim(),
@@ -628,7 +631,11 @@ function buildDevinChatRequest(
       create(ChatToolDefinitionSchema, {
         name: tool.name,
         description: tool.description || '',
-        jsonSchemaString: JSON.stringify(tool.parameters ?? {}),
+        jsonSchemaString: JSON.stringify(
+          isGemini
+            ? normalizeToolSchema(expandSchemaRefs(tool.parameters ?? {}))
+            : (tool.parameters ?? {})
+        ),
         strict: 'strict' in tool && tool.strict === true,
       })
     ),
