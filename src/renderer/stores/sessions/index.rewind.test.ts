@@ -1026,5 +1026,20 @@ describe('rewind 在 failed 状态放行、running 仍拦截', () => {
         sessionsModule.useSessionsStore.getState().conversations.second.forkedFromConversationId
       ).toBe('parent');
     });
+
+    it('上限之前已存在的第 4 层分支会话照常可回退，只是不能再分支', async () => {
+      seedLineage(
+        { parent: undefined, second: 'parent', third: 'second', fourth: 'third' },
+        { messages: rewindMessages() }
+      );
+      const store = sessionsModule.useSessionsStore.getState();
+      await expect(store.forkFromMessage('fourth', 0)).resolves.toBe(null);
+      store.rewind('fourth', 0, false);
+      expect(agentRewind).toHaveBeenCalledWith('fourth', 'entry-two', false);
+      expect(agentFork).not.toHaveBeenCalled();
+      expect(sessionsModule.useSessionsStore.getState().conversations.fourth).toMatchObject({
+        forkedFromConversationId: 'third',
+      });
+    });
   });
 });

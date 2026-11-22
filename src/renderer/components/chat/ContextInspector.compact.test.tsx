@@ -4,12 +4,15 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ContextInspector } from './ContextInspector';
 
-const harness = vi.hoisted(() => ({ conversation: {} as Record<string, unknown> }));
+const harness = vi.hoisted(() => ({
+  conversation: {} as Record<string, unknown>,
+  others: {} as Record<string, Record<string, unknown>>,
+}));
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/lib/sidePanelDock', () => ({ openSidePanelFile: vi.fn() }));
 vi.mock('@/stores/sessions', () => ({
   useSessionsStore: (select: (state: object) => unknown) =>
-    select({ conversations: { c: harness.conversation } }),
+    select({ conversations: { ...harness.others, c: harness.conversation } }),
 }));
 
 const occupancy = {
@@ -54,5 +57,28 @@ describe('ContextInspector 压缩按钮', () => {
 
   it('会话未启动不渲染按钮', () => {
     expect(button({ started: false })).toBe('');
+  });
+});
+
+describe('ContextInspector 从摘要分支', () => {
+  const html = (others: Record<string, Record<string, unknown>>, forkedFrom?: string) => {
+    harness.others = others;
+    harness.conversation = { started: true, forkedFromConversationId: forkedFrom };
+    return renderToStaticMarkup(
+      createElement(ContextInspector, {
+        occupancy: { ...occupancy, compactedMessageCount: 3, compactionEntryId: 'e1' },
+        conversationId: 'c',
+      })
+    );
+  };
+
+  it('分支层级未到上限时显示', () => {
+    expect(html({ a: {} }, 'a')).toContain('>Conversation branch<');
+  });
+
+  it('分支层级到上限时不显示，免得点了没反应', () => {
+    expect(html({ a: {}, b: { forkedFromConversationId: 'a' } }, 'b')).not.toContain(
+      '>Conversation branch<'
+    );
   });
 });
