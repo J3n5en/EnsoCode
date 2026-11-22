@@ -2524,6 +2524,7 @@ export const zhTranslations: Record<string, string> = {
   'Showing {{shown}} of {{total}} models': '显示 {{shown}} / 共 {{total}} 个模型',
   // Status line · 段位与预设
   'Status line settings': '状态栏设置',
+  'Session stats': '会话统计',
   'Recent request body': '最近请求体',
   'Serialized payload': '已序列化',
   'Before send': '发送前',
