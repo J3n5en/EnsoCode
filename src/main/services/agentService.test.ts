@@ -1458,3 +1458,207 @@ describe('AgentService 中断的 task 停放与续跑', () => {
     }
   });
 });
+
+describe('AgentService 子代理起的后台任务', () => {
+  it('结果里列出子代理起的后台任务，并说明归子代理、完成时不会通知父会话', async () => {
+    const notify = vi.fn();
+    const childTasks = vi.fn((sessionId: string) =>
+      sessionId === 'chat-1::agent-aaaaaaaa-aaaa-4aaa-8aaa-000000000001'
+        ? [
+            {
+              taskId: 'task-1-a',
+              command: 'pnpm dev\n--port 5173',
+              status: 'running' as const,
+              startedAt: 5,
+            },
+            {
+              taskId: 'task-2-b',
+              command: 'pnpm test',
+              status: 'done' as const,
+              exitCode: 0,
+              startedAt: 6,
+            },
+            {
+              taskId: 'task-0-old',
+              command: 'old',
+              status: 'done' as const,
+              exitCode: 0,
+              startedAt: 0,
+            },
+          ]
+        : []
+    );
+    const { service, children } = setup({ notify, childTasks });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 2,
+      turnId: spawned.value.runId,
+    });
+    const text = notify.mock.calls[0][1] as string;
+    expect(text).toContain('task-1-a (running): pnpm dev --port 5173');
+    expect(text).toContain('task-2-b (done, exit 0): pnpm test');
+    expect(text).not.toContain('task-0-old');
+    expect(text).toContain('belong to the subagent');
+    expect(text).toContain('will not notify you');
+  });
+
+  it('子代理没起后台任务时结果不加这一段', async () => {
+    const notify = vi.fn();
+    const { service, children } = setup({ notify, childTasks: () => [] });
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-completed',
+      identity: children[0],
+      seq: 2,
+      turnId: spawned.value.runId,
+    });
+    expect(notify.mock.calls[0][1]).not.toContain('Background tasks');
+  });
+});
+
+describe('AgentService 用户在子代理 tab 里停止', () => {
+  const listStatus = async (service: AgentService) => {
+    const listed = await service.list({ context, requestId: 'list', limit: 20 });
+    if (!listed.ok) throw new Error(listed.error);
+    return listed.value.agents.map((agent) => agent.status);
+  };
+
+  function fixture() {
+    const notify = vi.fn();
+    const onProgress = vi.fn();
+    const value = setup({ notify, onProgress });
+    let generation = 200;
+    value.runtime.resume = vi.fn(async ({ identity }) => ({
+      ...identity,
+      generation: `44444444-4444-4444-8444-${String(++generation).padStart(12, '0')}`,
+    }));
+    value.runtime.retry = vi.fn(async () => ({ ok: true }));
+    return { ...value, notify, onProgress };
+  }
+
+  const partial = (identity: ChildSessionIdentity, text: string): AgentWorkerEvent => ({
+    type: 'message-upsert',
+    identity,
+    seq: 1,
+    index: 1,
+    message: { role: 'assistant', content: [{ type: 'text', text }] },
+  });
+
+  const userStopped = (identity: ChildSessionIdentity, turnId: string): AgentWorkerEvent => ({
+    type: 'turn-completed',
+    identity,
+    seq: 9,
+    turnId,
+    aborted: true,
+  });
+
+  it('task：Run 按用户停止收口、停放待 resume，父会话收到一次带部分输出的结果', async () => {
+    const { service, children, notify, onProgress } = fixture();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe(partial(children[0], 'half done: checked a.ts'));
+    service.observe(userStopped(children[0], spawned.value.runId));
+
+    expect(await listStatus(service)).toEqual(['parked']);
+    expect(service.progress(owner.ownerId)).toEqual([]);
+    expect(onProgress).toHaveBeenLastCalledWith(owner.ownerId, []);
+    expect(
+      await service.report({ context, requestId: 'report', runId: spawned.value.runId })
+    ).toMatchObject({ ok: true, value: { run: { status: 'interrupted' } } });
+    expect(notify).toHaveBeenCalledTimes(1);
+    const text = notify.mock.calls[0][1] as string;
+    expect(text).toContain('interrupted');
+    expect(text).toContain('用户在子代理的 tab 里停止了它');
+    expect(text).toContain('half done: checked a.ts');
+    expect(text).toContain(`subagent resume with agentId ${spawned.value.agentId}`);
+    const waited = await service.wait({
+      context,
+      requestId: 'wait',
+      runIds: [spawned.value.runId],
+    });
+    expect(waited).toMatchObject({ ok: true });
+    expect(JSON.stringify(waited)).not.toContain('"running"');
+  });
+
+  it('task：停止后 resume 计入 3 次上限，用满后再被停止就关闭并说明', async () => {
+    const { service, runtime, notify } = fixture();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    let runId = spawned.value.runId;
+    let identity = await vi.mocked(runtime.spawn).mock.results[0].value;
+    for (let resumes = 0; resumes < 3; resumes++) {
+      service.observe(userStopped(identity, runId));
+      expect(await listStatus(service)).toEqual(['parked']);
+      const resumed = await service.resume({
+        context,
+        requestId: `resume-${resumes}`,
+        agentId: spawned.value.agentId,
+      });
+      if (!resumed.ok) throw new Error(resumed.error);
+      runId = resumed.value.runId;
+      identity = await vi.mocked(runtime.resume!).mock.results[resumes].value;
+    }
+    service.observe(userStopped(identity, runId));
+    expect(await listStatus(service)).toEqual(['closed']);
+    const last = notify.mock.calls.at(-1)?.[1] as string;
+    expect(last).toContain('resumed 3 times');
+    expect(last).not.toContain('subagent resume with agentId');
+  });
+
+  it('重试倒计时中被停止（aborted 的 turn-failed）同样按用户停止停放', async () => {
+    const { service, children, notify } = fixture();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    service.observe({
+      type: 'turn-failed',
+      identity: children[0],
+      seq: 3,
+      turnId: spawned.value.runId,
+      error: '529 overloaded',
+      aborted: true,
+    });
+    expect(await listStatus(service)).toEqual(['parked']);
+    expect(notify.mock.calls[0][1]).toContain('用户在子代理的 tab 里停止了它');
+  });
+
+  it('coworker：当前 Run 收口为中断，Agent 回到可用并接着跑排队的 Run', async () => {
+    const { service, runtime, children, notify } = fixture();
+    const spawned = await service.spawn(spawnRequest({ mode: 'coworker' }));
+    if (!spawned.ok) throw new Error(spawned.error);
+    const queued = await service.send({
+      context,
+      requestId: 'send',
+      agentId: spawned.value.agentId,
+      message: 'next job',
+      delivery: 'next',
+    });
+    if (!queued.ok) throw new Error(queued.error);
+    service.observe(userStopped(children[0], spawned.value.runId));
+    await vi.waitFor(() => expect(runtime.prompt).toHaveBeenCalledTimes(2));
+    expect(
+      await service.report({ context, requestId: 'report', runId: spawned.value.runId })
+    ).toMatchObject({ ok: true, value: { run: { status: 'interrupted' } } });
+    expect(notify.mock.calls[0][1]).toContain('用户在子代理的 tab 里停止了它');
+    expect(await listStatus(service)).toEqual(['active']);
+  });
+
+  it('模型自己 subagent stop 时同一轮的中止回执不再按用户停止重复收口', async () => {
+    const { service, runtime, children, notify } = fixture();
+    const spawned = await service.spawn(spawnRequest());
+    if (!spawned.ok) throw new Error(spawned.error);
+    vi.mocked(runtime.stop).mockImplementationOnce(async () => {
+      service.observe(userStopped(children[0], spawned.value.runId));
+      return { ok: true };
+    });
+    await service.stop({ context, requestId: 'stop', runId: spawned.value.runId });
+    expect(
+      await service.report({ context, requestId: 'report', runId: spawned.value.runId })
+    ).toMatchObject({ ok: true, value: { run: { status: 'cancelled' } } });
+    expect(await listStatus(service)).toEqual(['closed']);
+    expect(notify).not.toHaveBeenCalled();
+  });
+});

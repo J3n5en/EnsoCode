@@ -5,6 +5,7 @@ import {
   type SequencedConversationsPatch,
 } from '@shared/conversationsPatch';
 import { RUNTIME_CONVERSATION_KEYS } from './persistSnapshot';
+import { isPairViewed } from './unread';
 
 const RUNTIME_KEYS: ReadonlySet<string> = new Set(RUNTIME_CONVERSATION_KEYS);
 
@@ -32,6 +33,10 @@ export function applyConversationsPatchToState<C extends object>(
     for (const key of row.unset) if (!RUNTIME_KEYS.has(key)) delete merged[key];
     for (const [key, value] of Object.entries(row.set)) {
       if (!RUNTIME_KEYS.has(key)) merged[key] = value;
+    }
+    // 未读是写方按自己的 activeId 判的；本端正在看就是已读，写回会把 false 同步回去
+    if (merged.unread === true && (id === state.activeId || isPairViewed(id))) {
+      merged.unread = false;
     }
     conversations[id] = merged as C;
   }

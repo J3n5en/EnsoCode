@@ -333,9 +333,9 @@ export function observedSessionStatus(sessionId: string): PluginSessionStatus {
     : status;
 }
 
-/** 秘书 session_tasks 的数据源：worker 后台任务在 Main 的最近一次投影 */
+/** 秘书 session_tasks 与自动归档的数据源：会话及其子代理起的后台任务（worker 在 Main 的最近一次投影） */
 export function observedBackgroundTasks(sessionId: string): ObservedTask[] {
-  return backgroundTaskStates.tasks(sessionId);
+  return backgroundTaskStates.tasksInTree(sessionId);
 }
 
 /** 主会话名下还有没结束的子代理 Run：结束时 AgentService 会通知并叫醒主会话 */
@@ -1896,6 +1896,7 @@ export function registerAgentHandlers(): void {
       if (identity) sendAgentCommand({ type: 'agent-notify', identity, text, urgent });
     },
     onProgress: (ownerId, runs) => subagentProgressPush.update(ownerId, runs),
+    childTasks: (sessionId) => backgroundTaskStates.tasks(sessionId),
     allowedModes: (context) => {
       const state = readSettingsState() ?? {};
       const projects = Array.isArray(state.projects) ? state.projects : [];
