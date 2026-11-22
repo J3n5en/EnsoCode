@@ -54,6 +54,8 @@ type SessionsSlice = {
   conversations: Record<string, Conversation>;
   /** TimelineRow ForkButton 读取；手机 ChatHost.canFork=false，保持 no-op */
   forkFromMessage(conversationId: string, userIndexFromEnd: number): Promise<string | null>;
+  /** 秘书跳会话（secretaryReturn）调用；手机切会话走自己的抽屉，保持 no-op */
+  selectConversation(conversationId: string): void;
 } & QueueActions;
 
 const state: SessionsSlice = {
@@ -62,6 +64,7 @@ const state: SessionsSlice = {
   rewind: () => {},
   retry: () => {},
   forkFromMessage: async () => null,
+  selectConversation: () => {},
   removeQueuedMessage: () => {},
   updateQueuedMessage: () => {},
   sendQueuedNow: () => {},
@@ -98,4 +101,5 @@ export function useSessionsStore<T>(selector: (s: SessionsSlice) => T): T {
 }
 
 useSessionsStore.getState = () => state;
-useSessionsStore.subscribe = () => () => {};
+useSessionsStore.subscribe =
+  (_listener: (s: SessionsSlice, prev: SessionsSlice) => void) => () => {};
