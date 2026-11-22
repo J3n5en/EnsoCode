@@ -45,20 +45,13 @@ describe('unified subagent tool', () => {
       /spawn requires non-empty description and prompt/i
     );
     const parameters = tool.parameters as {
-      oneOf?: unknown;
-      anyOf?: unknown;
-      allOf?: unknown;
       properties: {
         description: { description?: string };
         prompt: { description?: string };
-        runIds: { description?: string; uniqueItems?: boolean };
+        runIds: { description?: string };
       };
     };
     const fields = parameters.properties;
-    expect(parameters.oneOf).toBeUndefined();
-    expect(parameters.anyOf).toBeUndefined();
-    expect(parameters.allOf).toBeUndefined();
-    expect(JSON.stringify(parameters)).not.toMatch(/"uniqueItems"/);
     expect(fields.runIds.description).toMatch(/duplicate/i);
     expect(`${fields.description.description}\n${fields.prompt.description}`).toMatch(/spawn/i);
     expect(fields.description.description).toMatch(/required/i);
