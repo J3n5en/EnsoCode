@@ -10,7 +10,7 @@ export interface ReadableMessage {
   /** 会话内绝对消息下标，翻页时原样作为 before 传回 */
   index: number;
   /** 稳定标识（jsonl entry id）：回退后下标可能指向别的消息，读全文按它取 */
-  messageId?: string;
+  entryId?: string;
   role: 'user' | 'assistant';
   text: string;
   truncated?: boolean;
@@ -72,10 +72,10 @@ export function projectReadableMessages(
     const text = readableText(message);
     if (!text) return;
     const truncated = text.length > maxChars;
-    const messageId = message.messageId ?? message.entryId;
+    const entryId = message.messageId ?? message.entryId;
     readable.push({
       index: baseIndex + offset,
-      ...(messageId ? { messageId } : {}),
+      ...(entryId ? { entryId } : {}),
       role: message.role,
       text: truncated ? `${text.slice(0, maxChars)}…` : text,
       ...(truncated ? { truncated: true } : {}),

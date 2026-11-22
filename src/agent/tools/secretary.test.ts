@@ -194,9 +194,23 @@ describe('secretary tools', () => {
         offset: '30000',
       })
     ).toEqual({ conversationId: 'c1', index: 7, offset: 30_000 });
+    // entryId 是现名；旧名 messageId / message_id 仍被接受，已在跑的会话不出错
+    for (const legacy of [{ entry_id: ' e-1 ' }, { messageId: 'e-1' }, { message_id: ' e-1 ' }])
+      expect(
+        normalizeSecretaryParams('session_read', { conversation_id: 'c1', ...legacy })
+      ).toEqual({ conversationId: 'c1', entryId: 'e-1' });
     expect(
-      normalizeSecretaryParams('session_read', { conversation_id: 'c1', message_id: ' e-1 ' })
-    ).toEqual({ conversationId: 'c1', messageId: 'e-1' });
+      normalizeSecretaryParams('session_read', {
+        conversationId: 'c1',
+        entryId: 'new',
+        messageId: 'old',
+      })
+    ).toEqual({ conversationId: 'c1', entryId: 'new' });
+    const readSchema = createSecretaryTools(invoker().port).find(
+      (tool) => tool.name === 'session_read'
+    )?.parameters as unknown as { properties: Record<string, unknown> };
+    expect(readSchema.properties).toHaveProperty('entryId');
+    expect(readSchema.properties).not.toHaveProperty('messageId');
     expect(
       normalizeSecretaryParams('session_activity', { conversation_id: 'c1', limit: '50' })
     ).toEqual({ conversationId: 'c1', limit: 50 });

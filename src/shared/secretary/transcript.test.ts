@@ -81,7 +81,7 @@ describe('projectReadableMessages', () => {
     expect(readable).toEqual([]);
   });
 
-  it('带出稳定 messageId：优先 messageId，其次复用 user 的 entryId，都没有时不带', () => {
+  it('带出 jsonl entryId：优先投影的 messageId，其次复用 user 的 entryId，都没有时不带', () => {
     const { messages: readable } = projectReadableMessages(
       [
         { ...user('问'), entryId: 'u-entry', messageId: 'u-entry' },
@@ -92,13 +92,14 @@ describe('projectReadableMessages', () => {
       { limit: 10 }
     );
 
-    expect(readable.map((message) => message.messageId)).toEqual([
+    expect(readable.map((message) => message.entryId)).toEqual([
       'u-entry',
       'a-entry',
       'legacy',
       undefined,
     ]);
-    expect(readable[3]).not.toHaveProperty('messageId');
+    expect(readable[3]).not.toHaveProperty('entryId');
+    expect(readable[1]).not.toHaveProperty('messageId');
   });
 });
 

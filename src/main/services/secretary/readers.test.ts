@@ -551,26 +551,26 @@ describe('session_read 的 index 模式', () => {
     });
     expect(
       await toolResult.session_read(
-        { conversationId: 's1', messageId: 'tool-entry' },
+        { conversationId: 's1', entryId: 'tool-entry' },
         { secretaryConversationId: 'sec-1' }
       )
-    ).toEqual({ ok: false, error: 'not-readable' });
+    ).toEqual({ ok: false, error: expect.stringMatching(/^not-readable: /) });
     expect(
       await toolResult.session_read(
         { conversationId: 's1', index: 3 },
         { secretaryConversationId: 'sec-1' }
       )
-    ).toEqual({ ok: false, error: 'stale-index' });
+    ).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
   });
 
   it('id 或下标已找不到消息时返回 stale-index', async () => {
-    for (const params of [{ messageId: 'gone' }, { index: 99 }])
+    for (const params of [{ entryId: 'gone' }, { index: 99 }])
       expect(
         await handlers(null).session_read(
           { conversationId: 's1', ...params },
           { secretaryConversationId: 'sec-1' }
         )
-      ).toEqual({ ok: false, error: 'stale-index' });
+      ).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
   });
 
   it('下标撞上没有正文的工具调用步骤也视为下标失效', async () => {
@@ -583,97 +583,37 @@ describe('session_read 的 index 模式', () => {
         { conversationId: 's1', index: 4 },
         { secretaryConversationId: 'sec-1' }
       )
-    ).toEqual({ ok: false, error: 'stale-index' });
+    ).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
   });
 
-  it('按 messageId 读全文，回带当前下标与 id', async () => {
+  it('按 entryId 读全文，回带当前下标与 id', async () => {
     const result = await run(
       handlers({ role: 'assistant', content: [{ type: 'text', text: '全文' }] }).session_read,
-      { conversationId: 's1', messageId: 'entry-a' }
+      { conversationId: 's1', entryId: 'entry-a' }
     );
-    expect(result).toMatchObject({ index: 5, messageId: 'entry-a', role: 'assistant' });
+    expect(result).toMatchObject({ index: 5, entryId: 'entry-a', role: 'assistant' });
     expect(result.text).toBe('<untrusted-content source="session:s1">全文</untrusted-content>');
   });
-});
 
-describe('session_read 跨分页的消息定位', () => {
-  const tool = (id: string): ProjectedMessage => ({
-    role: 'toolResult',
-    messageId: id,
-    content: [{ type: 'text', text: '工具输出 SECRET' }],
-  });
-  const said = (role: 'user' | 'assistant', id: string, body: string): ProjectedMessage => ({
-    role,
-    messageId: id,
-    content: [{ type: 'text', text: body }],
-  });
-
-  // 两次调用之间会话被重建：前面多出一条消息，同一个绝对下标漂到工具输出上
-  const growing = () => {
-    let transcript: ProjectedMessage[] = [
-      said('user', 'u1', '开始'),
-      said('assistant', 'a1', 'X'.repeat(3000)),
-      tool('t1'),
-    ];
-    const seenTargets: unknown[] = [];
-    const handlers = createSecretaryReadHandlers(
+  it('entryId 与 index 同时给出时按 entryId 取', async () => {
+    const seen: unknown[] = [];
+    const reader = createSecretaryReadHandlers(
       makePorts({
         projects: () => [project()],
         rows: () => ({ s1: row() }),
         conversations: () => [conversation('s1', 'p1')],
-        history: async () => ({ ok: true, messages: transcript, baseIndex: 0 }),
         message: async (_sessionFile, target) => {
-          seenTargets.push(target);
-          const index =
-            'messageId' in target
-              ? transcript.findIndex((message) => message.messageId === target.messageId)
-              : target.index;
-          const message = transcript[index];
-          return message ? { index, message } : null;
+          seen.push(target);
+          return { index: 2, message: { role: 'user', content: [{ type: 'text', text: '原文' }] } };
         },
       })
     );
-    const grow = () => {
-      transcript = [said('user', 'u0', '更早'), ...transcript, said('user', 'u2', '继续')];
-    };
-    return { handlers, grow, seenTargets };
-  };
-
-  it('分页消息带稳定 messageId，按 id 在会话增长后仍取到原消息全文', async () => {
-    const { handlers, grow, seenTargets } = growing();
-    const page = await run(handlers.session_read, { conversationId: 's1' });
-    const truncated = (page.messages as { messageId?: string; truncated?: boolean }[]).find(
-      (message) => message.truncated
-    );
-    expect(truncated?.messageId).toBe('a1');
-
-    grow();
-    const full = await run(handlers.session_read, {
-      conversationId: 's1',
-      messageId: truncated?.messageId,
-      index: 1,
-    });
-
-    expect(seenTargets).toEqual([{ messageId: 'a1' }]);
-    expect(full).toMatchObject({ messageId: 'a1', index: 2, role: 'assistant', totalChars: 3000 });
-  });
-
-  it('只给旧下标且已漂到工具输出时返回 stale-index，不是 not-readable，也不泄露工具输出', async () => {
-    const { handlers, grow } = growing();
-    await run(handlers.session_read, { conversationId: 's1' });
-    grow();
-
-    const stale = await handlers.session_read(
-      { conversationId: 's1', index: 3 },
-      { secretaryConversationId: 'sec-1' }
-    );
-
-    expect(stale).toEqual({ ok: false, error: 'stale-index' });
-    expect(JSON.stringify(stale)).not.toContain('工具输出');
+    await run(reader.session_read, { conversationId: 's1', entryId: 'a1', index: 1 });
+    expect(seen).toEqual([{ entryId: 'a1' }]);
   });
 });
 
-// 真实 pi jsonl：验证下标在哪些操作下会漂移、messageId 是否始终指回原消息
+// 真实 pi jsonl：验证下标在哪些操作下会漂移、entryId 是否始终指回原消息
 describe('session_read 在真实 jsonl 上的消息定位', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'enso-secretary-read-'));
   const sessionDir = path.join(root, 'sessions');
@@ -740,11 +680,11 @@ describe('session_read 在真实 jsonl 上的消息定位', () => {
     );
   }
 
-  type Listed = { index: number; messageId?: string; role: string; truncated?: boolean };
+  type Listed = { index: number; entryId?: string; role: string; truncated?: boolean };
   const listed = async (reader: ReturnType<typeof readerOn>) =>
     (await run(reader.session_read, { conversationId: 's1' })).messages as Listed[];
 
-  it('会话增长、压缩、context_edit 之后，已列出消息的绝对下标与 messageId 都不变', async () => {
+  it('会话增长、压缩、context_edit 之后，已列出消息的绝对下标与 entryId 都不变', async () => {
     const manager = SessionManager.create('/repo/alpha', sessionDir);
     const file = manager.getSessionFile() as string;
     manager.appendMessage(user('开始'));
@@ -757,7 +697,7 @@ describe('session_read 在真实 jsonl 上的消息定位', () => {
     const before = await listed(reader);
     expect(before.find((message) => message.truncated)).toMatchObject({
       index: 1,
-      messageId: longId,
+      entryId: longId,
     });
 
     manager.appendMessage(user('继续'));
@@ -774,14 +714,14 @@ describe('session_read 在真实 jsonl 上的消息定位', () => {
       });
       const byId = await run(reader.session_read, {
         conversationId: 's1',
-        messageId: message.messageId,
+        entryId: message.entryId,
       });
-      expect(byIndex).toMatchObject({ index: message.index, messageId: message.messageId });
-      expect(byId).toMatchObject({ index: message.index, messageId: message.messageId });
+      expect(byIndex).toMatchObject({ index: message.index, entryId: message.entryId });
+      expect(byId).toMatchObject({ index: message.index, entryId: message.entryId });
     }
-    expect(
-      await run(reader.session_read, { conversationId: 's1', messageId: longId })
-    ).toMatchObject({ totalChars: 3000 });
+    expect(await run(reader.session_read, { conversationId: 's1', entryId: longId })).toMatchObject(
+      { totalChars: 3000 }
+    );
   });
 
   it('回退后旧下标会落到新分支的工具输出上：报 stale-index 且不带出工具输出', async () => {
@@ -794,7 +734,7 @@ describe('session_read 在真实 jsonl 上的消息定位', () => {
     const goneId = manager.appendMessage(assistant('Y'.repeat(3000)));
     const reader = readerOn(file);
     const gone = (await listed(reader)).find((message) => message.truncated);
-    expect(gone).toMatchObject({ index: 4, messageId: goneId });
+    expect(gone).toMatchObject({ index: 4, entryId: goneId });
 
     // 与 supervisor 的回退一致：branch 到回退点，再写不可见锚点让重开停在回退处
     manager.branch(anchor);
@@ -812,18 +752,18 @@ describe('session_read 在真实 jsonl 上的消息定位', () => {
         }
       )?.message.role
     ).toBe('toolResult');
-    for (const target of [{ index: 4 }, { messageId: goneId }]) {
+    for (const target of [{ index: 4 }, { entryId: goneId }]) {
       const stale = await reader.session_read(
         { conversationId: 's1', ...target },
         { secretaryConversationId: 'sec-1' }
       );
-      expect(stale).toEqual({ ok: false, error: 'stale-index' });
+      expect(stale).toEqual({ ok: false, error: expect.stringMatching(/^stale-index: .*rewound/) });
       expect(JSON.stringify(stale)).not.toContain(SECRET);
     }
     // 回退点之前的消息下标与 id 都没动
     expect(
-      await run(reader.session_read, { conversationId: 's1', messageId: firstId })
-    ).toMatchObject({ index: 0, messageId: firstId, role: 'user' });
+      await run(reader.session_read, { conversationId: 's1', entryId: firstId })
+    ).toMatchObject({ index: 0, entryId: firstId, role: 'user' });
   });
 });
 

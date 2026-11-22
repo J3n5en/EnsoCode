@@ -3995,6 +3995,10 @@ export const zhTranslations: Record<string, string> = {
   'Not found': '找不到',
   'Dispatch limit reached': '已达到同时派发上限',
   'Project is not visible': '项目不在秘书可见范围内',
+  'The message changed (the session was rewound or switched branches). List the session again and read it with the new id.':
+    '消息已变化（会话回退或换了分支），请重新分页后用新的 id 读取',
+  'Only user and assistant messages can be read; tool calls and tool output are not shown.':
+    '只能读取用户和助手的消息，工具调用与工具输出不会显示',
   'A project is required': '需要指定项目',
   'Invalid schedule': '定时表达式不合法',
   'Auto-approved projects': '免确认的项目',

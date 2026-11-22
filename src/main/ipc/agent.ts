@@ -1345,12 +1345,12 @@ async function readFullSessionHistory(
 }
 
 /**
- * 秘书 session_read 的 index 模式：优先按稳定 messageId 取一条消息，下标只作兼容回退。
+ * 秘书 session_read 的全文模式：优先按 jsonl entryId 取一条消息，下标只作兼容回退。
  * 下标口径与列表模式的 index 一致（投影后的绝对位置，baseIndex + 偏移），会话重建后会漂移。
  */
 export async function readSessionMessage(
   sessionFile: string | undefined,
-  target: { messageId: string } | { index: number }
+  target: { entryId: string } | { index: number }
 ): Promise<{ index: number; message: ProjectedMessage } | null> {
   return findHistoryMessage(
     await readFullSessionHistory(sessionFile, { messageIds: true }),

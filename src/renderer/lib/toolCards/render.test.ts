@@ -79,6 +79,8 @@ const zh: Record<string, string> = {
   Name: '名称',
   Autonomy: '自主度',
   'Dispatch limit reached': '已达到同时派发上限',
+  'The message changed (the session was rewound or switched branches). List the session again and read it with the new id.':
+    '消息已变化（会话回退或换了分支），请重新分页后用新的 id 读取',
   'Unknown session': '未知会话',
   'New session': '新会话',
   'Read message {{index}} in {{title}}': '读取 {{title}} 的第 {{index}} 条消息',
@@ -808,6 +810,30 @@ describe('只读核实卡片', () => {
       ctx('zh')
     );
     expect(cardPlainText(list)).toContain('被截断的消息 #3');
+  });
+
+  it('session_read 的「码: 说明」错误按码显示可读说明，不显示裸码', () => {
+    const stale = call(
+      'session_read',
+      { conversationId: 'c1', entryId: 'e1' },
+      'stale-index: the message changed (the session was rewound or switched branches); list the session again and read it with the new entryId',
+      'error'
+    );
+    const zhCard = renderToolCall(stale, ctx('zh'));
+    expect(cardPlainText(zhCard)).toContain(
+      '消息已变化（会话回退或换了分支），请重新分页后用新的 id 读取'
+    );
+    expect(cardPlainText(zhCard)).not.toContain('stale-index');
+    expect(zhCard.status).toEqual({ tone: 'error', label: '被拒绝' });
+    expect(cardPlainText(renderToolCall(stale, ctx('en')))).toContain(
+      'The message changed (the session was rewound or switched branches).'
+    );
+    // 未登记的码原样显示
+    expect(
+      cardPlainText(
+        renderToolCall(call('session_read', {}, 'invalid arguments: bad', 'error'), ctx('en'))
+      )
+    ).toContain('invalid arguments: bad');
   });
 });
 

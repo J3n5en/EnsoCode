@@ -191,13 +191,18 @@ const REASONS: Record<string, string> = {
   'invalid-at': 'Invalid schedule',
   'at-in-past': 'Invalid schedule',
   'exactly-one-of-at-or-cron': 'Invalid schedule',
+  'stale-index':
+    'The message changed (the session was rewound or switched branches). List the session again and read it with the new id.',
+  'not-readable':
+    'Only user and assistant messages can be read; tool calls and tool output are not shown.',
 };
 
 function errorText(call: ToolCallInput, ctx: ToolCardContext): string | null {
   if (call.state !== 'error') return null;
   const text = call.output?.trim() ?? '';
   if (!text) return ctx.t('Tool failed');
-  const key = REASONS[text];
+  // 错误可能是「码: 说明」，按码取译文
+  const key = REASONS[text] ?? REASONS[/^([a-z][a-z-]*):\s/u.exec(text)?.[1] ?? ''];
   return key ? ctx.t(key) : text;
 }
 

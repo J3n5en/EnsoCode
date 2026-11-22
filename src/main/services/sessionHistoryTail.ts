@@ -90,14 +90,14 @@ export function projectParentHistoryAll(
     .filter((message): message is ProjectedMessage => message !== null);
 }
 
-/** 全量投影里按稳定 messageId（优先）或绝对下标取一条；取不到返回 null */
+/** 全量投影里按 jsonl entry id（优先）或绝对下标取一条；取不到返回 null */
 export function findHistoryMessage(
   messages: readonly ProjectedMessage[],
-  target: { messageId: string } | { index: number }
+  target: { entryId: string } | { index: number }
 ): { index: number; message: ProjectedMessage } | null {
   const index =
-    'messageId' in target
-      ? messages.findIndex((message) => message.messageId === target.messageId)
+    'entryId' in target
+      ? messages.findIndex((message) => message.messageId === target.entryId)
       : target.index;
   const message = messages[index];
   return message ? { index, message } : null;
