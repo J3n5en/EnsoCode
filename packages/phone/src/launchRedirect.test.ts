@@ -47,6 +47,7 @@ describe('index.html 内联直达 /desk', () => {
     ['?session=bad id', 'desk', [device('a')], 'a'],
     [`?session=${'x'.repeat(201)}`, 'desk', [device('a')], 'a'],
     ['?session=s1', 'phone', [device('a')], 'a'],
+    ['?pair=desk', 'desk', [device('a')], 'a'],
   ];
   it.each(cases)('search=%j mode=%s 与 launchTarget 一致', (search, mode, devices, activeId) => {
     const items: Record<string, string> = {

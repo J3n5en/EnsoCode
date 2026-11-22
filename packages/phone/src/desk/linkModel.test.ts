@@ -8,6 +8,13 @@ import {
 } from './linkModel';
 
 describe('reduceDeskLink', () => {
+  it('当前电脑改名后链路状态里的名字跟着变', () => {
+    const model = initialDeskLink('电脑 1', false);
+    const renamed = reduceDeskLink(model, { type: 'label', label: '家里 Mac' });
+    expect(toRemoteLinkStatus(renamed, 'ok').deviceLabel).toBe('家里 Mac');
+    expect(reduceDeskLink(renamed, { type: 'label', label: '家里 Mac' })).toBe(renamed);
+  });
+
   it('相同采样不换对象', () => {
     const model = reduceDeskLink(initialDeskLink('电脑 1', false), { type: 'rtt', rttMs: 40 });
     expect(reduceDeskLink(model, { type: 'rtt', rttMs: 40 })).toBe(model);

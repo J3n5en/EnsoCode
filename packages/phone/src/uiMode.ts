@@ -7,6 +7,18 @@ export type UiMode = 'phone' | 'desk';
 export const UI_MODE_KEY = 'enso-phone-ui-mode';
 /** 从桌面模式回手机版：带上 mode=phone，启动时据此落盘，避免又被跳回 desk */
 export const PHONE_URL = '/?mode=phone';
+/** 完整版里点「配对新电脑」：进精简版配对页，配完回完整版；不改记住的模式 */
+export const PAIR_FROM_DESK_URL = '/?pair=desk';
+
+/** 精简版启动时取出并抹掉 `?pair=desk` */
+export function takePairFromDesk(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('pair') !== 'desk') return false;
+  params.delete('pair');
+  const query = params.toString();
+  history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+  return true;
+}
 
 export function loadUiMode(): UiMode {
   return localStorage.getItem(UI_MODE_KEY) === 'desk' ? 'desk' : 'phone';
@@ -32,7 +44,7 @@ export function launchTarget(
 ): string | null {
   if (mode !== 'desk') return null;
   const params = new URLSearchParams(search);
-  if (params.get('mode') === 'phone') return null;
+  if (params.get('mode') === 'phone' || params.get('pair') === 'desk') return null;
   const device = pickActive(devices, activeId);
   if (!device || device.scope === 'read') return null;
   const session = parseSessionId(params.get('session'));

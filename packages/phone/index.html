@@ -11,7 +11,7 @@
         try {
           if (localStorage.getItem('enso-phone-ui-mode') !== 'desk') return;
           const params = new URLSearchParams(location.search);
-          if (params.get('mode') === 'phone') return;
+          if (params.get('mode') === 'phone' || params.get('pair') === 'desk') return;
           const list = JSON.parse(localStorage.getItem('enso-phone-devices') || 'null');
           if (!Array.isArray(list)) return;
           const activeId = localStorage.getItem('enso-phone-active-device');

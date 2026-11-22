@@ -28,6 +28,12 @@ export function saveDeskMeta(storage: KeyValue, pairId: string, meta: DeskMeta):
   } catch {}
 }
 
+export function clearDeskMeta(storage: Pick<Storage, 'removeItem'>, pairId: string): void {
+  try {
+    storage.removeItem(key(pairId));
+  } catch {}
+}
+
 /** 页面常驻时桌面升级重启：重连握手报的构建与在用的不同，就该整页换到新构建 */
 export function upgradedBuild(
   inUse: string,
