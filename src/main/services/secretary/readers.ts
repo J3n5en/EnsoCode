@@ -1,4 +1,4 @@
-import { projectNameFromPath } from '@shared/projectName';
+import { projectDisplayName, projectNameFromPath } from '@shared/projectName';
 import { parseProfile } from '@shared/secretary/parse';
 import {
   chunkMessageText,
@@ -57,6 +57,8 @@ type MaybePromise<T> = T | Promise<T>;
 /** Main 侧的只读数据源；测试注入假实现，生产走下面的 defaultPorts */
 export interface SecretaryReadPorts {
   projects(): MaybePromise<readonly ProjectAuthority[]>;
+  /** projectId → 用户起的别名；别名只存在 settings.json 的项目列表里，不在权威注册表 */
+  projectAliases?(): MaybePromise<Readonly<Record<string, string>>>;
   conversations(): MaybePromise<readonly ConversationAuthority[]>;
   rows(): MaybePromise<Record<string, Record<string, unknown>>>;
   status(conversationId: string): MaybePromise<SecretarySessionStatus>;
@@ -220,6 +222,38 @@ function projectKind(project: ProjectAuthority): 'local' | 'ssh' {
   return project.kind === 'ssh' ? 'ssh' : 'local';
 }
 
+/** 从 settings.json 的 enso-settings 项目列表取 projectId → 非空别名 */
+export function projectAliasesFromSettings(settings: unknown): Record<string, string> {
+  const aliases: Record<string, string> = {};
+  const state = (settings as { 'enso-settings'?: { state?: { projects?: unknown } } } | null)?.[
+    'enso-settings'
+  ]?.state;
+  if (!Array.isArray(state?.projects)) return aliases;
+  for (const raw of state.projects) {
+    if (!raw || typeof raw !== 'object') continue;
+    const { id, alias } = raw as Record<string, unknown>;
+    if (typeof id === 'string' && id && typeof alias === 'string' && alias.trim())
+      aliases[id] = alias.trim();
+  }
+  return aliases;
+}
+
+/** 展示名按「别名 > 目录名」取，别名只有去空白后非空才算 */
+function projectNames(
+  project: ProjectAuthority,
+  aliases: Readonly<Record<string, string>>
+): { name: string; alias?: string } {
+  const alias = aliases[project.projectId]?.trim();
+  const name = projectDisplayName({
+    name: projectNameFromPath(project.canonicalPath),
+    path: project.canonicalPath,
+    alias,
+  });
+  return alias
+    ? { name: redactSecrets(name), alias: redactSecrets(alias) }
+    : { name: redactSecrets(name) };
+}
+
 function lastActivity(sessions: readonly ListedSession[], projectId: string): number | null {
   let latest: number | null = null;
   for (const session of sessions) {
@@ -279,9 +313,10 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
   return {
     async project_list() {
       const { projects, sessions } = await collect(ports);
+      const aliases = (await ports.projectAliases?.()) ?? {};
       const rows = projects.map((project) => ({
         projectId: project.projectId,
-        name: redactSecrets(projectNameFromPath(project.canonicalPath)),
+        ...projectNames(project, aliases),
         kind: projectKind(project),
         path: redactSecrets(project.canonicalPath),
         lastActivityAt: lastActivity(sessions, project.projectId),
@@ -309,13 +344,14 @@ export function createSecretaryReadHandlers(ports: SecretaryReadPorts): Secretar
       const { projects, sessions } = await collect(ports);
       const project = projects.find((candidate) => candidate.projectId === projectId);
       if (!project) return notFound;
+      const aliases = (await ports.projectAliases?.()) ?? {};
       // ssh 项目的分支在远端，本机跑 git 只会得到错误
       const git = project.kind === 'ssh' ? null : await ports.git(project.canonicalPath);
       return {
         ok: true,
         result: {
           projectId,
-          name: redactSecrets(projectNameFromPath(project.canonicalPath)),
+          ...projectNames(project, aliases),
           kind: projectKind(project),
           path: redactSecrets(project.canonicalPath),
           lastActivityAt: lastActivity(sessions, projectId),
@@ -530,6 +566,9 @@ export function readPortsFor(
     async projects() {
       const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();
       return registry?.projection().projects ?? [];
+    },
+    async projectAliases() {
+      return projectAliasesFromSettings((await import('../../ipc/settings')).readSettings());
     },
     async conversations() {
       const registry = (await import('../../ipc/agent')).getSourceAuthorityRegistry();

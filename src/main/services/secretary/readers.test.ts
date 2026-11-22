@@ -18,6 +18,7 @@ import {
 } from '../sessionHistoryTail';
 import {
   createSecretaryReadHandlers,
+  projectAliasesFromSettings,
   type SecretaryReadPorts,
   type SecretarySessionStatus,
 } from './readers';
@@ -260,6 +261,93 @@ describe('project_info', () => {
       ok: false,
       error: 'invalid arguments',
     });
+  });
+});
+
+describe('项目别名', () => {
+  const aliased = (aliases: Record<string, string>) =>
+    createSecretaryReadHandlers(
+      makePorts({
+        projects: () => [
+          project({ projectId: 'p1', canonicalPath: '/repo/alpha' }),
+          project({ projectId: 'p2', canonicalPath: '/repo/beta' }),
+        ],
+        projectAliases: () => aliases,
+      })
+    );
+
+  it('有别名时 project_list 与 project_info 的名字取别名，并带上 alias', async () => {
+    const handlers = aliased({ p1: '  官网前端 ' });
+
+    const list = await run(handlers.project_list);
+    expect(list.projects).toEqual([
+      { projectId: 'p2', name: 'beta', kind: 'local', path: '/repo/beta', lastActivityAt: null },
+      {
+        projectId: 'p1',
+        name: '官网前端',
+        alias: '官网前端',
+        kind: 'local',
+        path: '/repo/alpha',
+        lastActivityAt: null,
+      },
+    ]);
+    expect(await run(handlers.project_info, { projectId: 'p1' })).toMatchObject({
+      name: '官网前端',
+      alias: '官网前端',
+      path: '/repo/alpha',
+    });
+  });
+
+  it('别名为空串或全空白时回退到目录名，不带 alias', async () => {
+    const handlers = aliased({ p1: '', p2: '   ' });
+
+    const list = await run(handlers.project_list);
+    expect(list.projects).toEqual([
+      { projectId: 'p1', name: 'alpha', kind: 'local', path: '/repo/alpha', lastActivityAt: null },
+      { projectId: 'p2', name: 'beta', kind: 'local', path: '/repo/beta', lastActivityAt: null },
+    ]);
+    const info = await run(handlers.project_info, { projectId: 'p2' });
+    expect(info.name).toBe('beta');
+    expect(info).not.toHaveProperty('alias');
+  });
+
+  it('别名同样脱敏', async () => {
+    const handlers = aliased({ p1: `别名 ${SECRET}` });
+
+    const list = await run(handlers.project_list);
+    const info = await run(handlers.project_info, { projectId: 'p1' });
+    expect(JSON.stringify(list)).not.toContain(SECRET);
+    expect(JSON.stringify(info)).not.toContain(SECRET);
+    expect(info.name).toContain('别名');
+  });
+});
+
+describe('projectAliasesFromSettings', () => {
+  it('从 settings.json 的项目列表取非空别名，坏数据跳过', () => {
+    expect(
+      projectAliasesFromSettings({
+        'enso-settings': {
+          state: {
+            projects: [
+              { id: 'p1', path: '/repo/alpha', alias: '官网' },
+              { id: 'p2', path: '/repo/beta' },
+              { id: 'p3', alias: '   ' },
+              { id: 'p4', alias: 42 },
+              { alias: '无 id' },
+              null,
+              'junk',
+            ],
+          },
+        },
+      })
+    ).toEqual({ p1: '官网' });
+  });
+
+  it('设置缺失或结构不对时返回空表', () => {
+    expect(projectAliasesFromSettings(null)).toEqual({});
+    expect(projectAliasesFromSettings({ 'enso-settings': { state: { projects: {} } } })).toEqual(
+      {}
+    );
   });
 });
 

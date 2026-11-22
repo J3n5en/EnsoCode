@@ -176,4 +176,12 @@ describe('buildSecretarySystemPrompt', () => {
     expect(setup).toBeDefined();
     expect(setup).not.toMatch(/model|autonomy/);
   });
+
+  it('项目可能既有别名又有目录名，两种叫法都要能对上', () => {
+    const prompt = buildSecretarySystemPrompt({ profile, persona: '', uiLanguage: 'zh' });
+    const projects = prompt.split('\n\n').find((part) => part.startsWith('Projects:'));
+    expect(projects).toBeDefined();
+    expect(projects).toMatch(/alias/);
+    expect(projects).toMatch(/directory name/);
+  });
 });
