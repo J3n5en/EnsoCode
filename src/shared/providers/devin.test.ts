@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { normalizeContext } from '@earendil-works/pi-ai';
+import { MCP_SCHEMA_ZOO } from '@shared/tools/mcpSchema.fixture';
+import { geminiSchemaIssues } from '@shared/tools/portableSchema';
 import { describe, expect, it } from 'vitest';
 import {
   buildDevinAuthUrl,
@@ -337,11 +339,7 @@ describe('Devin streamSimple（假 fetch）', () => {
       GetUserJwtResponseSchema,
       create(GetUserJwtResponseSchema, { userJwt: 'user-jwt' })
     );
-    const parameters = {
-      type: 'object',
-      properties: { path: { type: 'string' }, limit: { type: ['number', 'null'] } },
-      required: ['path'],
-    };
+    const parameters = MCP_SCHEMA_ZOO;
     const sentSchema = async (id: string) => {
       let sent: GetChatMessageRequest | undefined;
       const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -363,7 +361,9 @@ describe('Devin streamSimple（假 fetch）', () => {
       return JSON.parse(sent?.tools[0]?.jsonSchemaString ?? 'null');
     };
 
-    expect((await sentSchema('gemini-3-5-flash-low')).properties.limit).toEqual({
+    const gemini = await sentSchema('gemini-3-5-flash-low');
+    expect(geminiSchemaIssues(gemini, 'read')).toEqual([]);
+    expect(gemini.properties.limit).toEqual({
       type: 'number',
       nullable: true,
     });

@@ -792,6 +792,15 @@ export function normalizeToolSchema(value: unknown): unknown {
   return out;
 }
 
+export function cleanGeminiToolSchema(schema: unknown): unknown {
+  return normalizeToolSchema(expandSchemaRefs(schema));
+}
+
+/** Gemini 后端不认 type 数组、$ref 等写法，整次请求回不透明的 invalid_argument */
+export function toolSchemaForModel(modelId: string, schema: unknown): unknown {
+  return modelId.toLowerCase().startsWith('gemini') ? cleanGeminiToolSchema(schema) : schema;
+}
+
 // ---- 逻辑模型表 ----
 
 /** 思考档位键，与 pi 的 `thinkingLevelMap` 同一值域；关闭思考算 `off` */
@@ -1332,7 +1341,7 @@ export function convertTools(
       functionDeclarations: tools.map((tool) => ({
         name: tool.name,
         description: tool.description || '',
-        parameters: normalizeToolSchema(expandSchemaRefs(tool.parameters)),
+        parameters: cleanGeminiToolSchema(tool.parameters),
       })),
     },
   ];
