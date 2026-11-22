@@ -20,7 +20,7 @@ description: >
 pnpm test:formal
 ```
 
-`pnpm test:formal`（`ENSO_FORMAL_FULL=1`）跑完整界限，约 3 万个状态，空载约 20 秒。`pnpm test` 日常跑小界限，约 1400 个状态，本机 8 至 15 秒。只跑本模型：
+`pnpm test:formal`（`ENSO_FORMAL_FULL=1`）跑完整界限，约 3 万个状态，空载约 20 秒（CI 约 23 秒）。`pnpm test` 日常跑小界限，约 1400 个状态，空载约 1 秒；机器满载时两者都会慢一个数量级以上。只跑本模型：
 
 ```bash
 ENSO_FORMAL_FULL=1 npx vitest run src/agent/turnPhase.formal.test.ts
