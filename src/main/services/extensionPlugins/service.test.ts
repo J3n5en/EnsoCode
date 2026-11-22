@@ -43,12 +43,15 @@ class InProcessChild extends EventEmitter {
 }
 
 const temps: string[] = [];
+const services: ExtensionPluginService[] = [];
 const temp = (p: string) => {
   const d = mkdtempSync(join(tmpdir(), p));
   temps.push(d);
   return d;
 };
-afterEach(() => {
+afterEach(async () => {
+  vi.useRealTimers();
+  await Promise.all(services.splice(0).map((s) => s.dispose()));
   for (const d of temps.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -97,6 +100,7 @@ beforeEach(() => {
       now: () => Date.now(),
     },
   });
+  services.push(service);
 });
 
 async function install(files: Record<string, string>) {
@@ -1027,7 +1031,7 @@ const gate = {
 };
 
 function bootService(dir: string, fork: () => unknown) {
-  return new ExtensionPluginService({
+  const svc = new ExtensionPluginService({
     root: dir,
     hostVersion: '0.2.12',
     hostPath: '/unused',
@@ -1035,6 +1039,8 @@ function bootService(dir: string, fork: () => unknown) {
     fork: fork as never,
     gate,
   });
+  services.push(svc);
+  return svc;
 }
 
 async function stageCommit(svc: ExtensionPluginService, files: Record<string, string>) {
